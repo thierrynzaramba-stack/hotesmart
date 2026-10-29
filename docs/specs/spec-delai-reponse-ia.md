@@ -1591,20 +1591,29 @@ reprise automatique (elle exige `send_after` non nul). C'est exactement le
 constat 5 d'une revue du lot 2, et c'est pourquoi la branche « garder » et la
 branche « validation manuelle » écrivent les **mêmes** champs.
 
-⚠ **ET « LES PROPOSITIONS ANNONCÉES » EST RENDU LITTÉRALEMENT VRAI PAR UN
-INSTANT COMMUN.** Le compte vient d'un **premier** appel (l'aperçu), le
-désarmement d'un **second** : entre les deux, l'horloge avance, et un brouillon
-peut franchir son échéance. Sans instant partagé, l'ensemble désarmé ne serait
-pas l'ensemble annoncé — **et la différence partirait au voyageur.** L'aperçu
-rend donc son `instant`, l'écran le repasse en `cutoff`, et le même prédicat
-tranche aux deux bouts.
+⚠ **IL N'Y A PAS D'INSTANT PARTAGÉ, ET SON RETRAIT EST UN CONSTAT DE SÉCURITÉ
+SUR MON PROPRE CORRECTIF.** J'avais fait repasser par l'écran l'instant de
+l'aperçu (`cutoff`), pour que « l'ensemble désarmé » soit exactement
+« l'ensemble annoncé », en écrivant ici que sans ça « la différence partirait au
+voyageur ». **C'est l'inverse, et c'est mesuré** : l'ensemble
+`{création + N <= borne}` **croît** avec la borne, donc une borne *ancienne*
+désarme *moins*. Un brouillon qui franchissait son échéance pendant que l'hôte
+lisait le dialogue n'était pas désarmé, recevait une échéance déjà passée, et
+partait au prochain passage — alors que l'hôte venait de choisir « garder ».
 
-⚠ **Le `cutoff` est VALIDÉ côté serveur** : hors d'une fenêtre de 10 minutes
-autour de `Date.now()`, il est ignoré et on retombe sur l'horloge. Une valeur
-venue du client ne décide pas seule de ce qui part. Et la menace n'est pas
-l'attaquant, c'est la valeur aberrante — un `cutoff` très ancien ne désarmerait
-**rien** (donc tout partirait), un très lointain désarmerait **tout**. Les deux
-sont testés.
+**L'asymétrie des deux erreurs tranche, et je l'avais ignorée :**
+
+| erreur | coût |
+|---|---|
+| désarmer un brouillon **non** annoncé | inoffensif — il reste dans la file, l'hôte clique Envoyer |
+| laisser partir un brouillon que l'hôte croit gardé | irréversible, et c'est le téléphone d'un voyageur |
+
+Donc en cas de doute on **désarme**, exactement comme « une panne de lecture
+empêche l'envoi, elle ne l'autorise pas ». Le prédicat est l'horloge du
+**serveur** au moment d'écrire ; **aucune valeur venue du navigateur ne décide
+de ce qui part**, et un `cutoff` dans le corps de la requête est ignoré (un test
+l'exerce). Conséquence à assumer : le nombre annoncé est un **plancher** de ce
+qui sera gardé, et la note affiche le compte **réel** rendu par le writer.
 
 **Les deux boutons, avec ce que `window.confirm` permet.** Il ne laisse pas
 nommer ses boutons : le texte dit donc explicitement laquelle fait quoi —
@@ -1624,6 +1633,71 @@ raison, et l'hôte doit lire ce qui s'est réellement passé.
 **Et le fil est relu**, puisque des échéances ont disparu : sans ça les bulles
 garderaient à l'écran un compte à rebours qui n'existe plus — le défaut même que
 ce lot existe pour fermer.
+
+### La revue des deux issues : onze constats, dont deux de sécurité
+
+**Les deux de sécurité portaient sur le `cutoff`, c'est-à-dire sur mon propre
+garde-fou.** Il est retiré, et le raisonnement corrigé est écrit au-dessus. Ce
+qui reste à noter ici, c'est la forme du défaut : j'avais optimisé pour que deux
+ensembles soient **égaux**, sans regarder dans quel sens leur écart coûte. Le
+jour où ils divergent, l'un des deux sens envoie un message à un voyageur et
+l'autre non — et c'est ce sens-là qui décide, pas l'élégance de l'égalité.
+
+**Trois défauts de la note, tous mesurés.**
+
+`deja_prises` était **inatteignable** sous « garder » : ma chaîne de `else if`
+le reléguait après une branche qui captait tout. Le serveur pouvait rendre
+« 1 gardée, 8 déjà prises » et l'écran affichait une note **verte** qui ne
+parlait que de la première — alors que `deja_prises` est, de l'aveu du writer
+lui-même, « le seul cas où un message peut partir avec le réglage d'avant ».
+
+La note se **contredisait** quand l'écriture échouait : je posais le compte dès
+la question, donc elle disait dans la même phrase « Non enregistré : les
+propositions déjà en attente » **et** « 4 propositions sont gardées pour votre
+validation ». Rien n'était gardé. Le compte ne vient plus que du bilan du
+serveur.
+
+Et dans le scénario **dominant**, le choix de l'hôte **disparaissait** de la
+note. Sortir de « Je valide chaque réponse » laisse les brouillons déjà sans
+échéance : je les comptais `inchanges`, donc `desarmes` valait 0 et la note
+disait « Enregistré » tout court. Ils comptent maintenant comme gardés —
+`desarmes` veut dire « finit désarmée », pas « je l'ai écrite » — **et on
+n'écrit rien**, puisqu'il n'y a rien à changer.
+
+⚠ **Et les deux fixtures du banc DOM montaient un état que le vrai endpoint ne
+produit pas** : elles affirmaient `desarmes: 4` sur un bien qui sortait de la
+validation manuelle, là où le serveur aurait rendu 0. C'est la forme la plus
+coûteuse de faux vert — un test qui prouve un comportement dans un état
+impossible.
+
+**Neuf mutations de code vivant restaient vertes**, dont le claim de statut qui
+ferme la course avec le cron, l'erreur d'écriture avalée, et les cinq lignes du
+endpoint — où forcer la fonctionnalité à **inerte** *comme* à **toujours
+désarmer** laissait toute la suite verte. Toutes rougissent, et l'endpoint est
+désormais éprouvé **par exécution**, pas par grep.
+
+⚠ **Et `suspendu_le = null` était gardé par une fixture complice** : l'assertion
+avait l'air de le mesurer, mais `tache()` pose ce champ à `null` par défaut.
+C'est la **quatrième** fois que ce fichier paie ce piège, et il porte déjà
+l'avertissement à l'endroit même. Un test part maintenant d'une tâche
+réellement suspendue.
+
+### D5 — une proposition gardée devient inatteignable après le départ
+
+**Conséquence produit, relevée en revue, à trancher par Thierry.**
+
+L'écran ne charge que les conversations dont le séjour est à venir ou en cours,
+et `lireLesDues` exige une échéance. Une proposition **gardée pour validation**
+n'a plus d'échéance : après le départ du voyageur, elle n'est donc **ni affichée
+ni envoyée**. « Rien n'est supprimé » reste littéralement vrai ; « elles restent
+dans la file » n'est vrai que **pendant le séjour**.
+
+Sous « Laisser partir », la proposition part dans les minutes qui suivent, donc
+cet état orphelin est créé par la branche neuve. Pour un arriéré sur un voyageur
+qui part le lendemain, la fenêtre pour cliquer « Envoyer » est de quelques
+heures. Les deux voies possibles — une liste des propositions gardées hors du
+fil, ou une alerte avant le départ — sont des décisions d'écran, pas un
+correctif.
 
 ### La troisième revue : quatre fois le même défaut, fermé d'un seul côté
 

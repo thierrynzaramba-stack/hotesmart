@@ -2094,10 +2094,16 @@ async function enregistrerLePanneau (corps, ref) {
     // exactement ce que l'hote a choisi), et le reglage gouverne les suivants.
     let propager = true
     // ⚠ DEUX ISSUES REELLES, ET C'EST L'ARBITRAGE DE THIERRY DU 29 OCTOBRE 2026.
-    // La revue avait mesure que « Annuler » ne changeait RIEN dans l'etat de sa
-    // recette : l'echeance recalculee egalait celle deja posee, donc le serveur
-    // n'ecrivait rien, et la proposition partait dans les deux cas. Une
-    // confirmation dont une branche n'ecrit rien n'est pas une confirmation.
+    // La revue avait mesure que « Annuler » ne changeait RIEN : l'ancien refus
+    // posait `propager: false`, et sur ce drapeau l'endpoint n'appelait meme
+    // PAS le writer — il rendait un bilan vide. La proposition gardait donc son
+    // echeance, deja passee, et partait au prochain passage comme si l'hote
+    // avait dit oui. Une confirmation dont une branche n'ecrit rien n'est pas
+    // une confirmation.
+    // (Ce commentaire disait « l'echeance recalculee egalait celle deja posee,
+    // donc le serveur n'ecrivait rien » : c'est le mecanisme de `inchanges`,
+    // qui n'etait jamais atteint sur ce chemin. Conclusion juste, raison
+    // fausse — releve en revue.)
     //   · CONFIRMER  -> « Laisser partir » : le comportement du 28 octobre.
     //   · ANNULER    -> « Garder pour validation » : les propositions ANNONCEES
     //     sont DESARMEES, restent dans la file, et ne partent que sur son clic
@@ -2109,7 +2115,6 @@ async function enregistrerLePanneau (corps, ref) {
     // explicitement laquelle fait quoi, et fermer le dialogue sans lire garde
     // les propositions au lieu de les liberer.
     let garder = false
-    let cutoff = null
     // ⚠ UN CHOIX DE L'HOTE N'EST PAS UN ECHEC (recette du 28 octobre 2026,
     // point 4 : « Enregistre en partie. Non enregistre : les propositions deja
     // en attente » faisait croire a un echec). Garder ses propositions pour
@@ -2150,24 +2155,26 @@ async function enregistrerLePanneau (corps, ref) {
         logger.error('Messages', 'apercu brouillons', (ap && ap.motif) || 'apercu absent')
         propager = false
       } else if (ap.echues > 0) {
-        // ⚠ L'INSTANT DE L'APERCU EST REPASSE AU SERVEUR, pour que « les
-        // propositions annoncees » designe exactement l'ensemble desarme.
-        // Entre les deux appels l'horloge avance : sans instant commun, un
-        // brouillon peut franchir son echeance et partir alors qu'on venait de
-        // promettre a l'hote de le garder. Le serveur VALIDE cette valeur
-        // (fenetre de 10 min) — ce n'est pas le client qui decide ce qui part.
-        const i = Number(ap.instant)
-        if (Number.isFinite(i)) cutoff = i
+        // ⚠ AUCUN INSTANT NE REPART AU SERVEUR, et c'est le constat 1 d'une
+        // revue — de securite, sur mon propre correctif. Je repassais l'instant
+        // de l'apercu pour que l'ensemble desarme soit exactement l'ensemble
+        // annonce : l'ensemble {creation + N <= borne} CROIT avec la borne,
+        // donc une borne ancienne desarme MOINS, et un brouillon qui
+        // franchissait son echeance pendant que l'hote lisait le dialogue
+        // partait quand meme. L'asymetrie tranche : garder un brouillon non
+        // annonce est inoffensif, en laisser partir un que l'hote croit garde
+        // ne se repare pas. Le nombre annonce est donc un PLANCHER.
+        //
+        // ⚠ ET `gardees` NE SE POSE PAS ICI (constat 4) : le compte vient du
+        // SERVEUR, apres l'ecriture. Le poser des la question faisait dire
+        // « 4 propositions sont gardees » alors que l'ecriture avait echoue et
+        // qu'aucune ne l'etait.
         garder = !window.confirm(t('messages.delai_arriere_confirm', { n: ap.echues }))
-        if (garder) gardees = ap.echues
       }
     }
 
     const charge = { delais_ref: ref, delais: chargeDelais, propager }
-    if (garder) {
-      charge.garder = true
-      if (cutoff !== null) charge.cutoff = cutoff
-    }
+    if (garder) charge.garder = true
     const r = await appel('/api/agent-config', charge)
     const b = r && r.brouillons
     if (garder) {
@@ -2175,8 +2182,20 @@ async function enregistrerLePanneau (corps, ref) {
       // On annonce le nombre que le SERVEUR dit avoir desarme, pas celui qu'on
       // a compte avant — s'ils divergent, c'est le serveur qui a raison, et
       // l'hote doit lire ce qui s'est reellement passe.
-      if (b && b.ok === true && Number.isFinite(Number(b.desarmes))) gardees = Number(b.desarmes)
-      else { logger.error('Messages', 'garder brouillons', (b && b.motif) || 'bilan absent'); echoues.push(t('messages.partie_brouillons')) }
+      if (b && b.ok === true && Number.isFinite(Number(b.desarmes))) {
+        gardees = Number(b.desarmes)
+        // ⚠ ET `deja_prises` SE DIT AUSSI SUR CE CHEMIN (constat 3 d'une revue).
+        // Ma chaine de `else if` le rendait INATTEIGNABLE sous « garder » : le
+        // serveur pouvait rendre « 1 gardee, 8 deja prises » et l'ecran
+        // affichait une note VERTE qui ne parlait que de la premiere. C'est le
+        // seul cas ou un message peut partir avec le reglage d'avant.
+        if (Number(b.deja_prises) > 0) {
+          echoues.push(t('messages.partie_deja_prises', { n: Number(b.deja_prises) }))
+        }
+      } else {
+        logger.error('Messages', 'garder brouillons', (b && b.motif) || 'bilan absent')
+        echoues.push(t('messages.partie_brouillons'))
+      }
     } else if (!propager) {
       // L'ecran n'a pas pu compter : les reglages sont enregistres, mais les
       // propositions deja en attente n'ont pas suivi, et l'hote ne l'a pas

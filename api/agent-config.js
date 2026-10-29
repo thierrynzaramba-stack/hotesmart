@@ -471,16 +471,17 @@ module.exports = async (req, res) => {
             // sens de son arbitrage — une confirmation dont une branche
             // n'ecrit rien n'est pas une confirmation.
             //
-            // `cutoff` est l'instant que l'APERCU a utilise pour compter : le
-            // writer le valide (fenetre de 10 min) et s'en sert comme meme
-            // predicat, pour que « les propositions annoncees » designe
-            // exactement l'ensemble desarme. Une valeur absente ou aberrante
-            // retombe sur `Date.now()`, donc sur le comportement par defaut.
+            // ⚠ AUCUN INSTANT NE VIENT DU CLIENT (constat 1 d'une revue, de
+            // SECURITE). J'avais fait repasser par l'ecran l'instant de
+            // l'apercu : une borne ANCIENNE desarme MOINS, donc un brouillon
+            // qui franchissait son echeance pendant que l'hote lisait le
+            // dialogue partait quand meme. Le predicat est l'horloge du
+            // serveur, et le nombre annonce est un PLANCHER de ce qui sera
+            // garde. Seul un booleen traverse.
             const garderEchues = (req.body || {}).garder === true;
-            const brut = Number((req.body || {}).cutoff);
             brouillons = await appliquerDelaiAuxBrouillons(supabase, {
               userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now(),
-              garderEchues, cutoff: Number.isFinite(brut) ? brut : undefined
+              garderEchues
             });
           } catch (e) {
             brouillons = bilanVide({ motif: 'exception', erreur: String(e && e.message || e) });

@@ -265,13 +265,19 @@ test('LE TEST QUI COMPTE : ANNULER garde les propositions pour validation, et le
   // n'ecrivait rien, et la revue a mesure que dans l'etat de sa recette la
   // proposition partait quand meme. Annuler DESARME maintenant les
   // propositions annoncees.
-  const { b, envoyes } = bancEnregistrement({ echues: 4, confirme: false, desarmes: 4 })
+  // ⚠ `echues` ET `desarmes` DIFFERENT EXPRES (constat 5 d une revue) : les
+  // deux fixtures posaient le meme nombre des deux cotes, donc l invariant
+  // « c est le nombre du SERVEUR qui s affiche » n etait mesure par rien —
+  // garder `ap.echues` dans la note laissait tout vert. Le serveur en desarme
+  // 6 la ou l apercu en annoncait 4 : c est lui qui a raison, et c est son
+  // chiffre que l hote doit lire.
+  const { b, envoyes } = bancEnregistrement({ echues: 4, confirme: false, desarmes: 6 })
   // L hote sort de la validation manuelle, accepte la garde du 11 octobre,
   // puis REFUSE de liberer son arriere.
   b.repondreConfirm((texte) => texte === FR['messages.mode_confirm_auto'])
   B.clic(b, B.pilManuel(b))
   await b.msg.enregistrerPanneau(B.corps(b), REF)
-  assert.match(b.note(), /^Enregistré\. 4 proposition\(s\) déjà en attente sont gardées pour votre validation/)
+  assert.match(b.note(), /^Enregistré\. 6 proposition\(s\) déjà en attente sont gardées pour votre validation/)
   assert.equal(b.noteOk(), true, 'la note est VERTE : c est son choix, pas un echec')
   // Et le serveur a recu l'ORDRE de desarmer, pas l'ordre de ne rien faire.
   const reel = envoyes.filter(c => c.delais_ref && c.apercu !== true)
@@ -577,7 +583,7 @@ test('LE TEST QUI COMPTE : ANNULER ecrit, et le fil est relu', async () => {
     confirme: (texte) => texte === FR['messages.mode_confirm_auto'],
     appel: async (chemin, corps) => {
       if (corps) envoyes.push(corps)
-      if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 3, instant: 1762000000000 } }
+      if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 3 } }
       if (corps && corps.delais_ref) return { ok: true, delais_ref: REF, delais: corps.delais, brouillons }
       if (!corps) return { config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } } }
       return { ok: true }
@@ -596,7 +602,10 @@ test('LE TEST QUI COMPTE : ANNULER ecrit, et le fil est relu', async () => {
   assert.equal(reel[0].propager, true, 'et le reglage est enregistre quand meme')
   // ⚠ L'INSTANT DE L'APERCU EST REPASSE : sans lui, l ensemble desarme ne
   // serait pas l ensemble annonce, et la difference partirait au voyageur.
-  assert.equal(reel[0].cutoff, 1762000000000, 'avec l instant de l apercu')
+  // ⚠ ET AUCUN INSTANT NE REPART AU SERVEUR (constat 1 d une revue, de
+  // securite) : une borne venue du navigateur ne peut que REDUIRE l ensemble
+  // desarme, donc laisser partir un brouillon que l hote croit garde.
+  assert.equal('cutoff' in reel[0], false, 'aucune borne ne part du navigateur')
   // Le NOMBRE affiche est celui du SERVEUR, pas celui compte avant.
   assert.match(b.note(), /^Enregistré\. 3 proposition\(s\) déjà en attente sont gardées pour votre validation/)
   assert.equal(b.noteOk(), true)
@@ -830,5 +839,47 @@ test('LE TEST QUI COMPTE : la sequence de la recette, de bout en bout', async ()
   assert.equal(reels[0].delais.reponse_ia, 60, 'et le reglage choisi est bien celui qui part')
   assert.equal(reels[0].propager, true)
   assert.equal(b.note(), FR['messages.panneau_saved'])
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un ECHEC du desarmement ne se deguise pas en choix de l hote', async () => {
+  // ⚠ CONSTAT 4 D UNE REVUE, MESURE : je posais `gardees = ap.echues` des la
+  // question, donc quand l ecriture echouait la note disait, dans la meme
+  // phrase, « Non enregistré : les propositions déjà en attente » ET
+  // « 4 proposition(s) sont gardées pour votre validation ». Rien n etait
+  // garde : les 4 gardaient leur echeance et partaient. `gardees` ne vient
+  // plus que du bilan du SERVEUR.
+  const { b } = bancEnregistrement({
+    echues: 4, confirme: false, brouillons: { ok: false, motif: 'ecriture_impossible' }
+  })
+  // ⚠ IL FAUT SORTIR DU MANUEL : sous `reponse_ia: null` l apercu est saute,
+  // donc la question n est jamais posee et `garder` reste faux — le test
+  // mesurerait un autre chemin. `confirme: false` refuse les DEUX
+  // confirmations, donc on pose la valeur directement.
+  b.msg.delaisEnCours(REF).reponse_ia = 15
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.match(b.note(), /Non enregistré/)
+  assert.ok(!/gardées pour votre validation/.test(b.note()),
+    'aucune promesse de garde quand rien n a ete garde')
+  assert.equal(b.noteOk(), false)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : sous « garder », `deja_prises` se dit AUSSI', async () => {
+  // ⚠ CONSTAT 3 D UNE REVUE : ma chaine de `else if` rendait cette branche
+  // INATTEIGNABLE sous « garder ». Le serveur pouvait rendre « 1 gardee,
+  // 8 deja prises » et l ecran affichait une note VERTE qui ne parlait que de
+  // la premiere — alors que `deja_prises` est le SEUL cas ou un message peut
+  // partir avec le reglage d avant.
+  const { b } = bancEnregistrement({
+    echues: 9, confirme: false,
+    brouillons: { ok: true, desarmes: 1, rearmes: 0, inchanges: 0, deja_prises: 8 }
+  })
+  b.msg.delaisEnCours(REF).reponse_ia = 15
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.match(b.note(), /Non enregistré/, 'les 8 deja prises se disent')
+  assert.match(b.note(), /8 proposition/)
+  assert.match(b.note(), /gardées pour votre validation/, 'et la garde se dit aussi')
+  assert.equal(b.noteOk(), false, 'la note n est pas verte : des messages peuvent partir')
   b.fermer()
 })
