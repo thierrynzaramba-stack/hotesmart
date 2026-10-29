@@ -784,22 +784,37 @@ function suivreLaLargeur () {
   else if (typeof mq.addListener === 'function') mq.addListener(renderDate)
 }
 
-// ─── Alarmes de surréservation ──────────────────────────────────────────────
+// ─── Alarmes : surréservation ET envoi au voyageur ──────────────────────────
 function nomDuBien (ref) {
   const b = etat.biens.find(x => String(x.id) === String(ref) || String(x.provider_property_id) === String(ref))
   return b ? b.name : null
 }
+// ⚠ LE BANDEAU NE SERT PLUS QUE LA SURRESERVATION, ET SES TROIS PHRASES
+// ETAIENT DEVENUES FAUSSES — constat d'une revue independante. Chaque carte
+// etait titree « Surréservation · {bien} », avec « Deux séjours sur la même
+// nuit. » en repli et « L'alerte se répète jusqu'à ce qu'elle soit acquittée. »
+// en pied. Sur un ARRET d'envoi, les trois mentent : ce n'est pas une
+// surreservation, il n'y a pas deux sejours, et cette alarme NE se repete PAS
+// (elle est posee une fois, la porte du rejeu la relit ensuite sans realerter).
+// Une alarme qui se decrit faussement se classe faussement : l'hote cherche un
+// conflit de calendrier et ne lit pas le message qui ne part pas.
+const TYPES_ENVOI = ['message_ota_a_verifier', 'message_ota_arret', 'email_voyageur_abandon']
 function renderAlarmes () {
   const zone = $('[data-list="alarms"]')
   zone.hidden = !etat.alarmes.length
   const acquittable = peutEcrire('reservations')
   zone.innerHTML = etat.alarmes.map(a => {
     const nom = nomDuBien(a.property_id)
+    const envoi = TYPES_ENVOI.indexOf(String(a.type)) !== -1
+    const titre = envoi
+      ? (nom ? t('alarm.send_title', { name: nom }) : t('alarm.send_title_anon'))
+      : (nom ? t('alarm.title', { name: nom }) : t('alarm.title_anon'))
+    const date = I18n.date(new Date(a.created_at), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
     return `<div class="alert" role="alert">
       ${icone('i-alert', 'icon icon--lg')}
-      <span class="alert__title">${esc(nom ? t('alarm.title', { name: nom }) : t('alarm.title_anon'))}</span>
-      <span class="small">${esc(a.detail?.message || t('alarm.default'))}</span>
-      <span class="caption muted">${esc(t('alarm.since', { date: I18n.date(new Date(a.created_at), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) }))}</span>
+      <span class="alert__title">${esc(titre)}</span>
+      <span class="small">${esc(a.detail?.message || t(envoi ? 'alarm.send_default' : 'alarm.default'))}</span>
+      <span class="caption muted">${esc(envoi ? t('alarm.send_since', { date }) : t('alarm.since', { date }))}</span>
       ${acquittable ? `<button type="button" class="btn btn--primary" data-acquitter="${esc(a.id)}">${esc(t('alarm.ack'))}</button>` : ''}
     </div>`
   }).join('')

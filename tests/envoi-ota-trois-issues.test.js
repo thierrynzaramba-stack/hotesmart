@@ -158,14 +158,21 @@ test('LE TEST QUI COMPTE : le verrou CLAIME, il n ecrase pas', () => {
   assert.equal(retours.filter(x => x === 'true').length, 1,
     'un seul chemin autorise l envoi : celui ou la tenue est POSEE')
   // ⚠ ET ELLE DOIT SURVIVRE A L'INTERVALLE DU CRON, sinon elle ne protege de
-  // rien : `/api/cron-messages` tourne en `*/10`, et j'avais mis 2 minutes.
+  // rien (j'avais mis 2 minutes). ⚠ CE TEST NOMMAIT `/api/cron-messages`, ET
+  // C'ETAIT LE MAUVAIS CRON : `processMessageTemplates` est appele par
+  // `api/cron.js`, qui tourne en `*/5`. Mesurer l'intervalle du cron qu'on croit
+  // concerne, c'est mesurer un nom. On prend donc le PLUS COURT des intervalles
+  // declares : il majore tout cron qui pourrait atteindre ce chemin d'envoi,
+  // aujourd'hui comme apres l'ajout d'un cron de plus.
   const ota2 = fs.readFileSync(path.join(__dirname, '..', 'lib/envoi-ota.js'), 'utf8')
   const ms = /const VERROU_MS = (\d+) \* 60 \* 1000/.exec(ota2)
   assert.ok(ms, 'la duree de la tenue est lisible')
   const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'))
-  const cm = (vercel.crons || []).find(c => String(c.path).includes('cron-messages'))
-  assert.ok(cm, 'le cron des messages est declare')
-  const minutes = Number(/\*\/(\d+)/.exec(cm.schedule)[1])
+  const cadences = (vercel.crons || [])
+    .map(c => Number((/\*\/(\d+)/.exec(c.schedule) || [])[1]))
+    .filter(Number.isFinite)
+  assert.ok(cadences.length, 'au moins un cron periodique est declare')
+  const minutes = Math.min(...cadences)
   assert.ok(Number(ms[1]) > minutes,
     `la tenue (${ms[1]} min) doit depasser l intervalle du cron (${minutes} min)`)
   // Et le jeton existe, sinon un trainard efface la tenue d un autre.
@@ -252,11 +259,23 @@ test('LE TEST QUI COMPTE : les alarmes d envoi sont AFFICHEES, donc acquittables
   // journal, pas une alerte.
   const ecran = fs.readFileSync(path.join(__dirname, '..', 'api/ecran/aujourdhui.js'), 'utf8')
   const bloc = ecran.split('TYPES_ALARME')[1].slice(0, 400)
-  for (const t of ['overbooking', 'message_ota_a_verifier', 'message_ota_abandon']) {
+  for (const t of ['overbooking', 'message_ota_a_verifier', 'message_ota_arret',
+    'email_voyageur_abandon']) {
     assert.ok(bloc.includes(`'${t}'`), `${t} est servi au bandeau`)
   }
-  assert.match(ecran, /\.in\('type', TYPES_ALARME\)/, 'par un `in`, pas un `eq`')
-  assert.match(ecran, /\.is\('acquitted_at', null\)/, 'et seules les alarmes OUVERTES')
+  // ⚠ ON MESURE LE MECANISME, PAS L ORTHOGRAPHE. Cette assertion citait
+  // `.in('type', TYPES_ALARME)` au caractere ; la lecture a ete scindee en deux
+  // familles (surreservation / envoi) et le filtre porte desormais le parametre
+  // `types` — le test a rougi sur un refactor SANS defaut. Ce qui compte est
+  // qu'on filtre par APPARTENANCE a une liste et jamais par egalite a un type
+  // unique : c'est l'`eq('type', 'overbooking')` qui rendait l'alerte invisible.
+  const lecture = ecran.split('const lireFamille')[1].slice(0, 600)
+  assert.match(lecture, /\.in\('type', \w+\)/, 'par un `in`, pas un `eq`')
+  assert.doesNotMatch(lecture, /\.eq\('type'/,
+    'aucune egalite sur le type dans la lecture des alarmes')
+  assert.match(ecran, /lireFamille\(TYPES_ALARME/,
+    'et la liste des types atteint bien cette lecture')
+  assert.match(lecture, /\.is\('acquitted_at', null\)/, 'et seules les alarmes OUVERTES')
 })
 
 test('LE TEST QUI COMPTE : la porte du rejeu est FERMEE par une incertitude', () => {
@@ -300,9 +319,46 @@ test('LE TEST QUI COMPTE : une alarme AFFICHEE est ACQUITTABLE — les deux list
   const acquittables = liste(lire('api/incidents-acquitter.js'), 'TYPES_ACQUITTABLES')
   assert.deepEqual(affichees, acquittables,
     'tout type affiche au bandeau doit etre acquittable, et reciproquement')
-  for (const t of ['overbooking', 'message_ota_a_verifier', 'message_ota_abandon', 'message_ota_arret']) {
+  // ⚠ LA LISTE ATTENDUE EST CELLE DES TYPES QUI ALERTENT VRAIMENT — et on la
+  // tire du CODE QUI LES POSE, pas d'une copie a la main. `message_ota_abandon`
+  // a quitte l'ensemble avec la fonction qui le posait (il doublait l'arret) ;
+  // `email_voyageur_abandon` y est entre, parce qu'il alerte en `threshold: 1`
+  // et n'etait affiche nulle part.
+  // ⚠ LA LISTE ATTENDUE SE DERIVE DU CODE QUI POSE LES ALARMES, pas d'une copie
+  // a la main : `message_ota_abandon` a quitte l'ensemble avec la fonction qui
+  // le posait (il doublait l'arret), et `email_voyageur_abandon` y est entre.
+  // On exige donc que TOUT type pose par `lib/envoi-ota.js` en `threshold: 1`
+  // soit affiche et acquittable — ainsi un type d'envoi ajoute demain ne peut
+  // plus naitre invisible.
+  const ota = lire('lib/envoi-ota.js')
+  const constantes = Object.fromEntries(
+    [...ota.matchAll(/^const (TYPE_\w+) = '([a-z_]+)'/gm)].map(m => [m[1], m[2]]))
+  const reveillent = [...ota.matchAll(/reportIncident\(\s*(TYPE_\w+)\s*,\s*\{([^}]*)\}/g)]
+    .filter(m => /threshold: 1\b/.test(m[2]))
+    .map(m => constantes[m[1]])
+  assert.ok(reveillent.length >= 2, 'les alarmes d envoi sont lisibles dans le module')
+  for (const t of reveillent) {
+    assert.ok(affichees.includes(t), `${t} reveille l hote, il doit etre affiche et acquittable`)
+  }
+  // ⚠ ET LE COTE E-MAIL, QUI EST LE MEME DEFAUT ROUVERT (constat d'une revue) :
+  // `email_voyageur_abandon` alerte en `threshold: 1` depuis `cron-messages.js`
+  // et n'etait dans aucune des deux listes.
+  assert.match(lire('lib/cron-messages.js'), /reportIncident\('email_voyageur_abandon'/)
+  assert.ok(affichees.includes('email_voyageur_abandon'),
+    'l abandon d un e-mail voyageur doit etre affiche et acquittable')
+  // ⚠ CE QUE CE TEST NE GARDE PAS, ET IL FAUT LE DIRE. En derivant cette liste
+  // j'ai trouve que la MEME absence vaut pour une vingtaine d'autres types qui
+  // reveillent l'hote avec un bien — `message_non_envoye` (« information
+  // manquante », le plus proche de ce lot), `seam_failure`, `prix_sous_plancher`,
+  // `menage_non_assigne`… Aucun n'apparait sur un ecran. Ce n'est pas un oubli
+  // de ce lot : choisir lesquels meritent le bandeau est une decision produit,
+  // elle est remontee a Thierry, et l'elargir ici noierait exactement l'ecran
+  // qu'il demande de proteger.
+  for (const t of ['overbooking', 'message_ota_a_verifier', 'message_ota_arret']) {
     assert.ok(affichees.includes(t), `${t} est dans l ensemble`)
   }
+  assert.ok(!affichees.includes('message_ota_abandon'),
+    'et le type qui doublait l arret a disparu des deux cotes')
   // Et le filtre d'acquittement n'est plus un `eq` sur un seul type.
   const acq = lire('api/incidents-acquitter.js')
   assert.ok(!/\.eq\('type', 'overbooking'\)/.test(acq), 'plus aucun filtre sur un type unique')
@@ -310,15 +366,17 @@ test('LE TEST QUI COMPTE : une alarme AFFICHEE est ACQUITTABLE — les deux list
     'et les DEUX requetes — lecture et ecriture — portent la liste')
 })
 
-test('LE TEST QUI COMPTE : un ARRET bloque definitivement, et n alerte qu une fois', () => {
-  // ⚠ CONSTAT HAUT : `noterAbandonOta` ne faisait que REPORTER un incident.
-  // Rien ne bloquait le message : au tick suivant le provider etait rappele,
-  // l issue etait permanente a nouveau, et un NOUVEL incident insere —
-  // ~144 appels et 144 incidents par jour jusqu a la fin du sejour. Et la regle
-  // etait ecrite dix lignes plus haut, pour l e-mail.
+test('LE TEST QUI COMPTE : l arret est lu AVANT tout le reste, et sans fenetre', () => {
+  // ⚠ CE QUE CE TEST NE MESURE PLUS, ET POURQUOI. Il verifiait que la source de
+  // `cron-messages.js` CONTIENT `noterArretOta` dans la branche du plafond —
+  // `plafond.indexOf('noterArretOta')`. Il est reste VERT alors que cette
+  // branche etait devenue INATTEIGNABLE : une pre-porte en amont retournait
+  // sans rien poser. Mesurer qu une ligne est ecrite n est pas mesurer qu elle
+  // s execute. L effet se mesure maintenant en APPELANT la porte :
+  // tests/porte-ota-execution.test.js. Ce qui reste ici est ce qui se lit
+  // vraiment dans le texte : l ORDRE des lectures de la porte.
   const ota = fs.readFileSync(path.join(__dirname, '..', 'lib/envoi-ota.js'), 'utf8')
   const porte = ota.split('async function peutTenterOta')[1].split('\n}\n')[0]
-  // L arret est lu EN PREMIER : avant « a verifier », avant le plafond.
   const iArret = porte.indexOf('TYPE_ARRET_OTA')
   const iVerif = porte.indexOf('TYPE_AVERIF_OTA')
   const iPlafond = porte.indexOf('MAX_TENTATIVES_OTA')
@@ -327,19 +385,55 @@ test('LE TEST QUI COMPTE : un ARRET bloque definitivement, et n alerte qu une fo
   // Et SANS fenetre : sinon le message repart le lendemain.
   const ligne = porte.split('TYPE_ARRET_OTA')[1].split('\n')[0]
   assert.match(ligne, /\{ fenetre: false \}/, 'un arret n expire pas')
-  // Les deux causes d arret le POSENT.
+  // ⚠ UN SEUL DECIDEUR. La porte est consultee par les deux moteurs AVANT la
+  // generation ; en garder une copie dans `envoyerEtJournaliser` remettait la
+  // decision en aval d un `return` deja pris — c est ce qui a rendu la branche
+  // du plafond inatteignable — et coutait trois lectures Supabase de plus par
+  // message.
   const src2 = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-messages.js'), 'utf8')
   const h = src2.split('async function envoyerEtJournaliser')[1]
     .split('async function processMessageTemplates')[0]
+  assert.ok(!h.includes('peutTenterOta') && !h.includes('porteOta('),
+    'l envoi ne reinterroge pas la porte : un seul endroit decide')
+  // Une issue PERMANENTE, elle, est connue APRES l appel au provider : c est le
+  // seul arret que l envoi pose encore.
   const permanent = h.split('if (issue === ISSUE.PERMANENT) {')[1].split('\n  }\n')[0]
   assert.match(permanent, /noterArretOta/, 'une issue PERMANENTE arrete le message')
-  const plafond = h.split("porte.motif === 'plafond'")[1].split('\n      }\n')[0]
-  assert.match(plafond, /noterArretOta/, 'le plafond atteint aussi')
-  // ⚠ L ORDRE COMPTE : l arret AVANT l alerte, sinon la porte ne le voit pas au
-  // tick suivant et l alerte repart.
-  assert.ok(plafond.indexOf('noterArretOta') < plafond.indexOf('noterAbandonOta'),
-    'l arret est pose avant l alerte')
-  assert.ok(permanent.indexOf('noterArretOta') < permanent.indexOf('noterAbandonOta'))
+  // ⚠ ET UNE SEULE ALARME : `noterAbandonOta` doublait l arret sous un autre
+  // type, donc deux cartes, deux SMS, deux e-mails pour un seul echec.
+  assert.ok(!src2.includes('noterAbandonOta'), 'plus de seconde alarme')
+  assert.ok(!ota.match(/^async function noterAbandonOta/m), 'ni de fonction pour la poser')
+})
+
+test('LE TEST QUI COMPTE : la porte ne ferme QUE le mode Auto, jamais la proposition', () => {
+  // ⚠ CONSTAT D UNE REVUE INDEPENDANTE, VERIFIE. J avais place la porte du
+  // rejeu AVANT `getPropertyMode`, pour economiser l appel payant a Haiku. Mais
+  // en mode Test, le cron n ENVOIE rien : il depose une PROPOSITION que l hote
+  // valide a la main. Une ligne d arret — posee parce que l envoi automatique a
+  // echoue cinq fois — etouffait donc aussi la proposition, et retirait a l hote
+  // le seul chemin qui lui restait pour envoyer ce message lui-meme. L alerte
+  // lui disait « faites-le depuis /messages » pendant que le code lui en
+  // supprimait le moyen.
+  //
+  // En mode Test il n y a pas d envoi, donc pas de rejeu a plafonner : la porte
+  // n a rien a y faire. Elle se lit donc APRES le mode, et sous sa condition.
+  const src2 = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-messages.js'), 'utf8')
+  for (const fonction of ['checkAndSendTemplate', 'triggerTemplates']) {
+    const bloc = src2.split(`async function ${fonction}`)[1].split('\nasync function ')[0]
+    const iMode = bloc.indexOf('getPropertyMode(')
+    const iPorte = bloc.indexOf('porteOta(')
+    assert.ok(iMode > 0 && iMode < iPorte,
+      `${fonction} lit le mode du bien AVANT la porte`)
+    // Et la porte est SOUS la condition du mode Auto, pas a cote.
+    const avant = bloc.slice(0, iPorte)
+    const condition = avant.slice(avant.lastIndexOf('if ('))
+    assert.match(condition, /propMode === 'auto'/,
+      `${fonction} ne ferme la porte qu en mode Auto`)
+    // ⚠ ET UNE SEULE LECTURE DU MODE : la deplacer en avait laisse une seconde
+    // plus bas, donc deux requetes pour la meme reponse.
+    assert.equal((bloc.match(/getPropertyMode\(/g) || []).length, 1,
+      `${fonction} ne lit le mode qu une fois`)
+  }
 })
 
 test('LE TEST QUI COMPTE : la porte est franchie AVANT l appel payant a Haiku', () => {
@@ -379,12 +473,34 @@ test('LE TEST QUI COMPTE : « je n ai pas su lire la reponse » n est pas « il 
   // inattendue : le provider a PU traiter le message et c est nous qui ne
   // comprenons pas sa reponse. Les classer refus les rejouait, donc un envoi en
   // DOUBLE au voyageur.
+  //
+  // ⚠ ET CE TEST FIGEAIT UN DEFAUT (regle 17 de REVIEW.md). Il exigeait
+  // INCERTAIN meme en 422, sur ce raisonnement ecrit ici : « un statut ne
+  // rachete pas une reponse qu on ne sait pas lire ». C est faux, et le cas
+  // reel de la production le montre : un 429 dont le corps est une page HTML de
+  // passerelle — la forme la plus banale d une limite de debit — tombait en
+  // INCERTAIN, donc BLOQUE jusqu a un geste de l hote, alors que c est
+  // exactement le cas qui merite un rejeu au palier suivant. La lisibilite du
+  // CORPS ne dit rien de ce que le provider a fait du message ; le STATUT, lui,
+  // le dit. Constat d une revue independante, verifie avant correction.
   for (const code of ['reponse_non_json', 'forme_inattendue', 'reponse_vide']) {
     assert.equal(classerEnvoiOta({ ok: false, status: 200, error: code }), ISSUE.INCERTAIN,
-      `${code} met en doute, il ne rejoue pas`)
-    // Meme en 4xx : un statut ne rachete pas une reponse qu on ne sait pas lire.
-    assert.equal(classerEnvoiOta({ ok: false, status: 422, error: code }), ISSUE.INCERTAIN,
-      `${code} en 422 non plus`)
+      `${code} en 2xx met en doute, il ne rejoue pas`)
+    assert.equal(classerEnvoiOta({ ok: false, error: code }), ISSUE.INCERTAIN,
+      `${code} sans statut non plus`)
+    // ⚠ MAIS UN STATUT LU >= 400 TRANCHE : le provider a repondu, il n a pas
+    // pris le message. C est le symptome du 29 octobre 2026, et il doit se
+    // rejouer, pas se bloquer.
+    assert.equal(classerEnvoiOta({ ok: false, status: 429, error: code }), ISSUE.REFUS,
+      `${code} en 429 est un refus : il se rejoue au palier`)
+    assert.equal(classerEnvoiOta({ ok: false, status: 422, error: code }), ISSUE.REFUS,
+      `${code} en 422 aussi`)
+    // Choix ASSUME et borne : un 5xx suit la meme regle. Il peut venir APRES
+    // que le provider ait accepte, donc un rejeu peut doubler le message — mais
+    // c est precisement ce que le plafond a 5 tentatives borne, et traiter tout
+    // 5xx en incertain reviendrait a bloquer a la main chaque panne passagere.
+    assert.equal(classerEnvoiOta({ ok: false, status: 503, error: code }), ISSUE.REFUS,
+      `${code} en 503 se rejoue, dans la limite du plafond`)
   }
   // Et un code DU PROVIDER reste un refus, quel que soit le statut.
   assert.equal(classerEnvoiOta({ ok: false, status: 422, error: 'not_supported' }), ISSUE.REFUS)
