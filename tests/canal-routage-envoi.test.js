@@ -166,48 +166,88 @@ const src = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-messages.js'), 
 test('les deux moteurs decident du canal AVANT d\'ecrire quoi que ce soit', () => {
   const decisions = src.split('const decision = canalPour(booking)').length - 1
   assert.strictEqual(decisions, 2, 'un par moteur : checkAndSendTemplate et triggerTemplates')
-  const ordres = src.split('const journalAvantEnvoi = decision.canal !== CANAL.EMAIL').length - 1
-  assert.strictEqual(ordres, 2, 'et chacun en tire l\'ordre du journal')
+  // ⚠ `journalAvantEnvoi` N'EXISTE PLUS, et c'est le correctif du 29 octobre
+  // 2026 : plus aucun canal n'ecrit avant l'envoi, donc plus aucun ordre a
+  // tirer de la decision. Les deux moteurs passent par le MEME helper.
+  assert.ok(!/journalAvantEnvoi/.test(src),
+    'aucun ordre « journal avant envoi » ne subsiste')
+  const appels = src.split('await envoyerEtJournaliser({').length - 1
+  assert.strictEqual(appels, 2, 'et chacun appelle le helper partage')
 })
 
-test('LE TEST QUI COMPTE : sur le canal e-mail, rien n\'est ecrit avant un succes', () => {
+test('LE TEST QUI COMPTE : sur AUCUN canal rien n\'est ecrit avant un succes', () => {
   // Le defaut d'origine : `noterEnvoi` etait appele AVANT l'envoi, donc trois
   // reservations Offline portent un message marque envoye que Channex avait
   // refuse. Sur le canal e-mail, l'echec doit laisser la place nette — le fil et
   // `messages` ne disent JAMAIS qu'un message est parti quand il ne l'est pas.
-  const blocs = src.split('if (!journalAvantEnvoi && !sendRes?.ok) {').slice(1)
-  assert.strictEqual(blocs.length, 2, 'les deux moteurs portent la garde')
-  for (const bloc of blocs) {
-    const corps = bloc.split(/\n\s+(?:continue|return)\n/)[0]
-    assert.ok(!/from\('conversations'\)/.test(corps), 'aucun fil qui afficherait un message non delivre')
-    assert.ok(!/recordMessage/.test(corps), 'aucune ligne dans `messages`')
-    // Seule exception, et elle est l'inverse d'un faux vert : quand on ABANDONNE
-    // pour de bon, le journal s'ecrit — sans lui, le plafond ne plafonnerait rien
-    // et le message repartirait a chaque tick.
-    const journaux = (corps.match(/noterEnvoi/g) || []).length
-    if (journaux) {
-      assert.ok(/if \(abandon\) \{[\s\S]*?noterEnvoi/.test(corps),
-        'le seul journal admis est celui de l\'abandon')
-      assert.strictEqual(journaux, 1, 'et il n\'y en a qu\'un')
-    }
-  }
+  // ⚠ LA GARDE A CHANGE DE FORME ET DE PORTEE. Elle ne vit plus dans deux
+  // blocs recopies, mais dans le helper partage — et elle vaut desormais pour
+  // l'OTA comme pour l'e-mail, ce qui est tout le correctif du 29 octobre 2026.
+  const helper = src.split('async function envoyerEtJournaliser')[1]
+    .split('async function processMessageTemplates')[0]
+  // Le fil et le journal ne s'ecrivent QUE dans la branche du succes.
+  const succes = helper.split('if (sendRes?.ok) {')[1].split('\n  }\n')[0]
+  assert.ok(/from\('conversations'\)/.test(succes), 'le fil s\'ecrit sur un succes')
+  assert.ok(/noterEnvoi/.test(succes), 'et le journal aussi')
+  // Et nulle part ailleurs, sauf l'abandon e-mail.
+  const apres = helper.split('if (sendRes?.ok) {')[1].split('\n  }\n').slice(1).join('\n  }\n')
+  assert.ok(!/from\('conversations'\)/.test(apres),
+    'aucun fil qui afficherait un message non delivre')
+  assert.ok(!/recordMessage/.test(helper), 'et le helper n\'ecrit jamais dans `messages`')
+  const journaux = (apres.match(/noterEnvoi/g) || []).length
+  assert.strictEqual(journaux, 1, 'un seul journal apres l\'echec : celui de l\'abandon')
+  assert.ok(/if \(abandon\) \{[\s\S]{0,200}?noterEnvoi/.test(apres),
+    'et c\'est bien celui de l\'abandon e-mail')
+  // ⚠ ET LES DEUX SITES REFUSENT LA DOUBLE ECRITURE SUR UN ECHEC : c'est elle
+  // qui a menti, avec des lignes « outbound/auto » annoncant un message refuse.
+  assert.ok(/if \(!envoi\.livre\) return/.test(src), 'le site rejouable sort sur un echec')
+  assert.ok(/if \(!envoi\.livre\) continue/.test(src), 'le site one-shot aussi')
 })
 
 test('LE TEST QUI COMPTE : un abandon s\'ecrit, sinon le plafond ne plafonne rien', () => {
-  const check = src.split('async function checkAndSendTemplate')[1].split('async function triggerTemplates')[0]
-  assert.ok(/if \(abandon\) \{\s*\n\s*await noterEnvoi\(/.test(check),
+  // L'ancre a suivi le code : la politique e-mail vit dans le helper partage.
+  const helper = src.split('async function envoyerEtJournaliser')[1]
+    .split('async function processMessageTemplates')[0]
+  assert.ok(/if \(abandon\) \{\s*\n\s*await noterEnvoi\(/.test(helper),
     'un message qu\'on renonce a envoyer ne doit pas repartir a chaque tick')
 })
 
-test('le chemin OTA garde son ordre historique : journal AVANT envoi', () => {
-  // L'anti-boucle. Un envoi qui part sans etre note repart toutes les 5 minutes.
-  for (const bloc of src.split('if (journalAvantEnvoi) {').slice(1)) {
-    const corps = bloc.split('\n      }\n')[0]
-    assert.ok(/noterEnvoi/.test(corps), 'le journal est bien pose dans la branche OTA')
-  }
-  const avant = src.indexOf('if (journalAvantEnvoi) {')
-  const envoi = src.indexOf('const sendRes = await sendGuestMessage(beds24Key, property, booking, message,')
-  assert.ok(avant > 0 && envoi > avant, 'et il precede l\'envoi')
+test('LE TEST QUI COMPTE : le chemin OTA n\'ecrit PLUS rien avant l\'envoi', () => {
+  // ⚠ CE TEST DISAIT L'INVERSE, ET IL FIGEAIT LE DEFAUT — regle 17 de REVIEW.md
+  // en acte. Il s'appelait « le chemin OTA garde son ordre historique : journal
+  // AVANT envoi » et il etait VERT, pendant que la production perdait des
+  // messages : `message_sent_log` ecrit avant l'envoi est la garde anti-doublon,
+  // donc un refus du provider condamnait le message pour de bon et le fil
+  // l'affichait comme parti.
+  //
+  // Mesure du 29 octobre 2026 : cinq envois en echec en sept jours sur
+  // La bulle, et dans le journal la ligne est horodatee 0,1 a 0,6 seconde AVANT
+  // l'incident — la meme tentative. CINQ messages perdus, un par echec : le
+  // journal etant la garde anti-doublon, chacun etait condamne pour de bon.
+  // (J'avais d'abord ecrit « trois » — en comptant les voyageurs dont AUCUN
+  // message du meme type n'etait passe, au lieu des gabarits reellement
+  // perdus. Un nombre ecrit a la main, encore.) Parmi eux, les consignes de
+  // securite du jacuzzi et l'annonce des codes d'acces.
+  //
+  // Et le defaut etait DEJA ecrit dans `cron-messages.js` depuis septembre :
+  // le correctif d'alors n'avait ete applique qu'au canal e-mail.
+  const helper = src.split('async function envoyerEtJournaliser')[1]
+    .split('async function processMessageTemplates')[0]
+  // L'ancre est l'APPEL au provider, sans mot-cle de declaration : `sendRes`
+  // est declare plus haut depuis que l'envoi vit dans un `try/finally` (le
+  // verrou anti-doublon doit se relacher meme si l'envoi leve). Ancrer sur
+  // `const sendRes =` rendait la tranche egale a TOUT le helper, et
+  // l'assertion rougissait pour une raison qui n'etait pas la sienne.
+  const avantEnvoi = helper.split('await sendGuestMessage(')[0]
+  assert.ok(!/noterEnvoi/.test(avantEnvoi), 'aucun journal avant l\'appel au provider')
+  assert.ok(!/from\('conversations'\)/.test(avantEnvoi), 'aucune ligne de fil non plus')
+  assert.ok(!/recordMessage/.test(avantEnvoi), 'ni dans `messages`')
+  // ⚠ MAIS LE VERROU, LUI, EST POSE AVANT : ne plus rien ecrire avant l'envoi a
+  // emporte la protection anti-doublon que le defaut procurait par accident
+  // (deux passes concurrentes lisaient la ligne et passaient leur tour).
+  assert.match(avantEnvoi, /await tenirEnvoi\(/, 'la tenue est posee avant l appel')
+  assert.match(helper, /await relacherEnvoi\(tenue\.key\)/, 'et relachee ensuite')
+  assert.match(helper, /\} finally \{/, 'dans un finally, meme si l envoi leve')
 })
 
 // ─── 4. Les correctifs de review (16 septembre 2026) ─────────────────────────
@@ -248,11 +288,21 @@ test('les deux moteurs ne parlent pas de la meme chose avec le meme mot', () => 
   // checkAndSendTemplate est rejoue a chaque tick : un echec transitoire y
   // repassera. triggerTemplates consomme un evenement one-shot : il n'aura pas de
   // seconde chance, et le dit en erreur de cycle meme sans abandon formel.
+  // ⚠ LA DISTINCTION EST DESORMAIS PORTEE PAR UN ARGUMENT, PAS PAR DU TEXTE
+  // RECOPIE : le site one-shot passe `rejouable: false`, et le helper en tire
+  // tout le reste (ni palier, ni plafond, alerte immediate).
+  // ⚠ L'ORDRE DE DECLARATION COMPTE : `envoyerEtJournaliser` vient AVANT
+  // `checkAndSendTemplate`, donc une tranche bornee par lui avale tout le
+  // fichier — site one-shot compris. La borne est `triggerTemplates`.
   const check = src.split('async function checkAndSendTemplate')[1].split('async function triggerTemplates')[0]
   const trigger = src.split('async function triggerTemplates')[1]
-  assert.ok(!/NON REJOUABLE/.test(check), 'le chemin rejouable ne parle pas de perte')
-  assert.ok(/NON REJOUABLE/.test(trigger), 'le chemin one-shot le dit')
-  assert.ok(/send_message_one_shot/.test(trigger), 'et le distingue dans les erreurs du cycle')
+  const helper = src.split('async function envoyerEtJournaliser')[1]
+    .split('async function processMessageTemplates')[0]
+  assert.ok(!/rejouable: false/.test(check), 'le chemin rejouable ne se declare pas one-shot')
+  assert.ok(/rejouable: false/.test(trigger), 'le chemin one-shot le declare')
+  assert.ok(/send_message_one_shot/.test(helper),
+    'et le helper le distingue dans les erreurs du cycle')
+  assert.ok(/NON REJOUABLE/.test(helper), 'en le nommant dans l\'erreur')
 })
 
 test('le code d\'acces n\'alerte pas le fondateur pour un canal pas encore branche', () => {
@@ -317,15 +367,25 @@ test('LE TEST QUI COMPTE : sur le chemin one-shot, un echec ALERTE tout de suite
   // Le plafond y est inatteignable (une seule tentative par evenement) : s'en
   // remettre a lui, c'etait remplacer une alerte qui marchait — `send_failure` a
   // la 2e occurrence — par un compteur qui n'arrive jamais a 5.
+  // ⚠ L'ALERTE A CHANGE DE NOM ET DE PORTEE : elle vaut maintenant pour l'OTA
+  // comme pour l'e-mail, et c'est `noterAbandonOta` qui la pose — avec
+  // `threshold: 1`, donc sans attendre une seconde occurrence qui ne viendra
+  // jamais sur un evenement one-shot.
   const trigger = src.split('async function triggerTemplates')[1]
-  assert.ok(/reportIncident\('email_voyageur_abandon'/.test(trigger),
-    'l\'alerte part directement, sans passer par le compteur')
-  assert.ok(/threshold: 1/.test(trigger.split("reportIncident('email_voyageur_abandon'")[1].slice(0, 300)),
-    'et elle ne s\'attend pas a une seconde occurrence')
-  // Le nom apparait dans le commentaire qui explique pourquoi on ne l'appelle
-  // PAS ici : c'est l'appel qu'on interdit, pas la mention.
-  assert.ok(!/await faut_il_abandonner_email\(/.test(trigger),
-    'le compteur est reserve au chemin qui peut vraiment reessayer')
+  const helper = src.split('async function envoyerEtJournaliser')[1]
+    .split('async function processMessageTemplates')[0]
+  assert.ok(/rejouable: false/.test(trigger), 'le site one-shot se declare')
+  // La tranche s'arrete au `return` du bloc, pas a un nombre de caracteres :
+  // 700 caracteres debordaient sur le `noterRefusOta` du chemin rejouable, et
+  // l'assertion « rien n'est compte » mesurait alors la ligne d'a cote.
+  const sansRejeu = helper.split('if (!rejouable) {')[1].split('\n  }\n')[0]
+  assert.ok(/noterAbandonOta/.test(sansRejeu), 'l\'alerte part directement')
+  assert.ok(!/noterRefusOta/.test(sansRejeu), 'et rien n\'est COMPTE : le plafond serait inatteignable')
+  const ota = require('../lib/envoi-ota')
+  assert.equal(typeof ota.noterAbandonOta, 'function', 'le writer de l\'abandon est exporte')
+  // Le compteur e-mail reste reserve au chemin qui peut vraiment reessayer.
+  const emails = (helper.match(/await faut_il_abandonner_email\(/g) || []).length
+  assert.strictEqual(emails, 1, 'un seul appel au compteur e-mail, dans sa branche')
 })
 
 test('la politique d\'abandon teste le quota, et il peut l\'atteindre', () => {
