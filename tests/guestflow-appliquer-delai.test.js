@@ -715,10 +715,11 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
 
 // ── La recette du 29 octobre 2026 : une suspension DIFFERE un depart ───────
 
-// Une proposition vieille de 22 h, SUSPENDUE : l'etat exact lu en base staging
-// au diagnostic (created_at il y a 22 h, echeance deja passee, suspendu_le
-// pose). Dates relatives a T0, qui est INJECTE — donc figees, selon la regle du
-// depot.
+// Une proposition vieille de 22 h, SUSPENDUE : la FORME de celle lue en base
+// staging au diagnostic, pas son etat exact — l'echeance y est volontairement
+// decalee, voir le ⚠ ci-dessous. L'etat exact, lui, a son propre test
+// (« deja a la bonne echeance ET deja echue »). Dates relatives a T0, qui est
+// INJECTE — donc figees, selon la regle du depot.
 // ⚠ `send_after` NE DOIT PAS EGALER `created_at + 60 min`, sinon le module rend
 // `inchanges` et n'ecrit RIEN : mon premier jet posait exactement l'echeance
 // recalculee, donc le test « un seul update » mesurait un no-op. Meme piege que
@@ -751,21 +752,51 @@ test('LE TEST QUI COMPTE : une tache SUSPENDUE et echue compte dans `echues`', a
     'une suspendue dont l echeance recalculee est passee partira seule : elle compte')
 })
 
+test('LE TEST QUI COMPTE : deja a la bonne echeance ET deja echue compte quand meme', async () => {
+  // ⚠ C'EST L'ETAT EXACT DE LA RECETTE DU 29 OCTOBRE, et AUCUN test ne le
+  // couvrait — constat 5 de la revue, qui l'a mesure : deplacer `echues++`
+  // APRES le `if (t.send_after === nouvelle) { inchanges++; continue }` laissait
+  // les 28 tests verts.
+  //
+  // En base : `send_after` = 12:07 = `created_at + 60 min`, et le delai choisi
+  // est 60 min. Donc `nouvelle === send_after` : le module n'a RIEN a reecrire,
+  // il rend `inchanges` — et il doit compter la tache quand meme, parce qu'elle
+  // partira seule. Le compteur est evalue AVANT le `continue`, et c'est cet
+  // ordre que ce test garde.
+  const b = banc({
+    taches: [tache({
+      id: 'tache-recette',
+      created_at: new Date(T0 - 22 * 60 * MINUTE).toISOString(),
+      send_after: new Date(T0 - 21 * 60 * MINUTE).toISOString(),   // = created_at + 60 min
+      suspendu_le: new Date(T0 - 30 * MINUTE).toISOString()
+    })]
+  })
+  const r = await lancer(b, DANS_60, { apercu: true })
+  assert.equal(r.ok, true, r.motif)
+  assert.equal(r.inchanges, 1, 'rien a reecrire : l echeance est deja la bonne')
+  assert.equal(r.echues, 1, 'et elle partira seule : elle compte')
+})
+
 test('une suspendue dont l echeance recalculee est A VENIR ne compte pas', async () => {
   // La borne de l'autre cote : ce qui compte, c'est que l'echeance SOIT passee,
   // pas que la tache soit suspendue. Sans ce test, poser `echues++` sans
   // condition passerait au vert.
+  // ⚠ `send_after` NE VAUT PAS `created_at + 60 min` : a T0+50 min il tombait
+  // pile dessus, donc le module rendait `inchanges` et le chemin d'ecriture
+  // n'etait jamais exerce (constat 5 de la revue — le piege que le voisin
+  // documente, dans lequel ce test tombait a son tour).
   const b = banc({
     taches: [tache({
       id: 'tache-suspendue-recente',
       created_at: new Date(T0 - 10 * MINUTE).toISOString(),
-      send_after: new Date(T0 + 50 * MINUTE).toISOString(),
+      send_after: new Date(T0 + 20 * MINUTE).toISOString(),
       suspendu_le: new Date(T0 - 5 * MINUTE).toISOString()
     })]
   })
   const bilan = await lancer(b, DANS_60, { apercu: true })
   assert.equal(bilan.ok, true, bilan.motif)
   assert.equal(bilan.echues, 0, 'creation + 60 min est encore a venir')
+  assert.equal(bilan.rearmes, 1, 'et le chemin de rearmement est bien exerce')
 })
 
 test('et la suspension n est toujours PAS effacee par ce writer', async () => {

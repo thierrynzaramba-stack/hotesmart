@@ -1421,7 +1421,24 @@ seule. »
 | `created_at` | 28/10 11:07 — **22 h avant** |
 | `send_after` | 28/10 12:07 = `created_at + 60 min`, **échue de 21 h** |
 | `modifie_le` | 28/10 11:27 — l'hôte l'avait ouverte, donc suspendue |
+| `suspendu_le` | **NULL au moment de ma lecture** |
 | réglage en base | `reponse_ia: 60` — sa sauvegarde a bien pris |
+
+⚠ **`suspendu_le` était déjà NULL quand j'ai lu la ligne, et c'est une limite de
+ce diagnostic** (relevé en revue) : entre l'observation de Thierry et ma lecture,
+la reprise dormante et le writer ont tous deux écrit. **Je ne peux donc pas
+reconstruire l'instant exact**, et je ne l'invente pas. Ce que la ligne établit
+quand même : la proposition est en attente, créée 22 h avant, et son échéance
+est passée de 21 h — donc elle part au prochain passage.
+
+⚠ **Et le « 5 min » ne se déduit pas de ce tableau** : la formule du bouton est
+`max(5 min, send_after − suspendu_le)`, et avec `send_after` = 12:07 et une
+suspension à 11:27 elle donnerait **40 min**. Le plancher de 5 minutes n'est
+explicable que par un `suspendu_le` POSTÉRIEUR à l'échéance — ce que fait
+précisément `api/messages.js:498`, qui pose `suspendu_le = maintenant` à **chaque
+ouverture** du brouillon dans la saisie. Thierry ayant réouvert la proposition
+le 29, l'écart était négatif et le plancher s'appliquait. C'est cohérent, mais
+c'est une reconstitution, pas une mesure.
 
 **La cause est entièrement dans mon raisonnement.** Au constat 1 d'une revue,
 j'avais EXCLU les tâches suspendues de `echues`, en m'appuyant sur
@@ -1482,6 +1499,69 @@ case à l'écran. Un `return` muet laissait donc l'hôte lire « en pause » alo
 que rien n'avait été écrit — un écran qui affirme ce qui n'est pas. Les deux
 refus posent maintenant une note et **repeignent**, ce qui remet la case sur
 `etat.pauses`, c'est-à-dire sur l'état réel.
+
+### La revue de ce correctif : mon avertissement promettait un frein qui n'existe pas
+
+Huit constats, aucun de sécurité. Le plus lourd, et c'est encore mon correctif
+qui l'a créé :
+
+**« Annuler » ne changeait RIEN dans l'état même de la recette.** Mesuré : avec
+`send_after` déjà passée et l'échéance recalculée **égale** à celle déjà posée,
+le writer rend `inchanges` et n'écrit rien — que l'hôte accepte **ou** refuse.
+Les deux réponses donnent le même résultat : la proposition part. Le compteur
+avertissait juste, mais le « Continuer ? » laissait croire à un frein branché
+sur rien. Le frein n'existe que dans le cas d'origine, la sortie de « Je valide
+chaque réponse », où `send_after` est NUL.
+
+Le libellé le dit donc maintenant : « Refuser garde leur échéance actuelle, et
+celles qui sont **déjà échues** partiront quand même. »
+
+⚠ **ET SI THIERRY VEUT UN VRAI FREIN, C'EST UNE DÉCISION, PAS UN CORRECTIF.**
+Refuser pourrait DÉSARMER les propositions déjà échues (`send_after = null`),
+c'est-à-dire les remettre en attente de sa validation. C'est une écriture de
+masse qu'il n'a pas demandée, et elle contredit sa décision du 28 octobre
+(« si elle est déjà passée, il part au prochain passage, c'est ce que l'hôte a
+demandé »). Je ne l'ai donc pas inventée : l'écran dit la vérité, et la question
+lui revient.
+
+**Le libellé était redevenu assertif, et c'était faux.** « Partiront seules »
+sur un bien en pause est un mensonge mesuré : `brouillons-dus.js` refuse les
+propositions dès l'entrée (`automatisation_en_pause`), donc zéro part — et la
+question est quand même posée quand la carte des pauses n'est pas fiable
+(`etat.pausesLues === false` après un échec de lecture au boot). Retour à
+« pourraient partir », qui est la forme juste et que le JSDoc du module exige.
+
+**Et le mot « paused » en anglais désignait déjà le kill switch** : un hôte
+anglophone lisait « Paused: won't send on its own » et « A paused countdown only
+defers a send » sur le même écran. La suspension, en EN, c'est « on hold ».
+
+**Mon correctif des refus muets avait recréé la perte de saisie.** Le
+`renderTiroir()` que j'avais ajouté dans les deux gardes reconstruit le volet
+depuis `etat` : il effaçait les consignes et les destinataires en cours de
+frappe — mesuré, « CONSIGNE-TAPÉE-À-LA-MAIN » → vide — et la note invitait à
+recommencer un geste dont l'entrée venait d'être détruite. Les deux gardes
+repeignent maintenant le **seul** élément concerné : le bouton pour l'une, la
+case pour l'autre. Ce qui ferme aussi le troisième constat — le re-rendu pouvait
+**lever**, et la garde n'a pas de `try`.
+
+**Et le refus du kill switch était écrasé par un « Enregistré » vert.**
+`enregistrerPanneau` pose toujours une note en sortant : le refus de pause
+disparaissait quelques centaines de millisecondes plus tard, et l'hôte finissait
+sur un succès alors que sa pause n'avait pas pris. Le refus s'ajoute maintenant
+à la note finale et **emporte le vert**.
+
+⚠ **Une mutation survivait, et c'était l'état exact de la recette** : déplacer
+`echues++` après le court-circuit `inchanges` laissait les 28 tests verts. Aucun
+test ne couvrait « déjà à la bonne échéance ET déjà échue » — et la fixture
+voisine tombait, elle aussi, dans le piège du no-op que le fichier documente
+deux fois. Les deux sont corrigées, et la mutation rougit.
+
+⚠ **Enfin, une affirmation de la spec ne laissait aucune trace qui rougirait** :
+« j'ai rejoué la séquence exacte dans le banc, le chemin nominal est sain ». Une
+mesure qui ne vit que dans une phrase ne peut pas se démentir. Elle est
+maintenant un test qui exécute la séquence — sortie du manuel, confirmation,
+pilule 1 h, Enregistrer — et qui affirme les **deux** textes de confirmation
+dans l'ordre.
 
 ### La troisième revue : quatre fois le même défaut, fermé d'un seul côté
 

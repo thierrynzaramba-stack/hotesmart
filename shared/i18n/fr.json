@@ -584,7 +584,7 @@
   "messages.code_sent": "code envoyé",
   "messages.deja_partie": "Cette réponse vient de partir.",
   "messages.delai_aide": "Au premier passage suivant, vérifié toutes les 5 minutes.",
-  "messages.delai_arriere_confirm": "Propositions déjà en attente qui partiront seules, sans attendre le délai choisi : {n}. Une suspension ne fait que différer un départ, elle compte donc. Continuer ?",
+  "messages.delai_arriere_confirm": "Propositions déjà en attente qui pourraient partir seules sans attendre le délai choisi : {n}. Refuser garde leur échéance actuelle, et celles qui sont déjà échues partiront quand même. Continuer ?",
   "messages.delai_autre": "Autre…",
   "messages.echeances_gardees_ok": "Enregistré. Les propositions déjà en attente gardent leur échéance.",
   "messages.echeances_gardees": "Les propositions déjà en attente gardent leur échéance.",

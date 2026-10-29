@@ -584,7 +584,7 @@
   "messages.code_sent": "code sent",
   "messages.deja_partie": "That reply has just gone out.",
   "messages.delai_aide": "At the next pass, checked every 5 minutes.",
-  "messages.delai_arriere_confirm": "Propositions already waiting that will be sent on their own, without waiting for the chosen delay: {n}. A paused countdown only defers a send, so it counts. Continue?",
+  "messages.delai_arriere_confirm": "Propositions already waiting that could be sent on their own without waiting for the chosen delay: {n}. Declining keeps their current deadline, and those already past it will be sent anyway. Continue?",
   "messages.delai_autre": "Other…",
   "messages.echeances_gardees_ok": "Saved. Propositions already waiting keep their deadline.",
   "messages.echeances_gardees": "Propositions already waiting keep their deadline.",

@@ -723,3 +723,101 @@ test('LE TEST QUI COMPTE : une pause refusee ne laisse pas la case MENTIR', asyn
     'et la case est remise sur l etat REEL, pas sur le geste refuse')
   b.fermer()
 })
+
+// ── Les constats de la revue du correctif de recette ──────────────────────
+
+test('LE TEST QUI COMPTE : un refus ne DETRUIT PAS la saisie non enregistree', async () => {
+  // Constat 2 de la revue, mesure : mon premier jet appelait `renderTiroir()`
+  // pour repeindre le bouton desarme. Il reconstruit le volet depuis `etat`,
+  // donc il effacait tout ce qui ne vit que dans le DOM — les consignes de l IA
+  // et les destinataires d alerte en cours de frappe. Et la note invitait a
+  // recommencer un geste dont l entree venait d etre detruite.
+  const b = B.monter({ appel: async () => ({}) })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } },
+    prompting: { global: 'ancien global', overrides: {} }
+  })
+  const champ = B.corps(b).querySelector('[data-consignes="bien"]')
+  const mail = B.corps(b).querySelector('[data-alerte="intervention|email_lines"]')
+  champ.value = 'CONSIGNE-TAPEE-A-LA-MAIN'
+  mail.value = 'nouveau@exemple.test'
+  b.msg.etat.modeEnCours = true
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.equal(b.note(), FR['messages.reglage_en_cours'], 'le refus se dit')
+  assert.equal(B.corps(b).querySelector('[data-consignes="bien"]').value,
+    'CONSIGNE-TAPEE-A-LA-MAIN', 'sa consigne est toujours la')
+  assert.equal(B.corps(b).querySelector('[data-alerte="intervention|email_lines"]').value,
+    'nouveau@exemple.test', 'et son destinataire aussi')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un refus de pause survit au « Enregistre » de l ecriture en cours', async () => {
+  // Constat 4 de la revue, mesure : `enregistrerPanneau` pose TOUJOURS une note
+  // en sortant, donc son « Enregistré » VERT ecrasait le refus du kill switch
+  // quelques centaines de millisecondes plus tard. L hote finissait sur un
+  // succes alors que sa pause n avait pas pris — « croire l IA en pause pendant
+  // qu elle envoie est le pire des silences ».
+  let debloquer = null
+  const envoyes = []
+  const enregistre = { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } }
+  const b = B.monter({
+    appel: async (chemin, corps) => {
+      if (corps) envoyes.push(chemin)
+      if (corps && corps.apercu === true) {
+        await new Promise(r => { debloquer = r })
+        return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 0 } }
+      }
+      if (!corps) return { config: enregistre }
+      return { ok: true, delais_ref: REF, brouillons: { ok: true, desarmes: 0, rearmes: 0, deja_prises: 0 } }
+    }
+  })
+  B.peupler(b, { biens: [{ ref: REF, nom: 'Loft Pilotable' }], config: enregistre, pauses: {} })
+  const promesse = b.msg.enregistrerPanneau(B.corps(b), REF)
+  await new Promise(r => setTimeout(r, 0))
+  // L hote coupe l automatique PENDANT l enregistrement : c est un geste
+  // d urgence, il ne regarde pas si une autre ecriture est en vol.
+  await b.msg.basculerPause(REF, true)
+  assert.equal(b.note(), FR['messages.reglage_en_cours'], 'le refus se dit tout de suite')
+  assert.ok(!envoyes.includes('/api/property-automation'), 'et rien n est ecrit')
+  debloquer()
+  await promesse
+  assert.ok(b.note().includes(FR['messages.reglage_en_cours']),
+    'le refus du kill switch survit a la note de l enregistrement')
+  assert.equal(b.noteOk(), false, 'et il emporte le vert : la pause n a pas pris')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : la sequence de la recette, de bout en bout', async () => {
+  // ⚠ CETTE SEQUENCE ETAIT AFFIRMEE DANS LA SPEC SANS LAISSER DE TRACE QUI
+  // ROUGIRAIT (constat 8 de la revue) : « j ai rejoue la sequence exacte dans
+  // le banc, le chemin nominal est sain ». Une mesure qui ne vit que dans une
+  // phrase ne peut pas se dementir. La voici, executee.
+  const envoyes = []
+  const base = { [REF]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } } }
+  const b = B.monter({
+    appel: async (chemin, corps) => {
+      if (corps) envoyes.push(corps)
+      if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 1 } }
+      if (corps && corps.delais_ref) return { ok: true, delais_ref: REF, delais: corps.delais, brouillons: { ok: true, desarmes: 0, rearmes: 1, deja_prises: 0 } }
+      if (!corps) return { config: base }
+      return { ok: true }
+    }
+  })
+  await B.amorcer(b)
+  B.peupler(b, { biens: [{ ref: REF, nom: 'Loft Pilotable' }], config: base, pauses: {} })
+  B.clic(b, B.pilManuel(b))                       // sortie du manuel
+  B.clic(b, B.pilule(b, 60))                      // 1 h
+  B.clic(b, B.boutonSave(b))                      // Enregistrer
+  await B.reposer(b, 6)
+  assert.deepEqual(b.confirmations, [
+    FR['messages.mode_confirm_auto'],
+    FR['messages.delai_arriere_confirm'].split('{n}').join('1')
+  ], 'les DEUX confirmations sortent, dans cet ordre, avec leur texte')
+  const reels = envoyes.filter(c => c.delais_ref && c.apercu !== true)
+  assert.equal(reels.length, 1)
+  assert.equal(reels[0].delais.reponse_ia, 60, 'et le reglage choisi est bien celui qui part')
+  assert.equal(reels[0].propager, true)
+  assert.equal(b.note(), FR['messages.panneau_saved'])
+  b.fermer()
+})

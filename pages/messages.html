@@ -193,6 +193,7 @@ const etat = {
   // l'enveloppe — et chaque retrait est colle a celui de `modeEnCours`. C'est
   // ce `finally` qui tient l'invariant, pas l'ordre des lignes.
   panneauEnCours: false,   // l'enregistrement du panneau, lui seul
+  pauseRefusee: false,     // une bascule de pause refusee pendant une ecriture
   ouverte: null            // bookId de la conversation ouverte
 }
 const peutEcrireMessages = () => { try { return peutEcrire('messages') } catch { return false } }
@@ -1210,11 +1211,29 @@ async function basculerPause (ref, paused) {
   // a l'ecran. Un `return` muet laissait donc l'hote lire « en pause » — ou
   // « plus en pause » — alors que RIEN n'avait ete ecrit. C'est la famille de
   // defaut que ce chantier passe son temps a fermer : un ecran qui affirme ce
-  // qui n'est pas. Le re-rendu remet la case sur `etat.pauses`, c'est-a-dire
-  // sur l'etat reel, et la note dit pourquoi.
+  // qui n'est pas.
+  //
+  // ⚠ ON REMET LA CASE, ON NE RE-REND PAS (constats 2 et 6 de la revue). Un
+  // `renderTiroir()` ici effacerait la saisie non enregistree du volet, et il
+  // peut LEVER — mesure de la revue : avec une ancre du squelette absente,
+  // l'exception s'echappait du gestionnaire `change` et la case restait
+  // menteuse. Remettre la case directement ne peut ni l'un ni l'autre.
+  //
+  // ⚠ ET LA CASE REVIENT A LA DERNIERE CARTE CONNUE, pas a une verite : `etat.pauses`
+  // peut etre perimee (`etat.pausesLues === false`). La direction reste sure —
+  // on n'affirme jamais « en pause » a tort — et c'est tout ce qu'on peut
+  // promettre ici ; c'est la dette D1.
   if (etat.modeEnCours) {
     noteReglage(t('messages.reglage_en_cours'))
-    renderTiroir()
+    const caseP = $('[data-bind="tiroir-corps"]').querySelector('[data-tiroir-pause]')
+    if (caseP) caseP.checked = etat.pauses[String(ref)] === true
+    // ⚠ ET LE REFUS SURVIT A L'ECRITURE EN COURS (constat 4). `enregistrerPanneau`
+    // pose TOUJOURS une note en sortant : sans ce drapeau, son « Enregistré »
+    // VERT ecrasait le refus du kill switch quelques centaines de millisecondes
+    // plus tard, et l'hote finissait sur un succes alors que sa pause n'avait
+    // pas pris. Le fichier le dit lui-meme : « croire l'IA en pause pendant
+    // qu'elle envoie est le pire des silences ».
+    etat.pauseRefusee = true
     return
   }
   etat.modeEnCours = true
@@ -1940,12 +1959,23 @@ async function enregistrerPanneau (corps, ref) {
   // Le bouton est normalement `disabled` dans cet etat, donc le clic ne devrait
   // pas arriver ici. Mais `off` est pose au RENDU : si `modeEnCours` passe a
   // vrai sans qu'un rendu suive — `renderTiroir` sort sans peindre quand le
-  // tiroir est cache —, le DOM reste a vif et la garde mord en silence. Le
-  // re-rendu ci-dessous repare cette incoherence au passage : il repeint l'etat
-  // reel, donc le bouton desarme.
+  // tiroir est cache —, le DOM reste a vif et la garde mord en silence.
+  //
+  // ⚠ ET ON NE RE-REND PAS ICI, C'EST UN CONSTAT MESURE DE LA REVUE (constat 2).
+  // Mon premier jet appelait `renderTiroir()` pour repeindre le bouton desarme :
+  // il reconstruit le volet depuis `etat`, donc il EFFACE tout ce qui ne vit que
+  // dans le DOM — les consignes de l'IA et les destinataires d'alerte en cours
+  // de frappe. Mesure : le champ passait de « DESTINATAIRE-TAPE-A-LA-MAIN » a
+  // vide, et la note invitait a recommencer un geste dont l'entree venait
+  // d'etre detruite. C'est le defaut que ce fichier documente dix lignes plus
+  // bas, recree par le correctif d'un refus muet.
+  // On desarme donc le SEUL bouton concerne, sans toucher au reste — et sans
+  // pouvoir lever (constat 6 : la garde n'a pas de `try`, et c'est le seul
+  // endroit ou le DOM est deja dans un etat menteur).
   if (etat.modeEnCours) {
     noteReglage(t('messages.reglage_en_cours'))
-    renderTiroir()
+    const bouton = corps.querySelector('[data-panneau-save]')
+    if (bouton) bouton.disabled = true
     return
   }
   etat.modeEnCours = true
@@ -2264,12 +2294,18 @@ async function enregistrerLePanneau (corps, ref) {
   // moitie — parce que quand une partie a vraiment echoue, elle s'AJOUTE a
   // l'echec : l'hote doit lire les deux faits, celui qu'il a choisi et celui
   // qui a rate.
+  // ⚠ UN REFUS DE PAUSE SURVENU PENDANT CETTE ECRITURE S'AJOUTE, ET IL EMPORTE
+  // LE VERT (constat 4 de la revue, mesure) : le kill switch n'a pas pris, donc
+  // la note ne peut pas se terminer sur un succes.
+  const pauseRefusee = etat.pauseRefusee === true
+  etat.pauseRefusee = false
+  const corpsNote = echoues.length
+    ? t('messages.panneau_partiel', { parties: echoues.join(', ') })
+      + (echeancesGardees ? ' ' + t('messages.echeances_gardees') : '')
+    : (echeancesGardees ? t('messages.echeances_gardees_ok') : t('messages.panneau_saved'))
   noteReglage(
-    echoues.length
-      ? t('messages.panneau_partiel', { parties: echoues.join(', ') })
-        + (echeancesGardees ? ' ' + t('messages.echeances_gardees') : '')
-      : (echeancesGardees ? t('messages.echeances_gardees_ok') : t('messages.panneau_saved')),
-    echoues.length === 0)
+    pauseRefusee ? corpsNote + ' ' + t('messages.reglage_en_cours') : corpsNote,
+    echoues.length === 0 && !pauseRefusee)
 }
 
 // Les consignes : meme table, meme RLS que l'ancienne page, mais INSERT
