@@ -59,9 +59,15 @@ test('les trois cles i18n de ces paragraphes sont retirees des trois dictionnair
   // Une cle laissee derriere est une invitation a reposer le paragraphe, et
   // elle fausse le compte de couverture des traductions.
   for (const [langue, dico] of DICOS) {
-    // ⚠ `annee_ib_total_estime` est la QUATRIEME, retiree a la revue : elle
-    // redisait, derriere un survol, la phrase que `revenue.note` imprime en
-    // clair sous le bloc dans les deux vues.
+    // ⚠ `annee_ib_total_estime` est la QUATRIEME, et sa raison d'etre retiree a
+    // CHANGE depuis la revue — l'enoncer encore comme a la revue serait faux.
+    // A la revue : elle redisait, derriere un survol, la phrase que
+    // `revenue.note` imprimait EN CLAIR sous le bloc. La demande de Thierry qui
+    // a suivi a retire ce texte en clair des deux vues ; `revenue.note` ne vit
+    // donc plus que dans les deux ⓘ du total (le mois et l'annee). Ce qui reste
+    // vrai, et ce qui justifie le retrait : c'etait une SECONDE cle pour UNE
+    // phrase, et deux cles pour une phrase divergent a la premiere correction
+    // de style. L'ⓘ pousse `revenue.note` elle-meme.
     for (const cle of ['revenue.annee_comparables_note', 'revenue.annee_note_cours',
       'revenue.annee_note_entiere', 'revenue.annee_ib_total_estime']) {
       assert.ok(!(cle in dico), `${langue}.json porte encore la cle morte ${cle}`)
