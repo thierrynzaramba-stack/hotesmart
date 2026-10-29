@@ -465,8 +465,22 @@ module.exports = async (req, res) => {
           brouillons = bilanVide({ ok: true, motif: 'propagation_non_demandee' });
         } else {
           try {
+            // ⚠ « GARDER POUR VALIDATION » (decision de Thierry du 29 octobre
+            // 2026) : l'ecran demande le DESARMEMENT des propositions
+            // annoncees, pas leur liberation. Deux issues reelles, et c'est le
+            // sens de son arbitrage — une confirmation dont une branche
+            // n'ecrit rien n'est pas une confirmation.
+            //
+            // `cutoff` est l'instant que l'APERCU a utilise pour compter : le
+            // writer le valide (fenetre de 10 min) et s'en sert comme meme
+            // predicat, pour que « les propositions annoncees » designe
+            // exactement l'ensemble desarme. Une valeur absente ou aberrante
+            // retombe sur `Date.now()`, donc sur le comportement par defaut.
+            const garderEchues = (req.body || {}).garder === true;
+            const brut = Number((req.body || {}).cutoff);
             brouillons = await appliquerDelaiAuxBrouillons(supabase, {
-              userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now()
+              userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now(),
+              garderEchues, cutoff: Number.isFinite(brut) ? brut : undefined
             });
           } catch (e) {
             brouillons = bilanVide({ motif: 'exception', erreur: String(e && e.message || e) });

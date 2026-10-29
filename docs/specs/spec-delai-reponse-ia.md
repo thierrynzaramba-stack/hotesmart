@@ -1563,6 +1563,68 @@ maintenant un test qui exécute la séquence — sortie du manuel, confirmation,
 pilule 1 h, Enregistrer — et qui affirme les **deux** textes de confirmation
 dans l'ordre.
 
+### Arbitrage du 29 octobre : la confirmation a DEUX ISSUES RÉELLES
+
+**Décision de Thierry**, après que la revue ait mesuré que « Annuler » ne
+changeait rien dans l'état de sa recette :
+
+> La confirmation doit avoir deux issues réelles.
+> · « Laisser partir » : comportement actuel (décision du 28 oct.).
+> · « Garder pour validation » : les propositions annoncées sont désarmées
+>   (plus d'échéance, plus de reprise automatique). Elles restent dans la file
+>   et ne partent que sur mon clic Envoyer.
+> Périmètre : uniquement les propositions de ce bien, comptées dans la
+> confirmation, sur mon choix explicite. Rien n'est supprimé. Le réglage du
+> délai, lui, est enregistré dans les deux cas.
+
+**Ce que ça change dans le writer.** `appliquerDelaiAuxBrouillons` prend
+`garderEchues` : pour une tâche dont l'échéance recalculée est déjà passée, il
+écrit `send_after = null` **et** `suspendu_le = null` au lieu de la nouvelle
+échéance. Les autres suivent le réglage normalement — désarmer tout reviendrait
+à repasser le bien en validation manuelle sans qu'il l'ait demandé, et le
+périmètre est explicite.
+
+⚠ **`suspendu_le` s'efface AVEC l'échéance, et ce n'est pas un détail.** Une
+tâche sans échéance mais suspendue est dans un état **sans issue** : « vous
+modifiez » pour toujours, sans lien de reprise (le pied en exige une) et sans
+reprise automatique (elle exige `send_after` non nul). C'est exactement le
+constat 5 d'une revue du lot 2, et c'est pourquoi la branche « garder » et la
+branche « validation manuelle » écrivent les **mêmes** champs.
+
+⚠ **ET « LES PROPOSITIONS ANNONCÉES » EST RENDU LITTÉRALEMENT VRAI PAR UN
+INSTANT COMMUN.** Le compte vient d'un **premier** appel (l'aperçu), le
+désarmement d'un **second** : entre les deux, l'horloge avance, et un brouillon
+peut franchir son échéance. Sans instant partagé, l'ensemble désarmé ne serait
+pas l'ensemble annoncé — **et la différence partirait au voyageur.** L'aperçu
+rend donc son `instant`, l'écran le repasse en `cutoff`, et le même prédicat
+tranche aux deux bouts.
+
+⚠ **Le `cutoff` est VALIDÉ côté serveur** : hors d'une fenêtre de 10 minutes
+autour de `Date.now()`, il est ignoré et on retombe sur l'horloge. Une valeur
+venue du client ne décide pas seule de ce qui part. Et la menace n'est pas
+l'attaquant, c'est la valeur aberrante — un `cutoff` très ancien ne désarmerait
+**rien** (donc tout partirait), un très lointain désarmerait **tout**. Les deux
+sont testés.
+
+**Les deux boutons, avec ce que `window.confirm` permet.** Il ne laisse pas
+nommer ses boutons : le texte dit donc explicitement laquelle fait quoi —
+« Confirmer : les laisser partir. Annuler : les garder pour votre validation —
+elles ne partiront que sur votre clic Envoyer. » **Et c'est Annuler qui est la
+branche prudente**, donc celle de la touche Échap : fermer le dialogue sans lire
+garde les propositions au lieu de les libérer. Un vrai dialogue à deux boutons
+nommés serait un lot d'interface ; ce n'est pas celui-ci.
+
+**Deux clés retirées des trois dictionnaires** : `messages.echeances_gardees` et
+`messages.echeances_gardees_ok`. Refuser ne garde plus une échéance, il désarme —
+une traduction orpheline se fait rebrancher un jour par mégarde. Les nouvelles
+portent leur nombre, et **c'est le nombre du SERVEUR** (`brouillons.desarmes`)
+qui s'affiche, pas celui compté avant : s'ils divergent, c'est le serveur qui a
+raison, et l'hôte doit lire ce qui s'est réellement passé.
+
+**Et le fil est relu**, puisque des échéances ont disparu : sans ça les bulles
+garderaient à l'écran un compte à rebours qui n'existe plus — le défaut même que
+ce lot existe pour fermer.
+
 ### La troisième revue : quatre fois le même défaut, fermé d'un seul côté
 
 C'est la dernière que la règle autorise sur ce lot. Six constats, aucun de
