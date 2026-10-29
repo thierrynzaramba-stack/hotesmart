@@ -102,10 +102,10 @@
          souris, le rail etait inatteignable — barre de defilement masquee,
          molette non laterale, donc aucun declencheur pour la suite des avis. -->
     <div class="rail-wrap">
-      <button type="button" class="rail-fleche rail-fleche--prec" data-rail="prec"
+      <button type="button" class="rail-fleche rail-fleche--prec" data-rail="prec" hidden
               data-i18n-attr="aria-label:reviews.rail_prec" aria-controls="rail-avis">‹</button>
       <div class="grid-avis scroll-x" id="rail-avis" data-list="reviews"></div>
-      <button type="button" class="rail-fleche rail-fleche--suiv" data-rail="suiv"
+      <button type="button" class="rail-fleche rail-fleche--suiv" data-rail="suiv" hidden
               data-i18n-attr="aria-label:reviews.rail_suiv" aria-controls="rail-avis">›</button>
     </div>
   </section>
@@ -1267,7 +1267,19 @@ if (typeof window.addEventListener === 'function') {
 function armerLaSuiteDesAvis (vue, outils) {
   if (sentinelleAvis) { sentinelleAvis.disconnect(); sentinelleAvis = null }
   const zone = $('[data-list="reviews"]')
-  if (!zone || vue.etat !== 'liste') return
+  // ⚠ LES FLECHES SE RETIRENT DES QU'IL N'Y A PAS DE LISTE (constat 2 de la
+  // revue de fbb6baee). Les etats `vide` et `illisible` ne sont PAS dans
+  // `MUETS` : la section reste affichee, et on sortait d'ici sans brancher —
+  // deux boutons ronds d'allure cliquable, sans ecouteur, encadraient
+  // « Pas encore d'avis ». Elles naissent `hidden` et c'est `maj()` qui les
+  // montre, donc ce retrait couvre aussi un rendu qui n'arme jamais.
+  if (!zone || vue.etat !== 'liste') {
+    for (const sel of ['[data-rail="prec"]', '[data-rail="suiv"]']) {
+      const b = $(sel)
+      if (b) { b.hidden = true; b.disabled = true }
+    }
+    return
+  }
   // Le curseur part de la DERNIERE carte rendue — la plus ancienne des trois.
   const der = vue.cartes[vue.cartes.length - 1]
   if (!der || !der.recu_le || der.id == null) return

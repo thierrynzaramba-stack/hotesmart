@@ -739,7 +739,13 @@ function ouvrirAujourdhui (options = {}) {
         this.avant += String(html)
       } else this.innerHTML += String(html)
     },
-    closest: () => null, querySelector: () => null, querySelectorAll: () => []
+    closest: () => null, querySelector: () => null, querySelectorAll: () => [],
+    // ⚠ UN VRAI NOEUD PORTE SON DOCUMENT, et ce double ne le portait pas : un
+    // module qui lit `rail.ownerDocument.defaultView` — pour mesurer une
+    // gouttiere ou observer un redimensionnement — levait ici alors qu'il
+    // fonctionne en navigateur. Le double doit ressembler au vrai, sinon il
+    // fabrique des rouges qui n'existent nulle part ailleurs.
+    get ownerDocument () { return document_ }
   })
   const ecouteursDoc = []
   const document_ = {
@@ -3926,6 +3932,40 @@ test("LE TEST QUI COMPTE : la page BRANCHE les fleches du rail des avis", async 
   const apres = p.urls.filter(u => u.includes('/api/ecran/avis-recents')).length
   assert.strictEqual(apres, avant + 1,
     'le clic sur la fleche ne demande pas la page suivante des avis : le rappel branche ne fait rien')
+})
+
+test("LE TEST QUI COMPTE : sans liste d avis, les fleches ne s affichent pas", () => {
+  // ⚠ CONSTAT 2 DE LA REVUE DE fbb6baee. Les etats « vide » et « illisible »
+  // ne sont PAS dans `MUETS` : la section reste AFFICHEE, et
+  // `armerLaSuiteDesAvis` sort avant de brancher. Un hote sans avis note sur
+  // 30 jours voyait donc, a l'ordinateur, « Pas encore d'avis » encadre de deux
+  // boutons ronds d'allure cliquable — sans ecouteur, et `disabled` a false
+  // puisqu'aucun `maj()` n'avait tourne.
+  const opts = { sansInit: true, observateurs: [], ecouteurs: [], corps: () => ({}) }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  // D'abord une liste : les fleches se montrent.
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  for (const sel of ['[data-rail="prec"]', '[data-rail="suiv"]']) {
+    assert.strictEqual(p.cache(sel).hidden, false, `la fleche ${sel} reste masquee sur une vraie liste`)
+  }
+  // Puis plus aucun avis : elles disparaissent.
+  p.interne.etat.derniersAvis = []
+  p.interne.renderDerniersAvis()
+  for (const sel of ['[data-rail="prec"]', '[data-rail="suiv"]']) {
+    assert.strictEqual(p.cache(sel).hidden, true,
+      `la fleche ${sel} s affiche sans aucun avis a defiler`)
+    assert.strictEqual(p.cache(sel).disabled, true,
+      `la fleche ${sel} est encore active sans aucun avis a defiler`)
+  }
+  // Et une lecture RATEE n'est pas une liste vide : meme retrait.
+  p.interne.etat.avisConnu = false
+  p.interne.etat.derniersAvis = null
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(p.cache('[data-rail="suiv"]').hidden, true,
+    'la fleche s affiche alors que la lecture des avis a echoue')
 })
 
 test("LE TEST QUI COMPTE : les avis tiennent sur UNE SEULE ligne, a toutes les largeurs", () => {

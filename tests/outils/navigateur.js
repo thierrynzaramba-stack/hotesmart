@@ -53,6 +53,19 @@ async function ouvrir (fichier, o = {}) {
   // Le port est annonce sur la sortie d'erreur, et il est TIRE AU SORT
   // (`--remote-debugging-port=0`) : deux tests qui tournent en parallele ne
   // doivent pas se disputer un port fixe.
+  // ⚠ TOUT CHEMIN D'ECHEC TUE LE NAVIGATEUR (constat 5 de la revue de
+  // fbb6baee). Trois sorties ne le faisaient pas — le delai de 10 s, l'echec de
+  // `/json/list`, le refus du websocket — et un `ChildProcess` dont la sortie
+  // est en tube GARDE LA BOUCLE D'EVENEMENTS REFERENCEE : sur une machine
+  // chargee, le fichier de test ne rendait jamais la main et la suite entiere
+  // restait suspendue. Un test qui ne rougit pas proprement est pire qu'un test
+  // absent : il arrete la mesure au lieu de la rendre.
+  const tuer = () => {
+    try { proc.kill() } catch { /* deja parti */ }
+    try { require('node:fs').rmSync(profil, { recursive: true, force: true }) } catch { /* deja parti */ }
+  }
+  let ouverture = false
+  try {
   const url = await new Promise((res, rej) => {
     let buf = ''
     const minuteur = setTimeout(() => rej(new Error(
@@ -94,6 +107,7 @@ async function ouvrir (fichier, o = {}) {
 
   await envoyer('Page.enable')
   await envoyer('Runtime.enable')
+  ouverture = true
 
   /** Evalue une expression dans la page et rend sa valeur. */
   const lire = async (expression) => {
@@ -177,11 +191,13 @@ async function ouvrir (fichier, o = {}) {
 
   const fermer = () => {
     try { ws.close() } catch { /* deja ferme */ }
-    proc.kill()
-    try { require('node:fs').rmSync(profil, { recursive: true, force: true }) } catch { /* parti */ }
+    tuer()
   }
 
   return { lire, cliquer, attendre, pose, fermer, envoyer }
+  } finally {
+    if (!ouverture) tuer()
+  }
 }
 
 module.exports = { ouvrir, navigateurPresent, CHROME }

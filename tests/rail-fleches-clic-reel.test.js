@@ -110,6 +110,10 @@ window.__rebrancher = () => brancherFleches({
 })
 // Ce que la page fait dans finir() : plus de chargement, et la fleche se grise.
 window.__finir = () => { window.__fini = true; fleches.fin() }
+// Ce que fait un nouveau rendu : il rebranche. rouvrir() doit alors rendre la
+// fleche a son etat ouvert, meme si le rendu d'avant avait appele fin().
+// (Aucun backtick ici : ce commentaire vit dans un template literal.)
+window.__rendu = () => { window.__fini = false; window.__rebrancher() }
 window.__pret = true
 </script></body></html>`)
   return { f, dossier }
@@ -294,7 +298,13 @@ test("LE TEST QUI COMPTE : au bout du rail pendant que la suite CHARGE, la flech
   // d'apres — serait refuse. L'etat « grise » ne peut donc PAS se deduire de la
   // seule position ; il demande les deux conditions.
   assert.ok(navigateurPresent(), 'navigateur de banc absent')
-  const { f, dossier } = pageDeMesure(4, 700)
+  // ⚠ 2 500 ms, PAS 700 (constat 6 de la revue). `pose()` rend la main des
+  // 400 ms plus 150 de stabilite, auxquels s'ajoutent deux allers-retours CDP :
+  // avec 700 ms, le chargement pouvait arriver PENDANT la mesure et le test
+  // rougissait sur son propre message, sans qu'une ligne de production ait
+  // bouge. Un rouge intermittent dans une suite dont le compte sert de
+  // barriere est une barriere qu'on apprend a ignorer.
+  const { f, dossier } = pageDeMesure(4, 2500)
   const nav = await ouvrir(f, { largeur: 1280, hauteur: 900 })
   try {
     await nav.attendre('window.__pret === true')
@@ -312,6 +322,90 @@ test("LE TEST QUI COMPTE : au bout du rail pendant que la suite CHARGE, la flech
     await nav.attendre('window.__ajoutes >= 3')
     const arrive = await nav.lire(etat)
     assert.strictEqual(arrive.suivGrise, false, 'la fleche est grisee alors que trois cartes viennent d arriver')
+  } finally {
+    nav.fermer()
+    fs.rmSync(dossier, { recursive: true, force: true })
+  }
+})
+
+test("LE TEST QUI COMPTE : un nouveau rendu ROUVRE la suite apres un incident", async () => {
+  // ⚠ LE CONSTAT MAJEUR DE LA REVUE DE fbb6baee, rejoue comme l hote le vit.
+  // La page appelle finir() aussi dans le `catch` de suivante() : UNE lecture
+  // ratee suffisait a poser « fini » pour de bon. Le rendu suivant apportait
+  // des cartes fraiches et un nouveau curseur, mais l'etat restait ferme — au
+  // bout du rail la fleche se grisait et ne demandait plus rien. A
+  // l'ordinateur elle est le SEUL declencheur : c'etait le defaut de
+  // production, reproduit apres un seul incident reseau.
+  assert.ok(navigateurPresent(), 'navigateur de banc absent')
+  const { f, dossier } = pageDeMesure(4)
+  const nav = await ouvrir(f, { largeur: 1280, hauteur: 900 })
+  try {
+    await nav.attendre('window.__pret === true')
+    // L'incident : la page declare la suite finie.
+    await nav.lire('window.__finir(), true')
+    for (let k = 0; k < 10; k++) {
+      const e = await nav.lire(etat)
+      if (e.suivGrise) break
+      await nav.cliquer('[data-rail="suiv"]')
+      await nav.pose('Math.round(document.getElementById("rail-avis").scrollLeft)')
+    }
+    assert.strictEqual((await nav.lire(etat)).suivGrise, true,
+      'la fleche n est pas grisee apres fin() au bout : le cas de depart n est pas celui qu on veut')
+
+    // Le rendu suivant arrive — et la suite redevient ouverte.
+    await nav.lire('window.__rendu(), true')
+    const apres = await nav.lire(etat)
+    assert.strictEqual(apres.suivGrise, false,
+      'apres un nouveau rendu la fleche reste grisee : un seul incident reseau la tue pour la session')
+    // Et elle demande vraiment la page suivante.
+    const avant = apres.appels
+    await nav.cliquer('[data-rail="suiv"]')
+    await nav.pose('Math.round(document.getElementById("rail-avis").scrollLeft)')
+    assert.strictEqual((await nav.lire(etat)).appels, avant + 1,
+      'la fleche rouverte ne demande plus rien')
+  } finally {
+    nav.fermer()
+    fs.rmSync(dossier, { recursive: true, force: true })
+  }
+})
+
+test("LE TEST QUI COMPTE : reduire la fenetre REVEILLE la fleche", async () => {
+  // ⚠ CONSTAT 4 DE LA REVUE. Deux avis a 1 280 px tiennent dans la zone
+  // visible : la fleche droite est grisee a juste titre. L hote reduit sa
+  // fenetre, le contenu deborde — mais `scrollLeft` n a pas bouge, donc aucun
+  // `scroll` n est emis. Sans observation de la TAILLE, la fleche restait
+  // grisee sur du contenu hors de l ecran.
+  assert.ok(navigateurPresent(), 'navigateur de banc absent')
+  const { f, dossier } = pageDeMesure(2)
+  const nav = await ouvrir(f, { largeur: 1280, hauteur: 900 })
+  try {
+    await nav.attendre('window.__pret === true')
+    await nav.lire('window.__finir(), true')
+    const large = await nav.lire(etat)
+    assert.ok(large.total <= large.visible + 1,
+      `le rail deborde deja a 1280 px (${large.total} contre ${large.visible}) : le cas n est pas celui qu on veut`)
+    assert.strictEqual(large.suivGrise, true, 'la fleche n est pas grisee alors que tout tient dans la largeur')
+
+    // ⚠ ON REDUIT LA FENETRE POUR DE VRAI (CDP), on ne pose pas une largeur en
+    // JavaScript : c est le navigateur qui doit refaire sa mise en page.
+    await nav.envoyer('Emulation.setDeviceMetricsOverride', {
+      width: 760, height: 900, deviceScaleFactor: 1, mobile: false
+    })
+    // La mise en page se refait d'abord…
+    await nav.attendre('document.getElementById("rail-avis").scrollWidth > document.getElementById("rail-avis").clientWidth + 1')
+    // … puis `ResizeObserver` rejoue `maj()` DANS UN TOUR ULTERIEUR. Lire
+    // l'etat tout de suite le trouve inchange : mesure du 29 octobre 2026,
+    // quatre echecs sur cinq passes, et c'etait mon test qui lisait trop tot —
+    // pas le module. On attend donc la CONSEQUENCE, et son absence reste un
+    // echec (l'attente leve au bout de son delai).
+    let reveillee = true
+    try {
+      await nav.attendre('document.querySelector(\'[data-rail="suiv"]\').disabled === false', { maxMs: 3000 })
+    } catch { reveillee = false }
+    const etroit = await nav.lire(etat)
+    assert.ok(reveillee && etroit.suivGrise === false,
+      `la fleche reste grisee alors que le contenu deborde (${etroit.total} contre ${etroit.visible}) : `
+      + 'la taille du rail n est pas observee')
   } finally {
     nav.fermer()
     fs.rmSync(dossier, { recursive: true, force: true })
