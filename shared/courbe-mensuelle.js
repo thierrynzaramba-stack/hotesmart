@@ -208,11 +208,49 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
     // ⚠ UNE OPACITE PAR BANDE, BORNEE. Deux enveloppes de GRIS VOISINS ne se
     // distinguent pas (recette du 28 octobre : « trop proches »), et le remede
     // n'est pas une couleur vive — c'est le MEME gris a deux densites. Bornee
-    // comme `epaisseur`, et non echappee mais NUMERIQUE : elle entre dans un
-    // attribut.
+    // comme `epaisseur`, et non echappee mais NUMERIQUE.
+    //
+    // ⚠⚠ ELLE PART EN STYLE **EN LIGNE**, PAS EN ATTRIBUT, ET C'EST TOUT CE QUI
+    // COMPTE ICI. Un attribut de presentation (`opacity="0.15"`) a la priorite
+    // la PLUS BASSE de la cascade : toute regle d'auteur l'emporte sur lui. Or
+    // `shared/ui.css` pose `.cm-bande { opacity: .85 }` et
+    // `.cm-bande-trait { opacity: .85 }` — donc l'attribut n'a JAMAIS rien
+    // applique. Mesure de Thierry en recette sur staging, puis reproduite au
+    // banc chrome le 28 octobre 2026 :
+    //   attribut demande  : 0.15 et 0.07
+    //   opacite CALCULEE  : 0.85 et 0.85
+    //   les deux bandes se distinguent : NON
+    // Deux consequences, et la seconde est la pire : l'adoucissement demande
+    // n'avait aucun effet, ET le constat « bandes trop proches » du 28 octobre
+    // n'avait jamais ete reellement corrige — les deux densites ne s'appliquaient
+    // pas. Un style en ligne, lui, bat une regle de classe.
+    //
+    // ⚠ ET ON NE RETIRE PAS LA REGLE CSS, MAIS PAS POUR LA RAISON QUE J'AVAIS
+    // ECRITE. Je justifiais de la garder par « `marche-temperature.html` et
+    // `prix.html` passent des bandes SANS opacite » : les deux etaient FAUX,
+    // releve par la session chef de file et remesure ici —
+    // `class="cm-bande"` n'est emis que par les deux lignes de CE module,
+    // `pages/aujourdhui.html` en est le SEUL importateur,
+    // `marche-temperature.html` dessine ses propres `<rect>` sans cette classe
+    // (son attribut `opacity` marche, justement parce qu'aucune regle de classe
+    // ne le combat), et les « bandes » de `prix.html` sont des `div` en flex.
+    // Mon avertissement sur le rayon d'explosion etait donc large de trois
+    // ecrans.
+    // La VRAIE raison de garder la regle : elle est le DEFAUT quand aucune
+    // opacite n'est demandee, et `tests/courbe-bande-rendu.test.js` le mesure
+    // (0,85 calcule). La retirer rendrait les bandes opaques a 1 pour tout
+    // appelant futur qui ne precise rien.
+    // ⚠ Et dans ce depot un commentaire se lit comme une mesure : une decision
+    // juste adossee a un fait faux se propage, parce que personne ne reverifie
+    // ce qui est deja ecrit.
+    //
+    // ⚠ MES DEUX TESTS LISAIENT L'ATTRIBUT, donc mon intention, jamais le rendu.
+    // C'est pourquoi le test de ce lot lit le style CALCULE dans un vrai
+    // navigateur (`tests/courbe-bande-rendu.test.js`).
     const opacite = Number.isFinite(Number(b.opacite)) && Number(b.opacite) > 0
       ? Math.min(1, Number(b.opacite))
       : null
+    const styleOpacite = opacite === null ? '' : ` style="opacity:${opacite}"`
     return morceaux.map(ks => {
       // ⚠ UN MOIS SEUL NE FAIT PAS UN POLYGONE : trois points confondus en
       // dessinent un de surface nulle, donc invisible. On lui donne un TRAIT
@@ -221,12 +259,12 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
         const k = ks[0]
         return `<line class="cm-bande-trait" x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" `
           + `y1="${y(mx[k]).toFixed(1)}" y2="${y(mn[k]).toFixed(1)}" stroke="${couleur}"`
-          + `${opacite === null ? '' : ` opacity="${opacite}"`}/>`
+          + `${styleOpacite}/>`
       }
       const haut = ks.map(k => `${x(k).toFixed(1)},${y(mx[k]).toFixed(1)}`)
       const bas = [...ks].reverse().map(k => `${x(k).toFixed(1)},${y(mn[k]).toFixed(1)}`)
       return `<polygon class="cm-bande" points="${haut.concat(bas).join(' ')}" fill="${couleur}"`
-        + `${opacite === null ? '' : ` opacity="${opacite}"`}/>`
+        + `${styleOpacite}/>`
     }).join('')
   }).join('')
 

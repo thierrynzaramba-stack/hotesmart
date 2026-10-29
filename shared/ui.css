@@ -1657,12 +1657,59 @@ body.men-cfg-ouvert { overflow: hidden; }
    le seul fait que la condition testait `< 0` ; gris neutre, dans les DEUX
    tableaux du bloc (decision de Thierry du 28 octobre 2026). */
 .rev-tbl__ecart--nul { color: var(--muted); font-weight: var(--fw-semibold); }
+
 /* ⚠ ET LE NEGATIF, LUI, DIFFERE ENTRE LES DEUX TABLEAUX, EXPRES : `--bas`
    (encre) dans le tableau des biens, `--retard` (rouge) dans « Reserve a
    date ». Un bien qui a moins vendu que l'an dernier est un FAIT, pas une
    alarme ; un mois a venir en retard de rythme est une alarme, parce qu'il
    reste du temps pour agir. Le zero, lui, est neutre des deux cotes : il
    n'est ni un fait remarquable ni une alarme. */
+/* ─── Accueil : la grille « Aujourd'hui » / « À valider » ─────────────────
+   ⚠ CES REGLES ETAIENT EN LIGNE SUR LE `<div>`, ET C'EST POUR CA QU'ELLES
+   DEVIENNENT UNE CLASSE : un style en ligne gagne contre une classe, donc
+   l'etat « a plat » n'aurait jamais mordu.
+   ⚠ `align-items: start` EMPECHE DEJA L'ETIREMENT, et c'est mesure : au banc
+   a 1280 px, bloc gauche 21 px, bloc droit 716 px. Le bloc vide ne s'etire
+   PAS — ce qui restait, c'etaient 695 px de BLANC a sa gauche, parce que la
+   ligne de grille fait la hauteur de sa colonne la plus haute. */
+.auj-duo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 32px;
+  align-items: start;
+}
+.auj-duo__jour { grid-column: span 2; min-width: 0; }
+/* ⚠ QUAND LE JOUR N'A RIEN A DIRE, LA GRILLE SE MET A PLAT : une seule
+   colonne, la ligne d'etat vide au-dessus, « A valider » dessous sur toute la
+   largeur. Les 695 px de blanc disparaissent au lieu d'etre rognes (recette de
+   Thierry du 28 octobre 2026 : « le bloc vide doit rester compact et ne pas
+   s'etirer a la hauteur de A valider »).
+   ⚠ `gap` RESTE CELUI DE LA GRILLE — 32 px, repris A L'IDENTIQUE du style en
+   ligne d'avant, donc aucun changement visuel. Ma premiere version justifiait
+   ce 32 par « l'ecart des sections de cette page » : c'est FAUX, `.page` pose
+   `--gap-xl` (40 px, 18 px sous 720 px). La valeur est gardee parce qu'elle
+   etait la, pas parce qu'elle vaut autre chose. */
+.auj-duo--plat { grid-template-columns: 1fr; }
+.auj-duo--plat > .auj-duo__jour { grid-column: auto; }
+
+/* ─── La suite des avis, au defilement ───────────────────────────────────
+   La sentinelle est un enfant de la grille (ordinateur) ou du rail
+   (telephone) : elle doit donc OCCUPER une place, sinon elle est deja dans la
+   fenetre au premier rendu et declenche un chargement que personne n'a
+   demande.
+   ⚠ LE SEUIL EST CELUI DU RAIL — 720 px, celui de `.scroll-x` —, PAS 560.
+   Ma premiere version mettait 560 px, le seuil de `.rev-liste` : entre 561 et
+   720 px le bloc etait DEJA un rail et la sentinelle n'avait aucune largeur
+   (`flex: 0 0 auto` sur un contenu vide = 0 px), donc elle restait collee a la
+   derniere carte. Constat de la review du 28 octobre 2026.
+   ⚠ ET 268 px EST LA LARGEUR D'UNE CARTE (`.scroll-x .avis-carte`), pas un
+   nombre choisi : j'avais ecrit 160 px en l'annoncant comme « la largeur d'une
+   carte » — un chiffre faux dans un commentaire se lit comme une mesure. */
+.avis-suite { display: flex; align-items: center; justify-content: center; min-height: 40px; }
+@media (max-width: 720px) {
+  .avis-suite { flex: 0 0 auto; width: 268px; }
+}
+
 
 /* ─── Le tableau « Reserve a date » ───────────────────────────────────────
    Il DOUBLE la ligne pointillee, il ne la remplace pas : au niveau du compte,

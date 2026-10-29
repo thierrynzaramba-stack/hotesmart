@@ -390,6 +390,13 @@ async function bandeDesComparables (supabase, bienId, annee, jour) {
   // decroissant, donc la PREMIERE vue est la bonne.
   const vues = new Set()
   const parCle = new Map()
+  // ⚠ LES MOIS ECARTES POUR COUVERTURE PARTIELLE SE RETIENNENT, au lieu d'etre
+  // perdus en silence. Thierry l'a demande le 28 octobre 2026 en recette, apres
+  // avoir vu « un trou entre septembre et novembre » sans explication : le
+  // motif est deja en base, pose a l'ecriture, et l'ecran le jetait. Il part
+  // maintenant dans l'info-bulle du mois — pas en phrase sous la bande, le
+  // texte y est deja trop long (dette 121).
+  const partiels = new Set()
   for (const l of data || []) {
     const cleLigne = `${l.listing_id}|${l.mois}|${l.nature}`
     if (vues.has(cleLigne)) continue
@@ -400,7 +407,7 @@ async function bandeDesComparables (supabase, bienId, annee, jour) {
     // Une couverture partielle ne se trace pas : le mois le DIT par son motif,
     // pose a l'ecriture par le writer.
     if (l.nature === 'futur' && Number.isFinite(Number(l.nuits_mesurees))
-        && Number(l.nuits_mesurees) < joursDuMois(mois)) continue
+        && Number(l.nuits_mesurees) < joursDuMois(mois)) { partiels.add(mois); continue }
     const montant = l.nature === 'clos' ? l.montant_estime_cents : l.montant_affiche_cents
     if (montant === null || montant === undefined) continue
     const cle = `${mois}|${l.nature}`
@@ -444,7 +451,12 @@ async function bandeDesComparables (supabase, bienId, annee, jour) {
       releve_le: [...b.dates][0]
     }
   }
-  return { mois, jour }
+  // ⚠ UN MOIS N'EST ANNONCE PARTIEL QUE S'IL N'A **AUCUNE** BANDE. Si une
+  // partie de ses comparables est complete, la bande existe — avec moins de
+  // comparables, ce que la note dit deja — et annoncer « releve partiel »
+  // ferait douter d'une bande qui, elle, est entiere.
+  const partielsRendus = [...partiels].filter(m => !mois[m]).sort()
+  return { mois, jour, partiels: partielsRendus }
 }
 
 // Le nombre de jours d'un mois « YYYY-MM ». ⚠ `Date.UTC(an, m, 0)` rend le
