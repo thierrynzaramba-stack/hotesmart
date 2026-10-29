@@ -851,3 +851,109 @@ test('l APERCU ne touche rien non plus quand la lecture des taches echoue', asyn
   // L ecran s en servira pour ne PAS propager, tout en enregistrant.
   assert.equal(typeof res.body.apercu.echues, 'number')
 })
+
+// ════════════════════════════════════════════════════════════════════════════
+// H. « Garder pour validation » : le booleen du corps traverse l'ENDPOINT
+// ⚠ CES CINQ LIGNES N'ETAIENT COUVERTES PAR RIEN (constat 8 d'une revue, qui
+// l'a mesure : forcer `garderEchues` a `false` — donc rendre la fonctionnalite
+// entierement inerte — ou a `true` — donc desarmer a CHAQUE enregistrement —
+// laissait toute la suite verte). Ces tests EXECUTENT le handler.
+// ════════════════════════════════════════════════════════════════════════════
+
+const ECHUE = () => ({
+  id: 'T-ECHUE', user_id: COMPTE, property_id: BIEN, status: 'pending_validation',
+  created_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+  send_after: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+  suspendu_le: null, updated_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()
+})
+
+test('LE TEST QUI COMPTE : `garder: true` DESARME, par l endpoint', async () => {
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true, garder: true },
+    { config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } }, taches: [ECHUE()] })
+  assert.equal(res.code, 200, JSON.stringify(res.body))
+  assert.equal(res.body.brouillons.ok, true, res.body.brouillons.motif)
+  assert.equal(res.body.brouillons.desarmes, 1, 'la proposition echue est gardee')
+  assert.equal(res.body.brouillons.rearmes, 0)
+  const maj = etat.majTaches
+  assert.equal(maj.length, 1, 'une ecriture')
+  assert.equal(maj[0].patch.send_after, null, 'plus d echeance')
+  assert.equal(maj[0].patch.suspendu_le, null, 'ni suspension')
+})
+
+test('LE TEST QUI COMPTE : sans `garder`, le MEME appel laisse partir', async () => {
+  // La contre-partie exacte, a un booleen pres : c est la decision du
+  // 28 octobre, et c est ce qui rend la fonctionnalite non inerte.
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true },
+    { config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } }, taches: [ECHUE()] })
+  assert.equal(res.code, 200)
+  assert.equal(res.body.brouillons.desarmes, 0, 'rien n est garde')
+  assert.equal(res.body.brouillons.rearmes, 1, 'elle est rearmee depuis sa creation')
+  assert.notEqual(etat.majTaches[0].patch.send_after, null, 'elle garde une echeance')
+})
+
+test('`garder` n est lu que sur sa valeur BOOLEENNE vraie', async () => {
+  // ⚠ `=== true`, pas une valeur « truthy » : une chaine `"false"` venue d un
+  // client mal ecrit ne doit pas desarmer les propositions d un hote.
+  for (const valeur of ['true', 1, {}, 'false', null]) {
+    const { res } = await postConfig(
+      { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true, garder: valeur },
+      { config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } }, taches: [ECHUE()] })
+    assert.equal(res.body.brouillons.desarmes, 0,
+      `garder: ${JSON.stringify(valeur)} ne desarme pas`)
+  }
+})
+
+test('LE TEST QUI COMPTE : aucune borne de temps ne vient du corps de la requete', async () => {
+  // ⚠ CONSTAT DE SECURITE D UNE REVUE : j avais fait repasser par l ecran
+  // l instant de l apercu. Une borne ANCIENNE desarme MOINS, donc un brouillon
+  // qui franchissait son echeance pendant que l hote lisait le dialogue
+  // n etait pas desarme, recevait une echeance deja passee, et partait.
+  //
+  // ⚠ LA BORNE EST DANS LA FENETRE QUE L ANCIEN CODE ACCEPTAIT (9 minutes, pour
+  // une fenetre de 10). Ma premiere version envoyait 365 JOURS : l ancien code
+  // la rejetait deja, donc le test ne mesurait rien et restait vert contre le
+  // defaut. C est le piege du « perimetre mesure sur UNE forme », et il faut la
+  // forme que le code d avant ACCEPTAIT.
+  //
+  // Le brouillon est ne il y a 65 min et le delai est de 60 : son echeance
+  // recalculee tombe il y a 5 min — donc APRES une borne vieille de 9 min.
+  // L ancien code ne l aurait pas desarmee ; celui-ci le fait.
+  const ne = new Date(Date.now() - 65 * 60 * 1000).toISOString()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true,
+      garder: true, cutoff: Date.now() - 9 * 60 * 1000 },
+    { config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } },
+      taches: [{ ...ECHUE(), created_at: ne, send_after: ne }] })
+  assert.equal(res.body.brouillons.echues, 1, 'elle est echue selon l horloge du serveur')
+  assert.equal(res.body.brouillons.desarmes, 1,
+    'et elle est gardee : le corps de la requete ne decide pas de ce qui part')
+})
+
+test('LE TEST QUI COMPTE : le bilan est INVARIANT a toute cle de temps du corps', async () => {
+  // ⚠ CONSTAT 2 DE LA RE-REVUE : mes garde-fous grepaient le NOM `cutoff`. La
+  // revue a reintroduit le mecanisme exact sous `instantApercu` et tout restait
+  // vert. On mesure donc l INVARIANCE : meme etat serveur, meme bilan, quelles
+  // que soient les cles de temps que le corps transporte.
+  const ne = new Date(Date.now() - 65 * 60 * 1000).toISOString()
+  const etatServeur = () => ({
+    config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } },
+    taches: [{ ...ECHUE(), created_at: ne, send_after: ne }]
+  })
+  const base = { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true, garder: true }
+  const { res: nu } = await postConfig({ ...base }, etatServeur())
+  const temoin = { desarmes: nu.body.brouillons.desarmes, echues: nu.body.brouillons.echues }
+  assert.equal(temoin.desarmes, 1, 'le temoin desarme bien la proposition echue')
+  const vieux = Date.now() - 9 * 60 * 1000
+  for (const parasite of [
+    { cutoff: vieux }, { instantApercu: vieux }, { borne: vieux }, { instant: vieux },
+    { now: vieux }, { maintenant: vieux }, { apercu_instant: vieux }
+  ]) {
+    const { res } = await postConfig({ ...base, ...parasite }, etatServeur())
+    assert.equal(res.body.brouillons.desarmes, temoin.desarmes,
+      `${Object.keys(parasite)[0]} ne change pas ce qui est garde`)
+    assert.equal(res.body.brouillons.echues, temoin.echues,
+      `${Object.keys(parasite)[0]} ne change pas ce qui est compte`)
+  }
+})

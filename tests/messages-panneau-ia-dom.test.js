@@ -234,15 +234,18 @@ test('LE TEST QUI COMPTE : un bien choisi a la main n est pas ecrase par un re-r
 // ── Point 4 : refuser la liberation n est pas un echec ────────────────────
 
 // L enregistrement complet, avec l apercu qui annonce `echues`.
-function bancEnregistrement ({ echues = 0, brouillons = { ok: true, desarmes: 0, rearmes: 2, deja_prises: 0 }, confirme = true } = {}) {
+function bancEnregistrement ({ echues = 0, brouillons = null, confirme = true, desarmes = 0, instant = null } = {}) {
   const envoyes = []
+  const bilan = brouillons || { ok: true, desarmes, rearmes: desarmes ? 0 : 2, deja_prises: 0 }
   const b = B.monter({
     confirme,
     appel: async (chemin, corps) => {
       if (chemin.startsWith('/api/agent-config') && corps) {
         envoyes.push(corps)
-        if (corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues } }
-        if (corps.delais_ref) return { ok: true, delais_ref: REF, delais: corps.delais, brouillons }
+        if (corps.apercu === true) {
+          return { ok: true, delais_ref: REF, apercu: { ok: true, echues, instant: instant === null ? Date.now() : instant } }
+        }
+        if (corps.delais_ref) return { ok: true, delais_ref: REF, delais: corps.delais, brouillons: bilan }
         return { ok: true }
       }
       if (chemin.startsWith('/api/agent-config')) return { config: { [REF]: { mode: 'test', delais: { reponse_ia: 60, alerte_info: 0 } } } }
@@ -256,21 +259,31 @@ function bancEnregistrement ({ echues = 0, brouillons = { ok: true, desarmes: 0,
   return { b, envoyes }
 }
 
-test('LE TEST QUI COMPTE : refuser la liberation dit « Enregistre », pas « Non enregistre »', async () => {
-  const { b, envoyes } = bancEnregistrement({ echues: 4, confirme: false })
+test('LE TEST QUI COMPTE : ANNULER garde les propositions pour validation, et le DIT', async () => {
+  // ⚠ DEUX ISSUES REELLES (arbitrage de Thierry du 29 octobre 2026). Avant, ce
+  // test s'appelait « refuser la liberation dit Enregistre » : le refus
+  // n'ecrivait rien, et la revue a mesure que dans l'etat de sa recette la
+  // proposition partait quand meme. Annuler DESARME maintenant les
+  // propositions annoncees.
+  // ⚠ `echues` ET `desarmes` DIFFERENT EXPRES (constat 5 d une revue) : les
+  // deux fixtures posaient le meme nombre des deux cotes, donc l invariant
+  // « c est le nombre du SERVEUR qui s affiche » n etait mesure par rien —
+  // garder `ap.echues` dans la note laissait tout vert. Le serveur en desarme
+  // 6 la ou l apercu en annoncait 4 : c est lui qui a raison, et c est son
+  // chiffre que l hote doit lire.
+  const { b, envoyes } = bancEnregistrement({ echues: 4, confirme: false, desarmes: 6 })
   // L hote sort de la validation manuelle, accepte la garde du 11 octobre,
   // puis REFUSE de liberer son arriere.
   b.repondreConfirm((texte) => texte === FR['messages.mode_confirm_auto'])
   B.clic(b, B.pilManuel(b))
   await b.msg.enregistrerPanneau(B.corps(b), REF)
-  assert.equal(b.note(), FR['messages.echeances_gardees_ok'])
-  assert.equal(b.note(), 'Enregistré. Les propositions déjà en attente gardent leur échéance.')
-  assert.equal(b.noteOk(), true, 'la note est VERTE : rien n a rate')
-  // Et le reglage est bien parti, avec `propager: false` : la sourdine et les
-  // delais sont enregistres, les propositions en attente gardent leur echeance.
+  assert.match(b.note(), /^Enregistré\. 6 proposition\(s\) déjà en attente sont gardées pour votre validation/)
+  assert.equal(b.noteOk(), true, 'la note est VERTE : c est son choix, pas un echec')
+  // Et le serveur a recu l'ORDRE de desarmer, pas l'ordre de ne rien faire.
   const reel = envoyes.filter(c => c.delais_ref && c.apercu !== true)
   assert.equal(reel.length, 1)
-  assert.equal(reel[0].propager, false)
+  assert.equal(reel[0].propager, true, 'le reglage se propage : il est enregistre dans les deux cas')
+  assert.equal(reel[0].garder, true, 'et les propositions annoncees sont gardees')
   assert.equal(reel[0].delais.reponse_ia, 15)
   b.fermer()
 })
@@ -283,7 +296,7 @@ test('un ECHEC de la propagation, lui, reste rouge et se nomme', async () => {
   assert.match(b.note(), /Non enregistré/)
   assert.match(b.note(), new RegExp(FR['messages.partie_brouillons']))
   assert.equal(b.noteOk(), false)
-  assert.ok(!b.note().includes(FR['messages.echeances_gardees']),
+  assert.ok(!/gardées pour votre validation/.test(b.note()),
     'un echec ne se deguise pas en choix de l hote')
   b.fermer()
 })
@@ -302,8 +315,8 @@ test('un apercu ILLISIBLE reste un echec : l hote n a rien choisi', async () => 
   })
   await b.msg.enregistrerPanneau(B.corps(b), REF)
   assert.match(b.note(), /Non enregistré/)
-  assert.ok(!b.note().includes(FR['messages.echeances_gardees']),
-    'ne pas pouvoir compter n est pas un refus de l hote')
+  assert.ok(!/gardées pour votre validation/.test(b.note()),
+    'ne pas pouvoir compter n est pas un choix de l hote')
   b.fermer()
 })
 
@@ -552,26 +565,29 @@ test('LE TEST QUI COMPTE : un lever pendant l enregistrement rend les deux drape
   b.fermer()
 })
 
-test('LE TEST QUI COMPTE : un refus, avec la VRAIE reponse du serveur, dit une seule chose', async () => {
-  // ⚠ CE TEST A ETE REFAIT, ET SA PREMIERE VERSION PROUVAIT DEUX FAUX
-  // (constats 1 et 4 de la derniere revue). Elle faisait repondre au serveur
-  // un `{ ok: true, delais_ref }` SANS bilan `brouillons` — une forme que
-  // `api/agent-config.js` ne produit jamais : avec `propager: false` il rend
-  // toujours `bilanVide({ ok: true, motif: 'propagation_non_demandee' })`. Et
-  // elle atteignait le `catch` du rechargement par un `__leveTable` que le vrai
-  // client supabase ne produit pas non plus. Un test bati sur deux formes
-  // inatteignables mesure le double, pas la page.
-  //
-  // Ce qui EST vrai et atteignable : avec la vraie reponse, le refus dit une
-  // seule chose, en vert, et le fil n'est pas relu — rien n'a bouge en base.
+test('LE TEST QUI COMPTE : ANNULER ecrit, et le fil est relu', async () => {
+  // ⚠ CE TEST DISAIT L'INVERSE AVANT L'ARBITRAGE DE THIERRY DU 29 OCTOBRE :
+  // « un refus ne fabrique pas une note qui se contredit », et il affirmait que
+  // le fil n'etait PAS relu, parce que refuser n'ecrivait rien. C'est
+  // exactement ce que la revue a mesure comme defaut : la proposition partait
+  // quand meme. Annuler DESARME maintenant — donc ca ecrit, donc le fil doit
+  // etre relu, sinon les bulles gardent a l'ecran un compte a rebours qui
+  // n'existe plus.
   const brouillons = {
-    ok: true, motif: 'propagation_non_demandee',
-    desarmes: 0, rearmes: 0, inchanges: 0, deja_prises: 0, echues: 0, sans_creation: 0
+    ok: true, motif: 'desarmement_demande',
+    desarmes: 3, rearmes: 0, inchanges: 0, deja_prises: 0, echues: 3, sans_creation: 0
   }
+  const envoyes = []
   const b = B.monter({
+    // Il accepte la garde du 11 octobre, puis ANNULE la liberation.
     confirme: (texte) => texte === FR['messages.mode_confirm_auto'],
     appel: async (chemin, corps) => {
-      if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 7 } }
+      if (corps) envoyes.push(corps)
+      // ⚠ `echues` ET `desarmes` DIFFERENT ICI AUSSI (constat 5 de la
+      // re-revue : la fixture complice avait resservi, cinquieme fois). Le
+      // serveur en desarme 3 la ou l apercu en annoncait 5 ; les 2 manquantes
+      // ont quitte la file pendant que l hote lisait le dialogue.
+      if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 5 } }
       if (corps && corps.delais_ref) return { ok: true, delais_ref: REF, delais: corps.delais, brouillons }
       if (!corps) return { config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } } }
       return { ok: true }
@@ -581,16 +597,31 @@ test('LE TEST QUI COMPTE : un refus, avec la VRAIE reponse du serveur, dit une s
     biens: [{ ref: REF, nom: 'Loft Pilotable' }],
     config: { [REF]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } } }
   })
-  B.clic(b, B.pilManuel(b))
   const avant = b.tables.filter(x => x === 'agent_tasks').length
+  B.clic(b, B.pilManuel(b))
   await b.msg.enregistrerPanneau(B.corps(b), REF)
-  assert.equal(b.note(), FR['messages.echeances_gardees_ok'], 'son choix, dit une fois, en vert')
-  assert.equal(b.noteOk(), true)
-  assert.ok(!b.note().includes(FR['messages.partie_brouillons']),
-    'et la note ne se contredit pas sur le meme sujet')
-  // Rien n'a bouge en base : le fil n'a aucune raison d'etre relu.
-  assert.equal(b.tables.filter(x => x === 'agent_tasks').length, avant,
-    'un refus ne declenche pas de relecture des taches')
+  const reel = envoyes.filter(c => c.delais_ref && c.apercu !== true)
+  assert.equal(reel.length, 1)
+  assert.equal(reel[0].garder, true, 'l ordre de desarmer part')
+  assert.equal(reel[0].propager, true, 'et le reglage est enregistre quand meme')
+  // ⚠ AUCUN INSTANT NE REPART AU SERVEUR (constat 1 d une revue, de SECURITE) :
+  // une borne venue du navigateur ne peut que REDUIRE l ensemble desarme, donc
+  // laisser partir un brouillon que l hote croit garde.
+  //
+  // ⚠ CE BLOC PORTAIT ENCORE, JUSTE AU-DESSUS, LA PHRASE INVERSE — « l instant
+  // de l apercu est repasse : sans lui la difference partirait au voyageur ».
+  // C est celle que la revue a mesuree fausse en trois copies ; les deux autres
+  // avaient ete reecrites, celle-ci etait restee au-dessus de son propre
+  // dementi (releve en re-revue).
+  assert.equal('cutoff' in reel[0], false, 'aucune borne ne part du navigateur')
+  // Le NOMBRE affiche est celui du SERVEUR, pas celui compte avant.
+  assert.match(b.note(), /3 proposition\(s\) déjà en attente sont gardées pour votre validation/,
+    'le nombre du SERVEUR, pas celui de l apercu')
+  assert.match(b.note(), /2 proposition\(s\) annoncée\(s\) n’étaient plus en attente/,
+    'et l ecart avec l annonce se dit : elles sont parties au voyageur')
+  assert.equal(b.noteOk(), false, 'donc la note n est pas verte')
+  assert.ok(b.tables.filter(x => x === 'agent_tasks').length > avant,
+    'le fil est relu : des echeances ont disparu')
   b.fermer()
 })
 
@@ -671,5 +702,236 @@ test('LE TEST QUI COMPTE : un lever du DERNIER re-rendu laisse quand meme la not
   // ils vivent hors du corps. Sans `gelerEnTete(false)` dans ce `catch`, ils
   // restaient desarmes sans aucun chemin de retour.
   assert.equal(B.boutonVolet(b, 'programmes').disabled, false, 'les boutons de volet sont rendus')
+  b.fermer()
+})
+
+// ── La recette du 29 octobre 2026 : un refus de garde ne peut pas etre muet ─
+
+test('LE TEST QUI COMPTE : « Enregistrer » refuse en le DISANT, et n envoie rien', async () => {
+  // ⚠ SECONDE ANOMALIE DE LA RECETTE, non reproduite par Thierry : « sortie du
+  // manuel -> 1 h -> Enregistrer n a pas ete conserve ». Je n ai pas su
+  // reproduire la perte ; j ai trouve le seul chemin par lequel « Enregistrer »
+  // pouvait ne RIEN faire sans RIEN dire — sa garde de reentrance. Le bouton est
+  // normalement `disabled` dans cet etat, mais `off` est pose au RENDU : si
+  // `modeEnCours` passe a vrai sans qu un rendu suive, le DOM reste a vif et la
+  // garde mord en silence.
+  const envoyes = []
+  const b = B.monter({ appel: async (chemin, corps) => { if (corps) envoyes.push(corps); return {} } })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } }
+  })
+  // Une autre ecriture est en vol, et le DOM ne le sait pas encore.
+  b.msg.etat.modeEnCours = true
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.equal(b.note(), FR['messages.reglage_en_cours'], 'le refus se dit')
+  assert.equal(b.noteOk(), false)
+  assert.equal(envoyes.length, 0, 'et rien ne part')
+  // Et le re-rendu a repare l incoherence : le bouton montre l etat reel.
+  assert.equal(B.boutonSave(b).disabled, true, 'le bouton est repeint desarme')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : une pause refusee ne laisse pas la case MENTIR', async () => {
+  // Ici le silence est pire : le `change` a DEJA bascule la case a l ecran. Un
+  // `return` muet laissait l hote lire « en pause » alors que rien n etait
+  // ecrit — un ecran qui affirme ce qui n est pas, la famille de defaut que ce
+  // chantier passe son temps a fermer.
+  const envoyes = []
+  const b = B.monter({ appel: async (chemin, corps) => { if (corps) envoyes.push(corps); return {} } })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } },
+    pauses: {}
+  })
+  assert.equal(B.casePause(b).checked, false, 'au depart, pas en pause')
+  b.msg.etat.modeEnCours = true
+  B.changer(b, B.casePause(b), true)
+  await B.reposer(b)
+  assert.equal(b.note(), FR['messages.reglage_en_cours'], 'le refus se dit')
+  assert.equal(envoyes.length, 0, 'rien n est ecrit')
+  assert.equal(B.casePause(b).checked, false,
+    'et la case est remise sur l etat REEL, pas sur le geste refuse')
+  b.fermer()
+})
+
+// ── Les constats de la revue du correctif de recette ──────────────────────
+
+test('LE TEST QUI COMPTE : un refus ne DETRUIT PAS la saisie non enregistree', async () => {
+  // Constat 2 de la revue, mesure : mon premier jet appelait `renderTiroir()`
+  // pour repeindre le bouton desarme. Il reconstruit le volet depuis `etat`,
+  // donc il effacait tout ce qui ne vit que dans le DOM — les consignes de l IA
+  // et les destinataires d alerte en cours de frappe. Et la note invitait a
+  // recommencer un geste dont l entree venait d etre detruite.
+  const b = B.monter({ appel: async () => ({}) })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } },
+    prompting: { global: 'ancien global', overrides: {} }
+  })
+  const champ = B.corps(b).querySelector('[data-consignes="bien"]')
+  const mail = B.corps(b).querySelector('[data-alerte="intervention|email_lines"]')
+  champ.value = 'CONSIGNE-TAPEE-A-LA-MAIN'
+  mail.value = 'nouveau@exemple.test'
+  b.msg.etat.modeEnCours = true
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.equal(b.note(), FR['messages.reglage_en_cours'], 'le refus se dit')
+  assert.equal(B.corps(b).querySelector('[data-consignes="bien"]').value,
+    'CONSIGNE-TAPEE-A-LA-MAIN', 'sa consigne est toujours la')
+  assert.equal(B.corps(b).querySelector('[data-alerte="intervention|email_lines"]').value,
+    'nouveau@exemple.test', 'et son destinataire aussi')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un refus de pause survit au « Enregistre » de l ecriture en cours', async () => {
+  // Constat 4 de la revue, mesure : `enregistrerPanneau` pose TOUJOURS une note
+  // en sortant, donc son « Enregistré » VERT ecrasait le refus du kill switch
+  // quelques centaines de millisecondes plus tard. L hote finissait sur un
+  // succes alors que sa pause n avait pas pris — « croire l IA en pause pendant
+  // qu elle envoie est le pire des silences ».
+  let debloquer = null
+  const envoyes = []
+  const enregistre = { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } }
+  const b = B.monter({
+    appel: async (chemin, corps) => {
+      if (corps) envoyes.push(chemin)
+      if (corps && corps.apercu === true) {
+        await new Promise(r => { debloquer = r })
+        return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 0 } }
+      }
+      if (!corps) return { config: enregistre }
+      return { ok: true, delais_ref: REF, brouillons: { ok: true, desarmes: 0, rearmes: 0, deja_prises: 0 } }
+    }
+  })
+  B.peupler(b, { biens: [{ ref: REF, nom: 'Loft Pilotable' }], config: enregistre, pauses: {} })
+  const promesse = b.msg.enregistrerPanneau(B.corps(b), REF)
+  await new Promise(r => setTimeout(r, 0))
+  // L hote coupe l automatique PENDANT l enregistrement : c est un geste
+  // d urgence, il ne regarde pas si une autre ecriture est en vol.
+  await b.msg.basculerPause(REF, true)
+  assert.equal(b.note(), FR['messages.reglage_en_cours'], 'le refus se dit tout de suite')
+  assert.ok(!envoyes.includes('/api/property-automation'), 'et rien n est ecrit')
+  debloquer()
+  await promesse
+  assert.ok(b.note().includes(FR['messages.reglage_en_cours']),
+    'le refus du kill switch survit a la note de l enregistrement')
+  assert.equal(b.noteOk(), false, 'et il emporte le vert : la pause n a pas pris')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : la sequence de la recette, de bout en bout', async () => {
+  // ⚠ CETTE SEQUENCE ETAIT AFFIRMEE DANS LA SPEC SANS LAISSER DE TRACE QUI
+  // ROUGIRAIT (constat 8 de la revue) : « j ai rejoue la sequence exacte dans
+  // le banc, le chemin nominal est sain ». Une mesure qui ne vit que dans une
+  // phrase ne peut pas se dementir. La voici, executee.
+  const envoyes = []
+  const base = { [REF]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } } }
+  const b = B.monter({
+    appel: async (chemin, corps) => {
+      if (corps) envoyes.push(corps)
+      if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 1 } }
+      if (corps && corps.delais_ref) return { ok: true, delais_ref: REF, delais: corps.delais, brouillons: { ok: true, desarmes: 0, rearmes: 1, deja_prises: 0 } }
+      if (!corps) return { config: base }
+      return { ok: true }
+    }
+  })
+  await B.amorcer(b)
+  B.peupler(b, { biens: [{ ref: REF, nom: 'Loft Pilotable' }], config: base, pauses: {} })
+  B.clic(b, B.pilManuel(b))                       // sortie du manuel
+  B.clic(b, B.pilule(b, 60))                      // 1 h
+  B.clic(b, B.boutonSave(b))                      // Enregistrer
+  await B.reposer(b, 6)
+  assert.deepEqual(b.confirmations, [
+    FR['messages.mode_confirm_auto'],
+    FR['messages.delai_arriere_confirm'].split('{n}').join('1')
+  ], 'les DEUX confirmations sortent, dans cet ordre, avec leur texte')
+  const reels = envoyes.filter(c => c.delais_ref && c.apercu !== true)
+  assert.equal(reels.length, 1)
+  assert.equal(reels[0].delais.reponse_ia, 60, 'et le reglage choisi est bien celui qui part')
+  assert.equal(reels[0].propager, true)
+  assert.equal(b.note(), FR['messages.panneau_saved'])
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un ECHEC du desarmement ne se deguise pas en choix de l hote', async () => {
+  // ⚠ CONSTAT 4 D UNE REVUE, MESURE : je posais `gardees = ap.echues` des la
+  // question, donc quand l ecriture echouait la note disait, dans la meme
+  // phrase, « Non enregistré : les propositions déjà en attente » ET
+  // « 4 proposition(s) sont gardées pour votre validation ». Rien n etait
+  // garde : les 4 gardaient leur echeance et partaient. `gardees` ne vient
+  // plus que du bilan du SERVEUR.
+  const { b } = bancEnregistrement({
+    echues: 4, confirme: false, brouillons: { ok: false, motif: 'ecriture_impossible' }
+  })
+  // ⚠ IL FAUT SORTIR DU MANUEL : sous `reponse_ia: null` l apercu est saute,
+  // donc la question n est jamais posee et `garder` reste faux — le test
+  // mesurerait un autre chemin. `confirme: false` refuse les DEUX
+  // confirmations, donc on pose la valeur directement.
+  b.msg.delaisEnCours(REF).reponse_ia = 15
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.match(b.note(), /Non enregistré/)
+  assert.ok(!/gardées pour votre validation/.test(b.note()),
+    'aucune promesse de garde quand rien n a ete garde')
+  assert.equal(b.noteOk(), false)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : sous « garder », `deja_prises` se dit AUSSI', async () => {
+  // ⚠ CONSTAT 3 D UNE REVUE : ma chaine de `else if` rendait cette branche
+  // INATTEIGNABLE sous « garder ». Le serveur pouvait rendre « 1 gardee,
+  // 8 deja prises » et l ecran affichait une note VERTE qui ne parlait que de
+  // la premiere — alors que `deja_prises` est le SEUL cas ou un message peut
+  // partir avec le reglage d avant.
+  const { b } = bancEnregistrement({
+    echues: 9, confirme: false,
+    brouillons: { ok: true, desarmes: 1, rearmes: 0, inchanges: 0, deja_prises: 8 }
+  })
+  b.msg.delaisEnCours(REF).reponse_ia = 15
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.match(b.note(), /Non enregistré/, 'les 8 deja prises se disent')
+  assert.match(b.note(), /8 proposition/)
+  assert.match(b.note(), /gardées pour votre validation/, 'et la garde se dit aussi')
+  assert.equal(b.noteOk(), false, 'la note n est pas verte : des messages peuvent partir')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : si les propositions annoncees ont QUITTE la file, la note le dit', async () => {
+  // ⚠ CONSTAT 1 DE LA RE-REVUE, mesure au banc : l apercu annonce 4 echues, et
+  // le serveur rend `ok:true desarmes:0 deja_prises:0`. La note disait
+  // « Enregistré », VERTE, sans un mot — et le fil n etait meme pas relu, donc
+  // il gardait a l ecran le compte a rebours de propositions deja PARTIES.
+  //
+  // Mecanisme : `deja_prises` ne capte que la course LECTURE -> UPDATE, quelques
+  // millisecondes. La course LARGE — tout le temps pendant lequel
+  // `window.confirm` bloque l hote — fait sortir la tache de
+  // `pending_validation` : elle n est alors plus LUE DU TOUT, donc ni desarmee
+  // ni « deja prise ». Le cron passe toutes les 5 minutes.
+  const { b } = bancEnregistrement({
+    echues: 4, confirme: false,
+    brouillons: { ok: true, desarmes: 0, rearmes: 0, inchanges: 0, deja_prises: 0 }
+  })
+  b.msg.delaisEnCours(REF).reponse_ia = 15
+  const avant = b.tables.filter(x => x === 'agent_tasks').length
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.match(b.note(), /4 proposition\(s\) annoncée\(s\) n’étaient plus en attente/,
+    'les 4 annoncees ont disparu, et ca se dit')
+  assert.equal(b.noteOk(), false, 'la note n est pas verte : des messages sont partis')
+  assert.ok(!/^Enregistré$/.test(b.note()))
+  assert.ok(b.tables.filter(x => x === 'agent_tasks').length > avant,
+    'et le fil est relu : il gardait des comptes a rebours perimes')
+  b.fermer()
+})
+
+test('aucun ecart annonce/realise : la note reste simple et verte', async () => {
+  // La borne de l autre cote : sans ecart, aucune phrase de plus.
+  const { b } = bancEnregistrement({
+    echues: 2, confirme: false,
+    brouillons: { ok: true, desarmes: 2, rearmes: 0, inchanges: 0, deja_prises: 0 }
+  })
+  b.msg.delaisEnCours(REF).reponse_ia = 15
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.match(b.note(), /^Enregistré\. 2 proposition\(s\) déjà en attente sont gardées/)
+  assert.ok(!/plus en attente/.test(b.note()), 'aucune phrase d ecart')
+  assert.equal(b.noteOk(), true)
   b.fermer()
 })

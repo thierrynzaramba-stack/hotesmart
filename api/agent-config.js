@@ -465,8 +465,27 @@ module.exports = async (req, res) => {
           brouillons = bilanVide({ ok: true, motif: 'propagation_non_demandee' });
         } else {
           try {
+            // ⚠ « GARDER POUR VALIDATION » (decision de Thierry du 29 octobre
+            // 2026) : l'ecran demande le DESARMEMENT des propositions
+            // annoncees, pas leur liberation. Deux issues reelles, et c'est le
+            // sens de son arbitrage — une confirmation dont une branche
+            // n'ecrit rien n'est pas une confirmation.
+            //
+            // ⚠ AUCUN INSTANT NE VIENT DU CLIENT (constat 1 d'une revue, de
+            // SECURITE). J'avais fait repasser par l'ecran l'instant de
+            // l'apercu : une borne ANCIENNE desarme MOINS, donc un brouillon
+            // qui franchissait son echeance pendant que l'hote lisait le
+            // dialogue partait quand meme. Le predicat est l'horloge du
+            // serveur, et le nombre annonce est un PLANCHER de ce qui sera
+            // garde. Seuls DEUX booleens du corps decident du sort des
+            // brouillons — `garder` ici et `propager` plus haut —, et les deux
+            // sont lus en comparaison STRICTE : une chaine, un nombre ou un
+            // objet ne desarme ni ne libere rien. (Ma phrase disait « seul un
+            // booleen traverse » : trop etroite, relevee en revue.)
+            const garderEchues = (req.body || {}).garder === true;
             brouillons = await appliquerDelaiAuxBrouillons(supabase, {
-              userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now()
+              userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now(),
+              garderEchues
             });
           } catch (e) {
             brouillons = bilanVide({ motif: 'exception', erreur: String(e && e.message || e) });

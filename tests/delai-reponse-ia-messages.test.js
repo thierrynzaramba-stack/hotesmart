@@ -510,9 +510,17 @@ test('⚠ RECETTE 4 : la note du tiroir est VISIBLE, pas au fond d un panneau qu
   assert.ok(iFin > iCorps, 'le verrou du panneau se retire a la fin du corps')
   const iDerniere = sans.indexOf('noteReglage(', iFin)
   assert.ok(iDerniere > iFin, 'et la note suit')
-  const appel = sans.slice(iDerniere, iDerniere + 500)
+  // ⚠ LA TRANCHE PART DU VERROU, PAS DE `noteReglage(` : le texte de la note se
+  // compose maintenant AVANT l appel (`const corpsNote = …`, pour que le refus
+  // d une pause puisse s y ajouter et emporter le vert — constat 4 d une revue).
+  // Partir de l appel laissait `messages.panneau_saved` hors de la tranche.
+  const appel = sans.slice(iFin, iDerniere + 500)
   assert.ok(/messages\.panneau_saved/.test(appel), 'un enregistrement complet dit « Enregistré »')
-  assert.ok(/echoues\.length === 0\)/.test(appel), 'et le vert se decide sur l absence d echec')
+  // ⚠ LE VERT SE DECIDE SUR DEUX ABSENCES, PAS UNE : plus aucun echec de
+  // partie, ET aucune bascule de pause refusee pendant l ecriture (constat 4
+  // d une revue : le kill switch n avait pas pris et l ecran finissait vert).
+  assert.match(appel, /echoues\.length === 0 && !pauseRefusee\)/,
+    'le vert se decide sur l absence d echec ET sur l absence de refus de pause')
 })
 
 test('⚠ RECETTE 5 : aucun gabarit de bulle ne porte de retour à la ligne', () => {

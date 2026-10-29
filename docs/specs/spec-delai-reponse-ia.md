@@ -1405,9 +1405,340 @@ Le second programmait son geste de rupture dans un `setTimeout` — une
 geste tombait après la fin de l'enregistrement. Les deux portent désormais une
 assertion qui vérifie que **le geste a mordu** avant de lire son résultat.
 
+### Recette du 29 octobre : une suspension DIFFÈRE un départ, elle ne l'annule pas
+
+**Point 3 KO, et c'est mon propre correctif qui l'avait créé.** Thierry :
+« choix de 1 h puis Enregistrer → aucune confirmation, message *Enregistré*
+tout court, et la proposition affiche *Envoyer dans 5 min* : elle serait partie
+seule. »
+
+**Le diagnostic, lu en base staging** (lecture seule, projet
+`ortyofzzdsthlhqmzsnq`), sur `STG-BIEN-3` :
+
+| champ | valeur |
+|---|---|
+| `status` | `pending_validation` |
+| `created_at` | 28/10 11:07 — **22 h avant** |
+| `send_after` | 28/10 12:07 = `created_at + 60 min`, **échue de 21 h** |
+| `modifie_le` | 28/10 11:27 — l'hôte l'avait ouverte, donc suspendue |
+| `suspendu_le` | **NULL au moment de ma lecture** |
+| réglage en base | `reponse_ia: 60` — sa sauvegarde a bien pris |
+
+⚠ **`suspendu_le` était déjà NULL quand j'ai lu la ligne, et c'est une limite de
+ce diagnostic** (relevé en revue) : entre l'observation de Thierry et ma lecture,
+la reprise dormante et le writer ont tous deux écrit. **Je ne peux donc pas
+reconstruire l'instant exact**, et je ne l'invente pas. Ce que la ligne établit
+quand même : la proposition est en attente, créée 22 h avant, et son échéance
+est passée de 21 h — donc elle part au prochain passage.
+
+⚠ **Et le « 5 min » ne se déduit pas de ce tableau** : la formule du bouton est
+`max(5 min, send_after − suspendu_le)`, et avec `send_after` = 12:07 et une
+suspension à 11:27 elle donnerait **40 min**. Le plancher de 5 minutes n'est
+explicable que par un `suspendu_le` POSTÉRIEUR à l'échéance — ce que fait
+précisément `api/messages.js:498`, qui pose `suspendu_le = maintenant` à **chaque
+ouverture** du brouillon dans la saisie. Thierry ayant réouvert la proposition
+le 29, l'écart était négatif et le plancher s'appliquait. C'est cohérent, mais
+c'est une reconstitution, pas une mesure.
+
+**La cause est entièrement dans mon raisonnement.** Au constat 1 d'une revue,
+j'avais EXCLU les tâches suspendues de `echues`, en m'appuyant sur
+`lireLesDues`, qui les écarte (`.is('suspendu_le', null)`). C'est vrai de **ce
+lecteur**. Mais dans le **même fichier**, `reprendreSuspensionsDormantes` tourne
+à **chaque passage** : elle efface `suspendu_le` dès que l'hôte n'a plus touché
+le brouillon depuis 30 minutes, et repose
+`send_after = maintenant + max(5 min, send_after − suspendu_le)`.
+
+Le plancher est `REPRISE_MIN_MS` = **5 minutes**. C'est littéralement le
+« Envoyer dans 5 min » que Thierry a lu — et ce libellé est celui du **bouton de
+reprise**, donc la proposition était bien suspendue quand il l'a vue.
+
+**J'avais lu la moitié du chemin** : j'ai raisonné sur un lecteur d'une passe
+qui en enchaîne plusieurs. Une suspension ne protège pas un brouillon de
+l'envoi, elle en **diffère** la date, et personne n'a à intervenir.
+
+**La règle de Thierry, gravée** : *une proposition qui finira par partir seule
+compte, suspendue ou non.* `echues` compte donc toute tâche dont l'échéance
+recalculée est déjà passée, suspendue ou non — et la phrase de confirmation ne
+dit plus « dès le prochain passage » mais « partiront seules, sans attendre le
+délai choisi », avec la suspension nommée : « une suspension ne fait que
+différer un départ, elle compte donc ».
+
+⚠ **Ce qui NE change pas : compter n'est pas armer.** Le writer continue de ne
+pas toucher `suspendu_le`. L'effacer ici armerait un compte à rebours sur un
+texte que l'hôte est en train d'écrire, et le message pourrait partir sous ses
+doigts. Un test le garde.
+
+⚠ **Et un de mes tests FIGEAIT le défaut** — règle 17 de REVIEW.md en acte. Il
+s'appelait « `echues` EXCLUT les tâches suspendues : elles ne peuvent pas
+partir » et il était vert. C'est Thierry qui a trouvé le défaut, en recette, pas
+la suite : un test écrit sur un raisonnement faux protège le raisonnement, pas
+l'hôte.
+
+### La seconde anomalie : non reproduite, et ce que j'ai fermé quand même
+
+« Au premier passage, sortie du manuel → 1 h → Enregistrer n'a pas été conservé.
+Au second, ça a tenu. »
+
+**Je n'ai pas su la reproduire**, et je le dis plutôt que d'inventer une cause.
+Ce que j'ai éliminé par mesure, en rejouant la séquence exacte dans le banc
+(sortie du manuel → confirmation → pilule 1 h → Enregistrer) : les deux
+confirmations sortent, le POST part avec `reponse_ia: 60`, la note dit
+« Enregistré ». Le chemin nominal est sain.
+
+**Ce que j'ai trouvé en cherchant, et qui est un défaut réel** : les deux gardes
+de réentrance étaient **muettes**. `enregistrerPanneau` et `basculerPause`
+commençaient par `if (etat.modeEnCours) return` — l'hôte clique, rien ne part,
+rien ne s'affiche, et au rechargement son réglage n'a pas bougé. C'est le
+symptôme qu'il décrit, à la lettre. Le bouton est normalement `disabled` dans
+cet état, mais `off` est posé au **rendu** : si `modeEnCours` passe à vrai sans
+qu'un rendu suive — `renderTiroir` sort sans peindre quand le tiroir est
+caché —, le DOM reste à vif et la garde mord en silence.
+
+⚠ **Et sur la pause, le silence était pire** : le `change` a **déjà** basculé la
+case à l'écran. Un `return` muet laissait donc l'hôte lire « en pause » alors
+que rien n'avait été écrit — un écran qui affirme ce qui n'est pas. Les deux
+refus posent maintenant une note et **repeignent**, ce qui remet la case sur
+`etat.pauses`, c'est-à-dire sur l'état réel.
+
+### La revue de ce correctif : mon avertissement promettait un frein qui n'existe pas
+
+Huit constats, aucun de sécurité. Le plus lourd, et c'est encore mon correctif
+qui l'a créé :
+
+**« Annuler » ne changeait RIEN dans l'état même de la recette.** Mesuré : avec
+`send_after` déjà passée et l'échéance recalculée **égale** à celle déjà posée,
+le writer rend `inchanges` et n'écrit rien — que l'hôte accepte **ou** refuse.
+Les deux réponses donnent le même résultat : la proposition part. Le compteur
+avertissait juste, mais le « Continuer ? » laissait croire à un frein branché
+sur rien. Le frein n'existe que dans le cas d'origine, la sortie de « Je valide
+chaque réponse », où `send_after` est NUL.
+
+Le libellé le dit donc maintenant : « Refuser garde leur échéance actuelle, et
+celles qui sont **déjà échues** partiront quand même. »
+
+⚠ **ET SI THIERRY VEUT UN VRAI FREIN, C'EST UNE DÉCISION, PAS UN CORRECTIF.**
+Refuser pourrait DÉSARMER les propositions déjà échues (`send_after = null`),
+c'est-à-dire les remettre en attente de sa validation. C'est une écriture de
+masse qu'il n'a pas demandée, et elle contredit sa décision du 28 octobre
+(« si elle est déjà passée, il part au prochain passage, c'est ce que l'hôte a
+demandé »). Je ne l'ai donc pas inventée : l'écran dit la vérité, et la question
+lui revient.
+
+**Le libellé était redevenu assertif, et c'était faux.** « Partiront seules »
+sur un bien en pause est un mensonge mesuré : `brouillons-dus.js` refuse les
+propositions dès l'entrée (`automatisation_en_pause`), donc zéro part — et la
+question est quand même posée quand la carte des pauses n'est pas fiable
+(`etat.pausesLues === false` après un échec de lecture au boot). Retour à
+« pourraient partir », qui est la forme juste et que le JSDoc du module exige.
+
+**Et le mot « paused » en anglais désignait déjà le kill switch** : un hôte
+anglophone lisait « Paused: won't send on its own » et « A paused countdown only
+defers a send » sur le même écran. La suspension, en EN, c'est « on hold ».
+
+**Mon correctif des refus muets avait recréé la perte de saisie.** Le
+`renderTiroir()` que j'avais ajouté dans les deux gardes reconstruit le volet
+depuis `etat` : il effaçait les consignes et les destinataires en cours de
+frappe — mesuré, « CONSIGNE-TAPÉE-À-LA-MAIN » → vide — et la note invitait à
+recommencer un geste dont l'entrée venait d'être détruite. Les deux gardes
+repeignent maintenant le **seul** élément concerné : le bouton pour l'une, la
+case pour l'autre. Ce qui ferme aussi le troisième constat — le re-rendu pouvait
+**lever**, et la garde n'a pas de `try`.
+
+**Et le refus du kill switch était écrasé par un « Enregistré » vert.**
+`enregistrerPanneau` pose toujours une note en sortant : le refus de pause
+disparaissait quelques centaines de millisecondes plus tard, et l'hôte finissait
+sur un succès alors que sa pause n'avait pas pris. Le refus s'ajoute maintenant
+à la note finale et **emporte le vert**.
+
+⚠ **Une mutation survivait, et c'était l'état exact de la recette** : déplacer
+`echues++` après le court-circuit `inchanges` laissait les 28 tests verts. Aucun
+test ne couvrait « déjà à la bonne échéance ET déjà échue » — et la fixture
+voisine tombait, elle aussi, dans le piège du no-op que le fichier documente
+deux fois. Les deux sont corrigées, et la mutation rougit.
+
+⚠ **Enfin, une affirmation de la spec ne laissait aucune trace qui rougirait** :
+« j'ai rejoué la séquence exacte dans le banc, le chemin nominal est sain ». Une
+mesure qui ne vit que dans une phrase ne peut pas se démentir. Elle est
+maintenant un test qui exécute la séquence — sortie du manuel, confirmation,
+pilule 1 h, Enregistrer — et qui affirme les **deux** textes de confirmation
+dans l'ordre.
+
+### Arbitrage du 29 octobre : la confirmation a DEUX ISSUES RÉELLES
+
+**Décision de Thierry**, après que la revue ait mesuré que « Annuler » ne
+changeait rien dans l'état de sa recette :
+
+> La confirmation doit avoir deux issues réelles.
+> · « Laisser partir » : comportement actuel (décision du 28 oct.).
+> · « Garder pour validation » : les propositions annoncées sont désarmées
+>   (plus d'échéance, plus de reprise automatique). Elles restent dans la file
+>   et ne partent que sur mon clic Envoyer.
+> Périmètre : uniquement les propositions de ce bien, comptées dans la
+> confirmation, sur mon choix explicite. Rien n'est supprimé. Le réglage du
+> délai, lui, est enregistré dans les deux cas.
+
+**Ce que ça change dans le writer.** `appliquerDelaiAuxBrouillons` prend
+`garderEchues` : pour une tâche dont l'échéance recalculée est déjà passée, il
+écrit `send_after = null` **et** `suspendu_le = null` au lieu de la nouvelle
+échéance. Les autres suivent le réglage normalement — désarmer tout reviendrait
+à repasser le bien en validation manuelle sans qu'il l'ait demandé, et le
+périmètre est explicite.
+
+⚠ **`suspendu_le` s'efface AVEC l'échéance, et ce n'est pas un détail.** Une
+tâche sans échéance mais suspendue est dans un état **sans issue** : « vous
+modifiez » pour toujours, sans lien de reprise (le pied en exige une) et sans
+reprise automatique (elle exige `send_after` non nul). C'est exactement le
+constat 5 d'une revue du lot 2, et c'est pourquoi la branche « garder » et la
+branche « validation manuelle » écrivent les **mêmes** champs.
+
+⚠ **IL N'Y A PAS D'INSTANT PARTAGÉ, ET SON RETRAIT EST UN CONSTAT DE SÉCURITÉ
+SUR MON PROPRE CORRECTIF.** J'avais fait repasser par l'écran l'instant de
+l'aperçu (`cutoff`), pour que « l'ensemble désarmé » soit exactement
+« l'ensemble annoncé », en écrivant ici que sans ça « la différence partirait au
+voyageur ». **C'est l'inverse, et c'est mesuré** : l'ensemble
+`{création + N <= borne}` **croît** avec la borne, donc une borne *ancienne*
+désarme *moins*. Un brouillon qui franchissait son échéance pendant que l'hôte
+lisait le dialogue n'était pas désarmé, recevait une échéance déjà passée, et
+partait au prochain passage — alors que l'hôte venait de choisir « garder ».
+
+**L'asymétrie des deux erreurs tranche, et je l'avais ignorée :**
+
+| erreur | coût |
+|---|---|
+| désarmer un brouillon **non** annoncé | il reste dans la file, l'hôte clique Envoyer — **sous la réserve de la dette D5**, qui en limite la fenêtre au séjour |
+| laisser partir un brouillon que l'hôte croit gardé | irréversible, et c'est le téléphone d'un voyageur |
+
+Donc en cas de doute on **désarme**, exactement comme « une panne de lecture
+empêche l'envoi, elle ne l'autorise pas ». Le prédicat est l'horloge du
+**serveur** au moment d'écrire ; **aucune valeur venue du navigateur ne décide
+de ce qui part**, et un `cutoff` dans le corps de la requête est ignoré (un test
+l'exerce). Conséquence à assumer : le nombre annoncé est un **plancher** de ce
+qui sera gardé, et la note affiche le compte **réel** rendu par le writer.
+
+**Les deux boutons, avec ce que `window.confirm` permet.** Il ne laisse pas
+nommer ses boutons : le texte dit donc explicitement laquelle fait quoi —
+« Confirmer : les laisser partir. Annuler : les garder pour votre validation —
+elles ne partiront que sur votre clic Envoyer. » **Et c'est Annuler qui est la
+branche prudente**, donc celle de la touche Échap : fermer le dialogue sans lire
+garde les propositions au lieu de les libérer. Un vrai dialogue à deux boutons
+nommés serait un lot d'interface ; ce n'est pas celui-ci.
+
+**Deux clés retirées des trois dictionnaires** : `messages.echeances_gardees` et
+`messages.echeances_gardees_ok`. Refuser ne garde plus une échéance, il désarme —
+une traduction orpheline se fait rebrancher un jour par mégarde. Les nouvelles
+portent leur nombre, et **c'est le nombre du SERVEUR** (`brouillons.desarmes`)
+qui s'affiche, pas celui compté avant : s'ils divergent, c'est le serveur qui a
+raison, et l'hôte doit lire ce qui s'est réellement passé.
+
+**Et le fil est relu**, puisque des échéances ont disparu : sans ça les bulles
+garderaient à l'écran un compte à rebours qui n'existe plus — le défaut même que
+ce lot existe pour fermer.
+
+### La revue des deux issues : onze constats, dont deux de sécurité
+
+**Les deux de sécurité portaient sur le `cutoff`, c'est-à-dire sur mon propre
+garde-fou.** Il est retiré, et le raisonnement corrigé est écrit au-dessus. Ce
+qui reste à noter ici, c'est la forme du défaut : j'avais optimisé pour que deux
+ensembles soient **égaux**, sans regarder dans quel sens leur écart coûte. Le
+jour où ils divergent, l'un des deux sens envoie un message à un voyageur et
+l'autre non — et c'est ce sens-là qui décide, pas l'élégance de l'égalité.
+
+**Trois défauts de la note, tous mesurés.**
+
+`deja_prises` était **inatteignable** sous « garder » : ma chaîne de `else if`
+le reléguait après une branche qui captait tout. Le serveur pouvait rendre
+« 1 gardée, 8 déjà prises » et l'écran affichait une note **verte** qui ne
+parlait que de la première — alors que `deja_prises` est, de l'aveu du writer
+lui-même, « le seul cas où un message peut partir avec le réglage d'avant ».
+
+La note se **contredisait** quand l'écriture échouait : je posais le compte dès
+la question, donc elle disait dans la même phrase « Non enregistré : les
+propositions déjà en attente » **et** « 4 propositions sont gardées pour votre
+validation ». Rien n'était gardé. Le compte ne vient plus que du bilan du
+serveur.
+
+Et dans le scénario **dominant**, le choix de l'hôte **disparaissait** de la
+note. Sortir de « Je valide chaque réponse » laisse les brouillons déjà sans
+échéance : je les comptais `inchanges`, donc `desarmes` valait 0 et la note
+disait « Enregistré » tout court. Ils comptent maintenant comme gardés —
+`desarmes` veut dire « finit désarmée », pas « je l'ai écrite » — **et on
+n'écrit rien**, puisqu'il n'y a rien à changer.
+
+⚠ **Et les deux fixtures du banc DOM montaient un état que le vrai endpoint ne
+produit pas** : elles affirmaient `desarmes: 4` sur un bien qui sortait de la
+validation manuelle, là où le serveur aurait rendu 0. C'est la forme la plus
+coûteuse de faux vert — un test qui prouve un comportement dans un état
+impossible.
+
+**Toutes les mutations que la revue a vues survivre** — je ne reprends pas son
+compte, que la re-revue a recompté différemment selon qu'on énumère les lignes
+ou les variantes d'une même ligne depuis supprimée — dont le claim de statut qui
+ferme la course avec le cron, l'erreur d'écriture avalée, et les cinq lignes du
+endpoint — où forcer la fonctionnalité à **inerte** *comme* à **toujours
+désarmer** laissait toute la suite verte. Toutes rougissent, et l'endpoint est
+désormais éprouvé **par exécution**, pas par grep.
+
+⚠ **Et `suspendu_le = null` était gardé par une fixture complice** : l'assertion
+avait l'air de le mesurer, mais `tache()` pose ce champ à `null` par défaut.
+`tests/guestflow-appliquer-delai.test.js` porte **trois** avertissements sur ce
+piège, dont un à l'endroit même — et la re-revue en a trouvé une quatrième
+occurrence, dans l'autre fichier de tests. Un test part maintenant d'une tâche
+réellement suspendue.
+
+### La re-revue : les deux constats de sécurité sont fermés, et mon garde-fou mesurait un NOM
+
+**Le retrait du `cutoff` est complet et suffisant**, mesuré : zéro occurrence
+hors commentaires dans les trois fichiers, le prédicat est bien l'horloge du
+serveur, et le périmètre tient (autre compte, autre bien, `sending`, `done`, non
+échue, `created_at` illisible, références avec joker → zéro désarmé, zéro
+écriture). Les six constats de couverture de la revue précédente sont fermés
+aussi, chacun par une mutation qui rougit maintenant.
+
+⚠ **MON GARDE-FOU ANTI-BORNE GREPAIT LE MOT `cutoff`.** La re-revue a
+réintroduit le mécanisme **exact** sous un autre nom — `borneApercu` au writer,
+`instantApercu` au endpoint, même fenêtre de 10 minutes — et les trois fichiers
+restaient **verts**. Mon test s'appelait « aucune borne de temps ne vient du
+corps de la requête » ; ce qu'il mesurait était « aucune clé nommée `cutoff` ».
+C'est le piège du *périmètre mesuré sur une seule forme*, déplacé du
+365-jours vers le nom, dans le test même qui cite ce piège.
+
+Deux gardes le remplacent, et aucune ne dépend d'un nom : la **signature** du
+writer est épinglée (aucun paramètre hors `userId, propertyRef, delais,
+maintenant, apercu, garderEchues`), et un test d'**invariance** au endpoint
+vérifie que le bilan est identique quelles que soient les clés de temps que le
+corps transporte — sept noms essayés, avec la valeur que l'ancien code
+acceptait.
+
+⚠ **ET LA NOTE POUVAIT ÊTRE VERTE ET MUETTE** (constat 1, mesuré au banc).
+L'aperçu annonce 4 propositions, le serveur rend `desarmes: 0, deja_prises: 0`,
+et l'écran affichait « Enregistré » en vert — sans un mot — **et ne relisait
+même pas le fil**, qui gardait à l'écran le compte à rebours de propositions
+déjà parties.
+
+Le mécanisme est la **course large** : `deja_prises` ne capte que l'intervalle
+lecture → écriture, quelques millisecondes. Mais `window.confirm` **bloque**
+pendant tout le temps que l'hôte met à lire, et le cron passe toutes les
+5 minutes. Une tâche qu'il a claimée entre-temps n'est plus en
+`pending_validation` : elle n'est donc plus **lue du tout**, ni désarmée, ni
+comptée déjà prise. L'écart entre le nombre **annoncé** et le réalisé se dit
+maintenant, il emporte le vert, et un choix de garde relit **toujours** le fil.
+
+**Trois affirmations de plus corrigées** : l'aperçu **écrivait** sous
+`garderEchues` (la garde générale vit en aval de cette branche, donc elle ne la
+couvrait pas — inatteignable par l'endpoint, mais le module est exporté et son
+contrat disait le contraire) ; « `desarmes` dit *finit désarmée* » n'était vrai
+que dans cette branche ; et « seul un booléen traverse » en oubliait un second,
+`propager`. Plus une phrase réfutée restée dans un test juste au-dessus de son
+propre démenti, et une fixture complice qui avait **resservi** — la cinquième
+occurrence de ce piège sur ce lot.
+
 ### La troisième revue : quatre fois le même défaut, fermé d'un seul côté
 
-C'est la dernière que la règle autorise sur ce lot. Six constats, aucun de
+⚠ **Cette phrase disait « c'est la dernière que la règle autorise sur ce lot »,
+et elle a cessé d'être vraie** : la recette du 29 octobre a ouvert de nouveaux
+commits, chacun avec sa propre review, et un constat de sécurité a ouvert une
+re-review. Relevé en re-revue — un document qui garde « la dernière » trois
+sections sous deux reviews plus récentes se lit comme une mesure. Six constats, aucun de
 sécurité — et le fil conducteur est net : **quatre de mes correctifs fermaient
 un chemin et laissaient le chemin jumeau ouvert.**
 
@@ -1495,6 +1826,23 @@ geste d'urgence, immédiat par décision — c'est ce qui rend la collision
 possible.
 
 ---
+
+### D5 — une proposition gardée devient inatteignable après le départ
+
+**Conséquence produit, relevée en revue, à trancher par Thierry.**
+
+L'écran ne charge que les conversations dont le séjour est à venir ou en cours,
+et `lireLesDues` exige une échéance. Une proposition **gardée pour validation**
+n'a plus d'échéance : après le départ du voyageur, elle n'est donc **ni affichée
+ni envoyée**. « Rien n'est supprimé » reste littéralement vrai ; « elles restent
+dans la file » n'est vrai que **pendant le séjour**.
+
+Sous « Laisser partir », la proposition part dans les minutes qui suivent, donc
+cet état orphelin est créé par la branche neuve. Pour un arriéré sur un voyageur
+qui part le lendemain, la fenêtre pour cliquer « Envoyer » est de quelques
+heures. Les deux voies possibles — une liste des propositions gardées hors du
+fil, ou une alerte avant le départ — sont des décisions d'écran, pas un
+correctif.
 
 ## 11. Hors périmètre, relevé pendant l'étape 0
 

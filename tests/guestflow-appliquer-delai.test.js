@@ -113,10 +113,18 @@ function banc ({ taches = [], panneLecture = false, panneEcriture = false } = {}
   return { etat, client }
 }
 
-test('⚠ `echues` EXCLUT les taches suspendues : elles ne peuvent pas partir', async () => {
-  // Constat 1 de la derniere revue. `lireLesDues` ecarte les suspendues
-  // (`.is('suspendu_le', null)`) et ce module les garde suspendues expres au
-  // rearmement : les compter annoncait un envoi impossible.
+test('⚠ `echues` COMPTE les taches suspendues : une suspension differe un depart', async () => {
+  // ⚠ CE TEST DISAIT L'INVERSE, ET IL FIGEAIT LE DEFAUT. C'est la regle 17 de
+  // REVIEW.md en acte — « un test peut figer un bug » —, et c'est Thierry qui
+  // l'a trouve en recette, pas la suite : « une proposition qui finira par
+  // partir seule compte, suspendue ou non ».
+  //
+  // Mon raisonnement d'alors : `lireLesDues` ecarte les suspendues
+  // (`.is('suspendu_le', null)`), donc les compter annoncerait un envoi
+  // impossible. Vrai pour CE lecteur, faux pour la passe : dans le meme
+  // fichier, `reprendreSuspensionsDormantes` efface `suspendu_le` apres
+  // 30 minutes sans geste de l'hote et repose l'echeance au plancher de 5 min.
+  // J'avais lu la moitie du chemin.
   const vieux = '2026-11-11T08:00:00Z'   // +60 min -> 9 h, donc echu a T0 (11 h)
   const b = banc({ taches: [
     tache({ id: 'libre', created_at: vieux, send_after: null }),
@@ -125,7 +133,7 @@ test('⚠ `echues` EXCLUT les taches suspendues : elles ne peuvent pas partir', 
   ] })
   const r = await lancer(b, DANS_60, { apercu: true })
   assert.equal(r.rearmes, 2, 'les deux seraient rearmees')
-  assert.equal(r.echues, 1, 'mais une seule pourrait partir')
+  assert.equal(r.echues, 2, 'et les DEUX partiront seules : la suspendue aussi')
 })
 
 test('bilanVide rend les SIX compteurs, et c est le contrat du module', () => {
@@ -601,18 +609,31 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   // a le faire (discipline de 4.6.6).
   assert.ok(/apercu: true/.test(page), 'l ecran demande l apercu avant d enregistrer')
   assert.ok(/messages\.delai_arriere_confirm/.test(page), 'et il annonce le NOMBRE')
-  // ⚠ REFUSER NE COUTE PAS LE RESTE DU PANNEAU (constat 2 de la derniere
-  // revue). `delais` porte TROIS reglages : un refus doit enregistrer la
-  // sourdine et l echeance d alerte, et seulement SAUTER la propagation.
+  // ⚠ REFUSER NE COUTE PAS LE RESTE DU PANNEAU (constat 2 d une revue).
+  // `delais` porte TROIS reglages : un refus doit enregistrer la sourdine et
+  // l echeance d alerte.
   const iProp = page.indexOf('let propager = true')
   assert.ok(iProp > 0, 'le drapeau de propagation existe')
-  const bloc = page.slice(iProp, page.indexOf('const r = await appel', iProp))
-  assert.equal((bloc.match(/propager = false/g) || []).length, 3,
-    'trois raisons de ne pas propager : reponse illisible, apercu en echec, refus de l hote')
+  const bloc = page.slice(iProp, page.indexOf('const charge = {', iProp))
+  // ⚠ DEUX RAISONS, PLUS TROIS — arbitrage de Thierry du 29 octobre 2026. Le
+  // refus de l hote NE SAUTE PLUS la propagation : il demande le DESARMEMENT
+  // des propositions annoncees (`garder: true`), parce qu une branche qui
+  // n ecrit rien n est pas une issue. Il ne reste donc que les deux chemins ou
+  // l ecran n a PAS PU COMPTER : reponse illisible, et apercu en echec.
+  assert.equal((bloc.match(/propager = false/g) || []).length, 2,
+    'deux raisons de ne pas propager, et aucune n est un choix de l hote')
+  assert.match(bloc, /garder = !window\.confirm\(t\('messages\.delai_arriere_confirm'/,
+    'le choix de l hote se lit sur la confirmation, et il pose `garder`')
   assert.ok(!/feuVert/.test(page),
     'et plus aucun chemin ne saute l enregistrement entier')
-  assert.ok(/delais: chargeDelais, propager \}/.test(page),
+  assert.match(page, /const charge = \{ delais_ref: ref, delais: chargeDelais, propager \}/,
     'le POST part toujours, avec son drapeau')
+  assert.match(page, /charge\.garder = true/, 'et il porte l ordre de garder quand l hote l a choisi')
+  // ⚠ ET RIEN D'AUTRE : aucun instant ne repart au serveur (constat 1 d une
+  // revue, de securite). Une borne venue du navigateur ne peut que REDUIRE
+  // l ensemble desarme, donc laisser partir un brouillon que l hote croit
+  // garde. L horloge du serveur tranche, et le nombre annonce est un plancher.
+  assert.ok(!/cutoff/.test(sansComm(page)), 'aucune borne ne vient du client')
   // Sur un bien qu on SAIT en pause, aucune question : rien ne peut partir.
   assert.ok(/const enPauseSure = pausesFiables\(\) && etat\.pauses\[String\(ref\)\] === true/
     .test(page), 'un bien connu en pause ne declenche pas la question')
@@ -632,7 +653,13 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   // ne doit pas faire croire que les brouillons ont suivi.
   const i = page.indexOf('const b = r && r.brouillons')
   assert.ok(i > 0, 'le bilan est lu depuis la reponse')
-  assert.ok(/!b \|\|/.test(page.slice(i, i + 200)), 'bilan absent = echec, pas succes')
+  // ⚠ UN BILAN ABSENT COMPTE COMME UN ECHEC, SUR LES DEUX ISSUES. Depuis
+  // l arbitrage du 29 octobre il y a deux branches — « garder » et « laisser
+  // partir » — et chacune doit refuser un bilan manquant : un endpoint plus
+  // vieux que l ecran ne doit pas faire croire que les brouillons ont suivi.
+  const suite = page.slice(i, i + 900)
+  assert.match(suite, /b && b\.ok === true/, 'la branche « garder » exige un bilan ok')
+  assert.match(suite, /!b \|\| b\.ok !== true/, 'et la branche « laisser partir » aussi')
   // Et le fil se relit quand des echeances ont bouge, sinon il garde a l ecran
   // le compte a rebours d avant.
   assert.ok(/if \(brouillonsRepris > 0\) \{\s*try \{\s*await rechargerTaches\(\)/.test(page),
@@ -680,7 +707,10 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   // reentrant sortirait par le `return` en laissant le drapeau colle.
   const iEnv = page.indexOf('async function enregistrerPanneau (corps, ref) {')
   assert.ok(iEnv > 0)
-  const iGarde = page.indexOf('if (etat.modeEnCours) return', iEnv)
+  // ⚠ L'ANCRE SUIT LE CODE : la garde ne fait plus un `return` nu, elle POSE UNE
+  // NOTE avant de sortir (recette du 29 octobre 2026 : un geste qui ne fait
+  // rien doit le dire).
+  const iGarde = page.indexOf('if (etat.modeEnCours) {', iEnv)
   assert.ok(iGarde > iEnv && page.indexOf('etat.panneauEnCours = true', iEnv) > iGarde,
     'la pose suit la garde de reentrance')
   // ⚠ ET LE FILET EXISTE (constat 5) : un lever n importe ou doit rendre les
@@ -700,4 +730,313 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
         `${f} : ${cle} porte son nombre`)
     }
   }
+})
+
+// ── La recette du 29 octobre 2026 : une suspension DIFFERE un depart ───────
+
+// Une proposition vieille de 22 h, SUSPENDUE : la FORME de celle lue en base
+// staging au diagnostic, pas son etat exact — l'echeance y est volontairement
+// decalee, voir le ⚠ ci-dessous. L'etat exact, lui, a son propre test
+// (« deja a la bonne echeance ET deja echue »). Dates relatives a T0, qui est
+// INJECTE — donc figees, selon la regle du depot.
+// ⚠ `send_after` NE DOIT PAS EGALER `created_at + 60 min`, sinon le module rend
+// `inchanges` et n'ecrit RIEN : mon premier jet posait exactement l'echeance
+// recalculee, donc le test « un seul update » mesurait un no-op. Meme piege que
+// celui note sur `tache()` plus haut — une fixture qui rend le resultat attendu
+// par hasard ne mesure rien.
+const SUSPENDUE_VIEILLE = {
+  id: 'tache-suspendue',
+  created_at: new Date(T0 - 22 * 60 * MINUTE).toISOString(),
+  send_after: new Date(T0 - 20 * 60 * MINUTE).toISOString(),
+  suspendu_le: new Date(T0 - 21 * 60 * MINUTE).toISOString(),
+  updated_at: new Date(T0 - 21 * 60 * MINUTE).toISOString()
+}
+
+test('LE TEST QUI COMPTE : une tache SUSPENDUE et echue compte dans `echues`', async () => {
+  // ⚠ DECISION DE THIERRY EN RECETTE DU 29 OCTOBRE 2026 : « une proposition qui
+  // finira par partir seule compte, suspendue ou non ». Mon exclusion des
+  // suspendues etait fausse, et elle a coute le defaut exact de la recette : une
+  // proposition vieille de 22 h, suspendue, INVISIBLE du compteur — donc
+  // « Enregistré » sans un mot — alors que `reprendreSuspensionsDormantes`
+  // allait effacer sa suspension et la poster au voyageur.
+  //
+  // La suspension n'est pas un filtre, c'est un DELAI : la reprise est
+  // AUTOMATIQUE (30 min sans geste de l'hote, a chaque passage) et repose
+  // l'echeance au plancher de 5 min. C'est litteralement le « Envoyer dans
+  // 5 min » que Thierry a lu a l'ecran.
+  const b = banc({ taches: [tache(SUSPENDUE_VIEILLE)] })
+  const bilan = await lancer(b, DANS_60, { apercu: true })
+  assert.equal(bilan.ok, true, bilan.motif)
+  assert.equal(bilan.echues, 1,
+    'une suspendue dont l echeance recalculee est passee partira seule : elle compte')
+})
+
+test('LE TEST QUI COMPTE : deja a la bonne echeance ET deja echue compte quand meme', async () => {
+  // ⚠ C'EST L'ETAT EXACT DE LA RECETTE DU 29 OCTOBRE, et AUCUN test ne le
+  // couvrait — constat 5 de la revue, qui l'a mesure : deplacer `echues++`
+  // APRES le `if (t.send_after === nouvelle) { inchanges++; continue }` laissait
+  // les 28 tests verts.
+  //
+  // En base : `send_after` = 12:07 = `created_at + 60 min`, et le delai choisi
+  // est 60 min. Donc `nouvelle === send_after` : le module n'a RIEN a reecrire,
+  // il rend `inchanges` — et il doit compter la tache quand meme, parce qu'elle
+  // partira seule. Le compteur est evalue AVANT le `continue`, et c'est cet
+  // ordre que ce test garde.
+  const b = banc({
+    taches: [tache({
+      id: 'tache-recette',
+      created_at: new Date(T0 - 22 * 60 * MINUTE).toISOString(),
+      send_after: new Date(T0 - 21 * 60 * MINUTE).toISOString(),   // = created_at + 60 min
+      suspendu_le: new Date(T0 - 30 * MINUTE).toISOString()
+    })]
+  })
+  const r = await lancer(b, DANS_60, { apercu: true })
+  assert.equal(r.ok, true, r.motif)
+  assert.equal(r.inchanges, 1, 'rien a reecrire : l echeance est deja la bonne')
+  assert.equal(r.echues, 1, 'et elle partira seule : elle compte')
+})
+
+test('une suspendue dont l echeance recalculee est A VENIR ne compte pas', async () => {
+  // La borne de l'autre cote : ce qui compte, c'est que l'echeance SOIT passee,
+  // pas que la tache soit suspendue. Sans ce test, poser `echues++` sans
+  // condition passerait au vert.
+  // ⚠ `send_after` NE VAUT PAS `created_at + 60 min` : a T0+50 min il tombait
+  // pile dessus, donc le module rendait `inchanges` et le chemin d'ecriture
+  // n'etait jamais exerce (constat 5 de la revue — le piege que le voisin
+  // documente, dans lequel ce test tombait a son tour).
+  const b = banc({
+    taches: [tache({
+      id: 'tache-suspendue-recente',
+      created_at: new Date(T0 - 10 * MINUTE).toISOString(),
+      send_after: new Date(T0 + 20 * MINUTE).toISOString(),
+      suspendu_le: new Date(T0 - 5 * MINUTE).toISOString()
+    })]
+  })
+  const bilan = await lancer(b, DANS_60, { apercu: true })
+  assert.equal(bilan.ok, true, bilan.motif)
+  assert.equal(bilan.echues, 0, 'creation + 60 min est encore a venir')
+  assert.equal(bilan.rearmes, 1, 'et le chemin de rearmement est bien exerce')
+})
+
+test('et la suspension n est toujours PAS effacee par ce writer', async () => {
+  // La contrepartie, et elle ne bouge pas : COMPTER n'est pas ARMER. Effacer
+  // `suspendu_le` ici armerait un compte a rebours sur un texte que l'hote est
+  // en train d'ecrire, et le message pourrait partir sous ses doigts.
+  const b = banc({ taches: [tache(SUSPENDUE_VIEILLE)] })
+  await lancer(b, DANS_60)
+  assert.equal(b.etat.updates.length, 1, 'un seul update')
+  const patch = b.etat.updates[0].patch
+  assert.ok(!('suspendu_le' in patch), 'le writer ne touche pas a suspendu_le au rearmement')
+  assert.ok(!('updated_at' in patch),
+    'ni a updated_at sur une suspendue : c est le parachute de 30 min de l hote')
+  assert.equal(par(b, 'tache-suspendue').suspendu_le, SUSPENDUE_VIEILLE.suspendu_le,
+    'elle reste suspendue en base')
+})
+
+// ── « Garder pour validation » (arbitrage de Thierry, 29 octobre 2026) ─────
+
+test('LE TEST QUI COMPTE : `garderEchues` desarme les ECHUES et rearme les autres', async () => {
+  // ⚠ LE PERIMETRE EST TOUT L'ENJEU : « uniquement les propositions de ce bien,
+  // comptees dans la confirmation, sur mon choix explicite ». Donc les echues
+  // sont desarmees, et les AUTRES suivent le reglage normalement — desarmer
+  // tout serait repasser le bien en validation manuelle sans qu'il l'ait
+  // demande.
+  const b = banc({ taches: [
+    tache({ id: 'echue', created_at: new Date(T0 - 5 * 60 * MINUTE).toISOString(),
+      send_after: new Date(T0 - 3 * 60 * MINUTE).toISOString() }),
+    tache({ id: 'a-venir', created_at: new Date(T0 - 10 * MINUTE).toISOString(),
+      send_after: new Date(T0 + 20 * MINUTE).toISOString() })
+  ] })
+  const r = await lancer(b, DANS_60, { garderEchues: true })
+  assert.equal(r.ok, true, r.motif)
+  assert.equal(r.echues, 1, 'une seule etait echue')
+  assert.equal(r.desarmes, 1, 'et c est elle qui est desarmee')
+  assert.equal(r.rearmes, 1, 'l autre suit le reglage')
+  const echue = par(b, 'echue')
+  assert.equal(echue.send_after, null, 'plus d echeance')
+  assert.equal(echue.suspendu_le, null,
+    'ni suspension : sans echeance elle serait sans issue, ni reprise ni lien')
+  assert.equal(par(b, 'a-venir').send_after, new Date(T0 - 10 * MINUTE + 60 * MINUTE).toISOString(),
+    'l autre est rearmee depuis sa creation')
+})
+
+test('sans `garderEchues`, l echue part : c est « Laisser partir »', async () => {
+  // La contre-partie, et c est la decision du 28 octobre, inchangee.
+  const b = banc({ taches: [
+    tache({ id: 'echue', created_at: new Date(T0 - 5 * 60 * MINUTE).toISOString(),
+      send_after: new Date(T0 - 3 * 60 * MINUTE).toISOString() })
+  ] })
+  const r = await lancer(b, DANS_60)
+  assert.equal(r.desarmes, 0, 'rien n est desarme')
+  assert.equal(r.rearmes, 1)
+  assert.equal(par(b, 'echue').send_after, new Date(T0 - 5 * 60 * MINUTE + 60 * MINUTE).toISOString(),
+    'son echeance recalculee est passee : elle part au prochain passage')
+})
+
+test('LE TEST QUI COMPTE : en cas de doute on DESARME — l horloge du SERVEUR tranche', async () => {
+  // ⚠ CE TEST A REMPLACE CELUI DU `cutoff`, ET C'EST UN CONSTAT DE SECURITE SUR
+  // MON PROPRE CORRECTIF (constat 1 d'une revue). Je faisais repasser par
+  // l'ecran l'instant de l'apercu, pour que l'ensemble desarme soit exactement
+  // l'ensemble annonce. Mesure de la revue : l'ensemble {creation + N <= borne}
+  // CROIT avec la borne, donc une borne ANCIENNE desarme MOINS — un brouillon
+  // qui franchissait son echeance pendant que l'hote lisait le dialogue
+  // recevait une echeance deja passee et partait au prochain passage.
+  //
+  // L'asymetrie des deux erreurs tranche : garder un brouillon NON annonce est
+  // inoffensif (il reste dans la file), en laisser partir un que l'hote croit
+  // garde ne se repare pas. Donc le predicat est `maintenant`, et le nombre
+  // annonce est un PLANCHER de ce qui sera garde.
+  //
+  // Le brouillon de ce test franchit son echeance ENTRE l'apercu et l'ecriture.
+  const fixture = () => [tache({
+    id: 'franchit', created_at: new Date(T0 - 57 * MINUTE).toISOString(),
+    send_after: new Date(T0 + 10 * MINUTE).toISOString()
+  })]
+  // A l'apercu (T0) : creation + 60 min = T0 + 3 min, pas encore echue.
+  const avant = banc({ taches: fixture() })
+  const ra = await appliquerDelaiAuxBrouillons(avant.client, {
+    userId: COMPTE, propertyRef: REF, delais: DANS_60, maintenant: T0, apercu: true
+  })
+  assert.equal(ra.echues, 0, 'elle n est pas annoncee : son echeance est a venir')
+  // A l'ecriture, 9 minutes plus tard : elle est echue, donc elle est GARDEE.
+  const apres = banc({ taches: fixture() })
+  const rb = await appliquerDelaiAuxBrouillons(apres.client, {
+    userId: COMPTE, propertyRef: REF, delais: DANS_60,
+    maintenant: T0 + 9 * MINUTE, garderEchues: true
+  })
+  assert.equal(rb.desarmes, 1,
+    'elle est desarmee bien qu elle n ait pas ete annoncee : c est la direction prudente')
+  assert.equal(par(apres, 'franchit').send_after, null, 'et elle ne partira pas')
+  // ⚠ ET AUCUN PARAMETRE NE PERMET DE REVENIR EN ARRIERE : un instant venu du
+  // navigateur ne doit pas pouvoir reduire cet ensemble.
+  const src = lire('lib/guestflow/appliquer-delai.js')
+  assert.ok(!/cutoff/.test(sansComm(src)),
+    'aucune borne ne vient du client dans le code du writer')
+  assert.ok(!/cutoff/.test(sansComm(lire('api/agent-config.js'))),
+    'ni dans le endpoint')
+})
+
+test('LE TEST QUI COMPTE : une tache DEJA sans echeance compte comme gardee, sans ecriture', async () => {
+  // ⚠ C'EST LE CAS DOMINANT, et je le comptais `inchanges` (constat 5 d'une
+  // revue). Sortir de « Je valide chaque reponse » laisse les brouillons a
+  // `send_after: null` : l'ecran rendait donc « Enregistré » tout court, et le
+  // choix de l'hote disparaissait de la note alors qu'il venait de le faire.
+  // `desarmes` dit « finit desarmee », pas « je l'ai ecrite ».
+  const b = banc({ taches: [
+    tache({ id: 'deja', created_at: new Date(T0 - 5 * 60 * MINUTE).toISOString(),
+      send_after: null, suspendu_le: null })
+  ] })
+  const r = await lancer(b, DANS_60, { garderEchues: true })
+  assert.equal(r.desarmes, 1, 'elle est gardee pour validation, et ca se dit')
+  assert.equal(r.inchanges, 0)
+  // ⚠ ET ON N'ECRIT RIEN : `updated_at` est lu par la passe comme une mesure
+  // d inactivite de l hote, le reecrire repousserait son parachute de 30 min.
+  assert.equal(b.etat.updates.length, 0, 'aucune ecriture')
+})
+
+test('LE TEST QUI COMPTE : une suspendue ECHUE perd son echeance ET sa suspension', async () => {
+  // ⚠ CE CAS N ETAIT COUVERT PAR AUCUN TEST, et l assertion qui avait l air de
+  // le faire etait satisfaite par la FIXTURE — `tache()` pose
+  // `suspendu_le: null` par defaut (constat 6 d une revue : la quatrieme fois
+  // que ce fichier paie ce piege). On part donc d une tache VRAIMENT suspendue.
+  //
+  // Pourquoi les deux champs : une tache sans echeance mais suspendue est dans
+  // un etat SANS ISSUE — « vous modifiez » pour toujours, sans lien de reprise
+  // (le pied en exige une) et sans reprise automatique
+  // (`reprendreSuspensionsDormantes` exige `send_after` non nul).
+  const b = banc({ taches: [tache({
+    id: 'suspendue-echue',
+    created_at: new Date(T0 - 5 * 60 * MINUTE).toISOString(),
+    send_after: new Date(T0 - 3 * 60 * MINUTE).toISOString(),
+    suspendu_le: new Date(T0 - 2 * 60 * MINUTE).toISOString()
+  })] })
+  const r = await lancer(b, DANS_60, { garderEchues: true })
+  assert.equal(r.desarmes, 1)
+  const t = par(b, 'suspendue-echue')
+  assert.equal(t.send_after, null, 'plus d echeance')
+  assert.equal(t.suspendu_le, null, 'ET plus de suspension : sinon elle est sans issue')
+  assert.equal(b.etat.updates[0].patch.updated_at, new Date(T0).toISOString(),
+    'et le geste est horodate : la passe lit ce champ')
+})
+
+test('LE TEST QUI COMPTE : garder claime sur le STATUT, et compte `deja_prises`', async () => {
+  // ⚠ LE CLAIM N ETAIT PAS MESURE SUR CE CHEMIN (constat 7 d une revue :
+  // retirer `.eq('status', EN_ATTENTE)` laissait tout vert). Si le cron a pris
+  // la tache entre la lecture et l ecriture — `sending` —, on ne la ressuscite
+  // pas : c est le SEUL cas ou un message peut partir avec le reglage d avant.
+  const b = banc({ taches: [tache({
+    id: 'prise', created_at: new Date(T0 - 5 * 60 * MINUTE).toISOString(),
+    send_after: new Date(T0 - 3 * 60 * MINUTE).toISOString()
+  })] })
+  // ⚠ LE STATUT CHANGE APRES LA LECTURE, pas avant : la lecture filtre deja sur
+  // `pending_validation`, donc le poser d'entree revenait a cacher la tache au
+  // module — le test mesurait alors « rien a faire » au lieu de la course.
+  // Meme technique que le test de la course en mode manuel, plus haut.
+  const vraiFrom = b.client.from.bind(b.client)
+  let lu = false
+  b.client.from = (table) => {
+    const q = vraiFrom(table)
+    const vraiThen = q.then.bind(q)
+    q.then = (res, rej) => {
+      if (!lu) { lu = true; return vraiThen(res, rej) }
+      const t = b.etat.taches.find(x => x.id === 'prise')
+      if (t && t.status === 'pending_validation') t.status = 'sending'
+      return vraiThen(res, rej)
+    }
+    return q
+  }
+  const r = await lancer(b, DANS_60, { garderEchues: true })
+  assert.equal(r.ok, true, r.motif)
+  assert.equal(r.deja_prises, 1, 'elle est comptee DEJA PRISE')
+  assert.equal(r.desarmes, 0, 'et pas comme gardee : elle part')
+  assert.equal(par(b, 'prise').send_after, new Date(T0 - 3 * 60 * MINUTE).toISOString(),
+    'son echeance n a pas ete touchee')
+})
+
+test('LE TEST QUI COMPTE : une panne d ecriture sous garder REFUSE, elle ne s avale pas', async () => {
+  // Constat 7 d une revue : supprimer le `if (eG) return { ok: false … }` de la
+  // branche « garder » laissait tout vert. Une erreur avalee ferait dire
+  // « gardees » a l ecran alors que les propositions partent.
+  const b = banc({ taches: [tache({
+    id: 'echue', created_at: new Date(T0 - 5 * 60 * MINUTE).toISOString(),
+    send_after: new Date(T0 - 3 * 60 * MINUTE).toISOString()
+  })], panneEcriture: true })
+  const r = await lancer(b, DANS_60, { garderEchues: true })
+  assert.equal(r.ok, false, 'le module refuse')
+  assert.equal(r.motif, 'ecriture_impossible')
+  assert.equal(r.desarmes, 0, 'et il ne pretend rien avoir garde')
+})
+
+test('LE TEST QUI COMPTE : l apercu n ecrit RIEN, meme sous `garderEchues`', async () => {
+  // ⚠ CONSTAT 3 DE LA RE-REVUE, mesure : j avais retire cette garde en la
+  // croyant morte — le endpoint ne transmet jamais `garderEchues` sur son
+  // chemin d apercu. Mais ce module est EXPORTE, et son contrat dit
+  // « `apercu` : ne RIEN ecrire, seulement compter ». La garde generale vit en
+  // AVAL de la branche « garder », donc elle ne la couvrait pas : un appelant
+  // qui passe les deux ECRIVAIT, et deux affirmations du module etaient fausses.
+  const b = banc({ taches: [tache({
+    id: 'echue', created_at: new Date(T0 - 5 * 60 * MINUTE).toISOString(),
+    send_after: new Date(T0 - 3 * 60 * MINUTE).toISOString()
+  })] })
+  const r = await lancer(b, DANS_60, { garderEchues: true, apercu: true })
+  assert.equal(r.echues, 1)
+  assert.equal(r.desarmes, 1, 'il dit ce qu il ferait')
+  assert.equal(b.etat.updates.length, 0, 'et il n ecrit RIEN')
+  assert.notEqual(par(b, 'echue').send_after, null, 'la tache est intacte')
+})
+
+test('LE TEST QUI COMPTE : la SIGNATURE du writer ne porte aucune borne de temps hors `maintenant`', async () => {
+  // ⚠ CONSTAT 2 DE LA RE-REVUE, ET C EST UN FAUX VERT DE MON FAIT. Mes
+  // garde-fous grepaient le NOM `cutoff` : la revue a reintroduit le mecanisme
+  // EXACT sous un autre nom (`borneApercu`, `instantApercu`) et les trois
+  // fichiers restaient VERTS. Un grep sur un nom mesure un nom ; ce qui compte
+  // est qu AUCUN parametre de temps autre que `maintenant` n entre dans ce
+  // module — parce qu une borne ancienne desarme MOINS, donc elle fait partir
+  // ce que l hote croit garde.
+  const src = lire('lib/guestflow/appliquer-delai.js')
+  const m = /async function appliquerDelaiAuxBrouillons \(sb, \{([^}]*)\}\)/.exec(src)
+  assert.ok(m, 'la signature est lisible')
+  const cles = m[1].split(',').map(x => x.trim()).filter(Boolean)
+  assert.deepEqual(cles, ['userId', 'propertyRef', 'delais', 'maintenant', 'apercu', 'garderEchues'],
+    'un parametre de plus doit etre un choix conscient, pas une borne qui se glisse')
 })
