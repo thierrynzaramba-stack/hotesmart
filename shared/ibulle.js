@@ -30,7 +30,15 @@ export function brancherInfoBulles (racine) {
   racine.__ibulleBranchee = true
 
   racine.addEventListener('click', (e) => {
-    const btn = e.target && e.target.closest && e.target.closest('[data-ibulle]')
+    const cible = e.target && e.target.closest ? e.target : null
+    // ⚠ UN TOUCHER DANS LA BULLE NE LA REFERME PAS (constat 4 de la revue de
+    // 6d82af4d). Le texte est un FRERE du bouton, pas un descendant : sans
+    // cette garde, `closest('[data-ibulle]')` rend `null`, donc le clic est
+    // traite comme « ailleurs » et referme tout. Sur telephone la bulle est une
+    // feuille de quatre lignes : l'hote qui touche le texte pour le lire, le
+    // faire defiler ou le selectionner le voyait disparaitre.
+    if (cible && cible.closest('.ibulle__txt')) return
+    const btn = cible && cible.closest('[data-ibulle]')
     // ⚠ UN CLIC AILLEURS REFERME TOUT. Sans cela, une bulle ouverte au doigt
     // reste par-dessus le reste de l'ecran et rien ne dit comment la fermer :
     // il n'y a pas de survol a quitter sur un telephone.

@@ -154,6 +154,28 @@
     <div class="card stack" style="gap: 10px">
       <div class="row" style="justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap">
         <strong class="num h1" data-bind="revenue-total"></strong>
+        <!-- ⚠ L'ⓘ DU TOTAL DU MOIS. Elle recueille la phrase que le paragraphe
+             `revenue.note` imprimait en clair sous le bloc, retire le
+             29 octobre 2026. Sans elle, le retrait aurait fait disparaitre de
+             la vue Mois une information que personne n'aurait remplacee — un
+             retrait de fond par omission de forme, ce que la regle de refonte
+             interdit nommement.
+             ⚠ SON TEXTE EST EN `data-i18n`, PAS EN JAVASCRIPT : il ne depend
+             d'aucune donnee, donc il n'a pas besoin d'un rendu. Une ligne de
+             code en moins est une ligne qui ne peut pas oublier de s'executer. -->
+        <!-- ⚠ `ibulle--fin`, ET C'EST UNE MESURE QUI L'A POSEE. Le bandeau est un
+             `space-between` : la ⓘ est poussee au bord DROIT, et une bulle
+             ancree a gauche sortait de l'ecran — mesure au navigateur reel,
+             174 px dehors a 1280 px, 254 px a 1600. Troisieme fois que ce lot
+             rencontre ce defaut : une bulle se mesure, elle ne se suppose pas. -->
+        <span class="ibulle ibulle--fin">
+          <button type="button" class="ibulle__btn" aria-expanded="false"
+                  data-ibulle aria-controls="ib-mois-txt"
+                  data-i18n-attr="aria-label:revenue.mois_ib_ouvrir_total">
+            <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-help"></use></svg>
+          </button>
+          <span class="ibulle__txt" role="note" id="ib-mois-txt" data-i18n="revenue.note"></span>
+        </span>
         <!-- ⚠ LE MOIS NE S'AFFICHE PLUS ICI (recette, constat 4) : il etait
              ecrit DEUX FOIS a l'ecran, entre les fleches de navigation et a
              droite du total. Celui des fleches reste : c'est lui qu'on
@@ -259,10 +281,12 @@
                confusion sur l'opacite des bandes. -->
           <span class="ibulle" data-bind="revenue-annee-ib-total" hidden>
             <button type="button" class="ibulle__btn" aria-expanded="false"
-                    data-ibulle data-i18n-attr="aria-label:revenue.annee_ib_ouvrir">
+                    data-ibulle aria-controls="ib-total-txt"
+                    data-i18n-attr="aria-label:revenue.annee_ib_ouvrir_total">
               <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-help"></use></svg>
             </button>
-            <span class="ibulle__txt" role="note" data-bind="revenue-annee-ib-total-txt"></span>
+            <span class="ibulle__txt" role="note" id="ib-total-txt"
+                  data-bind="revenue-annee-ib-total-txt"></span>
           </span>
           <strong class="num rev-an-total" data-bind="revenue-annee-n"></strong>
         </div>
@@ -296,10 +320,12 @@
         <h3 class="caption" data-i18n="revenue.annee_courbe_titre"></h3>
         <span class="ibulle">
           <button type="button" class="ibulle__btn" aria-expanded="false"
-                  data-ibulle data-i18n-attr="aria-label:revenue.annee_ib_ouvrir">
+                  data-ibulle aria-controls="ib-courbe-txt"
+                  data-i18n-attr="aria-label:revenue.annee_ib_ouvrir_courbe">
             <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-help"></use></svg>
           </button>
-          <span class="ibulle__txt" role="note" data-bind="revenue-annee-ib-courbe"></span>
+          <span class="ibulle__txt" role="note" id="ib-courbe-txt"
+                data-bind="revenue-annee-ib-courbe"></span>
         </span>
       </div>
       <!-- ⚠ LA LEGENDE N'EST PLUS `aria-hidden`. Elle l'etait parce qu'elle ne
@@ -357,10 +383,14 @@
            meme temps que le retrait. -->
     </div>
 
-    <!-- ⚠ LA NOTE DE BAS DE BLOC PORTE L'HONNETETE DE TOUT CE QUI PRECEDE
-         (spec §4, decision Q9 de Thierry) : ces montants sont CALCULES selon
-         les delais des plateformes, et non confirmes par la banque. Dette 95. -->
-    <p class="caption muted" data-i18n="revenue.note"></p>
+    <!-- ⚠ LA NOTE DE BAS DE BLOC A QUITTE LE TEXTE EN CLAIR (demande de Thierry
+         du 29 octobre 2026) : « plus de texte en clair sous les blocs ». Elle
+         portait l'honnetete de tout ce qui precede (spec §4, decision Q9) —
+         ces montants sont CALCULES selon les delais des plateformes, et non
+         confirmes par la banque (dette 95) — et elle la porte toujours, mais
+         dans l'ⓘ du total : celle de l'annee (`lignesIb`, toujours poussee) et
+         celle du mois (juste a cote du grand chiffre). Rien n'est perdu :
+         c'etait la condition posee en meme temps que le retrait. -->
 
     <!-- Aucun logement : le MEME etat que la page Logements, rendu par le MEME
          module (Q7). Sans lui, l'accueil d'un hote qui debute n'offre plus
@@ -1170,14 +1200,22 @@ function renderDerniersAvis () {
 // l'accueil un second /avis, et rendu FAUX le compte de son propre en-tete
 // (« N avis notes sur 30 jours »).
 //
-// ⚠ UN SEUL MECANISME POUR LES DEUX ECRANS, et c'est ce qui le rend juste :
-// `IntersectionObserver` avec la FENETRE pour racine. A l'ordinateur,
-// `.grid-avis` est une grille de trois colonnes qui s'allonge vers le bas, et
-// la sentinelle entre dans la fenetre quand la PAGE defile. Au telephone,
-// c'est un rail horizontal (`.scroll-x`, `overflow-x: auto`) : la sentinelle
-// est alors hors de la zone visible de ce rail, et le navigateur tient compte
-// du rognage des ancetres — elle n'intersecte donc la fenetre qu'une fois le
-// rail defile jusqu'a elle. Deux gestes differents, une seule regle.
+// ⚠ UN SEUL MECANISME POUR LES DEUX ECRANS, et depuis la retouche A du
+// 29 octobre 2026 c'est aussi UN SEUL GESTE : la grille de trois colonnes a
+// disparu, `.grid-avis` est un rail horizontal a TOUTES les largeurs (demande de
+// Thierry : « une seule ligne de cartes, aussi sur ordinateur »). On defile
+// donc le RAIL dans les deux cas, et `IntersectionObserver` garde la FENETRE
+// pour racine : le navigateur tient compte du rognage des ancetres, donc la
+// sentinelle n'intersecte qu'une fois le rail defile jusqu'a elle.
+// ⚠ LA MESURE D'AVANT CE LOT EST PERIMEE, et elle parlait d'une grille de
+// trois colonnes qui n'existe plus. Nouvelle mesure au banc chrome-headless,
+// trois cartes et la sentinelle, balisage et feuilles reels :
+//   390 px  : rail 308 px visibles pour 1 056 px de contenu, sentinelle a
+//             917 px -> HORS du rail visible, il faut defiler ;
+//   1280 px : rail 1 070 pour 1 152, sentinelle a 1 077-1 257 -> son bord
+//             gauche est dans la zone visible, donc elle intersecte DES LE
+//             CHARGEMENT (c'est ce que la garde ci-dessous arrete) ;
+//   1600 px : meme forme, sentinelle a 1 237-1 417, visible aussi.
 //
 // ⚠ ET LE BLOC RESTE EN LECTURE SEULE (spec §3) : aucune action n'est ajoutee,
 // la derniere carte est un LIEN vers /avis.
@@ -1185,12 +1223,14 @@ let sentinelleAvis = null
 // ⚠ ON N'OBSERVE QU'APRES LE PREMIER DEFILEMENT, ET C'EST UNE MESURE QUI L'A
 // DECIDE. Le vrai `IntersectionObserver` appelle son rappel DES LA PREMIERE
 // OBSERVATION si la cible est dans la fenetre — il ne demande aucun geste.
-// Mesure au banc chrome-headless le 28 octobre 2026, sur le BALISAGE REEL de
-// cette page, dans le cas « journee vide » (celui que la retouche 3 raccourcit
-// le plus, donc le pire) :
-//   ordinateur 1280x900 : haut de la sentinelle a 1077 px, fenetre 900 px,
-//     `rootMargin` 200 px -> 1077 < 1100, DONC ELLE INTERSECTE AU CHARGEMENT ;
-//   telephone   390x844 : bord gauche a 858 px, hors de 390 + 200 -> non.
+// La mesure du 28 octobre portait sur une grille verticale et ne vaut plus ;
+// celle du 29, au meme banc, dit la meme chose pour une autre raison — le rail
+// est devenu horizontal a toutes les largeurs (voir le bloc ci-dessus) :
+//   ordinateur 1280x900 : sentinelle a 1 077 px, rail visible jusqu'a 1 175 px
+//     -> son bord gauche est dans la zone visible, DONC ELLE INTERSECTE AU
+//     CHARGEMENT ;
+//   telephone   390x844 : sentinelle a 917 px, rail visible jusqu'a 349 px
+//     -> non.
 // Sans cette garde, l'accueil partait donc a TROIS appels au chargement sur
 // ordinateur, alors que son budget est de DEUX et qu'un test le garde. Et
 // « quand on fait defiler on charge » sont les mots de la demande : le geste
@@ -2542,9 +2582,11 @@ function renderAnnee () {
       // vol — sont ceux du paragraphe qu'elle remplace, mot pour mot.
       + (txtComparables ? `<span class="ibulle ibulle--fin"><button type="button"`
         + ` class="ibulle__btn" aria-expanded="false" data-ibulle`
-        + ` aria-label="${esc(t('revenue.annee_ib_ouvrir'))}">`
+        + ` aria-controls="ib-comparables-txt"`
+        + ` aria-label="${esc(t('revenue.annee_ib_ouvrir_comparables'))}">`
         + `<svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-help"></use></svg>`
-        + `</button><span class="ibulle__txt" role="note">${esc(txtComparables)}</span></span>` : '')
+        + `</button><span class="ibulle__txt" role="note" id="ib-comparables-txt">`
+        + `${esc(txtComparables)}</span></span>` : '')
   }
 
   // ─── Le tableau par logement ────────────────────────────────────────────
@@ -2870,9 +2912,18 @@ function renderAnnee () {
   }
   if (brutsAn > 0) lignesIb.push(t('revenue.annee_ib_total_bruts', { n: brutsAn }))
   if (perimetreBouge) lignesIb.push(t('revenue.annee_ib_total_perimetre'))
-  // Toujours presente : elle ne depend d'aucun compte, elle dit la NATURE du
-  // chiffre. C'est la seule des quatre qui ne peut pas « valoir zero ».
-  lignesIb.push(t('revenue.annee_ib_total_estime'))
+  // ⚠ LA PHRASE DE L'HONNETETE EST TOUJOURS POUSSEE, et c'est la DEMANDE de
+  // Thierry du 29 octobre 2026, apres la revue de 6d82af4d : « plus de texte en
+  // clair sous les blocs. Remets "Montants calcules selon les delais de
+  // versement…" dans l'ⓘ du total, et retire `revenue.note` du texte visible,
+  // vue Mois et vue Annee. »
+  // La revue avait lu la duplication a l'envers : elle proposait de retirer la
+  // ligne de la bulle pour garder le paragraphe. C'est le paragraphe qui part.
+  // ⚠ C'EST DONC LA MEME CLE QUE LE PARAGRAPHE PORTAIT, `revenue.note`, et pas
+  // une copie de son texte : une seule source pour une seule phrase. Elle ne
+  // depend d'aucun compte — l'ⓘ du total existe donc toujours, meme sur un
+  // mois qui n'a rien d'autre a signaler.
+  lignesIb.push(t('revenue.note'))
   // Les autres reserves, chacune sur sa ligne. ⚠ On retire celles que les
   // quatre lignes ci-dessus disent deja, sinon l'hote lit deux fois la meme
   // chose dans la meme bulle.

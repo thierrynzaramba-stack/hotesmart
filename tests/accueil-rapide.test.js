@@ -2653,7 +2653,12 @@ test("LE TEST QUI COMPTE : « une ligne a 0 ne s affiche pas » dans l info-bull
     }
   })
   const lignes = ibTotal(p).split('\n').filter((l) => l.trim() !== '')
-  assert.deepStrictEqual(lignes, ['revenue.annee_ib_total_estime'],
+  // ⚠ IL RESTE LA PHRASE DE L'HONNETETE, et elle seule : c'est la decision de
+  // Thierry du 29 octobre 2026 (« plus de texte en clair sous les blocs »).
+  // Elle ne compte pas comme « une ligne a 0 » : elle ne depend d'aucun
+  // compte, elle dit la NATURE du chiffre. Ce que le test interdit, c'est
+  // qu'une reserve CONDITIONNELLE s'affiche quand son compte vaut zero.
+  assert.deepStrictEqual(lignes, ['revenue.note'],
     `l info-bulle enumere des lignes a zero : ${JSON.stringify(lignes)}`)
 })
 

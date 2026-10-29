@@ -38,13 +38,53 @@ const PAGE = fs.readFileSync(path.join(racine, 'pages', 'aujourdhui.html'), 'utf
 // commentaires HTML partent : ils portent des `>` qui brouillent la lecture.
 function blocsDeLaPage () {
   const sansCommentaires = (s) => s.replace(/<!--[\s\S]*?-->/g, '')
+  // ⚠ LE BANDEAU DU MOIS EN FAIT PARTIE depuis le 29 octobre : sa ⓘ est la
+  // troisieme de ce lot a avoir deborde, et la seule que ce test ne voyait pas.
+  const m0 = PAGE.indexOf('<!-- Le bandeau : total du mois, recu, a venir. -->')
+  const m1 = PAGE.indexOf('<!-- ⚠ UN TABLEAU, PAS UNE LISTE', m0)
+  assert.ok(m0 > 0 && m1 > m0, 'le bandeau du mois n a pas ete trouve dans la page')
   const i = PAGE.indexOf('<div class="rev-an-tete">')
   const j = PAGE.indexOf('<!-- Les pastilles de filtre', i)
   assert.ok(i > 0 && j > i, 'le bandeau du total n a pas ete trouve dans la page')
+  assert.ok(PAGE.includes('<div class="rev-an-legende" data-bind="revenue-annee-legende"></div>'),
+    'la legende a change de forme dans la page : la mesure de sa ⓘ ne porte plus sur elle')
   const k = PAGE.indexOf('<!-- ⓘ DU TITRE DE LA COURBE')
   const l = PAGE.indexOf('</div>', PAGE.indexOf('data-bind="revenue-annee-ib-courbe"')) + 6
   assert.ok(k > 0 && l > k, 'la ⓘ du titre de la courbe n a pas ete trouvee dans la page')
-  return sansCommentaires(PAGE.slice(i, j)) + sansCommentaires(PAGE.slice(k, l))
+  return sansCommentaires(PAGE.slice(m0, m1))
+    + sansCommentaires(PAGE.slice(i, j)) + sansCommentaires(PAGE.slice(k, l))
+}
+
+// ⚠ LA ⓘ DES COMPARABLES EST CONSTRUITE EN JAVASCRIPT, donc son balisage ne
+// s'extrait pas de la page comme les deux autres. Il est RECOMPOSE ici — et une
+// recopie peut deriver en silence, alors chaque forme qu'elle emploie est
+// VERIFIEE dans le script de la page. Si le rendu change de classe, le test
+// echoue au lieu de mesurer un balisage qui n'existe plus.
+//
+// C'est la ⓘ que le constat 1 de la revue de 6d82af4d a prise : la legende est
+// un flex qui RETOURNE A LA LIGNE, et une bulle collee au bord droit de son ⓘ
+// s'ouvrait a -231 px quand la ⓘ se retrouvait a gauche.
+function legendeDeMesure () {
+  const script = PAGE.slice(PAGE.indexOf('<script type="module">'))
+  for (const forme of ['class="rev-an-marque rev-an-marque--', 'class="ibulle ibulle--fin"',
+    'class="ibulle__btn" aria-expanded="false" data-ibulle', 'class="ibulle__txt" role="note"']) {
+    assert.ok(script.includes(forme),
+      `la page ne construit plus « ${forme} » : le balisage recompose de ce test ne mesure plus son rendu`)
+  }
+  const fr = JSON.parse(fs.readFileSync(path.join(racine, 'shared', 'i18n', 'fr.json'), 'utf8'))
+  const txt = fr['revenue.annee_ib_comparables']
+  assert.ok(txt && txt.length > 100, 'le texte des comparables est introuvable ou trop court pour mesurer')
+  // ⚠ SIX MARQUES, le cas le plus large : c'est precisement quand la bande
+  // existe (donc deux marques de plus) que la ⓘ datee est emise, et c'est donc
+  // le cas ou la legende retourne a la ligne.
+  const marque = (c, t) => `<span><i class="rev-an-marque rev-an-marque--${c}"></i>${t}</span>`
+  return '<div class="rev-an-legende" data-bind="revenue-annee-legende">'
+    + marque('plein', '2026') + marque('pointille', 'reserve a date') + marque('n1', '2025')
+    + marque('bande', 'comparables, mois passes') + marque('bande-futur', 'comparables, mois a venir')
+    + '<span class="ibulle ibulle--fin"><button type="button" class="ibulle__btn"'
+    + ' aria-expanded="false" data-ibulle aria-label="Qu est-ce que c est ?">?</button>'
+    + `<span class="ibulle__txt" role="note" data-bind="legende-comparables">${txt}</span></span>`
+    + '</div>'
 }
 
 // Mesure les rectangles des bulles OUVERTES a une largeur de fenetre donnee.
@@ -56,13 +96,20 @@ function mesurer (largeur) {
   const fr = JSON.parse(fs.readFileSync(path.join(racine, 'shared', 'i18n', 'fr.json'), 'utf8'))
   const txtTotal = [fr['revenue.annee_ib_total_sans_montant'], fr['revenue.annee_ib_total_estime']].join('\n')
   const txtCourbe = fr['revenue.annee_ib_courbe']
-  assert.ok(txtTotal.length > 40 && txtCourbe.length > 40, 'les textes des ⓘ sont introuvables ou vides')
+  // ⚠ LE VRAI TEXTE DU MOIS, ET PAS UN CARACTERE DE REMPLISSAGE. Une premiere
+  // version de ce test posait « X » dans la bulle du mois : large de trente
+  // pixels, elle ne pouvait pas deborder, et la mutation qui retirait son
+  // ancrage a droite SURVIVAIT. La bulle se mesure avec ce qu'elle contient.
+  const txtMois = fr['revenue.note']
+  assert.ok(txtTotal.length > 40 && txtCourbe.length > 40 && txtMois.length > 60,
+    'les textes des ⓘ sont introuvables ou trop courts pour mesurer un debordement')
   fs.writeFileSync(page, `<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="${path.join(racine, 'shared/theme.css')}">
 <link rel="stylesheet" href="${path.join(racine, 'shared/ui.css')}">
 </head><body><main class="page"><section class="card">
 ${blocsDeLaPage()}
+${legendeDeMesure()}
 </section></main>
 <script>
 try {
@@ -71,6 +118,8 @@ try {
   document.querySelector('[data-bind="revenue-annee-ib-total"]').hidden = false
   document.querySelector('[data-bind="revenue-annee-ib-total-txt"]').textContent = ${JSON.stringify(txtTotal)}
   document.querySelector('[data-bind="revenue-annee-ib-courbe"]').textContent = ${JSON.stringify(txtCourbe)}
+  document.querySelector('[data-bind="revenue-total"]').textContent = '7 950 €'
+  document.getElementById('ib-mois-txt').textContent = ${JSON.stringify(txtMois)}
   // Le GESTE : on ouvre, comme le doigt le fait.
   for (const b of document.querySelectorAll('[data-ibulle]')) b.setAttribute('aria-expanded', 'true')
   const bulles = [...document.querySelectorAll('.ibulle__txt')]
@@ -79,7 +128,7 @@ try {
     bulles: bulles.map((b) => {
       const r = b.getBoundingClientRect()
       return {
-        bind: b.getAttribute('data-bind') || '(construite)',
+        bind: b.getAttribute('data-bind') || b.id || '(construite)',
         display: getComputedStyle(b).display,
         gauche: Math.round(r.left), droite: Math.round(r.right),
         largeur: Math.round(r.width), hauteur: Math.round(r.height)
@@ -113,7 +162,9 @@ test("LE TEST QUI COMPTE : aucune bulle ne sort de l ecran, a aucune largeur", (
 
   for (const L of LARGEURS) {
     const r = mesurer(L)
-    assert.ok(r.bulles.length >= 2, `${L} px : ${r.bulles.length} bulle(s) mesuree(s), le balisage a change de forme`)
+    assert.strictEqual(r.bulles.length, 4,
+      `${L} px : ${r.bulles.length} bulle(s) mesuree(s) au lieu de 4 `
+      + '(total du mois, total de l annee, courbe, comparables)')
     for (const b of r.bulles) {
       // ⚠ ET ELLE EST BIEN OUVERTE : une bulle a `display: none` aurait tous
       // ses rectangles a zero, donc ne « deborderait » jamais. Le test serait

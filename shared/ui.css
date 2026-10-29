@@ -1773,12 +1773,40 @@ body.men-cfg-ouvert { overflow: hidden; }
   font-size: var(--fs-caption); font-weight: var(--fw-regular);
   text-align: start; white-space: pre-line;
 }
-.ibulle:hover .ibulle__txt,
+/* ⚠ LE SURVOL EST RESERVE AUX POINTEURS QUI SURVOLENT VRAIMENT (constat 2 de
+   la revue de 6d82af4d). Sur un navigateur tactile, `:hover` RESTE accroche a
+   l'element touche jusqu'au prochain toucher ailleurs : le premier doigt
+   ouvrait (`aria-expanded` ET `:hover`), le second rendait `aria-expanded` a
+   `false` mais `:hover` continuait d'ouvrir — la feuille ne se refermait pas,
+   et le geste demande paraissait casse. Le test jsdom ne lisait que
+   `aria-expanded`, donc il restait vert : c'est le faux vert exact contre
+   lequel ce lot a ete ecrit. */
+@media (hover: hover) and (pointer: fine) {
+  .ibulle:hover .ibulle__txt { display: block; }
+}
 .ibulle__btn:focus-visible + .ibulle__txt,
 .ibulle__btn[aria-expanded="true"] + .ibulle__txt { display: block; }
 /* ⚠ COLLEE AU BORD DROIT QUAND ELLE Y EST : sans cela, une ⓘ en fin de ligne
    ouvre sa bulle hors de l'ecran a droite. */
 .ibulle--fin .ibulle__txt { inset-inline-start: auto; inset-inline-end: 0; }
+
+/* ⚠ A L'ORDINATEUR, LA BULLE DE LA LEGENDE S'ANCRE SUR LA LEGENDE, pas sur son
+   ⓘ (constat 1 de la revue de 6d82af4d, mesure au navigateur reel). `--fin`
+   colle le bord DROIT de la bulle a son ⓘ ; or `.rev-an-legende` est un flex
+   qui RETOURNE A LA LIGNE, et la ⓘ se retrouve alors pres du bord gauche :
+   une bulle de 320 px s'ouvrait a −29 px a 800 px de large, et a −231 px a
+   900 px. C'est le meme defaut que celui du telephone, de l'autre cote.
+   La legende, elle, est bornee par la carte : en lui rendant l'ancrage
+   (`position: static` sur la ⓘ), la bulle s'aligne sur son bord droit et
+   s'ouvre sous elle — donc jamais hors de l'ecran, quel que soit le nombre de
+   marques et la largeur de la fenetre. */
+@media (min-width: 721px) {
+  .rev-an-legende { position: relative; }
+  .rev-an-legende .ibulle--fin { position: static; }
+  .rev-an-legende .ibulle--fin .ibulle__txt {
+    inset-inline-start: auto; inset-inline-end: 0; top: calc(100% + 6px);
+  }
+}
 
 /* ⚠ AU TELEPHONE, LA BULLE SE POSE EN BAS DE L'ECRAN, et ce n'est pas un choix
    d'esthetique : MESURE au navigateur reel (390 x 900, balisage reel de la vue
