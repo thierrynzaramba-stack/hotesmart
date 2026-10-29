@@ -353,7 +353,11 @@ module.exports = async (req, res) => {
     //     c'est a lui de l'envoyer depuis /messages.
     // Les deux portent dans leur `detail` le voyageur, le texte et les trois pas
     // a suivre — le bandeau affiche ce `detail` tel quel.
-    const TYPES_ALARME = ['overbooking', 'message_ota_a_verifier', 'message_ota_abandon']
+    // ⚠ LE MEME ENSEMBLE QUE `api/incidents-acquitter.js`, A LA LETTRE : une
+    // alarme affichee mais non acquittable laisse un bouton qui rend 404 et une
+    // alarme a l'ecran pour toujours (constat HAUT d'une revue independante).
+    const TYPES_ALARME = ['overbooking', 'message_ota_a_verifier',
+      'message_ota_abandon', 'message_ota_arret']
     let q = supabase.from('automation_incidents')
       .select('id, type, property_id, detail, created_at, acquitted_at')
       .eq('user_id', compte).in('type', TYPES_ALARME).is('acquitted_at', null)

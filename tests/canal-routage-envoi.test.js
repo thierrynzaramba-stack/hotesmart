@@ -246,7 +246,8 @@ test('LE TEST QUI COMPTE : le chemin OTA n\'ecrit PLUS rien avant l\'envoi', () 
   // emporte la protection anti-doublon que le defaut procurait par accident
   // (deux passes concurrentes lisaient la ligne et passaient leur tour).
   assert.match(avantEnvoi, /await tenirEnvoi\(/, 'la tenue est posee avant l appel')
-  assert.match(helper, /await relacherEnvoi\(tenue\.key\)/, 'et relachee ensuite')
+  assert.match(helper, /await relacherEnvoi\(tenue\.key, tenue\.token\)/,
+    'et relachee ensuite AVEC SON JETON : on ne supprime que sa propre tenue')
   assert.match(helper, /\} finally \{/, 'dans un finally, meme si l envoi leve')
 })
 
@@ -378,9 +379,30 @@ test('LE TEST QUI COMPTE : sur le chemin one-shot, un echec ALERTE tout de suite
   // La tranche s'arrete au `return` du bloc, pas a un nombre de caracteres :
   // 700 caracteres debordaient sur le `noterRefusOta` du chemin rejouable, et
   // l'assertion « rien n'est compte » mesurait alors la ligne d'a cote.
-  const sansRejeu = helper.split('if (!rejouable) {')[1].split('\n  }\n')[0]
-  assert.ok(/noterAbandonOta/.test(sansRejeu), 'l\'alerte part directement')
-  assert.ok(!/noterRefusOta/.test(sansRejeu), 'et rien n\'est COMPTE : le plafond serait inatteignable')
+  // ⚠ DEUX BLOCS `!rejouable` DESORMAIS — un par canal — et les DEUX doivent
+  // alerter tout de suite sans compter. Ma premiere version ne lisait que le
+  // premier, donc elle ne mesurait que la moitie de la garantie (constat d'une
+  // revue independante : la distinction one-shot de l'e-mail avait disparu de
+  // ma factorisation, avec l'assertion qui la tenait).
+  // ⚠ LES DEUX BLOCS N'ONT PAS LA MEME INDENTATION — celui de l'e-mail vit dans
+  // `if (!estOta) {`, donc a quatre espaces ; celui de l'OTA a deux. Couper sur
+  // un seul terminateur faisait deborder l'un des deux sur le code suivant, et
+  // l'assertion « rien n'est compte » mesurait alors la ligne d'a cote. On
+  // coupe au PREMIER des deux terminateurs qui se presente.
+  const finDeBloc = (b) => {
+    const a = b.indexOf('\n  }\n'), c = b.indexOf('\n    }\n')
+    const bornes = [a, c].filter(x => x >= 0)
+    return bornes.length ? b.slice(0, Math.min(...bornes)) : b
+  }
+  const blocs = helper.split('if (!rejouable) {').slice(1).map(finDeBloc)
+  assert.equal(blocs.length, 2, 'un bloc one-shot par canal : e-mail et OTA')
+  for (const bloc of blocs) {
+    assert.ok(/noterAbandonOta|reportIncident\('email_voyageur_abandon'/.test(bloc),
+      'l\'alerte part directement')
+    assert.ok(!/noterRefusOta/.test(bloc), 'rien n\'est COMPTE : le plafond serait inatteignable')
+    assert.ok(!/faut_il_abandonner_email\(/.test(bloc),
+      'et le compteur e-mail n\'est pas appele non plus')
+  }
   const ota = require('../lib/envoi-ota')
   assert.equal(typeof ota.noterAbandonOta, 'function', 'le writer de l\'abandon est exporte')
   // Le compteur e-mail reste reserve au chemin qui peut vraiment reessayer.

@@ -147,13 +147,33 @@ test('LE TEST QUI COMPTE : le verrou CLAIME, il n ecrase pas', () => {
   assert.match(tenir, /\.from\('write_locks'\)\.insert\(/,
     'le verrou s obtient par un INSERT : le conflit de cle EST le signal')
   assert.ok(!/\.upsert\(/.test(tenir), 'jamais par un upsert, qui ne conflictue pas')
-  assert.match(tenir, /motif: 'deja_tenu'/, 'et un conflit se lit « un autre le tient »')
-  // ⚠ FAIL-SAFE DANS LE SENS PRUDENT, et c'est l'INVERSE de la lecture du
-  // rejeu : une panne sur le verrou EMPECHE l'envoi.
-  assert.match(tenir, /motif: 'verrou_impossible'/)
+  // ⚠ UN CONFLIT N'EST PAS UNE PANNE, ET L'INVERSE NON PLUS (constat d'une
+  // revue) : lire TOUTE erreur d'insert comme « un autre le tient » faisait
+  // passer un tick en silence sur une panne de connexion. Le code `23505` est
+  // la violation d'unicite de Postgres.
+  assert.match(tenir, /error\.code === '23505'/, 'le conflit se reconnait a son code')
+  assert.match(tenir, /conflit \? 'deja_tenu' : 'verrou_impossible'/,
+    'et une panne qui n en est pas un empeche l envoi')
   const retours = [...tenir.matchAll(/return \{ ok: (true|false)/g)].map(m => m[1])
   assert.equal(retours.filter(x => x === 'true').length, 1,
     'un seul chemin autorise l envoi : celui ou la tenue est POSEE')
+  // ⚠ ET ELLE DOIT SURVIVRE A L'INTERVALLE DU CRON, sinon elle ne protege de
+  // rien : `/api/cron-messages` tourne en `*/10`, et j'avais mis 2 minutes.
+  const ota2 = fs.readFileSync(path.join(__dirname, '..', 'lib/envoi-ota.js'), 'utf8')
+  const ms = /const VERROU_MS = (\d+) \* 60 \* 1000/.exec(ota2)
+  assert.ok(ms, 'la duree de la tenue est lisible')
+  const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'))
+  const cm = (vercel.crons || []).find(c => String(c.path).includes('cron-messages'))
+  assert.ok(cm, 'le cron des messages est declare')
+  const minutes = Number(/\*\/(\d+)/.exec(cm.schedule)[1])
+  assert.ok(Number(ms[1]) > minutes,
+    `la tenue (${ms[1]} min) doit depasser l intervalle du cron (${minutes} min)`)
+  // Et le jeton existe, sinon un trainard efface la tenue d un autre.
+  assert.match(tenir, /const token = /, 'la tenue porte un jeton')
+  assert.match(tenir, /token,/, 'ecrit en base')
+  const relacher = ota2.split('async function relacherEnvoi')[1].split('\n}\n')[0]
+  assert.match(relacher, /if \(token\) q = q\.eq\('token', token\)/,
+    'et la liberation ne supprime que sa propre tenue')
   // Et la tenue expiree de CETTE cle est purgee avant : une fonction tuee en
   // plein vol ne bloque pas le message plus longtemps que le verrou.
   const iPurge = tenir.indexOf('.delete()')
@@ -253,4 +273,136 @@ test('LE TEST QUI COMPTE : la porte du rejeu est FERMEE par une incertitude', ()
   const retours = [...porte.matchAll(/return \{ ok: (true|false)/g)].map(m => m[1])
   assert.ok(retours.filter(x => x === 'true').length >= 3,
     'les deux pannes de lecture et le chemin nominal laissent tenter')
+})
+
+// ── Les constats HAUTS de la revue independante ────────────────────────────
+
+test('LE TEST QUI COMPTE : une alarme AFFICHEE est ACQUITTABLE — les deux listes sont identiques', () => {
+  // ⚠ CONSTAT HAUT, ET L'IRONIE DU LOT : j'avais rendu les alarmes d'envoi
+  // visibles sur /aujourdhui en citant « impossible a acquitter » comme le
+  // defaut a fermer — et `api/incidents-acquitter.js` filtrait toujours sur le
+  // seul `overbooking`, en LECTURE comme en ECRITURE. Le POST du bouton rendait
+  // 404, l'ecran basculait sur « Reessayer », et l'alarme restait pour
+  // toujours. Le defaut etait DEPLACE d'un cran, pas ferme.
+  //
+  // Et mon test d'alors ne mesurait que l'affichage : le « donc acquittables »
+  // de son nom n'etait verifie par rien.
+  const lire = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+  const liste = (src, nom) => {
+    // ⚠ LE TABLEAU EST SUR PLUSIEURS LIGNES : ma premiere lecture par regex
+    // rougissait sur son propre echappement. On coupe entre les crochets.
+    const i = src.indexOf('const ' + nom + ' = [')
+    assert.ok(i > 0, nom + ' est lisible')
+    const corps = src.slice(i, src.indexOf(']', i))
+    return [...corps.matchAll(/'([a-z_]+)'/g)].map(x => x[1]).sort()
+  }
+  const affichees = liste(lire('api/ecran/aujourdhui.js'), 'TYPES_ALARME')
+  const acquittables = liste(lire('api/incidents-acquitter.js'), 'TYPES_ACQUITTABLES')
+  assert.deepEqual(affichees, acquittables,
+    'tout type affiche au bandeau doit etre acquittable, et reciproquement')
+  for (const t of ['overbooking', 'message_ota_a_verifier', 'message_ota_abandon', 'message_ota_arret']) {
+    assert.ok(affichees.includes(t), `${t} est dans l ensemble`)
+  }
+  // Et le filtre d'acquittement n'est plus un `eq` sur un seul type.
+  const acq = lire('api/incidents-acquitter.js')
+  assert.ok(!/\.eq\('type', 'overbooking'\)/.test(acq), 'plus aucun filtre sur un type unique')
+  assert.equal((acq.match(/\.in\('type', TYPES_ACQUITTABLES\)/g) || []).length, 2,
+    'et les DEUX requetes — lecture et ecriture — portent la liste')
+})
+
+test('LE TEST QUI COMPTE : un ARRET bloque definitivement, et n alerte qu une fois', () => {
+  // ⚠ CONSTAT HAUT : `noterAbandonOta` ne faisait que REPORTER un incident.
+  // Rien ne bloquait le message : au tick suivant le provider etait rappele,
+  // l issue etait permanente a nouveau, et un NOUVEL incident insere —
+  // ~144 appels et 144 incidents par jour jusqu a la fin du sejour. Et la regle
+  // etait ecrite dix lignes plus haut, pour l e-mail.
+  const ota = fs.readFileSync(path.join(__dirname, '..', 'lib/envoi-ota.js'), 'utf8')
+  const porte = ota.split('async function peutTenterOta')[1].split('\n}\n')[0]
+  // L arret est lu EN PREMIER : avant « a verifier », avant le plafond.
+  const iArret = porte.indexOf('TYPE_ARRET_OTA')
+  const iVerif = porte.indexOf('TYPE_AVERIF_OTA')
+  const iPlafond = porte.indexOf('MAX_TENTATIVES_OTA')
+  assert.ok(iArret > 0 && iArret < iVerif && iVerif < iPlafond,
+    'arret, puis a verifier, puis le plafond')
+  // Et SANS fenetre : sinon le message repart le lendemain.
+  const ligne = porte.split('TYPE_ARRET_OTA')[1].split('\n')[0]
+  assert.match(ligne, /\{ fenetre: false \}/, 'un arret n expire pas')
+  // Les deux causes d arret le POSENT.
+  const src2 = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-messages.js'), 'utf8')
+  const h = src2.split('async function envoyerEtJournaliser')[1]
+    .split('async function processMessageTemplates')[0]
+  const permanent = h.split('if (issue === ISSUE.PERMANENT) {')[1].split('\n  }\n')[0]
+  assert.match(permanent, /noterArretOta/, 'une issue PERMANENTE arrete le message')
+  const plafond = h.split("porte.motif === 'plafond'")[1].split('\n      }\n')[0]
+  assert.match(plafond, /noterArretOta/, 'le plafond atteint aussi')
+  // ⚠ L ORDRE COMPTE : l arret AVANT l alerte, sinon la porte ne le voit pas au
+  // tick suivant et l alerte repart.
+  assert.ok(plafond.indexOf('noterArretOta') < plafond.indexOf('noterAbandonOta'),
+    'l arret est pose avant l alerte')
+  assert.ok(permanent.indexOf('noterArretOta') < permanent.indexOf('noterAbandonOta'))
+})
+
+test('LE TEST QUI COMPTE : la porte est franchie AVANT l appel payant a Haiku', () => {
+  // ⚠ CONSTAT D UNE REVUE : `generateAutoMessage` est un appel Anthropic, et il
+  // tournait AVANT la porte. Un message en palier, en plafond ou arrete payait
+  // donc un appel toutes les dix minutes. Avant le correctif, le
+  // `message_sent_log` ecrit avant l envoi court-circuitait des le second
+  // tick — le correctif avait retire ce frein sans le remplacer.
+  const src2 = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-messages.js'), 'utf8')
+  for (const fonction of ['checkAndSendTemplate', 'triggerTemplates']) {
+    const bloc = src2.split(`async function ${fonction}`)[1].split('\nasync function ')[0]
+    const iPorte = bloc.indexOf('porteOta(')
+    const iHaiku = bloc.indexOf('generateAutoMessage(')
+    assert.ok(iPorte > 0, `${fonction} franchit la porte`)
+    assert.ok(iHaiku > 0, `${fonction} genere le message`)
+    assert.ok(iPorte < iHaiku,
+      `${fonction} : la porte precede l appel payant (porte ${iPorte}, Haiku ${iHaiku})`)
+  }
+})
+
+test('les trois types neufs portent un LIBELLE, pas leur cle brute', () => {
+  // `LABELS[type] || type` mettait « message_ota_a_verifier » en objet du SMS
+  // et de l e-mail fondateur.
+  const fn = fs.readFileSync(path.join(__dirname, '..', 'lib/founder-notify.js'), 'utf8')
+  const i = fn.indexOf('const LABELS')
+  assert.ok(i > 0, 'la table des libelles est lisible')
+  const labels = fn.slice(i, fn.indexOf('\n}', i))
+  for (const t of ['message_ota_a_verifier', 'message_ota_abandon', 'message_ota_arret']) {
+    assert.ok(labels.includes(t), `${t} a son libelle`)
+  }
+  assert.match(labels, /ENVOI AU VOYAGEUR/, 'et le libelle dit de quoi il s agit')
+})
+
+test('LE TEST QUI COMPTE : « je n ai pas su lire la reponse » n est pas « il a refuse »', () => {
+  // ⚠ CONSTAT D UNE REVUE, AFFINE ICI. Ces trois codes sont les NOTRES, poses
+  // par `channelCall` quand le corps est illisible, vide ou de forme
+  // inattendue : le provider a PU traiter le message et c est nous qui ne
+  // comprenons pas sa reponse. Les classer refus les rejouait, donc un envoi en
+  // DOUBLE au voyageur.
+  for (const code of ['reponse_non_json', 'forme_inattendue', 'reponse_vide']) {
+    assert.equal(classerEnvoiOta({ ok: false, status: 200, error: code }), ISSUE.INCERTAIN,
+      `${code} met en doute, il ne rejoue pas`)
+    // Meme en 4xx : un statut ne rachete pas une reponse qu on ne sait pas lire.
+    assert.equal(classerEnvoiOta({ ok: false, status: 422, error: code }), ISSUE.INCERTAIN,
+      `${code} en 422 non plus`)
+  }
+  // Et un code DU PROVIDER reste un refus, quel que soit le statut.
+  assert.equal(classerEnvoiOta({ ok: false, status: 422, error: 'not_supported' }), ISSUE.REFUS)
+  assert.equal(classerEnvoiOta({ ok: false, status: 200, error: 'http_too_many_requests' }), ISSUE.REFUS)
+})
+
+test('LE TEST QUI COMPTE : Beds24 lit son STATUT HTTP avant de lire son corps', () => {
+  // ⚠ CONSTAT D UNE REVUE : seul `result.success === false` etait teste. Un 429
+  // ou un 500 dont le corps ne porte pas ce champ passait donc pour un SUCCES,
+  // et le message etait marque envoye sans avoir ete recu — le defaut meme que
+  // ce chantier ferme, par une autre porte.
+  const b24 = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-beds24.js'), 'utf8')
+  const envoi = b24.split('async function sendViaBeds24')[1].split('\n}\n')[0]
+  const iStatut = envoi.indexOf('if (!r.ok)')
+  const iCorps = envoi.indexOf('await r.json()')
+  assert.ok(iStatut > 0, 'le statut est teste')
+  assert.ok(iStatut < iCorps, 'et AVANT la lecture du corps')
+  const bloc = envoi.slice(iStatut, iStatut + 300)
+  assert.match(bloc, /refus: true/, 'un statut d echec est un REFUS, donc rejouable')
+  assert.match(bloc, /status: r\.status/, 'et il porte son statut, pour le diagnostic')
 })
