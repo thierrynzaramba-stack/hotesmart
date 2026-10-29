@@ -15,7 +15,8 @@
 // CE QUE LE DEFAUT A COUTE, et c'est ce que ces tests ferment : sur le canal
 // OTA, `message_sent_log` etait ecrit AVANT l'envoi. C'est la garde
 // anti-doublon : un refus du provider condamnait donc le message pour de bon,
-// et le fil l'affichait comme parti. Trois messages perdus en sept jours, dont
+// et le fil l'affichait comme parti. CINQ messages perdus en sept jours — un
+// par echec, chacun condamne pour de bon — dont
 // les consignes de securite du jacuzzi a un voyageur qui a passe deux nuits sur
 // place, et l'annonce des codes d'acces a une voyageuse qui arrivait le
 // lendemain.
@@ -126,8 +127,53 @@ test('les deux cles de comptage ne se confondent pas', () => {
   // Une seule cle pour les deux compteurs rendrait un refus bloquant comme une
   // incertitude, ou l'inverse.
   assert.notEqual(cleEchec('B', 'T'), cleVerif('B', 'T'))
-  assert.match(cleEchec('B', 'T'), /^OTAKEY:B:T$/)
-  assert.match(cleVerif('B', 'T'), /^OTAVERIF:B:T$/)
+  assert.match(cleEchec('B', 'T'), /^OTAKEY:B:T;$/)
+  assert.match(cleVerif('B', 'T'), /^OTAVERIF:B:T;$/)
+  // ⚠ ET AUCUNE CLE N'EST SOUS-CHAINE D'UNE AUTRE. La lecture est un
+  // `ilike '%cle%'` : sans terminateur, le compteur d'un message compterait les
+  // refus d'un autre des qu'un identifiant est le prefixe d'un second.
+  assert.ok(!cleEchec('B', 'T2').includes(cleEchec('B', 'T')),
+    'un identifiant prefixe d un autre ne collisionne pas')
+  assert.ok(!cleVerif('B1', 'T').includes(cleVerif('B', 'T')))
+})
+
+test('LE TEST QUI COMPTE : le verrou CLAIME, il n ecrase pas', () => {
+  // ⚠ MUTATION QUI SURVIVAIT : remplacer `insert` par `upsert` rendait le
+  // verrou inoffensif — il ne conflictue jamais, donc deux passes concurrentes
+  // envoient toutes les deux. C'est la seule erreur irreversible de ce
+  // mecanisme : un voyageur qui recoit deux fois le meme message.
+  const ota = fs.readFileSync(path.join(__dirname, '..', 'lib/envoi-ota.js'), 'utf8')
+  const tenir = ota.split('async function tenirEnvoi')[1].split('\n}\n')[0]
+  assert.match(tenir, /\.from\('write_locks'\)\.insert\(/,
+    'le verrou s obtient par un INSERT : le conflit de cle EST le signal')
+  assert.ok(!/\.upsert\(/.test(tenir), 'jamais par un upsert, qui ne conflictue pas')
+  assert.match(tenir, /motif: 'deja_tenu'/, 'et un conflit se lit « un autre le tient »')
+  // ⚠ FAIL-SAFE DANS LE SENS PRUDENT, et c'est l'INVERSE de la lecture du
+  // rejeu : une panne sur le verrou EMPECHE l'envoi.
+  assert.match(tenir, /motif: 'verrou_impossible'/)
+  const retours = [...tenir.matchAll(/return \{ ok: (true|false)/g)].map(m => m[1])
+  assert.equal(retours.filter(x => x === 'true').length, 1,
+    'un seul chemin autorise l envoi : celui ou la tenue est POSEE')
+  // Et la tenue expiree de CETTE cle est purgee avant : une fonction tuee en
+  // plein vol ne bloque pas le message plus longtemps que le verrou.
+  const iPurge = tenir.indexOf('.delete()')
+  const iPose = tenir.indexOf('.insert(')
+  assert.ok(iPurge > 0 && iPurge < iPose, 'la purge precede la pose')
+})
+
+test('LE TEST QUI COMPTE : un envoi reussi dont le journal rate est BLOQUE, pas rejoue', () => {
+  // ⚠ MUTATION QUI SURVIVAIT, et defaut ANTERIEUR a ce correctif :
+  // `noterEnvoi` hurle depuis septembre « LE MESSAGE PEUT REPARTIR AU PROCHAIN
+  // TICK » sans que rien ne l empeche. Le message etait donc renvoye au
+  // voyageur. On pose le blocage « a verifier », qui ne se rejoue jamais seul.
+  const src2 = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-messages.js'), 'utf8')
+  const h = src2.split('async function envoyerEtJournaliser')[1]
+    .split('async function processMessageTemplates')[0]
+  const succes = h.split('if (sendRes?.ok) {')[1].split('\n  }\n')[0]
+  assert.match(succes, /const note = await noterEnvoi\(/, 'le retour du journal est LU')
+  assert.match(succes, /if \(note === false && estOta\) \{/, 'un journal inecrivable est vu')
+  assert.match(succes, /noterAVerifierOta/, 'et il pose le blocage')
+  assert.match(succes, /anti-doublon inecrivable/, 'en disant pourquoi')
 })
 
 // ── La structure du correctif, sur le fichier reel ─────────────────────────
@@ -147,7 +193,50 @@ test('LE TEST QUI COMPTE : une issue INCERTAINE ne rejoue RIEN et appelle un hum
   assert.match(avis, /threshold: 1/, 'elle alerte tout de suite')
   assert.match(avis, /voyageur/, 'elle nomme le voyageur')
   assert.match(avis, /extrait/, 'et elle porte le texte du message')
-  assert.match(avis, /Aucun renvoi automatique/, 'en disant qu aucun renvoi n aura lieu')
+  // ⚠ UNE ALERTE SANS GESTE POSSIBLE NE SERT A RIEN (Thierry, 29 octobre 2026).
+  // Elle doit nommer l'ECRAN et les pas, pas seulement constater.
+  assert.match(avis, /NE REPARTIRA PAS SEUL/, 'elle dit qu aucun renvoi n aura lieu')
+  assert.match(avis, /\/messages/, 'elle nomme l ecran ou agir')
+  assert.match(avis, /Envoyer/, 'et le geste qui envoie')
+  assert.match(avis, /l'acquitter\s*\`?\s*\+?\s*\`?\s*ne renvoie rien/,
+    'et elle dit que l acquittement ne renvoie rien')
+})
+
+test('LE TEST QUI COMPTE : le blocage d une incertitude N EXPIRE PAS', () => {
+  // ⚠ DEFAUT DE MON PROPRE CORRECTIF, trouve par la question de Thierry « ou et
+  // comment je debloque un envoi incertain ? ». Je bornais les DEUX lectures a
+  // 24 h : le blocage sautait donc tout seul au bout d une journee et le cron
+  // renvoyait le message — le renvoi A L AVEUGLE que la decision interdit, et
+  // le contraire exact de ce que l alerte promet. Le code dementait son texte.
+  const ota = fs.readFileSync(path.join(__dirname, '..', 'lib/envoi-ota.js'), 'utf8')
+  const porte = ota.split('async function peutTenterOta')[1].split('\n}\n')[0]
+  const ligneVerif = porte.split('TYPE_AVERIF_OTA')[1].split('\n')[0]
+  assert.match(ligneVerif, /\{ fenetre: false \}/,
+    'la ligne « a verifier » se lit SANS fenetre : elle bloque tant qu elle existe')
+  // Et le compteur de refus garde la sienne : un refus d hier ne doit pas peser.
+  const ligneEchec = porte.split('lireLignes(TYPE_ECHEC_OTA')[1].split('\n')[0]
+  assert.ok(!/fenetre: false/.test(ligneEchec), 'le compteur, lui, oublie au bout de 24 h')
+  // La fenetre est bien appliquee par defaut.
+  const lecture = ota.split('async function lireLignes')[1].split('\n}\n')[0]
+  assert.match(lecture, /\{ fenetre = true \} = \{\}/, 'la fenetre est le defaut')
+  assert.match(lecture, /if \(fenetre\) q = q\.gte\('created_at', depuis\)/,
+    'et elle ne s applique que si on la demande')
+})
+
+test('LE TEST QUI COMPTE : les alarmes d envoi sont AFFICHEES, donc acquittables', () => {
+  // ⚠ SANS CA, L ALERTE N EXISTE PAS POUR L HOTE. Le bandeau de /aujourdhui ne
+  // servait que `overbooking` : une alerte d envoi etait ecrite en base, partait
+  // par e-mail au fondateur, et restait INVISIBLE sur tous les ecrans — donc
+  // impossible a acquitter, puisque le bouton n existe que sur une alarme
+  // affichee. Une alerte que personne ne peut voir ni fermer est une ligne de
+  // journal, pas une alerte.
+  const ecran = fs.readFileSync(path.join(__dirname, '..', 'api/ecran/aujourdhui.js'), 'utf8')
+  const bloc = ecran.split('TYPES_ALARME')[1].slice(0, 400)
+  for (const t of ['overbooking', 'message_ota_a_verifier', 'message_ota_abandon']) {
+    assert.ok(bloc.includes(`'${t}'`), `${t} est servi au bandeau`)
+  }
+  assert.match(ecran, /\.in\('type', TYPES_ALARME\)/, 'par un `in`, pas un `eq`')
+  assert.match(ecran, /\.is\('acquitted_at', null\)/, 'et seules les alarmes OUVERTES')
 })
 
 test('LE TEST QUI COMPTE : la porte du rejeu est FERMEE par une incertitude', () => {

@@ -340,9 +340,23 @@ module.exports = async (req, res) => {
     // ⚠ ET `tests/garde-colonne-selectionnee.test.js` NE L'AURAIT PAS VU : il
     // verifie qu'une colonne LUE est SELECTIONNEE, pas qu'elle EXISTE. Les deux
     // defauts se ressemblent et n'ont pas le meme filet.
+    // ⚠ TROIS TYPES, PLUS UN SEUL — ET C'EST UN CONSTAT DE THIERRY DU
+    // 29 OCTOBRE 2026 : « une alerte sans geste possible ne sert a rien ».
+    // Le bandeau ne montrait que `overbooking`. Les alertes d'envoi au voyageur
+    // etaient donc ecrites en base, envoyees par e-mail au fondateur... et
+    // INVISIBLES sur tous les ecrans — donc impossibles a acquitter, puisque le
+    // bouton n'existe que sur une alarme affichee. Une alerte que personne ne
+    // peut voir ni fermer n'est pas une alerte, c'est une ligne de journal.
+    //   · `message_ota_a_verifier` : un envoi dont l'issue est INCERTAINE. Il ne
+    //     repartira pas seul, et l'hote doit aller voir le fil chez l'OTA.
+    //   · `message_ota_abandon`    : un message qui NE PARTIRA PAS. S'il le veut,
+    //     c'est a lui de l'envoyer depuis /messages.
+    // Les deux portent dans leur `detail` le voyageur, le texte et les trois pas
+    // a suivre — le bandeau affiche ce `detail` tel quel.
+    const TYPES_ALARME = ['overbooking', 'message_ota_a_verifier', 'message_ota_abandon']
     let q = supabase.from('automation_incidents')
       .select('id, type, property_id, detail, created_at, acquitted_at')
-      .eq('user_id', compte).eq('type', 'overbooking').is('acquitted_at', null)
+      .eq('user_id', compte).in('type', TYPES_ALARME).is('acquitted_at', null)
     q = bornerRef(q, 'property_id')
     const { data, error } = await compter(q.order('created_at', { ascending: false }).limit(50))
     if (error) { indisponibles.push('alarmes'); return null }

@@ -222,17 +222,32 @@ test('LE TEST QUI COMPTE : le chemin OTA n\'ecrit PLUS rien avant l\'envoi', () 
   //
   // Mesure du 29 octobre 2026 : cinq envois en echec en sept jours sur
   // La bulle, et dans le journal la ligne est horodatee 0,1 a 0,6 seconde AVANT
-  // l'incident — la meme tentative. Trois messages perdus, dont des consignes
-  // de securite de jacuzzi et l'annonce des codes d'acces.
+  // l'incident — la meme tentative. CINQ messages perdus, un par echec : le
+  // journal etant la garde anti-doublon, chacun etait condamne pour de bon.
+  // (J'avais d'abord ecrit « trois » — en comptant les voyageurs dont AUCUN
+  // message du meme type n'etait passe, au lieu des gabarits reellement
+  // perdus. Un nombre ecrit a la main, encore.) Parmi eux, les consignes de
+  // securite du jacuzzi et l'annonce des codes d'acces.
   //
   // Et le defaut etait DEJA ecrit dans `cron-messages.js` depuis septembre :
   // le correctif d'alors n'avait ete applique qu'au canal e-mail.
   const helper = src.split('async function envoyerEtJournaliser')[1]
     .split('async function processMessageTemplates')[0]
-  const avantEnvoi = helper.split('const sendRes = await sendGuestMessage(')[0]
+  // L'ancre est l'APPEL au provider, sans mot-cle de declaration : `sendRes`
+  // est declare plus haut depuis que l'envoi vit dans un `try/finally` (le
+  // verrou anti-doublon doit se relacher meme si l'envoi leve). Ancrer sur
+  // `const sendRes =` rendait la tranche egale a TOUT le helper, et
+  // l'assertion rougissait pour une raison qui n'etait pas la sienne.
+  const avantEnvoi = helper.split('await sendGuestMessage(')[0]
   assert.ok(!/noterEnvoi/.test(avantEnvoi), 'aucun journal avant l\'appel au provider')
   assert.ok(!/from\('conversations'\)/.test(avantEnvoi), 'aucune ligne de fil non plus')
   assert.ok(!/recordMessage/.test(avantEnvoi), 'ni dans `messages`')
+  // ⚠ MAIS LE VERROU, LUI, EST POSE AVANT : ne plus rien ecrire avant l'envoi a
+  // emporte la protection anti-doublon que le defaut procurait par accident
+  // (deux passes concurrentes lisaient la ligne et passaient leur tour).
+  assert.match(avantEnvoi, /await tenirEnvoi\(/, 'la tenue est posee avant l appel')
+  assert.match(helper, /await relacherEnvoi\(tenue\.key\)/, 'et relachee ensuite')
+  assert.match(helper, /\} finally \{/, 'dans un finally, meme si l envoi leve')
 })
 
 // ─── 4. Les correctifs de review (16 septembre 2026) ─────────────────────────
