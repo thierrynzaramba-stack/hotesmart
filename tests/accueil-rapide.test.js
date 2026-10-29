@@ -741,12 +741,18 @@ function ouvrirAujourdhui (options = {}) {
     },
     closest: () => null, querySelector: () => null, querySelectorAll: () => []
   })
+  const ecouteursDoc = []
   const document_ = {
     documentElement: elem(),
     body: elem(),
     querySelector: sel => (stubs.has(sel) ? stubs.get(sel) : (stubs.set(sel, elem()), stubs.get(sel))),
     querySelectorAll: () => [],
-    addEventListener () {}, createElement: () => elem()
+    // ⚠ LE DOCUMENT AVALAIT SES ECOUTEURS, et c'est ce qui laissait survivre la
+    // mutation « la page n'appelle plus `brancherInfoBulles` » : la suite
+    // restait verte alors que les ⓘ ne s'ouvraient plus au doigt. Il les
+    // GARDE maintenant, et `toucherIbulle()` joue le geste.
+    addEventListener (type, fn) { ecouteursDoc.push({ type: String(type), fn }) },
+    createElement: () => elem()
   }
   // Chaque `.from(table)` cree une lecture que le test resout quand il veut.
   const supabase = {
@@ -864,6 +870,13 @@ function ouvrirAujourdhui (options = {}) {
     // ⚠ ET C'EST LE VRAI MODULE : un double rendrait des SVG inventes, donc des
     // assertions sur une geometrie qui n'est pas celle qu'on livre.
     'courbeMensuelle',
+    // ⚠ ET LE BRANCHEMENT DES ⓘ, pour la meme raison que les deux ci-dessus :
+    // la page appelle `brancherInfoBulles(document)` dans `init()`, donc son
+    // absence levait `brancherInfoBulles is not defined` et tuait le demarrage
+    // ENTIER — pas seulement les info-bulles. Le test l'a appris en rougissant.
+    // Le VRAI module, pas un double : un double qui ne branche rien laisserait
+    // croire que la page ouvre ses bulles au toucher.
+    'brancherInfoBulles',
     batirAujourdhui(options.sansInit)
   )(requireAuth, supabase, rien, rien, journal, ESC,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
@@ -888,7 +901,8 @@ function ouvrirAujourdhui (options = {}) {
     I18n, { renderMenu: rien, render: rien }, document_, fenetreDuBanc(options), { search: '', hash: '' },
     fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien },
     require('../shared/cache-ecran.js'),
-    require('../shared/courbe-mensuelle.js').courbeMensuelle)
+    require('../shared/courbe-mensuelle.js').courbeMensuelle,
+    require('../shared/ibulle.js').brancherInfoBulles)
 
   return {
     // Le corps que le test a fourni. Depuis le lot (b), les tests nourrissent
@@ -910,6 +924,20 @@ function ouvrirAujourdhui (options = {}) {
     // l'observation de la sentinelle (voir `armerLaSuiteDesAvis`).
     defiler: () => {
       for (const e of (options.ecouteurs || [])) if (e.type === 'scroll') e.fn({ type: 'scroll' })
+    },
+    // Le geste de l'hote sur telephone : « je touche la ⓘ ». Il part du MEME
+    // ecouteur que la page a pose, donc il tombe si elle ne le pose plus.
+    toucherIbulle: () => {
+      const btn = {
+        etat: 'false',
+        getAttribute: (n) => (n === 'aria-expanded' ? btn.etat : null),
+        setAttribute: (n, v) => { if (n === 'aria-expanded') btn.etat = String(v) }
+      }
+      btn.closest = (sel) => (sel === '[data-ibulle]' ? btn : null)
+      const clic = ecouteursDoc.find(e => e.type === 'click')
+      assert.ok(clic, 'la page ne pose AUCUN ecouteur de clic sur le document : les ⓘ ne s ouvrent pas au toucher')
+      clic.fn({ target: btn })
+      return btn.etat
     },
     ouvrirSession: () => resoudreSession({ user: { id: 'u1', email: 'thierry@exemple.fr', user_metadata: {} } }),
     repondreI18n: () => resoudreI18n('fr'),
@@ -2499,13 +2527,12 @@ test("LE TEST QUI COMPTE : un montant NON CALCULABLE ne s affiche pas « 0 € �
   assert.ok(!/<circle[^>]*fill="var\(--ink\)"/.test(svg),
     'la courbe pose un point plein : elle affirme zero euro la ou le montant est inconnu')
   // Et les deux sejours sont COMPTES dans une reserve.
-  const res = p.cache('[data-bind="revenue-annee-reserves"]')
-  assert.strictEqual(res.hidden, false, 'aucune reserve : deux sejours sans montant passent sous silence')
+  const res = { textContent: ibTotal(p) }
   // ⚠ LE BANC N'INTERPOLE PAS `{n}` : on ne peut pas lire « 2 » dans le texte.
   // On prouve donc que la reserve SUIT LA DONNEE par un contre-cas — sans
   // sejour refuse, elle ne doit pas apparaitre. Une reserve posee en dur
   // passerait le premier test et echouerait celui-ci.
-  assert.match(res.textContent, /revenue\.no_amount/,
+  assert.match(res.textContent, /revenue\.annee_ib_total_sans_montant/,
     `la reserve ne parle pas des montants non calculables : « ${res.textContent} »`)
   const sansRefus = bancAnnee({
     biens: [{ id: 'uuid-1', name: 'La bulle' }],
@@ -2515,7 +2542,7 @@ test("LE TEST QUI COMPTE : un montant NON CALCULABLE ne s affiche pas « 0 € �
       hors_biens: {}
     }
   })
-  assert.ok(!/revenue\.no_amount/.test(sansRefus.cache('[data-bind="revenue-annee-reserves"]').textContent),
+  assert.ok(!/revenue\.annee_ib_total_sans_montant/.test(ibTotal(sansRefus)),
     'la reserve des montants non calculables s affiche sans aucun sejour refuse : elle est posee en dur')
 })
 
@@ -2535,8 +2562,7 @@ test("LE TEST QUI COMPTE : l argent HORS BIENS de N-1 est declare, pas seulement
       hors_biens: { '2025-06': mo(99900) }
     }
   })
-  const res = p.cache('[data-bind="revenue-annee-reserves"]')
-  assert.strictEqual(res.hidden, false, 'aucune reserve : 999 € de N-1 sont dans le total et sur aucune ligne')
+  const res = { textContent: ibTotal(p) }
   assert.match(res.textContent, /revenue\.annee_hors_biens/,
     `la reserve ne parle pas de l argent hors biens : « ${res.textContent} »`)
 })
@@ -2584,6 +2610,53 @@ test("LE TEST QUI COMPTE : les lignes AFFICHEES somment au chiffre AFFICHE", () 
     `les lignes font ${somme} € pour un en-tete a ${entete} € : l arrondi par ligne ne concorde pas`)
 })
 
+test("LE TEST QUI COMPTE : la page BRANCHE l ouverture des ⓘ au toucher", async () => {
+  // ⚠ LA MUTATION QUI SURVIVAIT. Retirer `brancherInfoBulles(document)` de la
+  // page laissait la suite ENTIEREMENT verte : les textes etaient dans le DOM,
+  // les tests les lisaient par `innerHTML`, et personne ne touchait rien. Sur
+  // telephone, ou il n'y a pas de survol, les ⓘ seraient devenues muettes —
+  // c'est-a-dire que la demande de Thierry (« survol / toucher ») serait
+  // tombee en silence, et que le lot aurait RETIRE de l'information au lieu de
+  // la deplacer.
+  // ⚠ ET IL FAUT UN DEMARRAGE COMPLET : `bancAnnee` ouvre la page en
+  // `sansInit`, et le branchement vit dans `init()`. Un test ecrit sur
+  // `bancAnnee` aurait rougi pour la mauvaise raison.
+  const p = ouvrirAujourdhui({ corps: { biens: [], droits: { reservations: true } } })
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  assert.deepEqual(p.erreurs, [], `le demarrage a echoue : ${p.erreurs.join(' / ')}`)
+  assert.strictEqual(p.toucherIbulle(), 'true',
+    'un toucher sur une ⓘ ne l ouvre pas : la page ne branche pas shared/ibulle.js')
+})
+
+test("LE TEST QUI COMPTE : « une ligne a 0 ne s affiche pas » dans l info-bulle du total", () => {
+  // ⚠ LA DEMANDE DE THIERRY, mot pour mot, le 29 octobre 2026. Une info-bulle
+  // qui enumererait « 0 sejour sans montant · 0 sejour en brut · le perimetre
+  // est stable » serait plus longue que le paragraphe qu'elle remplace, et
+  // chaque ligne y dirait « rien a signaler » — donc rien.
+  //
+  // Un mois PROPRE : aucun sejour refuse, aucun brut, les deux annees portent
+  // les memes logements. Il ne reste que la mention systematique de
+  // l'estimation, qui n'est pas une reserve CONDITIONNELLE : les montants sont
+  // toujours estimes.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(10000), '2025-05': mo(9000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000), '2025-05': mo(9000) } },
+      hors_biens: {},
+      // ⚠ ET L AGREGAT « RESERVE A DATE » EST FOURNI. Sans lui, l info-bulle
+      // dit — a juste titre — que la comparaison a date n a pas pu etre lue :
+      // une reserve de plus, mais qui porte sur une PANNE, pas sur un zero.
+      // Le test a appris ce fait en rougissant.
+      reserve_a_date: rad({ '2025-11': {} })
+    }
+  })
+  const lignes = ibTotal(p).split('\n').filter((l) => l.trim() !== '')
+  assert.deepStrictEqual(lignes, ['revenue.annee_ib_total_estime'],
+    `l info-bulle enumere des lignes a zero : ${JSON.stringify(lignes)}`)
+})
+
 test("LE TEST QUI COMPTE : les montants BRUTS sont dits dans la vue Annee aussi", () => {
   // ⚠ UN RETRAIT DE FOND PAR OMISSION DE FORME, ce que la regle de refonte
   // interdit nommement. La vue Mois dit les bruts DEUX fois ; la vue Annee ne
@@ -2594,9 +2667,8 @@ test("LE TEST QUI COMPTE : les montants BRUTS sont dits dans la vue Annee aussi"
     biens: [{ id: 'uuid-1', name: 'La bulle' }],
     annee: { total: { '2026-05': avecBrut }, par_bien: { 'uuid-1': { '2026-05': avecBrut } }, hors_biens: {} }
   })
-  const res = p.cache('[data-bind="revenue-annee-reserves"]')
-  assert.strictEqual(res.hidden, false, 'aucune reserve : un montant brut passe pour un net')
-  assert.match(res.textContent, /revenue\.gross_count/,
+  const res = { textContent: ibTotal(p) }
+  assert.match(res.textContent, /revenue\.annee_ib_total_bruts/,
     `la reserve ne parle pas des bruts : « ${res.textContent} »`)
 })
 
@@ -2759,7 +2831,7 @@ test("LE TEST QUI COMPTE : une annee SANS AUCUNE ligne rend « — », pas « 0 
     'le tiret de la colonne N-1 n est explique par aucun motif sur sa ligne')
   // Au niveau du COMPTE, le motif ne peut pas vivre dans une colonne : il
   // descend dans les reserves.
-  assert.match(p.cache('[data-bind="revenue-annee-reserves"]').textContent, /revenue\.annee_sans_n1/,
+  assert.match(ibTotal(p), /revenue\.annee_sans_n1/,
     'l en-tete rend « — » sans qu aucune reserve ne dise pourquoi')
 })
 
@@ -2824,8 +2896,13 @@ test("LE TEST QUI COMPTE : sans logement choisi, AUCUNE bande n est tracee", () 
   assert.ok(!/<polygon/.test(svg), 'une bande est tracee sans logement choisi')
   assert.ok(!/rev-an-marque--bande/.test(p.cache('[data-bind="revenue-annee-legende"]').innerHTML),
     'la legende nomme une bande qui n existe pas')
-  assert.strictEqual(p.cache('[data-bind="revenue-annee-comparables"]').hidden, true,
-    'la note des comparables s affiche sans comparables')
+  // ⚠ L INFO-BULLE N EST PAS VIDE : sans logement choisi, elle DIT pourquoi il
+  // n y a pas de bande. Ce qu elle ne doit pas porter, c est la phrase qui
+  // DATE un releve — elle affirmerait une comparaison qui n existe pas.
+  assert.match(ibComparables(p), /revenue\.annee_comparables_tous/,
+    `la note ne dit pas pourquoi il n y a pas de bande : « ${ibComparables(p)} »`)
+  assert.ok(!/revenue\.annee_ib_comparables/.test(ibComparables(p)),
+    'la note date un releve de comparables alors qu aucune bande n est tracee')
 })
 
 test("LE TEST QUI COMPTE : la bande se trace, et sa note DATE le releve", () => {
@@ -2854,9 +2931,9 @@ test("LE TEST QUI COMPTE : la bande se trace, et sa note DATE le releve", () => 
   assert.match(svg, /<polygon class="cm-bande"/, 'la bande des comparables n est pas tracee')
   assert.match(p.cache('[data-bind="revenue-annee-legende"]').innerHTML, /rev-an-marque--bande/,
     'la legende ne nomme pas la bande')
-  const note = p.cache('[data-bind="revenue-annee-comparables"]')
+  const note = { textContent: ibComparables(p), hidden: ibComparables(p) === '' }
   assert.strictEqual(note.hidden, false, 'la note des comparables est masquee alors que la bande existe')
-  assert.match(note.textContent, /revenue\.annee_comparables_note/,
+  assert.match(note.textContent, /revenue\.annee_ib_comparables/,
     `la note ne porte pas la phrase des comparables : « ${note.textContent} »`)
 })
 
@@ -2974,13 +3051,13 @@ test("LE TEST QUI COMPTE : sous « Tous », l ecran DIT pourquoi il n y a pas de
   }
   const biens = [{ id: 'uuid-1', name: 'A' }]
   const tous = bancAnnee({ biens, annee })
-  const phrase = tous.cache('[data-bind="revenue-annee-comparables-tous"]')
+  const phrase = { textContent: ibComparables(tous), hidden: ibComparables(tous) === '' }
   assert.strictEqual(phrase.hidden, false, 'aucune phrase sous « Tous » : le silence se lit comme une panne')
   assert.match(phrase.textContent, /revenue\.annee_comparables_tous/,
     `la phrase attendue n est pas rendue : « ${phrase.textContent} »`)
   // Et elle s efface des qu un logement est choisi.
   const choisi = bancAnnee({ biens, annee, filtre: 'uuid-1' })
-  assert.strictEqual(choisi.cache('[data-bind="revenue-annee-comparables-tous"]').hidden, true,
+  assert.strictEqual(/annee_comparables_tous/.test(ibComparables(choisi)), false,
     'la phrase de « Tous » reste affichee alors qu un logement est choisi')
 })
 
@@ -3033,7 +3110,7 @@ test("LE TEST QUI COMPTE : un mois SOUS LE SEUIL n est pas trace, et se DIT", ()
   const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
   const gris = (svg.match(/stroke="var\(--muted\)"[^>]*stroke-dasharray/g) || []).length
   assert.strictEqual(gris, 1, 'le trait a disparu alors qu un mois sur deux passe le seuil')
-  assert.match(p.cache('[data-bind="revenue-annee-reserves"]').textContent, /revenue\.annee_rad_sous_seuil/,
+  assert.match(ibTotal(p), /revenue\.annee_rad_sous_seuil/,
     'le mois refuse par le seuil n est explique nulle part')
 })
 
@@ -3079,6 +3156,21 @@ test("LE TEST QUI COMPTE : la pastille pilote AUSSI « reserve a date »", () =>
 // interrogeait le DOM, et les cinq tests comparaient donc zero ligne a zero
 // ligne. Trois ont rougi par chance (0 !== 2) ; celui du telephone, qui
 // comparait deux longueurs, etait VERT sur deux listes vides.
+// ⚠ LES RESERVES ET LES NOTES VIVENT DANS LES ⓘ DEPUIS LE 29 OCTOBRE 2026, plus
+// dans des paragraphes sous la courbe (demande de Thierry, dette 121 soldee).
+// Ces deux aides existent pour que les tests suivent l'INFORMATION et non son
+// emplacement : l'invariant « ce fait se DIT » n'a pas change, c'est le lieu qui
+// a bouge. Neuf tests ont rougi a ce deplacement — c'est leur role, et c'est
+// pourquoi ils lisent une aide plutot qu'un selecteur en dur.
+const ibTotal = (p) => String(p.cache('[data-bind="revenue-annee-ib-total-txt"]').textContent || '')
+// La ⓘ des comparables est DANS la legende, reconstruite a chaque rendu : on la
+// lit dans son HTML, comme le reste de la legende.
+const ibComparables = (p) => {
+  const h = String(p.cache('[data-bind="revenue-annee-legende"]').innerHTML || '')
+  const m = h.match(/class="ibulle__txt"[^>]*>([\s\S]*?)<\/span>/)
+  return m ? m[1] : ''
+}
+
 const sansBalises = (h) => String(h).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
 const lignesDuTableauRad = (p) => {
   const html = String(p.cache('[data-list="revenue-annee-rad-lignes"]').innerHTML)
@@ -3346,8 +3438,7 @@ test("LE TEST QUI COMPTE : sans agregat, le tableau SE TAIT et la panne se NOMME
   assert.strictEqual(lignesDuTableauRad(p).length, 0, 'des lignes sont rendues sans agregat')
   assert.strictEqual(p.cache('[data-bind="revenue-annee-rad-col-n1"]').textContent, '',
     'l en-tete N-1 affiche sa parenthese vide')
-  const res = p.cache('[data-bind="revenue-annee-reserves"]')
-  assert.strictEqual(res.hidden, false, 'aucune reserve : le silence se lit comme « rien vendu l an dernier »')
+  const res = { textContent: ibTotal(p) }
   assert.match(res.textContent, /revenue\.annee_rad_indispo/,
     `la reserve dit « ${res.textContent} » au lieu de nommer la panne`)
 })
@@ -3782,29 +3873,49 @@ test("LE TEST QUI COMPTE : l armement d avant est COUPE, jamais laisse vivant", 
     `${vivants.length} observateurs vivants : les rendus d avant n ont pas ete coupes`)
 })
 
-test("LE TEST QUI COMPTE : la sentinelle OCCUPE une place, et au bon seuil", () => {
-  // ⚠ LA REGLE EST FONCTIONNELLE, PAS DECORATIVE : sans hauteur ni largeur, la
-  // sentinelle reste collee a la derniere carte et le defilement ne l atteint
-  // jamais. La mutation qui vidait la regle laissait 127 tests verts.
-  // ⚠ ET LE SEUIL EST CELUI DU RAIL (720 px), pas celui de `.rev-liste`
-  // (560 px) : entre les deux, le bloc est deja un rail.
+test("LE TEST QUI COMPTE : les avis tiennent sur UNE SEULE ligne, a toutes les largeurs", () => {
+  // ⚠ DEMANDE DE THIERRY DU 29 OCTOBRE 2026 : « UNE SEULE ligne de cartes,
+  // aussi sur ordinateur. Les avis suivants se chargent en defilant
+  // horizontalement dans cette ligne. Jamais de 2e ligne. Cartes de meme
+  // hauteur. » C'etait une grille de trois colonnes qui s'allongeait vers le
+  // BAS a chaque chargement : le bloc poussait la page, et le meme geste —
+  // defiler la page — servait a lire l'ecran et a charger des avis.
+  // ⚠ CE TEST A REMPLACE celui qui exigeait la largeur de la sentinelle DANS
+  // le media de 720 px. L'invariant n'a pas change (la sentinelle doit occuper
+  // une place, sinon le defilement ne l'atteint jamais) ; c'est son
+  // implementation qui a bouge, parce que le rail n'est plus propre au
+  // telephone. Un test qui fige l'implementation d'un invariant rougit a la
+  // premiere refonte, et on est tente de le supprimer au lieu de le reporter.
   const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
   const regle = (sel) => {
     const i = css.indexOf(sel + ' {')
     assert.notStrictEqual(i, -1, `la regle « ${sel} » n existe pas`)
     return css.slice(i + sel.length + 2, css.indexOf('}', i))
   }
+  // ⚠ LA REGLE GENERALE, PAS CELLE D'UN MEDIA : on lit la premiere occurrence,
+  // et `.grid-avis` est declaree avant toute media query (le commentaire du
+  // fichier dit pourquoi : a specificite egale, l'ordre tranche).
+  const rail = regle('.grid-avis')
+  assert.match(rail, /display:\s*flex/,
+    `.grid-avis n est pas un rail a toutes les largeurs : « ${rail.trim()} »`)
+  assert.match(rail, /overflow-x:\s*auto/,
+    'sans `overflow-x: auto`, les cartes debordent au lieu de defiler')
+  assert.match(rail, /align-items:\s*stretch/,
+    'les cartes n ont pas la meme hauteur : `align-items: stretch` manque')
+  // ⚠ ET AUCUN `grid-template-columns` : c'est lui qui faisait la 2e ligne.
+  assert.strictEqual(/grid-template-columns/.test(rail), false,
+    `.grid-avis garde des colonnes de grille : « ${rail.trim()} » — une 2e ligne reapparaitra`)
+  // Une largeur FIXE pour les enfants, sinon ils se compriment au lieu de
+  // faire defiler, et la « seule ligne » devient trois cartes ecrasees.
+  const enfants = regle('.grid-avis > *')
+  assert.match(enfants, /flex:\s*0\s+0\s+\d+px/,
+    `les cartes du rail n ont pas de largeur fixe : « ${enfants.trim()} »`)
+  // La sentinelle occupe une place DANS le rail, a toutes les largeurs.
+  const sent = regle('.grid-avis > .avis-suite')
+  assert.match(sent, /flex:\s*0\s+0\s+\d+px/,
+    `la sentinelle n a pas de largeur dans le rail : « ${sent.trim()} » — le defilement ne l atteindra pas`)
   assert.match(regle('.avis-suite'), /min-height:\s*\d+px/,
-    'la sentinelle n a pas de hauteur : a l ordinateur, rien ne la separe de la derniere carte')
-  // La largeur du rail : dans le media du RAIL, et egale a celle d une carte.
-  const seuilRail = css.indexOf('@media (max-width: 720px)', css.indexOf('.avis-suite {'))
-  assert.notStrictEqual(seuilRail, -1, 'la largeur du rail n est pas posee au seuil du rail (720 px)')
-  const bloc = css.slice(seuilRail, css.indexOf('\n}', seuilRail))
-  assert.match(bloc, /\.avis-suite\s*\{[^}]*width:\s*268px/,
-    `la sentinelle ne fait pas la largeur d une carte dans le rail : ${bloc.slice(0, 160)}`)
-  const carte = regle('.scroll-x .avis-carte')
-  assert.match(carte, /width:\s*268px/,
-    `une carte du rail ne fait plus 268 px (${carte.trim()}) : la sentinelle ne lui correspond plus`)
+    'la sentinelle n a pas de hauteur')
 })
 
 test("LE TEST QUI COMPTE : AUCUNE observation avant le premier defilement", () => {

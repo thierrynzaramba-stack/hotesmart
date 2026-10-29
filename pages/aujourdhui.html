@@ -248,6 +248,22 @@
       <div class="rev-an-tete">
         <div>
           <span class="caption muted" data-bind="revenue-annee-periode"></span>
+          <!-- ⚠ L'INFO-BULLE DU TOTAL. Demande de Thierry du 29 octobre 2026 :
+               « plus aucun paragraphe sous la courbe ni sous le tableau, tout
+               passe en info-bulles ». Elle remplace la ligne des RESERVES, qui
+               concatenait jusqu'a dix motifs par ` · ` (dette 121).
+               ⚠ UN VRAI BOUTON, PAS UN `title=` : un `title` n'apparait pas au
+               TOUCHER — la moitie de la demande —, n'est pas lisible au clavier,
+               et son texte n'est pas dans le DOM, donc intestable autrement
+               qu'en lisant un attribut. Ce depot vient de payer deux fois cette
+               confusion sur l'opacite des bandes. -->
+          <span class="ibulle" data-bind="revenue-annee-ib-total" hidden>
+            <button type="button" class="ibulle__btn" aria-expanded="false"
+                    data-ibulle data-i18n-attr="aria-label:revenue.annee_ib_ouvrir">
+              <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-help"></use></svg>
+            </button>
+            <span class="ibulle__txt" role="note" data-bind="revenue-annee-ib-total-txt"></span>
+          </span>
           <strong class="num rev-an-total" data-bind="revenue-annee-n"></strong>
         </div>
         <!-- ⚠ LE TOTAL N-1 EST COTE A COTE, SANS POURCENTAGE. La maquette en
@@ -274,7 +290,25 @@
       <div class="rev-an-filtres" role="group" data-list="revenue-annee-filtres"
            data-i18n-attr="aria-label:revenue.annee_filtre_aria"></div>
 
-      <div class="rev-an-legende" data-bind="revenue-annee-legende" aria-hidden="true"></div>
+      <!-- ⓘ DU TITRE DE LA COURBE : ce que la courbe montre, et ce qu'elle ne
+           montre pas. Elle remplace le paragraphe `revenue-annee-note`. -->
+      <div class="row" style="gap: 4px; align-items: center">
+        <h3 class="caption" data-i18n="revenue.annee_courbe_titre"></h3>
+        <span class="ibulle">
+          <button type="button" class="ibulle__btn" aria-expanded="false"
+                  data-ibulle data-i18n-attr="aria-label:revenue.annee_ib_ouvrir">
+            <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-help"></use></svg>
+          </button>
+          <span class="ibulle__txt" role="note" data-bind="revenue-annee-ib-courbe"></span>
+        </span>
+      </div>
+      <!-- ⚠ LA LEGENDE N'EST PLUS `aria-hidden`. Elle l'etait parce qu'elle ne
+           portait que des marques de couleur, doublees par le resume de la
+           courbe ; elle porte maintenant la ⓘ des comparables, qui est le SEUL
+           endroit ou leur nombre et la date du releve se lisent. La cacher aux
+           lecteurs d'ecran retirerait une information qui n'existe plus
+           ailleurs. -->
+      <div class="rev-an-legende" data-bind="revenue-annee-legende"></div>
       <div data-bind="revenue-annee-courbe"></div>
 
       <!-- ⚠ UN VRAI TABLEAU : trois colonnes de chiffres alignees se lisent,
@@ -295,7 +329,6 @@
            Mois : a 390 px, quatre colonnes ne tiennent pas. -->
       <ul class="rev-liste rev-liste--annee" data-list="revenue-annee-cartes"></ul>
 
-      <p class="caption muted" data-bind="revenue-annee-note"></p>
       <!-- ⚠ LE TABLEAU DOUBLE LA LIGNE POINTILLEE, IL NE LA REMPLACE PAS.
            Au niveau du compte, l'axe est tire par le pic d'ete : deux
            pointilles a 2 k € sur un axe a 16 k € se tassent au ras de l'axe,
@@ -317,9 +350,11 @@
         </div>
         <ul class="rev-liste rev-rad-liste" data-list="revenue-annee-rad-cartes"></ul>
       </div>
-      <p class="caption muted" data-bind="revenue-annee-comparables-tous" hidden></p>
-      <p class="caption muted" data-bind="revenue-annee-comparables" hidden></p>
-      <p class="caption muted" data-bind="revenue-annee-reserves" hidden></p>
+      <!-- ⚠ LES QUATRE PARAGRAPHES SONT RETIRES (dette 121 soldee) : la note de
+           periode, la phrase « sous Tous », la note des comparables et la ligne
+           des reserves. Leur contenu vit dans les trois ⓘ ci-dessus. Aucune
+           information n'est perdue — c'est la condition que Thierry a posee en
+           meme temps que le retrait. -->
     </div>
 
     <!-- ⚠ LA NOTE DE BAS DE BLOC PORTE L'HONNETETE DE TOUT CE QUI PRECEDE
@@ -353,6 +388,7 @@ import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
 import { courbeMensuelle } from '/shared/courbe-mensuelle.js'
+import { brancherInfoBulles } from '/shared/ibulle.js'
 // ⚠ `enteteCompte()` sur chaque fetch : les endpoints lus ici honorent X-Compte
 // (compteDelegue) ; sans l'en-tête, un membre verrait SON compte pendant que
 // les lectures Supabase, juste à côté, lisent le compte consulté.
@@ -2090,7 +2126,12 @@ function renderAnnee () {
     // s'affichait au-dessus d'un tableau vide dont l'en-tete annoncait encore
     // « 2026 | 2025 | Ecart » : un cadre qui promet des chiffres qu'on n'a pas.
     for (const b of ['revenue-annee-periode', 'revenue-annee-n', 'revenue-annee-n1',
-      'revenue-annee-n1-label', 'revenue-annee-note',
+      'revenue-annee-n1-label',
+      // ⚠ LES TROIS INFO-BULLES, et plus les paragraphes qu'elles remplacent :
+      // un texte laisse dans une bulle survivrait a « Lecture impossible »,
+      // invisible jusqu'au survol — donc pire qu'un paragraphe perime, qu'on
+      // voit au moins.
+      'revenue-annee-ib-courbe', 'revenue-annee-ib-total-txt',
       'revenue-annee-col-n', 'revenue-annee-col-n1']) {
       const n = document.querySelector(`[data-bind="${b}"]`); if (n) n.textContent = ''
     }
@@ -2100,7 +2141,8 @@ function renderAnnee () {
     // ⚠ ET LE BLOC LUI-MEME, pas seulement ses lignes : son TITRE et son
     // en-tete de colonnes resteraient sinon au-dessus d'un tableau vide.
     const rad_ = $('[data-bind="revenue-annee-rad"]'); if (rad_) rad_.hidden = true
-    const r = $('[data-bind="revenue-annee-reserves"]'); if (r) { r.hidden = true; r.textContent = '' }
+    const ibt = $('[data-bind="revenue-annee-ib-total"]'); if (ibt) ibt.hidden = true
+    const lg = $('[data-bind="revenue-annee-legende"]'); if (lg) lg.innerHTML = ''
   }
   if (etat.anneeEtat === 'chargement') { dire('revenue.computing'); videTout(); return }
   // ⚠ `!etat.annee.total` ET NON `=== null` : la vue Mois ecrit la forme lache
@@ -2439,6 +2481,34 @@ function renderAnnee () {
         : t('revenue.courbe_resume', { n: String(an), n1: String(an - 1) })
     })
   }
+  // ─── LE TEXTE DE LA ⓘ DES COMPARABLES ───────────────────────────────────
+  // ⚠ COMPOSE ICI, AVANT LA LEGENDE QUI LE PORTE, parce que c'est ici que les
+  // donnees sont. Il remplace deux paragraphes d'un coup : la note des
+  // comparables et la phrase « sous Tous » (dette 121).
+  // ⚠ QUATRE ETATS, ET AUCUN NE SE TAIT. Les trois derniers etaient deja la
+  // avant le passage en info-bulle, et chacun ferme un defaut mesure : un
+  // silence sous « Tous » se lit comme une panne (constat 1 de la recette du
+  // 28 octobre) ; une lecture RATEE n'est pas une absence de comparables ; une
+  // lecture EN VOL n'est pas une lecture ratee.
+  const txtComparables = (() => {
+    if (compEchoue) return t('revenue.annee_comparables_echec')
+    if (compEnVol) return t('revenue.computing')
+    if (!choisi) return t('revenue.annee_comparables_tous')
+    if (!(bandes.length && compDate && compNb)) return ''
+    // Le texte de Thierry, mot pour mot, avec ses deux valeurs dynamiques.
+    let s = t('revenue.annee_ib_comparables', {
+      n: compNb.min === compNb.max ? String(compNb.min) : `${compNb.min}–${compNb.max}`,
+      date: dateDuJour(String(compDate), { day: 'numeric', month: 'long', year: 'numeric' })
+    })
+    // ⚠ LES DEUX RESERVES DE LA BANDE SUIVENT, et elles ne sont pas dans le
+    // texte demande parce qu'elles n'arrivent pas toujours : des photos de
+    // dates differentes, et des comparables fermes. Les perdre au passage en
+    // info-bulle aurait retire deux faits mesures pour gagner deux lignes.
+    if (compPlusieursDates) s += '\n' + t('revenue.annee_comparables_dates')
+    if (compEcartes > 0) s += '\n' + t('revenue.annee_comparables_fermes', { n: compEcartes })
+    return s
+  })()
+
   // La legende : trois marques au plus, et la troisieme n'apparait que si le
   // trait pointille existe vraiment.
   const noeudLeg = $('[data-bind="revenue-annee-legende"]')
@@ -2463,6 +2533,18 @@ function renderAnnee () {
         b.nature === 'clos' ? 'bande' : 'bande-futur',
         t(b.nature === 'clos' ? 'revenue.annee_comparables_legende' : 'revenue.annee_comparables_legende_futur')
       )).join('')
+      // ⚠ LA ⓘ DES COMPARABLES VIT DANS LA LEGENDE, a cote des marques qu'elle
+      // explique (demande de Thierry du 29 octobre). Elle remplace le
+      // paragraphe `revenue-annee-comparables` ET la phrase « sous Tous ».
+      // ⚠ ET ELLE N'APPARAIT QUE S'IL Y A QUELQUE CHOSE A DIRE : une ⓘ qui
+      // s'ouvre sur du vide est pire qu'absente. Les quatre etats qu'elle
+      // porte — bande presente, « Tous » sans bande, lecture ratee, lecture en
+      // vol — sont ceux du paragraphe qu'elle remplace, mot pour mot.
+      + (txtComparables ? `<span class="ibulle ibulle--fin"><button type="button"`
+        + ` class="ibulle__btn" aria-expanded="false" data-ibulle`
+        + ` aria-label="${esc(t('revenue.annee_ib_ouvrir'))}">`
+        + `<svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-help"></use></svg>`
+        + `</button><span class="ibulle__txt" role="note">${esc(txtComparables)}</span></span>` : '')
   }
 
   // ─── Le tableau par logement ────────────────────────────────────────────
@@ -2673,30 +2755,21 @@ function renderAnnee () {
   // etait juste — un min/max de comparables n'a aucun sens pour un compte,
   // chaque logement ayant les siens — mais un silence se lit comme une panne.
   // Constat 1 de la recette du 28 octobre.
-  const noteSansBien = $('[data-bind="revenue-annee-comparables-tous"]')
-  if (noteSansBien) {
-    noteSansBien.hidden = !!choisi
-    noteSansBien.textContent = choisi ? '' : t('revenue.annee_comparables_tous')
+  // ─── LA ⓘ DU TITRE DE LA COURBE ─────────────────────────────────────────
+  // Le texte de Thierry, mot pour mot, avec ses deux valeurs dynamiques : la
+  // periode comparee et l'annee du trait gris. Il remplace le paragraphe
+  // `revenue-annee-note`, qui disait la meme chose en moins de mots et sous la
+  // courbe plutot qu'a cote de son titre.
+  const ibCourbe = $('[data-bind="revenue-annee-ib-courbe"]')
+  if (ibCourbe) {
+    // ⚠ LA PERIODE EST CELLE REELLEMENT COMPAREE, pas « l'annee ». Sur l'annee
+    // en cours le total s'arrete au mois courant (decision 2 de Thierry), et
+    // c'est exactement ce que cette phrase doit dire.
+    const periode = enCours
+      ? `${moisSeul(`${an}-01`)} – ${moisSeul(`${an}-${String(moisCourant).padStart(2, '0')}`)}`
+      : String(an)
+    ibCourbe.textContent = t('revenue.annee_ib_courbe', { periode, n1: String(an - 1) })
   }
-  const noteComp = $('[data-bind="revenue-annee-comparables"]')
-  if (noteComp) {
-    const dire = bandes.length && compDate && compNb
-    noteComp.hidden = !dire && !compEchoue && !compEnVol
-    if (compEchoue) noteComp.textContent = t('revenue.annee_comparables_echec')
-    else if (compEnVol) noteComp.textContent = t('revenue.computing')
-    else noteComp.textContent = dire
-      ? t('revenue.annee_comparables_note', {
-        n: compNb && compNb.min === compNb.max ? String(compNb.min) : `${compNb.min}–${compNb.max}`,
-        date: dateDuJour(String(compDate), { day: 'numeric', month: 'long', year: 'numeric' })
-      }) + (compPlusieursDates ? ' ' + t('revenue.annee_comparables_dates') : '')
-        + (compEcartes > 0 ? ' ' + t('revenue.annee_comparables_fermes', { n: compEcartes }) : '')
-      : ''
-  }
-  $('[data-bind="revenue-annee-note"]').textContent = enCours
-    ? t('revenue.annee_note_cours', {
-      mois: moisSeul(`${an}-${String(moisCourant).padStart(2, '0')}`), annee: String(an - 1)
-    })
-    : t('revenue.annee_note_entiere')
 
   // ⚠ CINQ RESERVES, ET CHACUNE EST UN FAIT MESURE, pas une precaution de
   // style. Les taire ferait un total qu'aucune ligne n'explique — c'est le
@@ -2774,10 +2847,46 @@ function renderAnnee () {
   // comme « l'an dernier n'a rien vendu ».
   if (enCours && !rad) reserves.push(t('revenue.annee_rad_indispo'))
 
-  const noeudRes = $('[data-bind="revenue-annee-reserves"]')
-  if (noeudRes) {
-    noeudRes.hidden = reserves.length === 0
-    noeudRes.textContent = reserves.join(' · ')
+  // ─── LA ⓘ DU TOTAL ──────────────────────────────────────────────────────
+  // ⚠ ELLE REMPLACE LA LIGNE DES RESERVES, qui concatenait jusqu'a DIX motifs
+  // par ` · ` sous le tableau (dette 121 : « chaque phrase est juste, c'est
+  // leur somme qui ne se lit plus »). Une par ligne, dans une bulle.
+  //
+  // ⚠ LES QUATRE LIGNES DE THIERRY D'ABORD, DANS SON ORDRE, puis les autres
+  // reserves. Il a dicte quatre lignes ; le bloc en produit jusqu'a dix. Les
+  // six restantes ne sont pas du remplissage — ce sont des faits mesures
+  // (sejours rattaches a aucun logement, logements sans aucune ligne, mois
+  // refuse par le seuil, agregat indisponible…) dont chacun ferme un defaut
+  // paye. Les jeter pour tenir la liste dictee aurait transforme un
+  // allegement d'affichage en perte d'information, et c'est la condition que
+  // Thierry a posee en meme temps que le retrait.
+  //
+  // ⚠ UNE LIGNE A ZERO NE S'AFFICHE PAS — sa consigne, et c'est la raison
+  // d'avoir quatre clefs plutot qu'un texte unique : « 0 sejour sans montant »
+  // est une phrase qui inquiete pour rien.
+  const lignesIb = []
+  if (refusN + refusN1 > 0) {
+    lignesIb.push(t('revenue.annee_ib_total_sans_montant', { n: refusN + refusN1 }))
+  }
+  if (brutsAn > 0) lignesIb.push(t('revenue.annee_ib_total_bruts', { n: brutsAn }))
+  if (perimetreBouge) lignesIb.push(t('revenue.annee_ib_total_perimetre'))
+  // Toujours presente : elle ne depend d'aucun compte, elle dit la NATURE du
+  // chiffre. C'est la seule des quatre qui ne peut pas « valoir zero ».
+  lignesIb.push(t('revenue.annee_ib_total_estime'))
+  // Les autres reserves, chacune sur sa ligne. ⚠ On retire celles que les
+  // quatre lignes ci-dessus disent deja, sinon l'hote lit deux fois la meme
+  // chose dans la meme bulle.
+  for (const r of reserves) {
+    if (r === t('revenue.annee_perimetre')) continue
+    if (refusN + refusN1 > 0 && r === t('revenue.no_amount', { n: refusN + refusN1 })) continue
+    if (brutsAn > 0 && r === t('revenue.gross_count', { n: brutsAn })) continue
+    lignesIb.push(r)
+  }
+  const ibTotal = $('[data-bind="revenue-annee-ib-total"]')
+  const ibTotalTxt = $('[data-bind="revenue-annee-ib-total-txt"]')
+  if (ibTotal && ibTotalTxt) {
+    ibTotal.hidden = lignesIb.length === 0
+    ibTotalTxt.textContent = lignesIb.join('\n')
   }
 }
 
@@ -2844,6 +2953,15 @@ async function init () {
   for (const b of document.querySelectorAll('.seg__btn[data-vue]')) {
     b.addEventListener('click', () => allerALaVue(b.dataset.vue))
   }
+
+  // ⚠ LES INFO-BULLES ⓘ S'OUVRENT AU TOUCHER, pas seulement au survol — c'est
+  // la moitie de la demande de Thierry (« survol / toucher »), et sur telephone
+  // c'est la SEULE moitie qui existe. Le comportement vit dans
+  // `shared/ibulle.js` et PAS ici : un comportement ecrit dans cette balise
+  // `<script>` ne se teste qu'en extrayant son code a la regex, et
+  // `tests/aujourdhui-info-bulles.test.js` exerce la MEME fonction que cette
+  // ligne appelle.
+  brancherInfoBulles(document)
   // ⚠ LES PASTILLES DE FILTRE SE DELEGUENT, parce qu'elles sont RECONSTRUITES a
   // chaque rendu : un ecouteur pose sur chaque bouton serait perdu au rendu
   // suivant, et un ecouteur pose a chaque rendu s'empilerait. Un seul ecouteur
