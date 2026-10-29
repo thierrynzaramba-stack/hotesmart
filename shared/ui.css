@@ -83,7 +83,32 @@ h1, h2, h3, p { margin: 0; }
    Posee apres, cette regle aurait remis `display: grid` au telephone et le
    defilement horizontal n'aurait jamais eu lieu. `.grid-auto`, deux lignes
    plus haut, est a sa place pour exactement la meme raison. */
-.grid-avis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-l); align-items: start; }
+/* ⚠ UNE SEULE LIGNE DE CARTES, A TOUTES LES LARGEURS — demande de Thierry du
+   29 octobre 2026 : « UNE SEULE ligne de cartes, aussi sur ordinateur. Les avis
+   suivants se chargent en defilant horizontalement dans cette ligne (comme le
+   rail mobile). Jamais de 2e ligne. »
+   C'etait une grille de trois colonnes qui s'allongeait vers le BAS a chaque
+   chargement : le bloc poussait tout le reste de la page, et le defilement de
+   la page servait a la fois a lire l'ecran et a charger des avis. Le rail, lui,
+   borne le geste au bloc.
+   ⚠ `align-items: stretch` ET NON `start` : « cartes de meme hauteur », demande
+   dans le meme message. Avec `start`, une carte dont le commentaire tient sur
+   une ligne etait deux fois moins haute que sa voisine, et la ligne de cartes
+   paraissait cassee. */
+.grid-avis {
+  display: flex;
+  gap: var(--gap-l);
+  align-items: stretch;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  /* La barre de defilement disparait, le geste reste — comme `.scroll-x`. */
+  scrollbar-width: none;
+}
+.grid-avis::-webkit-scrollbar { display: none; }
+/* ⚠ UNE LARGEUR FIXE, SINON PAS DE RAIL : des cartes en `flex: 1` se
+   compriment pour tenir dans la ligne au lieu de la faire defiler, et la
+   « seule ligne » devient trois cartes ecrasees. */
+.grid-avis > * { flex: 0 0 300px; scroll-snap-align: start; }
 .section-head { display: flex; align-items: baseline; gap: 12px; }
 .section-head .h2 { flex: 1; }
 
@@ -419,7 +444,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
      `flex: 1`), les chiffres passent dessous. */
   .section-head { flex-wrap: wrap; }
   .section-head .h2 { flex: 1 0 100%; }
-  .grid-avis { display: flex; }
+  /* ⚠ PLUS RIEN A BASCULER ICI : `.grid-avis` est un rail a TOUTES les
+     largeurs depuis le 29 octobre 2026. Seule la largeur des cartes change,
+     pour tenir dans 390 px. */
+  .grid-avis > * { flex: 0 0 268px; }
   /* Barre du bas sur fond noir (retouche charte du 11 octobre 2026) :
      inactifs en --on-ink-muted, actif en --on-ink, badge ambre inchange. */
   .bottombar {
@@ -1705,10 +1733,110 @@ body.men-cfg-ouvert { overflow: hidden; }
    ⚠ ET 268 px EST LA LARGEUR D'UNE CARTE (`.scroll-x .avis-carte`), pas un
    nombre choisi : j'avais ecrit 160 px en l'annoncant comme « la largeur d'une
    carte » — un chiffre faux dans un commentaire se lit comme une mesure. */
-.avis-suite { display: flex; align-items: center; justify-content: center; min-height: 40px; }
-@media (max-width: 720px) {
-  .avis-suite { flex: 0 0 auto; width: 268px; }
+/* ─── L'INFO-BULLE ⓘ ──────────────────────────────────────────────────────
+   Demande de Thierry du 29 octobre 2026 : « plus aucun paragraphe sous la
+   courbe ni sous le tableau. Tout passe en info-bulles ⓘ (survol / toucher). »
+   Elle solde la dette 121 — quatre paragraphes empiles dont une ligne de
+   reserves qui concatenait jusqu'a dix motifs.
+
+   ⚠ UN VRAI `<button>`, PAS UN `title=`. Trois raisons mesurables : un `title`
+   n'apparait pas au TOUCHER (la moitie de la demande), il n'est pas lisible au
+   clavier, et son texte n'est pas dans le DOM — donc intestable autrement qu'en
+   lisant un attribut, ce que ce depot vient de payer deux fois sur l'opacite
+   des bandes.
+
+   ⚠ ET PAS `hidden` POUR CACHER LE TEXTE : `[hidden]{display:none!important}`
+   est en tete de cette feuille, donc aucune regle de survol ne pourrait le
+   rouvrir. On cache par `display: none` sur la classe, et on ouvre au survol,
+   au focus clavier, et sur `aria-expanded="true"` que le clic pose (toucher). */
+.ibulle { position: relative; display: inline-flex; vertical-align: middle; }
+.ibulle__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  /* 24 px : la cible tactile minimale de cette feuille pour un bouton d'appoint
+     (`--control` vaut 44 px, reserve aux boutons d'action). */
+  width: 24px; height: 24px; padding: 0;
+  background: none; border: 0; border-radius: 50%;
+  color: var(--muted); cursor: pointer;
 }
+.ibulle__btn:hover, .ibulle__btn:focus-visible { color: var(--ink); background: var(--surface-2); }
+.ibulle__txt {
+  display: none;
+  position: absolute; z-index: 40; top: calc(100% + 6px); inset-inline-start: 0;
+  /* ⚠ UNE LARGEUR BORNEE PAR LA FENETRE, pas une largeur fixe : a 390 px, un
+     `width: 320px` depasse le bord et le texte devient illisible au toucher,
+     qui est justement le geste demande. */
+  width: max-content; max-width: min(320px, calc(100vw - 2 * var(--page-pad)));
+  padding: 10px 12px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-hover);
+  font-size: var(--fs-caption); font-weight: var(--fw-regular);
+  text-align: start; white-space: pre-line;
+}
+/* ⚠ LE SURVOL EST RESERVE AUX POINTEURS QUI SURVOLENT VRAIMENT (constat 2 de
+   la revue de 6d82af4d). Sur un navigateur tactile, `:hover` RESTE accroche a
+   l'element touche jusqu'au prochain toucher ailleurs : le premier doigt
+   ouvrait (`aria-expanded` ET `:hover`), le second rendait `aria-expanded` a
+   `false` mais `:hover` continuait d'ouvrir — la feuille ne se refermait pas,
+   et le geste demande paraissait casse. Le test jsdom ne lisait que
+   `aria-expanded`, donc il restait vert : c'est le faux vert exact contre
+   lequel ce lot a ete ecrit. */
+@media (hover: hover) and (pointer: fine) {
+  .ibulle:hover .ibulle__txt { display: block; }
+}
+.ibulle__btn:focus-visible + .ibulle__txt,
+.ibulle__btn[aria-expanded="true"] + .ibulle__txt { display: block; }
+/* ⚠ COLLEE AU BORD DROIT QUAND ELLE Y EST : sans cela, une ⓘ en fin de ligne
+   ouvre sa bulle hors de l'ecran a droite. */
+.ibulle--fin .ibulle__txt { inset-inline-start: auto; inset-inline-end: 0; }
+
+/* ⚠ A L'ORDINATEUR, LA BULLE DE LA LEGENDE S'ANCRE SUR LA LEGENDE, pas sur son
+   ⓘ (constat 1 de la revue de 6d82af4d, mesure au navigateur reel). `--fin`
+   colle le bord DROIT de la bulle a son ⓘ ; or `.rev-an-legende` est un flex
+   qui RETOURNE A LA LIGNE, et la ⓘ se retrouve alors pres du bord gauche :
+   une bulle de 320 px s'ouvrait a −29 px a 800 px de large, et a −231 px a
+   900 px. C'est le meme defaut que celui du telephone, de l'autre cote.
+   La legende, elle, est bornee par la carte : en lui rendant l'ancrage
+   (`position: static` sur la ⓘ), la bulle s'aligne sur son bord droit et
+   s'ouvre sous elle — donc jamais hors de l'ecran, quel que soit le nombre de
+   marques et la largeur de la fenetre. */
+@media (min-width: 721px) {
+  .rev-an-legende { position: relative; }
+  .rev-an-legende .ibulle--fin { position: static; }
+  .rev-an-legende .ibulle--fin .ibulle__txt {
+    inset-inline-start: auto; inset-inline-end: 0; top: calc(100% + 6px);
+  }
+}
+
+/* ⚠ AU TELEPHONE, LA BULLE SE POSE EN BAS DE L'ECRAN, et ce n'est pas un choix
+   d'esthetique : MESURE au navigateur reel (390 x 900, balisage reel de la vue
+   Annee), la bulle du total s'ouvrait de 196 px a 516 px — soit 126 px HORS
+   ECRAN. Le `max-width` ne suffit pas : il borne la LARGEUR, pas la position de
+   depart, et une ⓘ placee apres « Janvier → octobre 2026 » commence a 196 px.
+   Aligner sur le bord droit de l'ancre (`--fin`) ne ferait que deplacer le
+   debordement a gauche.
+   Sans JavaScript, la seule largeur qu'on connaisse au telephone est celle de
+   la FENETRE : la bulle devient une feuille basse, bornee par la fenetre, donc
+   jamais coupee — quelle que soit la position de la ⓘ qui l'ouvre. C'est le
+   geste que Thierry a demande (« toucher »), et sur telephone le seul qui
+   existe. Le precedent du depot est `.cal-yf-menu`, qui borne de la meme
+   facon. */
+@media (max-width: 720px) {
+  .ibulle__txt, .ibulle--fin .ibulle__txt {
+    position: fixed; top: auto; bottom: var(--page-pad);
+    inset-inline: var(--page-pad);
+    width: auto; max-width: none;
+  }
+}
+
+/* ⚠ LA SENTINELLE EST UNE CARTE DU RAIL, A TOUTES LES LARGEURS. Elle portait
+   sa largeur dans le media du telephone seulement, du temps ou l'ordinateur
+   avait une grille : depuis que le rail est global, l'ordinateur en a besoin
+   aussi — sans largeur, `flex: 0 0 300px` de la regle generale s'appliquerait,
+   ce qui marche, mais le `min-height` ne suffirait pas a la rendre atteignable
+   si elle etait vide. */
+.avis-suite { display: flex; align-items: center; justify-content: center; min-height: 40px; }
+.grid-avis > .avis-suite { flex: 0 0 180px; }
 
 
 /* ─── Le tableau « Reserve a date » ───────────────────────────────────────
