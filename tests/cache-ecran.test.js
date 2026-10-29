@@ -54,8 +54,27 @@ function charger ({ horloge = null } = {}) {
     removeItem: (k) => { magasin.delete(k) }
   }
   const sandbox = { localStorage, JSON, Object, console, module: { exports: {} } }
-  if (horloge) sandbox.Date = new Proxy(Date, { apply: (t, s, a) => Reflect.apply(t, s, a),
-    get: (t, p) => (p === 'now' ? horloge : t[p]) })
+  // ⚠ LE MODULE TOURNE DANS UN AUTRE REALM, ET SON `Date` N'EST PAS LE NOTRE.
+  // `vm.runInNewContext` donne au code les globales du contexte NEUF : son
+  // `Date` est une autre fonction que celle du realm principal, donc la
+  // contre-epreuve a horloge decalee — qui remplace le `Date` de Node et celui
+  // de jsdom — ne l'atteignait PAS. Mesure du 28 octobre 2026, par une sonde :
+  //   realm principal (ce que le test lit)   -> 2026-11
+  //   realm du VM     (ce que le module lit) -> 2026-10
+  //   ecart : 431 999 999 ms, soit exactement les 5 jours du decalage.
+  // Le test construisait donc sa fixture sur NOVEMBRE et le module la refusait
+  // parce qu'il etait encore en OCTOBRE : 1 rouge des J+5, et a tout decalage
+  // qui franchit une fin de mois, sans qu'aucune ligne de production soit en
+  // cause. Meme famille que l'ecart de realm deja note pour `deepEqual`.
+  //
+  // ⚠ ON INSTALLE DONC L'HORLOGE **TOUJOURS**, et par defaut celle du realm
+  // PRINCIPAL : le module et le test lisent alors la meme, decalee ou non. Une
+  // horloge explicite reste prioritaire pour les tests qui injectent un instant.
+  sandbox.Date = new Proxy(Date, {
+    apply: (t, s, a) => Reflect.apply(t, s, a),
+    construct: (t, a) => new t(...a),
+    get: (t, p) => (p === 'now' ? (horloge || Date.now) : t[p])
+  })
   const code = SOURCE.replace(/^export const /gm, 'const ')
     .replace(/^export function /gm, 'function ')
     + '\n;module.exports = { ecrire, lire, oublierTout, _interne }'
