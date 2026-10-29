@@ -113,10 +113,18 @@ function banc ({ taches = [], panneLecture = false, panneEcriture = false } = {}
   return { etat, client }
 }
 
-test('⚠ `echues` EXCLUT les taches suspendues : elles ne peuvent pas partir', async () => {
-  // Constat 1 de la derniere revue. `lireLesDues` ecarte les suspendues
-  // (`.is('suspendu_le', null)`) et ce module les garde suspendues expres au
-  // rearmement : les compter annoncait un envoi impossible.
+test('⚠ `echues` COMPTE les taches suspendues : une suspension differe un depart', async () => {
+  // ⚠ CE TEST DISAIT L'INVERSE, ET IL FIGEAIT LE DEFAUT. C'est la regle 17 de
+  // REVIEW.md en acte — « un test peut figer un bug » —, et c'est Thierry qui
+  // l'a trouve en recette, pas la suite : « une proposition qui finira par
+  // partir seule compte, suspendue ou non ».
+  //
+  // Mon raisonnement d'alors : `lireLesDues` ecarte les suspendues
+  // (`.is('suspendu_le', null)`), donc les compter annoncerait un envoi
+  // impossible. Vrai pour CE lecteur, faux pour la passe : dans le meme
+  // fichier, `reprendreSuspensionsDormantes` efface `suspendu_le` apres
+  // 30 minutes sans geste de l'hote et repose l'echeance au plancher de 5 min.
+  // J'avais lu la moitie du chemin.
   const vieux = '2026-11-11T08:00:00Z'   // +60 min -> 9 h, donc echu a T0 (11 h)
   const b = banc({ taches: [
     tache({ id: 'libre', created_at: vieux, send_after: null }),
@@ -125,7 +133,7 @@ test('⚠ `echues` EXCLUT les taches suspendues : elles ne peuvent pas partir', 
   ] })
   const r = await lancer(b, DANS_60, { apercu: true })
   assert.equal(r.rearmes, 2, 'les deux seraient rearmees')
-  assert.equal(r.echues, 1, 'mais une seule pourrait partir')
+  assert.equal(r.echues, 2, 'et les DEUX partiront seules : la suspendue aussi')
 })
 
 test('bilanVide rend les SIX compteurs, et c est le contrat du module', () => {
@@ -680,7 +688,10 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   // reentrant sortirait par le `return` en laissant le drapeau colle.
   const iEnv = page.indexOf('async function enregistrerPanneau (corps, ref) {')
   assert.ok(iEnv > 0)
-  const iGarde = page.indexOf('if (etat.modeEnCours) return', iEnv)
+  // ⚠ L'ANCRE SUIT LE CODE : la garde ne fait plus un `return` nu, elle POSE UNE
+  // NOTE avant de sortir (recette du 29 octobre 2026 : un geste qui ne fait
+  // rien doit le dire).
+  const iGarde = page.indexOf('if (etat.modeEnCours) {', iEnv)
   assert.ok(iGarde > iEnv && page.indexOf('etat.panneauEnCours = true', iEnv) > iGarde,
     'la pose suit la garde de reentrance')
   // ⚠ ET LE FILET EXISTE (constat 5) : un lever n importe ou doit rendre les
@@ -700,4 +711,74 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
         `${f} : ${cle} porte son nombre`)
     }
   }
+})
+
+// ── La recette du 29 octobre 2026 : une suspension DIFFERE un depart ───────
+
+// Une proposition vieille de 22 h, SUSPENDUE : l'etat exact lu en base staging
+// au diagnostic (created_at il y a 22 h, echeance deja passee, suspendu_le
+// pose). Dates relatives a T0, qui est INJECTE — donc figees, selon la regle du
+// depot.
+// ⚠ `send_after` NE DOIT PAS EGALER `created_at + 60 min`, sinon le module rend
+// `inchanges` et n'ecrit RIEN : mon premier jet posait exactement l'echeance
+// recalculee, donc le test « un seul update » mesurait un no-op. Meme piege que
+// celui note sur `tache()` plus haut — une fixture qui rend le resultat attendu
+// par hasard ne mesure rien.
+const SUSPENDUE_VIEILLE = {
+  id: 'tache-suspendue',
+  created_at: new Date(T0 - 22 * 60 * MINUTE).toISOString(),
+  send_after: new Date(T0 - 20 * 60 * MINUTE).toISOString(),
+  suspendu_le: new Date(T0 - 21 * 60 * MINUTE).toISOString(),
+  updated_at: new Date(T0 - 21 * 60 * MINUTE).toISOString()
+}
+
+test('LE TEST QUI COMPTE : une tache SUSPENDUE et echue compte dans `echues`', async () => {
+  // ⚠ DECISION DE THIERRY EN RECETTE DU 29 OCTOBRE 2026 : « une proposition qui
+  // finira par partir seule compte, suspendue ou non ». Mon exclusion des
+  // suspendues etait fausse, et elle a coute le defaut exact de la recette : une
+  // proposition vieille de 22 h, suspendue, INVISIBLE du compteur — donc
+  // « Enregistré » sans un mot — alors que `reprendreSuspensionsDormantes`
+  // allait effacer sa suspension et la poster au voyageur.
+  //
+  // La suspension n'est pas un filtre, c'est un DELAI : la reprise est
+  // AUTOMATIQUE (30 min sans geste de l'hote, a chaque passage) et repose
+  // l'echeance au plancher de 5 min. C'est litteralement le « Envoyer dans
+  // 5 min » que Thierry a lu a l'ecran.
+  const b = banc({ taches: [tache(SUSPENDUE_VIEILLE)] })
+  const bilan = await lancer(b, DANS_60, { apercu: true })
+  assert.equal(bilan.ok, true, bilan.motif)
+  assert.equal(bilan.echues, 1,
+    'une suspendue dont l echeance recalculee est passee partira seule : elle compte')
+})
+
+test('une suspendue dont l echeance recalculee est A VENIR ne compte pas', async () => {
+  // La borne de l'autre cote : ce qui compte, c'est que l'echeance SOIT passee,
+  // pas que la tache soit suspendue. Sans ce test, poser `echues++` sans
+  // condition passerait au vert.
+  const b = banc({
+    taches: [tache({
+      id: 'tache-suspendue-recente',
+      created_at: new Date(T0 - 10 * MINUTE).toISOString(),
+      send_after: new Date(T0 + 50 * MINUTE).toISOString(),
+      suspendu_le: new Date(T0 - 5 * MINUTE).toISOString()
+    })]
+  })
+  const bilan = await lancer(b, DANS_60, { apercu: true })
+  assert.equal(bilan.ok, true, bilan.motif)
+  assert.equal(bilan.echues, 0, 'creation + 60 min est encore a venir')
+})
+
+test('et la suspension n est toujours PAS effacee par ce writer', async () => {
+  // La contrepartie, et elle ne bouge pas : COMPTER n'est pas ARMER. Effacer
+  // `suspendu_le` ici armerait un compte a rebours sur un texte que l'hote est
+  // en train d'ecrire, et le message pourrait partir sous ses doigts.
+  const b = banc({ taches: [tache(SUSPENDUE_VIEILLE)] })
+  await lancer(b, DANS_60)
+  assert.equal(b.etat.updates.length, 1, 'un seul update')
+  const patch = b.etat.updates[0].patch
+  assert.ok(!('suspendu_le' in patch), 'le writer ne touche pas a suspendu_le au rearmement')
+  assert.ok(!('updated_at' in patch),
+    'ni a updated_at sur une suspendue : c est le parachute de 30 min de l hote')
+  assert.equal(par(b, 'tache-suspendue').suspendu_le, SUSPENDUE_VIEILLE.suspendu_le,
+    'elle reste suspendue en base')
 })

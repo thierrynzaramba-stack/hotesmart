@@ -673,3 +673,53 @@ test('LE TEST QUI COMPTE : un lever du DERNIER re-rendu laisse quand meme la not
   assert.equal(B.boutonVolet(b, 'programmes').disabled, false, 'les boutons de volet sont rendus')
   b.fermer()
 })
+
+// ── La recette du 29 octobre 2026 : un refus de garde ne peut pas etre muet ─
+
+test('LE TEST QUI COMPTE : « Enregistrer » refuse en le DISANT, et n envoie rien', async () => {
+  // ⚠ SECONDE ANOMALIE DE LA RECETTE, non reproduite par Thierry : « sortie du
+  // manuel -> 1 h -> Enregistrer n a pas ete conserve ». Je n ai pas su
+  // reproduire la perte ; j ai trouve le seul chemin par lequel « Enregistrer »
+  // pouvait ne RIEN faire sans RIEN dire — sa garde de reentrance. Le bouton est
+  // normalement `disabled` dans cet etat, mais `off` est pose au RENDU : si
+  // `modeEnCours` passe a vrai sans qu un rendu suive, le DOM reste a vif et la
+  // garde mord en silence.
+  const envoyes = []
+  const b = B.monter({ appel: async (chemin, corps) => { if (corps) envoyes.push(corps); return {} } })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } }
+  })
+  // Une autre ecriture est en vol, et le DOM ne le sait pas encore.
+  b.msg.etat.modeEnCours = true
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.equal(b.note(), FR['messages.reglage_en_cours'], 'le refus se dit')
+  assert.equal(b.noteOk(), false)
+  assert.equal(envoyes.length, 0, 'et rien ne part')
+  // Et le re-rendu a repare l incoherence : le bouton montre l etat reel.
+  assert.equal(B.boutonSave(b).disabled, true, 'le bouton est repeint desarme')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : une pause refusee ne laisse pas la case MENTIR', async () => {
+  // Ici le silence est pire : le `change` a DEJA bascule la case a l ecran. Un
+  // `return` muet laissait l hote lire « en pause » alors que rien n etait
+  // ecrit — un ecran qui affirme ce qui n est pas, la famille de defaut que ce
+  // chantier passe son temps a fermer.
+  const envoyes = []
+  const b = B.monter({ appel: async (chemin, corps) => { if (corps) envoyes.push(corps); return {} } })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } },
+    pauses: {}
+  })
+  assert.equal(B.casePause(b).checked, false, 'au depart, pas en pause')
+  b.msg.etat.modeEnCours = true
+  B.changer(b, B.casePause(b), true)
+  await B.reposer(b)
+  assert.equal(b.note(), FR['messages.reglage_en_cours'], 'le refus se dit')
+  assert.equal(envoyes.length, 0, 'rien n est ecrit')
+  assert.equal(B.casePause(b).checked, false,
+    'et la case est remise sur l etat REEL, pas sur le geste refuse')
+  b.fermer()
+})

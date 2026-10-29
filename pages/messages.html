@@ -1206,7 +1206,17 @@ function modesDe (config) {
 // Le kill switch par bien : writer existant /api/property-automation, puis
 // relecture — meme discipline que le mode.
 async function basculerPause (ref, paused) {
-  if (etat.modeEnCours) return
+  // ⚠ ICI LE SILENCE EST PIRE QU'AILLEURS : le `change` a DEJA bascule la case
+  // a l'ecran. Un `return` muet laissait donc l'hote lire « en pause » — ou
+  // « plus en pause » — alors que RIEN n'avait ete ecrit. C'est la famille de
+  // defaut que ce chantier passe son temps a fermer : un ecran qui affirme ce
+  // qui n'est pas. Le re-rendu remet la case sur `etat.pauses`, c'est-a-dire
+  // sur l'etat reel, et la note dit pourquoi.
+  if (etat.modeEnCours) {
+    noteReglage(t('messages.reglage_en_cours'))
+    renderTiroir()
+    return
+  }
   etat.modeEnCours = true
   renderTiroir()
   let ecritureOk = false
@@ -1921,7 +1931,23 @@ function lireLePanneau (corps, ref) {
 // lui-meme, donc le `if` ci-dessous ne mord que si une exception est passee.
 // C'est pour ca que l'ordre « re-rendu puis note » reste celui du corps.
 async function enregistrerPanneau (corps, ref) {
-  if (etat.modeEnCours) return
+  // ⚠ UN GESTE QUI NE FAIT RIEN DOIT LE DIRE (recette du 29 octobre 2026,
+  // seconde anomalie : « sortie du manuel -> 1 h -> Enregistrer n'a pas ete
+  // conserve », non reproduite). Ce `return` etait MUET : l'hote cliquait
+  // « Enregistrer », rien ne partait, rien ne s'affichait, et au rechargement
+  // son reglage n'avait pas bouge — exactement le symptome decrit.
+  //
+  // Le bouton est normalement `disabled` dans cet etat, donc le clic ne devrait
+  // pas arriver ici. Mais `off` est pose au RENDU : si `modeEnCours` passe a
+  // vrai sans qu'un rendu suive — `renderTiroir` sort sans peindre quand le
+  // tiroir est cache —, le DOM reste a vif et la garde mord en silence. Le
+  // re-rendu ci-dessous repare cette incoherence au passage : il repeint l'etat
+  // reel, donc le bouton desarme.
+  if (etat.modeEnCours) {
+    noteReglage(t('messages.reglage_en_cours'))
+    renderTiroir()
+    return
+  }
   etat.modeEnCours = true
   etat.panneauEnCours = true
   try {

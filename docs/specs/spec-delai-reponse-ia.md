@@ -1405,6 +1405,84 @@ Le second programmait son geste de rupture dans un `setTimeout` — une
 geste tombait après la fin de l'enregistrement. Les deux portent désormais une
 assertion qui vérifie que **le geste a mordu** avant de lire son résultat.
 
+### Recette du 29 octobre : une suspension DIFFÈRE un départ, elle ne l'annule pas
+
+**Point 3 KO, et c'est mon propre correctif qui l'avait créé.** Thierry :
+« choix de 1 h puis Enregistrer → aucune confirmation, message *Enregistré*
+tout court, et la proposition affiche *Envoyer dans 5 min* : elle serait partie
+seule. »
+
+**Le diagnostic, lu en base staging** (lecture seule, projet
+`ortyofzzdsthlhqmzsnq`), sur `STG-BIEN-3` :
+
+| champ | valeur |
+|---|---|
+| `status` | `pending_validation` |
+| `created_at` | 28/10 11:07 — **22 h avant** |
+| `send_after` | 28/10 12:07 = `created_at + 60 min`, **échue de 21 h** |
+| `modifie_le` | 28/10 11:27 — l'hôte l'avait ouverte, donc suspendue |
+| réglage en base | `reponse_ia: 60` — sa sauvegarde a bien pris |
+
+**La cause est entièrement dans mon raisonnement.** Au constat 1 d'une revue,
+j'avais EXCLU les tâches suspendues de `echues`, en m'appuyant sur
+`lireLesDues`, qui les écarte (`.is('suspendu_le', null)`). C'est vrai de **ce
+lecteur**. Mais dans le **même fichier**, `reprendreSuspensionsDormantes` tourne
+à **chaque passage** : elle efface `suspendu_le` dès que l'hôte n'a plus touché
+le brouillon depuis 30 minutes, et repose
+`send_after = maintenant + max(5 min, send_after − suspendu_le)`.
+
+Le plancher est `REPRISE_MIN_MS` = **5 minutes**. C'est littéralement le
+« Envoyer dans 5 min » que Thierry a lu — et ce libellé est celui du **bouton de
+reprise**, donc la proposition était bien suspendue quand il l'a vue.
+
+**J'avais lu la moitié du chemin** : j'ai raisonné sur un lecteur d'une passe
+qui en enchaîne plusieurs. Une suspension ne protège pas un brouillon de
+l'envoi, elle en **diffère** la date, et personne n'a à intervenir.
+
+**La règle de Thierry, gravée** : *une proposition qui finira par partir seule
+compte, suspendue ou non.* `echues` compte donc toute tâche dont l'échéance
+recalculée est déjà passée, suspendue ou non — et la phrase de confirmation ne
+dit plus « dès le prochain passage » mais « partiront seules, sans attendre le
+délai choisi », avec la suspension nommée : « une suspension ne fait que
+différer un départ, elle compte donc ».
+
+⚠ **Ce qui NE change pas : compter n'est pas armer.** Le writer continue de ne
+pas toucher `suspendu_le`. L'effacer ici armerait un compte à rebours sur un
+texte que l'hôte est en train d'écrire, et le message pourrait partir sous ses
+doigts. Un test le garde.
+
+⚠ **Et un de mes tests FIGEAIT le défaut** — règle 17 de REVIEW.md en acte. Il
+s'appelait « `echues` EXCLUT les tâches suspendues : elles ne peuvent pas
+partir » et il était vert. C'est Thierry qui a trouvé le défaut, en recette, pas
+la suite : un test écrit sur un raisonnement faux protège le raisonnement, pas
+l'hôte.
+
+### La seconde anomalie : non reproduite, et ce que j'ai fermé quand même
+
+« Au premier passage, sortie du manuel → 1 h → Enregistrer n'a pas été conservé.
+Au second, ça a tenu. »
+
+**Je n'ai pas su la reproduire**, et je le dis plutôt que d'inventer une cause.
+Ce que j'ai éliminé par mesure, en rejouant la séquence exacte dans le banc
+(sortie du manuel → confirmation → pilule 1 h → Enregistrer) : les deux
+confirmations sortent, le POST part avec `reponse_ia: 60`, la note dit
+« Enregistré ». Le chemin nominal est sain.
+
+**Ce que j'ai trouvé en cherchant, et qui est un défaut réel** : les deux gardes
+de réentrance étaient **muettes**. `enregistrerPanneau` et `basculerPause`
+commençaient par `if (etat.modeEnCours) return` — l'hôte clique, rien ne part,
+rien ne s'affiche, et au rechargement son réglage n'a pas bougé. C'est le
+symptôme qu'il décrit, à la lettre. Le bouton est normalement `disabled` dans
+cet état, mais `off` est posé au **rendu** : si `modeEnCours` passe à vrai sans
+qu'un rendu suive — `renderTiroir` sort sans peindre quand le tiroir est
+caché —, le DOM reste à vif et la garde mord en silence.
+
+⚠ **Et sur la pause, le silence était pire** : le `change` a **déjà** basculé la
+case à l'écran. Un `return` muet laissait donc l'hôte lire « en pause » alors
+que rien n'avait été écrit — un écran qui affirme ce qui n'est pas. Les deux
+refus posent maintenant une note et **repeignent**, ce qui remet la case sur
+`etat.pauses`, c'est-à-dire sur l'état réel.
+
 ### La troisième revue : quatre fois le même défaut, fermé d'un seul côté
 
 C'est la dernière que la règle autorise sur ce lot. Six constats, aucun de
