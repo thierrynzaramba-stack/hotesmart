@@ -79,6 +79,14 @@ async function pendantLEcriturePause (fn, { delai = null } = {}) {
   let debloquer = null
   const b = B.monter({
     appel: async (chemin) => {
+      // ⚠ L APERCU PRECEDE DESORMAIS LA LEVEE DE LA PAUSE (recette du
+      // 30 octobre 2026 : lever la pause est le geste qui libere, il demande
+      // donc avant). Sans cette reponse, l apercu est illisible, la pause n est
+      // PAS levee, et le vol que ces tests mettent en scene n a jamais lieu.
+      // `echues: 0` : aucune question, on mesure bien le gel de l ecriture.
+      if (chemin === '/api/agent-config') {
+        return { delais_ref: REF, apercu: { ok: true, motif: 'delai', echues: 0 } }
+      }
       if (chemin === '/api/property-automation') {
         await new Promise(r => { debloquer = r })
         return { paused: {} }
@@ -122,6 +130,14 @@ test('LE TEST QUI COMPTE : pendant l ecriture de la pause, un clic de pilule n e
   let debloquer = null
   const b = B.monter({
     appel: async (chemin) => {
+      // ⚠ L APERCU PRECEDE DESORMAIS LA LEVEE DE LA PAUSE (recette du
+      // 30 octobre 2026 : lever la pause est le geste qui libere, il demande
+      // donc avant). Sans cette reponse, l apercu est illisible, la pause n est
+      // PAS levee, et le vol que ces tests mettent en scene n a jamais lieu.
+      // `echues: 0` : aucune question, on mesure bien le gel de l ecriture.
+      if (chemin === '/api/agent-config') {
+        return { delais_ref: REF, apercu: { ok: true, motif: 'delai', echues: 0 } }
+      }
       if (chemin === '/api/property-automation') {
         if (debloquer === false) return { paused: {} }
         await new Promise(r => { debloquer = r })

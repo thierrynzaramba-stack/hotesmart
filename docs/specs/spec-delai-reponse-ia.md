@@ -1788,6 +1788,82 @@ laissait vert. Et ce document lui-même disait, dans la section d'au-dessus,
 qu'un test peut faire « lever » une table — dans le commit qui supprimait ce
 levier. Les deux sont corrigées.
 
+### Recette du 30 octobre : le geste qui libère, c'est la LEVÉE DE LA PAUSE
+
+**Constat de Thierry, et son hypothèse était juste jusqu'au mécanisme.** Loft
+Pilotable, proposition « cuisine » du 28 octobre : décochage de la pause, puis
+1 h → 15 min + Enregistrer → « Enregistré », aucune question. Son hypothèse :
+« la proposition était déjà échue avec 1 h, donc le changement de délai ne
+libère rien de neuf. Le vrai geste qui libère, c'est la levée de la pause, et
+il ne demande rien. »
+
+**Ce que la mesure sur staging a ajouté — en lecture seule, projet
+`ortyofzzdsthlhqmzsnq`.** La proposition `af7216b7` est à
+`status = pending_validation`, `created_at = 2026-10-28T11:07:58`,
+`send_after = 2026-10-28T11:22:58` — soit **création + 15 min, donc déjà
+échue** — et `updated_at = 2026-10-30T18:58:14`. L'enregistrement du panneau
+l'a donc bien **réarmée**, à une échéance déjà passée, **sans un mot**. Et
+`properties.paused_at` porte `2026-10-30T18:58:42`.
+
+**La cause, et elle est dans mon propre code.** La question du panneau est
+gardée par `chargeDelais.reponse_ia !== null && !enPauseSure`. L'exemption
+`enPauseSure` existe pour une bonne raison — sur un bien en pause,
+`brouillons-dus.js` refuse dès l'entrée, donc annoncer un envoi serait le
+mensonge que ce chantier passe son temps à corriger. Mais elle n'est vraie
+**que tant que la pause tient**, et la pause se lève par une **autre porte** :
+`basculerPause`, immédiate (« couper l'automatique est un geste d'urgence, il
+n'attend pas un Enregistrer »), qui ne demandait rien. L'enregistrement arme
+donc en silence, et la levée tire.
+
+**Décision de Thierry.** Lever la pause sur un bien qui a des propositions
+échues pose **la même question à deux issues**, et **s'il ne répond pas, la
+pause reste active**.
+
+**Ce qui est livré.** `basculerPause(ref, false)` compte d'abord
+(`echuesSiLaPauseEstLevee`, qui lit les délais **enregistrés** et non la saisie
+en cours — une valeur tapée et non enregistrée ne gouverne rien), puis :
+
+| issue | la pause | les propositions annoncées |
+|---|---|---|
+| **Confirmer** — « Laisser partir » | **levée** | partent au prochain passage |
+| **Annuler / Échap** — « Garder pour validation » | **reste active** | **désarmées** : ne partent que sur « Envoyer » |
+| **aperçu impossible** | **reste active** | inchangées, et l'écran le dit |
+
+⚠ **Annuler ÉCRIT**, sinon ce n'est pas une confirmation : c'est la leçon du
+29 octobre, où un « Annuler » qui ne changeait rien laissait la proposition
+partir comme si l'hôte avait dit oui. Le writer reste unique
+(`lib/guestflow/appliquer-delai.js`, atteint par `garder: true`).
+⚠ **Mettre en pause ne demande jamais rien** — couper l'automatique est un
+geste d'urgence, et un test le tient.
+⚠ **Ne pas savoir combien partiraient n'autorise pas à les libérer** (discipline
+de 4.6.6). La cible est le téléphone d'un voyageur.
+
+### Recette du 30 octobre : le panneau s'ouvrait encore sur le mauvais logement
+
+**Constat de Thierry** : « le volet s'est encore ouvert sur Maison Jardin au
+lieu du logement du fil ».
+
+**Le chemin, et c'est mon garde-fou du 28 octobre qui l'a laissé ouvert.**
+`ouvrirTiroir(true)` ne présélectionne le bien du fil **que si le tiroir était
+fermé** (`etaitFerme`) — ajouté pour qu'un choix fait au sélecteur tienne
+contre une bascule de volet, qui rappelle `ouvrirTiroir(true)` à chaque fois.
+Mais **changer de FIL** n'était couvert par rien : `ouvrir(bookId)` pose
+`etat.ouverte` et repeint la liste et le fil, et **ne touche jamais**
+`etat.tiroirBien`. Panneau ouvert sur Maison Jardin + clic sur le fil de Loft
+Pilotable = l'hôte règle le délai d'un AUTRE logement que celui qu'il lit, et
+le sélecteur dit vrai — c'est son regard qui est ailleurs.
+
+**Ce qui est livré.** `reporterLePanneauSurLeFil()`, appelée à l'ouverture d'un
+fil : si le tiroir est ouvert et pointe un autre bien, il suit. La bascule de
+volet, elle, continue de ne rien repointer. Et **une saisie non enregistrée ne
+disparaît plus en silence** : `renderTiroir` remet `etat.delaisEdit` à zéro dès
+que la référence change (c'est la dette D4), donc on repointe — c'est ce que
+Thierry demande — et on le **dit**, avec le nom du bien concerné.
+
+**Les deux correctifs sont mesurés en CLIQUANT**
+(`tests/messages-pause-levee-dom.test.js`, huit tests), et éprouvés par
+mutation : retirer la question rend 3 rouges, retirer le report 2.
+
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 
 **Trouvé en corrigeant les quatre points, mesuré, NON corrigé dans ce commit.**

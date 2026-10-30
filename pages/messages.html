@@ -1204,8 +1204,52 @@ function modesDe (config) {
   for (const [k, v] of Object.entries(config || {})) modes[k] = (v && v.mode === 'auto') ? 'auto' : 'test'
   return modes
 }
+// La case de pause revient a la derniere carte connue. Partagee par les trois
+// chemins qui doivent la remettre : refus pendant une ecriture, apercu
+// impossible, et « la pause reste active ».
+function remettreCasePause (ref) {
+  const caseP = $('[data-bind="tiroir-corps"]').querySelector('[data-tiroir-pause]')
+  if (caseP) caseP.checked = etat.pauses[String(ref)] === true
+}
+
+// Combien de propositions partiraient SEULES si la pause etait levee maintenant.
+// ⚠ ON LIT LES DELAIS ENREGISTRES, PAS LA SAISIE EN COURS. La question doit
+// decrire ce qui va reellement se passer : une valeur tapee et non enregistree
+// ne gouverne rien, et l'annoncer ferait un nombre faux dans les deux sens.
+async function echuesSiLaPauseEstLevee (ref) {
+  const d = delaisDuBien(ref)
+  // « Je valide chaque reponse » : rien n'est arme, donc rien ne peut partir.
+  if (d.reponse_ia === null) return { echues: 0, delais: null }
+  const delais = {
+    reponse_ia: d.reponse_ia, alerte_info: d.alerte_info,
+    sourdine: { active: d.sourdine.active === true, debut: d.sourdine.debut, fin: d.sourdine.fin }
+  }
+  const a = await appel('/api/agent-config', { delais_ref: ref, apercu: true, delais })
+  // Meme marqueur positif que sur le chemin du panneau : un 200 dont le corps
+  // n'est pas du JSON ne vaut pas feu vert (constat 5 d'une revue).
+  const ap = a && typeof a === 'object' && 'apercu' in a ? a.apercu : undefined
+  if (!ap || ap.ok !== true) {
+    return { erreur: (ap && ap.motif) || 'apercu absent', delais }
+  }
+  return { echues: Number(ap.echues) || 0, delais }
+}
+
 // Le kill switch par bien : writer existant /api/property-automation, puis
 // relecture — meme discipline que le mode.
+//
+// ⚠ LEVER LA PAUSE EST LE GESTE QUI LIBERE, ET IL NE DEMANDAIT RIEN — recette
+// de Thierry du 30 octobre 2026, et son hypothese etait juste jusqu'au
+// mecanisme. Le panneau, lui, pose la question ; mais il la SAUTE sur un bien
+// qu'il sait en pause, au motif que rien ne peut partir de la
+// (`brouillons-dus.js` refuse des l'entree). C'est vrai TANT QUE LA PAUSE
+// TIENT — et la pause se leve par une autre porte, immediate, qui ne demandait
+// rien. Mesure sur staging : la proposition « cuisine » du 28 octobre a ete
+// REARMEE a `created_at + 15 min` (donc deja echue) par l'enregistrement du
+// panneau a 18:58:14, sans un mot, parce que le bien etait en pause ; elle
+// attendait la levee pour partir.
+// Decision de Thierry : lever la pause sur un bien qui a des propositions
+// echues pose la MEME question a deux issues, et s'il ne repond pas, la pause
+// reste active.
 async function basculerPause (ref, paused) {
   // ⚠ ICI LE SILENCE EST PIRE QU'AILLEURS : le `change` a DEJA bascule la case
   // a l'ecran. Un `return` muet laissait donc l'hote lire « en pause » — ou
@@ -1225,8 +1269,7 @@ async function basculerPause (ref, paused) {
   // promettre ici ; c'est la dette D1.
   if (etat.modeEnCours) {
     noteReglage(t('messages.reglage_en_cours'))
-    const caseP = $('[data-bind="tiroir-corps"]').querySelector('[data-tiroir-pause]')
-    if (caseP) caseP.checked = etat.pauses[String(ref)] === true
+    remettreCasePause(ref)
     // ⚠ ET LE REFUS SURVIT A L'ECRITURE EN COURS (constat 4). `enregistrerPanneau`
     // pose TOUJOURS une note en sortant : sans ce drapeau, son « Enregistré »
     // VERT ecrasait le refus du kill switch quelques centaines de millisecondes
@@ -1236,6 +1279,61 @@ async function basculerPause (ref, paused) {
     etat.pauseRefusee = true
     return
   }
+
+  // ⚠ LA QUESTION AVANT LA LEVEE, ET ELLE A TROIS SORTIES.
+  //   · CONFIRMER -> « Laisser partir » : la pause est levee, les propositions
+  //     echues partent au prochain passage du cron ;
+  //   · ANNULER (ou Echap) -> « Garder pour validation » : LA PAUSE RESTE
+  //     ACTIVE, et les propositions annoncees sont DESARMEES — donc une levee
+  //     plus tard ne les fera pas partir non plus. Elles ne partent que sur le
+  //     clic « Envoyer » de l'hote. Rien n'est supprime.
+  //   · APERCU IMPOSSIBLE -> la pause reste active, et on le DIT. Ne pas savoir
+  //     combien partiraient n'autorise pas a les liberer : c'est la discipline
+  //     de 4.6.6, et la cible est le telephone d'un voyageur.
+  // Annuler est la branche PRUDENTE, donc celle de la touche Echap, comme sur
+  // le chemin du panneau. `window.confirm` ne nomme pas ses boutons : le texte
+  // dit laquelle fait quoi.
+  if (paused === false) {
+    etat.modeEnCours = true
+    let avant
+    try { avant = await echuesSiLaPauseEstLevee(ref) }
+    catch (err) { logger.error('Messages', 'apercu levee pause', err); avant = { erreur: 'appel' } }
+    etat.modeEnCours = false
+    if (avant.erreur) {
+      logger.error('Messages', 'apercu levee pause', avant.erreur)
+      noteReglage(t('messages.pause_apercu_ko'))
+      remettreCasePause(ref)
+      return
+    }
+    if (avant.echues > 0
+      && !window.confirm(t('messages.pause_lever_confirm', { n: avant.echues }))) {
+      // ⚠ ET CETTE BRANCHE ECRIT, sinon ce n'est pas une confirmation (lecon du
+      // 29 octobre : un « Annuler » qui ne change rien laissait la proposition
+      // partir comme si l'hote avait dit oui). Le writer unique reste
+      // `lib/guestflow/appliquer-delai.js`, atteint par `garder: true`.
+      etat.modeEnCours = true
+      let gardees = null
+      try {
+        const r = await appel('/api/agent-config',
+          { delais_ref: ref, delais: avant.delais, propager: true, garder: true })
+        const b = r && r.brouillons
+        if (b && b.ok === true && Number.isFinite(Number(b.desarmes))) gardees = Number(b.desarmes)
+        else logger.error('Messages', 'garder a la pause', (b && b.motif) || 'bilan absent')
+      } catch (err) { logger.error('Messages', 'garder a la pause', err) }
+      etat.modeEnCours = false
+      remettreCasePause(ref)
+      // ⚠ LE NOMBRE ANNONCE EST CELUI DU SERVEUR, pas celui compte avant : s'ils
+      // divergent, c'est l'arriere qui a bouge pendant que le dialogue etait
+      // ouvert, et l'hote doit lire ce qui s'est reellement passe. Si le bilan
+      // est illisible, on ne promet rien — la pause tient, c'est deja le
+      // principal.
+      noteReglage(gardees === null
+        ? t('messages.pause_gardees_ko')
+        : t('messages.pause_gardees', { n: gardees }), gardees !== null)
+      return
+    }
+  }
+
   etat.modeEnCours = true
   renderTiroir()
   let ecritureOk = false
@@ -2478,6 +2576,41 @@ function bienDuFilOuvert () {
   return etat.biens.has(ref) ? ref : null
 }
 
+// Une saisie du panneau non encore enregistree, s'il y en a une : rend le NOM
+// du bien concerne, pour pouvoir le dire. `etat.delaisEdit` est la copie de
+// travail du formulaire ; la comparer au bloc ENREGISTRE est le seul moyen de
+// savoir si l'hote a tape quelque chose.
+function editionPanneauNonEnregistree () {
+  const e = etat.delaisEdit
+  if (!e || !e.ref) return null
+  const d = delaisDuBien(e.ref)
+  const pareil = e.reponse_ia === d.reponse_ia
+    && e.alerte_info === d.alerte_info
+    && e.sourdine.active === d.sourdine.active
+    && e.sourdine.debut === d.sourdine.debut
+    && e.sourdine.fin === d.sourdine.fin
+  if (pareil) return null
+  return (etat.biens.get(String(e.ref)) || {}).name || String(e.ref)
+}
+
+// Repointe le panneau sur le bien du fil ouvert, s'il est ouvert et s'il n'y
+// est pas deja.
+// ⚠ ET UNE SAISIE NON ENREGISTREE NE DISPARAIT PAS EN SILENCE. `renderTiroir`
+// remet `etat.delaisEdit` a zero des que la reference change : c'est la dette
+// D4 (« une bascule de pause efface une consigne non enregistree »), et la
+// taire ici l'aurait elargie a un simple clic sur un autre fil. On repointe —
+// c'est ce que Thierry demande — et on le DIT.
+function reporterLePanneauSurLeFil () {
+  const tiroir = $('[data-bind="tiroir"]')
+  if (!tiroir || tiroir.hidden !== false) return
+  const duFil = bienDuFilOuvert()
+  if (!duFil || duFil === etat.tiroirBien) return
+  const perdu = editionPanneauNonEnregistree()
+  etat.tiroirBien = duFil
+  renderTiroir()
+  if (perdu) noteReglage(t('messages.panneau_suit_le_fil', { nom: perdu }))
+}
+
 function ouvrirTiroir (ouvert) {
   const tiroir = $('[data-bind="tiroir"]')
   // ⚠ « DEJA OUVERT » N'EST PAS UNE OUVERTURE (constat 1 de la revue du
@@ -2639,6 +2772,17 @@ function ouvrir (bookId) {
     etat.enEdition = null
   }
   etat.ouverte = bookId
+  // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry
+  // du 30 octobre 2026 (« le volet s'est encore ouvert sur Maison Jardin »), et
+  // c'est mon garde-fou du 28 octobre qui laissait ce chemin ouvert. Il ne
+  // preselectionne QUE si le tiroir etait ferme, pour qu'un choix fait au
+  // selecteur tienne contre une bascule de volet. Mais changer de FIL n'etait
+  // pas couvert : le panneau restait sur le bien d'avant, et l'hote reglait le
+  // delai d'un AUTRE logement que celui qu'il lisait — le selecteur disait
+  // vrai, personne ne le contredisait.
+  // La bascule de volet continue de ne rien repointer ; c'est l'ouverture d'un
+  // fil qui repointe, et elle seule.
+  reporterLePanneauSurLeFil()
   const c = etat.conversations.find(x => String(x.bookId) === String(bookId))
   // L'ouverture POSE l'etat lu (etape 2) — optimiste a l'ecran, silencieux en
   // cas de refus (un profil en lecture seule n'ecrit pas, l'heuristique reste).
