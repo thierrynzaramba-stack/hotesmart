@@ -14,7 +14,7 @@
    VALEUR. Pour la palette des cinq niveaux (plus bas), ce serait une CINQUIÈME
    copie d'un élément que Thierry a gravé le 29 octobre 2026 comme élément de
    structure : jamais modifié ni substitué sans sa DOUBLE validation
-   (docs/kb/restitution-yield.md §5 quater).
+   (docs/kb/charte-ui.md §3).
 
    Chaque bloc cite son fichier et sa ligne. Document complet, écarts compris :
    docs/kb/charte-ui.md
@@ -23,7 +23,7 @@
 
 /* ═══ SOCLE V5 — copie de shared/theme.css ════════════════════════════════ */
 :root {
-  /* Texte et surfaces — theme.css:24-33 */
+  /* Texte et surfaces — theme.css */
   --ink: #222222;
   --muted: #717171;
   --muted-2: #9B9B9B;
@@ -33,25 +33,25 @@
   --surface-2: #F7F7F7;
   --on-ink: #FFFFFF;
 
-  /* Marque — theme.css:35-36 */
+  /* Marque — theme.css */
   --brand-night: #0E1726;
   --on-ink-muted: #A3A3A3;
 
-  /* Ambre : UN seul moment par écran — theme.css:38-40 */
+  /* Ambre : UN seul moment par écran — theme.css */
   --amber: #F5A524;
   --amber-soft: #FFF4E0;
   --amber-text: #B87500;
 
-  /* Canaux — theme.css:46-49.
+  /* Canaux — theme.css.
      ⚠ Le calendrier n'utilise PAS --canal-booking ni --canal-direct :
-     il peint Booking en --info et Direct en --ok (ui.css:537-538).
+     il peint Booking en --info et Direct en --ok (ui.css).
      Écarts 7 et 8 de la charte. */
   --canal-airbnb: #FF5A5F;
   --canal-booking: #003580;
   --canal-direct: #0E1726;
   --on-canal: #FFFFFF;
 
-  /* Fonds de prestataire (planning ménages) — theme.css:55-62 */
+  /* Fonds de prestataire (planning ménages) — theme.css */
   --presta-1: #DDE4E6;
   --presta-2: #E3EADF;
   --presta-3: #E4E2F0;
@@ -61,7 +61,7 @@
   --presta-7: #E8E7E2;
   --presta-8: #E2E6EE;
 
-  /* États — theme.css:67-75 */
+  /* États — theme.css */
   --info: #2563EB;
   --ok: #0F7A4F;
   --ok-soft: #E8F5EE;
@@ -69,8 +69,16 @@
   --warn-soft: #FFF4E0;
   --danger: #B42318;
   --danger-soft: #FEF0EE;
+  /* ⚠ LES DEUX JETONS DE TEXTE, et les omettre était le constat le plus
+     dangereux de la review sur ce fichier : --ok et --danger rendent 3,44:1 et
+     2,80:1 sur --surface sombre, donc SOUS le 4,5:1 requis pour du texte. Le
+     dépôt a cessé de s'en servir comme couleur de texte le 28 octobre 2026.
+     Une maquette alignée sur un relevé qui les tait reprendrait exactement
+     les deux couleurs écartées. */
+  --ok-ink: #0F7A4F;
+  --danger-ink: #B42318;
 
-  /* Typographie — theme.css:78-91.
+  /* Typographie — theme.css.
      ⚠ « Outfit » n'existe nulle part dans le dépôt.
      ⚠ Aucun jeton de hauteur de ligne n'existe (écart 16). */
   --font: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -88,19 +96,19 @@
   --fw-black: 800;
   --tracking-tight: -0.03em;
 
-  /* Rayons — theme.css:94-96 */
+  /* Rayons — theme.css */
   --radius-pill: 99px;
   --radius-card: 16px;
   --radius-tile: 12px;
 
-  /* Contrôles — theme.css:99-103 */
+  /* Contrôles — theme.css */
   --control: 44px;
   --control-lg: 48px;
   --icon-size: 20px;
   --icon-size-lg: 22px;
   --icon-stroke: 1.75;
 
-  /* Espaces et page — theme.css:106-112 */
+  /* Espaces et page — theme.css */
   --gap-xs: 4px;
   --gap-s: 8px;
   --gap-m: 16px;
@@ -109,14 +117,14 @@
   --page-pad: 48px;
   --page-max: 1200px;
 
-  /* Ombres et voile — theme.css:115-118 */
+  /* Ombres et voile — theme.css */
   --shadow-hover: 0 6px 20px rgba(0, 0, 0, .12);
   --shadow-dot: 0 1px 3px rgba(0, 0, 0, .18);
   --shadow-sheet: 0 -8px 32px rgba(0, 0, 0, .18);
   --scrim: rgba(0, 0, 0, .45);
 }
 
-/* Variante sombre du socle V5 — theme.css:123-141.
+/* Variante sombre du socle V5 — theme.css.
    ⚠ ELLE N'EST JAMAIS ACTIVÉE : aucun code du dépôt ne pose data-theme
    (écart 12), et theme.css n'écoute pas prefers-color-scheme (écart 11). */
 :root[data-theme="dark"] {
@@ -134,6 +142,8 @@
   --ok-soft: #10301F;
   --warn-soft: #3A2A0A;
   --danger-soft: #3A1512;
+  --ok-ink: #4ADE80;       /* 10,57:1 sur #141414 */
+  --danger-ink: #F87171;   /* 6,66:1 sur #141414 */
   --shadow-hover: 0 6px 20px rgba(0, 0, 0, .5);
   --shadow-sheet: 0 -8px 32px rgba(0, 0, 0, .6);
   --scrim: rgba(0, 0, 0, .6);
@@ -147,27 +157,30 @@
    Dans public/style.css ils ne le sont PAS.
    ⚠ Ce socle n'a aucun jeton de taille, de graisse ni de rouge. */
 :root {
-  --lg-bg: #FFFFFF;              /* style.css:18 — nom réel : --bg */
-  --lg-bg2: #F5F5F3;             /* :19  --bg2 */
-  --lg-bg3: #EFEFED;             /* :20  --bg3 */
-  --lg-text: #1A1A1A;            /* :21  --text */
-  --lg-text2: #6B6B6B;           /* :22  --text2 */
-  --lg-text3: #9B9B9B;           /* :23  --text3 */
-  --lg-border: rgba(0,0,0,0.1);  /* :24  --border */
-  --lg-border2: rgba(0,0,0,0.2); /* :25  --border2 */
-  --lg-green: #1D9E75;           /* :26  --green */
-  --lg-green-bg: #E1F5EE;        /* :27  --green-bg */
-  --lg-amber: #BA7517;           /* :28  --amber */
-  --lg-amber-bg: #FAEEDA;        /* :29  --amber-bg */
-  --lg-blue: #2563EB;            /* :54  --blue — les ACTIONS, et elles seules */
-  --lg-prune: #5B2A86;           /* :55  --prune */
-  --lg-prune-bg: #F0E9F6;        /* :56  --prune-bg */
-  --lg-radius: 8px;              /* :57  --radius */
-  --lg-radius-lg: 12px;          /* :58  --radius-lg */
-  --lg-sidebar-width: 210px;     /* :59  --sidebar-width */
-  --lg-sidebar-collapsed: 48px;  /* :60  --sidebar-collapsed */
+  --lg-bg: #FFFFFF;              /* style.css — nom réel : --bg */
+  --lg-bg2: #F5F5F3;             /* --bg2 */
+  --lg-bg3: #EFEFED;             /* --bg3 */
+  --lg-text: #1A1A1A;            /* --text */
+  --lg-text2: #6B6B6B;           /* --text2 */
+  --lg-text3: #9B9B9B;           /* --text3 */
+  --lg-border: rgba(0,0,0,0.1);  /* --border */
+  --lg-border2: rgba(0,0,0,0.2); /* --border2 */
+  --lg-green: #1D9E75;           /* --green */
+  --lg-green-bg: #E1F5EE;        /* --green-bg */
+  --lg-amber: #BA7517;           /* --amber */
+  --lg-amber-bg: #FAEEDA;        /* --amber-bg */
+  /* ⚠ --blue, --prune ET --prune-bg NE SONT PAS ICI, et ce fichier les a
+     d'abord annoncés — relevé en review. Ils sont posés par le lot
+     `yf-ecran-periodes`, qui est dans `staging` et PAS dans `main` ; ce
+     relevé-ci est fait sur un arbre parti de `main`. Un relevé appartient à
+     l'arbre où il a été fait, et les mêler est ce qui a produit trois
+     jetons introuvables. Voir docs/kb/charte-ui.md §2. */
+  --lg-radius: 8px;              /* --radius */
+  --lg-radius-lg: 12px;          /* --radius-lg */
+  --lg-sidebar-width: 210px;     /* --sidebar-width */
+  --lg-sidebar-collapsed: 48px;  /* --sidebar-collapsed */
 
-  /* Police du socle legacy — style.css:64.
+  /* Police du socle legacy — style.css.
      Les écrans apps/yield/* ne chargent aucune police (écart 20). */
   --lg-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
@@ -184,11 +197,11 @@
 
    Pour lire les valeurs : public/style.css, ou docs/kb/charte-ui.md §3.
    Pour le pourquoi et la règle de double validation :
-   docs/kb/restitution-yield.md §5 quater. */
+   docs/kb/charte-ui.md §3. */
 
 
 /* ═══ ÉCHELLE « TEMPÉRATURE DU MARCHÉ » (4 niveaux, distincte) ═════════════
-   shared/temperature-calendrier.js:44-57. SEULE échelle du dépôt qui déclare
+   shared/temperature-calendrier.js. SEULE échelle du dépôt qui déclare
    aussi sa couleur de texte. */
 :root {
   --tc-creux: #E8EEF7;      --tc-creux-txt: #1C2B44;
@@ -216,12 +229,12 @@
    Les deux premiers sont de vrais jetons du code vivant ; les autres sont
    des valeurs EN DUR que ce fichier nomme pour la maquette. */
 :root {
-  --cal-col: 110px;        /* ui.css:447 — colonne de libellé, collante */
-  --cal-nuit-h: 40px;      /* ui.css:530 */
-  --cal-resas-h: 48px;     /* ui.css:530 */
-  --cal-jour-w: 46px;      /* EN DUR dans ui.css:497, 531, 532, 545 */
-  --cal-barre-h: 38px;     /* EN DUR dans ui.css:535 */
-  --cal-barre-r: 13px;     /* EN DUR dans ui.css:535 */
-  --cal-mbar-h: 22px;      /* EN DUR dans ui.css:621 — variante mobile */
-  --cal-mbar-r: 11px;      /* EN DUR dans ui.css:621 */
+  --cal-col: 110px;        /* ui.css — colonne de libellé, collante */
+  --cal-nuit-h: 40px;      /* ui.css */
+  --cal-resas-h: 48px;     /* ui.css */
+  --cal-jour-w: 46px;      /* EN DUR dans ui.css, 531, 532, 545 */
+  --cal-barre-h: 38px;     /* EN DUR dans ui.css */
+  --cal-barre-r: 13px;     /* EN DUR dans ui.css */
+  --cal-mbar-h: 22px;      /* EN DUR dans ui.css — variante mobile */
+  --cal-mbar-r: 11px;      /* EN DUR dans ui.css */
 }
