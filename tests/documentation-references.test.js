@@ -33,7 +33,13 @@ const SURVEILLES = [
   'docs/kb/charte-ui.md',
   'public/tokens.css',
   'public/style.css',
-  'tests/palette-niveaux.test.js'
+  'tests/palette-niveaux.test.js',
+  // ⚠ AJOUTE PARCE QUE J'AI FAILLI REFAIRE L'ERREUR UNE TROISIEME FOIS. Ce
+  // registre cite docs/kb/charte-ui.md et docs/maquettes/ : les deux viennent
+  // du lot du socle. Ecrit sur une branche partie de `main`, il portait deux
+  // renvois morts — le defaut exact que ce test existe pour attraper. Il est
+  // donc branche SUR le lot du socle, et surveille ici.
+  'docs/specs/spec-ce-qui-fait-bouger-vos-prix.md'
 ]
 
 // ⚠ UN TEST QUI PLANTE N'EXPLIQUE RIEN. Si un document surveille disparait,
