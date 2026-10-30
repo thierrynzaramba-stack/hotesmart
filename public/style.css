@@ -31,7 +31,55 @@
   --radius-lg: 12px;
   --sidebar-width: 210px;
   --sidebar-collapsed: 48px;
+
+  /* ⚠⚠ LA PALETTE DES CINQ NIVEAUX YIELDFLOW — ÉLÉMENT DE STRUCTURE.
+     Décision de Thierry du 29 octobre 2026 : échelle commune à TOUTE
+     restitution de prévision (Prédiction de prix, « Ce qui fait bouger vos
+     prix », le marché). **JAMAIS modifiée ni substituée sans sa DOUBLE
+     validation.** Le pourquoi : docs/kb/restitution-yield.md §5 quater.
+
+     ⚠ C'EST ICI LA SOURCE, ET NULLE PART AILLEURS. Avant le 30 octobre 2026
+     ces dix valeurs étaient recopiées QUATRE fois — trois dans
+     apps/yield/prix.html, une dans apps/yield/marche-global.html — et les
+     quatre copies concordaient : rien ne rougissait, et la cinquième aurait
+     divergé. tests/palette-niveaux.test.js épingle désormais les valeurs ET
+     la liste des fichiers où elles peuvent apparaître.
+
+     ⚠ DIX VALEURS, PAS CINQ : un fond ET un accent par niveau. L'accent se
+     pose en `box-shadow: inset 3px 0 0` sur les lignes de nuit et en trait de
+     légende sur le marché. N'en retenir que les fonds ferait une source
+     unique qui n'en couvre que la moitié.
+
+     ⚠ ET LA CONSIGNE « NI BLEU NI AMBRE » NE S'APPLIQUE PAS À CETTE ÉCHELLE :
+     Thierry l'a retirée pour elle, et pour elle seule, le 29 octobre 2026. Le
+     pas Base est bleuté et le pas Haut ambré, c'est voulu. Les trois couleurs
+     réservées — noir à la navigation, ambre à « ce qu'HôteSmart a fait pour
+     vous », bleu au cliquable — restent en vigueur partout ailleurs.
+
+     ⚠ LE TEXTE SUR CES FONDS N'EST PAS DÉCLARÉ : il hérite de --text. Les
+     cinq fonds sont pâles, donc le texte sombre passe sur les cinq. Un fond
+     foncé ajouté un jour demanderait sa couleur de texte avec lui. */
+  --yf-base: #E7F0F7;          --yf-base-l: #4A7FA8;
+  --yf-moyen: #EDF4EE;         --yf-moyen-l: #5F8F6E;
+  --yf-haut: #FBF4E2;          --yf-haut-l: #C89A2E;
+  --yf-tres-haut: #FAEADA;     --yf-tres-haut-l: #D2762E;
+  --yf-exceptionnel: #F8E2DA;  --yf-exceptionnel-l: #BF4F32;
+
+  /* La police du socle V5, pour les écrans YieldFlow qui la chargent.
+     ⚠ LE STACK EST ÉCRIT ICI UNE FOIS : six pages l'appliquent, et six
+     copies d'une liste de polices divergent. Il est identique à --font de
+     shared/theme.css — les deux feuilles ne se chargent pas ensemble sur les
+     écrans legacy, donc ce n'est pas un doublon utilisable, c'est le même
+     choix écrit dans les deux mondes. */
+  --font-v5: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
+
+/* ⚠ LA POLICE V5 SE DEMANDE, ELLE NE S'IMPOSE PAS. Cette feuille est chargée
+   par des écrans antérieurs à V5 que ce lot ne touche pas : changer le `body`
+   ci-dessous aurait changé la police de TOUS, pas des six écrans YieldFlow
+   demandés. La classe est donc posée page par page, avec le `<link>` qui
+   charge la fonte — sans le lien, la classe ne rendrait qu'un repli système. */
+body.police-v5 { font-family: var(--font-v5); }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

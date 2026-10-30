@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HôteSmart — Tarification</title>
   <link rel="stylesheet" href="/public/style.css">
+  <!-- ⚠ LA POLICE DU SOCLE V5 SUR LES ÉCRANS YIELDFLOW — demande de Thierry du
+       30 octobre 2026. L'URL est IDENTIQUE à celle des pages V5
+       (pages/aujourdhui.html, pages/calendrier.html) : même fichier, donc
+       même entrée de cache navigateur, aucune requête supplémentaire pour un
+       hôte qui vient d'une page V5.
+       ⚠ ET LA CLASSE `police-v5` POSÉE SUR LA BALISE BODY EST LA SECONDE
+       MOITIÉ : sans elle, la fonte serait téléchargée sans être appliquée. La
+       règle `body` de public/style.css n'est PAS touchée, parce que cette
+       feuille sert aussi des écrans antérieurs à V5 que ce lot ne change pas. -->
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     /* ─── Barre de sélection ─────────────────────────────────────────────── */
     /* ⚠ `hidden` NE MASQUE RIEN ICI SANS CETTE REGLE — relevé en review.
@@ -118,7 +128,7 @@
     }
   </style>
 </head>
-<body>
+<body class="police-v5">
 <!-- ⚠ LE CONTRAT DE MISE EN PAGE EST `.layout > .sidebar + .main`, ET L'ID
      DOIT ETRE `sidebar` : `components/sidebar.js` fait
      `document.getElementById('sidebar')` puis `if (!sidebar) return`.

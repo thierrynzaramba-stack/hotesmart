@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HôteSmart — Prédiction de prix</title>
   <link rel="stylesheet" href="/public/style.css">
+  <!-- ⚠ LA POLICE DU SOCLE V5 SUR LES ÉCRANS YIELDFLOW — demande de Thierry du
+       30 octobre 2026. L'URL est IDENTIQUE à celle des pages V5
+       (pages/aujourdhui.html, pages/calendrier.html) : même fichier, donc
+       même entrée de cache navigateur, aucune requête supplémentaire pour un
+       hôte qui vient d'une page V5.
+       ⚠ ET LA CLASSE `police-v5` POSÉE SUR LA BALISE BODY EST LA SECONDE
+       MOITIÉ : sans elle, la fonte serait téléchargée sans être appliquée. La
+       règle `body` de public/style.css n'est PAS touchée, parce que cette
+       feuille sert aussi des écrans antérieurs à V5 que ce lot ne change pas. -->
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     [hidden] { display: none !important; }
     .yp-barre { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
@@ -151,11 +161,16 @@
        ⚠ LA COULEUR NE PORTE JAMAIS SEULE : le badge texte du niveau reste sur
        chaque ligne, et un liseré gauche double la teinte. Un hôte daltonien
        lit le badge et l'ordre des lignes, pas la nuance. */
-    .n-base        { background: #E7F0F7; box-shadow: inset 3px 0 0 #4A7FA8; }
-    .n-moyen       { background: #EDF4EE; box-shadow: inset 3px 0 0 #5F8F6E; }
-    .n-haut        { background: #FBF4E2; box-shadow: inset 3px 0 0 #C89A2E; }
-    .n-tres-haut   { background: #FAEADA; box-shadow: inset 3px 0 0 #D2762E; }
-    .n-exceptionnel{ background: #F8E2DA; box-shadow: inset 3px 0 0 #BF4F32; }
+    /* ⚠ LA PALETTE VIENT DE public/style.css, ET DE NULLE PART AILLEURS.
+       Ces dix valeurs y sont la SOURCE UNIQUE depuis le 30 octobre 2026 :
+       élément de structure, jamais modifié ni substitué sans la double
+       validation de Thierry (docs/kb/restitution-yield.md §5 quater). Ce
+       fichier en portait TROIS copies, et marche-global une quatrième. */
+    .n-base        { background: var(--yf-base);         box-shadow: inset 3px 0 0 var(--yf-base-l); }
+    .n-moyen       { background: var(--yf-moyen);         box-shadow: inset 3px 0 0 var(--yf-moyen-l); }
+    .n-haut        { background: var(--yf-haut);          box-shadow: inset 3px 0 0 var(--yf-haut-l); }
+    .n-tres-haut   { background: var(--yf-tres-haut);     box-shadow: inset 3px 0 0 var(--yf-tres-haut-l); }
+    .n-exceptionnel{ background: var(--yf-exceptionnel);  box-shadow: inset 3px 0 0 var(--yf-exceptionnel-l); }
     /* ⚠ LES ÉTATS S'EXPRIMENT EN COULEUR, PAS EN TEXTE — règle de Thierry,
        13 septembre 2026. « Vendue », « Fermée », « Non renseignée » répétés
        trente fois occupaient une colonne entière pour dire ce qu'une teinte
@@ -207,6 +222,12 @@
     .yp-table td.yp-bar::before { content: ''; position: absolute; left: 7px;
                                   right: 7px; top: 0; bottom: 0;
                                   background: rgba(0,0,0,.045); }
+    /* ⚠ #4A7FA8 ICI N'EST PAS LA PALETTE, et c'est pourquoi il reste en dur.
+       C'est la couleur du SÉJOUR de cet écran — elle vaut la même chose que
+       l'accent du niveau Base par coïncidence, pas par intention. La passer en
+       var(--yf-base-l) aurait lié les barres de séjour à la palette des
+       niveaux : un changement de palette aurait repeint les séjours.
+       (Le nouvel écran, lui, prend --sejour : décision du 30 octobre 2026.) */
     .yp-seg { position: absolute; left: 3px; right: 3px; top: 0; bottom: 0;
               background: #4A7FA8; cursor: help; }
     .yp-seg.grise { background: #D2DAE2; }
@@ -226,14 +247,14 @@
     .yp-grille-note { font-size: 10px; color: var(--text3); margin-top: 6px; }
     .yp-niv-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px;
                     white-space: nowrap; border: 0.5px solid rgba(0,0,0,.08); }
-    .yp-niv-badge.n-base { background: #E7F0F7; } .yp-niv-badge.n-moyen { background: #EDF4EE; }
-    .yp-niv-badge.n-haut { background: #FBF4E2; } .yp-niv-badge.n-tres-haut { background: #FAEADA; }
-    .yp-niv-badge.n-exceptionnel { background: #F8E2DA; }
+    .yp-niv-badge.n-base { background: var(--yf-base); } .yp-niv-badge.n-moyen { background: var(--yf-moyen); }
+    .yp-niv-badge.n-haut { background: var(--yf-haut); } .yp-niv-badge.n-tres-haut { background: var(--yf-tres-haut); }
+    .yp-niv-badge.n-exceptionnel { background: var(--yf-exceptionnel); }
     .yp-groupe-sauf { font-size: 10.5px; color: var(--text2); display: inline-flex;
                       align-items: center; gap: 5px; flex-wrap: wrap; }
-    .yp-niv.n-base { background: #E7F0F7; } .yp-niv.n-moyen { background: #EDF4EE; }
-    .yp-niv.n-haut { background: #FBF4E2; } .yp-niv.n-tres-haut { background: #FAEADA; }
-    .yp-niv.n-exceptionnel { background: #F8E2DA; }
+    .yp-niv.n-base { background: var(--yf-base); } .yp-niv.n-moyen { background: var(--yf-moyen); }
+    .yp-niv.n-haut { background: var(--yf-haut); } .yp-niv.n-tres-haut { background: var(--yf-tres-haut); }
+    .yp-niv.n-exceptionnel { background: var(--yf-exceptionnel); }
     .yp-niv sup { font-size: 8px; }
     /* LA FOURCHETTE EXCEPTIONNEL (lot V2.0.7) : le bas est le prix du niveau,
        le haut une BORNE DE SECURITE (le prix le plus eleve deja obtenu), jamais
@@ -436,7 +457,7 @@
     }
   </style>
 </head>
-<body>
+<body class="police-v5">
 <!-- ⚠ LE CONTRAT DE MISE EN PAGE EST `.layout > .sidebar + .main`, ET L'ID
      DOIT ETRE `sidebar` : `components/sidebar.js` fait
      `document.getElementById('sidebar')` puis `if (!sidebar) return`.
@@ -1193,7 +1214,7 @@
       `<span class="yp-lg barre" title="${ech(titre)}"><i style="background:${couleur}"></i>${texte}</span>`
     return `<div class="yp-legende">
       ${c('#E8F2EC', 'vendue', 'Cette nuit est vendue : son prix ne se change plus.')}
-      ${c('#EDF4EE', 'à vendre', 'Ouverte à la vente : la teinte de la ligne est le niveau suggéré, repris de votre grille ci-dessus.')}
+      ${c('var(--yf-moyen)', 'à vendre', 'Ouverte à la vente : la teinte de la ligne est le niveau suggéré, repris de votre grille ci-dessus.')}
       ${c('#FBF1DA', 'fermée', 'Fermée à la vente : aucun prix ne s’y vend. Le prix affiché est celui que YieldFlow proposerait si vous l’ouvriez — rien n’est envoyé.')}
       ${c('#FFFFFF', 'non renseignée', 'Votre calendrier ne va pas jusqu’à cette nuit.')}
       ${a ? b('#B5C9DA', 'pas encore ouverte', 'Au-delà de la fenêtre de vente pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour et la nuit s’ouvrira seule, avec son prix déjà prêt.') : ''}
