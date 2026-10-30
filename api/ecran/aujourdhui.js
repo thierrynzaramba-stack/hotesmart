@@ -1,4 +1,21 @@
 // api/ecran/aujourdhui.js
+// ⚠ SEUIL DE MISE EN SERVICE DES ALERTES D'ENVOI AU VOYAGEUR (decision de
+// Thierry du 30 octobre 2026) : le bandeau n'affiche que les incidents d'envoi
+// NES APRES le deploiement du correctif `fix-envoi-ota`. L'historique sera
+// acquitte en masse plus tard, sur son go, avec auteur et motif, en lot separe.
+// ⚠ VERS LE PASSE SEULEMENT. Un seuil dans le futur masquerait toutes les
+// alertes d'envoi, en silence — c'est exactement la famille de defaut que ce
+// chantier passe son temps a fermer. `tests/bandeau-alarmes.test.js` le refuse.
+//
+// ⚠ ET IL A COMMENCE DANS LE FUTUR, DE VINGT-CINQ MINUTES. J'avais ecrit
+// `2026-10-30T00:00:00Z` en lisant la date LOCALE (Paris, UTC+1) alors qu'il
+// etait encore 22 h 35 le 29 en UTC. Le test l'a refuse immediatement — c'est
+// la lecon du depot sur l'heure de la mesure : « meme fuseau que le code
+// mesure, l'heure fait partie de la mesure ». Une date ecrite a la main depuis
+// une horloge locale n'est pas la date qu'un serveur en UTC va lire.
+// Un seuil ANTERIEUR est sans danger : aucune ligne de ces trois types
+// n'existait en production (mesure faite), donc rien ne peut le preceder.
+const SEUIL_ALARMES_ENVOI = '2026-10-29T00:00:00.000Z'
 // L'ECRAN D'ACCUEIL EN UN APPEL — lot (b) du chantier performance.
 // DOC : docs/specs/spec-performance-pages.md (modif = MEME COMMIT)
 //
@@ -356,15 +373,65 @@ module.exports = async (req, res) => {
     // ⚠ LE MEME ENSEMBLE QUE `api/incidents-acquitter.js`, A LA LETTRE : une
     // alarme affichee mais non acquittable laisse un bouton qui rend 404 et une
     // alarme a l'ecran pour toujours (constat HAUT d'une revue independante).
+    // ⚠ `email_voyageur_abandon` EN FAIT PARTIE, ET SON ABSENCE ETAIT LE MEME
+    // DEFAUT ROUVERT DU COTE E-MAIL (constat d'une revue independante) : un
+    // e-mail au voyageur abandonne sans seconde chance ecrivait son incident,
+    // telephonait au fondateur, et n'apparaissait sur AUCUN ecran de l'hote —
+    // donc inacquittable, comme les trois types OTA avant ce lot. Mesure en
+    // production avant correctif : 0 ligne de ce type, le canal e-mail n'etant
+    // pas branche. Il entre donc sans rien faire apparaitre.
+    // ⚠ ET `message_ota_abandon` N'EN FAIT PLUS PARTIE : il doublait
+    // `message_ota_arret` — meme echec, deux cartes, deux SMS, deux e-mails.
+    // La fonction qui le posait est supprimee (mesure : 0 ligne en production,
+    // le type n'a jamais ete deploye).
     const TYPES_ALARME = ['overbooking', 'message_ota_a_verifier',
-      'message_ota_abandon', 'message_ota_arret']
-    let q = supabase.from('automation_incidents')
-      .select('id, type, property_id, detail, created_at, acquitted_at')
-      .eq('user_id', compte).in('type', TYPES_ALARME).is('acquitted_at', null)
-    q = bornerRef(q, 'property_id')
-    const { data, error } = await compter(q.order('created_at', { ascending: false }).limit(50))
-    if (error) { indisponibles.push('alarmes'); return null }
-    return data || []
+      'message_ota_arret', 'email_voyageur_abandon']
+
+    // ⚠ DEUX LECTURES, ET UN PLAFOND PAR FAMILLE — DECISION DE THIERRY DU
+    // 30 OCTOBRE 2026, et un defaut que la mesure a precise.
+    //
+    // Sa crainte : « le bandeau risque d'etre noye, et l'alarme de
+    // surreservation chassee (limit 50) ». MESURE EN PRODUCTION, en lecture
+    // seule, avant ce correctif : `api_credit` 11 977 ouverts et `send_failure`
+    // 1 209 ouverts ne sont PAS dans `TYPES_ALARME`, donc ils n'entrent pas au
+    // bandeau ; `overbooking` a UNE ligne, deja acquittee ; et les trois types
+    // d'envoi n'existent pas encore. Le bandeau afficherait donc ZERO alarme au
+    // deploiement. Sa prémisse ne tenait pas — mais le MECANISME qu'il decrit
+    // est reel : `limit(50)` etait PARTAGE, trie par date descendante, et les
+    // alarmes d'envoi sont par nature plus fraiches qu'une surreservation qui
+    // dure. Le jour ou cinquante alertes d'envoi tombent, elles chassent la
+    // surreservation — qui est le conflit le plus cher du produit.
+    //
+    // D'ou la separation : la surreservation a sa propre lecture et son propre
+    // plafond. Aucune alerte d'envoi ne peut plus la pousser hors de l'ecran.
+    const lireFamille = async (types, borneDate) => {
+      let q = supabase.from('automation_incidents')
+        .select('id, type, property_id, detail, created_at, acquitted_at')
+        .eq('user_id', compte).in('type', types).is('acquitted_at', null)
+      if (borneDate) q = q.gte('created_at', borneDate)
+      q = bornerRef(q, 'property_id')
+      return compter(q.order('created_at', { ascending: false }).limit(25))
+    }
+
+    const [critiques, envois] = await Promise.all([
+      lireFamille(['overbooking'], null),
+      // ⚠ « L'ECRAN N'AFFICHE QUE LES INCIDENTS D'ENVOI NES APRES LE
+      // DEPLOIEMENT » (decision de Thierry). L'historique sera acquitte en
+      // masse plus tard, sur son go, avec auteur et motif, en lot separe.
+      //
+      // ⚠ ET C'EST UNE CEINTURE, PAS UNE BRETELLE : aucune ligne de ces trois
+      // types ne PEUT preceder ce correctif, puisque les types naissent avec
+      // lui — mesure faite, zero ligne en production. Le seuil ne sert donc que
+      // le jour ou l'on importerait de l'historique, ou ou un type serait
+      // reutilise.
+      // ⚠ IL NE DOIT JAMAIS ETRE DEPLACE VERS LE FUTUR : un seuil a venir
+      // masquerait TOUTES les alertes d'envoi, en silence. Un test refuse un
+      // seuil qui n'est pas dans le passe.
+      lireFamille(TYPES_ALARME.filter(t => t !== 'overbooking'), SEUIL_ALARMES_ENVOI)
+    ])
+    if (critiques.error || envois.error) { indisponibles.push('alarmes'); return null }
+    // La surreservation d'abord : c'est elle qu'on ne doit jamais rater.
+    return [...(critiques.data || []), ...(envois.data || [])]
   }
 
   // Les arrivees du jour et du lendemain, et elles SEULES : c'est tout ce dont

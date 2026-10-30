@@ -3,7 +3,7 @@
 // ensemble que celui servi au bandeau par `api/ecran/aujourdhui.js` : une
 // alarme affichee et non acquittable laisse un bouton qui rend 404.
 const TYPES_ACQUITTABLES = ['overbooking', 'message_ota_a_verifier',
-  'message_ota_abandon', 'message_ota_arret']
+  'message_ota_arret', 'email_voyageur_abandon']
 // DOC : docs/kb/reservation-directe.md (modif = MEME COMMIT)
 //
 // Acquittement MANUEL d'une alarme recurrente (surreservation).

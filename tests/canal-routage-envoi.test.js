@@ -369,9 +369,15 @@ test('LE TEST QUI COMPTE : sur le chemin one-shot, un echec ALERTE tout de suite
   // remettre a lui, c'etait remplacer une alerte qui marchait — `send_failure` a
   // la 2e occurrence — par un compteur qui n'arrive jamais a 5.
   // ⚠ L'ALERTE A CHANGE DE NOM ET DE PORTEE : elle vaut maintenant pour l'OTA
-  // comme pour l'e-mail, et c'est `noterAbandonOta` qui la pose — avec
+  // comme pour l'e-mail, et c'est `noterArretOta` qui la pose — avec
   // `threshold: 1`, donc sans attendre une seconde occurrence qui ne viendra
   // jamais sur un evenement one-shot.
+  // ⚠ ET ELLE NE S'APPELLE PLUS `noterAbandonOta` : cette fonction DOUBLAIT
+  // l'arret sous un autre type d'incident, donc deux cartes au bandeau, deux
+  // SMS et deux e-mails pour un seul echec (l'anti-spam de `reportIncident` est
+  // cle sur `(type, property_id)` : il ne deduplique pas entre types
+  // differents). Constat d'une revue independante. L'arret, lui, BLOQUE en plus
+  // d'alerter — c'est ce qui rend vraie la phrase « le message NE PARTIRA PAS ».
   const trigger = src.split('async function triggerTemplates')[1]
   const helper = src.split('async function envoyerEtJournaliser')[1]
     .split('async function processMessageTemplates')[0]
@@ -397,14 +403,16 @@ test('LE TEST QUI COMPTE : sur le chemin one-shot, un echec ALERTE tout de suite
   const blocs = helper.split('if (!rejouable) {').slice(1).map(finDeBloc)
   assert.equal(blocs.length, 2, 'un bloc one-shot par canal : e-mail et OTA')
   for (const bloc of blocs) {
-    assert.ok(/noterAbandonOta|reportIncident\('email_voyageur_abandon'/.test(bloc),
+    assert.ok(/noterArretOta|reportIncident\('email_voyageur_abandon'/.test(bloc),
       'l\'alerte part directement')
     assert.ok(!/noterRefusOta/.test(bloc), 'rien n\'est COMPTE : le plafond serait inatteignable')
     assert.ok(!/faut_il_abandonner_email\(/.test(bloc),
       'et le compteur e-mail n\'est pas appele non plus')
   }
   const ota = require('../lib/envoi-ota')
-  assert.equal(typeof ota.noterAbandonOta, 'function', 'le writer de l\'abandon est exporte')
+  assert.equal(typeof ota.noterArretOta, 'function', 'le writer de l\'arret est exporte')
+  assert.equal(ota.noterAbandonOta, undefined,
+    'et la seconde alarme, qui doublait celle-la, n\'existe plus')
   // Le compteur e-mail reste reserve au chemin qui peut vraiment reessayer.
   const emails = (helper.match(/await faut_il_abandonner_email\(/g) || []).length
   assert.strictEqual(emails, 1, 'un seul appel au compteur e-mail, dans sa branche')
