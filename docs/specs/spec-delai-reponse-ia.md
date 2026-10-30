@@ -1864,6 +1864,78 @@ Thierry demande — et on le **dit**, avec le nom du bien concerné.
 (`tests/messages-pause-levee-dom.test.js`, huit tests), et éprouvés par
 mutation : retirer la question rend 3 rouges, retirer le report 2.
 
+### La revue de ces deux correctifs : huit constats, et aucun n'était du style
+
+Tous vérifiés avant correction, et tous sur le chemin de l'envoi au voyageur ou
+sur ce que l'écran affirme.
+
+1. **`remettreCasePause` écrivait l'état de pause du bien d'AVANT dans le
+   panneau affiché.** Le nouveau chemin attend deux fois (aperçu, puis
+   désarmement) et `reporterLePanneauSurLeFil` n'avait aucune garde : un clic
+   sur un autre fil pendant ce vol repointait le panneau, et l'hôte lisait
+   « Maison Jardin » au sélecteur avec une case « en pause » et une note qui
+   parlaient d'un autre logement. **Deux gardes** : le panneau ne se repointe
+   pas pendant une écriture, et la case ne s'écrit que dans le panneau de son
+   propre bien.
+2. **L'aperçu tournait AVANT le gel.** Avant ce chantier, `basculerPause` posait
+   `modeEnCours` **puis** `renderTiroir()` avant tout `await` : la case et
+   « Enregistrer » étaient désarmés dès le premier instant. Mon bloc attendait
+   sans ce rendu — mesuré, `modeEnCours === true` avec `casePause.disabled ===
+   false`. Deux dégâts réels : l'hôte qui **re-coche** la pause pendant le vol
+   est refusé par une note transitoire **et l'appel en cours lève la pause quand
+   même** (l'état final est l'inverse de son dernier geste) ; et ce refus pose
+   `etat.pauseRefusee`, que seul `enregistrerPanneau` consomme, donc le prochain
+   enregistrement affiche un refus **en rouge** alors que tout a réussi. Un seul
+   gel pour tout le geste.
+3. **La question PROMETTAIT un départ** (« {n} propositions partiront sans
+   attendre ») sur un nombre qui est une **borne haute** — le défaut déjà
+   corrigé le 29 octobre sur le chemin du panneau, rouvert par la nouvelle
+   porte. `encoreLegitime` rejoue onze motifs de refus que ce compte ne connaît
+   pas : il sur-compte par construction. La phrase dit maintenant
+   « **pourraient** partir », dans les trois langues, et un test refuse la forme
+   assertive.
+4. **`editionPanneauNonEnregistree` ne voyait que les délais.** Les
+   destinataires d'alerte et les consignes IA ne vivent **nulle part** dans
+   l'état : `renderTiroir` fait `corps.innerHTML = voletIA(ref)`. Une consigne
+   par bien et une adresse d'alerte disparaissaient donc sans un mot — et la
+   consigne **globale** est partagée par tous les biens, donc jetée même quand
+   le délai n'avait pas bougé. ⚠ Et ma première correction était fausse aussi :
+   comparer le formulaire au bloc **enregistré** déclare « modifié » tout
+   panneau fraîchement peint, parce que le volet a des valeurs par **défaut**
+   que la config n'a pas (mesuré : sans bloc `intervention`, `email_enabled`
+   est rendu **coché**). On compare donc à l'**empreinte de rendu**
+   (`etat.panneauRendu`, posée par `renderTiroir`) : aucune valeur par défaut à
+   modéliser, et c'est exactement la question posée — « a-t-il tapé quelque
+   chose depuis que ce panneau a été peint ? »
+5. **La note du bien d'avant survivait au repointage** — le gestionnaire du
+   sélecteur masque la note pour cette raison précise depuis le 28 octobre.
+   Même défaut, autre porte ; la couleur `--ok` part avec.
+6. **« Annuler » écrivait le bloc `delais` entier depuis un instantané
+   client.** La cible `delais` **remplace** le bloc côté serveur, et
+   `etat.configIA` est chargé au démarrage de la page : si le délai avait changé
+   ailleurs (autre onglet, téléphone), annuler **ressuscitait l'ancienne
+   valeur** — et avec `propager: true`, les brouillons **non échus** étaient
+   réarmés à `created_at + N` avec ce N périmé. Un geste d'annulation ne doit
+   pas rapprocher l'échéance de propositions dont l'hôte n'a pas entendu parler.
+   On **relit** la config avant d'écrire ; si la relecture échoue, **on n'écrit
+   pas** et on le dit.
+7. **La branche « garder » ignorait `deja_prises` et l'écart annoncé/réalisé**,
+   alors que mon commentaire promettait la comparaison. Les deux sont dits
+   maintenant, avec les mêmes libellés que le chemin du panneau, et la note
+   n'est pas verte.
+8. **Les deux doubles élargis étaient plus permissifs que le vrai endpoint**
+   (ils répondaient un aperçu à n'importe quel appel et renvoyaient une
+   référence en dur). Resserrés sur `apercu === true` et sur la référence
+   demandée. Et mon commentaire sur-promettait : pour l'un des deux tests la
+   branche est **morte**, puisque `delai = null` sort avant tout réseau.
+
+**Dix-sept tests au banc jsdom**, et six mutations éprouvées une par une.
+⚠ **Une mutation a d'abord menti** : `if (etat.modeEnCours) return` apparaît
+**sept fois** dans `pages/messages.html`, et ma première mutation a frappé la
+première occurrence — donc une autre garde. Elle n'a rien rougi, et j'en aurais
+conclu que mon test ne mordait pas. Une mutation s'ancre sur un texte
+**unique**, comme une assertion.
+
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 
 **Trouvé en corrigeant les quatre points, mesuré, NON corrigé dans ce commit.**

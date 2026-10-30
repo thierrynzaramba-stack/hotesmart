@@ -78,14 +78,23 @@ test('ENTRER en validation manuelle ne demande rien : ce n est pas un armement',
 async function pendantLEcriturePause (fn, { delai = null } = {}) {
   let debloquer = null
   const b = B.monter({
-    appel: async (chemin) => {
+    appel: async (chemin, charge) => {
       // ⚠ L APERCU PRECEDE DESORMAIS LA LEVEE DE LA PAUSE (recette du
       // 30 octobre 2026 : lever la pause est le geste qui libere, il demande
       // donc avant). Sans cette reponse, l apercu est illisible, la pause n est
       // PAS levee, et le vol que ces tests mettent en scene n a jamais lieu.
       // `echues: 0` : aucune question, on mesure bien le gel de l ecriture.
-      if (chemin === '/api/agent-config') {
-        return { delais_ref: REF, apercu: { ok: true, motif: 'delai', echues: 0 } }
+      // ⚠ LE DOUBLE REFUSE CE QUE LE VRAI REFUSE (constat d une revue) : le
+      // endpoint ne rend `apercu` QUE sur `apercu === true`, et il echo la
+      // reference DEMANDEE. Ma premiere version repondait un apercu a n importe
+      // quel appel et renvoyait `REF` en dur : un double plus permissif que le
+      // vrai valide du code qui ne peut pas tourner.
+      // ⚠ ET CETTE BRANCHE EST MORTE POUR LE PREMIER DES DEUX TESTS, parce que
+      // `delai = null` fait sortir `echuesSiLaPauseEstLevee` avant tout reseau
+      // (validation manuelle : rien n est arme). Elle ne sert qu aux appels
+      // avec un delai.
+      if (chemin === '/api/agent-config' && charge && charge.apercu === true) {
+        return { delais_ref: charge.delais_ref, apercu: { ok: true, motif: 'delai', echues: 0 } }
       }
       if (chemin === '/api/property-automation') {
         await new Promise(r => { debloquer = r })
@@ -129,14 +138,23 @@ test('LE TEST QUI COMPTE : pendant l ecriture de la pause, un clic de pilule n e
   // Hors du vol : on refait le geste jusqu'au bout et on verifie la survie.
   let debloquer = null
   const b = B.monter({
-    appel: async (chemin) => {
+    appel: async (chemin, charge) => {
       // ⚠ L APERCU PRECEDE DESORMAIS LA LEVEE DE LA PAUSE (recette du
       // 30 octobre 2026 : lever la pause est le geste qui libere, il demande
       // donc avant). Sans cette reponse, l apercu est illisible, la pause n est
       // PAS levee, et le vol que ces tests mettent en scene n a jamais lieu.
       // `echues: 0` : aucune question, on mesure bien le gel de l ecriture.
-      if (chemin === '/api/agent-config') {
-        return { delais_ref: REF, apercu: { ok: true, motif: 'delai', echues: 0 } }
+      // ⚠ LE DOUBLE REFUSE CE QUE LE VRAI REFUSE (constat d une revue) : le
+      // endpoint ne rend `apercu` QUE sur `apercu === true`, et il echo la
+      // reference DEMANDEE. Ma premiere version repondait un apercu a n importe
+      // quel appel et renvoyait `REF` en dur : un double plus permissif que le
+      // vrai valide du code qui ne peut pas tourner.
+      // ⚠ ET CETTE BRANCHE EST MORTE POUR LE PREMIER DES DEUX TESTS, parce que
+      // `delai = null` fait sortir `echuesSiLaPauseEstLevee` avant tout reseau
+      // (validation manuelle : rien n est arme). Elle ne sert qu aux appels
+      // avec un delai.
+      if (chemin === '/api/agent-config' && charge && charge.apercu === true) {
+        return { delais_ref: charge.delais_ref, apercu: { ok: true, motif: 'delai', echues: 0 } }
       }
       if (chemin === '/api/property-automation') {
         if (debloquer === false) return { paused: {} }

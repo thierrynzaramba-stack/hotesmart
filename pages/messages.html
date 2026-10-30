@@ -171,6 +171,8 @@ const etat = {
   prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
   brevo: false,            // cle Brevo presente -> canal SMS ouvert
   tiroirVolet: 'ia', tiroirBien: null,
+  // L'empreinte du volet IA au moment ou il a ete peint (voir renderTiroir).
+  panneauRendu: null,
   templates: undefined,    // messages programmes du bien choisi ; null = illisible
   templatesBien: null, templatesEnCours: false,
   serrures: [],            // serrures du bien choisi (property_locks -> locks)
@@ -1208,6 +1210,14 @@ function modesDe (config) {
 // chemins qui doivent la remettre : refus pendant une ecriture, apercu
 // impossible, et « la pause reste active ».
 function remettreCasePause (ref) {
+  // ⚠ SEULEMENT SI LE PANNEAU AFFICHE ENCORE CE BIEN — constat MESURE d'une
+  // revue. Le chemin de la levee attend deux fois (apercu, puis desarmement),
+  // et un clic sur un autre fil repointe le panneau pendant ce vol : on ecrivait
+  // alors l'etat de pause du bien d'AVANT dans le panneau du bien d'APRES.
+  // L'hote lisait « Maison Jardin » au selecteur, la case « en pause » cochee,
+  // et une note parlant d'un autre logement. C'est exactement la famille « un
+  // ecran qui affirme ce qui n'est pas » que ce chantier ferme.
+  if (String(etat.tiroirBien) !== String(ref)) return
   const caseP = $('[data-bind="tiroir-corps"]').querySelector('[data-tiroir-pause]')
   if (caseP) caseP.checked = etat.pauses[String(ref)] === true
 }
@@ -1293,14 +1303,27 @@ async function basculerPause (ref, paused) {
   // Annuler est la branche PRUDENTE, donc celle de la touche Echap, comme sur
   // le chemin du panneau. `window.confirm` ne nomme pas ses boutons : le texte
   // dit laquelle fait quoi.
+  // ⚠ LE GEL VIENT AVANT LE PREMIER `await`, ET C'EST UN CONSTAT MESURE DE
+  // REVUE. Avant ce commit, `basculerPause` posait `modeEnCours` PUIS
+  // `renderTiroir()` avant tout appel : la case et « Enregistrer » etaient
+  // desarmes des le premier instant. Mon bloc d'apercu attendait sans ce rendu,
+  // donc `modeEnCours === true` avec `casePause.disabled === false`. Deux
+  // degats reels : l'hote qui re-coche la pause pendant le vol est refuse par
+  // une note transitoire ET l'appel en cours leve la pause quand meme — l'etat
+  // final est l'inverse de son dernier geste ; et ce refus pose
+  // `etat.pauseRefusee`, que seul `enregistrerPanneau` consomme, donc le
+  // prochain enregistrement affiche un refus EN ROUGE alors que tout a reussi.
+  // Un seul gel pour tout le geste, relache a la fin.
+  etat.modeEnCours = true
+  renderTiroir()
   if (paused === false) {
-    etat.modeEnCours = true
     let avant
     try { avant = await echuesSiLaPauseEstLevee(ref) }
     catch (err) { logger.error('Messages', 'apercu levee pause', err); avant = { erreur: 'appel' } }
-    etat.modeEnCours = false
     if (avant.erreur) {
       logger.error('Messages', 'apercu levee pause', avant.erreur)
+      etat.modeEnCours = false
+      renderTiroir()
       noteReglage(t('messages.pause_apercu_ko'))
       remettreCasePause(ref)
       return
@@ -1311,17 +1334,71 @@ async function basculerPause (ref, paused) {
       // 29 octobre : un « Annuler » qui ne change rien laissait la proposition
       // partir comme si l'hote avait dit oui). Le writer unique reste
       // `lib/guestflow/appliquer-delai.js`, atteint par `garder: true`.
-      etat.modeEnCours = true
+      //
+      // ⚠ ON RELIT LA CONFIG AVANT D'ECRIRE — constat de revue. La cible
+      // `delais` REMPLACE le bloc entier cote serveur, et `avant.delais` vient
+      // de `etat.configIA`, charge au demarrage de la page. Si le delai du bien
+      // a change ailleurs depuis (autre onglet, telephone), ANNULER un dialogue
+      // de levee de pause reecrivait l'ancienne valeur en silence — et comme
+      // `propager: true`, les brouillons NON echus etaient rearmes a
+      // `created_at + N` avec ce N perime. Un geste d'annulation ne doit pas
+      // rapprocher l'echeance de propositions dont l'hote n'a pas entendu
+      // parler. On relit ; si la relecture echoue, on n'ECRIT PAS et on le dit.
       let gardees = null
+      let bilan = null
+      let relectureOk = true
       try {
-        const r = await appel('/api/agent-config',
-          { delais_ref: ref, delais: avant.delais, propager: true, garder: true })
-        const b = r && r.brouillons
-        if (b && b.ok === true && Number.isFinite(Number(b.desarmes))) gardees = Number(b.desarmes)
-        else logger.error('Messages', 'garder a la pause', (b && b.motif) || 'bilan absent')
-      } catch (err) { logger.error('Messages', 'garder a la pause', err) }
+        const frais = await appel('/api/agent-config')
+        if (frais && frais.config) {
+          etat.configIA = frais.config
+          etat.modes = modesDe(frais.config)
+        } else relectureOk = false
+      } catch (err) { relectureOk = false; logger.error('Messages', 'relire config', err) }
+      const delaisFrais = relectureOk ? delaisDuBien(ref) : null
+      if (relectureOk && delaisFrais.reponse_ia !== null) {
+        try {
+          const r = await appel('/api/agent-config', {
+            delais_ref: ref,
+            delais: {
+              reponse_ia: delaisFrais.reponse_ia, alerte_info: delaisFrais.alerte_info,
+              sourdine: { active: delaisFrais.sourdine.active === true,
+                debut: delaisFrais.sourdine.debut, fin: delaisFrais.sourdine.fin }
+            },
+            propager: true, garder: true
+          })
+          bilan = (r && r.brouillons) || null
+          if (bilan && bilan.ok === true && Number.isFinite(Number(bilan.desarmes))) {
+            gardees = Number(bilan.desarmes)
+          } else logger.error('Messages', 'garder a la pause', (bilan && bilan.motif) || 'bilan absent')
+        } catch (err) { logger.error('Messages', 'garder a la pause', err) }
+      } else if (!relectureOk) {
+        logger.error('Messages', 'garder a la pause', 'config illisible')
+      } else {
+        // Le bien est repasse en validation manuelle ailleurs : plus rien n'est
+        // arme, donc rien a desarmer, et la pause tient. C'est un succes.
+        gardees = 0
+      }
       etat.modeEnCours = false
+      renderTiroir()
       remettreCasePause(ref)
+      // ⚠ CE QUI A ECHAPPE SE DIT, COMME SUR LE CHEMIN DU PANNEAU (constat de
+      // revue : mon commentaire promettait la comparaison, le code ne comparait
+      // rien). `deja_prises` est la course LECTURE -> UPDATE ; l'ecart entre ce
+      // qu'on a ANNONCE et ce qui a ete garde est la course LARGE, celle qui
+      // dure tout le temps du dialogue. Dans les deux cas une reponse est partie
+      // au voyageur, et une note joyeuse serait un mensonge.
+      const ecarts = []
+      if (gardees !== null) {
+        const prises = Number(bilan && bilan.deja_prises) || 0
+        if (prises > 0) ecarts.push(t('messages.partie_deja_prises', { n: prises }))
+        const manquantes = Math.max(0, (Number(avant.echues) || 0) - gardees - prises)
+        if (manquantes > 0) ecarts.push(t('messages.partie_envolees', { n: manquantes }))
+      }
+      if (ecarts.length) {
+        noteReglage(t('messages.pause_gardees_partiel',
+          { n: gardees, parties: ecarts.join(', ') }))
+        return
+      }
       // ⚠ LE NOMBRE ANNONCE EST CELUI DU SERVEUR, pas celui compte avant : s'ils
       // divergent, c'est l'arriere qui a bouge pendant que le dialogue etait
       // ouvert, et l'hote doit lire ce qui s'est reellement passe. Si le bilan
@@ -1334,8 +1411,6 @@ async function basculerPause (ref, paused) {
     }
   }
 
-  etat.modeEnCours = true
-  renderTiroir()
   let ecritureOk = false
   try {
     await appel('/api/property-automation', { provider_property_id: ref, paused })
@@ -1401,6 +1476,14 @@ function renderTiroir () {
   }
   corps.innerHTML = voletIA(ref)
   brancherTiroir(corps, ref)
+  // ⚠ L'EMPREINTE DU VOLET AU MOMENT OU IL EST PEINT, et c'est le seul moyen
+  // JUSTE de savoir si l'hote a tape quelque chose depuis. Ma premiere version
+  // comparait le formulaire au bloc ENREGISTRE : faux par construction, parce
+  // que le volet a des valeurs par DEFAUT que la config n'a pas — mesure, un
+  // bien sans bloc `intervention` rend `email_enabled` COCHE, donc tout
+  // panneau fraichement peint se declarait « modifie ». Comparer a ce qui a ete
+  // peint ne modelise aucun defaut : c'est exactement la question posee.
+  etat.panneauRendu = { ref, lu: lireLePanneau(corps, ref) }
 }
 
 // ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
@@ -2581,16 +2664,49 @@ function bienDuFilOuvert () {
 // travail du formulaire ; la comparer au bloc ENREGISTRE est le seul moyen de
 // savoir si l'hote a tape quelque chose.
 function editionPanneauNonEnregistree () {
+  const ref = etat.tiroirBien
+  if (!ref) return null
+  const nom = () => (etat.biens.get(String(ref)) || {}).name || String(ref)
+
+  // 1. Les delais : ils vivent dans `etat.delaisEdit`, pas dans le DOM.
   const e = etat.delaisEdit
-  if (!e || !e.ref) return null
-  const d = delaisDuBien(e.ref)
-  const pareil = e.reponse_ia === d.reponse_ia
-    && e.alerte_info === d.alerte_info
-    && e.sourdine.active === d.sourdine.active
-    && e.sourdine.debut === d.sourdine.debut
-    && e.sourdine.fin === d.sourdine.fin
-  if (pareil) return null
-  return (etat.biens.get(String(e.ref)) || {}).name || String(e.ref)
+  if (e && e.ref === ref) {
+    const d = delaisDuBien(ref)
+    const pareil = e.reponse_ia === d.reponse_ia
+      && e.alerte_info === d.alerte_info
+      && e.sourdine.active === d.sourdine.active
+      && e.sourdine.debut === d.sourdine.debut
+      && e.sourdine.fin === d.sourdine.fin
+    if (!pareil) return nom()
+  }
+
+  // 2. ⚠ ET LE RESTE DU VOLET, QUI NE VIT QUE DANS LE DOM — constat MESURE
+  // d'une revue, et ma note promettait plus que ce code ne faisait. Les
+  // destinataires d'alerte et les consignes IA ne sont NULLE PART dans l'etat :
+  // `renderTiroir` fait `corps.innerHTML = voletIA(ref)`, donc un repointage les
+  // efface. Comparer les seuls delais laissait disparaitre en silence une
+  // consigne par bien et une adresse d'alerte — et la consigne GLOBALE est
+  // partagee par tous les biens, donc elle etait jetee meme quand le delai
+  // n'avait pas bouge.
+  //
+  // On compare le formulaire a son EMPREINTE DE RENDU (`etat.panneauRendu`),
+  // avec le meme lecteur que l'enregistrement. Comparer au bloc enregistre
+  // serait faux : le volet a des valeurs par defaut que la config n'a pas.
+  const corps = $('[data-bind="tiroir-corps"]')
+  const rendu = etat.panneauRendu
+  if (!corps || !rendu || String(rendu.ref) !== String(ref)) return null
+  if (!corps.querySelector('[data-consignes="global"]')) return null
+  const lu = lireLePanneau(corps, ref)
+  const memeType = (k) => {
+    const a = rendu.lu.alertes[k]
+    const l = lu.alertes[k]
+    return l.sms_enabled === a.sms_enabled && String(l.sms_lines) === String(a.sms_lines)
+      && l.email_enabled === a.email_enabled && String(l.email_lines) === String(a.email_lines)
+  }
+  const memesConsignes = lu.consignes.global === rendu.lu.consignes.global
+    && lu.consignes.bien === rendu.lu.consignes.bien
+  if (!memeType('intervention') || !memeType('info_unknown') || !memesConsignes) return nom()
+  return null
 }
 
 // Repointe le panneau sur le bien du fil ouvert, s'il est ouvert et s'il n'y
@@ -2603,9 +2719,26 @@ function editionPanneauNonEnregistree () {
 function reporterLePanneauSurLeFil () {
   const tiroir = $('[data-bind="tiroir"]')
   if (!tiroir || tiroir.hidden !== false) return
+  // ⚠ JAMAIS PENDANT UNE ECRITURE — constat MESURE d'une revue. Une ecriture en
+  // vol (pause, apercu, desarmement) tient une reference `ref` capturee a son
+  // entree : repointer le panneau sous elle lui fait ecrire son resultat dans
+  // le panneau d'un AUTRE bien. Le fil, lui, change bien ; c'est le panneau qui
+  // attend la fin du geste.
+  if (etat.modeEnCours) return
   const duFil = bienDuFilOuvert()
   if (!duFil || duFil === etat.tiroirBien) return
   const perdu = editionPanneauNonEnregistree()
+  // ⚠ LA NOTE DU BIEN D'AVANT NE SURVIT PAS AU REPOINTAGE — constat de revue,
+  // et le gestionnaire du selecteur le fait deja pour la meme raison (constat
+  // du 28 octobre : un « Enregistre » VERT restait affiche sous les reglages
+  // NON enregistres du bien suivant). Meme defaut, autre porte.
+  // ⚠ ET LA COULEUR PART AVEC : une note masquee qui garde `--ok` est inerte
+  // aujourd'hui (`noteReglage` repose toujours la classe), mais c'est un vert
+  // en attente que le prochain code qui demasquerait sans reposer la classe
+  // ferait apparaitre sous un texte qui n'est pas le sien.
+  const noteAvant = $('[data-bind="tiroir-note"]')
+  noteAvant.hidden = true
+  noteAvant.classList.remove('msg-tiroir__note--ok')
   etat.tiroirBien = duFil
   renderTiroir()
   if (perdu) noteReglage(t('messages.panneau_suit_le_fil', { nom: perdu }))
