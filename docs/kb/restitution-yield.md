@@ -288,6 +288,89 @@ bien**, pas sur le maximum toutes zones — sinon la bannière se tait sur des m
 déjà hors couverture pour ce logement. Table vide : bannière quand même, c'est
 le pire cas.
 
+## 5 quater. ⚠ LA PALETTE DES CINQ NIVEAUX EST UN ÉLÉMENT DE STRUCTURE
+
+⚠⚠ **DÉCISION DE THIERRY, 29 OCTOBRE 2026, mot pour mot : « Cette palette est
+réutilisée pour toutes les prévisions. Enregistre-la comme élément de structure
+à ne jamais modifier ou substituer sans double validation de ma part. »**
+
+Elle n'est donc pas un choix d'écran : c'est **l'échelle commune à toute
+restitution de prévision** — Prédiction de prix, « Quand vos prix bougent », le
+marché, et ce qui viendra.
+
+| niveau | fond | accent | classe |
+|---|---|---|---|
+| Base | `#E7F0F7` | `#4A7FA8` | `n-base` |
+| Moyen | `#EDF4EE` | `#5F8F6E` | `n-moyen` |
+| Haut | `#FBF4E2` | `#C89A2E` | `n-haut` |
+| Très haut | `#FAEADA` | `#D2762E` | `n-tres-haut` |
+| Exceptionnel | `#F8E2DA` | `#BF4F32` | `n-exceptionnel` |
+
+**Dix valeurs, pas cinq.** Un fond ET un accent par niveau : l'accent se pose en
+`box-shadow: inset 3px 0 0` sur les lignes de nuit et en trait de légende sur le
+marché. Une « source unique » qui n'aurait retenu que les fonds n'en couvrait
+que la moitié.
+
+⚠ **ET LA CONSIGNE « NI BLEU NI AMBRE » NE S'APPLIQUE PAS À CETTE ÉCHELLE.**
+Thierry l'a retirée pour elle le 29 octobre 2026, et pour elle seule. Les trois
+couleurs réservées — **noir** à la navigation, **ambre** à « ce qu'HôteSmart a
+fait pour vous », **bleu** au cliquable — restent en vigueur partout ailleurs.
+Le pas `Base` est bleuté et le pas `Haut` ambré : c'est voulu, c'est tranché, et
+ce n'est pas une entorse à la charte.
+
+**Pourquoi la palette garde son changement de teinte.** Mis devant le choix
+entre une échelle d'une seule teinte (claire → foncée) et la palette existante,
+Thierry a tranché pour l'existante, à l'identique, afin de **ne pas toucher un
+écran validé en production**. Conséquence assumée et à surveiller : cinq tons
+pâles et proches se distinguent mal dans une bande fine — d'où l'obligation que
+**toute bande porte son niveau en NOM** (`title` + `aria-label`), une couleur
+seule n'étant de toute façon pas une information.
+
+### Ce qui est tenu par un test, et pourquoi il faut un test
+
+Une règle écrite dans un document ne rougit jamais. `tests/palette-niveaux.test.js`
+fait trois choses :
+
+1. il **épingle les dix valeurs**, à la casse et au caractère ;
+2. il **recense toutes les occurrences** des dix hexas dans le dépôt et exige
+   qu'elles figurent dans une **liste blanche de fichiers nommés** — une copie
+   de plus, où que ce soit, fait rougir ;
+3. il exige que chaque occurrence porte **la valeur canonique de son niveau** —
+   un `#E7F0F7` devenu `#E6F0F8`, ou deux fonds échangés entre niveaux, font
+   rougir.
+
+Son message d'échec **dit la règle en toutes lettres**, parce qu'un test dont
+l'échec n'explique pas la règle se contourne en changeant le test.
+
+Il épingle les **valeurs**, pas le goût : il n'empêche pas Thierry de changer la
+palette, il empêche qu'elle change **sans lui**.
+
+### État mesuré le 29 octobre 2026, et les deux écarts qui restent
+
+La palette était **recopiée quatre fois** — trois dans `apps/yield/prix.html`
+(`.n-*`, `.yp-niv-badge.n-*`, `.yp-niv.n-*`) et une en jetons dans
+`apps/yield/marche-global.html`. Les quatre copies **concordaient**, ce qui est
+précisément la situation dangereuse : rien ne rougissait, et la cinquième aurait
+divergé. La source unique vit désormais dans `public/style.css`, la seule
+feuille que les deux écrans chargent.
+
+⚠ **Deux écarts trouvés en posant la règle, NON corrigés, et c'est délibéré :**
+
+1. **Le 5e niveau est incomplet côté marché.** `marche-global.html` déclare
+   `--yf-exceptionnel-l` sans `--yf-exceptionnel` : sa légende apparie
+   `'Très haut ou Exceptionnel': ['--yf-tres-haut', '--yf-exceptionnel-l']`.
+   Quatre niveaux ont un fond, le cinquième non.
+2. **Le mode sombre diverge.** `marche-global.html` redéfinit quatre fonds sous
+   `prefers-color-scheme: dark` (`#1d2a36`, `#1f2d24`, `#352d17`, `#3a2717`) ;
+   `apps/yield/prix.html` n'a **aucun** bloc sombre, et ni l'une ni l'autre ne
+   charge `shared/theme.css`. **« À l'identique » est donc faux en mode
+   sombre** : les mêmes niveaux s'y affichent sombres sur un écran et pâles sur
+   l'autre — sur une page dont le fond, lui, reste clair.
+
+**Les deux demandent la double validation de Thierry**, puisque les corriger
+change l'apparence d'écrans validés. Ils sont au registre, pas dans un lot de
+passage.
+
 ## 6. Mobile
 
 C'est là que l'hôte regarde. Sous 640 px : la barre de sélection passe en deux
