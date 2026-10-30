@@ -5,6 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HôteSmart — Le marché global</title>
   <link rel="stylesheet" href="/public/style.css">
+  <!-- ⚠ LA POLICE DU SOCLE V5 SUR LES ÉCRANS YIELDFLOW — demande de Thierry du
+       30 octobre 2026. L'URL est IDENTIQUE à celle des pages V5
+       (pages/aujourdhui.html, pages/calendrier.html) : même fichier, donc
+       même entrée de cache navigateur, aucune requête supplémentaire pour un
+       hôte qui vient d'une page V5.
+       ⚠ ET LA CLASSE `police-v5` POSÉE SUR LA BALISE BODY EST LA SECONDE
+       MOITIÉ : sans elle, la fonte serait téléchargée sans être appliquée. La
+       règle `body` de public/style.css n'est PAS touchée, parce que cette
+       feuille sert aussi des écrans antérieurs à V5 que ce lot ne change pas. -->
+  <!-- ⚠ LE PRECONNECT EST LA MOITIE QU'ON OUBLIE — releve en review. Une
+       feuille tierce BLOQUANTE ajoutee a six ecrans, c'est un DNS puis un TLS
+       de plus devant le premier affichage, contre le budget « premier
+       affichage < 1 s » de CLAUDE.md. Les pages V5 de reference
+       (pages/aujourdhui.html, pages/calendrier.html) le portent ; ces ecrans
+       ne l'avaient pas, et le test n'epinglait que l'URL. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     [hidden] { display: none !important; }
     /* ⚠ PAGE EN LECTURE SEULE (spec §17 de docs/kb/chantier-nouveau-bien.md).
@@ -38,11 +56,14 @@
     .mg-legende i { display: inline-block; width: 22px; height: 0; vertical-align: 3px; margin-right: 6px; }
     .non-calc { color: var(--text2); font-style: italic; }
     /* « En resume » (§18) : quatre blocs, chacun sa source. */
-    :root {
-      --yf-base: #E7F0F7; --yf-base-l: #4A7FA8; --yf-moyen: #EDF4EE; --yf-moyen-l: #5F8F6E;
-      --yf-haut: #FBF4E2; --yf-haut-l: #C89A2E; --yf-tres-haut: #FAEADA; --yf-tres-haut-l: #D2762E;
-      --yf-exceptionnel-l: #BF4F32;
-    }
+    /* ⚠ LES DIX JETONS --yf-* VIENNENT DE public/style.css — ils étaient
+       redéclarés ICI jusqu'au 30 octobre 2026, soit la quatrième copie d'un
+       élément de structure. Les valeurs n'ont PAS changé : cet écran rend la
+       même chose qu'avant.
+       ⚠ Et il gagne au passage --yf-exceptionnel (le FOND du 5e niveau), qui
+       n'existait pas ici : seul son accent était déclaré. La légende continue
+       d'apparier « Très haut ou Exceptionnel » comme avant — ce lot ne
+       change pas ce qu'elle dit. */
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) {
         --yf-base: #1d2a36; --yf-moyen: #1f2d24; --yf-haut: #352d17; --yf-tres-haut: #3a2717;
@@ -80,7 +101,7 @@
     }
   </style>
 </head>
-<body>
+<body class="police-v5">
 <div class="layout">
 <div class="sidebar" id="sidebar"></div>
 <div class="main">

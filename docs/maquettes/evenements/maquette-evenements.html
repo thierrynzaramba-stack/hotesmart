@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Ce qui fait bouger vos prix</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FFFFFF;font-family:'Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',sans-serif;color:#222222;font-size:15px;line-height:1.4;-webkit-font-smoothing:antialiased}
+a{color:#222222}a:hover{color:#222222}
+button{font-family:inherit}
+.yf-wd{display:none}
+.yf-cont .yf-txt{visibility:hidden}
+.yf-an-hide{visibility:hidden}
+/* Téléphone : même grille que l'ordinateur, 7 colonnes de 150 px, défilement horizontal */
+@media (max-width: 1100px){
+  .yf-cal{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px;margin:0 -16px;padding-left:16px;padding-right:16px}
+  .yf-weekhead,.yf-week{grid-template-columns:repeat(7,150px) !important;width:max-content}
+  .yf-weekhead{position:sticky;left:0}
+}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #FFFFFF; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; color: #222222">
+
+  <div style="background: #FFFFFF; border-bottom: 1px solid #DDDDDD; padding: 0 16px">
+    <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; min-height: 64px">
+      <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px">
+        <span style="display: inline-flex; width: 30px; height: 30px; border-radius: 8px; background: #0E1726; align-items: center; justify-content: center">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5A524" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>
+        </span>
+        <span>HôteSmart</span>
+        <span style="font-weight: 500; color: #717171; font-size: 15px; margin-left: 6px">Tarification dynamique</span>
+      </div>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px">
+        <label for="bien" style="color: #717171">Logement</label>
+        <select id="bien" style="font-family: inherit; font-size: 14px; padding: 8px 12px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF; color: #222222">
+          <option>Recette — Loft Pilotable</option>
+          <option>Recette — Studio Centre</option>
+          <option>Recette — Maison Jardin</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div style="max-width: 1120px; width: 100%; margin: 0 auto; padding: 28px 16px 64px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px">
+
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px">
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <h1 style="margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -0.03em">Ce qui fait bouger vos prix</h1>
+        <p style="margin: 0; color: #717171; font-size: 15px">Loft Pilotable · du 1er novembre 2026 au 31 octobre 2027 · tout s’exprime sur votre grille</p>
+      </div>
+      <div style="margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; align-items: center" aria-label="Niveaux de la grille">
+        <sc-for list="{{legend}}" as="l" hint-placeholder-count="5">
+          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 10px; border-radius: 999px; background: {{l.bg}}; color: {{l.fg}}; font-weight: 500">{{l.label}} <span style="opacity: 0.8">{{l.prix}}</span></span>
+        </sc-for>
+      </div>
+    </div>
+
+    <section aria-label="Frise des douze prochains mois" style="background: #FFFFFF; border: 1px solid #DDDDDD; border-radius: 16px; padding: 18px 18px 14px; box-sizing: border-box">
+      <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 0; font-size: 12px; color: #717171; font-weight: 500">
+        <sc-for list="{{months}}" as="m" hint-placeholder-count="12">
+          <div style="border-left: 1px solid #EBEBEB; padding: 0 0 6px 6px">{{m.short}}</div>
+        </sc-for>
+      </div>
+      <div style="position: relative; height: {{friseHeight}}px; background: repeating-linear-gradient(to right, #EBEBEB 0 1px, transparent 1px calc(100% / 12)); border-radius: 4px">
+        <sc-for list="{{bars}}" as="b" hint-placeholder-count="14">
+          <button type="button" onClick="{{b.open}}" title="{{b.name}}" style="position: absolute; left: {{b.left}}%; width: {{b.width}}%; top: {{b.top}}px; height: 16px; border-radius: 4px; border: 0; padding: 0 6px; background: {{b.bg}}; color: {{b.fg}}; font-size: 11px; font-weight: 600; font-family: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; cursor: pointer; box-shadow: {{b.ring}}">{{b.short}}</button>
+        </sc-for>
+      </div>
+      <p style="margin: 10px 0 0; font-size: 12px; color: #717171">Un mois sans barre se vend au prix de la semaine ordinaire. Cliquez une barre pour ouvrir l’événement.</p>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+      <sc-for list="{{filters}}" as="f" hint-placeholder-count="4">
+        <button type="button" onClick="{{f.pick}}" style="font-size: 14px; padding: 8px 14px; border-radius: 999px; border: 1px solid {{f.border}}; background: {{f.bg}}; color: {{f.fg}}; font-weight: 500; cursor: pointer; min-height: 40px">{{f.label}}</button>
+      </sc-for>
+      <button type="button" onClick="{{toggleAdd}}" style="margin-left: auto; font-size: 14px; padding: 10px 16px; border-radius: 999px; border: 0; background: #222222; color: #FFFFFF; font-weight: 600; cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 8px">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        Ajouter un événement
+      </button>
+    </div>
+
+    <sc-if value="{{showAdd}}" hint-placeholder-val="{{false}}">
+      <section aria-label="Nouvel événement" style="background: #FFFFFF; border: 1px solid #222222; border-radius: 16px; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px">
+        <h2 style="margin: 0; font-size: 18px">Nouvel événement</h2>
+        <p style="margin: 0; font-size: 14px; color: #717171">Le nom dit la chose, pas la date : « Saison thermale », jamais « Saison thermale 2027 ». C’est lui qui relie les années entre elles.</p>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="nom" style="font-size: 13px; color: #717171">Nom</label>
+            <input id="nom" type="text" placeholder="Festival de jazz" style="font-family: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid #DDDDDD">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="recur" style="font-size: 13px; color: #717171">Chaque année</label>
+            <select id="recur" style="font-family: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF">
+              <option>Aux mêmes dates, je confirme chaque année</option>
+              <option>À des dates qui bougent, je les saisis chaque année</option>
+              <option>Une seule fois</option>
+            </select>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="deb" style="font-size: 13px; color: #717171">Du</label>
+            <input id="deb" type="date" style="font-family: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid #DDDDDD">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="fin" style="font-size: 13px; color: #717171">Au</label>
+            <input id="fin" type="date" style="font-family: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid #DDDDDD">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="comme" style="font-size: 13px; color: #717171">Tant qu’il n’a pas d’historique, se comporte comme</label>
+            <select id="comme" style="font-family: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF">
+              <option>La semaine ordinaire (le moteur ne change rien)</option>
+              <option>Les vacances d’été</option>
+              <option>Un week-end prolongé</option>
+              <option>La Saint-Valentin</option>
+            </select>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap">
+          <button type="button" onClick="{{toggleAdd}}" style="font-size: 14px; padding: 10px 18px; border-radius: 999px; border: 0; background: #222222; color: #FFFFFF; font-weight: 600; cursor: pointer; min-height: 44px">Créer l’événement</button>
+          <button type="button" onClick="{{toggleAdd}}" style="font-size: 14px; padding: 10px 18px; border-radius: 999px; border: 1px solid #DDDDDD; background: #FFFFFF; color: #222222; cursor: pointer; min-height: 44px">Annuler</button>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-for list="{{groups}}" as="g" hint-placeholder-count="12">
+      <section style="display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 6px 0 0; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: #717171; font-weight: 600">{{g.label}}</h2>
+        <sc-for list="{{g.events}}" as="ev" hint-placeholder-count="2">
+          <article style="background: #FFFFFF; border: 1px solid {{ev.border}}; border-radius: 16px; overflow: hidden">
+            <button type="button" onClick="{{ev.toggle}}" style="width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 14px 16px; border: 0; background: transparent; text-align: left; cursor: pointer; font-family: inherit; color: inherit; min-height: 56px">
+              <span style="display: flex; flex-direction: column; gap: 3px; flex: 1 1 260px; min-width: 0">
+                <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+                  <span style="font-size: 17px; font-weight: 600">{{ev.name}}</span>
+                  <span style="font-size: 11px; padding: 2px 8px; border-radius: 999px; background: {{ev.famBg}}; color: {{ev.famFg}}; font-weight: 600; letter-spacing: 0.02em">{{ev.famLabel}}</span>
+                  <sc-if value="{{ev.overridden}}" hint-placeholder-val="{{false}}">
+                    <span style="font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #FFF4E0; color: #B87500; font-weight: 600">réglé par vous</span>
+                  </sc-if>
+                </span>
+                <span style="font-size: 14px; color: #717171">{{ev.dates}} · {{ev.refLabel}}</span>
+              </span>
+              <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+                <sc-for list="{{ev.summary}}" as="s" hint-placeholder-count="2">
+                  <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 10px; border-radius: 999px; background: {{s.bg}}; color: {{s.fg}}; font-weight: 600; white-space: nowrap">{{s.label}}</span>
+                </sc-for>
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#717171" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transform: {{ev.chev}}; transition: transform 0.15s"><path d="M6 9l6 6 6-6"/></svg>
+              </span>
+            </button>
+
+            <sc-if value="{{ev.open}}" hint-placeholder-val="{{false}}">
+              <div style="border-top: 1px solid #EBEBEB; padding: 16px; display: flex; flex-direction: column; gap: 16px">
+
+                <sc-if value="{{ev.tabRegler}}" hint-placeholder-val="{{true}}">
+                <sc-if value="{{ev.hasLayers}}" hint-placeholder-val="{{true}}">
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 14px">
+                  <span style="color: #717171; margin-right: 4px">Afficher dans chaque nuit</span>
+                  <span style="font-size: 11px; color: #717171; order: 99; flex-basis: 100%">Votre choix est gardé d’un événement à l’autre et d’une saison à l’autre.</span>
+                  <sc-for list="{{ev.layers}}" as="l" hint-placeholder-count="4">
+                    <button type="button" aria-pressed="{{l.on}}" onClick="{{l.pick}}" style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 12px; border-radius: 999px; border: 1px solid {{l.border}}; background: {{l.bg}}; color: {{l.fg}}; font-weight: 600; cursor: pointer; min-height: 36px"><span style="width: 10px; height: 10px; border-radius: 3px; background: {{l.dot}}"></span>{{l.label}}</button>
+                  </sc-for>
+                </div>
+                </sc-if>
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; font-size: 14px">
+                  <span style="font-weight: 600">Zone d’influence</span>
+                  <span style="display: inline-flex; align-items: center; gap: 6px">
+                    <span style="color: #717171">week-ends avant</span>
+                    <button type="button" onClick="{{ev.beforeMinus}}" aria-label="Un week-end de moins avant" style="width: 36px; height: 36px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF; cursor: pointer; font-size: 16px">−</button>
+                    <span style="min-width: 20px; text-align: center; font-weight: 600">{{ev.before}}</span>
+                    <button type="button" onClick="{{ev.beforePlus}}" aria-label="Un week-end de plus avant" style="width: 36px; height: 36px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF; cursor: pointer; font-size: 16px">+</button>
+                  </span>
+                  <span style="display: inline-flex; align-items: center; gap: 6px">
+                    <span style="color: #717171">week-ends après</span>
+                    <button type="button" onClick="{{ev.afterMinus}}" aria-label="Un week-end de moins après" style="width: 36px; height: 36px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF; cursor: pointer; font-size: 16px">−</button>
+                    <span style="min-width: 20px; text-align: center; font-weight: 600">{{ev.after}}</span>
+                    <button type="button" onClick="{{ev.afterPlus}}" aria-label="Un week-end de plus après" style="width: 36px; height: 36px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF; cursor: pointer; font-size: 16px">+</button>
+                  </span>
+                  <span style="margin-left: auto; display: inline-flex; gap: 12px; font-size: 12px; color: #717171; flex-wrap: wrap">
+                    <span style="display: inline-flex; align-items: center; gap: 5px"><span style="width: 12px; height: 12px; border-radius: 3px; border: 2px solid #222222; box-sizing: border-box"></span>l’événement</span>
+                    <span style="display: inline-flex; align-items: center; gap: 5px"><span style="width: 12px; height: 12px; border-radius: 3px; border: 2px dashed #717171; box-sizing: border-box"></span>son rayonnement</span>
+                    <span style="display: inline-flex; align-items: center; gap: 5px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #FFF4E0; border: 1px solid #F5A524; box-sizing: border-box"></span>réglé par vous</span>
+                  </span>
+                </div>
+
+                <div class="yf-cal" style="display: flex; flex-direction: column; gap: 6px">
+                  <div class="yf-weekhead" style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; font-size: 11px; color: #717171; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em">
+                    <div style="padding: 0 4px">lun</div><div style="padding: 0 4px">mar</div><div style="padding: 0 4px">mer</div><div style="padding: 0 4px">jeu</div><div style="padding: 0 4px">ven</div><div style="padding: 0 4px">sam</div><div style="padding: 0 4px">dim</div>
+                  </div>
+                  <sc-for list="{{ev.weeks}}" as="w" hint-placeholder-count="3">
+                    <span class="yf-week-sep" style="display: none; font-size: 11px; color: #717171; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 2px 0">{{w.label}}</span>
+                    <div class="yf-week" style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px">
+                      <sc-for list="{{w.days}}" as="d" hint-placeholder-count="7">
+                        <button type="button" class="yf-day" onClick="{{d.pick}}" aria-label="{{d.aria}}" aria-pressed="{{d.selected}}" style="display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 6px; border-radius: 12px; border: {{d.borderCss}}; background: {{d.cellBg}}; color: #222222; cursor: pointer; text-align: left; font-family: inherit; box-shadow: {{d.ring}}; opacity: {{d.op}}">
+                          <span class="yf-dayhead" style="display: flex; justify-content: space-between; align-items: baseline; gap: 4px; padding: 2px 3px 0">
+                            <span style="font-size: 15px; font-weight: 700; letter-spacing: -0.01em">{{d.num}}</span>
+                            <span style="font-size: 10px; color: #717171; text-transform: uppercase; letter-spacing: 0.04em">{{d.month}}</span>
+                            <span class="yf-wd">{{d.wd}}</span>
+                          </span>
+                          <span class="yf-bulles" style="display: flex; flex-direction: column; gap: 4px">
+                          <span class="yf-lvl" style="display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 0 4px; min-height: 62px; box-sizing: border-box">
+                            <span style="font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: {{d.lvlBg}}; color: {{d.lvlFg}}; white-space: nowrap">{{d.lvlLabel}}</span>
+                            <span style="font-size: 15px; font-weight: 700; letter-spacing: -0.01em">{{d.prix}}</span>
+                            <sc-if value="{{d.hasRules}}" hint-placeholder-val="{{false}}">
+                              <span style="font-size: 10px; color: #717171; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%">{{d.rulesTxt}}</span>
+                            </sc-if>
+                          </span>
+                          <sc-for list="{{d.bulles}}" as="b" hint-placeholder-count="5">
+                            <span class="yf-bulle {{b.cls}}" title="{{b.tip}}" style="display: flex; align-items: center; gap: 6px; padding: 3px 7px; border-radius: {{b.radius}}; margin-left: {{b.ml}}; margin-right: {{b.mr}}; background: {{b.bg}}; color: {{b.fg}}; min-height: 24px; box-sizing: border-box; overflow: hidden">
+                              <span class="yf-txt yf-an {{b.anCls}}" style="font-size: 10px; font-weight: 700; width: 18px; flex: 0 0 auto; text-align: center; border-radius: 4px; padding: 1px 0; background: {{b.anBg}}; color: {{b.anFg}}">{{b.an}}</span>
+                              <span class="yf-txt" style="font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0">{{b.main}}</span>
+                              <sc-if value="{{b.hasLead}}" hint-placeholder-val="{{false}}">
+                                <span class="yf-txt" style="font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px; background: {{b.leadBg}}; color: {{b.leadFg}}; white-space: nowrap; flex: 0 0 auto">{{b.lead}}</span>
+                              </sc-if>
+                            </span>
+                          </sc-for>
+                          </span>
+                        </button>
+                      </sc-for>
+                    </div>
+                  </sc-for>
+                </div>
+
+                <sc-if value="{{ev.hasSel}}" hint-placeholder-val="{{false}}">
+                  <div style="border: 1px solid #222222; border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; background: #FFFFFF">
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px">
+                      <span style="font-weight: 600; font-size: 15px">{{ev.selLabel}}</span>
+                      <button type="button" onClick="{{ev.selectEvent}}" style="border: 0; background: transparent; color: #222222; text-decoration: underline; cursor: pointer; font-size: 13px; padding: 6px 0; font-family: inherit">tout l’événement</button>
+                      <button type="button" onClick="{{ev.selectHalo}}" style="border: 0; background: transparent; color: #222222; text-decoration: underline; cursor: pointer; font-size: 13px; padding: 6px 0; font-family: inherit">tout le rayonnement</button>
+                      <button type="button" onClick="{{ev.clearSel}}" style="margin-left: auto; border: 0; background: transparent; color: #717171; text-decoration: underline; cursor: pointer; font-size: 13px; padding: 6px 0; font-family: inherit">désélectionner</button>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px">
+                      <span style="font-size: 13px; color: #717171">Niveau de prix</span>
+                      <div style="display: flex; flex-wrap: wrap; gap: 6px">
+                        <sc-for list="{{ev.lvlPills}}" as="p" hint-placeholder-count="5">
+                          <button type="button" onClick="{{p.pick}}" aria-pressed="{{p.on}}" style="font-size: 13px; padding: 8px 12px; border-radius: 999px; border: 2px solid {{p.border}}; background: {{p.bg}}; color: {{p.fg}}; font-weight: 600; cursor: pointer; min-height: 40px">{{p.label}} <span style="opacity: 0.85; font-weight: 500">{{p.prix}}</span></button>
+                        </sc-for>
+                      </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px">
+                      <label style="display: flex; align-items: center; gap: 10px; font-size: 15px; min-height: 44px; cursor: pointer"><input type="checkbox" checked="{{ev.edArr}}" onChange="{{ev.toggleArr}}" style="width: 20px; height: 20px">Arrivée possible</label>
+                      <label style="display: flex; align-items: center; gap: 10px; font-size: 15px; min-height: 44px; cursor: pointer"><input type="checkbox" checked="{{ev.edDep}}" onChange="{{ev.toggleDep}}" style="width: 20px; height: 20px">Départ possible</label>
+                      <div style="display: flex; align-items: center; gap: 10px; font-size: 15px; flex-wrap: wrap">
+                        <span style="flex: 1 1 120px">Nuits minimum</span>
+                        <span style="display: inline-flex; align-items: center; gap: 6px">
+                          <button type="button" onClick="{{ev.minMinus}}" aria-label="Une nuit de moins au minimum" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF; cursor: pointer; font-size: 18px">−</button>
+                          <span style="min-width: 24px; text-align: center; font-weight: 600">{{ev.edMin}}</span>
+                          <button type="button" onClick="{{ev.minPlus}}" aria-label="Une nuit de plus au minimum" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF; cursor: pointer; font-size: 18px">+</button>
+                        </span>
+                      </div>
+                      <div style="display: flex; align-items: center; gap: 10px; font-size: 15px; flex-wrap: wrap">
+                        <span style="flex: 1 1 120px">Nuits maximum</span>
+                        <span style="display: inline-flex; align-items: center; gap: 6px">
+                          <button type="button" onClick="{{ev.maxMinus}}" aria-label="Une nuit de moins au maximum" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF; cursor: pointer; font-size: 18px">−</button>
+                          <span style="min-width: 44px; text-align: center; font-weight: 600">{{ev.edMaxLabel}}</span>
+                          <button type="button" onClick="{{ev.maxPlus}}" aria-label="Une nuit de plus au maximum" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #DDDDDD; background: #FFFFFF; cursor: pointer; font-size: 18px">+</button>
+                        </span>
+                      </div>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
+                      <button type="button" onClick="{{ev.apply}}" style="font-size: 14px; padding: 10px 18px; border-radius: 999px; border: 0; background: #222222; color: #FFFFFF; font-weight: 600; cursor: pointer; min-height: 44px">Appliquer à ces nuits</button>
+                      <button type="button" onClick="{{ev.resetSel}}" style="font-size: 14px; padding: 10px 18px; border-radius: 999px; border: 1px solid #DDDDDD; background: #FFFFFF; color: #222222; cursor: pointer; min-height: 44px">Remettre ces nuits en automatique</button>
+                      <span style="font-size: 12px; color: #717171">Le moteur proposait {{ev.autoHint}}.</span>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ev.noSel}}" hint-placeholder-val="{{false}}">
+                  <div style="display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12px; color: #717171; align-items: center">
+                    <span style="display: inline-flex; align-items: center; gap: 6px"><span style="padding: 2px 8px; border-radius: 999px; background: #6F9FC6; color: #FFFFFF; font-size: 10px; font-weight: 600">Haut</span>niveau et prix de la nuit, cette année</span>
+                    <span style="display: inline-flex; align-items: center; gap: 4px"><span style="width: 18px; height: 10px; border-radius: 3px; background: rgba(63,111,153,1)"></span><span style="width: 18px; height: 10px; border-radius: 3px; background: rgba(63,111,153,0.72)"></span><span style="width: 18px; height: 10px; border-radius: 3px; background: rgba(63,111,153,0.46)"></span><span style="width: 18px; height: 10px; border-radius: 3px; background: rgba(63,111,153,0.26)"></span>séjours : cette année, puis N−1, N−2, N−3 (de plus en plus pâle)</span>
+                    <span style="display: inline-flex; align-items: center; gap: 6px"><span style="padding: 1px 6px; border-radius: 999px; background: #FFFFFF; color: #222222; border: 1px solid #DDDDDD; font-size: 10px; font-weight: 700">−42 j</span>réservé 42 jours avant l’arrivée</span>
+                    <span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 16px; font-weight: 700; color: #DDDDDD; font-size: 12px; text-align: center">—</span>nuit restée vide cette année-là</span>
+                    <span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 18px; font-weight: 700; color: #222222; background: #EBEBEB; border-radius: 4px; font-size: 10px; text-align: center">C</span>mes comparables : prix médian, part déjà réservée</span>
+                    <span style="flex-basis: 100%; font-size: 12px">Touchez une ou plusieurs nuits pour régler niveau, arrivée, départ et nuits minimum / maximum.</span>
+                  </div>
+                </sc-if>
+                </sc-if>
+
+                <div style="display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; border-top: 1px solid #EBEBEB; padding-top: 12px; font-size: 14px">
+                  <span style="color: #717171">{{ev.recur}}</span>
+                  <span style="margin-left: auto; display: inline-flex; gap: 14px; flex-wrap: wrap">
+                    <sc-if value="{{ev.overridden}}" hint-placeholder-val="{{false}}">
+                      <button type="button" onClick="{{ev.reset}}" style="border: 0; background: transparent; color: #222222; text-decoration: underline; cursor: pointer; font-size: 14px; padding: 8px 0; font-family: inherit">Tout remettre en automatique</button>
+                    </sc-if>
+                    <sc-if value="{{ev.canDisable}}" hint-placeholder-val="{{false}}">
+                      <button type="button" style="border: 0; background: transparent; color: #717171; text-decoration: underline; cursor: pointer; font-size: 14px; padding: 8px 0; font-family: inherit">Ne pas appliquer à ce logement</button>
+                    </sc-if>
+                    <sc-if value="{{ev.canEdit}}" hint-placeholder-val="{{false}}">
+                      <button type="button" style="border: 0; background: transparent; color: #717171; text-decoration: underline; cursor: pointer; font-size: 14px; padding: 8px 0; font-family: inherit">Modifier les dates</button>
+                    </sc-if>
+                  </span>
+                </div>
+              </div>
+            </sc-if>
+          </article>
+        </sc-for>
+      </section>
+    </sc-for>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1700}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { open: 'valentin', filter: 'tous', days: {}, halo: {}, sel: [], ed: null, add: false };
+  }
+  renderVals() {
+    const LV = ['Base', 'Moyen', 'Haut', 'Très haut', 'Exceptionnel'];
+    const PX = ['90 €', '105 €', '115 €', '125 €', '140 €'];
+    const BG = ['#DCE5EE', '#AFC9DF', '#6F9FC6', '#3F6F99', '#BF4F32'];
+    const FG = ['#222222', '#222222', '#FFFFFF', '#FFFFFF', '#FFFFFF'];
+    const FAM = {
+      officiel: { label: 'Officiel', bg: '#F7F7F7', fg: '#222222' },
+      commercial: { label: 'Date commerciale', bg: '#F7F7F7', fg: '#222222' },
+      vous: { label: 'Le vôtre', bg: '#E8F5EE', fg: '#0F7A4F' }
+    };
+    const EV = [
+      { id: 'toussaint26', fam: 'officiel', name: 'Vacances de la Toussaint', short: 'Toussaint', start: '2026-10-17', end: '2026-11-01', dates: '17 octobre → 1er novembre 2026', ref: 'mesuré sur 3 ans', lv: [1, 3, 2], min: 2, halo: [0, 0], n1: ['920 €', '10', '92 €'], recur: 'Chaque année, aux dates officielles de la zone C' },
+      { id: 'armistice', fam: 'officiel', name: 'Armistice — week-end prolongé', short: 'Armistice', start: '2026-11-07', end: '2026-11-15', dates: '7 → 15 novembre 2026 · 9 nuits, le mercredi férié rayonne sur les deux week-ends', ref: 'référence empruntée aux fériés', lv: [1, 2, 2], min: 2, halo: [0, 0], n1: ['330 €', '3', '110 €'], recur: 'Chaque année, calculé depuis le 11 novembre' },
+      { id: 'noel', fam: 'officiel', name: 'Vacances de Noël', short: 'Noël', start: '2026-12-19', end: '2027-01-03', dates: '19 décembre 2026 → 3 janvier 2027', ref: 'mesuré sur 3 ans', lv: [2, 3, 2], min: 2, halo: [0, 0], n1: ['1 110 €', '9', '123 €'], recur: 'Chaque année, aux dates officielles' },
+      { id: 'reveillon-noel', fam: 'commercial', name: 'Réveillon de Noël', short: '24 déc.', start: '2026-12-24', end: '2026-12-24', dates: '24 décembre 2026 · une nuit', ref: 'mesuré sur 3 ans', lv: [4, 4, 4], min: 1, halo: [0, 0], n1: ['140 €', '1', '140 €'], recur: 'Chaque année, la date est l’événement' },
+      { id: 'reveillon-an', fam: 'commercial', name: 'Réveillon du Nouvel An', short: '31 déc.', start: '2026-12-31', end: '2026-12-31', dates: '31 décembre 2026 · une nuit', ref: 'mesuré sur 3 ans', lv: [4, 4, 4], min: 2, halo: [0, 0], n1: ['140 €', '1', '140 €'], recur: 'Chaque année, la date est l’événement' },
+      { id: 'valentin', fam: 'commercial', name: 'Saint-Valentin', short: 'St-Valentin', start: '2027-02-13', end: '2027-02-14', dates: '13 → 14 février 2027 · le dimanche 14 et le samedi le plus proche', ref: 'mesuré sur 3 ans', lv: [4, 4, 4], min: 2, halo: [2, 1], n1: ['280 €', '2', '140 €'], recur: 'Chaque année ; tombée en semaine, le samedi le plus proche s’ajoute' },
+      { id: 'hiver', fam: 'officiel', name: 'Vacances d’hiver', short: 'Hiver', start: '2027-02-20', end: '2027-03-07', dates: '20 février → 7 mars 2027', ref: 'mesuré sur 3 ans', lv: [1, 3, 2], min: 2, halo: [0, 0], n1: ['1 020 €', '9', '113 €'], recur: 'Chaque année, aux dates officielles de la zone C' },
+      { id: 'paques', fam: 'officiel', name: 'Pâques — week-end prolongé', short: 'Pâques', start: '2027-03-27', end: '2027-03-29', dates: '27 → 29 mars 2027', ref: 'mesuré sur 3 ans', lv: [2, 2, 2], min: 2, halo: [0, 0], n1: ['345 €', '3', '115 €'], recur: 'Chaque année, calculé' },
+      { id: 'mai', fam: 'officiel', name: 'Ponts de mai', short: 'Ponts de mai', start: '2027-04-30', end: '2027-05-09', dates: '30 avril → 9 mai 2027 · 1er mai, 8 mai et l’Ascension', ref: 'mesuré sur 3 ans', lv: [1, 3, 2], min: 2, halo: [0, 0], n1: ['820 €', '7', '117 €'], recur: 'Chaque année, calculé depuis les fériés' },
+      { id: 'thermale', fam: 'vous', name: 'Saison thermale', short: 'Saison thermale', start: '2027-05-15', end: '2027-10-15', dates: '15 mai → 15 octobre 2027', ref: 'pas encore d’historique, se comporte comme la semaine ordinaire +1', lv: [1, 2, 1], min: 1, halo: [0, 0], n1: ['—', '—', '—'], recur: 'Chaque année, je confirme les dates' },
+      { id: 'ete', fam: 'officiel', name: 'Vacances d’été', short: 'Été', start: '2027-07-03', end: '2027-08-31', dates: '3 juillet → 31 août 2027', ref: 'mesuré sur 3 ans', lv: [2, 3, 2], min: 3, halo: [0, 0], n1: ['4 560 €', '38', '120 €'], recur: 'Chaque année, aux dates officielles' },
+      { id: 'pianopic', fam: 'vous', name: 'Festival Piano Pic', short: 'Piano Pic', start: '2027-08-05', end: '2027-08-08', dates: '5 → 8 août 2027', ref: 'pas encore d’historique, se comporte comme les vacances d’été +1', lv: [4, 4, 4], min: 2, halo: [0, 0], n1: ['—', '—', '—'], recur: 'Chaque année, je saisis les dates' },
+      { id: 'toussaint27', fam: 'officiel', name: 'Vacances de la Toussaint', short: 'Toussaint', start: '2027-10-23', end: '2027-10-31', dates: '23 → 31 octobre 2027 · dates prévisionnelles, la publication officielle arrive', ref: 'mesuré sur 3 ans', lv: [1, 3, 2], min: 2, halo: [0, 0], n1: ['920 €', '10', '92 €'], recur: 'Chaque année, aux dates officielles de la zone C' }
+    ];
+    const st = this.state;
+    const DAY = 86400000;
+    const P = (iso) => Date.parse(iso + 'T00:00:00Z');
+    const ISO = (t) => new Date(t).toISOString().slice(0, 10);
+    const MS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+    const WD = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+    const dow = (t) => new Date(t).getUTCDay(); // 0 = dimanche
+    const isWE = (t) => dow(t) === 5 || dow(t) === 6; // vendredi, samedi : nuits de week-end
+    const haloOf = (ev) => st.halo[ev.id] || ev.halo;
+    const dayOv = (ev, iso) => (st.days[ev.id] || {})[iso];
+    const isOv = (ev) => Object.keys(st.days[ev.id] || {}).length > 0 || st.halo[ev.id] !== undefined;
+
+    // Réglage calculé par le moteur pour une nuit, dans le cadre de cet événement
+    const autoOf = (ev, t) => {
+      const a = P(ev.start), b = P(ev.end);
+      const [before, after] = haloOf(ev);
+      const main = Math.max(...ev.lv);
+      if (t >= a && t <= b) {
+        const d = dow(t);
+        const lvl = ev.lv[0] === ev.lv[1] && ev.lv[1] === ev.lv[2] ? ev.lv[0] : (d === 5 || d === 6 ? ev.lv[1] : d === 0 ? ev.lv[2] : ev.lv[0]);
+        return { zone: 'event', lvl, arr: true, dep: true, min: ev.min, max: 0 };
+      }
+      if (isWE(t)) {
+        if (t < a) { const k = Math.ceil((a - t) / (7 * DAY)); if (k <= before) return { zone: 'halo', lvl: Math.max(1, main - k), arr: true, dep: true, min: 2, max: 0 }; }
+        if (t > b) { const k = Math.ceil((t - b) / (7 * DAY)); if (k <= after) return { zone: 'halo', lvl: Math.max(1, main - k), arr: true, dep: true, min: 2, max: 0 }; }
+        return { zone: 'out', lvl: 2, arr: true, dep: true, min: 1, max: 0 };
+      }
+      return { zone: 'out', lvl: 0, arr: true, dep: true, min: 1, max: 0 };
+    };
+    const effOf = (ev, t) => Object.assign({}, autoOf(ev, t), dayOv(ev, ISO(t)) || {});
+
+    const setSel = (sel, ev, firstT) => {
+      let ed = st.ed;
+      if (!ed && sel.length) { const e = effOf(ev, firstT); ed = { lvl: e.lvl, arr: e.arr, dep: e.dep, min: e.min, max: e.max }; }
+      if (!sel.length) ed = null;
+      this.setState({ sel, ed });
+    };
+    const setEd = (patch) => this.setState({ ed: Object.assign({}, st.ed, patch) });
+
+    const build = (ev) => {
+      const open = st.open === ev.id;
+      const [before, after] = haloOf(ev);
+      // Calendriers des 3 années passées (illustration déterministe ; en vrai : la table des réservations)
+      const CH = [['Airbnb', '#E0493E'], ['Booking.com', '#2563EB'], ['Direct', '#0F7A4F']];
+      const hist = [];
+      if (ev.n1[0] !== '—' && open) {
+        let seed = 0; for (const c of ev.id) seed = (seed * 31 + c.charCodeAt(0)) >>> 0;
+        const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+        const yr = parseInt(ev.start.slice(0, 4), 10);
+        for (let k = 1; k <= 3; k++) {
+          const shift = (iso) => String(parseInt(iso.slice(0, 4), 10) - k) + iso.slice(4);
+          const a = P(shift(ev.start)), b = P(shift(ev.end));
+          let from = a - before * 7 * DAY - 2 * DAY, to = b + after * 7 * DAY + 2 * DAY;
+          while (dow(from) !== 1) from -= DAY;
+          while (dow(to) !== 0) to += DAY;
+          // Séjours
+          const nightsMap = {};
+          let resId = 0, ca = 0, sold = 0, leadSum = 0, opened = 0;
+          for (let t = from; t <= to; t += DAY) {
+            if (nightsMap[t]) continue;
+            const zone = autoOf(ev, t + Math.round(k * 365.25) * DAY).zone;
+            const zoneReal = (t >= a && t <= b) ? 'event' : zone;
+            const p = zoneReal === 'event' ? 0.62 : zoneReal === 'halo' ? 0.42 : 0.18;
+            if (rnd() > p) continue;
+            const len = 1 + Math.floor(rnd() * (zoneReal === 'event' ? 3 : 2));
+            const ch = CH[Math.floor(rnd() * 3)];
+            const lead = Math.round((zoneReal === 'event' ? 25 + rnd() * 70 : 5 + rnd() * 40) * (1 + k * 0.08));
+            const base = PX[autoOf(ev, t + Math.round(k * 365.25) * DAY).lvl].replace(/\D/g, '') * (1 - 0.06 * k);
+            const prix = Math.round(base * (0.92 + rnd() * 0.16) / 5) * 5;
+            resId++;
+            for (let i = 0; i < len && t + i * DAY <= to; i++) nightsMap[t + i * DAY] = { resId, ch, lead, prix, len, first: i === 0, last: i === len - 1 || t + (i + 1) * DAY > to };
+          }
+          const weeks = [];
+          for (let w = from; w <= to; w += 7 * DAY) {
+            const days = [];
+            for (let i = 0; i < 7; i++) {
+              const t = w + i * DAY, dt = new Date(t), n = nightsMap[t];
+              const inEv = t >= a && t <= b;
+              opened++;
+              if (n) { ca += n.prix; sold++; leadSum += n.lead; }
+              days.push({
+                num: dt.getUTCDate(), month: dt.getUTCDate() === 1 || i === 0 ? MS[dt.getUTCMonth()] : '',
+                sold: !!n, free: !n, prix: n ? n.prix + ' €' : '', lead: n ? n.lead : '',
+                bg: n ? '#FFFFFF' : '#EBEBEB',
+                borderCss: n ? '1px solid #DDDDDD; border-top: 4px solid ' + n.ch[1] : '1px solid #DDDDDD',
+                ring: inEv ? 'inset 0 0 0 2px #222222' : 'none',
+                op: inEv || (t > a - (before * 7 + 2) * DAY && t < b + (after * 7 + 2) * DAY) ? 1 : 0.6,
+                tip: WD[dow(t)] + ' ' + dt.getUTCDate() + ' ' + MS[dt.getUTCMonth()] + ' ' + (yr - k) + (n ? ' · ' + n.prix + ' € la nuit · ' + n.ch[0] + ' · séjour de ' + n.len + ' nuit' + (n.len > 1 ? 's' : '') + ' · réservé ' + n.lead + ' jours avant l’arrivée' : ' · restée vide')
+              });
+            }
+            weeks.push({ days });
+          }
+          const byOffset = {};
+          Object.keys(nightsMap).forEach(ts => { byOffset[Math.round((Number(ts) - a) / DAY)] = nightsMap[ts]; });
+          hist.push({ an: String(yr - k), ca: ca.toLocaleString('fr-FR') + ' €', nuits: sold, ouvertes: opened, estime: yr - k < 2026 ? ' *' : '', prix: sold ? Math.round(ca / sold) + ' €' : '—', delai: sold ? Math.round(leadSum / sold) : '—', weeks, byOffset });
+        }
+      }
+      const summary = ev.lv[0] === ev.lv[1] ? [{ label: LV[ev.lv[0]], bg: BG[ev.lv[0]], fg: FG[ev.lv[0]] }]
+        : [{ label: LV[ev.lv[0]] + ' la semaine', bg: BG[ev.lv[0]], fg: FG[ev.lv[0]] }, { label: LV[ev.lv[1]] + ' le week-end', bg: BG[ev.lv[1]], fg: FG[ev.lv[1]] }];
+      const out = {
+        id: ev.id, name: ev.name, dates: ev.dates, refLabel: ev.ref, recur: ev.recur,
+        famLabel: FAM[ev.fam].label, famBg: FAM[ev.fam].bg, famFg: FAM[ev.fam].fg,
+        overridden: isOv(ev), open, chev: open ? 'rotate(180deg)' : 'rotate(0deg)', border: open ? '#222222' : '#DDDDDD',
+        summary, before, after, weeks: [], hasSel: false, noSel: true,
+        hist: hist, hasHist: hist.length > 0, noHist: hist.length === 0,
+        canDisable: ev.fam === 'commercial', canEdit: ev.fam === 'vous',
+        toggle: () => this.setState({ open: open ? null : ev.id, sel: [], ed: null }),
+        reset: () => { const d = Object.assign({}, st.days); delete d[ev.id]; const h = Object.assign({}, st.halo); delete h[ev.id]; this.setState({ days: d, halo: h, sel: [], ed: null }); },
+        beforePlus: () => { const h = Object.assign({}, st.halo); h[ev.id] = [Math.min(4, before + 1), after]; this.setState({ halo: h }); },
+        beforeMinus: () => { const h = Object.assign({}, st.halo); h[ev.id] = [Math.max(0, before - 1), after]; this.setState({ halo: h }); },
+        afterPlus: () => { const h = Object.assign({}, st.halo); h[ev.id] = [before, Math.min(4, after + 1)]; this.setState({ halo: h }); },
+        afterMinus: () => { const h = Object.assign({}, st.halo); h[ev.id] = [before, Math.max(0, after - 1)]; this.setState({ halo: h }); },
+        _start: ev.start, _end: ev.end, _short: ev.short, _fam: ev.fam, _main: Math.max(...ev.lv)
+      };
+      if (!open) return out;
+
+      // Calendrier de la zone d'influence : semaines entières, du lundi au dimanche
+      const a = P(ev.start), b = P(ev.end);
+      let from = a - before * 7 * DAY - 2 * DAY, to = b + after * 7 * DAY + 2 * DAY;
+      while (dow(from) !== 1) from -= DAY;
+      while (dow(to) !== 0) to += DAY;
+      const sel = st.sel;
+      const weeks = [];
+      const eventDays = [], haloDays = [];
+      // Séjours déjà vendus cette année (illustration déterministe ; en vrai : les réservations du calendrier)
+      const nowMap = {};
+      {
+        let ns = 11; for (const c of ev.id) ns = (ns * 37 + c.charCodeAt(0)) >>> 0;
+        const nr = () => { ns = (ns * 1664525 + 1013904223) >>> 0; return ns / 4294967296; };
+        let rid = 0;
+        for (let t = from; t <= to; t += DAY) {
+          if (nowMap[t]) continue;
+          const z = autoOf(ev, t).zone;
+          if (nr() > (z === 'event' ? 0.3 : z === 'halo' ? 0.18 : 0.06)) continue;
+          const len = 1 + Math.floor(nr() * (z === 'event' ? 3 : 2));
+          const ch = CH[Math.floor(nr() * 3)], lead = Math.round(30 + nr() * 90);
+          rid++;
+          for (let i = 0; i < len && t + i * DAY <= to; i++) nowMap[t + i * DAY] = { resId: rid, ch, lead, len, prix: parseInt(PX[effOf(ev, t + i * DAY).lvl].replace(/\D/g, ''), 10), first: i === 0, last: i === len - 1 || t + (i + 1) * DAY > to };
+        }
+      }
+      // Forme d'une bulle selon sa place dans le séjour (barre continue sur plusieurs nuits)
+      const stayShape = (n, i) => {
+        if (!n || n.len === 1) return { radius: '8px', ml: '0', mr: '0', cls: '' };
+        const startsHere = n.first || i === 0, endsHere = n.last || i === 6;
+        return { radius: (startsHere ? '8px' : '0') + ' ' + (endsHere ? '8px 8px' : '0 0') + ' ' + (startsHere ? '8px' : '0'),
+          ml: startsHere ? '0' : '-11px', mr: endsHere ? '0' : '-11px', cls: '' };
+      };
+      for (let w = from; w <= to; w += 7 * DAY) {
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+          const t = w + i * DAY, iso = ISO(t), auto = autoOf(ev, t), ov = dayOv(ev, iso), e = Object.assign({}, auto, ov || {});
+          if (auto.zone === 'event') eventDays.push(iso); if (auto.zone === 'halo') haloDays.push(iso);
+          const selected = sel.indexOf(iso) >= 0;
+          const rules = [];
+          if (!e.arr) rules.push('sans arrivée'); if (!e.dep) rules.push('sans départ');
+          if (e.min > 1) rules.push(e.min + ' nuits min'); if (e.max > 0) rules.push(e.max + ' nuits max');
+          const dt = new Date(t);
+          // Bulles empilées : cette année (réglage + réservé si déjà vendu), les 3 années passées, le marché
+          const off = Math.round((t - a) / DAY);
+          let ms = (off + 7) * 2654435761 + ev.id.length * 97;
+          const mr = () => { ms = (ms * 1664525 + 1013904223) >>> 0; return ms / 4294967296; };
+          const thisYear = ev.start.slice(2, 4);
+          const bulles = [];
+          const nn = nowMap[t];
+          const nuitsTxt = (n) => n.len + ' nuit' + (n.len > 1 ? 's' : '');
+          // Une seule teinte (bleu) pour les séjours : pleine cette année, puis de plus en plus transparente par année passée
+          const SEJ = ['rgba(63,111,153,1)', 'rgba(63,111,153,0.72)', 'rgba(63,111,153,0.46)', 'rgba(63,111,153,0.26)'];
+          const SEJFG = ['#FFFFFF', '#FFFFFF', '#222222', '#222222'];
+          const ANBG = ['#222222', '#222222', '#717171', '#DDDDDD'], ANFG = ['#FFFFFF', '#FFFFFF', '#FFFFFF', '#222222'];
+          const dateTxt = (n, t0) => { const d1 = new Date(t0), d2 = new Date(t0 + (n.len - 1) * DAY); return n.len === 1 ? '' : ' · ' + d1.getUTCDate() + ' → ' + d2.getUTCDate() + ' ' + MS[d2.getUTCMonth()]; };
+          // Cette année : toujours une ligne (le séjour déjà réservé en barre pleine, sinon « — ») pour que les lignes restent alignées
+          if (!nn) bulles.push({ an: thisYear, anBg: ANBG[0], anFg: ANFG[0], main: '—', hasLead: false, lead: '', bg: 'transparent', fg: '#DDDDDD', radius: '8px', ml: '0', mr: '0', cls: '', tip: 'Pas encore réservée' });
+          if (nn) {
+            const t0 = t - (nn.first ? 0 : (() => { let k = 0; while (nowMap[t - (k + 1) * DAY] && nowMap[t - (k + 1) * DAY].resId === nn.resId) k++; return k; })() * DAY);
+            bulles.push(Object.assign({ an: thisYear, anBg: ANBG[0], anFg: ANFG[0],
+              main: nn.prix + ' €',
+              hasLead: nn.last, lead: '−' + nn.lead + ' j', leadBg: '#FFFFFF', leadFg: '#222222',
+              bg: SEJ[0], fg: SEJFG[0],
+              tip: 'Séjour de ' + nuitsTxt(nn) + ' · ' + nn.prix + ' € la nuit · ' + nn.ch[0] + ' · réservé ' + nn.lead + ' jours avant l’arrivée' }, stayShape(nn, i)));
+          }
+          const layers = st.layers || {};
+          const layerOn = (k) => layers[k] !== false;
+          hist.forEach((h, hi) => {
+            if (!layerOn('h' + hi)) return;
+            const n = h.byOffset[off], k = hi + 1;
+            if (n) bulles.push(Object.assign({ an: h.an.slice(2), anBg: ANBG[k], anFg: ANFG[k], main: n.prix + ' €', hasLead: n.last, lead: '−' + n.lead + ' j', leadBg: k < 2 ? '#FFFFFF' : '#222222', leadFg: k < 2 ? '#222222' : '#FFFFFF', bg: SEJ[k], fg: SEJFG[k], tip: h.an + ' · séjour de ' + nuitsTxt(n) + ' · ' + n.prix + ' € la nuit · ' + n.ch[0] + ' · réservé ' + n.lead + ' jours avant l’arrivée' }, stayShape(n, i)));
+            else bulles.push({ an: h.an.slice(2), anBg: '#EBEBEB', anFg: '#717171', main: '—', hasLead: false, lead: '', bg: 'transparent', fg: '#DDDDDD', radius: '8px', ml: '0', mr: '0', cls: '', tip: h.an + ' · restée vide' });
+          });
+          if (hist.length && layerOn('marche')) {
+            const base = parseInt(PX[auto.lvl].replace(/\D/g, ''), 10);
+            const med = Math.round(base * (1.05 + mr() * 0.25) / 5) * 5;
+            const occ = Math.min(100, Math.round((auto.zone === 'event' ? 55 : auto.zone === 'halo' ? 40 : 20) + mr() * 35));
+            const vous = parseInt(PX[e.lvl].replace(/\D/g, ''), 10), diff = (vous - med) / med;
+            bulles.push({ an: 'C', anBg: '#EBEBEB', anFg: '#222222', main: med + ' € · ' + occ + ' %', hasLead: false, lead: '', radius: '8px', ml: '0', mr: '0', cls: '', bg: '#F7F7F7', fg: '#222222', tip: 'Mes 5 comparables · prix médian affiché ' + med + ' € · ' + occ + ' % déjà réservés · ' + (diff < -0.08 ? 'vous êtes moins cher' : diff > 0.08 ? 'vous êtes plus cher' : 'vous êtes dans le marché') });
+          }
+          bulles.forEach(b => { b.anCls = i === 0 ? '' : 'yf-an-hide'; });
+          days.push({
+            num: dt.getUTCDate(), month: dt.getUTCDate() === 1 || i === 0 ? MS[dt.getUTCMonth()] : '', wd: WD[dow(t)].slice(0, 3) + '.',
+            bulles,
+            lvlLabel: LV[e.lvl], lvlBg: BG[e.lvl], lvlFg: FG[e.lvl], prix: PX[e.lvl], hasRules: true, rulesTxt: rules.length ? rules.join(' · ') : ' ',
+            cellBg: auto.zone === 'out' ? '#F7F7F7' : '#FFFFFF',
+            borderCss: auto.zone === 'event' ? '2px solid #222222' : auto.zone === 'halo' ? '2px dashed #717171' : '2px solid #EBEBEB',
+            ring: selected ? '0 0 0 3px #FFFFFF, 0 0 0 5px #222222' : (ov ? 'inset 0 0 0 2px #F5A524' : 'none'),
+            op: auto.zone === 'out' ? 0.55 : 1, selected,
+            aria: WD[dow(t)] + ' ' + dt.getUTCDate() + ' ' + MS[dt.getUTCMonth()] + ', ' + LV[e.lvl],
+            pick: () => { const s = selected ? sel.filter(x => x !== iso) : sel.concat([iso]); setSel(s, ev, t); }
+          });
+        }
+        const wd0 = new Date(w), wd6 = new Date(w + 6 * DAY);
+        weeks.push({ days, label: 'Semaine du ' + wd0.getUTCDate() + ' ' + MS[wd0.getUTCMonth()] + ' au ' + wd6.getUTCDate() + ' ' + MS[wd6.getUTCMonth()] });
+      }
+      out.weeks = weeks;
+
+      // Marché : une case par nuit de la même zone (illustration déterministe ; en vrai : comparables retenus)
+      let ms = 7; for (const c of ev.id) ms = (ms * 33 + c.charCodeAt(0)) >>> 0;
+      const mr = () => { ms = (ms * 1664525 + 1013904223) >>> 0; return ms / 4294967296; };
+      const market = [];
+      for (let w = from; w <= to; w += 7 * DAY) {
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+          const t = w + i * DAY, dt = new Date(t), auto = autoOf(ev, t), e = effOf(ev, t);
+          const base = parseInt(PX[auto.lvl].replace(/\D/g, ''), 10);
+          const med = Math.round(base * (1.05 + mr() * 0.25) / 5) * 5;
+          const lo = Math.round(med * (0.78 + mr() * 0.08) / 5) * 5, hi = Math.round(med * (1.15 + mr() * 0.2) / 5) * 5;
+          const occ = Math.min(100, Math.round((auto.zone === 'event' ? 55 : auto.zone === 'halo' ? 40 : 20) + mr() * 35));
+          const vous = parseInt(PX[e.lvl].replace(/\D/g, ''), 10);
+          const diff = (vous - med) / med;
+          const cheaper = diff < -0.08, pricier = diff > 0.08;
+          days.push({
+            num: dt.getUTCDate(), month: dt.getUTCDate() === 1 || i === 0 ? MS[dt.getUTCMonth()] : '',
+            med: med + ' €', range: lo + '–' + hi + ' €', occ, vous: vous + ' €',
+            bg: cheaper ? '#E8F5EE' : pricier ? '#FEF0EE' : '#FFFFFF', border: cheaper ? '#0F7A4F' : pricier ? '#B42318' : '#DDDDDD',
+            ring: auto.zone === 'event' ? 'inset 0 0 0 2px #222222' : 'none', op: auto.zone === 'out' ? 0.6 : 1,
+            tip: WD[dow(t)] + ' ' + dt.getUTCDate() + ' ' + MS[dt.getUTCMonth()] + ' · marché ' + med + ' € (' + lo + '–' + hi + ' €) · ' + occ + ' % des comparables déjà réservés · vous : ' + vous + ' € (' + LV[e.lvl] + ')'
+          });
+        }
+        market.push({ days });
+      }
+      out.market = market;
+
+      // Superposition : le calendrier de base reste, on lui superpose le marché ou une année passée
+      const overlay = st.overlay || 'none';
+      const pillStyle = (on) => ({ on, bg: on ? '#222222' : '#FFFFFF', fg: on ? '#FFFFFF' : '#222222', border: on ? '#222222' : '#DDDDDD' });
+      const choices = [['none', 'Rien'], ['marche', 'Le marché']].concat(hist.map((h, i) => [String(i), h.an]));
+      out.tabs = choices.map(([k, label]) => Object.assign({ label, pick: () => this.setState({ overlay: k }) }, pillStyle(overlay === k)));
+      out.tabRegler = true;
+      const layersSt = st.layers || {};
+      const layerDefs = [['marche', 'Mes comparables (5)', '#222222']].concat(hist.map((h, i) => ['h' + i, h.an + ' · ' + h.ca + ' · ' + h.nuits + ' nuits', '#3F6F99']));
+      out.hasLayers = hist.length > 0;
+      out.layers = layerDefs.map(([k, label, dot]) => { const on = layersSt[k] !== false; return { label, dot, on, bg: on ? '#222222' : '#FFFFFF', fg: on ? '#FFFFFF' : '#222222', border: on ? '#222222' : '#DDDDDD', pick: () => { const l = Object.assign({}, layersSt); l[k] = !on; this.setState({ layers: l }); } }; });
+      out.hasSel = sel.length > 0; out.noSel = sel.length === 0;
+      out.selLabel = sel.length === 1 ? '1 nuit sélectionnée' : sel.length + ' nuits sélectionnées';
+      out.selectEvent = () => setSel(eventDays.slice(), ev, P(eventDays[0]));
+      out.selectHalo = () => setSel(haloDays.slice(), ev, haloDays.length ? P(haloDays[0]) : a);
+      out.clearSel = () => this.setState({ sel: [], ed: null });
+      const ed = st.ed || { lvl: 0, arr: true, dep: true, min: 1, max: 0 };
+      out.lvlPills = LV.map((label, i) => ({ label, prix: PX[i], on: ed.lvl === i, bg: BG[i], fg: FG[i], border: ed.lvl === i ? '#222222' : 'transparent', pick: () => setEd({ lvl: i }) }));
+      out.edArr = ed.arr; out.edDep = ed.dep; out.edMin = ed.min; out.edMaxLabel = ed.max > 0 ? String(ed.max) : 'sans';
+      out.toggleArr = () => setEd({ arr: !ed.arr }); out.toggleDep = () => setEd({ dep: !ed.dep });
+      out.minPlus = () => setEd({ min: Math.min(14, ed.min + 1) }); out.minMinus = () => setEd({ min: Math.max(1, ed.min - 1) });
+      out.maxPlus = () => setEd({ max: Math.min(30, ed.max + 1) }); out.maxMinus = () => setEd({ max: Math.max(0, ed.max - 1) });
+      const firstAuto = sel.length ? autoOf(ev, P(sel[0])) : null;
+      out.autoHint = firstAuto ? LV[firstAuto.lvl] + (firstAuto.min > 1 ? ', ' + firstAuto.min + ' nuits minimum' : '') : '';
+      out.apply = () => { const d = Object.assign({}, st.days); const m = Object.assign({}, d[ev.id] || {}); sel.forEach(iso => { m[iso] = { lvl: ed.lvl, arr: ed.arr, dep: ed.dep, min: ed.min, max: ed.max }; }); d[ev.id] = m; this.setState({ days: d, sel: [], ed: null }); };
+      out.resetSel = () => { const d = Object.assign({}, st.days); const m = Object.assign({}, d[ev.id] || {}); sel.forEach(iso => { delete m[iso]; }); d[ev.id] = m; this.setState({ days: d, sel: [], ed: null }); };
+      return out;
+    };
+    const all = EV.map(build);
+
+    // Frise
+    const T0 = P('2026-11-01'), N = 365;
+    const lanesEnd = [];
+    const bars = all.map(e => {
+      let a = (P(e._start) - T0) / DAY, b = (P(e._end) - T0) / DAY + 1;
+      a = Math.max(0, a); b = Math.min(N, b);
+      let lane = lanesEnd.findIndex(end => end <= a - 4);
+      if (lane < 0) { lane = lanesEnd.length; lanesEnd.push(0); }
+      lanesEnd[lane] = b;
+      const w = Math.max(1.4, (b - a) / N * 100);
+      return { name: e.name, short: e._short, left: (a / N * 100).toFixed(2), width: w.toFixed(2), top: lane * 22 + 4, bg: BG[e._main], fg: FG[e._main],
+        ring: st.open === e.id ? '0 0 0 2px #FFFFFF, 0 0 0 4px #222222' : 'none', open: () => this.setState({ open: e.id, sel: [], ed: null }) };
+    });
+    const friseHeight = lanesEnd.length * 22 + 8;
+    const months = ['nov. 26', 'déc.', 'janv. 27', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.'].map(short => ({ short }));
+
+    const LONG = ['Novembre 2026', 'Décembre 2026', 'Janvier 2027', 'Février 2027', 'Mars 2027', 'Avril 2027', 'Mai 2027', 'Juin 2027', 'Juillet 2027', 'Août 2027', 'Septembre 2027', 'Octobre 2027'];
+    const visible = all.filter(e => st.filter === 'tous' || e._fam === st.filter);
+    const groups = LONG.map((label, i) => {
+      const y = i <= 1 ? 2026 : 2027, m = i <= 1 ? 10 + i : i - 2;
+      return { label, events: visible.filter(e => { const t = Math.max(T0, P(e._start)); const d = new Date(t); return d.getUTCFullYear() === y && d.getUTCMonth() === m; }) };
+    }).filter(g => g.events.length > 0);
+
+    const filters = [['tous', 'Tous'], ['officiel', 'Officiels'], ['commercial', 'Dates commerciales'], ['vous', 'Les vôtres']].map(([k, label]) => {
+      const on = st.filter === k;
+      return { label, pick: () => this.setState({ filter: k }), bg: on ? '#222222' : '#FFFFFF', fg: on ? '#FFFFFF' : '#222222', border: on ? '#222222' : '#DDDDDD' };
+    });
+    const legend = LV.map((label, i) => ({ label, prix: PX[i], bg: BG[i], fg: FG[i] }));
+    return { legend, months, bars, friseHeight, filters, groups, showAdd: st.add, toggleAdd: () => this.setState({ add: !st.add }) };
+  }
+}
+</script>
+</body>
+</html>
