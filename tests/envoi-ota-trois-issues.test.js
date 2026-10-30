@@ -495,16 +495,27 @@ test('LE TEST QUI COMPTE : « je n ai pas su lire la reponse » n est pas « il 
       `${code} en 429 est un refus : il se rejoue au palier`)
     assert.equal(classerEnvoiOta({ ok: false, status: 422, error: code }), ISSUE.REFUS,
       `${code} en 422 aussi`)
-    // Choix ASSUME et borne : un 5xx suit la meme regle. Il peut venir APRES
-    // que le provider ait accepte, donc un rejeu peut doubler le message — mais
-    // c est precisement ce que le plafond a 5 tentatives borne, et traiter tout
-    // 5xx en incertain reviendrait a bloquer a la main chaque panne passagere.
-    assert.equal(classerEnvoiOta({ ok: false, status: 503, error: code }), ISSUE.REFUS,
-      `${code} en 503 se rejoue, dans la limite du plafond`)
+    // ⚠ MAIS PAS UN 5xx NI UN 408, ET C EST UN CONSTAT DE LA TROISIEME REVUE.
+    // J avais ecrit ici que « le plafond le borne » : il borne a CINQ doublons,
+    // pas a zero. Un 502/503/504/408 au corps illisible est le timeout d une
+    // passerelle : la requete a pu etre TRAITEE avant qu elle abandonne, donc
+    // rejouer envoie le message une seconde fois au voyageur — la seule erreur
+    // irreversible de tout ce mecanisme. Il reste donc INCERTAIN, comme avant
+    // ce chantier.
+    for (const st of [500, 502, 503, 504, 408]) {
+      assert.equal(classerEnvoiOta({ ok: false, status: st, error: code }), ISSUE.INCERTAIN,
+        `${code} en ${st} ne se rejoue pas : la requete a pu aboutir`)
+    }
   }
-  // Et un code DU PROVIDER reste un refus, quel que soit le statut.
+  // Et un code DU PROVIDER reste un refus, quel que soit le statut — y compris
+  // en 5xx : si le provider a su nous repondre, il a traite la requete et l a
+  // refusee. C est la lisibilite du corps qui departage, pas le statut seul.
   assert.equal(classerEnvoiOta({ ok: false, status: 422, error: 'not_supported' }), ISSUE.REFUS)
   assert.equal(classerEnvoiOta({ ok: false, status: 200, error: 'http_too_many_requests' }), ISSUE.REFUS)
+  assert.equal(classerEnvoiOta({ ok: false, status: 503, error: 'not_supported' }), ISSUE.REFUS)
+  // ⚠ ET LE CAS DE LA PRODUCTION, NOMMEMENT : 429 au corps illisible, qui doit
+  // se rejouer au palier et non se bloquer.
+  assert.equal(classerEnvoiOta({ ok: false, status: 429, error: 'reponse_non_json' }), ISSUE.REFUS)
 })
 
 test('LE TEST QUI COMPTE : Beds24 lit son STATUT HTTP avant de lire son corps', () => {

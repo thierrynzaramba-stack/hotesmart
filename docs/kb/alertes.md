@@ -417,10 +417,21 @@ son correctif n'avait été appliqué qu'au canal e-mail.
 n'est pas du JSON — une page HTML de passerelle, la forme la plus banale d'une
 limite de débit — était classé INCERTAIN, donc bloqué jusqu'à un geste de
 l'hôte : exactement le symptôme de production, traité comme un doute au lieu
-d'un refus à rejouer. Un statut **lu** ≥ 400 est un refus certain, quelle que
-soit la forme du corps. Les trois codes qui sont les nôtres
+d'un refus à rejouer. Un **4xx lu** est donc un refus certain, quelle que soit
+la forme du corps.
+
+⚠ **Mais la borne est haute aussi, et le premier correctif allait trop loin.**
+Écrit « tout statut ≥ 400 est un refus », il transformait un timeout de
+passerelle en **renvoi à l'aveugle** : un 502, 503, 504 ou 408 avec une page
+HTML ne vient pas de l'application — la requête a pu être **traitée** avant que
+le proxy abandonne, donc le voyageur recevait le même message une seconde fois,
+et jusqu'à cinq. Le test assumait le risque en disant « le plafond le borne » :
+il le borne à cinq doublons, pas à zéro. **Un 5xx ou un 408 au corps illisible
+reste INCERTAIN** ; porteur d'un code **du provider**, il redevient un refus,
+puisqu'un provider qui a su répondre a traité la requête. C'est la lisibilité du
+corps qui départage, pas le statut seul. Les trois codes qui sont les nôtres
 (`reponse_non_json`, `forme_inattendue`, `reponse_vide`) ne valent donc que
-pour un 2xx ou un statut absent.
+pour un 2xx, un 5xx, un 408, ou un statut absent.
 
 ### La porte, et pourquoi elle pose l'arrêt elle-même
 
@@ -497,6 +508,11 @@ un bouton qui rend 404 et une alarme à l'écran pour toujours.
   avec auteur et motif, en lot séparé. ⚠ Ce seuil ne doit **jamais** être déplacé
   vers le futur : il masquerait toutes les alertes d'envoi en silence. Un test
   le refuse.
+- **Chaque carte commence par l'information utile.** La clé de corrélation
+  (`OTASTOP:…`, `OTAVERIF:…`) est en **fin** de phrase, entre crochets : en tête,
+  elle faisait lire quatre-vingts caractères d'identifiants techniques avant le
+  premier mot utile. `lireLignes` cherche par `ilike '%clé%'`, la position ne lui
+  importe pas.
 - **Chaque carte porte les phrases de sa famille.** Le bandeau ne servait que la
   surréservation, et ses trois textes sont écrits pour elle : « Surréservation ·
   {bien} », « Deux séjours sur la même nuit. », « L'alerte se répète jusqu'à

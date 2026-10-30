@@ -198,3 +198,77 @@ test("l e-mail abandonne est ACQUITTABLE, et c est le meme defaut qu on avait fe
     assert.match(src, /'email_voyageur_abandon'/, `${nom} le connait`)
   }
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LA SEPARATION DES DEUX FAMILLES, EXECUTEE — ET PAS GREPEE.
+//
+// ⚠ CONSTAT D'UNE REVUE INDEPENDANTE, ET IL EST JUSTE. Les trois premiers tests
+// de ce fichier assertent des fragments de la SOURCE de l'endpoint :
+// `lireFamille(['overbooking'], null)`, `TYPES_ALARME.filter(...)`, un seul
+// `.limit(`. Un refactor qui garde ces fragments mais recable l'affectation —
+// extraire les deux appels en `const pCritiques = …` / `const pEnvois = …`
+// avant le `Promise.all`, ou simplement echanger les deux arguments —
+// resterait VERT tout en posant la borne de date sur la SURRESERVATION et en
+// laissant la famille envoi sans borne. C'est exactement ce que le commentaire
+// du seuil dit de ne jamais laisser arriver en silence.
+//
+// On execute donc le bloc avec un double de Supabase qui ENREGISTRE ce que
+// chaque requete porte : ses types, sa borne de date, son plafond.
+function lireLesDeuxFamilles () {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/ecran/aujourdhui.js'), 'utf8')
+  const i = src.indexOf('    const TYPES_ALARME = [')
+  assert.notEqual(i, -1, 'le bloc des alarmes est reperable')
+  const ancre = src.indexOf('return [...(critiques.data', i)
+  assert.notEqual(ancre, -1, 'la sortie du bloc est reperable')
+  const code = src.slice(i, src.indexOf('\n', ancre))
+  const seuil = /const SEUIL_ALARMES_ENVOI = '([^']+)'/.exec(src)[1]
+
+  const requetes = []
+  const faux = () => {
+    const vu = { types: null, gte: null, limit: null, trie: false }
+    requetes.push(vu)
+    const o = {
+      select: () => o, eq: () => o, is: () => o,
+      in (col, val) { if (col === 'type') vu.types = val; return o },
+      gte (col, val) { if (col === 'created_at') vu.gte = val; return o },
+      order () { vu.trie = true; return o },
+      limit (n) { vu.limit = n; return Promise.resolve({ data: [], error: null }) }
+    }
+    return o
+  }
+  const ctx = {
+    supabase: { from: () => faux() },
+    compte: 'u1',
+    // ⚠ LA VALEUR VIENT DU MODULE LUI-MEME, pas d'une copie : le bloc mesure
+    // reference le nom, et c'est la constante du fichier qu'on lui donne.
+    SEUIL_ALARMES_ENVOI: seuil,
+    bornerRef: (q) => q,
+    compter: async (p) => p,
+    indisponibles: []
+  }
+  vm.createContext(ctx)
+  vm.runInContext('(async () => {\n' + code + '\n})()', ctx)
+  return { requetes, seuil, indisponibles: ctx.indisponibles }
+}
+
+test('LE TEST QUI COMPTE : la borne de date tombe sur l envoi, JAMAIS sur la surreservation', async () => {
+  const { requetes, seuil } = lireLesDeuxFamilles()
+  await new Promise(r => setImmediate(r))
+  assert.equal(requetes.length, 2, 'deux lectures, une par famille')
+  const critiques = requetes.find(q => (q.types || []).includes('overbooking'))
+  const envois = requetes.find(q => !(q.types || []).includes('overbooking'))
+  assert.ok(critiques && envois, 'les deux familles sont distinctes')
+  // ⚠ LE CŒUR DU TEST : si les deux arguments etaient echanges, c est ICI que
+  // ca se verrait — et nulle part dans les assertions de source.
+  assert.equal(critiques.gte, null,
+    'la surreservation n a AUCUNE borne de date : une alarme ancienne doit rester visible')
+  assert.equal(envois.gte, seuil, 'la famille envoi porte le seuil, et elle seule')
+  // Un plafond PAR famille : c est ce qui empeche l envoi de chasser le conflit.
+  assert.equal(critiques.limit, 25)
+  assert.equal(envois.limit, 25)
+  assert.ok(critiques.trie && envois.trie, 'les deux sont triees')
+  // Et la famille envoi ne contient pas la surreservation, sinon le seuil la
+  // masquerait par la bande.
+  assert.ok(!(envois.types || []).includes('overbooking'))
+  assert.ok((envois.types || []).length >= 2, 'et elle porte bien les types d envoi')
+})
