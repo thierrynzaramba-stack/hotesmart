@@ -739,7 +739,13 @@ function ouvrirAujourdhui (options = {}) {
         this.avant += String(html)
       } else this.innerHTML += String(html)
     },
-    closest: () => null, querySelector: () => null, querySelectorAll: () => []
+    closest: () => null, querySelector: () => null, querySelectorAll: () => [],
+    // ⚠ UN VRAI NOEUD PORTE SON DOCUMENT, et ce double ne le portait pas : un
+    // module qui lit `rail.ownerDocument.defaultView` — pour mesurer une
+    // gouttiere ou observer un redimensionnement — levait ici alors qu'il
+    // fonctionne en navigateur. Le double doit ressembler au vrai, sinon il
+    // fabrique des rouges qui n'existent nulle part ailleurs.
+    get ownerDocument () { return document_ }
   })
   const ecouteursDoc = []
   const document_ = {
@@ -877,6 +883,15 @@ function ouvrirAujourdhui (options = {}) {
     // Le VRAI module, pas un double : un double qui ne branche rien laisserait
     // croire que la page ouvre ses bulles au toucher.
     'brancherInfoBulles',
+    // ⚠ QUATRIEME MODULE OUBLIE DANS CE BANC (apres `CacheEcran`,
+    // `courbeMensuelle` et `brancherInfoBulles`), et la quatrieme fois avec le
+    // MEME symptome : `armerLaSuiteDesAvis` appelle `brancherFleches`, donc son
+    // absence levait `brancherFleches is not defined` et tuait TOUT rendu des
+    // avis — 13 rouges. La lecon se repete parce que rien dans ce depot ne
+    // compare la liste des `import` de la page a celle des noms injectes ici.
+    // Le VRAI module, pas un double : un double qui ne branche rien laisserait
+    // croire que les fleches defilent.
+    'brancherFleches',
     batirAujourdhui(options.sansInit)
   )(requireAuth, supabase, rien, rien, journal, ESC,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
@@ -902,7 +917,8 @@ function ouvrirAujourdhui (options = {}) {
     fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien },
     require('../shared/cache-ecran.js'),
     require('../shared/courbe-mensuelle.js').courbeMensuelle,
-    require('../shared/ibulle.js').brancherInfoBulles)
+    require('../shared/ibulle.js').brancherInfoBulles,
+    require('../shared/rail-fleches.js').brancherFleches)
 
   return {
     // Le corps que le test a fourni. Depuis le lot (b), les tests nourrissent
@@ -3876,6 +3892,80 @@ test("LE TEST QUI COMPTE : l armement d avant est COUPE, jamais laisse vivant", 
   const vivants = opts.observateurs.filter(o => !o.coupe)
   assert.strictEqual(vivants.length, 1,
     `${vivants.length} observateurs vivants : les rendus d avant n ont pas ete coupes`)
+})
+
+test("LE TEST QUI COMPTE : la page BRANCHE les fleches du rail des avis", async () => {
+  // ⚠ LA MEME LECON QUE POUR LES ⓘ, et elle vaut d'etre reprise : sans ce
+  // test, retirer l'appel a `brancherFleches` de la page laisserait toute la
+  // suite VERTE — les six tests au vrai navigateur mesurent le MODULE sur une
+  // page de banc, pas le fait que l'accueil s'en serve. Or c'est exactement le
+  // defaut que Thierry a constate en production : le geste n'existait pas.
+  // La preuve est la marque que le module pose sur le rail qu'il a branche.
+  const opts = { sansInit: true, observateurs: [], ecouteurs: [], corps: () => ({}) }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  const rail = p.cache('[data-list="reviews"]')
+  assert.ok(rail.__railFleches,
+    'le rail n est pas branche : la page n appelle pas brancherFleches, donc aucune fleche ne defile')
+  assert.strictEqual(typeof rail.__railFleches.maj, 'function', 'le branchement ne rend pas son contrat')
+  // ⚠ ET LE RAPPEL DE CHARGEMENT EST CELUI DE CE RENDU. Branche une fois pour
+  // toutes, il garderait le `suivante` du premier rendu, dont la sentinelle est
+  // detachee — le defaut que la review du 28 octobre a trouve sur l observateur.
+  const premier = rail.__railFleches.charger
+  p.interne.renderDerniersAvis()
+  assert.notStrictEqual(rail.__railFleches.charger, premier,
+    'le rappel de chargement n a pas suivi le nouveau rendu : il pointe une sentinelle detachee')
+  // ⚠ ET CE RAPPEL DEMANDE VRAIMENT LA PAGE SUIVANTE. Comparer deux fonctions
+  // ne prouvait RIEN : une fonction vide est aussi « differente » a chaque
+  // rendu, et la mutation qui remplacait `suivante` par `() => {}` SURVIVAIT.
+  // Ce qui se mesure est l'effet : l'appel part vers l'endpoint des avis.
+  // ⚠ ET ON ATTEND LA PROMESSE. `suivante` est `async` et son premier `await`
+  // est la lecture de session : lire les URL dans le meme tour les trouve
+  // VIDES, et l'echec accuse le branchement. Ce fichier documente deja ce
+  // piege sur l'observateur — il s'est rejoue ici au premier essai.
+  const avant = p.urls.filter(u => u.includes('/api/ecran/avis-recents')).length
+  rail.__railFleches.charger()
+  await tours()
+  const apres = p.urls.filter(u => u.includes('/api/ecran/avis-recents')).length
+  assert.strictEqual(apres, avant + 1,
+    'le clic sur la fleche ne demande pas la page suivante des avis : le rappel branche ne fait rien')
+})
+
+test("LE TEST QUI COMPTE : sans liste d avis, les fleches ne s affichent pas", () => {
+  // ⚠ CONSTAT 2 DE LA REVUE DE fbb6baee. Les etats « vide » et « illisible »
+  // ne sont PAS dans `MUETS` : la section reste AFFICHEE, et
+  // `armerLaSuiteDesAvis` sort avant de brancher. Un hote sans avis note sur
+  // 30 jours voyait donc, a l'ordinateur, « Pas encore d'avis » encadre de deux
+  // boutons ronds d'allure cliquable — sans ecouteur, et `disabled` a false
+  // puisqu'aucun `maj()` n'avait tourne.
+  const opts = { sansInit: true, observateurs: [], ecouteurs: [], corps: () => ({}) }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  // D'abord une liste : les fleches se montrent.
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  for (const sel of ['[data-rail="prec"]', '[data-rail="suiv"]']) {
+    assert.strictEqual(p.cache(sel).hidden, false, `la fleche ${sel} reste masquee sur une vraie liste`)
+  }
+  // Puis plus aucun avis : elles disparaissent.
+  p.interne.etat.derniersAvis = []
+  p.interne.renderDerniersAvis()
+  for (const sel of ['[data-rail="prec"]', '[data-rail="suiv"]']) {
+    assert.strictEqual(p.cache(sel).hidden, true,
+      `la fleche ${sel} s affiche sans aucun avis a defiler`)
+    assert.strictEqual(p.cache(sel).disabled, true,
+      `la fleche ${sel} est encore active sans aucun avis a defiler`)
+  }
+  // Et une lecture RATEE n'est pas une liste vide : meme retrait.
+  p.interne.etat.avisConnu = false
+  p.interne.etat.derniersAvis = null
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(p.cache('[data-rail="suiv"]').hidden, true,
+    'la fleche s affiche alors que la lecture des avis a echoue')
 })
 
 test("LE TEST QUI COMPTE : les avis tiennent sur UNE SEULE ligne, a toutes les largeurs", () => {

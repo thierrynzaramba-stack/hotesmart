@@ -846,6 +846,8 @@
   "revenue.upcoming": "À venir",
   "revenue.view": "Période affichée",
   "revenue.year": "Année",
+  "reviews.rail_prec": "Avis précédents",
+  "reviews.rail_suiv": "Avis suivants",
   "reviews.all": "Tous les avis",
   "reviews.count_30d": "{n, plural, =0 {aucun avis noté} one {# avis noté} other {# avis notés}} sur 30 jours",
   "reviews.empty": "Pas encore d’avis sur 30 jours",

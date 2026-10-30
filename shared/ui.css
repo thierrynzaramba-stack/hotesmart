@@ -1900,6 +1900,33 @@ body.men-cfg-ouvert { overflow: hidden; }
 .avis-suite { display: flex; align-items: center; justify-content: center; min-height: 40px; }
 .grid-avis > .avis-suite { flex: 0 0 180px; }
 
+/* ─── Les deux fleches du rail ─────────────────────────────────────────────
+   ⚠ A L'ORDINATEUR SEULEMENT, et c'est la demande : au telephone le doigt
+   defile le rail, et deux boutons par-dessus les cartes mangeraient la place
+   d'une carte sur trois. Le defaut qu'elles reparent est propre a la souris —
+   la barre de defilement est masquee, et une molette ordinaire ne defile pas
+   lateralement. */
+.rail-wrap { position: relative; }
+.rail-fleche { display: none; }
+@media (min-width: 721px) {
+  .rail-fleche {
+    display: inline-flex; align-items: center; justify-content: center;
+    position: absolute; top: 50%; transform: translateY(-50%); z-index: 3;
+    width: 36px; height: 36px; padding: 0;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 50%;
+    box-shadow: var(--shadow-hover); cursor: pointer;
+    font-size: 18px; line-height: 1;
+  }
+  /* A cheval sur le bord : la fleche ne recouvre pas le texte d'une carte. */
+  .rail-fleche--prec { inset-inline-start: -14px; }
+  .rail-fleche--suiv { inset-inline-end: -14px; }
+  .rail-fleche:hover:not(:disabled) { background: var(--surface-2); }
+  /* ⚠ GRISEE, PAS RETIREE : une fleche qui disparait au bout fait sauter la
+     mise en page et laisse l'hote chercher ce qui a bouge. */
+  .rail-fleche:disabled { opacity: .35; cursor: default; box-shadow: none; }
+}
+
 
 /* ─── Le tableau « Reserve a date » ───────────────────────────────────────
    Il DOUBLE la ligne pointillee, il ne la remplace pas : au niveau du compte,

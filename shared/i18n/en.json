@@ -846,6 +846,8 @@
   "revenue.upcoming": "Upcoming",
   "revenue.view": "Period shown",
   "revenue.year": "Year",
+  "reviews.rail_prec": "Previous reviews",
+  "reviews.rail_suiv": "Next reviews",
   "reviews.all": "All reviews",
   "reviews.count_30d": "{n, plural, =0 {no rated reviews} one {# rated review} other {# rated reviews}} over 30 days",
   "reviews.empty": "No reviews in the last 30 days",

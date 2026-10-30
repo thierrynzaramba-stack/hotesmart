@@ -846,6 +846,8 @@
   "revenue.upcoming": "Pendiente",
   "revenue.view": "Periodo mostrado",
   "revenue.year": "Año",
+  "reviews.rail_prec": "Reseñas anteriores",
+  "reviews.rail_suiv": "Reseñas siguientes",
   "reviews.all": "Todas las opiniones",
   "reviews.count_30d": "{n, plural, =0 {ninguna opinión puntuada} one {# opinión puntuada} other {# opiniones puntuadas}} en 30 días",
   "reviews.empty": "Aún no hay opiniones en 30 días",
