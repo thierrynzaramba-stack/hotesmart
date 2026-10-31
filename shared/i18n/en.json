@@ -639,6 +639,7 @@
   "messages.pause_apercu_ko": "The pending replies could not be counted: the pause stays on. Try again in a moment.",
   "messages.pause_gardees": "The pause stays on. {n} reply(ies) disarmed: they will only go out when you click Send.",
   "messages.pause_gardees_ko": "The pause stays on, but disarming the replies could not be confirmed. Check them before lifting the pause.",
+  "messages.pause_gardees_manuel": "The pause stays on. This property has been switched back to manual validation: no reply was armed any more.",
   "messages.pause_gardees_partiel": "{n} reply(ies) disarmed, the pause stays on. {parties}.",
   "messages.paused": "Automation paused on this listing",
   "messages.pause_lever_confirm": "Pending replies that could go out on their own if you lift the pause, without waiting for the chosen delay: {n}. OK: lift the pause and let them go. Cancel: the pause stays on and those replies are disarmed — they will only go out when you click Send.",

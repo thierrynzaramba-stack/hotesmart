@@ -639,6 +639,7 @@
   "messages.pause_apercu_ko": "Impossible de compter les propositions en attente : la pause reste active. Réessayez dans un instant.",
   "messages.pause_gardees": "La pause reste active. {n} proposition(s) désarmée(s) : elles ne partiront que sur votre clic Envoyer.",
   "messages.pause_gardees_ko": "La pause reste active, mais le désarmement des propositions n’a pas pu être confirmé. Vérifiez-les avant de lever la pause.",
+  "messages.pause_gardees_manuel": "La pause reste active. Ce logement est repassé en validation manuelle : plus aucune proposition n’était armée.",
   "messages.pause_gardees_partiel": "{n} proposition(s) désarmée(s), la pause reste active. {parties}.",
   "messages.paused": "Automatisation en pause sur ce logement",
   "messages.pause_lever_confirm": "Propositions déjà en attente qui pourraient partir seules si vous levez la pause, sans attendre le délai choisi : {n}. Confirmer : lever la pause et les laisser partir. Annuler : la pause reste active et ces propositions sont désarmées — elles ne partiront que sur votre clic Envoyer.",

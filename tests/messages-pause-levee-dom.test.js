@@ -413,3 +413,223 @@ test('LE TEST QUI COMPTE : la case ne s ecrit que dans le panneau du bien concer
   assert.equal(caseRef.checked, true, 'sur son propre panneau, elle remet la verite connue')
   b.fermer()
 })
+
+// ── Les six constats de la DERNIERE revue, mesures ────────────────────────
+
+test('LE TEST QUI COMPTE : un bien repasse en manuel ailleurs n annonce AUCUN envoi', async () => {
+  // ⚠ CONSTAT HAUT D'UNE REVUE, ET C EST MOI QUI AI FABRIQUE DES ENVOIS
+  // FANTOMES. `manquantes = avant.echues - gardees - prises` comparait un
+  // nombre compte sous l ANCIEN delai a un bilan produit sous le delai RELU.
+  // Si le bien est repasse en validation manuelle ailleurs, `gardees = 0` sans
+  // ecriture, et la note annoncait « 3 propositions annoncees n etaient plus en
+  // attente : l envoi les avait prises » alors que RIEN n etait arme et que
+  // RIEN n est parti. Garanti, puisqu on n entre ici que si `echues > 0`.
+  const { b, envois } = bancEnPause({
+    echues: 3, confirme: false,
+    configFraiche: { [REF]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } } }
+  })
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  const note = b.doc.querySelector('[data-bind="tiroir-note"]')
+  assert.equal(note.textContent, FR['messages.pause_gardees_manuel'],
+    'on dit l etat reel, pas un desarmement qui n a pas eu lieu')
+  assert.doesNotMatch(note.textContent, /envoi/i, 'et surtout aucun envoi annonce')
+  assert.equal(envois.filter(e => e.chemin === '/api/agent-config'
+    && e.charge && e.charge.garder === true).length, 0, 'rien a desarmer, donc rien d ecrit')
+  assert.equal(versPropertyAutomation(envois).length, 0, 'et la pause tient')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un delai allonge ailleurs n annonce pas d envolees', async () => {
+  // Meme cause : les deux nombres ne sont plus comparables. On dit ce que le
+  // serveur a desarme, et rien de plus.
+  const { b } = bancEnPause({
+    echues: 3, confirme: false, desarmes: 1,
+    configFraiche: { [REF]: { mode: 'auto', delais: { reponse_ia: 240, alerte_info: 0 } } }
+  })
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  const note = b.doc.querySelector('[data-bind="tiroir-note"]')
+  assert.equal(note.textContent, FR['messages.pause_gardees'].replace('{n}', '1'))
+  assert.doesNotMatch(note.textContent,
+    /n .taient plus en attente|no longer pending|ya no estaban/i,
+    'aucune envolee annoncee sur deux nombres incomparables')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : la relecture rafraichit AUSSI l ecran', async () => {
+  // ⚠ CONSTAT MESURE D UNE REVUE : rafraichir `etat.configIA` sans toucher
+  // `etat.delaisEdit` laissait la pilule active sur l ANCIENNE valeur, et
+  // `editionPanneauNonEnregistree` accusait l hote d une saisie qu il n avait
+  // jamais faite.
+  const { b } = bancEnPause({
+    echues: 1, confirme: false, desarmes: 1,
+    configFraiche: { [REF]: { mode: 'auto', delais: { reponse_ia: 240, alerte_info: 0 } } }
+  })
+  assert.equal(b.msg.delaisEnCours(REF).reponse_ia, 15, 'l ecran part de la valeur perimee')
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  assert.equal(b.msg.delaisEnCours(REF).reponse_ia, 240, 'l ecran suit la relecture')
+  assert.equal(b.msg.editionPanneauNonEnregistree(), null,
+    'et il n accuse personne d une saisie qui n a pas eu lieu')
+  b.fermer()
+})
+
+test('une saisie REELLE survit a la relecture', async () => {
+  const { b } = bancEnPause({
+    echues: 1, confirme: false, desarmes: 1,
+    configFraiche: { [REF]: { mode: 'auto', delais: { reponse_ia: 240, alerte_info: 0 } } }
+  })
+  B.clic(b, B.pilule(b, 60))   // l hote choisit 60, sans enregistrer
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  assert.equal(b.msg.delaisEnCours(REF).reponse_ia, 60,
+    'sa saisie est la seule chose qu on ne doit pas lui prendre')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : une sortie sans ecriture ne repeint pas le volet', async () => {
+  // ⚠ CONSTAT D UNE REVUE, MAIS PAS TOUT A FAIT SA CAUSE. Mes deux sorties sans
+  // ecriture appelaient `renderTiroir()` pour rendre les controles, donc un
+  // SECOND `corps.innerHTML = voletIA(ref)`. La revue en concluait que la
+  // saisie du volet survivait avant ce chantier : MESURE, non —
+  // `basculerPause` repeint DEJA a l entree, et le faisait avant. Toute bascule
+  // de pause efface donc la consigne non enregistree, c est la dette D4, et
+  // elle n est ni creee ni fermee ici.
+  // Ce qui se mesure vraiment : le volet n est peint qu UNE fois, et les
+  // controles sont rendus a l hote. On marque le noeud peint a l entree ; s il
+  // est detache, un second rendu a eu lieu.
+  // ⚠ IL FAUT UNE FENETRE POUR OBSERVER, SINON LE TEST NE MESURE RIEN. Ma
+  // premiere version capturait le noeud apres un seul tick, sans bloquer
+  // l apercu : le geste etait DEJA fini, donc le noeud capture etait celui
+  // d APRES la sortie, et l assertion etait vraie par construction — mutation
+  // faite, elle restait verte. On bloque l apercu, on capture pendant le vol,
+  // puis on libere.
+  const { b, liberer } = bancEnPause({ apercuKo: true, bloquerApercu: true })
+  B.changer(b, B.casePause(b), false)
+  await new Promise(r => setTimeout(r, 0))
+  const peintALEntree = B.casePause(b)
+  assert.ok(peintALEntree, 'le volet est peint, et gele')
+  assert.equal(peintALEntree.disabled, true, 'gele pendant le vol')
+  liberer()
+  await B.reposer(b)
+  assert.equal(b.doc.contains(peintALEntree), true,
+    'le meme noeud est encore la : aucune seconde peinture')
+  // Et les controles sont rendus a l hote, sans repeindre.
+  assert.equal(peintALEntree.disabled, false, 'la case est degelee')
+  assert.equal(B.boutonSave(b).disabled, false, '« Enregistrer » aussi')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : une note ne s affiche jamais sous un AUTRE logement', async () => {
+  // ⚠ ARBITRAGE ENTRE DEUX REVUES, ET LA RECETTE DE THIERRY L EMPORTE. La
+  // derniere revue demandait de GELER le selecteur de bien pendant une ecriture
+  // de pause. Le risque qu elle decrit est reel — la note atterrit sous un autre
+  // logement —, mais geler un controle qui n ECRIT RIEN est exactement ce qui a
+  // produit les points 1 et 3 de la recette du 28 octobre (« aucune
+  // confirmation », « le premier clic sur une pilule est perdu ») : un
+  // navigateur n envoie aucun clic sur un element desarme. On ferme donc le
+  // defaut a la SOURCE : une note qui parle d un bien ne s affiche que sous ce
+  // bien.
+  const { b, liberer } = bancEnPause({ apercuKo: true, bloquerApercu: true })
+  b.msg.etat.biens.set(AUTRE, { name: 'Maison Jardin', photo: null })
+  B.changer(b, B.casePause(b), false)
+  await new Promise(r => setTimeout(r, 0))
+  // Le selecteur reste VIVANT : c est la lecon du 28 octobre.
+  assert.equal(B.selBien(b).disabled, false, 'un controle qui n ecrit rien ne se desarme pas')
+  // L hote change de bien pendant le vol, comme le ferait le selecteur.
+  b.msg.etat.tiroirBien = AUTRE
+  b.msg.renderTiroir()
+  liberer()
+  await B.reposer(b)
+  const note = b.doc.querySelector('[data-bind="tiroir-note"]')
+  assert.equal(note.hidden, true,
+    'la note du bien d avant ne s affiche pas sous celui que l hote regarde')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : le panneau rattrape le fil a la FIN du geste', async () => {
+  // ⚠ CONSTAT MESURE D UNE REVUE, et ma propre garde l avait ouvert : le
+  // repointage est refuse pendant une ecriture, et RIEN ne le rappelait apres.
+  // L hote cliquait un autre fil pendant l aller-retour, et le panneau restait
+  // sur le bien d avant POUR DE BON — le defaut de la recette du 30 octobre,
+  // reouvert par le correctif.
+  const { b, liberer } = bancEnPause({ echues: 0, bloquerApercu: true })
+  b.msg.etat.biens.set(AUTRE, { name: 'Maison Jardin', photo: null })
+  b.msg.etat.conversations = [{ bookId: 'B-AUTRE', propertyId: AUTRE, guestName: 'Jardin',
+    lastNight: dans(2), messages: [] }]
+  B.changer(b, B.casePause(b), false)
+  await new Promise(r => setTimeout(r, 0))
+  b.msg.etat.ouverte = 'B-AUTRE'
+  b.msg.reporterLePanneauSurLeFil()
+  assert.equal(b.msg.etat.tiroirBien, REF, 'pas pendant le vol')
+  liberer()
+  await B.reposer(b)
+  assert.equal(b.msg.etat.tiroirBien, AUTRE,
+    'mais a la fin du geste, le panneau rejoint le fil que l hote lit')
+  b.fermer()
+})
+
+test('un echec de pause garde sa note, et le panneau ne bouge pas sous elle', async () => {
+  // La note parle de CE bien : repointer la ferait atterrir sous un autre
+  // logement. Le panneau suivra au prochain clic sur un fil.
+  const envois = []
+  const b = B.monter({ appel: async (chemin, charge) => {
+    envois.push({ chemin, charge: charge || null })
+    if (chemin === '/api/agent-config' && !charge) {
+      return { config: { [REF]: { mode: 'auto', delais: { reponse_ia: 15, alerte_info: 0 } } } }
+    }
+    if (chemin === '/api/agent-config' && charge && charge.apercu === true) {
+      return { delais_ref: charge.delais_ref, apercu: { ok: true, motif: 'delai', echues: 0 } }
+    }
+    // La relecture dit que la pause est TOUJOURS active : l ecriture a echoue.
+    if (chemin === '/api/property-automation' && !charge) return { paused: { [REF]: true } }
+    return {}
+  } })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }, { ref: AUTRE, nom: 'Maison Jardin' }],
+    config: { [REF]: { mode: 'auto', delais: { reponse_ia: 15, alerte_info: 0 } } },
+    pauses: { [REF]: true },
+    conversations: [{ bookId: 'B-AUTRE', propertyId: AUTRE, guestName: 'J',
+      lastNight: dans(2), messages: [] }],
+    bien: REF
+  })
+  b.msg.etat.ouverte = 'B-AUTRE'
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  assert.equal(b.doc.querySelector('[data-bind="tiroir-note"]').textContent, FR['messages.mode_error'])
+  assert.equal(b.msg.etat.tiroirBien, REF, 'le panneau reste sous sa note')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un destinataire d alerte compte, meme consignes illisibles', async () => {
+  // ⚠ CONSTAT MESURE D UNE REVUE. `etat.prompting === null` est un etat
+  // documente ; `voletIA` ne rend alors AUCUN `[data-consignes="global"]`, donc
+  // `editionPanneauNonEnregistree` sortait par ce garde — et les destinataires
+  // d alerte, qui restent editables, disparaissaient en silence.
+  const b = B.monter({ appel: async () => ({}) })
+  B.peupler(b, {
+    biens: [{ ref: AUTRE, nom: 'Maison Jardin' }, { ref: REF, nom: 'Loft Pilotable' }],
+    config: {
+      [AUTRE]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } },
+      [REF]: { mode: 'auto', delais: { reponse_ia: 15, alerte_info: 0 } }
+    },
+    prompting: null,
+    conversations: [
+      { bookId: 'B-JARDIN', propertyId: AUTRE, guestName: 'J', lastNight: dans(2), messages: [] },
+      { bookId: 'B-LOFT', propertyId: REF, guestName: 'L', lastNight: dans(2), messages: [] }
+    ],
+    ouverte: 'B-JARDIN'
+  })
+  b.msg.renderListe()
+  const champ = B.corps(b).querySelector('[data-alerte="intervention|email_lines"]')
+  assert.ok(champ, 'le destinataire reste editable quand les consignes sont illisibles')
+  champ.value = 'nouveau@exemple.test'
+  assert.equal(b.msg.editionPanneauNonEnregistree(), 'Maison Jardin',
+    'la saisie est vue, sans le bloc des consignes')
+  B.clic(b, b.doc.querySelector('[data-conv="B-LOFT"]'))
+  await B.reposer(b)
+  assert.equal(b.doc.querySelector('[data-bind="tiroir-note"]').textContent,
+    FR['messages.panneau_suit_le_fil'].replace('{nom}', 'Maison Jardin'))
+  b.fermer()
+})

@@ -639,6 +639,7 @@
   "messages.pause_apercu_ko": "No se han podido contar las respuestas pendientes: la pausa sigue activa. Inténtelo de nuevo en un momento.",
   "messages.pause_gardees": "La pausa sigue activa. {n} respuesta(s) desarmada(s): solo saldrán cuando pulse Enviar.",
   "messages.pause_gardees_ko": "La pausa sigue activa, pero no se ha podido confirmar el desarmado de las respuestas. Revíselas antes de levantar la pausa.",
+  "messages.pause_gardees_manuel": "La pausa sigue activa. Este alojamiento ha vuelto a validación manual: ya no había ninguna respuesta armada.",
   "messages.pause_gardees_partiel": "{n} respuesta(s) desarmada(s), la pausa sigue activa. {parties}.",
   "messages.paused": "Automatización en pausa en este alojamiento",
   "messages.pause_lever_confirm": "Respuestas pendientes que podrían salir solas si levanta la pausa, sin esperar el plazo elegido: {n}. Aceptar: levantar la pausa y dejarlas salir. Cancelar: la pausa sigue activa y esas respuestas quedan desarmadas — solo saldrán cuando pulse Enviar.",

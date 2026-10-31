@@ -1936,6 +1936,70 @@ première occurrence — donc une autre garde. Elle n'a rien rougi, et j'en aura
 conclu que mon test ne mordait pas. Une mutation s'ancre sur un texte
 **unique**, comme une assertion.
 
+### La dernière revue : six constats, et un arbitrage entre deux revues
+
+C'est la dernière du lot (exception « envoi au voyageur ») : ce qu'elle a trouvé
+est corrigé sans nouvelle review.
+
+1. **HAUT — l'écart « annoncé − gardé » fabriquait des envois au voyageur qui
+   n'avaient pas eu lieu.** `manquantes = avant.echues − gardees − prises`
+   comparait un nombre compté sous l'**ancien** délai à un bilan produit sous
+   celui qu'on vient de **relire**. Deux cas mesurés : le bien repassé en
+   validation manuelle ailleurs (`gardees = 0` sans écriture → la note
+   annonçait « 3 propositions annoncées n'étaient plus en attente : l'envoi les
+   avait prises » alors que **rien n'était armé et rien n'est parti**, et c'était
+   garanti puisqu'on n'entre là que si `echues > 0`) ; et le délai allongé
+   ailleurs (moins d'échues, même phrase). Et le lot admet lui-même que
+   `avant.echues` est une **borne haute** : une soustraction dure sur une borne
+   haute ne peut pas rendre un fait. L'écart ne se dit plus que si le délai n'a
+   pas bougé, et le cas « repassé en manuel » a sa propre phrase.
+2. **Le panneau restait sur le mauvais bien pour de bon.** Ma garde
+   « pas de repointage pendant une écriture » n'avait **aucun rattrapage** :
+   `basculerPause` finit par `renderTiroir(); renderFil()` et ne rappelait
+   jamais `reporterLePanneauSurLeFil`. Un clic sur un autre fil pendant
+   l'aller-retour laissait donc le panneau sur le bien d'avant — le défaut de la
+   recette du 30 octobre, rouvert par son propre correctif. Il rattrape
+   maintenant à la fin du geste, **sauf s'il y a une note à lire** : elle parle
+   de ce bien-là.
+3. **La relecture rafraîchissait `etat.configIA` mais pas l'écran.** La pilule
+   active restait sur l'ancienne valeur (mesuré : 15 affiché, 240 en base), et
+   `editionPanneauNonEnregistree` comparait un `delaisEdit` figé à la config
+   relue — donc **accusait l'hôte d'une saisie qu'il n'avait jamais faite**.
+   L'écran suit la relecture ; une saisie **réelle** est conservée.
+4. **Faux négatif quand les consignes sont illisibles.** `etat.prompting ===
+   null` est un état documenté ; `voletIA` ne rend alors aucun bloc de
+   consignes, la fonction sortait par ce garde, et les **destinataires
+   d'alerte** — qui restent éditables — disparaissaient en silence. Le garde
+   porte maintenant sur le **volet rendu**.
+5. **Mes deux sorties sans écriture repeignaient le volet une seconde fois.**
+   Elles rendent les contrôles un par un (`degelerVolet`). ⚠ **Mais la revue se
+   trompait sur la conséquence, et je l'ai vérifié** : elle écrivait que la
+   saisie survivait avant ce chantier. Non — `basculerPause` repeint **déjà à
+   l'entrée**, et le faisait avant. Toute bascule de pause efface la consigne non
+   enregistrée : c'est **D4**, inchangée, ni créée ni fermée ici. Ce qui est
+   fermé est plus modeste et vérifiable : un geste sans écriture ne repeint plus
+   deux fois.
+6. **Pas de filet autour du rendu du gel** : si `renderTiroir` levait,
+   `modeEnCours` restait à `true` pour toute la session. Filet posé, comme
+   `enregistrerPanneau` en a un.
+
+⚠ **ET UN ARBITRAGE, OÙ LA RECETTE DE THIERRY L'EMPORTE SUR UNE REVUE.** La
+revue demandait de **geler le sélecteur de bien** pendant une écriture de pause,
+pour que la note n'atterrisse pas sous un autre logement. Le risque est réel,
+mais `gelerEnTete` est clé sur `panneauEnCours` et **pas** sur `modeEnCours`
+pour une raison antérieure : les points 1 et 3 de la recette du 28 octobre —
+**un contrôle qui n'écrit rien ne se désarme pas**, parce qu'un navigateur
+n'envoie aucun clic sur un élément désarmé. Geler le sélecteur rouvrirait cette
+famille pour lui. Le défaut est donc fermé à la **source** : `noteDuBien` refuse
+de poser une note sous un autre logement, même garde que `remettreCasePause`.
+
+⚠ **ET UN DE MES TESTS NE MESURAIT RIEN, trouvé par la mutation.** Celui du
+« une sortie sans écriture ne repeint pas » capturait le nœud peint après un
+seul tick, sans bloquer l'aperçu : le geste était **déjà fini**, donc le nœud
+capturé était celui d'après la sortie, et l'assertion était vraie par
+construction. Mutation faite, il restait vert. **Il faut une fenêtre pour
+observer** : on bloque l'aperçu, on capture pendant le vol, puis on libère.
+
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 
 **Trouvé en corrigeant les quatre points, mesuré, NON corrigé dans ce commit.**
