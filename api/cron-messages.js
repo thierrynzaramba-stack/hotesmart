@@ -52,6 +52,7 @@ const MAX_BIENS_PAR_PASSE = 500
 const { demarrerPassage } = require('../lib/metriques-cron')
 const { ecrireLePassage, purgerSiDue: purgerLesMesures,
         ECRITURE_MAX_MS, PURGE_MAX_MS } = require('../lib/cron-stats')
+const { sansArchives } = require('../lib/biens-vivants')
 // Meme mur que le cycle principal (`maxDuration` 60 s, vercel.json).
 const MUR_MESURE_MS = 59000
 
@@ -127,12 +128,18 @@ module.exports = async function handler (req, res) {
   // ⚠ Beds24 reste ecarte a dessein : son `importMessages` est un no-op.
   // ⚠ BORNE EXPLICITE : Supabase tronque a 1000 lignes SANS erreur. La regle du
   // depot est de borner, meme quand le parc en compte cinq.
-  const { data: props, error } = await chrono.mesure('lecture_biens', () => supabase
+  // ⚠ ET LES BIENS ARCHIVES SORTENT DE LA FILE. Sans ce filtre, un bien archive
+  // y restait EN TETE : `ordonnerPourImport` met « jamais importe (`null`)
+  // d'abord », et le marqueur d'un bien dont l'import n'a jamais abouti reste a
+  // `null` pour toujours. Mesure du 30 octobre 2026 : deux biens dans ce cas
+  // occupaient les deux premieres places avant les trois biens vivants du
+  // compte, a chaque cycle de cinq minutes.
+  const { data: props, error } = await chrono.mesure('lecture_biens', () => sansArchives(supabase
     .from('properties')
     .select('id, user_id, provider_property_id, name')
     .in('provider', ['channex', 'channel'])
     .not('provider_property_id', 'is', null)
-    .limit(MAX_BIENS_PAR_PASSE))
+    .limit(MAX_BIENS_PAR_PASSE)))
   if (error) {
     console.error('[cron-messages] lecture des biens echec:', error.message)
     // ⚠ MESURE ECRITE MEME ICI : une passe qui n'a RIEN pu lire est

@@ -93,7 +93,15 @@ const fleches = brancherFleches({
       }
       fleches.maj()
     }
-    if (${delaiMs} > 0) setTimeout(poser, ${delaiMs})
+    // ⚠ PLUS AUCUN DELAI : LE TEST DECIDE QUAND LES CARTES ARRIVENT. Une
+    // premiere version attendait 700 ms, puis 2 500 — et rougissait quand meme
+    // sous la charge de la suite complete, parce que l'attente de pose et les
+    // allers-retours CDP mangeaient la marge. Un test qui depend d'une course
+    // (aucun backtick ici : ce commentaire vit dans un template literal)
+    // entre deux horloges est un rouge intermittent, et un rouge intermittent
+    // dans une suite dont le compte sert de barriere est une barriere qu'on
+    // apprend a ignorer. Ici le chargement ATTEND un signal explicite.
+    if (${delaiMs} > 0) window.__poserLaSuite = poser
     else poser()
   }
 })
@@ -313,12 +321,14 @@ test("LE TEST QUI COMPTE : au bout du rail pendant que la suite CHARGE, la flech
     const enVol = await nav.lire(etat)
     assert.strictEqual(enVol.appels, 1, 'le clic n a pas demande la page suivante')
     assert.strictEqual(enVol.ajoutes, 0,
-      `les cartes sont deja arrivees (${enVol.ajoutes}) : le delai du double est trop court pour observer l instant`)
+      `les cartes sont arrivees sans qu on les ait liberees (${enVol.ajoutes}) : le double ne retient plus le chargement`)
     assert.ok(enVol.defilement + enVol.visible >= enVol.total - 1,
       `le rail n est pas au bout (${enVol.defilement} + ${enVol.visible} contre ${enVol.total}) : le cas n est pas celui qu on veut`)
     assert.strictEqual(enVol.suivGrise, false,
       'au bout du rail et la suite EN VOL, la fleche droite est grisee : le prochain clic serait refuse')
-    // Et quand les cartes arrivent, elle est toujours cliquable.
+    // Et quand les cartes arrivent — c'est le test qui les libere —, elle est
+    // toujours cliquable.
+    await nav.lire('window.__poserLaSuite(), true')
     await nav.attendre('window.__ajoutes >= 3')
     const arrive = await nav.lire(etat)
     assert.strictEqual(arrive.suivGrise, false, 'la fleche est grisee alors que trois cartes viennent d arriver')
