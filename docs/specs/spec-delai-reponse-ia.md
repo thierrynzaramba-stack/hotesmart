@@ -1788,6 +1788,218 @@ laissait vert. Et ce document lui-même disait, dans la section d'au-dessus,
 qu'un test peut faire « lever » une table — dans le commit qui supprimait ce
 levier. Les deux sont corrigées.
 
+### Recette du 30 octobre : le geste qui libère, c'est la LEVÉE DE LA PAUSE
+
+**Constat de Thierry, et son hypothèse était juste jusqu'au mécanisme.** Loft
+Pilotable, proposition « cuisine » du 28 octobre : décochage de la pause, puis
+1 h → 15 min + Enregistrer → « Enregistré », aucune question. Son hypothèse :
+« la proposition était déjà échue avec 1 h, donc le changement de délai ne
+libère rien de neuf. Le vrai geste qui libère, c'est la levée de la pause, et
+il ne demande rien. »
+
+**Ce que la mesure sur staging a ajouté — en lecture seule, projet
+`ortyofzzdsthlhqmzsnq`.** La proposition `af7216b7` est à
+`status = pending_validation`, `created_at = 2026-10-28T11:07:58`,
+`send_after = 2026-10-28T11:22:58` — soit **création + 15 min, donc déjà
+échue** — et `updated_at = 2026-10-30T18:58:14`. L'enregistrement du panneau
+l'a donc bien **réarmée**, à une échéance déjà passée, **sans un mot**. Et
+`properties.paused_at` porte `2026-10-30T18:58:42`.
+
+**La cause, et elle est dans mon propre code.** La question du panneau est
+gardée par `chargeDelais.reponse_ia !== null && !enPauseSure`. L'exemption
+`enPauseSure` existe pour une bonne raison — sur un bien en pause,
+`brouillons-dus.js` refuse dès l'entrée, donc annoncer un envoi serait le
+mensonge que ce chantier passe son temps à corriger. Mais elle n'est vraie
+**que tant que la pause tient**, et la pause se lève par une **autre porte** :
+`basculerPause`, immédiate (« couper l'automatique est un geste d'urgence, il
+n'attend pas un Enregistrer »), qui ne demandait rien. L'enregistrement arme
+donc en silence, et la levée tire.
+
+**Décision de Thierry.** Lever la pause sur un bien qui a des propositions
+échues pose **la même question à deux issues**, et **s'il ne répond pas, la
+pause reste active**.
+
+**Ce qui est livré.** `basculerPause(ref, false)` compte d'abord
+(`echuesSiLaPauseEstLevee`, qui lit les délais **enregistrés** et non la saisie
+en cours — une valeur tapée et non enregistrée ne gouverne rien), puis :
+
+| issue | la pause | les propositions annoncées |
+|---|---|---|
+| **Confirmer** — « Laisser partir » | **levée** | partent au prochain passage |
+| **Annuler / Échap** — « Garder pour validation » | **reste active** | **désarmées** : ne partent que sur « Envoyer » |
+| **aperçu impossible** | **reste active** | inchangées, et l'écran le dit |
+
+⚠ **Annuler ÉCRIT**, sinon ce n'est pas une confirmation : c'est la leçon du
+29 octobre, où un « Annuler » qui ne changeait rien laissait la proposition
+partir comme si l'hôte avait dit oui. Le writer reste unique
+(`lib/guestflow/appliquer-delai.js`, atteint par `garder: true`).
+⚠ **Mettre en pause ne demande jamais rien** — couper l'automatique est un
+geste d'urgence, et un test le tient.
+⚠ **Ne pas savoir combien partiraient n'autorise pas à les libérer** (discipline
+de 4.6.6). La cible est le téléphone d'un voyageur.
+
+### Recette du 30 octobre : le panneau s'ouvrait encore sur le mauvais logement
+
+**Constat de Thierry** : « le volet s'est encore ouvert sur Maison Jardin au
+lieu du logement du fil ».
+
+**Le chemin, et c'est mon garde-fou du 28 octobre qui l'a laissé ouvert.**
+`ouvrirTiroir(true)` ne présélectionne le bien du fil **que si le tiroir était
+fermé** (`etaitFerme`) — ajouté pour qu'un choix fait au sélecteur tienne
+contre une bascule de volet, qui rappelle `ouvrirTiroir(true)` à chaque fois.
+Mais **changer de FIL** n'était couvert par rien : `ouvrir(bookId)` pose
+`etat.ouverte` et repeint la liste et le fil, et **ne touche jamais**
+`etat.tiroirBien`. Panneau ouvert sur Maison Jardin + clic sur le fil de Loft
+Pilotable = l'hôte règle le délai d'un AUTRE logement que celui qu'il lit, et
+le sélecteur dit vrai — c'est son regard qui est ailleurs.
+
+**Ce qui est livré.** `reporterLePanneauSurLeFil()`, appelée à l'ouverture d'un
+fil : si le tiroir est ouvert et pointe un autre bien, il suit. La bascule de
+volet, elle, continue de ne rien repointer. Et **une saisie non enregistrée ne
+disparaît plus en silence** : `renderTiroir` remet `etat.delaisEdit` à zéro dès
+que la référence change (c'est la dette D4), donc on repointe — c'est ce que
+Thierry demande — et on le **dit**, avec le nom du bien concerné.
+
+**Les deux correctifs sont mesurés en CLIQUANT**
+(`tests/messages-pause-levee-dom.test.js`, huit tests), et éprouvés par
+mutation : retirer la question rend 3 rouges, retirer le report 2.
+
+### La revue de ces deux correctifs : huit constats, et aucun n'était du style
+
+Tous vérifiés avant correction, et tous sur le chemin de l'envoi au voyageur ou
+sur ce que l'écran affirme.
+
+1. **`remettreCasePause` écrivait l'état de pause du bien d'AVANT dans le
+   panneau affiché.** Le nouveau chemin attend deux fois (aperçu, puis
+   désarmement) et `reporterLePanneauSurLeFil` n'avait aucune garde : un clic
+   sur un autre fil pendant ce vol repointait le panneau, et l'hôte lisait
+   « Maison Jardin » au sélecteur avec une case « en pause » et une note qui
+   parlaient d'un autre logement. **Deux gardes** : le panneau ne se repointe
+   pas pendant une écriture, et la case ne s'écrit que dans le panneau de son
+   propre bien.
+2. **L'aperçu tournait AVANT le gel.** Avant ce chantier, `basculerPause` posait
+   `modeEnCours` **puis** `renderTiroir()` avant tout `await` : la case et
+   « Enregistrer » étaient désarmés dès le premier instant. Mon bloc attendait
+   sans ce rendu — mesuré, `modeEnCours === true` avec `casePause.disabled ===
+   false`. Deux dégâts réels : l'hôte qui **re-coche** la pause pendant le vol
+   est refusé par une note transitoire **et l'appel en cours lève la pause quand
+   même** (l'état final est l'inverse de son dernier geste) ; et ce refus pose
+   `etat.pauseRefusee`, que seul `enregistrerPanneau` consomme, donc le prochain
+   enregistrement affiche un refus **en rouge** alors que tout a réussi. Un seul
+   gel pour tout le geste.
+3. **La question PROMETTAIT un départ** (« {n} propositions partiront sans
+   attendre ») sur un nombre qui est une **borne haute** — le défaut déjà
+   corrigé le 29 octobre sur le chemin du panneau, rouvert par la nouvelle
+   porte. `encoreLegitime` rejoue onze motifs de refus que ce compte ne connaît
+   pas : il sur-compte par construction. La phrase dit maintenant
+   « **pourraient** partir », dans les trois langues, et un test refuse la forme
+   assertive.
+4. **`editionPanneauNonEnregistree` ne voyait que les délais.** Les
+   destinataires d'alerte et les consignes IA ne vivent **nulle part** dans
+   l'état : `renderTiroir` fait `corps.innerHTML = voletIA(ref)`. Une consigne
+   par bien et une adresse d'alerte disparaissaient donc sans un mot — et la
+   consigne **globale** est partagée par tous les biens, donc jetée même quand
+   le délai n'avait pas bougé. ⚠ Et ma première correction était fausse aussi :
+   comparer le formulaire au bloc **enregistré** déclare « modifié » tout
+   panneau fraîchement peint, parce que le volet a des valeurs par **défaut**
+   que la config n'a pas (mesuré : sans bloc `intervention`, `email_enabled`
+   est rendu **coché**). On compare donc à l'**empreinte de rendu**
+   (`etat.panneauRendu`, posée par `renderTiroir`) : aucune valeur par défaut à
+   modéliser, et c'est exactement la question posée — « a-t-il tapé quelque
+   chose depuis que ce panneau a été peint ? »
+5. **La note du bien d'avant survivait au repointage** — le gestionnaire du
+   sélecteur masque la note pour cette raison précise depuis le 28 octobre.
+   Même défaut, autre porte ; la couleur `--ok` part avec.
+6. **« Annuler » écrivait le bloc `delais` entier depuis un instantané
+   client.** La cible `delais` **remplace** le bloc côté serveur, et
+   `etat.configIA` est chargé au démarrage de la page : si le délai avait changé
+   ailleurs (autre onglet, téléphone), annuler **ressuscitait l'ancienne
+   valeur** — et avec `propager: true`, les brouillons **non échus** étaient
+   réarmés à `created_at + N` avec ce N périmé. Un geste d'annulation ne doit
+   pas rapprocher l'échéance de propositions dont l'hôte n'a pas entendu parler.
+   On **relit** la config avant d'écrire ; si la relecture échoue, **on n'écrit
+   pas** et on le dit.
+7. **La branche « garder » ignorait `deja_prises` et l'écart annoncé/réalisé**,
+   alors que mon commentaire promettait la comparaison. Les deux sont dits
+   maintenant, avec les mêmes libellés que le chemin du panneau, et la note
+   n'est pas verte.
+8. **Les deux doubles élargis étaient plus permissifs que le vrai endpoint**
+   (ils répondaient un aperçu à n'importe quel appel et renvoyaient une
+   référence en dur). Resserrés sur `apercu === true` et sur la référence
+   demandée. Et mon commentaire sur-promettait : pour l'un des deux tests la
+   branche est **morte**, puisque `delai = null` sort avant tout réseau.
+
+**Dix-sept tests au banc jsdom**, et six mutations éprouvées une par une.
+⚠ **Une mutation a d'abord menti** : `if (etat.modeEnCours) return` apparaît
+**sept fois** dans `pages/messages.html`, et ma première mutation a frappé la
+première occurrence — donc une autre garde. Elle n'a rien rougi, et j'en aurais
+conclu que mon test ne mordait pas. Une mutation s'ancre sur un texte
+**unique**, comme une assertion.
+
+### La dernière revue : six constats, et un arbitrage entre deux revues
+
+C'est la dernière du lot (exception « envoi au voyageur ») : ce qu'elle a trouvé
+est corrigé sans nouvelle review.
+
+1. **HAUT — l'écart « annoncé − gardé » fabriquait des envois au voyageur qui
+   n'avaient pas eu lieu.** `manquantes = avant.echues − gardees − prises`
+   comparait un nombre compté sous l'**ancien** délai à un bilan produit sous
+   celui qu'on vient de **relire**. Deux cas mesurés : le bien repassé en
+   validation manuelle ailleurs (`gardees = 0` sans écriture → la note
+   annonçait « 3 propositions annoncées n'étaient plus en attente : l'envoi les
+   avait prises » alors que **rien n'était armé et rien n'est parti**, et c'était
+   garanti puisqu'on n'entre là que si `echues > 0`) ; et le délai allongé
+   ailleurs (moins d'échues, même phrase). Et le lot admet lui-même que
+   `avant.echues` est une **borne haute** : une soustraction dure sur une borne
+   haute ne peut pas rendre un fait. L'écart ne se dit plus que si le délai n'a
+   pas bougé, et le cas « repassé en manuel » a sa propre phrase.
+2. **Le panneau restait sur le mauvais bien pour de bon.** Ma garde
+   « pas de repointage pendant une écriture » n'avait **aucun rattrapage** :
+   `basculerPause` finit par `renderTiroir(); renderFil()` et ne rappelait
+   jamais `reporterLePanneauSurLeFil`. Un clic sur un autre fil pendant
+   l'aller-retour laissait donc le panneau sur le bien d'avant — le défaut de la
+   recette du 30 octobre, rouvert par son propre correctif. Il rattrape
+   maintenant à la fin du geste, **sauf s'il y a une note à lire** : elle parle
+   de ce bien-là.
+3. **La relecture rafraîchissait `etat.configIA` mais pas l'écran.** La pilule
+   active restait sur l'ancienne valeur (mesuré : 15 affiché, 240 en base), et
+   `editionPanneauNonEnregistree` comparait un `delaisEdit` figé à la config
+   relue — donc **accusait l'hôte d'une saisie qu'il n'avait jamais faite**.
+   L'écran suit la relecture ; une saisie **réelle** est conservée.
+4. **Faux négatif quand les consignes sont illisibles.** `etat.prompting ===
+   null` est un état documenté ; `voletIA` ne rend alors aucun bloc de
+   consignes, la fonction sortait par ce garde, et les **destinataires
+   d'alerte** — qui restent éditables — disparaissaient en silence. Le garde
+   porte maintenant sur le **volet rendu**.
+5. **Mes deux sorties sans écriture repeignaient le volet une seconde fois.**
+   Elles rendent les contrôles un par un (`degelerVolet`). ⚠ **Mais la revue se
+   trompait sur la conséquence, et je l'ai vérifié** : elle écrivait que la
+   saisie survivait avant ce chantier. Non — `basculerPause` repeint **déjà à
+   l'entrée**, et le faisait avant. Toute bascule de pause efface la consigne non
+   enregistrée : c'est **D4**, inchangée, ni créée ni fermée ici. Ce qui est
+   fermé est plus modeste et vérifiable : un geste sans écriture ne repeint plus
+   deux fois.
+6. **Pas de filet autour du rendu du gel** : si `renderTiroir` levait,
+   `modeEnCours` restait à `true` pour toute la session. Filet posé, comme
+   `enregistrerPanneau` en a un.
+
+⚠ **ET UN ARBITRAGE, OÙ LA RECETTE DE THIERRY L'EMPORTE SUR UNE REVUE.** La
+revue demandait de **geler le sélecteur de bien** pendant une écriture de pause,
+pour que la note n'atterrisse pas sous un autre logement. Le risque est réel,
+mais `gelerEnTete` est clé sur `panneauEnCours` et **pas** sur `modeEnCours`
+pour une raison antérieure : les points 1 et 3 de la recette du 28 octobre —
+**un contrôle qui n'écrit rien ne se désarme pas**, parce qu'un navigateur
+n'envoie aucun clic sur un élément désarmé. Geler le sélecteur rouvrirait cette
+famille pour lui. Le défaut est donc fermé à la **source** : `noteDuBien` refuse
+de poser une note sous un autre logement, même garde que `remettreCasePause`.
+
+⚠ **ET UN DE MES TESTS NE MESURAIT RIEN, trouvé par la mutation.** Celui du
+« une sortie sans écriture ne repeint pas » capturait le nœud peint après un
+seul tick, sans bloquer l'aperçu : le geste était **déjà fini**, donc le nœud
+capturé était celui d'après la sortie, et l'assertion était vraie par
+construction. Mutation faite, il restait vert. **Il faut une fenêtre pour
+observer** : on bloque l'aperçu, on capture pendant le vol, puis on libère.
+
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 
 **Trouvé en corrigeant les quatre points, mesuré, NON corrigé dans ce commit.**

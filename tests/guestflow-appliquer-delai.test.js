@@ -651,13 +651,20 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
     'une tache deja prise par l envoi est annoncee a l hote')
   // Un bilan ABSENT compte comme un echec : un endpoint plus vieux que l ecran
   // ne doit pas faire croire que les brouillons ont suivi.
-  const i = page.indexOf('const b = r && r.brouillons')
+  // ⚠ ON DECOUPE LA FONCTION D ABORD, PUIS ON ANCRE DEDANS. Cette assertion
+  // cherchait `const b = r && r.brouillons` dans TOUTE la page : le jour ou la
+  // levee de la pause a eu son propre bilan — meme lecture, meme phrase, et
+  // plus haut dans le fichier — elle a lu CE bloc-la, et le test a rougi sur du
+  // code juste. Une ancre doit etre unique dans SA PORTEE, pas dans le fichier.
+  const panneau = page.split('async function enregistrerLePanneau')[1] || ''
+  assert.ok(panneau, 'la fonction du panneau est reperable')
+  const i = panneau.indexOf('const b = r && r.brouillons')
   assert.ok(i > 0, 'le bilan est lu depuis la reponse')
   // ⚠ UN BILAN ABSENT COMPTE COMME UN ECHEC, SUR LES DEUX ISSUES. Depuis
   // l arbitrage du 29 octobre il y a deux branches — « garder » et « laisser
   // partir » — et chacune doit refuser un bilan manquant : un endpoint plus
   // vieux que l ecran ne doit pas faire croire que les brouillons ont suivi.
-  const suite = page.slice(i, i + 900)
+  const suite = panneau.slice(i, i + 900)
   assert.match(suite, /b && b\.ok === true/, 'la branche « garder » exige un bilan ok')
   assert.match(suite, /!b \|\| b\.ok !== true/, 'et la branche « laisser partir » aussi')
   // Et le fil se relit quand des echeances ont bouge, sinon il garde a l ecran

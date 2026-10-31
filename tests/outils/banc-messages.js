@@ -187,7 +187,8 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       etat, renderTiroir, ouvrirTiroir, renderListe, renderFil, renderFiltres,
       enregistrerPanneau, basculerPause, delaisEnCours, delaisDuBien,
       bandeauEcheance, etatEcheance, peutReprendre, pausesFiables, voletIA,
-      noteReglage, bienDuFilOuvert, init, PILULES
+      noteReglage, bienDuFilOuvert, init, PILULES,
+      reporterLePanneauSurLeFil, editionPanneauNonEnregistree, remettreCasePause
     }
   `
   window.__journal = []
