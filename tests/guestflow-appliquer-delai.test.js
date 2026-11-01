@@ -664,7 +664,13 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   // l arbitrage du 29 octobre il y a deux branches — « garder » et « laisser
   // partir » — et chacune doit refuser un bilan manquant : un endpoint plus
   // vieux que l ecran ne doit pas faire croire que les brouillons ont suivi.
-  const suite = panneau.slice(i, i + 900)
+  // ⚠ PAS DE FENETRE EN OCTETS — et c'est ce test qui vient de le payer. Il
+  // cherchait les deux branches dans les 900 caracteres suivant l'ancre : six
+  // lignes de COMMENTAIRE ajoutees au-dessus de la seconde l'ont poussee
+  // dehors, et le test a rougi sur du code juste. Une distance en octets n'est
+  // pas une portee. On cherche dans la fonction, depuis l'ancre, sans borne
+  // arbitraire.
+  const suite = panneau.slice(i)
   assert.match(suite, /b && b\.ok === true/, 'la branche « garder » exige un bilan ok')
   assert.match(suite, /!b \|\| b\.ok !== true/, 'et la branche « laisser partir » aussi')
   // Et le fil se relit quand des echeances ont bouge, sinon il garde a l ecran

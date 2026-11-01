@@ -969,3 +969,48 @@ test('aucun ecart annonce/realise : la note reste simple et verte', async () => 
   assert.equal(b.noteOk(), true)
   b.fermer()
 })
+
+test('LE TEST QUI COMPTE : le panneau deduit le DELTA des sejours termines, pas le total', async () => {
+  // ⚠ CONSTAT D UNE REVUE : le correctif de la fausse alarme n etait applique
+  // qu a UN des deux appelants. Ici l hote enregistre le panneau, laisse la
+  // confirmation ouverte, et le jour de depart d une proposition se termine
+  // pendant ce temps — la frontiere est 00:00 UTC, 01:00 a Paris en hiver.
+  // L ecriture la classe « sejour termine » au lieu de la desarmer, et l ecran
+  // annoncait « 1 reponse est partie au voyageur » alors que rien n etait parti.
+  // ⚠ LE CAS QUI TRANCHE ENTRE LE DELTA ET LE TOTAL, et ma premiere version ne
+  // le posait pas : avec « deja 0 termine a l apercu, 1 a l ecriture », les deux
+  // formules donnent le MEME resultat, et la mutation restait verte. Il faut un
+  // ARRIERE deja termine a l apercu (c est ce que la dette D5 laisse derriere
+  // elle) ET un envoi reel pendant le dialogue. Le delta vaut alors zero, et
+  // l envoi doit se dire ; le total, lui, l aurait TU.
+  // Et « Annuler » (confirme: false), parce que c est la branche « garder » qui
+  // compare les deux nombres.
+  const b = B.monter({
+    confirme: false,
+    appel: async (chemin, charge) => {
+      if (chemin !== '/api/agent-config') return {}
+      if (charge && charge.apercu === true) {
+        return { delais_ref: charge.delais_ref,
+          apercu: { ok: true, motif: 'delai', echues: 1, sejours_termines: 2 } }
+      }
+      // L ecriture ne desarme rien — le cron a pris la vivante — et reclasse
+      // les deux memes sejours termines.
+      return { delais_ref: charge && charge.delais_ref,
+        brouillons: { ok: true, motif: 'delai', desarmes: 0, rearmes: 0, inchanges: 0,
+          deja_prises: 0, echues: 0, sans_creation: 0, sejours_termines: 2 } }
+    }
+  })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'auto', delais: { reponse_ia: 15, alerte_info: 0 } } },
+    pauses: { [REF]: false }
+  })
+  B.clic(b, B.pilule(b, 60))
+  B.clic(b, B.boutonSave(b))
+  await B.reposer(b)
+  const note = b.doc.querySelector('[data-bind="tiroir-note"]')
+  assert.match(note.textContent, new RegExp(FR['messages.partie_envolees'].replace('{n}', '1')
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    'l envoi reel se dit : un arriere de sejours termines ne le masque pas')
+  b.fermer()
+})

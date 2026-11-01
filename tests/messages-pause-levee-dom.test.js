@@ -31,7 +31,7 @@ const FR = B.FR
 // `appel` repond l'apercu et garde tout ce qui part au serveur.
 function bancEnPause ({ echues = 2, confirme = true, apercuKo = false, desarmes = 2,
   dejaPrises = 0, configFraiche = undefined, delai = 15, bloquerApercu = false,
-  finis = 0 } = {}) {
+  finis = 0, finisApercu = 0 } = {}) {
   const envois = []
   let debloquer = null
   // La config telle que le serveur la rend. `configFraiche` permet a un test de
@@ -56,7 +56,8 @@ function bancEnPause ({ echues = 2, confirme = true, apercuKo = false, desarmes 
           if (bloquerApercu) await new Promise(r => { debloquer = r })
           return apercuKo
             ? { delais_ref: charge.delais_ref, apercu: { ok: false, motif: 'lecture_impossible' } }
-            : { delais_ref: charge.delais_ref, apercu: { ok: true, motif: 'delai', echues } }
+            : { delais_ref: charge.delais_ref,
+                apercu: { ok: true, motif: 'delai', echues, sejours_termines: finisApercu } }
         }
         return { delais_ref: charge && charge.delais_ref,
           brouillons: { ok: true, motif: 'delai', desarmes, rearmes: 0, inchanges: 0,
@@ -647,6 +648,43 @@ test('LE TEST QUI COMPTE : un sejour qui se termine pendant le dialogue n annonc
   const note = b.doc.querySelector('[data-bind="tiroir-note"]')
   assert.equal(note.textContent, FR['messages.pause_gardees'].replace('{n}', '1'),
     'une gardee, et aucun envoi annonce')
+  assert.doesNotMatch(note.textContent,
+    /n .taient plus en attente|no longer pending|ya no estaban/i)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un arriere de sejours termines ne TAIT pas un envoi reel', async () => {
+  // ⚠ LE CAS QUI TRANCHE, ET MA PREMIERE VERSION LE RATAIT — constat GRAVE
+  // d une revue, mesure. `avant.echues` n a JAMAIS compte les sejours deja
+  // termines : l apercu les sort par le haut, exactement comme l ecriture.
+  // Retirer le TOTAL retirait donc des unites jamais ajoutees, et avec
+  // l arriere D5 que ce lot solde — deux propositions de sejours termines sur
+  // le bien — une proposition vivante REELLEMENT partie pendant le dialogue
+  // passait de « 1 n etait plus en attente » a RIEN DU TOUT.
+  // Ici : l apercu voit 1 vivante echue ET 2 sejours deja termines ; l ecriture
+  // n en desarme aucune (le cron a pris la vivante) et reclasse les 2 memes.
+  // Le delta est donc ZERO, et l envoi reel doit se dire.
+  const { b } = bancEnPause({
+    echues: 1, confirme: false, desarmes: 0, finis: 2, finisApercu: 2
+  })
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  const note = b.doc.querySelector('[data-bind="tiroir-note"]')
+  assert.match(note.textContent, new RegExp(FR['messages.partie_envolees'].replace('{n}', '1')
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    'l envoi reel est annonce : un arriere de sejours termines ne le masque pas')
+  b.fermer()
+})
+
+test('un sejour qui se termine PENDANT le dialogue, lui, se deduit', async () => {
+  // Le delta vaut 1 : rien n est parti, et rien ne doit etre annonce.
+  const { b } = bancEnPause({
+    echues: 2, confirme: false, desarmes: 1, finis: 1, finisApercu: 0
+  })
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  const note = b.doc.querySelector('[data-bind="tiroir-note"]')
+  assert.equal(note.textContent, FR['messages.pause_gardees'].replace('{n}', '1'))
   assert.doesNotMatch(note.textContent,
     /n .taient plus en attente|no longer pending|ya no estaban/i)
   b.fermer()

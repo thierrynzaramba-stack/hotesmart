@@ -480,7 +480,8 @@ test('aucune tache echue : la passe ne fait rien et ne crie pas', async () => {
   // colonne ajoutee au bilan doit l'etre ici aussi — `interrompu` l'a ete avec
   // le budget mur.
   assert.deepEqual(bilan, { examines: 0, envoyes: 0, reportes: 0, abandonnes: 0,
-    orphelines: 0, reprises: 0, expirees: 0, erreurs: 0, interrompu: false })
+    orphelines: 0, reprises: 0, expirees: 0, cloturesReportees: 0,
+    erreurs: 0, interrompu: false })
   assert.equal(results.errors.length, 0)
 })
 
@@ -934,8 +935,14 @@ test('LE TEST QUI COMPTE : le predicat « sejour termine » est UN SEUL appel, p
   // comptait les occurrences brutes : les deux lignes de commentaire qui
   // EXPLIQUENT le seuil la faisaient rougir sur du code juste. Mesurer le texte
   // au lieu du mecanisme, encore une fois.
+  // ⚠ ON RETIRE LES COMMENTAIRES, Y COMPRIS EN FIN DE LIGNE ET EN BLOC —
+  // constat d'une revue sur ce test meme. Filtrer les lignes qui COMMENCENT par
+  // `//` laissait passer un `// T23:59:59Z` ecrit en fin de ligne de code, et
+  // tout bloc `/* … */` : le test aurait rougi sur du code juste, ce qui est la
+  // famille de defaut qu'il dit lui-meme venir de corriger.
   const lire = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
-    .split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n')
   const passe = lire('lib/guestflow/brouillons-dus.js')
   const delai = lire('lib/guestflow/appliquer-delai.js')
   const contrat = lire('lib/guestflow/delais-contrat.js')
@@ -1011,4 +1018,24 @@ test('la cloture remonte son compte dans le rapport du cycle', async () => {
   ] })
   await envoyerBrouillonsDus(results, { sb: b.client, maintenant: T0 })
   assert.equal(results.totalBrouillonsExpires, 2, 'le rapport du cycle porte le compte')
+})
+
+test('LE TEST QUI COMPTE : une cloture affamee se DIT dans le bilan', async () => {
+  // ⚠ CONSTAT D UNE REVUE : un `console.log` seul laissait le rapport du cycle
+  // annoncer `interrompu: false` alors que toutes les clotures etaient
+  // reportees. Si `dues` est vide, la passe sort AVANT la boucle d envoi, donc
+  // personne d autre ne pose ce drapeau : l arriere de la dette D5 pouvait
+  // cesser de se solder sans qu aucun nombre ne le dise.
+  const taches = []
+  for (let i = 0; i < 3; i++) taches.push(tache({ id: 'tache-' + i, departure: '2026-11-01' }))
+  const b = banc({ taches })
+  const results = { errors: [] }
+  let appels = 0
+  const bilan = await envoyerBrouillonsDus(results, {
+    sb: b.client, maintenant: T0, resteMs: () => (++appels === 1 ? 60000 : 0)
+  })
+  assert.equal(bilan.expirees, 0, 'rien n a ete cloture')
+  assert.equal(bilan.cloturesReportees, 1, 'et le bilan le DIT')
+  assert.equal(bilan.interrompu, true, 'la passe se declare interrompue')
+  assert.equal(results.totalBrouillonsCloturesReportees, 1, 'le rapport du cycle aussi')
 })

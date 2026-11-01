@@ -2154,6 +2154,53 @@ trouvés par la mutation :
   `T23:59:59Z` : les deux lignes de **commentaire** qui expliquent le seuil le
   faisaient rougir sur du code juste. On compte dans le code.
 
+### La dernière revue : ma déduction TAISAIT un envoi réel
+
+C'est la dernière du lot (exception « envoi au voyageur »). Six constats,
+corrigés sans nouvelle review.
+
+1. **GRAVE, et c'est l'inverse de ce que je croyais fermer.** Ma déduction des
+   séjours terminés retirait le **TOTAL**, alors que `avant.echues` ne les a
+   **jamais** comptés — l'aperçu les sort par le haut exactement comme
+   l'écriture. Je retirais donc des unités jamais ajoutées. Mesuré contre le
+   vrai module, avec l'arriéré que ce lot solde (deux propositions de séjours
+   terminés sur le bien) : une proposition vivante **réellement partie au
+   voyageur** pendant que la confirmation était ouverte passait de
+   « 1 n'était plus en attente » à **rien du tout**. Le terme juste est le
+   **DELTA** : `sejours_termines` de l'écriture moins celui de l'aperçu — ce qui
+   suppose que l'aperçu le remonte, ce qu'il ne faisait pas.
+2. **Le correctif n'était appliqué qu'à UN des deux appelants** : le panneau
+   gardait `annoncees - gardees - prises`, et sa fausse alarme restait ouverte.
+3. **`deja_prises` était faussé** par la nouvelle branche, et il faussait un
+   second nombre : un séjour terminé dont l'`update` ne mordait pas
+   l'incrémentait **en plus** de `sejours_termines`. Or son JSDoc dit « le seul
+   cas où un message peut partir avec le réglage d'avant » — faux sur un séjour
+   terminé — et l'écran soustrayait la même tâche **deux fois**.
+4. **La clôture pouvait être affamée en silence** : le `break` ne posait aucun
+   drapeau, et si `dues` est vide la passe sort avant la boucle d'envoi, donc le
+   cycle rapportait `interrompu: false` en ayant reporté toutes ses clôtures.
+5. **Le désarmement d'un séjour terminé était invisible du rechargement du
+   fil** : `brouillonsRepris` ne sommait pas `sejours_termines`.
+6. **Deux tests ne tranchaient pas.** Celui de la pause n'exerçait que le cas
+   où les deux formules **donnent le même résultat** ; et le filtre de
+   commentaires du test de parité ne voyait ni un `//` en fin de ligne de code
+   ni un bloc `/* … */`.
+
+⚠ **ET DEUX CHOSES TROUVÉES PAR MES PROPRES MUTATIONS, pas par la revue :**
+- en corrigeant le constat 1, j'avais plombé **la moitié** du chemin : l'aperçu
+  de la **pause** ne remontait toujours pas son compteur, donc `avant.sejours_termines`
+  valait `undefined`, le delta redevenait le total, et l'envoi réel restait tu.
+  C'est le test du cas qui tranche qui l'a montré ;
+- et mon test du panneau **ne tranchait pas non plus** : avec « 0 terminé à
+  l'aperçu, 1 à l'écriture », le delta ET le total donnent le même nombre. Il
+  faut un **arriéré déjà terminé** à l'aperçu — ce que D5 laisse derrière elle —
+  **et** un envoi réel pendant le dialogue.
+
+⚠ **Et un test a rougi sur du code juste** : il cherchait deux branches dans les
+**900 caractères** suivant son ancre, et six lignes de commentaire ajoutées
+au-dessus de la seconde l'ont poussée dehors. **Une distance en octets n'est pas
+une portée.**
+
 ### D5 — une proposition gardée devient inatteignable après le départ
 
 **Conséquence produit, relevée en revue, à trancher par Thierry.**
