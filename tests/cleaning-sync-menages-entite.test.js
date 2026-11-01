@@ -59,7 +59,14 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
         in (c, v) { a.ins = { c, v }; return chain },
         gte (c, v) { a.gte = { c, v }; return chain },
         lte (c, v) { a.lte = { c, v }; return chain },
-        not (c) { a.not = c; return chain },
+        // ⚠ `not` GARDE TOUTES SES COLONNES, pas la derniere. `clesArchivees`
+        // en chaine DEUX (`archive_le` puis `provider_property_id`) : avec un
+        // seul champ, le double ne pouvait plus distinguer la lecture des biens
+        // ARCHIVES de celle des biens vivants, et il rendait TOUS les biens
+        // comme archives — 28 tests rouges pour un filtre que le double
+        // n'appliquait pas. Le fichier porte deja la regle : « LE DOUBLE
+        // APPLIQUE SES FILTRES ».
+        not (c) { a.not = c; (a.nots = a.nots || []).push(c); return chain },
         gt (c, v) { a.gt = { c, v }; return chain },
         lt (c, v) { a.lt = { c, v }; return chain },
         is (c, v) { a.is = { c, v }; return chain },
@@ -160,7 +167,17 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
                    error: null }
         }
         if (table === 'property_cleaning_providers') return { data: liaisons, error: null }
-        if (table === 'properties') return { data: biens, error: erreurBiens }
+        if (table === 'properties') {
+          if (erreurBiens) return { data: null, error: erreurBiens }
+          // ⚠ LA LECTURE DES BIENS ARCHIVES EST UNE AUTRE LECTURE. Elle porte
+          // `.not('archive_le', 'is', null)` : le double doit donc rendre les
+          // biens ARCHIVES, et eux seuls. Sans ce cas, un bien non archive
+          // ressortait comme archive et ses reservations etaient ecartees.
+          if ((a.nots || []).includes('archive_le')) {
+            return { data: biens.filter(b => b.archive_le), error: null }
+          }
+          return { data: biens, error: null }
+        }
         return { data: [], error: null }
       }
       return chain
@@ -603,6 +620,42 @@ test('le rattrapage ne ressuscite pas un ménage annulé par la bande', async ()
 // lectures : le writer tourne en service key, qui contourne la RLS par
 // conception. Aucune assertion ne les couvrait — les retirer laissait les 996
 // tests verts.
+
+test("LE TEST QUI COMPTE : les réservations d'un bien ARCHIVÉ sont écartées", async () => {
+  // ⚠ 3 780 INCIDENTS `menage_non_assigne` SUR LE PREMIER CAS RÉEL (mesure du
+  // 30 octobre 2026). Ce writer ne part PAS de `properties` : il lit
+  // `bookings_snapshot` sur une fenêtre de dates, donc le bien n'est jamais
+  // « choisi » — il arrive par ses réservations, et aucun filtre de sélection
+  // ne pouvait l'écarter. C'est le seul chemin du lot « archiver un bien » qui
+  // demandait un Set de clés plutôt qu'un filtre.
+  const etat = preparer({
+    snaps: [SNAP(), SNAP({ departure: jour(4) })],
+    liaisons: [],
+    biens: [
+      { user_id: U, provider_property_id: '209413', provider: 'beds24',
+        archive_le: '2026-10-31T10:00:00Z' }
+    ]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.lus, 0,
+    `${bilan.lus} réservation(s) lue(s) pour un bien archivé : le writer va recréer ses ménages`)
+  assert.strictEqual(bilan.ecartes_archives, 2,
+    `le bilan n'annonce pas les lignes écartées (${bilan.ecartes_archives})`)
+  assert.strictEqual(etat.inseres.length, 0, 'un ménage a été créé pour un bien archivé')
+})
+
+test("un bien VIVANT n'est pas écarté par le filtre d'archive", async () => {
+  // Le contre-cas, sans lequel le test précédent passerait sur un writer qui
+  // écarte TOUT — c'est exactement ce que le double faisait avant d'appliquer
+  // le filtre `not('archive_le')`.
+  const etat = preparer({ snaps: [SNAP()], liaisons: [] })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.lus, 1, 'une réservation de bien vivant a été écartée')
+  assert.strictEqual(bilan.ecartes_archives, undefined,
+    'le bilan annonce des lignes écartées alors qu aucun bien n est archivé')
+})
 
 test('la lecture des ménages existants est filtrée par COMPTE', async () => {
   const etat = preparer({ snaps: [SNAP()], liaisons: [] })

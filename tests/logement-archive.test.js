@@ -265,6 +265,60 @@ test("LE TEST QUI COMPTE : reactiver rend le bien, mais NE ROUVRE PAS le passe",
     'une tache close par l archivage a ete rouverte')
 })
 
+// ─── La confirmation (option 2 de Thierry) ─────────────────────────────────
+
+test("LE TEST QUI COMPTE : la confirmation compte les sejours A VENIR, annules exclus", async () => {
+  // ⚠ DECISION DE THIERRY DU 1er NOVEMBRE 2026 : l'archivage est AUTORISE avec
+  // des sejours a venir, et il l'annonce. Le compte doit etre JUSTE : sur le
+  // premier cas reel, 15 sejours sont `confirmed` et tous dans le passe, 11 sont
+  // annules — le compte juste est ZERO. Un compte qui aurait dit « 26 » aurait
+  // fait hesiter l'hote devant un archivage sans consequence.
+  const b = banc({ properties: [unBien()] })
+  // Le double ne modelise pas `count`, donc on verifie la FORME de la question :
+  // c'est elle qui decide si le compte sera juste.
+  const vu = []
+  const client = {
+    from (t) {
+      if (t === 'properties') return b.client.from(t)
+      const q = { table: t, filtres: {} }
+      vu.push(q)
+      const ch = {
+        select (c, o) { q.select = c; q.options = o; return ch },
+        eq (c, v) { q.filtres[c] = v; return ch },
+        neq (c, v) { q.filtres[c + '_neq'] = v; return ch },
+        gte (c, v) { q.filtres[c + '_gte'] = v; return ch },
+        in (c, v) { q.filtres[c + '_in'] = v; return ch },
+        then (ok) { return Promise.resolve({ count: 0, error: null }).then(ok) }
+      }
+      return ch
+    }
+  }
+  const r = await A.compterAvantArchivage(client, {
+    bienId: 'uuid-bien', compte: 'compte-1', aujourdHui: '2026-11-01'
+  })
+  const sejours = vu.find(q => q.table === 'bookings_snapshot')
+  assert.ok(sejours, 'la confirmation ne compte pas les sejours')
+  assert.strictEqual(sejours.options && sejours.options.count, 'exact',
+    'le compte n est pas exact : PostgREST tronque a 1000 sans erreur')
+  assert.strictEqual(sejours.filtres.statut_canonique_neq, 'cancelled',
+    'les sejours ANNULES sont comptes : le chiffre annonce serait faux')
+  assert.strictEqual(sejours.filtres['snapshot->>departure_gte'], '2026-11-01',
+    'le compte ne porte pas sur le DEPART : un sejour en cours serait oublie')
+  assert.strictEqual(sejours.filtres.property_uuid, 'uuid-bien',
+    'le compte ne porte pas sur ce bien')
+  const taches = vu.find(q => q.table === 'agent_tasks')
+  assert.ok(taches, 'la confirmation ne compte pas les taches en vol')
+  assert.deepStrictEqual(taches.filtres.status_in, A.TACHES_EN_VOL)
+  assert.strictEqual(r.pilote_actif, false)
+  assert.strictEqual(r.etait_facture, true, 'la confirmation ne dit pas que le bien est facture')
+})
+
+test("la confirmation dit qu un bien est DEJA archive", async () => {
+  const b = banc({ properties: [unBien({ archive_le: '2026-10-01T00:00:00Z', provider_property_id: null })] })
+  const r = await A.compterAvantArchivage(b.client, { bienId: 'uuid-bien', compte: 'compte-1' })
+  assert.strictEqual(r.deja_archive, true)
+})
+
 test("reactiver un bien vivant est sans effet, et le dit", async () => {
   const b = banc({ properties: [unBien()] })
   const r = await A.reactiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })

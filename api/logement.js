@@ -24,6 +24,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, peutLire, peutEcrire } = require('../lib/permissions')
 const { lireFiche, lireListe, compterPourSuppression } = require('../lib/logement/lecture')
+const { compterAvantArchivage } = require('../lib/logement/archive')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -112,6 +113,28 @@ module.exports = async function handler (req, res) {
       if (!bien) return res.status(404).json({ error: 'Bien introuvable' })
       const compte = await compterPourSuppression(supabase, { compte: gardeEcr.accountUserId, bien })
       return res.status(200).json({ suppression: compte })
+    }
+
+    // ─── Ce que l'ARCHIVAGE va faire ───
+    //
+    // ⚠ GARDE COMME L'ARCHIVAGE LUI-MEME (`reglages: write`), pour la meme
+    // raison que le comptage de suppression : servir ces nombres a un profil en
+    // lecture lui montrerait le detail d'une action qu'on ne lui propose pas.
+    //
+    // ⚠ DECISION DE THIERRY DU 1er NOVEMBRE 2026, OPTION 2 : l'archivage est
+    // autorise avec des sejours a venir, et il l'ANNONCE. C'est ce bloc qui
+    // fournit la phrase de la confirmation — « N sejours a venir : leurs codes
+    // d'acces continueront de fonctionner ».
+    if (String((req.query && req.query.compter) || '') === 'archivage') {
+      const gardeArch = await requirePermission(req, res, {
+        domaine: 'reglages', niveau: 'write', bien: id, bienRequis: true
+      })
+      if (!gardeArch.ok) return
+      const avant = await compterAvantArchivage(supabase, {
+        bienId: gardeArch.bien ? gardeArch.bien.id : id,
+        compte: gardeArch.accountUserId
+      })
+      return res.status(200).json({ archivage: avant })
     }
 
 
