@@ -15,7 +15,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { envoyerBrouillonsDus, STATUT_EN_COURS, SENDING_ORPHELIN_MS } =
+const { envoyerBrouillonsDus, STATUT_EN_COURS, SENDING_ORPHELIN_MS, MAX_PAR_CYCLE } =
   require('../lib/guestflow/brouillons-dus')
 
 const T0 = Date.parse('2026-11-11T11:00:00Z') // 12 h a Paris, hors sourdine
@@ -51,8 +51,18 @@ function tache (p = {}) {
 // aurait valide du code incapable de tourner.
 const snapshotOta = { status: 'confirmed', provider: 'channex', source: 'Airbnb', ota: 'airbnb' }
 
+// ⚠ `avantUpdate` EXISTE POUR MESURER UN CLAIM, ET SANS LUI ON NE PEUT PAS.
+// Tous les ecrivains de ce module conditionnent leur update sur
+// `status = pending_validation` : c'est ce qui fait qu'une tache prise entre la
+// LECTURE et l'ECRITURE n'est pas ressuscitee. Un banc synchrone ne peut pas
+// produire cette course tout seul — et une tache posee d'emblee en `sending`
+// ne la mesure PAS : elle est ecartee des la lecture, donc le test passe meme
+// si la condition de l'update disparait (mesure : mutation faite, zero rouge).
+// Ce crochet tourne juste avant que l'update ne morde, et laisse un test
+// deplacer le sol sous lui.
 function banc ({ taches = [], biens = [bienOuvert], config = null,
-  snapshots = null, panneBiens = false, panneConfig = false, panneSnapshots = false } = {}) {
+  snapshots = null, panneBiens = false, panneConfig = false, panneSnapshots = false,
+  avantUpdate = null } = {}) {
   const etat = { taches: taches.map(t => ({ ...t })), updates: [] }
   // Par defaut, chaque tache a sa reservation au cœur : c'est le cas normal.
   const resas = snapshots !== null ? snapshots
@@ -123,6 +133,10 @@ function banc ({ taches = [], biens = [bienOuvert], config = null,
               return Promise.resolve({ data: null, error: { message: e.message } }).then(res, rej)
             }
             if (maj) {
+              // Le sol bouge ICI si un test le demande, puis le filtre est
+              // REJOUE : c'est exactement ce que fait Postgres sur un update
+              // conditionnel.
+              if (avantUpdate) { avantUpdate(etat); lignes = filtrer(table, f) }
               // ⚠ L'UPDATE CONDITIONNEL MORD : seules les lignes qui passent le
               // filtre sont touchees, et on rend CELLES-LA. Sur zero ligne, le
               // code appelant doit en conclure « quelqu un d autre l a prise ».
@@ -273,11 +287,42 @@ test('le reglage reste a un delai : ca part', async () => {
   assert.equal(bilan.envoyes, 1)
 })
 
-test('sejour termine : rien ne part', async () => {
+test('sejour termine : rien ne part, et la proposition est CLOSE', async () => {
+  // ⚠ CE TEST A CHANGE DE REPONSE, PAS D INTENTION — regle de Thierry du
+  // 1er novembre 2026. Avant, la tache etait examinee a CHAQUE passage, refusee
+  // par `encoreLegitime` et re-annotee `sejour_termine` dans son `summary`,
+  // pour toujours — elle restait `pending_validation`, donc comptee dans le
+  // badge et dans la question de la levee de pause, et inatteignable puisque le
+  // fil n est plus affiche apres le depart. Elle est maintenant CLOSE en amont.
+  // L invariant que ce test gardait — « rien ne part » — est plus fort qu avant.
+  // Et le refus de `encoreLegitime` n est pas devenu mort : le test suivant le
+  // montre, au-dela du plafond par cycle.
   const b = bancNominal({ taches: [tache({ departure: '2026-11-01' })] })
   const bilan = await lancer(b, { envoyer: async () => { throw new Error('ne doit pas etre appele') } })
-  assert.equal(bilan.abandonnes, 1)
-  assert.match(b.etat.taches[0].summary, /sejour_termine/)
+  assert.equal(bilan.expirees, 1, 'close par la fin du sejour')
+  assert.equal(bilan.examines, 0, 'elle n est meme plus examinee a chaque passage')
+  assert.equal(b.etat.taches[0].status, 'expired')
+  assert.equal(b.etat.taches[0].send_after, null)
+})
+
+test('LE TEST QUI COMPTE : au-dela du plafond, le refus de `encoreLegitime` mord encore', async () => {
+  // ⚠ LA CLOTURE NE REND PAS LE REFUS MORT, ET IL FAUT LE PROUVER. Le balayage
+  // est borne a `MAX_PAR_CYCLE` par passage : au-dela, des propositions dont le
+  // sejour est termine restent `pending_validation` ce tour-ci et arrivent
+  // jusqu a l envoi. C est la que le refus `sejour_termine` sert de filet, et
+  // supprimer ce filet en croyant la cloture suffisante ferait partir une
+  // reponse apres le depart.
+  const taches = []
+  for (let i = 0; i < MAX_PAR_CYCLE + 1; i++) {
+    taches.push(tache({ id: 'tache-' + i, departure: '2026-11-01' }))
+  }
+  const b = bancNominal({ taches })
+  const bilan = await lancer(b, { envoyer: async () => { throw new Error('ne doit pas etre appele') } })
+  assert.equal(bilan.expirees, MAX_PAR_CYCLE, 'le balayage en clot autant qu il le peut')
+  assert.equal(bilan.abandonnes, 1, 'et la survivante est refusee par la garde d envoi')
+  const survivante = b.etat.taches.find(t => t.status !== 'expired')
+  assert.ok(survivante, 'il en reste bien une')
+  assert.match(survivante.summary, /sejour_termine/, 'avec son motif, comme avant')
 })
 
 test('un bien introuvable ne fait pas partir le message', async () => {
@@ -434,7 +479,7 @@ test('aucune tache echue : la passe ne fait rien et ne crie pas', async () => {
   // colonne ajoutee au bilan doit l'etre ici aussi — `interrompu` l'a ete avec
   // le budget mur.
   assert.deepEqual(bilan, { examines: 0, envoyes: 0, reportes: 0, abandonnes: 0,
-    orphelines: 0, reprises: 0, erreurs: 0, interrompu: false })
+    orphelines: 0, reprises: 0, expirees: 0, erreurs: 0, interrompu: false })
   assert.equal(results.errors.length, 0)
 })
 
@@ -784,4 +829,95 @@ test('⚠ CONSTAT 5 : une orpheline rendue n est plus « suspendue » (pas d eta
   assert.equal(t.status, 'pending_validation')
   assert.equal(t.send_after, null)
   assert.equal(t.suspendu_le, null, 'la suspension est levee : pas d etat sans issue')
+})
+
+// ─── LA FIN DU SEJOUR CLOT CE QUI RESTE EN ATTENTE (regle de Thierry du
+// 1er novembre 2026, et elle solde la dette D5) ─────────────────────────────
+
+test('LE TEST QUI COMPTE : un sejour termine clot la proposition en attente', async () => {
+  // ⚠ CE QUE CA FERME, ET C EST CE QUI A BLOQUE UNE RECETTE. Une proposition
+  // encore en attente apres le depart ne partira JAMAIS — `encoreLegitime` la
+  // refuse par `sejour_termine`, a chaque passage, pour toujours. Elle restait
+  // pourtant `pending_validation` : comptee dans le badge, comptee dans la
+  // question de la levee de pause, et INATTEIGNABLE, puisque le fil du voyageur
+  // n est plus affiche une fois le sejour termine. L hote ne pouvait donc ni
+  // l envoyer ni la refuser.
+  const b = banc({ taches: [tache({ arrival: '2026-11-01', departure: '2026-11-05' })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 1, 'elle est close')
+  const t = b.etat.taches[0]
+  assert.equal(t.status, 'expired', 'close comme EXPIREE, pas « ignored » — l hote ne l a pas refusee')
+  assert.equal(t.send_after, null, 'desarmee')
+  assert.equal(t.suspendu_le, null, 'et sortie de toute suspension')
+  assert.equal(bilan.envoyes, 0, 'et rien n est parti')
+})
+
+test('un sejour qui finit AUJOURD HUI n est pas clos : la journee compte', async () => {
+  // ⚠ LE MEME PREDICAT QUE L ENVOI, AU CARACTERE : fin du jour de depart en
+  // UTC. T0 est le 11 novembre a 11 h UTC ; un depart le 11 laisse encore
+  // treize heures.
+  const b = banc({ taches: [tache({ departure: '2026-11-11' })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 0, 'rien n est clos')
+  assert.notEqual(b.etat.taches[0].status, 'expired')
+})
+
+test('une date de depart illisible ne se clot pas', async () => {
+  // On ne ferme pas ce qu on ne sait pas dater : la direction prudente est de
+  // laisser la proposition en attente.
+  const b = banc({ taches: [tache({ departure: 'pas-une-date' })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 0)
+  assert.notEqual(b.etat.taches[0].status, 'expired')
+})
+
+test('une proposition sans date de depart n est meme pas lue', async () => {
+  const b = banc({ taches: [tache({ departure: null })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 0)
+  assert.notEqual(b.etat.taches[0].status, 'expired')
+})
+
+test('LE TEST QUI COMPTE : la cloture est un CLAIM, elle ne ressuscite rien', async () => {
+  // ⚠ LA COURSE SE JOUE ENTRE LA LECTURE ET L ECRITURE, et c est la seule facon
+  // de la mesurer. Ma premiere version posait la tache d emblee en `sending` :
+  // elle etait ecartee des la LECTURE, donc le test restait vert meme en
+  // retirant la condition de l update (mutation faite, zero rouge). Il mesurait
+  // le filtre de lecture en croyant mesurer le claim.
+  // Ici l envoi prend la tache PENDANT le vol : la condition
+  // `status = pending_validation` doit alors ne rien toucher.
+  let pris = false
+  const b = banc({
+    taches: [tache({ departure: '2026-11-05' })],
+    avantUpdate: (etat) => {
+      if (pris) return
+      pris = true
+      etat.taches[0].status = STATUT_EN_COURS
+    }
+  })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 0, 'une tache prise sous nos pieds n est pas close')
+  assert.equal(b.etat.taches[0].status, STATUT_EN_COURS, 'et son statut est intact')
+  assert.equal(b.etat.taches[0].send_after !== null, true,
+    'surtout : son echeance n est pas effacee par une ecriture qui n a pas mordu')
+})
+
+test('LE TEST QUI COMPTE : une suspension reprise sur un sejour termine est close dans la MEME passe', async () => {
+  // ⚠ L ORDRE DES DEUX BALAYAGES COMPTE. `reprendreSuspensionsDormantes`
+  // repose une echeance ; la cloture retire la tache de la file. Dans cet
+  // ordre, un sejour termine est clos meme s il vient d etre repris —
+  // l inverse laisserait la reprise rearmer ce que la cloture venait de
+  // fermer, et la tache repartirait dans la file jusqu au passage suivant.
+  const b = banc({ taches: [tache({
+    departure: '2026-11-05',
+    suspendu_le: new Date(T0 - 60 * 60 * 1000).toISOString(),
+    send_after: new Date(T0 - 30 * 60 * 1000).toISOString(),
+    updated_at: new Date(T0 - 60 * 60 * 1000).toISOString()
+  })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.reprises, 1, 'la suspension a bien ete reprise d abord')
+  assert.equal(bilan.expirees, 1, 'et la cloture passe apres')
+  assert.equal(b.etat.taches[0].status, 'expired')
+  assert.equal(b.etat.taches[0].send_after, null,
+    'surtout : elle ne garde pas l echeance que la reprise venait de poser')
 })

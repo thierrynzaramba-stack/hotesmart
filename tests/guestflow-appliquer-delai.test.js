@@ -1047,3 +1047,72 @@ test('LE TEST QUI COMPTE : la SIGNATURE du writer ne porte aucune borne de temps
   assert.deepEqual(cles, ['userId', 'propertyRef', 'delais', 'maintenant', 'apercu', 'garderEchues'],
     'un parametre de plus doit etre un choix conscient, pas une borne qui se glisse')
 })
+
+// ─── LE COMPTE EXCLUT LES SEJOURS TERMINES (regle de Thierry du 1er novembre
+// 2026, apres sa recette) ───────────────────────────────────────────────────
+
+test('LE TEST QUI COMPTE : une proposition dont le sejour est TERMINE ne compte pas', async () => {
+  // ⚠ CE QUE CA FERME, ET C EST UNE RECETTE BLOQUEE. Une proposition dont le
+  // depart est passe ne partira JAMAIS : `encoreLegitime` la refuse par
+  // `sejour_termine`, a chaque passage, pour toujours. L annoncer dans la
+  // question gonflait le nombre d un fait impossible — et comme son fil n est
+  // plus affiche apres le depart, l hote lisait « 2 propositions » et n en
+  // trouvait qu une a l ecran.
+  const b = banc({ taches: [
+    tache({ id: 'en-cours', departure: '2026-11-20' }),
+    tache({ id: 'terminee', departure: '2026-11-05' })
+  ] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0, apercu: true,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.ok, true)
+  // Les deux sont echues au sens du calcul (nees 30 min avant T0, delai 15 min) ;
+  // une seule peut encore partir.
+  assert.equal(r.echues, 1, 'seule celle dont le sejour court compte')
+})
+
+test('le sejour qui finit AUJOURD HUI compte encore : la journee entiere lui appartient', async () => {
+  // ⚠ LE MEME PREDICAT QUE L ENVOI, AU CARACTERE : fin du jour de depart en
+  // UTC. T0 est le 11 novembre a 11 h ; un depart le 11 laisse treize heures.
+  const b = banc({ taches: [tache({ departure: '2026-11-11' })] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0, apercu: true,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.echues, 1)
+})
+
+test('un depart ABSENT ou illisible compte : on sur-compte, jamais l inverse', async () => {
+  // C est la direction de tout ce module. L envoi ne refuse que s il SAIT que
+  // le sejour est fini ; ne pas savoir ne doit pas CACHER a l hote une
+  // proposition qui pourrait partir.
+  for (const departure of [null, undefined, 'pas-une-date']) {
+    const b = banc({ taches: [tache({ departure })] })
+    const r = await appliquerDelaiAuxBrouillons(b.client, {
+      userId: COMPTE, propertyRef: REF, maintenant: T0, apercu: true,
+      delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+    })
+    assert.equal(r.echues, 1, `departure=${String(departure)} : compte quand meme`)
+  }
+})
+
+test('LE TEST QUI COMPTE : « garder » ne desarme pas une proposition hors du compte', async () => {
+  // ⚠ L ENSEMBLE DESARME EST L ENSEMBLE ANNONCE. Si le compte exclut les
+  // sejours termines, le desarmement doit les exclure aussi : desarmer plus que
+  // ce qu on a annonce serait moins grave que l inverse, mais la note dirait un
+  // nombre que l hote n a pas lu dans la question.
+  const b = banc({ taches: [
+    tache({ id: 'en-cours', departure: '2026-11-20' }),
+    tache({ id: 'terminee', departure: '2026-11-05' })
+  ] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0, garderEchues: true,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.ok, true)
+  assert.equal(r.echues, 1, 'une seule annoncee')
+  assert.equal(r.desarmes, 1, 'et une seule desarmee')
+  const desarmee = b.etat.updates.filter(u => u.patch.send_after === null).map(u => u.id)
+  assert.deepEqual(desarmee, ['en-cours'], 'celle dont le sejour court, et elle seule')
+})

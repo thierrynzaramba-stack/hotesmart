@@ -2039,6 +2039,64 @@ possible.
 
 ---
 
+### D5 EST SOLDÉE — deux règles de Thierry du 1er novembre 2026
+
+Sa recette du 1er novembre a buté sur la dette elle-même : le séjour
+`STG-AVENIR-3` s'était terminé la veille, la proposition « cuisine » n'était
+plus affichée, et la question de la levée de pause annonçait pourtant **deux**
+propositions dont une seule était trouvable à l'écran.
+
+**Règle 1 — le compte de la question exclut les séjours terminés.**
+`lib/guestflow/appliquer-delai.js` sélectionne désormais `departure` et
+n'incrémente `echues` que si le séjour court encore. Le prédicat est celui de
+l'envoi, **au caractère** : `departure`, fin du jour de départ en UTC — le même
+que le motif `sejour_termine` de `encoreLegitime`. Deux seuils pour une seule
+vérité finiraient par se contredire. ⚠ Un départ **absent ou illisible compte** :
+c'est la direction de tout ce module, on sur-compte jamais l'inverse, et l'envoi
+ne refuse que s'il **sait** que le séjour est fini.
+⚠ Le JSDoc du module promettait l'inverse (« trois motifs durables que ce module
+ne peut pas connaître sans lire d'autres tables : … `sejour_termine` ») : il est
+corrigé dans le même mouvement, parce qu'une note qui dit le contraire du code
+est pire qu'une note absente.
+
+**Règle 2 — à la fin du séjour, les propositions encore en attente sont closes
+automatiquement.** `cloreLesSejoursTermines`, dans
+`lib/guestflow/brouillons-dus.js`, à chaque passage, après la reprise des
+suspensions. Statut **`expired`** — pas `ignored`, qui voudrait dire « l'hôte
+l'a refusée » et serait un fait faux dans le journal ; la colonne `status` est
+un `text` sans contrainte, et tout lecteur du dépôt filtre sur
+`pending_validation`, donc une valeur de plus y est inerte.
+
+**Pourquoi cet ordre.** La reprise des suspensions repose une échéance ; la
+clôture retire la tâche de la file. Dans cet ordre, un séjour terminé est clos
+**même s'il vient d'être repris** — l'inverse laisserait la reprise réarmer ce
+que la clôture venait de fermer, et un test le tient.
+
+⚠ **Et le refus de `encoreLegitime` n'est pas devenu mort**, ce qui serait la
+tentation suivante. Le balayage est borné à `MAX_PAR_CYCLE` par passage :
+au-delà, des propositions dont le séjour est terminé restent
+`pending_validation` ce tour-ci et arrivent jusqu'à l'envoi. Un test le prouve
+avec `MAX_PAR_CYCLE + 1` tâches — le filet sert, et le retirer en croyant la
+clôture suffisante ferait partir une réponse après le départ.
+
+**Deux tests qui ne mesuraient pas ce qu'ils annonçaient, trouvés par la
+mutation :**
+- `sejour termine : rien ne part` **a changé de réponse, pas d'intention** : la
+  tâche était examinée et re-annotée à chaque passage, pour toujours ; elle est
+  maintenant close en amont, et l'invariant « rien ne part » est plus fort.
+- le test du **claim** de la clôture posait la tâche d'emblée en `sending` :
+  elle était écartée **dès la lecture**, donc le test restait vert même en
+  retirant la condition de l'update. Il mesurait le filtre de lecture en croyant
+  mesurer le claim. Le banc a maintenant un crochet `avantUpdate` qui déplace le
+  sol **entre la lecture et l'écriture** — la seule façon de produire cette
+  course dans un banc synchrone — et la mutation mord.
+
+**Semis de recette** (go de Thierry) : `STG-RECETTE-PAUSE-1` sur
+Loft Pilotable, séjour en cours, un message entrant, une proposition armée et
+échue, bien laissé en pause ; et la « cuisine » du 28 octobre fermée en
+`expired` à la main, puisque son séjour était terminé avant que la règle 2
+n'existe.
+
 ### D5 — une proposition gardée devient inatteignable après le départ
 
 **Conséquence produit, relevée en revue, à trancher par Thierry.**
