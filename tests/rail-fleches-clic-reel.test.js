@@ -167,19 +167,42 @@ async function poseApresMouvement (nav, avant) {
   // devenaient alors fausses : 8 s d'attente, puis un echec — sur un
   // comportement correct. C'est l'inverse du risque que je craignais : mon
   // attente n'avalait pas une assertion, elle echouait a tort.
+  // ⚠ L'ORDRE DES TROIS BRANCHES EST TOUT, et la premiere version de ce bloc
+  // s'est fait prendre : elle acceptait « une page a ete demandee » comme
+  // preuve GENERALE que le clic avait porte. Or `window.__appels` s'incremente
+  // des l'appel, AVANT que le defilement bouge et avant que les cartes
+  // arrivent : l'attente rendait la main aussitot et n'attendait plus RIEN.
+  // Mesure du 1er novembre 2026 : la suite complete est passee de 10 vertes
+  // sur 10 a 3 ROUGES sur 7, sur « le clic avance de TROIS cartes ». Une
+  // attente qui n'attend plus est pire que pas d'attente, parce qu'elle
+  // rassure.
+  //
+  // Donc : le defilement d'abord, et les autres traces SEULEMENT la ou aucun
+  // defilement n'est possible.
+  //
+  // BRANCHE 1 — le defilement a bouge : la preuve la plus forte, et la seule
+  //   qui vaille quand un mouvement est possible.
+  // BRANCHE 2 — le rail etait DEJA au bout avant le clic. Alors aucun
+  //   mouvement n'est possible : `aller(1)` borne son `scrollBy` a la portee
+  //   du moment, donc <= 1 px, tandis que les cartes chargees font croitre
+  //   `scrollWidth`. Exiger un defilement attendrait pour rien puis echouerait
+  //   sur un comportement CORRECT (constat 3 de la review). La, et la
+  //   seulement, les autres traces du clic font foi.
+  // BRANCHE 3 — sinon on attend.
+  //
+  // ⚠ ET LES COMMENTAIRES RESTENT DEHORS : ecrits dans le gabarit ci-dessous,
+  // leurs accents graves fermeraient la chaine envoyee a la page. Je m'y suis
+  // fait prendre deux fois aujourd'hui, et `node --check` l'a dit les deux
+  // fois.
+  const auBoutAvant = avant.defilement + avant.visible >= avant.total - 1
   const bouge = `(() => {
     const r = ${RAIL}
     if (Math.round(r.scrollLeft) !== ${avant.defilement}) return true
-    // ⚠ LE BOUT DU RAIL EST UNE IMMOBILITE LEGITIME : la fleche droite peut
-    // etre cliquable parce qu'il reste des PAGES a charger, alors que le
-    // defilement est deja au maximum. Exiger un mouvement y attendrait pour
-    // rien, puis echouerait a tort.
-    if (Math.round(r.scrollLeft + r.clientWidth) >= Math.round(r.scrollWidth) - 1) return true
-    // Et le clic a PORTE des que l'une de ses deux autres traces apparait :
-    // une page demandee, ou des cartes posees. On n'attend pas le COMPTE
-    // attendu — c'est l'affaire des assertions, pas de l'attente.
-    if (window.__appels > ${avant.appels}) return true
-    return r.querySelectorAll('article.card').length > ${avant.cartes}
+    if (${auBoutAvant}) {
+      return window.__appels > ${avant.appels}
+        || r.querySelectorAll('article.card').length > ${avant.cartes}
+    }
+    return false
   })()`
   try {
     await nav.attendre(bouge, { maxMs: 8000 })
