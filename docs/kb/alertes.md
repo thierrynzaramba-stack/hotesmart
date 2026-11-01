@@ -521,16 +521,71 @@ un bouton qui rend 404 et une alarme à l'écran pour toujours.
   se décrit faussement se classe faussement : l'hôte cherche un conflit de
   calendrier et ne lit pas le message qui ne part pas.
 
-⚠ **DÉCISION PRODUIT EN ATTENTE, et elle dépasse ce lot.** En dérivant la liste
-du code qui pose les alarmes, on a compté, dans `api/` et `lib/`, **20 types qui
-réveillent l'hôte** (`threshold: 1`, avec un bien nommé) : **3 sont affichés**
-(les deux de l'envoi OTA et `email_voyageur_abandon`), et **17 n'apparaissent
-sur aucun écran** — `api_credit`, `booking_change_dispatch`, `circuit_breaker`,
-`claim_failure`, `email_confirmation_repli`, `event_loop`,
-`message_non_envoye` (« information manquante », le plus proche de ce lot),
-`notif_hote_non_envoyee`, `paiement_issue_incertaine`,
-`poussee_dates_sans_prix`, `poussee_nuits_vendues`, `prix_non_pousses`,
-`prix_sous_plancher`, `reservation_remboursee`, `seam_failure`, `send_failure`,
-`volume`. Les élargir au bandeau d'un coup
-noierait exactement l'écran que la décision ci-dessus protège. Choisir lesquels
-le méritent est une décision produit.
+⚠ **CETTE DÉCISION EST PRISE — 1er novembre 2026.** En dérivant la liste du
+code qui pose les alarmes, on a compté, dans `api/` et `lib/`, **20 types qui
+réveillent l'hôte** (`threshold: 1`, avec un bien nommé) dont **17
+n'apparaissaient sur aucun écran**. Le critère de tri est ci-dessous.
+
+## Le lot des alarmes invisibles — le critère est posé (1er novembre 2026)
+
+**Décision de Thierry, et c'est un critère de sélection, pas une liste :**
+
+> « Tout ce qui empêche un voyageur de recevoir un message ou un code. »
+
+Appliqué aux 20 types : **8 doivent devenir visibles**, 9 ne relèvent pas du
+critère, 3 le sont déjà.
+
+### Les 8 qui entrent, avec ce qui bloque le voyageur
+
+| type | ce qui n'arrive pas au voyageur |
+|---|---|
+| `message_non_envoye` | un message « NON ENVOYÉ au voyageur » — variable inconnue ou information manquante |
+| `send_failure` | l'envoi a échoué |
+| `claim_failure` | « Claim access_codes échoué » — le **code d'arrivée** |
+| `seam_failure` | « Création code serrure échouée », « Refresh code serrure échoué » — le **code** |
+| `api_credit` | « *service* est COUPÉ : crédit ou quota épuisé » — plus rien ne part |
+| `email_confirmation_repli` | « La confirmation N'EST PAS PARTIE… Le voyageur a payé et n'a rien reçu » |
+| `circuit_breaker` | « Bien mis en pause automatiquement » — donc plus aucun message auto |
+| `booking_change_dispatch` | le dispatcher est en panne, donc le `booking_confirmed` ne se déclenche pas |
+
+### Les 9 qui n'entrent pas, nommément
+
+`notif_hote_non_envoyee` (c'est l'**hôte** qui n'est pas prévenu, pas le
+voyageur), `poussee_dates_sans_prix`, `poussee_nuits_vendues`,
+`prix_non_pousses`, `prix_sous_plancher`, `paiement_issue_incertaine`,
+`reservation_remboursee`, `event_loop`, `volume`. ⚠ **Les écarter se DIT** :
+elles restent invisibles, et c'est un choix, pas un oubli.
+`anti_doublon_message_hs` reste hors du bandeau pour une autre raison — elle n'a
+pas de bien (`propertyId: null`) et s'adresse au fondateur.
+
+### ⚠ Le cas « réponse automatique NON DÉLIVRÉE »
+
+`lib/cron-classify.js` pose une tâche dont le résumé dit « Réponse automatique
+NON DÉLIVRÉE (…) : vérifiez-la et renvoyez-la ». C'est le seul signal, dans la
+table, qu'un voyageur n'a jamais eu sa réponse — et il n'était visible **nulle
+part** : une tâche `pending_validation` dans une liste, pas une alarme.
+
+**Décision de Thierry, en deux temps :**
+1. **Pendant le séjour, c'est une ALARME visible sur `/aujourdhui` dès sa
+   pose.** Elle entre dans ce lot, par le critère ci-dessus.
+2. **Au départ du séjour, la clôture automatique est OK** — c'est ce que fait
+   `cloreLesSejoursTermines` (chantier délai de réponse IA, dette D5) : la tâche
+   passe en `expired`, la ligne et son résumé restent, et l'écran ne la montrait
+   déjà plus après le départ.
+
+### Ce qui reste à trancher AVANT de verser huit types au bandeau
+
+Le bandeau lit `TYPES_ALARME` (`api/ecran/aujourdhui.js`) et l'acquittement lit
+`TYPES_ACQUITTABLES` (`api/incidents-acquitter.js`) : **les deux listes doivent
+rester identiques**, un test le tient. Trois points d'abord :
+
+- **le seuil de date.** « L'écran n'affiche que les incidents nés après le
+  déploiement » vaut aujourd'hui pour la famille envoi. L'historique de ces huit
+  types, lui, existe : **11 977 `api_credit` et 1 209 `send_failure` ouverts**
+  en production (mesure du 30 octobre 2026). Les verser sans seuil noierait
+  l'écran — exactement ce que la décision du 30 octobre protège ;
+- **l'acquittement en masse** de cet historique attend le go de Thierry, avec
+  auteur et motif, en lot séparé ;
+- **la carte par famille.** Le bandeau titre par famille (surréservation /
+  envoi au voyageur) ; un `seam_failure` ou un `api_credit` n'est ni l'un ni
+  l'autre, et une alarme qui se décrit faussement se classe faussement.
