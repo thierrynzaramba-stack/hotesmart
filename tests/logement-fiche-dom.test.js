@@ -184,6 +184,67 @@ test("LE TEST QUI COMPTE : la confirmation d archivage DIT ce qui est garde, et 
   assert.ok(inconnu.includes('fiche.archiver_taches_inconnues'))
 })
 
+test("LE TEST QUI COMPTE : l annonce encore EN LIGNE est signalée, et l hôte archive quand même", () => {
+  // ⚠ DÉCISION DE THIERRY DU 1er NOVEMBRE 2026 SUR LA DETTE 126 : ni écriture
+  // chez le provider, ni refus — un AVERTISSEMENT. Le cas couvert : un bien
+  // archivé mais encore en vente recevrait une réservation sans code d'accès ni
+  // ménage, parce que l'archivage coupe ces deux chemins. La phrase est donc
+  // une consigne, pas une information — et elle ne BLOQUE rien.
+  const t = (c, v) => (v && v.canaux ? `${c}:${v.canaux}` : c)
+  const avecCanal = M.listeDArchivage(
+    { annonce_en_ligne: true, canaux: ['airbnb', 'booking'], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+  assert.ok(avecCanal.includes('fiche.archiver_annonce_en_ligne:Airbnb, Booking.com'),
+    `les canaux ne sont pas nommés : ${JSON.stringify(avecCanal)}`)
+
+  // ⚠ SANS CANAL CONNU, LA PHRASE CHANGE — et elle ne nomme JAMAIS le
+  // partenaire technique. Mesure en production le 1er novembre 2026 :
+  // `ota_listing_urls` est `null` sur les CINQ biens, donc c'est le cas le plus
+  // fréquent, pas l'exception.
+  const sansCanal = M.listeDArchivage(
+    { annonce_en_ligne: true, canaux: [], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+  assert.ok(sansCanal.includes('fiche.archiver_annonce_en_ligne_sans_canal'),
+    `la phrase sans canal manque : ${JSON.stringify(sansCanal)}`)
+  assert.ok(!sansCanal.some(x => /channex|beds24/i.test(x)),
+    'le nom du partenaire technique sort à l écran')
+
+  // ⚠ LE NOM DU PARTENAIRE TECHNIQUE NE SORT JAMAIS, ET C'EST LE CAS QUI
+  // COMPTE. `libelleDuCanal` rend le repli « Canal » pour un partenaire
+  // technique (sa garde du 21 octobre 2026) ou pour un canal vide. Sans le
+  // filtre, la phrase dirait « votre annonce est encore en ligne chez Canal » —
+  // qui ne dit rien a personne — et c'est le MEILLEUR cas : le pire serait que
+  // la garde cede un jour et laisse passer le nom lui-meme. On retombe donc sur
+  // la phrase sans canal.
+  // ⚠ Ma premiere version de ce test employait un OTA inconnu et rougissait sur
+  // le code JUSTE : `libelleDuCanal` rend alors le nom BRUT, pas « Canal ».
+  // Lire la fonction avant d'ecrire l'attendu, pas apres.
+  for (const brut of ['channex', 'beds24', '']) {
+    const r = M.listeDArchivage(
+      { annonce_en_ligne: true, canaux: [brut], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+    assert.ok(r.includes('fiche.archiver_annonce_en_ligne_sans_canal'),
+      `« ${brut} » est nomme a l ecran : ${JSON.stringify(r)}`)
+    // ⚠ ON VISE LA VALEUR RENDUE, PAS LE NOM DE LA CLE. Ma premiere version
+    // cherchait `/Canal/i` dans la ligne entiere, et la cle
+    // `..._sans_canal` la contient : le test rougissait sur le code JUSTE.
+    const nomme = r.filter(x => x.startsWith('fiche.archiver_annonce_en_ligne:'))
+    assert.deepStrictEqual(nomme, [],
+      `un canal est NOMME alors qu il ne devrait pas l etre : ${JSON.stringify(nomme)}`)
+  }
+
+  // Et rien ne s affiche quand l annonce n est plus en ligne.
+  const horsLigne = M.listeDArchivage(
+    { annonce_en_ligne: false, canaux: [], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+  assert.deepStrictEqual(horsLigne, ['fiche.archiver_garde'],
+    `un avertissement s affiche sur un bien hors ligne : ${JSON.stringify(horsLigne)}`)
+
+  // ⚠ ET `null` NE DÉCLENCHE RIEN : une lecture ratée ne dit pas « en ligne »,
+  // elle ne dit rien. Affirmer le contraire ferait retirer de la vente une
+  // annonce qui n existe pas.
+  const inconnu = M.listeDArchivage(
+    { annonce_en_ligne: null, canaux: [], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+  assert.ok(!inconnu.some(x => /annonce_en_ligne/.test(x)),
+    'une lecture ratée affirme que l annonce est en ligne')
+})
+
 test('l en-tête porte le nom, la ville · capacité et le FAIT DATÉ — mais PAS les pastilles', () => {
   const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
   assert.equal(d.querySelector('.fic-nom').textContent, 'La bulle')

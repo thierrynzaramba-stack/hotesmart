@@ -408,6 +408,39 @@ test("LE TEST QUI COMPTE : un BLOCAGE PROPRIETAIRE n est pas un sejour a venir",
     `${r.sejours_a_venir} sejour(s) compte(s) au lieu d un : le provider n est pas passe au lecteur de statut`)
 })
 
+test("LE TEST QUI COMPTE : le signal « annonce en ligne » est `channel_ready`", async () => {
+  // ⚠ ET C'EST UNE MESURE QUI L'A CHOISI, pas une preference. Lecture seule en
+  // production le 1er novembre 2026 : `ota_listing_urls` est `null` sur les CINQ
+  // biens et `ota_connect_status` vaut `draft` partout. Un avertissement fonde
+  // sur eux aurait ete MUET sur les deux biens a archiver. `channel_ready` est
+  // vrai sur trois biens, dont ces deux-la.
+  const b = banc({ properties: [unBien({ channel_ready: true, ota_listing_urls: null })] })
+  const r = await A.compterAvantArchivage(b.client, { bienId: 'uuid-bien', compte: 'compte-1' })
+  assert.strictEqual(r.annonce_en_ligne, true,
+    '`channel_ready` ne declenche pas l avertissement : il serait muet sur tout le parc reel')
+  assert.deepStrictEqual(r.canaux, [], 'des canaux sont inventes alors qu aucun n est connu')
+})
+
+test("les canaux CONNUS sont rendus, en cles brutes", async () => {
+  // L'ecran les nomme (`libelleDuCanal`), le serveur ne fait que les rendre :
+  // c'est la regle du depot, et c'est elle qui empeche le nom du partenaire
+  // technique de sortir.
+  const b = banc({ properties: [unBien({
+    channel_ready: false,
+    ota_listing_urls: { airbnb: 'https://airbnb.fr/rooms/1', booking: null }
+  })] })
+  const r = await A.compterAvantArchivage(b.client, { bienId: 'uuid-bien', compte: 'compte-1' })
+  assert.strictEqual(r.annonce_en_ligne, true, 'une URL d annonce ne declenche pas l avertissement')
+  assert.deepStrictEqual(r.canaux, ['airbnb'],
+    `un canal sans URL est rendu quand meme : ${JSON.stringify(r.canaux)}`)
+})
+
+test("un bien hors ligne ne declenche AUCUN avertissement", async () => {
+  const b = banc({ properties: [unBien({ channel_ready: false, ota_listing_urls: null })] })
+  const r = await A.compterAvantArchivage(b.client, { bienId: 'uuid-bien', compte: 'compte-1' })
+  assert.strictEqual(r.annonce_en_ligne, false)
+})
+
 test("la confirmation dit qu un bien est DEJA archive", async () => {
   const b = banc({ properties: [unBien({ archive_le: '2026-10-01T00:00:00Z', provider_property_id: null })] })
   const r = await A.compterAvantArchivage(b.client, { bienId: 'uuid-bien', compte: 'compte-1' })

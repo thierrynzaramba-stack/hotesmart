@@ -213,6 +213,8 @@
   "fiche.archiver_taches": "{n, plural, one {# proposition de message en attente sera classée} other {# propositions de message en attente seront classées}}",
   "fiche.archiver_taches_inconnues": "Nous n’avons pas pu compter les propositions de message en attente.",
   "fiche.archiver_pilote": "La tarification automatique sera désactivée pour ce logement.",
+  "fiche.archiver_annonce_en_ligne": "Votre annonce est encore en ligne chez {canaux} : pensez à la retirer de la vente.",
+  "fiche.archiver_annonce_en_ligne_sans_canal": "Ce logement est encore relié à votre gestionnaire de canaux : pensez à retirer l’annonce de la vente.",
   "fiche.archiver_facturation": "La facturation de ce logement s’arrête aujourd’hui.",
   "fiche.reactiver_titre": "Réactiver ce logement ?",
   "fiche.reactiver_texte": "Il revient sur l’accueil, le calendrier et les ménages. La tarification automatique reste désactivée.",

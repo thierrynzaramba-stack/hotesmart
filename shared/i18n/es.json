@@ -213,6 +213,8 @@
   "fiche.archiver_taches": "{n, plural, one {# propuesta de mensaje pendiente se archivará} other {# propuestas de mensaje pendientes se archivarán}}",
   "fiche.archiver_taches_inconnues": "No pudimos contar las propuestas de mensaje pendientes.",
   "fiche.archiver_pilote": "La tarificación automática se desactivará para este alojamiento.",
+  "fiche.archiver_annonce_en_ligne": "Su anuncio sigue publicado en {canaux}: recuerde retirarlo de la venta.",
+  "fiche.archiver_annonce_en_ligne_sans_canal": "Este alojamiento sigue conectado a su gestor de canales: recuerde retirar el anuncio de la venta.",
   "fiche.archiver_facturation": "La facturación de este alojamiento se detiene hoy.",
   "fiche.reactiver_titre": "¿Reactivar este alojamiento?",
   "fiche.reactiver_texte": "Vuelve a la pantalla de inicio, al calendario y a las limpiezas. La tarificación automática sigue desactivada.",

@@ -213,6 +213,8 @@
   "fiche.archiver_taches": "{n, plural, one {# pending message suggestion will be filed} other {# pending message suggestions will be filed}}",
   "fiche.archiver_taches_inconnues": "We could not count pending message suggestions.",
   "fiche.archiver_pilote": "Automatic pricing will be turned off for this listing.",
+  "fiche.archiver_annonce_en_ligne": "Your listing is still live on {canaux}: remember to take it off the market.",
+  "fiche.archiver_annonce_en_ligne_sans_canal": "This listing is still connected to your channel manager: remember to take it off the market.",
   "fiche.archiver_facturation": "Billing for this listing stops today.",
   "fiche.reactiver_titre": "Restore this listing?",
   "fiche.reactiver_texte": "It comes back to the home screen, the calendar and cleanings. Automatic pricing stays off.",

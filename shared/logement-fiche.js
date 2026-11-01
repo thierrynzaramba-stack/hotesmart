@@ -23,7 +23,11 @@
 //   · données                            on affiche.
 import { canauxHtml, faitDateAffiche, avisHtml, sousTitre, fraicheurDuCompte, releveDuCompteEnEchec,
   pastillesDesCanaux,
-  signalDuBien } from './logements-liste.js'
+  signalDuBien,
+  // ⚠ LE NOM D'UN CANAL VIENT DU MODULE COMMUN, il ne se recopie pas : la liste
+  // des libelles y vit avec sa garde — « le repli ne doit JAMAIS laisser sortir
+  // le nom du partenaire technique » (21 octobre 2026).
+  libelleDuCanal } from './logements-liste.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Le prix
@@ -871,6 +875,23 @@ export function listeDArchivage (avant, t) {
   else if (taches > 0) l.push(t('fiche.archiver_taches', { n: taches }))
   if (avant && avant.pilote_actif === true) l.push(t('fiche.archiver_pilote'))
   if (avant && avant.etait_facture === true) l.push(t('fiche.archiver_facturation'))
+  // ⚠ L'AVERTISSEMENT VIENT EN DERNIER, ET C'EST LE SEUL QUI DEMANDE UN GESTE A
+  // L'HOTE. Decision de Thierry du 1er novembre 2026 sur la dette 126 : ni
+  // ecriture chez le provider, ni refus — on AVERTIT, et il archive quand meme.
+  // Le cas couvert : un bien archive mais encore en vente recevrait une
+  // reservation sans code d'acces ni menage, parce que l'archivage coupe ces
+  // deux chemins. La phrase est donc une consigne, pas une information.
+  // ⚠ ET ELLE NE NOMME JAMAIS LE PARTENAIRE TECHNIQUE (regle du 21 octobre
+  // 2026) : avec un canal de vente connu, elle le nomme ; sans lui, elle parle
+  // du « gestionnaire de canaux ».
+  if (avant && avant.annonce_en_ligne === true) {
+    const canaux = Array.isArray(avant.canaux)
+      ? avant.canaux.map(c => libelleDuCanal({ ota: c })).filter(x => x && x !== 'Canal')
+      : []
+    l.push(canaux.length
+      ? t('fiche.archiver_annonce_en_ligne', { canaux: canaux.join(', ') })
+      : t('fiche.archiver_annonce_en_ligne_sans_canal'))
+  }
   return l
 }
 
