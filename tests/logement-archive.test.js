@@ -288,7 +288,9 @@ test("LE TEST QUI COMPTE : la confirmation compte les sejours A VENIR, annules e
         neq (c, v) { q.filtres[c + '_neq'] = v; return ch },
         gte (c, v) { q.filtres[c + '_gte'] = v; return ch },
         in (c, v) { q.filtres[c + '_in'] = v; return ch },
-        then (ok) { return Promise.resolve({ count: 0, error: null }).then(ok) }
+        limit (n) { q.borne = n; return ch },
+        // Le double rend des LIGNES : c'est ce que le code lit desormais.
+        then (ok) { return Promise.resolve({ data: [], count: 0, error: null }).then(ok) }
       }
       return ch
     }
@@ -298,19 +300,69 @@ test("LE TEST QUI COMPTE : la confirmation compte les sejours A VENIR, annules e
   })
   const sejours = vu.find(q => q.table === 'bookings_snapshot')
   assert.ok(sejours, 'la confirmation ne compte pas les sejours')
-  assert.strictEqual(sejours.options && sejours.options.count, 'exact',
-    'le compte n est pas exact : PostgREST tronque a 1000 sans erreur')
-  assert.strictEqual(sejours.filtres.statut_canonique_neq, 'cancelled',
-    'les sejours ANNULES sont comptes : le chiffre annonce serait faux')
+  // ⚠ NI `property_uuid` NI `statut_canonique` — constat 3 de la revue de
+  // 320aa4f8. Ces deux colonnes sont DERIVEES par le cron de 04:00 : tant
+  // qu'une ligne n'est pas derivee elles valent NULL, et les deux filtres
+  // l'ecartent (`NULL <> 'cancelled'` rend NULL). Un sejour reserve le jour
+  // meme serait invisible, donc la confirmation ne dirait rien des codes
+  // d'acces. On lit la cle PROVIDER et le statut DANS le snapshot.
+  assert.strictEqual(sejours.filtres.property_uuid, undefined,
+    'le compte filtre sur une colonne DERIVEE : un sejour non derive est invisible')
+  assert.strictEqual(sejours.filtres.statut_canonique_neq, undefined,
+    'le compte filtre sur `statut_canonique`, qui vaut NULL avant derivation')
+  assert.strictEqual(sejours.filtres.property_id, 'cle-channex',
+    'le compte ne porte pas sur la cle provider du bien')
+  assert.strictEqual(sejours.filtres.user_id, 'compte-1',
+    'le compte n est pas cloisonne : les sejours d un autre compte entreraient')
   assert.strictEqual(sejours.filtres['snapshot->>departure_gte'], '2026-11-01',
     'le compte ne porte pas sur le DEPART : un sejour en cours serait oublie')
-  assert.strictEqual(sejours.filtres.property_uuid, 'uuid-bien',
-    'le compte ne porte pas sur ce bien')
+  assert.match(String(sejours.select), /snapshot/,
+    'le compte ne lit pas le snapshot, donc il ne peut pas juger du statut')
   const taches = vu.find(q => q.table === 'agent_tasks')
   assert.ok(taches, 'la confirmation ne compte pas les taches en vol')
   assert.deepStrictEqual(taches.filtres.status_in, A.TACHES_EN_VOL)
   assert.strictEqual(r.pilote_actif, false)
   assert.strictEqual(r.etait_facture, true, 'la confirmation ne dit pas que le bien est facture')
+})
+
+test("LE TEST QUI COMPTE : un sejour NON DERIVE est compte quand meme", async () => {
+  // ⚠ CONSTAT 3 DE LA REVUE DE 320aa4f8, joue comme l'hote le vit : un voyageur
+  // reserve aujourd'hui, le cron de derivation (04:00) n'a pas encore tourne,
+  // l'hote archive le bien dans la journee. Avec un filtre sur les colonnes
+  // derivees, la confirmation ne mentionnait AUCUN sejour a venir — donc aucun
+  // mot sur les codes d'acces, sur le seul chiffre qui en engage.
+  const brut = { statut_canonique: null, property_uuid: null }
+  const lignes = [
+    // Deux sejours a venir, VIVANTS, et non derives.
+    { snapshot: { status: 'confirmed', departure: '2026-12-01' }, ...brut },
+    { snapshot: { status: 'confirmed', departure: '2026-12-15' }, ...brut },
+    // Un annule : il ne compte pas, et c'est le SNAPSHOT qui le dit.
+    { snapshot: { status: 'cancelled', departure: '2026-12-20' }, ...brut }
+  ]
+  const client = {
+    from (t) {
+      const ch = {
+        select () { return ch }, eq () { return ch }, neq () { return ch },
+        gte () { return ch }, in () { return ch }, limit () { return ch },
+        maybeSingle: async () => ({
+          data: { id: 'uuid-bien', provider_property_id: 'cle-channex',
+                  active_at: null, pilote_tarifaire: 'calendrier', archive_le: null },
+          error: null
+        }),
+        then (ok) {
+          return Promise.resolve(t === 'bookings_snapshot'
+            ? { data: lignes, error: null }
+            : { data: [], count: 0, error: null }).then(ok)
+        }
+      }
+      return ch
+    }
+  }
+  const r = await A.compterAvantArchivage(client, {
+    bienId: 'uuid-bien', compte: 'compte-1', aujourdHui: '2026-11-01'
+  })
+  assert.strictEqual(r.sejours_a_venir, 2,
+    `${r.sejours_a_venir} sejour(s) compte(s) au lieu de 2 : le statut n est pas lu dans le snapshot`)
 })
 
 test("la confirmation dit qu un bien est DEJA archive", async () => {

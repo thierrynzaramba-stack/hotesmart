@@ -645,6 +645,92 @@ test("LE TEST QUI COMPTE : les réservations d'un bien ARCHIVÉ sont écartées"
   assert.strictEqual(etat.inseres.length, 0, 'un ménage a été créé pour un bien archivé')
 })
 
+test("LE TEST QUI COMPTE : le bien archivé d'un compte n'écarte PAS le bien d'un AUTRE compte", async () => {
+  // ⚠ CONSTAT 6 DE LA REVUE DE 320aa4f8 — une fuite d'EFFET entre comptes.
+  // `provider_property_id` n'a AUCUNE unicité globale, et ce fichier le grave
+  // déjà : « Clé composite ». Avec une clé non cloisonnée, le compte A qui
+  // archive son bien `209413` faisait écarter les réservations du bien `209413`
+  // VIVANT du compte B : aucun ménage créé chez lui, et les siens annulés.
+  const etat = preparer({
+    snaps: [SNAP(), SNAP({}, )].map((x, i) => i === 1
+      ? { ...x, user_id: 'compte-2', booking_id: 'b2' }
+      : x),
+    liaisons: [],
+    biens: [
+      { user_id: U, provider_property_id: '209413', provider: 'beds24',
+        archive_le: '2026-10-31T10:00:00Z' },
+      // Le MEME numéro provider, chez un AUTRE compte, et VIVANT.
+      { user_id: 'compte-2', provider_property_id: '209413', provider: 'beds24' }
+    ]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.ecartes_archives, 1,
+    `${bilan.ecartes_archives} ligne(s) écartée(s) au lieu d une : la clé n est pas cloisonnée par compte`)
+  assert.strictEqual(bilan.lus, 1, 'la réservation du compte VIVANT a été écartée')
+  assert.ok(etat.inseres.length >= 1,
+    'aucun ménage créé pour le bien vivant du second compte')
+  for (const m of etat.inseres) {
+    assert.strictEqual(String(m.user_id), 'compte-2',
+      'un ménage a été créé pour le bien ARCHIVÉ')
+  }
+})
+
+test("LE TEST QUI COMPTE : les ménages d'un bien ARCHIVÉ ne sont PAS annulés", async () => {
+  // ⚠ CONSTAT 7 DE LA REVUE DE 320aa4f8, et le motif du journal le rendait
+  // pire : écarter les réservations les retire aussi de `vivants`, donc TOUS
+  // les ménages du bien dans la fenêtre partaient en `cancelled` — y compris
+  // celui qu'une prestataire avait ACCEPTÉ — avec au journal
+  // « Réservation annulée ou date de départ déplacée », qui est FAUX. La
+  // réservation est vivante ; le bien est RANGÉ.
+  // ⚠ C'est le raisonnement que ce fichier applique déjà à un bien inconnu :
+  // « un bien qu'on ne sait pas lire n'est pas un bien dont les séjours ont
+  // disparu ».
+  // ⚠ IL FAUT UN AUTRE BIEN VIVANT DANS LA PASSE, et c'est le cœur du cas. Si
+  // TOUTES les réservations sont écartées, `lignes` est vide et le writer sort
+  // avant d'annuler quoi que ce soit : ma première version du test ne mesurait
+  // RIEN, et la mutation qui retire la garde y survivait. Le défaut n'existe
+  // que quand le parc a encore du travail — c'est-à-dire en production.
+  const etat = preparer({
+    snaps: [SNAP(), { user_id: U, property_id: '777777', booking_id: 'b9',
+                      snapshot: { status: 'confirmed', arrival: jour(-1), departure: jour(2) } }],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
+    liaisons: [],
+    biens: [
+      { user_id: U, provider_property_id: '209413', provider: 'beds24',
+        archive_le: '2026-10-31T10:00:00Z' },
+      { user_id: U, provider_property_id: '777777', provider: 'beds24' }
+    ]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.lus, 1, 'la réservation du bien vivant a été écartée elle aussi')
+  assert.strictEqual(bilan.annules, 0,
+    `${bilan.annules} ménage(s) annulé(s) : le bien est archivé, pas sa réservation`)
+  const annulations = etat.majs.filter(q => q.table === 'menages' && q.row && q.row.status === 'cancelled')
+  assert.strictEqual(annulations.length, 0,
+    `une annulation a été écrite : ${JSON.stringify(annulations)}`)
+})
+
+test("une liste d archives INCOMPLETE n écarte RIEN, et le dit", async () => {
+  // ⚠ CONSTAT 8. Un `Set` tronqué ferait passer un bien archivé pour vivant,
+  // donc on recréerait ses ménages — le défaut même que la borne devait fermer.
+  // Même raisonnement que la garde `tronque` des snapshots : on s'abstient.
+  const etat = preparer({
+    snaps: [SNAP()],
+    liaisons: [],
+    biens: [],
+    erreurBiens: { message: 'properties illisible' }
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.archives_illisibles, true,
+    'une lecture ratée des archives ne se dit pas')
+  assert.strictEqual(bilan.ecartes_archives, undefined,
+    'des lignes sont écartées sur une liste d archives incomplète')
+})
+
 test("un bien VIVANT n'est pas écarté par le filtre d'archive", async () => {
   // Le contre-cas, sans lequel le test précédent passerait sur un writer qui
   // écarte TOUT — c'est exactement ce que le double faisait avant d'appliquer

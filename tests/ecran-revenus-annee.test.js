@@ -56,7 +56,13 @@ async function appeler ({
       const reponse = () => comparables
         ? { data: erreurReleves ? null : releves, error: erreurReleves }
         : { data: erreurBiens ? null : biens.map(id => ({
-            id, archive_le: archives.includes(id) ? '2026-10-31T10:00:00Z' : null
+            id,
+            // ⚠ LE DOUBLE REND LE NOM, parce que la vraie lecture le demande
+            // desormais : sans lui, la ligne d'un bien archive n'aurait rien a
+            // afficher dans sa colonne de gauche (constat 1 de la revue).
+            name: `Bien ${String(id).slice(0, 4)}`,
+            photo_url: null,
+            archive_le: archives.includes(id) ? '2026-10-31T10:00:00Z' : null
           })), error: erreurBiens }
       const q = {
         select () { return q },
@@ -363,8 +369,12 @@ test("LE TEST QUI COMPTE : un bien ARCHIVE garde ses revenus, et l endpoint le D
     archives: [BIEN_B],
     lignes: [ligne(BIEN_A, an, 5, { total_cents: 20000 }), ligne(BIEN_B, an, 5, { total_cents: 10000 })]
   })
-  assert.deepStrictEqual(r.charge.archives, [BIEN_B],
-    `l endpoint ne declare pas les biens archives : ${JSON.stringify(r.charge.archives)}`)
+  // ⚠ L'ENDPOINT REND LE NOM, PAS SEULEMENT L'UUID (constat 1 de la revue de
+  // 320aa4f8) : `api/ecran/aujourdhui` ecarte ces biens, donc l'ecran ne les a
+  // QUE par cette liste — et une ligne sans nom n'a rien a afficher.
+  assert.deepStrictEqual(r.charge.archives,
+    [{ id: BIEN_B, nom: `Bien ${BIEN_B.slice(0, 4)}`, photo_url: null }],
+    `l endpoint ne declare pas les biens archives avec leur nom : ${JSON.stringify(r.charge.archives)}`)
   assert.ok(r.charge.par_bien && r.charge.par_bien[BIEN_B],
     'le bien archive a perdu sa ligne de revenus')
   assert.strictEqual(r.charge.total[`${an}-05`].total_cents, 30000,

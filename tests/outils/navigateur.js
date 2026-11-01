@@ -107,16 +107,53 @@ async function ouvrir (fichier, o = {}) {
 
   await envoyer('Page.enable')
   await envoyer('Runtime.enable')
+
+  // ⚠ ON ATTEND QUE LE DOCUMENT SOIT LA. Sans cette attente, la premiere
+  // evaluation tombe dans la fenetre ou le contexte est remplace (voir `lire`).
+  for (let essai = 0; essai < 40; essai++) {
+    try {
+      const r = await envoyer('Runtime.evaluate', {
+        expression: 'document.readyState', returnByValue: true
+      })
+      if (r.result && (r.result.value === 'interactive' || r.result.value === 'complete')) break
+    } catch { /* contexte en cours de remplacement : on repasse */ }
+    await new Promise(r => setTimeout(r, 50))
+  }
   ouverture = true
 
-  /** Evalue une expression dans la page et rend sa valeur. */
+  /**
+   * Evalue une expression dans la page et rend sa valeur.
+   *
+   * ⚠ IL REESSAIE SUR « Execution context was destroyed », ET C'EST LA CAUSE DE
+   * TOUTE L'INTERMITTENCE QU'ON A CHASSEE TROIS FOIS. Le pilote se connecte au
+   * navigateur AVANT que la page ait fini de charger : entre la connexion CDP et
+   * le document definitif, le contexte d'execution est remplace, et une
+   * evaluation tombee dans cette fenetre echoue. Sous la charge de la suite
+   * complete, la fenetre s'elargit — d'ou un test qui passe SEUL et echoue en
+   * suite, ce qu'on a d'abord pris pour un defaut du produit, puis pour une
+   * course de defilement. Deux essais suffisent : le second tombe sur le
+   * contexte neuf.
+   */
   const lire = async (expression) => {
-    const r = await envoyer('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
-    if (r.exceptionDetails) {
-      throw new Error(`la page a leve : ${r.exceptionDetails.exception
-        ? r.exceptionDetails.exception.description : r.exceptionDetails.text}`)
+    let derniere = null
+    for (let essai = 0; essai < 3; essai++) {
+      try {
+        const r = await envoyer('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+        if (r.exceptionDetails) {
+          throw new Error(`la page a leve : ${r.exceptionDetails.exception
+            ? r.exceptionDetails.exception.description : r.exceptionDetails.text}`)
+        }
+        return r.result.value
+      } catch (e) {
+        derniere = e
+        // ⚠ ON NE REESSAIE QUE SUR CETTE ERREUR. Reessayer sur une exception de
+        // la page masquerait un vrai defaut en le rejouant jusqu'a ce qu'il
+        // passe — le contraire d'une mesure.
+        if (!/Execution context was destroyed|Cannot find context/i.test(String(e.message))) throw e
+        await new Promise(r2 => setTimeout(r2, 120))
+      }
     }
-    return r.result.value
+    throw derniere
   }
 
   /**

@@ -3902,14 +3902,21 @@ test("LE TEST QUI COMPTE : un bien ARCHIVE garde sa ligne de revenus, et elle le
   // ⚠ ET C'EST CE QUI SOLDE LA DETTE 118 : un logement disparu n'avait pas de
   // ligne, donc l'hote lisait la somme sans le detail par bien. Il en a une,
   // nommee, marquee.
+  // ⚠ LE BIEN ARCHIVE N'EST **PAS** DANS `biens`, et c'est tout l'objet du
+  // constat 1 de la revue de 320aa4f8 : `api/ecran/aujourdhui` l'ECARTE
+  // (etape 3), donc l'ecran ne l'a QUE par la liste de l'endpoint des revenus.
+  // Ma premiere version injectait le bien dans `etat.biens` a la main — un
+  // chemin qui n'existe pas en production : le test etait vert et la ligne
+  // etait absente a l'ecran.
   const p = bancAnnee({
-    biens: [{ id: 'uuid-1', name: 'La bulle' }, { id: 'uuid-2', name: 'Colomiers' }],
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
     annee: {
       total: { '2026-05': mo(30000) },
       par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(10000) } },
       hors_biens: {},
-      // La liste vient du SERVEUR. L'ecran ne devine pas qui est archive.
-      archives: ['uuid-2']
+      // La liste vient du SERVEUR, avec le NOM : sans lui, la ligne n'aurait
+      // rien a afficher dans sa colonne de gauche.
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
     }
   })
   const html = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)

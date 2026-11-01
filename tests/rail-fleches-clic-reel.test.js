@@ -312,18 +312,25 @@ test("LE TEST QUI COMPTE : au bout du rail pendant que la suite CHARGE, la flech
   // rougissait sur son propre message, sans qu'une ligne de production ait
   // bouge. Un rouge intermittent dans une suite dont le compte sert de
   // barriere est une barriere qu'on apprend a ignorer.
-  const { f, dossier } = pageDeMesure(4, 2500)
+  // ⚠ DEUX CARTES, POUR QUE LE RAIL SOIT DEJA AU BOUT SANS DEFILER. Une
+  // premiere version cliquait puis attendait la pose du defilement doux : elle
+  // passait SEULE et echouait dans la suite complete, ou l'animation n'aboutit
+  // pas dans le delai de la mesure. Un test dont le resultat depend de la
+  // charge de la machine ne mesure pas le produit ; et le fait a prouver — « au
+  // bout, la fleche reste cliquable tant que la suite existe » — ne demande
+  // AUCUN defilement pour etre vrai.
+  const { f, dossier } = pageDeMesure(2, 2500)
   const nav = await ouvrir(f, { largeur: 1280, hauteur: 900 })
   try {
     await nav.attendre('window.__pret === true')
+    const depart = await nav.lire(etat)
+    assert.ok(depart.total <= depart.visible + 1,
+      `le rail deborde (${depart.total} contre ${depart.visible}) : il n est pas au bout au chargement`)
     await nav.cliquer('[data-rail="suiv"]')
-    await nav.pose('Math.round(document.getElementById("rail-avis").scrollLeft)')
     const enVol = await nav.lire(etat)
     assert.strictEqual(enVol.appels, 1, 'le clic n a pas demande la page suivante')
     assert.strictEqual(enVol.ajoutes, 0,
       `les cartes sont arrivees sans qu on les ait liberees (${enVol.ajoutes}) : le double ne retient plus le chargement`)
-    assert.ok(enVol.defilement + enVol.visible >= enVol.total - 1,
-      `le rail n est pas au bout (${enVol.defilement} + ${enVol.visible} contre ${enVol.total}) : le cas n est pas celui qu on veut`)
     assert.strictEqual(enVol.suivGrise, false,
       'au bout du rail et la suite EN VOL, la fleche droite est grisee : le prochain clic serait refuse')
     // Et quand les cartes arrivent — c'est le test qui les libere —, elle est

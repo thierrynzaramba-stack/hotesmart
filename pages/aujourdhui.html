@@ -2277,7 +2277,22 @@ function renderAnnee () {
   // 28 octobre : l'en-tete en depend desormais. Seuls les logements qui portent
   // quelque chose sur l'une des deux annees — une pastille qui ne tracerait
   // rien n'est pas un filtre, c'est un cul-de-sac.
-  const avecDonnees = (etat.biens || []).filter(b => {
+  // ⚠ LES BIENS ARCHIVES VIENNENT DE L'ENDPOINT DES REVENUS, pas de la liste de
+  // l'accueil — constat 1 de la revue de 320aa4f8. L'accueil les ECARTE (etape
+  // 3 : ils n'ont plus de tuile ni de place dans le selecteur), donc
+  // `etat.biens` ne les porte pas : leur ligne de revenus disparaissait, alors
+  // que leurs euros restaient dans le total. C'est la dette 118 que ce lot
+  // annonce solder, reintroduite par sa propre etape 3.
+  // ⚠ ET LES ARCHIVES PASSENT APRES : la liste se lit des biens vivants vers
+  // les biens rangés, pas melangee par ordre alphabetique.
+  const archivesDuServeur = Array.isArray(etat.annee.archives) ? etat.annee.archives : []
+  const archives = new Set(archivesDuServeur.map(x => String(x && x.id != null ? x.id : x)))
+  const dejaLa = new Set((etat.biens || []).map(b => String(b.id)))
+  const biensPourRevenus = (etat.biens || []).concat(
+    archivesDuServeur
+      .filter(x => x && x.id != null && !dejaLa.has(String(x.id)))
+      .map(x => ({ id: x.id, name: x.nom || '', photo_url: x.photo_url || null })))
+  const avecDonnees = biensPourRevenus.filter(b => {
     const pm = a.par_bien && a.par_bien[String(b.id)]
     return pm && Object.keys(pm).length > 0
   })
@@ -2662,10 +2677,6 @@ function renderAnnee () {
   const brutsN1 = avecDonnees.map(b => bilanPeriode(a.par_bien[String(b.id)] || {}, an - 1, 'total_cents', jusquAu))
   const eurosN = repartirEnEuros(brutsN.map(x => x.total))
   const eurosN1 = repartirEnEuros(brutsN1.map(x => x.total))
-  // ⚠ DECLARE AVANT LA BOUCLE QUI S'EN SERT. Un `const` lu dans le `.map()`
-  // d'au-dessus leve `Cannot access 'archives' before initialization` — 22
-  // tests rouges, et une page blanche pour l'hote.
-  const archives = new Set(Array.isArray(etat.annee.archives) ? etat.annee.archives.map(String) : [])
   const lignes = avecDonnees.map((b, i) => {
     const pm = a.par_bien[String(b.id)] || {}
     const pct = ecartPourcent(brutsN[i].total, brutsN1[i].total)
