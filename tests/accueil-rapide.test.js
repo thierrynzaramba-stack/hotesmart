@@ -3894,6 +3894,93 @@ test("LE TEST QUI COMPTE : l armement d avant est COUPE, jamais laisse vivant", 
     `${vivants.length} observateurs vivants : les rendus d avant n ont pas ete coupes`)
 })
 
+test("LE TEST QUI COMPTE : la vue MOIS aussi garde la ligne d un bien archive", async () => {
+  // ⚠ CONSTAT 1 DE LA REVUE DE 26339835, et c'est le bloc PRINCIPAL de l'ecran.
+  // J'avais corrige la vue Annee et laisse la vue Mois entiere : la RPC
+  // `revenus_du_mois` n'a aucun filtre d'archive, donc les euros du bien
+  // restaient dans le bandeau SANS ligne pour les porter ni reserve pour les
+  // expliquer. Un bandeau qui annonce plus que la somme de ses lignes est
+  // exactement la dette 118.
+  const p = ouvrirAujourdhui({
+    corps: {
+      biens: [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1', currency: 'EUR' }],
+      // La liste SEPAREE que l'endpoint rend desormais.
+      biens_archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }],
+      droits: { reservations: true, menage: true },
+      revenus: {
+        mois: '2026-11',
+        par_bien: {
+          'uuid-1': { sejours: 2, recu_cents: 20000, a_venir_cents: 0, total_cents: 20000, bruts: 0, sans_montant: 0 },
+          'uuid-2': { sejours: 1, recu_cents: 30000, a_venir_cents: 0, total_cents: 30000, bruts: 0, sans_montant: 0 }
+        },
+        hors_biens: { sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0, sans_montant: 0 },
+        total: { sejours: 3, recu_cents: 50000, a_venir_cents: 0, total_cents: 50000, bruts: 0, sans_montant: 0 }
+      }
+    }
+  })
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  assert.deepEqual(p.erreurs, [], `le demarrage a echoue : ${p.erreurs.join(' / ')}`)
+  const html = String(p.cache('[data-list="revenue-rows"]').innerHTML)
+  assert.ok(html.includes('Colomiers'),
+    'le bien archive n a pas de ligne dans la vue Mois : ses euros sont au bandeau et nulle part ailleurs')
+  assert.ok(html.includes('La bulle'), 'le bien vivant a perdu sa ligne')
+  assert.strictEqual((html.match(/marque-archive/g) || []).length, 1,
+    'la ligne du bien archive ne porte pas sa marque')
+})
+
+test("LE TEST QUI COMPTE : un bien ARCHIVE garde sa ligne de revenus, et elle le DIT", () => {
+  // ⚠ DECISION 1 DE THIERRY DU 31 OCTOBRE 2026 : « revenus d'un bien archive
+  // comptes dans le total, ligne marquee archive ». Les retirer changerait le
+  // total de l'annee RETROACTIVEMENT — ce que ce depot interdit deja pour les
+  // prix — et l'argent encaisse l'a bien ete.
+  // ⚠ ET C'EST CE QUI SOLDE LA DETTE 118 : un logement disparu n'avait pas de
+  // ligne, donc l'hote lisait la somme sans le detail par bien. Il en a une,
+  // nommee, marquee.
+  // ⚠ LE BIEN ARCHIVE N'EST **PAS** DANS `biens`, et c'est tout l'objet du
+  // constat 1 de la revue de 320aa4f8 : `api/ecran/aujourdhui` l'ECARTE
+  // (etape 3), donc l'ecran ne l'a QUE par la liste de l'endpoint des revenus.
+  // Ma premiere version injectait le bien dans `etat.biens` a la main — un
+  // chemin qui n'existe pas en production : le test etait vert et la ligne
+  // etait absente a l'ecran.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(30000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(10000) } },
+      hors_biens: {},
+      // La liste vient du SERVEUR, avec le NOM : sans lui, la ligne n'aurait
+      // rien a afficher dans sa colonne de gauche.
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  const html = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  assert.ok(html.includes('Colomiers'), 'le bien archive a perdu sa ligne')
+  assert.ok(html.includes('La bulle'), 'le bien vivant a perdu sa ligne')
+  const marques = (html.match(/marque-archive/g) || []).length
+  assert.strictEqual(marques, 1,
+    `${marques} marque(s) « archive » au lieu d une seule : la marque ne suit pas la liste du serveur`)
+  // Et c'est bien la ligne de Colomiers qui la porte.
+  const avant = html.slice(0, html.indexOf('marque-archive'))
+  assert.ok(avant.lastIndexOf('Colomiers') > avant.lastIndexOf('La bulle'),
+    'la marque est posee sur la mauvaise ligne')
+  // Les cartes du telephone la portent aussi : le mobile suit l'ordinateur.
+  const cartes = String(p.cache('[data-list="revenue-annee-cartes"]').innerHTML)
+  assert.strictEqual((cartes.match(/marque-archive/g) || []).length, 1,
+    'la version mobile ne marque pas le bien archive')
+})
+
+test("sans liste d archives, AUCUNE ligne n est marquee", () => {
+  // Le contre-cas : une marque posee en dur passerait le test precedent.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: { total: { '2026-05': mo(10000) }, par_bien: { 'uuid-1': { '2026-05': mo(10000) } }, hors_biens: {} }
+  })
+  const html = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  assert.ok(!html.includes('marque-archive'),
+    'une ligne est marquee « archive » alors que le serveur n en declare aucune')
+})
+
 test("LE TEST QUI COMPTE : la page BRANCHE les fleches du rail des avis", async () => {
   // ⚠ LA MEME LECON QUE POUR LES ⓘ, et elle vaut d'etre reprise : sans ce
   // test, retirer l'appel a `brancherFleches` de la page laisserait toute la

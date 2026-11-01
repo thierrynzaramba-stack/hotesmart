@@ -23,7 +23,11 @@
 //   · données                            on affiche.
 import { canauxHtml, faitDateAffiche, avisHtml, sousTitre, fraicheurDuCompte, releveDuCompteEnEchec,
   pastillesDesCanaux,
-  signalDuBien } from './logements-liste.js'
+  signalDuBien,
+  // ⚠ LE NOM D'UN CANAL VIENT DU MODULE COMMUN, il ne se recopie pas : la liste
+  // des libelles y vit avec sa garde — « le repli ne doit JAMAIS laisser sortir
+  // le nom du partenaire technique » (21 octobre 2026).
+  libelleDuCanal } from './logements-liste.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Le prix
@@ -808,6 +812,89 @@ export function supprimerHtml (fiche, outils, { peutSupprimer = false } = {}) {
   </div>`
 }
 
+// ─── ARCHIVER, ET RANIMER ──────────────────────────────────────────────────
+//
+// Lot « archiver un bien », étape 4. Go de Thierry du 31 octobre 2026.
+//
+// ⚠ ARCHIVER N'EST PAS SUPPRIMER, ET LE BLOC LE DIT AVANT LE CLIC. Supprimer
+// efface ; archiver garde tout et arrête le reste. Les deux gestes vivent côte
+// à côte, et c'est justement pour ça que leur différence doit être écrite : un
+// hôte qui veut « retirer » un logement prendra le premier bouton qu'il
+// comprend.
+//
+// ⚠ ET IL SE RÈGLE SUR LE SERVEUR, comme le bloc « Supprimer » depuis le
+// 21 octobre : `archive_le` vient de la fiche, pas d'un calcul d'écran. Un
+// écran qui déduirait l'état d'archive afficherait « Réactiver » sur un bien
+// vivant le jour où la fiche changerait de forme.
+export function archiverHtml (fiche, outils, { peutArchiver = false } = {}) {
+  if (!peutArchiver) return null
+  const { t, esc, icone } = outils
+  const archive = Boolean(fiche && fiche.archive_le)
+  // ⚠ PAS DE ROUGE : ce geste est réversible, et le rouge de cette charte est
+  // réservé à ce qui ne revient pas. Le confondre avec la suppression ferait
+  // hésiter l'hôte devant le seul des deux gestes qui se défait.
+  const bouton = archive
+    ? `<button type="button" class="btn btn--ghost" data-bind="reactiver">`
+      + `${icone('i-check', 'icon')}<span>${esc(t('fiche.reactiver'))}</span></button>`
+    : `<button type="button" class="btn btn--ghost" data-bind="archiver">`
+      + `${icone('i-archive', 'icon')}<span>${esc(t('fiche.archiver'))}</span></button>`
+  return `<div class="fic-archiver">
+    ${bouton}
+    <p class="caption fic-muet">${esc(t(archive ? 'fiche.archive_etat' : 'fiche.archiver_quoi'))}</p>
+    <span class="fic-sauve caption" data-etat-archive aria-live="polite"></span>
+    <p class="fic-erreur caption" data-erreur-archive hidden></p>
+  </div>`
+}
+
+// La phrase de la confirmation d'archivage, à partir des nombres du serveur.
+//
+// ⚠ OPTION 2 DE THIERRY (1er novembre 2026) : l'archivage est AUTORISÉ avec des
+// séjours à venir, et il l'ANNONCE — « N séjours à venir : leurs codes d'accès
+// continueront de fonctionner ». Refuser bloquerait le cas réel (« le provider
+// a supprimé l'annonce, les séjours sont perdus de toute façon ») ; ne rien
+// dire laisserait l'hôte croire que TOUT est coupé.
+export function listeDArchivage (avant, t) {
+  const l = []
+  // ⚠ `Number(null)` VAUT 0, ET 0 EST FINI. Une premiere version de ce helper
+  // rendait donc 0 pour une lecture ratee — c'est-a-dire « aucun sejour a
+  // venir », une affirmation inventee, sur le seul chiffre de cette fenetre qui
+  // engage un code d'acces. Le piege est deja ecrit dans la memoire du depot ;
+  // il s'est rejoue ici, et c'est le test qui l'a trouve.
+  const n = (x) => (x === null || x === undefined || x === '' || Number.isNaN(Number(x)))
+    ? null
+    : (Number.isFinite(Number(x)) ? Number(x) : null)
+  // ⚠ CE QUI RESTE EST DIT EN PREMIER, parce que c'est ce que l'hôte vient
+  // vérifier : son historique.
+  l.push(t('fiche.archiver_garde'))
+  const sejours = n(avant && avant.sejours_a_venir)
+  // ⚠ `null` N'EST PAS `0` : une lecture ratée ne dit pas « aucun séjour ».
+  if (sejours === null) l.push(t('fiche.archiver_sejours_inconnus'))
+  else if (sejours > 0) l.push(t('fiche.archiver_sejours', { n: sejours }))
+  const taches = n(avant && avant.taches_en_vol)
+  if (taches === null) l.push(t('fiche.archiver_taches_inconnues'))
+  else if (taches > 0) l.push(t('fiche.archiver_taches', { n: taches }))
+  if (avant && avant.pilote_actif === true) l.push(t('fiche.archiver_pilote'))
+  if (avant && avant.etait_facture === true) l.push(t('fiche.archiver_facturation'))
+  // ⚠ L'AVERTISSEMENT VIENT EN DERNIER, ET C'EST LE SEUL QUI DEMANDE UN GESTE A
+  // L'HOTE. Decision de Thierry du 1er novembre 2026 sur la dette 126 : ni
+  // ecriture chez le provider, ni refus — on AVERTIT, et il archive quand meme.
+  // Le cas couvert : un bien archive mais encore en vente recevrait une
+  // reservation sans code d'acces ni menage, parce que l'archivage coupe ces
+  // deux chemins. La phrase est donc une consigne, pas une information.
+  // ⚠ ET ELLE NE NOMME JAMAIS LE PARTENAIRE TECHNIQUE (regle du 21 octobre
+  // 2026) : avec un canal de vente connu, elle le nomme ; sans lui, elle parle
+  // du « gestionnaire de canaux ».
+  if (avant && avant.annonce_en_ligne === true) {
+    const canaux = Array.isArray(avant.canaux)
+      ? avant.canaux.map(c => libelleDuCanal({ ota: c })).filter(x => x && x !== 'Canal')
+      : []
+    l.push(canaux.length
+      ? t('fiche.archiver_annonce_en_ligne', { canaux: canaux.join(', ') })
+      : t('fiche.archiver_annonce_en_ligne_sans_canal'))
+  }
+  return l
+}
+
 // Ce que la confirmation ÉNUMÈRE, à partir des nombres du serveur.
 //
 // ⚠ LE LOGEMENT LUI-MÊME EST TOUJOURS DANS LA LISTE, même quand il n'a aucune
@@ -1104,12 +1191,18 @@ export function ficheHtml (fiche, outils, droits = {}) {
   // blocs de lecture. La spec le veut « en bas » : hors colonnes, il l'est sur
   // les deux écrans.
   const supprimer = bloc('fiche.bloc_supprimer', supprimerHtml(fiche, o, droits), o)
+  // ⚠ ARCHIVER EST AU-DESSUS DE SUPPRIMER, et l'ordre est le message : le geste
+  // reversible se lit AVANT celui qui ne revient pas. Un hote qui veut
+  // « retirer » un logement rencontre d'abord celui qui garde son historique.
+  const archiver = bloc('fiche.bloc_archiver',
+    archiverHtml(fiche, o, { peutArchiver: droits.peutSupprimer === true }), o)
 
   return `${avecActions ? dialogueHtml(o) : ''}${enTeteHtml(fiche, o, { peutModifier })}
     <div class="fic-colonnes">
       <div class="fic-col fic-col--gauche">${gauche}</div>
       <div class="fic-col fic-col--droite">${droite}</div>
     </div>
+    ${archiver}
     ${supprimer}`
 }
 
