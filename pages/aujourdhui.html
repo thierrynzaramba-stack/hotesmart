@@ -1833,10 +1833,29 @@ function renderRevenus () {
   //
   // ⚠ ET ON NE REPARTIT PAS LA COLONNE « Total » SEPAREMENT : elle tomberait
   // juste en colonne et faux en ligne — un bien afficherait 159 + 0 = 160.
-  const donnees = (etat.biens || []).map(b => parBien[String(b.id)] || null)
+  // ⚠ LES BIENS ARCHIVES ONT LEUR LIGNE ICI AUSSI — constat 1 de la revue de
+  // 26339835, et c'etait un defaut d'ARGENT. L'accueil les ecarte de `biens`
+  // (etape 3), mais la RPC `revenus_du_mois` n'a aucun filtre d'archive : leurs
+  // euros restaient dans le total du bandeau, SANS ligne pour les porter et
+  // sans reserve pour les expliquer — `revenus_hors_mois` ne compte que les
+  // sejours rattaches a AUCUN bien, et un bien archive en est un. Le bandeau
+  // annoncait donc plus que la somme de ses lignes. C'est la dette 118, soldee
+  // sur la vue Annee et laissee entiere sur la vue Mois, qui est le bloc
+  // PRINCIPAL de l'ecran.
+  // ⚠ ILS PASSENT APRES LES VIVANTS, et la liste vient du serveur
+  // (`biens_archives`) : l'ecran ne devine pas qui est archive.
+  const archivesEcran = (etat.ecran && Array.isArray(etat.ecran.biens_archives))
+    ? etat.ecran.biens_archives
+    : []
+  const vus = new Set((etat.biens || []).map(b => String(b.id)))
+  const biensAvecArchives = (etat.biens || []).concat(
+    archivesEcran
+      .filter(x => x && x.id != null && !vus.has(String(x.id)))
+      .map(x => ({ id: x.id, name: x.nom || '', photo_url: x.photo_url || null, archive: true })))
+  const donnees = biensAvecArchives.map(b => parBien[String(b.id)] || null)
   const recusParBien = repartirEnEuros(donnees.map(d => (d ? d.recu_cents : 0)))
   const avenirParBien = repartirEnEuros(donnees.map(d => (d ? d.a_venir_cents : 0)))
-  const lignesRev = (etat.biens || []).map((b, idx) => {
+  const lignesRev = biensAvecArchives.map((b, idx) => {
     // ⚠ LA CLE EST MAINTENANT L'UUID DU BIEN, ET C'EST UN RENVERSEMENT ASSUME
     // (27 octobre 2026, architecture decidee par Thierry). Jusqu'ici l'endpoint
     // groupait par `bookings_snapshot.property_id`, c'est-a-dire la cle
@@ -1864,7 +1883,11 @@ function renderRevenus () {
     // portant son initiale, comme la liste des logements. Un `<img>` sans `src`
     // afficherait l'icone de fichier casse du navigateur.
     const photo = vignetteDuBien(b)
+    // ⚠ LA MARQUE SUIT LE NOM, DANS LES DEUX VUES. Un bien archive qui aurait
+    // sa ligne sans sa marque se lirait comme un bien vivant qui n'a rien
+    // encaisse ce mois-la — deux etats que rien ne distinguerait.
     const nom = `<span class="small" style="min-width: 0">${esc(b.name)}</span>`
+      + (b.archive ? `<span class="marque-archive">${esc(t('logements.archive'))}</span>` : '')
     if (!d) {
       // Aucun sejour range ce mois-ci pour ce bien. C'est un FAIT — zero euro
       // encaisse — et non une absence de donnee : le bien a ete lu, sa ligne

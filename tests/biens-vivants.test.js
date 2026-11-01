@@ -61,6 +61,32 @@ test("LE TEST QUI COMPTE : une lecture RATEE se dit incomplete, elle ne dit pas 
   assert.strictEqual(r.cles.size, 0)
 })
 
+test("LE TEST QUI COMPTE : « la colonne n existe pas encore » n est PAS une panne", async () => {
+  // ⚠ CONSTAT 5 DE LA REVUE DE 26339835, et il conditionne la MISE EN PROD.
+  // Dans ce depot une migration se colle A LA MAIN apres le push : il y a donc
+  // toujours une fenetre ou le code nomme une colonne que la base n'a pas, et
+  // PostgREST echoue EN ENTIER (42703). Traite comme une panne, ce cas faisait
+  // renoncer `cron-beds24-props` a materialiser A CHAQUE CYCLE pendant toute la
+  // fenetre, en journalisant une erreur qui n'en est pas une.
+  // ⚠ ET LA REPONSE « AUCUN BIEN ARCHIVE » EST LITTERALEMENT VRAIE : sans la
+  // colonne, aucun bien ne PEUT etre archive. Ce n'est pas une degradation,
+  // c'est le bon resultat.
+  const b = banc({ erreur: { code: '42703', message: 'column properties.archive_le does not exist' } })
+  const r = await B.clesArchivees(b.client, ['A'])
+  assert.strictEqual(r.complet, true,
+    'une colonne absente est traitee comme une panne : la materialisation Beds24 s arreterait a chaque cycle')
+  assert.strictEqual(r.cles.size, 0)
+  assert.strictEqual(r.colonneAbsente, true, 'le cas n est pas distingue dans la reponse')
+})
+
+test("une AUTRE erreur de lecture, elle, reste une panne", async () => {
+  // Le contre-cas : sans lui, « tout traiter comme une colonne absente »
+  // passerait le test precedent et avalerait les vraies pannes.
+  const b = banc({ erreur: { code: '08006', message: 'connection failure' } })
+  const r = await B.clesArchivees(b.client, ['A'])
+  assert.strictEqual(r.complet, false, 'une panne de connexion est traitee comme « aucun bien archive »')
+})
+
 test("LE TEST QUI COMPTE : une lecture TRONQUEE se dit incomplete", async () => {
   // PostgREST tronque SANS erreur : c'est le cas le plus traitre des deux.
   const pleine = Array.from({ length: B.LOT_ARCHIVES }, (_, i) => ({
@@ -71,6 +97,22 @@ test("LE TEST QUI COMPTE : une lecture TRONQUEE se dit incomplete", async () => 
   assert.strictEqual(r.complet, false,
     `${B.LOT_ARCHIVES} lignes lues pour une borne de ${B.LOT_ARCHIVES} : la troncature n est pas detectee`)
   assert.strictEqual(b.vu.borne, B.LOT_ARCHIVES, 'la lecture n est pas bornee explicitement')
+})
+
+test("LE TEST QUI COMPTE : une lecture tronquee GARDE les cles lues", async () => {
+  // ⚠ CONSTAT 3 DE LA REVUE DE 26339835. Jeter 1 000 cles JUSTES parce qu'il en
+  // manque d'autres ferait recreer les menages de TOUS les biens archives, et
+  // resonner les 3 780 incidents que cette lecture existe pour fermer. Le Set
+  // partiel est strictement plus sur : les deux gardes de la synchro lisent le
+  // MEME Set, donc un bien qui y figure est ecarte ET protege de l'annulation.
+  const pleine = Array.from({ length: B.LOT_ARCHIVES }, (_, i) => ({
+    user_id: 'A', provider_property_id: String(i)
+  }))
+  const b = banc({ lignes: pleine })
+  const r = await B.clesArchivees(b.client, ['A'])
+  assert.strictEqual(r.cles.size, B.LOT_ARCHIVES,
+    `${r.cles.size} cle(s) gardee(s) sur une lecture tronquee : des biens archives repassent pour vivants`)
+  assert.strictEqual(r.complet, false, 'la troncature doit rester DITE')
 })
 
 test("une lecture sous la borne se dit complete", async () => {

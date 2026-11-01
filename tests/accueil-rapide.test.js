@@ -3894,6 +3894,41 @@ test("LE TEST QUI COMPTE : l armement d avant est COUPE, jamais laisse vivant", 
     `${vivants.length} observateurs vivants : les rendus d avant n ont pas ete coupes`)
 })
 
+test("LE TEST QUI COMPTE : la vue MOIS aussi garde la ligne d un bien archive", async () => {
+  // ⚠ CONSTAT 1 DE LA REVUE DE 26339835, et c'est le bloc PRINCIPAL de l'ecran.
+  // J'avais corrige la vue Annee et laisse la vue Mois entiere : la RPC
+  // `revenus_du_mois` n'a aucun filtre d'archive, donc les euros du bien
+  // restaient dans le bandeau SANS ligne pour les porter ni reserve pour les
+  // expliquer. Un bandeau qui annonce plus que la somme de ses lignes est
+  // exactement la dette 118.
+  const p = ouvrirAujourdhui({
+    corps: {
+      biens: [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1', currency: 'EUR' }],
+      // La liste SEPAREE que l'endpoint rend desormais.
+      biens_archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }],
+      droits: { reservations: true, menage: true },
+      revenus: {
+        mois: '2026-11',
+        par_bien: {
+          'uuid-1': { sejours: 2, recu_cents: 20000, a_venir_cents: 0, total_cents: 20000, bruts: 0, sans_montant: 0 },
+          'uuid-2': { sejours: 1, recu_cents: 30000, a_venir_cents: 0, total_cents: 30000, bruts: 0, sans_montant: 0 }
+        },
+        hors_biens: { sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0, sans_montant: 0 },
+        total: { sejours: 3, recu_cents: 50000, a_venir_cents: 0, total_cents: 50000, bruts: 0, sans_montant: 0 }
+      }
+    }
+  })
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  assert.deepEqual(p.erreurs, [], `le demarrage a echoue : ${p.erreurs.join(' / ')}`)
+  const html = String(p.cache('[data-list="revenue-rows"]').innerHTML)
+  assert.ok(html.includes('Colomiers'),
+    'le bien archive n a pas de ligne dans la vue Mois : ses euros sont au bandeau et nulle part ailleurs')
+  assert.ok(html.includes('La bulle'), 'le bien vivant a perdu sa ligne')
+  assert.strictEqual((html.match(/marque-archive/g) || []).length, 1,
+    'la ligne du bien archive ne porte pas sa marque')
+})
+
 test("LE TEST QUI COMPTE : un bien ARCHIVE garde sa ligne de revenus, et elle le DIT", () => {
   // ⚠ DECISION 1 DE THIERRY DU 31 OCTOBRE 2026 : « revenus d'un bien archive
   // comptes dans le total, ligne marquee archive ». Les retirer changerait le

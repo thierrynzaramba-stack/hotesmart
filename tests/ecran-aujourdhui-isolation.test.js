@@ -581,11 +581,51 @@ test("LE TEST QUI COMPTE : les biens ARCHIVES quittent l accueil", async () => {
   const { requetes } = await banc({ titulaire: true })()
   const lectures = requetes.filter(r => r.table === 'properties')
   assert.ok(lectures.length, `aucune lecture de properties : ${requetes.map(r => r.table).join(', ')}`)
+  // ⚠ DEUX LECTURES, ET ELLES DISENT L'INVERSE L'UNE DE L'AUTRE. Celle des
+  // biens VIVANTS ecarte les archives ; celle des ARCHIVES les demande — elle
+  // existe pour que le tableau des revenus garde leur ligne (constat 1 de la
+  // revue de 26339835 : sans elle, le bandeau du mois annoncait plus que la
+  // somme de ses lignes). Exiger le meme filtre partout ferait rougir la
+  // seconde, qui est le correctif.
+  const vivants = lectures.filter(r => r.filtres.some(f => f[0] === 'is' && f[1] === 'archive_le' && f[2] === null))
+  const archives = lectures.filter(r => r.filtres.some(f => f[0] === 'not' && f[1] === 'archive_le'))
+  assert.strictEqual(vivants.length + archives.length, lectures.length,
+    'une lecture des biens de l accueil ne se prononce PAS sur l archive : '
+    + `${JSON.stringify(lectures.map(r => r.filtres))}`)
+  assert.ok(vivants.length >= 1, 'aucune lecture n ecarte les biens archives')
+  assert.strictEqual(archives.length, 1,
+    `${archives.length} lecture(s) des biens archives au lieu d une seule`)
+  // Et les deux restent bornees au compte.
   for (const r of lectures) {
-    assert.ok(r.filtres.some(f => f[0] === 'is' && f[1] === 'archive_le' && f[2] === null),
-      'une lecture des biens de l accueil n ecarte pas les archives : '
-      + `${JSON.stringify(r.filtres)}`)
+    assert.ok(r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id'),
+      `une lecture des biens n est pas bornee au compte : ${JSON.stringify(r.filtres)}`)
   }
+})
+
+test("LE TEST QUI COMPTE : l accueil REND la liste des biens archives", async () => {
+  // ⚠ CONSTAT 1 DE LA REVUE DE 26339835, ET C'ETAIT UN DEFAUT D'ARGENT. La RPC
+  // `revenus_du_mois` n'a AUCUN filtre d'archive : les euros d'un bien archive
+  // restent dans le total du bandeau. Ecarte de `biens` sans etre rendu
+  // ailleurs, il n'avait ni ligne pour les porter ni reserve pour les
+  // expliquer — `revenus_hors_mois` ne compte que les sejours rattaches a AUCUN
+  // bien, et un bien archive en est un. Le bandeau annoncait donc plus que la
+  // somme de ses lignes, en silence.
+  // ⚠ ET LA LISTE EST SEPAREE : la descendre dans `biens` ramenerait le bien
+  // dans les tuiles, le selecteur et les indicateurs, que l'etape 3 nettoie.
+  const { corps, requetes } = await banc({ titulaire: true })()
+  assert.ok('biens_archives' in corps,
+    `l accueil ne rend pas la liste des biens archives : ${Object.keys(corps).join(', ')}`)
+  // ⚠ UN TABLEAU, PAS `null`. C'est la difference entre « lu, et il n'y en a
+  // aucun » et « jamais demande » : la premiere forme fait rendre sa ligne au
+  // bien archive, la seconde laisse le bandeau annoncer plus que ses lignes.
+  // Une assertion qui accepterait `null` passerait sur une lecture supprimee.
+  assert.ok(Array.isArray(corps.biens_archives),
+    `la liste des archives vaut ${JSON.stringify(corps.biens_archives)} : la lecture n a pas eu lieu`)
+  // Et la lecture existe vraiment, avec le filtre qui la distingue.
+  const lectureArchives = requetes.filter(r => r.table === 'properties'
+    && r.filtres.some(f => f[0] === 'not' && f[1] === 'archive_le'))
+  assert.strictEqual(lectureArchives.length, 1,
+    `${lectureArchives.length} lecture(s) des biens archives au lieu d une`)
 })
 
 test('le titulaire n est borne par aucun perimetre, et les notes le savent', async () => {

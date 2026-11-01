@@ -365,6 +365,49 @@ test("LE TEST QUI COMPTE : un sejour NON DERIVE est compte quand meme", async ()
     `${r.sejours_a_venir} sejour(s) compte(s) au lieu de 2 : le statut n est pas lu dans le snapshot`)
 })
 
+test("LE TEST QUI COMPTE : un BLOCAGE PROPRIETAIRE n est pas un sejour a venir", async () => {
+  // ⚠ CONSTAT 2 DE LA REVUE DE 26339835. `isActiveStatus(snapshot, null)` ne
+  // trouve aucune table de statuts pour une ligne anterieure a l'unification —
+  // celles qui n'ont pas de `snapshot.provider` —, avertit, et retombe sur
+  // `confirmed`. Un `black` Beds24 (blocage proprietaire), un `request` ou une
+  // `inquiry` etaient donc comptes comme sejours a venir : la confirmation
+  // promettait des codes d'acces pour des nuits que personne n'a reservees.
+  // `lib/cleaning/sync-menages-entite.js` passe le provider pour cette raison,
+  // et son commentaire le grave : « le provider manquant faisait retomber
+  // 'black' sur 'confirmed' ».
+  const lignes = [
+    { snapshot: { status: 'confirmed', departure: '2026-12-01' }, provider: 'beds24' },
+    // Un blocage proprietaire : le bien est ferme, personne ne vient.
+    { snapshot: { status: 'black', departure: '2026-12-05' }, provider: 'beds24' },
+    // Une demande non confirmee.
+    { snapshot: { status: 'request', departure: '2026-12-10' }, provider: 'beds24' }
+  ]
+  const client = {
+    from (t) {
+      const ch = {
+        select () { return ch }, eq () { return ch }, neq () { return ch },
+        gte () { return ch }, in () { return ch }, limit () { return ch },
+        maybeSingle: async () => ({
+          data: { id: 'uuid-bien', provider_property_id: 'cle-beds24',
+                  active_at: null, pilote_tarifaire: 'calendrier', archive_le: null },
+          error: null
+        }),
+        then (ok) {
+          return Promise.resolve(t === 'bookings_snapshot'
+            ? { data: lignes, error: null }
+            : { data: [], count: 0, error: null }).then(ok)
+        }
+      }
+      return ch
+    }
+  }
+  const r = await A.compterAvantArchivage(client, {
+    bienId: 'uuid-bien', compte: 'compte-1', aujourdHui: '2026-11-01'
+  })
+  assert.strictEqual(r.sejours_a_venir, 1,
+    `${r.sejours_a_venir} sejour(s) compte(s) au lieu d un : le provider n est pas passe au lecteur de statut`)
+})
+
 test("la confirmation dit qu un bien est DEJA archive", async () => {
   const b = banc({ properties: [unBien({ archive_le: '2026-10-01T00:00:00Z', provider_property_id: null })] })
   const r = await A.compterAvantArchivage(b.client, { bienId: 'uuid-bien', compte: 'compte-1' })
