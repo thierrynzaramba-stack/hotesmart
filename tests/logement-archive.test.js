@@ -120,6 +120,37 @@ test("LE TEST QUI COMPTE : un bien JAMAIS facture ne recoit pas de fin de factur
   assert.strictEqual(r.facturation_arretee_le, null)
 })
 
+test("LE TEST QUI COMPTE : l archivage ETEINT le pilote tarifaire", async () => {
+  // ⚠ DECISION DE THIERRY DU 1er NOVEMBRE 2026, LES DEUX COTES. Sans cela,
+  // YieldFlow continuerait de pousser des prix chez le provider pour une
+  // annonce retiree. Le filtre de `scripts/piloter-yieldflow.js` est la seconde
+  // ligne de defense ; celle-ci dit l'INTENTION dans la donnee.
+  const b = banc({ properties: [unBien({ pilote_tarifaire: 'yieldflow' })] })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  assert.strictEqual(b.base.properties[0].pilote_tarifaire, 'calendrier',
+    'le pilote reste sur `yieldflow` : il pousserait des prix pour une annonce retiree')
+  assert.strictEqual(r.pilote_eteint, true, 'le compte rendu ne dit pas que le pilote a ete eteint')
+})
+
+test("LE TEST QUI COMPTE : reactiver NE RALLUME PAS YieldFlow", async () => {
+  // Remettre un bien en vente est un geste ; remettre un moteur de prix en
+  // marche en est un autre. Les confondre rouvrirait des nuits a des prix
+  // calcules pendant l'archivage.
+  const b = banc({ properties: [unBien({
+    archive_le: '2026-10-01T00:00:00Z', pilote_tarifaire: 'calendrier'
+  })] })
+  await A.reactiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  assert.strictEqual(b.base.properties[0].pilote_tarifaire, 'calendrier',
+    'la reactivation a rallume YieldFlow toute seule')
+})
+
+test("un bien deja sur `calendrier` ne voit pas son pilote touche", async () => {
+  const b = banc({ properties: [unBien({ pilote_tarifaire: 'calendrier' })] })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  assert.strictEqual(r.pilote_eteint, false,
+    'le compte rendu annonce une extinction qui n a pas eu lieu')
+})
+
 test("LE TEST QUI COMPTE : les taches IA EN VOL sont closes, et SEULES celles-la", async () => {
   // ⚠ 35 TACHES OUVERTES SUR LE PREMIER CAS REEL (17 `pending`, 18
   // `pending_validation`, mesure du 30 octobre). Sans cette coupure, elles
