@@ -109,9 +109,62 @@ async function ouvrir (fichier, o = {}) {
   await envoyer('Runtime.enable')
   ouverture = true
 
-  /** Evalue une expression dans la page et rend sa valeur. */
+  // ⚠ ON NE REND PAS LA MAIN AVANT QUE LE BON DOCUMENT SOIT LA.
+  // `Page.enable` ne dit rien du chargement : il peut rester `about:blank` le
+  // temps que la navigation vers le fichier se valide. Un test qui evalue a cet
+  // instant lit une page vide, ou perd son contexte en pleine lecture.
+  //
+  // ⚠ ET ON ATTEND L'ETAT, PAS UNE DUREE : l'URL du document est celle
+  // demandee ET `readyState` n'est plus `loading`. Sur une machine libre c'est
+  // immediat ; sur une machine chargee l'attente s'allonge d'elle-meme. Le
+  // plafond de 15 s est la borne au dela de laquelle on ECHOUE, pas un delai
+  // qu'on subit.
+  {
+    const vise = `file://${fichier}`
+    const limite = Date.now() + 15000
+    for (;;) {
+      let pret = false
+      try {
+        pret = await envoyer('Runtime.evaluate', {
+          expression: `document.readyState !== 'loading' && location.href === ${JSON.stringify(vise)}`,
+          returnByValue: true
+        }).then((r) => r.result.value === true)
+      } catch (e) {
+        // Le contexte se detruit precisement parce que le document arrive :
+        // c'est le cas qu'on attend, pas une panne.
+        if (!/Execution context was destroyed/.test(e.message)) throw e
+      }
+      if (pret) break
+      if (Date.now() > limite) {
+        throw new Error(`le navigateur n a pas valide ${vise} en 15 s`)
+      }
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  }
+
+  /**
+   * Evalue une expression dans la page et rend sa valeur.
+   *
+   * ⚠ ET ELLE REJOUE UNE FOIS SUR UN CONTEXTE DETRUIT. Chrome est lance avec
+   * `file://...` EN LIGNE DE COMMANDE : le chargement commence pendant son
+   * demarrage, et le contexte dans lequel on evalue peut etre celui d'avant la
+   * validation du document. CDP rend alors « Execution context was destroyed »
+   * — une erreur de TUYAU, pas une mesure. Mesure du 31 octobre 2026 : une
+   * passe sur dix de la suite complete, a 566 ms, avant toute interaction, et
+   * le test accusait l'interface.
+   *
+   * ⚠ UN SEUL REJEU, ET C'EST VOULU. Si le contexte se detruit DEUX fois, ce
+   * n'est plus le demarrage : c'est la page qui navigue ou le rendu qui meurt,
+   * et il faut le voir. Rejouer en boucle transformerait une panne en attente.
+   */
   const lire = async (expression) => {
-    const r = await envoyer('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+    let r
+    try {
+      r = await envoyer('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+    } catch (e) {
+      if (!/Execution context was destroyed/.test(e.message)) throw e
+      r = await envoyer('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+    }
     if (r.exceptionDetails) {
       throw new Error(`la page a leve : ${r.exceptionDetails.exception
         ? r.exceptionDetails.exception.description : r.exceptionDetails.text}`)
