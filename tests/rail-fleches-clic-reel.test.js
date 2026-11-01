@@ -158,29 +158,57 @@ const etat = `(() => {
 // dela de laquelle on ECHOUE en le disant.
 const RAIL = "document.getElementById('rail-avis')"
 
-async function poseApresMouvement (nav, avantPx) {
+async function poseApresMouvement (nav, avant) {
+  // ⚠ ON RECOIT L'ETAT D'AVANT EN ENTIER, pas seulement le defilement — relevé
+  // en review (constat 3). Un clic peut PORTER sans faire bouger d'un pixel :
+  // au bout du rail, `aller(1)` borne son `scrollBy` a la portee du moment,
+  // donc ≤ 1 px, tandis que les trois cartes chargees font CROITRE
+  // `scrollWidth` et sortent le rail de son bout. Les deux branches ci-dessous
+  // devenaient alors fausses : 8 s d'attente, puis un echec — sur un
+  // comportement correct. C'est l'inverse du risque que je craignais : mon
+  // attente n'avalait pas une assertion, elle echouait a tort.
   const bouge = `(() => {
     const r = ${RAIL}
-    if (Math.round(r.scrollLeft) !== ${avantPx}) return true
+    if (Math.round(r.scrollLeft) !== ${avant.defilement}) return true
     // ⚠ LE BOUT DU RAIL EST UNE IMMOBILITE LEGITIME : la fleche droite peut
     // etre cliquable parce qu'il reste des PAGES a charger, alors que le
     // defilement est deja au maximum. Exiger un mouvement y attendrait pour
     // rien, puis echouerait a tort.
-    return Math.round(r.scrollLeft + r.clientWidth) >= Math.round(r.scrollWidth) - 1
+    if (Math.round(r.scrollLeft + r.clientWidth) >= Math.round(r.scrollWidth) - 1) return true
+    // Et le clic a PORTE des que l'une de ses deux autres traces apparait :
+    // une page demandee, ou des cartes posees. On n'attend pas le COMPTE
+    // attendu — c'est l'affaire des assertions, pas de l'attente.
+    if (window.__appels > ${avant.appels}) return true
+    return r.querySelectorAll('article.card').length > ${avant.cartes}
   })()`
   try {
     await nav.attendre(bouge, { maxMs: 8000 })
-  } catch {
-    // ⚠ L'ECHEC DIT L'ETAT, pas la condition : « la condition est restee
-    // fausse » envoie lire le code du banc au lieu de montrer le rail.
-    const e = await nav.lire(etat)
-    assert.fail('le rail n a ni bouge ni atteint son bout dans les 8 s qui ont suivi le clic : '
-      + `depart ${avantPx} px, maintenant ${e.defilement} px, `
-      + `visible ${e.visible} px, total ${e.total} px, `
-      + `fleche droite ${e.suivGrise ? 'grisee' : 'cliquable'}`)
+  } catch (e) {
+    // ⚠ ON NE REECRIT QUE L'EXPIRATION — relevé en review (constat 4). Un
+    // `catch` nu attrapait TOUT : une exception de la page, un CDP sans
+    // reponse, un contexte detruit deux fois — et les rebaptisait « le rail n a
+    // ni bouge ni atteint son bout », c'est-a-dire en accusation de
+    // l'interface. C'est le defaut que ce lot ferme, reproduit un etage plus
+    // haut : une erreur de TUYAU lue comme une mesure.
+    if (!/est restee fausse pendant/.test(e.message)) throw e
+    // ⚠ ET LA LECTURE D'ETAT NE DOIT PAS MASQUER L'ECHEC : si elle leve a son
+    // tour, on perd l'`assert.fail` et on rend une erreur de lecture a la
+    // place d'un diagnostic.
+    let ou = 'etat illisible'
+    try {
+      const x = await nav.lire(etat)
+      ou = `maintenant ${x.defilement} px, visible ${x.visible} px, `
+        + `total ${x.total} px, ${x.cartes} carte(s), ${x.appels} appel(s), `
+        + `fleche droite ${x.suivGrise ? 'grisee' : 'cliquable'}`
+    } catch (lecture) { ou = `etat illisible (${lecture.message})` }
+    assert.fail('le clic n a laisse AUCUNE trace dans les 8 s : ni defilement, ni page '
+      + `demandee, ni carte posee. Depart ${avant.defilement} px, `
+      + `${avant.cartes} carte(s), ${avant.appels} appel(s) — ${ou}`)
   }
-  // Le mouvement a commence (ou ne peut pas commencer) : sa stabilite veut
-  // maintenant dire quelque chose. Plus aucun minimum.
+  // La trace est la : la stabilite du defilement veut maintenant dire quelque
+  // chose. ⚠ `minMs: 0` ne valait RIEN avant le correctif de
+  // tests/outils/navigateur.js : `0 || 400` rendait 400, donc le minimum fixe
+  // etait toujours applique malgre ce que disait ce commentaire.
   const px = await nav.pose(`Math.round(${RAIL}.scrollLeft)`, { minMs: 0 })
   // ⚠ ET LE DEFILEMENT POSE NE DIT RIEN DES CARTES NI DES FLECHES. Le scroll
   // est fini ; la page suivante, elle, arrive par une requete, et l'etat des
@@ -241,7 +269,7 @@ test("LE TEST QUI COMPTE : un VRAI clic sur la fleche charge les avis suivants",
     // `scrollBy` doux est asynchrone : lu tout de suite, `scrollLeft` vaut
     // encore 0 et la fleche gauche est legitimement grisee. Lire trop tot
     // fabrique un echec qui n'existe pas — c'est ce que ce test a fait d'abord.
-    await poseApresMouvement(nav, avant.defilement)
+    await poseApresMouvement(nav, avant)
     const apres = await nav.lire(etat)
     assert.strictEqual(apres.appels, 1,
       'le clic n a demande AUCUNE page suivante : c est le defaut constate en production')
@@ -265,7 +293,7 @@ test("LE TEST QUI COMPTE : le clic avance de TROIS cartes, pas d une ni de tout 
     await nav.cliquer('[data-rail="suiv"]')
     // Le defilement doux prend quelques images : on attend qu'il se pose, sans
     // jamais le POUSSER a la main.
-    const pose = await poseApresMouvement(nav, avant.defilement)
+    const pose = await poseApresMouvement(nav, avant)
     assert.ok(pose > avant.defilement,
       `le rail n a pas defile (${avant.defilement} -> ${pose}) : la fleche ne bouge rien`)
     // Trois cartes de 300 px plus deux gouttieres, borne par la zone visible.
@@ -304,7 +332,7 @@ test("LE TEST QUI COMPTE : au BOUT du rail la fleche droite reste cliquable, et 
       const e = await nav.lire(etat)
       if (e.suivGrise) break
       await nav.cliquer('[data-rail="suiv"]')
-      await poseApresMouvement(nav, e.defilement)
+      await poseApresMouvement(nav, e)
     }
     await apresRendu(nav)
     const auBout = await nav.lire(etat)
@@ -322,7 +350,7 @@ test("LE TEST QUI COMPTE : au BOUT du rail la fleche droite reste cliquable, et 
       const e = await nav.lire(etat)
       if (e.suivGrise) break
       await nav.cliquer('[data-rail="suiv"]')
-      await poseApresMouvement(nav, e.defilement)
+      await poseApresMouvement(nav, e)
     }
     await apresRendu(nav)
     const fini = await nav.lire(etat)
@@ -358,7 +386,7 @@ test("LE TEST QUI COMPTE : rebrancher ne DOUBLE pas le geste", async () => {
     await apresRendu(nav)
     const avant = await nav.lire(etat)
     await nav.cliquer('[data-rail="suiv"]')
-    await poseApresMouvement(nav, avant.defilement)
+    await poseApresMouvement(nav, avant)
     const apres = await nav.lire(etat)
     assert.strictEqual(apres.appels, 1,
       `${apres.appels} chargement(s) pour UN clic : les ecouteurs se sont empiles`)
@@ -390,7 +418,7 @@ test("LE TEST QUI COMPTE : au bout du rail pendant que la suite CHARGE, la flech
     await nav.attendre('window.__pret === true')
     // ⚠ LA MESURE D'AVANT SE PREND AVANT LE CLIC, sinon on n'a rien a quoi
     // comparer le mouvement.
-    const depart = (await nav.lire(etat)).defilement
+    const depart = await nav.lire(etat)
     await nav.cliquer('[data-rail="suiv"]')
     await poseApresMouvement(nav, depart)
     const enVol = await nav.lire(etat)
@@ -430,7 +458,7 @@ test("LE TEST QUI COMPTE : un nouveau rendu ROUVRE la suite apres un incident", 
       const e = await nav.lire(etat)
       if (e.suivGrise) break
       await nav.cliquer('[data-rail="suiv"]')
-      await poseApresMouvement(nav, e.defilement)
+      await poseApresMouvement(nav, e)
     }
     await apresRendu(nav)
     assert.strictEqual((await nav.lire(etat)).suivGrise, true,
@@ -445,7 +473,7 @@ test("LE TEST QUI COMPTE : un nouveau rendu ROUVRE la suite apres un incident", 
     // Et elle demande vraiment la page suivante.
     const avant = apres.appels
     await nav.cliquer('[data-rail="suiv"]')
-    await poseApresMouvement(nav, apres.defilement)
+    await poseApresMouvement(nav, apres)
     assert.strictEqual((await nav.lire(etat)).appels, avant + 1,
       'la fleche rouverte ne demande plus rien')
   } finally {

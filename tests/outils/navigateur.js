@@ -107,7 +107,6 @@ async function ouvrir (fichier, o = {}) {
 
   await envoyer('Page.enable')
   await envoyer('Runtime.enable')
-  ouverture = true
 
   // ⚠ ON NE REND PAS LA MAIN AVANT QUE LE BON DOCUMENT SOIT LA.
   // `Page.enable` ne dit rien du chargement : il peut rester `about:blank` le
@@ -141,6 +140,18 @@ async function ouvrir (fichier, o = {}) {
       await new Promise((r) => setTimeout(r, 25))
     }
   }
+
+  // ⚠ CETTE LIGNE EST ICI, ET PAS AVANT LE BLOC CI-DESSUS — releve en review.
+  // Le `finally` de cette fonction ne tue le navigateur que `if (!ouverture)` :
+  // posee plus haut, elle faisait FUIR le processus des que l'attente du
+  // document levait (expiration, ou erreur autre qu'un contexte detruit). Et un
+  // `ChildProcess` dont la sortie est en tube garde la boucle d'evenements
+  // referencee : le fichier de test ne rend jamais la main et la suite entiere
+  // reste SUSPENDUE. C'est le constat 5 de la revue de fbb6baee, rouvert par
+  // mon correctif — et sur le chemin le plus probable, la machine chargee.
+  // Transformer un rouge intermittent en suspension intermittente serait pire
+  // que le defaut d'origine.
+  ouverture = true
 
   /**
    * Evalue une expression dans la page et rend sa valeur.
@@ -210,11 +221,15 @@ async function ouvrir (fichier, o = {}) {
    * telephone lisait un rail vide (`pret: false`, 0 carte) et accusait le CSS.
    */
   const attendre = async (expression, o = {}) => {
-    const limite = Date.now() + (o.maxMs || 5000)
+    // ⚠ `??` ET NON `||`, MEME PIEGE QUE `pose` (constat 2 de la review) :
+    // `0 || 5000` vaut 5000, donc un appelant qui demanderait « pas d'attente »
+    // en recevrait cinq secondes, en silence. Personne ne passe 0 aujourd'hui ;
+    // on ferme la porte avant qu'elle serve.
+    const limite = Date.now() + (o.maxMs ?? 5000)
     for (;;) {
       if (await lire(`!!(${expression})`)) return true
       if (Date.now() > limite) {
-        throw new Error(`la condition « ${expression} » est restee fausse pendant ${o.maxMs || 5000} ms`)
+        throw new Error(`la condition « ${expression} » est restee fausse pendant ${o.maxMs ?? 5000} ms`)
       }
       await lire('new Promise(r => setTimeout(r, 50))')
     }
@@ -228,10 +243,17 @@ async function ouvrir (fichier, o = {}) {
    * et son symetrique serait un faux vert si la valeur de depart etait la
    * valeur attendue.
    */
+  // ⚠ LE MINIMUM SE LIT AVEC `??`, PAS AVEC `||` — releve en review, et le
+  // defaut etait complet : `0 || 400` vaut 400, donc un appelant qui demandait
+  // « aucun minimum » recevait les 400 ms quand meme, EN SILENCE, pendant que
+  // son propre commentaire affirmait « plus aucun minimum ». Une affirmation
+  // qui ne rougit jamais. Le commentaire ci-dessous vit HORS du gabarit :
+  // l'ecrire dedans y aurait mis des backticks, qui cassent la chaine envoyee
+  // a la page (mesure : `node --check` refuse le fichier).
   const pose = (expression, o = {}) => lire(`new Promise((res) => {
     const lu = () => (${expression})
     const debut = Date.now()
-    const minimum = ${o.minMs || 400}
+    const minimum = ${o.minMs ?? 400}
     let dernier = null, stable = 0
     const t = setInterval(() => {
       const x = lu()
