@@ -1276,7 +1276,13 @@ async function echuesSiLaPauseEstLevee (ref) {
   if (!ap || ap.ok !== true) {
     return { erreur: (ap && ap.motif) || 'apercu absent', delais }
   }
-  return { echues: Number(ap.echues) || 0, delais }
+  // ⚠ ET LE POINT DE DEPART DES SEJOURS TERMINES REMONTE AUSSI. Sans lui,
+  // `avant.sejours_termines` valait `undefined` cote appelant, le delta devenait
+  // le TOTAL, et un envoi reel pendant le dialogue etait TU — c'est exactement
+  // le constat GRAVE de la revue, et mon premier correctif ne l'avait ferme que
+  // sur l'autre appelant. Un test le mesure maintenant sur les deux.
+  return { echues: Number(ap.echues) || 0,
+    sejours_termines: Number(ap.sejours_termines) || 0, delais }
 }
 
 // Le kill switch par bien : writer existant /api/property-automation, puis
@@ -1476,7 +1482,23 @@ async function basculerPause (ref, paused) {
         const prises = Number(bilan && bilan.deja_prises) || 0
         if (prises > 0) ecarts.push(t('messages.partie_deja_prises', { n: prises }))
         if (memeDelai) {
-          const manquantes = Math.max(0, (Number(avant.echues) || 0) - gardees - prises)
+          // ⚠ UN DELTA, PAS UN TOTAL — ET MA PREMIERE VERSION TAISAIT UN ENVOI
+          // REEL, constat GRAVE d'une revue, mesure. Ce qu'il faut deduire est
+          // ce qui est devenu « sejour termine » ENTRE l'apercu et l'ecriture :
+          // la frontiere est 00:00 UTC (01:00 a Paris en hiver), et la
+          // confirmation bloquante peut rester ouverte des minutes. Or
+          // `avant.echues` n'a JAMAIS compte les sejours deja termines —
+          // l'apercu les sort par le haut, exactement comme l'ecriture. Retirer
+          // le TOTAL retirait donc des unites qui n'avaient jamais ete
+          // ajoutees : avec l'arriere D5 que ce lot solde (deux propositions de
+          // sejours termines sur le bien), une proposition vivante REELLEMENT
+          // partie pendant le dialogue passait de « 1 n'etait plus en attente »
+          // a RIEN du tout. C'est l'inverse du defaut que je voulais fermer.
+          const finisAvant = Number(avant.sejours_termines) || 0
+          const finisApres = Number(bilan && bilan.sejours_termines) || 0
+          const finis = Math.max(0, finisApres - finisAvant)
+          const manquantes = Math.max(0,
+            (Number(avant.echues) || 0) - gardees - prises - finis)
           if (manquantes > 0) ecarts.push(t('messages.partie_envolees', { n: manquantes }))
         }
       }
@@ -2338,6 +2360,11 @@ async function enregistrerLePanneau (corps, ref) {
   // Combien de propositions la confirmation a ANNONCEES. Compare au bilan du
   // serveur, elle dit si l'arriere a bouge entre les deux appels.
   let annoncees = 0
+  // ⚠ ET COMBIEN DE SEJOURS ETAIENT DEJA TERMINES AU MOMENT DE L'APERCU. Sans
+  // ce point de depart, on ne peut pas distinguer « ce sejour s'est termine
+  // pendant que l'hote lisait » de « l'arriere en contenait deja » — et c'est
+  // cette confusion qui faisait TAIRE un envoi reel (constat GRAVE d'une revue).
+  let apercuFinis = 0
 
   // 1. Les delais (cible `delais`).
   // ⚠ ET LES BROUILLONS DEJA EN ATTENTE SUIVENT (decision de Thierry du
@@ -2457,6 +2484,7 @@ async function enregistrerLePanneau (corps, ref) {
         // « 4 propositions sont gardees » alors que l'ecriture avait echoue et
         // qu'aucune ne l'etait.
         annoncees = Number(ap.echues) || 0
+        apercuFinis = Number(ap.sejours_termines) || 0
         garder = !window.confirm(t('messages.delai_arriere_confirm', { n: ap.echues }))
       }
     }
@@ -2490,7 +2518,15 @@ async function enregistrerLePanneau (corps, ref) {
         // l'ecran affichait « Enregistré » en VERT, sans un mot sur les
         // propositions annoncees — qui etaient parties au voyageur. Le cron
         // passe toutes les 5 minutes : la fenetre est celle de sa lecture.
-        const manquantes = Math.max(0, annoncees - gardees - prises)
+        // ⚠ LE MEME DELTA QU'AU CHEMIN DE LA PAUSE — constat d'une revue : le
+        // correctif n'etait applique qu'a UN des deux appelants, alors que
+        // `annoncees` vient du meme apercu et le bilan du meme writer. Ici
+        // aussi, le jour de depart peut se terminer pendant que la confirmation
+        // est ouverte, et l'ecran annoncait « 1 reponse est partie au voyageur »
+        // alors que rien n'etait parti.
+        const finis = Math.max(0,
+          (Number(b.sejours_termines) || 0) - (Number(apercuFinis) || 0))
+        const manquantes = Math.max(0, annoncees - gardees - prises - finis)
         if (manquantes > 0) {
           echoues.push(t('messages.partie_envolees', { n: manquantes }))
         }
@@ -2544,7 +2580,15 @@ async function enregistrerLePanneau (corps, ref) {
     // (constat 1 de la derniere revue).
     brouillonsRepris = (!b || b.ok !== true)
       ? 1
+      // ⚠ `sejours_termines` ENTRE DANS LA SOMME — constat d'une revue. Cette
+      // somme sert a decider si le fil se relit ; un enregistrement qui a bien
+      // ecrit `send_after: null` sur des propositions de sejours termines
+      // rendait 0, donc aucun rechargement, alors que des echeances venaient de
+      // disparaitre. Impact faible — ces fils ne sont normalement plus affiches
+      // apres le depart — mais la somme doit couvrir TOUTES les ecritures du
+      // writer, sinon elle cesse d'etre une somme.
       : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0) + (Number(b.deja_prises) || 0)
+        + (Number(b.sejours_termines) || 0)
         // ⚠ ET UN CHOIX DE GARDE RELIT TOUJOURS LE FIL (constat 1 de la
         // derniere revue). Les propositions annoncees ont forcement bouge : soit
         // elles sont desarmees — leur compte a rebours doit disparaitre de la

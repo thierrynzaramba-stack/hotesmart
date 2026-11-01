@@ -664,7 +664,13 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   // l arbitrage du 29 octobre il y a deux branches — « garder » et « laisser
   // partir » — et chacune doit refuser un bilan manquant : un endpoint plus
   // vieux que l ecran ne doit pas faire croire que les brouillons ont suivi.
-  const suite = panneau.slice(i, i + 900)
+  // ⚠ PAS DE FENETRE EN OCTETS — et c'est ce test qui vient de le payer. Il
+  // cherchait les deux branches dans les 900 caracteres suivant l'ancre : six
+  // lignes de COMMENTAIRE ajoutees au-dessus de la seconde l'ont poussee
+  // dehors, et le test a rougi sur du code juste. Une distance en octets n'est
+  // pas une portee. On cherche dans la fonction, depuis l'ancre, sans borne
+  // arbitraire.
+  const suite = panneau.slice(i)
   assert.match(suite, /b && b\.ok === true/, 'la branche « garder » exige un bilan ok')
   assert.match(suite, /!b \|\| b\.ok !== true/, 'et la branche « laisser partir » aussi')
   // Et le fil se relit quand des echeances ont bouge, sinon il garde a l ecran
@@ -1046,4 +1052,109 @@ test('LE TEST QUI COMPTE : la SIGNATURE du writer ne porte aucune borne de temps
   const cles = m[1].split(',').map(x => x.trim()).filter(Boolean)
   assert.deepEqual(cles, ['userId', 'propertyRef', 'delais', 'maintenant', 'apercu', 'garderEchues'],
     'un parametre de plus doit etre un choix conscient, pas une borne qui se glisse')
+})
+
+// ─── LE COMPTE EXCLUT LES SEJOURS TERMINES (regle de Thierry du 1er novembre
+// 2026, apres sa recette) ───────────────────────────────────────────────────
+
+test('LE TEST QUI COMPTE : une proposition dont le sejour est TERMINE ne compte pas', async () => {
+  // ⚠ CE QUE CA FERME, ET C EST UNE RECETTE BLOQUEE. Une proposition dont le
+  // depart est passe ne partira JAMAIS : `encoreLegitime` la refuse par
+  // `sejour_termine`, a chaque passage, pour toujours. L annoncer dans la
+  // question gonflait le nombre d un fait impossible — et comme son fil n est
+  // plus affiche apres le depart, l hote lisait « 2 propositions » et n en
+  // trouvait qu une a l ecran.
+  const b = banc({ taches: [
+    tache({ id: 'en-cours', departure: '2026-11-20' }),
+    tache({ id: 'terminee', departure: '2026-11-05' })
+  ] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0, apercu: true,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.ok, true)
+  // Les deux sont echues au sens du calcul (nees 30 min avant T0, delai 15 min) ;
+  // une seule peut encore partir.
+  assert.equal(r.echues, 1, 'seule celle dont le sejour court compte')
+})
+
+test('le sejour qui finit AUJOURD HUI compte encore : la journee entiere lui appartient', async () => {
+  // ⚠ LE MEME PREDICAT QUE L ENVOI, AU CARACTERE : fin du jour de depart en
+  // UTC. T0 est le 11 novembre a 11 h ; un depart le 11 laisse treize heures.
+  const b = banc({ taches: [tache({ departure: '2026-11-11' })] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0, apercu: true,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.echues, 1)
+})
+
+test('un depart ABSENT ou illisible compte : on sur-compte, jamais l inverse', async () => {
+  // C est la direction de tout ce module. L envoi ne refuse que s il SAIT que
+  // le sejour est fini ; ne pas savoir ne doit pas CACHER a l hote une
+  // proposition qui pourrait partir.
+  for (const departure of [null, undefined, 'pas-une-date']) {
+    const b = banc({ taches: [tache({ departure })] })
+    const r = await appliquerDelaiAuxBrouillons(b.client, {
+      userId: COMPTE, propertyRef: REF, maintenant: T0, apercu: true,
+      delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+    })
+    assert.equal(r.echues, 1, `departure=${String(departure)} : compte quand meme`)
+  }
+})
+
+test('LE TEST QUI COMPTE : un sejour termine est DESARME, et compte a part', async () => {
+  // ⚠ CE TEST A CHANGE DE REPONSE, ET C EST UN CONSTAT DE REVUE SUR MON PROPRE
+  // CORRECTIF. En excluant les sejours termines du COMPTE, j avais fait de
+  // `echue` une valeur fausse pour eux : la branche « garder » ne les prenait
+  // plus, et le controle tombait sur `send_after = creation + N` — une echeance
+  // DEJA PASSEE. La proposition ressortait donc ARMEE la ou elle etait
+  // desarmee avant le lot. Rien ne partait, mais c est l inverse de
+  // l invariant de cette fonction (« en cas de doute on DESARME »), et ici il
+  // n y a meme pas de doute.
+  // Ma premiere version de ce test ne regardait que les updates a
+  // `send_after === null` : elle etait AVEUGLE a ce re-armement.
+  const b = banc({ taches: [
+    tache({ id: 'en-cours', departure: '2026-11-20' }),
+    tache({ id: 'terminee', departure: '2026-11-05' })
+  ] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0, garderEchues: true,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.ok, true)
+  assert.equal(r.echues, 1, 'une seule est ANNONCEE a l hote')
+  assert.equal(r.desarmes, 1, 'une seule compte comme gardee sur sa demande')
+  assert.equal(r.sejours_termines, 1, 'et l autre a son propre compte, hors de la question')
+  // LES DEUX sont desarmees : aucune echeance ne survit a ce geste.
+  const parId = {}
+  for (const u of b.etat.updates) parId[u.id] = u.patch
+  assert.equal(parId['en-cours'].send_after, null, 'celle qui etait annoncee')
+  assert.equal(parId['terminee'].send_after, null,
+    'et celle du sejour termine : elle ne doit SURTOUT pas ressortir armee')
+  assert.equal(parId['terminee'].suspendu_le, null, 'ni suspendue, ce qui serait sans issue')
+})
+
+test('un sejour termine sans echeance n est pas reecrit pour rien', async () => {
+  // Deja desarmee : on ne touche pas `updated_at`, que la reprise des
+  // suspensions lit comme une mesure d inactivite de l hote.
+  const b = banc({ taches: [tache({ id: 'terminee', departure: '2026-11-05',
+    send_after: null, suspendu_le: null })] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.sejours_termines, 1)
+  assert.equal(b.etat.updates.length, 0, 'aucune ecriture')
+})
+
+test('en APERCU, un sejour termine ne declenche aucune ecriture', async () => {
+  const b = banc({ taches: [tache({ id: 'terminee', departure: '2026-11-05' })] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0, apercu: true,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.sejours_termines, 1, 'il est compte')
+  assert.equal(r.echues, 0, 'il n est pas annonce')
+  assert.equal(b.etat.updates.length, 0, 'et l apercu n ecrit rien, c est son contrat')
 })

@@ -2039,6 +2039,168 @@ possible.
 
 ---
 
+### D5 EST SOLDÉE — deux règles de Thierry du 1er novembre 2026
+
+Sa recette du 1er novembre a buté sur la dette elle-même : le séjour
+`STG-AVENIR-3` s'était terminé la veille, la proposition « cuisine » n'était
+plus affichée, et la question de la levée de pause annonçait pourtant **deux**
+propositions dont une seule était trouvable à l'écran.
+
+**Règle 1 — le compte de la question exclut les séjours terminés.**
+`lib/guestflow/appliquer-delai.js` sélectionne désormais `departure` et
+n'incrémente `echues` que si le séjour court encore. Le prédicat est celui de
+l'envoi, **au caractère** : `departure`, fin du jour de départ en UTC — le même
+que le motif `sejour_termine` de `encoreLegitime`. Deux seuils pour une seule
+vérité finiraient par se contredire. ⚠ Un départ **absent ou illisible compte** :
+c'est la direction de tout ce module, on sur-compte jamais l'inverse, et l'envoi
+ne refuse que s'il **sait** que le séjour est fini.
+⚠ Le JSDoc du module promettait l'inverse (« trois motifs durables que ce module
+ne peut pas connaître sans lire d'autres tables : … `sejour_termine` ») : il est
+corrigé dans le même mouvement, parce qu'une note qui dit le contraire du code
+est pire qu'une note absente.
+
+**Règle 2 — à la fin du séjour, les propositions encore en attente sont closes
+automatiquement.** `cloreLesSejoursTermines`, dans
+`lib/guestflow/brouillons-dus.js`, à chaque passage, après la reprise des
+suspensions. Statut **`expired`** — pas `ignored`, qui voudrait dire « l'hôte
+l'a refusée » et serait un fait faux dans le journal ; la colonne `status` est
+un `text` sans contrainte, et tout lecteur du dépôt filtre sur
+`pending_validation`, donc une valeur de plus y est inerte.
+
+**Pourquoi cet ordre.** La reprise des suspensions repose une échéance ; la
+clôture retire la tâche de la file. Dans cet ordre, un séjour terminé est clos
+**même s'il vient d'être repris** — l'inverse laisserait la reprise réarmer ce
+que la clôture venait de fermer, et un test le tient.
+
+⚠ **Et le refus de `encoreLegitime` n'est pas devenu mort**, ce qui serait la
+tentation suivante. Le balayage est borné à `MAX_PAR_CYCLE` par passage :
+au-delà, des propositions dont le séjour est terminé restent
+`pending_validation` ce tour-ci et arrivent jusqu'à l'envoi. Un test le prouve
+avec `MAX_PAR_CYCLE + 1` tâches — le filet sert, et le retirer en croyant la
+clôture suffisante ferait partir une réponse après le départ.
+
+**Deux tests qui ne mesuraient pas ce qu'ils annonçaient, trouvés par la
+mutation :**
+- `sejour termine : rien ne part` **a changé de réponse, pas d'intention** : la
+  tâche était examinée et re-annotée à chaque passage, pour toujours ; elle est
+  maintenant close en amont, et l'invariant « rien ne part » est plus fort.
+- le test du **claim** de la clôture posait la tâche d'emblée en `sending` :
+  elle était écartée **dès la lecture**, donc le test restait vert même en
+  retirant la condition de l'update. Il mesurait le filtre de lecture en croyant
+  mesurer le claim. Le banc a maintenant un crochet `avantUpdate` qui déplace le
+  sol **entre la lecture et l'écriture** — la seule façon de produire cette
+  course dans un banc synchrone — et la mutation mord.
+
+**Semis de recette** (go de Thierry) : `STG-RECETTE-PAUSE-1` sur
+Loft Pilotable, séjour en cours, un message entrant, une proposition armée et
+échue, bien laissé en pause ; et la « cuisine » du 28 octobre fermée en
+`expired` à la main, puisque son séjour était terminé avant que la règle 2
+n'existe.
+
+### La revue des deux règles : six constats, dont un qui inversait ma direction
+
+1. **« Garder pour validation » ARMAIT la proposition d'un séjour terminé**, au
+   lieu de la désarmer. En excluant ces tâches du **compte**, j'avais fait de
+   `echue` une valeur fausse pour elles : la branche `garder && echue` ne les
+   prenait plus, et le contrôle tombait sur `send_after = création + N` — une
+   échéance **déjà passée**. Mesuré au banc : la proposition ressortait **armée**
+   là où elle était désarmée avant le lot. Rien ne partait (la clôture et
+   `encoreLegitime` la refusent), mais c'est l'inverse de l'invariant que cette
+   fonction se donne — « en cas de doute on DÉSARME » —, et ici il n'y a même
+   pas de doute. Elle sort maintenant de la file **par le haut**, avant toute
+   autre décision, désarmée, et avec un compteur **séparé**
+   (`sejours_termines`) : elle n'a pas été annoncée à l'hôte, donc elle ne doit
+   gonfler ni `echues` ni `desarmes`. ⚠ Et mon test était **aveugle** à ce
+   ré-armement : il ne regardait que les écritures à `send_after === null`.
+2. **Le périmètre de la clôture est plus large que celui de l'envoi**, et mon
+   commentaire affirmait le contraire (« on clôt ce que `encoreLegitime`
+   refuserait, et rien d'autre » — faux pour tout ce qui n'a pas d'échéance).
+   C'est **voulu** : la règle dit « les propositions encore en attente », pas
+   « celles qui avaient une échéance ». Rien n'est détruit — la ligne reste, son
+   résumé reste, seul le statut change — et l'écran les masquait **déjà**
+   (`shared/aujourdhui.js` : `t.departure >= aujourdHui`). ⚠ **Un point pour
+   Thierry** : la clôture retire aussi les marqueurs « Réponse automatique NON
+   DÉLIVRÉE … vérifiez-la et renvoyez-la » de `cron-classify`. Ils méritent
+   probablement une **alarme**, pas une tâche qui se clôt avec le séjour.
+3. **`bilan.expirees` n'était pas remonté** : une écriture de masse qui ne
+   s'annonce pas. Les premiers cycles vont solder l'arriéré de D5, et un
+   `console.log` ne distingue pas un rattrapage d'une boucle. Le compte entre
+   dans le rapport du cycle (`results.totalBrouillonsExpires`).
+4. **La clôture ignorait le budget mur de la passe** : jusqu'à trente `UPDATE`
+   en série s'ajoutaient aux deux autres balayages **avant** la première lecture
+   des dues, et un cycle pouvait dépenser son budget en clôtures et reporter
+   tous les envois de cinq minutes. Elle consulte maintenant le même budget, et
+   s'arrête net.
+5. **Trois copies manuscrites du prédicat**, aucun garde-fou : la mutation
+   `maintenant <= finDuJour` → `<` dans une seule des trois laissait la suite
+   **entière** au vert. `sejourTermine` vit désormais dans **`delais-contrat.js`**
+   — pas dans la passe d'envoi, où je l'avais d'abord mis : un endpoint de
+   réglages se mettait alors à charger toute la passe pour connaître une règle
+   de date. Un test refuse toute recopie de `T23:59:59Z` ailleurs, et un autre
+   éprouve la **frontière à la seconde**.
+6. **Un nouveau chemin de fausse alarme** : si le jour de départ se termine
+   **entre** l'aperçu et l'écriture — la frontière est 00:00 UTC, 01:00 à Paris
+   en hiver, et la confirmation bloquante peut rester ouverte des minutes —
+   l'aperçu comptait la proposition et l'écriture ne la désarmait pas. L'écran
+   annonçait qu'une réponse était **partie au voyageur** alors que rien n'était
+   parti. Il déduit maintenant `sejours_termines`.
+
+⚠ **Et deux de mes tests mesuraient autre chose que ce qu'ils annonçaient**,
+trouvés par la mutation :
+- celui du **budget** passait `resteMs: () => 0`, donc la passe sortait par sa
+  garde d'**entrée**, bien avant la clôture : le test restait vert en retirant ma
+  garde. Le budget doit s'épuiser **pendant** la passe.
+- celui de la **parité du prédicat** comptait les occurrences brutes de
+  `T23:59:59Z` : les deux lignes de **commentaire** qui expliquent le seuil le
+  faisaient rougir sur du code juste. On compte dans le code.
+
+### La dernière revue : ma déduction TAISAIT un envoi réel
+
+C'est la dernière du lot (exception « envoi au voyageur »). Six constats,
+corrigés sans nouvelle review.
+
+1. **GRAVE, et c'est l'inverse de ce que je croyais fermer.** Ma déduction des
+   séjours terminés retirait le **TOTAL**, alors que `avant.echues` ne les a
+   **jamais** comptés — l'aperçu les sort par le haut exactement comme
+   l'écriture. Je retirais donc des unités jamais ajoutées. Mesuré contre le
+   vrai module, avec l'arriéré que ce lot solde (deux propositions de séjours
+   terminés sur le bien) : une proposition vivante **réellement partie au
+   voyageur** pendant que la confirmation était ouverte passait de
+   « 1 n'était plus en attente » à **rien du tout**. Le terme juste est le
+   **DELTA** : `sejours_termines` de l'écriture moins celui de l'aperçu — ce qui
+   suppose que l'aperçu le remonte, ce qu'il ne faisait pas.
+2. **Le correctif n'était appliqué qu'à UN des deux appelants** : le panneau
+   gardait `annoncees - gardees - prises`, et sa fausse alarme restait ouverte.
+3. **`deja_prises` était faussé** par la nouvelle branche, et il faussait un
+   second nombre : un séjour terminé dont l'`update` ne mordait pas
+   l'incrémentait **en plus** de `sejours_termines`. Or son JSDoc dit « le seul
+   cas où un message peut partir avec le réglage d'avant » — faux sur un séjour
+   terminé — et l'écran soustrayait la même tâche **deux fois**.
+4. **La clôture pouvait être affamée en silence** : le `break` ne posait aucun
+   drapeau, et si `dues` est vide la passe sort avant la boucle d'envoi, donc le
+   cycle rapportait `interrompu: false` en ayant reporté toutes ses clôtures.
+5. **Le désarmement d'un séjour terminé était invisible du rechargement du
+   fil** : `brouillonsRepris` ne sommait pas `sejours_termines`.
+6. **Deux tests ne tranchaient pas.** Celui de la pause n'exerçait que le cas
+   où les deux formules **donnent le même résultat** ; et le filtre de
+   commentaires du test de parité ne voyait ni un `//` en fin de ligne de code
+   ni un bloc `/* … */`.
+
+⚠ **ET DEUX CHOSES TROUVÉES PAR MES PROPRES MUTATIONS, pas par la revue :**
+- en corrigeant le constat 1, j'avais plombé **la moitié** du chemin : l'aperçu
+  de la **pause** ne remontait toujours pas son compteur, donc `avant.sejours_termines`
+  valait `undefined`, le delta redevenait le total, et l'envoi réel restait tu.
+  C'est le test du cas qui tranche qui l'a montré ;
+- et mon test du panneau **ne tranchait pas non plus** : avec « 0 terminé à
+  l'aperçu, 1 à l'écriture », le delta ET le total donnent le même nombre. Il
+  faut un **arriéré déjà terminé** à l'aperçu — ce que D5 laisse derrière elle —
+  **et** un envoi réel pendant le dialogue.
+
+⚠ **Et un test a rougi sur du code juste** : il cherchait deux branches dans les
+**900 caractères** suivant son ancre, et six lignes de commentaire ajoutées
+au-dessus de la seconde l'ont poussée dehors. **Une distance en octets n'est pas
+une portée.**
+
 ### D5 — une proposition gardée devient inatteignable après le départ
 
 **Conséquence produit, relevée en revue, à trancher par Thierry.**

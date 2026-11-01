@@ -15,8 +15,9 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { envoyerBrouillonsDus, STATUT_EN_COURS, SENDING_ORPHELIN_MS } =
+const { envoyerBrouillonsDus, STATUT_EN_COURS, SENDING_ORPHELIN_MS, MAX_PAR_CYCLE } =
   require('../lib/guestflow/brouillons-dus')
+const { sejourTermine } = require('../lib/guestflow/delais-contrat')
 
 const T0 = Date.parse('2026-11-11T11:00:00Z') // 12 h a Paris, hors sourdine
 const NUIT = Date.parse('2026-11-10T22:30:00Z') // 23 h 30 a Paris, en sourdine
@@ -51,8 +52,18 @@ function tache (p = {}) {
 // aurait valide du code incapable de tourner.
 const snapshotOta = { status: 'confirmed', provider: 'channex', source: 'Airbnb', ota: 'airbnb' }
 
+// ⚠ `avantUpdate` EXISTE POUR MESURER UN CLAIM, ET SANS LUI ON NE PEUT PAS.
+// Tous les ecrivains de ce module conditionnent leur update sur
+// `status = pending_validation` : c'est ce qui fait qu'une tache prise entre la
+// LECTURE et l'ECRITURE n'est pas ressuscitee. Un banc synchrone ne peut pas
+// produire cette course tout seul — et une tache posee d'emblee en `sending`
+// ne la mesure PAS : elle est ecartee des la lecture, donc le test passe meme
+// si la condition de l'update disparait (mesure : mutation faite, zero rouge).
+// Ce crochet tourne juste avant que l'update ne morde, et laisse un test
+// deplacer le sol sous lui.
 function banc ({ taches = [], biens = [bienOuvert], config = null,
-  snapshots = null, panneBiens = false, panneConfig = false, panneSnapshots = false } = {}) {
+  snapshots = null, panneBiens = false, panneConfig = false, panneSnapshots = false,
+  avantUpdate = null } = {}) {
   const etat = { taches: taches.map(t => ({ ...t })), updates: [] }
   // Par defaut, chaque tache a sa reservation au cœur : c'est le cas normal.
   const resas = snapshots !== null ? snapshots
@@ -123,6 +134,10 @@ function banc ({ taches = [], biens = [bienOuvert], config = null,
               return Promise.resolve({ data: null, error: { message: e.message } }).then(res, rej)
             }
             if (maj) {
+              // Le sol bouge ICI si un test le demande, puis le filtre est
+              // REJOUE : c'est exactement ce que fait Postgres sur un update
+              // conditionnel.
+              if (avantUpdate) { avantUpdate(etat); lignes = filtrer(table, f) }
               // ⚠ L'UPDATE CONDITIONNEL MORD : seules les lignes qui passent le
               // filtre sont touchees, et on rend CELLES-LA. Sur zero ligne, le
               // code appelant doit en conclure « quelqu un d autre l a prise ».
@@ -273,11 +288,42 @@ test('le reglage reste a un delai : ca part', async () => {
   assert.equal(bilan.envoyes, 1)
 })
 
-test('sejour termine : rien ne part', async () => {
+test('sejour termine : rien ne part, et la proposition est CLOSE', async () => {
+  // ⚠ CE TEST A CHANGE DE REPONSE, PAS D INTENTION — regle de Thierry du
+  // 1er novembre 2026. Avant, la tache etait examinee a CHAQUE passage, refusee
+  // par `encoreLegitime` et re-annotee `sejour_termine` dans son `summary`,
+  // pour toujours — elle restait `pending_validation`, donc comptee dans le
+  // badge et dans la question de la levee de pause, et inatteignable puisque le
+  // fil n est plus affiche apres le depart. Elle est maintenant CLOSE en amont.
+  // L invariant que ce test gardait — « rien ne part » — est plus fort qu avant.
+  // Et le refus de `encoreLegitime` n est pas devenu mort : le test suivant le
+  // montre, au-dela du plafond par cycle.
   const b = bancNominal({ taches: [tache({ departure: '2026-11-01' })] })
   const bilan = await lancer(b, { envoyer: async () => { throw new Error('ne doit pas etre appele') } })
-  assert.equal(bilan.abandonnes, 1)
-  assert.match(b.etat.taches[0].summary, /sejour_termine/)
+  assert.equal(bilan.expirees, 1, 'close par la fin du sejour')
+  assert.equal(bilan.examines, 0, 'elle n est meme plus examinee a chaque passage')
+  assert.equal(b.etat.taches[0].status, 'expired')
+  assert.equal(b.etat.taches[0].send_after, null)
+})
+
+test('LE TEST QUI COMPTE : au-dela du plafond, le refus de `encoreLegitime` mord encore', async () => {
+  // ⚠ LA CLOTURE NE REND PAS LE REFUS MORT, ET IL FAUT LE PROUVER. Le balayage
+  // est borne a `MAX_PAR_CYCLE` par passage : au-dela, des propositions dont le
+  // sejour est termine restent `pending_validation` ce tour-ci et arrivent
+  // jusqu a l envoi. C est la que le refus `sejour_termine` sert de filet, et
+  // supprimer ce filet en croyant la cloture suffisante ferait partir une
+  // reponse apres le depart.
+  const taches = []
+  for (let i = 0; i < MAX_PAR_CYCLE + 1; i++) {
+    taches.push(tache({ id: 'tache-' + i, departure: '2026-11-01' }))
+  }
+  const b = bancNominal({ taches })
+  const bilan = await lancer(b, { envoyer: async () => { throw new Error('ne doit pas etre appele') } })
+  assert.equal(bilan.expirees, MAX_PAR_CYCLE, 'le balayage en clot autant qu il le peut')
+  assert.equal(bilan.abandonnes, 1, 'et la survivante est refusee par la garde d envoi')
+  const survivante = b.etat.taches.find(t => t.status !== 'expired')
+  assert.ok(survivante, 'il en reste bien une')
+  assert.match(survivante.summary, /sejour_termine/, 'avec son motif, comme avant')
 })
 
 test('un bien introuvable ne fait pas partir le message', async () => {
@@ -434,7 +480,8 @@ test('aucune tache echue : la passe ne fait rien et ne crie pas', async () => {
   // colonne ajoutee au bilan doit l'etre ici aussi — `interrompu` l'a ete avec
   // le budget mur.
   assert.deepEqual(bilan, { examines: 0, envoyes: 0, reportes: 0, abandonnes: 0,
-    orphelines: 0, reprises: 0, erreurs: 0, interrompu: false })
+    orphelines: 0, reprises: 0, expirees: 0, cloturesReportees: 0,
+    erreurs: 0, interrompu: false })
   assert.equal(results.errors.length, 0)
 })
 
@@ -784,4 +831,211 @@ test('⚠ CONSTAT 5 : une orpheline rendue n est plus « suspendue » (pas d eta
   assert.equal(t.status, 'pending_validation')
   assert.equal(t.send_after, null)
   assert.equal(t.suspendu_le, null, 'la suspension est levee : pas d etat sans issue')
+})
+
+// ─── LA FIN DU SEJOUR CLOT CE QUI RESTE EN ATTENTE (regle de Thierry du
+// 1er novembre 2026, et elle solde la dette D5) ─────────────────────────────
+
+test('LE TEST QUI COMPTE : un sejour termine clot la proposition en attente', async () => {
+  // ⚠ CE QUE CA FERME, ET C EST CE QUI A BLOQUE UNE RECETTE. Une proposition
+  // encore en attente apres le depart ne partira JAMAIS — `encoreLegitime` la
+  // refuse par `sejour_termine`, a chaque passage, pour toujours. Elle restait
+  // pourtant `pending_validation` : comptee dans le badge, comptee dans la
+  // question de la levee de pause, et INATTEIGNABLE, puisque le fil du voyageur
+  // n est plus affiche une fois le sejour termine. L hote ne pouvait donc ni
+  // l envoyer ni la refuser.
+  const b = banc({ taches: [tache({ arrival: '2026-11-01', departure: '2026-11-05' })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 1, 'elle est close')
+  const t = b.etat.taches[0]
+  assert.equal(t.status, 'expired', 'close comme EXPIREE, pas « ignored » — l hote ne l a pas refusee')
+  assert.equal(t.send_after, null, 'desarmee')
+  assert.equal(t.suspendu_le, null, 'et sortie de toute suspension')
+  assert.equal(bilan.envoyes, 0, 'et rien n est parti')
+})
+
+test('un sejour qui finit AUJOURD HUI n est pas clos : la journee compte', async () => {
+  // ⚠ LE MEME PREDICAT QUE L ENVOI, AU CARACTERE : fin du jour de depart en
+  // UTC. T0 est le 11 novembre a 11 h UTC ; un depart le 11 laisse encore
+  // treize heures.
+  const b = banc({ taches: [tache({ departure: '2026-11-11' })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 0, 'rien n est clos')
+  assert.notEqual(b.etat.taches[0].status, 'expired')
+})
+
+test('une date de depart illisible ne se clot pas', async () => {
+  // On ne ferme pas ce qu on ne sait pas dater : la direction prudente est de
+  // laisser la proposition en attente.
+  const b = banc({ taches: [tache({ departure: 'pas-une-date' })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 0)
+  assert.notEqual(b.etat.taches[0].status, 'expired')
+})
+
+test('une proposition sans date de depart n est meme pas lue', async () => {
+  const b = banc({ taches: [tache({ departure: null })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 0)
+  assert.notEqual(b.etat.taches[0].status, 'expired')
+})
+
+test('LE TEST QUI COMPTE : la cloture est un CLAIM, elle ne ressuscite rien', async () => {
+  // ⚠ LA COURSE SE JOUE ENTRE LA LECTURE ET L ECRITURE, et c est la seule facon
+  // de la mesurer. Ma premiere version posait la tache d emblee en `sending` :
+  // elle etait ecartee des la LECTURE, donc le test restait vert meme en
+  // retirant la condition de l update (mutation faite, zero rouge). Il mesurait
+  // le filtre de lecture en croyant mesurer le claim.
+  // Ici l envoi prend la tache PENDANT le vol : la condition
+  // `status = pending_validation` doit alors ne rien toucher.
+  let pris = false
+  const b = banc({
+    taches: [tache({ departure: '2026-11-05' })],
+    avantUpdate: (etat) => {
+      if (pris) return
+      pris = true
+      etat.taches[0].status = STATUT_EN_COURS
+    }
+  })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.expirees, 0, 'une tache prise sous nos pieds n est pas close')
+  assert.equal(b.etat.taches[0].status, STATUT_EN_COURS, 'et son statut est intact')
+  assert.equal(b.etat.taches[0].send_after !== null, true,
+    'surtout : son echeance n est pas effacee par une ecriture qui n a pas mordu')
+})
+
+test('LE TEST QUI COMPTE : une suspension reprise sur un sejour termine est close dans la MEME passe', async () => {
+  // ⚠ L ORDRE DES DEUX BALAYAGES COMPTE. `reprendreSuspensionsDormantes`
+  // repose une echeance ; la cloture retire la tache de la file. Dans cet
+  // ordre, un sejour termine est clos meme s il vient d etre repris —
+  // l inverse laisserait la reprise rearmer ce que la cloture venait de
+  // fermer, et la tache repartirait dans la file jusqu au passage suivant.
+  const b = banc({ taches: [tache({
+    departure: '2026-11-05',
+    suspendu_le: new Date(T0 - 60 * 60 * 1000).toISOString(),
+    send_after: new Date(T0 - 30 * 60 * 1000).toISOString(),
+    updated_at: new Date(T0 - 60 * 60 * 1000).toISOString()
+  })] })
+  const bilan = await envoyerBrouillonsDus(null, { sb: b.client, maintenant: T0 })
+  assert.equal(bilan.reprises, 1, 'la suspension a bien ete reprise d abord')
+  assert.equal(bilan.expirees, 1, 'et la cloture passe apres')
+  assert.equal(b.etat.taches[0].status, 'expired')
+  assert.equal(b.etat.taches[0].send_after, null,
+    'surtout : elle ne garde pas l echeance que la reprise venait de poser')
+})
+
+test('LE TEST QUI COMPTE : le predicat « sejour termine » est UN SEUL appel, partage', () => {
+  // ⚠ CONSTAT D UNE REVUE, ET SA MUTATION L A PROUVE. Le seuil vivait en TROIS
+  // copies manuscrites de `T23:59:59Z` — la cloture, `encoreLegitime`, et
+  // `appliquer-delai.js`. Remplacer `maintenant <= finDuJour` par `<` dans une
+  // seule des trois laissait la suite entiere au vert : la promesse du lot
+  // (« le meme predicat que l envoi, AU CARACTERE ») n etait tenue par rien.
+  const fs = require('fs'); const path = require('path')
+  // ⚠ ON COMPTE DANS LE CODE, PAS DANS LES COMMENTAIRES. Ma premiere version
+  // comptait les occurrences brutes : les deux lignes de commentaire qui
+  // EXPLIQUENT le seuil la faisaient rougir sur du code juste. Mesurer le texte
+  // au lieu du mecanisme, encore une fois.
+  // ⚠ ON RETIRE LES COMMENTAIRES, Y COMPRIS EN FIN DE LIGNE ET EN BLOC —
+  // constat d'une revue sur ce test meme. Filtrer les lignes qui COMMENCENT par
+  // `//` laissait passer un `// T23:59:59Z` ecrit en fin de ligne de code, et
+  // tout bloc `/* … */` : le test aurait rougi sur du code juste, ce qui est la
+  // famille de defaut qu'il dit lui-meme venir de corriger.
+  const lire = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n')
+  const passe = lire('lib/guestflow/brouillons-dus.js')
+  const delai = lire('lib/guestflow/appliquer-delai.js')
+  const contrat = lire('lib/guestflow/delais-contrat.js')
+  // ⚠ LE SEUIL VIT DANS LE CONTRAT, ET NULLE PART AILLEURS. Je l avais d abord
+  // pose dans la passe d envoi : un endpoint de reglages se mettait alors a
+  // charger toute cette passe pour connaitre une regle de date. Les deux
+  // modules importaient DEJA le contrat.
+  assert.equal((contrat.match(/T23:59:59Z/g) || []).length, 1,
+    'la chaine du seuil n existe qu une fois, dans le contrat')
+  for (const [nom, src] of [['la passe d envoi', passe], ['le module du delai', delai]]) {
+    assert.equal((src.match(/T23:59:59Z/g) || []).length, 0,
+      `${nom} ne recopie pas le seuil`)
+    assert.match(src, /sejourTermine[^\n]*require\('\.\/delais-contrat'\)/,
+      `${nom} importe le predicat du contrat`)
+  }
+  // Les trois sites passent par la fonction.
+  assert.ok((passe.match(/sejourTermine\(/g) || []).length >= 2,
+    'la cloture ET la garde d envoi l appellent')
+  assert.ok((delai.match(/sejourTermine\(/g) || []).length >= 1, 'le compte aussi')
+})
+
+test('LE TEST QUI COMPTE : la cloture respecte le budget de la passe', async () => {
+  // ⚠ CONSTAT D UNE REVUE : trente `UPDATE` en serie s ajoutaient aux deux
+  // autres balayages AVANT la premiere lecture des dues. Avec un arriere, un
+  // cycle pouvait depenser son budget en clotures et reporter TOUS les envois de
+  // cinq minutes — alors que le budget mur existe pour que les envois
+  // n affament pas le dispatch.
+  //
+  // ⚠ ET LE BUDGET DOIT S EPUISER PENDANT LA PASSE, PAS AVANT. Ma premiere
+  // version passait `resteMs: () => 0` : la passe sort alors par sa garde
+  // D ENTREE, bien avant la cloture, et le test restait vert meme en retirant
+  // ma garde (mutation faite, zero rouge). Il mesurait la garde d entree en
+  // croyant mesurer la mienne. Ici le budget est large au premier appel — celui
+  // de l entree — et a sec ensuite.
+  const taches = []
+  for (let i = 0; i < 5; i++) taches.push(tache({ id: 'tache-' + i, departure: '2026-11-01' }))
+  const b = banc({ taches })
+  let appels = 0
+  const bilan = await envoyerBrouillonsDus(null, {
+    sb: b.client, maintenant: T0, resteMs: () => (++appels === 1 ? 60000 : 0)
+  })
+  assert.ok(appels > 1, 'la cloture a bien consulte le budget')
+  assert.equal(bilan.expirees, 0, 'aucune cloture quand le budget est a sec')
+})
+
+test('LE TEST QUI COMPTE : la frontiere du seuil, a la seconde', () => {
+  // ⚠ LA PARITE EST STRUCTURELLE (un seul appel), MAIS LA VALEUR NE L EST PAS :
+  // mutation faite, remplacer `maintenant > finDuJour` par `>=` ne rougissait
+  // nulle part. Un predicat partage peut etre faux partout a la fois.
+  const depart = '2026-11-05'
+  const finDuJour = Date.parse('2026-11-05T23:59:59Z')
+  assert.equal(sejourTermine(depart, finDuJour), false,
+    'la derniere seconde du jour de depart appartient encore au voyageur')
+  assert.equal(sejourTermine(depart, finDuJour + 1000), true,
+    'la seconde suivante, le sejour est termine')
+  assert.equal(sejourTermine(depart, Date.parse('2026-11-05T00:00:00Z')), false,
+    'le matin du depart, evidemment pas')
+  // Absent ou illisible : on ne refuse, et on ne clot, que ce qu on sait dater.
+  for (const v of [null, undefined, '', 'pas-une-date']) {
+    assert.equal(sejourTermine(v, Date.parse('2030-01-01T00:00:00Z')), false,
+      `departure=${String(v)} : jamais « termine »`)
+  }
+})
+
+test('la cloture remonte son compte dans le rapport du cycle', async () => {
+  // ⚠ UNE ECRITURE DE MASSE S ANNONCE (regle du depot). Les premiers cycles
+  // soldent l arriere historique de la dette D5 ; sans compteur rendu, un
+  // rattrapage normal et une boucle sont indistinguables.
+  const results = { errors: [] }
+  const b = banc({ taches: [
+    tache({ id: 't1', departure: '2026-11-01' }),
+    tache({ id: 't2', departure: '2026-11-02' })
+  ] })
+  await envoyerBrouillonsDus(results, { sb: b.client, maintenant: T0 })
+  assert.equal(results.totalBrouillonsExpires, 2, 'le rapport du cycle porte le compte')
+})
+
+test('LE TEST QUI COMPTE : une cloture affamee se DIT dans le bilan', async () => {
+  // ⚠ CONSTAT D UNE REVUE : un `console.log` seul laissait le rapport du cycle
+  // annoncer `interrompu: false` alors que toutes les clotures etaient
+  // reportees. Si `dues` est vide, la passe sort AVANT la boucle d envoi, donc
+  // personne d autre ne pose ce drapeau : l arriere de la dette D5 pouvait
+  // cesser de se solder sans qu aucun nombre ne le dise.
+  const taches = []
+  for (let i = 0; i < 3; i++) taches.push(tache({ id: 'tache-' + i, departure: '2026-11-01' }))
+  const b = banc({ taches })
+  const results = { errors: [] }
+  let appels = 0
+  const bilan = await envoyerBrouillonsDus(results, {
+    sb: b.client, maintenant: T0, resteMs: () => (++appels === 1 ? 60000 : 0)
+  })
+  assert.equal(bilan.expirees, 0, 'rien n a ete cloture')
+  assert.equal(bilan.cloturesReportees, 1, 'et le bilan le DIT')
+  assert.equal(bilan.interrompu, true, 'la passe se declare interrompue')
+  assert.equal(results.totalBrouillonsCloturesReportees, 1, 'le rapport du cycle aussi')
 })
