@@ -1476,7 +1476,17 @@ async function basculerPause (ref, paused) {
         const prises = Number(bilan && bilan.deja_prises) || 0
         if (prises > 0) ecarts.push(t('messages.partie_deja_prises', { n: prises }))
         if (memeDelai) {
-          const manquantes = Math.max(0, (Number(avant.echues) || 0) - gardees - prises)
+          // ⚠ ET LES SEJOURS TERMINES ENTRE L'APERCU ET L'ECRITURE SE DEDUISENT
+          // AUSSI — constat d'une revue. La frontiere est 00:00 UTC (01:00 a
+          // Paris en hiver), et la confirmation bloquante peut rester ouverte
+          // des minutes : l'apercu compte alors la proposition, l'ecriture la
+          // classe « sejour termine » et ne la desarme pas. Sans cette
+          // soustraction, l'ecran annonce qu'une reponse est PARTIE au voyageur
+          // alors que rien n'est parti — exactement le chiffre faux que les
+          // trente lignes au-dessus existent pour fermer.
+          const finis = Number(bilan && bilan.sejours_termines) || 0
+          const manquantes = Math.max(0,
+            (Number(avant.echues) || 0) - gardees - prises - finis)
           if (manquantes > 0) ecarts.push(t('messages.partie_envolees', { n: manquantes }))
         }
       }

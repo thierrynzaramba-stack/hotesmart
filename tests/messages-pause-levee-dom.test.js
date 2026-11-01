@@ -30,7 +30,8 @@ const FR = B.FR
 // Un bien EN PAUSE, en mode auto a 15 min, avec des propositions echues.
 // `appel` repond l'apercu et garde tout ce qui part au serveur.
 function bancEnPause ({ echues = 2, confirme = true, apercuKo = false, desarmes = 2,
-  dejaPrises = 0, configFraiche = undefined, delai = 15, bloquerApercu = false } = {}) {
+  dejaPrises = 0, configFraiche = undefined, delai = 15, bloquerApercu = false,
+  finis = 0 } = {}) {
   const envois = []
   let debloquer = null
   // La config telle que le serveur la rend. `configFraiche` permet a un test de
@@ -59,7 +60,7 @@ function bancEnPause ({ echues = 2, confirme = true, apercuKo = false, desarmes 
         }
         return { delais_ref: charge && charge.delais_ref,
           brouillons: { ok: true, motif: 'delai', desarmes, rearmes: 0, inchanges: 0,
-            deja_prises: dejaPrises, echues, sans_creation: 0 } }
+            deja_prises: dejaPrises, echues, sans_creation: 0, sejours_termines: finis } }
       }
       return {}
     }
@@ -631,5 +632,22 @@ test('LE TEST QUI COMPTE : un destinataire d alerte compte, meme consignes illis
   await B.reposer(b)
   assert.equal(b.doc.querySelector('[data-bind="tiroir-note"]').textContent,
     FR['messages.panneau_suit_le_fil'].replace('{nom}', 'Maison Jardin'))
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un sejour qui se termine pendant le dialogue n annonce pas d envoi', async () => {
+  // ⚠ CONSTAT D UNE REVUE. La frontiere est 00:00 UTC — 01:00 a Paris en hiver —
+  // et la confirmation bloquante peut rester ouverte des minutes : l apercu
+  // compte la proposition, l ecriture la classe « sejour termine » et ne la
+  // desarme pas. Sans deduction, l ecran annonce qu une reponse est PARTIE au
+  // voyageur alors que rien n est parti.
+  const { b } = bancEnPause({ echues: 2, confirme: false, desarmes: 1, finis: 1 })
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  const note = b.doc.querySelector('[data-bind="tiroir-note"]')
+  assert.equal(note.textContent, FR['messages.pause_gardees'].replace('{n}', '1'),
+    'une gardee, et aucun envoi annonce')
+  assert.doesNotMatch(note.textContent,
+    /n .taient plus en attente|no longer pending|ya no estaban/i)
   b.fermer()
 })

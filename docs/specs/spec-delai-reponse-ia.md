@@ -2097,6 +2097,63 @@ Loft Pilotable, séjour en cours, un message entrant, une proposition armée et
 `expired` à la main, puisque son séjour était terminé avant que la règle 2
 n'existe.
 
+### La revue des deux règles : six constats, dont un qui inversait ma direction
+
+1. **« Garder pour validation » ARMAIT la proposition d'un séjour terminé**, au
+   lieu de la désarmer. En excluant ces tâches du **compte**, j'avais fait de
+   `echue` une valeur fausse pour elles : la branche `garder && echue` ne les
+   prenait plus, et le contrôle tombait sur `send_after = création + N` — une
+   échéance **déjà passée**. Mesuré au banc : la proposition ressortait **armée**
+   là où elle était désarmée avant le lot. Rien ne partait (la clôture et
+   `encoreLegitime` la refusent), mais c'est l'inverse de l'invariant que cette
+   fonction se donne — « en cas de doute on DÉSARME » —, et ici il n'y a même
+   pas de doute. Elle sort maintenant de la file **par le haut**, avant toute
+   autre décision, désarmée, et avec un compteur **séparé**
+   (`sejours_termines`) : elle n'a pas été annoncée à l'hôte, donc elle ne doit
+   gonfler ni `echues` ni `desarmes`. ⚠ Et mon test était **aveugle** à ce
+   ré-armement : il ne regardait que les écritures à `send_after === null`.
+2. **Le périmètre de la clôture est plus large que celui de l'envoi**, et mon
+   commentaire affirmait le contraire (« on clôt ce que `encoreLegitime`
+   refuserait, et rien d'autre » — faux pour tout ce qui n'a pas d'échéance).
+   C'est **voulu** : la règle dit « les propositions encore en attente », pas
+   « celles qui avaient une échéance ». Rien n'est détruit — la ligne reste, son
+   résumé reste, seul le statut change — et l'écran les masquait **déjà**
+   (`shared/aujourdhui.js` : `t.departure >= aujourdHui`). ⚠ **Un point pour
+   Thierry** : la clôture retire aussi les marqueurs « Réponse automatique NON
+   DÉLIVRÉE … vérifiez-la et renvoyez-la » de `cron-classify`. Ils méritent
+   probablement une **alarme**, pas une tâche qui se clôt avec le séjour.
+3. **`bilan.expirees` n'était pas remonté** : une écriture de masse qui ne
+   s'annonce pas. Les premiers cycles vont solder l'arriéré de D5, et un
+   `console.log` ne distingue pas un rattrapage d'une boucle. Le compte entre
+   dans le rapport du cycle (`results.totalBrouillonsExpires`).
+4. **La clôture ignorait le budget mur de la passe** : jusqu'à trente `UPDATE`
+   en série s'ajoutaient aux deux autres balayages **avant** la première lecture
+   des dues, et un cycle pouvait dépenser son budget en clôtures et reporter
+   tous les envois de cinq minutes. Elle consulte maintenant le même budget, et
+   s'arrête net.
+5. **Trois copies manuscrites du prédicat**, aucun garde-fou : la mutation
+   `maintenant <= finDuJour` → `<` dans une seule des trois laissait la suite
+   **entière** au vert. `sejourTermine` vit désormais dans **`delais-contrat.js`**
+   — pas dans la passe d'envoi, où je l'avais d'abord mis : un endpoint de
+   réglages se mettait alors à charger toute la passe pour connaître une règle
+   de date. Un test refuse toute recopie de `T23:59:59Z` ailleurs, et un autre
+   éprouve la **frontière à la seconde**.
+6. **Un nouveau chemin de fausse alarme** : si le jour de départ se termine
+   **entre** l'aperçu et l'écriture — la frontière est 00:00 UTC, 01:00 à Paris
+   en hiver, et la confirmation bloquante peut rester ouverte des minutes —
+   l'aperçu comptait la proposition et l'écriture ne la désarmait pas. L'écran
+   annonçait qu'une réponse était **partie au voyageur** alors que rien n'était
+   parti. Il déduit maintenant `sejours_termines`.
+
+⚠ **Et deux de mes tests mesuraient autre chose que ce qu'ils annonçaient**,
+trouvés par la mutation :
+- celui du **budget** passait `resteMs: () => 0`, donc la passe sortait par sa
+  garde d'**entrée**, bien avant la clôture : le test restait vert en retirant ma
+  garde. Le budget doit s'épuiser **pendant** la passe.
+- celui de la **parité du prédicat** comptait les occurrences brutes de
+  `T23:59:59Z` : les deux lignes de **commentaire** qui expliquent le seuil le
+  faisaient rougir sur du code juste. On compte dans le code.
+
 ### D5 — une proposition gardée devient inatteignable après le départ
 
 **Conséquence produit, relevée en revue, à trancher par Thierry.**

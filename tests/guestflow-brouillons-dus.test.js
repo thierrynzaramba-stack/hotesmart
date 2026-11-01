@@ -17,6 +17,7 @@ const test = require('node:test')
 const assert = require('node:assert')
 const { envoyerBrouillonsDus, STATUT_EN_COURS, SENDING_ORPHELIN_MS, MAX_PAR_CYCLE } =
   require('../lib/guestflow/brouillons-dus')
+const { sejourTermine } = require('../lib/guestflow/delais-contrat')
 
 const T0 = Date.parse('2026-11-11T11:00:00Z') // 12 h a Paris, hors sourdine
 const NUIT = Date.parse('2026-11-10T22:30:00Z') // 23 h 30 a Paris, en sourdine
@@ -920,4 +921,94 @@ test('LE TEST QUI COMPTE : une suspension reprise sur un sejour termine est clos
   assert.equal(b.etat.taches[0].status, 'expired')
   assert.equal(b.etat.taches[0].send_after, null,
     'surtout : elle ne garde pas l echeance que la reprise venait de poser')
+})
+
+test('LE TEST QUI COMPTE : le predicat « sejour termine » est UN SEUL appel, partage', () => {
+  // ⚠ CONSTAT D UNE REVUE, ET SA MUTATION L A PROUVE. Le seuil vivait en TROIS
+  // copies manuscrites de `T23:59:59Z` — la cloture, `encoreLegitime`, et
+  // `appliquer-delai.js`. Remplacer `maintenant <= finDuJour` par `<` dans une
+  // seule des trois laissait la suite entiere au vert : la promesse du lot
+  // (« le meme predicat que l envoi, AU CARACTERE ») n etait tenue par rien.
+  const fs = require('fs'); const path = require('path')
+  // ⚠ ON COMPTE DANS LE CODE, PAS DANS LES COMMENTAIRES. Ma premiere version
+  // comptait les occurrences brutes : les deux lignes de commentaire qui
+  // EXPLIQUENT le seuil la faisaient rougir sur du code juste. Mesurer le texte
+  // au lieu du mecanisme, encore une fois.
+  const lire = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    .split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n')
+  const passe = lire('lib/guestflow/brouillons-dus.js')
+  const delai = lire('lib/guestflow/appliquer-delai.js')
+  const contrat = lire('lib/guestflow/delais-contrat.js')
+  // ⚠ LE SEUIL VIT DANS LE CONTRAT, ET NULLE PART AILLEURS. Je l avais d abord
+  // pose dans la passe d envoi : un endpoint de reglages se mettait alors a
+  // charger toute cette passe pour connaitre une regle de date. Les deux
+  // modules importaient DEJA le contrat.
+  assert.equal((contrat.match(/T23:59:59Z/g) || []).length, 1,
+    'la chaine du seuil n existe qu une fois, dans le contrat')
+  for (const [nom, src] of [['la passe d envoi', passe], ['le module du delai', delai]]) {
+    assert.equal((src.match(/T23:59:59Z/g) || []).length, 0,
+      `${nom} ne recopie pas le seuil`)
+    assert.match(src, /sejourTermine[^\n]*require\('\.\/delais-contrat'\)/,
+      `${nom} importe le predicat du contrat`)
+  }
+  // Les trois sites passent par la fonction.
+  assert.ok((passe.match(/sejourTermine\(/g) || []).length >= 2,
+    'la cloture ET la garde d envoi l appellent')
+  assert.ok((delai.match(/sejourTermine\(/g) || []).length >= 1, 'le compte aussi')
+})
+
+test('LE TEST QUI COMPTE : la cloture respecte le budget de la passe', async () => {
+  // ⚠ CONSTAT D UNE REVUE : trente `UPDATE` en serie s ajoutaient aux deux
+  // autres balayages AVANT la premiere lecture des dues. Avec un arriere, un
+  // cycle pouvait depenser son budget en clotures et reporter TOUS les envois de
+  // cinq minutes — alors que le budget mur existe pour que les envois
+  // n affament pas le dispatch.
+  //
+  // ⚠ ET LE BUDGET DOIT S EPUISER PENDANT LA PASSE, PAS AVANT. Ma premiere
+  // version passait `resteMs: () => 0` : la passe sort alors par sa garde
+  // D ENTREE, bien avant la cloture, et le test restait vert meme en retirant
+  // ma garde (mutation faite, zero rouge). Il mesurait la garde d entree en
+  // croyant mesurer la mienne. Ici le budget est large au premier appel — celui
+  // de l entree — et a sec ensuite.
+  const taches = []
+  for (let i = 0; i < 5; i++) taches.push(tache({ id: 'tache-' + i, departure: '2026-11-01' }))
+  const b = banc({ taches })
+  let appels = 0
+  const bilan = await envoyerBrouillonsDus(null, {
+    sb: b.client, maintenant: T0, resteMs: () => (++appels === 1 ? 60000 : 0)
+  })
+  assert.ok(appels > 1, 'la cloture a bien consulte le budget')
+  assert.equal(bilan.expirees, 0, 'aucune cloture quand le budget est a sec')
+})
+
+test('LE TEST QUI COMPTE : la frontiere du seuil, a la seconde', () => {
+  // ⚠ LA PARITE EST STRUCTURELLE (un seul appel), MAIS LA VALEUR NE L EST PAS :
+  // mutation faite, remplacer `maintenant > finDuJour` par `>=` ne rougissait
+  // nulle part. Un predicat partage peut etre faux partout a la fois.
+  const depart = '2026-11-05'
+  const finDuJour = Date.parse('2026-11-05T23:59:59Z')
+  assert.equal(sejourTermine(depart, finDuJour), false,
+    'la derniere seconde du jour de depart appartient encore au voyageur')
+  assert.equal(sejourTermine(depart, finDuJour + 1000), true,
+    'la seconde suivante, le sejour est termine')
+  assert.equal(sejourTermine(depart, Date.parse('2026-11-05T00:00:00Z')), false,
+    'le matin du depart, evidemment pas')
+  // Absent ou illisible : on ne refuse, et on ne clot, que ce qu on sait dater.
+  for (const v of [null, undefined, '', 'pas-une-date']) {
+    assert.equal(sejourTermine(v, Date.parse('2030-01-01T00:00:00Z')), false,
+      `departure=${String(v)} : jamais « termine »`)
+  }
+})
+
+test('la cloture remonte son compte dans le rapport du cycle', async () => {
+  // ⚠ UNE ECRITURE DE MASSE S ANNONCE (regle du depot). Les premiers cycles
+  // soldent l arriere historique de la dette D5 ; sans compteur rendu, un
+  // rattrapage normal et une boucle sont indistinguables.
+  const results = { errors: [] }
+  const b = banc({ taches: [
+    tache({ id: 't1', departure: '2026-11-01' }),
+    tache({ id: 't2', departure: '2026-11-02' })
+  ] })
+  await envoyerBrouillonsDus(results, { sb: b.client, maintenant: T0 })
+  assert.equal(results.totalBrouillonsExpires, 2, 'le rapport du cycle porte le compte')
 })

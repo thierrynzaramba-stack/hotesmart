@@ -1097,11 +1097,17 @@ test('un depart ABSENT ou illisible compte : on sur-compte, jamais l inverse', a
   }
 })
 
-test('LE TEST QUI COMPTE : « garder » ne desarme pas une proposition hors du compte', async () => {
-  // ⚠ L ENSEMBLE DESARME EST L ENSEMBLE ANNONCE. Si le compte exclut les
-  // sejours termines, le desarmement doit les exclure aussi : desarmer plus que
-  // ce qu on a annonce serait moins grave que l inverse, mais la note dirait un
-  // nombre que l hote n a pas lu dans la question.
+test('LE TEST QUI COMPTE : un sejour termine est DESARME, et compte a part', async () => {
+  // ⚠ CE TEST A CHANGE DE REPONSE, ET C EST UN CONSTAT DE REVUE SUR MON PROPRE
+  // CORRECTIF. En excluant les sejours termines du COMPTE, j avais fait de
+  // `echue` une valeur fausse pour eux : la branche « garder » ne les prenait
+  // plus, et le controle tombait sur `send_after = creation + N` — une echeance
+  // DEJA PASSEE. La proposition ressortait donc ARMEE la ou elle etait
+  // desarmee avant le lot. Rien ne partait, mais c est l inverse de
+  // l invariant de cette fonction (« en cas de doute on DESARME »), et ici il
+  // n y a meme pas de doute.
+  // Ma premiere version de ce test ne regardait que les updates a
+  // `send_after === null` : elle etait AVEUGLE a ce re-armement.
   const b = banc({ taches: [
     tache({ id: 'en-cours', departure: '2026-11-20' }),
     tache({ id: 'terminee', departure: '2026-11-05' })
@@ -1111,8 +1117,38 @@ test('LE TEST QUI COMPTE : « garder » ne desarme pas une proposition hors du c
     delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
   })
   assert.equal(r.ok, true)
-  assert.equal(r.echues, 1, 'une seule annoncee')
-  assert.equal(r.desarmes, 1, 'et une seule desarmee')
-  const desarmee = b.etat.updates.filter(u => u.patch.send_after === null).map(u => u.id)
-  assert.deepEqual(desarmee, ['en-cours'], 'celle dont le sejour court, et elle seule')
+  assert.equal(r.echues, 1, 'une seule est ANNONCEE a l hote')
+  assert.equal(r.desarmes, 1, 'une seule compte comme gardee sur sa demande')
+  assert.equal(r.sejours_termines, 1, 'et l autre a son propre compte, hors de la question')
+  // LES DEUX sont desarmees : aucune echeance ne survit a ce geste.
+  const parId = {}
+  for (const u of b.etat.updates) parId[u.id] = u.patch
+  assert.equal(parId['en-cours'].send_after, null, 'celle qui etait annoncee')
+  assert.equal(parId['terminee'].send_after, null,
+    'et celle du sejour termine : elle ne doit SURTOUT pas ressortir armee')
+  assert.equal(parId['terminee'].suspendu_le, null, 'ni suspendue, ce qui serait sans issue')
+})
+
+test('un sejour termine sans echeance n est pas reecrit pour rien', async () => {
+  // Deja desarmee : on ne touche pas `updated_at`, que la reprise des
+  // suspensions lit comme une mesure d inactivite de l hote.
+  const b = banc({ taches: [tache({ id: 'terminee', departure: '2026-11-05',
+    send_after: null, suspendu_le: null })] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.sejours_termines, 1)
+  assert.equal(b.etat.updates.length, 0, 'aucune ecriture')
+})
+
+test('en APERCU, un sejour termine ne declenche aucune ecriture', async () => {
+  const b = banc({ taches: [tache({ id: 'terminee', departure: '2026-11-05' })] })
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0, apercu: true,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.sejours_termines, 1, 'il est compte')
+  assert.equal(r.echues, 0, 'il n est pas annonce')
+  assert.equal(b.etat.updates.length, 0, 'et l apercu n ecrit rien, c est son contrat')
 })
