@@ -292,6 +292,13 @@ module.exports = async (req, res) => {
     let q = supabase.from('properties')
       .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency, photo_url')
       .eq('user_id', compte)
+      // ⚠ LES BIENS ARCHIVES QUITTENT L'ACCUEIL (lot « archiver un bien »,
+      // etape 3). Avant ce filtre, AUCUN endpoint d'ecran ne jugeait d'un etat
+      // d'activite : un bien que le provider avait supprime restait dans la
+      // liste, dans les tuiles et dans le selecteur, et l'hote n'avait aucun
+      // moyen de l'en retirer. Les REVENUS sont le seul ecran qui le garde —
+      // decision de Thierry du 31 octobre 2026 : son historique est vrai.
+      .is('archive_le', null)
     q = bornerUuid(q, 'id')
     const { data, error } = await compter(q.order('name', { ascending: true }))
     // ⚠ `null`, PAS `[]`. Une liste vide dit « cet hote n'a aucun logement »,

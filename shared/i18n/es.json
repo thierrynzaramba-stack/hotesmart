@@ -307,6 +307,7 @@
   "fiche.taxe_connue": "Tarifa transmitida",
   "fiche.taxe_non_lue": "La tasa turística no se puede leer ahora mismo.",
   "fiche.voir_calendrier": "Ver el calendario",
+  "logements.archive": "archivado",
   "logements.add": "Añadir un alojamiento",
   "logements.aucun_canal": "Ningún canal conectado",
   "logements.avis": "{note} / 5 · {n, plural, one {# reseña} other {# reseñas}}",

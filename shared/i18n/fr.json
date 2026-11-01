@@ -307,6 +307,7 @@
   "fiche.taxe_connue": "Barème transmis",
   "fiche.taxe_non_lue": "La taxe de séjour n’est pas lisible pour l’instant.",
   "fiche.voir_calendrier": "Voir le calendrier",
+  "logements.archive": "archivé",
   "logements.add": "Ajouter un logement",
   "logements.aucun_canal": "Aucun canal relié",
   "logements.avis": "{note} / 5 · {n, plural, one {# avis} other {# avis}}",

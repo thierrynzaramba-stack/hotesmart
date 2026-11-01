@@ -569,6 +569,25 @@ test('LE TEST QUI COMPTE : sur un compte DELEGUE aussi, le compte lu est celui d
     'un agregat porte un autre compte que celui de la garde')
 })
 
+test("LE TEST QUI COMPTE : les biens ARCHIVES quittent l accueil", async () => {
+  // ⚠ AVANT CE FILTRE, AUCUN ENDPOINT D ECRAN NE JUGEAIT D UN ETAT D ACTIVITE
+  // (mesure du 30 octobre 2026) : un bien que le provider avait supprime
+  // restait dans la liste, dans les tuiles et dans le selecteur, et l'hote
+  // n'avait aucun moyen de l'en retirer. Lot « archiver un bien », etape 3.
+  // ⚠ ON ASSERTE LE FILTRE, PAS LE RESULTAT. Le double rend ses lignes sans
+  // regarder `archive_le` — comme la plupart des doubles de ce fichier —, donc
+  // seule la QUESTION posee a la base prouve la coupure. Un test qui lirait la
+  // liste rendue resterait vert sans le filtre.
+  const { requetes } = await banc({ titulaire: true })()
+  const lectures = requetes.filter(r => r.table === 'properties')
+  assert.ok(lectures.length, `aucune lecture de properties : ${requetes.map(r => r.table).join(', ')}`)
+  for (const r of lectures) {
+    assert.ok(r.filtres.some(f => f[0] === 'is' && f[1] === 'archive_le' && f[2] === null),
+      'une lecture des biens de l accueil n ecarte pas les archives : '
+      + `${JSON.stringify(r.filtres)}`)
+  }
+})
+
 test('le titulaire n est borne par aucun perimetre, et les notes le savent', async () => {
   const { requetes, notesVues } = await banc({ titulaire: true })()
   for (const r of requetes) {

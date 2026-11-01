@@ -150,9 +150,17 @@ module.exports = async (req, res) => {
       p_refs: refsUuid === null ? null : refsUuid
     }),
     // Borne explicite : les biens du COMPTE, et du perimetre s'il y en a un.
+    // ⚠ LES BIENS ARCHIVES RESTENT ICI, ET C'EST LA DECISION 1 DE THIERRY
+    // (31 octobre 2026) : « revenus d'un bien archive comptes dans le total,
+    // ligne marquee archive ». Les retirer changerait le total de l'annee
+    // RETROACTIVEMENT — ce que ce depot interdit deja pour les prix — et
+    // l'argent encaisse l'a bien ete. On lit donc `archive_le` POUR LE DIRE,
+    // pas pour filtrer : c'est ce qui solde la dette 118, ou un logement
+    // disparu n'avait pas de ligne et laissait l'hote devant une somme sans
+    // detail.
     (refsUuid === null
-      ? supabase.from('properties').select('id').eq('user_id', compte).limit(BIENS_MAX + 1)
-      : supabase.from('properties').select('id').eq('user_id', compte).in('id', refsUuid).limit(BIENS_MAX + 1))
+      ? supabase.from('properties').select('id, archive_le').eq('user_id', compte).limit(BIENS_MAX + 1)
+      : supabase.from('properties').select('id, archive_le').eq('user_id', compte).in('id', refsUuid).limit(BIENS_MAX + 1))
   ])
 
   if (eAnnee) {
@@ -263,9 +271,20 @@ module.exports = async (req, res) => {
     if (reserveADate === null) indisponibles.push('reserve_a_date')
   }
 
+  // ⚠ QUELS BIENS SONT ARCHIVES — et c'est l'ecran qui le DIT, pas lui qui le
+  // devine. Decision 1 de Thierry : la ligne reste, marquee « archive ». Sans
+  // cette liste, l'ecran ne pourrait distinguer un logement archive d'un
+  // logement vivant qui n'a rien encaisse cette annee-la, et il choisirait
+  // probablement de n'en rien dire — c'est-a-dire la dette 118 une fois de
+  // plus : une somme sans son detail.
+  // ⚠ ET ON NE REND QUE LES UUID DES BIENS ARCHIVES DU PERIMETRE, pas une date
+  // par bien : l'ecran a besoin de savoir LESQUELS, pas depuis quand.
+  const archives = (biens || []).filter(b => b.archive_le).map(b => String(b.id))
+
   return rendre(res, t0, requetes, {
     annee, jour, par_bien: parBien, hors_biens: horsBiens, total, indisponibles,
-    comparables, reserve_a_date: reserveADate
+    comparables, reserve_a_date: reserveADate,
+    archives
   })
 }
 

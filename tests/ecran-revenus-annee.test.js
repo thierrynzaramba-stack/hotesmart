@@ -25,6 +25,9 @@ const TOUS_DOMAINES = ['reservations', 'menages', 'messages', 'avis', 'reglages'
 async function appeler ({
   query = {}, methode = 'GET', titulaire = true, refs = null,
   domaines = TOUS_DOMAINES, lignes = [], biens = [BIEN_A, BIEN_B],
+  // Les biens ARCHIVES, par uuid. Le double pose `archive_le` sur ceux-la :
+  // c'est la seule colonne que l'endpoint lit en plus de `id`.
+  archives = [],
   erreurRpc = null, erreurBiens = null,
   // Les lignes de `comparables_releves`, et une erreur de lecture au besoin.
   releves = [], erreurReleves = null,
@@ -52,7 +55,9 @@ async function appeler ({
       const comparables = table === 'comparables_releves'
       const reponse = () => comparables
         ? { data: erreurReleves ? null : releves, error: erreurReleves }
-        : { data: erreurBiens ? null : biens.map(id => ({ id })), error: erreurBiens }
+        : { data: erreurBiens ? null : biens.map(id => ({
+            id, archive_le: archives.includes(id) ? '2026-10-31T10:00:00Z' : null
+          })), error: erreurBiens }
       const q = {
         select () { return q },
         eq (c, v) { vu.filtres.push(['eq', c, v]); return q },
@@ -340,6 +345,38 @@ test("LE TEST QUI COMPTE : recu, a-venir et total ne se confondent JAMAIS", asyn
   const parisAujourdhui = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date())
   assert.strictEqual(r.vu.rpc[0].args.p_aujourdhui, parisAujourdhui,
     'le jour passe a la base n est pas celui de Paris')
+})
+
+test("LE TEST QUI COMPTE : un bien ARCHIVE garde ses revenus, et l endpoint le DIT", async () => {
+  // ⚠ DECISION 1 DE THIERRY DU 31 OCTOBRE 2026 : les revenus d'un bien archive
+  // restent COMPTES, sa ligne est marquee « archive ». Deux choses doivent donc
+  // etre vraies en meme temps, et les confondre serait un defaut :
+  //   · ses revenus restent dans `par_bien` ET dans le total — les retirer
+  //     changerait le total de l'annee RETROACTIVEMENT ;
+  //   · l'endpoint DECLARE lesquels sont archives, parce que l'ecran ne peut
+  //     pas le deviner : sans cette liste, il ne distinguerait pas un logement
+  //     archive d'un logement vivant qui n'a rien encaisse cette annee-la.
+  // C'est ce second point qui solde la dette 118.
+  const an = AN()
+  const r = await appeler({
+    biens: [BIEN_A, BIEN_B],
+    archives: [BIEN_B],
+    lignes: [ligne(BIEN_A, an, 5, { total_cents: 20000 }), ligne(BIEN_B, an, 5, { total_cents: 10000 })]
+  })
+  assert.deepStrictEqual(r.charge.archives, [BIEN_B],
+    `l endpoint ne declare pas les biens archives : ${JSON.stringify(r.charge.archives)}`)
+  assert.ok(r.charge.par_bien && r.charge.par_bien[BIEN_B],
+    'le bien archive a perdu sa ligne de revenus')
+  assert.strictEqual(r.charge.total[`${an}-05`].total_cents, 30000,
+    'le total ne compte plus les revenus du bien archive : il changerait retroactivement')
+})
+
+test("sans bien archive, la liste est VIDE et non absente", async () => {
+  // `undefined` ferait lire « on ne sait pas » a un ecran qui doit lire
+  // « aucun ». La difference est celle que ce depot nomme partout : un `null`
+  // n'est pas un zero.
+  const r = await appeler({ biens: [BIEN_A] })
+  assert.deepStrictEqual(r.charge.archives, [], 'la liste des archives n est pas rendue vide')
 })
 
 test("LE TEST QUI COMPTE : la lecture des biens est bornee au COMPTE", async () => {

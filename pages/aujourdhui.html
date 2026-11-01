@@ -2662,6 +2662,10 @@ function renderAnnee () {
   const brutsN1 = avecDonnees.map(b => bilanPeriode(a.par_bien[String(b.id)] || {}, an - 1, 'total_cents', jusquAu))
   const eurosN = repartirEnEuros(brutsN.map(x => x.total))
   const eurosN1 = repartirEnEuros(brutsN1.map(x => x.total))
+  // ⚠ DECLARE AVANT LA BOUCLE QUI S'EN SERT. Un `const` lu dans le `.map()`
+  // d'au-dessus leve `Cannot access 'archives' before initialization` — 22
+  // tests rouges, et une page blanche pour l'hote.
+  const archives = new Set(Array.isArray(etat.annee.archives) ? etat.annee.archives.map(String) : [])
   const lignes = avecDonnees.map((b, i) => {
     const pm = a.par_bien[String(b.id)] || {}
     const pct = ecartPourcent(brutsN[i].total, brutsN1[i].total)
@@ -2692,6 +2696,12 @@ function renderAnnee () {
         : t('revenue.annee_nouveau', { annee: String(an) }))}</span>`
     return {
       b,
+      // ⚠ ARCHIVE : LA LIGNE RESTE, ET ELLE LE DIT. Decision 1 de Thierry du
+      // 31 octobre 2026. Sans cette marque, l'hote lirait un logement comme
+      // vivant alors qu'il ne l'est plus — et c'est la dette 118 : une somme
+      // dont on ne peut pas rattacher le detail. La liste vient du serveur
+      // (`archives`), jamais devinee ici.
+      archive: archives.has(String(b.id)),
       // ⚠ MEME REGLE QUE L'EN-TETE, et c'est le constat 2 : une annee sans
       // AUCUNE ligne rend « — », pas « 0 € ». Le motif est sur la meme ligne,
       // dans la colonne « Ecart » : « nouveau en {annee} ».
@@ -2705,6 +2715,7 @@ function renderAnnee () {
   $('[data-list="revenue-annee-lignes"]').innerHTML = lignes.map(l => `<tr>
       <th scope="row" class="rev-tbl__bien"><span class="rev-tbl__bien-int">
         ${vignetteDuBien(l.b)}<span class="rev-tbl__nom">${esc(l.b.name)}</span>
+        ${l.archive ? `<span class="marque-archive">${esc(t('logements.archive'))}</span>` : ''}
       </span></th>
       <td class="rev-tbl__num">${esc(l.tN)}</td>
       <td class="rev-tbl__num muted">${esc(l.tN1)}</td>
@@ -2712,7 +2723,7 @@ function renderAnnee () {
     </tr>`).join('')
   $('[data-list="revenue-annee-cartes"]').innerHTML = lignes.map(l => `<li class="rev-carte">
       <div class="rev-carte__tete">
-        <span class="rev-carte__bien">${vignetteDuBien(l.b)}<span class="rev-tbl__nom"><span class="small">${esc(l.b.name)}</span></span></span>
+        <span class="rev-carte__bien">${vignetteDuBien(l.b)}<span class="rev-tbl__nom"><span class="small">${esc(l.b.name)}</span>${l.archive ? `<span class="marque-archive">${esc(t('logements.archive'))}</span>` : ''}</span></span>
         <span class="rev-carte__total">${esc(l.tN)}</span>
       </div>
       <p class="caption muted">${esc(String(an - 1))} · ${esc(l.tN1)} ${l.ecart}</p>

@@ -307,6 +307,7 @@
   "fiche.taxe_connue": "Rate provided",
   "fiche.taxe_non_lue": "The tourist tax cannot be read right now.",
   "fiche.voir_calendrier": "View calendar",
+  "logements.archive": "archived",
   "logements.add": "Add a property",
   "logements.aucun_canal": "No channel connected",
   "logements.avis": "{note} / 5 · {n, plural, one {# review} other {# reviews}}",
