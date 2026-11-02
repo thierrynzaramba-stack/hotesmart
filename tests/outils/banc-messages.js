@@ -40,7 +40,11 @@ const lire = (...p) => fs.readFileSync(path.join(RACINE, ...p), 'utf8')
 
 // Les modules partages dont la page importe des symboles, dans l'ordre des
 // dependances. `import`/`export` retires : on les evalue comme des scripts.
-const PARTAGES = ['properties', 'aujourdhui', 'messages-programmes', 'calendrier-resa']
+// ⚠ `confirmer` EN EST, ET C'EST LE POINT DE CE BANC. Les confirmations sont
+// son sujet : un double de la fenetre validerait ses propres boutons. Le vrai
+// module est donc evalue ici, et les tests CLIQUENT sur ce qu'il rend.
+const PARTAGES = ['properties', 'aujourdhui', 'messages-programmes', 'calendrier-resa',
+  'confirmer']
 const scriptPartage = (nom) => lire('shared', nom + '.js')
   .replace(/^import[\s\S]*?from\s*'[^']*'\s*$/gm, '')
   .replace(/^export default /gm, 'const __defaut_' + nom.replace(/-/g, '_') + ' = ')
@@ -123,7 +127,16 @@ function fabriquerPlural (window) {
  * @param {boolean}  o.ecriture    droit `messages` en ecriture
  * @param {boolean}  o.confirme    ce que repond `window.confirm` par defaut
  */
-function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, confirme = true } = {}) {
+// ⚠ `repondreFenetre` REMPLACE `confirme` POUR LES CONFIRMATIONS REPRISES.
+// `window.confirm` se doublait par une fonction ; la fenetre de la page, elle,
+// se CLIQUE. Le banc peut repondre automatiquement — il clique alors le VRAI
+// bouton rendu par le VRAI module —, ou laisser le test le faire a la main
+// quand c'est le dialogue lui-meme qu'on mesure.
+//   · `'partir'` / `'garder'` / `'continuer'` / `'rester'` : clique ce bouton ;
+//   · `null` : FERME la fenetre (Echap), donc ne decide rien ;
+//   · `undefined` (defaut) : ne touche a rien, le test s'en charge.
+function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, confirme = true,
+  repondreFenetre } = {}) {
   const dom = new JSDOM(squelette(), { runScripts: 'outside-only', url: 'https://exemple.test/messages' })
   const { window } = dom
   const envois = []
@@ -138,6 +151,54 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
     window.__confirmations.push(String(texte))
     const r = window.__reponseConfirm
     return typeof r === 'function' ? r(String(texte)) : r !== false
+  }
+  // Le repondeur automatique : il observe le DOM et clique le bouton demande
+  // des qu'une fenetre apparait. C'est le geste REEL, pas un court-circuit.
+  window.__fenetres = []
+  // ⚠ L'OBSERVATEUR SE DEBRANCHE A LA FERMETURE, et sans ca il LEVE. Mesure :
+  // une callback encore en vol apres `window.close()` tombait sur un document
+  // demonte et rendait `Uncaught TypeError: Cannot read properties of
+  // undefined (reading 'querySelector')` — attribue, dans la sortie de
+  // node:test, au test qui tournait a cet instant, donc a un test INNOCENT.
+  // C'est le banc qui coupait le sol, pas la page.
+  let observateur = null
+  window.__reponseFenetre = repondreFenetre
+  // ⚠ REGLABLE EN COURS DE TEST, comme `repondreConfirm` : un test qui bascule
+  // le mode manuel PUIS enregistre repond deux fois, et pas la meme chose.
+  // L'observateur lit donc `window.__reponseFenetre` a chaque fenetre, au lieu
+  // de capturer la valeur du montage.
+  {
+    const mo = new window.MutationObserver(() => {
+      if (!window.document || !window.document.body) return
+      const boite = window.document.querySelector('[data-bind="hs-confirm"]')
+      if (!boite) return
+      // ⚠ LA FENETRE VUE SE LIT DANS LE DOM, PAS DANS LE JOURNAL. Ma premiere
+      // version prenait la DERNIERE entree de `__fenetres` AVANT d'y pousser la
+      // courante : la fonction de reponse recevait donc la fenetre PRECEDENTE
+      // (ou `undefined` pour la premiere), et un geste a deux fenetres repondait
+      // a la seconde ce qu'il fallait repondre a la premiere. Mesure : la note
+      // rendait « Enregistré » tout court la ou on attendait les gardees.
+      const vue = {
+        titre: (boite.querySelector('.hs-confirm__titre') || {}).textContent || '',
+        texte: (boite.querySelector('.hs-confirm__texte') || {}).textContent || '',
+        boutons: [...boite.querySelectorAll('[data-confirm-choix]')].map(b => b.textContent)
+      }
+      window.__fenetres.push(vue)
+      let repondre = window.__reponseFenetre
+      if (typeof repondre === 'function') repondre = repondre(vue)
+      // `undefined` : on n'y touche pas, le test clique lui-meme.
+      if (repondre === undefined) return
+      if (repondre === null) {
+        window.document.dispatchEvent(new window.KeyboardEvent('keydown',
+          { key: 'Escape', bubbles: true, cancelable: true }))
+        return
+      }
+      const b = boite.querySelector('[data-confirm-choix="' + repondre + '"]')
+      if (!b) throw new Error('banc : la fenetre n offre pas « ' + repondre + ' »')
+      b.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+    })
+    mo.observe(window.document.body, { childList: true, subtree: true })
+    observateur = mo
   }
   window.__plural = fabriquerPlural(window)
   // ⚠ UNE PASSE UNIQUE, COMME LE VRAI `t()` (constat 10 de la revue). Ma
@@ -187,7 +248,7 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       etat, renderTiroir, ouvrirTiroir, renderListe, renderFil, renderFiltres,
       enregistrerPanneau, basculerPause, delaisEnCours, delaisDuBien,
       bandeauEcheance, etatEcheance, peutReprendre, pausesFiables, voletIA,
-      noteReglage, bienDuFilOuvert, init, PILULES,
+      noteReglage, bienDuFilOuvert, init, PILULES, confirmerDansLaPage, fenetreOuverte,
       reporterLePanneauSurLeFil, editionPanneauNonEnregistree, remettreCasePause
     }
   `
@@ -283,15 +344,25 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
     dom, window, doc: window.document, msg, envois,
     journal: window.__journal, domaines: window.__domaines,
     confirmations: window.__confirmations,
+    // Les fenetres de la page qui se sont ouvertes, dans l'ordre, avec leur
+    // titre, leur texte et le LIBELLE de chaque bouton : un test affirme ce que
+    // l'hote a lu, pas un compteur.
+    fenetres: window.__fenetres,
     tables: window.__tables,
     repondreConfirm: (v) => { window.__reponseConfirm = v },
+    // La reponse aux fenetres de la page : une cle de bouton, ou `null` pour
+    // FERMER (ce qui ne decide rien), ou `undefined` pour ne pas repondre.
+    repondreFenetre: (v) => { window.__reponseFenetre = v },
     note: () => {
       const n = window.document.querySelector('[data-bind="tiroir-note"]')
       return n.hidden ? null : n.textContent
     },
     noteOk: () => window.document.querySelector('[data-bind="tiroir-note"]')
       .classList.contains('msg-tiroir__note--ok'),
-    fermer: () => { try { window.close() } catch {} }
+    fermer: () => {
+      try { if (observateur) observateur.disconnect() } catch {}
+      try { window.close() } catch {}
+    }
   }
 }
 
@@ -378,5 +449,40 @@ const boutonVolet = (banc, nom) =>
   banc.doc.querySelector('[data-ouvre-volet="' + nom + '"]')
 const tiroirOuvert = (banc) => !banc.doc.querySelector('[data-bind="tiroir"]').hidden
 
-module.exports = { monter, amorcer, peupler, clic, changer, reposer, corps, pilules,
+// ─── La fenetre de confirmation : ce que l'hote voit, et ce qu'il clique ────
+// ⚠ ON NE DOUBLE PLUS `window.confirm` : la fenetre vit DANS la page, donc on
+// la lit et on la clique comme n'importe quel element. `banc.confirmations`
+// continue d'exister pour les confirmations qui n'ont pas encore ete reprises
+// (le remplacement d'un brouillon, la suppression d'un message programme).
+const fenetre = (banc) => banc.doc.querySelector('[data-bind="hs-confirm"]')
+const fenetreTitre = (banc) => {
+  const f = fenetre(banc)
+  return f ? (f.querySelector('.hs-confirm__titre') || {}).textContent || '' : ''
+}
+const fenetreTexte = (banc) => {
+  const f = fenetre(banc)
+  return f ? (f.querySelector('.hs-confirm__texte') || {}).textContent || '' : ''
+}
+const fenetreBoutons = (banc) => [...banc.doc.querySelectorAll('[data-confirm-choix]')]
+  .map(b => ({ cle: b.dataset.confirmChoix, libelle: b.textContent }))
+const choisir = (banc, cle) => {
+  const b = banc.doc.querySelector('[data-confirm-choix="' + cle + '"]')
+  if (!b) throw new Error('banc : aucun bouton « ' + cle + ' » dans la fenetre')
+  clic(banc, b)
+}
+const fermerFenetre = (banc, par = 'croix') => {
+  if (par === 'echap') {
+    banc.doc.dispatchEvent(new banc.window.KeyboardEvent('keydown',
+      { key: 'Escape', bubbles: true, cancelable: true }))
+    return
+  }
+  const cible = par === 'voile'
+    ? banc.doc.querySelector('[data-bind="hs-confirm-voile"]')
+    : banc.doc.querySelector('[data-confirm-fermer]')
+  if (!cible) throw new Error('banc : rien pour fermer la fenetre (' + par + ')')
+  clic(banc, cible)
+}
+
+module.exports = { fenetre, fenetreTitre, fenetreTexte, fenetreBoutons, choisir, fermerFenetre,
+  monter, amorcer, peupler, clic, changer, reposer, corps, pilules,
   pilule, pilManuel, casePause, boutonSave, selBien, boutonVolet, tiroirOuvert, FR }

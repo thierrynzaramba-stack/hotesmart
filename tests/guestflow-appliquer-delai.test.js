@@ -622,8 +622,16 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   // l ecran n a PAS PU COMPTER : reponse illisible, et apercu en echec.
   assert.equal((bloc.match(/propager = false/g) || []).length, 2,
     'deux raisons de ne pas propager, et aucune n est un choix de l hote')
-  assert.match(bloc, /garder = !window\.confirm\(t\('messages\.delai_arriere_confirm'/,
-    'le choix de l hote se lit sur la confirmation, et il pose `garder`')
+  // ⚠ LA CONFIRMATION N EST PLUS UNE BOITE NATIVE (decision de Thierry du
+  // 2 novembre 2026) : c est une fenetre DANS LA PAGE, a boutons nommes, et
+  // elle a TROIS issues. « Garder pour validation » est un bouton, plus la
+  // negation d un « Annuler ».
+  assert.match(bloc, /confirmerDansLaPage\(\{[\s\S]*?messages\.delai_arriere_confirm/,
+    'la question passe par la fenetre de la page')
+  assert.match(bloc, /garder = choix === 'garder'/,
+    'et le choix de l hote se lit sur le BOUTON qu il a clique')
+  assert.match(bloc, /if \(choix === null\)/,
+    'fermer la fenetre est une troisieme issue, qui n enregistre rien')
   assert.ok(!/feuVert/.test(page),
     'et plus aucun chemin ne saute l enregistrement entier')
   assert.match(page, /const charge = \{ delais_ref: ref, delais: chargeDelais, propager \}/,

@@ -30,6 +30,7 @@ const FR = B.FR
 // Un bien EN PAUSE, en mode auto a 15 min, avec des propositions echues.
 // `appel` repond l'apercu et garde tout ce qui part au serveur.
 function bancEnPause ({ echues = 2, confirme = true, apercuKo = false, desarmes = 2,
+  ferme = false,
   dejaPrises = 0, configFraiche = undefined, delai = 15, bloquerApercu = false,
   finis = 0, finisApercu = 0 } = {}) {
   const envois = []
@@ -38,7 +39,10 @@ function bancEnPause ({ echues = 2, confirme = true, apercuKo = false, desarmes 
   // faire DIVERGER la relecture de ce que la page avait au demarrage.
   const config = { [REF]: { mode: 'auto', delais: { reponse_ia: delai, alerte_info: 0 } } }
   const b = B.monter({
-    confirme,
+    // ⚠ ON NE DOUBLE PLUS `window.confirm` : la fenetre vit dans la page, et le
+    // banc CLIQUE son vrai bouton. `ferme: true` ferme par Echap — la troisieme
+    // issue, celle qui ne decide rien.
+    repondreFenetre: ferme ? null : (confirme ? 'partir' : 'garder'),
     appel: async (chemin, charge) => {
       envois.push({ chemin, charge: charge || null })
       if (chemin === '/api/property-automation') {
@@ -77,10 +81,16 @@ test('LE TEST QUI COMPTE : lever la pause DEMANDE, quand des propositions sont e
   const { b, envois } = bancEnPause({ echues: 2 })
   B.changer(b, B.casePause(b), false)
   await B.reposer(b)
-  // La PHRASE que l'hote lit, avec son nombre : une question qui ne dirait pas
-  // ce qui part ne serait pas la garde de Thierry.
-  assert.deepEqual(b.confirmations,
-    [FR['messages.pause_lever_confirm'].replace('{n}', '2')])
+  // ⚠ CE QUE L HOTE LIT, ET SURTOUT CE QU IL LIT SUR LES BOUTONS (decision de
+  // Thierry du 2 novembre 2026 : « OK » et « Annuler » ne disaient pas ce qu ils
+  // font, et « Annuler » portait l action qui ECRIT).
+  assert.equal(b.fenetres.length, 1, 'une fenetre, dans la page')
+  assert.equal(b.fenetres[0].titre, FR['messages.pause_lever_titre'])
+  assert.equal(b.fenetres[0].texte, FR['messages.pause_lever_confirm'].replace('{n}', '2'))
+  assert.deepEqual(b.fenetres[0].boutons,
+    [FR['messages.confirm_laisser_partir'], FR['messages.confirm_garder']],
+    'les boutons DISENT ce qu ils font')
+  assert.deepEqual(b.confirmations, [], 'et plus aucune boite native')
   // Confirmee, la pause est bien levee.
   const ecrits = versPropertyAutomation(envois)
   assert.equal(ecrits.length, 1, 'une seule ecriture de pause')
@@ -95,7 +105,8 @@ test('LE TEST QUI COMPTE : refuser laisse la PAUSE ACTIVE et desarme les proposi
   const { b, envois } = bancEnPause({ echues: 3, confirme: false, desarmes: 3 })
   B.changer(b, B.casePause(b), false)
   await B.reposer(b)
-  assert.equal(b.confirmations.length, 1, 'la question a bien ete posee')
+  assert.equal(b.fenetres.length, 1, 'la question a bien ete posee')
+  assert.deepEqual(b.confirmations, [], 'et pas par une boite native')
   assert.equal(versPropertyAutomation(envois).length, 0,
     'AUCUNE ecriture de pause : la pause reste active')
   // Et la branche ECRIT, sinon ce n'est pas une confirmation (lecon du 29
@@ -688,4 +699,89 @@ test('un sejour qui se termine PENDANT le dialogue, lui, se deduit', async () =>
   assert.doesNotMatch(note.textContent,
     /n .taient plus en attente|no longer pending|ya no estaban/i)
   b.fermer()
+})
+
+// ── La fenetre DANS LA PAGE, et sa troisieme issue (2 novembre 2026) ───────
+
+test('LE TEST QUI COMPTE : FERMER la fenetre ne change RIEN', async () => {
+  // ⚠ C EST LA DECISION DE THIERRY, ET C EST L ISSUE QUI N EXISTAIT PAS.
+  // `window.confirm` n a que deux sorties : « je ne reponds pas » etait donc
+  // indistinguable d « Annuler », qui portait l action d ECRIRE (desarmer).
+  // Fermer la fenetre — croix, Echap, clic a cote — ne doit RIEN changer : la
+  // pause reste, rien n est desarme, rien n est enregistre.
+  for (const par of ['croix', 'echap', 'voile']) {
+    const { b, envois } = bancEnPause({ echues: 2 })
+    // On ne repond pas automatiquement : c est le geste de fermeture qu on mesure.
+    b.repondreFenetre(undefined)
+    B.changer(b, B.casePause(b), false)
+    await B.reposer(b)
+    assert.ok(B.fenetre(b), `la fenetre est ouverte (${par})`)
+    B.fermerFenetre(b, par)
+    await B.reposer(b)
+    assert.equal(B.fenetre(b), null, `elle est refermee (${par})`)
+    assert.equal(versPropertyAutomation(envois).length, 0,
+      `${par} : AUCUNE ecriture de pause — elle reste active`)
+    assert.equal(envois.filter(e => e.chemin === '/api/agent-config'
+      && e.charge && e.charge.garder === true).length, 0,
+      `${par} : rien n est desarme`)
+    assert.equal(B.casePause(b).checked, true, `${par} : la case montre la pause active`)
+    b.fermer()
+  }
+})
+
+test('LE TEST QUI COMPTE : les boutons portent des NOMS, pas « OK » et « Annuler »', async () => {
+  const { b } = bancEnPause({ echues: 1 })
+  b.repondreFenetre(undefined)
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  assert.deepEqual(B.fenetreBoutons(b), [
+    { cle: 'partir', libelle: FR['messages.confirm_laisser_partir'] },
+    { cle: 'garder', libelle: FR['messages.confirm_garder'] }
+  ])
+  // Le titre dit le geste, le texte dit le nombre et ce que fermer fait.
+  assert.equal(B.fenetreTitre(b), FR['messages.pause_lever_titre'])
+  assert.match(B.fenetreTexte(b), /1/)
+  assert.match(B.fenetreTexte(b), /ne change rien/i)
+  // ⚠ ET AUCUNE BOITE NATIVE : c est elle qui SUSPEND la page, donc qui bloquait
+  // l extension Chrome avec laquelle Thierry joue ses recettes (vecu le
+  // 1er novembre 2026 : « l extension ne repond plus, aucune etape n est jouee »).
+  assert.deepEqual(b.confirmations, [])
+  B.fermerFenetre(b, 'echap')
+  await B.reposer(b)
+  b.fermer()
+})
+
+test('la fenetre est accessible : role, modal, titre lie, focus sur le premier bouton', async () => {
+  const { b } = bancEnPause({ echues: 1 })
+  b.repondreFenetre(undefined)
+  B.changer(b, B.casePause(b), false)
+  await B.reposer(b)
+  const f = B.fenetre(b)
+  assert.equal(f.getAttribute('role'), 'dialog')
+  assert.equal(f.getAttribute('aria-modal'), 'true')
+  const titre = b.doc.getElementById(f.getAttribute('aria-labelledby'))
+  assert.ok(titre, 'le titre est lie par aria-labelledby')
+  assert.equal(titre.textContent, FR['messages.pause_lever_titre'])
+  assert.equal(b.doc.activeElement.dataset.confirmChoix, 'partir',
+    'le premier bouton a le focus : utilisable au clavier sans souris')
+  assert.equal(b.doc.querySelector('[data-confirm-fermer]').getAttribute('aria-label'),
+    FR['messages.confirm_fermer'], 'la croix se nomme')
+  B.fermerFenetre(b, 'echap')
+  await B.reposer(b)
+  b.fermer()
+})
+
+test('« Laisser partir » leve la pause ; « Garder pour validation » ne la leve pas', async () => {
+  for (const [bouton, leve] of [['partir', true], ['garder', false]]) {
+    const { b, envois } = bancEnPause({ echues: 2, desarmes: 2 })
+    b.repondreFenetre(undefined)
+    B.changer(b, B.casePause(b), false)
+    await B.reposer(b)
+    B.choisir(b, bouton)
+    await B.reposer(b)
+    const ecrits = versPropertyAutomation(envois)
+    assert.equal(ecrits.length, leve ? 1 : 0, `${bouton} : la pause ${leve ? 'est levee' : 'reste'}`)
+    if (leve) assert.equal(ecrits[0].charge.paused, false)
+    b.fermer()
+  }
 })

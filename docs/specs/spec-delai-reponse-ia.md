@@ -2000,6 +2000,80 @@ capturé était celui d'après la sortie, et l'assertion était vraie par
 construction. Mutation faite, il restait vert. **Il faut une fenêtre pour
 observer** : on bloque l'aperçu, on capture pendant le vol, puis on libère.
 
+### `window.confirm` est remplacé par une fenêtre DANS LA PAGE (2 novembre 2026)
+
+**Décision de Thierry, et les deux motifs comptent autant l'un que l'autre :**
+
+1. **« OK » et « Annuler » ne disent pas ce qu'ils font.** Sur ce chantier,
+   « Annuler » portait l'action qui **écrit** — désarmer les propositions — et
+   il fallait le lire dans le texte du dialogue. Trois recettes de suite ont
+   buté dessus.
+2. **La boîte native SUSPEND la page, donc elle bloque l'extension Chrome** avec
+   laquelle il joue ses recettes. Vécu le 1er novembre 2026 : « l'extension ne
+   répond plus sur l'onglet HôteSmart, aucune étape n'est jouée ».
+
+**Périmètre, tel qu'il l'a nommé** : les trois confirmations de ce lot — levée
+de la pause, changement de délai, sortie de la validation manuelle.
+
+| confirmation | boutons | fermer (×, Échap, clic à côté) |
+|---|---|---|
+| levée de la pause | « Laisser partir » / « Garder pour validation » | la pause **reste**, rien n'est désarmé |
+| changement de délai | « Laisser partir » / « Garder pour validation » | **rien n'est enregistré**, pas même le délai |
+| sortie du mode manuel | « Continuer » / « Rester en validation » | le bien **reste** en validation |
+
+⚠ **ET C'EST LA TROISIÈME ISSUE QUI MANQUAIT.** `window.confirm` n'a que deux
+sorties : « je ne réponds pas » était indistinguable d'« Annuler », qui écrivait.
+C'est l'ambiguïté que j'avais signalée le 30 octobre sans pouvoir la résoudre.
+**Seul un clic sur un bouton nommé décide.**
+
+**Le composant** : `shared/confirmer.js`, promise-based
+(`confirmerDansLaPage({ titre, texte, boutons }) → clé | null`), et ses classes
+dans `shared/ui.css`. ⚠ **Pas de `<dialog>` natif, et c'est une contrainte
+mesurée** : jsdom 26.1.0 n'implémente ni `showModal` ni `close`
+(`el.showModal is not a function`). Or les garanties produit de ce lot se
+mesurent **au banc, en cliquant** — un composant qu'on ne peut pas rendre dans
+le banc serait un composant dont les gardes ne sont tenues par rien. On reprend
+donc le patron que `pages/menages.html` utilise déjà : un voile + un panneau.
+
+⚠ **Les textes ont dû changer avec les boutons.** Les trois messages disaient
+« Confirmer : … Annuler : … » : décrire des boutons qui n'existent plus aurait
+été pire qu'un texte muet. Ils énoncent maintenant le fait, le nombre, et ce
+que **fermer** fait.
+
+⚠ **Un piège que ma sortie neutre a rencontré, et qui méritait d'être compris**
+plutôt que contourné : le `finally` de `enregistrerPanneau` n'est **pas** un
+dégel neutre — s'il trouve `panneauEnCours` encore levé, il en conclut qu'une
+exception est passée et pose `mode_error`, « Réglage non enregistré, réessayez ».
+Ma première sortie laissait donc **une erreur rouge** s'afficher pour un geste
+qui ne fait rien, soit le mensonge exactement inverse de celui qu'on ferme. La
+sortie normale baisse les deux drapeaux ; la neutre doit faire pareil.
+
+**Le banc a changé aussi, et c'est le signe que le double suit le vrai.**
+`window.confirm` se doublait par une fonction ; la fenêtre, elle, se **clique** —
+le banc évalue le **vrai** module et clique ses **vrais** boutons
+(`repondreFenetre`, qui accepte une clé, `null` pour fermer, ou une **fonction**
+de la fenêtre vue, parce qu'un seul geste ouvre parfois deux fenêtres
+différentes). Trois erreurs de banc trouvées en l'écrivant : un observateur non
+débranché qui levait **après** la fermeture de la fenêtre jsdom et faisait
+rougir un test innocent ; une lecture de la fenêtre dans le **journal** au lieu
+du DOM, qui servait à la seconde fenêtre la réponse de la première ; et des
+tests qui affirmaient **avant** d'avoir laissé retomber un tour — la boîte
+native rendait son résultat dans la même instruction, la fenêtre non.
+
+**Sept mutations éprouvées** : fermer qui vaudrait « garder », fermer qui
+enregistrerait, fermer qui sortirait du manuel, Échap / croix / clic à côté qui
+ne fermeraient plus, et des boutons sans nom. ⚠ **Avec `--test-timeout`** : une
+mutation qui empêche la fenêtre de se refermer fait **attendre** le test pour
+toujours, et sans délai par test le hang remonte comme un blocage de la
+commande, pas comme un rouge.
+
+⚠ **DEUX `window.confirm` RESTENT DANS LA PAGE, ET C'EST ASSUMÉ** — ils
+appartiennent à d'autres lots : `messages.draft_replace` (remplacer un
+brouillon) et `messages.prog_delete_confirm` (supprimer un message programmé).
+Un test nomme ces deux-là, pour qu'un lecteur sache que ce n'est pas un oubli.
+Mais le motif de Thierry vaut pour eux : **ils bloqueront l'extension sur la
+recette de leur propre écran.**
+
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 
 **Trouvé en corrigeant les quatre points, mesuré, NON corrigé dans ce commit.**

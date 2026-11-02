@@ -19,14 +19,21 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const B = require('./outils/banc-messages.js')
+const fs = require('fs')
+const path = require('path')
 
 const REF = 'STG-BIEN-3'
 const AUTRE = 'STG-BIEN-1'
 const FR = B.FR
 
 // Un bien en validation manuelle, seul au compte, panneau ouvert.
+// ⚠ `confirme` DESIGNE ICI LE BOUTON DE LA FENETRE : `true` -> « Continuer »,
+// `false` -> « Rester en validation ». `ferme: true` ferme la fenetre, ce qui
+// revient a rester en validation sans rien ecrire.
 function bancManuel (opts = {}) {
-  const b = B.monter(opts)
+  const { confirme = true, ferme = false, ...reste } = opts
+  const b = B.monter({ ...reste,
+    repondreFenetre: ferme ? null : (confirme ? 'continuer' : 'rester') })
   B.peupler(b, {
     biens: [{ ref: REF, nom: 'Loft Pilotable' }],
     config: { [REF]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } } },
@@ -41,9 +48,20 @@ test('LE TEST QUI COMPTE : sortir de « Je valide chaque reponse » DEMANDE conf
   const b = bancManuel()
   assert.equal(b.msg.delaisEnCours(REF).reponse_ia, null, 'le bien part en validation manuelle')
   B.clic(b, B.pilManuel(b))
+  // ⚠ IL FAUT LAISSER RETOMBER UN TOUR : la fenetre vit dans la page, et le
+  // gestionnaire est devenu ASYNCHRONE (il attend le clic d'un bouton nomme).
+  // Affirmer juste apres le clic mesurait l'etat d'AVANT la reponse — et c'est
+  // le prix assume du remplacement de `window.confirm`, qui lui suspendait la
+  // page et rendait son resultat dans la meme instruction.
+  await B.reposer(b)
   // La PHRASE que l'hote lit, pas un compteur : une confirmation qui ne dirait
   // pas ce qui va partir ne serait pas la garde de Thierry.
-  assert.deepEqual(b.confirmations, [FR['messages.mode_confirm_auto']])
+  assert.equal(b.fenetres.length, 1, 'une fenetre dans la page')
+  assert.equal(b.fenetres[0].texte, FR['messages.mode_confirm_auto'])
+  assert.deepEqual(b.fenetres[0].boutons,
+    [FR['messages.confirm_continuer'], FR['messages.confirm_rester']],
+    'les boutons disent ce qu ils font')
+  assert.deepEqual(b.confirmations, [], 'et plus aucune boite native')
   assert.equal(b.msg.delaisEnCours(REF).reponse_ia, 15, 'acceptee, la sortie pose le delai de repli')
   b.fermer()
 })
@@ -51,7 +69,9 @@ test('LE TEST QUI COMPTE : sortir de « Je valide chaque reponse » DEMANDE conf
 test('LE TEST QUI COMPTE : refuser la confirmation laisse le bien en validation manuelle', async () => {
   const b = bancManuel({ confirme: false })
   B.clic(b, B.pilManuel(b))
-  assert.equal(b.confirmations.length, 1, 'la question a bien ete posee')
+  await B.reposer(b)
+  assert.equal(b.fenetres.length, 1, 'la question a bien ete posee')
+  assert.deepEqual(b.confirmations, [], 'et pas par une boite native')
   assert.equal(b.msg.delaisEnCours(REF).reponse_ia, null, 'refusee, rien ne bouge')
   // Et l'ecran le dit : la pilule reste cerclee, les pilules de delai absentes.
   assert.equal(B.pilManuel(b).getAttribute('aria-pressed'), 'true')
@@ -268,11 +288,16 @@ test('LE TEST QUI COMPTE : un bien choisi a la main n est pas ecrase par un re-r
 // ── Point 4 : refuser la liberation n est pas un echec ────────────────────
 
 // L enregistrement complet, avec l apercu qui annonce `echues`.
-function bancEnregistrement ({ echues = 0, brouillons = null, confirme = true, desarmes = 0, instant = null } = {}) {
+// ⚠ `confirme` NE DESIGNE PLUS UNE BOITE NATIVE MAIS UN BOUTON NOMME (decision
+// de Thierry du 2 novembre 2026) : `true` clique « Laisser partir », `false`
+// clique « Garder pour validation », et `ferme: true` FERME la fenetre — la
+// troisieme issue, celle qui ne decide rien et n'enregistre rien.
+function bancEnregistrement ({ echues = 0, brouillons = null, confirme = true, desarmes = 0,
+  instant = null, ferme = false } = {}) {
   const envoyes = []
   const bilan = brouillons || { ok: true, desarmes, rearmes: desarmes ? 0 : 2, deja_prises: 0 }
   const b = B.monter({
-    confirme,
+    repondreFenetre: ferme ? null : (confirme ? 'partir' : 'garder'),
     appel: async (chemin, corps) => {
       if (chemin.startsWith('/api/agent-config') && corps) {
         envoyes.push(corps)
@@ -308,8 +333,13 @@ test('LE TEST QUI COMPTE : ANNULER garde les propositions pour validation, et le
   const { b, envoyes } = bancEnregistrement({ echues: 4, confirme: false, desarmes: 6 })
   // L hote sort de la validation manuelle, accepte la garde du 11 octobre,
   // puis REFUSE de liberer son arriere.
-  b.repondreConfirm((texte) => texte === FR['messages.mode_confirm_auto'])
+  // ⚠ DEUX FENETRES, DEUX REPONSES : « Continuer » pour la garde du 11 octobre,
+  // puis « Garder pour validation » pour l arriere. Une cle unique ne peut pas
+  // repondre aux deux — le banc prend donc une fonction de la fenetre vue.
+  b.repondreFenetre((f) => f.boutons.includes(FR['messages.confirm_continuer'])
+    ? 'continuer' : 'garder')
   B.clic(b, B.pilManuel(b))
+  await B.reposer(b)
   await b.msg.enregistrerPanneau(B.corps(b), REF)
   assert.match(b.note(), /^Enregistré\. 6 proposition\(s\) déjà en attente sont gardées pour votre validation/)
   assert.equal(b.noteOk(), true, 'la note est VERTE : c est son choix, pas un echec')
@@ -614,7 +644,9 @@ test('LE TEST QUI COMPTE : ANNULER ecrit, et le fil est relu', async () => {
   const envoyes = []
   const b = B.monter({
     // Il accepte la garde du 11 octobre, puis ANNULE la liberation.
-    confirme: (texte) => texte === FR['messages.mode_confirm_auto'],
+    // Deux fenetres dans ce geste : la garde du 11 octobre, puis l arriere.
+    repondreFenetre: (f) => f.boutons.includes(FR['messages.confirm_continuer'])
+      ? 'continuer' : 'garder',
     appel: async (chemin, corps) => {
       if (corps) envoyes.push(corps)
       // ⚠ `echues` ET `desarmes` DIFFERENT ICI AUSSI (constat 5 de la
@@ -633,6 +665,12 @@ test('LE TEST QUI COMPTE : ANNULER ecrit, et le fil est relu', async () => {
   })
   const avant = b.tables.filter(x => x === 'agent_tasks').length
   B.clic(b, B.pilManuel(b))
+  // ⚠ LAISSER LA PREMIERE FENETRE SE REFERMER AVANT D ENREGISTRER. Le clic sur
+  // la pilule rend la main : la garde du 11 octobre s affiche, et c est le clic
+  // du banc sur « Continuer » — un tour plus tard — qui pose le delai de repli.
+  // Enchainer sans attendre enregistrait le bien ENCORE en validation manuelle,
+  // donc sans arriere a liberer, donc sans seconde fenetre.
+  await B.reposer(b)
   await b.msg.enregistrerPanneau(B.corps(b), REF)
   const reel = envoyes.filter(c => c.delais_ref && c.apercu !== true)
   assert.equal(reel.length, 1)
@@ -871,14 +909,29 @@ test('LE TEST QUI COMPTE : la sequence de la recette, de bout en bout', async ()
   })
   await B.amorcer(b)
   B.peupler(b, { biens: [{ ref: REF, nom: 'Loft Pilotable' }], config: base, pauses: {} })
+  // ⚠ LES GESTES ATTENDENT, DESORMAIS. Chaque confirmation vit dans la page :
+  // le gestionnaire rend la main, la fenetre s ouvre, et c est un CLIC qui
+  // decide. Enchainer les clics sans laisser retomber mesurait l etat d avant.
+  b.repondreFenetre('continuer')
   B.clic(b, B.pilManuel(b))                       // sortie du manuel
+  await B.reposer(b)
   B.clic(b, B.pilule(b, 60))                      // 1 h
+  b.repondreFenetre('partir')
   B.clic(b, B.boutonSave(b))                      // Enregistrer
   await B.reposer(b, 6)
-  assert.deepEqual(b.confirmations, [
+  // ⚠ LES DEUX FENETRES, DANS CET ORDRE, AVEC LEUR TEXTE ET LEURS BOUTONS.
+  // Avant le 2 novembre 2026 c'etaient deux boites natives, et on lisait
+  // `b.confirmations` ; ce sont desormais deux fenetres de la page, et ce qui
+  // compte le plus est le LIBELLE des boutons — c'est ce qui a change.
+  assert.deepEqual(b.fenetres.map(f => f.texte), [
     FR['messages.mode_confirm_auto'],
     FR['messages.delai_arriere_confirm'].split('{n}').join('1')
-  ], 'les DEUX confirmations sortent, dans cet ordre, avec leur texte')
+  ], 'les DEUX fenetres sortent, dans cet ordre, avec leur texte')
+  assert.deepEqual(b.fenetres.map(f => f.boutons), [
+    [FR['messages.confirm_continuer'], FR['messages.confirm_rester']],
+    [FR['messages.confirm_laisser_partir'], FR['messages.confirm_garder']]
+  ], 'et chaque bouton dit ce qu il fait')
+  assert.deepEqual(b.confirmations, [], 'plus aucune boite native sur ce parcours')
   const reels = envoyes.filter(c => c.delais_ref && c.apercu !== true)
   assert.equal(reels.length, 1)
   assert.equal(reels[0].delais.reponse_ia, 60, 'et le reglage choisi est bien celui qui part')
@@ -986,7 +1039,7 @@ test('LE TEST QUI COMPTE : le panneau deduit le DELTA des sejours termines, pas 
   // Et « Annuler » (confirme: false), parce que c est la branche « garder » qui
   // compare les deux nombres.
   const b = B.monter({
-    confirme: false,
+    repondreFenetre: 'garder',
     appel: async (chemin, charge) => {
       if (chemin !== '/api/agent-config') return {}
       if (charge && charge.apercu === true) {
@@ -1013,4 +1066,76 @@ test('LE TEST QUI COMPTE : le panneau deduit le DELTA des sejours termines, pas 
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
     'l envoi reel se dit : un arriere de sejours termines ne le masque pas')
   b.fermer()
+})
+
+// ── La fenetre dans la page : le delai et le mode manuel (2 novembre 2026) ──
+
+test('LE TEST QUI COMPTE : FERMER la fenetre du delai n enregistre RIEN', async () => {
+  // ⚠ DECISION DE THIERRY, MOT POUR MOT : « fermer la fenetre = ne rien
+  // changer : la pause reste, rien n est desarme, RIEN N EST ENREGISTRE ».
+  // Pas meme le delai. Fermer n est pas un refus — le refus a son propre
+  // bouton, « Garder pour validation », et lui ECRIT — c est une ABSENCE de
+  // decision, et le panneau reste tel quel.
+  // ⚠ LE BANC PART EN VALIDATION MANUELLE (`reponse_ia: null`), et sans delai
+  // la question ne se pose MEME PAS : ma premiere version enregistrait donc
+  // sans fenetre et mesurait un write parfaitement normal. Il faut d abord
+  // sortir du manuel — « Continuer » —, PUIS fermer la fenetre de l arriere.
+  const { b, envoyes } = bancEnregistrement({ echues: 3 })
+  b.repondreFenetre('continuer')
+  B.clic(b, B.pilManuel(b))
+  await B.reposer(b)
+  b.repondreFenetre(null)            // la fenetre de l arriere : on la FERME
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  await B.reposer(b)
+  assert.equal(b.fenetres.length, 2, 'les deux fenetres se sont bien ouvertes')
+  const reels = envoyes.filter(c => c.delais_ref && c.apercu !== true)
+  assert.equal(reels.length, 0, 'aucune ecriture : ni le delai, ni le desarmement')
+  assert.equal(b.note(), FR['messages.panneau_rien_change'],
+    'et l ecran le DIT : un geste qui ne fait rien doit le dire')
+  assert.equal(b.noteOk(), true, 'ce n est pas un echec, c est son choix de ne pas decider')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : FERMER la question du mode manuel y laisse le bien', async () => {
+  const b = bancManuel({ ferme: true })
+  assert.equal(b.msg.delaisEnCours(REF).reponse_ia, null)
+  B.clic(b, B.pilManuel(b))
+  await B.reposer(b)
+  assert.equal(b.fenetres.length, 1, 'la question a bien ete posee')
+  assert.deepEqual(b.fenetres[0].boutons,
+    [FR['messages.confirm_continuer'], FR['messages.confirm_rester']])
+  assert.equal(b.msg.delaisEnCours(REF).reponse_ia, null,
+    'fermee, le bien reste en validation manuelle')
+  assert.equal(B.pilManuel(b).getAttribute('aria-pressed'), 'true')
+  b.fermer()
+})
+
+test('« Rester en validation » laisse le bien en manuel, comme la fermeture', async () => {
+  const b = bancManuel({ confirme: false })
+  B.clic(b, B.pilManuel(b))
+  await B.reposer(b)
+  assert.equal(b.msg.delaisEnCours(REF).reponse_ia, null)
+  assert.equal(B.pilules(b).length, 0, 'et les pilules de delai restent absentes')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : plus aucune boite native sur les trois confirmations du lot', () => {
+  // ⚠ LA BOITE NATIVE SUSPEND LA PAGE, donc elle bloque l extension Chrome qui
+  // joue les recettes (vecu le 1er novembre 2026). Ce test garde le PERIMETRE
+  // decide par Thierry : les trois confirmations de ce lot. Les deux autres
+  // `window.confirm` de la page — remplacer un brouillon, supprimer un message
+  // programme — appartiennent a d autres lots, et sont nommees ici pour qu un
+  // lecteur sache que ce n est pas un oubli.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'pages', 'messages.html'), 'utf8')
+  const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  const restants = [...code.matchAll(/window\.confirm\(t\('([^']+)'\)/g)].map(m => m[1])
+  assert.deepEqual(restants.sort(), ['messages.draft_replace', 'messages.prog_delete_confirm'],
+    'seules les confirmations des AUTRES lots passent encore par la boite native')
+  for (const cle of ['messages.pause_lever_confirm', 'messages.delai_arriere_confirm',
+    'messages.mode_confirm_auto']) {
+    assert.ok(!new RegExp('window\\.confirm\\([^)]*' + cle.replace('.', '\\.')).test(code),
+      cle + ' ne passe plus par une boite native')
+    assert.ok(new RegExp('confirmerDansLaPage[\\s\\S]{0,400}' + cle.replace('.', '\\.')).test(code),
+      cle + ' passe par la fenetre de la page')
+  }
 })

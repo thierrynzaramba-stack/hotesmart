@@ -140,6 +140,7 @@ import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/s
 import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, reinitialiserMoment, libelleJour, libelleHeure, libelleDelai as libelleDelaiBrut }
   from '/shared/messages-programmes.js'
 import { departEvaluable } from '/shared/calendrier-resa.js'
+import { confirmerDansLaPage } from '/shared/confirmer.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -1341,9 +1342,12 @@ async function basculerPause (ref, paused) {
   //   · APERCU IMPOSSIBLE -> la pause reste active, et on le DIT. Ne pas savoir
   //     combien partiraient n'autorise pas a les liberer : c'est la discipline
   //     de 4.6.6, et la cible est le telephone d'un voyageur.
-  // Annuler est la branche PRUDENTE, donc celle de la touche Echap, comme sur
-  // le chemin du panneau. `window.confirm` ne nomme pas ses boutons : le texte
-  // dit laquelle fait quoi.
+  // ⚠ CE PARAGRAPHE DISAIT « Annuler est la branche prudente, donc celle de la
+  // touche Echap » : ce n'est PLUS VRAI depuis la fenetre a boutons nommes du
+  // 2 novembre 2026. Echap ne porte plus aucune action — il ferme, et fermer ne
+  // change rien. « Garder pour validation » est un bouton, et c'est lui qui
+  // ecrit. Le laisser tel quel aurait fait croire le contraire du code au
+  // prochain lecteur.
   // ⚠ LE GEL VIENT AVANT LE PREMIER `await`, ET C'EST UN CONSTAT MESURE DE
   // REVUE. Avant ce commit, `basculerPause` posait `modeEnCours` PUIS
   // `renderTiroir()` avant tout appel : la case et « Enregistrer » etaient
@@ -1390,8 +1394,35 @@ async function basculerPause (ref, paused) {
       remettreCasePause(ref)
       return
     }
-    if (avant.echues > 0
-      && !window.confirm(t('messages.pause_lever_confirm', { n: avant.echues }))) {
+    // ⚠ UNE FENETRE DANS LA PAGE, A BOUTONS NOMMES (decision de Thierry du
+    // 2 novembre 2026), et elle a TROIS issues la ou `window.confirm` n'en
+    // avait que deux :
+    //   · « Laisser partir »        -> la pause est levee, les echues partent ;
+    //   · « Garder pour validation » -> la pause RESTE, les echues sont desarmees ;
+    //   · FERMER (croix, Echap, clic a cote) -> RIEN ne change.
+    // Avant, « Annuler » portait l'action qui ECRIT et il fallait le lire dans
+    // le texte — trois recettes de suite ont bute dessus. Et la boite native
+    // SUSPEND la page, donc elle bloquait l'extension qui joue les recettes.
+    const choix = avant.echues > 0
+      ? await confirmerDansLaPage({
+        titre: t('messages.pause_lever_titre'),
+        texte: t('messages.pause_lever_confirm', { n: avant.echues }),
+        fermer: t('messages.confirm_fermer'),
+        boutons: [
+          { cle: 'partir', libelle: t('messages.confirm_laisser_partir'), principal: true },
+          { cle: 'garder', libelle: t('messages.confirm_garder') }
+        ]
+      })
+      : 'partir'
+    // ⚠ FERMER N'EST PAS « GARDER » : rien n'est desarme, et la pause reste
+    // active. C'est la troisieme issue, celle qui n'existait pas.
+    if (choix === null) {
+      etat.modeEnCours = false
+      degelerVolet()
+      remettreCasePause(ref)
+      return
+    }
+    if (choix === 'garder') {
       // ⚠ ET CETTE BRANCHE ECRIT, sinon ce n'est pas une confirmation (lecon du
       // 29 octobre : un « Annuler » qui ne change rien laissait la proposition
       // partir comme si l'hote avait dit oui). Le writer unique reste
@@ -2155,8 +2186,24 @@ function brancherTiroir (corps, ref) {
   //
   // Et c'est le SEUL chemin pour en sortir : les pilules ne sont pas rendues
   // en mode manuel. Une seule place a garder.
-  corps.querySelector('[data-delai-manuel]')?.addEventListener('click', () => {
-    if (d.reponse_ia === null && !window.confirm(t('messages.mode_confirm_auto'))) return
+  // ⚠ LA GARDE DU 11 OCTOBRE, DESORMAIS DANS UNE FENETRE DE LA PAGE. Le
+  // gestionnaire devient ASYNCHRONE : la question ne suspend plus la page, donc
+  // l'extension qui joue les recettes continue de repondre. Et les deux boutons
+  // DISENT ce qu'ils font — « Continuer » / « Rester en validation ».
+  // Fermer la fenetre revient a rester en validation : ne rien changer.
+  corps.querySelector('[data-delai-manuel]')?.addEventListener('click', async () => {
+    if (d.reponse_ia === null) {
+      const choix = await confirmerDansLaPage({
+        titre: t('messages.mode_confirm_auto_titre'),
+        texte: t('messages.mode_confirm_auto'),
+        fermer: t('messages.confirm_fermer'),
+        boutons: [
+          { cle: 'continuer', libelle: t('messages.confirm_continuer'), principal: true },
+          { cle: 'rester', libelle: t('messages.confirm_rester') }
+        ]
+      })
+      if (choix !== 'continuer') return
+    }
     basculerValidationManuelle(d)
     renderTiroir()
   })
@@ -2424,10 +2471,11 @@ async function enregistrerLePanneau (corps, ref) {
     //     « Envoyer ». Rien n'est supprime.
     // Le reglage du delai est enregistre dans les DEUX cas.
     //
-    // ⚠ ET ANNULER EST LA BRANCHE PRUDENTE, DONC CELLE DE LA TOUCHE ECHAP.
-    // `window.confirm` ne laisse pas nommer ses boutons ; le texte dit donc
-    // explicitement laquelle fait quoi, et fermer le dialogue sans lire garde
-    // les propositions au lieu de les liberer.
+    // ⚠ CECI N'EST PLUS VRAI, ET C'EST LA RAISON DE LA FENETRE DU 2 NOVEMBRE
+    // 2026. Ce paragraphe disait « Annuler est la branche prudente, donc celle
+    // de la touche Echap » et « fermer le dialogue sans lire garde les
+    // propositions » : desormais fermer ne garde RIEN et n'ecrit RIEN — ca ne
+    // change simplement rien. Garder est un BOUTON NOMME, et il ecrit.
     let garder = false
     // ⚠ UN CHOIX DE L'HOTE N'EST PAS UN ECHEC (recette du 28 octobre 2026,
     // point 4 : « Enregistre en partie. Non enregistre : les propositions deja
@@ -2485,7 +2533,42 @@ async function enregistrerLePanneau (corps, ref) {
         // qu'aucune ne l'etait.
         annoncees = Number(ap.echues) || 0
         apercuFinis = Number(ap.sejours_termines) || 0
-        garder = !window.confirm(t('messages.delai_arriere_confirm', { n: ap.echues }))
+        // ⚠ TROIS ISSUES, COMME SUR LA LEVEE DE LA PAUSE (decision de Thierry
+        // du 2 novembre 2026). « Annuler » portait l'action qui ECRIT, et son
+        // nom ne le disait pas.
+        const choix = await confirmerDansLaPage({
+          titre: t('messages.delai_arriere_titre'),
+          texte: t('messages.delai_arriere_confirm', { n: ap.echues }),
+          fermer: t('messages.confirm_fermer'),
+          boutons: [
+            { cle: 'partir', libelle: t('messages.confirm_laisser_partir'), principal: true },
+            { cle: 'garder', libelle: t('messages.confirm_garder') }
+          ]
+        })
+        // ⚠ FERMER N'ENREGISTRE RIEN DU TOUT — « ne rien changer : rien n'est
+        // desarme, rien n'est enregistre », mot pour mot. Pas meme le delai, et
+        // pas meme la sourdine saisie dans le meme geste : fermer n'est pas un
+        // refus, c'est une ABSENCE de decision, et le panneau reste tel quel.
+        // (La lecon du 28 octobre — « refuser ne doit pas couter le reste du
+        // panneau » — tient toujours : le REFUS a maintenant son propre bouton,
+        // « Garder pour validation », et lui enregistre.)
+        if (choix === null) {
+          // ⚠ ON BAISSE LES DRAPEAUX NOUS-MEMES, ET J'AVAIS ECRIT L'INVERSE
+          // ICI. Le `finally` de `enregistrerPanneau` n'est pas un degel neutre :
+          // s'il trouve `panneauEnCours` encore leve, il conclut qu'une
+          // exception est passee et pose `mode_error` — « Reglage non
+          // enregistre, reessayez ». Mesure au banc : fermer la fenetre
+          // affichait donc une ERREUR ROUGE pour un geste qui ne fait rien,
+          // exactement le mensonge inverse de celui qu'on ferme. La sortie
+          // NORMALE de cette fonction baisse les deux drapeaux (ligne ~2745) ;
+          // la mienne doit faire pareil.
+          etat.modeEnCours = false
+          etat.panneauEnCours = false
+          renderTiroir()
+          noteDuBien(ref, t('messages.panneau_rien_change'), true)
+          return
+        }
+        garder = choix === 'garder'
       }
     }
 
