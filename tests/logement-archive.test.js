@@ -318,6 +318,27 @@ test("LE TEST QUI COMPTE : la confirmation compte les sejours A VENIR, annules e
     'le compte ne porte pas sur le DEPART : un sejour en cours serait oublie')
   assert.match(String(sejours.select), /snapshot/,
     'le compte ne lit pas le snapshot, donc il ne peut pas juger du statut')
+  // ⚠ CHAQUE COLONNE DEMANDEE EXISTE, ET C'EST LE TEST QUI MANQUAIT. Defaut
+  // BLOQUANT trouve par Thierry en recette de staging le 2 novembre 2026 :
+  // `sejours_a_venir` valait `null` sur TOUS les biens, y compris un bien sans
+  // aucune reservation. La cause : `select('snapshot, provider')`, alors que
+  // `bookings_snapshot.provider` N'EXISTE PAS — la table porte `canal`.
+  // PostgREST refuse la requete ENTIERE pour une colonne inconnue (42703).
+  // ⚠ LA LISTE EST MESUREE CONTRE LA PRODUCTION le 2 novembre 2026, par
+  // l'OpenAPI de PostgREST. Elle n'a pas a etre exhaustive pour servir : elle
+  // doit contenir ce que ce code demande, et rien de plus large.
+  const COLONNES_SNAPSHOT = new Set(['id', 'created_at', 'updated_at', 'user_id',
+    'booking_id', 'property_id', 'snapshot', 'raw', 'raw_hash', 'property_uuid',
+    'canal', 'statut_canonique', 'montant_net_cents', 'montant_est_brut',
+    'commission_cents', 'date_versement', 'motif_non_calculable', 'derive_le',
+    'derive_version', 'est_blocage', 'derive_raw_hash', 'date_vente',
+    'date_vente_fiable', 'date_vente_motif', 'date_annulation',
+    'date_annulation_source'])
+  for (const c of String(sejours.select).split(',').map(x => x.trim()).filter(Boolean)) {
+    assert.ok(COLONNES_SNAPSHOT.has(c),
+      `le compte demande « bookings_snapshot.${c} », qui n existe pas : PostgREST refusera la requete `
+      + 'ENTIERE en 42703, et le compte restera `null` sur TOUS les biens')
+  }
   const taches = vu.find(q => q.table === 'agent_tasks')
   assert.ok(taches, 'la confirmation ne compte pas les taches en vol')
   assert.deepStrictEqual(taches.filtres.status_in, A.TACHES_EN_VOL)
@@ -388,7 +409,10 @@ test("LE TEST QUI COMPTE : un BLOCAGE PROPRIETAIRE n est pas un sejour a venir",
         select () { return ch }, eq () { return ch }, neq () { return ch },
         gte () { return ch }, in () { return ch }, limit () { return ch },
         maybeSingle: async () => ({
-          data: { id: 'uuid-bien', provider_property_id: 'cle-beds24',
+          // ⚠ LE BIEN PORTE SON PROVIDER, parce que c'est de LA que le lecteur
+          // de statut le prend desormais (defaut du 2 novembre 2026 :
+          // `bookings_snapshot.provider` n'existe pas).
+          data: { id: 'uuid-bien', provider: 'beds24', provider_property_id: 'cle-beds24',
                   active_at: null, pilote_tarifaire: 'calendrier', archive_le: null },
           error: null
         }),
@@ -406,6 +430,90 @@ test("LE TEST QUI COMPTE : un BLOCAGE PROPRIETAIRE n est pas un sejour a venir",
   })
   assert.strictEqual(r.sejours_a_venir, 1,
     `${r.sejours_a_venir} sejour(s) compte(s) au lieu d un : le provider n est pas passe au lecteur de statut`)
+})
+
+test("LE TEST QUI COMPTE : un bien SANS reservation rend 0, jamais `null`", async () => {
+  // ⚠ L'ATTENDU DE THIERRY, MOT POUR MOT (recette de staging du 2 novembre
+  // 2026) : « Attendu : 0, ou le vrai nombre. » Un `null` fait dire a l'ecran
+  // « nous n'avons pas pu compter » — ce qui est faux quand la reponse est
+  // simplement « aucun ». La difference est celle que ce depot nomme partout :
+  // un `null` n'est pas un zero, et l'inverse est vrai aussi.
+  const b = banc({ properties: [unBien()] })
+  const client = {
+    from (t) {
+      if (t === 'properties') return b.client.from(t)
+      const ch = {
+        select () { return ch }, eq () { return ch }, neq () { return ch },
+        gte () { return ch }, in () { return ch }, limit () { return ch },
+        // Aucune reservation, et la lecture REUSSIT.
+        then (ok) { return Promise.resolve({ data: [], count: 0, error: null }).then(ok) }
+      }
+      return ch
+    }
+  }
+  const r = await A.compterAvantArchivage(client, {
+    bienId: 'uuid-bien', compte: 'compte-1', aujourdHui: '2026-11-02'
+  })
+  assert.strictEqual(r.sejours_a_venir, 0,
+    `un bien sans reservation rend ${JSON.stringify(r.sejours_a_venir)} : l ecran dira « pas pu compter »`)
+  assert.strictEqual(r.taches_en_vol, 0, 'le compte des taches en vol a le meme defaut')
+})
+
+test("une lecture qui ECHOUE, elle, rend bien `null`", async () => {
+  // Le contre-cas, sans lequel « rendre 0 partout » passerait le test
+  // precedent — et une panne se lirait « aucun sejour a venir », sur le seul
+  // chiffre de cette fenetre qui engage un code d acces.
+  const b = banc({ properties: [unBien()] })
+  const client = {
+    from (t) {
+      if (t === 'properties') return b.client.from(t)
+      const ch = {
+        select () { return ch }, eq () { return ch }, neq () { return ch },
+        gte () { return ch }, in () { return ch }, limit () { return ch },
+        then (ok) { return Promise.resolve({ data: null, error: { message: 'panne' } }).then(ok) }
+      }
+      return ch
+    }
+  }
+  const r = await A.compterAvantArchivage(client, { bienId: 'uuid-bien', compte: 'compte-1' })
+  assert.strictEqual(r.sejours_a_venir, null,
+    'une panne de lecture passe pour « aucun sejour a venir »')
+})
+
+test("LE TEST QUI COMPTE : la lecture du bien DEMANDE `provider`", async () => {
+  // ⚠ C'EST LA CAUSE DU DEFAUT DU 2 NOVEMBRE 2026. La revue avait affirme que
+  // `bookings_snapshot` porte une colonne `provider` ; je l'ai applique sans le
+  // verifier, et la table ne la porte pas — elle porte `canal`. Le provider du
+  // bien vit dans `properties.provider`, et c'est de la que
+  // `sync-menages-entite` le lit (`providerParBien`).
+  // ⚠ ET UNE COLONNE DONT ON JUGE SANS L'AVOIR SELECTIONNEE EST UNE GARDE
+  // OUVERTE : `isActiveStatus(snapshot, undefined)` retombe sur `confirmed` et
+  // compte les blocages proprietaire. Ce depot nomme ce defaut explicitement.
+  // ⚠ Ma premiere version de ce test contenait un `assert.ok(true)` — donc
+  // rien. Un test qui ne peut pas echouer est pire qu'un test absent : il
+  // occupe la place de celui qui aurait mordu.
+  let vu = null
+  const client = {
+    from (t) {
+      const ch = {
+        select (c) { if (t === 'properties') vu = c; return ch },
+        eq () { return ch }, neq () { return ch }, gte () { return ch },
+        in () { return ch }, limit () { return ch },
+        maybeSingle: async () => ({
+          data: { id: 'uuid-bien', provider: 'channex', provider_property_id: 'cle',
+                  active_at: null, pilote_tarifaire: 'calendrier', archive_le: null },
+          error: null
+        }),
+        then (ok) { return Promise.resolve({ data: [], count: 0, error: null }).then(ok) }
+      }
+      return ch
+    }
+  }
+  await A.compterAvantArchivage(client, { bienId: 'uuid-bien', compte: 'compte-1' })
+  assert.ok(vu, 'la lecture du bien n a pas eu lieu')
+  const colonnes = String(vu).split(',').map(x => x.trim())
+  assert.ok(colonnes.includes('provider'),
+    `la lecture du bien ne demande pas \`provider\` : ${JSON.stringify(colonnes)}`)
 })
 
 test("LE TEST QUI COMPTE : le signal « annonce en ligne » est `channel_ready`", async () => {
