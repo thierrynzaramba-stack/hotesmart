@@ -32,6 +32,7 @@ const CODE_V2 = [
   'apps/yield/comparables.html', 'apps/yield/marche-global.html', 'apps/yield/marche-temperature.html', 'apps/yield/marche.html',
   'lib/airroi/client.js', 'lib/airroi/cout.js', 'lib/airroi/depot.js', 'lib/airroi/fixture-sure.js', 'lib/airroi/json.js',
   'lib/marche/activite.js', 'lib/marche/annonces-retirees.js', 'lib/marche/calendrier-marche.js', 'lib/marche/choix-comparables.js',
+  'lib/marche/comparables-releves.js',
   'lib/marche/controle.js', 'lib/marche/critere.js', 'lib/marche/etude.js', 'lib/marche/explication.js', 'lib/marche/grille-marche.js',
   'lib/marche/marche-global.js', 'lib/marche/menage.js', 'lib/marche/pertinence.js', 'lib/marche/prix-depart.js', 'lib/marche/profil-bien.js',
   'lib/marche/progression-marche.js', 'lib/marche/saisons.js', 'lib/marche/temperature-airroi.js', 'shared/temperature-calendrier.js',

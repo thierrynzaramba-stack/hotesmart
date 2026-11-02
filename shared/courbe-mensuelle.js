@@ -102,9 +102,11 @@ const ech = (s) => String(s == null ? '' : s)
  * @param {boolean}  o.arrondir     relève le haut de l'axe à un palier rond
  * @param {number}   o.largeur      largeur du `viewBox`, en unités (défaut 680)
  * @param {number}   o.hauteur      hauteur du `viewBox`, en unités (défaut 220)
+ * @param {Array}    o.bandes       [{ min: [12], max: [12], couleur }] — une
+ *   enveloppe dessinée DERRIÈRE les courbes (min–max des comparables).
  * @returns {string} le SVG, prêt à insérer
  */
-export function courbeMensuelle ({ series = [], graduation, bulle, resume, initiales, graduations, moisFort, arrondir, largeur, hauteur } = {}) {
+export function courbeMensuelle ({ series = [], graduation, bulle, resume, initiales, graduations, moisFort, arrondir, largeur, hauteur, bandes = [] } = {}) {
   // ⚠ DES BORNES, PARCE QUE CES DEUX NOMBRES DIVISENT. Une hauteur nulle
   // collerait toutes les series sur une ligne.
   // ⚠ ET LA BORNE DE LARGEUR NE SUFFIT PAS A ELLE SEULE — ce commentaire
@@ -134,7 +136,13 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
   // coupe, comme pour un mois sans donnée. C'est la seule réponse qui ne
   // fabrique pas de chiffre.
   const fini = (v) => Number.isFinite(v)
+  // ⚠ LA BANDE ENTRE DANS LE MAXIMUM, sinon elle sort du cadre par le haut
+  // sans un mot : un comparable qui gagne deux fois plus que l'hôte aurait son
+  // plafond tracé au-dessus de la zone dessinée, donc invisible — et l'écran
+  // montrerait une bande tronquée en affirmant qu'elle est complète.
   const toutes = series.flatMap(s => (s.valeurs || []).filter(fini))
+    .concat((Array.isArray(bandes) ? bandes : []).flatMap(b =>
+      [...(b.min || []), ...(b.max || [])].filter(fini)))
   // ⚠ UN MAXIMUM NUL FERAIT UNE DIVISION PAR ZÉRO, et le SVG sortirait avec des
   // `NaN` dans ses coordonnées. Un plancher à 1 rend une courbe plate, ce qui
   // est la vérité.
@@ -175,6 +183,90 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
 
   const x = (k) => MARGE_G + (L - MARGE_G - MARGE_D) * k / 11
   const y = (v) => MARGE_HAUT + (H - MARGE_HAUT - MARGE_BAS) * (1 - v / max)
+
+  // ⚠ LES BANDES SE DESSINENT EN PREMIER, donc DERRIÈRE tout le reste. Une
+  // enveloppe posée par-dessus les courbes les masquerait — et c'est la courbe
+  // de l'hôte qui porte le sens, la bande n'est qu'un décor de comparaison.
+  // ⚠ UNE BANDE SE COUPE SUR UN TROU, exactement comme un trait : relier deux
+  // segments par-dessus quatre mois sans comparable dessinerait une enveloppe
+  // qui n'a jamais été mesurée.
+  const polygones = (Array.isArray(bandes) ? bandes : []).map(b => {
+    const mn = b.min || []
+    const mx = b.max || []
+    const ok = (k) => fini(mn[k]) && fini(mx[k])
+    const morceaux = []
+    let courant = []
+    for (let k = 0; k < 12; k++) {
+      if (ok(k)) { courant.push(k); continue }
+      if (courant.length) morceaux.push(courant)
+      courant = []
+    }
+    if (courant.length) morceaux.push(courant)
+    const couleur = /^#[0-9a-fA-F]{3,8}$|^var\(--[\w-]+\)$|^[a-z]{3,20}$/.test(String(b.couleur || ''))
+      ? String(b.couleur)
+      : 'var(--line)'
+    // ⚠ UNE OPACITE PAR BANDE, BORNEE. Deux enveloppes de GRIS VOISINS ne se
+    // distinguent pas (recette du 28 octobre : « trop proches »), et le remede
+    // n'est pas une couleur vive — c'est le MEME gris a deux densites. Bornee
+    // comme `epaisseur`, et non echappee mais NUMERIQUE.
+    //
+    // ⚠⚠ ELLE PART EN STYLE **EN LIGNE**, PAS EN ATTRIBUT, ET C'EST TOUT CE QUI
+    // COMPTE ICI. Un attribut de presentation (`opacity="0.15"`) a la priorite
+    // la PLUS BASSE de la cascade : toute regle d'auteur l'emporte sur lui. Or
+    // `shared/ui.css` pose `.cm-bande { opacity: .85 }` et
+    // `.cm-bande-trait { opacity: .85 }` — donc l'attribut n'a JAMAIS rien
+    // applique. Mesure de Thierry en recette sur staging, puis reproduite au
+    // banc chrome le 28 octobre 2026 :
+    //   attribut demande  : 0.15 et 0.07
+    //   opacite CALCULEE  : 0.85 et 0.85
+    //   les deux bandes se distinguent : NON
+    // Deux consequences, et la seconde est la pire : l'adoucissement demande
+    // n'avait aucun effet, ET le constat « bandes trop proches » du 28 octobre
+    // n'avait jamais ete reellement corrige — les deux densites ne s'appliquaient
+    // pas. Un style en ligne, lui, bat une regle de classe.
+    //
+    // ⚠ ET ON NE RETIRE PAS LA REGLE CSS, MAIS PAS POUR LA RAISON QUE J'AVAIS
+    // ECRITE. Je justifiais de la garder par « `marche-temperature.html` et
+    // `prix.html` passent des bandes SANS opacite » : les deux etaient FAUX,
+    // releve par la session chef de file et remesure ici —
+    // `class="cm-bande"` n'est emis que par les deux lignes de CE module,
+    // `pages/aujourdhui.html` en est le SEUL importateur,
+    // `marche-temperature.html` dessine ses propres `<rect>` sans cette classe
+    // (son attribut `opacity` marche, justement parce qu'aucune regle de classe
+    // ne le combat), et les « bandes » de `prix.html` sont des `div` en flex.
+    // Mon avertissement sur le rayon d'explosion etait donc large de trois
+    // ecrans.
+    // La VRAIE raison de garder la regle : elle est le DEFAUT quand aucune
+    // opacite n'est demandee, et `tests/courbe-bande-rendu.test.js` le mesure
+    // (0,85 calcule). La retirer rendrait les bandes opaques a 1 pour tout
+    // appelant futur qui ne precise rien.
+    // ⚠ Et dans ce depot un commentaire se lit comme une mesure : une decision
+    // juste adossee a un fait faux se propage, parce que personne ne reverifie
+    // ce qui est deja ecrit.
+    //
+    // ⚠ MES DEUX TESTS LISAIENT L'ATTRIBUT, donc mon intention, jamais le rendu.
+    // C'est pourquoi le test de ce lot lit le style CALCULE dans un vrai
+    // navigateur (`tests/courbe-bande-rendu.test.js`).
+    const opacite = Number.isFinite(Number(b.opacite)) && Number(b.opacite) > 0
+      ? Math.min(1, Number(b.opacite))
+      : null
+    const styleOpacite = opacite === null ? '' : ` style="opacity:${opacite}"`
+    return morceaux.map(ks => {
+      // ⚠ UN MOIS SEUL NE FAIT PAS UN POLYGONE : trois points confondus en
+      // dessinent un de surface nulle, donc invisible. On lui donne un TRAIT
+      // vertical, qui est exactement ce que la donnée dit — un intervalle.
+      if (ks.length === 1) {
+        const k = ks[0]
+        return `<line class="cm-bande-trait" x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" `
+          + `y1="${y(mx[k]).toFixed(1)}" y2="${y(mn[k]).toFixed(1)}" stroke="${couleur}"`
+          + `${styleOpacite}/>`
+      }
+      const haut = ks.map(k => `${x(k).toFixed(1)},${y(mx[k]).toFixed(1)}`)
+      const bas = [...ks].reverse().map(k => `${x(k).toFixed(1)},${y(mn[k]).toFixed(1)}`)
+      return `<polygon class="cm-bande" points="${haut.concat(bas).join(' ')}" fill="${couleur}"`
+        + `${styleOpacite}/>`
+    }).join('')
+  }).join('')
 
   const grille = paliers.map(({ f, texte }) =>
     `<line class="cm-grille" x1="${MARGE_G}" x2="${L - MARGE_D}" `
@@ -261,7 +353,7 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
   // sens. Les chiffres sont écrits à côté, et ce libellé dit ce qu'elle montre
   // — même règle que la barre du bloc Mois.
   return `<svg class="cm" viewBox="0 0 ${L} ${H}" role="img" aria-label="${ech(resume)}">`
-    + `${grille}${abscisse}`
+    + `${polygones}${grille}${abscisse}`
     + `<line class="cm-axe" x1="${MARGE_G}" x2="${L - MARGE_D}" `
     + `y1="${H - MARGE_BAS}" y2="${H - MARGE_BAS}"/>`
     + `${courbes}</svg>`
