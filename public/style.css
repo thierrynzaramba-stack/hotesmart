@@ -77,16 +77,38 @@
      légende sur le marché. N'en retenir que les fonds ferait une source
      unique qui n'en couvre que la moitié.
 
-     ⚠ ET LA CONSIGNE « NI BLEU NI AMBRE » NE S'APPLIQUE PAS À CETTE ÉCHELLE :
-     Thierry l'a retirée pour elle, et pour elle seule, le 29 octobre 2026. Le
-     pas Base est bleuté et le pas Haut ambré, c'est voulu. Les trois couleurs
-     réservées — noir à la navigation, ambre à « ce qu'HôteSmart a fait pour
-     vous », bleu au cliquable — restent en vigueur partout ailleurs.
+     ⚠ UNE SEULE TEINTE DEPUIS LE 2 NOVEMBRE 2026, SUR DOUBLE VALIDATION DE
+     THIERRY : « une seule teinte prune, du plus clair (Base) au plus foncé
+     (Exceptionnel), luminance strictement décroissante, ni bleu ni ambre,
+     texte lisible sur chaque fond. » L'échelle précédente changeait de TEINTE
+     d'un pas à l'autre (Base bleuté, Moyen verdi, Haut ambré, Exceptionnel
+     rougi) : cinq couleurs sans ordre lisible, où rien ne disait que Haut
+     vient après Moyen. Les cinq fonds tiennent maintenant 269-272° et leur
+     luminance décroît de 0,801 à 0,261, par pas de 0,131 à 0,140 — l'ordre se
+     lit sans légende.
+     ⚠ ET BASE NE PART PAS DU QUASI-BLANC, sur retouche de Thierry du
+     2 novembre 2026 : « Base est presque blanc et risque de se lire vide ».
+     La première rampe le posait à #F7F3FB, soit 1,096:1 contre le --bg blanc
+     de la carte qui le porte — une teinte qu'on devine au lieu de la lire.
+     #EDE4F5 vaut 1,234:1 contre ce même blanc.
+     La consigne « ni bleu ni ambre » redevient donc valable ICI AUSSI : elle
+     avait été levée pour cette échelle seule le 29 octobre, et la rampe prune
+     la rend sans objet.
 
-     ⚠ LE TEXTE SUR CES FONDS N'EST PAS DÉCLARÉ : il hérite de --text. Les
-     cinq fonds sont pâles, donc le texte sombre passe sur les cinq — EN MODE
-     CLAIR, et seulement là. Un fond foncé ajouté un jour demanderait sa
-     couleur de texte avec lui.
+     ⚠ LE TEXTE PRINCIPAL HÉRITE DE --text, ET C'EST MESURÉ : #1a1a1a tient
+     de 14,10:1 (Base) à 5,16:1 (Exceptionnel) sur les cinq fonds. C'est la
+     raison pour laquelle la rampe s'arrête au MOYEN et ne va pas au foncé —
+     un fond foncé imposerait un régime de texte blanc, donc cinq valeurs de
+     plus et deux écrans à deux régimes.
+
+     ⚠ ET LE PETIT TEXTE NE PREND PAS LES GRIS GÉNÉRAUX : il prend l'ACCENT de
+     son propre niveau, via --niv-encre (posé par les règles .n-* de
+     apps/yield/prix.html). Les accents sont dimensionnés pour ça : 6,50:1 à
+     4,90:1 sur leur fond, donc lisibles en petit texte autant qu'en liseré.
+     ⚠ Ce n'est pas un raffinement, c'est un correctif : --text3 (#9b9b9b),
+     qui peignait le NOM du niveau dans les cinq cartes, était à 2,2-2,5:1 sur
+     l'ANCIENNE palette — déjà sous le seuil, en production, avant ce lot.
+     Mesure du 2 novembre 2026.
 
      ⚠ IL A EXISTÉ UN CAS OÙ C'ÉTAIT FAUX, ET IL EST FERMÉ DEPUIS LE
      2 NOVEMBRE 2026. apps/yield/marche-global.html redéfinissait quatre de ces
@@ -104,11 +126,11 @@
      disait encore « fermer ce sombre demande la double validation de Thierry »
      dans le commit qui venait de le fermer. Une phrase périmée se lit comme une
      mesure et ne rougit jamais. Voir docs/kb/charte-ui.md §5. */
-  --yf-base: #E7F0F7;          --yf-base-l: #4A7FA8;
-  --yf-moyen: #EDF4EE;         --yf-moyen-l: #5F8F6E;
-  --yf-haut: #FBF4E2;          --yf-haut-l: #C89A2E;
-  --yf-tres-haut: #FAEADA;     --yf-tres-haut-l: #D2762E;
-  --yf-exceptionnel: #F8E2DA;  --yf-exceptionnel-l: #BF4F32;
+  --yf-base: #EDE4F5;          --yf-base-l: #673B92;
+  --yf-moyen: #DED0ED;         --yf-moyen-l: #5E3488;
+  --yf-haut: #CDB8E2;          --yf-haut-l: #522B7A;
+  --yf-tres-haut: #B99DD5;     --yf-tres-haut-l: #432067;
+  --yf-exceptionnel: #A07DC4;  --yf-exceptionnel-l: #2A1342;
 
   /* La police du socle V5, pour les écrans YieldFlow qui la chargent.
      ⚠ LE STACK EST ÉCRIT ICI UNE FOIS : six pages l'appliquent, et six

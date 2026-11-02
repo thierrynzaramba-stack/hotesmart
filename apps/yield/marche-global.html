@@ -80,7 +80,15 @@
     .mg-zones { color: var(--text2); font-size: 12px; }
     .mg-niv-l { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px; margin-bottom: 4px;
                 border-radius: 4px; background: var(--niv-fond); box-shadow: inset 3px 0 0 var(--niv-lisere); font-size: 13.5px; color: var(--text); }
-    .mg-niv-l small { color: var(--text2); }
+    /* ⚠ LE PETIT TEXTE PREND LE LISERE DE SA LIGNE, PAS --text2. Sur la rampe
+       prune, #6b6b6b tombe a 1,58:1 sur le fond d'Exceptionnel ; le lisere du
+       niveau est a 4,90:1 au pire. Meme raison que --niv-encre dans prix.html.
+       ⚠ ET IL N'Y A PAS DE REPLI ICI, PARCE QU'IL SERAIT MORT : --niv-lisere
+       est TOUJOURS pose, en style en ligne, par la seule regle qui rend cette
+       classe. Un var(--niv-lisere, var(--text2)) se lisait comme une garde ; il
+       n'en etait pas une, et il cachait que la vraie garde est la valeur de
+       repli du || ci-dessous. Releve en review le 2 novembre 2026. */
+    .mg-niv-l small { color: var(--niv-lisere); }
     .mg-ev-liste { display: flex; flex-direction: column; gap: 6px; }
     .mg-ev-l { background: var(--bg2); border-left: 4px solid var(--ev); border-radius: 4px; padding: 7px 10px; font-size: 13px;
                display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
@@ -415,8 +423,22 @@
 
   // 5b, 5c, 5d — AirROI, sur les 12 mois du calendrier.
   const SOURCE_AIRROI = '<p class="mg-source">Source : modèle AirROI — les 12 mois du calendrier ci-dessus.</p>'
+  // ⚠ CHAQUE LIGNE PREND LA PAIRE DE SON NIVEAU, FOND ET ACCENT ENSEMBLE —
+  // et la derniere ligne vient de se remettre d'aplomb. Elle melangeait le
+  // FOND de « Tres haut » et l'ACCENT d'« Exceptionnel » : l'ecart 1 releve le
+  // 29 octobre 2026, laisse ouvert parce que le fermer changeait l'apparence
+  // d'un ecran valide. Thierry a valide la correction le 2 novembre 2026 :
+  // « garde sa propre paire ».
+  //
+  // ⚠ ET LA RAISON N'EST PAS LE CONTRASTE — je l'ai cru, et je l'avais ecrit
+  // ici. Sur la premiere rampe prune (Base #F7F3FB) le melange tombait a
+  // 2,79:1, sous le seuil de 3:1 d'un element graphique, et c'etait un
+  // argument. Thierry a ensuite fonce la rampe : le meme melange vaut
+  // maintenant 6,96:1, il passerait. La raison qui reste est la seule vraie :
+  // un fond va avec SON accent, sinon la legende ment sur ce qu'elle montre.
+  // Mesure du 2 novembre 2026, refaite sur les valeurs definitives.
   const YF = { Base: ['--yf-base', '--yf-base-l'], Moyen: ['--yf-moyen', '--yf-moyen-l'], Haut: ['--yf-haut', '--yf-haut-l'],
-    'Très haut ou Exceptionnel': ['--yf-tres-haut', '--yf-exceptionnel-l'] }
+    'Très haut ou Exceptionnel': ['--yf-exceptionnel', '--yf-exceptionnel-l'] }
   function blocsAirroi (r) {
     if (!r || r.statut !== 'calcule' || !r.semaine || !Array.isArray(r.niveaux) || !Array.isArray(r.evenements)) {
       return `<div class="mg-bloc"><h3>Le marché selon AirROI</h3>${SOURCE_AIRROI}<p class="non-calc">Non calculable : ${ech((r && r.motif) || 'résumé absent')}.</p></div>`
@@ -431,7 +453,13 @@
       + '<p class="mg-mention">Week-end : nuits du vendredi et du samedi ; semaine : du lundi au jeudi.</p></div>'
     const niveaux = `<div class="mg-bloc"><h3>Les niveaux du marché</h3>${SOURCE_AIRROI}`
       + r.niveaux.map(n => {
-        const [fond, lisere] = YF[n.yieldflow] || ['--bg2', '--border2']
+        // ⚠ LE REPLI NE PEUT PAS ETRE --border2, ET C'EST UN CONSTAT DE REVIEW
+        // DU 2 NOVEMBRE 2026. --niv-lisere ne sert pas qu'au trait : le petit
+        // texte de la ligne le prend aussi. --border2 vaut rgba(0,0,0,.2),
+        // donc 1,60:1 en TEXTE sur --bg2 — le nom AirROI entre parentheses
+        // disparaissait presque. Un jeton de BORDURE n'est pas une couleur de
+        // texte. --text2 : 4,88:1, et il fait un trait gris tres convenable.
+        const [fond, lisere] = YF[n.yieldflow] || ['--bg2', '--text2']
         return `<div class="mg-niv-l" style="--niv-fond:var(${fond});--niv-lisere:var(${lisere})"><span><b>${ech(n.yieldflow)}</b> <small>(${ech(NOM_AIRROI[niv(n.niveau)] || '—')})</small></span><span>${ech(n.jours)} jour${n.jours > 1 ? 's' : ''}</span></div>`
       }).join('')
       + '<p class="mg-mention">Les niveaux d’AirROI lus dans les noms de votre grille YieldFlow : une lecture, pas un calcul de vos prix. Pic correspond à Très haut ou Exceptionnel.</p></div>'

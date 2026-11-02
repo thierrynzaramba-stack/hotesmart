@@ -32,12 +32,22 @@ const SOURCE = 'public/style.css'
 // ⚠ DIX VALEURS, PAS CINQ : un fond ET un accent par niveau. L'accent se pose
 // en `box-shadow: inset 3px 0 0` sur les lignes de nuit et en trait de legende
 // sur le marche. N'epingler que les fonds aurait laisse cinq valeurs libres.
+// ⚠ LES VALEURS ONT CHANGE LE 2 NOVEMBRE 2026, SUR DOUBLE VALIDATION DE
+// THIERRY, ET C'EST EXACTEMENT LE CHEMIN QUE CE TEST IMPOSE : il a rougi
+// quand la palette a bouge, personne ne l'a « corrige », la question lui a ete
+// posee avec un apercu, et il a tranche — puis demande une retouche (Base
+// fonce, « presque blanc et risque de se lire vide »).
+//
+// L'echelle precedente changeait de TEINTE d'un pas a l'autre : Base bleute,
+// Moyen verdi, Haut ambre, Exceptionnel rougi. Cinq couleurs sans ordre
+// lisible. Les dix valeurs ci-dessous tiennent 269-272°, et la luminance des
+// fonds decroit de 0,801 a 0,261 par pas de 0,131 a 0,140.
 const PALETTE = [
-  { niveau: 'Base', jeton: 'yf-base', fond: '#E7F0F7', accent: '#4A7FA8' },
-  { niveau: 'Moyen', jeton: 'yf-moyen', fond: '#EDF4EE', accent: '#5F8F6E' },
-  { niveau: 'Haut', jeton: 'yf-haut', fond: '#FBF4E2', accent: '#C89A2E' },
-  { niveau: 'Tres haut', jeton: 'yf-tres-haut', fond: '#FAEADA', accent: '#D2762E' },
-  { niveau: 'Exceptionnel', jeton: 'yf-exceptionnel', fond: '#F8E2DA', accent: '#BF4F32' }
+  { niveau: 'Base', jeton: 'yf-base', fond: '#EDE4F5', accent: '#673B92' },
+  { niveau: 'Moyen', jeton: 'yf-moyen', fond: '#DED0ED', accent: '#5E3488' },
+  { niveau: 'Haut', jeton: 'yf-haut', fond: '#CDB8E2', accent: '#522B7A' },
+  { niveau: 'Tres haut', jeton: 'yf-tres-haut', fond: '#B99DD5', accent: '#432067' },
+  { niveau: 'Exceptionnel', jeton: 'yf-exceptionnel', fond: '#A07DC4', accent: '#2A1342' }
 ]
 
 const REGLE = 'Cette palette est un ELEMENT DE STRUCTURE (decision de Thierry du '
@@ -56,14 +66,21 @@ const REGLE = 'Cette palette est un ELEMENT DE STRUCTURE (decision de Thierry du
 // `'*'` = toutes les valeurs ; une liste = ces valeurs et pas d'autres.
 const AUTORISES = {
   'public/style.css': '*',
-  // ⚠ CE N'EST PAS UNE COPIE DE LA PALETTE, et la nuance est tout le sujet.
-  // #4A7FA8 y est la couleur du SEJOUR de cet ecran (`.yp-seg` et sa legende).
-  // Elle vaut la meme chose que l'accent du niveau Base par COINCIDENCE, pas
-  // par intention : la passer en var(--yf-base-l) aurait lie les barres de
-  // sejour a la palette, et un changement de palette aurait repeint les
-  // sejours. Le nouvel ecran, lui, prend --sejour (decision du 30/10/2026).
-  // UNE SEULE valeur est permise ici — les neuf autres font rougir.
-  'apps/yield/prix.html': ['#4A7FA8'],
+  // ⚠ L'ENTREE DE apps/yield/prix.html EST PARTIE LE 2 NOVEMBRE 2026, ET SON
+  // DEPART EST LA DEMONSTRATION DE CE QU'ELLE DISAIT. Elle permettait #4A7FA8,
+  // couleur du SEJOUR de cet ecran, qui valait l'accent du niveau Base par
+  // COINCIDENCE et non par intention — d'ou l'exception, limitee a cette
+  // valeur. La palette prune a emporte la coincidence : #4A7FA8 n'est plus une
+  // valeur de la palette, donc `permis()` n'est plus jamais consulte pour lui,
+  // donc l'entree ne garde plus rien.
+  //
+  // ⚠ ET UNE ENTREE QUI NE GARDE PLUS RIEN NE SE LAISSE PAS « AU CAS OU ».
+  // C'est la lecon que ce fichier porte deja deux fois, plus bas et plus haut :
+  // une liste blanche inerte se REVEILLE en silence le jour ou son motif
+  // reparait. Si un jour un accent de la palette retombait sur #4A7FA8, cette
+  // ligne aurait rouvert prix.html sans un rouge. La couleur du sejour, elle,
+  // reste en dur dans l'ecran — elle n'a jamais eu besoin de cette entree pour
+  // exister, seulement pour ne pas faire rougir un test qui ne la regarde plus.
   'docs/kb/charte-ui.md': '*',
   'docs/kb/restitution-yield.md': '*',
   // ⚠ LA SPEC DU LOT « yf-ecran-periodes » EST REVENUE DANS CETTE LISTE, ET
@@ -215,6 +232,61 @@ test('LE TEST QUI COMPTE : les hexas de la palette n apparaissent que dans les f
   assert.deepEqual(mauvaiseValeur, [],
     'une valeur de la palette est portee par le mauvais jeton :\n'
     + mauvaiseValeur.join('\n') + `\n${REGLE}`)
+})
+
+test('LE TEST QUI COMPTE : un fond de niveau va toujours avec SON accent', () => {
+  // ⚠ CONSTAT DE REVIEW DU 2 NOVEMBRE 2026 : rien ne gardait cet appariement,
+  // et il s'etait DEJA deparie une fois. Du 30 octobre au 2 novembre, la
+  // legende du marche peignait le FOND de « Tres haut » avec l'ACCENT
+  // d'« Exceptionnel », pendant que le jeton --yf-exceptionnel existait sans
+  // qu'aucune regle ne l'utilise. Les trois tests ci-dessus etaient verts :
+  // ils epinglent les VALEURS et leur source, pas la facon dont deux jetons
+  // sont assembles a l'usage.
+  const src = lire('apps/yield/marche-global.html')
+  const bloc = (src.match(/const YF = \{[\s\S]*?\}\n/) || [])[0]
+  assert.ok(bloc, 'la table YF de marche-global.html est introuvable')
+
+  const paires = [...bloc.matchAll(/\['(--yf-[a-z-]+)',\s*'(--yf-[a-z-]+)'\]/g)]
+  assert.equal(paires.length, 4,
+    'la table YF doit porter 4 lignes de legende, pas ' + paires.length)
+  const deparies = paires
+    .filter(([, fond, accent]) => accent !== fond + '-l')
+    .map(([, fond, accent]) => `${fond} apparie a ${accent} au lieu de ${fond}-l`)
+  assert.deepEqual(deparies, [],
+    'la legende du marche apparie un fond avec l accent d un AUTRE niveau :\n'
+    + deparies.join('\n')
+    + '\nUn fond va avec SON accent, sinon la legende ment sur ce qu elle montre.'
+    + `\n${REGLE}`)
+
+  // ⚠ ET LE REPLI NE PEUT PAS ETRE UN JETON DE BORDURE. Le second jeton ne
+  // sert pas qu'au trait : `.mg-niv-l small` le prend comme couleur de TEXTE.
+  // --border2 (rgba(0,0,0,.2)) y valait 1,60:1 sur --bg2.
+  const repli = (src.match(/YF\[n\.yieldflow\] \|\| \[('[^']+'),\s*('[^']+')\]/) || [])
+  assert.ok(repli[1], 'le repli de la table YF est introuvable')
+  assert.doesNotMatch(repli[2], /border/,
+    `le repli de la legende peint du TEXTE avec ${repli[2]} : un jeton de bordure`
+    + ' n est pas une couleur de texte (mesure : 1,60:1 sur --bg2).')
+})
+
+test('LE TEST QUI COMPTE : tout fond de niveau porte l encre de SON niveau', () => {
+  // ⚠ LA REGLE QUE LE LOT DU 2 NOVEMBRE 2026 A POSEE, ET QU'IL AVAIT LUI-MEME
+  // OUBLIEE A UN ENDROIT. Un fond de la palette sans --niv-encre laisse le
+  // texte sur un gris general : --text2 tombe a 1,58:1 sur Exceptionnel. Le
+  // lot l'avait pose sur les cartes et oublie sur la pastille des lignes de
+  // nuit — l'element le plus repete de l'ecran, un par nuit. Releve en review.
+  const src = lire('apps/yield/prix.html')
+  const manquants = []
+  for (const n of PALETTE) {
+    const classe = '.n-' + n.jeton.replace('yf-', '')
+    const regle = (src.match(new RegExp('\\' + classe + '\\s*\\{[^}]*\\}')) || [])[0]
+    if (!regle) { manquants.push(`${classe} : regle introuvable`); continue }
+    if (!regle.includes(`background: var(--${n.jeton})`)) manquants.push(`${classe} : pas de fond --${n.jeton}`)
+    if (!regle.includes(`--niv-encre: var(--${n.jeton}-l)`)) manquants.push(`${classe} : pas d encre --${n.jeton}-l`)
+  }
+  assert.deepEqual(manquants, [],
+    'une regle de niveau pose un fond sans son encre :\n' + manquants.join('\n')
+    + '\nUn fond de la palette sans --niv-encre laisse le texte sur un gris'
+    + ' general, qui tombe a 1,58:1 sur le niveau Exceptionnel.')
 })
 
 test('LE TEST QUI COMPTE : les six ecrans YieldFlow chargent la police V5', () => {

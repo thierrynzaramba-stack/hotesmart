@@ -66,10 +66,24 @@
     .yp-pilote .avertir { font-size: 13px; color: var(--text); margin: 0; flex-basis: 100%; }
     /* Lot 4.6.7 : la grille fixee par l'hote. */
     .yp-niv { position: relative; }
-    .yp-niv-edit { position: absolute; top: 2px; right: 4px; background: none; border: none; cursor: pointer; font-size: 12px; opacity: .55; padding: 0; }
+    /* ⚠ L'OPACITE PASSE DE .55 A .8, ET L'ENCRE SUIT LE NIVEAU. Le ✎ etait
+       deja sous le seuil AVANT ce lot (3,65 a 3,80:1 sur l'ancienne palette) ;
+       la rampe prune le faisait tomber a 2,50:1 sur Exceptionnel. Compose a
+       .8 sur l'accent du niveau : 3,68 a 4,19:1 — au-dessus des 3:1 d'un
+       composant d'interface, et mieux qu'avant le lot. Il reste sous 4,5:1 si
+       on le compte comme du texte : c'est une dette anterieure a ce lot, pas
+       un choix de celui-ci. */
+    .yp-niv-edit { position: absolute; top: 2px; right: 4px; background: none; border: none; cursor: pointer; font-size: 12px; color: var(--niv-encre, inherit); opacity: .8; padding: 0; }
     .yp-niv-edit:hover { opacity: 1; }
-    .yp-niv-fixe { font-size: 10.5px; color: var(--text2); margin-top: 2px; }
-    .yp-niv-x { background: none; border: none; cursor: pointer; color: #B02A37; font-size: 13px; padding: 0 0 0 2px; }
+    .yp-niv-fixe { font-size: 10.5px; color: var(--niv-encre, var(--text2)); margin-top: 2px; }
+    /* ⚠ LE × PERD SON ROUGE SUR LES NIVEAUX FONCES, ET AUCUN ROUGE NE S'EN
+       SORT. Il vit DANS la carte, donc sur un fond de la palette : #B02A37 y
+       vaut 1,93:1 sur Exceptionnel. Mesure du 2 novembre 2026 sur cinq rouges
+       de plus en plus sombres — le premier qui tient 4,5:1 sur les CINQ fonds
+       est #38070E, qui n'est plus un rouge mais un noir. La convention du
+       rouge destructif ne survit pas a une rampe prune ; ce qui reste pour
+       dire le geste, c'est le signe × et son title. */
+    .yp-niv-x { background: none; border: none; cursor: pointer; color: var(--niv-encre, #B02A37); font-size: 13px; padding: 0 0 0 2px; }
     /* Le montant et son × restent sur une ligne, meme sur telephone. */
     .yp-niv .p { white-space: nowrap; }
     .yp-grille-geste { margin-top: 8px; font-size: 13px; line-height: 1.6; }
@@ -174,11 +188,17 @@
        élément de structure, jamais modifié ni substitué sans la double
        validation de Thierry (docs/kb/charte-ui.md §3). Ce
        fichier en portait TROIS copies, et marche-global une quatrième. */
-    .n-base        { background: var(--yf-base);         box-shadow: inset 3px 0 0 var(--yf-base-l); }
-    .n-moyen       { background: var(--yf-moyen);         box-shadow: inset 3px 0 0 var(--yf-moyen-l); }
-    .n-haut        { background: var(--yf-haut);          box-shadow: inset 3px 0 0 var(--yf-haut-l); }
-    .n-tres-haut   { background: var(--yf-tres-haut);     box-shadow: inset 3px 0 0 var(--yf-tres-haut-l); }
-    .n-exceptionnel{ background: var(--yf-exceptionnel);  box-shadow: inset 3px 0 0 var(--yf-exceptionnel-l); }
+    /* ⚠ --niv-encre EST LA COULEUR DU PETIT TEXTE DE LA CARTE, et c'est un
+       correctif mesure, pas un gout. Le nom du niveau prenait --text3
+       (#9b9b9b) : 2,2 a 2,5:1 sur l'ANCIENNE palette deja, donc sous le seuil
+       EN PRODUCTION avant ce lot. L'accent du niveau est dimensionne pour
+       porter du petit texte (6,50:1 a 4,90:1 sur son fond), et il lie le
+       texte au niveau plutot qu'a un gris global. Mesure du 2 novembre 2026. */
+    .n-base        { background: var(--yf-base);         box-shadow: inset 3px 0 0 var(--yf-base-l);         --niv-encre: var(--yf-base-l); }
+    .n-moyen       { background: var(--yf-moyen);         box-shadow: inset 3px 0 0 var(--yf-moyen-l);        --niv-encre: var(--yf-moyen-l); }
+    .n-haut        { background: var(--yf-haut);          box-shadow: inset 3px 0 0 var(--yf-haut-l);         --niv-encre: var(--yf-haut-l); }
+    .n-tres-haut   { background: var(--yf-tres-haut);     box-shadow: inset 3px 0 0 var(--yf-tres-haut-l);    --niv-encre: var(--yf-tres-haut-l); }
+    .n-exceptionnel{ background: var(--yf-exceptionnel);  box-shadow: inset 3px 0 0 var(--yf-exceptionnel-l); --niv-encre: var(--yf-exceptionnel-l); }
     /* ⚠ LES ÉTATS S'EXPRIMENT EN COULEUR, PAS EN TEXTE — règle de Thierry,
        13 septembre 2026. « Vendue », « Fermée », « Non renseignée » répétés
        trente fois occupaient une colonne entière pour dire ce qu'une teinte
@@ -267,7 +287,7 @@
     /* LA FOURCHETTE EXCEPTIONNEL (lot V2.0.7) : le bas est le prix du niveau,
        le haut une BORNE DE SECURITE (le prix le plus eleve deja obtenu), jamais
        un objectif — le haut s'ecrit plus petit, et la note le dit. */
-    .yp-niv .p .haut { font-weight: 500; color: var(--text2); }
+    .yp-niv .p .haut { font-weight: 500; color: var(--niv-encre, var(--text2)); }
     .yp-preuve { font-size: 10.5px; color: var(--text2); margin-left: 2px; cursor: help; white-space: nowrap; }
     .yp-preuve b { font-weight: 600; color: var(--text); }
 
@@ -306,11 +326,23 @@
     /* ⚠ LE LISERÉ D'ALERTE S'ALLUME ICI, pas dans une colonne de texte : au
        même endroit du regard que le chiffre qui le justifie. */
     .yp-n1.alerte { box-shadow: inset 0 -2px 0 #B02A37; padding-bottom: 1px; }
+    /* ⚠ CETTE PASTILLE PORTE UN FOND DE LA PALETTE (.yp-niv-badge.n-*), donc
+       son texte suit la meme regle que les cartes : --niv-encre, l'accent de
+       son propre niveau. Elle gardait --text2 (#6b6b6b) — 4,32:1 sur Base mais
+       1,58:1 sur Exceptionnel, et c'est l'element le plus repete de l'ecran,
+       un par nuit. Releve en review le 2 novembre 2026. */
     .yp-niveau { font-size: 10px; text-transform: uppercase; letter-spacing: .03em;
-                 color: var(--text2); margin-right: 7px; }
+                 color: var(--niv-encre, var(--text2)); margin-right: 7px; }
     /* La bulle du niveau sur la ligne : la pastille de la grille, telle quelle. */
     .yp-niveau.yp-niv-badge { padding: 1px 7px; border-radius: 10px; }
-    .yp-niveau.hausse { color: #0F7B3E; } .yp-niveau.baisse { color: #B02A37; }
+    /* ⚠ LE VERT ET LE ROUGE ONT QUITTE CETTE PASTILLE, ET C'EST UN DOUBLON QUI
+       PART, PAS UN SIGNAL. .yp-niveau.hausse/.baisse peignait #0F7B3E / #B02A37
+       par-dessus le fond du niveau : 1,59:1 et 1,93:1 sur Exceptionnel. Le SENS
+       — la suggestion monte ou baisse — est deja porte, sur la MEME ligne et a
+       deux centimetres, par le PRIX lui-meme : <span class="yp-prix hausse">
+       prend la regle .hausse (ligne 147) sur le fond neutre de la ligne, ou le
+       vert vaut 4,64:1. La pastille, elle, dit le NIVEAU, et son fond le dit
+       deja. Releve en review le 2 novembre 2026. */
     .yp-prix { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
     .yp-plus { color: #3A4A8A; font-weight: 700; margin-left: 5px; cursor: help; }
     .yp-rien { font-size: 11px; color: #8A6D3B; cursor: help; }
@@ -346,7 +378,7 @@
        sinon la légende ne serait plus la légende des lignes. */
     .yp-niv.socle .p { text-decoration: underline; text-underline-offset: 3px;
                        text-decoration-thickness: 1.5px; }
-    .yp-niv .n { font-size: 9px; color: var(--text3); text-transform: uppercase;
+    .yp-niv .n { font-size: 9px; color: var(--niv-encre, var(--text3)); text-transform: uppercase;
                  letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis;
                  white-space: nowrap; }
     .yp-niv .p { font-size: 13px; font-weight: 600; margin-top: 1px;
