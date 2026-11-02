@@ -233,8 +233,32 @@ h1, h2, h3, p { margin: 0; }
 .msg-liste__outils { display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 10px; }
 .msg-recherche { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); }
 .msg-recherche input { flex: 1; border: 0; outline: 0; background: none; font-size: var(--fs-small); color: var(--ink); }
-.msg-filtres { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-.msg-filtres::-webkit-scrollbar { display: none; }
+/* ⚠ `.msg-pilules` SE GREFFE ICI, elle ne se recopie pas (chantier « delai de
+   reponse IA », lot 2). Les pilules de delai du volet « Reponse IA » demandent
+   exactement ce que les filtres font deja : defilement horizontal possible,
+   barre MASQUEE sur telephone. Ecrire une seconde regle identique, c'est
+   accepter qu'elles divergent — la regle du depot sur les modules communs vaut
+   aussi a l'interieur d'un fichier. */
+.msg-filtres, .msg-pilules { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.msg-filtres::-webkit-scrollbar, .msg-pilules::-webkit-scrollbar { display: none; }
+/* Les pilules du volet : meme hauteur de cible que les filtres, et `flex: none`
+   pour qu'elles ne se compriment pas au lieu de defiler. */
+.msg-pilules .tab { height: 36px; padding: 0 12px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; color: var(--info); font-weight: var(--fw-semibold); }
+.msg-pilules .tab[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); font-weight: var(--fw-bold); background: var(--surface); }
+@media (max-width: 720px) { .msg-pilules .tab { height: 44px; padding: 0 14px; } }
+/* ⚠ ET C'EST ICI QUE LA GREFFE S'ARRÊTE — recette du 28 octobre 2026 :
+   « Autre… » était coupé à droite sur ordinateur. La maquette validée portait
+   `flex-wrap: wrap` ; le défilement horizontal n'a de sens qu'au téléphone, où
+   la barre est masquée et le pouce fait le travail. Sur ordinateur, une rangée
+   qui défile cache une option sans le dire. Règle propre aux PILULES : les
+   filtres de la liste, eux, doivent rester sur une seule ligne. */
+@media (min-width: 721px) {
+  .msg-pilules { flex-wrap: wrap; overflow-x: visible; }
+}
+/* Un bouton `.btn` désactivé se grisait (`.btn:disabled`), une pilule non : le
+   gel du panneau pendant l'enregistrement ne se voyait pas. */
+.msg-pilules .tab:disabled { opacity: .5; cursor: not-allowed; }
+.msg-pilules .tab:disabled:hover { background: none; }
 .msg-filtres .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; }
 .msg-filtres .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
 .msg-deroule { overflow-y: auto; flex: 1; }
@@ -275,6 +299,28 @@ h1, h2, h3, p { margin: 0; }
 .bulle--hote { align-self: flex-end; background: var(--surface-2); color: var(--ink); border-end-end-radius: 4px; }
 .bulle--proposition { align-self: flex-end; background: var(--surface); border: 1.5px dashed var(--ink); border-end-end-radius: 4px; }
 .bulle__entete { display: flex; align-items: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); margin-bottom: 4px; }
+/* ⚠ L'ECHEANCE D'UN BROUILLON DIFFERE, ET C'EST LE SEUL AMBRE DE L'ECRAN
+   (chantier « delai de reponse IA », lot 2). `theme.css` reserve `--amber` a
+   « ce qu'HoteSmart a fait / attend », un seul moment par ecran : un brouillon
+   qui va partir tout seul est exactement cela. Rien d'autre dans ce fil ne doit
+   le porter.
+   La VARIANTE suspendue est GRISE : quand l'hote a ouvert le brouillon, plus
+   rien n'attend — c'est lui qui tient la main, donc l'ambre n'a plus d'objet. */
+.bulle__echeance { display: flex; align-items: center; gap: 6px; margin: -2px -6px 8px; padding: 7px 10px; border-radius: var(--radius-card); background: var(--amber-soft); color: var(--amber-text); font-size: var(--fs-small); font-weight: var(--fw-semibold); white-space: normal; }
+.bulle__echeance--suspendu { background: var(--surface-2); color: var(--muted); }
+.bulle__echeance .icon { width: 16px; height: 16px; flex: none; }
+/* Les gestes sous un brouillon differe : ce qui se passera sans rien faire, et
+   l'abandon. Bleu = cliquable, et le pied ne porte aucun bouton plein. */
+.bulle__pied { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; margin-top: 6px; }
+.bulle__pied .link { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; background: none; border: 0; padding: 0; color: var(--info); font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.bulle__pied .icon { width: 15px; height: 15px; }
+/* Le meme bandeau, au-dessus de la SAISIE : le mecanisme d'edition existant
+   descend la proposition hors du fil, donc sa bulle disparait avec son compte
+   a rebours. Les elements sont identiques — c'est le meme objet, seule sa
+   place change. */
+.msg-saisie__echeance { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 20px 0; }
+.msg-saisie__echeance .bulle__echeance { margin: 0; }
+.msg-saisie__echeance .bulle__pied { margin: 0; }
 .bulle-meta { align-self: flex-end; display: flex; align-items: center; gap: 5px; font-size: var(--fs-caption); color: var(--muted); margin: 2px 4px 8px; }
 .bulle-meta--voyageur { align-self: flex-start; }
 .bulle-meta .icon { width: 13px; height: 13px; }
@@ -333,7 +379,19 @@ h1, h2, h3, p { margin: 0; }
 .prog-carte [data-prog-suppr] { background: none; border: 0; padding: 4px; cursor: pointer; color: var(--muted); }
 .prog-carte [data-prog-suppr]:hover { color: var(--danger); }
 .prog-carte [data-prog-suppr] .icon { width: 15px; height: 15px; }
-.msg-tiroir__note { margin: 10px 18px 0; color: var(--danger); font-weight: var(--fw-semibold); }
+/* ⚠ COLLÉE EN BAS DU TIROIR, et c'est un constat de recette (28 octobre 2026 :
+   « après Enregistrer, aucun retour visible »). La note ÉTAIT bien écrite —
+   `noteReglage` la remplit — mais elle est le DERNIER enfant d'un panneau qui
+   défile en entier (`.msg-tiroir` est en `overflow-y: auto`), donc elle
+   atterrissait hors de l'écran : l'hôte lisait un silence là où le code
+   répondait. `position: sticky` la garde en vue tant qu'elle est affichée, sans
+   lutter contre le défilement de l'hôte — ce qu'un `scrollIntoView` aurait
+   fait. Le fond est opaque : sans lui, le texte du panneau défile dessous. */
+/* `env(safe-area-inset-bottom)` comme `.msg-saisie` : le tiroir est en
+   `inset-block: 0`, donc la dernière ligne d'une note épinglée passait sous
+   l'indicateur d'accueil de l'iPhone — le retour que ce correctif existe pour
+   rendre visible (constat de la review). */
+.msg-tiroir__note { position: sticky; bottom: 0; margin: 10px 0 0; padding: 10px 18px calc(14px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); color: var(--danger); font-weight: var(--fw-semibold); }
 .msg-tiroir__note--ok { color: var(--ok); }
 @media (max-width: 899px) {
   .msg-retour { display: inline-flex; }
@@ -1885,3 +1943,39 @@ body.men-cfg-ouvert { overflow: hidden; }
 .cm-grille { stroke: var(--line); stroke-width: 1; }
 .cm-axe { stroke: var(--line); stroke-width: 1.5; }
 .cm-grad, .cm-mois { font-size: 11px; fill: var(--muted); }
+
+/* ─── La fenêtre de confirmation DANS LA PAGE (shared/confirmer.js) ─────────
+   ⚠ Elle remplace `window.confirm` (décision de Thierry, 2 novembre 2026) :
+   « OK » et « Annuler » ne disent pas ce qu'ils font, et la boîte native
+   SUSPEND la page, donc elle bloque l'extension Chrome qui joue les recettes.
+   ⚠ Au-dessus de tout ce qui existe : `.msg-tiroir` est à z-index 40, la fiche
+   de /menages à 70, sa fenêtre de configuration à 60-61. ⚠ Mon commentaire
+   disait « le tiroir de /messages (z-index 60-61) » — un nombre écrit à la main
+   qui se lit comme une mesure et ne rougit jamais ; 60-61 est en réalité
+   `.men-cfg*`. 71 reste au-dessus des quatre, mais à UN cran de `.men-fiche` :
+   le jour où /menages importera cette fenêtre, c'est ce chiffre-là qu'il faudra
+   relire. */
+.hs-confirm__voile {
+  position: fixed; inset: 0; z-index: 70; background: rgb(0 0 0 / 0.4);
+}
+.hs-confirm {
+  position: fixed; z-index: 71; inset-block-start: 50%; inset-inline-start: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px)); max-height: min(90vh, 700px);
+  display: flex; flex-direction: column; gap: var(--gap-s);
+  padding: 20px; overflow: auto;
+  background: var(--surface); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-hover);
+}
+.hs-confirm__croix {
+  position: absolute; inset-block-start: 8px; inset-inline-end: 8px;
+}
+.hs-confirm__titre { margin: 0; padding-inline-end: 36px; font-weight: var(--fw-semibold); }
+.hs-confirm__texte { margin: 0; color: var(--muted); }
+/* ⚠ LES BOUTONS NOMMÉS SE LISENT EN ENTIER, Y COMPRIS AU TÉLÉPHONE : ils
+   s'empilent plutôt que de tronquer un libellé. Un bouton dont on ne lit pas
+   le nom ramène le défaut que cette fenêtre existe pour fermer. */
+.hs-confirm__pied {
+  display: flex; flex-wrap: wrap; gap: var(--gap-s); margin-block-start: 4px;
+}
+.hs-confirm__pied .btn { flex: 1 1 auto; white-space: normal; }

@@ -1,0 +1,959 @@
+// tests/delai-reponse-ia-lot1.test.js
+// Chantier « delai de reponse IA » (GuestFlow), LOT 1 — le socle.
+// Spec : docs/specs/spec-delai-reponse-ia.md
+//
+// Ce que ce lot doit prouver, et c'est la condition de sa remise :
+// **a la fin du lot 1, la production se comporte exactement comme avant.**
+// Donc la moitie de ce fichier teste des EQUIVALENCES, pas des nouveautes.
+//
+// ⚠ DATES : ces tests n'ont aucune horloge dans leur objet (le lot 1 ne pose
+// aucune echeance). Les dates du lot 2 seront INJECTEES — regle du depot :
+// dates relatives si le test lit l'horloge, dates figees s'il injecte le temps.
+
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
+
+const test = require('node:test')
+const assert = require('node:assert')
+const path = require('node:path')
+const Module = require('node:module')
+
+const COMPTE = 'compte-prod'
+const BIEN = '0544fd9a'
+
+// ─── Le banc ────────────────────────────────────────────────────────────────
+// `config` = le blob tel qu'il est EN BASE. `etat.ecritures` recoit les upserts,
+// ce qui permet de lire ce que le serveur a REELLEMENT voulu ecrire — pas ce
+// qu'on suppose qu'il a ecrit.
+// ⚠ CE DOUBLE A ETE PRIS EN DEFAUT LE 28 OCTOBRE 2026, ET C'EST MESURE. Il
+// n'etait pas THENABLE : `await q` rendait l'objet builder lui-meme, donc
+// `const { data, error } = await q` se destructurait en `undefined`/`undefined`.
+// `lib/guestflow/appliquer-delai.js`, appele par cet endpoint, lisait alors
+// `data || []` comme « aucune ligne » et rendait `ok: true` : muter la
+// reference du bien ou le compte qu'il recoit restait VERT sur toute la suite,
+// sur le chemin de l'envoi au voyageur. C'est la famille « un double plus
+// permissif que le vrai » : il VALIDE du code qui ne peut pas tourner.
+// Deux bouts corriges : le module refuse desormais une `data` qui n'est pas un
+// tableau (PostgREST en rend toujours un sur un select), et ce double rend la
+// forme du vrai client — thenable, avec `update` et `gt`.
+//
+// ⚠ CE QU'IL NE MESURE PAS, ET QU'IL NE FAUT JAMAIS LUI FAIRE DIRE : il
+// n'applique ni `limit` ni `order`, donc la PAGINATION PAR CURSEUR n'est pas
+// exercee ici. Ce double sert a prouver le CABLAGE des trois arguments
+// (`supabase`, `userId`, `propertyRef`) en executant l'endpoint. Le claim, la
+// pagination et les replis sont eprouves par
+// `tests/guestflow-appliquer-delai.test.js`, dont le double applique vraiment
+// `eq`, `gt`, `order` et `limit`.
+function preparer ({ config = null, lectureEnPanne = false, taches = [],
+  tachesIllisibles = false, tachesLevent = false } = {}) {
+  const etat = { ecritures: [], majTaches: [], lecturesTaches: [] }
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: COMPTE } }, error: null }) },
+    from (nom) {
+      // ⚠ LA LEVEE S'ECHAPPE ICI, PAS DANS `then` : le `then` du double
+      // convertit toute exception en `{ error }` — comme PostgREST — donc une
+      // levee posee plus bas prenait le chemin `lecture_impossible` au lieu du
+      // `catch` de l'endpoint. C'est la difference que le constat 4 visait.
+      if (tachesLevent && nom === 'agent_tasks') throw new Error('le client a leve')
+      const q = {
+        _f: {},
+        select () { return q }, eq (c, v) { q._f[c] = v; return q },
+        gt (c, v) { q._f['>' + c] = v; return q },
+        limit () { return q }, order () { return q }, not () { return q }, is () { return q },
+        update (patch) { q._maj = patch; return q },
+        upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: null }) },
+        single: async () => rep(nom), maybeSingle: async () => rep(nom),
+        // Thenable, comme le vrai client : un `await` rend `{ data, error }`.
+        then (ok, ko) {
+          try { return Promise.resolve(tableau(nom)).then(ok, ko) }
+          catch (e) { return Promise.resolve({ data: null, error: { message: e.message } }).then(ok, ko) }
+        }
+      }
+      function tableau (nom) {
+        if (nom === 'agent_tasks') {
+          // ⚠ DEUX PANNES DISTINCTES, ET ELLES NE PRENNENT PAS LE MEME CHEMIN :
+          // PostgREST rend `{ error }` (le module le lit et rend
+          // `lecture_impossible`), tandis qu'une exception — reseau coupe, client
+          // casse — remonte jusqu'au `catch` de l'endpoint. C'est ce second
+          // chemin que le constat 4 visait, et mon premier test ne l'atteignait
+          // pas : il portait son nom sans y aller.
+          if (tachesIllisibles) return { data: null, error: { message: 'panne taches' } }
+          if (q._maj) {
+            // ⚠ LE STATUT VIENT DU FILTRE, PAS D'UN LITTERAL (constat 6 de la
+            // derniere revue). Je testais `t.status === 'pending_validation'` en
+            // dur : retirer `.eq('status', EN_ATTENTE)` de l'update du module
+            // laissait donc ce fichier VERT, alors que c'est ce claim qui ferme
+            // la course avec le cron.
+            const touchees = taches.filter(t =>
+              String(t.id) === String(q._f.id)
+              && (q._f.status === undefined || String(t.status) === String(q._f.status)))
+            for (const t of touchees) Object.assign(t, q._maj)
+            etat.majTaches.push({ filtre: { ...q._f }, patch: { ...q._maj } })
+            return { data: touchees.map(t => ({ id: t.id })), error: null }
+          }
+          etat.lecturesTaches.push({ ...q._f })
+          const vus = taches.filter(t =>
+            String(t.user_id) === String(q._f.user_id)
+            && String(t.property_id) === String(q._f.property_id)
+            && String(t.status) === String(q._f.status)
+            && (q._f['>id'] === undefined || String(t.id) > String(q._f['>id'])))
+          return { data: vus.map(t => ({ ...t })), error: null }
+        }
+        const r = rep(nom)
+        return { data: r.data === null ? [] : [r.data], error: r.error }
+      }
+      function rep (nom) {
+        if (nom === 'agent_alert_config') {
+          if (lectureEnPanne) throw new Error('lecture impossible')
+          return { data: config ? { config } : null, error: null }
+        }
+        return { data: null, error: null }
+      }
+      return q
+    }
+  }
+  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
+  const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
+  require.cache[abs] = m
+  for (const mod of ['../lib/cron-shared', '../api/agent-config', '../lib/require-permission']) {
+    try { delete require.cache[require.resolve(mod)] } catch {}
+  }
+  return etat
+}
+
+function reponse () {
+  const r = { code: null, body: null }
+  r.status = c => { r.code = c; return r }
+  r.json = b => { r.body = b; return r }
+  r.setHeader = () => {}
+  r.end = () => r
+  return r
+}
+
+async function postConfig (corps, options = {}) {
+  const etat = preparer(options)
+  const handler = require('../api/agent-config')
+  const res = reponse()
+  await handler({ method: 'POST', headers: { authorization: 'Bearer jeton' }, body: corps }, res)
+  return { res, etat }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// A. `getPropertyMode` DERIVE le binaire — et son contrat ne change pas
+// ════════════════════════════════════════════════════════════════════════════
+
+test('getPropertyMode : reponse_ia = null -> test (Validation manuelle)', async () => {
+  preparer({ config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } } })
+  const { getPropertyMode } = require('../lib/cron-shared')
+  assert.equal(await getPropertyMode(COMPTE, BIEN), 'test')
+})
+
+test('getPropertyMode : reponse_ia = 0 -> auto (immediat, comme le Mode Auto)', async () => {
+  preparer({ config: { [BIEN]: { delais: { reponse_ia: 0, alerte_info: 0 } } } })
+  const { getPropertyMode } = require('../lib/cron-shared')
+  assert.equal(await getPropertyMode(COMPTE, BIEN), 'auto')
+})
+
+test('getPropertyMode : reponse_ia = 15 -> auto (ca part, dans 15 min)', async () => {
+  // ⚠ LE POINT LE PLUS IMPORTANT DU LOT 1. Un delai non nul rend « auto »,
+  // donc un MODELE PROGRAMME (cron-messages, cron-arrival-code) continue de
+  // partir sans validation. Si ce test disait 'test', regler un delai de
+  // reponse IA retiendrait aussi les messages d'arrivee et les codes d'acces —
+  // un changement de comportement que personne n'a demande.
+  preparer({ config: { [BIEN]: { delais: { reponse_ia: 15, alerte_info: 15 } } } })
+  const { getPropertyMode } = require('../lib/cron-shared')
+  assert.equal(await getPropertyMode(COMPTE, BIEN), 'auto')
+})
+
+test('getPropertyMode : sans bloc delais, le repli sur `mode` tient (bascule)', async () => {
+  preparer({ config: { [BIEN]: { mode: 'auto' } } })
+  const { getPropertyMode } = require('../lib/cron-shared')
+  assert.equal(await getPropertyMode(COMPTE, BIEN), 'auto')
+})
+
+test('getPropertyMode : aucune entree -> test (le repli sur d avant)', async () => {
+  preparer({ config: {} })
+  const { getPropertyMode } = require('../lib/cron-shared')
+  assert.equal(await getPropertyMode(COMPTE, BIEN), 'test')
+})
+
+test('getPropertyMode : bloc delais SANS reponse_ia -> repli sur `mode`', async () => {
+  // Un bloc partiel (ecrit par le POST legacy, ou une forme future) ne doit pas
+  // se lire comme « validation manuelle » par accident.
+  preparer({ config: { [BIEN]: { mode: 'auto', delais: { alerte_info: 15 } } } })
+  const { getPropertyMode } = require('../lib/cron-shared')
+  assert.equal(await getPropertyMode(COMPTE, BIEN), 'auto')
+})
+
+test('getPropertyMode : delais en TABLEAU -> repli sur `mode`, pas de levee', async () => {
+  preparer({ config: { [BIEN]: { mode: 'auto', delais: [] } } })
+  const { getPropertyMode } = require('../lib/cron-shared')
+  assert.equal(await getPropertyMode(COMPTE, BIEN), 'auto')
+})
+
+test('getPropertyMode : panne de lecture -> test (repli SUR : rien ne part)', async () => {
+  preparer({ lectureEnPanne: true })
+  const { getPropertyMode } = require('../lib/cron-shared')
+  assert.equal(await getPropertyMode(COMPTE, BIEN), 'test')
+})
+
+test('lireReglagesDuBien : rend toujours un objet, delais a null si absent', async () => {
+  preparer({ config: { [BIEN]: { mode: 'auto' } } })
+  const { lireReglagesDuBien } = require('../lib/cron-shared')
+  assert.deepEqual(await lireReglagesDuBien(COMPTE, BIEN), { mode: 'auto', delais: null })
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// B. La cible `delais` de /api/agent-config
+// ════════════════════════════════════════════════════════════════════════════
+
+test('agent-config : une charge valide est ecrite, et le reste du bien est PRESERVE', async () => {
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 15, alerte_info: 15, sourdine: { active: true, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto', intervention: { sms_enabled: true, sms_lines: '+33600000000' } }, 'autre-bien': { mode: 'test' } } }
+  )
+  assert.equal(res.code, 200)
+  const ecrit = etat.ecritures.find(e => e.table === 'agent_alert_config')
+  assert.ok(ecrit, 'un upsert est parti')
+  const blob = ecrit.row.config
+  assert.deepEqual(blob[BIEN].delais, { reponse_ia: 15, alerte_info: 15, sourdine: { active: true, debut: '22:00', fin: '08:00' } })
+  assert.equal(blob[BIEN].mode, 'auto', 'le mode du bien survit')
+  assert.deepEqual(blob[BIEN].intervention, { sms_enabled: true, sms_lines: '+33600000000' }, 'les alertes du bien survivent')
+  assert.deepEqual(blob['autre-bien'], { mode: 'test' }, 'les AUTRES biens survivent')
+})
+
+test('agent-config : reponse_ia = null est une VALEUR valide (validation manuelle)', async () => {
+  const { res, etat } = await postConfig({ delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0 } })
+  assert.equal(res.code, 200)
+  assert.equal(etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN].delais.reponse_ia, null)
+})
+
+test('agent-config : sourdine absente -> inactive par defaut, jamais active', async () => {
+  const { res, etat } = await postConfig({ delais_ref: BIEN, delais: { reponse_ia: 15, alerte_info: 15 } })
+  assert.equal(res.code, 200)
+  assert.deepEqual(etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN].delais.sourdine,
+    { active: false, debut: '22:00', fin: '08:00' })
+})
+
+for (const [etiquette, delais] of [
+  ['reponse_ia au-dela de 24 h', { reponse_ia: 1441, alerte_info: 0 }],
+  ['reponse_ia non entier', { reponse_ia: 15.5, alerte_info: 0 }],
+  ['reponse_ia negatif', { reponse_ia: -1, alerte_info: 0 }],
+  ['reponse_ia en chaine', { reponse_ia: '15', alerte_info: 0 }],
+  ['alerte_info manquant', { reponse_ia: 15 }],
+  ['alerte_info null (ce n est PAS une valeur ici)', { reponse_ia: 15, alerte_info: null }],
+  ['heure de sourdine illisible', { reponse_ia: 15, alerte_info: 15, sourdine: { active: true, debut: '22h', fin: '08:00' } }],
+  ['heure de sourdine hors plage', { reponse_ia: 15, alerte_info: 15, sourdine: { active: true, debut: '24:00', fin: '08:00' } }],
+  ['plage de sourdine vide (debut = fin)', { reponse_ia: 15, alerte_info: 15, sourdine: { active: true, debut: '22:00', fin: '22:00' } }],
+  ['sourdine en tableau', { reponse_ia: 15, alerte_info: 15, sourdine: [] }],
+  ['delais en tableau', []]
+]) {
+  test(`agent-config : ${etiquette} -> 400, aucune ecriture`, async () => {
+    const { res, etat } = await postConfig({ delais_ref: BIEN, delais })
+    assert.equal(res.code, 400)
+    assert.equal(etat.ecritures.length, 0, 'rien n a ete ecrit')
+  })
+}
+
+test('agent-config : les heures sont validees MEME sourdine inactive', async () => {
+  // Sinon une saisie fautive dort en base et ne mord qu'au jour ou l'hote
+  // active la sourdine — des semaines plus tard, sans rapport apparent.
+  const { res } = await postConfig({ delais_ref: BIEN, delais: { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: 'nawak', fin: '08:00' } } })
+  assert.equal(res.code, 400)
+})
+
+// ─── Une cible par requete, avec TROIS cibles ───────────────────────────────
+
+// ⚠ CHAQUE MOITIE DE CHARGE EST VALIDE EN SOI, ET C'EST TOUT L'INTERET.
+// Premiere version de ce test : `alertes: {}`. Il passait contre le code
+// d'AVANT — mais par la validation des alertes (un objet vide n'a ni
+// `intervention` ni `info_unknown`, donc 400), pas par la regle des cibles.
+// Un vert obtenu pour la mauvaise raison ne prouve rien : la contre-epreuve
+// l'a montre, 10 rouges attendus et un test muet. On verifie donc AUSSI le
+// motif rendu.
+const ALERTES_VALIDES = {
+  intervention: { sms_enabled: false, sms_lines: '', email_enabled: true, email_lines: 'a@b.c' },
+  info_unknown: { sms_enabled: false, sms_lines: '', email_enabled: true, email_lines: 'a@b.c' }
+}
+const DELAIS_VALIDES = { reponse_ia: 0, alerte_info: 0 }
+
+for (const [etiquette, corps] of [
+  ['mode + delais', { mode_ref: BIEN, mode: 'auto', delais_ref: BIEN, delais: DELAIS_VALIDES }],
+  ['alertes + delais', { alertes_ref: BIEN, alertes: ALERTES_VALIDES, delais_ref: BIEN, delais: DELAIS_VALIDES }],
+  ['mode + alertes', { mode_ref: BIEN, mode: 'auto', alertes_ref: BIEN, alertes: ALERTES_VALIDES }]
+]) {
+  test(`agent-config : deux cibles (${etiquette}) -> 400 « Une cible par requête »`, async () => {
+    // ⚠ LE COMPTE, PAS LA PAIRE. Avec trois cibles, un test `A && B` laisse
+    // passer `A && C` et `B && C` : la charge serait acceptee et UNE SEULE des
+    // deux appliquee, silencieusement. C'est le defaut exact que la version a
+    // deux cibles avait deja ferme une fois, et qu'une troisieme cible
+    // rouvrait.
+    const { res, etat } = await postConfig(corps)
+    assert.equal(res.code, 400)
+    assert.equal(res.body.error, 'Une cible par requête', 'refuse par la regle des cibles, pas par une validation de charge')
+    assert.equal(etat.ecritures.length, 0)
+  })
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// C. Le POST legacy MERGE, il n'ecrase plus
+// ════════════════════════════════════════════════════════════════════════════
+
+test('agent-config legacy : une cle absente de la charge est PRESERVEE', async () => {
+  // ⚠ C'EST LA CORRECTION DE SECURITE DE LA DONNEE DU LOT 1. `seedAlertConfig`
+  // (pages/onboarding.html:344) fait GET du blob, merge cote client, POST du
+  // tout. Entre son GET et son POST, une autre session peut ecrire : le POST
+  // passait par-dessus. Depuis ce lot, le serveur relit et merge.
+  const { res, etat } = await postConfig(
+    { config: { [BIEN]: { mode: 'test', intervention: { email_enabled: true, email_lines: 'a@b.c' } } } },
+    { config: { [BIEN]: { mode: 'auto', delais: { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } } } } }
+  )
+  assert.equal(res.code, 200)
+  const blob = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config
+  assert.deepEqual(blob[BIEN].delais, { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } },
+    'LES DELAIS DU BIEN SURVIVENT a un POST legacy qui ne les mentionne pas')
+  assert.equal(blob[BIEN].mode, 'test', 'le champ fourni, lui, est bien applique')
+  assert.deepEqual(blob[BIEN].intervention, { email_enabled: true, email_lines: 'a@b.c' })
+})
+
+test('agent-config legacy : un bien absent de la charge survit', async () => {
+  const { res, etat } = await postConfig(
+    { config: { 'bien-A': { mode: 'auto' } } },
+    { config: { 'bien-A': { mode: 'test' }, 'bien-B': { mode: 'auto', delais: { reponse_ia: null, alerte_info: 0 } } } }
+  )
+  assert.equal(res.code, 200)
+  const blob = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config
+  assert.equal(blob['bien-A'].mode, 'auto')
+  assert.ok(blob['bien-B'], 'bien-B n a pas disparu')
+  assert.equal(blob['bien-B'].delais.reponse_ia, null)
+})
+
+test('agent-config legacy : une charge en tableau -> 400', async () => {
+  const { res, etat } = await postConfig({ config: [] })
+  assert.equal(res.code, 400)
+  assert.equal(etat.ecritures.length, 0)
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// D. LES DEUX CLES RESTENT D'ACCORD — constat GRAVE de la revue du 27/10/2026
+// ════════════════════════════════════════════════════════════════════════════
+// `getPropertyMode` fait gouverner `delais`, mais deux lecteurs lisent encore
+// `mode` : l'interrupteur Test/Auto de messages.html (`modesDe`) et la garde de
+// scripts/templates-test-colomiers.js. Sans synchronisation, l'ecran affichait
+// « Test » pendant que GuestFlow envoyait tout seul.
+
+test('cible delais : `mode` est DERIVE et ecrit avec, pour que l interrupteur dise vrai', async () => {
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0 } },
+    { config: { [BIEN]: { mode: 'auto' } } }
+  )
+  assert.equal(res.code, 200)
+  const entree = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN]
+  assert.equal(entree.delais.reponse_ia, null)
+  assert.equal(entree.mode, 'test', 'reponse_ia = null -> mode derive a test')
+})
+
+test('cible delais : un delai non nul derive `mode` a auto', async () => {
+  const { etat } = await postConfig({ delais_ref: BIEN, delais: { reponse_ia: 15, alerte_info: 15 } })
+  const entree = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN]
+  assert.equal(entree.mode, 'auto')
+})
+
+test('cible mode : `delais.reponse_ia` est ALIGNE, sinon le toggle ne gouverne plus rien', async () => {
+  // Le scenario du constat : apres la migration, l'hote bascule en Test. Si
+  // `delais.reponse_ia` restait a 0, l'agent continuait d'envoyer.
+  const { res, etat } = await postConfig(
+    { mode_ref: BIEN, mode: 'test' },
+    { config: { [BIEN]: { mode: 'auto', delais: { reponse_ia: 0, alerte_info: 0, sourdine: { active: true, debut: '22:00', fin: '08:00' } } } } }
+  )
+  assert.equal(res.code, 200)
+  const entree = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN]
+  assert.equal(entree.mode, 'test')
+  assert.equal(entree.delais.reponse_ia, null, 'passer en Test met le delai en validation manuelle')
+  assert.deepEqual(entree.delais.sourdine, { active: true, debut: '22:00', fin: '08:00' },
+    'et la sourdine de l hote survit a la bascule')
+})
+
+test('cible mode : passer en Auto aligne a 0, pas a un delai invente', async () => {
+  const { etat } = await postConfig(
+    { mode_ref: BIEN, mode: 'auto' },
+    { config: { [BIEN]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 15 } } } }
+  )
+  const entree = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN]
+  assert.equal(entree.delais.reponse_ia, 0, 'Auto = immediat, le sens exact d avant')
+  assert.equal(entree.delais.alerte_info, 15, 'le delai d alerte n est pas touche')
+})
+
+test('cible mode : un bien SANS bloc delais n en recoit pas (bascule non commencee)', async () => {
+  const { etat } = await postConfig({ mode_ref: BIEN, mode: 'auto' }, { config: { [BIEN]: { mode: 'test' } } })
+  const entree = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN]
+  assert.equal(entree.mode, 'auto')
+  assert.equal(entree.delais, undefined, 'on ne fabrique pas un bloc delais par surprise')
+})
+
+// ─── La sourdine absente se REPREND (constat 4) ─────────────────────────────
+
+test('cible delais : sourdine absente de la charge -> celle de la BASE est gardee', async () => {
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 30, alerte_info: 30 } },
+    { config: { [BIEN]: { delais: { reponse_ia: 15, alerte_info: 15, sourdine: { active: true, debut: '23:00', fin: '07:30' } } } } }
+  )
+  assert.equal(res.code, 200)
+  const d = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN].delais
+  assert.deepEqual(d.sourdine, { active: true, debut: '23:00', fin: '07:30' },
+    'un enregistrement partiel ne desactive pas la sourdine en silence')
+  assert.equal(d.reponse_ia, 30)
+})
+
+// ─── Le legacy ne touche pas aux reglages d envoi (constat 3) ───────────────
+
+// (Le test « legacy : `delais` ecarte en silence, 200 » qui vivait ici a ete
+// RETIRE : le constat 1 de la seconde revue a change ce comportement en 400
+// nomme. Son remplacant est dans la section E — on ne garde pas deux tests qui
+// decrivent deux contrats opposes.)
+
+test('legacy : une entree invalide est REFUSEE, pas jetee en silence (constat 5)', async () => {
+  const { res, etat } = await postConfig({ config: { [BIEN]: 'pas-un-objet' } })
+  assert.equal(res.code, 400)
+  assert.deepEqual(res.body.refusees, [BIEN], 'la reponse NOMME ce qui a ete refuse')
+  assert.equal(etat.ecritures.length, 0)
+})
+
+test('legacy : une ref trop longue est refusee et nommee', async () => {
+  const longue = 'x'.repeat(65)
+  const { res } = await postConfig({ config: { [longue]: { mode: 'test' } } })
+  assert.equal(res.code, 400)
+  assert.equal(res.body.refusees.length, 1)
+})
+
+// ─── getPropertyMode refuse une valeur hors contrat (constat 2) ─────────────
+
+for (const [etiquette, valeur] of [
+  ['chaine', '15'], ['decimal', 15.5], ['hors borne', 99999], ['negatif', -5],
+  ['objet', {}], ['booleen', true]
+]) {
+  test(`getPropertyMode : reponse_ia ${etiquette} -> repli sur mode, jamais 'auto' par defaut`, async () => {
+    // ⚠ LE POST LEGACY N'APPELLE PAS `delaisPropres`, et c'est le writer des
+    // defauts des biens neufs : une forme fautive peut arriver en lecture sans
+    // avoir croise un validateur. Rendre 'auto' voudrait dire « ca part tout
+    // seul » — le sens NON sur — et debloquerait aussi les modeles programmes.
+    preparer({ config: { [BIEN]: { mode: 'test', delais: { reponse_ia: valeur, alerte_info: 0 } } } })
+    const { getPropertyMode } = require('../lib/cron-shared')
+    assert.equal(await getPropertyMode(COMPTE, BIEN), 'test')
+  })
+}
+
+test('getPropertyMode : reponse_ia hors contrat avec mode auto -> auto (on ne durcit PAS au-dela du repli)', async () => {
+  // Le repli est `mode`, pas `'test'` inconditionnel : sinon une valeur fautive
+  // RETIENDRAIT les messages d un bien que l hote a mis en Auto — on ne change
+  // pas son reglage a cause d une donnee malformee, on l ignore.
+  preparer({ config: { [BIEN]: { mode: 'auto', delais: { reponse_ia: '15', alerte_info: 0 } } } })
+  const { getPropertyMode } = require('../lib/cron-shared')
+  assert.equal(await getPropertyMode(COMPTE, BIEN), 'auto')
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// E. Les constats de la SECONDE revue du 27 octobre 2026
+// ════════════════════════════════════════════════════════════════════════════
+
+test('legacy : une charge qui porte `delais` est REFUSEE et nommee, plus ecartee en silence', async () => {
+  // Constat 1 : `delete propre[cle]` + 200 { ok: true }, dans la fonction meme
+  // qui pose « un rejet se dit ». Un writer verrait son reglage disparaitre en
+  // croyant l avoir pose.
+  const { res, etat } = await postConfig(
+    { config: { [BIEN]: { mode: 'auto', delais: { reponse_ia: 0, alerte_info: 0 } } } },
+    { config: { [BIEN]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 15 } } } }
+  )
+  assert.equal(res.code, 400)
+  assert.ok(res.body.refusees.some(r => /delais/.test(r)), 'la reponse NOMME la cle reservee')
+  assert.equal(etat.ecritures.length, 0)
+})
+
+test('cible mode : un `delais` en TABLEAU n est pas etale (le serveur n ecrit pas un bloc invalide)', async () => {
+  // Constat 4 : `{ ...[] , reponse_ia: 0 }` donnait `{ reponse_ia: 0 }` — plus
+  // d alerte_info, plus de sourdine, et le lot 2 lirait « pas d echeance ».
+  const { res, etat } = await postConfig(
+    { mode_ref: BIEN, mode: 'auto' },
+    { config: { [BIEN]: { mode: 'test', delais: [] } } }
+  )
+  assert.equal(res.code, 200)
+  const entree = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN]
+  assert.deepEqual(entree.delais, [], 'le bloc fautif est laisse tel quel, pas transforme en bloc boiteux')
+  assert.equal(entree.mode, 'auto')
+})
+
+test('cible mode : un `delais` SCALAIRE n est pas etale en caracteres', async () => {
+  const { etat } = await postConfig(
+    { mode_ref: BIEN, mode: 'auto' },
+    { config: { [BIEN]: { mode: 'test', delais: '22' } } }
+  )
+  const entree = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN]
+  assert.equal(entree.delais, '22', 'pas de { 0: "2", 1: "2", reponse_ia: 0 }')
+})
+
+test('toggle Test puis Auto : le delai de l hote est RESTITUE, pas detruit', async () => {
+  // Constat 5, le plus insidieux : l hote regle 30 min, touche l interrupteur
+  // deux fois, et repartait a 0 (envoi immediat) sans trace.
+  // Aller : Auto -> Test. La valeur est memorisee.
+  const { etat: e1 } = await postConfig(
+    { mode_ref: BIEN, mode: 'test' },
+    { config: { [BIEN]: { mode: 'auto', delais: { reponse_ia: 30, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } } } } }
+  )
+  const apresTest = e1.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN].delais
+  assert.equal(apresTest.reponse_ia, null, 'Test = validation manuelle')
+  assert.equal(apresTest.reponse_ia_rappel, 30, 'les 30 minutes sont MEMORISEES')
+
+  // Retour : Test -> Auto. La valeur revient.
+  const { etat: e2 } = await postConfig(
+    { mode_ref: BIEN, mode: 'auto' },
+    { config: { [BIEN]: { mode: 'test', delais: apresTest } } }
+  )
+  const apresAuto = e2.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN].delais
+  assert.equal(apresAuto.reponse_ia, 30, 'LES 30 MINUTES SONT RESTITUEES, pas remises a 0')
+  assert.equal(apresAuto.alerte_info, 15, 'et le delai d alerte n a pas bouge')
+})
+
+test('toggle Auto sans rappel : 0, le sens exact du Mode Auto d avant', async () => {
+  const { etat } = await postConfig(
+    { mode_ref: BIEN, mode: 'auto' },
+    { config: { [BIEN]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 15 } } } }
+  )
+  const d = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN].delais
+  assert.equal(d.reponse_ia, 0)
+})
+
+test('legacy : une entree fautive DEJA EN BASE et seulement reemise ne bloque pas', async () => {
+  // Constat 6 : sinon tout POST legacy futur rendait 400, l onboarding ne teste
+  // pas `r.ok`, et le seed des alertes echouait en silence pour ce compte —
+  // sans aucun moyen de reparer par cet endpoint.
+  const fautive = 'pas-un-objet'
+  const { res, etat } = await postConfig(
+    { config: { 'bien-casse': fautive, 'bien-sain': { mode: 'auto' } } },
+    { config: { 'bien-casse': fautive } }
+  )
+  assert.equal(res.code, 200, 'reemettre ce qui est deja en base ne bloque pas')
+  const blob = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config
+  assert.equal(blob['bien-sain'].mode, 'auto', 'et le reste de la charge est bien ecrit')
+})
+
+test('legacy : une entree fautive APPORTEE par l appelant est refusee', async () => {
+  const { res, etat } = await postConfig(
+    { config: { 'bien-casse': 'nouvelle-valeur-fautive' } },
+    { config: { 'bien-casse': { mode: 'test' } } }
+  )
+  assert.equal(res.code, 400)
+  assert.deepEqual(res.body.refusees, ['bien-casse'])
+  assert.equal(etat.ecritures.length, 0)
+})
+
+test('legacy : une ref trop longue est TRONQUEE dans la reponse', async () => {
+  // Constat 6, detail : le test de type passait avant celui de longueur, donc
+  // une ref enorme a valeur scalaire partait en entier dans `refusees`.
+  const longue = 'x'.repeat(300)
+  const { res } = await postConfig({ config: { [longue]: 'scalaire' } })
+  assert.equal(res.code, 400)
+  assert.equal(res.body.refusees.length, 1)
+  assert.ok(res.body.refusees[0].length < 40, `la ref est tronquee (recu ${res.body.refusees[0].length} caracteres)`)
+})
+
+test('le contrat des delais est PARTAGE, pas recopie (constat 7)', () => {
+  // Une borne ecrite deux fois derive : une valeur acceptee et stockee par
+  // l ecriture deviendrait « hors contrat » a la lecture, et le reglage
+  // cesserait de gouverner sans que rien ne rougisse.
+  const contrat = require('../lib/guestflow/delais-contrat')
+  assert.equal(contrat.DELAI_MAX_MIN, 1440)
+  assert.equal(contrat.minutesValides(1440), true)
+  assert.equal(contrat.minutesValides(1441), false)
+  assert.equal(contrat.reponseIaValide(null), true)
+  assert.equal(contrat.formeExploitable([]), false)
+  assert.equal(contrat.formeExploitable({}), true)
+  // Et les deux consommateurs l'importent vraiment, au lieu d'en garder une copie.
+  const fs = require('node:fs')
+  for (const f of ['api/agent-config.js', 'lib/cron-shared.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    assert.ok(/delais-contrat/.test(src), `${f} importe le contrat`)
+    assert.ok(!/<= *1440/.test(src), `${f} ne recopie pas la borne`)
+  }
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// F. La derivation du delai (lib/guestflow/delais-contrat.js), lot 2
+// ════════════════════════════════════════════════════════════════════════════
+
+test('delaiDeReponse : les trois cas, et leurs motifs', () => {
+  const { delaiDeReponse } = require('../lib/guestflow/delais-contrat')
+  const cas = [
+    [{ mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } },
+     { differe: false, manuel: true, motif: 'validation_manuelle' }],
+    [{ mode: 'auto', delais: { reponse_ia: 0, alerte_info: 0 } },
+     { differe: false, manuel: false, motif: 'immediat' }],
+    [{ mode: 'auto', delais: { reponse_ia: 15, alerte_info: 15 } },
+     { differe: true, manuel: false, motif: 'differe' }],
+    // Sans bloc : le binaire d avant gouverne encore (bascule en cours).
+    [{ mode: 'auto', delais: null }, { differe: false, manuel: false, motif: 'sans_delai' }],
+    [{ mode: 'test', delais: null }, { differe: false, manuel: true, motif: 'sans_delai' }],
+    // Hors contrat : repli sur le mode, et le motif le DIT.
+    [{ mode: 'auto', delais: { reponse_ia: '15' } }, { differe: false, manuel: false, motif: 'hors_contrat' }],
+    [{ mode: 'test', delais: { reponse_ia: 99999 } }, { differe: false, manuel: true, motif: 'hors_contrat' }],
+  ]
+  for (const [reglages, attendu] of cas) {
+    const r = delaiDeReponse(reglages)
+    assert.equal(r.differe, attendu.differe, JSON.stringify(reglages))
+    assert.equal(r.manuel, attendu.manuel, JSON.stringify(reglages))
+    assert.equal(r.motif, attendu.motif, JSON.stringify(reglages))
+  }
+})
+
+test('delaiDeReponse : le delai differe porte ses minutes', () => {
+  const { delaiDeReponse } = require('../lib/guestflow/delais-contrat')
+  assert.equal(delaiDeReponse({ mode: 'auto', delais: { reponse_ia: 240 } }).minutes, 240)
+  assert.equal(delaiDeReponse({ mode: 'auto', delais: { reponse_ia: 1440 } }).minutes, 1440)
+})
+
+test('echeanceDeReponse : l horloge est TOUJOURS injectee', () => {
+  const { echeanceDeReponse } = require('../lib/guestflow/delais-contrat')
+  const T = Date.parse('2026-11-11T12:00:00.000Z')
+  assert.equal(echeanceDeReponse(15, T), '2026-11-11T12:15:00.000Z')
+  assert.equal(echeanceDeReponse(0, T), '2026-11-11T12:00:00.000Z')
+  // Le module ne lit pas l heure : sans cela, aucun test a dates figees.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib/guestflow/delais-contrat.js'), 'utf8')
+  assert.ok(!/Date\.now\(\)/.test(src), 'aucune lecture de l horloge dans le contrat')
+})
+
+// ─── La migration des donnees : son contrat, lu dans le script ─────────────
+
+test('⚠ la migration pose alerte_info = 0, JAMAIS 15 (decision de Thierry)', () => {
+  // L alerte « info manquante » n a jamais ete reglable : cron-classify appelle
+  // sendAlertNotifications dans le tour, sans lire le mode. Poser 15 minutes
+  // aurait CHANGE le comportement de biens en production sous couvert de
+  // migration. Les 15 minutes sont le defaut des biens NEUFS.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'scripts/migrer-modes-vers-delais.js'), 'utf8')
+  assert.ok(/alerte_info: 0/.test(src), 'alerte_info = 0')
+  assert.ok(!/alerte_info: 15/.test(src), 'jamais 15 dans la migration')
+  // A blanc par defaut : ce script touche le reglage qui gouverne les envois.
+  assert.ok(/const GO = process\.argv\.includes\('--go'\)/.test(src), 'a blanc par defaut')
+  assert.ok(/if \(!GO\) continue/.test(src), 'rien ne s ecrit sans --go')
+  // Idempotent : un bloc deja conforme n est pas touche.
+  assert.ok(/dejaFaits\+\+/.test(src), 'idempotence comptee')
+  // L empreinte refuse une base inconnue.
+  assert.ok(/base === 'INCONNUE'[\s\S]{0,200}process\.exit\(1\)/.test(src), 'refus sur base inconnue')
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// L'ENDPOINT PROPAGE AUX BROUILLONS DEJA EN ATTENTE — execute, pas greppe
+// ════════════════════════════════════════════════════════════════════════════
+// ⚠ POURQUOI CES TESTS EXISTENT (constat 8 de la revue du 28 octobre 2026).
+// Le seul garde-fou du cablage etait un `indexOf('appliquerDelaiAuxBrouillons(')`
+// dans la source : muter `propertyRef: ref` en autre chose, ou `userId` en
+// `garde.userId`, restait VERT sur toute la suite. Ici l'endpoint est EXECUTE et
+// on regarde les TACHES : si l'un des trois arguments est faux, la tache n'est
+// pas trouvee et le compte tombe a zero.
+
+const tachesEnAttente = (p = {}) => ([{
+  id: 'tache-1', user_id: COMPTE, property_id: BIEN,
+  status: 'pending_validation', created_at: '2026-11-11T10:00:00Z',
+  send_after: '2026-11-11T12:00:00Z', suspendu_le: null, ...p
+}])
+
+test('⚠ POST delais (validation manuelle) DESARME les brouillons du bien', async () => {
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches }
+  )
+  assert.equal(res.code, 200)
+  assert.equal(taches[0].send_after, null, 'la tache est desarmee EN BASE')
+  assert.equal(taches[0].suspendu_le, null)
+  assert.ok(res.body.brouillons, 'le bilan redescend')
+  assert.equal(res.body.brouillons.ok, true)
+  assert.equal(res.body.brouillons.desarmes, 1)
+  assert.equal(res.body.brouillons.motif, 'validation_manuelle')
+})
+
+test('⚠ POST delais (un delai) REARME depuis la creation du brouillon', async () => {
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches }
+  )
+  assert.equal(res.code, 200)
+  assert.equal(taches[0].send_after, '2026-11-11T11:00:00.000Z',
+    'creation (10 h) + 60 min, et non l heure du clic')
+  assert.equal(res.body.brouillons.rearmes, 1)
+})
+
+test('⚠ et les trois ARGUMENTS sont les bons : un autre bien, un autre compte, intacts', async () => {
+  // C est le test que la revue reclamait : si `propertyRef` ou `userId` etait
+  // faux, le compte tomberait a zero ici.
+  const taches = [
+    ...tachesEnAttente({ id: 'a' }),
+    ...tachesEnAttente({ id: 'b', property_id: 'autre-bien' }),
+    ...tachesEnAttente({ id: 'c', user_id: 'compte-voisin' }),
+    ...tachesEnAttente({ id: 'd', status: 'sending' })
+  ]
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches }
+  )
+  assert.equal(res.body.brouillons.desarmes, 1, 'une seule tache touchee')
+  assert.equal(taches.find(t => t.id === 'a').send_after, null)
+  for (const id of ['b', 'c', 'd']) {
+    assert.equal(taches.find(t => t.id === id).send_after, '2026-11-11T12:00:00Z',
+      `${id} est intacte`)
+  }
+})
+
+// ⚠ DATES RELATIVES DANS CES DEUX TESTS, ET C'EST LA REGLE DU DEPOT : `echues`
+// se compare a `Date.now()`, lu par l'endpoint, qu'un test ne peut pas injecter
+// ici. Des dates figees en novembre 2026 rendaient `echues: 0` — vert ou rouge
+// selon le jour ou la suite tourne, ce qui ne mesure rien.
+const ilYa = (ms) => new Date(Date.now() - ms).toISOString()
+
+test('⚠ l APERCU n ecrit RIEN : ni le blob, ni les taches', async () => {
+  const taches = tachesEnAttente({ created_at: ilYa(2 * 60 * 60 * 1000) })
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, apercu: true, delais: { reponse_ia: 60, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches }
+  )
+  assert.equal(res.code, 200)
+  assert.equal(etat.ecritures.length, 0, 'aucun upsert du blob')
+  assert.equal(etat.majTaches.length, 0, 'aucune ecriture de tache')
+  assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z', 'la tache est intacte')
+  assert.ok(res.body.apercu, 'l apercu est rendu')
+  assert.equal(res.body.apercu.ok, true)
+  assert.equal(res.body.apercu.rearmes, 1, 'il COMPTE ce qui bougerait')
+  assert.equal(res.body.apercu.echues, 1,
+    'et il compte ce qui partirait au prochain passage : ne il y a 2 h, +60 min, deja echu')
+  assert.equal(res.body.brouillons, undefined, 'un apercu n est pas un enregistrement')
+})
+
+test('l apercu ne compte comme echu que ce qui l est vraiment', async () => {
+  const taches = tachesEnAttente({ created_at: ilYa(0) })
+  const { res } = await postConfig(
+    { delais_ref: BIEN, apercu: true, delais: { reponse_ia: 1440, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches }
+  )
+  assert.equal(res.body.apercu.rearmes, 1)
+  assert.equal(res.body.apercu.echues, 0, 'creation + 24 h est dans le futur')
+})
+
+test('⚠ les cibles `mode` et `alertes` ne touchent AUCUNE tache', async () => {
+  for (const corps of [
+    { mode_ref: BIEN, mode: 'auto' },
+    { alertes_ref: BIEN, alertes: { intervention: { sms_enabled: false }, info_unknown: { sms_enabled: false } } }
+  ]) {
+    const taches = tachesEnAttente()
+    const { res, etat } = await postConfig(corps, { config: { [BIEN]: { mode: 'test' } }, taches })
+    assert.equal(res.code, 200, JSON.stringify(corps))
+    assert.equal(etat.majTaches.length, 0, 'aucune tache touchee')
+    assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z')
+    assert.equal(res.body.brouillons, undefined)
+  }
+})
+
+test('⚠ la propagation est APRES l upsert, et un echec ne fait pas mentir le 200', async () => {
+  // Le reglage gouverne les brouillons a venir : il doit etre ecrit meme si la
+  // propagation echoue. Ici la lecture des taches echoue (double en panne).
+  const taches = tachesEnAttente()
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches, tachesIllisibles: true }
+  )
+  assert.equal(res.code, 200, 'le reglage EST enregistre, donc pas de 500')
+  const ecrit = etat.ecritures.find(e => e.table === 'agent_alert_config')
+  assert.ok(ecrit, 'l upsert du blob est bien parti')
+  assert.equal(ecrit.row.config[BIEN].delais.reponse_ia, null)
+  assert.equal(res.body.brouillons.ok, false, 'et l echec de propagation se DIT')
+  assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z', 'la tache n a pas bouge')
+})
+
+test('⚠ `propager: false` enregistre le blob et SAUTE la reprise des brouillons', async () => {
+  // Constat 2 de la derniere revue : `delais` porte TROIS reglages. Refuser de
+  // liberer l arriere ne doit pas couter la sourdine ni l echeance d alerte.
+  const taches = tachesEnAttente()
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, propager: false, delais: { reponse_ia: 60, alerte_info: 30, sourdine: { active: true, debut: '23:00', fin: '07:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches }
+  )
+  assert.equal(res.code, 200)
+  // Le blob EST enregistre, avec les trois reglages.
+  const ecrit = etat.ecritures.find(e => e.table === 'agent_alert_config')
+  assert.ok(ecrit, 'l upsert est bien parti')
+  assert.equal(ecrit.row.config[BIEN].delais.reponse_ia, 60)
+  assert.equal(ecrit.row.config[BIEN].delais.alerte_info, 30)
+  assert.deepEqual(ecrit.row.config[BIEN].delais.sourdine,
+    { active: true, debut: '23:00', fin: '07:00' }, 'la sourdine survit au refus')
+  // Et les brouillons gardent leur echeance : le comportement d avant ce lot.
+  assert.equal(etat.majTaches.length, 0, 'aucune tache touchee')
+  assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z')
+  assert.equal(res.body.brouillons.ok, true, 'ce n est pas un echec')
+  assert.equal(res.body.brouillons.motif, 'propagation_non_demandee')
+  for (const c of ['desarmes', 'rearmes', 'inchanges', 'deja_prises', 'echues', 'sans_creation']) {
+    assert.equal(res.body.brouillons[c], 0, `${c} est present et a zero`)
+  }
+})
+
+test('sans le drapeau, la propagation a lieu (le defaut n est pas « ne rien faire »)', async () => {
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches }
+  )
+  assert.equal(res.body.brouillons.motif, 'validation_manuelle')
+  assert.equal(taches[0].send_after, null)
+})
+
+test('⚠ le bilan d EXCEPTION de l endpoint porte les six compteurs, pas quatre', async () => {
+  // Constat 4 : `deja_prises` et `echues` manquaient a la liste que l endpoint
+  // recopiait A LA MAIN dans son `catch`, alors que le JSDoc du module les
+  // promet tous les six. Il faut donc LEVER pour y arriver — une panne
+  // PostgREST, elle, passe par le module et son bilan etait deja complet.
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches, tachesLevent: true }
+  )
+  assert.equal(res.code, 200, 'le reglage est enregistre malgre la levee')
+  assert.equal(res.body.brouillons.ok, false)
+  assert.equal(res.body.brouillons.motif, 'exception')
+  for (const c of ['desarmes', 'rearmes', 'inchanges', 'deja_prises', 'echues', 'sans_creation']) {
+    assert.equal(typeof res.body.brouillons[c], 'number', `${c} est un nombre, pas undefined`)
+  }
+})
+
+test('une panne PostgREST, elle, passe par le module et rend lecture_impossible', async () => {
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches, tachesIllisibles: true }
+  )
+  assert.equal(res.body.brouillons.ok, false)
+  assert.equal(res.body.brouillons.motif, 'lecture_impossible')
+  assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z', 'rien n a bouge')
+})
+
+// ⚠ CE TEST NE ROUGIT PAS CONTRE LE COMMIT D'AVANT, ET C'EST NORMAL : il couvre
+// un comportement que l'apercu avait deja. Il est la pour qu'une regression
+// future se voie, pas comme preuve d'un correctif — qu'on ne le cite donc pas
+// comme tel.
+test('l APERCU ne touche rien non plus quand la lecture des taches echoue', async () => {
+  const taches = tachesEnAttente()
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, apercu: true, delais: { reponse_ia: 60, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches, tachesIllisibles: true }
+  )
+  assert.equal(res.code, 200)
+  assert.equal(etat.ecritures.length, 0, 'un apercu en echec n ecrit pas le blob non plus')
+  assert.equal(res.body.apercu.ok, false)
+  assert.equal(res.body.apercu.motif, 'lecture_impossible')
+  // L ecran s en servira pour ne PAS propager, tout en enregistrant.
+  assert.equal(typeof res.body.apercu.echues, 'number')
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// H. « Garder pour validation » : le booleen du corps traverse l'ENDPOINT
+// ⚠ CES CINQ LIGNES N'ETAIENT COUVERTES PAR RIEN (constat 8 d'une revue, qui
+// l'a mesure : forcer `garderEchues` a `false` — donc rendre la fonctionnalite
+// entierement inerte — ou a `true` — donc desarmer a CHAQUE enregistrement —
+// laissait toute la suite verte). Ces tests EXECUTENT le handler.
+// ════════════════════════════════════════════════════════════════════════════
+
+const ECHUE = () => ({
+  id: 'T-ECHUE', user_id: COMPTE, property_id: BIEN, status: 'pending_validation',
+  created_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+  send_after: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+  suspendu_le: null, updated_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()
+})
+
+test('LE TEST QUI COMPTE : `garder: true` DESARME, par l endpoint', async () => {
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true, garder: true },
+    { config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } }, taches: [ECHUE()] })
+  assert.equal(res.code, 200, JSON.stringify(res.body))
+  assert.equal(res.body.brouillons.ok, true, res.body.brouillons.motif)
+  assert.equal(res.body.brouillons.desarmes, 1, 'la proposition echue est gardee')
+  assert.equal(res.body.brouillons.rearmes, 0)
+  const maj = etat.majTaches
+  assert.equal(maj.length, 1, 'une ecriture')
+  assert.equal(maj[0].patch.send_after, null, 'plus d echeance')
+  assert.equal(maj[0].patch.suspendu_le, null, 'ni suspension')
+})
+
+test('LE TEST QUI COMPTE : sans `garder`, le MEME appel laisse partir', async () => {
+  // La contre-partie exacte, a un booleen pres : c est la decision du
+  // 28 octobre, et c est ce qui rend la fonctionnalite non inerte.
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true },
+    { config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } }, taches: [ECHUE()] })
+  assert.equal(res.code, 200)
+  assert.equal(res.body.brouillons.desarmes, 0, 'rien n est garde')
+  assert.equal(res.body.brouillons.rearmes, 1, 'elle est rearmee depuis sa creation')
+  assert.notEqual(etat.majTaches[0].patch.send_after, null, 'elle garde une echeance')
+})
+
+test('`garder` n est lu que sur sa valeur BOOLEENNE vraie', async () => {
+  // ⚠ `=== true`, pas une valeur « truthy » : une chaine `"false"` venue d un
+  // client mal ecrit ne doit pas desarmer les propositions d un hote.
+  for (const valeur of ['true', 1, {}, 'false', null]) {
+    const { res } = await postConfig(
+      { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true, garder: valeur },
+      { config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } }, taches: [ECHUE()] })
+    assert.equal(res.body.brouillons.desarmes, 0,
+      `garder: ${JSON.stringify(valeur)} ne desarme pas`)
+  }
+})
+
+test('LE TEST QUI COMPTE : aucune borne de temps ne vient du corps de la requete', async () => {
+  // ⚠ CONSTAT DE SECURITE D UNE REVUE : j avais fait repasser par l ecran
+  // l instant de l apercu. Une borne ANCIENNE desarme MOINS, donc un brouillon
+  // qui franchissait son echeance pendant que l hote lisait le dialogue
+  // n etait pas desarme, recevait une echeance deja passee, et partait.
+  //
+  // ⚠ LA BORNE EST DANS LA FENETRE QUE L ANCIEN CODE ACCEPTAIT (9 minutes, pour
+  // une fenetre de 10). Ma premiere version envoyait 365 JOURS : l ancien code
+  // la rejetait deja, donc le test ne mesurait rien et restait vert contre le
+  // defaut. C est le piege du « perimetre mesure sur UNE forme », et il faut la
+  // forme que le code d avant ACCEPTAIT.
+  //
+  // Le brouillon est ne il y a 65 min et le delai est de 60 : son echeance
+  // recalculee tombe il y a 5 min — donc APRES une borne vieille de 9 min.
+  // L ancien code ne l aurait pas desarmee ; celui-ci le fait.
+  const ne = new Date(Date.now() - 65 * 60 * 1000).toISOString()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true,
+      garder: true, cutoff: Date.now() - 9 * 60 * 1000 },
+    { config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } },
+      taches: [{ ...ECHUE(), created_at: ne, send_after: ne }] })
+  assert.equal(res.body.brouillons.echues, 1, 'elle est echue selon l horloge du serveur')
+  assert.equal(res.body.brouillons.desarmes, 1,
+    'et elle est gardee : le corps de la requete ne decide pas de ce qui part')
+})
+
+test('LE TEST QUI COMPTE : le bilan est INVARIANT a toute cle de temps du corps', async () => {
+  // ⚠ CONSTAT 2 DE LA RE-REVUE : mes garde-fous grepaient le NOM `cutoff`. La
+  // revue a reintroduit le mecanisme exact sous `instantApercu` et tout restait
+  // vert. On mesure donc l INVARIANCE : meme etat serveur, meme bilan, quelles
+  // que soient les cles de temps que le corps transporte.
+  const ne = new Date(Date.now() - 65 * 60 * 1000).toISOString()
+  const etatServeur = () => ({
+    config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } },
+    taches: [{ ...ECHUE(), created_at: ne, send_after: ne }]
+  })
+  const base = { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true, garder: true }
+  const { res: nu } = await postConfig({ ...base }, etatServeur())
+  const temoin = { desarmes: nu.body.brouillons.desarmes, echues: nu.body.brouillons.echues }
+  assert.equal(temoin.desarmes, 1, 'le temoin desarme bien la proposition echue')
+  const vieux = Date.now() - 9 * 60 * 1000
+  for (const parasite of [
+    { cutoff: vieux }, { instantApercu: vieux }, { borne: vieux }, { instant: vieux },
+    { now: vieux }, { maintenant: vieux }, { apercu_instant: vieux }
+  ]) {
+    const { res } = await postConfig({ ...base, ...parasite }, etatServeur())
+    assert.equal(res.body.brouillons.desarmes, temoin.desarmes,
+      `${Object.keys(parasite)[0]} ne change pas ce qui est garde`)
+    assert.equal(res.body.brouillons.echues, temoin.echues,
+      `${Object.keys(parasite)[0]} ne change pas ce qui est compte`)
+  }
+})

@@ -393,6 +393,116 @@ marque du partenaire.
 sortie est lue par un humain au moment où il les lance, et aucun n'est déployé.
 Le même test refuse qu'un fichier de `api/` ou `lib/` soit exempté.
 
+## Délai d'alerte « info manquante » — le socle (lot 1, 27 octobre 2026)
+
+Spec : `docs/specs/spec-delai-reponse-ia.md`. Détail du chantier et des
+réglages : `docs/kb/guestflow.md`, section « Délai de réponse IA ».
+**Ce lot ne change aucun comportement** — le différé arrive au lot 3.
+
+### ⚠ Le constat qui compte : l'alerte n'a JAMAIS été réglable
+
+`lib/cron-classify.js` insère la tâche `info_unknown` ou `intervention`, puis
+appelle `sendAlertNotifications` **dans le même tour, inconditionnellement** —
+et **sans lire le mode du bien**. En Mode Test comme en Mode Auto, l'alerte
+d'info manquante part tout de suite.
+
+Donc le réglage `delais.alerte_info` ne retarde pas un chemin déjà réglable :
+**il crée le premier réglage de ce chemin.** L'intuition « c'était déjà en
+test » est fausse ici, et c'est pour ça que la migration pose `alerte_info = 0`
+**partout** : mettre 15 min aurait changé le comportement de biens en
+production sous couvert de migration. Les 15 min sont le défaut des biens
+**neufs**, à l'onboarding.
+
+### Ce qui restera inchangé au lot 3
+
+**`intervention` ne sera jamais retardée, jamais mise en sourdine.** L'urgence
+part dans le tour, `alert_after` reste nul pour ce type. Seule `info_unknown`
+porte une échéance.
+
+### La sourdine de nuit (lot 3)
+
+Activable par bien, plage réglable, **désactivée par défaut**. Une alerte dont
+l'échéance tombe dans la plage est repoussée à la fin de la plage. Plage qui
+enjambe minuit (22 h → 8 h) traitée explicitement : c'est le cas normal, pas le
+cas limite.
+
+⚠ **Le fuseau en v1 est `Europe/Paris` pour tous les biens**, dans une
+constante unique (`FUSEAU_V1`, `lib/guestflow/sourdine.js`) — décision de
+Thierry du 27 octobre 2026. `properties.timezone` **existe** déjà
+(`migrations/2026-09-08-fiche-unifiee.sql`), et on ne la lit volontairement
+pas tant qu'aucun bien n'est hors de France. La constante porte son motif :
+sans lui, la session qui lira « Paris en dur » dans six mois y verra un oubli
+et « corrigera » une décision. Ce qui reste interdit : calculer une sourdine en
+UTC en silence — la famille de bugs qui a dupliqué 83 messages le 14 septembre
+2026.
+
+### ⚠ Question ouverte au 27 octobre 2026 : la sourdine et l'alerte de reprise
+
+Le lot 2 ajoute une alerte quand le compte à rebours d'un brouillon **modifié
+par l'hôte** reprend, pour le prévenir avant qu'un texte peut-être inachevé
+parte. Thierry l'a demandée « même canal et même sourdine que l'info
+manquante ». **Les deux moitiés ne tiennent pas ensemble** : avec la sourdine,
+une reprise à 2 h du matin donne une alerte à 8 h, soit **après** le départ du
+brouillon — l'alerte n'avertit plus, elle raconte. Trois issues au §9 de la
+spec ; recommandation retenue en attente : la sourdine retarde **l'alerte ET
+l'envoi**, pour que l'avertissement précède toujours le texte.
+
+### Dette relevée en passant
+
+`lib/alert-notify.js` — `PROPERTY_NAMES` code en dur `169567` (« Cœur de vie
+23 ») et `209413` (« La bulle »). Tout autre bien s'annonce « Logement <id> »
+dans le SMS **et** dans l'objet de l'e-mail : l'hôte d'un troisième bien reçoit
+une alerte qui lui parle d'un numéro.
+
+## Le délai d'alerte et la sourdine — l'état au lot 2 (27 octobre 2026)
+
+Le lot 2 a livré le **réglage** (`delais.alerte_info`, `delais.sourdine` dans
+`agent_alert_config.config[<ref>]`) et la **règle de calcul**
+(`lib/guestflow/sourdine.js`). Ce qui **n'est pas** encore branché : le report
+effectif de l'alerte « info manquante », qui est le **lot 3**.
+
+Donc aujourd'hui, et il faut le savoir : **le réglage existe à l'écran, et
+l'alerte part toujours dans le tour.** La migration pose `alerte_info = 0`
+partout, donc le réglage affiché dit la vérité pour tous les biens existants —
+mais un hôte qui le passerait à 15 minutes ne verrait rien changer avant le
+lot 3. ⚠ C'est une dette assumée du découpage, pas un oubli.
+
+### Ce que `lib/guestflow/sourdine.js` garantit déjà
+
+- Plage **`[début, fin[`** : sans cette convention, une échéance repoussée à
+  8 h 00 retomberait dans la plage et serait repoussée à nouveau. Un test le
+  vérifie explicitement.
+- **Les deux changements d'heure sont éprouvés.** La fin reste 8 h de Paris
+  quand la nuit dure 23 heures (29 mars 2027) ou 25 (25 octobre 2026). Et une
+  mesure qui surprend : le report du 24 octobre dure **10 h 30 réelles** pour
+  9 h 30 de cadran — l'heure rendue s'y ajoute. Ma première assertion disait
+  11 h 30 et elle était **fausse** ; le module avait raison. Le calcul est posé
+  en entier dans le test, pour que personne ne refasse l'erreur. **Une durée de
+  sourdine se calcule sur des INSTANTS, jamais sur la différence des heures
+  affichées.**
+- **Chaque refus a son motif** (`sourdine_absente`, `sourdine_inactive`,
+  `plage_illisible`, `plage_vide`, `hors_plage`, `instant_illisible`) — jamais
+  un « non » silencieux.
+- **Aucune horloge lue** : tout instant est injecté, un test le vérifie par
+  grep sur `Date.now()`.
+
+### Le fuseau, et pourquoi il est en dur
+
+`FUSEAU_V1 = 'Europe/Paris'` pour tous les biens, décision de Thierry du
+27 octobre 2026. `properties.timezone` **existe** et n'est volontairement pas
+lue tant qu'aucun bien n'est hors de France. La constante porte son motif :
+sans lui, la session qui lira « Paris en dur » dans six mois y verra un oubli et
+« corrigera » une décision.
+
+### Décision 7 : la nuit, un brouillon MODIFIÉ ne part pas
+
+Et **seulement** modifié : un brouillon jamais touché part la nuit comme en
+journée. La sourdine protège le texte incertain de l'hôte, pas la réponse de
+l'IA. L'alerte part à la fin de la plage, puis le brouillon **15 minutes plus
+tard** — sans ce délai de grâce, l'alerte « avertirait » d'une chose déjà faite.
+Le report est en place dans la passe (`reportes` au bilan) ; **l'alerte
+elle-même est au lot 3**.
+
 ## L'envoi au voyageur : trois issues, une porte, une alarme (30 octobre 2026)
 
 Branche `fix-envoi-ota`. Avant ce lot, le canal OTA écrivait `message_sent_log`

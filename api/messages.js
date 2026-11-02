@@ -261,15 +261,29 @@ async function cloreProposition(req, res) {
   if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
     return res.status(404).json({ error: 'Proposition introuvable' })
   }
-  if (tache.status !== 'pending_validation') {
+  // ⚠ `sending` N'EST CLOTURABLE QUE POUR UN ENVOI (constat 4 de la revue).
+  // C'est l'etat normal quand l'ecran a RESERVE la tache avant d'envoyer :
+  // refuser ce statut bloquerait la cloture de son propre envoi. Mais
+  // l'accepter pour un REJET rouvrait la course que le claim ferme : le cron
+  // claime et commence l'appel provider, l'hote clique « Ne pas envoyer », la
+  // tache passe a `ignored` — et le cron finit d'envoyer. Le voyageur a recu
+  // le message, l'hote lit « rejetee », et rien ne le dit.
+  // Un rejet n'a rien a reserver, donc rien a gagner a accepter `sending` : il
+  // attend que la tache revienne (echec de l'envoi, ou reprise des orphelines).
+  const CLOTURABLES = statut === 'done'
+    ? ['pending_validation', STATUT_EN_COURS]
+    : ['pending_validation']
+  if (!CLOTURABLES.includes(tache.status)) {
     // Deja close ailleurs (ancienne page, autre onglet) : on le dit, on ne
     // re-ecrit pas — l'ecran retire la bulle dans les deux cas.
     return res.status(409).json({ error: 'deja_close', statut: tache.status })
   }
   // La condition de statut dans l'UPDATE ferme la course entre deux clics.
+  // ⚠ ET ELLE DESARME L'ECHEANCE : sans `send_after: null`, une tache close par
+  // l'ecran garderait son echeance et la passe du cron la relirait comme due.
   const { data: maj, error: eU } = await supabase.from('agent_tasks')
-    .update({ status: statut })
-    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .update({ status: statut, send_after: null })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', tache.status)
     .select('id')
   if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
   if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
@@ -283,6 +297,221 @@ async function cloreProposition(req, res) {
     if (eJ) console.error('[messages] journal conversations non ecrit', eJ.message)
   }
   return res.status(200).json({ ok: true, task_id: tache.id, statut })
+}
+
+// ─── Le CLAIM, avant que l'ecran envoie (chantier « delai de reponse IA ») ───
+//
+// ⚠ C'EST LE CORRECTIF DU CONSTAT CENTRAL DE L'ETAPE 0. `cloreProposition` a
+// toujours eu un claim atomique, mais l'ecran envoyait D'ABORD et le claim
+// venait APRES : « le client envoie d'abord par posterMessage, PUIS cette
+// action pose le statut ». Inoffensif tant que seul un humain envoyait — deux
+// onglets se soldaient par un 409 apres coup. Des que le CRON peut envoyer la
+// meme tache, cet ordre produit le double envoi au voyageur.
+//
+// L'ecran suit donc desormais le meme ordre que la passe du cron :
+//   1. POST { action: 'reserver' }  -> la tache passe a `sending` (409 si prise)
+//   2. l'ecran envoie               -> seulement si l'etape 1 a reussi
+//   3. POST { action: 'proposition' } -> `done` + journal
+// Un 409 a l'etape 1 veut dire « cette reponse vient de partir » : l'ecran le
+// dit et n'envoie RIEN.
+const STATUT_EN_COURS = 'sending'
+
+async function reserverProposition (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, property_id, suggested_reply')
+    .eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  // Perimetre par bien, 404 pas 403 — meme regle qu'archiverFil.
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+
+  // ⚠ LA CONDITION DE STATUT EST LE CLAIM : zero ligne = quelqu'un d'autre l'a
+  // prise (le cron, ou un autre onglet). On ne reessaie pas, on le DIT.
+  const { data: prise, error: eU } = await supabase.from('agent_tasks')
+    .update({ status: STATUT_EN_COURS, updated_at: new Date().toISOString() })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .select('id')
+  if (eU) return res.status(503).json({ error: 'Reservation impossible' })
+  if (!prise || !prise.length) {
+    return res.status(409).json({ error: 'deja_prise', statut: tache.status })
+  }
+  return res.status(200).json({ ok: true, task_id: tache.id, texte: tache.suggested_reply })
+}
+
+// ⚠ ET UNE RESERVATION SE RELACHE — MAIS DESARMEE, comme la reprise des
+// orphelines du cron (constat 14 de la revue du 27 octobre 2026). L'ecran ne
+// relache qu'apres un ECHEC de `posterMessage` : c'est precisement le cas
+// « on ne sait pas si l'envoi est parti ». `reprendreOrphelines` refuse
+// deliberement de renvoyer dans ce doute et rend la main a l'hote ; laisser
+// `send_after` dans le passe ici faisait l'inverse — le cron renvoyait le meme
+// brouillon au cycle suivant. Deux traitements opposes pour le meme doute.
+async function relacherProposition (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, property_id').eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+  const { error: eU } = await supabase.from('agent_tasks')
+    .update({
+      status: 'pending_validation',
+      send_after: null,
+      // ⚠ LA SUSPENSION S'EFFACE AUSSI (constat 5 de la seconde revue).
+      // Desarmer en laissant `suspendu_le` produisait un etat SANS ISSUE : la
+      // bulle affichait « En attente : vous modifiez » pour toujours, sans lien
+      // de reprise (il exige une echeance) et sans que le cron la reprenne
+      // (`reprendreSuspensionsDormantes` exige `send_after` non nul).
+      suspendu_le: null,
+      summary: "Envoi interrompu : impossible de savoir si le message est parti. "
+        + "Vérifiez le fil avant de renvoyer.",
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', STATUT_EN_COURS)
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  return res.status(200).json({ ok: true, task_id: tache.id, desarmee: true })
+}
+
+// ─── La REPRISE du compte a rebours (decision 4 de Thierry, 27/10/2026) ──────
+//
+// ⚠ « Reprise AVEC LE TEMPS RESTANT, 5 minutes au minimum » — et ce temps se
+// CALCULE, il n'a pas besoin d'une colonne. `send_after - suspendu_le` est
+// exactement ce qui restait quand l'hote a ouvert le brouillon : les deux
+// instants sont en base.
+//
+// Sans ce recalcul, deux defauts opposes : si on laissait `send_after` tel
+// quel, un brouillon ouvert vingt minutes partirait a la seconde ou l'hote le
+// relache — sous ses doigts ; et si on repartait du delai PLEIN, l'hote qui
+// jette un oeil a sa proposition repousserait l'envoi de quinze minutes a
+// chaque regard.
+//
+// Le plancher de 5 minutes existe pour le cas limite : un brouillon suspendu a
+// trente secondes de son echeance ne doit pas partir dans la seconde qui suit
+// le relachement.
+const REPRISE_MIN_MS = 5 * 60 * 1000
+
+async function reprendreEcheance (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, property_id, send_after, suspendu_le')
+    .eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+  if (tache.status !== 'pending_validation') {
+    return res.status(409).json({ error: 'deja_close', statut: tache.status })
+  }
+  // Rien a reprendre : la tache n'etait pas suspendue, ou n'a pas d'echeance.
+  if (!tache.suspendu_le || !tache.send_after) {
+    return res.status(409).json({ error: 'rien_a_reprendre' })
+  }
+
+  const echeance = Date.parse(tache.send_after)
+  const suspension = Date.parse(tache.suspendu_le)
+  if (!Number.isFinite(echeance) || !Number.isFinite(suspension)) {
+    return res.status(409).json({ error: 'rien_a_reprendre' })
+  }
+  const maintenant = Date.now()
+  const restait = Math.max(REPRISE_MIN_MS, echeance - suspension)
+  const nouvelle = new Date(maintenant + restait).toISOString()
+
+  const { data: maj, error: eU } = await supabase.from('agent_tasks')
+    .update({ suspendu_le: null, send_after: nouvelle, updated_at: new Date(maintenant).toISOString() })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .select('id')
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
+  return res.status(200).json({ ok: true, task_id: tache.id, send_after: nouvelle })
+}
+
+// ─── Le brouillon que l'hote a ecrit (decision 6 de Thierry, 27/10/2026) ─────
+//
+// ⚠ SANS CETTE ACTION, LA REPRISE DU COMPTE A REBOURS ENVOIE LE TEXTE DE L'IA.
+// L'edition de l'hote ne touchait pas la base : `suggested_reply` portait le
+// texte de l'IA, et l'ecran envoyait le contenu du champ au moment du clic. Une
+// reprise automatique livrait donc au voyageur la version que l'hote avait
+// justement commence a corriger.
+//
+// Trois colonnes bougent ensemble, et chacune a son role :
+//   · `suggested_reply` -> le texte de l'hote, celui qui partira ;
+//   · `suspendu_le`     -> l'ouverture suspend le compte a rebours (regle 2) ;
+//   · `modifie_le`      -> la reprise devra l'ALERTER (decision 7), et la
+//                          sourdine de nuit ne s'applique qu'a ce cas.
+async function enregistrerBrouillon (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  const texte = typeof req.body.texte === 'string' ? req.body.texte : null
+  const ouverture = req.body.ouverture === true
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+  // Une ouverture n'apporte pas de texte ; une sauvegarde en exige un.
+  if (!ouverture && (texte === null || !texte.trim())) {
+    return res.status(400).json({ error: 'Texte requis' })
+  }
+  // Borne comme les autres champs du fichier.
+  if (texte !== null && texte.length > 10000) return res.status(400).json({ error: 'Texte trop long' })
+
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, property_id').eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+  // ⚠ UNE TACHE DEJA PARTIE NE S'EDITE PAS : sans cette garde, l'hote
+  // ecraserait le texte d'une reponse deja delivree, et le journal
+  // `conversations` dirait autre chose que ce que le voyageur a lu.
+  if (tache.status !== 'pending_validation') {
+    return res.status(409).json({ error: 'deja_close', statut: tache.status })
+  }
+
+  const maintenant = new Date().toISOString()
+  const patch = { suspendu_le: maintenant, updated_at: maintenant }
+  // ⚠ `modifie_le` NE SE POSE QUE SUR UNE VRAIE ECRITURE. Une simple ouverture
+  // suspend le compte a rebours, mais elle ne doit PAS declencher l'alerte de
+  // reprise ni la sourdine : l'hote qui ouvre, lit et ferme n'a rien change, et
+  // le brouillon de l'IA peut partir la nuit comme en journee (decision 7).
+  if (!ouverture) {
+    patch.suggested_reply = texte
+    patch.modifie_le = maintenant
+  }
+
+  const { data: maj, error: eU } = await supabase.from('agent_tasks')
+    .update(patch)
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .select('id')
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
+  return res.status(200).json({ ok: true, task_id: tache.id, suspendu: true, modifie: !ouverture })
 }
 
 // ─── L'epingle (lot 2 etape 4) ───────────────────────────────────────────────
@@ -390,6 +619,20 @@ module.exports = async function handler(req, res) {
   // Etape 3 : Envoyer / Rejeter une proposition clot la tache (et le journal).
   if (req.method === 'POST' && req.body && req.body.action === 'proposition') {
     return await cloreProposition(req, res)
+  }
+  // Chantier « delai de reponse IA » : le claim AVANT l'envoi, son relachement,
+  // et le brouillon que l'hote a ecrit.
+  if (req.method === 'POST' && req.body && req.body.action === 'reserver') {
+    return await reserverProposition(req, res)
+  }
+  if (req.method === 'POST' && req.body && req.body.action === 'relacher') {
+    return await relacherProposition(req, res)
+  }
+  if (req.method === 'POST' && req.body && req.body.action === 'brouillon') {
+    return await enregistrerBrouillon(req, res)
+  }
+  if (req.method === 'POST' && req.body && req.body.action === 'reprendre') {
+    return await reprendreEcheance(req, res)
   }
   // Etape 4 : l'epingle, portee de l'ancienne page.
   if (req.method === 'POST' && req.body && (req.body.action === 'epingler' || req.body.action === 'desepingler')) {
