@@ -2074,6 +2074,72 @@ Un test nomme ces deux-là, pour qu'un lecteur sache que ce n'est pas un oubli.
 Mais le motif de Thierry vaut pour eux : **ils bloqueront l'extension sur la
 recette de leur propre écran.**
 
+### La revue de la fenêtre : onze constats, dont trois graves
+
+1. **GRAVE — « fermer ne change rien » EFFAÇAIT la saisie non enregistrée.** Ma
+   sortie neutre appelait `renderTiroir()` pour relâcher les contrôles, et il
+   repeint les champs depuis `etat` alors que ce chemin n'a **rien** écrit.
+   ⚠ **Et la cause réelle est en amont de mon correctif** : `enregistrerLePanneau`
+   lit le formulaire (`saisi`) **puis** repeint, à l'entrée — inoffensif sur le
+   chemin normal (les valeurs lues sont écrites puis relues), destructeur quand
+   on ferme. Ne plus repeindre dans ma sortie ne suffisait donc pas : il faut
+   **remettre** la saisie (`reposerLaSaisie`, l'inverse exact de
+   `lireLePanneau`). C'est le défaut que ce fichier documente déjà (« le champ
+   passait de "DESTINATAIRE-TAPÉ-À-LA-MAIN" à vide »), recréé puis refermé.
+2. **GRAVE — le retrait de `deja_prises` TAISAIT un envoi réel.** Mon
+   raisonnement (« sur un séjour terminé, rien ne peut partir ») est vrai à
+   l'instant de l'écriture, **pas** à l'instant où le cron a pris la tâche : il
+   tourne à 23:59:50 UTC, le séjour n'est pas terminé **pour lui**, il envoie ;
+   l'hôte valide à 00:00:10 et l'écriture classe la tâche « séjour terminé ».
+   L'`update` conditionné rend zéro ligne — le seul signal qu'une réponse est
+   partie. Silence double : ni `partie_deja_prises`, ni l'écart (le delta
+   mangeait l'unité). Désormais : `deja_prises` **ou** `sejours_termines`,
+   jamais les deux, sinon l'écran soustrait la même tâche deux fois.
+3. **GRAVE — `aria-modal="true"` sans modalité réelle.** Ni piège de focus, ni
+   garde de réentrance, et `fenetreOuverte` exporté mais jamais appelé. Mesuré :
+   au clavier seul, pendant la question du mode manuel, l'hôte atteignait la
+   **case pause** et son écriture partait jusqu'au bout — la boîte native
+   faisait ce travail gratuitement, en suspendant la page. Et deux appels
+   rapprochés empilaient **deux** boîtes. Trois fermetures : la tabulation est
+   enfermée dans la fenêtre, le geste du mode manuel **gèle** la page, et une
+   seconde fenêtre est refusée (`null`, la direction sûre).
+4. Ce `renderTiroir()` n'avait **aucun filet** : s'il levait, le `catch`
+   poussait deux échecs partiels **puis la fonction écrivait les étapes 2 et 3**
+   pour un geste qui ne doit rien changer. Fermé par le correctif 1.
+5. **Le texte ne disait plus que « Garder pour validation » LAISSE LA PAUSE
+   ACTIVE.** L'hôte vient de décocher la case pour **lever** la pause : le
+   libellé seul pouvait s'entendre « lève la pause, mais garde l'arriéré ». Les
+   textes nomment maintenant les deux boutons **et leur conséquence**, dans les
+   trois langues.
+6. **`b.fenetres` n'était pas un compte de fenêtres** : une entrée par **lot de
+   mutations** (3 pour une fenêtre si un `renderTiroir` passait) et lecture de la
+   **première** boîte seulement (1 pour deux empilées). Il ne mesurait donc ni
+   l'ouverture ni la superposition. Corrigé par un marquage des boîtes vues, et
+   `maxFenetresSimultanees` prouve l'unicité.
+7. **`var(--text-muted)` n'existe pas** dans le dépôt — le jeton est `--muted`.
+   La déclaration était invalide, donc sans effet.
+8. **Le z-index écrit dans le commentaire était faux** : `.msg-tiroir` est à 40,
+   pas 60-61 (60-61 est `.men-cfg*`). Encore un nombre à la main qui se lit
+   comme une mesure.
+9. **L'en-tête décrivait un mécanisme non utilisé** (« un voile + un panneau, en
+   `hidden` ») : le module n'écrit jamais `hidden`. Il n'est donc **pas** couvert
+   par `tests/masquage-hidden.test.js`, et le laisser croire était pire qu'un
+   commentaire absent.
+10. **Le texte n'était pas lié par `aria-describedby`** : un lecteur d'écran
+    annonçait le titre puis le bouton, et **pas** le paragraphe qui porte le
+    nombre de propositions — l'information la plus importante de cette fenêtre.
+11. **Le titre posait une question à laquelle aucun bouton ne répond**
+    (« Enregistrer ce délai ? » / « Laisser partir » / « Garder »). Les trois
+    titres décrivent maintenant le **sujet**, et les boutons y répondent.
+
+⚠ **ET TROIS DE MES PREMIERS CORRECTIFS N'ÉTAIENT TENUS PAR RIEN**, trouvé par
+mutation et non par la revue : la saisie remise, le gel de la question du mode
+manuel, et le piège de focus. Ce dernier mérite d'être retenu : **jsdom
+n'implémente pas la navigation séquentielle au clavier**, donc un `Tab` sans
+gestionnaire ne déplace rien — « le focus est resté dans la fenêtre » est vrai
+par construction, piège ou pas. Mon test était vide. Il affirme maintenant la
+**destination** du focus et que l'événement a été intercepté.
+
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 
 **Trouvé en corrigeant les quatre points, mesuré, NON corrigé dans ce commit.**

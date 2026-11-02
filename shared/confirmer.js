@@ -23,7 +23,15 @@
 // Or les garanties produit de ce lot se mesurent AU BANC, en cliquant. Un
 // composant qu'on ne peut pas rendre dans le banc serait un composant dont les
 // gardes ne sont tenues par rien. On reprend donc le patron que la page menages
-// utilise deja : un voile + un panneau, en `hidden`.
+// utilise deja : un voile + un panneau.
+//
+// ⚠ MAIS PAS `hidden`, ET MON EN-TETE DISAIT LE CONTRAIRE (constat de revue).
+// La fenetre est AJOUTEE au document puis RETIREE (`appendChild` / `.remove()`),
+// elle n'est jamais masquee par l'attribut. Elle ne depend donc pas de la regle
+// `[hidden] { display: none !important }` des trois feuilles — ce qui est une
+// bonne nouvelle — mais elle n'est pas couverte non plus par
+// `tests/masquage-hidden.test.js`, et le laisser croire etait pire qu'un
+// commentaire absent.
 
 // Les classes vivent dans shared/ui.css (`.hs-confirm*`).
 const ANCRE = 'hs-confirm'
@@ -44,6 +52,11 @@ function vider (el) { while (el.firstChild) el.removeChild(el.firstChild) }
  */
 export function confirmerDansLaPage ({ titre, texte, boutons, doc, fermer = 'Fermer' }) {
   const d = doc || (typeof document !== 'undefined' ? document : null)
+  // ⚠ UNE SEULE FENETRE A LA FOIS — constat MESURE d'une revue : deux appels
+  // rapproches empilaient DEUX boites dans le document, et le focus comme la
+  // touche Echap n'allaient qu'a l'une des deux. On refuse la seconde, et on
+  // rend `null` : c'est la direction sure, puisque `null` ne decide rien.
+  if (d && fenetreOuverte(d)) return Promise.resolve(null)
   if (!d || !Array.isArray(boutons) || !boutons.length) {
     // ⚠ PAS DE REPLI SUR `window.confirm` : il bloque l'extension, et un repli
     // silencieux ferait exactement ce que ce module existe pour empecher. Sans
@@ -70,7 +83,15 @@ export function confirmerDansLaPage ({ titre, texte, boutons, doc, fermer = 'Fer
 
   const p = d.createElement('p')
   p.className = ANCRE + '__texte small'
+  p.id = ANCRE + '-texte'
   p.textContent = String(texte || '')
+  // ⚠ LE TEXTE EST ANNONCE, PAS SEULEMENT AFFICHE — constat de revue. Avec
+  // `role="dialog"` et le seul `aria-labelledby`, un lecteur d'ecran annonce le
+  // titre puis le bouton focalise : le paragraphe qui porte LE NOMBRE de
+  // propositions, et la phrase « fermer ne change rien », n'etaient pas lus.
+  // Sur une fenetre dont tout l'objet est que l'hote sache ce qui va partir au
+  // voyageur, c'etait l'information la plus importante qui manquait.
+  boite.setAttribute('aria-describedby', p.id)
 
   const croix = d.createElement('button')
   croix.type = 'button'
@@ -104,7 +125,26 @@ export function confirmerDansLaPage ({ titre, texte, boutons, doc, fermer = 'Fer
     // ⚠ TOUTES LES FERMETURES RENDENT `null`, ET C'EST LA DECISION DE THIERRY :
     // « fermer la fenetre = ne rien changer ». La croix, Echap et le clic a
     // cote passent donc par le MEME chemin que l'absence de reponse.
-    const surTouche = (e) => { if (e.key === 'Escape') { e.preventDefault(); finir(null) } }
+    // ⚠ `aria-modal="true"` SANS PIEGE DE FOCUS EST UN MENSONGE, et c'est un
+    // constat MESURE : au clavier seul, pendant que la fenetre etait ouverte,
+    // l'hote atteignait la case pause de la page — et son ecriture partait
+    // jusqu'au bout. Le voile ne bloque que la SOURIS. On enferme donc la
+    // tabulation dans la fenetre : c'est ce que la boite native faisait
+    // gratuitement, en suspendant la page.
+    const focusables = () => [...boite.querySelectorAll('button:not([disabled])')]
+    const surTouche = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); finir(null); return }
+      if (e.key !== 'Tab') return
+      const liste = focusables()
+      if (!liste.length) return
+      const premier = liste[0]
+      const dernier = liste[liste.length - 1]
+      const actif = d.activeElement
+      // Hors de la fenetre (ou nulle part) : on ramene dedans.
+      if (!boite.contains(actif)) { e.preventDefault(); premier.focus(); return }
+      if (e.shiftKey && actif === premier) { e.preventDefault(); dernier.focus(); return }
+      if (!e.shiftKey && actif === dernier) { e.preventDefault(); premier.focus() }
+    }
 
     for (const b of boutons) {
       const el = d.createElement('button')

@@ -2193,15 +2193,36 @@ function brancherTiroir (corps, ref) {
   // Fermer la fenetre revient a rester en validation : ne rien changer.
   corps.querySelector('[data-delai-manuel]')?.addEventListener('click', async () => {
     if (d.reponse_ia === null) {
-      const choix = await confirmerDansLaPage({
+      // ⚠ ON GELE PENDANT LA QUESTION — constat MESURE d'une revue, et c'est
+      // une porte que la fenetre a ouverte. La boite native suspendait la
+      // page : rien d'autre ne pouvait etre clique. La fenetre, elle, rend la
+      // main — et au clavier seul l'hote atteignait la CASE PAUSE, dont
+      // l'ecriture partait jusqu'au bout, pendant que la question etait
+      // ouverte. Pire : le selecteur de bien restait vivant lui aussi, donc au
+      // retour `basculerValidationManuelle(d)` s'appliquait au `d` du bien
+      // d'AVANT.
+      etat.modeEnCours = true
+      geler(corps, true)
+      gelerEnTete(true)
+      let choix = null
+      try {
+        choix = await confirmerDansLaPage({
         titre: t('messages.mode_confirm_auto_titre'),
         texte: t('messages.mode_confirm_auto'),
         fermer: t('messages.confirm_fermer'),
-        boutons: [
-          { cle: 'continuer', libelle: t('messages.confirm_continuer'), principal: true },
-          { cle: 'rester', libelle: t('messages.confirm_rester') }
-        ]
-      })
+          boutons: [
+            { cle: 'continuer', libelle: t('messages.confirm_continuer'), principal: true },
+            { cle: 'rester', libelle: t('messages.confirm_rester') }
+          ]
+        })
+      } finally {
+        // ⚠ RELACHE DANS TOUS LES CAS, et SANS repeindre : un re-rendu ici
+        // emporterait la saisie non enregistree du volet, exactement comme sur
+        // le chemin ci-dessus.
+        etat.modeEnCours = false
+        geler(corps, false)
+        gelerEnTete(false)
+      }
       if (choix !== 'continuer') return
     }
     basculerValidationManuelle(d)
@@ -2274,6 +2295,39 @@ function lireLePanneau (corps, ref) {
       bien: (corps.querySelector('[data-consignes="bien"]')?.value || '').trim()
     }
   }
+}
+
+// L'INVERSE EXACT DE `lireLePanneau` : il remet dans le DOM ce qu'on y avait lu.
+//
+// ⚠ IL EXISTE POUR QUE « FERMER NE CHANGE RIEN » SOIT VRAI — constat GRAVE
+// d'une revue, et la cause est en amont de la fenetre. `enregistrerLePanneau`
+// lit le formulaire (`saisi`), PUIS repeint (`geler` + `renderTiroir`) : sur le
+// chemin normal c'est inoffensif, puisque les valeurs lues sont ensuite ecrites
+// et relues. Mais quand l'hote FERME la fenetre, rien n'est ecrit — et le
+// repeint d'entree a deja remis les champs a leur valeur ENREGISTREE. Mesure au
+// banc : une consigne et un destinataire tapes revenaient a vide, avec « Rien
+// n'a ete modifie » juste en dessous. Un geste qui ne change rien ne doit pas
+// effacer une saisie.
+function reposerLaSaisie (corps, saisi) {
+  if (!corps || !saisi) return
+  const poser = (sel, valeur) => {
+    const el = corps.querySelector(sel)
+    if (el) el.value = String(valeur == null ? '' : valeur)
+  }
+  const cocher = (sel, valeur) => {
+    const el = corps.querySelector(sel)
+    if (el) el.checked = valeur === true
+  }
+  for (const k of ['intervention', 'info_unknown']) {
+    const a = saisi.alertes[k]
+    if (!a) continue
+    cocher('[data-alerte="' + k + '|sms_enabled"]', a.sms_enabled)
+    poser('[data-alerte="' + k + '|sms_lines"]', a.sms_lines)
+    cocher('[data-alerte="' + k + '|email_enabled"]', a.email_enabled)
+    poser('[data-alerte="' + k + '|email_lines"]', a.email_lines)
+  }
+  poser('[data-consignes="global"]', saisi.consignes.global)
+  poser('[data-consignes="bien"]', saisi.consignes.bien)
 }
 
 // ─── UN SEUL « ENREGISTRER », TROIS ECRITURES ───────────────────────────────
@@ -2562,9 +2616,33 @@ async function enregistrerLePanneau (corps, ref) {
           // exactement le mensonge inverse de celui qu'on ferme. La sortie
           // NORMALE de cette fonction baisse les deux drapeaux (ligne ~2745) ;
           // la mienne doit faire pareil.
+          // ⚠ ON NE REPEINT PAS, ET C'EST UN CONSTAT GRAVE DE REVUE : mon
+          // `renderTiroir()` ici EFFACAIT la saisie que l'hote n'avait pas
+          // encore enregistree. Il refait `corps.innerHTML = voletIA(ref)`,
+          // donc il repeint les champs depuis `etat` — or ce chemin n'a RIEN
+          // ecrit : `etat.prompting` n'est mis a jour qu'apres
+          // `ecrireConsigne`. Mesure au banc : un destinataire d'alerte et une
+          // consigne tapes revenaient a vide, avec la note « Rien n'a ete
+          // modifie » juste en dessous. C'est le defaut que ce fichier
+          // documente trente lignes plus bas (« le champ passait de
+          // "DESTINATAIRE-TAPE-A-LA-MAIN" a vide »), recree par mon correctif.
+          // ⚠ ET CA FERME UN SECOND CONSTAT : ce `renderTiroir()` etait dans le
+          // `try` de l'etape 1 et n'avait AUCUN filet. S'il levait, le `catch`
+          // poussait deux echecs partiels puis la fonction CONTINUAIT vers les
+          // etapes 2 et 3 — elle ECRIVAIT les alertes et les consignes — pour
+          // un geste qui ne doit rien changer. On relache les controles un par
+          // un, comme `degelerVolet` le fait sur le chemin de la pause : rien
+          // a repeindre, donc rien a perdre et rien a lever.
           etat.modeEnCours = false
           etat.panneauEnCours = false
-          renderTiroir()
+          geler(corps, false)
+          gelerEnTete(false)
+          // ⚠ ET ON REMET LA SAISIE : le repeint d'ENTREE de cette fonction a
+          // deja ramene les champs a leur valeur enregistree, alors qu'on
+          // n'ecrit rien. Sans ca, « fermer ne change rien » serait faux pour
+          // tout ce qui ne vit que dans le DOM — les consignes et les
+          // destinataires d'alerte.
+          reposerLaSaisie(corps, saisi)
           noteDuBien(ref, t('messages.panneau_rien_change'), true)
           return
         }

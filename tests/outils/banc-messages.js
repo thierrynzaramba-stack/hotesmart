@@ -155,6 +155,8 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
   // Le repondeur automatique : il observe le DOM et clique le bouton demande
   // des qu'une fenetre apparait. C'est le geste REEL, pas un court-circuit.
   window.__fenetres = []
+  window.__vues = new WeakSet()
+  window.__maxSimultanees = 0
   // ⚠ L'OBSERVATEUR SE DEBRANCHE A LA FERMETURE, et sans ca il LEVE. Mesure :
   // une callback encore en vol apres `window.close()` tombait sur un document
   // demonte et rendait `Uncaught TypeError: Cannot read properties of
@@ -170,8 +172,18 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
   {
     const mo = new window.MutationObserver(() => {
       if (!window.document || !window.document.body) return
-      const boite = window.document.querySelector('[data-bind="hs-confirm"]')
-      if (!boite) return
+      // ⚠ UNE ENTREE PAR FENETRE REELLE, ET PAS UNE PAR LOT DE MUTATIONS —
+      // constat MESURE d'une revue. Ma version poussait a CHAQUE salve tant
+      // qu'une boite etait presente (un `renderTiroir` pendant la question
+      // donnait un journal de 3 pour UNE fenetre) et ne lisait que la PREMIERE
+      // du document (deux boites empilees donnaient 1). Le journal ne mesurait
+      // donc ni l'ouverture ni la superposition. On marque les boites deja
+      // vues, et on les prend TOUTES.
+      const boites = [...window.document.querySelectorAll('[data-bind="hs-confirm"]')]
+      const neuves = boites.filter(x => !window.__vues.has(x))
+      if (!neuves.length) return
+      for (const x of neuves) window.__vues.add(x)
+      const boite = neuves[0]
       // ⚠ LA FENETRE VUE SE LIT DANS LE DOM, PAS DANS LE JOURNAL. Ma premiere
       // version prenait la DERNIERE entree de `__fenetres` AVANT d'y pousser la
       // courante : la fonction de reponse recevait donc la fenetre PRECEDENTE
@@ -183,7 +195,16 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
         texte: (boite.querySelector('.hs-confirm__texte') || {}).textContent || '',
         boutons: [...boite.querySelectorAll('[data-confirm-choix]')].map(b => b.textContent)
       }
-      window.__fenetres.push(vue)
+      for (const x of neuves) {
+        window.__fenetres.push(x === boite ? vue : {
+          titre: (x.querySelector('.hs-confirm__titre') || {}).textContent || '',
+          texte: (x.querySelector('.hs-confirm__texte') || {}).textContent || '',
+          boutons: [...x.querySelectorAll('[data-confirm-choix]')].map(b => b.textContent)
+        })
+      }
+      // ⚠ ET LA SUPERPOSITION SE COMPTE : le module refuse la seconde fenetre,
+      // et c'est ce nombre qui le prouve.
+      window.__maxSimultanees = Math.max(window.__maxSimultanees || 0, boites.length)
       let repondre = window.__reponseFenetre
       if (typeof repondre === 'function') repondre = repondre(vue)
       // `undefined` : on n'y touche pas, le test clique lui-meme.
@@ -348,6 +369,9 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
     // titre, leur texte et le LIBELLE de chaque bouton : un test affirme ce que
     // l'hote a lu, pas un compteur.
     fenetres: window.__fenetres,
+    // Le plus grand nombre de fenetres vues EN MEME TEMPS dans le document.
+    // `aria-modal` sans ce nombre a 1 est une promesse non tenue.
+    get maxFenetresSimultanees () { return window.__maxSimultanees || 0 },
     tables: window.__tables,
     repondreConfirm: (v) => { window.__reponseConfirm = v },
     // La reponse aux fenetres de la page : une cle de bouton, ou `null` pour

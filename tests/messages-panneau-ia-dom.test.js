@@ -354,8 +354,15 @@ test('LE TEST QUI COMPTE : ANNULER garde les propositions pour validation, et le
 
 test('un ECHEC de la propagation, lui, reste rouge et se nomme', async () => {
   const { b } = bancEnregistrement({ echues: 0, brouillons: { ok: false, motif: 'lecture_illisible' } })
-  b.repondreConfirm(true)
+  // La question du mode manuel vit dans la page : on clique « Continuer ».
+  b.repondreFenetre('continuer')
   B.clic(b, B.pilManuel(b))
+  // ⚠ LA QUESTION GELE LE PANNEAU TANT QU ELLE EST OUVERTE (correctif d un
+  // constat de revue : au clavier seul, l hote atteignait la case pause pendant
+  // la question). Enchainer sans attendre fait donc refuser l enregistrement
+  // par « un reglage est deja en cours » — ce qui est le comportement JUSTE,
+  // mais pas celui qu on mesure ici.
+  await B.reposer(b)
   await b.msg.enregistrerPanneau(B.corps(b), REF)
   assert.match(b.note(), /Non enregistré/)
   assert.match(b.note(), new RegExp(FR['messages.partie_brouillons']))
@@ -386,8 +393,15 @@ test('un apercu ILLISIBLE reste un echec : l hote n a rien choisi', async () => 
 
 test('sans arriere, la note reste le simple « Enregistre »', async () => {
   const { b } = bancEnregistrement({ echues: 0 })
-  b.repondreConfirm(true)
+  // La question du mode manuel vit dans la page : on clique « Continuer ».
+  b.repondreFenetre('continuer')
   B.clic(b, B.pilManuel(b))
+  // ⚠ LA QUESTION GELE LE PANNEAU TANT QU ELLE EST OUVERTE (correctif d un
+  // constat de revue : au clavier seul, l hote atteignait la case pause pendant
+  // la question). Enchainer sans attendre fait donc refuser l enregistrement
+  // par « un reglage est deja en cours » — ce qui est le comportement JUSTE,
+  // mais pas celui qu on mesure ici.
+  await B.reposer(b)
   await b.msg.enregistrerPanneau(B.corps(b), REF)
   assert.equal(b.note(), FR['messages.panneau_saved'])
   assert.equal(b.noteOk(), true)
@@ -1138,4 +1152,57 @@ test('LE TEST QUI COMPTE : plus aucune boite native sur les trois confirmations 
     assert.ok(new RegExp('confirmerDansLaPage[\\s\\S]{0,400}' + cle.replace('.', '\\.')).test(code),
       cle + ' passe par la fenetre de la page')
   }
+})
+
+test('LE TEST QUI COMPTE : FERMER la fenetre ne touche pas a la saisie du volet', async () => {
+  // ⚠ CONSTAT GRAVE D UNE REVUE, ET C EST MON CORRECTIF QUI L AVAIT CREE. Ma
+  // sortie neutre appelait `renderTiroir()` pour relacher les controles : il
+  // refait `corps.innerHTML = voletIA(ref)`, donc il repeint les champs depuis
+  // `etat` — alors que ce chemin n a RIEN ecrit. Un destinataire d alerte et une
+  // consigne tapes revenaient a VIDE, avec « Rien n a ete modifie » juste en
+  // dessous. C est le defaut que ce fichier documente deja (« le champ passait
+  // de "DESTINATAIRE-TAPE-A-LA-MAIN" a vide »), recree par le correctif.
+  const { b } = bancEnregistrement({ echues: 3 })
+  b.repondreFenetre('continuer')
+  B.clic(b, B.pilManuel(b))
+  await B.reposer(b)
+  // L hote tape deux choses qui ne vivent QUE dans le DOM.
+  const consigne = B.corps(b).querySelector('[data-consignes="bien"]')
+  const destinataire = B.corps(b).querySelector('[data-alerte="intervention|email_lines"]')
+  assert.ok(consigne && destinataire, 'les deux champs sont rendus')
+  consigne.value = 'Ne jamais donner le code avant 15 h'
+  destinataire.value = 'moi@exemple.test'
+  b.repondreFenetre(null)              // on FERME la fenetre de l arriere
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  await B.reposer(b)
+  assert.equal(B.corps(b).querySelector('[data-consignes="bien"]').value,
+    'Ne jamais donner le code avant 15 h', 'la consigne est encore la')
+  assert.equal(B.corps(b).querySelector('[data-alerte="intervention|email_lines"]').value,
+    'moi@exemple.test', 'et le destinataire aussi')
+  // Et les controles sont rendus a l hote, sans repeindre.
+  assert.equal(B.boutonSave(b).disabled, false)
+  assert.equal(B.casePause(b).disabled, false)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : la question du mode manuel GELE la page', async () => {
+  // ⚠ CONSTAT MESURE D UNE REVUE : la boite native suspendait la page, donc
+  // rien d autre ne pouvait etre clique. La fenetre rend la main — et au clavier
+  // seul, l hote atteignait la CASE PAUSE, dont l ecriture partait jusqu au
+  // bout, pendant que la question etait ouverte. Le selecteur de bien restait
+  // vivant lui aussi : au retour, le basculement s appliquait au bien d AVANT.
+  const b = bancManuel()
+  b.repondreFenetre(undefined)         // la question reste ouverte
+  B.clic(b, B.pilManuel(b))
+  await B.reposer(b)
+  assert.ok(B.fenetre(b), 'la question est ouverte')
+  assert.equal(B.casePause(b).disabled, true, 'la case pause est desarmee')
+  assert.equal(B.boutonSave(b).disabled, true, '« Enregistrer » aussi')
+  assert.equal(B.selBien(b).disabled, true, 'et le selecteur de bien')
+  // Et tout est rendu une fois la question refermee.
+  B.fermerFenetre(b, 'echap')
+  await B.reposer(b)
+  assert.equal(B.casePause(b).disabled, false, 'rendu apres la fermeture')
+  assert.equal(B.selBien(b).disabled, false)
+  b.fermer()
 })

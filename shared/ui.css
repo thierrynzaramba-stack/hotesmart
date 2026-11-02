@@ -1711,8 +1711,13 @@ body.men-cfg-ouvert { overflow: hidden; }
    ⚠ Elle remplace `window.confirm` (décision de Thierry, 2 novembre 2026) :
    « OK » et « Annuler » ne disent pas ce qu'ils font, et la boîte native
    SUSPEND la page, donc elle bloque l'extension Chrome qui joue les recettes.
-   ⚠ Au-dessus du tiroir de /messages (z-index 60-61) : une question posée sous
-   le panneau qu'elle concerne serait inatteignable. */
+   ⚠ Au-dessus de tout ce qui existe : `.msg-tiroir` est à z-index 40, la fiche
+   de /menages à 70, sa fenêtre de configuration à 60-61. ⚠ Mon commentaire
+   disait « le tiroir de /messages (z-index 60-61) » — un nombre écrit à la main
+   qui se lit comme une mesure et ne rougit jamais ; 60-61 est en réalité
+   `.men-cfg*`. 71 reste au-dessus des quatre, mais à UN cran de `.men-fiche` :
+   le jour où /menages importera cette fenêtre, c'est ce chiffre-là qu'il faudra
+   relire. */
 .hs-confirm__voile {
   position: fixed; inset: 0; z-index: 70; background: rgb(0 0 0 / 0.4);
 }
@@ -1729,7 +1734,7 @@ body.men-cfg-ouvert { overflow: hidden; }
   position: absolute; inset-block-start: 8px; inset-inline-end: 8px;
 }
 .hs-confirm__titre { margin: 0; padding-inline-end: 36px; font-weight: var(--fw-semibold); }
-.hs-confirm__texte { margin: 0; color: var(--text-muted); }
+.hs-confirm__texte { margin: 0; color: var(--muted); }
 /* ⚠ LES BOUTONS NOMMÉS SE LISENT EN ENTIER, Y COMPRIS AU TÉLÉPHONE : ils
    s'empilent plutôt que de tronquer un libellé. Un bouton dont on ne lit pas
    le nom ramène le défaut que cette fenêtre existe pour fermer. */

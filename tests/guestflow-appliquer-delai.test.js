@@ -52,6 +52,9 @@ function tache (p = {}) {
 
 // ─── Le double ──────────────────────────────────────────────────────────────
 function banc ({ taches = [], panneLecture = false, panneEcriture = false } = {}) {
+  // `retour.avantUpdate` : pose par un test pour deplacer le sol entre la
+  // lecture et l ecriture (voir le crochet dans `then`).
+  const retour = {}
   const etat = {
     taches: taches.map(t => ({ ...t })),
     lectures: [],            // les filtres de chaque SELECT, dans l'ordre
@@ -83,6 +86,13 @@ function banc ({ taches = [], panneLecture = false, panneEcriture = false } = {}
             return true
           }
           if (estUpdate) {
+            // ⚠ UN CROCHET POUR MESURER UN CLAIM, et sans lui on ne peut pas.
+            // Une tache posee d emblee en `sending` est ecartee DES LA LECTURE :
+            // le test passerait alors meme si la condition de l update
+            // disparaissait. Le sol doit bouger ENTRE la lecture et l ecriture,
+            // comme le fait le cron. Meme crochet que le banc de
+            // `brouillons-dus`, pour la meme raison.
+            if (typeof retour.avantUpdate === 'function') retour.avantUpdate(etat)
             if (panneEcriture) {
               return Promise.resolve({ data: null, error: { message: 'panne ecriture' } }).then(res, rej)
             }
@@ -110,7 +120,9 @@ function banc ({ taches = [], panneLecture = false, panneEcriture = false } = {}
       return q
     }
   }
-  return { etat, client }
+  retour.etat = etat
+  retour.client = client
+  return retour
 }
 
 test('⚠ `echues` COMPTE les taches suspendues : une suspension differe un depart', async () => {
@@ -1165,4 +1177,29 @@ test('en APERCU, un sejour termine ne declenche aucune ecriture', async () => {
   assert.equal(r.sejours_termines, 1, 'il est compte')
   assert.equal(r.echues, 0, 'il n est pas annonce')
   assert.equal(b.etat.updates.length, 0, 'et l apercu n ecrit rien, c est son contrat')
+})
+
+test('LE TEST QUI COMPTE : une tache PRISE sous nos pieds se dit, meme sejour termine', async () => {
+  // ⚠ CONSTAT DE REVUE, ET C EST LA CORRECTION DE MA PROPRE CORRECTION. J avais
+  // retire `deja_prises` de la branche « sejour termine » en raisonnant « rien
+  // ne peut partir d un sejour termine ». C est vrai a l instant de CETTE
+  // ecriture, pas a l instant ou le cron a pris la tache : il tourne a 23:59:50
+  // UTC, le sejour n est pas encore termine POUR LUI, il ENVOIE au voyageur ;
+  // l hote valide sa fenetre a 00:00:10 et l ecriture classe la tache « sejour
+  // termine ». L update conditionne sur `pending_validation` rend alors ZERO
+  // ligne — et c est le seul signal qu une reponse est partie.
+  // Le silence etait double : ni `partie_deja_prises`, ni l ecart (le delta des
+  // sejours termines mangeait l unite), donc « Enregistré » en VERT sur un
+  // envoi irreversible.
+  const b = banc({ taches: [tache({ id: 'prise', departure: '2026-11-05' })] })
+  // Le cron la prend entre la lecture et l ecriture.
+  b.avantUpdate = () => { b.etat.taches[0].status = 'sending' }
+  const r = await appliquerDelaiAuxBrouillons(b.client, {
+    userId: COMPTE, propertyRef: REF, maintenant: T0,
+    delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+  })
+  assert.equal(r.ok, true)
+  assert.equal(r.deja_prises, 1, 'la tache prise se DIT')
+  assert.equal(r.sejours_termines, 0,
+    'et elle ne compte pas dans les deux : sinon l ecran la soustrait deux fois')
 })
