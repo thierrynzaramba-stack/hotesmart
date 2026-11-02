@@ -95,7 +95,31 @@ export async function renderOnboardingBanner() {
   close.setAttribute('aria-label', 'Fermer')
   close.innerHTML = '&times;'
   close.style.cssText = 'position:absolute;right:10px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#fff;font-size:22px;line-height:1;cursor:pointer;opacity:0.7;padding:0 6px;'
-  close.addEventListener('click', () => { try { sessionStorage.setItem(DISMISS_KEY, '1') } catch {}; bar.remove() })
+  // ⚠ LE BANDEAU PUBLIE SA HAUTEUR, parce que quelqu'un se tient dessous.
+  // Il est `position: sticky; top: 0`, donc il occupe le haut de l'ecran ; le
+  // bouton ☰ de la barre laterale est `position: fixed; top: 14px` avec un
+  // z-index superieur, et il lui passait DESSUS. Constate en recette le
+  // 1er novembre 2026 sur telephone, capture a l'appui : le ☰ recouvrait
+  // « Finalisez la configuration de votre compte ».
+  //
+  // ⚠ ET LA HAUTEUR SE MESURE, ELLE NE SE DEVINE PAS : le bandeau porte
+  // `flex-wrap`, donc il passe sur deux ou trois lignes selon la largeur et la
+  // longueur du message. Une valeur en dur aurait ete juste sur un telephone
+  // et fausse sur le suivant.
+  const publierHauteur = () => {
+    const h = bar.isConnected ? Math.ceil(bar.getBoundingClientRect().height) : 0
+    document.documentElement.style.setProperty('--bandeau-h', h + 'px')
+  }
+  publierHauteur()
+  if (typeof ResizeObserver === 'function') new ResizeObserver(publierHauteur).observe(bar)
+  else window.addEventListener('resize', publierHauteur)
+
+  close.addEventListener('click', () => {
+    try { sessionStorage.setItem(DISMISS_KEY, '1') } catch {}
+    bar.remove()
+    // Le bandeau parti, ce qui se decalait doit revenir en place.
+    publierHauteur()
+  })
   bar.appendChild(msg); bar.appendChild(link); bar.appendChild(close)
   document.body.insertBefore(bar, document.body.firstChild)
 }

@@ -122,14 +122,19 @@ test('LE TEST QUI COMPTE : toute declaration --yf-* porte une valeur NOMMEE', ()
   // (jeton, valeur) et on exige qu'elle figure dans une table nommee.
   const attendues = new Map()          // fichier -> liste de « jeton:valeur »
   attendues.set(SOURCE, PALETTE.flatMap(n => [`--${n.jeton}:${n.fond}`, `--${n.jeton}-l:${n.accent}`]))
-  // ⚠ LA REDECLARATION CONNUE EST NOMMEE VALEUR PAR VALEUR, pas par fichier.
-  // apps/yield/marche-global.html redefinit quatre fonds en sombre, DEUX fois
-  // (sous `prefers-color-scheme` et sous `[data-theme="dark"]`). C'est l'ecart
-  // du mode sombre : le fermer change l'apparence d'un ecran valide, donc
-  // double validation de Thierry, pas un geste de passage. L'ecrire ici le
-  // garde VISIBLE — et borne a ces huit declarations exactes.
-  const SOMBRE = ['--yf-base:#1d2a36', '--yf-moyen:#1f2d24', '--yf-haut:#352d17', '--yf-tres-haut:#3a2717']
-  attendues.set('apps/yield/marche-global.html', [...SOMBRE, ...SOMBRE])
+  // ⚠ IL N'Y A PLUS DE REDECLARATION CONNUE, ET C'EST UN CHANGEMENT DE
+  // DECISION, PAS UN NETTOYAGE. Jusqu'au 2 novembre 2026, cette table nommait
+  // huit declarations sombres de apps/yield/marche-global.html — quatre fonds,
+  // deux fois — avec leur raison : le fermer changeait l'apparence d'un ecran
+  // valide, donc double validation.
+  //
+  // Thierry l'a donnee le 2 novembre : « pas de mode sombre sur YieldFlow pour
+  // l'instant ». La recette du 1er avait montre pourquoi — quatre fonds
+  // s'eclaircissaient pendant que le texte restait #1a1a1a par-dessus
+  // (contraste ~1,1:1, bloc illisible), et l'echelle de temperature
+  // s'INVERSAIT. Les huit declarations sont donc parties, et la SOURCE est
+  // maintenant seule a declarer la palette. Toute nouvelle declaration, claire
+  // ou sombre, fait rougir.
 
   const faits = []
   for (const f of fichiers()) {
