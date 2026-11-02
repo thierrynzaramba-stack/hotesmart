@@ -66,17 +66,22 @@ const AUTORISES = {
   'apps/yield/prix.html': ['#4A7FA8'],
   'docs/kb/charte-ui.md': '*',
   'docs/kb/restitution-yield.md': '*',
-  // ⚠ LA SPEC DU LOT « yf-ecran-periodes » A ÉTÉ RETIRÉE DE CETTE LISTE —
-  // relevé en review : son fichier n'existe pas sur un arbre parti de `main`
-  // (il vit dans ce lot-là, qui est dans `staging`). Une entrée de liste
-  // blanche pour un fichier ABSENT est inerte aujourd'hui et s'activera en
-  // silence le jour où quelqu'un créera ce nom : elle aurait alors autorisé
-  // TOUTES les valeurs de la palette, sans un rouge.
+  // ⚠ LA SPEC DU LOT « yf-ecran-periodes » EST REVENUE DANS CETTE LISTE, ET
+  // L'ALLER-RETOUR EST LA LEÇON. Elle en avait été retirée en review le
+  // 31 octobre 2026 : sur un arbre parti de `main`, le fichier n'existait pas,
+  // et une entrée de liste blanche pour un fichier ABSENT est inerte — elle se
+  // serait activée en silence le jour où le nom naîtrait, autorisant TOUTES les
+  // valeurs de la palette sans un rouge.
   //
-  // ⚠ ET SON CHEMIN N'EST PAS ÉCRIT ICI, volontairement : un chemin qui
-  // n'existe pas se lit comme une adresse. C'est
-  // tests/documentation-references.test.js qui tient cette règle, et c'est lui
-  // qui a attrapé cette ligne.
+  // Le nom est né : la fusion du 2 novembre 2026 a ramené la spec ici, et elle
+  // porte bien les dix valeurs canoniques dans sa section 0 bis.4 — l'endroit
+  // où la règle a été gravée. L'entrée est donc légitime SUR CETTE BRANCHE, et
+  // le rouge qui l'a réclamée est exactement ce que ce test doit faire :
+  // signaler qu'un fichier porteur de la palette est apparu.
+  //
+  // ⚠ Ce qu'il ne faut PAS en conclure : qu'il fallait la laisser « au cas où ».
+  // Une liste blanche préventive ne garde rien.
+  'docs/specs/spec-yf-ecran-periodes.md': '*',
   'tests/palette-niveaux.test.js': '*'
 }
 const permis = (f, hexa) => {

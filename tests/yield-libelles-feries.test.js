@@ -105,3 +105,48 @@ test('LE TEST QUI COMPTE : le MOTEUR n est pas touche — les cles internes sont
   assert.ok(!src.includes('11 novembre'),
     'le nom COURANT ne doit pas entrer dans le moteur : il est d affichage')
 })
+
+test("LE TEST QUI COMPTE : AUCUN ferie du moteur ne retombe sur son nom interne a l ecran", async () => {
+  // ⚠ C'EST LA GARDE QUE THIERRY A DEMANDEE, et elle ne lit pas le code : elle
+  // l'EXECUTE. `titreWeekEnd` a un repli — « Week-end — <nom interne> » — qui
+  // existe pour ne pas casser la phrase sur un ferie inconnu ou sur deux feries
+  // joints par « et ». Ce repli est une SORTIE DE SECOURS : si un ferie du
+  // moteur l'emprunte, c'est que la table a vieilli, et l'hote lit
+  // « Week-end — Armistice 1918 » au lieu de « Week-end du 11 novembre ».
+  //
+  // ⚠ UN TEST QUI SE CONTENTERAIT DE COMPARER LES CLES NE VERRAIT PAS CA : une
+  // cle presente mais avec une valeur vide, ou un repli qui changerait de
+  // forme, passeraient. On verifie donc le TEXTE RENDU, ferie par ferie.
+  const { titreWeekEnd } = await import('../shared/yield-libelles-feries.js')
+  // ⚠ ON RECONNAIT LE REPLI A SON TIRET, PAS A LA PRESENCE DU NOM INTERNE.
+  // Ma premiere version testait `titre.includes(nom)` et rougissait sur
+  // « Week-end de l’Ascension » — dont le nom courant CONTIENT legitimement le
+  // nom interne. Un proxy mal choisi accuse du code juste.
+  //
+  // ⚠ ET ON EXIGE AUSSI L'ARTICLE : une entree posee a la va-vite
+  // (`'Ascension': 'Ascension'`) passerait le seul test du tiret, et rendrait
+  // « Week-end Ascension ». Les quatre formes valides sont « du », « de »,
+  // « de l’ » et « de la ».
+  const FORME = /^Week-end (du |de |de l’|de la )/
+  const retombes = []
+  for (const nom of feriesDuMoteur()) {
+    const titre = titreWeekEnd(nom)
+    if (!titre || titre.includes('—') || !FORME.test(titre)) retombes.push(`${nom} -> ${titre}`)
+  }
+  assert.deepEqual(retombes, [],
+    'ces feries retombent sur leur nom INTERNE a l ecran :\n' + retombes.join('\n')
+    + '\n\nLe repli « Week-end — <nom> » est une sortie de secours pour un ferie'
+    + ' inconnu, pas pour les onze que le moteur pose. Ajoute leur entree dans'
+    + ' shared/yield-libelles-feries.js, avec son article.')
+})
+
+test('LE CONTRE-CONTROLE : le repli existe toujours, et il se voit', async () => {
+  // ⚠ SANS LUI, LE TEST CI-DESSUS SERAIT VERT POUR UNE FONCTION QUI RENVERRAIT
+  // N IMPORTE QUOI DE NON VIDE (regle 22). Ici on prouve que le repli est bien
+  // la, et qu'il est RECONNAISSABLE — c'est ce qui permet au test precedent de
+  // le detecter.
+  const { titreWeekEnd } = await import('../shared/yield-libelles-feries.js')
+  const inconnu = titreWeekEnd('Fete du Houblon')
+  assert.equal(inconnu, 'Week-end — Fete du Houblon')
+  assert.ok(inconnu.includes('—'), 'le repli doit rester reconnaissable a son tiret')
+})

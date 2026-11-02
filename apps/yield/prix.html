@@ -643,6 +643,7 @@
   import { motif, nomSegment, refus } from '/shared/yield-motifs.js'
   import { api as apiClient } from '/shared/api-client.js'
   import { composerJours, celluleDepart, detailDepart, motifNonCalcule } from '/shared/prix-depart-jours.js'
+  import { titreWeekEnd } from '/shared/yield-libelles-feries.js'
 
   initErrorHandler()
 
@@ -2137,7 +2138,18 @@
   // ⚠ LE NOM AFFICHE D'UNE PERIODE, EN UN SEUL ENDROIT. La frise et la ligne
   // le lisent toutes deux : deux copies diraient un jour deux noms pour la
   // meme bande et la meme ligne.
-  const nomAffiche = (e) => e.ferie_voisin ? `Week-end du ${e.ferie_voisin}` : e.nom
+  // ⚠ LE NOM COURANT, PAS LE NOM INTERNE. `e.ferie_voisin` porte le nom que le
+  // MOTEUR donne au ferie — « Armistice 1918 » — qui est la cle du segment et de
+  // ses reglages. L'ecrire tel quel donnait « Week-end du Armistice 1918 » :
+  // faux en francais, et ce n'est pas ce qu'un hote a en tete. Constate en
+  // recette le 1er novembre 2026.
+  //
+  // ⚠ `titreWeekEnd` ne traduit QUE L'AFFICHAGE : la cle ne bouge pas, et un
+  // reglage deja pose sur ce segment continue de s'appliquer. Decision de
+  // Thierry du 2 novembre 2026, table unique dans
+  // shared/yield-libelles-feries.js — avec son article ecrit a la main, parce
+  // qu'une regle d'elision automatique aurait rendu « Week-end du Paques ».
+  const nomAffiche = (e) => e.ferie_voisin ? titreWeekEnd(e.ferie_voisin) : e.nom
   // Ce que l'hote a commence a taper dans le formulaire d'ajout. Il survit a
   // un refus, et seulement a lui : un ajout reussi le vide.
   let brouillonAjout = { ouvert: false, nom: '', debut: '', fin: '', rec: '', parent: '' }

@@ -245,8 +245,19 @@ test('LE TEST QUI COMPTE : un week-end prolonge porte son nom REEL, et une seule
   // redisait « week-end du 11 novembre » dans le detail : le meme fait deux
   // fois, dont une en vocabulaire interne.
   const src = sansCommentaires(PAGE())
-  assert.match(src, /const nomAffiche = \(e\) => e\.ferie_voisin \? `Week-end du \$\{e\.ferie_voisin\}` : e\.nom/,
-    'le nom affiche se decide en UN endroit')
+  // ⚠ LA REGLE A CHANGE LE 2 NOVEMBRE 2026, ET CETTE ASSERTION A ROUGI : c'est
+  // son role. Elle figeait « Week-end du ${e.ferie_voisin} », qui rendait
+  // « Week-end du Armistice 1918 » — le nom INTERNE du ferie, faux en francais
+  // et etranger a l'hote. Decision de Thierry : une table de libelles
+  // d'affichage, a un seul endroit, et le moteur intact.
+  assert.match(src, /const nomAffiche = \(e\) => e\.ferie_voisin \? titreWeekEnd\(e\.ferie_voisin\) : e\.nom/,
+    'le nom affiche se decide en UN endroit, et il passe par la table de libelles')
+  assert.match(src, /import \{ titreWeekEnd \} from '\/shared\/yield-libelles-feries\.js'/,
+    'la table vient du module partage, pas d une copie locale')
+  // ⚠ ET LA REGLE NE SE RECOMPOSE PAS A LA MAIN A COTE. Une seconde
+  // interpolation `Week-end du ${…}` serait une copie qui divergerait.
+  assert.doesNotMatch(src, /`Week-end du \$\{/,
+    'plus aucune composition manuelle du titre : elle passe par titreWeekEnd')
   // ⚠ ET EN UN SEUL : la frise et la ligne le lisent toutes deux. Deux copies
   // diraient un jour deux noms pour la meme bande et la meme ligne.
   const usages = (src.match(/nomAffiche\(e\)/g) || []).length
