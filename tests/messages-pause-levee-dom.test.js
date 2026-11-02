@@ -847,7 +847,14 @@ test('LE TEST QUI COMPTE : jamais DEUX fenetres a la fois', async () => {
   await B.reposer(b)
   assert.equal(b.doc.querySelectorAll('[data-bind="hs-confirm"]').length, 1,
     'une seule boite dans le document')
-  assert.equal(await second, null, 'et la seconde rend `null` : elle ne decide rien')
+  // ⚠ ET ELLE NE REND PAS `null` : `null` veut dire « l hote a ferme », donc les
+  // appelants la prenaient pour une DECISION — le decochage de la pause etait
+  // annule sans note, et la page degelee sous une fenetre encore ouverte
+  // (constat mesure d une revue). Une question qui n a pas ete POSEE n est pas
+  // une question a laquelle on n a pas repondu.
+  const r = await second
+  assert.notEqual(r, null, 'le refus se distingue d une fermeture')
+  assert.equal(r, b.msg.OCCUPEE, 'c est la sentinelle du refus')
   assert.equal(b.maxFenetresSimultanees, 1, 'le banc le mesure aussi')
   B.fermerFenetre(b, 'echap')
   await B.reposer(b)
@@ -878,16 +885,22 @@ test('LE TEST QUI COMPTE : le texte dit que « Garder » LAISSE LA PAUSE ACTIVE'
   // « leve la pause, mais garde l arriere » — alors que cette branche ne leve
   // PAS la pause. Le texte doit donc dire la consequence de CHAQUE bouton, pas
   // seulement celle de la fermeture.
+  // ⚠ UN MOTIF PAR LANGUE, PAS UNE ALTERNANCE — constat d'une revue, et ma
+  // premiere version avait DEUX defauts : une boucle morte (`assert.ok(true)`
+  // ne mesure rien, et aucun `else` ne rougissait), et une alternance des trois
+  // phrases, donc `es.json` passait en portant la phrase ANGLAISE. Un test
+  // multilingue qui accepte la mauvaise langue ne mesure pas la traduction.
+  const ATTENDU = {
+    fr: /laisse la pause active/i,
+    en: /keeps the pause on/i,
+    es: /mantiene la pausa activa/i
+  }
   for (const lg of ['fr', 'en', 'es']) {
     const d = JSON.parse(require('fs').readFileSync(
       require('path').join(__dirname, '..', 'shared', 'i18n', lg + '.json'), 'utf8'))
     const q = d['messages.pause_lever_confirm']
-    for (const attendu of [/laisse la pause active/i, /keeps the pause on/i,
-      /mantiene la pausa activa/i]) {
-      if (attendu.test(q)) { assert.ok(true); break }
-    }
-    assert.match(q, /laisse la pause active|keeps the pause on|mantiene la pausa activa/i,
-      lg + ' : le texte doit dire que garder MAINTIENT la pause')
+    assert.match(q, ATTENDU[lg],
+      lg + ' : le texte doit dire DANS SA LANGUE que garder MAINTIENT la pause')
     // Et il nomme les deux boutons, pour qu aucun ne soit une devinette.
     assert.match(q, new RegExp(d['messages.confirm_laisser_partir']
       .replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), lg + ' : le bouton 1 est nomme')

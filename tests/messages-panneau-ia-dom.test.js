@@ -1206,3 +1206,71 @@ test('LE TEST QUI COMPTE : la question du mode manuel GELE la page', async () =>
   assert.equal(B.selBien(b).disabled, false)
   b.fermer()
 })
+
+test('LE TEST QUI COMPTE : sans Brevo, la case SMS reste desarmee apres une fermeture', async () => {
+  // ⚠ CONSTAT MESURE D UNE REVUE, DEUX DEFAUTS EN UN. `geler(corps, false)`
+  // n est PAS l inverse de `geler(corps, true)` : le rendu desarme la case SMS
+  // EN PERMANENCE quand l hote n a pas de cle Brevo, et un relachement en bloc
+  // la REARMAIT. Et `reposerLaSaisie` la COCHAIT, parce que `lireLePanneau`
+  // rend dans ce cas la valeur ENREGISTREE et non le DOM. L hote se retrouvait
+  // avec une alerte SMS cochee et cliquable qu il n a jamais reglee — et son
+  // geste aurait ete jete en silence au prochain « Enregistrer ».
+  const { b } = bancEnregistrement({ echues: 2 })
+  b.msg.etat.brevo = false
+  b.msg.etat.configIA[REF] = { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 },
+    intervention: { sms_enabled: true, sms_lines: '0600000000', email_enabled: true, email_lines: '' },
+    info_unknown: { sms_enabled: false, sms_lines: '', email_enabled: true, email_lines: '' } }
+  b.repondreFenetre('continuer')
+  B.clic(b, B.pilManuel(b))
+  await B.reposer(b)
+  const caseSms = B.corps(b).querySelector('[data-alerte="intervention|sms_enabled"]')
+  assert.ok(caseSms, 'la case existe')
+  assert.equal(caseSms.disabled, true, 'sans Brevo, le rendu la desarme')
+  const cocheeAvant = caseSms.checked
+  b.repondreFenetre(null)
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  await B.reposer(b)
+  const apres = B.corps(b).querySelector('[data-alerte="intervention|sms_enabled"]')
+  assert.equal(apres.disabled, true, 'elle est TOUJOURS desarmee : le degel ne rend que ce qu il a pris')
+  assert.equal(apres.checked, cocheeAvant, 'et son etat n a pas bouge')
+  b.fermer()
+})
+
+test('fermer la fenetre ne tronque pas la saisie', async () => {
+  // ⚠ SECONDE ASYMETRIE MESUREE : `lireLePanneau` fait `.trim()` sur les
+  // consignes. Reposer SA sortie tronquait donc la saisie de l hote. On repose
+  // une photo du DOM, pas une lecture normalisee.
+  const { b } = bancEnregistrement({ echues: 2 })
+  b.repondreFenetre('continuer')
+  B.clic(b, B.pilManuel(b))
+  await B.reposer(b)
+  const champ = B.corps(b).querySelector('[data-consignes="bien"]')
+  champ.value = 'Ne pas donner le code\n\n'
+  b.repondreFenetre(null)
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  await B.reposer(b)
+  assert.equal(B.corps(b).querySelector('[data-consignes="bien"]').value,
+    'Ne pas donner le code\n\n', 'au caractere, retours a la ligne compris')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : le focus revient sur la pilule apres la question', async () => {
+  // ⚠ CONSTAT MESURE : `geler` desarmait la pilule AVANT que la fenetre ne
+  // capture `document.activeElement`, et `focus()` sur un element desarme ne
+  // fait rien. Apres Echap, le focus etait sur `<body>` — exactement le defaut
+  // que `shared/confirmer.js` annonce fermer, sur le chemin CLAVIER, celui pour
+  // lequel le gel a ete ajoute.
+  const b = bancManuel()
+  b.repondreFenetre(undefined)
+  const pilule = B.pilManuel(b)
+  pilule.focus()
+  assert.equal(b.doc.activeElement, pilule, 'le focus part de la pilule')
+  B.clic(b, pilule)
+  await B.reposer(b)
+  B.fermerFenetre(b, 'echap')
+  await B.reposer(b)
+  assert.equal(B.pilManuel(b).disabled, false, 'la pilule est rearmee')
+  assert.equal(b.doc.activeElement, B.pilManuel(b),
+    'et le focus lui revient : un hote au clavier ne repart pas du haut de la page')
+  b.fermer()
+})

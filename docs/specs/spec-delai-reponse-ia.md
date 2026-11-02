@@ -2140,6 +2140,57 @@ gestionnaire ne déplace rien — « le focus est resté dans la fenêtre » est
 par construction, piège ou pas. Mon test était vide. Il affirme maintenant la
 **destination** du focus et que l'événement a été intercepté.
 
+### La dernière revue de la fenêtre : sept constats, tous mesurés
+
+C'est la dernière du lot (exception « envoi au voyageur ») : corrigés sans
+nouvelle review.
+
+1. **`geler(corps, false)` n'est pas l'inverse de `geler(corps, true)`.** Le
+   rendu désarme **en permanence** la case SMS d'un hôte sans clé Brevo
+   (`etat.brevo && !etat.modeEnCours`), et un relâchement en bloc la **réarmait**.
+   L'hôte pouvait alors la cocher — et `lireLePanneau` ignore le DOM dans ce
+   cas, donc **son geste était jeté en silence** au prochain « Enregistrer »,
+   sans que `editionPanneauNonEnregistree` le signale. Le gel du panneau passe
+   par un **repeint**, donc un relevé de nœuds ne survit pas : la photo note
+   désormais les **sélecteurs** déjà désarmés, et `degelerLeVolet` les laisse
+   désarmés.
+2. **`reposerLaSaisie` cochait une case que le rendu laisse vide.**
+   `lireLePanneau` n'est pas une photo du formulaire : sans Brevo il rend la
+   valeur **enregistrée** des champs SMS (garde délibérée), et il `.trim()` les
+   consignes. Reposer sa sortie cochait donc une alerte SMS jamais réglée, et
+   **tronquait** la saisie. On repose une **photo du DOM**, prise avant le
+   repeint d'entrée.
+3. **Une fenêtre REFUSÉE rendait `null`, et `null` veut déjà dire « l'hôte a
+   fermé ».** Les appelants prenaient donc le refus pour une décision :
+   décochage de la pause annulé **sans note**, page dégelée **sous une fenêtre
+   encore ouverte**, et sur le panneau une note **verte** « Rien n'a été
+   modifié » pour une question jamais vue. Le refus a maintenant sa sentinelle
+   (`OCCUPEE`), et les trois appelants le disent par
+   `messages.reglage_en_cours`. ⚠ **Je n'ai pas gelé `[data-delai-manuel]` sur
+   `modeEnCours`**, bien que ça ferme aussi la concurrence : c'est exactement ce
+   qui produisait le point 1 de la recette du 28 octobre (« aucune confirmation
+   n'apparaît », parce que le bouton était `disabled` pendant une écriture de
+   pause).
+4. **Le gel désarmait la pilule AVANT la capture de `activeElement`**, donc
+   `focus()` sur un élément désarmé ne faisait rien : après Échap, le focus était
+   sur `<body>` — le contraire de la garantie écrite dans `confirmer.js`, et sur
+   le chemin **clavier**, celui pour lequel le gel a été ajouté.
+5. **`deja_prises` affirmait un envoi incertain.** L'écran rend ce compteur par
+   « déjà prise(s) par l'**envoi** », or zéro ligne peut aussi vouloir dire que
+   l'hôte a cliqué « Ne pas envoyer » dans un autre onglet — et cette tâche
+   n'avait jamais été **annoncée**. Compteur distinct `finis_disparus` :
+   soustrait comme les autres séjours terminés (l'arithmétique ne change pas),
+   et il n'affirme rien.
+6. **Le test « dans les trois langues » n'était pas par langue** : une boucle
+   morte (`assert.ok(true)`) et une **alternance** des trois phrases, donc
+   `es.json` passait en portant la phrase **anglaise**. Un motif par langue,
+   indexé sur `lg` — et une mutation le prouve.
+7. **`mode_confirm_auto` était la seule fenêtre dont le texte ne nommait pas ses
+   boutons**, et son titre affirmait un résultat que le geste ne produit pas
+   (« Les réponses partiront sans votre validation » : le clic ne fait que
+   basculer l'état local, rien ne part avant un « Enregistrer »). Le titre
+   décrit le **geste**, et le texte nomme les deux boutons.
+
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 
 **Trouvé en corrigeant les quatre points, mesuré, NON corrigé dans ce commit.**

@@ -140,7 +140,7 @@ import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/s
 import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, reinitialiserMoment, libelleJour, libelleHeure, libelleDelai as libelleDelaiBrut }
   from '/shared/messages-programmes.js'
 import { departEvaluable } from '/shared/calendrier-resa.js'
-import { confirmerDansLaPage } from '/shared/confirmer.js'
+import { confirmerDansLaPage, OCCUPEE } from '/shared/confirmer.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -1414,6 +1414,17 @@ async function basculerPause (ref, paused) {
         ]
       })
       : 'partir'
+    // ⚠ UNE QUESTION NON POSEE N'EST PAS UNE QUESTION SANS REPONSE (constat
+    // d'une revue, mesure). Si une autre fenetre etait deja ouverte, la notre a
+    // ete REFUSEE : on ne degele rien sous elle, on remet la case, et on le DIT
+    // — sinon le decochage de la pause etait annule en silence, et la page
+    // degelee sous une fenetre encore ouverte.
+    if (choix === OCCUPEE) {
+      etat.modeEnCours = false
+      remettreCasePause(ref)
+      noteDuBien(ref, t('messages.reglage_en_cours'))
+      return
+    }
     // ⚠ FERMER N'EST PAS « GARDER » : rien n'est desarme, et la pause reste
     // active. C'est la troisieme issue, celle qui n'existait pas.
     if (choix === null) {
@@ -1525,8 +1536,14 @@ async function basculerPause (ref, paused) {
           // sejours termines sur le bien), une proposition vivante REELLEMENT
           // partie pendant le dialogue passait de « 1 n'etait plus en attente »
           // a RIEN du tout. C'est l'inverse du defaut que je voulais fermer.
+          // ⚠ `finis_disparus` SE SOUSTRAIT COMME `sejours_termines` : ce sont
+          // des taches de sejour termine qui ont quitte la file, et le module ne
+          // sait pas si l'hote les a envoyees ou refusees. Les compter dans
+          // `deja_prises` faisait dire a l'ecran « deja prise par l'ENVOI » —
+          // une affirmation d'envoi pour un geste qui peut etre un refus.
           const finisAvant = Number(avant.sejours_termines) || 0
-          const finisApres = Number(bilan && bilan.sejours_termines) || 0
+          const finisApres = (Number(bilan && bilan.sejours_termines) || 0)
+            + (Number(bilan && bilan.finis_disparus) || 0)
           const finis = Math.max(0, finisApres - finisAvant)
           const manquantes = Math.max(0,
             (Number(avant.echues) || 0) - gardees - prises - finis)
@@ -2201,8 +2218,16 @@ function brancherTiroir (corps, ref) {
       // ouverte. Pire : le selecteur de bien restait vivant lui aussi, donc au
       // retour `basculerValidationManuelle(d)` s'appliquait au `d` du bien
       // d'AVANT.
+      // ⚠ LE FOCUS SE CAPTURE AVANT LE GEL — constat MESURE d'une revue, et
+      // c'est le chemin CLAVIER, celui pour lequel le gel existe. `geler` pose
+      // `disabled` sur la pilule ; `confirmerDansLaPage` capture ENSUITE
+      // `document.activeElement`, et `avant.focus()` sur un element desarme ne
+      // fait rien. Mesure : focus sur la pilule avant le clic, `<body>` apres
+      // Echap. C'est litteralement la garantie que `shared/confirmer.js`
+      // annonce fermer.
+      const focusAvant = document.activeElement
       etat.modeEnCours = true
-      geler(corps, true)
+      const degeler = gelerReversible(corps)
       gelerEnTete(true)
       let choix = null
       try {
@@ -2218,11 +2243,17 @@ function brancherTiroir (corps, ref) {
       } finally {
         // ⚠ RELACHE DANS TOUS LES CAS, et SANS repeindre : un re-rendu ici
         // emporterait la saisie non enregistree du volet, exactement comme sur
-        // le chemin ci-dessus.
+        // le chemin ci-dessus. Et par `degeler`, qui ne rend que ce qu'il a
+        // pris : un relachement en bloc rearmerait la case SMS d'un hote sans
+        // Brevo.
         etat.modeEnCours = false
-        geler(corps, false)
+        degeler()
         gelerEnTete(false)
+        // Et le focus revient sur la pilule, maintenant qu'elle est rearmee.
+        try { if (focusAvant && typeof focusAvant.focus === 'function') focusAvant.focus() } catch (e) {}
       }
+      // Un refus se dit, lui aussi : la question n'a pas ete posee.
+      if (choix === OCCUPEE) { noteDuBien(ref, t('messages.reglage_en_cours')); return }
       if (choix !== 'continuer') return
     }
     basculerValidationManuelle(d)
@@ -2308,26 +2339,76 @@ function lireLePanneau (corps, ref) {
 // banc : une consigne et un destinataire tapes revenaient a vide, avec « Rien
 // n'a ete modifie » juste en dessous. Un geste qui ne change rien ne doit pas
 // effacer une saisie.
-function reposerLaSaisie (corps, saisi) {
-  if (!corps || !saisi) return
-  const poser = (sel, valeur) => {
+// ⚠ ON NE REPOSE PAS `lireLePanneau`, ON REPOSE LE DOM TEL QU'IL ETAIT —
+// constat d'une revue, deux asymetries mesurees. `lireLePanneau` n'est pas une
+// photo du formulaire : sans cle Brevo il rend la valeur ENREGISTREE des champs
+// SMS au lieu du DOM (garde deliberee : les lire effacerait les SMS d'un hote
+// qui n'y a pas touche), et il `.trim()` les consignes. Reposer sa sortie
+// COCHAIT donc une case que le rendu laisse volontairement vide — l'hote sans
+// Brevo se retrouvait avec une alerte SMS cochee qu'il n'a jamais reglee et qui
+// ne sera jamais enregistree — et tronquait la saisie.
+// Une photo du DOM se prend sur le DOM.
+const CHAMPS_DU_VOLET = ['[data-consignes="global"]', '[data-consignes="bien"]',
+  '[data-alerte="intervention|sms_lines"]', '[data-alerte="intervention|email_lines"]',
+  '[data-alerte="info_unknown|sms_lines"]', '[data-alerte="info_unknown|email_lines"]']
+const CASES_DU_VOLET = ['[data-alerte="intervention|sms_enabled"]',
+  '[data-alerte="intervention|email_enabled"]',
+  '[data-alerte="info_unknown|sms_enabled"]', '[data-alerte="info_unknown|email_enabled"]']
+
+// ⚠ LA PHOTO NOTE AUSSI CE QUI ETAIT DEJA DESARME, et c'est ce qui rend le
+// degel juste. Le gel du panneau passe par un REPEINT (`geler` +
+// `renderTiroir`), donc un releve de noeuds ne survit pas : les noeuds sont
+// remplaces. Mais les SELECTEURS, eux, survivent. On note donc, avant le gel,
+// quels controles le rendu desarme EN PERMANENCE — la case SMS d'un hote sans
+// cle Brevo — et on les laisse desarmes au relachement.
+function photoDuVolet (corps) {
+  if (!corps) return null
+  const photo = { valeurs: {}, cases: {}, desarmes: [] }
+  for (const sel of CHAMPS_DU_VOLET) {
     const el = corps.querySelector(sel)
-    if (el) el.value = String(valeur == null ? '' : valeur)
+    // ⚠ UN CHAMP ABSENT N'EST PAS UN CHAMP VIDE : sans Brevo, les champs SMS ne
+    // sont pas rendus du tout. On ne note que ce qui existe, et on ne repose
+    // donc que ce qui existait.
+    if (el) photo.valeurs[sel] = el.value
   }
-  const cocher = (sel, valeur) => {
+  for (const sel of CASES_DU_VOLET) {
     const el = corps.querySelector(sel)
-    if (el) el.checked = valeur === true
+    if (el) photo.cases[sel] = el.checked === true
   }
-  for (const k of ['intervention', 'info_unknown']) {
-    const a = saisi.alertes[k]
-    if (!a) continue
-    cocher('[data-alerte="' + k + '|sms_enabled"]', a.sms_enabled)
-    poser('[data-alerte="' + k + '|sms_lines"]', a.sms_lines)
-    cocher('[data-alerte="' + k + '|email_enabled"]', a.email_enabled)
-    poser('[data-alerte="' + k + '|email_lines"]', a.email_lines)
+  for (const sel of [...CHAMPS_DU_VOLET, ...CASES_DU_VOLET]) {
+    const el = corps.querySelector(sel)
+    if (el && el.disabled) photo.desarmes.push(sel)
   }
-  poser('[data-consignes="global"]', saisi.consignes.global)
-  poser('[data-consignes="bien"]', saisi.consignes.bien)
+  return photo
+}
+
+// Relacher le volet SANS repeindre, en laissant desarme ce qui l'etait deja.
+// ⚠ `geler(corps, false)` seul N'EST PAS L'INVERSE de `geler(corps, true)` :
+// mesure au banc, il REARMAIT la case SMS d'un hote sans Brevo, que le rendu
+// desarme en permanence. L'hote pouvait alors la cocher, et `lireLePanneau`
+// ignore le DOM dans ce cas : son geste etait JETE EN SILENCE au prochain
+// « Enregistrer ».
+function degelerLeVolet (corps, photo) {
+  if (!corps) return
+  geler(corps, false)
+  for (const sel of (photo && photo.desarmes) || []) {
+    const el = corps.querySelector(sel)
+    if (el) el.disabled = true
+  }
+}
+
+function reposerLaSaisie (corps, photo) {
+  if (!corps || !photo) return
+  for (const [sel, v] of Object.entries(photo.valeurs)) {
+    const el = corps.querySelector(sel)
+    if (el) el.value = v
+  }
+  for (const [sel, v] of Object.entries(photo.cases)) {
+    const el = corps.querySelector(sel)
+    // ⚠ ON NE REARME PAS CE QUE LE RENDU DESARME : une case desarmee en
+    // permanence (SMS sans Brevo) garde l'etat que le rendu lui a donne.
+    if (el && !el.disabled) el.checked = v
+  }
 }
 
 // ─── UN SEUL « ENREGISTRER », TROIS ECRITURES ───────────────────────────────
@@ -2442,6 +2523,9 @@ async function enregistrerLePanneau (corps, ref) {
   // parce qu'ils vivent dans `etat.delaisEdit`.
   const d = delaisEnCours(ref)
   const saisi = lireLePanneau(corps, ref)
+  // La photo du formulaire, prise AVANT le repeint d'entree : c'est elle qu'on
+  // repose si l'hote ferme la fenetre sans decider.
+  const photo = photoDuVolet(corps)
 
   // ⚠ `geler()` NE PROTEGE RIEN, ET DEUX TEXTES L'AFFIRMAIENT (constat 8 de la
   // revue). Il pose `disabled` sur les noeuds EXISTANTS, et `renderTiroir()` la
@@ -2606,6 +2690,19 @@ async function enregistrerLePanneau (corps, ref) {
         // (La lecon du 28 octobre — « refuser ne doit pas couter le reste du
         // panneau » — tient toujours : le REFUS a maintenant son propre bouton,
         // « Garder pour validation », et lui enregistre.)
+        // Question REFUSEE (une fenetre etait deja ouverte) : rien n'a eu lieu,
+        // et l'hote doit le lire — « Reglage non enregistre » serait faux, et
+        // « Rien n'a ete modifie » en vert le serait aussi, puisqu'il n'a jamais
+        // vu la question.
+        if (choix === OCCUPEE) {
+          etat.modeEnCours = false
+          etat.panneauEnCours = false
+          degelerLeVolet(corps, photo)
+          gelerEnTete(false)
+          reposerLaSaisie(corps, photo)
+          noteDuBien(ref, t('messages.reglage_en_cours'))
+          return
+        }
         if (choix === null) {
           // ⚠ ON BAISSE LES DRAPEAUX NOUS-MEMES, ET J'AVAIS ECRIT L'INVERSE
           // ICI. Le `finally` de `enregistrerPanneau` n'est pas un degel neutre :
@@ -2635,14 +2732,14 @@ async function enregistrerLePanneau (corps, ref) {
           // a repeindre, donc rien a perdre et rien a lever.
           etat.modeEnCours = false
           etat.panneauEnCours = false
-          geler(corps, false)
+          degelerLeVolet(corps, photo)
           gelerEnTete(false)
           // ⚠ ET ON REMET LA SAISIE : le repeint d'ENTREE de cette fonction a
           // deja ramene les champs a leur valeur enregistree, alors qu'on
           // n'ecrit rien. Sans ca, « fermer ne change rien » serait faux pour
           // tout ce qui ne vit que dans le DOM — les consignes et les
           // destinataires d'alerte.
-          reposerLaSaisie(corps, saisi)
+          reposerLaSaisie(corps, photo)
           noteDuBien(ref, t('messages.panneau_rien_change'), true)
           return
         }
@@ -2686,7 +2783,8 @@ async function enregistrerLePanneau (corps, ref) {
         // est ouverte, et l'ecran annoncait « 1 reponse est partie au voyageur »
         // alors que rien n'etait parti.
         const finis = Math.max(0,
-          (Number(b.sejours_termines) || 0) - (Number(apercuFinis) || 0))
+          (Number(b.sejours_termines) || 0) + (Number(b.finis_disparus) || 0)
+          - (Number(apercuFinis) || 0))
         const manquantes = Math.max(0, annoncees - gardees - prises - finis)
         if (manquantes > 0) {
           echoues.push(t('messages.partie_envolees', { n: manquantes }))
@@ -2749,7 +2847,7 @@ async function enregistrerLePanneau (corps, ref) {
       // apres le depart — mais la somme doit couvrir TOUTES les ecritures du
       // writer, sinon elle cesse d'etre une somme.
       : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0) + (Number(b.deja_prises) || 0)
-        + (Number(b.sejours_termines) || 0)
+        + (Number(b.sejours_termines) || 0) + (Number(b.finis_disparus) || 0)
         // ⚠ ET UN CHOIX DE GARDE RELIT TOUJOURS LE FIL (constat 1 de la
         // derniere revue). Les propositions annoncees ont forcement bouge : soit
         // elles sont desarmees — leur compte a rebours doit disparaitre de la
@@ -2900,6 +2998,26 @@ async function ecrireConsigne (uid, propertyId, texte) {
 // POST serait silencieusement ecartee par le re-render (releve en review).
 function geler (corps, fige) {
   corps.querySelectorAll('textarea, input, button, select').forEach(x => { x.disabled = fige })
+}
+
+// ⚠ `geler(corps, false)` N'EST PAS L'INVERSE DE `geler(corps, true)`, ET CA SE
+// MESURE — constat d'une revue. Certains controles sont desarmes EN PERMANENCE
+// par le rendu : la case SMS d'un hote sans cle Brevo l'est toujours
+// (`etat.brevo && !etat.modeEnCours ? '' : 'disabled'`). Un relachement en bloc
+// la REARME, l'hote peut la cocher — et `lireLePanneau` ignore le DOM dans ce
+// cas, donc son geste est JETE EN SILENCE au prochain « Enregistrer », sans que
+// rien ne le signale.
+// Ce gel-ci note donc QUI etait deja desarme, et ne rend que le reste.
+function gelerReversible (corps) {
+  if (!corps) return () => {}
+  const noeuds = [...corps.querySelectorAll('textarea, input, button, select')]
+  const dejaDesarmes = new Set(noeuds.filter(x => x.disabled))
+  for (const x of noeuds) x.disabled = true
+  return () => {
+    for (const x of noeuds) {
+      if (!dejaDesarmes.has(x)) x.disabled = false
+    }
+  }
 }
 
 // ⚠ L'EN-TETE DU TIROIR VIT HORS DE `tiroir-corps`, DONC HORS DE TOUT GEL.

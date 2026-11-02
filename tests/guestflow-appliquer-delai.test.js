@@ -1199,7 +1199,11 @@ test('LE TEST QUI COMPTE : une tache PRISE sous nos pieds se dit, meme sejour te
     delais: { reponse_ia: 15, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
   })
   assert.equal(r.ok, true)
-  assert.equal(r.deja_prises, 1, 'la tache prise se DIT')
+  // ⚠ PAS `deja_prises` : l'ecran rend ce compteur par « deja prise(s) par
+  // l'ENVOI », et zero ligne peut aussi vouloir dire que l'hote a clique « Ne
+  // pas envoyer » dans un autre onglet. On ne nomme pas un envoi incertain.
+  assert.equal(r.finis_disparus, 1, 'la tache disparue de la file se DIT')
+  assert.equal(r.deja_prises, 0, 'mais sans affirmer qu elle est PARTIE')
   assert.equal(r.sejours_termines, 0,
     'et elle ne compte pas dans les deux : sinon l ecran la soustrait deux fois')
 })

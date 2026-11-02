@@ -269,7 +269,7 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       etat, renderTiroir, ouvrirTiroir, renderListe, renderFil, renderFiltres,
       enregistrerPanneau, basculerPause, delaisEnCours, delaisDuBien,
       bandeauEcheance, etatEcheance, peutReprendre, pausesFiables, voletIA,
-      noteReglage, bienDuFilOuvert, init, PILULES, confirmerDansLaPage, fenetreOuverte,
+      noteReglage, bienDuFilOuvert, init, PILULES, confirmerDansLaPage, fenetreOuverte, OCCUPEE,
       reporterLePanneauSurLeFil, editionPanneauNonEnregistree, remettreCasePause
     }
   `

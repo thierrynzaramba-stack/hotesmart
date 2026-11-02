@@ -36,6 +36,10 @@
 // Les classes vivent dans shared/ui.css (`.hs-confirm*`).
 const ANCRE = 'hs-confirm'
 
+// Le refus : une fenetre etait deja ouverte, donc la question n'a PAS ete posee.
+// Distinct de `null` (« l'hote a ferme »), et distinct d'une cle de bouton.
+export const OCCUPEE = Symbol('fenetre-deja-ouverte')
+
 function vider (el) { while (el.firstChild) el.removeChild(el.firstChild) }
 
 /**
@@ -54,9 +58,15 @@ export function confirmerDansLaPage ({ titre, texte, boutons, doc, fermer = 'Fer
   const d = doc || (typeof document !== 'undefined' ? document : null)
   // ⚠ UNE SEULE FENETRE A LA FOIS — constat MESURE d'une revue : deux appels
   // rapproches empilaient DEUX boites dans le document, et le focus comme la
-  // touche Echap n'allaient qu'a l'une des deux. On refuse la seconde, et on
-  // rend `null` : c'est la direction sure, puisque `null` ne decide rien.
-  if (d && fenetreOuverte(d)) return Promise.resolve(null)
+  // touche Echap n'allaient qu'a l'une des deux.
+  // ⚠ ET LE REFUS NE REND PAS `null`, parce que `null` veut deja dire « l'hote
+  // a ferme » — second constat de revue, mesure. Les appelants prenaient donc
+  // le refus pour une decision : le decochage de la pause etait annule SANS
+  // NOTE, la page degelee sous une fenetre encore ouverte, et sur le chemin du
+  // panneau l'hote lisait « Rien n'a ete modifie » en vert pour une fenetre
+  // qu'il n'a jamais vue. Une question qui n'a pas ete POSEE n'est pas une
+  // question a laquelle on n'a pas repondu.
+  if (d && fenetreOuverte(d)) return Promise.resolve(OCCUPEE)
   if (!d || !Array.isArray(boutons) || !boutons.length) {
     // ⚠ PAS DE REPLI SUR `window.confirm` : il bloque l'extension, et un repli
     // silencieux ferait exactement ce que ce module existe pour empecher. Sans
