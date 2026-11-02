@@ -49,14 +49,32 @@ export const LIBELLE_FERIE = {
 /**
  * Le titre d'un week-end prolongé, à partir du nom INTERNE du férié voisin.
  *
- * ⚠ UN FÉRIÉ INCONNU NE DOIT PAS RENDRE UNE PHRASE CASSÉE. Deux fériés
- * rayonnant sur le même week-end sont joints par « et » en amont
- * (`lib/yield/reference.js`), et un férié ajouté un jour n'aurait pas d'entrée
- * ici. Dans les deux cas on retombe sur le nom tel quel, précédé de « — » :
- * c'est moins joli, mais ça ne ment pas et ça se voit.
+ * ⚠⚠ LE NOM PEUT EN JOINDRE PLUSIEURS, ET C'EST LE CAS AUJOURD'HUI.
+ * `lib/yield/reference.js` joint par « et » tous les fériés d'une même chaîne :
+ * `suite.filter(ferie).map(j => feries.get(j)).join(' et ')`. Cette clé
+ * composée n'a par construction aucune entrée dans la table.
+ *
+ * Relevé en review le 2 novembre 2026, et MESURÉ sur la fenêtre servie ce
+ * jour-là (2026-11-02 → 2027-11-02) : « Ascension et Victoire 1945 » y est,
+ * pour le week-end du 9 mai 2027. J'avais décrit le repli comme une « sortie
+ * de secours pour un férié inconnu » — il était emprunté DÈS MAINTENANT, et il
+ * rendait « Week-end — Ascension et Victoire 1945 », c'est-à-dire exactement
+ * les noms internes que ce lot existe pour écarter. Récurrence mesurée
+ * 2026-2045 : 2027, 2029, 2030, 2032, 2035 (trois fériés), 2040, 2041, 2043.
+ *
+ * On découpe donc sur « et » et on compose chaque part : « de l’Ascension et
+ * du 8 mai ». ⚠ ET SI UNE SEULE PART EST INCONNUE, TOUT RETOMBE SUR LE REPLI :
+ * une phrase à moitié traduite — « de l’Ascension et Machin 1999 » — serait
+ * pire qu'une phrase honnêtement non traduite, parce qu'elle aurait l'air juste.
+ *
+ * ⚠ LE REPLI RESTE, et il garde son rôle : un férié ajouté un jour, ou une
+ * forme de jointure qui changerait. On rend le nom tel quel, précédé d'un tiret
+ * cadratin : moins joli, mais ça ne ment pas et ça se voit.
  */
 export function titreWeekEnd (nomInterne) {
   if (!nomInterne) return null
-  const suite = LIBELLE_FERIE[nomInterne]
-  return suite ? `Week-end ${suite}` : `Week-end — ${nomInterne}`
+  const parts = String(nomInterne).split(' et ')
+  const suites = parts.map((p) => LIBELLE_FERIE[p])
+  if (suites.some((x) => !x)) return `Week-end — ${nomInterne}`
+  return `Week-end ${suites.join(' et ')}`
 }

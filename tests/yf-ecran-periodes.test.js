@@ -262,8 +262,12 @@ test('LE TEST QUI COMPTE : un week-end prolonge porte son nom REEL, et une seule
   // diraient un jour deux noms pour la meme bande et la meme ligne.
   const usages = (src.match(/nomAffiche\(e\)/g) || []).length
   assert.ok(usages >= 2, `la frise ET la ligne doivent lire la meme regle (${usages} usage(s))`)
-  assert.ok(!/Week-end du \$\{e\.ferie_voisin\}/.test(src.replace(/const nomAffiche[^\n]*\n/, '')),
-    'aucune seconde copie de la regle de nommage')
+  // ⚠ UNE ASSERTION MORTE A ETE RETIREE ICI — relevee en review. Elle testait
+  // `!/Week-end du \${e.ferie_voisin}/` sur la source PRIVEE de la ligne de
+  // `nomAffiche` : le `doesNotMatch` ci-dessus la subsume strictement, et son
+  // exemption n'exemptait plus rien puisque cette ligne ne contient plus le
+  // motif. Elle ne pouvait plus rougir pour aucune mutation, et se lisait
+  // pourtant comme un garde-fou.
   // Le detail ne redit plus le week-end.
   assert.doesNotMatch(src, /· week-end du \$\{/, 'le detail ne doit plus repeter le nom')
   assert.ok(!src.includes('const colle'), 'la variable morte a ete retiree')
