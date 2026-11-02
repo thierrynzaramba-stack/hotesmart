@@ -245,14 +245,44 @@ test('LE TEST QUI COMPTE : un week-end prolonge porte son nom REEL, et une seule
   // redisait « week-end du 11 novembre » dans le detail : le meme fait deux
   // fois, dont une en vocabulaire interne.
   const src = sansCommentaires(PAGE())
-  assert.match(src, /const nomAffiche = \(e\) => e\.ferie_voisin \? `Week-end du \$\{e\.ferie_voisin\}` : e\.nom/,
-    'le nom affiche se decide en UN endroit')
+  // ⚠ LA REGLE A CHANGE LE 2 NOVEMBRE 2026, ET CETTE ASSERTION A ROUGI : c'est
+  // son role. Elle figeait « Week-end du ${e.ferie_voisin} », qui rendait
+  // « Week-end du Armistice 1918 » — le nom INTERNE du ferie, faux en francais
+  // et etranger a l'hote. Decision de Thierry : une table de libelles
+  // d'affichage, a un seul endroit, et le moteur intact.
+  // ⚠ LES TROIS CHEMINS PASSENT PAR LA TABLE depuis le 2 novembre 2026 : la
+  // ligne du week-end, celle du ferie, et celle du pont. Avant, seule la
+  // premiere etait traduite, et l hote lisait « Armistice 1918 » et « pont
+  // Armistice 1918 » juste a cote de « Week-end du 11 novembre ».
+  assert.match(src, /if \(e\.ferie_voisin\) return titreWeekEnd\(e\.ferie_voisin\)/,
+    'la ligne du week-end passe par la table')
+  // ⚠ ET LE ROUTAGE SE FAIT PAR LE SEGMENT, PAS PAR LA FORME DU TEXTE — releve
+  // en review. Se fier a l absence de la table ne distingue pas l ORIGINE : un
+  // evenement de l hote nomme « Noel » se serait affiche « 25 decembre ». Et
+  // un prefixe `/^pont /` lu sur du texte attrape les lignes « Pont de
+  // l'Ascension » du calendrier scolaire, que seule la casse epargnait.
+  assert.match(src, /if \(officiel && e\.segment === 'ferie'\) return titreFerie\(e\.nom\) \|\| e\.nom/,
+    'la ligne du ferie se reconnait a son SEGMENT et a son origine officielle')
+  assert.match(src, /if \(officiel && e\.segment === 'pont'\)/,
+    'la ligne du pont aussi')
+  assert.match(src, /const officiel = e\.origine === 'officiel'/,
+    'et l origine officielle protege les evenements de l hote')
+  assert.match(src, /import \{ titreWeekEnd, titreFerie, titrePont \} from '\/shared\/yield-libelles-feries\.js'/,
+    'les trois viennent du module partage, pas d une copie locale')
+  // ⚠ ET LA REGLE NE SE RECOMPOSE PAS A LA MAIN A COTE. Une seconde
+  // interpolation `Week-end du ${…}` serait une copie qui divergerait.
+  assert.doesNotMatch(src, /`Week-end du \$\{/,
+    'plus aucune composition manuelle du titre : elle passe par titreWeekEnd')
   // ⚠ ET EN UN SEUL : la frise et la ligne le lisent toutes deux. Deux copies
   // diraient un jour deux noms pour la meme bande et la meme ligne.
   const usages = (src.match(/nomAffiche\(e\)/g) || []).length
   assert.ok(usages >= 2, `la frise ET la ligne doivent lire la meme regle (${usages} usage(s))`)
-  assert.ok(!/Week-end du \$\{e\.ferie_voisin\}/.test(src.replace(/const nomAffiche[^\n]*\n/, '')),
-    'aucune seconde copie de la regle de nommage')
+  // ⚠ UNE ASSERTION MORTE A ETE RETIREE ICI — relevee en review. Elle testait
+  // `!/Week-end du \${e.ferie_voisin}/` sur la source PRIVEE de la ligne de
+  // `nomAffiche` : le `doesNotMatch` ci-dessus la subsume strictement, et son
+  // exemption n'exemptait plus rien puisque cette ligne ne contient plus le
+  // motif. Elle ne pouvait plus rougir pour aucune mutation, et se lisait
+  // pourtant comme un garde-fou.
   // Le detail ne redit plus le week-end.
   assert.doesNotMatch(src, /· week-end du \$\{/, 'le detail ne doit plus repeter le nom')
   assert.ok(!src.includes('const colle'), 'la variable morte a ete retiree')
