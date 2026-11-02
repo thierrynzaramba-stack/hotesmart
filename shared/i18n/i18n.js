@@ -29,7 +29,7 @@ window.I18n = (() => {
   // ROUGIT si elle ne correspond pas. Sans lui, une traduction corrigee
   // resterait invisible un an chez l'hote — le defaut exact que le cache long
   // rend possible.
-  const VERSION = '01e7bc5d4d34';
+  const VERSION = 'ec18ab37165d';
   const FALLBACK = 'fr';
   const STORAGE_KEY = 'hs.lang';
 

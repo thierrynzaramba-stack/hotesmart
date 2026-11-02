@@ -2000,6 +2000,197 @@ capturé était celui d'après la sortie, et l'assertion était vraie par
 construction. Mutation faite, il restait vert. **Il faut une fenêtre pour
 observer** : on bloque l'aperçu, on capture pendant le vol, puis on libère.
 
+### `window.confirm` est remplacé par une fenêtre DANS LA PAGE (2 novembre 2026)
+
+**Décision de Thierry, et les deux motifs comptent autant l'un que l'autre :**
+
+1. **« OK » et « Annuler » ne disent pas ce qu'ils font.** Sur ce chantier,
+   « Annuler » portait l'action qui **écrit** — désarmer les propositions — et
+   il fallait le lire dans le texte du dialogue. Trois recettes de suite ont
+   buté dessus.
+2. **La boîte native SUSPEND la page, donc elle bloque l'extension Chrome** avec
+   laquelle il joue ses recettes. Vécu le 1er novembre 2026 : « l'extension ne
+   répond plus sur l'onglet HôteSmart, aucune étape n'est jouée ».
+
+**Périmètre, tel qu'il l'a nommé** : les trois confirmations de ce lot — levée
+de la pause, changement de délai, sortie de la validation manuelle.
+
+| confirmation | boutons | fermer (×, Échap, clic à côté) |
+|---|---|---|
+| levée de la pause | « Laisser partir » / « Garder pour validation » | la pause **reste**, rien n'est désarmé |
+| changement de délai | « Laisser partir » / « Garder pour validation » | **rien n'est enregistré**, pas même le délai |
+| sortie du mode manuel | « Continuer » / « Rester en validation » | le bien **reste** en validation |
+
+⚠ **ET C'EST LA TROISIÈME ISSUE QUI MANQUAIT.** `window.confirm` n'a que deux
+sorties : « je ne réponds pas » était indistinguable d'« Annuler », qui écrivait.
+C'est l'ambiguïté que j'avais signalée le 30 octobre sans pouvoir la résoudre.
+**Seul un clic sur un bouton nommé décide.**
+
+**Le composant** : `shared/confirmer.js`, promise-based
+(`confirmerDansLaPage({ titre, texte, boutons }) → clé | null`), et ses classes
+dans `shared/ui.css`. ⚠ **Pas de `<dialog>` natif, et c'est une contrainte
+mesurée** : jsdom 26.1.0 n'implémente ni `showModal` ni `close`
+(`el.showModal is not a function`). Or les garanties produit de ce lot se
+mesurent **au banc, en cliquant** — un composant qu'on ne peut pas rendre dans
+le banc serait un composant dont les gardes ne sont tenues par rien. On reprend
+donc le patron que `pages/menages.html` utilise déjà : un voile + un panneau.
+
+⚠ **Les textes ont dû changer avec les boutons.** Les trois messages disaient
+« Confirmer : … Annuler : … » : décrire des boutons qui n'existent plus aurait
+été pire qu'un texte muet. Ils énoncent maintenant le fait, le nombre, et ce
+que **fermer** fait.
+
+⚠ **Un piège que ma sortie neutre a rencontré, et qui méritait d'être compris**
+plutôt que contourné : le `finally` de `enregistrerPanneau` n'est **pas** un
+dégel neutre — s'il trouve `panneauEnCours` encore levé, il en conclut qu'une
+exception est passée et pose `mode_error`, « Réglage non enregistré, réessayez ».
+Ma première sortie laissait donc **une erreur rouge** s'afficher pour un geste
+qui ne fait rien, soit le mensonge exactement inverse de celui qu'on ferme. La
+sortie normale baisse les deux drapeaux ; la neutre doit faire pareil.
+
+**Le banc a changé aussi, et c'est le signe que le double suit le vrai.**
+`window.confirm` se doublait par une fonction ; la fenêtre, elle, se **clique** —
+le banc évalue le **vrai** module et clique ses **vrais** boutons
+(`repondreFenetre`, qui accepte une clé, `null` pour fermer, ou une **fonction**
+de la fenêtre vue, parce qu'un seul geste ouvre parfois deux fenêtres
+différentes). Trois erreurs de banc trouvées en l'écrivant : un observateur non
+débranché qui levait **après** la fermeture de la fenêtre jsdom et faisait
+rougir un test innocent ; une lecture de la fenêtre dans le **journal** au lieu
+du DOM, qui servait à la seconde fenêtre la réponse de la première ; et des
+tests qui affirmaient **avant** d'avoir laissé retomber un tour — la boîte
+native rendait son résultat dans la même instruction, la fenêtre non.
+
+**Sept mutations éprouvées** : fermer qui vaudrait « garder », fermer qui
+enregistrerait, fermer qui sortirait du manuel, Échap / croix / clic à côté qui
+ne fermeraient plus, et des boutons sans nom. ⚠ **Avec `--test-timeout`** : une
+mutation qui empêche la fenêtre de se refermer fait **attendre** le test pour
+toujours, et sans délai par test le hang remonte comme un blocage de la
+commande, pas comme un rouge.
+
+⚠ **DEUX `window.confirm` RESTENT DANS LA PAGE, ET C'EST ASSUMÉ** — ils
+appartiennent à d'autres lots : `messages.draft_replace` (remplacer un
+brouillon) et `messages.prog_delete_confirm` (supprimer un message programmé).
+Un test nomme ces deux-là, pour qu'un lecteur sache que ce n'est pas un oubli.
+Mais le motif de Thierry vaut pour eux : **ils bloqueront l'extension sur la
+recette de leur propre écran.**
+
+### La revue de la fenêtre : onze constats, dont trois graves
+
+1. **GRAVE — « fermer ne change rien » EFFAÇAIT la saisie non enregistrée.** Ma
+   sortie neutre appelait `renderTiroir()` pour relâcher les contrôles, et il
+   repeint les champs depuis `etat` alors que ce chemin n'a **rien** écrit.
+   ⚠ **Et la cause réelle est en amont de mon correctif** : `enregistrerLePanneau`
+   lit le formulaire (`saisi`) **puis** repeint, à l'entrée — inoffensif sur le
+   chemin normal (les valeurs lues sont écrites puis relues), destructeur quand
+   on ferme. Ne plus repeindre dans ma sortie ne suffisait donc pas : il faut
+   **remettre** la saisie (`reposerLaSaisie`, l'inverse exact de
+   `lireLePanneau`). C'est le défaut que ce fichier documente déjà (« le champ
+   passait de "DESTINATAIRE-TAPÉ-À-LA-MAIN" à vide »), recréé puis refermé.
+2. **GRAVE — le retrait de `deja_prises` TAISAIT un envoi réel.** Mon
+   raisonnement (« sur un séjour terminé, rien ne peut partir ») est vrai à
+   l'instant de l'écriture, **pas** à l'instant où le cron a pris la tâche : il
+   tourne à 23:59:50 UTC, le séjour n'est pas terminé **pour lui**, il envoie ;
+   l'hôte valide à 00:00:10 et l'écriture classe la tâche « séjour terminé ».
+   L'`update` conditionné rend zéro ligne — le seul signal qu'une réponse est
+   partie. Silence double : ni `partie_deja_prises`, ni l'écart (le delta
+   mangeait l'unité). Désormais : `deja_prises` **ou** `sejours_termines`,
+   jamais les deux, sinon l'écran soustrait la même tâche deux fois.
+3. **GRAVE — `aria-modal="true"` sans modalité réelle.** Ni piège de focus, ni
+   garde de réentrance, et `fenetreOuverte` exporté mais jamais appelé. Mesuré :
+   au clavier seul, pendant la question du mode manuel, l'hôte atteignait la
+   **case pause** et son écriture partait jusqu'au bout — la boîte native
+   faisait ce travail gratuitement, en suspendant la page. Et deux appels
+   rapprochés empilaient **deux** boîtes. Trois fermetures : la tabulation est
+   enfermée dans la fenêtre, le geste du mode manuel **gèle** la page, et une
+   seconde fenêtre est refusée (`null`, la direction sûre).
+4. Ce `renderTiroir()` n'avait **aucun filet** : s'il levait, le `catch`
+   poussait deux échecs partiels **puis la fonction écrivait les étapes 2 et 3**
+   pour un geste qui ne doit rien changer. Fermé par le correctif 1.
+5. **Le texte ne disait plus que « Garder pour validation » LAISSE LA PAUSE
+   ACTIVE.** L'hôte vient de décocher la case pour **lever** la pause : le
+   libellé seul pouvait s'entendre « lève la pause, mais garde l'arriéré ». Les
+   textes nomment maintenant les deux boutons **et leur conséquence**, dans les
+   trois langues.
+6. **`b.fenetres` n'était pas un compte de fenêtres** : une entrée par **lot de
+   mutations** (3 pour une fenêtre si un `renderTiroir` passait) et lecture de la
+   **première** boîte seulement (1 pour deux empilées). Il ne mesurait donc ni
+   l'ouverture ni la superposition. Corrigé par un marquage des boîtes vues, et
+   `maxFenetresSimultanees` prouve l'unicité.
+7. **`var(--text-muted)` n'existe pas** dans le dépôt — le jeton est `--muted`.
+   La déclaration était invalide, donc sans effet.
+8. **Le z-index écrit dans le commentaire était faux** : `.msg-tiroir` est à 40,
+   pas 60-61 (60-61 est `.men-cfg*`). Encore un nombre à la main qui se lit
+   comme une mesure.
+9. **L'en-tête décrivait un mécanisme non utilisé** (« un voile + un panneau, en
+   `hidden` ») : le module n'écrit jamais `hidden`. Il n'est donc **pas** couvert
+   par `tests/masquage-hidden.test.js`, et le laisser croire était pire qu'un
+   commentaire absent.
+10. **Le texte n'était pas lié par `aria-describedby`** : un lecteur d'écran
+    annonçait le titre puis le bouton, et **pas** le paragraphe qui porte le
+    nombre de propositions — l'information la plus importante de cette fenêtre.
+11. **Le titre posait une question à laquelle aucun bouton ne répond**
+    (« Enregistrer ce délai ? » / « Laisser partir » / « Garder »). Les trois
+    titres décrivent maintenant le **sujet**, et les boutons y répondent.
+
+⚠ **ET TROIS DE MES PREMIERS CORRECTIFS N'ÉTAIENT TENUS PAR RIEN**, trouvé par
+mutation et non par la revue : la saisie remise, le gel de la question du mode
+manuel, et le piège de focus. Ce dernier mérite d'être retenu : **jsdom
+n'implémente pas la navigation séquentielle au clavier**, donc un `Tab` sans
+gestionnaire ne déplace rien — « le focus est resté dans la fenêtre » est vrai
+par construction, piège ou pas. Mon test était vide. Il affirme maintenant la
+**destination** du focus et que l'événement a été intercepté.
+
+### La dernière revue de la fenêtre : sept constats, tous mesurés
+
+C'est la dernière du lot (exception « envoi au voyageur ») : corrigés sans
+nouvelle review.
+
+1. **`geler(corps, false)` n'est pas l'inverse de `geler(corps, true)`.** Le
+   rendu désarme **en permanence** la case SMS d'un hôte sans clé Brevo
+   (`etat.brevo && !etat.modeEnCours`), et un relâchement en bloc la **réarmait**.
+   L'hôte pouvait alors la cocher — et `lireLePanneau` ignore le DOM dans ce
+   cas, donc **son geste était jeté en silence** au prochain « Enregistrer »,
+   sans que `editionPanneauNonEnregistree` le signale. Le gel du panneau passe
+   par un **repeint**, donc un relevé de nœuds ne survit pas : la photo note
+   désormais les **sélecteurs** déjà désarmés, et `degelerLeVolet` les laisse
+   désarmés.
+2. **`reposerLaSaisie` cochait une case que le rendu laisse vide.**
+   `lireLePanneau` n'est pas une photo du formulaire : sans Brevo il rend la
+   valeur **enregistrée** des champs SMS (garde délibérée), et il `.trim()` les
+   consignes. Reposer sa sortie cochait donc une alerte SMS jamais réglée, et
+   **tronquait** la saisie. On repose une **photo du DOM**, prise avant le
+   repeint d'entrée.
+3. **Une fenêtre REFUSÉE rendait `null`, et `null` veut déjà dire « l'hôte a
+   fermé ».** Les appelants prenaient donc le refus pour une décision :
+   décochage de la pause annulé **sans note**, page dégelée **sous une fenêtre
+   encore ouverte**, et sur le panneau une note **verte** « Rien n'a été
+   modifié » pour une question jamais vue. Le refus a maintenant sa sentinelle
+   (`OCCUPEE`), et les trois appelants le disent par
+   `messages.reglage_en_cours`. ⚠ **Je n'ai pas gelé `[data-delai-manuel]` sur
+   `modeEnCours`**, bien que ça ferme aussi la concurrence : c'est exactement ce
+   qui produisait le point 1 de la recette du 28 octobre (« aucune confirmation
+   n'apparaît », parce que le bouton était `disabled` pendant une écriture de
+   pause).
+4. **Le gel désarmait la pilule AVANT la capture de `activeElement`**, donc
+   `focus()` sur un élément désarmé ne faisait rien : après Échap, le focus était
+   sur `<body>` — le contraire de la garantie écrite dans `confirmer.js`, et sur
+   le chemin **clavier**, celui pour lequel le gel a été ajouté.
+5. **`deja_prises` affirmait un envoi incertain.** L'écran rend ce compteur par
+   « déjà prise(s) par l'**envoi** », or zéro ligne peut aussi vouloir dire que
+   l'hôte a cliqué « Ne pas envoyer » dans un autre onglet — et cette tâche
+   n'avait jamais été **annoncée**. Compteur distinct `finis_disparus` :
+   soustrait comme les autres séjours terminés (l'arithmétique ne change pas),
+   et il n'affirme rien.
+6. **Le test « dans les trois langues » n'était pas par langue** : une boucle
+   morte (`assert.ok(true)`) et une **alternance** des trois phrases, donc
+   `es.json` passait en portant la phrase **anglaise**. Un motif par langue,
+   indexé sur `lg` — et une mutation le prouve.
+7. **`mode_confirm_auto` était la seule fenêtre dont le texte ne nommait pas ses
+   boutons**, et son titre affirmait un résultat que le geste ne produit pas
+   (« Les réponses partiront sans votre validation » : le clic ne fait que
+   basculer l'état local, rien ne part avant un « Enregistrer »). Le titre
+   décrit le **geste**, et le texte nomme les deux boutons.
+
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 
 **Trouvé en corrigeant les quatre points, mesuré, NON corrigé dans ce commit.**

@@ -361,8 +361,22 @@ test('messages etape 4 : passer en Auto exige une confirmation, et l\'etat est R
   // toujours : quitter « Je valide chaque reponse » autorise des envois sans
   // relecture. La confirmation est donc sur CE bouton. Ce test l'avait
   // attrapee : elle avait disparu avec le toggle.
-  assert.ok(/d\.reponse_ia === null && !window\.confirm\(t\('messages\.mode_confirm_auto'\)\)/.test(src),
+  // ⚠ LA GARDE EST TOUJOURS LA, MAIS PLUS DANS UNE BOITE NATIVE (decision de
+  // Thierry du 2 novembre 2026) : une fenetre dans la page, deux boutons
+  // nommes — « Continuer » / « Rester en validation » — et fermer la fenetre
+  // laisse le bien en validation. La boite native suspendait la page, donc
+  // bloquait l extension Chrome avec laquelle il joue ses recettes.
+  // ⚠ ET CE TEST NE PEUT PLUS SE CONTENTER DE LA SOURCE : le geste est mesure
+  // en CLIQUANT dans tests/messages-panneau-ia-dom.test.js (« sortir de "Je
+  // valide chaque reponse" DEMANDE confirmation », et les deux issues de
+  // fermeture). Ce qui reste ici est l invariant de frontiere : la garde existe
+  // sur ce bouton, et elle passe par la fenetre.
+  assert.ok(/d\.reponse_ia === null\b/.test(src),
+    'la garde porte bien sur la sortie de la validation manuelle')
+  assert.ok(/confirmerDansLaPage\(\{[\s\S]*?messages\.mode_confirm_auto/.test(src),
     'quitter la validation manuelle est un geste lourd : confirmation explicite (demande de Thierry)')
+  assert.ok(/choix !== 'continuer'/.test(src),
+    'et seul le bouton « Continuer » fait sortir du manuel')
   // Apres le POST : un GET de relecture nourrit l'interrupteur — jamais
   // l'etat suppose. Idem pour la pause.
   // ⚠ L'ECRITURE DU MODE A DISPARU DE L'ECRAN (le serveur le derive des delais

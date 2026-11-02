@@ -1960,3 +1960,39 @@ body.men-cfg-ouvert { overflow: hidden; }
 .cm-grille { stroke: var(--line); stroke-width: 1; }
 .cm-axe { stroke: var(--line); stroke-width: 1.5; }
 .cm-grad, .cm-mois { font-size: 11px; fill: var(--muted); }
+
+/* ─── La fenêtre de confirmation DANS LA PAGE (shared/confirmer.js) ─────────
+   ⚠ Elle remplace `window.confirm` (décision de Thierry, 2 novembre 2026) :
+   « OK » et « Annuler » ne disent pas ce qu'ils font, et la boîte native
+   SUSPEND la page, donc elle bloque l'extension Chrome qui joue les recettes.
+   ⚠ Au-dessus de tout ce qui existe : `.msg-tiroir` est à z-index 40, la fiche
+   de /menages à 70, sa fenêtre de configuration à 60-61. ⚠ Mon commentaire
+   disait « le tiroir de /messages (z-index 60-61) » — un nombre écrit à la main
+   qui se lit comme une mesure et ne rougit jamais ; 60-61 est en réalité
+   `.men-cfg*`. 71 reste au-dessus des quatre, mais à UN cran de `.men-fiche` :
+   le jour où /menages importera cette fenêtre, c'est ce chiffre-là qu'il faudra
+   relire. */
+.hs-confirm__voile {
+  position: fixed; inset: 0; z-index: 70; background: rgb(0 0 0 / 0.4);
+}
+.hs-confirm {
+  position: fixed; z-index: 71; inset-block-start: 50%; inset-inline-start: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px)); max-height: min(90vh, 700px);
+  display: flex; flex-direction: column; gap: var(--gap-s);
+  padding: 20px; overflow: auto;
+  background: var(--surface); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-hover);
+}
+.hs-confirm__croix {
+  position: absolute; inset-block-start: 8px; inset-inline-end: 8px;
+}
+.hs-confirm__titre { margin: 0; padding-inline-end: 36px; font-weight: var(--fw-semibold); }
+.hs-confirm__texte { margin: 0; color: var(--muted); }
+/* ⚠ LES BOUTONS NOMMÉS SE LISENT EN ENTIER, Y COMPRIS AU TÉLÉPHONE : ils
+   s'empilent plutôt que de tronquer un libellé. Un bouton dont on ne lit pas
+   le nom ramène le défaut que cette fenêtre existe pour fermer. */
+.hs-confirm__pied {
+  display: flex; flex-wrap: wrap; gap: var(--gap-s); margin-block-start: 4px;
+}
+.hs-confirm__pied .btn { flex: 1 1 auto; white-space: normal; }
