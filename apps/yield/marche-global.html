@@ -34,16 +34,10 @@
       --mg-n2: #9DB9E3; --mg-n1: #5B87C9; --mg-n: #1E3F73;
       --mg-barre: #9DB9E3; --mg-barre-partielle: #C9CED6;
     }
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-        --mg-n2: #4a5f80; --mg-n1: #7fa3dc; --mg-n: #c7dbff;
-        --mg-barre: #5b7fb5; --mg-barre-partielle: #555b66;
-      }
-    }
-    :root[data-theme="dark"] {
-      --mg-n2: #4a5f80; --mg-n1: #7fa3dc; --mg-n: #c7dbff;
-      --mg-barre: #5b7fb5; --mg-barre-partielle: #555b66;
-    }
+    /* ⚠ VARIANTE SOMBRE RETIREE — double validation de Thierry du 2 novembre
+       2026 : « pas de mode sombre sur YieldFlow pour l'instant ». Ces barres
+       s'eclaircissaient pendant que le texte et le fond de page restaient
+       clairs : un ecran a moitie sombre n'est pas un mode sombre. */
     .mg-avertir { background: var(--amber-bg); border: 0.5px solid var(--amber); border-radius: var(--radius);
                   padding: 12px 14px; margin-bottom: 16px; font-size: 13.5px; line-height: 1.5; }
     .mg-meta { font-size: 12.5px; color: var(--text2); margin: 6px 0 16px; }
@@ -64,12 +58,18 @@
        n'existait pas ici : seul son accent était déclaré. La légende continue
        d'apparier « Très haut ou Exceptionnel » comme avant — ce lot ne
        change pas ce qu'elle dit. */
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-        --yf-base: #1d2a36; --yf-moyen: #1f2d24; --yf-haut: #352d17; --yf-tres-haut: #3a2717;
-      }
-    }
-    :root[data-theme="dark"] { --yf-base: #1d2a36; --yf-moyen: #1f2d24; --yf-haut: #352d17; --yf-tres-haut: #3a2717; }
+    /* ⚠ LES FONDS SOMBRES SONT RETIRES — double validation de Thierry du
+       2 novembre 2026 : « pas de mode sombre sur YieldFlow pour l'instant ».
+       CE QU'ILS FAISAIENT. Cet ecran redefinissait quatre fonds de niveaux
+       sous `prefers-color-scheme: dark`, alors que `public/style.css` n'a
+       AUCUN bloc sombre : `.mg-niv-l` continuait donc de peindre `--text`
+       (#1a1a1a) par-dessus. Contraste ~1,1:1 — les quatre lignes de
+       « Les niveaux du marche » etaient ILLISIBLES chez tout hote en
+       preference systeme sombre. Constate en recette le 1er novembre 2026,
+       et c'etait l'ecart 11 de docs/kb/charte-ui.md.
+       La page reste donc claire, comme le reste de l'application. Un vrai
+       mode sombre est un chantier a part, pas une surcharge de quatre
+       jetons sur un ecran. */
     .mg-bloc { padding: 12px 0; border-top: 0.5px solid var(--border); }
     #mg-resume-tendance { border-top: 0; padding-top: 4px; }
     .mg-bloc h3 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }

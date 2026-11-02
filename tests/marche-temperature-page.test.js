@@ -69,8 +69,29 @@ test('toute donnee venue du serveur passe par l echappement HTML', () => {
   assert.deepEqual(fautifs, [])
 })
 
-test('theme sombre : les couleurs des niveaux viennent du module commun, qui a leur version sombre', () => {
+test('pas de mode sombre : les couleurs viennent du module commun, et SANS variante sombre', () => {
+  // ⚠⚠ CE TEST A ETE RETOURNE LE 2 NOVEMBRE 2026, SUR DOUBLE VALIDATION DE
+  // THIERRY : « pas de mode sombre sur YieldFlow pour l'instant ».
+  //
+  // Il gardait l'EXISTENCE de la variante sombre. Elle a ete retiree parce
+  // qu'elle etait un DEMI-mode sombre, et qu'un demi-mode sombre ment :
+  // — l'echelle s'INVERSAIT, « Pic » devenant la case la plus CLAIRE
+  //   (#a9c4ef) et « creux » la plus foncee, le contraire de ce que l'echelle
+  //   veut dire ;
+  // — et sur marche-global, quatre fonds de niveaux s'eclaircissaient pendant
+  //   que `public/style.css`, qui n'a aucun bloc sombre, continuait de peindre
+  //   le texte en #1a1a1a : contraste ~1,1:1, bloc illisible.
+  // Constate en recette le 1er novembre 2026, captures a l'appui.
+  //
+  // Il garde donc maintenant l'ABSENCE, pour qu'une variante sombre ne
+  // revienne pas par morceaux. Un vrai mode sombre sera un chantier a part.
   assert.ok(!/--t-/.test(PAGE), 'plus aucune couleur de niveau propre a la page')
-  assert.match(MODULE, /prefers-color-scheme: dark[\s\S]*--tc-pic/)
-  assert.match(MODULE, /\[data-theme="dark"\][\s\S]*--tc-pic/)
+  const regles = MODULE.replace(/\/\*[\s\S]*?\*\//g, ' ')
+  assert.doesNotMatch(regles, /prefers-color-scheme:\s*dark/,
+    'le module ne doit plus porter de regle sous prefers-color-scheme')
+  assert.doesNotMatch(regles, /:root\[data-theme="dark"\]/,
+    'ni sous [data-theme="dark"]')
+  // Et l'echelle CLAIRE reste : c'est elle qui porte le sens.
+  assert.match(MODULE, /--tc-pic:\s*#1E3F73/,
+    'l echelle claire doit rester, « Pic » le plus fonce')
 })

@@ -201,35 +201,49 @@ La valeur peinte n'est donc pas la valeur du jeton. La légende, elle, utilise
 `--coul` **pur** (`.cal-legende__pt`,  ; `.cal-ligne-resa__point`,
 .
 
-## 5. Mode sombre — ce qui existe, et où il manque
+## 5. Mode sombre — ce qui existe, et où il a été RETIRÉ
+
+⚠⚠ **DÉCISION DE THIERRY DU 2 NOVEMBRE 2026, DOUBLE VALIDATION DONNÉE :
+« pas de mode sombre sur YieldFlow pour l'instant. »** Un vrai mode sombre sera
+un chantier à part.
 
 | socle / module | mécanisme | couverture |
 |---|---|---|
-| `shared/theme.css` | `:root[data-theme="dark"]` **seulement** | 16 jetons redéfinis |
-| `shared/temperature-calendrier.js` | `prefers-color-scheme` **ET** `[data-theme="dark"]` | les 4 niveaux + leurs textes |
-| `apps/yield/marche-global.html` | `prefers-color-scheme` **ET** `[data-theme="dark"]` | 4 fonds sur 5 |
+| `shared/theme.css` | `:root[data-theme="dark"]` **seulement** | 19 jetons redéfinis |
+| `shared/temperature-calendrier.js` | **aucun** — retiré le 2 novembre 2026 | néant |
+| `apps/yield/marche-global.html` | **aucun** — retiré le 2 novembre 2026 | néant |
 | `public/style.css` | **aucun** | néant |
 | `apps/yield/prix.html` | **aucun** | néant |
 
-⚠ **`data-theme` N'EST POSÉ PAR AUCUN CODE DU DÉPÔT.** Balayage complet des
-`.js` et `.html` : la seule occurrence hors feuilles de style est une assertion
-de test (`tests/marche-temperature-page.test.js`). La variante sombre de
-`shared/theme.css` est donc **déclarée et jamais activée**.
+**Pourquoi les deux ont été retirés, et c'est la leçon : un demi-mode sombre
+ment.**
 
-⚠ **ET L'ASYMÉTRIE REND UN ÉCRAN ILLISIBLE, pas seulement incohérent — relevé
-en review.** Sur `apps/yield/marche-global.html`, en préférence système sombre,
-les quatre fonds de niveaux passent à `#1D2A36`…`#3A2717` tandis que
-`.mg-niv-l` garde `color: var(--text)` = `#1A1A1A`, parce que
-`public/style.css` n'a **aucun** bloc sombre. Contraste ≈ **1,1:1** : les
-quatre lignes de « En résumé » y sont illisibles. C'est préexistant ; le lot du
-30 octobre 2026 ne l'aggrave pas, mais la première règle qui utilisera
-`--yf-exceptionnel` sur cet écran ajoutera un cinquième cas, en pâle et sans
-surcharge sombre.
+1. **Il rendait un bloc illisible.** Sur `apps/yield/marche-global.html`, en
+   préférence système sombre, quatre fonds de niveaux passaient à
+   `#1D2A36`…`#3A2717` tandis que `.mg-niv-l` gardait `color: var(--text)` =
+   `#1A1A1A`, parce que `public/style.css` n'a **aucun** bloc sombre.
+   Contraste ≈ **1,1:1** : les quatre lignes de « En résumé » étaient
+   illisibles. Constaté en recette le 1er novembre 2026, capture à l'appui.
+2. **Et il INVERSAIT une échelle.** Dans `shared/temperature-calendrier.js`,
+   la variante sombre faisait de « Pic » la case la plus **claire**
+   (`#A9C4EF`) et de « creux » la plus foncée — le contraire de ce que
+   l'échelle veut dire.
 
-⚠ **`shared/theme.css` n'écoute PAS `prefers-color-scheme`.** Un seul fichier du
-dépôt contient cette règle : `apps/yield/marche-global.html`. Donc chez un hôte
-en préférence sombre, les quatre fonds de niveaux de cet écran passent au
-sombre tandis que le reste de la page reste clair.
+**Ce qui tient la décision** : `tests/retouches-yieldflow-recette.test.js` garde
+l'**absence** de toute règle sombre sur les six écrans YieldFlow et sur le
+module partagé. Et `tests/marche-temperature-page.test.js` et
+`tests/temperature-calendrier-dom.test.js` ont été **retournés** : ils gardaient
+l'existence de la variante, ils gardent désormais son absence. Un garde-fou
+qu'on efface laisse revenir ce qu'il empêchait ; un garde-fou qu'on retourne dit
+pourquoi.
+
+⚠ **`data-theme` N'EST TOUJOURS POSÉ PAR AUCUN CODE DU DÉPÔT.** La variante
+sombre de `shared/theme.css` reste **déclarée et jamais activée** — elle n'est
+pas touchée par cette décision, qui ne porte que sur YieldFlow.
+
+⚠ **`shared/theme.css` n'écoute PAS `prefers-color-scheme`.** Depuis le
+2 novembre 2026, **plus aucun fichier du dépôt ne contient cette règle** : les
+deux qui l'avaient étaient les deux retirés ci-dessus.
 
 ## 6. Typographie
 
@@ -463,8 +477,8 @@ bascule se fait par `.only-mobile` / `.only-desktop` à **721 px**.
 | 8 | **Canal Direct peint de deux couleurs** | `#0E1726` (messagerie) **vs** `#0F7A4F` (calendrier) | `ui.css` / `ui.css` |
 | ~~9~~ | ~~La palette des 5 niveaux recopiée 4 fois~~ — **FERMÉ le 30 octobre 2026** : source unique dans `public/style.css`, les 4 copies sont des renvois, un test épingle les 10 valeurs | — |
 | ~~10~~ | ~~Le 5e niveau est incomplet côté marché~~ — **FERMÉ le 30 octobre 2026** : `--yf-exceptionnel` (le fond) existe désormais. ⚠ Il n'est encore utilisé par aucune règle de `marche-global.html`, dont la légende continue d'apparier « Très haut ou Exceptionnel » comme avant | — |
-| 11 | **Mode sombre : deux mécanismes, et un seul fichier écoute l'OS** | `[data-theme]` seul **vs** `prefers-color-scheme` + `[data-theme]` | `theme.css` / `marche-global.html`, `temperature-calendrier.js` |
-| 12 | **`data-theme` n'est posé par aucun code** | variante sombre déclarée, jamais activée | balayage `.js`/`.html` : seule occurrence hors CSS = `tests/marche-temperature-page.test.js` |
+| ~~11~~ | ~~Mode sombre : deux mécanismes, et un seul fichier écoute l'OS~~ — **FERMÉ le 2 novembre 2026** sur double validation de Thierry : les deux fichiers qui écoutaient l'OS ont vu leur variante sombre retirée. Il ne reste que `[data-theme]` dans `shared/theme.css`, hors YieldFlow |
+| 12 | **`data-theme` n'est posé par aucun code** (inchangé : la décision du 2 novembre ne porte que sur YieldFlow) | variante sombre déclarée, jamais activée | balayage `.js`/`.html` : seule occurrence hors CSS = `tests/marche-temperature-page.test.js` |
 | 13 | **`.btn--primary` et `.btn--outline` identiques** | mêmes trois propriétés, mêmes valeurs | `ui.css` et `104` |
 | 14 | **Deux attributs d'état pour `.tab`** | `aria-current="page"` **et** `aria-pressed="true"`, trois règles séparées | `ui.css`, `214`, `282`, `453` |
 | 15 | **La couleur de canal peinte n'est pas la valeur du jeton** | barre : `color-mix(… 82%, black)` ; légende : `--coul` pur | `ui.css` vs `590`, `640` |

@@ -88,15 +88,22 @@
      CLAIR, et seulement là. Un fond foncé ajouté un jour demanderait sa
      couleur de texte avec lui.
 
-     ⚠ ET IL EXISTE DÉJÀ UN CAS OÙ C'EST FAUX, préexistant à ce lot et relevé
-     en review : apps/yield/marche-global.html redéfinit quatre de ces fonds
-     sous `prefers-color-scheme: dark` (#1d2a36 … #3a2717) alors que cette
-     feuille n'a AUCUN bloc sombre. Son `.mg-niv-l` peint donc --text (#1a1a1a)
-     sur un fond sombre : contraste ≈ 1,1:1, les quatre lignes de « En résumé »
-     y sont illisibles. Ce lot ne l'aggrave pas (--yf-exceptionnel reste inutilisé
-     là-bas) mais la première règle qui s'en servira sur cet écran ajoutera un
-     cinquième cas. Fermer ce sombre change l'apparence d'un écran validé :
-     double validation de Thierry. Voir docs/kb/charte-ui.md §5. */
+     ⚠ IL A EXISTÉ UN CAS OÙ C'ÉTAIT FAUX, ET IL EST FERMÉ DEPUIS LE
+     2 NOVEMBRE 2026. apps/yield/marche-global.html redéfinissait quatre de ces
+     fonds sous `prefers-color-scheme: dark` alors que cette feuille n'a aucun
+     bloc sombre : son `.mg-niv-l` peignait --text (#1a1a1a) par-dessus,
+     contraste ≈ 1,1:1, et les quatre lignes de « En résumé » étaient
+     illisibles chez tout hôte en préférence système sombre. Constaté en
+     recette le 1er novembre 2026.
+     Sur double validation de Thierry — « pas de mode sombre sur YieldFlow pour
+     l'instant » — les trois blocs sombres de YieldFlow sont partis, et
+     tests/retouches-yieldflow-recette.test.js garde leur ABSENCE. La phrase
+     ci-dessus vaut donc sans exception : les cinq fonds sont pâles, les six
+     écrans sont clairs.
+     ⚠ Et cette correction est elle-même un constat de review : le commentaire
+     disait encore « fermer ce sombre demande la double validation de Thierry »
+     dans le commit qui venait de le fermer. Une phrase périmée se lit comme une
+     mesure et ne rougit jamais. Voir docs/kb/charte-ui.md §5. */
   --yf-base: #E7F0F7;          --yf-base-l: #4A7FA8;
   --yf-moyen: #EDF4EE;         --yf-moyen-l: #5F8F6E;
   --yf-haut: #FBF4E2;          --yf-haut-l: #C89A2E;
@@ -129,6 +136,48 @@ body.police-v5 { font-family: var(--font-v5); }
    navigateur. `:where()` garde la specificite a zero, donc n'importe quelle
    regle de page continue de gagner. */
 body.police-v5 :where(input, select, button, textarea, optgroup) { font-family: inherit; }
+/* ⚠ LEAFLET POSE SA PROPRE POLICE, ET UN HERITAGE NE PEUT PAS LA BATTRE.
+   `leaflet.css` declare `font-family` sur `.leaflet-container` : une
+   declaration l'emporte toujours sur ce qui descend du parent, donc la regle
+   d'heritage ci-dessus ne l'atteignait pas. Releve en recette du 1er novembre
+   2026 sur l'ecran Comparables : l'etiquette « Votre logement », les boutons
+   de zoom + et − et les noms de communes restaient en Helvetica au milieu
+   d'une page en Plus Jakarta Sans.
+   On vise donc le conteneur ET ce qu'il contient : Leaflet re-declare la
+   police sur certains de ses controles. */
+body.police-v5 .leaflet-container,
+body.police-v5 .leaflet-container :where(a, div, span, button) { font-family: var(--font-v5); }
+
+/* ⚠ LE SELECTEUR DE LOGEMENT N'AVAIT AUCUNE REGLE SUR CINQ ECRANS SUR SIX
+   — releve en recette. `<select id="yp-bien">`, `cp-bien`, `mg-bien`,
+   `mt-bien`, `mc-bien` : apparence brute du navigateur, bord carre et fond
+   gris, a cote d'une page en Plus Jakarta Sans. Seul `yf-bien` portait une
+   largeur minimale.
+   ⚠ ET LA REGLE EST PORTEE PAR `body.police-v5`, PAS PAR `select` TOUT SEUL :
+   cette feuille sert aussi des ecrans anterieurs a V5 que ce lot ne touche
+   pas. Styler tous les `select` du socle legacy les aurait tous changes. */
+body.police-v5 .yf-champ select,
+body.police-v5 .yp-barre select,
+body.police-v5 select[id$="-bien"] {
+  height: 34px; padding: 0 10px;
+  border: 0.5px solid var(--border2); border-radius: var(--radius);
+  background: var(--bg); color: var(--text);
+  font-size: 13px; cursor: pointer; max-width: 100%;
+  /* ⚠ PAS DE `min-width` ICI — relevé en review. J'y avais mis 150px, et ce
+     sélecteur (0,2,2) bat la règle mobile de apps/yield/index.html (0,1,1), qui
+     pose `min-width: 0; width: 100%` sous 640px. Sous ~320px la barre
+     d'exploration retombait à un champ par ligne et les `select` cessaient de
+     se comporter comme les `input` de la même rangée.
+     Cette règle n'apporte que l'APPARENCE ; la taille reste l'affaire de chaque
+     écran, qui la connait mieux qu'une feuille partagée. */
+}
+body.police-v5 select[id$="-bien"]:hover { background: var(--bg2); }
+/* ⚠ PAS DE REGLE DE FOCUS ICI, ET C EST DELIBERE. J y avais ecrit
+   `outline: 2px solid var(--blue)` — or `--blue` N EXISTE PAS sur cette
+   cible : il est pose par le lot `yf-ecran-periodes`, qui est dans `staging`
+   et pas dans `main`. Un `var()` sans repli rend la declaration invalide au
+   calcul : l anneau de focus aurait disparu EN SILENCE, et rien ne l aurait
+   dit. On laisse donc celui du navigateur, qui est toujours la. */
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

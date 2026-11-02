@@ -140,13 +140,20 @@ export async function renderSidebar(activePage = '') {
 function initMobileSidebar(sidebar) {
   if (document.getElementById('sidebar-toggle')) return
 
+  // ⚠ LE ☰ SE PLACE SOUS LE BANDEAU D'ONBOARDING, PAS DESSUS.
+  // `components/onboarding-banner.js` publie sa hauteur MESUREE dans
+  // `--bandeau-h` ; sans bandeau la variable vaut 0 et rien ne bouge.
+  // Avant ce repli, le ☰ (fixed, z-index 1000) passait par-dessus le
+  // bandeau (sticky, z-index 200) et recouvrait « Finalisez la configuration
+  // de votre compte » — recette du 1er novembre 2026, sur telephone,
+  // capture a l'appui.
   const toggle = document.createElement('button')
   toggle.id = 'sidebar-toggle'
   toggle.innerHTML = '☰'
   toggle.style.cssText = `
     display: none;
     position: fixed;
-    top: 14px;
+    top: calc(14px + var(--bandeau-h, 0px));
     left: 14px;
     z-index: 1000;
     background: var(--bg);

@@ -45,16 +45,14 @@ const STYLES = `
     --tc-creux: #E8EEF7; --tc-modere: #B9CCE9; --tc-favorable: #6F97D3; --tc-pic: #1E3F73;
     --tc-creux-txt: #1c2b44; --tc-modere-txt: #1c2b44; --tc-favorable-txt: #1c2b44; --tc-pic-txt: #ffffff;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --tc-creux: #1d2735; --tc-modere: #2c4466; --tc-favorable: #446eae; --tc-pic: #a9c4ef;
-      --tc-creux-txt: #c9d6ea; --tc-modere-txt: #e3ecf8; --tc-favorable-txt: #ffffff; --tc-pic-txt: #0f1d33;
-    }
-  }
-  :root[data-theme="dark"] {
-    --tc-creux: #1d2735; --tc-modere: #2c4466; --tc-favorable: #446eae; --tc-pic: #a9c4ef;
-    --tc-creux-txt: #c9d6ea; --tc-modere-txt: #e3ecf8; --tc-favorable-txt: #ffffff; --tc-pic-txt: #0f1d33;
-  }
+  /* ⚠ VARIANTE SOMBRE RETIREE — double validation de Thierry du 2 novembre
+     2026 : « pas de mode sombre sur YieldFlow pour l'instant ».
+     ELLE INVERSAIT L'ECHELLE, et c'est ce qui l'a condamnee : en preference
+     systeme sombre, « Pic » devenait la case la PLUS CLAIRE (#a9c4ef) et
+     « creux » la plus foncee — le contraire de ce que l'echelle veut dire.
+     Constate en recette le 1er novembre 2026, sur le calendrier du marche.
+     Ce module n'est charge que par apps/yield/marche-temperature.html et
+     apps/yield/marche-global.html : le retrait ne touche que YieldFlow. */
   .tc-legende { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
   .tc-niv { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 3px 10px 3px 3px;
             border: 0.5px solid var(--border); border-radius: 999px; }

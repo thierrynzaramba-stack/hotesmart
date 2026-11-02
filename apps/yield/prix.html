@@ -527,6 +527,23 @@
       .yp-barre { gap: 8px; }
       #yp-bien { flex: 1 1 100%; }
       .yp-niveaux { flex-basis: 100%; max-width: none; }
+      /* ⚠ DEUX DEFAUTS DE LA RECETTE DU 1er NOVEMBRE 2026, ET UNE SEULE CAUSE :
+         la colonne fait ~67 px a 390 px, et le crayon est en position ABSOLUE
+         par-dessus le nom.
+         — « EXCEPTIONNEL » demande 70 px a 9 px majuscules, pour 55,6 px
+           disponibles. Mesure en navigateur reel : il ne tient dans AUCUNE
+           police, ni la police systeme (70,2 px) ni Plus Jakarta Sans
+           (72,2 px). Ce n'est donc pas le changement de police qui l'a coupe
+           — elle est meme plus etroite sur « Tres haut » (50,6 contre 52,6).
+         — Et le crayon mangeait le peu de place restante.
+         Sur telephone, le nom passe donc sur DEUX LIGNES et le crayon rentre
+         dans le flux, sous le prix. Rien n'est tronque, rien ne se recouvre. */
+      .yp-niv { padding-bottom: 2px; }
+      .yp-niv .n { white-space: normal; overflow: visible; text-overflow: clip;
+                   line-height: 1.15; }
+      .yp-niv-edit { position: static; display: block; margin: 2px auto 0;
+                     opacity: .8; }
+      .yp-niv-fixe { line-height: 1.2; }
     }
   </style>
 </head>
