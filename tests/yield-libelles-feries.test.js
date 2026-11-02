@@ -35,6 +35,27 @@ function feriesDuMoteur () {
 let T = null
 test.before(async () => { ({ LIBELLE_FERIE: T } = await import('../shared/yield-libelles-feries.js')) })
 
+test('LE TEST QUI COMPTE : chaque entree porte DEUX chaines, `nom` et `article`', () => {
+  // ⚠⚠ CE TEST EXISTE PARCE QUE LA TABLE A CHANGE DE FORME ET QUE TROIS
+  // ASSERTIONS SONT DEVENUES VIDES SANS ROUGIR. Elles lisaient les valeurs
+  // comme des CHAINES ; depuis que chaque entree est un objet, `String(objet)`
+  // vaut « [object Object] », qui ne matche aucun des motifs — donc les filtres
+  // rendaient toujours une liste vide, et les assertions passaient pour de bon.
+  // Mesure du 2 novembre 2026 : `/^du [aeiou]/i.test(objet)` et
+  // `/\d/.test(objet)` rendent tous deux `false`.
+  //
+  // On exige donc la FORME avant de mesurer le fond : si la table change encore
+  // de structure, c'est ici que ca rougit, pas en silence ailleurs.
+  const fautifs = []
+  for (const [cle, v] of Object.entries(T)) {
+    if (!v || typeof v !== 'object') { fautifs.push(`${cle} : pas un objet`); continue }
+    if (typeof v.nom !== 'string' || !v.nom) fautifs.push(`${cle} : \`nom\` absent ou vide`)
+    if (typeof v.article !== 'string' || !v.article) fautifs.push(`${cle} : \`article\` absent ou vide`)
+  }
+  assert.deepEqual(fautifs, [],
+    'ces entrees n ont pas la forme attendue :\n' + fautifs.join('\n'))
+})
+
 test('LE TEST QUI COMPTE : les onze feries du moteur ont une entree, et aucune entree n est orpheline', () => {
   const noms = feriesDuMoteur()
   const sans = noms.filter((n) => !(n in T))
@@ -64,11 +85,17 @@ test('LE TEST QUI COMPTE : l apostrophe de la cle est celle du MOTEUR, pas la ty
 test('LE TEST QUI COMPTE : aucun « du » devant une voyelle, aucun « Lundi de »', () => {
   // Les deux fautes que la table existe pour empecher, et que Thierry a
   // nommees : « Week-end du Ascension » et « Week-end du Lundi de Paques ».
+  // ⚠ ON LIT `.article`, PAS L'OBJET. Avec `v` tel quel, `String(v)` vaut
+  // « [object Object] » et ce filtre ne trouvait plus jamais rien.
   const devantVoyelle = Object.entries(T)
-    .filter(([, v]) => /^du [aeiouyàâéèêîïôûœh]/i.test(v)).map(([k, v]) => `${k} -> ${v}`)
+    .filter(([, v]) => /^du [aeiouyàâéèêîïôûœh]/i.test(v.article))
+    .map(([k, v]) => `${k} -> ${v.article}`)
   assert.deepEqual(devantVoyelle, [],
     'ces libelles mettent « du » devant une voyelle :\n' + devantVoyelle.join('\n'))
-  const lundi = Object.entries(T).filter(([, v]) => /Lundi/.test(v)).map(([k, v]) => `${k} -> ${v}`)
+  // ⚠ ET SEUL L'ARTICLE PERD LE « Lundi » : la ligne du ferie, elle, garde
+  // « Lundi de Paques » — c'est son nom courant (decision de Thierry).
+  const lundi = Object.entries(T).filter(([, v]) => /Lundi/.test(v.article))
+    .map(([k, v]) => `${k} -> ${v.article}`)
   assert.deepEqual(lundi, [],
     'ces libelles gardent « Lundi » :\n' + lundi.join('\n')
     + '\nOn dit « le week-end de Paques », pas « le week-end du Lundi de Paques ».')
@@ -194,7 +221,8 @@ test('LE TEST QUI COMPTE : la DATE du libelle est celle du ferie, pas celle d un
     + ' sans eux cette mesure ne vaut rien')
   const faux = []
   for (const [iso, nom] of feries) {
-    const libelle = LIBELLE_FERIE[nom]
+    const entree = LIBELLE_FERIE[nom]
+    const libelle = entree && entree.article
     if (!libelle || !/\d/.test(libelle)) continue      // les trois mobiles
     const [, m, j] = iso.split('-')
     const jour = String(Number(j))
@@ -223,26 +251,49 @@ test('LE TEST QUI COMPTE : un nom COMPOSE se traduit entierement, ou pas du tout
     'Week-end — Ascension et Machin 1999')
 })
 
-test('LE TEST QUI COMPTE : les noms composes de la FENETRE SERVIE sont tous traduits', async () => {
-  // ⚠ CELUI-CI NE RAISONNE PAS, IL REGARDE : on demande au moteur les
-  // week-ends prolonges de la fenetre que l'endpoint sert (aujourd'hui -> +1 an,
-  // api/yield-evenements.js) et on exige que CHACUN ait un titre traduit.
-  // C'est ce qui aurait attrape le defaut sans qu'une review le trouve.
-  const { weekEndsProlonges } = require('../lib/yield/reference.js')
-  const { titreWeekEnd } = await import('../shared/yield-libelles-feries.js')
+test('LE TEST QUI COMPTE : sur la FENETRE SERVIE, aucun nom interne n atteint l ecran', async () => {
+  // ⚠⚠ CELUI-CI NE RAISONNE PAS, IL REGARDE. On demande au moteur ce qu'il
+  // posera sur la fenetre que l'endpoint sert vraiment (aujourd'hui -> +1 an,
+  // api/yield-evenements.js) et on exige que CHACUN des trois chemins rende un
+  // libelle traduit. C'est ce qui aurait attrape, sans review :
+  //   — « Week-end — Ascension et Victoire 1945 » (noms joints par « et ») ;
+  //   — « Armistice 1918 » sur la ligne du ferie ;
+  //   — « pont Armistice 1918 » sur la ligne du pont.
+  //
+  // ⚠ ET IL COUVRE LES TROIS, parce que couvrir un seul chemin donnait un test
+  // dont le TITRE promettait « a l ecran » alors qu'il ne mesurait qu'un tiers.
+  const { titreWeekEnd, titreFerie, titrePont } = await import('../shared/yield-libelles-feries.js')
+  const { pontsEntre, weekEndsProlonges } = require('../lib/yield/reference.js')
+  const { joursFeriesEntre } = require('../lib/yield/jours-feries.js')
   const auj = new Date().toISOString().slice(0, 10)
   const fin = new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10)
+
+  const feries = joursFeriesEntre(auj, fin)
+  const ponts = pontsEntre(auj, fin)
   const we = weekEndsProlonges(auj, fin)
-  assert.ok(we && we.size > 0,
-    `aucun week-end prolonge sur ${auj} -> ${fin} : la mesure ne vaut rien`)
-  const retombes = []
+  // ⚠ NON-VACUITE SUR LES TROIS : une Map vide satisferait tout ce qui suit.
+  assert.ok(feries && feries.size >= 10, `feries sur ${auj} -> ${fin} : ${feries ? feries.size : 0}`)
+  assert.ok(ponts && ponts.size > 0, `ponts sur ${auj} -> ${fin} : ${ponts ? ponts.size : 0}`)
+  assert.ok(we && we.size > 0, `week-ends prolonges sur ${auj} -> ${fin} : ${we ? we.size : 0}`)
+
+  const fautifs = []
+  for (const nom of new Set(feries.values())) {
+    const t = titreFerie(nom)
+    if (!t) fautifs.push(`FERIE   « ${nom} » -> aucun libelle, l ecran garde le nom interne`)
+  }
+  for (const nom of new Set(ponts.values())) {
+    const t = titrePont(nom)
+    if (!t) fautifs.push(`PONT    « pont ${nom} » -> aucun libelle, l ecran garde le nom interne`)
+  }
   for (const nom of new Set(we.values())) {
     const t = titreWeekEnd(nom)
-    if (!t || t.includes('—')) retombes.push(`${nom} -> ${t}`)
+    if (!t || t.includes('—')) fautifs.push(`WEEKEND « ${nom} » -> « ${t} », le repli`)
   }
-  assert.deepEqual(retombes, [],
-    `ces noms de la fenetre servie (${auj} -> ${fin}) retombent sur le repli :\n`
-    + retombes.join('\n'))
+  assert.deepEqual(fautifs, [],
+    `sur la fenetre servie (${auj} -> ${fin}), ces libelles laissent passer un nom`
+    + ' INTERNE a l ecran :\n' + fautifs.join('\n')
+    + '\n\nAjoute leur entree dans shared/yield-libelles-feries.js, avec ses deux'
+    + ' formes (`nom` et `article`).')
 })
 
 test('LE CONTRE-CONTROLE : le repli existe toujours, et il se voit', async () => {

@@ -643,7 +643,7 @@
   import { motif, nomSegment, refus } from '/shared/yield-motifs.js'
   import { api as apiClient } from '/shared/api-client.js'
   import { composerJours, celluleDepart, detailDepart, motifNonCalcule } from '/shared/prix-depart-jours.js'
-  import { titreWeekEnd } from '/shared/yield-libelles-feries.js'
+  import { titreWeekEnd, titreFerie, titrePont } from '/shared/yield-libelles-feries.js'
 
   initErrorHandler()
 
@@ -2149,7 +2149,19 @@
   // Thierry du 2 novembre 2026, table unique dans
   // shared/yield-libelles-feries.js — avec son article ecrit a la main, parce
   // qu'une regle d'elision automatique aurait rendu « Week-end du Paques ».
-  const nomAffiche = (e) => e.ferie_voisin ? titreWeekEnd(e.ferie_voisin) : e.nom
+  const nomAffiche = (e) => {
+    if (e.ferie_voisin) return titreWeekEnd(e.ferie_voisin)
+    // ⚠ LA LIGNE DU PONT PORTE « pont <nom interne> » — `lib/yield/reference.js`
+    // pose `libelle: \`pont ${ponts.get(iso)}\``. On retire le prefixe pour
+    // retrouver le nom, et on recompose avec l'article de la table.
+    const pont = /^pont (.+)$/.exec(e.nom || '')
+    if (pont) return titrePont(pont[1]) || e.nom
+    // ⚠ ET SI CE N'EST PAS UN FERIE, ON NE TOUCHE A RIEN. `titreFerie` rend
+    // `null` sur tout nom absent de la table : c'est ce qui protege les lignes
+    // de vacances, dont le libelle (« Vacances de la Toussaint — votre zone »)
+    // ressemble a un ferie sans en etre un.
+    return titreFerie(e.nom) || e.nom
+  }
   // Ce que l'hote a commence a taper dans le formulaire d'ajout. Il survit a
   // un refus, et seulement a lui : un ajout reussi le vide.
   let brouillonAjout = { ouvert: false, nom: '', debut: '', fin: '', rec: '', parent: '' }

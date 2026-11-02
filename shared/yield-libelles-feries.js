@@ -23,58 +23,84 @@
 // « 11 novembre ».
 
 // Clé = le nom interne, tel que `lib/yield/jours-feries.js` le pose.
-// Valeur = ce qui suit « Week-end », article compris.
+// Deux formes par férié, écrites à la main toutes les deux :
+//   `nom`     — le nom courant SANS article, pour la ligne du férié ;
+//   `article` — ce qui suit « Week-end » ou « Pont ».
+//
+// ⚠ ET LES DEUX DIFFÈRENT POUR LES TROIS MOBILES, par décision de Thierry du
+// 2 novembre 2026 : la ligne du férié garde « Lundi de Pâques » (c'est son nom
+// courant), tandis que le week-end dit « de Pâques » — on ne dit pas « le
+// week-end du Lundi de Pâques ». L'un ne se dérive donc pas de l'autre, et
+// c'est pourquoi les deux sont écrits.
 export const LIBELLE_FERIE = {
   // Les huit à date fixe : leur date EST leur nom courant.
-  // ⚠ APOSTROPHE DROITE DANS LA CLE, ET CE N'EST PAS UN DETAIL.
-  // `lib/yield/jours-feries.js` pose 'Jour de l\'An' avec U+0027. Ecrite en
-  // apostrophe typographique (U+2019), la cle ne matchait JAMAIS, et le repli
-  // rendait « Week-end — Jour de l'An » sans que rien ne rougisse. Trouve en
+  // ⚠ APOSTROPHE DROITE DANS LA CLÉ, ET CE N'EST PAS UN DÉTAIL.
+  // `lib/yield/jours-feries.js` pose 'Jour de l\'An' avec U+0027. Écrite en
+  // apostrophe typographique (U+2019), la clé ne matchait JAMAIS, et le repli
+  // rendait « Week-end — Jour de l'An » sans que rien ne rougisse. Trouvé en
   // confrontant la table aux noms du moteur, octet par octet.
-  // La valeur AFFICHEE, elle, garde la typographie juste : « de l’Ascension ».
-  'Jour de l\'An': 'du 1er janvier',
-  'Fête du Travail': 'du 1er mai',
-  'Victoire 1945': 'du 8 mai',
-  'Fête nationale': 'du 14 juillet',
-  'Assomption': 'du 15 août',
-  'Toussaint': 'du 1er novembre',
-  'Armistice 1918': 'du 11 novembre',
-  'Noël': 'du 25 décembre',
-  // Les trois mobiles : pas de date, et pas de « Lundi ».
-  'Lundi de Pâques': 'de Pâques',
-  'Ascension': 'de l’Ascension',
-  'Lundi de Pentecôte': 'de la Pentecôte'
+  // La valeur AFFICHÉE, elle, garde la typographie juste : « de l’Ascension ».
+  'Jour de l\'An': { nom: '1er janvier', article: 'du 1er janvier' },
+  'Fête du Travail': { nom: '1er mai', article: 'du 1er mai' },
+  'Victoire 1945': { nom: '8 mai', article: 'du 8 mai' },
+  'Fête nationale': { nom: '14 juillet', article: 'du 14 juillet' },
+  'Assomption': { nom: '15 août', article: 'du 15 août' },
+  'Toussaint': { nom: '1er novembre', article: 'du 1er novembre' },
+  'Armistice 1918': { nom: '11 novembre', article: 'du 11 novembre' },
+  'Noël': { nom: '25 décembre', article: 'du 25 décembre' },
+  // Les trois mobiles : pas de date. Leur nom courant EST leur nom, et seul
+  // l'article perd le « Lundi ».
+  'Lundi de Pâques': { nom: 'Lundi de Pâques', article: 'de Pâques' },
+  'Ascension': { nom: 'Ascension', article: 'de l’Ascension' },
+  'Lundi de Pentecôte': { nom: 'Lundi de Pentecôte', article: 'de la Pentecôte' }
 }
 
 /**
- * Le titre d'un week-end prolongé, à partir du nom INTERNE du férié voisin.
+ * Compose un libellé à partir du nom INTERNE, qui peut en joindre plusieurs.
  *
  * ⚠⚠ LE NOM PEUT EN JOINDRE PLUSIEURS, ET C'EST LE CAS AUJOURD'HUI.
- * `lib/yield/reference.js` joint par « et » tous les fériés d'une même chaîne :
- * `suite.filter(ferie).map(j => feries.get(j)).join(' et ')`. Cette clé
- * composée n'a par construction aucune entrée dans la table.
+ * `lib/yield/reference.js` joint par « et » tous les fériés d'une même chaîne.
+ * Mesuré sur la fenêtre servie le 2 novembre 2026 (→ 2027-11-02) :
+ * « Ascension et Victoire 1945 », pour le week-end du 9 mai 2027. Récurrence
+ * 2026-2045 : huit années, dont 2035 avec TROIS fériés joints.
  *
- * Relevé en review le 2 novembre 2026, et MESURÉ sur la fenêtre servie ce
- * jour-là (2026-11-02 → 2027-11-02) : « Ascension et Victoire 1945 » y est,
- * pour le week-end du 9 mai 2027. J'avais décrit le repli comme une « sortie
- * de secours pour un férié inconnu » — il était emprunté DÈS MAINTENANT, et il
- * rendait « Week-end — Ascension et Victoire 1945 », c'est-à-dire exactement
- * les noms internes que ce lot existe pour écarter. Récurrence mesurée
- * 2026-2045 : 2027, 2029, 2030, 2032, 2035 (trois fériés), 2040, 2041, 2043.
- *
- * On découpe donc sur « et » et on compose chaque part : « de l’Ascension et
- * du 8 mai ». ⚠ ET SI UNE SEULE PART EST INCONNUE, TOUT RETOMBE SUR LE REPLI :
- * une phrase à moitié traduite — « de l’Ascension et Machin 1999 » — serait
- * pire qu'une phrase honnêtement non traduite, parce qu'elle aurait l'air juste.
- *
- * ⚠ LE REPLI RESTE, et il garde son rôle : un férié ajouté un jour, ou une
- * forme de jointure qui changerait. On rend le nom tel quel, précédé d'un tiret
- * cadratin : moins joli, mais ça ne ment pas et ça se voit.
+ * ⚠ TOUT OU RIEN : si une seule part est inconnue, on rend `null` et l'appelant
+ * retombe sur le nom interne. Une phrase à moitié traduite — « de l’Ascension
+ * et Machin 1999 » — serait pire qu'une phrase honnêtement non traduite, parce
+ * qu'elle aurait l'air juste.
+ */
+function composer (nomInterne, champ, prefixe) {
+  if (!nomInterne) return null
+  const parts = String(nomInterne).split(' et ').map((p) => (LIBELLE_FERIE[p] || {})[champ])
+  if (parts.some((x) => !x)) return null
+  const suite = parts.join(' et ')
+  return prefixe ? `${prefixe} ${suite}` : suite
+}
+
+/**
+ * Le titre d'un week-end prolongé. Garde son repli : un férié inconnu, ou une
+ * forme de jointure qui changerait, rend le nom tel quel précédé d'un tiret
+ * cadratin — moins joli, mais ça ne ment pas et ça se voit.
  */
 export function titreWeekEnd (nomInterne) {
   if (!nomInterne) return null
-  const parts = String(nomInterne).split(' et ')
-  const suites = parts.map((p) => LIBELLE_FERIE[p])
-  if (suites.some((x) => !x)) return `Week-end — ${nomInterne}`
-  return `Week-end ${suites.join(' et ')}`
+  return composer(nomInterne, 'article', 'Week-end') || `Week-end — ${nomInterne}`
+}
+
+/**
+ * La ligne du FÉRIÉ lui-même : le nom courant, sans article.
+ * ⚠ REND `null` SI LE NOM N'EST PAS UN FÉRIÉ, et c'est volontaire : l'appelant
+ * garde alors son libellé intact. C'est ce qui protège les lignes de vacances
+ * — « Vacances de la Toussaint — votre zone » n'est pas « Toussaint ».
+ */
+export function titreFerie (nomInterne) {
+  return composer(nomInterne, 'nom', null)
+}
+
+/**
+ * La ligne du PONT : « Pont » suivi de l'article de la table.
+ * ⚠ REND `null` SI LE NOM N'EST PAS UN FÉRIÉ, comme ci-dessus.
+ */
+export function titrePont (nomInterne) {
+  return composer(nomInterne, 'article', 'Pont')
 }

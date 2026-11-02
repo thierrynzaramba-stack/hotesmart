@@ -250,10 +250,18 @@ test('LE TEST QUI COMPTE : un week-end prolonge porte son nom REEL, et une seule
   // « Week-end du Armistice 1918 » — le nom INTERNE du ferie, faux en francais
   // et etranger a l'hote. Decision de Thierry : une table de libelles
   // d'affichage, a un seul endroit, et le moteur intact.
-  assert.match(src, /const nomAffiche = \(e\) => e\.ferie_voisin \? titreWeekEnd\(e\.ferie_voisin\) : e\.nom/,
-    'le nom affiche se decide en UN endroit, et il passe par la table de libelles')
-  assert.match(src, /import \{ titreWeekEnd \} from '\/shared\/yield-libelles-feries\.js'/,
-    'la table vient du module partage, pas d une copie locale')
+  // ⚠ LES TROIS CHEMINS PASSENT PAR LA TABLE depuis le 2 novembre 2026 : la
+  // ligne du week-end, celle du ferie, et celle du pont. Avant, seule la
+  // premiere etait traduite, et l hote lisait « Armistice 1918 » et « pont
+  // Armistice 1918 » juste a cote de « Week-end du 11 novembre ».
+  assert.match(src, /if \(e\.ferie_voisin\) return titreWeekEnd\(e\.ferie_voisin\)/,
+    'la ligne du week-end passe par la table')
+  assert.match(src, /return titrePont\(pont\[1\]\) \|\| e\.nom/,
+    'la ligne du pont aussi, avec repli sur le libelle d origine')
+  assert.match(src, /return titreFerie\(e\.nom\) \|\| e\.nom/,
+    'et la ligne du ferie, sans toucher aux lignes de vacances')
+  assert.match(src, /import \{ titreWeekEnd, titreFerie, titrePont \} from '\/shared\/yield-libelles-feries\.js'/,
+    'les trois viennent du module partage, pas d une copie locale')
   // ⚠ ET LA REGLE NE SE RECOMPOSE PAS A LA MAIN A COTE. Une seconde
   // interpolation `Week-end du ${…}` serait une copie qui divergerait.
   assert.doesNotMatch(src, /`Week-end du \$\{/,
