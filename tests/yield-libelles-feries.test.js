@@ -87,8 +87,10 @@ test('LE TEST QUI COMPTE : aucun « du » devant une voyelle, aucun « Lundi de 
   // nommees : « Week-end du Ascension » et « Week-end du Lundi de Paques ».
   // ⚠ ON LIT `.article`, PAS L'OBJET. Avec `v` tel quel, `String(v)` vaut
   // « [object Object] » et ce filtre ne trouvait plus jamais rien.
+  // ⚠ « du » ET « de » : relevé en review. Ne regarder que `^du` laissait
+  // passer `'Ascension': { article: 'de Ascension' }` — il faut « de l’ ».
   const devantVoyelle = Object.entries(T)
-    .filter(([, v]) => /^du [aeiouyàâéèêîïôûœh]/i.test(v.article))
+    .filter(([, v]) => /^(?:du|de) [aeiouyàâéèêîïôûœh]/i.test(v.article))
     .map(([k, v]) => `${k} -> ${v.article}`)
   assert.deepEqual(devantVoyelle, [],
     'ces libelles mettent « du » devant une voyelle :\n' + devantVoyelle.join('\n'))
@@ -138,33 +140,16 @@ test('LE TEST QUI COMPTE : le MOTEUR n est pas touche — les cles internes sont
 })
 
 test("LE TEST QUI COMPTE : aucun ferie ne retombe sur son nom interne DANS LE TITRE DE WEEK-END", async () => {
-  // ⚠⚠ LE TITRE DE CE TEST A ETE RESTREINT EN REVIEW, PARCE QU'IL PROMETTAIT
-  // PLUS QUE CE QU'IL TIENT. Il s'appelait « aucun ferie du moteur ne retombe
-  // sur son nom interne A L'ECRAN » — or il ne mesure que le chemin
-  // `titreWeekEnd`, c'est-a-dire la seule ligne « week-end prolonge ».
+  // ⚠ LE TITRE DE CE TEST EST RESTREINT A CE QU'IL GARDE : le chemin
+  // `titreWeekEnd`, c'est-a-dire la seule ligne « week-end prolonge ». Il
+  // s'appelait « … A L'ECRAN », ce qui promettait les trois chemins alors
+  // qu'il n'en mesurait qu'un. Un titre qui promet trop est un faux vert a lui
+  // tout seul.
   //
-  // ⚠ ET DEUX AUTRES CHEMINS GARDENT LE NOM INTERNE, MESURES SUR LA FENETRE
-  // SERVIE : la ligne du FERIE lui-meme (`lib/yield/reference.js` pose
-  // `libelle: feries.get(iso)`, donc « Armistice 1918 ») et la ligne du PONT
-  // (`libelle: \`pont ${ponts.get(iso)}\`», donc « pont Armistice 1918 »).
-  // L'hote lit donc « Armistice 1918 » et « pont Armistice 1918 » juste a cote
-  // de « Week-end du 11 novembre ».
-  //
-  // Les etendre est une DECISION PRODUIT, pas une correction : Thierry a
-  // demande la regle « Week-end du <nom courant> », pas le renommage des
-  // lignes de ferie et de pont. Elle lui est posee. En attendant, ce titre dit
-  // ce que ce test garde, et rien de plus : un titre qui promet trop est un
-  // faux vert a lui tout seul.
-  // ⚠ C'EST LA GARDE QUE THIERRY A DEMANDEE, et elle ne lit pas le code : elle
-  // l'EXECUTE. `titreWeekEnd` a un repli — « Week-end — <nom interne> » — qui
-  // existe pour ne pas casser la phrase sur un ferie inconnu ou sur deux feries
-  // joints par « et ». Ce repli est une SORTIE DE SECOURS : si un ferie du
-  // moteur l'emprunte, c'est que la table a vieilli, et l'hote lit
-  // « Week-end — Armistice 1918 » au lieu de « Week-end du 11 novembre ».
-  //
-  // ⚠ UN TEST QUI SE CONTENTERAIT DE COMPARER LES CLES NE VERRAIT PAS CA : une
-  // cle presente mais avec une valeur vide, ou un repli qui changerait de
-  // forme, passeraient. On verifie donc le TEXTE RENDU, ferie par ferie.
+  // Les trois chemins sont couverts par « sur la FENETRE SERVIE, aucun nom
+  // interne n'atteint l'ecran », plus bas. (Les lignes du ferie et du pont
+  // etaient encore en nom interne au 2 novembre au matin ; elles ont ete
+  // traduites le meme jour, sur decision de Thierry.)
   const { titreWeekEnd } = await import('../shared/yield-libelles-feries.js')
   // ⚠ ON RECONNAIT LE REPLI A SON TIRET, PAS A LA PRESENCE DU NOM INTERNE.
   // Ma premiere version testait `titre.includes(nom)` et rougissait sur
@@ -175,17 +160,25 @@ test("LE TEST QUI COMPTE : aucun ferie ne retombe sur son nom interne DANS LE TI
   // (`'Ascension': 'Ascension'`) passerait le seul test du tiret, et rendrait
   // « Week-end Ascension ». Les quatre formes valides sont « du », « de »,
   // « de l’ » et « de la ».
-  // ⚠ CE MOTIF A ETE CORRIGE EN REVIEW, ET IL ETAIT FAUX DE DEUX FACONS.
-  // Il s'ecrivait `/^Week-end (du |de |de l’|de la )/` : toute chaine
-  // commencant par « de l’ » ou « de la » commence DEJA par « de », donc les
-  // deux dernieres alternatives etaient mortes et le controle reel valait
-  // « du » OU « de ». Consequence mesuree : `'Armistice 1918': 'de Armistice
-  // 1918'` passait.
-  // Et il ne demandait RIEN APRES L'ARTICLE : `'Toussaint': 'du '` passait les
-  // sept tests en rendant « Week-end du », alors qu'un commentaire d'ici
-  // annoncait qu'une valeur vide serait vue.
-  // Maintenant : l'article est ancre, et il doit etre suivi de quelque chose.
-  const FORME = /^Week-end (?:du|de|de l’|de la) \S|^Week-end de l’\S/
+  // ⚠⚠ CE MOTIF A ETE CORRIGE DEUX FOIS, ET LA SECONDE CORRECTION EST LA
+  // LECON. Il s'ecrivait d'abord `/^Week-end (du |de |de l’|de la )/` : toute
+  // chaine commencant par « de l’ » commence deja par « de », donc les deux
+  // dernieres alternatives etaient MORTES.
+  //
+  // Ma « correction » suivante gardait le defaut : j'avais mis les formes
+  // courtes en premier et ajoute une branche `|^Week-end de l’\S` qui ne
+  // pouvait jamais etre atteinte. Mesure de la review :
+  // `FORME.test('Week-end de Armistice 1918')` rendait `true` — exactement le
+  // cas que mon propre commentaire donnait comme refuse.
+  //
+  // MAINTENANT : les formes LONGUES d'abord, et un controle separe de
+  // l'elision, parce qu'un motif unique ne sait pas dire « de » est juste
+  // devant une consonne et faux devant une voyelle.
+  // ⚠ ET IL A FALLU UNE ANTICIPATION NEGATIVE, TROUVEE EN MESURANT.
+  // Meme formes longues d'abord, « Week-end de l’ » passait ENCORE : la
+  // branche `de ` avalait le « l’ » comme contenu. Chaque alternative porte
+  // donc sa propre exigence de contenu, et `de ` refuse d'etre suivi de « l’ ».
+  const FORME = /^Week-end (?:du \S|de la \S|de l’\S|de (?!l’)\S)/
   const retombes = []
   for (const nom of feriesDuMoteur()) {
     const titre = titreWeekEnd(nom)
@@ -227,7 +220,12 @@ test('LE TEST QUI COMPTE : la DATE du libelle est celle du ferie, pas celle d un
     const [, m, j] = iso.split('-')
     const jour = String(Number(j))
     const attendu = `${jour === '1' ? '1er' : jour} ${MOIS[Number(m) - 1]}`
-    if (sansAccent(libelle) !== `du ${attendu}`) faux.push(`${nom} (${iso}) -> « ${libelle} », attendu « du ${attendu} »`)
+    if (sansAccent(libelle) !== `du ${attendu}`) faux.push(`${nom} (${iso}) article « ${libelle} », attendu « du ${attendu} »`)
+    // ⚠ ET `nom` AUSSI, et c'est un constat de review. Ce test ne mesurait que
+    // `.article` : la mutation `'Toussaint': { nom: '15 août', … }` laissait
+    // 11 verts. Or `nom` est precisement le champ que ce lot ajoute, et celui
+    // que la ligne du ferie AFFICHE.
+    if (sansAccent(entree.nom) !== attendu) faux.push(`${nom} (${iso}) nom « ${entree.nom} », attendu « ${attendu} »`)
   }
   assert.deepEqual(faux, [],
     'ces libelles ne portent pas la date du ferie :\n' + faux.join('\n')

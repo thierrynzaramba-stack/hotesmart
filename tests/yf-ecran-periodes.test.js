@@ -256,10 +256,17 @@ test('LE TEST QUI COMPTE : un week-end prolonge porte son nom REEL, et une seule
   // Armistice 1918 » juste a cote de « Week-end du 11 novembre ».
   assert.match(src, /if \(e\.ferie_voisin\) return titreWeekEnd\(e\.ferie_voisin\)/,
     'la ligne du week-end passe par la table')
-  assert.match(src, /return titrePont\(pont\[1\]\) \|\| e\.nom/,
-    'la ligne du pont aussi, avec repli sur le libelle d origine')
-  assert.match(src, /return titreFerie\(e\.nom\) \|\| e\.nom/,
-    'et la ligne du ferie, sans toucher aux lignes de vacances')
+  // ⚠ ET LE ROUTAGE SE FAIT PAR LE SEGMENT, PAS PAR LA FORME DU TEXTE — releve
+  // en review. Se fier a l absence de la table ne distingue pas l ORIGINE : un
+  // evenement de l hote nomme « Noel » se serait affiche « 25 decembre ». Et
+  // un prefixe `/^pont /` lu sur du texte attrape les lignes « Pont de
+  // l'Ascension » du calendrier scolaire, que seule la casse epargnait.
+  assert.match(src, /if \(officiel && e\.segment === 'ferie'\) return titreFerie\(e\.nom\) \|\| e\.nom/,
+    'la ligne du ferie se reconnait a son SEGMENT et a son origine officielle')
+  assert.match(src, /if \(officiel && e\.segment === 'pont'\)/,
+    'la ligne du pont aussi')
+  assert.match(src, /const officiel = e\.origine === 'officiel'/,
+    'et l origine officielle protege les evenements de l hote')
   assert.match(src, /import \{ titreWeekEnd, titreFerie, titrePont \} from '\/shared\/yield-libelles-feries\.js'/,
     'les trois viennent du module partage, pas d une copie locale')
   // ⚠ ET LA REGLE NE SE RECOMPOSE PAS A LA MAIN A COTE. Une seconde

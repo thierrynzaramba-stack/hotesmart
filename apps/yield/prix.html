@@ -2150,17 +2150,39 @@
   // shared/yield-libelles-feries.js — avec son article ecrit a la main, parce
   // qu'une regle d'elision automatique aurait rendu « Week-end du Paques ».
   const nomAffiche = (e) => {
+    // ⚠⚠ ON ROUTE PAR LE SEGMENT, PAS PAR LA FORME DU TEXTE — relevé en review
+    // le 2 novembre 2026, deux constats pour une seule cause.
+    //
+    // Ma première version appelait `titreFerie(e.nom)` sur TOUTE ligne et se
+    // fiait à l'absence de la table pour s'arrêter. Or l'absence ne distingue
+    // pas l'origine : un hôte peut nommer son événement « Noël » (80 caractères
+    // libres, `lib/yield/evenements.js`), et sa ligne se serait affichée
+    // « 25 décembre » au-dessus de « 20 → 31 décembre », pendant que la bande
+    // de reconduction et le `confirm` de suppression disaient toujours
+    // « Noël » : deux noms pour la même période.
+    //
+    // Et `/^pont (.+)$/` lisait un PRÉFIXE DE TEXTE. Le calendrier scolaire
+    // porte littéralement des lignes « Pont de l'Ascension »
+    // (`lib/marche/marche-global.js` les filtre par `/^pont/i`, avec le drapeau
+    // `i`, parce que la casse du ministère n'est pas garantie) : seule ma
+    // sensibilité à la casse l'épargnait. Un « pont Toussaint » tapé par l'hôte
+    // passait, lui.
+    //
+    // Les discriminants étaient dans le payload depuis le début : `e.segment`
+    // vaut `ferie`, `pont`, `week_end_prolonge`… et `e.origine` vaut
+    // `officiel`, `calendrier` ou `declare`. On s'en sert.
+    const officiel = e.origine === 'officiel'
     if (e.ferie_voisin) return titreWeekEnd(e.ferie_voisin)
-    // ⚠ LA LIGNE DU PONT PORTE « pont <nom interne> » — `lib/yield/reference.js`
-    // pose `libelle: \`pont ${ponts.get(iso)}\``. On retire le prefixe pour
-    // retrouver le nom, et on recompose avec l'article de la table.
-    const pont = /^pont (.+)$/.exec(e.nom || '')
-    if (pont) return titrePont(pont[1]) || e.nom
-    // ⚠ ET SI CE N'EST PAS UN FERIE, ON NE TOUCHE A RIEN. `titreFerie` rend
-    // `null` sur tout nom absent de la table : c'est ce qui protege les lignes
-    // de vacances, dont le libelle (« Vacances de la Toussaint — votre zone »)
-    // ressemble a un ferie sans en etre un.
-    return titreFerie(e.nom) || e.nom
+    if (officiel && e.segment === 'ferie') return titreFerie(e.nom) || e.nom
+    if (officiel && e.segment === 'pont') {
+      // Le libellé du pont est `pont <nom interne>` (lib/yield/reference.js).
+      // Le découpage est sûr ICI, et seulement ici : on sait que c'en est un.
+      const m = /^pont\s+(.+)$/.exec(e.nom || '')
+      return (m && titrePont(m[1])) || e.nom
+    }
+    // Tout le reste — vacances, dates commerciales, événements de l'hôte —
+    // garde son libellé, quel qu'il soit.
+    return e.nom
   }
   // Ce que l'hote a commence a taper dans le formulaire d'ajout. Il survit a
   // un refus, et seulement a lui : un ajout reussi le vide.
