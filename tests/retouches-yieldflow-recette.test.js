@@ -95,10 +95,24 @@ test('LE TEST QUI COMPTE : plus aucune regle de mode sombre sur YieldFlow', () =
     .concat(['shared/temperature-calendrier.js'])
   const fautifs = []
   for (const f of fichiers) {
-    // Les commentaires expliquent le retrait : on ne compte que les REGLES.
-    const code = lire(f).split('\n')
-      .filter((l) => !/^\s*(\/\/|\*|\/\*|\s*\*)/.test(l)).join('\n')
-      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    // ⚠ LES COMMENTAIRES EXPLIQUENT LE RETRAIT : on ne compte que les REGLES.
+    //
+    // ⚠ ET LE DEPOUILLEMENT SE FAIT EN UN SEUL GESTE, PAS EN DEUX — faux vert
+    // DEMONTRE en review. Ma premiere version filtrait d'abord les lignes
+    // commencant par `//`, `*` ou `/*`, PUIS retirait les blocs : le filtre
+    // emportait les DELIMITEURS, donc le `replace` suivant ne pouvait plus les
+    // apparier. Mesure par injection dans marche-global.html : un commentaire
+    // ouvert en fin de ligne et referme par un `*/` seul sur sa ligne faisait
+    // avaler au motif paresseux tout ce qui suivait — une regle
+    // `@media (prefers-color-scheme: dark)` BIEN PRESENTE etait alors declaree
+    // absente, et le bloc suivant disparaissait du texte analyse.
+    //
+    // ⚠ CE TEST EST LE SEUL GARDE-FOU D'UNE DECISION QUI EXIGE LA DOUBLE
+    // VALIDATION DE THIERRY. Un faux vert ici veut dire qu'un mode sombre peut
+    // revenir par morceaux sans que rien ne rougisse. Les deux tests freres
+    // (marche-temperature-page, temperature-calendrier-dom) le font d'un seul
+    // geste ; celui-ci s'aligne sur eux.
+    const code = lire(f).replace(/\/\*[\s\S]*?\*\//g, ' ')
     if (/@media[^{]*prefers-color-scheme:\s*dark|:root\[data-theme="dark"\]/.test(code)) fautifs.push(f)
   }
   assert.deepEqual(fautifs, [],

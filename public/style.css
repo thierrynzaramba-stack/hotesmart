@@ -61,15 +61,22 @@
      CLAIR, et seulement là. Un fond foncé ajouté un jour demanderait sa
      couleur de texte avec lui.
 
-     ⚠ ET IL EXISTE DÉJÀ UN CAS OÙ C'EST FAUX, préexistant à ce lot et relevé
-     en review : apps/yield/marche-global.html redéfinit quatre de ces fonds
-     sous `prefers-color-scheme: dark` (#1d2a36 … #3a2717) alors que cette
-     feuille n'a AUCUN bloc sombre. Son `.mg-niv-l` peint donc --text (#1a1a1a)
-     sur un fond sombre : contraste ≈ 1,1:1, les quatre lignes de « En résumé »
-     y sont illisibles. Ce lot ne l'aggrave pas (--yf-exceptionnel reste inutilisé
-     là-bas) mais la première règle qui s'en servira sur cet écran ajoutera un
-     cinquième cas. Fermer ce sombre change l'apparence d'un écran validé :
-     double validation de Thierry. Voir docs/kb/charte-ui.md §5. */
+     ⚠ IL A EXISTÉ UN CAS OÙ C'ÉTAIT FAUX, ET IL EST FERMÉ DEPUIS LE
+     2 NOVEMBRE 2026. apps/yield/marche-global.html redéfinissait quatre de ces
+     fonds sous `prefers-color-scheme: dark` alors que cette feuille n'a aucun
+     bloc sombre : son `.mg-niv-l` peignait --text (#1a1a1a) par-dessus,
+     contraste ≈ 1,1:1, et les quatre lignes de « En résumé » étaient
+     illisibles chez tout hôte en préférence système sombre. Constaté en
+     recette le 1er novembre 2026.
+     Sur double validation de Thierry — « pas de mode sombre sur YieldFlow pour
+     l'instant » — les trois blocs sombres de YieldFlow sont partis, et
+     tests/retouches-yieldflow-recette.test.js garde leur ABSENCE. La phrase
+     ci-dessus vaut donc sans exception : les cinq fonds sont pâles, les six
+     écrans sont clairs.
+     ⚠ Et cette correction est elle-même un constat de review : le commentaire
+     disait encore « fermer ce sombre demande la double validation de Thierry »
+     dans le commit qui venait de le fermer. Une phrase périmée se lit comme une
+     mesure et ne rougit jamais. Voir docs/kb/charte-ui.md §5. */
   --yf-base: #E7F0F7;          --yf-base-l: #4A7FA8;
   --yf-moyen: #EDF4EE;         --yf-moyen-l: #5F8F6E;
   --yf-haut: #FBF4E2;          --yf-haut-l: #C89A2E;
@@ -128,7 +135,14 @@ body.police-v5 select[id$="-bien"] {
   height: 34px; padding: 0 10px;
   border: 0.5px solid var(--border2); border-radius: var(--radius);
   background: var(--bg); color: var(--text);
-  font-size: 13px; cursor: pointer; min-width: 150px; max-width: 100%;
+  font-size: 13px; cursor: pointer; max-width: 100%;
+  /* ⚠ PAS DE `min-width` ICI — relevé en review. J'y avais mis 150px, et ce
+     sélecteur (0,2,2) bat la règle mobile de apps/yield/index.html (0,1,1), qui
+     pose `min-width: 0; width: 100%` sous 640px. Sous ~320px la barre
+     d'exploration retombait à un champ par ligne et les `select` cessaient de
+     se comporter comme les `input` de la même rangée.
+     Cette règle n'apporte que l'APPARENCE ; la taille reste l'affaire de chaque
+     écran, qui la connait mieux qu'une feuille partagée. */
 }
 body.police-v5 select[id$="-bien"]:hover { background: var(--bg2); }
 /* ⚠ PAS DE REGLE DE FOCUS ICI, ET C EST DELIBERE. J y avais ecrit
