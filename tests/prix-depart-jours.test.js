@@ -106,7 +106,14 @@ test('LE TEST QUI COMPTE (recette du 6 octobre 2026) : un seul vocabulaire a l e
   assert.equal(r.get('2026-11-06').prix, 180)
   const teintes = { Base: 'n-base', Moyen: 'n-moyen', Haut: 'n-haut', 'Très haut': 'n-tres-haut', Exceptionnel: 'n-exceptionnel' }
   for (const x of r.values()) assert.doesNotMatch(M.celluleDepart(x, teintes) + M.detailDepart(x), /Creux|Modéré|Favorable|Pic/)
+  // ⚠ SANS LA TABLE DES CHIFFRES, LE NOM SORT NU — et c'etait le defaut :
+  // cette pastille etait la seule de l'ecran a l'afficher ainsi, a cote d'une
+  // autre qui disait « 3 · Haut » sur la MEME ligne. Regle 2 de Thierry.
   assert.match(M.celluleDepart(r.get('2026-11-06'), teintes), /class="yp-niv-badge n-exceptionnel">Exceptionnel</)
+  const chiffres = { Base: 1, Moyen: 2, Haut: 3, 'Très haut': 4, Exceptionnel: 5 }
+  assert.match(M.celluleDepart(r.get('2026-11-06'), teintes, chiffres),
+    /class="yp-niv-badge n-exceptionnel">5 · Exceptionnel</,
+    'avec la table, le chiffre precede le nom')
   assert.equal((M.detailDepart(r.get('2026-11-06')).match(/Exceptionnel/g) || []).length, 1, 'le mot une seule fois dans le detail')
 })
 
