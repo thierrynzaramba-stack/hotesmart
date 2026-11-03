@@ -337,7 +337,7 @@
        son propre niveau. Elle gardait --text2 (#6b6b6b) — 4,32:1 sur Base mais
        1,58:1 sur Exceptionnel, et c'est l'element le plus repete de l'ecran,
        un par nuit. Releve en review le 2 novembre 2026. */
-    .yp-niveau { font-size: 10px; text-transform: uppercase; letter-spacing: .03em;
+    .yp-niveau { font-size: 10.5px; letter-spacing: .01em;
                  color: var(--niv-encre, var(--text2)); margin-right: 7px; }
     /* La bulle du niveau sur la ligne : la pastille de la grille, telle quelle. */
     .yp-niveau.yp-niv-badge { padding: 1px 7px; border-radius: 10px; }
@@ -388,12 +388,35 @@
        une propriete personnalisee fait le meme travail sans les repeter. */
     .yp-niv { background: var(--niveau-fond, var(--bg)); padding: 5px 6px; text-align: center; flex: 1 1 0;
               min-width: 0; }
+    /* ⚠ LA CASE BASE PORTE LE MEME CONTOUR QUE LES PASTILLES — recette de
+       Thierry sur staging, 3 novembre 2026 : « pour qu'elle se detache du
+       fond blanc ». Mesure : #F7F7F7 contre le blanc du bloc, 1,07:1 — le
+       bord gauche de la premiere case se confondait avec la carte. Les cases
+       suivantes sont bornees par le filet de 1 px de .yp-niveaux ; Base, elle,
+       n'a rien a sa gauche.
+       ⚠ Les cases 2 et 3 sont dans la meme situation du cote haut et bas
+       (1,19:1 et 1,45:1 contre le blanc) : c'est mesure, pas corrige, parce
+       que la demande porte sur Base. */
+    /* ⚠ UN box-shadow INSET, PAS UNE BORDURE, et c'est un constat de review
+       du 3 novembre 2026. Avec `border`, la case Base mesurait 112,8 px contre
+       110,8 pour ses quatre soeurs (72,8 contre 70,8 au telephone) et son
+       libelle tombait 1 px plus bas : les cinq colonnes de « Votre grille »
+       n'etaient plus de meme largeur. Et sa bordure droite s'ajoutait au
+       `gap: 1px` du conteneur — un double filet de 2 px entre Base et Moyen,
+       exactement ce que le commentaire de public/style.css donne comme raison
+       de garder le lisere HORS des cases. Un inset occupe zero place. */
+    .yp-niv.n-base { box-shadow: inset 0 0 0 1px var(--niveau-lisere); }
     /* Le socle garde sa marque, mais discrètement : la teinte du niveau prime,
        sinon la légende ne serait plus la légende des lignes. */
     .yp-niv.socle .p { text-decoration: underline; text-underline-offset: 3px;
                        text-decoration-thickness: 1.5px; }
-    .yp-niv .n { font-size: 9px; color: var(--niv-encre, var(--text3)); text-transform: uppercase;
-                 letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis;
+    /* ⚠ PLUS DE MAJUSCULES FORCEES — recette de Thierry du 3 novembre 2026 :
+       « libelle partout en 1 · Base, sans majuscules forcees ». Le libelle
+       porte deja son chiffre ; le mettre en capitales le rendait plus dur a
+       lire sans rien ajouter. La taille monte de 9 a 10 px : des bas-de-casse
+       a 9 px sont plus petits a l'oeil que des capitales a 9 px. */
+    .yp-niv .n { font-size: 10px; color: var(--niv-encre, var(--text3));
+                 letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis;
                  white-space: nowrap; }
     .yp-niv .p { font-size: 13px; font-weight: 600; margin-top: 1px;
                  font-variant-numeric: tabular-nums; }

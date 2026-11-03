@@ -319,6 +319,122 @@ test('LE TEST QUI COMPTE : toute declaration --niveau-* porte une valeur NOMMEE'
 // un NOM l'est. Chercher la valeur etait la bonne garde pour une teinte, c'est
 // la mauvaise pour une encre.
 
+test('LE TEST QUI COMPTE : les trois retouches de la recette du 3 novembre 2026', () => {
+  const prix = lire('apps/yield/prix.html')
+
+  // ── 1. la case Base se detache du fond blanc ────────────────────────
+  // « Case Base de "Votre grille" : meme contour que les pastilles, pour
+  // qu'elle se detache du fond blanc. » Mesure : #F7F7F7 contre le blanc du
+  // bloc, 1,07:1. Avec le contour : 3,36:1.
+  //
+  // ⚠ UN box-shadow INSET, PAS UNE BORDURE, et le test l'exige nommement.
+  // Avec `border`, la case Base mesurait 112,8 px contre 110,8 pour ses
+  // soeurs, son libelle tombait 1 px plus bas, et sa bordure droite doublait
+  // le `gap: 1px` du conteneur. Un inset occupe zero place. Releve en review.
+  const base = (prix.match(/\.yp-niv\.n-base\s*\{[^}]*\}/) || [])[0]
+  assert.ok(base, 'la case Base doit avoir sa regle de contour')
+  assert.match(base, /box-shadow:\s*inset 0 0 0 1px var\(--niveau-lisere\)/,
+    'le contour de la case Base doit etre un inset : une bordure elargit la case')
+  assert.doesNotMatch(base, /(^|[^-])border\s*:/,
+    'pas de `border` sur la case Base — elle prendrait de la place dans la grille')
+
+  // ── 2. plus de majuscules forcees sur un libelle de niveau ──────────
+  // « Libelle partout en "1 · Base", sans majuscules forcees (grille et
+  // pastille de ligne comprises). »
+  //
+  // ⚠ TOUTES LES REGLES, PAS LA PREMIERE — constat de review, prouve par
+  // mutation : `match()` sans /g ne lisait que la premiere declaration, donc
+  // la copie du @media (max-width: 640px) n'etait jamais inspectee. Un
+  // `text-transform: uppercase` ajoute a la regle MOBILE laissait la suite
+  // verte pendant que le telephone reaffichait « 1 · BASE ». C'est la regle
+  // « LE MOBILE SUIT L'ORDINATEUR » qui se defaisait en silence.
+  const forcees = []
+  for (const sel of ['\\.yp-niv \\.n', '\\.yp-niveau']) {
+    const regles = prix.match(new RegExp(sel + '(?![-\\w])[^{]*\\{[^}]*\\}', 'g')) || []
+    if (!regles.length) { forcees.push(`${sel} : aucune regle trouvee`); continue }
+    for (const r of regles) {
+      if (/text-transform:\s*uppercase/.test(r)) forcees.push(`${sel} : ${r.trim().slice(0, 70)}`)
+    }
+  }
+  assert.deepEqual(forcees, [],
+    'un libelle de niveau est force en majuscules :\n' + forcees.join('\n')
+    + '\nRecette du 3 novembre 2026 : « sans majuscules forcees », mobile compris.')
+
+  // ── 3. le calendrier AirROI a quitte le bleu ────────────────────────
+  // « Quitte le bleu (reserve au cliquable) et passe sur l'echelle d'encre,
+  // Creux = niveau 1 … Pic = niveau 5, avec la meme legende. »
+  //
+  // ⚠ LE SAUT EST SUR LE 2, PAS SUR LE 4, et ce test l'epingle NIVEAU PAR
+  // NIVEAU. Thierry a pose les deux bornes et laisse le milieu ; la mesure a
+  // tranche : avec 1-2-3-5 les trois paliers bas sont a 1,11:1 et 1,22:1 l'un
+  // de l'autre — une carte de chaleur a quatre paliers qui n'en restitue que
+  // deux. Avec 1-3-4-5 : 1,36 / 2,31 / 4,73:1.
+  const tc = lire('shared/temperature-calendrier.js')
+  const ATTENDU = { creux: 1, modere: 3, favorable: 4, pic: 5 }
+  const ecarts = []
+  for (const [palier, n] of Object.entries(ATTENDU)) {
+    if (!new RegExp(`--tc-${palier}:\\s*var\\(--niveau-${n}[,)]`).test(tc)) {
+      ecarts.push(`--tc-${palier} doit renvoyer a --niveau-${n}`)
+    }
+  }
+  assert.deepEqual(ecarts, [],
+    'l echelle AirROI ne suit pas la correspondance mesuree :\n' + ecarts.join('\n'))
+
+  // ⚠ PLUS AUCUNE COULEUR EN DUR SUR LES PALIERS — c'est ce qui garantit que
+  // le bleu est parti. Les quatre valeurs etaient a 216-217°, en pleine bande
+  // du bleu reserve au CLIQUABLE, sur des cases qui sont des boutons.
+  // ⚠ Les REPLIS sont permis et meme exiges (voir plus bas) : on refuse une
+  // couleur en PREMIERE position, pas en repli.
+  const enDur = []
+  for (const m of tc.matchAll(/--tc-[a-z]+(?:-txt|-bord)?:\s*([^;\n]+)/g)) {
+    if (!/^var\(/.test(m[1].trim())) enDur.push(m[0].trim())
+  }
+  assert.deepEqual(enDur, [],
+    'ces paliers portent une couleur en dur au lieu d un renvoi :\n' + enDur.join('\n')
+    + '\nLe bleu est reserve a ce qui est CLIQUABLE ; une case de calendrier EST'
+    + ' cliquable, donc la couleur de donnee ne peut pas etre bleue.')
+
+  // ⚠ LE LISERE DOIT CONTRASTER AVEC SON PROPRE FOND — pas seulement exister.
+  // Constat de review, prouve par mutation : l'assertion d'avant acceptait
+  // `--tc-creux-bord: var(--niveau-1)`, c'est-a-dire un lisere de la couleur
+  // du fond, donc pas de lisere du tout.
+  const ECHELLE_V = { 1: '#F7F7F7', 2: '#EBEBEB', 3: '#D6D6D6', 4: '#8C8C8C', 5: '#222222' }
+  const faibles = []
+  for (const [palier, n] of Object.entries(ATTENDU)) {
+    const m = new RegExp(`--tc-${palier}-bord:\\s*var\\(--niveau-([1-5])`).exec(tc)
+    if (!m) { faibles.push(`--tc-${palier}-bord absent`); continue }
+    const c = contraste(ECHELLE_V[m[1]], ECHELLE_V[n])
+    if (c < 3) faibles.push(`--tc-${palier}-bord (--niveau-${m[1]}) est a ${c.toFixed(2)}:1 de son fond`)
+  }
+  assert.deepEqual(faibles, [],
+    'un lisere ne se detache pas de son propre fond :\n' + faibles.join('\n'))
+
+  // ⚠ ET LES QUATRE CONSOMMATEURS DOIVENT LE CONSOMMER. Constat de review,
+  // prouve par mutation : remplacer les deux `border: 1px solid var(--tc-bord…)`
+  // par `border: 0` laissait la suite VERTE pendant que toutes les cases
+  // perdaient leur contour. C'est l'etat dans lequel .tc-badge se trouvait
+  // DEJA — le seul des quatre a avoir ete oublie, et le plus repete.
+  const sansBord = ['.tc-jour', '.tc-case', '.tc-badge', '.tc-pastille'].filter(sel => {
+    const r = (tc.match(new RegExp('\\' + sel + '\\s*\\{[^}]*\\}')) || [])[0]
+    return !r || !/border:\s*1px solid var\(--tc-bord/.test(r)
+  })
+  assert.deepEqual(sansBord, [],
+    'ces elements posent un palier sans consommer son lisere :\n' + sansBord.join('\n')
+    + '\nSans lisere, un palier pale est a 1,07:1 du fond blanc : la forme disparait.')
+
+  // ⚠ ET LE MODULE RESTE AUTONOME. Constat de review : un renvoi sans repli
+  // rend le jeton invalide si public/style.css n'est pas charge — et alors
+  // `background: var(--tc-creux)` tombe a `transparent` ET `border` ne prend
+  // pas son propre repli, parce que --tc-bord EST declare, il vaut l invalide.
+  // Un calendrier entierement incolore et sans bords, sans une erreur.
+  const sansRepli = []
+  for (const m of tc.matchAll(/(--tc-[a-z-]+):\s*var\((--[a-z0-9-]+)\)/g)) sansRepli.push(`${m[1]} renvoie a ${m[2]} sans repli`)
+  assert.deepEqual(sansRepli, [],
+    'ces renvois n ont pas de repli :\n' + sansRepli.join('\n')
+    + '\nCe module vit dans shared/ : il doit rendre quelque chose meme si la'
+    + ' feuille qui porte l echelle n est pas chargee.')
+})
+
 test('LE TEST QUI COMPTE : les six ecrans YieldFlow chargent la police V5', () => {
   // ⚠ DEUX MOITIES, ET UNE SEULE NE SUFFIT PAS. Le `<link>` telecharge la
   // fonte ; la classe `police-v5` l applique. Sans le lien, la classe rend un

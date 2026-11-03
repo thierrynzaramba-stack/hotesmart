@@ -114,7 +114,16 @@ test('pas de mode sombre : aucune variante sombre des couleurs de niveaux', () =
     'le module ne doit plus porter de regle sous prefers-color-scheme')
   assert.doesNotMatch(regles, /:root\[data-theme="dark"\]/,
     'ni sous [data-theme="dark"]')
-  assert.match(SOURCE, /--tc-pic:\s*#1E3F73/,
+  // ⚠ ET L ECHELLE CLAIRE RESTE : c'est elle qui porte le sens. Elle n'est
+  // plus bleue depuis le 3 novembre 2026 — recette de Thierry : « le
+  // calendrier AirROI quitte le bleu, reserve au cliquable, et passe sur
+  // l'echelle d'encre ». Les quatre paliers sont des RENVOIS a --niveau-*,
+  // donc il n'y a plus d'hexa a epingler ici : ce qu'on garde, c'est que le
+  // palier le plus haut est le plus FONCE, ce que la variante sombre
+  // retiree inversait precisement.
+  // ⚠ ET LE RENVOI PORTE UN REPLI : ce module vit dans shared/, il doit rendre
+  // quelque chose meme si la feuille qui porte l echelle n est pas chargee.
+  assert.match(SOURCE, /--tc-pic:\s*var\(--niveau-5,\s*#222222\)/,
     'l echelle claire reste : « Pic » est le plus fonce, et c est le sens')
 })
 
