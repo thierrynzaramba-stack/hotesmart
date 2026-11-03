@@ -1,58 +1,33 @@
-# Spec — Base de connaissance V5 : source unique des informations d'un bien
+# Spec — Base de connaissance V5 : les réponses prêtes
 
 Chantier ouvert par Thierry le **3 novembre 2026**.
 Branche : `kb-v5-base-connaissance`. Worktree : `/home/thierry/hotesmart-kb`.
+Recette : **staging** (`ortyofzzdsthlhqmzsnq`).
 
-> **Rien n'est codé avant que Thierry ait validé cette spec et les maquettes**
-> (sa consigne d'ouverture). Les lots sont courts ; un lot qui touche l'envoi au
-> voyageur a droit à l'exception de review de `CLAUDE.md`.
-
----
-
-## 0. Ce qui a déclenché le chantier, et c'est mesuré
-
-Le 2 novembre 2026 à 21:40, un voyageur demande à La bulle quels suppléments
-sont proposés. L'IA prépare : « une bouteille de champagne servie avec glaçons
-au prix de **39 €** ». Le 3 novembre à 04:26, Thierry répond lui-même :
-« une bouteille de champagne au frais avec des glaçons pour **29 euros** ».
-
-**L'IA n'a rien inventé.** Elle a recopié, mot pour mot, la ligne
-`knowledge` `f693f184-570e-4c27-801a-976975cc30dc` — bien La bulle, `type: faq`,
-clé « Pack en complément », **écrite le 20 juillet 2026** :
-
-> « Bonjour, Actuellement, nous proposons une bouteille de champagne servie avec
-> glaçons au prix de 39 €. Le pack massage est malheureusement épuisé pour le
-> moment. »
-
-Rien dans `agent_prompting` (0 occurrence de « 39 » ou « champagne ») ni dans
-les onze modèles de `message_templates` ne porte ce prix. **La source est unique
-et elle est périmée depuis trois mois et demi.**
-
-⚠ **La leçon qui fonde le chantier** : il n'existe aucun garde-fou possible
-contre une IA fidèle à une base fausse. Seule la mise à jour **en un seul
-endroit** protège. Et ce prix n'est jamais parti au voyageur par un hasard
-heureux — la réservation n'existait pas, donc l'envoi a été refusé (dette 126).
+⚠ **DIRECTION VALIDÉE LE 3 NOVEMBRE 2026, ET ELLE REMPLACE LA PRÉCÉDENTE**, que
+Thierry a jugée trop compliquée. Maquette de référence : les cinq captures
+`Ordinateur ·` / `Téléphone · Base de connaissance` du 3 novembre 16:26.
+Ce qui disparaît de la version d'avant : les « faits » et les « réponses
+rédigées » comme deux natures séparées, les balises montrées en `{…}` à l'écran,
+et le badge de vérification sur chaque information.
 
 ---
 
 ## 1. Principe
 
-**La base de connaissance est la source unique des faits d'un bien** : wifi,
-accès, horaires, équipements, suppléments et prix, règles, contacts.
+**La base de connaissance, ce sont des RÉPONSES PRÊTES** — des messages
+pré-enregistrés, une liste par logement. Elles servent de base à l'IA **et** aux
+réponses manuelles de l'hôte.
 
-**Trois usages lisent la même base :**
-
-1. **Les messages programmés** y piochent par balises — même syntaxe
-   qu'aujourd'hui (`{telephone_hote}`).
-2. **L'IA** lit la base pour répondre.
-3. **Les réponses manuelles de l'hôte** : dans la zone de saisie de Messages,
-   les mêmes balises sont acceptées, remplacées par leur valeur **avant**
-   l'envoi, et **l'hôte voit le texte final avant d'envoyer**.
-
-**Modifier une information la met à jour partout.**
+- **Les balises restent**, et ce sont **les mêmes que dans les messages
+  programmés**. À l'écran elles apparaissent en **étiquettes lisibles** —
+  Prénom, Nom wifi, Mot de passe wifi, Heure d'arrivée, Téléphone, Code
+  immeuble — **jamais en `{…}`**.
+- **Chaque valeur est saisie une seule fois**, dans le bloc **« Infos du
+  logement »**, placé **sous** les réponses prêtes.
+- **Une valeur vide s'affiche « À remplir » en rouge.**
 
 ---
-
 ## 2. ÉTAPE 0 — l'inventaire, mesuré en lecture seule le 3 novembre 2026
 
 Toutes les mesures ci-dessous viennent de la **production**
@@ -179,120 +154,117 @@ d'un coup.** La V5 ajoute (type, libellé, rattachement), elle ne renomme pas
 
 ---
 
-## 3. Décisions qui attendent Thierry
 
-| # | question | pourquoi elle bloque |
+---
+
+## 3. Les écrans
+
+### 3.1 Accès
+
+Une icône **« Base de connaissance »** dans l'en-tête de Messages, à côté de
+« Messages programmés » et « Réponses de l'IA ».
+
+- **Ordinateur** : elle ouvre un **volet à droite, 440 px**.
+- **Téléphone** : une **page plein écran**.
+- **Sélecteur de logement en haut** des deux.
+
+### 3.2 La carte d'une réponse prête
+
+Icône + sujet, le texte avec ses étiquettes, et « vérifiée le … ».
+
+- **Badge ambre « À revoir »** quand la réponse n'a pas été vérifiée depuis
+  **90 jours**. ⚠ **C'est le seul ambre de l'écran** : la charte V5 réserve
+  l'ambre à un seul moment par page.
+- **Badge gris « Hors IA »**, avec un cadenas, quand l'IA n'a pas le droit de
+  s'en servir.
+
+### 3.3 Modifier une réponse prête
+
+- champs **Sujet** et **Message** (avec les étiquettes) ;
+- **« Insérer »** : boutons **bleus** — Prénom / Téléphone / Heure d'arrivée /
+  Nom wifi / **Autre…** — qui insèrent la balise en un clic ;
+- **aperçu rempli avec le vrai voyageur** ;
+- interrupteur **« L'IA peut s'en servir »** (« Sinon, vous seul l'utilisez. ») ;
+- **Enregistrer** à bord noir ; **Supprimer** en rouge, avec **une fenêtre dans
+  la page** (jamais `window.confirm` — règle acquise le 2 novembre) ;
+  **Annuler** en bleu.
+
+### 3.4 La réponse manuelle
+
+- un bouton **« Réponses prêtes »** à côté du champ ouvre une liste avec
+  **recherche**, des **aperçus déjà remplis pour ce voyageur**, et un lien
+  **« Gérer la base de connaissance »** ;
+- au choix d'une réponse, **le texte va dans le champ, balises déjà
+  remplacées**, et il **reste modifiable** ;
+- au-dessus du texte, la mention **« Réponse prête · <sujet> »**, avec une croix
+  pour la retirer.
+
+### 3.5 Une balise vide
+
+- elle reste **en étiquette rouge** dans le texte ;
+- un bandeau **« <info> à remplir »** propose un lien **« Remplir »** vers la
+  fiche ;
+- **l'envoi est bloqué** (bouton gris).
+
+### 3.6 Le champ de saisie
+
+Il se place **juste sous le dernier message et suit le fil**. Il **ne reste pas
+collé en bas de l'écran**.
+
+### 3.7 Charte
+
+Plus Jakarta Sans, fond blanc, **bleu `#2563EB` = cliquable**, **ambre pour un
+seul moment par écran**, **noir réservé à la navigation**, **bouton principal à
+bord noir**. Peu de texte, des icônes. Ordinateur **et** téléphone, chargement
+rapide.
+
+---
+
+## 4. Les lots
+
+Un par un, **recette staging entre chaque**.
+
+| lot | contenu | visible ? |
 |---|---|---|
-| D1 | ~~Le champagne : 29 € ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : 29 €, et le pack massage est TOUJOURS ÉPUISÉ.** La ligne `faq` « Pack en complément » de La bulle passe donc de 39 € à **29 €** ; sa seconde phrase reste vraie. | C'est la ligne qui a déclenché le chantier. ✔ **CORRIGÉE EN PRODUCTION par Thierry le 3 novembre 2026**, et vérifié en lecture seule ensuite : la ligne porte 29 €, la phrase sur le pack massage est intacte, **un seul prix dans toute la base** (45 lignes lues) et **zéro ligne à 39 €** — il n'y en avait pas d'autre ailleurs. L'IA lit cette table à chaque passage du cron, sans cache. |
-| D2 | ~~Quel est LE téléphone hôte ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : les DEUX numéros des modèles sont bons** — NUMERO-C et NUMERO-B. Donc **deux clés**, `telephone_hote` (NUMERO-C) et `telephone_hote_2` (NUMERO-B), et **NUMERO-A, que la base porte aujourd'hui, est PÉRIMÉ** : il est remplacé, pas conservé. | Une balise unique ne peut pas porter deux numéros. ⚠ **Conséquence mesurée : sur les deux biens de Bagnères, la balise `{telephone_hote}` aurait envoyé un numéro périmé à chaque message** — elle n'a jamais servi, parce que les cinq modèles écrivent les bons numéros en dur. Le défaut était donc masqué par celui que le chantier vient fermer. |
-| D3 | ~~Le code d'immeuble entre-t-il dans la base ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : OUI, avec une clé marquée « jamais lue par l'IA » (`lisible_par_ia = false`). Il ne part que par les messages programmés, ou par Thierry lui-même.** | C'est un secret d'accès. ⚠ **Conséquence pour le lot 5 : le drapeau doit être prouvé en APPELANT la fonction qui bâtit le contexte du modèle**, pas en grepant la source — un `lisible_par_ia` que le contexte ignore serait un faux garde-fou sur un code de porte. |
-| D4 | ~~Une date de dernière vérification ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : OUI, par information, avec un badge « à revoir » après 90 JOURS, et sans texte en plus.** | C'est le seul garde-fou contre un prix qui dort. ⚠ **Mesuré : le 39 € avait 106 jours.** Le badge aurait donc mordu 16 jours avant la question du voyageur. La date se pose au moment où l'hôte ENREGISTRE la valeur, jamais automatiquement : une date posée par le système dirait « vérifié » de ce que personne n'a relu. |
-| D5 | ~~Deux natures, ou on sépare ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : on GARDE les deux natures (faits et réponses rédigées), avec une règle — une réponse rédigée ne contient JAMAIS un prix, un chiffre ou un contact en dur ; elle utilise la balise du fait.** | C'est la règle qui ferme la cause pour de bon : le 39 € vivait dans le TEXTE d'une réponse rédigée, donc hors de portée de toute balise. ⚠ **Conséquence : la base devient aussi un porteur de faits chiffrés** — `prix_champagne` est un fait, `{prix_champagne}` sa balise, et la réponse rédigée ne porte plus que la phrase. |
+| **1** | **Socle : un seul remplaceur de balises**, partagé par les messages programmés, les réponses manuelles et l'IA. Aujourd'hui il en existe **deux** (`lib/message-builder.js`, `lib/cron-messages.js`). Tests. | **rien pour l'hôte** |
+| **2** | **Nettoyage des données en production** : doublons, valeurs écrites en dur dans les textes, prix faux. **D'abord un script à blanc qui produit un rapport** ; l'écriture **seulement sur go explicite de Thierry** (`CONFIRMER_PROD=cjmrizpdyhrcurmgyrhs`). | non |
+| **3** | **Page V5** : volet ordinateur + page téléphone. Elle **remplace** `apps/agent-ai/knowledge.html`. | oui |
+| **4** | **Insertion en un clic** dans les messages programmés et les réponses manuelles, avec le remplissage automatique et **le blocage si une balise est vide**. | oui |
+| **5** | **IA** : elle répond **seulement à partir des réponses prêtes autorisées** ; **jamais** une réponse « Hors IA », **jamais** une donnée confidentielle, **jamais** un prix absent de la base ; sinon **l'alerte « info manquante » existante prend le relais**. | oui |
 
 ---
 
-## 4. Modèle de données cible
+## 5. Règles du chantier
 
-**On garde la table `knowledge`** (dix lecteurs), on l'étend :
-
-- `key` et `value` : inchangés.
-- `type` : `fixed` et `faq` conservés ; une valeur de plus si D5 le demande.
-- **nouveau** `verifie_le` (timestamptz, nullable) — D4.
-- **nouveau** `lisible_par_ia` (boolean, défaut `true`) — D3.
-- **nouveau** `telephone_hote_2` (clé `fixed`, décision D2) : deux numéros partent aux voyageurs, donc deux
-  clés et deux balises. ⚠ La valeur actuelle de `telephone_hote` (NUMERO-A) est **périmée** et remplacée.
-- `property_id` reste la **référence provider** (`provider_property_id`), règle 10
-  de `CLAUDE.md`. ⚠ Vérifié : les 45 lignes portent bien des refs provider.
-
-Migration additive, lignes courtes, **aucun défaut qui change un comportement**.
+- Branche `kb-v5-base-connaissance` ; recette sur **staging**
+  (`ortyofzzdsthlhqmzsnq`).
+- ⚠ **Aucune valeur réelle** (codes, téléphones, mots de passe wifi, adresses)
+  **dans le dépôt, les tests ou les captures.**
+- ⚠ **Ne jamais modifier `api/channel-webhook.js`.**
+- ⚠ **Ne jamais commiter `package-lock.json`.**
+- **Je ne merge pas** : c'est le chef de file qui merge. **Aucune écriture en
+  production sans le go de Thierry.**
 
 ---
 
-## 5. Les trois usages, un seul remplaceur
-
-Un module unique — `shared/balises.js` + son miroir serveur — porte :
-
-1. **la liste des balises** et d'où vient chacune (base, réservation, serrure) ;
-2. **le remplacement** ;
-3. **le constat de manque** : quelles balises n'ont pas de valeur, et **où la
-   remplir** (on étend la table de `cron-messages.js:857`).
-
-`lib/message-builder.js` et `lib/cron-messages.js` l'appellent tous les deux :
-**les deux copies disparaissent**, et un test refuse qu'une troisième naisse.
-
----
-
-## 6. Gardes
-
-- ⚠ **Une balise sans valeur ne part JAMAIS en clair au voyageur.** Envoi
-  **bloqué**, message qui nomme l'information manquante et où la remplir — même
-  règle que les messages programmés aujourd'hui.
-- **Règle IA proposée, à valider** : *« Ne donne jamais un prix, un chiffre, un
-  code ou un horaire qui ne figure pas dans la base. Si l'information manque,
-  dis que tu vas vérifier et préviens l'hôte. »* Posée dans
-  `agent_prompting`, donc modifiable sans déploiement.
-- **Un fait marqué `lisible_par_ia = false` n'entre pas dans le contexte
-  envoyé au modèle** — et un test le prouve en appelant la fonction, pas en
-  grepant la source.
-- **L'hôte voit le texte final** avant tout envoi manuel : le remplacement se
-  fait **à l'affichage de l'aperçu**, pas au moment du clic.
-
----
-
-## 7. Écran V5
-
-- La base s'ouvre depuis **l'en-tête de Messages**, à côté de l'icône
-  « Messages programmés » (troisième bouton d'en-tête).
-- **Insertion en un clic** : en écrivant un message programmé ou une réponse
-  manuelle, une liste des informations de la base ; un clic insère la balise, et
-  **la valeur actuelle est affichée** à côté.
-- **Dans la base, on voit quels messages utilisent chaque information** (et
-  l'écran le dit quand la réponse est « aucun »).
-- Charte V5, peu de texte, **desktop ET mobile**.
-
-Maquettes : `docs/specs/base-connaissance-v5/maquette/kb-desktop.html` et
-`kb-mobile.html`.
-
-**Vues en lien, les deux écrans réunis** (validées par Thierry le 3 novembre 2026) :
-<https://claude.ai/artifact/JTvTkSiSUB5aMfCAUTGSKq>
-
----
-
-## 8. PERFORMANCE — case obligatoire (`CLAUDE.md`)
+## 6. PERFORMANCE — case obligatoire (`CLAUDE.md`)
 
 | # | point | réponse |
 |---|---|---|
-| 1 | Un écran = un endpoint | **Oui** : `/api/ecran/connaissance`, garde `contexteDEcran`, lectures en parallèle (base + modèles + usages). |
-| 2 | Donnée non urgente = résumé pré-calculé | **Sans objet** : la base est une donnée de **réglage**, lue à l'ouverture d'un écran et modifiée à la main. Aucun calcul. |
-| 3 | Affichage instantané par cache navigateur | **NON, et c'est une décision** : la base porte des codes d'accès et des mots de passe wifi. Interdit par la règle 3. |
+| 1 | Un écran = un endpoint | **Oui** (lot 3) : `/api/ecran/connaissance`, garde `contexteDEcran`, lectures en parallèle. |
+| 2 | Donnée non urgente = résumé pré-calculé | **Sans objet** : une réponse prête est un réglage, lu à l'ouverture et modifié à la main. Aucun calcul. |
+| 3 | Cache navigateur | **NON, et c'est une décision** : les réponses prêtes portent des codes d'accès et des mots de passe wifi. Interdit par la règle 3. |
 | 4 | `private, no-store` avant le PREMIER refus | **Oui**, 405 compris (dette 90). |
-| 5 | Statique versionné | **Oui** : `shared/balises.js` servi avec `?v=<empreinte>`. |
-| 6 | Pas de lecture tronquée à 1000 | **Oui, et ça compte ici** : `knowledge` peut dépasser 1000 lignes à quelques dizaines de biens. Pagination **par curseur** sur `id`. |
+| 5 | Statique versionné | **Oui** : le module de balises servi avec `?v=<empreinte>`. |
+| 6 | Pas de lecture tronquée à 1000 | **Oui** : pagination **par curseur** sur `id` — `knowledge` dépassera 1000 lignes à quelques dizaines de biens. |
 | 7 | Budget < 1 s / < 2 s, tenu par un test qui compte les appels | **Oui** + `Server-Timing` avec le nombre de requêtes. |
-| 8 | Mesure AVANT / APRÈS | **AVANT, mesuré** : la page actuelle n'est pas instrumentée — à mesurer au lot 1 (appels, requêtes, octets) avant d'écrire une ligne. |
+| 8 | Mesure AVANT / APRÈS | **À faire au lot 3** : la page actuelle n'est pas instrumentée. |
 
 ---
 
-## 9. Découpage en lots
+## 7. Ce qui n'est PAS dans ce chantier
 
-| lot | contenu | touche l'envoi ? |
-|---|---|---|
-| **0** | *Cette spec + maquettes.* Validation de Thierry. | non |
-| **1** | **Un seul remplaceur** (`shared/balises.js`), les deux copies retirées, test anti-troisième copie. Aucun changement visible. | **oui** |
-| **2** | Migration additive (`verifie_le`, `lisible_par_ia`, `telephone_hote_2`) + écran V5 de la base, desktop et mobile, **avec le badge « à revoir » à 90 jours** (D4). | non |
-| **3** | Insertion en un clic dans les messages programmés + « quels messages utilisent cette information ». | non |
-| **4** | Balises dans la saisie manuelle, avec aperçu du texte final et blocage si une balise est vide. | **oui** |
-| **5** | Règle IA « jamais un chiffre absent de la base » + `lisible_par_ia` respecté, **prouvé en appelant le bâtisseur de contexte** (D3) + **un test qui refuse une réponse rédigée portant un prix, un chiffre ou un contact en dur** (D5). | **oui** |
-| **6** | Reprise des valeurs en dur vers des balises, **avec Thierry, ligne par ligne** : les cinq modèles concernés, ET les réponses rédigées qui portent un chiffre (D5) — à commencer par le prix du champagne, qui devient le fait `prix_champagne`. | **oui** |
-
-Lots 1, 4, 5 et 6 : exception de review applicable (une review de plus, limitée
-au diff des correctifs).
-
----
-
-## 10. Ce qui n'est PAS dans ce chantier
-
-- La dette **126** (une proposition sans réservation est invisible) : notée au
-  registre, remède = la rendre affichable. Domaine messagerie.
+- La dette **126** (une proposition sans réservation est invisible) : domaine
+  messagerie.
 - `kb_question_templates` : rôle non tranché.
-- Toute réécriture du contenu des `faq` : c'est Thierry qui écrit ses textes.
+- La réécriture du contenu des réponses : c'est Thierry qui écrit ses textes.

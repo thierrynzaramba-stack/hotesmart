@@ -24,11 +24,14 @@ const messages = lire('lib/cron-messages.js')
 const channexProps = lire('lib/cron-channel-props.js')
 
 test('les placeholders lisent la base de connaissance AVANT le provider', () => {
-  assert.match(messages, /val\('telephone_hote', property\.phone\)/)
-  assert.match(messages, /val\('adresse', property\.address\)/)
-  // L'ordre compte : la connaissance de l'hote prime sur ce que rend le
-  // provider, parce que c'est la qu'il regle explicitement ces valeurs.
-  assert.match(messages, /if \(k\[cle\] && String\(k\[cle\]\)\.trim\(\)\) return/)
+  // ⚠ L'EFFET EST MESURE AILLEURS DEPUIS LE LOT 1 : la priorite « base avant
+  // provider » vit dans `lib/balises.js` et se prouve en APPELANT la fonction
+  // (`tests/balises.test.js`, « la base de connaissance passe AVANT le repli »).
+  // Ce qui reste ici est le CABLAGE de ce chemin : qu'il transmette bien la
+  // connaissance de l'hote ET les replis du provider.
+  assert.match(messages, /connaissance: k,/)
+  assert.match(messages, /telephone_hote: property\.phone,/)
+  assert.match(messages, /adresse: property\.address,/)
 })
 
 test('plus aucune lecture nue de `property.phone`', () => {
@@ -52,17 +55,29 @@ test('les horaires du bien voyagent avec lui sur le chemin Channex', () => {
 })
 
 test('les horaires ont trois replis, le defaut en dernier', () => {
-  assert.match(messages, /val\('checkin', property\.checkInStart, property\.checkin_time, '18:00'\)/)
-  assert.match(messages, /val\('checkout', property\.checkOutEnd, property\.checkout_time, '10:00'\)/)
+  // Le CABLAGE ici, l'EFFET dans `tests/balises.test.js` (« le repli du
+  // provider sert quand la base est muette, et le defaut en dernier »).
+  assert.match(messages, /checkin: property\.checkInStart \|\| property\.checkin_time,/)
+  assert.match(messages, /checkout: property\.checkOutEnd \|\| property\.checkout_time/)
+  const balises = lire('lib/balises.js')
+  assert.match(balises, /defaut: '18:00'/)
+  assert.match(balises, /defaut: '10:00'/)
 })
 
 test('un placeholder non resolu laisse un MARQUEUR, jamais un blanc', () => {
   // ⚠ « Appelez-moi au . » est un message casse que personne ne remarque ;
   // « [TÉLÉPHONE HÔTE] » se remarque tout de suite. Convention deja posee dans
   // lib/message-builder.js.
-  assert.match(messages, /'\[TÉLÉPHONE HÔTE\]'/)
-  assert.match(messages, /'\[ADRESSE\]'/)
-  assert.match(messages, /const ou = \(v, marqueur\) => \(v == null \? marqueur : v\)/)
+  // ⚠ LES MARQUEURS ONT DEMENAGE dans `lib/balises.js` (lot 1), et ils y sont
+  // mesures PAR L'EFFET (`tests/balises.test.js`, « une valeur absente laisse
+  // un MARQUEUR, jamais un blanc »). Ici on garde la seule chose que ce
+  // fichier-ci peut encore dire : qu'aucun marqueur n'est reintroduit en dur.
+  const balises = lire('lib/balises.js')
+  assert.match(balises, /marqueur: '\[TÉLÉPHONE HÔTE\]'/)
+  assert.match(balises, /marqueur: '\[ADRESSE\]'/)
+  const net = messages.replace(/^\s*\/\/.*$/gm, '')
+  assert.ok(!/'\[TÉLÉPHONE HÔTE\]'/.test(net) && !/'\[ADRESSE\]'/.test(net),
+    'un marqueur recopie ici serait une seconde source')
 })
 
 test('le manque est JOURNALISE, et il ARRETE l envoi', () => {
@@ -70,7 +85,7 @@ test('le manque est JOURNALISE, et il ARRETE l envoi', () => {
   // dit lequel manque, pour que ce soit reparable sans lire un message envoye.
   assert.match(messages, /manque\(nt\) dans la base de connaissance/)
   const bloc = messages.slice(messages.indexOf('async function generateAutoMessage'))
-  assert.ok(bloc.indexOf('manquants.push') < bloc.indexOf('ENVOI ANNULE'),
+  assert.ok(bloc.indexOf('remplacerBalises(') < bloc.indexOf('ENVOI ANNULE'),
     'le manque doit etre collecte AVANT d etre signale')
 })
 
@@ -107,8 +122,11 @@ test('un message MARQUE ne part pas au voyageur', () => {
 test('on ne signale QUE les placeholders que le template utilise', () => {
   // Sinon : un avertissement par message, par bien, toutes les 5 minutes — le
   // signal diagnostique devient du bruit permanent.
-  assert.match(messages, /const utilise = cle => text\.includes/)
-  assert.match(messages, /if \(utilise\(cle\)\) manquants\.push\(cle\)/)
+  // L'EFFET est mesure dans `tests/balises.test.js` (« on ne signale QUE les
+  // balises que le texte utilise ») ; la regle elle-meme vit desormais la-bas.
+  const balises = lire('lib/balises.js')
+  assert.match(balises, /const utilise = \(cle\) => src\.includes/)
+  assert.match(balises, /if \(utilise\(cle\)\) manquants\.push\(cle\)/)
 })
 
 test('la knowledge est chargee UNE FOIS par bien, pas par message', () => {
