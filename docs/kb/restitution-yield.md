@@ -300,11 +300,62 @@ marché, et ce qui viendra.
 
 | niveau | fond | accent | classe |
 |---|---|---|---|
-| Base | `#E7F0F7` | `#4A7FA8` | `n-base` |
-| Moyen | `#EDF4EE` | `#5F8F6E` | `n-moyen` |
-| Haut | `#FBF4E2` | `#C89A2E` | `n-haut` |
-| Très haut | `#FAEADA` | `#D2762E` | `n-tres-haut` |
-| Exceptionnel | `#F8E2DA` | `#BF4F32` | `n-exceptionnel` |
+| Base | `#EDE4F5` | `#673B92` | `n-base` |
+| Moyen | `#DED0ED` | `#5E3488` | `n-moyen` |
+| Haut | `#CDB8E2` | `#522B7A` | `n-haut` |
+| Très haut | `#B99DD5` | `#432067` | `n-tres-haut` |
+| Exceptionnel | `#A07DC4` | `#2A1342` | `n-exceptionnel` |
+
+⚠ **UNE SEULE TEINTE PRUNE DEPUIS LE 2 NOVEMBRE 2026**, sur double validation
+de Thierry : « une seule teinte prune, du plus clair (Base) au plus foncé
+(Exceptionnel), luminance strictement décroissante, ni bleu ni ambre, texte
+lisible sur chaque fond », puis, après aperçu : « Base est presque blanc et
+risque de se lire vide — fonce-le ».
+
+L'échelle d'avant changeait de **teinte** d'un pas à l'autre — Base bleuté,
+Moyen verdi, Haut ambré, Exceptionnel rougi — donc cinq couleurs sans ordre
+lisible : rien n'y disait que Haut vient après Moyen. Les dix valeurs tiennent
+maintenant **269-272°**, et la luminance des fonds décroît de **0,801 à 0,261**
+par pas de **0,131 à 0,140**.
+
+| ce qui est mesuré | valeur |
+|---|---|
+| texte `--text` (#1a1a1a) sur les cinq fonds | 14,10:1 → 5,16:1 |
+| petit texte (l'accent du niveau) sur son propre fond | 6,50:1 → 4,90:1 |
+| Base contre le `--bg` blanc de la carte qui le porte | 1,234:1 (la 1re rampe : 1,096:1) |
+
+⚠ **ET TOUT TEXTE POSÉ SUR UN FOND DE LA PALETTE PREND `--niv-encre`** —
+l'accent de son propre niveau — au lieu d'un gris général. Posé par les règles
+`.n-*` de `apps/yield/prix.html`, et par `--niv-lisere` côté marché.
+
+Les deux gris remplacés n'étaient **pas** dans le même état, et il faut le dire
+précisément : la première rédaction de ce paragraphe les mettait dans le même
+sac et annonçait « 2,2 à 2,5:1 » pour les deux. C'était faux pour l'un d'eux,
+et c'est un relecteur qui l'a mesuré.
+
+| ce qui est peint | ancienne palette | rampe prune | avec `--niv-encre` |
+|---|---|---|---|
+| le NOM du niveau, `--text3` (#9b9b9b) | 2,23 → 2,53:1 — **déjà sous le seuil, en production, avant ce lot** | 1,17 → 2,25:1 | 4,90 → 6,50:1 |
+| « fixé par vous », `--text2` (#6b6b6b) | 4,28 → 4,86:1 — **au-dessus du seuil sur quatre des cinq** | 1,58 → 4,32:1 | 4,90 → 6,50:1 |
+| la pastille de niveau des lignes de nuit, `--text2` | 4,28 → 4,86:1 | 1,58 → 4,32:1 | 4,90 → 6,50:1 |
+
+⚠ **ET DEUX CONVENTIONS DE COULEUR NE SURVIVENT PAS À LA RAMPE**, les deux
+relevées en review le 2 novembre 2026 :
+- le **vert / rouge** de la pastille de niveau (`.yp-niveau.hausse/.baisse`,
+  1,59:1 et 1,93:1 sur Exceptionnel) est **retiré** : c'était un doublon. Le
+  sens — la suggestion monte ou baisse — reste porté par le PRIX, sur la même
+  ligne, sur le fond neutre, où le vert vaut 4,64:1 ;
+- le **rouge destructif** du `×` qui retire un montant fixé (`#B02A37`,
+  1,93:1 sur Exceptionnel) prend `--niv-encre`. Mesure faite sur cinq rouges de
+  plus en plus sombres : le premier qui tienne 4,5:1 sur les **cinq** fonds est
+  `#38070E`, qui n'est plus un rouge mais un noir. Il ne reste que le signe `×`
+  et son `title` pour dire le geste.
+
+⚠ **LA RAMPE S'ARRÊTE AU MOYEN ET NE VA PAS AU FONCÉ**, et c'est une décision,
+pas une limite. Un fond foncé imposerait un régime de texte **blanc** sur les
+deux derniers niveaux : cinq valeurs de plus, et deux écrans à deux régimes de
+texte. La rampe retenue garde `--text` lisible sur les cinq fonds (5,16:1 au
+pire), donc un seul régime.
 
 **Dix valeurs, pas cinq.** Un fond ET un accent par niveau : l'accent se pose en
 `box-shadow: inset 3px 0 0` sur les lignes de nuit et en trait de légende sur le
@@ -336,7 +387,7 @@ fait trois choses :
    qu'elles figurent dans une **liste blanche de fichiers nommés** — une copie
    de plus, où que ce soit, fait rougir ;
 3. il exige que chaque occurrence porte **la valeur canonique de son niveau** —
-   un `#E7F0F7` devenu `#E6F0F8`, ou deux fonds échangés entre niveaux, font
+   un `#EDE4F5` devenu `#EDE4F6`, ou deux fonds échangés entre niveaux, font
    rougir.
 
 Son message d'échec **dit la règle en toutes lettres**, parce qu'un test dont

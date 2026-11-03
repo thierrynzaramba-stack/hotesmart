@@ -32,12 +32,22 @@ const SOURCE = 'public/style.css'
 // ⚠ DIX VALEURS, PAS CINQ : un fond ET un accent par niveau. L'accent se pose
 // en `box-shadow: inset 3px 0 0` sur les lignes de nuit et en trait de legende
 // sur le marche. N'epingler que les fonds aurait laisse cinq valeurs libres.
+// ⚠ LES VALEURS ONT CHANGE LE 2 NOVEMBRE 2026, SUR DOUBLE VALIDATION DE
+// THIERRY, ET C'EST EXACTEMENT LE CHEMIN QUE CE TEST IMPOSE : il a rougi
+// quand la palette a bouge, personne ne l'a « corrige », la question lui a ete
+// posee avec un apercu, et il a tranche — puis demande une retouche (Base
+// fonce, « presque blanc et risque de se lire vide »).
+//
+// L'echelle precedente changeait de TEINTE d'un pas a l'autre : Base bleute,
+// Moyen verdi, Haut ambre, Exceptionnel rougi. Cinq couleurs sans ordre
+// lisible. Les dix valeurs ci-dessous tiennent 269-272°, et la luminance des
+// fonds decroit de 0,801 a 0,261 par pas de 0,131 a 0,140.
 const PALETTE = [
-  { niveau: 'Base', jeton: 'yf-base', fond: '#E7F0F7', accent: '#4A7FA8' },
-  { niveau: 'Moyen', jeton: 'yf-moyen', fond: '#EDF4EE', accent: '#5F8F6E' },
-  { niveau: 'Haut', jeton: 'yf-haut', fond: '#FBF4E2', accent: '#C89A2E' },
-  { niveau: 'Tres haut', jeton: 'yf-tres-haut', fond: '#FAEADA', accent: '#D2762E' },
-  { niveau: 'Exceptionnel', jeton: 'yf-exceptionnel', fond: '#F8E2DA', accent: '#BF4F32' }
+  { niveau: 'Base', jeton: 'yf-base', fond: '#EDE4F5', accent: '#673B92' },
+  { niveau: 'Moyen', jeton: 'yf-moyen', fond: '#DED0ED', accent: '#5E3488' },
+  { niveau: 'Haut', jeton: 'yf-haut', fond: '#CDB8E2', accent: '#522B7A' },
+  { niveau: 'Tres haut', jeton: 'yf-tres-haut', fond: '#B99DD5', accent: '#432067' },
+  { niveau: 'Exceptionnel', jeton: 'yf-exceptionnel', fond: '#A07DC4', accent: '#2A1342' }
 ]
 
 const REGLE = 'Cette palette est un ELEMENT DE STRUCTURE (decision de Thierry du '
@@ -56,14 +66,21 @@ const REGLE = 'Cette palette est un ELEMENT DE STRUCTURE (decision de Thierry du
 // `'*'` = toutes les valeurs ; une liste = ces valeurs et pas d'autres.
 const AUTORISES = {
   'public/style.css': '*',
-  // ⚠ CE N'EST PAS UNE COPIE DE LA PALETTE, et la nuance est tout le sujet.
-  // #4A7FA8 y est la couleur du SEJOUR de cet ecran (`.yp-seg` et sa legende).
-  // Elle vaut la meme chose que l'accent du niveau Base par COINCIDENCE, pas
-  // par intention : la passer en var(--yf-base-l) aurait lie les barres de
-  // sejour a la palette, et un changement de palette aurait repeint les
-  // sejours. Le nouvel ecran, lui, prend --sejour (decision du 30/10/2026).
-  // UNE SEULE valeur est permise ici — les neuf autres font rougir.
-  'apps/yield/prix.html': ['#4A7FA8'],
+  // ⚠ L'ENTREE DE apps/yield/prix.html EST PARTIE LE 2 NOVEMBRE 2026, ET SON
+  // DEPART EST LA DEMONSTRATION DE CE QU'ELLE DISAIT. Elle permettait #4A7FA8,
+  // couleur du SEJOUR de cet ecran, qui valait l'accent du niveau Base par
+  // COINCIDENCE et non par intention — d'ou l'exception, limitee a cette
+  // valeur. La palette prune a emporte la coincidence : #4A7FA8 n'est plus une
+  // valeur de la palette, donc `permis()` n'est plus jamais consulte pour lui,
+  // donc l'entree ne garde plus rien.
+  //
+  // ⚠ ET UNE ENTREE QUI NE GARDE PLUS RIEN NE SE LAISSE PAS « AU CAS OU ».
+  // C'est la lecon que ce fichier porte deja deux fois, plus bas et plus haut :
+  // une liste blanche inerte se REVEILLE en silence le jour ou son motif
+  // reparait. Si un jour un accent de la palette retombait sur #4A7FA8, cette
+  // ligne aurait rouvert prix.html sans un rouge. La couleur du sejour, elle,
+  // reste en dur dans l'ecran — elle n'a jamais eu besoin de cette entree pour
+  // exister, seulement pour ne pas faire rougir un test qui ne la regarde plus.
   'docs/kb/charte-ui.md': '*',
   'docs/kb/restitution-yield.md': '*',
   // ⚠ LA SPEC DU LOT « yf-ecran-periodes » EST REVENUE DANS CETTE LISTE, ET
@@ -217,6 +234,217 @@ test('LE TEST QUI COMPTE : les hexas de la palette n apparaissent que dans les f
     + mauvaiseValeur.join('\n') + `\n${REGLE}`)
 })
 
+// ⚠ LE PRUNE EST LA QUATRIEME COULEUR RESERVEE DU PRODUIT, decision de
+// Thierry du 2 novembre 2026 : noir = navigation, ambre = « ce qu'HoteSmart a
+// fait pour vous », bleu = cliquable, PRUNE = les niveaux de prix.
+//
+// ⚠ POURQUOI UN TEST ET PAS SEULEMENT UNE PHRASE DANS LA CHARTE. Les trois
+// premieres reservations vivent depuis le 28 octobre 2026 dans un commentaire
+// de public/style.css. Un commentaire ne rougit jamais.
+//
+// ⚠ ET LA PREMIERE VERSION DE CE TEST, ECRITE LE MEME JOUR, NE GARDAIT PRESQUE
+// RIEN — six trous mesures en review, tous reproduits par mutation :
+//   1. elle ne regardait que la forme `--jeton: #hexa`. Un prune pose
+//      DIRECTEMENT en valeur de propriete passait — et il y en avait deja :
+//      apps/yield/prix.html peint `color: #5A3E8A` et
+//      `box-shadow: inset 3px 0 0 #5A3E8A`, soit l'idiome meme de l'accent de
+//      niveau, sur l'ecran qui affiche les niveaux ;
+//   2. elle classait en HSL. La saturation HSL explose pres du blanc et du
+//      noir : `#FBFAFF`, un blanc a peine violace, y est lu « saturation
+//      100 % » et faisait rougir pour rien. On classe donc en Lab, par CHROMA
+//      et angle de teinte, qui ne dependent pas de la clarte ;
+//   3. sa bande HSL 250-290° laissait passer `--presta-3` (#E4E2F0) a 1,4°
+//      sous la borne, alors qu'il est a ΔE 3,19 de --yf-base — la couleur la
+//      plus proche de la palette qui existe dans ce depot. D'ou le SECOND
+//      critere : tout ce qui est a moins de ΔE 5 d'une valeur de la palette
+//      est dedans, quelle que soit sa teinte ;
+//   4. elle ne voyait ni `#93F`, ni `rgb()`, ni `hsl()`, ni `rebeccapurple`,
+//      ni `#8A2BE2FF`, ni `--MutPrune` (majuscules), et ne parcourait pas les
+//      `.svg` ;
+//   5-6. son assertion de « liveness » se contentait d'un COMMENTAIRE et
+//      exigeait que le lot yf-ecran-periodes soit dans l'arbre. Elle est
+//      retiree : voir la note sur le sens unique, plus bas.
+const PRUNE_BANDE = { teinte: [302, 325], chromaMin: 8 }  // en Lab
+const PRUNE_PROCHE = 5                                     // ΔE CIE76 a la palette
+
+// ⚠ L'INVENTAIRE DES PRUNES QUI EXISTAIENT AVANT LA RESERVATION. Il est
+// NOMINATIF : chaque valeur avec ce qu'elle peint. La reservation vaut a
+// partir du 2 novembre 2026 ; elle ne repeint pas retroactivement des ecrans
+// valides, elle empeche le ONZIEME.
+const PRUNE_CONNU = new Map([
+  // ⚠ L'EXCEPTION DATEE. Thierry, 2 novembre 2026 : « le prune "moins chers"
+  // disparait avec le lot 4 (les periodes passent en niveaux de grille) ;
+  // yf-ecran-periodes ne part pas en prod avant le lot 4. » A retirer AVEC
+  // le lot 4 — ΔE 5,67 de --yf-moyen-l, et ΔE 2,67 pour le fond, soit la MEME
+  // couleur que --yf-base.
+  ['#5B2A86', '--prune, etat « moins chers » — exception jusqu au lot 4'],
+  ['#F0E9F6', '--prune-bg, fond de ce meme etat — exception jusqu au lot 4'],
+  // ⚠ CELUI-CI EST LE PLUS GENANT, et il est anterieur : « votre prix » (le
+  // prix fixe par l'hote) sur l'ecran Prediction de prix, en couleur de texte
+  // ET en `box-shadow: inset 3px 0 0` — l'idiome de l'accent de niveau.
+  ['#5A3E8A', 'apps/yield/prix.html — « votre prix » (.yp-hote, tr.prix-hote)'],
+  ['#7B3FA0', 'apps/yield/comparables.html — legende « equipements »'],
+  ['#5B3B8F', 'pages/avis.html — texte du badge de source « email »'],
+  ['#F3EDFA', 'pages/avis.html — fond de ce meme badge'],
+  ['#FBF0FF', 'shared/config.js — carte de l app « Tarification dynamique »'],
+  ['#E4E2F0', 'shared/theme.css / public/tokens.css — --presta-3 (ΔE 3,19 de --yf-base)'],
+  ['#EEEDFE', 'fond violace de analyze.html, prestataires.html, style.css, config.js'],
+  ['#7A3E9A', 'tests/yf-ecran-periodes.test.js — hexa dont le test exige la DISPARITION']
+])
+
+// ⚠ CE TEST NE GARDE QUE DANS UN SENS, ET C'EST VOULU. Il refuse une valeur
+// INCONNUE ; il n'exige pas qu'une valeur connue soit encore la. La raison est
+// mesuree : `--prune` est pose par le lot yf-ecran-periodes, qui est dans
+// `staging` et PAS dans `main` — une assertion « l'entree doit etre trouvee »
+// rougirait sur toute branche partie de main, en annoncant une cause fausse.
+// Ce fichier a deja paye deux fois pour une liste blanche dependante de la
+// branche (voir AUTORISES, plus haut). Contrepartie assumee : une entree peut
+// devenir inerte sans rougir — d'ou la date portee par chacune.
+
+const lin = (v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+function labDe (hexa) {
+  const [r, g, b] = [1, 3, 5].map(i => lin(parseInt(hexa.substr(i, 2), 16) / 255))
+  let X = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+  let Y = (0.2126 * r + 0.7152 * g + 0.0722 * b)
+  let Z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+  const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116)
+  ;[X, Y, Z] = [f(X), f(Y), f(Z)]
+  return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]
+}
+const ecartE = (a, b) => { const p = labDe(a); const q = labDe(b)
+  return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) }
+function chromaTeinte (hexa) {
+  const [, A, B] = labDe(hexa)
+  let h = Math.atan2(B, A) * 180 / Math.PI; if (h < 0) h += 360
+  return { chroma: Math.hypot(A, B), teinte: h }
+}
+const NOMMEES = { rebeccapurple: '#663399', purple: '#800080', indigo: '#4B0082',
+  darkviolet: '#9400D3', blueviolet: '#8A2BE2', orchid: '#DA70D6', violet: '#EE82EE',
+  plum: '#DDA0DD', thistle: '#D8BFD8', mediumpurple: '#9370DB' }
+const hslHex = (h, s, l) => { const a = s * Math.min(l, 1 - l)
+  const f = (n) => { const k = (n + h / 30) % 12
+    return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1))))).toString(16).padStart(2, '0') }
+  return ('#' + f(0) + f(8) + f(4)).toUpperCase() }
+
+// ⚠ UNE COULEUR DANS UN COMMENTAIRE NE PEINT RIEN, et ce depot garde
+// systematiquement les valeurs retirees en commentaire (public/style.css porte
+// encore #F7F3FB, la premiere rampe prune). Sans ce retrait, l'inventaire
+// comptait deux faux positifs : `#a4f2` et `#b7c1`, qui sont des NUMEROS DE
+// REGLE inventes dans une phrase de lib/cleaning/changement-regles.js.
+function sansCommentaires (src, f) {
+  let s = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
+  if (/\.js$/.test(f)) s = s.split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
+  return s
+}
+
+function couleursDe (texte) {
+  const out = []
+  for (const m of texte.matchAll(/#([0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{3,4})(?![0-9A-Fa-f])/g)) {
+    let v = m[1]
+    v = (v.length === 3 || v.length === 4) ? v.slice(0, 3).split('').map(c => c + c).join('') : v.slice(0, 6)
+    out.push('#' + v.toUpperCase())
+  }
+  for (const m of texte.matchAll(/rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/g)) {
+    out.push('#' + [1, 2, 3].map(i => Number(m[i]).toString(16).padStart(2, '0')).join('').toUpperCase())
+  }
+  for (const m of texte.matchAll(/hsla?\(\s*([\d.]+)(?:deg)?[\s,]+([\d.]+)%[\s,]+([\d.]+)%/g)) {
+    out.push(hslHex(Number(m[1]), Number(m[2]) / 100, Number(m[3]) / 100))
+  }
+  for (const m of texte.matchAll(new RegExp('\\b(' + Object.keys(NOMMEES).join('|') + ')\\b', 'gi'))) {
+    out.push(NOMMEES[m[1].toLowerCase()])
+  }
+  return out
+}
+
+test('LE TEST QUI COMPTE : le PRUNE est reserve aux niveaux de prix', () => {
+  const palette = PALETTE.flatMap(n => [n.fond.toUpperCase(), n.accent.toUpperCase()])
+  const intrus = []
+  for (const f of fichiersCouleur()) {
+    // ⚠ CE FICHIER EST L'INVENTAIRE, PAS DE LA PEINTURE. Il porte des hexas
+    // prune par necessite : le dictionnaire des couleurs NOMMEES (#663399 pour
+    // rebeccapurple, #4B0082 pour indigo…) et les cles de PRUNE_CONNU. Sans
+    // cette ligne, le test se declarait lui-meme en infraction — cinq intrus,
+    // tous dans sa propre table de reference. Aucun de ces hexas n'atteint un
+    // ecran : ce fichier ne produit aucune page.
+    if (f === 'tests/palette-niveaux.test.js') continue
+    const src = sansCommentaires(lire(f), f)
+    for (const hexa of new Set(couleursDe(src))) {
+      if (palette.includes(hexa) || PRUNE_CONNU.has(hexa)) continue
+      const { chroma, teinte } = chromaTeinte(hexa)
+      const proche = Math.min(...palette.map(v => ecartE(hexa, v)))
+      const dansBande = teinte >= PRUNE_BANDE.teinte[0] && teinte <= PRUNE_BANDE.teinte[1]
+        && chroma >= PRUNE_BANDE.chromaMin
+      if (!dansBande && proche >= PRUNE_PROCHE) continue
+      intrus.push(`${f} : ${hexa} — Lab ${teinte.toFixed(0)}°, chroma ${chroma.toFixed(1)},`
+        + ` a ΔE ${proche.toFixed(1)} de la palette (${dansBande ? 'dans la bande prune' : 'trop proche de la palette'})`)
+    }
+  }
+  assert.deepEqual(intrus.sort(), [],
+    'ces couleurs prennent la teinte PRUNE, reservee aux niveaux de prix :\n'
+    + intrus.join('\n')
+    + '\n\nLe prune est la 4e couleur reservee du produit (Thierry, 2 novembre 2026),'
+    + ' au meme titre que le noir pour la navigation, l ambre pour « ce qu HoteSmart'
+    + ' a fait pour vous » et le bleu pour ce qui est cliquable.'
+    + '\nSi c est un usage LEGITIME, il faut sa double validation — et alors on l ajoute'
+    + ' a PRUNE_CONNU AVEC CE QU IL PEINT, comme les dix entrees existantes.'
+    + `\n${REGLE}`)
+})
+
+test('LE TEST QUI COMPTE : un fond de niveau va toujours avec SON accent', () => {
+  // ⚠ CONSTAT DE REVIEW DU 2 NOVEMBRE 2026 : rien ne gardait cet appariement,
+  // et il s'etait DEJA deparie une fois. Du 30 octobre au 2 novembre, la
+  // legende du marche peignait le FOND de « Tres haut » avec l'ACCENT
+  // d'« Exceptionnel », pendant que le jeton --yf-exceptionnel existait sans
+  // qu'aucune regle ne l'utilise. Les trois tests ci-dessus etaient verts :
+  // ils epinglent les VALEURS et leur source, pas la facon dont deux jetons
+  // sont assembles a l'usage.
+  const src = lire('apps/yield/marche-global.html')
+  const bloc = (src.match(/const YF = \{[\s\S]*?\}\n/) || [])[0]
+  assert.ok(bloc, 'la table YF de marche-global.html est introuvable')
+
+  const paires = [...bloc.matchAll(/\['(--yf-[a-z-]+)',\s*'(--yf-[a-z-]+)'\]/g)]
+  assert.equal(paires.length, 4,
+    'la table YF doit porter 4 lignes de legende, pas ' + paires.length)
+  const deparies = paires
+    .filter(([, fond, accent]) => accent !== fond + '-l')
+    .map(([, fond, accent]) => `${fond} apparie a ${accent} au lieu de ${fond}-l`)
+  assert.deepEqual(deparies, [],
+    'la legende du marche apparie un fond avec l accent d un AUTRE niveau :\n'
+    + deparies.join('\n')
+    + '\nUn fond va avec SON accent, sinon la legende ment sur ce qu elle montre.'
+    + `\n${REGLE}`)
+
+  // ⚠ ET LE REPLI NE PEUT PAS ETRE UN JETON DE BORDURE. Le second jeton ne
+  // sert pas qu'au trait : `.mg-niv-l small` le prend comme couleur de TEXTE.
+  // --border2 (rgba(0,0,0,.2)) y valait 1,60:1 sur --bg2.
+  const repli = (src.match(/YF\[n\.yieldflow\] \|\| \[('[^']+'),\s*('[^']+')\]/) || [])
+  assert.ok(repli[1], 'le repli de la table YF est introuvable')
+  assert.doesNotMatch(repli[2], /border/,
+    `le repli de la legende peint du TEXTE avec ${repli[2]} : un jeton de bordure`
+    + ' n est pas une couleur de texte (mesure : 1,60:1 sur --bg2).')
+})
+
+test('LE TEST QUI COMPTE : tout fond de niveau porte l encre de SON niveau', () => {
+  // ⚠ LA REGLE QUE LE LOT DU 2 NOVEMBRE 2026 A POSEE, ET QU'IL AVAIT LUI-MEME
+  // OUBLIEE A UN ENDROIT. Un fond de la palette sans --niv-encre laisse le
+  // texte sur un gris general : --text2 tombe a 1,58:1 sur Exceptionnel. Le
+  // lot l'avait pose sur les cartes et oublie sur la pastille des lignes de
+  // nuit — l'element le plus repete de l'ecran, un par nuit. Releve en review.
+  const src = lire('apps/yield/prix.html')
+  const manquants = []
+  for (const n of PALETTE) {
+    const classe = '.n-' + n.jeton.replace('yf-', '')
+    const regle = (src.match(new RegExp('\\' + classe + '\\s*\\{[^}]*\\}')) || [])[0]
+    if (!regle) { manquants.push(`${classe} : regle introuvable`); continue }
+    if (!regle.includes(`background: var(--${n.jeton})`)) manquants.push(`${classe} : pas de fond --${n.jeton}`)
+    if (!regle.includes(`--niv-encre: var(--${n.jeton}-l)`)) manquants.push(`${classe} : pas d encre --${n.jeton}-l`)
+  }
+  assert.deepEqual(manquants, [],
+    'une regle de niveau pose un fond sans son encre :\n' + manquants.join('\n')
+    + '\nUn fond de la palette sans --niv-encre laisse le texte sur un gris'
+    + ' general, qui tombe a 1,58:1 sur le niveau Exceptionnel.')
+})
+
 test('LE TEST QUI COMPTE : les six ecrans YieldFlow chargent la police V5', () => {
   // ⚠ DEUX MOITIES, ET UNE SEULE NE SUFFIT PAS. Le `<link>` telecharge la
   // fonte ; la classe `police-v5` l applique. Sans le lien, la classe rend un
@@ -274,6 +502,25 @@ test('LE TEST QUI COMPTE : les six ecrans YieldFlow chargent la police V5', () =
       `apps/yield/${nom}.html doit charger EXACTEMENT l URL des pages V5 (${urlV5})`)
   }
 })
+
+// ⚠ LE PARCOURS DES COULEURS EST PLUS LARGE QUE CELUI DES JETONS : il prend
+// aussi les .svg (shared/icons.svg peut peindre), et il ecarte TOUT chemin de
+// maquette, pas seulement docs/maquettes — docs/specs/lot-menages-v5/maquette/
+// existe, et une maquette n'est pas du code produit (constat de review du
+// 2 novembre 2026).
+function fichiersCouleur () {
+  const out = []
+  const marche = (rel) => {
+    for (const e of fs.readdirSync(path.join(racine, rel || '.'), { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (e.name === 'node_modules' || e.name === '.git' || /maquette/i.test(r)) continue
+      if (e.isDirectory()) { marche(r); continue }
+      if (/\.(css|html|js|svg)$/.test(e.name)) out.push(r)
+    }
+  }
+  marche('')
+  return out
+}
 
 // Le parcours des fichiers du depot qui peuvent porter une couleur.
 function fichiers () {
