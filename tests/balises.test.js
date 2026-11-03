@@ -134,7 +134,7 @@ test('LE TEST QUI COMPTE : un seul remplaceur dans le depot', () => {
   // Et il ne reconnaissait qu'une seule forme, alors que l'idiome de
   // `balises.js` lui-meme est `new RegExp(\`\\{${cle}\\}\`)` : un
   // copier-coller de sa boucle serait passe vert.
-  for (const dossier of ['lib', 'api', 'shared', 'pages', 'scripts']) {
+  for (const dossier of ['lib', 'api', 'shared', 'pages', 'scripts', 'apps']) {
     const pile = [path.join(racine, dossier)]
     while (pile.length) {
       const d = pile.pop()
@@ -143,13 +143,23 @@ test('LE TEST QUI COMPTE : un seul remplaceur dans le depot', () => {
         if (e.isDirectory()) { pile.push(p); continue }
         if (!e.name.endsWith('.js') && !e.name.endsWith('.html')) continue
         if (p === path.join(racine, 'lib', 'balises.js')) continue
+        // ⚠ LES TROIS FORMES DE COMMENTAIRE, HTML COMPRIS — constat de la
+        // seconde review : sans `<!-- -->`, un exemple laisse dans une page
+        // ferait crier au loup sur une copie qui n'existe pas.
         const net = fs.readFileSync(p, 'utf8')
-          .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+          .replace(/\/\*[\s\S]*?\*\//g, ' ')
+          .replace(/<!--[\s\S]*?-->/g, ' ')
+          .replace(/^[ \t]*\/\/.*$/gm, ' ')
         for (const cle of Object.keys(BALISES)) {
+          // ⚠ QUATRE FORMES, ET LA DERNIERE EST CELLE QUE CE LOT VIENT
+          // D'INTRODUIRE — constat de la seconde review : mon garde-fou ne
+          // voyait ni `pose(` (l'idiome de `balises.js` apres le correctif du
+          // `$`), ni une cle CONSTRUITE (`\${cle}`), donc un copier-coller de
+          // sa propre boucle serait passe vert.
           const litteral = new RegExp(`\\.replace\\(\\s*/\\\\?\\{${cle}\\\\?\\}`)
-          // La seconde forme : celle que `balises.js` emploie lui-meme.
+          const pose = new RegExp(`pose\\(\\s*\\w+\\s*,\\s*/\\\\?\\{${cle}\\\\?\\}`)
           const construit = new RegExp(`new RegExp\\([\`'"]\\\\*\\{${cle}`)
-          if (litteral.test(net) || construit.test(net)) {
+          if (litteral.test(net) || pose.test(net) || construit.test(net)) {
             coupables.push(`${path.relative(racine, p)} : {${cle}}`)
           }
         }
@@ -158,6 +168,30 @@ test('LE TEST QUI COMPTE : un seul remplaceur dans le depot', () => {
   }
   assert.deepEqual(coupables, [],
     'une seconde copie du remplacement est apparue — c est exactement ce que le lot 1 a ferme')
+  // ⚠ ET LA BOUCLE GENERIQUE, celle qui ne cite aucune cle : c'est exactement
+  // le bloc de `lib/balises.js`, et c'est lui qu'un lot futur recopiera.
+  const generique = []
+  for (const dossier of ['lib', 'api', 'shared', 'pages', 'scripts', 'apps']) {
+    const pile = [path.join(racine, dossier)]
+    while (pile.length) {
+      const d = pile.pop()
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const q = path.join(d, e.name)
+        if (e.isDirectory()) { pile.push(q); continue }
+        if (!e.name.endsWith('.js') && !e.name.endsWith('.html')) continue
+        if (q === path.join(racine, 'lib', 'balises.js')) continue
+        const net = fs.readFileSync(q, 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, ' ')
+          .replace(/<!--[\s\S]*?-->/g, ' ')
+          .replace(/^[ \t]*\/\/.*$/gm, ' ')
+        if (/new RegExp\(`\\\\\{\$\{\w+\}\\\\\}`/.test(net)) {
+          generique.push(path.relative(racine, q))
+        }
+      }
+    }
+  }
+  assert.deepEqual(generique, [],
+    'la boucle de substitution de balises.js a ete recopiee ailleurs')
 })
 
 test('LE TEST QUI COMPTE : une valeur portant un $ arrive INTACTE chez le voyageur', () => {
@@ -172,6 +206,14 @@ test('LE TEST QUI COMPTE : une valeur portant un $ arrive INTACTE chez le voyage
   }
   // Et la meme regle vaut pour ce qui vient de la reservation.
   assert.equal(remplacerBalises('nom: {nom}', { reservation: { nom: 'A$$B' } }).texte, 'nom: A$$B')
+  // ⚠ LE PRENOM, et il etait le SEUL oublie du premier correctif — constat de
+  // la seconde review. C'est le champ le plus souvent substitue, et c'est du
+  // texte libre venu de l'OTA.
+  for (const v of ['C$`D', 'Jo$$ie', 'A$&B', "E$'F"]) {
+    const r = remplacerBalises('Bonjour {prenom}, bienvenue', { reservation: { prenom: v } })
+    assert.equal(r.texte, `Bonjour ${v}, bienvenue`, `le prenom ${v} doit arriver intact`)
+    assert.deepEqual(r.inconnues, [], 'et il ne doit pas etre pris pour une variable inconnue')
+  }
 })
 
 test('un repli est une CHAINE de replis : un blanc ne masque pas le suivant', () => {
@@ -185,6 +227,15 @@ test('un repli est une CHAINE de replis : un blanc ne masque pas le suivant', ()
     reservation: RESA, connaissance: {}, replis: { checkin: ['  ', null] }
   })
   assert.equal(vide.texte, 'arrivee 18:00', 'tous blancs : le defaut')
+  // ⚠ `0` ET `false` SE SAUTENT, comme le faisait `||` — constat de la seconde
+  // review : sans ca, un provider posant `checkInStart: 0` pour « non regle »
+  // affichait « 0 » comme heure d'arrivee.
+  for (const faux of [0, false]) {
+    const r = remplacerBalises('arrivee {checkin}', {
+      reservation: RESA, connaissance: {}, replis: { checkin: [faux, '16:00'] }
+    })
+    assert.equal(r.texte, 'arrivee 16:00', `${JSON.stringify(faux)} doit etre saute`)
+  }
 })
 
 test('LE TEST QUI COMPTE : toute balise pouvant manquer dit OU la remplir', () => {
@@ -199,8 +250,11 @@ test('LE TEST QUI COMPTE : toute balise pouvant manquer dit OU la remplir', () =
   }
   // Et le chemin des messages programmes lit CETTE table, pas une copie.
   const cron = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cron-messages.js'), 'utf8')
-  assert.match(cron, /OU_REMPLIR: OU_RENSEIGNER \} = require\('\.\/balises'\)/,
-    'une seconde table « ou le remplir » redivergerait')
+  // ⚠ L'ASSERTION NE DOIT PAS DEPENDRE DE CE QU'ON IMPORTE EN PLUS : ma
+  // premiere version citait la ligne entiere, et elle a rougi des que
+  // `etiquetteDe` s'y est ajoute — un test qui casse sur un ajout legitime.
+  assert.match(cron, /OU_REMPLIR: OU_RENSEIGNER/, 'la table vient de balises.js')
+  assert.ok(!/const OU_RENSEIGNER = \{/.test(cron), 'une seconde table redivergerait')
 })
 
 test('chaque balise de la base dit OU la remplir, et porte une etiquette lisible', () => {

@@ -171,7 +171,9 @@ test('l alerte dit QUOI, OU, et OU LE CORRIGER', () => {
   assert.match(t, /template\.event_type/, 'quel message')
   assert.match(t, /booking\.arrival/, 'quel sejour')
   assert.match(t, /propertyName/, 'quel bien')
-  assert.match(t, /manquants\.join/, 'quel placeholder')
+  // ⚠ L'HOTE LIT LE NOM DE L'INFORMATION, PAS SA CLE — constat de la seconde
+  // review : la phrase disait « Manque : wifi_mdp ». `etiquetteDe` la traduit.
+  assert.match(t, /manquants\.map\(etiquetteDe\)\.join/, 'quelle information, en clair')
   assert.match(t, /OU_RENSEIGNER\[m\]/, 'ou le renseigner')
   // ⚠ LA TABLE A DEMENAGE dans `lib/balises.js` (une seule source), mais le
   // LIBELLE ne change pas : il nomme l'ecran qui existe aujourd'hui.
