@@ -14,6 +14,7 @@ const { refusPlancher, valeurEffective } = require('../lib/plancher-vs-base')
 const { refsDuPerimetre } = require('../lib/permissions')
 const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
 const { clesMigrees } = require('../lib/cles-migrees')
+const { sansArchives } = require('../lib/biens-vivants')
 
 const { surveillerReponse } = require('../lib/reponse-partenaire')
 const supabase = createClient(
@@ -168,7 +169,22 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ properties: [] })
     }
 
-    let qProps = supabase
+    // ⚠ CETTE LISTE SERT DEUX ECRANS QUE THIERRY A NOMMES SEPAREMENT — les
+    // bulles du bas du calendrier (point 3) et la liste des logements de la
+    // base de connaissance (point 6) : `pages/calendrier.html` et
+    // `apps/agent-ai/knowledge.html` appellent tous deux cet endpoint. Un bien
+    // archive y apparaissait donc deux fois, sous deux apparences.
+    //
+    // ⚠ LA GARDE EST SUR CETTE LISTE SEULE, PAS SUR L'ENDPOINT. La lecture d'UN
+    // bien par son identifiant (le PATCH, plus bas) ne la porte surtout pas :
+    // la fiche d'un bien archive doit s'ouvrir, sinon il n'y a plus de chemin
+    // pour le reactiver. C'est la distinction qui tient tout ce lot — une
+    // lecture de LISTE se filtre, une lecture CIBLEE jamais.
+    // ⚠ `sansArchives` ENVELOPPE LA CHAINE APRES `.select()`, jamais le
+    // `.from()` seul : `from()` n'expose ni `.is()` ni les autres filtres, et le
+    // garde de type de `sansArchives` LEVE. Ecrit a l'envers d'abord, attrape
+    // par une mesure directe plutot que par la production.
+    let qProps = sansArchives(supabase
       .from('properties')
       // ⚠ `migration_target_property_id` : c'est elle qui rend un bien EN COURS
       // DE MIGRATION eligible aux ecrans de connexion OTA. Sans elle, un bien
@@ -176,7 +192,7 @@ module.exports = async function handler(req, res) {
       // n'apparaissait nulle part — l'hote ne pouvait pas le connecter, et il
       // n'y avait aucun autre chemin dans le produit.
       .select('id, name, provider, provider_property_id, migration_target_property_id, currency, address, zip_code, city, country, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, pilote_tarifaire, ota_connect_status, ota_requested_at, ota_listing_urls, photo_url, created_at')
-      .eq('user_id', compteLecture)
+      .eq('user_id', compteLecture))
     if (refsPerimetre) {
       // ⚠ LE PIEGE UUID, POUR LA TROISIEME FOIS. `properties.id` est de type
       // uuid : y passer une reference Beds24 numerique (« 209413 ») fait echouer
