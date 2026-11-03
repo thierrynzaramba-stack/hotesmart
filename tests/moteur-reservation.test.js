@@ -483,3 +483,43 @@ test('un bien a plusieurs unites n est PAS vendable par le moteur', () => {
   assert.equal(M.raisonNonVendable({ ...BIEN, inventory_units: 1 }), null)
   assert.equal(M.raisonNonVendable({ ...BIEN, inventory_units: null }), null)
 })
+
+// ─── Tout motif de refus a une phrase pour l'hote ───────────────────────────
+test("LE TEST QUI COMPTE : tout motif rendu a une phrase dans l ecran de l hote", () => {
+  // ⚠ CE GARDE-FOU MANQUAIT AU DEPOT, et son absence s'est payee le jour meme :
+  // `raisonNonVendable` a gagne un cinquieme motif (`bien_archive`) et
+  // `apps/reservation-directe/index.html` n'en declarait que quatre. Son repli
+  // est `BLOQUANTS[b.bloquant] || b.bloquant` : l'hote lisait donc la chaine
+  // technique « bien_archive » dans un encadre rouge. Constat de la revue de
+  // 3ab472d9 — rien, ni test ni i18n-check, ne pouvait l'attraper.
+  //
+  // ⚠ LES MOTIFS SONT OBTENUS EN APPELANT LA FONCTION, pas en grepant ses
+  // `return` : une branche devenue inatteignable sortirait quand meme d'un grep,
+  // et un motif neuf ajoute par un `return` d'une autre forme y echapperait.
+  const cas = [
+    null,
+    { ...BIEN, archive_le: '2026-11-03T20:42:19.342Z' },
+    { inventory_units: 1 },
+    { provider_property_id: 'p', inventory_units: 2 },
+    { ...BIEN, provider: 'beds24' }
+  ]
+  const motifs = [...new Set(cas.map(b => M.raisonNonVendable(b)).filter(Boolean))]
+  assert.ok(motifs.length >= 5,
+    `${motifs.length} motifs obtenus (${motifs}) : les cas de ce test ne couvrent plus la fonction`)
+
+  // ⚠ LE DICTIONNAIRE EST **EVALUE**, pas cherche a la sous-chaine : on veut ses
+  // VRAIES cles. Un `grep` de presence resterait vert sur une cle commentee.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'apps/reservation-directe/index.html'), 'utf8')
+  const bloc = src.match(/const BLOQUANTS = (\{[\s\S]*?\n  \})/)
+  assert.ok(bloc, 'le dictionnaire BLOQUANTS n a pas ete trouve dans l ecran')
+  // eslint-disable-next-line no-new-func
+  const BLOQUANTS = new Function(`return ${bloc[1]}`)()
+  assert.ok(Object.keys(BLOQUANTS).length >= 5,
+    `BLOQUANTS n a que ${Object.keys(BLOQUANTS).length} entrees`)
+
+  for (const m of motifs) {
+    assert.ok(typeof BLOQUANTS[m] === 'string' && BLOQUANTS[m].length > 20,
+      `le motif « ${m} » n a pas de phrase dans apps/reservation-directe : l hote lirait ce nom technique`)
+  }
+})
