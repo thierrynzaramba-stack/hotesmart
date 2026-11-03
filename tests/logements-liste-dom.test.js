@@ -86,6 +86,26 @@ const bien = (extra = {}) => ({
 // logement »). La REGLE, elle, reste eprouvee ici : c'est elle qui compte, et la
 // fiche (etape 2) la consomme.
 
+test("LE TEST QUI COMPTE : la liste MARQUE un bien archive", () => {
+  // ⚠ CONSTAT DE THIERRY EN RECETTE DE STAGING, le 3 novembre 2026, HORS de son
+  // plan : « la page /logements liste toujours Loft Pilotable et Maison Jardin
+  // comme les autres, sans pastille archive ». L'accueil et les revenus les
+  // marquaient deja ; cette page etait le dernier endroit ou un bien range se
+  // lisait comme un bien vivant — et c'est la page d'ou l'hote part pour
+  // ouvrir une fiche.
+  const vivant = doc(M.carteHtml(bien(), OUTILS()))
+  assert.ok(!vivant.querySelector('.marque-archive'),
+    'un bien vivant porte la marque « archive »')
+
+  const range = doc(M.carteHtml({ ...bien(), archive_le: '2026-11-02T12:26:00Z' }, OUTILS()))
+  const marque = range.querySelector('.marque-archive')
+  assert.ok(marque, 'un bien archive ne porte aucune marque dans la liste')
+  // ⚠ LA MEME CLASSE QUE PARTOUT : une seconde forme pour le meme etat
+  // divergerait au premier correctif de style.
+  assert.match(String(marque.textContent), /archiv/i,
+    `la marque ne dit pas « archive » : « ${marque.textContent} »`)
+})
+
 test('LE TEST QUI COMPTE : un fait daté NON LU ne devient jamais « Libre »', () => {
   const dit = M.faitDateAffiche(null)
   assert.equal(dit.cle, 'logements.fait_indisponible')

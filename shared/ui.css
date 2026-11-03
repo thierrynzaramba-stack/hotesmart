@@ -162,6 +162,19 @@ h1, h2, h3, p { margin: 0; }
   padding: 6px 12px; border-radius: var(--radius-pill);
   background: var(--surface); font-size: var(--fs-caption); font-weight: var(--fw-semibold);
 }
+/* ⚠ LA MARQUE D'UN LOGEMENT ARCHIVE. Decision 1 de Thierry du 31 octobre
+   2026 : les revenus d'un bien archive restent COMPTES, et sa ligne est
+   marquee. Sobre a dessein — ce n'est pas une alerte, c'est un etat : un fond
+   neutre et le texte en gris, pas une couleur de la palette des niveaux, qui
+   est reservee aux previsions de prix. */
+.marque-archive {
+  display: inline-flex; align-items: center;
+  margin-inline-start: 6px; padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2); color: var(--muted);
+  font-size: 11px; font-weight: var(--fw-semibold);
+  white-space: nowrap; vertical-align: middle;
+}
 
 /* ---------- Cartes ---------- */
 .card {
