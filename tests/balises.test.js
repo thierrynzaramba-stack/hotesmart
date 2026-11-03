@@ -199,7 +199,10 @@ test('LE TEST QUI COMPTE : l annee ne se dit QUE hors de l annee en cours', () =
   assert.equal(dans('2026-11-02'), 'x lundi 2 novembre', 'meme annee : pas d annee')
   assert.equal(dans('2026-12-25'), 'x vendredi 25 décembre', 'decembre de cette annee non plus')
   assert.equal(dans('2027-11-02'), 'x mardi 2 novembre 2027', 'annee suivante : elle se dit')
-  assert.equal(dans('2027-01-01'), 'x vendredi 1 janvier 2027', 'meme a un jour d ecart')
+  // ⚠ « 1er », PAS « 1 » — constat de review : « le 1 janvier » n'est pas du
+  // francais, et ma premiere version de ce test FIGEAIT le defaut, sur le cas
+  // precis qu'une confirmation de reservation affiche en clair.
+  assert.equal(dans('2027-01-01'), 'x vendredi 1er janvier 2027', 'meme a un jour d ecart')
   // ⚠ ET DANS L'AUTRE SENS : un sejour passe porte son annee aussi. Un message
   // de depart relu en janvier ne doit pas faire croire a l'annee en cours.
   assert.equal(dans('2025-11-02'), 'x dimanche 2 novembre 2025', 'annee passee : elle se dit')
@@ -211,6 +214,70 @@ test('LE TEST QUI COMPTE : l annee ne se dit QUE hors de l annee en cours', () =
   assert.equal(remplacerBalises('x {arrivee}',
     { reservation: { arrivee: memeDate }, maintenant: new Date('2027-06-01T12:00:00Z') }).texte,
   'x mardi 2 novembre', 'vu depuis 2027, la meme date ne porte plus d annee')
+})
+
+test('LE TEST QUI COMPTE : l annee se decide en heure de PARIS, pas celle du serveur', () => {
+  // ⚠ CONSTAT DE REVIEW, MESURE, et il mordait UNE HEURE PAR AN. Une date
+  // ecrite « 2026-12-31 » est minuit UTC, les getters de `Date` sont LOCAUX, et
+  // les fonctions Vercel tournent en UTC. A 23:30 UTC le 31 decembre, il est
+  // deja le 1er janvier a Paris : l'ancienne version disait « jeudi
+  // 31 décembre » sans annee, et « mardi 5 janvier 2027 » AVEC — les deux a
+  // l'envers, dans le message qui confirme une reservation.
+  const reveillon = new Date('2026-12-31T23:30:00Z')   // 00:30 le 1er janvier a Paris
+  const dit = (d, ref) => remplacerBalises('x {arrivee}', { reservation: { arrivee: d }, maintenant: ref }).texte
+  assert.equal(dit('2026-12-31', reveillon), 'x jeudi 31 décembre 2026',
+    'vu de Paris on est en 2027 : l annee du sejour se dit')
+  assert.equal(dit('2027-01-05', reveillon), 'x mardi 5 janvier',
+    'et janvier 2027 est l annee EN COURS : elle ne se dit pas')
+
+  // ⚠ ET LE RESULTAT NE DEPEND PLUS DU FUSEAU DU PROCESSUS. Mesure du
+  // 3 novembre 2026 : sous `TZ=America/New_York`, l'ancienne version rendait
+  // un JOUR faux en plus de l'annee. On ne peut pas changer `TZ` en cours de
+  // test (l'`Intl` est deja construit), mais on peut EPROUVER que la fonction
+  // n'utilise aucun getter local : sous n'importe quel fuseau, une date UTC du
+  // 31 decembre a 23:00 reste le 31 decembre a Paris.
+  assert.equal(dit('2026-12-31', new Date('2026-06-01T12:00:00Z')), 'x jeudi 31 décembre',
+    'meme annee vue de juin 2026 : pas d annee')
+})
+
+test('LE TEST QUI COMPTE : la preuve se fait SOUS UTC, le fuseau de Vercel', () => {
+  // ⚠ SANS CE TEST, LE GARDE-FOU EST VIDE SUR CETTE MACHINE, et je l'ai mesure :
+  // la machine de developpement est a l'heure de Paris, donc les getters LOCAUX
+  // y donnent le bon resultat. La mutation « retour aux getters locaux » rendait
+  // ZERO rouge — un test qui ne peut pas voir le defaut qu'il pretend garder.
+  // Le defaut, lui, ne vit que sous `TZ=UTC`, c'est-a-dire en production.
+  // On lance donc un processus ENFANT avec ce fuseau : c'est la seule facon de
+  // mesurer ici ce qui se passe la-bas.
+  const { execFileSync } = require('node:child_process')
+  const code = `
+    const { formatDate } = require(${JSON.stringify(path.join(__dirname, '..', 'lib', 'balises.js'))})
+    const r = new Date('2026-12-31T23:30:00Z')
+    console.log(JSON.stringify([formatDate('2026-12-31', r), formatDate('2027-01-05', r)]))
+  `
+  const sortie = execFileSync(process.execPath, ['-e', code],
+    { env: { ...process.env, TZ: 'UTC' }, encoding: 'utf8' })
+  const [reveillon, janvier] = JSON.parse(sortie)
+  assert.equal(reveillon, 'jeudi 31 décembre 2026',
+    'sous UTC aussi, il est le 1er janvier a Paris : l annee du sejour se dit')
+  assert.equal(janvier, 'mardi 5 janvier',
+    'et janvier 2027 est l annee en cours a Paris : elle ne se dit pas')
+})
+
+test('LE TEST QUI COMPTE : un instant de reference inutilisable retombe sur l horloge', () => {
+  // ⚠ CONSTAT DE REVIEW : `maintenant == null` etait la seule garde. Un
+  // horodatage en SECONDES est une date VALIDE (janvier 1970), donc l'annee se
+  // disait sur TOUTES les dates, en silence, dans du texte qui part au
+  // voyageur. Le JSDoc annoncait « number » sans preciser l'unite.
+  const annee = new Date().getFullYear()
+  const cetteAnnee = `${annee}-06-15`
+  const dit = (ref) => remplacerBalises('x {arrivee}', { reservation: { arrivee: cetteAnnee }, maintenant: ref }).texte
+  for (const faux of [1762000000, '', NaN, 0, 'hier', {}, -1]) {
+    assert.ok(!dit(faux).includes(String(annee)),
+      `un instant ${JSON.stringify(faux)} ne doit pas faire dire l annee en cours`)
+  }
+  // Contre-epreuve : un instant VALIDE d'une autre annee, lui, fait dire l annee.
+  assert.ok(dit(new Date(`${annee - 2}-06-15T12:00:00Z`)).includes(String(annee)),
+    'un instant valide d une autre annee la fait bien dire')
 })
 
 test('LE TEST QUI COMPTE : un seul remplaceur dans le depot', () => {
