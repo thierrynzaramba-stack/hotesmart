@@ -27,12 +27,57 @@
   --green-bg: #E1F5EE;
   --amber: #BA7517;
   --amber-bg: #FAEEDA;
-  /* ⚠ DEUX TEINTES AJOUTEES LE 28 OCTOBRE 2026, et TROIS couleurs reservees.
+  /* ⚠ DEUX TEINTES AJOUTEES LE 28 OCTOBRE 2026, et QUATRE couleurs reservees.
      Decisions de Thierry, dans l'ordre ou elles ont ete posees :
        · le NOIR est reserve a la NAVIGATION ;
        · l'AMBRE est reserve a « ce que HoteSmart a fait pour vous » ;
-       · le BLEU est reserve a CE QUI EST CLIQUABLE.
+       · le BLEU est reserve a CE QUI EST CLIQUABLE ;
+       · le PRUNE est reserve aux NIVEAUX DE PRIX (2 novembre 2026).
      D'ou les deux jetons ci-dessous, et leur partage du travail.
+
+     ⚠ LA QUATRIEME EST NEE D'UNE COMPARAISON MESUREE, pas d'un gout. Quatre
+     rampes ont ete construites sur la MEME echelle de luminance (0,80 a 0,26)
+     et comparees en ecart perceptuel ΔE CIE76 aux couleurs qui ont DEJA un
+     sens dans le produit. Les deux rencontres les plus proches tombent, pour
+     les quatre rampes, sur les MEMES deux references — d'ou les colonnes :
+
+       rampe          ΔE de son Base    ΔE de son Base au trait
+                      a --amber-bg      « nuit passee » #E4E4E4
+                      (#FAEEDA)
+       orange              4,3                 10,9
+       sable -> brun       9,1                  2,8
+       gris encre         11,5                  1,1
+       PRUNE              19,2                  9,5
+
+     Lecture : ΔE < 3 = la meme couleur, 3-10 = confondues d'un coup d'oeil,
+     > 20 = deux couleurs. ⚠ ET 19,2 EST SOUS LA BARRE DES 20 : ce tableau dit
+     que le prune est le MOINS MAL PLACE des quatre, pas qu'il est une autre
+     couleur que l'ambre. La place n'etait pas libre, elle etait la moins
+     occupee.
+
+     Les quatre tenaient les cinq conditions (luminance decroissante, ordre,
+     texte lisible, Base detache du blanc) : ce n'est donc pas la lisibilite
+     qui les departage. L'orange touche l'ambre aux DEUX bouts — son pas clair
+     a ΔE 6,0 du fond de la nuit « fermee » (#FBF1DA), son pas fonce a ΔE 10,3
+     de --amber (#BA7517) ; le prune, lui, en est a ΔE 75,2.
+
+     ⚠ LES VINGT VALEURS COMPAREES sont inscrites dans docs/kb/charte-ui.md §3,
+     parce que les trois rampes ecartees n'existent dans AUCUN fichier de ce
+     depot : sans elles, les nombres ci-dessus seraient invérifiables.
+
+     ⚠ ET LA RESERVATION NE REPEINT RIEN RETROACTIVEMENT — elle empeche la
+     ONZIEME. Dix valeurs prune, vingt-sept occurrences, existaient avant la
+     decision ; elles sont inventoriees une par une dans charte-ui.md §3 et
+     dans PRUNE_CONNU de tests/palette-niveaux.test.js. La plus genante n'est
+     pas --prune : c'est #5A3E8A, qui peint « votre prix » sur l'ecran meme des
+     niveaux, avec l'idiome de l'accent de niveau.
+
+     ⚠ L'EXCEPTION DATEE : --prune ci-dessous porte encore l'ETAT « moins
+     chers », a ΔE 5,67 de --yf-moyen-l ; --prune-bg est a ΔE 2,67 de
+     --yf-base, c'est-a-dire la MEME couleur. Decision de Thierry du
+     2 novembre 2026 : « le prune moins chers disparait avec le lot 4 (les
+     periodes passent en niveaux de grille) ; yf-ecran-periodes ne part pas en
+     prod avant le lot 4. »
 
      --blue : les ACTIONS, et elles seules. Un bouton, un lien.
 

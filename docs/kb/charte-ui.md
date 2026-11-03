@@ -108,11 +108,109 @@ pas — et le dire est la seule façon de ne pas refaire la même erreur.
 socle.** Les rouges y sont des hexas en dur dans les pages
 (`#B02A37`, `#842029`, `#FDECEA` dans `apps/yield/prix.html`, non jetonnés).
 
-## 3. La palette des cinq niveaux YieldFlow
+## 3. La palette des cinq niveaux YieldFlow — LA COULEUR DES NIVEAUX DE PRIX
+
+⚠ **QUATRIÈME COULEUR RÉSERVÉE DU PRODUIT, décision de Thierry du 2 novembre
+2026.** Le prune est **réservé aux niveaux de prix**, au même titre que les
+trois posées le 28 octobre :
+
+| couleur | réservée à |
+|---|---|
+| **noir** | la navigation |
+| **ambre** | « ce qu'HôteSmart a fait pour vous » |
+| **bleu** | ce qui est cliquable |
+| **prune** | **les niveaux de prix** |
+
+Réservée veut dire : **à partir du 2 novembre 2026, aucun nouvel usage ne prend
+cette teinte**, et `tests/palette-niveaux.test.js` fait rougir toute couleur
+prune qui n'est pas la palette ou l'une des dix déjà inventoriées ci-dessous.
+
+⚠ **ET LA RÉSERVATION NE REPEINT RIEN RÉTROACTIVEMENT — elle empêche la
+onzième.** Une première rédaction de ce paragraphe affirmait « aucun autre
+usage ne prend cette teinte » : c'était faux à l'heure où la phrase était
+écrite, et relevé en review le même jour. Mesuré sur tout le dépôt,
+commentaires retirés (une couleur en commentaire ne peint rien) : **dix valeurs
+prune, vingt-sept occurrences**, toutes antérieures à la décision.
+
+| valeur | ce qu'elle peint | statut |
+|---|---|---|
+| `#5B2A86` | `--prune`, l'état « moins chers » | **part avec le lot 4** |
+| `#F0E9F6` | `--prune-bg`, le fond de ce même état — ΔE **2,67** de `--yf-base`, la même couleur | **part avec le lot 4** |
+| `#5A3E8A` | `apps/yield/prix.html` — « votre prix » (`.yp-hote`, `tr.prix-hote`), en couleur de texte **et** en `box-shadow: inset 3px 0 0` | à résoudre |
+| `#7B3FA0` | `apps/yield/comparables.html` — légende « équipements » | à résoudre |
+| `#5B3B8F` / `#F3EDFA` | `pages/avis.html` — texte et fond du badge de source « email » | à résoudre |
+| `#FBF0FF` | `shared/config.js` — carte de l'app « Tarification dynamique » | à résoudre |
+| `#E4E2F0` | `shared/theme.css` / `public/tokens.css` — `--presta-3`, à ΔE **3,19** de `--yf-base` | à résoudre |
+| `#EEEDFE` | fond violacé de `analyze.html`, `prestataires.html`, `style.css`, `config.js` | à résoudre |
+| `#7A3E9A` | `tests/yf-ecran-periodes.test.js` — hexa dont le test exige la **disparition** | sans objet |
+
+⚠ **Le plus gênant est `#5A3E8A`**, et il est antérieur : il peint « votre
+prix » sur **l'écran qui affiche les niveaux**, avec l'idiome même de l'accent
+de niveau (`box-shadow: inset 3px 0 0`). Il n'est pas touché par ce lot — le
+signaler est le travail de cette ligne.
+
+⚠ **ET CE CHOIX EST UNE MESURE, PAS UN GOÛT.** Quatre rampes ont été
+construites sur la **même échelle de luminance** (0,80 → 0,26), avec le même
+balisage et les mêmes feuilles, puis comparées en **écart perceptuel ΔE
+CIE76** aux couleurs qui ont **déjà un sens** dans le produit. Lecture :
+ΔE < 3 = la même couleur · 3-10 = confondues d'un coup d'œil · > 20 = deux
+couleurs.
+
+Les deux rencontres les plus proches tombent, pour les quatre rampes, sur les
+**mêmes deux références** — ce qui rend la colonne lisible :
+
+| rampe | ΔE de son pas Base à `--amber-bg` (`#FAEEDA`) | ΔE de son pas Base au trait « nuit passée » (`#E4E4E4`) |
+|---|---|---|
+| orange | **4,3** | 10,9 |
+| sable → brun | 9,1 | **2,8** |
+| gris encre | 11,5 | **1,1** |
+| **prune** | **19,2** | 9,5 |
+
+⚠ **19,2 est sous la barre des 20.** Le tableau démontre que le prune est le
+**moins mal placé** des quatre, pas qu'il est « une autre couleur » que
+l'ambre. Dit autrement : la place n'était pas libre, elle était seulement la
+moins occupée.
+
+Les quatre rampes tenaient les cinq conditions — une seule teinte, Base le plus
+clair → Exceptionnel le plus foncé, luminance strictement décroissante, texte
+lisible sur chaque fond, Base détaché du blanc de la carte (1,23 à 1,24:1).
+**Ce n'est donc pas la lisibilité qui les départage, c'est la place libre.**
+
+- **l'orange** touche l'ambre **aux deux bouts** : son pas Base à ΔE 6,0 du
+  fond de la nuit « fermée » (`#FBF1DA`), son pas Exceptionnel (`#D07525`) à
+  ΔE **10,3** de `--amber` (`#BA7517`) et ΔE 12,8 d'`--amber-text` ;
+- **le sable** est l'orange désaturé — même angle de teinte (26-28°), 17-34 %
+  de saturation contre 69-70 %. Désaturer l'éloigne de l'ambre et le rapproche
+  du gris : il finit coincé entre les deux ;
+- **le gris encre** est à ΔE 1,1 du trait « nuit passée », c'est-à-dire la
+  même couleur qu'un état qui dit « il n'y a rien ici » ;
+- **le prune** est, de loin, celui dont le pas le plus foncé est le plus
+  éloigné de `--amber` : ΔE **75,2**, contre 10,3 pour l'orange et 30,8 pour
+  le sable.
+
+⚠ **LES VINGT VALEURS COMPARÉES, pour que ces nombres soient refaisables.**
+Les trois rampes écartées n'existent dans aucun fichier du dépôt : sans cette
+table, leurs chiffres seraient invérifiables, donc à ne pas citer. Mêmes cibles
+de luminance pour les quatre : 0,801 · 0,668 · 0,528 · 0,392 · 0,261.
+
+| rampe | Base | Moyen | Haut | Très haut | Exceptionnel |
+|---|---|---|---|---|---|
+| orange | `#F7E4D4` | `#F1CFB2` | `#EAB689` | `#E29858` | `#D07525` |
+| sable → brun | `#EBE7E3` | `#DED3CB` | `#D0BDAD` | `#C1A388` | `#AF835C` |
+| gris encre | `#E7E7E7` | `#D6D6D6` | `#C1C1C1` | `#A8A8A8` | `#8B8B8B` |
+| **prune** | `#EDE4F5` | `#DED0ED` | `#CDB8E2` | `#B99DD5` | `#A07DC4` |
+
+⚠ **UNE EXCEPTION VIVANTE, NOMMÉE ET DATÉE.** `--prune` (#5B2A86) porte encore
+l'état **« moins chers »** de la pop-up « Quand vos prix bougent », à **ΔE
+5,67** de `--yf-moyen-l` ; `--prune-bg` (#F0E9F6) est à **ΔE 2,67** de
+`--yf-base`, c'est-à-dire la **même couleur**. Décision de Thierry du
+2 novembre 2026, mot pour mot : « le prune “moins chers” disparaît avec le
+lot 4 (les périodes passent en niveaux de grille) ; `yf-ecran-periodes` ne part
+pas en prod avant le lot 4. »
 
 ⚠ **ÉLÉMENT DE STRUCTURE** — décision de Thierry du 29 octobre 2026 : échelle
 commune à toute restitution de prévision, **jamais modifiée ni substituée sans
-sa double validation**. Raisons et portée : `docs/kb/charte-ui.md` §3.
+sa double validation**.
 
 | niveau | fond | accent | classe |
 |---|---|---|---|
