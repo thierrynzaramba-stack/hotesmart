@@ -130,7 +130,16 @@ test("LE TEST QUI COMPTE : le bloc d archive suit l ETAT DU SERVEUR, jamais un c
   assert.strictEqual(vivant.querySelector('[data-bind="reactiver"]'), null,
     'un bien vivant propose de le reactiver')
 
-  const archive = doc(M.archiverHtml(fiche({ archive_le: '2026-10-31T10:00:00Z' }), OUTILS(), { peutArchiver: true }))
+  // ⚠ `bien.archive_le`, ET C'EST LE DEFAUT QUE CE TEST A LAISSE PASSER. Ma
+  // premiere version posait `archive_le` a la RACINE de la fiche — une forme que
+  // `lireFiche` ne produit PAS : il construit `{ bien: publier(bien), … }`. Le
+  // test etait donc vert sur un ecran ou le bouton « Reactiver » n'apparaissait
+  // jamais, et Thierry a archive deux biens sans pouvoir revenir (recette de
+  // staging du 3 novembre 2026). Troisieme faux vert de ce lot, et la troisieme
+  // fois la MEME cause : un banc qui fabrique une forme inexistante.
+  const avecArchive = fiche()
+  avecArchive.bien = { ...avecArchive.bien, archive_le: '2026-10-31T10:00:00Z' }
+  const archive = doc(M.archiverHtml(avecArchive, OUTILS(), { peutArchiver: true }))
   assert.ok(archive.querySelector('[data-bind="reactiver"]'), 'le bien archive n offre pas de le ranimer')
   assert.strictEqual(archive.querySelector('[data-bind="archiver"]'), null,
     'un bien deja archive propose de l archiver encore')

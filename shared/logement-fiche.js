@@ -829,7 +829,18 @@ export function supprimerHtml (fiche, outils, { peutSupprimer = false } = {}) {
 export function archiverHtml (fiche, outils, { peutArchiver = false } = {}) {
   if (!peutArchiver) return null
   const { t, esc, icone } = outils
-  const archive = Boolean(fiche && fiche.archive_le)
+  // ⚠ `fiche.bien.archive_le`, PAS `fiche.archive_le` — defaut BLOQUANT trouve
+  // par Thierry en recette de staging le 3 novembre 2026, et il avait la cause
+  // exacte. `lireFiche` construit `{ bien: publier(bien), … }` : la colonne
+  // atterrit donc sous `bien`, comme TOUT le reste de la fiche (`fiche.bien.id`
+  // deux cents lignes plus haut). Mon bloc lisait un cran trop haut, donc
+  // `archive` valait TOUJOURS faux : la fiche d'un bien archive proposait encore
+  // « Archiver », le bouton « Reactiver » n'apparaissait JAMAIS, et l'hote
+  // archivait sans pouvoir revenir. C'est la troisieme fois que ce lot paye la
+  // meme faute, et la troisieme fois de la MEME facon : un test qui fabrique une
+  // forme que le serveur ne produit pas.
+  const b = (fiche && fiche.bien) || null
+  const archive = Boolean(b && b.archive_le)
   // ⚠ PAS DE ROUGE : ce geste est réversible, et le rouge de cette charte est
   // réservé à ce qui ne revient pas. Le confondre avec la suppression ferait
   // hésiter l'hôte devant le seul des deux gestes qui se défait.
