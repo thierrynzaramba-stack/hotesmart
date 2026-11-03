@@ -87,7 +87,15 @@
                              background: var(--niveau-fond, var(--bg2)); color: var(--niv-encre, var(--text));
                              border: 1px solid var(--niveau-lisere, var(--border2)); }
     .mg-ev-liste { display: flex; flex-direction: column; gap: 6px; }
-    .mg-ev-l { background: var(--bg2); border-left: 4px solid var(--ev); border-radius: 4px; padding: 7px 10px; font-size: 13px;
+    /* ⚠ LE RAIL EST NEUTRE DEPUIS LE 3 NOVEMBRE 2026, et le niveau est sur
+       le BADGE de la ligne. Il portait --tc-<niveau>, ce qui donnait sur ce
+       fond --bg2 : 1,08 / 1,50 / 2,72 / 9,55:1 en bleu — trois paliers sur
+       quatre deja sous le seuil de 3:1 — et 1,02 / 1,09 / 1,33 / 14,57:1 en
+       encre, ou le trait et le fond ont en plus la MEME teinte (0 % des deux
+       cotes). Un trait de 4 px ne peut pas encoder quatre densites de gris sur
+       un fond gris : c'est une limite de l'echelle, pas un reglage. Le niveau
+       est deja nomme a cote, sur un badge qui a sa bordure. */
+    .mg-ev-l { background: var(--bg2); border-left: 4px solid var(--border2); border-radius: 4px; padding: 7px 10px; font-size: 13px;
                display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
     .mg-ev-l .o { font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); }
     svg.mg { width: 100%; height: auto; display: block; }
@@ -476,7 +484,7 @@
       + '<p class="mg-mention">Les niveaux d’AirROI lus dans les noms de votre grille YieldFlow : une lecture, pas un calcul de vos prix. Pic correspond à Très haut ou Exceptionnel.</p></div>'
     const evts = r.evenements.map(e => {
       const n = niv(e.niveau)
-      return `<div class="mg-ev-l" style="--ev:${n ? `var(--tc-${n})` : 'var(--border2)'}"><strong>${ech(e.nom)}</strong>`
+      return `<div class="mg-ev-l"><strong>${ech(e.nom)}</strong>`
         + `<span>${jourFr(e.debut)}${e.fin !== e.debut ? ` → ${jourFr(e.fin)}` : ''} (${ech(e.nuits)} nuit${e.nuits > 1 ? 's' : ''})</span>`
         + `${badge(e.niveau)}<span class="o">${e.recurrent ? 'récurrent' : 'ponctuel'}</span></div>`
     }).join('')

@@ -209,7 +209,7 @@
     const max = Math.max(10, Math.ceil(Math.max(...vals)) + 1)
     const y = v => h + (max - v) / (max - min) * (H - h - b)
     const x = i => g + i * (L - g - d) / Math.max(1, pts.length - 1)
-    const bande = (de, a, n) => `<rect x="${g}" width="${L - g - d}" y="${y(Math.min(a, max))}" height="${Math.max(0, y(Math.max(de, min)) - y(Math.min(a, max)))}" fill="var(--tc-${n})" opacity="0.35"></rect>`
+    const bande = (de, a, n) => `<rect x="${g}" width="${L - g - d}" y="${y(Math.min(a, max))}" height="${Math.max(0, y(Math.max(de, min)) - y(Math.min(a, max)))}" fill="var(--tc-${n})" opacity="0.65"></rect>`
     const bandes = bande(min, s.creux, 'creux') + bande(s.creux, s.favorable, 'modere') + bande(s.favorable, s.pic, 'favorable') + bande(s.pic, max, 'pic')
     const ligne = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.ecart).toFixed(1)}`).join(' ')
     const graduations = [s.creux, 0, s.favorable, s.pic].map(v => `<text x="${g - 6}" y="${y(v) + 4}" text-anchor="end">${v > 0 ? '+' : ''}${v}</text>`).join('')

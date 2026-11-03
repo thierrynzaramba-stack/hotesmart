@@ -25,7 +25,7 @@ export const jourFr = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || '')) ? `${
 // ⚠ UN NIVEAU INCONNU N'ENTRE JAMAIS DANS UN STYLE (revue de 675ed3b) : seuls
 // les quatre niveaux connus sont interpoles.
 export const niv = n => (Object.prototype.hasOwnProperty.call(NIVEAUX, n) ? n : null)
-export const badge = n => niv(n) ? `<span class="tc-badge" style="background:var(--tc-${niv(n)});color:var(--tc-${niv(n)}-txt)">${NIVEAUX[niv(n)]}</span>` : '<span class="non-calc">—</span>'
+export const badge = n => niv(n) ? `<span class="tc-badge" style="background:var(--tc-${niv(n)});color:var(--tc-${niv(n)}-txt);--tc-bord:var(--tc-${niv(n)}-bord)">${NIVEAUX[niv(n)]}</span>` : '<span class="non-calc">—</span>'
 const sens = v => SENS[v] || '—'
 const joursValides = jours => (jours || []).filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(String(x.jour)))
 
@@ -38,12 +38,49 @@ function listeDuJour (x) {
     + `<dt>Demande du marché</dt><dd>${sens(sn.demande)} <span class="non-calc">(non comptée dans le niveau : elle date du calcul)</span></dd></dl>`
 }
 
-// Une seule teinte, quatre paliers ; leur version sombre ; les classes du
-// calendrier. Injecte une fois par page.
+// Quatre paliers, et ils prennent L'ECHELLE D'ENCRE depuis le 3 novembre 2026.
+// Injecte une fois par page.
+//
+// ⚠ LE BLEU EST PARTI, ET C'ETAIT LA DEMANDE — recette de Thierry sur staging :
+// « le calendrier AirROI quitte le bleu (reserve au cliquable) et passe sur
+// l'echelle d'encre ». Les quatre paliers tenaient 216-217°, en plein dans la
+// bande du bleu, sur des cases qui sont des BOUTONS : la couleur reservee au
+// cliquable servait de couleur de donnee sur un element cliquable.
+//
+// ⚠ QUATRE PALIERS POUR CINQ NIVEAUX, et le saut est VOULU : « Pic » couvre
+// Tres haut ET Exceptionnel, exactement comme la legende de marche-global le
+// dit depuis toujours (« Pic correspond a Tres haut ou Exceptionnel »). D'ou
+// creux=1, modere=2, favorable=3, pic=5 — pas de palier sur le 4.
+//
+// ⚠ AUCUN HEXA ICI : les quatre valeurs sont des renvois. Les deux ecrans qui
+// chargent ce module — marche-temperature et marche-global — chargent aussi
+// public/style.css, ou l'echelle est declaree une fois.
+//
+// ⚠ ET LE TEXTE GAGNE AU PASSAGE : 16,25 / 14,60 / 11,97 / 15,91:1 contre
+// 12,18 / 8,71 / 4,76 / 10,43:1 en bleu. Le palier « favorable » etait le plus
+// juste, a 4,76:1.
 const STYLES = `
   :root {
-    --tc-creux: #E8EEF7; --tc-modere: #B9CCE9; --tc-favorable: #6F97D3; --tc-pic: #1E3F73;
-    --tc-creux-txt: #1c2b44; --tc-modere-txt: #1c2b44; --tc-favorable-txt: #1c2b44; --tc-pic-txt: #ffffff;
+    /* ⚠ QUATRE PALIERS, ET LE SAUT EST SUR LE 2, PAS SUR LE 4. Thierry a pose
+       les deux bornes — « Creux = niveau 1 … Pic = niveau 5 » — et laisse le
+       milieu. Mesure du 3 novembre 2026 : avec 1-2-3-5, les trois paliers bas
+       sont a 1,11:1 et 1,22:1 l'un de l'autre, c'est-a-dire INDISTINGUABLES.
+       Une carte de chaleur a quatre paliers dont trois se confondent n'en
+       restitue plus que deux. Avec 1-3-4-5 : 1,36 / 2,31 / 4,73:1 — mieux que
+       la rampe bleue remplacee, qui tenait 1,40 / 1,83 / 3,50. Releve en
+       review ; le saut sur le 2 ne coute rien, le saut sur le 4 coutait la
+       lisibilite de la moitie basse. */
+    --tc-creux: var(--niveau-1, #F7F7F7); --tc-modere: var(--niveau-3, #D6D6D6);
+    --tc-favorable: var(--niveau-4, #8C8C8C); --tc-pic: var(--niveau-5, #222222);
+    --tc-creux-txt: var(--text, #1a1a1a); --tc-modere-txt: var(--text, #1a1a1a);
+    --tc-favorable-txt: var(--text, #1a1a1a); --tc-pic-txt: var(--bg, #ffffff);
+    /* Le lisere, meme mecanique que les pastilles : sans lui, un palier pale
+       est a 1,07:1 du fond blanc de la page et la case n'a plus de forme. Il
+       sert a VOIR la case, pas a distinguer les paliers entre eux — c'est le
+       fond qui s'en charge. Le palier le plus fonce prend un lisere CLAIR :
+       son fond est deja a 15,91:1 du blanc. */
+    --tc-creux-bord: var(--niveau-4, #8C8C8C); --tc-modere-bord: var(--niveau-5, #222222);
+    --tc-favorable-bord: var(--niveau-5, #222222); --tc-pic-bord: var(--niveau-3, #D6D6D6);
   }
   /* ⚠ VARIANTE SOMBRE RETIREE — double validation de Thierry du 2 novembre
      2026 : « pas de mode sombre sur YieldFlow pour l'instant ».
@@ -56,8 +93,15 @@ const STYLES = `
   .tc-legende { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
   .tc-niv { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 3px 10px 3px 3px;
             border: 0.5px solid var(--border); border-radius: 999px; }
-  .tc-pastille { width: 18px; height: 18px; border-radius: 50%; display: inline-block; }
-  .tc-badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+  .tc-pastille { width: 18px; height: 18px; border-radius: 50%; display: inline-block;
+                 border: 1px solid var(--tc-bord, transparent); }
+  /* ⚠ LE BADGE A UNE BORDURE DEPUIS LE 3 NOVEMBRE 2026, et son absence etait
+     un constat de review : badge() emettait --tc-bord, mais .tc-badge n'avait
+     aucune declaration border — le jeton etait MORT. Sur une carte blanche,
+     « Creux » restait une pastille a 1,07:1, sans forme. C'etait le seul des
+     quatre consommateurs a ne pas l'avoir, et le plus repete. */
+  .tc-badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+              border: 1px solid var(--tc-bord, transparent); }
   .tc-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; max-width: 560px; }
   .tc-nav button { font: inherit; border: 0.5px solid var(--border2); background: var(--bg); color: var(--text);
                    border-radius: 8px; padding: 6px 12px; cursor: pointer; min-width: 44px; min-height: 44px; }
@@ -65,7 +109,7 @@ const STYLES = `
   .tc-nav h3 { margin: 0; font-size: 16px; text-transform: capitalize; }
   .tc-grille { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; max-width: 560px; }
   .tc-jsem { font-size: 11px; color: var(--text2); text-align: center; padding-bottom: 2px; }
-  .tc-jour { aspect-ratio: 1; border: 0; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer;
+  .tc-jour { aspect-ratio: 1; border: 1px solid var(--tc-bord, transparent); border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer;
              display: flex; align-items: center; justify-content: center; position: relative; padding: 0; }
   .tc-jour.evt::after { content: ''; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .tc-jour[aria-pressed="true"] { outline: 2px solid var(--text); outline-offset: 1px; }
@@ -82,7 +126,7 @@ const STYLES = `
   .tc-mois h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px; text-transform: capitalize; }
   .tc-mini { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
   .tc-mjsem { font-size: 10.5px; color: var(--text2); text-align: center; }
-  .tc-case { font: inherit; font-size: 11px; line-height: normal; text-align: center; padding: 4px 0; border: 0; border-radius: 3px; cursor: pointer; }
+  .tc-case { font: inherit; font-size: 11px; line-height: normal; text-align: center; padding: 4px 0; border: 1px solid var(--tc-bord, transparent); border-radius: 3px; cursor: pointer; }
   .tc-case:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
   .tc-vide { font-size: 11px; text-align: center; padding: 4px 0; color: var(--text2); }
   /* Telephone (demandes de Thierry, 4 octobre 2026) : deux mois par ligne,
@@ -150,10 +194,10 @@ export function monterCalendrierTemperature (conteneur, jours) {
       const x = parJour.get(cle)
       const n = x && niv(x.niveau)
       cases += n
-        ? `<button type="button" class="tc-jour${x.evenement ? ' evt' : ''}" data-jour="${cle}" aria-pressed="${cle === jourChoisi}" style="background:var(--tc-${n});color:var(--tc-${n}-txt)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}">${d}</button>`
+        ? `<button type="button" class="tc-jour${x.evenement ? ' evt' : ''}" data-jour="${cle}" aria-pressed="${cle === jourChoisi}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}">${d}</button>`
         : '<div></div>'
     }
-    const legende = Object.keys(NIVEAUX).map(n => `<span class="tc-niv"><span class="tc-pastille" style="background:var(--tc-${n})"></span><b>${NIVEAUX[n]}</b> ${DESCRIPTION[n]}</span>`).join('')
+    const legende = Object.keys(NIVEAUX).map(n => `<span class="tc-niv"><span class="tc-pastille" style="background:var(--tc-${n});--tc-bord:var(--tc-${n}-bord)"></span><b>${NIVEAUX[n]}</b> ${DESCRIPTION[n]}</span>`).join('')
     conteneur.innerHTML = `<div class="tc-legende">${legende}</div>`
       + `<div class="tc-nav"><button type="button" data-tc="prec" aria-label="Mois précédent"${moisCourant === 0 ? ' disabled' : ''}>‹</button>`
       + `<h3>${ech(moisFr(m))}</h3>`
@@ -227,7 +271,7 @@ export function monterAnneeTemperature (conteneur, jours, { premierMois = null, 
     const d = new Date(Date.UTC(a0, m0 - 1 + i, 1))
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
   })
-  const legende = `<div class="tc-legende-simple">${Object.keys(NIVEAUX).map(n => `<span><i style="background:var(--tc-${n})"></i>${NIVEAUX[n]} (${DESCRIPTION[n]})</span>`).join('')}</div>`
+  const legende = `<div class="tc-legende-simple">${Object.keys(NIVEAUX).map(n => `<span><i style="background:var(--tc-${n});border:1px solid var(--tc-${n}-bord)"></i>${NIVEAUX[n]} (${DESCRIPTION[n]})</span>`).join('')}</div>`
   const entete = JOURS_COURTS.map(j => `<span class="tc-mjsem">${j}</span>`).join('')
   const blocs = mois.map(m => {
     const [a, mm] = m.split('-').map(Number)
@@ -239,7 +283,7 @@ export function monterAnneeTemperature (conteneur, jours, { premierMois = null, 
       const x = parJour.get(cle)
       const n = x && niv(x.niveau)
       cases += n
-        ? `<button type="button" class="tc-case" data-jour="${cle}" style="background:var(--tc-${n});color:var(--tc-${n}-txt)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}" title="${ech(jourFr(cle))} · ${NIVEAUX[n]}${x.evenement ? ' · ' + ech(x.evenement) : ''}">${d}</button>`
+        ? `<button type="button" class="tc-case" data-jour="${cle}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}" title="${ech(jourFr(cle))} · ${NIVEAUX[n]}${x.evenement ? ' · ' + ech(x.evenement) : ''}">${d}</button>`
         : `<span class="tc-vide">${d}</span>`
     }
     const absent = presents.has(m) ? '' : '<p class="non-calc" style="font-size:11.5px;margin:4px 0 0">Non couvert par le modèle AirROI.</p>'
