@@ -229,7 +229,7 @@ Un par un, **recette staging entre chaque**.
 | **1** | **Socle : un seul remplaceur de balises**, partagé par les messages programmés, les réponses manuelles et l'IA. Aujourd'hui il en existe **deux** (`lib/message-builder.js`, `lib/cron-messages.js`). Tests. | **rien pour l'hôte** |
 | **2** | **Nettoyage des données en production** : doublons, valeurs écrites en dur dans les textes, prix faux. **D'abord un script à blanc qui produit un rapport** ; l'écriture **seulement sur go explicite de Thierry** (`CONFIRMER_PROD=cjmrizpdyhrcurmgyrhs`). | non |
 | **3** | **Page V5** : volet ordinateur + page téléphone. Elle **remplace** `apps/agent-ai/knowledge.html`. | oui |
-| **4** | **Insertion en un clic** dans les messages programmés et les réponses manuelles, avec le remplissage automatique et **le blocage si une balise est vide**. | oui |
+| **4** | **Insertion en un clic** dans les messages programmés et les réponses manuelles, avec le remplissage automatique et **le blocage si une balise est vide**. ⚠ **ET LE MÊME BLOCAGE POUR LE CODE** (décision de Thierry du 3 novembre 2026) : le bouton Envoyer reste gris tant que `[CODE À INSÉRER]` est dans le texte — même règle que les balises vides. C'est ce qui ferme la porte que le lot 1b n'a fait que réduire : aujourd'hui un hôte qui clique Envoyer sans lire la proposition envoie encore le marqueur, et seul le résumé en majuscules l'en avertit. | oui |
 | **5** | **IA** : elle répond **seulement à partir des réponses prêtes autorisées** ; **jamais** une réponse « Hors IA », **jamais** une donnée confidentielle, **jamais** un prix absent de la base ; sinon **l'alerte « info manquante » existante prend le relais**. | oui |
 
 ---
