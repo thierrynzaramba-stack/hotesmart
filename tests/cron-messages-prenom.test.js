@@ -48,29 +48,41 @@ test('LE TEST QUI COMPTE : une information MANQUANTE arrete l envoi, et previent
     'la cle technique ne doit pas etre ce que l hote lit en premier')
 })
 
-test('LE TEST QUI COMPTE (lot 1b) : un modele portant {code_acces} est RETENU, et l hote le lit', async () => {
-  // ⚠ AVANT LE LOT 1B, CE MESSAGE PARTAIT AU VOYAGEUR avec « [CODE À INSÉRER] »
-  // en clair, apres etre passe par Haiku : la seule garde du depot vivait sur
-  // le chemin de la serrure. La garde est maintenant dans le remplaceur, donc
-  // sur TOUS les chemins.
-  //
-  // ⚠ ET ON MESURE LA TRACE, PAS SEULEMENT LE REFUS. Un envoi degrade devient
-  // un envoi RETENU, et un message retenu est un message que personne ne voit
-  // partir : si le refus ne laissait qu'un `console.error`, l'hote ne saurait
-  // jamais que son voyageur attend. C'est la famille de defaut que ce depot
-  // connait — tout sort en logs, rien n'atteint l'ecran.
-  const { mod, incidents, appels } = charger('texte ameliore')
+test('LE TEST QUI COMPTE (lot 1b) : un modele portant {code_acces} est PREPARE, pas jete', async () => {
+  // ⚠ MA PREMIERE VERSION DU LOT 1B FAISAIT RENDRE `null` ICI, et c'etait une
+  // REGRESSION trouvee en review : le `null` tombe avant la fourche auto/Test,
+  // donc la proposition que l'hote relit et COMPLETE A LA MAIN disparaissait
+  // aussi. Pour un code, c'est la seule issue : la base de connaissance ne
+  // porte pas `code_acces`, et le moteur programme ne le fournit jamais.
+  // La garde doit refuser l'ENVOI, pas la preparation — et c'est ce que mesure
+  // ce test : le message EXISTE, marque, pret a etre complete.
+  const { mod } = charger('texte ameliore')
   const m = await mod.generateAutoMessage(
     modele('Bonjour {prenom}, votre code est {code_acces}.'),
     { firstName: 'Carole', arrival: '2026-10-08', departure: '2026-10-10' },
     bien, 'Carole', {}, 'u1')
-  assert.strictEqual(m, null, 'rien ne part sans le code')
-  assert.equal(appels.length, 0, 'et on ne paie pas Haiku pour un message retenu')
-  assert.equal(incidents.length, 1, 'l hote est prevenu')
-  assert.match(incidents[0].detail, /Code d'accès/, 'l alerte NOMME l information')
-  assert.match(incidents[0].detail, /serrure/, 'et dit ou se corrige le defaut : le modele')
-  assert.ok(!/code_acces/.test(incidents[0].detail.split('A renseigner')[0]),
-    'pas de nom technique dans ce que l hote lit en premier')
+  assert.ok(m, 'le message est prepare : sans lui, l hote n a plus aucun chemin')
+  assert.match(m, /\[CODE À INSÉRER\]/, 'et il porte le marqueur, que la garde d envoi reconnait')
+  const { hasUnresolvedCode } = require('../lib/balises')
+  assert.ok(hasUnresolvedCode(m), 'c est ce que le site d envoi consulte pour ne PAS envoyer')
+
+  // ⚠ ET C'EST CE TEST QUI A TROUVE LE TROU : le double de l'IA rend « texte
+  // ameliore », SANS marqueur. Sans la garde finale, le message perdait sa
+  // marque en passant par Haiku, le site d'envoi ne voyait plus rien a bloquer,
+  // et un message sans code serait parti au voyageur — par la porte meme que ce
+  // lot ferme. C'est le drapeau du remplaceur qui fait foi, pas une relecture.
+  assert.ok(!/texte ameliore/.test(m), 'l amelioration de l IA est ECARTEE quand elle efface le marqueur')
+})
+
+test('et la contre-epreuve : avec le code, l amelioration de l IA est GARDEE', async () => {
+  // Sans elle, « on ecarte l IA » resterait vrai d un code qui ne manque pas,
+  // et le lot aurait silencieusement supprime l amelioration pour tout le monde.
+  const { mod } = charger('texte ameliore')
+  const m = await mod.generateAutoMessage(
+    modele('Bonjour {prenom}, bienvenue.'),
+    { firstName: 'Carole', arrival: '2026-10-08', departure: '2026-10-10' },
+    bien, 'Carole', {}, 'u1')
+  assert.equal(m, 'texte ameliore')
 })
 
 test('et le meme message part NORMALEMENT quand l information est la', async () => {

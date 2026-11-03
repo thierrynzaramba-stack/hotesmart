@@ -94,37 +94,49 @@ test('une balise inconnue est RENDUE, pas avalee : l appelant decide', () => {
   assert.deepEqual(r.manquants, [], 'une balise inconnue n est pas une valeur manquante')
 })
 
-test('LE TEST QUI COMPTE : un code non resolu RETIENT le message', () => {
-  // ⚠ CE TEST DISAIT L'INVERSE JUSQU'AU 3 NOVEMBRE 2026, et c'est une decision
-  // de Thierry qui l'a retourne (lot 1b). L'ancienne version gravait « le code
-  // n'entre JAMAIS dans les manquants », au motif que son absence est normale
-  // quand un message programme est bati. Vrai — mais la consequence l'etait
-  // aussi : un modele d'arrivee portant `{code_acces}` envoyait
-  // « [CODE À INSÉRER] » en clair au voyageur, apres etre passe par Haiku,
-  // parce que la seule garde du depot vivait sur UN autre chemin.
-  // Desormais le remplaceur le signale, et tout appelant qui refuse deja sur un
-  // manque refuse aussi sur un code absent.
+test('LE TEST QUI COMPTE : un code non resolu SE SIGNALE, et n entre pas dans les manquants', () => {
+  // ⚠ CETTE DISTINCTION EST TOUT, et ma premiere version du lot 1b l'avait
+  // ratee : `manquants` fait RETOURNER `null` a `generateAutoMessage`, et ce
+  // `null` tombe AVANT la fourche auto/Test — donc la proposition que l'hote
+  // complete a la main disparaissait elle aussi. Pour un code il n'existe
+  // aucune autre issue : la base de connaissance ne porte pas `code_acces`, et
+  // le moteur programme ne fournit jamais le code. Le drapeau separe permet a
+  // l'appelant de refuser l'ENVOI en gardant la preparation.
   const sans = remplacerBalises('code {code_acces}', { reservation: RESA })
   assert.equal(sans.texte, `code ${UNRESOLVED_CODE}`)
-  assert.deepEqual(sans.manquants, ['code_acces'], 'un code absent est un manque')
-  assert.ok(hasUnresolvedCode(sans.texte), 'et la garde de l envoi le voit aussi')
+  assert.equal(sans.codeNonResolu, true, 'le code absent se signale')
+  assert.deepEqual(sans.manquants, [], 'mais il ne bloque PAS la generation')
+  assert.ok(hasUnresolvedCode(sans.texte), 'et la garde de l envoi le voit')
 
-  // Avec le code, rien ne manque et rien ne bloque — la contre-epreuve, sans
-  // laquelle « il manque » resterait vrai d'un code qui ne manque pas.
   const avec = remplacerBalises('code {code_acces}', { reservation: RESA, codeAcces: '000000' })
   assert.equal(avec.texte, 'code 000000')
-  assert.deepEqual(avec.manquants, [])
+  assert.equal(avec.codeNonResolu, false)
   assert.ok(!hasUnresolvedCode(avec.texte))
 
-  // ⚠ ET UN TEXTE QUI NE DEMANDE PAS LE CODE N'EN MANQUE PAS : sans ca, tout
-  // message programme deviendrait irrecevable.
-  const autre = remplacerBalises('Bonjour {prenom}', { reservation: RESA })
-  assert.deepEqual(autre.manquants, [])
+  // Un texte qui ne demande pas le code ne le signale pas.
+  assert.equal(remplacerBalises('Bonjour {prenom}', { reservation: RESA }).codeNonResolu, false)
 
-  // Et le « ou le remplir » ne renvoie pas l'hote vers la base : le code vient
-  // de la serrure, la correction se fait dans le MODELE.
-  assert.match(OU_REMPLIR.code_acces, /serrure/)
-  assert.match(OU_REMPLIR.code_acces, /modèle/)
+  // ⚠ ET LE CODE N'A PAS DE « OU LE REMPLIR » : le gabarit de l'alerte des
+  // manquants promet « le message repartira une fois l'information saisie » —
+  // faux pour un code, qui ne se saisit nulle part. Il a son propre message.
+  assert.equal(OU_REMPLIR.code_acces, undefined)
+})
+
+test('LE TEST QUI COMPTE : les deux sites d envoi consultent la garde du code', () => {
+  // ⚠ UN TEST DE CABLAGE, ET JE LE DIS : aucun test du depot n'exerce
+  // `checkAndSendTemplate` ni `processMessageTemplates` — ils demandent un
+  // double complet de Supabase. L'EFFET de la garde (« le message est prepare,
+  // l'envoi est refuse ») n'est donc pas mesure ; ce qui l'est, c'est que les
+  // DEUX sites d'envoi la consultent, et que le message existe (teste par
+  // effet dans tests/cron-messages-prenom.test.js). Dette notee dans la remise.
+  const cron = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cron-messages.js'), 'utf8')
+  const gardes = cron.match(/const codeARemplir = hasUnresolvedCode\(message\)/g) || []
+  assert.equal(gardes.length, 2, 'les deux sites d envoi posent la garde')
+  const fourches = cron.match(/if \(propMode === 'auto' && !codeARemplir\)/g) || []
+  assert.equal(fourches.length, 2, 'et les deux fourches la consultent')
+  // Et personne ne rappelle l'ancien format par la porte de derriere.
+  assert.ok(!/formatDate.*require\('\.\/cron-shared'\)/.test(cron),
+    'cron-shared.formatDate ne doit plus etre importe : il remettrait le second format a portee')
 })
 
 test('LE TEST QUI COMPTE : UN SEUL format de date, et il n est pas injectable', () => {
@@ -145,13 +157,18 @@ test('LE TEST QUI COMPTE : UN SEUL format de date, et il n est pas injectable', 
   })
   assert.equal(force.texte, 'arrivee lundi 2 novembre',
     'aucun appelant ne doit pouvoir imposer son format')
-  const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'balises.js'), 'utf8')
-  assert.ok(!/ctx\.formatDate/.test(source), 'le point d injection ne doit plus exister')
-
-  // Et le chemin des messages programmes ne passe plus le sien.
-  const cron = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cron-messages.js'), 'utf8')
-  const appel = cron.slice(cron.indexOf('remplacerBalises('), cron.indexOf('text = texte'))
-  assert.ok(!/\bformatDate\b/.test(appel), 'cron-messages ne doit plus passer de formateur')
+  // ⚠ LE GREP IGNORE LES COMMENTAIRES — constat de review : sans ca, un
+  // commentaire qui NOMME le parametre retire (« on n'accepte plus
+  // ctx.formatDate ») rendrait ce test rouge pour rien.
+  const sansCommentaires = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+  assert.ok(!/ctx\.formatDate/.test(sansCommentaires('lib/balises.js')),
+    'le point d injection ne doit plus exister')
+  // ⚠ ET ON REGARDE LE FICHIER ENTIER, pas une tranche delimitee par une
+  // chaine magique : `cron.slice(…, indexOf('text = texte'))` rendait -1 au
+  // premier renommage, et l'assertion restait verte a vide pour toujours.
+  assert.ok(!/\bformatDate\b/.test(sansCommentaires('lib/cron-messages.js')),
+    'cron-messages ne doit plus connaitre d autre formateur, nulle part')
 })
 
 test('LE TEST QUI COMPTE : un seul remplaceur dans le depot', () => {
@@ -273,7 +290,15 @@ test('LE TEST QUI COMPTE : toute balise pouvant manquer dit OU la remplir', () =
   // ⚠ Constat de review : le wifi est entre dans les manquants avec ce lot, et
   // l'alerte envoyee a l'hote disait « A renseigner dans wifi_mdp » — un nom
   // technique. On exige donc la couverture pour TOUT ce qui peut y entrer.
-  const peutManquer = DE_LA_BASE.filter(cle => !BALISES[cle].defaut)
+  // ⚠ LA POPULATION EST « CE QUI PEUT ENTRER DANS `manquants` », pas « ce qui
+  // vient de la base » — constat de review. Les deux coincidaient jusqu'a ce
+  // que le lot 1b fasse entrer un code d'origine `serrure`… avant de l'en
+  // ressortir. On la DERIVE du comportement plutot que de l'origine : on
+  // demande a la fonction, pour chaque balise, si elle finit dans `manquants`.
+  const peutManquer = Object.keys(BALISES).filter(cle => {
+    const r = remplacerBalises(`x {${cle}} y`, { reservation: {}, connaissance: {} })
+    return r.manquants.includes(cle)
+  })
   assert.ok(peutManquer.length >= 4, 'le test doit porter sur une vraie population')
   for (const cle of peutManquer) {
     assert.ok(OU_REMPLIR[cle], `${cle} peut entrer dans les manquants : il doit dire ou se remplir`)
