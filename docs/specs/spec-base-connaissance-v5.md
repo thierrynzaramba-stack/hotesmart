@@ -185,9 +185,9 @@ d'un coup.** La V5 ajoute (type, libellé, rattachement), elle ne renomme pas
 |---|---|---|
 | D1 | ~~Le champagne : 29 € ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : 29 €, et le pack massage est TOUJOURS ÉPUISÉ.** La ligne `faq` « Pack en complément » de La bulle passe donc de 39 € à **29 €** ; sa seconde phrase reste vraie. | C'est la ligne qui a déclenché le chantier. ✔ **CORRIGÉE EN PRODUCTION par Thierry le 3 novembre 2026**, et vérifié en lecture seule ensuite : la ligne porte 29 €, la phrase sur le pack massage est intacte, **un seul prix dans toute la base** (45 lignes lues) et **zéro ligne à 39 €** — il n'y en avait pas d'autre ailleurs. L'IA lit cette table à chaque passage du cron, sans cache. |
 | D2 | ~~Quel est LE téléphone hôte ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : les DEUX numéros des modèles sont bons** — NUMERO-C et NUMERO-B. Donc **deux clés**, `telephone_hote` (NUMERO-C) et `telephone_hote_2` (NUMERO-B), et **NUMERO-A, que la base porte aujourd'hui, est PÉRIMÉ** : il est remplacé, pas conservé. | Une balise unique ne peut pas porter deux numéros. ⚠ **Conséquence mesurée : sur les deux biens de Bagnères, la balise `{telephone_hote}` aurait envoyé un numéro périmé à chaque message** — elle n'a jamais servi, parce que les cinq modèles écrivent les bons numéros en dur. Le défaut était donc masqué par celui que le chantier vient fermer. |
-| D3 | **Le code d'immeuble `CODE-IMMEUBLE`** devient-il une clé de la base ? | C'est un secret d'accès : s'il entre dans la base, il entre aussi dans ce que l'IA peut lire. ⚠ **Ma recommandation : une clé marquée « jamais lue par l'IA »**, utilisable en balise seulement. |
-| D4 | Une entrée de base peut-elle porter **une date de dernière vérification**, et l'écran la montrer ? | C'est le seul garde-fou contre un 39 € qui dort trois mois. |
-| D5 | Les `faq` d'aujourd'hui sont des **réponses rédigées** (« Bonjour, … »), pas des faits. On garde les deux natures (`fait` et `réponse`) ou on sépare ? | Change la forme de l'écran et ce que l'IA reçoit. |
+| D3 | ~~Le code d'immeuble entre-t-il dans la base ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : OUI, avec une clé marquée « jamais lue par l'IA » (`lisible_par_ia = false`). Il ne part que par les messages programmés, ou par Thierry lui-même.** | C'est un secret d'accès. ⚠ **Conséquence pour le lot 5 : le drapeau doit être prouvé en APPELANT la fonction qui bâtit le contexte du modèle**, pas en grepant la source — un `lisible_par_ia` que le contexte ignore serait un faux garde-fou sur un code de porte. |
+| D4 | ~~Une date de dernière vérification ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : OUI, par information, avec un badge « à revoir » après 90 JOURS, et sans texte en plus.** | C'est le seul garde-fou contre un prix qui dort. ⚠ **Mesuré : le 39 € avait 106 jours.** Le badge aurait donc mordu 16 jours avant la question du voyageur. La date se pose au moment où l'hôte ENREGISTRE la valeur, jamais automatiquement : une date posée par le système dirait « vérifié » de ce que personne n'a relu. |
+| D5 | ~~Deux natures, ou on sépare ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : on GARDE les deux natures (faits et réponses rédigées), avec une règle — une réponse rédigée ne contient JAMAIS un prix, un chiffre ou un contact en dur ; elle utilise la balise du fait.** | C'est la règle qui ferme la cause pour de bon : le 39 € vivait dans le TEXTE d'une réponse rédigée, donc hors de portée de toute balise. ⚠ **Conséquence : la base devient aussi un porteur de faits chiffrés** — `prix_champagne` est un fait, `{prix_champagne}` sa balise, et la réponse rédigée ne porte plus que la phrase. |
 
 ---
 
@@ -253,6 +253,9 @@ Un module unique — `shared/balises.js` + son miroir serveur — porte :
 Maquettes : `docs/specs/base-connaissance-v5/maquette/kb-desktop.html` et
 `kb-mobile.html`.
 
+**Vues en lien, les deux écrans réunis** (validées par Thierry le 3 novembre 2026) :
+<https://claude.ai/artifact/JTvTkSiSUB5aMfCAUTGSKq>
+
 ---
 
 ## 8. PERFORMANCE — case obligatoire (`CLAUDE.md`)
@@ -276,11 +279,11 @@ Maquettes : `docs/specs/base-connaissance-v5/maquette/kb-desktop.html` et
 |---|---|---|
 | **0** | *Cette spec + maquettes.* Validation de Thierry. | non |
 | **1** | **Un seul remplaceur** (`shared/balises.js`), les deux copies retirées, test anti-troisième copie. Aucun changement visible. | **oui** |
-| **2** | Migration additive (`verifie_le`, `lisible_par_ia`) + écran V5 de la base, desktop et mobile. | non |
+| **2** | Migration additive (`verifie_le`, `lisible_par_ia`, `telephone_hote_2`) + écran V5 de la base, desktop et mobile, **avec le badge « à revoir » à 90 jours** (D4). | non |
 | **3** | Insertion en un clic dans les messages programmés + « quels messages utilisent cette information ». | non |
 | **4** | Balises dans la saisie manuelle, avec aperçu du texte final et blocage si une balise est vide. | **oui** |
-| **5** | Règle IA « jamais un chiffre absent de la base » + `lisible_par_ia` respecté. | **oui** |
-| **6** | Reprise des faits en dur des onze modèles vers des balises — **avec Thierry**, ligne par ligne, puisque chaque valeur demande sa décision. | **oui** |
+| **5** | Règle IA « jamais un chiffre absent de la base » + `lisible_par_ia` respecté, **prouvé en appelant le bâtisseur de contexte** (D3) + **un test qui refuse une réponse rédigée portant un prix, un chiffre ou un contact en dur** (D5). | **oui** |
+| **6** | Reprise des valeurs en dur vers des balises, **avec Thierry, ligne par ligne** : les cinq modèles concernés, ET les réponses rédigées qui portent un chiffre (D5) — à commencer par le prix du champagne, qui devient le fait `prix_champagne`. | **oui** |
 
 Lots 1, 4, 5 et 6 : exception de review applicable (une review de plus, limitée
 au diff des correctifs).
