@@ -28,6 +28,15 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
+// ⚠ jsdom N'EST ICI QUE POUR **PARSER** CE QUE LA PAGE A PRODUIT, pas pour la
+// faire tourner : le banc de ce fichier rend volontairement des chaines, et
+// `cache()` donne un noeud DOUBLE qui n'a ni `querySelectorAll` ni enfants.
+// Lire les pastilles a la regex marcherait aujourd'hui et mentirait le jour ou
+// les attributs changeraient d'ordre — on relit donc le HTML comme un
+// navigateur le lirait.
+const { JSDOM } = require('jsdom')
+const boutonsDe = (html) =>
+  Array.from(new JSDOM(`<div>${html}</div>`).window.document.querySelectorAll('.rev-an-puce'))
 const fs = require('fs')
 const path = require('path')
 
@@ -3979,6 +3988,88 @@ test("sans liste d archives, AUCUNE ligne n est marquee", () => {
   const html = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
   assert.ok(!html.includes('marque-archive'),
     'une ligne est marquee « archive » alors que le serveur n en declare aucune')
+})
+
+test("LE TEST QUI COMPTE : un bien ARCHIVE a sa ligne mais PLUS de pastille de filtre", () => {
+  // ⚠ RETOUCHE DE RECETTE DU 3 NOVEMBRE 2026 (demande de Thierry). Les deux
+  // roles de la liste se separent : la LIGNE reste — les euros d'un bien rangé
+  // sont dans le total, c'est la dette 118 — mais la BARRE DE FILTRES ne
+  // propose que des biens vivants. On range un bien pour ne plus le piloter ;
+  // filtrer la courbe sur lui n'a pas d'usage.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(30000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(10000) } },
+      hors_biens: {},
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  // La ligne est bien la — sinon ce test passerait en retirant le bien partout,
+  // ce qui serait la dette 118 rouverte.
+  const lignes = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  assert.ok(lignes.includes('Colomiers'),
+    'le bien archive a perdu sa ligne : la retouche a retire le bien au lieu de sa seule pastille')
+
+  // ⚠ ON INTERROGE LES BOUTONS RENDUS, PAS UNE SOUS-CHAINE DU HTML : le nom
+  // « Colomiers » apparait ailleurs dans la page, et un `includes` sur le
+  // conteneur entier dirait n'importe quoi le jour ou la barre portera un
+  // libelle compose.
+  const puces = boutonsDe(String(p.cache('[data-list="revenue-annee-filtres"]').innerHTML))
+  assert.ok(puces.length >= 2,
+    `${puces.length} pastille(s) rendue(s) : le test ne lit rien, son vert ne vaudrait rien`)
+  const valeurs = puces.map(b => String(b.getAttribute('data-filtre') || ''))
+  assert.ok(valeurs.includes('uuid-1'), 'le bien vivant a perdu sa pastille')
+  assert.ok(!valeurs.includes('uuid-2'),
+    'le bien archive a encore une pastille de filtre : ' + valeurs.join(', '))
+  // Et « Tous » reste, sinon il n'y aurait plus de quoi revenir au compte.
+  assert.ok(valeurs.includes(''), 'la pastille « Tous » a disparu')
+})
+
+test("archiver le bien ACTUELLEMENT filtre rend la main a « Tous »", () => {
+  // ⚠ LE CUL-DE-SAC QUE LA GARDE EVITE, et c'est pour lui qu'elle lit les
+  // PASTILLES et non le tableau : le bien filtre hier est archive aujourd'hui.
+  // Si la garde testait `avecDonnees` — ou le tableau le lit encore —, le
+  // filtre survivrait SANS pastille allumee : ni le bien, ni « Tous », et
+  // l'en-tete comme la courbe parleraient d'un perimetre que plus aucun bouton
+  // ne montre.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    filtre: 'uuid-2',
+    annee: {
+      total: { '2026-05': mo(30000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(10000) } },
+      hors_biens: {},
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  assert.strictEqual(p.interne.etat.filtreAnnee, null,
+    'le filtre pose sur un bien archive a survecu a son archivage')
+  const tous = boutonsDe(String(p.cache('[data-list="revenue-annee-filtres"]').innerHTML))
+    .find(b => String(b.getAttribute('data-filtre') || '') === '')
+  assert.ok(tous, 'la pastille « Tous » est absente')
+  assert.strictEqual(tous.getAttribute('aria-pressed'), 'true',
+    '« Tous » n est pas allume : aucune pastille ne montre le perimetre affiche')
+  // ⚠ CE QUE CHAQUE ASSERTION ATTRAPE, ET CE QU'ELLE N'ATTRAPE PAS — constat de
+  // la revue de dabd46f4, et ma premiere version de ce commentaire affirmait
+  // ici une mesure FAUSSE (« sans la garde, le grand chiffre vaudrait 100 € »).
+  // MESURE : garde retiree ET la seule assertion `filtreAnnee` mise de cote, le
+  // test passe — `ℹ fail 0`. Donc tout ce test tient sur son assertion 1.
+  //
+  // La raison est en amont : `choisi` se resout dans `pourPastilles`, qui exclut
+  // les archives. `find('uuid-2')` rend donc TOUJOURS `undefined`, la garde ou
+  // non : l'en-tete vaut 300 € et « Tous » s'allume de toute facon.
+  //
+  // Les deux assertions qui suivent restent, mais pour ce qu'elles sont : un
+  // controle de COHERENCE, pas un filet. Elles mordraient si quelqu'un remettait
+  // la resolution de `choisi` sur `avecDonnees` — pour afficher le perimetre
+  // entier, par exemple — EN MEME TEMPS que la garde disparaitrait. C'est le seul
+  // etat du code ou l'ecran filtrerait sur un bien sans pastille, et c'est
+  // l'interet de les garder ; ce n'est pas ce que la mutation isolee de la garde
+  // demontre.
+  const total = p.cache('[data-bind="revenue-annee-n"]').textContent
+  assert.strictEqual(euros(total), 300,
+    `l en-tete vaut « ${total} » au lieu de 300 € : elle filtre encore sur le bien archive`)
 })
 
 test("LE TEST QUI COMPTE : la page BRANCHE les fleches du rail des avis", async () => {

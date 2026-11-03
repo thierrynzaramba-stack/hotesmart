@@ -2319,14 +2319,27 @@ function renderAnnee () {
     const pm = a.par_bien && a.par_bien[String(b.id)]
     return pm && Object.keys(pm).length > 0
   })
+  // ⚠ UN BIEN ARCHIVE GARDE SA LIGNE MAIS N'EST PLUS UNE PASTILLE DE FILTRE
+  // (retouche de recette du 3 novembre 2026, demande de Thierry). Les deux
+  // roles de `avecDonnees` se separent ici : le TABLEAU et les RESERVES
+  // continuent de le lire entier — les euros d'un bien rangé restent dans le
+  // total, c'est la dette 118 — mais la barre de filtres ne propose que des
+  // biens VIVANTS. Filtrer la courbe sur un bien qu'on vient de ranger n'a
+  // pas d'usage : on le range pour ne plus le piloter.
+  const pourPastilles = avecDonnees.filter(b => !archives.has(String(b.id)))
   // Une pastille retiree ne laisse pas un filtre orphelin : le bien choisi peut
   // disparaitre d'un rechargement, et la selection perimee s'oublie. Son seul
   // effet reel est la : sans elle, `find` rend `undefined`, « Tous » se rallume
   // et la courbe montre le compte — rien ne se vide.
-  if (etat.filtreAnnee && !avecDonnees.some(b => String(b.id) === etat.filtreAnnee)) {
+  // ⚠ ET LA GARDE SUIT LES PASTILLES, PAS LE TABLEAU : archiver le bien
+  // actuellement filtre lui retire sa pastille. Teste contre `avecDonnees`,
+  // le filtre survivrait sans pastille allumee — ni le bien, ni « Tous » —
+  // et l'en-tete comme la courbe parleraient d'un perimetre que plus aucun
+  // bouton ne montre. C'est le cul-de-sac decrit juste au-dessus.
+  if (etat.filtreAnnee && !pourPastilles.some(b => String(b.id) === etat.filtreAnnee)) {
     etat.filtreAnnee = null
   }
-  const choisi = etat.filtreAnnee ? avecDonnees.find(b => String(b.id) === etat.filtreAnnee) : null
+  const choisi = etat.filtreAnnee ? pourPastilles.find(b => String(b.id) === etat.filtreAnnee) : null
 
   // ⚠ L'EN-TETE SUIT LA PASTILLE DEPUIS LE 28 OCTOBRE (decision Q1 de Thierry),
   // et avec SON POURCENTAGE. Ce n'est pas un revirement sur la decision 1 :
@@ -2392,7 +2405,7 @@ function renderAnnee () {
     + `aria-pressed="${actif ? 'true' : 'false'}">${esc(texte)}</button>`
   $('[data-list="revenue-annee-filtres"]').innerHTML =
     puce('', t('revenue.annee_filtre_tous'), !choisi)
-    + avecDonnees.map(b => puce(String(b.id), String(b.name || ''), choisi && String(b.id) === String(choisi.id))).join('')
+    + pourPastilles.map(b => puce(String(b.id), String(b.name || ''), choisi && String(b.id) === String(choisi.id))).join('')
 
   // ─── La courbe, une seule, filtree par la pastille ──────────────────────
   // ⚠ LE REALISE ET LE DEJA RESERVE SONT DEUX TRAITS D'UNE MEME SERIE, qui se
