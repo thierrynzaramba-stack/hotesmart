@@ -297,6 +297,63 @@ test('la fenetre est bornee meme si le client en demande trente ans', async () =
   assert.equal(r.corps.nuits.length, 365)
 })
 
+// ─── Un bien ARCHIVE ne vend plus ───────────────────────────────────────────
+test('LE TEST QUI COMPTE : un bien ARCHIVE ne vend plus, et le lien reste valide', async () => {
+  // ⚠ DEMANDE DE THIERRY DU 3 NOVEMBRE 2026, PRIORITE ABSOLUE, sur un cas REEL :
+  // « Colomiers archive, lien ACTIF, encore reservable ». Un bien range
+  // continuait de prendre des reservations et des paiements.
+  // ⚠ 200 ET PAS 404 : le lien EST valide, c'est le bien qui ne vend plus. Un
+  // 404 dirait a l'hote que son lien est revoque et l'enverrait le recreer.
+  reinit({ archive_le: '2026-11-03T20:42:19.342Z' })
+  const r = await appeler({ token: JETON })
+  assert.equal(r.code, 200)
+  assert.equal(r.corps.ouvert, false, 'un bien archive est encore ouvert a la vente')
+  assert.equal(r.corps.raison, 'bien_archive')
+  // Aucun prix, aucune nuit : la page n'a rien a proposer.
+  assert.equal(r.corps.nuits, undefined, 'un calendrier est servi pour un bien archive')
+})
+
+test("LE TEST QUI COMPTE : l'archivage passe AVANT tout autre motif de refus", async () => {
+  // Un bien archive ET mal configure doit dire « archive », pas
+  // « sans_lien_provider » : le second envoie l'hote verifier un provider
+  // alors que la cause est son propre geste. Colomiers est exactement ce cas —
+  // Channex l'a supprime de son cote.
+  reinit({ archive_le: '2026-11-03T20:42:19.342Z', provider_property_id: null, base_price: null })
+  const r = await appeler({ token: JETON })
+  assert.equal(r.corps.raison, 'bien_archive',
+    `le motif rendu est « ${r.corps.raison} » : un autre refus a mordu avant l archivage`)
+})
+
+test("LE TEST QUI COMPTE : la lecture du bien DEMANDE archive_le", async () => {
+  // ⚠ C'EST LUI QUI FERME LA GARDE AVEUGLE, et sans lui les deux tests
+  // ci-dessus sont des faux verts : `raisonNonVendable` est PURE, elle juge
+  // l'objet qu'on lui donne. Le banc injecte `archive_le` a la main ; si
+  // `CHAMPS_BIEN` ne le demandait pas, la production verrait `undefined` et
+  // vendrait — avec les deux tests au vert. Le depot a deja paye exactement
+  // cet oubli sur `base_price` (api/booking-links.js, constat de review).
+  // On lit la requete REELLEMENT emise, pas la source du module.
+  reinit()
+  await appeler({ token: JETON })
+  const q = etat.requetes.find(x => x.table === 'properties')
+  assert.ok(q, 'aucune lecture de properties n a eu lieu')
+  assert.match(String(q.champs), /\barchive_le\b/,
+    `la lecture du bien demande « ${q.champs} » : archive_le n y est pas`)
+})
+
+test("une reservation DEJA PAYEE reste consultable sur un bien archive", async () => {
+  // ⚠ L'ARCHIVAGE NE DOIT PAS EFFACER CE QUI EST DEJA VENDU. La confirmation
+  // est placee AVANT `raisonNonVendable` dans l'endpoint — un choix anterieur,
+  // fait pour l'hote qui desactive son lien juste apres un paiement — et
+  // l'archivage en herite. Sans cela, un voyageur qui revient de Stripe apres
+  // l'archivage ne verrait plus jamais l'etat de sa reservation.
+  reinit({ archive_le: '2026-11-03T20:42:19.342Z' })
+  const r = await appeler({ token: JETON, action: 'confirmation', t: '11111111-1111-1111-1111-111111111111' })
+  assert.notEqual(r.code, 200,
+    'le banc ne porte aucune tentative : ce test ne vaut que par le motif rendu')
+  assert.equal(r.corps.error, 'introuvable',
+    `le motif est « ${r.corps.error} » : la garde d archivage a mordu avant la confirmation`)
+})
+
 test('un debut dans le passe est ignore : la fenetre part d aujourd hui', async () => {
   reinit()
   const r = await appeler({ token: JETON, debut: '2020-01-01' })
