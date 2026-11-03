@@ -4050,9 +4050,23 @@ test("archiver le bien ACTUELLEMENT filtre rend la main a « Tous »", () => {
   assert.ok(tous, 'la pastille « Tous » est absente')
   assert.strictEqual(tous.getAttribute('aria-pressed'), 'true',
     '« Tous » n est pas allume : aucune pastille ne montre le perimetre affiche')
-  // ⚠ ET L'EN-TETE SUIT : c'est ce qui distingue cette assertion d'un controle
-  // cosmetique. Sans la garde, le grand chiffre vaudrait 100 € — le seul bien
-  // archive — alors que la barre de filtres dit « Tous ».
+  // ⚠ CE QUE CHAQUE ASSERTION ATTRAPE, ET CE QU'ELLE N'ATTRAPE PAS — constat de
+  // la revue de dabd46f4, et ma premiere version de ce commentaire affirmait
+  // ici une mesure FAUSSE (« sans la garde, le grand chiffre vaudrait 100 € »).
+  // MESURE : garde retiree ET la seule assertion `filtreAnnee` mise de cote, le
+  // test passe — `ℹ fail 0`. Donc tout ce test tient sur son assertion 1.
+  //
+  // La raison est en amont : `choisi` se resout dans `pourPastilles`, qui exclut
+  // les archives. `find('uuid-2')` rend donc TOUJOURS `undefined`, la garde ou
+  // non : l'en-tete vaut 300 € et « Tous » s'allume de toute facon.
+  //
+  // Les deux assertions qui suivent restent, mais pour ce qu'elles sont : un
+  // controle de COHERENCE, pas un filet. Elles mordraient si quelqu'un remettait
+  // la resolution de `choisi` sur `avecDonnees` — pour afficher le perimetre
+  // entier, par exemple — EN MEME TEMPS que la garde disparaitrait. C'est le seul
+  // etat du code ou l'ecran filtrerait sur un bien sans pastille, et c'est
+  // l'interet de les garder ; ce n'est pas ce que la mutation isolee de la garde
+  // demontre.
   const total = p.cache('[data-bind="revenue-annee-n"]').textContent
   assert.strictEqual(euros(total), 300,
     `l en-tete vaut « ${total} » au lieu de 300 € : elle filtre encore sur le bien archive`)
