@@ -81,6 +81,7 @@ test('la purge ne touche que le PASSE du bien', async () => {
 
 // ─── L'ECRAN ────────────────────────────────────────────────────────────────
 const PAGE = lire('apps/yield/prix.html').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+const FEUILLE = lire('public/style.css')
 
 test('LE TEST QUI COMPTE : la couleur du niveau est une BULLE sur le badge, jamais sur toute la ligne', () => {
   // Premier retour : « comme la maquette Excel » (toute la ligne). Second
@@ -90,7 +91,22 @@ test('LE TEST QUI COMPTE : la couleur du niveau est une BULLE sur le badge, jama
   assert.ok(!/\$\{niveau\}/.test(ligne), 'plus de classe de niveau sur le tr')
   assert.match(ligne, /<tr class="\$\{we \? 'we' : ''\} \$\{etat\} /, 'la ligne porte son etat')
   assert.match(ligne, /class="yp-niveau yp-niv-badge \$\{CLASSES\[n\.niveau\] \|\| ''\}/, 'la bulle est sur le mot du niveau')
-  for (const c of ['n-base', 'n-moyen', 'n-haut', 'n-tres-haut', 'n-exceptionnel']) assert.match(PAGE, new RegExp(`\\.yp-niv-badge\\.${c} \\{ background:`), `la pastille ${c} existe`)
+  // ⚠ LA REGLE A CHANGE DE SELECTEUR, PAS D'INTENTION. Jusqu'au 3 novembre
+  // 2026 le fond venait de `.yp-niv-badge.n-*` ; l'echelle d'encre le pose
+  // sur la classe NUE `.n-*`, qui porte aussi l'encre et le lisere. Ce que
+  // ce test garde reste le meme : la couleur est sur la BULLE, jamais sur
+  // la ligne — et la premiere assertion de ce test, elle, n'a pas bouge.
+  for (const c of ['n-base', 'n-moyen', 'n-haut', 'n-tres-haut', 'n-exceptionnel']) {
+    // ⚠ LE FOND PASSE PAR --niveau-fond, et ce n'est pas un detail d'ecriture :
+    // pose en direct, il perdait contre `.yp-niv { background: var(--bg) }`,
+    // declare plus bas a specificite egale — les cinq cartes rendaient BLANC
+    // (mesure navigateur du 3 novembre 2026, niveau 5 en blanc sur blanc).
+    // ⚠ ET ELLES SONT DANS public/style.css, PAS DANS LA PAGE, depuis le
+    // 3 novembre 2026 : deux ecrans les emploient — celui-ci et le marche —
+    // donc les ecrire dans chaque page refaisait la copie que le chantier de
+    // la source unique venait de fermer.
+    assert.match(FEUILLE, new RegExp(`\\.${c}\\s*\\{[^}]*--niveau-fond: var\\(--niveau-[1-5]\\)`), `la pastille ${c} a son fond`)
+  }
 })
 
 test('LE TEST QUI COMPTE : sur un bien pilote, le prix se modifie sur la ligne, le conseil YieldFlow reste a cote, et la main part avec `prix_hote: true`', () => {

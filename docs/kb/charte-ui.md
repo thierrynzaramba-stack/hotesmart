@@ -108,202 +108,147 @@ pas — et le dire est la seule façon de ne pas refaire la même erreur.
 socle.** Les rouges y sont des hexas en dur dans les pages
 (`#B02A37`, `#842029`, `#FDECEA` dans `apps/yield/prix.html`, non jetonnés).
 
-## 3. La palette des cinq niveaux YieldFlow — LA COULEUR DES NIVEAUX DE PRIX
+## 3. L'échelle d'encre des cinq niveaux
 
-⚠ **QUATRIÈME COULEUR RÉSERVÉE DU PRODUIT, décision de Thierry du 2 novembre
-2026.** Le prune est **réservé aux niveaux de prix**, au même titre que les
-trois posées le 28 octobre :
+⚠ **CHOIX DÉFINITIF DE THIERRY, 3 novembre 2026, de sa main** : « Échelle
+d'encre : choix définitif. Elle remplace le prune ET l'orange ; aucune autre
+palette ne doit être appliquée. » Cinq **densités de l'encre de la charte**,
+aucune teinte.
 
-| couleur | réservée à |
-|---|---|
-| **noir** | la navigation |
-| **ambre** | « ce qu'HôteSmart a fait pour vous » |
-| **bleu** | ce qui est cliquable |
-| **prune** | **les niveaux de prix** |
+| jeton | valeur | niveau | texte | contraste | liseré |
+|---|---|---|---|---|---|
+| `--niveau-1` | `#F7F7F7` | 1 · Base | `--text` | 16,25:1 | `--niveau-4` |
+| `--niveau-2` | `#EBEBEB` | 2 · Moyen | `--text` | 14,60:1 | `--niveau-5` |
+| `--niveau-3` | `#D6D6D6` | 3 · Haut | `--text` | 11,97:1 | `--niveau-5` |
+| `--niveau-4` | `#8C8C8C` | 4 · Très haut | `--text` | 5,18:1 | `--niveau-5` |
+| `--niveau-5` | `#222222` | 5 · Exceptionnel | `--bg` | 15,91:1 | aucun |
 
-Réservée veut dire : **à partir du 2 novembre 2026, aucun nouvel usage ne prend
-cette teinte**, et `tests/palette-niveaux.test.js` fait rougir toute couleur
-prune qui n'est pas la palette ou l'une des dix déjà inventoriées ci-dessous.
+⚠ **CINQ VALEURS, PAS DIX, ET AUCUN HEXA AILLEURS.** Les palettes d'avant
+avaient un fond **et** un accent par niveau. Ici l'encre du texte est `--text`
+ou `--bg`, le liseré est `--niveau-4` ou `--niveau-5` : tout s'exprime en
+jetons déjà là. **Source unique : `public/style.css`.**
 
-⚠ **ET LA RÉSERVATION NE REPEINT RIEN RÉTROACTIVEMENT — elle empêche la
-onzième.** Une première rédaction de ce paragraphe affirmait « aucun autre
-usage ne prend cette teinte » : c'était faux à l'heure où la phrase était
-écrite, et relevé en review le même jour. Mesuré sur tout le dépôt,
-commentaires retirés (une couleur en commentaire ne peint rien) : **dix valeurs
-prune, vingt-sept occurrences**, toutes antérieures à la décision.
+⚠ **ET CE N'EST PAS UN CHOIX DE FICHIER, C'EST UNE MESURE.** Le brief
+demandait `theme.css`. Relevé le 3 novembre sur les six écrans YieldFlow :
+**aucun ne charge `shared/theme.css`**, tous ne chargent que
+`/public/style.css`. Les jetons y auraient été **indéfinis**. Et faire charger
+`theme.css` à ces pages aurait changé `--border` et **`--amber`**
+(`#BA7517` → `#F5A524`), donc repeint la couleur réservée et la nuit
+« fermée ».
 
-| valeur | ce qu'elle peint | statut |
+⚠ **TROIS DES CINQ DENSITÉS SONT DÉJÀ DES JETONS DU SOCLE V5**, et c'est la
+confirmation que l'échelle est bien « l'encre de la charte » :
+
+| valeur | ce qu'elle est déjà | dans |
 |---|---|---|
-| `#5B2A86` | `--prune`, l'état « moins chers » | **part avec le lot 4** |
-| `#F0E9F6` | `--prune-bg`, le fond de ce même état — ΔE **2,67** de `--yf-base`, la même couleur | **part avec le lot 4** |
-| `#5A3E8A` | `apps/yield/prix.html` — « votre prix » (`.yp-hote`, `tr.prix-hote`), en couleur de texte **et** en `box-shadow: inset 3px 0 0` | à résoudre |
-| `#7B3FA0` | `apps/yield/comparables.html` — légende « équipements » | à résoudre |
-| `#5B3B8F` / `#F3EDFA` | `pages/avis.html` — texte et fond du badge de source « email » | à résoudre |
-| `#FBF0FF` | `shared/config.js` — carte de l'app « Tarification dynamique » | à résoudre |
-| `#E4E2F0` | `shared/theme.css` / `public/tokens.css` — `--presta-3`, à ΔE **3,19** de `--yf-base` | à résoudre |
-| `#EEEDFE` | fond violacé de `analyze.html`, `prestataires.html`, `style.css`, `config.js` | à résoudre |
-| `#7A3E9A` | `tests/yf-ecran-periodes.test.js` — hexa dont le test exige la **disparition** | sans objet |
+| `#222222` | `--ink` — le texte, les boutons, les icônes | `shared/theme.css` |
+| `#EBEBEB` | `--line` — les séparateurs | `shared/theme.css` |
+| `#F7F7F7` | `--surface-2` — le fond des pastilles d'icône | `shared/theme.css` |
 
-⚠ **Le plus gênant est `#5A3E8A`**, et il est antérieur : il peint « votre
-prix » sur **l'écran qui affiche les niveaux**, avec l'idiome même de l'accent
-de niveau (`box-shadow: inset 3px 0 0`). Il n'est pas touché par ce lot — le
-signaler est le travail de cette ligne.
+C'est pourquoi **il n'y a pas de test « ces hexas n'apparaissent que dans les
+fichiers nommés »** : un gris n'est pas distinctif, et ces trois-là vivent
+partout où le socle les emploie. Ce qui garde la source unique, c'est le test
+des **déclarations** — `--niveau-1..5` ne se déclarent qu'ici.
 
-⚠ **ET CE CHOIX EST UNE MESURE, PAS UN GOÛT.** Quatre rampes ont été
-construites sur la **même échelle de luminance** (0,80 → 0,26), avec le même
-balisage et les mêmes feuilles, puis comparées en **écart perceptuel ΔE
-CIE76** aux couleurs qui ont **déjà un sens** dans le produit. Lecture :
-ΔE < 3 = la même couleur · 3-10 = confondues d'un coup d'œil · > 20 = deux
-couleurs.
+### Les cinq règles de Thierry, et ce qui les mesure
 
-Les deux rencontres les plus proches tombent, pour les quatre rampes, sur les
-**mêmes deux références** — ce qui rend la colonne lisible :
+| règle | mesure |
+|---|---|
+| 1. Le niveau colore la **pastille** ou la **case**, jamais la ligne ni la page | aucune règle n'applique une classe de niveau à `tr`, `tbody`, `table`, `body` ou `html` |
+| 2. Le **chiffre** est toujours écrit ; la couleur n'est qu'un repère | « 1 · Base » … « 5 · Exceptionnel », et aucun rendu de pastille n'affiche un nom nu |
+| 3. Ambre = fermée / fait pour vous, vert = hausse, rouge = baisse. Rien d'autre n'a de teinte | saturation **0 %** sur les cinq valeurs |
+| 4. Pas de dégradé ni de brillance | aucun `gradient`, aucune ombre **portée** sur les cinq règles |
+| 5. Contraste texte/fond **≥ 4,5:1** sur les cinq | 5,18:1 au pire (niveau 4) |
+
+`tests/palette-niveaux.test.js` tient les cinq, et chacune a été prouvée par
+une mutation qui la fait rougir.
+
+### Deux corrections, mesurées avant d'être proposées, validées le 3 novembre
+
+1. **Le niveau 4 porte du texte noir**, pas blanc. En blanc il est à
+   **3,36:1** — sous le seuil que la règle 5 pose elle-même. En noir, 5,18:1.
+   Garder le blanc aurait demandé de foncer `#8C8C8C` jusqu'à `#767676` ou
+   moins, soit un pas de plus vers le niveau 5.
+2. **Les pastilles 1 à 3 portent un liseré.** Sans lui leur fond ne dit rien :
+   **1,02 à 1,45:1** contre les quatre fonds de ligne réels (ligne ordinaire
+   `#FFFFFF`, nuit passée `#FAFAFA`, week-end `#F5F5F3`, ligne de période
+   `#EFEFED`), et le filet d'origine de la pastille était lui-même à 1,19:1.
+   Pris trois crans plus bas dans la même échelle : **3,14 à 13,35:1**.
+
+### Trois choses que la review a corrigées, et qu'il faut savoir
+
+1. **Les cinq classes `.n-base` … `.n-exceptionnel` sont dans `public/style.css`,
+   pas dans la page.** Deux écrans les emploient — la Prédiction de prix et le
+   marché — et les écrire dans chaque page refaisait la copie que la source
+   unique venait de fermer. C'est d'ailleurs par là que le niveau avait atteint
+   une **ligne** sur le marché.
+2. **Tout passe par des propriétés personnalisées** — `--niveau-fond`,
+   `--niv-encre`, `--niveau-lisere` — et ce n'est pas un style, c'est un
+   correctif. Posés en direct, `background` perdait contre
+   `.yp-niv { background: var(--bg) }` et `border` contre
+   `.yp-niv-badge { border: 0.5px solid rgba(0,0,0,.08) }` : même spécificité,
+   déclarations plus bas. Les cinq cartes rendaient **blanc** et les six
+   liserés étaient **inertes**. Une propriété personnalisée ne dépend pas de
+   l'ordre des règles.
+3. **Le liseré est sur la pastille, pas sur la case.** Les cases de grille sont
+   déjà séparées par le `gap: 1px` de `.yp-niveaux` ; leur ajouter une bordure
+   faisait un double filet.
+
+⚠ **Et la leçon de méthode : aucun des huit tests n'avait vu les deux défauts
+de cascade**, alors qu'ils lisaient tous la bonne règle. Ils vérifiaient ce qui
+est **écrit**, pas ce qui est **peint**. Un défaut d'ordre de cascade ne se lit
+pas dans une règle prise seule — il se mesure dans un navigateur.
+
+### Ce que l'échelle gagne, et ce qu'elle coûte
+
+Elle gagne **la place**. Sans teinte, aucune collision possible avec les trois
+couleurs réservées. C'est ce que ni le prune ni l'orange ne pouvaient offrir,
+et c'est mesuré — quatre rampes construites sur la **même échelle de
+luminance** (0,80 → 0,26), comparées en **ΔE CIE76** aux couleurs qui ont déjà
+un sens. Lecture : < 3 = la même couleur · 3-10 = confondues d'un coup d'œil ·
+> 20 = deux couleurs.
 
 | rampe | ΔE de son pas Base à `--amber-bg` (`#FAEEDA`) | ΔE de son pas Base au trait « nuit passée » (`#E4E4E4`) |
 |---|---|---|
 | orange | **4,3** | 10,9 |
+| orange à dégradé (brief du 3/11) | **5,9** | 5,2 |
 | sable → brun | 9,1 | **2,8** |
 | gris encre | 11,5 | **1,1** |
-| **prune** | **19,2** | 9,5 |
+| prune | 19,2 | 9,5 |
 
-⚠ **19,2 est sous la barre des 20.** Le tableau démontre que le prune est le
-**moins mal placé** des quatre, pas qu'il est « une autre couleur » que
-l'ambre. Dit autrement : la place n'était pas libre, elle était seulement la
-moins occupée.
+Les cinq rampes tenaient les conditions de lisibilité : **ce n'est jamais la
+lisibilité qui les a départagées, c'est la place libre.**
 
-Les quatre rampes tenaient les cinq conditions — une seule teinte, Base le plus
-clair → Exceptionnel le plus foncé, luminance strictement décroissante, texte
-lisible sur chaque fond, Base détaché du blanc de la carte (1,23 à 1,24:1).
-**Ce n'est donc pas la lisibilité qui les départage, c'est la place libre.**
+Elle coûte **le bas de l'échelle** : `--niveau-1` est à ΔE 1,0 du fond
+« nuit passée », `--niveau-2` à ΔE 1,7 du fond des lignes de période. Les
+règles 1 et 2 sont exactement ce qui rend ce coût acceptable — le niveau ne
+peint jamais une ligne, et ce qui porte l'information est le chiffre, pas la
+couleur. Le liseré referme le reste pour l'œil.
 
-- **l'orange** touche l'ambre **aux deux bouts** : son pas Base à ΔE 6,0 du
-  fond de la nuit « fermée » (`#FBF1DA`), son pas Exceptionnel (`#D07525`) à
-  ΔE **10,3** de `--amber` (`#BA7517`) et ΔE 12,8 d'`--amber-text` ;
-- **le sable** est l'orange désaturé — même angle de teinte (26-28°), 17-34 %
-  de saturation contre 69-70 %. Désaturer l'éloigne de l'ambre et le rapproche
-  du gris : il finit coincé entre les deux ;
-- **le gris encre** est à ΔE 1,1 du trait « nuit passée », c'est-à-dire la
-  même couleur qu'un état qui dit « il n'y a rien ici » ;
-- **le prune** est, de loin, celui dont le pas le plus foncé est le plus
-  éloigné de `--amber` : ΔE **75,2**, contre 10,3 pour l'orange et 30,8 pour
-  le sable.
+### Les vingt-cinq valeurs comparées, pour que ces nombres soient refaisables
 
-⚠ **LES VINGT VALEURS COMPARÉES, pour que ces nombres soient refaisables.**
-Les trois rampes écartées n'existent dans aucun fichier du dépôt : sans cette
-table, leurs chiffres seraient invérifiables, donc à ne pas citer. Mêmes cibles
-de luminance pour les quatre : 0,801 · 0,668 · 0,528 · 0,392 · 0,261.
+Les quatre rampes écartées n'existent dans aucun fichier du dépôt : sans cette
+table, leurs chiffres seraient invérifiables, donc à ne pas citer.
 
-| rampe | Base | Moyen | Haut | Très haut | Exceptionnel |
+| rampe | 1 | 2 | 3 | 4 | 5 |
 |---|---|---|---|---|---|
 | orange | `#F7E4D4` | `#F1CFB2` | `#EAB689` | `#E29858` | `#D07525` |
 | sable → brun | `#EBE7E3` | `#DED3CB` | `#D0BDAD` | `#C1A388` | `#AF835C` |
-| gris encre | `#E7E7E7` | `#D6D6D6` | `#C1C1C1` | `#A8A8A8` | `#8B8B8B` |
-| **prune** | `#EDE4F5` | `#DED0ED` | `#CDB8E2` | `#B99DD5` | `#A07DC4` |
+| gris encre (2/11) | `#E7E7E7` | `#D6D6D6` | `#C1C1C1` | `#A8A8A8` | `#8B8B8B` |
+| prune | `#EDE4F5` | `#DED0ED` | `#CDB8E2` | `#B99DD5` | `#A07DC4` |
+| **échelle d'encre** | `#F7F7F7` | `#EBEBEB` | `#D6D6D6` | `#8C8C8C` | `#222222` |
 
-⚠ **UNE EXCEPTION VIVANTE, NOMMÉE ET DATÉE.** `--prune` (#5B2A86) porte encore
-l'état **« moins chers »** de la pop-up « Quand vos prix bougent », à **ΔE
-5,67** de `--yf-moyen-l` ; `--prune-bg` (#F0E9F6) est à **ΔE 2,67** de
-`--yf-base`, c'est-à-dire la **même couleur**. Décision de Thierry du
-2 novembre 2026, mot pour mot : « le prune “moins chers” disparaît avec le
-lot 4 (les périodes passent en niveaux de grille) ; `yf-ecran-periodes` ne part
-pas en prod avant le lot 4. »
+### ⚠ Une quatrième couleur réservée a existé vingt-quatre heures
 
-⚠ **ÉLÉMENT DE STRUCTURE** — décision de Thierry du 29 octobre 2026 : échelle
-commune à toute restitution de prévision, **jamais modifiée ni substituée sans
-sa double validation**.
+Le 2 novembre, le **prune** a été réservé aux niveaux de prix, au même titre
+que le noir, l'ambre et le bleu — écrit ici, dans `public/style.css`, et tenu
+par un test. Le 3 novembre, l'échelle d'encre l'a remplacé et **la réservation
+tombe avec lui** : le prune redevient une couleur ordinaire, et `--prune`
+reprend son seul rôle, l'état « moins chers ». Les couleurs réservées sont de
+nouveau **trois**.
 
-| niveau | fond | accent | classe |
-|---|---|---|---|
-| Base | `#EDE4F5` | `#673B92` | `n-base` |
-| Moyen | `#DED0ED` | `#5E3488` | `n-moyen` |
-| Haut | `#CDB8E2` | `#522B7A` | `n-haut` |
-| Très haut | `#B99DD5` | `#432067` | `n-tres-haut` |
-| Exceptionnel | `#A07DC4` | `#2A1342` | `n-exceptionnel` |
-
-⚠ **UNE SEULE TEINTE PRUNE DEPUIS LE 2 NOVEMBRE 2026**, sur double validation
-de Thierry : « une seule teinte prune, du plus clair (Base) au plus foncé
-(Exceptionnel), luminance strictement décroissante, ni bleu ni ambre, texte
-lisible sur chaque fond », puis, après aperçu : « Base est presque blanc et
-risque de se lire vide — fonce-le ».
-
-L'échelle d'avant changeait de **teinte** d'un pas à l'autre — Base bleuté,
-Moyen verdi, Haut ambré, Exceptionnel rougi — donc cinq couleurs sans ordre
-lisible : rien n'y disait que Haut vient après Moyen. Les dix valeurs tiennent
-maintenant **269-272°**, et la luminance des fonds décroît de **0,801 à 0,261**
-par pas de **0,131 à 0,140**.
-
-| ce qui est mesuré | valeur |
-|---|---|
-| texte `--text` (#1a1a1a) sur les cinq fonds | 14,10:1 → 5,16:1 |
-| petit texte (l'accent du niveau) sur son propre fond | 6,50:1 → 4,90:1 |
-| Base contre le `--bg` blanc de la carte qui le porte | 1,234:1 (la 1re rampe : 1,096:1) |
-
-⚠ **ET TOUT TEXTE POSÉ SUR UN FOND DE LA PALETTE PREND `--niv-encre`** —
-l'accent de son propre niveau — au lieu d'un gris général. Posé par les règles
-`.n-*` de `apps/yield/prix.html`, et par `--niv-lisere` côté marché.
-
-Les deux gris remplacés n'étaient **pas** dans le même état, et il faut le dire
-précisément : la première rédaction de ce paragraphe les mettait dans le même
-sac et annonçait « 2,2 à 2,5:1 » pour les deux. C'était faux pour l'un d'eux,
-et c'est un relecteur qui l'a mesuré.
-
-| ce qui est peint | ancienne palette | rampe prune | avec `--niv-encre` |
-|---|---|---|---|
-| le NOM du niveau, `--text3` (#9b9b9b) | 2,23 → 2,53:1 — **déjà sous le seuil, en production, avant ce lot** | 1,17 → 2,25:1 | 4,90 → 6,50:1 |
-| « fixé par vous », `--text2` (#6b6b6b) | 4,28 → 4,86:1 — **au-dessus du seuil sur quatre des cinq** | 1,58 → 4,32:1 | 4,90 → 6,50:1 |
-| la pastille de niveau des lignes de nuit, `--text2` | 4,28 → 4,86:1 | 1,58 → 4,32:1 | 4,90 → 6,50:1 |
-
-⚠ **ET DEUX CONVENTIONS DE COULEUR NE SURVIVENT PAS À LA RAMPE**, les deux
-relevées en review le 2 novembre 2026 :
-- le **vert / rouge** de la pastille de niveau (`.yp-niveau.hausse/.baisse`,
-  1,59:1 et 1,93:1 sur Exceptionnel) est **retiré** : c'était un doublon. Le
-  sens — la suggestion monte ou baisse — reste porté par le PRIX, sur la même
-  ligne, sur le fond neutre, où le vert vaut 4,64:1 ;
-- le **rouge destructif** du `×` qui retire un montant fixé (`#B02A37`,
-  1,93:1 sur Exceptionnel) prend `--niv-encre`. Mesure faite sur cinq rouges de
-  plus en plus sombres : le premier qui tienne 4,5:1 sur les **cinq** fonds est
-  `#38070E`, qui n'est plus un rouge mais un noir. Il ne reste que le signe `×`
-  et son `title` pour dire le geste.
-
-⚠ **LA RAMPE S'ARRÊTE AU MOYEN ET NE VA PAS AU FONCÉ**, et c'est une décision,
-pas une limite. Un fond foncé imposerait un régime de texte **blanc** sur les
-deux derniers niveaux : cinq valeurs de plus, et deux écrans à deux régimes de
-texte. La rampe retenue garde `--text` lisible sur les cinq fonds (5,16:1 au
-pire), donc un seul régime.
-
-⚠ **CES DIX VALEURS SONT DÉSORMAIS DES JETONS, ET DANS UN SEUL FICHIER** :
-`public/style.css`, jetons `--yf-base` … `--yf-exceptionnel-l`. C'est le lot du
-30 octobre 2026 qui l'a fait. Avant lui elles étaient des **hexas en dur,
-recopiés quatre fois** :
-
-| endroit | ce qu'il porte |
-|---|---|
-| `apps/yield/prix.html` | fond **et** accent (`box-shadow: inset 3px 0 0`) |
-| `apps/yield/prix.html` | fond seul (`.yp-niv-badge.n-*`) |
-| `apps/yield/prix.html` | fond seul (`.yp-niv.n-*`) |
-| `apps/yield/marche-global.html` | jetons `--yf-base`, `--yf-base-l`, … |
-
-Les quatre copies **concordaient**, ce qui est la situation dangereuse : rien
-ne rougissait, et la cinquième aurait divergé. Elles sont maintenant des
-renvois (`var(--yf-*)`), et `tests/palette-niveaux.test.js` épingle les dix
-valeurs ET refuse toute déclaration non nommée, dans n'importe quel fichier.
-
-⚠ **ET LE TEST A ÉTÉ RÉÉCRIT APRÈS UNE REVIEW QUI L'A DEFAIT.** Sa première
-version écartait un fichier **en bloc** : dix redéclarations divergentes
-insérées dans `apps/yield/marche-global.html` laissaient les quatre tests au
-vert. Une exception accordée à un FICHIER ouvre la porte à tout ce que ce
-fichier contient — la table nomme donc maintenant chaque couple
-(jeton, valeur).
-
-**Texte sur ces fonds** : `.yp-niv-badge` (`apps/yield/prix.html`) ne
-déclare **aucune couleur de texte** — le texte hérite de `--text` (`#1A1A1A`).
-Seules deux classes la surchargent : `.yp-niveau.hausse` → `#0F7B3E` et
-`.yp-niveau.baisse` → `#B02A37` , hexas en dur.
-
-**Forme du badge** : `font-size: 10px`, `padding: 2px 8px`,
-`border-radius: 4px`, `border: 0.5px solid rgba(0,0,0,.08)` .
-Variante `.yp-niveau.yp-niv-badge` : `padding: 1px 7px`, `border-radius: 10px`
-.
+La durée de vie de cette réservation est elle-même la leçon : **une couleur
+réservée se paie en place**, et les niveaux n'avaient pas besoin d'en prendre.
 
 ## 3 bis. L'échelle « température du marché » (4 niveaux, distincte)
 
@@ -625,7 +570,7 @@ bascule se fait par `.only-mobile` / `.only-desktop` à **721 px**.
 | 7 | **Canal Booking peint de deux couleurs** | `#003580` (messagerie) **vs** `#2563EB` (calendrier) | `ui.css` / `ui.css` |
 | 8 | **Canal Direct peint de deux couleurs** | `#0E1726` (messagerie) **vs** `#0F7A4F` (calendrier) | `ui.css` / `ui.css` |
 | ~~9~~ | ~~La palette des 5 niveaux recopiée 4 fois~~ — **FERMÉ le 30 octobre 2026** : source unique dans `public/style.css`, les 4 copies sont des renvois, un test épingle les 10 valeurs | — |
-| ~~10~~ | ~~Le 5e niveau est incomplet côté marché~~ — **FERMÉ POUR DE BON le 2 novembre 2026**, sur validation de Thierry (« garde sa propre paire »). Le jeton `--yf-exceptionnel` existait depuis le 30 octobre, mais **aucune règle ne l'utilisait** : la légende du marché appariait le FOND de « Très haut » et l'ACCENT d'« Exceptionnel ». Elle prend désormais sa propre paire. ⚠ La raison **n'est pas** le contraste : sur la 1re rampe prune ce mélange tombait à 2,79:1, mais après la retouche de Base il vaut 6,96:1 — il passerait. La raison est qu'un fond va avec SON accent, sinon la légende ment sur ce qu'elle montre | — |
+| ~~10~~ | ~~Le 5e niveau est incomplet côté marché~~ — **SANS OBJET depuis le 3 novembre 2026** : l'échelle d'encre n'a plus de « paires » fond/accent, donc plus de dépariage possible. L'écart avait été ouvert le 29 octobre (la légende du marché appariait le FOND de « Très haut » et l'ACCENT d'« Exceptionnel ») puis fermé le 2 novembre sur validation de Thierry. ⚠ Ce qui l'a vraiment refermé n'est ni l'une ni l'autre de ces décisions, c'est la disparition de la notion d'accent | — |
 | ~~11~~ | ~~Mode sombre : deux mécanismes, et un seul fichier écoute l'OS~~ — **FERMÉ le 2 novembre 2026** sur double validation de Thierry : les deux fichiers qui écoutaient l'OS ont vu leur variante sombre retirée. Il ne reste que `[data-theme]` dans `shared/theme.css`, hors YieldFlow |
 | 12 | **`data-theme` n'est posé par aucun code** (inchangé : la décision du 2 novembre ne porte que sur YieldFlow) | variante sombre déclarée, jamais activée | balayage `.js`/`.html` : seule occurrence hors CSS = `tests/marche-temperature-page.test.js` |
 | 13 | **`.btn--primary` et `.btn--outline` identiques** | mêmes trois propriétés, mêmes valeurs | `ui.css` et `104` |

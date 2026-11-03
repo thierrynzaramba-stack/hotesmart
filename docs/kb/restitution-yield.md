@@ -298,97 +298,62 @@ Elle n'est donc pas un choix d'écran : c'est **l'échelle commune à toute
 restitution de prévision** — Prédiction de prix, « Quand vos prix bougent », le
 marché, et ce qui viendra.
 
-| niveau | fond | accent | classe |
-|---|---|---|---|
-| Base | `#EDE4F5` | `#673B92` | `n-base` |
-| Moyen | `#DED0ED` | `#5E3488` | `n-moyen` |
-| Haut | `#CDB8E2` | `#522B7A` | `n-haut` |
-| Très haut | `#B99DD5` | `#432067` | `n-tres-haut` |
-| Exceptionnel | `#A07DC4` | `#2A1342` | `n-exceptionnel` |
+| jeton | valeur | niveau | texte | classe |
+|---|---|---|---|---|
+| `--niveau-1` | `#F7F7F7` | 1 · Base | `--text` | `n-base` |
+| `--niveau-2` | `#EBEBEB` | 2 · Moyen | `--text` | `n-moyen` |
+| `--niveau-3` | `#D6D6D6` | 3 · Haut | `--text` | `n-haut` |
+| `--niveau-4` | `#8C8C8C` | 4 · Très haut | `--text` | `n-tres-haut` |
+| `--niveau-5` | `#222222` | 5 · Exceptionnel | `--bg` | `n-exceptionnel` |
 
-⚠ **UNE SEULE TEINTE PRUNE DEPUIS LE 2 NOVEMBRE 2026**, sur double validation
-de Thierry : « une seule teinte prune, du plus clair (Base) au plus foncé
-(Exceptionnel), luminance strictement décroissante, ni bleu ni ambre, texte
-lisible sur chaque fond », puis, après aperçu : « Base est presque blanc et
-risque de se lire vide — fonce-le ».
+⚠ **CINQ VALEURS, PAS DIX** : l'échelle d'encre n'a pas d'accent par niveau.
+L'encre du texte est `--text` ou `--bg`, le liseré est `--niveau-4` ou
+`--niveau-5` — tout en jetons déjà là. Source unique : `public/style.css`.
 
-L'échelle d'avant changeait de **teinte** d'un pas à l'autre — Base bleuté,
-Moyen verdi, Haut ambré, Exceptionnel rougi — donc cinq couleurs sans ordre
-lisible : rien n'y disait que Haut vient après Moyen. Les dix valeurs tiennent
-maintenant **269-272°**, et la luminance des fonds décroît de **0,801 à 0,261**
-par pas de **0,131 à 0,140**.
+⚠ **LE CHIFFRE EST TOUJOURS ÉCRIT** (règle 2 de Thierry) : « 1 · Base » …
+« 5 · Exceptionnel ». Au bas de l'échelle, le fond ne porte plus
+l'information — `--niveau-1` est à ΔE 1,0 du fond « nuit passée ».
 
-| ce qui est mesuré | valeur |
-|---|---|
-| texte `--text` (#1a1a1a) sur les cinq fonds | 14,10:1 → 5,16:1 |
-| petit texte (l'accent du niveau) sur son propre fond | 6,50:1 → 4,90:1 |
-| Base contre le `--bg` blanc de la carte qui le porte | 1,234:1 (la 1re rampe : 1,096:1) |
+**Les cinq règles, les deux corrections mesurées, et les vingt-cinq valeurs
+des cinq rampes comparées : `docs/kb/charte-ui.md` §3.** Elles ne sont pas
+recopiées ici — c'est tout l'objet d'une source unique.
 
-⚠ **ET TOUT TEXTE POSÉ SUR UN FOND DE LA PALETTE PREND `--niv-encre`** —
-l'accent de son propre niveau — au lieu d'un gris général. Posé par les règles
-`.n-*` de `apps/yield/prix.html`, et par `--niv-lisere` côté marché.
+⚠ **TOUT CE QUI SUIVAIT ICI DÉCRIVAIT LA PALETTE PRUNE, ET A ÉTÉ RETIRÉ LE
+3 NOVEMBRE 2026.** On y lisait « une seule teinte prune », « les dix valeurs
+tiennent 269-272° », « dix valeurs, pas cinq », « la consigne *ni bleu ni
+ambre* ne s'applique pas à cette échelle », et trois tableaux de mesures. Rien
+de tout cela n'est vrai : l'échelle d'encre n'a **aucune teinte**, elle a
+**cinq** valeurs, et les trois couleurs réservées valent de nouveau partout.
 
-Les deux gris remplacés n'étaient **pas** dans le même état, et il faut le dire
-précisément : la première rédaction de ce paragraphe les mettait dans le même
-sac et annonçait « 2,2 à 2,5:1 » pour les deux. C'était faux pour l'un d'eux,
-et c'est un relecteur qui l'a mesuré.
+**Ces paragraphes ont vécu moins de vingt-quatre heures, et c'est précisément
+pourquoi ils sont retirés plutôt que corrigés.** Une description périmée se lit
+comme une mesure et ne rougit jamais — aucun test ne lit les `.md`. La seule
+protection est de ne pas en laisser traîner.
 
-| ce qui est peint | ancienne palette | rampe prune | avec `--niv-encre` |
-|---|---|---|---|
-| le NOM du niveau, `--text3` (#9b9b9b) | 2,23 → 2,53:1 — **déjà sous le seuil, en production, avant ce lot** | 1,17 → 2,25:1 | 4,90 → 6,50:1 |
-| « fixé par vous », `--text2` (#6b6b6b) | 4,28 → 4,86:1 — **au-dessus du seuil sur quatre des cinq** | 1,58 → 4,32:1 | 4,90 → 6,50:1 |
-| la pastille de niveau des lignes de nuit, `--text2` | 4,28 → 4,86:1 | 1,58 → 4,32:1 | 4,90 → 6,50:1 |
-
-⚠ **ET DEUX CONVENTIONS DE COULEUR NE SURVIVENT PAS À LA RAMPE**, les deux
-relevées en review le 2 novembre 2026 :
-- le **vert / rouge** de la pastille de niveau (`.yp-niveau.hausse/.baisse`,
-  1,59:1 et 1,93:1 sur Exceptionnel) est **retiré** : c'était un doublon. Le
-  sens — la suggestion monte ou baisse — reste porté par le PRIX, sur la même
-  ligne, sur le fond neutre, où le vert vaut 4,64:1 ;
-- le **rouge destructif** du `×` qui retire un montant fixé (`#B02A37`,
-  1,93:1 sur Exceptionnel) prend `--niv-encre`. Mesure faite sur cinq rouges de
-  plus en plus sombres : le premier qui tienne 4,5:1 sur les **cinq** fonds est
-  `#38070E`, qui n'est plus un rouge mais un noir. Il ne reste que le signe `×`
-  et son `title` pour dire le geste.
-
-⚠ **LA RAMPE S'ARRÊTE AU MOYEN ET NE VA PAS AU FONCÉ**, et c'est une décision,
-pas une limite. Un fond foncé imposerait un régime de texte **blanc** sur les
-deux derniers niveaux : cinq valeurs de plus, et deux écrans à deux régimes de
-texte. La rampe retenue garde `--text` lisible sur les cinq fonds (5,16:1 au
-pire), donc un seul régime.
-
-**Dix valeurs, pas cinq.** Un fond ET un accent par niveau : l'accent se pose en
-`box-shadow: inset 3px 0 0` sur les lignes de nuit et en trait de légende sur le
-marché. Une « source unique » qui n'aurait retenu que les fonds n'en couvrait
-que la moitié.
-
-⚠ **ET LA CONSIGNE « NI BLEU NI AMBRE » NE S'APPLIQUE PAS À CETTE ÉCHELLE.**
-Thierry l'a retirée pour elle le 29 octobre 2026, et pour elle seule. Les trois
-couleurs réservées — **noir** à la navigation, **ambre** à « ce qu'HôteSmart a
-fait pour vous », **bleu** au cliquable — restent en vigueur partout ailleurs.
-Le pas `Base` est bleuté et le pas `Haut` ambré : c'est voulu, c'est tranché, et
-ce n'est pas une entorse à la charte.
-
-**Pourquoi la palette garde son changement de teinte.** Mis devant le choix
-entre une échelle d'une seule teinte (claire → foncée) et la palette existante,
-Thierry a tranché pour l'existante, à l'identique, afin de **ne pas toucher un
-écran validé en production**. Conséquence assumée et à surveiller : cinq tons
-pâles et proches se distinguent mal dans une bande fine — d'où l'obligation que
-**toute bande porte son niveau en NOM** (`title` + `aria-label`), une couleur
-seule n'étant de toute façon pas une information.
+**L'état courant, ses cinq règles, ses deux corrections mesurées et les
+vingt-cinq valeurs des cinq rampes comparées : `docs/kb/charte-ui.md` §3.**
 
 ### Ce qui est tenu par un test, et pourquoi il faut un test
 
 Une règle écrite dans un document ne rougit jamais. `tests/palette-niveaux.test.js`
-fait trois choses :
+tient **les cinq règles de Thierry**, une par test, et chacune a été prouvée par
+une mutation qui la fait rougir :
 
-1. il **épingle les dix valeurs**, à la casse et au caractère ;
-2. il **recense toutes les occurrences** des dix hexas dans le dépôt et exige
-   qu'elles figurent dans une **liste blanche de fichiers nommés** — une copie
-   de plus, où que ce soit, fait rougir ;
-3. il exige que chaque occurrence porte **la valeur canonique de son niveau** —
-   un `#EDE4F5` devenu `#EDE4F6`, ou deux fonds échangés entre niveaux, font
-   rougir.
+1. les **cinq valeurs** sont dans la source unique, au caractère ;
+2. l'échelle n'a **aucune teinte** — saturation 0 % sur les cinq (règle 3) ;
+3. le **contraste texte/fond ≥ 4,5:1** sur les cinq (règle 5) ;
+4. aucune classe de niveau n'atteint une **ligne** ni la page (règle 1) ;
+5. aucun **dégradé**, aucune brillance (règle 4) ;
+6. le **chiffre** est écrit sur chaque pastille rendue (règle 2) ;
+7. toute déclaration `--niveau-*` est **nommée** — une de plus est une copie,
+   une de moins est une source amputée.
+
+⚠ **ET IL N'Y A PAS DE TEST « CES HEXAS N'APPARAISSENT QUE DANS LES FICHIERS
+NOMMÉS », ce qui était vrai des palettes colorées.** Trois des cinq densités
+**sont déjà des jetons du socle V5** — `#222222` = `--ink`, `#EBEBEB` = `--line`,
+`#F7F7F7` = `--surface-2` — donc elles vivent partout où le socle les emploie.
+Un gris n'est pas distinctif ; un **nom** l'est. Chercher la valeur était la
+bonne garde pour une teinte, c'est la mauvaise pour une encre.
 
 Son message d'échec **dit la règle en toutes lettres**, parce qu'un test dont
 l'échec n'explique pas la règle se contourne en changeant le test.
@@ -396,32 +361,29 @@ l'échec n'explique pas la règle se contourne en changeant le test.
 Il épingle les **valeurs**, pas le goût : il n'empêche pas Thierry de changer la
 palette, il empêche qu'elle change **sans lui**.
 
-### État mesuré le 29 octobre 2026, et les deux écarts qui restent
+### Ce que la source unique a coûté, et les deux écarts qu'elle a révélés — CLOS
 
-La palette était **recopiée quatre fois** — trois dans `apps/yield/prix.html`
-(`.n-*`, `.yp-niv-badge.n-*`, `.yp-niv.n-*`) et une en jetons dans
-`apps/yield/marche-global.html`. Les quatre copies **concordaient**, ce qui est
-précisément la situation dangereuse : rien ne rougissait, et la cinquième aurait
-divergé. La source unique vit désormais dans `public/style.css`, la seule
-feuille que les deux écrans chargent.
+La palette était **recopiée quatre fois** jusqu'au 30 octobre 2026 — trois dans
+`apps/yield/prix.html`, une en jetons dans `apps/yield/marche-global.html`. Les
+quatre copies **concordaient**, ce qui est précisément la situation dangereuse :
+rien ne rougissait, et la cinquième aurait divergé.
 
-⚠ **Deux écarts trouvés en posant la règle, NON corrigés, et c'est délibéré :**
+⚠ **Les deux écarts que la règle avait révélés sont clos, et pas par où on le
+croyait :**
 
-1. **Le 5e niveau est incomplet côté marché.** `marche-global.html` déclare
-   `--yf-exceptionnel-l` sans `--yf-exceptionnel` : sa légende apparie
-   `'Très haut ou Exceptionnel': ['--yf-tres-haut', '--yf-exceptionnel-l']`.
-   Quatre niveaux ont un fond, le cinquième non.
-2. **Le mode sombre diverge.** `marche-global.html` redéfinit quatre fonds sous
-   `prefers-color-scheme: dark` (`#1d2a36`, `#1f2d24`, `#352d17`, `#3a2717`) ;
-   `apps/yield/prix.html` n'a **aucun** bloc sombre, et ni l'une ni l'autre ne
-   charge `shared/theme.css`. **« À l'identique » est donc faux en mode
-   sombre** : les mêmes niveaux s'y affichent sombres sur un écran et pâles sur
-   l'autre — sur une page dont le fond, lui, reste clair.
+1. **Le 5e niveau incomplet côté marché** — `marche-global.html` appariait le
+   fond d'un niveau avec l'accent d'un autre. Corrigé le 2 novembre sur
+   validation, puis rendu **sans objet** le 3 : l'échelle d'encre n'a plus
+   d'accent, donc plus de paire à déparier.
+2. **Le mode sombre divergent** — retiré de YieldFlow le 2 novembre, sur double
+   validation de Thierry (« pas de mode sombre sur YieldFlow pour l'instant »).
 
-**Les deux demandent la double validation de Thierry**, puisque les corriger
-change l'apparence d'écrans validés. Ils sont au registre, pas dans un lot de
-passage.
-
+⚠ **ET LA SOURCE UNIQUE A ENCORE BOUGÉ LE 3 NOVEMBRE** : les cinq classes
+`.n-base` … `.n-exceptionnel` ne vivent plus dans la page mais dans
+`public/style.css`, avec les jetons. Deux écrans les emploient — la Prédiction
+de prix et le marché — et les écrire dans chaque page refaisait exactement la
+copie que ce chantier venait de fermer. C'est d'ailleurs par là que le niveau
+avait atteint une **ligne** sur le marché, ce que la règle 1 interdit.
 ## 6. Mobile
 
 C'est là que l'hôte regarde. Sous 640 px : la barre de sélection passe en deux
