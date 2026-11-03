@@ -102,7 +102,16 @@
     sans_lien_provider: 'Ce logement n’est pas relié à votre gestionnaire de canaux. Sans ce lien, le calendrier ne verrait aucune réservation et vendrait des nuits déjà prises.',
     multi_unites_non_supporte: 'Ce logement compte plusieurs unités. La réservation directe ne les gère pas encore.',
     sans_ecriture_crs: 'Ce logement n’est pas encore géré par Channex. La réservation directe encaisse puis écrit la réservation chez le gestionnaire de canaux : sans ce chemin, le paiement serait pris puis remboursé. Il s’ouvrira à la migration du logement.',
-    bien_inconnu: 'Logement introuvable.'
+    bien_inconnu: 'Logement introuvable.',
+    // ⚠ CINQUIEME MOTIF, ajoute le 3 novembre 2026 avec la garde d'archivage.
+    // Sans cette ligne le repli `BLOQUANTS[b.bloquant] || b.bloquant` affiche la
+    // chaine technique « bien_archive » dans l'encadre rouge de l'hote, et rien
+    // dans le depot ne l'attrape — constat de la revue de 3ab472d9.
+    // ⚠ ET SON REMEDE N'EST PAS UN REGLAGE : les quatre autres motifs se
+    // corrigent en configurant le logement, celui-ci en le reactivant. Les deux
+    // phrases d'aide qui parlent de « regler le point ci-dessus » et de « pas
+    // ENCORE vendre » sont donc fausses pour lui, et elles le disent autrement.
+    bien_archive: 'Ce logement est archivé. Sa page publique répond « ce logement n’est plus proposé à la réservation » et aucun paiement n’est possible. Réactivez-le depuis Mes biens pour le remettre en vente.'
   }
 
   function esc(s) {
@@ -166,8 +175,9 @@
             ${b.liens.map(ligneLien).join('')}
           </table>` : '<div class="aide">Aucun lien. Créez-en un pour ouvrir ce logement à la réservation directe.</div>'}
 
-          ${b.bloquant ? `<div class="aide">Réglez d’abord le point ci-dessus : un lien créé maintenant
-          afficherait « ce logement n’est pas ouvert à la réservation » à chaque visiteur.</div>` : `
+          ${b.bloquant ? `<div class="aide">${b.bloquant === 'bien_archive'
+            ? 'Réactivez d’abord ce logement : un lien créé maintenant afficherait « ce logement n’est plus proposé à la réservation » à chaque visiteur.'
+            : 'Réglez d’abord le point ci-dessus : un lien créé maintenant afficherait « ce logement n’est pas ouvert à la réservation » à chaque visiteur.'}</div>` : `
           <div class="creer">
             <div class="champ"><label>Site</label>
               <input class="label-input" data-neuf-label="${b.id}" placeholder="Mon site vitrine"></div>
@@ -240,7 +250,9 @@
       // Un lien cree sur un bien qui ne peut pas vendre : on le dit tout de
       // suite, plutot que de laisser l'hote coller une URL morte.
       message(d.bloquant
-        ? succes + ' Attention : ce logement ne peut pas encore vendre — l’adresse affichera « non ouvert à la réservation ».'
+        ? succes + (d.bloquant === 'bien_archive'
+          ? ' Attention : ce logement est archivé — l’adresse affichera « ce logement n’est plus proposé à la réservation ».'
+          : ' Attention : ce logement ne peut pas encore vendre — l’adresse affichera « non ouvert à la réservation ».')
         : succes, d.bloquant ? 'ko' : 'ok')
       if (recharger) await charger()
     } catch (e) { message('Enregistrement impossible.', 'ko') }
