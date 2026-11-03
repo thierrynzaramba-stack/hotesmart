@@ -94,33 +94,64 @@ test('une balise inconnue est RENDUE, pas avalee : l appelant decide', () => {
   assert.deepEqual(r.manquants, [], 'une balise inconnue n est pas une valeur manquante')
 })
 
-test('LE TEST QUI COMPTE : le code d acces n entre JAMAIS dans les manquants', () => {
-  // Son absence est NORMALE au moment ou un message programme est bati : la
-  // serrure n'a pas encore genere le code. L'ajouter aux manquants ferait
-  // refuser des modeles qui partent aujourd'hui (`menage_done` en production).
-  // Sa garde est ailleurs, et elle est plus forte : `hasUnresolvedCode`.
+test('LE TEST QUI COMPTE : un code non resolu RETIENT le message', () => {
+  // ⚠ CE TEST DISAIT L'INVERSE JUSQU'AU 3 NOVEMBRE 2026, et c'est une decision
+  // de Thierry qui l'a retourne (lot 1b). L'ancienne version gravait « le code
+  // n'entre JAMAIS dans les manquants », au motif que son absence est normale
+  // quand un message programme est bati. Vrai — mais la consequence l'etait
+  // aussi : un modele d'arrivee portant `{code_acces}` envoyait
+  // « [CODE À INSÉRER] » en clair au voyageur, apres etre passe par Haiku,
+  // parce que la seule garde du depot vivait sur UN autre chemin.
+  // Desormais le remplaceur le signale, et tout appelant qui refuse deja sur un
+  // manque refuse aussi sur un code absent.
   const sans = remplacerBalises('code {code_acces}', { reservation: RESA })
   assert.equal(sans.texte, `code ${UNRESOLVED_CODE}`)
-  assert.deepEqual(sans.manquants, [])
-  assert.ok(hasUnresolvedCode(sans.texte), 'la garde de l envoi, elle, le voit')
+  assert.deepEqual(sans.manquants, ['code_acces'], 'un code absent est un manque')
+  assert.ok(hasUnresolvedCode(sans.texte), 'et la garde de l envoi le voit aussi')
+
+  // Avec le code, rien ne manque et rien ne bloque — la contre-epreuve, sans
+  // laquelle « il manque » resterait vrai d'un code qui ne manque pas.
   const avec = remplacerBalises('code {code_acces}', { reservation: RESA, codeAcces: '000000' })
   assert.equal(avec.texte, 'code 000000')
+  assert.deepEqual(avec.manquants, [])
   assert.ok(!hasUnresolvedCode(avec.texte))
+
+  // ⚠ ET UN TEXTE QUI NE DEMANDE PAS LE CODE N'EN MANQUE PAS : sans ca, tout
+  // message programme deviendrait irrecevable.
+  const autre = remplacerBalises('Bonjour {prenom}', { reservation: RESA })
+  assert.deepEqual(autre.manquants, [])
+
+  // Et le « ou le remplir » ne renvoie pas l'hote vers la base : le code vient
+  // de la serrure, la correction se fait dans le MODELE.
+  assert.match(OU_REMPLIR.code_acces, /serrure/)
+  assert.match(OU_REMPLIR.code_acces, /modèle/)
 })
 
-test('le format de date est INJECTE : les deux chemins ne formatent pas pareil', () => {
-  // Mesure du 3 novembre 2026 : le code d'acces rend « dimanche 2 novembre »,
-  // les messages programmes « 02 novembre 2026 ». Imposer l'un des deux aurait
-  // change le texte recu par le voyageur — ce lot promet « rien de visible ».
-  // ⚠ Le 2 novembre 2026 est un LUNDI. La maquette validee ecrit « dimanche
-  // 2 novembre » — c'est une maquette, pas un calendrier, et un test qui
-  // recopierait sa phrase sans la verifier figerait son erreur.
-  const defaut = remplacerBalises('arrivee {arrivee}', { reservation: RESA })
-  assert.equal(defaut.texte, 'arrivee lundi 2 novembre')
-  const autre = remplacerBalises('arrivee {arrivee}', {
-    reservation: RESA, formatDate: () => '02 novembre 2026'
+test('LE TEST QUI COMPTE : UN SEUL format de date, et il n est pas injectable', () => {
+  // ⚠ CE TEST DISAIT L'INVERSE JUSQU'AU 3 NOVEMBRE 2026 : il gravait que les
+  // deux chemins formatent differemment et que le format est INJECTE. Le lot 1
+  // avait fait ce choix pour ne rien changer au texte recu par le voyageur ;
+  // Thierry a tranche l'unification (lot 1b), confirmee dans sa fenetre parce
+  // qu'elle CHANGE ce texte : les messages programmes rendaient
+  // « 02 novembre 2026 », ils rendent « lundi 2 novembre ».
+  const r = remplacerBalises('arrivee {arrivee}, depart {depart}', { reservation: RESA })
+  assert.equal(r.texte, 'arrivee lundi 2 novembre, depart mercredi 4 novembre')
+
+  // ⚠ L'INJECTION A ETE RETIREE, PAS SEULEMENT INUTILISEE : un point
+  // d'injection laisse en place permet de redivergier en une ligne, sans
+  // conflit et sans test rouge. On EPROUVE qu'un appelant ne peut plus choisir.
+  const force = remplacerBalises('arrivee {arrivee}', {
+    reservation: RESA, formatDate: () => 'FORMAT-IMPOSE'
   })
-  assert.equal(autre.texte, 'arrivee 02 novembre 2026')
+  assert.equal(force.texte, 'arrivee lundi 2 novembre',
+    'aucun appelant ne doit pouvoir imposer son format')
+  const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'balises.js'), 'utf8')
+  assert.ok(!/ctx\.formatDate/.test(source), 'le point d injection ne doit plus exister')
+
+  // Et le chemin des messages programmes ne passe plus le sien.
+  const cron = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cron-messages.js'), 'utf8')
+  const appel = cron.slice(cron.indexOf('remplacerBalises('), cron.indexOf('text = texte'))
+  assert.ok(!/\bformatDate\b/.test(appel), 'cron-messages ne doit plus passer de formateur')
 })
 
 test('LE TEST QUI COMPTE : un seul remplaceur dans le depot', () => {

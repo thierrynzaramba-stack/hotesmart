@@ -48,6 +48,31 @@ test('LE TEST QUI COMPTE : une information MANQUANTE arrete l envoi, et previent
     'la cle technique ne doit pas etre ce que l hote lit en premier')
 })
 
+test('LE TEST QUI COMPTE (lot 1b) : un modele portant {code_acces} est RETENU, et l hote le lit', async () => {
+  // ⚠ AVANT LE LOT 1B, CE MESSAGE PARTAIT AU VOYAGEUR avec « [CODE À INSÉRER] »
+  // en clair, apres etre passe par Haiku : la seule garde du depot vivait sur
+  // le chemin de la serrure. La garde est maintenant dans le remplaceur, donc
+  // sur TOUS les chemins.
+  //
+  // ⚠ ET ON MESURE LA TRACE, PAS SEULEMENT LE REFUS. Un envoi degrade devient
+  // un envoi RETENU, et un message retenu est un message que personne ne voit
+  // partir : si le refus ne laissait qu'un `console.error`, l'hote ne saurait
+  // jamais que son voyageur attend. C'est la famille de defaut que ce depot
+  // connait — tout sort en logs, rien n'atteint l'ecran.
+  const { mod, incidents, appels } = charger('texte ameliore')
+  const m = await mod.generateAutoMessage(
+    modele('Bonjour {prenom}, votre code est {code_acces}.'),
+    { firstName: 'Carole', arrival: '2026-10-08', departure: '2026-10-10' },
+    bien, 'Carole', {}, 'u1')
+  assert.strictEqual(m, null, 'rien ne part sans le code')
+  assert.equal(appels.length, 0, 'et on ne paie pas Haiku pour un message retenu')
+  assert.equal(incidents.length, 1, 'l hote est prevenu')
+  assert.match(incidents[0].detail, /Code d'accès/, 'l alerte NOMME l information')
+  assert.match(incidents[0].detail, /serrure/, 'et dit ou se corrige le defaut : le modele')
+  assert.ok(!/code_acces/.test(incidents[0].detail.split('A renseigner')[0]),
+    'pas de nom technique dans ce que l hote lit en premier')
+})
+
 test('et le meme message part NORMALEMENT quand l information est la', async () => {
   // La contre-epreuve de l arret : sans elle, un test qui exige `null` reste
   // vert sur un code qui ne rend JAMAIS rien.
