@@ -16,6 +16,16 @@ function chargerEndpoint({ props = [], snaps = [], user = { id: 'u1' }, propErr 
       const q = {
         _nom: nom,
         select() { return q }, eq(c, v) { etat.requetes.push({ table: nom, col: c, val: v }); return q },
+        // ⚠ `is` COMPLETE CE DOUBLE depuis le filtre des biens archives :
+        // `sansArchives` (lib/biens-vivants.js) LEVE sur une chaine qui n'a pas
+        // `.is`, et c'est VOULU — un double incomplet doit echouer bruyamment
+        // plutot que de valider du code qui ne peut pas tourner.
+        //
+        // ⚠ IL NE FAIT QUE CHAINER, et il ne mesure donc PAS que la garde est
+        // posee : ces tests ne parlent pas d'archivage. C'est
+        // tests/ecrans-sans-biens-archives.test.js qui le mesure, avec un
+        // double qui APPLIQUE le filtre.
+        is () { return q },
         not() { return q }, in() { return q },
         order(c) { par(nom).order = c; etat.order = c; return q },
         // `or` : filtre de perimetre pose par la garde (etape 3). Le titulaire

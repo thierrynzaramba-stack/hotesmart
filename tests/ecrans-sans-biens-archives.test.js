@@ -36,8 +36,20 @@ process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
 
 const TITULAIRE = '11111111-1111-1111-1111-111111111111'
-const VIVANT = { id: '22222222-2222-2222-2222-222222222222', name: 'La bulle', archive_le: null }
-const RANGE = { id: '33333333-3333-3333-3333-333333333333', name: 'Colomiers', archive_le: '2026-11-03T20:42:19.342Z' }
+// ⚠ `provider_property_id` EST OBLIGATOIRE SUR LES DEUX : le domaine menage
+// raisonne en cle provider et EXCLUT les biens qui n'en ont pas
+// (`.not('provider_property_id', 'is', null)`). Sans elle, l'endpoint rendait
+// zero bien et l'assertion de non-vacuite refusait — a juste titre : un banc
+// qui ne rend rien ne prouve rien.
+const VIVANT = {
+  id: '22222222-2222-2222-2222-222222222222', name: 'La bulle',
+  provider_property_id: 'prop-vivant', provider: 'channex', archive_le: null
+}
+const RANGE = {
+  id: '33333333-3333-3333-3333-333333333333', name: 'Colomiers',
+  provider_property_id: 'prop-range', provider: 'channex',
+  archive_le: '2026-11-03T20:42:19.342Z'
+}
 
 // ─── Le double de `properties`, qui HONORE les filtres demandes ─────────────
 function tableProperties (lignes, journal) {
@@ -71,6 +83,31 @@ function tableProperties (lignes, journal) {
   return chaine
 }
 
+// ⚠ CERTAINS ENDPOINTS ONT BESOIN D'UNE AUTRE TABLE POUR FRANCHIR LEUR GARDE
+// D'ENTREE — l'app de la prestataire resout son jeton dans `public_tokens`
+// avant de lire quoi que ce soit. Un banc qui ne sait servir que `properties`
+// ne les atteint jamais, et l'assertion de non-vacuite le dit au lieu de
+// verdir. Les lignes sont donc fournies par l'ecran, a cote de sa `query`.
+function tableGarnie (lignes) {
+  const chaine = {
+    select () { return chaine },
+    eq () { return chaine },
+    in () { return chaine },
+    is () { return chaine },
+    not () { return chaine },
+    or () { return chaine },
+    order () { return chaine },
+    limit () { return chaine },
+    range () { return chaine },
+    gte () { return chaine },
+    lte () { return chaine },
+    maybeSingle: async () => ({ data: lignes[0] || null, error: null }),
+    single: async () => ({ data: lignes[0] || null, error: null }),
+    then (res) { return res({ data: lignes, error: null, count: lignes.length }) }
+  }
+  return chaine
+}
+
 // Toute autre table rend une liste vide : l'endpoint doit survivre sans elle.
 function tableVide () {
   const chaine = new Proxy({}, {
@@ -83,9 +120,11 @@ function tableVide () {
   return chaine
 }
 
-function installer (lignes, journal) {
+function installer (lignes, journal, tables = {}) {
   const client = {
-    from: (nom) => (nom === 'properties' ? tableProperties(lignes, journal) : tableVide()),
+    from: (nom) => (nom === 'properties'
+      ? tableProperties(lignes, journal)
+      : (tables[nom] ? tableGarnie(tables[nom]) : tableVide())),
     rpc: () => ({ then: (res) => res({ data: [], error: null }) }),
     // ⚠ CERTAINS ENDPOINTS AUTHENTIFIENT AVANT LA GARDE, par le jeton Bearer
     // (`supabase.auth.getUser`) : doubler `requirePermission` seul ne suffit
@@ -112,7 +151,12 @@ function installer (lignes, journal) {
       return {
         ...vraieGarde,
         requirePermission: async () => ({ ok: true, contexte, compte: TITULAIRE, bien: null }),
-        contexteDEcran: async () => ({ ok: true, userId: TITULAIRE, accountUserId: TITULAIRE, contexte })
+        contexteDEcran: async () => ({ ok: true, userId: TITULAIRE, accountUserId: TITULAIRE, contexte }),
+        // ⚠ QUATRIEME PORTE D'ENTREE : certains endpoints appellent
+        // `verifierSession` directement, sans passer par les deux gardes
+        // ci-dessus. Doubler trois gardes sur quatre laisse l endpoint a 401 —
+        // et c est encore la non-vacuite qui l a dit.
+        verifierSession: async () => TITULAIRE
       }
     }
     return origine.apply(this, arguments)
@@ -120,9 +164,9 @@ function installer (lignes, journal) {
   return () => { Module._load = origine }
 }
 
-function appeler (chemin, query, lignes) {
+function appeler (chemin, query, lignes, tables) {
   const journal = {}
-  const stop = installer(lignes, journal)
+  const stop = installer(lignes, journal, tables)
   try {
     const abs = require.resolve(path.join(__dirname, '..', chemin))
     delete require.cache[abs]
@@ -153,8 +197,18 @@ function appeler (chemin, query, lignes) {
 // reaction serait de retirer le test, pas de corriger l'endpoint.
 const ECRANS = [
   { ecran: 'Accueil', chemin: 'api/ecran/aujourdhui.js', query: { blocs: 'biens' }, legitimes: ['biens_archives'] },
-  { ecran: 'Calendrier et base de connaissance', chemin: 'api/channel-property.js', query: {} }
+  { ecran: 'Calendrier et base de connaissance', chemin: 'api/channel-property.js', query: {} },
+  { ecran: 'Menages (A traiter et calendrier)', chemin: 'api/menages.js', query: {} },
 ]
+
+// ⚠ `api/menages-public.js` N'EST PAS DANS CETTE LISTE, et la raison vaut
+// d'etre ecrite : son chemin d'entree valide un PORTEUR de jeton — profil
+// prestataire actif, mode d'acces, perimetre de biens — et le banc generique ne
+// reproduit pas cet etat. Garni a moitie, il refusait en 401 et l'assertion de
+// non-vacuite le disait au lieu de verdir.
+// Son filtre est prouve la ou le banc sait franchir cette garde :
+// `tests/menages-public-filtre-presta.test.js`, qui lit la requete REELLEMENT
+// emise et exige `archive_le is null`.
 
 // ⚠ UNE EXEMPTION SE COMPTE ET SE MOTIVE, elle ne se decrit pas — meme
 // discipline que l'`ATTENDU` de tests/bookings-snapshot-troncature.test.js. Le
@@ -171,7 +225,7 @@ const EXEMPTES = {
 
 for (const e of ECRANS) {
   test(`LE TEST QUI COMPTE : ${e.ecran} ne rend AUCUN bien archive`, async () => {
-    const { rep, journal, erreur } = await appeler(e.chemin, e.query, [VIVANT, RANGE])
+    const { rep, journal, erreur } = await appeler(e.chemin, e.query, [VIVANT, RANGE], e.tables)
     assert.equal(erreur, undefined, `l endpoint a leve : ${erreur && erreur.message}`)
     assert.ok(journal.filtres, `${e.chemin} n a pas lu properties : ce test ne mesure rien`)
     // On retire les champs qui ont le DROIT de nommer un bien archive.

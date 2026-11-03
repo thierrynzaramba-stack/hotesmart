@@ -21,6 +21,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { isActiveStatus } = require('../lib/bookings-snapshot')
+const { sansArchives } = require('../lib/biens-vivants')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
@@ -107,7 +108,14 @@ module.exports = async function handler(req, res) {
 
   try {
     // ===== BIENS (tous providers) =====
-    let qProps = supabase
+    // ⚠ POINT 4 DU CONSTAT DE THIERRY DU 3 NOVEMBRE 2026 : « À traiter » et le
+    // calendrier des menages montraient encore Colomiers, archive. C'est la
+    // liste de l'ecran, elle se filtre.
+    //
+    // ⚠ CONFORME A CE QU'ON PROMET A L'HOTE : la confirmation d'archivage dit
+    // « arrete les synchronisations, les messages et les menages »
+    // (`fiche.archiver_quoi`). Un bien range ne produit plus de menage.
+    let qProps = sansArchives(supabase
       .from('properties')
       // `id` (UUID) est indispensable a l'ecran Prestataires : `/api/membres`
       // attend `permissions.property_ids` en UUID, alors que tout le domaine
@@ -115,7 +123,7 @@ module.exports = async function handler(req, res) {
       // sous deux noms distincts — les confondre est le piege n°1 du depot.
       .select('id, provider_property_id, name, provider')
       .eq('user_id', userId)
-      .not('provider_property_id', 'is', null)
+      .not('provider_property_id', 'is', null))
     if (filtreRef) qProps = qProps.or(filtreRef)
     const { data: propRows, error: propErr } = await qProps
       .order('name', { ascending: true })
@@ -1344,6 +1352,13 @@ async function ecrireLiaisons (req, res) {
                    requiresAck: l && l.requires_ack !== undefined ? l.requires_ack : undefined })
   }
 
+  // ⚠ CELLE-CI N'EST **PAS** FILTREE, ET C'EST RAISONNE. Elle VALIDE les
+  // references d'une ecriture — l'assignation des prestataires de menage —, et
+  // un prestataire peut porter dans ses biens un logement archive depuis. La
+  // filtrer ferait rejeter cette reference, donc refuser l'enregistrement
+  // ENTIER : l'hote ne pourrait plus toucher a ses prestataires tant qu'il n'a
+  // pas devine lequel de ses biens coince. Une liste d'ecran se filtre, une
+  // garde d'appartenance jamais.
   const { data: biensDuCompte, error: errBiens } = await supabase.from('properties')
     .select('provider_property_id').eq('user_id', userId)
     .not('provider_property_id', 'is', null)

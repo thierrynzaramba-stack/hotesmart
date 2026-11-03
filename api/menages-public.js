@@ -3,6 +3,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 // Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
+const { sansArchives } = require('../lib/biens-vivants')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, filtresAttribution, MAX_IDS } = require('../lib/attribution-prestataire')
 const { alertMenageRefuse, alertReglesModifiees, alertPlageModifiee } = require('../lib/alert-notify')
@@ -569,11 +570,14 @@ module.exports = async function handler(req, res) {
     // ecrites AVANT l'unification : elles portent le statut BRUT du provider et
     // aucun champ `provider`. Sans ce defaut, un blocage proprietaire Beds24
     // ('black') retomberait sur le fallback 'confirmed' -> menage fantome.
-    const { data: propRows, error: errProps } = await supabase
+    // ⚠ L'APP DE LA PRESTATAIRE AUSSI (point 4). Elle n'a pas a voir le
+    // planning d'un logement que l'hote a range : ce qui reste a faire dessus,
+    // s'il en reste, ne sera demande par personne.
+    const { data: propRows, error: errProps } = await sansArchives(supabase
       .from('properties')
       .select('provider_property_id, name, provider, checkout_time, photo_url')
       .eq('user_id', userId)
-      .not('provider_property_id', 'is', null)
+      .not('provider_property_id', 'is', null))
     // ⚠ L'ERREUR ETAIT AVALEE, trois instructions avant la garde `errSnaps`.
     // Constat de review du 7 septembre. Une panne rendait `propRows` null, donc
     // `properties` vide, donc `propIds` vide, donc le bloc de lecture des

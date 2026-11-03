@@ -174,6 +174,30 @@ const MENAGE = (booking, provider, depart, over = {}) => ({
 
 // ─── Le filtre par personne ────────────────────────────────────────────────
 
+test("LE TEST QUI COMPTE : la lecture des biens EXCLUT les logements archivés", async () => {
+  // ⚠ POINT 4 DU CONSTAT DE THIERRY DU 3 NOVEMBRE 2026. L'app de la
+  // prestataire n'a pas à montrer le planning d'un logement que l'hôte a rangé :
+  // ce qui reste à faire dessus, s'il en reste, ne sera demandé par personne.
+  //
+  // ⚠ ON LIT LA REQUÊTE RÉELLEMENT ÉMISE, pas la source du module ni la
+  // réponse. Le double de ce fichier rend `BIENS` sans honorer les filtres sur
+  // `properties` — il ne peut donc pas montrer l'effet du filtre, seulement sa
+  // présence. C'est la même preuve que pour les listes de colonnes de
+  // `raisonNonVendable` : une garde qui n'est pas DEMANDÉE à Postgres n'existe
+  // pas, quoi que dise le code.
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, null, 'la lecture a échoué : ce test ne mesure rien')
+
+  const lectures = journal.filter(a => a.table === 'properties')
+  assert.ok(lectures.length >= 1, 'aucune lecture de properties : ce test ne mesure rien')
+  const filtree = lectures.some(a => (a.is || []).some(x => x.c === 'archive_le' && x.v === null))
+  assert.ok(filtree,
+    'la lecture des biens ne demande pas `archive_le is null` : un logement archivé reste au planning')
+})
+
 test('la prestataire ne voit QUE les ménages qui lui sont assignés', async () => {
   preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
