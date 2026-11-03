@@ -183,8 +183,8 @@ d'un coup.** La V5 ajoute (type, libellé, rattachement), elle ne renomme pas
 
 | # | question | pourquoi elle bloque |
 |---|---|---|
-| D1 | **Le champagne : 29 € ?** Et le pack massage est-il toujours épuisé ? | C'est la ligne qui a déclenché le chantier. |
-| D2 | **Quel est LE `telephone_hote`** de La bulle et de Cœur de vie 23 : `NUMERO-A` (la base), ou les deux numéros des modèles ? | Une balise unique ne peut pas porter deux numéros. Si les deux doivent partir, il faut **deux clés** (`telephone_hote`, `telephone_hote_2`). |
+| D1 | ~~Le champagne : 29 € ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : 29 €, et le pack massage est TOUJOURS ÉPUISÉ.** La ligne `faq` « Pack en complément » de La bulle passe donc de 39 € à **29 €** ; sa seconde phrase reste vraie. | C'est la ligne qui a déclenché le chantier. ⚠ **Pas encore corrigée en production** : c'est une écriture, elle attend son go — ou le geste de Thierry depuis l'écran actuel. |
+| D2 | ~~Quel est LE téléphone hôte ?~~ **TRANCHÉ par Thierry le 3 novembre 2026 : les DEUX numéros des modèles sont bons** — NUMERO-C et NUMERO-B. Donc **deux clés**, `telephone_hote` (NUMERO-C) et `telephone_hote_2` (NUMERO-B), et **NUMERO-A, que la base porte aujourd'hui, est PÉRIMÉ** : il est remplacé, pas conservé. | Une balise unique ne peut pas porter deux numéros. ⚠ **Conséquence mesurée : sur les deux biens de Bagnères, la balise `{telephone_hote}` aurait envoyé un numéro périmé à chaque message** — elle n'a jamais servi, parce que les cinq modèles écrivent les bons numéros en dur. Le défaut était donc masqué par celui que le chantier vient fermer. |
 | D3 | **Le code d'immeuble `CODE-IMMEUBLE`** devient-il une clé de la base ? | C'est un secret d'accès : s'il entre dans la base, il entre aussi dans ce que l'IA peut lire. ⚠ **Ma recommandation : une clé marquée « jamais lue par l'IA »**, utilisable en balise seulement. |
 | D4 | Une entrée de base peut-elle porter **une date de dernière vérification**, et l'écran la montrer ? | C'est le seul garde-fou contre un 39 € qui dort trois mois. |
 | D5 | Les `faq` d'aujourd'hui sont des **réponses rédigées** (« Bonjour, … »), pas des faits. On garde les deux natures (`fait` et `réponse`) ou on sépare ? | Change la forme de l'écran et ce que l'IA reçoit. |
@@ -199,6 +199,8 @@ d'un coup.** La V5 ajoute (type, libellé, rattachement), elle ne renomme pas
 - `type` : `fixed` et `faq` conservés ; une valeur de plus si D5 le demande.
 - **nouveau** `verifie_le` (timestamptz, nullable) — D4.
 - **nouveau** `lisible_par_ia` (boolean, défaut `true`) — D3.
+- **nouveau** `telephone_hote_2` (clé `fixed`, décision D2) : deux numéros partent aux voyageurs, donc deux
+  clés et deux balises. ⚠ La valeur actuelle de `telephone_hote` (NUMERO-A) est **périmée** et remplacée.
 - `property_id` reste la **référence provider** (`provider_property_id`), règle 10
   de `CLAUDE.md`. ⚠ Vérifié : les 45 lignes portent bien des refs provider.
 
