@@ -128,19 +128,28 @@ test('LE TEST QUI COMPTE : un seul remplaceur dans le depot', () => {
   // qu une copie. L effet, lui, est mesure par les tests ci-dessus.
   const racine = path.join(__dirname, '..')
   const coupables = []
-  for (const dossier of ['lib', 'api']) {
+  // ⚠ LE PERIMETRE ET LES DEUX FORMES, et c'est un constat de review : il ne
+  // balayait que `lib/` et `api/` — or la spec annonce `shared/balises.js` et
+  // le lot 4 ecrit l'insertion cote front, donc la copie naitra justement la.
+  // Et il ne reconnaissait qu'une seule forme, alors que l'idiome de
+  // `balises.js` lui-meme est `new RegExp(\`\\{${cle}\\}\`)` : un
+  // copier-coller de sa boucle serait passe vert.
+  for (const dossier of ['lib', 'api', 'shared', 'pages', 'scripts']) {
     const pile = [path.join(racine, dossier)]
     while (pile.length) {
       const d = pile.pop()
       for (const e of fs.readdirSync(d, { withFileTypes: true })) {
         const p = path.join(d, e.name)
         if (e.isDirectory()) { pile.push(p); continue }
-        if (!e.name.endsWith('.js')) continue
+        if (!e.name.endsWith('.js') && !e.name.endsWith('.html')) continue
         if (p === path.join(racine, 'lib', 'balises.js')) continue
         const net = fs.readFileSync(p, 'utf8')
           .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
         for (const cle of Object.keys(BALISES)) {
-          if (new RegExp(`\\.replace\\(\\s*/\\\\?\\{${cle}\\\\?\\}`).test(net)) {
+          const litteral = new RegExp(`\\.replace\\(\\s*/\\\\?\\{${cle}\\\\?\\}`)
+          // La seconde forme : celle que `balises.js` emploie lui-meme.
+          const construit = new RegExp(`new RegExp\\([\`'"]\\\\*\\{${cle}`)
+          if (litteral.test(net) || construit.test(net)) {
             coupables.push(`${path.relative(racine, p)} : {${cle}}`)
           }
         }
@@ -149,6 +158,49 @@ test('LE TEST QUI COMPTE : un seul remplaceur dans le depot', () => {
   }
   assert.deepEqual(coupables, [],
     'une seconde copie du remplacement est apparue — c est exactement ce que le lot 1 a ferme')
+})
+
+test('LE TEST QUI COMPTE : une valeur portant un $ arrive INTACTE chez le voyageur', () => {
+  // ⚠ CONSTAT DE REVIEW, MESURE. Dans une CHAINE de remplacement, `$$`, `$&`,
+  // ``$` `` et `$'` sont des motifs : « pa$$w0rd » devenait « pa$w0rd », et
+  // « x$`y » recopiait le texte d'avant. Aucun de ces cas ne leve, aucun
+  // n'entre dans `manquants` : le voyageur recevait un mot de passe faux, sans
+  // la moindre garde. Et c'est le champ le plus susceptible de porter un `$`.
+  for (const valeur of ['pa$$w0rd', 'ab$&cd', "x$`y", "z$'t", '$1euro']) {
+    const r = remplacerBalises('wifi: {wifi_mdp}', { reservation: RESA, connaissance: { wifi_mdp: valeur } })
+    assert.equal(r.texte, `wifi: ${valeur}`, `la valeur ${valeur} doit arriver intacte`)
+  }
+  // Et la meme regle vaut pour ce qui vient de la reservation.
+  assert.equal(remplacerBalises('nom: {nom}', { reservation: { nom: 'A$$B' } }).texte, 'nom: A$$B')
+})
+
+test('un repli est une CHAINE de replis : un blanc ne masque pas le suivant', () => {
+  // ⚠ Constat de review : `property.checkInStart || property.checkin_time`
+  // ecrasait le second des que le premier etait une chaine d'espaces.
+  const r = remplacerBalises('arrivee {checkin}', {
+    reservation: RESA, connaissance: {}, replis: { checkin: ['   ', '16:00'] }
+  })
+  assert.equal(r.texte, 'arrivee 16:00', 'le repli blanc est saute, pas pris')
+  const vide = remplacerBalises('arrivee {checkin}', {
+    reservation: RESA, connaissance: {}, replis: { checkin: ['  ', null] }
+  })
+  assert.equal(vide.texte, 'arrivee 18:00', 'tous blancs : le defaut')
+})
+
+test('LE TEST QUI COMPTE : toute balise pouvant manquer dit OU la remplir', () => {
+  // ⚠ Constat de review : le wifi est entre dans les manquants avec ce lot, et
+  // l'alerte envoyee a l'hote disait « A renseigner dans wifi_mdp » — un nom
+  // technique. On exige donc la couverture pour TOUT ce qui peut y entrer.
+  const peutManquer = DE_LA_BASE.filter(cle => !BALISES[cle].defaut)
+  assert.ok(peutManquer.length >= 4, 'le test doit porter sur une vraie population')
+  for (const cle of peutManquer) {
+    assert.ok(OU_REMPLIR[cle], `${cle} peut entrer dans les manquants : il doit dire ou se remplir`)
+    assert.ok(!/^[a-z_]+$/.test(OU_REMPLIR[cle]), `${cle} : « ou le remplir » ne doit pas etre le nom technique`)
+  }
+  // Et le chemin des messages programmes lit CETTE table, pas une copie.
+  const cron = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cron-messages.js'), 'utf8')
+  assert.match(cron, /OU_REMPLIR: OU_RENSEIGNER \} = require\('\.\/balises'\)/,
+    'une seconde table « ou le remplir » redivergerait')
 })
 
 test('chaque balise de la base dit OU la remplir, et porte une etiquette lisible', () => {
