@@ -3,7 +3,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 // Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
-const { sansArchives } = require('../lib/biens-vivants')
+const { archivesEpuisees } = require('../lib/biens-vivants')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, filtresAttribution, MAX_IDS } = require('../lib/attribution-prestataire')
 const { alertMenageRefuse, alertReglesModifiees, alertPlageModifiee } = require('../lib/alert-notify')
@@ -570,14 +570,20 @@ module.exports = async function handler(req, res) {
     // ecrites AVANT l'unification : elles portent le statut BRUT du provider et
     // aucun champ `provider`. Sans ce defaut, un blocage proprietaire Beds24
     // ('black') retomberait sur le fallback 'confirmed' -> menage fantome.
-    // ⚠ L'APP DE LA PRESTATAIRE AUSSI (point 4). Elle n'a pas a voir le
-    // planning d'un logement que l'hote a range : ce qui reste a faire dessus,
-    // s'il en reste, ne sera demande par personne.
-    const { data: propRows, error: errProps } = await sansArchives(supabase
+    // ⚠ L'APP DE LA PRESTATAIRE SUIT LA MEME REGLE QUE L'ECRAN DE L'HOTE, et
+    // par le MEME module : un bien archive reste tant qu'il a un depart a venir
+    // (decision de Thierry du 3 novembre 2026). Un `sansArchives` ici retirait
+    // de son planning un menage prevu demain sur un sejour deja vendu.
+    //
+    // ⚠ `archive_le` EST DONC SELECTIONNEE : la regle est pure, elle juge
+    // l'objet qu'on lui donne, et sans cette colonne elle voit `undefined`
+    // partout — donc aucun bien archive, donc aucun retrait. Le defaut serait
+    // silencieux et le test vert si le banc injectait la colonne a la main.
+    const { data: propRows, error: errProps } = await supabase
       .from('properties')
-      .select('provider_property_id, name, provider, checkout_time, photo_url')
+      .select('provider_property_id, name, provider, checkout_time, photo_url, archive_le')
       .eq('user_id', userId)
-      .not('provider_property_id', 'is', null))
+      .not('provider_property_id', 'is', null)
     // ⚠ L'ERREUR ETAIT AVALEE, trois instructions avant la garde `errSnaps`.
     // Constat de review du 7 septembre. Une panne rendait `propRows` null, donc
     // `properties` vide, donc `propIds` vide, donc le bloc de lecture des
@@ -593,7 +599,8 @@ module.exports = async function handler(req, res) {
     const properties = (propRows || [])
       .filter(p => !allowedIds.length || allowedIds.includes(String(p.provider_property_id)))
       .map(p => ({ id: String(p.provider_property_id), name: p.name, provider: p.provider,
-                   checkout_time: p.checkout_time, photo: p.photo_url || null }))
+                   checkout_time: p.checkout_time, photo: p.photo_url || null,
+                   archive_le: p.archive_le || null }))
     const propNameById = {}
     const propProviderById = {}
     properties.forEach(p => { propNameById[p.id] = p.name; propProviderById[p.id] = p.provider })
@@ -941,6 +948,27 @@ module.exports = async function handler(req, res) {
       } catch (eVue) {
         console.error('[menages-public] horodatage de la vue impossible:', eVue.message)
       }
+    }
+
+    // ⚠ LES BIENS ARCHIVES SANS DEPART A VENIR SORTENT DU PLANNING, et ici
+    // seulement : il faut les reservations pour savoir s'il reste un depart.
+    // `allBookings` est deja filtre sur les sejours retenus, donc ses departs
+    // sont exactement ceux qui comptent.
+    const departsParBien = {}
+    for (const b of allBookings) {
+      if (!b || !b.departure) continue
+      ;(departsParBien[b.propId] = departsParBien[b.propId] || []).push(String(b.departure))
+    }
+    const biensEpuises = archivesEpuisees({
+      biens: properties.map(p => ({ cle: p.id, archive_le: p.archive_le })),
+      departs: departsParBien,
+      aujourdhui: new Date().toISOString().slice(0, 10)
+    })
+    if (biensEpuises.size) {
+      // ⚠ LES DEUX LISTES PARTENT ENSEMBLE : un menage « a prendre » dont le
+      // bien a disparu du planning s'afficherait sans nom de logement.
+      allBookings = allBookings.filter(b => !biensEpuises.has(b.propId))
+      aPrendre = (aPrendre || []).filter(m => !biensEpuises.has(String(m.propId || m.property_id)))
     }
 
     return res.json({

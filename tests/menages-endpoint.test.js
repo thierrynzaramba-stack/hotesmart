@@ -160,6 +160,68 @@ test('reassignation : sans session -> 401, jamais 405', async () => {
   assert.strictEqual(res.code, 401)
 })
 
+// ⚠ DES DATES RELATIVES, PARCE QUE CES DEUX TESTS LISENT L'HORLOGE :
+// `api/menages.js` calcule « aujourd'hui » avec `new Date()`. Regle du depot —
+// dates relatives si le test lit l'horloge, dates figees s'il injecte le temps.
+const jour = (n) => {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+test("LE TEST QUI COMPTE : un bien ARCHIVE garde son planning jusqu au dernier depart", async () => {
+  // ⚠ DECISION DE THIERRY DU 3 NOVEMBRE 2026 : « les menages des sejours deja
+  // vendus (non annules) d un bien archive restent visibles dans Menages et
+  // dans l app prestataire jusqu au DERNIER DEPART ». L archivage est autorise
+  // avec des sejours a venir — leurs codes d acces continuent de fonctionner,
+  // donc le voyageur arrive, donc il faut nettoyer apres lui.
+  const { handler } = chargerEndpoint({
+    props: [{ provider_property_id: 'range', name: 'Colomiers', provider: 'channex',
+              archive_le: '2026-11-03T20:42:19.342Z' }],
+    snaps: [{ booking_id: 'b1', property_id: 'range',
+              snapshot: { provider: 'channex', status: 'confirmed',
+                          arrival: jour(2), departure: jour(5),
+                          firstName: 'Marie', lastName: 'M', numAdult: 2, numChild: 0 } }]
+  })
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.properties.length, 1,
+    'le bien archive a perdu son planning alors qu un sejour vendu reste a nettoyer')
+  assert.strictEqual(res.body.bookings.length, 1, 'le sejour a venir a disparu')
+  // ⚠ ET LA LIGNE DIT QU IL EST ARCHIVE : sans cela l hote voit un bien range
+  // dans sa liste de travail sans savoir qu il l est.
+  assert.ok(res.body.properties[0].archive_le, 'la ligne ne porte pas l etat archive')
+})
+
+test("LE TEST QUI COMPTE : apres le dernier depart, le bien archive sort du planning", async () => {
+  // L autre moitie de la decision : « apres le dernier depart, il disparait des
+  // deux ecrans ». Le sejour est PASSE, donc plus rien a nettoyer.
+  const { handler } = chargerEndpoint({
+    props: [{ provider_property_id: 'range', name: 'Colomiers', provider: 'channex',
+              archive_le: '2026-11-03T20:42:19.342Z' },
+            { provider_property_id: 'vivant', name: 'La bulle', provider: 'channex', archive_le: null }],
+    snaps: [{ booking_id: 'b1', property_id: 'range',
+              snapshot: { provider: 'channex', status: 'confirmed',
+                          arrival: jour(-10), departure: jour(-5),
+                          firstName: 'Marie', lastName: 'M', numAdult: 2, numChild: 0 } }]
+  })
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, 200)
+  const noms = res.body.properties.map(p => p.name)
+  assert.ok(!noms.includes('Colomiers'),
+    `le bien archive sans depart a venir est encore au planning : ${noms.join(', ')}`)
+  // ⚠ LE CONTRE-CAS, et il compte : un bien VIVANT sans aucune reservation ne
+  // sort PAS. Ma premiere version de la regle appelait `estArchive(b)` — une
+  // fonction ASYNC — donc testait une Promise toujours vraie, et retirait tous
+  // les biens sans depart, archives ou non.
+  assert.ok(noms.includes('La bulle'),
+    'un bien VIVANT sans reservation a ete retire du planning')
+  // Et ses menages partent avec lui : une ligne sans bien s affiche sans nom.
+  assert.strictEqual(res.body.bookings.length, 0, 'le sejour passe du bien archive est reste')
+})
+
 test('E1 : un bien CHANNEX apparait au planning', async () => {
   const { handler } = chargerEndpoint({
     props: [{ provider_property_id: 'uuid-channex', name: 'Colomiers', provider: 'channex' }],

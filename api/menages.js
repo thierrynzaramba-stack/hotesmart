@@ -21,7 +21,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { isActiveStatus } = require('../lib/bookings-snapshot')
-const { sansArchives } = require('../lib/biens-vivants')
+const { archivesEpuisees } = require('../lib/biens-vivants')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
@@ -108,20 +108,23 @@ module.exports = async function handler(req, res) {
 
   try {
     // ===== BIENS (tous providers) =====
-    // ⚠ POINT 4 DU CONSTAT DE THIERRY DU 3 NOVEMBRE 2026 : « À traiter » et le
-    // calendrier des menages montraient encore Colomiers, archive. C'est la
-    // liste de l'ecran, elle se filtre.
+    // ⚠ UN BIEN ARCHIVE EST LU, ET SON SORT SE DECIDE EN AVAL. Point 4 du
+    // constat de Thierry du 3 novembre 2026, AFFINE par sa decision du meme
+    // jour : les menages des sejours DEJA VENDUS d'un bien archive restent
+    // visibles jusqu'au dernier depart.
     //
-    // ⚠ CONFORME A CE QU'ON PROMET A L'HOTE : la confirmation d'archivage dit
-    // « arrete les synchronisations, les messages et les menages »
-    // (`fiche.archiver_quoi`). Un bien range ne produit plus de menage.
-    let qProps = sansArchives(supabase
+    // ⚠ UN `sansArchives` ICI SERAIT FAUX, et c'etait ma premiere version : il
+    // retirait du planning un menage prevu demain sur un sejour deja vendu. Or
+    // l'archivage est autorise avec des sejours a venir — leurs codes d'acces
+    // continuent de fonctionner, donc le voyageur arrive, donc il faut nettoyer
+    // apres lui. La regle est dans `archivesEpuisees`, en un seul exemplaire.
+    let qProps = (supabase
       .from('properties')
       // `id` (UUID) est indispensable a l'ecran Prestataires : `/api/membres`
       // attend `permissions.property_ids` en UUID, alors que tout le domaine
       // menage raisonne en `provider_property_id`. Les deux sont donc exposes,
       // sous deux noms distincts — les confondre est le piege n°1 du depot.
-      .select('id, provider_property_id, name, provider')
+      .select('id, provider_property_id, name, provider, archive_le')
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null))
     if (filtreRef) qProps = qProps.or(filtreRef)
@@ -138,7 +141,11 @@ module.exports = async function handler(req, res) {
       id:       String(p.provider_property_id),
       uuid:     p.id,
       name:     p.name || `Bien ${p.provider_property_id}`,
-      provider: p.provider || null
+      provider: p.provider || null,
+      // ⚠ PORTEE JUSQU'A L'ECRAN : c'est elle qui permet de marquer la ligne
+      // « archive » pendant la periode ou le bien reste visible. Sans elle,
+      // l'hote verrait un bien range sans savoir qu'il l'est.
+      archive_le: p.archive_le || null
     }))
     if (!properties.length) {
       console.log(t.ligne(' -> aucun bien'))
@@ -367,9 +374,34 @@ module.exports = async function handler(req, res) {
       else liaisons = lia || []
     }
 
+    // ⚠ LES BIENS ARCHIVES SANS DEPART A VENIR SORTENT ICI, et pas avant : il
+    // faut les reservations pour savoir s'il reste un depart. `bookings` est
+    // deja filtre sur le statut canonique — seul un sejour non annule donne
+    // lieu a un menage —, donc ses departs sont exactement ceux qui comptent.
+    const departs = {}
+    for (const b of bookings) {
+      if (!b.departure) continue
+      ;(departs[b.propId] = departs[b.propId] || []).push(String(b.departure))
+    }
+    const epuises = archivesEpuisees({
+      biens: properties.map(p => ({ cle: p.id, archive_le: p.archive_le })),
+      departs,
+      aujourdhui: new Date().toISOString().slice(0, 10)
+    })
+    // ⚠ ON RETIRE LE BIEN **ET** CE QUI S'Y RATTACHE : une ligne de menage dont
+    // le bien a disparu de la liste s'affiche sans nom, et le calendrier la
+    // place sous un en-tete vide. Les quatre collections partent ensemble.
+    const vivants = properties.filter(p => !epuises.has(p.id))
+    const bookingsVivants = bookings.filter(b => !epuises.has(b.propId))
+    const menagesVivants = menages.filter(m => !epuises.has(String(m.property_id)))
+    const liaisonsVivantes = liaisons.filter(l => !epuises.has(String(l.property_id)))
+
     t.top('mapping')
-    console.log(t.ligne(` biens=${properties.length} resas=${bookings.length} menages=${menages.length}${tronque ? ' TRONQUE' : ''}`))
-    return res.status(200).json({ properties, bookings, tronque, menages, prestataires, liaisons, rapprochement })
+    console.log(t.ligne(` biens=${vivants.length} resas=${bookingsVivants.length} menages=${menagesVivants.length}${tronque ? ' TRONQUE' : ''}${epuises.size ? ` archives_epuises=${epuises.size}` : ''}`))
+    return res.status(200).json({
+      properties: vivants, bookings: bookingsVivants, tronque,
+      menages: menagesVivants, prestataires, liaisons: liaisonsVivantes, rapprochement
+    })
   } catch (err) {
     // Une requete qui rame PUIS echoue est le cas le plus interessant a
     // diagnostiquer : il doit loguer son chrono comme les autres.

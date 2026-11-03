@@ -151,3 +151,63 @@ test("sansArchives REFUSE ce qui n est pas une chaine Supabase", () => {
   B.sansArchives({ is: (c, v) => { vu = [c, v]; return 'chaine' } })
   assert.deepStrictEqual(vu, [B.COLONNE, null])
 })
+
+// ─── Un bien archive reste tant qu'il a un depart a venir ───────────────────
+test("LE TEST QUI COMPTE : un bien archive AVEC un depart a venir reste, sans depart il sort", () => {
+  // ⚠ DECISION DE THIERRY DU 3 NOVEMBRE 2026, qui AFFINE le point 4. Sa
+  // premiere forme — « un bien archive disparait des menages » — retirait du
+  // planning de la prestataire un menage prevu demain sur un sejour DEJA VENDU.
+  // L'archivage est autorise avec des sejours a venir : leurs codes d'acces
+  // continuent de fonctionner, donc le voyageur arrive, donc il faut nettoyer
+  // apres lui.
+  const { archivesEpuisees } = require('../lib/biens-vivants')
+  const biens = [
+    { cle: 'vivant', archive_le: null },
+    { cle: 'range-avec-depart', archive_le: '2026-11-03T20:42:19Z' },
+    { cle: 'range-epuise', archive_le: '2026-11-03T20:42:19Z' }
+  ]
+  const sortent = archivesEpuisees({
+    biens,
+    departs: { 'range-avec-depart': ['2026-11-08'], 'range-epuise': ['2026-10-01'] },
+    aujourdhui: '2026-11-04'
+  })
+  assert.deepEqual([...sortent], ['range-epuise'])
+
+  // ⚠ UN BIEN VIVANT SANS AUCUN DEPART NE SORT JAMAIS, et ce n'est pas une
+  // evidence : ma premiere version appelait `estArchive(b)` — une fonction
+  // ASYNC qui interroge la base — donc testait une Promise, toujours vraie.
+  // TOUS les biens etaient evalues, et un bien vivant sans reservation
+  // disparaissait de l'ecran. Attrape par une mesure directe avant tout test.
+  assert.ok(!sortent.has('vivant'),
+    'un bien VIVANT sans depart a venir est retire de l ecran')
+
+  // ⚠ `>=` ET NON `>` : un depart AUJOURD'HUI est un menage A FAIRE
+  // aujourd'hui. Un `>` ferait disparaitre le bien le matin meme du dernier
+  // depart, c'est-a-dire le jour ou la prestataire en a besoin.
+  const leJourMeme = archivesEpuisees({
+    biens: [{ cle: 'b', archive_le: '2026-11-03T20:42:19Z' }],
+    departs: { b: ['2026-11-04'] },
+    aujourdhui: '2026-11-04'
+  })
+  assert.equal(leJourMeme.size, 0, 'le bien sort le jour meme de son dernier depart')
+
+  // Le lendemain, il sort.
+  const lendemain = archivesEpuisees({
+    biens: [{ cle: 'b', archive_le: '2026-11-03T20:42:19Z' }],
+    departs: { b: ['2026-11-04'] },
+    aujourdhui: '2026-11-05'
+  })
+  assert.deepEqual([...lendemain], ['b'])
+})
+
+test("archivesEpuisees EXIGE sa date : elle ne lit jamais l horloge", () => {
+  // Regle du depot : dates relatives si le test lit l'horloge, dates figees
+  // s'il injecte le temps. Cette fonction injecte, donc elle REFUSE de deviner
+  // — un repli sur `new Date()` la rendrait ineprouvable a une autre date, et
+  // c'est la maladie des 28 rouges calendaires du depot.
+  const { archivesEpuisees } = require('../lib/biens-vivants')
+  for (const mauvais of [undefined, null, '', '2026-11', 'demain', '04/11/2026']) {
+    assert.throws(() => archivesEpuisees({ biens: [], departs: {}, aujourdhui: mauvais }),
+      /aujourdhui/, `« ${mauvais} » a ete accepte comme date`)
+  }
+})

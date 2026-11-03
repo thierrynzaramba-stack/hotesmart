@@ -174,17 +174,24 @@ const MENAGE = (booking, provider, depart, over = {}) => ({
 
 // ─── Le filtre par personne ────────────────────────────────────────────────
 
-test("LE TEST QUI COMPTE : la lecture des biens EXCLUT les logements archivés", async () => {
-  // ⚠ POINT 4 DU CONSTAT DE THIERRY DU 3 NOVEMBRE 2026. L'app de la
-  // prestataire n'a pas à montrer le planning d'un logement que l'hôte a rangé :
-  // ce qui reste à faire dessus, s'il en reste, ne sera demandé par personne.
+test("LE TEST QUI COMPTE : la lecture des biens DEMANDE archive_le", async () => {
+  // ⚠ CE TEST A CHANGE DE SENS LE JOUR MEME, ET C'EST NOTE EXPRES. Sa premiere
+  // version exigeait `archive_le is null` dans la requete — l'ancienne
+  // decision, « un bien archive disparait des menages ». Thierry l'a AFFINEE
+  // quelques heures plus tard : les menages des sejours deja vendus restent
+  // visibles jusqu'au dernier depart. Un test qui aurait survecu a ce
+  // changement aurait FIGE la decision perimee et fait rougir le correctif.
   //
-  // ⚠ ON LIT LA REQUÊTE RÉELLEMENT ÉMISE, pas la source du module ni la
-  // réponse. Le double de ce fichier rend `BIENS` sans honorer les filtres sur
-  // `properties` — il ne peut donc pas montrer l'effet du filtre, seulement sa
-  // présence. C'est la même preuve que pour les listes de colonnes de
-  // `raisonNonVendable` : une garde qui n'est pas DEMANDÉE à Postgres n'existe
-  // pas, quoi que dise le code.
+  // Ce qui se prouve ici est donc le CABLAGE : la colonne est-elle lue ? La
+  // regle elle-meme (`archivesEpuisees`) est pure et prouvee dans
+  // `tests/biens-vivants.test.js` ; son effet sur un planning est prouve dans
+  // `tests/menages-endpoint.test.js`, qui partage le MEME module.
+  //
+  // ⚠ ET LE CABLAGE EST LA MOITIE QUI MANQUE TOUJOURS : la regle est pure, elle
+  // juge l'objet qu'on lui donne. Sans `archive_le` au `select`, elle voit
+  // `undefined` partout — donc aucun bien archive, donc aucun retrait — et
+  // l'effet mesure ailleurs resterait vert puisque son banc injecte la colonne
+  // a la main.
   const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   const res = reponse()
@@ -193,9 +200,9 @@ test("LE TEST QUI COMPTE : la lecture des biens EXCLUT les logements archivés",
 
   const lectures = journal.filter(a => a.table === 'properties')
   assert.ok(lectures.length >= 1, 'aucune lecture de properties : ce test ne mesure rien')
-  const filtree = lectures.some(a => (a.is || []).some(x => x.c === 'archive_le' && x.v === null))
-  assert.ok(filtree,
-    'la lecture des biens ne demande pas `archive_le is null` : un logement archivé reste au planning')
+  const demande = lectures.some(a => /\barchive_le\b/.test(String(a.colonnes || a.champs || '')))
+  assert.ok(demande,
+    `la lecture des biens ne demande pas archive_le : ${lectures.map(a => a.colonnes || a.champs).join(' | ')}`)
 })
 
 test('la prestataire ne voit QUE les ménages qui lui sont assignés', async () => {
