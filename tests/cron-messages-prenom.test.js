@@ -27,6 +27,38 @@ const credit = Object.assign(new Error('400 Your credit balance is too low'), { 
 const bien = { id: 'p1', name: 'La bulle' }
 const modele = (t) => ({ event_type: 'arrival', template_text: t })
 
+test('LE TEST QUI COMPTE : une information MANQUANTE arrete l envoi, et previent l hote', async () => {
+  // ⚠ CONSTAT DE LA SECONDE REVIEW DU LOT 1, ET IL ETAIT JUSTE : aucune
+  // assertion du depot ne portait sur le `return null` qui suit
+  // `prevenirManque`. Supprimer cette seule ligne laissait la suite VERTE et
+  // envoyait « Appelez-moi au [TÉLÉPHONE HÔTE] » au voyageur — le message
+  // passant en plus par Haiku, qui peut le reformuler. On mesure donc l ARRET,
+  // pas seulement l alerte.
+  const { mod, incidents, appels } = charger('texte ameliore')
+  const m = await mod.generateAutoMessage(
+    modele('Bonjour {prenom}, appelez-moi au {telephone_hote}.'),
+    { firstName: 'Carole', arrival: '2026-10-08', departure: '2026-10-10' },
+    bien, 'Carole', {}, 'u1')
+  assert.strictEqual(m, null, 'rien ne part quand une information manque')
+  assert.equal(appels.length, 0, 'et on ne paie pas Haiku pour un message qui ne partira pas')
+  assert.equal(incidents.length, 1, 'l hote est prevenu une fois')
+  assert.equal(incidents[0].type, 'message_non_envoye')
+  assert.match(incidents[0].detail, /Téléphone/, 'l alerte nomme l information, pas sa cle technique')
+  assert.ok(!/telephone_hote/.test(incidents[0].detail.split('A renseigner')[0]),
+    'la cle technique ne doit pas etre ce que l hote lit en premier')
+})
+
+test('et le meme message part NORMALEMENT quand l information est la', async () => {
+  // La contre-epreuve de l arret : sans elle, un test qui exige `null` reste
+  // vert sur un code qui ne rend JAMAIS rien.
+  const { mod } = charger('texte ameliore')
+  const m = await mod.generateAutoMessage(
+    modele('Bonjour {prenom}, appelez-moi au {telephone_hote}.'),
+    { firstName: 'Carole', arrival: '2026-10-08', departure: '2026-10-10' },
+    bien, 'Carole', { telephone_hote: 'NUMERO-DE-TEST' }, 'u1')
+  assert.ok(m && m.length, 'le message part quand tout est renseigne')
+})
+
 test('LE TEST QUI COMPTE (vecu du 8 octobre) : IA en panne — le texte SUBSTITUE part, jamais le modele brut', async () => {
   const { mod } = charger(credit)
   const m = await mod.generateAutoMessage(modele('Bonjour {prenom}, bienvenue au {logement} !'), { firstName: 'Carole', arrival: '2026-10-08', departure: '2026-10-10' }, bien, 'Carole X', {}, 'u1')
