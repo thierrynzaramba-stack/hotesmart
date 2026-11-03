@@ -448,7 +448,16 @@ export function carteHtml (bien, outils) {
   return `<article class="log-carte" data-bien="${esc(bien.id)}">
     <div class="log-photo">${photo}</div>
     <div class="log-texte">
-      <div class="log-nom"><a class="log-lien" href="/logements/${esc(encodeURIComponent(bien.id))}">${esc(bien.nom || '')}</a></div>
+      <div class="log-nom"><a class="log-lien" href="/logements/${esc(encodeURIComponent(bien.id))}">${esc(bien.nom || '')}</a>${
+        // ⚠ LA MARQUE « ARCHIVE » MANQUAIT ICI, et Thierry l'a vu en recette de
+        // staging le 3 novembre 2026, hors de son plan : la liste montrait ses
+        // deux biens archives « comme les autres ». L'accueil et les revenus les
+        // marquaient deja ; cette page etait le dernier endroit ou un bien range
+        // se lisait comme un bien vivant.
+        // ⚠ ET C'EST LA MEME CLASSE QUE PARTOUT (`marque-archive`) : une seconde
+        // forme pour le meme etat divergerait au premier correctif de style.
+        bien.archive_le ? `<span class="marque-archive">${esc(t('logements.archive'))}</span>` : ''
+      }</div>
       ${sous ? `<div class="log-sous caption">${sous}</div>` : ''}
     </div>
     <div class="log-canaux">${canauxHtml(bien, outils)}</div>
