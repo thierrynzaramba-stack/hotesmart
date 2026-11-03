@@ -74,6 +74,28 @@ test('LE TEST QUI COMPTE (lot 1b) : un modele portant {code_acces} est PREPARE, 
   assert.ok(!/texte ameliore/.test(m), 'l amelioration de l IA est ECARTEE quand elle efface le marqueur')
 })
 
+test('LE TEST QUI COMPTE : ce que l hote LIT quand un message est retenu faute de code', async () => {
+  // ⚠ RIEN NE MESURAIT CETTE ALERTE — constat de review, et vider le corps de
+  // la fonction laissait la suite verte. Or son `detail` est la SEULE chose que
+  // l'hote voit : le message n'est pas parti, il attend, et personne d'autre ne
+  // le lui dira.
+  const { mod, incidents } = charger('texte ameliore')
+  await mod.prevenirCodeARemplir('u1', bien,
+    { event_type: 'arrival' },
+    { firstName: 'Carole', lastName: 'X', arrival: '2026-10-08', departure: '2026-10-10' })
+  assert.equal(incidents.length, 1)
+  const d = incidents[0].detail
+  assert.equal(incidents[0].type, 'message_non_envoye')
+  assert.match(d, /NON ENVOYE/, 'ce qui s est passe')
+  assert.match(d, /CODE D'ACCÈS/, 'l information en clair, pas sa cle technique')
+  assert.match(d, /à valider/, 'ou le message attend')
+  // ⚠ ET LA PHRASE QUI EVITE UNE ATTENTE INFINIE : la bascule a deja note
+  // l'envoi dans `message_sent_log`, donc l'anti-doublon l'a compte. Un hote
+  // qui corrige son modele et attend le cycle suivant attendrait pour toujours.
+  assert.match(d, /ne repartira pas/, 'que CE message-ci ne reviendra pas')
+  assert.ok(!/code_acces/.test(d), 'jamais le nom technique')
+})
+
 test('et la contre-epreuve : avec le code, l amelioration de l IA est GARDEE', async () => {
   // Sans elle, « on ecarte l IA » resterait vrai d un code qui ne manque pas,
   // et le lot aurait silencieusement supprime l amelioration pour tout le monde.

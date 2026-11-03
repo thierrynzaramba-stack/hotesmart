@@ -129,14 +129,25 @@ test('LE TEST QUI COMPTE : les deux sites d envoi consultent la garde du code', 
   // l'envoi est refuse ») n'est donc pas mesure ; ce qui l'est, c'est que les
   // DEUX sites d'envoi la consultent, et que le message existe (teste par
   // effet dans tests/cron-messages-prenom.test.js). Dette notee dans la remise.
+  // ⚠ COMMENTAIRES RETIRES — constat de review : la version d'avant lisait la
+  // source BRUTE, donc commenter les deux lignes de garde laissait le compte a
+  // 2 et la suite VERTE, la garde desactivee.
   const cron = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cron-messages.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
   const gardes = cron.match(/const codeARemplir = hasUnresolvedCode\(message\)/g) || []
   assert.equal(gardes.length, 2, 'les deux sites d envoi posent la garde')
   const fourches = cron.match(/if \(propMode === 'auto' && !codeARemplir\)/g) || []
   assert.equal(fourches.length, 2, 'et les deux fourches la consultent')
-  // Et personne ne rappelle l'ancien format par la porte de derriere.
-  assert.ok(!/formatDate.*require\('\.\/cron-shared'\)/.test(cron),
-    'cron-shared.formatDate ne doit plus etre importe : il remettrait le second format a portee')
+  // ⚠ ET L'ALERTE NE PART QUE SI UN ENVOI ALLAIT AVOIR LIEU — constat de
+  // review : en mode Test rien ne partait, et une alerte inutile AVALE le
+  // `message_non_envoye` d'un vrai defaut pendant une heure (anti-spam par
+  // type et par bien).
+  const alertes = cron.match(/if \(propMode === 'auto' && codeARemplir\) await prevenirCodeARemplir/g) || []
+  assert.equal(alertes.length, 2, 'les deux alertes sont conditionnees a un envoi reel')
+  // ⚠ L'ASSERTION SUR L'IMPORT A ETE RETIREE D'ICI — constat de review : elle
+  // ne pouvait mordre que si les deux termes tombaient sur la MEME ligne, et le
+  // test du format, dans ce meme fichier, couvre deja le cas plus largement
+  // (`!/\bformatDate\b/` sur le fichier entier).
 })
 
 test('LE TEST QUI COMPTE : UN SEUL format de date, et il n est pas injectable', () => {
