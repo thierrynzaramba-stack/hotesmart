@@ -264,7 +264,7 @@ Un par un, **recette staging entre chaque**.
 
 ## 7. Ce qui n'est PAS dans ce chantier
 
-- La dette **126** (une proposition sans réservation est invisible) : domaine
+- La dette **129** (une proposition sans réservation est invisible) : domaine
   messagerie.
 - `kb_question_templates` : rôle non tranché.
 - La réécriture du contenu des réponses : c'est Thierry qui écrit ses textes.
