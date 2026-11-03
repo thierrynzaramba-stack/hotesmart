@@ -225,6 +225,7 @@
   "fiche.annuler": "Annuler",
   "fiche.assistant": "Assistant HôteSmart",
   "fiche.assistant_actif": "Actif",
+  "fiche.assistant_archive": "Archivé",
   "fiche.assistant_ok": "Mettre en pause",
   "fiche.assistant_pause": "En pause",
   "fiche.assistant_texte": "Plus aucun message ni code d’accès ne partira pour ce logement. La lecture et la synchronisation continuent.",

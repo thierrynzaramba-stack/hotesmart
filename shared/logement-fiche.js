@@ -275,6 +275,28 @@ export function calendrierHtml (fiche, { t, esc, icone }) {
 // changement d'état, là où un bouton qui change de nom l'oblige à deviner.
 export function assistantHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, icone } = outils
+
+  // ⚠ UN BIEN ARCHIVE N'A PLUS D'ASSISTANT A BASCULER, et l'encart disait
+  // « Assistant HôteSmart · Actif » sur un logement rangé — point 8 du constat
+  // de Thierry du 3 novembre 2026, vu en production sur Colomiers. C'était
+  // faux deux fois : rien ne tourne plus pour ce bien, et l'interrupteur
+  // proposait de mettre en pause une automatisation déjà arrêtée.
+  //
+  // ⚠ LA GARDE PASSE AVANT `peutModifier`, donc avant `signalHtml` : un lecteur
+  // sans droit de modification voyait le même encart. Les deux chemins la
+  // partagent, plutôt que deux copies qui divergeront.
+  //
+  // ⚠ ET IL N'Y A PAS D'INTERRUPTEUR DESACTIVE : un interrupteur grisé invite
+  // à chercher pourquoi on ne peut pas l'actionner. L'action disponible sur un
+  // bien archivé est « Réactiver », et elle vit dans son propre bloc.
+  const bien = fiche.bien || {}
+  if (bien.archive_le) {
+    return `<p class="fic-assistant caption" data-assistant="archive">
+      <span>${esc(t('fiche.assistant'))}</span>
+      <span class="fic-muet" data-assistant-etat>${esc(t('fiche.assistant_archive'))}</span>
+    </p>`
+  }
+
   if (!peutModifier) return signalHtml(fiche, outils)
   const enPause = (fiche.bien || {}).assistant_en_pause === true
   return `<p class="fic-assistant caption" data-assistant="${enPause ? 'pause' : 'actif'}">
