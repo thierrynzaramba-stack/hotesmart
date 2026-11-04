@@ -111,7 +111,17 @@ const PUBLIC_ATTENDU = {
   // l'installation de l'application, ou les 300 s valent cher.
   // ⚠ CE QU'ON ACCEPTE EN L'EXEMPTANT, DIT PLUTOT QUE TAIT : une prestataire
   // desactivee garde son manifeste pendant cinq minutes.
-  'api/manifest.js': 'public, max-age=300'
+  'api/manifest.js': 'public, max-age=300',
+  // Le manifeste et le service worker de l'appli HOTE installee (PWA lot 1,
+  // 4 novembre 2026). Identiques pour TOUT LE MONDE : nom, couleurs lues dans
+  // theme.css, icones, code du service worker et SHA du deploiement. Aucune
+  // donnee de compte, aucun jeton lu. `s-maxage` : la cle de cache du CDN
+  // Vercel inclut l'URL du deploiement, donc un deploiement ne sert jamais la
+  // reponse d'un autre.
+  // ⚠ CE QU'ON ACCEPTE EN L'EXEMPTANT : si cette garantie de Vercel tombait,
+  // un telephone garderait au plus une heure l'ancien service worker — sans
+  // effet sur les pages, que le service worker ne met jamais en cache.
+  'api/pwa.js': 'public, max-age=0, must-revalidate, s-maxage=3600'
 }
 
 test('LE TEST QUI COMPTE : le recensement voit TOUT api/**/*.js, sous-repertoires compris', () => {
@@ -190,7 +200,10 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   // 23 octobre 2026, recensement RECURSIF) : trois endpoints sans garde
   // pouvaient atterrir en silence. Un plafond mou est un plafond qui ne sert
   // qu'une fois.
-  assert.ok(SANS_GARDE_ATTENDU.length <= 9,
+  // Leve a 10 le 4 novembre 2026, et NOMME : `api/pwa.js` (manifeste et service
+  // worker de l'appli hote installee) est public par nature — meme reponse pour
+  // tout le monde, aucune donnee de compte, recense dans PUBLIC_ATTENDU.
+  assert.ok(SANS_GARDE_ATTENDU.length <= 10,
     `${SANS_GARDE_ATTENDU.length} endpoints sans garde :\n  ` + SANS_GARDE_ATTENDU.join('\n  ') +
     '\nUn de plus qu attendu : soit il est public par nature (webhook, cron, manifest,\n' +
     'page publique), soit il lui manque sa garde. Nommez-le avant de lever le plafond.')
