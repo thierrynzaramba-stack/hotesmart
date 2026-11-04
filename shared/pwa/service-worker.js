@@ -75,13 +75,19 @@ function estCachable (url) {
 }
 
 // Une réponse que le service worker a le droit de COPIER dans le cache.
-function rangeable (res) {
+// `url` : l'adresse demandée (une réponse construite n'en porte pas toujours).
+function rangeable (res, url) {
   if (!res || res.status !== 200) return false
-  // Jamais d'opaque : on ne sait pas ce qu'il contient.
+  // Jamais d'opaque : on ne sait pas ce qu'il contient (et son statut est 0).
   if (res.type !== 'basic' && res.type !== 'cors') return false
   if (estHtml(res)) return false
   const cc = res.headers.get('Cache-Control') || ''
-  if (/no-store|private/i.test(cc)) return false
+  if (/no-store/i.test(cc)) return false
+  // ⚠ `private` EST REFUSÉ PARTOUT SAUF CHEZ GOOGLE FONTS (constat de review) :
+  // sa feuille de police est servie `private` parce qu'elle varie selon le
+  // NAVIGATEUR, pas selon un compte. Refusée, la police n'atteignait jamais le
+  // hors-ligne. Sur l'origine du site, `private` reste une donnée de compte.
+  if (/private/i.test(cc) && !ORIGINES_POLICE.includes(url.origin)) return false
   return true
 }
 
@@ -91,14 +97,14 @@ async function precharger (cache) {
     // gardés un an, et sans version dans l'URL on relirait l'ancien.
     const res = await fetch(new Request(url, { cache: 'reload' }))
     // La page hors-ligne est la SEULE réponse HTML admise dans le cache.
-    const admise = url === PAGE_HORS_LIGNE ? (res.status === 200 && estHtml(res)) : rangeable(res)
+    const admise = url === PAGE_HORS_LIGNE ? (res.status === 200 && estHtml(res)) : rangeable(res, new URL(url, self.location.origin))
     if (!admise) throw new Error('précache refusé : ' + url)
     await cache.put(url, res)
   }))
   // La police est un confort : sans elle, la page retombe sur system-ui.
   try {
     const res = await fetch(new Request(POLICE, { mode: 'cors', cache: 'reload' }))
-    if (rangeable(res)) await cache.put(POLICE, res)
+    if (rangeable(res, new URL(POLICE))) await cache.put(POLICE, res)
   } catch (_) {}
 }
 
@@ -149,9 +155,10 @@ async function reseauDAbord (event) {
   const req = event.request
   try {
     const res = await fetch(req)
-    if (rangeable(res)) {
+    if (rangeable(res, new URL(req.url))) {
       const copie = res.clone()
-      event.waitUntil(caches.open(CACHE).then(c => c.put(req, copie)).catch(() => {}))
+      // Clé = l'ADRESSE seule, pas l'objet requête de la page et ses en-têtes.
+      event.waitUntil(caches.open(CACHE).then(c => c.put(req.url, copie)).catch(() => {}))
     }
     return res
   } catch (erreur) {

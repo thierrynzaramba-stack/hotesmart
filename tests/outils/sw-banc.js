@@ -78,8 +78,13 @@ function creerStockage () {
 
 // Une réponse « du réseau » : le type (basic / cors / opaque) est posé à la
 // main, un Response construit par Node rendant toujours « default ».
+// ⚠ UNE RÉPONSE OPAQUE EST CELLE D'UN VRAI NAVIGATEUR (constat de review) :
+// statut 0, aucun en-tête lisible, aucun corps. Le banc la faisait 200 avec
+// ses en-têtes, ce qui laissait croire la garde de type tenue par un test.
 function reponse ({ statut = 200, type = 'basic', entetes = {}, corps = '' } = {}) {
-  const r = new Response(statut === 204 ? null : corps, { status: statut, headers: entetes })
+  const r = type === 'opaque'
+    ? Response.error()
+    : new Response(statut === 204 ? null : corps, { status: statut, headers: entetes })
   Object.defineProperty(r, 'type', { value: type })
   return r
 }
@@ -166,6 +171,7 @@ function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerSt
 
   return {
     stockage,
+    globale: contexte,
     cycleDeVie,
     requete,
     appelsReseau,

@@ -39,9 +39,11 @@ reçoit le nouveau à sa prochaine visite, et l'activation purge l'ancien cache
 3. **Liste POSITIVE** (`STATIQUES` + la police) : `theme.css`, `ui.css`,
    `icons.svg`, `logo.svg`, `i18n/i18n.js`, `langues.json`, `fr/en/es.json`,
    la feuille Google Fonts et ses fichiers de police. Stratégie **réseau
-   d'abord**, copie pour le hors-ligne seulement. Jamais en cache : une réponse
-   HTML (sauf la page hors-ligne elle-même), opaque, `private` ou `no-store`,
-   ni une adresse portant un paramètre autre que `v`.
+   d'abord**, copie pour le hors-ligne seulement, rangée sous son ADRESSE
+   seule. Jamais en cache : une réponse HTML (sauf la page hors-ligne
+   elle-même), opaque, `no-store`, `private` (sauf chez Google Fonts, dont la
+   feuille de police est `private` parce qu'elle varie selon le navigateur —
+   constat de review), ni une adresse portant un paramètre autre que `v`.
    `i18n.js` est dans la liste parce que la page hors-ligne en a besoin pour
    se traduire ; c'est un fichier du dépôt, identique pour tous.
 4. **Clé de cache = `hotesmart-pwa-<SHA du déploiement>`.** Un navigateur ne
@@ -153,7 +155,21 @@ Sur l'adresse staging (`hotesmart-staging…`), connecté avec le compte test.
 7. À la fin : supprimer l'icône staging du téléphone (elle s'appelle elle
    aussi « HôteSmart »).
 
+⚠ **iPhone : la première ouverture depuis l'icône peut demander de se
+reconnecter.** Une appli posée sur l'écran d'accueil d'iOS a son propre
+stockage, séparé de Safari : la session ouverte dans Safari ne la suit pas.
+Ce n'est pas une panne — se connecter une fois dans l'appli suffit.
+
+Contrôle technique (chef de file) : `curl -sI '<feuille Google Fonts>' | grep -i
+cache-control` doit rendre `private, …` — c'est l'hypothèse de l'exception
+ci-dessus (§2.3), mesurée par la review via la documentation, non par requête
+(le proxy de la session l'interdisait).
+
 ## 7. Limites connues
+
+- ⚠ **CLAUDE.md, « GARDE-FOUS PRODUIT », dit encore « PWA hôte = V2 (après
+  10+ clients payants) »**. Ce lot a été demandé par Thierry le 4 novembre
+  2026 ; la ligne n'a pas été modifiée ici — à mettre à jour sur sa décision.
 
 - Les balises ne sont posées que par les écrans qui chargent `nav.js` (les
   sept écrans V5) : on installe depuis l'accueil. Dette 131.
