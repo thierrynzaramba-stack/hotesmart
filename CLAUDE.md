@@ -627,7 +627,11 @@ pour fermer.
 
 ## GARDE-FOUS PRODUIT
 - AUCUN autre bridge CM (Smoobu, Hostaway, Lodgify) ni marque de serrure avant prospect réel.
-- inventory_type : seul 'whole' codé. PWA hôte = V2 (après 10+ clients payants).
+- inventory_type : seul 'whole' codé.
+- PWA hôte : l'ancien garde-fou « V2, après 10+ clients payants » est LEVÉ
+  (décision de Thierry, 4 novembre 2026). Lot 1 = HôteSmart installable
+  (manifeste, service worker sûr, page hors-ligne) ; notifications push = lot 2,
+  plus tard. KB : docs/kb/pwa.md.
 - Refonte mobile messagerie.html AVANT d'annoncer la messagerie sur la landing.
 
 ## 3 BOUSSOLES (challenger toute feature, franc, pas complaisant)
