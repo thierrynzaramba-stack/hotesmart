@@ -15,7 +15,7 @@
       "maxDuration": 60
     },
     "api/pwa.js": {
-      "includeFiles": "shared/theme.css"
+      "includeFiles": "shared/{theme.css,pwa/service-worker.js}"
     }
   },
   "crons": [
@@ -32,6 +32,10 @@
     {
       "source": "/manifest.webmanifest",
       "destination": "/api/pwa?f=manifest"
+    },
+    {
+      "source": "/sw.js",
+      "destination": "/api/pwa?f=sw"
     },
     {
       "source": "/book/:token",
