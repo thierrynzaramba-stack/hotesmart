@@ -221,6 +221,7 @@
   "fiche.reactiver_ok": "Réactiver",
   "fiche.archive_partiel": "Logement archivé, mais une partie du ménage n’a pas abouti. Prévenez-nous.",
   "fiche.archive_fait": "Logement archivé.",
+  "fiche.archive_fait_menages": "{n, plural, one {Logement archivé. # ménage créé pour les séjours à venir.} other {Logement archivé. # ménages créés pour les séjours à venir.}}",
   "fiche.reactive_fait": "Logement réactivé.",
   "fiche.annuler": "Annuler",
   "fiche.assistant": "Assistant HôteSmart",

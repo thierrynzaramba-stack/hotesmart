@@ -221,6 +221,7 @@
   "fiche.reactiver_ok": "Reactivar",
   "fiche.archive_partiel": "Alojamiento archivado, pero parte de la limpieza no se completó. Avísenos.",
   "fiche.archive_fait": "Alojamiento archivado.",
+  "fiche.archive_fait_menages": "{n, plural, one {Alojamiento archivado. # limpieza creada para las estancias futuras.} other {Alojamiento archivado. # limpiezas creadas para las estancias futuras.}}",
   "fiche.reactive_fait": "Alojamiento reactivado.",
   "fiche.annuler": "Cancelar",
   "fiche.assistant": "Asistente HôteSmart",
