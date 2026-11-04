@@ -503,28 +503,68 @@
     .qpb-msg.ok { background: var(--green-bg); color: var(--green); }
     .qpb-msg.ko { background: var(--amber-bg); color: var(--amber); }
     /* La frise : douze colonnes, une bande par periode, meme couleur que la liste. */
-    .qpb-frise { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; margin: 10px 0 6px; }
+    /* ⚠ LE NOMBRE DE COLONNES VIENT DU NOMBRE DE MOIS, pas d'un 12 en dur :
+       la fenetre en touche TREIZE des que le jour n'est pas un 1er. Figer 12
+       faisait passer la treizieme a la ligne, d'ou le repli qui rangeait une
+       periode d'octobre sous septembre. */
+    .qpb-frise { display: grid; grid-template-columns: repeat(var(--qpb-mois, 12), 1fr); gap: 3px; margin: 10px 0 6px; }
+    /* La derniere colonne ne couvre que le DEBUT de son mois : elle le dit
+       au lieu de se faire passer pour un mois entier. */
+    .qpb-col--partiel .qpb-col-nom { opacity: .65; }
+    .qpb-col--partiel .qpb-col-bandes { -webkit-mask-image: linear-gradient(90deg, #000 60%, transparent);
+                                        mask-image: linear-gradient(90deg, #000 60%, transparent); }
     .qpb-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    /* ⚠ RENDUE A LA FEUILLE : le gabarit emet toujours .qpb-vide pour un mois
+       sans periode, et sa regle avait disparu avec le bloc des effets —
+       constat de review du 4 novembre. Une case sans style, c est une
+       colonne qui se tasse et une frise qui ne s aligne plus. */
+    .qpb-vide { height: 7px; border-radius: 3px; background: var(--bg2); }
     .qpb-col-nom { font-size: 9.5px; color: var(--text3); text-align: center; white-space: nowrap; overflow: hidden; }
     .qpb-col-bandes { display: flex; flex-direction: column; gap: 2px; min-height: 26px; }
-    .qpb-bande { height: 7px; border: 0; border-radius: 3px; padding: 0; cursor: pointer; width: 100%; }
+    /* ⚠ LES CLASSES D'EFFET ONT DISPARU — amendement du 29 octobre 2026.
+       `.e-monte` / `.e-baisse` / `.e-normal` / `.e-inconnu` peignaient une
+       echelle INVENTEE (« un peu plus chers », « prix normaux »…) qui n'existe
+       ni dans le moteur, ni dans Prediction de prix. La bande et la pastille
+       portent desormais LE NIVEAU DE LA GRILLE, avec les classes d'encre
+       .n-base … .n-exceptionnel de public/style.css — les memes que partout.
+       ⚠ Et `--prune` / `--prune-bg` partent du produit avec elles : c'etait
+       leur SEUL usage. Thierry l'avait annonce le 2 novembre. */
+    /* ⚠ LA BANDE PORTE UN LISERE, ET SANS LUI ELLE N'EXISTE PAS. Mesure du
+       3 novembre 2026, vue sur l'apercu : sur le fond blanc de la pop-up, le
+       fond des trois niveaux bas est a 1,07 / 1,19 / 1,45:1 — une bande de
+       7 px de haut qu'on ne voit pas. C'est le meme defaut que les pastilles
+       et que les cases du calendrier AirROI, et c'est le meme remede : une
+       autre densite de la MEME echelle, prise par --niveau-lisere. La bande
+       se voit alors a 3,36:1 au pire. */
+    .qpb-bande { height: 7px; border: 1px solid var(--niveau-lisere, var(--border2));
+                 border-radius: 3px; padding: 0; cursor: pointer; width: 100%; }
     .qpb-bande:hover, .qpb-bande:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
-    .qpb-vide { height: 7px; border-radius: 3px; background: var(--bg3); display: block; }
-    /* La pastille et la bande partagent les memes quatre etats. */
-    .qpb-pt { width: 10px; height: 10px; border-radius: 3px; flex: none; display: inline-block; }
-    .e-monte, .qpb-bande.e-monte { background: var(--green); }
-    /* ⚠ NI AMBRE NI BLEU : l'ambre est reserve a « ce que HoteSmart a fait
-       pour vous », le bleu a ce qui est CLIQUABLE. Un prix qui baisse est un
-       ETAT, et il a son jeton propre. */
-    .e-baisse, .qpb-bande.e-baisse { background: var(--prune); }
-    .e-normal, .qpb-bande.e-normal { background: var(--text3); }
-    .e-inconnu, .qpb-bande.e-inconnu { background: var(--bg3); border: 1px dashed var(--border2); }
-    .qpb-effet.e-monte { color: var(--green); background: var(--green-bg); }
-    .qpb-effet.e-baisse { color: var(--prune); background: var(--prune-bg); }
-    .qpb-effet.e-normal { color: var(--text2); background: var(--bg3); }
-    .qpb-effet.e-inconnu { color: var(--text2); background: transparent; border: 1px dashed var(--border2); }
-    .qpb-effet { font-size: 12px; font-weight: 600; border-radius: var(--radius); padding: 3px 9px; white-space: nowrap; }
-    .qpb-effet i { font-weight: 400; font-style: normal; opacity: .75; }
+    /* Une periode dont le niveau n'est pas connu ne prend AUCUNE teinte : un
+       contour, et c'est tout. Lui donner une densite serait affirmer un niveau. */
+    /* ⚠ ET LA BANDE SANS NIVEAU DOIT SE VOIR AUSSI. Son pointille etait
+       --border2, soit rgba(0,0,0,.2) : 1,61:1 compose sur le blanc — une
+       bande qu'on ne voit pas, pour une periode qui existe et qui est
+       reglable. Mesure du 3 novembre, sur l'apercu. Le pointille passe a
+       --niveau-4 (3,36:1) : il reste POINTILLE, donc il ne se confond pas
+       avec une bande de niveau, et il devient visible. */
+    .qpb-bande--auto { background: var(--bg); border: 1px dashed var(--niveau-4); }
+    /* La pastille de niveau de la ligne : la meme qu'ailleurs, au meme endroit
+       dans la cascade — fond, encre et lisere viennent des classes .n-*. */
+    .qpb-niveau { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 2px 9px;
+                  white-space: nowrap; border: 1px solid var(--niveau-lisere, var(--border2));
+                  background: var(--niveau-fond, transparent); color: var(--niv-encre, var(--text2)); }
+    .qpb-niveau i { font-weight: 400; font-style: normal; opacity: .8; }
+    /* ⚠ « CHAQUE ANNEE » SE VOIT — anomalie 1 de la recette du 29 octobre. Un
+       reglage est pose sur le SEGMENT, sans date : il vaut pour toutes les
+       occurrences. C'est voulu, et Thierry demande que ca se lise. Jamais sur
+       une ligne « Automatique » : elle ne porte aucun reglage, et l'ecrire la
+       serait faux. */
+    .qpb-chaque { font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+                  color: var(--text2); white-space: nowrap; }
+    .qpb-mesure { font-size: 10.5px; color: var(--text3); white-space: nowrap;
+                  font-variant-numeric: tabular-nums; }
+    .qpb-pt { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+              background: var(--niveau-fond, var(--bg3)); border: 1px solid var(--niveau-lisere, var(--border2)); }
     /* La liste, groupee par mois. */
     .qpb-mois { margin-top: 14px; }
     .qpb-mois h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text3); margin-bottom: 6px; }
@@ -569,7 +609,7 @@
     /* ⚠ LE TELEPHONE SUIT L'ORDINATEUR, et la frise de douze colonnes n'y
        tient pas : elle DEFILE plutot que de se tasser a 25 px par mois. */
     @media (max-width: 720px) {
-      .qpb-frise { grid-template-columns: repeat(12, 46px); overflow-x: auto; padding-bottom: 4px; }
+      .qpb-frise { grid-template-columns: repeat(var(--qpb-mois, 12), 46px); overflow-x: auto; padding-bottom: 4px; }
       .qpb-l { align-items: flex-start; }
       .qpb-actions { width: 100%; margin-left: 0; gap: 8px; }
       .qpb-regl { flex: none; }
@@ -653,7 +693,7 @@
       <button id="yp-suiv" aria-label="Mois suivant">›</button>
     </div>
     <span id="yp-ca"></span>
-    <button class="yp-btn-ev" id="yp-ouvrir-ev" title="Les douze prochains mois : quand vos prix montent ou baissent, et pourquoi — vacances, jours fériés, fêtes du calendrier, vos propres périodes.">Quand vos prix bougent</button>
+    <button class="yp-btn-ev" id="yp-ouvrir-ev" title="L’année qui vient : quand vos prix montent ou baissent, et pourquoi — vacances, jours fériés, fêtes du calendrier, vos propres périodes.">Quand vos prix bougent</button>
   </div>
 
   <!-- « QUAND VOS PRIX BOUGENT » — les douze prochains mois (refonte du
@@ -713,6 +753,7 @@
   import { api as apiClient } from '/shared/api-client.js'
   import { composerJours, celluleDepart, detailDepart, motifNonCalcule } from '/shared/prix-depart-jours.js'
   import { titreWeekEnd, titreFerie, titrePont } from '/shared/yield-libelles-feries.js'
+  import { libellePastille, groupes as groupesNiveau, apresLePas } from '/shared/yield-niveau-periode.js'
 
   initErrorHandler()
 
@@ -2211,16 +2252,58 @@
   // L'effet d'une periode, en mots. ⚠ L'AMPLITUDE DU MOTEUR S'ARRETE A DEUX
   // (`AMPLITUDE_MAX = 2`) : il n'y a donc que cinq etats, et pas neuf. Un
   // troisieme cran serait refuse par le serveur.
-  const EFFET_MOT = {
-    '-2': 'nettement moins chers', '-1': 'un peu moins chers',
-    0: 'prix normaux',
-    1: 'un peu plus chers', 2: 'nettement plus chers'
+  // ⚠⚠ LE VOCABULAIRE D'EFFET A DISPARU — amendement du 29 octobre 2026,
+  // recette de Thierry. « un peu plus chers / nettement / moins chers / prix
+  // normaux » ne correspondait a RIEN dans le moteur : c'etait une seconde
+  // echelle, inventee pour traduire les crans « sans mot du moteur ». Le
+  // resultat n'etait pas une traduction mais une echelle qui n'existe nulle
+  // part — ni dans le moteur, ni dans Prediction de prix, ni dans la tete de
+  // l'hote.
+  //
+  // Ce qui est parti avec : EFFET_MOT, effetMot(), effetClasse(), les classes
+  // .e-monte / .e-baisse / .e-normal / .e-inconnu de la pop-up, .qpb-effet,
+  // .qpb-pt — et --prune / --prune-bg, dont c'etait le SEUL usage produit.
+  //
+  // Ce qui le remplace : LE NIVEAU DE LA GRILLE DU BIEN, calcule par le
+  // moteur et mis en mots par shared/yield-niveau-periode.js.
+  const NIVEAU_CLASSE = {
+    Base: 'n-base', Moyen: 'n-moyen', Haut: 'n-haut',
+    'Très haut': 'n-tres-haut', Exceptionnel: 'n-exceptionnel'
   }
-  // ⚠ `null` N'EST PAS 0. « Automatique » veut dire que l'hote laisse le
-  // moteur decider ; « prix normaux » est un reglage qu'il a pose. Les deux
-  // ne portent ni le meme mot, ni la meme couleur.
-  const effetClasse = (c) => c == null ? 'inconnu' : (c > 0 ? 'monte' : (c < 0 ? 'baisse' : 'normal'))
-  const effetMot = (c) => c == null ? 'Automatique' : (EFFET_MOT[c] || EFFET_MOT[Math.sign(c) * 2])
+  // La classe d'encre d'une periode : celle de son groupe de jours le plus
+  // nombreux. ⚠ Une periode sans niveau n'a PAS de classe — elle ne prend pas
+  // la teinte d'un niveau qu'on ne connait pas.
+  const classeDeNiveau = (e) => {
+    const g = groupesNiveau(e.niveaux_jour)
+    return g.length ? (NIVEAU_CLASSE[g[0].niveau] || '') : ''
+  }
+  // ⚠ `crans = 0` N'EST PAS `crans = null`, ET C'EST LA PRECISION DE THIERRY
+  // DU 3 NOVEMBRE 2026 : 0 est une mesure (« cette periode ne pousse rien »),
+  // donc la pastille affiche le niveau ORDINAIRE du bien ; null est l'absence
+  // de mesure, donc « Automatique », sans niveau invente.
+  //
+  // Le serveur l'applique deja : niveaux_jour vaut `indice + crans`, donc
+  // `indice + 0` pour une periode sans effet, et `null` quand crans est null.
+  // Ici on ne fait que le DIRE.
+  const texteNiveau = (e, coupe, motif) => {
+    if (coupe) return { html: 'Pas prise en compte', titre: null, classe: '' }
+    const p = libellePastille(e.niveaux_jour)
+    if (!p) {
+      // ⚠ ON N'INVENTE PAS UN NIVEAU QU'ON N'A PAS. « niveau estime » suppose
+      // une estimation : elle existe quand le moteur a emprunte au segment
+      // parent. Sans estimation du tout, la ligne porte LE MOTIF SEUL.
+      const estime = !!e.reference_empruntee
+      return {
+        html: estime ? 'Automatique · <i>niveau estimé</i>' : 'Automatique',
+        titre: motif || (estime ? 'Niveau estimé depuis une période voisine, faute d’historique propre.' : null),
+        classe: ''
+      }
+    }
+    return {
+      html: `${ech(p.principal)}${p.complement ? ` · <i>${ech(p.complement)}</i>` : ''}`,
+      titre: p.titre, classe: classeDeNiveau(e)
+    }
+  }
   // ⚠ LE NOM AFFICHE D'UNE PERIODE, EN UN SEUL ENDROIT. La frise et la ligne
   // le lisent toutes deux : deux copies diraient un jour deux noms pour la
   // meme bande et la meme ligne.
@@ -2325,13 +2408,25 @@
     const debutF = fenetre.debut || auj
     const finF = fenetre.fin || debutF
 
-    // Les douze mois de la fenetre, du mois courant au douzieme.
+    // TOUS les mois que la fenetre touche — douze ou TREIZE.
     const moisListe = []
-    // ⚠ DOUZE, ET PAS TREIZE. La fenetre du serveur va d'aujourd'hui a
-    // aujourd'hui + 1 an : elle TOUCHE donc un treizieme mois, celui qui
-    // porte la date de fin. La frise a douze colonnes — le treizieme passait
-    // a la ligne, et on lisait « oct. » deux fois (vu sur l'apercu).
-    for (let m = moisDe(debutF); m <= moisDe(finF) && moisListe.length < 12; m = moisSuivant(m)) moisListe.push(m)
+    // ⚠⚠ TREIZE QUAND LA FENETRE EN TOUCHE TREIZE — anomalie 2 de la recette
+    // de Thierry du 29 octobre 2026, et c'etait un defaut de ce lot.
+    //
+    // La fenetre du serveur va d'aujourd'hui a aujourd'hui + 1 an : elle
+    // touche 13 mois des que le jour n'est pas un 1er. Le code plafonnait a
+    // 12 colonnes — avec sa raison : la 13e passait a la ligne et on lisait
+    // « oct. » deux fois. Mais le serrage symetrique qui en decoulait
+    // repliait dans le dernier mois TOUT ce qui commencait apres, et
+    // l'occurrence du 23 octobre 2027 se rangeait sous « septembre 2027 ».
+    //
+    // ⚠ LE REPLI ETAIT UNE SOLUTION D'AFFICHAGE APPLIQUEE A UNE QUESTION DE
+    // RATTACHEMENT. Masquer une colonne est un choix de mise en page ; ranger
+    // une periode sous un mois ou elle n'a pas un seul jour est un FAIT FAUX.
+    // La frise tient donc 13 colonnes, la derniere visiblement partielle.
+    for (let m = moisDe(debutF); m <= moisDe(finF) && moisListe.length < 13; m = moisSuivant(m)) moisListe.push(m)
+    // La derniere colonne ne couvre que le DEBUT de son mois : elle le dit.
+    const moisPartiel = moisListe.length > 12 ? moisListe[moisListe.length - 1] : null
 
     // Les periodes, dans l'ordre du calendrier. Une periode qui chevauche
     // deux mois apparait dans la frise de chacun, et UNE SEULE FOIS dans la
@@ -2350,10 +2445,17 @@
       const dedans = entrees.map((e, i) => ({ e, i })).filter(({ e }) => e.debut <= finMois && e.fin >= `${m}-01`)
       const bandes = dedans.map(({ e, i }) => {
         const n = nomAffiche(e)
-        return `<button type="button" class="qpb-bande e-${effetClasse(e.crans)}" data-vers="${i}"
-          title="${ech(`${n} — ${effetMot(e.crans)}`)}" aria-label="${ech(`${n}, ${effetMot(e.crans)}`)}"></button>`
+        // ⚠ LA BANDE PORTE LE NIVEAU, PAS UN EFFET. Une periode sans niveau
+        // connu garde la classe `qpb-bande--auto` : un contour, pas une teinte.
+        const p = libellePastille(e.niveaux_jour)
+        const dit = p ? `${p.principal}${p.complement ? ` · ${p.complement}` : ''}` : 'Automatique'
+        const cl = classeDeNiveau(e)
+        return `<button type="button" class="qpb-bande ${cl || 'qpb-bande--auto'}" data-vers="${i}"
+          title="${ech(`${n} — ${dit}`)}" aria-label="${ech(`${n}, ${dit}`)}"></button>`
       }).join('')
-      return `<div class="qpb-col"><span class="qpb-col-nom">${ech(MOIS_COURT[Number(m.slice(5, 7)) - 1])}</span>
+      const partiel = m === moisPartiel
+      return `<div class="qpb-col${partiel ? ' qpb-col--partiel' : ''}"${partiel
+        ? ` title="${ech('Ce mois n’est couvert que jusqu’à la fin de la fenêtre.')}"` : ''}><span class="qpb-col-nom">${ech(MOIS_COURT[Number(m.slice(5, 7)) - 1])}</span>
         <div class="qpb-col-bandes">${bandes || '<span class="qpb-vide"></span>'}</div></div>`
     }).join('')
 
@@ -2389,14 +2491,33 @@
     const dernierMois = moisListe[moisListe.length - 1]
     const moisDeLaLigne = (e) => {
       const m = moisDe(e.debut)
+      // ⚠ LE SERRAGE PAR LE BAS RESTE, AVEC SA RAISON : une periode peut
+      // COMMENCER AVANT la fenetre et la chevaucher — elle se range alors
+      // sous le premier mois montre. C'est un rattachement vrai.
       if (m < premierMois) return premierMois
-      if (m > dernierMois) return dernierMois
+      // ⚠ PLUS DE REPLI PAR LE HAUT. Il n'y en a plus besoin : moisListe
+      // porte maintenant tous les mois que la fenetre touche. S'il en
+      // restait un au-dela, le ranger sous le dernier serait le fait faux
+      // que cette correction supprime — on le laisse sortir, et le controle
+      // de compte ci-dessous le criera.
+      if (m > dernierMois) return null
       return m
     }
     const parMois = new Map(moisListe.map(m => [m, []]))
-    entrees.forEach((e, i) => parMois.get(moisDeLaLigne(e)).push({ e, i }))
+    // ⚠ UNE ENTREE HORS FENETRE N'EST PLUS REPLIEE, DONC ELLE N'EST PLUS
+    // POSEE — et c'est le controle de compte, juste dessous, qui doit le
+    // dire. C'est lui qui aurait du crier avant cette correction, et il ne
+    // pouvait pas : une entree REPLIEE n'est pas une entree perdue.
+    entrees.forEach((e, i) => { const m = moisDeLaLigne(e); if (m && parMois.has(m)) parMois.get(m).push({ e, i }) })
     // Le compte doit retomber sur ses pieds : aucune entree perdue en route.
     const posees = [...parMois.values()].reduce((n, l) => n + l.length, 0)
+    // ⚠ CE CONTROLE CRIE DANS LA CONSOLE, PAS A L HOTE — et c'est dit plutot
+    // que promis. Constat de review : le commentaire annoncait une alarme que
+    // `console.error` ne porte pas. Le cas est inatteignable aujourd'hui (la
+    // fenetre du serveur tient en 13 mois, et la frise en montre 13), donc ce
+    // n'est pas un defaut vivant : c'est un filet pour le jour ou la fenetre
+    // changerait. S'il se declenchait, la bande de la frise resterait rendue
+    // et son clic viserait une ligne absente.
     if (posees !== entrees.length) {
       console.error('[periodes] %d periode(s) perdue(s) a l affichage', entrees.length - posees)
     }
@@ -2429,12 +2550,13 @@
     el('yp-pop-ev').innerHTML = `<div class="yp-pop-tete qpb-tete">
         <h2>Quand vos prix bougent</h2>
         <button class="yp-pop-fermer qpb-fermer" id="ev-fermer" aria-label="Fermer">×</button>
-        <span class="qpb-sous">les 12 prochains mois</span>
+        <span class="qpb-sous">${ech(`les ${moisListe.length} prochains mois`)}</span>
       </div>
       ${message ? `<div class="qpb-msg ${message.startsWith('✓') ? 'ok' : 'ko'}">${ech(message)}</div>` : ''}
-      <div class="qpb-frise" role="group" aria-label="Les douze prochains mois">${frise}</div>
+      <div class="qpb-frise" role="group" style="--qpb-mois:${moisListe.length}"
+        aria-label="${ech(`Les ${moisListe.length} prochains mois`)}">${frise}</div>
       ${horizon}${reconductions}
-      ${sections || '<p class="qpb-dit">Aucune période sur les douze prochains mois.</p>'}
+      ${sections || `<p class="qpb-dit">${ech(`Aucune période sur les ${moisListe.length} prochains mois.`)}</p>`}
       ${ajout}`
 
     el('ev-fermer').addEventListener('click', fermerPopup)
@@ -2494,11 +2616,40 @@
     // bouton « remettre en automatique » sur une ligne deja automatique ne
     // ferait rien — un bouton qui ne fait rien est un bouton qui ment.
     const regleALaMain = e.crans_ajustes != null
-    // ⚠ DEUX FLECHES, ET LA PASTILLE DIT L'ETAT. Les libelles « − moins fort /
-    // + plus fort » repetaient en mots ce que la pastille disait deja mieux.
+    // Le niveau de la periode, mis en mots une seule fois pour la ligne.
+    const niv = texteNiveau(e, coupe, motif)
+
+    // ⚠ L'ETIQUETTE ANNONCE LE RESULTAT AVANT LE CLIC (spec §0 bis.2). ▲ et ▼
+    // deplacent la periode d'UN CRAN, semaine et week-end ENSEMBLE, reliefs
+    // gardes — c'est la definition du cran, pas un choix d'interface.
+    //
+    // ⚠ ET UN BOUTON A LA BORNE EST DESACTIVE *AVEC SA RAISON*, jamais
+    // silencieusement inoperant : « le week-end est deja a 5 · Exceptionnel ».
+    // Un bouton qui ne fait rien sans le dire est le defaut que ce lot corrige
+    // ailleurs — on ne le reintroduit pas ici.
+    //
+    // ⚠ LA BORNE SE VERIFIE SUR TOUS LES GROUPES DE JOURS, pas sur la semaine
+    // seule : si le week-end est a Exceptionnel et la semaine a Haut, ▲ est
+    // refuse — sinon le cran ecraserait le relief qu'il doit conserver.
+    // apresLePas() s'en charge, et il connait les deux bornes : l'echelle et
+    // l'amplitude du moteur.
+    const pas = (sens) => {
+      // ⚠ LE PAS SE CALCULE SUR LA STRUCTURE ET LES CRANS, pas sur les niveaux
+      // AFFICHES : ceux-ci sont deja ecretes par l'echelle, et le clic ecrete
+      // les CRANS. Refaire le pas sur l'affichage promettait un resultat faux.
+      const r = apresLePas({ niveauxJour: e.niveaux_jour, structure: e.structure_jour,
+        crans: c, cransMax: max }, sens)
+      const verbe = sens > 0 ? 'Monter' : 'Baisser'
+      const etiquette = r.possible
+        ? (r.apres ? `${verbe} d’un cran : ${nom} passe à ${r.apres}` : `${verbe} d’un cran : ${nom}`)
+        : `${verbe} d’un cran, impossible : ${r.raison}`
+      return `<button type="button" class="qpb-pas" data-ev-pas="${sens}" data-segment="${ech(e.cle)}"
+        data-actuel="${c == null ? 0 : c}"${r.possible ? '' : ' disabled'}
+        title="${ech(etiquette)}" aria-label="${ech(etiquette)}">${sens > 0 ? '▲' : '▼'}</button>`
+    }
     const gestes = lecture ? '' : `<div class="qpb-regl">
-        <button type="button" class="qpb-pas" data-ev-pas="-1" data-segment="${ech(e.cle)}" data-actuel="${c == null ? 0 : c}" ${c != null && c <= -max ? 'disabled' : ''} aria-label="Baisser le prix : ${ech(nom)}" title="Baisser le prix">▼</button>
-        <button type="button" class="qpb-pas" data-ev-pas="1" data-segment="${ech(e.cle)}" data-actuel="${c == null ? 0 : c}" ${c != null && c >= max ? 'disabled' : ''} aria-label="Monter le prix : ${ech(nom)}" title="Monter le prix">▲</button>
+        ${pas(-1)}
+        ${pas(1)}
       </div>
       ${regleALaMain ? `<button type="button" class="qpb-auto" data-ev-auto="${ech(e.cle)}">remettre en automatique</button>` : ''}`
     const menu = lecture || !((e.droits && e.droits.desactivable) || (e.droits && e.droits.supprimable && e.id)) ? '' : `<details class="qpb-plus">
@@ -2508,14 +2659,22 @@
           ${e.droits.supprimable && e.id ? `<button type="button" class="qpb-sup" data-ev-sup="${ech(e.id)}" data-nom="${ech(nom)}">Supprimer</button>` : ''}
         </div></details>`
     return `<div class="qpb-l${coupe ? ' coupee' : ''}" id="qpb-l-${i}">
-      <span class="qpb-pt e-${effetClasse(c)}" aria-hidden="true"></span>
+      <span class="qpb-pt ${niv.classe}" aria-hidden="true"></span>
       <div class="qpb-l-txt">
         <b>${ech(nom)}</b>
         <span class="qpb-quand">${ech(quand)}${nuits} · ${ech(ORIGINE_MOT[e.origine] || e.origine)}</span>
       </div>
-      <span class="qpb-effet e-${effetClasse(c)}" ${motif ? `title="${ech(motif)}"` : ''}>${ech(coupe ? 'Pas prise en compte' : effetMot(c))}${
-        !regleALaMain && e.crans_mesures != null ? ` <i>(${e.crans_mesures > 0 ? '+' : ''}${e.crans_mesures} aujourd’hui)</i>`
-        : (motif ? ` <i>${ech(motif)}</i>` : '')}</span>
+      <span class="qpb-niveau ${niv.classe}"${niv.titre ? ` title="${ech(niv.titre)}"` : ''}>${niv.html}</span>
+      ${/* ⚠ LA MESURE DU MOTEUR RESTE ATTEIGNABLE — constat de review du
+            28 octobre 2026, et elle n'etait PAS dans la liste des retraits du
+            3 novembre : je l'avais emportee avec le vocabulaire d'effet, ce
+            qui depassait la demande. Le cran n'est pas un mot invente, c'est
+            l'unite du moteur. Il ne s'affiche que si l'hote n'a rien pose :
+            sur une ligne reglee, la mesure est remplacee, pas cachee. */''}
+      ${!regleALaMain && e.crans_mesures != null
+        ? `<span class="qpb-mesure" title="Ce que le moteur mesure aujourd’hui sur cette période.">${e.crans_mesures > 0 ? '+' : ''}${e.crans_mesures} cran${Math.abs(e.crans_mesures) > 1 ? 's' : ''}</span>`
+        : ''}
+      ${regleALaMain ? '<span class="qpb-chaque" title="Un réglage est posé sur la période, sans date : il vaut pour toutes ses occurrences.">chaque année</span>' : ''}
       <div class="qpb-actions">${gestes}${menu}</div>
     </div>`
   }

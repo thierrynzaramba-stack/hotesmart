@@ -130,10 +130,13 @@ mot :**
 > Enregistre-la comme **élément de structure à ne jamais modifier ou substituer
 > sans double validation de ma part**.
 
-**La consigne « ni bleu ni ambre » est donc RETIRÉE pour cette échelle**, et
-seulement pour elle : les trois couleurs réservées — noir à la navigation, ambre
-à « ce qu'HôteSmart a fait pour vous », bleu au cliquable — restent en vigueur
-partout ailleurs.
+⚠ **CETTE EXEMPTION EST SANS OBJET DEPUIS LE 3 NOVEMBRE 2026**, et le dire vaut
+mieux que de la laisser lire comme une règle vivante. Elle avait été accordée à
+une échelle COLORÉE — Base bleuté, Haut ambré. L'échelle d'encre n'a **aucune
+teinte** : elle n'entre en concurrence avec rien, donc elle n'a besoin d'aucune
+exemption. Les trois couleurs réservées — noir à la navigation, ambre à « ce
+qu'HôteSmart a fait pour vous », bleu au cliquable — valent de nouveau partout,
+y compris ici.
 
 #### La palette canonique — LA SOURCE
 
@@ -329,6 +332,138 @@ mobile**, comme le premier — règle du dépôt : le mobile suit l'ordinateur, 
 question se pose avant la clôture, pas après.
 
 ---
+
+---
+
+## 0 ter. ⚠ LE LOT EST REPRIS — 3 NOVEMBRE 2026, branche `yf-periodes-niveaux`
+
+**Décision de Thierry, mot pour mot** : « `yf-periodes-niveaux` part de
+`268bcd59`, pas de staging. Contenu = le KO structurel de ma recette du
+29 octobre. »
+
+⚠ **ET ÇA REVIENT SUR UNE DÉCISION ÉCRITE, QU'IL FAUT DIRE PLUTÔT QUE DE LA
+LAISSER SE CONTREDIRE EN SILENCE.** Le registre du chantier
+`docs/specs/spec-ce-qui-fait-bouger-vos-prix.md` §5 porte, depuis le 30 octobre :
+« Le lot `yf-ecran-periodes` est ARRÊTÉ. Son amendement de recette ne sera pas
+codé : le présent chantier le remplace. » Le §0 bis ci-dessus était donc une
+spec **sans lot**. Thierry le rouvre le 3 novembre : l'amendement **est** codé,
+sur l'écran existant, et le chantier « Ce qui fait bouger vos prix » reste
+devant pour la refonte complète. Les deux anomalies que le registre avait
+promues « exigences du lot 4 » — le 13e mois et « chaque année » — reviennent
+donc ici, où elles sont nées.
+
+⚠ **ET C'EST CE LOT QUI DÉBLOQUE LA PRODUCTION DE TOUTE LA CHAÎNE YIELDFLOW.**
+Mesuré le 3 novembre : `yf-ecran-periodes` (1b98c812) est ancêtre de
+`lot-palette-prune` (0377f0b8), qui est ancêtre de `lot-echelle-encre`
+(268bcd59). Les trois attendent ce lot avant `main`. D'où la base :
+**`268bcd59`, la tête de la chaîne — pas `staging`.** Une branche partie de
+`staging` emporterait dans `main` **tout ce que `staging` porte en plus**, dont
+la recette n'est pas faite ; la règle 3 l'interdit, et elle fermerait la chaîne
+entière à la production.
+
+⚠ **L'ÉCART SE MESURE, IL NE SE CITE PAS.** Une version de ce paragraphe
+annonçait « 103 commits et 129 fichiers » : le nombre n'était reproductible par
+aucune commande, et il BOUGE à chaque merge dans `staging`. Relevé en review.
+La mesure se refait en deux commandes, et c'est elle qui fait foi :
+
+```bash
+git log --oneline --no-merges 268bcd59..origin/staging | wc -l
+git diff --name-only 268bcd59 origin/staging | wc -l
+```
+
+Au 4 novembre 2026 : **110 commits et 155 fichiers** — contre 60 commits et
+82 fichiers pour `origin/main..origin/staging`. Les deux chiffres grossissent
+tant que la chaîne YieldFlow attend son go. Correction de Thierry lui-même, après signalement.
+
+### 0 ter.1 Ce que le §0 bis ne pouvait pas savoir
+
+Le §0 bis date du 29 octobre. Trois choses ont changé depuis, et elles entrent
+dans ce lot :
+
+| | ce que le §0 bis dit | ce qui vaut |
+|---|---|---|
+| **la palette** | « même palette que Prédiction de prix », cinq teintes puis prune | **l'échelle d'encre** : cinq densités, saturation 0 %. Choix définitif de Thierry du 3 novembre |
+| **« ni bleu ni ambre »** | « retirée pour cette échelle » | **sans objet** : une échelle sans teinte n'entre en concurrence avec aucune couleur réservée. Le paragraphe est corrigé en place |
+| **le libellé** | « Haut », « Très haut » | **« 3 · Haut », « 4 · Très haut »** — le chiffre est toujours écrit (règle 2). Au bas de l'échelle le fond ne porte plus l'information |
+
+Et une quatrième, acquise entre-temps : **les libellés de fériés passent par la
+table** `shared/yield-libelles-feries.js` — « 11 novembre », « de l'Ascension »,
+« Pont du 8 mai ». À l'affichage seulement ; aucune clé de segment ne bouge.
+
+### 0 ter.2 Les sept points du lot, et où chacun est spécifié
+
+| # | point | spec |
+|---|---|---|
+| 1 | la pastille affiche le **niveau de la grille du bien**, et les deux si semaine et week-end diffèrent | §0 bis.1 |
+| 2 | **▲ / ▼ = un cran** sur la grille, semaine et week-end ensemble, reliefs gardés | §0 bis.2 |
+| 3 | **frise et pastilles sur l'échelle d'encre** ; `--prune` « moins chers » et tout le vocabulaire d'effet disparaissent | §0 bis.4, amendé ci-dessus |
+| 4 | **« Automatique · niveau estimé »**, le détail en infobulle | §0 bis.3 |
+| 5 | **« chaque année »** sur une ligne réglée | §0 bis.5 |
+| 6 | le **13e mois** rangé sous son vrai mois | §0 bis.6 |
+| 7 | **libellés des fériés via la table** | §0 ter.1 |
+
+### 0 ter.3 Le vocabulaire qui disparaît — l'inventaire, mesuré
+
+Relevé dans `apps/yield/prix.html` le 3 novembre 2026. Rien de cette liste ne
+doit survivre au lot, ni dans le code, ni dans les classes, ni dans les tests :
+
+| ce qui part | où |
+|---|---|
+| `EFFET_MOT`, `effetMot()`, `effetClasse()` | la table de mots inventés et ses deux fonctions |
+| `.e-monte`, `.e-baisse`, `.e-normal`, `.e-inconnu` | 11 règles CSS, dont `.qpb-bande.*` et `.qpb-effet.*` |
+| `--prune`, `--prune-bg` | leur **seul** usage produit. Ils redeviennent des jetons sans emploi |
+| `.qpb-effet` | la pastille d'effet |
+
+⚠ **`.qpb-pt` EST CONSERVÉE, pas retirée** — une version de ce tableau disait le contraire du code. Le point de la ligne reste, et il prend désormais le fond et le liseré de son **niveau** : il change de source, pas d'existence.
+
+⚠ **`--prune` SORT DU PRODUIT AVEC CE LOT**, et c'est ce que Thierry annonçait
+le 2 novembre : « le prune "moins chers" disparaît avec le lot 4 (les périodes
+passent en niveaux de grille) ». L'exception nommée dans
+`tests/palette-niveaux.test.js` et dans `docs/kb/charte-ui.md` §3 **doit partir
+dans le même lot** — une entrée de liste blanche qui ne garde plus rien se
+réveille en silence le jour où son motif revient. Ce fichier porte la leçon
+trois fois.
+
+### 0 ter.4 Ce qui change au SERVEUR, et pourquoi c'est une ligne
+
+`api/yield-evenements.js` appelle déjà `grilleDuBien(...)` et prend
+`g.grille.positions`. La **même réponse** porte `g.grille.positions_jour`
+(Map `segment|jour`, `lib/yield/suggestion.js:482`), **calculée dans le même
+appel et jetée**. Précédent établi : `api/yield-prix.js:748` la sert déjà.
+
+**Zéro requête de plus, zéro appel de plus** — la case PERFORMANCE du lot est
+inchangée (§0 bis.7). Sans elle, la règle « le mot week-end ne s'écrit que s'il
+est vrai » (§0 bis.1) ne serait pas tenable : on ne saurait pas quels jours se
+détachent.
+
+### 0 ter.5 Case PERFORMANCE
+
+| point | réponse |
+|---|---|
+| **1. un écran = un endpoint** | inchangé : la pop-up lit `/api/yield-evenements`, un seul appel |
+| **2. donnée non urgente = résumé** | sans objet : ce sont des réglages de l'hôte et une grille déjà calculée dans l'appel |
+| **3. cache navigateur** | sans objet : aucun cache sur cet écran, et il porte des réglages qui s'écrivent |
+| **4. `private, no-store`** | inchangé — l'endpoint le pose déjà avant son premier refus |
+| **5. statiques versionnés** | sans objet : aucun fichier statique ajouté |
+| **6. lecture tronquée à 1000** | sans objet : la fenêtre est d'un an, bornée par date |
+| **7. budget < 1 s / < 2 s** | inchangé : aucun appel ajouté. `positions_jour` voyage dans une réponse déjà émise |
+| **8. mesure avant/après** | appels : 1 → 1. Requêtes : inchangé. Octets : ⚠ ce n'est **pas** `positions_jour` qui voyage — elle reste au serveur. Ce qui part en plus, ce sont **`niveaux_jour` et `structure_jour`**, 7 clés chacune **par période** (≈ 300 octets par période). Relevé en review : la version précédente de cette ligne décrivait un transfert qui n'a pas lieu |
+
+### 0 ter.6 Les deux aperçus
+
+**Desktop ET mobile avant commit** (demande de Thierry, et règle
+« LE MOBILE SUIT L'ORDINATEUR »). Ce qu'ils doivent montrer :
+
+1. la frise, avec son **13e mois partiel** ;
+2. une pastille à **un** groupe de jours, une à **deux** (« 3 · Haut ·
+   week-ends 4 · Très haut »), et une à **jours nommés** (« vendredis et
+   samedis ») — les trois cas de §0 bis.1 ;
+3. une ligne **« Automatique · niveau estimé »** et une ligne **« chaque
+   année »** ;
+4. ▲ / ▼ avec leur étiquette de résultat, et **un bouton désactivé avec sa
+   raison** ;
+5. un **férié**, un **pont** et un **week-end prolongé**, pour montrer les
+   libellés de la table.
 
 ## 1. Pourquoi c'est illisible — mesuré dans le code, pas supposé
 
@@ -544,6 +679,12 @@ tronque en silence.
 4. **Trois couleurs réservées** : le **noir** à la navigation, l'**ambre** à
    « ce qu'HôteSmart a fait pour vous », le **bleu** à ce qui est cliquable.
    D'où `--prune` (#5B2A86) pour l'état « moins chers ».
+
+   ⚠ **PÉRIMÉ DEPUIS LE 3 NOVEMBRE 2026, et c'est ce lot qui le périme.**
+   L'état « moins chers » n'existe plus : la période affiche **son niveau**
+   sur l'échelle d'encre. `--prune` et `--prune-bg` sont sortis de
+   `public/style.css` dans le même commit que leur dernier usage — c'était
+   leur seul usage produit, et Thierry l'avait annoncé le 2 novembre.
 5. **Champs date natifs conservés** — on garde le sélecteur du téléphone.
    ⚠ Conséquence assumée : leur format suit le **navigateur**, pas notre
    interface. Un hôte au navigateur anglais verra `mm/dd/yyyy` dans une page

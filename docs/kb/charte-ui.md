@@ -88,12 +88,16 @@ bas. Le bouton plein noir existe dans le socle **legacy** — voir §2.
 
 ⚠ **ET TROIS JETONS QUE CE DOCUMENT A D'ABORD ANNONCÉS ICI N'Y SONT PAS —
 relevé en review, et la cause vaut d'être écrite.** `--blue` (#2563EB),
-`--prune` (#5B2A86) et `--prune-bg` (#F0E9F6) ont été posés par le lot
-`yf-ecran-periodes`, qui est dans **`staging`** et **pas dans `main`**. La
-première version de ce document a été **relevée sur cette branche-là puis
-écrite dans un lot parti de `main`** : trois jetons annoncés avec leur numéro
-de ligne, introuvables partout. Un designer qui aurait aligné une maquette sur
-`--prune` l'aurait découvert au branchement.
+⚠ **`--prune` ET `--prune-bg` ONT QUITTÉ `public/style.css` LE 4 NOVEMBRE
+2026**, avec le lot qui a emporté leur dernier usage : les périodes affichent
+désormais leur **niveau** sur l'échelle d'encre, et l'état « moins chers » —
+que ces deux jetons peignaient — n'existe plus. Thierry l'avait annoncé le
+2 novembre : « le prune "moins chers" disparaît avec le lot 4 ».
+
+Ils avaient été posés par le lot `yf-ecran-periodes` du 28 octobre, et ce
+document a longtemps dit qu'ils vivaient dans la feuille. **Un jeton sans
+usage se recopie et se maintient pour rien** — c'est la raison qui avait fait
+retirer `--blue-bg` le 28 octobre, et elle vaut ici.
 
 **La leçon, et elle est générale : un relevé appartient à l'arbre où il a été
 fait.** Le présent document est mesuré sur un arbre parti de `main`
@@ -243,9 +247,15 @@ table, leurs chiffres seraient invérifiables, donc à ne pas citer.
 Le 2 novembre, le **prune** a été réservé aux niveaux de prix, au même titre
 que le noir, l'ambre et le bleu — écrit ici, dans `public/style.css`, et tenu
 par un test. Le 3 novembre, l'échelle d'encre l'a remplacé et **la réservation
-tombe avec lui** : le prune redevient une couleur ordinaire, et `--prune`
-reprend son seul rôle, l'état « moins chers ». Les couleurs réservées sont de
-nouveau **trois**.
+tombe avec lui** : le prune redevient une couleur ordinaire. Les couleurs
+réservées sont de nouveau **trois**.
+
+⚠ **ET LE 4 NOVEMBRE, `--prune` A QUITTÉ LE PRODUIT TOUT COURT** : le lot des
+périodes en niveaux a emporté son dernier usage, et les deux jetons sont
+sortis de `public/style.css` dans le même commit. Une couleur réservée
+vingt-quatre heures, puis supprimée deux jours plus tard : la leçon reste
+celle du §3 — **une couleur réservée se paie en place**, et les niveaux
+n'avaient besoin ni d'en prendre, ni d'en garder une.
 
 La durée de vie de cette réservation est elle-même la leçon : **une couleur
 réservée se paie en place**, et les niveaux n'avaient pas besoin d'en prendre.

@@ -62,11 +62,31 @@ test('LE TEST QUI COMPTE : plus aucune navigation par mois dans cet ecran', () =
     'aucun decalage de mois : l ecran montre les douze d un coup')
 })
 
-test('les douze mois sont GROUPES, et il y en a douze, pas treize', () => {
+test('les mois sont GROUPES, et il y en a TREIZE quand la fenetre en touche treize', () => {
+  // ⚠ CE TEST DISAIT L'INVERSE JUSQU'AU 3 NOVEMBRE 2026, et il avait tort —
+  // c'est l'anomalie 2 de la recette de Thierry du 29 octobre. Il exigeait
+  // `moisListe.length < 12`, donc il GARDAIT le plafond qui obligeait au repli,
+  // et le repli rangeait l'occurrence du 23 octobre 2027 sous « septembre
+  // 2027 ». Masquer une colonne est une mise en page ; ranger une periode sous
+  // un mois ou elle n'a pas un seul jour est un FAIT FAUX.
   const bloc = blocRendu()
-  assert.match(bloc, /moisListe\.length < 12/,
-    'la fenetre du serveur TOUCHE un treizieme mois : la frise doit s arreter a douze')
+  assert.match(bloc, /moisListe\.length < 13/,
+    'la fenetre touche 13 mois des que le jour n est pas un 1er : la frise les montre')
   assert.match(bloc, /qpb-mois/, 'les periodes doivent etre groupees par mois')
+  // ⚠ ET LA TREIZIEME COLONNE SE DIT PARTIELLE, au lieu de se faire passer
+  // pour un mois entier : elle ne couvre que le debut de son mois.
+  assert.match(bloc, /const moisPartiel = moisListe\.length > 12/,
+    'la derniere colonne doit savoir qu elle est partielle')
+  const src = sansCommentaires(PAGE())
+  assert.match(src, /qpb-col--partiel/, 'et le dire a l ecran')
+  // ⚠ ET LA BANDE SE VOIT. Sur l'echelle d'encre, le fond des trois niveaux
+  // bas est a 1,07 / 1,19 / 1,45:1 du blanc : une bande de 7 px sans lisere
+  // n'est pas une bande, c'est du vide. Mesure faite sur l'apercu, pas en
+  // lecture — c'est ce que l'image a montre et qu'aucun test ne disait.
+  assert.match(src, /\.qpb-bande \{[^}]*border: 1px solid var\(--niveau-lisere/,
+    'une bande de niveau porte le lisere de son niveau, sinon on ne la voit pas')
+  assert.match(src, /--qpb-mois:\$\{moisListe\.length\}/,
+    'le nombre de colonnes vient du nombre de mois, pas d un 12 en dur')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -124,18 +144,22 @@ test('les mots de remplacement sont bien la', () => {
 // 3. UN SEUL CODE COULEUR, ET LES TROIS COULEURS RESERVEES
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('LE TEST QUI COMPTE : un seul code couleur — l origine n en est plus une', () => {
-  const src = PAGE()
-  // ⚠ L'ancien ecran avait DEUX codes : le fond disait le niveau de prix, le
-  // contour disait l'origine, et rien ne disait qu'il y en avait deux.
-  assert.doesNotMatch(src, /EV_COULEUR/,
-    'la table de couleurs par origine doit avoir disparu')
-  assert.doesNotMatch(src, /#2A5E86|#7A3E9A|#1F6F45/,
-    'les trois hexas d origine doivent avoir disparu')
-  // Les quatre etats d'effet, et eux seuls.
-  for (const etat of ['e-monte', 'e-baisse', 'e-normal', 'e-inconnu']) {
-    assert.ok(src.includes(etat), `l etat ${etat} manque`)
+test('LE TEST QUI COMPTE : un seul code couleur — et c est le NIVEAU', () => {
+  // ⚠ CE TEST EXIGEAIT L INVERSE JUSQU AU 4 NOVEMBRE 2026, ET IL PASSAIT POUR
+  // UNE MAUVAISE RAISON — constat de review. Il demandait `e-monte`,
+  // `e-baisse`, `e-normal`, `e-inconnu` dans la page, et il les trouvait
+  // dans DEUX COMMENTAIRES qui racontent leur retrait. Il protegeait donc
+  // l inverse de ce que le lot livre, et aurait rougi au premier nettoyage de
+  // commentaire : un faux vert dans les deux sens.
+  const src = sansCommentaires(PAGE())
+  for (const mort of ['e-monte', 'e-baisse', 'e-normal', 'qpb-effet']) {
+    assert.doesNotMatch(src, new RegExp('\\b' + mort + '\\b'),
+      `${mort} appartient au vocabulaire invente : il ne doit plus exister`)
   }
+  // Le seul code couleur est l echelle d encre, par les classes partagees.
+  assert.match(src, /class="qpb-bande \$\{cl \|\| 'qpb-bande--auto'\}"/,
+    'la bande porte la classe de son NIVEAU, ou le contour « sans niveau »')
+  assert.match(src, /const NIVEAU_CLASSE = \{/, 'une seule table de classes')
 })
 
 test('LE TEST QUI COMPTE : les trois couleurs reservees sont respectees', () => {
@@ -146,18 +170,25 @@ test('LE TEST QUI COMPTE : les trois couleurs reservees sont respectees', () => 
     const m = src.match(new RegExp('\\' + sel + '[^{]*\\{([^}]*)\\}'))
     return m ? m[1] : ''
   }
-  assert.match(regle('.qpb-effet.e-baisse'), /var\(--prune\)/,
-    '« moins chers » doit etre prune : ni ambre (reserve), ni bleu (reserve au cliquable)')
-  assert.doesNotMatch(regle('.qpb-effet.e-baisse'), /--amber|--blue/,
-    '« moins chers » ne doit porter ni l ambre ni le bleu')
+  // ⚠ « MOINS CHERS » N'EXISTE PLUS, ET SON PRUNE NON PLUS. Amendement du
+  // 29 octobre, code le 3 novembre : la periode affiche SON NIVEAU sur
+  // l'echelle d'encre. --prune et --prune-bg etaient son seul usage produit ;
+  // ils sont sortis de public/style.css dans le meme commit.
+  assert.equal(regle('.qpb-effet.e-baisse'), '',
+    'la regle de l etat « moins chers » ne doit plus exister')
+  assert.doesNotMatch(src, /--prune/, 'le jeton ne doit plus etre reference')
   assert.match(regle('.qpb-btn-plein'), /var\(--blue\)/,
     'une action est bleue, jamais noire')
   assert.doesNotMatch(regle('.qpb-btn-plein'), /var\(--text\)\s*;/,
     'le noir est reserve a la navigation')
   // Et les jetons existent la ou vivent leurs voisins.
   const feuille = lire('public/style.css')
-  for (const jeton of ['--blue:', '--prune:', '--prune-bg:']) {
-    assert.ok(feuille.includes(jeton), `${jeton} manque a public/style.css`)
+  assert.ok(feuille.includes('--blue:'), '--blue: manque a public/style.css')
+  // ⚠ ET LES DEUX JETONS DU PRUNE NE DOIVENT PLUS Y ETRE. Un jeton sans usage
+  // se recopie et se maintient pour rien — c'est la raison qui avait fait
+  // retirer --blue-bg le 28 octobre, et elle vaut ici.
+  for (const jeton of ['--prune:', '--prune-bg:']) {
+    assert.ok(!feuille.includes(jeton), `${jeton} doit avoir quitte public/style.css`)
   }
   // ⚠ `--blue-bg` A ETE RETIRE : il n'etait reference nulle part (review du
   // 28 octobre). Un jeton inutilise se recopie et se maintient pour rien.
@@ -166,7 +197,7 @@ test('LE TEST QUI COMPTE : les trois couleurs reservees sont respectees', () => 
   // pas le socle V5, donc sans ce jeton elles n'auraient aucun bleu.
   assert.match(feuille, /OUI, C'EST LA MEME VALEUR QUE `--info`/,
     'un doublon assume se commente, sinon la prochaine review le « corrige »')
-  assert.ok(feuille.includes('#5B2A86'), 'le prune demande est #5B2A86')
+  assert.ok(!feuille.includes('#5B2A86'), 'la valeur du prune ne doit plus etre declaree')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -180,13 +211,12 @@ function outils () {
   const i = src.indexOf('const MOIS_LONG =')
   const j = src.indexOf('async function rendrePopup')
   assert.ok(i > 0 && j > i, 'les outils de date sont introuvables')
-  const k = src.indexOf('const EFFET_MOT =')
-  const l = src.indexOf('const ORIGINE_MOT =')
-  assert.ok(k > 0 && l > k, 'la table des effets est introuvable')
+  // ⚠ LA TABLE DES EFFETS N'EST PLUS EXTRAITE : elle n'existe plus. Ce que
+  // la page porte encore de PUR, ce sont les outils de date ; le niveau, lui,
+  // vit dans shared/yield-niveau-periode.js et se teste directement.
   const ctx = { assert }
   vm.createContext(ctx)
-  vm.runInContext(src.slice(i, j) + '\n' + src.slice(k, l)
-    + '\nglobalThis.O = { periodeEnLettres, effetClasse, effetMot }', ctx)
+  vm.runInContext(src.slice(i, j) + '\nglobalThis.O = { periodeEnLettres }', ctx)
   return ctx.O
 }
 
@@ -208,35 +238,236 @@ test('LE TEST QUI COMPTE : les dates en toutes lettres, sans repeter l inutile',
   }
 })
 
-test('LE TEST QUI COMPTE : `null` n est pas 0 — deux etats, deux mots, deux couleurs', () => {
-  const { effetClasse, effetMot } = outils()
-  // ⚠ « Automatique » veut dire « l hote laisse le moteur decider » ;
-  // « prix normaux » est un reglage qu il a POSE. Les confondre afficherait
-  // un reglage la ou il n y en a pas.
-  assert.equal(effetClasse(null), 'inconnu')
-  assert.equal(effetMot(null), 'Automatique')
-  assert.equal(effetClasse(0), 'normal')
-  assert.equal(effetMot(0), 'prix normaux')
-  assert.notEqual(effetClasse(null), effetClasse(0))
-  assert.notEqual(effetMot(null), effetMot(0))
+test('LE TEST QUI COMPTE : `crans = 0` n est pas `crans = null` — DEUX tests, un pour chacun', async () => {
+  // ⚠⚠ PRECISION DE THIERRY DU 3 NOVEMBRE 2026, mot pour mot : « crans = 0
+  // n'est pas crans = null. 0 = mesure sans effet → la pastille affiche le
+  // niveau ORDINAIRE du bien. null = inconnu → "Automatique", sans niveau
+  // invente. Un test pour chacun. »
+  //
+  // ⚠ ET ON MESURE LE SERVEUR, PAS UNE COPIE. L'ancien test lisait deux
+  // fonctions de la PAGE (`effetClasse`, `effetMot`) qui traduisaient les
+  // crans en mots inventes. Ces mots sont partis ; ce qui porte la difference
+  // est maintenant `niveaux_jour`, pose par lib/yield/calendrier-pilotage.js
+  // avec la formule du moteur. C'est donc lui qu'on interroge.
+  const { calendrier } = require('../lib/yield/calendrier-pilotage.js')
+  const R = require('../lib/yield/reference.js')
+  const ctx = R.construireContexte({ zoneBien: 'A', vacances: [], evenements: [], debut: '2026-11-01', fin: '2026-12-31' })
+  // Une structure ordinaire a RELIEF : la semaine a Moyen (1), le week-end a
+  // Haut (2). C'est ce relief que le cran doit conserver.
+  const pj = new Map()
+  for (const j of R.JOURS_SEMAINE) {
+    pj.set(`${R.SEGMENTS.HORS_VACANCES}|${j}`,
+      { fiable: true, indice: (j === 'samedi' || j === 'dimanche') ? 2 : 1 })
+  }
+  const lire = (cransFerie) => {
+    const pos = new Map([
+      [R.SEGMENTS.HORS_VACANCES, { fiable: true, indice: 1, niveau: 'Moyen', crans: 0, mediane: 100, echantillon: 50 }],
+      ['ferie', cransFerie === null
+        ? { fiable: false, indice: null, niveau: null, crans: null, echantillon: 0 }
+        : { fiable: true, indice: 1 + cransFerie, niveau: 'x', crans: cransFerie, mediane: 120, echantillon: 20 }]
+    ])
+    const l = calendrier({ contexte: ctx, debut: '2026-11-01', fin: '2026-12-31',
+      positions: pos, positions_jour: pj, evenements: [] })
+    return l.find(e => e.segment === 'ferie')
+  }
+
+  // ── crans = 0 : une MESURE, qui dit « cette periode ne pousse rien » ──
+  const zero = lire(0)
+  assert.ok(zero, 'le ferie doit etre dans la liste')
+  assert.equal(zero.crans, 0, 'le cas teste est bien 0, pas null')
+  assert.ok(zero.niveaux_jour, 'a 0 crans, la pastille a bien un niveau : celui du bien')
+  assert.equal(zero.niveaux_jour.lundi, 'Moyen', 'la semaine garde le niveau ordinaire')
+  assert.equal(zero.niveaux_jour.samedi, 'Haut', 'et le week-end le sien : le relief est conserve')
+
+  // ── crans = null : l ABSENCE de mesure, et on n invente rien ──────────
+  const inconnu = lire(null)
+  assert.ok(inconnu, 'le ferie doit etre dans la liste meme sans mesure')
+  assert.equal(inconnu.crans, null, 'le cas teste est bien null, pas 0')
+  assert.equal(inconnu.niveaux_jour, null,
+    'sans mesure, AUCUN niveau — un niveau affiche sans mesure serait un chiffre faux')
+
+  // ── et les deux ne se confondent jamais ──────────────────────────────
+  assert.notDeepEqual(zero.niveaux_jour, inconnu.niveaux_jour,
+    '0 et null doivent rendre deux choses differentes, sinon la distinction est perdue')
+
+  // Ce que l ECRAN en fait : un niveau d un cote, « Automatique » de l autre.
+  const M = await import('../shared/yield-niveau-periode.js')
+  assert.equal(M.libellePastille(zero.niveaux_jour).principal, '2 · Moyen',
+    'a 0 cran, la pastille porte le niveau ordinaire, avec son chiffre')
+  assert.equal(M.libellePastille(inconnu.niveaux_jour), null,
+    'sans niveau, le module ne rend RIEN : c est l ecran qui dira « Automatique »')
 })
 
-test('les cinq etats de l amplitude, et PAS un de plus', () => {
-  const { effetClasse, effetMot } = outils()
-  // ⚠ L amplitude du moteur s arrete a DEUX (`AMPLITUDE_MAX = 2`) : il n y a
-  // que « un peu » et « nettement ». Un troisieme degre serait refuse par le
-  // serveur — decision de Thierry du 28 octobre : on ne touche pas au moteur.
-  assert.equal(effetMot(1), 'un peu plus chers')
-  assert.equal(effetMot(2), 'nettement plus chers')
-  assert.equal(effetMot(-1), 'un peu moins chers')
-  assert.equal(effetMot(-2), 'nettement moins chers')
-  assert.equal(effetClasse(2), 'monte')
-  assert.equal(effetClasse(-2), 'baisse')
-  // Le mot ne contient jamais « beaucoup » : ce degre n existe pas.
-  for (const c of [-2, -1, 0, 1, 2, null]) {
-    assert.doesNotMatch(String(effetMot(c)), /beaucoup/,
-      'un troisieme degre serait refuse par le serveur')
+test('LE TEST QUI COMPTE : un cran POUSSE la structure en gardant ses reliefs', async () => {
+  // La formule du moteur, montree a l ecran :
+  //   niveau de la nuit = niveau(hors vacances | son jour) + crans
+  // Un bien a relief (semaine Moyen, week-end Haut) pousse de 2 crans donne
+  // Tres haut en semaine ET Exceptionnel le week-end — le meme cran, l ecart
+  // conserve. C'est ce que le vocabulaire invente aplatissait.
+  const { calendrier } = require('../lib/yield/calendrier-pilotage.js')
+  const R = require('../lib/yield/reference.js')
+  const ctx = R.construireContexte({ zoneBien: 'A', vacances: [], evenements: [], debut: '2026-11-01', fin: '2026-12-31' })
+  const pj = new Map()
+  for (const j of R.JOURS_SEMAINE) {
+    pj.set(`${R.SEGMENTS.HORS_VACANCES}|${j}`,
+      { fiable: true, indice: (j === 'samedi' || j === 'dimanche') ? 2 : 1 })
   }
+  const pos = new Map([
+    [R.SEGMENTS.HORS_VACANCES, { fiable: true, indice: 1, niveau: 'Moyen', crans: 0, mediane: 100, echantillon: 50 }],
+    ['ferie', { fiable: true, indice: 3, niveau: 'Très haut', crans: 2, mediane: 160, echantillon: 20 }]
+  ])
+  const e = calendrier({ contexte: ctx, debut: '2026-11-01', fin: '2026-12-31',
+    positions: pos, positions_jour: pj, evenements: [] }).find(x => x.segment === 'ferie')
+  assert.equal(e.niveaux_jour.mardi, 'Très haut', 'Moyen + 2 crans')
+  assert.equal(e.niveaux_jour.samedi, 'Exceptionnel', 'Haut + 2 crans — le relief est garde')
+
+  const M = await import('../shared/yield-niveau-periode.js')
+  const p = M.libellePastille(e.niveaux_jour)
+  assert.equal(p.principal, '4 · Très haut', 'la pastille montre le groupe le plus nombreux')
+  assert.equal(p.complement, 'week-ends 5 · Exceptionnel',
+    'et nomme le week-end, parce que les jours qui different SONT le week-end du moteur')
+
+  // ⚠ ET LE MOT « WEEK-END » NE S ECRIT QUE S IL EST VRAI. Si ce sont les
+  // vendredis et samedis qui se detachent, on les NOMME : inventer
+  // « week-end » pour des vendredis serait une affirmation fausse, et elle ne
+  // rougirait jamais.
+  const autre = {}
+  for (const j of M.JOURS_ORDRE) autre[j] = (j === 'vendredi' || j === 'samedi') ? 'Très haut' : 'Haut'
+  const q = M.libellePastille(autre)
+  assert.equal(q.complement, 'vendredis et samedis 4 · Très haut')
+  assert.doesNotMatch(q.complement, /week-end/, 'on n invente pas un week-end')
+
+  // Et la borne du cran se verifie sur TOUS les groupes, pas sur la semaine.
+  // ⚠ LA BORNE NE REFUSE QUE SI LE PAS NE CHANGERAIT RIEN, et c'est un
+  // constat de review. Refuser des qu'UN groupe bute tuait ▼ pour toute la
+  // periode des que la semaine etait a Base — le cas COURANT, Base etant le
+  // quantile 0,25 — alors que le week-end, lui, serait bien descendu.
+  const JJ = M.JOURS_ORDRE
+  const mixte = Object.fromEntries(JJ.map(j => [j, (j === 'samedi' || j === 'dimanche') ? 2 : 0]))
+  const utile = M.apresLePas({ structure: mixte, crans: 0, cransMax: 2 }, -1)
+  assert.equal(utile.possible, true,
+    'la semaine est a Base mais le week-end descendrait : le pas sert, il est offert')
+  const plafond = Object.fromEntries(JJ.map(j => [j, 4]))
+  const bute = M.apresLePas({ structure: plafond, crans: 0, cransMax: 2 }, 1)
+  assert.equal(bute.possible, false, 'rien ne bougerait : ▲ est refuse')
+  assert.match(bute.raison, /la semaine est déjà à 5 · Exceptionnel/,
+    'et le bouton desactive DIT sa raison, au lieu d etre inoperant en silence')
+  // ⚠ ET L ARRIVEE SE CALCULE SUR LES CRANS, PAS SUR L AFFICHAGE : avec une
+  // structure a 4 et deux crans, ▼ ecrit crans = 1, donc 4 + 1 = 5 ecrete a
+  // Exceptionnel — le niveau ne bouge pas, et l etiquette doit le dire.
+  // ⚠ ET C'EST LE CAS QUE LA REVIEW AVAIT MESURE : structure a 4, crans +2.
+  // Le clic ecrirait crans = 1, donc 4 + 1 = 5 ecrete a Exceptionnel — le
+  // meme niveau qu'avant. Ma premiere version annoncait « passe a 4 · Tres
+  // haut » et laissait Exceptionnel : un bouton ACTIF qui ne fait rien. Il
+  // est maintenant refuse, avec sa raison.
+  const haut = Object.fromEntries(JJ.map(j => [j, 4]))
+  const rien = M.apresLePas({ structure: haut, crans: 2, cransMax: 2 }, -1)
+  assert.equal(rien.possible, false, 'le pas ne changerait rien : il est refuse')
+  assert.match(rien.raison, /déjà à 5 · Exceptionnel/, 'et il dit pourquoi')
+})
+
+test('LE TEST QUI COMPTE : « chaque annee » se voit, et JAMAIS sur une ligne automatique', () => {
+  // ⚠ ANOMALIE 1 DE LA RECETTE DU 29 OCTOBRE. Un reglage est pose sur le
+  // SEGMENT, sans date : il vaut pour toutes les occurrences, chaque annee.
+  // Thierry : « c'est voulu, mais il faut que ca se voie. »
+  //
+  // ⚠ ET LE CRITERE EST `crans_ajustes`, PAS `crans` : `crans` vaut la mesure
+  // du moteur quand l hote n a rien pose. L ecrire la serait faux — une ligne
+  // en « Automatique » ne porte aucun reglage, donc rien ne se reconduit.
+  const src = sansCommentaires(PAGE())
+  assert.match(src, /const regleALaMain = e\.crans_ajustes != null/,
+    'le critere reste crans_ajustes, jamais crans')
+  // ⚠ ON VISE LE BALISAGE, PAS LA PREMIERE OCCURRENCE DU NOM. La regle CSS
+  // porte `qpb-chaque` elle aussi, et elle vient AVANT dans le fichier :
+  // chercher autour de la premiere occurrence mesurait le CSS, pas le rendu.
+  assert.match(src, /\$\{regleALaMain \? '<span class="qpb-chaque"[^']*chaque année<\/span>' : ''\}/,
+    '« chaque annee » doit etre conditionnee a un reglage pose a la main')
+})
+
+test('LE TEST QUI COMPTE : les libelles de feries passent par la table, dans la pop-up aussi', () => {
+  // Le nom COURANT, pas le nom interne : « Week-end du 11 novembre », pas
+  // « Week-end du Armistice 1918 ». A l affichage seulement — la cle du
+  // segment et de ses reglages ne bouge pas d un caractere.
+  const src = sansCommentaires(PAGE())
+  assert.match(src, /import \{ titreWeekEnd, titreFerie, titrePont \} from '\/shared\/yield-libelles-feries\.js'/,
+    'la table est importee, pas recopiee')
+  assert.match(src, /const nomAffiche = /, 'et un seul endroit compose le nom affiche')
+  // La frise ET la ligne doivent passer par lui : deux copies diraient un jour
+  // deux noms pour la meme bande et la meme ligne.
+  assert.ok((src.match(/nomAffiche\(e\)/g) || []).length >= 2,
+    'la frise et la ligne lisent toutes deux le meme composeur')
+})
+
+test('LE TEST QUI COMPTE : le serveur sert positions_jour, et l ecran ne le recalcule pas', () => {
+  // ⚠ ZERO REQUETE DE PLUS, ZERO APPEL DE PLUS. grilleDuBien la calcule deja
+  // dans le meme appel (lib/yield/suggestion.js) et l endpoint la JETAIT.
+  // Precedent etabli : api/yield-prix.js la sert deja.
+  const api = lire('api/yield-evenements.js')
+  assert.match(api, /positionsJour = g\.grille\.positions_jour/,
+    'l endpoint doit prendre positions_jour dans la reponse qu il a deja')
+  assert.match(api, /positions_jour: positionsJour/,
+    'et la passer a calendrier()')
+  // Et il n y a qu UN appel a grilleDuBien : si la mesure en demandait un
+  // second, la case PERFORMANCE du lot serait fausse.
+  assert.equal((api.match(/await grilleDuBien\(/g) || []).length, 1,
+    'un seul appel a la grille, comme avant le lot')
+
+  // ⚠ ET LA FORMULE N EST PAS REECRITE DANS L ECRAN. Si la page recalculait un
+  // niveau a partir des crans, elle ferait un second moteur, qui divergerait
+  // au premier changement de l autre.
+  const src = sansCommentaires(PAGE())
+  assert.doesNotMatch(src, /indice \+ crans|crans \+ indice/,
+    'la page ne recompose jamais un niveau : elle lit niveaux_jour')
+  const moteur = lire('lib/yield/calendrier-pilotage.js')
+  // ⚠ LES QUATRE BRANCHES DU MOTEUR, PAS UNE SEULE — constat de review, et
+  // c'etait le defaut que mon propre commentaire disait vouloir eviter. Le
+  // moteur fait passer la MESURE PROPRE du couple segment|jour avant le
+  // modele en crans : sans elle, un ferie du samedi mesure a Base s affichait
+  // « Tres haut » dans la pop-up pendant que Prediction de prix rendait
+  // « Base, 80 € ». Trois niveaux d ecart sur la meme nuit, entre deux ecrans.
+  assert.match(moteur, /const indiceModele = structure \? borne\(structure\.indice \+ \(e\.crans \|\| 0\)\) : null/,
+    'le modele en crans, comme dans suggestion.js')
+  assert.match(moteur, /const indiceMesure = fiable\(mesure\) \? mesure\.indice : null/,
+    'ET la mesure propre du couple, que le moteur fait passer AVANT')
+  assert.match(moteur, /structure = fiable\(structJour\) \? structJour : \(fiable\(structSeg\) \? structSeg : null\)/,
+    'ET le repli du moteur quand le jour n est pas fiable')
+  assert.match(moteur, /if \(e\.crans == null\) return null/,
+    'ET la regle de Thierry par-dessus : null n est jamais un niveau')
+})
+
+test('LE TEST QUI COMPTE : le repli du moteur joue, et on le MESURE', () => {
+  // ⚠ UNE ASSERTION DE TEXTE NE SUFFISAIT PAS, et la mutation l'a prouve :
+  // la chaine \`fiable(structSeg) ? structSeg : null\` apparait DEUX fois — dans
+  // niveauxDuJour et dans structureDuJour. En retirer une laissait le test
+  // vert. On execute donc, au lieu de lire.
+  const { calendrier } = require('../lib/yield/calendrier-pilotage.js')
+  const R = require('../lib/yield/reference.js')
+  const ctx = R.construireContexte({ zoneBien: 'A', vacances: [], evenements: [], debut: '2026-08-01', fin: '2026-09-30' })
+  // AUCUN jour ordinaire fiable — seul le segment « hors vacances » l'est.
+  const pj = new Map()
+  for (const j of R.JOURS_SEMAINE) pj.set(`${R.SEGMENTS.HORS_VACANCES}|${j}`, { fiable: false, indice: null })
+  const pos = new Map([
+    [R.SEGMENTS.HORS_VACANCES, { fiable: true, indice: 1, niveau: 'Moyen', crans: 0, mediane: 100, echantillon: 50 }],
+    ['ferie', { fiable: true, indice: 2, niveau: 'Haut', crans: 1, mediane: 120, echantillon: 20 }]
+  ])
+  const e = calendrier({ contexte: ctx, debut: '2026-08-01', fin: '2026-09-30',
+    positions: pos, positions_jour: pj, evenements: [] }).find(x => x.segment === 'ferie')
+  // Le moteur replie sur la position du segment ordinaire : Moyen + 1 = Haut.
+  assert.ok(e.niveaux_jour, 'sans le repli, la pastille dirait « Automatique » a cote d un « +1 cran »')
+  assert.equal(e.niveaux_jour.lundi, 'Haut', 'Moyen (repli du segment) + 1 cran')
+  // Et la structure servie a la fleche replie de la meme facon.
+  assert.ok(e.structure_jour, 'la structure doit replier aussi, sinon la fleche ne promet rien')
+  assert.equal(e.structure_jour.lundi, 1, 'l indice ordinaire vient du segment')
+})
+
+test('la case d un mois SANS periode garde son style', () => {
+  // ⚠ Constat de review : la regle .qpb-vide avait disparu avec le bloc des
+  // effets, alors que le gabarit l'emet toujours. Une case sans style, c'est
+  // une colonne qui se tasse et une frise qui ne s aligne plus.
+  const src = sansCommentaires(PAGE())
+  assert.match(src, /<span class="qpb-vide"><\/span>/, 'le gabarit emet bien la case vide')
+  assert.match(src, /\.qpb-vide \{[^}]*height: 7px/,
+    'et la feuille lui donne la meme hauteur qu une bande, sinon la colonne se tasse')
 })
 
 test('LE TEST QUI COMPTE : un week-end prolonge porte son nom REEL, et une seule fois', () => {
@@ -324,8 +555,22 @@ test('les fleches bornent a ce que le serveur accepte', () => {
   assert.match(bloc, /if \(voulu === actuel\) return/,
     'a la borne, on n envoie rien du tout')
   const src = sansCommentaires(PAGE())
-  assert.match(src, /aria-label="Baisser le prix/, 'la fleche bas se dit')
-  assert.match(src, /aria-label="Monter le prix/, 'la fleche haut se dit')
+  // ⚠ L ETIQUETTE ANNONCE LE RESULTAT AVANT LE CLIC — spec §0 bis.2, et c'est
+  // ce qui remplace « Baisser le prix ». « Toussaint passe a 4 · Tres haut »
+  // dit ce que le geste FAIT ; « Baisser le prix » disait seulement son sens.
+  // Au telephone, ou l ancien menu −4…+4 n etait pas lisible, c'est la seule
+  // facon de savoir ou l on va.
+  assert.match(src, /apresLePas\(\{ niveauxJour: e\.niveaux_jour, structure: e\.structure_jour,/,
+    'les deux fleches passent par le meme calcul, et lui donnent la STRUCTURE')
+  assert.match(src, /crans: c, cransMax: max \}, sens\)/,
+    'le pas se calcule sur les crans, pas sur les niveaux affiches')
+  // ⚠ ET LE SERVEUR DOIT LA SERVIR, sinon la fleche ne promet rien.
+  assert.match(lire('lib/yield/calendrier-pilotage.js'), /e\.structure_jour = structureDuJour\(p\)/,
+    'la structure ordinaire par jour voyage avec la periode')
+  assert.match(src, /passe à \$\{r\.apres\}/, 'l etiquette annonce le niveau d arrivee')
+  assert.match(src, /impossible : \$\{r\.raison\}/,
+    'et a la borne, elle DIT pourquoi — un bouton qui ne fait rien sans le dire est un bouton qui ment')
+  assert.match(src, /\$\{r\.possible \? '' : ' disabled'\}/, 'le bouton est reellement desactive')
 })
 
 test('le formulaire est DERRIERE un bouton, ferme au premier rendu', () => {
@@ -352,7 +597,11 @@ test('la lecture seule retire les gestes et garde les faits', () => {
   const bloc = blocRendu()
   assert.match(bloc, /const ajout = lecture \? '' :/, 'l ajout disparait en lecture seule')
   // Mais la ligne, elle, reste : les faits ne se cachent pas.
-  assert.match(fn, /qpb-effet/, 'l effet reste lisible en lecture seule')
+  // ⚠ CE QUI RESTE LISIBLE A CHANGE DE NOM, PAS DE NATURE : l ecran ne montre
+  // plus un « effet » mais LE NIVEAU de la grille. Le fait reste, et il reste
+  // visible sans droit d ecriture.
+  assert.match(fn, /qpb-niveau/, 'le niveau reste lisible en lecture seule')
+  assert.doesNotMatch(fn, /qpb-effet/, 'l ancienne pastille d effet n existe plus')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -370,11 +619,21 @@ test('LE TEST QUI COMPTE : aucune periode ne se perd, aux DEUX bouts de la fenet
   // l'interface » — et que ce filtre reperdait.
   const src = sansCommentaires(PAGE())
   assert.match(src, /if \(m < premierMois\) return premierMois/,
-    'ce qui commence avant la fenetre va au premier mois')
-  assert.match(src, /if \(m > dernierMois\) return dernierMois/,
-    'ce qui commence apres va au dernier — c est le bout qui manquait')
-  assert.doesNotMatch(src, /if \(parMois\.has\(m\)\) parMois\.get\(m\)\.push/,
-    'plus aucun `has()` : une entree hors des douze mois serait silencieusement jetee')
+    'ce qui commence avant la fenetre va au premier mois — un rattachement VRAI')
+  // ⚠ CE TEST EXIGEAIT L INVERSE JUSQU AU 3 NOVEMBRE 2026, et c'est la lecon.
+  // Il demandait `if (m > dernierMois) return dernierMois` — le repli — pour
+  // qu aucune periode ne se perde. L intention etait juste ; le moyen etait un
+  // FAIT FAUX : une periode d octobre 2027 se rangeait sous septembre. Le
+  // repli etait une solution d AFFICHAGE appliquee a une question de
+  // RATTACHEMENT.
+  //
+  // Maintenant : la frise porte les 13 mois que la fenetre touche, donc il n y
+  // a plus rien a replier. Et s il restait une entree au-dela, elle n est PAS
+  // rangee de force — c'est le controle de compte qui crie.
+  assert.match(src, /if \(m > dernierMois\) return null/,
+    'plus de repli par le haut : on ne range pas une periode sous un mois ou elle n a aucun jour')
+  assert.match(src, /if \(m && parMois\.has\(m\)\) parMois\.get\(m\)\.push/,
+    'une entree hors fenetre n est pas posee — et le compte, juste dessous, le dira')
   // Et le compte retombe sur ses pieds, avec une alarme si ce n'est pas le cas.
   assert.match(src, /const posees = \[\.\.\.parMois\.values\(\)\]\.reduce/,
     'le nombre de lignes posees se compte')
