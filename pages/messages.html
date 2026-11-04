@@ -269,6 +269,13 @@ async function charger () {
     ] : []),
     // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
     // sous RLS, jamais /api/channel-property (il interroge Beds24 en direct).
+    //
+    // ⚠ **NON FILTREE SUR L'ARCHIVAGE**, et c'est raisonne : c'est une table de
+    // CORRESPONDANCE cle provider -> nom, pas une liste de choix. Les
+    // conversations d'un logement archive restent lisibles — son historique est
+    // conserve, c'est la promesse de l'archivage — et sans son nom ici, chaque
+    // fil s'afficherait sous une reference provider. Meme decision que pour les
+    // deux tables de noms de `api/avis.js`.
     supabase.from('properties').select('id, name, provider_property_id, photo_url').eq('user_id', compteCourant())
       .then(({ data, error }) => {
         if (error) { logger.error('Messages', 'biens', error); return }

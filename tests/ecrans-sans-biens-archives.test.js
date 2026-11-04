@@ -199,6 +199,12 @@ const ECRANS = [
   { ecran: 'Accueil', chemin: 'api/ecran/aujourdhui.js', query: { blocs: 'biens' }, legitimes: ['biens_archives'] },
   { ecran: 'Calendrier et base de connaissance', chemin: 'api/channel-property.js', query: {} },
   { ecran: 'Menages (A traiter et calendrier)', chemin: 'api/menages.js', query: {} },
+  // ⚠ `legitimes` EST VIDE ICI ET C'EST VOULU : la decision de Thierry garde
+  // les avis RECUS d'un bien archive, mais la liste `biens` — celle du filtre et
+  // du formulaire — ne doit plus le proposer. Le banc ne fournit aucun avis,
+  // donc seule cette liste parle.
+  { ecran: 'Avis (filtre et formulaire)', chemin: 'api/avis.js', query: {} },
+  { ecran: 'Avis — reglage auto-validation', chemin: 'api/avis.js', query: { action: 'auto-validation' } },
 ]
 
 // ⚠ `api/menages-public.js` N'EST PAS DANS CETTE LISTE, et la raison vaut

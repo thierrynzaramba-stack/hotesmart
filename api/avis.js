@@ -14,6 +14,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
+const { sansArchives } = require('../lib/biens-vivants')
 const { ratioProprete, noteMoyenne, notesDuPerimetre, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 const { assemblerCartes } = require('../lib/avis/cartes')
 const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origine')
@@ -157,9 +158,21 @@ async function lister (req, res, garde) {
   }
 
   // Les biens du perimetre, pour le filtre et le formulaire.
-  let qb = supabase.from('properties')
+  //
+  // ⚠ POINT 5 DU CONSTAT DE THIERRY DU 3 NOVEMBRE 2026, et sa decision est
+  // precise : « les avis recus restent dans la note globale ; filtre et
+  // formulaire excluent le bien archive ». On ne propose donc plus de SAISIR un
+  // avis sur un logement range, ni de filtrer la liste par lui — mais ses avis
+  // deja recus ne bougent pas d'un pouce.
+  //
+  // ⚠ LES DEUX TABLES DE NOMS, PLUS BAS, NE SONT PAS FILTREES : ce sont elles
+  // qui donnent son nom a l'avis d'un bien archive. Les filtrer ferait
+  // s'afficher une reference provider (« Bien 0544fd9a-… ») sur un avis que la
+  // decision garde a l'ecran. Une liste de CHOIX se filtre, une table de
+  // CORRESPONDANCE jamais.
+  let qb = sansArchives(supabase.from('properties')
     .select('id, name, provider_property_id, provider')
-    .eq('user_id', userId)
+    .eq('user_id', userId))
     // Un bien pas encore provisionne chez le provider n'a pas de reference : il
     // produirait une <option value=""> qui se confond avec « Tous les biens »,
     // et que le formulaire refuserait apres l'avoir presentee comme choisie.
@@ -472,6 +485,9 @@ async function evaluationsLister (req, res, garde) {
   if (error) return res.status(503).json({ error: 'Évaluations illisibles', detail: error.message })
 
   // Les noms de biens, pour que l'ecran n'affiche pas des references provider.
+  // ⚠ **NON FILTREE** : c'est une table de CORRESPONDANCE, pas une liste de
+  // choix. Un avis recu sur un bien archive reste a l'ecran (decision de
+  // Thierry) ; sans son nom ici, il s'afficherait sous sa reference provider.
   const { data: biens, error: eBiens } = await supabase.from('properties')
     .select('id, name, provider_property_id').eq('user_id', userId)
   if (eBiens) return res.status(503).json({ error: 'Biens illisibles', detail: eBiens.message })
@@ -664,6 +680,8 @@ async function cartesLister (req, res, garde) {
   // Une borne atteinte se DIT, jamais en silence (revue de ed445b2).
   const avisTronques = avis.length >= MAX_AVIS_CARTES
 
+  // ⚠ **NON FILTREE**, meme raison : `nomParId` et `nomParRef` nomment les
+  // cartes d'avis, y compris celles d'un bien archive que la decision garde.
   const { data: biens, error: eBiens } = await supabase.from('properties')
     .select('id, name, provider_property_id, provider').eq('user_id', userId)
     .not('provider_property_id', 'is', null).order('name')
@@ -794,8 +812,11 @@ async function configLire (req, res, garde) {
 // droit de le changer.
 async function autoValidationLire (req, res, garde) {
   const userId = garde.accountUserId
-  const { data: biens, error } = await supabase.from('properties')
-    .select('id, name, provider_property_id').eq('user_id', userId).order('name', { ascending: true })
+  // ⚠ FILTREE : c'est un ecran de REGLAGE par bien, donc une liste de choix.
+  // Regler l'auto-validation des avis d'un logement range n'a pas de sens — et
+  // le reglage existant reste en base, il reviendra a la reactivation.
+  const { data: biens, error } = await sansArchives(supabase.from('properties')
+    .select('id, name, provider_property_id').eq('user_id', userId).order('name', { ascending: true }))
   if (error) return res.status(503).json({ error: 'Biens illisibles', detail: error.message })
   const visibles = (biens || []).filter(b => peutLire(garde.contexte, 'avis', { id: b.id, ref: b.provider_property_id }))
   const { data: lignes, error: eL } = visibles.length
