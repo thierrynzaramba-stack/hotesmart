@@ -13,6 +13,9 @@
     },
     "api/cron-messages.js": {
       "maxDuration": 60
+    },
+    "api/pwa.js": {
+      "includeFiles": "shared/theme.css"
     }
   },
   "crons": [
@@ -26,6 +29,10 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/manifest.webmanifest",
+      "destination": "/api/pwa?f=manifest"
+    },
     {
       "source": "/book/:token",
       "destination": "/pages/book"
