@@ -167,9 +167,9 @@ ci-dessus (§2.3), mesurée par la review via la documentation, non par requête
 
 ## 7. Limites connues
 
-- ⚠ **CLAUDE.md, « GARDE-FOUS PRODUIT », dit encore « PWA hôte = V2 (après
-  10+ clients payants) »**. Ce lot a été demandé par Thierry le 4 novembre
-  2026 ; la ligne n'a pas été modifiée ici — à mettre à jour sur sa décision.
+- Le garde-fou de CLAUDE.md « PWA hôte = V2 (après 10+ clients payants) » est
+  **levé** par décision de Thierry du 4 novembre 2026, et réécrit dans le même
+  lot (section « GARDE-FOUS PRODUIT »).
 
 - Les balises ne sont posées que par les écrans qui chargent `nav.js` (les
   sept écrans V5) : on installe depuis l'accueil. Dette 131.
