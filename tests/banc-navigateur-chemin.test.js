@@ -73,10 +73,14 @@ test('dans CET environnement, le navigateur de banc est trouve', () => {
 
 test('LD_LIBRARY_PATH : pose quand les bibliotheques du PC existent, intact sinon', () => {
   const env = { LD_LIBRARY_PATH: '/a/moi', AUTRE: '1' }
-  const avec = nav.envNavigateur(env, () => true, '/libs')
+  // ⚠ LES DOUBLES REGARDENT LE CHEMIN QU'ON LEUR PASSE (constat de review du
+  // 5 novembre 2026) : `() => true` / `() => false` laissaient verte la
+  // mutation `existe(CHROME)` au lieu de `existe(libs)`, qui poserait dans le
+  // cloud un LD_LIBRARY_PATH vers un dossier absent.
+  const avec = nav.envNavigateur(env, f => f === '/libs', '/libs')
   assert.equal(avec.LD_LIBRARY_PATH, '/libs', 'le PC de Thierry : comme avant, le dossier de bibliotheques')
   assert.equal(avec.AUTRE, '1')
-  const sans = nav.envNavigateur(env, () => false, '/libs')
+  const sans = nav.envNavigateur(env, f => f !== '/libs', '/libs')
   assert.equal(sans.LD_LIBRARY_PATH, '/a/moi', 'le cloud : l environnement herite, intact')
   assert.notEqual(sans, env, 'une copie, jamais l objet process.env lui-meme')
 })
@@ -86,6 +90,12 @@ test('une seule copie du chemin du navigateur dans tests/', () => {
   // EST une copie de texte. Il voit le dossier `ms-playwright` et la revision
   // ecrits ailleurs que dans l'outil ; il ne voit PAS un chemin reconstruit
   // morceau par morceau sous d'autres noms.
+  // ⚠ ET LE RETRAIT DES COMMENTAIRES IGNORE LES CHAINES (constat de review du
+  // 5 novembre 2026), deux limites connues : une chaine comme 'api/*' suivie
+  // plus loin d'un '*/' efface tout le texte entre les deux, donc une copie qui
+  // s'y trouverait ; et un commentaire `//` en FIN de ligne n'est pas retire,
+  // donc un `// ms-playwright` apres du code fait rougir sur un simple
+  // commentaire.
   const MOTIF = /ms-playwright|chromium_headless_shell-\d+/
   const fichiers = []
   const parcourir = (d) => {
