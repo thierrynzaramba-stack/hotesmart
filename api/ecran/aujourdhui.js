@@ -292,6 +292,13 @@ module.exports = async (req, res) => {
     let q = supabase.from('properties')
       .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency, photo_url')
       .eq('user_id', compte)
+      // ⚠ LES BIENS ARCHIVES QUITTENT L'ACCUEIL (lot « archiver un bien »,
+      // etape 3). Avant ce filtre, AUCUN endpoint d'ecran ne jugeait d'un etat
+      // d'activite : un bien que le provider avait supprime restait dans la
+      // liste, dans les tuiles et dans le selecteur, et l'hote n'avait aucun
+      // moyen de l'en retirer. Les REVENUS sont le seul ecran qui le garde —
+      // decision de Thierry du 31 octobre 2026 : son historique est vrai.
+      .is('archive_le', null)
     q = bornerUuid(q, 'id')
     const { data, error } = await compter(q.order('name', { ascending: true }))
     // ⚠ `null`, PAS `[]`. Une liste vide dit « cet hote n'a aucun logement »,
@@ -301,6 +308,41 @@ module.exports = async (req, res) => {
     // haut, condamne.
     if (error) { console.error('[ecran/aujourdhui]', 'biens', error.message); indisponibles.push('biens'); return null }
     return data || []
+  }
+
+  // ⚠ LES BIENS ARCHIVES, A PART — constat 1 de la revue de 26339835, et c'est
+  // un defaut d'ARGENT. `lireBiens` les ecarte (etape 3 : plus de tuile, plus de
+  // place dans le selecteur), mais la RPC `revenus_du_mois` n'a AUCUN filtre
+  // d'archive : leurs euros restent dans le total du bandeau. Et la reserve
+  // `hors_biens` ne les rattrape pas — `revenus_hors_mois` ne compte que les
+  // sejours rattaches a AUCUN bien de `properties`, et un bien archive y est
+  // toujours. Resultat : un bandeau qui annonce 300 € de plus que la somme de
+  // ses lignes, sans ligne ni reserve pour l'expliquer. C'est la dette 118,
+  // qu'on venait de solder sur la vue Annee et qui restait entiere sur la vue
+  // Mois — le bloc principal de l'ecran.
+  // ⚠ UNE LISTE SEPAREE, PAS UN RETOUR DANS `biens` : les descendre dans
+  // `biens` les ferait revenir dans les tuiles, le selecteur et les
+  // indicateurs, que l'etape 3 vient de nettoyer. L'ecran s'en sert pour les
+  // LIGNES de revenus, et pour rien d'autre.
+  const lireBiensArchives = async () => {
+    if (!droits.reservations && !droits.menages) return null
+    if (perimetreVide) return []
+    let q = supabase
+      .from('properties')
+      .select('id, name, photo_url')
+      .eq('user_id', compte)
+      .not('archive_le', 'is', null)
+    q = bornerUuid(q, 'id')
+    const { data, error } = await compter(q.order('name', { ascending: true }))
+    // ⚠ `null` ICI NE MASQUE RIEN : l'ecran rend alors ses lignes sans les
+    // archives, comme avant ce lot. On le dit tout de meme, parce qu'un ecart
+    // entre le bandeau et les lignes a une cause lisible.
+    if (error) {
+      console.error('[ecran/aujourdhui]', 'biens_archives', error.message)
+      indisponibles.push('biens_archives')
+      return null
+    }
+    return (data || []).map(b => ({ id: String(b.id), nom: b.name || null, photo_url: b.photo_url || null }))
   }
 
   const lireTaches = async () => {
@@ -928,9 +970,13 @@ module.exports = async (req, res) => {
   // inerte, et aucun test ne l'aurait dit : `null` veut dire « je ne sais pas »,
   // donc le module ne compte rien et ne se plaint pas.
   const pBiens = sur('biens', lireBiens, null)
-  const [biens, taches, alarmes, arrivees, notes, derniers, revenus, conversations, nMenages, nPrix, nSurresa, nIa] =
+  // ⚠ EN PARALLELE DES AUTRES, et derriere le meme `sur()` : une lecture qui
+  // echoue ne doit pas emporter l'ecran — elle se declare `indisponible`.
+  const pArchives = sur('biens_archives', lireBiensArchives, null)
+  const [biens, biensArchives, taches, alarmes, arrivees, notes, derniers, revenus, conversations, nMenages, nPrix, nSurresa, nIa] =
     await Promise.all([
       pBiens,
+      pArchives,
       sur('taches', lireTaches, null),
       sur('alarmes', lireAlarmes, null),
       sur('arrivees', lireArrivees, []),
@@ -1089,6 +1135,9 @@ module.exports = async (req, res) => {
   return res.status(200).json({
     jour,
     biens,
+    // La liste SEPAREE des biens archives : l'ecran s'en sert pour les LIGNES
+    // de revenus, et pour rien d'autre (voir `lireBiensArchives`).
+    biens_archives: biensArchives,
     taches,
     alarmes,
     // ⚠ `arrivees` NE PART PLUS DANS LA REPONSE, ET C'ETAIT UNE FUITE DE

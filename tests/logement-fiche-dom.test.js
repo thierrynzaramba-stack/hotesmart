@@ -95,19 +95,163 @@ test('la fiche rend ses blocs, titrés et dans l ordre', () => {
   // MILIEU de la fiche au téléphone, où les colonnes s'empilent : l'action la
   // plus destructrice du produit se lisait entre deux blocs de lecture.
   const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  // ⚠ HUIT BLOCS DEPUIS LE LOT « ARCHIVER UN BIEN » (1er novembre 2026).
+  // « Archiver ou réactiver » est AVANT « Supprimer ce logement », et l'ordre
+  // est le message : le geste réversible se lit avant celui qui ne revient pas.
+  // Un hôte qui veut « retirer » un logement rencontre d'abord celui qui garde
+  // son historique.
   assert.deepEqual([...d.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent), [
     'Où il est en vente', 'Prix', 'Le logement',
-    'Ménage', 'Avis des voyageurs', 'Réglages', 'Supprimer ce logement'
+    'Ménage', 'Avis des voyageurs', 'Réglages',
+    'Archiver ou réactiver', 'Supprimer ce logement'
   ])
   assert.equal(d.querySelector('.fic-col .fic-supprimer'), null,
     'il ne doit plus vivre dans une colonne')
 
   const refuse = doc(M.ficheHtml(
     fiche({ suppression: { possible: false, motif: 'annonce_reliee' } }), OUTILS(), { peutSupprimer: true }))
+  // ⚠ ET LE BLOC D'ARCHIVE RESTE QUAND LA SUPPRESSION EST REFUSEE — c'est
+  // meme le cas qui compte. Un bien « relie a une annonce » ne se supprime
+  // pas ; l'archiver est precisement ce que l'hote peut faire a la place.
   assert.deepEqual([...refuse.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent), [
     'Où il est en vente', 'Prix', 'Le logement',
-    'Ménage', 'Avis des voyageurs', 'Réglages', 'Supprimer ce logement'
+    'Ménage', 'Avis des voyageurs', 'Réglages',
+    'Archiver ou réactiver', 'Supprimer ce logement'
   ])
+})
+
+test("LE TEST QUI COMPTE : le bloc d archive suit l ETAT DU SERVEUR, jamais un calcul d ecran", () => {
+  // ⚠ C'EST L'ALIGNEMENT QUE THIERRY A DEMANDE LE 21 OCTOBRE pour le bloc
+  // « Supprimer » : « on s'aligne sur le serveur, c'est lui la vraie
+  // protection ». Un ecran qui DEDUIRAIT l'etat d'archive afficherait
+  // « Reactiver » sur un bien vivant le jour ou la fiche changerait de forme.
+  const vivant = doc(M.archiverHtml(fiche(), OUTILS(), { peutArchiver: true }))
+  assert.ok(vivant.querySelector('[data-bind="archiver"]'), 'le bien vivant n offre pas d archiver')
+  assert.strictEqual(vivant.querySelector('[data-bind="reactiver"]'), null,
+    'un bien vivant propose de le reactiver')
+
+  // ⚠ `bien.archive_le`, ET C'EST LE DEFAUT QUE CE TEST A LAISSE PASSER. Ma
+  // premiere version posait `archive_le` a la RACINE de la fiche — une forme que
+  // `lireFiche` ne produit PAS : il construit `{ bien: publier(bien), … }`. Le
+  // test etait donc vert sur un ecran ou le bouton « Reactiver » n'apparaissait
+  // jamais, et Thierry a archive deux biens sans pouvoir revenir (recette de
+  // staging du 3 novembre 2026). Troisieme faux vert de ce lot, et la troisieme
+  // fois la MEME cause : un banc qui fabrique une forme inexistante.
+  const avecArchive = fiche()
+  avecArchive.bien = { ...avecArchive.bien, archive_le: '2026-10-31T10:00:00Z' }
+  const archive = doc(M.archiverHtml(avecArchive, OUTILS(), { peutArchiver: true }))
+  assert.ok(archive.querySelector('[data-bind="reactiver"]'), 'le bien archive n offre pas de le ranimer')
+  assert.strictEqual(archive.querySelector('[data-bind="archiver"]'), null,
+    'un bien deja archive propose de l archiver encore')
+
+  // ⚠ PAS DE ROUGE SUR UN GESTE REVERSIBLE. Le rouge de cette charte est
+  // reserve a ce qui ne revient pas ; le confondre avec la suppression ferait
+  // hesiter l hote devant le seul des deux gestes qui se defait.
+  for (const d of [vivant, archive]) {
+    assert.strictEqual(d.querySelector('.btn--danger'), null,
+      'le bouton d archive porte le rouge de la suppression')
+  }
+})
+
+test("sans le droit d ecriture, le bloc d archive n existe PAS", () => {
+  // Masquage par droit ET garde serveur : l'endpoint garde par
+  // `reglages: write`. Ici on ne fait que ne pas le proposer — mais ne pas le
+  // proposer evite de promettre une action qui finira en 403.
+  assert.strictEqual(M.archiverHtml(fiche(), OUTILS(), { peutArchiver: false }), null)
+  assert.strictEqual(M.archiverHtml(fiche(), OUTILS(), {}), null,
+    'le droit par defaut n est pas le refus')
+})
+
+test("LE TEST QUI COMPTE : la confirmation d archivage DIT ce qui est garde, et ne dit pas 0", () => {
+  // ⚠ OPTION 2 DE THIERRY (1er novembre 2026). Trois regles s y jouent :
+  //   · ce qui est GARDE est dit en premier — c'est ce que l'hote vient
+  //     verifier ;
+  //   · `null` n'est pas `0` : une lecture ratee ne dit pas « aucun sejour » ;
+  //   · un compte a zero ne s'affiche pas (la regle du depot, deja ecrite pour
+  //     les info-bulles de la vue Annee).
+  const t = (c, v) => (v && v.n != null ? `${c}:${v.n}` : c)
+  const pleine = M.listeDArchivage(
+    { sejours_a_venir: 3, taches_en_vol: 35, pilote_actif: true, etait_facture: true }, t)
+  assert.strictEqual(pleine[0], 'fiche.archiver_garde',
+    'la confirmation ne commence pas par ce qui est GARDE')
+  assert.ok(pleine.includes('fiche.archiver_sejours:3'), 'les sejours a venir ne sont pas annonces')
+  assert.ok(pleine.includes('fiche.archiver_taches:35'), 'les taches en vol ne sont pas annoncees')
+  assert.ok(pleine.includes('fiche.archiver_pilote'), 'le pilote tarifaire n est pas annonce')
+  assert.ok(pleine.includes('fiche.archiver_facturation'), 'la fin de facturation n est pas annoncee')
+
+  // Le cas reel des deux premiers biens : rien a signaler.
+  const propre = M.listeDArchivage(
+    { sejours_a_venir: 0, taches_en_vol: 0, pilote_actif: false, etait_facture: false }, t)
+  assert.deepStrictEqual(propre, ['fiche.archiver_garde'],
+    `un compte a zero s affiche : ${JSON.stringify(propre)}`)
+
+  // Et une lecture ratee le DIT, au lieu d affirmer zero.
+  const inconnu = M.listeDArchivage(
+    { sejours_a_venir: null, taches_en_vol: null, pilote_actif: null, etait_facture: null }, t)
+  assert.ok(inconnu.includes('fiche.archiver_sejours_inconnus'),
+    'une lecture ratee passe pour « aucun sejour a venir »')
+  assert.ok(inconnu.includes('fiche.archiver_taches_inconnues'))
+})
+
+test("LE TEST QUI COMPTE : l annonce encore EN LIGNE est signalée, et l hôte archive quand même", () => {
+  // ⚠ DÉCISION DE THIERRY DU 1er NOVEMBRE 2026 SUR LA DETTE 126 : ni écriture
+  // chez le provider, ni refus — un AVERTISSEMENT. Le cas couvert : un bien
+  // archivé mais encore en vente recevrait une réservation sans code d'accès ni
+  // ménage, parce que l'archivage coupe ces deux chemins. La phrase est donc
+  // une consigne, pas une information — et elle ne BLOQUE rien.
+  const t = (c, v) => (v && v.canaux ? `${c}:${v.canaux}` : c)
+  const avecCanal = M.listeDArchivage(
+    { annonce_en_ligne: true, canaux: ['airbnb', 'booking'], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+  assert.ok(avecCanal.includes('fiche.archiver_annonce_en_ligne:Airbnb, Booking.com'),
+    `les canaux ne sont pas nommés : ${JSON.stringify(avecCanal)}`)
+
+  // ⚠ SANS CANAL CONNU, LA PHRASE CHANGE — et elle ne nomme JAMAIS le
+  // partenaire technique. Mesure en production le 1er novembre 2026 :
+  // `ota_listing_urls` est `null` sur les CINQ biens, donc c'est le cas le plus
+  // fréquent, pas l'exception.
+  const sansCanal = M.listeDArchivage(
+    { annonce_en_ligne: true, canaux: [], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+  assert.ok(sansCanal.includes('fiche.archiver_annonce_en_ligne_sans_canal'),
+    `la phrase sans canal manque : ${JSON.stringify(sansCanal)}`)
+  assert.ok(!sansCanal.some(x => /channex|beds24/i.test(x)),
+    'le nom du partenaire technique sort à l écran')
+
+  // ⚠ LE NOM DU PARTENAIRE TECHNIQUE NE SORT JAMAIS, ET C'EST LE CAS QUI
+  // COMPTE. `libelleDuCanal` rend le repli « Canal » pour un partenaire
+  // technique (sa garde du 21 octobre 2026) ou pour un canal vide. Sans le
+  // filtre, la phrase dirait « votre annonce est encore en ligne chez Canal » —
+  // qui ne dit rien a personne — et c'est le MEILLEUR cas : le pire serait que
+  // la garde cede un jour et laisse passer le nom lui-meme. On retombe donc sur
+  // la phrase sans canal.
+  // ⚠ Ma premiere version de ce test employait un OTA inconnu et rougissait sur
+  // le code JUSTE : `libelleDuCanal` rend alors le nom BRUT, pas « Canal ».
+  // Lire la fonction avant d'ecrire l'attendu, pas apres.
+  for (const brut of ['channex', 'beds24', '']) {
+    const r = M.listeDArchivage(
+      { annonce_en_ligne: true, canaux: [brut], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+    assert.ok(r.includes('fiche.archiver_annonce_en_ligne_sans_canal'),
+      `« ${brut} » est nomme a l ecran : ${JSON.stringify(r)}`)
+    // ⚠ ON VISE LA VALEUR RENDUE, PAS LE NOM DE LA CLE. Ma premiere version
+    // cherchait `/Canal/i` dans la ligne entiere, et la cle
+    // `..._sans_canal` la contient : le test rougissait sur le code JUSTE.
+    const nomme = r.filter(x => x.startsWith('fiche.archiver_annonce_en_ligne:'))
+    assert.deepStrictEqual(nomme, [],
+      `un canal est NOMME alors qu il ne devrait pas l etre : ${JSON.stringify(nomme)}`)
+  }
+
+  // Et rien ne s affiche quand l annonce n est plus en ligne.
+  const horsLigne = M.listeDArchivage(
+    { annonce_en_ligne: false, canaux: [], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+  assert.deepStrictEqual(horsLigne, ['fiche.archiver_garde'],
+    `un avertissement s affiche sur un bien hors ligne : ${JSON.stringify(horsLigne)}`)
+
+  // ⚠ ET `null` NE DÉCLENCHE RIEN : une lecture ratée ne dit pas « en ligne »,
+  // elle ne dit rien. Affirmer le contraire ferait retirer de la vente une
+  // annonce qui n existe pas.
+  const inconnu = M.listeDArchivage(
+    { annonce_en_ligne: null, canaux: [], sejours_a_venir: 0, taches_en_vol: 0 }, t)
+  assert.ok(!inconnu.some(x => /annonce_en_ligne/.test(x)),
+    'une lecture ratée affirme que l annonce est en ligne')
 })
 
 test('l en-tête porte le nom, la ville · capacité et le FAIT DATÉ — mais PAS les pastilles', () => {

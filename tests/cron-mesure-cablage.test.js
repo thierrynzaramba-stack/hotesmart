@@ -145,6 +145,11 @@ function preparer ({ insert = () => ({ error: null }) } = {}) {
         select () { return q }, in () { return q }, not () { return q },
         eq () { return q }, order () { return q },
         limit () { return q },
+        // ⚠ `is` EXISTE PARCE QUE LE VRAI CLIENT L'A. Le lot « archiver un
+        // bien » ajoute `.is('archive_le', null)` aux boucles du cron ; un
+        // double qui ne connait pas ce maillon fabrique un faux rouge sur une
+        // forme que PostgREST accepte.
+        is () { return q },
         insert (ligne) { ecrits.push({ table, ligne }); return Promise.resolve(insert(ligne)) },
         upsert (ligne) { ecrits.push({ table, op: 'upsert', ligne }); return Promise.resolve({ error: null }) },
         delete () { return { lt: async () => ({ error: null }) } },
