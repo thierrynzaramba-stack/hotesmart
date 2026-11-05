@@ -464,11 +464,13 @@ test('etape 4 : plus aucun lien vers l\'ancienne app, hors Connaissances', () =>
   const resa = lire('shared/calendrier-resa.js')
   assert.ok(resa.includes("'/messages?conv=' + encodeURIComponent(resa.id)"),
     'urlConversation (module partage des deux calendriers) pointe /messages')
-  // La nouvelle page garde UN SEUL lien vers l'ancienne app : Connaissances.
+  // ⚠ LE DERNIER LIEN VERS L'ANCIENNE APP EST PARTI (base de connaissance V5,
+  // lot 3) : « Connaissances » ouvre désormais le volet de la base dans
+  // Messages, et l'ancienne page redirige vers lui.
   const page = html()
   const liens = [...page.matchAll(/agent-ai\/([\w-]+)/g)].map(m => m[1])
-  assert.deepEqual([...new Set(liens)], ['knowledge'],
-    'seul Connaissances survit (le renvoi provisoire est parti avec la redirection)')
+  assert.deepEqual([...new Set(liens)], [],
+    'plus aucun lien vers l\'ancienne app : Connaissances mene au volet V5')
   // Et la barre laterale des anciennes pages ne liste plus que Connaissances.
   const sidebar = lire('components/sidebar.js')
   assert.ok(!sidebar.includes('agent-ai/messages') && !sidebar.includes('agent-ai/config'),
@@ -509,7 +511,10 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
     // expliquer, il y a un délai — que la pilule et son aide disent déjà. La
     // clé `messages.auto_scope` est supprimée des trois dictionnaires, donc
     // cette ligne ne pourrait plus être satisfaite.
-    'lien Connaissances': 'agent-ai/knowledge',
+    // ⚠ DÉPLACÉ, PAS RETIRÉ (base de connaissance V5, lot 3) : l'ancienne page
+    // redirige vers le volet « Base de connaissance », et le lien y mène
+    // directement au lieu de quitter Messages.
+    'lien Connaissances': 'data-ouvre-connaissance',
     'choix du logement en tete du panneau': 'data-bind="tiroir-bien"',
     'bouton Messages programmes (en-tete)': 'data-ouvre-volet="programmes"',
     'bouton Reponses de l\'IA (en-tete)': 'data-ouvre-volet="ia"',
@@ -527,7 +532,7 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
   // Les redirections rouvrent le bon volet, et JS coupe a son repli.
   assert.ok(/voletDemande === 'ia' \|\| voletDemande === 'programmes'\) && reglagesIci\(\)/.test(src),
     '?volet= honore a l\'arrivee, titulaire seulement')
-  for (const page of ['apps/agent-ai/config.html', 'apps/agent-ai/messages.html']) {
+  for (const page of ['apps/agent-ai/config.html', 'apps/agent-ai/messages.html', 'apps/agent-ai/knowledge.html']) {
     assert.ok(/http-equiv="refresh" content="0;url=\/messages\?volet=/.test(lire(page)),
       page + ' : repli meta refresh (JS bloque = page blanche sinon)')
   }

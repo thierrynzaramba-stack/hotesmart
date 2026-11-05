@@ -112,3 +112,29 @@ test('la carte porte les trois états, et l’âge est un nombre de jours', () =
   assert.equal(neuve.aRevoir, false)
   assert.equal(neuve.jours, 2)
 })
+
+test('LE TEST QUI COMPTE : les segments disent à l’écran où poser chaque étiquette, et rien d’autre', () => {
+  // ⚠ C'EST L'ÉCRAN QUI LES PEINT, ET IL NE RE-DÉCOUPE RIEN : sans eux, chaque
+  // écran referait l'analyse du texte de son côté — une seconde copie de la
+  // règle, dans le navigateur.
+  const { segments } = enEtiquettes('Bonjour {prenom}, code {code_promo} wifi {wifi_mdp}.', { wifi_mdp: '' })
+  assert.deepEqual(segments, [
+    { texte: 'Bonjour ' },
+    { cle: 'prenom', libelle: 'Prénom', vide: false },
+    // Une balise INCONNUE reste du texte, accolades comprises, collée à ses voisins.
+    { texte: ', code {code_promo} wifi ' },
+    { cle: 'wifi_mdp', libelle: 'Mot de passe wifi', vide: true },
+    { texte: '.' }
+  ])
+  // Recoller les segments rend le texte d'origine : rien n'est perdu.
+  const recolle = segments.map(s => (s.cle ? `{${s.cle}}` : s.texte)).join('')
+  assert.equal(recolle, 'Bonjour {prenom}, code {code_promo} wifi {wifi_mdp}.')
+  assert.deepEqual(enEtiquettes('', {}).segments, [])
+  assert.deepEqual(enEtiquettes(null, {}).segments, [])
+})
+
+test('la carte porte le texte BRUT pour l’éditeur, et les segments pour l’affichage', () => {
+  const c = carte({ id: 3, key: 'Arrivée', value: 'Dès {checkin}' }, { connaissance: { checkin: '17:00' } })
+  assert.equal(c.brut, 'Dès {checkin}')
+  assert.deepEqual(c.segments, [{ texte: 'Dès ' }, { cle: 'checkin', libelle: "Heure d'arrivée", vide: false }])
+})

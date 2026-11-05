@@ -234,6 +234,52 @@ Un par un, **recette staging entre chaque**.
 
 ---
 
+## 4 ter. LOT 3 — CE QUI EST LIVRÉ (5 novembre 2026, à recetter sur staging)
+
+- **Les deux vues, UN module** : `shared/connaissance-vue.js`, monté par le volet
+  de 440 px de Messages (bouton livre à côté de « Messages programmés ») et par
+  la page plein écran `/connaissance` au téléphone (`pages/connaissance.html`,
+  qui charge `shared/nav.js` et n'enregistre aucun service worker). Sous 900 px,
+  le bouton mène à la page ; au-dessus, il ouvre le volet.
+- **La carte** : icône + sujet, texte avec étiquettes (jamais d'accolades), une
+  balise vide en étiquette rouge, « Vérifiée le … » / « Jamais vérifiée », badge
+  ambre « À revoir » au-delà de 90 jours (seul ambre de l'écran), badge gris
+  « Hors IA » avec le cadenas.
+- **L'éditeur** : Sujet, Message à étiquettes (zone éditable, collage en texte
+  brut), « Insérer » en bleu — Prénom / Téléphone / Heure d'arrivée / Nom wifi /
+  Autre… —, insertion au curseur, aperçu rempli **par le serveur** avec le vrai
+  voyageur (celui du fil ouvert s'il séjourne dans ce logement, sinon le
+  prochain séjour actif), interrupteur « L'IA peut s'en servir », Enregistrer à
+  bord noir, Annuler en bleu, Supprimer en rouge par une fenêtre dans la page.
+- **« Infos du logement »** sous les réponses : chaque valeur se corrige sur
+  place ; vide = « À remplir » en rouge ; vider une valeur supprime la ligne.
+- **L'écriture ligne à ligne** : une réponse par son `id`, un fait par sa clé ;
+  un sujet déjà pris rend 409 et n'écrase rien.
+- **« Hors IA » est TENU côté modèle** : `buildKnowledgeText`
+  (`lib/cron-classify.js`, les quatre chemins de l'IA) écarte toute entrée
+  `lisible_par_ia = false`. Sans ce filtre, le cadenas aurait menti.
+- **L'alerte « info manquante »** nomme le nouvel écran :
+  « Messages → Base de connaissance → Infos du logement → <étiquette> »
+  (`lib/balises.js`, `OU_ECRAN`).
+- **Ce qui reste à faire hors de ce fil** : la migration
+  `2026-11-04-connaissance-v5` en **production** (sur go de Thierry, puis
+  `scripts/verifier-migration-connaissance-v5.js`). Tant qu'elle n'y est pas,
+  l'écran marche, le dit, et refuse l'écriture en 503 plutôt que d'écrire à
+  moitié.
+
+### Recette staging — ce que Thierry regarde
+
+1. Ordinateur, Messages : le bouton livre ouvre le volet large ; la liste des
+   réponses du logement du fil ouvert ; « À revoir » et « Hors IA » aux bons
+   endroits ; « Infos du logement » dessous, « À remplir » en rouge.
+2. Ouvrir une réponse : étiquettes dans le texte, aperçu au prénom d'un vrai
+   voyageur, insérer « Téléphone » au milieu d'une phrase, décocher l'IA,
+   enregistrer : la carte revient avec « Vérifiée le » du jour et « Hors IA ».
+3. Supprimer : la fenêtre dans la page ; « Garder » ne supprime rien.
+4. Téléphone : le même bouton ouvre la page plein écran, sélecteur de logement
+   en tête, mêmes gestes.
+5. L'ancienne adresse `/apps/agent-ai/knowledge` mène au volet.
+
 ## 4 bis. INVENTAIRE de `apps/agent-ai/knowledge.html` (lot 3)
 
 ⚠ **Règle du dépôt : une spec UI ne supprime jamais une fonction métier par
@@ -247,10 +293,12 @@ pour chaque élément s'il est **conservé**, **déplacé** ou **retiré AVEC RA
 | **Liste de FAQ** (sujet + réponse), ajout et suppression ligne à ligne | **conservée**, devenue « Réponses prêtes » : une carte par réponse, icône + sujet + texte. |
 | **Compteur « N entrées »** | **retiré AVEC RAISON** : la maquette validée ne le porte pas, et le nombre se lit en regardant la liste. Rien ne s'y décide. |
 | **Témoin « Modifications non sauvegardées »** | **remplacé** : la V5 enregistre réponse par réponse (écran « Modifier une réponse prête »), il n'y a donc plus d'état global non enregistré à signaler. |
-| **Bouton « ⬇️ Importer depuis Beds24 »** | ⚠ **DÉCISION DE THIERRY ATTENDUE.** Il est aujourd'hui **masqué par défaut** (`display:none`) et ne s'affiche que pour un bien Beds24. La maquette validée ne le porte pas. **Par défaut je le CONSERVE à l'identique** (masqué, même condition) plutôt que de le supprimer par omission — mais il n'a pas sa place dans la charte V5, et le parc migre vers Channex. |
-| **Badge « Beds24 »** sur une réponse importée | **conservé** tant que l'import l'est : il dit d'où vient le texte. |
+| **Bouton « ⬇️ Importer depuis Beds24 »** | **RETIRÉ — décision de Thierry du 5 novembre 2026.** Il était masqué par défaut et ne s'affichait que pour un bien Beds24 ; la maquette validée ne le porte pas, et le garder aurait obligé l'écran V5 à lire le provider en direct (`/api/channel-property` interroge Beds24), ce que la règle « le cœur de données d'abord » interdit. |
+| **Badge « Beds24 »** sur une réponse importée | **retiré avec l'import** : il n'existait qu'à l'écran, au moment de l'import (aucune colonne ne porte l'origine d'une entrée). |
 | **Sauvegarde** : `delete` de toutes les lignes du bien, puis `insert` | ⚠ **REMPLACÉE, ET C'EST UNE CORRECTION, PAS UNE REFONTE.** Voir ci-dessous. |
 | **Écriture directe en base depuis le navigateur** (RLS) | **déplacée** derrière un endpoint d'écran (`/api/ecran/connaissance`), règle 1 de la performance et garde unique `contexteDEcran`. |
+| **Page non délégable** (`exigerCompteProprePage`, domaine `reglages`) | **conservé** : l'écran est réservé au TITULAIRE, lecture comprise — l'endpoint refuse un membre en 403 avant toute lecture, le bouton du tiroir n'existe que pour le titulaire (comme les deux autres volets, dette 68), et la page téléphone porte le même garde-fou. ⚠ La première version du socle ouvrait la LECTURE aux membres (droits `messagerie`) : ce n'était écrit dans aucune décision, et la base porte des mots de passe wifi et des codes d'immeuble. L'ouvrir est une décision de droits, à poser au lot 4 si les réponses manuelles d'un membre en ont besoin. |
+| **L'adresse `apps/agent-ai/knowledge`** | **redirigée** vers `/messages?volet=connaissance` — décision de Thierry du 5 novembre 2026, DANS ce lot : laissée en service, son enregistrement (tout supprimer, tout réinsérer) aurait effacé `verifie_le` et `lisible_par_ia` à chaque passage. Au téléphone, Messages renvoie vers `/connaissance`. Le lien « Connaissances » du volet IA ouvre désormais le volet de la base. |
 
 ### ⚠ Pourquoi la sauvegarde ne peut PAS rester ce qu'elle est
 
@@ -300,10 +348,27 @@ réinsère. Trois conséquences, et la troisième est bloquante pour ce lot :
 | 2 | Donnée non urgente = résumé pré-calculé | **Sans objet** : une réponse prête est un réglage, lu à l'ouverture et modifié à la main. Aucun calcul. |
 | 3 | Cache navigateur | **NON, et c'est une décision** : les réponses prêtes portent des codes d'accès et des mots de passe wifi. Interdit par la règle 3. |
 | 4 | `private, no-store` avant le PREMIER refus | **Oui**, 405 compris (dette 90). |
-| 5 | Statique versionné | **Oui** : le module de balises servi avec `?v=<empreinte>`. |
-| 6 | Pas de lecture tronquée à 1000 | **Oui** : pagination **par curseur** sur `id` — `knowledge` dépassera 1000 lignes à quelques dizaines de biens. |
-| 7 | Budget < 1 s / < 2 s, tenu par un test qui compte les appels | **Oui** + `Server-Timing` avec le nombre de requêtes. |
-| 8 | Mesure AVANT / APRÈS | **À faire au lot 3** : la page actuelle n'est pas instrumentée. |
+| 5 | Statique versionné | **Non, et c'est l'état du dépôt, pas un oubli du lot** : aucun module JS n'est versionné aujourd'hui (seuls les dictionnaires i18n le sont, `VERSION` mise à jour). Le module de la vue suit la pratique commune — revalidé à chaque chargement. ⚠ Ce que le lot fait À LA PLACE : Messages charge le module **à la première ouverture du volet** (`import()`), jamais avec la page. Versionner les modules est un chantier du dépôt entier. |
+| 6 | Pas de lecture tronquée à 1000 | **Oui** : pagination **par curseur** sur `id` (pages de 200) — test « la lecture se pagine par CURSEUR » à 205 entrées. |
+| 7 | Budget < 1 s / < 2 s, tenu par un test qui compte les appels | **Oui** : `tests/connaissance-vue-dom.test.js` exige UN appel pour peindre l'écran, `tests/connaissance-ecran.test.js` exige TROIS requêtes et `Server-Timing` qui les compte. La durée elle-même se mesure en recette (staging). |
+| 8 | Mesure AVANT / APRÈS | Voir le tableau ci-dessous. |
+
+### Mesure AVANT / APRÈS (5 novembre 2026)
+
+⚠ **CE QUI EST MESURÉ, ET OÙ.** Les appels et les requêtes ne dépendent pas des
+données : ils sont mesurés **au banc** (APRÈS : doubles qui comptent chaque
+requête) et **dans le code** (AVANT : la branche GET de `/api/channel-property`
+et la lecture RLS de la page remplacée, lues ligne à ligne). Les octets des
+fichiers sont mesurés **sur disque**. Les octets des RÉPONSES dépendent du
+compte : ils se mesurent **sur staging pendant la recette** — ce fil n'a pas de
+session staging, et un chiffre de fixture ne serait pas une mesure.
+
+| | AVANT — `apps/agent-ai/knowledge.html` | APRÈS — volet de Messages | APRÈS — page téléphone |
+|---|---|---|---|
+| **Appels du navigateur** pour peindre l'écran | **2** : `/api/channel-property` + lecture RLS de `knowledge` | **1** : `/api/ecran/connaissance` | **1** : idem |
+| **Requêtes** derrière | **5** : `properties`, `api_keys`, `canaux_du_bien`, `canaux_releve` (channel-property) + `knowledge` — **et un appel Beds24 EN DIRECT** quand le compte a une clé | **3** : `properties`, `knowledge`, `bookings_snapshot` (aperçu) ; +1 sans la migration ; +1 par tranche de 200 entrées | **3** |
+| **Octets statiques** propres à l'écran | **53 052** : page 21 832 + `public/style.css` 10 857 + `components/sidebar.js` 20 363 | **28 321** (8 596 gzip) pour `shared/connaissance-vue.js`, chargé à la **première ouverture** du volet seulement ; `shared/ui.css` +7,5 Ko (déjà chargée par Messages) | **33 404** : page 5 083 + module 28 321 |
+| **Octets des réponses** | à mesurer sur staging | à mesurer sur staging | à mesurer sur staging |
 
 ---
 

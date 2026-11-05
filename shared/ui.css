@@ -406,6 +406,75 @@ h1, h2, h3, p { margin: 0; }
    rendre visible (constat de la review). */
 .msg-tiroir__note { position: sticky; bottom: 0; margin: 10px 0 0; padding: 10px 18px calc(14px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); color: var(--danger); font-weight: var(--fw-semibold); }
 .msg-tiroir__note--ok { color: var(--ok); }
+/* ---------- Base de connaissance V5 (lot 3) ----------
+   Le volet de l'ordinateur fait 440 px (maquette) ; les deux autres volets du
+   tiroir gardent leurs 360 px. La page téléphone (/connaissance) monte la MÊME
+   vue (`shared/connaissance-vue.js`) : ces règles valent pour les deux.
+   Charte : bleu = cliquable, l'ambre UNIQUEMENT pour « À revoir », le rouge
+   pour ce qui manque ou supprime, aucun fond noir. */
+.msg-tiroir--large { width: min(440px, 100vw); }
+.kb { display: flex; flex-direction: column; gap: 4px; padding: 6px 0 18px; }
+.kb-bien { display: flex; align-items: center; gap: 10px; padding: 8px 18px; }
+.kb-bien__photo { width: 40px; height: 40px; border-radius: var(--radius-card); object-fit: cover; flex: none; background: var(--surface-2); }
+.kb-bien__photo--vide { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.kb-bien__nom { font-weight: var(--fw-semibold); }
+.kb-bien select { flex: 1; min-width: 0; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 10px; font-size: var(--fs-body); }
+.kb-section { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 18px 4px; }
+.kb-section__titre { margin: 0; font-size: var(--fs-small); font-weight: var(--fw-bold); letter-spacing: var(--tracking-tight); }
+.kb-cartes { display: flex; flex-direction: column; gap: 8px; padding: 4px 18px; }
+.kb-carte { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.kb-carte:hover { box-shadow: var(--shadow-hover); }
+.kb-carte__tete { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kb-carte__tete .icon { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.kb-carte__sujet { font-weight: var(--fw-semibold); margin-inline-end: auto; }
+.kb-carte__texte { font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.kb-etiquette { display: inline-block; padding: 0 7px; margin: 0 1px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink); font-size: var(--fs-caption); font-weight: var(--fw-semibold); line-height: 1.7; white-space: nowrap; user-select: all; }
+.kb-etiquette--vide, .kb-manque { background: var(--danger-soft); color: var(--danger); }
+.kb-manque { padding: 0 3px; border-radius: 4px; font-weight: var(--fw-semibold); }
+.kb-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: var(--radius-pill); font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+.kb-badge .icon { width: 13px; height: 13px; }
+.kb-badge--revoir { background: var(--amber-soft); color: var(--amber-text); }
+.kb-badge--horsia { background: var(--surface-2); color: var(--muted); }
+.kb-faits { display: flex; flex-direction: column; padding: 0 18px; }
+.kb-fait { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.kb-fait:last-child { border-bottom: 0; }
+.kb-fait__libelle { display: flex; flex-direction: column; flex: 0 0 38%; font-size: var(--fs-small); color: var(--muted); }
+.kb-fait__valeur { flex: 1; min-width: 0; font-size: var(--fs-small); overflow-wrap: anywhere; }
+.kb-a-remplir { color: var(--danger); font-weight: var(--fw-semibold); }
+.kb-fait--edition { flex-wrap: wrap; }
+.kb-fait--edition input { flex: 1 1 100%; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0 10px; font-size: var(--fs-body); background: var(--surface); color: var(--ink); }
+.kb-icone { background: none; border: 0; padding: 6px; cursor: pointer; color: var(--info); flex: none; }
+.kb-icone .icon { width: 17px; height: 17px; }
+.kb-lien { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 4px 0; color: var(--info); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.kb-lien .icon { width: 16px; height: 16px; }
+.kb-editeur { display: flex; flex-direction: column; gap: 12px; padding: 8px 18px; }
+.kb-champ { display: flex; flex-direction: column; gap: 4px; }
+.kb-champ input { height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0 10px; font-size: var(--fs-body); background: var(--surface); color: var(--ink); }
+.kb-message { min-height: 110px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); font-size: var(--fs-body); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; }
+.kb-message:focus, .kb-champ input:focus, .kb-fait--edition input:focus { border-color: var(--ink); outline: none; }
+.kb-insertion { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.kb-inserer { min-height: 34px; padding: 0 12px; border: 1px solid var(--info); border-radius: var(--radius-pill); background: var(--surface); color: var(--info); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.kb-autres { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
+.kb-apercu { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: var(--radius-card); background: var(--surface-2); }
+.kb-apercu__texte { margin: 0; font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.5em; }
+.kb-interrupteur { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.kb-interrupteur input { width: 20px; height: 20px; margin-top: 2px; flex: none; accent-color: var(--info); }
+.kb-interrupteur > span { display: flex; flex-direction: column; }
+.kb-interrupteur__titre { font-weight: var(--fw-semibold); }
+.kb-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.kb-supprimer { margin-inline-start: auto; background: none; border: 0; padding: 4px 0; color: var(--danger); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.kb-note { margin: 4px 18px; color: var(--danger); font-size: var(--fs-small); font-weight: var(--fw-semibold); }
+.kb-editeur .kb-note { margin: 0; }
+.kb-note--ok { color: var(--ok); }
+.kb-info, .kb-vide { margin: 6px 18px; }
+.kb button:disabled { opacity: .5; cursor: default; }
+/* La page téléphone : la vue plein écran, sous un en-tête de retour. */
+.kb-page { max-width: 640px; margin: 0 auto; padding-bottom: 96px; }
+.kb-page__entete { display: flex; align-items: center; gap: 10px; padding: 12px 18px 4px; }
+.kb-page__entete h1 { margin: 0; }
+@media (max-width: 899px) {
+  .kb-inserer, .kb-lien, .kb-supprimer { min-height: 44px; }
+}
 @media (max-width: 899px) {
   .msg-retour { display: inline-flex; }
   /* En-tete du fil COMPACT (spec §4) : nom puis bien · dates, chacun sur sa
