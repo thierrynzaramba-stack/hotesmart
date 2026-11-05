@@ -808,6 +808,8 @@
   "nouveau.voyageurs_inclus": "Guests included in the price",
   "nouveau.voyageurs_inclus_aide": "Optional. By default, all guests are included.",
   "nouveau.voyageurs_inclus_defaut": "All",
+  "offline.retry": "Try again",
+  "offline.title": "You are offline",
   "photo.add": "Add a photo",
   "photo.bad_type": "Choose an image (it will be converted to JPEG)",
   "photo.failed": "Upload failed, try again",

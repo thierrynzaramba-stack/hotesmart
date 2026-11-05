@@ -808,6 +808,8 @@
   "nouveau.voyageurs_inclus": "Huéspedes incluidos en el precio",
   "nouveau.voyageurs_inclus_aide": "Opcional. Por defecto se incluyen todos los huéspedes.",
   "nouveau.voyageurs_inclus_defaut": "Todos",
+  "offline.retry": "Reintentar",
+  "offline.title": "Estás sin conexión",
   "photo.add": "Añadir una foto",
   "photo.bad_type": "Elija una imagen (se convertirá a JPEG)",
   "photo.failed": "Error al enviar, reinténtelo",
