@@ -13,8 +13,14 @@
 // SUPABASE_ANON_KEY est presente : les deux tables ne se lisent pas sans session.
 // ⚠ LIMITE CONNUE (dette 32) : l'API ne donne pas le catalogue — ni les
 // policies, ni les contraintes CHECK/UNIQUE ne sont prouvees ici. Elles l'ont
-// ete sur un Postgres embarque avant le commit (11 positions acceptees,
-// 18 incoherences refusees) ; la relecture du fichier de migration les couvre.
+// ete sur un Postgres embarque avant le commit (11 positions acceptees ;
+// 18 refus : 2 doublons, 14 positions incoherentes, 2 largeurs hors bornes ;
+// plus un geste inconnu refuse au journal) ; la relecture du fichier de
+// migration les couvre.
+// ⚠ ET LA SONDE SANS SESSION NE PROUVE RIEN SUR UNE TABLE VIDE (REVIEW.md
+// regle 16.3) : « aucune ligne lisible » y est vrai avec ou sans RLS. Juste
+// apres la migration, les deux tables sont vides : la sonde le dit, et ne
+// compte pas ce resultat comme une preuve.
 const { createClient } = require('@supabase/supabase-js')
 const { nomDeLaBase } = require('../lib/empreinte-base')
 
@@ -48,6 +54,8 @@ const ATTENDU = {
   if (process.env.SUPABASE_ANON_KEY) {
     const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
     for (const t of ['yield_reglages_position', 'yield_reglages_position_journal']) {
+      const { count: n } = await sb.from(t).select('id', { count: 'exact', head: true })
+      if (!n) { console.log(`  · sonde navigateur sur ${t} : NON CONCLUANTE — la table est vide, « rien de lisible » y serait vrai sans RLS`); continue }
       const { data, error: e } = await anon.from(t).select('id').limit(1)
       // Une table ABSENTE n'est pas une table fermee : un verificateur qui n'a
       // rien lu ne rassure pas.

@@ -79,9 +79,21 @@ tranché ici.
 **« Le vendredi (ou samedi) du k-ième week-end avant / après. »** Le week-end
 de la maquette est fait de **NUITS : vendredi et samedi** (registre §3). Le
 dimanche n'en fait pas partie, et ce n'est pas le `estWeekEnd` du moteur
-(samedi + dimanche) : **les deux ne s'alignent jamais**. `k` se compte comme
-la maquette : `k = ⌈ écart en jours / 7 ⌉` depuis la première nuit (avant) ou
-la dernière nuit (après) de l'événement, de 1 à 4.
+(samedi + dimanche) : **les deux ne s'alignent jamais**. `k` va de 1 à 4, et
+**un week-end reste entier** : son vendredi et son samedi portent le même rang.
+
+- **avant** : le 1er week-end est celui du dernier vendredi AVANT la première
+  nuit de l'événement — si l'événement commence un samedi, seul ce vendredi
+  rayonne, le samedi étant déjà dans l'événement ;
+- **après** : le 1er week-end est celui du premier samedi APRÈS la dernière
+  nuit — si l'événement finit un vendredi, seul ce samedi rayonne.
+
+⚠ **Pas la formule de la maquette, `k = ⌈ écart / 7 ⌉`** (constat de review du
+2a). Elle coupe un week-end en deux quand l'événement commence un samedi, ce
+qui est le cas de toutes les vacances scolaires : avant Noël 2026 (samedi 19),
+le vendredi 11 tombait au 2e week-end et le samedi 12 au 1er. Les deux règles
+donnent le même résultat quand l'événement commence un dimanche, comme la
+Saint-Valentin 2027 de la maquette.
 
 ### 2.4 Les jokers, et l'ordre de précision
 
@@ -106,6 +118,16 @@ réglage du **réveillon** d'abord ; s'il n'en a pas, celui des **vacances de
 Noël** pour cette nuit ; sinon le calcul. C'est la règle que le moteur suit
 déjà pour la nuit sous-jacente d'un événement sans historique
 (`suggestion.js`, étape 0) — appliquée ici au réglage de l'hôte.
+
+⚠ **L'ORDRE EST CELUI DU MOTEUR (`segmenterJour`), PAS « LE PLUS COURT
+D'ABORD »** (constat de review du 2a) : férié → pont (sauf sous la date
+commerciale elle-même) → événements de l'hôte et dates commerciales (le plus
+court, puis l'hôte avant la date commerciale) → vacances de la zone du bien →
+d'une autre zone → week-end prolongé. L'hôte règle une nuit sous l'événement
+que le moteur lui montre : c'est cette ligne-là qui doit s'appliquer. Exemple
+mesuré : une saison thermale qui contient l'été gagne la nuit chez le moteur ;
+un tri par durée donnait l'été. Un test compare les deux nuit par nuit, sur
+quatorze mois.
 
 ## 3. La reconduction annuelle
 
@@ -151,7 +173,15 @@ lignes **sans nuit** :
   que deux ; `samedi_rattache` d'un 14 février samedi ; 2e week-end prolongé
   quand l'Armistice tombe un jeudi) ;
 - la position est hors de la zone d'influence réglée (l'hôte a réduit la zone
-  après avoir réglé le 3e week-end avant).
+  après avoir réglé le 3e week-end avant) ;
+- l'événement n'a **aucune occurrence** dans la fenêtre : le pont de
+  l'Armistice quand le 11 novembre tombe un samedi (2028), un événement de
+  l'hôte qu'il n'a pas reconduit. Motif `evenement_absent`.
+
+Une occurrence que le calcul ou l'appelant a **coupée au bord** (une
+Saint-Valentin dont le 14 tombe juste après la fin de la fenêtre) ne signale
+rien : on ne sait pas ce qui lui manque. Un événement que l'hôte a coupé
+(`actif: false`) ne signale rien non plus.
 
 **Ces lignes ne sont ni supprimées ni déplacées.** Elles sont rendues avec leur
 motif, et l'écran (lot 4) les montre. Une ligne supprimée en silence est un
@@ -224,8 +254,12 @@ sous-agent, puis push.
   rayonnement garde son calcul d'aujourd'hui, et la largeur par défaut vaut 0.
 - **L'écran** et le regroupement d'un événement composé à l'affichage
   (« Armistice — week-end prolongé » = férié + ponts + week-ends) : lot 4. Le
-  stockage reste par clé ; la zone d'influence d'un composé se porte sur la
-  clé de son férié.
+  stockage reste par clé, et le rayonnement se compte depuis l'occurrence de
+  la clé qui le porte. ⚠ Pour un composé, ce n'est pas encore le bon ancrage :
+  une ligne « avant » sur `ferie:armistice_1918` compterait depuis le seul
+  11 novembre, et le samedi 7 — déjà dans le week-end prolongé — deviendrait
+  le « 1er week-end avant ». Le lot 4 décidera de l'ancrage d'un composé
+  (constat de review du 2a).
 
 **Limite connue, au bord de la fenêtre** : le résolveur ne voit que les
 vacances et les événements que le contexte a lus. Un événement qui commence

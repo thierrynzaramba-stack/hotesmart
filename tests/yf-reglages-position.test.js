@@ -136,10 +136,84 @@ test('la clé fine du week-end prolongé : le férié le plus proche, stable qua
     ['week_end_prolonge:lundi_de_pentecote', '2027-05-15']])
 })
 
+test('LE TEST QUI COMPTE : pour chaque nuit, l événement dont la ligne s applique est celui que le MOTEUR retient (`segmenterJour`)', () => {
+  // Une année chargée : vacances de la zone, une saison thermale de l'hôte qui
+  // contient l'été, un événement de l'hôte d'une nuit le soir du réveillon du
+  // Nouvel An, les dates commerciales, les fériés, les ponts.
+  const R = require('../lib/yield/reference')
+  const { clesDeReglage } = require('../lib/yield/reglages-segment')
+  const debut = '2026-11-05'
+  const fin = '2028-01-05'
+  const vacances = [NOEL_26, TOUSSAINT_27,
+    { zone: 'C', nom: 'Vacances d\'Hiver', date_debut: '2027-02-20', date_fin: '2027-03-07' },
+    { zone: 'C', nom: 'Vacances de Printemps', date_debut: '2027-04-17', date_fin: '2027-05-02' },
+    { zone: 'C', nom: 'Vacances d\'Été', date_debut: '2027-07-03', date_fin: '2027-08-31' },
+    { zone: 'A', nom: 'Vacances d\'Hiver', date_debut: '2027-02-06', date_fin: '2027-02-21' }]
+  const evenements = [...datesCommerciales(debut, fin),
+    { segment: 'evenement:saison_thermale', nom: 'Saison thermale', date_debut: '2027-05-15', date_fin: '2027-10-15', origine: 'declare' },
+    { segment: 'evenement:soiree_maison', nom: 'Soirée maison', date_debut: '2027-12-31', date_fin: '2027-12-31', origine: 'declare' }]
+  const occs = P.occurrences({ zoneBien: 'C', vacances, evenements, debut, fin })
+  const lignes = [...new Set(occs.map(o => o.cle))].map(cle => ligne(cle, 'evenement', null, null, null, 'Haut'))
+  const r = P.resoudre({ lignes, occurrences: occs, debut, fin })
+  const ctx = R.construireContexte({ zoneBien: 'C', vacances, evenements, debut: '2026-09-01', fin: '2028-03-01' })
+  let comparees = 0
+  for (const [iso, x] of r.parNuit) {
+    const s = R.segmenterJour(iso, ctx)
+    const attendue = s.segment === 'week_end_prolonge' ? 'week_end_prolonge' : clesDeReglage(s)[0]
+    const obtenue = x.cle.startsWith('week_end_prolonge:') ? 'week_end_prolonge' : x.cle
+    assert.equal(obtenue, attendue, `${iso} : le moteur retient ${attendue}`)
+    comparees++
+  }
+  assert.ok(comparees > 200, `${comparees} nuits comparées`)
+  // Les trois cas qui avaient montré l'écart :
+  assert.equal(r.parNuit.get('2027-07-10').cle, 'evenement:saison_thermale', 'la saison qui contient l été gagne la nuit')
+  assert.equal(r.parNuit.get('2027-12-31').cle, 'evenement:soiree_maison', 'à durée égale, l hôte avant la date commerciale')
+  assert.equal(r.parNuit.get('2027-10-30').cle, 'vacances_zone_du_bien:toussaint', 'les vacances avant le week-end prolongé')
+})
+
+test('LE TEST QUI COMPTE : un week-end du rayonnement reste ENTIER, même quand l événement commence un samedi (toutes les vacances)', () => {
+  // Noël 2026 : samedi 19 décembre → dimanche 3 janvier.
+  const r = resoudre({ debut: '2026-11-20', fin: '2027-01-31', lignes: [
+    ligne(CLE_NOEL, 'avant', 1, null, null, 'Haut'), ligne(CLE_NOEL, 'avant', 2, null, null, 'Moyen'),
+    ligne(CLE_NOEL, 'apres', 1, null, null, 'Très haut')], largeurs: new Map([[CLE_NOEL, { avant: 2, apres: 1 }]]) })
+  assert.deepEqual(['2026-12-18', '2026-12-11', '2026-12-12', '2026-12-04', '2026-12-05'].map(j => niv(r, j)),
+    ['Haut', 'Moyen', 'Moyen', null, null], 'vendredi 18 seul au 1er (le samedi 19 est dans Noël) ; 11 ET 12 ensemble au 2e')
+  assert.deepEqual(['2027-01-08', '2027-01-09', '2027-01-15'].map(j => niv(r, j)), ['Très haut', 'Très haut', null])
+})
+
+test('LE TEST QUI COMPTE : un événement SANS occurrence cette année se signale aussi (décision 8) — le pont de l Armistice en 2028', () => {
+  // 11 novembre 2028 : un samedi, donc aucun pont.
+  const l = ligne('pont:pont_armistice_1918', 'evenement', 1, 'vendredi', null, 'Haut')
+  const r = resoudre({ debut: '2028-01-01', fin: '2028-12-31', vacances: [], lignes: [l] })
+  assert.deepEqual(r.sansNuit.map(s => [s.ligne.id, s.occurrence, s.motif]), [[l.id, null, 'evenement_absent']])
+  const coupe = resoudre({ debut: '2028-01-01', fin: '2028-12-31', vacances: [], lignes: [l], inactifs: new Set(['pont:pont_armistice_1918']) })
+  assert.deepEqual(coupe.sansNuit, [], 'un événement que l hôte a coupé ne se signale pas')
+})
+
+test('pas de faux signal au bord de la fenêtre : une date commerciale coupée par l appelant est une occurrence INCOMPLÈTE', () => {
+  // Comme `preparerContexte` : les dates commerciales arrivent coupées à la
+  // fin du contexte. Fin au 13 février 2028 : le samedi 12 est là, le 14 non.
+  const fin = '2028-02-13'
+  const lignes = [ligne('commercial:saint_valentin', 'evenement', null, null, 'date', 'Exceptionnel')]
+  const r = resoudre({ debut: '2027-03-01', fin, vacances: [], lignes, evenements: datesCommerciales('2027-01-01', fin) })
+  assert.deepEqual(r.sansNuit, [])
+  // Et des vacances qui CONTIENNENT un férié restent complètes près du bord :
+  // l'été 2027 compte 9 samedis, « le 10e » se signale quelle que soit la fenêtre.
+  const ete = { zone: 'C', nom: 'Vacances d\'Été', date_debut: '2027-07-03', date_fin: '2027-08-31' }
+  for (const debut of ['2027-07-20', '2027-08-10']) {
+    const x = resoudre({ debut, fin: '2028-06-30', vacances: [ete], lignes: [ligne('vacances_zone_du_bien:été', 'evenement', 10, 'samedi', null, 'Haut')] })
+    assert.deepEqual(x.sansNuit.map(s => s.motif), ['position_absente'], `fenêtre du ${debut}`)
+  }
+})
+
 // ─── La validation : la même que la base ─────────────────────────────────────
 // Les cas éprouvés contre la migration sur un Postgres embarqué (PGlite) le
-// 5 novembre 2026 : 11 acceptés, 16 refusés par une contrainte CHECK (les deux
-// doublons relèvent de l'index unique, que seul l'écrivain voit).
+// 5 novembre 2026, REJOUÉS ici contre `validerPosition` : 10 des 11 positions
+// acceptées (la 11e, un niveau nul, relève de `poserPosition`), 13 des 14 refus
+// de position (le 14e, un niveau inventé, aussi) — les deux doublons relèvent de
+// l'index unique —, plus trois cas propres à l'écrivain (rang 61, rang 1,5,
+// nuit inconnue). Ces cas ne prouvent pas que l'écrivain et la base disent la
+// même chose AU-DELÀ d'eux.
 const P_ = (evenement, zone, rang, jour, nuit) => ({ evenement, zone, rang, jour, nuit })
 const ACCEPTES = [
   P_(CLE_NOEL, 'evenement', 2, 'samedi', null), P_(CLE_NOEL, 'evenement', null, 'samedi', null),
@@ -159,7 +233,10 @@ const REFUSES = [
   [P_('commercial:saint_valentin', 'evenement', null, 'samedi', 'date'), 'nuit_seule'],
   [P_('commercial:saint_valentin', 'avant', null, null, 'date'), 'nuit_seule'], [P_('  ', 'evenement', null, null, null), 'evenement_requis'],
   [P_('x', 'evenement', 61, 'lundi', null), 'rang_hors_bornes'], [P_('x', 'evenement', 1.5, 'lundi', null), 'rang_invalide'],
-  [P_('x', 'evenement', null, null, 'veille'), 'nuit_inconnue']
+  [P_('x', 'evenement', null, null, 'veille'), 'nuit_inconnue'],
+  // L'écrivain est PLUS STRICT que la base ici, et c'est voulu : un réveillon
+  // n'a jamais de samedi rattaché (`weekend_proche: false`).
+  [P_('commercial:reveillon_noel', 'evenement', null, null, 'samedi_rattache'), 'sans_samedi_rattache']
 ]
 
 test('LE TEST QUI COMPTE : l écrivain refuse exactement ce que la base refuse, avec un motif parlant', () => {
@@ -190,7 +267,11 @@ function fausseBase ({ tables = {}, erreurs = {} } = {}) {
     from (nom) {
       const q = { f: [], op: 'select', lim: null }
       const lignes = () => (t[nom] || (t[nom] = []))
-      const filtre = l => q.f.every(([k, c, v]) => k === 'eq' ? l[c] === v : k === 'is' ? (l[c] ?? null) === v : k === 'gt' ? String(l[c]) > String(v) : true)
+      // ⚠ `eq(c, null)` NE TROUVE RIEN, comme en SQL (`= null` n'est jamais
+      // vrai ; PostgREST compare même à la chaîne 'null'). Une fausse base qui
+      // le traitait comme `is null` rendait vert un écrivain faux (review du
+      // lot 2a, REVIEW.md règle 22).
+      const filtre = l => q.f.every(([k, c, v]) => k === 'eq' ? (v !== null && l[c] === v) : k === 'is' ? (l[c] ?? null) === v : k === 'gt' ? String(l[c]) > String(v) : true)
       q.select = () => q
       q.eq = (c, v) => { q.f.push(['eq', c, v]); return q }
       q.is = (c, v) => { q.f.push(['is', c, v]); return q }
@@ -246,6 +327,11 @@ test('LE TEST QUI COMPTE : un NULL se cherche par `is`, pas par `eq` — « tous
   const r = await RP.poserPosition(sb, { ...base, rang: null, niveau: 'Haut' })
   assert.equal(r.geste, 'posee')
   assert.deepEqual(sb.t.yield_reglages_position.map(l => [l.rang, l.niveau]), [[2, 'Exceptionnel'], [null, 'Haut']])
+  // Et le même joker reposé se REMPLACE : sa ligne (rang NULL, nuit NULL) n'est
+  // retrouvée que par `is` — par `eq`, l'écrivain insérerait un doublon.
+  const r2 = await RP.poserPosition(sb, { ...base, rang: null, niveau: 'Très haut' })
+  assert.deepEqual([r2.geste, r2.avant], ['remplacee', 'Haut'])
+  assert.equal(sb.t.yield_reglages_position.length, 2)
 })
 
 test('écrivain : bien d un autre compte, niveau inventé, position incohérente → refusés SANS écriture', async () => {
