@@ -9,19 +9,34 @@
 //
 // ⚠ LA FORME, PAS L'EXISTENCE — lecon du depot : `create table if not exists`
 // et `add column if not exists` reussissent EN SILENCE sur une forme differente.
-// On lit donc chaque colonne par son NOM, et on EPROUVE son defaut et son type
-// sur une ligne reelle plutot que de les supposer.
+// On lit donc chaque colonne par son NOM, on EPROUVE son TYPE en demandant a la
+// base de comparer une valeur impossible (elle refuse dans le langage du type),
+// et on EPROUVE le defaut sur TOUTES les lignes reelles.
 //
-// ⚠ CE QUE CE SCRIPT NE PEUT PAS PROUVER, ET IL LE DIT : l'INDEX. PostgREST
-// n'expose pas `pg_indexes` (dette 32). La preuve se lit dans l'editeur SQL :
-//   select indexname, indexdef from pg_indexes
-//   where tablename = 'knowledge' order by indexname;
-// On doit y voir `idx_knowledge_bien` sur (user_id, property_id, type).
+// ⚠ CE QUE CE SCRIPT NE PEUT PAS PROUVER, ET IL LE DIT :
+//   · l'INDEX : PostgREST n'expose pas `pg_indexes` (dette 32). La preuve se lit
+//     dans l'editeur SQL :
+//       select indexname, indexdef from pg_indexes
+//       where tablename = 'knowledge' order by indexname;
+//     On doit y voir `idx_knowledge_bien` sur (user_id, property_id, type).
+//   · la contrainte NOT NULL elle-meme : l'API ne montre que des VALEURS. Le
+//     script prouve qu'aucune ligne n'est nulle, pas que la colonne l'interdit.
+//   · le defaut sur une table VIDE : sans ligne, il n'y a rien a eprouver, et le
+//     script le dit au lieu de conclure « conforme » (constat de review).
 
 const { createClient } = require('@supabase/supabase-js')
 const { nomDeLaBase } = require('../lib/empreinte-base')
 
 const COLONNES = ['verifie_le', 'lisible_par_ia']
+const PAGE = 1000
+
+// Le type se prouve par le REFUS : comparer a une valeur que seul ce type
+// rejette. Postgres rend 22007/22008 pour une date illisible, 22P02 pour un
+// booleen illisible ; une colonne `text` accepterait les deux sans broncher.
+const PREUVES_DE_TYPE = [
+  { colonne: 'verifie_le', valeur: 'pas-une-date', codes: ['22007', '22008'], type: 'timestamptz' },
+  { colonne: 'lisible_par_ia', valeur: 'pas-un-booleen', codes: ['22P02'], type: 'boolean' }
+]
 
 ;(async () => {
   const base = nomDeLaBase(process.env.SUPABASE_URL)
@@ -41,19 +56,51 @@ const COLONNES = ['verifie_le', 'lisible_par_ia']
     console.log(`  ✔ ${c} : la colonne répond`)
   }
 
-  // 2. LE DEFAUT DE `lisible_par_ia` EST `true`, et on l'EPROUVE sur les lignes
-  //    existantes : une colonne ajoutee avec le mauvais defaut aurait coupe
-  //    l'IA sur toute la base, en silence.
-  const { data: lignes, error: eL } = await sb.from('knowledge')
-    .select('id, lisible_par_ia, verifie_le').limit(1000)
-  if (eL) { console.error('ÉCHEC :', eL.message); process.exit(1) }
+  // 2. Chaque colonne a le BON TYPE.
+  for (const p of PREUVES_DE_TYPE) {
+    const { error } = await sb.from('knowledge').select('id').eq(p.colonne, p.valeur).limit(1)
+    const code = String((error && error.code) || '')
+    if (!error || !p.codes.includes(code)) {
+      console.error(`  ✖ ${p.colonne} : le type n'est pas ${p.type} (la base a ${error ? `rendu ${code || error.message}` : 'accepté une valeur impossible'})`)
+      process.exit(1)
+    }
+    console.log(`  ✔ ${p.colonne} : type ${p.type} (refus ${code})`)
+  }
+
+  // 3. LE DEFAUT DE `lisible_par_ia` EST `true`, eprouve sur TOUTES les lignes,
+  //    par curseur : PostgREST coupe a 1000 SANS ERREUR, et une colonne ajoutee
+  //    avec le mauvais defaut aurait coupe l'IA sur toute la base, en silence.
+  const lignes = []
+  let apres = null
+  for (;;) {
+    let q = sb.from('knowledge').select('id, lisible_par_ia, verifie_le').order('id').limit(PAGE)
+    if (apres != null) q = q.gt('id', apres)
+    const { data, error } = await q
+    if (error) { console.error('ÉCHEC :', error.message); process.exit(1) }
+    lignes.push(...(data || []))
+    if (!data || data.length < PAGE) break
+    apres = data[data.length - 1].id
+  }
+  if (count != null && lignes.length !== count) {
+    console.error(`ÉCHEC : ${lignes.length} ligne(s) lue(s) pour ${count} comptée(s) — lecture incomplète`)
+    process.exit(1)
+  }
+  if (!lignes.length) {
+    console.log('  ? lisible_par_ia : table VIDE — le défaut n’est PAS éprouvé ici.')
+    console.log('\nMigration 2026-11-04-connaissance-v5 : colonnes et types présents ; défaut NON PROUVÉ (aucune ligne).')
+    console.log('(L’INDEX n’est pas prouvé ici — voir l’en-tête du script.)')
+    process.exit(2)
+  }
   const faux = lignes.filter(l => l.lisible_par_ia !== true)
   const nulles = lignes.filter(l => l.lisible_par_ia == null)
   console.log(`  ${faux.length === 0 ? '✔' : '✖'} lisible_par_ia : ${lignes.length - faux.length}/${lignes.length} à true`)
-  console.log(`  ${nulles.length === 0 ? '✔' : '✖'} aucune valeur NULLE (la colonne est NOT NULL)`)
+  console.log(`  ${nulles.length === 0 ? '✔' : '✖'} aucune valeur nulle parmi les ${lignes.length} ligne(s)`)
+  // ⚠ « Hors IA » est un geste de l'hôte : une ligne à `false` APRÈS le premier
+  // enregistrement dans l'écran V5 est normale. Ce contrôle vaut le jour du
+  // collage ; plus tard, il compte les « Hors IA » posés.
   if (faux.length || nulles.length) process.exit(1)
 
-  // 3. `verifie_le` EST NULLE PARTOUT tant que l'hote n'a rien enregistre, et
+  // 4. `verifie_le` EST NULLE PARTOUT tant que l'hote n'a rien enregistre, et
   //    c'est le comportement attendu : une date posee par le systeme dirait
   //    « verifie » de ce que personne n'a relu.
   const posees = lignes.filter(l => l.verifie_le != null)
@@ -61,5 +108,5 @@ const COLONNES = ['verifie_le', 'lisible_par_ia']
   if (!posees.length) console.log('    (aucune : normal avant le premier enregistrement dans l’écran V5)')
 
   console.log(`\nMigration 2026-11-04-connaissance-v5 : conforme sur ce que l’API permet de prouver.`)
-  console.log('(L’INDEX n’est pas prouvé ici — voir l’en-tête du script.)')
+  console.log('(L’INDEX et la contrainte NOT NULL ne sont pas prouvés ici — voir l’en-tête du script.)')
 })().catch(e => { console.error('ÉCHEC :', e.message); process.exit(1) })

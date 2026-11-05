@@ -1634,7 +1634,7 @@ function renderTiroir () {
   // ⚠ QUITTER LE VOLET « BASE DE CONNAISSANCE », C'EST DÉMONTER SA VUE : elle
   // écoute `selectionchange` sur le DOCUMENT, qui survit au `innerHTML` des
   // autres volets.
-  if (vueConnaissance && etat.tiroirVolet !== 'connaissance') { vueConnaissance.detruire(); vueConnaissance = null }
+  if (vueConnaissance && etat.tiroirVolet !== 'connaissance') demonterConnaissance()
   tiroir.classList.toggle('msg-tiroir--large', etat.tiroirVolet === 'connaissance')
   $('[data-bind="tiroir-titre"]').textContent = t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled'
     : etat.tiroirVolet === 'connaissance' ? 'kb.title' : 'messages.tab_ia')
@@ -1689,9 +1689,21 @@ let moduleConnaissance = null
 // rappelé par bien d'autres chemins (fin d'une écriture, repointage sur le
 // fil) : remonter la vue à chaque fois relirait l'écran ET effacerait la
 // réponse que l'hôte est en train d'écrire.
+// ⚠ DÉMONTER UNE VUE EN PLEINE SAISIE SE DIT — constat de review. Changer de
+// volet ou de logement au sélecteur du tiroir effaçait une réponse en cours
+// sans un mot (la dette D4 des autres volets, élargie à celui-ci) ; le
+// repointage sur le fil, lui, le disait déjà. La note part sous le tiroir,
+// là où l'hôte la lit.
+function demonterConnaissance () {
+  if (!vueConnaissance) return
+  const perdue = vueConnaissance.enEdition()
+  vueConnaissance.detruire()
+  vueConnaissance = null
+  if (perdue) noteReglage(t('kb.edit_dropped'))
+}
 async function peindreConnaissance (corps, ref) {
   if (vueConnaissance && vueConnaissance.ref === String(ref) && corps.contains(vueConnaissance.racine)) return
-  if (vueConnaissance) { vueConnaissance.detruire(); vueConnaissance = null }
+  demonterConnaissance()
   corps.innerHTML = `<div data-kb-racine><p class="muted small kb-vide">${esc(t('common.loading'))}</p></div>`
   const racine = corps.firstElementChild
   try {

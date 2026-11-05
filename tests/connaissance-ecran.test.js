@@ -173,6 +173,8 @@ test('LE TEST QUI COMPTE : le GET peint tout l écran en TROIS requêtes, Server
   for (const q of r.requetes) assert.equal(filtre(q, 'user_id'), TITULAIRE, `${q.table} sans user_id`)
   const kb = r.requetes.find(x => x.table === 'knowledge')
   assert.equal(filtre(kb, 'property_id'), 'P2')
+  const resa = r.requetes.find(x => x.table === 'bookings_snapshot')
+  assert.equal(filtre(resa, 'property_id'), 'P2', 'le voyageur de l aperçu est cherché dans CE bien')
   const c = r.charge
   assert.equal(c.bien.ref, 'P2')
   assert.equal(c.reponses.length, 1)
@@ -328,6 +330,13 @@ test('un fait rempli s écrit par sa CLÉ (upsert sur l identité du fait), date
   assert.equal(q.options.onConflict, 'user_id,property_id,type,key')
   assert.equal(q.charge.value, '17:00')
   assert.ok(q.charge.verifie_le)
+  // ⚠ L'IDENTITÉ DU FAIT EST DANS LA CHARGE : un upsert sans `user_id` ou sur
+  // un autre bien écrirait chez quelqu'un d'autre (constat de review : rien ne
+  // le vérifiait).
+  assert.equal(q.charge.user_id, TITULAIRE)
+  assert.equal(q.charge.property_id, 'P1')
+  assert.equal(q.charge.type, 'fixed')
+  assert.equal(q.charge.key, 'checkin')
 })
 
 test('supprimer vise UNE ligne du compte et du bien, et dit quand elle n existe pas', async () => {
@@ -348,14 +357,24 @@ test('supprimer vise UNE ligne du compte et du bien, et dit quand elle n existe 
   assert.equal(absente.statut, 404)
 })
 
-test('la migration absente se dit en écriture (503), elle ne se tait pas', async () => {
-  const r = await appeler({
-    methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'faq', key: 'S', value: 'T', lisible_par_ia: false },
-    repondre: (q) => (q.table === 'properties' ? { data: BIENS, error: null }
-      : { data: null, error: { code: '42703', message: 'column "lisible_par_ia" does not exist' } })
-  })
-  assert.equal(r.statut, 503)
-  assert.equal(r.charge.error, 'migration_absente')
+test('LE TEST QUI COMPTE : la migration absente se dit en écriture (503), avec l erreur que PostgREST rend VRAIMENT', async () => {
+  // ⚠ UNE ÉCRITURE QUI NOMME UNE COLONNE ABSENTE REND `PGRST204`, PAS 42703 —
+  // constat de review : la première version de ce test fournissait l'erreur
+  // d'un SELECT, que la base ne rend jamais à une écriture, et validait donc un
+  // chemin inatteignable (REVIEW.md, règle 22). Forme mesurée dans le dépôt :
+  // api/sms.js et lib/email-guestflow.js la reconnaissent déjà.
+  for (const op of ['update', 'insert', 'upsert']) {
+    const corps = op === 'upsert'
+      ? { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'checkin', value: '17:00' }
+      : { action: 'enregistrer', bien: 'P1', type: 'faq', key: 'S', value: 'T', lisible_par_ia: false, ...(op === 'update' ? { id: 'a1' } : {}) }
+    const r = await appeler({
+      methode: 'POST', corps,
+      repondre: (q) => (q.table === 'properties' ? { data: BIENS, error: null }
+        : { data: null, error: { code: 'PGRST204', message: "Could not find the 'verifie_le' column of 'knowledge' in the schema cache" } })
+    })
+    assert.equal(r.statut, 503, op)
+    assert.equal(r.charge.error, 'migration_absente', op)
+  }
 })
 
 test('LE TEST QUI COMPTE : l aperçu de l éditeur passe par le remplaceur, avec le voyageur du BIEN', async () => {
@@ -386,8 +405,16 @@ test('LE TEST QUI COMPTE : l aperçu de l éditeur passe par le remplaceur, avec
   assert.equal(r.charge.voyageur.prenom, 'Lou')
   const resaLue = r.requetes.find(q => q.table === 'bookings_snapshot' && filtre(q, 'booking_id'))
   assert.equal(filtre(resaLue, 'property_id'), 'P1', 'la réservation est cherchée DANS ce bien')
+  assert.equal(filtre(resaLue, 'user_id'), TITULAIRE, 'et DANS ce compte')
   const suivant = r.requetes.find(q => q.table === 'bookings_snapshot' && !filtre(q, 'booking_id'))
   assert.equal(suivant.filtres.find(f => f[0] === 'gte')[1], 'snapshot->>departure')
+  assert.equal(filtre(suivant, 'user_id'), TITULAIRE)
+  assert.equal(filtre(suivant, 'property_id'), 'P1')
+  // Les faits de l'aperçu : ceux du compte ET du bien.
+  const faitsLus = r.requetes.find(q => q.table === 'knowledge')
+  assert.equal(filtre(faitsLus, 'user_id'), TITULAIRE)
+  assert.equal(filtre(faitsLus, 'property_id'), 'P1')
+  assert.equal(filtre(faitsLus, 'type'), 'fixed')
 })
 
 test('le jour de référence du « prochain voyageur » est celui de PARIS', () => {

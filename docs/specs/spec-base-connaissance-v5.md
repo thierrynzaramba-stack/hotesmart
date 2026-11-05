@@ -253,6 +253,11 @@ Un par un, **recette staging entre chaque**.
   bord noir, Annuler en bleu, Supprimer en rouge par une fenêtre dans la page.
 - **« Infos du logement »** sous les réponses : chaque valeur se corrige sur
   place ; vide = « À remplir » en rouge ; vider une valeur supprime la ligne.
+  ⚠ **Sauf les horaires** (`checkin`, `checkout`) : ils ont un DÉFAUT dans
+  `lib/balises.js` (18:00, 10:00 — « un fait, pas un trou »), le voyageur le
+  reçoit, et l'écran le montre « 18:00 par défaut » au lieu d'un « À remplir »
+  qui serait faux. Même règle pour l'étiquette rouge dans les textes : elle suit
+  les `manquants` du remplaceur, testé balise par balise (review du lot 3).
 - **L'écriture ligne à ligne** : une réponse par son `id`, un fait par sa clé ;
   un sujet déjà pris rend 409 et n'écrase rien.
 - **« Hors IA » est TENU côté modèle** : `buildKnowledgeText`
@@ -266,6 +271,16 @@ Un par un, **recette staging entre chaque**.
   `scripts/verifier-migration-connaissance-v5.js`). Tant qu'elle n'y est pas,
   l'écran marche, le dit, et refuse l'écriture en 503 plutôt que d'écrire à
   moitié.
+
+### Laissé en l'état, avec sa raison (review du lot 3)
+
+- **L'index `idx_knowledge_bien (user_id, property_id, type)` double celui de la
+  contrainte unique `(user_id, property_id, type, key)`**, qui couvre déjà ce
+  préfixe : un coût d'écriture sans gain. Il n'est PAS retiré de la migration :
+  elle est déjà collée sur staging, et un fichier qui ne dit plus ce que la base
+  porte serait pire que l'index. À retirer par une migration à part, si Thierry
+  le veut — la table compte quelques dizaines de lignes, le coût est nul
+  aujourd'hui.
 
 ### Recette staging — ce que Thierry regarde
 

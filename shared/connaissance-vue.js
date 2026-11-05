@@ -28,6 +28,12 @@ export const KB_INSERTION_RAPIDE = ['prenom', 'telephone_hote', 'checkin', 'wifi
 // Le délai de l'aperçu après une frappe : pas une requête par touche.
 export const KB_DELAI_APERCU = 400
 
+// Les bornes de l'endpoint (api/ecran/connaissance.js), dites AVANT l'envoi :
+// la zone éditable n'a pas de `maxlength`, et un refus serveur après coup
+// coûte un aller-retour pour un texte que l'hôte doit de toute façon raccourcir.
+export const KB_MAX_TEXTE = 4000
+export const KB_MAX_SUJET = 200
+
 /**
  * Le texte d'une zone d'édition, balises rendues en `{cle}`.
  * ⚠ LE NAVIGATEUR DÉCIDE DU BALISAGE D'UN RETOUR À LA LIGNE : Chrome pose des
@@ -70,6 +76,11 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
   selecteur = false, onBien = null, doc = null }) {
   const d = doc || racine.ownerDocument
   const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
+  // Le dernier logement ANNONCÉ à `onBien` : distinct de `etat.ref`, que le
+  // sélecteur pose AVANT la lecture — comparer à lui ne déclenchait jamais
+  // l'annonce après un changement au sélecteur (constat de review : l'adresse
+  // de la page téléphone gardait l'ancien `?bien=`).
+  let refAnnoncee = bien ? String(bien) : null
   const etat = {
     ref: bien ? String(bien) : null,
     donnees: null, erreur: null, chargement: false,
@@ -108,8 +119,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
       if (g !== generation || etat.detruite) return
       etat.donnees = r
       const vu = r && r.bien ? String(r.bien.ref) : null
-      if (vu !== etat.ref) {
-        etat.ref = vu
+      etat.ref = vu
+      if (vu !== refAnnoncee) {
+        refAnnoncee = vu
         if (typeof onBien === 'function') onBien(vu)
       }
     } catch (e) {
@@ -176,9 +188,13 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
         </div>
       </div>`
     }
+    // Une valeur vide AVEC un défaut (les horaires) montre ce que le voyageur
+    // recevra, marqué « par défaut » — pas un « À remplir » qui serait faux.
     const valeur = f.aRemplir
       ? `<span class="kb-fait__valeur kb-a-remplir">${esc(t('kb.to_fill'))}</span>`
-      : `<span class="kb-fait__valeur">${esc(f.valeur)}</span>`
+      : !String(f.valeur || '').trim() && f.defaut
+        ? `<span class="kb-fait__valeur">${esc(f.defaut)} <span class="caption muted">${esc(t('kb.by_default'))}</span></span>`
+        : `<span class="kb-fait__valeur">${esc(f.valeur)}</span>`
     const sous = f.sansBalise ? `<span class="caption muted">${esc(t('kb.ai_only'))}</span>` : ''
     const verrou = f.horsIa ? `<span class="kb-badge kb-badge--horsia">${icone('i-lock')}${esc(t('kb.no_ai'))}</span>` : ''
     return `<div class="kb-fait">
@@ -396,14 +412,20 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     minuteur = setTimeout(() => { minuteur = null; rafraichirApercu() }, delai)
   }
 
+  // ⚠ UN NUMÉRO PAR DEMANDE D'APERÇU — constat MESURÉ de review : deux frappes
+  // rapprochées lancent deux demandes, et si la première revient APRÈS la
+  // seconde, l'aperçu montrait l'ancien texte sous le nouveau. Seule la
+  // dernière demande partie a le droit de peindre.
+  let demandeApercu = 0
   async function rafraichirApercu () {
     const l = lireEditeur()
     if (!l || !etat.ref) return
     const g = generation
+    const n = ++demandeApercu
     try {
       const r = await appel('/api/ecran/connaissance',
         { action: 'apercu', bien: etat.ref, texte: l.texte, ...(resa ? { resa: String(resa) } : {}) })
-      if (g !== generation || etat.mode !== 'edition' || etat.detruite) return
+      if (n !== demandeApercu || g !== generation || etat.mode !== 'edition' || etat.detruite) return
       etat.apercu = { texte: (r.apercu || {}).texte || '', prenom: r.voyageur && r.voyageur.prenom }
       const p = racine.querySelector('[data-kb-apercu]')
       if (p) p.innerHTML = apercuHtml(etat.apercu.texte)
@@ -413,10 +435,15 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
   }
 
   // Le texte d'une erreur d'écriture, et seulement ce qu'on sait dire.
+  // ⚠ « RÉESSAYEZ » SEULEMENT QUAND RÉESSAYER PEUT SERVIR — constat de review :
+  // un texte trop long ou une réponse supprimée ailleurs ne passeront pas
+  // mieux au second clic.
   function texteErreur (e) {
     if (e && e.status === 409) return t('kb.subject_exists')
     if (e && e.status === 503) return t('kb.migration_missing')
     if (e && e.status === 403) return t('kb.no_access')
+    if (e && e.status === 404) return t('kb.not_found')
+    if (e && e.status === 400) return t('kb.too_long', { max: KB_MAX_TEXTE })
     return t('kb.save_error')
   }
 
@@ -427,6 +454,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     if (!l) return
     if (!l.sujet) { etat.note = { texte: t('kb.subject_required') }; repeindreNote(); return }
     if (!l.texte.trim()) { etat.note = { texte: t('kb.message_required') }; repeindreNote(); return }
+    if (l.texte.length > KB_MAX_TEXTE || l.sujet.length > KB_MAX_SUJET) {
+      etat.note = { texte: t('kb.too_long', { max: KB_MAX_TEXTE }) }; repeindreNote(); return
+    }
     enCours = true
     geler(true)
     const e = etat.edition
@@ -514,6 +544,13 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
   // réponse qui n'est pas encore revenue.
   function geler (oui) {
     racine.querySelectorAll('button, input, select').forEach(x => { x.disabled = oui === true })
+    // ⚠ LE SÉLECTEUR DE LOGEMENT RESTE GELÉ HORS DE LA LISTE — constat MESURÉ de
+    // review. Le dégel réactivait TOUT, donc aussi le sélecteur que la vue
+    // avait désactivé en entrant dans l'éditeur : après un refus (409), l'hôte
+    // changeait de logement, l'éditeur restait ouvert, et le texte tapé pour
+    // un logement partait dans l'AUTRE.
+    const sel = racine.querySelector('[data-kb-bien]')
+    if (sel && etat.mode !== 'liste') sel.disabled = true
     const zone = racine.querySelector('[data-kb-message]')
     if (zone) zone.contentEditable = oui === true ? 'false' : 'true'
   }
@@ -601,6 +638,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
   function surChangement (ev) {
     const sel = ev.target.closest && ev.target.closest('[data-kb-bien]')
     if (!sel) return
+    // Second verrou, côté geste : on ne change JAMAIS de logement sous un
+    // éditeur ouvert, quel que soit l'état du `disabled`.
+    if (etat.mode !== 'liste' || enCours) { sel.value = etat.ref || ''; return }
     etat.note = null
     recharger(sel.value)
   }

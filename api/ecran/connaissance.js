@@ -226,7 +226,14 @@ module.exports = async (req, res) => {
       // ce que personne n'a relu — et le badge « À revoir » ne vaudrait rien.
       const maintenant = new Date().toISOString()
       const repondreErreur = (error) => {
-        if (colonneAbsente(error)) {
+        // ⚠ UNE ÉCRITURE NE REND PAS LA MÊME ERREUR QU'UNE LECTURE — constat de
+        // review. Un `select` sur une colonne absente rend 42703 (Postgres) ;
+        // un `insert`, `update` ou `upsert` qui la NOMME rend `PGRST204`
+        // (« Could not find the '…' column … in the schema cache ») : PostgREST
+        // refuse avant d'aller en base. Ne reconnaître que 42703 laissait
+        // l'hôte devant un « Enregistrement impossible » au lieu du 503 qui dit
+        // la vraie cause. Même lecture que `api/sms.js`.
+        if (colonneAbsente(error) || /PGRST204|schema cache/i.test(`${error.code || ''} ${error.message || ''}`)) {
           return res.status(503).json({ error: 'migration_absente', message: 'Migration 2026-11-04-connaissance-v5 non appliquée' })
         }
         // 23505 : la contrainte d'unicité `user_id, property_id, type, key`.

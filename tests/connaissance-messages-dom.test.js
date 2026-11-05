@@ -159,3 +159,27 @@ test('l aperçu prend le voyageur du fil ouvert, s il séjourne dans CE logement
   assert.deepEqual(lecturesKb(b).map(e => e.chemin), ['/api/ecran/connaissance?bien=P2&resa=B7'])
   b.fermer()
 })
+
+test('LE TEST QUI COMPTE : changer de volet en pleine saisie le DIT, la réponse ne disparaît pas en silence', async () => {
+  const b = banc()
+  await amorcer(b)
+  peupler(b, { biens: BIENS, volet: 'connaissance', bien: 'P1' })
+  await reposer(b)
+  clic(b, b.doc.querySelector('[data-kb-ouvrir="r1"]'))
+  b.doc.querySelector('[data-kb-sujet]').value = 'Wifi corrigé'
+  clic(b, boutonVolet(b, 'programmes'))
+  await reposer(b)
+  assert.equal(b.note(), 'La saisie en cours de la base de connaissance n’a pas été enregistrée')
+  b.fermer()
+})
+
+test('changer de volet SANS saisie ne dit rien', async () => {
+  const b = banc()
+  await amorcer(b)
+  peupler(b, { biens: BIENS, volet: 'connaissance', bien: 'P1' })
+  await reposer(b)
+  clic(b, boutonVolet(b, 'programmes'))
+  await reposer(b)
+  assert.equal(b.note(), null)
+  b.fermer()
+})

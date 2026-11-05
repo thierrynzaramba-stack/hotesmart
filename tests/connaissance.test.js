@@ -138,3 +138,22 @@ test('la carte porte le texte BRUT pour l’éditeur, et les segments pour l’a
   assert.equal(c.brut, 'Dès {checkin}')
   assert.deepEqual(c.segments, [{ texte: 'Dès ' }, { cle: 'checkin', libelle: "Heure d'arrivée", vide: false }])
 })
+
+test('LE TEST QUI COMPTE : un horaire sans valeur n’est PAS un trou — il a un défaut', () => {
+  // ⚠ CONSTAT MESURÉ DE REVIEW : `{checkin}` vide sortait `vide: true` alors que
+  // le remplaceur rend « 18:00 » sans rien mettre dans `manquants`. L'écran
+  // annonçait un manque que le voyageur ne verra jamais — et le lot 4 aurait
+  // bloqué l'envoi dessus. La règle suit le remplaceur : on le vérifie EN
+  // L'APPELANT, pour chaque balise de la base.
+  const { remplacerBalises, DE_LA_BASE } = require('../lib/balises')
+  for (const cle of DE_LA_BASE) {
+    const r = remplacerBalises(`x {${cle}} y`, { reservation: {}, connaissance: {} })
+    const { segments } = enEtiquettes(`x {${cle}} y`, {})
+    assert.equal(segments[1].vide, r.manquants.includes(cle), `${cle} : l’écran et le remplaceur disent la même chose`)
+  }
+  const f = faits([], { maintenant: MAINTENANT })
+  const checkin = f.find(x => x.cle === 'checkin')
+  assert.equal(checkin.aRemplir, false)
+  assert.equal(checkin.defaut, '18:00')
+  assert.equal(f.find(x => x.cle === 'wifi_mdp').aRemplir, true, 'sans défaut, une absence reste à remplir')
+})

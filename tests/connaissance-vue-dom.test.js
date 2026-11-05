@@ -59,7 +59,7 @@ async function monter ({ repondre, selecteur = false, bien = 'P1', resa = null }
   w.__confirm = 0
   w.confirm = () => { w.__confirm++; return true }
   w.eval(sansModule(lire('shared', 'confirmer.js')) + '\n' + sansModule(lire('shared', 'connaissance-vue.js'))
-    + '\nwindow.__kb = { monterConnaissance, kbVersTexte, KB_INSERTION_RAPIDE }')
+    + '\nwindow.__kb = { monterConnaissance, kbVersTexte, KB_INSERTION_RAPIDE, KB_MAX_TEXTE }')
   const envois = []
   const appel = async (chemin, corps) => {
     // Copie hors du realm de la fenêtre : `deepStrictEqual` compare aussi les
@@ -338,5 +338,107 @@ test('dans l éditeur aussi, une balise sans valeur reste une étiquette ROUGE �
   assert.ok(zone.querySelector('[data-balise="wifi_nom"]').classList.contains('kb-etiquette--vide'))
   clic(b, b.racine.querySelector('[data-kb-inserer="telephone_hote"]'))
   assert.ok(!zone.querySelector('[data-balise="telephone_hote"]').classList.contains('kb-etiquette--vide'), 'renseigné : pas rouge')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : après un refus, le logement ne change PAS sous l éditeur ouvert', async () => {
+  // Constat MESURÉ de review : le dégel réactivait le sélecteur ; changer de
+  // logement gardait l'éditeur, et le texte tapé pour P1 partait dans P2.
+  const b = await monter({ selecteur: true, repondre: (chemin, corps) => (corps ? { __statut: 409 } : ecran()) })
+  clic(b, b.racine.querySelector('[data-kb-ajouter]'))
+  b.racine.querySelector('[data-kb-sujet]').value = 'Boîte à clés'
+  b.racine.querySelector('[data-kb-message]').textContent = 'La boîte de P1'
+  clic(b, b.racine.querySelector('[data-kb-enregistrer]'))
+  await reposer()
+  const sel = b.racine.querySelector('[data-kb-bien]')
+  assert.equal(sel.disabled, true, 'gelé hors de la liste, même après le dégel')
+  // Même si le geste passe (un `disabled` contourné), il ne change rien.
+  sel.disabled = false
+  sel.value = 'P2'
+  sel.dispatchEvent(new b.w.Event('change', { bubbles: true }))
+  await reposer()
+  assert.equal(sel.value, 'P1')
+  assert.equal(b.vue.ref, 'P1')
+  assert.equal(lectures(b).length, 1, 'aucune relecture d un autre logement')
+  clic(b, b.racine.querySelector('[data-kb-enregistrer]'))
+  await reposer()
+  assert.ok(ecritures(b).every(e => e.corps.bien === 'P1'))
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : seule la DERNIÈRE demande d aperçu peint, même si elle revient la première', async () => {
+  const attentes = []
+  const b = await monter({
+    repondre: (chemin, corps) => {
+      if (!corps || corps.action !== 'apercu') return ecran()
+      return new Promise(res => attentes.push(() => res({ ok: true, apercu: { texte: 'APERCU ' + corps.texte }, voyageur: null })))
+    }
+  })
+  clic(b, b.racine.querySelector('[data-kb-ouvrir="r2"]'))
+  const zone = b.racine.querySelector('[data-kb-message]')
+  zone.textContent = 'ancien texte'
+  const p1 = b.vue.rafraichirApercu()
+  zone.textContent = 'texte actuel'
+  const p2 = b.vue.rafraichirApercu()
+  await reposer()
+  attentes[1](); await p2
+  attentes[0](); await p1
+  assert.equal(b.racine.querySelector('[data-kb-apercu]').textContent, 'APERCU texte actuel')
+  b.fermer()
+})
+
+test('changer de logement au sélecteur PRÉVIENT la page (l adresse suit le logement affiché)', async () => {
+  const dom = await monter({ selecteur: true, repondre: (chemin) => ecran({ ref: /bien=P2/.test(chemin) ? 'P2' : 'P1' }) })
+  dom.fermer()
+  // Remonter avec un `onBien` qui compte : la vue du banc n'en pose pas.
+  const { JSDOM: J } = require('jsdom')
+  const d2 = new J('<!doctype html><body><div id="r"></div></body>', { runScripts: 'outside-only' })
+  d2.window.I18n = { date: (x) => x.toISOString().slice(0, 10) }
+  d2.window.eval(sansModule(lire('shared', 'confirmer.js')) + '\n' + sansModule(lire('shared', 'connaissance-vue.js'))
+    + '\nwindow.__kb = { monterConnaissance }')
+  const annonces = []
+  const vue = d2.window.__kb.monterConnaissance({
+    racine: d2.window.document.getElementById('r'), selecteur: true, bien: 'P1', doc: d2.window.document,
+    t: (k) => FR[k] || k, esc: (s) => String(s), onBien: (v) => annonces.push(v),
+    appel: async (chemin) => ecran({ ref: /bien=P2/.test(chemin) ? 'P2' : 'P1' })
+  })
+  await vue.pret
+  assert.deepEqual(annonces, [], 'le logement demandé est celui affiché : rien à annoncer')
+  const sel = d2.window.document.querySelector('[data-kb-bien]')
+  sel.value = 'P2'
+  sel.dispatchEvent(new d2.window.Event('change', { bubbles: true }))
+  await reposer()
+  assert.deepEqual(annonces, ['P2'])
+  vue.detruire(); d2.window.close()
+})
+
+test('un horaire vide montre son DÉFAUT, jamais « À remplir »', async () => {
+  const e = ecran()
+  e.faits.push({ cle: 'checkin', libelle: "Heure d'arrivée", balise: '{checkin}', valeur: '', defaut: '18:00', aRemplir: false, horsIa: false, sansBalise: false })
+  const b = await monter({ repondre: () => e })
+  const fait = [...b.racine.querySelectorAll('.kb-fait')].find(x => x.textContent.includes("Heure d'arrivée"))
+  assert.equal(fait.querySelector('.kb-a-remplir'), null)
+  assert.match(fait.querySelector('.kb-fait__valeur').textContent, /^18:00 par défaut$/)
+  b.fermer()
+})
+
+test('un texte trop long est refusé AVANT l envoi, sans « réessayez »', async () => {
+  const b = await monter()
+  clic(b, b.racine.querySelector('[data-kb-ajouter]'))
+  b.racine.querySelector('[data-kb-sujet]').value = 'Long'
+  b.racine.querySelector('[data-kb-message]').textContent = 'x'.repeat(b.kb.KB_MAX_TEXTE + 1)
+  clic(b, b.racine.querySelector('[data-kb-enregistrer]'))
+  await reposer()
+  assert.equal(ecritures(b).length, 0)
+  assert.equal(b.racine.querySelector('[data-kb-note]').textContent, 'Texte trop long : 4000 caractères au plus')
+  b.fermer()
+})
+
+test('une réponse supprimée ailleurs (404) le dit, sans proposer de réessayer', async () => {
+  const b = await monter({ repondre: (chemin, corps) => (corps ? { __statut: 404 } : ecran()) })
+  clic(b, b.racine.querySelector('[data-kb-ouvrir="r2"]'))
+  clic(b, b.racine.querySelector('[data-kb-enregistrer]'))
+  await reposer()
+  assert.equal(b.racine.querySelector('[data-kb-note]').textContent, 'Cette réponse n’existe plus : rechargez l’écran')
   b.fermer()
 })
