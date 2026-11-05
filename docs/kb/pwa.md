@@ -160,6 +160,15 @@ reconnecter.** Une appli posée sur l'écran d'accueil d'iOS a son propre
 stockage, séparé de Safari : la session ouverte dans Safari ne la suit pas.
 Ce n'est pas une panne — se connecter une fois dans l'appli suffit.
 
+⚠ **Android : un téléphone qui a l'ancienne appli « HôteSmart Tarifs »
+propose « Ouvrir » au lieu d'« Installer ».** Constaté par Thierry en recette
+de production du lot 1. Ce n'est pas une panne du lot : le téléphone garde
+l'installation de l'ancienne appli (§1). Le remède, dans Chrome : Paramètres →
+Paramètres des sites → Données stockées → `hotesmart.vercel.app` → « Effacer
+et réinitialiser ». Puis rouvrir l'accueil : Chrome propose « Installer ». Ce
+geste efface aussi la session du site sur ce téléphone : il faut se
+reconnecter.
+
 Contrôle technique (chef de file) : `curl -sI '<feuille Google Fonts>' | grep -i
 cache-control` doit rendre `private, …` — c'est l'hypothèse de l'exception
 ci-dessus (§2.3), mesurée par la review via la documentation, non par requête
