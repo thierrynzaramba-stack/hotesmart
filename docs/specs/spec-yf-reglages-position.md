@@ -119,18 +119,28 @@ année, elle cherche sa nuit dans l'occurrence de l'événement.
   créée en silence). Les réglages de position suivent l'occurrence confirmée.
 
 La clé d'un événement est sa **clé de réglage la plus fine**, déjà stable d'une
-année sur l'autre (`clesDeReglage`) : `vacances_zone_du_bien:noel`,
+année sur l'autre (`clesDeReglage`) : `vacances_zone_du_bien:noël` (l'accent
+vient de `nomCourt`, comme dans le moteur — la clé est la sienne, pas une copie),
 `ferie:armistice_1918`, `pont:pont_armistice_1918`, `commercial:saint_valentin`,
 `evenement:saison_thermale` pour un événement de l'hôte
 (`lib/yield/evenements.js`, `cleSegment`). Les préfixes `ferie:` et
 `commercial:` désignent les dates fixes — la base s'en sert pour refuser un
 jour de semaine sur une date fixe (§6).
 
-⚠ **UNE CLÉ FINE MANQUE, ET CE LOT L'AJOUTE** : le week-end prolongé n'a que la
-clé large `week_end_prolonge`, partagée par tous ceux de l'année. Un réglage
-de position y vaudrait pour l'Armistice ET pour Pâques. Clé fine ajoutée :
-`week_end_prolonge:<férié voisin>` (le champ `ferie_voisin` existe déjà). La
-clé large reste lue en repli : les réglages en crans déjà posés ne bougent pas.
+⚠ **UNE CLÉ FINE MANQUE, ET CE LOT L'AJOUTE — DANS LE RÉSOLVEUR SEULEMENT** :
+le week-end prolongé n'a que la clé large `week_end_prolonge`, partagée par
+tous ceux de l'année. Un réglage de position y vaudrait pour l'Armistice ET
+pour Pâques. Clé fine : `week_end_prolonge:<férié le plus proche>`
+(`lib/yield/positions.js`, `cleWeekEndProlonge` ; à égalité, le plus tôt).
+Pas le libellé `ferie_voisin` du moteur : il joint les fériés de la chaîne
+(« Fête du Travail et Victoire 1945 ») et change avec sa composition d'une
+année sur l'autre — la clé ne se reconduirait pas.
+
+⚠ **`clesDeReglage` N'EST PAS MODIFIÉE**, et c'est volontaire : elle porte
+l'écran actuel des périodes, où ▲ sur « Week-end du 11 novembre » écrit des
+crans sur la clé large — donc sur tous les week-ends prolongés. Lui donner la
+clé fine changerait ce geste en production avant que le lot 4 ne remplace
+l'écran. Les réglages en crans déjà posés ne bougent pas.
 
 ## 4. Ce qui est signalé, jamais deviné
 
@@ -195,7 +205,7 @@ Migration : `migrations/2026-11-05-yield-reglages-position.sql` — **additive**
 
 | étape | contenu | effet en production |
 |---|---|---|
-| **2a** | migration, writer `lib/yield/reglages-position.js` (garde bien/compte, journal), résolveur `lib/yield/positions.js` (nuit → position ; lignes → niveau par nuit + lignes sans nuit), clé fine du week-end prolongé, `poserReglage` qui garde la largeur | **aucun** : la table est vide |
+| **2a** | migration, writer `lib/yield/reglages-position.js` (garde bien/compte, journal), résolveur `lib/yield/positions.js` (nuit → position ; lignes → niveau par nuit + lignes sans nuit ; clé fine du week-end prolongé), `poserReglage` qui garde la largeur, `reglagesDuBien` qui lit `*` (les colonnes de largeur n'existent pas avant la migration : les nommer ferait lever le moteur de tous les biens dans l'intervalle), `scripts/verifier-migration-reglages-position.js` | **aucun** : la table est vide, et aucun appelant ne la lit encore |
 | **2b** | le moteur consulte les positions (`preparerContexte` → `prixDeLaNuit`) ; parité écran/moteur vérifiée par `scripts/verifier-parite-prix.js` | aucun tant qu'aucune ligne n'existe ; une ligne change le prix de ses nuits |
 | **2c** | `api/yield-evenements.js` : lecture des positions et des lignes sans nuit par événement ; écriture d'une sélection (droit `reglages: write`, confirmation « N nuits vont changer de prix » comptée par le moteur) | l'API existe, aucun écran ne l'appelle avant le lot 4 |
 
@@ -216,6 +226,13 @@ sous-agent, puis push.
   (« Armistice — week-end prolongé » = férié + ponts + week-ends) : lot 4. Le
   stockage reste par clé ; la zone d'influence d'un composé se porte sur la
   clé de son férié.
+
+**Limite connue, au bord de la fenêtre** : le résolveur ne voit que les
+vacances et les événements que le contexte a lus. Un événement qui commence
+après la fin de la fenêtre peut rayonner sur ses dernières semaines ; tant que
+le contexte ne le charge pas, ce rayonnement n'est pas appliqué. Il l'est dès
+que la fenêtre glisse jusqu'à lui (au plus quatre semaines, à douze mois de
+distance).
 
 ## 9. PERFORMANCE
 
