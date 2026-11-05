@@ -104,15 +104,46 @@ version** : on modifie un dictionnaire, et c'est tout.
 `tests/i18n-version.test.js` appelle la fonction et mesure ce que le navigateur
 reçoit.
 
-**Case performance.** Aucune requête ajoutée : la page charge toujours
-`/shared/i18n/i18n.js`, puis les dictionnaires en parallèle. Le moteur passe
-par le CDN (`s-maxage=3600` et `stale-while-revalidate`, clé de cache par
-déploiement) ; seule la première demande d'un déploiement, par région, attend
-la fonction, les rafraîchissements suivants se font en arrière-plan. Le navigateur le
-revalide comme il revalidait le fichier statique (`max-age=0`), et les
-dictionnaires restent cachés un an. Empreinte inchangée pour des dictionnaires
-inchangés : le déploiement de ce changement ne fait retélécharger aucun
-dictionnaire.
+**Case performance** (CLAUDE.md, huit points ; complétée sur constat de
+review du 5 novembre 2026).
+
+1. Endpoint d'écran : sans objet — ce n'est pas un écran, c'est le moteur du
+   socle, une seule fonction sans aucune lecture de base.
+2. Donnée non urgente : sans objet — aucune donnée affichée. L'empreinte est
+   calculée **une fois par instance** (`corps` en mémoire dans `api/i18n.js`),
+   jamais par requête.
+3. Cache navigateur à clé compte : sans objet — aucune donnée de compte.
+4. `private, no-store` : le 200 est public par nature (recensé dans
+   `tests/cache-prive-endpoints.test.js`) ; le 405 et le 500 sont en
+   `no-store`, posé avant le refus.
+5. Statiques : les dictionnaires restent versionnés (`?v=<empreinte>`) et
+   cachés un an. Le moteur, qui PORTE la version, est revalidé à chaque fois
+   (`max-age=0`), comme l'ancien fichier statique.
+6. Lecture tronquée : sans objet (aucune lecture Supabase).
+7. Budget : **aucun appel ajouté, aucune requête Supabase.** La page charge
+   toujours `/shared/i18n/i18n.js`, puis les dictionnaires en parallèle. Le
+   CDN garde le moteur une heure (`s-maxage=3600`, clé de cache par
+   déploiement) : seule la première demande d'un déploiement, par région,
+   attend la fonction. `stale-while-revalidate` : effet non prouvé à côté de
+   `must-revalidate` (la norme HTTP l'interdit) ; au pire sans effet.
+8. Mesure AVANT / APRÈS, le 5 novembre 2026 vers 23 h 50, par `curl`
+   (`Accept-Encoding: br, gzip`) :
+
+   | | AVANT : production, fichier statique (main `66495863`) | APRÈS : staging, la fonction (`52f463fc`, modèle de `7c70c3a7`) |
+   |---|---|---|
+   | Appels | 1 | 1 |
+   | Requêtes Supabase | 0 | 0 |
+   | Octets (non compressés / br) | 5 991 / 2 755 | 6 405 / 2 940 |
+   | `Cache-Control` reçu | `public, max-age=0, must-revalidate` | identique (Vercel retire `s-maxage` et `stale-while-revalidate`) |
+   | `x-vercel-cache` | HIT | MISS à la 1re demande, puis HIT |
+   | Revalidation (`If-None-Match`) | 304, 0 octet | 304, 0 octet |
+
+   L'écart, +414 octets non compressés (+185 en br), ce sont les commentaires
+   du modèle. Le commit `8f95b42e` en ajoute 123 (6 528 octets servis, calculé
+   sur le modèle). La `VERSION` servie par staging, `1b368c6c2f9b`, est bien
+   l'empreinte recalculée des dictionnaires de staging. Pour des dictionnaires
+   inchangés, l'empreinte ne change pas (`849d31fadade` sur main) : le
+   déploiement de ce changement ne fait retélécharger aucun dictionnaire.
 
 Changer de langue : `I18n.set('en')` dans la console, ou ajouter le sélecteur
 `HSNav.renderLangSelector(container)` dans le menu ≡.

@@ -106,6 +106,86 @@ test('contre-epreuve : un dictionnaire change, la version servie change', () => 
   }
 })
 
+// ⚠ LA RAISON DU PASSAGE A « TOUS LES .json » (constat de review du
+// 5 novembre 2026) : une langue ajoutee doit entrer d'elle-meme dans
+// l'empreinte, et SES corrections ensuite aussi. On ajoute un `xx.json` SANS
+// toucher langues.json, pour que seul le nouveau fichier puisse faire bouger
+// la version. Contre-epreuve par mutation : une liste ecrite a la main dans
+// `fichiers()` (en, es, fr, langues) fait rougir ce test.
+test('LE TEST QUI COMPTE : une langue ajoutee entre d elle-meme dans l empreinte, et ses corrections aussi', () => {
+  const { empreinte: duModule } = require('../lib/i18n-version')
+  const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'i18n-'))
+  try {
+    for (const f of FICHIERS) fs.copyFileSync(path.join(DOSSIER, f), path.join(tmp, f))
+    const avant = duModule(tmp)
+    fs.writeFileSync(path.join(tmp, 'xx.json'), JSON.stringify({ 'offline.retry': 'xx' }))
+    const ajoutee = duModule(tmp)
+    assert.notEqual(ajoutee, avant, 'une langue ajoutee doit changer la version')
+    fs.writeFileSync(path.join(tmp, 'xx.json'), JSON.stringify({ 'offline.retry': 'xx corrige' }))
+    assert.notEqual(duModule(tmp), ajoutee, 'une correction de la langue ajoutee doit changer la version')
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+// ⚠ UN DICTIONNAIRE MANQUANT EST UNE ERREUR, JAMAIS UNE EMPREINTE (constat de
+// review du 5 novembre 2026). Avant ce controle : sans es.json la fonction
+// servait `43b6a2200079`, sans aucun .json `e3b0c44298fc`, en 200 — la meme
+// version a chaque deploiement, donc des dictionnaires figes un an en silence.
+test('LE TEST QUI COMPTE : un dictionnaire manquant leve, et la fonction rend 500 no-store', async () => {
+  const { empreinte: duModule, moteurI18n } = require('../lib/i18n-version')
+  const os = require('node:os')
+  const cas = [
+    ['es.json', /es\.json absent/], // une langue listee dans langues.json
+    ['fr.json', /fr\.json absent/], // le repli
+    ['langues.json', /langues\.json absent/]
+  ]
+  for (const [retire, attendu] of cas) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'i18n-'))
+    try {
+      for (const f of FICHIERS) if (f !== retire) fs.copyFileSync(path.join(DOSSIER, f), path.join(tmp, f))
+      assert.throws(() => duModule(tmp), attendu, `sans ${retire}, l empreinte doit etre refusee`)
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  }
+  // Dossier vide : refuse aussi, et pas l'empreinte du vide.
+  const vide = fs.mkdtempSync(path.join(os.tmpdir(), 'i18n-'))
+  try {
+    assert.throws(() => duModule(vide), /dictionnaires i18n incomplets/)
+  } finally {
+    fs.rmSync(vide, { recursive: true, force: true })
+  }
+  // langues.json illisible : refuse.
+  const casse = fs.mkdtempSync(path.join(os.tmpdir(), 'i18n-'))
+  try {
+    for (const f of FICHIERS) fs.copyFileSync(path.join(DOSSIER, f), path.join(casse, f))
+    fs.writeFileSync(path.join(casse, 'langues.json'), '{ pas du json')
+    assert.throws(() => duModule(casse), /langues\.json illisible/)
+  } finally {
+    fs.rmSync(casse, { recursive: true, force: true })
+  }
+  // Et le chemin servi : la fonction ne cache pas l'erreur, elle rend 500
+  // no-store (un 200 serait le silence que ce test existe pour refuser).
+  const mod = require.resolve('../lib/i18n-version')
+  const api = require.resolve('../api/i18n')
+  const vrai = require.cache[mod].exports.moteurI18n
+  delete require.cache[api]
+  require.cache[mod].exports.moteurI18n = () => { throw new Error('dictionnaires i18n incomplets : es.json absent(s)') }
+  try {
+    const r = fausseReponse()
+    const erreur = console.error
+    console.error = () => {}
+    try { await require('../api/i18n')({ method: 'GET' }, r) } finally { console.error = erreur }
+    assert.equal(r.code, 500)
+    assert.equal(r.entetes['cache-control'], 'no-store')
+  } finally {
+    require.cache[mod].exports.moteurI18n = vrai
+    delete require.cache[api]
+  }
+  assert.ok(moteurI18n().includes('const VERSION = "'), 'le vrai dossier, complet, reste servi')
+})
+
 test('le modele porte le jeton UNE fois, et aucune version ecrite a la main', () => {
   assert.equal(source.split("'__HS_I18N_VERSION__'").length - 1, 1)
   assert.doesNotMatch(sansCommentaires, /const VERSION = '[0-9a-f]{6,}'/,
