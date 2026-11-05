@@ -13,7 +13,8 @@ shared/
     langues.json   ← liste des langues → sélecteur construit automatiquement
     fr.json        ← référence
     en.json, es.json
-    i18n.js        ← t(), pluriels, dates/montants via Intl
+    i18n.modele.js ← t(), pluriels, dates/montants via Intl — MODELE : servi à
+                     /shared/i18n/i18n.js par api/i18n.js, version posée au déploiement
 pages/
   aujourdhui.html  ← page « Aujourd'hui », exemple complet qui utilise tout le socle
 scripts/
@@ -78,9 +79,40 @@ d'autre. C'est la règle à reprendre pour le balayage de la dette 81.
 ## Tester en local
 
 ```
-npx serve .    # ou vercel dev
+vercel dev
 open http://localhost:3000/pages/aujourdhui.html
 ```
+
+⚠ **Plus `npx serve .` seul** (5 novembre 2026) : `/shared/i18n/i18n.js` n'est
+plus un fichier, c'est `api/i18n.js` qui le sert, et un serveur statique rend
+404 — la page s'affiche sans aucun texte. `vercel dev` exécute la fonction. Un
+banc local qui sert le dépôt en statique doit répondre à cette adresse avec
+`require('./lib/i18n-version').moteurI18n()`.
+
+## ⚠ LA VERSION DES DICTIONNAIRES SE CALCULE AU DÉPLOIEMENT
+
+Les dictionnaires sont cachés un an, et leur URL porte une empreinte
+(`fr.json?v=<empreinte>`) qui les invalide. Cette empreinte était écrite à la
+main dans `i18n.js` : chaque lot qui touchait une traduction la changeait, et
+deux lots parallèles entraient **toujours** en conflit sur cette ligne, pour une
+valeur qu'aucun des deux n'avait juste. Depuis le 5 novembre 2026 (décision de
+Thierry du 28 octobre), `api/i18n.js` sert le moteur avec l'empreinte des
+dictionnaires déployés (`lib/i18n-version.js`, même algorithme qu'avant :
+sha256 de tous les `.json` du dossier triés — aujourd'hui en, es, fr,
+langues —, douze caractères ; une langue ajoutée y entre d'elle-même). **On ne touche plus à aucune
+version** : on modifie un dictionnaire, et c'est tout.
+`tests/i18n-version.test.js` appelle la fonction et mesure ce que le navigateur
+reçoit.
+
+**Case performance.** Aucune requête ajoutée : la page charge toujours
+`/shared/i18n/i18n.js`, puis les dictionnaires en parallèle. Le moteur passe
+par le CDN (`s-maxage=3600` et `stale-while-revalidate`, clé de cache par
+déploiement) ; seule la première demande d'un déploiement, par région, attend
+la fonction, les rafraîchissements suivants se font en arrière-plan. Le navigateur le
+revalide comme il revalidait le fichier statique (`max-age=0`), et les
+dictionnaires restent cachés un an. Empreinte inchangée pour des dictionnaires
+inchangés : le déploiement de ce changement ne fait retélécharger aucun
+dictionnaire.
 
 Changer de langue : `I18n.set('en')` dans la console, ou ajouter le sélecteur
 `HSNav.renderLangSelector(container)` dans le menu ≡.

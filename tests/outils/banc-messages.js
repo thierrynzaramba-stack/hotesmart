@@ -102,7 +102,7 @@ const FR = JSON.parse(lire('shared', 'i18n', 'fr.json'))
 // accolades : un double qui ne remplacerait que `{n}` rendrait les chaines ICU
 // telles quelles, et un test comparerait une chaine ICU a elle-meme.
 function fabriquerPlural (window) {
-  const src = lire('shared', 'i18n', 'i18n.js')
+  const src = lire('shared', 'i18n', 'i18n.modele.js')
   const i = src.indexOf('function plural(')
   if (i < 0) throw new Error('banc : la fonction plural de i18n.js est introuvable')
   let j = src.indexOf('{', i); let profondeur = 0; let fin = -1
