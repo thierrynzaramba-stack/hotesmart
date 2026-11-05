@@ -157,3 +157,23 @@ test('LE TEST QUI COMPTE : un horaire sans valeur n’est PAS un trou — il a u
   assert.equal(checkin.defaut, '18:00')
   assert.equal(f.find(x => x.cle === 'wifi_mdp').aRemplir, true, 'sans défaut, une absence reste à remplir')
 })
+
+test('LE TEST QUI COMPTE : « vide » suit le remplaceur AVEC LES REPLIS de l’envoi (fiche du logement)', () => {
+  // Constat MESURÉ de la seconde review : le test de parité appelait le
+  // remplaceur SANS replis, ce qu'aucun chemin d'envoi ne fait. Ici, les mêmes
+  // replis que `lib/cron-messages.js` (adresse et horaires de la fiche).
+  const { remplacerBalises, DE_LA_BASE } = require('../lib/balises')
+  const replis = { adresse: '1 rue Fiche', checkin: '16:00', checkout: '11:00' }
+  for (const cle of DE_LA_BASE) {
+    const r = remplacerBalises(`x {${cle}} y`, { reservation: {}, connaissance: {}, replis })
+    const { segments } = enEtiquettes(`x {${cle}} y`, {}, replis)
+    assert.equal(segments[1].vide, r.manquants.includes(cle), `${cle} : l’écran et l’envoi disent la même chose`)
+  }
+  const f = faits([], { maintenant: MAINTENANT, replis })
+  const adresse = f.find(x => x.cle === 'adresse')
+  assert.equal(adresse.aRemplir, false, 'l’adresse part au voyageur depuis la fiche')
+  assert.equal(adresse.repli, '1 rue Fiche')
+  assert.equal(f.find(x => x.cle === 'checkin').repli, '16:00')
+  // Un repli blanc n'est pas une valeur (même règle que le remplaceur).
+  assert.equal(faits([], { replis: { adresse: '   ' } }).find(x => x.cle === 'adresse').aRemplir, true)
+})

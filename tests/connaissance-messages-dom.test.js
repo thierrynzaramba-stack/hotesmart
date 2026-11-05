@@ -183,3 +183,30 @@ test('changer de volet SANS saisie ne dit rien', async () => {
   assert.equal(b.note(), null)
   b.fermer()
 })
+
+test('changer de volet PENDANT un enregistrement ne prétend pas que la saisie est perdue', async () => {
+  let lacher
+  const b = monter({
+    titulaire: true,
+    appel: async (chemin, corps) => {
+      if (/^\/api\/ecran\/connaissance/.test(chemin)) {
+        if (corps) return new Promise(r => { lacher = () => r({ ok: true }) })
+        return { ...ECRAN }
+      }
+      return {}
+    }
+  })
+  await amorcer(b)
+  peupler(b, { biens: BIENS, volet: 'connaissance', bien: 'P1' })
+  await reposer(b)
+  clic(b, b.doc.querySelector('[data-kb-ouvrir="r1"]'))
+  b.doc.querySelector('[data-kb-sujet]').value = 'Wifi corrigé'
+  clic(b, b.doc.querySelector('[data-kb-enregistrer]'))
+  await reposer(b)
+  clic(b, boutonVolet(b, 'programmes'))
+  await reposer(b)
+  assert.equal(b.note(), null, 'l écriture est partie : rien n est perdu')
+  lacher(); await reposer(b)
+  assert.equal(b.envois.filter(e => e.methode === 'POST' && /connaissance/.test(e.chemin)).length, 1)
+  b.fermer()
+})

@@ -17,8 +17,8 @@ const TITULAIRE = '11111111-1111-4111-8111-111111111111'
 const MEMBRE = '22222222-2222-4222-8222-222222222222'
 
 const BIENS = [
-  { id: 'u-1', name: 'La bulle', provider_property_id: 'P1', photo_url: null },
-  { id: 'u-2', name: 'Cœur', provider_property_id: 'P2', photo_url: 'https://x.test/p2.jpg' }
+  { id: 'u-1', name: 'La bulle', provider_property_id: 'P1', photo_url: null, address: null, checkin_time: null, checkout_time: null },
+  { id: 'u-2', name: 'Cœur', provider_property_id: 'P2', photo_url: 'https://x.test/p2.jpg', address: '9 rue Fiche', checkin_time: '16:00', checkout_time: null }
 ]
 
 // ⚠ LES DATES SONT RELATIVES : `voyageurDuBien` lit l'horloge (« séjours dont
@@ -422,4 +422,30 @@ test('le jour de référence du « prochain voyageur » est celui de PARIS', () 
   const { jourParis } = require('../api/ecran/connaissance')
   assert.equal(jourParis(new Date('2026-12-31T23:30:00Z')), '2027-01-01')
   assert.equal(jourParis(new Date('2026-07-01T21:30:00Z')), '2026-07-01')
+})
+
+test('LE TEST QUI COMPTE : l écran et l aperçu suivent la FICHE du logement quand la base se tait', async () => {
+  // Les mêmes replis que l'envoi (lib/cron-messages.js) : adresse et horaires de
+  // `properties`, lus dans la requête des biens — aucune requête de plus.
+  const r = await appeler({
+    query: { bien: 'P2' },
+    repondre: base({ lignes: [{ id: 'a', type: 'faq', key: 'Accès', value: 'Au {adresse} dès {checkin}', verifie_le: null, lisible_par_ia: true }] })
+  })
+  assert.equal(r.statut, 200)
+  assert.equal(r.requetes.length, 3, 'toujours trois requêtes')
+  assert.match(r.requetes.find(q => q.table === 'properties').colonnes, /address, checkin_time, checkout_time/)
+  const c = r.charge.reponses[0]
+  assert.equal(c.apercu, 'Au 9 rue Fiche dès 16:00', 'ce que le voyageur recevra')
+  assert.ok(c.segments.filter(s => s.cle).every(s => s.vide === false), 'pas d étiquette rouge : la fiche les remplit')
+  const adresse = r.charge.faits.find(f => f.cle === 'adresse')
+  assert.equal(adresse.aRemplir, false)
+  assert.equal(adresse.repli, '9 rue Fiche')
+})
+
+test('les bornes de taille rendent un CODE stable, que l écran sait lire', async () => {
+  const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'faq', key: 'S', value: 'x'.repeat(4001) }, repondre: base() })
+  assert.equal(r.statut, 400)
+  assert.equal(r.charge.error, 'trop_long')
+  const f = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'adresse', value: 'x'.repeat(1001) }, repondre: base() })
+  assert.equal(f.charge.error, 'trop_long')
 })

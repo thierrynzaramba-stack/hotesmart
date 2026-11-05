@@ -190,11 +190,16 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     }
     // Une valeur vide AVEC un défaut (les horaires) montre ce que le voyageur
     // recevra, marqué « par défaut » — pas un « À remplir » qui serait faux.
+    // … et la fiche du logement passe AVANT le défaut, comme dans le
+    // remplaceur : c'est ce que le voyageur recevra vraiment.
+    const vide = !String(f.valeur || '').trim()
     const valeur = f.aRemplir
       ? `<span class="kb-fait__valeur kb-a-remplir">${esc(t('kb.to_fill'))}</span>`
-      : !String(f.valeur || '').trim() && f.defaut
-        ? `<span class="kb-fait__valeur">${esc(f.defaut)} <span class="caption muted">${esc(t('kb.by_default'))}</span></span>`
-        : `<span class="kb-fait__valeur">${esc(f.valeur)}</span>`
+      : vide && f.repli
+        ? `<span class="kb-fait__valeur">${esc(f.repli)} <span class="caption muted">${esc(t('kb.from_property'))}</span></span>`
+        : vide && f.defaut
+          ? `<span class="kb-fait__valeur">${esc(f.defaut)} <span class="caption muted">${esc(t('kb.by_default'))}</span></span>`
+          : `<span class="kb-fait__valeur">${esc(f.valeur)}</span>`
     const sous = f.sansBalise ? `<span class="caption muted">${esc(t('kb.ai_only'))}</span>` : ''
     const verrou = f.horsIa ? `<span class="kb-badge kb-badge--horsia">${icone('i-lock')}${esc(t('kb.no_ai'))}</span>` : ''
     return `<div class="kb-fait">
@@ -342,6 +347,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
       sujetCourant: c ? c.sujet : '', segmentsCourants: c ? c.segments : [], lisibleCourant: c ? !c.horsIa : true
     }
     etat.apercu = c ? { texte: c.apercu, prenom: r.voyageur && r.voyageur.prenom } : null
+    // Un aperçu demandé pour l'éditeur PRÉCÉDENT ne peint pas celui-ci.
+    demandeApercu++
+    if (minuteur) { clearTimeout(minuteur); minuteur = null }
     etat.mode = 'edition'
     etat.note = null
     peindre()
@@ -361,7 +369,12 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     }
   }
 
+  // ⚠ UNE ÉCRITURE EN VOL N'EST PLUS UNE SAISIE PERDUE — constat MESURÉ de la
+  // seconde review. L'hôte clique Enregistrer puis change de volet avant la
+  // réponse : la note disait « pas enregistrée » alors que le POST aboutissait,
+  // et il retapait sa réponse pour se heurter au 409 « sujet existe ».
   function enEdition () {
+    if (enCours) return false
     if (etat.mode === 'fait' && etat.fait) {
       const champ = racine.querySelector('[data-kb-fait-saisie]')
       return !!champ && champ.value.trim() !== String(etat.fait.initial || '').trim()
@@ -443,7 +456,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     if (e && e.status === 503) return t('kb.migration_missing')
     if (e && e.status === 403) return t('kb.no_access')
     if (e && e.status === 404) return t('kb.not_found')
-    if (e && e.status === 400) return t('kb.too_long', { max: KB_MAX_TEXTE })
+    if (e && e.status === 400 && e.code === 'trop_long') return t('kb.too_long')
     return t('kb.save_error')
   }
 
@@ -455,7 +468,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     if (!l.sujet) { etat.note = { texte: t('kb.subject_required') }; repeindreNote(); return }
     if (!l.texte.trim()) { etat.note = { texte: t('kb.message_required') }; repeindreNote(); return }
     if (l.texte.length > KB_MAX_TEXTE || l.sujet.length > KB_MAX_SUJET) {
-      etat.note = { texte: t('kb.too_long', { max: KB_MAX_TEXTE }) }; repeindreNote(); return
+      etat.note = { texte: t('kb.too_long') }; repeindreNote(); return
     }
     enCours = true
     geler(true)
@@ -566,6 +579,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
 
   function revenirALaListe () {
     etat.mode = 'liste'; etat.edition = null; etat.fait = null; etat.apercu = null; etat.note = null
+    demandeApercu++
     if (minuteur) { clearTimeout(minuteur); minuteur = null }
     peindre()
   }
@@ -640,7 +654,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     if (!sel) return
     // Second verrou, côté geste : on ne change JAMAIS de logement sous un
     // éditeur ouvert, quel que soit l'état du `disabled`.
-    if (etat.mode !== 'liste' || enCours) { sel.value = etat.ref || ''; return }
+    // (Pas de verrou sur l'écriture en vol : pendant une écriture le mode n'est
+    // jamais « liste », et après, la liste repeinte est le bon moment.)
+    if (etat.mode !== 'liste') { sel.value = etat.ref || ''; return }
     etat.note = null
     recharger(sel.value)
   }

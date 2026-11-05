@@ -132,11 +132,21 @@ async function voyageurDuBien (compte, ref, resa, compteur) {
 // L'aperçu passe par LE remplaceur du dépôt (`lib/balises.js`), jamais par une
 // copie : c'est l'objet du lot 1, et un aperçu calculé autrement mentirait sur
 // ce que le voyageur recevra.
+// ⚠ AVEC LES MÊMES REPLIS QUE L'ENVOI — constat de la seconde review :
+// `lib/cron-messages.js` passe au remplaceur la fiche du logement (adresse,
+// horaires) quand la base se tait. Sans eux, l'aperçu disait « 18:00 » là où le
+// voyageur reçoit l'horaire de la fiche, et « [ADRESSE] » là où l'adresse part.
+// Le téléphone n'a pas de colonne (il vit dans la base) : pas de repli ici.
+const replisDuBien = (bien) => ({
+  adresse: bien.address, checkin: bien.checkin_time, checkout: bien.checkout_time
+})
+
 function apercu (texte, connaissance, voyageur, bien) {
   const v = voyageur || {}
   const r = remplacerBalises(texte, {
     reservation: { prenom: v.prenom, nom: v.nom, arrivee: v.arrivee, depart: v.depart, logement: bien.name },
-    connaissance
+    connaissance,
+    replis: replisDuBien(bien)
   })
   return { texte: r.texte, manquants: r.manquants, codeNonResolu: r.codeNonResolu === true }
 }
@@ -170,7 +180,7 @@ module.exports = async (req, res) => {
     // ⚠ UN BIEN ARCHIVÉ N'APPARAÎT NULLE PART (règle de Thierry, 3 novembre
     // 2026) — et on ne règle pas les réponses d'un logement qui ne loue plus.
     const { data: tousLesBiens, error: eB } = await supabase.from('properties')
-      .select('id, name, provider_property_id, photo_url')
+      .select('id, name, provider_property_id, photo_url, address, checkin_time, checkout_time')
       .eq('user_id', accountUserId).is('archive_le', null).order('name')
     compteur.n++
     if (eB) throw new Error(eB.message)
@@ -192,7 +202,7 @@ module.exports = async (req, res) => {
 
       if (action === 'apercu') {
         const texte = String(corps.texte == null ? '' : corps.texte)
-        if (texte.length > MAX_TEXTE) return res.status(400).json({ error: 'Texte trop long' })
+        if (texte.length > MAX_TEXTE) return res.status(400).json({ error: 'trop_long', message: 'Texte trop long' })
         const [lu, voyageur] = await Promise.all([
           supabase.from('knowledge').select('key, value')
             .eq('user_id', accountUserId).eq('property_id', ref).eq('type', 'fixed')
@@ -248,7 +258,7 @@ module.exports = async (req, res) => {
         const cle = String(corps.key || '').trim()
         if (!cle || cle.length > MAX_CLE) return res.status(400).json({ error: 'Information non désignée' })
         const valeur = String(corps.value == null ? '' : corps.value).trim()
-        if (valeur.length > MAX_FAIT) return res.status(400).json({ error: 'Valeur trop longue' })
+        if (valeur.length > MAX_FAIT) return res.status(400).json({ error: 'trop_long', message: 'Valeur trop longue' })
         if (!valeur) {
           const { error } = await supabase.from('knowledge').delete()
             .eq('user_id', accountUserId).eq('property_id', ref).eq('type', 'fixed').eq('key', cle)
@@ -271,10 +281,12 @@ module.exports = async (req, res) => {
       // Une réponse prête.
       const sujet = String(corps.key || '').trim()
       if (!sujet) return res.status(400).json({ error: 'Le sujet est obligatoire' })
-      if (sujet.length > MAX_SUJET) return res.status(400).json({ error: 'Sujet trop long' })
+      if (sujet.length > MAX_SUJET) return res.status(400).json({ error: 'trop_long', message: 'Sujet trop long' })
       const texte = String(corps.value == null ? '' : corps.value)
       if (!texte.trim()) return res.status(400).json({ error: 'Le message est vide' })
-      if (texte.length > MAX_TEXTE) return res.status(400).json({ error: 'Message trop long' })
+      // ⚠ UN CODE STABLE (`trop_long`) POUR LES BORNES DE TAILLE : l'écran ne
+      // dit « trop long » que sur lui, jamais sur un autre 400 (seconde review).
+      if (texte.length > MAX_TEXTE) return res.status(400).json({ error: 'trop_long', message: 'Message trop long' })
       const champs = { key: sujet, value: texte, verifie_le: maintenant }
       if (lisible === true || lisible === false) champs.lisible_par_ia = lisible
 
@@ -315,9 +327,10 @@ module.exports = async (req, res) => {
     ])
 
     const connaissance = faitsEnObjet(lignes)
+    const replis = replisDuBien(choisi)
     const maintenant = Date.now()
     const reponses = lignes.filter(l => l.type !== 'fixed')
-      .map(l => ({ ...carte(l, { connaissance, maintenant }), apercu: apercu(l.value, connaissance, voyageur, choisi).texte }))
+      .map(l => ({ ...carte(l, { connaissance, replis, maintenant }), apercu: apercu(l.value, connaissance, voyageur, choisi).texte }))
       .sort((a, b) => a.sujet.localeCompare(b.sujet, 'fr'))
 
     timing()
@@ -325,7 +338,7 @@ module.exports = async (req, res) => {
       migration,
       biens: biens.map(p => ({ ref: String(p.provider_property_id), nom: p.name, photo: p.photo_url || null })),
       bien: { ref, nom: choisi.name, photo: choisi.photo_url || null },
-      faits: faits(lignes, { maintenant }),
+      faits: faits(lignes, { maintenant, replis }),
       reponses,
       // ⚠ LES BALISES INSÉRABLES VIENNENT DU MODULE, JAMAIS RECOPIÉES DANS LA
       // PAGE : le jour où une balise change de libellé, elle change partout.

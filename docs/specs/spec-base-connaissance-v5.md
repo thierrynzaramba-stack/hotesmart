@@ -253,11 +253,14 @@ Un par un, **recette staging entre chaque**.
   bord noir, Annuler en bleu, Supprimer en rouge par une fenêtre dans la page.
 - **« Infos du logement »** sous les réponses : chaque valeur se corrige sur
   place ; vide = « À remplir » en rouge ; vider une valeur supprime la ligne.
-  ⚠ **Sauf les horaires** (`checkin`, `checkout`) : ils ont un DÉFAUT dans
-  `lib/balises.js` (18:00, 10:00 — « un fait, pas un trou »), le voyageur le
-  reçoit, et l'écran le montre « 18:00 par défaut » au lieu d'un « À remplir »
-  qui serait faux. Même règle pour l'étiquette rouge dans les textes : elle suit
-  les `manquants` du remplaceur, testé balise par balise (review du lot 3).
+  ⚠ **« À remplir » veut dire « le voyageur recevrait un trou »**, dans l'ordre
+  du remplaceur : la base, puis la **fiche du logement** (`properties.address`,
+  `checkin_time`, `checkout_time` — les replis que l'envoi passe déjà), puis le
+  **défaut** des horaires (18:00, 10:00 — « un fait, pas un trou »,
+  `lib/balises.js`). L'écran montre « 16:00 · fiche du logement » ou « 18:00 ·
+  par défaut » au lieu d'un « À remplir » qui serait faux, et l'aperçu reçoit
+  les mêmes replis. L'étiquette rouge dans les textes suit la même règle, testée
+  balise par balise contre le remplaceur AVEC les replis (reviews 1 et 2).
 - **L'écriture ligne à ligne** : une réponse par son `id`, un fait par sa clé ;
   un sujet déjà pris rend 409 et n'écrase rien.
 - **« Hors IA » est TENU côté modèle** : `buildKnowledgeText`

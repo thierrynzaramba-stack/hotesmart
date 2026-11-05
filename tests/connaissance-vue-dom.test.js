@@ -66,7 +66,7 @@ async function monter ({ repondre, selecteur = false, bien = 'P1', resa = null }
     // prototypes, et un objet jsdom n'a pas l'`Object` de Node.
     envois.push({ chemin, corps: corps ? JSON.parse(JSON.stringify(corps)) : null })
     const r = repondre ? await repondre(chemin, corps) : null
-    if (r && r.__statut) { const e = new Error('refus'); e.status = r.__statut; throw e }
+    if (r && r.__statut) { const e = new Error('refus'); e.status = r.__statut; e.code = r.__code || null; throw e }
     return r || (corps ? { ok: true } : ecran())
   }
   const t = (k, v) => {
@@ -430,7 +430,7 @@ test('un texte trop long est refusé AVANT l envoi, sans « réessayez »', asyn
   clic(b, b.racine.querySelector('[data-kb-enregistrer]'))
   await reposer()
   assert.equal(ecritures(b).length, 0)
-  assert.equal(b.racine.querySelector('[data-kb-note]').textContent, 'Texte trop long : 4000 caractères au plus')
+  assert.equal(b.racine.querySelector('[data-kb-note]').textContent, 'Texte trop long : raccourcissez-le')
   b.fermer()
 })
 
@@ -440,5 +440,80 @@ test('une réponse supprimée ailleurs (404) le dit, sans proposer de réessayer
   clic(b, b.racine.querySelector('[data-kb-enregistrer]'))
   await reposer()
   assert.equal(b.racine.querySelector('[data-kb-note]').textContent, 'Cette réponse n’existe plus : rechargez l’écran')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : une écriture EN VOL n est pas une saisie perdue', async () => {
+  // Constat MESURÉ de la seconde review : changer de volet pendant
+  // l'enregistrement faisait dire « pas enregistrée » à une réponse qui l'était.
+  let lacher
+  const b = await monter({ repondre: (chemin, corps) => (corps ? new Promise(r => { lacher = () => r({ ok: true }) }) : ecran()) })
+  clic(b, b.racine.querySelector('[data-kb-ouvrir="r2"]'))
+  b.racine.querySelector('[data-kb-sujet]').value = 'Code de la porte'
+  assert.equal(b.vue.enEdition(), true)
+  clic(b, b.racine.querySelector('[data-kb-enregistrer]'))
+  await reposer()
+  assert.equal(b.vue.enEdition(), false, 'l écriture part : rien n est perdu')
+  lacher(); await reposer()
+  b.fermer()
+})
+
+test('un aperçu demandé pour une réponse ne peint PAS la suivante', async () => {
+  let lacher
+  const b = await monter({
+    repondre: (chemin, corps) => (corps && corps.action === 'apercu'
+      ? new Promise(r => { lacher = () => r({ ok: true, apercu: { texte: 'APERCU de r2' }, voyageur: null }) })
+      : ecran())
+  })
+  clic(b, b.racine.querySelector('[data-kb-ouvrir="r2"]'))
+  const p = b.vue.rafraichirApercu()
+  clic(b, b.racine.querySelector('[data-kb-annuler]'))
+  clic(b, b.racine.querySelector('[data-kb-ouvrir="r1"]'))
+  lacher(); await p
+  assert.ok(!/APERCU de r2/.test(b.racine.querySelector('[data-kb-apercu]').textContent))
+  b.fermer()
+})
+
+test('un 400 qui n est pas « trop long » ne le prétend pas', async () => {
+  const b = await monter({ repondre: (chemin, corps) => (corps ? { __statut: 400, __code: 'Information non désignée' } : ecran()) })
+  clic(b, b.racine.querySelector('[data-kb-ouvrir="r2"]'))
+  clic(b, b.racine.querySelector('[data-kb-enregistrer]'))
+  await reposer()
+  assert.equal(b.racine.querySelector('[data-kb-note]').textContent, 'Enregistrement impossible, réessayez')
+  b.fermer()
+})
+
+test('le serveur dit « trop long » par son CODE, et l écran le reprend', async () => {
+  const b = await monter({ repondre: (chemin, corps) => (corps ? { __statut: 400, __code: 'trop_long' } : ecran()) })
+  clic(b, b.racine.querySelector('[data-kb-modifier-fait="wifi_mdp"]'))
+  b.racine.querySelector('[data-kb-fait-saisie]').value = 'abc'
+  clic(b, b.racine.querySelector('[data-kb-fait-enregistrer]'))
+  await reposer()
+  assert.equal(b.racine.querySelector('[data-kb-note]').textContent, 'Texte trop long : raccourcissez-le')
+  b.fermer()
+})
+
+test('une information vide en base mais présente sur la FICHE du logement montre la fiche, avant le défaut', async () => {
+  const e = ecran()
+  e.faits.push({ cle: 'adresse', libelle: 'Adresse', balise: '{adresse}', valeur: '', repli: '1 rue Fiche', defaut: null, aRemplir: false, horsIa: false, sansBalise: false })
+  e.faits.push({ cle: 'checkin', libelle: "Heure d'arrivée", balise: '{checkin}', valeur: '', repli: '16:00', defaut: '18:00', aRemplir: false, horsIa: false, sansBalise: false })
+  const b = await monter({ repondre: () => e })
+  const ligne = (lib) => [...b.racine.querySelectorAll('.kb-fait')].find(x => x.querySelector('.kb-fait__libelle').textContent === lib)
+  assert.equal(ligne('Adresse').querySelector('.kb-fait__valeur').textContent, '1 rue Fiche fiche du logement')
+  assert.equal(ligne("Heure d'arrivée").querySelector('.kb-fait__valeur').textContent, '16:00 fiche du logement')
+  b.fermer()
+})
+
+test('juste après un enregistrement, le sélecteur de logement répond de nouveau', async () => {
+  const b = await monter({ selecteur: true, repondre: (chemin, corps) => (corps ? { ok: true } : ecran({ ref: /bien=P2/.test(chemin) ? 'P2' : 'P1' })) })
+  clic(b, b.racine.querySelector('[data-kb-ouvrir="r2"]'))
+  clic(b, b.racine.querySelector('[data-kb-enregistrer]'))
+  await reposer()
+  const sel = b.racine.querySelector('[data-kb-bien]')
+  assert.equal(sel.disabled, false)
+  sel.value = 'P2'
+  sel.dispatchEvent(new b.w.Event('change', { bubbles: true }))
+  await reposer()
+  assert.equal(b.vue.ref, 'P2')
   b.fermer()
 })
