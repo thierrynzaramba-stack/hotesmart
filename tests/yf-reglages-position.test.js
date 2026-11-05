@@ -381,3 +381,92 @@ test('LE TEST QUI COMPTE : tant que la migration n est pas collée, un réglage 
   assert.match(lu, /\.from\(TABLE\)\.select\('\*'\)/, 'la lecture prend `*` : une colonne absente ne la fait pas lever')
   await assert.rejects(RS.poserReglage(sb, { userId: COMPTE, propertyId: BIEN, segment: 'x', weekends_apres: 5 }), /hors bornes/)
 })
+
+// ─── 2b : le moteur lit le niveau posé nuit par nuit ─────────────────────────
+const S = require('../lib/yield/suggestion')
+const R2 = require('../lib/yield/reference')
+const { prixDeLaNuit } = require('../lib/yield/contexte-du-bien')
+const NIV = [115, 125, 140, 155, 165]
+function grille ({ sansStructure = false } = {}) {
+  const niveaux = S.NIVEAUX.map((x, i) => ({ ...x, prix: NIV[i], prix_mesure: NIV[i], etire: false }))
+  const pos = indice => ({ fiable: true, indice, niveau: niveaux[indice].nom, crans: 0, echantillon: 40, reservations: 20, mediane: NIV[indice] })
+  return {
+    base: { fiable: true, echantillon: 854, reservations: 400, niveaux, min: 35, max: 295, plafond: 295 },
+    positions: sansStructure ? new Map() : new Map([['hors_vacances', { ...pos(1), crans: 0 }]]),
+    positions_jour: sansStructure ? new Map() : new Map([['hors_vacances|samedi', pos(4)], ['hors_vacances|mardi', pos(0)]])
+  }
+}
+const CTX = R2.construireContexte({ zoneBien: 'C', vacances: [], debut: '2025-01-01', fin: '2027-12-31' })
+const SAMEDI = '2026-11-21'
+const MARDI = '2026-11-17'
+const nuit = (g, date, extra = {}) => S.suggerer({ date, grille: g, contexte: CTX, ouverte: true, delaiJours: 30, bien: { prix_minimum: 1 }, ...extra })
+const pose = (niveau, cle = 'evenement:salon') => ({ niveau, cle, zone: 'evenement', ligne: { id: 'l-x' } })
+
+test('LE TEST QUI COMPTE (2b) : le niveau posé pour une nuit devient son niveau de départ, au-dessus de la mesure — et le dit', () => {
+  const g = grille()
+  assert.equal(nuit(g, MARDI).niveau, 'Base', 'sans réglage : la mesure du mardi')
+  const s = nuit(g, MARDI, { reglagePosition: pose('Très haut') })
+  assert.deepEqual([s.niveau, s.prix, s.niveau_de_depart, s.source_du_niveau, s.ajuste_par_l_hote], ['Très haut', 155, 'Très haut', 'reglage', true])
+  assert.deepEqual(s.reglage_position, { cle: 'evenement:salon', zone: 'evenement', ligne: 'l-x' })
+  assert.equal(s.niveau_sans_reglage_position, 'Base')
+  const c = s.couches.find(x => x.nom === 'position')
+  assert.equal(c.agit, true)
+  assert.match(c.resume, /Très haut — c’est vous qui l’avez posé pour cette nuit$/)
+  assert.match(c.detail, /le calcul disait Base$/)
+})
+
+test('LE TEST QUI COMPTE (2b) : `calcul` ne pose AUCUN niveau ; un niveau inconnu non plus — la nuit garde son calcul', () => {
+  const g = grille()
+  const avant = nuit(g, SAMEDI)
+  for (const niveau of ['calcul', 'un peu plus cher', null]) {
+    const s = nuit(g, SAMEDI, { reglagePosition: pose(niveau) })
+    assert.deepEqual([s.niveau, s.prix, s.source_du_niveau, s.reglage_position], [avant.niveau, avant.prix, avant.source_du_niveau, undefined], String(niveau))
+  }
+})
+
+test('LE TEST QUI COMPTE (2b) : un niveau posé s applique même quand le moteur ne sait rien construire', () => {
+  const g = grille({ sansStructure: true })
+  assert.ok(nuit(g, MARDI).non_calculable.length, 'sans réglage : non calculable')
+  const s = nuit(g, MARDI, { reglagePosition: pose('Haut') })
+  assert.deepEqual([s.niveau, s.prix, s.non_calculable], ['Haut', 140, []])
+  assert.equal(s.niveau_sans_reglage_position, null)
+})
+
+test('LE TEST QUI COMPTE (2b) : le réglage de l hôte qui BAISSE prime sur la preuve N-1 ; celui qui monte la laisse jouer', () => {
+  const g = grille()
+  const preuveN1 = { date: '2025-11-22', prix: 230, ventes: 1, meme_segment: true, hors_reference: false }
+  assert.equal(nuit(g, SAMEDI, { preuveN1 }).prix, 230, 'sans réglage : la prime prouvée')
+  const bas = nuit(g, SAMEDI, { preuveN1, reglagePosition: pose('Moyen') })
+  assert.deepEqual([bas.niveau, bas.prix], ['Moyen', 125], 'posé SOUS le calcul (Exceptionnel) : la preuve ne le remonte pas')
+  const haut = nuit(g, MARDI, { preuveN1: { ...preuveN1, date: '2025-11-18', prix: 150 }, reglagePosition: pose('Moyen') })
+  assert.equal(haut.niveau_sans_reglage_position, 'Base')
+  assert.ok(haut.prix >= 125, 'posé AU-DESSUS du calcul : rien ne le retient')
+})
+
+test('LE TEST QUI COMPTE (2b) : `prixDeLaNuit` passe au moteur le niveau résolu pour CETTE nuit, et rien pour les autres', () => {
+  const ctx = { auj: '2026-11-01', contexte: CTX, grille: grille(), pressionParMois: new Map(), vendues: {}, bien: { prix_minimum: 1 },
+    reglages: new Map(), positions: { parNuit: new Map([[MARDI, pose('Exceptionnel')]]), sansNuit: [] } }
+  const s = prixDeLaNuit(ctx, MARDI, { ouverte: true, vendue: false })
+  assert.deepEqual([s.niveau_de_depart, s.reglage_position && s.reglage_position.cle], ['Exceptionnel', 'evenement:salon'])
+  const autre = prixDeLaNuit(ctx, '2026-11-24', { ouverte: true, vendue: false })
+  assert.equal(autre.reglage_position, undefined)
+  // Un contexte d'avant le lot (sans `positions`) tarife comme avant.
+  const ancien = prixDeLaNuit({ ...ctx, positions: undefined }, MARDI, { ouverte: true, vendue: false })
+  assert.equal(ancien.niveau_de_depart, 'Base')
+})
+
+test('2b : la porte du moteur ne calcule rien sans ligne ; avec des lignes, elle lit coupures et largeurs dans les réglages d événement', () => {
+  const vide = P.positionsDuContexte({ lignes: [], debut: '2026-11-05', fin: '2027-11-05' })
+  assert.deepEqual([vide.parNuit.size, vide.sansNuit.length], [0, 0])
+  const cle = 'commercial:saint_valentin'
+  const reglages = new Map([[cle, { segment: cle, crans: null, actif: true, weekends_avant: 1, weekends_apres: null }]])
+  const r = P.positionsDuContexte({ lignes: [ligne(cle, 'avant', 1, 'vendredi', null, 'Haut')], reglages, zoneBien: 'C', vacances: [],
+    evenements: datesCommerciales('2027-01-01', '2027-03-01'), debut: '2027-01-01', fin: '2027-03-01' })
+  assert.equal(niv(r, '2027-02-12'), 'Haut')
+  const coupe = P.positionsDuContexte({ lignes: [ligne(cle, 'avant', 1, 'vendredi', null, 'Haut')],
+    reglages: new Map([[cle, { ...reglages.get(cle), actif: false }]]), zoneBien: 'C', vacances: [],
+    evenements: datesCommerciales('2027-01-01', '2027-03-01'), debut: '2027-01-01', fin: '2027-03-01' })
+  assert.equal(coupe.parNuit.size, 0, 'une date que l hôte a coupée n applique rien')
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'yield', 'contexte-du-bien.js'), 'utf8')
+  assert.match(src, /Promise\.all\(\[\s*reglagesDuBien\(supabase, bien\.id\), lignesDuBien\(supabase, bien\.id\)\]\)/, 'les deux lectures partent ensemble')
+})
