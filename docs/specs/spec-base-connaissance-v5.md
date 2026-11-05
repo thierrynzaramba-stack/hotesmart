@@ -234,6 +234,51 @@ Un par un, **recette staging entre chaque**.
 
 ---
 
+## 4 bis. INVENTAIRE de `apps/agent-ai/knowledge.html` (lot 3)
+
+⚠ **Règle du dépôt : une spec UI ne supprime jamais une fonction métier par
+omission.** Les 470 lignes de la page en service ont été lues ; ce qui suit dit
+pour chaque élément s'il est **conservé**, **déplacé** ou **retiré AVEC RAISON**.
+
+| ce que la page fait aujourd'hui | V5 |
+|---|---|
+| **Sélecteur de logement** (`/api/channel-property`) | **conservé** — en tête du volet et de la page téléphone, avec la photo du bien. |
+| **Six champs fixes** : adresse, téléphone, heure de check-in, heure de check-out, nom wifi, mot de passe wifi | **conservés**, dans le bloc « Infos du logement », **sous** les réponses prêtes. Une valeur vide s'affiche « À remplir » en rouge. |
+| **Liste de FAQ** (sujet + réponse), ajout et suppression ligne à ligne | **conservée**, devenue « Réponses prêtes » : une carte par réponse, icône + sujet + texte. |
+| **Compteur « N entrées »** | **retiré AVEC RAISON** : la maquette validée ne le porte pas, et le nombre se lit en regardant la liste. Rien ne s'y décide. |
+| **Témoin « Modifications non sauvegardées »** | **remplacé** : la V5 enregistre réponse par réponse (écran « Modifier une réponse prête »), il n'y a donc plus d'état global non enregistré à signaler. |
+| **Bouton « ⬇️ Importer depuis Beds24 »** | ⚠ **DÉCISION DE THIERRY ATTENDUE.** Il est aujourd'hui **masqué par défaut** (`display:none`) et ne s'affiche que pour un bien Beds24. La maquette validée ne le porte pas. **Par défaut je le CONSERVE à l'identique** (masqué, même condition) plutôt que de le supprimer par omission — mais il n'a pas sa place dans la charte V5, et le parc migre vers Channex. |
+| **Badge « Beds24 »** sur une réponse importée | **conservé** tant que l'import l'est : il dit d'où vient le texte. |
+| **Sauvegarde** : `delete` de toutes les lignes du bien, puis `insert` | ⚠ **REMPLACÉE, ET C'EST UNE CORRECTION, PAS UNE REFONTE.** Voir ci-dessous. |
+| **Écriture directe en base depuis le navigateur** (RLS) | **déplacée** derrière un endpoint d'écran (`/api/ecran/connaissance`), règle 1 de la performance et garde unique `contexteDEcran`. |
+
+### ⚠ Pourquoi la sauvegarde ne peut PAS rester ce qu'elle est
+
+`apps/agent-ai/knowledge.html` supprime **toutes** les lignes du bien puis les
+réinsère. Trois conséquences, et la troisième est bloquante pour ce lot :
+
+1. **`created_at` est perdu à chaque enregistrement** : toute entrée paraît
+   écrite aujourd'hui. C'est ce qui rendait l'âge du rapport peu fiable.
+2. **Une panne entre le `delete` et l'`insert` vide la base du bien.** Il n'y a
+   ni transaction, ni retour arrière : le navigateur peut se fermer entre les
+   deux.
+3. ⚠ **`verifie_le` et `lisible_par_ia` seraient effacés à chaque
+   enregistrement** — donc le badge « À revoir » et la portée IA ne tiendraient
+   pas une sauvegarde. **La V5 écrit ligne à ligne, par `id`.**
+
+### Ce que la V5 ajoute, et qui n'existait pas
+
+- **`verifie_le`** : posé **quand l'hôte enregistre**, jamais par le système.
+  Badge ambre **« À revoir »** au-delà de **90 jours** — et c'est le **seul
+  ambre de l'écran** (charte V5).
+- **`lisible_par_ia`** : badge gris **« Hors IA »** avec un cadenas. Un fait
+  marqué ainsi n'entre pas dans le contexte envoyé au modèle, et un test le
+  prouve **en appelant** le bâtisseur de contexte.
+- **Les étiquettes lisibles** à la place des accolades : `{telephone_hote}`
+  s'affiche « Téléphone ». La liste vient de `lib/balises.js`, jamais recopiée.
+
+---
+
 ## 5. Règles du chantier
 
 - Branche `kb-v5-base-connaissance` ; recette sur **staging**
