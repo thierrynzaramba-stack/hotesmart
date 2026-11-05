@@ -37,7 +37,8 @@ async function rendre (lang) {
     return { ok: fs.existsSync(f), json: async () => JSON.parse(fs.readFileSync(f, 'utf8')) }
   }
   w.localStorage.setItem('hs.lang', lang)
-  w.eval(lire('shared/i18n/i18n.js'))
+  // Le moteur tel que /shared/i18n/i18n.js le sert (api/i18n.js).
+  w.eval(require('../lib/i18n-version').moteurI18n())
   const scripts = [...w.document.querySelectorAll('script:not([src])')]
   assert.equal(scripts.length, 1, 'un seul script en ligne attendu')
   w.eval(scripts[0].textContent)
