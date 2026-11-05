@@ -27,7 +27,9 @@ window.I18n = (() => {
   //
   // ⚠ CE FICHIER EST UN MODELE, PAS CE QUE LE NAVIGATEUR RECOIT. `/shared/i18n/
   // i18n.js` est servi par `api/i18n.js`, qui remplace le jeton ci-dessous par
-  // l'empreinte des quatre fichiers DEPLOYES (lib/i18n-version.js). Jusqu'au
+  // l'empreinte de TOUS les .json du dossier DEPLOYES (lib/i18n-version.js :
+  // une langue ajoutee y entre d'elle-meme, et un dictionnaire manquant est une
+  // erreur, pas une empreinte). Jusqu'au
   // 5 novembre 2026, cette empreinte etait ecrite ici a la main : chaque lot
   // qui touchait une traduction la changeait, et deux lots paralleles se
   // rencontraient TOUJOURS en conflit sur cette ligne — pour une valeur
