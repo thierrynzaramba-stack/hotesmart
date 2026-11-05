@@ -130,6 +130,10 @@
       "destination": "/pages/menages"
     },
     {
+      "source": "/connaissance",
+      "destination": "/pages/connaissance"
+    },
+    {
       "source": "/apps/agent-ai",
       "destination": "/pages/messages"
     },
