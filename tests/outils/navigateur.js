@@ -18,13 +18,65 @@
 // un gain nul.
 
 const { spawn } = require('node:child_process')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 
-const CHROME = '/home/thierry/.cache/ms-playwright/chromium_headless_shell-1243'
-  + '/chrome-headless-shell-linux64/chrome-headless-shell'
-const LIBS = '/home/thierry/.cache/hotesmart-banc/libs/usr/lib/x86_64-linux-gnu'
+// ⚠ LE NAVIGATEUR DE BANC SE TROUVE, IL N'EST PLUS ECRIT EN DUR — ET C'EST LA
+// SEULE COPIE DU DEPOT (5 novembre 2026, passage des sessions dans le cloud,
+// decision de Thierry). Le chemin `/home/thierry/.cache/ms-playwright/...`
+// etait recopie dans TROIS fichiers (ce module, `courbe-bande-rendu` et
+// `ibulle-rendu`) : dans le cloud, les 14 tests de banc echouaient tous avec
+// « navigateur de banc absent », et la regle « un seul rouge = on s'arrete »
+// n'y pouvait plus rien dire. Les deux autres bancs importent maintenant d'ici.
+//
+// ⚠ LA REVISION RESTE EPINGLEE (1243), ET C'EST VOULU : ces bancs mesurent un
+// RENDU (cascade CSS, position des bulles, geste reel). Un autre Chrome peut
+// calculer autrement ; on cherche donc le MEME binaire a plusieurs endroits,
+// on n'accepte pas « un Chrome quelconque ».
+//   1. `$PLAYWRIGHT_BROWSERS_PATH` — le cloud de Claude Code l'installe dans
+//      `/opt/pw-browsers`, revision 1243 comprise ;
+//   2. `~/.cache/ms-playwright` — l'emplacement par defaut de Playwright,
+//      celui du PC de Thierry (`/home/thierry/...`).
+const REVISION = 'chromium_headless_shell-1243'
+const BINAIRE = path.join('chrome-headless-shell-linux64', 'chrome-headless-shell')
+
+/** Les emplacements essayes, dans l'ordre. Injectable pour les tests. */
+function cheminsCandidats (env = process.env, maison = os.homedir()) {
+  const c = []
+  // Une valeur relative (Playwright accepte `0`, « a cote du paquet ») ne
+  // designe pas un dossier de navigateurs : on l'ignore.
+  const pw = env.PLAYWRIGHT_BROWSERS_PATH
+  if (pw && path.isAbsolute(pw)) c.push(path.join(pw, REVISION, BINAIRE))
+  c.push(path.join(maison, '.cache', 'ms-playwright', REVISION, BINAIRE))
+  return [...new Set(c)]
+}
+
+/** Le premier candidat present ; a defaut, le premier essaye (pour le message). */
+function resoudreChrome (env = process.env, maison = os.homedir(), existe = fs.existsSync) {
+  const c = cheminsCandidats(env, maison)
+  return c.find(f => existe(f)) || c[0]
+}
+
+const CHROME = resoudreChrome()
+// Les bibliotheques systeme qui manquaient sur le PC de Thierry (WSL), posees
+// hors depot. Le cloud n'en a pas besoin : on ne touche a l'environnement que
+// si le dossier existe.
+const LIBS = path.join(os.homedir(), '.cache', 'hotesmart-banc', 'libs', 'usr', 'lib', 'x86_64-linux-gnu')
+
+/** L'environnement d'un lancement du navigateur de banc. Injectable pour les tests. */
+function envNavigateur (env = process.env, existe = fs.existsSync, libs = LIBS) {
+  return existe(libs) ? { ...env, LD_LIBRARY_PATH: libs } : { ...env }
+}
 
 /** Le navigateur de banc est-il installe ? Un test ne doit JAMAIS se taire. */
-function navigateurPresent () { return require('node:fs').existsSync(CHROME) }
+function navigateurPresent () { return fs.existsSync(CHROME) }
+
+/** Le message d'un banc sans navigateur : il dit OU on a cherche. */
+function messageAbsent (role) {
+  return `le navigateur de banc est absent (cherche : ${cheminsCandidats().join(' ; ')}) : `
+    + `ce test ne peut pas se taire, il est le seul ${role}`
+}
 
 /**
  * Ouvre une page dans un vrai navigateur et rend un pilote.
@@ -42,13 +94,12 @@ async function ouvrir (fichier, o = {}) {
   // la suite complete, ou il lisait `inline-block` — il mesurait la fenetre de
   // 1 280 px du test precedent. Un banc dont le resultat depend de ses voisins
   // ne mesure rien.
-  const profil = require('node:fs').mkdtempSync(
-    require('node:path').join(require('node:os').tmpdir(), 'cdp-profil-'))
+  const profil = fs.mkdtempSync(path.join(os.tmpdir(), 'cdp-profil-'))
   const proc = spawn(CHROME, ['--headless', '--no-sandbox', '--disable-gpu',
     '--allow-file-access-from-files', '--remote-debugging-port=0',
     `--user-data-dir=${profil}`, '--no-first-run', '--no-default-browser-check',
     `--window-size=${largeur},${hauteur}`, `file://${fichier}`],
-  { env: { ...process.env, LD_LIBRARY_PATH: LIBS }, stdio: ['ignore', 'pipe', 'pipe'] })
+  { env: envNavigateur(), stdio: ['ignore', 'pipe', 'pipe'] })
 
   // Le port est annonce sur la sortie d'erreur, et il est TIRE AU SORT
   // (`--remote-debugging-port=0`) : deux tests qui tournent en parallele ne
@@ -62,7 +113,7 @@ async function ouvrir (fichier, o = {}) {
   // absent : il arrete la mesure au lieu de la rendre.
   const tuer = () => {
     try { proc.kill() } catch { /* deja parti */ }
-    try { require('node:fs').rmSync(profil, { recursive: true, force: true }) } catch { /* deja parti */ }
+    try { fs.rmSync(profil, { recursive: true, force: true }) } catch { /* deja parti */ }
   }
   let ouverture = false
   try {
@@ -275,4 +326,7 @@ async function ouvrir (fichier, o = {}) {
   }
 }
 
-module.exports = { ouvrir, navigateurPresent, CHROME }
+module.exports = {
+  ouvrir, navigateurPresent, CHROME, LIBS, envNavigateur, messageAbsent,
+  cheminsCandidats, resoudreChrome, REVISION
+}
