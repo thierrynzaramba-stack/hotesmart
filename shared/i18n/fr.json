@@ -810,6 +810,8 @@
   "nouveau.voyageurs_inclus": "Voyageurs inclus dans le prix",
   "nouveau.voyageurs_inclus_aide": "Optionnel. Par défaut, tous les voyageurs sont inclus.",
   "nouveau.voyageurs_inclus_defaut": "Tous",
+  "offline.retry": "Réessayer",
+  "offline.title": "Vous êtes hors connexion",
   "photo.add": "Ajouter une photo",
   "photo.bad_type": "Choisissez une image (elle sera convertie en JPEG)",
   "photo.failed": "Échec de l’envoi, réessayez",
