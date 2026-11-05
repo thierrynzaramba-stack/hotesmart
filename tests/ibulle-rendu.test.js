@@ -28,9 +28,9 @@ const os = require('node:os')
 const { execFileSync } = require('node:child_process')
 
 const racine = path.join(__dirname, '..')
-const CHROME = '/home/thierry/.cache/ms-playwright/chromium_headless_shell-1243'
-  + '/chrome-headless-shell-linux64/chrome-headless-shell'
-const LIBS = '/home/thierry/.cache/hotesmart-banc/libs/usr/lib/x86_64-linux-gnu'
+// Le navigateur de banc se TROUVE (PC de Thierry ou cloud), et c'est la seule
+// copie du chemin : tests/outils/navigateur.js.
+const { CHROME, envNavigateur, messageAbsent } = require('./outils/navigateur.js')
 
 const PAGE = fs.readFileSync(path.join(racine, 'pages', 'aujourdhui.html'), 'utf8')
 
@@ -140,7 +140,7 @@ try {
   const dom = execFileSync(CHROME, ['--headless', '--no-sandbox', '--disable-gpu',
     '--allow-file-access-from-files', `--window-size=${largeur},900`,
     '--virtual-time-budget=1500', '--dump-dom', `file://${page}`],
-  { env: { ...process.env, LD_LIBRARY_PATH: LIBS }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  { env: envNavigateur(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
   const titre = (dom.match(/<title>([\s\S]*?)<\/title>/) || [])[1]
   assert.ok(titre, 'la sonde n a rien rendu : la page de mesure ne s est pas executee')
   fs.rmSync(dossier, { recursive: true, force: true })
@@ -157,8 +157,7 @@ const LARGEURS = [360, 390, 430, 719, 720, 721, 1024, 1280, 1600]
 test("LE TEST QUI COMPTE : aucune bulle ne sort de l ecran, a aucune largeur", () => {
   // ⚠ LE GARDE-FOU NE SE SAUTE PAS TOUT SEUL. Sans navigateur, on echoue.
   assert.ok(fs.existsSync(CHROME),
-    `le navigateur de banc est absent (${CHROME}) : ce test ne peut pas se taire, `
-    + 'il est le seul a mesurer la POSITION rendue des info-bulles')
+    messageAbsent('a mesurer la POSITION rendue des info-bulles'))
 
   for (const L of LARGEURS) {
     const r = mesurer(L)
