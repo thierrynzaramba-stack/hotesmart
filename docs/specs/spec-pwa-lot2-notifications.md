@@ -1,8 +1,9 @@
 # Spec — PWA lot 2 : les notifications push de l'appli hôte
 
 **Statut : brouillon du 7 novembre 2026, à valider par Thierry. Aucune ligne de
-code n'est écrite.** Révisée après une review (5 constats de sécurité, 2
-bloquants, tous repris ici).
+code n'est écrite.** Révisée après deux reviews : la première a trouvé
+5 constats de sécurité et 2 bloquants ; la seconde, la dernière, a vérifié
+leur correction. Tout est repris ici.
 
 **Comment lire.** Les §0 à §7 sont pour Thierry : chaque choix produit y est
 posé en question (Q1 à Q15, récapitulées au §12) et n'est pas tranché. Les §8 à
@@ -131,7 +132,7 @@ crie pour rien finit ignorée.** Mieux vaut moins de types, bien suivis.
   peuvent l'acquitter, c'est-à-dire ceux qui ont `reservations` en `write` sur
   le bien ?
 
-## 5. S'abonner, se désabonner — Q4, Q5, Q5 bis, Q13
+## 5. S'abonner, se désabonner — Q4, Q5, Q13
 
 **La mécanique.** Le téléphone et l'ordinateur de l'hôte sont deux abonnements
 différents. Un appareil n'est jamais abonné pour deux personnes à la fois : si
@@ -150,9 +151,12 @@ le précédent n'y reçoit plus rien.
   événements propres à une app (b, c, d par exemple) pourraient vivre dans
   l'app, à côté des alertes e-mail et SMS du tiroir de Messages. Ces deux
   emplacements sont des écrans de la refonte V5.
-- **Q5 bis — la déconnexion.** Proposition : se déconnecter désabonne
-  l'appareil, côté téléphone **et** côté serveur. Sinon, un téléphone prêté ou
-  partagé continuerait de recevoir les notifications du compte d'avant. D'accord ?
+- **La déconnexion désabonne l'appareil**, côté téléphone **et** côté serveur.
+  Une autre personne qui se connecte sur l'appareil le désabonne aussi pour
+  l'ancienne. Sinon, un téléphone prêté ou partagé continuerait de recevoir
+  les notifications du compte d'avant. C'est une **règle de sécurité**, comme
+  « le cache est vidé à la déconnexion », et non une question. Si tu n'en veux
+  pas, dis-le.
 - **Un abonnement mort** est supprimé à la première tentative d'envoi.
   C'est le cas d'une appli supprimée ou d'une permission retirée dans les
   réglages du téléphone. **Q13** : l'hôte est-il prévenu, par e-mail, quand
@@ -230,7 +234,8 @@ lien vers le site. Laquelle ?
    clés du navigateur. Elle stocke aussi un libellé de l'appareil, les dates
    de création et du dernier envoi réussi, et les préférences de Q4.
    - **L'adresse d'envoi est unique** : un nouvel abonné sur le même appareil
-     prend la ligne, et l'ancien ne reçoit plus rien.
+     prend la ligne, avec son propre compte et des préférences remises à zéro,
+     et l'ancien ne reçoit plus rien.
    - **Plafond** : 10 appareils par utilisateur.
    - **Un seul module écrit** dans cette table, `lib/push/abonnements.js`. La
      RLS ne permet aucune écriture depuis le navigateur ; en lecture, chacun ne
@@ -240,27 +245,36 @@ lien vers le site. Laquelle ?
    - La garde est l'utilisateur connecté, sur ses propres abonnements.
    - `private, no-store` est posé avant le premier refus, 405 compris. Seule
      la clé publique est servie en public.
-   - **L'adresse d'envoi est validée à l'abonnement** : `https` obligatoire,
-     et seulement les services connus (Google `fcm.googleapis.com`, Apple
-     `*.push.apple.com`, Mozilla `updates.push.services.mozilla.com`,
-     Microsoft `*.notify.windows.com`). Sinon, le serveur pourrait être poussé
-     à appeler n'importe quelle adresse.
-3. **Envoi `lib/push/envoyer.js`, écrit avec le module `crypto` de Node et
-   `fetch`, sans dépendance.** Il signe (RFC 8292) et chiffre (RFC 8291), et
-   il est vérifié contre les vecteurs de test de la RFC 8291. Pourquoi pas la
-   bibliothèque `web-push` : elle envoie par `https.request`, que le compteur
-   de coût du cron ne voit pas (il ne compte que `fetch`,
-   `docs/kb/cout-du-cron.md` §2). Chaque envoi a un délai maximal de
-   5 secondes. Un 404 ou un 410 supprime l'abonnement.
+   - **L'adresse d'envoi est validée à chaque écriture** (abonnement comme
+     renouvellement) : `https` obligatoire, et seulement les services connus
+     (Google `fcm.googleapis.com`, Apple `*.push.apple.com`, Mozilla
+     `updates.push.services.mozilla.com`, Microsoft `*.notify.windows.com`).
+     Le nom d'hôte est lu par `new URL()` et comparé exactement, ou par
+     suffixe avec son point. Sinon, le serveur pourrait être poussé à appeler
+     n'importe quelle adresse.
+3. **Envoi `lib/push/envoyer.js`.** La signature (RFC 8292) et le chiffrement
+   (RFC 8291) viennent de la bibliothèque `web-push`, éprouvée, par sa
+   fonction `generateRequestDetails()`, qui prépare la requête sans l'envoyer.
+   Une seule dépendance ajoutée, et pas de code de chiffrement à maintenir
+   nous-mêmes. **L'envoi lui-même passe par `fetch`**, donc il est compté par
+   le compteur de coût du cron (`docs/kb/cout-du-cron.md` §2), avec
+   `redirect: 'error'` et un délai maximal de 5 secondes. Un 404 ou un 410
+   supprime l'abonnement.
 4. **Le message suit le format déclaratif** :
    `{"web_push": 8030, "notification": {title, body, navigate, …}}`, **jamais
    `mutable: true`**. C'est ce qui permet à l'iPhone 18.4+ de l'afficher
    lui-même, et au service worker de l'afficher sur les autres appareils.
+   Sur l'iPhone 18.4+, le service worker n'est pas consulté au toucher : l'adresse
+   `navigate` est donc **construite par le serveur**, en chemin relatif du
+   site, jamais à partir d'une donnée du voyageur.
 5. **Le service worker** gagne trois écouteurs :
    - `push`, qui affiche **toujours** une notification ;
    - `notificationclick`, qui ouvre l'écran visé, jamais hors du site ;
-   - `pushsubscriptionchange`, qui renvoie au serveur un abonnement renouvelé
-     par le navigateur.
+   - `pushsubscriptionchange`, qui réabonne le navigateur, mais **n'écrit rien
+     côté serveur** : le service worker n'a pas de session. C'est la page,
+     à la prochaine ouverture de l'appli, qui envoie le nouvel abonnement par
+     le même POST, avec les mêmes contrôles (session, `https`, liste blanche,
+     plafond, unicité).
 
    Ce qui change exprès : les deux tests de `tests/pwa-service-worker.test.js`
    (l. 348 et l. 426), le motif qui interdit `showNotification`, l'en-tête du
@@ -274,6 +288,8 @@ lien vers le site. Laquelle ?
      acceptée, membre égal à l'abonné, domaine de l'événement, bien dans le
      périmètre.
    - Elle exclut les accès par lien.
+   - Un événement sans domaine (k, pause automatique) ne part qu'au
+     titulaire : par défaut, c'est le refus.
    - Le point d'envoi se branche sur l'émetteur de chaque événement, à côté de
      l'e-mail et du SMS, avec un **motif** propre à chaque événement (b, j, l,
      m séparés).
@@ -283,8 +299,18 @@ lien vers le site. Laquelle ?
 8. **L'ordre à l'abonnement**, pour l'iPhone : d'abord la permission, dans le
    geste ; puis la clé publique ; puis l'abonnement ; puis l'enregistrement
    côté serveur.
-9. **Staging n'a pas de cron** (`docs/STAGING.md` §1) : en recette, les envois
-   déclenchés par le cron se lancent à la main.
+9. **La déconnexion** appelle `subscription.unsubscribe()` dans le navigateur
+   **même si** l'appel au serveur échoue (session expirée, appareil hors
+   ligne). Le service d'envoi répondra ensuite 404 ou 410, et le serveur
+   nettoiera la ligne. **À la connexion**, si l'appareil porte un abonnement
+   enregistré pour un autre utilisateur, il est désabonné.
+10. **Un changement de clé** vide la table des abonnements de cet
+    environnement. À l'ouverture, la page compare la clé de l'abonnement de
+    l'appareil à la clé publique servie : si elles diffèrent, elle désabonne,
+    puis réabonne. Sinon, les envois échoueraient sans bruit avec une erreur
+    autre que 404 ou 410, et Q13 ne se déclencherait jamais.
+11. **Staging n'a pas de cron** (`docs/STAGING.md` §1) : en recette, les envois
+    déclenchés par le cron se lancent à la main.
 
 ## 9. Case PERFORMANCE (CLAUDE.md, huit points)
 
@@ -323,6 +349,7 @@ lien vers le site. Laquelle ?
 - `pages/guide.html` : **complété** (installer l'appli et s'abonner sur
   iPhone).
 - Appli prestataire : **non touchée** (dette 130 inchangée).
+- `package.json` : **une dépendance ajoutée**, `web-push` (§8.3).
 
 ## 11. Tests et recette
 
@@ -335,10 +362,16 @@ lien vers le site. Laquelle ?
   - un bien hors de son périmètre ;
   - un profil désactivé ;
   - une invitation non acceptée ;
-  - un accès par lien.
+  - un accès par lien ;
+  - un événement sans domaine envoyé à un membre ;
+  - l'ancien abonné d'un appareil passé à un autre utilisateur.
 - **Abonnements** :
-  - un second abonné sur le même appareil prend l'abonnement ;
-  - la déconnexion désabonne ;
+  - un second abonné sur le même appareil prend l'abonnement, préférences
+    remises à zéro ;
+  - la déconnexion désabonne, y compris quand l'appel au serveur échoue ;
+  - la connexion d'un autre utilisateur désabonne l'ancien ;
+  - un renouvellement passe par les mêmes contrôles que l'abonnement ;
+  - un changement de clé réabonne l'appareil ;
   - un 410 supprime l'abonnement ;
   - une adresse d'envoi hors liste est refusée ;
   - le plafond de 10 tient.
@@ -361,7 +394,6 @@ lien vers le site. Laquelle ?
 | Q3 | La surréservation : titulaire seul, ou aussi les membres qui peuvent l'acquitter ? | §4 |
 | Q4 | Le niveau de réglage : par appareil, par événement, ou par événement et par bien ? | §5 |
 | Q5 | Où vit le bouton : `/settings`, chaque app, ou les deux ? | §5 |
-| Q5 bis | La déconnexion désabonne l'appareil : d'accord ? | §5 |
 | Q6 | Le détail sur l'écran verrouillé : le bien seul, le prénom, ou le début du message ? | §6 |
 | Q7 | Une pastille avec un chiffre sur l'icône ? | §6 |
 | Q8 | La nuit : quels événements se taisent, et la surréservation sonne-t-elle ? | §6 |
