@@ -31,12 +31,22 @@ const { calendrier, ORIGINES } = require('../lib/yield/calendrier-pilotage')
 const { lireVacances, etendueSource } = require('../lib/yield/vacances')
 const R = require('../lib/yield/reference')
 const { grilleDuBien } = require('../lib/yield/grille-du-bien')
+// Lot 2 « Ce qui fait bouger vos prix » : le reglage par POSITION, nuit par nuit.
+const { lignesDuBien, poserPosition, retirerPosition, validerPosition } = require('../lib/yield/reglages-position')
+const { positionsDuContexte, NIVEAUX: NIVEAUX_POSES, CALCUL } = require('../lib/yield/positions')
+const { simulerPositions, cleDePosition } = require('../lib/yield/simuler-positions')
+const { pilotParYield } = require('../lib/pilote-tarifaire')
+const { effacerMarqueur } = require('../lib/ouverture-marqueur')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
 // La meme fenetre d'historique que la page des prix : la grille est une
 // propriete du BIEN, pas de l'ecran qui la regarde.
 const ANS_GRILLE = 3
+// Un geste de l'ecran du lot 4 couvre une selection de nuits : « tout
+// l'evenement », un jour, quelques nuits. Une borne, pour qu'une requete ne
+// puisse pas ecrire mille lignes d'un coup.
+const POSITIONS_PAR_GESTE = 120
 
 // ⚠ LE JOUR A PARIS, PAS LE JOUR DU PROCESS. Aucun `TZ` n'est pose dans
 // `vercel.json` : la fonction tourne en UTC. Meme correctif qu'aux exceptions.
@@ -130,12 +140,13 @@ module.exports = async (req, res) => {
       // qu'aucune erreur ne sorte. C'est exactement ce que la garde `fenetre`
       // de `segmenterJour` existe pour rendre visible.
       const debutHistorique = reculerAns(auj, ANS_GRILLE)
-      const [declares, toutes, vacances, etendue, reglages] = await Promise.all([
+      const [declares, toutes, vacances, etendue, reglages, lignesPosition] = await Promise.all([
         evenementsDuBien(supabase, bien.id, f1, f2),
         toutesLesOccurrences(supabase, bien.id),
         lireVacances(supabase, debutHistorique, f2),
         etendueSource(supabase),
-        reglagesDuBien(supabase, bien.id)
+        reglagesDuBien(supabase, bien.id),
+        lignesDuBien(supabase, bien.id)
       ])
       const coupees = new Set()
       for (const [cle, r] of reglages) if (r.actif === false) coupees.add(cle)
@@ -196,6 +207,24 @@ module.exports = async (req, res) => {
       }
       liste.sort((a, b) => a.debut.localeCompare(b.debut))
 
+      // ⚠ LES REGLAGES DE POSITION (lot 2) : les lignes, la nuit que chacune
+      // prend dans la fenetre, et celles qui n'en prennent AUCUNE — avec leur
+      // motif. Meme resolution que le moteur (`positionsDuContexte`), sur la
+      // meme matiere que le calendrier ci-dessus.
+      const resolu = positionsDuContexte({ lignes: lignesPosition, reglages, zoneBien: bien.zone_scolaire,
+        vacances, evenements: [...declaresLarges, ...commerciales], debut: f1, fin: f2 })
+      const positionsReglees = {
+        lignes: lignesPosition.map(l => ({ id: l.id, evenement: l.evenement, zone: l.zone, rang: l.rang ?? null,
+          jour: l.jour ?? null, nuit: l.nuit ?? null, niveau: l.niveau ?? null })),
+        par_nuit: [...resolu.parNuit].map(([date, r]) => ({ date, niveau: r.niveau, cle: r.cle, zone: r.zone,
+          ligne: r.ligne ? r.ligne.id : null })),
+        sans_nuit: resolu.sansNuit.map(x => ({ ligne: x.ligne ? x.ligne.id : null, cle: x.cle,
+          occurrence: x.occurrence, motif: x.motif })),
+        largeurs: [...reglages.values()]
+          .filter(r => r && (r.weekends_avant != null || r.weekends_apres != null))
+          .map(r => ({ cle: r.segment, avant: r.weekends_avant ?? null, apres: r.weekends_apres ?? null }))
+      }
+
       // La zone du bien decide du seul segment de vacances qui porte un signal.
       const couvertureZone = (etendue || []).find(e => e.zone === bien.zone_scolaire) || null
       return res.status(200).json({
@@ -224,6 +253,7 @@ module.exports = async (req, res) => {
         niveaux: NIVEAUX_VALIDES,
         // ⚠ L'ECRAN PARLE EN CRANS, comme le moteur. Un seul vocabulaire.
         crans_max: CRANS_MAX,
+        positions: positionsReglees,
         // ⚠ L'ECRAN MASQUE, L'ENDPOINT REFUSE. Ce drapeau sert a ne pas
         // montrer un formulaire qui sera refuse — il ne remplace aucune garde.
         droits_ecriture: garde.contexte
@@ -288,7 +318,7 @@ module.exports = async (req, res) => {
   // fait un endpoint dont le corps decide de la nature de l'ecriture, donc un
   // endroit de plus ou se tromper.
   if (req.method === 'PATCH') {
-    const { segment, crans, actif } = body
+    const { segment, crans, actif, weekends_avant: wAvant, weekends_apres: wApres } = body
     try {
       const r = await poserReglage(supabase, {
         // ⚠ NI LE BIEN NI LE COMPTE NE VIENNENT DU CORPS. La garde a tranche.
@@ -298,19 +328,94 @@ module.exports = async (req, res) => {
         // On ne transmet QUE les champs presents : `crans: null` veut dire
         // « retire mon ajustement », l'absence veut dire « n'y touche pas ».
         ...(Object.prototype.hasOwnProperty.call(body, 'crans') ? { crans } : {}),
-        ...(Object.prototype.hasOwnProperty.call(body, 'actif') ? { actif } : {})
+        ...(Object.prototype.hasOwnProperty.call(body, 'actif') ? { actif } : {}),
+        // La largeur de la zone d'influence (lot 2), meme convention.
+        ...(Object.prototype.hasOwnProperty.call(body, 'weekends_avant') ? { weekends_avant: wAvant } : {}),
+        ...(Object.prototype.hasOwnProperty.call(body, 'weekends_apres') ? { weekends_apres: wApres } : {})
       })
       console.log(`[yield-evenements] ${bien.name} : reglage « ${segment} » ->` +
         ` ${r.crans == null ? 'cran mesure' : (r.crans > 0 ? '+' : '') + r.crans + ' cran(s)'},` +
         ` actif ${r.actif !== false}`)
       return res.status(200).json({ reglage: r })
     } catch (e) {
-      const validation = /segment requis|segment trop long|crans doit etre|crans hors bornes|actif doit etre/
+      const validation = /segment requis|segment trop long|crans doit etre|crans hors bornes|actif doit etre|weekends_(avant|apres) hors bornes/
         .test(e.message)
       if (!validation) console.error('[yield-evenements] PATCH', e.message)
       if (!validation) return res.status(503).json({ error: 'ecriture_impossible' })
       return res.status(400).json({ error: e.message.replace('[yield-reglages] ', '') })
     }
+  }
+
+  // ─── PUT : regler une selection de nuits, par POSITION (lot 2) ───────────
+  // { bien, positions: [{ evenement, zone, rang, jour, nuit, niveau }],
+  //   simuler: true | confirme: { nuits } }
+  // `niveau` : un des cinq, 'calcul' (rendue au calcul), ou null (retirer).
+  // ⚠ UN VERBE A PART, comme PATCH : on regle des NUITS par leur position,
+  // pas un segment, ni une occurrence.
+  // ⚠ LA CONFIRMATION, COMME LA GRILLE (decision 4 de Thierry) : `simuler`
+  // rend « N nuits vont changer de prix », compte par la regle du moteur ;
+  // l'ecriture exige ce nombre, recalcule au moment du clic — s'il a change,
+  // 409 et on redemande.
+  // ⚠ CET ENDPOINT N'ECRIT AUCUN PRIX AU CALENDRIER : sur un bien pilote, le
+  // repere du jour est efface, et le moteur pose les prix au prochain passage.
+  if (req.method === 'PUT') {
+    const demandees = Array.isArray(body.positions) ? body.positions : null
+    if (!demandees || !demandees.length) return res.status(400).json({ error: 'positions_requises' })
+    if (demandees.length > POSITIONS_PAR_GESTE) {
+      return res.status(400).json({ error: 'trop_de_positions', max: POSITIONS_PAR_GESTE })
+    }
+    const operations = []
+    for (const o of demandees) {
+      const v = validerPosition(o || {})
+      if (!v.ok) return res.status(400).json({ error: v.raison, message: v.message })
+      const niveau = o.niveau === null ? null : o.niveau
+      if (niveau !== null && niveau !== CALCUL && !NIVEAUX_POSES.includes(niveau)) {
+        return res.status(400).json({ error: 'niveau_inconnu', message: 'Niveau inconnu : Base, Moyen, Haut, Très haut ou Exceptionnel.' })
+      }
+      operations.push({ ...v.position, niveau })
+    }
+    // ⚠ DEUX FOIS LA MEME POSITION DANS UN GESTE : lequel gagnerait ? On refuse.
+    if (new Set(operations.map(cleDePosition)).size !== operations.length) {
+      return res.status(400).json({ error: 'positions_en_double' })
+    }
+    const auj = jourLocal(new Date())
+    let sim
+    try { sim = await simulerPositions(supabase, bien, operations, auj) } catch (e) {
+      console.error('[yield-evenements] PUT simulation', bien.id, e.message)
+      return res.status(503).json({ error: 'simulation_impossible', message: 'Le calcul a échoué : rien n’a changé. Réessayez.' })
+    }
+    const confirmation = { pilote: sim.pilote, nuits: sim.nuits, du: sim.du, au: sim.au, min: sim.min, max: sim.max,
+      ...(sim.ouverture_inconnue ? { ouverture_inconnue: true } : {}) }
+    const apercu = { confirmation, visees: Object.fromEntries(sim.visees), sans_nuit: sim.sans_nuit }
+    if (body.simuler === true) return res.status(200).json({ simulation: true, ...apercu })
+    const c = body.confirme && typeof body.confirme === 'object' ? body.confirme : {}
+    if (Number(c.nuits) !== sim.nuits) {
+      return res.status(409).json({ error: 'a_confirmer', message: 'Le nombre de nuits concernées a changé : confirmez à nouveau.', ...apercu })
+    }
+    const ecrites = []
+    for (const o of operations) {
+      const k = cleDePosition(o)
+      // ⚠ NI LE BIEN NI LE COMPTE NE VIENNENT DU CORPS, et ils passent APRES
+      // la position : rien de ce que le corps porte ne peut les recouvrir.
+      const args = { ...o, userId: compte, propertyId: bien.id, recommandes: sim.recommandes.get(k) || null }
+      const r = o.niveau === null ? await retirerPosition(supabase, args) : await poserPosition(supabase, args)
+      if (!r.ok) {
+        // ⚠ CE QUI EST DEJA ECRIT SE DIT : un geste interrompu au milieu ne
+        // doit pas laisser l'ecran croire que rien n'a bouge.
+        const code = ['geste_concurrent', 'conflit_compte'].includes(r.raison) ? 409
+          : ['lecture_impossible', 'ecriture_impossible'].includes(r.raison) ? 503 : 400
+        if (code === 503) console.error('[yield-evenements] PUT ecriture', bien.id, r.raison, r.message)
+        return res.status(code).json({ error: r.raison, message: r.message, ecrites })
+      }
+      ecrites.push({ position: k, geste: r.geste, avant: r.avant })
+    }
+    let envoi = 'immediat'
+    if (pilotParYield(bien) && sim.nuits > 0) {
+      const { error: eM } = await effacerMarqueur(supabase, bien.id)
+      if (eM) { console.error('[yield-evenements] marqueur non efface', bien.id, eM.message); envoi = 'passage_quotidien' }
+    }
+    console.log(`[yield-evenements] ${bien.name} : ${ecrites.length} position(s) reglee(s), ${sim.nuits} nuit(s)`)
+    return res.status(200).json({ ok: true, ecrites, envoi, ...apercu })
   }
 
   // ─── DELETE : corriger une saisie ────────────────────────────────────────

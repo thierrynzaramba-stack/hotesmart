@@ -254,7 +254,7 @@ Migration : `migrations/2026-11-05-yield-reglages-position.sql` — **additive**
 |---|---|---|
 | **2a** | migration, writer `lib/yield/reglages-position.js` (garde bien/compte, journal), résolveur `lib/yield/positions.js` (nuit → position ; lignes → niveau par nuit + lignes sans nuit ; clé fine du week-end prolongé), `poserReglage` qui garde la largeur, `reglagesDuBien` qui lit `*` (les colonnes de largeur n'existent pas avant la migration : les nommer ferait lever le moteur de tous les biens dans l'intervalle), `scripts/verifier-migration-reglages-position.js` | **aucun** : la table est vide, et aucun appelant ne la lit encore |
 | **2b** | le moteur consulte les positions : `preparerContexte` lit les lignes **en parallèle** des réglages d'événement et les résout une fois pour la fenêtre (`positionsDuContexte` ; sans ligne, rien n'est calculé) ; `prixDeLaNuit` passe à `suggerer` le niveau de LA nuit (`reglagePosition`), qui devient le niveau de départ (étage 0 bis, `source = 'reglage'`, `reglage_position` dans la sortie, « le calcul disait … » dans le détail). L'écran et le moteur passant par la même porte, la parité tient par construction | aucun tant qu'aucune ligne n'existe ; une ligne change le prix de ses nuits |
-| **2c** | `api/yield-evenements.js` : lecture des positions et des lignes sans nuit par événement ; écriture d'une sélection (droit `reglages: write`, confirmation « N nuits vont changer de prix » comptée par le moteur) | l'API existe, aucun écran ne l'appelle avant le lot 4 |
+| **2c** | `api/yield-evenements.js` : le GET rend un bloc `positions` (les lignes ; `par_nuit`, la nuit que chacune prend dans la fenêtre ; `sans_nuit`, celles qui n'en prennent aucune, avec leur occurrence et leur motif ; `largeurs`) ; PATCH transmet `weekends_avant` / `weekends_apres` ; **PUT** règle une sélection (`positions: [{ evenement, zone, rang, jour, nuit, niveau }]`, `niveau: null` retire), droit `reglages: write`, au plus 120 positions, doublons refusés. `simuler: true` rend « N nuits vont changer de prix » sans rien écrire ; l'écriture exige `confirme.nuits` égal au compte refait au clic, sinon 409 `a_confirmer`. Le compte vient de `lib/yield/simuler-positions.js` : même matière (`preparerContexte` garde `lignesPosition` et `materiauxPositions`), lignes actuelles contre proposées, nuits comptées par `calculerPrix`. Le journal garde, nuit par nuit, le niveau que YieldFlow donnait SANS réglage de position. Un geste interrompu rend ce qui est déjà écrit (`ecrites`). Sur un bien piloté, le repère du jour est effacé : le moteur pose les prix au passage suivant | l'API existe, aucun écran ne l'appelle avant le lot 4 |
 
 Chaque étape : tests neufs qui rougissent contre le code d'avant (REVIEW.md
 règle 19), suite complète à zéro rouge aux deux horloges, review par un
@@ -303,6 +303,11 @@ Le lot ne touche pas le front. Les huit points :
 7. **Budget** : +1 requête par contexte de prix, lancée **en parallèle** de
    `reglagesDuBien` (aujourd'hui séquentielles dans `preparerContexte`). Le
    résolveur est pur, une passe sur la fenêtre.
+   Au 2c, le GET de `/api/yield-evenements` prend la même requête de plus,
+   dans son `Promise.all`. Le PUT est un geste d'écriture, pas une lecture
+   d'écran : une simulation (un contexte, plus fermetures et prix au ✎), puis
+   quatre requêtes environ par position écrite (garde, lecture, écriture,
+   journal) — d'où la borne de 120 positions par geste.
 8. **Mesure avant / après** : appels, requêtes et octets de
    `/api/yield-prix` et `/api/yield-evenements` sur staging, au 2b et au 2c.
 
