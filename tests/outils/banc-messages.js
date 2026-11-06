@@ -43,8 +43,10 @@ const lire = (...p) => fs.readFileSync(path.join(RACINE, ...p), 'utf8')
 // ⚠ `confirmer` EN EST, ET C'EST LE POINT DE CE BANC. Les confirmations sont
 // son sujet : un double de la fenetre validerait ses propres boutons. Le vrai
 // module est donc evalue ici, et les tests CLIQUENT sur ce qu'il rend.
+// ⚠ `connaissance-vue` APRES `confirmer` : son import de `confirmerDansLaPage`
+// est retire ici, il lit donc le symbole que `confirmer` vient de poser.
 const PARTAGES = ['properties', 'aujourdhui', 'messages-programmes', 'calendrier-resa',
-  'confirmer']
+  'confirmer', 'connaissance-vue']
 const scriptPartage = (nom) => lire('shared', nom + '.js')
   .replace(/^import[\s\S]*?from\s*'[^']*'\s*$/gm, '')
   .replace(/^export default /gm, 'const __defaut_' + nom.replace(/-/g, '_') + ' = ')
@@ -62,7 +64,13 @@ function corpsDeLaPage () {
   const m = /<script type="module">([\s\S]*?)<\/script>/.exec(html)
   if (!m) throw new Error('banc : le module de pages/messages.html est introuvable')
   const sansImports = m[1].replace(/^import\s[\s\S]*?from\s*'[^']*'\s*$/gm, '')
-  const sansAmorce = sansImports.replace(/^init\(\)\.catch\([\s\S]*?\)\s*$/m, '')
+  // ⚠ LE MODULE DE LA BASE DE CONNAISSANCE SE CHARGE A LA DEMANDE dans la page
+  // (`import()` a la premiere ouverture du volet). jsdom n'execute pas un
+  // `import()` dynamique : on le remplace par le module que le banc a DEJA
+  // evalue pour de vrai (PARTAGES), sans en recopier une ligne.
+  const sansImportDynamique = sansImports.replace(/import\('\/shared\/connaissance-vue\.js'\)/g,
+    'Promise.resolve({ monterConnaissance })')
+  const sansAmorce = sansImportDynamique.replace(/^init\(\)\.catch\([\s\S]*?\)\s*$/m, '')
   if (/^\s*import\s/m.test(sansAmorce)) throw new Error('banc : un import a survecu')
   // ⚠ LE GARDE-FOU VISE `init()` EN DEBUT DE LIGNE, PAS SEULEMENT
   // `init().catch(` (constat mineur de la derniere revue : je l'avais rétréci).
@@ -270,7 +278,10 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       enregistrerPanneau, basculerPause, delaisEnCours, delaisDuBien,
       bandeauEcheance, etatEcheance, peutReprendre, pausesFiables, voletIA,
       noteReglage, bienDuFilOuvert, init, PILULES, confirmerDansLaPage, fenetreOuverte, OCCUPEE,
-      reporterLePanneauSurLeFil, editionPanneauNonEnregistree, remettreCasePause
+      reporterLePanneauSurLeFil, editionPanneauNonEnregistree, remettreCasePause,
+      urlConnaissance, ouvrirConnaissance,
+      // Un GETTER, pas une valeur : la vue est montee APRES l'evaluation.
+      get vueConnaissance () { return vueConnaissance }
     }
   `
   window.__journal = []

@@ -271,6 +271,14 @@ export const api = {
     aUneConversation: (bookingId) =>
       apiCall(`messages?booking_id=${encodeURIComponent(bookingId)}`, 'GET')
   },
+  // La base de connaissance V5 (lot 3) : UN endpoint d'ecran, qui peint tout
+  // l'ecran en GET et ecrit une entree a la fois en POST. La page telephone
+  // (/connaissance) passe par ici ; le volet de Messages, par l'`appel` de sa
+  // page — les deux visent le meme endpoint.
+  connaissance: {
+    lire: (params = '') => apiCall(`ecran/connaissance${params ? '?' + params : ''}`, 'GET'),
+    ecrire: (corps) => apiCall('ecran/connaissance', 'POST', corps)
+  },
   reservationDirecte: {
     creer:   (payload)   => apiCall('reservation-directe', 'POST', payload),
     // `modifier` : dates, prix vendu et voyageurs d'une reservation « Offline ».
