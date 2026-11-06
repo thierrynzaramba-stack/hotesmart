@@ -317,3 +317,37 @@ dimanche) le rend en « sans nuit », et le résolveur l'applique sur 2028 (un
 lundi : samedi 12) ; réduire la zone avant à 1
 après avoir réglé le 2e week-end avant → la ligne est rendue hors zone, pas
 supprimée.
+
+### 10 bis. Recette 2a + 2b sur staging — 6 et 7 novembre 2026, CONFORME
+
+Branche mise sur staging par le chef de file (merge `b4522a1059b22a6d2ebe2cce5c5f4818683c3589`).
+Migration collée sur staging par Thierry le 6 novembre à 10 h 19, vérifiée
+(11 / 13 / 2 colonnes). Bien : Recette — Loft Pilotable (`STG-BIEN-3`), pilote
+coupé (la suggestion se calcule quand même, c'est elle qu'on lit). Le Loft n'a
+pas de zone scolaire : la recette porte sur des événements qui n'en dépendent
+pas. Lignes posées en SQL (l'écran arrive au lot 4).
+
+| pièce | attendu | constaté |
+|---|---|---|
+| départ, aucune ligne | — | 7 nov. Moyen 105 €, 14 nov. Moyen 105 €, 24 déc. Base 90 € |
+| `commercial:reveillon_noel` · nuit `date` · Exceptionnel | seule la nuit du 24 bouge | 24 déc. **Exceptionnel 140 €**, « c'est vous qui l'avez posé », « Niveau figé », « le calcul disait Base » ; 7 et 14 nov. inchangés |
+| `week_end_prolonge:armistice_1918` · tous les samedis Haut + 2e samedi `calcul` | 7 nov. Haut figé, 14 nov. au calcul, dimanche inchangé | 7 nov. **Haut 115 €** figé ; 8 nov. inchangé ; 14 nov. Moyen 105 € (le délai joue : rendu au calcul) |
+| nettoyage | retour exact au départ | 7 nov. Moyen 105 €, 24 déc. Base 90 €, plus aucune mention de réglage |
+
+**Observations, hors de ce lot :**
+- *Pour le lot 4 (l'écran)* : le titre d'une période ignore les nuits réglées
+  à la main (« Réveillon de Noël — pas assez d'historique », « week-end
+  prolongé : Moyen, position empruntée » au-dessus d'une nuit figée en Haut) ;
+  « le calcul disait Haut » donne le niveau de DÉPART du calcul, avant le
+  délai, alors que l'écran montrait Moyen — la phrase doit le dire.
+- *Moteur, données de staging* : les samedis du week-end prolongé de
+  l'Armistice sortent en Moyen (position empruntée) quand un samedi ordinaire
+  sort en Haut. Comportement du moteur d'avant ce lot, sur un historique
+  synthétique ; à regarder sur des données réelles avant d'en faire une dette.
+- *Colonne « Prix de départ » (marché)* : elle a bougé entre deux relevés
+  (248 → 256 €) parce que minuit est passé ; aucun fichier de ce calcul n'est
+  dans le lot.
+
+Reste à recetter avec l'API (2c) : une ligne sans nuit rendue avec son motif
+(samedi rattaché de la Saint-Valentin 2027, pont de l'Armistice 2028), le
+rayonnement et sa largeur.
