@@ -188,22 +188,39 @@ motif, et l'écran (lot 4) les montre. Une ligne supprimée en silence est un
 réglage perdu ; une ligne déplacée sur une « nuit voisine » est une
 devinette.
 
-## 5. Où le niveau entre dans le prix
+## 5. Où le niveau entre dans le prix — et il reste FIGÉ
 
-Le réglage de position est un **niveau de départ imposé par l'hôte**, au même
+Le réglage de position est le **niveau de départ imposé par l'hôte**, au même
 étage que le réglage en crans d'aujourd'hui (`source = 'reglage'` dans
 `prixDeLaNuit`), et prioritaire sur lui :
 
 **position de l'hôte → crans de l'hôte → mesure → modèle → position du segment.**
 
-Tout ce qui s'applique aujourd'hui après le niveau de départ s'applique encore
-(grille fixée par l'hôte, plancher N-1, primes, fourchette), avec la règle
-existante « le réglage de l'hôte qui baisse prime ». `calcul` = aucune
-position : la nuit retombe sur les crans, la mesure ou le modèle.
+⚠ **ET IL RESTE FIGÉ — décision de Thierry, 6 novembre 2026, mot pour mot :
+« les niveaux posés à la main restent figés ».** Ni la demande (pression du
+mois contre N-1), ni le délai (−1 à quatorze jours, +1 au-delà de soixante),
+ni la preuve N-1 (prime de la fourchette Exceptionnel, relèvement à tous les
+niveaux) ne le déplacent. La nuit prend le prix de CE niveau dans la grille —
+le montant que l'hôte a fixé lui-même compris (`grille_hote`, appliquée avant).
+**Seul le prix minimum du bien** (`tarifAcceptable`) le refuse encore : il
+ferme la nuit plutôt que de la vendre sous le plancher, comme partout.
+
+Les couches « pression » et « délai » restent montrées, sans effet, et le
+disent (« sans effet : le niveau posé par l'hôte est figé ») ; une couche
+`fige` l'annonce ; la preuve N-1 non reprise dit « votre réglage (… posé à la
+main, figé) fixe ce niveau ». `calcul` = aucune position : la nuit retombe sur
+les crans, la mesure ou le modèle, et tout le pipeline joue.
+
+⚠ **Sans grille fiable, un niveau n'a pas de prix** : la nuit reste « non
+calculable », et la sortie porte `reglage_position_non_applique` (niveau, clé,
+motif) — le niveau posé ne disparaît pas sans trace.
 
 ⚠ **Point d'application unique** : `preparerContexte` lit les lignes, et
 `prixDeLaNuit` les consulte par la même fonction que l'écran. Pas de seconde
-assemblée (dette 17, soldée le 23 septembre 2026 : elle ne revient pas).
+assemblée (dette 17, soldée le 23 septembre 2026 : elle ne revient pas). Les
+positions se résolvent **depuis le 1er du mois courant au plus tard**
+(`debutDesPositions`) : l'écran tarife les tuiles du radar depuis ce mois-là,
+quel que soit le mois demandé (constat de review du 2b).
 
 ## 6. La table, et ce qui change dans l'existant
 

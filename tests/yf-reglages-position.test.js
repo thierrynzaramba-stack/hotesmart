@@ -432,15 +432,59 @@ test('LE TEST QUI COMPTE (2b) : un niveau posé s applique même quand le moteur
   assert.equal(s.niveau_sans_reglage_position, null)
 })
 
-test('LE TEST QUI COMPTE (2b) : le réglage de l hôte qui BAISSE prime sur la preuve N-1 ; celui qui monte la laisse jouer', () => {
+test('LE TEST QUI COMPTE (2b) : un niveau posé est FIGÉ face à la preuve N-1 — posé sous le calcul comme au-dessus (décision de Thierry, 6 novembre 2026)', () => {
   const g = grille()
   const preuveN1 = { date: '2025-11-22', prix: 230, ventes: 1, meme_segment: true, hors_reference: false }
   assert.equal(nuit(g, SAMEDI, { preuveN1 }).prix, 230, 'sans réglage : la prime prouvée')
   const bas = nuit(g, SAMEDI, { preuveN1, reglagePosition: pose('Moyen') })
   assert.deepEqual([bas.niveau, bas.prix], ['Moyen', 125], 'posé SOUS le calcul (Exceptionnel) : la preuve ne le remonte pas')
+  // Le mardi se vend Base ; la preuve de l'an dernier (150 €) relèverait un
+  // Moyen à 150 € — un niveau figé reste à 125 €, et le dit.
+  const libre = nuit(g, MARDI, { delaiJours: 30 })
+  assert.equal(libre.niveau, 'Base')
   const haut = nuit(g, MARDI, { preuveN1: { ...preuveN1, date: '2025-11-18', prix: 150 }, reglagePosition: pose('Moyen') })
-  assert.equal(haut.niveau_sans_reglage_position, 'Base')
-  assert.ok(haut.prix >= 125, 'posé AU-DESSUS du calcul : rien ne le retient')
+  assert.deepEqual([haut.niveau_sans_reglage_position, haut.niveau, haut.prix], ['Base', 'Moyen', 125], 'posé AU-DESSUS du calcul : figé aussi')
+  assert.ok(haut.releve_n1 && haut.releve_n1.motif_sans_prime === 'releve_non_repris_reglage_de_l_hote', JSON.stringify(haut.releve_n1))
+  assert.match(haut.releve_n1.resume, /non repris : votre réglage \(Moyen posé à la main, figé\) fixe ce niveau/)
+})
+
+test('LE TEST QUI COMPTE (2b) : un niveau posé est FIGÉ face à la demande et au délai — les couches le disent, sans mentir', () => {
+  const g = grille()
+  const pousse = { delaiJours: 5, pression: { ecart: -0.6, fiable: true } }
+  const libre = nuit(g, SAMEDI, pousse)
+  assert.ok(libre.deplacement < 0, 'sans réglage : la nuit descend')
+  const s = nuit(g, SAMEDI, { ...pousse, reglagePosition: pose('Haut') })
+  assert.deepEqual([s.niveau, s.prix, s.deplacement, s.fige_par_l_hote], ['Haut', 140, 0, true])
+  for (const nom of ['pression', 'delai']) {
+    const c = s.couches.find(x => x.nom === nom)
+    assert.deepEqual([c.agit, c.deplacement, c.resume], [false, 0, null], nom)
+    assert.match(c.detail, /sans effet : le niveau posé par l’hôte est figé$/, nom)
+  }
+  assert.ok(s.couches.some(c => c.nom === 'fige' && c.agit))
+  // Seul le prix minimum du bien le refuse encore.
+  const refuse = nuit(g, SAMEDI, { reglagePosition: pose('Moyen'), bien: { prix_minimum: 15000 } })   // en centimes, comme properties.prix_minimum
+  assert.deepEqual([refuse.prix, refuse.non_calculable], [null, [S.MOTIFS.SOUS_PLANCHER]])
+})
+
+test('2b : le résumé ne nomme pas le segment du moteur ; un niveau posé sans grille ne disparaît pas sans trace', () => {
+  const g = grille()
+  assert.equal(nuit(g, MARDI, { reglagePosition: pose('Haut') }).couches.find(c => c.nom === 'position').resume,
+    'Haut — c’est vous qui l’avez posé pour cette nuit')
+  assert.equal(nuit(g, MARDI, { reglagePosition: { ...pose('Haut'), zone: 'avant' } }).couches.find(c => c.nom === 'position').resume,
+    'Haut — c’est vous qui l’avez posé pour cette nuit, un week-end avant l’événement')
+  const mince = { ...g, base: { ...g.base, fiable: false } }
+  const s = nuit(mince, MARDI, { reglagePosition: pose('Haut') })
+  assert.deepEqual(s.reglage_position_non_applique, { niveau: 'Haut', cle: 'evenement:salon', motif: S.MOTIFS.SEGMENT_MINCE })
+  assert.equal(nuit(mince, MARDI, { reglagePosition: pose('calcul') }).reglage_position_non_applique, undefined)
+})
+
+test('LE TEST QUI COMPTE (2b) : les positions se résolvent depuis le 1er du mois courant au plus tard — le radar et le mois ouvert disent la même chose', () => {
+  const { debutDesPositions } = require('../lib/yield/contexte-du-bien')
+  assert.equal(debutDesPositions('2027-02-01', '2026-11-06'), '2026-11-01', 'février demandé : le radar part de novembre')
+  assert.equal(debutDesPositions('2026-11-06', '2026-11-06'), '2026-11-01')
+  assert.equal(debutDesPositions('2026-10-01', '2026-11-06'), '2026-10-01', 'un début plus tôt est gardé')
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'yield', 'contexte-du-bien.js'), 'utf8')
+  assert.match(src, /debut: debutDesPositions\(debut, auj\), fin: finContexte/)
 })
 
 test('LE TEST QUI COMPTE (2b) : `prixDeLaNuit` passe au moteur le niveau résolu pour CETTE nuit, et rien pour les autres', () => {
