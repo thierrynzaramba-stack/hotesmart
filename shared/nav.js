@@ -82,7 +82,13 @@
     sel.className = 'btn btn--secondary';
     sel.setAttribute('data-i18n-attr', 'aria-label:nav.language');
     sel.innerHTML = I18n.langues.map(l => `<option value="${esc(l.code)}"${l.code === I18n.lang ? ' selected' : ''}>${esc(l.nom)}</option>`).join('');
-    sel.addEventListener('change', e => I18n.set(e.target.value));
+    sel.addEventListener('change', e => {
+      const code = e.target.value;
+      I18n.set(code);
+      // PWA lot 2b : la langue de la PERSONNE, pour ses notifications. Chargé
+      // à la demande et seulement sur ce geste — jamais au chargement d'une page.
+      import('/shared/langue-personne.js').then(m => m.enregistrer(code)).catch(() => {});
+    });
     container.appendChild(sel);
     I18n.apply(container);
   }

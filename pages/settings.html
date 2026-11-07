@@ -104,6 +104,21 @@
     .panel h3 { font-size: 16px; font-weight: 500; margin-bottom: 3px; }
     .panel .h-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
     .panel-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+    /* Onglet Notifications, lot 2b : le tableau des événements et les heures calmes. */
+    .n-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .n-table th { font-size: 11px; color: var(--text2); font-weight: 500; text-align: center; padding: 6px 4px; white-space: nowrap; }
+    .n-table th:first-child, .n-table td:first-child { text-align: left; padding-left: 0; }
+    .n-table td { padding: 8px 4px; border-bottom: 0.5px solid var(--border); text-align: center; vertical-align: middle; }
+    .n-table tr.n-groupe td { font-size: 11px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: .3px; border-bottom: 0; padding-top: 16px; }
+    .n-table input { width: 16px; height: 16px; cursor: pointer; }
+    .plage { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 0; border-bottom: 0.5px solid var(--border); font-size: 13px; }
+    .plage input[type=time] { padding: 6px 8px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 13px; font-family: inherit; background: var(--bg); color: var(--text); }
+    .jours { display: flex; gap: 4px; }
+    .jours label { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 11px; cursor: pointer; color: var(--text2); }
+    .jours input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+    .jours input:checked + span { color: var(--text); font-weight: 600; }
+    .jours label:has(input:checked) { border-color: var(--text2); background: var(--bg2); }
+    .jours input:focus-visible + span { outline: 2px solid var(--text2); outline-offset: 2px; }
     @media (max-width: 640px) { .grid2, .biens { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -165,10 +180,11 @@
 
   </div>
 
-  <!-- NOTIFICATIONS (PWA lot 2a) — docs/specs/spec-pwa-lot2-notifications.md §6.
-       Au lot 2a : abonner CET appareil, s'envoyer un essai, voir et retirer
-       ses appareils. Le tableau des événements et le mode « urgence
-       seulement » arrivent au lot 2b. Données de la PERSONNE connectée. -->
+  <!-- NOTIFICATIONS (PWA lots 2a et 2b) — docs/specs/spec-pwa-lot2-notifications.md
+       §6 et §15.6. Lot 2a : abonner CET appareil, s'envoyer un essai, voir et
+       retirer ses appareils. Lot 2b : le tableau des quatorze événements et
+       les heures calmes du mode « urgence seulement ». Données de la PERSONNE
+       connectée, jamais celles d'un compte. -->
   <div id="zone-notifications" style="display:none">
     <div class="card">
       <div class="card-title">Notifications sur cet appareil</div>
@@ -184,6 +200,20 @@
       <div class="card-title">Mes appareils abonnés</div>
       <div class="card-sub">Chaque appareil où vous avez activé les notifications. Se déconnecter d’un appareil le retire aussi.</div>
       <div id="n-appareils"></div>
+    </div>
+    <div class="card" id="n-quand" hidden>
+      <div class="card-title">Quand vous prévenir</div>
+      <div class="card-sub">Pour chaque événement, choisissez comment il vous arrive. « Urgent » le fait passer même pendant vos heures calmes. Le SMS ne part pas si l’un de vos appareils reçoit les notifications : elle le remplace. Vous ne recevez que ce que vos droits vous ouvrent sur chaque compte.</div>
+      <div id="n-tableau"></div>
+    </div>
+    <div class="card" id="n-calme" hidden>
+      <div class="card-title">Heures calmes</div>
+      <div class="card-sub">Pendant ces heures, seul l’urgent vous arrive, ainsi que ce qui concerne un voyageur qui arrive aujourd’hui ou demain, ou qui est sur place. Le reste vous arrive à la fin de la plage, regroupé. Le jour d’une plage est celui où elle commence : « 22:00 à 07:00, le vendredi » couvre la nuit du vendredi au samedi.</div>
+      <div id="n-plages"></div>
+      <button class="btn-ghost" id="n-ajouter-plage" style="margin-top:12px">Ajouter une plage</button>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+      <button class="btn" id="n-enregistrer" hidden>Enregistrer</button>
     </div>
   </div>
 </div>
@@ -663,6 +693,17 @@ else charger()
 // shared/push-appareil.js ; cette page ne fait qu'afficher et relayer les gestes.
 import * as P from '/shared/push-appareil.js'
 
+// L'état de l'onglet (lot 2b), déclaré AVANT toute fonction qui l'écrit.
+const CANAUX_ECRAN = [['push', 'Notification'], ['email', 'E-mail'], ['sms', 'SMS'], ['urgent', 'Urgent']]
+const JOURS_ECRAN = [[1, 'L', 'lundi'], [2, 'M', 'mardi'], [3, 'M', 'mercredi'], [4, 'J', 'jeudi'],
+  [5, 'V', 'vendredi'], [6, 'S', 'samedi'], [7, 'D', 'dimanche']]
+const PLAFOND_PLAGES_ECRAN = 6
+let groupes = [], brouillonNotif = null, notifModifie = false, versionNotif = 0, permissionVue = null
+// Chaque modification du brouillon fait avancer `versionNotif` : la réponse d'un
+// enregistrement ne remplace le brouillon que s'il n'a pas bougé PENDANT l'envoi.
+function brouillonTouche () { notifModifie = true; versionNotif++ }
+const ERREUR_LECTURE = 'Lecture impossible : vérifiez la connexion, puis rechargez la page.'
+
 function montrerOnglet (nom) {
   const notif = nom === 'notifications'
   ongletActif = notif ? 'notifications' : 'equipe'
@@ -671,7 +712,7 @@ function montrerOnglet (nom) {
   $('zone-notifications').style.display = notif ? 'block' : 'none'
   // L'onglet Équipe rallume ce qui était visible avant (drapeaux de `charger`).
   afficherZonesEquipe()
-  if (notif) rendreNotifications().catch(e => message(e.message))
+  if (notif) rendreNotifications().catch(() => message(ERREUR_LECTURE))
 }
 
 async function jetonActuel () {
@@ -683,10 +724,42 @@ const MOTIFS = {
   non_pris: 'Ce navigateur ne permet pas les notifications.',
   iphone_hors_appli: 'Sur iPhone, posez d’abord HôteSmart sur l’écran d’accueil (Partager, puis « Sur l’écran d’accueil »), ouvrez-le depuis son icône, puis revenez ici.',
   sans_service_worker: 'Ouvrez une fois l’accueil d’HôteSmart sur cet appareil, puis revenez ici.',
-  refusee: 'Les notifications sont bloquées pour HôteSmart sur cet appareil. Autorisez-les dans les réglages du navigateur (sur iPhone : supprimez l’icône, reposez l’appli, et acceptez).',
   ignoree: 'La demande d’autorisation a été fermée sans réponse. Réessayez.',
   cles_absentes: 'Les notifications ne sont pas encore activées sur HôteSmart.',
   plafond_atteint: 'Vous avez déjà 10 appareils abonnés : retirez-en un d’abord.'
+}
+
+// ⚠ NOTIFICATIONS BLOQUÉES : LE CHEMIN EXACT DE CET APPAREIL (décision Q21 de
+// Thierry, 7 novembre 2026 : « le plus simple et clair pour l'utilisateur »).
+// Né de la recette du 2a : sur Android, c'est le réglage du SITE dans Chrome qui
+// bloquait, alors que l'appli installée avait ses notifications actives — et le
+// message ne parlait que « du navigateur ». L'adresse affichée est celle du
+// site ouvert (production ou staging), jamais une adresse écrite en dur.
+function texteBloquee () {
+  const site = location.host
+  const p = P.plateforme()
+  if (p === 'android') {
+    return `Les notifications sont bloquées pour HôteSmart dans Chrome. Pour les autoriser : ouvrez Chrome, touchez ⋮ puis Paramètres → Paramètres des sites → Notifications, choisissez ${site}, puis Autoriser. Revenez ensuite ici.`
+  }
+  if (p === 'android-autre') {
+    return `Les notifications sont bloquées pour HôteSmart dans ce navigateur. Pour les autoriser : ouvrez ses paramètres, puis les autorisations des sites → Notifications, choisissez ${site}, puis Autoriser. Revenez ensuite ici.`
+  }
+  if (p === 'iphone') {
+    return 'Les notifications sont bloquées pour HôteSmart. Pour les autoriser : ouvrez l’app Réglages → Notifications → HôteSmart → Autoriser les notifications. Si HôteSmart n’y figure pas, supprimez son icône, reposez l’appli sur l’écran d’accueil, ouvrez-la et acceptez.'
+  }
+  return `Les notifications sont bloquées pour HôteSmart dans ce navigateur. Pour les autoriser : cliquez sur l’icône à gauche de l’adresse (${site}), puis Notifications → Autoriser, et rechargez la page.`
+}
+
+// Le texte d'état, et le lien vers le guide quand il y a quelque chose à faire.
+function ecrireEtat (texte, avecGuide) {
+  const el = $('n-etat')
+  el.textContent = texte
+  if (avecGuide) {
+    const a = document.createElement('a')
+    a.href = '/guide#appli'
+    a.textContent = 'Voir le guide pas à pas'
+    el.append(' ', a)
+  }
 }
 
 async function rendreNotifications () {
@@ -702,14 +775,19 @@ async function rendreNotifications () {
   // ⚠ L'iPHONE D'ABORD : dans un onglet Safari, `PushManager` n'existe pas, donc
   // `pris()` est faux — et l'hôte doit lire comment poser l'appli, pas
   // « ce navigateur ne permet pas » (constat de review).
-  let texte
-  if (P.iphoneHorsAppli()) texte = MOTIFS.iphone_hors_appli
+  // ⚠ LE BLOCAGE SE DIT DÈS L'OUVERTURE (Q21), avant tout clic : le bouton
+  // « Recevoir » ne servirait à rien, le navigateur refuserait sans rien demander.
+  let texte, guide = false
+  const bloque = P.bloquee()
+  if (P.iphoneHorsAppli()) { texte = MOTIFS.iphone_hors_appli; guide = true }
   else if (!P.pris()) texte = MOTIFS.non_pris
   else if (!etat.pret) texte = MOTIFS.cles_absentes
+  else if (bloque) { texte = texteBloquee(); guide = true }
   else if (abonneIci) texte = 'Cet appareil reçoit les notifications.'
   else texte = 'Cet appareil ne reçoit pas encore les notifications.'
-  $('n-etat').textContent = texte
-  const possible = P.pris() && !P.iphoneHorsAppli() && etat.pret
+  ecrireEtat(texte, guide)
+  permissionVue = P.pris() ? Notification.permission : null
+  const possible = P.pris() && !P.iphoneHorsAppli() && etat.pret && !bloque
   $('n-abonner').hidden = !possible || abonneIci
   $('n-essai').hidden = !possible || !abonneIci
   $('n-desabonner').hidden = !abonneIci
@@ -720,7 +798,149 @@ async function rendreNotifications () {
         <div class="card-sub" style="margin:0">Abonné le ${esc(new Date(a.cree_le).toLocaleDateString('fr-FR'))}${a.dernier_envoi_le ? ' · dernière notification le ' + esc(new Date(a.dernier_envoi_le).toLocaleDateString('fr-FR')) : ''}</div></div>
         <button class="btn-danger" data-retirer="${esc(a.id)}">Retirer</button></div>`).join('')
     : '<div class="card-sub" style="margin:0">Aucun appareil abonné pour le moment.</div>'
+
+  rendreReglages(etat)
 }
+
+// ─── Lot 2b : quand vous prévenir, et les heures calmes ────────────────────
+// La liste des événements VIENT DU SERVEUR (lib/notifications/catalogue.js) :
+// cette page ne la recopie pas. Elle tient un brouillon, et n'écrit qu'au clic
+// sur « Enregistrer ».
+//
+// ⚠ UN BROUILLON MODIFIÉ N'EST JAMAIS ÉCRASÉ PAR UNE RELECTURE : chaque geste sur
+// les appareils (s'abonner, essai, retirer) relit l'état du serveur, et il ne
+// doit pas effacer ce que la personne est en train de régler.
+
+function rendreReglages (etat) {
+  if (etat.reglages_indisponibles) message('Vos réglages de notification n’ont pas pu être lus. Rechargez la page.')
+  if (!Array.isArray(etat.evenements)) return
+  if (!brouillonNotif || !notifModifie) {
+    groupes = etat.groupes || []
+    brouillonNotif = {
+      evenements: etat.evenements.map(e => ({ ...e })),
+      plages: (etat.plages || []).map(p => ({ debut: p.debut, fin: p.fin, jours: [...(p.jours || [1, 2, 3, 4, 5, 6, 7])] }))
+    }
+  }
+  $('n-quand').hidden = false
+  $('n-calme').hidden = false
+  $('n-enregistrer').hidden = false
+  rendreTableau()
+  rendrePlages()
+}
+
+function rendreTableau () {
+  const lignes = []
+  for (const g of groupes) {
+    const evs = brouillonNotif.evenements.filter(e => e.groupe === g.code)
+    if (!evs.length) continue
+    lignes.push(`<tr class="n-groupe"><td colspan="5">${esc(g.libelle)}</td></tr>`)
+    for (const e of evs) {
+      lignes.push(`<tr><td>${esc(e.libelle)}</td>${CANAUX_ECRAN.map(([c, nom]) =>
+        `<td><input type="checkbox" data-code="${esc(e.code)}" data-canal="${c}"${e[c] ? ' checked' : ''} aria-label="${esc(nom + ' — ' + e.libelle)}"></td>`).join('')}</tr>`)
+    }
+  }
+  $('n-tableau').innerHTML = `<table class="n-table"><thead><tr><th scope="col">Événement</th>${CANAUX_ECRAN.map(([, nom]) => `<th scope="col">${nom}</th>`).join('')}</tr></thead><tbody>${lignes.join('')}</tbody></table>`
+}
+
+function rendrePlages () {
+  const pl = brouillonNotif.plages
+  $('n-plages').innerHTML = pl.length
+    ? pl.map((p, i) => `<div class="plage" data-rang="${i}">
+        <span>De</span><input type="time" step="60" data-champ="debut" value="${esc(p.debut)}" aria-label="Début de la plage ${i + 1}">
+        <span>à</span><input type="time" step="60" data-champ="fin" value="${esc(p.fin)}" aria-label="Fin de la plage ${i + 1}">
+        <span class="jours">${JOURS_ECRAN.map(([j, court, long]) =>
+          `<label title="${long}"><input type="checkbox" data-jour="${j}"${p.jours.includes(j) ? ' checked' : ''} aria-label="${long}, plage ${i + 1}"><span>${court}</span></label>`).join('')}</span>
+        <button class="btn-danger" data-retirer-plage="${i}" aria-label="Retirer la plage ${i + 1}">Retirer</button>
+      </div>`).join('')
+    : '<div class="card-sub" style="margin:0">Aucune plage : tout vous arrive tout de suite.</div>'
+  $('n-ajouter-plage').disabled = pl.length >= PLAFOND_PLAGES_ECRAN
+}
+
+// ⚠ LA SURRÉSERVATION EST LA SEULE ALERTE QUI NE SE RATTRAPE PAS (spec §4.5) :
+// deux voyageurs devant la même porte. La retirer des urgences, ou lui retirer
+// tous ses canaux, se confirme — et l'écran dit pourquoi au moment du geste.
+function confirmerSurreservation (e, canal, coche) {
+  if (e.code !== 'surreservation' || coche) return true
+  if (canal === 'urgent') {
+    return window.confirm('La surréservation est la seule alerte qui ne se rattrape pas : deux voyageurs devant la même porte.\n\nSans « Urgent », elle attendra la fin de vos heures calmes. Continuer ?')
+  }
+  const restants = ['push', 'email', 'sms'].filter(c => c !== canal && e[c])
+  if (restants.length) return true
+  return window.confirm('La surréservation est la seule alerte qui ne se rattrape pas : deux voyageurs devant la même porte.\n\nSans aucun canal, elle ne vous préviendra plus du tout. Continuer ?')
+}
+
+$('n-tableau').onchange = (ev) => {
+  const c = ev.target
+  if (!c || !c.dataset || !c.dataset.code) return
+  const e = brouillonNotif.evenements.find(x => x.code === c.dataset.code)
+  if (!e) return
+  if (!confirmerSurreservation(e, c.dataset.canal, c.checked)) { c.checked = !c.checked; return }
+  e[c.dataset.canal] = c.checked
+  brouillonTouche()
+}
+
+$('n-plages').onchange = (ev) => {
+  const ligne = ev.target.closest('.plage')
+  if (!ligne) return
+  const p = brouillonNotif.plages[Number(ligne.dataset.rang)]
+  if (!p) return
+  if (ev.target.dataset.champ) p[ev.target.dataset.champ] = ev.target.value
+  if (ev.target.dataset.jour) {
+    const j = Number(ev.target.dataset.jour)
+    p.jours = ev.target.checked ? [...new Set([...p.jours, j])].sort((x, y) => x - y) : p.jours.filter(x => x !== j)
+  }
+  brouillonTouche()
+}
+
+$('n-plages').onclick = (ev) => {
+  const rang = ev.target?.dataset?.retirerPlage
+  if (rang === undefined) return
+  brouillonNotif.plages.splice(Number(rang), 1)
+  brouillonTouche()
+  rendrePlages()
+  // Le bouton cliqué n'existe plus : le focus va au geste suivant naturel.
+  $('n-ajouter-plage').focus()
+}
+
+$('n-ajouter-plage').onclick = () => {
+  if (brouillonNotif.plages.length >= PLAFOND_PLAGES_ECRAN) return
+  brouillonNotif.plages.push({ debut: '22:00', fin: '07:00', jours: [1, 2, 3, 4, 5, 6, 7] })
+  brouillonTouche()
+  rendrePlages()
+}
+
+$('n-enregistrer').onclick = async () => {
+  $('n-enregistrer').disabled = true
+  const versionEnvoyee = versionNotif
+  try {
+    const evenements = Object.fromEntries(brouillonNotif.evenements.map(e =>
+      [e.code, { push: !!e.push, email: !!e.email, sms: !!e.sms, urgent: !!e.urgent }]))
+    const r = await P.enregistrerReglages(await jetonActuel(), { evenements, plages: brouillonNotif.plages })
+    if (!r.ok) {
+      const ou = Number.isInteger(r.rang) ? `Plage ${r.rang + 1} : ` : ''
+      message(ou + (r.error || 'Enregistrement impossible, réessayez.'))
+      return
+    }
+    // ⚠ UNE CASE COCHÉE PENDANT L'ENVOI N'EST PAS EFFACÉE (constat de review) :
+    // si le brouillon a bougé depuis le clic, il reste tel quel, et l'écran dit
+    // qu'il reste à enregistrer.
+    if (versionNotif !== versionEnvoyee) {
+      message('Réglages enregistrés, sauf vos dernières modifications : enregistrez de nouveau.')
+      return
+    }
+    notifModifie = false
+    rendreReglages({ groupes, evenements: r.evenements, plages: r.plages })
+    message('Réglages enregistrés.', 'ok')
+  } catch (e) { message(e.message) }
+  finally { $('n-enregistrer').disabled = false }
+}
+
+// Revenu des réglages du téléphone (Q21) : si la permission a changé, l'état se
+// relit. La comparaison est locale ; le réseau n'est touché que si elle bouge.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || ongletActif !== 'notifications' || !P.pris()) return
+  if (Notification.permission !== permissionVue) rendreNotifications().catch(() => message(ERREUR_LECTURE))
+})
 
 $('tab-equipe').onclick = () => montrerOnglet('equipe')
 $('tab-notifications').onclick = () => montrerOnglet('notifications')
@@ -736,7 +956,7 @@ $('n-abonner').onclick = async () => {
         return { jeton: data.session?.access_token || null, userId: data.session?.user?.id || null }
       }
     })
-    if (!r.ok) message(MOTIFS[r.motif] || r.message || 'L’abonnement a échoué, réessayez.')
+    if (!r.ok) message(r.motif === 'refusee' ? texteBloquee() : (MOTIFS[r.motif] || r.message || 'L’abonnement a échoué, réessayez.'))
     else message('Cet appareil recevra les notifications. Envoyez-vous un essai pour vérifier.', 'ok')
     await rendreNotifications()
   } catch (e) { message(e.message) }

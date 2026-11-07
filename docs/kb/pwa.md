@@ -273,3 +273,87 @@ les deux clés, `/settings` dit « pas encore activées » et rien ne part.
 3. Se déconnecter, se reconnecter : l'appareil n'est plus abonné.
 4. iPhone : avec le point 2 reporté de la recette du lot 1 (§6), en une fois
    (décision du 7 novembre).
+
+## 9. Lot 2b — les réglages de la personne (8 novembre 2026)
+
+Spec : `docs/specs/spec-pwa-lot2-notifications.md` §15 (décisions du 7 novembre
+au soir, §13 : Q21 à Q24). Le 2b pose **ce que chaque personne règle** ; rien
+n'envoie encore selon ces réglages, c'est le 2c qui branche les événements.
+**Recetté sur staging seul** ; la production reçoit 2b et 2c ensemble (Q24).
+
+| Pièce | Fichier |
+|---|---|
+| Table des réglages | `migrations/2026-11-08-notifications-reglages.sql` (`notifications_reglages`, une ligne par PERSONNE, RLS sans politique) |
+| Catalogue des quatorze événements | `lib/notifications/catalogue.js` (seule liste ; l'écran la reçoit du serveur) |
+| Writer unique | `lib/notifications/reglages.js` (défauts, validation, tableau et langue écrits sans s'écraser) |
+| Heures calmes | `lib/notifications/plages.js` (réutilise `plageDeNuit` de `lib/guestflow/sourdine.js`, sans le modifier) |
+| Décision | `lib/notifications/decision.js` (maintenant ou fin de plage, pour une personne et un événement) |
+| Endpoint | `api/push.js` (GET rend aussi le tableau, les plages, la langue ; POST `reglages`, `langue`) |
+| Navigateur | `shared/push-appareil.js` (`plateforme`, `bloquee`, `enregistrerReglages`, `enregistrerLangue`), `shared/langue-personne.js` |
+| Écran | `/settings`, onglet « Notifications » : « Quand vous prévenir », « Heures calmes » |
+| Langue | `shared/nav.js`, le sélecteur du menu ≡ |
+| Guide | `pages/guide.html` §14 (`#appli`) |
+
+**Les règles, et pourquoi :**
+1. **Une personne sans ligne a les défauts** (Q23) : notification et e-mail,
+   pas de SMS, urgent a, b, h, j, aucune plage, français. La ligne ne range
+   que les événements enregistrés : un événement ajouté au catalogue prend ses
+   défauts chez tout le monde, sans migration.
+2. **La langue vit dans la ligne de la personne, pas sur `profiles`** :
+   `profiles` porte une ligne par couple (compte, membre).
+3. **Le jour d'une plage est celui où elle commence** : « 22:00 → 07:00, le
+   vendredi » couvre la nuit du vendredi au samedi. L'écran et le guide le
+   disent.
+4. **Des plages qui se suivent font une seule attente**, jusqu'au premier
+   instant libre. **Une semaine sans un moment libre est refusée**
+   (`aucun_moment_libre`) : ce qui n'est pas urgent n'arriverait jamais.
+5. **Le séjour en cours compte le jour du départ** : le matin du départ, le
+   voyageur est là. Les jours (arrivée aujourd'hui, demain) sont ceux de Paris.
+6. **Chacun ne lit et n'écrit que SES réglages** : l'endpoint prend la
+   personne dans la session, jamais dans le corps.
+7. **Retirer la surréservation des urgences, ou tous ses canaux, se
+   confirme** : c'est la seule alerte qui ne se rattrape pas.
+8. **Un brouillon modifié n'est jamais écrasé** quand l'onglet relit le
+   serveur après un geste sur les appareils.
+9. **Bloquées (Q21)** : dès l'ouverture, le chemin exact de l'appareil
+   (Android avec Chrome : Chrome → ⋮ → Paramètres → Paramètres des sites →
+   Notifications ; un autre navigateur Android : ses autorisations des sites ;
+   iPhone et iPad : Réglages → Notifications → HôteSmart ; ordinateur : l'icône
+   à gauche de l'adresse), l'adresse du site ouvert (jamais en dur), et le lien
+   vers le guide. Au retour sur l'onglet, l'état se relit si la permission a
+   changé (comparaison locale, sans réseau sinon).
+10. **La langue s'enregistre sur le geste du menu ≡ seulement** : aucun appel
+    ajouté au chargement d'une page.
+11. **Une fin de plage dans le trou du passage à l'heure d'été finit au saut**
+    (constat de review) : la nuit où l'horloge saute de 2 h à 3 h, une fin à
+    2 h 30 n'existe pas, et `plageDeNuit` rend un instant d'AVANT (1 h 30,
+    parfois déjà passé). `lib/notifications/plages.js` corrige au saut (3 h)
+    sans toucher `sourdine.js`. ⚠ `lib/guestflow/sourdine.js` a le même défaut
+    pour la décision 7 (mesuré : à 1 h 45 avec une fin à 2 h 30, l'échéance
+    rendue est 1 h 30) — signalé au fil messagerie, qui tient ce fichier.
+12. **Une case cochée pendant un enregistrement n'est pas effacée** : la
+    réponse ne remplace le brouillon que s'il n'a pas bougé depuis le clic.
+13. **Des réglages illisibles ne font pas tomber les appareils** : le GET sert
+    les appareils et dit `reglages_indisponibles`.
+
+**Ce qui est au 2c, et pourquoi** : les contacts libres, la reprise des listes
+d'`agent_alert_config`, le déménagement du bloc « Alertes » de Messages, la
+file d'attente et sa passe de cron, les quatorze événements branchés, le
+remplacement du SMS, l'e-mail du dernier appareil, `next` dans
+`components/auth-guard.js`. Sans la bascule d'envoi, ces réglages ne feraient
+rien.
+
+**Recette (Thierry, sur staging, après la migration)** :
+1. `/settings` → Notifications : le tableau des quatorze événements, la
+   notification et l'e-mail cochés, le SMS décoché, « Urgent » sur la
+   surréservation, l'urgence de l'assistant, le ménage sans personne et le
+   code d'accès non résolu.
+2. Cocher un SMS, ajouter une plage (22:00 → 07:00, du lundi au vendredi),
+   « Enregistrer », recharger : tout est resté.
+3. Décocher « Urgent » sur la surréservation : la question s'affiche ;
+   « Annuler » remet la case.
+4. Changer la langue au menu ≡ d'une page V5 : rien ne change à l'écran de
+   `/settings` (la langue sert aux notifications du 2c), mais la valeur est
+   enregistrée — vérifiée par moi en base.
+5. Android : bloquer les notifications du site dans Chrome, rouvrir l'onglet :
+   le chemin exact s'affiche, avec le lien vers le guide.
