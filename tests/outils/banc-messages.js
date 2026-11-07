@@ -70,7 +70,15 @@ function corpsDeLaPage () {
   // evalue pour de vrai (PARTAGES), sans en recopier une ligne.
   const sansImportDynamique = sansImports.replace(/import\('\/shared\/connaissance-vue\.js'\)/g,
     'Promise.resolve({ monterConnaissance })')
-  const sansAmorce = sansImportDynamique.replace(/^init\(\)\.catch\([\s\S]*?\)\s*$/m, '')
+  // ⚠ LA NAVIGATION EST OBSERVEE, PAS SUBIE : jsdom n'implemente pas
+  // `location.assign` vers une autre page (il ecrit une erreur et ne fait
+  // rien), et ses proprietes ne se doublent pas. Sans ce relais, un test ne
+  // pouvait pas dire SI la page partait, ni OU — et un depart refuse se
+  // confondait avec un depart reussi (constat 7 de la review du 7 novembre
+  // 2026). Le relais garde la forme (`assign` ou `replace`) et l'adresse.
+  const sansNavigation = sansImportDynamique.replace(/\blocation\.(assign|replace)\(/g,
+    (_, forme) => "window.__naviguer('" + forme + "', ")
+  const sansAmorce = sansNavigation.replace(/^init\(\)\.catch\([\s\S]*?\)\s*$/m, '')
   if (/^\s*import\s/m.test(sansAmorce)) throw new Error('banc : un import a survecu')
   // ⚠ LE GARDE-FOU VISE `init()` EN DEBUT DE LIGNE, PAS SEULEMENT
   // `init().catch(` (constat mineur de la derniere revue : je l'avais rétréci).
@@ -286,6 +294,8 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
   `
   window.__journal = []
   window.__domaines = []
+  window.__navigations = []
+  window.__naviguer = (forme, adresse) => { window.__navigations.push({ forme, adresse: String(adresse) }) }
   // ⚠ LE DOUBLE SUPABASE REFUSE CE QUE LE VRAI REFUSE (constat 9 de la revue
   // du 28 octobre 2026, et c'est un faux vert qu'il a MESURE). Sa premiere
   // version acceptait n'importe quel nom de maillon et n'importe quelle
@@ -375,6 +385,8 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
   return {
     dom, window, doc: window.document, msg, envois,
     journal: window.__journal, domaines: window.__domaines,
+    // Les departs de la page, dans l'ordre : `{ forme: 'assign'|'replace', adresse }`.
+    navigations: window.__navigations,
     confirmations: window.__confirmations,
     // Les fenetres de la page qui se sont ouvertes, dans l'ordre, avec leur
     // titre, leur texte et le LIBELLE de chaque bouton : un test affirme ce que

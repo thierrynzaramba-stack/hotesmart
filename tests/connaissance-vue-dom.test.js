@@ -235,6 +235,8 @@ test('LE TEST QUI COMPTE : supprimer demande dans la PAGE ; fermer ou « Garder 
   assert.ok(boite, 'une fenêtre DANS la page')
   assert.equal(b.w.__confirm, 0, 'jamais window.confirm (règle du 2 novembre 2026)')
   assert.equal(boite.querySelector('.hs-confirm__titre').textContent, 'Supprimer « Wifi » ?')
+  assert.equal(boite.querySelector('.hs-confirm__texte').textContent,
+    'La réponse disparaît de la base, et l’IA ne s’en servira plus.')
   clic(b, boite.querySelector('[data-confirm-choix="garder"]'))
   await reposer()
   assert.equal(ecritures(b).length, 0)
@@ -244,6 +246,18 @@ test('LE TEST QUI COMPTE : supprimer demande dans la PAGE ; fermer ou « Garder 
   await reposer()
   assert.deepEqual(ecritures(b).map(x => x.corps), [{ action: 'supprimer', bien: 'P1', id: 'r1' }])
   assert.equal(b.racine.querySelector('[data-kb-note]').textContent, 'Supprimé')
+  b.fermer()
+})
+
+test('supprimer une réponse Hors IA ne prétend pas que l IA s en servait (recette du 7 novembre 2026)', async () => {
+  const b = await monter()
+  clic(b, b.racine.querySelector('[data-kb-ouvrir="r2"]'))
+  clic(b, b.racine.querySelector('[data-kb-supprimer]'))
+  await reposer()
+  const boite = b.d.querySelector('[data-bind="hs-confirm"]')
+  assert.equal(boite.querySelector('.hs-confirm__texte').textContent, 'La réponse disparaît de la base.')
+  clic(b, boite.querySelector('[data-confirm-choix="garder"]'))
+  await reposer()
   b.fermer()
 })
 

@@ -103,6 +103,16 @@
     <div class="msg-saisie__echeance" data-bind="saisie-echeance" hidden></div>
     <div class="msg-saisie" data-bind="saisie" hidden>
       <textarea rows="1" data-bind="texte" data-i18n-attr="placeholder:messages.write;aria-label:messages.write"></textarea>
+      <!-- La base de connaissance À CÔTÉ DE LA SAISIE (recette du 7 novembre
+           2026, demande de Thierry). Au téléphone, le bouton d'en-tête ne vit
+           que sur la LISTE : pour l'atteindre il fallait quitter le fil, et la
+           page s'ouvrait sur le premier logement, sans voyageur. Celui-ci est
+           DANS le fil. Même attribut que l'en-tête, donc même branchement
+           (titulaire seul, volet ou page, gel pendant une écriture). -->
+      <button type="button" class="btn btn--secondary btn--icon" data-ouvre-volet="connaissance" hidden
+        data-i18n-attr="aria-label:kb.title;title:kb.title">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-book"/></svg>
+      </button>
       <button type="button" class="btn btn--secondary btn--icon" data-bind="proposer" data-i18n-attr="aria-label:messages.propose;title:messages.propose">
         <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
       </button>
@@ -1749,10 +1759,92 @@ function urlConnaissance () {
 // Depuis le lien du volet « Réponses de l'IA » : on change de volet, on ne
 // referme pas le tiroir.
 function ouvrirConnaissance () {
-  if (telephone()) { location.assign(urlConnaissance()); return }
+  if (telephone()) { quitterVersConnaissance(); return }
   etat.tiroirVolet = 'connaissance'
   ouvrirTiroir(true)
 }
+
+// ⚠ AU TÉLÉPHONE, LA BASE EST UNE AUTRE PAGE : ON QUITTE MESSAGES. Depuis le
+// 7 novembre 2026 l'icône vit aussi à côté de la saisie, donc on peut partir
+// EN PLEINE FRAPPE, et quitter une page COUPE ce qui y était en vol.
+//
+// ⚠ ON NE PART DONC PAS TANT QUE QUELQUE CHOSE PEUT PARTIR DEUX FOIS — constats
+// 1 à 3 de la review du correctif, tous mesurés :
+//   · un envoi en cours (message libre ou proposition) : la page coupée avant
+//     la clôture laisse la tâche en `sending`, et un second clic au retour
+//     DOUBLE le message chez le voyageur ;
+//   · une proposition de l'IA en cours de « Modifier » : son enregistrement
+//     part au `blur`, AVANT le clic, et rien ne permet d'en attendre la fin —
+//     j'avais écrit un `await` qui n'attendait rien (vérifié par la review).
+//     Garder ce texte comme texte libre serait pire : son envoi ne validerait
+//     pas la proposition, qui partirait AUSSI à son échéance ;
+//   · un message « Non envoyé · Réessayer » de ce fil : il ne vit qu'en
+//     mémoire, la page le perdrait.
+// Dans ces cas l'icône le DIT sous la saisie, et on reste.
+//
+// Sinon : un texte LIBRE est gardé (même compte, une heure, rendu une seule
+// fois au retour par `reprendreSaisieGardee`), et l'adresse de Messages porte
+// le fil (?conv=), pour que le retour — bouton de la page ou retour arrière —
+// le rouvre.
+const CLE_SAISIE_GARDEE = 'hs-messages-saisie'
+const SAISIE_GARDEE_MS = 60 * 60 * 1000
+function departBloque () {
+  const enVol = [...etat.envois.values()].some(l => l.some(e => e.etatEnvoi === 'en_cours'))
+    || etat.taches.some(x => x.etatEnvoi === 'en_cours')
+  if (enVol) return 'messages.kb_wait_send'
+  if (etat.enEdition) return 'messages.kb_finish_edit'
+  const enEchec = (etat.envois.get(String(etat.ouverte)) || []).some(e => e.etatEnvoi === 'echec')
+  if (enEchec) return 'messages.kb_failed_send'
+  return null
+}
+function quitterVersConnaissance () {
+  // Depuis la LISTE (fil fermé), le geste d'avant ce correctif est inchangé.
+  if (etat.ouverte !== null) {
+    const bloque = departBloque()
+    if (bloque) { noteReglage(t(bloque)); return }
+    const zone = $('[data-bind="texte"]')
+    const texte = zone ? String(zone.value || '') : ''
+    try {
+      if (texte.trim()) {
+        sessionStorage.setItem(CLE_SAISIE_GARDEE, JSON.stringify({
+          compte: String(compteCourant()), bookId: String(etat.ouverte), texte, t: Date.now()
+        }))
+      } else sessionStorage.removeItem(CLE_SAISIE_GARDEE)
+    } catch (e) { logger.error('Messages', 'saisie gardée', e) }
+    try {
+      const u = new URL(location.href)
+      u.searchParams.set('conv', String(etat.ouverte))
+      u.searchParams.delete('volet')
+      history.replaceState(history.state, '', u)
+    } catch (e) { logger.error('Messages', 'adresse du fil', e) }
+  }
+  location.assign(urlConnaissance())
+}
+// Le texte gardé est LU ET RETIRÉ au chargement, une seule fois (constat 4 :
+// laissé en place, un texte déjà envoyé pouvait revenir plus tard). Il n'est
+// rendu qu'au fil que l'adresse rouvre, pour le même compte, dans l'heure,
+// sans proposition en cours de modification, et dans une saisie VIDE.
+function reprendreSaisieGardee (bookIdOuvert) {
+  let garde = null
+  try {
+    garde = JSON.parse(sessionStorage.getItem(CLE_SAISIE_GARDEE) || 'null')
+    sessionStorage.removeItem(CLE_SAISIE_GARDEE)
+  } catch { return }
+  if (!garde || !garde.texte || bookIdOuvert === null || bookIdOuvert === undefined) return
+  if (String(garde.bookId) !== String(bookIdOuvert)) return
+  if (String(garde.compte) !== String(compteCourant())) return
+  if (!(Date.now() - Number(garde.t) < SAISIE_GARDEE_MS)) return
+  if (etat.enEdition) return
+  const zone = $('[data-bind="texte"]')
+  if (!zone || zone.value.trim()) return
+  zone.value = garde.texte
+  ajusterHauteur(zone)
+}
+// Retour arrière servi depuis le cache du navigateur : la page revient INTACTE,
+// saisie comprise, et `init` ne se rejoue pas. Le texte gardé n'a plus d'objet.
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted) { try { sessionStorage.removeItem(CLE_SAISIE_GARDEE) } catch {} }
+})
 
 // ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
 // MEMES lectures et MEMES ecritures RLS que l'ancienne app templates
@@ -3506,7 +3598,7 @@ async function init () {
     b.addEventListener('click', () => {
       // La base de connaissance au TÉLÉPHONE est une page plein écran, pas le
       // tiroir (spec KB V5 §3.1).
-      if (b.dataset.ouvreVolet === 'connaissance' && telephone()) { location.assign(urlConnaissance()); return }
+      if (b.dataset.ouvreVolet === 'connaissance' && telephone()) { quitterVersConnaissance(); return }
       const tiroir = $('[data-bind="tiroir"]')
       const deja = !tiroir.hidden && etat.tiroirVolet === b.dataset.ouvreVolet
       etat.tiroirVolet = b.dataset.ouvreVolet
@@ -3563,6 +3655,8 @@ async function init () {
   // point 2 de la recette, rouvert par la porte des liens profonds.
   const demandee = params.get('conv')
   if (demandee && etat.conversations.some(x => String(x.bookId) === String(demandee))) ouvrir(String(demandee))
+  // Retour de la base de connaissance (téléphone) : le texte libre gardé au départ.
+  reprendreSaisieGardee(etat.ouverte)
   // Volet demandé par les redirections de l'ancienne app (?volet=ia ou
   // programmes) : le panneau s'ouvre à l'arrivée — titulaire seulement,
   // comme les boutons qui y mènent.

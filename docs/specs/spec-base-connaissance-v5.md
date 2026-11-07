@@ -167,6 +167,19 @@ Une icône **« Base de connaissance »** dans l'en-tête de Messages, à côté
 - **Ordinateur** : elle ouvre un **volet à droite, 440 px**.
 - **Téléphone** : une **page plein écran**.
 - **Sélecteur de logement en haut** des deux.
+- **La même icône à côté du champ de saisie du fil** (recette du 7 novembre
+  2026, demande de Thierry). Au téléphone, l'en-tête n'existe que sur la LISTE :
+  pour l'atteindre il fallait quitter le fil, et la page s'ouvrait sur le
+  premier logement, sans voyageur pour l'aperçu. Depuis la saisie, elle s'ouvre
+  sur le logement ET le voyageur de la conversation, et son retour rouvre cette
+  conversation. Au téléphone, quitter la page coupe ce qui y est en vol : l'icône
+  **refuse de partir, et le dit sous la saisie**, tant qu'un envoi est en cours
+  (n'importe quel fil), qu'une proposition de l'IA est en cours de « Modifier »,
+  ou qu'un message « Non envoyé » de ce fil attend « Réessayer » (review du
+  correctif : un départ dans ces cas pouvait doubler un message au voyageur ou
+  perdre un texte). Sinon, un texte LIBRE est gardé (`sessionStorage`, lié au
+  compte, une heure), lu et retiré au retour, et rendu seulement au fil que
+  l'adresse rouvre, dans une saisie vide.
 
 ### 3.2 La carte d'une réponse prête
 
@@ -284,6 +297,17 @@ Un par un, **recette staging entre chaque**.
   porte serait pire que l'index. À retirer par une migration à part, si Thierry
   le veut — la table compte quelques dizaines de lignes, le coût est nul
   aujourd'hui.
+- **Hors de ce lot, trouvé par la review du correctif de recette (7 novembre
+  2026)** : dans `lancerEnvoi`, l'`await enregistrerBrouillonEnCours()` posé
+  contre la course `brouillon` / `reserver` n'attend rien — le `blur` a déjà
+  lancé l'enregistrement et mis `suggested_reply` à jour, donc le second appel
+  sort aussitôt (ordre mesuré par la review : début brouillon, début reserver,
+  fin reserver, fin brouillon). Défaut du chantier délai de réponse IA, antérieur
+  à ce lot : à inscrire au registre des dettes et à traiter dans ce chantier.
+- **Le texte gardé n'est pas effacé à la déconnexion** (`purgerCachesLocaux` ne
+  vide que le `localStorage`) : il est lié au compte, périme en une heure, et
+  disparaît au premier retour sur Messages — `sessionStorage` meurt aussi avec
+  l'onglet.
 
 ### Recette staging — ce que Thierry regarde
 
@@ -297,6 +321,13 @@ Un par un, **recette staging entre chaque**.
 4. Téléphone : le même bouton ouvre la page plein écran, sélecteur de logement
    en tête, mêmes gestes.
 5. L'ancienne adresse `/apps/agent-ai/knowledge` mène au volet.
+
+**Résultat de la recette du 7 novembre 2026 (staging, `b4522a10`)** : les cinq
+points passent. Deux correctifs en sortent, commités sur la branche du lot
+(règle 8) : l'icône à côté de la saisie (§3.1), et la fenêtre de suppression
+d'une réponse Hors IA, qui disait « l'IA ne s'en servira plus ». Un constat de
+recette était une erreur de mesure, pas un défaut : le libellé « Logement » du
+sélecteur est bien masqué (`.sr-only`) — c'est `innerText` qui le comptait.
 
 ## 4 bis. INVENTAIRE de `apps/agent-ai/knowledge.html` (lot 3)
 
