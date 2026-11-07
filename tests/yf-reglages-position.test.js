@@ -534,21 +534,28 @@ test('2c : les lignes APRÈS un geste — poser, remplacer, retirer, sans touche
 })
 
 const BIEN_PILOTE = { id: BIEN, user_id: COMPTE, prix_minimum: 1, pilote_tarifaire: 'yieldflow', pilote_fenetre_type: 'mois', pilote_fenetre_valeur: 3, rate_sync_mode: 'managed' }
-function chargerSimulateur (lignesActuelles = [], { sansMateriaux = false } = {}) {
-  const debut = '2026-12-01'
-  const fin = '2027-03-01'
-  const evenements = datesCommerciales('2026-01-01', fin)
-  const materiauxPositions = { reglages: new Map(), zoneBien: null, vacances: [], evenements, debut, fin }
+// Le simulateur sur une matiere fabriquee : le faux `preparerContexte` HONORE
+// les bornes qu'on lui passe (fenetre, finContexte), comme le vrai.
+function chargerSimulateur (lignesActuelles = [], { sansMateriaux = false, evenementsEnPlus = [], reglages = new Map(), retouche = null } = {}) {
+  const appels = []
+  const evenements = [...datesCommerciales('2026-01-01', '2027-12-31'), ...evenementsEnPlus]
   const ctxCal = R2.construireContexte({ zoneBien: 'C', vacances: [], evenements, debut: '2025-01-01', fin: '2027-12-31' })
-  const parDate = new Map()
-  for (let j = debut; j <= fin; j = new Date(Date.parse(`${j}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)) parDate.set(j, { date: j, rate: 100 })
-  const ctx = { auj: debut, contexte: ctxCal, grille: grille(), pressionParMois: new Map(), vendues: {}, bien: BIEN_PILOTE, reglages: new Map(),
-    lignesPosition: lignesActuelles, materiauxPositions, positions: P.positionsDuContexte({ ...materiauxPositions, lignes: lignesActuelles }),
-    parDate, ouverts: null, ouvertureConnue: true }
-  if (sansMateriaux) delete ctx.materiauxPositions
+  const preparer = async (s, b, c, o) => {
+    appels.push(o)
+    const finContexte = [o.fin, o.aujourdHui, o.finContexte || o.aujourdHui].sort()[2]
+    const materiauxPositions = { reglages, zoneBien: null, vacances: [], evenements, debut: `${o.aujourdHui.slice(0, 7)}-01`, fin: finContexte }
+    const parDate = new Map()
+    for (let j = o.debut; j <= o.fin; j = new Date(Date.parse(`${j}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)) parDate.set(j, { date: j, rate: 100 })
+    const ctx = { auj: o.aujourdHui, contexte: ctxCal, grille: grille(), pressionParMois: new Map(), vendues: {}, bien: b, reglages,
+      lignesPosition: lignesActuelles, materiauxPositions, positions: P.positionsDuContexte({ ...materiauxPositions, lignes: lignesActuelles }),
+      parDate, ouverts: null, ouvertureConnue: true }
+    if (sansMateriaux) delete ctx.materiauxPositions
+    if (retouche) retouche(ctx)
+    return ctx
+  }
   const avant = Module._load
   Module._load = function (d, ...reste) {
-    if (d === './contexte-du-bien') { const vrai = avant.apply(this, [d, ...reste]); return { ...vrai, preparerContexte: async () => ctx } }
+    if (d === './contexte-du-bien') { const vrai = avant.apply(this, [d, ...reste]); return { ...vrai, preparerContexte: preparer } }
     if (d === '../fermetures') return { fermeturesDuBien: async () => [] }
     if (d === '../prix-hote') return { prixHoteDuBien: async () => new Map() }
     return avant.apply(this, [d, ...reste])
@@ -557,7 +564,10 @@ function chargerSimulateur (lignesActuelles = [], { sansMateriaux = false } = {}
   const m = require('../lib/yield/simuler-positions')
   Module._load = avant
   delete require.cache[require.resolve('../lib/yield/simuler-positions')]
-  return m.simulerPositions
+  const simuler = (...a) => m.simulerPositions(...a)
+  simuler.appels = appels
+  simuler.preparer = preparer
+  return simuler
 }
 const REVEILLON = { evenement: 'commercial:reveillon_noel', zone: 'evenement', rang: null, jour: null, nuit: 'date' }
 
@@ -568,7 +578,15 @@ test('LE TEST QUI COMPTE (2c) : « N nuits vont changer de prix » compte par la
   assert.deepEqual([s.pilote, s.nuits, s.du, s.au, s.max], [true, 1, '2026-12-24', '2026-12-24', 165])
   assert.deepEqual(s.visees.get(k), ['2026-12-24'])
   assert.deepEqual(Object.keys(s.recommandes.get(k)), ['2026-12-24'])
-  assert.ok(S.NIVEAUX.some(n => n.nom === s.recommandes.get(k)['2026-12-24']), 'un des cinq niveaux, celui du calcul sans réglage')
+  // Le recommandé est le niveau du calcul SANS AUCUN réglage de position —
+  // pas celui du contexte qui porte le réglage (qui rendrait « Exceptionnel »).
+  const { prixDeLaNuit: pdn } = require('../lib/yield/contexte-du-bien')
+  const nu = await simuler.preparer(null, BIEN_PILOTE, COMPTE, { aujourdHui: '2026-12-01', debut: '2026-12-01', fin: '2027-03-01' })
+  const attendu = pdn(nu, '2026-12-24', { ouverte: true, vendue: false }).niveau
+  assert.notEqual(attendu, 'Exceptionnel', 'la fixture doit distinguer le recommandé du niveau posé')
+  assert.equal(s.recommandes.get(k)['2026-12-24'], attendu)
+  // La vue court sur douze mois, le compte sur la fenêtre ; la pression est demandée pour les douze mois.
+  assert.deepEqual([simuler.appels[0].fin, simuler.appels[0].finContexte, simuler.appels[0].mois.length], ['2027-03-01', '2027-12-01', 13])
   assert.deepEqual(s.sans_nuit, [])
   // Retirer : la nuit qu'elle tenait change aussi, et sa recommandation est gardée.
   const retrait = await chargerSimulateur([{ id: 'r1', ...REVEILLON, niveau: 'Exceptionnel' }])(null, BIEN_PILOTE, [{ ...REVEILLON, niveau: null }], '2026-12-01')
@@ -601,7 +619,7 @@ function chargerApi ({ sim = null, ecrire = null, bien = BIEN_PILOTE, lignes = [
     for (const [k, v] of Object.entries(stubs)) if (d === k || d.endsWith(k)) return v
     if (/\/reglages-position$/.test(d)) {
       const vrai = avant.apply(this, [d, ...reste])
-      return { ...vrai, lignesDuBien: async () => lignes,
+      return { ...vrai, lignesDuBien: async () => { if (lignes === null) throw new Error('panne'); return lignes },
         poserPosition: async (s, o) => { gestes.push(['poser', o.evenement, o.niveau, o.recommandes]); gestes.push(['qui', o.userId, o.propertyId]); return ecrire ? ecrire(o) : { ok: true, geste: 'posee', avant: null } },
         retirerPosition: async (s, o) => { gestes.push(['retirer', o.evenement]); return { ok: true, geste: 'retiree', avant: 'Haut' } } }
     }
@@ -671,7 +689,12 @@ test('2c, API : un geste interrompu dit ce qui est déjà écrit ; un geste conc
   let n = 0
   const e = chargerApi({ sim: SIM_API, ecrire: () => (++n === 2 ? { ok: false, raison: 'geste_concurrent', message: 'modifié ailleurs' } : { ok: true, geste: 'posee', avant: null }) })
   const r = await e.appeler('PUT', { positions: [{ ...REVEILLON, niveau: 'Haut' }, { evenement: 'commercial:reveillon_nouvel_an', zone: 'evenement', nuit: 'date', niveau: 'Haut' }], confirme: { nuits: 1 } })
-  assert.deepEqual([r.code, r.corps.error, r.corps.ecrites.length], [409, 'geste_concurrent', 1])
+  assert.deepEqual([r.code, r.corps.error, r.corps.ecrites.length, r.corps.envoi], [409, 'geste_concurrent', 1, 'immediat'])
+  assert.ok(e.gestes.some(x => x[0] === 'marqueur'), 'une position déjà écrite part au passage suivant du moteur, pas le lendemain')
+  // Un refus du writer sur une position déjà validée est un défaut serveur : 503, pas 400.
+  const f = chargerApi({ sim: SIM_API, ecrire: () => ({ ok: false, raison: 'bien_hors_compte', message: 'x' }) })
+  const r2 = await f.appeler('PUT', { positions: [{ ...REVEILLON, niveau: 'Haut' }], confirme: { nuits: 1 } })
+  assert.deepEqual([r2.code, r2.corps.error, r2.corps.ecrites, f.gestes.some(x => x[0] === 'marqueur')], [503, 'ecriture_impossible', [], false])
 })
 
 test('LE TEST QUI COMPTE (2c, API) : la lecture rend les lignes, la nuit de chacune, les lignes sans nuit et les largeurs', async () => {
@@ -726,4 +749,51 @@ test('2c, API : PATCH transmet la largeur de la zone d influence seulement quand
   assert.deepEqual([o.userId, o.propertyId, o.weekends_avant, 'weekends_apres' in o, 'crans' in o], [COMPTE, BIEN, 3, false, false])
   const hors = await e.appeler('PATCH', { segment: 'commercial:saint_valentin', weekends_apres: 5 })
   assert.equal(hors.code, 400)
+})
+
+test('LE TEST QUI COMPTE (2c, review) : une ligne au-delà de la fenêtre de pilotage prend ses nuits dans la vue et le journal, mais aucun prix ne bouge aujourd hui', async () => {
+  const salon = { segment: 'evenement:salon_juin', date_debut: '2027-06-10', date_fin: '2027-06-12', origine: 'hote' }
+  const simuler = chargerSimulateur([], { evenementsEnPlus: [salon] })
+  const pos = { evenement: 'evenement:salon_juin', zone: 'evenement', rang: null, jour: null, nuit: null }
+  const s = await simuler(null, BIEN_PILOTE, [{ ...pos, niveau: 'Haut' }], '2026-12-01')
+  const k = cleDePosition(pos)
+  assert.deepEqual([s.nuits, s.sans_nuit], [0, []], 'ni nuit comptée (hors fenêtre), ni « sans nuit » (elle agira en juin)')
+  assert.ok(s.visees.get(k).length >= 3 && s.visees.get(k).every(d => d >= '2027-06-10' && d <= '2027-06-12'))
+  assert.ok(Object.keys(s.recommandes.get(k)).length >= 3, 'le journal garde ce que YieldFlow recommandait, même au-delà de la fenêtre')
+})
+
+test('LE TEST QUI COMPTE (2c, review) : le compte voit la matière du MOTEUR — un événement qui commence après la fin de la fenêtre ne rayonne pas encore dedans', async () => {
+  // Fenêtre au 2027-03-01 ; salon du 3 au 5 mars ; son 1er week-end avant = ven. 26 et sam. 27 février, DANS la fenêtre.
+  const salon = { segment: 'evenement:salon_mars', date_debut: '2027-03-03', date_fin: '2027-03-05', origine: 'hote' }
+  const reglages = new Map([['evenement:salon_mars', { segment: 'evenement:salon_mars', actif: true, crans: null, weekends_avant: 1, weekends_apres: null }]])
+  const simuler = chargerSimulateur([], { evenementsEnPlus: [salon], reglages })
+  const pos = { evenement: 'evenement:salon_mars', zone: 'avant', rang: 1, jour: null, nuit: null }
+  const s = await simuler(null, BIEN_PILOTE, [{ ...pos, niveau: 'Exceptionnel' }], '2026-12-01')
+  assert.deepEqual(s.visees.get(cleDePosition(pos)), ['2027-02-26', '2027-02-27'], 'la vue la montre')
+  assert.equal(s.nuits, 0, 'le moteur ne lit pas encore le salon : annoncer ces deux nuits serait faux')
+})
+
+test('2c, review : ouverture inconnue → aucun compte annoncé ; une nuit vendue ou fermée à la vente n est pas comptée', async () => {
+  const inconnue = await chargerSimulateur([], { retouche: c => { c.ouvertureConnue = false } })(null, BIEN_PILOTE, [{ ...REVEILLON, niveau: 'Exceptionnel' }], '2026-12-01')
+  assert.deepEqual([inconnue.ouverture_inconnue, inconnue.nuits], [true, 0])
+  const vendue = await chargerSimulateur([], { retouche: c => { c.parDate.set('2026-12-24', { date: '2026-12-24', rate: 100, avail: 0 }) } })(null, BIEN_PILOTE, [{ ...REVEILLON, niveau: 'Exceptionnel' }], '2026-12-01')
+  assert.equal(vendue.nuits, 0)
+  assert.deepEqual(vendue.visees.get(cleDePosition(REVEILLON)), ['2026-12-24'], 'la ligne prend toujours sa nuit : c est le prix qui ne bouge pas')
+})
+
+test('LE TEST QUI COMPTE (2c, review) : une ligne qui ne porte qu une LARGEUR ne masque pas les crans d une clé plus large', () => {
+  const { reglagePour } = require('../lib/yield/reglages-segment')
+  const jour = { segment: 'vacances_zone_du_bien', detail: 'vacances_zone_du_bien:noël' }
+  const large = { segment: 'vacances_zone_du_bien', crans: 1, actif: true }
+  const largeur = { segment: 'vacances_zone_du_bien:noël', crans: null, actif: true, weekends_avant: 2 }
+  assert.equal(reglagePour(new Map([['vacances_zone_du_bien', large], ['vacances_zone_du_bien:noël', largeur]]), jour).crans, 1)
+  // Une ligne fine qui AJUSTE, ou qui COUPE, garde la main.
+  assert.equal(reglagePour(new Map([['vacances_zone_du_bien', large], ['vacances_zone_du_bien:noël', { ...largeur, crans: -1 }]]), jour).crans, -1)
+  assert.equal(reglagePour(new Map([['vacances_zone_du_bien', large], ['vacances_zone_du_bien:noël', { ...largeur, actif: false }]]), jour).actif, false)
+})
+
+test('2c, API (review) : la lecture des positions en panne ne fait pas tomber l écran', async () => {
+  const e = chargerApi({ lignes: null })
+  const g = await e.appeler('GET', { debut: '2026-11-07', fin: '2027-11-06' })
+  assert.deepEqual([g.code, g.corps.positions], [200, { indisponible: 'lecture_impossible' }])
 })

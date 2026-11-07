@@ -47,6 +47,7 @@ const ANS_GRILLE = 3
 // l'evenement », un jour, quelques nuits. Une borne, pour qu'une requete ne
 // puisse pas ecrire mille lignes d'un coup.
 const POSITIONS_PAR_GESTE = 120
+const ECRITURES_EN_PARALLELE = 6
 
 // ⚠ LE JOUR A PARIS, PAS LE JOUR DU PROCESS. Aucun `TZ` n'est pose dans
 // `vercel.json` : la fonction tourne en UTC. Meme correctif qu'aux exceptions.
@@ -146,7 +147,12 @@ module.exports = async (req, res) => {
         lireVacances(supabase, debutHistorique, f2),
         etendueSource(supabase),
         reglagesDuBien(supabase, bien.id),
-        lignesDuBien(supabase, bien.id)
+        // ⚠ ISOLEE, COMME LA GRILLE : une panne de lecture des positions ne
+        // fait pas tomber le calendrier, les reconductions et le formulaire.
+        lignesDuBien(supabase, bien.id).catch(e => {
+          console.error('[yield-evenements] positions :', e.message)
+          return null
+        })
       ])
       const coupees = new Set()
       for (const [cle, r] of reglages) if (r.actif === false) coupees.add(cle)
@@ -211,9 +217,9 @@ module.exports = async (req, res) => {
       // prend dans la fenetre, et celles qui n'en prennent AUCUNE — avec leur
       // motif. Meme resolution que le moteur (`positionsDuContexte`), sur la
       // meme matiere que le calendrier ci-dessus.
-      const resolu = positionsDuContexte({ lignes: lignesPosition, reglages, zoneBien: bien.zone_scolaire,
+      const resolu = lignesPosition && positionsDuContexte({ lignes: lignesPosition, reglages, zoneBien: bien.zone_scolaire,
         vacances, evenements: [...declaresLarges, ...commerciales], debut: f1, fin: f2 })
-      const positionsReglees = {
+      const positionsReglees = !lignesPosition ? { indisponible: 'lecture_impossible' } : {
         lignes: lignesPosition.map(l => ({ id: l.id, evenement: l.evenement, zone: l.zone, rang: l.rang ?? null,
           jour: l.jour ?? null, nuit: l.nuit ?? null, niveau: l.niveau ?? null })),
         par_nuit: [...resolu.parNuit].map(([date, r]) => ({ date, niveau: r.niveau, cle: r.cle, zone: r.zone,
@@ -392,27 +398,50 @@ module.exports = async (req, res) => {
     if (Number(c.nuits) !== sim.nuits) {
       return res.status(409).json({ error: 'a_confirmer', message: 'Le nombre de nuits concernées a changé : confirmez à nouveau.', ...apercu })
     }
+    // ⚠ EN PARALLELE, PAR PAQUETS : 120 positions a environ quatre requetes
+    // chacune, en sequence, frolaient la duree d'une fonction (constat de
+    // review du 2c). Deux positions du geste sont toujours deux lignes
+    // distinctes (doublons refuses plus haut), donc aucune ne marche sur
+    // l'autre. Au premier refus, on ne lance plus rien, et on attend celles
+    // deja parties : ce qui est ecrit se dit.
     const ecrites = []
-    for (const o of operations) {
-      const k = cleDePosition(o)
-      // ⚠ NI LE BIEN NI LE COMPTE NE VIENNENT DU CORPS, et ils passent APRES
-      // la position : rien de ce que le corps porte ne peut les recouvrir.
-      const args = { ...o, userId: compte, propertyId: bien.id, recommandes: sim.recommandes.get(k) || null }
-      const r = o.niveau === null ? await retirerPosition(supabase, args) : await poserPosition(supabase, args)
-      if (!r.ok) {
-        // ⚠ CE QUI EST DEJA ECRIT SE DIT : un geste interrompu au milieu ne
-        // doit pas laisser l'ecran croire que rien n'a bouge.
-        const code = ['geste_concurrent', 'conflit_compte'].includes(r.raison) ? 409
-          : ['lecture_impossible', 'ecriture_impossible'].includes(r.raison) ? 503 : 400
-        if (code === 503) console.error('[yield-evenements] PUT ecriture', bien.id, r.raison, r.message)
-        return res.status(code).json({ error: r.raison, message: r.message, ecrites })
+    let refus = null
+    for (let i = 0; i < operations.length && !refus; i += ECRITURES_EN_PARALLELE) {
+      const paquet = operations.slice(i, i + ECRITURES_EN_PARALLELE)
+      const resultats = await Promise.all(paquet.map(async o => {
+        const k = cleDePosition(o)
+        // ⚠ NI LE BIEN NI LE COMPTE NE VIENNENT DU CORPS, et ils passent APRES
+        // la position : rien de ce que le corps porte ne peut les recouvrir.
+        const args = { ...o, userId: compte, propertyId: bien.id, recommandes: sim.recommandes.get(k) || null }
+        try {
+          return { k, r: o.niveau === null ? await retirerPosition(supabase, args) : await poserPosition(supabase, args) }
+        } catch (e) {
+          return { k, r: { ok: false, raison: 'ecriture_impossible', message: e.message } }
+        }
+      }))
+      for (const { k, r } of resultats) {
+        if (r.ok) ecrites.push({ position: k, geste: r.geste, avant: r.avant })
+        else if (!refus) refus = r
       }
-      ecrites.push({ position: k, geste: r.geste, avant: r.avant })
     }
+
+    // ⚠ LE REPERE DU MOTEUR S'EFFACE DES QU'UNE LIGNE EST ECRITE, meme si le
+    // geste s'est arrete au milieu : sinon une position deja en base ne part
+    // chez le canal que le lendemain, alors que l'ecran la montre deja.
     let envoi = 'immediat'
-    if (pilotParYield(bien) && sim.nuits > 0) {
+    if (ecrites.length && pilotParYield(bien) && sim.nuits > 0) {
       const { error: eM } = await effacerMarqueur(supabase, bien.id)
       if (eM) { console.error('[yield-evenements] marqueur non efface', bien.id, eM.message); envoi = 'passage_quotidien' }
+    }
+    if (refus) {
+      // ⚠ TOUTE POSITION A ETE VALIDEE PLUS HAUT, avec les regles du writer :
+      // un refus ici n'est pas une erreur de l'appelant, sauf un geste
+      // concurrent. Le reste est un defaut de cablage — 503, et il se journalise.
+      const concurrent = ['geste_concurrent', 'conflit_compte'].includes(refus.raison)
+      if (!concurrent) console.error('[yield-evenements] PUT ecriture', bien.id, refus.raison, refus.message)
+      return res.status(concurrent ? 409 : 503).json({ error: concurrent ? refus.raison : 'ecriture_impossible',
+        message: concurrent ? refus.message : 'L’enregistrement a échoué en cours de route : voyez ce qui est déjà écrit.',
+        ecrites, envoi, ...apercu })
     }
     console.log(`[yield-evenements] ${bien.name} : ${ecrites.length} position(s) reglee(s), ${sim.nuits} nuit(s)`)
     return res.status(200).json({ ok: true, ecrites, envoi, ...apercu })
