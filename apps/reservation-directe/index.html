@@ -35,6 +35,9 @@
   table.liens th { text-align:left; font-size:11px; font-weight:500; color:var(--text2); padding:0 8px 6px 0; }
   table.liens td { padding:7px 8px 7px 0; border-top:0.5px solid var(--border); vertical-align:middle; }
   table.liens tr.revoque td { color:var(--text2); }
+  /* Un lien SUSPENDU se lit comme un lien revoque : le logement est range, son
+     adresse ne vend plus. La difference est reversible, et la pastille le dit. */
+  table.liens tr.suspendu td { color:var(--text2); }
   .url { font-family:var(--font-mono, monospace); font-size:11px; color:var(--text2); word-break:break-all; }
   .mini { font-size:11.5px; padding:4px 9px; }
   .coef-input { width:64px; font-size:12.5px; padding:4px 6px; border:0.5px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); }
@@ -120,15 +123,35 @@
   }
   function message(t, sorte) { const m = $('msg'); m.className = 'msg ' + (sorte || 'ok'); m.textContent = t }
 
-  function ligneLien(l) {
-    return `<tr class="${l.active ? '' : 'revoque'}">
-      <td>${l.active ? '<span class="pastille p-ok">actif</span>' : '<span class="pastille p-off">révoqué</span>'}</td>
+  // ⚠ `archive` VIENT DU BIEN, PAS DU LIEN, et c'est pour ca que cette fonction
+  // le recoit en second argument (retouche de recette de Thierry, 3 novembre
+  // 2026). Le lien d'un bien archive restait affiche « actif » avec Copier et
+  // Apercu : l'hote pouvait donc diffuser une adresse qui repond « ce logement
+  // n'est plus propose a la reservation ».
+  //
+  // ⚠ ON N'A PAS REVOQUE LE LIEN EN BASE, et c'est la decision de Thierry : il
+  // redevient actif a la reactivation du logement. Revoquer serait irreversible
+  // — « REVOQUER, C EST DESACTIVER, jamais supprimer », mais un lien desactive
+  // ne se rallume pas tout seul —, et l'hote devrait recreer son adresse, donc
+  // la recoller partout ou il l'avait publiee. L'etat affiche est SUSPENDU : le
+  // lien est intact, c'est le logement qui ne vend plus.
+  //
+  // ⚠ « REVOQUER » RESTE PROPOSE : un hote qui archive pour de bon doit pouvoir
+  // fermer l'adresse definitivement sans reactiver d'abord.
+  function ligneLien(l, archive) {
+    const suspendu = l.active && archive
+    return `<tr class="${l.active ? (suspendu ? 'suspendu' : '') : 'revoque'}">
+      <td>${l.active
+        ? (suspendu
+          ? '<span class="pastille p-off">suspendu (logement archivé)</span>'
+          : '<span class="pastille p-ok">actif</span>')
+        : '<span class="pastille p-off">révoqué</span>'}</td>
       <td><input class="label-input" value="${esc(l.label)}" data-champ="label" data-id="${l.id}" ${l.active ? '' : 'disabled'}></td>
       <td><input class="coef-input" type="number" min="1" max="1000" value="${l.coefficient}" data-champ="coefficient" data-id="${l.id}" ${l.active ? '' : 'disabled'}> %</td>
       <td class="url">${l.active ? esc(l.url) : '—'}</td>
       <td style="white-space:nowrap">
-        ${l.active ? `<button class="btn mini" data-copier="${esc(l.url)}">Copier</button>
-        <button class="btn mini" data-voir="${esc(l.url)}">Aperçu</button>
+        ${l.active ? `${suspendu ? '' : `<button class="btn mini" data-copier="${esc(l.url)}">Copier</button>
+        <button class="btn mini" data-voir="${esc(l.url)}">Aperçu</button>`}
         <button class="btn mini" data-revoquer="${l.id}">Révoquer</button>` : ''}
       </td></tr>`
   }
@@ -172,7 +195,7 @@
           <h3>Liens de réservation</h3>
           ${b.liens.length ? `<table class="liens">
             <tr><th></th><th>Site</th><th>Prix</th><th>Adresse à coller</th><th></th></tr>
-            ${b.liens.map(ligneLien).join('')}
+            ${b.liens.map(l => ligneLien(l, b.bloquant === 'bien_archive')).join('')}
           </table>` : '<div class="aide">Aucun lien. Créez-en un pour ouvrir ce logement à la réservation directe.</div>'}
 
           ${b.bloquant ? `<div class="aide">${b.bloquant === 'bien_archive'

@@ -40,6 +40,8 @@ const { chargerLiaisons, chargerDisponibilites,
         dansLaFenetreDeProposition, proposeesDe } = require('../lib/cleaning/assign')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 const { colonneAbsente } = require('../lib/colonne-absente')
+const { archivesEpuisees } = require('../lib/biens-vivants')
+const { isActiveStatus } = require('../lib/bookings-snapshot-status')
 
 // ⚠ UNE VALIDATION NE VAUT QUE POUR QUI L'A POSEE. Un menage change de main —
 // l'hote reassigne, une collegue accepte, le moteur pose une remplacante apres
@@ -137,7 +139,7 @@ module.exports = async function handler (req, res) {
     if (filtreRef === '') return res.status(200).json({ jours, biens: [], garde: [], menages: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
 
     let qProps = supabase.from('properties')
-      .select('provider_property_id, name, photo_url')
+      .select('provider_property_id, name, photo_url, provider, archive_le')
       .eq('user_id', userId).not('provider_property_id', 'is', null)
     if (filtreRef) qProps = qProps.or(filtreRef)
     const { data: propRows, error: errProps } = await qProps
@@ -146,7 +148,46 @@ module.exports = async function handler (req, res) {
       console.error('[garde] lecture biens echec', errProps.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
-    const biens = (propRows || []).map(p => ({
+    // ⚠ UN BIEN ARCHIVE RESTE AU PLANNING JUSQU'A SON DERNIER DEPART, et pas
+    // au-dela — constat 5 de la revue du 7 novembre 2026 : cet ecran (la bulle
+    // « A traiter » et le calendrier de garde de `pages/menages.html`) ne
+    // filtrait AUCUN archivage, donc un bien range y restait sans limite de
+    // temps, et en « sans personnel » s'il gardait des liaisons. La regle est
+    // celle de `api/menages.js` et de l'app prestataire : `archivesEpuisees`,
+    // en un seul exemplaire (decision de Thierry du 3 novembre 2026).
+    // ⚠ LES DEPARTS VIENNENT DES RESERVATIONS, PAS DE LA FENETRE AFFICHEE : un
+    // depart dans trois semaines garde le bien, meme sur une vue d'une semaine.
+    // Et pas des menages : apres l'archivage, la synchro ne les touche plus.
+    // ⚠ UNE LECTURE RATEE OU TRONQUEE NE RETIRE RIEN : un bien de trop au
+    // planning vaut mieux qu'un menage a faire qui disparait.
+    let epuises = new Set()
+    const archivesLus = (propRows || []).filter(p => p.archive_le)
+    if (archivesLus.length) {
+      const aujourdhui = new Date().toISOString().slice(0, 10)
+      const { data: resas, error: eResas } = await supabase.from('bookings_snapshot')
+        .select('property_id, snapshot')
+        .eq('user_id', userId)
+        .in('property_id', archivesLus.map(p => String(p.provider_property_id)))
+        .gte('snapshot->>departure', aujourdhui)
+        .limit(LOT_MENAGES)
+      if (eResas) console.error('[garde] lecture des departs des biens archives echec', eResas.message)
+      else if ((resas || []).length < LOT_MENAGES) {
+        const providerDe = new Map(archivesLus.map(p => [String(p.provider_property_id), p.provider || null]))
+        const departs = {}
+        for (const r of (resas || [])) {
+          const cle = String(r.property_id)
+          if (!r.snapshot || !r.snapshot.departure) continue
+          if (!isActiveStatus(r.snapshot, providerDe.get(cle))) continue
+          ;(departs[cle] = departs[cle] || []).push(String(r.snapshot.departure))
+        }
+        epuises = archivesEpuisees({
+          biens: archivesLus.map(p => ({ cle: String(p.provider_property_id), archive_le: p.archive_le })),
+          departs,
+          aujourdhui
+        })
+      }
+    }
+    const biens = (propRows || []).filter(p => !epuises.has(String(p.provider_property_id))).map(p => ({
       id: String(p.provider_property_id), name: p.name || `Bien ${p.provider_property_id}`,
       // La photo de couverture (lot photos) : l'ecran V5 l'affiche en tete de
       // bloc, repli initiales cote client. `null` est une absence, pas une panne.

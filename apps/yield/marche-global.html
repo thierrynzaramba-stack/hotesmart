@@ -150,6 +150,7 @@
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
   import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { sansArchives } from '/shared/biens-vivants.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
   import { monterAnneeTemperature, fermerDetail, badge, niv } from '/shared/temperature-calendrier.js'
@@ -198,7 +199,12 @@
     if (!session) return
     renderSidebar('yield-marche-global').catch(e => console.error('[marche-global] sidebar', e))
     const compte = compteCourant()
-    let q = supabase.from('properties').select('id, name').order('name')
+    // ⚠ UN LOGEMENT ARCHIVE NE PARAIT PLUS DANS LE SELECTEUR (point 7 du constat
+    // de Thierry du 3 novembre 2026). Cette lecture est CLIENT — elle passe par
+    // la RLS, pas par un endpoint —, donc aucun filtre serveur ne pouvait
+    // l'atteindre : la regle vit dans `/shared/biens-vivants.js`, en un seul
+    // exemplaire pour les six ecrans qui l'emploient.
+    let q = sansArchives(supabase.from('properties').select('id, name')).order('name')
     if (compte) q = q.eq('user_id', compte)
     const { data, error } = await q
     if (error) return corps('<p class="non-calc">Impossible de lire la liste des logements.</p>')

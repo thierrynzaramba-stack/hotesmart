@@ -33,6 +33,13 @@ function preparer ({ user = MEMBRE, liens = [], permissions = null, erreurProfil
       const q = {
         _f: {},
         select () { return q }, eq (c, v) { q._f[c] = v; return q },
+        // ⚠ `is` COMPLETE CE DOUBLE depuis le filtre des biens archives :
+        // `sansArchives` (lib/biens-vivants.js) LEVE sur une chaine qui n'a pas
+        // `.is`, et c'est voulu — un double incomplet doit echouer bruyamment
+        // plutot que de valider du code qui ne peut pas tourner. Il ENREGISTRE
+        // le filtre au lieu de l'avaler : un double plus permissif que le vrai
+        // laisserait passer une garde absente.
+        is (c, v) { q._f['is:' + c] = v; return q },
         or (e) { q._or = e; return q }, in () { return q }, not () { return q },
         order () { return q }, limit () { return q },
         single: async () => rep(nom, q), maybeSingle: async () => rep(nom, q),
@@ -260,6 +267,7 @@ function preparerChannelProperty ({ perimetre }) {
       const q = {
         _f: {},
         select () { return q }, eq (c, v) { q._f[c] = v; return q },
+        is (c, v) { emis.filtres.push('is:' + c + '=' + String(v)); return q },
         or (e) { emis.filtres.push(e); return q },
         in () { return q }, not () { return q }, order () { return q }, limit () { return q },
         single: async () => rep(nom, q), maybeSingle: async () => rep(nom, q),

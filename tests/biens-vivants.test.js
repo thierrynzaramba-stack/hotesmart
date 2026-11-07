@@ -12,6 +12,9 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const B = require('../lib/biens-vivants.js')
 
+// Les lignes que la base rend pour la lecture des ARCHIVES portent leur date.
+const ARCHIVE_LE = '2026-11-03T10:00:00Z'
+
 // Un double minimal, et STRICT : il refuse une methode qu'il ne connait pas.
 function banc ({ lignes = [], erreur = null } = {}) {
   const vu = { filtres: [], borne: null, colonnes: null }
@@ -40,7 +43,7 @@ test("LE TEST QUI COMPTE : la cle est COMPOSITE — deux comptes peuvent porter 
   // ⚠ CONSTAT 6 : une fuite d'EFFET entre comptes. `provider_property_id` n'a
   // aucune unicite globale. Avec une cle non cloisonnee, le bien archive du
   // compte A faisait ecarter le bien VIVANT du compte B portant le meme numero.
-  const b = banc({ lignes: [{ user_id: 'A', provider_property_id: '209413' }] })
+  const b = banc({ lignes: [{ user_id: 'A', provider_property_id: '209413', archive_le: ARCHIVE_LE }] })
   const r = await B.clesArchivees(b.client, ['A', 'B'])
   assert.ok(r.cles.has(B.cleDuBien('A', '209413')), 'le bien archive du compte A est absent')
   assert.ok(!r.cles.has(B.cleDuBien('B', '209413')),
@@ -90,7 +93,7 @@ test("une AUTRE erreur de lecture, elle, reste une panne", async () => {
 test("LE TEST QUI COMPTE : une lecture TRONQUEE se dit incomplete", async () => {
   // PostgREST tronque SANS erreur : c'est le cas le plus traitre des deux.
   const pleine = Array.from({ length: B.LOT_ARCHIVES }, (_, i) => ({
-    user_id: 'A', provider_property_id: String(i)
+    user_id: 'A', provider_property_id: String(i), archive_le: ARCHIVE_LE
   }))
   const b = banc({ lignes: pleine })
   const r = await B.clesArchivees(b.client, ['A'])
@@ -106,7 +109,7 @@ test("LE TEST QUI COMPTE : une lecture tronquee GARDE les cles lues", async () =
   // partiel est strictement plus sur : les deux gardes de la synchro lisent le
   // MEME Set, donc un bien qui y figure est ecarte ET protege de l'annulation.
   const pleine = Array.from({ length: B.LOT_ARCHIVES }, (_, i) => ({
-    user_id: 'A', provider_property_id: String(i)
+    user_id: 'A', provider_property_id: String(i), archive_le: ARCHIVE_LE
   }))
   const b = banc({ lignes: pleine })
   const r = await B.clesArchivees(b.client, ['A'])
@@ -150,4 +153,81 @@ test("sansArchives REFUSE ce qui n est pas une chaine Supabase", () => {
   let vu = null
   B.sansArchives({ is: (c, v) => { vu = [c, v]; return 'chaine' } })
   assert.deepStrictEqual(vu, [B.COLONNE, null])
+})
+
+// ─── Un bien archive reste tant qu'il a un depart a venir ───────────────────
+test("LE TEST QUI COMPTE : un bien archive AVEC un depart a venir reste, sans depart il sort", () => {
+  // ⚠ DECISION DE THIERRY DU 3 NOVEMBRE 2026, qui AFFINE le point 4. Sa
+  // premiere forme — « un bien archive disparait des menages » — retirait du
+  // planning de la prestataire un menage prevu demain sur un sejour DEJA VENDU.
+  // L'archivage est autorise avec des sejours a venir : leurs codes d'acces
+  // continuent de fonctionner, donc le voyageur arrive, donc il faut nettoyer
+  // apres lui.
+  const { archivesEpuisees } = require('../lib/biens-vivants')
+  const biens = [
+    { cle: 'vivant', archive_le: null },
+    { cle: 'range-avec-depart', archive_le: '2026-11-03T20:42:19Z' },
+    { cle: 'range-epuise', archive_le: '2026-11-03T20:42:19Z' }
+  ]
+  const sortent = archivesEpuisees({
+    biens,
+    departs: { 'range-avec-depart': ['2026-11-08'], 'range-epuise': ['2026-10-01'] },
+    aujourdhui: '2026-11-04'
+  })
+  assert.deepEqual([...sortent], ['range-epuise'])
+
+  // ⚠ UN BIEN VIVANT SANS AUCUN DEPART NE SORT JAMAIS, et ce n'est pas une
+  // evidence : ma premiere version appelait `estArchive(b)` — une fonction
+  // ASYNC qui interroge la base — donc testait une Promise, toujours vraie.
+  // TOUS les biens etaient evalues, et un bien vivant sans reservation
+  // disparaissait de l'ecran. Attrape par une mesure directe avant tout test.
+  assert.ok(!sortent.has('vivant'),
+    'un bien VIVANT sans depart a venir est retire de l ecran')
+
+  // ⚠ `>=` ET NON `>` : un depart AUJOURD'HUI est un menage A FAIRE
+  // aujourd'hui. Un `>` ferait disparaitre le bien le matin meme du dernier
+  // depart, c'est-a-dire le jour ou la prestataire en a besoin.
+  const leJourMeme = archivesEpuisees({
+    biens: [{ cle: 'b', archive_le: '2026-11-03T20:42:19Z' }],
+    departs: { b: ['2026-11-04'] },
+    aujourdhui: '2026-11-04'
+  })
+  assert.equal(leJourMeme.size, 0, 'le bien sort le jour meme de son dernier depart')
+
+  // Le lendemain, il sort.
+  const lendemain = archivesEpuisees({
+    biens: [{ cle: 'b', archive_le: '2026-11-03T20:42:19Z' }],
+    departs: { b: ['2026-11-04'] },
+    aujourdhui: '2026-11-05'
+  })
+  assert.deepEqual([...lendemain], ['b'])
+})
+
+test("archivesEpuisees EXIGE sa date : elle ne lit jamais l horloge", () => {
+  // Regle du depot : dates relatives si le test lit l'horloge, dates figees
+  // s'il injecte le temps. Cette fonction injecte, donc elle REFUSE de deviner
+  // — un repli sur `new Date()` la rendrait ineprouvable a une autre date, et
+  // c'est la maladie des 28 rouges calendaires du depot.
+  const { archivesEpuisees } = require('../lib/biens-vivants')
+  for (const mauvais of [undefined, null, '', '2026-11', 'demain', '04/11/2026']) {
+    assert.throws(() => archivesEpuisees({ biens: [], departs: {}, aujourdhui: mauvais }),
+      /aujourdhui/, `« ${mauvais} » a ete accepte comme date`)
+  }
+})
+
+test("LE TEST QUI COMPTE : un bien VIVANT rendu par la lecture n est PAS declare archive", async () => {
+  // ⚠ LA SECONDE BARRIERE (7 novembre 2026). Un faux positif ici est le pire
+  // defaut du module : un bien vivant pris pour archive perd ses menages et
+  // ses conversations. Deux doubles de test dont `.not()` ne filtrait rien
+  // faisaient declarer TOUS les biens archives — la messagerie se vidait. Ce
+  // banc-ci ne filtre pas non plus : seule la verification de `archive_le`
+  // dans les lignes rendues tient.
+  const b = banc({ lignes: [
+    { user_id: 'A', provider_property_id: 'vivant', archive_le: null },
+    { user_id: 'A', provider_property_id: 'sans-colonne' },
+    { user_id: 'A', provider_property_id: 'range', archive_le: ARCHIVE_LE }
+  ] })
+  const r = await B.clesArchivees(b.client, ['A'])
+  assert.deepEqual([...r.cles], [B.cleDuBien('A', 'range')])
+  assert.match(String(b.vu.colonnes), new RegExp(B.COLONNE), 'la colonne n est pas lue : rien ne peut etre re-verifie')
 })

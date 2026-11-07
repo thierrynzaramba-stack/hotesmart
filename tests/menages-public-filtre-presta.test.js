@@ -57,7 +57,7 @@ const SNAPS = [
 function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true, access_mode: 'lien' },
                      menages = null, erreurProfil = null, erreurMenages = null,
                      tokenPropIds = ['209413'], done = [], events = [],
-                     erreurUpdate = null } = {}) {
+                     erreurUpdate = null, biens = BIENS } = {}) {
   const journal = []
   const client = {
     from (table) {
@@ -101,7 +101,7 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true,
       }
       function rep () {
         if (a.update) return { data: null, error: a.erreurUpdate || null }
-        if (table === 'properties') return { data: BIENS, error: null }
+        if (table === 'properties') return { data: biens, error: null }
         if (table === 'bookings_snapshot') return { data: SNAPS, error: null }
         if (table === 'menage_done') return { data: done, error: null }
         if (table === 'menage_events') return { data: events, error: null }
@@ -173,6 +173,41 @@ const MENAGE = (booking, provider, depart, over = {}) => ({
 })
 
 // ─── Le filtre par personne ────────────────────────────────────────────────
+
+test("LE TEST QUI COMPTE : la lecture des biens DEMANDE archive_le", async () => {
+  // ⚠ CE TEST A CHANGE DE SENS LE JOUR MEME, ET C'EST NOTE EXPRES. Sa premiere
+  // version exigeait `archive_le is null` dans la requete — l'ancienne
+  // decision, « un bien archive disparait des menages ». Thierry l'a AFFINEE
+  // quelques heures plus tard : les menages des sejours deja vendus restent
+  // visibles jusqu'au dernier depart. Un test qui aurait survecu a ce
+  // changement aurait FIGE la decision perimee et fait rougir le correctif.
+  //
+  // Ce qui se prouve ici est donc le CABLAGE : la colonne est-elle lue ? La
+  // regle elle-meme (`archivesEpuisees`) est pure et prouvee dans
+  // `tests/biens-vivants.test.js` ; son EFFET sur ce planning-ci est prouve
+  // plus bas dans ce fichier (« un menage A PRENDRE d'un bien archive… »).
+  // ⚠ IL L'ETAIT « par `tests/menages-endpoint.test.js` », et c'etait faux
+  // (constat 8 de la revue du 7 novembre 2026) : l'entree n'est pas la meme
+  // ici — les sejours sont reduits a ceux de la prestataire —, et c'est
+  // exactement par cet ecart que le constat 2 passait au vert.
+  //
+  // ⚠ ET LE CABLAGE EST LA MOITIE QUI MANQUE TOUJOURS : la regle est pure, elle
+  // juge l'objet qu'on lui donne. Sans `archive_le` au `select`, elle voit
+  // `undefined` partout — donc aucun bien archive, donc aucun retrait — et
+  // l'effet mesure ailleurs resterait vert puisque son banc injecte la colonne
+  // a la main.
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, null, 'la lecture a échoué : ce test ne mesure rien')
+
+  const lectures = journal.filter(a => a.table === 'properties')
+  assert.ok(lectures.length >= 1, 'aucune lecture de properties : ce test ne mesure rien')
+  const demande = lectures.some(a => /\barchive_le\b/.test(String(a.colonnes || a.champs || '')))
+  assert.ok(demande,
+    `la lecture des biens ne demande pas archive_le : ${lectures.map(a => a.colonnes || a.champs).join(' | ')}`)
+})
 
 test('la prestataire ne voit QUE les ménages qui lui sont assignés', async () => {
   preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
@@ -526,4 +561,34 @@ test('... et une valeur autre que `1` horodate comme d\'habitude', async () => {
     await handler({ ...req(), query: { ...req().query, apercu: v } }, reponse())
     assert.ok(journal.find(a => a.table === 'public_tokens' && a.update), `apercu=${v}`)
   }
+})
+
+// ─── Un bien ARCHIVE : le dernier depart est celui du BIEN ──────────────────
+// Constat 2 de la revue du 7 novembre 2026. Les departs passes a
+// `archivesEpuisees` etaient ceux des seuls menages de la prestataire : sans
+// menage sur le bien, elle le voyait « epuise », et le menage a prendre — que
+// personne ne porte — disparaissait de sa page.
+const BIEN_ARCHIVE = [{ ...BIENS[0], archive_le: '2026-11-03T10:00:00Z' }]
+const ORPHELIN = MENAGE('b2', null, DEP_B, { status: 'orphaned' })
+
+test("LE TEST QUI COMPTE : un menage A PRENDRE d'un bien archive reste propose tant qu'un depart est a venir", async () => {
+  preparer({ biens: BIEN_ARCHIVE, menages: [ORPHELIN] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, null, `la lecture a échoué (${res.code}) : ce test ne mesure rien`)
+  const pris = (res.body.a_prendre || []).map(m => m.booking_id)
+  assert.deepStrictEqual(pris, ['b2'],
+    'le menage a prendre a disparu : le bien a ete juge epuise sur les seuls menages de la prestataire')
+  // Et rien de l'AUTRE sejour ne sort pour autant : le calcul lit les sejours
+  // du bien, la reponse ne porte toujours que les siens.
+  assert.deepStrictEqual(res.body.bookings, [])
+})
+
+test("le meme menage a prendre sur un bien VIVANT : propose aussi (temoin)", async () => {
+  preparer({ menages: [ORPHELIN] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.deepStrictEqual((res.body.a_prendre || []).map(m => m.booking_id), ['b2'])
 })

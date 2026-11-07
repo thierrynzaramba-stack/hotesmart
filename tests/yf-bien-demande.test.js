@@ -105,9 +105,27 @@ async function chargerAvec (recherche, biens = BIENS) {
     ech: (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
     compteCourant: () => 'U1',
     etat: (m, e) => { vu.etat = { m, e } },
-    supabase: { from: () => ({ select: () => ({ order: () => ({ eq: async () => ({ data: biens, error: null }) }) }) }) }
+    // ⚠ `is` AJOUTE A CHAQUE MAILLON depuis le filtre des biens archives : la
+    // page enveloppe desormais sa chaine par `sansArchives`, qui LEVE si `.is`
+    // manque. Ce double chaine seulement — ce banc parle du bien DEMANDE par
+    // l'URL, pas de l'archivage.
+    supabase: { from: () => {
+      const q = {
+        select: () => q, order: () => q, is: () => q,
+        eq: async () => ({ data: biens, error: null }),
+        then: (ok) => ok({ data: biens, error: null })
+      }
+      return q
+    } },
+    // ⚠ LE VRAI `sansArchives`, depuis le module commun : ce banc retire les
+    // `import` de la page, donc chaque dependance neuve doit lui etre fournie.
+    // Un double local accepterait un appel ecrit a l'envers que le vrai refuse.
+    sansArchives: new Function(
+      require('node:fs').readFileSync(
+        require('node:path').join(__dirname, '..', 'shared', 'biens-vivants.js'), 'utf8')
+        .replace(/^export /gm, '') + '\nreturn sansArchives')()
   }
-  window.eval('const { el, ech, compteCourant, etat, supabase } = window.__ctx\n'
+  window.eval('const { el, ech, compteCourant, etat, supabase, sansArchives } = window.__ctx\n'
     + fn + '\nwindow.__chargerBiens = chargerBiens')
   const ok = await window.__chargerBiens()
   return { ok, select: window.document.getElementById('yp-bien'), vu, fermer: () => window.close() }
