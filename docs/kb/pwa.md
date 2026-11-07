@@ -323,7 +323,11 @@ n'envoie encore selon ces réglages, c'est le 2c qui branche les événements.
    vers le guide. Au retour sur l'onglet, l'état se relit si la permission a
    changé (comparaison locale, sans réseau sinon).
 10. **La langue s'enregistre sur le geste du menu ≡ seulement** : aucun appel
-    ajouté au chargement d'une page.
+    ajouté au chargement d'une page. ⚠ **Et AVANT le changement de langue de
+    la page** (recette du 7 novembre) : plusieurs écrans se rechargent sur
+    `i18n:changed`, et le rechargement coupait l'enregistrement (appareil
+    repassé en français, serveur resté en anglais). `shared/nav.js` attend
+    l'enregistrement, au plus 1,5 s, et l'envoi part en `keepalive`.
 11. **Une fin de plage dans le trou du passage à l'heure d'été finit au saut**
     (constat de review) : la nuit où l'horloge saute de 2 h à 3 h, une fin à
     2 h 30 n'existe pas, et `plageDeNuit` rend un instant d'AVANT (1 h 30,
