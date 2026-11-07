@@ -1,5 +1,5 @@
-// shared/push-appareil.js — les notifications push SUR CET APPAREIL (PWA lot 2a).
-// Spec : docs/specs/spec-pwa-lot2-notifications.md §6, §9.8-9.10 · KB : docs/kb/pwa.md §8
+// shared/push-appareil.js — les notifications push SUR CET APPAREIL (PWA lots 2a et 2b).
+// Spec : docs/specs/spec-pwa-lot2-notifications.md §6, §9.8-9.10, §15 · KB : docs/kb/pwa.md §8-9
 //
 // Un seul module pour tout ce que le navigateur fait des notifications :
 // s'abonner (sur un geste), se désabonner, et oublier l'appareil à la
@@ -46,6 +46,23 @@ export function libelleAppareil () {
   const nav = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome'
     : /Safari\//.test(ua) ? 'Safari' : ''
   return nav ? `${nav} sur ${systeme}` : systeme
+}
+
+// LE TYPE D'APPAREIL, pour dire le BON chemin quand les notifications sont
+// bloquées (décision Q21 : « le plus simple et clair pour l'utilisateur »).
+// Rend 'iphone', 'android' ou 'ordinateur'.
+export function plateforme () {
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || ''
+  if (/iPhone|iPad|iPod/.test(ua) ||
+    (/Macintosh/.test(ua) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1)) return 'iphone'
+  if (/Android/.test(ua)) return 'android'
+  return 'ordinateur'
+}
+
+// La permission est-elle DÉJÀ refusée sur cet appareil ? Se lit sans rien
+// demander : l'écran le dit dès l'ouverture, avant tout clic.
+export function bloquee () {
+  return pris() && Notification.permission === 'denied'
 }
 
 async function enregistrement () {
@@ -136,6 +153,19 @@ export async function abonner ({ session }) {
   if (userId) ecrireLocal(CLE_TITULAIRE, userId)
   if (r.empreinte) ecrireLocal(CLE_EMPREINTE, r.empreinte)
   return { ok: true, empreinte: r.empreinte }
+}
+
+// LES RÉGLAGES DE LA PERSONNE (lot 2b) : le tableau des événements et les heures
+// calmes, enregistrés ensemble.
+export async function enregistrerReglages (jeton, { evenements, plages }) {
+  return appelServeur(jeton, 'POST', { action: 'reglages', evenements, plages })
+}
+
+// LA LANGUE DE LA PERSONNE (lot 2b), dans laquelle ses notifications lui
+// arriveront. Appelée par le sélecteur du menu ≡ (shared/nav.js), seulement sur
+// ce geste.
+export async function enregistrerLangue (jeton, langue) {
+  return appelServeur(jeton, 'POST', { action: 'langue', langue })
 }
 
 export async function essai (jeton) {

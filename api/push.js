@@ -1,10 +1,16 @@
-// api/push.js — les notifications push de l'appli hôte (PWA lot 2a).
-// Spec : docs/specs/spec-pwa-lot2-notifications.md §9.2 · KB : docs/kb/pwa.md §8
+// api/push.js — les notifications push de l'appli hôte (PWA lots 2a et 2b).
+// Spec : docs/specs/spec-pwa-lot2-notifications.md §9.2 et §15.5 · KB : docs/kb/pwa.md §8-9
 //
-//   GET    /api/push                              → { pret, cle_publique, appareils }
+//   GET    /api/push                              → { pret, cle_publique, appareils,
+//                                                     groupes, evenements, plages, langue }
 //   POST   /api/push { action: 'abonner', abonnement, appareil }
 //   POST   /api/push { action: 'essai' }          → une notification sur MES appareils
+//   POST   /api/push { action: 'reglages', evenements, plages }   (lot 2b)
+//   POST   /api/push { action: 'langue', langue }                 (lot 2b)
 //   DELETE /api/push { endpoint } | { id }        → retirer un de MES appareils
+//
+// ⚠ C'EST L'ENDPOINT D'ÉCRAN DE L'ONGLET NOTIFICATIONS de `/settings` : un seul
+// GET à l'ouverture, ses deux lectures (appareils, réglages) en parallèle.
 //
 // ⚠ LA GARDE EST LA PERSONNE CONNECTÉE, SUR SES PROPRES APPAREILS. Aucun compte,
 // aucun bien n'entre ici : un abonnement appartient à une personne, et chaque
@@ -17,6 +23,8 @@
 const { verifierSession, posterEnTetesPrives } = require('../lib/require-permission')
 const abonnements = require('../lib/push/abonnements')
 const { clesVapid, messageDeclaratif, envoyerAPersonne } = require('../lib/push/envoyer')
+const reglages = require('../lib/notifications/reglages')
+const catalogue = require('../lib/notifications/catalogue')
 
 const MESSAGES_REFUS = {
   abonnement_absent: 'Abonnement manquant.',
@@ -24,7 +32,37 @@ const MESSAGES_REFUS = {
   cle_p256dh_invalide: 'Abonnement illisible.',
   cle_auth_invalide: 'Abonnement illisible.',
   plafond_atteint: `Vous avez déjà ${abonnements.PLAFOND_APPAREILS} appareils abonnés : retirez-en un d'abord.`,
-  cible_absente: 'Appareil non précisé.'
+  cible_absente: 'Appareil non précisé.',
+  // Lot 2b — les réglages. Les refus que seul un appel fait à la main peut
+  // produire (l'écran envoie toujours un tableau complet) restent génériques.
+  evenements_illisibles: 'Réglages illisibles.',
+  evenement_inconnu: 'Réglages illisibles.',
+  reglage_illisible: 'Réglages illisibles.',
+  canal_inconnu: 'Réglages illisibles.',
+  valeur_illisible: 'Réglages illisibles.',
+  plages_illisibles: 'Heures calmes illisibles.',
+  plage_illisible: 'Heures calmes illisibles.',
+  heure_illisible: 'Une heure est mal écrite (attendu : 22:00).',
+  plage_vide: 'Une plage commence et finit à la même heure.',
+  jours_absents: 'Choisissez au moins un jour pour chaque plage.',
+  jour_illisible: 'Un jour est illisible.',
+  trop_de_plages: 'Six plages au plus.',
+  aucun_moment_libre: 'Vos heures calmes couvrent toute la semaine : ce qui n’est pas urgent n’arriverait jamais. Laissez au moins un moment libre.',
+  langue_inconnue: 'Langue inconnue.'
+}
+
+// Le catalogue fusionné avec les réglages de la personne, dans l'ordre de l'écran.
+function tableauDe (eff) {
+  return catalogue.EVENEMENTS.map(e => ({
+    code: e.code, libelle: e.libelle, groupe: e.groupe, ...eff.evenements[e.code]
+  }))
+}
+
+function refusReglages (res, r) {
+  const code = r.motif === 'ecriture_impossible' ? 503 : 400
+  const corps = { error: MESSAGES_REFUS[r.motif] || 'Écriture impossible, réessayez.', motif: r.motif }
+  if (Number.isInteger(r.rang)) corps.rang = r.rang
+  return res.status(code).json(corps)
 }
 
 function corpsDe (req) {
@@ -47,9 +85,17 @@ module.exports = async function handler (req, res) {
 
   try {
     if (req.method === 'GET') {
-      const r = await abonnements.lister({ userId })
-      if (!r.ok) return res.status(503).json({ error: 'Lecture impossible, réessayez.' })
-      return res.status(200).json({ pret: !!cles, cle_publique: cles ? cles.publique : null, appareils: r.appareils })
+      const [r, g] = await Promise.all([abonnements.lister({ userId }), reglages.lire({ userId })])
+      if (!r.ok || !g.ok) return res.status(503).json({ error: 'Lecture impossible, réessayez.' })
+      return res.status(200).json({
+        pret: !!cles,
+        cle_publique: cles ? cles.publique : null,
+        appareils: r.appareils,
+        groupes: catalogue.GROUPES,
+        evenements: tableauDe(g.reglages),
+        plages: g.reglages.plages,
+        langue: g.reglages.langue
+      })
     }
 
     const corps = corpsDe(req)
@@ -60,7 +106,20 @@ module.exports = async function handler (req, res) {
       return res.status(200).json({ ok: true })
     }
 
-    // POST
+    // POST — les réglages d'abord : ils ne dépendent pas des clés d'envoi (une
+    // personne règle ses heures même si les notifications ne sont pas prêtes).
+    if (corps.action === 'reglages') {
+      const r = await reglages.enregistrer({ userId, evenements: corps.evenements, plages: corps.plages })
+      if (!r.ok) return refusReglages(res, r)
+      return res.status(200).json({ ok: true, evenements: tableauDe(r.reglages), plages: r.reglages.plages })
+    }
+
+    if (corps.action === 'langue') {
+      const r = await reglages.enregistrerLangue({ userId, langue: corps.langue })
+      if (!r.ok) return refusReglages(res, r)
+      return res.status(200).json({ ok: true, langue: r.langue })
+    }
+
     if (!cles) return res.status(503).json({ error: 'Les notifications ne sont pas encore configurées.', motif: 'cles_absentes' })
 
     if (corps.action === 'abonner') {
