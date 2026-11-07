@@ -24,7 +24,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
-const { ouvrir, navigateurPresent, CHROME } = require('./outils/navigateur.js')
+const { ouvrir, navigateurPresent, messageAbsent } = require('./outils/navigateur.js')
 
 const racine = path.join(__dirname, '..')
 const PAGE = fs.readFileSync(path.join(racine, 'pages', 'aujourdhui.html'), 'utf8')
@@ -266,8 +266,7 @@ const apresRendu = (nav) =>
 test("LE TEST QUI COMPTE : un VRAI clic sur la fleche charge les avis suivants", async () => {
   // ⚠ LE GARDE-FOU NE SE SAUTE PAS TOUT SEUL.
   assert.ok(navigateurPresent(),
-    `le navigateur de banc est absent (${CHROME}) : ce test ne peut pas se taire, `
-    + 'il est le seul a mesurer un GESTE reel')
+    messageAbsent('a mesurer un GESTE reel'))
 
   const { f, dossier } = pageDeMesure(6)
   const nav = await ouvrir(f, { largeur: 1280, hauteur: 900 })

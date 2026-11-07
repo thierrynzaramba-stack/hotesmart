@@ -91,11 +91,16 @@ function reponse ({ statut = 200, type = 'basic', entetes = {}, corps = '' } = {
 
 // Charge une version du service worker. `reseau(requete)` rend une description
 // de réponse, ou LÈVE pour simuler l'absence de réseau.
-function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerStockage(), reseau }) {
+function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerStockage(), reseau, fenetres = [] }) {
   const code = source !== undefined ? source : serviceWorker(version)
   const ecouteurs = {}
   let precharge = false
   const appelsReseau = []
+  // Notifications push (lot 2a) : ce que le service worker AFFICHE, ce qu'il
+  // OUVRE, et les abonnements qu'il refait — relus par les tests.
+  const notifications = []
+  const ouvertures = []
+  const reabonnements = []
 
   class RequeteSW extends Request {
     constructor (entree, init) {
@@ -120,8 +125,16 @@ function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerSt
     fetch: fetchFaux,
     caches: stockage.api,
     location: new URL('/sw.js', ORIGINE),
-    registration: { navigationPreload: { async enable () { precharge = true } } },
-    clients: { async claim () {} },
+    registration: {
+      navigationPreload: { async enable () { precharge = true } },
+      async showNotification (titre, options = {}) { notifications.push({ titre, options }) },
+      pushManager: { async subscribe (o) { reabonnements.push(o); return { endpoint: 'https://fcm.googleapis.com/fcm/send/neuf' } } }
+    },
+    clients: {
+      async claim () {},
+      async matchAll () { return fenetres },
+      async openWindow (url) { ouvertures.push(url); return null }
+    },
     skipWaiting: async () => {},
     addEventListener (type, f) { (ecouteurs[type] = ecouteurs[type] || []).push(f) }
   }
@@ -169,12 +182,33 @@ function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerSt
     return resultat
   }
 
+  // Un événement quelconque (`push`, `notificationclick`, …) : on attend tout ce
+  // que le service worker a confié à `waitUntil`, et on rend les erreurs.
+  async function evenement (type, extra = {}) {
+    const { attentes } = declencher(type, extra)
+    const issues = await Promise.allSettled(attentes)
+    return { attentes: attentes.length, erreurs: issues.filter(i => i.status === 'rejected').map(i => i.reason) }
+  }
+
+  // Un message push tel que le navigateur le remet : `data.json()` lève si le
+  // corps n'est pas du JSON, `data` est null s'il n'y a pas de corps.
+  function messagePush (corps) {
+    if (corps === null) return { data: null }
+    const brut = typeof corps === 'string' ? corps : JSON.stringify(corps)
+    return { data: { json: () => JSON.parse(brut), text: () => brut } }
+  }
+
   return {
     stockage,
     globale: contexte,
     cycleDeVie,
     requete,
+    evenement,
+    messagePush,
     appelsReseau,
+    notifications,
+    ouvertures,
+    reabonnements,
     ecouteurs: () => Object.keys(ecouteurs).sort(),
     get prechargeActif () { return precharge }
   }

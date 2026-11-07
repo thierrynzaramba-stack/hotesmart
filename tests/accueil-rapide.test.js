@@ -272,7 +272,8 @@ const estLeFichier = (url, nom) =>
 test('LE TEST QUI COMPTE : i18n demande la liste et le repli EN MEME TEMPS', async () => {
   // Preuve par l'execution : `langues.json` ne repond qu'une fois `fr.json`
   // demande. En file, on n'arriverait jamais a la seconde demande.
-  const src = lire('shared/i18n/i18n.js')
+  // Le moteur tel que le navigateur le RECOIT (api/i18n.js), empreinte posee.
+  const src = require('../lib/i18n-version').moteurI18n()
   const demandes = []
   let repondreLangues
   const rep = corps => ({ ok: true, json: async () => corps })
@@ -439,7 +440,8 @@ test("i18n : une langues.json en erreur est NOMMEE, pas parsee", async () => {
   // Sans le controle `r.ok`, un 404 renvoie la page d'erreur HTML au parseur
   // JSON : l'hote lit « Unexpected token < » au lieu du fichier manquant.
   // `load()` portait deja cette garde ; la lecture en ligne de langues.json, non.
-  const src = lire('shared/i18n/i18n.js')
+  // Le moteur tel que le navigateur le RECOIT (api/i18n.js), empreinte posee.
+  const src = require('../lib/i18n-version').moteurI18n()
   const fetchFaux = url => Promise.resolve(estLeFichier(url, 'langues.json')
     ? { ok: false, status: 404, json: async () => { throw new SyntaxError('Unexpected token <') } }
     : { ok: true, json: async () => ({}) })
