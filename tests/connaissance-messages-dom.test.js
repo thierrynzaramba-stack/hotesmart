@@ -458,6 +458,115 @@ test('un champ vidé à la main ne porte plus le texte d aucune conversation', a
   b.fermer()
 })
 
+// ─── Review 2 : la marque suit TOUS les textes posés, et rien d'autre ne passe ─
+const utiliserEncore = async (b) => {
+  clic(b, iconeSaisie(b))
+  await reposer(b)
+  utiliser(b)
+  await reposer(b)
+}
+const taper = (b, valeur) => {
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  zone.value = valeur
+  zone.dispatchEvent(new b.window.Event('input', { bubbles: true }))
+}
+
+test('LE TEST QUI COMPTE : deux « Utiliser » dans le même fil, changer de fil les retire TOUS', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  await utiliserEncore(b)
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  assert.equal(zone.value, 'Bonjour Ana, Le wifi est RESEAU\nBonjour Ana, Le wifi est RESEAU')
+  b.msg.ouvrir('B9')
+  assert.equal(zone.value, '', 'aucun des deux textes d Ana ne reste')
+  assert.equal(noteSaisie(b), FR_USE_REMOVED)
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b), [])
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : une phrase AJOUTÉE au texte posé est une retouche — tout reste, et « Envoyer » refuse ailleurs', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  taper(b, 'Belle soirée Ana, à demain 15 h\nBonjour Ana, Le wifi est RESEAU')
+  b.msg.ouvrir('B9')
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  assert.equal(zone.value, 'Belle soirée Ana, à demain 15 h\nBonjour Ana, Le wifi est RESEAU', 'rien n est jeté')
+  assert.equal(noteSaisie(b), FR_USE_WRONG)
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b), [], 'ce qui était écrit pour Ana ne part pas chez un autre voyageur')
+  b.msg.ouvrir('B7')
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b).map(e => e.corps.bookingId), ['B7'])
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : « Utiliser » dans un autre fil n ajoute rien à un texte préparé pour Ana', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B8', 'P2')])
+  taper(b, 'Bonjour Ana !, Le wifi est RESEAU')
+  b.msg.ouvrir('B8')
+  await reposer(b)
+  await utiliserEncore(b)
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  assert.equal(zone.value, 'Bonjour Ana !, Le wifi est RESEAU', 'le texte de Marie n a pas été ajouté')
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b), [], 'la marque est restée sur le fil d Ana')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : « Modifier » (sans échéance) + « Utiliser », puis changer de fil : le texte de l IA repart aussi', async () => {
+  const b = banc()
+  await amorcer(b)
+  peupler(b, { biens: BIENS, volet: 'ia', bien: 'P1', conversations: [fil('B7', 'P2'), fil('B9', 'P1')],
+    taches: [{ id: 'T1', booking_id: 'B7', suggested_reply: 'Bonjour Ana, voici votre code de boite' }] })
+  b.msg.ouvrirTiroir(false)
+  b.msg.ouvrir('B7')
+  // Le vrai « Modifier » (le banc n'indexe pas les bulles de proposition).
+  b.msg.modifierProposition('T1')
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  assert.equal(zone.value, 'Bonjour Ana, voici votre code de boite')
+  await utiliserEncore(b)
+  assert.equal(zone.value, 'Bonjour Ana, voici votre code de boite\nBonjour Ana, Le wifi est RESEAU')
+  b.msg.ouvrir('B9')
+  assert.equal(zone.value, '', 'ni le texte de l IA ni celui de la base ne restent')
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b), [])
+  b.fermer()
+})
+
+test('tiroir OUVERT et nouveau fil dans un autre logement : la note R7 se lit sous le champ', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  taper(b, 'Bonjour Ana !, Le wifi est RESEAU')
+  clic(b, iconeSaisie(b))
+  await reposer(b)
+  b.msg.ouvrir('B9')
+  await reposer(b)
+  assert.equal(noteSaisie(b), FR_USE_WRONG)
+  b.fermer()
+})
+
+test('« Modifier » remplace le champ : ce qui suit se comporte comme sans « Utiliser »', async () => {
+  const scenario = async (avecUtiliser) => {
+    const b = banc()
+    await amorcer(b)
+    peupler(b, { biens: BIENS, volet: 'ia', bien: 'P1', conversations: [fil('B7', 'P2'), fil('B9', 'P1')],
+      taches: [{ id: 'T1', booking_id: 'B7', suggested_reply: 'Texte de l IA' }] })
+    b.msg.ouvrirTiroir(false)
+    b.msg.ouvrir('B7')
+    if (avecUtiliser) await utiliserEncore(b)
+    b.msg.modifierProposition('T1')
+    taper(b, 'Texte de l IA, relu')
+    b.msg.ouvrir('B9')
+    const vu = { champ: b.doc.querySelector('[data-bind="texte"]').value, note: noteSaisie(b) }
+    b.fermer()
+    return vu
+  }
+  assert.deepEqual(await scenario(true), await scenario(false))
+})
+
 test('R2 — dans Messages, choisir un autre logement au sélecteur du tiroir retire « Utiliser »', async () => {
   const b = await telephoneSurB7()
   clic(b, iconeSaisie(b))

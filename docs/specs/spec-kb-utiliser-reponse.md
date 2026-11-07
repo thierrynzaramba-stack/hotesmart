@@ -80,12 +80,23 @@ son test (§7).
   comportement d'une frappe, et c'est ce que l'hôte a demandé (« comme si je
   l'avais tapé »).
 - **R7. Un texte posé appartient à SA conversation.** Le champ de saisie est
-  partagé entre les fils de la page. Si l'hôte change de conversation avec un
-  texte posé par « Utiliser » encore intact, ce texte est **retiré**, et une
-  note le dit. S'il l'a retouché, on ne devine pas ce qui est à qui : le texte
-  reste, et « Envoyer » le **refuse** dans l'autre conversation (note « Ce
-  texte a été préparé pour une autre conversation : il ne partira pas ici ») ;
-  il repart dans la sienne. Un champ vidé à la main ne porte plus rien.
+  partagé entre les fils de la page ; la page garde **tous** les textes posés
+  par « Utiliser » et le fil pour lequel ils l'ont été. Si l'hôte change de
+  conversation et que le champ ne contient **que** ces textes, tels quels, ils
+  sont **retirés**, et une note le dit. S'il reste quoi que ce soit d'autre —
+  une retouche, une phrase ajoutée avant ou après —, on ne devine pas ce qui
+  est à qui : **tout** reste, et « Envoyer » le **refuse** dans l'autre
+  conversation (note « Ce texte a été préparé pour une autre conversation : il
+  ne partira pas ici ») ; il repart dans la sienne. Dans l'autre conversation,
+  « Utiliser » n'ajoute rien non plus à ce champ. La note se lit sous le champ,
+  tiroir ouvert ou non. Un champ vidé à la main ne porte plus rien.
+  Pendant un « Modifier » : le texte de l'IA suivi seulement des textes posés
+  n'est pas une retouche de l'hôte — en changeant de fil, il repart avec sa
+  proposition, et les textes posés sont retirés.
+  **Assumé** : un champ remplacé par sélection puis frappe, sans être vidé,
+  garde la marque ; ce texte-là sera refusé dans une autre conversation. Le
+  refus dit quoi faire (« Videz le champ, ou revenez à cette conversation ») et
+  ne fait rien partir.
 - **R6. Le texte du titulaire seulement.** L'écran reste réservé au titulaire
   (403 avant toute lecture, comme kb-v5). Aucune route neuve.
 
@@ -213,3 +224,32 @@ correctif avec son test qui rougit sans lui (mutation) :
 - **R4 / R5** : la spec ne disait pas qu'un texte ajouté pendant un
   « Modifier » différé part à l'échéance. → écrit en R5 (comportement d'une
   frappe, inchangé).
+
+## 10. Review 2 — ce qu'elle a trouvé, ce qui a changé
+
+Review du diff des correctifs (`f9c95478..68821a90`). Tout a été rejoué au banc
+par la review, avec les vrais gestes. Corrigé, chaque correctif avec son test
+qui rougit sans lui (mutation) :
+
+- **BLOQUANT — deux « Utiliser » dans le même fil** : seul le dernier texte
+  était suivi ; le premier, rempli pour Ana, partait dans un autre logement
+  avec une note « retiré » qui rassurait à tort. → tous les textes sont suivis.
+- **Une phrase ajoutée avant ou après le texte posé** passait pour « intact » :
+  le texte de la base était retiré, l'ajout pour Ana partait ailleurs. → s'il
+  reste quoi que ce soit, tout reste et « Envoyer » refuse (R7).
+- **« Modifier » sans échéance + « Utiliser » + changement de fil** : le texte
+  de l'IA écrit pour Ana partait chez un autre voyageur (régression d'une garde
+  plus ancienne). → le texte de l'IA suivi seulement des textes posés repart
+  avec sa proposition.
+- **« Utiliser » dans le fil de Marie** reprenait la marque pour Marie, et le
+  texte d'Ana partait avec le sien. → refusé, champ intact.
+- **Note R7 effacée** quand le tiroir était ouvert sur un autre logement. → la
+  note se lit sous le champ.
+- Deux gardes sans test : la libération de la marque par « Modifier » et
+  l'exception du prénom. → testées.
+
+**Hors lot, signalé** : un texte de l'IA **retouché** pendant un « Modifier »
+reste dans le champ quand on change de fil, et peut partir dans une autre
+conversation (choix d'une review antérieure : « on ne jette jamais ce que l'hôte
+a tapé »). « Utiliser » ne change rien à ce chemin ; le fermer de la même façon
+que R7 est une décision à part.

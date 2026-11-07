@@ -185,7 +185,7 @@ const etat = {
   pausesLues: false,
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
-  saisieRemplie: null,     // { bookId, texte } : texte posé par « Utiliser », rempli pour CE fil
+  saisieRemplie: null,     // { bookId, textes } : textes posés par « Utiliser », remplis pour CE fil
   modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
   configIA: null,          // blob agent_alert_config.config ; null = illisible (volet ferme)
   prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
@@ -780,7 +780,7 @@ async function envoyer () {
   // restait dans la saisie PARTAGÉE après un changement de fil, et « Envoyer »
   // le postait à Marie — mot de passe wifi d'une autre maison compris. Le
   // champ garde le texte (rien n'est jeté), et le dit.
-  if (saisieRemplieAilleurs()) { noteReglage(t('kb.use_wrong_conv')); return }
+  if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
   etat.saisieRemplie = null
   zone.value = ''
   ajusterHauteur(zone)
@@ -1808,12 +1808,19 @@ function utiliserDansLaSaisie ({ texte, resa, ref }) {
   const saisie = $('[data-bind="saisie"]')
   const zone = $('[data-bind="texte"]')
   if (!saisie || saisie.hidden || !zone) return false
+  // ⚠ LE CHAMP PORTE DÉJÀ UN TEXTE PRÉPARÉ POUR UNE AUTRE CONVERSATION :
+  // on n'y ajoute rien (constat 3 de la review 2, mesuré : la marque passait
+  // au fil de Marie et le texte d'Ana partait avec le sien).
+  if (saisieRemplieAilleurs()) { noteReglage(t('kb.use_wrong_conv')); return false }
   const avant = zone.value.replace(/\s+$/, '')
   zone.value = avant ? avant + '\n' + texte : String(texte)
   ajusterHauteur(zone)
-  // Pour QUI ce texte a été rempli : la saisie est partagée entre les fils de
-  // la page, et ce texte-là porte un prénom et les infos d'un logement.
-  etat.saisieRemplie = { bookId: String(resa), texte: String(texte) }
+  // Pour QUI ces textes ont été remplis : la saisie est partagée entre les
+  // fils de la page, et chacun porte un prénom et les infos d'un logement.
+  // TOUS sont gardés, pas le dernier (constat 1 de la review 2).
+  const r = etat.saisieRemplie
+  if (r && String(r.bookId) === String(resa)) r.textes.push(String(texte))
+  else etat.saisieRemplie = { bookId: String(resa), textes: [String(texte)] }
   ouvrirTiroir(false)
   zone.focus()
   try { zone.setSelectionRange(zone.value.length, zone.value.length) } catch {}
@@ -1825,24 +1832,47 @@ function saisieRemplieAilleurs () {
   const zone = $('[data-bind="texte"]')
   return !!r && !!zone && zone.value.trim() !== '' && String(r.bookId) !== String(etat.ouverte)
 }
-// Changer de fil avec un texte de la base dans le champ : s'il est encore tel
-// que posé, il est RETIRÉ (il était rempli pour l'autre voyageur) ; retouché,
-// on ne devine pas ce qui est à qui — il reste, et « Envoyer » le refusera ici.
-// Dans les deux cas, on le dit.
+// Le champ, une fois retirés les textes posés par « Utiliser » : ce qui reste
+// est ce que l'hôte a écrit lui-même (ou le texte de l'IA d'un « Modifier »).
+function sansTextesPoses (valeur) {
+  const r = etat.saisieRemplie
+  let v = String(valeur || '')
+  if (!r) return v
+  for (const tx of [...r.textes].reverse()) {
+    const i = v.lastIndexOf(tx)
+    if (i >= 0) v = v.slice(0, i) + v.slice(i + tx.length)
+  }
+  return v
+}
+// Une note sur le CHAMP se lit sous le champ, tiroir ouvert ou non : dans le
+// tiroir, le repointage du panneau sur le nouveau fil l'effaçait (constat 5
+// de la review 2).
+function noteChamp (texte) {
+  const note = $('[data-bind="saisie-etat"]')
+  note.hidden = false
+  note.textContent = texte
+}
+// Changer de fil avec un texte de la base dans le champ. S'il n'y a QUE des
+// textes posés, tels quels, ils sont RETIRÉS (ils étaient remplis pour l'autre
+// voyageur). S'il reste quoi que ce soit d'autre — une retouche, une phrase
+// ajoutée avant ou après, le texte d'une proposition —, on ne devine pas ce
+// qui est à qui : TOUT reste, la marque aussi, et « Envoyer » le refusera ici
+// (constats 1, 2 et 4 de la review 2 : retirer seulement le texte posé
+// laissait partir ailleurs, sans marque, ce qui était écrit pour Ana). Dans
+// les deux cas, on le dit.
 function rangerSaisieRemplie (bookId) {
   const r = etat.saisieRemplie
   const zone = $('[data-bind="texte"]')
   if (!r || !zone || String(r.bookId) === String(bookId)) return
   if (!zone.value.trim()) { etat.saisieRemplie = null; return }
-  const i = zone.value.lastIndexOf(r.texte)
-  if (i >= 0) {
-    zone.value = (zone.value.slice(0, i) + zone.value.slice(i + r.texte.length)).replace(/\s+$/, '')
+  if (!sansTextesPoses(zone.value).trim()) {
+    zone.value = ''
     ajusterHauteur(zone)
     etat.saisieRemplie = null
-    noteReglage(t('kb.use_removed'))
+    noteChamp(t('kb.use_removed'))
     return
   }
-  noteReglage(t('kb.use_wrong_conv'))
+  noteChamp(t('kb.use_wrong_conv'))
 }
 
 // ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
@@ -3529,9 +3559,18 @@ function ouvrir (bookId) {
     enregistrerBrouillonEnCours()
     const zone = $('[data-bind="texte"]')
     const xEd = tacheParId(etat.enEdition.tacheId)
-    if (xEd && zone.value.trim() === String(xEd.suggested_reply || '').trim()) {
+    // Le texte de l'IA, plus seulement des réponses posées par « Utiliser »
+    // dans CE fil, n'est pas une retouche de l'hôte : il repart lui aussi
+    // (constat 2 de la review 2 — sans ça, l'ajout le faisait passer pour
+    // retouché, et il restait dans la saisie du fil suivant).
+    const ia = String(xEd ? xEd.suggested_reply || '' : '').trim()
+    const r = etat.saisieRemplie
+    const poses = r && String(r.bookId) === String(etat.enEdition.bookId)
+    if (xEd && (zone.value.trim() === ia || (poses && sansTextesPoses(zone.value).trim() === ia))) {
+      if (poses && zone.value.trim() !== ia) noteChamp(t('kb.use_removed'))
       zone.value = ''
       ajusterHauteur(zone)
+      if (poses) etat.saisieRemplie = null
     }
     etat.enEdition = null
   }

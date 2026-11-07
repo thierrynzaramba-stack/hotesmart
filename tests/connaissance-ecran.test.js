@@ -230,6 +230,19 @@ test('les infos de la RÉSERVATION absentes comptent aussi parmi les manques (le
   assert.deepEqual(r.charge.reponses[0].manquants.sort(), ['arrivee', 'nom'])
 })
 
+test('un PRÉNOM absent ne refuse pas : il prend la forme neutre (décision du 8 octobre 2026)', async () => {
+  const r = await appeler({
+    query: { bien: 'P2', resa: 'B9' },
+    repondre: base({
+      lignes: [{ id: 'b1', type: 'faq', key: 'Salut', value: 'Bonjour {prenom}, le wifi est prêt', verifie_le: null, lisible_par_ia: true }],
+      resas: [{ booking_id: 'B9', property_id: 'P2', snapshot: { status: 'confirmed', lastName: 'Durand', arrival: jour(3), departure: jour(5) } }]
+    })
+  })
+  assert.equal(r.charge.voyageur.duFil, true)
+  assert.deepEqual(r.charge.reponses[0].manquants, [], 'le prénom n est pas un manque')
+  assert.equal(r.charge.reponses[0].apercu, 'Bonjour, le wifi est prêt')
+})
+
 test('LE TEST QUI COMPTE : duFil n est vrai que pour la réservation DEMANDÉE, trouvée dans CE logement', async () => {
   // Sinon le serveur se rabat sur le prochain séjour du logement : bon pour
   // l'aperçu, mais « Bonjour Paul » dans le fil de Marie (R1).
