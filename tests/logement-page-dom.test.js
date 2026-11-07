@@ -1215,6 +1215,6 @@ test('le titre d onglet suit le changement de langue', () => {
     assert.match(html, /poserTitre\s*\(\)/, `${f} doit poser le titre au chargement aussi`)
   }
   // Et l événement existe bien : sinon l écouteur serait du code dormant.
-  const i18n = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/i18n.js'), 'utf8')
+  const i18n = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/i18n.modele.js'), 'utf8')
   assert.match(i18n, /dispatchEvent\(new CustomEvent\('i18n:changed'/)
 })

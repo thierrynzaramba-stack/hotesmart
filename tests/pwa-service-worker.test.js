@@ -93,6 +93,15 @@ function creerReseau (edition = 'v1', { absents = [] } = {}) {
       if (etat.pieges.has(p)) return { entetes: { 'content-type': 'application/json', 'cache-control': 'no-store' }, corps: JSON.stringify({ donnees: AVEC_CANARIS }) }
       if (etat.precacheHtmlPour === p) return { entetes: { 'content-type': 'text/html' }, corps: '<html>404</html>' }
       const ext = (p.match(/\.(\w+)$/) || [])[1]
+      // Le moteur i18n n'est plus un fichier : api/i18n.js le sert. ⚠ ON
+      // APPELLE LA VRAIE FONCTION (constat de review) : recopier ses en-tetes
+      // ici laissait ce test vert le jour ou elle passerait en `private`, que
+      // le service worker refuse — donc une installation qui echoue.
+      if (p === '/shared/i18n/i18n.js' && !absents.includes(p)) {
+        const r = { entetes: {}, setHeader (k, v) { this.entetes[k.toLowerCase()] = v; return this }, status (c) { this.statut = c; return this }, send (b) { this.corps = b; return this }, json (b) { this.corps = JSON.stringify(b); return this } }
+        await require('../api/i18n')({ method: 'GET' }, r)
+        return { statut: r.statut, entetes: r.entetes, corps: `${r.corps}\n/* ${p} ${etat.edition} */` }
+      }
       if (p.startsWith('/shared/') && TYPES[ext]) {
         const f = path.join(RACINE, p)
         if (absents.includes(p) || !fs.existsSync(f)) return { statut: 404, entetes: { 'content-type': 'text/html' }, corps: '<html>404</html>' }

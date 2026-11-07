@@ -16,6 +16,9 @@
     },
     "api/pwa.js": {
       "includeFiles": "shared/{theme.css,pwa/service-worker.js}"
+    },
+    "api/i18n.js": {
+      "includeFiles": "shared/i18n/*.{json,js}"
     }
   },
   "crons": [
@@ -36,6 +39,10 @@
     {
       "source": "/sw.js",
       "destination": "/api/pwa?f=sw"
+    },
+    {
+      "source": "/shared/i18n/i18n.js",
+      "destination": "/api/i18n"
     },
     {
       "source": "/book/:token",
