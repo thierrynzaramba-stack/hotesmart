@@ -70,9 +70,10 @@ test("EXHAUSTIVITE : toute lecture CLIENT de properties est filtree, ou motivee"
   // Les lectures qui ont le DROIT de voir un bien archive, avec leur raison.
   const MOTIVEES = {
     'pages/messages.html':
-      'table de CORRESPONDANCE cle provider -> nom : les conversations d un '
-      + 'logement archive restent lisibles, et sans son nom chaque fil '
-      + 's afficherait une reference provider.'
+      'table de CORRESPONDANCE cle provider -> nom, pas une liste de choix. '
+      + 'Depuis le 6 novembre 2026, les conversations d un bien archive ne '
+      + 'sortent plus de /api/messages (filtre serveur) : cette table nomme ce '
+      + 'que le serveur rend, filtrer ici n ajouterait rien.'
   }
 
   const fichiers = [

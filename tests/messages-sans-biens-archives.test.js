@@ -38,7 +38,11 @@ function preparer ({ messages = [], snaps = [], properties = [], panneProperties
           if (panneProperties) return { data: null, error: { message: 'panne reseau' } }
           const lignes = properties.filter(p =>
             Object.entries(q.eq).every(([k, v]) => p[k] === v) &&
-            Object.entries(q.in).every(([k, v]) => v.includes(p[k])) &&
+            // ⚠ `.in('user_id')` N'EST PAS APPLIQUE, EXPRES (constat 9 de la
+            // revue du 7 novembre 2026) : sans cela, le test inter-comptes
+            // passait grace au filtre de compte, et retirer la cle COMPOSITE
+            // ne le faisait pas rougir. Seule la cle doit l'empecher.
+            Object.entries(q.in).every(([k, v]) => k === 'user_id' || v.includes(p[k])) &&
             q.not.every(k => (p[k] ?? null) !== null))
           return { data: lignes, error: null }
         }

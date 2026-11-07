@@ -225,9 +225,12 @@ const ECRANS = [
 // prestataire actif, mode d'acces, perimetre de biens — et le banc generique ne
 // reproduit pas cet etat. Garni a moitie, il refusait en 401 et l'assertion de
 // non-vacuite le disait au lieu de verdir.
-// Son filtre est prouve la ou le banc sait franchir cette garde :
-// `tests/menages-public-filtre-presta.test.js`, qui lit la requete REELLEMENT
-// emise et exige `archive_le is null`.
+// Sa regle est prouvee la ou le banc sait franchir cette garde :
+// `tests/menages-public-filtre-presta.test.js` — le CABLAGE (la colonne est
+// lue) et l'EFFET (un bien archive reste tant qu'un depart du BIEN est a
+// venir). ⚠ Il « exigeait `archive_le is null` » jusqu'au 3 novembre 2026 :
+// la decision « jusqu'au dernier depart » a remplace ce filtre (constat 9 de
+// la revue du 7 novembre 2026).
 
 // ⚠ UNE EXEMPTION SE COMPTE ET SE MOTIVE, elle ne se decrit pas — meme
 // discipline que l'`ATTENDU` de tests/bookings-snapshot-troncature.test.js. Le

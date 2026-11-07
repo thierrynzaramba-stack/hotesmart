@@ -864,9 +864,11 @@ module.exports = async function handler(req, res) {
     // pas actifs ». Elle REMPLACE le choix ecrit cote ecran (pages/messages.html,
     // « les conversations d'un logement archive restent lisibles ») : les
     // messages restent en base, ils ne s'affichent plus.
-    // ⚠ ICI, ET PAS DANS LA PAGE : tout ce qui lit cette collection — la liste,
-    // les arrivees du jour, le compteur « a traiter » de l'accueil — voit la
-    // meme verite. Un filtre d'ecran en laisserait passer un.
+    // ⚠ ICI, ET PAS DANS LA PAGE : tout ce qui lit cette collection — la liste
+    // et les arrivees du jour de Messages — voit la meme verite. ⚠ L'accueil,
+    // lui, ne passe PAS par ici (`api/ecran/aujourdhui.js` lit `messages`
+    // lui-meme ; constat 9 de la revue du 7 novembre 2026 : cette ligne
+    // affirmait le contraire).
     // ⚠ LA CLE EST COMPOSITE (`cleDuBien`) : `provider_property_id` n'a aucune
     // unicite globale, et un bien archive chez un autre compte ne doit RIEN
     // retirer ici (constat 6 de la revue de 320aa4f8, lib/biens-vivants.js).
