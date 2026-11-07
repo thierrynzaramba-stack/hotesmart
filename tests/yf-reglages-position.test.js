@@ -102,21 +102,36 @@ test('un événement dans un autre : le plus court d abord, puis celui qui le co
   assert.equal(r.parNuit.get('2026-12-31').cle, CLE_NOEL)
 })
 
-test('le rayonnement : vendredi et samedi seulement, k = ⌈écart / 7⌉, borné par la largeur réglée — au-delà, la ligne est hors zone', () => {
+test('LE TEST QUI COMPTE : le rayonnement — vendredi et samedi seulement, et la largeur de la zone ne borne AUCUN réglage (décision du 7 novembre : elle sert à l affichage)', () => {
   const cle = 'commercial:saint_valentin'
-  const lignes = [ligne(cle, 'avant', 1, 'vendredi', null, 'Haut'), ligne(cle, 'avant', null, 'samedi', null, 'Moyen')]
+  const lignes = [ligne(cle, 'avant', 1, 'vendredi', null, 'Haut'), ligne(cle, 'avant', 2, 'samedi', null, 'Moyen'), ligne(cle, 'avant', 3, null, null, 'Base')]
   const r = resoudre({ debut: '2027-01-01', fin: '2027-03-01', vacances: [], lignes, largeurs: new Map([[cle, { avant: 2, apres: 0 }]]) })
   // Saint-Valentin 2027 : dimanche 14 février.
   assert.equal(niv(r, '2027-02-12'), 'Haut', 'vendredi 12 : 1er week-end avant')
-  assert.equal(niv(r, '2027-02-05'), null, 'vendredi 5 : 2e week-end, aucune ligne pour lui')
-  assert.deepEqual(['2027-02-13', '2027-02-06', '2027-01-30'].map(j => niv(r, j)), ['Moyen', 'Moyen', null], 'largeur 2 : le 3e week-end est hors zone')
+  assert.deepEqual(['2027-02-13', '2027-02-05', '2027-02-06'].map(j => niv(r, j)), [null, null, 'Moyen'], 'seules les nuits désignées')
   assert.equal(niv(r, '2027-02-11'), null, 'un jeudi ne rayonne pas')
+  // Le 3e week-end est au-delà de la zone affichée (2) : il garde son niveau, et il est signalé.
+  assert.deepEqual(['2027-01-29', '2027-01-30'].map(j => [niv(r, j), r.parNuit.get(j).hors_zone_affichee]), [['Base', true], ['Base', true]])
+  assert.equal(r.parNuit.get('2027-02-06').hors_zone_affichee, undefined)
+  assert.deepEqual(r.horsZone.map(h => [h.ligne.rang, h.largeur]), [[3, 2]])
+  assert.deepEqual(r.sansNuit, [])
+  // Zone réduite après coup, ou jamais réglée : les réglages restent, rien n est « sans nuit ».
   const etroit = resoudre({ debut: '2027-01-01', fin: '2027-03-01', vacances: [],
-    lignes: [ligne(cle, 'avant', 2, 'vendredi', null, 'Haut'), ligne(cle, 'apres', 1, 'samedi', null, 'Haut')],
+    lignes: [ligne(cle, 'avant', 2, 'vendredi', null, 'Haut'), ligne(cle, 'apres', 1, 'samedi', null, 'Très haut')],
     largeurs: new Map([[cle, { avant: 1, apres: null }]]) })
-  assert.deepEqual(etroit.parNuit.size, 0)
-  assert.deepEqual(etroit.sansNuit.map(s => [s.ligne.zone, s.motif]), [['avant', 'hors_zone'], ['apres', 'hors_zone']],
-    'zone réduite après coup : la ligne est rendue, pas supprimée')
+  assert.deepEqual([niv(etroit, '2027-02-05'), niv(etroit, '2027-02-20')], ['Haut', 'Très haut'])
+  assert.deepEqual([etroit.sansNuit, etroit.horsZone.map(h => [h.ligne.zone, h.largeur])], [[], [['avant', 1], ['apres', 0]]])
+})
+
+test('LE TEST QUI COMPTE : une ligne du rayonnement SANS rang n agit pas et se signale ; un week-end amputé rend « position absente »', () => {
+  const cle = 'commercial:saint_valentin'
+  const joker = ligne(cle, 'avant', null, 'samedi', null, 'Haut')
+  const r = resoudre({ debut: '2027-01-01', fin: '2027-03-01', vacances: [], lignes: [joker], largeurs: new Map([[cle, { avant: 4, apres: null }]]) })
+  assert.deepEqual([r.parNuit.size, r.sansNuit.map(x => [x.ligne.id, x.motif])], [0, [[joker.id, 'rang_requis']]])
+  // Noël 2026 commence un samedi : le 1er week-end avant n a que son vendredi.
+  const samedi = ligne(CLE_NOEL, 'avant', 1, 'samedi', null, 'Haut')
+  const n = resoudre({ debut: '2026-11-20', fin: '2027-01-31', lignes: [samedi] })
+  assert.deepEqual([n.parNuit.size, n.sansNuit.map(x => [x.ligne.id, x.motif])], [0, [[samedi.id, 'position_absente']]])
 })
 
 test('un événement coupé par l hôte n applique rien et ne signale rien ; une occurrence qui déborde la fenêtre ne signale pas ce qu elle porte au-delà', () => {
@@ -220,7 +235,7 @@ const ACCEPTES = [
   P_(CLE_NOEL, 'evenement', null, null, null), P_('commercial:reveillon_noel', 'evenement', null, null, 'date'),
   P_('commercial:saint_valentin', 'evenement', null, null, 'samedi_rattache'), P_('ferie:armistice_1918', 'evenement', null, null, 'date'),
   P_('commercial:saint_valentin', 'avant', 1, 'vendredi', null), P_('commercial:saint_valentin', 'apres', 2, null, null),
-  P_(CLE_NOEL, 'avant', null, null, null), P_('evenement:salon_du_livre', 'evenement', 1, 'lundi', null)
+  P_('evenement:salon_du_livre', 'evenement', 1, 'lundi', null)
 ]
 const REFUSES = [
   [P_('x', 'pendant', null, null, null), 'zone_inconnue'], [P_('x', 'evenement', 1, 'samedy', null), 'jour_inconnu'],
@@ -236,7 +251,11 @@ const REFUSES = [
   [P_('x', 'evenement', null, null, 'veille'), 'nuit_inconnue'],
   // L'écrivain est PLUS STRICT que la base ici, et c'est voulu : un réveillon
   // n'a jamais de samedi rattaché (`weekend_proche: false`).
-  [P_('commercial:reveillon_noel', 'evenement', null, null, 'samedi_rattache'), 'sans_samedi_rattache']
+  [P_('commercial:reveillon_noel', 'evenement', null, null, 'samedi_rattache'), 'sans_samedi_rattache'],
+  // PLUS STRICT AUSSI, décision de Thierry du 7 novembre 2026 : la largeur de
+  // la zone ne change aucun prix, donc une ligne du rayonnement désigne son
+  // week-end. La base l accepte (c était l une des positions éprouvées).
+  [P_(CLE_NOEL, 'avant', null, null, null), 'rang_requis']
 ]
 
 test('LE TEST QUI COMPTE : l écrivain refuse exactement ce que la base refuse, avec un motif parlant', () => {
@@ -699,12 +718,16 @@ test('2c, API : un geste interrompu dit ce qui est déjà écrit ; un geste conc
 
 test('LE TEST QUI COMPTE (2c, API) : la lecture rend les lignes, la nuit de chacune, les lignes sans nuit et les largeurs', async () => {
   const lignes = [{ id: 'l1', evenement: 'commercial:reveillon_noel', zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'Exceptionnel' },
-    { id: 'l2', evenement: 'pont:pont_armistice_1918', zone: 'evenement', rang: 3, jour: 'lundi', nuit: null, niveau: 'Haut' }]
+    { id: 'l2', evenement: 'pont:pont_armistice_1918', zone: 'evenement', rang: 3, jour: 'lundi', nuit: null, niveau: 'Haut' },
+    { id: 'l3', evenement: 'commercial:saint_valentin', zone: 'avant', rang: 3, jour: 'vendredi', nuit: null, niveau: 'Haut' }]
   const e = chargerApi({ lignes })
   const g = await e.appeler('GET', { debut: '2026-11-07', fin: '2027-11-06' })
   assert.equal(g.code, 200)
   const p = g.corps.positions
-  assert.deepEqual(p.lignes.map(l => l.id), ['l1', 'l2'])
+  assert.deepEqual(p.lignes.map(l => l.id), ['l1', 'l2', 'l3'])
+  // Le 3e week-end avant la Saint-Valentin 2027, zone affichée à 2 : il agit, et il est signalé.
+  assert.deepEqual(p.par_nuit.filter(x => x.ligne === 'l3').map(x => [x.date, x.hors_zone_affichee]), [['2027-01-29', true]])
+  assert.deepEqual(p.hors_zone.map(x => [x.ligne, x.largeur]), [['l3', 2]])
   assert.deepEqual(p.par_nuit.filter(x => x.ligne === 'l1').map(x => x.date), ['2026-12-24'])
   assert.deepEqual(p.sans_nuit.map(x => [x.ligne, x.occurrence && x.occurrence.debut, x.motif]), [['l2', '2026-11-09', 'position_absente']],
     'un seul pont d Armistice dans la fenêtre (celui de 2026, un seul lundi : le 3e n existe pas) ; celui de 2027 tombe le 12 novembre, après la fin')

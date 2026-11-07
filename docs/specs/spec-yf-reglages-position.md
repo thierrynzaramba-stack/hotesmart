@@ -32,6 +32,14 @@ ni l'écran.
   puis on corrige nuit par nuit.
 - **Rappel gravé (29 octobre 2026)** : les seuls niveaux sont Base / Moyen /
   Haut / Très haut / Exceptionnel.
+- **7 novembre 2026, mot pour mot** : « agrandir la zone est une chose,
+  programmer l'impact en est une autre », puis, sur le cas inverse (un niveau
+  posé sur le 3e week-end avant, zone réduite à 2) : **A — il garde son
+  niveau**. **La largeur de la zone sert à l'AFFICHAGE : elle ne change aucun
+  prix**, ni quand elle grandit, ni quand elle rétrécit. D'où trois règles :
+  une ligne du rayonnement désigne toujours son week-end (pas de joker de
+  rang, §2.4) ; une ligne au-delà de la zone affichée agit et se signale
+  (§4) ; changer la largeur ne demande aucune confirmation.
 
 ⚠ **CE QUE LA MAQUETTE NE DONNE PAS, ET QUE CE LOT CONÇOIT** : elle garde ses
 réglages par date (`st.days[ev.id][iso]`). Le modèle de mémorisation est donc
@@ -88,6 +96,11 @@ dimanche n'en fait pas partie, et ce n'est pas le `estWeekEnd` du moteur
 - **après** : le 1er week-end est celui du premier samedi APRÈS la dernière
   nuit — si l'événement finit un vendredi, seul ce samedi rayonne.
 
+**La largeur de la zone (`weekends_avant` / `weekends_apres`, 0 à 4) est ce que
+l'écran AFFICHE, pas ce qui s'applique** (décision du 7 novembre 2026). Une
+ligne sur le k-ième week-end agit pour tout k de 1 à 4, que la zone affichée
+le couvre ou non.
+
 ⚠ **Pas la formule de la maquette, `k = ⌈ écart / 7 ⌉`** (constat de review du
 2a). Elle coupe un week-end en deux quand l'événement commence un samedi, ce
 qui est le cas de toutes les vacances scolaires : avant Noël 2026 (samedi 19),
@@ -103,7 +116,14 @@ ligne la PLUS PRÉCISE gagne :
 1. `date` / `samedi_rattache` (dates fixes) ou rang + jour (« 2e samedi »)
 2. jour seul (« tous les samedis de l'événement »)
 3. rang seul, rayonnement seulement (« tout le 1er week-end avant »)
-4. rien (« tout l'événement », « tout le rayonnement avant »)
+4. rien (« tout l'événement »)
+
+⚠ **DANS LE RAYONNEMENT, LE RANG EST OBLIGATOIRE** (décision du 7 novembre
+2026). « Tous les week-ends avant » ou « tous les samedis avant » s'étendrait
+avec la zone, et agrandir la zone ne change aucun prix. L'écran écrit donc une
+ligne par week-end de la zone du moment. L'écrivain refuse un rang vide
+(`rang_requis`) — plus strict que la base, comme pour le samedi rattaché d'un
+réveillon ; une telle ligne venue d'ailleurs n'agit pas et se signale.
 
 « Remettre ces nuits en automatique » sur UNE nuit couverte par un joker écrit
 une ligne précise dont le niveau vaut `calcul` : elle masque le joker pour
@@ -172,8 +192,7 @@ lignes **sans nuit** :
 - la position n'existe pas cette année (3e samedi d'un événement qui n'en a
   que deux ; `samedi_rattache` d'un 14 février samedi ; 2e week-end prolongé
   quand l'Armistice tombe un jeudi) ;
-- la position est hors de la zone d'influence réglée (l'hôte a réduit la zone
-  après avoir réglé le 3e week-end avant) ;
+- une ligne du rayonnement sans rang (`rang_requis`) ;
 - l'événement n'a **aucune occurrence** dans la fenêtre : le pont de
   l'Armistice quand le 11 novembre tombe un samedi (2028), un événement de
   l'hôte qu'il n'a pas reconduit. Motif `evenement_absent`.
@@ -182,6 +201,12 @@ Une occurrence que le calcul ou l'appelant a **coupée au bord** (une
 Saint-Valentin dont le 14 tombe juste après la fin de la fenêtre) ne signale
 rien : on ne sait pas ce qui lui manque. Un événement que l'hôte a coupé
 (`actif: false`) ne signale rien non plus.
+
+**Les lignes qui agissent HORS DE LA ZONE AFFICHÉE** (l'hôte a réduit la
+zone après avoir réglé le 3e week-end avant) ne sont pas « sans nuit » : elles
+gardent leur niveau. La lecture les rend à part (`hors_zone`, avec la largeur
+affichée) et marque leurs nuits (`hors_zone_affichee`) : l'écran doit les
+montrer, pour qu'aucun prix ne soit réglé hors de la vue de l'hôte.
 
 **Ces lignes ne sont ni supprimées ni déplacées.** Elles sont rendues avec leur
 motif, et l'écran (lot 4) les montre. Une ligne supprimée en silence est un
@@ -254,7 +279,7 @@ Migration : `migrations/2026-11-05-yield-reglages-position.sql` — **additive**
 |---|---|---|
 | **2a** | migration, writer `lib/yield/reglages-position.js` (garde bien/compte, journal), résolveur `lib/yield/positions.js` (nuit → position ; lignes → niveau par nuit + lignes sans nuit ; clé fine du week-end prolongé), `poserReglage` qui garde la largeur, `reglagesDuBien` qui lit `*` (les colonnes de largeur n'existent pas avant la migration : les nommer ferait lever le moteur de tous les biens dans l'intervalle), `scripts/verifier-migration-reglages-position.js` | **aucun** : la table est vide, et aucun appelant ne la lit encore |
 | **2b** | le moteur consulte les positions : `preparerContexte` lit les lignes **en parallèle** des réglages d'événement et les résout une fois pour la fenêtre (`positionsDuContexte` ; sans ligne, rien n'est calculé) ; `prixDeLaNuit` passe à `suggerer` le niveau de LA nuit (`reglagePosition`), qui devient le niveau de départ (étage 0 bis, `source = 'reglage'`, `reglage_position` dans la sortie, « le calcul disait … » dans le détail). L'écran et le moteur passant par la même porte, la parité tient par construction | aucun tant qu'aucune ligne n'existe ; une ligne change le prix de ses nuits |
-| **2c** | `api/yield-evenements.js` : le GET rend un bloc `positions` (les lignes ; `par_nuit`, la nuit que chacune prend dans la fenêtre ; `sans_nuit`, celles qui n'en prennent aucune, avec leur occurrence et leur motif ; `largeurs`) ; PATCH transmet `weekends_avant` / `weekends_apres` ; **PUT** règle une sélection (`positions: [{ evenement, zone, rang, jour, nuit, niveau }]`, `niveau: null` retire), droit `reglages: write`, au plus 120 positions, doublons refusés. `simuler: true` rend « N nuits vont changer de prix » sans rien écrire ; l'écriture exige `confirme.nuits` égal au compte refait au clic, sinon 409 `a_confirmer`. Le compte vient de `lib/yield/simuler-positions.js` : même matière (`preparerContexte` garde `lignesPosition` et `materiauxPositions`), lignes actuelles contre proposées, nuits comptées par `calculerPrix`. Le journal garde, nuit par nuit, le niveau que YieldFlow donnait SANS réglage de position — le niveau FINAL du calcul (pression, délai et preuve N-1 compris), pas le niveau de départ que cite le détail « le calcul disait … ». Deux bornes : ce que la ligne prend (`visees`, `sans_nuit`, journal) se lit sur douze mois, comme le GET ; le compte ne regarde que la fenêtre de pilotage, avec la matière que le moteur y voit (un événement qui commence après la fin ne rayonne pas encore dedans). Écritures par paquets de six ; un geste interrompu rend ce qui est déjà écrit (`ecrites`) et efface quand même le repère du moteur. Une ligne qui ne porte qu'une largeur ne masque plus les crans d'une clé plus large (`reglagePour`). ⚠ Le PATCH de largeur ne demande pas encore de confirmation : décision de Thierry attendue | l'API existe, aucun écran ne l'appelle avant le lot 4 |
+| **2c** | `api/yield-evenements.js` : le GET rend un bloc `positions` (les lignes ; `par_nuit`, la nuit que chacune prend dans la fenêtre ; `sans_nuit`, celles qui n'en prennent aucune, avec leur occurrence et leur motif ; `largeurs`) ; PATCH transmet `weekends_avant` / `weekends_apres` ; **PUT** règle une sélection (`positions: [{ evenement, zone, rang, jour, nuit, niveau }]`, `niveau: null` retire), droit `reglages: write`, au plus 120 positions, doublons refusés. `simuler: true` rend « N nuits vont changer de prix » sans rien écrire ; l'écriture exige `confirme.nuits` égal au compte refait au clic, sinon 409 `a_confirmer`. Le compte vient de `lib/yield/simuler-positions.js` : même matière (`preparerContexte` garde `lignesPosition` et `materiauxPositions`), lignes actuelles contre proposées, nuits comptées par `calculerPrix`. Le journal garde, nuit par nuit, le niveau que YieldFlow donnait SANS réglage de position — le niveau FINAL du calcul (pression, délai et preuve N-1 compris), pas le niveau de départ que cite le détail « le calcul disait … ». Deux bornes : ce que la ligne prend (`visees`, `sans_nuit`, journal) se lit sur douze mois, comme le GET ; le compte ne regarde que la fenêtre de pilotage, avec la matière que le moteur y voit (un événement qui commence après la fin ne rayonne pas encore dedans). Écritures par paquets de six ; un geste interrompu rend ce qui est déjà écrit (`ecrites`) et efface quand même le repère du moteur. Une ligne qui ne porte qu'une largeur ne masque plus les crans d'une clé plus large (`reglagePour`). Le PATCH de largeur ne demande aucune confirmation : il ne change aucun prix (décision du 7 novembre). L'aperçu du PUT rend aussi `hors_zone` | l'API existe, aucun écran ne l'appelle avant le lot 4 |
 
 Chaque étape : tests neufs qui rougissent contre le code d'avant (REVIEW.md
 règle 19), suite complète à zéro rouge aux deux horloges, review par un
@@ -322,8 +347,9 @@ automatique → il reprend son calcul, les autres restent à Haut ; régler
 `samedi_rattache` de la Saint-Valentin → l'occurrence 2027 (14 février un
 dimanche) le rend en « sans nuit », et le résolveur l'applique sur 2028 (un
 lundi : samedi 12) ; réduire la zone avant à 1
-après avoir réglé le 2e week-end avant → la ligne est rendue hors zone, pas
-supprimée.
+après avoir réglé le 2e week-end avant → ce week-end **garde son niveau**, et
+la lecture le rend dans `hors_zone` (décision du 7 novembre 2026) ; agrandir
+la zone → aucun prix ne change.
 
 ### 10 bis. Recette 2a + 2b sur staging — 6 et 7 novembre 2026, CONFORME
 

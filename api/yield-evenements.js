@@ -223,9 +223,14 @@ module.exports = async (req, res) => {
         lignes: lignesPosition.map(l => ({ id: l.id, evenement: l.evenement, zone: l.zone, rang: l.rang ?? null,
           jour: l.jour ?? null, nuit: l.nuit ?? null, niveau: l.niveau ?? null })),
         par_nuit: [...resolu.parNuit].map(([date, r]) => ({ date, niveau: r.niveau, cle: r.cle, zone: r.zone,
-          ligne: r.ligne ? r.ligne.id : null })),
+          ligne: r.ligne ? r.ligne.id : null, ...(r.hors_zone_affichee ? { hors_zone_affichee: true } : {}) })),
         sans_nuit: resolu.sansNuit.map(x => ({ ligne: x.ligne ? x.ligne.id : null, cle: x.cle,
           occurrence: x.occurrence, motif: x.motif })),
+        // ⚠ LA ZONE NE BORNE AUCUN REGLAGE (decision de Thierry du 7 novembre
+        // 2026) : un week-end regle au-dela de la zone affichee garde son
+        // niveau. L'ecran doit le montrer — un prix regle hors de la vue.
+        hors_zone: resolu.horsZone.map(x => ({ ligne: x.ligne ? x.ligne.id : null, cle: x.cle,
+          occurrence: x.occurrence, largeur: x.largeur })),
         largeurs: [...reglages.values()]
           .filter(r => r && (r.weekends_avant != null || r.weekends_apres != null))
           .map(r => ({ cle: r.segment, avant: r.weekends_avant ?? null, apres: r.weekends_apres ?? null }))
@@ -392,7 +397,7 @@ module.exports = async (req, res) => {
     }
     const confirmation = { pilote: sim.pilote, nuits: sim.nuits, du: sim.du, au: sim.au, min: sim.min, max: sim.max,
       ...(sim.ouverture_inconnue ? { ouverture_inconnue: true } : {}) }
-    const apercu = { confirmation, visees: Object.fromEntries(sim.visees), sans_nuit: sim.sans_nuit }
+    const apercu = { confirmation, visees: Object.fromEntries(sim.visees), sans_nuit: sim.sans_nuit, hors_zone: sim.hors_zone || [] }
     if (body.simuler === true) return res.status(200).json({ simulation: true, ...apercu })
     const c = body.confirme && typeof body.confirme === 'object' ? body.confirme : {}
     if (Number(c.nuits) !== sim.nuits) {
