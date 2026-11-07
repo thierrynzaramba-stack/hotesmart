@@ -44,6 +44,13 @@
           data-i18n-attr="aria-label:messages.drawer_scheduled;title:messages.drawer_scheduled;data-legende:messages.drawer_scheduled">
           <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-scheduled"/></svg>
         </button>
+        <!-- Base de connaissance V5 (lot 3) : à côté de « Messages programmés »
+             (décision du 3 novembre 2026). Ordinateur : le volet de 440 px ;
+             téléphone : la page plein écran /connaissance. -->
+        <button type="button" class="msg-btnrond" data-ouvre-volet="connaissance" hidden
+          data-i18n-attr="aria-label:kb.title;title:kb.title;data-legende:kb.title">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-book"/></svg>
+        </button>
         <button type="button" class="msg-btnrond" data-ouvre-volet="ia" hidden
           data-i18n-attr="aria-label:messages.tab_ia;title:messages.tab_ia;data-legende:messages.tab_ia">
           <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
@@ -96,6 +103,16 @@
     <div class="msg-saisie__echeance" data-bind="saisie-echeance" hidden></div>
     <div class="msg-saisie" data-bind="saisie" hidden>
       <textarea rows="1" data-bind="texte" data-i18n-attr="placeholder:messages.write;aria-label:messages.write"></textarea>
+      <!-- La base de connaissance À CÔTÉ DE LA SAISIE (recette du 7 novembre
+           2026, demande de Thierry). Au téléphone, le bouton d'en-tête ne vit
+           que sur la LISTE : pour l'atteindre il fallait quitter le fil, et la
+           page s'ouvrait sur le premier logement, sans voyageur. Celui-ci est
+           DANS le fil. Même attribut que l'en-tête, donc même branchement
+           (titulaire seul, volet ou page, gel pendant une écriture). -->
+      <button type="button" class="btn btn--secondary btn--icon" data-ouvre-volet="connaissance" hidden
+        data-i18n-attr="aria-label:kb.title;title:kb.title">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-book"/></svg>
+      </button>
       <button type="button" class="btn btn--secondary btn--icon" data-bind="proposer" data-i18n-attr="aria-label:messages.propose;title:messages.propose">
         <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
       </button>
@@ -1624,8 +1641,13 @@ function renderTiroir () {
   const tiroir = $('[data-bind="tiroir"]')
   if (tiroir.hidden) return
   sauverTextesProgrammes()
-  $('[data-bind="tiroir-titre"]').textContent =
-    t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled' : 'messages.tab_ia')
+  // ⚠ QUITTER LE VOLET « BASE DE CONNAISSANCE », C'EST DÉMONTER SA VUE : elle
+  // écoute `selectionchange` sur le DOCUMENT, qui survit au `innerHTML` des
+  // autres volets.
+  if (vueConnaissance && etat.tiroirVolet !== 'connaissance') demonterConnaissance()
+  tiroir.classList.toggle('msg-tiroir--large', etat.tiroirVolet === 'connaissance')
+  $('[data-bind="tiroir-titre"]').textContent = t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled'
+    : etat.tiroirVolet === 'connaissance' ? 'kb.title' : 'messages.tab_ia')
   const corps = $('[data-bind="tiroir-corps"]')
   const sel = $('[data-bind="tiroir-bien"]')
   const refs = [...etat.biens.keys()]
@@ -1635,6 +1657,7 @@ function renderTiroir () {
   gelerEnTete(etat.panneauEnCours === true)
   const ref = etat.tiroirBien
   if (!ref) { corps.innerHTML = `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`; return }
+  if (etat.tiroirVolet === 'connaissance') { peindreConnaissance(corps, ref); return }
   if (etat.tiroirVolet === 'programmes') {
     // Les messages programmes du bien se chargent a l'OUVERTURE du volet,
     // jamais au boot de la page.
@@ -1658,6 +1681,170 @@ function renderTiroir () {
   // peint ne modelise aucun defaut : c'est exactement la question posee.
   etat.panneauRendu = { ref, lu: lireLePanneau(corps, ref) }
 }
+
+// ─── Volet « Base de connaissance » (chantier KB V5, lot 3) ─────────────────
+// La vue vit dans `shared/connaissance-vue.js`, PARTAGÉE avec la page
+// téléphone : rien de la carte, de l'éditeur ni des « Infos du logement »
+// n'est écrit ici. Elle lit et écrit par `/api/ecran/connaissance`, un appel
+// pour peindre tout l'écran.
+let vueConnaissance = null
+// ⚠ LE MODULE SE CHARGE À LA PREMIÈRE OUVERTURE DU VOLET, PAS AVEC LA PAGE.
+// Messages est l'écran le plus ouvert du produit : un import statique ferait
+// payer ses ~28 Ko à CHAQUE ouverture de Messages, y compris par l'hôte qui
+// n'ouvre jamais la base (règle « tout lot qui touche le front respecte le
+// chargement rapide »). Le banc remplace cet `import()` par le module qu'il a
+// déjà évalué (tests/outils/banc-messages.js).
+let moduleConnaissance = null
+// ⚠ MONTÉE UNE FOIS PAR BIEN, PAS À CHAQUE RENDU DU TIROIR. `renderTiroir` est
+// rappelé par bien d'autres chemins (fin d'une écriture, repointage sur le
+// fil) : remonter la vue à chaque fois relirait l'écran ET effacerait la
+// réponse que l'hôte est en train d'écrire.
+// ⚠ DÉMONTER UNE VUE EN PLEINE SAISIE SE DIT — constat de review. Changer de
+// volet ou de logement au sélecteur du tiroir effaçait une réponse en cours
+// sans un mot (la dette D4 des autres volets, élargie à celui-ci) ; le
+// repointage sur le fil, lui, le disait déjà. La note part sous le tiroir,
+// là où l'hôte la lit.
+function demonterConnaissance () {
+  if (!vueConnaissance) return
+  const perdue = vueConnaissance.enEdition()
+  vueConnaissance.detruire()
+  vueConnaissance = null
+  if (perdue) noteReglage(t('kb.edit_dropped'))
+}
+async function peindreConnaissance (corps, ref) {
+  if (vueConnaissance && vueConnaissance.ref === String(ref) && corps.contains(vueConnaissance.racine)) return
+  demonterConnaissance()
+  corps.innerHTML = `<div data-kb-racine><p class="muted small kb-vide">${esc(t('common.loading'))}</p></div>`
+  const racine = corps.firstElementChild
+  try {
+    if (!moduleConnaissance) moduleConnaissance = await import('/shared/connaissance-vue.js')
+  } catch (err) {
+    logger.error('Messages', 'base de connaissance', err)
+    if (corps.contains(racine)) racine.innerHTML = `<p class="caption muted kb-vide">${esc(t('messages.load_error'))}</p>`
+    return
+  }
+  // ⚠ LE TIROIR A PU CHANGER PENDANT LE CHARGEMENT : autre volet, autre bien,
+  // tiroir refermé, ou un second rendu qui a déjà posé sa propre racine. On ne
+  // monte que si CETTE racine est encore celle du volet demandé.
+  if (!corps.contains(racine) || etat.tiroirVolet !== 'connaissance' || String(etat.tiroirBien) !== String(ref)
+    || $('[data-bind="tiroir"]').hidden) return
+  // L'aperçu se remplit avec le voyageur du fil ouvert — s'il séjourne dans
+  // CE logement ; sinon le serveur prend le prochain séjour du bien.
+  const duFil = bienDuFilOuvert()
+  vueConnaissance = moduleConnaissance.monterConnaissance({
+    racine, appel, t, esc, bien: ref,
+    resa: duFil === String(ref) ? etat.ouverte : null,
+    // Le serveur peut peindre un AUTRE bien que celui demandé (bien archivé,
+    // bien inconnu) : le sélecteur du tiroir suit ce qui est affiché, sinon il
+    // nommerait un logement dont on lit les réponses d'un autre.
+    onBien: (vu) => {
+      if (!vu || !etat.biens.has(vu) || vu === etat.tiroirBien) return
+      etat.tiroirBien = vu
+      const sel = $('[data-bind="tiroir-bien"]')
+      if (sel) sel.value = vu
+    }
+  })
+}
+const telephone = () => { try { return window.matchMedia('(max-width: 899px)').matches } catch { return false } }
+// La page plein écran du téléphone, sur le logement du fil ouvert s'il y en a
+// un (ou celui du tiroir), avec la réservation pour l'aperçu.
+function urlConnaissance () {
+  const q = new URLSearchParams()
+  const duFil = bienDuFilOuvert()
+  const ref = duFil || etat.tiroirBien
+  if (ref) q.set('bien', String(ref))
+  if (duFil && etat.ouverte !== null) q.set('resa', String(etat.ouverte))
+  return '/connaissance' + (q.toString() ? '?' + q : '')
+}
+// Depuis le lien du volet « Réponses de l'IA » : on change de volet, on ne
+// referme pas le tiroir.
+function ouvrirConnaissance () {
+  if (telephone()) { quitterVersConnaissance(); return }
+  etat.tiroirVolet = 'connaissance'
+  ouvrirTiroir(true)
+}
+
+// ⚠ AU TÉLÉPHONE, LA BASE EST UNE AUTRE PAGE : ON QUITTE MESSAGES. Depuis le
+// 7 novembre 2026 l'icône vit aussi à côté de la saisie, donc on peut partir
+// EN PLEINE FRAPPE, et quitter une page COUPE ce qui y était en vol.
+//
+// ⚠ ON NE PART DONC PAS TANT QUE QUELQUE CHOSE PEUT PARTIR DEUX FOIS — constats
+// 1 à 3 de la review du correctif, tous mesurés :
+//   · un envoi en cours (message libre ou proposition) : la page coupée avant
+//     la clôture laisse la tâche en `sending`, et un second clic au retour
+//     DOUBLE le message chez le voyageur ;
+//   · une proposition de l'IA en cours de « Modifier » : son enregistrement
+//     part au `blur`, AVANT le clic, et rien ne permet d'en attendre la fin —
+//     j'avais écrit un `await` qui n'attendait rien (vérifié par la review).
+//     Garder ce texte comme texte libre serait pire : son envoi ne validerait
+//     pas la proposition, qui partirait AUSSI à son échéance ;
+//   · un message « Non envoyé · Réessayer » de ce fil : il ne vit qu'en
+//     mémoire, la page le perdrait.
+// Dans ces cas l'icône le DIT sous la saisie, et on reste.
+//
+// Sinon : un texte LIBRE est gardé (même compte, une heure, rendu une seule
+// fois au retour par `reprendreSaisieGardee`), et l'adresse de Messages porte
+// le fil (?conv=), pour que le retour — bouton de la page ou retour arrière —
+// le rouvre.
+const CLE_SAISIE_GARDEE = 'hs-messages-saisie'
+const SAISIE_GARDEE_MS = 60 * 60 * 1000
+function departBloque () {
+  const enVol = [...etat.envois.values()].some(l => l.some(e => e.etatEnvoi === 'en_cours'))
+    || etat.taches.some(x => x.etatEnvoi === 'en_cours')
+  if (enVol) return 'messages.kb_wait_send'
+  if (etat.enEdition) return 'messages.kb_finish_edit'
+  const enEchec = (etat.envois.get(String(etat.ouverte)) || []).some(e => e.etatEnvoi === 'echec')
+  if (enEchec) return 'messages.kb_failed_send'
+  return null
+}
+function quitterVersConnaissance () {
+  // Depuis la LISTE (fil fermé), le geste d'avant ce correctif est inchangé.
+  if (etat.ouverte !== null) {
+    const bloque = departBloque()
+    if (bloque) { noteReglage(t(bloque)); return }
+    const zone = $('[data-bind="texte"]')
+    const texte = zone ? String(zone.value || '') : ''
+    try {
+      if (texte.trim()) {
+        sessionStorage.setItem(CLE_SAISIE_GARDEE, JSON.stringify({
+          compte: String(compteCourant()), bookId: String(etat.ouverte), texte, t: Date.now()
+        }))
+      } else sessionStorage.removeItem(CLE_SAISIE_GARDEE)
+    } catch (e) { logger.error('Messages', 'saisie gardée', e) }
+    try {
+      const u = new URL(location.href)
+      u.searchParams.set('conv', String(etat.ouverte))
+      u.searchParams.delete('volet')
+      history.replaceState(history.state, '', u)
+    } catch (e) { logger.error('Messages', 'adresse du fil', e) }
+  }
+  location.assign(urlConnaissance())
+}
+// Le texte gardé est LU ET RETIRÉ au chargement, une seule fois (constat 4 :
+// laissé en place, un texte déjà envoyé pouvait revenir plus tard). Il n'est
+// rendu qu'au fil que l'adresse rouvre, pour le même compte, dans l'heure,
+// sans proposition en cours de modification, et dans une saisie VIDE.
+function reprendreSaisieGardee (bookIdOuvert) {
+  let garde = null
+  try {
+    garde = JSON.parse(sessionStorage.getItem(CLE_SAISIE_GARDEE) || 'null')
+    sessionStorage.removeItem(CLE_SAISIE_GARDEE)
+  } catch { return }
+  if (!garde || !garde.texte || bookIdOuvert === null || bookIdOuvert === undefined) return
+  if (String(garde.bookId) !== String(bookIdOuvert)) return
+  if (String(garde.compte) !== String(compteCourant())) return
+  if (!(Date.now() - Number(garde.t) < SAISIE_GARDEE_MS)) return
+  if (etat.enEdition) return
+  const zone = $('[data-bind="texte"]')
+  if (!zone || zone.value.trim()) return
+  zone.value = garde.texte
+  ajusterHauteur(zone)
+}
+// Retour arrière servi depuis le cache du navigateur : la page revient INTACTE,
+// saisie comprise, et `init` ne se rejoue pas. Le texte gardé n'a plus d'objet.
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted) { try { sessionStorage.removeItem(CLE_SAISIE_GARDEE) } catch {} }
+})
 
 // ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
 // MEMES lectures et MEMES ecritures RLS que l'ancienne app templates
@@ -2113,7 +2300,7 @@ function voletIA (ref) {
     <div class="msg-tiroir__bloc">
       <span class="msg-tiroir__nom">${esc(t('messages.breaker_title'))}</span>
       <p class="caption muted">${esc(t('messages.breaker_desc'))}</p>
-      <a class="link small" href="/apps/agent-ai/knowledge">${esc(t('messages.knowledge'))}</a>
+      <a class="link small" href="/connaissance" data-ouvre-connaissance>${esc(t('messages.knowledge'))}</a>
     </div>
     <h3 class="msg-tiroir__section">${esc(t('messages.tab_alerts'))}</h3>` + voletAlertes(ref)
     // ⚠ UN SEUL « ENREGISTRER » POUR TOUT LE PANNEAU (demande de Thierry).
@@ -2173,6 +2360,14 @@ function voletAlertes (ref) {
 }
 
 function brancherTiroir (corps, ref) {
+  // Le lien « Connaissances » mene a la base de connaissance V5 : l'ancienne
+  // page redirige vers elle (lot 3, decision de Thierry du 5 novembre 2026).
+  // Il change de VOLET, il ne quitte plus Messages ; au telephone, il ouvre la
+  // page plein ecran.
+  corps.querySelector('[data-ouvre-connaissance]')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    ouvrirConnaissance()
+  })
   const d = delaisEnCours(ref)
   // Les pilules : un clic POSE la valeur dans l'etat d'edition, et re-rend.
   // Rien ne part au serveur avant « Enregistrer » (demande de Thierry : un
@@ -3094,6 +3289,11 @@ function editionPanneauNonEnregistree () {
   if (!ref) return null
   const nom = () => (etat.biens.get(String(ref)) || {}).name || String(ref)
 
+  // 0. Le volet « Base de connaissance » : la vue sait si une réponse ou une
+  // information est en cours d'écriture. Le repointage sur le fil la
+  // remonterait sur un autre logement, et le texte partirait sans un mot.
+  if (etat.tiroirVolet === 'connaissance') return vueConnaissance && vueConnaissance.enEdition() ? nom() : null
+
   // 1. Les delais : ils vivent dans `etat.delaisEdit`, pas dans le DOM.
   const e = etat.delaisEdit
   if (e && e.ref === ref) {
@@ -3396,6 +3596,9 @@ async function init () {
   document.querySelectorAll('[data-ouvre-volet]').forEach(b => {
     b.hidden = !reglagesIci()
     b.addEventListener('click', () => {
+      // La base de connaissance au TÉLÉPHONE est une page plein écran, pas le
+      // tiroir (spec KB V5 §3.1).
+      if (b.dataset.ouvreVolet === 'connaissance' && telephone()) { quitterVersConnaissance(); return }
       const tiroir = $('[data-bind="tiroir"]')
       const deja = !tiroir.hidden && etat.tiroirVolet === b.dataset.ouvreVolet
       etat.tiroirVolet = b.dataset.ouvreVolet
@@ -3437,6 +3640,21 @@ async function init () {
   })
   $('[data-bind="envoyer"]').addEventListener('click', envoyer)
   $('[data-bind="proposer"]').addEventListener('click', proposer)
+  // Au téléphone, le champ prend TOUTE LA LARGEUR pendant la frappe, les
+  // boutons passent dessous (recette du 7 novembre 2026, demande de Thierry :
+  // avec le livre en plus, le champ n'avait plus qu'un tiers de la largeur).
+  // La mise en page est dans ui.css, réservée au téléphone.
+  //
+  // ⚠ ON NE REPLIE JAMAIS AU `blur`. Il part au toucher d'un bouton de la
+  // saisie, AVANT son `click` : replier à cet instant déplacerait le bouton
+  // sous le doigt, et le clic tomberait à côté — sur « Envoyer » compris. On
+  // replie APRÈS un clic ailleurs dans la page, quand il a déjà trouvé sa cible.
+  const barreSaisie = $('[data-bind="saisie"]')
+  zoneTexte.addEventListener('focus', () => barreSaisie.classList.add('msg-saisie--frappe'))
+  document.addEventListener('click', (e) => {
+    if (barreSaisie.contains(e.target) || document.activeElement === zoneTexte) return
+    barreSaisie.classList.remove('msg-saisie--frappe')
+  })
 
   // Filtre demandé par l'URL (lien « n de plus » de l'accueil, étape 4).
   const params = new URLSearchParams(location.search)
@@ -3452,12 +3670,21 @@ async function init () {
   // point 2 de la recette, rouvert par la porte des liens profonds.
   const demandee = params.get('conv')
   if (demandee && etat.conversations.some(x => String(x.bookId) === String(demandee))) ouvrir(String(demandee))
+  // Retour de la base de connaissance (téléphone) : le texte libre gardé au départ.
+  reprendreSaisieGardee(etat.ouverte)
   // Volet demandé par les redirections de l'ancienne app (?volet=ia ou
   // programmes) : le panneau s'ouvre à l'arrivée — titulaire seulement,
   // comme les boutons qui y mènent.
   const voletDemande = params.get('volet')
   if ((voletDemande === 'ia' || voletDemande === 'programmes') && reglagesIci()) {
     etat.tiroirVolet = voletDemande
+    ouvrirTiroir(true)
+  }
+  // La redirection de l'ancienne base de connaissance (?volet=connaissance) :
+  // le volet à l'ordinateur, la page plein écran au téléphone.
+  if (voletDemande === 'connaissance' && reglagesIci()) {
+    if (telephone()) { location.replace(urlConnaissance()); return }
+    etat.tiroirVolet = 'connaissance'
     ouvrirTiroir(true)
   }
   const filtreDemande = params.get('filtre')
