@@ -59,8 +59,12 @@ reçoit le nouveau à sa prochaine visite, et l'activation purge l'ancien cache
 6. **Le cache se reconstitue** après chaque navigation réussie s'il a disparu —
    l'activation de `apps/menages/sw.js` efface tous les caches qui ne sont pas
    le sien (dette 130).
-7. **Aucune notification push.** Les seuls écouteurs sont `install`,
-   `activate`, `fetch` (testé).
+7. **Notifications push (lot 2a, §8).** Les écouteurs permis sont `install`,
+   `activate`, `fetch`, `push`, `notificationclick` et
+   `pushsubscriptionchange`, et eux seuls (testé). Chaque push **affiche**
+   une notification, même illisible ; le toucher n'ouvre jamais hors du site.
+   Jusqu'au lot 1, la règle était « aucune notification push » : elle a
+   changé exprès.
 
 ### Pourquoi une fonction, et pas des fichiers statiques
 
@@ -190,3 +194,82 @@ ci-dessus (§2.3), mesurée par la review via la documentation, non par requête
   cours de page aujourd'hui.
 - Le service worker contrôle aussi les pages non V5 de l'hôte (portée `/`) :
   réseau seul, page hors-ligne en cas d'échec — aucun autre effet.
+
+## 8. Lot 2a — les notifications push : le socle (7 novembre 2026)
+
+Spec : `docs/specs/spec-pwa-lot2-notifications.md` (décisions de Thierry du
+7 novembre, §13). Le lot 2a pose le socle : **on s'abonne et on reçoit une
+notification d'essai**. Le tableau des événements, le mode « urgence
+seulement » et les contacts libres sont au lot 2b ; les quatorze événements au
+lot 2c.
+
+| Pièce | Fichier |
+|---|---|
+| Table des appareils abonnés | `migrations/2026-11-07-push-abonnements.sql` (`push_abonnements`, adresse d'envoi UNIQUE et normalisée, RLS sans politique : le navigateur n'y lit ni n'écrit rien) |
+| Writer unique | `lib/push/abonnements.js` (validation de l'adresse, plafond de 10, reprise d'un appareil par le dernier abonné) |
+| Envoi | `lib/push/envoyer.js` (`web-push` 3.6.7, CommonJS, `generateRequestDetails()` + `fetch`, délai 5 s, `redirect: 'error'`, corps annulé, 404/410 = abonnement supprimé) |
+| Endpoint | `api/push.js` (GET état, POST `abonner` / `essai`, DELETE) |
+| Service worker | `shared/pwa/service-worker.js` (`push`, `notificationclick`, `pushsubscriptionchange`) |
+| Navigateur | `shared/push-appareil.js` (abonner, oublier, vérifier l'appareil à chaque page) |
+| Écran | `/settings`, onglet « Notifications » |
+| Clés | `scripts/pwa-cles-push.js`, lancé par Thierry sur son PC |
+
+**Les règles, et pourquoi :**
+1. **L'adresse d'envoi n'est acceptée que chez les services connus**, en
+   `https` : Google `fcm.googleapis.com`, Apple `*.push.apple.com`, Mozilla
+   `updates.push.services.mozilla.com`, Microsoft `*.notify.windows.com`. Le
+   serveur appelle cette adresse : sans liste, n'importe quel utilisateur
+   connecté lui ferait appeler n'importe quoi.
+2. **Un appareil n'est jamais abonné pour deux personnes.** L'adresse est
+   unique en base, et la ligne passe au dernier abonné.
+3. **La déconnexion oublie l'appareil** (`purgerCachesLocaux`, donc les
+   chemins qui ferment une session) : le serveur s'il répond en 3 s, puis le
+   navigateur **toujours**. Exception : le changement d'utilisateur de
+   `requireAuth` appelle la purge **sans** l'appareil, parce que c'est
+   `verifierAppareil` qui y décide. **À chaque page protégée** (`requireAuth`,
+   seulement si la permission est accordée), un appareil abonné pour une autre
+   personne est désabonné, sans appel réseau.
+4. **Chaque push affiche une notification**, même illisible (sinon Safari
+   retire l'abonnement). Le message est au format déclaratif
+   (`web_push: 8030`), jamais `mutable` : l'adresse ouverte au toucher est
+   construite par le serveur, en chemin du site, **résolu** sur une origine
+   témoin (« /\t/evil.example » se résolvait ailleurs).
+5. **La demande de permission est la première attente du clic** : sur
+   iPhone, une demande qui ne suit pas le geste est ignorée.
+6. **`pushsubscriptionchange` n'écrit rien au serveur** (pas de session dans
+   le service worker). La page suivante voit que l'empreinte de l'abonnement a
+   changé et le renvoie par le POST, avec les mêmes contrôles.
+7. **La clé privée ne s'affiche jamais.** Le script ne dit que le nom de
+   chaque variable et sa longueur, et refuse d'écraser des clés déjà posées
+   sans `--remplacer` (changer de clé désabonne tout le monde). Il exige
+   `--scope` (l'équipe Vercel) et un `npm install` fait sur le PC, et il
+   supprime son dossier temporaire sur tous les chemins, refus compris.
+
+**Variables Vercel** (production de chaque projet) : `PUSH_VAPID_PUBLIC`,
+`PUSH_VAPID_PRIVATE`. Le contact exigé par Apple est `FOUNDER_EMAIL`, et à
+défaut l'adresse du site (`APP_URL`) : staging n'a pas `FOUNDER_EMAIL`. Sans
+les deux clés, `/settings` dit « pas encore activées » et rien ne part.
+
+**Ce qui n'est pas dans le 2a, et c'est voulu :**
+- le retour au bon écran après une reconnexion (`next` dans
+  `components/auth-guard.js`) : au lot 2c, avec les notifications qui ouvrent
+  un écran précis. L'essai ouvre `/settings` ;
+- après un changement de clé, le réabonnement se fait en touchant
+  « Recevoir les notifications » dans `/settings` (l'abonnement fait avec
+  l'ancienne clé y est défait), pas encore tout seul à l'ouverture ;
+- l'e-mail quand le dernier appareil disparaît : au lot 2c, avec le
+  remplacement du SMS ;
+- l'explication « installer et s'abonner sur iPhone » dans `pages/guide.html`
+  (spec §6) : elle touche `pages/`, hors de l'accord du 7 novembre (qui vise
+  `/settings` et le tiroir de Messages) — à demander ;
+- la mesure avant/après de la case performance (spec §10.8) : sur staging,
+  après le déploiement du lot.
+
+**Recette (Thierry, sur staging, après la migration et les clés)** :
+1. Android, Chrome, appli installée : `/settings` → Notifications →
+   « Recevoir les notifications sur cet appareil » → accepter.
+2. « M'envoyer un essai » : la notification arrive, téléphone verrouillé
+   compris ; la toucher ouvre l'onglet Notifications.
+3. Se déconnecter, se reconnecter : l'appareil n'est plus abonné.
+4. iPhone : avec le point 2 reporté de la recette du lot 1 (§6), en une fois
+   (décision du 7 novembre).
