@@ -468,6 +468,15 @@ Cette alerte suit désormais le mode urgence ; seule la décision 7 garde
 | Q23 | Les canaux par défaut | Notification et e-mail cochés, SMS décoché, pour les quatorze événements |
 | Q24 | La livraison | 2b recetté sur staging seul ; la production reçoit 2b et 2c ensemble |
 
+**Décisions du 8 novembre (spec du 2c, §16) :**
+
+| | Question | Décision |
+|---|---|---|
+| Q25 | Ce que reçoivent les contacts libres | Comme aujourd'hui : chacun garde ce que sa liste recevait (les urgences b, j, l, m, o, et/ou l'info manquante c), pour ses biens |
+| Q26 | Le SMS de la surréservation | Coché par défaut pour elle seule (il ne part que sans appareil abonné) — exception à Q23 |
+| Q27 | « Évaluation du voyageur à faire », trouvée à l'inventaire | Quinzième événement (o), groupe Avis, notification et e-mail, non urgent |
+| Q28 | L'e-mail du « Nouveau message d'un voyageur » | Décoché par défaut pour cet événement seul — exception à Q23 |
+
 ## 14. Découpage proposé, et ce que le lot ne fait pas
 
 **Découpage proposé** (un fil, une branche par sous-lot, chacun reviewé et
@@ -644,3 +653,114 @@ font les heures calmes.
 
 Les octets de la page comptent ses commentaires ; aucune ressource n'est
 ajoutée à son chargement.
+
+## 16. Lot 2c — la bascule des alertes (proposition, 8 novembre 2026)
+
+Le 2c fait partir les quatorze événements selon les réglages du 2b. Il part en
+production **avec** le 2b (Q24). Branche à créer depuis `main`.
+
+### 16.1 Ce qui part aujourd'hui, et d'où (inventaire mesuré sur `main` `13ec5926`)
+
+| | Événement | Émetteur aujourd'hui | Ce qui part aujourd'hui, et à qui |
+|---|---|---|---|
+| a | Surréservation | `lib/cron-overbooking.js` | SMS (clé Brevo de l'hôte) + e-mail au **titulaire**, toutes les ~45 min jusqu'à l'acquittement ; copie fondateur |
+| b | Urgence de l'IA | `lib/cron-classify.js` → `sendAlertNotifications` | SMS + e-mail aux **listes** d'`agent_alert_config` (par bien, type `intervention`) |
+| c | Information manquante | `lib/cron-classify.js`, `lib/guestflow/brouillons-dus.js` | idem, type `info_unknown`, avec le délai et la sourdine de GuestFlow |
+| d | Brouillon à valider | — | rien (visible dans Messages) |
+| e | Message d'un voyageur | — | rien |
+| f | Nouvelle réservation | `lib/booking-changes-dispatch.js` → `consommateurNotifHote` | e-mail au titulaire, **réservations directes seulement** |
+| g | Annulation ou modification | — | rien |
+| h | Ménage sans personne | `lib/cleaning/sync-menages-entite.js` | incident **fondateur** seul (`menage_non_assigne`) |
+| i | Ménage « Pas vu » | `lib/cleaning/relance-validation.js` | rien chez l'hôte (alerte à l'écran) ; SMS à la prestataire |
+| j | Code d'accès non résolu | `lib/cron-access.js`, `lib/cron-arrival-code.js` → `alertMissingAccessCode` | tâche à l'écran + les listes d'`agent_alert_config` |
+| k | Pause automatique | `lib/cron-alerting.js` | incident fondateur ; e-mail à l'hôte (`docs/kb/alertes.md` §3) |
+| l | Ménage refusé | `api/menages-public.js` → `alertMenageRefuse` | tâche à l'écran + les listes |
+| m | Disponibilités modifiées | `api/menages-public.js` → `alertReglesModifiees`, `alertPlageModifiee` | tâche à l'écran + les listes |
+| n | Nouvel avis | — | rien |
+| **o** | **Évaluation du voyageur à faire** (la prestataire a rempli l'état du logement ; relances J-5 et J-1) | `lib/avis/notifications.js` → `sendAlertNotifications` | tâche à l'écran + les listes. **Absent des quatorze** : trouvé à l'inventaire du 2c |
+
+**Les listes d'`agent_alert_config` reçoivent donc aujourd'hui** : celle de type
+`intervention` → b, j, l, m et o ; celle de type `info_unknown` → c.
+
+Les points exacts de branchement de d, e, g, i et n se fixent au lot ; ils
+viennent tous du cœur (règle « le cœur de données d'abord »), jamais d'un appel
+au provider.
+
+### 16.2 La pièce centrale : un seul point d'envoi
+
+`lib/notifications/notifier.js`, appelé par chaque émetteur avec : le compte, le
+code de l'événement, le bien, la réservation concernée s'il y en a une, et le
+contenu (titre, texte court, écran à ouvrir, sujet).
+
+Pour chaque événement :
+1. **Les destinataires** : le titulaire et les membres qui ont le domaine de
+   l'événement sur ce bien (§5), revérifiés à l'envoi ; puis les contacts
+   libres du bien.
+2. **Pour chaque personne**, la décision du 2b (`decision.js`), avec le séjour
+   lu dans `bookings_snapshot`.
+3. **Maintenant** : la notification sur ses appareils ; l'e-mail (clé
+   plateforme) ; le SMS (clé Brevo du compte) **seulement si elle n'a aucun
+   appareil abonné** (Q11).
+4. **Fin de plage** : une ligne dans une **file d'attente**
+   (`notifications_file`). Une passe du cron la vide à la fin de chaque plage :
+   un seul message regroupé par personne et par canal.
+5. **Le contenu dans la langue de la personne** (fr, en, es), le bien et le
+   prénom du voyageur, jamais le texte de son message (§7).
+6. **Le dernier appareil** : quand un envoi trouve le dernier appareil d'une
+   personne mort (404 ou 410), elle reçoit un e-mail (Q13).
+
+Les anciens envois (`sendAlertNotifications`, les SMS de `cron-overbooking`,
+`notifierNouvelleResa`) passent par ce point ; ce qui va au fondateur
+(`reportIncident`) ne change pas.
+
+### 16.3 Les contacts libres
+
+- **Une table `notifications_contacts`** : le compte, un nom, un e-mail et/ou un
+  numéro, les biens, et ce qu'il reçoit — les urgences (b, j, l, m, o) et/ou
+  l'info manquante (c), comme ses listes d'aujourd'hui (Q25). Réglés par le
+  titulaire dans `/settings`. Ils suivent les heures du titulaire, et ne
+  reçoivent jamais de notification (pas d'appareil).
+- **La reprise d'`agent_alert_config`** (listes `sms_lines` et `email_lines`,
+  par bien et par type) est faite par un script, vérifié avant = après :
+  personne ne perd un destinataire.
+  - **Une ligne qui porte l'e-mail ou le numéro du titulaire lui-même** ne
+    devient pas un contact : elle coche le canal correspondant dans SES
+    réglages, sinon il recevrait tout en double.
+- **Les réglages de GuestFlow restent dans `agent_alert_config`** : le délai
+  d'alerte et la sourdine (`delais`) appartiennent à Messages. Seules les
+  listes de destinataires déménagent.
+
+### 16.4 Le bloc « Alertes » du tiroir de Messages
+
+Il déménage dans `/settings` (Q20). Dans Messages, il est remplacé par un lien
+« Qui est prévenu → Réglages ». **À coordonner avec le fil messagerie**, qui
+tient `pages/messages.html` et `api/agent-config.js`.
+
+### 16.5 Le retour au bon écran
+
+`components/auth-guard.js` passe l'adresse demandée à la page de connexion
+(`next`) : une notification touchée avec une session expirée ramène sur son
+écran après la connexion.
+
+### 16.6 Ce que les décisions du 8 novembre changent au 2b
+
+Elles touchent le catalogue (`lib/notifications/catalogue.js`), donc les
+défauts de chacun, et se codent au 2c-1 :
+- **quinze événements** : `evaluation_voyageur` (o) rejoint le groupe Avis ;
+- **des canaux par défaut par événement** : Q23 reste la règle (notification et
+  e-mail, pas de SMS), avec deux exceptions — le SMS de la surréservation
+  (Q26) et l'e-mail du message d'un voyageur (Q28) ;
+- personne n'a encore de réglage en production : aucune migration de données.
+
+### 16.7 Découpage
+
+Chaque sous-lot a sa branche, sa review et sa recette sur staging ; la
+production reçoit 2b et tout le 2c ensemble. **Les branches du 2c partent de
+`pwa-lot-2b-reglages`** (elle-même partie de `main`) : le 2b doit passer avant
+elles.
+1. **2c-1 — le point d'envoi** : `notifier.js`, la file d'attente et sa passe de
+   cron, les textes en trois langues, le dernier appareil, `next`. Branché sur
+   un seul événement (a, la surréservation), pour l'éprouver de bout en bout.
+2. **2c-2 — les treize autres événements**, un par un.
+3. **2c-3 — les contacts libres**, la reprise d'`agent_alert_config` et le
+   déménagement du bloc « Alertes ».
