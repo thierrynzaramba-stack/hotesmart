@@ -109,8 +109,26 @@ son test (§7).
 7. **Budget** : au téléphone, ouvrir la base ne charge plus une page entière :
    un seul appel, comme à l'ordinateur. Le test qui compte les appels de
    l'écran est étendu au chemin téléphone.
-8. **Mesure AVANT / APRÈS** (appels, requêtes, octets) : prise sur staging avant
-   le premier commit de code, puis après — elle sera écrite ici.
+8. **Mesure AVANT / APRÈS** — staging, 7 novembre 2026 vers minuit, cache
+   navigateur chaud, conversation « Recette Balises » (Loft Pilotable),
+   `performance.getEntriesByType`, Server-Timing de l'écran.
+
+   | geste au téléphone | requêtes navigateur | dont réseau | octets transférés | appels API | requêtes Supabase de l'écran |
+   |---|---|---|---|---|---|
+   | AVANT — ouvrir la base (page `/connaissance` chargée en entier) | 38 | 15 | 10 860 | 1 | 3 |
+   | AVANT — revenir à la conversation (Messages rechargé) | 46 | 20 | 219 716 | 4 | — |
+   | **AVANT — l'aller-retour** | **84** | **35** | **230 576** | **5** | **3** |
+   | APRÈS — ouvrir la base (le volet, première fois) | 3 | 2 | 1 569 | 1 | 3 |
+   | APRÈS — revenir à la conversation (fermer le volet) | 0 | 0 | 0 | 0 | — |
+   | **APRÈS — l'aller-retour** | **3** | **2** | **1 569** | **1** | **3** |
+
+   L'APRÈS est mesuré sur le chemin du volet tel qu'il tourne déjà à
+   l'ordinateur sur staging : c'est le code que le téléphone emprunte désormais
+   (seule la largeur change). Il sera remesuré au téléphone pendant la recette,
+   et la ligne corrigée ici s'il diffère. Les trois champs ajoutés par réponse
+   (`manquants`, `inconnues`, `codeNonResolu`) pèsent quelques dizaines
+   d'octets ; aucune requête Supabase de plus (le test des trois requêtes du GET
+   tient).
 
 ## 6. Mobile et ordinateur
 

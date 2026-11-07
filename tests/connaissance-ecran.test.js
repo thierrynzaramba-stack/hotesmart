@@ -188,11 +188,53 @@ test('LE TEST QUI COMPTE : le GET peint tout l écran en TROIS requêtes, Server
   assert.match(carte.apercu, /^Bonjour Ana, le wifi est RESEAU \/ \[WIFI MOT DE PASSE\]$/)
   // ⚠ LE VOYAGEUR NE SORT QU'AVEC SON PRÉNOM : le snapshot porte aussi son
   // e-mail et son téléphone, dont l'écran n'a aucun besoin.
-  assert.deepEqual(Object.keys(c.voyageur).sort(), ['arrivee', 'prenom', 'resa'])
+  assert.deepEqual(Object.keys(c.voyageur).sort(), ['arrivee', 'duFil', 'prenom', 'resa'])
+  assert.equal(c.voyageur.duFil, false, 'sans ?resa=, l aperçu n est fait pour aucune conversation')
   assert.ok(!JSON.stringify(c).includes('ana@x.test'))
   assert.ok(!JSON.stringify(c).includes('+33600000000'))
   // Les balises insérables viennent du module, avec leur marqueur.
   assert.ok(c.balises.some(b => b.cle === 'wifi_nom' && b.libelle === 'Nom wifi' && b.marqueur === '[WIFI NOM]'))
+})
+
+// ─── « Utiliser » une réponse dans la conversation (spec kb-utiliser-reponse) ─
+test('LE TEST QUI COMPTE : chaque réponse dit ce qui MANQUE pour partir telle quelle', async () => {
+  // Le bouton « Utiliser » refuse sur ces trois signaux (R3) : jamais un
+  // « [WIFI NOM] », un code non résolu ni une balise inconnue dans le fil.
+  const r = await appeler({
+    query: { bien: 'P2' },
+    repondre: base({ lignes: [
+      { id: 'a1', type: 'fixed', key: 'wifi_nom', value: 'RESEAU', verifie_le: null, lisible_par_ia: true },
+      { id: 'b1', type: 'faq', key: 'Complet', value: 'Le wifi est {wifi_nom}', verifie_le: null, lisible_par_ia: true },
+      { id: 'b2', type: 'faq', key: 'Manque', value: 'Code wifi : {wifi_mdp}', verifie_le: null, lisible_par_ia: true },
+      { id: 'b3', type: 'faq', key: 'Code', value: 'Votre code : {code_acces}', verifie_le: null, lisible_par_ia: false },
+      { id: 'b4', type: 'faq', key: 'Inconnue', value: 'Voir {plan_acces}', verifie_le: null, lisible_par_ia: true }
+    ] })
+  })
+  assert.equal(r.statut, 200)
+  const par = Object.fromEntries(r.charge.reponses.map(x => [x.sujet, x]))
+  assert.deepEqual([par.Complet.manquants, par.Complet.inconnues, par.Complet.codeNonResolu], [[], [], false])
+  assert.equal(par.Complet.apercu, 'Le wifi est RESEAU')
+  assert.deepEqual(par.Manque.manquants, ['wifi_mdp'])
+  assert.equal(par.Code.codeNonResolu, true)
+  assert.deepEqual(par.Inconnue.inconnues, ['{plan_acces}'])
+})
+
+test('LE TEST QUI COMPTE : duFil n est vrai que pour la réservation DEMANDÉE, trouvée dans CE logement', async () => {
+  // Sinon le serveur se rabat sur le prochain séjour du logement : bon pour
+  // l'aperçu, mais « Bonjour Paul » dans le fil de Marie (R1).
+  const resas = [
+    { booking_id: 'B9', property_id: 'P2', snapshot: { status: 'confirmed', firstName: 'Ana', arrival: jour(3), departure: jour(5) } },
+    { booking_id: 'B7', property_id: 'P1', snapshot: { status: 'confirmed', firstName: 'Marie', arrival: jour(1), departure: jour(4) } }
+  ]
+  const lignes = [{ id: 'b1', type: 'faq', key: 'Salut', value: 'Bonjour {prenom}', verifie_le: null, lisible_par_ia: true }]
+  const duFil = await appeler({ query: { bien: 'P2', resa: 'B9' }, repondre: base({ lignes, resas }) })
+  assert.equal(duFil.charge.voyageur.duFil, true)
+  assert.equal(duFil.charge.reponses[0].apercu, 'Bonjour Ana')
+  const ailleurs = await appeler({ query: { bien: 'P2', resa: 'B7' }, repondre: base({ lignes, resas }) })
+  assert.equal(ailleurs.charge.voyageur.resa, 'B9', 'rabattu sur le prochain séjour de P2')
+  assert.equal(ailleurs.charge.voyageur.duFil, false, 'B7 n est pas dans ce logement')
+  const sans = await appeler({ query: { bien: 'P2' }, repondre: base({ lignes, resas }) })
+  assert.equal(sans.charge.voyageur.duFil, false)
 })
 
 test('LE TEST QUI COMPTE : la lecture se pagine par CURSEUR, jamais tronquée à une page', async () => {

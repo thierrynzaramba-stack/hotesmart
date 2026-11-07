@@ -51,7 +51,7 @@ function ecran (o = {}) {
   }
 }
 
-async function monter ({ repondre, selecteur = false, bien = 'P1', resa = null } = {}) {
+async function monter ({ repondre, selecteur = false, bien = 'P1', resa = null, utiliser = null } = {}) {
   const dom = new JSDOM('<!doctype html><html><body><div id="r"></div></body></html>',
     { runScripts: 'outside-only', url: 'https://exemple.test/connaissance' })
   const w = dom.window
@@ -75,7 +75,7 @@ async function monter ({ repondre, selecteur = false, bien = 'P1', resa = null }
   }
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   const racine = w.document.getElementById('r')
-  const vue = w.__kb.monterConnaissance({ racine, appel, t, esc, bien, resa, selecteur, doc: w.document })
+  const vue = w.__kb.monterConnaissance({ racine, appel, t, esc, bien, resa, selecteur, utiliser, doc: w.document })
   await vue.pret
   return { w, d: w.document, racine, vue, envois, kb: w.__kb, fermer: () => { vue.detruire(); w.close() } }
 }
@@ -529,5 +529,106 @@ test('juste après un enregistrement, le sélecteur de logement répond de nouve
   sel.dispatchEvent(new b.w.Event('change', { bubbles: true }))
   await reposer()
   assert.equal(b.vue.ref, 'P2')
+  b.fermer()
+})
+
+
+// ─── « Utiliser » une réponse dans la conversation (spec kb-utiliser-reponse) ─
+// Le serveur rend, par réponse, ce qui manque pour l'envoyer telle quelle, et
+// dit si l'aperçu est fait pour la réservation de la conversation (`duFil`).
+const avecSignaux = (o = {}) => {
+  const e = ecran(o)
+  e.reponses = e.reponses.map(r => ({ manquants: [], inconnues: [], codeNonResolu: false, ...r }))
+  e.reponses[0].manquants = ['wifi_mdp']
+  e.voyageur = { resa: 'B9', prenom: 'Ana', arrivee: '2026-11-20', duFil: true, ...(o.voyageur || {}) }
+  return e
+}
+const boutonsUtiliser = (b) => [...b.racine.querySelectorAll('[data-kb-utiliser]')].map(x => x.dataset.kbUtiliser)
+
+test('LE TEST QUI COMPTE : sans conversation (aucun `utiliser`), aucune réponse n a de bouton « Utiliser »', async () => {
+  // La page téléphone `/connaissance` et Messages sans fil ouvert.
+  const b = await monter({ resa: 'B9', repondre: () => avecSignaux() })
+  assert.deepEqual(boutonsUtiliser(b), [])
+  assert.equal(b.racine.querySelectorAll('.kb-carte-bloc').length, 0, 'la carte reste telle quelle')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : « Utiliser » rend le texte REMPLI pour ce voyageur, et rien ne part au serveur', async () => {
+  const recus = []
+  const b = await monter({ resa: 'B9', utiliser: (x) => { recus.push(JSON.parse(JSON.stringify(x))) }, repondre: () => avecSignaux() })
+  assert.deepEqual(boutonsUtiliser(b), ['r1', 'r2'])
+  const avant = b.envois.length
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r2"]'))
+  await reposer()
+  assert.deepEqual(recus, [{ texte: 'Le code est 1234', resa: 'B9', ref: 'P1', sujet: 'Code immeuble' }])
+  assert.equal(b.envois.length, avant, 'R4 : aucun appel — l envoi reste le bouton « Envoyer » de la conversation')
+  // La carte s'ouvre toujours à l'éditeur : l'action vit SOUS elle.
+  assert.ok(b.racine.querySelector('.kb-carte-bloc [data-kb-ouvrir="r2"]'))
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : R1 — un aperçu qui n est PAS fait pour la réservation du fil n a pas de bouton', async () => {
+  for (const [nom, voyageur] of [
+    ['prochain séjour (duFil faux)', { resa: 'B5', duFil: false }],
+    ['une autre réservation, même si duFil est vrai', { resa: 'B5', duFil: true }]
+  ]) {
+    const b = await monter({ resa: 'B9', utiliser: () => { throw new Error('jamais') }, repondre: () => avecSignaux({ voyageur }) })
+    assert.deepEqual(boutonsUtiliser(b), [], nom)
+    b.fermer()
+  }
+  const sansVoyageur = await monter({ resa: 'B9', utiliser: () => {}, repondre: () => ({ ...avecSignaux(), voyageur: null }) })
+  assert.deepEqual(boutonsUtiliser(sansVoyageur), [])
+  sansVoyageur.fermer()
+})
+
+test('LE TEST QUI COMPTE : R2 — changer de logement retire le bouton, même si le serveur se trompait', async () => {
+  const b = await monter({ bien: 'P1', resa: 'B9', selecteur: true, utiliser: () => { throw new Error('jamais') },
+    repondre: (chemin) => avecSignaux({ ref: /bien=P2/.test(chemin) ? 'P2' : 'P1' }) })
+  assert.deepEqual(boutonsUtiliser(b), ['r1', 'r2'])
+  const sel = b.racine.querySelector('[data-kb-bien]')
+  sel.value = 'P2'
+  sel.dispatchEvent(new b.w.Event('change', { bubbles: true }))
+  await reposer()
+  assert.equal(b.racine.querySelector('[data-kb-bien]').value, 'P2')
+  assert.deepEqual(boutonsUtiliser(b), [], 'le wifi d une autre maison ne va pas dans ce fil')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : R3 — une info manquante REFUSE, la nomme, et « Le remplir » ouvre sa ligne', async () => {
+  const recus = []
+  const b = await monter({ resa: 'B9', utiliser: (x) => recus.push(x), repondre: () => avecSignaux() })
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r1"]'))
+  await reposer()
+  assert.equal(recus.length, 0, 'rien ne va dans la conversation')
+  const refus = [...b.racine.querySelectorAll('[data-kb-refus]')].map(x => x.textContent)
+  assert.deepEqual(refus, ['Il manque : Mot de passe wifi. Complétez-le avant d’utiliser cette réponse.'])
+  assert.ok(b.racine.querySelector('[data-kb-ouvrir="r1"]').closest('.kb-carte-bloc').querySelector('[data-kb-refus]'),
+    'le refus est sous SA carte')
+  clic(b, b.racine.querySelector('[data-kb-remplir="wifi_mdp"]'))
+  await reposer()
+  const champ = b.racine.querySelector('[data-kb-fait-saisie]')
+  assert.ok(champ, 'la ligne s ouvre en saisie')
+  assert.equal(b.racine.querySelector('.kb-fait--edition label').textContent, 'Mot de passe wifi')
+  assert.equal(b.d.activeElement, champ)
+  assert.equal(b.racine.querySelector('[data-kb-refus]'), null, 'le refus s efface')
+  b.fermer()
+})
+
+test('R3 — un code non résolu ou une balise inconnue refusent aussi, chacun avec sa phrase', async () => {
+  const e = avecSignaux()
+  e.reponses[0].manquants = []
+  e.reponses[0].codeNonResolu = true
+  e.reponses[1].inconnues = ['{plan_acces}']
+  const recus = []
+  const b = await monter({ resa: 'B9', utiliser: (x) => recus.push(x), repondre: () => e })
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r1"]'))
+  await reposer()
+  assert.deepEqual([...b.racine.querySelectorAll('[data-kb-refus]')].map(x => x.textContent), [FR['kb.use_code']])
+  assert.equal(b.racine.querySelector('[data-kb-remplir]'), null, 'rien à remplir dans la base pour un code')
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r2"]'))
+  await reposer()
+  assert.deepEqual([...b.racine.querySelectorAll('[data-kb-refus]')].map(x => x.textContent),
+    ['Balise inconnue : {plan_acces}. Corrigez la réponse avant de l’utiliser.'])
+  assert.equal(recus.length, 0)
   b.fermer()
 })

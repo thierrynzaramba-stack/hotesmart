@@ -70,10 +70,14 @@ export function kbVersTexte (noeud) {
  * @param {string}   [o.resa]     réservation du fil ouvert, pour l'aperçu
  * @param {boolean}  [o.selecteur] la vue pose son propre sélecteur (téléphone)
  * @param {function} [o.onBien]   prévenu quand le logement affiché change
+ * @param {function} [o.utiliser] `({ texte, resa, ref, sujet }) => void` : la page
+ *   hôte qui a une conversation ouverte le passe, et chaque réponse prête porte
+ *   alors un bouton « Utiliser » (spec kb-utiliser-reponse). Sans lui — la page
+ *   téléphone, ou Messages sans fil ouvert — aucun bouton.
  * @param {Document} [o.doc]      le document (le banc en injecte un)
  */
 export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa = null,
-  selecteur = false, onBien = null, doc = null }) {
+  selecteur = false, onBien = null, utiliser = null, doc = null }) {
   const d = doc || racine.ownerDocument
   const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
   // Le dernier logement ANNONCÉ à `onBien` : distinct de `etat.ref`, que le
@@ -81,6 +85,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
   // l'annonce après un changement au sélecteur (constat de review : l'adresse
   // de la page téléphone gardait l'ancien `?bien=`).
   let refAnnoncee = bien ? String(bien) : null
+  // Le logement de la conversation, figé au montage : « Utiliser » n'existe que
+  // tant que la vue montre CE logement (R2 — jamais le wifi d'une autre maison).
+  const bienDuFil = resa && bien ? String(bien) : null
   const etat = {
     ref: bien ? String(bien) : null,
     donnees: null, erreur: null, chargement: false,
@@ -89,6 +96,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     fait: null,             // { cle, initial }
     note: null,             // { texte, ok }
     apercu: null,           // { texte, prenom } de l'éditeur
+    refus: null,            // { id, lignes: [texte], remplir: cle|null } — « Utiliser » refusé
     detruite: false
   }
   let minuteur = null
@@ -118,6 +126,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
       const r = await appel('/api/ecran/connaissance' + (q.toString() ? '?' + q : ''))
       if (g !== generation || etat.detruite) return
       etat.donnees = r
+      etat.refus = null
       const vu = r && r.bien ? String(r.bien.ref) : null
       etat.ref = vu
       if (vu !== refAnnoncee) {
@@ -163,17 +172,67 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
       <select data-kb-bien ${etat.mode !== 'liste' ? 'disabled' : ''}>${options}</select></label>`
   }
 
+  // ⚠ « UTILISER » N'EXISTE QUE POUR LE VOYAGEUR ET LE LOGEMENT DE LA
+  // CONVERSATION — spec kb-utiliser-reponse §2. Trois conditions, toutes
+  // nécessaires : la page l'a demandé, le serveur dit que l'aperçu est fait pour
+  // CETTE réservation (`duFil`, R1), et la vue montre encore le logement du fil
+  // (R2). Une seule qui manque, et le bouton n'est pas peint.
+  function utilisable () {
+    const v = etat.donnees && etat.donnees.voyageur
+    return typeof utiliser === 'function' && !!resa && !!bienDuFil
+      && etat.ref === bienDuFil && !!v && v.duFil === true && String(v.resa) === String(resa)
+  }
+
   function carteHtml (c) {
     const badges = (c.aRevoir ? `<span class="kb-badge kb-badge--revoir">${esc(t('kb.to_review'))}</span>` : '')
       + (c.horsIa ? `<span class="kb-badge kb-badge--horsia">${icone('i-lock')}${esc(t('kb.no_ai'))}</span>` : '')
     const pied = c.verifieLe
       ? esc(t('kb.checked_on', { date: date(c.verifieLe) }))
       : esc(t('kb.never_checked'))
-    return `<button type="button" class="kb-carte" data-kb-ouvrir="${esc(c.id)}">
+    const carte = `<button type="button" class="kb-carte" data-kb-ouvrir="${esc(c.id)}">
       <span class="kb-carte__tete">${icone('i-message')}<span class="kb-carte__sujet">${esc(c.sujet)}</span>${badges}</span>
       <span class="kb-carte__texte">${segmentsHtml(c.segments)}</span>
       <span class="kb-carte__pied caption muted">${pied}</span>
     </button>`
+    if (!utilisable()) return carte
+    const refus = etat.refus && etat.refus.id === String(c.id) ? etat.refus : null
+    const lignes = refus ? refus.lignes.map(l =>
+      `<p class="kb-note" role="status" data-kb-refus>${esc(l)}</p>`).join('') : ''
+    const remplir = refus && refus.remplir
+      ? `<button type="button" class="kb-lien" data-kb-remplir="${esc(refus.remplir)}">${esc(t('kb.fill_it'))}</button>` : ''
+    return `<div class="kb-carte-bloc">${carte}${lignes}
+      <div class="kb-carte-bloc__actions">${remplir}
+        <button type="button" class="btn btn--secondary kb-utiliser" data-kb-utiliser="${esc(c.id)}">${esc(t('kb.use'))}</button>
+      </div>
+    </div>`
+  }
+
+  // Ce qui empêche d'utiliser une réponse TELLE QUELLE (R3). Rend `null` si elle
+  // peut partir. Le serveur a fait le remplacement pour CE voyageur : on ne
+  // refait rien ici, on lit ses trois signaux.
+  function refusDe (c) {
+    const lignes = []
+    const manquants = Array.isArray(c.manquants) ? c.manquants : []
+    const inconnues = Array.isArray(c.inconnues) ? c.inconnues : []
+    if (manquants.length) lignes.push(t('kb.use_missing', { liste: manquants.map(libelleDe).join(', ') }))
+    if (c.codeNonResolu === true) lignes.push(t('kb.use_code'))
+    if (inconnues.length) lignes.push(t('kb.use_unknown', { liste: inconnues.join(', ') }))
+    if (!lignes.length && !String(c.apercu || '').trim()) lignes.push(t('kb.use_empty'))
+    if (!lignes.length) return null
+    // « Le remplir » ouvre la PREMIÈRE information manquante qui vit dans la
+    // base de ce logement — là où l'hôte la complète, dans la même vue.
+    const faits = (etat.donnees && etat.donnees.faits) || []
+    const remplir = manquants.find(cle => faits.some(f => f.cle === cle)) || null
+    return { id: String(c.id), lignes, remplir }
+  }
+
+  function utiliserReponse (id) {
+    const c = ((etat.donnees || {}).reponses || []).find(x => String(x.id) === String(id))
+    if (!c || !utilisable()) return
+    const refus = refusDe(c)
+    etat.refus = refus
+    if (refus) { peindre(); return }
+    utiliser({ texte: String(c.apercu), resa: String(resa), ref: etat.ref, sujet: c.sujet })
   }
 
   function faitHtml (f) {
@@ -581,6 +640,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
 
   function revenirALaListe () {
     etat.mode = 'liste'; etat.edition = null; etat.fait = null; etat.apercu = null; etat.note = null
+    etat.refus = null
     demandeApercu++
     if (minuteur) { clearTimeout(minuteur); minuteur = null }
     peindre()
@@ -596,10 +656,12 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     if (cible.hasAttribute('data-kb-enregistrer')) { enregistrer(); return }
     if (cible.hasAttribute('data-kb-supprimer')) { supprimer(); return }
     if (cible.hasAttribute('data-kb-fait-enregistrer')) { enregistrerFait(); return }
-    if (cible.dataset.kbModifierFait != null) {
-      const f = ((etat.donnees || {}).faits || []).find(x => x.cle === cible.dataset.kbModifierFait)
+    if (cible.dataset.kbUtiliser != null) { utiliserReponse(cible.dataset.kbUtiliser); return }
+    const aModifier = cible.dataset.kbModifierFait != null ? cible.dataset.kbModifierFait : cible.dataset.kbRemplir
+    if (aModifier != null) {
+      const f = ((etat.donnees || {}).faits || []).find(x => x.cle === aModifier)
       if (!f) return
-      etat.mode = 'fait'; etat.fait = { cle: f.cle, initial: f.valeur }; etat.note = null
+      etat.mode = 'fait'; etat.fait = { cle: f.cle, initial: f.valeur }; etat.note = null; etat.refus = null
       peindre()
       return
     }
@@ -690,6 +752,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
   return {
     pret, racine,
     get ref () { return etat.ref },
+    // La réservation pour laquelle la vue a été montée : Messages la compare au
+    // fil ouvert pour savoir s'il faut la remonter (le fil a changé sous elle).
+    get resa () { return resa ? String(resa) : null },
     get etat () { return etat },
     recharger, enEdition, detruire, inserer, rafraichirApercu, lireEditeur
   }
