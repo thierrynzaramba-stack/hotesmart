@@ -567,6 +567,62 @@ test('« Modifier » remplace le champ : ce qui suit se comporte comme sans « U
   assert.deepEqual(await scenario(true), await scenario(false))
 })
 
+// ─── Review 3 : un champ vidé puis rétabli, et la note qui suit le fil ──────
+test('LE TEST QUI COMPTE : vider puis rétablir (Ctrl+Z) le texte posé ne le libère pas pour un autre fil', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  taper(b, '')
+  taper(b, 'Bonjour Ana, Le wifi est RESEAU')
+  b.msg.ouvrir('B9')
+  assert.equal(noteSaisie(b), FR_USE_REMOVED, 'rétabli tel quel : il est retiré comme un texte posé')
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b), [])
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : vider, changer de fil, PUIS rétablir : « Envoyer » refuse encore', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  taper(b, '')
+  b.msg.ouvrir('B9')
+  taper(b, 'Bonjour Ana, Le wifi est RESEAU')
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b), [], 'le texte d Ana revenu par l annulation ne part pas chez un autre voyageur')
+  assert.equal(noteSaisie(b), FR_USE_WRONG)
+  b.fermer()
+})
+
+test('la note R7 tombe en revenant dans le bon fil, et après un envoi', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  taper(b, 'Bonjour Ana !, Le wifi est RESEAU')
+  b.msg.ouvrir('B9')
+  assert.equal(noteSaisie(b), FR_USE_WRONG)
+  b.msg.ouvrir('B7')
+  assert.equal(noteSaisie(b), null, 'dans le fil d Ana, « il ne partira pas ici » serait faux')
+  b.msg.ouvrir('B9')
+  envoyer(b)
+  await reposer(b)
+  assert.equal(noteSaisie(b), FR_USE_WRONG, 'le refus se redit au geste')
+  b.msg.ouvrir('B7')
+  envoyer(b)
+  await reposer(b)
+  assert.equal(envoisVoyageur(b).length, 1)
+  assert.equal(noteSaisie(b), null, 'après l envoi, plus de note')
+  b.fermer()
+})
+
+test('« retiré du champ » tombe quand l hôte envoie son propre message dans le nouveau fil', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  b.msg.ouvrir('B9')
+  assert.equal(noteSaisie(b), FR_USE_REMOVED)
+  taper(b, 'Bonjour, à demain')
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b).map(e => e.corps.bookingId), ['B9'])
+  assert.equal(noteSaisie(b), null)
+  b.fermer()
+})
+
 test('R2 — dans Messages, choisir un autre logement au sélecteur du tiroir retire « Utiliser »', async () => {
   const b = await telephoneSurB7()
   clic(b, iconeSaisie(b))

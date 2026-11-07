@@ -89,10 +89,15 @@ son test (§7).
   conversation (note « Ce texte a été préparé pour une autre conversation : il
   ne partira pas ici ») ; il repart dans la sienne. Dans l'autre conversation,
   « Utiliser » n'ajoute rien non plus à ce champ. La note se lit sous le champ,
-  tiroir ouvert ou non. Un champ vidé à la main ne porte plus rien.
+  tiroir ouvert ou non, et tombe quand on change de fil ou qu'un envoi passe.
+  Un champ vidé à la main garde sa marque tant que l'hôte n'a rien écrit
+  d'autre : une annulation (Ctrl+Z) qui remet le texte posé le remet avec sa
+  marque. Dès que l'hôte écrit son propre texte, la marque est abandonnée.
   Pendant un « Modifier » : le texte de l'IA suivi seulement des textes posés
-  n'est pas une retouche de l'hôte — en changeant de fil, il repart avec sa
-  proposition, et les textes posés sont retirés.
+  n'est pas une retouche de l'hôte. En changeant de fil, si la proposition est
+  **sans échéance**, il repart avec elle et les textes posés sont retirés ; si
+  elle est **différée**, le tout devient son brouillon et part à l'échéance,
+  chez son voyageur (R5).
   **Assumé** : un champ remplacé par sélection puis frappe, sans être vidé,
   garde la marque ; ce texte-là sera refusé dans une autre conversation. Le
   refus dit quoi faire (« Videz le champ, ou revenez à cette conversation ») et
@@ -253,3 +258,19 @@ reste dans le champ quand on change de fil, et peut partir dans une autre
 conversation (choix d'une review antérieure : « on ne jette jamais ce que l'hôte
 a tapé »). « Utiliser » ne change rien à ce chemin ; le fermer de la même façon
 que R7 est une décision à part.
+
+## 11. Review 3 (la dernière) — ce qu'elle a trouvé, ce qui a changé
+
+Review du diff des correctifs (`68821a90..11b3758a`). Les sept tests de la
+review 2 rougissent chacun contre leur correctif (vérifié par la review). Aucun
+double envoi, aucun texte de l'hôte jeté sans le dire. Corrigé sans nouvelle
+review, chaque correctif avec son test qui rougit sans lui :
+
+- **Vider le champ puis annuler (Ctrl+Z)** remettait le texte d'Ana sans
+  marque, et il partait chez Marie. → la marque passe « vide » au lieu d'être
+  oubliée (R7).
+- **La note R7 restait affichée** dans la bonne conversation et après un envoi.
+  → elle tombe au changement de fil et quand un envoi passe.
+- **La spec disait** que les textes posés sont retirés pendant tout
+  « Modifier » : faux pour une proposition différée (le tout devient son
+  brouillon, R5). → R7 corrigée.

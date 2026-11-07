@@ -185,7 +185,7 @@ const etat = {
   pausesLues: false,
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
-  saisieRemplie: null,     // { bookId, textes } : textes posés par « Utiliser », remplis pour CE fil
+  saisieRemplie: null,     // { bookId, textes, vide } : textes posés par « Utiliser », remplis pour CE fil
   modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
   configIA: null,          // blob agent_alert_config.config ; null = illisible (volet ferme)
   prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
@@ -782,6 +782,7 @@ async function envoyer () {
   // champ garde le texte (rien n'est jeté), et le dit.
   if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
   etat.saisieRemplie = null
+  effacerNoteChamp()
   zone.value = ''
   ajusterHauteur(zone)
   const entree = { texte, etatEnvoi: 'en_cours' }
@@ -1819,7 +1820,7 @@ function utiliserDansLaSaisie ({ texte, resa, ref }) {
   // fils de la page, et chacun porte un prénom et les infos d'un logement.
   // TOUS sont gardés, pas le dernier (constat 1 de la review 2).
   const r = etat.saisieRemplie
-  if (r && String(r.bookId) === String(resa)) r.textes.push(String(texte))
+  if (r && String(r.bookId) === String(resa)) { r.textes.push(String(texte)); r.vide = false }
   else etat.saisieRemplie = { bookId: String(resa), textes: [String(texte)] }
   ouvrirTiroir(false)
   zone.focus()
@@ -1830,8 +1831,15 @@ function utiliserDansLaSaisie ({ texte, resa, ref }) {
 function saisieRemplieAilleurs () {
   const r = etat.saisieRemplie
   const zone = $('[data-bind="texte"]')
-  return !!r && !!zone && zone.value.trim() !== '' && String(r.bookId) !== String(etat.ouverte)
+  if (!r || !zone || !zone.value.trim() || String(r.bookId) === String(etat.ouverte)) return false
+  return !r.vide || textePoseRevenu(r, zone.value)
 }
+// ⚠ UN CHAMP VIDÉ N'OUBLIE PAS TOUT DE SUITE POUR QUI IL AVAIT ÉTÉ REMPLI —
+// constat 1 de la review 3, mesuré : vider le champ puis annuler (Ctrl+Z)
+// remettait le texte d'Ana, sans marque, et il partait chez Marie. La marque
+// passe « vide » ; à la frappe suivante, si un texte posé est revenu tel quel,
+// elle reprend, sinon (l'hôte écrit le sien) elle est abandonnée.
+const textePoseRevenu = (r, valeur) => r.textes.some(tx => String(valeur).includes(tx))
 // Le champ, une fois retirés les textes posés par « Utiliser » : ce qui reste
 // est ce que l'hôte a écrit lui-même (ou le texte de l'IA d'un « Modifier »).
 function sansTextesPoses (valeur) {
@@ -1852,6 +1860,18 @@ function noteChamp (texte) {
   note.hidden = false
   note.textContent = texte
 }
+// La note R7 dit l'état d'un fil précis : elle tombe quand on change de fil et
+// quand un envoi passe (constat 2 de la review 3 — « il ne partira pas ici »
+// restait affiché dans la bonne conversation, après l'envoi). Seules les deux
+// notes R7 sont effacées : les autres messages de la saisie ont leur vie.
+function effacerNoteChamp () {
+  const note = $('[data-bind="saisie-etat"]')
+  if (!note || note.hidden) return
+  if (note.textContent === t('kb.use_removed') || note.textContent === t('kb.use_wrong_conv')) {
+    note.hidden = true
+    note.textContent = ''
+  }
+}
 // Changer de fil avec un texte de la base dans le champ. S'il n'y a QUE des
 // textes posés, tels quels, ils sont RETIRÉS (ils étaient remplis pour l'autre
 // voyageur). S'il reste quoi que ce soit d'autre — une retouche, une phrase
@@ -1864,7 +1884,11 @@ function rangerSaisieRemplie (bookId) {
   const r = etat.saisieRemplie
   const zone = $('[data-bind="texte"]')
   if (!r || !zone || String(r.bookId) === String(bookId)) return
-  if (!zone.value.trim()) { etat.saisieRemplie = null; return }
+  // Champ vide : la marque reste, « vide » — une annulation peut remettre le
+  // texte dans le fil suivant (constat 1 de la review 3).
+  if (!zone.value.trim()) { r.vide = true; return }
+  if (r.vide && !textePoseRevenu(r, zone.value)) { etat.saisieRemplie = null; return }
+  r.vide = false
   if (!sansTextesPoses(zone.value).trim()) {
     zone.value = ''
     ajusterHauteur(zone)
@@ -3546,6 +3570,9 @@ function dateLongue (jour) {
   return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
 }
 function ouvrir (bookId) {
+  // La note R7 du fil d'avant ne vaut plus ici (constat 2 de la review 3) ;
+  // celle du nouveau fil, s'il y en a une, est posée plus bas.
+  if (String(bookId) !== String(etat.ouverte)) effacerNoteChamp()
   // Le statut d'evaluation se REDEMANDE a chaque ouverture : une publication
   // faite depuis la fiche resa, ou un echec transitoire, ne fige rien.
   etat.evaluations.delete(String(bookId))
@@ -3668,8 +3695,17 @@ async function init () {
   const zoneTexte = $('[data-bind="texte"]')
   zoneTexte.addEventListener('input', () => {
     ajusterHauteur(zoneTexte)
-    // Un champ vidé à la main ne porte plus le texte d'aucune conversation.
-    if (!zoneTexte.value.trim()) etat.saisieRemplie = null
+    // Un champ vidé à la main garde sa marque, « vide » : une annulation peut
+    // remettre le texte posé (constat 1 de la review 3). À la frappe suivante,
+    // un texte posé revenu tel quel la reprend ; le texte de l'hôte l'abandonne.
+    const r = etat.saisieRemplie
+    if (r) {
+      if (!zoneTexte.value.trim()) r.vide = true
+      else if (r.vide) {
+        if (textePoseRevenu(r, zoneTexte.value)) r.vide = false
+        else etat.saisieRemplie = null
+      }
+    }
   })
   // ⚠ LE BROUILLON DE L'HOTE S'ENREGISTRE QUAND IL QUITTE L'EDITEUR
   // (decision 6 de Thierry, 27 octobre 2026). Sans ca, la reprise du compte a
