@@ -102,21 +102,36 @@ test('un événement dans un autre : le plus court d abord, puis celui qui le co
   assert.equal(r.parNuit.get('2026-12-31').cle, CLE_NOEL)
 })
 
-test('le rayonnement : vendredi et samedi seulement, k = ⌈écart / 7⌉, borné par la largeur réglée — au-delà, la ligne est hors zone', () => {
+test('LE TEST QUI COMPTE : le rayonnement — vendredi et samedi seulement, et la largeur de la zone ne borne AUCUN réglage (décision du 7 novembre : elle sert à l affichage)', () => {
   const cle = 'commercial:saint_valentin'
-  const lignes = [ligne(cle, 'avant', 1, 'vendredi', null, 'Haut'), ligne(cle, 'avant', null, 'samedi', null, 'Moyen')]
+  const lignes = [ligne(cle, 'avant', 1, 'vendredi', null, 'Haut'), ligne(cle, 'avant', 2, 'samedi', null, 'Moyen'), ligne(cle, 'avant', 3, null, null, 'Base')]
   const r = resoudre({ debut: '2027-01-01', fin: '2027-03-01', vacances: [], lignes, largeurs: new Map([[cle, { avant: 2, apres: 0 }]]) })
   // Saint-Valentin 2027 : dimanche 14 février.
   assert.equal(niv(r, '2027-02-12'), 'Haut', 'vendredi 12 : 1er week-end avant')
-  assert.equal(niv(r, '2027-02-05'), null, 'vendredi 5 : 2e week-end, aucune ligne pour lui')
-  assert.deepEqual(['2027-02-13', '2027-02-06', '2027-01-30'].map(j => niv(r, j)), ['Moyen', 'Moyen', null], 'largeur 2 : le 3e week-end est hors zone')
+  assert.deepEqual(['2027-02-13', '2027-02-05', '2027-02-06'].map(j => niv(r, j)), [null, null, 'Moyen'], 'seules les nuits désignées')
   assert.equal(niv(r, '2027-02-11'), null, 'un jeudi ne rayonne pas')
+  // Le 3e week-end est au-delà de la zone affichée (2) : il garde son niveau, et il est signalé.
+  assert.deepEqual(['2027-01-29', '2027-01-30'].map(j => [niv(r, j), r.parNuit.get(j).hors_zone_affichee]), [['Base', true], ['Base', true]])
+  assert.equal(r.parNuit.get('2027-02-06').hors_zone_affichee, undefined)
+  assert.deepEqual(r.horsZone.map(h => [h.ligne.rang, h.largeur]), [[3, 2]])
+  assert.deepEqual(r.sansNuit, [])
+  // Zone réduite après coup, ou jamais réglée : les réglages restent, rien n est « sans nuit ».
   const etroit = resoudre({ debut: '2027-01-01', fin: '2027-03-01', vacances: [],
-    lignes: [ligne(cle, 'avant', 2, 'vendredi', null, 'Haut'), ligne(cle, 'apres', 1, 'samedi', null, 'Haut')],
+    lignes: [ligne(cle, 'avant', 2, 'vendredi', null, 'Haut'), ligne(cle, 'apres', 1, 'samedi', null, 'Très haut')],
     largeurs: new Map([[cle, { avant: 1, apres: null }]]) })
-  assert.deepEqual(etroit.parNuit.size, 0)
-  assert.deepEqual(etroit.sansNuit.map(s => [s.ligne.zone, s.motif]), [['avant', 'hors_zone'], ['apres', 'hors_zone']],
-    'zone réduite après coup : la ligne est rendue, pas supprimée')
+  assert.deepEqual([niv(etroit, '2027-02-05'), niv(etroit, '2027-02-20')], ['Haut', 'Très haut'])
+  assert.deepEqual([etroit.sansNuit, etroit.horsZone.map(h => [h.ligne.zone, h.largeur])], [[], [['avant', 1], ['apres', 0]]])
+})
+
+test('LE TEST QUI COMPTE : une ligne du rayonnement SANS rang n agit pas et se signale ; un week-end amputé rend « position absente »', () => {
+  const cle = 'commercial:saint_valentin'
+  const joker = ligne(cle, 'avant', null, 'samedi', null, 'Haut')
+  const r = resoudre({ debut: '2027-01-01', fin: '2027-03-01', vacances: [], lignes: [joker], largeurs: new Map([[cle, { avant: 4, apres: null }]]) })
+  assert.deepEqual([r.parNuit.size, r.sansNuit.map(x => [x.ligne.id, x.motif])], [0, [[joker.id, 'rang_requis']]])
+  // Noël 2026 commence un samedi : le 1er week-end avant n a que son vendredi.
+  const samedi = ligne(CLE_NOEL, 'avant', 1, 'samedi', null, 'Haut')
+  const n = resoudre({ debut: '2026-11-20', fin: '2027-01-31', lignes: [samedi] })
+  assert.deepEqual([n.parNuit.size, n.sansNuit.map(x => [x.ligne.id, x.motif])], [0, [[samedi.id, 'position_absente']]])
 })
 
 test('un événement coupé par l hôte n applique rien et ne signale rien ; une occurrence qui déborde la fenêtre ne signale pas ce qu elle porte au-delà', () => {
@@ -213,14 +228,17 @@ test('pas de faux signal au bord de la fenêtre : une date commerciale coupée p
 // de position (le 14e, un niveau inventé, aussi) — les deux doublons relèvent de
 // l'index unique —, plus trois cas propres à l'écrivain (rang 61, rang 1,5,
 // nuit inconnue). Ces cas ne prouvent pas que l'écrivain et la base disent la
-// même chose AU-DELÀ d'eux.
+// même chose AU-DELÀ d'eux. ⚠ Depuis le 7 novembre 2026, l'une des 10
+// positions acceptées par la base (le rayonnement sans rang) est REFUSÉE par
+// l'écrivain : elle est passée dans REFUSES, avec le samedi rattaché d'un
+// réveillon — les deux cas où l'écrivain est volontairement plus strict.
 const P_ = (evenement, zone, rang, jour, nuit) => ({ evenement, zone, rang, jour, nuit })
 const ACCEPTES = [
   P_(CLE_NOEL, 'evenement', 2, 'samedi', null), P_(CLE_NOEL, 'evenement', null, 'samedi', null),
   P_(CLE_NOEL, 'evenement', null, null, null), P_('commercial:reveillon_noel', 'evenement', null, null, 'date'),
   P_('commercial:saint_valentin', 'evenement', null, null, 'samedi_rattache'), P_('ferie:armistice_1918', 'evenement', null, null, 'date'),
   P_('commercial:saint_valentin', 'avant', 1, 'vendredi', null), P_('commercial:saint_valentin', 'apres', 2, null, null),
-  P_(CLE_NOEL, 'avant', null, null, null), P_('evenement:salon_du_livre', 'evenement', 1, 'lundi', null)
+  P_('evenement:salon_du_livre', 'evenement', 1, 'lundi', null)
 ]
 const REFUSES = [
   [P_('x', 'pendant', null, null, null), 'zone_inconnue'], [P_('x', 'evenement', 1, 'samedy', null), 'jour_inconnu'],
@@ -236,10 +254,14 @@ const REFUSES = [
   [P_('x', 'evenement', null, null, 'veille'), 'nuit_inconnue'],
   // L'écrivain est PLUS STRICT que la base ici, et c'est voulu : un réveillon
   // n'a jamais de samedi rattaché (`weekend_proche: false`).
-  [P_('commercial:reveillon_noel', 'evenement', null, null, 'samedi_rattache'), 'sans_samedi_rattache']
+  [P_('commercial:reveillon_noel', 'evenement', null, null, 'samedi_rattache'), 'sans_samedi_rattache'],
+  // PLUS STRICT AUSSI, décision de Thierry du 7 novembre 2026 : la largeur de
+  // la zone ne change aucun prix, donc une ligne du rayonnement désigne son
+  // week-end. La base l accepte (c était l une des positions éprouvées).
+  [P_(CLE_NOEL, 'avant', null, null, null), 'rang_requis']
 ]
 
-test('LE TEST QUI COMPTE : l écrivain refuse exactement ce que la base refuse, avec un motif parlant', () => {
+test('LE TEST QUI COMPTE : l écrivain refuse ce que la base refuse, avec un motif parlant — et deux cas de plus, voulus', () => {
   for (const p of ACCEPTES) assert.equal(RP.validerPosition(p).ok, true, JSON.stringify(p))
   for (const [p, raison] of REFUSES) assert.equal(RP.validerPosition(p).raison, raison, JSON.stringify(p))
 })
@@ -513,4 +535,330 @@ test('2b : la porte du moteur ne calcule rien sans ligne ; avec des lignes, elle
   assert.equal(coupe.parNuit.size, 0, 'une date que l hôte a coupée n applique rien')
   const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'yield', 'contexte-du-bien.js'), 'utf8')
   assert.match(src, /Promise\.all\(\[\s*reglagesDuBien\(supabase, bien\.id\), lignesDuBien\(supabase, bien\.id\)\]\)/, 'les deux lectures partent ensemble')
+})
+
+// ─── 2c : simuler un geste, puis l'API ────────────────────────────────────────
+const Module = require('node:module')
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
+const { lignesApres, cleDePosition } = require('../lib/yield/simuler-positions')
+
+test('2c : les lignes APRÈS un geste — poser, remplacer, retirer, sans toucher aux autres', () => {
+  const actuelles = [{ id: 'a', evenement: CLE_NOEL, zone: 'evenement', rang: 2, jour: 'samedi', nuit: null, niveau: 'Haut' },
+    { id: 'b', evenement: 'commercial:reveillon_noel', zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'Exceptionnel' }]
+  const apres = lignesApres(actuelles, [
+    { evenement: CLE_NOEL, zone: 'evenement', rang: 2, jour: 'samedi', nuit: null, niveau: 'calcul' },
+    { evenement: 'commercial:reveillon_noel', zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: null },
+    { evenement: CLE_NOEL, zone: 'evenement', rang: null, jour: 'samedi', nuit: null, niveau: 'Moyen' }])
+  assert.deepEqual(apres.map(l => [l.id, l.niveau]), [['a', 'calcul'], [`propose:${CLE_NOEL}|evenement||samedi|`, 'Moyen']])
+  assert.notEqual(cleDePosition({ evenement: 'x', zone: 'evenement', rang: 2, jour: 'samedi' }),
+    cleDePosition({ evenement: 'x', zone: 'evenement', rang: null, jour: 'samedi' }), 'un joker n est pas le 2e samedi')
+})
+
+const BIEN_PILOTE = { id: BIEN, user_id: COMPTE, prix_minimum: 1, pilote_tarifaire: 'yieldflow', pilote_fenetre_type: 'mois', pilote_fenetre_valeur: 3, rate_sync_mode: 'managed' }
+// Le simulateur sur une matiere fabriquee : le faux `preparerContexte` HONORE
+// les bornes qu'on lui passe (fenetre, finContexte), comme le vrai.
+function chargerSimulateur (lignesActuelles = [], { sansMateriaux = false, evenementsEnPlus = [], reglages = new Map(), retouche = null } = {}) {
+  const appels = []
+  const evenements = [...datesCommerciales('2026-01-01', '2027-12-31'), ...evenementsEnPlus]
+  const ctxCal = R2.construireContexte({ zoneBien: 'C', vacances: [], evenements, debut: '2025-01-01', fin: '2027-12-31' })
+  const preparer = async (s, b, c, o) => {
+    appels.push(o)
+    const finContexte = [o.fin, o.aujourdHui, o.finContexte || o.aujourdHui].sort()[2]
+    const materiauxPositions = { reglages, zoneBien: null, vacances: [], evenements, debut: `${o.aujourdHui.slice(0, 7)}-01`, fin: finContexte }
+    const parDate = new Map()
+    for (let j = o.debut; j <= o.fin; j = new Date(Date.parse(`${j}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)) parDate.set(j, { date: j, rate: 100 })
+    const ctx = { auj: o.aujourdHui, contexte: ctxCal, grille: grille(), pressionParMois: new Map(), vendues: {}, bien: b, reglages,
+      lignesPosition: lignesActuelles, materiauxPositions, positions: P.positionsDuContexte({ ...materiauxPositions, lignes: lignesActuelles }),
+      parDate, ouverts: null, ouvertureConnue: true }
+    if (sansMateriaux) delete ctx.materiauxPositions
+    if (retouche) retouche(ctx)
+    return ctx
+  }
+  const avant = Module._load
+  Module._load = function (d, ...reste) {
+    if (d === './contexte-du-bien') { const vrai = avant.apply(this, [d, ...reste]); return { ...vrai, preparerContexte: preparer } }
+    if (d === '../fermetures') return { fermeturesDuBien: async () => [] }
+    if (d === '../prix-hote') return { prixHoteDuBien: async () => new Map() }
+    return avant.apply(this, [d, ...reste])
+  }
+  delete require.cache[require.resolve('../lib/yield/simuler-positions')]
+  const m = require('../lib/yield/simuler-positions')
+  Module._load = avant
+  delete require.cache[require.resolve('../lib/yield/simuler-positions')]
+  const simuler = (...a) => m.simulerPositions(...a)
+  simuler.appels = appels
+  simuler.preparer = preparer
+  return simuler
+}
+const REVEILLON = { evenement: 'commercial:reveillon_noel', zone: 'evenement', rang: null, jour: null, nuit: 'date' }
+
+test('LE TEST QUI COMPTE (2c) : « N nuits vont changer de prix » compte par la règle du moteur, et garde ce que YieldFlow recommandait', async () => {
+  const simuler = chargerSimulateur()
+  const s = await simuler(null, BIEN_PILOTE, [{ ...REVEILLON, niveau: 'Exceptionnel' }], '2026-12-01')
+  const k = cleDePosition(REVEILLON)
+  assert.deepEqual([s.pilote, s.nuits, s.du, s.au, s.max], [true, 1, '2026-12-24', '2026-12-24', 165])
+  assert.deepEqual(s.visees.get(k), ['2026-12-24'])
+  assert.deepEqual(Object.keys(s.recommandes.get(k)), ['2026-12-24'])
+  // Le recommandé est le niveau du calcul SANS AUCUN réglage de position —
+  // pas celui du contexte qui porte le réglage (qui rendrait « Exceptionnel »).
+  const { prixDeLaNuit: pdn } = require('../lib/yield/contexte-du-bien')
+  const nu = await simuler.preparer(null, BIEN_PILOTE, COMPTE, { aujourdHui: '2026-12-01', debut: '2026-12-01', fin: '2027-03-01' })
+  const attendu = pdn(nu, '2026-12-24', { ouverte: true, vendue: false }).niveau
+  assert.notEqual(attendu, 'Exceptionnel', 'la fixture doit distinguer le recommandé du niveau posé')
+  assert.equal(s.recommandes.get(k)['2026-12-24'], attendu)
+  // La vue court sur douze mois, le compte sur la fenêtre ; la pression est demandée pour les douze mois.
+  assert.deepEqual([simuler.appels[0].fin, simuler.appels[0].finContexte, simuler.appels[0].mois.length], ['2027-03-01', '2027-12-01', 13])
+  assert.deepEqual(s.sans_nuit, [])
+  // Retirer : la nuit qu'elle tenait change aussi, et sa recommandation est gardée.
+  const retrait = await chargerSimulateur([{ id: 'r1', ...REVEILLON, niveau: 'Exceptionnel' }])(null, BIEN_PILOTE, [{ ...REVEILLON, niveau: null }], '2026-12-01')
+  assert.deepEqual([retrait.nuits, retrait.du], [1, '2026-12-24'])
+  assert.deepEqual(Object.keys(retrait.recommandes.get(k)), ['2026-12-24'])
+  // Un bien non piloté : aucun prix du calendrier ne bouge.
+  const libre = await chargerSimulateur()(null, { ...BIEN_PILOTE, pilote_tarifaire: 'calendrier' }, [{ ...REVEILLON, niveau: 'Exceptionnel' }], '2026-12-01')
+  assert.deepEqual([libre.pilote, libre.nuits], [false, 0])
+})
+
+test('2c : une ligne proposée sans nuit est rendue avant l écriture — le samedi rattaché d une Saint-Valentin un dimanche', async () => {
+  const simuler = chargerSimulateur()
+  const s = await simuler(null, BIEN_PILOTE, [{ evenement: 'commercial:saint_valentin', zone: 'evenement', rang: null, jour: null, nuit: 'samedi_rattache', niveau: 'Haut' }], '2026-12-01')
+  assert.deepEqual([s.nuits, s.sans_nuit.map(x => [x.occurrence && x.occurrence.debut, x.motif])], [0, [['2027-02-14', 'position_absente']]])
+})
+
+function chargerApi ({ sim = null, ecrire = null, bien = BIEN_PILOTE, lignes = [] } = {}) {
+  const gestes = []
+  const sb = { from () { const q = {}; q.select = () => q; q.eq = () => q; q.maybeSingle = async () => ({ data: { zone_scolaire: null, name: 'Loft', ...bien }, error: null }); return q } }
+  const stubs = {
+    '@supabase/supabase-js': { createClient: () => sb },
+    '/require-permission': { requirePermission: async (req, res, o) => { gestes.push(['garde', o.domaine, o.niveau]); return { ok: true, bien: { id: BIEN }, accountUserId: COMPTE } }, UUID_RE: /^[0-9a-f-]{36}$/i },
+    '/simuler-positions': { ...require('../lib/yield/simuler-positions'), simulerPositions: async (s, b, ops) => { gestes.push(['simulation', ops.length]); return sim(ops) } },
+    '/ouverture-marqueur': { effacerMarqueur: async () => { gestes.push(['marqueur']); return {} } },
+    '/vacances': { lireVacances: async () => [], etendueSource: async () => [] },
+    '/grille-du-bien': { grilleDuBien: async () => { throw new Error('pas de grille ici') } }
+  }
+  const avant = Module._load
+  Module._load = function (d, ...reste) {
+    for (const [k, v] of Object.entries(stubs)) if (d === k || d.endsWith(k)) return v
+    if (/\/reglages-position$/.test(d)) {
+      const vrai = avant.apply(this, [d, ...reste])
+      return { ...vrai, lignesDuBien: async () => { if (lignes === null) throw new Error('panne'); return lignes },
+        poserPosition: async (s, o) => { gestes.push(['poser', o.evenement, o.niveau, o.recommandes]); gestes.push(['qui', o.userId, o.propertyId]); return ecrire ? ecrire(o) : { ok: true, geste: 'posee', avant: null } },
+        retirerPosition: async (s, o) => { gestes.push(['retirer', o.evenement]); return { ok: true, geste: 'retiree', avant: 'Haut' } } }
+    }
+    if (/\/evenements$/.test(d) && !/api/.test(d)) {
+      const vrai = avant.apply(this, [d, ...reste])
+      return { ...vrai, evenementsDuBien: async () => [], toutesLesOccurrences: async () => [] }
+    }
+    if (/\/reglages-segment$/.test(d)) {
+      const vrai = avant.apply(this, [d, ...reste])
+      return { ...vrai, reglagesDuBien: async () => new Map([['commercial:saint_valentin', { segment: 'commercial:saint_valentin', actif: true, crans: null, weekends_avant: 2, weekends_apres: null }]]),
+        poserReglage: async (s, o) => { gestes.push(['reglage', o]); vrai.valider(o); return { segment: o.segment, crans: null, actif: true } } }
+    }
+    return avant.apply(this, [d, ...reste])
+  }
+  delete require.cache[require.resolve('../api/yield-evenements')]
+  const api = require('../api/yield-evenements')
+  Module._load = avant
+  delete require.cache[require.resolve('../api/yield-evenements')]
+  const appeler = (method, donnees = {}) => new Promise(resolve => {
+    let code = 200
+    const res = { status (c) { code = c; return res }, setHeader () {}, json: corps => resolve({ code, corps }) }
+    api({ method, query: method === 'GET' ? { bien: BIEN, ...donnees } : {}, body: method === 'GET' ? {} : { bien: BIEN, ...donnees }, headers: {} }, res)
+  })
+  return { appeler, gestes }
+}
+const SIM_API = ops => ({ pilote: true, nuits: 1, du: '2026-12-24', au: '2026-12-24', min: 165, max: 165,
+  recommandes: new Map(ops.map(o => [cleDePosition(o), { '2026-12-24': 'Base' }])), visees: new Map(ops.map(o => [cleDePosition(o), ['2026-12-24']])), sans_nuit: [] })
+
+test('LE TEST QUI COMPTE (2c, API) : simuler annonce sans rien écrire ; l écriture exige le nombre annoncé ; le recommandé part au journal ; le repère du moteur est effacé', async () => {
+  const e = chargerApi({ sim: SIM_API })
+  const corps = { positions: [{ ...REVEILLON, niveau: 'Exceptionnel', userId: 'pirate', propertyId: 'ailleurs' }] }
+  const s = await e.appeler('PUT', { ...corps, simuler: true })
+  assert.deepEqual([s.code, s.corps.simulation, s.corps.confirmation.nuits, s.corps.visees[cleDePosition(REVEILLON)]], [200, true, 1, ['2026-12-24']])
+  assert.deepEqual(e.gestes.find(x => x[0] === 'garde'), ['garde', 'reglages', 'write'])
+  for (const confirme of [undefined, { nuits: 3 }]) {
+    const r = await e.appeler('PUT', { ...corps, ...(confirme ? { confirme } : {}) })
+    assert.deepEqual([r.code, r.corps.error], [409, 'a_confirmer'])
+  }
+  assert.equal(e.gestes.some(x => x[0] === 'poser'), false, 'rien n est écrit sans le bon nombre')
+  const ok = await e.appeler('PUT', { ...corps, confirme: { nuits: 1 } })
+  assert.deepEqual([ok.code, ok.corps.ok, ok.corps.envoi, ok.corps.ecrites.length], [200, true, 'immediat', 1])
+  assert.deepEqual(e.gestes.find(x => x[0] === 'poser'), ['poser', 'commercial:reveillon_noel', 'Exceptionnel', { '2026-12-24': 'Base' }])
+  assert.deepEqual(e.gestes.find(x => x[0] === 'qui'), ['qui', COMPTE, BIEN], 'le compte et le bien viennent de la garde, jamais du corps')
+  assert.ok(e.gestes.some(x => x[0] === 'marqueur'))
+})
+
+test('2c, API : refus parlants AVANT toute simulation — position incohérente, niveau inventé, doublon, geste trop gros ; un retrait passe par `niveau: null`', async () => {
+  const e = chargerApi({ sim: SIM_API })
+  const cas = [
+    [{ positions: [{ evenement: 'commercial:saint_valentin', zone: 'apres', rang: 1, jour: 'dimanche', niveau: 'Haut' }] }, 'rayonnement_ven_sam'],
+    [{ positions: [{ ...REVEILLON, niveau: 'un peu plus cher' }] }, 'niveau_inconnu'],
+    [{ positions: [{ ...REVEILLON, niveau: 'Haut' }, { ...REVEILLON, niveau: 'Base' }] }, 'positions_en_double'],
+    [{ positions: Array.from({ length: 121 }, (_, i) => ({ evenement: `evenement:e${i}`, zone: 'evenement', niveau: 'Haut' })) }, 'trop_de_positions'],
+    [{ positions: [] }, 'positions_requises']
+  ]
+  for (const [corps, erreur] of cas) {
+    const r = await e.appeler('PUT', corps)
+    assert.deepEqual([r.code, r.corps.error], [400, erreur])
+  }
+  assert.equal(e.gestes.some(x => x[0] === 'simulation'), false)
+  const retrait = await e.appeler('PUT', { positions: [{ ...REVEILLON, niveau: null }], confirme: { nuits: 1 } })
+  assert.equal(retrait.code, 200)
+  assert.ok(e.gestes.some(x => x[0] === 'retirer'))
+})
+
+test('2c, API : un geste interrompu dit ce qui est déjà écrit ; un geste concurrent rend 409', async () => {
+  let n = 0
+  const e = chargerApi({ sim: SIM_API, ecrire: () => (++n === 2 ? { ok: false, raison: 'geste_concurrent', message: 'modifié ailleurs' } : { ok: true, geste: 'posee', avant: null }) })
+  const r = await e.appeler('PUT', { positions: [{ ...REVEILLON, niveau: 'Haut' }, { evenement: 'commercial:reveillon_nouvel_an', zone: 'evenement', nuit: 'date', niveau: 'Haut' }], confirme: { nuits: 1 } })
+  assert.deepEqual([r.code, r.corps.error, r.corps.ecrites.length, r.corps.envoi], [409, 'geste_concurrent', 1, 'immediat'])
+  assert.ok(e.gestes.some(x => x[0] === 'marqueur'), 'une position déjà écrite part au passage suivant du moteur, pas le lendemain')
+  // Un refus du writer sur une position déjà validée est un défaut serveur : 503, pas 400.
+  const f = chargerApi({ sim: SIM_API, ecrire: () => ({ ok: false, raison: 'bien_hors_compte', message: 'x' }) })
+  const r2 = await f.appeler('PUT', { positions: [{ ...REVEILLON, niveau: 'Haut' }], confirme: { nuits: 1 } })
+  assert.deepEqual([r2.code, r2.corps.error, r2.corps.ecrites, f.gestes.some(x => x[0] === 'marqueur')], [503, 'ecriture_impossible', [], false])
+})
+
+test('LE TEST QUI COMPTE (2c, API) : la lecture rend les lignes, la nuit de chacune, les lignes sans nuit et les largeurs', async () => {
+  const lignes = [{ id: 'l1', evenement: 'commercial:reveillon_noel', zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'Exceptionnel' },
+    { id: 'l2', evenement: 'pont:pont_armistice_1918', zone: 'evenement', rang: 3, jour: 'lundi', nuit: null, niveau: 'Haut' },
+    { id: 'l3', evenement: 'commercial:saint_valentin', zone: 'avant', rang: 3, jour: 'vendredi', nuit: null, niveau: 'Haut' }]
+  const e = chargerApi({ lignes })
+  const g = await e.appeler('GET', { debut: '2026-11-07', fin: '2027-11-06' })
+  assert.equal(g.code, 200)
+  const p = g.corps.positions
+  assert.deepEqual(p.lignes.map(l => l.id), ['l1', 'l2', 'l3'])
+  // Le 3e week-end avant la Saint-Valentin 2027, zone affichée à 2 : il agit, et il est signalé.
+  assert.deepEqual(p.par_nuit.filter(x => x.ligne === 'l3').map(x => [x.date, x.hors_zone_affichee]), [['2027-01-29', true]])
+  assert.deepEqual(p.hors_zone.map(x => [x.ligne, x.largeur]), [['l3', 2]])
+  assert.deepEqual(p.par_nuit.filter(x => x.ligne === 'l1').map(x => x.date), ['2026-12-24'])
+  assert.deepEqual(p.sans_nuit.map(x => [x.ligne, x.occurrence && x.occurrence.debut, x.motif]), [['l2', '2026-11-09', 'position_absente']],
+    'un seul pont d Armistice dans la fenêtre (celui de 2026, un seul lundi : le 3e n existe pas) ; celui de 2027 tombe le 12 novembre, après la fin')
+  assert.deepEqual(p.largeurs, [{ cle: 'commercial:saint_valentin', avant: 2, apres: null }])
+  assert.deepEqual(e.gestes.find(x => x[0] === 'garde'), ['garde', 'reservations', 'read'])
+})
+
+test('LE TEST QUI COMPTE (2c) : preparerContexte garde les lignes et la MATIÈRE de la résolution — la rejouer rend exactement les mêmes nuits', async () => {
+  const avant = Module._load
+  Module._load = function (d, ...reste) {
+    if (/\/grille-du-bien$/.test(d)) return { grilleDuBien: async () => ({ eclatements: [], duBien: [], grille: grille() }) }
+    return avant.apply(this, [d, ...reste])
+  }
+  delete require.cache[require.resolve('../lib/yield/contexte-du-bien')]
+  const { preparerContexte } = require('../lib/yield/contexte-du-bien')
+  Module._load = avant
+  delete require.cache[require.resolve('../lib/yield/contexte-du-bien')]
+  const ligne = { id: 'r1', user_id: COMPTE, property_id: BIEN, ...REVEILLON, niveau: 'Exceptionnel' }
+  const base = { from (table) {
+    const q = {}
+    for (const m of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'lt', 'gt', 'order', 'range', 'limit', 'is', 'or', 'not']) q[m] = () => q
+    q.maybeSingle = () => Promise.resolve({ data: null, error: null }); q.single = q.maybeSingle
+    q.then = (res, rej) => Promise.resolve({ data: table === 'yield_reglages_position' ? [ligne] : [], error: null, count: 0 }).then(res, rej)
+    return q
+  } }
+  const B = { id: BIEN, user_id: COMPTE, provider: 'channex', provider_property_id: 'P', zone_scolaire: 'C', capacity: 2, inventory_units: 1, base_price: 100, prix_minimum: 5000, pilote_tarifaire: 'yieldflow', rate_sync_mode: 'managed' }
+  const ctx = await preparerContexte(base, B, COMPTE, { aujourdHui: '2026-11-07', debut: '2026-12-01', fin: '2026-12-31' })
+  assert.deepEqual(ctx.lignesPosition.map(l => l.id), ['r1'])
+  assert.deepEqual([ctx.materiauxPositions.zoneBien, ctx.materiauxPositions.debut], ['C', '2026-11-01'])
+  assert.deepEqual([...ctx.positions.parNuit.keys()], ['2026-12-24'])
+  const rejoue = P.positionsDuContexte({ ...ctx.materiauxPositions, lignes: ctx.lignesPosition })
+  assert.deepEqual([...rejoue.parNuit.entries()], [...ctx.positions.parNuit.entries()])
+  // Et sans cette matière, la simulation refuse au lieu de compter « 0 nuit » en silence.
+  await assert.rejects(chargerSimulateur([], { sansMateriaux: true })(null, BIEN_PILOTE, [{ ...REVEILLON, niveau: 'Haut' }], '2026-12-01'), /sans materiauxPositions/)
+})
+
+test('2c, API : PATCH transmet la largeur de la zone d influence seulement quand elle est envoyée, et refuse hors bornes en 400', async () => {
+  const e = chargerApi()
+  const r = await e.appeler('PATCH', { segment: 'commercial:saint_valentin', weekends_avant: 3 })
+  assert.equal(r.code, 200)
+  const o = e.gestes.find(x => x[0] === 'reglage')[1]
+  assert.deepEqual([o.userId, o.propertyId, o.weekends_avant, 'weekends_apres' in o, 'crans' in o], [COMPTE, BIEN, 3, false, false])
+  const hors = await e.appeler('PATCH', { segment: 'commercial:saint_valentin', weekends_apres: 5 })
+  assert.equal(hors.code, 400)
+})
+
+test('LE TEST QUI COMPTE (2c, review) : une ligne au-delà de la fenêtre de pilotage prend ses nuits dans la vue et le journal, mais aucun prix ne bouge aujourd hui', async () => {
+  const salon = { segment: 'evenement:salon_juin', date_debut: '2027-06-10', date_fin: '2027-06-12', origine: 'hote' }
+  const simuler = chargerSimulateur([], { evenementsEnPlus: [salon] })
+  const pos = { evenement: 'evenement:salon_juin', zone: 'evenement', rang: null, jour: null, nuit: null }
+  const s = await simuler(null, BIEN_PILOTE, [{ ...pos, niveau: 'Haut' }], '2026-12-01')
+  const k = cleDePosition(pos)
+  assert.deepEqual([s.nuits, s.sans_nuit], [0, []], 'ni nuit comptée (hors fenêtre), ni « sans nuit » (elle agira en juin)')
+  assert.ok(s.visees.get(k).length >= 3 && s.visees.get(k).every(d => d >= '2027-06-10' && d <= '2027-06-12'))
+  assert.ok(Object.keys(s.recommandes.get(k)).length >= 3, 'le journal garde ce que YieldFlow recommandait, même au-delà de la fenêtre')
+})
+
+test('LE TEST QUI COMPTE (2c, review) : le compte voit la matière du MOTEUR — un événement qui commence après la fin de la fenêtre ne rayonne pas encore dedans', async () => {
+  // Fenêtre au 2027-03-01 ; salon du 3 au 5 mars ; son 1er week-end avant = ven. 26 et sam. 27 février, DANS la fenêtre.
+  const salon = { segment: 'evenement:salon_mars', date_debut: '2027-03-03', date_fin: '2027-03-05', origine: 'hote' }
+  const reglages = new Map([['evenement:salon_mars', { segment: 'evenement:salon_mars', actif: true, crans: null, weekends_avant: 1, weekends_apres: null }]])
+  const simuler = chargerSimulateur([], { evenementsEnPlus: [salon], reglages })
+  const pos = { evenement: 'evenement:salon_mars', zone: 'avant', rang: 1, jour: null, nuit: null }
+  const s = await simuler(null, BIEN_PILOTE, [{ ...pos, niveau: 'Exceptionnel' }], '2026-12-01')
+  assert.deepEqual(s.visees.get(cleDePosition(pos)), ['2027-02-26', '2027-02-27'], 'la vue la montre')
+  assert.equal(s.nuits, 0, 'le moteur ne lit pas encore le salon : annoncer ces deux nuits serait faux')
+})
+
+test('2c, review : ouverture inconnue → aucun compte annoncé ; une nuit vendue ou fermée à la vente n est pas comptée', async () => {
+  const inconnue = await chargerSimulateur([], { retouche: c => { c.ouvertureConnue = false } })(null, BIEN_PILOTE, [{ ...REVEILLON, niveau: 'Exceptionnel' }], '2026-12-01')
+  assert.deepEqual([inconnue.ouverture_inconnue, inconnue.nuits], [true, 0])
+  const vendue = await chargerSimulateur([], { retouche: c => { c.parDate.set('2026-12-24', { date: '2026-12-24', rate: 100, avail: 0 }) } })(null, BIEN_PILOTE, [{ ...REVEILLON, niveau: 'Exceptionnel' }], '2026-12-01')
+  assert.equal(vendue.nuits, 0)
+  assert.deepEqual(vendue.visees.get(cleDePosition(REVEILLON)), ['2026-12-24'], 'la ligne prend toujours sa nuit : c est le prix qui ne bouge pas')
+})
+
+test('LE TEST QUI COMPTE (2c, review) : une ligne qui ne porte qu une LARGEUR ne masque pas les crans d une clé plus large', () => {
+  const { reglagePour } = require('../lib/yield/reglages-segment')
+  const jour = { segment: 'vacances_zone_du_bien', detail: 'vacances_zone_du_bien:noël' }
+  const large = { segment: 'vacances_zone_du_bien', crans: 1, actif: true }
+  const largeur = { segment: 'vacances_zone_du_bien:noël', crans: null, actif: true, weekends_avant: 2 }
+  assert.equal(reglagePour(new Map([['vacances_zone_du_bien', large], ['vacances_zone_du_bien:noël', largeur]]), jour).crans, 1)
+  // Une ligne fine qui AJUSTE, ou qui COUPE, garde la main.
+  assert.equal(reglagePour(new Map([['vacances_zone_du_bien', large], ['vacances_zone_du_bien:noël', { ...largeur, crans: -1 }]]), jour).crans, -1)
+  assert.equal(reglagePour(new Map([['vacances_zone_du_bien', large], ['vacances_zone_du_bien:noël', { ...largeur, actif: false }]]), jour).actif, false)
+})
+
+test('2c, API (review) : la lecture des positions en panne ne fait pas tomber l écran', async () => {
+  const e = chargerApi({ lignes: null })
+  const g = await e.appeler('GET', { debut: '2026-11-07', fin: '2027-11-06' })
+  assert.deepEqual([g.code, g.corps.positions], [200, { indisponible: 'lecture_impossible' }])
+})
+
+test('LE TEST QUI COMPTE (review A) : la liste « hors zone » suit les nuits PRISES — une occurrence finie avant la fenêtre rayonne dedans ; un week-end hors fenêtre ne signale rien', () => {
+  const foire = { segment: 'evenement:foire', date_debut: '2026-10-28', date_fin: '2026-11-01' }
+  const l = ligne('evenement:foire', 'apres', 2, null, null, 'Haut')
+  const r = resoudre({ debut: '2026-11-07', fin: '2027-11-06', vacances: [], evenements: [foire], lignes: [l], largeurs: new Map([['evenement:foire', { avant: null, apres: 1 }]]) })
+  // Dernière nuit dim. 1er nov. → 1er week-end après = ven. 6 / sam. 7 ; le 2e = 13 / 14.
+  assert.deepEqual(['2026-11-13', '2026-11-14'].map(j => [niv(r, j), r.parNuit.get(j).hors_zone_affichee]), [['Haut', true], ['Haut', true]])
+  assert.deepEqual(r.horsZone.map(h => [h.ligne.id, h.occurrence.debut, h.largeur]), [[l.id, '2026-10-28', 1]], 'une entrée, la bonne occurrence')
+  // Une foire dont le 2e week-end après tombe après la fin de la fenêtre : rien n est pris, rien n est signalé.
+  const tard = { segment: 'evenement:foire', date_debut: '2027-11-01', date_fin: '2027-11-03' }
+  const t = resoudre({ debut: '2027-06-01', fin: '2027-11-06', vacances: [], evenements: [tard], lignes: [l], largeurs: new Map([['evenement:foire', { avant: null, apres: 1 }]]) })
+  assert.deepEqual([t.parNuit.size, t.horsZone], [0, []])
+})
+
+test('2c, review A : une ligne sans rang d un événement coupé ne se signale pas ; elle se RETIRE (validation, puis API)', async () => {
+  const joker = ligne('commercial:saint_valentin', 'avant', null, null, null, 'Haut')
+  const r = resoudre({ debut: '2027-01-01', fin: '2027-03-01', vacances: [], lignes: [joker], inactifs: new Set(['commercial:saint_valentin']) })
+  assert.deepEqual(r.sansNuit, [])
+  const pos = { evenement: 'commercial:saint_valentin', zone: 'avant', rang: null, jour: null, nuit: null }
+  assert.equal(RP.validerPosition(pos).raison, 'rang_requis')
+  assert.equal(RP.validerPosition(pos, { retrait: true }).ok, true)
+  const e = chargerApi({ sim: SIM_API })
+  const pose = await e.appeler('PUT', { positions: [{ ...pos, niveau: 'Haut' }], simuler: true })
+  assert.deepEqual([pose.code, pose.corps.error], [400, 'rang_requis'])
+  const retrait = await e.appeler('PUT', { positions: [{ ...pos, niveau: null }], confirme: { nuits: 1 } })
+  assert.equal(retrait.code, 200)
+  assert.ok(e.gestes.some(x => x[0] === 'retirer'))
+})
+
+test('LE TEST QUI COMPTE (review A) : le calendrier de pilotage lit les crans comme le moteur — une ligne qui ne porte qu une largeur ne masque pas le +1 des vacances', () => {
+  const { calendrier } = require('../lib/yield/calendrier-pilotage')
+  const contexte = R2.construireContexte({ zoneBien: 'C', vacances: [NOEL_26], evenements: [], debut: '2026-12-01', fin: '2027-01-31' })
+  const reglages = new Map([
+    ['vacances_zone_du_bien', { segment: 'vacances_zone_du_bien', crans: 1, actif: true }],
+    [CLE_NOEL, { segment: CLE_NOEL, crans: null, actif: true, weekends_avant: 2 }]])
+  const noel = calendrier({ contexte, debut: '2026-12-01', fin: '2027-01-31', reglages, positions: null, evenements: [] })
+    .find(e => e.debut === '2026-12-19')
+  assert.deepEqual([noel.crans_ajustes, noel.cle_reglage], [1, 'vacances_zone_du_bien'])
 })
