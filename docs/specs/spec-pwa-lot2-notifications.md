@@ -1,9 +1,10 @@
 # Spec — PWA lot 2 : les notifications push de l'appli hôte
 
 **Statut : décisions produit prises par Thierry le 7 novembre 2026 (§13).
-Aucune ligne de code n'est écrite.** La spec a passé deux reviews avant ces
-décisions : la première a trouvé 5 constats de sécurité et 2 bloquants ; la
-seconde, la dernière, a vérifié leur correction.
+Le lot 2a (le socle) est EN PRODUCTION depuis le 7 novembre 2026 à 19 h 57
+(main `019ae717`, KB `docs/kb/pwa.md` §8) ; 2b et 2c restent à coder.** La spec
+a passé deux reviews avant ces décisions : la première a trouvé 5 constats de
+sécurité et 2 bloquants ; la seconde, la dernière, a vérifié leur correction.
 
 **Comment lire.** Les §0 à §8 disent ce que le produit fera. Les §9 à §12 sont
 techniques et ne demandent aucune décision. KB du lot 1 : `docs/kb/pwa.md`.
@@ -460,13 +461,27 @@ Cette alerte suit désormais le mode urgence ; seule la décision 7 garde
 recetté) :
 1. **2a — le socle** : table et endpoint d'abonnement, clés, service worker,
    bouton « cet appareil » et essai dans `/settings`. À la fin, on reçoit une
-   notification d'essai.
+   notification d'essai. **En production le 7 novembre 2026, recette Android
+   conforme.**
 2. **2b — la configuration** : le tableau par personne, les plages, le mode
    urgence et sa file d'attente, les contacts libres, la migration des listes
    d'`agent_alert_config`, le déménagement du bloc « Alertes » de Messages, la
    langue sur le profil.
 3. **2c — les quatorze événements** branchés un par un, avec le remplacement
    du SMS et l'e-mail du dernier appareil.
+
+**Question ouverte pour le 2b, née de la recette du 2a :**
+- **Q21 — le message « notifications bloquées » sur Android.** Le
+  7 novembre, en réabonnant son téléphone en production, Thierry a lu
+  « Les notifications sont bloquées pour HôteSmart sur cet appareil ». Le
+  réglage Notifications de Chrome pour `hotesmart.vercel.app` (Paramètres des
+  sites) bloquait le site, alors que les notifications de l'appli installée
+  étaient actives côté Android. Après réautorisation dans Chrome, le
+  réabonnement est passé ; la cause n'est pas établie (le code ne touche pas à
+  la permission). Aujourd'hui le message ne parle que du navigateur en
+  général, et de l'iPhone. Faut-il qu'il donne le chemin exact sur Android
+  (Chrome → ⋮ → Paramètres → Paramètres des sites → Notifications →
+  hotesmart.vercel.app → Autoriser), voire un lien d'aide dans le guide ?
 
 **Ce que le lot ne fait pas** :
 - pas de notification marketing, ni rien vers les voyageurs ;
