@@ -84,10 +84,18 @@
     sel.innerHTML = I18n.langues.map(l => `<option value="${esc(l.code)}"${l.code === I18n.lang ? ' selected' : ''}>${esc(l.nom)}</option>`).join('');
     sel.addEventListener('change', e => {
       const code = e.target.value;
-      I18n.set(code);
       // PWA lot 2b : la langue de la PERSONNE, pour ses notifications. Chargé
       // à la demande et seulement sur ce geste — jamais au chargement d'une page.
-      import('/shared/langue-personne.js').then(m => m.enregistrer(code)).catch(() => {});
+      // ⚠ ENREGISTRÉE AVANT LE CHANGEMENT DE LANGUE DE LA PAGE (recette du
+      // 7 novembre 2026) : plusieurs écrans se RECHARGENT sur `i18n:changed`, et
+      // le rechargement coupait l'enregistrement — l'appareil était passé en
+      // français, le serveur avait gardé l'anglais. On attend donc
+      // l'enregistrement, au plus 1,5 s : une panne réseau ne bloque jamais
+      // le changement de langue.
+      const enregistrement = import('/shared/langue-personne.js')
+        .then(m => m.enregistrer(code)).catch(() => {});
+      Promise.race([enregistrement, new Promise(r => setTimeout(r, 1500))])
+        .then(() => I18n.set(code));
     });
     container.appendChild(sel);
     I18n.apply(container);

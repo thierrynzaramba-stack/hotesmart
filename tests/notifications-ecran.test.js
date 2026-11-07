@@ -304,22 +304,25 @@ test('le guide porte la section vers laquelle l\'écran renvoie', () => {
 
 // ─── La langue ──────────────────────────────────────────────────────────────
 
-function chargerNav () {
+function chargerNav ({ enregistrer = null } = {}) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="m"></div></body></html>', {
     url: 'https://hotesmart.test/pages/aujourdhui', runScripts: 'outside-only', pretendToBeVisual: true
   })
   const w = dom.window
   const imports = []
   const enregistres = []
+  const ordre = []
   w.__importer = async (p) => {
     imports.push(p)
-    if (p === '/shared/langue-personne.js') return { async enregistrer (code) { enregistres.push(code) } }
+    if (p === '/shared/langue-personne.js') {
+      return { enregistrer: enregistrer || (async (code) => { enregistres.push(code); ordre.push('enregistree:' + code) }) }
+    }
     throw new Error('module inattendu ' + p)
   }
   const poses = []
-  w.I18n = { langues: [{ code: 'fr', nom: 'Français' }, { code: 'en', nom: 'English' }], lang: 'fr', set (c) { poses.push(c) }, apply () {} }
+  w.I18n = { langues: [{ code: 'fr', nom: 'Français' }, { code: 'en', nom: 'English' }], lang: 'fr', set (c) { poses.push(c); ordre.push('page:' + c) }, apply () {} }
   w.eval(lire('shared/nav.js').replace(/\bimport\(/g, '__importer('))
-  return { w, imports, enregistres, poses }
+  return { w, imports, enregistres, poses, ordre }
 }
 
 test('LE TEST QUI COMPTE : la langue s\'enregistre sur le geste du menu ≡, jamais au chargement', async () => {
@@ -334,6 +337,21 @@ test('LE TEST QUI COMPTE : la langue s\'enregistre sur le geste du menu ≡, jam
   for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r))
   assert.deepEqual(n.poses, ['en'], 'la page change de langue')
   assert.deepEqual(n.enregistres, ['en'], 'et la langue de la personne est enregistrée')
+  // ⚠ Recette du 7 novembre : la page se RECHARGE au changement de langue ;
+  // l'enregistrement doit donc être fini AVANT.
+  assert.deepEqual(n.ordre, ['enregistree:en', 'page:en'])
+})
+
+test('un enregistrement qui ne répond pas ne bloque pas le changement de langue plus de 1,5 s', async () => {
+  const n = chargerNav({ enregistrer: () => new Promise(() => {}) })
+  n.w.HSNav.renderLangSelector(n.w.document.getElementById('m'))
+  const sel = n.w.document.querySelector('#m select')
+  sel.value = 'en'
+  sel.dispatchEvent(new n.w.Event('change', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 200))
+  assert.deepEqual(n.poses, [], 'on attend l\'enregistrement')
+  await new Promise(r => setTimeout(r, 1500))
+  assert.deepEqual(n.poses, ['en'], 'puis la page change quand même')
 })
 
 test('enregistrer la langue : avec la session de la personne ; sans session, rien ne part', async () => {
@@ -358,7 +376,7 @@ function chargerModule ({ ua, permission = 'default', maxTouchPoints = 0, appels
   const src = lire('shared/push-appareil.js')
   const navigator = { userAgent: ua, maxTouchPoints, serviceWorker: {} }
   const window = { PushManager: function () {}, Notification: { permission } }
-  const fetch = async (url, init) => { appels.push([url, init.method, JSON.parse(init.body)]); return { ok: true, status: 200, json: async () => ({ ok: true }) } }
+  const fetch = async (url, init) => { appels.push([url, init.method, JSON.parse(init.body), !!init.keepalive]); return { ok: true, status: 200, json: async () => ({ ok: true }) } }
   // eslint-disable-next-line no-new-func
   return new Function('navigator', 'window', 'Notification', 'localStorage', 'fetch', 'setTimeout', 'clearTimeout', 'AbortController',
     src.replace(/^export\s+/gm, '') + '\n;return { plateforme, bloquee, enregistrerReglages, enregistrerLangue }')(
@@ -381,7 +399,7 @@ test('le type d\'appareil, et le blocage lu sans rien demander', async () => {
   await m.enregistrerReglages('jeton', { evenements: { avis: {} }, plages: [] })
   await m.enregistrerLangue('jeton', 'en')
   assert.deepEqual(appels, [
-    ['/api/push', 'POST', { action: 'reglages', evenements: { avis: {} }, plages: [] }],
-    ['/api/push', 'POST', { action: 'langue', langue: 'en' }]
-  ])
+    ['/api/push', 'POST', { action: 'reglages', evenements: { avis: {} }, plages: [] }, false],
+    ['/api/push', 'POST', { action: 'langue', langue: 'en' }, true]
+  ], 'la langue part en keepalive : elle survit à un rechargement')
 })

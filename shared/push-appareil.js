@@ -104,7 +104,7 @@ function memeCle (sub, octets) {
   return a.length === octets.length && a.every((v, i) => v === octets[i])
 }
 
-async function appelServeur (jeton, methode, corps) {
+async function appelServeur (jeton, methode, corps, { keepalive = false } = {}) {
   const ctl = new AbortController()
   const minuteur = setTimeout(() => ctl.abort(), DELAI_SERVEUR_MS * 3)
   try {
@@ -113,6 +113,7 @@ async function appelServeur (jeton, methode, corps) {
       headers: { authorization: `Bearer ${jeton}`, ...(corps ? { 'content-type': 'application/json' } : {}) },
       body: corps ? JSON.stringify(corps) : undefined,
       cache: 'no-store',
+      keepalive,
       signal: ctl.signal
     })
     let d = {}
@@ -168,8 +169,10 @@ export async function enregistrerReglages (jeton, { evenements, plages }) {
 // LA LANGUE DE LA PERSONNE (lot 2b), dans laquelle ses notifications lui
 // arriveront. Appelée par le sélecteur du menu ≡ (shared/nav.js), seulement sur
 // ce geste.
+// ⚠ `keepalive` : si la page se recharge malgré l'attente de shared/nav.js
+// (réseau lent), le navigateur termine quand même l'envoi.
 export async function enregistrerLangue (jeton, langue) {
-  return appelServeur(jeton, 'POST', { action: 'langue', langue })
+  return appelServeur(jeton, 'POST', { action: 'langue', langue }, { keepalive: true })
 }
 
 export async function essai (jeton) {
