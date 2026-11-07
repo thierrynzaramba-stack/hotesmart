@@ -150,7 +150,10 @@ function installer (lignes, journal, tables = {}) {
       // premiere seule laissait les deux ecrans a 401 ou 403.
       return {
         ...vraieGarde,
-        requirePermission: async () => ({ ok: true, contexte, compte: TITULAIRE, bien: null }),
+        // ⚠ `accountUserId` COMME LA VRAIE GARDE : sans lui, un endpoint qui
+        // en deduit son compte (`api/channel-property.js`) lisait pour
+        // `undefined`, et sa lecture des biens archives n'avait jamais lieu.
+        requirePermission: async () => ({ ok: true, contexte, compte: TITULAIRE, accountUserId: TITULAIRE, userId: TITULAIRE, bien: null }),
         contexteDEcran: async () => ({ ok: true, userId: TITULAIRE, accountUserId: TITULAIRE, contexte }),
         // ⚠ QUATRIEME PORTE D'ENTREE : certains endpoints appellent
         // `verifierSession` directement, sans passer par les deux gardes
@@ -287,4 +290,33 @@ test("EXHAUSTIVITE : tout fichier de api/ecran/ figure dans la liste ci-dessus",
   for (const [f, raison] of Object.entries(EXEMPTES)) {
     assert.ok(String(raison).length > 40, `l exemption de ${f} n a pas de raison ecrite`)
   }
+})
+
+test('LE TEST QUI COMPTE : un bien BEDS24 archive en base ne revient pas par la liste live du provider', async () => {
+  // ⚠ CONSTAT 4 DE LA REVUE DU 7 NOVEMBRE 2026. Les biens Beds24 ne viennent
+  // pas de la base mais de l'API du provider : `sansArchives` ne pouvait pas
+  // les atteindre, et un bien Beds24 archive restait dans les bulles du
+  // calendrier et dans la liste de la base de connaissance.
+  const RANGE_B24 = {
+    id: '44444444-4444-4444-4444-444444444444', user_id: TITULAIRE, name: 'Studio Beds24',
+    provider: 'beds24', provider_property_id: '555', archive_le: '2026-11-03T20:42:19.342Z'
+  }
+  const vraiFetch = global.fetch
+  global.fetch = async (url) => {
+    if (String(url).includes('beds24.com/api/v2/properties')) {
+      return { ok: true, status: 200, json: async () => ({ data: [
+        { id: 555, name: 'Studio Beds24', roomTypes: [] },
+        { id: 556, name: 'Gite Beds24 vivant', roomTypes: [] }
+      ] }) }
+    }
+    throw new Error('appel reseau inattendu : ' + url)
+  }
+  try {
+    const { rep, erreur } = await appeler('api/channel-property.js', {}, [VIVANT, RANGE_B24], { api_keys: [{ api_key: 'cle-de-test' }] })
+    assert.equal(erreur, undefined, `l endpoint a leve : ${erreur && erreur.message}`)
+    const texte = JSON.stringify(rep.corps || {})
+    assert.ok(texte.includes('Gite Beds24 vivant'),
+      `la liste live Beds24 n a pas ete servie (code ${rep.code}) : ce test ne mesure rien`)
+    assert.ok(!texte.includes('Studio Beds24'), 'le bien Beds24 archive revient par la liste live')
+  } finally { global.fetch = vraiFetch }
 })

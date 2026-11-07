@@ -14,7 +14,7 @@ const { refusPlancher, valeurEffective } = require('../lib/plancher-vs-base')
 const { refsDuPerimetre } = require('../lib/permissions')
 const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
 const { clesMigrees } = require('../lib/cles-migrees')
-const { sansArchives } = require('../lib/biens-vivants')
+const { sansArchives, clesArchivees, cleDuBien } = require('../lib/biens-vivants')
 
 const { surveillerReponse } = require('../lib/reponse-partenaire')
 const supabase = createClient(
@@ -267,6 +267,15 @@ module.exports = async function handler(req, res) {
         // snapshots, messages, codes d'acces) ; celle-ci ne fait que lire, et
         // c'est pourquoi elle avait echappe a l'inventaire.
         const migrees = await clesMigrees(supabase, compteLecture, 'beds24')
+        // ⚠ ET UN BIEN BEDS24 ARCHIVE EN BASE NE SORT PAS NON PLUS — constat 4
+        // de la revue du 7 novembre 2026. `sansArchives` ne porte que sur la
+        // lecture en BASE ; les biens Beds24 arrivent de l'API du provider, que
+        // rien ne comparait a `archive_le` : le bien restait dans les bulles du
+        // calendrier et dans la liste de la base de connaissance.
+        // ⚠ CLE COMPOSITE, et une lecture ratee n'ecarte rien (`clesArchivees`
+        // ne leve jamais) : un bien de trop vaut mieux qu'une liste amputee, que
+        // l'onboarding prendrait pour « ce bien n'existe pas ».
+        const archivesBeds24 = await clesArchivees(supabase, [compteLecture])
         // ⚠ GARDE AVEUGLE : on n'ajoute RIEN plutot que d'ajouter des fantomes.
         // Ici la liste Beds24 n'est qu'un complement de `channexProps`, qui vient
         // du coeur et reste juste : l'ecran garde donc les biens qu'on connait.
@@ -302,6 +311,8 @@ module.exports = async function handler(req, res) {
           .filter(b => !dejaServis.has(String(b.id)))
           // Migre : il ne doit plus apparaitre du tout.
           .filter(b => !migrees.has(String(b.id)))
+          // Archive en base : il quitte la liste comme un bien Channex archive.
+          .filter(b => !archivesBeds24.cles.has(cleDuBien(compteLecture, String(b.id))))
           .map(b => ({
           id: b.id,
           name: b.name,
