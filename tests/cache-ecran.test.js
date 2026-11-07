@@ -326,7 +326,10 @@ test("LE TEST QUI COMPTE : les CINQ sorties effacent le cache, par un seul geste
   // moitie differente : `compte.html` ne vidait que le cache d'ecran et
   // laissait le compte courant ; `auth-guard` ne vidait que le compte courant.
   // Un seul `purgerCachesLocaux` ferme la classe.
-  const geste = /purgerCachesLocaux\(\)/
+  // ⚠ AVEC OU SANS OPTIONS (PWA lot 2a) : le changement d'utilisateur de
+  // auth-guard appelle `purgerCachesLocaux({ appareil: false })` — la MÊME
+  // purge des caches, sans oublier l'abonnement push de l'appareil.
+  const geste = /purgerCachesLocaux\((\{[^)]*\})?\)/
   const blocs = [
     ['shared/supabase.js', 'la deconnexion', /export async function signOut[\s\S]*?\n\}/],
     ['components/auth-guard.js', 'un autre utilisateur sur ce navigateur',
