@@ -101,7 +101,7 @@ test('LE TEST QUI COMPTE : le tableau vient du serveur, et « Enregistrer » ren
   assert.equal(e.$('n-quand').hidden, false)
   assert.equal(e.$('n-calme').hidden, false)
   const lignes = e.w.document.querySelectorAll('#n-tableau tbody tr:not(.n-groupe)')
-  assert.equal(lignes.length, 14, 'les quatorze événements')
+  assert.equal(lignes.length, 15, 'les quinze événements')
   assert.equal(e.w.document.querySelectorAll('#n-tableau tr.n-groupe').length, 4)
   // Les défauts de Q23, tels que l'écran les montre.
   assert.equal(e.caseDe('avis', 'push').checked, true)
@@ -186,13 +186,16 @@ test('LE TEST QUI COMPTE : retirer la surréservation des urgences se confirme ;
   refus.$('n-enregistrer').click()
   await refus.attendre()
   assert.equal(refus.appels.find(a => a.enregistrer).enregistrer.evenements.surreservation.urgent, true)
-  // Tous les canaux retirés : confirmé au dernier seulement.
+  // Tous les canaux retirés : confirmé au dernier seulement (le SMS est coché
+  // par défaut sur la surréservation, Q26).
+  assert.equal(refus.caseDe('surreservation', 'sms').checked, true)
   refus.changer(refus.caseDe('surreservation', 'push'), false)
-  assert.equal(refus.confirmations.length, 1, 'un canal restant : pas de question')
   refus.changer(refus.caseDe('surreservation', 'email'), false)
+  assert.equal(refus.confirmations.length, 1, 'un canal restant : pas de question')
+  refus.changer(refus.caseDe('surreservation', 'sms'), false)
   assert.equal(refus.confirmations.length, 2)
   assert.match(refus.confirmations[1], /ne vous préviendra plus du tout/)
-  assert.equal(refus.caseDe('surreservation', 'email').checked, true)
+  assert.equal(refus.caseDe('surreservation', 'sms').checked, true)
   // Accepté : la personne a le dernier mot (Q17).
   const accepte = await ouvrirSettings({ confirmer: () => true })
   accepte.changer(accepte.caseDe('surreservation', 'urgent'), false)

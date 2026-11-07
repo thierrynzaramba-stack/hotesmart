@@ -55,6 +55,10 @@ const TACHES = [
   // du cycle. Elle porte son propre budget mur de 20 s et un plafond de 30 par
   // cycle : le reliquat part au cycle suivant, avec son echeance intacte.
   'brouillons_dus',
+  // ⚠ AJOUTEE LE 8 NOVEMBRE 2026 (PWA lot 2c-1) : les notifications qui
+  // attendaient la fin des heures calmes partent, regroupees par personne.
+  // Juste apres les brouillons et avant le dispatch : elle ENVOIE aussi.
+  'notifications_file',
   'dispatch_changements',
   // Dette 59, 19 octobre 2026 — la seule entree neuve de ce lot.
   'releve_canaux'

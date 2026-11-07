@@ -136,6 +136,7 @@ const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
 const { executerAutoValidations } = require('../lib/avis/auto-validation')
 const { envoyerBrouillonsDus } = require('../lib/guestflow/brouillons-dus')
+const { viderFile: viderFileNotifications } = require('../lib/notifications/file')
 const { releverLesComptesDus } = require('../lib/canaux-du-bien')
 const { demarrerPassage } = require('../lib/metriques-cron')
 const { ecrireLePassage, purgerSiDue: purgerLesMesures,
@@ -786,6 +787,26 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur brouillons dus:', err.message)
       results.errors.push({ context: 'brouillons_dus', error: err.message })
+    }
+
+    // 4 ter. LES NOTIFICATIONS QUI ATTENDAIENT LA FIN DES HEURES CALMES (PWA lot
+    // 2c-1, docs/kb/pwa.md §10). Une passe prend ce qui est dû, en le SUPPRIMANT
+    // (une ligne ne part qu'une fois, même si deux passes se croisent), et envoie
+    // UN message regroupé par personne et par canal.
+    // ⚠ AUCUN BALAYAGE : la lecture porte sur `a` (index de la migration
+    // 2026-11-08-notifications-file), donc sur ce qui est dû, plafonné à 200
+    // lignes par passe ; le reliquat part au cycle suivant.
+    // ⚠ Placée ICI, avant le dispatch, pour la même raison que les brouillons :
+    // elle ENVOIE, et le dispatch est le poste le plus coûteux du cycle.
+    try {
+      await chrono.mesure('notifications_file', async () => {
+        const bilanFile = await viderFileNotifications()
+        results.notificationsFile = bilanFile
+      })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur file des notifications:', err.message)
+      results.errors.push({ context: 'notifications_file', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

@@ -361,3 +361,50 @@ rien.
    enregistrée — vérifiée par moi en base.
 5. Android : bloquer les notifications du site dans Chrome, rouvrir l'onglet :
    le chemin exact s'affiche, avec le lien vers le guide.
+
+## 10. Lot 2c-1 — le point d'envoi unique (8 novembre 2026)
+
+Spec : `docs/specs/spec-pwa-lot2-notifications.md` §16 (décisions Q25 à Q28).
+Branche `pwa-lot-2c1-envoi`, partie de `pwa-lot-2b-reglages`. La production
+reçoit 2b et tout le 2c ensemble (Q24).
+
+| Pièce | Fichier |
+|---|---|
+| Point d'envoi | `lib/notifications/notifier.js` (destinataires → réglages → décision → envoi ou file) |
+| Destinataires | `lib/notifications/destinataires.js` (titulaire par `is_owner`, membres par `niveauEffectif` et `dansPerimetre`, jamais un accès par lien) |
+| Envoi immédiat | `lib/notifications/envoi.js` (notification, e-mail plateforme, SMS clé du compte seulement sans appareil, dernier appareil) |
+| File d'attente | `migrations/2026-11-08-notifications-file.sql`, writer unique `lib/notifications/file.js`, passe `notifications_file` du cron |
+| Textes | `lib/notifications/textes.js` (fr, en, es ; le 2c-1 rédige la surréservation) |
+| Premier émetteur | `lib/cron-overbooking.js` (la surréservation) |
+| Retour au bon écran | `components/auth-guard.js` (`next` vers la page de connexion) |
+| Essai sur soi | `POST /api/push` `essai_evenement`, `vider_ma_file` |
+
+**Les règles, et pourquoi :**
+1. **Quinze événements** (Q27 : « Évaluation du voyageur à faire », trouvée à
+   l'inventaire), et deux exceptions aux défauts : le SMS de la surréservation
+   coché (Q26), l'e-mail du message d'un voyageur décoché (Q28).
+2. **Les droits se relisent à chaque envoi.** La surréservation va à qui peut
+   l'acquitter (`reservations` en écriture) ; un événement sans domaine (k) au
+   titulaire seul.
+3. **La notification remplace le SMS** (Q11) : jamais de SMS à qui a un
+   appareil abonné, même si la notification est décochée pour l'événement.
+   **Ne pas savoir vaut « sans appareil »** (lecture en panne, clés absentes) :
+   un SMS de trop plutôt qu'une surréservation manquée.
+4. **Le dernier appareil** (Q13) : quand tous les appareils d'une personne
+   répondent 404 ou 410, elle reçoit un e-mail, et le SMS coché part dès cet
+   envoi.
+5. **La file est rédigée dans la langue de la personne** au moment où
+   l'événement arrive. **Un sujet = une ligne** : la relance d'une
+   surréservation remplace sa ligne.
+6. **Une ligne ne part qu'une fois** : la passe la SUPPRIME en la prenant.
+   Une ligne prise puis ratée est perdue — comme un envoi immédiat raté.
+7. **Un essai se dit essai** (« Essai — », « Test — », « Prueba — »), sur un
+   logement fictif, et ne va qu'à l'appelant (`seulement`) : jamais à un autre
+   membre de son compte.
+8. **Après une reconnexion, on revient à l'écran demandé** : `requireAuth`
+   passe la page en `next` ; `pages/login.html` la filtre (chemin du site
+   seulement) ; la page de connexion n'est jamais un `next`.
+
+**Recette sur staging (pas de cron)** : l'essai et « vider ma file » se
+lancent depuis l'onglet Notifications ouvert (console du navigateur, avec la
+session), ou par moi dans le navigateur de Thierry.

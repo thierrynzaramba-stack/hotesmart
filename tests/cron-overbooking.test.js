@@ -208,3 +208,40 @@ test('ALARME : une fermeture AUTOMATIQUE ne vaut pas « vu » — l\'alarme repa
   assert.strictEqual(bilan.ouverts, 1)
   assert.strictEqual(envois.length, 1, 'l\'alarme crie de nouveau')
 })
+
+// ─── PWA lot 2c-1 : l'hôte est prévenu par le point d'envoi unique ──────────
+// Ce que la surréservation transmet à `notifier` (lib/notifications/notifier.js),
+// EXÉCUTÉ par `traiterAlarmes` : le compte, le code, le bien, les nuits comme
+// séjour, l'écran d'acquittement, un sujet par bien, et `rappel` pour que chaque
+// relance sonne. Le fondateur reste en copie, par son propre canal.
+test('LE TEST QUI COMPTE : la surréservation passe par le point d\'envoi unique, et le fondateur reste en copie', async () => {
+  const capture = {}
+  const envois = []
+  const appels = []
+  const cheminNotifier = require.resolve('../lib/notifications/notifier')
+  const avant = require.cache[cheminNotifier]
+  require.cache[cheminNotifier] = { id: cheminNotifier, filename: cheminNotifier, loaded: true,
+    exports: { notifier: async (p) => { appels.push(p); return { ok: true, personne_joignable: true, erreurs: [] } } } }
+  try {
+    const g = { userId: 'u1', propertyId: 'p1', propertyName: 'La bulle', nuits: ['2026-12-24', '2026-12-25'], bookings: ['a', 'b'], unites: 1 }
+    const mod = requireFrais(capture, envois, [])
+    const bilan = await mod.traiterAlarmes([g])
+    assert.strictEqual(bilan.ouverts, 1)
+    assert.strictEqual(appels.length, 1, 'l\'hôte est prévenu une fois')
+    const p = appels[0]
+    assert.deepStrictEqual({ compte: p.compte, code: p.code, bien: p.bien, chemin: p.chemin, sujet: p.sujet, rappel: p.rappel },
+      { compte: 'u1', code: 'surreservation', bien: { ref: 'p1' }, chemin: '/pages/aujourdhui', sujet: 'surreservation:p1', rappel: true })
+    assert.deepStrictEqual(p.sejour, { arrivee: '2026-12-24', depart: '2026-12-25' })
+    assert.deepStrictEqual(p.donnees, { bien: 'La bulle', nuits: ['2026-12-24', '2026-12-25'], relance: false })
+    assert.strictEqual(envois.length, 1, 'le fondateur reste en copie')
+    // Un point d'envoi qui lève ne fait taire ni le cycle ni le fondateur.
+    require.cache[cheminNotifier].exports.notifier = async () => { throw new Error('panne') }
+    const envois2 = []
+    const mod2 = requireFrais({}, envois2, [])
+    const bilan2 = await mod2.traiterAlarmes([g])
+    assert.strictEqual(bilan2.ouverts, 1)
+    assert.strictEqual(envois2.length, 1)
+  } finally {
+    if (avant) require.cache[cheminNotifier] = avant; else delete require.cache[cheminNotifier]
+  }
+})
