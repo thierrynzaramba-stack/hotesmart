@@ -29,6 +29,16 @@ export async function requireAuth() {
 
   const userId = session.user.id
 
+  // NOTIFICATIONS DE CET APPAREIL (PWA lot 2a, shared/push-appareil.js) : un
+  // appareil abonné pour une AUTRE personne est désabonné, et un abonnement
+  // renouvelé par le navigateur est renvoyé au serveur. Sans attente ni appel
+  // réseau dans le cas courant ; jamais bloquant, jamais une raison d'échouer.
+  if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+    import('/shared/push-appareil.js')
+      .then(m => m.verifierAppareil(userId, session.access_token || null))
+      .catch(() => {})
+  }
+
   // ⚠ LE STOCKAGE DE SESSION PEUT LEVER, ET C'EST ICI QU'ON ARRIVE QUAND IL
   // LEVE. `sessionStorage` est inaccessible dans exactement les memes
   // configurations que `localStorage` — donnees de site bloquees, iframe sans

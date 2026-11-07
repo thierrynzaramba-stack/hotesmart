@@ -128,6 +128,7 @@
 
   <div class="tabs">
     <button class="tab active" id="tab-equipe">Équipe et droits</button>
+    <button class="tab" id="tab-notifications">Notifications</button>
     <a class="tab" href="/connexions">Connexions <span class="ext">↗</span></a>
     <a class="tab" href="/abonnement">Abonnement <span class="ext">↗</span></a>
     <a class="tab" href="/pages/compte.html">Mon compte <span class="ext">↗</span></a>
@@ -162,6 +163,28 @@
       <div id="liste"></div>
     </div>
 
+  </div>
+
+  <!-- NOTIFICATIONS (PWA lot 2a) — docs/specs/spec-pwa-lot2-notifications.md §6.
+       Au lot 2a : abonner CET appareil, s'envoyer un essai, voir et retirer
+       ses appareils. Le tableau des événements et le mode « urgence
+       seulement » arrivent au lot 2b. Données de la PERSONNE connectée. -->
+  <div id="zone-notifications" style="display:none">
+    <div class="card">
+      <div class="card-title">Notifications sur cet appareil</div>
+      <div class="card-sub">Recevez les alertes d’HôteSmart sur ce téléphone ou cet ordinateur, même quand l’application est fermée.</div>
+      <div id="n-etat" class="card-sub" style="margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="n-abonner" hidden>Recevoir les notifications sur cet appareil</button>
+        <button class="btn-ghost" id="n-essai" hidden>M’envoyer un essai</button>
+        <button class="btn-danger" id="n-desabonner" hidden>Ne plus recevoir sur cet appareil</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Mes appareils abonnés</div>
+      <div class="card-sub">Chaque appareil où vous avez activé les notifications. Se déconnecter d’un appareil le retire aussi.</div>
+      <div id="n-appareils"></div>
+    </div>
   </div>
 </div>
 
@@ -625,6 +648,129 @@ $('liste').onclick = e => {
 const { data: { session } } = await supabase.auth.getSession()
 if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings' + location.search)
 else charger()
+
+// ─── Onglet « Notifications » (PWA lot 2a) ──────────────────────────────────
+// Tout ce que le navigateur fait des notifications vit dans
+// shared/push-appareil.js ; cette page ne fait qu'afficher et relayer les gestes.
+import * as P from '/shared/push-appareil.js'
+
+function montrerOnglet (nom) {
+  const notif = nom === 'notifications'
+  $('tab-equipe').classList.toggle('active', !notif)
+  $('tab-notifications').classList.toggle('active', notif)
+  $('zone-notifications').style.display = notif ? 'block' : 'none'
+  // L'onglet Équipe rallume ce qui était visible avant (drapeaux de `charger`).
+  $('zone-equipe').style.display = !notif && $('zone-equipe').dataset.visible === 'oui' ? 'block' : 'none'
+  $('zone-refus').style.display = !notif && $('zone-refus').dataset.visible === 'oui' ? 'block' : 'none'
+  if (notif) rendreNotifications().catch(e => message(e.message))
+}
+
+async function jetonActuel () {
+  const { data } = await supabase.auth.getSession()
+  return data.session?.access_token || null
+}
+
+const MOTIFS = {
+  non_pris: 'Ce navigateur ne permet pas les notifications.',
+  iphone_hors_appli: 'Sur iPhone, posez d’abord HôteSmart sur l’écran d’accueil (Partager, puis « Sur l’écran d’accueil »), ouvrez-le depuis son icône, puis revenez ici.',
+  sans_service_worker: 'Ouvrez une fois l’accueil d’HôteSmart sur cet appareil, puis revenez ici.',
+  refusee: 'Les notifications sont bloquées pour HôteSmart sur cet appareil. Autorisez-les dans les réglages du navigateur (sur iPhone : supprimez l’icône, reposez l’appli, et acceptez).',
+  ignoree: 'La demande d’autorisation a été fermée sans réponse. Réessayez.',
+  cles_absentes: 'Les notifications ne sont pas encore activées sur HôteSmart.',
+  plafond_atteint: 'Vous avez déjà 10 appareils abonnés : retirez-en un d’abord.'
+}
+
+async function rendreNotifications () {
+  const jeton = await jetonActuel()
+  if (!jeton) return
+  const etat = await P.etatServeur(jeton)
+  if (!etat.ok) { message(etat.error || 'Lecture impossible, réessayez.'); return }
+  const sub = await P.abonnementActuel()
+  const ici = sub ? await P.empreinte(sub.endpoint) : null
+  const appareils = etat.appareils || []
+  const abonneIci = !!ici && appareils.some(a => a.empreinte === ici)
+
+  let texte
+  if (!P.pris()) texte = MOTIFS.non_pris
+  else if (P.iphoneHorsAppli()) texte = MOTIFS.iphone_hors_appli
+  else if (!etat.pret) texte = MOTIFS.cles_absentes
+  else if (abonneIci) texte = 'Cet appareil reçoit les notifications.'
+  else texte = 'Cet appareil ne reçoit pas encore les notifications.'
+  $('n-etat').textContent = texte
+  const possible = P.pris() && !P.iphoneHorsAppli() && etat.pret
+  $('n-abonner').hidden = !possible || abonneIci
+  $('n-essai').hidden = !possible || !abonneIci
+  $('n-desabonner').hidden = !abonneIci
+
+  $('n-appareils').innerHTML = appareils.length
+    ? appareils.map(a => `<div class="bloc" style="display:flex;align-items:center;gap:12px">
+        <div style="flex:1"><div style="font-size:13px">${esc(a.appareil || 'Appareil')}${a.empreinte === ici ? ' <span class="card-sub">(cet appareil)</span>' : ''}</div>
+        <div class="card-sub" style="margin:0">Abonné le ${esc(new Date(a.cree_le).toLocaleDateString('fr-FR'))}${a.dernier_envoi_le ? ' · dernière notification le ' + esc(new Date(a.dernier_envoi_le).toLocaleDateString('fr-FR')) : ''}</div></div>
+        <button class="btn-danger" data-retirer="${esc(a.id)}">Retirer</button></div>`).join('')
+    : '<div class="card-sub" style="margin:0">Aucun appareil abonné pour le moment.</div>'
+}
+
+$('tab-equipe').onclick = () => montrerOnglet('equipe')
+$('tab-notifications').onclick = () => montrerOnglet('notifications')
+
+// ⚠ LE CLIC APPELLE `abonner` SANS ATTENTE PRÉALABLE : sur iPhone, la demande
+// d'autorisation doit suivre le geste. La session est lue DANS `abonner`, après.
+$('n-abonner').onclick = async () => {
+  $('n-abonner').disabled = true
+  try {
+    const r = await P.abonner({
+      session: async () => {
+        const { data } = await supabase.auth.getSession()
+        return { jeton: data.session?.access_token || null, userId: data.session?.user?.id || null }
+      }
+    })
+    if (!r.ok) message(MOTIFS[r.motif] || r.message || 'L’abonnement a échoué, réessayez.')
+    else message('Cet appareil recevra les notifications. Envoyez-vous un essai pour vérifier.', 'ok')
+    await rendreNotifications()
+  } catch (e) { message(e.message) }
+  finally { $('n-abonner').disabled = false }
+}
+
+$('n-essai').onclick = async () => {
+  $('n-essai').disabled = true
+  try {
+    const r = await P.essai(await jetonActuel())
+    if (!r.ok) message(r.error || 'L’essai a échoué, réessayez.')
+    else if (r.envoyes > 0) message(`Essai envoyé à ${r.envoyes} appareil${r.envoyes > 1 ? 's' : ''}.`, 'ok')
+    else message('Aucun appareil n’a pu recevoir l’essai. Réabonnez cet appareil.')
+    await rendreNotifications()
+  } catch (e) { message(e.message) }
+  finally { $('n-essai').disabled = false }
+}
+
+$('n-desabonner').onclick = async () => {
+  $('n-desabonner').disabled = true
+  try {
+    await P.oublierAppareil(await jetonActuel())
+    message('Cet appareil ne recevra plus les notifications.', 'ok')
+    await rendreNotifications()
+  } catch (e) { message(e.message) }
+  finally { $('n-desabonner').disabled = false }
+}
+
+$('n-appareils').onclick = async (e) => {
+  const id = e.target?.dataset?.retirer
+  if (!id) return
+  try {
+    const sub = await P.abonnementActuel()
+    const ici = sub ? await P.empreinte(sub.endpoint) : null
+    const lui = ((await P.etatServeur(await jetonActuel())).appareils || []).find(a => a.id === id)
+    // Retirer CET appareil, c'est aussi le désabonner dans le navigateur.
+    if (lui && lui.empreinte === ici) await P.oublierAppareil(await jetonActuel())
+    else {
+      const r = await P.retirer(await jetonActuel(), id)
+      if (!r.ok) message(r.error || 'Retrait impossible, réessayez.')
+    }
+    await rendreNotifications()
+  } catch (err) { message(err.message) }
+}
+
+if (new URLSearchParams(location.search).get('onglet') === 'notifications') montrerOnglet('notifications')
 </script>
 </body>
 </html>

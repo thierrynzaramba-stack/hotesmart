@@ -22,7 +22,16 @@
    4. À l'activation : purge des caches des déploiements précédents et
       de celui de l'ancien service worker « HoteSmart Tarifs », qui
       vivait à la même adresse et mettait les pages HTML en cache.
-   AUCUNE notification push dans ce lot. Aucun texte affiché, aucun hexa.
+   5. NOTIFICATIONS PUSH (lot 2a) : chaque message reçu AFFICHE une
+      notification, toujours — Safari retire l'abonnement d'un service
+      worker qui en reçoit une sans rien montrer. Le message est au
+      format déclaratif (`web_push: 8030`), écrit par le serveur
+      (lib/push/envoyer.js) : le texte affiché vient de lui. Au toucher,
+      on ouvre l'écran visé, jamais hors du site. Un abonnement
+      renouvelé par le navigateur est refait ici, mais rien n'est écrit
+      côté serveur (pas de session ici) : c'est la page qui le renvoie.
+   Aucun hexa. Aucun texte affiché, sinon le nom « HôteSmart » quand le
+   message reçu est illisible.
 
    ⚠ LE CACHE STORAGE EST PARTAGÉ PAR TOUTE L'ORIGINE. L'appli
    prestataire (apps/menages/sw.js) y a le sien, `hotesmart-clean-*` :
@@ -198,4 +207,89 @@ self.addEventListener('fetch', (event) => {
   }
   if (!estCachable(new URL(req.url))) return
   event.respondWith(reseauDAbord(event))
+})
+
+// ─── Notifications push (lot 2a) ─────────────────────────────────────────────
+
+const ACCUEIL = '/dashboard'
+const ICONE = '/shared/pwa/icone-192.png'
+
+function chaine (v, max) {
+  return typeof v === 'string' ? v.slice(0, max) : ''
+}
+
+// Un chemin du site, et rien d'autre : sinon l'accueil. Même règle que le
+// serveur (lib/push/envoyer.js) et que la page de connexion (`next`).
+function cheminSur (brut) {
+  const s = typeof brut === 'string' ? brut : ''
+  if (!s.startsWith('/') || s.startsWith('//') || s.includes('\\')) return ACCUEIL
+  try {
+    const u = new URL(s, self.location.origin)
+    return u.origin === self.location.origin ? u.pathname + u.search + u.hash : ACCUEIL
+  } catch (_) { return ACCUEIL }
+}
+
+function lireMessage (event) {
+  try {
+    const m = event.data ? event.data.json() : null
+    return m && typeof m === 'object' && m.notification && typeof m.notification === 'object' ? m.notification : {}
+  } catch (_) { return {} }
+}
+
+// ⚠ AFFICHE TOUJOURS, MÊME SUR UN MESSAGE ILLISIBLE. Un push qui ne montre
+// rien fait retirer l'abonnement par Safari (« silent push penalties ») : on
+// préfère une notification nue à un appareil qui ne reçoit plus rien.
+function afficher (event) {
+  const n = lireMessage(event)
+  const titre = chaine(n.title, 120) || 'HôteSmart'
+  const tag = chaine(n.tag, 64)
+  const options = {
+    body: chaine(n.body, 300),
+    icon: ICONE,
+    lang: chaine(n.lang, 5) || 'fr',
+    dir: n.dir === 'rtl' ? 'rtl' : 'ltr',
+    data: { chemin: cheminSur(n.navigate) }
+  }
+  if (tag) {
+    options.tag = tag
+    options.renotify = n.renotify === true
+  }
+  return self.registration.showNotification(titre, options)
+}
+
+async function ouvrir (chemin) {
+  const cible = new URL(cheminSur(chemin), self.location.origin).href
+  const fenetres = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  for (const f of fenetres) {
+    if (new URL(f.url).origin !== self.location.origin) continue
+    try {
+      const ouverte = f.navigate ? await f.navigate(cible) : null
+      if (ouverte && ouverte.focus) return ouverte.focus()
+      if (f.focus) return f.focus()
+    } catch (_) { /* fenêtre non contrôlée : on en ouvre une */ }
+  }
+  return self.clients.openWindow(cible)
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil(afficher(event))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const data = event.notification.data || {}
+  event.waitUntil(ouvrir(data.chemin))
+})
+
+// Le navigateur a renouvelé l'abonnement : on se réabonne avec la même clé.
+// ⚠ RIEN N'EST ÉCRIT CÔTÉ SERVEUR : le service worker n'a pas de session. La
+// page, à sa prochaine ouverture, compare et renvoie l'abonnement par le POST
+// de /api/push, avec tous ses contrôles (shared/push-appareil.js).
+self.addEventListener('pushsubscriptionchange', (event) => {
+  const avant = event.oldSubscription && event.oldSubscription.options
+  if (!avant || !avant.applicationServerKey) return
+  event.waitUntil(self.registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: avant.applicationServerKey
+  }).catch(() => {}))
 })

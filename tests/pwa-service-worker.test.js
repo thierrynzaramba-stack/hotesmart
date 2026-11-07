@@ -20,7 +20,11 @@
 //   4. Après un déploiement, la page affichée est la NOUVELLE — même avant
 //      que le téléphone ait pris le nouveau service worker.
 //   5. Hors ligne : la page hors-ligne pour une navigation, rien pour /api/.
-//   6. Aucune notification push dans ce lot.
+//   6. Notifications push (lot 2a, changé EXPRÈS — il garantissait « aucune
+//      notification » au lot 1) : chaque push affiche une notification, même
+//      illisible ; le toucher n'ouvre jamais hors du site ; un abonnement
+//      renouvelé est refait sans rien écrire au serveur ; et aucun autre
+//      écouteur que les six permis.
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -345,12 +349,90 @@ test('le préchargement de navigation est activé, et une navigation POST n\'est
   assert.equal((await sw.requete('/pages/connexions', { navigation: true, methode: 'POST' })).interceptee, false)
 })
 
-test('aucune notification push dans ce lot', () => {
+// ⚠ CE TEST A CHANGÉ EXPRÈS AU LOT 2a (spec PWA lot 2, §9.5). Il disait
+// « aucune notification push dans ce lot » ; il dit maintenant QUELS écouteurs
+// sont permis. Un écouteur de plus (`sync`, `message`…) reste un rouge.
+test('les écouteurs permis, et seulement eux', () => {
   const { reseau } = creerReseau()
   const sw = chargerServiceWorker({ reseau })
-  assert.deepEqual(sw.ecouteurs(), ['activate', 'fetch', 'install'])
-  const code = SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-  assert.doesNotMatch(code, /showNotification|pushManager|['"](push|notificationclick|sync)['"]/)
+  assert.deepEqual(sw.ecouteurs(), ['activate', 'fetch', 'install', 'notificationclick', 'push', 'pushsubscriptionchange'])
+})
+
+const MESSAGE = { web_push: 8030, notification: { title: 'Nouveau message de Marie — La bulle', body: 'Arrivée demain', navigate: '/messages?booking=42', tag: 'conv-42', lang: 'fr', dir: 'ltr' } }
+
+test('LE TEST QUI COMPTE : chaque push AFFICHE une notification, même illisible', async () => {
+  // Safari retire l'abonnement d'un service worker qui reçoit un push sans
+  // rien montrer : un message illisible doit quand même afficher quelque chose.
+  async function afficheesPour (source, corps) {
+    const { reseau } = creerReseau()
+    const sw = chargerServiceWorker({ source, reseau })
+    const r = await sw.evenement('push', sw.messagePush(corps))
+    assert.equal(r.erreurs.length, 0, 'le traitement du push ne doit pas échouer')
+    return sw.notifications
+  }
+  const bonne = await afficheesPour(SOURCE, MESSAGE)
+  assert.equal(bonne.length, 1)
+  assert.equal(bonne[0].titre, 'Nouveau message de Marie — La bulle')
+  assert.equal(bonne[0].options.body, 'Arrivée demain')
+  assert.equal(bonne[0].options.tag, 'conv-42')
+  assert.equal(bonne[0].options.renotify, false)
+  assert.equal(bonne[0].options.data.chemin, '/messages?booking=42')
+  for (const illisible of ['pas du json', null, { autre: 1 }, { web_push: 8030, notification: 'x' }]) {
+    const n = await afficheesPour(SOURCE, illisible)
+    assert.equal(n.length, 1, `rien d'affiché pour ${JSON.stringify(illisible)}`)
+    assert.equal(n[0].titre, 'HôteSmart')
+  }
+  // Contre-épreuve : le service worker qui n'affiche rien sur un message
+  // illisible (la faute la plus plausible) — le contrôle doit rougir.
+  const fautif = muter('function afficher (event) {\n  const n = lireMessage(event)\n',
+    'function afficher (event) {\n  const n = lireMessage(event)\n  if (!n.title) return Promise.resolve()\n')
+  assert.equal((await afficheesPour(fautif, 'pas du json')).length, 0, 'la contre-épreuve doit voir le push muet')
+})
+
+test('LE TEST QUI COMPTE : le toucher n\'ouvre jamais hors du site', async () => {
+  async function ouvertPour (navigate, source = SOURCE) {
+    const { reseau } = creerReseau()
+    const sw = chargerServiceWorker({ source, reseau })
+    await sw.evenement('push', sw.messagePush({ web_push: 8030, notification: { title: 't', navigate } }))
+    const n = sw.notifications[0]
+    let fermee = false
+    await sw.evenement('notificationclick', { notification: { data: n.options.data, close () { fermee = true } } })
+    assert.ok(fermee, 'la notification se ferme au toucher')
+    return sw.ouvertures
+  }
+  assert.deepEqual(await ouvertPour('/messages?booking=42'), [`${ORIGINE}/messages?booking=42`])
+  for (const piege of ['https://exemple.fr/hameconnage', '//exemple.fr/x', 'javascript:alert(1)', '/\\exemple.fr', '', undefined, 42]) {
+    assert.deepEqual(await ouvertPour(piege), [`${ORIGINE}/dashboard`], `adresse acceptée : ${String(piege)}`)
+  }
+  // Contre-épreuve : sans la règle du chemin, l'adresse tierce est ouverte.
+  const fautif = muter('function cheminSur (brut) {\n', "function cheminSur (brut) {\n  if (typeof brut === 'string' && brut) return brut\n")
+  assert.deepEqual(await ouvertPour('https://exemple.fr/hameconnage', fautif), ['https://exemple.fr/hameconnage'])
+})
+
+test('le toucher reprend une fenêtre déjà ouverte du site au lieu d\'en ouvrir une autre', async () => {
+  const { reseau } = creerReseau()
+  const vues = []
+  const fenetre = { url: `${ORIGINE}/calendrier`, async navigate (u) { vues.push(u); return this }, async focus () { vues.push('focus') } }
+  const sw = chargerServiceWorker({ reseau, fenetres: [{ url: 'https://exemple.fr/', async navigate () { throw new Error('jamais') } }, fenetre] })
+  await sw.evenement('notificationclick', { notification: { data: { chemin: '/messages' }, close () {} } })
+  assert.deepEqual(vues, [`${ORIGINE}/messages`, 'focus'])
+  assert.deepEqual(sw.ouvertures, [])
+})
+
+test('un abonnement renouvelé est refait avec la même clé, sans rien envoyer au serveur', async () => {
+  const { reseau } = creerReseau()
+  const sw = chargerServiceWorker({ reseau })
+  const cle = new Uint8Array([4, 1, 2, 3])
+  const avant = sw.appelsReseau.length
+  await sw.evenement('pushsubscriptionchange', { oldSubscription: { options: { applicationServerKey: cle } } })
+  assert.equal(sw.reabonnements.length, 1)
+  assert.equal(sw.reabonnements[0].userVisibleOnly, true)
+  assert.equal(sw.reabonnements[0].applicationServerKey, cle)
+  assert.equal(sw.appelsReseau.length, avant, 'le service worker n\'a pas de session : il n\'appelle pas /api/push')
+  // Sans ancien abonnement lisible, il ne fait rien (et n'échoue pas).
+  const r = await sw.evenement('pushsubscriptionchange', {})
+  assert.equal(r.erreurs.length, 0)
+  assert.equal(sw.reabonnements.length, 1)
 })
 
 test('le service worker servi porte le SHA du déploiement, une seule fois, et se compile', async () => {
@@ -423,7 +505,10 @@ test('LE TEST QUI COMPTE : hors ligne, une page figée dans UN AUTRE cache de l\
   assert.ok((await horsLigne(fautive)).includes(CANARIS.code), 'le contrôle doit voir la page figée servie')
 })
 
-test('aucune notification push : ni écouteur, ni propriété on*', async () => {
+// ⚠ CHANGÉ EXPRÈS AU LOT 2a : les écouteurs push passent par
+// `addEventListener` (test des écouteurs permis, plus haut) ; une propriété
+// `on*` reste interdite, parce qu'elle échappe à ce test-là.
+test('aucune propriété on* : tout passe par les écouteurs permis', async () => {
   const PROPRIETES = ['onpush', 'onnotificationclick', 'onnotificationclose', 'onsync', 'onpushsubscriptionchange', 'onmessage']
   const poses = (source) => {
     const { reseau } = creerReseau()

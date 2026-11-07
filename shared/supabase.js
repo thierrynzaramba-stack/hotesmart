@@ -40,6 +40,16 @@ export async function purgerCachesLocaux() {
     const c = await import('/shared/cache-ecran.js')
     c.oublierTout()
   } catch { /* module indisponible : la péremption de 12 h rattrapera */ }
+  // ⚠ ET LES NOTIFICATIONS DE CET APPAREIL (PWA lot 2a). Sans ce geste, un
+  // téléphone prêté ou partagé continuerait de recevoir les notifications de
+  // la personne d'avant. Le serveur d'abord si la session vit encore (3 s au
+  // plus), puis le navigateur, TOUJOURS (shared/push-appareil.js).
+  try {
+    const p = await import('/shared/push-appareil.js')
+    let jeton = null
+    try { jeton = (await supabase.auth.getSession()).data.session?.access_token || null } catch { jeton = null }
+    await p.oublierAppareil(jeton)
+  } catch { /* module indisponible : `verifierAppareil` rattrapera à la connexion suivante */ }
 }
 
 export async function signOut() {
