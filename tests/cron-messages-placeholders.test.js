@@ -175,9 +175,11 @@ test('l alerte dit QUOI, OU, et OU LE CORRIGER', () => {
   // review : la phrase disait « Manque : wifi_mdp ». `etiquetteDe` la traduit.
   assert.match(t, /manquants\.map\(etiquetteDe\)\.join/, 'quelle information, en clair')
   assert.match(t, /OU_RENSEIGNER\[m\]/, 'ou le renseigner')
-  // ⚠ LA TABLE A DEMENAGE dans `lib/balises.js` (une seule source), mais le
-  // LIBELLE ne change pas : il nomme l'ecran qui existe aujourd'hui.
-  assert.match(lire('lib/balises.js'), /GuestFlow → Base de connaissance → Téléphone hôte/)
+  // ⚠ LA TABLE A DEMENAGE dans `lib/balises.js` (une seule source), et le
+  // LIBELLE nomme l'ecran qui existe aujourd'hui : depuis le lot 3 de la base
+  // de connaissance V5, c'est l'ecran V5 (l'ancienne page redirige vers lui).
+  const { OU_REMPLIR } = require('../lib/balises')
+  assert.equal(OU_REMPLIR.telephone_hote, 'Messages → Base de connaissance → Infos du logement → Téléphone')
 })
 
 test('l alerte ne fait jamais echouer le cycle', () => {
