@@ -219,12 +219,12 @@ test("LE TEST QUI COMPTE : la legende « reserve a date » ne garde AUCUNE accol
 // dictionnaire. Si l'une est renommee, l'extraction echoue et le test le DIT :
 // c'est le seul couplage acceptable, parce qu'il se voit.
 function traducteurReel (lang = 'fr') {
-  const src = fs.readFileSync(path.join(racine, 'shared/i18n/i18n.js'), 'utf8')
+  const src = fs.readFileSync(path.join(racine, 'shared/i18n/i18n.modele.js'), 'utf8')
   const dico = JSON.parse(fs.readFileSync(path.join(racine, `shared/i18n/${lang}.json`), 'utf8'))
   const tranche = (depart) => {
     const i = src.indexOf(depart)
     assert.notStrictEqual(i, -1,
-      `« ${depart} » n existe plus dans shared/i18n/i18n.js : l extraction du vrai traducteur est a refaire`)
+      `« ${depart} » n existe plus dans shared/i18n/i18n.modele.js : l extraction du vrai traducteur est a refaire`)
     // ⚠ ON NE COMPTE LES ACCOLADES QU'APRES LA LISTE DE PARAMETRES.
     // `function t(key, vars = {})` en porte une paire dans sa valeur par
     // defaut : un compteur naif referme la fonction DES CETTE PAIRE, et rend

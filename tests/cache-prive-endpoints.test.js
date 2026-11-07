@@ -121,7 +121,14 @@ const PUBLIC_ATTENDU = {
   // ⚠ CE QU'ON ACCEPTE EN L'EXEMPTANT : si cette garantie de Vercel tombait,
   // un telephone garderait au plus une heure l'ancien service worker — sans
   // effet sur les pages, que le service worker ne met jamais en cache.
-  'api/pwa.js': 'public, max-age=0, must-revalidate, s-maxage=3600'
+  'api/pwa.js': 'public, max-age=0, must-revalidate, s-maxage=3600',
+  // Le moteur i18n, servi avec l'empreinte des dictionnaires deployes
+  // (5 novembre 2026 : la version n'est plus ecrite a la main). Identique pour
+  // tout le monde : du code et l'empreinte de fichiers publics, aucun compte.
+  // ⚠ CE QU'ON ACCEPTE EN L'EXEMPTANT : si la cle de cache du CDN cessait
+  // d'inclure le deploiement, un navigateur garderait au plus une heure
+  // l'ancienne empreinte — donc les anciens dictionnaires, pas une donnee.
+  'api/i18n.js': 'public, max-age=0, must-revalidate, s-maxage=3600, stale-while-revalidate=86400'
 }
 
 test('LE TEST QUI COMPTE : le recensement voit TOUT api/**/*.js, sous-repertoires compris', () => {
@@ -203,7 +210,9 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   // Leve a 10 le 4 novembre 2026, et NOMME : `api/pwa.js` (manifeste et service
   // worker de l'appli hote installee) est public par nature — meme reponse pour
   // tout le monde, aucune donnee de compte, recense dans PUBLIC_ATTENDU.
-  assert.ok(SANS_GARDE_ATTENDU.length <= 10,
+  // Leve a 11 le 5 novembre 2026, et NOMME : `api/i18n.js` (le moteur i18n
+  // avec l'empreinte des dictionnaires), public par nature, meme recensement.
+  assert.ok(SANS_GARDE_ATTENDU.length <= 11,
     `${SANS_GARDE_ATTENDU.length} endpoints sans garde :\n  ` + SANS_GARDE_ATTENDU.join('\n  ') +
     '\nUn de plus qu attendu : soit il est public par nature (webhook, cron, manifest,\n' +
     'page publique), soit il lui manque sa garde. Nommez-le avant de lever le plafond.')
