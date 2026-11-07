@@ -185,6 +185,7 @@ const etat = {
   pausesLues: false,
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
+  saisieRemplie: null,     // { bookId, texte } : texte posé par « Utiliser », rempli pour CE fil
   modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
   configIA: null,          // blob agent_alert_config.config ; null = illisible (volet ferme)
   prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
@@ -774,6 +775,13 @@ async function envoyer () {
   const zone = $('[data-bind="texte"]')
   const texte = zone.value.trim()
   if (!c || !texte) return
+  // ⚠ UN TEXTE POSÉ PAR « UTILISER » NE PART QUE DANS SA CONVERSATION —
+  // constat 1 de la review du lot, mesuré : rempli pour Ana (logement P2), il
+  // restait dans la saisie PARTAGÉE après un changement de fil, et « Envoyer »
+  // le postait à Marie — mot de passe wifi d'une autre maison compris. Le
+  // champ garde le texte (rien n'est jeté), et le dit.
+  if (saisieRemplieAilleurs()) { noteReglage(t('kb.use_wrong_conv')); return }
+  etat.saisieRemplie = null
   zone.value = ''
   ajusterHauteur(zone)
   const entree = { texte, etatEnvoi: 'en_cours' }
@@ -848,6 +856,7 @@ function modifierProposition (id) {
     && !window.confirm(t('messages.draft_replace'))) return
   zone.value = x.suggested_reply || ''
   ajusterHauteur(zone)
+  etat.saisieRemplie = null
   etat.enEdition = { tacheId: x.id, bookId: String(etat.ouverte) }
   // ⚠ OUVRIR SUSPEND L'ECHEANCE (regle 2 du chantier). Sans ca, l'hote
   // corrigerait un texte qui part sous ses doigts. L'appel est optimiste :
@@ -1725,8 +1734,14 @@ async function peindreConnaissance (corps, ref) {
   // textes pour CE voyageur : la garder après un changement de fil mettrait
   // « Bonjour Ana » dans la conversation de Marie (spec kb-utiliser-reponse, R1).
   const resa = resaPourLaBase(ref)
-  if (vueConnaissance && vueConnaissance.ref === String(ref) && vueConnaissance.resa === resa
-    && corps.contains(vueConnaissance.racine)) return
+  if (vueConnaissance && vueConnaissance.ref === String(ref) && corps.contains(vueConnaissance.racine)) {
+    if (vueConnaissance.resa === resa) return
+    // Même logement, autre fil, et une réponse prête EN COURS D'ÉCRITURE : on
+    // ne l'efface pas pour un changement de fil (constat 6). La vue garde sa
+    // réservation d'avant ; « Utiliser » y est refusé au geste, qui la remonte
+    // une fois l'écriture finie.
+    if (vueConnaissance.enEdition()) return
+  }
   demonterConnaissance()
   corps.innerHTML = `<div data-kb-racine><p class="muted small kb-vide">${esc(t('common.loading'))}</p></div>`
   const racine = corps.firstElementChild
@@ -1796,10 +1811,38 @@ function utiliserDansLaSaisie ({ texte, resa, ref }) {
   const avant = zone.value.replace(/\s+$/, '')
   zone.value = avant ? avant + '\n' + texte : String(texte)
   ajusterHauteur(zone)
+  // Pour QUI ce texte a été rempli : la saisie est partagée entre les fils de
+  // la page, et ce texte-là porte un prénom et les infos d'un logement.
+  etat.saisieRemplie = { bookId: String(resa), texte: String(texte) }
   ouvrirTiroir(false)
   zone.focus()
   try { zone.setSelectionRange(zone.value.length, zone.value.length) } catch {}
   return true
+}
+// Le champ porte-t-il un texte de la base rempli pour une AUTRE conversation ?
+function saisieRemplieAilleurs () {
+  const r = etat.saisieRemplie
+  const zone = $('[data-bind="texte"]')
+  return !!r && !!zone && zone.value.trim() !== '' && String(r.bookId) !== String(etat.ouverte)
+}
+// Changer de fil avec un texte de la base dans le champ : s'il est encore tel
+// que posé, il est RETIRÉ (il était rempli pour l'autre voyageur) ; retouché,
+// on ne devine pas ce qui est à qui — il reste, et « Envoyer » le refusera ici.
+// Dans les deux cas, on le dit.
+function rangerSaisieRemplie (bookId) {
+  const r = etat.saisieRemplie
+  const zone = $('[data-bind="texte"]')
+  if (!r || !zone || String(r.bookId) === String(bookId)) return
+  if (!zone.value.trim()) { etat.saisieRemplie = null; return }
+  const i = zone.value.lastIndexOf(r.texte)
+  if (i >= 0) {
+    zone.value = (zone.value.slice(0, i) + zone.value.slice(i + r.texte.length)).replace(/\s+$/, '')
+    ajusterHauteur(zone)
+    etat.saisieRemplie = null
+    noteReglage(t('kb.use_removed'))
+    return
+  }
+  noteReglage(t('kb.use_wrong_conv'))
 }
 
 // ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
@@ -3492,6 +3535,7 @@ function ouvrir (bookId) {
     }
     etat.enEdition = null
   }
+  rangerSaisieRemplie(bookId)
   etat.ouverte = bookId
   // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry
   // du 30 octobre 2026 (« le volet s'est encore ouvert sur Maison Jardin »), et
@@ -3583,7 +3627,11 @@ async function init () {
   $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
   // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
   const zoneTexte = $('[data-bind="texte"]')
-  zoneTexte.addEventListener('input', () => ajusterHauteur(zoneTexte))
+  zoneTexte.addEventListener('input', () => {
+    ajusterHauteur(zoneTexte)
+    // Un champ vidé à la main ne porte plus le texte d'aucune conversation.
+    if (!zoneTexte.value.trim()) etat.saisieRemplie = null
+  })
   // ⚠ LE BROUILLON DE L'HOTE S'ENREGISTRE QUAND IL QUITTE L'EDITEUR
   // (decision 6 de Thierry, 27 octobre 2026). Sans ca, la reprise du compte a
   // rebours enverrait le texte de l'IA — la version que l'hote avait

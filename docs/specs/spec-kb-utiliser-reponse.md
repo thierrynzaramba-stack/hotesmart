@@ -1,7 +1,7 @@
 # Spec — Utiliser une réponse prête dans la conversation
 
-**Statut : brouillon du 7 novembre 2026, à valider par Thierry avant la première
-ligne de code.** Branche `kb-utiliser-reponse`, partie de main `7127651c`
+**Statut : validée par Thierry le 7 novembre 2026 (« go »), codée, corrigée
+après la review 1.** Branche `kb-utiliser-reponse`, partie de main `7127651c`
 (kb-v5 en production). Fil messagerie.
 
 Lot qui touche l'**envoi au voyageur** (il remplit le champ de saisie) : jusqu'à
@@ -54,17 +54,38 @@ son test (§7).
   bouton « Utiliser » dans cette conversation (le wifi d'une autre maison). Le
   bouton n'existe que si le logement affiché est celui du fil.
 - **R3. Jamais un repère à la place d'une info.** Si le remplacement laisse un
-  manque (`[WIFI NOM]`, prénom absent, code d'accès non résolu), « Utiliser »
-  **refuse** et dit lesquels : « Il manque : Nom wifi ». Le lien « Le remplir »
-  ouvre la ligne correspondante des infos du logement, dans la même base. Le
-  serveur rend ces manques par réponse (`manquants`, `codeNonResolu` — déjà
-  calculés par `remplacerBalises`, aujourd'hui jetés).
+  manque, « Utiliser » **refuse** et dit lesquels : « Il manque : Nom wifi ».
+  Le lien « Le remplir » ouvre la ligne correspondante des infos du logement,
+  dans la même base. Ce qui refuse :
+  - une info **du logement** vide (`[WIFI NOM]`…) ;
+  - une info **de la réservation** vide : nom, arrivée, départ, logement
+    (« Votre séjour du  au  ») ;
+  - un code d'accès non résolu, une balise inconnue (`{wifi}` mal tapée) ;
+  - et, en dernier filet, **le texte lui-même** : vide, ou portant encore un
+    repère `[…]` ou une accolade `{…}`, quel que soit ce que le serveur a dit.
+  **Le prénom absent ne refuse pas** : il garde la forme neutre décidée le
+  8 octobre 2026 (« Bonjour, » plutôt que « Bonjour , »), comme dans les
+  messages programmés. Le serveur rend ces manques par réponse (`manquants`,
+  `inconnues`, `codeNonResolu` — calculés par `remplacerBalises`, jetés
+  jusqu'ici).
 - **R4. Jamais d'envoi.** « Utiliser » n'appelle aucune route d'envoi. Le texte
   part par le seul bouton « Envoyer », avec tout ce qui l'entoure aujourd'hui
   (échec « Non envoyé · Réessayer », validation d'une proposition, etc.).
 - **R5. Pendant un « Modifier »** (proposition de l'IA descendue dans le champ),
   « Utiliser » ajoute à ce texte, comme une frappe : c'est le texte que l'hôte
   est en train de corriger, il est enregistré comme aujourd'hui, au `blur`.
+  ⚠ **Conséquence à connaître** : si la proposition est à envoi **différé**,
+  le texte ajouté devient celui de la proposition et part à son échéance, comme
+  tout texte tapé pendant un « Modifier ». Rien de neuf : c'est le
+  comportement d'une frappe, et c'est ce que l'hôte a demandé (« comme si je
+  l'avais tapé »).
+- **R7. Un texte posé appartient à SA conversation.** Le champ de saisie est
+  partagé entre les fils de la page. Si l'hôte change de conversation avec un
+  texte posé par « Utiliser » encore intact, ce texte est **retiré**, et une
+  note le dit. S'il l'a retouché, on ne devine pas ce qui est à qui : le texte
+  reste, et « Envoyer » le **refuse** dans l'autre conversation (note « Ce
+  texte a été préparé pour une autre conversation : il ne partira pas ici ») ;
+  il repart dans la sienne. Un champ vidé à la main ne porte plus rien.
 - **R6. Le texte du titulaire seulement.** L'écran reste réservé au titulaire
   (403 avant toute lecture, comme kb-v5). Aucune route neuve.
 
@@ -82,20 +103,23 @@ son test (§7).
 
 ## 4. Ce qui change, fichier par fichier
 
-- `api/ecran/connaissance.js` (GET) : par réponse, `manquants` et
-  `codeNonResolu` à côté de `apercu` ; `voyageur.duFil` vrai seulement si la
-  réservation demandée (`?resa=`) est celle trouvée **dans ce logement**. Aucune
-  lecture de plus.
+- `api/ecran/connaissance.js` (GET) : par réponse, `manquants` (infos du
+  logement ET de la réservation), `inconnues` et `codeNonResolu` à côté de
+  `apercu` ; `voyageur.duFil` vrai seulement si la réservation demandée
+  (`?resa=`) est celle trouvée **dans ce logement**. Aucune lecture de plus.
 - `shared/connaissance-vue.js` : bouton « Utiliser » sur chaque carte quand la
   page hôte le demande (`utiliser: (texte) => …` passé à `monterConnaissance`),
   refus R3 dans la vue, lien « Le remplir ».
 - `pages/messages.html` : au téléphone, le livre ouvre le tiroir au lieu de
   naviguer ; « Utiliser » ajoute au champ, ajuste sa hauteur, referme le
   tiroir, rend le focus au champ. Retrait du §3.
-- `shared/ui.css` : rien de neuf attendu (le tiroir couvre déjà l'écran) ;
-  vérifier la note et le bouton fermer au téléphone.
-- `shared/i18n/{fr,en,es}.json` : « Utiliser », « Il manque : … »,
-  « Le remplir ».
+- `shared/ui.css` : le bloc carte + action (`.kb-carte-bloc`), et la cible de
+  44 px au téléphone pour « Utiliser ».
+- `shared/i18n/{fr,en,es}.json` : « Utiliser », « Le remplir », les refus
+  (manque, code, balise inconnue, texte vide ou incomplet, autre
+  conversation) ; retrait des trois refus de départ.
+- `tests/outils/banc-messages.js` : expose `ouvrirConnaissance`,
+  `utiliserDansLaSaisie` et `ouvrir` au banc.
 
 ## 5. Case performance (règle du dépôt, les huit points)
 
@@ -144,12 +168,19 @@ mêmes refus. Seule la place change : volet à droite, ou plein écran.
 - R1 : réservation du fil introuvable dans ce logement → aucun bouton.
 - R2 : autre logement choisi dans le sélecteur → aucun bouton.
 - R3 : un manque → refus, champ intact, message qui nomme l'info ; code non
-  résolu → refus.
+  résolu, balise inconnue → refus ; info de réservation vide → refus, prénom
+  vide → forme neutre ; texte vide ou portant un repère → refus (garde finale).
 - R4 : aucun appel à `/api/messages` ni à une route d'envoi pendant « Utiliser ».
 - R5 : pendant un « Modifier », le texte s'ajoute et l'édition reste la même.
 - Serveur : `manquants`, `codeNonResolu` et `voyageur.duFil` (vrai, faux quand
   la réservation demandée n'est pas dans ce logement, faux sans `?resa=`).
 - La page `/connaissance` n'a pas de bouton « Utiliser ».
+- R7 : changer de fil retire le texte posé intact et le dit ; retouché, il
+  reste et « Envoyer » le refuse ailleurs, puis l'envoie dans son fil ; un
+  champ vidé puis retapé ne retient rien.
+- Pendant une relecture de la base, « Utiliser » sur la liste d'avant ne pose
+  rien ; changer de fil dans le même logement ne jette pas une réponse en cours
+  d'écriture ; le tiroir se repeint sur le nouveau fil.
 
 ## 8. Recette staging — ce que Thierry regarde
 
@@ -160,3 +191,25 @@ mêmes refus. Seule la place change : volet à droite, ou plein écran.
 3. « Utiliser » sur une réponse dont une info manque → refus « Il manque : … »,
    et « Le remplir » mène à la bonne ligne.
 4. Ordinateur : les mêmes gestes dans le volet.
+
+## 9. Review 1 — ce qu'elle a trouvé, ce qui a changé
+
+Review du commit `f9c95478` (plage `d2388809..f9c95478`). Corrigé, chaque
+correctif avec son test qui rougit sans lui (mutation) :
+
+- **Le texte posé suivait l'hôte d'une conversation à l'autre** (le champ est
+  partagé) : « Bonjour Ana, le wifi de la bulle » pouvait partir chez Marie.
+  → R7.
+- **Les infos de la réservation vides passaient** (« Votre séjour du  au  ») :
+  `remplacerBalises` ne compte comme manques que les infos du logement. →
+  ajoutées côté serveur, prénom excepté (forme neutre).
+- **Rien ne vérifiait le texte lui-même** : si le serveur oubliait un manque, un
+  repère partait. → garde finale dans la vue (R3).
+- **« Utiliser » pendant une relecture** posait le texte de la liste d'avant. →
+  refusé tant que la lecture n'est pas revenue.
+- **Changer de fil dans le même logement** remontait la base et jetait une
+  réponse en cours d'écriture ; et le tiroir ouvert ne se repeignait pas sur le
+  nouveau fil. → la vue reste si elle est en écriture ; le tiroir se repeint.
+- **R4 / R5** : la spec ne disait pas qu'un texte ajouté pendant un
+  « Modifier » différé part à l'échéance. → écrit en R5 (comportement d'une
+  frappe, inchangé).

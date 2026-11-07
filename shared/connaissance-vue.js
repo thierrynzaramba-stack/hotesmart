@@ -218,6 +218,14 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     if (c.codeNonResolu === true) lignes.push(t('kb.use_code'))
     if (inconnues.length) lignes.push(t('kb.use_unknown', { liste: inconnues.join(', ') }))
     if (!lignes.length && !String(c.apercu || '').trim()) lignes.push(t('kb.use_empty'))
+    // ⚠ LA DERNIÈRE GARDE LIT LE TEXTE LUI-MÊME (constat 3 de la review) : un
+    // repère du remplaceur ou une accolade restée (`{wifi-mdp}`, que la
+    // reconnaissance des balises ne voit pas) ne va jamais dans la conversation,
+    // quel que soit le signal qui aurait dû le dire.
+    const apercu = String(c.apercu || '')
+    if (!lignes.length && (marqueurs().some(m => apercu.includes(m)) || /\{[^{}]*\}/.test(apercu))) {
+      lignes.push(t('kb.use_incomplete'))
+    }
     if (!lignes.length) return null
     // « Le remplir » ouvre la PREMIÈRE information manquante qui vit dans la
     // base de ce logement — là où l'hôte la complète, dans la même vue.
@@ -227,6 +235,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
   }
 
   function utiliserReponse (id) {
+    // Pendant une lecture, la liste peinte est celle d'AVANT : utiliser l'une de
+    // ses réponses poserait l'ancien texte (constat 5 de la review).
+    if (etat.chargement) return
     const c = ((etat.donnees || {}).reponses || []).find(x => String(x.id) === String(id))
     if (!c || !utilisable()) return
     const refus = refusDe(c)

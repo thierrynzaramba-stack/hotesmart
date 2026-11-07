@@ -21,6 +21,9 @@ const ECRAN = {
   voyageur: null
 }
 const BIENS = [{ ref: 'P1', nom: 'La bulle' }, { ref: 'P2', nom: 'Cœur' }]
+const FR = require('../shared/i18n/fr.json')
+const FR_USE_REMOVED = FR['kb.use_removed']
+const FR_USE_WRONG = FR['kb.use_wrong_conv']
 const lecturesKb = (banc) => banc.envois.filter(e => /^\/api\/ecran\/connaissance/.test(e.chemin) && e.methode === 'GET')
 
 function banc (o = {}) {
@@ -301,7 +304,10 @@ test('LE TEST QUI COMPTE : pendant un « Modifier », la base s ouvre aussi — 
 
 // ─── « Utiliser » une réponse prête (spec kb-utiliser-reponse) ─────────────
 const utiliser = (b, id = 'r1') => clic(b, b.doc.querySelector(`[data-bind="tiroir-corps"] [data-kb-utiliser="${id}"]`))
-const envoisMessages = (b) => b.envois.filter(e => /^\/api\/messages/.test(e.chemin) && e.methode !== 'GET')
+// TOUT appel qui écrit — pas seulement `/api/messages` : l'envoi au voyageur
+// passe par `/api/beds24` ou `/api/channel-message` (constat 2 de la review).
+const ecrituresHorsBase = (b) => b.envois.filter(e => e.methode !== 'GET' && !/^\/api\/ecran\/connaissance/.test(e.chemin))
+const envoisVoyageur = (b) => b.envois.filter(e => /^\/api\/(beds24|channel-message)/.test(e.chemin))
 
 test('LE TEST QUI COMPTE : « Utiliser » ajoute À LA SUITE du texte tapé, referme la base, et rien ne part', async () => {
   const b = await telephoneSurB7()
@@ -309,14 +315,14 @@ test('LE TEST QUI COMPTE : « Utiliser » ajoute À LA SUITE du texte tapé, ref
   zone.value = 'Bonjour !  '
   clic(b, iconeSaisie(b))
   await reposer(b)
-  const avant = envoisMessages(b).length
+  const avant = ecrituresHorsBase(b).length
   utiliser(b)
   await reposer(b)
   assert.equal(zone.value, 'Bonjour !\nBonjour Ana, Le wifi est RESEAU', 'à la suite, avec un retour à la ligne')
   assert.equal(tiroirOuvert(b), false, 'retour à la conversation')
   assert.equal(b.doc.activeElement, zone, 'le curseur est dans le champ')
   assert.equal(zone.selectionStart, zone.value.length, 'à la fin du texte')
-  assert.equal(envoisMessages(b).length, avant, 'R4 : rien n est envoyé — l envoi reste le bouton « Envoyer »')
+  assert.equal(ecrituresHorsBase(b).length, avant, 'R4 : AUCUNE écriture — l envoi reste le bouton « Envoyer »')
   b.fermer()
 })
 
@@ -379,6 +385,110 @@ test('LE TEST QUI COMPTE : R1 — un texte rempli pour une AUTRE conversation es
   assert.equal(b.msg.utiliserDansLaSaisie({ texte: 'Bonjour Marie', resa: 'B8', ref: 'P2' }), false,
     'R2 : B8 est à P1, pas à P2')
   assert.equal(zone.value, 'Pour Marie')
+  b.fermer()
+})
+
+// ─── Le texte posé par « Utiliser » appartient à SA conversation ────────────
+// Constat 1 de la review, mesuré : la saisie est PARTAGÉE entre les fils, et un
+// texte rempli pour Ana partait chez Marie après un changement de fil.
+async function bancDeuxFils (convs) {
+  const b = banc()
+  await amorcer(b)
+  peupler(b, { biens: BIENS, volet: 'ia', bien: 'P1', conversations: convs })
+  b.msg.ouvrirTiroir(false)
+  b.msg.ouvrir('B7')
+  clic(b, iconeSaisie(b))
+  await reposer(b)
+  utiliser(b)
+  await reposer(b)
+  return b
+}
+const envoyer = (b) => clic(b, b.doc.querySelector('[data-bind="envoyer"]'))
+
+test('LE TEST QUI COMPTE : changer de fil RETIRE le texte posé pour l autre voyageur, et le dit', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B8', 'P2')])
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  assert.equal(zone.value, 'Bonjour Ana, Le wifi est RESEAU')
+  b.msg.ouvrir('B8')
+  assert.equal(zone.value, '', 'le texte d Ana ne reste pas dans le fil de Marie')
+  assert.equal(noteSaisie(b), FR_USE_REMOVED)
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b), [])
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un texte posé PUIS retouché reste, mais « Envoyer » le refuse dans un autre fil', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  zone.value = zone.value.replace('Ana', 'Ana !')
+  zone.dispatchEvent(new b.window.Event('input', { bubbles: true }))
+  b.msg.ouvrir('B9')
+  assert.equal(zone.value, 'Bonjour Ana !, Le wifi est RESEAU', 'rien n est jeté de ce que l hôte a tapé')
+  envoyer(b)
+  await reposer(b)
+  assert.deepEqual(envoisVoyageur(b), [], 'le wifi d une autre maison ne part pas chez ce voyageur')
+  assert.equal(zone.value, 'Bonjour Ana !, Le wifi est RESEAU', 'le champ est intact')
+  assert.equal(noteSaisie(b), FR_USE_WRONG)
+  // De retour dans SA conversation, il part.
+  b.msg.ouvrir('B7')
+  envoyer(b)
+  await reposer(b)
+  assert.equal(envoisVoyageur(b).length, 1)
+  assert.equal(envoisVoyageur(b)[0].corps.bookingId, 'B7')
+  b.fermer()
+})
+
+test('un champ vidé à la main ne porte plus le texte d aucune conversation', async () => {
+  const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  zone.value = ''
+  zone.dispatchEvent(new b.window.Event('input', { bubbles: true }))
+  // L'hôte écrit ensuite SON texte, avant de changer de fil : ce n'est plus
+  // le texte de la base, rien ne doit le retenir.
+  zone.value = 'Bonjour, à demain'
+  zone.dispatchEvent(new b.window.Event('input', { bubbles: true }))
+  b.msg.ouvrir('B9')
+  assert.equal(zone.value, 'Bonjour, à demain')
+  assert.notEqual(noteSaisie(b), FR_USE_WRONG)
+  envoyer(b)
+  await reposer(b)
+  assert.equal(envoisVoyageur(b).length, 1)
+  assert.equal(envoisVoyageur(b)[0].corps.bookingId, 'B9')
+  b.fermer()
+})
+
+test('R2 — dans Messages, choisir un autre logement au sélecteur du tiroir retire « Utiliser »', async () => {
+  const b = await telephoneSurB7()
+  clic(b, iconeSaisie(b))
+  await reposer(b)
+  assert.ok(b.doc.querySelector('[data-kb-utiliser]'))
+  const sel = b.doc.querySelector('[data-bind="tiroir-bien"]')
+  sel.value = 'P1'
+  sel.dispatchEvent(new b.window.Event('change', { bubbles: true }))
+  await reposer(b)
+  assert.equal(lecturesKb(b).pop().chemin, '/api/ecran/connaissance?bien=P1', 'sans la réservation du fil')
+  assert.equal(b.doc.querySelector('[data-kb-utiliser]'), null)
+  b.fermer()
+})
+
+test('changer de fil dans le même logement n efface pas une réponse prête EN COURS D ÉCRITURE', async () => {
+  const b = banc()
+  await amorcer(b)
+  peupler(b, { biens: BIENS, volet: 'ia', bien: 'P1', conversations: [fil('B7', 'P2'), fil('B8', 'P2')] })
+  b.msg.ouvrirTiroir(false)
+  b.msg.ouvrir('B7')
+  clic(b, iconeSaisie(b))
+  await reposer(b)
+  clic(b, b.doc.querySelector('[data-kb-ouvrir="r1"]'))
+  b.doc.querySelector('[data-kb-sujet]').value = 'Wifi corrigé'
+  const vue = b.msg.vueConnaissance
+  b.msg.ouvrir('B8')
+  await reposer(b)
+  assert.equal(b.msg.vueConnaissance, vue, 'la vue n est pas remontée')
+  assert.equal(b.doc.querySelector('[data-kb-sujet]').value, 'Wifi corrigé')
+  // Et la vue d'avant ne pose rien dans le fil de Marie : refus au geste.
+  assert.equal(b.msg.utiliserDansLaSaisie({ texte: 'Bonjour Ana', resa: 'B7', ref: 'P2' }), false)
   b.fermer()
 })
 

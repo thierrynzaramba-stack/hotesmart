@@ -219,6 +219,17 @@ test('LE TEST QUI COMPTE : chaque réponse dit ce qui MANQUE pour partir telle q
   assert.deepEqual(par.Inconnue.inconnues, ['{plan_acces}'])
 })
 
+test('les infos de la RÉSERVATION absentes comptent aussi parmi les manques (le prénom a sa forme neutre)', async () => {
+  const r = await appeler({
+    query: { bien: 'P2', resa: 'B9' },
+    repondre: base({
+      lignes: [{ id: 'b1', type: 'faq', key: 'Arrivee', value: 'Bonjour {prenom} {nom}, arrivée le {arrivee}', verifie_le: null, lisible_par_ia: true }],
+      resas: [{ booking_id: 'B9', property_id: 'P2', snapshot: { status: 'confirmed', firstName: 'Ana', departure: jour(5) } }]
+    })
+  })
+  assert.deepEqual(r.charge.reponses[0].manquants.sort(), ['arrivee', 'nom'])
+})
+
 test('LE TEST QUI COMPTE : duFil n est vrai que pour la réservation DEMANDÉE, trouvée dans CE logement', async () => {
   // Sinon le serveur se rabat sur le prochain séjour du logement : bon pour
   // l'aperçu, mais « Bonjour Paul » dans le fil de Marie (R1).

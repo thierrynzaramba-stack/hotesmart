@@ -632,3 +632,50 @@ test('R3 — un code non résolu ou une balise inconnue refusent aussi, chacun a
   assert.equal(recus.length, 0)
   b.fermer()
 })
+
+test('R3 — un texte vide, ou un repère resté dans l aperçu, refusent aussi (garde finale sur le texte)', async () => {
+  const e = avecSignaux()
+  e.reponses[0].manquants = []
+  e.reponses[0].apercu = '   '
+  e.reponses[1].apercu = 'Le code est {code-porte}'
+  const recus = []
+  const b = await monter({ resa: 'B9', utiliser: (x) => recus.push(x), repondre: () => e })
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r1"]'))
+  await reposer()
+  assert.deepEqual([...b.racine.querySelectorAll('[data-kb-refus]')].map(x => x.textContent), [FR['kb.use_empty']])
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r2"]'))
+  await reposer()
+  assert.deepEqual([...b.racine.querySelectorAll('[data-kb-refus]')].map(x => x.textContent), [FR['kb.use_incomplete']])
+  e.reponses[1].apercu = 'Le wifi : [WIFI NOM]'
+  await b.vue.recharger()
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r2"]'))
+  await reposer()
+  assert.deepEqual([...b.racine.querySelectorAll('[data-kb-refus]')].map(x => x.textContent), [FR['kb.use_incomplete']])
+  assert.equal(recus.length, 0)
+  b.fermer()
+})
+
+test('pendant une relecture, « Utiliser » sur la liste d AVANT ne pose rien (l ancien texte)', async () => {
+  let attente = null
+  let e = avecSignaux()
+  const recus = []
+  const b = await monter({ resa: 'B9', utiliser: (x) => recus.push(x.texte),
+    repondre: (chemin, corps) => (corps || !attente) ? (corps ? null : e) : attente.promesse })
+  let liberer
+  attente = { promesse: new Promise(r => { liberer = r }) }
+  const enCours = b.vue.recharger()
+  await reposer()
+  const ancien = b.racine.querySelector('[data-kb-utiliser="r2"]')
+  if (ancien) clic(b, ancien)
+  await reposer()
+  assert.deepEqual(recus, [], 'la liste peinte est celle d avant la relecture')
+  e = avecSignaux()
+  e.reponses[1].apercu = 'Le code est 5678'
+  attente = null
+  liberer(e)
+  await enCours
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r2"]'))
+  await reposer()
+  assert.deepEqual(recus, ['Le code est 5678'])
+  b.fermer()
+})

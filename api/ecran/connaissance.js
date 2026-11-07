@@ -141,15 +141,20 @@ const replisDuBien = (bien) => ({
   adresse: bien.address, checkin: bien.checkin_time, checkout: bien.checkout_time
 })
 
+// Les infos de la RÉSERVATION que le remplaceur rend vides sans le signaler
+// (constat 3 de la review du lot « Utiliser ») : un nom ou une date absents
+// donnent « Bonjour M. » ou « vous arrivez le  », et rien ne le dit. Le prénom
+// n'y est pas : son absence a une forme neutre, décidée le 8 octobre 2026.
+const DE_LA_RESERVATION = ['nom', 'arrivee', 'depart', 'logement']
+
 function apercu (texte, connaissance, voyageur, bien) {
   const v = voyageur || {}
-  const r = remplacerBalises(texte, {
-    reservation: { prenom: v.prenom, nom: v.nom, arrivee: v.arrivee, depart: v.depart, logement: bien.name },
-    connaissance,
-    replis: replisDuBien(bien)
-  })
+  const reservation = { prenom: v.prenom, nom: v.nom, arrivee: v.arrivee, depart: v.depart, logement: bien.name }
+  const r = remplacerBalises(texte, { reservation, connaissance, replis: replisDuBien(bien) })
+  const src = String(texte == null ? '' : texte)
+  const resaVides = DE_LA_RESERVATION.filter(c => src.includes(`{${c}}`) && !String(reservation[c] || '').trim())
   return {
-    texte: r.texte, manquants: r.manquants,
+    texte: r.texte, manquants: [...r.manquants, ...resaVides],
     inconnues: r.inconnues || [], codeNonResolu: r.codeNonResolu === true
   }
 }
