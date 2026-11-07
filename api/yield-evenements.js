@@ -377,7 +377,9 @@ module.exports = async (req, res) => {
     }
     const operations = []
     for (const o of demandees) {
-      const v = validerPosition(o || {})
+      // Un retrait (`niveau: null`) passe la regle du rang : une ligne sans
+      // rang, venue de la base, doit pouvoir s'effacer.
+      const v = validerPosition(o || {}, { retrait: !!o && o.niveau === null })
       if (!v.ok) return res.status(400).json({ error: v.raison, message: v.message })
       const niveau = o.niveau === null ? null : o.niveau
       if (niveau !== null && niveau !== CALCUL && !NIVEAUX_POSES.includes(niveau)) {

@@ -228,7 +228,10 @@ test('pas de faux signal au bord de la fenêtre : une date commerciale coupée p
 // de position (le 14e, un niveau inventé, aussi) — les deux doublons relèvent de
 // l'index unique —, plus trois cas propres à l'écrivain (rang 61, rang 1,5,
 // nuit inconnue). Ces cas ne prouvent pas que l'écrivain et la base disent la
-// même chose AU-DELÀ d'eux.
+// même chose AU-DELÀ d'eux. ⚠ Depuis le 7 novembre 2026, l'une des 10
+// positions acceptées par la base (le rayonnement sans rang) est REFUSÉE par
+// l'écrivain : elle est passée dans REFUSES, avec le samedi rattaché d'un
+// réveillon — les deux cas où l'écrivain est volontairement plus strict.
 const P_ = (evenement, zone, rang, jour, nuit) => ({ evenement, zone, rang, jour, nuit })
 const ACCEPTES = [
   P_(CLE_NOEL, 'evenement', 2, 'samedi', null), P_(CLE_NOEL, 'evenement', null, 'samedi', null),
@@ -258,7 +261,7 @@ const REFUSES = [
   [P_(CLE_NOEL, 'avant', null, null, null), 'rang_requis']
 ]
 
-test('LE TEST QUI COMPTE : l écrivain refuse exactement ce que la base refuse, avec un motif parlant', () => {
+test('LE TEST QUI COMPTE : l écrivain refuse ce que la base refuse, avec un motif parlant — et deux cas de plus, voulus', () => {
   for (const p of ACCEPTES) assert.equal(RP.validerPosition(p).ok, true, JSON.stringify(p))
   for (const [p, raison] of REFUSES) assert.equal(RP.validerPosition(p).raison, raison, JSON.stringify(p))
 })
@@ -819,4 +822,43 @@ test('2c, API (review) : la lecture des positions en panne ne fait pas tomber l 
   const e = chargerApi({ lignes: null })
   const g = await e.appeler('GET', { debut: '2026-11-07', fin: '2027-11-06' })
   assert.deepEqual([g.code, g.corps.positions], [200, { indisponible: 'lecture_impossible' }])
+})
+
+test('LE TEST QUI COMPTE (review A) : la liste « hors zone » suit les nuits PRISES — une occurrence finie avant la fenêtre rayonne dedans ; un week-end hors fenêtre ne signale rien', () => {
+  const foire = { segment: 'evenement:foire', date_debut: '2026-10-28', date_fin: '2026-11-01' }
+  const l = ligne('evenement:foire', 'apres', 2, null, null, 'Haut')
+  const r = resoudre({ debut: '2026-11-07', fin: '2027-11-06', vacances: [], evenements: [foire], lignes: [l], largeurs: new Map([['evenement:foire', { avant: null, apres: 1 }]]) })
+  // Dernière nuit dim. 1er nov. → 1er week-end après = ven. 6 / sam. 7 ; le 2e = 13 / 14.
+  assert.deepEqual(['2026-11-13', '2026-11-14'].map(j => [niv(r, j), r.parNuit.get(j).hors_zone_affichee]), [['Haut', true], ['Haut', true]])
+  assert.deepEqual(r.horsZone.map(h => [h.ligne.id, h.occurrence.debut, h.largeur]), [[l.id, '2026-10-28', 1]], 'une entrée, la bonne occurrence')
+  // Une foire dont le 2e week-end après tombe après la fin de la fenêtre : rien n est pris, rien n est signalé.
+  const tard = { segment: 'evenement:foire', date_debut: '2027-11-01', date_fin: '2027-11-03' }
+  const t = resoudre({ debut: '2027-06-01', fin: '2027-11-06', vacances: [], evenements: [tard], lignes: [l], largeurs: new Map([['evenement:foire', { avant: null, apres: 1 }]]) })
+  assert.deepEqual([t.parNuit.size, t.horsZone], [0, []])
+})
+
+test('2c, review A : une ligne sans rang d un événement coupé ne se signale pas ; elle se RETIRE (validation, puis API)', async () => {
+  const joker = ligne('commercial:saint_valentin', 'avant', null, null, null, 'Haut')
+  const r = resoudre({ debut: '2027-01-01', fin: '2027-03-01', vacances: [], lignes: [joker], inactifs: new Set(['commercial:saint_valentin']) })
+  assert.deepEqual(r.sansNuit, [])
+  const pos = { evenement: 'commercial:saint_valentin', zone: 'avant', rang: null, jour: null, nuit: null }
+  assert.equal(RP.validerPosition(pos).raison, 'rang_requis')
+  assert.equal(RP.validerPosition(pos, { retrait: true }).ok, true)
+  const e = chargerApi({ sim: SIM_API })
+  const pose = await e.appeler('PUT', { positions: [{ ...pos, niveau: 'Haut' }], simuler: true })
+  assert.deepEqual([pose.code, pose.corps.error], [400, 'rang_requis'])
+  const retrait = await e.appeler('PUT', { positions: [{ ...pos, niveau: null }], confirme: { nuits: 1 } })
+  assert.equal(retrait.code, 200)
+  assert.ok(e.gestes.some(x => x[0] === 'retirer'))
+})
+
+test('LE TEST QUI COMPTE (review A) : le calendrier de pilotage lit les crans comme le moteur — une ligne qui ne porte qu une largeur ne masque pas le +1 des vacances', () => {
+  const { calendrier } = require('../lib/yield/calendrier-pilotage')
+  const contexte = R2.construireContexte({ zoneBien: 'C', vacances: [NOEL_26], evenements: [], debut: '2026-12-01', fin: '2027-01-31' })
+  const reglages = new Map([
+    ['vacances_zone_du_bien', { segment: 'vacances_zone_du_bien', crans: 1, actif: true }],
+    [CLE_NOEL, { segment: CLE_NOEL, crans: null, actif: true, weekends_avant: 2 }]])
+  const noel = calendrier({ contexte, debut: '2026-12-01', fin: '2027-01-31', reglages, positions: null, evenements: [] })
+    .find(e => e.debut === '2026-12-19')
+  assert.deepEqual([noel.crans_ajustes, noel.cle_reglage], [1, 'vacances_zone_du_bien'])
 })

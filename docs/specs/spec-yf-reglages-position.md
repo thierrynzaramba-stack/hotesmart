@@ -293,7 +293,10 @@ sous-agent, puis push.
 - **Le rayonnement AUTOMATIQUE** (−1 niveau par week-end d'écart, plancher
   Moyen, nuits ven/sam — registre §3) : un calcul neuf du moteur, proposé en
   lot à part après celui-ci. D'ici là, sans réglage de l'hôte, une nuit de
-  rayonnement garde son calcul d'aujourd'hui, et la largeur par défaut vaut 0.
+  rayonnement garde son calcul d'aujourd'hui. ⚠ À trancher avec Thierry avant
+  ce lot : depuis le 7 novembre, la largeur de la zone ne change aucun prix ;
+  le rayonnement automatique dira si elle bornerait ce calcul-là, et seulement
+  lui — jamais un niveau posé par l'hôte.
 - **L'écran** et le regroupement d'un événement composé à l'affichage
   (« Armistice — week-end prolongé » = férié + ponts + week-ends) : lot 4. Le
   stockage reste par clé, et le rayonnement se compte depuis l'occurrence de
