@@ -324,8 +324,12 @@ Cette alerte suit désormais le mode urgence ; seule la décision 7 garde
     dans des tables à writer unique, lues par l'endpoint d'écran de
     `/settings`. Les listes d'`agent_alert_config` sont reprises en contacts
     libres à la migration, vérifiées par script (avant = après).
-13. **La langue sur le profil** : une colonne sur `profiles`, écrite quand la
-    personne change de langue au menu ≡. Sans valeur, c'est le français.
+13. **La langue de la personne** : écrite quand la personne change de langue
+    au menu ≡. Sans valeur, c'est le français. ⚠ **Pas sur `profiles`**, comme
+    la première version de ce paragraphe le disait : `profiles` porte une ligne
+    par couple (compte, membre), donc une personne membre de deux comptes en a
+    trois. La langue est celle de la PERSONNE : elle vit dans la ligne de
+    réglages de la personne (§15.1), une seule par utilisateur.
 14. **Staging n'a pas de cron** (`docs/STAGING.md` §1) : en recette, les envois
     déclenchés par le cron se lancent à la main.
 
@@ -455,6 +459,15 @@ Cette alerte suit désormais le mode urgence ; seule la décision 7 garde
 | Q10 | Les prestataires | Dans la foulée, au lot 3 |
 | Q15 | La recette iPhone | Avec celle du lot 1, en une fois |
 
+**Décisions du 7 novembre au soir (go du 2b) :**
+
+| | Question | Décision |
+|---|---|---|
+| Q21 | Le message « notifications bloquées » | « Le plus simple et clair pour l'utilisateur » : le chemin exact pour son appareil (Android, iPhone, ordinateur), affiché dès l'ouverture de l'onglet, et un lien vers le guide |
+| Q22 | Le guide | Complété dans le 2b : installer l'appli, activer les notifications, débloquer |
+| Q23 | Les canaux par défaut | Notification et e-mail cochés, SMS décoché, pour les quatorze événements |
+| Q24 | La livraison | 2b recetté sur staging seul ; la production reçoit 2b et 2c ensemble |
+
 ## 14. Découpage proposé, et ce que le lot ne fait pas
 
 **Découpage proposé** (un fil, une branche par sous-lot, chacun reviewé et
@@ -463,28 +476,158 @@ recetté) :
    bouton « cet appareil » et essai dans `/settings`. À la fin, on reçoit une
    notification d'essai. **En production le 7 novembre 2026, recette Android
    conforme.**
-2. **2b — la configuration** : le tableau par personne, les plages, le mode
-   urgence et sa file d'attente, les contacts libres, la migration des listes
+2. **2b — les réglages de la personne** (§15) : le tableau des quatorze
+   événements, les heures du mode urgence, la règle de décision
+   « maintenant ou fin de plage », la langue enregistrée, le message clair du
+   blocage (Q21) et le guide. **Recetté sur staging seul** (Q24).
+3. **2c — la bascule** : les contacts libres et la reprise des listes
    d'`agent_alert_config`, le déménagement du bloc « Alertes » de Messages, la
-   langue sur le profil.
-3. **2c — les quatorze événements** branchés un par un, avec le remplacement
-   du SMS et l'e-mail du dernier appareil.
+   file d'attente et sa passe de cron, les quatorze événements branchés un par
+   un, le remplacement du SMS, l'e-mail du dernier appareil, et le retour au
+   bon écran après reconnexion (`next`). **Part en production avec le 2b.**
 
-**Question ouverte pour le 2b, née de la recette du 2a :**
-- **Q21 — le message « notifications bloquées » sur Android.** Le
-  7 novembre, en réabonnant son téléphone en production, Thierry a lu
-  « Les notifications sont bloquées pour HôteSmart sur cet appareil ». Le
-  réglage Notifications de Chrome pour `hotesmart.vercel.app` (Paramètres des
-  sites) bloquait le site, alors que les notifications de l'appli installée
-  étaient actives côté Android. Après réautorisation dans Chrome, le
-  réabonnement est passé ; la cause n'est pas établie (le code ne touche pas à
-  la permission). Aujourd'hui le message ne parle que du navigateur en
-  général, et de l'iPhone. Faut-il qu'il donne le chemin exact sur Android
-  (Chrome → ⋮ → Paramètres → Paramètres des sites → Notifications →
-  hotesmart.vercel.app → Autoriser), voire un lien d'aide dans le guide ?
+**Pourquoi les contacts libres et le bloc « Alertes » sont passés au 2c**
+(ajustement annoncé à Thierry le 7 novembre au soir) : tant que les alertes
+partent par `agent_alert_config`, des contacts libres réglés dans `/settings`
+ne feraient rien, et le bloc déménagé laisserait Messages sans réglage actif.
+Ils n'ont de sens qu'avec la bascule. Comme 2b et 2c partent ensemble en
+production, l'hôte ne voit jamais l'état intermédiaire.
+
+**Q21, née de la recette du 2a — tranchée** (§13) : le 7 novembre, en
+réabonnant son téléphone en production, Thierry a lu « Les notifications sont
+bloquées pour HôteSmart sur cet appareil ». Le réglage Notifications de Chrome
+pour le site (Paramètres des sites) bloquait, alors que les notifications de
+l'appli installée étaient actives côté Android. Après réautorisation dans
+Chrome, le réabonnement est passé ; la cause n'est pas établie (le code ne
+touche pas à la permission). Le message donne désormais le chemin exact
+(§15.6).
 
 **Ce que le lot ne fait pas** :
 - pas de notification marketing, ni rien vers les voyageurs ;
 - pas de notification envoyée depuis un écran ouvert : seul le serveur envoie ;
 - l'appli prestataire attend le lot 3 ;
 - rien en production sans le go de Thierry : migration, clés, envoi réel.
+
+## 15. Lot 2b — les réglages de la personne (détail)
+
+Branche `pwa-lot-2b-reglages`, partie de `main` `019ae717`. Rien n'envoie
+encore selon ces réglages : c'est le 2c qui branche les événements.
+
+### 15.1 La donnée
+
+- **Table `notifications_reglages`**, une ligne par personne (`user_id`, clé
+  primaire, vers `auth.users`, supprimée avec elle) : `evenements` (jsonb),
+  `plages` (jsonb), `langue` (`fr`, `en`, `es` ou vide), `maj_le`.
+- **RLS active, aucune politique** : seule la clé de service lit et écrit,
+  comme `push_abonnements`.
+- **Un seul writer**, `lib/notifications/reglages.js`. Il valide tout à
+  l'écriture : un code d'événement inconnu, un canal inconnu, une valeur qui
+  n'est pas un booléen, une heure mal formée, une plage vide (début = fin),
+  un jour hors de 1 à 7, plus de 6 plages : refusé en 400, rien n'est écrit.
+- **Une personne sans ligne a les défauts** (Q23) : notification et e-mail
+  cochés, SMS décoché, urgent pour a, b, h et j, aucune plage, français. La
+  ligne ne s'écrit qu'au premier « Enregistrer ». Un événement ajouté plus
+  tard au catalogue prend ses défauts chez tout le monde, sans migration.
+- **Les mêmes réglages pour tous les comptes** d'une personne membre de
+  plusieurs comptes : ses heures sont les siennes, pas celles d'un compte.
+
+### 15.2 Le catalogue des quatorze événements
+
+`lib/notifications/catalogue.js` : pour chacun, son code, son libellé, son
+groupe à l'écran, son domaine de droits (§3) et s'il est urgent par défaut.
+**C'est la seule liste** : l'écran la reçoit du serveur, il ne la recopie pas.
+
+### 15.3 Les plages du mode urgence
+
+`lib/notifications/plages.js`. **Une seule règle de calcul**, celle de
+`lib/guestflow/sourdine.js` (`plageDeNuit`, `minutesDeLHeure`), réutilisée sans
+la modifier : `[début, fin[`, fuseau `Europe/Paris`, changements d'heure déjà
+éprouvés. Ce qui s'ajoute :
+- **les jours** : une plage peut ne valoir que certains jours. Le jour est
+  **celui où la plage commence** : la plage « 22:00 → 07:00, du lundi au
+  vendredi » couvre la nuit du vendredi au samedi jusqu'à 7 h, et pas celle du
+  samedi au dimanche ;
+- **plusieurs plages** : l'instant est « en plage » s'il est dans l'une d'elles ;
+- **les plages qui se suivent** : 22:00 → 07:00 puis 07:00 → 09:00 font une
+  seule attente, jusqu'à 9 h. La fin retenue est le premier instant qui n'est
+  dans aucune plage.
+
+### 15.4 La décision « maintenant ou fin de plage »
+
+`lib/notifications/decision.js`, sans base ni horloge lue : tout entre en
+paramètre (l'événement, les réglages, l'instant, le séjour concerné). Pour
+chaque canal coché :
+1. hors plage → **maintenant** ;
+2. événement dans la liste des urgences de la personne → **maintenant** ;
+3. séjour dont l'arrivée est **aujourd'hui ou demain**, ou **en cours** →
+   **maintenant**. « En cours » va de l'arrivée au départ, **jour du départ
+   compris** : le matin du départ, le voyageur est encore là. Les jours sont
+   ceux de Paris ;
+4. sinon → **à la fin de la plage** (§15.3).
+
+Un canal décoché ne part jamais. Le 2c lira le séjour dans le cœur
+(`bookings_snapshot`) et rangera « fin de plage » dans la file d'attente.
+
+### 15.5 L'endpoint
+
+`/api/push` reste le seul endpoint de l'onglet Notifications :
+- **GET** rend en plus `evenements` (le catalogue fusionné avec les réglages de
+  la personne), `plages` et `langue` ;
+- **POST `action: 'reglages'`** enregistre le tableau et les plages ;
+- **POST `action: 'langue'`** enregistre la langue.
+
+La garde est la session : chacun lit et écrit **ses** réglages, jamais ceux
+d'un autre (aucun identifiant de personne n'est accepté dans le corps).
+
+### 15.6 L'écran `/settings`, onglet Notifications
+
+- **« Quand vous prévenir »** : les quatorze événements par groupe
+  (Réservations, Messages, Ménages, Avis), quatre cases par ligne :
+  Notification, E-mail, SMS, Urgent. Une phrase dit que chacun ne reçoit que
+  ce que ses droits permettent.
+- **« Heures calmes »** : les plages, chacune avec son début, sa fin et ses
+  jours, un bouton pour la retirer, « Ajouter une plage ». Sans plage, tout
+  arrive tout de suite. Une phrase dit ce qui passe quand même (les urgences,
+  et les séjours qui arrivent aujourd'hui ou demain ou sont en cours).
+- **Un seul bouton « Enregistrer »** pour les deux.
+- **Décocher « Urgent » sur la surréservation**, ou tous ses canaux, demande
+  une confirmation qui dit pourquoi : c'est la seule alerte qui ne se
+  rattrape pas (§4.5).
+- **Le blocage (Q21)** : dès l'ouverture de l'onglet, si la permission est
+  refusée, l'état le dit avec le chemin exact de l'appareil, et un lien vers
+  le guide :
+  - Android : Chrome → ⋮ → Paramètres → Paramètres des sites → Notifications
+    → le site → Autoriser ;
+  - iPhone : Réglages → Notifications → HôteSmart → Autoriser les
+    notifications ; s'il n'y figure pas, supprimer l'icône, reposer l'appli et
+    accepter ;
+  - ordinateur : l'icône à gauche de l'adresse → Notifications → Autoriser.
+
+### 15.7 La langue
+
+Le sélecteur de langue du menu ≡ (`shared/nav.js`) enregistre la langue
+choisie, **seulement sur ce geste** : aucun appel ajouté au chargement d'une
+page.
+
+### 15.8 Le guide
+
+`pages/guide.html` gagne une section « L'appli sur votre téléphone » :
+l'installer (iPhone, Android), activer les notifications, débloquer, et ce que
+font les heures calmes.
+
+### 15.9 Case PERFORMANCE du 2b
+
+1. Endpoint d'écran : `/api/push` GET pour l'onglet, deux lectures en
+   parallèle côté serveur (appareils, réglages).
+2. Donnée non urgente : sans objet (des réglages, pas un calcul).
+3. Cache navigateur : aucun.
+4. `private, no-store` : inchangé, posé avant le premier refus.
+5. Statiques : sans changement.
+6. Lecture tronquée : une ligne par personne, sans objet.
+7. Budget : zéro appel ajouté au chargement des autres pages ; l'onglet garde
+   un seul appel à l'ouverture, « Enregistrer » en fait un.
+8. Mesure avant/après : §15.10, mesurée au lot.
+
+### 15.10 Mesures
+
+À remplir au lot (appels, requêtes, octets de l'onglet, avant et après).
