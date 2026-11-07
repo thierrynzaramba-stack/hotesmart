@@ -501,7 +501,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     const choix = await confirmerDansLaPage({
       doc: d,
       titre: t('kb.delete_title', { subject: e.sujetInitial }),
-      texte: t('kb.delete_text'),
+      // « l'IA ne s'en servira plus » serait faux d'une réponse Hors IA
+      // (recette du 7 novembre 2026) : la phrase suit l'état ENREGISTRÉ.
+      texte: t(e.lisibleInitial === false ? 'kb.delete_text_hors_ia' : 'kb.delete_text'),
       fermer: t('messages.close'),
       boutons: [
         { cle: 'supprimer', libelle: t('kb.delete') },

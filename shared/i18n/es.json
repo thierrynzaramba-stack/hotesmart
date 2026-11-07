@@ -340,6 +340,7 @@
   "kb.checked_on": "Verificada el {date}",
   "kb.delete": "Eliminar",
   "kb.delete_text": "La respuesta sale de la base y la IA dejará de usarla.",
+  "kb.delete_text_hors_ia": "La respuesta sale de la base.",
   "kb.delete_title": "¿Eliminar «{subject}»?",
   "kb.deleted": "Eliminado",
   "kb.edit_dropped": "La edición en curso de la base de conocimiento no se guardó",

@@ -340,6 +340,7 @@
   "kb.checked_on": "Checked on {date}",
   "kb.delete": "Delete",
   "kb.delete_text": "The reply leaves the base, and the AI will no longer use it.",
+  "kb.delete_text_hors_ia": "The reply leaves the base.",
   "kb.delete_title": "Delete “{subject}”?",
   "kb.deleted": "Deleted",
   "kb.edit_dropped": "The knowledge base entry you were editing was not saved",

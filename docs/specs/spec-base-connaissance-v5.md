@@ -167,6 +167,15 @@ Une icône **« Base de connaissance »** dans l'en-tête de Messages, à côté
 - **Ordinateur** : elle ouvre un **volet à droite, 440 px**.
 - **Téléphone** : une **page plein écran**.
 - **Sélecteur de logement en haut** des deux.
+- **La même icône à côté du champ de saisie du fil** (recette du 7 novembre
+  2026, demande de Thierry). Au téléphone, l'en-tête n'existe que sur la LISTE :
+  pour l'atteindre il fallait quitter le fil, et la page s'ouvrait sur le
+  premier logement, sans voyageur pour l'aperçu. Depuis la saisie, elle s'ouvre
+  sur le logement ET le voyageur de la conversation, et son retour rouvre cette
+  conversation. Partir en pleine frappe ne perd rien : un brouillon différé en
+  cours de modification part en base d'abord ; un texte libre est gardé pour ce
+  fil (`sessionStorage`) et rendu dans une saisie vide à sa réouverture —
+  jamais un texte d'édition, dont l'envoi ne validerait pas la proposition.
 
 ### 3.2 La carte d'une réponse prête
 
@@ -297,6 +306,13 @@ Un par un, **recette staging entre chaque**.
 4. Téléphone : le même bouton ouvre la page plein écran, sélecteur de logement
    en tête, mêmes gestes.
 5. L'ancienne adresse `/apps/agent-ai/knowledge` mène au volet.
+
+**Résultat de la recette du 7 novembre 2026 (staging, `b4522a10`)** : les cinq
+points passent. Deux correctifs en sortent, commités sur la branche du lot
+(règle 8) : l'icône à côté de la saisie (§3.1), et la fenêtre de suppression
+d'une réponse Hors IA, qui disait « l'IA ne s'en servira plus ». Un constat de
+recette était une erreur de mesure, pas un défaut : le libellé « Logement » du
+sélecteur est bien masqué (`.sr-only`) — c'est `innerText` qui le comptait.
 
 ## 4 bis. INVENTAIRE de `apps/agent-ai/knowledge.html` (lot 3)
 

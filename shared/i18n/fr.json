@@ -340,6 +340,7 @@
   "kb.checked_on": "Vérifiée le {date}",
   "kb.delete": "Supprimer",
   "kb.delete_text": "La réponse disparaît de la base, et l’IA ne s’en servira plus.",
+  "kb.delete_text_hors_ia": "La réponse disparaît de la base.",
   "kb.delete_title": "Supprimer « {subject} » ?",
   "kb.deleted": "Supprimé",
   "kb.edit_dropped": "La saisie en cours de la base de connaissance n’a pas été enregistrée",

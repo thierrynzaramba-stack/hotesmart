@@ -103,6 +103,16 @@
     <div class="msg-saisie__echeance" data-bind="saisie-echeance" hidden></div>
     <div class="msg-saisie" data-bind="saisie" hidden>
       <textarea rows="1" data-bind="texte" data-i18n-attr="placeholder:messages.write;aria-label:messages.write"></textarea>
+      <!-- La base de connaissance À CÔTÉ DE LA SAISIE (recette du 7 novembre
+           2026, demande de Thierry). Au téléphone, le bouton d'en-tête ne vit
+           que sur la LISTE : pour l'atteindre il fallait quitter le fil, et la
+           page s'ouvrait sur le premier logement, sans voyageur. Celui-ci est
+           DANS le fil. Même attribut que l'en-tête, donc même branchement
+           (titulaire seul, volet ou page, gel pendant une écriture). -->
+      <button type="button" class="btn btn--secondary btn--icon" data-ouvre-volet="connaissance" hidden
+        data-i18n-attr="aria-label:kb.title;title:kb.title">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-book"/></svg>
+      </button>
       <button type="button" class="btn btn--secondary btn--icon" data-bind="proposer" data-i18n-attr="aria-label:messages.propose;title:messages.propose">
         <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
       </button>
@@ -1749,9 +1759,55 @@ function urlConnaissance () {
 // Depuis le lien du volet « Réponses de l'IA » : on change de volet, on ne
 // referme pas le tiroir.
 function ouvrirConnaissance () {
-  if (telephone()) { location.assign(urlConnaissance()); return }
+  if (telephone()) { quitterVersConnaissance(); return }
   etat.tiroirVolet = 'connaissance'
   ouvrirTiroir(true)
+}
+
+// ⚠ AU TÉLÉPHONE, LA BASE EST UNE AUTRE PAGE : ON QUITTE MESSAGES, ET RIEN DE
+// CE QUE L'HÔTE A TAPÉ NE SE PERD (règle de l'étape 2 : « texte jamais
+// perdu »). Depuis le 7 novembre 2026 l'icône vit aussi à côté de la saisie,
+// donc on peut partir EN PLEINE FRAPPE :
+//   · un brouillon différé en cours de modification part en base d'abord —
+//     le même geste que quitter le fil (`ouvrir`) ;
+//   · un texte LIBRE est gardé pour CE fil, et rendu quand il se rouvre.
+//     Jamais un texte d'édition : rendu comme texte libre, son envoi ne
+//     validerait pas la proposition, qui partirait AUSSI à son échéance —
+//     deux messages chez le voyageur. Lui vit en base, dans sa proposition ;
+//   · l'adresse de Messages porte le fil (?conv=), pour que le retour —
+//     bouton de la page ou retour arrière du téléphone — le rouvre.
+const CLE_SAISIE_GARDEE = 'hs-messages-saisie'
+async function quitterVersConnaissance () {
+  const url = urlConnaissance()
+  if (etat.ouverte !== null) {
+    await enregistrerBrouillonEnCours()
+    const zone = $('[data-bind="texte"]')
+    const texte = zone ? String(zone.value || '') : ''
+    if (texte.trim() && !etat.enEdition) {
+      try { sessionStorage.setItem(CLE_SAISIE_GARDEE, JSON.stringify({ bookId: String(etat.ouverte), texte })) }
+      catch (e) { logger.error('Messages', 'saisie gardée', e) }
+    }
+    try {
+      const u = new URL(location.href)
+      u.searchParams.set('conv', String(etat.ouverte))
+      u.searchParams.delete('volet')
+      history.replaceState(history.state, '', u)
+    } catch (e) { logger.error('Messages', 'adresse du fil', e) }
+  }
+  location.assign(url)
+}
+// Le texte gardé au départ, rendu au fil qui l'avait — dans une saisie VIDE
+// seulement : on n'écrase jamais ce que l'hôte a tapé depuis, et le texte
+// reste gardé tant qu'il n'a pas été rendu.
+function rendreSaisieGardee (bookId) {
+  let garde = null
+  try { garde = JSON.parse(sessionStorage.getItem(CLE_SAISIE_GARDEE) || 'null') } catch { return }
+  if (!garde || !garde.texte || String(garde.bookId) !== String(bookId)) return
+  const zone = $('[data-bind="texte"]')
+  if (!zone || zone.value.trim()) return
+  zone.value = garde.texte
+  ajusterHauteur(zone)
+  try { sessionStorage.removeItem(CLE_SAISIE_GARDEE) } catch {}
 }
 
 // ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
@@ -3466,6 +3522,8 @@ function ouvrir (bookId) {
       .catch(e => logger.error('Messages', 'read_at', e))
   }
   renderListe(); renderFil()
+  // Retour de la base de connaissance (téléphone) : le texte libre gardé.
+  rendreSaisieGardee(bookId)
 }
 
 // ─── Démarrage ──────────────────────────────────────────────────────────────
@@ -3506,7 +3564,7 @@ async function init () {
     b.addEventListener('click', () => {
       // La base de connaissance au TÉLÉPHONE est une page plein écran, pas le
       // tiroir (spec KB V5 §3.1).
-      if (b.dataset.ouvreVolet === 'connaissance' && telephone()) { location.assign(urlConnaissance()); return }
+      if (b.dataset.ouvreVolet === 'connaissance' && telephone()) { quitterVersConnaissance(); return }
       const tiroir = $('[data-bind="tiroir"]')
       const deja = !tiroir.hidden && etat.tiroirVolet === b.dataset.ouvreVolet
       etat.tiroirVolet = b.dataset.ouvreVolet

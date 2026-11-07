@@ -210,3 +210,117 @@ test('changer de volet PENDANT un enregistrement ne prétend pas que la saisie e
   assert.equal(b.envois.filter(e => e.methode === 'POST' && /connaissance/.test(e.chemin)).length, 1)
   b.fermer()
 })
+
+// ─── L'icône À CÔTÉ DE LA SAISIE (recette du 7 novembre 2026) ─────────────
+// Au téléphone, le bouton d'en-tête ne vit que sur la LISTE : pour l'atteindre
+// il fallait quitter le fil, et la page s'ouvrait sur le premier logement,
+// sans voyageur (mesuré en recette sur staging). L'icône de la saisie est DANS
+// le fil — et comme on peut la toucher en pleine frappe, partir ne doit rien
+// coûter de ce que l'hôte a tapé.
+const iconeSaisie = (b) => b.doc.querySelector('[data-bind="saisie"] [data-ouvre-volet="connaissance"]')
+const auTelephone = (b) => {
+  b.window.matchMedia = (q) => ({ matches: /max-width: 899px/.test(q), media: q, addEventListener () {}, removeEventListener () {} })
+}
+const fil = (bookId, propertyId) => ({ bookId, propertyId, messages: [], lastNight: '2099-01-02' })
+const CLE = 'hs-messages-saisie'
+
+test('LE TEST QUI COMPTE : l icône de la base vit DANS la saisie du fil, titulaire seul', async () => {
+  const b = banc()
+  await amorcer(b)
+  const icone = iconeSaisie(b)
+  assert.ok(icone, 'à côté du champ de saisie')
+  assert.match(icone.innerHTML, /#i-book/)
+  assert.equal(icone.hidden, false)
+  b.fermer()
+  const m = banc({ titulaire: false })
+  await amorcer(m)
+  assert.equal(iconeSaisie(m).hidden, true, 'l endpoint refuse un membre : l icône aussi')
+  m.fermer()
+})
+
+test('à l ordinateur, l icône de la saisie ouvre le volet sur le logement ET le voyageur du fil', async () => {
+  const b = banc()
+  await amorcer(b)
+  peupler(b, { biens: BIENS, volet: 'ia', bien: 'P1', conversations: [fil('B7', 'P2')], ouverte: 'B7' })
+  b.msg.ouvrirTiroir(false)
+  clic(b, iconeSaisie(b))
+  await reposer(b)
+  assert.equal(tiroirOuvert(b), true)
+  assert.equal(b.msg.etat.tiroirVolet, 'connaissance')
+  assert.deepEqual(lecturesKb(b).map(e => e.chemin), ['/api/ecran/connaissance?bien=P2&resa=B7'])
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : au téléphone, l icône de la saisie part vers la page SANS perdre le texte tapé', async () => {
+  const b = banc()
+  await amorcer(b)
+  peupler(b, { biens: BIENS, volet: 'ia', bien: 'P1', conversations: [fil('B7', 'P2')], ouverte: 'B7' })
+  b.msg.ouvrirTiroir(false)
+  auTelephone(b)
+  assert.equal(b.msg.urlConnaissance(), '/connaissance?bien=P2&resa=B7', 'le logement et le voyageur du fil')
+  b.doc.querySelector('[data-bind="texte"]').value = 'Bonjour, le code est '
+  clic(b, iconeSaisie(b))
+  await reposer(b)
+  assert.equal(tiroirOuvert(b), false, 'pas de tiroir au téléphone')
+  assert.equal(lecturesKb(b).length, 0, 'la page lira elle-même')
+  assert.deepEqual(JSON.parse(b.window.sessionStorage.getItem(CLE)), { bookId: 'B7', texte: 'Bonjour, le code est ' })
+  assert.equal(new b.window.URL(b.window.location.href).searchParams.get('conv'), 'B7',
+    'le retour arrière rouvre le fil')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : partir pendant un « Modifier » enregistre le brouillon en base, et ne le garde PAS comme texte libre', async () => {
+  // Rendu comme texte libre, son envoi ne validerait pas la proposition, qui
+  // partirait AUSSI à son échéance : deux messages chez le voyageur.
+  const b = banc()
+  await amorcer(b)
+  const echeance = new Date(Date.now() + 3600e3).toISOString()
+  peupler(b, { biens: BIENS, volet: 'ia', bien: 'P1', conversations: [fil('B7', 'P2')], ouverte: 'B7',
+    taches: [{ id: 'T1', booking_id: 'B7', suggested_reply: 'Texte de l IA', send_after: echeance }] })
+  b.msg.ouvrirTiroir(false)
+  b.msg.etat.enEdition = { bookId: 'B7', tacheId: 'T1' }
+  auTelephone(b)
+  b.doc.querySelector('[data-bind="texte"]').value = 'Texte retouché'
+  clic(b, iconeSaisie(b))
+  await reposer(b)
+  const brouillons = b.envois.filter(e => e.chemin === '/api/messages' && e.corps && e.corps.action === 'brouillon')
+  assert.deepEqual(brouillons.map(e => e.corps), [{ action: 'brouillon', task_id: 'T1', texte: 'Texte retouché' }])
+  assert.equal(b.window.sessionStorage.getItem(CLE), null)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : le texte gardé revient quand SON fil se rouvre, une fois, et nulle part ailleurs', async () => {
+  const b = banc()
+  await amorcer(b)
+  b.window.sessionStorage.setItem(CLE, JSON.stringify({ bookId: 'B7', texte: 'Bonjour, le code est ' }))
+  peupler(b, { biens: BIENS, volet: 'ia', bien: 'P1', conversations: [fil('B7', 'P2'), fil('B8', 'P1')] })
+  b.msg.ouvrirTiroir(false)
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  b.msg.ouvrir('B8')
+  assert.equal(zone.value, '', 'un autre fil ne le reçoit pas')
+  assert.ok(b.window.sessionStorage.getItem(CLE), 'toujours gardé')
+  b.msg.ouvrir('B7')
+  assert.equal(zone.value, 'Bonjour, le code est ')
+  assert.equal(b.window.sessionStorage.getItem(CLE), null, 'rendu une seule fois')
+  await reposer(b)
+  b.fermer()
+})
+
+test('le texte gardé n écrase jamais une saisie déjà tapée, et reste gardé', async () => {
+  const b = banc()
+  await amorcer(b)
+  b.window.sessionStorage.setItem(CLE, JSON.stringify({ bookId: 'B7', texte: 'Bonjour' }))
+  peupler(b, { biens: BIENS, volet: 'ia', bien: 'P1', conversations: [fil('B7', 'P2')] })
+  b.msg.ouvrirTiroir(false)
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  zone.value = 'Autre chose'
+  b.msg.ouvrir('B7')
+  assert.equal(zone.value, 'Autre chose')
+  assert.ok(b.window.sessionStorage.getItem(CLE))
+  // Saisie vidée : à la réouverture suivante, il revient.
+  zone.value = ''
+  b.msg.ouvrir('B7')
+  assert.equal(zone.value, 'Bonjour')
+  await reposer(b)
+  b.fermer()
+})

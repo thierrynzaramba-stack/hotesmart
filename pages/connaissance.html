@@ -39,7 +39,7 @@
 
 <main class="kb-page">
   <div class="kb-page__entete">
-    <a class="btn btn--secondary btn--icon" href="/pages/messages" data-i18n-attr="aria-label:kb.back;title:kb.back">
+    <a class="btn btn--secondary btn--icon" href="/pages/messages" data-bind="retour" data-i18n-attr="aria-label:kb.back;title:kb.back">
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(180 12 12)"/></svg>
     </a>
     <h1 class="h2" data-i18n="kb.title"></h1>
@@ -94,6 +94,10 @@ async function init () {
 
   const racine = $('[data-kb-racine]')
   const params = new URLSearchParams(location.search)
+  // Venue d'une conversation (l'icône de la saisie, 7 novembre 2026) : le
+  // retour rouvre CETTE conversation, même si l'hôte a changé de logement ici.
+  const resa = params.get('resa')
+  if (resa) $('[data-bind="retour"]').href = '/pages/messages?conv=' + encodeURIComponent(resa)
   monterConnaissance({
     racine, appel, t, esc, selecteur: true,
     bien: params.get('bien'), resa: params.get('resa'),

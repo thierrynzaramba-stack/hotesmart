@@ -41,6 +41,15 @@ test('la page monte LA vue partagée, avec son sélecteur, et ne recopie aucune 
   assert.ok(!/from\('knowledge'\)/.test(sansCommentaires(lire('shared/connaissance-vue.js'))))
 })
 
+test('venue d une conversation, le retour de la page rouvre CETTE conversation (recette du 7 novembre 2026)', () => {
+  const code = sansCommentaires(PAGE)
+  assert.match(code, /<a [^>]*href="\/pages\/messages"[^>]*data-bind="retour"/, 'sans conversation : la liste')
+  // La réservation est lue À L'ARRIVÉE : changer de logement sur la page
+  // l'efface de l'adresse, pas du retour.
+  assert.match(code, /const resa = params\.get\('resa'\)\s*\n\s*if \(resa\) \$\('\[data-bind="retour"\]'\)\.href = '\/pages\/messages\?conv=' \+ encodeURIComponent\(resa\)/)
+  assert.ok(code.indexOf("params.get('resa')") < code.indexOf('monterConnaissance({'), 'lue avant que la vue ne réécrive l adresse')
+})
+
 test('/connaissance est routée vers la page, et l ancienne page redirige vers le volet', () => {
   const vercel = JSON.parse(lire('vercel.json'))
   const r = (vercel.rewrites || []).find(x => x.source === '/connaissance')
