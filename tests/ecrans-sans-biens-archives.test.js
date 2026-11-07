@@ -202,6 +202,12 @@ const ECRANS = [
   { ecran: 'Accueil', chemin: 'api/ecran/aujourdhui.js', query: { blocs: 'biens' }, legitimes: ['biens_archives'] },
   { ecran: 'Calendrier et base de connaissance', chemin: 'api/channel-property.js', query: {} },
   { ecran: 'Menages (A traiter et calendrier)', chemin: 'api/menages.js', query: {} },
+  // ⚠ LA PAGE `/menages` NE LIT PAS `api/menages.js` mais `api/garde.js`
+  // (bulle « A traiter » et calendrier de garde) — constat 5 de la revue du
+  // 7 novembre 2026 : la ligne du dessus couvrait l'accueil et l'ecran des
+  // prestataires, pas cet ecran. Sans reservation au banc, le bien archive n'a
+  // aucun depart a venir : il doit etre absent.
+  { ecran: 'Menages (page /menages : bulle et calendrier de garde)', chemin: 'api/garde.js', query: { du: '2026-11-09', au: '2026-11-15' } },
   // ⚠ `legitimes` EST VIDE ICI ET C'EST VOULU : la decision de Thierry garde
   // les avis RECUS d'un bien archive, mais la liste `biens` — celle du filtre et
   // du formulaire — ne doit plus le proposer. Le banc ne fournit aucun avis,
