@@ -496,6 +496,12 @@ h1, h2, h3, p { margin: 0; }
   .bulle__actions .btn { flex: 1 1 100%; justify-content: center; }
   .bulle__actions [data-envoyer-prop] { order: -1; }
   .bulle-menu { order: 1; margin-inline-start: auto; }
+  /* La saisie PENDANT LA FRAPPE (recette du 7 novembre 2026) : le champ sur
+     toute la largeur, les boutons dessous, à droite. La classe se pose au
+     toucher du champ et ne se retire qu'APRÈS un clic hors de la saisie
+     (pages/messages.html) : les boutons ne bougent pas sous le doigt. */
+  .msg-saisie--frappe { flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
+  .msg-saisie--frappe textarea { flex: 1 1 100%; }
 }
 
 /* ---------- Barre du haut ---------- */

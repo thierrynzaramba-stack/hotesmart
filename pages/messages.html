@@ -3640,6 +3640,21 @@ async function init () {
   })
   $('[data-bind="envoyer"]').addEventListener('click', envoyer)
   $('[data-bind="proposer"]').addEventListener('click', proposer)
+  // Au téléphone, le champ prend TOUTE LA LARGEUR pendant la frappe, les
+  // boutons passent dessous (recette du 7 novembre 2026, demande de Thierry :
+  // avec le livre en plus, le champ n'avait plus qu'un tiers de la largeur).
+  // La mise en page est dans ui.css, réservée au téléphone.
+  //
+  // ⚠ ON NE REPLIE JAMAIS AU `blur`. Il part au toucher d'un bouton de la
+  // saisie, AVANT son `click` : replier à cet instant déplacerait le bouton
+  // sous le doigt, et le clic tomberait à côté — sur « Envoyer » compris. On
+  // replie APRÈS un clic ailleurs dans la page, quand il a déjà trouvé sa cible.
+  const barreSaisie = $('[data-bind="saisie"]')
+  zoneTexte.addEventListener('focus', () => barreSaisie.classList.add('msg-saisie--frappe'))
+  document.addEventListener('click', (e) => {
+    if (barreSaisie.contains(e.target) || document.activeElement === zoneTexte) return
+    barreSaisie.classList.remove('msg-saisie--frappe')
+  })
 
   // Filtre demandé par l'URL (lien « n de plus » de l'accueil, étape 4).
   const params = new URLSearchParams(location.search)
