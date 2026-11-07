@@ -204,6 +204,10 @@ const ECRANS = [
   // du formulaire — ne doit plus le proposer. Le banc ne fournit aucun avis,
   // donc seule cette liste parle.
   { ecran: 'Avis (filtre et formulaire)', chemin: 'api/avis.js', query: {} },
+  // ⚠ C'EST CETTE LECTURE-CI QUE `pages/avis.html` APPELLE pour remplir son
+  // filtre et son formulaire (constat 3 de la revue du 7 novembre 2026) : la
+  // ligne du dessus couvrait `lister`, que la page n'appelle plus.
+  { ecran: 'Avis (cartes : le filtre et le formulaire de la page)', chemin: 'api/avis.js', query: { action: 'cartes' } },
   { ecran: 'Avis — reglage auto-validation', chemin: 'api/avis.js', query: { action: 'auto-validation' } },
 ]
 

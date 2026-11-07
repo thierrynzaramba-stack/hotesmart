@@ -14,7 +14,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
-const { sansArchives } = require('../lib/biens-vivants')
+const { sansArchives, COLONNE: COLONNE_ARCHIVE } = require('../lib/biens-vivants')
 const { ratioProprete, noteMoyenne, notesDuPerimetre, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 const { assemblerCartes } = require('../lib/avis/cartes')
 const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origine')
@@ -682,8 +682,12 @@ async function cartesLister (req, res, garde) {
 
   // ⚠ **NON FILTREE**, meme raison : `nomParId` et `nomParRef` nomment les
   // cartes d'avis, y compris celles d'un bien archive que la decision garde.
+  // ⚠ MAIS `archive_le` EST LU, pour la LISTE DE CHOIX rendue plus bas : c'est
+  // elle que la page lit pour son filtre et son formulaire (constat 3 de la
+  // revue du 7 novembre 2026 — le lot avait filtre `lister`, que la page
+  // n'appelle plus, et laisse celle-ci proposer le bien archive).
   const { data: biens, error: eBiens } = await supabase.from('properties')
-    .select('id, name, provider_property_id, provider').eq('user_id', userId)
+    .select('id, name, provider_property_id, provider, ' + COLONNE_ARCHIVE).eq('user_id', userId)
     .not('provider_property_id', 'is', null).order('name')
   if (eBiens) return res.status(500).json({ error: 'Lecture impossible' })
   const nomParId = new Map((biens || []).map(b => [b.id, b.name]))
@@ -711,7 +715,11 @@ async function cartesLister (req, res, garde) {
     anciens_tronques: avecAnciens && anciensTotal > MAX_LIGNES,
     // La liste lue a atteint une borne : des cartes anciennes peuvent manquer.
     liste_incomplete: avisTronques || (ev.data || []).length >= MAX_EVALS_CARTES,
-    biens: (biens || []).filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
+    // La liste de CHOIX (filtre et formulaire de la page) : sans les biens
+    // archives — decision de Thierry du 3 novembre 2026, point 5. Les cartes,
+    // elles, gardent leurs noms par les deux tables ci-dessus.
+    biens: (biens || []).filter(b => !b[COLONNE_ARCHIVE])
+      .filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
       .map(b => ({ name: b.name, provider_property_id: b.provider_property_id })),
     periodes: Object.keys(PERIODES),
     // ⚠ `note_sur_5` ET PLUS `moyenne` (decision de Thierry, 20 octobre 2026 :
