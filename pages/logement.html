@@ -922,7 +922,20 @@ async function archiverLogement (bouton) {
       bouton.disabled = false
       return
     }
-    direEtatArchive(zone, '', t('fiche.archive_fait'))
+    // ⚠ LE NOMBRE DE MENAGES CREES SE DIT, et seulement s'il y en a (demande de
+    // Thierry du 3 novembre 2026). L'archivage cree desormais les menages de
+    // tous les sejours a venir, y compris au-dela des 180 jours du cron : sans
+    // cette phrase, l'hote ne saurait pas que la prestataire a du travail
+    // programme sur un logement qu'il vient de ranger.
+    //
+    // ⚠ `null` N'EST PAS `0`, et les deux se taisent ici pour des raisons
+    // differentes : `0` veut dire « tous les menages existaient deja », `null`
+    // « on n'a pas pu le savoir ». Annoncer « 0 ménage créé » sur une ignorance
+    // serait une affirmation fausse ; l'echec, lui, est deja dans `rates`.
+    const n = r && Number.isFinite(r.menages_crees) ? r.menages_crees : 0
+    direEtatArchive(zone, '', n > 0
+      ? t('fiche.archive_fait_menages', { n })
+      : t('fiche.archive_fait'))
     await charger()
   } catch (e) {
     logger.error('Logement', e.message, { status: e.status })
