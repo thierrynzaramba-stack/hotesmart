@@ -86,11 +86,14 @@ module.exports = async function handler (req, res) {
   try {
     if (req.method === 'GET') {
       const [r, g] = await Promise.all([abonnements.lister({ userId }), reglages.lire({ userId })])
-      if (!r.ok || !g.ok) return res.status(503).json({ error: 'Lecture impossible, réessayez.' })
+      if (!r.ok) return res.status(503).json({ error: 'Lecture impossible, réessayez.' })
+      const corps = { pret: !!cles, cle_publique: cles ? cles.publique : null, appareils: r.appareils }
+      // ⚠ DES RÉGLAGES ILLISIBLES NE FONT PAS TOMBER LES APPAREILS (constat de
+      // review) : la gestion des appareils du lot 2a reste servie, et l'écran dit
+      // que les réglages sont indisponibles.
+      if (!g.ok) return res.status(200).json({ ...corps, reglages_indisponibles: true })
       return res.status(200).json({
-        pret: !!cles,
-        cle_publique: cles ? cles.publique : null,
-        appareils: r.appareils,
+        ...corps,
         groupes: catalogue.GROUPES,
         evenements: tableauDe(g.reglages),
         plages: g.reglages.plages,

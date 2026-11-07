@@ -71,6 +71,9 @@ test('une plage : heures, plage vide, jours — chaque refus a son motif ; jours
   assert.equal(plages.validerPlage({ debut: '22:00', fin: '07:00', jours: [8] }).motif, 'jour_illisible')
   assert.equal(plages.validerPlage({ debut: '22:00', fin: '07:00', jours: ['1'] }).motif, 'jour_illisible')
   assert.equal(plages.validerPlage(null).motif, 'plage_illisible')
+  // Une heure qui n'est pas une chaîne ne passe pas, même si son texte est juste.
+  assert.equal(plages.validerPlage({ debut: ['22:00'], fin: '07:00' }).motif, 'heure_illisible')
+  assert.equal(plages.validerPlage({ debut: '22:00', fin: [['07:00']] }).motif, 'heure_illisible')
   assert.deepEqual(plages.validerPlage({ debut: '22:00', fin: '07:00' }).plage.jours, [1, 2, 3, 4, 5, 6, 7])
   assert.deepEqual(plages.validerPlage({ debut: '22:00', fin: '07:00', jours: [5, 1, 5] }).plage.jours, [1, 5])
 })
@@ -146,6 +149,27 @@ test('les deux changements d\'heure : la fin tombe à la bonne heure locale', ()
   // Le jour de début se lit juste aussi le dimanche du changement.
   const samedi = [{ debut: '22:00', fin: '07:00', jours: [6] }]
   assert.equal(plages.dansLesPlages(ete('2026-10-25T02:30'), samedi).dedans, true, 'la nuit du samedi 24')
+})
+
+test('LE TEST QUI COMPTE : une fin dans le trou du passage à l\'heure d\'été finit au saut, jamais dans le passé', () => {
+  // Nuit du 28 au 29 mars 2026 : à 2 h, l'horloge saute à 3 h. 2 h 30 n'existe pas.
+  const jusqua230 = [{ debut: '22:00', fin: '02:30' }]
+  for (const instant of [hiver('2026-03-29T01:45'), hiver('2026-03-29T00:15'), hiver('2026-03-28T23:00')]) {
+    const r = plages.dansLesPlages(instant, jusqua230)
+    assert.equal(r.motif, 'dans_une_plage', new Date(instant).toISOString())
+    assert.equal(r.finDeLaPlage, ete('2026-03-29T03:00'), 'la plage finit au saut de 3 h')
+    assert.ok(r.finDeLaPlage > instant)
+  }
+  assert.equal(plages.dansLesPlages(hiver('2026-03-29T01:30'), [{ debut: '22:00', fin: '02:00' }]).finDeLaPlage, ete('2026-03-29T03:00'))
+  // La décision dit « fin de plage à 3 h », pas « maintenant ».
+  const d = decider({ code: 'avis', reglages: { evenements: {}, plages: jusqua230 }, instant: hiver('2026-03-29T01:45') })
+  assert.deepEqual([d.moment, d.a, d.motif], ['fin_de_plage', ete('2026-03-29T03:00'), 'dans_une_plage'])
+  // Le seul moment libre de la semaine tombe dans le trou : l'attente court jusqu'à
+  // celui de la semaine suivante — borné, et c'est ce que les plages demandent.
+  const seulLibreLeDimanche = [{ debut: '03:00', fin: '02:00' }, { debut: '02:00', fin: '03:00', jours: [1, 2, 3, 4, 5, 6] }]
+  assert.equal(plages.validerPlages(seulLibreLeDimanche).ok, true)
+  const r = plages.dansLesPlages(hiver('2026-03-28T23:00'), seulLibreLeDimanche)
+  assert.deepEqual([r.motif, r.finDeLaPlage], ['dans_une_plage', ete('2026-04-05T02:00')])
 })
 
 test('une plage illisible en base est écartée, jamais prise pour « tout couvert »', () => {
@@ -293,15 +317,25 @@ test('enregistrer le tableau ne touche pas la langue ; enregistrer la langue ne 
   assert.equal(etat.ecritures.length, 2, 'une langue inconnue n\'écrit rien')
 })
 
-test('les langues acceptées sont celles du site (shared/i18n/langues.json), pas une liste recopiée', () => {
+test('les langues acceptées sont celles du site (shared/i18n/langues.json), en base comme dans le writer', () => {
   const site = require('../shared/i18n/langues.json').map(l => l.code)
   assert.deepEqual(reglages.LANGUES, site)
+  // ⚠ La contrainte de la table est une copie : une langue ajoutée au site sans
+  // migration serait acceptée par le writer puis refusée par la base (constat de
+  // review). Ce test la fait rougir à ce moment-là.
+  const sql = require('node:fs').readFileSync(path.join(__dirname, '..', 'migrations/2026-11-08-notifications-reglages.sql'), 'utf8')
+  const enBase = /check \(langue in \(([^)]*)\)\)/.exec(sql)[1].split(',').map(x => x.trim().replace(/'/g, ''))
+  assert.deepEqual(enBase.sort(), [...site].sort())
 })
 
 // ─── 5. L'endpoint ──────────────────────────────────────────────────────────
 
-function monterApi ({ lignes = [], env = {} } = {}) {
+function monterApi ({ lignes = [], env = {}, reglagesEnPanne = false } = {}) {
   const { db, etat } = baseReglages(lignes)
+  if (reglagesEnPanne) {
+    const panne = { select: () => panne, eq: () => panne, maybeSingle: async () => ({ data: null, error: { message: 'relation does not exist' } }) }
+    db.from = () => panne
+  }
   const jetons = { 'jeton-a': A, 'jeton-b': B }
   const appareils = { select: () => appareils, eq: () => appareils, then: (ok, ko) => Promise.resolve({ data: [], error: null }).then(ok, ko) }
   const client = {
@@ -394,5 +428,16 @@ test('POST reglages refusé : 400 avec le motif, le rang de la plage, et rien é
     assert.equal(etat.lignes[0].langue, 'es')
     assert.equal(etat.lignes[0].user_id, A)
     assert.equal((await appeler({ methode: 'POST', corps: { action: 'langue', langue: 'xx' } })).code, 400)
+  } finally { fini() }
+})
+
+test('GET : des réglages illisibles ne font pas tomber la liste des appareils', async () => {
+  const { appeler, fini } = monterApi({ reglagesEnPanne: true })
+  try {
+    const r = await appeler()
+    assert.equal(r.code, 200)
+    assert.deepEqual(r.corps.appareils, [])
+    assert.equal(r.corps.reglages_indisponibles, true)
+    assert.equal(r.corps.evenements, undefined)
   } finally { fini() }
 })

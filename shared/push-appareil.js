@@ -50,12 +50,16 @@ export function libelleAppareil () {
 
 // LE TYPE D'APPAREIL, pour dire le BON chemin quand les notifications sont
 // bloquées (décision Q21 : « le plus simple et clair pour l'utilisateur »).
-// Rend 'iphone', 'android' ou 'ordinateur'.
+// Rend 'iphone' (iPhone et iPad), 'android' (Chrome sous Android),
+// 'android-autre' (Samsung Internet, Firefox, Edge, Opera sous Android : leurs
+// menus ne sont pas ceux de Chrome) ou 'ordinateur'.
 export function plateforme () {
   const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || ''
   if (/iPhone|iPad|iPod/.test(ua) ||
     (/Macintosh/.test(ua) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1)) return 'iphone'
-  if (/Android/.test(ua)) return 'android'
+  if (/Android/.test(ua)) {
+    return /Chrome\//.test(ua) && !/SamsungBrowser|Firefox|EdgA|OPR/.test(ua) ? 'android' : 'android-autre'
+  }
   return 'ordinateur'
 }
 

@@ -316,13 +316,25 @@ n'envoie encore selon ces réglages, c'est le 2c qui branche les événements.
 8. **Un brouillon modifié n'est jamais écrasé** quand l'onglet relit le
    serveur après un geste sur les appareils.
 9. **Bloquées (Q21)** : dès l'ouverture, le chemin exact de l'appareil
-   (Android : Chrome → ⋮ → Paramètres → Paramètres des sites → Notifications ;
-   iPhone : Réglages → Notifications → HôteSmart ; ordinateur : l'icône à
-   gauche de l'adresse), l'adresse du site ouvert (jamais en dur), et le lien
+   (Android avec Chrome : Chrome → ⋮ → Paramètres → Paramètres des sites →
+   Notifications ; un autre navigateur Android : ses autorisations des sites ;
+   iPhone et iPad : Réglages → Notifications → HôteSmart ; ordinateur : l'icône
+   à gauche de l'adresse), l'adresse du site ouvert (jamais en dur), et le lien
    vers le guide. Au retour sur l'onglet, l'état se relit si la permission a
    changé (comparaison locale, sans réseau sinon).
 10. **La langue s'enregistre sur le geste du menu ≡ seulement** : aucun appel
     ajouté au chargement d'une page.
+11. **Une fin de plage dans le trou du passage à l'heure d'été finit au saut**
+    (constat de review) : la nuit où l'horloge saute de 2 h à 3 h, une fin à
+    2 h 30 n'existe pas, et `plageDeNuit` rend un instant d'AVANT (1 h 30,
+    parfois déjà passé). `lib/notifications/plages.js` corrige au saut (3 h)
+    sans toucher `sourdine.js`. ⚠ `lib/guestflow/sourdine.js` a le même défaut
+    pour la décision 7 (mesuré : à 1 h 45 avec une fin à 2 h 30, l'échéance
+    rendue est 1 h 30) — signalé au fil messagerie, qui tient ce fichier.
+12. **Une case cochée pendant un enregistrement n'est pas effacée** : la
+    réponse ne remplace le brouillon que s'il n'a pas bougé depuis le clic.
+13. **Des réglages illisibles ne font pas tomber les appareils** : le GET sert
+    les appareils et dit `reglages_indisponibles`.
 
 **Ce qui est au 2c, et pourquoi** : les contacts libres, la reprise des listes
 d'`agent_alert_config`, le déménagement du bloc « Alertes » de Messages, la

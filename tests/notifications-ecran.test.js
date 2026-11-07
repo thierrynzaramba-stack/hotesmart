@@ -45,7 +45,7 @@ function etatServeur (surcharge = {}) {
   }
 }
 
-async function ouvrirSettings ({ plateforme = 'android', bloquee = false, etat = etatServeur(), reponseEnregistrer = null, confirmer = () => true, hote = 'hotesmart.vercel.app' } = {}) {
+async function ouvrirSettings ({ plateforme = 'android', bloquee = false, etat = etatServeur(), reponseEnregistrer = null, enregistrer = null, lecture = null, confirmer = () => true, hote = 'hotesmart.vercel.app' } = {}) {
   const html = lire('pages/settings.html')
   const dom = new JSDOM(html, { url: `https://${hote}/settings?onglet=notifications`, pretendToBeVisual: true })
   const w = dom.window
@@ -54,12 +54,17 @@ async function ouvrirSettings ({ plateforme = 'android', bloquee = false, etat =
   w.confirm = (texte) => { confirmations.push(texte); return confirmer(texte) }
   const module = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1]
     .replace(/^\s*import\s.*$/gm, '')
+  const Notification = { permission: bloquee ? 'denied' : 'default' }
   const P = {
     pris: () => true,
     iphoneHorsAppli: () => false,
     plateforme: () => plateforme,
-    bloquee: () => bloquee,
-    async etatServeur (j) { appels.push('GET:' + j); return JSON.parse(JSON.stringify(etat)) },
+    bloquee: () => Notification.permission === 'denied',
+    async etatServeur (j) {
+      appels.push('GET:' + j)
+      if (lecture) return lecture()
+      return JSON.parse(JSON.stringify(etat))
+    },
     async abonnementActuel () { return null },
     async empreinte () { return null },
     async abonner () { appels.push('abonner'); return { ok: false, motif: 'refusee' } },
@@ -68,6 +73,7 @@ async function ouvrirSettings ({ plateforme = 'android', bloquee = false, etat =
     async oublierAppareil () {},
     async enregistrerReglages (j, corps) {
       appels.push({ enregistrer: JSON.parse(JSON.stringify(corps)), jeton: j })
+      if (enregistrer) return enregistrer(corps)
       if (reponseEnregistrer) return reponseEnregistrer
       return { ok: true, evenements: corps.evenements ? etat.evenements.map(e => ({ ...e, ...corps.evenements[e.code] })) : etat.evenements, plages: corps.plages }
     }
@@ -77,7 +83,7 @@ async function ouvrirSettings ({ plateforme = 'android', bloquee = false, etat =
   const executer = new AsyncFunction('exigerCompteProprePage', 'peutEcrire', 'renderSidebar', 'supabase', 'api', 'P',
     'window', 'document', 'location', 'Notification', 'navigator', 'setTimeout', module)
   await executer(async () => {}, () => true, async () => {}, supabase, api, P,
-    w, w.document, w.location, { permission: bloquee ? 'denied' : 'default' }, w.navigator, () => 0)
+    w, w.document, w.location, Notification, w.navigator, () => 0)
   for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r))
   const $ = (id) => w.document.getElementById(id)
   const attendre = async () => { for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)) }
@@ -87,7 +93,7 @@ async function ouvrirSettings ({ plateforme = 'android', bloquee = false, etat =
     else el.value = valeur
     el.dispatchEvent(new w.Event('change', { bubbles: true }))
   }
-  return { w, $, appels, confirmations, attendre, caseDe, changer }
+  return { w, $, appels, confirmations, attendre, caseDe, changer, Notification }
 }
 
 test('LE TEST QUI COMPTE : le tableau vient du serveur, et « Enregistrer » renvoie ce que la personne a coché', async () => {
@@ -122,6 +128,37 @@ test('LE TEST QUI COMPTE : le tableau vient du serveur, et « Enregistrer » ren
   assert.deepEqual(envoi.enregistrer.plages, [{ debut: '22:00', fin: '06:30', jours: [1, 2, 3, 4, 5] }])
   // Et ce que l'écran envoie, le writer l'accepte (aucun contrat implicite).
   assert.equal(reglages.validerEvenements(envoi.enregistrer.evenements).ok, true)
+})
+
+test('le tableau est CELUI DU SERVEUR, pas une copie écrite dans la page', async () => {
+  const etat = etatServeur({
+    groupes: [{ code: 'avis', libelle: 'Avis reçus' }],
+    evenements: [
+      { code: 'avis', libelle: 'Un libellé venu du serveur', groupe: 'avis', push: false, email: true, sms: true, urgent: true },
+      { code: 'surreservation', libelle: 'Autre libellé', groupe: 'avis', push: true, email: false, sms: false, urgent: false }
+    ]
+  })
+  const e = await ouvrirSettings({ etat })
+  const lignes = e.w.document.querySelectorAll('#n-tableau tbody tr:not(.n-groupe)')
+  assert.equal(lignes.length, 2)
+  assert.equal(lignes[0].cells[0].textContent, 'Un libellé venu du serveur')
+  assert.equal(e.w.document.querySelector('#n-tableau tr.n-groupe').textContent, 'Avis reçus')
+  assert.equal(e.caseDe('avis', 'push').checked, false)
+  assert.equal(e.caseDe('avis', 'sms').checked, true)
+  assert.equal(e.caseDe('surreservation', 'urgent').checked, false)
+})
+
+test('LE TEST QUI COMPTE : ce que le serveur rend est ÉCHAPPÉ (libellés, groupes, heures)', async () => {
+  const piege = '<img src=x onerror="window.__xss=1">'
+  const etat = etatServeur({
+    groupes: [{ code: 'avis', libelle: piege }],
+    evenements: [{ code: 'avis', libelle: piege, groupe: 'avis', push: true, email: true, sms: false, urgent: false }],
+    plages: [{ debut: '"><img src=x onerror="window.__xss=2">', fin: '07:00', jours: [1] }]
+  })
+  const e = await ouvrirSettings({ etat })
+  assert.equal(e.w.document.querySelectorAll('#n-tableau img, #n-plages img').length, 0, 'aucune balise injectée')
+  assert.equal(e.w.document.querySelector('#n-tableau tbody tr:not(.n-groupe) td').textContent, piege, 'le texte s\'affiche tel quel')
+  assert.equal(e.w.document.querySelector('#n-plages [data-champ="debut"]').getAttribute('value'), '"><img src=x onerror="window.__xss=2">')
 })
 
 test('une plage se retire ; les plages du serveur s\'affichent ; six au plus', async () => {
@@ -181,6 +218,51 @@ test('un brouillon modifié n\'est pas écrasé quand l\'écran relit le serveur
   assert.equal(e.w.document.querySelectorAll('#n-plages .plage').length, 1, 'la plage ajoutée est restée')
 })
 
+test('LE TEST QUI COMPTE : une case cochée PENDANT l\'enregistrement n\'est pas effacée', async () => {
+  let liberer
+  const e = await ouvrirSettings({ enregistrer: (corps) => new Promise(r => { liberer = () => r({ ok: true, evenements: etatServeur().evenements.map(x => ({ ...x, ...corps.evenements[x.code] })), plages: corps.plages }) }) })
+  e.changer(e.caseDe('avis', 'sms'), true)
+  e.$('n-enregistrer').click()
+  await e.attendre()
+  // Le réseau est lent : la personne coche une autre case avant la réponse.
+  e.changer(e.caseDe('reservation', 'sms'), true)
+  liberer()
+  await e.attendre()
+  assert.equal(e.caseDe('reservation', 'sms').checked, true, 'la case cochée pendant l\'envoi est restée')
+  assert.match(e.$('msg').textContent, /enregistrez de nouveau/)
+  // Le second enregistrement emporte tout.
+  e.$('n-enregistrer').click()
+  await e.attendre()
+  const derniers = e.appels.filter(a => a.enregistrer)
+  assert.equal(derniers.length, 2)
+  assert.equal(derniers[1].enregistrer.evenements.reservation.sms, true)
+  assert.equal(derniers[1].enregistrer.evenements.avis.sms, true)
+})
+
+test('lecture impossible : un message en français ; réglages illisibles : les appareils restent', async () => {
+  const panne = await ouvrirSettings({ lecture: async () => { throw new TypeError('Failed to fetch') } })
+  assert.equal(panne.$('msg').textContent, 'Lecture impossible : vérifiez la connexion, puis rechargez la page.')
+  assert.equal(panne.$('n-quand').hidden, true)
+  const sansReglages = await ouvrirSettings({ etat: { ok: true, pret: true, cle_publique: 'cle', appareils: [{ id: 'x', appareil: 'Pixel', cree_le: '2026-11-07T10:00:00Z', empreinte: 'e' }], reglages_indisponibles: true } })
+  assert.match(sansReglages.$('msg').textContent, /n’ont pas pu être lus/)
+  assert.equal(sansReglages.$('n-quand').hidden, true)
+  assert.equal(sansReglages.w.document.querySelectorAll('#n-appareils .appareil').length, 1, 'la liste des appareils est servie')
+})
+
+test('revenu des réglages du téléphone : l\'état se relit si la permission a changé, et seulement alors', async () => {
+  const e = await ouvrirSettings({ bloquee: true })
+  const lectures = () => e.appels.filter(a => typeof a === 'string' && a.startsWith('GET')).length
+  const avant = lectures()
+  e.w.document.dispatchEvent(new e.w.Event('visibilitychange'))
+  await e.attendre()
+  assert.equal(lectures(), avant, 'permission inchangée : aucun appel')
+  e.Notification.permission = 'granted'
+  e.w.document.dispatchEvent(new e.w.Event('visibilitychange'))
+  await e.attendre()
+  assert.equal(lectures(), avant + 1)
+  assert.doesNotMatch(e.$('n-etat').textContent, /bloquées/)
+})
+
 test('un refus du serveur désigne la plage fautive', async () => {
   const e = await ouvrirSettings({ reponseEnregistrer: { ok: false, motif: 'plage_vide', rang: 1, error: 'Une plage commence et finit à la même heure.' } })
   e.$('n-enregistrer').click()
@@ -196,7 +278,10 @@ test('LE TEST QUI COMPTE : bloquées — le chemin exact de l\'appareil dès l\'
   assert.equal(android.$('n-etat').querySelector('a').getAttribute('href'), '/guide#appli')
   assert.equal(android.$('n-abonner').hidden, true, 'le bouton ne servirait à rien')
   const iphone = await ouvrirSettings({ bloquee: true, plateforme: 'iphone' })
-  assert.match(iphone.$('n-etat').textContent, /Réglages de l’iPhone → Notifications → HôteSmart/)
+  assert.match(iphone.$('n-etat').textContent, /Réglages → Notifications → HôteSmart/)
+  const samsung = await ouvrirSettings({ bloquee: true, plateforme: 'android-autre' })
+  assert.match(samsung.$('n-etat').textContent, /autorisations des sites/)
+  assert.doesNotMatch(samsung.$('n-etat').textContent, /Chrome/, 'pas le chemin de Chrome dans un autre navigateur')
   const ordi = await ouvrirSettings({ bloquee: true, plateforme: 'ordinateur' })
   assert.match(ordi.$('n-etat').textContent, /à gauche de l’adresse/)
   // Contre-épreuve : non bloquées, l'état ordinaire et le bouton.
@@ -286,6 +371,8 @@ test('le type d\'appareil, et le blocage lu sans rien demander', async () => {
   assert.equal(chargerModule({ ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1', maxTouchPoints: 5 }).plateforme(), 'iphone', 'un iPad se présente en Mac')
   assert.equal(chargerModule({ ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1' }).plateforme(), 'ordinateur')
   assert.equal(chargerModule({ ua: 'Mozilla/5.0 (Windows NT 10.0) Chrome/130' }).plateforme(), 'ordinateur')
+  assert.equal(chargerModule({ ua: 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 SamsungBrowser/25.0 Chrome/121 Mobile' }).plateforme(), 'android-autre')
+  assert.equal(chargerModule({ ua: 'Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0' }).plateforme(), 'android-autre')
   assert.equal(chargerModule({ ua: 'x', permission: 'denied' }).bloquee(), true)
   assert.equal(chargerModule({ ua: 'x', permission: 'default' }).bloquee(), false)
   assert.equal(chargerModule({ ua: 'x', permission: 'granted' }).bloquee(), false)
