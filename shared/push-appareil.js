@@ -62,7 +62,10 @@ export async function abonnementActuel () {
 // L'empreinte d'une adresse d'envoi, calculée comme le serveur
 // (lib/push/abonnements.js) : sha256, 16 premiers caractères hexadécimaux.
 export async function empreinte (endpoint) {
-  const octets = new TextEncoder().encode(String(endpoint))
+  // La forme NORMALISÉE, comme le serveur la range.
+  let e = String(endpoint)
+  try { e = new URL(e).href } catch { /* on garde la chaîne */ }
+  const octets = new TextEncoder().encode(e)
   const h = await crypto.subtle.digest('SHA-256', octets)
   return [...new Uint8Array(h)].map(o => o.toString(16).padStart(2, '0')).join('').slice(0, 16)
 }
@@ -108,8 +111,9 @@ export async function etatServeur (jeton) {
 // `session()` rend { jeton, userId } : elle n'est appelée qu'APRÈS la demande
 // de permission, pour qu'aucune attente ne s'intercale entre le geste et elle.
 export async function abonner ({ session }) {
-  if (!pris()) return { ok: false, motif: 'non_pris' }
+  // L'iPhone d'abord : dans un onglet Safari, `PushManager` n'existe pas.
   if (iphoneHorsAppli()) return { ok: false, motif: 'iphone_hors_appli' }
+  if (!pris()) return { ok: false, motif: 'non_pris' }
   // ⚠ LA PREMIÈRE ATTENTE EST LA PERMISSION, ET RIEN AVANT : sur iPhone, une
   // demande qui ne suit pas immédiatement le geste est ignorée.
   const permission = await Notification.requestPermission()

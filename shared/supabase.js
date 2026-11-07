@@ -31,7 +31,7 @@ export async function getUser() {
 // sur le disque — jusqu'a 12 h, ou indefiniment, puisqu'une cle perimee est
 // refusee a la lecture mais n'est pas effacee. Le garde-fou de changement
 // d'utilisateur est en `sessionStorage`, donc muet sur une session neuve.
-export async function purgerCachesLocaux() {
+export async function purgerCachesLocaux({ appareil = true } = {}) {
   try {
     const m = await import('/shared/compte-courant.js')
     m.reinitialiser()
@@ -44,7 +44,9 @@ export async function purgerCachesLocaux() {
   // téléphone prêté ou partagé continuerait de recevoir les notifications de
   // la personne d'avant. Le serveur d'abord si la session vit encore (3 s au
   // plus), puis le navigateur, TOUJOURS (shared/push-appareil.js).
-  try {
+  // `appareil: false` : le changement d'utilisateur de components/auth-guard.js,
+  // où `verifierAppareil` décide à partir du titulaire enregistré.
+  if (appareil) try {
     const p = await import('/shared/push-appareil.js')
     let jeton = null
     try { jeton = (await supabase.auth.getSession()).data.session?.access_token || null } catch { jeton = null }

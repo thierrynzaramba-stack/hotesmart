@@ -28,7 +28,7 @@ const octets = (b64) => Uint8Array.from(Buffer.from(b64, 'base64url'))
 
 // Un navigateur factice : service worker, gestionnaire push, permission,
 // stockage local, et un serveur /api/push qu'on règle par test.
-function navigateurFactice ({ ua = 'Mozilla/5.0 (Linux; Android 14) Chrome/130 Mobile', permission = 'granted', abonnement = null, sansServiceWorker = false, serveur } = {}) {
+function navigateurFactice ({ ua = 'Mozilla/5.0 (Linux; Android 14) Chrome/130 Mobile', permission = 'granted', abonnement = null, sansServiceWorker = false, sansPushManager = false, serveur } = {}) {
   const journal = []
   const stockage = new Map()
   let sub = abonnement
@@ -66,7 +66,9 @@ function navigateurFactice ({ ua = 'Mozilla/5.0 (Linux; Android 14) Chrome/130 M
       return serveur(init.method || 'GET', corps, init)
     }
   }
-  g.window.PushManager = function () {}
+  // ⚠ Dans un onglet Safari sur iPhone, `PushManager` n'existe PAS (constat de
+  // review : le test passait parce que le faux navigateur le déclarait).
+  if (!sansPushManager) g.window.PushManager = function () {}
   g.window.Notification = g.Notification
   return { g, journal, stockage, get sub () { return sub } }
 }
@@ -108,7 +110,8 @@ test('s\'abonner : refus, iPhone hors appli, pas de service worker, clés absent
   const cas = [
     [{ permission: 'denied' }, 'refusee'],
     [{ permission: 'default' }, 'ignoree'],
-    [{ ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Safari/604.1' }, 'iphone_hors_appli'],
+    [{ ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Safari/604.1', sansPushManager: true }, 'iphone_hors_appli'],
+    [{ sansPushManager: true }, 'non_pris'],
     [{ sansServiceWorker: true }, 'sans_service_worker'],
     [{ serveur: (m) => m === 'GET' ? repondre(200, { pret: false, cle_publique: null, appareils: [] }) : repondre(500, {}) }, 'cles_absentes']
   ]
@@ -234,4 +237,68 @@ test('LE TEST QUI COMPTE : la déconnexion (purgerCachesLocaux) oublie l\'appare
   appels.length = 0
   await m.signOut()
   assert.deepEqual(appels, ['compte', 'ecran', 'signOut'])
+})
+
+// ─── 5. Le branchement dans requireAuth (components/auth-guard.js), EXÉCUTÉ ──
+// Constat de review : retirer l'appel laissait tous les tests verts. On exécute
+// donc requireAuth, comme tests/accueil-rapide.test.js : ses `import` statiques
+// retirés et injectés, et l'`import()` dynamique remplacé par un chargeur
+// factice. Rien d'autre n'est réécrit.
+function batirRequireAuth () {
+  return fs.readFileSync(path.join(RACINE, 'components/auth-guard.js'), 'utf8')
+    .replace(/^import[\s\S]*?from\s+'[^']*'\s*$/gm, '')
+    .replace(/^export\s+/gm, '')
+    .replace(/\bimport\(/g, '__importer(') + '\n;return { requireAuth }'
+}
+
+async function lancerRequireAuth ({ navigateur, permission = 'granted', changementUtilisateur = false, moduleLeve = false } = {}) {
+  const appels = []
+  const stockage = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) } }
+  const sessionStorage = stockage()
+  if (changementUtilisateur) sessionStorage.setItem('hs_auth_user_id', B)
+  const chaine = { select: () => chaine, eq: () => chaine, maybeSingle: async () => ({ data: { current_step: 3, completed: true }, error: null }), insert: async () => ({ error: null }) }
+  const supabase = { from: () => chaine }
+  const session = { user: { id: A }, access_token: 'jeton-a' }
+  const fenetre = { location: { pathname: '/pages/aujourdhui', replace: u => appels.push('redirection:' + u) } }
+  const importer = async (p) => {
+    appels.push('import:' + p)
+    if (moduleLeve) throw new Error('module indisponible')
+    if (p === '/shared/push-appareil.js') return { async verifierAppareil (u, j) { appels.push(`verifier:${u}:${j}`) } }
+    throw new Error('module inattendu ' + p)
+  }
+  const Notification = permission ? { permission } : undefined
+  // eslint-disable-next-line no-new-func
+  const sorti = new Function('supabase', 'getSession', 'purgerCachesLocaux', 'chargerContexte', 'reinitialiser',
+    'window', 'sessionStorage', 'localStorage', 'console', 'navigator', 'Notification', '__importer', batirRequireAuth())(
+    supabase, async () => session, async (o) => { appels.push('purge:' + JSON.stringify(o || {})) },
+    async () => ({ comptes: [{ user_id: A }] }), () => {},
+    fenetre, sessionStorage, stockage(), { error: () => {}, warn: () => {}, log: () => {} },
+    navigateur, Notification, importer)
+  const rendu = await sorti.requireAuth()
+  for (let i = 0; i < 20; i++) await Promise.resolve()
+  return { appels, rendu }
+}
+
+test('LE TEST QUI COMPTE : chaque page protégée vérifie l\'appareil, sans bloquer ni échouer', async () => {
+  const avec = await lancerRequireAuth({ navigateur: { serviceWorker: {} } })
+  assert.ok(avec.rendu && avec.rendu.user.id === A, 'requireAuth rend la session')
+  assert.ok(avec.appels.includes(`verifier:${A}:jeton-a`), `vérification absente : ${avec.appels.join(', ')}`)
+  // Sans permission accordée, aucun appareil ne peut être abonné : le module
+  // n'est même pas chargé (une requête par page économisée).
+  for (const permission of ['default', 'denied', null]) {
+    const r = await lancerRequireAuth({ navigateur: { serviceWorker: {} }, permission })
+    assert.ok(!r.appels.some(a => a.startsWith('import:')), `module chargé avec la permission ${permission}`)
+  }
+  // Sans service worker : rien.
+  const sans = await lancerRequireAuth({ navigateur: {} })
+  assert.ok(!sans.appels.some(a => a.startsWith('import:')))
+  // Un module indisponible ne fait jamais échouer la page.
+  const leve = await lancerRequireAuth({ navigateur: { serviceWorker: {} }, moduleLeve: true })
+  assert.ok(leve.rendu && leve.rendu.user.id === A)
+})
+
+test('au changement d\'utilisateur, la purge garde l\'abonnement : c\'est verifierAppareil qui tranche', async () => {
+  const r = await lancerRequireAuth({ navigateur: { serviceWorker: {} }, changementUtilisateur: true })
+  assert.ok(r.appels.includes('purge:{"appareil":false}'), `purge attendue sans l'appareil : ${r.appels.join(', ')}`)
+  assert.ok(r.appels.includes(`verifier:${A}:jeton-a`))
 })

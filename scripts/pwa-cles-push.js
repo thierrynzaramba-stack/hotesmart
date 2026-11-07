@@ -5,10 +5,14 @@
 // À LANCER PAR THIERRY, SUR SON PC, UNE FOIS PAR PROJET (décision du
 // 7 novembre 2026) : staging d'abord, la production ensuite, sur go.
 //
-//   node scripts/pwa-cles-push.js --projet hotesmart-staging          (à blanc)
-//   node scripts/pwa-cles-push.js --projet hotesmart-staging --go
-//   node scripts/pwa-cles-push.js --projet hotesmart --go
-//   (ajouter --scope <equipe> si le projet est dans une équipe Vercel)
+//   node scripts/pwa-cles-push.js --projet hotesmart-staging --scope <equipe>        (à blanc)
+//   node scripts/pwa-cles-push.js --projet hotesmart-staging --scope <equipe> --go
+//   node scripts/pwa-cles-push.js --projet hotesmart --scope <equipe> --go
+//
+// Prérequis sur le PC : le dépôt à jour avec `npm install` fait (pour
+// `web-push`), et la commande `vercel` connectée (`vercel login`).
+// `--scope` est OBLIGATOIRE : depuis la CLI 55, `--yes` ne choisit plus
+// d'équipe (constat de review), et un projet ambigu ne doit pas se deviner.
 //
 // Il génère une paire de clés (VAPID) et l'écrit DIRECTEMENT dans les variables
 // de production du projet Vercel désigné, par la commande `vercel` déjà
@@ -40,23 +44,27 @@ function arg (nom) {
 const PROJET = arg('--projet')
 const GO = process.argv.includes('--go')
 const REMPLACER = process.argv.includes('--remplacer')
-// L'équipe Vercel, si le projet n'est pas dans le compte personnel.
+// L'équipe Vercel (son identifiant, visible dans l'adresse du tableau de bord).
 const EQUIPE = arg('--scope')
 
-function stop (texte, code = 2) {
-  console.error(texte)
-  process.exit(code)
+// ⚠ ON LÈVE, ON NE QUITTE PAS (constat de review) : `process.exit()` dans le
+// `try` sautait le `finally`, et le dossier temporaire lié au projet — où
+// `vercel link` peut écrire un jeton — restait sur le PC.
+class Arret extends Error {
+  constructor (texte, code = 2) { super(texte); this.code = code }
 }
-
-if (!PROJETS.includes(PROJET)) stop(`Précisez le projet : --projet ${PROJETS.join(' ou --projet ')}`)
+function stop (texte, code = 2) { throw new Arret(texte, code) }
 
 // `vercel` sans afficher sa sortie brute : elle pourrait un jour contenir une
 // valeur. On ne rend que le code de sortie, et un texte EXPURGÉ des valeurs.
+// `cwd` passe par l'option de `spawnSync`, pas par `--cwd` en argument : sous
+// Windows (`shell: true`), un chemin avec une espace serait coupé en deux.
 function vercel (args, { entree = null, cwd = null, masquer = [] } = {}) {
-  const complets = [...args, ...(cwd ? ['--cwd', cwd] : []), ...(EQUIPE ? ['--scope', EQUIPE] : [])]
+  const complets = [...args, ...(EQUIPE ? ['--scope', EQUIPE] : [])]
   const r = spawnSync('vercel', complets, {
     input: entree,
     encoding: 'utf8',
+    cwd: cwd || undefined,
     shell: process.platform === 'win32'
   })
   let sortie = `${r.stdout || ''}\n${r.stderr || ''}`
@@ -64,8 +72,11 @@ function vercel (args, { entree = null, cwd = null, masquer = [] } = {}) {
   return { code: r.status, sortie, erreur: r.error }
 }
 
-;(async () => {
-  const webpush = require('web-push')
+async function principal () {
+  if (!PROJETS.includes(PROJET)) stop(`Précisez le projet : --projet ${PROJETS.join(' ou --projet ')}`)
+  if (!EQUIPE || !/^[A-Za-z0-9_-]+$/.test(EQUIPE)) stop('Précisez l\'équipe Vercel : --scope <identifiant de l\'équipe> (visible dans l\'adresse du tableau de bord Vercel).')
+  let webpush
+  try { webpush = require('web-push') } catch { stop('Le module web-push manque : lancez `npm install` dans le dépôt, puis relancez.') }
 
   const version = vercel(['--version'])
   if (version.erreur || version.code !== 0) stop('La commande `vercel` est introuvable sur ce PC. Installez-la (npm i -g vercel), connectez-vous (vercel login), puis relancez.')
@@ -113,4 +124,9 @@ function vercel (args, { entree = null, cwd = null, masquer = [] } = {}) {
   } finally {
     fs.rmSync(dossier, { recursive: true, force: true })
   }
-})().catch(e => stop(`Erreur : ${e && e.message ? e.message : e}`, 1))
+}
+
+principal().catch(e => {
+  console.error(e instanceof Arret ? e.message : `Erreur : ${e && e.message ? e.message : e}`)
+  process.exit(e instanceof Arret ? e.code : 1)
+})

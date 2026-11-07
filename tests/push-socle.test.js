@@ -110,6 +110,17 @@ test('LE TEST QUI COMPTE : seules les adresses des services connus, en https, so
   ]) assert.ok(!ab.adresseValide(ko), `acceptée à tort : ${String(ko).slice(0, 60)}`)
 })
 
+test('l\'adresse est rangée sous sa forme normalisée : l\'unicité porte sur l\'appareil', async () => {
+  const { db, etat } = baseFactice()
+  const { abonnement } = navigateur('https://fcm.googleapis.com/fcm/send/abc')
+  await ab.enregistrer({ userId: A, abonnement: { ...abonnement, endpoint: 'https://FCM.googleapis.com/fcm/send/abc' }, db })
+  await ab.enregistrer({ userId: B, abonnement, db })
+  assert.equal(etat.lignes.length, 1, 'deux orthographes, un seul appareil')
+  assert.equal(etat.lignes[0].user_id, B)
+  await ab.retirer({ userId: B, endpoint: 'https://FCM.googleapis.com/fcm/send/abc', db })
+  assert.equal(etat.lignes.length, 0)
+})
+
 test('un abonnement sans clés lisibles est refusé, avec son motif', () => {
   const { abonnement } = navigateur()
   assert.equal(ab.validerAbonnement(abonnement).ok, true)
@@ -215,7 +226,9 @@ test('le message déclaratif : titre obligatoire, chemin du site seulement, suje
   assert.equal(messageDeclaratif({ titre: 't', rappel: true }).notification.renotify, undefined, 'pas de relance sans sujet')
   assert.ok(!('mutable' in messageDeclaratif({ titre: 't' })), 'jamais mutable : l\'iPhone ne consulterait pas le service worker')
   assert.throws(() => messageDeclaratif({ titre: '  ' }), /sans titre/)
-  for (const piege of ['https://exemple.fr', '//exemple.fr', 'javascript:alert(1)', '/\\exemple.fr', '/x:y', '']) {
+  // « /\t/… » et « /\n/… » : le parseur d'URL retire tabulations et retours à la
+  // ligne, et le chemin se résolvait en https://evil.example/ (constat de review).
+  for (const piege of ['https://exemple.fr', '//exemple.fr', 'javascript:alert(1)', '/\\exemple.fr', '/x:y', '', '/\t/evil.example', '/\n/evil.example', '/\r/evil.example', '/ /evil.example']) {
     assert.equal(cheminDuSite(piege), '/dashboard', `chemin accepté : ${piege}`)
   }
   assert.equal(cheminDuSite('/settings?onglet=notifications'), '/settings?onglet=notifications')

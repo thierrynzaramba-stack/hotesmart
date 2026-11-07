@@ -19,11 +19,13 @@
 -- (lib/push/abonnements.js) fait passer la ligne au
 -- dernier abonne.
 --
--- RLS ACTIVEE. Lecture : chacun ses propres lignes.
--- AUCUNE ecriture depuis le navigateur : seule la cle
--- service ecrit, par l'endpoint /api/push, qui valide
--- l'adresse d'envoi (https, services connus) et le
--- plafond de 10 appareils par personne.
+-- RLS ACTIVEE, AUCUNE POLICY. Le navigateur ne lit ni
+-- n'ecrit rien ici directement : ni l'adresse d'envoi,
+-- ni les cles. Seule la cle service y touche, par
+-- l'endpoint /api/push, qui valide l'adresse (https,
+-- services connus), le plafond de 10 appareils, et ne
+-- rend que des empreintes. Aucun code n'a besoin
+-- d'une lecture directe (constat de review).
 
 create table if not exists public.push_abonnements (
   id uuid primary key
@@ -49,9 +51,7 @@ create index if not exists
 alter table public.push_abonnements
   enable row level security;
 
+-- Une politique d'une version anterieure de ce
+-- fichier, retiree si elle a ete posee.
 drop policy if exists push_abonnements_lecture
   on public.push_abonnements;
-create policy push_abonnements_lecture
-  on public.push_abonnements
-  for select to authenticated
-  using (user_id = auth.uid());

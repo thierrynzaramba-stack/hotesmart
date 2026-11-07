@@ -33,7 +33,11 @@ export async function requireAuth() {
   // appareil abonné pour une AUTRE personne est désabonné, et un abonnement
   // renouvelé par le navigateur est renvoyé au serveur. Sans attente ni appel
   // réseau dans le cas courant ; jamais bloquant, jamais une raison d'échouer.
-  if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+  // ⚠ SEULEMENT SI LA PERMISSION EST ACCORDEE : sans elle, aucun appareil ne
+  // peut etre abonne, et charger le module coûterait une requete par page pour
+  // rien (constat de review).
+  if (typeof navigator !== 'undefined' && navigator.serviceWorker &&
+      typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     import('/shared/push-appareil.js')
       .then(m => m.verifierAppareil(userId, session.access_token || null))
       .catch(() => {})
@@ -77,7 +81,12 @@ export async function requireAuth() {
       // et c'etait justement la moitie mal corrigee.
       // Import STATIQUE, en tete de ce fichier : rien a charger au moment du
       // geste, donc rien qu'une navigation puisse annuler.
-      await purgerCachesLocaux()
+      // ⚠ SANS L'APPAREIL (PWA lot 2a, constat de review) : ici l'utilisateur
+      // CHANGE, il ne se deconnecte pas. Desabonner sans condition supprimerait
+      // aussi l'abonnement du NOUVEL utilisateur (plusieurs onglets), et
+      // retarderait la page de 3 s. `verifierAppareil`, plus haut, fait le bon
+      // controle : il compare au titulaire enregistre sur l'appareil.
+      await purgerCachesLocaux({ appareil: false })
     }
     sessionStorage.setItem(SESSION_USER_KEY, userId)
   } catch (e) {

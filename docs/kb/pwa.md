@@ -192,9 +192,9 @@ lot 2c.
 
 | Pièce | Fichier |
 |---|---|
-| Table des appareils abonnés | `migrations/2026-11-07-push-abonnements.sql` (`push_abonnements`, adresse d'envoi UNIQUE, RLS : lecture de ses lignes, aucune écriture navigateur) |
+| Table des appareils abonnés | `migrations/2026-11-07-push-abonnements.sql` (`push_abonnements`, adresse d'envoi UNIQUE et normalisée, RLS sans politique : le navigateur n'y lit ni n'écrit rien) |
 | Writer unique | `lib/push/abonnements.js` (validation de l'adresse, plafond de 10, reprise d'un appareil par le dernier abonné) |
-| Envoi | `lib/push/envoyer.js` (`web-push` `generateRequestDetails()` + `fetch`, délai 5 s, `redirect: 'error'`, 404/410 = abonnement supprimé) |
+| Envoi | `lib/push/envoyer.js` (`web-push` 3.6.7, CommonJS, `generateRequestDetails()` + `fetch`, délai 5 s, `redirect: 'error'`, corps annulé, 404/410 = abonnement supprimé) |
 | Endpoint | `api/push.js` (GET état, POST `abonner` / `essai`, DELETE) |
 | Service worker | `shared/pwa/service-worker.js` (`push`, `notificationclick`, `pushsubscriptionchange`) |
 | Navigateur | `shared/push-appareil.js` (abonner, oublier, vérifier l'appareil à chaque page) |
@@ -209,14 +209,18 @@ lot 2c.
    connecté lui ferait appeler n'importe quoi.
 2. **Un appareil n'est jamais abonné pour deux personnes.** L'adresse est
    unique en base, et la ligne passe au dernier abonné.
-3. **La déconnexion oublie l'appareil** (`purgerCachesLocaux`, donc les cinq
+3. **La déconnexion oublie l'appareil** (`purgerCachesLocaux`, donc les
    chemins qui ferment une session) : le serveur s'il répond en 3 s, puis le
-   navigateur **toujours**. **À chaque page protégée** (`requireAuth`), un
-   appareil abonné pour une autre personne est désabonné, sans appel réseau.
+   navigateur **toujours**. Exception : le changement d'utilisateur de
+   `requireAuth` appelle la purge **sans** l'appareil, parce que c'est
+   `verifierAppareil` qui y décide. **À chaque page protégée** (`requireAuth`,
+   seulement si la permission est accordée), un appareil abonné pour une autre
+   personne est désabonné, sans appel réseau.
 4. **Chaque push affiche une notification**, même illisible (sinon Safari
    retire l'abonnement). Le message est au format déclaratif
    (`web_push: 8030`), jamais `mutable` : l'adresse ouverte au toucher est
-   construite par le serveur, en chemin du site.
+   construite par le serveur, en chemin du site, **résolu** sur une origine
+   témoin (« /\t/evil.example » se résolvait ailleurs).
 5. **La demande de permission est la première attente du clic** : sur
    iPhone, une demande qui ne suit pas le geste est ignorée.
 6. **`pushsubscriptionchange` n'écrit rien au serveur** (pas de session dans
@@ -224,7 +228,9 @@ lot 2c.
    changé et le renvoie par le POST, avec les mêmes contrôles.
 7. **La clé privée ne s'affiche jamais.** Le script ne dit que le nom de
    chaque variable et sa longueur, et refuse d'écraser des clés déjà posées
-   sans `--remplacer` (changer de clé désabonne tout le monde).
+   sans `--remplacer` (changer de clé désabonne tout le monde). Il exige
+   `--scope` (l'équipe Vercel) et un `npm install` fait sur le PC, et il
+   supprime son dossier temporaire sur tous les chemins, refus compris.
 
 **Variables Vercel** (production de chaque projet) : `PUSH_VAPID_PUBLIC`,
 `PUSH_VAPID_PRIVATE`. Le contact exigé par Apple est `FOUNDER_EMAIL`, et à
@@ -239,7 +245,12 @@ les deux clés, `/settings` dit « pas encore activées » et rien ne part.
   « Recevoir les notifications » dans `/settings` (l'abonnement fait avec
   l'ancienne clé y est défait), pas encore tout seul à l'ouverture ;
 - l'e-mail quand le dernier appareil disparaît : au lot 2c, avec le
-  remplacement du SMS.
+  remplacement du SMS ;
+- l'explication « installer et s'abonner sur iPhone » dans `pages/guide.html`
+  (spec §6) : elle touche `pages/`, hors de l'accord du 7 novembre (qui vise
+  `/settings` et le tiroir de Messages) — à demander ;
+- la mesure avant/après de la case performance (spec §10.8) : sur staging,
+  après le déploiement du lot.
 
 **Recette (Thierry, sur staging, après la migration et les clés)** :
 1. Android, Chrome, appli installée : `/settings` → Notifications →

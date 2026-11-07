@@ -284,6 +284,17 @@ const VIDE = { property_scope: 'all', property_ids: [], reservations: 'none', me
 
 let biens = [], profils = [], edite = null, brouillon = { ...VIDE }, lienAffiche = ''
 
+// L'onglet affiché : « equipe » ou « notifications » (PWA lot 2a). ⚠ `charger`
+// finit APRÈS l'ouverture directe de `?onglet=notifications` (l'adresse qu'ouvre
+// la notification d'essai) : il ne rallume les zones de l'équipe que si c'est
+// leur onglet (constat de review).
+let ongletActif = 'equipe'
+function afficherZonesEquipe () {
+  const equipe = ongletActif === 'equipe'
+  $('zone-equipe').style.display = equipe && $('zone-equipe').dataset.visible === 'oui' ? 'block' : 'none'
+  $('zone-refus').style.display = equipe && $('zone-refus').dataset.visible === 'oui' ? 'block' : 'none'
+}
+
 const $ = id => document.getElementById(id)
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
@@ -306,8 +317,7 @@ async function charger () {
     // l'onglet Avis ne doit pas lui afficher une liste d'équipe vide.
     $('zone-equipe').dataset.visible = 'oui'
     $('zone-refus').dataset.visible = 'non'
-    $('zone-equipe').style.display = 'block'
-    $('zone-refus').style.display = 'none'
+    afficherZonesEquipe()
     rendreListe()
   } catch (e) {
     // 403 = domaine `equipe` non accordé. Ce n'est pas une erreur à afficher en
@@ -315,8 +325,7 @@ async function charger () {
     if (/droits insuffisants/i.test(e.message)) {
       $('zone-refus').dataset.visible = 'oui'
       $('zone-equipe').dataset.visible = 'non'
-      $('zone-refus').style.display = 'block'
-      $('zone-equipe').style.display = 'none'
+      afficherZonesEquipe()
       return
     }
     // ⚠ MEME SUR UN ECHEC NON PREVU, LES DRAPEAUX SE POSENT. Constat de review :
@@ -324,7 +333,7 @@ async function charger () {
     // vide, les deux zones restant a `display:none` sans que rien ne le dise.
     $('zone-refus').dataset.visible = 'oui'
     $('zone-equipe').dataset.visible = 'non'
-    $('zone-refus').style.display = 'block'
+    afficherZonesEquipe()
     $('zone-refus').querySelector('.card-title').textContent = 'Chargement impossible'
     $('zone-refus').querySelector('.card-sub').textContent =
       'La liste des profils n’a pas pu être chargée. Rechargez la page.'
@@ -656,12 +665,12 @@ import * as P from '/shared/push-appareil.js'
 
 function montrerOnglet (nom) {
   const notif = nom === 'notifications'
+  ongletActif = notif ? 'notifications' : 'equipe'
   $('tab-equipe').classList.toggle('active', !notif)
   $('tab-notifications').classList.toggle('active', notif)
   $('zone-notifications').style.display = notif ? 'block' : 'none'
   // L'onglet Équipe rallume ce qui était visible avant (drapeaux de `charger`).
-  $('zone-equipe').style.display = !notif && $('zone-equipe').dataset.visible === 'oui' ? 'block' : 'none'
-  $('zone-refus').style.display = !notif && $('zone-refus').dataset.visible === 'oui' ? 'block' : 'none'
+  afficherZonesEquipe()
   if (notif) rendreNotifications().catch(e => message(e.message))
 }
 
@@ -690,9 +699,12 @@ async function rendreNotifications () {
   const appareils = etat.appareils || []
   const abonneIci = !!ici && appareils.some(a => a.empreinte === ici)
 
+  // ⚠ L'iPHONE D'ABORD : dans un onglet Safari, `PushManager` n'existe pas, donc
+  // `pris()` est faux — et l'hôte doit lire comment poser l'appli, pas
+  // « ce navigateur ne permet pas » (constat de review).
   let texte
-  if (!P.pris()) texte = MOTIFS.non_pris
-  else if (P.iphoneHorsAppli()) texte = MOTIFS.iphone_hors_appli
+  if (P.iphoneHorsAppli()) texte = MOTIFS.iphone_hors_appli
+  else if (!P.pris()) texte = MOTIFS.non_pris
   else if (!etat.pret) texte = MOTIFS.cles_absentes
   else if (abonneIci) texte = 'Cet appareil reçoit les notifications.'
   else texte = 'Cet appareil ne reçoit pas encore les notifications.'
@@ -703,7 +715,7 @@ async function rendreNotifications () {
   $('n-desabonner').hidden = !abonneIci
 
   $('n-appareils').innerHTML = appareils.length
-    ? appareils.map(a => `<div class="bloc" style="display:flex;align-items:center;gap:12px">
+    ? appareils.map(a => `<div class="appareil" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:0.5px solid var(--border)">
         <div style="flex:1"><div style="font-size:13px">${esc(a.appareil || 'Appareil')}${a.empreinte === ici ? ' <span class="card-sub">(cet appareil)</span>' : ''}</div>
         <div class="card-sub" style="margin:0">Abonné le ${esc(new Date(a.cree_le).toLocaleDateString('fr-FR'))}${a.dernier_envoi_le ? ' · dernière notification le ' + esc(new Date(a.dernier_envoi_le).toLocaleDateString('fr-FR')) : ''}</div></div>
         <button class="btn-danger" data-retirer="${esc(a.id)}">Retirer</button></div>`).join('')
