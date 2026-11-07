@@ -1392,7 +1392,9 @@ async function ecrireLiaisons (req, res) {
   // pas devine lequel de ses biens coince. Une liste d'ecran se filtre, une
   // garde d'appartenance jamais.
   const { data: biensDuCompte, error: errBiens } = await supabase.from('properties')
-    .select('provider_property_id').eq('user_id', userId)
+    // `archive_le` : voir « les liaisons d'un bien archive ne se desactivent
+    // pas » plus bas.
+    .select('provider_property_id, archive_le').eq('user_id', userId)
     .not('provider_property_id', 'is', null)
   if (errBiens) {
     console.error('[menages] lecture biens echec', errBiens.message)
@@ -1415,6 +1417,23 @@ async function ecrireLiaisons (req, res) {
   // C'est REVIEW.md regle 11 dans l'autre sens : la donnee client agissait sur
   // des ressources qu'elle ne designe pas.
   const gardees = voulues.map(v => v.ref)
+  // ⚠ LES LIAISONS D'UN BIEN ARCHIVE NE SE DESACTIVENT PAS ICI — constat 6 de
+  // la revue du 7 novembre 2026. Apres son dernier depart, un bien archive
+  // quitte l'ecran des prestataires : l'hote ne peut donc ni le voir ni le
+  // decocher, et l'enregistrement (qui REMPLACE la liste) le retirait en
+  // silence. Reactive un jour, le bien n'avait plus personne, et ses menages
+  // naissaient non assignes, sans alerte (un bien sans liaison n'est pas en
+  // panne). On ne retire pas a l'aveugle ce qu'on n'a pas montre.
+  // ⚠ ET `public_tokens.property_ids` SUIT, puisqu'il se calcule sur les
+  // liaisons REELLEMENT actives apres ecriture (`apres`, plus bas).
+  // ⚠ SEULES LES REFERENCES SURES entrent dans le filtre, qui est interpole :
+  // une reference archivee hors du format se comporte comme avant ce correctif.
+  const REF_SURE = /^[A-Za-z0-9_-]{1,64}$/
+  const archivesProteges = (biensDuCompte || [])
+    .filter(b => b.archive_le && REF_SURE.test(String(b.provider_property_id)))
+    .map(b => String(b.provider_property_id))
+    .filter(r => !gardees.includes(r))
+  const exclues = [...gardees, ...archivesProteges]
   let desactivation = supabase.from('property_cleaning_providers')
     .update({ active: false })
     .eq('user_id', userId).eq('provider_id', prof.id)
@@ -1423,7 +1442,7 @@ async function ecrireLiaisons (req, res) {
     // desactivation, ce qui est le comportement sur (il ne gere aucun bien).
     desactivation = desactivation.in('property_id', refs.map(String))
   }
-  if (gardees.length) desactivation = desactivation.not('property_id', 'in', `(${gardees.map(r => `"${r}"`).join(',')})`)
+  if (exclues.length) desactivation = desactivation.not('property_id', 'in', `(${exclues.map(r => `"${r}"`).join(',')})`)
   const { error: errDes } = await desactivation
   if (errDes) {
     console.error('[menages] desactivation liaisons echec', errDes.message)
