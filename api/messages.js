@@ -19,6 +19,7 @@ const { etatMenage } = require('../lib/cron-arrival-code')
 // Lot 7 du chantier avis : l'archivage des fils (spec §9), une fonction pure.
 const { etatArchivage } = require('../lib/archivage-conversations')
 const { readStatus } = require('../lib/bookings-snapshot-status')
+const { clesArchivees, cleDuBien } = require('../lib/biens-vivants')
 
 // Jour de Paris (celui des biens), YYYY-MM-DD, a un decalage de jours pres.
 //
@@ -856,6 +857,33 @@ module.exports = async function handler(req, res) {
         messages:     conv.messages
       }
     })
+
+    // ⚠ LES CONVERSATIONS D'UN BIEN ARCHIVE QUITTENT MESSAGES — decision de
+    // Thierry du 6 novembre 2026 : « les biens archives ne doivent pas
+    // apparaitre sur les pages Bonjour, Calendrier et Messages car ils ne sont
+    // pas actifs ». Elle REMPLACE le choix ecrit cote ecran (pages/messages.html,
+    // « les conversations d'un logement archive restent lisibles ») : les
+    // messages restent en base, ils ne s'affichent plus.
+    // ⚠ ICI, ET PAS DANS LA PAGE : tout ce qui lit cette collection — la liste
+    // et les arrivees du jour de Messages — voit la meme verite. ⚠ L'accueil,
+    // lui, ne passe PAS par ici (`api/ecran/aujourdhui.js` lit `messages`
+    // lui-meme ; constat 9 de la revue du 7 novembre 2026 : cette ligne
+    // affirmait le contraire).
+    // ⚠ LA CLE EST COMPOSITE (`cleDuBien`) : `provider_property_id` n'a aucune
+    // unicite globale, et un bien archive chez un autre compte ne doit RIEN
+    // retirer ici (constat 6 de la revue de 320aa4f8, lib/biens-vivants.js).
+    // ⚠ UNE LECTURE RATEE NE RETIRE RIEN : `clesArchivees` ne leve jamais et
+    // rend un ensemble vide. Mieux vaut un fil de trop qu'une messagerie vide
+    // un jour de panne — c'est la regle de cet endpoint pour l'archivage.
+    {
+      const arch = await clesArchivees(supabase, [userId])
+      if (arch.cles.size) {
+        for (let i = conversations.length - 1; i >= 0; i--) {
+          if (arch.cles.has(cleDuBien(userId, conversations[i].propertyId))) conversations.splice(i, 1)
+        }
+      }
+      if (!arch.complet) console.error('[messages] lecture des biens archives incomplete : rien n\'est ecarte en plus')
+    }
 
     // Tri conversations par lastTime desc (plus recentes d'abord).
     conversations.sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0))

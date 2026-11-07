@@ -1,5 +1,6 @@
 import { getUser, signOut, supabase } from '../shared/supabase.js'
 import CONFIG from '../shared/config.js'
+import { sansArchives } from '../shared/biens-vivants.js'
 import { renderOnboardingBanner } from '/components/onboarding-banner.js'
 import { compteCourant, peutLire, doitAfficherSelecteur, comptes, basculerVers, estTitulaire }
   from '/shared/compte-courant.js'
@@ -405,10 +406,15 @@ async function getApiStatus(user) {
     let otaActive = false
     let firstPropertyId = null
     try {
-      const { data: chProps } = await supabase
+      // ⚠ UN BIEN ARCHIVE NE DOIT PAS FAIRE NAITRE UN LIEN OTA dans le menu :
+      // cette lecture cherche le PREMIER bien Channex du compte pour decider
+      // d'afficher l'entree de connexion, et un logement range la declenchait
+      // encore. Lecture CLIENT, donc la regle vient de `shared/biens-vivants`.
+      // Thierry ne l'avait pas listee : trouvee en cherchant le point 7.
+      const { data: chProps } = await sansArchives(supabase
         .from('properties')
         .select('id')
-        .eq('user_id', compteCourant())
+        .eq('user_id', compteCourant()))
         .in('provider', ['channex', 'channel'])
         .order('created_at', { ascending: true })
         .limit(1)

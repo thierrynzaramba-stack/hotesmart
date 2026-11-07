@@ -31,7 +31,17 @@ function charger({ snapshots = [], tokens = [], profils = null, statut = null,
     : (tokens || []).map(t => ({ pwa_token: t.token })).filter(x => x.pwa_token)
   const table = (nom) => {
     const q = {
-      select() { return q }, eq() { return q }, not() { return q },
+      select() { return q }, eq() { return q }, // ⚠ `is` COMPLETE CE DOUBLE depuis le filtre des biens archives :
+        // `sansArchives` (lib/biens-vivants.js) LEVE sur une chaine qui n'a pas
+        // `.is`, et c'est VOULU — un double incomplet doit echouer bruyamment
+        // plutot que de valider du code qui ne peut pas tourner.
+        //
+        // ⚠ IL NE FAIT QUE CHAINER, et il ne mesure donc PAS que la garde est
+        // posee : ces tests ne parlent pas d'archivage. C'est
+        // tests/ecrans-sans-biens-archives.test.js qui le mesure, avec un
+        // double qui APPLIQUE le filtre.
+ is () { return q },
+ not() { return q },
       lte(col, val) { req.lte = { col, val }; return q },
       order(col, opts) { req.order = { col, ...opts }; return q },
       limit(n) { req.limit = n; return Promise.resolve({ data: snapshots }) },

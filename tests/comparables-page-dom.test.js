@@ -72,7 +72,21 @@ async function monter (serveur, { sansLeaflet = false } = {}) {
   // La VRAIE table des tranches, depuis le module commun (jamais recopiee).
   w.TRANCHE = new w.Function(fs.readFileSync(path.join(__dirname, '..', 'shared', 'prix-depart-jours.js'), 'utf8').replace(/^export /gm, '') + '\nreturn TRANCHE')()
   const biens = { data: [{ id: 'B1', name: 'La bulle' }, { id: 'B2', name: 'Cœur de vie' }], error: null }
-  w.supabase = { from: () => { const q = { select: () => q, order: () => q, eq: () => q, then: ok => ok(biens) }; return q } }
+  w.supabase = { from: () => { const q = { select: () => q, order: () => q, eq: () => q,
+    // ⚠ `is` COMPLETE CE DOUBLE depuis le filtre des biens archives :
+    // `sansArchives` LEVE sur une chaine qui n'a pas `.is`, et c'est voulu — un
+    // double incomplet doit echouer bruyamment plutot que de valider du code
+    // qui ne peut pas tourner. Il ne fait que chainer : ce banc ne parle pas
+    // d'archivage, c'est tests/biens-vivants-parite.test.js qui s'en charge.
+    is: () => q, then: ok => ok(biens) }; return q } }
+  // ⚠ LE VRAI `sansArchives`, DEPUIS LE MODULE COMMUN (jamais recopie). Ce banc
+  // retire les `import` de la page, donc toute dependance neuve doit lui etre
+  // fournie — sinon `ReferenceError` et toute la page tombe. Un double local
+  // serait plus permissif que le vrai : il accepterait un appel ecrit a
+  // l'envers que le module refuse.
+  w.sansArchives = new w.Function(
+    fs.readFileSync(path.join(__dirname, '..', 'shared', 'biens-vivants.js'), 'utf8')
+      .replace(/^export /gm, '') + '\nreturn sansArchives')()
   const script = /<script type="module">([\s\S]*?)<\/script>/.exec(HTML)[1].replace(/^\s*import .*$/gm, '')
   w.eval(`(async () => {${script}})()`)
   await attendre()

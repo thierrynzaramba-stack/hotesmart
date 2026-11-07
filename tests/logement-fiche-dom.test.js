@@ -254,6 +254,49 @@ test("LE TEST QUI COMPTE : l annonce encore EN LIGNE est signalée, et l hôte a
     'une lecture ratée affirme que l annonce est en ligne')
 })
 
+test("LE TEST QUI COMPTE : sur un bien ARCHIVE, l encart ne dit plus « Actif »", () => {
+  // ⚠ POINT 8 DU CONSTAT DE THIERRY DU 3 NOVEMBRE 2026, vu en production sur
+  // Colomiers : la fiche d un logement archivé affichait
+  // « Assistant HôteSmart · Actif ». Faux deux fois — rien ne tourne plus pour
+  // ce bien, et l interrupteur proposait de mettre en pause une automatisation
+  // déjà arrêtée.
+  const f = fiche()
+  f.bien = { ...f.bien, archive_le: '2026-11-03T20:42:19.342Z' }
+  const d = doc(M.assistantHtml(f, OUTILS(), { peutModifier: true }))
+
+  const encart = d.querySelector('.fic-assistant')
+  assert.ok(encart, 'l encart d état a disparu : l hôte ne sait plus où il en est')
+  assert.equal(encart.getAttribute('data-assistant'), 'archive')
+  assert.equal(d.querySelector('[data-assistant-etat]').textContent, FR['fiche.assistant_archive'])
+  assert.ok(!encart.textContent.includes(FR['fiche.assistant_actif']),
+    'l encart dit encore « Actif » sur un bien archivé')
+
+  // ⚠ AUCUN INTERRUPTEUR, meme desactive : un interrupteur grise invite a
+  // chercher pourquoi il ne s actionne pas. L action d un bien archive est
+  // « Reactiver », et elle vit dans son propre bloc.
+  assert.equal(d.querySelector('[role="switch"]'), null,
+    'un interrupteur est rendu sur un bien archivé')
+  assert.equal(d.querySelector('[data-bind="assistant"]'), null,
+    'le bouton de bascule est encore branché sur un bien archivé')
+})
+
+test("sans droit de modification non plus, un bien ARCHIVE ne dit pas « Actif »", () => {
+  // ⚠ LA GARDE EST AVANT `peutModifier` POUR CETTE RAISON : le chemin du
+  // lecteur passe par `signalHtml`, qui ne connaît pas l archivage. Deux
+  // gardes, une par chemin, auraient divergé au premier changement.
+  const f = fiche()
+  f.bien = { ...f.bien, archive_le: '2026-11-03T20:42:19.342Z' }
+  const d = doc(M.assistantHtml(f, OUTILS(), { peutModifier: false }))
+  assert.equal(d.querySelector('[data-assistant-etat]').textContent, FR['fiche.assistant_archive'])
+})
+
+test("un bien VIVANT garde son interrupteur et son « Actif »", () => {
+  // Le contre-cas : sans lui, retirer l encart pour tout le monde passerait.
+  const d = doc(M.assistantHtml(fiche(), OUTILS(), { peutModifier: true }))
+  assert.ok(d.querySelector('[role="switch"]'), 'le bien vivant a perdu son interrupteur')
+  assert.equal(d.querySelector('[data-assistant-etat]').textContent, FR['fiche.assistant_actif'])
+})
+
 test('l en-tête porte le nom, la ville · capacité et le FAIT DATÉ — mais PAS les pastilles', () => {
   const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
   assert.equal(d.querySelector('.fic-nom').textContent, 'La bulle')

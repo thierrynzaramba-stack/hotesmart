@@ -122,6 +122,11 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
           // ⚠ Le double APPLIQUE les bornes de date : sans cela, retirer le
           // filtre de fenêtre du writer ne casserait aucun test.
           const d = snaps.filter(s => {
+            // ⚠ ET LA BORNE AU BIEN (`borneAuBien`, geste d'archivage) : sans
+            // elle, le double rendait les reservations de TOUT le compte et le
+            // constat 1 de la revue du 7 novembre 2026 ne se reproduisait pas.
+            if (a.f.user_id != null && s.user_id !== a.f.user_id) return false
+            if (a.f.property_id != null && String(s.property_id) !== String(a.f.property_id)) return false
             const dep = s.snapshot?.departure
             if (!dep) return true
             if (a.gte && dep < a.gte.v) return false
@@ -149,7 +154,8 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
           if (propositions !== null && a.f.assignment_mode === 'garde') {
             return { data: propositions, error: null }
           }
-          return { data: menages, error: null }
+          // La lecture des existants, bornee au bien quand l'archivage le demande.
+          return { data: menages.filter(m => a.f.property_id == null || String(m.property_id) === String(a.f.property_id)), error: null }
         }
         if (table === 'provider_availability_rules') return { data: regles, error: erreurDispos }
         if (table === 'provider_availability_exceptions') return { data: exceptions, error: null }
@@ -1659,4 +1665,52 @@ test('ÉLARGIR [garde : panne du journal] une PANNE du journal n\'élargit rien'
   const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
   await poserPropositionsDues(null, { maintenant: T0 })
   assert.strictEqual(etat.majs.length, 0)
+})
+
+// ─── Le geste d'archivage : la borne au bien vaut pour TOUT le cycle ────────
+// Constat 1 de la revue du 7 novembre 2026. `borneAuBien` ne restreignait que
+// les RESERVATIONS : archiver le bien A annulait les menages du bien B du meme
+// compte, avec le motif faux « Reservation annulee ».
+const BIENS_AB = [
+  { user_id: U, provider_property_id: '209413', provider: 'channex' },
+  { user_id: U, provider_property_id: 'B-777', provider: 'channex' }
+]
+const BORNE_A = { borneAuBien: { userId: U, propertyId: '209413' }, joursAvant: 3650 }
+const annulesDe = (etat) => etat.majs.filter(q => q.row && q.row.status === 'cancelled').flatMap(q => q.ids)
+
+test('LE TEST QUI COMPTE : borne au bien A, les menages du bien B ne sont PAS annules', async () => {
+  const etat = preparer({
+    biens: BIENS_AB,
+    snaps: [
+      { user_id: U, property_id: '209413', booking_id: 'bA', snapshot: { status: 'confirmed', arrival: jour(1), departure: jour(3) } },
+      { user_id: U, property_id: 'B-777', booking_id: 'bB', snapshot: { status: 'confirmed', arrival: jour(2), departure: jour(5) } }
+    ],
+    menages: [
+      { id: 'mA', user_id: U, property_id: '209413', booking_id: 'bA', departure_date: jour(3), status: 'accepted', provider_id: REGINA },
+      { id: 'mB1', user_id: U, property_id: 'B-777', booking_id: 'bB', departure_date: jour(5), status: 'assigned', provider_id: REGINA, assigned_by: 'host' },
+      { id: 'mB2', user_id: U, property_id: 'B-777', booking_id: 'bB2', departure_date: jour(9), status: 'accepted', provider_id: REGINA }
+    ],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages(null, BORNE_A)
+  assert.deepStrictEqual(annulesDe(etat), [], 'archiver A a annule des menages du bien B')
+  assert.strictEqual(bilan.annules, 0)
+  assert.ok(!etat.journal.some(l => l.event === 'cancelled'), 'un motif « annule » est journalise a tort')
+})
+
+test('borne au bien A, un menage DU BIEN A dont la reservation a disparu reste annule', async () => {
+  // La borne ne coupe pas la regle : elle la RESTREINT au bien.
+  const etat = preparer({
+    biens: BIENS_AB,
+    snaps: [{ user_id: U, property_id: '209413', booking_id: 'bA', snapshot: { status: 'cancelled', departure: jour(3) } }],
+    menages: [
+      { id: 'mA', user_id: U, property_id: '209413', booking_id: 'bA', departure_date: jour(3), status: 'accepted', provider_id: REGINA },
+      { id: 'mB1', user_id: U, property_id: 'B-777', booking_id: 'bB', departure_date: jour(5), status: 'accepted', provider_id: REGINA }
+    ],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages(null, BORNE_A)
+  assert.deepStrictEqual(annulesDe(etat), ['mA'])
 })
