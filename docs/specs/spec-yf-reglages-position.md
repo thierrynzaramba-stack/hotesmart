@@ -386,4 +386,32 @@ pas. Lignes posées en SQL (l'écran arrive au lot 4).
 
 Reste à recetter avec l'API (2c) : une ligne sans nuit rendue avec son motif
 (samedi rattaché de la Saint-Valentin 2027, pont de l'Armistice 2028), le
-rayonnement et sa largeur.
+rayonnement et sa largeur — fait au §10 ter.
+
+### 10 ter. Recette 2c sur staging — 7 novembre 2026, CONFORME
+
+Branche mise sur staging par le chef de file (tête `6186ce9f03482e58ae1ee487639c74c6ea61c68e`,
+staging `93a2ce00ef2057fc92182401592cd549e6466a2b`, déploiement « Production –
+hotesmart-staging » présent pour ce SHA). Même bien (Loft Pilotable, pilote
+coupé, sans zone scolaire). Appels à l'API depuis le navigateur de Thierry,
+connecté au compte de recette (l'écran arrive au lot 4) ; journal lu en SQL.
+
+| pièce | attendu | constaté |
+|---|---|---|
+| départ | aucune ligne | 0 ligne, 0 nuit, 0 sans nuit, 0 hors zone, aucune largeur |
+| PUT sans `confirme` | refus | **409 `a_confirmer`**, rien d'écrit |
+| Saint-Valentin · `samedi_rattache` · Haut | 2027 sans nuit, 2028 sur le samedi 12 | aperçu et lecture : 2027-02-14 **`position_absente`** ; lecture jusqu'en mars 2028 : **2028-02-12 Haut** |
+| pont de l'Armistice · 3e lundi · Haut | sans nuit | **`position_absente`** sur 2026 (9-13 nov.) et 2027 (12 nov.) |
+| Saint-Valentin · avant · 1er week-end · vendredi · Exceptionnel, largeur 0 | la nuit agit, et se signale | 2027-02-12 **Exceptionnel 140 €**, `hors_zone_affichee` ; `hors_zone` liste 2027 et 2028 (vendredi 11 févr. 2028 : la Saint-Valentin 2028 tient le samedi 12) |
+| largeur avant 1, puis 0 | aucun prix ne bouge (décision du 7 novembre) | **Exceptionnel 140 €** aux trois relevés ; `hors_zone` 0 à largeur 1, 1 à largeur 0 |
+| retrait des trois lignes, largeur effacée | retour exact au départ | 3 × `retiree` (avant : Haut, Haut, Exceptionnel) ; 0 ligne ; 2027-02-12 au calcul, **Haut 115 €** |
+| journal | 6 gestes ; le recommandé de la nuit réglée | 3 `posee` + 3 `retiree` ; pour le 1er week-end avant : `{"2027-02-12": "Haut"}` aux deux gestes — le niveau que le calcul rend une fois la ligne retirée ; `null` pour les deux lignes sans nuit dans les douze mois |
+
+**Ce que cette recette ne prouve pas** : le compte « N nuits vont changer de
+prix » sur un bien PILOTÉ — le Loft ne l'est pas, le compte vaut donc 0 par
+construction. Il est tenu par les tests (compte par `calculerPrix`, matière du
+moteur, bornes de la fenêtre).
+
+**Observation pour le lot 4** : sur un bien non piloté, le PUT rend
+`envoi: 'immediat'` alors qu'aucun prix ne part chez le canal. L'écran ne doit
+afficher ce champ que pour un bien piloté (`confirmation.pilote`).
