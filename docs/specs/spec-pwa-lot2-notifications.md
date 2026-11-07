@@ -628,6 +628,19 @@ font les heures calmes.
    un seul appel à l'ouverture, « Enregistrer » en fait un.
 8. Mesure avant/après : §15.10, mesurée au lot.
 
-### 15.10 Mesures
+### 15.10 Mesures (8 novembre 2026, sur la branche, contre `main` `019ae717`)
 
-À remplir au lot (appels, requêtes, octets de l'onglet, avant et après).
+| | Avant (2a) | Après (2b) |
+|---|---|---|
+| Appels à l'ouverture de l'onglet | 1 (GET `/api/push`) | 1 (le même) |
+| Requêtes Supabase de ce GET | 1 (appareils) | 2, en parallèle (appareils, réglages) |
+| Octets de la réponse (personne sans appareil, défauts) | 133 | 2 428 |
+| Appels sur « Enregistrer » | — | 1 (POST `reglages`) |
+| Appels ajoutés au chargement des autres pages | — | 0 (la langue part sur le geste seulement ; tenu par `tests/notifications-ecran.test.js`) |
+| `pages/settings.html` | 40 902 octets | 52 501 |
+| `shared/push-appareil.js` | 8 989 | 10 342 |
+| `shared/nav.js` | 12 727 | 13 024 |
+| `shared/langue-personne.js` (chargé au geste seulement) | — | 1 144 |
+
+Les octets de la page comptent ses commentaires ; aucune ressource n'est
+ajoutée à son chargement.
