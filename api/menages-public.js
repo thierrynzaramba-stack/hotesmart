@@ -739,6 +739,11 @@ module.exports = async function handler(req, res) {
     const menagesAssignes = mn || []
     const siens = new Set((mn || []).map(m =>
       `${String(m.property_id)}|${String(m.booking_id)}|${m.departure_date}`))
+    // ⚠ LES SEJOURS RETENUS DES BIENS DU JETON, AVANT le filtre par personne.
+    // Ils ne sortent JAMAIS dans la reponse : ils servent seulement a savoir si
+    // un bien ARCHIVE a encore un depart a venir (constat 2 de la revue du
+    // 7 novembre 2026, voir `archivesEpuisees` plus bas).
+    const sejoursDesBiens = allBookings
     // ⚠ LE FILTRE S'APPLIQUE DANS LES DEUX CAS. Un seul chemin non filtre
     // suffisait a rouvrir la fuite ; il n'y en a plus.
     allBookings = allBookings.filter(b =>
@@ -952,13 +957,21 @@ module.exports = async function handler(req, res) {
 
     // ⚠ LES BIENS ARCHIVES SANS DEPART A VENIR SORTENT DU PLANNING, et ici
     // seulement : il faut les reservations pour savoir s'il reste un depart.
-    // `allBookings` est deja filtre sur les sejours retenus, donc ses departs
-    // sont exactement ceux qui comptent.
+    // ⚠ LE DERNIER DEPART EST CELUI DU BIEN, PAS CELUI DE SES MENAGES A ELLE —
+    // constat 2 de la revue du 7 novembre 2026. Ma premiere version lisait
+    // `allBookings`, deja reduit aux menages de CETTE prestataire : une
+    // prestataire sans menage sur le bien le voyait « epuise », et le menage
+    // « a prendre » a J+4 que personne ne porte — exactement celui qu'il faut
+    // prendre — disparaissait. La decision de Thierry dit « jusqu'au DERNIER
+    // DEPART » du bien. On lit donc les sejours retenus du bien, et les departs
+    // des menages a prendre.
     const departsParBien = {}
-    for (const b of allBookings) {
-      if (!b || !b.departure) continue
-      ;(departsParBien[b.propId] = departsParBien[b.propId] || []).push(String(b.departure))
+    const noterDepart = (cle, dep) => {
+      if (!cle || !dep) return
+      ;(departsParBien[cle] = departsParBien[cle] || []).push(String(dep))
     }
+    for (const b of sejoursDesBiens) if (b) noterDepart(b.propId, b.departure)
+    for (const m of (aPrendre || [])) if (m) noterDepart(String(m.propId || m.property_id), m.departure_date)
     const biensEpuises = archivesEpuisees({
       biens: properties.map(p => ({ cle: p.id, archive_le: p.archive_le })),
       departs: departsParBien,
