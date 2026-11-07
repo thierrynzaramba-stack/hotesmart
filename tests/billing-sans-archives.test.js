@@ -123,3 +123,15 @@ test("le DERNIER bien archive : l'abonnement s'arrete en fin de periode", async 
   assert.deepEqual(r, { qty: 0 })
   assert.deepEqual(stripeAppels, [{ id: 'sub_1', params: { cancel_at_period_end: true } }])
 })
+
+test("LE TEST QUI COMPTE : `creer: false` (l archivage) n ouvre JAMAIS d abonnement", async () => {
+  // Decision « stop abonnement » du 7 novembre 2026 : retirer un bien ne doit
+  // pas demarrer un essai Stripe sur un compte qui n en avait pas.
+  const { billing, stripeAppels } = charger({
+    properties: PARC,
+    accounts: [{ user_id: COMPTE, is_beta: false, stripe_customer_id: null, stripe_subscription_id: null }]
+  })
+  const r = await billing.syncAccountBilling(COMPTE, null, { creer: false })
+  assert.deepEqual(r, { qty: 1, skipped: 'sans_abonnement' })
+  assert.deepEqual(stripeAppels, [])
+})

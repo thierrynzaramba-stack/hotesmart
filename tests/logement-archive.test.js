@@ -23,6 +23,10 @@ const A = require('../lib/logement/archive.js')
 // « rien a creer », ce qui est l'etat de ces fixtures ; le test dedie plus bas
 // mesure la vraie creation.
 const SANS_MENAGE = async () => ({ crees: 0, erreurs: 0 })
+// ⚠ L'ABONNEMENT AUSSI EST INJECTE (decision « stop abonnement » du 7 novembre
+// 2026) : sans ce double, chaque archivage du banc chargerait le vrai module de
+// facturation — client Stripe et Supabase — et tenterait un appel reseau.
+const SANS_FACTURATION = async () => ({ skipped: 'beta' })
 
 const T = '2026-10-31T10:00:00.000Z'
 
@@ -107,7 +111,7 @@ test("LE TEST QUI COMPTE : `active_at` n est JAMAIS efface, une FIN est posee", 
   // le bien a ete actif : le trial du compte demarre au PREMIER `active_at`,
   // donc l'effacer reecrit une date de debut de periode d'essai.
   const b = banc({ properties: [unBien()] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', parQui: 'moi', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', parQui: 'moi', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, true, `archivage refuse : ${JSON.stringify(r)}`)
   const bien = b.base.properties[0]
   assert.strictEqual(bien.active_at, '2026-07-19T00:00:00Z',
@@ -122,7 +126,7 @@ test("LE TEST QUI COMPTE : un bien JAMAIS facture ne recoit pas de fin de factur
   // 30 octobre 2026). Poser une fin sur un bien jamais actif inventerait une
   // periode de facturation qui n'a pas existe.
   const b = banc({ properties: [unBien({ active_at: null })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(b.base.properties[0].facturable_jusqu_au, null,
     'une fin de facturation est posee sur un bien qui n a jamais ete facture')
   assert.strictEqual(r.etait_facture, false)
@@ -135,7 +139,7 @@ test("LE TEST QUI COMPTE : l archivage ETEINT le pilote tarifaire", async () => 
   // annonce retiree. Le filtre de `scripts/piloter-yieldflow.js` est la seconde
   // ligne de defense ; celle-ci dit l'INTENTION dans la donnee.
   const b = banc({ properties: [unBien({ pilote_tarifaire: 'yieldflow' })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(b.base.properties[0].pilote_tarifaire, 'calendrier',
     'le pilote reste sur `yieldflow` : il pousserait des prix pour une annonce retiree')
   assert.strictEqual(r.pilote_eteint, true, 'le compte rendu ne dit pas que le pilote a ete eteint')
@@ -155,7 +159,7 @@ test("LE TEST QUI COMPTE : reactiver NE RALLUME PAS YieldFlow", async () => {
 
 test("un bien deja sur `calendrier` ne voit pas son pilote touche", async () => {
   const b = banc({ properties: [unBien({ pilote_tarifaire: 'calendrier' })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.pilote_eteint, false,
     'le compte rendu annonce une extinction qui n a pas eu lieu')
 })
@@ -175,7 +179,7 @@ test("LE TEST QUI COMPTE : les taches IA EN VOL sont closes, et SEULES celles-la
     { id: 't6', user_id: 'compte-2', property_id: 'cle-channex', status: 'pending' }
   ]
   const b = banc({ properties: [unBien()], agent_tasks: taches })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.taches_closes, 2, `${r.taches_closes} tache(s) closes au lieu de 2`)
   const etat = Object.fromEntries(b.base.agent_tasks.map(t => [t.id, t.status]))
   assert.strictEqual(etat.t1, 'archived', 'une tache `pending` n est pas close')
@@ -198,7 +202,7 @@ test("LE TEST QUI COMPTE : le marqueur d import est retire de la file", async ()
       { id: 'messages_import:compte-1:autre-bien', last_run: '2026-10-30T19:00:00Z' }
     ]
   })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.marqueur_retire, true, 'le marqueur n a pas ete retire')
   const restants = b.base.cron_logs.map(l => l.id)
   assert.ok(!restants.includes('messages_import:compte-1:cle-channex'),
@@ -215,7 +219,7 @@ test("LE TEST QUI COMPTE : un echec partiel ne se tait pas", async () => {
     agent_tasks: [{ id: 't1', user_id: 'compte-1', property_id: 'cle-channex', status: 'pending' }],
     pannes: { 'agent_tasks:update': 'colonne status absente' }
   })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, true, 'un echec de nettoyage a annule l archivage')
   assert.strictEqual(b.base.properties[0].archive_le, T, 'le bien n est pas archive')
   assert.ok(Array.isArray(r.rates) && r.rates.length === 1, `les rates ne sont pas remontes : ${JSON.stringify(r.rates)}`)
@@ -225,7 +229,7 @@ test("LE TEST QUI COMPTE : un echec partiel ne se tait pas", async () => {
 
 test("LE TEST QUI COMPTE : rearchiver ne REDATE pas", async () => {
   const b = banc({ properties: [unBien({ archive_le: '2026-10-01T00:00:00Z' })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, true)
   assert.strictEqual(r.deja_archive, true, 'le rearchivage n est pas signale comme tel')
   assert.strictEqual(b.base.properties[0].archive_le, '2026-10-01T00:00:00Z',
@@ -234,7 +238,7 @@ test("LE TEST QUI COMPTE : rearchiver ne REDATE pas", async () => {
 
 test("LE TEST QUI COMPTE : le bien d un AUTRE compte est introuvable", async () => {
   const b = banc({ properties: [unBien({ user_id: 'compte-2' })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, false)
   assert.strictEqual(r.motif_refus, 'bien_introuvable', 'un bien d un autre compte a ete atteint')
   assert.strictEqual(b.base.properties[0].archive_le, null, 'le bien d un autre compte a ete archive')
@@ -245,7 +249,7 @@ test("un bien SANS cle provider s archive quand meme, et le dit", async () => {
   // rien a nettoyer dans les tables enfant, mais le bien doit sortir des
   // boucles et des ecrans.
   const b = banc({ properties: [unBien({ provider_property_id: null })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, true)
   assert.strictEqual(b.base.properties[0].archive_le, T)
   assert.strictEqual(r.taches_closes, null, 'un nettoyage est annonce sans cle provider')
@@ -582,7 +586,7 @@ test("LE TEST QUI COMPTE : l archivage cree les menages des sejours a venir, AVA
   const appels = []
   const r = await A.archiver(b.client, {
     bienId: 'uuid-bien', compte: 'compte-1', maintenant: T,
-    creerMenages: async (results, o) => { appels.push(o); return { crees: 3, erreurs: 0 } }
+    synchroniserFacturation: SANS_FACTURATION, creerMenages: async (results, o) => { appels.push(o); return { crees: 3, erreurs: 0 } }
   })
   assert.equal(r.ok, true)
   assert.equal(r.menages_crees, 3, 'le compte des menages crees ne remonte pas a la confirmation')
@@ -621,7 +625,7 @@ test("LE TEST QUI COMPTE : les menages sont crees AVANT la pose du drapeau", asy
   }
   await A.archiver(clientEspion, {
     bienId: 'uuid-bien', compte: 'compte-1', maintenant: T,
-    creerMenages: async () => { ordre.push('menages'); return { crees: 1, erreurs: 0 } }
+    synchroniserFacturation: SANS_FACTURATION, creerMenages: async () => { ordre.push('menages'); return { crees: 1, erreurs: 0 } }
   })
   assert.deepEqual(ordre.slice(0, 2), ['menages', 'drapeau'],
     `l ordre observe est ${ordre.join(' -> ')} : le drapeau est pose avant la creation, donc rien ne sera cree`)
@@ -634,10 +638,62 @@ test("un echec de creation NE BLOQUE PAS l archivage, et il se DIT", async () =>
   const b = banc({ properties: [unBien()] })
   const r = await A.archiver(b.client, {
     bienId: 'uuid-bien', compte: 'compte-1', maintenant: T,
-    creerMenages: async () => { throw new Error('sync indisponible') }
+    synchroniserFacturation: SANS_FACTURATION, creerMenages: async () => { throw new Error('sync indisponible') }
   })
   assert.equal(r.ok, true, 'l archivage a ete refuse pour un echec de creation de menages')
   assert.equal(r.menages_crees, null, '`menages_crees` doit valoir null, jamais 0, quand on ne sait pas')
   assert.ok((r.rates || []).some(x => x.quoi === 'menages_a_venir' && /sync indisponible/.test(x.detail)),
     `l echec de creation est tu : ${JSON.stringify(r.rates)}`)
+})
+
+// ─── L'abonnement, tout de suite (decision de Thierry du 7 novembre 2026) ───
+// « stop abonnement » : archiver un bien recalcule l'abonnement du compte
+// immediatement, sans jamais en creer un.
+test("LE TEST QUI COMPTE : l archivage recalcule l abonnement APRES le drapeau, sans jamais en creer", async () => {
+  const b = banc({ properties: [unBien()] })
+  const ordre = []
+  const appels = []
+  const clientEspion = {
+    from (table) {
+      const q = b.client.from(table)
+      if (table !== 'properties') return q
+      return new Proxy(q, {
+        get (cible, p) {
+          if (p === 'update') ordre.push('drapeau')
+          const v = cible[p]
+          return typeof v === 'function' ? v.bind(cible) : v
+        }
+      })
+    }
+  }
+  const r = await A.archiver(clientEspion, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE,
+    synchroniserFacturation: async (compte, email, o) => {
+      ordre.push('abonnement'); appels.push({ compte, o })
+      return { qty: 1, updated: true, direction: 'down' }
+    }
+  })
+  assert.equal(r.ok, true)
+  assert.deepEqual(ordre.filter(x => x === 'drapeau' || x === 'abonnement').slice(0, 2), ['drapeau', 'abonnement'],
+    `ordre ${ordre.join(' -> ')} : recalcule avant le drapeau, le bien serait encore compte`)
+  assert.deepEqual(appels, [{ compte: 'compte-1', o: { creer: false } }],
+    'l abonnement n est pas recalcule pour CE compte, ou peut etre cree a cette occasion')
+  assert.deepEqual(r.abonnement, { qty: 1, updated: true, direction: 'down' })
+  assert.equal(r.rates, null)
+})
+
+test("un recalcul d abonnement en ECHEC n empeche pas l archivage, et il se DIT", async () => {
+  for (const sync of [
+    async () => ({ error: 'Stripe indisponible' }),
+    async () => { throw new Error('Stripe indisponible') }
+  ]) {
+    const b = banc({ properties: [unBien()] })
+    const r = await A.archiver(b.client, {
+      bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE, synchroniserFacturation: sync
+    })
+    assert.equal(r.ok, true, 'l archivage a ete refuse pour un echec de facturation')
+    assert.equal(r.abonnement, null)
+    assert.ok((r.rates || []).some(x => x.quoi === 'abonnement' && /Stripe indisponible/.test(x.detail)),
+      `l echec de l abonnement est tu : ${JSON.stringify(r.rates)}`)
+  }
 })
