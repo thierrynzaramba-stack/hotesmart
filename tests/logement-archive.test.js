@@ -649,37 +649,79 @@ test("un echec de creation NE BLOQUE PAS l archivage, et il se DIT", async () =>
 // ─── L'abonnement, tout de suite (decision de Thierry du 7 novembre 2026) ───
 // « stop abonnement » : archiver un bien recalcule l'abonnement du compte
 // immediatement, sans jamais en creer un.
-test("LE TEST QUI COMPTE : l archivage recalcule l abonnement APRES le drapeau, sans jamais en creer", async () => {
+test("LE TEST QUI COMPTE : l archivage recalcule l abonnement APRES que le drapeau est ECRIT, sans jamais en creer", async () => {
+  // ⚠ L'ORDRE SE MESURE A L'EXECUTION, PAS A L'ACCES (constat 5 de la revue de
+  // 9fc95ec9). Ma premiere version notait « drapeau » quand le code touchait
+  // `.update` : une requete construite puis attendue APRES le recalcul passait
+  // au vert, alors que le bien etait encore compte. Ici, le double du recalcul
+  // regarde la LIGNE : le banc n'y ecrit `archive_le` qu'a l'execution.
   const b = banc({ properties: [unBien()] })
-  const ordre = []
   const appels = []
-  const clientEspion = {
-    from (table) {
-      const q = b.client.from(table)
-      if (table !== 'properties') return q
-      return new Proxy(q, {
-        get (cible, p) {
-          if (p === 'update') ordre.push('drapeau')
-          const v = cible[p]
-          return typeof v === 'function' ? v.bind(cible) : v
-        }
-      })
-    }
-  }
-  const r = await A.archiver(clientEspion, {
+  const r = await A.archiver(b.client, {
     bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE,
     synchroniserFacturation: async (compte, email, o) => {
-      ordre.push('abonnement'); appels.push({ compte, o })
+      appels.push({ compte, o, deja_ecrit: b.base.properties[0].archive_le === T })
       return { qty: 1, updated: true, direction: 'down' }
     }
   })
   assert.equal(r.ok, true)
-  assert.deepEqual(ordre.filter(x => x === 'drapeau' || x === 'abonnement').slice(0, 2), ['drapeau', 'abonnement'],
-    `ordre ${ordre.join(' -> ')} : recalcule avant le drapeau, le bien serait encore compte`)
-  assert.deepEqual(appels, [{ compte: 'compte-1', o: { creer: false } }],
-    'l abonnement n est pas recalcule pour CE compte, ou peut etre cree a cette occasion')
+  assert.deepEqual(appels, [{ compte: 'compte-1', o: { creer: false }, deja_ecrit: true }],
+    `appels ${JSON.stringify(appels)} : recalcule avant que le drapeau soit ecrit, pour un autre compte, ou en pouvant creer`)
   assert.deepEqual(r.abonnement, { qty: 1, updated: true, direction: 'down' })
   assert.equal(r.rates, null)
+})
+
+test("LE TEST QUI COMPTE : le chemin PAR DEFAUT (production) appelle la vraie facturation en `creer: false`", async () => {
+  // ⚠ CONSTAT 4 DE LA REVUE DE 9fc95ec9 : tous les archivages du banc injectaient
+  // le double, donc le chemin de production n'etait traverse par AUCUN test —
+  // la mutation qui oubliait de transmettre `{ creer: false }` restait verte.
+  // C'est le defaut de « l'envoi par defaut » que CLAUDE.md raconte.
+  const absBilling = require.resolve('../lib/billing')
+  const avant = require.cache[absBilling]
+  const appels = []
+  const m = new (require('node:module'))(absBilling)
+  m.exports = { syncAccountBilling: async (...args) => { appels.push(args); return { qty: 0 } } }
+  m.loaded = true
+  require.cache[absBilling] = m
+  try {
+    const b = banc({ properties: [unBien()] })
+    const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+    assert.equal(r.ok, true)
+    assert.deepEqual(appels, [['compte-1', null, { creer: false }]])
+    assert.deepEqual(r.abonnement, { qty: 0 })
+  } finally {
+    if (avant) require.cache[absBilling] = avant; else delete require.cache[absBilling]
+  }
+})
+
+test("LE TEST QUI COMPTE : un bien DEJA archive rejoue le recalcul, et dit s il echoue encore", async () => {
+  // ⚠ CONSTAT 2 DE LA REVUE DE 9fc95ec9 : apres un premier echec Stripe, l'ecran
+  // rend le bouton ; le second clic repondait « deja archive » sans rien
+  // recalculer, et l'ecran disait « fait ». Le bien restait facture.
+  const b = banc({ properties: [unBien({ archive_le: '2026-10-30T09:00:00.000Z' })] })
+  const appels = []
+  const r = await A.archiver(b.client, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE,
+    synchroniserFacturation: async (compte, email, o) => { appels.push(o); return { error: 'Stripe indisponible' } }
+  })
+  assert.equal(r.ok, true)
+  assert.equal(r.deja_archive, true)
+  assert.deepEqual(appels, [{ creer: false }], 'le second clic ne rejoue pas le recalcul')
+  assert.ok((r.rates || []).some(x => x.quoi === 'abonnement'), 'l echec repete est tu : l ecran dirait « fait »')
+})
+
+test("un bien JAMAIS active n appelle pas la facturation : il n a jamais ete compte", async () => {
+  // Constat 7 de la revue de 9fc95ec9 : deux appels Stripe pour rien, et une
+  // fausse alerte « archive partiel » le jour ou Stripe est en panne.
+  const b = banc({ properties: [unBien({ active_at: null })] })
+  let appele = false
+  const r = await A.archiver(b.client, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE,
+    synchroniserFacturation: async () => { appele = true; return { qty: 0 } }
+  })
+  assert.equal(r.ok, true)
+  assert.equal(appele, false)
+  assert.deepEqual(r.abonnement, { skipped: 'jamais_facture' })
 })
 
 test("un recalcul d abonnement en ECHEC n empeche pas l archivage, et il se DIT", async () => {

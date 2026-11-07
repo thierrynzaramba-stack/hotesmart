@@ -56,14 +56,20 @@ function client (tables) {
   }
 }
 
-function charger ({ properties, accounts = [], quantiteActuelle = 0 }) {
+function charger ({ properties, accounts = [], quantiteActuelle = 0, abonnement = {} }) {
   const sb = client({ properties, accounts })
   const stripeAppels = []
   class StripeDouble {
     constructor () {
-      this.prices = { list: async () => ({ data: [{ id: 'price_1' }] }) }
+      // ⚠ TOUT APPEL STRIPE QUI ECRIT OU QUI COUTE EST ENREGISTRE (constat 6 de la
+      // revue de 9fc95ec9) : un double qui n'enregistrait que `update` laissait
+      // croire qu'une liste vide prouvait « aucune creation ».
+      this.prices = { list: async () => { stripeAppels.push({ appel: 'prices.list' }); return { data: [{ id: 'price_1' }] } } }
+      this.customers = { create: async () => { stripeAppels.push({ appel: 'customers.create' }); return { id: 'cus_neuf' } } }
       this.subscriptions = {
-        retrieve: async id => ({ id, items: { data: [{ id: 'si_1', quantity: quantiteActuelle }] } }),
+        retrieve: async id => ({ id, status: 'active', cancel_at_period_end: false, ...abonnement,
+                                 items: { data: [{ id: 'si_1', quantity: quantiteActuelle }] } }),
+        create: async () => { stripeAppels.push({ appel: 'subscriptions.create' }); return { id: 'sub_neuf', status: 'trialing' } },
         update: async (id, params) => { stripeAppels.push({ id, params }); return { id } }
       }
     }
@@ -106,8 +112,10 @@ test("LE TEST QUI COMPTE : l'abonnement descend a la quantite des biens VIVANTS,
   const r = await billing.syncAccountBilling(COMPTE)
   assert.equal(r.error, undefined, 'la synchro a echoue : ' + r.error)
   assert.deepEqual(r, { qty: 1, updated: true, direction: 'down' })
-  assert.equal(stripeAppels.length, 1)
-  assert.deepEqual(stripeAppels[0].params, {
+  const ecritures = stripeAppels.filter(x => x.params)
+  assert.equal(ecritures.length, 1)
+  assert.ok(!stripeAppels.some(x => /create/.test(x.appel || '')), 'une creation Stripe a eu lieu')
+  assert.deepEqual(ecritures[0].params, {
     items: [{ id: 'si_1', quantity: 1 }], proration_behavior: 'none'
   })
   assert.deepEqual(sb.ecritures, [{ table: 'accounts', maj: { sub_quantity: 1 }, lignes: 1 }])
@@ -134,4 +142,32 @@ test("LE TEST QUI COMPTE : `creer: false` (l archivage) n ouvre JAMAIS d abonnem
   const r = await billing.syncAccountBilling(COMPTE, null, { creer: false })
   assert.deepEqual(r, { qty: 1, skipped: 'sans_abonnement' })
   assert.deepEqual(stripeAppels, [])
+})
+
+test("LE TEST QUI COMPTE : un ARRET PROGRAMME se leve des qu un bien redevient facturable", async () => {
+  // Constat 1 (argent) de la revue de 9fc95ec9. Archiver le dernier bien pose
+  // `cancel_at_period_end` sans toucher a la quantite (1) ; un nouveau bien
+  // active ensuite donnait 1 === 1, « inchange », et l'abonnement s'arretait
+  // en fin de periode avec un bien actif.
+  const { billing, stripeAppels } = charger({
+    properties: [{ id: 'n', user_id: COMPTE, active_at: '2026-11-07T00:00:00Z', archive_le: null }],
+    accounts: [{ user_id: COMPTE, is_beta: false, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }],
+    quantiteActuelle: 1,
+    abonnement: { cancel_at_period_end: true }
+  })
+  const r = await billing.syncAccountBilling(COMPTE)
+  assert.deepEqual(r, { qty: 1, updated: true, direction: 'same', arret_leve: true })
+  assert.deepEqual(stripeAppels.filter(x => x.params), [{ id: 'sub_1', params: { cancel_at_period_end: false } }])
+})
+
+test("un abonnement TERMINE chez Stripe se dit, il ne se modifie pas", async () => {
+  const { billing, stripeAppels } = charger({
+    properties: PARC,
+    accounts: [{ user_id: COMPTE, is_beta: false, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }],
+    quantiteActuelle: 2,
+    abonnement: { status: 'canceled' }
+  })
+  const r = await billing.syncAccountBilling(COMPTE)
+  assert.deepEqual(r, { qty: 1, error: 'abonnement_termine' })
+  assert.deepEqual(stripeAppels.filter(x => x.params), [], 'un abonnement termine a ete modifie')
 })
