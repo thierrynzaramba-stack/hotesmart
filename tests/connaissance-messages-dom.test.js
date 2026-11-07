@@ -387,3 +387,50 @@ test('un retour servi depuis le cache du navigateur retire le texte gardé : la 
   assert.equal(b.window.sessionStorage.getItem(CLE), null)
   b.fermer()
 })
+
+// ─── La saisie s'élargit pendant la frappe (recette du 7 novembre 2026) ────
+// Avec le livre en plus, le champ n'avait plus qu'un tiers de la largeur du
+// téléphone. Toucher le champ le passe sur toute la largeur, boutons dessous.
+const barre = (b) => b.doc.querySelector('[data-bind="saisie"]')
+const enFrappe = (b) => barre(b).classList.contains('msg-saisie--frappe')
+
+test('LE TEST QUI COMPTE : toucher le champ l élargit ; quitter le champ seul ne le replie PAS', async () => {
+  // Le `blur` part au toucher d'un bouton, AVANT son clic : replier à cet
+  // instant déplacerait le bouton sous le doigt.
+  const b = await telephoneSurB7()
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  assert.equal(enFrappe(b), false)
+  zone.focus()
+  assert.equal(enFrappe(b), true)
+  zone.blur()
+  assert.equal(enFrappe(b), true, 'toujours large au blur')
+  b.fermer()
+})
+
+test('un clic dans la saisie la garde large ; un clic ailleurs la replie, APRÈS avoir atteint sa cible', async () => {
+  const b = await telephoneSurB7()
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  zone.focus(); zone.blur()
+  clic(b, b.doc.querySelector('[data-bind="proposer"]'))
+  assert.equal(enFrappe(b), true, 'un bouton de la saisie')
+  let atteint = null
+  const ailleurs = b.doc.querySelector('.msg-fil__titre') || b.doc.querySelector('[data-bind="fil"]')
+  ailleurs.addEventListener('click', () => { atteint = enFrappe(b) })
+  clic(b, ailleurs)
+  assert.equal(atteint, true, 'la cible du clic voit la saisie encore large : rien n a bougé sous le doigt')
+  assert.equal(enFrappe(b), false, 'repliée ensuite')
+  await reposer(b)
+  b.fermer()
+})
+
+test('la saisie large ne vit qu au téléphone, et le champ y prend toute la ligne', () => {
+  const css = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const i = css.indexOf('.msg-saisie--frappe {')
+  assert.ok(i > 0)
+  const media = css.lastIndexOf('@media', i)
+  assert.match(css.slice(media, media + 40), /^@media \(max-width: 899px\)/, 'réservée au téléphone')
+  assert.equal(css.slice(media, i).split('{').length - 1 - (css.slice(media, i).split('}').length - 1), 1,
+    'la règle est DANS ce bloc @media, pas après sa fermeture')
+  assert.match(css, /\.msg-saisie--frappe \{ flex-wrap: wrap;/)
+  assert.match(css, /\.msg-saisie--frappe textarea \{ flex: 1 1 100%; \}/)
+})

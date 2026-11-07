@@ -180,6 +180,12 @@ Une icône **« Base de connaissance »** dans l'en-tête de Messages, à côté
   perdre un texte). Sinon, un texte LIBRE est gardé (`sessionStorage`, lié au
   compte, une heure), lu et retiré au retour, et rendu seulement au fil que
   l'adresse rouvre, dans une saisie vide.
+- **Au téléphone, le champ prend toute la largeur pendant la frappe**, les
+  boutons dessous (seconde recette du 7 novembre 2026, choix de Thierry : avec
+  le livre en plus, le champ n'avait plus qu'un tiers de la largeur). Posé au
+  toucher du champ, retiré seulement après un clic ailleurs dans la page —
+  jamais au `blur`, qui précède le clic d'un bouton et le déplacerait sous le
+  doigt.
 
 ### 3.2 La carte d'une réponse prête
 
