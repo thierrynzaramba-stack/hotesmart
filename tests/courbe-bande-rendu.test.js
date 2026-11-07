@@ -29,9 +29,9 @@ const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
 const racine = path.join(__dirname, '..')
-const CHROME = '/home/thierry/.cache/ms-playwright/chromium_headless_shell-1243'
-  + '/chrome-headless-shell-linux64/chrome-headless-shell'
-const LIBS = '/home/thierry/.cache/hotesmart-banc/libs/usr/lib/x86_64-linux-gnu'
+// Le navigateur de banc se TROUVE (PC de Thierry ou cloud), et c'est la seule
+// copie du chemin : tests/outils/navigateur.js.
+const { CHROME, envNavigateur, messageAbsent } = require('./outils/navigateur.js')
 
 // La page de mesure : la courbe REELLE, les feuilles REELLES, et une sonde qui
 // rend le style CALCULE de chaque bande.
@@ -72,7 +72,7 @@ document.title = JSON.stringify({
   const dom = execFileSync(CHROME, ['--headless', '--no-sandbox', '--disable-gpu',
     '--allow-file-access-from-files', '--window-size=900,600',
     '--virtual-time-budget=1500', '--dump-dom', `file://${page}`],
-  { env: { ...process.env, LD_LIBRARY_PATH: LIBS }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  { env: envNavigateur(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
   const titre = (dom.match(/<title>([\s\S]*?)<\/title>/) || [])[1]
   assert.ok(titre, 'la sonde n a rien rendu : la page ne s est pas executee')
   fs.rmSync(dossier, { recursive: true, force: true })
@@ -82,8 +82,7 @@ document.title = JSON.stringify({
 test("LE TEST QUI COMPTE : l opacite demandee est celle que le NAVIGATEUR CALCULE", () => {
   // ⚠ LE GARDE-FOU NE SE SAUTE PAS TOUT SEUL. Sans navigateur, on echoue.
   assert.ok(fs.existsSync(CHROME),
-    `le navigateur de banc est absent (${CHROME}) : ce test ne peut pas se taire, `
-    + 'il est le seul du depot a mesurer la cascade CSS')
+    messageAbsent('du depot a mesurer la cascade CSS'))
 
   const r = mesurer([0.15, 0.07])
   assert.strictEqual(r.polygones, 2, `${r.polygones} polygone(s) de bande rendus au lieu de 2`)
