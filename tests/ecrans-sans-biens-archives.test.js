@@ -200,6 +200,11 @@ function appeler (chemin, query, lignes, tables) {
 // reaction serait de retirer le test, pas de corriger l'endpoint.
 const ECRANS = [
   { ecran: 'Accueil', chemin: 'api/ecran/aujourdhui.js', query: { blocs: 'biens' }, legitimes: ['biens_archives'] },
+  // La base de connaissance V5 (lot kb-v5, dans main le 7 novembre 2026) : le
+  // volet et la page telephone choisissent leur logement dans `biens`. Le
+  // filtre est l'affaire de kb-v5 (`.is('archive_le', null)`) ; ce banc le
+  // TIENT, pour qu'un retrait futur rougisse ici.
+  { ecran: 'Base de connaissance (volet et page telephone)', chemin: 'api/ecran/connaissance.js', query: {} },
   { ecran: 'Calendrier et base de connaissance', chemin: 'api/channel-property.js', query: {} },
   { ecran: 'Menages (A traiter et calendrier)', chemin: 'api/menages.js', query: {} },
   // ⚠ LA PAGE `/menages` NE LIT PAS `api/menages.js` mais `api/garde.js`

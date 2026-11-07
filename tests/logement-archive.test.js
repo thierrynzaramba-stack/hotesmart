@@ -36,7 +36,10 @@ function banc (etat = {}) {
   const base = {
     properties: etat.properties || [],
     agent_tasks: etat.agent_tasks || [],
-    cron_logs: etat.cron_logs || []
+    cron_logs: etat.cron_logs || [],
+    // La base de connaissance du bien : l'archivage ne doit JAMAIS y ecrire
+    // (decision de Thierry du 7 novembre 2026, « on garde la configuration »).
+    knowledge: etat.knowledge || []
   }
   const journal = []
   const pannes = etat.pannes || {}
@@ -738,4 +741,25 @@ test("un recalcul d abonnement en ECHEC n empeche pas l archivage, et il se DIT"
     assert.ok((r.rates || []).some(x => x.quoi === 'abonnement' && /Stripe indisponible/.test(x.detail)),
       `l echec de l abonnement est tu : ${JSON.stringify(r.rates)}`)
   }
+})
+
+// ─── La base de connaissance d'un bien archive est GARDEE ───────────────────
+// Decision de Thierry du 7 novembre 2026 : un bien archive disparait de la
+// liste des biens de la base de connaissance, « mais sa configuration est
+// gardee » — ses faits et ses reponses doivent etre intacts s'il est reactive.
+test("LE TEST QUI COMPTE : l archivage ne supprime ni ne modifie la configuration de la base de connaissance", async () => {
+  const KB = [
+    { id: 'k1', user_id: 'compte-1', property_id: 'cle-channex', type: 'fixed', key: 'wifi', value: 'Livebox-1234' },
+    { id: 'k2', user_id: 'compte-1', property_id: 'cle-channex', type: 'qa', key: 'parking', value: 'Place 12, au sous-sol.' }
+  ]
+  const avant = JSON.parse(JSON.stringify(KB))
+  const b = banc({ properties: [unBien()], knowledge: KB })
+  const r = await A.archiver(b.client, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T,
+    synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE
+  })
+  assert.equal(r.ok, true)
+  assert.deepEqual(b.base.knowledge, avant, 'la base de connaissance du bien a ete supprimee ou modifiee')
+  assert.ok(!b.journal.some(j => j.table === 'knowledge'),
+    `une ecriture a touche la base de connaissance : ${JSON.stringify(b.journal.filter(j => j.table === 'knowledge'))}`)
 })
