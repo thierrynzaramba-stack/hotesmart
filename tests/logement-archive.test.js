@@ -55,6 +55,12 @@ function banc (etat = {}) {
         in (col, vals) { ctx.filtres.push(l => vals.map(String).includes(String(l[col]))); return chaine },
         update (champs) { ctx.op = 'update'; ctx.champs = champs; return chaine },
         delete () { ctx.op = 'delete'; return chaine },
+        // ⚠ `insert` ET `upsert` EXISTENT AUSSI (constat 2 de la revue de
+        // 0ccd215d) : sans eux, une ecriture de ce type levait une TypeError
+        // que le `try` de chaque etape d'`archiver` avalait — le test de la
+        // base de connaissance restait vert sur un `upsert` qui la modifiait.
+        insert (lignes) { ctx.op = 'insert'; ctx.champs = lignes; return chaine },
+        upsert (lignes) { ctx.op = 'upsert'; ctx.champs = lignes; return chaine },
         async maybeSingle () {
           if (pannes[table + ':select']) return { data: null, error: { message: pannes[table + ':select'] } }
           const r = appliquer()
@@ -70,9 +76,18 @@ function banc (etat = {}) {
           for (const c of voulues) sortie[c] = l[c]
           return { data: sortie, error: null }
         },
-        then (resoudre) { return chaine.executer().then(resoudre) },
+        // ⚠ LE REJET EST TRANSMIS (constat 4 de la revue de 0ccd215d) : sans le
+        // second argument, un refus du double sortait en `unhandledRejection`
+        // au lieu d'atteindre le `try` de l'appelant.
+        then (resoudre, rejeter) { return chaine.executer().then(resoudre, rejeter) },
         async executer () {
           const quoi = ctx.table + ':' + ctx.op
+          // ⚠ TOUTE TENTATIVE D'ECRITURE EST NOTEE AVANT TOUT REFUS : un test
+          // qui interdit d'ecrire dans une table doit voir la tentative, meme
+          // si elle echoue ensuite.
+          if (['update', 'delete', 'insert', 'upsert'].includes(ctx.op)) {
+            (journal.tentatives = journal.tentatives || []).push({ op: ctx.op, table: ctx.table })
+          }
           if (pannes[quoi]) return { data: null, error: { message: pannes[quoi] } }
           // ⚠ TOUTE ECRITURE EST CLOISONNEE. La cle de service contourne la
           // RLS par conception : c'est au code de filtrer, et c'est donc au
@@ -84,6 +99,12 @@ function banc (etat = {}) {
             }
           }
           const touchees = appliquer()
+          if (ctx.op === 'insert' || ctx.op === 'upsert') {
+            const lignes = Array.isArray(ctx.champs) ? ctx.champs : [ctx.champs]
+            base[ctx.table].push(...lignes.map(l => ({ ...l })))
+            journal.push({ op: ctx.op, table: ctx.table, n: lignes.length })
+            return { data: lignes, error: null }
+          }
           if (ctx.op === 'update') {
             for (const l of touchees) Object.assign(l, ctx.champs)
             journal.push({ op: 'update', table: ctx.table, n: touchees.length, champs: ctx.champs })
@@ -759,7 +780,16 @@ test("LE TEST QUI COMPTE : l archivage ne supprime ni ne modifie la configuratio
     synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE
   })
   assert.equal(r.ok, true)
+  // ⚠ `rates` NUL : une ecriture ratee sur la base de connaissance finirait
+  // ici, avalee par le `try` de son etape (constat 2 de la revue de 0ccd215d).
+  assert.equal(r.rates, null, `un echec partiel : ${JSON.stringify(r.rates)}`)
+  const tentativesKB = () => (b.journal.tentatives || []).filter(j => j.table === 'knowledge')
   assert.deepEqual(b.base.knowledge, avant, 'la base de connaissance du bien a ete supprimee ou modifiee')
-  assert.ok(!b.journal.some(j => j.table === 'knowledge'),
-    `une ecriture a touche la base de connaissance : ${JSON.stringify(b.journal.filter(j => j.table === 'knowledge'))}`)
+  assert.deepEqual(tentativesKB(), [], `l archivage a tente d ecrire dans la base de connaissance : ${JSON.stringify(tentativesKB())}`)
+  // ⚠ ET LA REACTIVATION AUSSI (constat 1 de la revue de 0ccd215d) : la
+  // decision dit que la configuration doit etre intacte « s'il est reactive ».
+  const r2 = await A.reactiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  assert.equal(r2.ok, true)
+  assert.deepEqual(b.base.knowledge, avant, 'la reactivation a supprime ou modifie la base de connaissance')
+  assert.deepEqual(tentativesKB(), [], `la reactivation a tente d ecrire dans la base de connaissance : ${JSON.stringify(tentativesKB())}`)
 })

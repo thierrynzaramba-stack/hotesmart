@@ -204,7 +204,11 @@ const ECRANS = [
   // volet et la page telephone choisissent leur logement dans `biens`. Le
   // filtre est l'affaire de kb-v5 (`.is('archive_le', null)`) ; ce banc le
   // TIENT, pour qu'un retrait futur rougisse ici.
-  { ecran: 'Base de connaissance (volet et page telephone)', chemin: 'api/ecran/connaissance.js', query: {} },
+  // ⚠ `?bien=` EST LE CHEMIN REEL du volet Messages (constat 3 de la revue de
+  // 0ccd215d) : il demande le bien du fil ouvert, et le fil d'un bien archive
+  // existe encore. Demander le bien ARCHIVE prouve qu'il n'est pas servi par
+  // ce chemin non plus.
+  { ecran: 'Base de connaissance (volet et page telephone)', chemin: 'api/ecran/connaissance.js', query: { bien: 'prop-range' } },
   { ecran: 'Calendrier et base de connaissance', chemin: 'api/channel-property.js', query: {} },
   { ecran: 'Menages (A traiter et calendrier)', chemin: 'api/menages.js', query: {} },
   // ⚠ LA PAGE `/menages` NE LIT PAS `api/menages.js` mais `api/garde.js`
