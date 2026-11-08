@@ -29,9 +29,9 @@ HôteSmart doit permettre à l'hôte de la générer et de l'envoyer.
 4. Le voyageur ouvre le lien. Il choisit « particulier » ou « société » et
    remplit le formulaire : nom ou raison sociale, adresse, et pour une société
    son n° de TVA intracommunautaire et son SIREN s'il en a.
-5. À la validation, la facture est **émise** : elle reçoit son numéro, son
-   contenu est figé, et le PDF est produit. Le voyageur le télécharge depuis le
-   même lien.
+5. La facture est **émise** — numéro, contenu figé, PDF — **jamais avant la
+   fin du séjour** (règle de Thierry, Q7). Le voyageur la télécharge depuis le
+   même lien. Le moment exact de l'émission dépend de Q7 bis.
 6. L'hôte voit l'état sur la fiche (demandée, émise) et télécharge le PDF.
 
 ## 3. Ce qui existe déjà (lecture du dépôt, `main` = dde1004ff1211a4a813a3ed1b471d36d92018fcf)
@@ -153,6 +153,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   facture négative, numérotée dans la même suite) ; l'hôte peut ensuite
   renvoyer un nouveau lien au voyageur. Cas visé d'abord : une faute de
   frappe du voyageur dans le formulaire.
+- **Q7 (8 nov. 2026), règle posée par Thierry : la facture n'est émise qu'en
+  fin de séjour.** Une annulation ou une modification AVANT la fin du séjour
+  ne touche donc aucune facture émise. Restent à trancher : le parcours quand
+  le voyageur remplit le formulaire avant son départ (Q7 bis), et un
+  changement APRÈS la fin du séjour (remboursement tardif).
 
 ## 5. Données (proposition, à revoir après les réponses)
 
