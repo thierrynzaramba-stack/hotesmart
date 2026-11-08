@@ -108,10 +108,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q3 — Les charges déjà connues d'HôteSmart.** Tranchée, voir ci-dessous
   et §7 bis.
 - **Q21 — La commission de Booking.com.** Tranchée, voir ci-dessous.
-- **Q4 — La validation.** *Proposition* : tout ce que l'IA lit arrive
-  **« à vérifier »** et ne compte dans **aucun** total tant que l'hôte ne l'a
-  pas validé — même principe que les avis (validation humaine avant tout
-  comptage). Jamais de champ inventé : ce que l'IA ne lit pas reste vide.
+- **Q4 — La validation et les totaux.** Tranchée, voir ci-dessous.
 - **Q5 — Les catégories.** Liste fermée en V1 ? *Proposition* : ménage ;
   linge et blanchisserie ; consommables et produits d'accueil ; eau,
   électricité, gaz ; internet et téléphone ; entretien et petites réparations ;
@@ -203,6 +200,16 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   ⚠ À vérifier au premier mois : si l'e-mail de Booking porte le PDF, il entre
   seul ; s'il n'est qu'une notification, il arrive « sans facture lisible »
   (Q19) et le PDF se télécharge dans l'extranet.
+- **Q4 (8 nov. 2026, 22 h 30) : « tout est inclus ; seulement les factures
+  vérifiées ont une mention ; tant que tout n'est pas vérifié, le total est une
+  estimation ».** Toute facture lue compte **tout de suite** dans les totaux,
+  vérifiée ou non. Une facture validée par l'hôte porte la mention
+  **« vérifiée »**. Tant qu'il reste dans le périmètre affiché une facture
+  « à vérifier », le total est marqué **« estimation »**, avec le nombre de
+  factures non vérifiées. Ce que l'IA ne lit pas reste vide, jamais inventé :
+  une facture sans montant lu ne s'additionne pas, et le total le dit
+  (« N factures sans montant »). Une facture annulée, illisible ou « sans
+  facture » ne compte pas.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -267,6 +274,12 @@ validée est considérée payée (Q2).
 | `lecture_ia` | jsonb : ce que l'IA a lu, champ par champ, avec sa confiance, le modèle et l'heure. **Jamais écrasé par la saisie** : l'écart lu / validé mesure la précision (étape 5). |
 | `cree_le`, `modifie_le`, `valide_le`, `valide_par` | |
 
+- **Table `charges_resume`** (nom provisoire) : une ligne par compte ×
+  entité × bien × mois, avec la somme HT, TVA et TTC, le nombre de factures,
+  de factures non vérifiées et de factures sans montant, et l'heure du
+  calcul. Écrite par le writer unique de `charges` et par le recalcul
+  quotidien, jamais par l'endpoint. Une entité ou un bien vide a sa propre
+  ligne (« sans entité », « sans bien »). Voir §11, point 2.
 - **L'historique vit dans la charge.** Elle porte sa propre entité et son
   propre bien : si un bien change d'entité, les charges passées ne bougent pas
   (accord avec le fil facturation, 8 novembre).
@@ -434,9 +447,18 @@ les faire lire par l'IA. Le modèle du §6 est choisi pour que ce lot n'ait rien
    **temps réel** (une facture envoyée y apparaît tout de suite), lus par
    index (`user_id`, `statut`). Le compteur porte sur **toutes** les lignes,
    pas sur la page affichée : compte exact en tête seule. Pas de total
-   « à payer » en V1 (Q2). Les statistiques (par mois,
-   rentabilité par bien) sont **non urgentes** : elles ne sont pas dans la V1,
-   et viendront par un résumé pré-calculé avec son heure.
+   « à payer » en V1 (Q2).
+   **Les totaux** (par mois, par entité, par bien) sont une donnée **non
+   urgente**, servie par une **table de résumé** que l'endpoint ne fait que
+   lire, avec l'heure du calcul affichée. Mais une facture envoyée doit y
+   compter tout de suite (Q4) : le résumé est donc **mis à jour par le writer
+   unique à chaque écriture** de charge, pour la seule ligne touchée
+   (compte × entité × bien × mois), et **recalculé une fois par jour** par le
+   cron dédié pour la cohérence. Il porte, à côté de la somme, le nombre de
+   factures non vérifiées et sans montant — c'est ce qui affiche
+   « estimation ». Un mois sans aucune facture n'est pas un 0 inventé : il
+   n'a pas de ligne, et l'écran le dit. La rentabilité par bien
+   (revenus − charges) reste hors V1.
 3. **Cache navigateur : aucun.** La page porte des montants, des justificatifs
    et une file « à vérifier » qui change à chaque e-mail reçu : elle se relit.
 4. **`private, no-store`** sur les deux endpoints, posé avant le premier refus
