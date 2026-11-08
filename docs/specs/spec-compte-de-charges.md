@@ -443,7 +443,7 @@ validée est considérée payée (Q2).
 5. **La mesure** sur les vraies factures de Thierry : écart lu / validé, champ
    par champ. Elle décide si Mindee est utile.
 
-Plus tard : les charges déjà connues (Q3), l'export comptable (Q13), la
+Plus tard : les ménages des prestataires (Q3), l'export comptable (Q13), la
 rentabilité par bien (résumé quotidien), la réception des factures
 électroniques (§10).
 
