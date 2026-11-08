@@ -105,10 +105,13 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   *Proposition* : oui, facultatif ; sans bien, c'est une charge de l'entité.
   C'est ce qui permettra plus tard la rentabilité par bien. *(posée le 8 nov.)*
 - **Q2 — Le suivi du paiement.** Tranchée, voir ci-dessous.
-- **Q3 — Les charges déjà connues d'HôteSmart** (ménages des prestataires,
-  commissions des plateformes). *Proposition par défaut (Thierry sans
-  préférence)* : lot ultérieur. Il commence par vérifier que ces montants
-  existent en base.
+- **Q3 — Les charges déjà connues d'HôteSmart.** Tranchée, voir ci-dessous
+  et §7 bis.
+- **Q21 — La commission de Booking.com.** Elle n'est pas dans ce que Booking
+  transmet (§7 bis). *Proposition* : elle entre par la **facture mensuelle de
+  commissions** que Booking.com envoie à l'hôte, transférée comme toute
+  facture (catégorie « commissions des plateformes »). Pas de taux estimé :
+  un montant inventé passerait pour un vrai.
 - **Q4 — La validation.** *Proposition* : tout ce que l'IA lit arrive
   **« à vérifier »** et ne compte dans **aucun** total tant que l'hôte ne l'a
   pas validé — même principe que les avis (validation humaine avant tout
@@ -191,6 +194,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   payées ».** Aucun suivi du paiement en V1 : ni statut « à payer / payée »,
   ni échéance, ni total « à payer », ni « Marquer payée ». L'échéance que
   l'IA lit reste dans `lecture_ia`, pour le lot qui ajoutera ce suivi.
+- **Q3 (8 nov. 2026, 22 h 21) : « les charges des OTA à comptabiliser ».**
+  Les commissions des plateformes entrent dans le compte de charges dès la
+  V1 (§7 bis). Les ménages des prestataires ne sont pas cités : ils restent
+  pour un lot ultérieur.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -248,7 +255,8 @@ validée est considérée payée (Q2).
 | `fournisseur_nom`, `fournisseur_siret`, `numero_facture`, `date_facture` | lus puis validés |
 | `montant_ht_cents`, `montant_tva_cents`, `montant_ttc_cents` | centimes, euros seulement en V1 ; une TVA à 0 lue n'est pas une TVA vide (Q17) |
 | `categorie` | liste fermée (Q5) |
-| `origine` | `photo`, `fichier`, `email` |
+| `origine` | `photo`, `fichier`, `email`, `ota` (§7 bis) |
+| `booking_id` | référence de la réservation, pour `origine = ota` seulement ; **unique (`user_id`, `booking_id`)** sur ce statut d'origine |
 | `email_uuid`, `email_expediteur`, `email_recu_le` | origine e-mail ; **unique (`user_id`, `email_uuid`, empreinte)** : Brevo peut rejouer un webhook. Une ligne `sans_facture` n'a pas d'empreinte (et Postgres tient deux vides pour différents) : **unique partiel (`user_id`, `email_uuid`)** sur ce statut. |
 | `justificatif_chemin`, `justificatif_type`, `justificatif_octets`, `justificatif_empreinte` | fichier au nom **aléatoire** dans le bucket privé ; empreinte SHA-256, unique par compte (Q14) |
 | `lecture_ia` | jsonb : ce que l'IA a lu, champ par champ, avec sa confiance, le modèle et l'heure. **Jamais écrasé par la saisie** : l'écart lu / validé mesure la précision (étape 5). |
@@ -336,6 +344,42 @@ validée est considérée payée (Q2).
   d'IA (crédit épuisé, indisponibilité) **arrête le passage sans rien
   compter** : un quart d'heure de panne ne doit pas rendre toutes les
   charges en attente `illisible`.
+
+## 7 bis. Les commissions des plateformes (Q3)
+
+**Ce que le cœur sait de la commission, par canal** (lu dans
+`lib/revenus/net-hote.js` et `docs/kb/prix-voyageur.md`, pas supposé) :
+
+| Canal | Commission dans le cœur |
+|---|---|
+| Airbnb (Channex) | **connue** : la retenue hôte (`Listing Cancellation Host Fee`), lue réservation par réservation |
+| Booking.com (Channex) | **absente** du payload — Q21 |
+| Beds24 | servie par Beds24 **quand elle existe** |
+| Direct (Offline, moteur) | aucune commission par construction |
+
+**Proposition de mécanisme** :
+- Une **charge automatique par réservation** dont la commission est connue :
+  `origine = ota`, catégorie « commissions des plateformes », montant = la
+  commission, bien = le bien de la réservation, entité = `entiteDuBien`,
+  référence de la réservation. Pas de justificatif, pas de lecture IA : le
+  montant vient du cœur. Sans entité (Q20), elle attend « à vérifier » comme
+  les autres.
+- **Une seule source de vérité** : le montant est celui que lit déjà
+  `lib/revenus/net-hote.js` — jamais une seconde lecture de la commission
+  (deux implémentations divergeraient, dette 17 du dépôt).
+- **Une réservation annulée** annule sa charge (motif « réservation
+  annulée »). Une retenue gardée par la plateforme sur une annulation est à
+  mesurer avant d'être traitée.
+- **Date de la charge** : la date du versement du canal (`delais_versement`,
+  `lib/revenus/versement.js`), comme le bloc Revenus.
+- **Doublon à fermer** : une facture de frais de la plateforme transférée à
+  la main pour un canal déjà compté automatiquement doublerait la charge. Le
+  formulaire le signale (« commissions Airbnb déjà comptées depuis vos
+  réservations »).
+- **Cadence** : donnée non urgente, matérialisée par une tâche du cron dédié
+  (`api/cron-charges.js`) une fois par jour, sur les réservations dont le
+  versement est passé ; écriture idempotente (unique par compte et
+  réservation). Aucune lecture du fournisseur : on lit le cœur.
 
 ## 8. Découpage proposé
 
