@@ -227,6 +227,8 @@ const ECRANS = [
   // ligne du dessus couvrait `lister`, que la page n'appelle plus.
   { ecran: 'Avis (cartes : le filtre et le formulaire de la page)', chemin: 'api/avis.js', query: { action: 'cartes' } },
   { ecran: 'Avis — reglage auto-validation', chemin: 'api/avis.js', query: { action: 'auto-validation' } },
+  // Facture voyageur, etape 1 : la liste des biens a rattacher a une entite.
+  { ecran: 'Entites juridiques (Reglages)', chemin: 'api/entites-juridiques.js', query: {} },
 ]
 
 // ⚠ `api/menages-public.js` N'EST PAS DANS CETTE LISTE, et la raison vaut
