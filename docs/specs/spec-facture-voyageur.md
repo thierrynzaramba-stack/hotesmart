@@ -47,9 +47,17 @@ HôteSmart doit permettre à l'hôte de la générer et de l'envoyer.
   - `taxeSejourInfo` : montant, **collecteur**, incluse ou non (`lib/taxe-sejour`) ;
   - `fraisCanal` : la retenue hôte d'Airbnb (Host Fee) ;
   - `factures` : les lignes `invoiceItems` de Beds24 (historique).
-  - ⚠ Le **frais de service voyageur d'Airbnb n'est transmis par aucun
-    canal**. HôteSmart ne connaît donc pas ce que le voyageur Airbnb a payé en
-    tout (voir Q2).
+  - **Le prix payé par le voyageur Airbnb est reconstruit** : Channex sert le
+    net hôte (`amount`, `meta.amount_type = "Payout Amount"`) et la retenue
+    hôte (`Listing Cancellation Host Fee`) ; leur somme est le prix voyageur,
+    prouvé contre le prix Beds24 du même séjour (`docs/kb/prix-voyageur.md`
+    §1 et §1 bis — exemple réel : 82,21 + 18,79 = 101,00 €).
+  - Retenue mesurée à 18,6 % du brut sur les biens de Thierry : c'est le
+    modèle de frais « hôte seul », où Airbnb n'ajoute **rien** au prix payé
+    par le voyageur. Dans l'autre modèle (frais partagés, ≈ 14 % payés par le
+    voyageur en plus), ce supplément n'est transmis par aucun canal, et le
+    modèle ne se lit dans aucun champ (`docs/kb/chantier-nouveau-bien.md`
+    §10, point 2).
 - **Qui collecte la taxe de séjour**, par canal : `docs/specs/spec-taxe-sejour.md`
   §1.1. Airbnb la collecte lui-même ; Booking la retient (La bulle) ou
   l'encaisse pour l'hôte qui la reverse (Colomiers) ; en direct, c'est l'hôte.
@@ -68,9 +76,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 
 - **Q1 — Le formulaire.** Le voyageur le remplit lui-même depuis le lien
   (lecture proposée), ou c'est l'hôte qui le remplit ?
-- **Q2 — Le montant d'une réservation Airbnb.** L'hôte ne peut facturer que ce
-  qu'il a vendu : le prix du séjour hors frais de service Airbnb (Airbnb
-  facture lui-même ses frais au voyageur), ou autre chose ?
+- **Q2 — Le montant d'une réservation Airbnb.** Le prix payé par le voyageur
+  pour le séjour, tel que HôteSmart le reconstruit (net hôte + retenue
+  Airbnb) ? Un éventuel frais de service voyageur (modèle partagé) n'y figure
+  pas : Airbnb le facture lui-même.
 - **Q3 — La taxe de séjour.** Sur la facture seulement quand l'hôte la collecte
   (direct, Booking « reversée ») ? Et quand la plateforme la collecte : absente,
   ou mentionnée « collectée par Airbnb / Booking » ?
