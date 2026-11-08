@@ -159,7 +159,9 @@ export function libellePastille (niveauxJour) {
  *   `structure` = { lundi: indice, … }, la structure ORDINAIRE par jour, celle
  *   sur laquelle le cran s'applique. Sans elle, on annonce le geste sans
  *   promettre un niveau d'arrivee.
- * @returns {{possible: boolean, raison: string|null, apres: string|null}}
+ * @returns {{possible: boolean, raison: string|null, apres: string|null, pas: number}}
+ *   `pas` = le nombre de crans que le clic deplacera reellement (signe
+ *   compris) ; plus d'un quand la mesure du moteur depasse l'amplitude.
  */
 export function apresLePas (opts, sens, cransActuels, cransMax) {
   // Compatibilite : un appel a l'ancienne (niveauxJour en premier) reste lu,
@@ -170,20 +172,32 @@ export function apresLePas (opts, sens, cransActuels, cransMax) {
   const max = Number.isFinite(o.cransMax !== undefined ? o.cransMax : cransMax)
     ? (o.cransMax !== undefined ? o.cransMax : cransMax) : 2
   const c = crans == null ? 0 : crans
+  // ⚠ LA CIBLE EST CELLE QUE LE CLIC ENVERRA : `clamp(c + sens, ±max)`
+  // (constat de la review de la chaine, 8 novembre 2026). `c` peut etre la
+  // MESURE du moteur, qui va de −4 a +4 : un ferie mesure a +4 que l'on baisse
+  // recoit 2, soit DEUX crans de descente — l'annoncer « d'un cran, passe a
+  // Tres haut » etait faux. Le pas reel est rendu (`pas`) pour que l'ecran le
+  // dise.
+  const cible = Math.max(-max, Math.min(max, c + sens))
   // ⚠ LA SEULE BORNE QUI REFUSE EST CELLE DU MOTEUR. Au-dela, le serveur
   // refuserait la valeur : un bouton qui envoie ce qui sera refuse ment.
-  if (sens > 0 ? c >= max : c <= -max) {
-    return { possible: false, raison: `le réglage est déjà au maximum (${max} crans)`, apres: null }
+  // Et un ▲ dont la cible serait PLUS BASSE que la mesure (mesure +4, cible
+  // +2) n'est pas une montee : il est refuse, avec la vraie raison.
+  if (sens > 0 ? cible <= c : cible >= c) {
+    const raison = (o.pose === false && Math.abs(c) > max)
+      ? `le moteur mesure déjà ${c > 0 ? '+' : ''}${c} crans, et un réglage s’arrête à ${max}`
+      : `le réglage est déjà au maximum (${max} crans)`
+    return { possible: false, raison, apres: null, pas: 0 }
   }
   const s = o.structure
-  if (!s || typeof s !== 'object') return { possible: true, raison: null, apres: null }
+  if (!s || typeof s !== 'object') return { possible: true, raison: null, apres: null, pas: cible - c }
   // Le niveau d'arrivee se recalcule depuis la STRUCTURE, comme le moteur.
   const dernier = NIVEAUX_ORDRE.length - 1
   const apresJour = {}
   for (const j of JOURS_ORDRE) {
     const i = s[j]
     if (i == null || !Number.isFinite(i)) continue
-    apresJour[j] = NIVEAUX_ORDRE[Math.max(0, Math.min(dernier, i + c + sens))]
+    apresJour[j] = NIVEAUX_ORDRE[Math.max(0, Math.min(dernier, i + cible))]
   }
   // ⚠ LA SECONDE BORNE REFUSE QUAND LE PAS NE CHANGERAIT RIEN — et seulement
   // la. La spec (§0 bis.2) demande trois bornes : Base, Exceptionnel, et
@@ -211,9 +225,9 @@ export function apresLePas (opts, sens, cransActuels, cransMax) {
       const quoi = a.length === 1 ? 'la semaine'
         : (pluriel ? `les ${et(bute.jours.map(j => PLURIEL[j]))}` : 'le week-end')
       return { possible: false,
-        raison: `${quoi} ${pluriel ? 'sont' : 'est'} déjà à ${avecChiffre(bute.niveau)}`, apres: null }
+        raison: `${quoi} ${pluriel ? 'sont' : 'est'} déjà à ${avecChiffre(bute.niveau)}`, apres: null, pas: 0 }
     }
   }
   const p = libellePastille(apresJour)
-  return { possible: true, raison: null, apres: p ? p.principal : null }
+  return { possible: true, raison: null, apres: p ? p.principal : null, pas: cible - c }
 }

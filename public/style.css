@@ -230,12 +230,13 @@ body.police-v5 select[id$="-bien"] {
      écran, qui la connait mieux qu'une feuille partagée. */
 }
 body.police-v5 select[id$="-bien"]:hover { background: var(--bg2); }
-/* ⚠ PAS DE REGLE DE FOCUS ICI, ET C EST DELIBERE. J y avais ecrit
-   `outline: 2px solid var(--blue)` — or `--blue` N EXISTE PAS sur cette
-   cible : il est pose par le lot `yf-ecran-periodes`, qui est dans `staging`
-   et pas dans `main`. Un `var()` sans repli rend la declaration invalide au
-   calcul : l anneau de focus aurait disparu EN SILENCE, et rien ne l aurait
-   dit. On laisse donc celui du navigateur, qui est toujours la. */
+/* ⚠ PAS DE REGLE DE FOCUS ICI. Elle avait ete retiree quand `--blue`
+   n'existait pas sur l'arbre du socle (un `var()` sans repli aurait fait
+   disparaitre l'anneau EN SILENCE). Depuis que la chaine porte
+   `yf-ecran-periodes`, `--blue` est defini plus haut dans ce fichier : la
+   regle POURRAIT revenir — mais ce serait un changement visible, a recetter.
+   D'ici la, l'anneau du navigateur, qui est toujours la (review de la chaine,
+   8 novembre 2026). */
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

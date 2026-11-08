@@ -2288,9 +2288,10 @@
   // donc la pastille affiche le niveau ORDINAIRE du bien ; null est l'absence
   // de mesure, donc « Automatique », sans niveau invente.
   //
-  // Le serveur l'applique deja : niveaux_jour vaut `indice + crans`, donc
-  // `indice + 0` pour une periode sans effet, et `null` quand crans est null.
-  // Ici on ne fait que le DIRE.
+  // Le serveur l'applique deja, par les QUATRE branches du moteur (mesure
+  // propre du couple segment|jour, modele en crans, repli, null) — et non plus
+  // par le seul `indice + crans` qu'ecrivait ce commentaire. Ici on ne fait
+  // que le DIRE.
   const texteNiveau = (e, coupe, motif) => {
     if (coupe) return { html: 'Pas prise en compte', titre: null, classe: '' }
     const p = libellePastille(e.niveaux_jour)
@@ -2377,6 +2378,15 @@
     pas_d_historique_propre: 'pas encore d’historique sur ce type de période',
     date_desactivee: 'vous n’en tenez pas compte'
   }
+  // La portee d'un reglage pose sur une cle LARGE (`clesDeReglage`,
+  // lib/yield/reglages-segment.js : la cle fine d'abord, puis le segment).
+  const ORIGINE_LARGE = {
+    vacances_zone_du_bien: 'toutes les vacances de votre zone',
+    vacances_autre_zone: 'toutes les vacances des autres zones',
+    ferie: 'tous les jours fériés',
+    pont: 'tous les ponts',
+    week_end_prolonge: 'tous les week-ends prolongés'
+  }
   const ORIGINE_MOT = {
     officiel: 'vacances et jours fériés',
     calendrier: 'fêtes du calendrier',
@@ -2454,7 +2464,10 @@
         // ⚠ LA BANDE PORTE LE NIVEAU, PAS UN EFFET. Une periode sans niveau
         // connu garde la classe `qpb-bande--auto` : un contour, pas une teinte.
         const p = libellePastille(e.niveaux_jour)
-        const dit = p ? `${p.principal}${p.complement ? ` · ${p.complement}` : ''}` : 'Automatique'
+        // ⚠ Une periode COUPEE se dit comme sur sa ligne : « Pas prise en
+        // compte », pas « Automatique » (constat de la review de la chaine).
+        const dit = e.actif === false ? 'Pas prise en compte'
+          : (p ? `${p.principal}${p.complement ? ` · ${p.complement}` : ''}` : 'Automatique')
         const cl = classeDeNiveau(e)
         return `<button type="button" class="qpb-bande ${cl || 'qpb-bande--auto'}" data-vers="${i}"
           title="${ech(`${n} — ${dit}`)}" aria-label="${ech(`${n}, ${dit}`)}"></button>`
@@ -2622,6 +2635,13 @@
     // bouton « remettre en automatique » sur une ligne deja automatique ne
     // ferait rien — un bouton qui ne fait rien est un bouton qui ment.
     const regleALaMain = e.crans_ajustes != null
+    // Les periodes de NOMS DIFFERENTS qui partagent la meme cle de reglage :
+    // un cran pose sur l'une vaut pour toutes.
+    const autresNoms = new Set(((ev && ev.calendrier) || [])
+      .filter(x => x && x.cle === e.cle && nomAffiche(x) !== nomAffiche(e)).map(x => nomAffiche(x)))
+    const partage = autresNoms.size === 0 ? null
+      : (e.cle === 'week_end_prolonge' ? 'tous les week-ends prolongés'
+        : `${autresNoms.size + 1} périodes réglées ensemble`)
     // Le niveau de la periode, mis en mots une seule fois pour la ligne.
     const niv = texteNiveau(e, coupe, motif)
 
@@ -2644,20 +2664,40 @@
       // AFFICHES : ceux-ci sont deja ecretes par l'echelle, et le clic ecrete
       // les CRANS. Refaire le pas sur l'affichage promettait un resultat faux.
       const r = apresLePas({ niveauxJour: e.niveaux_jour, structure: e.structure_jour,
-        crans: c, cransMax: max }, sens)
+        crans: c, cransMax: max, pose: regleALaMain }, sens)
       const verbe = sens > 0 ? 'Monter' : 'Baisser'
+      // ⚠ LE PAS REEL, pas « un cran » par principe : une mesure du moteur
+      // au-dela de l'amplitude se ramene a la borne en un seul clic.
+      const n = Math.abs(r.pas || 1)
+      const combien = n > 1 ? `de ${n} crans` : 'd’un cran'
+      // ⚠ UN REGLAGE PARTAGE SE DIT (constat de la review de la chaine) : les
+      // week-ends prolonges n'ont qu'UNE cle de reglage — ▲ sur « Week-end du
+      // 11 novembre » deplace aussi Paques, l'Ascension… L'etiquette
+      // nominative le cachait.
+      const sujet = partage ? `${partage} — ${nom}` : nom
       const etiquette = r.possible
-        ? (r.apres ? `${verbe} d’un cran : ${nom} passe à ${r.apres}` : `${verbe} d’un cran : ${nom}`)
+        ? (r.apres ? `${verbe} ${combien} : ${sujet} passe à ${r.apres}` : `${verbe} ${combien} : ${sujet}`)
         : `${verbe} d’un cran, impossible : ${r.raison}`
       return `<button type="button" class="qpb-pas" data-ev-pas="${sens}" data-segment="${ech(e.cle)}"
         data-actuel="${c == null ? 0 : c}"${r.possible ? '' : ' disabled'}
         title="${ech(etiquette)}" aria-label="${ech(etiquette)}">${sens > 0 ? '▲' : '▼'}</button>`
     }
-    const gestes = lecture ? '' : `<div class="qpb-regl">
+    // ⚠ UNE PERIODE COUPEE N'A PAS DE FLECHES (constat de la review de la
+    // chaine) : un cran pose sur une ligne `actif=false` etait stocke sans se
+    // voir, puis s'appliquait sans prevenir a la reactivation.
+    // ⚠ ET « REMETTRE EN AUTOMATIQUE » VISE LA CLE QUI PORTE LE REGLAGE
+    // (`cle_reglage`), pas la cle fine : un reglage pose sur toutes les
+    // vacances ne se retirait pas en visant celles de Noel, et le bouton
+    // restait la sans rien faire.
+    const cleAuto = e.cle_reglage || e.cle
+    const portee = cleAuto !== e.cle
+      ? ` title="${ech(`Le réglage est posé sur ${ORIGINE_LARGE[cleAuto] || 'toutes les périodes de ce type'} : il sera retiré pour toutes.`)}"`
+      : ''
+    const gestes = lecture ? '' : `${coupe ? '' : `<div class="qpb-regl">
         ${pas(-1)}
         ${pas(1)}
-      </div>
-      ${regleALaMain ? `<button type="button" class="qpb-auto" data-ev-auto="${ech(e.cle)}">remettre en automatique</button>` : ''}`
+      </div>`}
+      ${regleALaMain ? `<button type="button" class="qpb-auto" data-ev-auto="${ech(cleAuto)}"${portee}>remettre en automatique</button>` : ''}`
     const menu = lecture || !((e.droits && e.droits.desactivable) || (e.droits && e.droits.supprimable && e.id)) ? '' : `<details class="qpb-plus">
         <summary aria-label="Autres gestes sur ${ech(nom)}">⋯</summary>
         <div class="qpb-plus-liste">

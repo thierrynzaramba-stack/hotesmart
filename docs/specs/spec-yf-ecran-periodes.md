@@ -519,6 +519,30 @@ quand même**, l'écart noté ici. On ne touche pas au moteur (décision du
 pose le NIVEAU de chaque nuit (lot 2, `yield_reglages_position`, en production
 depuis le 8 novembre), plus aucun cran.
 
+### 0 quater.1 La review de toute la chaîne — 8 novembre 2026
+
+Demandée par le chef de file : les rapports des reviews faites le long de la
+chaîne étaient perdus. **Une** review, sur la plage
+`dde1004ff1211a4a813a3ed1b471d36d92018fcf..93f3f16ad7b13643f8217aba9cab653130ac652a`
+(main de production → la chaîne après merge de ce main), arbre
+`/home/claude/hotesmart`, branche `yf-periodes-niveaux`. Fichiers cités :
+`shared/yield-niveau-periode.js`, `apps/yield/prix.html`,
+`lib/yield/calendrier-pilotage.js`, `api/yield-evenements.js`,
+`tests/yf-ecran-periodes.test.js`, `public/tokens.css`, `public/style.css` —
+tous dans le diff de la plage. **Aucun constat de sécurité** (garde, en-têtes,
+échappement de la pop-up et maquette hors déploiement vérifiés).
+
+| # | constat | suite |
+|---|---|---|
+| 1 | une mesure au-delà de ±2 : la flèche annonçait « d'un cran » un pas de deux, et ▲ refusait « réglage au maximum » sans réglage posé | **corrigé** : `apresLePas` part de la cible du clic, rend `pas`, l'étiquette dit « de 2 crans » ; tests à +4 et −4 |
+| 2 | ▲ peut faire **baisser** toute une période affichée « Automatique » (dates commerciales sans historique : le moteur les met au niveau de leur nuit sous-jacente, un cran posé repart de la structure ordinaire), et le point de départ ne se voit pas | **soumis à Thierry** (décision produit) |
+| 3 | un seul réglage pour tous les week-ends prolongés, l'étiquette n'en nommait qu'un | **corrigé** : « tous les week-ends prolongés — … passe à … » ; plus largement, des périodes de noms différents sur une même clé le disent |
+| 4 | « remettre en automatique » visait la clé fine, pas celle qui porte le réglage | **corrigé** : `cle_reglage`, et la portée en infobulle quand la clé est large |
+| 5 | une période coupée gardait ses flèches (cran stocké invisible) ; la frise disait « Automatique » | **corrigé** : pas de flèches, la frise dit « Pas prise en compte » |
+| 6 | la parité pastille / moteur n'est tenue que par des regex sur le texte du code | **dette** : un test qui exécute `suggerer` sur les mêmes nuits et compare au niveau de départ quand un cran est posé, sur le modèle de `scripts/verifier-parite-prix.js`. Le lot 4 retire les crans de l'écran : le test y perd son objet |
+| 7 | `public/tokens.css` servi en production sans être chargé, et périmé | **déplacé** en `docs/charte/tokens.css` (hors déploiement), ses deux lignes périmées corrigées |
+| 8 | deux commentaires faux (`--blue`, `indice + crans`) | **corrigés** |
+
 ## 1. Pourquoi c'est illisible — mesuré dans le code, pas supposé
 
 | constat | mesure |
