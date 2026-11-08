@@ -110,9 +110,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q21 — La commission de Booking.com.** Tranchée, voir ci-dessous.
 - **Q4 — La validation et les totaux.** Tranchée, voir ci-dessous.
 - **Q5 — Les catégories.** Tranchée, voir ci-dessous.
-- **Q6 — L'adresse e-mail.** Une par **compte** (l'entité est proposée d'après
-  le destinataire lu sur la facture, nom ou SIRET) ou une par **entité** ?
-  *Proposition* : une par compte.
+- **Q6 — L'adresse e-mail.** Tranchée, voir ci-dessous.
 - **Q7 — Qui peut écrire à cette adresse.** Seulement l'hôte (transfert), ou
   aussi un fournisseur directement ? *Proposition* : tout expéditeur, puisque
   l'adresse est signée (non devinable) et que tout arrive « à vérifier ».
@@ -212,6 +210,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   (comptable, conciergerie) ; commissions des plateformes ; frais bancaires ;
   autre. **À faire valider par un comptable** : la frontière entretien /
   travaux (une immobilisation s'amortit).
+- **Q6 (8 nov. 2026, 22 h 33) : d'accord, une adresse par compte.**
+  L'entité est proposée d'après le destinataire lu sur la facture (SIRET,
+  puis nom, parmi les entités non archivées) ; si ce n'est pas clair, le
+  champ reste vide et l'hôte choisit.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
