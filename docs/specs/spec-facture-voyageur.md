@@ -1,10 +1,10 @@
 # Spec de lot — La facture du voyageur, émise par l'hôte à sa demande
 
 Demande de Thierry du 8 novembre 2026 (fil « facturation » du Projet).
-**Statut : questions produit TRANCHÉES par Thierry le 8 novembre 2026 (§4) ;
-relue par un sous-agent le même soir (25 constats, intégrés — §10). Six
-questions nées de la relecture attendent Thierry (§4 bis). Aucun code.**
-Restent avant de coder : ces six réponses, les prérequis du §7 et le go de
+**Statut : TOUTES les questions produit TRANCHÉES par Thierry le 8 novembre
+2026 (§4, puis §4 bis après la relecture) ; spec relue par un sous-agent
+(25 constats) et revérifiée côté sécurité (3 constats), tous intégrés (§10).
+Aucun code.** Restent avant de coder : les prérequis du §7 et le go de
 Thierry, étape par étape.
 
 Hors sujet : la facturation de l'abonnement HôteSmart (Stripe, `lib/billing.js`).
@@ -35,8 +35,8 @@ confirme le total après le séjour, et la facture lui parvient par lien.
    la réservation n'est pas annulée, HôteSmart notifie l'hôte, une seule fois :
    **« Votre facture est presque prête »**, en précisant que **le total payé
    peut comporter une erreur à cause de la taxe de séjour, et qu'il doit être
-   vérifié** (Q8 bis). Puis un rappel par jour tant qu'il n'a pas confirmé
-   (fin des rappels : §4 bis, P6). Formulaire rempli après ce délai : la
+   vérifié** (Q8 bis). Puis un rappel par jour, **pendant 7 jours au plus**
+   (P6) ; ensuite la facture reste « à confirmer » sur la fiche. Formulaire rempli après ce délai : la
    notification part au passage suivant du cron.
 4. **L'hôte vérifie les deux montants — Séjour et Taxe de séjour — et les
    confirme ou les corrige** ; le total en est la somme (§5.3). Si la taxe
@@ -193,6 +193,10 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   parti. (2) Langue inconnue ou autre que fr/en/es : **anglais**.
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
+  → **Réponse de Thierry (8 nov. 2026, 22 h 09) : A.** Les rappels
+  s'arrêtent au bout de **7 jours** ; la facture reste ensuite « à
+  confirmer », bien visible sur la fiche, et l'hôte la confirme quand il
+  veut.
 
 ## 5. Données
 
@@ -371,7 +375,8 @@ devient une facture à l'émission.
 - **Notification** : une seule, au passage `formulaire_rempli → a_confirmer`
   (conditionnel). **Rappel** : une fois par jour, la ligne étant réservée
   avant l'envoi (`dernier_rappel_le` posé conditionnellement) — deux passes ne
-  rappellent jamais deux fois. Fin : P6.
+  rappellent jamais deux fois. **7 rappels au plus** (P6), comptés en base ;
+  au-delà, la passe ne relit plus la demande pour la rappeler.
 - Elle **notifie, elle n'émet jamais** : seule la confirmation de l'hôte émet.
 - `api/cron.js` se régénère en fichier complet ; la passe entre dans le coût
   du cron (carte 20 du diagnostic).
@@ -394,7 +399,6 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
 ## 7. Découpage
 
 **Prérequis, avant l'étape qui en dépend :**
-- **Les réponses P1 à P6** (§4 bis) — avant l'étape 2.
 - **Les mentions légales** de la facture (actuelles et nouvelles, par régime
   de TVA, pour une société) **validées par un comptable** — avant l'étape 3.
 - **Les textes** « Votre facture est presque prête », « Votre facture est
