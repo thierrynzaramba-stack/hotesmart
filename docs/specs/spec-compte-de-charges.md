@@ -1,8 +1,10 @@
 # Spec de chantier — Le compte de charges : les factures reçues par l'hôte
 
 Demande de Thierry du 8 novembre 2026 (fil « compte de charges » du Projet).
-**Statut : étape 0, proposition. Aucun code.** Les questions du §4 sont à
-trancher par Thierry, une par une ; chaque réponse est inscrite ici, datée.
+**Statut : étape 0 close le 8 novembre 2026 — les 22 questions du §4 sont
+tranchées par Thierry, chaque réponse inscrite et datée. Aucun code.** Ce qui
+reste « *proposition* » dans le texte est un choix technique non contredit,
+ou une précision soumise à Thierry avec la décision qu'elle accompagne.
 
 Ce chantier parle des factures que l'hôte **reçoit** : artisans, énergie,
 internet, assurance, linge, consommables… Hors sujet : la facture que l'hôte
@@ -100,10 +102,7 @@ précision **mesurée** à l'étape 5 ne suffit pas.
 
 Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 
-- **Q1 — Un bien précis.** Quand une entité porte plusieurs biens, une facture
-  peut-elle **aussi** être affectée à un bien (le plombier de La bulle) ?
-  *Proposition* : oui, facultatif ; sans bien, c'est une charge de l'entité.
-  C'est ce qui permettra plus tard la rentabilité par bien. *(posée le 8 nov.)*
+- **Q1 — Un bien précis.** Tranchée, voir ci-dessous.
 - **Q2 — Le suivi du paiement.** Tranchée, voir ci-dessous.
 - **Q3 — Les charges déjà connues d'HôteSmart.** Tranchée, voir ci-dessous
   et §7 bis.
@@ -124,12 +123,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q16 — Révoquer l'adresse.** Tranchée, voir ci-dessous.
 - **Q17 — La TVA récupérable.** Tranchée, voir ci-dessous.
 - **Q18 — Un bien hors de l'entité.** Tranchée, voir ci-dessous.
-- **Q19 — Les factures sans pièce jointe** (énergie, télécoms : facture dans
-  le texte de l'e-mail ou derrière un lien). *Proposition* : pas lues en V1 ;
-  l'e-mail apparaît « sans facture lisible » avec son texte, et l'hôte ajoute
-  le PDF à la main. Ce texte affiché sert aussi à lire l'e-mail de
-  confirmation qu'une messagerie (Gmail par exemple) envoie à l'adresse cible
-  avant d'activer un transfert automatique.
+- **Q19 — Les factures sans pièce jointe.** Tranchée, voir ci-dessous.
 - **Q20 — Un compte sans entité.** Tranchée, voir ci-dessous.
 
 ### Réponses de Thierry
@@ -247,6 +241,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q18 (8 nov. 2026, 23 h 05) : non.** Une facture ne peut pas être
   affectée à un bien qui ne relève pas de l'entité choisie (l'entité du bien
   se lit par `entiteDuBien`). Le serveur refuse.
+- **Q19 (8 nov. 2026, 23 h 07) : d'accord.** Une facture dans le texte d'un
+  e-mail ou derrière un lien n'est pas lue en V1 : l'e-mail apparaît « sans
+  facture lisible » avec son expéditeur, son sujet et son texte, et l'hôte
+  ajoute le PDF à la main. Ce texte sert aussi à lire l'e-mail de
+  confirmation d'un transfert automatique (Gmail par exemple).
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
