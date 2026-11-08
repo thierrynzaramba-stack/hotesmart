@@ -113,13 +113,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q6 — L'adresse e-mail.** Tranchée, voir ci-dessous.
 - **Q7 — Qui peut écrire à cette adresse.** Tranchée, voir ci-dessous.
 - **Q8 — Le domaine de l'adresse.** Tranchée, voir ci-dessous.
-- **Q9 — Les droits.** Titulaire seul en V1, ou un domaine neuf `charges`,
-  délégable (un gestionnaire saisit les factures) ? *Proposition* : titulaire
-  seul en V1 (D1 ne demande pas plus), tenu par une garde explicite
-  `estTitulaireDuCompte` sur les deux endpoints, consultation des
-  justificatifs comprise. **Pas** le domaine `facturation` : sa lecture se
-  délègue, et un hôte qui donnerait la lecture de l'abonnement ouvrirait
-  toutes ses factures sans le savoir.
+- **Q9 — Les droits.** Tranchée, voir ci-dessous.
 - **Q10 — Où vit l'écran.** *Proposition* : une page `/charges`, entrée du
   menu ≡. Pas de sixième onglet de navigation.
 - **Q11 — Supprimer.** *Proposition* : une facture « à vérifier » se supprime
@@ -216,6 +210,12 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q8 (8 nov. 2026, 22 h 36) : d'accord, `reply.hotesmart.fr` en V1.**
   Aucun geste DNS. Un sous-domaine dédié (`factures.hotesmart.fr` : MX chez
   IONOS, domaine authentifié chez Brevo, webhook) viendra plus tard.
+- **Q9 (8 nov. 2026, 22 h 37) : d'accord, titulaire seul en V1.** Aucun
+  membre, même en lecture. Garde serveur explicite `estTitulaireDuCompte` sur
+  `/api/charges` et `/api/ecran/charges`, consultation des justificatifs
+  comprise (refus en 403, pas un bouton masqué). **Pas** le domaine
+  `facturation`, dont la lecture se délègue. Un domaine `charges` délégable
+  viendra plus tard s'il est demandé.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
