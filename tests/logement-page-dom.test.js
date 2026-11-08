@@ -411,9 +411,16 @@ test('LE TEST QUI COMPTE : la page écrit PAR LE CLIENT D API, jamais par un app
   // Et les écritures qu'elle fait sont NOMMÉES : si une sixième apparaît, ce
   // test la fait lire à quelqu'un.
   const appels = [...script.matchAll(/api\.(\w+)\.(\w+)\s*\(/g)].map(m => `${m[1]}.${m[2]}`)
+  // ⚠ TROIS APPELS DE PLUS DEPUIS LE LOT « ARCHIVER UN BIEN » (1er novembre
+  // 2026) : le comptage de confirmation, l'archivage et la réactivation. Ils
+  // passent tous par `shared/api-client.js`, et l'archivage a son endpoint
+  // propre — writer UNIQUE des colonnes d'archive. Deux écrans qui écriraient
+  // `archive_le` divergeraient au premier correctif, comme
+  // `public_tokens.property_ids` l'a fait.
   const connus = new Set(['logement.fiche', 'logement.compterSuppression',
+    'logement.compterArchivage', 'logement.archiver', 'logement.reactiver',
     'bien.modifier', 'bien.supprimer', 'bien.pause', 'bien.photo', 'calendar.fullsync'])
-  for (const a of appels) assert.ok(connus.has(a), `appel non prévu par l'étape 3 : ${a}`)
+  for (const a of appels) assert.ok(connus.has(a), `appel non prévu : ${a}`)
 })
 
 test('aucun hexa et aucun emoji dans la page : jetons de theme.css et sprite', () => {
@@ -1208,6 +1215,6 @@ test('le titre d onglet suit le changement de langue', () => {
     assert.match(html, /poserTitre\s*\(\)/, `${f} doit poser le titre au chargement aussi`)
   }
   // Et l événement existe bien : sinon l écouteur serait du code dormant.
-  const i18n = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/i18n.js'), 'utf8')
+  const i18n = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/i18n.modele.js'), 'utf8')
   assert.match(i18n, /dispatchEvent\(new CustomEvent\('i18n:changed'/)
 })

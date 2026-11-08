@@ -18,13 +18,65 @@
 // un gain nul.
 
 const { spawn } = require('node:child_process')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 
-const CHROME = '/home/thierry/.cache/ms-playwright/chromium_headless_shell-1243'
-  + '/chrome-headless-shell-linux64/chrome-headless-shell'
-const LIBS = '/home/thierry/.cache/hotesmart-banc/libs/usr/lib/x86_64-linux-gnu'
+// ⚠ LE NAVIGATEUR DE BANC SE TROUVE, IL N'EST PLUS ECRIT EN DUR — ET C'EST LA
+// SEULE COPIE DU DEPOT (5 novembre 2026, passage des sessions dans le cloud,
+// decision de Thierry). Le chemin `/home/thierry/.cache/ms-playwright/...`
+// etait recopie dans TROIS fichiers (ce module, `courbe-bande-rendu` et
+// `ibulle-rendu`) : dans le cloud, les 14 tests de banc echouaient tous avec
+// « navigateur de banc absent », et la regle « un seul rouge = on s'arrete »
+// n'y pouvait plus rien dire. Les deux autres bancs importent maintenant d'ici.
+//
+// ⚠ LA REVISION RESTE EPINGLEE (1243), ET C'EST VOULU : ces bancs mesurent un
+// RENDU (cascade CSS, position des bulles, geste reel). Un autre Chrome peut
+// calculer autrement ; on cherche donc le MEME binaire a plusieurs endroits,
+// on n'accepte pas « un Chrome quelconque ».
+//   1. `$PLAYWRIGHT_BROWSERS_PATH` — le cloud de Claude Code l'installe dans
+//      `/opt/pw-browsers`, revision 1243 comprise ;
+//   2. `~/.cache/ms-playwright` — l'emplacement par defaut de Playwright,
+//      celui du PC de Thierry (`/home/thierry/...`).
+const REVISION = 'chromium_headless_shell-1243'
+const BINAIRE = path.join('chrome-headless-shell-linux64', 'chrome-headless-shell')
+
+/** Les emplacements essayes, dans l'ordre. Injectable pour les tests. */
+function cheminsCandidats (env = process.env, maison = os.homedir()) {
+  const c = []
+  // Une valeur relative (Playwright accepte `0`, « a cote du paquet ») ne
+  // designe pas un dossier de navigateurs : on l'ignore.
+  const pw = env.PLAYWRIGHT_BROWSERS_PATH
+  if (pw && path.isAbsolute(pw)) c.push(path.join(pw, REVISION, BINAIRE))
+  c.push(path.join(maison, '.cache', 'ms-playwright', REVISION, BINAIRE))
+  return [...new Set(c)]
+}
+
+/** Le premier candidat present ; a defaut, le premier essaye (pour le message). */
+function resoudreChrome (env = process.env, maison = os.homedir(), existe = fs.existsSync) {
+  const c = cheminsCandidats(env, maison)
+  return c.find(f => existe(f)) || c[0]
+}
+
+const CHROME = resoudreChrome()
+// Les bibliotheques systeme qui manquaient sur le PC de Thierry (WSL), posees
+// hors depot. Le cloud n'en a pas besoin : on ne touche a l'environnement que
+// si le dossier existe.
+const LIBS = path.join(os.homedir(), '.cache', 'hotesmart-banc', 'libs', 'usr', 'lib', 'x86_64-linux-gnu')
+
+/** L'environnement d'un lancement du navigateur de banc. Injectable pour les tests. */
+function envNavigateur (env = process.env, existe = fs.existsSync, libs = LIBS) {
+  return existe(libs) ? { ...env, LD_LIBRARY_PATH: libs } : { ...env }
+}
 
 /** Le navigateur de banc est-il installe ? Un test ne doit JAMAIS se taire. */
-function navigateurPresent () { return require('node:fs').existsSync(CHROME) }
+function navigateurPresent () { return fs.existsSync(CHROME) }
+
+/** Le message d'un banc sans navigateur : il dit OU on a cherche. */
+function messageAbsent (role) {
+  return `le navigateur de banc est absent (cherche : ${cheminsCandidats().join(' ; ')}) : `
+    + `ce test ne peut pas se taire, il est le seul ${role}`
+}
 
 /**
  * Ouvre une page dans un vrai navigateur et rend un pilote.
@@ -42,13 +94,12 @@ async function ouvrir (fichier, o = {}) {
   // la suite complete, ou il lisait `inline-block` — il mesurait la fenetre de
   // 1 280 px du test precedent. Un banc dont le resultat depend de ses voisins
   // ne mesure rien.
-  const profil = require('node:fs').mkdtempSync(
-    require('node:path').join(require('node:os').tmpdir(), 'cdp-profil-'))
+  const profil = fs.mkdtempSync(path.join(os.tmpdir(), 'cdp-profil-'))
   const proc = spawn(CHROME, ['--headless', '--no-sandbox', '--disable-gpu',
     '--allow-file-access-from-files', '--remote-debugging-port=0',
     `--user-data-dir=${profil}`, '--no-first-run', '--no-default-browser-check',
     `--window-size=${largeur},${hauteur}`, `file://${fichier}`],
-  { env: { ...process.env, LD_LIBRARY_PATH: LIBS }, stdio: ['ignore', 'pipe', 'pipe'] })
+  { env: envNavigateur(), stdio: ['ignore', 'pipe', 'pipe'] })
 
   // Le port est annonce sur la sortie d'erreur, et il est TIRE AU SORT
   // (`--remote-debugging-port=0`) : deux tests qui tournent en parallele ne
@@ -62,7 +113,7 @@ async function ouvrir (fichier, o = {}) {
   // absent : il arrete la mesure au lieu de la rendre.
   const tuer = () => {
     try { proc.kill() } catch { /* deja parti */ }
-    try { require('node:fs').rmSync(profil, { recursive: true, force: true }) } catch { /* deja parti */ }
+    try { fs.rmSync(profil, { recursive: true, force: true }) } catch { /* deja parti */ }
   }
   let ouverture = false
   try {
@@ -107,11 +158,75 @@ async function ouvrir (fichier, o = {}) {
 
   await envoyer('Page.enable')
   await envoyer('Runtime.enable')
+
+  // ⚠ ON NE REND PAS LA MAIN AVANT QUE LE BON DOCUMENT SOIT LA.
+  // `Page.enable` ne dit rien du chargement : il peut rester `about:blank` le
+  // temps que la navigation vers le fichier se valide. Un test qui evalue a cet
+  // instant lit une page vide, ou perd son contexte en pleine lecture.
+  //
+  // ⚠ ET ON ATTEND L'ETAT, PAS UNE DUREE : l'URL du document est celle
+  // demandee ET `readyState` n'est plus `loading`. Sur une machine libre c'est
+  // immediat ; sur une machine chargee l'attente s'allonge d'elle-meme. Le
+  // plafond de 15 s est la borne au dela de laquelle on ECHOUE, pas un delai
+  // qu'on subit.
+  {
+    const vise = `file://${fichier}`
+    const limite = Date.now() + 15000
+    for (;;) {
+      let pret = false
+      try {
+        pret = await envoyer('Runtime.evaluate', {
+          expression: `document.readyState !== 'loading' && location.href === ${JSON.stringify(vise)}`,
+          returnByValue: true
+        }).then((r) => r.result.value === true)
+      } catch (e) {
+        // Le contexte se detruit precisement parce que le document arrive :
+        // c'est le cas qu'on attend, pas une panne.
+        if (!/Execution context was destroyed/.test(e.message)) throw e
+      }
+      if (pret) break
+      if (Date.now() > limite) {
+        throw new Error(`le navigateur n a pas valide ${vise} en 15 s`)
+      }
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  }
+
+  // ⚠ CETTE LIGNE EST ICI, ET PAS AVANT LE BLOC CI-DESSUS — releve en review.
+  // Le `finally` de cette fonction ne tue le navigateur que `if (!ouverture)` :
+  // posee plus haut, elle faisait FUIR le processus des que l'attente du
+  // document levait (expiration, ou erreur autre qu'un contexte detruit). Et un
+  // `ChildProcess` dont la sortie est en tube garde la boucle d'evenements
+  // referencee : le fichier de test ne rend jamais la main et la suite entiere
+  // reste SUSPENDUE. C'est le constat 5 de la revue de fbb6baee, rouvert par
+  // mon correctif — et sur le chemin le plus probable, la machine chargee.
+  // Transformer un rouge intermittent en suspension intermittente serait pire
+  // que le defaut d'origine.
   ouverture = true
 
-  /** Evalue une expression dans la page et rend sa valeur. */
+  /**
+   * Evalue une expression dans la page et rend sa valeur.
+   *
+   * ⚠ ET ELLE REJOUE UNE FOIS SUR UN CONTEXTE DETRUIT. Chrome est lance avec
+   * `file://...` EN LIGNE DE COMMANDE : le chargement commence pendant son
+   * demarrage, et le contexte dans lequel on evalue peut etre celui d'avant la
+   * validation du document. CDP rend alors « Execution context was destroyed »
+   * — une erreur de TUYAU, pas une mesure. Mesure du 31 octobre 2026 : une
+   * passe sur dix de la suite complete, a 566 ms, avant toute interaction, et
+   * le test accusait l'interface.
+   *
+   * ⚠ UN SEUL REJEU, ET C'EST VOULU. Si le contexte se detruit DEUX fois, ce
+   * n'est plus le demarrage : c'est la page qui navigue ou le rendu qui meurt,
+   * et il faut le voir. Rejouer en boucle transformerait une panne en attente.
+   */
   const lire = async (expression) => {
-    const r = await envoyer('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+    let r
+    try {
+      r = await envoyer('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+    } catch (e) {
+      if (!/Execution context was destroyed/.test(e.message)) throw e
+      r = await envoyer('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+    }
     if (r.exceptionDetails) {
       throw new Error(`la page a leve : ${r.exceptionDetails.exception
         ? r.exceptionDetails.exception.description : r.exceptionDetails.text}`)
@@ -157,11 +272,15 @@ async function ouvrir (fichier, o = {}) {
    * telephone lisait un rail vide (`pret: false`, 0 carte) et accusait le CSS.
    */
   const attendre = async (expression, o = {}) => {
-    const limite = Date.now() + (o.maxMs || 5000)
+    // ⚠ `??` ET NON `||`, MEME PIEGE QUE `pose` (constat 2 de la review) :
+    // `0 || 5000` vaut 5000, donc un appelant qui demanderait « pas d'attente »
+    // en recevrait cinq secondes, en silence. Personne ne passe 0 aujourd'hui ;
+    // on ferme la porte avant qu'elle serve.
+    const limite = Date.now() + (o.maxMs ?? 5000)
     for (;;) {
       if (await lire(`!!(${expression})`)) return true
       if (Date.now() > limite) {
-        throw new Error(`la condition « ${expression} » est restee fausse pendant ${o.maxMs || 5000} ms`)
+        throw new Error(`la condition « ${expression} » est restee fausse pendant ${o.maxMs ?? 5000} ms`)
       }
       await lire('new Promise(r => setTimeout(r, 50))')
     }
@@ -175,10 +294,17 @@ async function ouvrir (fichier, o = {}) {
    * et son symetrique serait un faux vert si la valeur de depart etait la
    * valeur attendue.
    */
+  // ⚠ LE MINIMUM SE LIT AVEC `??`, PAS AVEC `||` — releve en review, et le
+  // defaut etait complet : `0 || 400` vaut 400, donc un appelant qui demandait
+  // « aucun minimum » recevait les 400 ms quand meme, EN SILENCE, pendant que
+  // son propre commentaire affirmait « plus aucun minimum ». Une affirmation
+  // qui ne rougit jamais. Le commentaire ci-dessous vit HORS du gabarit :
+  // l'ecrire dedans y aurait mis des backticks, qui cassent la chaine envoyee
+  // a la page (mesure : `node --check` refuse le fichier).
   const pose = (expression, o = {}) => lire(`new Promise((res) => {
     const lu = () => (${expression})
     const debut = Date.now()
-    const minimum = ${o.minMs || 400}
+    const minimum = ${o.minMs ?? 400}
     let dernier = null, stable = 0
     const t = setInterval(() => {
       const x = lu()
@@ -200,4 +326,7 @@ async function ouvrir (fichier, o = {}) {
   }
 }
 
-module.exports = { ouvrir, navigateurPresent, CHROME }
+module.exports = {
+  ouvrir, navigateurPresent, CHROME, LIBS, envNavigateur, messageAbsent,
+  cheminsCandidats, resoudreChrome, REVISION
+}

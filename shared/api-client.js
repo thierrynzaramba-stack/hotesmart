@@ -110,7 +110,17 @@ export const api = {
     // sur le bien, comme le DELETE lui-meme : ces nombres sont ceux d'une
     // action, pas d'une lecture.
     compterSuppression: (id) =>
-      apiCall(`logement?id=${encodeURIComponent(id)}&compter=suppression`, 'GET')
+      apiCall(`logement?id=${encodeURIComponent(id)}&compter=suppression`, 'GET'),
+    // Ce que l'archivage va faire, AVANT de le faire : sejours a venir, taches
+    // en vol, pilote actif. Meme garde que l'archivage lui-meme.
+    compterArchivage: (id) =>
+      apiCall(`logement?id=${encodeURIComponent(id)}&compter=archivage`, 'GET'),
+    // ⚠ L'ARCHIVAGE A SON PROPRE ENDPOINT, et il est le writer UNIQUE des
+    // colonnes d'archive. Deux ecrans qui ecriraient `archive_le` divergeraient
+    // au premier correctif — c'est le defaut que ce depot a paye sur
+    // `public_tokens.property_ids`.
+    archiver: (id, motif) => apiCall('logement-archive', 'POST', { id, motif }),
+    reactiver: (id) => apiCall('logement-archive', 'POST', { id, action: 'reactiver' })
   },
   // Les ECRITURES de la fiche passent par les endpoints existants, inchanges.
   bien: {
@@ -260,6 +270,14 @@ export const api = {
     // lignes de PostgREST sans le dire.
     aUneConversation: (bookingId) =>
       apiCall(`messages?booking_id=${encodeURIComponent(bookingId)}`, 'GET')
+  },
+  // La base de connaissance V5 (lot 3) : UN endpoint d'ecran, qui peint tout
+  // l'ecran en GET et ecrit une entree a la fois en POST. La page telephone
+  // (/connaissance) passe par ici ; le volet de Messages, par l'`appel` de sa
+  // page — les deux visent le meme endpoint.
+  connaissance: {
+    lire: (params = '') => apiCall(`ecran/connaissance${params ? '?' + params : ''}`, 'GET'),
+    ecrire: (corps) => apiCall('ecran/connaissance', 'POST', corps)
   },
   reservationDirecte: {
     creer:   (payload)   => apiCall('reservation-directe', 'POST', payload),

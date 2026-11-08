@@ -97,6 +97,7 @@ function table (nom) {
     eq (c, v) { q.filtres[c] = v; return chaine },
     in (c, v) { q.filtres[c + '@in'] = v; return chaine },
     lt (c, v) { q.filtres[c + '<'] = v; return chaine },
+    limit () { q.limite = true; return chaine },
     update (m) { q.maj = m; return chaine },
     insert (r) {
       if (nom === 'write_locks') {
@@ -121,6 +122,15 @@ function table (nom) {
           if (q.filtres['key@in']) etat.liberations.push({ cles: q.filtres['key@in'], token: q.filtres.token })
         }
         return res({ error: null })
+      }
+      // La lecture PAR CLE de `estArchive` (lib/biens-vivants.js) : elle honore
+      // la cle composite, pour qu'un test ne passe pas sur un bien d'un autre.
+      if (nom === 'properties' && q.limite && !q.maj) {
+        if (etat.lectureArchiveEchoue) return res({ data: null, error: { message: 'panne' } })
+        const b = base.bien
+        const sienne = b && q.filtres.user_id === b.user_id &&
+          q.filtres.provider_property_id === String(b.provider_property_id)
+        return res({ data: sienne ? [b] : [], error: null })
       }
       if (q.maj && nom === 'booking_attempts') {
         if (etat.majEchoue) return res({ data: null, error: { message: 'panne' } })
@@ -150,6 +160,7 @@ function reinit (surT, surB) {
   etat.remboursements = []; etat.erreurRemboursement = null
   etat.incidents = []; etat.alarmes = []; etat.emails = []
   etat.liberations = []; etat.verrous = new Set(); etat.majEchoue = false
+  etat.lectureArchiveEchoue = false
 }
 
 // ─── Le succes ──────────────────────────────────────────────────────────────
@@ -536,4 +547,58 @@ test('l incident de REMBOURSEMENT porte aussi les faits', () => {
   const bloc = src.slice(src.indexOf("reportIncident('reservation_remboursee'"))
   assert.match(bloc.slice(0, 300), /faits\(t\)/,
     'l incident de remboursement doit porter dates, montant, voyageur, heure et code')
+})
+
+// ─── Un bien ARCHIVE entre le paiement et la creation ───────────────────────
+// Decision de Thierry (lot « filtre biens vivants ») : « la reservation se cree,
+// avec alerte fondateur ». Rien n'est bloque, tout est signale.
+const ARCHIVE = { archive_le: '2026-11-05T09:00:00Z' }
+const alertesArchive = () => etat.incidents.filter(i => i.type === 'reservation_sur_bien_archive')
+
+test('LE TEST QUI COMPTE : bien ARCHIVE apres le paiement — la reservation se CREE et le fondateur est alerte', async () => {
+  reinit(null, ARCHIVE)
+  const r = await C.creerDepuisTentative(supabase, TENTATIVE.id)
+  assert.equal(r.ok, true, 'la reservation doit se creer : le voyageur a paye avant l archivage')
+  assert.equal(base.tentative.status, 'booked')
+  assert.equal(etat.appelsCRS.length, 1)
+  assert.equal(etat.remboursements.length, 0, 'aucun remboursement : on ne bloque rien')
+  assert.equal(etat.emails.length, 1, 'le voyageur recoit sa confirmation')
+  assert.equal(etat.emails[0].sorte, 'confirmation')
+  const a = alertesArchive()
+  assert.equal(a.length, 1, 'le fondateur doit etre alerte une fois')
+  assert.equal(a[0].propertyId, 'prop-123')
+  assert.equal(a[0].propertyName, 'Le Nid')
+  assert.equal(a[0].threshold, undefined, 'seuil par defaut : l alerte PART, elle ne se contente pas d une trace')
+  assert.match(a[0].detail, /bk-999/, 'l alerte nomme la reservation creee')
+  assert.match(a[0].detail, /ana@exemple\.com/, 'l alerte porte les faits (voyageur, dates, montant, code)')
+  assert.match(a[0].detail, /ARCHIVE/)
+  assert.equal(etat.alarmes.length, 0, 'ce n est pas de l argent en suspens : pas d alarme brute')
+})
+
+test('bien VIVANT : aucune alerte « bien archive »', async () => {
+  reinit()
+  const r = await C.creerDepuisTentative(supabase, TENTATIVE.id)
+  assert.equal(r.ok, true)
+  assert.equal(alertesArchive().length, 0)
+})
+
+test("lecture de l'archive en PANNE : la reservation reste creee, rien ne leve", async () => {
+  // On est apres l'encaissement ET apres la creation chez le provider : une
+  // exception ici ferait croire a un echec alors que la reservation existe.
+  reinit(null, ARCHIVE)
+  etat.lectureArchiveEchoue = true
+  const r = await C.creerDepuisTentative(supabase, TENTATIVE.id)
+  assert.equal(r.ok, true)
+  assert.equal(r.bookingId, 'bk-999')
+  assert.equal(base.tentative.status, 'booked')
+  assert.equal(etat.remboursements.length, 0)
+  assert.equal(alertesArchive().length, 0)
+})
+
+test('un echec CERTAIN sur un bien archive garde son chemin : remboursement, pas d alerte « reservation creee »', async () => {
+  reinit(null, ARCHIVE)
+  etat.reponseCRS = { ok: false, status: 422, erreurs: { x: 'refus' } }
+  const r = await C.creerDepuisTentative(supabase, TENTATIVE.id)
+  assert.equal(r.ok, false)
+  assert.equal(alertesArchive().length, 0, 'aucune reservation n existe : l alerte mentirait')
 })

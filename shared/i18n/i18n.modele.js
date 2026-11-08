@@ -16,7 +16,7 @@
    ============================================================ */
 window.I18n = (() => {
   const BASE = '/shared/i18n/';
-  // ⚠ LA VERSION DES DICTIONNAIRES, ET POURQUOI ELLE EST ECRITE A LA MAIN.
+  // ⚠ LA VERSION DES DICTIONNAIRES, ET POURQUOI ELLE EST CALCULEE AU DEPLOIEMENT.
   // Les quatre fichiers d'i18n etaient charges avec `cache: 'no-cache'`, donc
   // REVALIDES a chaque ouverture de page : 42 Ko pour le francais, 82 Ko pour
   // un hote anglophone ou hispanophone (fr.json sert de repli), un aller-retour
@@ -24,12 +24,20 @@ window.I18n = (() => {
   // etait `public, max-age=0, must-revalidate`, `x-vercel-cache: MISS`.
   // Ils sont desormais caches UN AN, et c'est cette version qui les invalide :
   // elle entre dans l'URL, donc un dictionnaire change = une URL neuve.
-  // ⚠ ET ELLE EST TENUE PAR UN TEST, PAS PAR LA MEMOIRE DE QUI TRADUIT.
-  // `tests/i18n-version.test.js` recalcule l'empreinte des quatre fichiers et
-  // ROUGIT si elle ne correspond pas. Sans lui, une traduction corrigee
-  // resterait invisible un an chez l'hote — le defaut exact que le cache long
-  // rend possible.
-  const VERSION = 'a4af1cb5f9f8';
+  //
+  // ⚠ CE FICHIER EST UN MODELE, PAS CE QUE LE NAVIGATEUR RECOIT. `/shared/i18n/
+  // i18n.js` est servi par `api/i18n.js`, qui remplace le jeton ci-dessous par
+  // l'empreinte de TOUS les .json du dossier DEPLOYES (lib/i18n-version.js :
+  // une langue ajoutee y entre d'elle-meme, et un dictionnaire manquant est une
+  // erreur, pas une empreinte). Jusqu'au
+  // 5 novembre 2026, cette empreinte etait ecrite ici a la main : chaque lot
+  // qui touchait une traduction la changeait, et deux lots paralleles se
+  // rencontraient TOUJOURS en conflit sur cette ligne — pour une valeur
+  // qu'aucun des deux n'avait juste, puisque la bonne est celle des
+  // dictionnaires FUSIONNES. Decision de Thierry du 28 octobre 2026 : la
+  // calculer au deploiement. Plus de ligne a changer, plus de conflit, et
+  // l'empreinte ne peut plus etre oubliee.
+  const VERSION = '__HS_I18N_VERSION__';
   const FALLBACK = 'fr';
   const STORAGE_KEY = 'hs.lang';
 

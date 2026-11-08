@@ -865,22 +865,37 @@ function suivreLaLargeur () {
   else if (typeof mq.addListener === 'function') mq.addListener(renderDate)
 }
 
-// ─── Alarmes de surréservation ──────────────────────────────────────────────
+// ─── Alarmes : surréservation ET envoi au voyageur ──────────────────────────
 function nomDuBien (ref) {
   const b = etat.biens.find(x => String(x.id) === String(ref) || String(x.provider_property_id) === String(ref))
   return b ? b.name : null
 }
+// ⚠ LE BANDEAU NE SERT PLUS QUE LA SURRESERVATION, ET SES TROIS PHRASES
+// ETAIENT DEVENUES FAUSSES — constat d'une revue independante. Chaque carte
+// etait titree « Surréservation · {bien} », avec « Deux séjours sur la même
+// nuit. » en repli et « L'alerte se répète jusqu'à ce qu'elle soit acquittée. »
+// en pied. Sur un ARRET d'envoi, les trois mentent : ce n'est pas une
+// surreservation, il n'y a pas deux sejours, et cette alarme NE se repete PAS
+// (elle est posee une fois, la porte du rejeu la relit ensuite sans realerter).
+// Une alarme qui se decrit faussement se classe faussement : l'hote cherche un
+// conflit de calendrier et ne lit pas le message qui ne part pas.
+const TYPES_ENVOI = ['message_ota_a_verifier', 'message_ota_arret', 'email_voyageur_abandon']
 function renderAlarmes () {
   const zone = $('[data-list="alarms"]')
   zone.hidden = !etat.alarmes.length
   const acquittable = peutEcrire('reservations')
   zone.innerHTML = etat.alarmes.map(a => {
     const nom = nomDuBien(a.property_id)
+    const envoi = TYPES_ENVOI.indexOf(String(a.type)) !== -1
+    const titre = envoi
+      ? (nom ? t('alarm.send_title', { name: nom }) : t('alarm.send_title_anon'))
+      : (nom ? t('alarm.title', { name: nom }) : t('alarm.title_anon'))
+    const date = I18n.date(new Date(a.created_at), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
     return `<div class="alert" role="alert">
       ${icone('i-alert', 'icon icon--lg')}
-      <span class="alert__title">${esc(nom ? t('alarm.title', { name: nom }) : t('alarm.title_anon'))}</span>
-      <span class="small">${esc(a.detail?.message || t('alarm.default'))}</span>
-      <span class="caption muted">${esc(t('alarm.since', { date: I18n.date(new Date(a.created_at), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) }))}</span>
+      <span class="alert__title">${esc(titre)}</span>
+      <span class="small">${esc(a.detail?.message || t(envoi ? 'alarm.send_default' : 'alarm.default'))}</span>
+      <span class="caption muted">${esc(envoi ? t('alarm.send_since', { date }) : t('alarm.since', { date }))}</span>
       ${acquittable ? `<button type="button" class="btn btn--primary" data-acquitter="${esc(a.id)}">${esc(t('alarm.ack'))}</button>` : ''}
     </div>`
   }).join('')
@@ -1818,10 +1833,48 @@ function renderRevenus () {
   //
   // ⚠ ET ON NE REPARTIT PAS LA COLONNE « Total » SEPAREMENT : elle tomberait
   // juste en colonne et faux en ligne — un bien afficherait 159 + 0 = 160.
-  const donnees = (etat.biens || []).map(b => parBien[String(b.id)] || null)
+  // ⚠ LES BIENS ARCHIVES ONT LEUR LIGNE ICI AUSSI — constat 1 de la revue de
+  // 26339835, et c'etait un defaut d'ARGENT. L'accueil les ecarte de `biens`
+  // (etape 3), mais la RPC `revenus_du_mois` n'a aucun filtre d'archive : leurs
+  // euros restaient dans le total du bandeau, SANS ligne pour les porter et
+  // sans reserve pour les expliquer — `revenus_hors_mois` ne compte que les
+  // sejours rattaches a AUCUN bien, et un bien archive en est un. Le bandeau
+  // annoncait donc plus que la somme de ses lignes. C'est la dette 118, soldee
+  // sur la vue Annee et laissee entiere sur la vue Mois, qui est le bloc
+  // PRINCIPAL de l'ecran.
+  // ⚠ ILS PASSENT APRES LES VIVANTS, et la liste vient du serveur
+  // (`biens_archives`) : l'ecran ne devine pas qui est archive.
+  const archivesEcran = (etat.ecran && Array.isArray(etat.ecran.biens_archives))
+    ? etat.ecran.biens_archives
+    : []
+  const vus = new Set((etat.biens || []).map(b => String(b.id)))
+  // ⚠ ET UN BIEN ARCHIVE N'A DE LIGNE QUE S'IL PORTE DE L'ARGENT CE MOIS-CI —
+  // decision de Thierry du 6 novembre 2026, sur ce qu'il a vu en production :
+  // « Colomiers · archivé · aucun versement ce mois-ci · 0 € 0 € 0 € ». La ligne
+  // d'un bien archive existe pour PORTER ses euros (dette 118, juste au-dessus) :
+  // a zero, elle n'explique rien du total et montre un bien rangé comme s'il
+  // vivait encore. Le bandeau ne bouge pas : il ne perd que des zeros.
+  // ⚠ « De l'argent », c'est un montant NON NUL — un remboursement compte — OU
+  // un montant INCONNU (`refuses.montant`, `sans_montant`) : un sejour dont on
+  // ne sait pas le prix n'est pas un sejour a zero euro, et retirer sa ligne
+  // cacherait justement ce que l'ecran ne sait pas.
+  // ⚠ LE FILTRE PASSE AVANT LA REPARTITION, pour que `repartirEnEuros` ne
+  // distribue les centimes qu'entre les lignes AFFICHEES.
+  // ⚠ UN BIEN VIVANT GARDE SA LIGNE A ZERO : « aucun versement ce mois-ci » est
+  // une information sur un logement qu'on pilote encore.
+  const porteDeLArgent = (d) => Boolean(d) && (
+    Number(d.total_cents || 0) !== 0 || Number(d.recu_cents || 0) !== 0 ||
+    Number(d.a_venir_cents || 0) !== 0 || Number(d.sans_montant || 0) > 0 ||
+    Number((d.refuses && d.refuses.montant) || 0) > 0)
+  const biensAvecArchives = (etat.biens || []).concat(
+    archivesEcran
+      .filter(x => x && x.id != null && !vus.has(String(x.id)))
+      .filter(x => porteDeLArgent(parBien[String(x.id)]))
+      .map(x => ({ id: x.id, name: x.nom || '', photo_url: x.photo_url || null, archive: true })))
+  const donnees = biensAvecArchives.map(b => parBien[String(b.id)] || null)
   const recusParBien = repartirEnEuros(donnees.map(d => (d ? d.recu_cents : 0)))
   const avenirParBien = repartirEnEuros(donnees.map(d => (d ? d.a_venir_cents : 0)))
-  const lignesRev = (etat.biens || []).map((b, idx) => {
+  const lignesRev = biensAvecArchives.map((b, idx) => {
     // ⚠ LA CLE EST MAINTENANT L'UUID DU BIEN, ET C'EST UN RENVERSEMENT ASSUME
     // (27 octobre 2026, architecture decidee par Thierry). Jusqu'ici l'endpoint
     // groupait par `bookings_snapshot.property_id`, c'est-a-dire la cle
@@ -1849,7 +1902,11 @@ function renderRevenus () {
     // portant son initiale, comme la liste des logements. Un `<img>` sans `src`
     // afficherait l'icone de fichier casse du navigateur.
     const photo = vignetteDuBien(b)
+    // ⚠ LA MARQUE SUIT LE NOM, DANS LES DEUX VUES. Un bien archive qui aurait
+    // sa ligne sans sa marque se lirait comme un bien vivant qui n'a rien
+    // encaisse ce mois-la — deux etats que rien ne distinguerait.
     const nom = `<span class="small" style="min-width: 0">${esc(b.name)}</span>`
+      + (b.archive ? `<span class="marque-archive">${esc(t('logements.archive'))}</span>` : '')
     if (!d) {
       // Aucun sejour range ce mois-ci pour ce bien. C'est un FAIT — zero euro
       // encaisse — et non une absence de donnee : le bien a ete lu, sa ligne
@@ -2262,18 +2319,59 @@ function renderAnnee () {
   // 28 octobre : l'en-tete en depend desormais. Seuls les logements qui portent
   // quelque chose sur l'une des deux annees — une pastille qui ne tracerait
   // rien n'est pas un filtre, c'est un cul-de-sac.
-  const avecDonnees = (etat.biens || []).filter(b => {
+  // ⚠ LES BIENS ARCHIVES VIENNENT DE L'ENDPOINT DES REVENUS, pas de la liste de
+  // l'accueil — constat 1 de la revue de 320aa4f8. L'accueil les ECARTE (etape
+  // 3 : ils n'ont plus de tuile ni de place dans le selecteur), donc
+  // `etat.biens` ne les porte pas : leur ligne de revenus disparaissait, alors
+  // que leurs euros restaient dans le total. C'est la dette 118 que ce lot
+  // annonce solder, reintroduite par sa propre etape 3.
+  // ⚠ ET LES ARCHIVES PASSENT APRES : la liste se lit des biens vivants vers
+  // les biens rangés, pas melangee par ordre alphabetique.
+  const archivesDuServeur = Array.isArray(etat.annee.archives) ? etat.annee.archives : []
+  const archives = new Set(archivesDuServeur.map(x => String(x && x.id != null ? x.id : x)))
+  const dejaLa = new Set((etat.biens || []).map(b => String(b.id)))
+  const biensPourRevenus = (etat.biens || []).concat(
+    archivesDuServeur
+      .filter(x => x && x.id != null && !dejaLa.has(String(x.id)))
+      .map(x => ({ id: x.id, name: x.nom || '', photo_url: x.photo_url || null })))
+  const avecDonnees = biensPourRevenus.filter(b => {
     const pm = a.par_bien && a.par_bien[String(b.id)]
-    return pm && Object.keys(pm).length > 0
+    if (!(pm && Object.keys(pm).length > 0)) return false
+    // ⚠ UN BIEN ARCHIVE N'A DE LIGNE QUE S'IL PORTE DE L'ARGENT SUR LA PERIODE
+    // AFFICHEE — meme decision de Thierry que la vue Mois (6 novembre 2026), et
+    // il l'a precisee pour cette vue-ci : Colomiers, 2 402 € encaisses en 2026,
+    // RESTE, marque « archive ». La periode, ce sont les DEUX colonnes de la
+    // ligne, a la meme tranche que leurs totaux (`jusquAu`) : un bien qui n'a
+    // d'euros qu'en N-1 garde sa ligne, sinon le total N-1 ne serait plus la
+    // somme de ses lignes. Un montant inconnu compte comme de l'argent, pour la
+    // raison dite en vue Mois. Un bien VIVANT n'est pas concerne.
+    if (!archives.has(String(b.id))) return true
+    return [an, an - 1].some(y => {
+      const bi = bilanPeriode(pm, y, 'total_cents', jusquAu)
+      return !bi.absente && (bi.total !== 0 || bi.sansMontant > 0 || bi.refuse)
+    })
   })
+  // ⚠ UN BIEN ARCHIVE GARDE SA LIGNE MAIS N'EST PLUS UNE PASTILLE DE FILTRE
+  // (retouche de recette du 3 novembre 2026, demande de Thierry). Les deux
+  // roles de `avecDonnees` se separent ici : le TABLEAU et les RESERVES
+  // continuent de le lire entier — les euros d'un bien rangé restent dans le
+  // total, c'est la dette 118 — mais la barre de filtres ne propose que des
+  // biens VIVANTS. Filtrer la courbe sur un bien qu'on vient de ranger n'a
+  // pas d'usage : on le range pour ne plus le piloter.
+  const pourPastilles = avecDonnees.filter(b => !archives.has(String(b.id)))
   // Une pastille retiree ne laisse pas un filtre orphelin : le bien choisi peut
   // disparaitre d'un rechargement, et la selection perimee s'oublie. Son seul
   // effet reel est la : sans elle, `find` rend `undefined`, « Tous » se rallume
   // et la courbe montre le compte — rien ne se vide.
-  if (etat.filtreAnnee && !avecDonnees.some(b => String(b.id) === etat.filtreAnnee)) {
+  // ⚠ ET LA GARDE SUIT LES PASTILLES, PAS LE TABLEAU : archiver le bien
+  // actuellement filtre lui retire sa pastille. Teste contre `avecDonnees`,
+  // le filtre survivrait sans pastille allumee — ni le bien, ni « Tous » —
+  // et l'en-tete comme la courbe parleraient d'un perimetre que plus aucun
+  // bouton ne montre. C'est le cul-de-sac decrit juste au-dessus.
+  if (etat.filtreAnnee && !pourPastilles.some(b => String(b.id) === etat.filtreAnnee)) {
     etat.filtreAnnee = null
   }
-  const choisi = etat.filtreAnnee ? avecDonnees.find(b => String(b.id) === etat.filtreAnnee) : null
+  const choisi = etat.filtreAnnee ? pourPastilles.find(b => String(b.id) === etat.filtreAnnee) : null
 
   // ⚠ L'EN-TETE SUIT LA PASTILLE DEPUIS LE 28 OCTOBRE (decision Q1 de Thierry),
   // et avec SON POURCENTAGE. Ce n'est pas un revirement sur la decision 1 :
@@ -2339,7 +2437,7 @@ function renderAnnee () {
     + `aria-pressed="${actif ? 'true' : 'false'}">${esc(texte)}</button>`
   $('[data-list="revenue-annee-filtres"]').innerHTML =
     puce('', t('revenue.annee_filtre_tous'), !choisi)
-    + avecDonnees.map(b => puce(String(b.id), String(b.name || ''), choisi && String(b.id) === String(choisi.id))).join('')
+    + pourPastilles.map(b => puce(String(b.id), String(b.name || ''), choisi && String(b.id) === String(choisi.id))).join('')
 
   // ─── La courbe, une seule, filtree par la pastille ──────────────────────
   // ⚠ LE REALISE ET LE DEJA RESERVE SONT DEUX TRAITS D'UNE MEME SERIE, qui se
@@ -2677,6 +2775,12 @@ function renderAnnee () {
         : t('revenue.annee_nouveau', { annee: String(an) }))}</span>`
     return {
       b,
+      // ⚠ ARCHIVE : LA LIGNE RESTE, ET ELLE LE DIT. Decision 1 de Thierry du
+      // 31 octobre 2026. Sans cette marque, l'hote lirait un logement comme
+      // vivant alors qu'il ne l'est plus — et c'est la dette 118 : une somme
+      // dont on ne peut pas rattacher le detail. La liste vient du serveur
+      // (`archives`), jamais devinee ici.
+      archive: archives.has(String(b.id)),
       // ⚠ MEME REGLE QUE L'EN-TETE, et c'est le constat 2 : une annee sans
       // AUCUNE ligne rend « — », pas « 0 € ». Le motif est sur la meme ligne,
       // dans la colonne « Ecart » : « nouveau en {annee} ».
@@ -2690,6 +2794,7 @@ function renderAnnee () {
   $('[data-list="revenue-annee-lignes"]').innerHTML = lignes.map(l => `<tr>
       <th scope="row" class="rev-tbl__bien"><span class="rev-tbl__bien-int">
         ${vignetteDuBien(l.b)}<span class="rev-tbl__nom">${esc(l.b.name)}</span>
+        ${l.archive ? `<span class="marque-archive">${esc(t('logements.archive'))}</span>` : ''}
       </span></th>
       <td class="rev-tbl__num">${esc(l.tN)}</td>
       <td class="rev-tbl__num muted">${esc(l.tN1)}</td>
@@ -2697,7 +2802,7 @@ function renderAnnee () {
     </tr>`).join('')
   $('[data-list="revenue-annee-cartes"]').innerHTML = lignes.map(l => `<li class="rev-carte">
       <div class="rev-carte__tete">
-        <span class="rev-carte__bien">${vignetteDuBien(l.b)}<span class="rev-tbl__nom"><span class="small">${esc(l.b.name)}</span></span></span>
+        <span class="rev-carte__bien">${vignetteDuBien(l.b)}<span class="rev-tbl__nom"><span class="small">${esc(l.b.name)}</span>${l.archive ? `<span class="marque-archive">${esc(t('logements.archive'))}</span>` : ''}</span></span>
         <span class="rev-carte__total">${esc(l.tN)}</span>
       </div>
       <p class="caption muted">${esc(String(an - 1))} · ${esc(l.tN1)} ${l.ecart}</p>

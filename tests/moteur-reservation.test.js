@@ -483,3 +483,97 @@ test('un bien a plusieurs unites n est PAS vendable par le moteur', () => {
   assert.equal(M.raisonNonVendable({ ...BIEN, inventory_units: 1 }), null)
   assert.equal(M.raisonNonVendable({ ...BIEN, inventory_units: null }), null)
 })
+
+// ─── Tout motif de refus a une phrase pour l'hote ───────────────────────────
+test("LE TEST QUI COMPTE : tout motif rendu a une phrase dans l ecran de l hote", () => {
+  // ⚠ CE GARDE-FOU MANQUAIT AU DEPOT, et son absence s'est payee le jour meme :
+  // `raisonNonVendable` a gagne un cinquieme motif (`bien_archive`) et
+  // `apps/reservation-directe/index.html` n'en declarait que quatre. Son repli
+  // est `BLOQUANTS[b.bloquant] || b.bloquant` : l'hote lisait donc la chaine
+  // technique « bien_archive » dans un encadre rouge. Constat de la revue de
+  // 3ab472d9 — rien, ni test ni i18n-check, ne pouvait l'attraper.
+  //
+  // ⚠ LES MOTIFS SONT OBTENUS EN APPELANT LA FONCTION, pas en grepant ses
+  // `return` : une branche devenue inatteignable sortirait quand meme d'un grep,
+  // et un motif neuf ajoute par un `return` d'une autre forme y echapperait.
+  const cas = [
+    null,
+    { ...BIEN, archive_le: '2026-11-03T20:42:19.342Z' },
+    { inventory_units: 1 },
+    { provider_property_id: 'p', inventory_units: 2 },
+    { ...BIEN, provider: 'beds24' }
+  ]
+  const motifs = [...new Set(cas.map(b => M.raisonNonVendable(b)).filter(Boolean))]
+  assert.ok(motifs.length >= 5,
+    `${motifs.length} motifs obtenus (${motifs}) : les cas de ce test ne couvrent plus la fonction`)
+
+  // ⚠ LE DICTIONNAIRE EST **EVALUE**, pas cherche a la sous-chaine : on veut ses
+  // VRAIES cles. Un `grep` de presence resterait vert sur une cle commentee.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'apps/reservation-directe/index.html'), 'utf8')
+  const bloc = src.match(/const BLOQUANTS = (\{[\s\S]*?\n  \})/)
+  assert.ok(bloc, 'le dictionnaire BLOQUANTS n a pas ete trouve dans l ecran')
+  // eslint-disable-next-line no-new-func
+  const BLOQUANTS = new Function(`return ${bloc[1]}`)()
+  assert.ok(Object.keys(BLOQUANTS).length >= 5,
+    `BLOQUANTS n a que ${Object.keys(BLOQUANTS).length} entrees`)
+
+  for (const m of motifs) {
+    assert.ok(typeof BLOQUANTS[m] === 'string' && BLOQUANTS[m].length > 20,
+      `le motif « ${m} » n a pas de phrase dans apps/reservation-directe : l hote lirait ce nom technique`)
+  }
+})
+
+// ─── L'ecran Liens : un lien suspendu, pas revoque ──────────────────────────
+test("LE TEST QUI COMPTE : le lien d un bien ARCHIVE est suspendu, pas actif", () => {
+  // ⚠ RETOUCHE DE RECETTE DE THIERRY DU 3 NOVEMBRE 2026, apres la mise en
+  // production du point 1 : le lien d un bien archive restait affiche « actif »
+  // avec Copier et Apercu. L hote pouvait donc diffuser une adresse qui repond
+  // « ce logement n est plus propose a la reservation ».
+  //
+  // ⚠ LA VRAIE FONCTION EST EXTRAITE ET EVALUEE, pas recopiee : la page n est
+  // pas modularisee, et une copie dans le test diverge au premier changement.
+  // Meme geste que pour `BLOQUANTS` juste au-dessus.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'apps/reservation-directe/index.html'), 'utf8')
+  const bloc = src.match(/(function ligneLien\(l, archive\) \{[\s\S]*?\n  \})/)
+  assert.ok(bloc, 'ligneLien n a pas ete trouvee, ou sa signature a change')
+  // eslint-disable-next-line no-new-func
+  const ligneLien = new Function('esc', `return ${bloc[1]}`)((s) => String(s == null ? '' : s))
+
+  const lien = { id: 'l1', label: 'Site vitrine', coefficient: 100, url: 'https://x.test/book/abc', active: true }
+
+  const vivant = ligneLien(lien, false)
+  assert.match(vivant, />actif</, 'le lien d un bien vivant n est plus actif')
+  assert.match(vivant, /data-copier=/, 'le bien vivant a perdu son bouton Copier')
+  assert.match(vivant, /data-voir=/, 'le bien vivant a perdu son Apercu')
+
+  const archive = ligneLien(lien, true)
+  assert.match(archive, /suspendu \(logement archiv/, `l etat affiche n est pas « suspendu » : ${archive.slice(0, 120)}`)
+  assert.ok(!/>actif</.test(archive), 'le lien d un bien archive s affiche encore « actif »')
+  assert.ok(!/data-copier=/.test(archive), 'Copier est encore propose sur un bien archive')
+  assert.ok(!/data-voir=/.test(archive), 'Apercu est encore propose sur un bien archive')
+  // ⚠ REVOQUER RESTE : un hote qui archive pour de bon doit pouvoir fermer
+  // l adresse sans reactiver d abord.
+  assert.match(archive, /data-revoquer="l1"/, 'Revoquer a disparu sur un bien archive')
+
+  // ⚠ ET UN LIEN DEJA REVOQUE RESTE REVOQUE, archive ou non : « suspendu » ne
+  // doit pas recouvrir un etat definitif.
+  const revoque = ligneLien({ ...lien, active: false }, true)
+  assert.match(revoque, />révoqué</, 'un lien revoque sur un bien archive affiche autre chose')
+  assert.ok(!/suspendu/.test(revoque), 'un lien revoque est annonce « suspendu »')
+
+  // ⚠ ET LE CABLAGE, parce que tout ce qui precede reste VERT si l appelant
+  // cesse de passer l etat du bien. Mesure : la mutation
+  // `ligneLien(l, false)` dans `rendre` ne faisait rougir AUCUNE des
+  // assertions ci-dessus — la fonction est juste, personne ne l appelle plus
+  // correctement, et l ecran affiche « actif » de nouveau.
+  //
+  // ⚠ CETTE ASSERTION LIT LA SOURCE, et c est sa limite : elle verifie la
+  // FORME de l appel, pas son effet. Elle resterait verte si `b.bloquant`
+  // changeait de nom de valeur cote serveur. Ce que le depot a de mieux sans
+  // rendre cette page en jsdom — et c est ce qu il faudra faire le jour ou
+  // l ecran grossit.
+  assert.match(src, /ligneLien\(l,\s*b\.bloquant === 'bien_archive'\)/,
+    'l appel de ligneLien ne passe plus l etat archive du bien : la fonction est juste et inutile')
+})

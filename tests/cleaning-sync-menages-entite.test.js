@@ -59,7 +59,14 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
         in (c, v) { a.ins = { c, v }; return chain },
         gte (c, v) { a.gte = { c, v }; return chain },
         lte (c, v) { a.lte = { c, v }; return chain },
-        not (c) { a.not = c; return chain },
+        // ⚠ `not` GARDE TOUTES SES COLONNES, pas la derniere. `clesArchivees`
+        // en chaine DEUX (`archive_le` puis `provider_property_id`) : avec un
+        // seul champ, le double ne pouvait plus distinguer la lecture des biens
+        // ARCHIVES de celle des biens vivants, et il rendait TOUS les biens
+        // comme archives — 28 tests rouges pour un filtre que le double
+        // n'appliquait pas. Le fichier porte deja la regle : « LE DOUBLE
+        // APPLIQUE SES FILTRES ».
+        not (c) { a.not = c; (a.nots = a.nots || []).push(c); return chain },
         gt (c, v) { a.gt = { c, v }; return chain },
         lt (c, v) { a.lt = { c, v }; return chain },
         is (c, v) { a.is = { c, v }; return chain },
@@ -115,6 +122,11 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
           // ⚠ Le double APPLIQUE les bornes de date : sans cela, retirer le
           // filtre de fenêtre du writer ne casserait aucun test.
           const d = snaps.filter(s => {
+            // ⚠ ET LA BORNE AU BIEN (`borneAuBien`, geste d'archivage) : sans
+            // elle, le double rendait les reservations de TOUT le compte et le
+            // constat 1 de la revue du 7 novembre 2026 ne se reproduisait pas.
+            if (a.f.user_id != null && s.user_id !== a.f.user_id) return false
+            if (a.f.property_id != null && String(s.property_id) !== String(a.f.property_id)) return false
             const dep = s.snapshot?.departure
             if (!dep) return true
             if (a.gte && dep < a.gte.v) return false
@@ -142,7 +154,8 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
           if (propositions !== null && a.f.assignment_mode === 'garde') {
             return { data: propositions, error: null }
           }
-          return { data: menages, error: null }
+          // La lecture des existants, bornee au bien quand l'archivage le demande.
+          return { data: menages.filter(m => a.f.property_id == null || String(m.property_id) === String(a.f.property_id)), error: null }
         }
         if (table === 'provider_availability_rules') return { data: regles, error: erreurDispos }
         if (table === 'provider_availability_exceptions') return { data: exceptions, error: null }
@@ -160,7 +173,17 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
                    error: null }
         }
         if (table === 'property_cleaning_providers') return { data: liaisons, error: null }
-        if (table === 'properties') return { data: biens, error: erreurBiens }
+        if (table === 'properties') {
+          if (erreurBiens) return { data: null, error: erreurBiens }
+          // ⚠ LA LECTURE DES BIENS ARCHIVES EST UNE AUTRE LECTURE. Elle porte
+          // `.not('archive_le', 'is', null)` : le double doit donc rendre les
+          // biens ARCHIVES, et eux seuls. Sans ce cas, un bien non archive
+          // ressortait comme archive et ses reservations etaient ecartees.
+          if ((a.nots || []).includes('archive_le')) {
+            return { data: biens.filter(b => b.archive_le), error: null }
+          }
+          return { data: biens, error: null }
+        }
         return { data: [], error: null }
       }
       return chain
@@ -603,6 +626,128 @@ test('le rattrapage ne ressuscite pas un ménage annulé par la bande', async ()
 // lectures : le writer tourne en service key, qui contourne la RLS par
 // conception. Aucune assertion ne les couvrait — les retirer laissait les 996
 // tests verts.
+
+test("LE TEST QUI COMPTE : les réservations d'un bien ARCHIVÉ sont écartées", async () => {
+  // ⚠ 3 780 INCIDENTS `menage_non_assigne` SUR LE PREMIER CAS RÉEL (mesure du
+  // 30 octobre 2026). Ce writer ne part PAS de `properties` : il lit
+  // `bookings_snapshot` sur une fenêtre de dates, donc le bien n'est jamais
+  // « choisi » — il arrive par ses réservations, et aucun filtre de sélection
+  // ne pouvait l'écarter. C'est le seul chemin du lot « archiver un bien » qui
+  // demandait un Set de clés plutôt qu'un filtre.
+  const etat = preparer({
+    snaps: [SNAP(), SNAP({ departure: jour(4) })],
+    liaisons: [],
+    biens: [
+      { user_id: U, provider_property_id: '209413', provider: 'beds24',
+        archive_le: '2026-10-31T10:00:00Z' }
+    ]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.lus, 0,
+    `${bilan.lus} réservation(s) lue(s) pour un bien archivé : le writer va recréer ses ménages`)
+  assert.strictEqual(bilan.ecartes_archives, 2,
+    `le bilan n'annonce pas les lignes écartées (${bilan.ecartes_archives})`)
+  assert.strictEqual(etat.inseres.length, 0, 'un ménage a été créé pour un bien archivé')
+})
+
+test("LE TEST QUI COMPTE : le bien archivé d'un compte n'écarte PAS le bien d'un AUTRE compte", async () => {
+  // ⚠ CONSTAT 6 DE LA REVUE DE 320aa4f8 — une fuite d'EFFET entre comptes.
+  // `provider_property_id` n'a AUCUNE unicité globale, et ce fichier le grave
+  // déjà : « Clé composite ». Avec une clé non cloisonnée, le compte A qui
+  // archive son bien `209413` faisait écarter les réservations du bien `209413`
+  // VIVANT du compte B : aucun ménage créé chez lui, et les siens annulés.
+  const etat = preparer({
+    snaps: [SNAP(), SNAP({}, )].map((x, i) => i === 1
+      ? { ...x, user_id: 'compte-2', booking_id: 'b2' }
+      : x),
+    liaisons: [],
+    biens: [
+      { user_id: U, provider_property_id: '209413', provider: 'beds24',
+        archive_le: '2026-10-31T10:00:00Z' },
+      // Le MEME numéro provider, chez un AUTRE compte, et VIVANT.
+      { user_id: 'compte-2', provider_property_id: '209413', provider: 'beds24' }
+    ]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.ecartes_archives, 1,
+    `${bilan.ecartes_archives} ligne(s) écartée(s) au lieu d une : la clé n est pas cloisonnée par compte`)
+  assert.strictEqual(bilan.lus, 1, 'la réservation du compte VIVANT a été écartée')
+  assert.ok(etat.inseres.length >= 1,
+    'aucun ménage créé pour le bien vivant du second compte')
+  for (const m of etat.inseres) {
+    assert.strictEqual(String(m.user_id), 'compte-2',
+      'un ménage a été créé pour le bien ARCHIVÉ')
+  }
+})
+
+test("LE TEST QUI COMPTE : les ménages d'un bien ARCHIVÉ ne sont PAS annulés", async () => {
+  // ⚠ CONSTAT 7 DE LA REVUE DE 320aa4f8, et le motif du journal le rendait
+  // pire : écarter les réservations les retire aussi de `vivants`, donc TOUS
+  // les ménages du bien dans la fenêtre partaient en `cancelled` — y compris
+  // celui qu'une prestataire avait ACCEPTÉ — avec au journal
+  // « Réservation annulée ou date de départ déplacée », qui est FAUX. La
+  // réservation est vivante ; le bien est RANGÉ.
+  // ⚠ C'est le raisonnement que ce fichier applique déjà à un bien inconnu :
+  // « un bien qu'on ne sait pas lire n'est pas un bien dont les séjours ont
+  // disparu ».
+  // ⚠ IL FAUT UN AUTRE BIEN VIVANT DANS LA PASSE, et c'est le cœur du cas. Si
+  // TOUTES les réservations sont écartées, `lignes` est vide et le writer sort
+  // avant d'annuler quoi que ce soit : ma première version du test ne mesurait
+  // RIEN, et la mutation qui retire la garde y survivait. Le défaut n'existe
+  // que quand le parc a encore du travail — c'est-à-dire en production.
+  const etat = preparer({
+    snaps: [SNAP(), { user_id: U, property_id: '777777', booking_id: 'b9',
+                      snapshot: { status: 'confirmed', arrival: jour(-1), departure: jour(2) } }],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
+    liaisons: [],
+    biens: [
+      { user_id: U, provider_property_id: '209413', provider: 'beds24',
+        archive_le: '2026-10-31T10:00:00Z' },
+      { user_id: U, provider_property_id: '777777', provider: 'beds24' }
+    ]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.lus, 1, 'la réservation du bien vivant a été écartée elle aussi')
+  assert.strictEqual(bilan.annules, 0,
+    `${bilan.annules} ménage(s) annulé(s) : le bien est archivé, pas sa réservation`)
+  const annulations = etat.majs.filter(q => q.table === 'menages' && q.row && q.row.status === 'cancelled')
+  assert.strictEqual(annulations.length, 0,
+    `une annulation a été écrite : ${JSON.stringify(annulations)}`)
+})
+
+test("une liste d archives INCOMPLETE n écarte RIEN, et le dit", async () => {
+  // ⚠ CONSTAT 8. Un `Set` tronqué ferait passer un bien archivé pour vivant,
+  // donc on recréerait ses ménages — le défaut même que la borne devait fermer.
+  // Même raisonnement que la garde `tronque` des snapshots : on s'abstient.
+  const etat = preparer({
+    snaps: [SNAP()],
+    liaisons: [],
+    biens: [],
+    erreurBiens: { message: 'properties illisible' }
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.archives_illisibles, true,
+    'une lecture ratée des archives ne se dit pas')
+  assert.strictEqual(bilan.ecartes_archives, undefined,
+    'des lignes sont écartées sur une liste d archives incomplète')
+})
+
+test("un bien VIVANT n'est pas écarté par le filtre d'archive", async () => {
+  // Le contre-cas, sans lequel le test précédent passerait sur un writer qui
+  // écarte TOUT — c'est exactement ce que le double faisait avant d'appliquer
+  // le filtre `not('archive_le')`.
+  const etat = preparer({ snaps: [SNAP()], liaisons: [] })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.lus, 1, 'une réservation de bien vivant a été écartée')
+  assert.strictEqual(bilan.ecartes_archives, undefined,
+    'le bilan annonce des lignes écartées alors qu aucun bien n est archivé')
+})
 
 test('la lecture des ménages existants est filtrée par COMPTE', async () => {
   const etat = preparer({ snaps: [SNAP()], liaisons: [] })
@@ -1520,4 +1665,52 @@ test('ÉLARGIR [garde : panne du journal] une PANNE du journal n\'élargit rien'
   const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
   await poserPropositionsDues(null, { maintenant: T0 })
   assert.strictEqual(etat.majs.length, 0)
+})
+
+// ─── Le geste d'archivage : la borne au bien vaut pour TOUT le cycle ────────
+// Constat 1 de la revue du 7 novembre 2026. `borneAuBien` ne restreignait que
+// les RESERVATIONS : archiver le bien A annulait les menages du bien B du meme
+// compte, avec le motif faux « Reservation annulee ».
+const BIENS_AB = [
+  { user_id: U, provider_property_id: '209413', provider: 'channex' },
+  { user_id: U, provider_property_id: 'B-777', provider: 'channex' }
+]
+const BORNE_A = { borneAuBien: { userId: U, propertyId: '209413' }, joursAvant: 3650 }
+const annulesDe = (etat) => etat.majs.filter(q => q.row && q.row.status === 'cancelled').flatMap(q => q.ids)
+
+test('LE TEST QUI COMPTE : borne au bien A, les menages du bien B ne sont PAS annules', async () => {
+  const etat = preparer({
+    biens: BIENS_AB,
+    snaps: [
+      { user_id: U, property_id: '209413', booking_id: 'bA', snapshot: { status: 'confirmed', arrival: jour(1), departure: jour(3) } },
+      { user_id: U, property_id: 'B-777', booking_id: 'bB', snapshot: { status: 'confirmed', arrival: jour(2), departure: jour(5) } }
+    ],
+    menages: [
+      { id: 'mA', user_id: U, property_id: '209413', booking_id: 'bA', departure_date: jour(3), status: 'accepted', provider_id: REGINA },
+      { id: 'mB1', user_id: U, property_id: 'B-777', booking_id: 'bB', departure_date: jour(5), status: 'assigned', provider_id: REGINA, assigned_by: 'host' },
+      { id: 'mB2', user_id: U, property_id: 'B-777', booking_id: 'bB2', departure_date: jour(9), status: 'accepted', provider_id: REGINA }
+    ],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages(null, BORNE_A)
+  assert.deepStrictEqual(annulesDe(etat), [], 'archiver A a annule des menages du bien B')
+  assert.strictEqual(bilan.annules, 0)
+  assert.ok(!etat.journal.some(l => l.event === 'cancelled'), 'un motif « annule » est journalise a tort')
+})
+
+test('borne au bien A, un menage DU BIEN A dont la reservation a disparu reste annule', async () => {
+  // La borne ne coupe pas la regle : elle la RESTREINT au bien.
+  const etat = preparer({
+    biens: BIENS_AB,
+    snaps: [{ user_id: U, property_id: '209413', booking_id: 'bA', snapshot: { status: 'cancelled', departure: jour(3) } }],
+    menages: [
+      { id: 'mA', user_id: U, property_id: '209413', booking_id: 'bA', departure_date: jour(3), status: 'accepted', provider_id: REGINA },
+      { id: 'mB1', user_id: U, property_id: 'B-777', booking_id: 'bB', departure_date: jour(5), status: 'accepted', provider_id: REGINA }
+    ],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages(null, BORNE_A)
+  assert.deepStrictEqual(annulesDe(etat), ['mA'])
 })

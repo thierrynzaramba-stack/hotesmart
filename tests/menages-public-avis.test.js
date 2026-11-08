@@ -67,6 +67,16 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
         gte (c, v) { a.gte = [c, v]; if (table === 'ota_reviews') periodesDemandees.push(v); return chain },
         in (c, v) { a.ins.push({ c, v: (v || []).map(String) }); return chain },
         or (e) { (a.ors = a.ors || []).push(String(e)); return chain },
+        // ⚠ `is` COMPLETE CE DOUBLE depuis le filtre des biens archives :
+        // `sansArchives` (lib/biens-vivants.js) LEVE sur une chaine qui n'a pas
+        // `.is`, et c'est VOULU — un double incomplet doit echouer bruyamment
+        // plutot que de valider du code qui ne peut pas tourner.
+        //
+        // ⚠ IL NE FAIT QUE CHAINER, et il ne mesure donc PAS que la garde est
+        // posee : ces tests ne parlent pas d'archivage. C'est
+        // tests/ecrans-sans-biens-archives.test.js qui le mesure, avec un
+        // double qui APPLIQUE le filtre.
+        is () { return chain },
         not () { return chain }, order () { return chain },
         // ⚠ Chainable, comme le vrai builder : `.limit()` est suivi d'un `.gte()`
         // quand une periode est reglee. Un double qui rendait une Promise ici

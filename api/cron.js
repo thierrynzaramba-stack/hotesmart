@@ -93,6 +93,15 @@
 //   l'hote (api/avis.js). Jamais un avis negatif. ⚠ Pas de balayage : l'index
 //   partiel `guest_evaluations_auto_publier_idx`, 20 lectures et 5 publications
 //   par passage au plus, aucune quand il reste moins de 20 s au cycle.
+// Session #42 (chantier « delai de reponse IA », lot 2) : LES BROUILLONS ECHUS
+//   PARTENT (lib/guestflow/brouillons-dus.js). Le Mode Test / Mode Auto par
+//   bien devient un DELAI : le brouillon de l'IA attend N minutes, visible pour
+//   l'hote, et part de lui-meme s'il ne fait rien — le parachute de l'oubli.
+//   ⚠ Pas un balayage : deux index partiels sur (status, echeance), donc les
+//   taches ECHUES seulement. Claim atomique avant tout envoi, le MEME que
+//   celui de l'ecran (api/messages.js, action `reserver`), dans le meme ordre :
+//   c'est ce qui empeche le double message. Budget mur 20 s et 30 brouillons
+//   par cycle, parce que cette passe ENVOIE et tourne avant le dispatch.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -126,6 +135,7 @@ const { channelCall } = require('../lib/channel-fullsync')
 const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
 const { executerAutoValidations } = require('../lib/avis/auto-validation')
+const { envoyerBrouillonsDus } = require('../lib/guestflow/brouillons-dus')
 const { releverLesComptesDus } = require('../lib/canaux-du-bien')
 const { demarrerPassage } = require('../lib/metriques-cron')
 const { ecrireLePassage, purgerSiDue: purgerLesMesures,
@@ -738,6 +748,44 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur auto-validation avis:', err.message)
       results.errors.push({ context: 'auto_validation_avis', error: err.message })
+    }
+
+    // 4quindecies. LES BROUILLONS DE REPONSE IA ECHUS PARTENT (chantier « delai
+    // de reponse IA », lot 2 ; spec docs/specs/spec-delai-reponse-ia.md §4.4).
+    // Un bien peut regler un DELAI de reponse : le brouillon de l'IA attend N
+    // minutes dans `agent_tasks` avec son echeance (`send_after`), visible pour
+    // l'hote, et part de lui-meme si personne n'a rien fait. C'est aussi le
+    // PARACHUTE du Mode Test : un hote qui oublie une proposition laissait le
+    // voyageur sans reponse indefiniment.
+    // ⚠ AUCUN BALAYAGE : la lecture porte sur (`status`, `send_after`) par deux
+    // index PARTIELS (migration 2026-10-27-delai-reponse-ia), donc sur les
+    // taches ECHUES et non sur la table. Le volume suit le trafic reel, pas le
+    // parc — c'est la regle des 30 000 comptes.
+    // ⚠ CLAIM ATOMIQUE AVANT TOUT ENVOI, et l'ecran passe par le MEME claim
+    // (api/messages.js, action `reserver`) dans le MEME ordre : c'est ce qui
+    // empeche le double message quand l'hote clique pendant que le cron prend
+    // la tache. Tout est reverifie a l'echeance — kill switch, reglage relu,
+    // sejour termine —, parce que des heures ont pu passer depuis la pose.
+    // ⚠ Placee ICI, avant le dispatch : elle ENVOIE (un appel provider par
+    // brouillon), donc elle porte son propre budget mur de 20 s et un plafond
+    // de 30 par cycle. Le reliquat part au cycle suivant avec son echeance
+    // intacte ; sans ce budget, trente envois lents mangeaient les 60 s et
+    // affamaient le dispatch.
+    try {
+      await chrono.mesure('brouillons_dus', async () => {
+        const bilanBrouillons = await envoyerBrouillonsDus(results, {
+          resteMs: () => 55000 - chrono.total()
+        })
+        results.totalBrouillonsEnvoyes = bilanBrouillons?.envoyes || 0
+        results.totalBrouillonsReportes = bilanBrouillons?.reportes || 0
+        if (bilanBrouillons?.orphelines) {
+          results.totalBrouillonsOrphelins = bilanBrouillons.orphelines
+        }
+      })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur brouillons dus:', err.message)
+      results.errors.push({ context: 'brouillons_dus', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

@@ -147,3 +147,62 @@
 
   window.HSNav = { render, renderLangSelector, renderMenu };
 })();
+
+/* ============================================================
+   HÔTESMART INSTALLABLE SUR TÉLÉPHONE (PWA lot 1) — KB : docs/kb/pwa.md
+
+   ⚠ POURQUOI ICI. Il n'existe pas d'en-tête HTML commun : chaque page porte
+   le sien, et pages/ ne bouge pas pendant la refonte V5. nav.js est l'en-tête
+   commun DE FAIT — les sept écrans V5 le chargent, et lui seul. Il pose donc,
+   une fois, dans <head> : le manifeste, theme-color, les balises
+   apple-mobile-web-app-* et l'icône iPhone ; puis il enregistre le service
+   worker. Une balise déjà présente n'est jamais doublée.
+   Chrome et Safari lisent ces balises au moment de « Ajouter à l'écran
+   d'accueil », donc après ce script : les poser en JavaScript suffit. La
+   recette sur téléphone le vérifie (docs/kb/pwa.md §Recette).
+
+   ⚠ theme-color se LIT dans la charte (jeton --surface de shared/theme.css),
+   au chargement : aucun hexa ici. Aucun écran hôte ne change de thème en
+   cours de page aujourd'hui ; le jour où un sélecteur de thème existera, il
+   devra mettre cette balise à jour.
+
+   ⚠ L'ENREGISTREMENT ATTEND la fin du chargement : le service worker ne
+   dispute pas le réseau à la page qui s'affiche.
+   ============================================================ */
+(() => {
+  const head = document.head;
+  if (!head) return;
+  const poser = (selecteur, creer) => { if (!head.querySelector(selecteur)) head.appendChild(creer()); };
+  const lien = (rel, href, attrs = {}) => () => {
+    const l = document.createElement('link');
+    l.rel = rel;
+    l.href = href;
+    for (const [k, v] of Object.entries(attrs)) l.setAttribute(k, v);
+    return l;
+  };
+  const meta = (name, content) => () => {
+    const m = document.createElement('meta');
+    m.name = name;
+    m.content = content;
+    return m;
+  };
+
+  // `use-credentials` : le manifeste se récupère aussi derrière une protection
+  // d'accès Vercel (le navigateur l'envoie sans cookie sinon).
+  poser('link[rel="manifest"]', lien('manifest', '/manifest.webmanifest', { crossorigin: 'use-credentials' }));
+  poser('link[rel="apple-touch-icon"]', lien('apple-touch-icon', '/apple-touch-icon.png'));
+  poser('meta[name="mobile-web-app-capable"]', meta('mobile-web-app-capable', 'yes'));
+  poser('meta[name="apple-mobile-web-app-capable"]', meta('apple-mobile-web-app-capable', 'yes'));
+  poser('meta[name="apple-mobile-web-app-status-bar-style"]', meta('apple-mobile-web-app-status-bar-style', 'default'));
+  poser('meta[name="apple-mobile-web-app-title"]', meta('apple-mobile-web-app-title', 'HôteSmart'));
+  const surface = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim();
+  if (surface) poser('meta[name="theme-color"]', meta('theme-color', surface));
+
+  function enregistrer() {
+    if (!('serviceWorker' in navigator) || window.top !== window) return;
+    navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' })
+      .catch(err => console.warn('PWA : service worker non enregistré', err));
+  }
+  if (document.readyState === 'complete') enregistrer();
+  else window.addEventListener('load', enregistrer, { once: true });
+})();

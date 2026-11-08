@@ -53,16 +53,23 @@ function preparer ({ biens = BIENS, erreurBiens = null, importJette = false,
         eq (c, v) { etat.filtres[c] = v; return chain },
         in (c, v) { etat.filtres[c + '_in'] = v; return chain },
         not (c, op, v) { etat.filtres[c + '_not'] = op + ' ' + v; return chain },
-        // ⚠ C'EST `limit` QUI RESOUT, parce que c'est le DERNIER maillon de la
-        // vraie requete. Faire resoudre `not` rendait la chaine plus courte que
-        // la vraie : `.limit()` n'existait plus, et le double levait au premier
-        // appel. Il vaut mieux qu'il leve que d'accepter une forme que
-        // PostgREST refuserait — mais il devait suivre la requete, pas
-        // l'inverse.
-        limit (n) {
-          etat.borne = n
+        // ⚠ `is` EXISTE PARCE QUE LE VRAI CLIENT L'A. Le lot « archiver un
+        // bien » ajoute `.is('archive_le', null)` APRES `.limit()` — une forme
+        // que PostgREST accepte sans broncher. Ce double resolvait sur
+        // `.limit()`, donc le maillon suivant tombait sur une PROMESSE : douze
+        // tests ont rougi pour une forme pourtant valide. Un double MOINS
+        // complet que le vrai fabrique un faux rouge, exactement comme un
+        // double plus permissif fabrique un faux vert.
+        is (c, v) { etat.filtres[c + '_is'] = v; return chain },
+        // ⚠ ET C'EST LA CHAINE QUI EST `thenable`, PAS `limit` QUI RESOUT.
+        // C'est ainsi que le vrai client fonctionne : chaque maillon rend la
+        // chaine, et l'attente declenche la requete. Faire resoudre un maillon
+        // nomme fige l'ORDRE des filtres, que PostgREST ne fige pas.
+        limit (n) { etat.borne = n; return chain },
+        then (resoudre, rejeter) {
           return Promise.resolve(erreurBiens ? { data: null, error: erreurBiens }
                                              : { data: biens, error: null })
+            .then(resoudre, rejeter)
         }
       }
       return chain
@@ -226,6 +233,20 @@ test('le PERIMETRE couvre la marque blanche, pas seulement `channex`', async () 
     'et pas un `eq` sur une seule')
   // ⚠ Et la lecture est BORNEE : Supabase tronque a 1000 lignes sans erreur.
   assert.ok(etat.borne > 0, 'la lecture des biens est bornee explicitement')
+})
+
+test("LE TEST QUI COMPTE : la file ECARTE les biens archives", async () => {
+  // ⚠ LE DEFAUT MESURE EN PRODUCTION LE 30 OCTOBRE 2026. Un bien dont l'import
+  // n'a jamais abouti garde son marqueur d'anteriorite a `null`, et
+  // `ordonnerPourImport` met « jamais importe d'abord » : il passait donc EN
+  // TETE a chaque cycle de cinq minutes, avant les biens vivants. Deux biens
+  // etaient dans ce cas sur le compte reel, dont un que Channex avait supprime.
+  // Le filtre doit porter sur la colonne, pas sur une liste de biens connus.
+  const { etat, handler } = preparer({})
+  await handler(req(), reponse())
+  assert.ok(etat.tables.includes('properties'), `tables lues : ${etat.tables.join(', ')}`)
+  assert.strictEqual(etat.filtres.archive_le_is, null,
+    'la file ne filtre pas sur `archive_le` : un bien archive y repasse en tete')
 })
 
 test('passe l echeance du parc, les biens restants ne sont PAS touches', async () => {

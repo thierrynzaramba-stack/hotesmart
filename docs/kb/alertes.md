@@ -392,3 +392,255 @@ marque du partenaire.
 `tests/reponse-partenaire-detection.test.js` : ils sont lancés à la main, leur
 sortie est lue par un humain au moment où il les lance, et aucun n'est déployé.
 Le même test refuse qu'un fichier de `api/` ou `lib/` soit exempté.
+
+## Délai d'alerte « info manquante » — le socle (lot 1, 27 octobre 2026)
+
+Spec : `docs/specs/spec-delai-reponse-ia.md`. Détail du chantier et des
+réglages : `docs/kb/guestflow.md`, section « Délai de réponse IA ».
+**Ce lot ne change aucun comportement** — le différé arrive au lot 3.
+
+### ⚠ Le constat qui compte : l'alerte n'a JAMAIS été réglable
+
+`lib/cron-classify.js` insère la tâche `info_unknown` ou `intervention`, puis
+appelle `sendAlertNotifications` **dans le même tour, inconditionnellement** —
+et **sans lire le mode du bien**. En Mode Test comme en Mode Auto, l'alerte
+d'info manquante part tout de suite.
+
+Donc le réglage `delais.alerte_info` ne retarde pas un chemin déjà réglable :
+**il crée le premier réglage de ce chemin.** L'intuition « c'était déjà en
+test » est fausse ici, et c'est pour ça que la migration pose `alerte_info = 0`
+**partout** : mettre 15 min aurait changé le comportement de biens en
+production sous couvert de migration. Les 15 min sont le défaut des biens
+**neufs**, à l'onboarding.
+
+### Ce qui restera inchangé au lot 3
+
+**`intervention` ne sera jamais retardée, jamais mise en sourdine.** L'urgence
+part dans le tour, `alert_after` reste nul pour ce type. Seule `info_unknown`
+porte une échéance.
+
+### La sourdine de nuit (lot 3)
+
+Activable par bien, plage réglable, **désactivée par défaut**. Une alerte dont
+l'échéance tombe dans la plage est repoussée à la fin de la plage. Plage qui
+enjambe minuit (22 h → 8 h) traitée explicitement : c'est le cas normal, pas le
+cas limite.
+
+⚠ **Le fuseau en v1 est `Europe/Paris` pour tous les biens**, dans une
+constante unique (`FUSEAU_V1`, `lib/guestflow/sourdine.js`) — décision de
+Thierry du 27 octobre 2026. `properties.timezone` **existe** déjà
+(`migrations/2026-09-08-fiche-unifiee.sql`), et on ne la lit volontairement
+pas tant qu'aucun bien n'est hors de France. La constante porte son motif :
+sans lui, la session qui lira « Paris en dur » dans six mois y verra un oubli
+et « corrigera » une décision. Ce qui reste interdit : calculer une sourdine en
+UTC en silence — la famille de bugs qui a dupliqué 83 messages le 14 septembre
+2026.
+
+### ⚠ Question ouverte au 27 octobre 2026 : la sourdine et l'alerte de reprise
+
+Le lot 2 ajoute une alerte quand le compte à rebours d'un brouillon **modifié
+par l'hôte** reprend, pour le prévenir avant qu'un texte peut-être inachevé
+parte. Thierry l'a demandée « même canal et même sourdine que l'info
+manquante ». **Les deux moitiés ne tiennent pas ensemble** : avec la sourdine,
+une reprise à 2 h du matin donne une alerte à 8 h, soit **après** le départ du
+brouillon — l'alerte n'avertit plus, elle raconte. Trois issues au §9 de la
+spec ; recommandation retenue en attente : la sourdine retarde **l'alerte ET
+l'envoi**, pour que l'avertissement précède toujours le texte.
+
+### Dette relevée en passant
+
+`lib/alert-notify.js` — `PROPERTY_NAMES` code en dur `169567` (« Cœur de vie
+23 ») et `209413` (« La bulle »). Tout autre bien s'annonce « Logement <id> »
+dans le SMS **et** dans l'objet de l'e-mail : l'hôte d'un troisième bien reçoit
+une alerte qui lui parle d'un numéro.
+
+## Le délai d'alerte et la sourdine — l'état au lot 2 (27 octobre 2026)
+
+Le lot 2 a livré le **réglage** (`delais.alerte_info`, `delais.sourdine` dans
+`agent_alert_config.config[<ref>]`) et la **règle de calcul**
+(`lib/guestflow/sourdine.js`). Ce qui **n'est pas** encore branché : le report
+effectif de l'alerte « info manquante », qui est le **lot 3**.
+
+Donc aujourd'hui, et il faut le savoir : **le réglage existe à l'écran, et
+l'alerte part toujours dans le tour.** La migration pose `alerte_info = 0`
+partout, donc le réglage affiché dit la vérité pour tous les biens existants —
+mais un hôte qui le passerait à 15 minutes ne verrait rien changer avant le
+lot 3. ⚠ C'est une dette assumée du découpage, pas un oubli.
+
+### Ce que `lib/guestflow/sourdine.js` garantit déjà
+
+- Plage **`[début, fin[`** : sans cette convention, une échéance repoussée à
+  8 h 00 retomberait dans la plage et serait repoussée à nouveau. Un test le
+  vérifie explicitement.
+- **Les deux changements d'heure sont éprouvés.** La fin reste 8 h de Paris
+  quand la nuit dure 23 heures (29 mars 2027) ou 25 (25 octobre 2026). Et une
+  mesure qui surprend : le report du 24 octobre dure **10 h 30 réelles** pour
+  9 h 30 de cadran — l'heure rendue s'y ajoute. Ma première assertion disait
+  11 h 30 et elle était **fausse** ; le module avait raison. Le calcul est posé
+  en entier dans le test, pour que personne ne refasse l'erreur. **Une durée de
+  sourdine se calcule sur des INSTANTS, jamais sur la différence des heures
+  affichées.**
+- **Chaque refus a son motif** (`sourdine_absente`, `sourdine_inactive`,
+  `plage_illisible`, `plage_vide`, `hors_plage`, `instant_illisible`) — jamais
+  un « non » silencieux.
+- **Aucune horloge lue** : tout instant est injecté, un test le vérifie par
+  grep sur `Date.now()`.
+
+### Le fuseau, et pourquoi il est en dur
+
+`FUSEAU_V1 = 'Europe/Paris'` pour tous les biens, décision de Thierry du
+27 octobre 2026. `properties.timezone` **existe** et n'est volontairement pas
+lue tant qu'aucun bien n'est hors de France. La constante porte son motif :
+sans lui, la session qui lira « Paris en dur » dans six mois y verra un oubli et
+« corrigera » une décision.
+
+### Décision 7 : la nuit, un brouillon MODIFIÉ ne part pas
+
+Et **seulement** modifié : un brouillon jamais touché part la nuit comme en
+journée. La sourdine protège le texte incertain de l'hôte, pas la réponse de
+l'IA. L'alerte part à la fin de la plage, puis le brouillon **15 minutes plus
+tard** — sans ce délai de grâce, l'alerte « avertirait » d'une chose déjà faite.
+Le report est en place dans la passe (`reportes` au bilan) ; **l'alerte
+elle-même est au lot 3**.
+
+## L'envoi au voyageur : trois issues, une porte, une alarme (30 octobre 2026)
+
+Branche `fix-envoi-ota`. Avant ce lot, le canal OTA écrivait `message_sent_log`
+et la ligne du fil **avant** l'envoi. Un refus du provider laissait donc les
+deux : `message_sent_log` étant la garde anti-doublon, le message ne repartait
+jamais, et le fil l'affichait comme parti. **Mesure en production : cinq envois
+perdus en sept jours sur La bulle**, tous Airbnb, tous `http_too_many_requests`,
+la ligne de journal horodatée 0,1 à 0,6 s *avant* l'incident — la même
+tentative. Le même défaut était déjà écrit dans le dépôt depuis septembre, et
+son correctif n'avait été appliqué qu'au canal e-mail.
+
+### Les trois issues (`lib/envoi-ota.js`)
+
+| issue | ce qu'on sait | ce qu'on fait |
+|---|---|---|
+| `LIVRE` | le provider a pris le message | on écrit le journal et le fil — **seule** issue qui écrit |
+| `REFUS` | il a répondu et n'a pas pris le message | on **compte**, le cron réessaie au palier suivant |
+| `INCERTAIN` | on ne sait pas s'il l'a reçu | **aucun rejeu**, une ligne « à vérifier » et un geste humain |
+| `PERMANENT` | rien n'y changera | un **arrêt** définitif, et on le dit |
+
+**Le statut HTTP passe avant la lisibilité du corps.** Un `429` dont le corps
+n'est pas du JSON — une page HTML de passerelle, la forme la plus banale d'une
+limite de débit — était classé INCERTAIN, donc bloqué jusqu'à un geste de
+l'hôte : exactement le symptôme de production, traité comme un doute au lieu
+d'un refus à rejouer. Un **4xx lu** est donc un refus certain, quelle que soit
+la forme du corps.
+
+⚠ **Mais la borne est haute aussi, et le premier correctif allait trop loin.**
+Écrit « tout statut ≥ 400 est un refus », il transformait un timeout de
+passerelle en **renvoi à l'aveugle** : un 502, 503, 504 ou 408 avec une page
+HTML ne vient pas de l'application — la requête a pu être **traitée** avant que
+le proxy abandonne, donc le voyageur recevait le même message une seconde fois,
+et jusqu'à cinq. Le test assumait le risque en disant « le plafond le borne » :
+il le borne à cinq doublons, pas à zéro. **Un 5xx ou un 408 au corps illisible
+reste INCERTAIN** ; porteur d'un code **du provider**, il redevient un refus,
+puisqu'un provider qui a su répondre a traité la requête. C'est la lisibilité du
+corps qui départage, pas le statut seul. Les trois codes qui sont les nôtres
+(`reponse_non_json`, `forme_inattendue`, `reponse_vide`) ne valent donc que
+pour un 2xx, un 5xx, un 408, ou un statut absent.
+
+### La porte, et pourquoi elle pose l'arrêt elle-même
+
+`porteOta` est consultée par les **deux** moteurs (`checkAndSendTemplate` et
+`triggerTemplates`) **avant** la génération du message — `generateAutoMessage`
+est un appel payant à Haiku, et un message au plafond en payait un à chaque
+tick. Elle lit, dans cet ordre : l'**arrêt** (sans fenêtre), le « **à
+vérifier** » (sans fenêtre), puis le **plafond** et le **palier** (fenêtre de
+24 h, paliers 0/5/15/45/120/360 minutes, 5 tentatives).
+
+⚠ **Elle POSE l'arrêt au plafond, et c'est le correctif d'un défaut de
+structure.** La gestion du plafond vivait en aval, dans `envoyerEtJournaliser` ;
+la porte en amont retournait `!ok` sans rien poser, donc la branche aval était
+**inatteignable**. Déroulé réel : 5 refus en 24 h → tick suivant, la porte
+refuse en silence → ni arrêt, ni alarme ; 24 h plus tard les 5 refus sortent de
+la fenêtre de comptage, la porte rouvre, **et le message part** — alors que
+l'hôte n'a jamais rien vu. Le test qui gardait cette branche faisait
+`indexOf('noterArretOta')` sur la **source** : il mesurait qu'une ligne était
+écrite, pas qu'elle s'exécute, et il est resté vert. L'effet se mesure
+maintenant en **appelant** la porte (`tests/porte-ota-execution.test.js`).
+
+⚠ **Et elle ne ferme que le mode Auto.** Placée avant la lecture du mode du
+bien, elle étouffait aussi la **proposition** du mode Test — donc le seul chemin
+qui restait à l'hôte pour envoyer le message à la main, celui que l'alerte lui
+demande d'emprunter. En mode Test il n'y a pas d'envoi, donc pas de rejeu à
+plafonner.
+
+### Une alarme, une fois
+
+`noterArretOta` **bloque et alerte** (`threshold: 1`). Il a existé un second
+writer, `noterAbandonOta`, qui n'alertait que : deux types d'incident pour un
+seul échec, et l'anti-spam de `reportIncident` étant clé sur
+`(type, property_id)`, **deux types différents ne se suppriment pas l'un
+l'autre** — donc deux cartes au bandeau, deux SMS et deux e-mails disant la
+même chose. Il est supprimé ; le compte des tentatives, seule information qu'il
+portait en plus, est passé à l'arrêt.
+
+Acquitter une alarme la retire de l'écran ; **ça ne relance aucun envoi**, et
+c'est délibéré : « acquitté » est ambigu, et rejouer serait la seule erreur
+irréversible de tout ce mécanisme.
+
+### Le verrou d'envoi
+
+Ne plus rien écrire avant l'envoi a emporté une protection que le défaut
+procurait par accident : deux passages de cron qui se chevauchent liraient
+« aucun journal » et enverraient les deux. `write_locks` la rend explicite —
+`insert` et non `upsert` (un conflit de clé primaire **est** le signal), un
+**jeton** pour ne relâcher que sa propre tenue, et une durée de **15 minutes**
+qui doit dépasser l'intervalle du cron. ⚠ Le cron qui compte n'est pas
+`/api/cron-messages` (`*/10`) comme l'avait écrit un commentaire, mais
+`api/cron.js` (`*/5`), qui appelle `processMessageTemplates`. Le test ne nomme
+plus aucun cron : il prend le **plus court** des intervalles déclarés.
+
+### Ce que l'hôte voit, et où il agit
+
+Quatre types atteignent le bandeau de `/aujourdhui` et sont acquittables, et
+**les deux listes doivent rester identiques** (`api/ecran/aujourdhui.js` et
+`api/incidents-acquitter.js`) : une alarme affichée mais non acquittable laisse
+un bouton qui rend 404 et une alarme à l'écran pour toujours.
+
+- `overbooking`, `message_ota_a_verifier`, `message_ota_arret`,
+  `email_voyageur_abandon`.
+- **Deux lectures, un plafond par famille** (décision de Thierry, 30 octobre
+  2026). Le `limit(50)` était partagé et trié par date descendante : les alarmes
+  d'envoi étant plus fraîches qu'une surréservation qui dure, cinquante d'entre
+  elles chassaient de l'écran le conflit le plus cher du produit. La
+  surréservation a maintenant sa lecture et son plafond ; rien ne peut plus la
+  pousser dehors.
+- **L'écran n'affiche que les incidents d'envoi nés après le déploiement**
+  (`SEUIL_ALARMES_ENVOI`). C'est une ceinture : mesure en production, **0 ligne**
+  de ces types avant le lot. L'historique (11 977 `api_credit`, 1 209
+  `send_failure`, jamais acquittés) n'est **pas** dans ces listes et n'entre donc
+  pas au bandeau ; il sera acquitté en masse plus tard, sur le go de Thierry,
+  avec auteur et motif, en lot séparé. ⚠ Ce seuil ne doit **jamais** être déplacé
+  vers le futur : il masquerait toutes les alertes d'envoi en silence. Un test
+  le refuse.
+- **Chaque carte commence par l'information utile.** La clé de corrélation
+  (`OTASTOP:…`, `OTAVERIF:…`) est en **fin** de phrase, entre crochets : en tête,
+  elle faisait lire quatre-vingts caractères d'identifiants techniques avant le
+  premier mot utile. `lireLignes` cherche par `ilike '%clé%'`, la position ne lui
+  importe pas.
+- **Chaque carte porte les phrases de sa famille.** Le bandeau ne servait que la
+  surréservation, et ses trois textes sont écrits pour elle : « Surréservation ·
+  {bien} », « Deux séjours sur la même nuit. », « L'alerte se répète jusqu'à
+  acquittement. » Sur un arrêt d'envoi, les trois sont faux — et le dernier est
+  l'inverse du mécanisme, puisqu'un arrêt n'alerte qu'une fois. Une alarme qui
+  se décrit faussement se classe faussement : l'hôte cherche un conflit de
+  calendrier et ne lit pas le message qui ne part pas.
+
+⚠ **DÉCISION PRODUIT EN ATTENTE, et elle dépasse ce lot.** En dérivant la liste
+du code qui pose les alarmes, on a compté, dans `api/` et `lib/`, **20 types qui
+réveillent l'hôte** (`threshold: 1`, avec un bien nommé) : **3 sont affichés**
+(les deux de l'envoi OTA et `email_voyageur_abandon`), et **17 n'apparaissent
+sur aucun écran** — `api_credit`, `booking_change_dispatch`, `circuit_breaker`,
+`claim_failure`, `email_confirmation_repli`, `event_loop`,
+`message_non_envoye` (« information manquante », le plus proche de ce lot),
+`notif_hote_non_envoyee`, `paiement_issue_incertaine`,
+`poussee_dates_sans_prix`, `poussee_nuits_vendues`, `prix_non_pousses`,
+`prix_sous_plancher`, `reservation_remboursee`, `seam_failure`, `send_failure`,
+`volume`. Les élargir au bandeau d'un coup
+noierait exactement l'écran que la décision ci-dessus protège. Choisir lesquels
+le méritent est une décision produit.
