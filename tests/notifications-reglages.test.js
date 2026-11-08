@@ -38,11 +38,13 @@ const NUIT = { debut: '22:00', fin: '07:00', jours: [1, 2, 3, 4, 5, 6, 7] }
 
 // ─── 1. Le catalogue ────────────────────────────────────────────────────────
 
-test('le catalogue : quatorze événements, codes et lettres uniques, chacun dans un groupe connu', () => {
+test('le catalogue : quinze événements, codes et lettres uniques, chacun dans un groupe connu', () => {
   const E = catalogue.EVENEMENTS
-  assert.equal(E.length, 14)
-  assert.equal(new Set(E.map(e => e.code)).size, 14)
-  assert.deepEqual(E.map(e => e.lettre).sort(), 'abcdefghijklmn'.split(''))
+  assert.equal(E.length, 15)
+  assert.equal(new Set(E.map(e => e.code)).size, 15)
+  assert.deepEqual(E.map(e => e.lettre).sort(), 'abcdefghijklmno'.split(''))
+  // o, trouvé à l'inventaire du 2c (Q27) : dans le groupe Avis, non urgent.
+  assert.deepEqual(catalogue.evenement('evaluation_voyageur'), { ...catalogue.evenement('evaluation_voyageur'), lettre: 'o', groupe: 'avis', domaine: 'avis', urgent: false })
   const groupes = new Set(catalogue.GROUPES.map(g => g.code))
   for (const e of E) assert.ok(groupes.has(e.groupe), `${e.code} : groupe ${e.groupe} inconnu`)
   // k (la pause automatique) est le seul sans domaine : titulaire seul (§5).
@@ -51,11 +53,15 @@ test('le catalogue : quatorze événements, codes et lettres uniques, chacun dan
   assert.deepEqual(E.filter(e => e.ecriture).map(e => e.lettre), ['a'])
 })
 
-test('LE TEST QUI COMPTE : les défauts de Thierry — urgent a, b, h, j ; notification et e-mail, jamais le SMS (Q16, Q23)', () => {
+test('LE TEST QUI COMPTE : les défauts de Thierry — urgent a, b, h, j ; notification et e-mail sans SMS, deux exceptions (Q16, Q23, Q26, Q28)', () => {
   assert.deepEqual(catalogue.EVENEMENTS.filter(e => e.urgent).map(e => e.lettre).sort(), ['a', 'b', 'h', 'j'])
+  const EXCEPTIONS = {
+    surreservation: { push: true, email: true, sms: true }, // Q26
+    message_voyageur: { push: true, email: false, sms: false } // Q28
+  }
   for (const e of catalogue.EVENEMENTS) {
     const d = catalogue.reglageParDefaut(e.code)
-    assert.deepEqual({ push: d.push, email: d.email, sms: d.sms }, { push: true, email: true, sms: false }, e.code)
+    assert.deepEqual({ push: d.push, email: d.email, sms: d.sms }, EXCEPTIONS[e.code] || { push: true, email: true, sms: false }, e.code)
   }
   assert.equal(catalogue.reglageParDefaut('inconnu'), null)
 })
@@ -231,7 +237,7 @@ test('aucun canal coché : rien ne part ; un code inconnu ou un instant illisibl
   assert.equal(decider({ code: 'avis', reglages: null, instant: 'x' }).motif, 'instant_illisible')
   // Une ligne abîmée en base retombe sur les défauts, canal par canal, sans rendre muet.
   const abime = decider({ code: 'surreservation', reglages: avecNuit({ surreservation: { push: 'oui', urgent: null } }), instant: MINUIT_ET_DEMIE })
-  assert.deepEqual([abime.canaux, abime.motif], [['push', 'email'], 'urgent'])
+  assert.deepEqual([abime.canaux, abime.motif], [['push', 'email', 'sms'], 'urgent'])
 })
 
 // ─── 4. Le writer ───────────────────────────────────────────────────────────
@@ -267,10 +273,11 @@ function baseReglages (lignes = []) {
 
 const toutCoche = () => Object.fromEntries(catalogue.EVENEMENTS.map(e => [e.code, { push: true, email: true, sms: true, urgent: false }]))
 
-test('effectifs : une personne sans ligne a les quatorze défauts ; une ligne partielle se fusionne', () => {
+test('effectifs : une personne sans ligne a les quinze défauts ; une ligne partielle se fusionne', () => {
   const vide = reglages.effectifs(null)
-  assert.equal(Object.keys(vide.evenements).length, 14)
-  assert.deepEqual(vide.evenements.surreservation, { push: true, email: true, sms: false, urgent: true })
+  assert.equal(Object.keys(vide.evenements).length, 15)
+  assert.deepEqual(vide.evenements.surreservation, { push: true, email: true, sms: true, urgent: true })
+  assert.deepEqual(vide.evenements.message_voyageur, { push: true, email: false, sms: false, urgent: false })
   assert.deepEqual(vide.plages, [])
   assert.equal(vide.langue, null)
   const partiel = reglages.effectifs({ evenements: { avis: { push: false, email: true, sms: true, urgent: true } }, plages: [NUIT], langue: 'en' })

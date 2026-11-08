@@ -361,3 +361,86 @@ rien.
    enregistrée — vérifiée par moi en base.
 5. Android : bloquer les notifications du site dans Chrome, rouvrir l'onglet :
    le chemin exact s'affiche, avec le lien vers le guide.
+
+## 10. Lot 2c-1 — le point d'envoi unique (8 novembre 2026)
+
+Spec : `docs/specs/spec-pwa-lot2-notifications.md` §16 (décisions Q25 à Q28).
+Branche `pwa-lot-2c1-envoi`, partie de `pwa-lot-2b-reglages`. La production
+reçoit 2b et tout le 2c ensemble (Q24).
+
+| Pièce | Fichier |
+|---|---|
+| Point d'envoi | `lib/notifications/notifier.js` (destinataires → réglages → décision → envoi ou file) |
+| Destinataires | `lib/notifications/destinataires.js` (titulaire par `is_owner`, membres par `niveauEffectif` et `dansPerimetre`, jamais un accès par lien) |
+| Envoi immédiat | `lib/notifications/envoi.js` (notification, e-mail plateforme, SMS clé du compte seulement sans appareil, dernier appareil) |
+| File d'attente | `migrations/2026-11-08-notifications-file.sql`, writer unique `lib/notifications/file.js`, passe `notifications_file` du cron |
+| Textes | `lib/notifications/textes.js` (fr, en, es ; le 2c-1 rédige la surréservation) |
+| Premier émetteur | `lib/cron-overbooking.js` (la surréservation) |
+| Retour au bon écran | `components/auth-guard.js` (`next` vers la page de connexion) |
+| Essai sur soi | `POST /api/push` `essai_evenement`, `vider_ma_file` |
+
+**Les règles, et pourquoi :**
+1. **Quinze événements** (Q27 : « Évaluation du voyageur à faire », trouvée à
+   l'inventaire), et deux exceptions aux défauts : le SMS de la surréservation
+   coché (Q26), l'e-mail du message d'un voyageur décoché (Q28).
+2. **Les droits se relisent à chaque envoi.** La surréservation va à qui peut
+   l'acquitter (`reservations` en écriture) ; un événement sans domaine (k) au
+   titulaire seul.
+3. **La notification remplace le SMS** (Q11) : jamais de SMS à qui a un
+   appareil abonné, même si la notification est décochée pour l'événement.
+   **Mais une notification qui n'a atteint AUCUN appareil ne remplace rien**
+   (5xx, délai, 403 après un changement de clé) : le SMS part (constat de
+   review). **Ne pas savoir vaut « sans appareil »** (lecture en panne, clés
+   absentes) : un SMS de trop plutôt qu'une surréservation manquée. Ce que le
+   titulaire a coupé sur le profil d'une personne (`notify_sms`,
+   `notify_email`) ne part pas : le SMS est payé par SA clé.
+4. **Le dernier appareil** (Q13) : quand tous les appareils d'une personne
+   répondent 404 ou 410, elle reçoit un e-mail, et le SMS coché part dès cet
+   envoi.
+5. **La file est rédigée dans la langue de la personne** au moment où
+   l'événement arrive, **sans ses coordonnées**. **Un sujet = une ligne** : la
+   relance d'une surréservation remplace sa ligne ; ce qui part MAINTENANT
+   retire la ligne du même sujet qui attendait ; une alarme éteinte ou
+   acquittée retire la sienne chez tout le compte.
+6. **À la sortie de la file** (constats de SÉCURITÉ de review) : **regroupé
+   par personne ET par compte** — jamais le bien d'un compte par les
+   coordonnées ou la clé SMS d'un autre ; **les droits et les coordonnées se
+   relisent** — une personne désactivée, ou qui a perdu le domaine ou le bien,
+   ne reçoit rien ; **chaque canal ne porte que ses lignes**.
+7. **Une ligne ne part qu'une fois** : la passe relit les droits, PUIS la
+   SUPPRIME en la prenant, groupe par groupe, au moment d'envoyer. Une relecture
+   des droits en panne laisse le groupe en base. Budget : 30 envois par passe,
+   pas de nouveau groupe sous 20 s de reste ; ce qui n'a pas commencé RESTE en
+   base. Ce que la marge ne garantit pas : un groupe commencé peut durer plus
+   qu'elle (5 s par appareil muet) — si le cycle est tué pendant lui, lui seul
+   est perdu. **La file en panne ne rend personne muet** : l'alerte part tout de
+   suite. **Ce qui vient de partir** (et seulement s'il est parti) retire la
+   ligne du même sujet qui attendait.
+8. **Un essai se dit essai** (« Essai — », « Test — », « Prueba — »), sur un
+   logement fictif, ne va qu'à l'appelant (`seulement`), et **en notification
+   seule — e-mail « dernier appareil » compris** : l'e-mail du profil se réécrit
+   librement (policy `profiles_write`), un essai qui écrit serait un relais vers
+   n'importe quelle adresse (deux constats de SÉCURITÉ, les deux reviews).
+   La ligne en file range l'identifiant ET la référence du bien : le périmètre se
+   relit sur le bien à la sortie.
+9. **Après une reconnexion, on revient à l'écran demandé** : `requireAuth`
+   passe la page en `next` ; `pages/login.html` la filtre (chemin du site
+   seulement) ; la page de connexion n'est jamais un `next`.
+
+**Limites connues** (review du 8 novembre) :
+- **Une adhésion se forge par la policy `profiles_write`** : un titulaire peut
+  écrire une ligne « membre accepté » au nom d'un tiers dont il connaît
+  l'identifiant, et ses notifications partiraient sur les appareils de ce
+  tiers. La cause est antérieure au lot (la même ligne ouvre déjà le compte au
+  tiers) : **dette à inscrire au registre**.
+- Une personne qui a décoché la notification d'un événement et coché le SMS,
+  avec un appareil abonné mort, ne reçoit pas le SMS de cet événement : ses
+  appareils sont comptés, pas sondés. Le premier événement envoyé en
+  notification nettoie l'appareil mort (et la prévient, Q13).
+- L'écran ouvert par la notification de surréservation (`/pages/aujourdhui`)
+  ne choisit pas le compte : un membre de plusieurs comptes y arrive sur son
+  compte courant.
+
+**Recette sur staging (pas de cron)** : l'essai et « vider ma file » se
+lancent depuis l'onglet Notifications ouvert (console du navigateur, avec la
+session), ou par moi dans le navigateur de Thierry.

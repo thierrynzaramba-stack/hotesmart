@@ -7,6 +7,8 @@
 //   POST   /api/push { action: 'essai' }          → une notification sur MES appareils
 //   POST   /api/push { action: 'reglages', evenements, plages }   (lot 2b)
 //   POST   /api/push { action: 'langue', langue }                 (lot 2b)
+//   POST   /api/push { action: 'essai_evenement', code }          (lot 2c-1)
+//   POST   /api/push { action: 'vider_ma_file' }                  (lot 2c-1)
 //   DELETE /api/push { endpoint } | { id }        → retirer un de MES appareils
 //
 // ⚠ C'EST L'ENDPOINT D'ÉCRAN DE L'ONGLET NOTIFICATIONS de `/settings` : un seul
@@ -25,6 +27,7 @@ const abonnements = require('../lib/push/abonnements')
 const { clesVapid, messageDeclaratif, envoyerAPersonne } = require('../lib/push/envoyer')
 const reglages = require('../lib/notifications/reglages')
 const catalogue = require('../lib/notifications/catalogue')
+const textes = require('../lib/notifications/textes')
 
 const MESSAGES_REFUS = {
   abonnement_absent: 'Abonnement manquant.',
@@ -121,6 +124,34 @@ module.exports = async function handler (req, res) {
       const r = await reglages.enregistrerLangue({ userId, langue: corps.langue })
       if (!r.ok) return refusReglages(res, r)
       return res.status(200).json({ ok: true, langue: r.langue })
+    }
+
+    // LOT 2c-1 — ÉPROUVER LA CHAÎNE SUR SOI-MÊME : un événement d'essai (logement
+    // fictif, titre « Essai — ») passe par le point d'envoi unique, AVEC les
+    // réglages et les heures calmes de l'appelant, et ne va qu'à LUI — jamais à
+    // un autre membre de son compte (`seulement`).
+    if (corps.action === 'essai_evenement') {
+      const donnees = textes.exemple(corps.code)
+      if (!donnees) return res.status(400).json({ error: 'Pas d’essai pour cet événement.', motif: 'essai_inconnu' })
+      const { notifier } = require('../lib/notifications/notifier')
+      // ⚠ LA NOTIFICATION SEULE : ni e-mail plateforme ni SMS. L'e-mail du
+      // profil se réécrit librement (policy `profiles_write`) : un essai par
+      // e-mail répété serait un relais illimité vers n'importe quelle adresse
+      // (constat de SÉCURITÉ de review ; même classe que api/alert-test.js).
+      const bilan = await notifier({
+        compte: userId, code: corps.code, donnees, seulement: userId, canauxPermis: ['push'],
+        chemin: '/settings?onglet=notifications', sujet: `essai:${corps.code}`
+      })
+      if (!bilan.ok) return res.status(503).json({ error: 'Essai impossible, réessayez.', bilan })
+      return res.status(200).json({ ok: true, bilan })
+    }
+
+    // Ce qui attend la fin de MES heures calmes part tout de suite (la recette
+    // sur staging, qui n'a pas de cron). Jamais les lignes d'un autre.
+    if (corps.action === 'vider_ma_file') {
+      const { viderFile } = require('../lib/notifications/file')
+      const bilan = await viderFile({ seulement: userId })
+      return res.status(200).json({ ok: true, bilan })
     }
 
     if (!cles) return res.status(503).json({ error: 'Les notifications ne sont pas encore configurées.', motif: 'cles_absentes' })

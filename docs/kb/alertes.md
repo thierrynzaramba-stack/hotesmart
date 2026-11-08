@@ -89,7 +89,9 @@ Aucun SMS n'est **inclus ni facturé par HôteSmart** : le SMS passe **par le co
 ## Surréservation — l'exception qui ne se tait pas
 
 `overbooking` est le SEUL type d'alerte à ne pas suivre l'anti-spam décrit
-ci-dessus. Il réémet un SMS toutes les ~45 minutes et ne s'arrête **que** par
+ci-dessus. Il réémet son alerte toutes les ~45 minutes (depuis le lot PWA 2c-1 :
+par le point d'envoi unique, notification ou SMS selon les appareils de chacun,
+`docs/kb/pwa.md` §10) et ne s'arrête **que** par
 acquittement manuel (`api/incidents-acquitter.js`, bouton au dashboard) — ou
 lorsque le conflit disparaît de lui-même.
 
