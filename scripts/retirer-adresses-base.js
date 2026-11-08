@@ -55,7 +55,16 @@ async function main () {
 
   const biens = await toutLire(() => sb.from('properties')
     .select('id, user_id, name, provider_property_id, address').order('id'))
-  const parCle = new Map(biens.map(b => [`${b.user_id}|${b.provider_property_id}`, b]))
+  // ⚠ DEUX CLÉS PAR BIEN (review 1 du lot) : `knowledge.property_id` est la
+  // référence du partenaire, mais une ligne ancienne peut porter l'UUID du
+  // bien. Indexée sur la seule référence, elle tombait en « bien introuvable »
+  // — donc SUPPRIMÉE sans regarder la fiche, alors qu'elle pouvait être la
+  // seule à porter l'adresse.
+  const parCle = new Map()
+  for (const b of biens) {
+    parCle.set(`${b.user_id}|${b.id}`, b)
+    if (b.provider_property_id) parCle.set(`${b.user_id}|${b.provider_property_id}`, b)
+  }
 
   const aSupprimer = []
   const bloquants = []

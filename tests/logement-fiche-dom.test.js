@@ -2024,3 +2024,13 @@ test('LE TEST QUI COMPTE : refusé par le serveur (membre), le bloc n existe PAS
   const panne = doc(M.ficheHtml(fiche({ accueil: null, indisponibles: ['accueil'] }), OUTILS(), { peutSupprimer: true }))
   assert.equal(panne.querySelector('[data-bloc="accueil"] [data-non-lu]').textContent, FR['fiche.accueil_non_lu'])
 })
+
+test('un bien ARCHIVÉ montre ses infos d accueil, sans crayon ni champ (la base refuse de les écrire)', () => {
+  // Review 1 du lot : le crayon menait à un refus « Seul le titulaire… », faux.
+  const f = fiche({ accueil: { faits: FAITS_ACCUEIL } })
+  f.bien = { ...f.bien, archive_le: '2026-11-01T10:00:00Z' }
+  const d = doc(M.ficheHtml(f, OUTILS(), { peutSupprimer: true, accueilEnEdition: 'wifi_nom' }))
+  assert.ok(d.querySelector('[data-acc-ligne="telephone_hote"]'), 'les infos restent lisibles')
+  assert.equal(d.querySelectorAll('[data-acc-modifier]').length, 0)
+  assert.equal(d.querySelector('[data-bloc="accueil"] [data-acc-saisie]'), null)
+})

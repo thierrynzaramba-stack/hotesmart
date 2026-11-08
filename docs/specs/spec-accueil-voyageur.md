@@ -47,8 +47,12 @@ qu'aujourd'hui seule la synchronisation Beds24 écrit (mesuré : aucune autre
 écriture dans le dépôt). C'est le repli que l'envoi passe déjà.
 
 Chaque ligne se corrige sur place, comme aujourd'hui dans la base : vider une
-valeur la supprime ; le cadenas « Hors IA » et « Vérifiée le … » suivent la
-ligne. **L'adresse n'est pas dans ce bloc** : elle reste dans « Le logement »,
+valeur la supprime ; le cadenas « Hors IA » suit la ligne. (« Vérifiée le … »
+et « À revoir » ne s'affichaient pas sur ces infos dans la base — seulement sur
+les réponses prêtes — et ne s'y affichent pas non plus : correction de la
+review 1, la première version de cette spec les disait conservés.) Un logement
+**archivé** montre ses infos, sans crayon : la base n'écrit que pour les
+logements en service. **L'adresse n'est pas dans ce bloc** : elle reste dans « Le logement »,
 et c'est la seule.
 
 **Réservé au titulaire**, comme la base aujourd'hui (le bloc porte le mot de
@@ -71,8 +75,11 @@ conversation : l'hôte tape la valeur, enregistre, l'aperçu se recalcule et
 **Seule exception, l'adresse** : elle n'est pas une info de la base (une seule
 adresse, celle de la fiche) ; une réponse refusée pour elle porte un lien
 « Ouvrir la fiche » vers le bloc « Le logement ». Écrire l'adresse depuis la
-conversation passerait par le writer de la fiche, qui la transmet aussi au
-canal — trop pour un geste fait au fil d'un message.
+conversation passerait par le writer de la fiche (`api/channel-property.js`),
+qui la transmet aussi à Channex pour un logement Channex — trop pour un geste
+fait au fil d'un message. (Pour un logement Beds24, ce writer ne la transmet
+pas : l'adresse de la fiche vit dans HôteSmart seulement, et c'est elle que le
+voyageur reçoit — §2, S2.)
 
 ## 2. Les règles de sûreté
 
@@ -81,9 +88,25 @@ canal — trop pour un geste fait au fil d'un message.
   la valeur saisie, puis l'heure synchronisée du canal, puis le défaut
   (horaires seulement).
 - **S2. Une seule adresse.** Plus aucun chemin ne lit l'adresse de la base :
-  l'envoi (`lib/cron-messages.js`, `lib/booking-changes-dispatch.js`), l'aperçu
-  et l'IA lisent l'adresse de la fiche. L'écriture d'une ligne `adresse` dans la
-  base est refusée.
+  l'envoi (`lib/cron-messages.js`, `lib/booking-changes-dispatch.js`, et le
+  message du **code d'accès**, `lib/message-builder.js` — oublié par la
+  première version, constat BLOQUANT de la review 1), l'aperçu et l'IA lisent
+  l'adresse de la fiche. L'écriture d'une ligne `adresse` dans la base est
+  refusée.
+  **Chemin Beds24** (constat IMPORTANT de la review 1) : le cron y lit l'objet
+  rendu par l'API Beds24, dont `address` est celle de Beds24, pas celle de la
+  fiche. `lib/cron-beds24-props.js` y pose `adresseFiche` (lu dans
+  `properties`, par la requête qu'il fait déjà à chaque cycle), et
+  `replisDuBien` la prend seule quand elle existe — une fiche vide est un
+  manque, pas un retour à l'adresse Beds24. Si la matérialisation renonce
+  (lecture des archives ou des clés migrées en échec), l'objet n'est pas
+  décoré et l'adresse Beds24, d'où la fiche a été tirée, reste le repli.
+  **Écart connu, non corrigé ici** : sur ce chemin, le téléphone de l'objet
+  Beds24 (`phone`) reste un repli de l'envoi, mais la fiche et l'aperçu ne le
+  voient pas (`properties` n'a pas de colonne téléphone). Un téléphone absent
+  de la base s'affiche « À remplir » alors que l'envoi Beds24 en poserait un.
+  Comportement d'avant ce lot, inchangé ; à fermer en persistant le téléphone
+  au cœur, comme les horaires.
 - **S3. L'IA ne perd rien.** Aujourd'hui l'IA ne lit que la base
   (`buildKnowledgeText`, quatre appelants). Elle reçoit désormais aussi
   l'adresse de la fiche et les horaires effectifs. Un test compare, bien par
@@ -118,7 +141,8 @@ canal — trop pour un geste fait au fil d'un message.
 | Adresse | **fusionnée** avec l'adresse de la fiche (décision du 8 novembre) |
 | « À remplir » en rouge | **conservé** |
 | Correction sur place, vider = supprimer | **conservé** |
-| Cadenas « Hors IA », « Vérifiée le … », « À revoir » | **conservés** sur chaque ligne |
+| Cadenas « Hors IA » | **conservé** sur chaque ligne |
+| « Vérifiée le … », « À revoir » | **sans objet** : le bloc ne les affichait pas (seules les réponses prêtes les portent) |
 | Clés sans balise (lues par l'IA seulement) | **déplacées**, sous « Autres infos pour l'IA » |
 | Lien « Le remplir » de « Utiliser » | **remplacé** par le champ sur place (§1.3) |
 
@@ -144,8 +168,10 @@ canal — trop pour un geste fait au fil d'un message.
   « Le remplir » sur place.
 - `lib/cron-classify.js` (`buildKnowledgeText`) et ses quatre appelants : la
   fiche du logement en plus de la base.
-- `lib/cron-messages.js`, `lib/booking-changes-dispatch.js` : l'adresse de la
-  fiche seulement.
+- `lib/cron-messages.js`, `lib/booking-changes-dispatch.js`,
+  `lib/message-builder.js` (et son appelant `lib/cron-arrival-code.js`) :
+  l'adresse de la fiche seulement.
+- `lib/cron-beds24-props.js` : `adresseFiche` sur l'objet Beds24 (S2).
 - `lib/balises.js` : `OU_ECRAN` par balise (S5).
 - `shared/i18n/{fr,en,es}.json`.
 

@@ -74,7 +74,7 @@ test.before(async () => {
 
 const FR = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', 'fr.json'), 'utf8'))
 
-function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, chemin = '/logements/b1', peutEcrireReservations = true, erreurEcriture = null } = {}) {
+function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, chemin = '/logements/b1', peutEcrireReservations = true, erreurEcriture = null, erreurRelecture = null, relue = null } = {}) {
   const dom = new JSDOM(
     `<!doctype html><html><head><style>[hidden]{display:none !important}</style></head>
      <body>${MAIN}</body></html>`,
@@ -99,7 +99,7 @@ function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, che
   }
   const api = {
     logement: {
-      fiche: async (id) => { etat.appels++; etat.demandes.push(id); if (erreur) throw erreur; return reponse }
+      fiche: async (id) => { etat.appels++; etat.demandes.push(id); if (erreur) throw erreur; if (erreurRelecture && etat.appels > 1) throw erreurRelecture; if (relue && etat.appels > 1) return relue; return reponse }
     },
     connaissance: {
       ecrire: async (corps) => { etat.ecritures.push(corps); if (erreurEcriture) throw erreurEcriture; return { ok: true } }
@@ -1282,4 +1282,32 @@ test('un refus du serveur (403) se dit, et la saisie n est pas perdue', async ()
   const e = doc.querySelector('[data-bind="accueil-erreur"]')
   assert.equal(e.hidden, false)
   assert.equal(e.textContent, '[fiche.accueil_refus]')
+})
+
+test('écrite mais pas relue : on ne dit pas « pas enregistrée » (l hôte retaperait une info déjà en base)', async () => {
+  // Constat de la review 1 du lot : les deux échecs étaient confondus.
+  const { doc, ctx, etat } = monter({ reponse: fiche({ accueil: ACCUEIL }), erreurRelecture: new Error('réseau') })
+  await ctx.__charger()
+  ctx.__editer('wifi_mdp')
+  doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value = 'secret'
+  await ctx.__enregistrerAccueil('wifi_mdp')
+  assert.equal(etat.ecritures.length, 1, 'l écriture est partie')
+  assert.equal(doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]'), null, 'l éditeur se referme : l info est en base')
+  const e = doc.querySelector('[data-bind="accueil-erreur"]')
+  assert.equal(e.hidden, false)
+  assert.equal(e.textContent, '[fiche.accueil_relu_echec]')
+})
+
+test('relue ILLISIBLE : le bloc le dit, au lieu de garder l ancien état', async () => {
+  // Un objet DISTINCT pour la relecture : muter celui du premier chargement
+  // passait contre le code d'avant, par aliasing (la page garde la référence).
+  const relue = fiche({ accueil: null })
+  relue.indisponibles = [...(relue.indisponibles || []), 'accueil']
+  const { doc, ctx } = monter({ reponse: fiche({ accueil: ACCUEIL }), relue })
+  await ctx.__charger()
+  ctx.__editer('wifi_mdp')
+  doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value = 'secret'
+  await ctx.__enregistrerAccueil('wifi_mdp')
+  const bloc = doc.querySelector('[data-bloc="accueil"]')
+  assert.ok(bloc.textContent.includes('fiche.accueil_non_lu'), bloc.textContent)
 })

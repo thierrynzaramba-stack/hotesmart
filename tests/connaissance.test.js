@@ -180,3 +180,16 @@ test('LE TEST QUI COMPTE : « vide » suit le remplaceur AVEC LES REPLIS de l’
   // Un repli blanc n'est pas une valeur (même règle que le remplaceur).
   assert.equal(faits([], { replis: { telephone_hote: '   ' } }).find(x => x.cle === 'telephone_hote').aRemplir, true)
 })
+
+test('une ligne `adresse` restée dans la BASE ne rend pas l’étiquette « remplie » (balise de fiche)', () => {
+  // Constat de la review 1 du lot Accueil du voyageur : le remplaceur ignore
+  // la base pour `adresse` (`fiche: true`), l'aperçu doit dire la même chose.
+  const { remplacerBalises } = require('../lib/balises')
+  const connaissance = { adresse: 'Ancienne adresse de la base' }
+  const r = remplacerBalises('x {adresse} y', { reservation: {}, connaissance, replis: {} })
+  const { segments } = enEtiquettes('x {adresse} y', connaissance, {})
+  assert.deepEqual(r.manquants, ['adresse'])
+  assert.equal(segments[1].vide, true, 'l’aperçu dit « remplie » une adresse que l’envoi ne prendra pas')
+  // Et avec l'adresse de la fiche, plus de trou.
+  assert.equal(enEtiquettes('x {adresse} y', connaissance, { adresse: '1 rue Fiche' }).segments[1].vide, false)
+})

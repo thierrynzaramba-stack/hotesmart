@@ -545,3 +545,42 @@ test('les bornes de taille rendent un CODE stable, que l écran sait lire', asyn
   const f = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'wifi_nom', value: 'x'.repeat(1001) }, repondre: base() })
   assert.equal(f.charge.error, 'trop_long')
 })
+
+// ⚠ REVIEW 1 DU LOT ACCUEIL DU VOYAGEUR : la fiche ignore `X-Compte` (le bien
+// désigne le compte) ; la base, non. Sélecteur resté sur un compte où l'on est
+// MEMBRE, le titulaire d'un bien voyait le bloc d'accueil de SON bien et se
+// faisait refuser l'écriture par « Réservé au titulaire du compte ».
+const BIEN_DU_MEMBRE = '33333333-3333-4333-8333-333333333333'
+function avecBienDuMembre () {
+  const defaut = base()
+  return (r) => {
+    const f = (c) => (r.filtres.find(x => x[0] === 'eq' && x[1] === c) || [])[2]
+    if (r.table === 'properties' && f('user_id') === MEMBRE) {
+      const lignes = [{ id: BIEN_DU_MEMBRE, name: 'Chez moi', provider_property_id: 'PM', photo_url: null, address: null, checkin_time: null, checkout_time: null }]
+      return { data: f('id') && f('id') !== BIEN_DU_MEMBRE ? [] : lignes, error: null }
+    }
+    return defaut(r)
+  }
+}
+
+test('LE TEST QUI COMPTE : le bien désigné prime sur X-Compte quand il est À L APPELANT', async () => {
+  const r = await appeler({ methode: 'POST', titulaire: false, repondre: avecBienDuMembre(),
+    corps: { action: 'enregistrer', bienId: BIEN_DU_MEMBRE, type: 'fixed', key: 'wifi_nom', value: 'RESEAU' } })
+  assert.equal(r.statut, 200, JSON.stringify(r.charge))
+  const ecrite = r.requetes.find(q => q.table === 'knowledge' && q.op !== 'select')
+  assert.ok(ecrite, 'une écriture')
+  const charge = Array.isArray(ecrite.charge) ? ecrite.charge[0] : ecrite.charge
+  assert.equal(charge.user_id, MEMBRE, 'écrite sur le compte DU BIEN, pas sur celui du sélecteur')
+  assert.equal(String(charge.property_id), 'PM')
+})
+
+test('et ne crée aucun droit : un bien du compte où l on est membre reste refusé', async () => {
+  const r = await appeler({ methode: 'POST', titulaire: false, repondre: avecBienDuMembre(),
+    corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'wifi_nom', value: 'X' } })
+  assert.equal(r.statut, 403)
+  assert.equal(r.requetes.filter(q => q.table === 'knowledge').length, 0)
+  const autre = await appeler({ methode: 'POST', titulaire: false, repondre: avecBienDuMembre(),
+    corps: { action: 'enregistrer', bienId: '44444444-4444-4444-8444-444444444444', type: 'fixed', key: 'wifi_nom', value: 'X' } })
+  assert.equal(autre.statut, 403)
+  assert.equal(autre.requetes.filter(q => q.table === 'knowledge').length, 0)
+})

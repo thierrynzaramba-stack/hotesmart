@@ -237,6 +237,7 @@
   "fiche.accueil_aide": "What your guests receive in your messages, and what the AI knows about the listing.",
   "fiche.accueil_non_lu": "The welcome details could not be read. Try again in a moment.",
   "fiche.accueil_echec": "The detail was not saved. Try again.",
+  "fiche.accueil_relu_echec": "The info is saved, but the display could not be refreshed. Reload the page.",
   "fiche.accueil_refus": "Only the account owner can change these details.",
   "fiche.bloc_logement": "The property",
   "fiche.bloc_menage": "Cleaning",

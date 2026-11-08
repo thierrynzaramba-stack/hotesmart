@@ -35,7 +35,9 @@ test('les placeholders lisent la base de connaissance AVANT le provider', () => 
   assert.match(messages, /replis: replisDuBien\(property\)/)
   const balises = lire('lib/balises.js')
   assert.match(balises, /telephone_hote: b\.phone,/)
-  assert.match(balises, /adresse: b\.address,/)
+  // L'adresse de la FICHE d'abord : `adresseFiche` sur l'objet Beds24 (posée
+  // par lib/cron-beds24-props.js), sinon `address`, qui EST la fiche ailleurs.
+  assert.match(balises, /adresse: b\.adresseFiche !== undefined \? b\.adresseFiche : b\.address,/)
 })
 
 test('plus aucune lecture nue de `property.phone`', () => {
@@ -186,7 +188,9 @@ test('l alerte dit QUOI, OU, et OU LE CORRIGER', () => {
   // « Accueil du voyageur ». Le chemin nomme LE logement de l'alerte.
   const { OU_REMPLIR } = require('../lib/balises')
   assert.equal(OU_REMPLIR.telephone_hote, 'Logements → <nom du logement> → Accueil du voyageur → Téléphone')
-  assert.match(t, /replace\('<nom du logement>', nom\)/, 'le gabarit est rempli par le nom du bien')
+  // Par FONCTION (review 1 du lot) : un nom porteur de `$&` ne doit pas
+  // devenir un motif de remplacement.
+  assert.match(t, /replace\('<nom du logement>', \(\) => nom\)/, 'le gabarit est rempli par le nom du bien')
 })
 
 test('l alerte ne fait jamais echouer le cycle', () => {

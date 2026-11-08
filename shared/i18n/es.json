@@ -237,6 +237,7 @@
   "fiche.accueil_aide": "Lo que sus huéspedes reciben en sus mensajes, y lo que la IA sabe del alojamiento.",
   "fiche.accueil_non_lu": "No se pudieron leer los datos de bienvenida. Inténtelo de nuevo en un momento.",
   "fiche.accueil_echec": "El dato no se ha guardado. Inténtelo de nuevo.",
+  "fiche.accueil_relu_echec": "La información está guardada, pero no se pudo actualizar la vista. Recargue la página.",
   "fiche.accueil_refus": "Solo el titular de la cuenta puede modificar estos datos.",
   "fiche.bloc_logement": "El alojamiento",
   "fiche.bloc_menage": "Limpieza",

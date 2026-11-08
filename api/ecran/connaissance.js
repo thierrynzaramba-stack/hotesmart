@@ -34,7 +34,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const { createClient } = require('@supabase/supabase-js')
-const { contexteDEcran } = require('../../lib/require-permission')
+const { contexteDEcran, UUID_RE } = require('../../lib/require-permission')
 const { estTitulaireDuCompte } = require('../../lib/permissions')
 const { colonneAbsente } = require('../../lib/colonne-absente')
 const { carte, faits, HORS_DES_FAITS } = require('../../lib/connaissance')
@@ -185,7 +185,24 @@ module.exports = async (req, res) => {
     res.setHeader('Allow', 'GET, POST')
     return res.status(405).json({ error: 'Méthode non autorisée' })
   }
-  const { accountUserId, contexte } = garde
+  let { accountUserId, contexte } = garde
+  // ⚠ LE BIEN DÉSIGNÉ PRIME SUR `X-Compte` QUAND IL EST À L'APPELANT (review 1
+  // du lot Accueil du voyageur). La fiche du logement ignore `X-Compte` — « le
+  // bien désigne le compte » (shared/logement-fiche.js) — et montre le bloc
+  // d'accueil au titulaire DU BIEN. Le sélecteur resté sur un compte où il est
+  // membre, l'écriture partait ici avec ce compte-là, et rendait « Seul le
+  // titulaire… » au titulaire lui-même. On ne bascule que vers SON PROPRE
+  // compte : aucun droit n'est créé, l'appelant est titulaire du sien.
+  const bienIdBrut = req.method === 'POST' ? String((req.body || {}).bienId || '').trim() : ''
+  if (bienIdBrut && UUID_RE.test(bienIdBrut) && !estTitulaireDuCompte(contexte)) {
+    const { data: aMoi, error: eM } = await supabase.from('properties').select('id')
+      .eq('id', bienIdBrut).eq('user_id', garde.userId).is('archive_le', null).maybeSingle()
+    compteur.n++
+    if (!eM && aMoi) {
+      accountUserId = garde.userId
+      contexte = { userId: garde.userId, accountUserId: garde.userId, profil: null, permissions: null }
+    }
+  }
   // ⚠ AVANT TOUTE LECTURE : un 403 posé après la lecture a déjà sorti les
   // données de la base.
   if (!estTitulaireDuCompte(contexte)) {

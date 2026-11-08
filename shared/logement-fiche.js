@@ -777,9 +777,13 @@ export function accueilHtml (fiche, outils, { enEdition = null, peutModifier = t
   if (a === null) {
     return (fiche.indisponibles || []).includes('accueil') ? nonLu('fiche.accueil_non_lu', outils) : null
   }
-  const lignes = (a.faits || []).map(f => (enEdition === f.cle
+  // ⚠ UN BIEN ARCHIVÉ SE LIT, IL NE SE RÈGLE PLUS (review 1 du lot) : la base
+  // refuse d'écrire pour lui (`api/ecran/connaissance.js`, biens vivants
+  // seulement), et le crayon menait à « Seul le titulaire… », un refus faux.
+  const modifiable = peutModifier && !(fiche.bien && fiche.bien.archive_le)
+  const lignes = (a.faits || []).map(f => (modifiable && enEdition === f.cle
     ? editeurInfoHtml(f, { t, esc })
-    : ligneInfoHtml(f, { t, esc, peutModifier })))
+    : ligneInfoHtml(f, { t, esc, peutModifier: modifiable })))
   return `<p class="fic-aide caption">${esc(t('fiche.accueil_aide'))}</p>
     <div class="kb-faits" data-bind="accueil">${lignes.join('')}</div>
     <p class="fic-erreur caption" data-bind="accueil-erreur" role="alert" hidden></p>`

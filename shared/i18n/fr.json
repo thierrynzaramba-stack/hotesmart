@@ -237,6 +237,7 @@
   "fiche.accueil_aide": "Ce que vos voyageurs reçoivent dans vos messages, et ce que l’IA sait du logement.",
   "fiche.accueil_non_lu": "Les infos d’accueil n’ont pas pu être lues. Réessayez dans un instant.",
   "fiche.accueil_echec": "L’info n’a pas été enregistrée. Réessayez.",
+  "fiche.accueil_relu_echec": "L’info est enregistrée, mais l’affichage n’a pas pu être mis à jour. Rechargez la page.",
   "fiche.accueil_refus": "Seul le titulaire du compte peut modifier ces infos.",
   "fiche.bloc_logement": "Le logement",
   "fiche.bloc_menage": "Ménage",

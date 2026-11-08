@@ -590,16 +590,32 @@ async function enregistrerAccueil (cle) {
   const valeur = champ.value
   accueilEnVol = true
   for (const b of document.querySelectorAll('[data-bloc="accueil"] button')) b.disabled = true
+  // ⚠ ÉCRIRE ET RELIRE SONT DEUX ÉCHECS DIFFÉRENTS (review 1 du lot) : une
+  // relecture tombée après une écriture réussie disait « pas enregistrée », et
+  // l'hôte retapait une info déjà en base.
+  let ecrit = false
   try {
     await enregistrerInfo((chemin, corps) => api.connaissance.ecrire(corps), { bienId: bienCourant.id, cle, valeur })
+    ecrit = true
     // Relu au serveur : l'état (« À remplir », « synchronisée », « par défaut »)
     // vient de la même règle que l'envoi, il ne se devine pas ici.
     const f = await api.logement.fiche(idDuBien)
-    ficheCourante = { ...ficheCourante, accueil: f.accueil }
+    // Le bloc relu peut être illisible (`indisponibles`) : on reprend CE drapeau
+    // seulement, les autres blocs n'ont pas été repeints.
+    const autres = (ficheCourante.indisponibles || []).filter(n => n !== 'accueil')
+    const illisible = (f.indisponibles || []).includes('accueil')
+    ficheCourante = { ...ficheCourante, accueil: f.accueil,
+      indisponibles: illisible ? [...autres, 'accueil'] : autres }
     accueilEnEdition = null
     peindreAccueil()
   } catch (e) {
     logger.error('Logement', e.message, { status: e.status })
+    if (ecrit) {
+      accueilEnEdition = null
+      peindreAccueil()
+      erreurAccueil(t('fiche.accueil_relu_echec'))
+      return
+    }
     peindreAccueil()
     const neuf = $('[data-bloc="accueil"] [data-acc-saisie]')
     if (neuf) neuf.value = valeur
