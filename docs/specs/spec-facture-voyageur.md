@@ -227,6 +227,9 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   le formulaire à la place du voyageur** — coordonnées reçues par message, ou
   voyageur qui ne remplit pas. La suite est identique : confirmation du total
   24 h après le départ, puis émission.
+- **Q13 (8 nov. 2026) : réponse A.** Le lien du voyageur est valable **1 an
+  après le départ** ; au-delà, l'hôte en renvoie un nouveau depuis la fiche.
+  La facture, elle, est conservée par HôteSmart indépendamment du lien.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
