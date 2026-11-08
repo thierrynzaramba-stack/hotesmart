@@ -186,6 +186,11 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   s'affiche sur la fiche pour que l'hôte le transmette lui-même (SMS…). Un
   voyageur dont la langue n'est ni le français, ni l'anglais, ni l'espagnol :
   proposition, l'anglais.
+  → **Réponse de Thierry (8 nov. 2026, 22 h 09) : d'accord pour les deux.**
+  (1) Réservation sans canal (Offline sans e-mail) : le lien s'affiche sur la
+  fiche avec un bouton « Copier », pour le lien du formulaire comme pour
+  « Votre facture est disponible » ; l'état dit que le message n'est pas
+  parti. (2) Langue inconnue ou autre que fr/en/es : **anglais**.
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
 
