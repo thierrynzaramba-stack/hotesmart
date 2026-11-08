@@ -40,6 +40,8 @@ const NON_DELEGABLES = [
   'pages/settings.html',            // équipe et droits du compte de l'appelant
   'pages/connexions.html',          // clés PMS — RLS `auth.uid()` stricte
   'pages/abonnement.html',          // facturation — domaine non délégable
+  'pages/entites-juridiques.html',  // entités juridiques — `facturation`,
+                                    // écriture réservée au titulaire
   'pages/compte.html',              // identité pure
   'pages/onboarding.html',          // l'onboarding est celui de la personne
   'pages/logement-nouveau.html',    // création d'un logement (V5, étape 4) :

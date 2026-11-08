@@ -43,6 +43,12 @@ create table if not exists
   rcs text,
   email text,
   telephone text,
+  -- Debut de l'exercice comptable, « MM-JJ »,
+  -- VIDE POSSIBLE et sans defaut (Thierry, 8 nov.
+  -- 2026, 22 h 50) : on ne suppose pas une annee
+  -- civile a la place de l'hote. Lu par le compte
+  -- de charges (purge au-dela de N-1).
+  debut_exercice text,
   par_defaut boolean not null
     default false,
   archivee_le timestamptz,
@@ -71,6 +77,10 @@ create table if not exists
     or siret ~ '^[0-9]{14}$'),
   constraint ej_pays_chk check (
     pays ~ '^[A-Z]{2}$'),
+  constraint ej_exercice_chk check (
+    debut_exercice is null
+    or debut_exercice ~
+    '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'),
   -- Une entite archivee n'est jamais celle
   -- par defaut.
   constraint ej_defaut_archive_chk

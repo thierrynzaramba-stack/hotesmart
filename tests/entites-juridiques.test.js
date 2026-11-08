@@ -187,6 +187,19 @@ test('LE TEST QUI COMPTE : assujetti exige SON taux (Q4), et seulement un taux p
   assert.equal(EJ.validerEntite({ ...ENTITE_OK, regime_tva: undefined }).champ, 'regime_tva')
 })
 
+test('LE TEST QUI COMPTE : le debut d\'exercice est VIDE par defaut (aucune annee civile supposee), « MM-JJ » sinon', () => {
+  assert.equal(EJ.validerEntite(ENTITE_OK).entite.debut_exercice, null, 'pas de valeur par defaut')
+  assert.equal(EJ.validerEntite({ ...ENTITE_OK, debut_exercice: '' }).entite.debut_exercice, null)
+  assert.equal(EJ.validerEntite({ ...ENTITE_OK, debut_exercice: '07-01' }).entite.debut_exercice, '07-01')
+  assert.equal(EJ.validerEntite({ ...ENTITE_OK, debut_exercice: '01-01' }).entite.debut_exercice, '01-01')
+  for (const mauvais of ['13-01', '02-30', '02-29', '04-31', '1-1', '01/01', 'janv']) {
+    assert.equal(EJ.validerEntite({ ...ENTITE_OK, debut_exercice: mauvais }).champ, 'debut_exercice', `accepte : ${mauvais}`)
+  }
+  assert.match(SQL, /debut_exercice text,/)
+  assert.doesNotMatch(SQL, /debut_exercice text\s+(not null|default)/, 'ni obligatoire ni par defaut en base')
+  assert.ok(EJ.CHAMPS.includes('debut_exercice'), 'rendu par entitesDuCompte')
+})
+
 test('validation : les refus nomment leur champ', () => {
   assert.equal(EJ.validerEntite({ ...ENTITE_OK, type: 'association' }).champ, 'type')
   assert.equal(EJ.validerEntite({ ...ENTITE_OK, nom: '   ' }).champ, 'nom')

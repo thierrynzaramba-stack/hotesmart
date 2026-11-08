@@ -222,6 +222,7 @@ Thierry.
 | `taux_tva` | nombre, vide possible | obligatoire si `assujetti`, réglé par l'hôte |
 | `capital`, `rcs` | vide possible | mentions d'une société, à valider avec un comptable |
 | `email`, `telephone` | vide possible | contact imprimé |
+| `debut_exercice` | texte « MM-JJ », **vide possible, sans défaut** | demandé par le compte de charges (Thierry, 8 nov. 2026, 22 h 50) : la purge au-delà de N-1 dépend de l'exercice de chaque entité ; on ne suppose pas une année civile |
 | `par_defaut` | booléen | **une seule** par compte (index unique partiel) |
 | `archivee_le` | horodatage, vide possible | on retire une entité, on ne la supprime pas : des factures et des charges y renvoient |
 | `cree_le`, `modifie_le` | horodatage | |
@@ -243,8 +244,12 @@ appartient au même `user_id`. Pas de ligne = l'entité par défaut du compte
 charges (colonne sur `properties`) : il faut le lui redire.
 
 **Où elle se règle** : test du dépôt « ce réglage a-t-il un sens si l'app
-n'existait pas ? » — oui. L'entité du compte se règle dans `/settings`, le
-remplacement d'un bien sur la fiche du logement.
+n'existait pas ? » — oui, donc dans Réglages : une page **« Entités
+juridiques »** (`pages/entites-juridiques.html`, onglet-lien de `/settings`,
+non délégable). **Le choix de l'entité de chaque logement vit sur cette même
+page**, pas sur la fiche du logement (Thierry, 8 novembre 2026, à l'étape 1) :
+la fiche est gardée sur `reglages`, et c'est là qu'un membre aurait pu changer
+l'émetteur des factures.
 
 **Accès** : RLS activée, **aucune politique**, et `revoke all from anon,
 authenticated` — exception à la règle 5 de REVIEW.md, nommée ici, sur le
@@ -464,10 +469,9 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    - Fiche de réservation : l'état de la facture arrive **dans la réponse
      existante** (`GET /api/calendar?booking=`) — une lecture de plus côté
      serveur, en parallèle, aucun appel de plus côté navigateur.
-   - Étape 1 : le bloc « Entité juridique » de `/settings` et le choix de
-     l'entité sur la fiche du logement lisent par leurs endpoints d'écran
-     existants quand il y en a, sinon par un seul endpoint neuf — décidé et
-     mesuré à l'ouverture de l'étape 1.
+   - Étape 1 : la page « Entités juridiques » lit UN endpoint,
+     `GET /api/entites-juridiques` (entités, logements, numérotation, lus en
+     parallèle côté serveur) ; `/settings` ne gagne qu'un lien, aucun appel.
 2. **Résumé pré-calculé : sans objet.** Une facture est un document comptable,
    donc une donnée temps réel, jamais un résumé.
 3. **Cache navigateur : aucun.** Ces écrans portent une identité et un
@@ -480,9 +484,11 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
 7. **Budget** : premier affichage < 1 s, écran complet < 2 s ; page publique
    = 1 appel ; un test compte les appels de chaque écran touché, et chaque
    endpoint pose `Server-Timing` avec son nombre de requêtes.
-8. **Mesure AVANT / APRÈS** (appels, requêtes, octets, sur staging) : `/settings`
-   et la fiche du logement au début de l'étape 1 ; la fiche de réservation au
-   début de l'étape 2. La page publique n'existe pas (AVANT sans objet).
+8. **Mesure AVANT / APRÈS** (appels, requêtes, octets, sur staging) : la page
+   « Entités juridiques » est neuve (AVANT sans objet ; APRÈS : 1 appel, son
+   nombre de requêtes dans `Server-Timing` — 3 + une par entité active), et
+   `/settings` ne gagne aucun appel ; la fiche de réservation au début de
+   l'étape 2. La page publique n'existe pas (AVANT sans objet).
 
 **Mobile** : le bouton, l'état et la confirmation existent aussi sur la fiche
 du téléphone ; la page publique est pensée pour le téléphone d'abord.

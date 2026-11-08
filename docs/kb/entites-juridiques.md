@@ -22,7 +22,7 @@ aucune entité automatique, aucune reprise des comptes existants.
 
 | Table | Rôle |
 |---|---|
-| `entites_juridiques` | l'identité : type, nom, adresse, SIRET, TVA intracommunautaire, régime de TVA (`exonere`, `franchise`, `assujetti` + taux réglé par l'hôte), mentions d'une société, contact ; `par_defaut` (une seule par compte) ; `archivee_le` (on archive, on ne supprime jamais) |
+| `entites_juridiques` | l'identité : type, nom, adresse, SIRET, TVA intracommunautaire, régime de TVA (`exonere`, `franchise`, `assujetti` + taux réglé par l'hôte), mentions d'une société, contact ; `debut_exercice` (« MM-JJ », vide possible et sans défaut — lu par le compte de charges pour sa purge au-delà de N-1) ; `par_defaut` (une seule par compte) ; `archivee_le` (on archive, on ne supprime jamais) |
 | `biens_entites` | le lien **bien → entité** (`property_uuid` → `entite_id`). Pas de ligne = l'entité par défaut du compte |
 | `factures_voyageur_suites` | la suite des numéros de facture, par entité et par **année de Paris** : préfixe, prochain numéro, dernier émis |
 
@@ -66,10 +66,23 @@ aucune entité automatique, aucune reprise des comptes existants.
   - En-têtes privés avant le premier refus, 405 compris ; `Server-Timing`
     avec le nombre de requêtes.
 
+## L'écran
+
+`pages/entites-juridiques.html` (onglet-lien de `/settings`, **non
+délégable**), vue `shared/entites-juridiques-vue.js` : les entités actives
+(résumé, numérotation, modifier, utiliser par défaut, archiver après
+confirmation), **« Vos logements »** — l'entité de chaque logement se choisit
+ICI, pas sur la fiche du logement (Thierry, 8 novembre 2026) — et les entités
+archivées repliées. Le formulaire suit le type et le régime : forme, capital et
+RCS pour une société, taux pour un assujetti ; un champ caché part vide. Le
+début d'exercice se choisit jour et mois, les deux ou rien. Clés i18n `ej.*`
+(fr, en, es).
+
 ## Les tests
 
-`tests/entites-juridiques.test.js` (migration, validation, endpoint,
-numérotation, lectures exposées), éprouvé par sept mutations (garde
-d'écriture, entité archivée, entité d'un autre compte, préfixe figé, périmètre,
-en-têtes, taux) ; `tests/ecrans-sans-biens-archives.test.js` couvre la liste
-des biens de l'écran.
+`tests/entites-juridiques.test.js` (migration, validation, début d'exercice,
+endpoint, numérotation, lectures exposées) et `tests/entites-juridiques-dom.test.js`
+(l'écran monté dans un DOM : aucun texte en dur, formulaire, gestes,
+échappement, page non délégable), éprouvés par onze mutations ;
+`tests/ecrans-sans-biens-archives.test.js` couvre la liste des logements de
+l'écran ; `tests/pages-non-delegables.test.js` recense la page.
