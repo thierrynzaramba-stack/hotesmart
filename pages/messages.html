@@ -46,7 +46,8 @@
         </button>
         <!-- Base de connaissance V5 (lot 3) : à côté de « Messages programmés »
              (décision du 3 novembre 2026). Ordinateur : le volet de 440 px ;
-             téléphone : la page plein écran /connaissance. -->
+             téléphone : le même volet, plein écran par-dessus Messages
+             (décision du 7 novembre 2026, spec kb-utiliser-reponse). -->
         <button type="button" class="msg-btnrond" data-ouvre-volet="connaissance" hidden
           data-i18n-attr="aria-label:kb.title;title:kb.title;data-legende:kb.title">
           <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-book"/></svg>
@@ -108,7 +109,7 @@
            que sur la LISTE : pour l'atteindre il fallait quitter le fil, et la
            page s'ouvrait sur le premier logement, sans voyageur. Celui-ci est
            DANS le fil. Même attribut que l'en-tête, donc même branchement
-           (titulaire seul, volet ou page, gel pendant une écriture). -->
+           (titulaire seul, le volet par-dessus, gel pendant une écriture). -->
       <button type="button" class="btn btn--secondary btn--icon" data-ouvre-volet="connaissance" hidden
         data-i18n-attr="aria-label:kb.title;title:kb.title">
         <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-book"/></svg>
@@ -184,6 +185,7 @@ const etat = {
   pausesLues: false,
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
+  saisieRemplie: null,     // { bookId, textes, vide } : textes posés par « Utiliser », remplis pour CE fil
   modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
   configIA: null,          // blob agent_alert_config.config ; null = illisible (volet ferme)
   prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
@@ -663,6 +665,12 @@ function renderFil () {
   // La saisie (etape 2) : retiree sans droit d'ecriture, jamais grisee.
   const saisie = $('[data-bind="saisie"]')
   saisie.hidden = !peutEcrireMessages()
+  // ⚠ LE CHAMP SE REMESURE UNE FOIS VISIBLE — recette de Thierry du
+  // 8 novembre 2026 : au téléphone, la saisie est cachée pendant le changement
+  // de fil, un champ caché mesure 0, et la hauteur de zéro prise là restait
+  // collée au champ (« sa hauteur se réduit en ouvrant plusieurs conversations
+  // à la suite »).
+  if (!saisie.hidden) ajusterHauteur($('[data-bind="texte"]'))
   const enPause = etat.pauses[String(c.propertyId)] === true
   const btnIA = $('[data-bind="proposer"]')
   btnIA.disabled = enPause
@@ -781,6 +789,14 @@ async function envoyer () {
   const zone = $('[data-bind="texte"]')
   const texte = zone.value.trim()
   if (!c || !texte) return
+  // ⚠ UN TEXTE POSÉ PAR « UTILISER » NE PART QUE DANS SA CONVERSATION —
+  // constat 1 de la review du lot, mesuré : rempli pour Ana (logement P2), il
+  // restait dans la saisie PARTAGÉE après un changement de fil, et « Envoyer »
+  // le postait à Marie — mot de passe wifi d'une autre maison compris. Le
+  // champ garde le texte (rien n'est jeté), et le dit.
+  if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
+  etat.saisieRemplie = null
+  effacerNoteChamp()
   zone.value = ''
   ajusterHauteur(zone)
   const entree = { texte, etatEnvoi: 'en_cours' }
@@ -855,6 +871,7 @@ function modifierProposition (id) {
     && !window.confirm(t('messages.draft_replace'))) return
   zone.value = x.suggested_reply || ''
   ajusterHauteur(zone)
+  etat.saisieRemplie = null
   etat.enEdition = { tacheId: x.id, bookId: String(etat.ouverte) }
   // ⚠ OUVRIR SUSPEND L'ECHEANCE (regle 2 du chantier). Sans ca, l'hote
   // corrigerait un texte qui part sous ses doigts. L'appel est optimiste :
@@ -1719,8 +1736,27 @@ function demonterConnaissance () {
   vueConnaissance = null
   if (perdue) noteReglage(t('kb.edit_dropped'))
 }
+// La réservation pour laquelle la vue doit être montée : celle du fil ouvert,
+// s'il séjourne dans CE logement — sinon aucune (l'aperçu prend alors le
+// prochain séjour, et « Utiliser » n'existe pas).
+function resaPourLaBase (ref) {
+  const duFil = bienDuFilOuvert()
+  return duFil === String(ref) && etat.ouverte !== null ? String(etat.ouverte) : null
+}
 async function peindreConnaissance (corps, ref) {
-  if (vueConnaissance && vueConnaissance.ref === String(ref) && corps.contains(vueConnaissance.racine)) return
+  // ⚠ LA VUE SE REMONTE AUSSI QUAND LA CONVERSATION CHANGE SOUS ELLE — même
+  // logement, autre voyageur. Montée pour une réservation, elle remplit ses
+  // textes pour CE voyageur : la garder après un changement de fil mettrait
+  // « Bonjour Ana » dans la conversation de Marie (spec kb-utiliser-reponse, R1).
+  const resa = resaPourLaBase(ref)
+  if (vueConnaissance && vueConnaissance.ref === String(ref) && corps.contains(vueConnaissance.racine)) {
+    if (vueConnaissance.resa === resa) return
+    // Même logement, autre fil, et une réponse prête EN COURS D'ÉCRITURE : on
+    // ne l'efface pas pour un changement de fil (constat 6). La vue garde sa
+    // réservation d'avant ; « Utiliser » y est refusé au geste, qui la remonte
+    // une fois l'écriture finie.
+    if (vueConnaissance.enEdition()) return
+  }
   demonterConnaissance()
   corps.innerHTML = `<div data-kb-racine><p class="muted small kb-vide">${esc(t('common.loading'))}</p></div>`
   const racine = corps.firstElementChild
@@ -1738,10 +1774,15 @@ async function peindreConnaissance (corps, ref) {
     || $('[data-bind="tiroir"]').hidden) return
   // L'aperçu se remplit avec le voyageur du fil ouvert — s'il séjourne dans
   // CE logement ; sinon le serveur prend le prochain séjour du bien.
-  const duFil = bienDuFilOuvert()
+  // ⚠ ET LA RESA SE RELIT ICI, APRÈS LE CHARGEMENT DU MODULE : le fil a pu
+  // changer pendant l'`import()`.
+  const resaMontee = resaPourLaBase(ref)
   vueConnaissance = moduleConnaissance.monterConnaissance({
     racine, appel, t, esc, bien: ref,
-    resa: duFil === String(ref) ? etat.ouverte : null,
+    resa: resaMontee,
+    // « Utiliser » n'existe qu'avec une conversation ouverte dans CE logement,
+    // et pour qui peut écrire dans la saisie.
+    utiliser: resaMontee && peutEcrireMessages() ? utiliserDansLaSaisie : null,
     // Le serveur peut peindre un AUTRE bien que celui demandé (bien archivé,
     // bien inconnu) : le sélecteur du tiroir suit ce qui est affiché, sinon il
     // nommerait un logement dont on lit les réponses d'un autre.
@@ -1753,106 +1794,124 @@ async function peindreConnaissance (corps, ref) {
     }
   })
 }
-const telephone = () => { try { return window.matchMedia('(max-width: 899px)').matches } catch { return false } }
-// La page plein écran du téléphone, sur le logement du fil ouvert s'il y en a
-// un (ou celui du tiroir), avec la réservation pour l'aperçu.
-function urlConnaissance () {
-  const q = new URLSearchParams()
-  const duFil = bienDuFilOuvert()
-  const ref = duFil || etat.tiroirBien
-  if (ref) q.set('bien', String(ref))
-  if (duFil && etat.ouverte !== null) q.set('resa', String(etat.ouverte))
-  return '/connaissance' + (q.toString() ? '?' + q : '')
-}
 // Depuis le lien du volet « Réponses de l'IA » : on change de volet, on ne
-// referme pas le tiroir.
+// referme pas le tiroir. Au téléphone aussi : depuis le 7 novembre 2026 la base
+// s'ouvre PAR-DESSUS Messages, jamais dans une autre page (spec
+// kb-utiliser-reponse §3). Ce qui retenait le départ vers la page (envoi en
+// cours, « Modifier », « Non envoyé ») et le texte gardé au départ n'existent
+// plus : on ne quitte plus rien, donc rien n'est coupé ni perdu.
 function ouvrirConnaissance () {
-  if (telephone()) { quitterVersConnaissance(); return }
   etat.tiroirVolet = 'connaissance'
   ouvrirTiroir(true)
 }
 
-// ⚠ AU TÉLÉPHONE, LA BASE EST UNE AUTRE PAGE : ON QUITTE MESSAGES. Depuis le
-// 7 novembre 2026 l'icône vit aussi à côté de la saisie, donc on peut partir
-// EN PLEINE FRAPPE, et quitter une page COUPE ce qui y était en vol.
-//
-// ⚠ ON NE PART DONC PAS TANT QUE QUELQUE CHOSE PEUT PARTIR DEUX FOIS — constats
-// 1 à 3 de la review du correctif, tous mesurés :
-//   · un envoi en cours (message libre ou proposition) : la page coupée avant
-//     la clôture laisse la tâche en `sending`, et un second clic au retour
-//     DOUBLE le message chez le voyageur ;
-//   · une proposition de l'IA en cours de « Modifier » : son enregistrement
-//     part au `blur`, AVANT le clic, et rien ne permet d'en attendre la fin —
-//     j'avais écrit un `await` qui n'attendait rien (vérifié par la review).
-//     Garder ce texte comme texte libre serait pire : son envoi ne validerait
-//     pas la proposition, qui partirait AUSSI à son échéance ;
-//   · un message « Non envoyé · Réessayer » de ce fil : il ne vit qu'en
-//     mémoire, la page le perdrait.
-// Dans ces cas l'icône le DIT sous la saisie, et on reste.
-//
-// Sinon : un texte LIBRE est gardé (même compte, une heure, rendu une seule
-// fois au retour par `reprendreSaisieGardee`), et l'adresse de Messages porte
-// le fil (?conv=), pour que le retour — bouton de la page ou retour arrière —
-// le rouvre.
-const CLE_SAISIE_GARDEE = 'hs-messages-saisie'
-const SAISIE_GARDEE_MS = 60 * 60 * 1000
-function departBloque () {
-  const enVol = [...etat.envois.values()].some(l => l.some(e => e.etatEnvoi === 'en_cours'))
-    || etat.taches.some(x => x.etatEnvoi === 'en_cours')
-  if (enVol) return 'messages.kb_wait_send'
-  if (etat.enEdition) return 'messages.kb_finish_edit'
-  const enEchec = (etat.envois.get(String(etat.ouverte)) || []).some(e => e.etatEnvoi === 'echec')
-  if (enEchec) return 'messages.kb_failed_send'
-  return null
-}
-function quitterVersConnaissance () {
-  // Depuis la LISTE (fil fermé), le geste d'avant ce correctif est inchangé.
-  if (etat.ouverte !== null) {
-    const bloque = departBloque()
-    if (bloque) { noteReglage(t(bloque)); return }
-    const zone = $('[data-bind="texte"]')
-    const texte = zone ? String(zone.value || '') : ''
-    try {
-      if (texte.trim()) {
-        sessionStorage.setItem(CLE_SAISIE_GARDEE, JSON.stringify({
-          compte: String(compteCourant()), bookId: String(etat.ouverte), texte, t: Date.now()
-        }))
-      } else sessionStorage.removeItem(CLE_SAISIE_GARDEE)
-    } catch (e) { logger.error('Messages', 'saisie gardée', e) }
-    try {
-      const u = new URL(location.href)
-      u.searchParams.set('conv', String(etat.ouverte))
-      u.searchParams.delete('volet')
-      history.replaceState(history.state, '', u)
-    } catch (e) { logger.error('Messages', 'adresse du fil', e) }
+// « Utiliser » une réponse prête (spec kb-utiliser-reponse) : le texte, déjà
+// rempli par le serveur pour CE voyageur, va À LA SUITE de ce qui est tapé, et
+// la base se referme sur la conversation. ⚠ RIEN NE PART (R4) : l'envoi reste
+// le bouton « Envoyer », avec tout ce qui l'entoure — validation d'une
+// proposition en cours de « Modifier » (R5), échec « Non envoyé · Réessayer ».
+function utiliserDansLaSaisie ({ texte, resa, ref }) {
+  // ⚠ LA CONVERSATION A PU CHANGER SOUS LA VUE, et c'est revérifié AU GESTE :
+  // le fil ouvert doit être celui pour lequel le texte a été rempli (R1), dans
+  // le logement de ce texte (R2). Sinon on le dit, et la vue se remonte sur le
+  // fil ouvert.
+  if (etat.ouverte === null || String(etat.ouverte) !== String(resa) || bienDuFilOuvert() !== String(ref)) {
+    noteReglage(t('kb.use_other_conv'))
+    renderTiroir()
+    return false
   }
-  location.assign(urlConnaissance())
-}
-// Le texte gardé est LU ET RETIRÉ au chargement, une seule fois (constat 4 :
-// laissé en place, un texte déjà envoyé pouvait revenir plus tard). Il n'est
-// rendu qu'au fil que l'adresse rouvre, pour le même compte, dans l'heure,
-// sans proposition en cours de modification, et dans une saisie VIDE.
-function reprendreSaisieGardee (bookIdOuvert) {
-  let garde = null
-  try {
-    garde = JSON.parse(sessionStorage.getItem(CLE_SAISIE_GARDEE) || 'null')
-    sessionStorage.removeItem(CLE_SAISIE_GARDEE)
-  } catch { return }
-  if (!garde || !garde.texte || bookIdOuvert === null || bookIdOuvert === undefined) return
-  if (String(garde.bookId) !== String(bookIdOuvert)) return
-  if (String(garde.compte) !== String(compteCourant())) return
-  if (!(Date.now() - Number(garde.t) < SAISIE_GARDEE_MS)) return
-  if (etat.enEdition) return
+  const saisie = $('[data-bind="saisie"]')
   const zone = $('[data-bind="texte"]')
-  if (!zone || zone.value.trim()) return
-  zone.value = garde.texte
+  if (!saisie || saisie.hidden || !zone) return false
+  // ⚠ LE CHAMP PORTE DÉJÀ UN TEXTE PRÉPARÉ POUR UNE AUTRE CONVERSATION :
+  // on n'y ajoute rien (constat 3 de la review 2, mesuré : la marque passait
+  // au fil de Marie et le texte d'Ana partait avec le sien).
+  if (saisieRemplieAilleurs()) { noteReglage(t('kb.use_wrong_conv')); return false }
+  const avant = zone.value.replace(/\s+$/, '')
+  zone.value = avant ? avant + '\n' + texte : String(texte)
   ajusterHauteur(zone)
+  // Pour QUI ces textes ont été remplis : la saisie est partagée entre les
+  // fils de la page, et chacun porte un prénom et les infos d'un logement.
+  // TOUS sont gardés, pas le dernier (constat 1 de la review 2).
+  const r = etat.saisieRemplie
+  if (r && String(r.bookId) === String(resa)) { r.textes.push(String(texte)); r.vide = false }
+  else etat.saisieRemplie = { bookId: String(resa), textes: [String(texte)] }
+  ouvrirTiroir(false)
+  zone.focus()
+  try { zone.setSelectionRange(zone.value.length, zone.value.length) } catch {}
+  return true
 }
-// Retour arrière servi depuis le cache du navigateur : la page revient INTACTE,
-// saisie comprise, et `init` ne se rejoue pas. Le texte gardé n'a plus d'objet.
-window.addEventListener('pageshow', (e) => {
-  if (e.persisted) { try { sessionStorage.removeItem(CLE_SAISIE_GARDEE) } catch {} }
-})
+// Le champ porte-t-il un texte de la base rempli pour une AUTRE conversation ?
+function saisieRemplieAilleurs () {
+  const r = etat.saisieRemplie
+  const zone = $('[data-bind="texte"]')
+  if (!r || !zone || !zone.value.trim() || String(r.bookId) === String(etat.ouverte)) return false
+  return !r.vide || textePoseRevenu(r, zone.value)
+}
+// ⚠ UN CHAMP VIDÉ N'OUBLIE PAS TOUT DE SUITE POUR QUI IL AVAIT ÉTÉ REMPLI —
+// constat 1 de la review 3, mesuré : vider le champ puis annuler (Ctrl+Z)
+// remettait le texte d'Ana, sans marque, et il partait chez Marie. La marque
+// passe « vide » ; à la frappe suivante, si un texte posé est revenu tel quel,
+// elle reprend, sinon (l'hôte écrit le sien) elle est abandonnée.
+const textePoseRevenu = (r, valeur) => r.textes.some(tx => String(valeur).includes(tx))
+// Le champ, une fois retirés les textes posés par « Utiliser » : ce qui reste
+// est ce que l'hôte a écrit lui-même (ou le texte de l'IA d'un « Modifier »).
+function sansTextesPoses (valeur) {
+  const r = etat.saisieRemplie
+  let v = String(valeur || '')
+  if (!r) return v
+  for (const tx of [...r.textes].reverse()) {
+    const i = v.lastIndexOf(tx)
+    if (i >= 0) v = v.slice(0, i) + v.slice(i + tx.length)
+  }
+  return v
+}
+// Une note sur le CHAMP se lit sous le champ, tiroir ouvert ou non : dans le
+// tiroir, le repointage du panneau sur le nouveau fil l'effaçait (constat 5
+// de la review 2).
+function noteChamp (texte) {
+  const note = $('[data-bind="saisie-etat"]')
+  note.hidden = false
+  note.textContent = texte
+}
+// La note R7 dit l'état d'un fil précis : elle tombe quand on change de fil et
+// quand un envoi passe (constat 2 de la review 3 — « il ne partira pas ici »
+// restait affiché dans la bonne conversation, après l'envoi). Seules les deux
+// notes R7 sont effacées : les autres messages de la saisie ont leur vie.
+function effacerNoteChamp () {
+  const note = $('[data-bind="saisie-etat"]')
+  if (!note || note.hidden) return
+  if (note.textContent === t('kb.use_wrong_conv')) {
+    note.hidden = true
+    note.textContent = ''
+  }
+}
+// Changer de fil avec un texte de la base dans le champ. S'il n'y a QUE des
+// textes posés, tels quels, ils sont RETIRÉS (ils étaient remplis pour l'autre
+// voyageur). S'il reste quoi que ce soit d'autre — une retouche, une phrase
+// ajoutée avant ou après, le texte d'une proposition —, on ne devine pas ce
+// qui est à qui : TOUT reste, la marque aussi, et « Envoyer » le refusera ici
+// (constats 1, 2 et 4 de la review 2 : retirer seulement le texte posé
+// laissait partir ailleurs, sans marque, ce qui était écrit pour Ana). Le
+// retrait se fait EN SILENCE (recette de Thierry du 8 novembre 2026 : la note
+// « retiré du champ » était de trop) ; le texte qui reste, lui, le dit.
+function rangerSaisieRemplie (bookId) {
+  const r = etat.saisieRemplie
+  const zone = $('[data-bind="texte"]')
+  if (!r || !zone || String(r.bookId) === String(bookId)) return
+  // Champ vide : la marque reste, « vide » — une annulation peut remettre le
+  // texte dans le fil suivant (constat 1 de la review 3).
+  if (!zone.value.trim()) { r.vide = true; return }
+  if (r.vide && !textePoseRevenu(r, zone.value)) { etat.saisieRemplie = null; return }
+  r.vide = false
+  if (!sansTextesPoses(zone.value).trim()) {
+    zone.value = ''
+    ajusterHauteur(zone)
+    etat.saisieRemplie = null
+    return
+  }
+  noteChamp(t('kb.use_wrong_conv'))
+}
 
 // ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
 // MEMES lectures et MEMES ecritures RLS que l'ancienne app templates
@@ -2370,8 +2429,7 @@ function voletAlertes (ref) {
 function brancherTiroir (corps, ref) {
   // Le lien « Connaissances » mene a la base de connaissance V5 : l'ancienne
   // page redirige vers elle (lot 3, decision de Thierry du 5 novembre 2026).
-  // Il change de VOLET, il ne quitte plus Messages ; au telephone, il ouvre la
-  // page plein ecran.
+  // Il change de VOLET, il ne quitte plus Messages — au telephone non plus.
   corps.querySelector('[data-ouvre-connaissance]')?.addEventListener('click', (e) => {
     e.preventDefault()
     ouvrirConnaissance()
@@ -3526,6 +3584,9 @@ function dateLongue (jour) {
   return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
 }
 function ouvrir (bookId) {
+  // La note R7 du fil d'avant ne vaut plus ici (constat 2 de la review 3) ;
+  // celle du nouveau fil, s'il y en a une, est posée plus bas.
+  if (String(bookId) !== String(etat.ouverte)) effacerNoteChamp()
   // Le statut d'evaluation se REDEMANDE a chaque ouverture : une publication
   // faite depuis la fiche resa, ou un echec transitoire, ne fige rien.
   etat.evaluations.delete(String(bookId))
@@ -3539,12 +3600,21 @@ function ouvrir (bookId) {
     enregistrerBrouillonEnCours()
     const zone = $('[data-bind="texte"]')
     const xEd = tacheParId(etat.enEdition.tacheId)
-    if (xEd && zone.value.trim() === String(xEd.suggested_reply || '').trim()) {
+    // Le texte de l'IA, plus seulement des réponses posées par « Utiliser »
+    // dans CE fil, n'est pas une retouche de l'hôte : il repart lui aussi
+    // (constat 2 de la review 2 — sans ça, l'ajout le faisait passer pour
+    // retouché, et il restait dans la saisie du fil suivant).
+    const ia = String(xEd ? xEd.suggested_reply || '' : '').trim()
+    const r = etat.saisieRemplie
+    const poses = r && String(r.bookId) === String(etat.enEdition.bookId)
+    if (xEd && (zone.value.trim() === ia || (poses && sansTextesPoses(zone.value).trim() === ia))) {
       zone.value = ''
       ajusterHauteur(zone)
+      if (poses) etat.saisieRemplie = null
     }
     etat.enEdition = null
   }
+  rangerSaisieRemplie(bookId)
   etat.ouverte = bookId
   // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry
   // du 30 octobre 2026 (« le volet s'est encore ouvert sur Maison Jardin »), et
@@ -3557,6 +3627,9 @@ function ouvrir (bookId) {
   // La bascule de volet continue de ne rien repointer ; c'est l'ouverture d'un
   // fil qui repointe, et elle seule.
   reporterLePanneauSurLeFil()
+  // La base ouverte suit la CONVERSATION, pas seulement le logement : même
+  // logement, autre voyageur, et sa vue se remonte pour lui (R1).
+  if (etat.tiroirVolet === 'connaissance' && $('[data-bind="tiroir"]').hidden === false) renderTiroir()
   const c = etat.conversations.find(x => String(x.bookId) === String(bookId))
   // L'ouverture POSE l'etat lu (etape 2) — optimiste a l'ecran, silencieux en
   // cas de refus (un profil en lecture seule n'ecrit pas, l'heuristique reste).
@@ -3604,9 +3677,8 @@ async function init () {
   document.querySelectorAll('[data-ouvre-volet]').forEach(b => {
     b.hidden = !reglagesIci()
     b.addEventListener('click', () => {
-      // La base de connaissance au TÉLÉPHONE est une page plein écran, pas le
-      // tiroir (spec KB V5 §3.1).
-      if (b.dataset.ouvreVolet === 'connaissance' && telephone()) { quitterVersConnaissance(); return }
+      // Au téléphone comme à l'ordinateur : le tiroir. Il couvre l'écran du
+      // téléphone (`width: min(440px, 100vw)`), par-dessus la conversation.
       const tiroir = $('[data-bind="tiroir"]')
       const deja = !tiroir.hidden && etat.tiroirVolet === b.dataset.ouvreVolet
       etat.tiroirVolet = b.dataset.ouvreVolet
@@ -3634,7 +3706,20 @@ async function init () {
   $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
   // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
   const zoneTexte = $('[data-bind="texte"]')
-  zoneTexte.addEventListener('input', () => ajusterHauteur(zoneTexte))
+  zoneTexte.addEventListener('input', () => {
+    ajusterHauteur(zoneTexte)
+    // Un champ vidé à la main garde sa marque, « vide » : une annulation peut
+    // remettre le texte posé (constat 1 de la review 3). À la frappe suivante,
+    // un texte posé revenu tel quel la reprend ; le texte de l'hôte l'abandonne.
+    const r = etat.saisieRemplie
+    if (r) {
+      if (!zoneTexte.value.trim()) r.vide = true
+      else if (r.vide) {
+        if (textePoseRevenu(r, zoneTexte.value)) r.vide = false
+        else etat.saisieRemplie = null
+      }
+    }
+  })
   // ⚠ LE BROUILLON DE L'HOTE S'ENREGISTRE QUAND IL QUITTE L'EDITEUR
   // (decision 6 de Thierry, 27 octobre 2026). Sans ca, la reprise du compte a
   // rebours enverrait le texte de l'IA — la version que l'hote avait
@@ -3678,8 +3763,6 @@ async function init () {
   // point 2 de la recette, rouvert par la porte des liens profonds.
   const demandee = params.get('conv')
   if (demandee && etat.conversations.some(x => String(x.bookId) === String(demandee))) ouvrir(String(demandee))
-  // Retour de la base de connaissance (téléphone) : le texte libre gardé au départ.
-  reprendreSaisieGardee(etat.ouverte)
   // Volet demandé par les redirections de l'ancienne app (?volet=ia ou
   // programmes) : le panneau s'ouvre à l'arrivée — titulaire seulement,
   // comme les boutons qui y mènent.
@@ -3689,9 +3772,8 @@ async function init () {
     ouvrirTiroir(true)
   }
   // La redirection de l'ancienne base de connaissance (?volet=connaissance) :
-  // le volet à l'ordinateur, la page plein écran au téléphone.
+  // le volet, par-dessus Messages au téléphone comme à l'ordinateur.
   if (voletDemande === 'connaissance' && reglagesIci()) {
-    if (telephone()) { location.replace(urlConnaissance()); return }
     etat.tiroirVolet = 'connaissance'
     ouvrirTiroir(true)
   }
