@@ -426,8 +426,14 @@ export function rendre (data, opts = {}) {
   // part (`anciens_a_traiter`), sans quoi la bulle dirait « Rien ne vous
   // attend » pendant qu'un message ecrit apres le depart attend (revue du lot
   // Avis V5, constat 5). Section ouverte, elles viennent des Anciens eux-memes.
-  const anc = separerDetections(anciensCharges ? c.anciens : ((data && data.anciens_a_traiter) || []))
-  const detections = [...att.detections, ...rec.detections, ...anc.detections]
+  // ⚠ LES DETECTIONS DES ANCIENS VIENNENT DES DEUX SOURCES, sans doublon : la
+  // liste servie a part (bornee) ET la section ouverte (bornee autrement). Une
+  // seule source les faisait apparaitre ou disparaitre a l'ouverture (re-review
+  // du lot V5, B.2).
+  const anc = anciensCharges ? separerDetections(c.anciens) : { detections: [], restantes: null }
+  const vues = new Set()
+  const detections = [...att.detections, ...rec.detections, ...anc.detections, ...separerDetections((data && data.anciens_a_traiter) || []).detections]
+    .filter(({ a }) => (vues.has(a.id) ? false : (vues.add(a.id), true)))
   const attente = c.attente || []
   const n = attente.length + detections.length
 
@@ -442,7 +448,7 @@ export function rendre (data, opts = {}) {
   const recents = rec.restantes
   // Le compte des Anciens dit les CARTES que la section montre : une carte qui
   // n'avait qu'une detection est montee dans « À traiter » et n'y est plus.
-  const seules = ((data && data.anciens_a_traiter) || []).filter(x => (x.avis || []).every(a => a.detecte) && !x.evaluation).length
+  const seules = Number(data && data.anciens_detection_seule) || 0
   const anciensTotal = Math.max(0, (Number(data && data.anciens_total) || 0) - seules)
   const anciens = anciensCharges
     ? (anc.restantes.length ? grille(anc.restantes, 'a') : `<p class="avp-gris">${ECHAPPER(T('avis.anciens_vide'))}</p>`)
@@ -472,7 +478,7 @@ export function rendre (data, opts = {}) {
  */
 export async function monter (conteneur, options = {}) {
   if (!conteneur) throw new Error('[avis] les cartes exigent un conteneur')
-  const { charger: lire, actions = {}, bus = null, peutEcrire = false, filtres = () => ({}), surDonnees = () => {}, zoneStats = null, initiales = null, surPret = () => {}, t = null, langue = 'fr' } = options
+  const { charger: lire, actions = {}, bus = null, peutEcrire = false, filtres = () => ({}), surDonnees = () => {}, zoneStats = null, initiales = null, surPret = () => {}, surEchec = () => {}, t = null, langue = 'fr' } = options
   if (typeof lire !== 'function') throw new Error('[avis] les cartes exigent une lecture')
   const T = traducteur(t, langue)
   const etat = { data: null, anciensOuverts: false, seq: 0 }
@@ -499,6 +505,7 @@ export async function monter (conteneur, options = {}) {
       if (n !== etat.seq) return false
       // ⚠ UN ECHEC SE DIT : une liste vide laisserait croire qu'il n'y a rien.
       const statut = err && (err.status || err.statut)
+      surEchec(err)
       conteneur.innerHTML = `<p class="avp-erreur">${ECHAPPER(statut === 403 ? T('avis.acces_refuse') : (err && err.message) || T('avis.illisibles'))}</p>`
       if (zoneStats) zoneStats.hidden = true
       return false
@@ -506,6 +513,10 @@ export async function monter (conteneur, options = {}) {
     if (n !== etat.seq) return false
     etat.data = data
     surDonnees(etat.data)
+    // ⚠ `surDonnees` PEUT RELANCER UNE LECTURE (un filtre que le serveur ne
+    // propose plus est remis au defaut) : on ne peint alors pas une reponse
+    // qui vient d'etre perimee (re-review du lot V5, B.1).
+    if (n !== etat.seq) return false
     afficher()
     return true
   }

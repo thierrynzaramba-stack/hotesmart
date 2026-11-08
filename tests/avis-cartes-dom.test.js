@@ -140,13 +140,17 @@ test('« À traiter » recoit les detections des ANCIENS meme section fermee, et
   // depart produit une detection rangee dans les Anciens. Section fermee, la
   // bulle disait « Rien ne vous attend ».
   const det = carte({ cle: 'avis:v9', section: 'anciens', evaluation: null, avis: [{ id: 'v9', masque: false, detecte: true, analyse: true, verdict: 'remarque', texte: 'Moquette tachée' }] })
-  const ferme = doc(rendre(donnees({}, { anciens_total: 4, anciens_a_traiter: [det] }), { peutEcrire: true }))
+  const ferme = doc(rendre(donnees({}, { anciens_total: 4, anciens_a_traiter: [det], anciens_detection_seule: 1 }), { peutEcrire: true }))
   assert.ok(ferme.querySelector('[data-detection="v9"]'), 'la detection est dans « À traiter »')
   assert.equal(ferme.querySelectorAll('.avp-rien').length, 0)
   assert.equal(ferme.querySelector('details[data-anciens] .avp-compte').textContent, '3', 'la carte montee n est plus comptee dans les Anciens')
-  // Section ouverte : la meme detection vient des Anciens, une seule fois.
-  const ouvert = doc(rendre(donnees({ anciens: [det] }, { anciens_total: 4, anciens_a_traiter: [det] }), { anciensOuverts: true, peutEcrire: true }))
+  // Section ouverte : la meme detection, servie par les deux sources, n'apparait qu'une fois.
+  const ouvert = doc(rendre(donnees({ anciens: [det] }, { anciens_total: 4, anciens_a_traiter: [det], anciens_detection_seule: 1 }), { anciensOuverts: true, peutEcrire: true }))
   assert.equal(ouvert.querySelectorAll('[data-detection="v9"]').length, 1)
+  // ⚠ Et une detection que la section ouverte ne porte pas (au-dela de ses 500
+  // cartes) reste dans « À traiter » : elle ne disparait pas a l'ouverture (B.2).
+  const ouvertSans = doc(rendre(donnees({ anciens: [] }, { anciens_total: 4, anciens_a_traiter: [det], anciens_detection_seule: 1 }), { anciensOuverts: true, peutEcrire: true }))
+  assert.ok(ouvertSans.querySelector('[data-detection="v9"]'))
 })
 
 test('les textes de section qui disent un vide ou une borne', () => {
@@ -288,6 +292,37 @@ test('monter : le cache peint les CHIFFRES et les filtres avant la lecture — J
   assert.match(vuAvant.stats, /4,2/)
   assert.equal(filtres.length, 2, 'les filtres se peignent depuis le cache, puis depuis la reponse')
   assert.equal(c.querySelector('.avp-qui').textContent, 'Angela X')
+  delete global.window
+})
+
+test('monter : une lecture relancee par `surDonnees` ne laisse pas peindre la reponse perimee (re-review, B.1) ; un echec est signale a la page', async () => {
+  const dom = new JSDOM('<!doctype html><body><div id="c"></div></body>')
+  global.window = dom.window
+  const c = dom.window.document.getElementById('c')
+  const lectures = []
+  let recharger = null
+  let relance = false
+  let vuPendant = null
+  let seconde = null
+  await monter(c, {
+    surPret: (r) => { recharger = r },
+    charger: async (p) => {
+      lectures.push(p)
+      if (lectures.length === 1) return donnees({ recents: [carte({ voyageur: { prenom: 'Perime', nom: null } })] })
+      // La relecture prend son temps : on regarde l'ecran PENDANT qu'elle court.
+      await new Promise(r => setTimeout(r, 5))
+      vuPendant = c.textContent
+      return donnees({ recents: [carte()] })
+    },
+    surDonnees: () => { if (!relance) { relance = true; seconde = recharger() } },
+  })
+  await seconde
+  assert.equal(lectures.length, 2)
+  assert.ok(!vuPendant.includes('Perime'), 'la reponse perimee n a jamais ete peinte')
+  assert.equal(c.querySelector('.avp-qui').textContent, 'Angela X')
+  const echecs = []
+  await monter(dom.window.document.createElement('div'), { charger: async () => { const e = new Error('x'); e.status = 403; throw e }, surEchec: (e) => echecs.push(e.status) })
+  assert.deepEqual(echecs, [403])
   delete global.window
 })
 

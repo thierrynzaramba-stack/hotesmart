@@ -124,7 +124,7 @@ import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
 import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte } from '/shared/compte-courant.js'
-import { lire as lireCache, ecrire as ecrireCache } from '/shared/cache-ecran.js'
+import { lire as lireCache, ecrire as ecrireCache, oublier as oublierCache } from '/shared/cache-ecran.js'
 import { monter as monterCartes } from '/core/avis/cartes.js'
 
 initErrorHandler()
@@ -226,7 +226,9 @@ function peindreAuto (pa) {
 // périodes viennent du serveur.
 function surDonnees (d) {
   etat.biens = (d && d.biens) || []
-  etat.periodes = ((d && d.periodes) || ['30j']).filter(p => PERIODES_CONNUES.includes(p))
+  etat.periodes = ((d && d.periodes) || []).filter(p => PERIODES_CONNUES.includes(p))
+  // Une liste vide ne doit pas faire boucler la correction ci-dessous.
+  if (!etat.periodes.length) etat.periodes = ['30j']
   // Un filtre que le serveur ne propose plus (période retirée, logement sorti
   // du périmètre) est remis au défaut — ET L'ÉCRAN SE RELIT : sinon « Tous »
   // serait pressé au-dessus des cartes d'un seul logement.
@@ -436,6 +438,15 @@ async function init () {
     zoneStats: $('[data-bind="stats"]'),
     initiales,
     surPret: (recharger) => { etat.recharger = recharger },
+    // ⚠ UN REFUS DU SERVEUR EFFACE CE QUE LE CACHE AVAIT PEINT : les logements
+    // et les chiffres d'un périmètre que l'on n'a plus (re-review, A.1).
+    surEchec: (err) => {
+      if (!err || (err.status || err.statut) !== 403) return
+      if (etat.moi && etat.compte) oublierCache('avis', etat.moi, etat.compte)
+      etat.biens = []
+      etat.bien = ''
+      peindreFiltres()
+    },
     t,
     langue: I18n.lang
   })

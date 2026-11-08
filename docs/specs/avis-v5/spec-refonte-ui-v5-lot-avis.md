@@ -309,6 +309,20 @@ fond blanc), parce que le noir est réservé à la navigation (charte du
    filtre remis au défaut qui relit l'écran, compte des Anciens, couleurs du
    volet aux jetons, utilisateur lu dans la session.
 
+**Re-review des correctifs (01158b9f), la seule autorisée :** constats 1 à 12
+fermés, sauf le test du droit `reservations` (partiel : le double n'avait pas
+de réservation dans le cœur). Corrigé sans nouvelle review, comme le veut la
+règle, avec quatre défauts faibles introduits par les correctifs :
+- un refus 403 oublie l'entrée du cache et vide les pastilles de logements
+  qu'il avait peintes ;
+- une lecture relancée par `surDonnees` ne laisse plus peindre la réponse
+  qu'elle vient de périmer, et une liste de périodes vide ne fait plus boucler ;
+- les détections des Anciens viennent des deux sources, sans doublon (elles ne
+  disparaissent plus à l'ouverture), et le compte des Anciens vient du serveur
+  (`anciens_detection_seule`) ;
+- tests : réservation du cœur dans le double, périmètre et `reservations` sur
+  `anciens_a_traiter`, lecture des Anciens hors du cache.
+
 Chaque étape : une review, zéro rouge, remise au chef de file avec les cinq éléments.
 
 ## 9. Tests attendus (étape 1)

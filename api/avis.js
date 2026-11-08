@@ -728,6 +728,11 @@ async function cartesLister (req, res, garde) {
     // meme section fermee (voir plus haut). Section ouverte, la page les lit
     // dans `cartes.anciens` et ignore ce champ.
     anciens_a_traiter: aTraiterAnciens(cartes.anciens),
+    // Les cartes des Anciens qui n'ont QU'une detection, sans evaluation : la
+    // page les monte dans « À traiter », donc la section Anciens ne les montre
+    // plus — et son compte ne doit plus les compter. Compte exact, sur toute la
+    // section (la liste ci-dessus est bornee).
+    anciens_detection_seule: cartes.anciens.filter(c => (c.avis || []).length && c.avis.every(a => a.detecte) && !c.evaluation).length,
     // La liste lue a atteint une borne : des cartes anciennes peuvent manquer.
     liste_incomplete: avisTronques || (ev.data || []).length >= MAX_EVALS_CARTES,
     // La liste de CHOIX (filtre et formulaire de la page) : sans les biens

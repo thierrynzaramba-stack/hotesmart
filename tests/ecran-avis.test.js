@@ -41,7 +41,16 @@ function projeter (ligne, colonnes) {
   return out
 }
 
-function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVIS_A, AVIS_B], biens = [BIEN_A, BIEN_B], autoEnPanne = false, auto = [], evalsEnPanne = false } = {}) {
+// ⚠ LA RESERVATION DANS LE COEUR, source principale du nom et des dates d'un
+// sejour (re-review du lot V5, constat 11) : un prenom DIFFERENT de celui de
+// l'avis, pour savoir d'ou vient ce qui s'affiche.
+// ⚠ DATES RELATIVES : le sejour doit rester dans « Récents » quel que soit le
+// jour ou tourne le test (horloge decalee comprise).
+const ARRIVEE_A = ilYa(7).slice(0, 10)
+const DEPART_A = ilYa(4).slice(0, 10)
+const SNAPSHOTS = [{ user_id: PROD, booking_id: 'resa-a1', snapshot: { firstName: 'Fabienne', lastName: 'Durand', arrival: ARRIVEE_A, departure: DEPART_A } }]
+
+function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVIS_A, AVIS_B], biens = [BIEN_A, BIEN_B], autoEnPanne = false, auto = [], evalsEnPanne = false, snapshots = SNAPSHOTS } = {}) {
   const etat = { tables: [], fetchs: 0 }
   // ⚠ CHAQUE LECTURE DU DOUBLE PASSE PAR `fetch`, comme supabase-js : sans ca,
   // le compteur de `Server-Timing` n'etait jamais traverse, et « 0 requêtes »
@@ -83,6 +92,11 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVI
           for (const e of q.ors) if (/property_id_ref/.test(e)) c = c.filter(a => e.includes(a.property_id_ref))
           if (q.head) return Promise.resolve({ data: null, count: c.length, error: null })
           return Promise.resolve({ data: c.map(a => projeter(a, q.colonnes)), count: c.length, error: null })
+        }
+        if (nom === 'bookings_snapshot') {
+          let c = snapshots.filter(x => q.f.user_id == null || x.user_id === q.f.user_id)
+          for (const i of q.ins) c = c.filter(x => i.v.includes(String(x[i.c])))
+          return Promise.resolve({ data: c, error: null })
         }
         if (nom === 'avis_auto_validation') {
           if (autoEnPanne) return Promise.resolve({ data: null, error: { message: 'panne' } })
@@ -189,14 +203,15 @@ test('le droit `reservations` decide du nom et des dates d un sejour : sans lui,
   assert.ok(c, 'la carte de Colomiers')
   assert.deepEqual([c.voyageur, c.arrivee, c.depart], [null, null, null])
   assert.ok(!String(c.cle).includes('resa-a1'), `la reservation fuit par la cle : ${c.cle}`)
-  assert.ok(!JSON.stringify(sans.body).includes('Fanny'), 'le nom du voyageur ne descend nulle part')
+  for (const nom of ['Fanny', 'Fabienne', 'Durand', ARRIVEE_A, DEPART_A]) assert.ok(!JSON.stringify(sans.body).includes(nom), `« ${nom} » descend sans le droit reservations`)
 
   preparer({ ...MEMBRE_SUR_A, permissions: { ...MEMBRE_SUR_A.permissions, reservations: 'read' } })
   const avec = reponse()
   await require('../api/ecran/avis')(req({}, 'GET', PROD), avec)
   const c2 = [...avec.body.cartes.attente, ...avec.body.cartes.recents].find(x => x.bien_ref === REF_A)
-  assert.equal(c2.voyageur && c2.voyageur.prenom, 'Fanny')
-  assert.ok(c2.arrivee && c2.depart)
+  // Avec le droit : la RESERVATION du coeur fait foi (prenom et dates du snapshot).
+  assert.equal(c2.voyageur && c2.voyageur.prenom, 'Fabienne')
+  assert.deepEqual([c2.arrivee, c2.depart], [ARRIVEE_A, DEPART_A])
 })
 
 test('une detection des Anciens est servie meme section fermee (« À traiter » ne doit pas dire « rien »)', async () => {
@@ -206,6 +221,19 @@ test('une detection des Anciens est servie meme section fermee (« À traiter »
   assert.equal(res.body.cartes.anciens, null)
   assert.deepEqual(res.body.anciens_a_traiter.map(c => c.avis[0].id), ['r9'])
   assert.ok(res.body.anciens_total >= 1)
+  assert.equal(res.body.anciens_detection_seule, 1, 'la carte « detection seule » est comptee a part')
+})
+
+test('les detections des Anciens suivent le perimetre et le droit `reservations` (re-review du lot V5, B.3)', async () => {
+  const surB = { ...DETECTION_ANCIENNE, id: 'r8', property_id_ref: REF_B }
+  const surA = { ...DETECTION_ANCIENNE, guest_name: 'Gaston Lagaffe', stay_start: '2026-09-01', stay_end: '2026-09-03', booking_uid: 'resa-ga' }
+  preparer({ ...MEMBRE_SUR_A, avis: [surA, surB], snapshots: [{ user_id: PROD, booking_id: 'resa-ga', snapshot: { firstName: 'Gaston', lastName: 'Lagaffe', arrival: '2026-09-01', departure: '2026-09-03' } }] })
+  const res = reponse()
+  await require('../api/ecran/avis')(req({}, 'GET', PROD), res)
+  assert.equal(res.code, 200)
+  assert.deepEqual(res.body.anciens_a_traiter.map(c => c.avis[0].id), ['r9'], 'la detection du logement B ne descend pas')
+  const brut = JSON.stringify(res.body.anciens_a_traiter)
+  for (const nom of ['Gaston', 'Lagaffe', 'resa-ga', '2026-09-01']) assert.ok(!brut.includes(nom), `« ${nom} » descend sans le droit reservations`)
 })
 
 test('une panne de lecture ne relaie JAMAIS le message brut de la base', async () => {

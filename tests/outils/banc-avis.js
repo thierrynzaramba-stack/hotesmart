@@ -49,10 +49,10 @@ function i18nFr () {
 }
 
 // Une reponse d'ecran plausible, a N logements.
-function reponseEcran ({ biens = 2, attente = [], recents = [], auto = { actifs: 1, total: 2 } } = {}) {
+function reponseEcran ({ biens = 2, attente = [], recents = [], anciens = null, auto = { actifs: 1, total: 2 } } = {}) {
   const liste = Array.from({ length: biens }, (_, i) => ({ name: `Bien ${i + 1}`, provider_property_id: `ref-${i + 1}`, photo_url: null }))
   return {
-    cartes: { attente, recents, anciens: null }, anciens_total: 0, liste_incomplete: false,
+    cartes: { attente, recents, anciens }, anciens_total: 0, liste_incomplete: false,
     biens: liste, periodes: ['15j', '30j', '6mois', 'toujours'],
     stats: { total: 3, positif: 2, remarque: 1, note_sur_5: 4.8, notes: 3, periode: '30j' },
     publication_auto: auto,
@@ -82,7 +82,14 @@ async function monter (o = {}) {
     journal.fetch.push(entree)
     if (entree.url.startsWith('/api/ecran/avis')) {
       if (retenue && premiere) { premiere = false; await retenue }
-      const d = (o.ecran || (() => reponseEcran()))(entree.url)
+      let d
+      // Comme le serveur : `anciens=1` rend la section (un tableau), sinon `null`.
+      try { d = (o.ecran || ((url) => reponseEcran({ anciens: /anciens=1/.test(url) ? [] : null })))(entree.url) } catch (e) {
+        // Une erreur qui porte un statut est une REPONSE du serveur (403…) ;
+        // les autres sont une panne reseau.
+        if (e && e.status) return { ok: false, status: e.status, json: async () => ({ error: e.message }) }
+        throw e
+      }
       return { ok: true, status: 200, json: async () => d }
     }
     if (entree.url.startsWith('/api/avis?action=sejours')) return { ok: true, status: 200, json: async () => ({ sejours: [] }) }
@@ -117,6 +124,7 @@ async function monter (o = {}) {
     enteteCompte: () => (o.compteDelegue ? { 'X-Compte': COMPTE } : {}),
     lireCache: (...a) => (cache ? cache.lire(...a) : null),
     ecrireCache: (...a) => (cache ? cache.ecrire(...a) : false),
+    oublierCache: (...a) => (cache ? cache.oublier(...a) : false),
     monterCartes: cartes.monter,
     __importer: async (chemin) => {
       if (chemin === '/shared/hs-bus.js') return { hsBus: { ouvrir: async (action, p) => { journal.bus.push({ action, ...p }); return { ok: true } } } }

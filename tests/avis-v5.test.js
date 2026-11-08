@@ -233,6 +233,19 @@ test('cache : une lecture filtree par logement ou avec les Anciens n entre pas d
     await banc.cliquer(banc.$('[data-bien="ref-1"]'))
     assert.equal(banc.w.localStorage.getItem(cle), null, 'filtre par logement : rien d ecrit')
     assert.ok(avant)
+    await banc.cliquer(banc.$('[data-bien=""]'))
+    banc.w.localStorage.removeItem(cle)
+    // Les Anciens ouverts : la lecture porte `anciens=1`, et rien n'est ecrit non plus (re-review, B.4).
+    const details = banc.$('details[data-anciens]')
+    // ⚠ jsdom envoie LUI-MEME l'evenement `toggle` quand `open` change, comme un
+    // navigateur : le redoubler a la main lancait une seconde lecture apres la
+    // fin du test.
+    details.open = true
+    // La relecture des Anciens va jusqu'au bout AVANT la fermeture du banc.
+    for (let i = 0; i < 20 && !/anciens=1/.test(banc.lecturesEcran().at(-1).url); i++) await banc.attendre()
+    await new Promise(r => setTimeout(r, 20))
+    assert.match(banc.lecturesEcran().at(-1).url, /anciens=1/)
+    assert.equal(banc.w.localStorage.getItem(cle), null, 'lecture des Anciens : rien d ecrit')
   } finally { banc.fermer() }
 })
 
@@ -247,6 +260,15 @@ test('LE TEST QUI COMPTE (revue, constat 2) : un filtre clique PENDANT le charge
     const cle = Object.keys(banc.w.localStorage).find(k => k.startsWith('hs.ecran.avis.'))
     const garde = JSON.parse(banc.w.localStorage.getItem(cle)).donnees
     assert.equal(garde.vue_periode, '30j', 'la derniere ecrite est celle de la lecture des 30 jours, sous SON etiquette')
+  } finally { banc.fermer() }
+})
+
+test('un REFUS du serveur efface le cache et les logements qu il avait peints (re-review, A.1)', async () => {
+  const anciennes = { ...reponseEcran(), vue_periode: '30j' }
+  const banc = await monter({ cache: anciennes, ecran: () => { const e = new Error('Droits insuffisants'); e.status = 403; throw e } })
+  try {
+    assert.equal(banc.$$('[data-bind="biens"] [data-bien]').length, 1, 'il ne reste que « Tous »')
+    assert.equal(Object.keys(banc.w.localStorage).filter(k => k.startsWith('hs.ecran.avis.')).length, 0, 'le cache de l ecran est oublie')
   } finally { banc.fermer() }
 })
 
