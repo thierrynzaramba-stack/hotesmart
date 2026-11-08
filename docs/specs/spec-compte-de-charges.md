@@ -107,11 +107,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q2 — Le suivi du paiement.** Tranchée, voir ci-dessous.
 - **Q3 — Les charges déjà connues d'HôteSmart.** Tranchée, voir ci-dessous
   et §7 bis.
-- **Q21 — La commission de Booking.com.** Elle n'est pas dans ce que Booking
-  transmet (§7 bis). *Proposition* : elle entre par la **facture mensuelle de
-  commissions** que Booking.com envoie à l'hôte, transférée comme toute
-  facture (catégorie « commissions des plateformes »). Pas de taux estimé :
-  un montant inventé passerait pour un vrai.
+- **Q21 — La commission de Booking.com.** Tranchée, voir ci-dessous.
 - **Q4 — La validation.** *Proposition* : tout ce que l'IA lit arrive
   **« à vérifier »** et ne compte dans **aucun** total tant que l'hôte ne l'a
   pas validé — même principe que les avis (validation humaine avant tout
@@ -198,6 +194,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   Les commissions des plateformes entrent dans le compte de charges dès la
   V1 (§7 bis). Les ménages des prestataires ne sont pas cités : ils restent
   pour un lot ultérieur.
+- **Q21 (8 nov. 2026, 22 h 24) : d'accord.** La commission de Booking.com
+  entre par la **facture mensuelle de commissions** que Booking.com envoie à
+  l'hôte, transférée ou déposée comme toute facture (catégorie « commissions
+  des plateformes »). Aucun taux estimé.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -353,7 +353,7 @@ validée est considérée payée (Q2).
 | Canal | Commission dans le cœur |
 |---|---|
 | Airbnb (Channex) | **connue** : la retenue hôte (`Listing Cancellation Host Fee`), lue réservation par réservation |
-| Booking.com (Channex) | **absente** du payload — Q21 |
+| Booking.com (Channex) | **absente** du payload — entre par la facture mensuelle de Booking.com (Q21) |
 | Beds24 | servie par Beds24 **quand elle existe** |
 | Direct (Offline, moteur) | aucune commission par construction |
 
