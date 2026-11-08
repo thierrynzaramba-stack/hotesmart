@@ -182,14 +182,20 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   le PDF à la main. Ce texte affiché sert aussi à lire l'e-mail de
   confirmation qu'une messagerie (Gmail par exemple) envoie à l'adresse cible
   avant d'activer un transfert automatique.
-- **Q20 — Un compte sans entité.** Avec D3, une facture ne peut pas être
-  validée tant que le compte n'a aucune entité. Réponse attendue du fil
-  facturation (§3) ; *proposition* : l'écran propose de créer l'entité au
-  premier envoi.
+- **Q20 — Un compte sans entité.** Tranchée, voir ci-dessous.
 
 ### Réponses de Thierry
 
-*(aucune pour l'instant)*
+- **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
+  vaut pour les deux chantiers, `facture-voyageur` @
+  0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
+  aucune entité juridique.** Le titulaire crée la première dans Réglages,
+  quand il en a besoin. Tant qu'elle manque, **une charge ne se valide pas** :
+  l'écran dit pourquoi, et le titulaire est prévenu. **On ne remplit jamais
+  une identité légale à sa place** : aucune entité créée automatiquement,
+  aucune reprise des comptes existants. Conséquence ici : une facture peut
+  être envoyée et lue sans entité ; elle reste « à vérifier » jusqu'à ce que
+  l'entité existe.
 
 ## 5. Les parcours proposés
 
