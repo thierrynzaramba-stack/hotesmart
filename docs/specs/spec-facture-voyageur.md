@@ -101,10 +101,17 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   comptable.)
 - **Q14 — La référence de la plateforme.** Le code de réservation Airbnb ou
   Booking figure-t-il sur la facture ?
+- **Q15 — L'émetteur et l'entité juridique du compte de charges.** L'émetteur
+  de la facture est-il la même chose que l'« entité juridique » du chantier
+  compte de charges ? Si oui, un seul fil crée la table, et l'autre la
+  réutilise.
 
 ### Réponses de Thierry
 
-*(à remplir au fil des réponses)*
+- **Q1 (8 nov. 2026) : c'est le voyageur qui saisit.** Le lien ouvre un
+  formulaire que le voyageur remplit lui-même ; la facture est émise à la
+  validation, et il la télécharge depuis le même lien. Le parcours du §2 est
+  confirmé.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
@@ -113,6 +120,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   a-t-il un sens si l'app n'existait pas ? » — oui, l'identité légale de l'hôte
   sert ailleurs. Donc l'identité du compte va dans `/settings`, et le
   remplacement d'un bien sur la fiche du logement.
+  ⚠ **Recouvrement avec le chantier « compte de charges »** (autre fil, décision
+  de Thierry du 8 novembre 2026) : chaque facture fournisseur y est rattachée à
+  une **entité juridique**, elle-même rattachée à un ou plusieurs biens. C'est
+  la même notion que l'émetteur d'ici. Une seule table doit la porter, avec un
+  seul writer : question posée à Thierry (Q15).
 - **La facture est FIGÉE à l'émission.** L'émetteur, le destinataire et les
   lignes y sont **copiés**, jamais relus ensuite : si l'hôte change d'adresse
   l'an prochain, une facture déjà émise ne bouge pas.
