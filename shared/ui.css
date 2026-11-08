@@ -428,6 +428,12 @@ h1, h2, h3, p { margin: 0; }
 .kb-carte__tete .icon { width: 18px; height: 18px; color: var(--muted); flex: none; }
 .kb-carte__sujet { font-weight: var(--fw-semibold); margin-inline-end: auto; }
 .kb-carte__texte { font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* « Utiliser » une réponse dans la conversation (spec kb-utiliser-reponse) :
+   la carte reste le bouton qui ouvre l'éditeur, l'action vit SOUS elle — un
+   bouton dans un bouton n'existe pas en HTML. */
+.kb-carte-bloc { display: flex; flex-direction: column; gap: 6px; }
+.kb-carte-bloc .kb-note { margin: 0; }
+.kb-carte-bloc__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 14px; }
 .kb-etiquette { display: inline-block; padding: 0 7px; margin: 0 1px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink); font-size: var(--fs-caption); font-weight: var(--fw-semibold); line-height: 1.7; white-space: nowrap; user-select: all; }
 .kb-etiquette--vide, .kb-manque { background: var(--danger-soft); color: var(--danger); }
 .kb-manque { padding: 0 3px; border-radius: 4px; font-weight: var(--fw-semibold); }
@@ -473,7 +479,7 @@ h1, h2, h3, p { margin: 0; }
 .kb-page__entete { display: flex; align-items: center; gap: 10px; padding: 12px 18px 4px; }
 .kb-page__entete h1 { margin: 0; }
 @media (max-width: 899px) {
-  .kb-inserer, .kb-lien, .kb-supprimer { min-height: 44px; }
+  .kb-inserer, .kb-lien, .kb-supprimer, .kb-utiliser { min-height: 44px; }
 }
 @media (max-width: 899px) {
   .msg-retour { display: inline-flex; }
