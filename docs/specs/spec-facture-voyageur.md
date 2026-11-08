@@ -114,7 +114,7 @@ confirme le total après le séjour, et la facture lui parvient par le même lie
 | Q14 | Référence de la plateforme | **Oui** : « Réservation Airbnb HMADA4CMQR », ou la référence HôteSmart pour une directe. |
 | Q15 | Émetteur et compte de charges | **Une seule table d'entités juridiques**, partagée avec le chantier compte de charges, **construite par ce fil**. Thierry : la spec d'abord ; le risque de tables en double se règle à la mise en production. |
 
-**Conséquence, signalée à Thierry** : la taxe de séjour manquante se saisit
+**Conséquence, validée par Thierry le 8 novembre 2026** : la taxe de séjour manquante se saisit
 au moment de la confirmation du total (§2, point 4), et non avant l'envoi du
 lien comme écrit d'abord — par la balise des messages programmés, le lien
 part sans aucun geste de l'hôte.
