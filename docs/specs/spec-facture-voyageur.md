@@ -148,6 +148,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   l'émission, jamais réutilisé. **L'hôte règle le préfixe et le numéro de
   départ**, pour reprendre une suite commencée ailleurs. (Une suite par
   entité et par année vit dans ce lot, pas dans la table partagée.)
+- **Q6 (8 nov. 2026) : réponse A, l'avoir est dans ce lot.** Un bouton
+  « Annuler par un avoir » sur la fiche annule la facture émise (avoir =
+  facture négative, numérotée dans la même suite) ; l'hôte peut ensuite
+  renvoyer un nouveau lien au voyageur. Cas visé d'abord : une faute de
+  frappe du voyageur dans le formulaire.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
@@ -263,7 +268,7 @@ avant l'étape 2.
    plus (CLAUDE.md, « UNE REVIEW PAR COMMIT »).
 4. Le bouton et l'état sur la fiche de la réservation (ordinateur et
    téléphone).
-5. L'avoir, si Q6 le met dans ce lot.
+5. L'avoir (Q6 : dans ce lot) et le renvoi d'un nouveau lien.
 
 ## 8. Hors périmètre
 
