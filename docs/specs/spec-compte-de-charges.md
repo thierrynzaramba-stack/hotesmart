@@ -46,13 +46,16 @@ précision **mesurée** à l'étape 5 ne suffit pas.
 
 - **Aucune facture fournisseur, aucune charge** dans le code ni en base.
 - **L'entité juridique n'existe pas encore.** Proposée par le fil facturation
-  (branche `facture-voyageur` @ b3d3202c48000828c62aad0806c79938ae8b542f, §5
-  ter) : table `entites_juridiques` (dont `siret`, `regime_tva`, `par_defaut`
-  unique par compte, `archivee_le` — jamais supprimée), lien
-  `properties.entite_juridique_id` (vide = l'entité par défaut du compte),
-  writer unique `lib/entites-juridiques.js`, accès par un endpoint gardé sur
-  `facturation`. **Ce chantier n'y ajoute aucune colonne** (accord du
-  8 novembre). Il demande une **lecture côté serveur** réutilisable par son
+  (branche `facture-voyageur` @ 603de80cccc73022d245c093661d07c1a667d589,
+  §5.1) : table `entites_juridiques` (dont `siret`, `regime_tva`, `par_defaut`
+  unique par compte, `archivee_le` — jamais supprimée, unique `(id, user_id)`
+  comme cible de clés composites). Le lien bien → entité vit dans une **table
+  à part**, `biens_entites` (`property_uuid` clé, `entite_id`, `user_id`) — pas
+  sur `properties`, qu'un membre `reglages: write` peut réécrire en entier.
+  Pas de ligne = l'entité par défaut du compte. « Même compte » garanti en
+  base (clé composite + trigger). RLS sans politique, `revoke` ; writer unique
+  `lib/entites-juridiques.js`, écriture derrière `facturation` (titulaire
+  seul). **Ce chantier n'y ajoute aucune colonne** (accord du 8 novembre). Il demande une **lecture côté serveur** réutilisable par son
   propre endpoint : les entités d'un compte, archivées comprises (au moins `id`,
   `nom`, `siret`, `regime_tva`, `par_defaut`, `archivee_le`). Question encore
   ouverte chez le fil facturation : un compte peut-il n'avoir **aucune**
@@ -227,7 +230,7 @@ justificatif.
 | Colonne | Rôle |
 |---|---|
 | `id`, `user_id` | la facture, le compte |
-| `entite_juridique_id` | **non nul à la validation** (D3) ; proposée par la lecture |
+| `entite_juridique_id` | **non nul à la validation** (D3) ; proposée par la lecture. Clé étrangère **composite** (`entite_juridique_id`, `user_id`) → `entites_juridiques (id, user_id)` : une charge ne peut pas pointer l'entité d'un autre compte, garanti en base (même modèle que `biens_entites`). |
 | `bien_id` | uuid → `properties.id`, vide possible (Q1). ⚠ Nommé `bien_id` et non `property_id` : dans le dépôt, `property_id` d'une table enfant est la référence TEXTE du fournisseur (REVIEW.md règle 10). Exception raisonnée, déclarée comme celle de `docs/kb/price-log.md` : la clé UUID survit à un changement de fournisseur (décision E6). |
 | `statut` | `envoi`, `a_lire`, `a_verifier`, `validee`, `annulee` (+ motif), `illisible`, `sans_facture` |
 | `tentatives_lecture` | compteur des lectures **qui ont eu lieu et ont échoué** ; au troisième échec, `illisible` (l'hôte saisit à la main). Une panne du fournisseur d'IA ne compte pas. |
@@ -257,7 +260,10 @@ justificatif.
   titulaire — `requirePermission` ne sait résoudre que des biens et des
   réservations. L'entité et le bien envoyés à la validation sont résolus de
   même, et leurs comptes comparés à celui de la charge ; un bien hors de
-  l'entité est refusé (Q18).
+  l'entité est refusé (Q18). L'entité d'un bien se lit par la fonction de
+  lecture de `lib/entites-juridiques.js` (ligne de `biens_entites`, sinon
+  l'entité par défaut), jamais recalculée ici. Le compte du bien est aussi
+  vérifié en base par un trigger, comme pour `biens_entites`.
 - **La lecture** : `lib/charges/lecture.js`. Une demande à Haiku par document
   (image ou PDF), réponse JSON imposée, liste de catégories fermée ; ce que
   l'IA ne lit pas reste `null`. **L'entité n'est jamais devinée par l'IA** :
