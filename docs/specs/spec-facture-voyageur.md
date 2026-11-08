@@ -199,8 +199,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   bien** (`properties.country`, lu par `lib/logement/lecture.js`). Un bien en
   France → facture en français. HôteSmart sait le français, l'anglais et
   l'espagnol ; un bien dans un autre pays sera une question le jour où il
-  existera (tous les biens actuels sont en France). La langue du formulaire et
-  du message au voyageur : Q9 bis.
+  existera (tous les biens actuels sont en France).
+- **Q9 bis (8 nov. 2026) : oui.** Le formulaire du voyageur et le message
+  « Votre facture est disponible » sont dans **la langue du voyageur**
+  (français, anglais ou espagnol) ; seule la facture suit le pays du bien.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
