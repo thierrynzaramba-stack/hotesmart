@@ -174,6 +174,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q7, dernier cas (8 nov. 2026) : pas d'alerte.** Un changement après
   l'émission (remboursement tardif…) est à la main de l'hôte : il fait
   l'avoir, et il peut émettre une nouvelle facture.
+- **Q7 ter (8 nov. 2026) : réponse A.** À l'émission, HôteSmart **poste
+  automatiquement dans la conversation** un court message « Votre facture est
+  disponible » avec le lien. ⚠ C'est un envoi au voyageur sans geste de
+  l'hôte : l'étape qui le code a droit à la review de plus, et le texte du
+  message est montré à Thierry avant le code.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
