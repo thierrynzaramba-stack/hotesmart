@@ -114,8 +114,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q7 — Qui peut écrire à cette adresse.** Tranchée, voir ci-dessous.
 - **Q8 — Le domaine de l'adresse.** Tranchée, voir ci-dessous.
 - **Q9 — Les droits.** Tranchée, voir ci-dessous.
-- **Q10 — Où vit l'écran.** *Proposition* : une page `/charges`, entrée du
-  menu ≡. Pas de sixième onglet de navigation.
+- **Q10 — Où vit l'écran.** Tranchée, voir ci-dessous.
 - **Q11 — Supprimer.** *Proposition* : une facture « à vérifier » se supprime
   (doublon, mauvais envoi) ; une facture validée s'**annule** avec un motif,
   elle ne s'efface jamais.
@@ -216,6 +215,9 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   comprise (refus en 403, pas un bouton masqué). **Pas** le domaine
   `facturation`, dont la lecture se délègue. Un domaine `charges` délégable
   viendra plus tard s'il est demandé.
+- **Q10 (8 nov. 2026, 22 h 38) : d'accord, page `/charges` dans le menu ≡**
+  (à côté de Réglages et Avis), visible du titulaire seul. Pas de sixième
+  onglet de navigation.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
