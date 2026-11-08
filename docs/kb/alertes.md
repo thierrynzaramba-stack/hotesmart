@@ -36,8 +36,10 @@ selon ses réglages (notification, e-mail, SMS sans appareil ; urgent par défau
 donc il passe les heures calmes). Les listes de la configuration ci-dessus restent
 servies jusqu'au lot 2c-3, qui les reprendra en contacts. L'ancien « e-mail de
 repli au titulaire » (envoyé quand la configuration n'avait envoyé aucun e-mail)
-est **remplacé** : le titulaire reçoit l'e-mail par défaut, et ne le reçoit plus
-s'il l'a retiré de ses réglages.
+est **remplacé** : le titulaire reçoit l'e-mail par défaut selon ses réglages.
+⚠ Jusqu'au 2c-3, si son adresse figure AUSSI dans les listes ci-dessus, il
+reçoit les deux e-mails, et celui de la configuration ne suit pas ses réglages
+(la production reçoit 2b et tout le 2c ensemble : elle ne voit pas cet état).
 
 ## 3. Kill switch (manuel) & coupe-circuit (automatique)
 

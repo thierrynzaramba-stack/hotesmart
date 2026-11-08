@@ -435,7 +435,8 @@ reçoit 2b et tout le 2c ensemble (Q24).
   écrire une ligne « membre accepté » au nom d'un tiers dont il connaît
   l'identifiant, et ses notifications partiraient sur les appareils de ce
   tiers. La cause est antérieure au lot (la même ligne ouvre déjà le compte au
-  tiers) : **dette à inscrire au registre**.
+  tiers) : **dette 135** du registre (docs/kb/dettes-v1.md), corrigée dans un
+  lot à part après le 2c, sur go de Thierry (décision B du 8 novembre).
 - Une personne qui a décoché la notification d'un événement et coché le SMS,
   avec un appareil abonné mort, ne reçoit pas le SMS de cet événement : ses
   appareils sont comptés, pas sondés. Le premier événement envoyé en
@@ -447,3 +448,64 @@ reçoit 2b et tout le 2c ensemble (Q24).
 **Recette sur staging (pas de cron)** : l'essai et « vider ma file » se
 lancent depuis l'onglet Notifications ouvert (console du navigateur, avec la
 session), ou par moi dans le navigateur de Thierry.
+
+## 11. Lot 2c-2 — les autres événements (8 novembre 2026)
+
+Branche `pwa-lot-2c2-evenements`, partie de `pwa-lot-2c1-envoi`. Un commit par
+domaine, chacun avec sa review. Les listes d'`agent_alert_config` restent
+servies jusqu'au lot 2c-3, qui les reprend en contacts : la production reçoit
+2b et tout le 2c ensemble (Q24), elle ne voit jamais l'état intermédiaire.
+
+### 11.1 Réservations (f, g, j)
+
+| Événement | Émetteur | Sujet, écran |
+|---|---|---|
+| f Nouvelle réservation | `lib/booking-changes-dispatch.js`, consommateur « 3 ter » | `resa:<id>`, `/calendrier` |
+| g Annulation ou modification | idem | `resa:<id>` (remplace la vente, sonne), `/calendrier` |
+| j Code d'accès non résolu | `lib/alert-notify.js` `alertMissingAccessCode` | `code:<id>`, `/pages/messages` |
+
+**Les règles, et pourquoi :**
+1. **Une réservation ancienne n'est pas une nouvelle réservation.** Un bien
+   qu'on connecte, une migration, un `demapped` font arriver des `new` pour des
+   séjours vendus depuis longtemps. f ne part que pour une vente **récente** :
+   date de vente **fiable** (une importée porte la date de migration), de trois
+   jours au plus (`dateDeVente`, lib/yield/eclatement.js). Une date inconnue ne
+   prévient pas : la plateforme a déjà prévenu l'hôte.
+2. **« Annulée » veut dire annulée.** `cancelled` couvre aussi une réservation
+   passée en blocage ou revenue en demande : le ménage doit le savoir, l'hôte ne
+   reçoit pas « réservation annulée » pour son propre blocage.
+3. **Une modification dit ce qui a changé** — les quatre champs du cœur
+   (arrivée, départ, adultes, enfants), jamais un montant.
+4. **Dix annulations ou modifications au plus par compte et par cycle.** Le
+   reliquat ne part pas, et il est **tracé comme un échec** (`processing_errors`,
+   incident fondateur) : une rafale est une anomalie. Le plafond borne un cycle,
+   pas une journée. Les ventes n'y entrent pas : leur garde est la date de vente.
+5. **Une réservation directe** : le titulaire reçoit déjà le relevé détaillé
+   (`lib/notif-hote-resa.js`) ; l'e-mail du point d'envoi lui est retiré
+   (`exclusions` du notifier) **quand ce relevé est parti**, et seulement alors.
+   La notification reste.
+6. **Le code non résolu relit son bien** : les appelants passent la référence
+   provider, et un membre peut avoir son périmètre en UUID. **Une référence
+   Channex a la forme d'un UUID** : on cherche d'abord par la référence, puis par
+   l'identifiant. L'ancien « e-mail de repli au titulaire » est remplacé.
+7. **Les textes ne laissent jamais de trou** : une annulation Channex arrive
+   parfois sans dates ni voyageur (« Un voyageur : réservation annulée. ») ; le
+   prénom, tapé par un visiteur pour une réservation directe, est borné à
+   40 caractères ; le canal se dit par `canalNormalise` (« Booking.com »,
+   « Airbnb », « Direct »), jamais par l'orthographe du partenaire.
+8. **Chaque événement rédigé a son essai** (`essai_evenement`, logement fictif).
+
+**Limites connues :**
+- **Jusqu'au 2c-3, double e-mail possible pour j** : si l'adresse du titulaire
+  figure aussi dans les listes de la configuration d'alertes, il reçoit les
+  deux, et celui de la configuration ne suit pas ses réglages.
+- **Une annulation Channex sans dates** part sans séjour : la décision « fin de
+  plage » ne sait pas que l'arrivée est proche. La cause est en amont (le
+  snapshot fusionné perd les dates), hors du lot.
+- **L'e-mail du titulaire vient de son profil** (`is_owner`), plus de
+  l'adresse de connexion : un profil sans e-mail ne reçoit pas d'e-mail.
+- **Le relevé détaillé d'une réservation directe reste hors du point d'envoi** :
+  il ignore les heures calmes et la case e-mail de f. Question posée à Thierry.
+- **Le notifier tourne dans la boucle du dispatcher** : un appareil muet coûte
+  jusqu'à 5 s, et le budget du dispatcher se vérifie entre deux événements.
+

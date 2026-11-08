@@ -45,9 +45,34 @@ test('une modification dit CE QUI a changé (les quatre champs du cœur), une an
   })
   assert.deepStrictEqual(modif, { titre: 'Réservation modifiée — La bulle', corps: 'Jean : arrivée 12/12 → 13/12, adultes 2 → 3.' })
   const sansDetail = textes.rediger('annulation_modification', 'fr', { bien: 'La bulle', prenom: 'Jean', arrivee: '2026-12-13', depart: '2026-12-15', annulation: false, changements: null })
-  assert.strictEqual(sansDetail.corps, 'Jean : du 13/12 au 15/12.')
+  assert.strictEqual(sansDetail.corps, 'Jean, du 13/12 au 15/12.')
   const annul = textes.rediger('annulation_modification', 'fr', { bien: 'La bulle', prenom: 'Jean', arrivee: '2026-12-12', depart: '2026-12-15', annulation: true })
   assert.deepStrictEqual(annul, { titre: 'Annulation — La bulle', corps: 'Jean, du 12/12 au 15/12 : réservation annulée.' })
+})
+
+test('une annulation Channex sans dates ni voyageur ne laisse aucun trou dans le texte', () => {
+  for (const l of ['fr', 'en', 'es']) {
+    const t = textes.rediger('annulation_modification', l, { bien: 'Colomiers', prenom: '', arrivee: null, depart: null, annulation: true })
+    assert.ok(!/,\s*[:.]|\s{2}|undefined|null/.test(t.corps), `${l} : « ${t.corps} »`)
+  }
+  assert.strictEqual(textes.rediger('annulation_modification', 'fr', { bien: 'Colomiers', annulation: true }).corps, 'Un voyageur : réservation annulée.')
+})
+
+test('un prénom tapé par un visiteur est borné ; le canal se dit par la règle du dépôt, pas par l\'orthographe du partenaire', () => {
+  const long = textes.rediger('reservation', 'fr', { bien: 'B', prenom: 'x'.repeat(200), arrivee: '2026-12-12', depart: '2026-12-15' })
+  assert.ok(long.corps.length < 80, long.corps)
+  const canal = (c) => textes.rediger('reservation', 'fr', { bien: 'B', prenom: 'Jean', arrivee: '2026-12-12', depart: '2026-12-15', canal: c }).corps
+  assert.strictEqual(canal('BookingCom'), 'Jean, du 12/12 au 15/12 · Booking.com.')
+  assert.strictEqual(canal('AirBNB'), 'Jean, du 12/12 au 15/12 · Airbnb.')
+  assert.strictEqual(canal('abb'), 'Jean, du 12/12 au 15/12 · Airbnb.')
+})
+
+test('chaque événement rédigé a son essai (POST /api/push, essai_evenement)', () => {
+  for (const code of textes.rediges()) {
+    const d = textes.exemple(code)
+    assert.ok(d && d.essai, code)
+    assert.ok(textes.rediger(code, 'fr', d).titre.startsWith('Essai — '), code)
+  }
 })
 
 test('le code non résolu dit quoi faire', () => {
@@ -60,6 +85,10 @@ test('le code non résolu dit quoi faire', () => {
 
 const COMPTE = 'compte-1'
 const UUID_BIEN = '3f2a1b4c-1111-4222-8333-944455556666'
+// Une référence Channex a la forme d'un UUID (lib/channels/channex.js) : elle ne
+// doit jamais être prise pour l'identifiant HôteSmart du bien.
+const REF_CHANNEX = '0db6b39b-b8f6-4c1e-9a7d-5e2f3a4b5c6d'
+const UUID_COLOMIERS = '7a8b9c0d-2222-4333-8444-955566667777'
 
 function stub (rel, exports) {
   const abs = require.resolve(path.join(__dirname, '..', rel))
@@ -70,6 +99,9 @@ function stub (rel, exports) {
 function preparer ({ dejaAlerte = false, bienLisible = true } = {}) {
   const etat = { notifications: [], emails: [], sms: [], taches: [], lecturesBien: [] }
   const client = {
+    // L'adresse de connexion du titulaire : l'ancien e-mail de repli la lisait ici.
+    // Sans elle, le test « plus d'e-mail de repli » passerait pour une mauvaise raison.
+    auth: { admin: { getUserById: async () => ({ data: { user: { email: 'hote@exemple.fr' } }, error: null }) } },
     from (table) {
       const f = {}
       const chain = {
@@ -80,8 +112,10 @@ function preparer ({ dejaAlerte = false, bienLisible = true } = {}) {
           if (table === 'properties') {
             etat.lecturesBien.push({ ...f })
             if (!bienLisible) return Promise.resolve({ data: null, error: { message: 'panne' } })
-            const ok = f.user_id === COMPTE && (f.provider_property_id === '209413' || f.id === UUID_BIEN)
-            return Promise.resolve({ data: ok ? { id: UUID_BIEN, name: 'La bulle', provider_property_id: '209413' } : null, error: null })
+            if (f.user_id !== COMPTE) return Promise.resolve({ data: null, error: null })
+            if (f.provider_property_id === '209413' || f.id === UUID_BIEN) return Promise.resolve({ data: { id: UUID_BIEN, name: 'La bulle', provider_property_id: '209413' }, error: null })
+            if (f.provider_property_id === REF_CHANNEX || f.id === UUID_COLOMIERS) return Promise.resolve({ data: { id: UUID_COLOMIERS, name: 'Colomiers', provider_property_id: REF_CHANNEX }, error: null })
+            return Promise.resolve({ data: null, error: null })
           }
           return Promise.resolve({ data: null, error: null })
         },
@@ -124,16 +158,29 @@ test('LE TEST QUI COMPTE : le code non résolu prévient par le point d\'envoi, 
   assert.strictEqual(etat.taches.length, 1, 'la tâche in-app reste')
 })
 
-test('appelé avec l\'UUID, le bien se lit par l\'UUID ; une lecture en panne n\'empêche pas l\'alerte', async () => {
+test('LE TEST QUI COMPTE : une référence Channex (forme d\'UUID) se lit comme une RÉFÉRENCE — le bien garde son nom et ses deux identifiants', async () => {
+  const { alertMissingAccessCode, etat } = preparer()
+  await alertMissingAccessCode({ userId: COMPTE, propertyId: REF_CHANNEX, booking: RESA })
+  assert.deepStrictEqual(etat.lecturesBien[0], { user_id: COMPTE, provider_property_id: REF_CHANNEX })
+  assert.deepStrictEqual(etat.notifications[0].bien, { id: UUID_COLOMIERS, ref: REF_CHANNEX })
+  assert.strictEqual(etat.notifications[0].donnees.bien, 'Colomiers')
+})
+
+test('appelé avec l\'UUID HôteSmart, le bien se retrouve ; une lecture en panne n\'empêche pas l\'alerte', async () => {
   const a = preparer()
   await a.alertMissingAccessCode({ userId: COMPTE, propertyId: UUID_BIEN, booking: RESA })
-  assert.deepStrictEqual(a.etat.lecturesBien, [{ user_id: COMPTE, id: UUID_BIEN }])
+  assert.deepStrictEqual(a.etat.lecturesBien, [{ user_id: COMPTE, provider_property_id: UUID_BIEN }, { user_id: COMPTE, id: UUID_BIEN }])
   assert.deepStrictEqual(a.etat.notifications[0].bien, { id: UUID_BIEN, ref: '209413' })
 
   const b = preparer({ bienLisible: false })
   await b.alertMissingAccessCode({ userId: COMPTE, propertyId: '209413', booking: RESA })
   assert.strictEqual(b.etat.notifications.length, 1)
   assert.deepStrictEqual(b.etat.notifications[0].bien, { id: undefined, ref: '209413' })
+  // En panne, une valeur en forme d'UUID part des deux côtés : elle ne peut
+  // désigner que ce bien, et le membre au périmètre en UUID reste prévenu.
+  const c = preparer({ bienLisible: false })
+  await c.alertMissingAccessCode({ userId: COMPTE, propertyId: REF_CHANNEX, booking: RESA })
+  assert.deepStrictEqual(c.etat.notifications[0].bien, { id: REF_CHANNEX, ref: REF_CHANNEX })
 })
 
 test('une alerte déjà posée pour ce séjour ne prévient pas une seconde fois', async () => {
