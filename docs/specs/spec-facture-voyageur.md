@@ -139,6 +139,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   l'envoi du lien, puisque la facture est émise dès que le voyageur valide le
   formulaire. (Le barème par bien du lot 3 de la taxe de séjour n'existe pas
   encore ; s'il arrive, pré-remplir cette saisie sera une question à poser.)
+- **Q4 (8 nov. 2026) : trois choix dans la fiche de l'entité** — exonéré,
+  franchise en base, assujetti. **Assujetti : l'hôte règle lui-même son taux
+  de TVA.** Le texte exact de chaque mention est validé par un comptable avant
+  l'étape 2 (émission).
 
 ## 5. Données (proposition, à revoir après les réponses)
 
