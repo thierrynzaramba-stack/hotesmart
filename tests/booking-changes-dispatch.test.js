@@ -8,6 +8,21 @@ const assert = require('node:assert')
 const path = require('node:path')
 const Module = require('node:module')
 
+// La VRAIE regle « reservation directe » (lib/notif-hote-resa.js), lue une fois
+// puis le cache vide : les doubles ci-dessous ne doivent rien heriter du module
+// reel (constat de review : une copie de la regle dans le double divergeait).
+const VRAI_ESTDIRECTE = (() => {
+  const env = { url: process.env.SUPABASE_URL, cle: process.env.SUPABASE_SERVICE_KEY }
+  process.env.SUPABASE_URL = env.url || 'http://localhost:54321'
+  process.env.SUPABASE_SERVICE_KEY = env.cle || 'test-key'
+  const avant = new Set(Object.keys(require.cache))
+  const f = require('../lib/notif-hote-resa').estDirecte
+  for (const k of Object.keys(require.cache)) if (!avant.has(k)) delete require.cache[k]
+  if (env.url === undefined) delete process.env.SUPABASE_URL
+  if (env.cle === undefined) delete process.env.SUPABASE_SERVICE_KEY
+  return f
+})()
+
 // ─── Injection de doubles dans le cache de require ───────────────────────────
 function stub(relPath, exports) {
   const abs = require.resolve(path.join(__dirname, '..', relPath))
@@ -18,13 +33,14 @@ function stub(relPath, exports) {
   return abs
 }
 
-function chargerDispatcher({ events, menageThrows = false, accessThrows = false, templateThrows = false, snapshotStatus = 'confirmed', notifHoteThrows = false, notifHoteRetour = null, venteLe = null, importee = false, source = 'airbnb', notifierThrows = false, idBien = null, statuts = {} }) {
+function chargerDispatcher({ events, menageThrows = false, accessThrows = false, templateThrows = false, snapshotStatus = 'confirmed', notifHoteThrows = false, notifHoteRetour = null, venteLe = null, importee = false, source = 'airbnb', notifierThrows = false, idBien = null, statuts = {}, decisionReleve = { envoyer: 'maintenant' }, fileEnPanne = false }) {
   const etat = {
     updates: [],
     incidents: [],
     menageWrites: 0,
     notifsHote: [],
     notifications: [],
+    releves: [],
     appels: { menages: 0, access: 0, templates: 0, notifHote: 0 }
   }
 
@@ -120,7 +136,14 @@ function chargerDispatcher({ events, menageThrows = false, accessThrows = false,
       return { ok: true, erreurs: [] }
     }
   })
+  // PWA lot 2c-2 : le releve suit les reglages du titulaire (decision injectee).
+  stub('lib/notifications/releve.js', {
+    decisionDuReleve: async (o) => { etat.releves.push(['decision', o.compte]); return decisionReleve },
+    differer: async (o) => { etat.releves.push(['differer', o.bookingId, o.a]); return fileEnPanne ? { ok: false, motif: 'ecriture_impossible' } : { ok: true } }
+  })
   stub('lib/notif-hote-resa.js', {
+    // La VRAIE regle « directe », pas une copie.
+    estDirecte: VRAI_ESTDIRECTE,
     notifierNouvelleResa: async (o) => {
       etat.appels.notifHote++
       etat.notifsHote.push(o)
@@ -495,6 +518,30 @@ test('une reservation DIRECTE : l\'e-mail du titulaire est retire quand le relev
     notifHoteRetour: { ok: false, raison: 'destinataire_absent' } })
   await rate.mod.dispatchBookingChanges({})
   assert.strictEqual(rate.etat.notifications[0].exclusions, null)
+})
+
+test('LE TEST QUI COMPTE : le releve suit les reglages du titulaire — decoche, il ne part pas ; heures calmes, il attend dans la file', async () => {
+  const resa = () => ev({ provider: 'channex', property_id: 'uuid-channex' })
+  // E-mail de « Nouvelle reservation » decoche : ni releve, ni retrait (il n'y a rien a retirer).
+  const non = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'Offline', decisionReleve: { envoyer: 'non', motif: 'email_decoche' } })
+  await non.mod.dispatchBookingChanges({})
+  assert.strictEqual(non.etat.appels.notifHote, 0)
+  assert.strictEqual(non.etat.notifications[0].exclusions, null)
+  // Heures calmes : dans la file, pour la fin de la plage ; l'e-mail court est retire au titulaire.
+  const A = Date.parse('2026-11-11T07:00:00+01:00')
+  const tard = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'Offline', decisionReleve: { envoyer: 'plus_tard', a: A } })
+  await tard.mod.dispatchBookingChanges({})
+  assert.strictEqual(tard.etat.appels.notifHote, 0, 'rien ne part pendant les heures calmes')
+  assert.deepStrictEqual(tard.etat.releves, [['decision', 'u1'], ['differer', '77', A]])
+  assert.deepStrictEqual(tard.etat.notifications[0].exclusions, { u1: ['email'] })
+  // La file en panne ne rend pas muet : le releve part tout de suite.
+  const panne = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'Offline', decisionReleve: { envoyer: 'plus_tard', a: A }, fileEnPanne: true })
+  await panne.mod.dispatchBookingChanges({})
+  assert.strictEqual(panne.etat.appels.notifHote, 1)
+  // Une OTA ne consulte rien : le releve ne la concerne pas.
+  const ota = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'BookingCom', decisionReleve: { envoyer: 'non' } })
+  await ota.mod.dispatchBookingChanges({})
+  assert.deepStrictEqual(ota.etat.releves, [])
 })
 
 test('annulation et modification : sur le meme sujet que la vente, et elles sonnent', async () => {

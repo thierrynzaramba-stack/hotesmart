@@ -275,6 +275,14 @@ implémentations — et un jour, une seule des deux corrigée.
   qu'est HôteSmart. La marque blanche protège l'illusion du voyageur, pas la sienne.
 - **Destinataire** : le profil `is_owner` du compte. `notify_email = false` est un refus
   explicite, respecté — et ce n'est **pas** une panne, donc aucun incident.
+- **Il suit les réglages de notifications du titulaire** (décision de Thierry du
+  8 novembre 2026, PWA lot 2c-2, `lib/notifications/releve.js`, docs/kb/pwa.md §11) :
+  l'e-mail de « Nouvelle réservation » décoché → pas de relevé ; pendant ses heures
+  calmes → il attend la fin de la plage dans `notifications_file` et part **seul**, relu
+  dans le cœur au moment de partir (une réservation défaite pendant la nuit ne
+  s'annonce pas) ; un séjour imminent passe les heures calmes. La file en panne ne
+  rend pas muet : il part tout de suite. La règle « directe » (`estDirecte`) vit dans
+  ce module, et le dispatcher la lit — elle n'est pas recopiée.
 
 ### ⚠️ La dédup passe par `message_sent_log`, avec un `template_id` sentinelle
 

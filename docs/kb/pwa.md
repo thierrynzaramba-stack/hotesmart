@@ -480,10 +480,16 @@ servies jusqu'au lot 2c-3, qui les reprend en contacts : la production reçoit
    reliquat ne part pas, et il est **tracé comme un échec** (`processing_errors`,
    incident fondateur) : une rafale est une anomalie. Le plafond borne un cycle,
    pas une journée. Les ventes n'y entrent pas : leur garde est la date de vente.
-5. **Une réservation directe** : le titulaire reçoit déjà le relevé détaillé
-   (`lib/notif-hote-resa.js`) ; l'e-mail du point d'envoi lui est retiré
-   (`exclusions` du notifier) **quand ce relevé est parti**, et seulement alors.
-   La notification reste.
+5. **Une réservation directe** : le titulaire reçoit le relevé détaillé
+   (`lib/notif-hote-resa.js`, coordonnées du voyageur, prix, conditions) ; l'e-mail
+   court du point d'envoi lui est retiré (`exclusions` du notifier) **quand ce
+   relevé est parti ou attend dans la file**, et seulement alors. La notification
+   reste. **Le relevé suit SES réglages de f** (décision de Thierry du 8 novembre,
+   `lib/notifications/releve.js`) : e-mail décoché → pas de relevé ; heures
+   calmes → la file (`releve:<id>`), d'où il part **seul**, au titulaire seul,
+   jamais fondu dans le message regroupé ; la ligne ne porte que les références,
+   la réservation et le bien se **relisent** à la sortie (défaite pendant la nuit
+   → rien). La file en panne ne rend pas muet : il part tout de suite.
 6. **Le code non résolu relit son bien** : les appelants passent la référence
    provider, et un membre peut avoir son périmètre en UUID. **Une référence
    Channex a la forme d'un UUID** : on cherche d'abord par la référence, puis par
@@ -504,8 +510,9 @@ servies jusqu'au lot 2c-3, qui les reprend en contacts : la production reçoit
   snapshot fusionné perd les dates), hors du lot.
 - **L'e-mail du titulaire vient de son profil** (`is_owner`), plus de
   l'adresse de connexion : un profil sans e-mail ne reçoit pas d'e-mail.
-- **Le relevé détaillé d'une réservation directe reste hors du point d'envoi** :
-  il ignore les heures calmes et la case e-mail de f. Question posée à Thierry.
+- **Le relevé va au titulaire seul**, jamais aux membres qui ont le domaine
+  `reservations` : il porte les coordonnées du voyageur. Les membres reçoivent la
+  notification et l'e-mail courts.
 - **Le notifier tourne dans la boucle du dispatcher** : un appareil muet coûte
   jusqu'à 5 s, et le budget du dispatcher se vérifie entre deux événements.
 
