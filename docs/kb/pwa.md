@@ -407,14 +407,22 @@ reçoit 2b et tout le 2c ensemble (Q24).
    coordonnées ou la clé SMS d'un autre ; **les droits et les coordonnées se
    relisent** — une personne désactivée, ou qui a perdu le domaine ou le bien,
    ne reçoit rien ; **chaque canal ne porte que ses lignes**.
-7. **Une ligne ne part qu'une fois** : la passe la SUPPRIME en la prenant, groupe
-   par groupe, au moment d'envoyer. Budget : 30 envois par passe, 8 s de marge ;
-   ce qui n'a pas le temps de partir RESTE en base. **La file en panne ne rend
-   personne muet** : l'alerte part tout de suite.
+7. **Une ligne ne part qu'une fois** : la passe relit les droits, PUIS la
+   SUPPRIME en la prenant, groupe par groupe, au moment d'envoyer. Une relecture
+   des droits en panne laisse le groupe en base. Budget : 30 envois par passe,
+   pas de nouveau groupe sous 20 s de reste ; ce qui n'a pas commencé RESTE en
+   base. Ce que la marge ne garantit pas : un groupe commencé peut durer plus
+   qu'elle (5 s par appareil muet) — si le cycle est tué pendant lui, lui seul
+   est perdu. **La file en panne ne rend personne muet** : l'alerte part tout de
+   suite. **Ce qui vient de partir** (et seulement s'il est parti) retire la
+   ligne du même sujet qui attendait.
 8. **Un essai se dit essai** (« Essai — », « Test — », « Prueba — »), sur un
    logement fictif, ne va qu'à l'appelant (`seulement`), et **en notification
-   seule** : l'e-mail du profil se réécrit librement (policy `profiles_write`),
-   un essai par e-mail répété serait un relais vers n'importe quelle adresse.
+   seule — e-mail « dernier appareil » compris** : l'e-mail du profil se réécrit
+   librement (policy `profiles_write`), un essai qui écrit serait un relais vers
+   n'importe quelle adresse (deux constats de SÉCURITÉ, les deux reviews).
+   La ligne en file range l'identifiant ET la référence du bien : le périmètre se
+   relit sur le bien à la sortie.
 9. **Après une reconnexion, on revient à l'écran demandé** : `requireAuth`
    passe la page en `next` ; `pages/login.html` la filtre (chemin du site
    seulement) ; la page de connexion n'est jamais un `next`.

@@ -115,3 +115,11 @@ test('le releve des canaux est borne en temps et en nombre', () => {
 test('le cycle journalise son bilan de canaux dans results', () => {
   assert.match(source, /results\.canaux = /)
 })
+
+// PWA lot 2c-1 (seconde review) : la passe de la file reçoit le budget du cycle.
+// Sans lui, elle enverrait jusqu'à son plafond même quand le cycle n'a plus le
+// temps — et un groupe pris serait perdu au moment où la fonction est tuée.
+test('la passe de la file des notifications reçoit le budget du cycle', () => {
+  const bloc = source.slice(source.indexOf("chrono.mesure('notifications_file'"))
+  assert.match(bloc.slice(0, 400), /viderFileNotifications\(\{\s*resteMs:\s*\(\)\s*=>\s*55000 - chrono\.total\(\)\s*\}\)/)
+})

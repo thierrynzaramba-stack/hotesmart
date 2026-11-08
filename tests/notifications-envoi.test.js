@@ -565,3 +565,85 @@ test('LE TEST QUI COMPTE : la surréservation, de la sonde aux canaux — le tit
     for (const m of MODULES) delete require.cache[require.resolve(m)]
   }
 })
+
+// ─── 8. Seconde review ──────────────────────────────────────────────────────
+
+test('LE TEST QUI COMPTE : l\'essai ne prévient pas par e-mail « dernier appareil » — plus aucun relais d\'e-mail', async () => {
+  const { db } = base({ profiles: [proprio] })
+  const e = envois({ push: { ok: true, envoyes: 0, morts: 1, echecs: 0, aucun_appareil: false } })
+  const b = await notifier({ compte: COMPTE, code: 'surreservation', donnees: textes.exemple('surreservation', MIDI), chemin: '/', sujet: 'essai:surreservation',
+    seulement: COMPTE, canauxPermis: ['push'], maintenant: MIDI, db, deps: e.deps })
+  assert.equal(b.derniers_appareils, 1, 'l\'appareil mort est bien vu')
+  assert.ok(!e.journal.some(j => j[0] === 'email' || j[0] === 'sms'), 'mais rien ne part par e-mail ni SMS')
+  // Hors essai, le même appareil mort prévient par e-mail (Q13).
+  const e2 = envois({ push: { ok: true, envoyes: 0, morts: 1, echecs: 0, aucun_appareil: false } })
+  await notifier({ compte: COMPTE, code: 'surreservation', donnees: { bien: 'B', nuits: [] }, chemin: '/', sujet: 's', maintenant: MIDI, db, deps: e2.deps })
+  assert.ok(e2.journal.some(j => j[0] === 'email' && /ne vous arrivent plus/.test(j[2])))
+})
+
+test('LE TEST QUI COMPTE : une relecture des droits en panne laisse les lignes en base — jamais prises puis perdues', async () => {
+  const { db, etat } = base({ ...AVEC_MEMBRE, notifications_file: [ligneFile({ id: 'a1' }), ligneFile({ id: 'a2', sujet: 's2' })] }, { pannes: ['profiles'] })
+  const e = envois()
+  const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps: e.deps })
+  assert.deepEqual([bilan.prises, bilan.reportees], [0, 2])
+  assert.ok(bilan.erreurs.includes('droits_illisibles'))
+  assert.equal(etat.tables.notifications_file.length, 2, 'elles partiront au cycle suivant')
+  assert.equal(e.journal.length, 0)
+})
+
+test('un envoi entièrement raté n\'efface pas la ligne du même sujet qui attendait', async () => {
+  const { db, etat } = base({ profiles: [proprio], notifications_file: [ligneFile({ id: 'attend', sujet: 'surreservation:p1' })] })
+  const rate = { cles: null, compterAppareils: async () => ({ ok: true, n: 0 }), envoyerPush: async () => ({ ok: false }),
+    envoyerEmail: async () => ({ ok: false }), envoyerSms: async () => ({ success: false }) }
+  const b = await notifier({ compte: COMPTE, code: 'surreservation', donnees: { bien: 'B', nuits: [] }, chemin: '/', sujet: 'surreservation:p1', maintenant: MIDI, db, deps: rate })
+  assert.equal(b.personne_joignable, false)
+  assert.deepEqual(etat.tables.notifications_file.map(l => l.id), ['attend'])
+})
+
+test('le bien rangé par son seul identifiant garde son périmètre à la sortie', async () => {
+  const perm = droits({ reservations: 'write', property_scope: 'selected', property_ids: ['uuid-1'], property_refs: ['ref-1'] })
+  const { db, etat } = base({ profiles: [proprio, membre()], profile_permissions: [perm], notifications_reglages: [
+    { user_id: MEMBRE, evenements: { surreservation: { push: true, email: true, sms: false, urgent: false } }, plages: [NUIT_TOUS_LES_JOURS] }] })
+  // Mis en file avec { id } seul, sur le bien du périmètre : il passe.
+  await notifier({ compte: COMPTE, code: 'surreservation', bien: { id: 'uuid-1' }, donnees: { bien: 'B', nuits: [] }, chemin: '/', sujet: 'dans', maintenant: NUIT, db, deps: envois().deps })
+  // Et sur un bien hors périmètre — rangé, le membre ne passe pas la décision : il n'est pas destinataire.
+  const ligne = etat.tables.notifications_file.find(l => l.user_id === MEMBRE)
+  assert.equal(ligne.contenu.bienId, 'uuid-1')
+  // Le périmètre change pendant la plage : le bien sort du périmètre du membre.
+  etat.tables.profile_permissions[0].property_ids = ['uuid-9']
+  etat.tables.profile_permissions[0].property_refs = ['ref-9']
+  const e = envois()
+  const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps: e.deps })
+  assert.equal(bilan.ecartees, 1)
+  assert.ok(!e.journal.some(j => j[1] === MEMBRE || j[1] === 'membre@exemple.fr'))
+})
+
+test('LE TEST QUI COMPTE : acquitter une surréservation retire sa ligne de la file — et ne peut pas échouer à cause d\'elle', async () => {
+  const k = (rel) => require.resolve(rel)
+  const remplacer = (rel, exports) => { const c = k(rel); const avant = require.cache[c]; require.cache[c] = { id: c, filename: c, loaded: true, exports }; return () => { if (avant) require.cache[c] = avant; else delete require.cache[c] } }
+  const retraits = []
+  let fileLeve = false
+  const update = { eq: () => update, in: () => update, is: () => update, or: () => update,
+    select: async () => ({ data: [{ id: 'inc-1', type: 'overbooking', property_id: 'p1' }], error: null }) }
+  const restaurer = [
+    remplacer('../lib/require-permission', { requirePermission: async () => ({ ok: true, userId: MEMBRE, accountUserId: COMPTE, contexte: { userId: COMPTE, accountUserId: COMPTE } }) }),
+    remplacer('../lib/notifications/file', { retirerSujet: async (p) => { if (fileLeve) throw new Error('panne'); retraits.push(p); return { ok: true } } }),
+    remplacer(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'), { createClient: () => ({ from: () => ({ update: () => update }) }) })
+  ]
+  delete require.cache[k('../api/incidents-acquitter')]
+  try {
+    const handler = require('../api/incidents-acquitter')
+    const appeler = async () => { const r = { code: null, corps: null }; r.status = (c) => { r.code = c; return r }; r.json = (b) => { r.corps = b; return r }; r.setHeader = () => r
+      await handler({ method: 'POST', headers: {}, body: { id: 'inc-1' } }, r); return r }
+    const r = await appeler()
+    assert.equal(r.code, 200)
+    assert.equal(retraits.length, 1)
+    assert.equal(retraits[0].compte, COMPTE)
+    assert.equal(retraits[0].sujet, 'surreservation:p1')
+    fileLeve = true
+    assert.equal((await appeler()).code, 200, 'une file en panne n\'empêche pas d\'acquitter')
+  } finally {
+    restaurer.forEach(f => f())
+    delete require.cache[k('../api/incidents-acquitter')]
+  }
+})
