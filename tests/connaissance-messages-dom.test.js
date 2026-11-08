@@ -22,7 +22,6 @@ const ECRAN = {
 }
 const BIENS = [{ ref: 'P1', nom: 'La bulle' }, { ref: 'P2', nom: 'Cœur' }]
 const FR = require('../shared/i18n/fr.json')
-const FR_USE_REMOVED = FR['kb.use_removed']
 const FR_USE_WRONG = FR['kb.use_wrong_conv']
 const lecturesKb = (banc) => banc.envois.filter(e => /^\/api\/ecran\/connaissance/.test(e.chemin) && e.methode === 'GET')
 
@@ -405,13 +404,13 @@ async function bancDeuxFils (convs) {
 }
 const envoyer = (b) => clic(b, b.doc.querySelector('[data-bind="envoyer"]'))
 
-test('LE TEST QUI COMPTE : changer de fil RETIRE le texte posé pour l autre voyageur, et le dit', async () => {
+test('LE TEST QUI COMPTE : changer de fil RETIRE le texte posé pour l autre voyageur, en silence', async () => {
   const b = await bancDeuxFils([fil('B7', 'P2'), fil('B8', 'P2')])
   const zone = b.doc.querySelector('[data-bind="texte"]')
   assert.equal(zone.value, 'Bonjour Ana, Le wifi est RESEAU')
   b.msg.ouvrir('B8')
   assert.equal(zone.value, '', 'le texte d Ana ne reste pas dans le fil de Marie')
-  assert.equal(noteSaisie(b), FR_USE_REMOVED)
+  assert.equal(noteSaisie(b), null, 'retiré en silence (recette du 8 novembre)')
   envoyer(b)
   await reposer(b)
   assert.deepEqual(envoisVoyageur(b), [])
@@ -478,7 +477,7 @@ test('LE TEST QUI COMPTE : deux « Utiliser » dans le même fil, changer de fil
   assert.equal(zone.value, 'Bonjour Ana, Le wifi est RESEAU\nBonjour Ana, Le wifi est RESEAU')
   b.msg.ouvrir('B9')
   assert.equal(zone.value, '', 'aucun des deux textes d Ana ne reste')
-  assert.equal(noteSaisie(b), FR_USE_REMOVED)
+  assert.equal(noteSaisie(b), null, 'retiré en silence (recette du 8 novembre)')
   envoyer(b)
   await reposer(b)
   assert.deepEqual(envoisVoyageur(b), [])
@@ -573,7 +572,8 @@ test('LE TEST QUI COMPTE : vider puis rétablir (Ctrl+Z) le texte posé ne le li
   taper(b, '')
   taper(b, 'Bonjour Ana, Le wifi est RESEAU')
   b.msg.ouvrir('B9')
-  assert.equal(noteSaisie(b), FR_USE_REMOVED, 'rétabli tel quel : il est retiré comme un texte posé')
+  assert.equal(b.doc.querySelector('[data-bind="texte"]').value, '', 'rétabli tel quel : il est retiré comme un texte posé')
+  assert.equal(noteSaisie(b), null, 'en silence')
   envoyer(b)
   await reposer(b)
   assert.deepEqual(envoisVoyageur(b), [])
@@ -611,15 +611,34 @@ test('la note R7 tombe en revenant dans le bon fil, et après un envoi', async (
   b.fermer()
 })
 
-test('« retiré du champ » tombe quand l hôte envoie son propre message dans le nouveau fil', async () => {
+test('le refus « il ne partira pas ici » tombe quand l hôte envoie SON message dans ce fil', async () => {
   const b = await bancDeuxFils([fil('B7', 'P2'), fil('B9', 'P1')])
+  taper(b, 'Bonjour Ana !, Le wifi est RESEAU')
   b.msg.ouvrir('B9')
-  assert.equal(noteSaisie(b), FR_USE_REMOVED)
+  assert.equal(noteSaisie(b), FR_USE_WRONG)
+  taper(b, '')
   taper(b, 'Bonjour, à demain')
   envoyer(b)
   await reposer(b)
   assert.deepEqual(envoisVoyageur(b).map(e => e.corps.bookingId), ['B9'])
-  assert.equal(noteSaisie(b), null)
+  assert.equal(noteSaisie(b), null, 'après l envoi, plus de note')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE (recette du 8 novembre) : au téléphone, changer de fil ne fige pas une hauteur de zéro', async () => {
+  const b = await telephoneSurB7()
+  const zone = b.doc.querySelector('[data-bind="texte"]')
+  // jsdom ne mesure rien : on rend au champ la mesure d'un vrai navigateur —
+  // 0 quand la saisie est cachée (téléphone, liste affichée), 48 sinon.
+  Object.defineProperty(zone, 'scrollHeight', { configurable: true, get: () => (b.doc.body.dataset.fil ? 48 : 0) })
+  clic(b, iconeSaisie(b))
+  await reposer(b)
+  utiliser(b)
+  await reposer(b)
+  assert.equal(zone.style.height, '48px')
+  clic(b, b.doc.querySelector('[data-bind="retour"]'))
+  b.msg.ouvrir('B8')
+  assert.equal(zone.style.height, '48px', 'remesuré une fois la saisie visible')
   b.fermer()
 })
 

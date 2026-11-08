@@ -375,7 +375,6 @@
   "kb.use_empty": "This reply is empty.",
   "kb.use_other_conv": "The conversation has changed: reopen the knowledge base for this one.",
   "kb.use_wrong_conv": "This text was prepared for another conversation: it will not be sent here. Clear the field, or go back to that conversation.",
-  "kb.use_removed": "The knowledge base text prepared for the other conversation was removed from the field.",
   "kb.use_incomplete": "This reply is not complete for this guest: check it before using it.",
   "kb.title": "Knowledge base",
   "kb.to_fill": "To fill in",

@@ -83,7 +83,8 @@ son test (§7).
   partagé entre les fils de la page ; la page garde **tous** les textes posés
   par « Utiliser » et le fil pour lequel ils l'ont été. Si l'hôte change de
   conversation et que le champ ne contient **que** ces textes, tels quels, ils
-  sont **retirés**, et une note le dit. S'il reste quoi que ce soit d'autre —
+  sont **retirés, en silence** (recette du 8 novembre 2026 : la note « retiré
+  du champ » était de trop). S'il reste quoi que ce soit d'autre —
   une retouche, une phrase ajoutée avant ou après —, on ne devine pas ce qui
   est à qui : **tout** reste, et « Envoyer » le **refuse** dans l'autre
   conversation (note « Ce texte a été préparé pour une autre conversation : il
@@ -274,3 +275,24 @@ review, chaque correctif avec son test qui rougit sans lui :
 - **La spec disait** que les textes posés sont retirés pendant tout
   « Modifier » : faux pour une proposition différée (le tout devient son
   brouillon, R5). → R7 corrigée.
+
+## 12. Recette du 8 novembre 2026 (staging, téléphone)
+
+Conformes : la base s'ouvre par-dessus la conversation ; « Utiliser » ajoute à
+la suite, prénom du voyageur rempli, rien ne part ; le texte posé ne suit pas
+dans une autre conversation. Pas de réponse avec une info manquante sur le
+compte : le refus sera recetté avec « Accueil du voyageur ».
+
+Corrigé sur la branche du lot (règle 8), chaque correctif avec son test :
+
+- **La hauteur du champ tombait à zéro** en ouvrant plusieurs conversations à
+  la suite au téléphone : le champ était mesuré pendant que la saisie était
+  cachée. → il se remesure une fois la saisie visible.
+- **La note « retiré du champ » est retirée** (décision de Thierry) : le
+  retrait se fait en silence. Le refus d'« Envoyer » pour un texte retouché
+  reste.
+
+Décidé pendant la recette, **lot à part après « Accueil du voyageur »** :
+chaque conversation garde son propre brouillon non envoyé (texte tapé ou posé),
+tant que l'appli est ouverte, rien sur le serveur. Il remplacera le mécanisme
+de R7.
