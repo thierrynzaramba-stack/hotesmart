@@ -122,12 +122,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q14 — Les doublons.** Tranchée, voir ci-dessous.
 - **Q15 — Le risque résiduel des pièces jointes.** Tranchée, voir ci-dessous.
 - **Q16 — Révoquer l'adresse.** Tranchée, voir ci-dessous.
-- **Q17 — La TVA récupérable.** Ce qu'est la charge réelle (HT ou TTC) est
-  une question fiscale : prorata de déduction, dépenses non déductibles.
-  *Proposition* : la V1 stocke HT, TVA et TTC tels que lus et validés, et
-  n'affiche pas de « charge réelle » avant l'avis d'un comptable. Une TVA lue
-  à 0 (« TVA non applicable, art. 293 B ») se distingue d'une TVA non lue
-  (vide).
+- **Q17 — La TVA récupérable.** Tranchée, voir ci-dessous.
 - **Q18 — Un bien hors de l'entité.** Une facture peut-elle être affectée à un
   bien qui ne relève pas de l'entité choisie ? *Proposition* : non, refusé par
   le serveur.
@@ -246,6 +241,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   chantier (RLS sans politique, writer unique). Le bouton incrémente la
   version : l'ancienne adresse est refusée aussitôt. Un e-mail reçu sur une
   adresse périmée est refusé (200 + trace, pas de 503 : c'est définitif).
+- **Q17 (8 nov. 2026, 23 h 02) : d'accord.** La V1 enregistre HT, TVA et
+  TTC tels que lus et validés, et **n'affiche aucune « charge réelle »**
+  avant l'avis d'un comptable. Les totaux (Q4) donnent les trois sommes. Une
+  TVA lue à 0 (« TVA non applicable, art. 293 B ») se distingue d'une TVA non
+  lue (vide).
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
