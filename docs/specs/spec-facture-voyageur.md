@@ -154,6 +154,9 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   disponible » par le chemin serveur (`sendGuestMessage`, qui ne vérifie aucun
   droit). Un membre « réservations » en écriture sans « messages » peut-il
   faire ces deux gestes (Q10), ou faut-il les deux droits ?
+  → **Réponse de Thierry (8 nov. 2026, 22 h 03) : A — les deux droits,
+  « réservations » ET « messages » en écriture, pour envoyer le lien et pour
+  confirmer le total.**
 - **P2 — Ce que voit un membre en lecture.** La facture porte le nom,
   l'adresse et le SIREN du voyageur ; la fiche ne montre aujourd'hui les
   coordonnées du voyageur qu'au titulaire. Un membre « réservations » en
@@ -307,13 +310,14 @@ devient une facture à l'émission.
   d'envois du formulaire borné par jeton.
 - **RLS** : activée, aucune politique, `revoke all from anon, authenticated`
   (même exception nommée qu'au §5.1). Les endpoints gardent chaque geste :
-  `reservations` en écriture pour envoyer le lien (et `messages`, selon P1),
-  remplir, confirmer, faire un avoir ; ce qu'un niveau lecture reçoit : P2.
+  `reservations` en écriture pour remplir le formulaire et faire un avoir ;
+  `reservations` ET `messages` en écriture pour envoyer le lien et confirmer
+  le total (P1) ; ce qu'un niveau lecture reçoit : P2.
 
 ### 5.4 L'émission, dans l'ordre
 
 1. **Le geste de l'hôte** : garde serveur (droits — `reservations` en
-   écriture, et `messages` selon la réponse à P1, puisque ce geste fait partir
+   écriture ET `messages` en écriture (P1), puisque ce geste fait partir
    un message ; départ relu dans `bookings_snapshot` + 24 h échu ; réservation
    non annulée ; entité active).
 2. **Une seule fonction SQL, une seule transaction** : passage conditionnel
