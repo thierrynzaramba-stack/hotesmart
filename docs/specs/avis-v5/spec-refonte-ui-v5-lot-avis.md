@@ -79,7 +79,9 @@ Bulle `--amber-soft`, titre « À traiter » et compteur `--amber`. Une ligne pa
   message · à confirmer avant d'être compté », boutons **Ignorer** / **Confirmer**
   (droit `write` ; sans ce droit, la ligne s'affiche sans boutons, comme aujourd'hui).
   Une fois confirmée, la détection rejoint la carte de son séjour comme un avis
-  ordinaire ; ignorée, elle disparaît.
+  ordinaire ; ignorée, elle disparaît. Une détection rangée dans les Anciens
+  rejoint « À traiter » quand la section est ouverte (elle n'est lue qu'alors,
+  comme avant).
 - Rien à faire : la bulle est remplacée par une ligne neutre **« Rien ne vous
   attend. »** (texte actuel) — pas d'ambre quand rien n'attend.
 
@@ -238,11 +240,46 @@ l'app de la prestataire, et c'est elle qui publie chez Airbnb.
 
 1. **Page V5 + endpoint d'écran** : socle V5, en-tête, filtres, chiffres,
    « À traiter », cartes, téléphone ; `/api/ecran/avis` ; cache ; tests (appels,
-   `no-store`, inventaire ci-dessus, droits). Mesure après.
+   `no-store`, inventaire ci-dessus, droits). **Le volet Réglages et la fenêtre
+   de saisie y sont aussi** (ex-étape 3) : l'ancienne fenêtre vivait des styles
+   du vieux socle, qui partent avec lui — la laisser pour une étape suivante,
+   c'était livrer une saisie sans mise en page. Mesure après.
 2. **Résumé des chiffres (Q1 = A)** : `resume_bien_avis`, son calcul par le cron
    une à deux fois par jour, premier calcul immédiat pour un logement neuf,
    « Calculé à HH:MM » à l'écran, `null` avec son motif jamais 0.
-3. **Réglages en volet et saisie restylée.**
+
+**Écart assumé avec la maquette : les boutons.** La maquette les dessinait en
+aplat noir ; la page suit la charte réelle (`.btn--primary` = contour encre sur
+fond blanc), parce que le noir est réservé à la navigation (charte du
+11 octobre 2026). Toutes les pages V5 sont ainsi.
+
+## 8 bis. Étape 1 — ce qui a été livré (8 novembre 2026)
+
+- `api/ecran/avis.js` : l'appel d'écran. Il **réutilise** `cartesLister` et
+  `autoValidationLire` d'`api/avis.js` (exportés sous `ecran`), avec leurs
+  gardes de périmètre — aucune lecture recopiée. Garde `contexteDEcran`
+  (en-tête privé avant tout refus, 405 compris), refus 403 sans `avis` en
+  lecture **avant** toute lecture. `Server-Timing` porte le nombre de requêtes,
+  compté par `lib/compte-requetes.js` (`AsyncLocalStorage` sur `fetch` : le
+  compte d'une requête, même quand l'instance en sert plusieurs).
+- `api/avis.js` : la liste `biens` porte `photo_url` ; `lib/avis/cartes.js` :
+  chaque carte porte `bien_ref` (la photo se retrouve par la référence).
+- `core/avis/cartes.js` : rendu V5 (`avp-*`), « À traiter » (évaluations +
+  détections), textes traduits (`t` de la page ; repli `TEXTES_FR` identique à
+  `fr.json`, tenu par `tests/avis-cartes-i18n.test.js`), cache peint avant la
+  lecture (`initiales`).
+- `pages/avis.html` : socle V5, un seul module, deux endpoints en constantes
+  (`ECRAN` au chargement, `AVIS` aux gestes), filtres en pastilles, volet
+  Réglages et fenêtre de saisie en `<dialog>` natifs.
+- `core/avis/ecran-reglages.js` : styles passés aux jetons V5 (avec repli).
+- 110 clés `avis.*` en fr, en, es.
+- Tests : `tests/avis-v5.test.js` (banc qui exécute le vrai module de la page,
+  `tests/outils/banc-avis.js` : un appel au chargement à 1 comme à 12
+  logements, filtres, droits, saisie et double clic, volet, `?evaluer=`,
+  `?reglages=1`, cache), `tests/ecran-avis.test.js`,
+  `tests/avis-cartes-i18n.test.js`, `tests/avis-cartes-dom.test.js` réécrit sur
+  le nouveau rendu (chaque assertion de la recette du 7 octobre gardée) ;
+  `budget-ecran` et `ecrans-sans-biens-archives` connaissent la page.
 
 Chaque étape : une review, zéro rouge, remise au chef de file avec les cinq éléments.
 

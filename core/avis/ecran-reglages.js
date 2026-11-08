@@ -1,8 +1,11 @@
 // core/avis/ecran-reglages.js
 // DOC : docs/specs/spec-evaluation-voyageur.md §4.7 (modif = MEME COMMIT)
 //
-// L'ONGLET « AVIS » DE /settings : la grille d'evaluation, les mots-cles, le ton
-// et la signature.
+// LES REGLAGES DES AVIS : la grille d'evaluation, les mots-cles, le ton, la
+// signature et la publication automatique. Ne dans l'onglet « Avis » de
+// /settings, ils vivent dans l'app Avis depuis le 2 octobre 2026, et dans un
+// VOLET de la page V5 depuis le 8 novembre 2026 (styles aux jetons de
+// shared/theme.css, avec un repli quand la page ne les charge pas).
 //
 // ⚠ CET ECRAN N'EST PAS LE JUGE. Les deux regles que l'hote ne peut pas defaire
 // — une note 1 est negative, un refus de recommander est negatif — sont tenues
@@ -45,26 +48,27 @@ export function negatifForce (niveau, categorie) {
 // au soir) : ses styles voyagent avec lui, au lieu de rester dans /settings.
 const STYLE_ID = 'hs-avis-reglages-style'
 const STYLE = `
-.hs-avis-reglages .card-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
-.hs-avis-reglages .card-sub { font-size: 12.5px; color: var(--text2, #6b6b6b); margin-bottom: 14px; line-height: 1.5; }
+.hs-avis-reglages .card { margin-bottom: 14px; }
+.hs-avis-reglages .card-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+.hs-avis-reglages .card-sub { font-size: 12.5px; color: var(--muted, #6b6b6b); margin-bottom: 14px; line-height: 1.5; }
 .hs-avis-reglages .hs-critere { margin-bottom: 12px; }
 .hs-avis-reglages .hs-critere-entete { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 .hs-avis-reglages .hs-critere-entete input[type=text] { flex: 1 1 240px; min-width: 0; }
 .hs-avis-reglages .hs-niveaux { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .hs-avis-reglages .hs-niveau { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .hs-avis-reglages .hs-niveau input[type=text] { flex: 1 1 180px; min-width: 0; }
-.hs-avis-reglages .hs-niveau-negatif { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text2, #6b6b6b); }
-.hs-avis-reglages .hs-niveau-force { font-size: 11px; color: var(--text2, #6b6b6b); }
+.hs-avis-reglages .hs-niveau-negatif { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted, #6b6b6b); }
+.hs-avis-reglages .hs-niveau-force { font-size: 11px; color: var(--muted, #6b6b6b); }
 .hs-avis-reglages .hs-reglage { display: block; margin-bottom: 10px; font-size: 13px; }
-.hs-avis-reglages .hs-reglage span { display: block; margin-bottom: 4px; color: var(--text2, #6b6b6b); }
+.hs-avis-reglages .hs-reglage span { display: block; margin-bottom: 4px; color: var(--muted, #6b6b6b); }
 .hs-avis-reglages .hs-reglage input, .hs-avis-reglages .hs-reglage select { width: 100%; box-sizing: border-box; }
-.hs-avis-reglages input[type=text], .hs-avis-reglages input[type=number], .hs-avis-reglages select { font: inherit; font-size: 13.5px; padding: 6px 8px; border: 1px solid #d9d4ce; border-radius: 8px; background: var(--bg, #fff); color: inherit; }
+.hs-avis-reglages input[type=text], .hs-avis-reglages input[type=number], .hs-avis-reglages select { font: inherit; font-size: 13.5px; padding: 6px 8px; border: 1px solid var(--border, #d9d4ce); border-radius: 10px; background: var(--surface, #fff); color: inherit; }
 .hs-avis-reglages .hs-avis-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
-.hs-avis-reglages .hs-avis-actions button, .hs-avis-reglages .hs-critere button { font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 8px; border: 1px solid #d9d4ce; background: var(--bg, #fff); color: inherit; cursor: pointer; }
-.hs-avis-reglages .hs-avis-principal { background: #C97B5C !important; border-color: #C97B5C !important; color: #fff !important; font-weight: 600; }
-.hs-avis-reglages .hs-avis-erreur { color: #b3261e; font-size: 13px; }
-.hs-avis-reglages .hs-avis-message { color: #1b5e20; font-size: 13px; }
-.hs-avis-reglages .hs-auto-bien { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 9px 0; border-top: 0.5px solid #e6e2dd; }
+.hs-avis-reglages .hs-avis-actions button, .hs-avis-reglages .hs-critere button { font: inherit; font-size: 13px; min-height: 40px; padding: 0 16px; border-radius: var(--radius-pill, 99px); border: 1px solid var(--border, #d9d4ce); background: var(--surface, #fff); color: inherit; font-weight: 600; cursor: pointer; }
+.hs-avis-reglages .hs-avis-principal { border-color: var(--ink, #222) !important; font-weight: 600; }
+.hs-avis-reglages .hs-avis-erreur { color: var(--danger-ink, #b3261e); font-size: 13px; }
+.hs-avis-reglages .hs-avis-message { color: var(--ok-ink, #1b5e20); font-size: 13px; }
+.hs-avis-reglages .hs-auto-bien { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 9px 0; border-top: 1px solid var(--line, #e6e2dd); }
 .hs-avis-reglages .hs-auto-bien:first-of-type { border-top: 0; }
 .hs-avis-reglages .hs-auto-nom { flex: 1 1 200px; display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .hs-avis-reglages .hs-auto-delai { display: flex; align-items: center; gap: 6px; font-size: 13px; }

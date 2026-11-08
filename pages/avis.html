@@ -1,559 +1,440 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Avis voyageurs</title>
-  <link rel="stylesheet" href="/public/style.css">
-  <style>
-    .avis-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }
-    .stat-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:16px; }
-    .stat-val  { font-size:26px; font-weight:700; line-height:1.1; }
-    .stat-lab  { font-size:12px; color:var(--text2); margin-top:4px; }
-    .stat-card.alerte .stat-val { color:#E8873A; }
-
-    .avis-barre { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
-    .avis-barre select { max-width:280px; }
-
-    .avis-item { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg);
-                 padding:16px; margin-bottom:12px; }
-    .avis-head { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; font-size:13px; color:var(--text2); }
-    .avis-note { margin-left:auto; font-weight:700; font-size:15px; color:var(--text); }
-    .avis-extrait { margin:10px 0 6px; padding:10px 12px; border-left:3px solid var(--border);
-                    font-style:italic; background:rgba(0,0,0,0.02); border-radius:4px; }
-    .avis-texte { font-size:14px; line-height:1.5; white-space:pre-wrap; }
-    .avis-texte.replie { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-    .avis-plus { background:none; border:none; color:var(--green); cursor:pointer; padding:4px 0; font-size:13px; }
-
-    .badge-prop { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600; }
-    .badge-prop.positif      { background:#E6F4EA; color:#1E7B34; }
-    .badge-prop.remarque     { background:#FDF0E2; color:#A85B12; }
-    .badge-prop.rien_signale { background:#F0F0F0; color:#666; }
-    .badge-prop.attente      { background:#F0F0F0; color:#999; }
-    /* Etiquette d'origine, une couleur par source. Meme forme que les badges
-       de proprete pour que l'oeil les lise comme une meme famille. */
-    .badge-src { padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
-    .badge-src.messagerie { background:#EEF2FF; color:#3B4CCA; }
-    .badge-src.airbnb     { background:#FDECEF; color:#B0224A; }
-    .badge-src.booking    { background:#E8EEFB; color:#1B3E8F; }
-    .badge-src.sms        { background:#E9F5EC; color:#276B3B; }
-    .badge-src.email      { background:#F3EDFA; color:#5B3B8F; }
-    .badge-src.oral       { background:#FBF0E4; color:#8A5A18; }
-    .badge-src.autre      { background:#F0F0F0; color:#666; }
-
-    /* Ratio de proprete sur la periode */
-    .ratio { display:flex; gap:14px; align-items:center; }
-    .ratio-item { display:flex; gap:5px; align-items:center; font-size:15px; font-weight:700; }
-    .ratio-item svg { width:15px; height:15px; }
-    .ratio-item.pos { color:#1E7B34; }
-    .ratio-item.neg { color:#A85B12; }
-
-    /* Une detection n'est pas un fait : elle se distingue a l'oeil et porte sa
-       propre action. Bordure gauche plutot qu'un fond colore — l'entree reste
-       lisible comme les autres. */
-    .avis-item.detecte { border-left: 3px solid #E8873A; }
-    .bandeau-detecte { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
-                       background:#FDF0E2; color:#A85B12; border-radius:8px;
-                       padding:8px 12px; margin-bottom:10px; font-size:13px; }
-    .bandeau-detecte .titre { font-weight:600; }
-    .bandeau-detecte .actions { margin-left:auto; display:flex; gap:8px; }
-    .btn-mini { border:0.5px solid var(--border); background:var(--bg); color:var(--text);
-                border-radius:6px; padding:4px 12px; font-size:12px; font-weight:600; cursor:pointer; }
-    .btn-mini.ok { background:#1E7B34; color:#fff; border-color:#1E7B34; }
-
-    /* Requalification : discrete, elle ne doit pas concurrencer la lecture de
-       l'avis. Un petit selecteur qui n'apparait qu'au droit d'ecriture. */
-    .requalif { margin-left:8px; font-size:11px; border:0.5px solid var(--border);
-                border-radius:6px; padding:1px 4px; background:var(--bg); color:var(--text2); }
-    .corrige { font-size:11px; color:var(--text2); font-style:italic; margin-left:6px; }
-
-    /* ⚠ `hidden` NE MASQUE PAS un element dont une regle auteur pose un display.
-       `.btn` est en `display:inline-flex` (public/style.css), donc `btn.hidden =
-       true` etait un NO-OP : le bouton de saisie restait visible, y compris pour
-       un membre `avis: read`. Le serveur refusait bien en 403, mais le masquage
-       par droit annonce ne fonctionnait pas. Meme cause pour #stats. */
-    [hidden] { display: none !important; }
-
-    /* ⚠ AUCUNE de ces classes n'existe dans public/style.css : `grep '.modal'`
-       n'y renvoie rien. Chaque page definit les siennes (biens.html:54,
-       menages, serrures...). Sans ces regles, la modale s'affichait EN FLUX
-       NORMAL sous le pli — formulaire brut visible en permanence — et le bouton
-       d'ouverture ne produisait rien.
-       Classe d'ouverture `.show`, comme pages/biens.html : une page de plus avec
-       `.open` aurait fait deux conventions pour la meme chose. */
-    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
-             align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
-    .modal.show { display: flex; }
-    .modal-content { background: var(--bg); border-radius: var(--radius-lg); width: 100%;
-                     max-width: 520px; padding: 24px; max-height: 90vh; overflow-y: auto; }
-    .modal-content h2 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
-    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
-    .modal-feedback { font-size: 13px; color: #E24B4A; min-height: 18px; margin-top: 10px; }
-    .modal-body label { display:block; margin-top:12px; font-size:13px; font-weight:600; }
-    .modal-body input, .modal-body select { width: 100%; padding: 9px 10px; font-size: 14px;
-                     border: 0.5px solid var(--border); border-radius: 8px; background: var(--bg);
-                     color: var(--text); margin-top: 4px; }
-    .modal-body textarea { width:100%; min-height:120px; font-family:inherit; font-size:14px;
-                           padding:10px; border:0.5px solid var(--border); border-radius:8px;
-                           resize:vertical; margin-top: 4px; }
-  </style>
-  <style>
-    /* ─── Une carte par séjour (core/avis/cartes.js, recette du 7 octobre 2026) */
-    #zone-cartes { margin-top: 4px; }
-    .hs-eval-resume { font-size: 13px; color: #6b6b6b; margin: 0 0 12px; }
-    .hs-section { margin: 0 0 22px; }
-    .hs-section h2 { font-size: 15px; margin: 0 0 10px; display: inline-flex; gap: 8px; align-items: baseline; }
-    details.hs-section > summary { cursor: pointer; list-style: revert; }
-    details.hs-section > summary h2 { margin: 0; }
-    .hs-compte { font-size: 12px; font-weight: 600; color: #6b6b6b; background: #f0ede9; border-radius: 999px; padding: 1px 8px; }
-    .hs-sous { font-size: 12px; font-weight: 400; color: #6b6b6b; }
-    .hs-cartes { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
-    .hs-carte { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; font-size: 13.5px; min-width: 0; }
-    .hs-carte-a-faire { border-left: 3px solid #C97B5C; }
-    .hs-carte-tete { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-    .hs-carte-qui { font-weight: 600; font-size: 15px; }
-    .hs-carte-infos { color: #6b6b6b; font-size: 12.5px; margin: 2px 0 8px; overflow-wrap: anywhere; }
-    .hs-carte-bloc { background: #f7f5f2; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
-    .hs-carte-bloc p { margin: 4px 0 0; line-height: 1.45; overflow-wrap: anywhere; }
-    .hs-carte-bloc.detecte { border-left: 3px solid #E8873A; }
-    .hs-carte-notre { background: #fbf3ee; }
-    .hs-carte-ligne { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .hs-carte-libelle { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #6b6b6b; }
-    .hs-carte-note { font-weight: 700; font-size: 13px; }
-    .hs-carte-etat { color: #6b6b6b; font-size: 12.5px; }
-    .hs-carte-origine { color: #6b6b6b; font-size: 12px; font-style: italic; }
-    .hs-carte-gris { color: #8a8580; font-size: 12.5px; }
-    .hs-eval-bouton { margin-top: 8px; font: inherit; font-size: 13.5px; font-weight: 600; padding: 8px 14px; border-radius: 10px; border: 0; background: #C97B5C; color: #fff; cursor: pointer; }
-    .hs-eval-delai { color: #6b6b6b; font-size: 12px; }
-    /* ⚠ L'urgence se voit SANS la couleur : « dernier jour » est un mot, pas
-       seulement un rouge — une page lue en niveaux de gris doit rester claire. */
-    .hs-eval-urgent { color: #b3261e; font-size: 12px; font-weight: 600; }
-    .hs-avis-erreur { font-size: 13px; color: #b3261e; }
-    select.requalif { margin-left: 0; font-weight: 600; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « AVIS » — refonte V5, lot Avis, étape 1.
+     Spec : docs/specs/avis-v5/spec-refonte-ui-v5-lot-avis.md ; maquettes dans
+     docs/specs/avis-v5/maquette/. Avis vit dans le menu ≡ (spec V5 §3) : aucun
+     onglet de la barre n'est actif ici.
+     Le contenu (cartes, « À traiter », chiffres) est rendu par
+     /core/avis/cartes.js : les avis sont une fonctionnalité du cœur, la page
+     n'en porte que l'en-tête, les filtres et les deux fenêtres.
+     ⚠ UN APPEL AU CHARGEMENT : /api/ecran/avis (tests/budget-ecran.test.js).
+     Les autres ne partent que sur un geste.
+     RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
 <body>
-<div class="layout">
-  <div class="sidebar" id="sidebar"></div>
-  <div class="main">
-    <div class="topbar">
-      <div>
-        <!-- ⚠ L'ICONE DU SPRITE, PAS UN EMOJI (regle V5, rappel de Thierry du
-             20 octobre 2026). Un emoji ne suit ni la couleur du theme, ni le
-             mode sombre, il change de dessin selon le systeme, et un lecteur
-             d'ecran l'annonce (« etoile blanche moyenne ») avant un titre qui
-             se suffit. Styles en ligne : cette page ne charge que
-             /public/style.css, ou `.icon` n'existe pas. -->
-        <div class="page-title" style="display:flex;align-items:center;gap:8px">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>
-          <span>Avis voyageurs</span>
-        </div>
-        <div class="page-sub" id="sous-titre">Chargement…</div>
-        <!-- L'auto-validation de l'evaluation (spec §10 bis) : activee ou non,
-             et son delai. Lue sur la config du compte. -->
-        <div class="page-sub" id="etat-auto" hidden></div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <!-- ⚠ Réglages refuse un compte délégué : le lien n'apparaît qu'au
-             titulaire qui a le droit d'écriture sur les avis (voir initAvis). -->
-        <!-- Les réglages des avis vivent DANS l'app (décision de Thierry du
-             2 octobre 2026 au soir) : le bouton les ouvre sur place. -->
-        <button class="btn" id="lien-configuration" type="button" hidden>⚙ Configuration</button>
-        <button class="btn btn-primary" id="btn-saisir" hidden>+ Saisir un avis reçu</button>
-      </div>
-    </div>
-    <div class="content">
-      <section id="zone-reglages" style="display:none;margin-bottom:18px"></section>
 
-      <div class="avis-stats" id="stats" hidden></div>
-
-      <div class="avis-barre">
-        <select id="filtre-bien"><option value="">Tous les biens</option></select>
-        <!-- Les valeurs sont celles du serveur : `PERIODES` fait foi. Une
-             liste en dur ici et une autre la-bas divergeraient. -->
-        <select id="filtre-periode"></select>
-      </div>
-
-      <!-- ⚠ UNE CARTE PAR SEJOUR, POUR TOUS LES AVIS (recette de Thierry du
-           7 octobre 2026) : en attente de notation, recents (20 jours),
-           anciens (repliee). Le contenu vit dans un module du coeur,
-           /core/avis/cartes.js ; l'assemblage, au serveur (action `cartes`). -->
-      <div id="zone-cartes"><p class="hs-carte-gris">Chargement…</p></div>
-    </div>
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
   </div>
-</div>
+</header>
 
-<!-- Saisie d'un avis reçu en direct (droit avis = write) -->
-<div class="modal" id="saisie-modal">
-  <div class="modal-content">
-    <h2>Saisir un avis reçu</h2>
-    <p style="font-size:13px;color:var(--text2)">
-      Un compliment ou une remarque reçus par SMS, par email ou de vive voix. Il rejoint
-      vos autres avis et son verdict de propreté est calculé comme pour les autres.
-    </p>
-    <div class="modal-body">
-      <label for="s-bien">Bien concerné</label>
-      <select id="s-bien"></select>
+<main class="page avp">
+  <div class="avp-tete">
+    <div class="avp-tete__titre">
+      <h1 class="h1" data-i18n="avis.titre"></h1>
+      <!-- L'état de la publication automatique, sur UNE ligne (demande de
+           Thierry du 2 octobre 2026), avec le lien vers son réglage. -->
+      <p class="avp-auto" data-bind="auto" hidden></p>
+    </div>
+    <!-- ⚠ Les deux gestes n'existent qu'au droit `avis: write` (nés cachés) ;
+         le serveur revalide chaque geste : ce masquage est un confort. -->
+    <button type="button" class="btn btn--secondary btn--icon" data-action="reglages" hidden data-i18n-attr="aria-label:avis.reglages;title:avis.reglages">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-settings"/></svg>
+    </button>
+    <button type="button" class="btn btn--secondary avp-saisir" data-action="saisir" hidden data-i18n-attr="aria-label:avis.saisir_aria">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg>
+      <span class="avp-saisir__mot" data-i18n="avis.saisir"></span>
+    </button>
+  </div>
 
-      <label for="s-source">Reçu par</label>
-      <select id="s-source">
-        <option value="sms">SMS</option>
-        <option value="email">Email</option>
-        <option value="oral">De vive voix</option>
+  <div class="avp-filtres">
+    <!-- Les périodes viennent du serveur (`PERIODES` fait foi) ; les logements
+         de la réponse, donc sans les biens archivés. -->
+    <div class="avp-pastilles" role="group" data-bind="periodes" data-i18n-attr="aria-label:avis.periode_aria"></div>
+    <div class="avp-pastilles" role="group" data-bind="biens" data-i18n-attr="aria-label:avis.biens_aria"></div>
+  </div>
+
+  <div class="avp-chiffres" data-bind="stats" hidden></div>
+
+  <div class="avp-contenu" data-bind="cartes"><p class="muted" data-i18n="common.loading"></p></div>
+</main>
+
+<!-- Saisie d'un avis reçu en direct (droit avis = write). -->
+<dialog class="avp-feuille" data-bind="saisie" aria-labelledby="avp-saisie-titre">
+  <form method="dialog" class="avp-feuille__corps" data-bind="saisie-form" novalidate>
+    <div class="avp-feuille__tete">
+      <h2 class="avp-h2" id="avp-saisie-titre" data-i18n="avis.saisie_titre"></h2>
+      <button type="button" class="btn btn--secondary btn--icon" data-action="saisie-fermer" data-i18n-attr="aria-label:avis.fermer">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg>
+      </button>
+    </div>
+    <p class="muted small" data-i18n="avis.saisie_aide"></p>
+    <label class="avp-champ"><span data-i18n="avis.saisie_bien"></span><select data-bind="s-bien"></select></label>
+    <label class="avp-champ"><span data-i18n="avis.saisie_source"></span>
+      <select data-bind="s-source">
+        <option value="sms" data-i18n="avis.source_sms"></option>
+        <option value="email" data-i18n="avis.source_email"></option>
+        <option value="oral" data-i18n="avis.source_oral"></option>
       </select>
-
-      <label for="s-date">Date de réception</label>
-      <input type="date" id="s-date">
-
-      <label for="s-sejour">Séjour concerné <span style="font-weight:400;color:var(--text2)">(facultatif)</span></label>
-      <select id="s-sejour"><option value="">Sans rattachement</option></select>
-
-      <label for="s-texte">Ce que le voyageur a dit</label>
-      <textarea id="s-texte" maxlength="5000" placeholder="Recopiez ses mots, aussi fidèlement que possible."></textarea>
+    </label>
+    <label class="avp-champ"><span data-i18n="avis.saisie_date"></span><input type="date" data-bind="s-date"></label>
+    <label class="avp-champ"><span><span data-i18n="avis.saisie_sejour"></span> <span class="muted" data-i18n="avis.facultatif"></span></span>
+      <select data-bind="s-sejour"><option value="" data-i18n="avis.sans_rattachement"></option></select>
+    </label>
+    <label class="avp-champ"><span data-i18n="avis.saisie_texte"></span>
+      <textarea data-bind="s-texte" maxlength="5000" rows="5" data-i18n-attr="placeholder:avis.saisie_ph"></textarea>
+    </label>
+    <p class="avp-erreur" data-bind="s-retour" role="status"></p>
+    <div class="avp-feuille__pied">
+      <button type="button" class="btn btn--secondary" data-action="saisie-fermer" data-i18n="avis.annuler"></button>
+      <button type="button" class="btn btn--primary" data-action="saisie-envoyer" data-i18n="avis.enregistrer"></button>
     </div>
-    <div class="modal-feedback" id="s-feedback"></div>
-    <div class="modal-actions">
-      <button class="btn" id="s-annuler">Annuler</button>
-      <button class="btn btn-primary" id="s-envoyer">Enregistrer</button>
-    </div>
+  </form>
+</dialog>
+
+<!-- Les réglages des avis, DANS l'app (décision de Thierry du 2 octobre 2026) :
+     un volet à droite à l'ordinateur, plein écran au téléphone. -->
+<dialog class="avp-volet" data-bind="reglages" aria-labelledby="avp-reglages-titre">
+  <div class="avp-volet__tete">
+    <h2 class="avp-h2" id="avp-reglages-titre" data-i18n="avis.reglages_titre"></h2>
+    <button type="button" class="btn btn--secondary btn--icon" data-action="reglages-fermer" data-i18n-attr="aria-label:avis.fermer">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg>
+    </button>
   </div>
-</div>
+  <div class="avp-volet__corps" data-bind="reglages-zone"></div>
+</dialog>
 
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
 <script type="module">
-  import { requireAuth } from '/components/auth-guard.js'
-  import { renderSidebar } from '/components/sidebar.js'
-  import { peutEcrire, enteteCompte, estTitulaire } from '/shared/compte-courant.js'
-  import { supabase } from '/shared/supabase.js'
+import { requireAuth } from '/components/auth-guard.js'
+import { getUser, signOut, supabase } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte } from '/shared/compte-courant.js'
+import { lire as lireCache, ecrire as ecrireCache } from '/shared/cache-ecran.js'
+import { monter as monterCartes } from '/core/avis/cartes.js'
 
-  // ⚠ LE MODULE PILOTE L'INITIALISATION. Il ne suffit PAS de poser les helpers
-  // tot dans le module : un module est DEFERRE, et ses `import` sont resolus en
-  // RESEAU avant que son corps ne s'execute. Le script classique plus bas, lui,
-  // s'execute des le parsing. Une init accrochee a DOMContentLoaded partait donc
-  // AVANT que le module ait pose quoi que ce soit sur window — une course,
-  // invisible en local ou tout est en cache, perdue en production.
-  //
-  // Le script classique se contente d'exposer window.initAvis ; c'est nous qui
-  // l'appelons, une fois les helpers poses et la session verifiee. Meme motif
-  // que apps/agent-ai/messagerie.html, qui appelle window.loadConversations().
-  // ⚠ PAS d'import de `apiCall` : shared/api-client.js n'exporte QUE `api`.
-  // L'importer nommement faisait avorter le module entier en production — « does
-  // not provide an export named 'apiCall' » — et la page etait morte. On suit le
-  // motif de apps/agent-ai/messagerie.html : fetch direct, jeton de session et
-  // `enteteCompte()` pour la delegation de compte.
-  window.peutEcrire = peutEcrire
-  window.estTitulaire = estTitulaire
-  window.enteteCompte = enteteCompte
-  window._supabase = supabase
+initErrorHandler()
+// ⚠ LES MODULES DU CŒUR AVIS (réglages, fenêtre d'évaluation) appellent le
+// serveur par `core/avis/appel.js`, qui lit la session et le compte ICI
+// (tests/avis-pages-session.test.js) : la même session, le même compte que la
+// page, plutôt qu'une seconde lecture qui pourrait diverger.
+window._supabase = supabase
+window.enteteCompte = enteteCompte
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
 
+// ⚠ LES DEUX SEULS ENDPOINTS DE LA PAGE. L'écran se peint avec le premier, en
+// UN appel ; le second ne sert qu'aux gestes (corriger, confirmer, saisir).
+const ECRAN = '/api/ecran/avis'
+const AVIS = '/api/avis'
+
+// L'appel : jeton RELU à chaque fois (un onglet ouvert plus d'une heure aurait
+// un jeton expiré), compte délégué par `X-Compte`. Il LÈVE sur réponse non-ok,
+// avec le statut porté par l'erreur : chaque appelant l'attrape.
+async function appelAPI (url, methode = 'GET', corps = null) {
+  let jeton = null
+  try {
+    const { data } = await supabase.auth.getSession()
+    jeton = (data && data.session && data.session.access_token) || null
+  } catch { /* pas de session : le serveur répondra 401 */ }
+  const opts = {
+    method: methode,
+    headers: { 'Content-Type': 'application/json', ...(jeton ? { Authorization: `Bearer ${jeton}` } : {}), ...enteteCompte() }
+  }
+  if (corps) opts.body = JSON.stringify(corps)
+  const res = await fetch(url, opts)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(data.error || t('avis.erreur_serveur'))
+    err.status = res.status
+    throw err
+  }
+  return data
+}
+
+// ─── État de la page ────────────────────────────────────────────────────────
+const PERIODES_CONNUES = ['15j', '30j', '6mois', 'toujours']
+const etat = { periode: '30j', bien: '', biens: [], periodes: [], recharger: null, moi: null, compte: null, envoiEnCours: false, reglagesMontes: false }
+
+// La période retenue : celle mémorisée si elle est connue, sinon 30 jours.
+// ⚠ Mémorisée PAR NAVIGATEUR, pas en base : un confort d'affichage. Le stockage
+// peut lever (navigation privée) : on retombe sur le défaut.
+function periodeVoulue () {
+  try {
+    const memo = localStorage.getItem('avis_periode')
+    if (memo && PERIODES_CONNUES.includes(memo)) return memo
+  } catch { /* stockage indisponible */ }
+  return '30j'
+}
+
+// ─── Filtres ────────────────────────────────────────────────────────────────
+const vignette = (b) => b.photo_url
+  ? `<img class="avp-pastille__photo" src="${esc(b.photo_url)}" alt="" loading="lazy" decoding="async">`
+  : `<span class="avp-pastille__photo avp-pastille__photo--vide" aria-hidden="true">${esc(String(b.name || '?').trim().charAt(0).toUpperCase())}</span>`
+
+function peindreFiltres () {
+  const p = $('[data-bind="periodes"]')
+  p.innerHTML = etat.periodes.map(cle => `<button type="button" class="avp-pastille" data-periode="${esc(cle)}" aria-pressed="${cle === etat.periode}">${esc(t('avis.periode_' + cle))}</button>`).join('')
+  const b = $('[data-bind="biens"]')
+  b.innerHTML = `<button type="button" class="avp-pastille" data-bien="" aria-pressed="${etat.bien === ''}">${esc(t('avis.tous'))}</button>`
+    + etat.biens.map(x => `<button type="button" class="avp-pastille avp-pastille--photo" data-bien="${esc(x.provider_property_id)}" aria-pressed="${String(x.provider_property_id) === etat.bien}">${vignette(x)}<span>${esc(x.name)}</span></button>`).join('')
+}
+
+document.addEventListener('click', (ev) => {
+  const pe = ev.target.closest && ev.target.closest('[data-periode]')
+  if (pe) {
+    etat.periode = pe.dataset.periode
+    try { localStorage.setItem('avis_periode', etat.periode) } catch { /* sans mémoire */ }
+    peindreFiltres()
+    if (etat.recharger) etat.recharger()
+    return
+  }
+  const bi = ev.target.closest && ev.target.closest('[data-bien]')
+  if (bi) {
+    etat.bien = bi.dataset.bien
+    peindreFiltres()
+    if (etat.recharger) etat.recharger()
+  }
+})
+
+// ─── La ligne de publication automatique ────────────────────────────────────
+// Un échec de lecture se tait : ce n'est qu'une information.
+function peindreAuto (pa) {
+  const el = $('[data-bind="auto"]')
+  if (!pa) { el.hidden = true; return }
+  const texte = pa.actifs ? t('avis.auto_actif', { n: pa.actifs, m: pa.total }) : t('avis.auto_inactif')
+  const lien = $('[data-action="reglages"]').hidden ? '' : ` · <a href="#" data-action="reglages-lien">${esc(t('avis.reglages'))}</a>`
+  el.innerHTML = esc(texte) + lien
+  el.hidden = false
+}
+
+// Les filtres et le formulaire se remplissent à la réponse : les biens et les
+// périodes viennent du serveur.
+function surDonnees (d) {
+  etat.biens = (d && d.biens) || []
+  etat.periodes = ((d && d.periodes) || ['30j']).filter(p => PERIODES_CONNUES.includes(p))
+  if (!etat.periodes.includes(etat.periode)) etat.periode = etat.periodes.includes('30j') ? '30j' : etat.periodes[0]
+  if (etat.bien && !etat.biens.some(b => String(b.provider_property_id) === etat.bien)) etat.bien = ''
+  peindreFiltres()
+  peindreAuto(d && d.publication_auto)
+  const sel = $('[data-bind="s-bien"]')
+  const garde = sel.value
+  sel.innerHTML = etat.biens.map(b => `<option value="${esc(b.provider_property_id)}">${esc(b.name)}</option>`).join('')
+  if (garde) sel.value = garde
+}
+
+// ─── L'écran ────────────────────────────────────────────────────────────────
+// La vue par défaut (tous les logements, sans les anciens) se garde pour
+// l'affichage instantané : clé utilisateur + compte, vidée à la déconnexion
+// (shared/cache-ecran.js). Rien de ce qu'elle porte n'est un code, un
+// paiement ni une surréservation.
+const vueParDefaut = (params) => !/(^|&)(bien|anciens)=/.test(params)
+
+async function lireEcran (params) {
+  const d = await appelAPI(ECRAN + (params ? '?' + params : ''))
+  if (vueParDefaut(params) && etat.moi && etat.compte) ecrireCache('avis', etat.moi, etat.compte, { ...d, vue_periode: etat.periode })
+  return d
+}
+
+const actions = {
+  requalifier: (id, verdict) => appelAPI(AVIS, 'POST', { action: 'requalifier', id, verdict }),
+  valider: (id, statut) => appelAPI(AVIS, 'POST', { action: 'valider', id, statut })
+}
+
+// ─── Saisie d'un avis reçu ──────────────────────────────────────────────────
+const dateNue = (d) => {
+  if (!d) return ''
+  const j = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d))
+  const x = j ? new Date(Number(j[1]), Number(j[2]) - 1, Number(j[3])) : new Date(d)
+  return isNaN(x) ? '' : I18n.date(x, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+async function chargerSejours () {
+  const ref = $('[data-bind="s-bien"]').value
+  const sel = $('[data-bind="s-sejour"]')
+  sel.innerHTML = `<option value="">${esc(t('avis.sans_rattachement'))}</option>`
+  if (!ref) return
+  let d
+  try {
+    d = await appelAPI(AVIS + '?action=sejours&bien=' + encodeURIComponent(ref))
+  } catch {
+    // Le rattachement est facultatif : son échec n'empêche pas la saisie.
+    return
+  }
+  for (const s of (d && d.sejours) || []) {
+    const dates = [dateNue(s.arrival), dateNue(s.departure)].filter(Boolean).join(' → ')
+    sel.insertAdjacentHTML('beforeend', `<option value="${esc(s.booking_uid)}">${esc(dates + (s.nom ? ' · ' + s.nom : ''))}</option>`)
+  }
+}
+
+function ouvrir (dlg) {
+  if (typeof dlg.showModal === 'function') { try { dlg.showModal(); return } catch { /* déjà ouverte */ } }
+  dlg.setAttribute('open', '')
+}
+function fermer (dlg) {
+  if (typeof dlg.close === 'function') { try { dlg.close(); return } catch { /* déjà fermée */ } }
+  dlg.removeAttribute('open')
+}
+
+function ouvrirSaisie () {
+  $('[data-bind="s-date"]').value = new Date().toISOString().slice(0, 10)
+  $('[data-bind="s-retour"]').textContent = ''
+  ouvrir($('[data-bind="saisie"]'))
+  chargerSejours()
+}
+
+async function envoyerSaisie () {
+  // Garde anti-double-clic : l'identifiant est un UUID tiré à chaque appel,
+  // deux envois créeraient DEUX avis identiques.
+  if (etat.envoiEnCours) return
+  const retour = $('[data-bind="s-retour"]')
+  const texte = $('[data-bind="s-texte"]').value.trim()
+  if (!$('[data-bind="s-bien"]').value) { retour.textContent = t('avis.choisir_bien'); return }
+  if (!texte) { retour.textContent = t('avis.texte_requis'); return }
+  etat.envoiEnCours = true
+  const bouton = $('[data-action="saisie-envoyer"]')
+  bouton.disabled = true
+  retour.textContent = t('avis.enregistrement')
+  try {
+    await appelAPI(AVIS, 'POST', {
+      action: 'create',
+      bien: $('[data-bind="s-bien"]').value,
+      source: $('[data-bind="s-source"]').value,
+      date: $('[data-bind="s-date"]').value || null,
+      booking_uid: $('[data-bind="s-sejour"]').value || null,
+      texte
+    })
+  } catch (e) {
+    retour.textContent = (e && e.message) || t('avis.enregistrement_ko')
+    return
+  } finally {
+    etat.envoiEnCours = false
+    bouton.disabled = false
+  }
+  $('[data-bind="s-texte"]').value = ''
+  retour.textContent = ''
+  fermer($('[data-bind="saisie"]'))
+  if (etat.recharger) await etat.recharger()
+}
+
+// ─── Réglages, dans un volet ────────────────────────────────────────────────
+// Montés à la demande, une fois ; refermés, ils relisent l'écran (un bien
+// vient peut-être d'être activé en publication automatique).
+async function ouvrirReglages () {
+  const dlg = $('[data-bind="reglages"]')
+  ouvrir(dlg)
+  if (etat.reglagesMontes) return
+  etat.reglagesMontes = true
+  const zone = $('[data-bind="reglages-zone"]')
+  try {
+    const { monter } = await import('/core/avis/ecran-reglages.js')
+    await monter(zone, { avertir: (m) => logger.info('Avis', 'réglages : ' + m) })
+  } catch (e) {
+    // ⚠ UN ÉCHEC DE CHARGEMENT SE DIT, et la prochaine ouverture réessaie.
+    logger.error('Avis', 'réglages', e)
+    etat.reglagesMontes = false
+    zone.innerHTML = `<p class="avp-erreur">${esc(t('avis.reglages_ko'))}</p>`
+  }
+}
+
+document.addEventListener('click', (ev) => {
+  const a = ev.target.closest && ev.target.closest('[data-action]')
+  if (!a) return
+  const quoi = a.dataset.action
+  if (quoi === 'saisir') ouvrirSaisie()
+  else if (quoi === 'saisie-fermer') fermer($('[data-bind="saisie"]'))
+  else if (quoi === 'saisie-envoyer') envoyerSaisie()
+  else if (quoi === 'reglages' || quoi === 'reglages-lien') { ev.preventDefault(); ouvrirReglages() }
+  else if (quoi === 'reglages-fermer') fermer($('[data-bind="reglages"]'))
+})
+$('[data-bind="reglages"]').addEventListener('close', () => { if (etat.recharger) etat.recharger() })
+$('[data-bind="s-bien"]').addEventListener('change', chargerSejours)
+
+// ─── Démarrage ──────────────────────────────────────────────────────────────
+async function init () {
   const session = await requireAuth()
-  // ⚠ requireAuth renvoie null ET declenche une redirection — mais
-  // window.location.replace() n'interrompt PAS le script : le code continuerait
-  // avec _session a null, et le premier appel API leverait un TypeError sur
-  // `.access_token` avant meme que la page de connexion s'affiche. On arrete
-  // ici, comme le fait exigerCompteProprePage pour les pages non delegables.
-  if (!session) await new Promise(() => {})
-  window._session = session
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+  let user = null
+  try { user = await getUser() } catch { /* l'avatar attendra, pas la page */ }
+  $('[data-bind="initials"]').textContent = ((user && user.email) || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis')
+  })
+  HSNav.render({ peutLire })
+  I18n.apply(document)
 
-  // ⚠ La sidebar ne doit PAS pouvoir empecher la page de s'afficher.
-  // renderSidebar appelle getUser(), qui leve sur incident reseau. Sans ce
-  // catch, l'init n'etait jamais atteinte et la page restait indefiniment sur
-  // « Chargement… », muette. La version d'avant, elle, affichait les avis sans
-  // la sidebar : le correctif d'ordre avait donc introduit une REGRESSION.
-  try {
-    await renderSidebar('avis')
-  } catch (e) {
-    console.error('[avis] sidebar indisponible:', e && e.message)
+  // Les deux gestes n'apparaissent qu'avec le droit d'écriture sur `avis`.
+  const peut = peutEcrire('avis')
+  $('[data-action="saisir"]').hidden = !peut
+  $('[data-action="reglages"]').hidden = !peut
+
+  etat.moi = user && user.id
+  etat.compte = compteCourant()
+  etat.periode = periodeVoulue()
+  const cache = (etat.moi && etat.compte) ? lireCache('avis', etat.moi, etat.compte) : null
+  const initiales = cache && cache.donnees && cache.donnees.vue_periode === etat.periode ? cache.donnees : null
+
+  let hsBus = null
+  try { hsBus = (await import('/shared/hs-bus.js')).hsBus } catch { hsBus = null }
+
+  const r = await monterCartes($('[data-bind="cartes"]'), {
+    charger: lireEcran,
+    actions,
+    bus: hsBus,
+    peutEcrire: peut,
+    filtres: () => ({ periode: etat.periode, bien: etat.bien }),
+    surDonnees,
+    zoneStats: $('[data-bind="stats"]'),
+    initiales,
+    t,
+    langue: I18n.lang
+  })
+  etat.recharger = r.recharger
+
+  const u = new URL(location.href)
+  // ⚠ `?evaluer=<booking_uid>` OUVRE LA FENÊTRE D'ÉVALUATION (spec §10 : le lien
+  // de la notification « évaluez le voyageur » mène ici). Par le bus : droit
+  // absent ou séjour inconnu = rien ne s'ouvre. Le paramètre est retiré, pour
+  // qu'un rechargement ne rouvre pas la fenêtre.
+  const aEvaluer = u.searchParams.get('evaluer')
+  if (aEvaluer && aEvaluer.length <= 200 && hsBus) {
+    try { history.replaceState(null, '', location.pathname) } catch { /* sans historique */ }
+    const o = await hsBus.ouvrir('avis.evaluer', { booking_uid: aEvaluer })
+    if (o && o.ok === true) await r.recharger()
   }
-
-  // Et si l'init elle-meme echoue, on le DIT. Une page vide et silencieuse est
-  // le pire retour possible : l'utilisateur ne sait pas s'il n'a pas d'avis ou
-  // si quelque chose est casse.
-  try {
-    await window.initAvis()
-  } catch (e) {
-    console.error('[avis] initialisation echouee:', e && e.message)
-    document.getElementById('zone-cartes').innerHTML = '<p class="hs-avis-erreur">La page n’a pas pu se charger. Rechargez pour réessayer.</p>'
+  // L'ancien chemin /settings?onglet=avis renvoie ici avec ?reglages=1.
+  if (u.searchParams.get('reglages') === '1' && peut) {
+    u.searchParams.delete('reglages')
+    try { history.replaceState(null, '', u.pathname + u.search) } catch { /* sans historique */ }
+    ouvrirReglages()
   }
-// ─── Les cartes (recette du 7 octobre 2026) ─────────────────────────────────
-// ⚠ UN ECHEC ICI NE CASSE PAS LA PAGE : le module dit lui-meme son echec dans
-// son conteneur ; la saisie et les reglages restent utilisables.
-;(async () => {
-  const zone = document.getElementById('zone-cartes')
-  try {
-    const [{ monter }, { hsBus }] = await Promise.all([
-      import('/core/avis/cartes.js'),
-      import('/shared/hs-bus.js').catch(() => ({ hsBus: null })),
-    ])
-    const r = await monter(zone, {
-      appel: window.appelAvis,
-      bus: hsBus,
-      peutEcrire: window.peutEcrire ? window.peutEcrire('avis') : false,
-      filtres: () => ({ periode: document.getElementById('filtre-periode').value || window.periodeAvis(), bien: document.getElementById('filtre-bien').value }),
-      surDonnees: (d) => window.avisSurDonnees(d),
-      zoneStats: document.getElementById('stats'),
-    })
-    window.rechargerCartes = r.recharger
-    // ⚠ `?evaluer=<booking_uid>` OUVRE LA FENÊTRE D'ÉVALUATION (spec §10 : le
-    // lien de la notification « évaluez le voyageur » mène ici, fenêtre ouverte).
-    // Par le bus : droit absent ou séjour inconnu = rien ne s'ouvre. On retire
-    // le paramètre ensuite, pour qu'un rechargement ne rouvre pas la fenêtre.
-    const aEvaluer = new URLSearchParams(location.search).get('evaluer')
-    if (aEvaluer && aEvaluer.length <= 200 && hsBus) {
-      try { history.replaceState(null, '', location.pathname) } catch { /* sans historique */ }
-      const o = await hsBus.ouvrir('avis.evaluer', { booking_uid: aEvaluer })
-      if (o && o.ok === true) await r.recharger()
-    }
-  } catch (e) {
-    console.error('[avis] cartes', e)
-    zone.innerHTML = '<p class="hs-avis-erreur">La liste des avis n’a pas pu se charger. Rechargez la page pour réessayer.</p>'
-  }
-})()
-</script>
+}
 
-<script>
-(function () {
-  const $ = id => document.getElementById(id)
-  let biens = [], envoiEnCours = false
-
-  const LIB_PERIODE = { '15j': '15 derniers jours', '30j': '30 derniers jours',
-                        '6mois': '6 derniers mois', toujours: 'Depuis toujours' }
-
-  // Appel API local, sur le motif de la messagerie : jeton de session et
-  // `enteteCompte()` pour la delegation. Il LEVE sur reponse non-ok, comme
-  // apiCall le faisait, avec le statut porte par l'erreur — les appelants sont
-  // deja ecrits pour ca.
-  async function appelAPI (chemin, method = 'GET', body = null) {
-    // ⚠ Le jeton est RELU a chaque appel, pas capture au chargement.
-    // Capture une fois, il expirait sur un onglet laisse ouvert plus d'une heure
-    // (duree par defaut d'un JWT Supabase) : le moindre changement de filtre
-    // partait alors en 401 avec un message serveur brut. `apiCall` relisait la
-    // session a chaque appel — ne pas le faire etait une regression, meme si la
-    // messagerie a le meme defaut.
-    let jeton = window._session && window._session.access_token
-    try {
-      const { data } = await window._supabase.auth.getSession()
-      if (data && data.session) jeton = data.session.access_token
-    } catch { /* on garde le jeton du chargement */ }
-
-    const opts = {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${jeton}`,
-        ...(window.enteteCompte ? window.enteteCompte() : {})
-      }
-    }
-    if (body) opts.body = JSON.stringify(body)
-    const res = await fetch('/api/' + chemin, opts)
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      const err = new Error(data.error || 'Erreur serveur')
-      err.status = res.status
-      throw err
-    }
-    return data
-  }
-
-  // ⚠ L'ETAT DE LA PUBLICATION AUTOMATIQUE SE DIT EN HAUT DE LA PAGE (demande de
-  // Thierry du 2 octobre 2026), avec le lien vers son reglage. Un echec de
-  // lecture se tait : ce n'est qu'une information, la page ne depend pas d'elle.
-  // Bien par bien depuis le 2 octobre au soir : la ligne compte les biens.
-  async function afficherEtatAuto () {
-    const el = $('etat-auto')
-    try {
-      const auto = await appelAPI('avis?action=auto-validation')
-      const biens = (auto && auto.biens) || []
-      const actifs = biens.filter(b => b.heures)
-      const lien = $('lien-configuration').hidden ? ''
-        : ' · <a href="#" data-ouvrir-reglages>⚙ Configuration</a>'
-      el.innerHTML = (actifs.length
-        ? `Publication automatique des évaluations : <strong>activée sur ${actifs.length} bien(s)</strong> sur ${biens.length} (jamais pour un avis négatif).`
-        : 'Publication automatique des évaluations : <strong>désactivée</strong> sur tous vos biens.') + lien
-      el.hidden = false
-      const a = el.querySelector('[data-ouvrir-reglages]')
-      if (a) a.addEventListener('click', (ev) => { ev.preventDefault(); ouvrirReglages() })
-    } catch { el.hidden = true }
-  }
-
-  // ─── Les réglages, dans l'app ────────────────────────────────────────────
-  // Montés à la demande, une fois ; refermés, ils relisent l'état de la ligne
-  // du haut (un bien vient peut-être d'être activé).
-  let reglagesMontes = false
-  async function ouvrirReglages () {
-    const zone = $('zone-reglages')
-    const ouvert = zone.style.display !== 'none'
-    if (ouvert) { zone.style.display = 'none'; afficherEtatAuto(); return }
-    zone.style.display = ''
-    if (!reglagesMontes) {
-      reglagesMontes = true
-      try {
-        const { monter } = await import('/core/avis/ecran-reglages.js')
-        await monter(zone, { avertir: (m) => console.log('[avis] réglages :', m) })
-      } catch (e) {
-        // ⚠ UN ÉCHEC DE CHARGEMENT SE DIT, et le prochain clic réessaie.
-        console.error('[avis] réglages', e)
-        reglagesMontes = false
-        zone.innerHTML = '<div class="card"><div class="card-title">Réglages des avis indisponibles</div>'
-          + '<div class="card-sub">Rechargez la page. Si cela persiste, contactez le support.</div></div>'
-      }
-    }
-    zone.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  const echapper = t => String(t == null ? '' : t)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-
-  // ⚠ Pour une colonne `date` (« 2026-08-15 »), pas pour un timestamp.
-  // `new Date('2026-08-15')` vaut minuit UTC : formaté en heure locale, il
-  // affiche la VEILLE à l'ouest de Greenwich — un séjour décalé d'un jour pour
-  // un hôte aux Antilles ou en Guyane. Les dates de séjour se lisent donc en
-  // UTC ; `received_at`, qui est un instant réel, reste en local.
-  const dateNueFr = d => {
-    if (!d) return ''
-    const x = new Date(d)
-    return isNaN(x) ? '' : x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
-  }
-
-  // La periode retenue : celle memorisee si elle est connue, sinon 30 jours.
-  function periodeVoulue () {
-    try {
-      const memo = localStorage.getItem('avis_periode')
-      if (memo && Object.prototype.hasOwnProperty.call(LIB_PERIODE, memo)) return memo
-    } catch { /* stockage indisponible */ }
-    return '30j'
-  }
-
-  // Les filtres se remplissent a la premiere reponse des cartes (les biens et
-  // les periodes viennent du serveur : `PERIODES` fait foi).
-  let filtresRemplis = false
-  window.avisSurDonnees = function (data) {
-    biens = (data && data.biens) || []
-    const n = data && data.cartes ? (data.cartes.attente || []).length + (data.cartes.recents || []).length + (Number(data.anciens_total) || 0) : 0
-    $('sous-titre').textContent = n ? `${n} séjour${n > 1 ? 's' : ''}` : 'Aucun avis pour le moment'
-    if (filtresRemplis) return
-    filtresRemplis = true
-    const sel = $('filtre-periode')
-    if (!sel.options.length) {
-      for (const cle of ((data && data.periodes) || ['30j'])) {
-        sel.insertAdjacentHTML('beforeend', `<option value="${echapper(cle)}">${echapper(LIB_PERIODE[cle] || cle)}</option>`)
-      }
-      sel.value = periodeVoulue()
-    }
-    if ($('filtre-bien').options.length <= 1) {
-      for (const b of biens) {
-        $('filtre-bien').insertAdjacentHTML('beforeend', `<option value="${echapper(b.provider_property_id)}">${echapper(b.name)}</option>`)
-        $('s-bien').insertAdjacentHTML('beforeend', `<option value="${echapper(b.provider_property_id)}">${echapper(b.name)}</option>`)
-      }
-    }
-  }
-  window.periodeAvis = periodeVoulue
-  window.appelAvis = appelAPI
-  const charger = async () => { if (window.rechargerCartes) await window.rechargerCartes() }
-
-  // ─── Saisie manuelle ──────────────────────────────────────────────────────
-  async function chargerSejours () {
-    const ref = $('s-bien').value
-    const sel = $('s-sejour')
-    sel.innerHTML = '<option value="">Sans rattachement</option>'
-    if (!ref) return
-    let d
-    try {
-      d = await appelAPI('avis?action=sejours&bien=' + encodeURIComponent(ref))
-    } catch {
-      // Le rattachement est facultatif : son echec ne doit pas empecher la
-      // saisie de l'avis.
-      return
-    }
-    for (const s of (d && d.sejours) || []) {
-      const dates = [dateNueFr(s.arrival), dateNueFr(s.departure)].filter(Boolean).join(' → ')
-      const nom = s.nom ? ' · ' + s.nom : ''
-      sel.insertAdjacentHTML('beforeend',
-        `<option value="${echapper(s.booking_uid)}">${echapper(dates + nom)}</option>`)
-    }
-  }
-
-  async function envoyer () {
-    // Garde anti-double-clic : l'identifiant est un UUID genere a chaque appel,
-    // donc deux envois creeraient DEUX avis identiques et non un doublon
-    // rattrape par la contrainte d'unicite.
-    if (envoiEnCours) return
-    const texte = $('s-texte').value.trim()
-    if (!$('s-bien').value) { $('s-feedback').textContent = 'Choisissez un bien.'; return }
-    if (!texte) { $('s-feedback').textContent = 'Recopiez ce que le voyageur a dit.'; return }
-
-    envoiEnCours = true
-    $('s-envoyer').disabled = true
-    $('s-feedback').textContent = 'Enregistrement…'
-    try {
-      await appelAPI('avis', 'POST', {
-        action: 'create',
-        bien: $('s-bien').value,
-        source: $('s-source').value,
-        date: $('s-date').value || null,
-        booking_uid: $('s-sejour').value || null,
-        texte
-      })
-    } catch (e) {
-      envoiEnCours = false
-      $('s-envoyer').disabled = false
-      $('s-feedback').textContent = (e && e.message) || 'Enregistrement impossible.'
-      return
-    }
-    envoiEnCours = false
-    $('s-envoyer').disabled = false
-    $('saisie-modal').classList.remove('show')
-    $('s-texte').value = ''
-    $('s-feedback').textContent = ''
-    await charger()
-  }
-
-  // ⚠ EXPOSE, PAS AUTO-DECLENCHE. Accrocher cette init a DOMContentLoaded la
-  // ferait partir avant que le module ait pose window._session et
-  // window.enteteCompte (voir le commentaire du module). C'est le module qui
-  // appelle.
-  window.initAvis = async function () {
-    // Le bouton de saisie n'apparait qu'avec le droit d'ecriture sur `avis`.
-    // Le serveur le revalide : ce masquage est un confort, pas la garde.
-    const peut = window.peutEcrire ? window.peutEcrire('avis') : false
-    $('btn-saisir').hidden = !peut
-    // « ⚙ Configuration » ouvre les réglages DANS la page. Un membre au droit
-    // d'écriture y règle les biens de son périmètre ; le serveur refuse le
-    // niveau compte (grille, rédaction) à un périmètre partiel, et le dit.
-    $('lien-configuration').hidden = !peut
-    // `onclick`, pas addEventListener : une seconde initialisation ne double pas
-    // l'écouteur (deux bascules s'annuleraient).
-    $('lien-configuration').onclick = ouvrirReglages
-    afficherEtatAuto()
-    // L'ancien chemin /settings?onglet=avis renvoie ici avec ?reglages=1.
-    try {
-      const u = new URL(location.href)
-      if (u.searchParams.get('reglages') === '1' && peut) {
-        u.searchParams.delete('reglages'); history.replaceState(null, '', u.pathname + u.search)
-        ouvrirReglages()
-      }
-    } catch { /* adresse illisible : rien */ }
-
-    $('s-date').value = new Date().toISOString().slice(0, 10)
-
-    // ⚠ Le choix de periode est memorise PAR NAVIGATEUR, pas en base : c'est un
-    // confort d'affichage, pas une donnee du compte. Le stockage peut lever
-    // (navigation privee, site data bloque) — `periodeVoulue()` retombe alors
-    // sur le defaut plutot que de casser la page.
-    $('filtre-periode').addEventListener('change', () => {
-      try { localStorage.setItem('avis_periode', $('filtre-periode').value) } catch { /* sans mémoire */ }
-      charger()
-    })
-    $('filtre-bien').addEventListener('change', charger)
-    $('s-bien').addEventListener('change', chargerSejours)
-    $('btn-saisir').addEventListener('click', () => {
-      $('saisie-modal').classList.add('show')
-      chargerSejours()
-    })
-    $('s-annuler').addEventListener('click', () => $('saisie-modal').classList.remove('show'))
-    $('s-envoyer').addEventListener('click', envoyer)
-  }
-})()
+// ⚠ UNE PAGE VIDE ET MUETTE EST LE PIRE RETOUR : l'hôte ne sait pas s'il n'a
+// pas d'avis ou si quelque chose est cassé.
+init().catch(e => {
+  logger.error('Avis', e && e.message, e)
+  const z = $('[data-bind="cartes"]')
+  if (z) z.innerHTML = `<p class="avp-erreur">${esc(t('avis.page_ko'))}</p>`
+})
 </script>
 </body>
 </html>

@@ -686,8 +686,10 @@ async function cartesLister (req, res, garde) {
   // elle que la page lit pour son filtre et son formulaire (constat 3 de la
   // revue du 7 novembre 2026 — le lot avait filtre `lister`, que la page
   // n'appelle plus, et laisse celle-ci proposer le bien archive).
+  // ⚠ `photo_url` : la vignette du bien dans la refonte V5 (pastilles du
+  // filtre, cartes). Une colonne de la meme ligne, aucune lecture de plus.
   const { data: biens, error: eBiens } = await supabase.from('properties')
-    .select('id, name, provider_property_id, provider, ' + COLONNE_ARCHIVE).eq('user_id', userId)
+    .select('id, name, provider_property_id, provider, photo_url, ' + COLONNE_ARCHIVE).eq('user_id', userId)
     .not('provider_property_id', 'is', null).order('name')
   if (eBiens) return res.status(500).json({ error: 'Lecture impossible' })
   const nomParId = new Map((biens || []).map(b => [b.id, b.name]))
@@ -720,7 +722,7 @@ async function cartesLister (req, res, garde) {
     // elles, gardent leurs noms par les deux tables ci-dessus.
     biens: (biens || []).filter(b => !b[COLONNE_ARCHIVE])
       .filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
-      .map(b => ({ name: b.name, provider_property_id: b.provider_property_id })),
+      .map(b => ({ name: b.name, provider_property_id: b.provider_property_id, photo_url: b.photo_url || null })),
     periodes: Object.keys(PERIODES),
     // ⚠ `note_sur_5` ET PLUS `moyenne` (decision de Thierry, 20 octobre 2026 :
     // « tout sur 5 … meme regle partout ou une note globale s'affiche »). Un
@@ -2472,3 +2474,11 @@ async function router (req, res) {
 }
 
 module.exports.outilsAutoValidation = outilsAutoValidation
+
+// ⚠ L'APPEL D'ECRAN DE LA PAGE AVIS (api/ecran/avis.js) REUTILISE CES DEUX
+// LECTURES TELLES QUELLES, avec leurs gardes de perimetre : les recopier dans
+// l'endpoint d'ecran ferait deux versions de la meme regle, et le chantier
+// profils et droits a ferme dix fuites nees exactement de ca. Elles attendent
+// une garde de la forme `{ accountUserId, contexte }`, que `contexteDEcran`
+// produit comme `requirePermission`.
+module.exports.ecran = { cartesLister, autoValidationLire }

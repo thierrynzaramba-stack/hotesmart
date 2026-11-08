@@ -83,13 +83,16 @@ test('« Moi » devient « L’hôte » dans le choix de qui remplit', async () 
 })
 
 test('la page Avis ouvre ses réglages SUR PLACE (la configuration d’une app vit dans l’app)', () => {
+  // Refonte V5 du 8 novembre 2026 : le bouton est un engrenage, et les
+  // réglages s'ouvrent dans un VOLET de la page — toujours sur place.
   const page = lire('pages/avis.html')
-  assert.match(page, /<button [^>]*id="lien-configuration"[^>]*hidden/, 'un bouton, né caché')
+  assert.match(page, /<button [^>]*data-action="reglages"[^>]*hidden/, 'un bouton, né caché')
   assert.ok(!/href="\/settings\?onglet=avis"/.test(page), 'plus de renvoi vers Réglages')
   assert.match(page, /import\('\/core\/avis\/ecran-reglages\.js'\)/)
-  assert.match(page, /id="zone-reglages"/)
+  assert.match(page, /<dialog [^>]*data-bind="reglages"/)
+  assert.match(page, /data-bind="reglages-zone"/)
   // Le droit d'écriture suffit : un membre règle les biens de son périmètre.
-  assert.match(page, /\$\('lien-configuration'\)\.hidden = !peut/)
+  assert.match(page, /\$\('\[data-action="reglages"\]'\)\.hidden = !peut/)
 })
 
 test('Réglages n’a plus d’onglet Avis, et l’ancienne adresse renvoie vers l’app', () => {
