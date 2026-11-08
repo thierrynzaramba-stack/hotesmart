@@ -75,8 +75,9 @@ précision **mesurée** à l'étape 5 ne suffit pas.
   coût et son compte (`lib/ia/journal.js`, `avecContexteIA`, table
   `ia_appels`). Une image est limitée à 10 Mo **encodée en base64** par l'API
   Claude, soit environ 7,5 Mo bruts.
-- **Le cron** : `api/cron.js`, plafonné à 60 s (`vercel.json`), porte toutes
-  les tâches de toutes les apps.
+- **Le cron** : `api/cron.js`, plafonné à 60 s (`vercel.json`), porte la
+  plupart des tâches ; `api/cron-messages.js` est déjà un cron dédié — le
+  précédent d'un cron par app.
 - **Le stockage de fichiers** : un seul bucket, `property-photos`, **public en
   lecture** (`api/property-photo.js` : JPEG 2 Mo, envoyé en base64 dans le
   corps de la requête). Un justificatif ne peut pas y aller.
@@ -86,7 +87,8 @@ précision **mesurée** à l'étape 5 ne suffit pas.
   **lecture** se délègue ; l'écran des droits présente `facturation` comme
   « Abonnement et paiements » (`pages/settings.html`). Le seul contrôle
   « titulaire » est `estTitulaireDuCompte` (`lib/permissions.js`) ;
-  `contexteDEcran` rend un contexte, il ne refuse rien.
+  `contexteDEcran` refuse sans session, mais ne vérifie pas que l'appelant est
+  titulaire du compte.
 - **La navigation** (`shared/nav.js`) : cinq entrées (Aujourd'hui, Calendrier,
   Messages, Ménages, Logements) et le menu ≡ (Réglages, Avis, Aide).
 - **Fonctions Vercel** : 67 fichiers sous `api/`, pour une limite de 100.
@@ -228,13 +230,13 @@ justificatif.
 | `entite_juridique_id` | **non nul à la validation** (D3) ; proposée par la lecture |
 | `bien_id` | uuid → `properties.id`, vide possible (Q1). ⚠ Nommé `bien_id` et non `property_id` : dans le dépôt, `property_id` d'une table enfant est la référence TEXTE du fournisseur (REVIEW.md règle 10). Exception raisonnée, déclarée comme celle de `docs/kb/price-log.md` : la clé UUID survit à un changement de fournisseur (décision E6). |
 | `statut` | `envoi`, `a_lire`, `a_verifier`, `validee`, `annulee` (+ motif), `illisible`, `sans_facture` |
-| `tentatives_lecture` | compteur : au-delà de 3 échecs, `illisible` (l'hôte saisit à la main) |
+| `tentatives_lecture` | compteur des lectures **qui ont eu lieu et ont échoué** ; au troisième échec, `illisible` (l'hôte saisit à la main). Une panne du fournisseur d'IA ne compte pas. |
 | `paiement`, `echeance_le`, `payee_le` | `a_payer` / `payee` (Q2) |
 | `fournisseur_nom`, `fournisseur_siret`, `numero_facture`, `date_facture` | lus puis validés |
 | `montant_ht_cents`, `montant_tva_cents`, `montant_ttc_cents` | centimes, euros seulement en V1 ; une TVA à 0 lue n'est pas une TVA vide (Q17) |
 | `categorie` | liste fermée (Q5) |
 | `origine` | `photo`, `fichier`, `email` |
-| `email_uuid`, `email_expediteur`, `email_recu_le` | origine e-mail ; **unique (`user_id`, `email_uuid`, empreinte)** : Brevo peut rejouer un webhook |
+| `email_uuid`, `email_expediteur`, `email_recu_le` | origine e-mail ; **unique (`user_id`, `email_uuid`, empreinte)** : Brevo peut rejouer un webhook. Une ligne `sans_facture` n'a pas d'empreinte (et Postgres tient deux vides pour différents) : **unique partiel (`user_id`, `email_uuid`)** sur ce statut. |
 | `justificatif_chemin`, `justificatif_type`, `justificatif_octets`, `justificatif_empreinte` | fichier au nom **aléatoire** dans le bucket privé ; empreinte SHA-256, unique par compte (Q14) |
 | `lecture_ia` | jsonb : ce que l'IA a lu, champ par champ, avec sa confiance, le modèle et l'heure. **Jamais écrasé par la saisie** : l'écart lu / validé mesure la précision (étape 5). |
 | `cree_le`, `modifie_le`, `valide_le`, `valide_par` | |
@@ -278,26 +280,40 @@ justificatif.
   le filtre anti-boucle et avant le refus d'un message sans texte (§3). Ces
   deux gardes existent parce que l'agent IA répond ; le chemin `fac-` ne
   répond jamais, et un e-mail de facture porte souvent `List-Unsubscribe` ou
-  arrive sans texte. Le score de spam reste appliqué. **Le chemin des réponses
+  arrive sans texte. Le score de spam reste appliqué : il est aujourd'hui
+  calculé dans la même fonction que les en-têtes (`motifAutomatique`), il en
+  sera sorti pour que l'aiguillage ne le saute pas. **Le chemin des réponses
   voyageurs ne change pas**, et des tests le prouvent.
 - **Les pièces jointes** (Q15) : au plus 10 par e-mail (proposition). Leur
   nombre, nom, type et taille sont **confrontés à la relecture** ; une
-  divergence est un refus. Le `DownloadToken` est contrôlé (format) et encodé
+  divergence est un refus, **et un champ absent de la relecture aussi** (sur
+  ce chemin, on ne reprend pas la tolérance du webhook actuel aux champs
+  manquants : sans taille relue, le contrôle ne bloquerait plus rien). Le
+  `DownloadToken` est contrôlé (format) et encodé
   avant d'entrer dans l'URL de Brevo ; les octets téléchargés doivent faire la
   taille relue. Chaque pièce est déposée dans le bucket, une charge `a_lire`
   par pièce, **idempotente** (unique `user_id`, `email_uuid`, empreinte).
 - **Téléchargement dans le webhook, pas différé** : la durée de vie d'un
   `DownloadToken` n'est pas documentée, et il n'existe que dans le POST. Le
   webhook télécharge donc tout de suite, avec une durée maximale déclarée dans
-  `vercel.json`. **Un échec rend 503** (Brevo rejoue) : un 200 après un
-  téléchargement raté perdrait la facture pour toujours.
+  `vercel.json`. **Seule une panne passagère rend 503** (Brevo rejoue) :
+  réseau, Brevo en 5xx, stockage indisponible. Un refus **définitif** — jeton
+  refusé par Brevo, taille qui ne correspond pas — rend 200 **avec une trace**
+  (ligne `sans_facture` portant le motif), sinon Brevo rejouerait jusqu'à
+  épuisement et la facture disparaîtrait sans trace (même leçon que le
+  webhook actuel, `api/inbound-email.js`). Un doublon d'empreinte (le
+  fournisseur et l'hôte envoient le même PDF) rend 200 sans rien créer.
 - **La lecture par l'IA, elle, est différée** : une fonction de cron
   **dédiée** (`api/cron-charges.js`, toutes les 5 minutes, sa propre limite de
   60 s) lit les charges `a_lire` par index, avec un budget de temps qui
-  s'arrête avant la limite. Elle ne charge pas `api/cron.js`, qui porte toutes
-  les autres apps. Un échec incrémente `tentatives_lecture` ; au troisième, la
-  charge passe `illisible` et n'est plus relue — jamais une lecture facturée
-  toutes les 5 minutes (incident du 8 octobre, `lib/ia/journal.js`).
+  s'arrête avant la limite. Elle ne charge pas `api/cron.js` (précédent :
+  `api/cron-messages.js`). Une lecture qui a eu lieu et a échoué incrémente
+  `tentatives_lecture` ; au troisième échec, la charge passe `illisible` et
+  n'est plus relue — jamais une lecture facturée toutes les 5 minutes
+  (incident du 8 octobre, `lib/ia/journal.js`). Une panne du fournisseur
+  d'IA (crédit épuisé, indisponibilité) **arrête le passage sans rien
+  compter** : un quart d'heure de panne ne doit pas rendre toutes les
+  charges en attente `illisible`.
 
 ## 8. Découpage proposé
 
