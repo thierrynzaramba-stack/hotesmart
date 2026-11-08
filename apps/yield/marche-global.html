@@ -5,6 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HôteSmart — Le marché global</title>
   <link rel="stylesheet" href="/public/style.css">
+  <!-- ⚠ LA POLICE DU SOCLE V5 SUR LES ÉCRANS YIELDFLOW — demande de Thierry du
+       30 octobre 2026. L'URL est IDENTIQUE à celle des pages V5
+       (pages/aujourdhui.html, pages/calendrier.html) : même fichier, donc
+       même entrée de cache navigateur, aucune requête supplémentaire pour un
+       hôte qui vient d'une page V5.
+       ⚠ ET LA CLASSE `police-v5` POSÉE SUR LA BALISE BODY EST LA SECONDE
+       MOITIÉ : sans elle, la fonte serait téléchargée sans être appliquée. La
+       règle `body` de public/style.css n'est PAS touchée, parce que cette
+       feuille sert aussi des écrans antérieurs à V5 que ce lot ne change pas. -->
+  <!-- ⚠ LE PRECONNECT EST LA MOITIE QU'ON OUBLIE — releve en review. Une
+       feuille tierce BLOQUANTE ajoutee a six ecrans, c'est un DNS puis un TLS
+       de plus devant le premier affichage, contre le budget « premier
+       affichage < 1 s » de CLAUDE.md. Les pages V5 de reference
+       (pages/aujourdhui.html, pages/calendrier.html) le portent ; ces ecrans
+       ne l'avaient pas, et le test n'epinglait que l'URL. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     [hidden] { display: none !important; }
     /* ⚠ PAGE EN LECTURE SEULE (spec §17 de docs/kb/chantier-nouveau-bien.md).
@@ -16,16 +34,10 @@
       --mg-n2: #9DB9E3; --mg-n1: #5B87C9; --mg-n: #1E3F73;
       --mg-barre: #9DB9E3; --mg-barre-partielle: #C9CED6;
     }
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-        --mg-n2: #4a5f80; --mg-n1: #7fa3dc; --mg-n: #c7dbff;
-        --mg-barre: #5b7fb5; --mg-barre-partielle: #555b66;
-      }
-    }
-    :root[data-theme="dark"] {
-      --mg-n2: #4a5f80; --mg-n1: #7fa3dc; --mg-n: #c7dbff;
-      --mg-barre: #5b7fb5; --mg-barre-partielle: #555b66;
-    }
+    /* ⚠ VARIANTE SOMBRE RETIREE — double validation de Thierry du 2 novembre
+       2026 : « pas de mode sombre sur YieldFlow pour l'instant ». Ces barres
+       s'eclaircissaient pendant que le texte et le fond de page restaient
+       clairs : un ecran a moitie sombre n'est pas un mode sombre. */
     .mg-avertir { background: var(--amber-bg); border: 0.5px solid var(--amber); border-radius: var(--radius);
                   padding: 12px 14px; margin-bottom: 16px; font-size: 13.5px; line-height: 1.5; }
     .mg-meta { font-size: 12.5px; color: var(--text2); margin: 6px 0 16px; }
@@ -38,17 +50,18 @@
     .mg-legende i { display: inline-block; width: 22px; height: 0; vertical-align: 3px; margin-right: 6px; }
     .non-calc { color: var(--text2); font-style: italic; }
     /* « En resume » (§18) : quatre blocs, chacun sa source. */
-    :root {
-      --yf-base: #E7F0F7; --yf-base-l: #4A7FA8; --yf-moyen: #EDF4EE; --yf-moyen-l: #5F8F6E;
-      --yf-haut: #FBF4E2; --yf-haut-l: #C89A2E; --yf-tres-haut: #FAEADA; --yf-tres-haut-l: #D2762E;
-      --yf-exceptionnel-l: #BF4F32;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-        --yf-base: #1d2a36; --yf-moyen: #1f2d24; --yf-haut: #352d17; --yf-tres-haut: #3a2717;
-      }
-    }
-    :root[data-theme="dark"] { --yf-base: #1d2a36; --yf-moyen: #1f2d24; --yf-haut: #352d17; --yf-tres-haut: #3a2717; }
+    /* ⚠ LES FONDS SOMBRES SONT RETIRES — double validation de Thierry du
+       2 novembre 2026 : « pas de mode sombre sur YieldFlow pour l'instant ».
+       CE QU'ILS FAISAIENT. Cet ecran redefinissait quatre fonds de niveaux
+       sous `prefers-color-scheme: dark`, alors que `public/style.css` n'a
+       AUCUN bloc sombre : `.mg-niv-l` continuait donc de peindre `--text`
+       (#1a1a1a) par-dessus. Contraste ~1,1:1 — les quatre lignes de
+       « Les niveaux du marche » etaient ILLISIBLES chez tout hote en
+       preference systeme sombre. Constate en recette le 1er novembre 2026,
+       et c'etait l'ecart 11 de docs/kb/charte-ui.md.
+       La page reste donc claire, comme le reste de l'application. Un vrai
+       mode sombre est un chantier a part, pas une surcharge de quatre
+       jetons sur un ecran. */
     .mg-bloc { padding: 12px 0; border-top: 0.5px solid var(--border); }
     #mg-resume-tendance { border-top: 0; padding-top: 4px; }
     .mg-bloc h3 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
@@ -57,11 +70,32 @@
     .mg-sens { display: grid; grid-template-columns: 26px 1fr; gap: 4px 6px; font-size: 13.5px; align-items: center; }
     .mg-sens b { font-size: 17px; text-align: center; }
     .mg-zones { color: var(--text2); font-size: 12px; }
+    /* ⚠ LA LIGNE NE PORTE PLUS LE NIVEAU, LA PASTILLE LE PORTE — regle 1 de
+       Thierry, et c'est un constat de review du 3 novembre 2026. Avec
+       `background: var(--niv-fond)` sur la ligne, « Très haut ou
+       Exceptionnel » devenait une BANDE #222222 pleine largeur a texte blanc
+       au milieu d'un ecran clair. La regle dit « la pastille ou la case,
+       jamais la ligne » : la ligne reprend donc le fond neutre des blocs, et
+       le niveau vit dans une pastille, comme partout ailleurs.
+       ⚠ Et le test de la regle 1 ne l'avait pas vu : il cherche une classe
+       `.n-*` derriere un nom d'element, or ici le niveau arrivait par une
+       PROPRIETE PERSONNALISEE en style en ligne. Le test a ete elargi. */
     .mg-niv-l { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px; margin-bottom: 4px;
-                border-radius: 4px; background: var(--niv-fond); box-shadow: inset 3px 0 0 var(--niv-lisere); font-size: 13.5px; color: var(--text); }
+                border-radius: 4px; background: var(--bg2); font-size: 13.5px; color: var(--text); }
     .mg-niv-l small { color: var(--text2); }
+    .mg-niv-l .mg-pastille { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+                             background: var(--niveau-fond, var(--bg2)); color: var(--niv-encre, var(--text));
+                             border: 1px solid var(--niveau-lisere, var(--border2)); }
     .mg-ev-liste { display: flex; flex-direction: column; gap: 6px; }
-    .mg-ev-l { background: var(--bg2); border-left: 4px solid var(--ev); border-radius: 4px; padding: 7px 10px; font-size: 13px;
+    /* ⚠ LE RAIL EST NEUTRE DEPUIS LE 3 NOVEMBRE 2026, et le niveau est sur
+       le BADGE de la ligne. Il portait --tc-<niveau>, ce qui donnait sur ce
+       fond --bg2 : 1,08 / 1,50 / 2,72 / 9,55:1 en bleu — trois paliers sur
+       quatre deja sous le seuil de 3:1 — et 1,02 / 1,09 / 1,33 / 14,57:1 en
+       encre, ou le trait et le fond ont en plus la MEME teinte (0 % des deux
+       cotes). Un trait de 4 px ne peut pas encoder quatre densites de gris sur
+       un fond gris : c'est une limite de l'echelle, pas un reglage. Le niveau
+       est deja nomme a cote, sur un badge qui a sa bordure. */
+    .mg-ev-l { background: var(--bg2); border-left: 4px solid var(--border2); border-radius: 4px; padding: 7px 10px; font-size: 13px;
                display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
     .mg-ev-l .o { font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); }
     svg.mg { width: 100%; height: auto; display: block; }
@@ -80,7 +114,7 @@
     }
   </style>
 </head>
-<body>
+<body class="police-v5">
 <div class="layout">
 <div class="sidebar" id="sidebar"></div>
 <div class="main">
@@ -400,8 +434,31 @@
 
   // 5b, 5c, 5d — AirROI, sur les 12 mois du calendrier.
   const SOURCE_AIRROI = '<p class="mg-source">Source : modèle AirROI — les 12 mois du calendrier ci-dessus.</p>'
-  const YF = { Base: ['--yf-base', '--yf-base-l'], Moyen: ['--yf-moyen', '--yf-moyen-l'], Haut: ['--yf-haut', '--yf-haut-l'],
-    'Très haut ou Exceptionnel': ['--yf-tres-haut', '--yf-exceptionnel-l'] }
+  // ⚠ TROIS JETONS PAR NIVEAU : le fond, le trait, l'encre. L'echelle d'encre
+  // n'a pas d'« accent » — elle n'a que des densites — donc le trait et le
+  // texte se choisissent dans la meme echelle, et le texte bascule sur --bg
+  // au niveau 5. Aucun hexa ici : tout est jeton.
+  //
+  // ⚠ LA DERNIERE LIGNE COUVRE DEUX NIVEAUX (« Pic » chez AirROI vaut Tres
+  // haut OU Exceptionnel) : elle prend le fond du 5, et un trait CLAIR, parce
+  // qu'un trait sombre sur un fond sombre ne se verrait pas. C'est la suite de
+  // l'ecart 1 du 29 octobre, qui appariait le fond d'un niveau avec l'accent
+  // d'un autre : un fond va avec un trait qu'on voit dessus, et c'est tout ce
+  // que la regle disait.
+  // ⚠ UNE CLASSE DE NIVEAU, PAS DES JETONS EN STYLE EN LIGNE. Les classes
+  // .n-* de l'echelle d'encre portent deja le fond, l'encre et le lisere ;
+  // les reecrire ici en trois jetons etait une quatrieme copie du mecanisme,
+  // et c'est par la que le niveau avait atteint la LIGNE (constat de review
+  // du 3 novembre 2026). La derniere entree couvre deux niveaux — « Pic »
+  // chez AirROI vaut Tres haut OU Exceptionnel — et prend la classe du 5.
+  const YF = {
+    Base: 'n-base',
+    Moyen: 'n-moyen',
+    Haut: 'n-haut',
+    'Très haut ou Exceptionnel': 'n-exceptionnel'
+  }
+  // Le CHIFFRE est toujours ecrit (regle 2) — a l'affichage seulement.
+  const CHIFFRE_MARCHE = { Base: '1', Moyen: '2', Haut: '3', 'Très haut ou Exceptionnel': '4-5' }
   function blocsAirroi (r) {
     if (!r || r.statut !== 'calcule' || !r.semaine || !Array.isArray(r.niveaux) || !Array.isArray(r.evenements)) {
       return `<div class="mg-bloc"><h3>Le marché selon AirROI</h3>${SOURCE_AIRROI}<p class="non-calc">Non calculable : ${ech((r && r.motif) || 'résumé absent')}.</p></div>`
@@ -416,13 +473,24 @@
       + '<p class="mg-mention">Week-end : nuits du vendredi et du samedi ; semaine : du lundi au jeudi.</p></div>'
     const niveaux = `<div class="mg-bloc"><h3>Les niveaux du marché</h3>${SOURCE_AIRROI}`
       + r.niveaux.map(n => {
-        const [fond, lisere] = YF[n.yieldflow] || ['--bg2', '--border2']
-        return `<div class="mg-niv-l" style="--niv-fond:var(${fond});--niv-lisere:var(${lisere})"><span><b>${ech(n.yieldflow)}</b> <small>(${ech(NOM_AIRROI[niv(n.niveau)] || '—')})</small></span><span>${ech(n.jours)} jour${n.jours > 1 ? 's' : ''}</span></div>`
+        // ⚠ LE REPLI EST DEVENU UNE CLASSE VIDE, ET LA RAISON MERITE D'ETRE
+        // GARDEE. Jusqu'au 3 novembre 2026 cette ligne rendait trois jetons en
+        // style en ligne, avec un repli `['--bg2', '--text2', '--text2']` — et
+        // une version anterieure y mettait `--border2`, un jeton de BORDURE
+        // employe comme couleur de TEXTE : 1,60:1 sur --bg2, le nom AirROI
+        // entre parentheses disparaissait presque.
+        // Maintenant c'est une CLASSE de niveau, et le repli est la chaine
+        // vide : une ligne dont le libelle n'est pas connu garde simplement le
+        // fond neutre de .mg-pastille et le texte --text, soit le repli ecrit
+        // dans les `var(…, …)` de la regle. Il n'y a plus de couleur a choisir
+        // ici, donc plus de mauvaise couleur a choisir.
+        const classe = YF[n.yieldflow] || ''
+        return `<div class="mg-niv-l"><span><b class="mg-pastille ${classe}">${CHIFFRE_MARCHE[n.yieldflow] ? `${CHIFFRE_MARCHE[n.yieldflow]} · ` : ''}${ech(n.yieldflow)}</b> <small>(${ech(NOM_AIRROI[niv(n.niveau)] || '—')})</small></span><span>${ech(n.jours)} jour${n.jours > 1 ? 's' : ''}</span></div>`
       }).join('')
       + '<p class="mg-mention">Les niveaux d’AirROI lus dans les noms de votre grille YieldFlow : une lecture, pas un calcul de vos prix. Pic correspond à Très haut ou Exceptionnel.</p></div>'
     const evts = r.evenements.map(e => {
       const n = niv(e.niveau)
-      return `<div class="mg-ev-l" style="--ev:${n ? `var(--tc-${n})` : 'var(--border2)'}"><strong>${ech(e.nom)}</strong>`
+      return `<div class="mg-ev-l"><strong>${ech(e.nom)}</strong>`
         + `<span>${jourFr(e.debut)}${e.fin !== e.debut ? ` → ${jourFr(e.fin)}` : ''} (${ech(e.nuits)} nuit${e.nuits > 1 ? 's' : ''})</span>`
         + `${badge(e.niveau)}<span class="o">${e.recurrent ? 'récurrent' : 'ponctuel'}</span></div>`
     }).join('')

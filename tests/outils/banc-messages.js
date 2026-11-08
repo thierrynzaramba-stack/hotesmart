@@ -287,7 +287,7 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       bandeauEcheance, etatEcheance, peutReprendre, pausesFiables, voletIA,
       noteReglage, bienDuFilOuvert, init, PILULES, confirmerDansLaPage, fenetreOuverte, OCCUPEE,
       reporterLePanneauSurLeFil, editionPanneauNonEnregistree, remettreCasePause,
-      urlConnaissance, ouvrirConnaissance,
+      ouvrirConnaissance, utiliserDansLaSaisie, ouvrir, modifierProposition,
       // Un GETTER, pas une valeur : la vue est montee APRES l'evaluation.
       get vueConnaissance () { return vueConnaissance }
     }

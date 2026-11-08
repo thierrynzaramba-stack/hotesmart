@@ -1,0 +1,605 @@
+# Charte UI HôteSmart — restitution de l'existant
+
+**Relevé le 30 octobre 2026**, branche `yf-ecran-periodes`. Document de
+**lecture** : chaque valeur est citée avec son fichier et sa ligne. Aucune
+proposition, aucune correction. Ce qui n'est pas défini est écrit comme tel.
+
+⚠ **LIRE D'ABORD : L'APPLICATION A DEUX SOCLES, PAS UN.**
+
+| socle | fichiers | pages qui le chargent |
+|---|---|---|
+| **V5** | `shared/theme.css` + `shared/ui.css` | `pages/*` (dont `aujourdhui.html` — la page « Bonjour » —, `calendrier.html`, `messages.html`, `menages.html`) |
+| **Legacy** | `public/style.css` | `apps/yield/*` (dont `prix.html`, `marche-global.html`), `pages/connexions.html`, et les écrans antérieurs à V5 |
+
+Les deux jeux de jetons **portent des noms identiques avec des valeurs
+différentes** (`--border`, `--amber`). Une page charge l'un **ou** l'autre,
+jamais les deux. Détail en §9.
+
+---
+
+## 1. Couleurs — socle V5 (`shared/theme.css`)
+
+| rôle | jeton | valeur | ligne |
+|---|---|---|---|
+| fond de page | `--surface` | `#FFFFFF` | 31 |
+| fond des pastilles d'icône | `--surface-2` | `#F7F7F7` | 32 |
+| séparateurs | `--line` | `#EBEBEB` | 29 |
+| bordures cartes et boutons secondaires | `--border` | `#DDDDDD` | 30 |
+| texte principal | `--ink` | `#222222` | 24 |
+| texte secondaire | `--muted` | `#717171` | 25 |
+| texte tertiaire | `--muted-2` | `#9B9B9B` | 26 |
+| texte sur fond `--ink` | `--on-ink` | `#FFFFFF` | 33 |
+| inactifs sur fond `--ink` | `--on-ink-muted` | `#A3A3A3` | 36 |
+| logo, avatar | `--brand-night` | `#0E1726` | 35 |
+| bleu (liens, information) | `--info` | `#2563EB` | 67 |
+| ambre | `--amber` | `#F5A524` | 38 |
+| ambre, fond | `--amber-soft` | `#FFF4E0` | 39 |
+| ambre, texte lisible sur blanc | `--amber-text` | `#B87500` | 40 |
+| vert | `--ok` | `#0F7A4F` | 70 |
+| vert, fond | `--ok-soft` | `#E8F5EE` | 71 |
+| avertissement | `--warn` | `#9A5B00` | 72 |
+| avertissement, fond | `--warn-soft` | `#FFF4E0` | 73 |
+| danger | `--danger` | `#B42318` | 74 |
+| danger, fond | `--danger-soft` | `#FEF0EE` | 75 |
+| vert **en texte** | `--ok-ink` | `#0F7A4F` clair · `#4ADE80` sombre | 95 / 160 |
+| danger **en texte** | `--danger-ink` | `#B42318` clair · `#F87171` sombre | 96 / 161 |
+
+⚠ **`--ok-ink` ET `--danger-ink` EXISTENT POUR UN DÉFAUT DE CONTRASTE, et les
+omettre était le constat le plus dangereux de la review sur ce document.**
+`--ok` et `--danger` rendent **3,44:1** et **2,80:1** sur `--surface` sombre,
+donc **sous le 4,5:1** requis pour du texte ; le dépôt a cessé de s'en servir
+comme couleur de texte le 28 octobre 2026 et a posé ces deux-là à la place,
+avec leur mesure en commentaire. Une maquette alignée sur un relevé qui les
+tait reprendrait exactement les deux couleurs écartées.
+
+⚠ **« Le noir des boutons pleins » N'EXISTE PAS EN V5.** Commentaire de
+`shared/ui.css` : « Retouche charte du 11 octobre 2026 : le fond noir
+(`--ink`) est réservé à la NAVIGATION (`.bottombar`, `.tab[aria-current]`). Un
+bouton principal se distingue par son BORD `--ink`, comme l'outline. » Le fond
+`--ink` n'apparaît donc que sur un onglet actif, un filtre actif et la barre du
+bas. Le bouton plein noir existe dans le socle **legacy** — voir §2.
+
+**Fonds de prestataire** (planning ménages), `shared/theme.css` :
+`--presta-1` `#DDE4E6`, `-2` `#E3EADF`, `-3` `#E4E2F0`, `-4` `#F1E6DA`,
+`-5` `#DCE8EF`, `-6` `#DFEAE5`, `-7` `#E8E7E2`, `-8` `#E2E6EE`.
+
+**Ombres et voile**, `shared/theme.css` :
+`--shadow-hover: 0 6px 20px rgba(0, 0, 0, .12)` ·
+`--shadow-dot: 0 1px 3px rgba(0, 0, 0, .18)` ·
+`--shadow-sheet: 0 -8px 32px rgba(0, 0, 0, .18)` ·
+`--scrim: rgba(0, 0, 0, .45)`.
+
+## 2. Couleurs — socle legacy (`public/style.css`)
+
+| rôle | jeton | valeur | ligne |
+|---|---|---|---|
+| fond de page | `--bg` | `#FFFFFF` | 18 |
+| fond secondaire | `--bg2` | `#F5F5F3` | 19 |
+| fond tertiaire | `--bg3` | `#EFEFED` | 20 |
+| texte principal | `--text` | `#1A1A1A` | 21 |
+| texte secondaire | `--text2` | `#6B6B6B` | 22 |
+| texte atténué | `--text3` | `#9B9B9B` | 23 |
+| bordure | `--border` | `rgba(0,0,0,0.1)` | 24 |
+| bordure appuyée | `--border2` | `rgba(0,0,0,0.2)` | 25 |
+| vert | `--green` | `#1D9E75` | 26 |
+| vert, fond | `--green-bg` | `#E1F5EE` | 27 |
+| ambre | `--amber` | `#BA7517` | 28 |
+| ambre, fond | `--amber-bg` | `#FAEEDA` | 29 |
+
+⚠ **ET TROIS JETONS QUE CE DOCUMENT A D'ABORD ANNONCÉS ICI N'Y SONT PAS —
+relevé en review, et la cause vaut d'être écrite.** `--blue` (#2563EB),
+⚠ **`--prune` ET `--prune-bg` ONT QUITTÉ `public/style.css` LE 4 NOVEMBRE
+2026**, avec le lot qui a emporté leur dernier usage : les périodes affichent
+désormais leur **niveau** sur l'échelle d'encre, et l'état « moins chers » —
+que ces deux jetons peignaient — n'existe plus. Thierry l'avait annoncé le
+2 novembre : « le prune "moins chers" disparaît avec le lot 4 ».
+
+Ils avaient été posés par le lot `yf-ecran-periodes` du 28 octobre, et ce
+document a longtemps dit qu'ils vivaient dans la feuille. **Un jeton sans
+usage se recopie et se maintient pour rien** — c'est la raison qui avait fait
+retirer `--blue-bg` le 28 octobre, et elle vaut ici.
+
+**La leçon, et elle est générale : un relevé appartient à l'arbre où il a été
+fait.** Le présent document est mesuré sur un arbre parti de `main`
+(`07ee3870`). Ce qui vit dans `staging` et pas encore dans `main` n'y figure
+pas — et le dire est la seule façon de ne pas refaire la même erreur.
+
+**Bouton plein noir, legacy** : `.btn-primary` (`public/style.css`) —
+`background: var(--text)` soit `#1A1A1A`, `color: var(--bg)` soit `#FFFFFF`,
+`border-color: var(--text)`. Survol : `opacity: 0.85` .
+
+⚠ **Aucune couleur de danger ni de rouge n'est définie en jeton dans ce
+socle.** Les rouges y sont des hexas en dur dans les pages
+(`#B02A37`, `#842029`, `#FDECEA` dans `apps/yield/prix.html`, non jetonnés).
+
+## 3. L'échelle d'encre des cinq niveaux
+
+⚠ **CHOIX DÉFINITIF DE THIERRY, 3 novembre 2026, de sa main** : « Échelle
+d'encre : choix définitif. Elle remplace le prune ET l'orange ; aucune autre
+palette ne doit être appliquée. » Cinq **densités de l'encre de la charte**,
+aucune teinte.
+
+| jeton | valeur | niveau | texte | contraste | liseré |
+|---|---|---|---|---|---|
+| `--niveau-1` | `#F7F7F7` | 1 · Base | `--text` | 16,25:1 | `--niveau-4` |
+| `--niveau-2` | `#EBEBEB` | 2 · Moyen | `--text` | 14,60:1 | `--niveau-5` |
+| `--niveau-3` | `#D6D6D6` | 3 · Haut | `--text` | 11,97:1 | `--niveau-5` |
+| `--niveau-4` | `#8C8C8C` | 4 · Très haut | `--text` | 5,18:1 | `--niveau-5` |
+| `--niveau-5` | `#222222` | 5 · Exceptionnel | `--bg` | 15,91:1 | aucun |
+
+⚠ **CINQ VALEURS, PAS DIX, ET AUCUN HEXA AILLEURS.** Les palettes d'avant
+avaient un fond **et** un accent par niveau. Ici l'encre du texte est `--text`
+ou `--bg`, le liseré est `--niveau-4` ou `--niveau-5` : tout s'exprime en
+jetons déjà là. **Source unique : `public/style.css`.**
+
+⚠ **ET CE N'EST PAS UN CHOIX DE FICHIER, C'EST UNE MESURE.** Le brief
+demandait `theme.css`. Relevé le 3 novembre sur les six écrans YieldFlow :
+**aucun ne charge `shared/theme.css`**, tous ne chargent que
+`/public/style.css`. Les jetons y auraient été **indéfinis**. Et faire charger
+`theme.css` à ces pages aurait changé `--border` et **`--amber`**
+(`#BA7517` → `#F5A524`), donc repeint la couleur réservée et la nuit
+« fermée ».
+
+⚠ **TROIS DES CINQ DENSITÉS SONT DÉJÀ DES JETONS DU SOCLE V5**, et c'est la
+confirmation que l'échelle est bien « l'encre de la charte » :
+
+| valeur | ce qu'elle est déjà | dans |
+|---|---|---|
+| `#222222` | `--ink` — le texte, les boutons, les icônes | `shared/theme.css` |
+| `#EBEBEB` | `--line` — les séparateurs | `shared/theme.css` |
+| `#F7F7F7` | `--surface-2` — le fond des pastilles d'icône | `shared/theme.css` |
+
+C'est pourquoi **il n'y a pas de test « ces hexas n'apparaissent que dans les
+fichiers nommés »** : un gris n'est pas distinctif, et ces trois-là vivent
+partout où le socle les emploie. Ce qui garde la source unique, c'est le test
+des **déclarations** — `--niveau-1..5` ne se déclarent qu'ici.
+
+### Les cinq règles de Thierry, et ce qui les mesure
+
+| règle | mesure |
+|---|---|
+| 1. Le niveau colore la **pastille** ou la **case**, jamais la ligne ni la page | aucune règle n'applique une classe de niveau à `tr`, `tbody`, `table`, `body` ou `html` |
+| 2. Le **chiffre** est toujours écrit ; la couleur n'est qu'un repère | « 1 · Base » … « 5 · Exceptionnel », et aucun rendu de pastille n'affiche un nom nu |
+| 3. Ambre = fermée / fait pour vous, vert = hausse, rouge = baisse. Rien d'autre n'a de teinte | saturation **0 %** sur les cinq valeurs |
+| 4. Pas de dégradé ni de brillance | aucun `gradient`, aucune ombre **portée** sur les cinq règles |
+| 5. Contraste texte/fond **≥ 4,5:1** sur les cinq | 5,18:1 au pire (niveau 4) |
+
+`tests/palette-niveaux.test.js` tient les cinq, et chacune a été prouvée par
+une mutation qui la fait rougir.
+
+### Deux corrections, mesurées avant d'être proposées, validées le 3 novembre
+
+1. **Le niveau 4 porte du texte noir**, pas blanc. En blanc il est à
+   **3,36:1** — sous le seuil que la règle 5 pose elle-même. En noir, 5,18:1.
+   Garder le blanc aurait demandé de foncer `#8C8C8C` jusqu'à `#767676` ou
+   moins, soit un pas de plus vers le niveau 5.
+2. **Les pastilles 1 à 3 portent un liseré.** Sans lui leur fond ne dit rien :
+   **1,02 à 1,45:1** contre les quatre fonds de ligne réels (ligne ordinaire
+   `#FFFFFF`, nuit passée `#FAFAFA`, week-end `#F5F5F3`, ligne de période
+   `#EFEFED`), et le filet d'origine de la pastille était lui-même à 1,19:1.
+   Pris trois crans plus bas dans la même échelle : **3,14 à 13,35:1**.
+
+### Trois choses que la review a corrigées, et qu'il faut savoir
+
+1. **Les cinq classes `.n-base` … `.n-exceptionnel` sont dans `public/style.css`,
+   pas dans la page.** Deux écrans les emploient — la Prédiction de prix et le
+   marché — et les écrire dans chaque page refaisait la copie que la source
+   unique venait de fermer. C'est d'ailleurs par là que le niveau avait atteint
+   une **ligne** sur le marché.
+2. **Tout passe par des propriétés personnalisées** — `--niveau-fond`,
+   `--niv-encre`, `--niveau-lisere` — et ce n'est pas un style, c'est un
+   correctif. Posés en direct, `background` perdait contre
+   `.yp-niv { background: var(--bg) }` et `border` contre
+   `.yp-niv-badge { border: 0.5px solid rgba(0,0,0,.08) }` : même spécificité,
+   déclarations plus bas. Les cinq cartes rendaient **blanc** et les six
+   liserés étaient **inertes**. Une propriété personnalisée ne dépend pas de
+   l'ordre des règles.
+3. **Le liseré est sur la pastille, pas sur la case.** Les cases de grille sont
+   déjà séparées par le `gap: 1px` de `.yp-niveaux` ; leur ajouter une bordure
+   faisait un double filet.
+
+⚠ **Et la leçon de méthode : aucun des huit tests n'avait vu les deux défauts
+de cascade**, alors qu'ils lisaient tous la bonne règle. Ils vérifiaient ce qui
+est **écrit**, pas ce qui est **peint**. Un défaut d'ordre de cascade ne se lit
+pas dans une règle prise seule — il se mesure dans un navigateur.
+
+### Ce que l'échelle gagne, et ce qu'elle coûte
+
+Elle gagne **la place**. Sans teinte, aucune collision possible avec les trois
+couleurs réservées. C'est ce que ni le prune ni l'orange ne pouvaient offrir,
+et c'est mesuré — quatre rampes construites sur la **même échelle de
+luminance** (0,80 → 0,26), comparées en **ΔE CIE76** aux couleurs qui ont déjà
+un sens. Lecture : < 3 = la même couleur · 3-10 = confondues d'un coup d'œil ·
+> 20 = deux couleurs.
+
+| rampe | ΔE de son pas Base à `--amber-bg` (`#FAEEDA`) | ΔE de son pas Base au trait « nuit passée » (`#E4E4E4`) |
+|---|---|---|
+| orange | **4,3** | 10,9 |
+| orange à dégradé (brief du 3/11) | **5,9** | 5,2 |
+| sable → brun | 9,1 | **2,8** |
+| gris encre | 11,5 | **1,1** |
+| prune | 19,2 | 9,5 |
+
+Les cinq rampes tenaient les conditions de lisibilité : **ce n'est jamais la
+lisibilité qui les a départagées, c'est la place libre.**
+
+Elle coûte **le bas de l'échelle** : `--niveau-1` est à ΔE 1,0 du fond
+« nuit passée », `--niveau-2` à ΔE 1,7 du fond des lignes de période. Les
+règles 1 et 2 sont exactement ce qui rend ce coût acceptable — le niveau ne
+peint jamais une ligne, et ce qui porte l'information est le chiffre, pas la
+couleur. Le liseré referme le reste pour l'œil.
+
+### Les vingt-cinq valeurs comparées, pour que ces nombres soient refaisables
+
+Les quatre rampes écartées n'existent dans aucun fichier du dépôt : sans cette
+table, leurs chiffres seraient invérifiables, donc à ne pas citer.
+
+| rampe | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| orange | `#F7E4D4` | `#F1CFB2` | `#EAB689` | `#E29858` | `#D07525` |
+| sable → brun | `#EBE7E3` | `#DED3CB` | `#D0BDAD` | `#C1A388` | `#AF835C` |
+| gris encre (2/11) | `#E7E7E7` | `#D6D6D6` | `#C1C1C1` | `#A8A8A8` | `#8B8B8B` |
+| prune | `#EDE4F5` | `#DED0ED` | `#CDB8E2` | `#B99DD5` | `#A07DC4` |
+| **échelle d'encre** | `#F7F7F7` | `#EBEBEB` | `#D6D6D6` | `#8C8C8C` | `#222222` |
+
+### ⚠ Une quatrième couleur réservée a existé vingt-quatre heures
+
+Le 2 novembre, le **prune** a été réservé aux niveaux de prix, au même titre
+que le noir, l'ambre et le bleu — écrit ici, dans `public/style.css`, et tenu
+par un test. Le 3 novembre, l'échelle d'encre l'a remplacé et **la réservation
+tombe avec lui** : le prune redevient une couleur ordinaire. Les couleurs
+réservées sont de nouveau **trois**.
+
+⚠ **ET LE 4 NOVEMBRE, `--prune` A QUITTÉ LE PRODUIT TOUT COURT** : le lot des
+périodes en niveaux a emporté son dernier usage, et les deux jetons sont
+sortis de `public/style.css` dans le même commit. Une couleur réservée
+vingt-quatre heures, puis supprimée deux jours plus tard : la leçon reste
+celle du §3 — **une couleur réservée se paie en place**, et les niveaux
+n'avaient besoin ni d'en prendre, ni d'en garder une.
+
+La durée de vie de cette réservation est elle-même la leçon : **une couleur
+réservée se paie en place**, et les niveaux n'avaient pas besoin d'en prendre.
+
+## 3 bis. L'échelle « température du marché » (4 niveaux, distincte)
+
+`shared/temperature-calendrier.js`, injectée par le module. **Seule
+échelle du dépôt qui déclare aussi sa couleur de texte.**
+
+| niveau | fond | texte |
+|---|---|---|
+| creux | `#E8EEF7` | `#1C2B44` |
+| modéré | `#B9CCE9` | `#1C2B44` |
+| favorable | `#6F97D3` | `#1C2B44` |
+| pic | `#1E3F73` | `#FFFFFF` |
+
+Variante sombre déclarée  : `#1D2735`, `#2C4466`, `#446EAE`,
+`#A9C4EF`, avec textes `#C9D6EA`, `#E3ECF8`, `#FFFFFF`, `#0F1D33`.
+
+## 4. Couleurs de canal
+
+**Les jetons** (`shared/theme.css`) :
+
+| canal | jeton | valeur |
+|---|---|---|
+| Airbnb | `--canal-airbnb` | `#FF5A5F` |
+| Booking | `--canal-booking` | `#003580` |
+| Direct | `--canal-direct` | `#0E1726` |
+| texte sur canal | `--on-canal` | `#FFFFFF` |
+
+**Ce que le calendrier utilise réellement** (`shared/ui.css`) :
+
+| classe | `--coul` | valeur effective |
+|---|---|---|
+| `.cal-barre--airbnb` | `var(--canal-airbnb)` | `#FF5A5F` |
+| `.cal-barre--booking` | `var(--info)` | `#2563EB` |
+| `.cal-barre--direct` | `var(--ok)` | `#0F7A4F` |
+| `.cal-barre--blocage` | — | fond `var(--surface-2)` `#F7F7F7`, texte `var(--ink)`, italique, bordure `1px solid var(--border)` |
+
+⚠ **`--canal-booking` et `--canal-direct` ne servent QUE dans la messagerie**
+(`.conv__canal--*`, `shared/ui.css`). Le calendrier peint les mêmes
+canaux avec `--info` et `--ok`. Voir §9.
+
+⚠ **La couleur est assombrie au rendu** :
+`background: color-mix(in srgb, var(--coul) 82%, black)` (`shared/ui.css`).
+La valeur peinte n'est donc pas la valeur du jeton. La légende, elle, utilise
+`--coul` **pur** (`.cal-legende__pt`,  ; `.cal-ligne-resa__point`,
+.
+
+## 5. Mode sombre — ce qui existe, et où il a été RETIRÉ
+
+⚠⚠ **DÉCISION DE THIERRY DU 2 NOVEMBRE 2026, DOUBLE VALIDATION DONNÉE :
+« pas de mode sombre sur YieldFlow pour l'instant. »** Un vrai mode sombre sera
+un chantier à part.
+
+| socle / module | mécanisme | couverture |
+|---|---|---|
+| `shared/theme.css` | `:root[data-theme="dark"]` **seulement** | 19 jetons redéfinis |
+| `shared/temperature-calendrier.js` | **aucun** — retiré le 2 novembre 2026 | néant |
+| `apps/yield/marche-global.html` | **aucun** — retiré le 2 novembre 2026 | néant |
+| `public/style.css` | **aucun** | néant |
+| `apps/yield/prix.html` | **aucun** | néant |
+
+**Pourquoi les deux ont été retirés, et c'est la leçon : un demi-mode sombre
+ment.**
+
+1. **Il rendait un bloc illisible.** Sur `apps/yield/marche-global.html`, en
+   préférence système sombre, quatre fonds de niveaux passaient à
+   `#1D2A36`…`#3A2717` tandis que `.mg-niv-l` gardait `color: var(--text)` =
+   `#1A1A1A`, parce que `public/style.css` n'a **aucun** bloc sombre.
+   Contraste ≈ **1,1:1** : les quatre lignes de « En résumé » étaient
+   illisibles. Constaté en recette le 1er novembre 2026, capture à l'appui.
+2. **Et il INVERSAIT une échelle.** Dans `shared/temperature-calendrier.js`,
+   la variante sombre faisait de « Pic » la case la plus **claire**
+   (`#A9C4EF`) et de « creux » la plus foncée — le contraire de ce que
+   l'échelle veut dire.
+
+**Ce qui tient la décision** : `tests/retouches-yieldflow-recette.test.js` garde
+l'**absence** de toute règle sombre sur les six écrans YieldFlow et sur le
+module partagé. Et `tests/marche-temperature-page.test.js` et
+`tests/temperature-calendrier-dom.test.js` ont été **retournés** : ils gardaient
+l'existence de la variante, ils gardent désormais son absence. Un garde-fou
+qu'on efface laisse revenir ce qu'il empêchait ; un garde-fou qu'on retourne dit
+pourquoi.
+
+⚠ **`data-theme` N'EST TOUJOURS POSÉ PAR AUCUN CODE DU DÉPÔT.** La variante
+sombre de `shared/theme.css` reste **déclarée et jamais activée** — elle n'est
+pas touchée par cette décision, qui ne porte que sur YieldFlow.
+
+⚠ **`shared/theme.css` n'écoute PAS `prefers-color-scheme`.** Depuis le
+2 novembre 2026, **plus aucun fichier du dépôt ne contient cette règle** : les
+deux qui l'avaient étaient les deux retirés ci-dessus.
+
+## 6. Typographie
+
+⚠ **« Outfit » n'existe nulle part dans le dépôt** (balayage `.css` et `.html` :
+zéro occurrence).
+
+| socle | famille | source |
+|---|---|---|
+| V5 | `'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif` | `shared/theme.css`, appliquée par `shared/ui.css` |
+| legacy | `-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` | `public/style.css` |
+
+**Chargement** : `fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800`
+dans `pages/aujourdhui.html` et `pages/calendrier.html`. **`apps/yield/prix.html`
+ne charge aucune police** (vérifié : 0 occurrence de `fonts.googleapis`).
+
+**Tailles** (`shared/theme.css`) :
+
+| rôle | jeton | desktop | ≤ 720 px |
+|---|---|---|---|
+| titre de page | `--fs-h1` | `32px` | `26px` |
+| titre de section | `--fs-h2` | `22px` | `20px` |
+| chiffre clé | `--fs-kpi` | `28px` | `24px` |
+| corps | `--fs-body` | `15px` | inchangé |
+| libellé secondaire | `--fs-small` | `14px` | inchangé |
+| petit texte | `--fs-caption` | `13px` | inchangé |
+| navigation mobile | `--fs-nav-mobile` | `10px` | inchangé |
+
+Surcharges mobiles : `shared/ui.css`.
+
+**Graisses** (`shared/theme.css`) : `--fw-regular: 400`,
+`--fw-medium: 500`, `--fw-semibold: 600`, `--fw-bold: 700`, `--fw-black: 800`.
+**Interlettrage** : `--tracking-tight: -0.03em` .
+
+⚠ **Aucune hauteur de ligne n'est jetonnée.** Les `line-height` sont posés au
+cas par cas dans les règles (`.bulle` : `1.45`, `shared/ui.css`). Il n'y a
+pas de `--lh-*`.
+
+⚠ **Le socle legacy n'a aucun jeton de taille ni de graisse** : les tailles y
+sont écrites en dur (`.btn` : `font-size: 13px`, `font-weight: 500`,
+`public/style.css`).
+
+## 7. Formes et espaces
+
+| rôle | jeton | valeur | source |
+|---|---|---|---|
+| boutons, badges, onglets | `--radius-pill` | `99px` | `theme.css` |
+| cartes, photos | `--radius-card` | `16px` | `theme.css` |
+| pastilles d'icône | `--radius-tile` | `12px` | `theme.css` |
+| legacy, général | `--radius` | `8px` | `style.css` |
+| legacy, grand | `--radius-lg` | `12px` | `style.css` |
+| hauteur min cliquable | `--control` | `44px` | `theme.css` |
+| hauteur grande | `--control-lg` | `48px` | `theme.css` |
+| icône | `--icon-size` | `20px` | `theme.css` |
+| icône grande | `--icon-size-lg` | `22px` | `theme.css` |
+| trait d'icône | `--icon-stroke` | `1.75` | `theme.css` |
+| espaces | `--gap-xs/-s/-m/-l/-xl` | `4 / 8 / 16 / 24 / 40px` | `theme.css` |
+| marge de page | `--page-pad` | `48px` (→ `24px` ≤ 720 px) | `theme.css`, `ui.css` |
+| largeur max du contenu | `--page-max` | `1200px` | `theme.css` |
+| largeur sidebar legacy | `--sidebar-width` | `210px` | `style.css` |
+| sidebar legacy repliée | `--sidebar-collapsed` | `48px` | `style.css` |
+
+**Espacement entre cartes** : il n'y a pas de jeton dédié. `.card` porte
+`gap: 12px` **en interne** (`ui.css`) ; l'écart entre cartes vient du
+conteneur de chaque page (`.cal-page { gap: 12px }`, `ui.css`).
+
+### Grille du calendrier principal (desktop)
+
+| mesure | valeur | source |
+|---|---|---|
+| colonne de libellé (collante) | `--cal-col: 110px` | `ui.css` |
+| largeur d'une colonne de jour | `46px` | `ui.css`, `531`, `532`, `545` |
+| hauteur d'une case nuit | `--cal-nuit-h: 40px` | `ui.css`, `549` |
+| hauteur de la piste réservations | `--cal-resas-h: 48px` | `ui.css` |
+| gap entre colonnes | **aucun** — `border: 1px solid var(--line)` sur chaque case | `ui.css` |
+| survol d'une case | `color-mix(in srgb, var(--info) 10%, var(--surface))` | `ui.css` |
+
+⚠ **Il n'y a pas d'état « sélectionné » de case déclaré.** La seule règle d'état
+est le survol ci-dessus, et elle exclut le passé
+(`.cal-nuit:not(.cal-nuit--passe):hover`).
+
+## 8. Composants — tels qu'ils sont faits aujourd'hui
+
+### Bouton plein / bouton contour (V5, `shared/ui.css`)
+
+| | |
+|---|---|
+| `.btn` | `height: var(--control)` 44px · `padding: 0 18px` · `border-radius: var(--radius-pill)` 99px · `font-size: var(--fs-small)` 14px · `font-weight: var(--fw-semibold)` 600 · `border: 1px solid transparent` |
+| `.btn--primary` | fond `var(--surface)`, texte `var(--ink)`, bord `var(--ink)` |
+| `.btn--secondary` | fond `var(--surface)`, texte `var(--ink)`, bord `var(--border)` |
+| `.btn--outline` | fond `var(--surface)`, texte `var(--ink)`, bord `var(--ink)` |
+| `.btn--icon` | `width: 44px`, `padding: 0` |
+| `.btn--lg` | `height: 48px`, `padding: 0 20px`, `font-size: var(--fs-body)` |
+| survol | `box-shadow: var(--shadow-hover)` |
+| désactivé | `opacity: .5`, `cursor: not-allowed` (règles **après** `:hover`, ordre commenté comme déterminant) |
+
+⚠ **`.btn--primary` et `.btn--outline` sont déclarés à l'identique** — mêmes
+trois propriétés, mêmes valeurs. Voir §9.
+
+**Lien** : `.link` — `font-weight: var(--fw-semibold)`,
+`text-decoration: underline`. **Aucune couleur** : le lien hérite. Le bleu
+`--info` n'est pas appliqué par `.link`.
+
+### Pastille pill de filtre (« Tous / À valider »)
+
+Ce sont des `.tab`, pas un composant propre. `pages/messages.html` :
+`<button class="tab" data-filtre="tous" aria-pressed="true">`.
+
+| | |
+|---|---|
+| `.msg-filtres` | `display: flex` · `gap: 6px` · `overflow-x: auto` · barre de défilement masquée (`ui.css`) |
+| `.msg-filtres .tab` | `height: 36px` · `padding: 0 14px` · `font-size: var(--fs-small)` · `border: 1px solid var(--border)` · `flex: none`  |
+| actif | `.tab[aria-pressed="true"]` → fond `var(--ink)`, texte `var(--on-ink)`, bord `var(--ink)`  |
+
+**`.tab` générique** (`ui.css`) : `height: var(--control)` 44px ·
+`padding: 0 18px` · `border-radius: var(--radius-pill)` ·
+`font-size: var(--fs-body)` · `font-weight: var(--fw-medium)` · survol
+`background: var(--surface-2)` · actif de navigation
+`.tab[aria-current="page"]` → fond `var(--ink)`.
+
+⚠ **Deux attributs d'état coexistent** : `aria-current="page"` (navigation) et
+`aria-pressed="true"` (filtres, mode, période), chacun avec sa propre règle —
+`ui.css`, `282`, `453`.
+
+### Chip de niveau
+
+Voir §3 : `.yp-niv-badge`, `font-size: 10px`, `padding: 2px 8px`,
+`border-radius: 4px`, `border: 0.5px solid rgba(0,0,0,.08)`, fond par classe
+`n-*`, **texte hérité**.
+
+### Sélecteur de logement
+
+⚠ **Il n'y a pas de composant partagé.** Trois formes distinctes :
+
+| endroit | forme |
+|---|---|
+| `shared/ui.css` | seule règle globale : `button, input, textarea, select { font: inherit; color: inherit; }` — **aucune** forme, aucune bordure |
+| `shared/ui.css` (volet IA) | `height: 38px` · `border: 1px solid var(--border)` · `border-radius: var(--radius-card)` · fond `var(--surface)` · `padding: 0 10px` · `font-size: var(--fs-body)` |
+| `shared/ui.css` (bloc du volet) | `height: 36px` · même bordure et rayon · `padding: 0 8px` · `font-size: var(--fs-small)` |
+| `public/style.css` (legacy, `.nav-compte-select`) | `width: 100%` · `padding: 6px 8px` · `font-size: 12px` · `border: 0.5px solid var(--border)` · `border-radius: var(--radius)` 8px |
+
+Le sélecteur de `apps/yield/*` (`#yf-bien`, `#yp-bien`, …) est un `<select>` nu
+sous le socle legacy : il n'a que la règle `.yf-champ select { min-width: 130px }`
+(`apps/yield/index.html`) et aucune forme jetonnée.
+
+### Barre de réservation du calendrier (`shared/ui.css`)
+
+| mesure | valeur |
+|---|---|
+| hauteur | `38px`, `top: 5px` dans une piste de `48px` |
+| rayon | `13px` ; `7px` pour `.cal-barre--blocage` |
+| texte | `font-size: var(--fs-small)` 14px · `font-weight: var(--fw-semibold)` · `padding: 0 10px` |
+| troncature | `overflow: hidden` · `white-space: nowrap` · `text-overflow: ellipsis` · `text-align: start` |
+| couleur | `color-mix(in srgb, var(--coul) 82%, black)`, texte `var(--on-canal)` |
+| bords coupés | `.cal-barre--coupe-g` / `--coupe-d` retirent le rayon du côté tronqué |
+| position | `left: calc((var(--d) + .5) / var(--n) * 100%)` — décalée d'une demi-case (la nuit, pas le jour) |
+
+Variante mobile `.cal-mbar`  : `height: 22px`, `border-radius: 11px`,
+`font-size: var(--fs-caption)`, `padding: 0 7px`.
+
+### Volet latéral (« Réponses de l'IA ») — `shared/ui.css`
+
+| | |
+|---|---|
+| `.msg-tiroir` | `position: fixed` · `inset-block: 0` · collé au bord de fin · `width: min(360px, 100vw)` · fond `var(--surface)` · `border-inline-start: 1px solid var(--line)` · `box-shadow: var(--shadow-hover)` · `z-index: 40` · `overflow-y: auto` |
+| en-tête | `padding: 16px 18px` · `border-bottom: 1px solid var(--line)` |
+| sections | `margin: 16px 18px 4px` · `font-size: var(--fs-small)` · `font-weight: var(--fw-bold)` · `letter-spacing: var(--tracking-tight)` |
+| blocs | `padding: 14px 18px` · `gap: 10px` · `border-bottom: 1px solid var(--line)` |
+
+### Volet du bas sur mobile
+
+⚠ **Il n'y a pas de composant « feuille du bas » générique.** Ce qui existe :
+
+| | |
+|---|---|
+| le jeton | `--shadow-sheet: 0 -8px 32px rgba(0, 0, 0, .18)` (`theme.css`), commenté « feuilles du bas (PWA) » |
+| le voile | `--scrim: rgba(0, 0, 0, .45)` (`theme.css`) |
+| le volet ménages ≤ 899 px | `.men-volet { width: 100vw; border-inline-start: 0 }` et `.men-voile { display: none }` (`ui.css`) — il prend tout l'écran, ce n'est pas une feuille basse |
+
+### Le menu YieldFlow du calendrier (`shared/ui.css`, lot du 28 octobre)
+
+| | |
+|---|---|
+| bouton `.cal-yf` | `28×28px`, `border-radius: var(--radius-pill)` |
+| actif `.cal-yf--on` | fond `var(--info)`, texte `var(--on-ink)`, `box-shadow: var(--shadow-dot)`, sans bordure |
+| inactif `.cal-yf--off` | `border: 1px solid var(--border)`, fond `var(--surface)`, texte `var(--muted)` |
+| ouvert | `outline: 2px solid var(--info)`, `outline-offset: 2px` |
+| menu `.cal-yf-menu` | `position: fixed` · `z-index: 55` · `width: min(320px, calc(100vw - 2 * var(--page-pad)))` · `border-radius: var(--radius-card)` · `max-height: min(520px, 80vh)` |
+| pastille d'état | `--on` : fond `var(--surface-2)`, point `7px` en `var(--ok)` · `--off` : fond `var(--surface-2)`, texte `var(--muted)` |
+| ligne ambre | fond `var(--warn-soft)`, texte `var(--warn)`, `border-radius: 10px` |
+
+## 9. Mobile
+
+**Points de rupture utilisés** (`shared/ui.css`) : `899px`, `720px` / `721px`,
+`560px` / `561px`, plus `@media (hover: hover)` et
+`@media (prefers-reduced-motion: reduce)`.
+
+| rupture | ce qu'elle fait |
+|---|---|
+| `max-width: 899px` | volets en pleine largeur, planning ménages recomposé (`--cal-col: 0px`), identités collantes au-dessus de la piste |
+| `max-width: 720px` | `--page-pad: 24px`, `--fs-h1: 26px`, `--fs-h2: 20px`, `--fs-kpi: 24px` ; bulles à `86%` ; actions en pleine largeur |
+| `min-width: 721px` | `.only-mobile { display: none !important }` — **c'est le point de bascule des deux calendriers** |
+| `max-width: 560px` | ajustements de la fiche logement |
+
+### Le calendrier principal sous 700 px
+
+⚠ **Ce n'est pas le calendrier desktop rétréci : c'est un autre composant.** La
+bascule se fait par `.only-mobile` / `.only-desktop` à **721 px**.
+
+| | desktop (≥ 721 px) | mobile (≤ 720 px) |
+|---|---|---|
+| structure | bande horizontale continue, `grid-auto-columns: 46px`, largeur `calc(var(--n) * 46px)` | grille de mois, `grid-template-columns: repeat(7, 1fr)`, `gap: 4px` (`ui.css`) |
+| semaines | une seule piste | empilées, `gap: 4px` (`ui.css`) |
+| largeur de colonne | **fixe, 46px** | **fluide, `1fr`** (≈ `(100vw − 48px − 6×4px) / 7`) |
+| défilement horizontal | **oui** — la largeur totale dépasse la fenêtre dès ~20 jours | **non** |
+| barre de réservation | `.cal-barre`, 38px / rayon 13px | `.cal-mbar`, 22px / rayon 11px |
+| en-tête | — | `.cal-mois__tete` collant (`position: sticky; top: 0`), nav centrée, nom du mois `17px` capitalisé (`ui.css`) |
+
+## 10. Écarts — définis à deux endroits avec des valeurs différentes
+
+**Listés, non corrigés.**
+
+| # | écart | valeurs | sources |
+|---|---|---|---|
+| 1 | **Deux socles complets** aux noms qui collisionnent | `--border` : `#DDDDDD` **vs** `rgba(0,0,0,0.1)` | `theme.css` / `style.css` |
+| 2 | idem | `--amber` : `#F5A524` **vs** `#BA7517` | `theme.css` / `style.css` |
+| 3 | idem | texte principal : `#222222` **vs** `#1A1A1A` | `theme.css` / `style.css` |
+| 4 | idem | vert : `#0F7A4F` **vs** `#1D9E75` | `theme.css` / `style.css` |
+| 5 | idem | rayon général : `16px` / `99px` / `12px` **vs** `8px` / `12px` | `theme.css` / `style.css` |
+| 6 | **Deux typographies** | `Plus Jakarta Sans` **vs** police système | `theme.css` / `style.css` |
+| 7 | **Canal Booking peint de deux couleurs** | `#003580` (messagerie) **vs** `#2563EB` (calendrier) | `ui.css` / `ui.css` |
+| 8 | **Canal Direct peint de deux couleurs** | `#0E1726` (messagerie) **vs** `#0F7A4F` (calendrier) | `ui.css` / `ui.css` |
+| ~~9~~ | ~~La palette des 5 niveaux recopiée 4 fois~~ — **FERMÉ le 30 octobre 2026** : source unique dans `public/style.css`, les 4 copies sont des renvois, un test épingle les 10 valeurs | — |
+| ~~10~~ | ~~Le 5e niveau est incomplet côté marché~~ — **SANS OBJET depuis le 3 novembre 2026** : l'échelle d'encre n'a plus de « paires » fond/accent, donc plus de dépariage possible. L'écart avait été ouvert le 29 octobre (la légende du marché appariait le FOND de « Très haut » et l'ACCENT d'« Exceptionnel ») puis fermé le 2 novembre sur validation de Thierry. ⚠ Ce qui l'a vraiment refermé n'est ni l'une ni l'autre de ces décisions, c'est la disparition de la notion d'accent | — |
+| ~~11~~ | ~~Mode sombre : deux mécanismes, et un seul fichier écoute l'OS~~ — **FERMÉ le 2 novembre 2026** sur double validation de Thierry : les deux fichiers qui écoutaient l'OS ont vu leur variante sombre retirée. Il ne reste que `[data-theme]` dans `shared/theme.css`, hors YieldFlow |
+| 12 | **`data-theme` n'est posé par aucun code** (inchangé : la décision du 2 novembre ne porte que sur YieldFlow) | variante sombre déclarée, jamais activée | balayage `.js`/`.html` : seule occurrence hors CSS = `tests/marche-temperature-page.test.js` |
+| 13 | **`.btn--primary` et `.btn--outline` identiques** | mêmes trois propriétés, mêmes valeurs | `ui.css` et `104` |
+| 14 | **Deux attributs d'état pour `.tab`** | `aria-current="page"` **et** `aria-pressed="true"`, trois règles séparées | `ui.css`, `214`, `282`, `453` |
+| 15 | **La couleur de canal peinte n'est pas la valeur du jeton** | barre : `color-mix(… 82%, black)` ; légende : `--coul` pur | `ui.css` vs `590`, `640` |
+| 16 | **Pas de jeton de hauteur de ligne** | `line-height` en dur au cas par cas | `ui.css` (`1.45`) |
+| 17 | **Pas de jeton de rouge dans le socle legacy** | `#B02A37`, `#842029`, `#FDECEA` en dur | `apps/yield/prix.html` |
+| 18 | **`.link` ne porte aucune couleur** | le bleu `--info` n'est pas appliqué par la classe du lien | `ui.css` |
+| 19 | **Pas d'état « sélectionné » de case** | seul le survol est déclaré | `ui.css` |
+| ~~20~~ | ~~`apps/yield/prix.html` ne charge aucune police~~ — **FERMÉ le 30 octobre 2026** : six écrans YieldFlow chargent Plus Jakarta Sans (lien + `preconnect` + classe `police-v5`), et leurs contrôles de formulaire en héritent. `evenements.html` reste sans police : c'est une redirection | — |
+
+## 11. Ce qui n'a PAS été mesuré
+
+Dit plutôt que deviné :
+
+- les hauteurs de ligne réelles au rendu (seules les déclarations ont été lues) ;
+- les rapports de contraste (aucun calcul fait ; la seule échelle qui déclare
+  son texte est celle de §3 bis) ;
+- `pages/onboarding.html`, `apps/sms/*`, `apps/menages/prestataires.html` et
+  les écrans antérieurs non cités ;
+- la barre du bas mobile (`.bottombar`) au-delà de `display: none` au-dessus de
+  899 px et du jeton `--fs-nav-mobile`.

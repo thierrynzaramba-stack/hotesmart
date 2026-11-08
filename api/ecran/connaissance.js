@@ -141,20 +141,37 @@ const replisDuBien = (bien) => ({
   adresse: bien.address, checkin: bien.checkin_time, checkout: bien.checkout_time
 })
 
+// Les infos de la RÉSERVATION que le remplaceur rend vides sans le signaler
+// (constat 3 de la review du lot « Utiliser ») : un nom ou une date absents
+// donnent « Bonjour M. » ou « vous arrivez le  », et rien ne le dit. Le prénom
+// n'y est pas : son absence a une forme neutre, décidée le 8 octobre 2026.
+const DE_LA_RESERVATION = ['nom', 'arrivee', 'depart', 'logement']
+
 function apercu (texte, connaissance, voyageur, bien) {
   const v = voyageur || {}
-  const r = remplacerBalises(texte, {
-    reservation: { prenom: v.prenom, nom: v.nom, arrivee: v.arrivee, depart: v.depart, logement: bien.name },
-    connaissance,
-    replis: replisDuBien(bien)
-  })
-  return { texte: r.texte, manquants: r.manquants, codeNonResolu: r.codeNonResolu === true }
+  const reservation = { prenom: v.prenom, nom: v.nom, arrivee: v.arrivee, depart: v.depart, logement: bien.name }
+  const r = remplacerBalises(texte, { reservation, connaissance, replis: replisDuBien(bien) })
+  const src = String(texte == null ? '' : texte)
+  const resaVides = DE_LA_RESERVATION.filter(c => src.includes(`{${c}}`) && !String(reservation[c] || '').trim())
+  return {
+    texte: r.texte, manquants: [...r.manquants, ...resaVides],
+    inconnues: r.inconnues || [], codeNonResolu: r.codeNonResolu === true
+  }
 }
 
 const faitsEnObjet = (lignes) => Object.fromEntries(
   (lignes || []).filter(l => l.type === 'fixed').map(l => [l.key, l.value]))
 
-const voyageurPublic = (v) => (v ? { resa: v.resa, prenom: v.prenom, arrivee: v.arrivee } : null)
+// ⚠ `duFil` DIT SI L'APERÇU EST FAIT POUR LA RÉSERVATION DEMANDÉE, et c'est la
+// garde du bouton « Utiliser » (spec kb-utiliser-reponse §2, R1). Quand la
+// réservation du fil n'est pas dans CE logement, `voyageurDuBien` se rabat sur
+// le prochain séjour : un confort pour l'aperçu, mais un texte « Bonjour Paul »
+// mis dans le fil de Marie s'il partait dans la conversation. Faux sans
+// `?resa=`, faux quand le voyageur rendu n'est pas celui demandé.
+const voyageurPublic = (v, resaDemandee = null) => (v ? {
+  resa: v.resa, prenom: v.prenom, arrivee: v.arrivee,
+  duFil: resaDemandee != null && String(resaDemandee) !== '' && String(v.resa) === String(resaDemandee)
+} : null)
 
 module.exports = async (req, res) => {
   const t0 = Date.now()
@@ -212,7 +229,7 @@ module.exports = async (req, res) => {
         if (lu.error) return res.status(500).json({ error: 'Lecture impossible' })
         const a = apercu(texte, faitsEnObjet((lu.data || []).map(l => ({ ...l, type: 'fixed' }))), voyageur, choisi)
         timing()
-        return res.status(200).json({ ok: true, apercu: a, voyageur: voyageurPublic(voyageur) })
+        return res.status(200).json({ ok: true, apercu: a, voyageur: voyageurPublic(voyageur, corps.resa) })
       }
 
       if (action === 'supprimer') {
@@ -329,8 +346,17 @@ module.exports = async (req, res) => {
     const connaissance = faitsEnObjet(lignes)
     const replis = replisDuBien(choisi)
     const maintenant = Date.now()
+    // Chaque réponse porte, à côté de son aperçu, ce qui MANQUE pour l'envoyer
+    // telle quelle : le bouton « Utiliser » refuse sur ces trois signaux
+    // (spec kb-utiliser-reponse §2, R3) — jamais un « [WIFI NOM] » dans le fil.
     const reponses = lignes.filter(l => l.type !== 'fixed')
-      .map(l => ({ ...carte(l, { connaissance, replis, maintenant }), apercu: apercu(l.value, connaissance, voyageur, choisi).texte }))
+      .map(l => {
+        const a = apercu(l.value, connaissance, voyageur, choisi)
+        return {
+          ...carte(l, { connaissance, replis, maintenant }),
+          apercu: a.texte, manquants: a.manquants, inconnues: a.inconnues, codeNonResolu: a.codeNonResolu
+        }
+      })
       .sort((a, b) => a.sujet.localeCompare(b.sujet, 'fr'))
 
     timing()
@@ -343,7 +369,7 @@ module.exports = async (req, res) => {
       // ⚠ LES BALISES INSÉRABLES VIENNENT DU MODULE, JAMAIS RECOPIÉES DANS LA
       // PAGE : le jour où une balise change de libellé, elle change partout.
       balises,
-      voyageur: voyageurPublic(voyageur)
+      voyageur: voyageurPublic(voyageur, req.query && req.query.resa)
     })
   } catch (e) {
     console.error('[ecran/connaissance]', e.message)
