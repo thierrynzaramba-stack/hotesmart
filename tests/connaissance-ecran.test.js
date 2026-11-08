@@ -293,6 +293,16 @@ test('un bien inconnu ou absent rend le PREMIER bien en lecture', async () => {
   assert.equal(r.charge.bien.ref, 'P1')
 })
 
+test('la base porte l UUID du bien (lien vers sa fiche) et dit SEULEMENT si la fiche a une adresse', async () => {
+  const sans = await appeler({ query: { bien: 'P1' }, repondre: base() })
+  assert.deepEqual({ id: sans.charge.bien.id, adresse: sans.charge.bien.adresse }, { id: 'u-1', adresse: false })
+  const avec = await appeler({ query: { bien: 'P2' }, repondre: base() })
+  assert.deepEqual({ id: avec.charge.bien.id, adresse: avec.charge.bien.adresse }, { id: 'u-2', adresse: true })
+  assert.ok(!JSON.stringify(avec.charge).includes('9 rue Fiche') || avec.charge.reponses.length,
+    'l adresse elle-même ne descend pas dans la description du bien')
+  assert.equal(avec.charge.bien.address, undefined)
+})
+
 test('LE TEST QUI COMPTE : en écriture, le logement est OBLIGATOIRE et doit être du compte', async () => {
   // ⚠ RETOMBER SUR LE PREMIER BIEN, comme le fait la lecture, écrirait la
   // réponse d'un logement dans un AUTRE, sans un mot.
@@ -503,15 +513,35 @@ test('LE TEST QUI COMPTE : l écran et l aperçu suivent la FICHE du logement qu
   const c = r.charge.reponses[0]
   assert.equal(c.apercu, 'Au 9 rue Fiche dès 16:00', 'ce que le voyageur recevra')
   assert.ok(c.segments.filter(s => s.cle).every(s => s.vide === false), 'pas d étiquette rouge : la fiche les remplit')
-  const adresse = r.charge.faits.find(f => f.cle === 'adresse')
-  assert.equal(adresse.aRemplir, false)
-  assert.equal(adresse.repli, '9 rue Fiche')
+  // L'adresse n'est plus une info de la base (une seule adresse, celle de la
+  // fiche) ; l'heure d'arrivée, si, avec la fiche en repli.
+  assert.equal(r.charge.faits.find(f => f.cle === 'adresse'), undefined)
+  const checkin = r.charge.faits.find(f => f.cle === 'checkin')
+  assert.equal(checkin.aRemplir, false)
+  assert.equal(checkin.repli, '16:00')
+})
+
+test('LE TEST QUI COMPTE : écrire une ligne `adresse` dans la base est refusé (la fiche fait foi)', async () => {
+  const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'adresse', value: '1 rue X' }, repondre: base() })
+  assert.equal(r.statut, 400)
+  assert.equal(r.charge.error, 'adresse_dans_la_fiche')
+  assert.equal(r.requetes.filter(q => q.table === 'knowledge').length, 0, 'aucune écriture')
+})
+
+test('la fiche écrit par l UUID du bien (`bienId`), résolu dans les biens DU COMPTE', async () => {
+  const ok = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'wifi_nom', value: 'RESEAU' }, repondre: base() })
+  assert.equal(ok.statut, 200)
+  const ecrite = ok.requetes.find(q => q.table === 'knowledge')
+  assert.ok(ecrite, 'une écriture')
+  const autre = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bienId: 'uuid-d-un-autre-compte', type: 'fixed', key: 'wifi_nom', value: 'X' }, repondre: base() })
+  assert.equal(autre.statut, 403, 'hors du compte, comme une référence étrangère')
+  assert.equal(autre.requetes.filter(q => q.table === 'knowledge').length, 0)
 })
 
 test('les bornes de taille rendent un CODE stable, que l écran sait lire', async () => {
   const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'faq', key: 'S', value: 'x'.repeat(4001) }, repondre: base() })
   assert.equal(r.statut, 400)
   assert.equal(r.charge.error, 'trop_long')
-  const f = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'adresse', value: 'x'.repeat(1001) }, repondre: base() })
+  const f = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'wifi_nom', value: 'x'.repeat(1001) }, repondre: base() })
   assert.equal(f.charge.error, 'trop_long')
 })

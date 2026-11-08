@@ -96,19 +96,62 @@ test('LE TEST QUI COMPTE : « Hors IA » sort l entrée du contexte envoyé au M
   assert.equal(buildKnowledgeText([]), '')
 })
 
+test('LE TEST QUI COMPTE : l IA lit ce que le voyageur recevrait — adresse de la FICHE, horaires effectifs', () => {
+  // Spec Accueil du voyageur, S3 : sans les replis, l'IA perdait l'adresse le
+  // jour où la ligne de la base disparaît, et ignorait les horaires de la fiche.
+  process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+  process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
+  const { buildKnowledgeText } = require('../lib/cron-classify')
+  const { replisDuBien } = require('../lib/balises')
+  const replis = replisDuBien({ address: '12 rue Fiche', checkin_time: '16:00' })
+  const texte = buildKnowledgeText([
+    { type: 'fixed', key: 'adresse', value: '9 rue Ancienne', lisible_par_ia: true },
+    { type: 'fixed', key: 'wifi_nom', value: 'RESEAU', lisible_par_ia: true },
+    { type: 'fixed', key: 'equip_lits', value: 'deux lits', lisible_par_ia: true }
+  ], { replis })
+  assert.ok(texte.includes('- adresse : 12 rue Fiche'), texte)
+  assert.ok(!texte.includes('9 rue Ancienne'), 'une adresse restée dans la base ne part plus au modèle')
+  assert.ok(texte.includes('- checkin : 16:00'), 'l heure de la fiche')
+  assert.ok(texte.includes('- checkout : 10:00'), 'le défaut, comme l envoi')
+  assert.ok(texte.includes('- wifi_nom : RESEAU'))
+  assert.ok(!texte.includes('wifi_mdp'), 'une info vide n est pas inventée')
+  assert.ok(texte.includes('- equip_lits : deux lits'), 'une clé sans balise reste lue')
+  // ⚠ « HORS IA » COUVRE AUSSI LE REPLI : l'hôte a dit « pas à l'IA » pour
+  // cette info, la fiche ne la lui rend pas par la bande.
+  const cache = buildKnowledgeText([{ type: 'fixed', key: 'checkin', value: '15:00', lisible_par_ia: false }], { replis })
+  assert.ok(!/checkin/.test(cache), cache)
+  // Sans le bien (appelant ancien) : la base seule, sauf l'adresse.
+  const sansBien = buildKnowledgeText([{ type: 'fixed', key: 'adresse', value: '9 rue Ancienne' }, { type: 'fixed', key: 'checkin', value: '15:00' }])
+  assert.ok(!sansBien.includes('9 rue Ancienne'))
+  assert.ok(sansBien.includes('- checkin : 15:00'))
+})
+
 test('les quatre chemins de l IA lisent `lisible_par_ia` (select *) et passent par le bâtisseur', () => {
   for (const f of ['lib/cron-classify.js', 'api/simulate.js', 'api/guestflow-proposer.js']) {
     const src = sansCommentaires(lire(f))
     const lectures = src.match(/from\('knowledge'\)[\s\S]{0,40}?\.select\('([^']*)'\)/g) || []
     assert.ok(lectures.length, f + ' lit knowledge')
     for (const l of lectures) assert.match(l, /select\('\*'\)/, f + ' : la colonne doit venir avec la ligne')
-    assert.match(src, /buildKnowledgeText\(knowledge \|\| \[\]\)/, f)
+    // ⚠ ET AVEC LES REPLIS DU BIEN (spec Accueil du voyageur, S3) : sans eux,
+    // l'IA perd l'adresse, qui ne vit plus que dans la fiche du logement.
+    const appels = src.match(/buildKnowledgeText\(knowledge \|\| \[\][^\n]*/g) || []
+    assert.ok(appels.length, f + ' passe par le bâtisseur')
+    for (const a of appels) assert.match(a, /\{ replis: replisDuBien\(/, f + ' : ' + a)
   }
 })
 
-test('« où le remplir » nomme l écran V5, avec l étiquette que l écran affiche', () => {
+test('« où le remplir » nomme la FICHE du logement, avec l étiquette que l écran affiche', () => {
+  // Lot « Accueil du voyageur » (8 novembre 2026) : ces infos ont quitté la
+  // base pour la fiche du logement ; l'adresse vit dans le bloc « Le logement ».
   const { OU_REMPLIR, DE_LA_BASE, etiquetteDe } = require('../lib/balises')
   for (const cle of DE_LA_BASE) {
-    assert.equal(OU_REMPLIR[cle], `Messages → Base de connaissance → Infos du logement → ${etiquetteDe(cle)}`, cle)
+    const attendu = cle === 'adresse'
+      ? 'Logements → <nom du logement> → Le logement → Adresse'
+      : `Logements → <nom du logement> → Accueil du voyageur → ${etiquetteDe(cle)}`
+    assert.equal(OU_REMPLIR[cle], attendu, cle)
   }
+  // Les blocs nommés existent dans la fiche, sous ces mots.
+  const fr = require('../shared/i18n/fr.json')
+  assert.equal(fr['fiche.bloc_accueil'], 'Accueil du voyageur')
+  assert.equal(fr['fiche.bloc_logement'], 'Le logement')
 })

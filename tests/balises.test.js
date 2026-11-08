@@ -30,8 +30,30 @@ test('LE TEST QUI COMPTE : la base de connaissance passe AVANT le repli du provi
     connaissance: { telephone_hote: 'BASE-TEL', adresse: 'BASE-ADRESSE' },
     replis: { telephone_hote: 'PROVIDER-TEL', adresse: 'PROVIDER-ADRESSE' }
   })
-  assert.equal(r.texte, 'tel BASE-TEL, adresse BASE-ADRESSE')
+  // ⚠ SAUF L'ADRESSE : une seule adresse, celle de la FICHE (décision de
+  // Thierry du 8 novembre 2026). Une ligne `adresse` restée dans la base ne
+  // passe plus devant celle que l'hôte corrige dans sa fiche.
+  assert.equal(r.texte, 'tel BASE-TEL, adresse PROVIDER-ADRESSE')
   assert.deepEqual(r.manquants, [])
+})
+
+test('LE TEST QUI COMPTE : une adresse SEULEMENT dans la base est un MANQUE (la fiche fait foi)', () => {
+  const r = remplacerBalises('adresse {adresse}', {
+    reservation: RESA, connaissance: { adresse: 'BASE-ADRESSE' }, replis: {}
+  })
+  assert.equal(r.texte, 'adresse [ADRESSE]')
+  assert.deepEqual(r.manquants, ['adresse'])
+})
+
+test('valeurEffective suit le remplaceur (base, fiche, défaut ; l adresse, fiche seule)', () => {
+  const { valeurEffective, replisDuBien } = require('../lib/balises')
+  const replis = replisDuBien({ address: '12 rue X', checkin_time: '16:00' })
+  assert.equal(valeurEffective('adresse', { adresse: 'BASE' }, replis), '12 rue X')
+  assert.equal(valeurEffective('checkin', {}, replis), '16:00')
+  assert.equal(valeurEffective('checkin', { checkin: '15:00' }, replis), '15:00')
+  assert.equal(valeurEffective('checkout', {}, replis), '10:00')
+  assert.equal(valeurEffective('wifi_nom', {}, replis), null)
+  assert.equal(valeurEffective('prenom', {}, replis), null, 'une balise de la réservation n est pas une info du logement')
 })
 
 test('le repli du provider sert quand la base est muette, et le defaut en dernier', () => {

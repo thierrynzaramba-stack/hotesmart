@@ -1,17 +1,15 @@
 # Spec — Accueil du voyageur : les infos du logement passent dans sa fiche
 
-**Statut : brouillon du 8 novembre 2026, à valider par Thierry avant la
-première ligne de code.** Branche `accueil-voyageur`, partie de main
-`dde1004f` (filtre-biens-vivants et kb-v5 en production). Fil messagerie.
+**Statut : validée par Thierry le 8 novembre 2026 (« ok »).** Branche
+`accueil-voyageur`, partie de main `dde1004f`, main `e1e27976` intégrée
+(« Utiliser » en production). Fil messagerie.
 
 Lot qui touche l'**envoi au voyageur** (les valeurs remplacent les balises des
 messages, et l'IA les lit) : jusqu'à trois reviews, et Thierry présent pour
 tester juste après le merge.
 
-**Dépendance** : `kb-utiliser-reponse` passe AVANT. Les deux lots touchent
-`shared/connaissance-vue.js`, `api/ecran/connaissance.js` et les traductions ;
-ce lot intègre `main` une fois « Utiliser » mergé, et reprend son « Le
-remplir » (§1.3).
+**Dépendance** : `kb-utiliser-reponse`, en production depuis le 8 novembre
+2026 et intégré à cette branche ; ce lot reprend son « Le remplir » (§1.3).
 
 ## 0. Les décisions de Thierry
 
@@ -69,8 +67,12 @@ changent pas : ils lisent les mêmes valeurs.
 Quand « Utiliser » refuse parce qu'une info du logement manque, « Le remplir »
 ouvre **un champ sous le refus**, dans la base ouverte par-dessus la
 conversation : l'hôte tape la valeur, enregistre, l'aperçu se recalcule et
-« Utiliser » devient possible. On ne quitte pas la conversation. Pour
-l'adresse, le champ écrit l'adresse de la fiche (la seule).
+« Utiliser » devient possible. On ne quitte pas la conversation.
+**Seule exception, l'adresse** : elle n'est pas une info de la base (une seule
+adresse, celle de la fiche) ; une réponse refusée pour elle porte un lien
+« Ouvrir la fiche » vers le bloc « Le logement ». Écrire l'adresse depuis la
+conversation passerait par le writer de la fiche, qui la transmet aussi au
+canal — trop pour un geste fait au fil d'un message.
 
 ## 2. Les règles de sûreté
 
@@ -96,14 +98,16 @@ l'adresse, le champ écrit l'adresse de la fiche (la seule).
 ## 3. La reprise de l'adresse (avant le merge en production)
 
 1. Je donne à Thierry une requête SQL **en lecture seule** : pour chaque bien,
-   l'adresse de la base et celle de la fiche.
+   l'adresse de la base et celle de la fiche. (Le script du point 3 fait la
+   même liste, à blanc.)
 2. Trois cas : identiques ou base vide → rien à faire ; fiche vide → l'adresse
    de la base est recopiée dans la fiche **par l'écran de la fiche** (le même
    chemin qu'à la main, qui la transmet aussi au canal) ; **écart** → Thierry
    choisit.
 3. Après le merge, les lignes `adresse` de la base sont supprimées, sur go de
-   Thierry, par un script qui refuse de tourner tant qu'un bien a une adresse
-   de base sans adresse de fiche.
+   Thierry, par `scripts/retirer-adresses-base.js` (à blanc par défaut,
+   `--go`, et `--go --prod` en production). Il refuse tant qu'un bien a une
+   adresse de base sans adresse de fiche.
 
 ## 4. Inventaire du bloc « Infos du logement » (base de connaissance)
 
@@ -125,10 +129,17 @@ l'adresse, le champ écrit l'adresse de la fiche (la seule).
 - `lib/logement/lecture.js`, `api/logement.js` : la fiche lit les lignes
   `fixed` du bien (une requête, en parallèle des autres), bloc `accueil`
   refusé à un membre.
-- **Le writer des faits** : un seul, celui de la base aujourd'hui (POST de
-  `api/ecran/connaissance.js`, par clé), sorti dans `lib/` pour que la fiche et
-  « Le remplir » l'appellent sans recopie.
-- `shared/logement-fiche.js` : le bloc « Accueil du voyageur ».
+- **Le writer des faits** : un seul, le POST de `api/ecran/connaissance.js`
+  (titulaire seul). Il accepte désormais le bien par son **UUID** (`bienId`) :
+  la fiche ne reçoit jamais la référence du partenaire (un test l'interdit). Il
+  refuse la clé `adresse`.
+- `shared/accueil-voyageur.js` (nouveau) : la ligne d'une info, son éditeur et
+  son écriture — le module commun de la fiche et de « Le remplir ».
+- `shared/logement-fiche.js` : le bloc « Accueil du voyageur » ;
+  `pages/logement.html` : l'écriture sur place, qui ne repeint que ce bloc.
+- `lib/balises.js` : `replisDuBien` (un seul objet de replis pour l'envoi,
+  l'aperçu, la fiche et l'IA) et `valeurEffective` (la règle du remplaceur,
+  pour l'IA) ; l'adresse ne lit plus la base (`fiche: true`).
 - `shared/connaissance-vue.js` : le bloc « Infos du logement » retiré, le champ
   « Le remplir » sur place.
 - `lib/cron-classify.js` (`buildKnowledgeText`) et ses quatre appelants : la
@@ -150,9 +161,15 @@ l'adresse, le champ écrit l'adresse de la fiche (la seule).
 6. **Lecture tronquée** : la lecture est bornée à un bien (quelques lignes).
 7. **Budget** : le test qui compte les requêtes de la fiche passe de N à N+1 ;
    la base de connaissance garde ses trois requêtes.
-8. **Mesure AVANT / APRÈS** : appels, requêtes Supabase (Server-Timing) et
-   octets de la fiche et de la base, mesurés sur staging **avant le premier
-   commit de code**, puis à la recette.
+8. **Mesure AVANT / APRÈS** (staging, 8 novembre 2026, compte de recette,
+   « Recette — Maison Jardin », cache du navigateur chaud) :
+
+   | écran | appels API | requêtes Supabase | octets API | octets page |
+   |---|---|---|---|---|
+   | fiche, AVANT | 1 (`/api/logement`) | non exposé (pas de Server-Timing) | 1 056 | 57 815 |
+   | base, AVANT | 1 (`/api/ecran/connaissance`) | 3 | 1 156 | 11 047 |
+   | fiche, APRÈS | 1 | +1 (`knowledge`, en parallèle) | à mesurer en recette | à mesurer |
+   | base, APRÈS | 1 | 3 | à mesurer en recette | à mesurer |
 
 ## 7. Tests (chacun rougit contre `dde1004f`)
 

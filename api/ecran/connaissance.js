@@ -37,7 +37,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { contexteDEcran } = require('../../lib/require-permission')
 const { estTitulaireDuCompte } = require('../../lib/permissions')
 const { colonneAbsente } = require('../../lib/colonne-absente')
-const { carte, faits } = require('../../lib/connaissance')
+const { carte, faits, HORS_DES_FAITS } = require('../../lib/connaissance')
 const { BALISES, etiquetteDe, remplacerBalises } = require('../../lib/balises')
 const { isActiveStatus } = require('../../lib/bookings-snapshot-status')
 
@@ -137,9 +137,9 @@ async function voyageurDuBien (compte, ref, resa, compteur) {
 // horaires) quand la base se tait. Sans eux, l'aperçu disait « 18:00 » là où le
 // voyageur reçoit l'horaire de la fiche, et « [ADRESSE] » là où l'adresse part.
 // Le téléphone n'a pas de colonne (il vit dans la base) : pas de repli ici.
-const replisDuBien = (bien) => ({
-  adresse: bien.address, checkin: bien.checkin_time, checkout: bien.checkout_time
-})
+// Les replis du bien viennent du module commun (spec Accueil du voyageur,
+// S1) : la fiche du logement, l'aperçu et l'envoi lisent la même chose.
+const { replisDuBien } = require('../../lib/balises')
 
 // Les infos de la RÉSERVATION que le remplaceur rend vides sans le signaler
 // (constat 3 de la review du lot « Utiliser ») : un nom ou une date absents
@@ -205,14 +205,21 @@ module.exports = async (req, res) => {
 
     const corps = req.body || {}
     const demande = String((req.method === 'POST' ? corps.bien : req.query && req.query.bien) || '').trim()
+    // ⚠ LA FICHE DU LOGEMENT DÉSIGNE LE BIEN PAR SON UUID (`bienId`) : elle ne
+    // reçoit jamais la référence du partenaire — un test de `api/logement.js`
+    // l'interdit. Le bien est résolu ICI, dans les biens DU COMPTE, comme la
+    // référence : un UUID d'un autre compte rend 404, pas une écriture.
+    const bienId = req.method === 'POST' ? String(corps.bienId || '').trim() : ''
 
     // ─── POST : enregistrer, supprimer, ou prévisualiser UNE entrée ─────
     if (req.method === 'POST') {
       // ⚠ LE BIEN EST OBLIGATOIRE EN ÉCRITURE. Retomber sur le premier bien du
       // compte, comme le fait la lecture, écrirait la réponse d'un logement
       // dans un AUTRE, sans un mot.
-      if (!demande) return res.status(400).json({ error: 'Logement non désigné' })
-      const choisi = biens.find(p => String(p.provider_property_id) === demande)
+      if (!demande && !bienId) return res.status(400).json({ error: 'Logement non désigné' })
+      const choisi = bienId
+        ? biens.find(p => String(p.id) === bienId)
+        : biens.find(p => String(p.provider_property_id) === demande)
       if (!choisi) return res.status(403).json({ error: 'Logement hors de votre compte' })
       const ref = String(choisi.provider_property_id)
       const { action } = corps
@@ -274,6 +281,13 @@ module.exports = async (req, res) => {
       if (corps.type === 'fixed') {
         const cle = String(corps.key || '').trim()
         if (!cle || cle.length > MAX_CLE) return res.status(400).json({ error: 'Information non désignée' })
+        // ⚠ UNE SEULE ADRESSE, CELLE DE LA FICHE (décision de Thierry du
+        // 8 novembre 2026) : une ligne `adresse` écrite ici ne serait plus lue
+        // par personne — ni l'envoi, ni l'IA, ni l'écran. On refuse plutôt que
+        // d'enregistrer une valeur morte.
+        if (HORS_DES_FAITS.has(cle)) {
+          return res.status(400).json({ error: 'adresse_dans_la_fiche', message: 'L’adresse se règle dans la fiche du logement.' })
+        }
         const valeur = String(corps.value == null ? '' : corps.value).trim()
         if (valeur.length > MAX_FAIT) return res.status(400).json({ error: 'trop_long', message: 'Valeur trop longue' })
         if (!valeur) {
@@ -363,7 +377,13 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       migration,
       biens: biens.map(p => ({ ref: String(p.provider_property_id), nom: p.name, photo: p.photo_url || null })),
-      bien: { ref, nom: choisi.name, photo: choisi.photo_url || null },
+      // `id` : la base renvoie vers la FICHE du logement, où vivent désormais les
+      // infos d'accueil (lot du 8 novembre 2026). `adresse` : un booléen, pas
+      // l'adresse — la base dit seulement si l'étiquette doit être rouge.
+      bien: {
+        ref, id: choisi.id, nom: choisi.name, photo: choisi.photo_url || null,
+        adresse: !!String(choisi.address || '').trim()
+      },
       faits: faits(lignes, { maintenant, replis }),
       reponses,
       // ⚠ LES BALISES INSÉRABLES VIENNENT DU MODULE, JAMAIS RECOPIÉES DANS LA

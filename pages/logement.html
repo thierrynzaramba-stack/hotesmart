@@ -271,7 +271,8 @@ import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCou
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
 import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie, canauxDeVente,
-  listeDeSuppression, noteDeSuppression, listeDArchivage } from '/shared/logement-fiche.js'
+  listeDeSuppression, noteDeSuppression, listeDArchivage, accueilHtml } from '/shared/logement-fiche.js'
+import { enregistrerInfo } from '/shared/accueil-voyageur.js'
 // ⚠ LA PRÉPARATION DE LA PHOTO EST PARTAGÉE avec l'écran d'aujourd'hui : elle
 // porte deux leçons de revue (une image sans dimensions, l'échelle de qualité
 // qui décide « trop lourde ») et une seconde copie les perdrait.
@@ -559,7 +560,79 @@ $('[data-bind="fiche"]').addEventListener('change', (ev) => {
   if (mode) changerMode(mode)
 })
 
+// ─── Accueil du voyageur : une info à la fois, écrite sur place ────────────
+//
+// ⚠ LE BLOC SE REPEINT SEUL, JAMAIS LA FICHE ENTIÈRE : le bloc « Le logement »
+// porte des cases en cours de saisie, et repeindre la fiche les effacerait.
+// ⚠ ET L'ÉCRITURE PASSE PAR LE WRITER DE LA BASE (titulaire seul, garde
+// serveur), par l'UUID du bien : la fiche ne connaît pas la référence du
+// partenaire.
+let accueilEnEdition = null
+let accueilEnVol = false
+function peindreAccueil () {
+  const section = $('[data-bloc="accueil"]')
+  if (!section || !ficheCourante) return
+  const titre = section.querySelector('.fic-bloc__titre')
+  const corps = accueilHtml(ficheCourante, OUTILS, { enEdition: accueilEnEdition })
+  section.innerHTML = (titre ? titre.outerHTML : '') + (corps || '')
+  I18n.apply(section)
+}
+function erreurAccueil (texte) {
+  const e = $('[data-bind="accueil-erreur"]')
+  if (!e) return
+  e.hidden = !texte
+  e.textContent = texte || ''
+}
+async function enregistrerAccueil (cle) {
+  if (accueilEnVol || !ficheCourante || !bienCourant) return
+  const champ = $('[data-bloc="accueil"] [data-acc-saisie]')
+  if (!champ) return
+  const valeur = champ.value
+  accueilEnVol = true
+  for (const b of document.querySelectorAll('[data-bloc="accueil"] button')) b.disabled = true
+  try {
+    await enregistrerInfo((chemin, corps) => api.connaissance.ecrire(corps), { bienId: bienCourant.id, cle, valeur })
+    // Relu au serveur : l'état (« À remplir », « synchronisée », « par défaut »)
+    // vient de la même règle que l'envoi, il ne se devine pas ici.
+    const f = await api.logement.fiche(idDuBien)
+    ficheCourante = { ...ficheCourante, accueil: f.accueil }
+    accueilEnEdition = null
+    peindreAccueil()
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    peindreAccueil()
+    const neuf = $('[data-bloc="accueil"] [data-acc-saisie]')
+    if (neuf) neuf.value = valeur
+    erreurAccueil(t(e.status === 403 ? 'fiche.accueil_refus' : 'fiche.accueil_echec'))
+  } finally {
+    accueilEnVol = false
+    for (const b of document.querySelectorAll('[data-bloc="accueil"] button')) b.disabled = false
+  }
+}
+$('[data-bind="fiche"]').addEventListener('keydown', (ev) => {
+  if (!ev.target.matches || !ev.target.matches('[data-bloc="accueil"] [data-acc-saisie]')) return
+  if (ev.key === 'Enter') { ev.preventDefault(); enregistrerAccueil(accueilEnEdition) }
+  if (ev.key === 'Escape') { ev.preventDefault(); accueilEnEdition = null; peindreAccueil() }
+})
+
 $('[data-bind="fiche"]').addEventListener('click', (ev) => {
+  const accModifier = ev.target.closest('[data-acc-modifier]')
+  if (accModifier) {
+    if (accueilEnVol) return
+    accueilEnEdition = accModifier.dataset.accModifier
+    peindreAccueil()
+    const champ = $('[data-bloc="accueil"] [data-acc-saisie]')
+    if (champ) champ.focus()
+    return
+  }
+  if (ev.target.closest('[data-bloc="accueil"] [data-acc-annuler]')) {
+    if (accueilEnVol) return
+    accueilEnEdition = null
+    peindreAccueil()
+    return
+  }
+  const accEnregistrer = ev.target.closest('[data-acc-enregistrer]')
+  if (accEnregistrer) { enregistrerAccueil(accEnregistrer.dataset.accEnregistrer); return }
   const bouton = ev.target.closest('[data-bind="enregistrer"]')
   if (bouton) { envoyerBloc(bouton); return }
   const bascule = ev.target.closest('[data-bind="assistant"]')
@@ -993,6 +1066,7 @@ async function charger () {
     // gardé par `reglages: write` ; ici on ne fait que ne pas le proposer.
     bienCourant = f.bien
     ficheCourante = f
+    accueilEnEdition = null
     // ⚠ LE REFUS DU SERVEUR EST SOUVERAIN, `peutEcrire` est la SECONDE garde
     // (constat de sécurité de la revue de l'étape 3, même famille que celui du
     // 21 octobre sur Supprimer). `peutEcrire` répond pour le COMPTE COURANT du

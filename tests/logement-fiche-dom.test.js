@@ -1974,3 +1974,53 @@ test('et le rendu de la fiche ne montre pas les deux phrases ensemble', () => {
   assert.equal(d.querySelector('.fic-fraicheur'), null,
     'aucune ligne de fraîcheur sous un logement qui n a aucun canal')
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Accueil du voyageur (lot du 8 novembre 2026) : les infos venues de la base
+// ═══════════════════════════════════════════════════════════════════════════
+
+const FAITS_ACCUEIL = [
+  { cle: 'telephone_hote', libelle: 'Téléphone', balise: '{telephone_hote}', valeur: '0600000000', aRemplir: false, horsIa: false, sansBalise: false },
+  { cle: 'checkin', libelle: "Heure d'arrivée", balise: '{checkin}', valeur: '', repli: '16:00', defaut: '18:00', aRemplir: false, horsIa: false, sansBalise: false },
+  { cle: 'checkout', libelle: 'Heure de départ', balise: '{checkout}', valeur: '', repli: null, defaut: '10:00', aRemplir: false, horsIa: false, sansBalise: false },
+  { cle: 'wifi_nom', libelle: 'Nom wifi', balise: '{wifi_nom}', valeur: 'RESEAU<b>', aRemplir: false, horsIa: true, sansBalise: false },
+  { cle: 'wifi_mdp', libelle: 'Mot de passe wifi', balise: '{wifi_mdp}', valeur: '', aRemplir: true, horsIa: false, sansBalise: false },
+  { cle: 'equip_lits', libelle: 'equip_lits', balise: null, valeur: 'deux lits', aRemplir: false, horsIa: false, sansBalise: true }
+]
+
+test('LE TEST QUI COMPTE : le bloc « Accueil du voyageur » suit « Le logement », et dit ce que le voyageur recevra', () => {
+  const d = doc(M.ficheHtml(fiche({ accueil: { faits: FAITS_ACCUEIL } }), OUTILS(), { peutSupprimer: true }))
+  const titres = [...d.querySelectorAll('.fic-col--gauche .fic-bloc__titre')].map(x => x.textContent)
+  assert.deepEqual(titres, ['Où il est en vente', 'Prix', 'Le logement', 'Accueil du voyageur'])
+  const ligne = (cle) => d.querySelector(`[data-acc-ligne="${cle}"]`)
+  assert.equal(ligne('telephone_hote').querySelector('.kb-fait__valeur').textContent, '0600000000')
+  assert.equal(ligne('checkin').querySelector('.kb-fait__valeur').textContent, `16:00 ${FR['acc.synced']}`,
+    'l heure synchronisée passe avant le défaut, comme dans l envoi')
+  assert.equal(ligne('checkout').querySelector('.kb-fait__valeur').textContent, `10:00 ${FR['kb.by_default']}`)
+  assert.equal(ligne('wifi_mdp').querySelector('.kb-a-remplir').textContent, FR['kb.to_fill'])
+  assert.equal(ligne('checkin').querySelector('.kb-a-remplir'), null, 'un horaire vide n est jamais « À remplir »')
+  assert.match(ligne('equip_lits').textContent, new RegExp(FR['kb.ai_only']))
+  assert.ok(ligne('wifi_nom').querySelector('.kb-badge--horsia'), 'le cadenas Hors IA suit la ligne')
+  assert.equal(ligne('wifi_nom').querySelector('b'), null, 'une valeur de l hôte n entre jamais en HTML')
+  assert.equal(d.querySelectorAll('[data-acc-modifier]').length, 6, 'chaque info se corrige')
+  // L'adresse n'y est pas : elle reste dans « Le logement », et c'est la seule.
+  assert.equal(ligne('adresse'), null)
+})
+
+test('l info en cours d écriture devient un champ, au même endroit — valeur échappée', () => {
+  const d = doc(M.ficheHtml(fiche({ accueil: { faits: FAITS_ACCUEIL } }), OUTILS(),
+    { peutSupprimer: true, accueilEnEdition: 'wifi_nom' }))
+  const champ = d.querySelector('[data-bloc="accueil"] [data-acc-saisie]')
+  assert.equal(champ.value, 'RESEAU<b>')
+  assert.equal(d.querySelector('[data-acc-edition="wifi_nom"] label').textContent, 'Nom wifi')
+  assert.equal(d.querySelector('[data-acc-ligne="wifi_nom"]'), null)
+  assert.ok(d.querySelector('[data-acc-enregistrer="wifi_nom"]'))
+})
+
+test('LE TEST QUI COMPTE : refusé par le serveur (membre), le bloc n existe PAS ; illisible, il le DIT', () => {
+  const refuse = doc(M.ficheHtml(fiche({ accueil: null, refuses: ['accueil'] }), OUTILS(), { peutSupprimer: true }))
+  assert.equal(refuse.querySelector('[data-bloc="accueil"]'), null)
+  assert.ok(![...refuse.querySelectorAll('.fic-bloc__titre')].some(x => x.textContent === 'Accueil du voyageur'))
+  const panne = doc(M.ficheHtml(fiche({ accueil: null, indisponibles: ['accueil'] }), OUTILS(), { peutSupprimer: true }))
+  assert.equal(panne.querySelector('[data-bloc="accueil"] [data-non-lu]').textContent, FR['fiche.accueil_non_lu'])
+})
