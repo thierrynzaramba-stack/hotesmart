@@ -1,6 +1,7 @@
 # Spec — Refonte UI V5, lot « Avis »
 
-**Statut : proposition, à valider par Thierry (étape 0, aucun code).**
+**Statut : questions Q1 et Q2 tranchées par Thierry le 8 novembre 2026 (§7) ;
+étape 1 à lancer sur son go.**
 Branche `refonte-avis-v5`, partie de `main` à `dde1004ff1211a4a813a3ed1b471d36d92018fcf`.
 
 Maquette : `maquette/avis-desktop.html` (ordinateur) et `maquette/avis-mobile.html`
@@ -209,7 +210,11 @@ table `api_keys` depuis le navigateur, y compris des colonnes de clés. La page 
 la lit plus. Les autres pages à l'ancien style continuent ; c'est à signaler, pas à
 corriger ici.
 
-## 7. Questions à Thierry
+## 7. Questions à Thierry — TRANCHÉES le 8 novembre 2026
+
+**Décision de Thierry : Q1 = A, Q2 = A.** Les trois chiffres passent en résumé dans
+ce lot, en étape 2, avec l'heure du calcul affichée ; la fenêtre d'évaluation est
+restylée dans un petit lot à part, après celui-ci.
 
 **Q1 — Les trois chiffres passent-ils en résumé dans ce lot ?**
 La règle du dépôt classe la note moyenne et les compteurs de propreté en « non
@@ -234,7 +239,9 @@ l'app de la prestataire, et c'est elle qui publie chez Airbnb.
 1. **Page V5 + endpoint d'écran** : socle V5, en-tête, filtres, chiffres,
    « À traiter », cartes, téléphone ; `/api/ecran/avis` ; cache ; tests (appels,
    `no-store`, inventaire ci-dessus, droits). Mesure après.
-2. **Selon Q1** : `resume_bien_avis`, son calcul par le cron, « Calculé à ».
+2. **Résumé des chiffres (Q1 = A)** : `resume_bien_avis`, son calcul par le cron
+   une à deux fois par jour, premier calcul immédiat pour un logement neuf,
+   « Calculé à HH:MM » à l'écran, `null` avec son motif jamais 0.
 3. **Réglages en volet et saisie restylée.**
 
 Chaque étape : une review, zéro rouge, remise au chef de file avec les cinq éléments.
