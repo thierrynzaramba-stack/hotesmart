@@ -513,3 +513,53 @@ Devenus des questions à Thierry (§4 bis) : 5 → P1, 11 → P2, 15 → P3, 13 
 nouvelle relecture — la règle de stockage privé du PDF avait disparu (1) ;
 la confirmation fait aussi partir un message, P1 la couvre désormais (2) ;
 `biens_entites` suit la règle d'accès de l'entité quel que soit l'endpoint (3).
+
+## 11. Les textes (proposition du 8 novembre 2026, à valider par Thierry)
+
+Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.
+`{prenom}` suit la règle de `lib/balises.js` (sans prénom : « Bonjour, »).
+
+### 11.1 Le message qui porte le lien (porte 1, au voyageur, dans sa langue)
+
+- **fr** — Bonjour {prenom}, pour recevoir votre facture, merci de renseigner
+  vos coordonnées de facturation ici : {lien}. Votre facture sera disponible
+  sur ce même lien après votre séjour.
+- **en** — Hello {prenom}, to receive your invoice, please enter your billing
+  details here: {lien}. Your invoice will be available at the same link after
+  your stay.
+- **es** — Hola {prenom}, para recibir su factura, introduzca sus datos de
+  facturación aquí: {lien}. Su factura estará disponible en este mismo enlace
+  después de su estancia.
+
+Porte 2 : c'est le texte du message programmé de l'hôte. Porte 3 : GuestFlow
+rédige sa réponse et y insère le lien.
+
+### 11.2 « Votre facture est presque prête » (à l'hôte, dans la langue de son interface)
+
+- **fr** — **Votre facture est presque prête.** La facture de {voyageur}
+  ({bien}, séjour du {arrivee} au {depart}) attend votre vérification.
+  Séjour : {sejour} · Taxe de séjour : {taxe} · Total : {total}.
+  **Le total payé peut comporter une erreur à cause de la taxe de séjour :
+  vérifiez-le avant l'envoi.** [Vérifier et envoyer]
+  - Taxe absente de l'import : « Taxe de séjour : non transmise — à saisir
+    avant l'envoi. »
+  - Rappel : « Rappel : la facture de {voyageur} attend votre vérification. »
+- **en** — **Your invoice is almost ready.** The invoice for {voyageur}
+  ({bien}, stay from {arrivee} to {depart}) is waiting for your review.
+  Stay: {sejour} · Tourist tax: {taxe} · Total: {total}.
+  **The total paid may be wrong because of the tourist tax: please check it
+  before sending.** [Review and send]
+- **es** — **Su factura está casi lista.** La factura de {voyageur} ({bien},
+  estancia del {arrivee} al {depart}) espera su revisión.
+  Estancia: {sejour} · Tasa turística: {taxe} · Total: {total}.
+  **El total pagado puede contener un error debido a la tasa turística:
+  verifíquelo antes del envío.** [Verificar y enviar]
+
+### 11.3 « Votre facture est disponible » (au voyageur, dans sa langue)
+
+- **fr** — Bonjour {prenom}, votre facture est disponible ici : {lien}. Merci
+  pour votre séjour !
+- **en** — Hello {prenom}, your invoice is available here: {lien}. Thank you
+  for your stay!
+- **es** — Hola {prenom}, su factura está disponible aquí: {lien}. ¡Gracias
+  por su estancia!
