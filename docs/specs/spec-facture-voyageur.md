@@ -29,11 +29,16 @@ HôteSmart doit permettre à l'hôte de la générer et de l'envoyer.
 4. Le voyageur ouvre le lien. Il choisit « particulier » ou « société » et
    remplit le formulaire : nom ou raison sociale, adresse, et pour une société
    son n° de TVA intracommunautaire et son SIREN s'il en a.
-5. La facture est **émise** — numéro, contenu figé, PDF — **jamais avant la
-   fin du séjour** (règle de Thierry, Q7) : automatiquement 24 h après l'heure
-   de départ si le formulaire est rempli (Q7 bis), ou à la validation s'il est
-   rempli après. Le voyageur la télécharge depuis le même lien.
-6. L'hôte voit l'état sur la fiche (demandée, émise) et télécharge le PDF.
+5. **24 h après l'heure de départ** (Q7 bis), si le formulaire est rempli,
+   HôteSmart notifie l'hôte « Votre facture est presque prête » : il vérifie
+   le total payé — la taxe de séjour peut le fausser — et le confirme ou le
+   corrige (Q8 bis). Un rappel par jour tant qu'il n'a pas confirmé.
+6. **Au geste de l'hôte**, la facture est **émise** — numéro, contenu figé,
+   PDF — et HôteSmart poste « Votre facture est disponible » avec le lien dans
+   la conversation (Q7 ter). Jamais avant la fin du séjour (Q7). Formulaire
+   rempli après ce délai : la notification part à la validation du voyageur.
+7. L'hôte voit l'état sur la fiche (demandée, à confirmer, émise) et
+   télécharge le PDF.
 
 ## 3. Ce qui existe déjà (lecture du dépôt, `main` = dde1004ff1211a4a813a3ed1b471d36d92018fcf)
 
@@ -182,8 +187,14 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q8 (8 nov. 2026) : réponse B — une ligne « Séjour », ménage compris**,
   puis la taxe de séjour, puis le total. (Le ménage est bien transmis à part
   par Channex pour Airbnb, 43/43 ; Thierry préfère la ligne unique.)
-  **Et avant l'envoi, l'hôte confirme que le total payé est juste** — le
-  moment exact de cette confirmation est posé en Q8 bis.
+  **Et avant l'envoi, l'hôte confirme que le total payé est juste.**
+- **Q8 bis (8 nov. 2026) : réponse B — la confirmation se fait juste avant
+  l'émission.** 24 h après l'heure de départ, HôteSmart notifie l'hôte :
+  **« Votre facture est presque prête »**, en précisant que **le total payé
+  peut comporter une erreur à cause de la taxe de séjour, et que l'information
+  doit être vérifiée**. L'hôte confirme ou corrige le total ; **la facture
+  n'est émise et le voyageur ne la reçoit qu'après ce geste.** Tant qu'il n'a
+  pas confirmé : un rappel par jour.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
