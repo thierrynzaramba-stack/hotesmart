@@ -1,8 +1,9 @@
 # Spec de chantier — Le compte de charges : les factures reçues par l'hôte
 
 Demande de Thierry du 8 novembre 2026 (fil « compte de charges » du Projet).
-**Statut : étape 0 close le 8 novembre 2026 — les 22 questions du §4 sont
-tranchées par Thierry, chaque réponse inscrite et datée. Aucun code.** Ce qui
+**Statut : étape 0 — Q1 à Q22 tranchées par Thierry le 8 novembre 2026,
+chaque réponse inscrite et datée ; Q23 (née de la relecture de cohérence)
+en attente. Aucun code.** Ce qui
 reste « *proposition* » dans le texte est un choix technique non contredit,
 ou une précision soumise à Thierry avec la décision qu'elle accompagne.
 
@@ -25,8 +26,8 @@ créer ? »
 | D4 | **Une seule table d'entités juridiques**, partagée avec la facture voyageur ; c'est le **fil facturation** qui la construit (`spec-facture-voyageur.md` §5 ter). | 8 nov. 2026 |
 | D5 | **La spec d'abord** ; la question des tables en double se règle au moment de la mise en production. | 8 nov. 2026 |
 
-Sans préférence de Thierry le 8 novembre (propositions par défaut, §4) : la
-profondeur du suivi (Q2) et les charges déjà connues d'HôteSmart (Q3).
+Les 22 questions du §4 ont ensuite été tranchées le même soir ; leurs
+réponses, datées, sont sous « Réponses de Thierry ».
 
 ## 2. Construire plutôt que brancher un outil (étude du 8 novembre 2026)
 
@@ -57,11 +58,11 @@ précision **mesurée** à l'étape 5 ne suffit pas.
   Pas de ligne = l'entité par défaut du compte. « Même compte » garanti en
   base (clé composite + trigger). RLS sans politique, `revoke` ; writer unique
   `lib/entites-juridiques.js`, écriture derrière `facturation` (titulaire
-  seul). **Ce chantier n'y ajoute aucune colonne** (accord du 8 novembre). Il demande une **lecture côté serveur** réutilisable par son
-  propre endpoint : les entités d'un compte, archivées comprises (au moins `id`,
-  `nom`, `siret`, `regime_tva`, `par_defaut`, `archivee_le`). Question encore
-  ouverte chez le fil facturation : un compte peut-il n'avoir **aucune**
-  entité ?
+  seul). Ce chantier y a demandé **une seule colonne**, `debut_exercice`
+  (Q22, livrée par le fil facturation). Il lit par deux fonctions serveur
+  (§6) : les entités d'un compte, archivées comprises (`id`, `nom`, `siret`,
+  `regime_tva`, `par_defaut`, `archivee_le`, `debut_exercice`), et l'entité
+  d'un bien. Un compte peut n'avoir aucune entité (Q20, réponse A).
 - **L'e-mail entrant** : `api/inbound-email.js` reçoit tout `*@reply.hotesmart.fr`
   (Brevo). Le webhook n'est pas authentifiable : le contenu vient du POST, la
   relecture `GET /inbound/events/<uuid>` authentifie le destinataire, et **le
@@ -98,9 +99,10 @@ précision **mesurée** à l'étape 5 ne suffit pas.
   Messages, Ménages, Logements) et le menu ≡ (Réglages, Avis, Aide).
 - **Fonctions Vercel** : 67 fichiers sous `api/`, pour une limite de 100.
 
-## 4. Questions à trancher (une par une)
+## 4. Questions
 
-Chaque question attend la réponse de Thierry. Rien n'est codé avant.
+Q1 à Q22 tranchées le 8 novembre 2026. **Q23**, née de la relecture de
+cohérence, attend Thierry.
 
 - **Q1 — Un bien précis.** Tranchée, voir ci-dessous.
 - **Q2 — Le suivi du paiement.** Tranchée, voir ci-dessous.
@@ -117,6 +119,13 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q11 — Supprimer.** Tranchée, voir ci-dessous.
 - **Q12 — La conservation.** Tranchée, voir ci-dessous.
 - **Q22 — La période comptable.** Tranchée, voir ci-dessous.
+- **Q23 — Le statut d'une commission de plateforme à sa naissance.** Elle
+  vient du cœur, pas d'une lecture IA. *Proposition* : elle naît
+  **validée**, avec la mention **« depuis la réservation »** (et non
+  « vérifiée », qui dit que l'hôte l'a vérifiée), et ne rend pas le total
+  « estimation ». Sans entité (Q20), elle reste « à vérifier » et passe
+  validée dès que l'entité existe. Sinon, chaque séjour Airbnb ajouterait une
+  ligne à vérifier, et le total resterait « estimation » en permanence.
 - **Q13 — L'export pour le comptable.** Tranchée, voir ci-dessous.
 - **Q14 — Les doublons.** Tranchée, voir ci-dessous.
 - **Q15 — Le risque résiduel des pièces jointes.** Tranchée, voir ci-dessous.
@@ -197,7 +206,9 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   moment.** À 22 h 43, Thierry avait d'abord décidé « HôteSmart conserve
   seulement N et N-1 ; l'hôte choisit sa période comptable » ; **à 22 h 53, il
   revient dessus : « on n'efface pas pour le moment, finalement on garde
-  tout »**. Donc : aucune purge, aucune tâche d'effacement, les charges et
+  tout »**. Donc : aucune purge, aucune tâche d'effacement (une seule
+  exception soumise à Thierry, §6 : un envoi de fichier jamais confirmé, qui
+  n'est pas une charge), les charges et
   leurs justificatifs restent tant que l'hôte ne les supprime pas (Q11). La
   conservation légale (plusieurs années, à confirmer avec un comptable) reste
   celle de l'hôte : HôteSmart n'est pas son archive légale. À la suppression
@@ -232,7 +243,8 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   un **numéro de version par compte**, stocké dans une petite table de ce
   chantier (RLS sans politique, writer unique). Le bouton incrémente la
   version : l'ancienne adresse est refusée aussitôt. Un e-mail reçu sur une
-  adresse périmée est refusé (200 + trace, pas de 503 : c'est définitif).
+  adresse périmée est refusé (200, pas de 503 : c'est définitif), avec une
+  trace dans le journal serveur seulement (§7).
 - **Q17 (8 nov. 2026, 23 h 02) : d'accord.** La V1 enregistre HT, TVA et
   TTC tels que lus et validés, et **n'affiche aucune « charge réelle »**
   avant l'avis d'un comptable. Les totaux (Q4) donnent les trois sommes. Une
@@ -285,11 +297,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
    son sujet et son texte, effaçable, Q19) — jamais de réponse automatique à
    l'expéditeur.
 
-**C. Le suivi.** Une liste filtrable par entité, bien, statut (à vérifier,
-validée, annulée) et mois ; consultation et suppression (Q11). Toute facture
-validée est considérée payée (Q2).
+**C. Le suivi.** Une liste filtrable par entité, bien, statut (à lire, à
+vérifier, vérifiée, illisible, sans facture lisible, annulée) et mois ;
+consultation et suppression (Q11). Toute facture est considérée payée (Q2).
 
-## 6. Données (proposition, à revoir après les réponses)
+## 6. Données
 
 **Table `charges`** (nom provisoire) — une ligne = une facture reçue.
 
@@ -299,24 +311,49 @@ validée est considérée payée (Q2).
 | `entite_juridique_id` | **non nul à la validation** (D3) ; proposée par la lecture. Clé étrangère **composite** (`entite_juridique_id`, `user_id`) → `entites_juridiques (id, user_id)` : une charge ne peut pas pointer l'entité d'un autre compte, garanti en base (même modèle que `biens_entites`). |
 | `bien_id` | uuid → `properties.id`, vide possible (Q1). ⚠ Nommé `bien_id` et non `property_id` : dans le dépôt, `property_id` d'une table enfant est la référence TEXTE du fournisseur (REVIEW.md règle 10). Exception raisonnée, déclarée comme celle de `docs/kb/price-log.md` : la clé UUID survit à un changement de fournisseur (décision E6). |
 | `statut` | `envoi`, `a_lire`, `a_verifier`, `validee`, `annulee` (charge de plateforme dont la réservation est annulée), `illisible`, `sans_facture`. Une suppression (Q11) efface la ligne. |
+| `motif` | texte court, vide possible : pourquoi une charge est `annulee`, `illisible` ou `sans_facture` (« réservation annulée », « jeton refusé par Brevo », « e-mail sans pièce jointe lisible »…) |
 | `tentatives_lecture` | compteur des lectures **qui ont eu lieu et ont échoué** ; au troisième échec, `illisible` (l'hôte saisit à la main). Une panne du fournisseur d'IA ne compte pas. |
 | `fournisseur_nom`, `fournisseur_siret`, `numero_facture`, `date_facture` | lus puis validés |
+| `date_repli` | booléen : le jour retenu n'est pas `date_facture` mais le jour de réception (date non lue) |
 | `montant_ht_cents`, `montant_tva_cents`, `montant_ttc_cents` | centimes, euros seulement en V1 ; une TVA à 0 lue n'est pas une TVA vide (Q17) |
 | `categorie` | liste fermée (Q5) |
 | `origine` | `photo`, `fichier`, `email`, `ota` (§7 bis) |
-| `booking_id` | référence de la réservation, pour `origine = ota` seulement ; **unique (`user_id`, `booking_id`)** sur ce statut d'origine |
+| `booking_id` | référence de la réservation, pour `origine = ota` seulement ; **index unique partiel (`user_id`, `booking_id`) `where origine = 'ota'`** |
 | `email_uuid`, `email_expediteur`, `email_recu_le` | origine e-mail ; **unique (`user_id`, `email_uuid`, empreinte)** : Brevo peut rejouer un webhook. Une ligne `sans_facture` n'a pas d'empreinte (et Postgres tient deux vides pour différents) : **unique partiel (`user_id`, `email_uuid`)** sur ce statut. |
 | `justificatif_chemin`, `justificatif_type`, `justificatif_octets`, `justificatif_empreinte` | fichier au nom **aléatoire** dans le bucket privé ; empreinte SHA-256, **indexée mais pas unique** : un doublon est regroupé, pas refusé (Q14) |
-| `groupe_doublon` | vide, ou l'`id` de la première charge du groupe de doublons possibles (Q14) |
+| `groupe_doublon` | vide, ou l'`id` de la première charge du groupe de doublons possibles (Q14) ; clé `on delete set null` |
+| `signal` | vide, `doublon` (Q14) ou `commission_deja_comptee` (§7 bis) : la charge porte le signal « Vérifier » |
+| `signal_tranche` | booléen : l'hôte a tranché (garder). Tant qu'il ne l'a pas fait : un groupe de doublons compte **une fois**, une commission déjà comptée compte **zéro**, et le total est « estimation ». Quand la première charge d'un groupe est supprimée, les autres perdent leur `groupe_doublon` (`set null`), leur signal tombe s'il ne reste qu'elles, et le résumé de leurs cellules est recalculé. |
 | `lecture_ia` | jsonb : ce que l'IA a lu, champ par champ, avec sa confiance, le modèle et l'heure. **Jamais écrasé par la saisie** : l'écart lu / validé mesure la précision (étape 5). |
 | `cree_le`, `modifie_le`, `valide_le`, `valide_par` | |
 
-- **Table `charges_resume`** (nom provisoire) : une ligne par compte ×
-  entité × bien × mois, avec la somme HT, TVA et TTC, le nombre de factures,
-  de factures non vérifiées et de factures sans montant, et l'heure du
-  calcul. Écrite par le writer unique de `charges` et par le recalcul
-  quotidien, jamais par l'endpoint. Une entité ou un bien vide a sa propre
-  ligne (« sans entité », « sans bien »). Voir §11, point 2.
+- **Table `charges_resume`** (nom provisoire) : une ligne (une « cellule »)
+  par compte × entité × bien × **jour**, avec les sommes HT, TVA et TTC, le
+  nombre de factures, de factures non vérifiées, de signaux non tranchés, et
+  de factures sans montant **par colonne** (sans HT, sans TVA, sans TTC), et
+  l'heure du calcul. Le jour plutôt que le mois : un exercice peut commencer
+  en milieu de mois (`debut_exercice` « MM-JJ », Q22) ; le total d'un mois
+  ou d'un exercice est une somme en base sur ces cellules. Clé unique en
+  `NULLS NOT DISTINCT` (entité ou bien vide = cellule « sans entité »,
+  « sans bien » ; deux vides ne doivent pas faire deux cellules). Écrite par
+  le writer unique de `charges` et par le recalcul quotidien, jamais par
+  l'endpoint. Voir §11, point 2.
+- **Le jour d'une charge** : `date_facture` ; à défaut (pas encore lue, ou non
+  lue), le jour de réception, et la charge le porte (`date_repli`) ; pour une
+  charge de plateforme, la date du versement (§7 bis).
+- **Ce qui compte dans les totaux** (Q4) : s'additionnent les montants lus
+  des charges `a_verifier` et `validee` (une charge `a_lire` n'a encore aucun
+  montant). Une charge `illisible` n'ajoute rien mais rend le total
+  « estimation ». Ne comptent pas : `envoi` (fichier pas confirmé),
+  `annulee`, `sans_facture`. Le total est « estimation » s'il reste dans le
+  périmètre une charge `a_lire`, `a_verifier` ou `illisible`, un signal non
+  tranché, ou une facture sans montant dans la colonne affichée.
+- **Table `charges_ota_supprimees`** (Q11) : `user_id`, `booking_id`,
+  `supprimee_le`, sans montant ; unique (`user_id`, `booking_id`). La
+  matérialisation des commissions (§7 bis) saute toute réservation qui y
+  figure. RLS sans politique, writer unique `lib/charges.js`.
+- **Table `charges_adresses`** (Q16) : `user_id` clé, `version` entière
+  (≥ 1), `modifiee_le`. RLS sans politique, writer unique `lib/charges.js`.
 - **L'historique vit dans la charge.** Elle porte sa propre entité et son
   propre bien : si un bien change d'entité, les charges passées ne bougent pas
   (accord avec le fil facturation, 8 novembre).
@@ -324,8 +361,9 @@ validée est considérée payée (Q2).
   consultation par URL signée de courte durée, délivrée au titulaire seul.
   Type vérifié sur le contenu relu (signature du fichier), pas sur le nom ;
   PDF 10 Mo au plus, image réduite sous la limite de l'API Claude
-  (propositions). Une ligne restée en `envoi` (fichier jamais confirmé) est
-  purgée avec son fichier après 24 h.
+  (propositions). ⚠ **Seule exception à « on garde tout » (Q12), soumise à
+  Thierry** : une ligne restée en `envoi` — un fichier jamais confirmé, donc
+  pas une charge — est effacée avec son fichier après 24 h, par le cron dédié.
 - **Accès** : RLS activée, aucune politique côté navigateur ; tout passe par
   les endpoints gardés (Q9). **Writer unique** : `lib/charges.js`.
 - **Isolation entre comptes** (REVIEW.md règle 11) : toute action qui désigne
@@ -364,7 +402,10 @@ validée est considérée payée (Q2).
   La signature HMAC utilise un **secret dédié** (Q16), distinct de celui des
   réservations : un jeton de réservation n'est jamais accepté comme adresse de
   factures, ni l'inverse. Le compte est **résolu en base** (compte supprimé =
-  refus), et la version comparée à celle du compte.
+  refus), et la version comparée à celle du compte. Un e-mail reçu sur une **adresse
+  périmée** (version ancienne) est refusé en 200 avec une trace dans le
+  **journal serveur seulement** : une adresse abandonnée ne doit pas continuer
+  de remplir la liste de l'hôte.
 - **Dans `api/inbound-email.js`** : l'aiguillage vers `lib/charges/email.js`
   se place **après** la relecture et le refus des divergences, mais **avant**
   le filtre anti-boucle et avant le refus d'un message sans texte (§3). Ces
@@ -389,7 +430,7 @@ validée est considérée payée (Q2).
   `vercel.json`. **Seule une panne passagère rend 503** (Brevo rejoue) :
   réseau, Brevo en 5xx, stockage indisponible. Un refus **définitif** — jeton
   refusé par Brevo, taille qui ne correspond pas — rend 200 **avec une trace**
-  (ligne `sans_facture` portant le motif), sinon Brevo rejouerait jusqu'à
+  (ligne `sans_facture` portant le `motif`, visible de l'hôte), sinon Brevo rejouerait jusqu'à
   épuisement et la facture disparaîtrait sans trace (même leçon que le
   webhook actuel, `api/inbound-email.js`). Un doublon d'empreinte (le
   fournisseur et l'hôte envoient le même PDF) **crée sa ligne, regroupée**
@@ -419,46 +460,64 @@ validée est considérée payée (Q2).
 | Beds24 | servie par Beds24 **quand elle existe** |
 | Direct (Offline, moteur) | aucune commission par construction |
 
-**Proposition de mécanisme** :
-- Une **charge automatique par réservation** dont la commission est connue :
-  `origine = ota`, catégorie « commissions des plateformes », montant = la
-  commission, bien = le bien de la réservation, entité = `entiteDuBien`,
-  référence de la réservation. Pas de justificatif, pas de lecture IA : le
-  montant vient du cœur. Sans entité (Q20), elle attend « à vérifier » comme
-  les autres.
-- **Une seule source de vérité** : le montant est celui que lit déjà
-  `lib/revenus/net-hote.js` — jamais une seconde lecture de la commission
-  (deux implémentations divergeraient, dette 17 du dépôt).
-- **Une réservation annulée** annule sa charge (motif « réservation
-  annulée »). Une retenue gardée par la plateforme sur une annulation est à
-  mesurer avant d'être traitée.
-- **Date de la charge** : la date du versement du canal (`delais_versement`,
-  `lib/revenus/versement.js`), comme le bloc Revenus.
-- **Doublon à fermer** : une facture de frais de la plateforme transférée à
-  la main pour un canal déjà compté automatiquement doublerait la charge.
-  Elle est traitée comme un doublon possible (Q14) : regroupée avec les
-  commissions de la période, signal « Vérifier » (« commissions Airbnb déjà
-  comptées depuis vos réservations »).
-- **Cadence** : donnée non urgente, matérialisée par une tâche du cron dédié
-  (`api/cron-charges.js`) une fois par jour, sur les réservations dont le
-  versement est passé ; écriture idempotente (unique par compte et
-  réservation). Aucune lecture du fournisseur : on lit le cœur.
+**Mécanisme** :
+- **La source est déjà dérivée dans le cœur** : `bookings_snapshot`
+  porte `commission_cents`, `date_versement`, `canal`, `statut_canonique`,
+  `est_blocage` et `property_uuid`, calculés une fois à l'écriture de la
+  réservation par `lib/revenus/derive.js` (qui compose `net-hote.js` et
+  `versement.js`). On lit **ces colonnes**, jamais `raw` (3,8 Mo pour le
+  bloc Revenus) ni une seconde implémentation de la commission.
+- **Une charge automatique par réservation** : `origine = ota`, catégorie
+  « commissions des plateformes », montant TTC = `commission_cents` (HT et
+  TVA vides : non transmis), bien = `property_uuid`, entité =
+  `entiteDuBien`, `booking_id`, jour = `date_versement`. Pas de
+  justificatif, pas de lecture IA. **Statut de naissance : Q23.**
+- **Filtre** : celui des agrégats Revenus — `statut_canonique = 'confirmed'`
+  et `est_blocage is not true` — et `commission_cents` non nul. **Le canal
+  Booking.com est exclu quel que soit le fournisseur** (Channex ou Beds24) :
+  sa commission entre par la facture mensuelle (Q21), sinon elle serait
+  comptée deux fois.
+- **Étendue** : tout l'historique présent dans le cœur (« on garde tout »,
+  Q12), matérialisé par lots bornés au premier passage.
+- **La charge suit le cœur** : si une nouvelle dérivation change
+  `commission_cents` ou `date_versement`, la charge est mise à jour ; une
+  réservation qui passe `cancelled` met sa charge `annulee` (motif
+  « réservation annulée »). Une charge automatique ne se modifie pas à la
+  main : elle se supprime (Q11), et la réservation part alors dans
+  `charges_ota_supprimees` — elle n'est plus jamais recréée.
+- **Commission déjà comptée** : une facture déposée ou transférée, de
+  catégorie « commissions des plateformes », dont le fournisseur est un canal
+  aux commissions automatiques (Airbnb), porte le signal
+  `commission_deja_comptee` (« commissions Airbnb déjà comptées depuis vos
+  réservations — Vérifier ») et **compte zéro** tant que l'hôte n'a pas
+  tranché. Ce n'est pas un groupe de doublons (Q14) : une facture face à
+  plusieurs réservations.
+- **Cadence** : donnée non urgente, matérialisée une fois par jour par le
+  cron dédié (`api/cron-charges.js`), idempotente (index unique partiel
+  `user_id`, `booking_id` `where origine = 'ota'`). Aucune lecture du
+  fournisseur : on lit le cœur.
 
 ## 8. Découpage proposé
 
 0. Cette spec, et les réponses aux questions du §4.
 1. **Prérequis** : la table des entités juridiques dans `main` (fil
-   facturation, étape 1 de sa spec), avec sa lecture côté serveur (§3).
-2. **Le socle** : migration `charges`, bucket privé, writer, lecture IA,
-   endpoint d'écriture (créer, lire, valider, supprimer, URL d'envoi et de
-   consultation).
-3. **L'écran `/charges`**, ordinateur et téléphone : liste, ajout par photo ou
-   fichier, formulaire de vérification.
-4. **L'e-mail entrant** : adresse signée, branche dans `api/inbound-email.js`,
-   pièces jointes, fonction de cron dédiée à la lecture. ⚠ Ce lot touche le
-   fichier qui fait entrer
-   les réponses des voyageurs : sa review vérifie que ce chemin est intact.
-5. **La mesure** sur les vraies factures de Thierry : écart lu / validé, champ
+   facturation, étape 1 de sa spec), avec ses lectures côté serveur (§6).
+2. **Le socle** : migrations (`charges`, `charges_resume`,
+   `charges_ota_supprimees`, `charges_adresses`), bucket privé, writer
+   (avec la mise à jour transactionnelle du résumé), lecture IA, endpoint
+   d'écriture (créer, lire, valider, trancher un signal, supprimer, URL
+   d'envoi et de consultation), et **le cron dédié** `api/cron-charges.js`
+   (recalcul quotidien du résumé, effacement des `envoi` de plus de 24 h).
+3. **L'écran `/charges`**, ordinateur et téléphone : liste, totaux
+   « estimation », ajout par photo ou fichier, formulaire de vérification,
+   signaux « Vérifier ».
+4. **Les commissions des plateformes** (§7 bis) : matérialisation
+   quotidienne dans le cron dédié, signal `commission_deja_comptee`.
+5. **L'e-mail entrant** : adresse signée et bouton « Changer d'adresse »,
+   branche dans `api/inbound-email.js`, pièces jointes, lecture différée par
+   le cron dédié. ⚠ Ce lot touche le fichier qui fait entrer les réponses des
+   voyageurs : sa review vérifie que ce chemin est intact.
+6. **La mesure** sur les vraies factures de Thierry : écart lu / validé, champ
    par champ. Elle décide si Mindee est utile.
 
 Plus tard : les ménages des prestataires (Q3), l'export comptable (Q13), la
@@ -494,17 +553,18 @@ les faire lire par l'IA. Le modèle du §6 est choisi pour que ce lot n'ait rien
    index (`user_id`, `statut`). Le compteur porte sur **toutes** les lignes,
    pas sur la page affichée : compte exact en tête seule. Pas de total
    « à payer » en V1 (Q2).
-   **Les totaux** (par mois, par entité, par bien) sont une donnée **non
-   urgente**, servie par une **table de résumé** que l'endpoint ne fait que
-   lire, avec l'heure du calcul affichée. Mais une facture envoyée doit y
-   compter tout de suite (Q4) : le résumé est donc **mis à jour par le writer
-   unique à chaque écriture** de charge, pour la seule ligne touchée
-   (compte × entité × bien × mois), et **recalculé une fois par jour** par le
-   cron dédié pour la cohérence. Il porte, à côté de la somme, le nombre de
-   factures non vérifiées et sans montant — c'est ce qui affiche
-   « estimation ». Un mois sans aucune facture n'est pas un 0 inventé : il
-   n'a pas de ligne, et l'écran le dit. La rentabilité par bien
-   (revenus − charges) reste hors V1.
+   **Les totaux** (par mois, par exercice, par entité, par bien) sont une
+   donnée **non urgente**, servie par `charges_resume` que l'endpoint ne fait
+   que lire (une somme en base sur les cellules du jour), avec l'heure du
+   calcul affichée. Mais une facture lue doit y compter tout de suite (Q4) :
+   **le writer unique recalcule, dans une fonction SQL transactionnelle, la
+   cellule d'avant et la cellule d'après** de chaque charge écrite (une
+   validation qui change d'entité, de bien ou de jour la déplace ; un
+   regroupement ou une suppression touche aussi les autres membres du
+   groupe) — recalcul, jamais incrément. Le cron dédié recalcule tout une
+   fois par jour pour la cohérence. « Estimation » se lit dans la cellule
+   (§6, ce qui compte). Un jour sans facture n'a pas de cellule, pas un 0
+   inventé. La rentabilité par bien (revenus − charges) reste hors V1.
 3. **Cache navigateur : aucun.** La page porte des montants, des justificatifs
    et une file « à vérifier » qui change à chaque e-mail reçu : elle se relit.
 4. **`private, no-store`** sur les deux endpoints, posé avant le premier refus
