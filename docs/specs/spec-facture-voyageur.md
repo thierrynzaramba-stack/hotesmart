@@ -1,44 +1,49 @@
 # Spec de lot — La facture du voyageur, émise par l'hôte à sa demande
 
 Demande de Thierry du 8 novembre 2026 (fil « facturation » du Projet).
-**Statut : étape 0, proposition. Aucun code.** Les questions du §4 sont à
-trancher par Thierry, une par une ; chaque réponse est inscrite ici, datée.
+**Statut : questions produit TRANCHÉES par Thierry le 8 novembre 2026 (§4).
+Aucun code.** Restent avant de coder : les prérequis du §7 (mentions validées
+par un comptable, textes des messages montrés à Thierry, accord du fil compte
+de charges sur la table partagée) et le go de Thierry, étape par étape.
 
 Hors sujet : la facturation de l'abonnement HôteSmart (Stripe, `lib/billing.js`).
 Ce lot parle de la facture que **l'hôte** remet à **son voyageur**.
 
-## 1. La demande, et les décisions de Thierry (8 novembre 2026)
+## 1. La demande, en une phrase
 
-Un voyageur demande une facture à l'hôte (souvent un voyageur professionnel).
-HôteSmart doit permettre à l'hôte de la générer et de l'envoyer.
+Un voyageur (souvent un professionnel) demande une facture : HôteSmart lui
+envoie un lien vers un formulaire, il y saisit ses coordonnées, l'hôte
+confirme le total après le séjour, et la facture lui parvient par le même lien.
 
-| # | Décision | Date |
-|---|---|---|
-| D1 | Possible pour **toutes** les réservations : Airbnb, Booking, directes (Offline, moteur). | 8 nov. 2026 |
-| D2 | L'émetteur (nom ou société, adresse, SIRET…) est **une identité par compte, remplaçable pour un bien** (exemple : un bien détenu par une SCI). | 8 nov. 2026 |
-| D3 | La facture part par **un lien sécurisé envoyé dans la conversation** (Airbnb, Booking ou e-mail selon la réservation). Motif : les voyageurs Airbnb n'ont souvent pas d'e-mail connu. | 8 nov. 2026 |
-| D4 | Le destinataire est renseigné par **« un formulaire à remplir »**. Lecture proposée, à confirmer (Q1) : le lien ouvre un formulaire que **le voyageur** remplit lui-même. | 8 nov. 2026 |
+## 2. Le parcours
 
-## 2. Le parcours proposé (sous réserve de Q1)
-
-1. Le voyageur demande une facture, en général par message.
-2. L'hôte touche « Facture » sur la fiche de la réservation (ou dans le fil de
-   la conversation, selon Q11).
-3. HôteSmart crée une **demande de facture** et poste dans la conversation un
-   message court qui porte le lien. L'hôte voit le texte avant l'envoi.
-4. Le voyageur ouvre le lien. Il choisit « particulier » ou « société » et
-   remplit le formulaire : nom ou raison sociale, adresse, et pour une société
-   son n° de TVA intracommunautaire et son SIREN s'il en a.
-5. **24 h après l'heure de départ** (Q7 bis), si le formulaire est rempli,
-   HôteSmart notifie l'hôte « Votre facture est presque prête » : il vérifie
-   le total payé — la taxe de séjour peut le fausser — et le confirme ou le
-   corrige (Q8 bis). Un rappel par jour tant qu'il n'a pas confirmé.
-6. **Au geste de l'hôte**, la facture est **émise** — numéro, contenu figé,
-   PDF — et HôteSmart poste « Votre facture est disponible » avec le lien dans
-   la conversation (Q7 ter). Jamais avant la fin du séjour (Q7). Formulaire
-   rempli après ce délai : la notification part à la validation du voyageur.
-7. L'hôte voit l'état sur la fiche (demandée, à confirmer, émise) et
-   télécharge le PDF.
+1. **Le lien part par l'une des trois portes** (Q11) :
+   - le bouton « Facture » de la fiche de réservation ;
+   - la balise `{lien_facture}` d'un message programmé ;
+   - GuestFlow, quand le voyageur demande une facture.
+   Le lien peut partir à tout moment, avant, pendant ou après le séjour (Q7 bis).
+2. **Le voyageur ouvre le lien** et remplit le formulaire, dans sa langue
+   (Q1, Q9 bis) : particulier ou société, nom ou raison sociale, adresse, et
+   pour une société son n° de TVA intracommunautaire et son SIREN s'il en a.
+   Tant que la facture n'est pas émise, la page dit quand elle le sera.
+   L'hôte peut aussi remplir ce formulaire à sa place, depuis la fiche (Q12).
+3. **24 h après l'heure de départ du bien** (Q7 bis), si le formulaire est
+   rempli, HôteSmart notifie l'hôte : **« Votre facture est presque prête »**,
+   en précisant que **le total payé peut comporter une erreur à cause de la
+   taxe de séjour, et qu'il doit être vérifié** (Q8 bis). Un rappel par jour
+   tant qu'il n'a pas confirmé. Formulaire rempli après ce délai : la
+   notification part à la validation du voyageur.
+4. **L'hôte confirme ou corrige le total.** Si la taxe de séjour n'est nulle
+   part dans l'import, il en saisit la valeur à ce moment-là (Q3, voir §4).
+5. **Au geste de l'hôte, la facture est émise** : numéro, contenu figé, PDF.
+   HôteSmart poste dans la conversation **« Votre facture est disponible »**
+   avec le lien, dans la langue du voyageur (Q7 ter). Jamais avant la fin du
+   séjour (Q7).
+6. **La fiche de réservation montre l'état** (lien envoyé, formulaire rempli,
+   à confirmer, émise, annulée par un avoir) et permet de télécharger le PDF,
+   de faire un avoir puis une nouvelle facture (Q6, Q7).
+7. **Une réservation annulée avant le départ n'est jamais facturée** ; le
+   lien le dit.
 
 ## 3. Ce qui existe déjà (lecture du dépôt, `main` = dde1004ff1211a4a813a3ed1b471d36d92018fcf)
 
@@ -53,238 +58,75 @@ HôteSmart doit permettre à l'hôte de la générer et de l'envoyer.
   - `taxeSejourInfo` : montant, **collecteur**, incluse ou non (`lib/taxe-sejour`) ;
   - `fraisCanal` : la retenue hôte d'Airbnb (Host Fee) ;
   - `factures` : les lignes `invoiceItems` de Beds24 (historique).
-  - **Le prix payé par le voyageur Airbnb est reconstruit** : Channex sert le
-    net hôte (`amount`, `meta.amount_type = "Payout Amount"`) et la retenue
-    hôte (`Listing Cancellation Host Fee`) ; leur somme est le prix voyageur,
-    prouvé contre le prix Beds24 du même séjour (`docs/kb/prix-voyageur.md`
-    §1 et §1 bis — exemple réel : 82,21 + 18,79 = 101,00 €).
-  - Retenue mesurée à 18,6 % du brut sur les biens de Thierry : c'est le
-    modèle de frais « hôte seul », où Airbnb n'ajoute **rien** au prix payé
-    par le voyageur. Dans l'autre modèle (frais partagés, ≈ 14 % payés par le
-    voyageur en plus), ce supplément n'est transmis par aucun canal, et le
-    modèle ne se lit dans aucun champ (`docs/kb/chantier-nouveau-bien.md`
-    §10, point 2).
-- **Qui collecte la taxe de séjour**, par canal : `docs/specs/spec-taxe-sejour.md`
-  §1.1. Airbnb la collecte lui-même ; Booking la retient (La bulle) ou
-  l'encaisse pour l'hôte qui la reverse (Colomiers) ; en direct, c'est l'hôte.
-- **L'envoi dans la conversation** passe déjà par un seul aiguillage :
+- **Le prix payé par le voyageur Airbnb est reconstruit** : Channex sert le
+  net hôte (`amount`, `meta.amount_type = "Payout Amount"`) et la retenue
+  hôte (`Listing Cancellation Host Fee`) ; leur somme est le prix voyageur,
+  prouvé contre le prix Beds24 du même séjour (`docs/kb/prix-voyageur.md`
+  §1 et §1 bis — exemple réel : 82,21 + 18,79 = 101,00 €). Retenue mesurée à
+  18,6 % du brut sur les biens de Thierry : modèle de frais « hôte seul », où
+  Airbnb n'ajoute rien au prix payé par le voyageur.
+- **Le ménage Airbnb** est transmis à part par Channex (`rooms[].services[]`
+  « Cleaning Fee », 43/43 ; `lib/marche/menage.js`). La facture ne le
+  détaille pas (Q8).
+- **La taxe de séjour** de chaque réservation est dans le cœur, table
+  `taxes_sejour` (`lib/taxe-sejour/lecture.js`, origine `transmis`,
+  `calcule` ou `absent`). Qui la collecte, par canal :
+  `docs/specs/spec-taxe-sejour.md` §1.1. Le barème par bien (lot 3 de ce
+  chantier-là) n'existe pas encore.
+- **L'heure de départ** du bien : `properties.checkout_time`. **Le pays** :
+  `properties.country` (lu par `lib/logement/lecture.js`).
+- **Les balises des messages programmés** : `lib/balises.js` (`{prenom}`…).
+- **L'envoi dans la conversation** passe par un seul aiguillage :
   `posterMessage()` (`pages/messages.html`) → `/api/channel-message`, qui route
   côté serveur par la source (fil OTA, ou e-mail pour une réservation Offline),
   ou `/api/beds24` pour un bien Beds24.
+- **Les droits** : `lib/permissions.js` — domaines `reservations` (délégable)
+  et `facturation` (non délégable, titulaire seul).
 - **Pages publiques à jeton** déjà en service : `pages/book.html` (marque
   blanche, autonome) et la page publique de la prestataire.
 - **Aucune bibliothèque PDF** dans `package.json`.
 - **Fonctions Vercel** : 67 fichiers sous `api/`, pour une limite de 100.
 
-## 4. Questions à trancher (une par une)
+## 4. Les décisions de Thierry (8 novembre 2026)
 
-Chaque question attend la réponse de Thierry. Rien n'est codé avant.
+| # | Sujet | Décision |
+|---|---|---|
+| D1 | Réservations concernées | **Toutes** : Airbnb, Booking, directes (Offline, moteur). |
+| D2 | Émetteur | **Une identité par compte, remplaçable pour un bien** (exemple : un bien détenu par une SCI). |
+| D3 | Envoi | **Un lien sécurisé dans la conversation.** Motif : les voyageurs Airbnb n'ont souvent pas d'e-mail connu. |
+| Q1 | Qui remplit le formulaire | **Le voyageur.** |
+| Q2 | Montant d'une réservation Airbnb | **Le prix payé par le voyageur** (net hôte + retenue Airbnb). Thierry : les frais partagés d'Airbnb disparaissent ; le supplément voyageur inconnu n'est pas traité. |
+| Q3 | Taxe de séjour | **Elle figure sur la facture**, pour arriver au total réellement payé, quel que soit le canal ou le collecteur. **Absente de l'import : l'hôte en saisit la valeur.** |
+| Q4 | Régime de TVA | **Trois choix dans la fiche de l'entité** : exonéré, franchise en base, assujetti. **Assujetti : l'hôte règle lui-même son taux.** Mentions validées par un comptable. |
+| Q5 | Numérotation | **Une suite par entité**, forme `F-2026-0001`, qui repart à 1 chaque année ; numéro donné à l'émission, jamais réutilisé. **L'hôte règle le préfixe et le numéro de départ.** |
+| Q6 | Corriger une facture émise | **Un avoir, dans ce lot** : bouton « Annuler par un avoir » sur la fiche ; avoir numéroté dans la même suite ; nouvelle facture ensuite. |
+| Q7 | Réservation qui change | **La facture n'est émise qu'en fin de séjour.** Un changement après l'émission : **pas d'alerte**, l'hôte fait l'avoir et peut émettre une nouvelle facture. |
+| Q7 bis | Formulaire rempli avant le départ | Le lien part à tout moment ; **émission 24 h après l'heure de départ**, avec les montants à jour. |
+| Q7 ter | Prévenir le voyageur | À l'émission, HôteSmart **poste « Votre facture est disponible »** avec le lien dans la conversation. |
+| Q8 | Lignes | **Une ligne « Séjour » (ménage compris), la taxe de séjour, le total.** |
+| Q8 bis | Confirmation du total | **Juste avant l'émission, par l'hôte** : notification « Votre facture est presque prête », avertissement sur la taxe de séjour, un rappel par jour ; rien ne part sans son geste. |
+| Q9 | Langue de la facture | **La langue du pays du bien** (France → français). Un bien hors France sera une question le jour où il existera. |
+| Q9 bis | Langue du formulaire et des messages au voyageur | **La langue du voyageur** (français, anglais ou espagnol). |
+| Q10 | Droits | **Droit « réservations » en écriture** (délégable) : envoyer le lien, remplir le formulaire, confirmer le total, faire un avoir. **Titulaire seul** (domaine `facturation`) : l'entité juridique, sa TVA, sa numérotation. Chaque geste gardé côté serveur. |
+| Q11 | Où part le lien | **Trois portes** : bouton de la fiche de réservation ; balise `{lien_facture}` des messages programmés ; GuestFlow quand le voyageur demande une facture. |
+| Q12 | Sans formulaire | **L'hôte peut le remplir à la place du voyageur**, depuis la fiche. |
+| Q13 | Durée du lien | **1 an après le départ** ; ensuite, l'hôte renvoie un nouveau lien. La facture reste conservée. |
+| Q14 | Référence de la plateforme | **Oui** : « Réservation Airbnb HMADA4CMQR », ou la référence HôteSmart pour une directe. |
+| Q15 | Émetteur et compte de charges | **Une seule table d'entités juridiques**, partagée avec le chantier compte de charges, **construite par ce fil**. Thierry : la spec d'abord ; le risque de tables en double se règle à la mise en production. |
 
-- **Q1 — Le formulaire.** Le voyageur le remplit lui-même depuis le lien
-  (lecture proposée), ou c'est l'hôte qui le remplit ?
-- **Q2 — Le montant d'une réservation Airbnb.** Le prix payé par le voyageur
-  pour le séjour, tel que HôteSmart le reconstruit (net hôte + retenue
-  Airbnb) ? Un éventuel frais de service voyageur (modèle partagé) n'y figure
-  pas : Airbnb le facture lui-même.
-- **Q3 — La taxe de séjour.** Sur la facture seulement quand l'hôte la collecte
-  (direct, Booking « reversée ») ? Et quand la plateforme la collecte : absente,
-  ou mentionnée « collectée par Airbnb / Booking » ?
-- **Q4 — Le régime de TVA de l'émetteur.** Il change la mention en bas de
-  facture. Trois cas à proposer dans l'identité : exonéré (location meublée),
-  franchise en base, ou assujetti (avec son taux). **À faire valider par un
-  comptable** : le libellé exact de chaque mention n'est pas tranché ici.
-- **Q5 — La numérotation.** Une suite par émetteur (le compte, ou le bien qui
-  a sa propre identité), continue et sans trou. Forme proposée :
-  `F-2026-0001`. Le numéro est attribué à l'émission et n'est jamais réutilisé.
-- **Q6 — Corriger une facture émise.** Une facture émise ne se modifie pas. On
-  la corrige par un **avoir**, puis une nouvelle facture. Dans ce lot, ou plus
-  tard ?
-- **Q7 — Réservation annulée après la facture.** Avoir automatique, alerte à
-  l'hôte, ou rien ?
-- **Q8 — Les lignes.** Un total « Séjour du … au … », ou le détail : nuits,
-  ménage s'il est séparé, voyageurs supplémentaires, taxe de séjour ?
-- **Q9 — La langue.** Facture en français seulement, ou dans la langue du
-  voyageur (fr, en, es) ?
-- **Q10 — Les droits.** Le titulaire seul, ou aussi un membre qui a le droit
-  « réservations » en écriture ?
-- **Q11 — Où est le bouton.** Fiche de la réservation, fil de la conversation,
-  ou les deux ?
-- **Q12 — Sans formulaire.** L'hôte peut-il émettre directement, au nom de la
-  réservation, quand le voyageur ne remplit pas le formulaire ?
-- **Q13 — La durée du lien.** Combien de temps le lien reste-t-il valable pour
-  le voyageur ? (HôteSmart garde la facture de toute façon : c'est une pièce
-  comptable.)
-- **Q14 — La référence de la plateforme.** Le code de réservation Airbnb ou
-  Booking figure-t-il sur la facture ?
-- **Q15 — L'émetteur et l'entité juridique du compte de charges.** L'émetteur
-  de la facture est-il la même chose que l'« entité juridique » du chantier
-  compte de charges ? Si oui, un seul fil crée la table, et l'autre la
-  réutilise.
+**Conséquence, signalée à Thierry** : la taxe de séjour manquante se saisit
+au moment de la confirmation du total (§2, point 4), et non avant l'envoi du
+lien comme écrit d'abord — par la balise des messages programmés, le lien
+part sans aucun geste de l'hôte.
 
-### Réponses de Thierry
+## 5. Données (proposition)
 
-- **Q1 (8 nov. 2026) : c'est le voyageur qui saisit.** Le lien ouvre un
-  formulaire que le voyageur remplit lui-même ; la facture est émise à la
-  validation, et il la télécharge depuis le même lien. Le parcours du §2 est
-  confirmé.
-- **Q15 (8 nov. 2026, décision de Thierry transmise par le fil compte de
-  charges) : une seule table d'entités juridiques dans le cœur, partagée par
-  les deux chantiers.** Ce fil n'a rien créé. Il a transmis ses besoins (§5 bis).
-  **Thierry, le même soir : c'est ce fil (facturation) qui construit la
-  table.** Proposition au §5 ter, soumise au fil compte de charges avant tout
-  code. Thierry, 20 h 49 : **on termine la spec d'abord** ; la question des
-  tables en double se règle au moment de la mise en production.
-- **Q2 (8 nov. 2026) : la facture d'une réservation Airbnb porte le prix payé
-  par le voyageur** (net hôte + retenue Airbnb, tel que HôteSmart le
-  reconstruit). Thierry : les frais partagés d'Airbnb vont disparaître ; le
-  cas du supplément voyageur inconnu n'est donc pas traité.
-- **Q3 (8 nov. 2026) : la taxe de séjour figure sur la facture**, pour que la
-  facture arrive au total réellement payé, quel que soit le canal. Source :
-  la ligne `taxes_sejour` de la réservation (`origine = transmis`). **Quand
-  l'import ne la porte nulle part, l'hôte en saisit la valeur** — avant
-  l'envoi du lien, puisque la facture est émise dès que le voyageur valide le
-  formulaire. (Le barème par bien du lot 3 de la taxe de séjour n'existe pas
-  encore ; s'il arrive, pré-remplir cette saisie sera une question à poser.)
-- **Q4 (8 nov. 2026) : trois choix dans la fiche de l'entité** — exonéré,
-  franchise en base, assujetti. **Assujetti : l'hôte règle lui-même son taux
-  de TVA.** Le texte exact de chaque mention est validé par un comptable avant
-  l'étape 2 (émission).
-- **Q5 (8 nov. 2026) : réponse A.** Une suite par entité juridique, de la
-  forme `F-2026-0001`, qui repart à 1 chaque année ; numéro donné à
-  l'émission, jamais réutilisé. **L'hôte règle le préfixe et le numéro de
-  départ**, pour reprendre une suite commencée ailleurs. (Une suite par
-  entité et par année vit dans ce lot, pas dans la table partagée.)
-- **Q6 (8 nov. 2026) : réponse A, l'avoir est dans ce lot.** Un bouton
-  « Annuler par un avoir » sur la fiche annule la facture émise (avoir =
-  facture négative, numérotée dans la même suite) ; l'hôte peut ensuite
-  renvoyer un nouveau lien au voyageur. Cas visé d'abord : une faute de
-  frappe du voyageur dans le formulaire.
-- **Q7 (8 nov. 2026), règle posée par Thierry : la facture n'est émise qu'en
-  fin de séjour.** Une annulation ou une modification AVANT la fin du séjour
-  ne touche donc aucune facture émise. Restent à trancher : le parcours quand
-  le voyageur remplit le formulaire avant son départ (Q7 bis), et un
-  changement APRÈS la fin du séjour (remboursement tardif).
-- **Q7 bis (8 nov. 2026) : réponse A.** L'hôte envoie le lien à tout moment ;
-  le voyageur remplit le formulaire quand il veut ; la facture est émise
-  automatiquement, avec les montants à jour. D'ici là, le lien affiche quand
-  elle sera disponible.
-  **Précisé par Thierry à 21 h 09 : l'émission a lieu 24 h après l'heure de
-  départ** (heure de départ du bien, `properties.checkout_time`), pas le jour
-  même.
-  Conséquences : une réservation annulée avant le départ n'est jamais
-  facturée (le lien le dit) ; l'émission automatique est une passe du cron,
-  qui ne lit que les demandes complètes dont le départ est échu (aucun
-  parcours de toutes les réservations) — `api/cron.js` se régénère en
-  fichier complet, et la passe entre dans le coût du cron (carte 20).
-- **Q7, dernier cas (8 nov. 2026) : pas d'alerte.** Un changement après
-  l'émission (remboursement tardif…) est à la main de l'hôte : il fait
-  l'avoir, et il peut émettre une nouvelle facture.
-- **Q7 ter (8 nov. 2026) : réponse A.** À l'émission, HôteSmart **poste
-  automatiquement dans la conversation** un court message « Votre facture est
-  disponible » avec le lien. ⚠ C'est un envoi au voyageur sans geste de
-  l'hôte : l'étape qui le code a droit à la review de plus, et le texte du
-  message est montré à Thierry avant le code.
-- **Q8 (8 nov. 2026) : réponse B — une ligne « Séjour », ménage compris**,
-  puis la taxe de séjour, puis le total. (Le ménage est bien transmis à part
-  par Channex pour Airbnb, 43/43 ; Thierry préfère la ligne unique.)
-  **Et avant l'envoi, l'hôte confirme que le total payé est juste.**
-- **Q8 bis (8 nov. 2026) : réponse B — la confirmation se fait juste avant
-  l'émission.** 24 h après l'heure de départ, HôteSmart notifie l'hôte :
-  **« Votre facture est presque prête »**, en précisant que **le total payé
-  peut comporter une erreur à cause de la taxe de séjour, et que l'information
-  doit être vérifiée**. L'hôte confirme ou corrige le total ; **la facture
-  n'est émise et le voyageur ne la reçoit qu'après ce geste.** Tant qu'il n'a
-  pas confirmé : un rappel par jour.
-- **Q9 (8 nov. 2026) : la facture est dans la langue du pays où se trouve le
-  bien** (`properties.country`, lu par `lib/logement/lecture.js`). Un bien en
-  France → facture en français. HôteSmart sait le français, l'anglais et
-  l'espagnol ; un bien dans un autre pays sera une question le jour où il
-  existera (tous les biens actuels sont en France).
-- **Q9 bis (8 nov. 2026) : oui.** Le formulaire du voyageur et le message
-  « Votre facture est disponible » sont dans **la langue du voyageur**
-  (français, anglais ou espagnol) ; seule la facture suit le pays du bien.
-- **Q10 (8 nov. 2026) : réponse A.** Un membre qui a le droit
-  **« réservations » en écriture** peut envoyer le lien, confirmer le total et
-  faire un avoir. **Seul le titulaire** règle l'entité juridique (identité,
-  TVA, numérotation) : domaine `facturation`, déjà non délégable. Chaque geste
-  est gardé côté serveur (règle « un masquage par droit ne suffit jamais »).
-- **Q11 (8 nov. 2026) : trois portes vers le même lien.**
-  1. **Un bouton sur la fiche de la réservation.**
-  2. **Une balise `{lien_facture}` dans les messages programmés**, à côté de
-     `{prenom}` et des autres (`lib/balises.js`). Exemple : au départ,
-     « Besoin d'une facture ? Remplissez ce formulaire : {lien_facture} ».
-     Chaque voyageur reçoit son propre lien ; une facture n'est préparée que
-     s'il remplit le formulaire, et la suite ne change pas (confirmation de
-     l'hôte, puis émission).
-  3. **GuestFlow (l'IA) envoie le lien quand le voyageur demande une
-     facture**, dans ses réponses comme dans ses propositions.
-  ⚠ Les portes 2 et 3 touchent l'envoi au voyageur et le domaine du fil
-  Messagerie (`lib/cron-messages.js`, `lib/balises.js`, GuestFlow) : elles
-  se coordonnent avec lui, après son lot en cours, et ont droit à la review
-  de plus.
-- **Q12 (8 nov. 2026) : réponse A.** Depuis la fiche de la réservation,
-  l'hôte (ou un membre « réservations » en écriture) peut **remplir lui-même
-  le formulaire à la place du voyageur** — coordonnées reçues par message, ou
-  voyageur qui ne remplit pas. La suite est identique : confirmation du total
-  24 h après le départ, puis émission.
-- **Q13 (8 nov. 2026) : réponse A.** Le lien du voyageur est valable **1 an
-  après le départ** ; au-delà, l'hôte en renvoie un nouveau depuis la fiche.
-  La facture, elle, est conservée par HôteSmart indépendamment du lien.
-
-## 5. Données (proposition, à revoir après les réponses)
-
-- **Identité de l'émetteur.** Une identité par compte, et un remplacement
-  possible par bien (D2). Où se règle-t-elle ? Test du dépôt : « ce réglage
-  a-t-il un sens si l'app n'existait pas ? » — oui, l'identité légale de l'hôte
-  sert ailleurs. Donc l'identité du compte va dans `/settings`, et le
-  remplacement d'un bien sur la fiche du logement.
-  ⚠ **Recouvrement avec le chantier « compte de charges »** (autre fil, décision
-  de Thierry du 8 novembre 2026) : chaque facture fournisseur y est rattachée à
-  une **entité juridique**, elle-même rattachée à un ou plusieurs biens. C'est
-  la même notion que l'émetteur d'ici. Une seule table doit la porter, avec un
-  seul writer : question posée à Thierry (Q15).
-- **La facture est FIGÉE à l'émission.** L'émetteur, le destinataire et les
-  lignes y sont **copiés**, jamais relus ensuite : si l'hôte change d'adresse
-  l'an prochain, une facture déjà émise ne bouge pas.
-- **Table `factures_voyageur`** (nom provisoire) : compte (`user_id`), bien
-  (`properties.id`, UUID), référence de la réservation, statut (`demandee`,
-  `emise`, `annulee_par_avoir`), numéro, émetteur figé, destinataire figé,
-  lignes figées, montants en centimes, devise, date d'émission, chemin du PDF,
-  empreinte du jeton.
-- **Le numéro** se tire dans une fonction SQL qui verrouille la suite de
-  l'émetteur : deux émissions simultanées ne peuvent pas prendre le même
-  numéro, et une émission qui échoue ne laisse pas de trou.
-- **Le jeton du lien** est aléatoire (au moins 128 bits), **stocké haché**.
-  La page publique ne montre que la facture de ce jeton, rien du compte.
-- **Le PDF** est produit côté serveur à l'émission, par une bibliothèque en
-  JavaScript pur (sans navigateur embarqué), stocké dans un bucket **privé**,
-  et servi par une URL signée de courte durée.
-- **RLS** sur la table neuve, dans le modèle du chantier profils et droits.
-
-## 5 bis. Ce que la facture attend de l'entité juridique partagée
-
-Transmis au fil compte de charges le 8 novembre 2026. Rien n'est créé.
-
-- **Champs lus par la facture** : compte (`user_id`) ; type (personne physique
-  ou société) et forme juridique ; nom ou raison sociale ; adresse (ligne,
-  code postal, ville, pays) ; SIREN ou SIRET ; n° de TVA intracommunautaire
-  (vide possible) ; régime de TVA (selon Q4) ; pour une société, les mentions
-  légales à lister avec un comptable (capital, RCS…).
-- **Lien avec les biens** : un bien relève d'**une** entité au plus, une
-  entité porte un ou plusieurs biens. Clé sur `properties.id` (UUID, décision
-  E6). Pour D2, il faut aussi une entité **par défaut** du compte : un bien sans
-  entité désignée facture sous celle-là.
-- **Ce qui reste dans ce chantier** : la suite des numéros de facture par
-  entité, et la copie de l'entité dans chaque facture émise. Une facture est
-  figée, donc modifier ou détacher une entité ne change aucune facture déjà
-  émise.
-
-## 5 ter. La table des entités juridiques (proposition, construite par ce fil)
-
-Rien n'est créé avant l'accord du fil compte de charges et le go de Thierry.
+### 5.1 L'entité juridique, partagée avec le compte de charges
 
 **`public.entites_juridiques`** — une ligne = une identité légale d'un compte
-(l'hôte en nom propre, une SCI, une société).
+(l'hôte en nom propre, une SCI, une société). Soumise au fil compte de
+charges le 8 novembre 2026 ; rien n'est créé avant son accord et le go de
+Thierry.
 
 | Colonne | Type | Rôle |
 |---|---|---|
@@ -297,8 +139,8 @@ Rien n'est créé avant l'accord du fil compte de charges et le go de Thierry.
 | `pays` | texte, `FR` par défaut | code ISO |
 | `siret` | texte, 14 chiffres, vide possible | le SIREN en est les 9 premiers |
 | `tva_intracom` | texte, vide possible | |
-| `regime_tva` | texte, vide possible : `exonere`, `franchise`, `assujetti` | attend Q4 |
-| `taux_tva` | nombre, vide possible | seulement si `assujetti` |
+| `regime_tva` | texte : `exonere`, `franchise`, `assujetti` | Q4 |
+| `taux_tva` | nombre, vide possible | obligatoire si `assujetti`, réglé par l'hôte |
 | `capital`, `rcs` | vide possible | mentions d'une société, à valider avec un comptable |
 | `email`, `telephone` | vide possible | contact imprimé |
 | `par_defaut` | booléen | **une seule** par compte (index unique partiel) |
@@ -306,17 +148,65 @@ Rien n'est créé avant l'accord du fil compte de charges et le go de Thierry.
 | `cree_le`, `modifie_le` | horodatage | |
 
 **Lien avec les biens** : `properties.entite_juridique_id`, uuid, vide
-possible, vers `entites_juridiques.id`. **Vide = l'entité par défaut du
-compte** (décision D2). Un bien relève d'une entité au plus ; l'entité doit
-appartenir au même compte que le bien, contrôle fait par le writer.
+possible. **Vide = l'entité par défaut du compte** (D2). Un bien relève d'une
+entité au plus ; le writer refuse une entité d'un autre compte. Clé sur
+`properties.id` (décision E6).
 
-**Accès** : RLS activée, **aucune politique côté navigateur**. Tout passe par
-un endpoint gardé sur le domaine `facturation`, qui est déjà réservé au
-titulaire (`lib/permissions.js`, `NON_DELEGABLES`). Writer unique :
+**Où elle se règle** : test du dépôt « ce réglage a-t-il un sens si l'app
+n'existait pas ? » — oui. L'entité du compte se règle dans `/settings`, le
+remplacement d'un bien sur la fiche du logement.
+
+**Accès** : RLS activée, **aucune politique côté navigateur** ; tout passe
+par un endpoint gardé sur le domaine `facturation`. Writer unique :
 `lib/entites-juridiques.js`.
 
-**Ce qui n'y est pas** : la suite des numéros de facture (table propre à ce
-lot, par entité) et tout ce qui est propre aux charges.
+### 5.2 La suite des numéros (propre à ce lot)
+
+**`factures_voyageur_suites`** : une ligne par entité et par année —
+préfixe, prochain numéro. Le titulaire règle le préfixe et le numéro de
+départ (Q5). Le numéro se tire dans une **fonction SQL qui verrouille la
+ligne** : deux émissions simultanées ne prennent jamais le même numéro, et
+une émission qui échoue ne laisse pas de trou (le tirage et l'écriture de la
+facture sont dans la même transaction). Les avoirs prennent leur numéro dans
+la même suite.
+
+### 5.3 La demande et la facture
+
+**`factures_voyageur`** (nom provisoire) — une ligne par demande ; elle
+devient une facture à l'émission.
+
+- **Rattachement** : compte (`user_id`), bien (`properties.id`), référence de
+  la réservation (clé provider, règle 10 du dépôt), entité juridique.
+- **Statut** : `lien_envoye`, `formulaire_rempli`, `a_confirmer`, `emise`,
+  `annulee_par_avoir`, `sans_objet` (réservation annulée avant le départ).
+- **Destinataire** : type, nom ou raison sociale, adresse, TVA, SIREN ;
+  **qui l'a saisi** (voyageur ou hôte, Q12) ; langue du voyageur (Q9 bis).
+- **Confirmation** (Q8 bis) : total proposé, total confirmé, taxe de séjour
+  saisie par l'hôte s'il y a lieu, **qui** a confirmé et **quand** ; date de
+  la notification et du dernier rappel.
+- **Facture émise, FIGÉE** : numéro, date, émetteur copié, destinataire
+  copié, lignes copiées (Séjour, Taxe de séjour, montants en centimes,
+  devise), mention de TVA, référence plateforme (Q14), langue du pays du bien
+  (Q9), chemin du PDF. Rien de tout cela n'est relu ensuite : une entité
+  modifiée l'an prochain ne change aucune facture émise.
+- **Avoir** : une ligne liée à la facture qu'il annule, dans la même suite.
+- **Lien** : jeton aléatoire d'au moins 128 bits, **stocké haché**, expiration
+  = départ + 1 an (Q13). La page publique ne montre que ce jeton, rien du
+  compte.
+- **PDF** : produit côté serveur à l'émission, par une bibliothèque en
+  JavaScript pur (sans navigateur embarqué), stocké dans un bucket **privé**,
+  servi par une URL signée de courte durée.
+- **RLS** : activée ; lecture et écriture par les endpoints gardés (domaine
+  `reservations` pour les gestes du §4, Q10).
+
+### 5.4 La passe du cron
+
+Une passe bornée : elle ne lit que les demandes `formulaire_rempli` dont le
+départ + 24 h est échu, et les demandes `a_confirmer` qui attendent leur
+rappel du jour. Jamais un parcours de toutes les réservations. `api/cron.js`
+se régénère en fichier complet ; la passe entre dans le coût du cron
+(carte 20 du diagnostic). Elle **notifie l'hôte**, elle n'émet rien : seule
+la confirmation de l'hôte émet.
 
 ## 6. Contrainte légale à venir : la facture électronique
 
@@ -328,24 +218,38 @@ facture à une société : elle passera par une plateforme agréée. Pour un
 particulier, ce sera une transmission des données à l'administration
 (e-reporting).
 
-Conséquence pour ce lot : **la v1 est un PDF**, conforme jusque-là. Un lot
-ultérieur, **avant le 1er septembre 2027**, branche une plateforme agréée.
-Le modèle de données du §5 (facture figée, lignes structurées, destinataire
-séparé) est choisi pour que ce lot-là n'ait rien à reprendre. Les mentions
-obligatoires (actuelles et nouvelles) sont **à lister avec un comptable**
-avant l'étape 2.
+Conséquence : **la v1 est un PDF**. Un lot ultérieur, **avant le
+1er septembre 2027**, branche une plateforme agréée. Le modèle du §5 (facture
+figée, lignes structurées, destinataire séparé) est choisi pour que ce lot-là
+n'ait rien à reprendre.
 
-## 7. Découpage proposé
+## 7. Découpage
 
-0. Cette spec, et les réponses aux questions du §4.
-1. L'identité de l'émetteur : migration, `/settings`, remplacement par bien.
-2. L'émission : table, numérotation, PDF, endpoint côté hôte.
-3. Le lien et le formulaire du voyageur, et l'envoi dans la conversation.
-   ⚠ Cette étape touche l'**envoi au voyageur** : elle a droit à une review de
-   plus (CLAUDE.md, « UNE REVIEW PAR COMMIT »).
-4. Le bouton et l'état sur la fiche de la réservation (ordinateur et
-   téléphone).
-5. L'avoir (Q6 : dans ce lot) et le renvoi d'un nouveau lien.
+**Prérequis, avant l'étape qui en dépend :**
+- **Les mentions légales** de la facture (actuelles et nouvelles, par régime
+  de TVA, pour une société) **validées par un comptable** — avant l'étape 3.
+- **Les textes** « Votre facture est presque prête » et « Votre facture est
+  disponible » **montrés à Thierry** — avant l'étape 3.
+- **Le canal de la notification à l'hôte** (notification de l'appli, e-mail)
+  — question à Thierry à l'étape 3, avec ce que le lot PWA 2 aura livré.
+- **L'accord du fil compte de charges** sur la table du §5.1 — avant
+  l'étape 1.
+
+**Étapes**, chacune avec son go, ses tests et sa review :
+1. **L'entité juridique** : migration (staging d'abord), writer, endpoint,
+   écran dans `/settings`, remplacement par bien sur la fiche du logement,
+   réglage de la numérotation.
+2. **La demande et le formulaire** : table, lien à jeton, page publique dans
+   la langue du voyageur, bouton de la fiche de réservation (porte 1), saisie
+   par l'hôte (Q12), état sur la fiche — ordinateur et téléphone.
+3. **La confirmation et l'émission** : passe du cron, notification et rappel,
+   confirmation ou correction du total, saisie de la taxe manquante,
+   numérotation, PDF, message « Votre facture est disponible ».
+   ⚠ **Envoi au voyageur** : review de plus (CLAUDE.md).
+4. **L'avoir** et la nouvelle facture.
+5. **Les portes 2 et 3** : balise `{lien_facture}` et GuestFlow. ⚠ Domaine
+   du fil Messagerie (`lib/balises.js`, `lib/cron-messages.js`) : après son
+   lot en cours, en coordination ; envoi au voyageur, review de plus.
 
 ## 8. Hors périmètre
 
@@ -353,28 +257,31 @@ avant l'étape 2.
 - Le branchement à une plateforme agréée (lot à part, avant le 1er sept. 2027).
 - Tout export comptable.
 - Les lignes `invoiceItems` de Beds24 : lues, jamais modifiées.
+- Le supplément voyageur du modèle de frais partagés d'Airbnb (Q2).
+- Un bien hors de France (Q9).
 
 ## 9. PERFORMANCE
 
 1. **Un écran = un endpoint.** La page publique du voyageur lit et envoie par
    un seul endpoint, par jeton. Côté hôte, l'état de la facture arrive **dans
-   la réponse existante** de la fiche (`GET /api/calendar?booking=`) : aucun
-   appel de plus à l'ouverture.
+   la réponse existante** de la fiche (`GET /api/calendar?booking=`) : une
+   lecture de plus côté serveur, aucun appel de plus côté navigateur.
 2. **Résumé pré-calculé : sans objet.** Une facture est un document comptable,
    donc une donnée temps réel, jamais un résumé.
 3. **Cache navigateur : aucun.** La page porte une identité et un montant payé.
-4. **`private, no-store`** sur les deux endpoints, posé avant le premier refus
+4. **`private, no-store`** sur les endpoints, posé avant le premier refus
    (405 compris).
 5. **Statiques versionnés** : la page publique suit `?v=<empreinte>`.
-6. **Lectures tronquées** : aucune liste de factures en v1. Si une liste
-   arrive, elle se pagine par curseur.
+6. **Lectures tronquées** : la passe du cron se pagine par curseur ; aucune
+   liste de factures à l'écran en v1 (si une liste arrive, curseur aussi).
 7. **Budget** : page publique = 1 appel pour s'afficher ; un test compte les
    appels.
 8. **Mesure AVANT / APRÈS** : la page publique n'existe pas (AVANT sans
    objet). La fiche de réservation est mesurée sur staging (appels, requêtes,
-   octets) au début de l'étape 4, la seule qui la touche.
+   octets) au début de l'étape 2, la première qui la touche.
 
-**Mobile** : le bouton et l'état existent aussi sur la fiche du téléphone ; la
-page publique est pensée pour le téléphone d'abord.
+**Mobile** : le bouton, l'état et la confirmation existent aussi sur la fiche
+du téléphone ; la page publique est pensée pour le téléphone d'abord.
 
-**Fonctions Vercel** : deux de plus au plus (67 → 69 sur 100).
+**Fonctions Vercel** : trois de plus au plus (entités, factures, page
+publique) : 67 → 70 sur 100.
