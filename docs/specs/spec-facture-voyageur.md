@@ -168,6 +168,11 @@ confirme le total après le séjour, et la facture lui parvient par lien.
 - **P3 — Un bien archivé.** Ses séjours passés restent-ils facturables ? Si
   oui, il faut un écran pour y accéder : le calendrier ne montre plus les
   biens archivés.
+  → **Réponse de Thierry (8 nov. 2026, 22 h 07) : A.** Les demandes **déjà
+  en cours** au moment de l'archivage vont jusqu'au bout — confirmation
+  (ouverte depuis la notification, sans passer par le calendrier), émission,
+  avoir. **Aucune nouvelle demande** sur un bien archivé : le serveur la
+  refuse, quelle que soit la porte.
 - **P4 — Pas d'entité juridique.** Si le compte n'a pas d'entité par défaut
   (ou si celle du bien est archivée), la confirmation ne peut pas émettre. Le
   membre qui confirme ne peut pas la régler (titulaire seul). Proposition : la
@@ -343,7 +348,11 @@ devient une facture à l'émission.
 
 - **Bornée** : elle ne lit que les demandes `formulaire_rempli` et
   `a_confirmer`, paginées par curseur — jamais toutes les réservations.
-  Elle passe par `sansArchives` (selon P3).
+  ⚠ **Exception NOMMÉE à `sansArchives`** (`lib/biens-vivants.js`) : la passe
+  lit des DEMANDES, pas des biens, et une demande ouverte avant l'archivage
+  va jusqu'au bout (P3). Elle n'appelle aucun provider pour le bien. Le test
+  d'exhaustivité des boucles doit la connaître comme exception, avec ce
+  motif — sinon un correctif « oublié » l'arrêterait en silence.
 - **Le départ est relu** dans `bookings_snapshot` à chaque passage, jamais
   copié dans la demande. **Heure de départ** : `properties.checkout_time` à
   l'heure d'Europe/Paris ; **vide → 23 h 59 le jour du départ** (repli
