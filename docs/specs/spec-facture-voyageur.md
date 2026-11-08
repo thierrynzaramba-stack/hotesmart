@@ -259,6 +259,21 @@ est gardé sur `reglages` en écriture et `reservations` en lecture
 (`api/logement.js`) : s'il affiche ou modifie l'entité d'un bien, il appelle
 cette garde-là en plus de la sienne — sinon le constat 4 se rouvre.
 
+**Accord du fil compte de charges : 8 novembre 2026, 22 h 12** (sa spec
+alignée : branche `compte-de-charges` @ 69ed6715c9ef7a3474777e7369831c6f5b81e342).
+Il pose sa propre clé composite `(entite_juridique_id, user_id)` →
+`entites_juridiques (id, user_id)` sur sa table des charges.
+
+**Lectures serveur exposées par `lib/entites-juridiques.js`** (demandées par
+le fil compte de charges ; elles ne gardent rien elles-mêmes — c'est
+l'endpoint appelant qui garde, et le sien est réservé au titulaire) :
+- `entitesDuCompte(userId)` : les entités du compte, **archivées comprises** —
+  `id, nom, siret, regime_tva, par_defaut, archivee_le`.
+- `entiteDuBien(userId, propertyUuid)` : l'entité de sa ligne `biens_entites`,
+  sinon l'entité par défaut du compte, sinon `null` ; rendue **même archivée**,
+  avec `archivee_le` et sa provenance (`bien` ou `defaut`). C'est l'appelant
+  qui décide : la facture refuse une entité archivée (P4).
+
 ### 5.2 La suite des numéros (propre à ce lot)
 
 **`factures_voyageur_suites`** : une ligne par entité et par année —
@@ -406,8 +421,11 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
   l'étape 2.
 - **Le canal de la notification à l'hôte** (notification de l'appli, e-mail)
   — question à Thierry à l'étape 3, avec ce que le lot PWA 2 aura livré.
-- **L'accord du fil compte de charges** sur le §5.1 (dont le lien
-  `biens_entites`, changé après la relecture) — avant l'étape 1.
+- ~~L'accord du fil compte de charges sur le §5.1~~ — **obtenu le
+  8 novembre 2026** (§5.1).
+- **Un compte sans aucune entité** : est-ce permis, et qui crée la première,
+  quand ? Question posée à Thierry le 8 novembre 2026 (elle bloque aussi la
+  validation des charges) — avant l'étape 1.
 
 **Étapes**, chacune avec son go, ses tests et sa review :
 1. **L'entité juridique** : migration (staging d'abord), writer, endpoint,
