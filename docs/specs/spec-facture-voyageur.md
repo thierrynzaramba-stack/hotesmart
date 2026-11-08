@@ -222,6 +222,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   Messagerie (`lib/cron-messages.js`, `lib/balises.js`, GuestFlow) : elles
   se coordonnent avec lui, après son lot en cours, et ont droit à la review
   de plus.
+- **Q12 (8 nov. 2026) : réponse A.** Depuis la fiche de la réservation,
+  l'hôte (ou un membre « réservations » en écriture) peut **remplir lui-même
+  le formulaire à la place du voyageur** — coordonnées reçues par message, ou
+  voyageur qui ne remplit pas. La suite est identique : confirmation du total
+  24 h après le départ, puis émission.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
