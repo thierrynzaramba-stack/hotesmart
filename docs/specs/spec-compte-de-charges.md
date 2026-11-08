@@ -104,9 +104,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   peut-elle **aussi** être affectée à un bien (le plombier de La bulle) ?
   *Proposition* : oui, facultatif ; sans bien, c'est une charge de l'entité.
   C'est ce qui permettra plus tard la rentabilité par bien. *(posée le 8 nov.)*
-- **Q2 — Le suivi.** *Proposition par défaut (Thierry sans préférence)* :
-  statut « à payer / payée », date d'échéance et date de paiement. Pas de
-  rappel en V1.
+- **Q2 — Le suivi du paiement.** Tranchée, voir ci-dessous.
 - **Q3 — Les charges déjà connues d'HôteSmart** (ménages des prestataires,
   commissions des plateformes). *Proposition par défaut (Thierry sans
   préférence)* : lot ultérieur. Il commence par vérifier que ces montants
@@ -189,6 +187,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q1 (8 nov. 2026, 22 h 17) : oui.** Une facture peut être affectée à un
   bien précis de son entité, de façon **facultative** ; sans bien, c'est une
   charge de l'entité (`bien_id` vide).
+- **Q2 (8 nov. 2026, 22 h 18) : « pour la V1 on considère les factures comme
+  payées ».** Aucun suivi du paiement en V1 : ni statut « à payer / payée »,
+  ni échéance, ni total « à payer », ni « Marquer payée ». L'échéance que
+  l'IA lit reste dans `lecture_ia`, pour le lot qui ajoutera ce suivi.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -212,7 +214,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
    l'envoi (limite image de l'API Claude, §3).
 3. L'endpoint **relit le fichier dans le bucket** (signature du type, empreinte,
    taille), le fait lire par l'IA (quelques secondes) et rend un
-   formulaire **pré-rempli** : fournisseur, n° de facture, date, échéance,
+   formulaire **pré-rempli** : fournisseur, n° de facture, date,
    HT, TVA, TTC, catégorie proposée, entité proposée, bien (Q1). Chaque champ
    incertain est signalé.
 4. L'hôte corrige et **valide** (Q4).
@@ -228,9 +230,9 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
    son sujet et son texte, effaçable, Q19) — jamais de réponse automatique à
    l'expéditeur.
 
-**C. Le suivi.** Une liste filtrable par entité, bien, statut (à vérifier, à
-payer, payée, annulée) et mois ; « Marquer payée » ; consultation du
-justificatif.
+**C. Le suivi.** Une liste filtrable par entité, bien, statut (à vérifier,
+validée, annulée) et mois ; consultation du justificatif. Toute facture
+validée est considérée payée (Q2).
 
 ## 6. Données (proposition, à revoir après les réponses)
 
@@ -243,7 +245,6 @@ justificatif.
 | `bien_id` | uuid → `properties.id`, vide possible (Q1). ⚠ Nommé `bien_id` et non `property_id` : dans le dépôt, `property_id` d'une table enfant est la référence TEXTE du fournisseur (REVIEW.md règle 10). Exception raisonnée, déclarée comme celle de `docs/kb/price-log.md` : la clé UUID survit à un changement de fournisseur (décision E6). |
 | `statut` | `envoi`, `a_lire`, `a_verifier`, `validee`, `annulee` (+ motif), `illisible`, `sans_facture` |
 | `tentatives_lecture` | compteur des lectures **qui ont eu lieu et ont échoué** ; au troisième échec, `illisible` (l'hôte saisit à la main). Une panne du fournisseur d'IA ne compte pas. |
-| `paiement`, `echeance_le`, `payee_le` | `a_payer` / `payee` (Q2) |
 | `fournisseur_nom`, `fournisseur_siret`, `numero_facture`, `date_facture` | lus puis validés |
 | `montant_ht_cents`, `montant_tva_cents`, `montant_ttc_cents` | centimes, euros seulement en V1 ; une TVA à 0 lue n'est pas une TVA vide (Q17) |
 | `categorie` | liste fermée (Q5) |
@@ -342,10 +343,10 @@ justificatif.
 1. **Prérequis** : la table des entités juridiques dans `main` (fil
    facturation, étape 1 de sa spec), avec sa lecture côté serveur (§3).
 2. **Le socle** : migration `charges`, bucket privé, writer, lecture IA,
-   endpoint d'écriture (créer, lire, valider, payer, annuler, URL d'envoi et de
+   endpoint d'écriture (créer, lire, valider, annuler, URL d'envoi et de
    consultation).
 3. **L'écran `/charges`**, ordinateur et téléphone : liste, ajout par photo ou
-   fichier, formulaire de vérification, suivi du paiement.
+   fichier, formulaire de vérification.
 4. **L'e-mail entrant** : adresse signée, branche dans `api/inbound-email.js`,
    pièces jointes, fonction de cron dédiée à la lecture. ⚠ Ce lot touche le
    fichier qui fait entrer
@@ -380,15 +381,15 @@ les faire lire par l'IA. Le modèle du §6 est choisi pour que ce lot n'ait rien
 1. **Un écran = un endpoint** : `/api/ecran/charges` peint la page (liste,
    compteurs, entités du compte, adresse e-mail) par `contexteDEcran`, lectures
    en parallèle côté serveur. Les écritures passent par `/api/charges`.
-2. **Donnée non urgente** : la liste, le compteur « à vérifier » et le total
-   « à payer » sont du **temps réel** (une facture validée y apparaît tout de
-   suite), lus par index (`user_id`, `statut`). Le compteur et le total portent
-   sur **toutes** les lignes, pas sur la page affichée : compte exact en tête
-   seule, somme faite en base. Les statistiques (par mois,
+2. **Donnée non urgente** : la liste et le compteur « à vérifier » sont du
+   **temps réel** (une facture envoyée y apparaît tout de suite), lus par
+   index (`user_id`, `statut`). Le compteur porte sur **toutes** les lignes,
+   pas sur la page affichée : compte exact en tête seule. Pas de total
+   « à payer » en V1 (Q2). Les statistiques (par mois,
    rentabilité par bien) sont **non urgentes** : elles ne sont pas dans la V1,
    et viendront par un résumé pré-calculé avec son heure.
-3. **Cache navigateur : aucun.** La page porte des montants dus et des statuts
-   de paiement : elle se relit.
+3. **Cache navigateur : aucun.** La page porte des montants, des justificatifs
+   et une file « à vérifier » qui change à chaque e-mail reçu : elle se relit.
 4. **`private, no-store`** sur les deux endpoints, posé avant le premier refus
    (405 compris).
 5. **Statiques versionnés** : la page et son module suivent `?v=<empreinte>`.
