@@ -73,6 +73,15 @@ function decalerAns (iso, n) {
 }
 
 module.exports = async (req, res) => {
+  // ⚠ AVANT LE PREMIER REFUS, PAS AVANT LA GARDE (dette 90) — constat de la
+  // review du 28 octobre 2026, et la spec du lot s'y etait engagee. Cette
+  // reponse porte DOUZE MOIS de reglages tarifaires d'un compte en un seul
+  // appel depuis que l'ecran lit la fenetre entiere : la laisser partir sur
+  // le defaut de Vercel (`public, max-age=0, must-revalidate`) AUTORISE un
+  // cache partage a la stocker. Un refus parle du compte appelant, lui aussi.
+  res.setHeader('cache-control', 'private, no-store')
+  res.setHeader('vary', 'authorization, x-compte')
+
   const body = req.body || {}
   const brut = (v) => (Array.isArray(v) ? v[0] : v)
   // ⚠ DEUX NOMS POUR LA MEME CHOSE — le defaut qui avait tue le lot 4.3 entier.
@@ -173,11 +182,19 @@ module.exports = async (req, res) => {
       // separees auraient fait deux chiffres pour la meme question — et c'est
       // ainsi qu'un ecran finit par contredire l'autre.
       let positions = null
+      // ⚠ positions_jour VOYAGE DANS LA MEME REPONSE, et elle etait JETEE.
+      // grilleDuBien la calcule dans le meme appel (lib/yield/suggestion.js) ;
+      // api/yield-prix.js la sert deja. Sans elle, la pastille ne peut pas dire
+      // quels jours se detachent, donc la regle « le mot week-end ne s ecrit que
+      // s il est vrai » (spec §0 bis.1) ne serait pas tenable. Zero requete de
+      // plus, zero appel de plus.
+      let positionsJour = null
       try {
         const g = await grilleDuBien(supabase, bien, compte, {
           contexte, debut: debutHistorique, fin: veilleDe(auj)
         })
         positions = g.grille.positions
+        positionsJour = g.grille.positions_jour
       } catch (e) {
         // ⚠ UNE GRILLE ABSENTE N'EMPECHE PAS DE REGLER SES EVENEMENTS. On perd
         // la colonne « niveau calcule », pas l'ecran : `position_non_calculable`
@@ -185,7 +202,7 @@ module.exports = async (req, res) => {
         console.error('[yield-evenements] grille indisponible :', e.message)
       }
       const liste = calendrier({
-        contexte, debut: f1, fin: f2, reglages, positions,
+        contexte, debut: f1, fin: f2, reglages, positions, positions_jour: positionsJour,
         evenements: [...declaresLarges, ...commerciales]
       })
       // Les dates coupees, ajoutees a part puisqu'elles ne segmentent plus rien.
