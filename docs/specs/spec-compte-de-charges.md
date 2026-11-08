@@ -197,7 +197,12 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q21 (8 nov. 2026, 22 h 24) : d'accord.** La commission de Booking.com
   entre par la **facture mensuelle de commissions** que Booking.com envoie à
   l'hôte, transférée ou déposée comme toute facture (catégorie « commissions
-  des plateformes »). Aucun taux estimé.
+  des plateformes »). Aucun taux estimé. L'extranet Booking.com accepte un
+  contact de type « Factures », **par établissement** : l'adresse de factures
+  HôteSmart peut y être posée (question de Thierry, 8 nov. 2026, 22 h 26).
+  ⚠ À vérifier au premier mois : si l'e-mail de Booking porte le PDF, il entre
+  seul ; s'il n'est qu'une notification, il arrive « sans facture lisible »
+  (Q19) et le PDF se télécharge dans l'extranet.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
