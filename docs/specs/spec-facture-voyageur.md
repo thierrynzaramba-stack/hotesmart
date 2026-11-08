@@ -208,6 +208,20 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   faire un avoir. **Seul le titulaire** règle l'entité juridique (identité,
   TVA, numérotation) : domaine `facturation`, déjà non délégable. Chaque geste
   est gardé côté serveur (règle « un masquage par droit ne suffit jamais »).
+- **Q11 (8 nov. 2026) : trois portes vers le même lien.**
+  1. **Un bouton sur la fiche de la réservation.**
+  2. **Une balise `{lien_facture}` dans les messages programmés**, à côté de
+     `{prenom}` et des autres (`lib/balises.js`). Exemple : au départ,
+     « Besoin d'une facture ? Remplissez ce formulaire : {lien_facture} ».
+     Chaque voyageur reçoit son propre lien ; une facture n'est préparée que
+     s'il remplit le formulaire, et la suite ne change pas (confirmation de
+     l'hôte, puis émission).
+  3. **GuestFlow (l'IA) envoie le lien quand le voyageur demande une
+     facture**, dans ses réponses comme dans ses propositions.
+  ⚠ Les portes 2 et 3 touchent l'envoi au voyageur et le domaine du fil
+  Messagerie (`lib/cron-messages.js`, `lib/balises.js`, GuestFlow) : elles
+  se coordonnent avec lui, après son lot en cours, et ont droit à la review
+  de plus.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
