@@ -179,6 +179,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   disponible » avec le lien. ⚠ C'est un envoi au voyageur sans geste de
   l'hôte : l'étape qui le code a droit à la review de plus, et le texte du
   message est montré à Thierry avant le code.
+- **Q8 (8 nov. 2026) : réponse B — une ligne « Séjour », ménage compris**,
+  puis la taxe de séjour, puis le total. (Le ménage est bien transmis à part
+  par Channex pour Airbnb, 43/43 ; Thierry préfère la ligne unique.)
+  **Et avant l'envoi, l'hôte confirme que le total payé est juste** — le
+  moment exact de cette confirmation est posé en Q8 bis.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
