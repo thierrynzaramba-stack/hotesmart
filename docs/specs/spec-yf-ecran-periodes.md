@@ -465,6 +465,60 @@ détachent.
 5. un **férié**, un **pont** et un **week-end prolongé**, pour montrer les
    libellés de la table.
 
+## 0 quater. RECETTE DU 7-8 NOVEMBRE 2026 sur staging — et la décision A
+
+Staging, compte de recette, **Recette — Loft Pilotable**, pop-up « Quand vos
+prix bougent » ouverte depuis Prédiction de prix (`?evenements=1`).
+
+⚠ **CE QUE THIERRY A DIT EN OUVRANT L'ÉCRAN : « ça ne ressemble pas à la
+maquette ».** C'est exact, et c'est voulu : cet écran est l'intermédiaire
+qu'attend la production ; la maquette Événements est le lot 4 du chantier
+« Ce qui fait bouger vos prix », qui le remplacera. Question posée, réponse de
+Thierry : **cette version peut partir en production en attendant** (« oui »).
+
+| point | vérifié par | résultat |
+|---|---|---|
+| frise de **13 mois**, nov. 2026 → nov. 2027 | Thierry | ✓ |
+| un **niveau avec son chiffre** sur chaque ligne, aucun vocabulaire d'effet | Thierry | ✓ |
+| libellés de la table : « Week-end du 11 novembre », « Pont du 11 novembre », « 11 novembre » | Thierry | ✓ |
+| niveaux sur l'**échelle d'encre**, aucune teinte | Thierry | ✓ |
+| étiquette des flèches **avant** le clic | navigateur de Thierry | ✓ « Monter d'un cran : … passe à 3 · Haut » |
+| « **chaque année** » sur une ligne réglée, pas sur une automatique | navigateur de Thierry | ✓ |
+| ▲ puis ▼ | navigateur de Thierry | ⚠ **écart, ci-dessous** |
+| téléphone (cadre de 387 px) | navigateur de Thierry | ✓ ligne dans l'écran, flèches de 44 × 44 px, la frise défile dans son propre cadre (`.qpb-frise`, `overflow-x: auto`) |
+
+### ⚠ L'écart des flèches — mesuré, et c'est la règle du MOTEUR
+
+Ligne « Vacances de Noël — autre zone », Loft, 8 novembre 2026 :
+
+| état | lundi | mardi | mercredi | jeudi | vendredi | samedi | dimanche |
+|---|---|---|---|---|---|---|---|
+| automatique (« 0 cran ») | Haut | Haut | Moyen | Base | Moyen | Très haut | Moyen |
+| ▲ (cran +1 posé) | Haut | **Moyen** | Haut | Haut | Très haut | **Très haut** | Haut |
+| puis ▼ (cran 0 posé) | Moyen | Base | Moyen | Moyen | Haut | Haut | Moyen |
+
+Prédiction de prix, même état automatique : samedi 19 décembre Exceptionnel
+140 €, mardi 22 Haut 115 € — **l'automatique affiche bien ce que le moteur
+fait.**
+
+**La cause** : en automatique, le moteur prend la **mesure propre du couple
+segment|jour** ; dès qu'un cran est **posé** — même 0 — il part de la
+**structure ordinaire du bien** et lui ajoute le cran. Monter d'un cran peut
+donc faire **baisser** un jour (le mardi) et laisser le samedi en place, et ▼
+ne ramène pas à l'automatique : seul « remettre en automatique » le fait
+(vérifié, état de départ rétabli). **L'écran dit vrai** — l'étiquette annonce
+le groupe principal, et la pastille suit le moteur ; c'est le geste « un cran »
+qui n'a pas le sens qu'il annonce pour un hôte.
+
+⚠ **CETTE RÈGLE EST DÉJÀ EN PRODUCTION** : la pop-up servie aujourd'hui pose
+les mêmes crans sur le même moteur ; elle le montre seulement moins.
+
+**Décision de Thierry, 8 novembre 2026 : A — l'écran part en production
+quand même**, l'écart noté ici. On ne touche pas au moteur (décision du
+28 octobre). **Le lot 4 du chantier le ferme par construction** : l'hôte y
+pose le NIVEAU de chaque nuit (lot 2, `yield_reglages_position`, en production
+depuis le 8 novembre), plus aucun cran.
+
 ## 1. Pourquoi c'est illisible — mesuré dans le code, pas supposé
 
 | constat | mesure |
