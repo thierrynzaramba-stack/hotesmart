@@ -177,6 +177,10 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   (ou si celle du bien est archivée), la confirmation ne peut pas émettre. Le
   membre qui confirme ne peut pas la régler (titulaire seul). Proposition : la
   confirmation le dit, et le titulaire est prévenu.
+  → **Réponse de Thierry (8 nov. 2026, 22 h 08) : A.** La confirmation dit
+  pourquoi elle est bloquée, et le titulaire reçoit « Renseignez votre entité
+  juridique pour émettre vos factures » (une fois par blocage, pas à chaque
+  essai). Dès que l'entité existe, la confirmation redevient possible.
 - **P5 — Voyageur sans canal ou dans une autre langue.** Une réservation
   Offline sans e-mail ne peut recevoir aucun message : proposition, le lien
   s'affiche sur la fiche pour que l'hôte le transmette lui-même (SMS…). Un
@@ -296,7 +300,7 @@ devient une facture à l'émission.
   a confirmé et **quand** ; date de la notification et du dernier rappel.
 - **L'émetteur est résolu et copié À L'ÉMISSION** : l'entité du bien
   (`biens_entites`), sinon l'entité par défaut du compte. Aucune entité active
-  → l'émission est refusée (P4).
+  → l'émission est refusée avec son motif, et le titulaire est prévenu (P4).
 - **Facture émise, FIGÉE** : numéro, date, émetteur copié, destinataire
   copié, lignes copiées, mention de TVA, référence plateforme (Q14), langue du
   pays du bien (Q9), chemin du PDF. Rien n'est relu ensuite.
