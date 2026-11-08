@@ -116,10 +116,12 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q9 — Les droits.** Tranchée, voir ci-dessous.
 - **Q10 — Où vit l'écran.** Tranchée, voir ci-dessous.
 - **Q11 — Supprimer.** Tranchée, voir ci-dessous.
-- **Q12 — La conservation des justificatifs.** *Proposition* : tant que le
-  compte existe. La durée légale de conservation des pièces justificatives
-  (dix ans en droit commercial) est **à confirmer avec un comptable** ; le sort
-  des justificatifs à la suppression du compte est à trancher.
+- **Q12 — La conservation.** Tranchée, voir ci-dessous.
+- **Q22 — La période comptable : par entité ou par compte ?** *Proposition* :
+  par **entité** (une SCI peut clôturer à une autre date que l'hôte en nom
+  propre). Ce serait alors une colonne de `entites_juridiques` (début
+  d'exercice), à demander au fil facturation ; par compte, elle vivrait dans
+  ce chantier.
 - **Q13 — L'export pour le comptable** (tableau + justificatifs). V1 ou lot
   suivant ? *Proposition* : lot suivant ; la comptabilité elle-même
   (amortissements, liasse) reste hors d'HôteSmart.
@@ -223,6 +225,22 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   mis à jour dans la même écriture. ⚠ **Une charge automatique de plateforme
   supprimée n'est jamais recréée** par la matérialisation quotidienne : une
   trace de suppression (compte, réservation, date) est gardée, sans montant.
+- **Q12 (8 nov. 2026, 22 h 43) : « HôteSmart conserve seulement N et N-1 ;
+  l'hôte choisit sa période comptable ».** HôteSmart garde les charges de
+  l'exercice en cours et de l'exercice précédent, pas au-delà. L'exercice est
+  réglé par l'hôte (Q22). Conséquences proposées :
+  - **purge** à l'ouverture de l'exercice N+1 : tout ce qui est antérieur à
+    N-1 est effacé — lignes, justificatifs du bucket, résumé, traces de
+    suppression des charges de plateforme. Tâche du cron dédié, idempotente ;
+  - **prévenir avant** : l'hôte est averti (proposition : 30 jours avant)
+    de ce qui va être effacé, et peut télécharger ses justificatifs. La
+    conservation légale (plusieurs années, à confirmer avec un comptable)
+    reste la sienne : HôteSmart n'est pas son archive légale ;
+  - **l'export (Q13) doit exister avant la première purge**, soit au plus
+    tard à la fin du premier exercice N-1 ;
+  - les charges automatiques de plateforme ne sont matérialisées que pour N
+    et N-1 ;
+  - à la suppression du compte, tout est effacé avec lui (proposition).
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
