@@ -31,6 +31,8 @@ test('chaque cle que le module demande existe dans les trois langues, non vide',
     'avis.v_': ['positif', 'remarque', 'rien_signale'],
     'avis.etat_': ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee', 'echec_publication', 'expiree', 'abandonnee', 'evaluee_ailleurs'],
     'avis.origine_': ['humain', 'ia', 'ia_valide', 'ia_presta', 'ia_auto', 'ailleurs', 'ia_inconnue'],
+    'avis.p_': ['sms', 'email', 'oral', 'message'],
+    'avis.recu_': ['sms', 'email', 'oral', 'message'],
   }
   for (const prefixe of Object.keys(familles)) assert.ok(src.includes(`'${prefixe}' +`), `famille ${prefixe} introuvable dans le module : la liste du test est perimee`)
   const cles = new Set([...directes, ...Object.entries(familles).flatMap(([p, s]) => s.map(x => p + x))])

@@ -625,6 +625,9 @@ async function contexteDesSejours (userId, evaluations) {
 // ⚠ LES COMPTEURS PORTENT SUR TOUTE LA PERIODE, calcules par la base
 // (lib/stats-avis.js) : jamais sur les lignes servies.
 const MAX_AVIS_CARTES = 5000
+// Une borne, pas un usage : des detections qui dorment par centaines seraient
+// deja un defaut de tri, pas une liste a peindre.
+const MAX_ANCIENS_A_TRAITER = 100
 const MAX_EVALS_CARTES = 2000
 const PAGE_AVIS = 1000
 async function cartesLister (req, res, garde) {
@@ -700,7 +703,13 @@ async function cartesLister (req, res, garde) {
   // sans eux pour savoir lesquelles partent, puis on lit leurs sejours.
   const maintenant = Date.now()
   const sansSejours = assemblerCartes({ evaluations: ev.data || [], avis, nomBien, voitSejours, maintenant })
-  const servies = [...sansSejours.attente, ...sansSejours.recents, ...(avecAnciens ? sansSejours.anciens : [])]
+  // ⚠ LES DETECTIONS DES ANCIENS SONT SERVIES MEME SECTION FERMEE (revue du lot
+  // Avis V5, constat 5) : la page les range dans « À traiter », et une bulle
+  // qui dirait « Rien ne vous attend » pendant qu'un message de voyageur ecrit
+  // trois semaines apres son depart attend une confirmation serait un
+  // mensonge. Elles sont deja assemblees en memoire : aucune lecture de plus.
+  const aTraiterAnciens = (liste) => liste.filter(c => (c.avis || []).some(a => a.detecte)).slice(0, MAX_ANCIENS_A_TRAITER)
+  const servies = [...sansSejours.attente, ...sansSejours.recents, ...(avecAnciens ? sansSejours.anciens : aTraiterAnciens(sansSejours.anciens))]
   const uids = servies.map(c => (c.cle.startsWith('sejour:') ? c.cle.slice(7) : null)).filter(Boolean)
   const sejours = await sejoursDe(userId, uids)
   const cartes = assemblerCartes({ evaluations: ev.data || [], avis, sejours, nomBien, voitSejours, maintenant })
@@ -715,6 +724,10 @@ async function cartesLister (req, res, garde) {
     cartes: { attente: cartes.attente, recents: cartes.recents, anciens: avecAnciens ? cartes.anciens.slice(0, MAX_LIGNES) : null },
     anciens_total: anciensTotal,
     anciens_tronques: avecAnciens && anciensTotal > MAX_LIGNES,
+    // Les cartes des Anciens qui portent une detection a confirmer, servies
+    // meme section fermee (voir plus haut). Section ouverte, la page les lit
+    // dans `cartes.anciens` et ignore ce champ.
+    anciens_a_traiter: aTraiterAnciens(cartes.anciens),
     // La liste lue a atteint une borne : des cartes anciennes peuvent manquer.
     liste_incomplete: avisTronques || (ev.data || []).length >= MAX_EVALS_CARTES,
     // La liste de CHOIX (filtre et formulaire de la page) : sans les biens

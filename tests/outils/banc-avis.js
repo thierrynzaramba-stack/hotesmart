@@ -102,8 +102,7 @@ async function monter (o = {}) {
   if (o.cache && cache) cache.ecrire('avis', MOI, COMPTE, o.cache)
 
   const injectes = {
-    requireAuth: async () => ({ access_token: 'jeton-session' }),
-    getUser: async () => ({ id: MOI, email: 'th@exemple.test' }),
+    requireAuth: async () => ({ access_token: 'jeton-session', user: { id: MOI, email: 'th@exemple.test' } }),
     signOut: async () => {},
     supabase: { auth: { getSession: async () => ({ data: { session: { access_token: 'jeton-relu' } } }) } },
     initErrorHandler: () => {},

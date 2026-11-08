@@ -77,31 +77,42 @@ test('LE TEST QUI COMPTE (point E) : un avis masque par Airbnb se dit, sans 0/10
   const d = doc(rendre(donnees({ attente: [enAttente()] }), { avecBus: true }))
   const ligne = d.querySelector('.avp-atraiter .avp-ligne-atraiter')
   const t = ligne.textContent
-  assert.match(t, /Avis déposé, masqué par Airbnb jusqu’à votre évaluation\./)
+  assert.match(ligne.querySelector('.avp-long').textContent, /^Avis déposé, masqué par Airbnb jusqu’à votre évaluation\.$/)
+  // Au telephone, la forme courte (spec §4) : les deux sont dans le rendu, le CSS en montre une.
+  assert.ok([...ligne.querySelectorAll('.avp-court')].some(x => x.textContent === 'Avis masqué jusqu’à votre évaluation'))
   assert.doesNotMatch(t, /0 \/ 5|\/10/)
   assert.match(t, /2 jours restants/)
   // ⚠ L'urgence se dit en MOTS, la couleur ne fait que la souligner.
   const dernier = doc(rendre(donnees({ attente: [enAttente({ evaluation: { ...enAttente().evaluation, jours_restants: 1 } })] })))
   assert.match(dernier.querySelector('.avp-delai--urgent').textContent, /^Dernier jour$/)
-  assert.equal(d.querySelector('[data-evaluer]').textContent, 'Évaluer Angela')
+  assert.equal(d.querySelector('[data-evaluer] .avp-long').textContent, 'Évaluer Angela')
+  assert.equal(d.querySelector('[data-evaluer] .avp-court').textContent, 'Évaluer')
+  // Une ligne d'action dit le prenom et l'initiale (spec §3.4).
+  assert.match(ligne.querySelector('.avp-qui').textContent, /^Angela X\. /)
   // Le compteur de la bulle : une evaluation, et AUCUNE carte en double dans Recents.
   assert.equal(d.querySelector('[data-compte-atraiter]').textContent, '1')
   assert.equal(d.querySelectorAll('.avp-carte').length, 0)
 })
 
-test('« À traiter » : l etat de notre avis se dit quand il change le geste (« Remplie par la prestataire »)', () => {
+test('« À traiter » : l etat ET l origine de notre avis se disent (« Remplie par la prestataire », « rédigé par l’IA… »)', () => {
   const d = doc(rendre(donnees({ attente: [enAttente({ evaluation: { ...enAttente().evaluation, status: 'soumise_prestataire', etat: 'soumise_prestataire' } })] }), { avecBus: true }))
   assert.match(d.querySelector('.avp-ligne-atraiter').textContent, /Remplie par la prestataire/)
+  // Revue du lot V5, constat 6 : l'inventaire (E7) garde l'origine, y compris sur une ligne a faire.
+  const ia = doc(rendre(donnees({ attente: [enAttente({ evaluation: { ...enAttente().evaluation, status: 'a_valider', etat: 'a_valider', origine: { cle: 'ia', libelle: 'x' } } })] }), { avecBus: true }))
+  assert.equal(ia.querySelector('.avp-ligne-atraiter .avp-origine').textContent, 'rédigé par l’IA, pas encore validé')
 })
 
 test('« À traiter » recoit les DETECTIONS : citation, boutons au droit d ecriture seulement, et la carte qui n avait qu elles disparait', () => {
-  const det = { id: 'd1', masque: false, detecte: true, analyse: true, verdict: 'remarque', texte: 'La douche était sale', extrait: 'douche sale' }
+  const det = { id: 'd1', masque: false, detecte: true, analyse: true, verdict: 'remarque', texte: 'La douche était sale mais sinon tout était parfait', extrait: 'douche sale', recu_le: '2026-10-30T10:00:00Z' }
   const seule = carte({ cle: 'avis:d1', evaluation: null, avis: [det], voyageur: { prenom: 'Paul', nom: 'D' } })
   const d = doc(rendre(donnees({ recents: [seule, carte({ cle: 'sejour:u2' })] }), { peutEcrire: true }))
   const ligne = d.querySelector('[data-detection="d1"]')
   assert.ok(ligne, 'la detection est dans « À traiter »')
-  assert.match(ligne.textContent, /« douche sale »/)
-  assert.match(ligne.textContent, /Détecté dans un message · À confirmer avant d’être compté · La bulle/)
+  assert.equal(ligne.querySelector('.avp-citation').textContent, '« douche sale »')
+  // ⚠ L'EXTRAIT NE REMPLACE PAS LE MESSAGE (revue du lot V5, constat 4) : on
+  // confirme sur ce que le voyageur a ECRIT, pas sur un resume.
+  assert.equal(ligne.querySelector('.avp-texte').textContent, 'La douche était sale mais sinon tout était parfait')
+  assert.match(ligne.textContent, /Détecté dans un message · À confirmer avant d’être compté · La bulle · reçu le 30 oct\. 2026/)
   assert.deepEqual([...ligne.querySelectorAll('[data-valider]')].map(b => b.dataset.statut), ['ignore', 'confirme'])
   assert.equal(d.querySelector('[data-compte-atraiter]').textContent, '1')
   // La carte « avis seul » n'avait que la detection : elle ne reste pas vide dans Recents.
@@ -124,6 +135,20 @@ test('point C : trois temps ; une evaluation expiree se dit, sans bouton ; rien 
   assert.equal(d.querySelectorAll('.avp-atraiter, .badge--amber').length, 0, 'pas d ambre quand rien n attend')
 })
 
+test('« À traiter » recoit les detections des ANCIENS meme section fermee, et le compte des Anciens ne les compte plus', () => {
+  // Revue du lot V5, constat 5 : un voyageur qui ecrit trois semaines apres son
+  // depart produit une detection rangee dans les Anciens. Section fermee, la
+  // bulle disait « Rien ne vous attend ».
+  const det = carte({ cle: 'avis:v9', section: 'anciens', evaluation: null, avis: [{ id: 'v9', masque: false, detecte: true, analyse: true, verdict: 'remarque', texte: 'Moquette tachée' }] })
+  const ferme = doc(rendre(donnees({}, { anciens_total: 4, anciens_a_traiter: [det] }), { peutEcrire: true }))
+  assert.ok(ferme.querySelector('[data-detection="v9"]'), 'la detection est dans « À traiter »')
+  assert.equal(ferme.querySelectorAll('.avp-rien').length, 0)
+  assert.equal(ferme.querySelector('details[data-anciens] .avp-compte').textContent, '3', 'la carte montee n est plus comptee dans les Anciens')
+  // Section ouverte : la meme detection vient des Anciens, une seule fois.
+  const ouvert = doc(rendre(donnees({ anciens: [det] }, { anciens_total: 4, anciens_a_traiter: [det] }), { anciensOuverts: true, peutEcrire: true }))
+  assert.equal(ouvert.querySelectorAll('[data-detection="v9"]').length, 1)
+})
+
 test('les textes de section qui disent un vide ou une borne', () => {
   const vide = doc(rendre(donnees({ anciens: [] }, { anciens_tronques: true, liste_incomplete: true }), { anciensOuverts: true }))
   const t = vide.body.textContent
@@ -133,6 +158,8 @@ test('les textes de section qui disent un vide ou une borne', () => {
   assert.match(t, /La liste est incomplète : les séjours les plus anciens ne sont pas tous affichés\./)
   const ferme = doc(rendre(donnees({})))
   assert.match(ferme.querySelector('details[data-anciens]').textContent, /Chargement…/)
+  const direct = doc(rendre(donnees({ recents: [carte({ plateforme: { cle: 'direct', source: 'sms' } }), carte({ cle: 'x', plateforme: { cle: 'autre' } })] })))
+  assert.deepEqual([...direct.querySelectorAll('.avp-source')].map(x => x.textContent), ['reçu par SMS', 'Avis'], 'une source directe en phrase ; « autre » ne s ecrit jamais tel quel')
   const sansTexte = doc(rendre(donnees({ recents: [carte({ avis: [], evaluation: null })] })))
   assert.match(sansTexte.body.textContent, /Pas encore reçu\./)
   assert.match(sansTexte.body.textContent, /Aucune évaluation du voyageur pour ce séjour\./)
@@ -242,17 +269,53 @@ test('monter : une detection confirmee part au serveur puis la page se relit ; u
   delete global.window
 })
 
-test('monter : les donnees du cache se peignent AVANT la lecture, puis la reponse les remplace', async () => {
+test('monter : le cache peint les CHIFFRES et les filtres avant la lecture — JAMAIS les cartes', async () => {
+  // Revue du lot V5, constat 1 : les cartes portent des noms de voyageurs, des
+  // dates et des textes d'avis ; le cache ne connait pas les droits.
+  const dom = new JSDOM('<!doctype html><body><div id="c"><p>attente</p></div><div id="s"></div></body>')
+  global.window = dom.window
+  const c = dom.window.document.getElementById('c')
+  const s = dom.window.document.getElementById('s')
+  let vuAvant = null
+  const filtres = []
+  await monter(c, {
+    initiales: { ...donnees({ recents: [carte({ voyageur: { prenom: 'Cache', nom: null } })] }), stats: { total: 9, note_sur_5: 4.2, notes: 9, positif: 1, remarque: 0 } },
+    zoneStats: s,
+    surDonnees: (d) => filtres.push((d.biens || []).length),
+    charger: async () => { vuAvant = { cartes: c.textContent, stats: s.textContent }; return donnees({ recents: [carte()] }) },
+  })
+  assert.equal(vuAvant.cartes, 'attente', 'aucune carte venue du cache')
+  assert.match(vuAvant.stats, /4,2/)
+  assert.equal(filtres.length, 2, 'les filtres se peignent depuis le cache, puis depuis la reponse')
+  assert.equal(c.querySelector('.avp-qui').textContent, 'Angela X')
+  delete global.window
+})
+
+test('monter : la DERNIERE lecture demandee gagne, pas la derniere arrivee ; la relecture est confiee avant la premiere reponse', async () => {
+  // Revue du lot V5, constats 2 et 3.
   const dom = new JSDOM('<!doctype html><body><div id="c"></div></body>')
   global.window = dom.window
   const c = dom.window.document.getElementById('c')
-  let vuAvant = null
-  await monter(c, {
-    initiales: donnees({ recents: [carte({ voyageur: { prenom: 'Cache', nom: null } })] }),
-    charger: async () => { vuAvant = c.querySelector('.avp-qui').textContent; return donnees({ recents: [carte()] }) },
+  const resolutions = []
+  let recharger = null
+  let filtre = '30j'
+  const fin = monter(c, {
+    filtres: () => ({ periode: filtre }),
+    surPret: (r) => { recharger = r },
+    charger: (params) => new Promise(ok => resolutions.push({ params, ok })),
   })
-  assert.equal(vuAvant, 'Cache')
-  assert.equal(c.querySelector('.avp-qui').textContent, 'Angela X')
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(typeof recharger, 'function', 'la page peut relire avant la premiere reponse')
+  filtre = '6mois'
+  const seconde = recharger()
+  await new Promise(r => setTimeout(r, 0))
+  assert.deepEqual(resolutions.map(x => x.params), ['periode=30j', 'periode=6mois'])
+  // La seconde repond d'abord, la premiere ensuite : l'ecran garde la seconde.
+  resolutions[1].ok(donnees({ recents: [carte({ voyageur: { prenom: 'Six', nom: 'Mois' } })] }))
+  await seconde
+  resolutions[0].ok(donnees({ recents: [carte({ voyageur: { prenom: 'Trente', nom: 'Jours' } })] }))
+  await fin
+  assert.equal(c.querySelector('.avp-qui').textContent, 'Six Mois')
   delete global.window
 })
 

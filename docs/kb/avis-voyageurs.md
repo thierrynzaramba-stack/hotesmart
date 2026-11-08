@@ -1125,8 +1125,13 @@ faut savoir pour y toucher :
 - **« À traiter » remplace « En attente de notation »** et reçoit aussi les avis
   **détectés** dans un message. Une carte qui n'avait qu'une détection, sans
   évaluation, disparaît de Récents : elle n'avait rien d'autre à dire. Les
-  détections des Anciens n'y montent qu'à l'ouverture de la section (elles ne
-  sont lues qu'alors, comme avant).
+  détections des Anciens sont servies **même section fermée**
+  (`anciens_a_traiter`, assemblées en mémoire, aucune lecture de plus).
+- **Le cache navigateur ne garde jamais les cartes** : seulement les chiffres,
+  les logements, les périodes et la publication automatique. Il ne connaît
+  pas les droits et ne se vide qu'à la déconnexion.
+- **La dernière lecture demandée gagne** (`monter` numérote ses lectures), et la
+  page peut relire avant la première réponse (`surPret`).
 - **Les textes passent par `t`** (I18n de la page). `TEXTES_FR` est le repli du
   module, et il doit rester **identique** à `fr.json` —
   `tests/avis-cartes-i18n.test.js` rougit sinon. Une origine que l'écran ne

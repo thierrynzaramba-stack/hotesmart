@@ -22,7 +22,7 @@
 
 const { contexteDEcran } = require('../../lib/require-permission')
 const { peutLire } = require('../../lib/permissions')
-const { compterRequetes } = require('../../lib/compte-requetes')
+const { compterRequetes, requetesJusquIci } = require('../../lib/compte-requetes')
 const avis = require('../avis')
 
 // Les lectures d'`api/avis.js` repondent sur un `res` : on leur en donne un
@@ -47,8 +47,7 @@ function resumeAuto (corps) {
   return { actifs: biens.filter(b => b.heures !== null && b.heures !== undefined).length, total: biens.length }
 }
 
-module.exports = async (req, res) => {
-  const t0 = Date.now()
+async function traiter (req, res, t0) {
   const garde = await contexteDEcran(req, res)
   if (!garde.ok) return
   if (req.method !== 'GET') {
@@ -68,28 +67,34 @@ module.exports = async (req, res) => {
     anciens: req.query && req.query.anciens,
   }
 
-  let lu
-  try {
-    lu = await compterRequetes(async () => {
-      const cartes = reponseCaptee()
-      const auto = reponseCaptee()
-      await Promise.all([
-        avis.ecran.cartesLister({ method: 'GET', query }, cartes.res, g),
-        avis.ecran.autoValidationLire({ method: 'GET', query: {} }, auto.res, g),
-      ])
-      return { cartes: cartes.sortie, auto: auto.sortie }
-    })
-  } catch (e) {
-    console.error('[ecran/avis] lecture echec:', e && e.message)
-    return res.status(500).json({ error: 'Lecture impossible' })
-  }
-  res.setHeader('Server-Timing', `total;dur=${Date.now() - t0};desc="${lu.requetes} requêtes"`)
+  const cartes = reponseCaptee()
+  const auto = reponseCaptee()
+  await Promise.all([
+    avis.ecran.cartesLister({ method: 'GET', query }, cartes.res, g),
+    avis.ecran.autoValidationLire({ method: 'GET', query: {} }, auto.res, g),
+  ])
+  // ⚠ LE COMPTE PART DU DEBUT DE LA REQUETE, garde comprise (session, compte,
+  // profil) : c'est ce que l'ecran paie, pas seulement ses lectures metier.
+  res.setHeader('Server-Timing', `total;dur=${Date.now() - t0};desc="${requetesJusquIci()} requêtes"`)
 
-  const { cartes, auto } = lu.resultat
-  if (cartes.code !== 200) {
-    return res.status(cartes.code).json(cartes.body || { error: 'Lecture impossible' })
+  if (cartes.sortie.code !== 200) {
+    // ⚠ LE MESSAGE SEUL, JAMAIS `detail` : les lectures d'`api/avis.js` y
+    // mettent le message brut de la base, qui n'a rien a faire dans un
+    // navigateur (revue du lot Avis V5).
+    const corps = cartes.sortie.body || {}
+    return res.status(cartes.sortie.code).json({ error: corps.error || 'Lecture impossible' })
   }
   // L'etat de la publication automatique n'est qu'une information : son echec
   // se tait (la page masque la ligne), il ne casse pas l'ecran.
-  return res.status(200).json({ ...cartes.body, publication_auto: auto.code === 200 ? resumeAuto(auto.body) : null })
+  return res.status(200).json({ ...cartes.sortie.body, publication_auto: auto.sortie.code === 200 ? resumeAuto(auto.sortie.body) : null })
+}
+
+module.exports = async (req, res) => {
+  const t0 = Date.now()
+  try {
+    await compterRequetes(() => traiter(req, res, t0))
+  } catch (e) {
+    console.error('[ecran/avis] lecture echec:', e && e.message)
+    if (!res.headersSent) return res.status(500).json({ error: 'Lecture impossible' })
+  }
 }

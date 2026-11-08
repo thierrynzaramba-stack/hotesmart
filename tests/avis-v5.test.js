@@ -150,6 +150,15 @@ test('saisie : les champs partent au serveur, un double clic ne cree pas deux av
   } finally { banc.fermer() }
 })
 
+test('saisie : Entree dans un champ ne soumet pas la fenetre (revue, constat 7)', async () => {
+  const banc = await monter({ peutEcrire: true })
+  try {
+    const ev = new banc.w.Event('submit', { bubbles: true, cancelable: true })
+    banc.$('[data-bind="saisie-form"]').dispatchEvent(ev)
+    assert.ok(ev.defaultPrevented, 'la soumission implicite est arretee')
+  } finally { banc.fermer() }
+})
+
 // ─── Reglages ───────────────────────────────────────────────────────────────
 test('reglages : l engrenage ouvre le volet, monte l ecran UNE fois, et la fermeture relit l ecran', async () => {
   const banc = await monter({ peutEcrire: true })
@@ -188,16 +197,57 @@ test('?evaluer=<booking_uid> ouvre la fenetre d evaluation par le bus, puis l ec
 })
 
 // ─── Affichage instantane ───────────────────────────────────────────────────
-test('cache : les dernieres donnees s affichent AVANT la reponse, pour la meme periode seulement', async () => {
+test('cache : les CHIFFRES et les filtres s affichent avant la reponse, pour la meme periode — les cartes jamais', async () => {
   const anciennes = { ...reponseEcran({ recents: [carteRecente(1, 1)] }), vue_periode: '30j' }
+  anciennes.stats = { ...anciennes.stats, note_sur_5: 4.2 }
   const banc = await monter({ cache: anciennes, retenirEcran: true })
   try {
-    assert.equal(banc.$$('.avp-carte').length, 1, 'peint depuis le cache')
+    assert.match(banc.$('[data-bind="stats"]').textContent, /4,2/, 'les chiffres du cache')
+    assert.equal(banc.$$('[data-bind="biens"] [data-bien]').length, 3, 'les filtres du cache')
+    assert.equal(banc.$$('.avp-carte').length, 0, 'aucune carte depuis le cache')
     await banc.liberer()
-    assert.equal(banc.$$('.avp-carte').length, 0, 'remplace par la reponse')
+    assert.match(banc.$('[data-bind="stats"]').textContent, /4,8/, 'remplaces par la reponse')
   } finally { banc.fermer() }
   const autre = await monter({ cache: { ...anciennes, vue_periode: '6mois' }, retenirEcran: true })
-  try { assert.equal(autre.$$('.avp-carte').length, 0, 'une autre periode ne se peint pas') ; await autre.liberer() } finally { autre.fermer() }
+  try { assert.doesNotMatch(autre.$('[data-bind="stats"]').textContent, /4,2/, 'une autre periode ne se peint pas'); await autre.liberer() } finally { autre.fermer() }
+})
+
+test('LE TEST QUI COMPTE (revue, constat 1) : le cache ne garde NI cartes, NI nom, NI texte d avis', async () => {
+  const recents = [{ ...carteRecente(1, 1), voyageur: { prenom: 'Angela', nom: 'Martin' }, avis: [{ id: 'a', masque: false, texte: 'Texte secret', analyse: true, verdict: 'positif' }] }]
+  const banc = await monter({ ecran: () => reponseEcran({ recents }) })
+  try {
+    const gardes = Object.keys(banc.w.localStorage).filter(k => k.startsWith('hs.ecran.avis.'))
+    assert.equal(gardes.length, 1, 'la vue par defaut est gardee')
+    const brut = banc.w.localStorage.getItem(gardes[0])
+    for (const interdit of ['Angela', 'Martin', 'Texte secret', '"cartes"', '2026-10-01']) assert.ok(!brut.includes(interdit), `le cache garde « ${interdit} »`)
+    assert.deepEqual(Object.keys(JSON.parse(brut).donnees).sort(), ['biens', 'periodes', 'publication_auto', 'stats', 'vue_periode'])
+  } finally { banc.fermer() }
+})
+
+test('cache : une lecture filtree par logement ou avec les Anciens n entre pas dans le cache', async () => {
+  const banc = await monter()
+  try {
+    const cle = Object.keys(banc.w.localStorage).find(k => k.startsWith('hs.ecran.avis.'))
+    const avant = banc.w.localStorage.getItem(cle)
+    banc.w.localStorage.removeItem(cle)
+    await banc.cliquer(banc.$('[data-bien="ref-1"]'))
+    assert.equal(banc.w.localStorage.getItem(cle), null, 'filtre par logement : rien d ecrit')
+    assert.ok(avant)
+  } finally { banc.fermer() }
+})
+
+test('LE TEST QUI COMPTE (revue, constat 2) : un filtre clique PENDANT le chargement relit l ecran, et le cache porte la periode de SA lecture', async () => {
+  const anciennes = { ...reponseEcran(), vue_periode: '30j' }
+  const banc = await monter({ cache: anciennes, retenirEcran: true })
+  try {
+    // L'ecran est peint depuis le cache, la premiere lecture est en vol.
+    await banc.cliquer(banc.$('[data-periode="6mois"]'))
+    assert.deepEqual(banc.lecturesEcran().map(f => f.url), ['/api/ecran/avis?periode=30j', '/api/ecran/avis?periode=6mois'], 'le clic relit')
+    await banc.liberer()
+    const cle = Object.keys(banc.w.localStorage).find(k => k.startsWith('hs.ecran.avis.'))
+    const garde = JSON.parse(banc.w.localStorage.getItem(cle)).donnees
+    assert.equal(garde.vue_periode, '30j', 'la derniere ecrite est celle de la lecture des 30 jours, sous SON etiquette')
+  } finally { banc.fermer() }
 })
 
 test('une page qui ne peut pas demarrer le DIT', async () => {

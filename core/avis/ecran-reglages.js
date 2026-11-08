@@ -345,7 +345,7 @@ export function rendre (etat) {
       + `<label class="hs-auto-nom"><input type="checkbox" data-auto-case="${echapper(b.property_id)}"${actif ? ' checked' : ''}${verrou}> ${echapper(b.nom || 'Bien')}</label>`
       + `<label class="hs-auto-delai"><input type="number" min="${bornes.min}" max="${bornes.max}" step="1" data-auto-heures="${echapper(b.property_id)}" `
       + `value="${actif ? echapper(String(b.heures)) : ''}"${actif && b.modifiable ? '' : ' disabled'} placeholder="48"> h</label>`
-      + (m ? `<small class="hs-auto-message" style="color:${m.ton === 'erreur' ? '#b3261e' : '#2e5e3a'}">${echapper(m.texte)}</small>` : '')
+      + (m ? `<small class="hs-auto-message" style="color:${m.ton === 'erreur' ? 'var(--danger-ink, #b3261e)' : 'var(--ok-ink, #2e5e3a)'}">${echapper(m.texte)}</small>` : '')
       + `</div>`
   }).join('')
   const blocAuto = `<div class="card"><div class="card-title">Publication automatique</div>`

@@ -80,8 +80,10 @@ Bulle `--amber-soft`, titre « À traiter » et compteur `--amber`. Une ligne pa
   (droit `write` ; sans ce droit, la ligne s'affiche sans boutons, comme aujourd'hui).
   Une fois confirmée, la détection rejoint la carte de son séjour comme un avis
   ordinaire ; ignorée, elle disparaît. Une détection rangée dans les Anciens
-  rejoint « À traiter » quand la section est ouverte (elle n'est lue qu'alors,
-  comme avant).
+  (un voyageur qui écrit trois semaines après son départ) est servie **même
+  section fermée** (`anciens_a_traiter`) : la bulle ne dit jamais « Rien ne
+  vous attend » pendant qu'elle attend. L'extrait s'affiche en citation, **le
+  message entier en dessous** (replié), avec sa date.
 - Rien à faire : la bulle est remplacée par une ligne neutre **« Rien ne vous
   attend. »** (texte actuel) — pas d'ambre quand rien n'attend.
 
@@ -188,10 +190,15 @@ Chrome :
    (requalifier, valider, créer). Une fonction de plus : 67 aujourd'hui sur 100.
 2. **Donnée non urgente = résumé.** Les trois chiffres sont aujourd'hui calculés à
    chaque ouverture. **Voir Q1.**
-3. **Affichage instantané.** La réponse de l'écran est gardée par le cache
-   navigateur partagé, à clé utilisateur + compte, purgé à la déconnexion par le geste
-   commun : affichée tout de suite, puis relue. Aucune des quatre données interdites
-   (code d'accès, paiement, surréservation, tâche qui en porte un) n'y figure.
+3. **Affichage instantané.** Le cache navigateur partagé (clé utilisateur +
+   compte, purgé à la déconnexion) garde **les chiffres, les logements, les
+   périodes et l'état de la publication automatique** — pas les cartes. Elles
+   portent des noms de voyageurs, des dates de séjour et le texte des avis ; le
+   cache ne connaît pas les droits et ne se vide qu'à la déconnexion, donc un
+   membre à qui l'on retire un logement ou `reservations` les reverrait jusqu'à
+   douze heures (revue du 8 novembre 2026, constat 1). Même règle que
+   `derniers_avis` sur l'accueil. Aucune des quatre données interdites n'y
+   figure non plus.
 4. **`private, no-store`** posé par `contexteDEcran` avant le premier refus, 405
    compris (dette 90) ; un test le vérifie sur le nouvel endpoint.
 5. **Fichiers statiques versionnés** : les fichiers i18n de la page passent par le
@@ -280,6 +287,27 @@ fond blanc), parce que le noir est réservé à la navigation (charte du
   `tests/avis-cartes-i18n.test.js`, `tests/avis-cartes-dom.test.js` réécrit sur
   le nouveau rendu (chaque assertion de la recette du 7 octobre gardée) ;
   `budget-ecran` et `ecrans-sans-biens-archives` connaissent la page.
+
+**Review du 8 novembre 2026 (a6b33182), corrigée :**
+1. *Sécurité* — le cache gardait les cartes (noms, dates, textes) : il ne garde
+   plus que la partie non nominative (§6, point 3).
+2. Un filtre cliqué pendant la première lecture ne relisait pas, et le cache
+   rangeait la réponse sous la période cliquée : la relecture est confiée à la
+   page avant la première réponse (`surPret`), et le cache prend la période de
+   SA lecture.
+3. La dernière lecture **demandée** gagne, plus la dernière arrivée (numéro de
+   séquence dans `monter`).
+4. Une détection montre l'extrait **et** le message entier, avec sa date.
+5. Les détections des Anciens sont servies section fermée.
+6. L'origine de notre avis est dite sur les lignes « À traiter ».
+7. Entrée dans la fenêtre de saisie ne la ferme plus sans rien dire.
+8. `Server-Timing` compte depuis le début de la requête, garde comprise ; un
+   refus ne relaie plus le message brut de la base.
+9-12. Tests : compte de requêtes exact, enveloppe qui lève, droit
+   `reservations`, contenu du cache. Mineurs repris : formes courtes au
+   téléphone, « reçu par SMS », prénom et initiale, date du jour en local,
+   filtre remis au défaut qui relit l'écran, compte des Anciens, couleurs du
+   volet aux jetons, utilisateur lu dans la session.
 
 Chaque étape : une review, zéro rouge, remise au chef de file avec les cinq éléments.
 

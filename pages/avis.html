@@ -119,7 +119,7 @@
 <script src="/shared/nav.js"></script>
 <script type="module">
 import { requireAuth } from '/components/auth-guard.js'
-import { getUser, signOut, supabase } from '/shared/supabase.js'
+import { signOut, supabase } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
@@ -227,26 +227,45 @@ function peindreAuto (pa) {
 function surDonnees (d) {
   etat.biens = (d && d.biens) || []
   etat.periodes = ((d && d.periodes) || ['30j']).filter(p => PERIODES_CONNUES.includes(p))
-  if (!etat.periodes.includes(etat.periode)) etat.periode = etat.periodes.includes('30j') ? '30j' : etat.periodes[0]
-  if (etat.bien && !etat.biens.some(b => String(b.provider_property_id) === etat.bien)) etat.bien = ''
+  // Un filtre que le serveur ne propose plus (période retirée, logement sorti
+  // du périmètre) est remis au défaut — ET L'ÉCRAN SE RELIT : sinon « Tous »
+  // serait pressé au-dessus des cartes d'un seul logement.
+  let corrige = false
+  if (!etat.periodes.includes(etat.periode)) { etat.periode = etat.periodes.includes('30j') ? '30j' : etat.periodes[0]; corrige = true }
+  if (etat.bien && !etat.biens.some(b => String(b.provider_property_id) === etat.bien)) { etat.bien = ''; corrige = true }
   peindreFiltres()
   peindreAuto(d && d.publication_auto)
   const sel = $('[data-bind="s-bien"]')
   const garde = sel.value
   sel.innerHTML = etat.biens.map(b => `<option value="${esc(b.provider_property_id)}">${esc(b.name)}</option>`).join('')
   if (garde) sel.value = garde
+  if (corrige && etat.recharger) etat.recharger()
 }
 
 // ─── L'écran ────────────────────────────────────────────────────────────────
-// La vue par défaut (tous les logements, sans les anciens) se garde pour
-// l'affichage instantané : clé utilisateur + compte, vidée à la déconnexion
-// (shared/cache-ecran.js). Rien de ce qu'elle porte n'est un code, un
-// paiement ni une surréservation.
+// L'affichage instantané : clé utilisateur + compte, vidée à la déconnexion
+// (shared/cache-ecran.js), et pour la vue par défaut seulement (tous les
+// logements, sans les anciens).
+// ⚠ ON NE GARDE QUE CE QUI N'EST PAS NOMINATIF (revue du lot Avis V5,
+// constat 1) : les chiffres, les logements, les périodes, l'état de la
+// publication automatique. Les CARTES portent des noms de voyageurs, des dates
+// de séjour et le texte des avis ; le cache ne connaît que l'utilisateur et le
+// compte, jamais les droits, et n'est vidé qu'à la déconnexion. Un membre à
+// qui l'on retire un logement ou le droit `reservations` les reverrait jusqu'à
+// douze heures. Elles attendent le serveur — c'est la même règle que
+// `derniers_avis` de l'accueil.
+const GARDE_DU_CACHE = ['stats', 'biens', 'periodes', 'publication_auto']
 const vueParDefaut = (params) => !/(^|&)(bien|anciens)=/.test(params)
 
 async function lireEcran (params) {
   const d = await appelAPI(ECRAN + (params ? '?' + params : ''))
-  if (vueParDefaut(params) && etat.moi && etat.compte) ecrireCache('avis', etat.moi, etat.compte, { ...d, vue_periode: etat.periode })
+  if (vueParDefaut(params) && etat.moi && etat.compte) {
+    const gardee = Object.fromEntries(GARDE_DU_CACHE.filter(k => d && k in d).map(k => [k, d[k]]))
+    // ⚠ LA PÉRIODE DE LA LECTURE, PAS CELLE DE L'ÉCRAN : un filtre cliqué
+    // pendant la lecture changerait `etat.periode`, et les chiffres des
+    // 30 jours seraient rangés sous « 6 mois » (revue, constat 2).
+    ecrireCache('avis', etat.moi, etat.compte, { ...gardee, vue_periode: new URLSearchParams(params).get('periode') || '' })
+  }
   return d
 }
 
@@ -290,8 +309,15 @@ function fermer (dlg) {
   dlg.removeAttribute('open')
 }
 
+// Aujourd'hui, au jour LOCAL : `toISOString` donne le jour UTC, donc la veille
+// entre minuit et deux heures à Paris.
+const aujourdhui = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function ouvrirSaisie () {
-  $('[data-bind="s-date"]').value = new Date().toISOString().slice(0, 10)
+  $('[data-bind="s-date"]').value = aujourdhui()
   $('[data-bind="s-retour"]').textContent = ''
   ouvrir($('[data-bind="saisie"]'))
   chargerSejours()
@@ -363,6 +389,10 @@ document.addEventListener('click', (ev) => {
 })
 $('[data-bind="reglages"]').addEventListener('close', () => { if (etat.recharger) etat.recharger() })
 $('[data-bind="s-bien"]').addEventListener('change', chargerSejours)
+// ⚠ ENTRÉE DANS UN CHAMP SOUMET LE FORMULAIRE, et `method="dialog"` fermait
+// alors la fenêtre sans rien enregistrer ni rien dire (revue, constat 7).
+// L'enregistrement ne part que du bouton.
+$('[data-bind="saisie-form"]').addEventListener('submit', (ev) => ev.preventDefault())
 
 // ─── Démarrage ──────────────────────────────────────────────────────────────
 async function init () {
@@ -370,8 +400,9 @@ async function init () {
   if (!session) return
   await I18n.init()
   document.addEventListener('i18n:changed', () => location.reload())
-  let user = null
-  try { user = await getUser() } catch { /* l'avatar attendra, pas la page */ }
+  // L'utilisateur vient de la SESSION déjà lue : pas un aller-retour de plus
+  // avant l'appel d'écran.
+  const user = session.user || null
   $('[data-bind="initials"]').textContent = ((user && user.email) || '').slice(0, 2).toUpperCase()
   HSNav.renderMenu({
     comptes: comptes(), compteActif: compteCourant(),
@@ -404,6 +435,7 @@ async function init () {
     surDonnees,
     zoneStats: $('[data-bind="stats"]'),
     initiales,
+    surPret: (recharger) => { etat.recharger = recharger },
     t,
     langue: I18n.lang
   })

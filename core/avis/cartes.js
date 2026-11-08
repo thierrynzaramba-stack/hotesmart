@@ -64,6 +64,13 @@ export const TEXTES_FR = {
   'avis.dernier_jour': 'Dernier jour',
   'avis.jours_restants': '{n, plural, one {# jour restant} other {# jours restants}}',
   'avis.evaluer': 'Évaluer {prenom}',
+  'avis.evaluer_court': 'Évaluer',
+  'avis.masque_court': 'Avis masqué jusqu’à votre évaluation',
+  'avis.recu_sms': 'reçu par SMS',
+  'avis.recu_email': 'reçu par email',
+  'avis.recu_oral': 'reçu de vive voix',
+  'avis.recu_message': 'reçu dans la messagerie',
+  'avis.recu_direct': 'reçu en direct',
   'avis.ce_voyageur': 'ce voyageur',
   'avis.aucune_eval': 'Aucune évaluation du voyageur pour ce séjour.',
   'avis.delai_passe': 'Le délai d’évaluation est passé : Airbnb ne l’accepte plus.',
@@ -166,14 +173,22 @@ function canalDe (p, T) {
   if (p.cle === 'airbnb') return { classe: 'airbnb', lettre: 'A', libelle: T('avis.p_airbnb'), ecrit: false }
   if (p.cle === 'booking') return { classe: 'booking', lettre: 'B', libelle: T('avis.p_booking'), ecrit: false }
   if (p.cle === 'direct') {
-    const cle = { sms: 'avis.p_sms', email: 'avis.p_email', oral: 'avis.p_oral', message: 'avis.p_message' }[p.source]
-    return { classe: 'direct', lettre: 'D', libelle: T(cle || 'avis.p_direct'), ecrit: true }
+    const src = ['sms', 'email', 'oral', 'message'].includes(p.source) ? p.source : null
+    return { classe: 'direct', lettre: 'D', libelle: T(src ? 'avis.p_' + src : 'avis.p_direct'), ecrit: true, phrase: T(src ? 'avis.recu_' + src : 'avis.recu_direct') }
   }
-  return { classe: 'autre', lettre: '·', libelle: String(p.cle || T('avis.p_avis')), ecrit: true }
+  // Une plateforme que l'ecran ne connait pas garde son nom (« expedia » dit
+  // quelque chose) ; une plateforme INCONNUE (`autre`) ne s'ecrit pas.
+  const nom = p.cle && p.cle !== 'autre' ? String(p.cle) : T('avis.p_avis')
+  return { classe: 'autre', lettre: '·', libelle: nom, ecrit: true, phrase: nom }
 }
 
 const pastilleCanal = (c) => `<span class="avp-canal avp-canal--${ECHAPPER(c.classe)}" title="${ECHAPPER(c.libelle)}">`
   + `<span aria-hidden="true">${ECHAPPER(c.lettre)}</span><span class="sr-only">${ECHAPPER(c.libelle)}</span></span>`
+
+// Deux formes d'un meme texte : la longue a l'ordinateur, la courte au
+// telephone (spec §4). La forme cachee l'est par `display: none` : un lecteur
+// d'ecran ne lit qu'une des deux.
+const deuxFormes = (long, court) => `<span class="avp-long">${ECHAPPER(long)}</span><span class="avp-court">${ECHAPPER(court)}</span>`
 
 const initiale = (nom) => String(nom || '?').trim().charAt(0).toUpperCase() || '?'
 
@@ -190,6 +205,14 @@ const nomDu = (c, T) => {
   const v = c.voyageur
   const qui = v ? [v.prenom, v.nom].filter(Boolean).join(' ') : ''
   return qui || T('avis.voyageur')
+}
+
+// « Julie M. » : le prenom et l'initiale du nom, pour une ligne d'action.
+const nomCourt = (c, T) => {
+  const v = c.voyageur
+  if (!v || !v.prenom) return nomDu(c, T)
+  const ini = v.nom ? ' ' + String(v.nom).trim().charAt(0).toUpperCase() + '.' : ''
+  return v.prenom + ini
 }
 
 function infosDu (c, ctx) {
@@ -262,7 +285,7 @@ function boutonEvaluer (c, ctx) {
   const e = c.evaluation
   if (!e || !e.evaluable || !ctx.avecBus) return ''
   const prenom = (c.voyageur && c.voyageur.prenom) || ctx.T('avis.ce_voyageur')
-  return `<button type="button" class="btn btn--primary avp-evaluer" data-evaluer="${ECHAPPER(e.booking_uid)}">${ICONE('i-edit')}<span>${ECHAPPER(ctx.T('avis.evaluer', { prenom }))}</span></button>`
+  return `<button type="button" class="btn btn--primary avp-evaluer" data-evaluer="${ECHAPPER(e.booking_uid)}">${ICONE('i-edit')}${deuxFormes(ctx.T('avis.evaluer', { prenom }), ctx.T('avis.evaluer_court'))}</button>`
 }
 
 function blocNotreAvis (c, ctx, cle) {
@@ -293,7 +316,7 @@ function carte (c, ctx, cle) {
     + `<div class="avp-carte__tete">${vignette(c, ctx)}`
     + `<div class="avp-id"><span class="avp-qui">${ECHAPPER(nomDu(c, ctx.T))}</span>`
     + `<span class="avp-infos">${infosDu(c, ctx).map(ECHAPPER).join(' · ')}</span></div>`
-    + (canal.ecrit ? `<span class="avp-source">${ECHAPPER(canal.libelle)}</span>` : '')
+    + (canal.ecrit ? `<span class="avp-source">${ECHAPPER(canal.phrase || canal.libelle)}</span>` : '')
     + `${pastilleCanal(canal)}</div>`
     + avis + blocNotreAvis(c, ctx, cle)
     + '</li>'
@@ -306,26 +329,42 @@ function ligneEvaluation (c, ctx, cle) {
   const { T } = ctx
   const e = c.evaluation || {}
   const canal = canalDe(c.plateforme, T)
+  // L'etat et l'origine de notre avis, quand ils disent quelque chose
+  // (« Remplie par la prestataire », « rédigé par l'IA, pas encore validé ») :
+  // l'inventaire les garde (spec §5, D5 et E7).
   const etat = e.etat && e.etat !== 'a_remplir' ? `<span class="avp-etat">${ECHAPPER(etatDe(e, ctx))}</span>` : ''
+  const origine = origineDe(e, ctx)
   // L'avis du voyageur, s'il en est un d'affichable : masque (le cas courant),
   // ou recu. Les detections sont sorties a part.
-  const avis = c.avis.filter(a => !a.detecte).map((a, k) => blocSonAvis(a, ctx, `${cle}-${k}`)).join('')
+  const avis = c.avis.filter(a => !a.detecte).map((a, k) => (a.masque
+    ? `<p class="avp-gris">${ICONE('i-lock')}${deuxFormes(T('avis.masque'), T('avis.masque_court'))}</p>`
+    : blocSonAvis(a, ctx, `${cle}-${k}`))).join('')
   return `<li class="avp-ligne-atraiter" data-cle="${ECHAPPER(c.cle)}">${vignette(c, ctx, ' avp-photo--l')}`
-    + `<div class="avp-id"><span class="avp-qui">${ECHAPPER(nomDu(c, T))} ${pastilleCanal(canal)}</span>`
-    + `<span class="avp-infos">${infosDu(c, ctx).map(ECHAPPER).join(' · ')}</span>${etat}${avis}</div>`
+    + `<div class="avp-id"><span class="avp-qui">${ECHAPPER(nomCourt(c, T))} ${pastilleCanal(canal)}</span>`
+    + `<span class="avp-infos">${infosDu(c, ctx).map(ECHAPPER).join(' · ')}</span>${etat}`
+    + (origine ? `<span class="avp-origine">${ICONE('i-ai')}${ECHAPPER(origine)}</span>` : '')
+    + `${avis}</div>`
     + `<div class="avp-actions">${delai(e.jours_restants, ctx)}${boutonEvaluer(c, ctx)}</div></li>`
 }
 
 // Une detection dans un message : pas un fait tant qu'un humain ne l'a pas
 // confirmee. Les boutons ne viennent qu'au droit d'ecriture.
-function ligneDetection (a, c, ctx) {
+//
+// ⚠ L'EXTRAIT NE REMPLACE PAS LE MESSAGE (revue du lot Avis V5, constat 4).
+// L'ancien bloc montrait les deux : « douche sale » seul ferait confirmer une
+// remarque sur un message qui disait « la douche était sale mais sinon tout
+// était parfait ». L'extrait en citation, le message entier replie dessous.
+function ligneDetection (a, c, ctx, cle) {
   const { T } = ctx
-  const citation = a.extrait || a.texte || ''
+  const texte = a.texte || ''
+  const infos = [T('avis.detecte'), T('avis.a_confirmer'), c.bien || T('avis.bien_inconnu'),
+    a.recu_le ? T('avis.recu_le', { date: dateCourte(a.recu_le, ctx.langue, true) }) : ''].filter(Boolean)
   return `<li class="avp-ligne-atraiter avp-ligne-atraiter--detection" data-detection="${ECHAPPER(a.id)}">`
     + `<span class="avp-tuile">${ICONE('i-message')}</span>`
-    + `<div class="avp-id"><span class="avp-qui">${ECHAPPER(nomDu(c, T))}${proprete(a, ctx)}</span>`
-    + (citation ? `<span class="avp-citation">« ${ECHAPPER(citation)} »</span>` : '')
-    + `<span class="avp-infos">${ECHAPPER(T('avis.detecte'))} · ${ECHAPPER(T('avis.a_confirmer'))} · ${ECHAPPER(c.bien || T('avis.bien_inconnu'))}</span></div>`
+    + `<div class="avp-id"><span class="avp-qui">${ECHAPPER(nomCourt(c, T))}${proprete(a, ctx)}</span>`
+    + (a.extrait ? `<span class="avp-citation">« ${ECHAPPER(a.extrait)} »</span>` : '')
+    + (texte ? texteRepliable(texte, cle, ctx) : '')
+    + `<span class="avp-infos">${infos.map(ECHAPPER).join(' · ')}</span></div>`
     + (ctx.peutEcrire
       ? `<div class="avp-actions"><button type="button" class="btn btn--secondary" data-valider="${ECHAPPER(a.id)}" data-statut="ignore">${ECHAPPER(T('avis.ignorer'))}</button>`
         + `<button type="button" class="btn btn--primary" data-valider="${ECHAPPER(a.id)}" data-statut="confirme">${ICONE('i-check')}<span>${ECHAPPER(T('avis.confirmer'))}</span></button></div>`
@@ -383,7 +422,11 @@ export function rendre (data, opts = {}) {
   const anciensCharges = Array.isArray(c.anciens)
   const att = separerDetections(c.attente)
   const rec = separerDetections(c.recents)
-  const anc = anciensCharges ? separerDetections(c.anciens) : { detections: [], restantes: null }
+  // ⚠ LES DETECTIONS DES ANCIENS, MEME SECTION FERMEE : le serveur les sert a
+  // part (`anciens_a_traiter`), sans quoi la bulle dirait « Rien ne vous
+  // attend » pendant qu'un message ecrit apres le depart attend (revue du lot
+  // Avis V5, constat 5). Section ouverte, elles viennent des Anciens eux-memes.
+  const anc = separerDetections(anciensCharges ? c.anciens : ((data && data.anciens_a_traiter) || []))
   const detections = [...att.detections, ...rec.detections, ...anc.detections]
   const attente = c.attente || []
   const n = attente.length + detections.length
@@ -392,12 +435,15 @@ export function rendre (data, opts = {}) {
     ? `<section class="avp-atraiter" aria-labelledby="avp-atraiter-titre"><div class="avp-atraiter__tete">`
       + `<h2 class="avp-h2" id="avp-atraiter-titre">${ECHAPPER(T('avis.a_traiter'))}</h2><span class="badge badge--amber" data-compte-atraiter>${n}</span></div>`
       + `<ul class="avp-lignes">${attente.map((x, i) => ligneEvaluation(x, ctx, `w${i}`)).join('')}`
-      + `${detections.map(({ a, c: carteDe }) => ligneDetection(a, carteDe, ctx)).join('')}</ul></section>`
+      + `${detections.map(({ a, c: carteDe }, i) => ligneDetection(a, carteDe, ctx, `d${i}`)).join('')}</ul></section>`
     : `<p class="avp-rien" data-compte-atraiter="0">${ICONE('i-check')}${ECHAPPER(T('avis.rien'))}</p>`
 
   const grille = (liste, base) => `<ul class="avp-grille">${liste.map((x, i) => carte(x, ctx, `${base}${i}`)).join('')}</ul>`
   const recents = rec.restantes
-  const anciensTotal = Number(data && data.anciens_total) || 0
+  // Le compte des Anciens dit les CARTES que la section montre : une carte qui
+  // n'avait qu'une detection est montee dans « À traiter » et n'y est plus.
+  const seules = ((data && data.anciens_a_traiter) || []).filter(x => (x.avis || []).every(a => a.detecte) && !x.evaluation).length
+  const anciensTotal = Math.max(0, (Number(data && data.anciens_total) || 0) - seules)
   const anciens = anciensCharges
     ? (anc.restantes.length ? grille(anc.restantes, 'a') : `<p class="avp-gris">${ECHAPPER(T('avis.anciens_vide'))}</p>`)
       + (data.anciens_tronques ? `<p class="avp-gris">${ECHAPPER(T('avis.anciens_tronques'))}</p>` : '')
@@ -426,10 +472,10 @@ export function rendre (data, opts = {}) {
  */
 export async function monter (conteneur, options = {}) {
   if (!conteneur) throw new Error('[avis] les cartes exigent un conteneur')
-  const { charger: lire, actions = {}, bus = null, peutEcrire = false, filtres = () => ({}), surDonnees = () => {}, zoneStats = null, initiales = null, t = null, langue = 'fr' } = options
+  const { charger: lire, actions = {}, bus = null, peutEcrire = false, filtres = () => ({}), surDonnees = () => {}, zoneStats = null, initiales = null, surPret = () => {}, t = null, langue = 'fr' } = options
   if (typeof lire !== 'function') throw new Error('[avis] les cartes exigent une lecture')
   const T = traducteur(t, langue)
-  const etat = { data: null, anciensOuverts: false }
+  const etat = { data: null, anciensOuverts: false, seq: 0 }
   const alerter = (m) => { try { (conteneur.ownerDocument.defaultView || window).alert(m) } catch { /* sans fenetre */ } }
   const params = (anciens) => {
     const f = filtres() || {}
@@ -440,16 +486,25 @@ export async function monter (conteneur, options = {}) {
     conteneur.innerHTML = rendre(etat.data, { peutEcrire, avecBus: Boolean(bus), anciensOuverts: etat.anciensOuverts, t, langue })
     if (zoneStats) { zoneStats.innerHTML = rendreStats(etat.data && etat.data.stats, { t, langue }); zoneStats.hidden = false }
   }
+  // ⚠ LA DERNIERE LECTURE DEMANDEE GAGNE, PAS LA DERNIERE ARRIVEE (revue du lot
+  // Avis V5, constat 3). Deux filtres cliques vite, ou un geste suivi d'un
+  // filtre, mettent deux lectures en vol ; sans numero, la plus lente
+  // repeignait l'ecran avec un filtre qui n'est plus presse.
   async function charger () {
+    const n = ++etat.seq
+    let data
     try {
-      etat.data = await lire(params(etat.anciensOuverts))
+      data = await lire(params(etat.anciensOuverts))
     } catch (err) {
+      if (n !== etat.seq) return false
       // ⚠ UN ECHEC SE DIT : une liste vide laisserait croire qu'il n'y a rien.
       const statut = err && (err.status || err.statut)
       conteneur.innerHTML = `<p class="avp-erreur">${ECHAPPER(statut === 403 ? T('avis.acces_refuse') : (err && err.message) || T('avis.illisibles'))}</p>`
       if (zoneStats) zoneStats.hidden = true
       return false
     }
+    if (n !== etat.seq) return false
+    etat.data = data
     surDonnees(etat.data)
     afficher()
     return true
@@ -494,9 +549,18 @@ export async function monter (conteneur, options = {}) {
     }
   })
 
-  // L'affichage instantane : les dernieres donnees connues, peintes tout de
-  // suite, puis relues. Une lecture en echec ne garde pas l'ancien ecran.
-  if (initiales && initiales.cartes) { etat.data = initiales; surDonnees(initiales); afficher() }
+  // ⚠ LA RELECTURE EST CONFIEE A LA PAGE AVANT LA PREMIERE REPONSE (revue du
+  // lot Avis V5, constat 2) : un filtre clique pendant le chargement doit
+  // relire, pas seulement repeindre sa pastille.
+  surPret(charger)
+  // L'affichage instantane : les CHIFFRES et les filtres connus, peints tout de
+  // suite. ⚠ JAMAIS LES CARTES : elles portent des noms de voyageurs, des dates
+  // de sejour et le texte des avis, que le cache du navigateur ne garde pas
+  // (revue du lot Avis V5, constat 1) — elles attendent le serveur.
+  if (initiales) {
+    surDonnees(initiales)
+    if (zoneStats && initiales.stats) { zoneStats.innerHTML = rendreStats(initiales.stats, { t, langue }); zoneStats.hidden = false }
+  }
   const ok = await charger()
   return { charge: ok, recharger: charger }
 }

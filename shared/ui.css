@@ -2219,3 +2219,10 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
   .avp-feuille { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; margin: 0; }
   .avp-volet { width: 100vw; }
 }
+/* Deux formes d'un même texte (core/avis/cartes.js, `deuxFormes`) : la longue
+   à l'ordinateur, la courte au téléphone (spec du lot Avis, §4). */
+.avp-court { display: none; }
+@media (max-width: 899px) {
+  .avp-long { display: none; }
+  .avp-court { display: inline; }
+}

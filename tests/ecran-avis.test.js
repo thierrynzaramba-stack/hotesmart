@@ -23,15 +23,33 @@ const BIEN_A = { id: 'aa11bb22-cc33-4dd4-8ee5-ff6677889900', user_id: PROD, name
 const BIEN_B = { id: 'bb22cc33-dd44-4ee5-8ff6-001122334455', user_id: PROD, name: 'La bulle', provider: 'beds24', provider_property_id: REF_B, photo_url: null, archive_le: null }
 
 const ilYa = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - n); return d.toISOString() }
-const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', provider: 'channex', ota: 'airbnb', ai_analyzed_at: ilYa(3), property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: ilYa(3), overall_score: 9, content: 'Séjour parfait', is_hidden: false }
+// ⚠ UN NOM, DES DATES ET UNE RESERVATION : sans eux, le test du droit
+// `reservations` ne mesurerait rien (revue du lot V5, constat 11).
+const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', provider: 'channex', ota: 'airbnb', ai_analyzed_at: ilYa(3), property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: ilYa(3), overall_score: 9, content: 'Séjour parfait', is_hidden: false,
+                 guest_name: 'Fanny Durand', stay_start: ilYa(8).slice(0, 10), stay_end: ilYa(5).slice(0, 10), booking_uid: 'resa-a1' }
+// Une detection ecrite trois semaines apres le depart : rangee dans les Anciens.
+const DETECTION_ANCIENNE = { id: 'r9', user_id: PROD, statut: 'detecte', provider: 'message', ota: null, ai_analyzed_at: ilYa(40), property_id_ref: REF_A, ai_clean_verdict: 'remarque', received_at: ilYa(40), content: 'La moquette était tachée', is_hidden: false }
 const AVIS_B = { id: 'r2', user_id: PROD, statut: 'confirme', provider: 'channex', ota: 'booking', ai_analyzed_at: ilYa(4), property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: ilYa(4), overall_score: 7, content: 'La clé était difficile à trouver', is_hidden: false }
 
 const MODULES = ['../api/ecran/avis', '../api/avis', '../lib/require-permission', '../lib/permissions', '../lib/cron-reviews-classify', '../lib/cron-shared']
 
-function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVIS_A, AVIS_B], biens = [BIEN_A, BIEN_B], autoEnPanne = false, auto = [] } = {}) {
-  const etat = { tables: [] }
+// La projection des colonnes demandees : une colonne non lue ne descend pas.
+function projeter (ligne, colonnes) {
+  if (typeof colonnes !== 'string' || !colonnes.trim() || colonnes.trim() === '*') return ligne
+  const out = {}
+  for (const n of colonnes.split(',').map(c => c.trim()).filter(Boolean)) if (Object.prototype.hasOwnProperty.call(ligne, n)) out[n] = ligne[n]
+  return out
+}
+
+function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVIS_A, AVIS_B], biens = [BIEN_A, BIEN_B], autoEnPanne = false, auto = [], evalsEnPanne = false } = {}) {
+  const etat = { tables: [], fetchs: 0 }
+  // ⚠ CHAQUE LECTURE DU DOUBLE PASSE PAR `fetch`, comme supabase-js : sans ca,
+  // le compteur de `Server-Timing` n'etait jamais traverse, et « 0 requêtes »
+  // ecrit en dur restait vert (revue du lot V5, constat 9).
+  globalThis.fetch = async () => { etat.fetchs++; return { ok: true } }
+  const viaFetch = (chemin) => globalThis.fetch(process.env.SUPABASE_URL + chemin)
   const client = {
-    auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null } : { data: null, error: { message: 'x' } }) },
+    auth: { getUser: async () => { await viaFetch('/auth/v1/user'); return user ? { data: { user: { id: user } }, error: null } : { data: null, error: { message: 'x' } } } },
     from (nom) {
       etat.tables.push(nom)
       const q = { f: {}, ins: [], ors: [], head: false, count: null, colonnes: '' }
@@ -46,7 +64,12 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVI
         maybeSingle: async () => { const r = await lire(); return { data: (r.data || [])[0] || null, error: r.error } },
         then (ok, ko) { return lire().then(ok, ko) },
       }
-      function lire () {
+      async function lire () {
+        await viaFetch('/rest/v1/' + nom)
+        return lireSansFetch()
+      }
+      function lireSansFetch () {
+        if (nom === 'guest_evaluations' && evalsEnPanne) return Promise.resolve({ data: null, error: { message: 'relation "guest_evaluations" : panne de connexion 10.0.0.12' } })
         if (nom === 'properties') {
           let c = biens.filter(b => (q.f.user_id == null || b.user_id === q.f.user_id))
           if ('archive_le' in q.f) c = c.filter(b => b.archive_le === q.f.archive_le)
@@ -59,7 +82,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVI
           for (const i of q.ins) c = c.filter(a => i.v.includes(String(a[i.c])))
           for (const e of q.ors) if (/property_id_ref/.test(e)) c = c.filter(a => e.includes(a.property_id_ref))
           if (q.head) return Promise.resolve({ data: null, count: c.length, error: null })
-          return Promise.resolve({ data: c, count: c.length, error: null })
+          return Promise.resolve({ data: c.map(a => projeter(a, q.colonnes)), count: c.length, error: null })
         }
         if (nom === 'avis_auto_validation') {
           if (autoEnPanne) return Promise.resolve({ data: null, error: { message: 'panne' } })
@@ -98,8 +121,10 @@ const MEMBRE_SUR_A = {
   permissions: { avis: 'read', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] },
 }
 
+let etatCompte = () => NaN
 test('le titulaire : UN appel rend les cartes, les chiffres, les biens (avec photo), les periodes et la publication automatique', async () => {
-  preparer({ auto: [{ property_id: BIEN_A.id, heures: 48 }] })
+  const etat = preparer({ auto: [{ property_id: BIEN_A.id, heures: 48 }] })
+  etatCompte = () => etat.fetchs
   const res = reponse()
   await require('../api/ecran/avis')(req({ periode: '30j' }), res)
   assert.equal(res.code, 200, JSON.stringify(res.body))
@@ -112,7 +137,10 @@ test('le titulaire : UN appel rend les cartes, les chiffres, les biens (avec pho
   // Les cartes portent la reference de leur bien : c'est elle qui trouve la photo.
   assert.ok(res.body.cartes.recents.every(c => [REF_A, REF_B].includes(c.bien_ref)))
   assert.equal(res.entetes['cache-control'], 'private, no-store')
-  assert.match(res.entetes['server-timing'], /^total;dur=\d+;desc="\d+ requêtes"$/)
+  // Le compte EXACT, garde comprise : chaque lecture du double est un `fetch`.
+  const compte = Number(res.entetes['server-timing'].match(/^total;dur=\d+;desc="(\d+) requêtes"$/)[1])
+  assert.ok(compte > 0)
+  assert.equal(compte, etatCompte())
 })
 
 test('l en-tete prive est pose AVANT le refus de methode (dette 90)', async () => {
@@ -151,6 +179,42 @@ test('un membre limite a un bien : le MEME perimetre que l action `cartes`, et u
   const hors = reponse()
   await require('../api/ecran/avis')(req({ bien: REF_B }, 'GET', PROD), hors)
   assert.equal(hors.code, 403)
+})
+
+test('le droit `reservations` decide du nom et des dates d un sejour : sans lui, ni l un ni les autres, ni la reservation dans la cle', async () => {
+  preparer(MEMBRE_SUR_A)
+  const sans = reponse()
+  await require('../api/ecran/avis')(req({}, 'GET', PROD), sans)
+  const c = [...sans.body.cartes.attente, ...sans.body.cartes.recents].find(x => x.bien_ref === REF_A)
+  assert.ok(c, 'la carte de Colomiers')
+  assert.deepEqual([c.voyageur, c.arrivee, c.depart], [null, null, null])
+  assert.ok(!String(c.cle).includes('resa-a1'), `la reservation fuit par la cle : ${c.cle}`)
+  assert.ok(!JSON.stringify(sans.body).includes('Fanny'), 'le nom du voyageur ne descend nulle part')
+
+  preparer({ ...MEMBRE_SUR_A, permissions: { ...MEMBRE_SUR_A.permissions, reservations: 'read' } })
+  const avec = reponse()
+  await require('../api/ecran/avis')(req({}, 'GET', PROD), avec)
+  const c2 = [...avec.body.cartes.attente, ...avec.body.cartes.recents].find(x => x.bien_ref === REF_A)
+  assert.equal(c2.voyageur && c2.voyageur.prenom, 'Fanny')
+  assert.ok(c2.arrivee && c2.depart)
+})
+
+test('une detection des Anciens est servie meme section fermee (« À traiter » ne doit pas dire « rien »)', async () => {
+  preparer({ avis: [AVIS_A, DETECTION_ANCIENNE] })
+  const res = reponse()
+  await require('../api/ecran/avis')(req({}), res)
+  assert.equal(res.body.cartes.anciens, null)
+  assert.deepEqual(res.body.anciens_a_traiter.map(c => c.avis[0].id), ['r9'])
+  assert.ok(res.body.anciens_total >= 1)
+})
+
+test('une panne de lecture ne relaie JAMAIS le message brut de la base', async () => {
+  preparer({ evalsEnPanne: true })
+  const res = reponse()
+  await require('../api/ecran/avis')(req({}), res)
+  assert.equal(res.code, 503)
+  assert.deepEqual(Object.keys(res.body), ['error'])
+  assert.ok(!JSON.stringify(res.body).includes('10.0.0.12'))
 })
 
 test('la publication automatique illisible se tait : l ecran rend quand meme ses cartes', async () => {
@@ -192,7 +256,18 @@ test('compterRequetes : compte les requetes Supabase de SA requete seulement, me
   } finally { globalThis.fetch = vrai }
 })
 
-test('compterRequetes : une enveloppe qui leve ne casse pas l appel, et l erreur de la lecture remonte', async () => {
+test('compterRequetes : un comptage qui leve ne casse pas l appel ; l erreur de la lecture, elle, remonte', async () => {
   const { compterRequetes } = require('../lib/compte-requetes')
+  const vrai = globalThis.fetch
+  globalThis.fetch = async () => 'reponse du vrai fetch'
+  try {
+    // Revue du lot V5, constat 10 : une cible dont la lecture de l'URL leve fait
+    // lever le COMPTAGE ; l'appel doit passer quand meme, avec la reponse du
+    // vrai `fetch`.
+    const piege = { get url () { throw new Error('url illisible') } }
+    const { resultat, requetes } = await compterRequetes(() => fetch(piege))
+    assert.equal(resultat, 'reponse du vrai fetch')
+    assert.equal(requetes, 0)
+  } finally { globalThis.fetch = vrai }
   await assert.rejects(compterRequetes(async () => { throw new Error('lecture') }), /lecture/)
 })
