@@ -111,9 +111,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q4 — La validation et les totaux.** Tranchée, voir ci-dessous.
 - **Q5 — Les catégories.** Tranchée, voir ci-dessous.
 - **Q6 — L'adresse e-mail.** Tranchée, voir ci-dessous.
-- **Q7 — Qui peut écrire à cette adresse.** Seulement l'hôte (transfert), ou
-  aussi un fournisseur directement ? *Proposition* : tout expéditeur, puisque
-  l'adresse est signée (non devinable) et que tout arrive « à vérifier ».
+- **Q7 — Qui peut écrire à cette adresse.** Tranchée, voir ci-dessous.
 - **Q8 — Le domaine de l'adresse.** *Proposition V1* : `reply.hotesmart.fr`,
   déjà branché, aucun geste DNS. Plus tard, un sous-domaine dédié
   (`factures.hotesmart.fr`) demande trois gestes de Thierry : MX chez IONOS,
@@ -214,6 +212,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   L'entité est proposée d'après le destinataire lu sur la facture (SIRET,
   puis nom, parmi les entités non archivées) ; si ce n'est pas clair, le
   champ reste vide et l'hôte choisit.
+- **Q7 (8 nov. 2026, 22 h 34) : d'accord, tout expéditeur.** Un
+  fournisseur (Booking.com, un artisan) peut écrire directement à l'adresse ;
+  elle est signée, donc non devinable, et tout ce qui arrive est
+  « à vérifier » (compté en « estimation », Q4).
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
