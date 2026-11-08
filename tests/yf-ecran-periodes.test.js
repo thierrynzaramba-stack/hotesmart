@@ -562,7 +562,7 @@ test('les fleches bornent a ce que le serveur accepte', () => {
   // facon de savoir ou l on va.
   assert.match(src, /apresLePas\(\{ niveauxJour: e\.niveaux_jour, structure: e\.structure_jour,/,
     'les deux fleches passent par le meme calcul, et lui donnent la STRUCTURE')
-  assert.match(src, /crans: c, cransMax: max \}, sens\)/,
+  assert.match(src, /crans: c, cransMax: max(, pose: regleALaMain)? \}, sens\)/,
     'le pas se calcule sur les crans, pas sur les niveaux affiches')
   // ⚠ ET LE SERVEUR DOIT LA SERVIR, sinon la fleche ne promet rien.
   assert.match(lire('lib/yield/calendrier-pilotage.js'), /e\.structure_jour = structureDuJour\(p\)/,
@@ -591,7 +591,9 @@ test('le formulaire est DERRIERE un bouton, ferme au premier rendu', () => {
 test('la lecture seule retire les gestes et garde les faits', () => {
   const src = sansCommentaires(PAGE())
   const i = src.indexOf('function ligneHtml')
-  const fn = src.slice(i, i + 3000)
+  // ⚠ 6000 et non plus 3000 : la review de la chaine (8 novembre 2026) a
+  // ajoute le reglage partage et la cle du retrait avant `gestes`.
+  const fn = src.slice(i, i + 6000)
   assert.match(fn, /const gestes = lecture \? '' :/, 'les reglages disparaissent en lecture seule')
   assert.match(fn, /const menu = lecture \|\|/, 'le menu ⋯ disparait en lecture seule')
   const bloc = blocRendu()
@@ -761,4 +763,48 @@ test('LE TEST QUI COMPTE : la fenetre passe au-dessus du bouton ☰ de la barre 
   assert.ok(r, 'le z-index de la fenetre est introuvable')
   assert.ok(Number(r[1]) > zBouton,
     `la fenetre (${r[1]}) doit passer AU-DESSUS du ☰ (${zBouton}) : une modale est au-dessus de la chrome de la page`)
+})
+
+// ─── Review de la chaine YieldFlow, 8 novembre 2026 ───────────────────────────
+test('LE TEST QUI COMPTE (review de la chaine) : une MESURE au-dela de ±2 — la fleche annonce le pas que le clic fera', async () => {
+  // Le clic envoie clamp(c + sens, ±2). Un ferie mesure a +4 (structure a
+  // Base) que l on baisse recoit 2 : DEUX crans de descente, pas un.
+  const M = await import('../shared/yield-niveau-periode.js')
+  const JOURS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
+  const base = Object.fromEntries(JOURS.map(j => [j, 0]))
+  const bas = M.apresLePas({ structure: base, crans: 4, cransMax: 2, pose: false }, -1)
+  assert.deepEqual([bas.possible, bas.pas, bas.apres], [true, -2, '3 · Haut'])
+  const haut = M.apresLePas({ structure: base, crans: 4, cransMax: 2, pose: false }, 1)
+  assert.equal(haut.possible, false, '▲ enverrait 2, donc une BAISSE : refuse')
+  assert.match(haut.raison, /mesure déjà \+4 crans/, 'avec la vraie raison, pas « le reglage est au maximum » quand rien n est pose')
+  // Le miroir a −4 : structure a Exceptionnel.
+  const exc = Object.fromEntries(JOURS.map(j => [j, 4]))
+  const monte = M.apresLePas({ structure: exc, crans: -4, cransMax: 2, pose: false }, 1)
+  assert.deepEqual([monte.possible, monte.pas, monte.apres], [true, 2, '3 · Haut'])
+  assert.equal(M.apresLePas({ structure: exc, crans: -4, cransMax: 2, pose: false }, -1).possible, false)
+  // Un reglage POSE a la borne garde son ancienne raison.
+  assert.match(M.apresLePas({ structure: base, crans: 2, cransMax: 2, pose: true }, 1).raison, /déjà au maximum \(2 crans\)/)
+  // Et l ecran dit le pas reel.
+  const src = sansCommentaires(PAGE())
+  assert.match(src, /const combien = n > 1 \? `de \$\{n\} crans` : 'd’un cran'/)
+})
+
+test('LE TEST QUI COMPTE (review de la chaine) : pas de fleches sur une periode COUPEE ; « remettre en automatique » vise la cle qui porte le reglage ; un reglage partage se dit', () => {
+  const src = sansCommentaires(PAGE())
+  assert.match(src, /\$\{\(coupe \|\| sansDepart\) \? '' : `<div class="qpb-regl">/, 'une periode coupee n a pas de fleches')
+  assert.match(src, /const cleAuto = e\.cle_reglage \|\| e\.cle/)
+  assert.match(src, /data-ev-auto="\$\{ech\(cleAuto\)\}"/, 'le retrait vise la cle qui porte le reglage')
+  assert.doesNotMatch(src, /data-ev-auto="\$\{ech\(e\.cle\)\}"/)
+  assert.match(src, /e\.cle === 'week_end_prolonge' \? 'tous les week-ends prolongés'/, 'les week-ends prolonges partagent un seul reglage, et l etiquette le dit')
+  assert.match(src, /const dit = e\.actif === false \? 'Pas prise en compte'/, 'la frise dit comme la ligne')
+})
+
+test('LE TEST QUI COMPTE (decision du 8 novembre) : pas de fleches sur une ligne « Automatique » SANS niveau de depart — un ▲ y faisait baisser le reveillon', () => {
+  const src = sansCommentaires(PAGE())
+  assert.match(src, /const sansDepart = !regleALaMain && e\.crans == null && \/\^\(commercial\|evenement\):\/\.test/,
+    'sans mesure ni reglage, une date du calendrier ou un evenement declare n a pas de point de depart lisible — un ferie ou un pont garde ses fleches')
+  // Une ligne REGLEE garde ses fleches et son « remettre en automatique » :
+  // le critere exclut regleALaMain.
+  assert.match(lire('lib/yield/calendrier-pilotage.js'), /e\.crans = e\.crans_ajustes != null \? e\.crans_ajustes : e\.crans_mesures/,
+    '`crans` est null seulement quand il n y a ni reglage ni mesure')
 })

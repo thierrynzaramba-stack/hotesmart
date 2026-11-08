@@ -2,7 +2,8 @@
 // UNE REFERENCE PENDANTE DANS UN DOCUMENT NE ROUGIT JAMAIS.
 //
 // ⚠ LE DEFAUT QU'IL EMPECHE, releve en review le 30 octobre 2026 et en SIX
-// endroits a la fois. `public/style.css`, `public/tokens.css`,
+// endroits a la fois. `public/style.css`, `public/tokens.css` (depuis
+// deplace en `docs/charte/tokens.css`, hors du deploiement),
 // `apps/yield/prix.html`, `docs/kb/charte-ui.md` et
 // `tests/palette-niveaux.test.js` renvoyaient tous a
 // « docs/kb/restitution-yield.md §5 quater » comme etant LA regle de double
@@ -31,7 +32,7 @@ const racine = path.join(__dirname, '..')
 // que le lot du socle a produits ou modifies : c'est la qu'etaient les six.
 const SURVEILLES = [
   'docs/kb/charte-ui.md',
-  'public/tokens.css',
+  'docs/charte/tokens.css',
   'public/style.css',
   'tests/palette-niveaux.test.js',
   // ⚠ AJOUTE PARCE QUE J'AI FAILLI REFAIRE L'ERREUR UNE TROISIEME FOIS. Ce

@@ -1,4 +1,7 @@
-/* public/tokens.css — RESTITUTION DES JETONS EXISTANTS
+/* docs/charte/tokens.css — RESTITUTION DES JETONS EXISTANTS
+   ⚠ DEPLACE DE public/ LE 8 NOVEMBRE 2026 (review de la chaine YieldFlow) :
+   sous public/, cette copie de lecture etait SERVIE en production alors
+   qu'aucune page ne la charge ; docs/ est exclu du deploiement (.vercelignore).
    Relevé le 30 octobre 2026. Demandé par Thierry pour aligner une maquette
    faite à côté.
 
@@ -181,14 +184,16 @@
   --lg-sidebar-collapsed: 48px;  /* --sidebar-collapsed */
 
   /* Police du socle legacy — style.css.
-     Les écrans apps/yield/* ne chargent aucune police (écart 20). */
+     ⚠ Périmé depuis le lot du socle : les écrans apps/yield/* portent
+     `body.police-v5` (public/style.css, --font-v5). */
   --lg-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 
 /* ═══ PALETTE DES CINQ NIVEAUX YIELDFLOW — ELLE N'EST PLUS ICI ═════════
    ⚠ LES DIX VALEURS ONT UNE SOURCE UNIQUE DEPUIS LE 30 OCTOBRE 2026 :
-   public/style.css, jetons --yf-base … --yf-exceptionnel-l.
+   public/style.css, jetons --niveau-1 … --niveau-5 et classes .n-base …
+   (l'échelle d'encre du 3 novembre 2026 a remplacé les --yf-*).
 
    Ce fichier les portait le temps d'un relévé. Les y laisser aurait fait une
    CINQUIÈME copie d'un élément de structure — exactement ce que le lot qui a

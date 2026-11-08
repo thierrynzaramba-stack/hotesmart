@@ -465,6 +465,84 @@ détachent.
 5. un **férié**, un **pont** et un **week-end prolongé**, pour montrer les
    libellés de la table.
 
+## 0 quater. RECETTE DU 7-8 NOVEMBRE 2026 sur staging — et la décision A
+
+Staging, compte de recette, **Recette — Loft Pilotable**, pop-up « Quand vos
+prix bougent » ouverte depuis Prédiction de prix (`?evenements=1`).
+
+⚠ **CE QUE THIERRY A DIT EN OUVRANT L'ÉCRAN : « ça ne ressemble pas à la
+maquette ».** C'est exact, et c'est voulu : cet écran est l'intermédiaire
+qu'attend la production ; la maquette Événements est le lot 4 du chantier
+« Ce qui fait bouger vos prix », qui le remplacera. Question posée, réponse de
+Thierry : **cette version peut partir en production en attendant** (« oui »).
+
+| point | vérifié par | résultat |
+|---|---|---|
+| frise de **13 mois**, nov. 2026 → nov. 2027 | Thierry | ✓ |
+| un **niveau avec son chiffre** sur chaque ligne, aucun vocabulaire d'effet | Thierry | ✓ |
+| libellés de la table : « Week-end du 11 novembre », « Pont du 11 novembre », « 11 novembre » | Thierry | ✓ |
+| niveaux sur l'**échelle d'encre**, aucune teinte | Thierry | ✓ |
+| étiquette des flèches **avant** le clic | navigateur de Thierry | ✓ « Monter d'un cran : … passe à 3 · Haut » |
+| « **chaque année** » sur une ligne réglée, pas sur une automatique | navigateur de Thierry | ✓ |
+| ▲ puis ▼ | navigateur de Thierry | ⚠ **écart, ci-dessous** |
+| téléphone (cadre de 387 px) | navigateur de Thierry | ✓ ligne dans l'écran, flèches de 44 × 44 px, la frise défile dans son propre cadre (`.qpb-frise`, `overflow-x: auto`) |
+
+### ⚠ L'écart des flèches — mesuré, et c'est la règle du MOTEUR
+
+Ligne « Vacances de Noël — autre zone », Loft, 8 novembre 2026 :
+
+| état | lundi | mardi | mercredi | jeudi | vendredi | samedi | dimanche |
+|---|---|---|---|---|---|---|---|
+| automatique (« 0 cran ») | Haut | Haut | Moyen | Base | Moyen | Très haut | Moyen |
+| ▲ (cran +1 posé) | Haut | **Moyen** | Haut | Haut | Très haut | **Très haut** | Haut |
+| puis ▼ (cran 0 posé) | Moyen | Base | Moyen | Moyen | Haut | Haut | Moyen |
+
+Prédiction de prix, même état automatique : samedi 19 décembre Exceptionnel
+140 €, mardi 22 Haut 115 € — **l'automatique affiche bien ce que le moteur
+fait.**
+
+**La cause** : en automatique, le moteur prend la **mesure propre du couple
+segment|jour** ; dès qu'un cran est **posé** — même 0 — il part de la
+**structure ordinaire du bien** et lui ajoute le cran. Monter d'un cran peut
+donc faire **baisser** un jour (le mardi) et laisser le samedi en place, et ▼
+ne ramène pas à l'automatique : seul « remettre en automatique » le fait
+(vérifié, état de départ rétabli). **L'écran dit vrai** — l'étiquette annonce
+le groupe principal, et la pastille suit le moteur ; c'est le geste « un cran »
+qui n'a pas le sens qu'il annonce pour un hôte.
+
+⚠ **CETTE RÈGLE EST DÉJÀ EN PRODUCTION** : la pop-up servie aujourd'hui pose
+les mêmes crans sur le même moteur ; elle le montre seulement moins.
+
+**Décision de Thierry, 8 novembre 2026 : A — l'écran part en production
+quand même**, l'écart noté ici. On ne touche pas au moteur (décision du
+28 octobre). **Le lot 4 du chantier le ferme par construction** : l'hôte y
+pose le NIVEAU de chaque nuit (lot 2, `yield_reglages_position`, en production
+depuis le 8 novembre), plus aucun cran.
+
+### 0 quater.1 La review de toute la chaîne — 8 novembre 2026
+
+Demandée par le chef de file : les rapports des reviews faites le long de la
+chaîne étaient perdus. **Une** review, sur la plage
+`dde1004ff1211a4a813a3ed1b471d36d92018fcf..93f3f16ad7b13643f8217aba9cab653130ac652a`
+(main de production → la chaîne après merge de ce main), arbre
+`/home/claude/hotesmart`, branche `yf-periodes-niveaux`. Fichiers cités :
+`shared/yield-niveau-periode.js`, `apps/yield/prix.html`,
+`lib/yield/calendrier-pilotage.js`, `api/yield-evenements.js`,
+`tests/yf-ecran-periodes.test.js`, `public/tokens.css`, `public/style.css` —
+tous dans le diff de la plage. **Aucun constat de sécurité** (garde, en-têtes,
+échappement de la pop-up et maquette hors déploiement vérifiés).
+
+| # | constat | suite |
+|---|---|---|
+| 1 | une mesure au-delà de ±2 : la flèche annonçait « d'un cran » un pas de deux, et ▲ refusait « réglage au maximum » sans réglage posé | **corrigé** : `apresLePas` part de la cible du clic, rend `pas`, l'étiquette dit « de 2 crans » ; tests à +4 et −4 |
+| 2 | ▲ peut faire **baisser** toute une période affichée « Automatique » (dates commerciales sans historique : le moteur les met au niveau de leur nuit sous-jacente, un cran posé repart de la structure ordinaire), et le point de départ ne se voit pas | **décision de Thierry, 8 novembre 2026 : « oui » — les flèches sont cachées sur ces lignes** (`sansDepart` : sans mesure ni réglage, clé `commercial:` ou `evenement:`). Mesuré sur le Loft de staging : exactement trois lignes — réveillon de Noël, réveillon du Nouvel An, Saint-Valentin ; les fériés et ponts sans mesure gardent les leurs (leur repli est la semaine ordinaire, ▲ y monte vraiment). Ces nuits se règlent nuit par nuit au lot 4 |
+| 3 | un seul réglage pour tous les week-ends prolongés, l'étiquette n'en nommait qu'un | **corrigé** : « tous les week-ends prolongés — … passe à … » ; plus largement, des périodes de noms différents sur une même clé le disent |
+| 4 | « remettre en automatique » visait la clé fine, pas celle qui porte le réglage | **corrigé** : `cle_reglage`, et la portée en infobulle quand la clé est large |
+| 5 | une période coupée gardait ses flèches (cran stocké invisible) ; la frise disait « Automatique » | **corrigé** : pas de flèches, la frise dit « Pas prise en compte » |
+| 6 | la parité pastille / moteur n'est tenue que par des regex sur le texte du code | **dette** : un test qui exécute `suggerer` sur les mêmes nuits et compare au niveau de départ quand un cran est posé, sur le modèle de `scripts/verifier-parite-prix.js`. Le lot 4 retire les crans de l'écran : le test y perd son objet |
+| 7 | `public/tokens.css` servi en production sans être chargé, et périmé | **déplacé** en `docs/charte/tokens.css` (hors déploiement), ses deux lignes périmées corrigées |
+| 8 | deux commentaires faux (`--blue`, `indice + crans`) | **corrigés** |
+
 ## 1. Pourquoi c'est illisible — mesuré dans le code, pas supposé
 
 | constat | mesure |
