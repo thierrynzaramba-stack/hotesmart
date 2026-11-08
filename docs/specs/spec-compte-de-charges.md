@@ -109,13 +109,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   et §7 bis.
 - **Q21 — La commission de Booking.com.** Tranchée, voir ci-dessous.
 - **Q4 — La validation et les totaux.** Tranchée, voir ci-dessous.
-- **Q5 — Les catégories.** Liste fermée en V1 ? *Proposition* : ménage ;
-  linge et blanchisserie ; consommables et produits d'accueil ; eau,
-  électricité, gaz ; internet et téléphone ; entretien et petites réparations ;
-  travaux et équipement ; assurance ; impôts et taxes (foncière, CFE) ;
-  charges de copropriété ; abonnements et logiciels ; honoraires (comptable,
-  conciergerie) ; frais bancaires ; autre. **À faire valider par un
-  comptable** : la frontière entretien / travaux (une immobilisation s'amortit).
+- **Q5 — Les catégories.** Tranchée, voir ci-dessous.
 - **Q6 — L'adresse e-mail.** Une par **compte** (l'entité est proposée d'après
   le destinataire lu sur la facture, nom ou SIRET) ou une par **entité** ?
   *Proposition* : une par compte.
@@ -210,6 +204,14 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   une facture sans montant lu ne s'additionne pas, et le total le dit
   (« N factures sans montant »). Une facture annulée, illisible ou « sans
   facture » ne compte pas.
+- **Q5 (8 nov. 2026, 22 h 32) : d'accord, liste fermée en V1.** Ménage ;
+  linge et blanchisserie ; consommables et produits d'accueil ; eau,
+  électricité, gaz ; internet et téléphone ; entretien et petites
+  réparations ; travaux et équipement ; assurance ; impôts et taxes (foncière,
+  CFE) ; charges de copropriété ; abonnements et logiciels ; honoraires
+  (comptable, conciergerie) ; commissions des plateformes ; frais bancaires ;
+  autre. **À faire valider par un comptable** : la frontière entretien /
+  travaux (une immobilisation s'amortit).
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
