@@ -260,10 +260,16 @@ justificatif.
   titulaire — `requirePermission` ne sait résoudre que des biens et des
   réservations. L'entité et le bien envoyés à la validation sont résolus de
   même, et leurs comptes comparés à celui de la charge ; un bien hors de
-  l'entité est refusé (Q18). L'entité d'un bien se lit par la fonction de
-  lecture de `lib/entites-juridiques.js` (ligne de `biens_entites`, sinon
-  l'entité par défaut), jamais recalculée ici. Le compte du bien est aussi
-  vérifié en base par un trigger, comme pour `biens_entites`.
+  l'entité est refusé (Q18). Le compte du bien est aussi vérifié en base par
+  un trigger, comme pour `biens_entites`.
+- **Les lectures de l'entité** viennent de `lib/entites-juridiques.js` (accord
+  du fil facturation, `facture-voyageur` @
+  2b1df50476cd0202a3ede64196b7634fb6acb06c) : `entitesDuCompte(userId)` et
+  `entiteDuBien(userId, propertyUuid)` — ligne de `biens_entites`, sinon
+  l'entité par défaut, sinon `null`, avec sa provenance. Elles ne gardent
+  rien : c'est l'endpoint des charges qui garde. *Proposition* : une entité
+  **archivée** n'est jamais proposée ni acceptée pour valider une nouvelle
+  charge ; les charges déjà validées la gardent.
 - **La lecture** : `lib/charges/lecture.js`. Une demande à Haiku par document
   (image ou PDF), réponse JSON imposée, liste de catégories fermée ; ce que
   l'IA ne lit pas reste `null`. **L'entité n'est jamais devinée par l'IA** :
