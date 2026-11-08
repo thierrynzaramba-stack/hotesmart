@@ -214,6 +214,40 @@ Chrome :
 8. **Mesure APRÈS** : mêmes trois nombres, même compte, même méthode, consignés ici
    avant la remise au chef de file.
 
+**Mesure APRÈS — staging** (`2c4fcf5d`), compte de recette (7 logements, **0 avis**),
+8 novembre 2026, dans Chrome, même méthode (entrées `performance`, cache chaud) :
+
+| | AVANT (prod) | APRÈS (staging) |
+|---|---|---|
+| appels `/api` au chargement | 3 | **2** : `/api/membres` (143 o, socle commun à toutes les pages V5) et `/api/ecran/avis` (1 251 o) |
+| appels Supabase directs du navigateur | 10 | **1** : `onboarding_state`, lu par le socle commun (`requireAuth`) |
+| octets transférés | 62 268 (461 450 décodés), 36 ressources | **46 209** (731 538 décodés), 38 ressources |
+| requêtes Supabase côté serveur | 11 (non re-mesuré) | **11**, lues dans `Server-Timing` |
+| départ de l'appel des données | 3,5 s | **2,9 s** |
+| réponse de l'appel des données | 1,3 s | **0,83 s** |
+| écran complet | 4,8 s | **3,7 s** |
+
+**Le budget « écran complet < 2 s » n'est PAS tenu, et la cause est hors du lot.**
+Avant que la page puisse appeler son écran, le socle commun a déjà pris 2,6 s :
+DOM prêt à 1,65 s, puis `requireAuth` attend `/api/membres` (≈ 0,95 s), dont la page a
+besoin pour connaître le compte et les droits. Après ce point, la part propre à la page
+coûte ≈ 1,1 s : 0,3 s d'i18n et de modules, puis 0,83 s d'appel d'écran. Toutes les
+pages V5 paient la même chaîne : c'est un sujet transverse, pas un correctif de ce lot.
+
+**Deux limites de cette mesure, dites ici pour qu'on ne la lise pas comme ce
+qu'elle n'est pas :** ce n'est pas le même compte (le compte de recette n'a aucun
+avis, donc la réponse de l'écran pèse 1 251 o contre 24 720 o pour les cartes du
+compte de Thierry), et staging n'est pas la production. **La mesure sur le compte de
+Thierry se prend en production juste après le merge**, et se consigne ici.
+
+Recette du même jour, sur staging : une pastille de période et une pastille de
+logement déclenchent chacune **un seul** appel d'écran ; le volet des réglages s'ouvre
+(480 px) et se ferme ; la saisie s'ouvre (7 logements, date du jour, liste des séjours)
+et se ferme **sans enregistrer** ; au téléphone (390 px), la page ne déborde pas — seule
+la rangée des logements défile, comme prévu — et les deux barres V5 sont là. Les cartes,
+les lignes d'évaluation et de détection ne sont pas visibles sur staging faute d'avis :
+elles sont tenues par le banc (`tests/avis-v5.test.js`, `tests/avis-cartes-dom.test.js`).
+
 **Constat en passant, hors lot :** le vieux socle (`components/sidebar.js`) lit la
 table `api_keys` depuis le navigateur, y compris des colonnes de clés. La page V5 ne
 la lit plus. Les autres pages à l'ancien style continuent ; c'est à signaler, pas à
