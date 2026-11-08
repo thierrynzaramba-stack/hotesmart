@@ -186,6 +186,9 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 
 ### Réponses de Thierry
 
+- **Q1 (8 nov. 2026, 22 h 17) : oui.** Une facture peut être affectée à un
+  bien précis de son entité, de façon **facultative** ; sans bien, c'est une
+  charge de l'entité (`bien_id` vide).
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
