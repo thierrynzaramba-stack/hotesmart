@@ -115,7 +115,9 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q15 (8 nov. 2026, décision de Thierry transmise par le fil compte de
   charges) : une seule table d'entités juridiques dans le cœur, partagée par
   les deux chantiers.** Ce fil n'a rien créé. Il a transmis ses besoins (§5 bis).
-  Reste ouvert : quel fil construit la table.
+  **Thierry, le même soir : c'est ce fil (facturation) qui construit la
+  table.** Proposition au §5 ter, soumise au fil compte de charges avant tout
+  code.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
@@ -164,6 +166,45 @@ Transmis au fil compte de charges le 8 novembre 2026. Rien n'est créé.
   entité, et la copie de l'entité dans chaque facture émise. Une facture est
   figée, donc modifier ou détacher une entité ne change aucune facture déjà
   émise.
+
+## 5 ter. La table des entités juridiques (proposition, construite par ce fil)
+
+Rien n'est créé avant l'accord du fil compte de charges et le go de Thierry.
+
+**`public.entites_juridiques`** — une ligne = une identité légale d'un compte
+(l'hôte en nom propre, une SCI, une société).
+
+| Colonne | Type | Rôle |
+|---|---|---|
+| `id` | uuid, clé | |
+| `user_id` | uuid, non nul → `auth.users` | le compte titulaire |
+| `type` | texte : `personne_physique` ou `societe` | |
+| `forme_juridique` | texte, vide possible | SCI, SAS, EI… |
+| `nom` | texte, non nul | nom complet, ou raison sociale |
+| `adresse_ligne1`, `adresse_ligne2`, `code_postal`, `ville` | texte | |
+| `pays` | texte, `FR` par défaut | code ISO |
+| `siret` | texte, 14 chiffres, vide possible | le SIREN en est les 9 premiers |
+| `tva_intracom` | texte, vide possible | |
+| `regime_tva` | texte, vide possible : `exonere`, `franchise`, `assujetti` | attend Q4 |
+| `taux_tva` | nombre, vide possible | seulement si `assujetti` |
+| `capital`, `rcs` | vide possible | mentions d'une société, à valider avec un comptable |
+| `email`, `telephone` | vide possible | contact imprimé |
+| `par_defaut` | booléen | **une seule** par compte (index unique partiel) |
+| `archivee_le` | horodatage, vide possible | on retire une entité, on ne la supprime pas : des factures et des charges y renvoient |
+| `cree_le`, `modifie_le` | horodatage | |
+
+**Lien avec les biens** : `properties.entite_juridique_id`, uuid, vide
+possible, vers `entites_juridiques.id`. **Vide = l'entité par défaut du
+compte** (décision D2). Un bien relève d'une entité au plus ; l'entité doit
+appartenir au même compte que le bien, contrôle fait par le writer.
+
+**Accès** : RLS activée, **aucune politique côté navigateur**. Tout passe par
+un endpoint gardé sur le domaine `facturation`, qui est déjà réservé au
+titulaire (`lib/permissions.js`, `NON_DELEGABLES`). Writer unique :
+`lib/entites-juridiques.js`.
+
+**Ce qui n'y est pas** : la suite des numéros de facture (table propre à ce
+lot, par entité) et tout ce qui est propre aux charges.
 
 ## 6. Contrainte légale à venir : la facture électronique
 
