@@ -123,9 +123,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q15 — Le risque résiduel des pièces jointes.** Tranchée, voir ci-dessous.
 - **Q16 — Révoquer l'adresse.** Tranchée, voir ci-dessous.
 - **Q17 — La TVA récupérable.** Tranchée, voir ci-dessous.
-- **Q18 — Un bien hors de l'entité.** Une facture peut-elle être affectée à un
-  bien qui ne relève pas de l'entité choisie ? *Proposition* : non, refusé par
-  le serveur.
+- **Q18 — Un bien hors de l'entité.** Tranchée, voir ci-dessous.
 - **Q19 — Les factures sans pièce jointe** (énergie, télécoms : facture dans
   le texte de l'e-mail ou derrière un lien). *Proposition* : pas lues en V1 ;
   l'e-mail apparaît « sans facture lisible » avec son texte, et l'hôte ajoute
@@ -246,6 +244,9 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   avant l'avis d'un comptable. Les totaux (Q4) donnent les trois sommes. Une
   TVA lue à 0 (« TVA non applicable, art. 293 B ») se distingue d'une TVA non
   lue (vide).
+- **Q18 (8 nov. 2026, 23 h 05) : non.** Une facture ne peut pas être
+  affectée à un bien qui ne relève pas de l'entité choisie (l'entité du bien
+  se lit par `entiteDuBien`). Le serveur refuse.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
