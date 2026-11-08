@@ -415,7 +415,10 @@ reçoit 2b et tout le 2c ensemble (Q24).
    qu'elle (5 s par appareil muet) — si le cycle est tué pendant lui, lui seul
    est perdu. **La file en panne ne rend personne muet** : l'alerte part tout de
    suite. **Ce qui vient de partir** (et seulement s'il est parti) retire la
-   ligne du même sujet qui attendait.
+   ligne du même sujet qui attendait. **Ce qui sort des heures calmes sonne
+   toujours** (`rappel`, recette du 8 novembre) : sans cela, il remplaçait en
+   silence une notification du même sujet encore affichée — envoyé, accepté,
+   jamais vu.
 8. **Un essai se dit essai** (« Essai — », « Test — », « Prueba — »), sur un
    logement fictif, ne va qu'à l'appelant (`seulement`), et **en notification
    seule — e-mail « dernier appareil » compris** : l'e-mail du profil se réécrit

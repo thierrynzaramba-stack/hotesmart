@@ -424,6 +424,9 @@ test('une seule ligne garde son écran et son sujet ; `seulement` prend tout ce 
   assert.equal(bilan.messages, 1)
   assert.equal(journal[0].navigate, '/pages/calendrier', 'son écran')
   assert.equal(journal[0].tag, 's1', 'son sujet')
+  // Recette du 8 novembre : la fin des heures calmes SONNE, même si une
+  // notification du même sujet est encore affichée (sinon, remplacement muet).
+  assert.equal(journal[0].renotify, true)
   assert.deepEqual(etat.tables.notifications_file.map(l => l.id), ['b1'], 'la ligne d\'un autre reste')
 })
 
