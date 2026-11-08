@@ -166,3 +166,18 @@ test('prenom neutre, partout : en tete de ligne, en milieu de phrase, et le meme
   const t = buildMessage({ template_text: 'Bonjour {prenom}, votre code : {code_acces}' }, { firstName: '' }, 'Voyageur', '1234', {})
   assert.strictEqual(t, 'Bonjour, votre code : 1234', 'jamais « Bonjour Voyageur »')
 })
+
+test('le chemin de l alerte nomme le logement TEL QUEL, meme si son nom porte `$&`', async () => {
+  // Review 2 du lot Accueil du voyageur, constat 4 : le remplacement par
+  // fonction n'etait verifie que par une expression reguliere sur le source.
+  // Avec `.replace(gabarit, nom)`, `$&` est un MOTIF : il redevient
+  // « <nom du logement> » et l'hote lit un chemin qui ne mene nulle part.
+  const { mod, incidents } = charger('texte ameliore')
+  const m = await mod.generateAutoMessage(
+    modele('Le wifi : {wifi_mdp}.'),
+    { firstName: 'Carole', arrival: '2026-10-08', departure: '2026-10-10' },
+    { id: 'p9', name: 'Gîte $& Co' }, 'Carole', {}, 'u1')
+  assert.strictEqual(m, null)
+  assert.equal(incidents.length, 1)
+  assert.ok(incidents[0].detail.includes('Logements → Gîte $& Co → Accueil du voyageur'), incidents[0].detail)
+})

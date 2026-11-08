@@ -26,18 +26,26 @@ function injecter (chemin, exports) {
   return abs
 }
 
-function charger ({ lignes }) {
+function charger ({ lignes, archives = [], archivesIllisibles = false, erreurAdresses = null }) {
   const selects = []
   const table = () => {
     const filtre = {}
     let colonnes = null
+    let refs = null
     const q = {
       select (c) { colonnes = c; selects.push(c); return q },
       eq (col, val) { filtre[col] = String(val); return q },
       is () { return q },
-      maybeSingle: async () => ({
-        data: lignes[filtre.provider_property_id] || null, error: null, colonnes
-      }),
+      in (col, vals) { refs = vals.map(String); return q },
+      maybeSingle: async () => ({ data: lignes[filtre.provider_property_id] || null, error: null }),
+      // La lecture dediee des adresses : une LISTE, bornee par `.in`.
+      then (res, rej) {
+        if (erreurAdresses) return Promise.resolve({ data: null, error: erreurAdresses }).then(res, rej)
+        const data = Object.entries(lignes)
+          .filter(([ref]) => !refs || refs.includes(ref))
+          .map(([ref, l]) => ({ provider_property_id: ref, address: l.address }))
+        return Promise.resolve({ data, error: null, colonnes }).then(res, rej)
+      },
       insert: async () => ({ error: null }),
       update () { return { eq: () => ({ is: async () => ({ error: null }), then: (r) => r({ error: null }) }) } }
     }
@@ -48,7 +56,7 @@ function charger ({ lignes }) {
     injecter('../lib/billing', { syncAccountBilling: async () => {} }),
     injecter('../lib/cles-migrees', { clesMigrees: async () => new Set() }),
     injecter('../lib/biens-vivants', {
-      clesArchivees: async () => ({ complet: true, cles: new Set() }),
+      clesArchivees: async () => ({ complet: !archivesIllisibles, cles: new Set(archives.map(r => `u1|${r}`)) }),
       cleDuBien: (u, p) => `${u}|${p}`
     })
   ]
@@ -80,19 +88,45 @@ test('une fiche SANS adresse ne retombe pas sur Beds24 : c est un manque, que l 
     'le voyageur recevrait une adresse que la fiche et l apercu disent manquante (S1)')
 })
 
-test('bien neuf (materialise a ce cycle) : la fiche vient d etre ecrite avec l adresse Beds24', async () => {
+test('bien neuf (pas encore dans le coeur) : pas de decoration, l adresse Beds24 est celle qui entre dans la fiche', async () => {
   const { mod } = charger({ lignes: {} })
   const biens = [{ id: 222, name: 'Neuf', address: 'Adresse Beds24' }]
   await mod.materializeBeds24Properties('u1', biens, {})
-  assert.strictEqual(biens[0].adresseFiche, 'Adresse Beds24')
+  assert.strictEqual(biens[0].adresseFiche, undefined)
+  const { replisDuBien } = require('../lib/balises')
+  assert.strictEqual(replisDuBien(biens[0]).adresse, 'Adresse Beds24')
 })
 
-test('aucune requete de plus : l adresse vient du SELECT qui existait deja', async () => {
-  const { mod, selects } = charger({ lignes: { 111: { id: 'uuid-1', active_at: '2026-01-01', address: 'X' } } })
-  await mod.materializeBeds24Properties('u1', [{ id: 111, name: 'Gite' }], {})
-  const lecturesDuBien = selects.filter(c => /active_at/.test(c))
-  assert.strictEqual(lecturesDuBien.length, 1)
-  assert.ok(/address/.test(lecturesDuBien[0]))
+// ⚠ CONSTAT 3 DE LA REVIEW 2 : posee dans la boucle de materialisation, la
+// decoration manquait exactement la ou les gardes renoncent — et l'ancienne
+// adresse Beds24 repartait au voyageur, alors que l'hote l'avait corrigee.
+test('LE TEST QUI COMPTE : un bien ARCHIVE (saute par la materialisation) porte quand meme l adresse de la fiche', async () => {
+  const { mod } = charger({ lignes: { 111: { id: 'uuid-1', active_at: '2026-01-01', address: 'Adresse corrigee' } }, archives: ['111'] })
+  const biens = [{ id: 111, name: 'Gite', address: 'Ancienne adresse Beds24' }]
+  await mod.materializeBeds24Properties('u1', biens, {})
+  assert.strictEqual(biens[0].adresseFiche, 'Adresse corrigee')
+})
+
+test('archives illisibles (la materialisation renonce au cycle) : les biens sont decores quand meme', async () => {
+  const { mod } = charger({ lignes: { 111: { id: 'uuid-1', active_at: '2026-01-01', address: 'Adresse corrigee' } }, archivesIllisibles: true })
+  const biens = [{ id: 111, name: 'Gite', address: 'Ancienne adresse Beds24' }]
+  await mod.materializeBeds24Properties('u1', biens, { errors: [] })
+  assert.strictEqual(biens[0].adresseFiche, 'Adresse corrigee')
+})
+
+test('lecture des adresses en echec : aucune decoration, l adresse Beds24 reste le repli, et rien ne leve', async () => {
+  const { mod } = charger({ lignes: { 111: { id: 'uuid-1', active_at: '2026-01-01', address: 'X' } }, erreurAdresses: { message: 'panne' } })
+  const biens = [{ id: 111, name: 'Gite', address: 'Adresse Beds24' }]
+  await mod.materializeBeds24Properties('u1', biens, {})
+  assert.strictEqual(biens[0].adresseFiche, undefined)
+})
+
+test('une seule lecture des adresses par compte, bornee aux biens rendus par Beds24', async () => {
+  const { mod, selects } = charger({ lignes: { 111: { id: 'a', active_at: 'x', address: 'A' }, 112: { id: 'b', active_at: 'x', address: 'B' } } })
+  const biens = [{ id: 111 }, { id: 112 }]
+  await mod.materializeBeds24Properties('u1', biens, {})
+  assert.strictEqual(selects.filter(c => c === 'provider_property_id, address').length, 1)
+  assert.deepStrictEqual(biens.map(b => b.adresseFiche), ['A', 'B'])
 })
 
 test('objet NON decore (materialisation qui a renonce) : l adresse du provider reste le repli', () => {

@@ -112,13 +112,16 @@ test('une adresse dans la BASE seulement ne part plus (une seule adresse : la fi
   assert.ok(texte.includes('12 rue des Lilas'))
 })
 
-test('sans adresse de fiche, la base ne la remplace pas : marqueur, pas une vieille adresse', async () => {
+test('sans adresse de fiche, la base ne la remplace pas', async () => {
+  // ⚠ CE TEST NE DIT PAS que le marqueur doit partir : fiche vide, ce chemin
+  // envoie encore « [ADRESSE] » (ecart connu, d'avant le lot, au registre des
+  // dettes — review 2, constat 2). Il ne fige que la regle du lot : une ligne
+  // `adresse` de la base n'est plus jamais lue.
   const { mod, taches } = charger({ connaissance: [{ key: 'adresse', value: 'Ancienne adresse de la base' }] })
   await mod.processArrivalCodes('u1', null,
     { id: '0db6b39b', name: 'La bulle', provider: 'channex', address: '' },
     [arrivante()], {})
   const texte = texteEnvoye(taches)
-  assert.ok(texte.includes('[ADRESSE]'))
   assert.ok(!texte.includes('Ancienne adresse'))
 })
 

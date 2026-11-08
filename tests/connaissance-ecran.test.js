@@ -583,4 +583,10 @@ test('et ne crée aucun droit : un bien du compte où l on est membre reste refu
     corps: { action: 'enregistrer', bienId: '44444444-4444-4444-8444-444444444444', type: 'fixed', key: 'wifi_nom', value: 'X' } })
   assert.equal(autre.statut, 403)
   assert.equal(autre.requetes.filter(q => q.table === 'knowledge').length, 0)
+  // ⚠ ET LA BASCULE N'A PAS EU LIEU (review 2, constat 4) : sans cette
+  // assertion, retirer le filtre `user_id` de la requête de bascule laissait ce
+  // test vert — le 403 venait alors du second filtrage, plus de la garde.
+  const eqDe = (q, c) => (q.filtres.find(x => x[0] === 'eq' && x[1] === c) || [])[2]
+  assert.ok(!autre.requetes.some(q => q.table === 'properties' && eqDe(q, 'user_id') === MEMBRE && !eqDe(q, 'id')),
+    'les biens du membre ont été lus : la bascule a eu lieu vers un compte que le bien ne désigne pas')
 })

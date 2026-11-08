@@ -95,12 +95,19 @@ voyageur reçoit — §2, S2.)
   refusée.
   **Chemin Beds24** (constat IMPORTANT de la review 1) : le cron y lit l'objet
   rendu par l'API Beds24, dont `address` est celle de Beds24, pas celle de la
-  fiche. `lib/cron-beds24-props.js` y pose `adresseFiche` (lu dans
-  `properties`, par la requête qu'il fait déjà à chaque cycle), et
-  `replisDuBien` la prend seule quand elle existe — une fiche vide est un
-  manque, pas un retour à l'adresse Beds24. Si la matérialisation renonce
-  (lecture des archives ou des clés migrées en échec), l'objet n'est pas
-  décoré et l'adresse Beds24, d'où la fiche a été tirée, reste le repli.
+  fiche. `lib/cron-beds24-props.js` y pose `adresseFiche` (lue dans
+  `properties`), et `replisDuBien` la prend seule quand elle existe — une
+  fiche vide est un manque, pas un retour à l'adresse Beds24. Si cette lecture
+  échoue, l'objet n'est pas décoré et l'adresse Beds24 reste le repli.
+  Le message du code d'accès, lui, n'a pas de garde sur les manquants : fiche
+  vide, il part encore avec « [ADRESSE] » (comportement d'avant le lot,
+  dette 133, décision de Thierry attendue).
+  La lecture est **dédiée et faite avant toute garde** (review 2, constat 3) :
+  posée dans la boucle de matérialisation, elle manquait aux biens archivés, à
+  tout le compte quand une garde renonçait, et au bien dont la lecture
+  tombait — et l'ancienne adresse Beds24 repartait. Coût : une requête par
+  compte Beds24 et par cycle. Seul son propre échec laisse l'adresse Beds24 en
+  repli.
   **Écart connu, non corrigé ici** : sur ce chemin, le téléphone de l'objet
   Beds24 (`phone`) reste un repli de l'envoi, mais la fiche et l'aperçu ne le
   voient pas (`properties` n'a pas de colonne téléphone). Un téléphone absent
@@ -113,7 +120,8 @@ voyageur reçoit — §2, S2.)
   bien, ce que l'IA lit avant et après le lot.
 - **S4. Aucune adresse perdue au déploiement.** La reprise (§3) passe AVANT le
   merge en production : sinon un bien dont l'adresse ne vivait que dans la base
-  enverrait « [ADRESSE] » et déclencherait l'alerte.
+  — **ou, pour un logement Beds24, que chez Beds24** — enverrait « [ADRESSE] »
+  et déclencherait l'alerte.
 - **S5. L'alerte « info manquante » mène au bon endroit** :
   « Logements → <nom du logement> → Accueil du voyageur → <étiquette> », et
   « Logements → <nom du logement> → Le logement → Adresse » pour l'adresse.
@@ -123,6 +131,12 @@ voyageur reçoit — §2, S2.)
 1. Je donne à Thierry une requête SQL **en lecture seule** : pour chaque bien,
    l'adresse de la base et celle de la fiche. (Le script du point 3 fait la
    même liste, à blanc.)
+   **Et une seconde liste, que la première ne trouve pas** (review 2, constat
+   1) : les logements **Beds24** en service dont la **fiche** n'a pas
+   d'adresse. Avant le lot, l'adresse de l'API Beds24 partait en repli ; depuis,
+   la fiche seule fait foi. Sans ligne `adresse` dans la base, ils
+   n'apparaissent pas dans la première liste — et ils perdraient leur adresse
+   au déploiement. Leur adresse se recopie dans la fiche avant la production.
 2. Trois cas : identiques ou base vide → rien à faire ; fiche vide → l'adresse
    de la base est recopiée dans la fiche **par l'écran de la fiche** (le même
    chemin qu'à la main, qui la transmet aussi au canal) ; **écart** → Thierry

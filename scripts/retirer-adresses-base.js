@@ -49,12 +49,27 @@ async function toutLire (faire) {
 
 async function main () {
   console.log(`Base : ${base}${GO ? '' : ' — À BLANC, rien n’est écrit'}`)
+  const biens = await toutLire(() => sb.from('properties')
+    .select('id, user_id, name, provider, provider_property_id, address, archive_le').order('id'))
+
+  // ⚠ LES LOGEMENTS BEDS24 SANS ADRESSE DE FICHE (review 2 du lot, constat 1).
+  // Avant le lot, leur adresse partait quand même : celle de l'API Beds24, en
+  // repli. Depuis, la fiche seule fait foi — un tel logement perd son adresse
+  // au déploiement (messages retenus, IA sans adresse), et il n'a AUCUNE ligne
+  // `adresse` dans la base : la liste ci-dessous est la seule qui le trouve.
+  // À remplir dans la fiche AVANT la production (S4). Informatif : il ne bloque
+  // pas le retrait des lignes, qui n'y change rien.
+  const sansAdresse = biens.filter(b => !b.archive_le && !propre(b.address))
+  if (sansAdresse.length) {
+    console.log(`Logements en service SANS adresse dans leur fiche : ${sansAdresse.length}`)
+    for (const b of sansAdresse) {
+      console.log(`- ${b.name || b.id} (${b.provider})${b.provider === 'beds24' ? ' — PERD SON ADRESSE au déploiement : la remplir dans la fiche' : ''}`)
+    }
+  } else console.log('Tous les logements en service ont une adresse dans leur fiche.')
+
   const lignes = await toutLire(() => sb.from('knowledge')
     .select('id, user_id, property_id, value').eq('type', 'fixed').eq('key', 'adresse').order('id'))
   if (!lignes.length) { console.log('Aucune ligne `adresse` dans la base : rien à faire.'); return }
-
-  const biens = await toutLire(() => sb.from('properties')
-    .select('id, user_id, name, provider_property_id, address').order('id'))
   // ⚠ DEUX CLÉS PAR BIEN (review 1 du lot) : `knowledge.property_id` est la
   // référence du partenaire, mais une ligne ancienne peut porter l'UUID du
   // bien. Indexée sur la seule référence, elle tombait en « bien introuvable »
