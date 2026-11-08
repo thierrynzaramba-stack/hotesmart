@@ -121,12 +121,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q13 — L'export pour le comptable.** Tranchée, voir ci-dessous.
 - **Q14 — Les doublons.** Tranchée, voir ci-dessous.
 - **Q15 — Le risque résiduel des pièces jointes.** Tranchée, voir ci-dessous.
-- **Q16 — Révoquer l'adresse.** Une adresse donnée aux fournisseurs finira
-  par circuler, et une adresse signée sans table ne se révoque pas : le seul
-  recours serait de changer le secret, ce qui casserait aussi les adresses de
-  réponse des voyageurs. *Proposition* : un **secret dédié** aux adresses de
-  factures, et un **numéro de version par compte** (une colonne, donc une
-  table) que le bouton « Changer d'adresse » incrémente.
+- **Q16 — Révoquer l'adresse.** Tranchée, voir ci-dessous.
 - **Q17 — La TVA récupérable.** Ce qu'est la charge réelle (HT ou TTC) est
   une question fiscale : prorata de déduction, dépenses non déductibles.
   *Proposition* : la V1 stocke HT, TVA et TTC tels que lus et validés, et
@@ -244,6 +239,13 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   type et taille confrontés à la relecture Brevo (champ absent = refus),
   taille téléchargée égale à la taille relue, jeton contrôlé et encodé, et
   tout arrive « à vérifier ».
+- **Q16 (8 nov. 2026, 23 h 01) : d'accord, bouton « Changer d'adresse ».**
+  Un **secret dédié** aux adresses de factures (distinct de
+  `REPLY_TOKEN_SECRET`, que les adresses de réponse des voyageurs gardent) et
+  un **numéro de version par compte**, stocké dans une petite table de ce
+  chantier (RLS sans politique, writer unique). Le bouton incrémente la
+  version : l'ancienne adresse est refusée aussitôt. Un e-mail reçu sur une
+  adresse périmée est refusé (200 + trace, pas de 503 : c'est définitif).
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
