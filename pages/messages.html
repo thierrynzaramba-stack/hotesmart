@@ -665,6 +665,12 @@ function renderFil () {
   // La saisie (etape 2) : retiree sans droit d'ecriture, jamais grisee.
   const saisie = $('[data-bind="saisie"]')
   saisie.hidden = !peutEcrireMessages()
+  // ⚠ LE CHAMP SE REMESURE UNE FOIS VISIBLE — recette de Thierry du
+  // 8 novembre 2026 : au téléphone, la saisie est cachée pendant le changement
+  // de fil, un champ caché mesure 0, et la hauteur de zéro prise là restait
+  // collée au champ (« sa hauteur se réduit en ouvrant plusieurs conversations
+  // à la suite »).
+  if (!saisie.hidden) ajusterHauteur($('[data-bind="texte"]'))
   const enPause = etat.pauses[String(c.propertyId)] === true
   const btnIA = $('[data-bind="proposer"]')
   btnIA.disabled = enPause
@@ -1875,7 +1881,7 @@ function noteChamp (texte) {
 function effacerNoteChamp () {
   const note = $('[data-bind="saisie-etat"]')
   if (!note || note.hidden) return
-  if (note.textContent === t('kb.use_removed') || note.textContent === t('kb.use_wrong_conv')) {
+  if (note.textContent === t('kb.use_wrong_conv')) {
     note.hidden = true
     note.textContent = ''
   }
@@ -1886,8 +1892,9 @@ function effacerNoteChamp () {
 // ajoutée avant ou après, le texte d'une proposition —, on ne devine pas ce
 // qui est à qui : TOUT reste, la marque aussi, et « Envoyer » le refusera ici
 // (constats 1, 2 et 4 de la review 2 : retirer seulement le texte posé
-// laissait partir ailleurs, sans marque, ce qui était écrit pour Ana). Dans
-// les deux cas, on le dit.
+// laissait partir ailleurs, sans marque, ce qui était écrit pour Ana). Le
+// retrait se fait EN SILENCE (recette de Thierry du 8 novembre 2026 : la note
+// « retiré du champ » était de trop) ; le texte qui reste, lui, le dit.
 function rangerSaisieRemplie (bookId) {
   const r = etat.saisieRemplie
   const zone = $('[data-bind="texte"]')
@@ -1901,7 +1908,6 @@ function rangerSaisieRemplie (bookId) {
     zone.value = ''
     ajusterHauteur(zone)
     etat.saisieRemplie = null
-    noteChamp(t('kb.use_removed'))
     return
   }
   noteChamp(t('kb.use_wrong_conv'))
@@ -3602,7 +3608,6 @@ function ouvrir (bookId) {
     const r = etat.saisieRemplie
     const poses = r && String(r.bookId) === String(etat.enEdition.bookId)
     if (xEd && (zone.value.trim() === ia || (poses && sansTextesPoses(zone.value).trim() === ia))) {
-      if (poses && zone.value.trim() !== ia) noteChamp(t('kb.use_removed'))
       zone.value = ''
       ajusterHauteur(zone)
       if (poses) etat.saisieRemplie = null

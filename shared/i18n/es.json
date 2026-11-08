@@ -378,7 +378,6 @@
   "kb.use_empty": "Esta respuesta está vacía.",
   "kb.use_other_conv": "La conversación ha cambiado: vuelva a abrir la base de conocimiento para esta.",
   "kb.use_wrong_conv": "Este texto se preparó para otra conversación: no se enviará aquí. Vacíe el campo o vuelva a esa conversación.",
-  "kb.use_removed": "Se ha quitado del campo el texto de la base de conocimiento preparado para la otra conversación.",
   "kb.use_incomplete": "Esta respuesta no está completa para este huésped: revísela antes de usarla.",
   "kb.title": "Base de conocimiento",
   "kb.to_fill": "Por completar",

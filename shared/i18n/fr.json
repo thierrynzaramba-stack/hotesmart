@@ -378,7 +378,6 @@
   "kb.use_empty": "Cette réponse est vide.",
   "kb.use_other_conv": "La conversation a changé : rouvrez la base de connaissance pour celle-ci.",
   "kb.use_wrong_conv": "Ce texte a été préparé pour une autre conversation : il ne partira pas ici. Videz le champ, ou revenez à cette conversation.",
-  "kb.use_removed": "Le texte de la base de connaissance préparé pour l’autre conversation a été retiré du champ.",
   "kb.use_incomplete": "Cette réponse n’est pas complète pour ce voyageur : vérifiez-la avant de l’utiliser.",
   "kb.title": "Base de connaissance",
   "kb.to_fill": "À remplir",
