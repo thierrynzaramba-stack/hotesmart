@@ -2693,7 +2693,20 @@
     const portee = cleAuto !== e.cle
       ? ` title="${ech(`Le réglage est posé sur ${ORIGINE_LARGE[cleAuto] || 'toutes les périodes de ce type'} : il sera retiré pour toutes.`)}"`
       : ''
-    const gestes = lecture ? '' : `${coupe ? '' : `<div class="qpb-regl">
+    // ⚠ PAS DE FLECHES NON PLUS SUR UNE LIGNE « AUTOMATIQUE » SANS NIVEAU DE
+    // DEPART (decision de Thierry du 8 novembre 2026, constat 2 de la review
+    // de la chaine). Sans mesure ni reglage (`crans` null : reveillons,
+    // Saint-Valentin, evenements sans historique), le moteur met ces nuits
+    // au niveau de leur nuit sous-jacente ; un cran pose repart de la
+    // structure ordinaire — le reveillon de Noel passait de Tres haut a Haut
+    // sous un bouton « Monter ». Ces nuits se regleront nuit par nuit au
+    // lot 4 du chantier « Ce qui fait bouger vos prix ».
+    // ⚠ SEULS les dates du calendrier et les evenements declares : eux
+    // seuls heritent de leur nuit sous-jacente (`suggerer`, etage 0). Un
+    // ferie ou un pont sans mesure retombe sur la semaine ordinaire, et
+    // ▲ y monte vraiment : ses fleches restent.
+    const sansDepart = !regleALaMain && e.crans == null && /^(commercial|evenement):/.test(String(e.cle || ''))
+    const gestes = lecture ? '' : `${(coupe || sansDepart) ? '' : `<div class="qpb-regl">
         ${pas(-1)}
         ${pas(1)}
       </div>`}

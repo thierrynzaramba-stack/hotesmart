@@ -791,10 +791,20 @@ test('LE TEST QUI COMPTE (review de la chaine) : une MESURE au-dela de ±2 — l
 
 test('LE TEST QUI COMPTE (review de la chaine) : pas de fleches sur une periode COUPEE ; « remettre en automatique » vise la cle qui porte le reglage ; un reglage partage se dit', () => {
   const src = sansCommentaires(PAGE())
-  assert.match(src, /\$\{coupe \? '' : `<div class="qpb-regl">/, 'une periode coupee n a pas de fleches')
+  assert.match(src, /\$\{\(coupe \|\| sansDepart\) \? '' : `<div class="qpb-regl">/, 'une periode coupee n a pas de fleches')
   assert.match(src, /const cleAuto = e\.cle_reglage \|\| e\.cle/)
   assert.match(src, /data-ev-auto="\$\{ech\(cleAuto\)\}"/, 'le retrait vise la cle qui porte le reglage')
   assert.doesNotMatch(src, /data-ev-auto="\$\{ech\(e\.cle\)\}"/)
   assert.match(src, /e\.cle === 'week_end_prolonge' \? 'tous les week-ends prolongés'/, 'les week-ends prolonges partagent un seul reglage, et l etiquette le dit')
   assert.match(src, /const dit = e\.actif === false \? 'Pas prise en compte'/, 'la frise dit comme la ligne')
+})
+
+test('LE TEST QUI COMPTE (decision du 8 novembre) : pas de fleches sur une ligne « Automatique » SANS niveau de depart — un ▲ y faisait baisser le reveillon', () => {
+  const src = sansCommentaires(PAGE())
+  assert.match(src, /const sansDepart = !regleALaMain && e\.crans == null && \/\^\(commercial\|evenement\):\/\.test/,
+    'sans mesure ni reglage, une date du calendrier ou un evenement declare n a pas de point de depart lisible — un ferie ou un pont garde ses fleches')
+  // Une ligne REGLEE garde ses fleches et son « remettre en automatique » :
+  // le critere exclut regleALaMain.
+  assert.match(lire('lib/yield/calendrier-pilotage.js'), /e\.crans = e\.crans_ajustes != null \? e\.crans_ajustes : e\.crans_mesures/,
+    '`crans` est null seulement quand il n y a ni reglage ni mesure')
 })
