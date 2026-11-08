@@ -112,10 +112,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q5 — Les catégories.** Tranchée, voir ci-dessous.
 - **Q6 — L'adresse e-mail.** Tranchée, voir ci-dessous.
 - **Q7 — Qui peut écrire à cette adresse.** Tranchée, voir ci-dessous.
-- **Q8 — Le domaine de l'adresse.** *Proposition V1* : `reply.hotesmart.fr`,
-  déjà branché, aucun geste DNS. Plus tard, un sous-domaine dédié
-  (`factures.hotesmart.fr`) demande trois gestes de Thierry : MX chez IONOS,
-  domaine authentifié chez Brevo, webhook.
+- **Q8 — Le domaine de l'adresse.** Tranchée, voir ci-dessous.
 - **Q9 — Les droits.** Titulaire seul en V1, ou un domaine neuf `charges`,
   délégable (un gestionnaire saisit les factures) ? *Proposition* : titulaire
   seul en V1 (D1 ne demande pas plus), tenu par une garde explicite
@@ -216,6 +213,9 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   fournisseur (Booking.com, un artisan) peut écrire directement à l'adresse ;
   elle est signée, donc non devinable, et tout ce qui arrive est
   « à vérifier » (compté en « estimation », Q4).
+- **Q8 (8 nov. 2026, 22 h 36) : d'accord, `reply.hotesmart.fr` en V1.**
+  Aucun geste DNS. Un sous-domaine dédié (`factures.hotesmart.fr` : MX chez
+  IONOS, domaine authentifié chez Brevo, webhook) viendra plus tard.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
