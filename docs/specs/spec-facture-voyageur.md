@@ -147,10 +147,13 @@ confirme le total après le séjour, et la facture lui parvient par lien.
 
 ## 4 bis. Questions nées de la relecture (à Thierry, une par une)
 
-- **P1 — Les droits pour poster le lien.** Poster dans la conversation exige
-  aujourd'hui le droit « messages » en écriture (`/api/channel-message`). Un
-  membre « réservations » en écriture sans « messages » doit-il pouvoir
-  poster le lien (Q10), ou faut-il les deux droits ?
+- **P1 — Les droits pour faire partir un message au voyageur.** Poster dans
+  la conversation exige aujourd'hui le droit « messages » en écriture
+  (`/api/channel-message`). Deux gestes du lot font partir un message : envoyer
+  le lien (porte 1) et **confirmer le total**, qui déclenche « Votre facture est
+  disponible » par le chemin serveur (`sendGuestMessage`, qui ne vérifie aucun
+  droit). Un membre « réservations » en écriture sans « messages » peut-il
+  faire ces deux gestes (Q10), ou faut-il les deux droits ?
 - **P2 — Ce que voit un membre en lecture.** La facture porte le nom,
   l'adresse et le SIREN du voyageur ; la fiche ne montre aujourd'hui les
   coordonnées du voyageur qu'au titulaire. Un membre « réservations » en
@@ -223,6 +226,13 @@ authenticated` — exception à la règle 5 de REVIEW.md, nommée ici, sur le
 précédent de `taxes_sejour`. Tout passe par un endpoint : écriture gardée
 sur `facturation` (titulaire seul), lecture selon `peutLire` (un membre
 `facturation: read` lit l'entité). Writer unique : `lib/entites-juridiques.js`.
+**`biens_entites` suit exactement la même règle**, quel que soit l'endpoint
+qui la sert : RLS sans politique et `revoke`, écriture par
+`lib/entites-juridiques.js` seul, derrière `facturation` (titulaire seul),
+lecture selon `peutLire('facturation')`. ⚠ L'endpoint de la fiche du logement
+est gardé sur `reglages` en écriture et `reservations` en lecture
+(`api/logement.js`) : s'il affiche ou modifie l'entité d'un bien, il appelle
+cette garde-là en plus de la sienne — sinon le constat 4 se rouvre.
 
 ### 5.2 La suite des numéros (propre à ce lot)
 
@@ -278,6 +288,12 @@ devient une facture à l'émission.
 - **Facture émise, FIGÉE** : numéro, date, émetteur copié, destinataire
   copié, lignes copiées, mention de TVA, référence plateforme (Q14), langue du
   pays du bien (Q9), chemin du PDF. Rien n'est relu ensuite.
+- **Le PDF** porte le nom, l'adresse et le SIREN du voyageur : il est stocké
+  dans un bucket **privé**, et servi **uniquement** par l'endpoint gardé de la
+  fiche ou par l'endpoint du jeton, par une **URL signée de courte durée**.
+  ⚠ Le seul précédent de stockage du dépôt est un bucket public lu par
+  `getPublicUrl` (`api/property-photo.js`) : ce n'est PAS le modèle à suivre
+  (re-relecture, constat 1).
 - **Les liens** : table **`factures_voyageur_jetons`** — un jeton aléatoire
   d'au moins 128 bits par envoi, **stocké haché**. Un jeton haché ne se relit
   pas : **chaque envoi crée un jeton neuf** (bouton, balise, GuestFlow,
@@ -296,8 +312,10 @@ devient une facture à l'émission.
 
 ### 5.4 L'émission, dans l'ordre
 
-1. **Le geste de l'hôte** : garde serveur (droits ; départ relu dans
-   `bookings_snapshot` + 24 h échu ; réservation non annulée ; entité active).
+1. **Le geste de l'hôte** : garde serveur (droits — `reservations` en
+   écriture, et `messages` selon la réponse à P1, puisque ce geste fait partir
+   un message ; départ relu dans `bookings_snapshot` + 24 h échu ; réservation
+   non annulée ; entité active).
 2. **Une seule fonction SQL, une seule transaction** : passage conditionnel
    `a_confirmer → emise` (une seconde confirmation simultanée ne trouve plus la
    ligne en `a_confirmer` et n'émet rien), tirage du numéro, contenu figé.
@@ -433,3 +451,9 @@ seuil serveur (17) ; règles de la page publique (18) ; source de la langue
 22) ; exception RLS et E6 nommées (23, 24) ; case PERFORMANCE complétée (25).
 Devenus des questions à Thierry (§4 bis) : 5 → P1, 11 → P2, 15 → P3, 13 → P4,
 19 → P5, 9 (fin des rappels) → P6.
+
+**Re-relecture SÉCURITÉ** (une seule, règle du dépôt), plage
+25c0f251..9308ee05 : les corrections tiennent ; trois constats, corrigés sans
+nouvelle relecture — la règle de stockage privé du PDF avait disparu (1) ;
+la confirmation fait aussi partir un message, P1 la couvre désormais (2) ;
+`biens_entites` suit la règle d'accès de l'entité quel que soit l'endpoint (3).
