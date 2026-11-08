@@ -120,13 +120,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q22 — La période comptable.** Tranchée, voir ci-dessous.
 - **Q13 — L'export pour le comptable.** Tranchée, voir ci-dessous.
 - **Q14 — Les doublons.** Tranchée, voir ci-dessous.
-- **Q15 — Le risque résiduel des pièces jointes.** Le 18 septembre 2026,
-  Thierry a accepté un risque nommé : qui connaîtrait l'`uuid` d'un e-mail
-  réel pourrait en substituer le **corps**. Ici, le jeton de téléchargement de
-  la pièce jointe ne vient, lui aussi, que du POST (§3). Accepter le même
-  risque pour les pièces jointes ? Gardes proposées (§7) : nombre, nom, type
-  et taille des pièces confrontés à la relecture, taille téléchargée égale à
-  celle relue, et tout arrive « à vérifier ».
+- **Q15 — Le risque résiduel des pièces jointes.** Tranchée, voir ci-dessous.
 - **Q16 — Révoquer l'adresse.** Une adresse donnée aux fournisseurs finira
   par circuler, et une adresse signée sans table ne se révoque pas : le seul
   recours serait de changer le secret, ce qui casserait aussi les adresses de
@@ -244,6 +238,12 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   *Proposition* pour les totaux (Q4) : tant que le groupe n'est pas tranché,
   il compte **une seule fois** (la première facture), et le total reste
   « estimation ».
+- **Q15 (8 nov. 2026, 23 h 00) : d'accord, risque résiduel accepté pour les
+  pièces jointes**, comme pour le corps des e-mails le 18 septembre 2026 :
+  le `DownloadToken` ne vient que du POST. Gardes exigées (§7) : nombre, nom,
+  type et taille confrontés à la relecture Brevo (champ absent = refus),
+  taille téléchargée égale à la taille relue, jeton contrôlé et encodé, et
+  tout arrive « à vérifier ».
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
