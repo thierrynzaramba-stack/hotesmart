@@ -119,9 +119,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q12 — La conservation.** Tranchée, voir ci-dessous.
 - **Q22 — La période comptable.** Tranchée, voir ci-dessous.
 - **Q13 — L'export pour le comptable.** Tranchée, voir ci-dessous.
-- **Q14 — Les doublons.** *Proposition* : le même fichier (même empreinte)
-  est refusé ; le même fournisseur avec le même numéro de facture déclenche
-  « déjà enregistrée ? » sans refuser.
+- **Q14 — Les doublons.** Tranchée, voir ci-dessous.
 - **Q15 — Le risque résiduel des pièces jointes.** Le 18 septembre 2026,
   Thierry a accepté un risque nommé : qui connaîtrait l'`uuid` d'un e-mail
   réel pourrait en substituer le **corps**. Ici, le jeton de téléchargement de
@@ -237,6 +235,15 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q13 (8 nov. 2026, 22 h 54) : d'accord, lot après la V1.** L'export
   (tableau des charges + justificatifs regroupés) vient dans un lot suivant ;
   la comptabilité elle-même (amortissements, liasse) reste hors d'HôteSmart.
+- **Q14 (8 nov. 2026, 22 h 56) : « elles sont regroupées, avec un signal
+  d'appel à l'action (vérifier) ».** Un doublon possible n'est **jamais
+  refusé** : il est **regroupé** avec la facture qu'il double, et le groupe
+  porte un signal **« Vérifier »**. Sont des doublons possibles : le même
+  fichier (même empreinte), et le même fournisseur avec le même numéro de
+  facture. L'hôte tranche : garder les deux, ou en supprimer un (Q11).
+  *Proposition* pour les totaux (Q4) : tant que le groupe n'est pas tranché,
+  il compte **une seule fois** (la première facture), et le total reste
+  « estimation ».
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -297,7 +304,8 @@ validée est considérée payée (Q2).
 | `origine` | `photo`, `fichier`, `email`, `ota` (§7 bis) |
 | `booking_id` | référence de la réservation, pour `origine = ota` seulement ; **unique (`user_id`, `booking_id`)** sur ce statut d'origine |
 | `email_uuid`, `email_expediteur`, `email_recu_le` | origine e-mail ; **unique (`user_id`, `email_uuid`, empreinte)** : Brevo peut rejouer un webhook. Une ligne `sans_facture` n'a pas d'empreinte (et Postgres tient deux vides pour différents) : **unique partiel (`user_id`, `email_uuid`)** sur ce statut. |
-| `justificatif_chemin`, `justificatif_type`, `justificatif_octets`, `justificatif_empreinte` | fichier au nom **aléatoire** dans le bucket privé ; empreinte SHA-256, unique par compte (Q14) |
+| `justificatif_chemin`, `justificatif_type`, `justificatif_octets`, `justificatif_empreinte` | fichier au nom **aléatoire** dans le bucket privé ; empreinte SHA-256, **indexée mais pas unique** : un doublon est regroupé, pas refusé (Q14) |
+| `groupe_doublon` | vide, ou l'`id` de la première charge du groupe de doublons possibles (Q14) |
 | `lecture_ia` | jsonb : ce que l'IA a lu, champ par champ, avec sa confiance, le modèle et l'heure. **Jamais écrasé par la saisie** : l'écart lu / validé mesure la précision (étape 5). |
 | `cree_le`, `modifie_le`, `valide_le`, `valide_par` | |
 
@@ -377,7 +385,9 @@ validée est considérée payée (Q2).
   (ligne `sans_facture` portant le motif), sinon Brevo rejouerait jusqu'à
   épuisement et la facture disparaîtrait sans trace (même leçon que le
   webhook actuel, `api/inbound-email.js`). Un doublon d'empreinte (le
-  fournisseur et l'hôte envoient le même PDF) rend 200 sans rien créer.
+  fournisseur et l'hôte envoient le même PDF) **crée sa ligne, regroupée**
+  avec la première (Q14) ; seul un **rejeu** du même e-mail par Brevo (même
+  `email_uuid`, même empreinte) ne crée rien.
 - **La lecture par l'IA, elle, est différée** : une fonction de cron
   **dédiée** (`api/cron-charges.js`, toutes les 5 minutes, sa propre limite de
   60 s) lit les charges `a_lire` par index, avec un budget de temps qui
@@ -418,9 +428,10 @@ validée est considérée payée (Q2).
 - **Date de la charge** : la date du versement du canal (`delais_versement`,
   `lib/revenus/versement.js`), comme le bloc Revenus.
 - **Doublon à fermer** : une facture de frais de la plateforme transférée à
-  la main pour un canal déjà compté automatiquement doublerait la charge. Le
-  formulaire le signale (« commissions Airbnb déjà comptées depuis vos
-  réservations »).
+  la main pour un canal déjà compté automatiquement doublerait la charge.
+  Elle est traitée comme un doublon possible (Q14) : regroupée avec les
+  commissions de la période, signal « Vérifier » (« commissions Airbnb déjà
+  comptées depuis vos réservations »).
 - **Cadence** : donnée non urgente, matérialisée par une tâche du cron dédié
   (`api/cron-charges.js`) une fois par jour, sur les réservations dont le
   versement est passé ; écriture idempotente (unique par compte et
