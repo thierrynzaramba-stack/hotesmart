@@ -143,6 +143,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   franchise en base, assujetti. **Assujetti : l'hôte règle lui-même son taux
   de TVA.** Le texte exact de chaque mention est validé par un comptable avant
   l'étape 2 (émission).
+- **Q5 (8 nov. 2026) : réponse A.** Une suite par entité juridique, de la
+  forme `F-2026-0001`, qui repart à 1 chaque année ; numéro donné à
+  l'émission, jamais réutilisé. **L'hôte règle le préfixe et le numéro de
+  départ**, pour reprendre une suite commencée ailleurs. (Une suite par
+  entité et par année vit dans ce lot, pas dans la table partagée.)
 
 ## 5. Données (proposition, à revoir après les réponses)
 
