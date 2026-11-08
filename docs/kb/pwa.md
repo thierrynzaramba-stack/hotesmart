@@ -388,22 +388,50 @@ reçoit 2b et tout le 2c ensemble (Q24).
    titulaire seul.
 3. **La notification remplace le SMS** (Q11) : jamais de SMS à qui a un
    appareil abonné, même si la notification est décochée pour l'événement.
-   **Ne pas savoir vaut « sans appareil »** (lecture en panne, clés absentes) :
-   un SMS de trop plutôt qu'une surréservation manquée.
+   **Mais une notification qui n'a atteint AUCUN appareil ne remplace rien**
+   (5xx, délai, 403 après un changement de clé) : le SMS part (constat de
+   review). **Ne pas savoir vaut « sans appareil »** (lecture en panne, clés
+   absentes) : un SMS de trop plutôt qu'une surréservation manquée. Ce que le
+   titulaire a coupé sur le profil d'une personne (`notify_sms`,
+   `notify_email`) ne part pas : le SMS est payé par SA clé.
 4. **Le dernier appareil** (Q13) : quand tous les appareils d'une personne
    répondent 404 ou 410, elle reçoit un e-mail, et le SMS coché part dès cet
    envoi.
 5. **La file est rédigée dans la langue de la personne** au moment où
-   l'événement arrive. **Un sujet = une ligne** : la relance d'une
-   surréservation remplace sa ligne.
-6. **Une ligne ne part qu'une fois** : la passe la SUPPRIME en la prenant.
-   Une ligne prise puis ratée est perdue — comme un envoi immédiat raté.
-7. **Un essai se dit essai** (« Essai — », « Test — », « Prueba — »), sur un
-   logement fictif, et ne va qu'à l'appelant (`seulement`) : jamais à un autre
-   membre de son compte.
-8. **Après une reconnexion, on revient à l'écran demandé** : `requireAuth`
+   l'événement arrive, **sans ses coordonnées**. **Un sujet = une ligne** : la
+   relance d'une surréservation remplace sa ligne ; ce qui part MAINTENANT
+   retire la ligne du même sujet qui attendait ; une alarme éteinte ou
+   acquittée retire la sienne chez tout le compte.
+6. **À la sortie de la file** (constats de SÉCURITÉ de review) : **regroupé
+   par personne ET par compte** — jamais le bien d'un compte par les
+   coordonnées ou la clé SMS d'un autre ; **les droits et les coordonnées se
+   relisent** — une personne désactivée, ou qui a perdu le domaine ou le bien,
+   ne reçoit rien ; **chaque canal ne porte que ses lignes**.
+7. **Une ligne ne part qu'une fois** : la passe la SUPPRIME en la prenant, groupe
+   par groupe, au moment d'envoyer. Budget : 30 envois par passe, 8 s de marge ;
+   ce qui n'a pas le temps de partir RESTE en base. **La file en panne ne rend
+   personne muet** : l'alerte part tout de suite.
+8. **Un essai se dit essai** (« Essai — », « Test — », « Prueba — »), sur un
+   logement fictif, ne va qu'à l'appelant (`seulement`), et **en notification
+   seule** : l'e-mail du profil se réécrit librement (policy `profiles_write`),
+   un essai par e-mail répété serait un relais vers n'importe quelle adresse.
+9. **Après une reconnexion, on revient à l'écran demandé** : `requireAuth`
    passe la page en `next` ; `pages/login.html` la filtre (chemin du site
    seulement) ; la page de connexion n'est jamais un `next`.
+
+**Limites connues** (review du 8 novembre) :
+- **Une adhésion se forge par la policy `profiles_write`** : un titulaire peut
+  écrire une ligne « membre accepté » au nom d'un tiers dont il connaît
+  l'identifiant, et ses notifications partiraient sur les appareils de ce
+  tiers. La cause est antérieure au lot (la même ligne ouvre déjà le compte au
+  tiers) : **dette à inscrire au registre**.
+- Une personne qui a décoché la notification d'un événement et coché le SMS,
+  avec un appareil abonné mort, ne reçoit pas le SMS de cet événement : ses
+  appareils sont comptés, pas sondés. Le premier événement envoyé en
+  notification nettoie l'appareil mort (et la prévient, Q13).
+- L'écran ouvert par la notification de surréservation (`/pages/aujourdhui`)
+  ne choisit pas le compte : un membre de plusieurs comptes y arrive sur son
+  compte courant.
 
 **Recette sur staging (pas de cron)** : l'essai et « vider ma file » se
 lancent depuis l'onglet Notifications ouvert (console du navigateur, avec la

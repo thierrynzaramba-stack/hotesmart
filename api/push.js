@@ -134,8 +134,12 @@ module.exports = async function handler (req, res) {
       const donnees = textes.exemple(corps.code)
       if (!donnees) return res.status(400).json({ error: 'Pas d’essai pour cet événement.', motif: 'essai_inconnu' })
       const { notifier } = require('../lib/notifications/notifier')
+      // ⚠ LA NOTIFICATION SEULE : ni e-mail plateforme ni SMS. L'e-mail du
+      // profil se réécrit librement (policy `profiles_write`) : un essai par
+      // e-mail répété serait un relais illimité vers n'importe quelle adresse
+      // (constat de SÉCURITÉ de review ; même classe que api/alert-test.js).
       const bilan = await notifier({
-        compte: userId, code: corps.code, donnees, seulement: userId,
+        compte: userId, code: corps.code, donnees, seulement: userId, canauxPermis: ['push'],
         chemin: '/settings?onglet=notifications', sujet: `essai:${corps.code}`
       })
       if (!bilan.ok) return res.status(503).json({ error: 'Essai impossible, réessayez.', bilan })

@@ -118,6 +118,16 @@ module.exports = async (req, res) => {
     }
 
     console.log(`[incidents-acquitter] overbooking bien ${data[0].property_id} acquitte par ${String(garde.userId).slice(0, 8)} (compte ${String(garde.accountUserId).slice(0, 8)})`)
+    // PWA lot 2c-1 : une surreservation acquittee ne part plus a la fin des
+    // heures calmes de qui que ce soit du compte (docs/kb/pwa.md §10). Jamais
+    // une raison de faire echouer l'acquittement.
+    if (data[0].type === 'overbooking') {
+      try {
+        await require('../lib/notifications/file').retirerSujet({
+          compte: garde.accountUserId, sujet: `surreservation:${data[0].property_id}`, db: supabase
+        })
+      } catch (e) { console.error('[incidents-acquitter] file non nettoyee', e.message) }
+    }
     return res.status(200).json({ ok: true, acquitte: data[0].id })
   }
 

@@ -210,38 +210,62 @@ test('ALARME : une fermeture AUTOMATIQUE ne vaut pas « vu » — l\'alarme repa
 })
 
 // ─── PWA lot 2c-1 : l'hôte est prévenu par le point d'envoi unique ──────────
-// Ce que la surréservation transmet à `notifier` (lib/notifications/notifier.js),
-// EXÉCUTÉ par `traiterAlarmes` : le compte, le code, le bien, les nuits comme
-// séjour, l'écran d'acquittement, un sujet par bien, et `rappel` pour que chaque
-// relance sonne. Le fondateur reste en copie, par son propre canal.
+// ⚠ LES DEUX MODULES QUE CE FICHIER CHARGE PARESSEUSEMENT SONT REMPLACÉS POUR
+// TOUT LE FICHIER (constat de review) : sans cela, les tests ALARME ci-dessus
+// appelaient le VRAI point d'envoi, donc le vrai client Supabase — une base
+// réelle si l'environnement en désigne une (REVIEW.md règle 21). La chaîne
+// réelle `crier` → `notifier` est exécutée, sur une base factice, dans
+// tests/notifications-envoi.test.js.
+const appelsNotifier = []
+const retraitsFile = []
+const cheminNotifier = require.resolve('../lib/notifications/notifier')
+const cheminFile = require.resolve('../lib/notifications/file')
+require.cache[cheminNotifier] = { id: cheminNotifier, filename: cheminNotifier, loaded: true,
+  exports: { notifier: async (p) => { appelsNotifier.push(p); return { ok: true, personne_joignable: true, erreurs: [] } } } }
+require.cache[cheminFile] = { id: cheminFile, filename: cheminFile, loaded: true,
+  exports: { retirerSujet: async (p) => { retraitsFile.push(p); return { ok: true } } } }
+
+// Des nuits RELATIVES : `crier` lit l'horloge (la première nuit à venir).
+const jourDans = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' })
+  .format(new Date(Date.now() + n * 86400000))
+
 test('LE TEST QUI COMPTE : la surréservation passe par le point d\'envoi unique, et le fondateur reste en copie', async () => {
+  appelsNotifier.length = 0
   const capture = {}
   const envois = []
-  const appels = []
-  const cheminNotifier = require.resolve('../lib/notifications/notifier')
-  const avant = require.cache[cheminNotifier]
-  require.cache[cheminNotifier] = { id: cheminNotifier, filename: cheminNotifier, loaded: true,
-    exports: { notifier: async (p) => { appels.push(p); return { ok: true, personne_joignable: true, erreurs: [] } } } }
+  const passee = jourDans(-3)
+  const prochaine = jourDans(40)
+  const g = { userId: 'u1', propertyId: 'p1', propertyName: 'La bulle', nuits: [passee, prochaine, jourDans(41)], bookings: ['a', 'b'], unites: 1 }
+  const mod = requireFrais(capture, envois, [])
+  const bilan = await mod.traiterAlarmes([g])
+  assert.strictEqual(bilan.ouverts, 1)
+  assert.strictEqual(appelsNotifier.length, 1, 'l\'hôte est prévenu une fois')
+  const p = appelsNotifier[0]
+  assert.deepStrictEqual({ compte: p.compte, code: p.code, bien: p.bien, chemin: p.chemin, sujet: p.sujet, rappel: p.rappel },
+    { compte: 'u1', code: 'surreservation', bien: { ref: 'p1' }, chemin: '/pages/aujourdhui', sujet: 'surreservation:p1', rappel: true })
+  // Le séjour est la première nuit À VENIR, pas « de la première à la dernière ».
+  assert.deepStrictEqual(p.sejour, { arrivee: prochaine, depart: prochaine })
+  assert.deepStrictEqual(p.donnees, { bien: 'La bulle', nuits: g.nuits, relance: false })
+  assert.strictEqual(envois.length, 1, 'le fondateur reste en copie')
+  // Toutes les nuits passées : pas de séjour.
+  appelsNotifier.length = 0
+  await requireFrais({}, [], []).traiterAlarmes([{ ...g, nuits: [passee] }])
+  assert.strictEqual(appelsNotifier[0].sejour, null)
+  // Un point d'envoi qui lève ne fait taire ni le cycle ni le fondateur.
+  const avant = require.cache[cheminNotifier].exports.notifier
+  require.cache[cheminNotifier].exports.notifier = async () => { throw new Error('panne') }
   try {
-    const g = { userId: 'u1', propertyId: 'p1', propertyName: 'La bulle', nuits: ['2026-12-24', '2026-12-25'], bookings: ['a', 'b'], unites: 1 }
-    const mod = requireFrais(capture, envois, [])
-    const bilan = await mod.traiterAlarmes([g])
-    assert.strictEqual(bilan.ouverts, 1)
-    assert.strictEqual(appels.length, 1, 'l\'hôte est prévenu une fois')
-    const p = appels[0]
-    assert.deepStrictEqual({ compte: p.compte, code: p.code, bien: p.bien, chemin: p.chemin, sujet: p.sujet, rappel: p.rappel },
-      { compte: 'u1', code: 'surreservation', bien: { ref: 'p1' }, chemin: '/pages/aujourdhui', sujet: 'surreservation:p1', rappel: true })
-    assert.deepStrictEqual(p.sejour, { arrivee: '2026-12-24', depart: '2026-12-25' })
-    assert.deepStrictEqual(p.donnees, { bien: 'La bulle', nuits: ['2026-12-24', '2026-12-25'], relance: false })
-    assert.strictEqual(envois.length, 1, 'le fondateur reste en copie')
-    // Un point d'envoi qui lève ne fait taire ni le cycle ni le fondateur.
-    require.cache[cheminNotifier].exports.notifier = async () => { throw new Error('panne') }
     const envois2 = []
-    const mod2 = requireFrais({}, envois2, [])
-    const bilan2 = await mod2.traiterAlarmes([g])
+    const bilan2 = await requireFrais({}, envois2, []).traiterAlarmes([g])
     assert.strictEqual(bilan2.ouverts, 1)
     assert.strictEqual(envois2.length, 1)
-  } finally {
-    if (avant) require.cache[cheminNotifier] = avant; else delete require.cache[cheminNotifier]
-  }
+  } finally { require.cache[cheminNotifier].exports.notifier = avant }
+})
+
+test('une alarme éteinte retire sa ligne de la file d\'attente : elle ne part plus à la fin des heures calmes', async () => {
+  retraitsFile.length = 0
+  const mod = requireFrais({}, [], [{ id: 'inc-1', user_id: 'u1', property_id: 'p1', last_alerted_at: null, acquitted_at: null }])
+  const bilan = await mod.traiterAlarmes([])
+  assert.strictEqual(bilan.refermes, 1)
+  assert.deepStrictEqual(retraitsFile, [{ compte: 'u1', sujet: 'surreservation:p1' }])
 })

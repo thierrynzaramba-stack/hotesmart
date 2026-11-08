@@ -795,13 +795,17 @@ module.exports = async function handler(req, res) {
     // UN message regroupé par personne et par canal.
     // ⚠ AUCUN BALAYAGE : la lecture porte sur `a` (index de la migration
     // 2026-11-08-notifications-file), donc sur ce qui est dû, plafonné à 200
-    // lignes par passe ; le reliquat part au cycle suivant.
+    // lignes et 30 envois par passe, avec son budget mur (8 s de marge) ; le
+    // reliquat RESTE en base et part au cycle suivant.
     // ⚠ Placée ICI, avant le dispatch, pour la même raison que les brouillons :
     // elle ENVOIE, et le dispatch est le poste le plus coûteux du cycle.
     try {
       await chrono.mesure('notifications_file', async () => {
-        const bilanFile = await viderFileNotifications()
+        const bilanFile = await viderFileNotifications({ resteMs: () => 55000 - chrono.total() })
         results.notificationsFile = bilanFile
+        if (bilanFile.erreurs && bilanFile.erreurs.length) {
+          results.errors.push({ context: 'notifications_file', error: [...new Set(bilanFile.erreurs)].join(',') })
+        }
       })
     }
     catch (err) {

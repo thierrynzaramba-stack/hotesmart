@@ -246,6 +246,28 @@ test('LE TEST QUI COMPTE : le dernier appareil disparaît — un e-mail le dit, 
   assert.ok(!un.journal.some(j => j[0] === 'email'))
 })
 
+test('LE TEST QUI COMPTE : une notification qui n\'a atteint AUCUN appareil ne remplace pas le SMS (5xx, délai, 403)', async () => {
+  const e = envois({ push: { ok: true, envoyes: 0, morts: 0, echecs: 2, aucun_appareil: false } })
+  const b = await envoyerMaintenant({ personne: PERSONNE, canaux: ['push', 'sms'], contenu: CONTENU, compte: COMPTE, deps: e.deps })
+  assert.equal(b.sms, true, 'aucun appareil n\'a reçu : le SMS part')
+  assert.ok(b.erreurs.includes('push_non_livree'), 'et le bilan le dit')
+  assert.equal(b.dernier_appareil, false, 'pas « dernier appareil » : ils ne sont pas morts')
+  // Un appareil a reçu, un autre a échoué : la notification a remplacé le SMS.
+  const un = envois({ push: { ok: true, envoyes: 1, morts: 0, echecs: 1, aucun_appareil: false } })
+  assert.equal((await envoyerMaintenant({ personne: PERSONNE, canaux: ['push', 'sms'], contenu: CONTENU, compte: COMPTE, deps: un.deps })).sms, false)
+})
+
+test('ce que le titulaire a coupé sur le profil (notify_sms, notify_email) ne part pas', async () => {
+  const e = envois({ push: { ok: true, envoyes: 0, morts: 0, echecs: 0, aucun_appareil: true } })
+  const b = await envoyerMaintenant({ personne: { ...PERSONNE, smsPermis: false, emailPermis: false }, canaux: ['push', 'email', 'sms'], contenu: CONTENU, compte: COMPTE, deps: e.deps })
+  assert.deepEqual([b.email, b.sms], [false, false])
+  assert.ok(!e.journal.some(j => j[0] === 'email' || j[0] === 'sms'))
+  // Et destinataires.js lit ces drapeaux sur le profil de CE compte.
+  const { db } = base({ profiles: [{ ...proprio, notify_sms: false }, membre({ notify_email: false })], profile_permissions: [droits({ reservations: 'write' })] })
+  const r = await destinataires({ compte: COMPTE, code: 'surreservation', db })
+  assert.deepEqual(r.personnes.map(p => [p.userId, p.smsPermis, p.emailPermis]), [[COMPTE, false, true], [MEMBRE, true, false]])
+})
+
 test('un envoi qui lève ne fait jamais lever l\'appelant', async () => {
   const deps = { cles: { publique: 'p' }, envoyerPush: async () => { throw new Error('x') }, envoyerEmail: async () => { throw new Error('x') }, envoyerSms: async () => { throw new Error('x') }, compterAppareils: async () => { throw new Error('x') } }
   const b = await envoyerMaintenant({ personne: PERSONNE, canaux: ['push', 'email', 'sms'], contenu: CONTENU, compte: COMPTE, deps })
@@ -276,7 +298,8 @@ test('LE TEST QUI COMPTE : pendant les heures calmes, ce qui attend va dans la f
   assert.deepEqual(ligne.canaux, ['push', 'email'])
   assert.equal(ligne.a, new Date(hiver('2026-11-11T07:00')).toISOString())
   assert.equal(ligne.contenu.titre, 'Overbooking — La bulle', 'rédigé dans SA langue')
-  assert.equal(ligne.contenu.email, 'hote@exemple.fr')
+  assert.equal(ligne.contenu.email, undefined, 'aucune coordonnée rangée : elles se relisent à la sortie')
+  assert.equal(ligne.contenu.bienRef, 'p1')
   // Le membre, lui, est prévenu maintenant, en français.
   assert.deepEqual(e.journal.find(j => j[0] === 'push'), ['push', MEMBRE, 'Surréservation — La bulle'])
 })
@@ -313,30 +336,85 @@ test('`seulement` : l\'essai d\'une personne ne prévient aucun autre membre du 
 // ─── 5. La file ─────────────────────────────────────────────────────────────
 
 const ligneFile = (o = {}) => ({ id: o.id, user_id: COMPTE, compte_id: COMPTE, code: 'surreservation', sujet: 's1', canaux: ['push'], a: new Date(hiver('2026-11-11T07:00')).toISOString(),
-  contenu: { titre: 'T1', corps: 'C1', chemin: '/pages/calendrier', langue: 'fr', email: 'hote@exemple.fr', telephone: '+33600000001' }, cree_le: '2026-11-11T00:00:00Z', ...o })
+  contenu: { titre: 'T1', corps: 'C1', chemin: '/pages/calendrier', langue: 'fr', bienRef: 'p1' }, cree_le: '2026-11-11T00:00:00Z', ...o })
+const AVEC_MEMBRE = { profiles: [proprio, membre()], profile_permissions: [droits({ reservations: 'write', avis: 'read', messages: 'read' })] }
 
 test('LE TEST QUI COMPTE : à la fin de la plage, UN message par personne, et une ligne ne part qu\'une fois', async () => {
-  const { db, etat } = base({ notifications_file: [
+  const { db, etat } = base({ ...AVEC_MEMBRE, notifications_file: [
     ligneFile({ id: 'a1' }),
-    ligneFile({ id: 'a2', sujet: 's2', canaux: ['email'], contenu: { ...ligneFile().contenu, titre: 'T2' }, cree_le: '2026-11-11T01:00:00Z' }),
-    ligneFile({ id: 'b1', user_id: MEMBRE, contenu: { ...ligneFile().contenu, titre: 'T3', email: 'membre@exemple.fr' } }),
+    ligneFile({ id: 'a2', sujet: 's2', canaux: ['push'], contenu: { ...ligneFile().contenu, titre: 'T2' }, cree_le: '2026-11-11T01:00:00Z' }),
+    ligneFile({ id: 'b1', user_id: MEMBRE, contenu: { ...ligneFile().contenu, titre: 'T3' } }),
     ligneFile({ id: 'pas-encore', a: new Date(hiver('2026-11-11T09:00')).toISOString() })
   ] })
   const e = envois()
   const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T07:05'), db, deps: e.deps })
-  assert.deepEqual([bilan.dues, bilan.prises, bilan.personnes, bilan.messages], [3, 3, 2, 2])
+  assert.deepEqual([bilan.dues, bilan.prises, bilan.groupes, bilan.messages], [3, 3, 2, 2])
   const pushTitulaire = e.journal.find(j => j[0] === 'push' && j[1] === COMPTE)
   assert.equal(pushTitulaire[2], '2 alerte(s) pendant vos heures calmes', 'regroupé')
-  assert.ok(e.journal.some(j => j[0] === 'email' && j[1] === 'hote@exemple.fr'), 'les canaux sont réunis')
   assert.deepEqual(etat.tables.notifications_file.map(l => l.id), ['pas-encore'], 'ce qui n\'est pas dû reste')
-  // Une seconde passe ne trouve rien : rien ne part deux fois.
   const e2 = envois()
   assert.equal((await file.viderFile({ maintenant: hiver('2026-11-11T07:10'), db, deps: e2.deps })).messages, 0)
-  assert.equal(e2.journal.length, 0)
+  assert.equal(e2.journal.length, 0, 'rien ne part deux fois')
+})
+
+test('LE TEST QUI COMPTE : regroupé par personne ET PAR COMPTE — jamais le bien d\'un compte par les coordonnées d\'un autre', async () => {
+  // MEMBRE est membre du compte COMPTE, et titulaire de son propre compte.
+  const sonCompte = { ...proprio, id: 'p-sien', account_user_id: MEMBRE, member_user_id: MEMBRE, email: 'membre-perso@exemple.fr', phone: '+33677777777' }
+  const { db } = base({ profiles: [proprio, membre(), sonCompte], profile_permissions: [droits({ reservations: 'write' })], notifications_file: [
+    ligneFile({ id: 'x1', user_id: MEMBRE, compte_id: COMPTE, sujet: 'sx', canaux: ['email', 'sms'], contenu: { ...ligneFile().contenu, titre: 'Villa de COMPTE' } }),
+    ligneFile({ id: 'x2', user_id: MEMBRE, compte_id: MEMBRE, sujet: 'sy', canaux: ['email', 'sms'], contenu: { ...ligneFile().contenu, titre: 'Bien de MEMBRE' } })
+  ] })
+  const sorties = []
+  const deps = { ...envois({ cles: null }).deps,
+    envoyerEmail: async (to, sujet) => { sorties.push(['email', to, sujet]); return { ok: true } },
+    envoyerSms: async (to, texte, ref, ctx, compte) => { sorties.push(['sms', to, texte.split('\n')[0], compte]); return { success: true } } }
+  const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps })
+  assert.equal(bilan.groupes, 2, 'deux comptes, deux envois')
+  assert.deepEqual(sorties.sort((a, b) => a.join().localeCompare(b.join())), [
+    ['email', 'membre-perso@exemple.fr', 'HôteSmart — Bien de MEMBRE'],
+    ['email', 'membre@exemple.fr', 'HôteSmart — Villa de COMPTE'],
+    ['sms', '+33600000002', 'HôteSmart — Villa de COMPTE', COMPTE],
+    ['sms', '+33677777777', 'HôteSmart — Bien de MEMBRE', MEMBRE]
+  ])
+})
+
+test('LE TEST QUI COMPTE : les droits se relisent à la sortie — une personne désactivée pendant ses heures calmes ne reçoit rien', async () => {
+  const lignes = [ligneFile({ id: 'm1', user_id: MEMBRE, canaux: ['email'] })]
+  for (const [profil, perm, nom] of [
+    [membre({ active: false }), droits({ reservations: 'write' }), 'désactivé'],
+    [membre(), droits({ reservations: 'read' }), 'a perdu l\'écriture'],
+    [membre(), droits({ reservations: 'write', property_scope: 'selected', property_ids: ['autre'], property_refs: ['autre'] }), 'a perdu le bien']
+  ]) {
+    const { db, etat } = base({ profiles: [proprio, profil], profile_permissions: [perm], notifications_file: lignes })
+    const e = envois()
+    const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps: e.deps })
+    assert.equal(bilan.ecartees, 1, nom)
+    assert.equal(e.journal.filter(j => j[0] === 'email').length, 0, nom)
+    assert.equal(etat.tables.notifications_file.length, 0, `${nom} : la ligne est retirée, pas gardée pour toujours`)
+  }
+  // Et les coordonnées sont celles d'AUJOURD'HUI.
+  const { db } = base({ profiles: [proprio, membre({ email: 'nouvelle@exemple.fr' })], profile_permissions: [droits({ reservations: 'write' })], notifications_file: lignes })
+  const e = envois()
+  await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps: e.deps })
+  assert.equal(e.journal.find(j => j[0] === 'email')[1], 'nouvelle@exemple.fr')
+})
+
+test('chaque canal ne porte que SES lignes : une ligne en notification seule n\'entre ni dans l\'e-mail ni dans le SMS', async () => {
+  const { db } = base({ ...AVEC_MEMBRE, notifications_file: [
+    ligneFile({ id: 'a1', sujet: 's1', canaux: ['push'], contenu: { ...ligneFile().contenu, titre: 'Push seul' } }),
+    ligneFile({ id: 'a2', sujet: 's2', canaux: ['email', 'sms'], contenu: { ...ligneFile().contenu, titre: 'Email et SMS' } })
+  ] })
+  const sorties = []
+  const deps = { ...envois({ push: { ok: true, envoyes: 0, morts: 0, echecs: 0, aucun_appareil: true } }).deps,
+    envoyerPush: async (o) => { sorties.push(['push', o.message.notification.title]); return { ok: true, envoyes: 0, morts: 0, echecs: 0, aucun_appareil: true } },
+    envoyerEmail: async (to, sujet) => { sorties.push(['email', sujet]); return { ok: true } },
+    envoyerSms: async (to, texte) => { sorties.push(['sms', texte.split('\n')[0]]); return { success: true } } }
+  await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps })
+  assert.deepEqual(sorties, [['push', 'Push seul'], ['email', 'HôteSmart — Email et SMS'], ['sms', 'HôteSmart — Email et SMS']])
 })
 
 test('une seule ligne garde son écran et son sujet ; `seulement` prend tout ce qui est À SOI, tout de suite', async () => {
-  const { db, etat } = base({ notifications_file: [
+  const { db, etat } = base({ ...AVEC_MEMBRE, notifications_file: [
     ligneFile({ id: 'a1', a: new Date(hiver('2026-11-11T09:00')).toISOString() }),
     ligneFile({ id: 'b1', user_id: MEMBRE })
   ] })
@@ -349,14 +427,34 @@ test('une seule ligne garde son écran et son sujet ; `seulement` prend tout ce 
   assert.deepEqual(etat.tables.notifications_file.map(l => l.id), ['b1'], 'la ligne d\'un autre reste')
 })
 
-test('la passe est plafonnée ; une panne de lecture ne lève pas', async () => {
-  const lignes = Array.from({ length: 5 }, (_, i) => ligneFile({ id: `l${i}`, sujet: `s${i}` }))
-  const { db, etat } = base({ notifications_file: lignes })
-  const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), plafond: 3, db, deps: envois().deps })
-  assert.equal(bilan.prises, 3)
-  assert.equal(etat.tables.notifications_file.length, 2, 'le reliquat part au cycle suivant')
+test('LE TEST QUI COMPTE : sans le temps de partir, une ligne RESTE en base — jamais prise puis perdue', async () => {
+  const lignes = Array.from({ length: 35 }, (_, i) => ligneFile({ id: `l${i}`, sujet: `s${i}`, user_id: i === 0 ? COMPTE : `${String(i).padStart(8, '0')}-0000-4000-8000-000000000000` }))
+  // Budget épuisé : rien n'est pris.
+  const sansTemps = base({ ...AVEC_MEMBRE, notifications_file: lignes })
+  const b0 = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), resteMs: () => 1000, db: sansTemps.db, deps: envois().deps })
+  assert.deepEqual([b0.prises, b0.reportees], [0, 35])
+  assert.equal(sansTemps.etat.tables.notifications_file.length, 35)
+  // Plafond de groupes par passe : le reliquat reste pour le cycle suivant.
+  const plafond = base({ ...AVEC_MEMBRE, notifications_file: lignes })
+  const b1 = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), resteMs: () => 50000, db: plafond.db, deps: envois().deps })
+  assert.equal(b1.groupes, file.GROUPES_PAR_PASSE)
+  assert.equal(plafond.etat.tables.notifications_file.length, 35 - file.GROUPES_PAR_PASSE)
+  // Une panne de lecture ne lève pas.
   const panne = base({ notifications_file: lignes }, { pannes: ['notifications_file'] })
-  assert.equal((await file.viderFile({ db: panne.db, deps: envois().deps })).erreurs, 1)
+  assert.deepEqual((await file.viderFile({ db: panne.db, deps: envois().deps })).erreurs, ['lecture_impossible'])
+})
+
+test('ce qui part maintenant remplace la ligne du même sujet qui attendait ; la file en panne ne rend personne muet', async () => {
+  const { db, etat } = base({ profiles: [proprio], notifications_file: [ligneFile({ id: 'vieille', sujet: 'surreservation:p1' })] })
+  const e = envois()
+  await notifier({ compte: COMPTE, code: 'surreservation', donnees: { bien: 'B', nuits: [] }, chemin: '/', sujet: 'surreservation:p1', maintenant: MIDI, db, deps: e.deps })
+  assert.equal(etat.tables.notifications_file.length, 0, 'la relance a remplacé la ligne en attente')
+  // La file refuse d'écrire : l'alerte part tout de suite plutôt que jamais.
+  const panne = base({ profiles: [proprio], notifications_reglages: [{ user_id: COMPTE, evenements: { surreservation: { push: true, email: true, sms: false, urgent: false } }, plages: [NUIT_TOUS_LES_JOURS] }] }, { pannes: ['notifications_file'] })
+  const e2 = envois()
+  const b = await notifier({ compte: COMPTE, code: 'surreservation', donnees: { bien: 'B', nuits: [] }, chemin: '/', sujet: 's', maintenant: NUIT, db: panne.db, deps: e2.deps })
+  assert.deepEqual([b.en_attente, b.maintenant], [0, 1])
+  assert.ok(e2.journal.some(j => j[0] === 'email'))
 })
 
 // ─── 6. L'endpoint ──────────────────────────────────────────────────────────
@@ -404,8 +502,10 @@ test('LE TEST QUI COMPTE : l\'essai d\'un événement ne va qu\'à l\'appelant, 
     const r = await appeler({ corps: { action: 'essai_evenement', code: 'surreservation' } })
     assert.equal(r.code, 200, JSON.stringify(r.corps))
     assert.equal(r.corps.bilan.destinataires, 1)
-    // Sans appareil et avec les défauts de la surréservation : e-mail et SMS, au titulaire seul.
-    assert.deepEqual(sorties.map(s => s[1]).sort(), ['+33600000001', 'hote@exemple.fr'])
+    // ⚠ LA NOTIFICATION SEULE : ni e-mail plateforme ni SMS, même si les
+    // réglages les cochent (un essai répété serait un relais vers n'importe
+    // quelle adresse — constat de review).
+    assert.deepEqual(sorties, [])
     assert.equal((await appeler({ corps: { action: 'essai_evenement', code: 'inexistant' } })).code, 400)
   } finally { fini() }
 })
@@ -418,4 +518,50 @@ test('« vider ma file » ne prend que les lignes de l\'appelant', async () => {
     assert.equal(r.corps.bilan.prises, 1)
     assert.deepEqual(etat.tables.notifications_file.map(l => l.id), ['a1'])
   } finally { fini() }
+})
+
+// ─── 7. La chaîne réelle : la surréservation jusqu'aux canaux ───────────────
+// Constat de review : le test de lib/cron-overbooking.js remplace `notifier` par
+// un double. Ici, la VRAIE chaîne tourne — `traiterAlarmes` → `crier` →
+// `notifier` → `destinataires` → `envoyerMaintenant` — sur une base factice, et
+// seuls les canaux du bout (e-mail plateforme, SMS) sont des doubles.
+test('LE TEST QUI COMPTE : la surréservation, de la sonde aux canaux — le titulaire et qui peut acquitter, et eux seuls', async () => {
+  const { db } = base({
+    profiles: [proprio, membre(), membre({ id: 'p-lecteur', member_user_id: AUTRE, email: 'lecteur@exemple.fr', phone: '+33600000003' })],
+    profile_permissions: [droits({ reservations: 'write' }), droits({ profile_id: 'p-lecteur', reservations: 'read' })],
+    push_abonnements: []
+  })
+  const sorties = []
+  const remplacer = (rel, exports) => { const k = require.resolve(rel); const avant = require.cache[k]; require.cache[k] = { id: k, filename: k, loaded: true, exports }; return () => { if (avant) require.cache[k] = avant; else delete require.cache[k] } }
+  const MODULES = ['../lib/cron-overbooking', '../lib/notifications/notifier', '../lib/notifications/file', '../lib/notifications/envoi', '../lib/notifications/destinataires', '../lib/notifications/reglages', '../lib/push/abonnements', '../lib/push/envoyer']
+  for (const m of MODULES) delete require.cache[require.resolve(m)]
+  const capture = []
+  const sondeDb = { from: () => { const q = { select: () => q, eq: () => q, is: () => q, order: () => q, gte: () => q, lt: () => q, or: () => q, range: () => q,
+    insert: (row) => { capture.push(row); return { select: () => ({ maybeSingle: async () => ({ data: { id: 'inc' }, error: null }) }) } },
+    update: () => q, then: (ok, ko) => Promise.resolve({ data: [], error: null }).then(ok, ko) }; return q } }
+  const restaurer = [
+    remplacer('../lib/cron-shared', { supabase: sondeDb }),
+    remplacer('../lib/founder-notify', { envoyerAlerteBrute: async () => { sorties.push(['fondateur']) }, LABELS: {} }),
+    remplacer('../lib/platform-notify', { sendPlatformEmail: async (to, sujet) => { sorties.push(['email', to, sujet]); return { ok: true } } }),
+    remplacer('../api/sms', { sendSms: async (to, texte, ref, ctx, compte) => { sorties.push(['sms', to, ctx, compte]); return { success: true } } })
+  ]
+  try {
+    const mod = require('../lib/cron-overbooking')
+    // Le point d'envoi lit SA base au moment de l'envoi : la base factice des profils.
+    require.cache[require.resolve('../lib/cron-shared')].exports = { supabase: db }
+    const bilan = await mod.traiterAlarmes([{ userId: COMPTE, propertyId: 'p1', propertyName: 'La bulle', nuits: ['2099-01-01'], bookings: ['a', 'b'], unites: 1 }])
+    assert.equal(bilan.ouverts, 1)
+    const nonFondateur = sorties.filter(x => x[0] !== 'fondateur').sort((a, b) => a.join().localeCompare(b.join()))
+    // Sans appareil abonné et avec les défauts (Q26) : e-mail ET SMS, par la clé du compte.
+    assert.deepEqual(nonFondateur, [
+      ['email', 'hote@exemple.fr', 'HôteSmart — Surréservation — La bulle'],
+      ['email', 'membre@exemple.fr', 'HôteSmart — Surréservation — La bulle'],
+      ['sms', '+33600000001', 'notification', COMPTE],
+      ['sms', '+33600000002', 'notification', COMPTE]
+    ], 'le membre en lecture seule ne reçoit rien')
+    assert.ok(sorties.some(x => x[0] === 'fondateur'), 'le fondateur reste en copie')
+  } finally {
+    restaurer.forEach(f => f())
+    for (const m of MODULES) delete require.cache[require.resolve(m)]
+  }
 })
