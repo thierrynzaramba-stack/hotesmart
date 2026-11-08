@@ -63,17 +63,30 @@ précision **mesurée** à l'étape 5 ne suffit pas.
   compte ne vient jamais du message**, il vient d'une adresse signée (HMAC,
   sans table : `lib/jeton-reponse.js`). **Les pièces jointes n'y sont pas
   traitées aujourd'hui.** Brevo les sert par
-  `GET /v3/inbound/attachments/{DownloadToken}` (jeton fourni dans le webhook),
-  avec notre clé.
-- **L'IA** : `claude-haiku-4-5-20251001` par le SDK (`api/grok.js`), chaque
-  appel journalisé avec son coût et son compte (`lib/ia/journal.js`,
-  `avecContexteIA`, table `ia_appels`).
+  `GET /v3/inbound/attachments/{DownloadToken}`, avec notre clé. ⚠ Le
+  `DownloadToken` n'existe **que dans le POST** : la relecture
+  `GET /inbound/events/<uuid>` ne rend, par pièce, que son nom, son type, sa
+  taille et son `contentId` (documentation Brevo, lue le 8 novembre 2026).
+  Le filtre anti-boucle du webhook (`List-Unsubscribe`, `Precedence: bulk`,
+  `Auto-Submitted`…) s'applique **avant** la lecture du destinataire, et un
+  message sans texte est écarté (`!corps`).
+- **L'IA** : `claude-haiku-4-5-20251001` par le client partagé de
+  `lib/cron-shared.js` (seul client admis), chaque appel journalisé avec son
+  coût et son compte (`lib/ia/journal.js`, `avecContexteIA`, table
+  `ia_appels`). Une image est limitée à 10 Mo **encodée en base64** par l'API
+  Claude, soit environ 7,5 Mo bruts.
+- **Le cron** : `api/cron.js`, plafonné à 60 s (`vercel.json`), porte toutes
+  les tâches de toutes les apps.
 - **Le stockage de fichiers** : un seul bucket, `property-photos`, **public en
   lecture** (`api/property-photo.js` : JPEG 2 Mo, envoyé en base64 dans le
   corps de la requête). Un justificatif ne peut pas y aller.
 - **Les droits** (`lib/permissions.js`) : domaines `reservations`, `menages`,
-  `prestataires`, `messages`, `avis`, `reglages`, `facturation`, `equipe` ;
-  `facturation` et `equipe` sont réservés au titulaire.
+  `prestataires`, `messages`, `avis`, `reglages`, `facturation`, `equipe`.
+  ⚠ `facturation` et `equipe` ne se délèguent pas en **écriture**, mais la
+  **lecture** se délègue ; l'écran des droits présente `facturation` comme
+  « Abonnement et paiements » (`pages/settings.html`). Le seul contrôle
+  « titulaire » est `estTitulaireDuCompte` (`lib/permissions.js`) ;
+  `contexteDEcran` rend un contexte, il ne refuse rien.
 - **La navigation** (`shared/nav.js`) : cinq entrées (Aujourd'hui, Calendrier,
   Messages, Ménages, Logements) et le menu ≡ (Réglages, Avis, Aide).
 - **Fonctions Vercel** : 67 fichiers sous `api/`, pour une limite de 100.
@@ -114,9 +127,13 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   déjà branché, aucun geste DNS. Plus tard, un sous-domaine dédié
   (`factures.hotesmart.fr`) demande trois gestes de Thierry : MX chez IONOS,
   domaine authentifié chez Brevo, webhook.
-- **Q9 — Les droits.** Titulaire seul en V1 (domaine `facturation`), ou un
-  domaine neuf `charges`, délégable (un gestionnaire saisit les factures) ?
-  *Proposition* : titulaire seul en V1, D1 ne demande pas plus.
+- **Q9 — Les droits.** Titulaire seul en V1, ou un domaine neuf `charges`,
+  délégable (un gestionnaire saisit les factures) ? *Proposition* : titulaire
+  seul en V1 (D1 ne demande pas plus), tenu par une garde explicite
+  `estTitulaireDuCompte` sur les deux endpoints, consultation des
+  justificatifs comprise. **Pas** le domaine `facturation` : sa lecture se
+  délègue, et un hôte qui donnerait la lecture de l'abonnement ouvrirait
+  toutes ses factures sans le savoir.
 - **Q10 — Où vit l'écran.** *Proposition* : une page `/charges`, entrée du
   menu ≡. Pas de sixième onglet de navigation.
 - **Q11 — Supprimer.** *Proposition* : une facture « à vérifier » se supprime
@@ -132,6 +149,38 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q14 — Les doublons.** *Proposition* : le même fichier (même empreinte)
   est refusé ; le même fournisseur avec le même numéro de facture déclenche
   « déjà enregistrée ? » sans refuser.
+- **Q15 — Le risque résiduel des pièces jointes.** Le 18 septembre 2026,
+  Thierry a accepté un risque nommé : qui connaîtrait l'`uuid` d'un e-mail
+  réel pourrait en substituer le **corps**. Ici, le jeton de téléchargement de
+  la pièce jointe ne vient, lui aussi, que du POST (§3). Accepter le même
+  risque pour les pièces jointes ? Gardes proposées (§7) : nombre, nom, type
+  et taille des pièces confrontés à la relecture, taille téléchargée égale à
+  celle relue, et tout arrive « à vérifier ».
+- **Q16 — Révoquer l'adresse.** Une adresse donnée aux fournisseurs finira
+  par circuler, et une adresse signée sans table ne se révoque pas : le seul
+  recours serait de changer le secret, ce qui casserait aussi les adresses de
+  réponse des voyageurs. *Proposition* : un **secret dédié** aux adresses de
+  factures, et un **numéro de version par compte** (une colonne, donc une
+  table) que le bouton « Changer d'adresse » incrémente.
+- **Q17 — La TVA récupérable.** Ce qu'est la charge réelle (HT ou TTC) est
+  une question fiscale : prorata de déduction, dépenses non déductibles.
+  *Proposition* : la V1 stocke HT, TVA et TTC tels que lus et validés, et
+  n'affiche pas de « charge réelle » avant l'avis d'un comptable. Une TVA lue
+  à 0 (« TVA non applicable, art. 293 B ») se distingue d'une TVA non lue
+  (vide).
+- **Q18 — Un bien hors de l'entité.** Une facture peut-elle être affectée à un
+  bien qui ne relève pas de l'entité choisie ? *Proposition* : non, refusé par
+  le serveur.
+- **Q19 — Les factures sans pièce jointe** (énergie, télécoms : facture dans
+  le texte de l'e-mail ou derrière un lien). *Proposition* : pas lues en V1 ;
+  l'e-mail apparaît « sans facture lisible » avec son texte, et l'hôte ajoute
+  le PDF à la main. Ce texte affiché sert aussi à lire l'e-mail de
+  confirmation qu'une messagerie (Gmail par exemple) envoie à l'adresse cible
+  avant d'activer un transfert automatique.
+- **Q20 — Un compte sans entité.** Avec D3, une facture ne peut pas être
+  validée tant que le compte n'a aucune entité. Réponse attendue du fil
+  facturation (§3) ; *proposition* : l'écran propose de créer l'entité au
+  premier envoi.
 
 ### Réponses de Thierry
 
@@ -142,9 +191,13 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 **A. Photo ou PDF (le téléphone d'abord).**
 1. « Ajouter une facture » : appareil photo ou fichier (PDF, JPEG, PNG).
 2. Le fichier part **directement** dans un bucket privé par une URL d'envoi
-   signée, délivrée par l'endpoint (pas de base64 dans le corps d'une
-   fonction : une fonction Vercel refuse un corps de plus de 4,5 Mo).
-3. L'endpoint lit le fichier avec l'IA (quelques secondes) et rend un
+   signée (pas de base64 dans le corps d'une requête : une fonction Vercel
+   refuse un corps de plus de 4,5 Mo). C'est **le serveur** qui choisit le
+   chemin et crée la ligne `charges` en délivrant l'URL ; le navigateur ne
+   renvoie jamais de chemin. Une photo est réduite sur le téléphone avant
+   l'envoi (limite image de l'API Claude, §3).
+3. L'endpoint **relit le fichier dans le bucket** (signature du type, empreinte,
+   taille), le fait lire par l'IA (quelques secondes) et rend un
    formulaire **pré-rempli** : fournisseur, n° de facture, date, échéance,
    HT, TVA, TTC, catégorie proposée, entité proposée, bien (Q1). Chaque champ
    incertain est signalé.
@@ -156,9 +209,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 2. Chaque pièce jointe utilisable (PDF, JPEG, PNG) devient une facture
    **« à lire »**, puis **« à vérifier »** une fois lue par l'IA.
 3. Elle apparaît dans « À vérifier » ; l'hôte la valide comme en A.
-4. Un e-mail sans pièce jointe utilisable ne crée rien, et le dit dans la
-   liste (« e-mail reçu sans facture lisible », effaçable) — jamais de réponse
-   automatique à l'expéditeur (risque de boucle).
+4. Un e-mail sans pièce jointe utilisable crée une ligne au statut
+   `sans_facture` (« e-mail reçu sans facture lisible », avec son expéditeur,
+   son sujet et son texte, effaçable, Q19) — jamais de réponse automatique à
+   l'expéditeur.
 
 **C. Le suivi.** Une liste filtrable par entité, bien, statut (à vérifier, à
 payer, payée, annulée) et mois ; « Marquer payée » ; consultation du
@@ -172,12 +226,12 @@ justificatif.
 |---|---|
 | `id`, `user_id` | la facture, le compte |
 | `entite_juridique_id` | **non nul à la validation** (D3) ; proposée par la lecture |
-| `property_id` | uuid `properties.id`, vide possible (Q1) |
-| `statut` | `a_lire`, `a_verifier`, `validee`, `annulee` (+ motif) |
+| `bien_id` | uuid → `properties.id`, vide possible (Q1). ⚠ Nommé `bien_id` et non `property_id` : dans le dépôt, `property_id` d'une table enfant est la référence TEXTE du fournisseur (REVIEW.md règle 10). Exception raisonnée, déclarée comme celle de `docs/kb/price-log.md` : la clé UUID survit à un changement de fournisseur (décision E6). |
+| `statut` | `envoi`, `a_lire`, `a_verifier`, `validee`, `annulee` (+ motif), `illisible`, `sans_facture` |
+| `tentatives_lecture` | compteur : au-delà de 3 échecs, `illisible` (l'hôte saisit à la main) |
 | `paiement`, `echeance_le`, `payee_le` | `a_payer` / `payee` (Q2) |
 | `fournisseur_nom`, `fournisseur_siret`, `numero_facture`, `date_facture` | lus puis validés |
-| `montant_ht_cents`, `montant_tva_cents`, `montant_ttc_cents` | centimes, euros seulement en V1 |
-| `tva_recuperable` | booléen **figé à la validation**, copié du régime de TVA de l'entité : la charge réelle est le HT si la TVA est récupérable, le TTC sinon. Une entité qui change de régime ne réécrit pas les charges passées. |
+| `montant_ht_cents`, `montant_tva_cents`, `montant_ttc_cents` | centimes, euros seulement en V1 ; une TVA à 0 lue n'est pas une TVA vide (Q17) |
 | `categorie` | liste fermée (Q5) |
 | `origine` | `photo`, `fichier`, `email` |
 | `email_uuid`, `email_expediteur`, `email_recu_le` | origine e-mail ; **unique (`user_id`, `email_uuid`, empreinte)** : Brevo peut rejouer un webhook |
@@ -189,37 +243,61 @@ justificatif.
   propre bien : si un bien change d'entité, les charges passées ne bougent pas
   (accord avec le fil facturation, 8 novembre).
 - **Bucket `justificatifs`, privé** : aucune politique côté navigateur ;
-  consultation par URL signée de courte durée. Type vérifié sur le contenu
-  (signature du fichier), pas sur le nom ; 10 Mo au plus (proposition).
+  consultation par URL signée de courte durée, délivrée au titulaire seul.
+  Type vérifié sur le contenu relu (signature du fichier), pas sur le nom ;
+  PDF 10 Mo au plus, image réduite sous la limite de l'API Claude
+  (propositions). Une ligne restée en `envoi` (fichier jamais confirmé) est
+  purgée avec son fichier après 24 h.
 - **Accès** : RLS activée, aucune politique côté navigateur ; tout passe par
-  l'endpoint gardé (Q9). **Writer unique** : `lib/charges.js`.
+  les endpoints gardés (Q9). **Writer unique** : `lib/charges.js`.
+- **Isolation entre comptes** (REVIEW.md règle 11) : toute action qui désigne
+  une charge la **résout en base** et compare son `user_id` au compte du
+  titulaire — `requirePermission` ne sait résoudre que des biens et des
+  réservations. L'entité et le bien envoyés à la validation sont résolus de
+  même, et leurs comptes comparés à celui de la charge ; un bien hors de
+  l'entité est refusé (Q18).
 - **La lecture** : `lib/charges/lecture.js`. Une demande à Haiku par document
   (image ou PDF), réponse JSON imposée, liste de catégories fermée ; ce que
   l'IA ne lit pas reste `null`. **L'entité n'est jamais devinée par l'IA** :
-  elle lit le destinataire, et le rapprochement avec les entités du compte
-  (SIRET, puis nom) est fait par le code. Appel journalisé
-  (`avecContexteIA`, fonction `charges-lecture`). Garde de coût par compte et
+  elle lit le destinataire, et le rapprochement avec les entités **non
+  archivées** du compte (SIRET, puis nom) est fait par le code ; deux
+  candidates possibles, ou aucune, laissent le champ vide. Client partagé de
+  `lib/cron-shared.js`, appel journalisé (`avecContexteIA`, fonction
+  `charges-lecture`). Garde de coût par compte et
   par jour (plafond à fixer à l'étape 2, sur la mesure de `ia_appels`).
 
 ## 7. L'adresse e-mail (détail)
 
-- **Forme proposée** : `fac-<compte>-<signature>@reply.hotesmart.fr`. La
-  signature HMAC utilise un **contexte distinct** de celui des réservations :
-  un jeton de réservation n'est jamais accepté comme adresse de factures, ni
-  l'inverse. Aucune table, comme `lib/jeton-reponse.js`.
-- **Dans `api/inbound-email.js`** : après la relecture chez Brevo, une adresse
-  `fac-` part vers `lib/charges/email.js` ; **le chemin des réponses voyageurs
-  ne change pas**, et des tests le prouvent. Mêmes gardes : anti-boucle,
-  score de spam, refus d'une divergence entre le POST et la relecture.
-- **Les pièces jointes** : au plus 10 par e-mail (proposition), téléchargées
-  chez Brevo par leur `DownloadToken`, déposées dans le bucket, une charge
-  `a_lire` par pièce. ⚠ **À vérifier à l'étape 4** : si la relecture
-  `GET /inbound/events/<uuid>` rend aussi les jetons des pièces jointes, ce sont
-  eux qu'on utilise, pas ceux du POST.
-- **La lecture e-mail est différée** : le webhook répond vite et n'appelle pas
-  l'IA ; une tâche du cron lit les charges `a_lire`, bornée (10 par passage,
-  proposition), par index sur (`statut`). Cela touche `api/cron.js`, régénéré
-  en fichier complet.
+- **Forme proposée** : `fac-<compte>-<version>-<signature>@reply.hotesmart.fr`.
+  La signature HMAC utilise un **secret dédié** (Q16), distinct de celui des
+  réservations : un jeton de réservation n'est jamais accepté comme adresse de
+  factures, ni l'inverse. Le compte est **résolu en base** (compte supprimé =
+  refus), et la version comparée à celle du compte.
+- **Dans `api/inbound-email.js`** : l'aiguillage vers `lib/charges/email.js`
+  se place **après** la relecture et le refus des divergences, mais **avant**
+  le filtre anti-boucle et avant le refus d'un message sans texte (§3). Ces
+  deux gardes existent parce que l'agent IA répond ; le chemin `fac-` ne
+  répond jamais, et un e-mail de facture porte souvent `List-Unsubscribe` ou
+  arrive sans texte. Le score de spam reste appliqué. **Le chemin des réponses
+  voyageurs ne change pas**, et des tests le prouvent.
+- **Les pièces jointes** (Q15) : au plus 10 par e-mail (proposition). Leur
+  nombre, nom, type et taille sont **confrontés à la relecture** ; une
+  divergence est un refus. Le `DownloadToken` est contrôlé (format) et encodé
+  avant d'entrer dans l'URL de Brevo ; les octets téléchargés doivent faire la
+  taille relue. Chaque pièce est déposée dans le bucket, une charge `a_lire`
+  par pièce, **idempotente** (unique `user_id`, `email_uuid`, empreinte).
+- **Téléchargement dans le webhook, pas différé** : la durée de vie d'un
+  `DownloadToken` n'est pas documentée, et il n'existe que dans le POST. Le
+  webhook télécharge donc tout de suite, avec une durée maximale déclarée dans
+  `vercel.json`. **Un échec rend 503** (Brevo rejoue) : un 200 après un
+  téléchargement raté perdrait la facture pour toujours.
+- **La lecture par l'IA, elle, est différée** : une fonction de cron
+  **dédiée** (`api/cron-charges.js`, toutes les 5 minutes, sa propre limite de
+  60 s) lit les charges `a_lire` par index, avec un budget de temps qui
+  s'arrête avant la limite. Elle ne charge pas `api/cron.js`, qui porte toutes
+  les autres apps. Un échec incrémente `tentatives_lecture` ; au troisième, la
+  charge passe `illisible` et n'est plus relue — jamais une lecture facturée
+  toutes les 5 minutes (incident du 8 octobre, `lib/ia/journal.js`).
 
 ## 8. Découpage proposé
 
@@ -232,7 +310,8 @@ justificatif.
 3. **L'écran `/charges`**, ordinateur et téléphone : liste, ajout par photo ou
    fichier, formulaire de vérification, suivi du paiement.
 4. **L'e-mail entrant** : adresse signée, branche dans `api/inbound-email.js`,
-   pièces jointes, tâche du cron. ⚠ Ce lot touche le fichier qui fait entrer
+   pièces jointes, fonction de cron dédiée à la lecture. ⚠ Ce lot touche le
+   fichier qui fait entrer
    les réponses des voyageurs : sa review vérifie que ce chemin est intact.
 5. **La mesure** sur les vraies factures de Thierry : écart lu / validé, champ
    par champ. Elle décide si Mindee est utile.
@@ -266,7 +345,9 @@ les faire lire par l'IA. Le modèle du §6 est choisi pour que ce lot n'ait rien
    en parallèle côté serveur. Les écritures passent par `/api/charges`.
 2. **Donnée non urgente** : la liste, le compteur « à vérifier » et le total
    « à payer » sont du **temps réel** (une facture validée y apparaît tout de
-   suite), lus par index (`user_id`, `statut`). Les statistiques (par mois,
+   suite), lus par index (`user_id`, `statut`). Le compteur et le total portent
+   sur **toutes** les lignes, pas sur la page affichée : compte exact en tête
+   seule, somme faite en base. Les statistiques (par mois,
    rentabilité par bien) sont **non urgentes** : elles ne sont pas dans la V1,
    et viendront par un résumé pré-calculé avec son heure.
 3. **Cache navigateur : aucun.** La page porte des montants dus et des statuts
@@ -275,14 +356,17 @@ les faire lire par l'IA. Le modèle du §6 est choisi pour que ce lot n'ait rien
    (405 compris).
 5. **Statiques versionnés** : la page et son module suivent `?v=<empreinte>`.
 6. **Lectures tronquées** : la liste se pagine **par curseur** (pages de 50).
-7. **Budget** : 1 appel pour peindre l'écran, tenu par un test qui compte les
-   appels, et `Server-Timing` avec le nombre de requêtes. Le fichier ne
-   transite par aucune fonction (envoi direct au bucket).
+7. **Budget** : premier affichage < 1 s, écran complet < 2 s ; 1 appel pour
+   peindre l'écran, tenu par un test qui compte les appels, et `Server-Timing`
+   avec le nombre de requêtes. Le fichier ne passe pas dans le corps d'une
+   requête du navigateur (envoi direct au bucket) ; l'endpoint le relit dans le
+   bucket pour le vérifier et le faire lire.
 8. **Mesure AVANT / APRÈS** : écran neuf, AVANT sans objet. APRÈS mesuré sur
    staging à l'étape 3 (appels, requêtes, octets).
 
 **Mobile** : une seule vue (`shared/charges-vue.js`) pour l'ordinateur et le
 téléphone ; l'ajout par photo est pensé pour le téléphone d'abord.
 
-**Fonctions Vercel** : deux de plus (`api/charges.js`, `api/ecran/charges.js`),
-67 → 69 sur 100 — à additionner aux deux du fil facturation.
+**Fonctions Vercel** : trois de plus (`api/charges.js`, `api/ecran/charges.js`,
+`api/cron-charges.js`), 67 → 70 sur 100 — à additionner aux deux du fil
+facturation.
