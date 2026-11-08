@@ -112,6 +112,10 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   formulaire que le voyageur remplit lui-même ; la facture est émise à la
   validation, et il la télécharge depuis le même lien. Le parcours du §2 est
   confirmé.
+- **Q15 (8 nov. 2026, décision de Thierry transmise par le fil compte de
+  charges) : une seule table d'entités juridiques dans le cœur, partagée par
+  les deux chantiers.** Ce fil n'a rien créé. Il a transmis ses besoins (§5 bis).
+  Reste ouvert : quel fil construit la table.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
@@ -142,6 +146,24 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   JavaScript pur (sans navigateur embarqué), stocké dans un bucket **privé**,
   et servi par une URL signée de courte durée.
 - **RLS** sur la table neuve, dans le modèle du chantier profils et droits.
+
+## 5 bis. Ce que la facture attend de l'entité juridique partagée
+
+Transmis au fil compte de charges le 8 novembre 2026. Rien n'est créé.
+
+- **Champs lus par la facture** : compte (`user_id`) ; type (personne physique
+  ou société) et forme juridique ; nom ou raison sociale ; adresse (ligne,
+  code postal, ville, pays) ; SIREN ou SIRET ; n° de TVA intracommunautaire
+  (vide possible) ; régime de TVA (selon Q4) ; pour une société, les mentions
+  légales à lister avec un comptable (capital, RCS…).
+- **Lien avec les biens** : un bien relève d'**une** entité au plus, une
+  entité porte un ou plusieurs biens. Clé sur `properties.id` (UUID, décision
+  E6). Pour D2, il faut aussi une entité **par défaut** du compte : un bien sans
+  entité désignée facture sous celle-là.
+- **Ce qui reste dans ce chantier** : la suite des numéros de facture par
+  entité, et la copie de l'entité dans chaque facture émise. Une facture est
+  figée, donc modifier ou détacher une entité ne change aucune facture déjà
+  émise.
 
 ## 6. Contrainte légale à venir : la facture électronique
 
