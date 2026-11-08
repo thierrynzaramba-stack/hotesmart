@@ -118,9 +118,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q11 — Supprimer.** Tranchée, voir ci-dessous.
 - **Q12 — La conservation.** Tranchée, voir ci-dessous.
 - **Q22 — La période comptable.** Tranchée, voir ci-dessous.
-- **Q13 — L'export pour le comptable** (tableau + justificatifs). V1 ou lot
-  suivant ? *Proposition* : lot suivant ; la comptabilité elle-même
-  (amortissements, liasse) reste hors d'HôteSmart.
+- **Q13 — L'export pour le comptable.** Tranchée, voir ci-dessous.
 - **Q14 — Les doublons.** *Proposition* : le même fichier (même empreinte)
   est refusé ; le même fournisseur avec le même numéro de facture déclenche
   « déjà enregistrée ? » sans refuser.
@@ -236,6 +234,9 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   purge (Q12, 22 h 53), elle ne sert plus qu'à **présenter les totaux par
   exercice** (en cours, précédent). Tant qu'elle est vide, les totaux restent
   par mois — on ne suppose pas une année civile à la place de l'hôte.
+- **Q13 (8 nov. 2026, 22 h 54) : d'accord, lot après la V1.** L'export
+  (tableau des charges + justificatifs regroupés) vient dans un lot suivant ;
+  la comptabilité elle-même (amortissements, liasse) reste hors d'HôteSmart.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -448,7 +449,8 @@ rentabilité par bien (résumé quotidien), la réception des factures
 
 ## 9. Hors périmètre
 
-- La comptabilité : amortissements, liasse, déclaration (proposition, Q13).
+- La comptabilité : amortissements, liasse, déclaration (Q13).
+- L'export pour le comptable (lot suivant, Q13).
 - Le paiement des fournisseurs depuis HôteSmart.
 - Les devises autres que l'euro, les notes de frais.
 - Devenir plateforme agréée de facturation électronique.
