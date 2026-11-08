@@ -29,6 +29,16 @@ Un bouton **Tester** par canal dans la config : en cas d'échec, il affiche **l'
 - **Code d'accès non résolu**.
 - **Pause automatique** de son bien (voir §3).
 
+**Depuis le lot PWA 2c-2, le code d'accès non résolu part AUSSI par le point
+d'envoi unique** (`lib/notifications/notifier.js`, docs/kb/pwa.md §11) : le
+titulaire et les membres qui ont le domaine `reservations` sur ce bien, chacun
+selon ses réglages (notification, e-mail, SMS sans appareil ; urgent par défaut,
+donc il passe les heures calmes). Les listes de la configuration ci-dessus restent
+servies jusqu'au lot 2c-3, qui les reprendra en contacts. L'ancien « e-mail de
+repli au titulaire » (envoyé quand la configuration n'avait envoyé aucun e-mail)
+est **remplacé** : le titulaire reçoit l'e-mail par défaut, et ne le reçoit plus
+s'il l'a retiré de ses réglages.
+
 ## 3. Kill switch (manuel) & coupe-circuit (automatique)
 
 ### Couper l'IA / Réactiver (manuel)

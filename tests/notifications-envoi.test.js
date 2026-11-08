@@ -650,3 +650,19 @@ test('LE TEST QUI COMPTE : acquitter une surréservation retire sa ligne de la f
     delete require.cache[k('../api/incidents-acquitter')]
   }
 })
+
+// ─── 9. Lot 2c-2 : un canal qu'une personne reçoit déjà autrement ───────────
+
+test('LE TEST QUI COMPTE : `exclusions` retire un canal à UNE personne, et à elle seule', async () => {
+  const { db } = base({ profiles: [proprio, membre()], profile_permissions: [droits({ reservations: 'read' })] })
+  const e = envois()
+  const b = await notifier({ compte: COMPTE, code: 'reservation', bien: { ref: 'ref-1' },
+    donnees: { bien: 'La bulle', prenom: 'Jean', arrivee: '2026-12-12', depart: '2026-12-15', canal: 'Offline' },
+    chemin: '/calendrier', sujet: 'resa:1', exclusions: { [COMPTE]: ['email'] }, maintenant: MIDI, db, deps: e.deps })
+  assert.equal(b.ok, true)
+  // Le titulaire d'une réservation directe reçoit déjà le relevé détaillé : pas d'e-mail ici.
+  assert.ok(!e.journal.some(j => j[0] === 'email' && j[1] === 'hote@exemple.fr'), 'pas de second e-mail au titulaire')
+  assert.ok(e.journal.some(j => j[0] === 'push' && j[1] === COMPTE), 'sa notification part')
+  // Le membre, lui, n'a rien reçu d'autre : il garde ses canaux.
+  assert.ok(e.journal.some(j => j[0] === 'email' && j[1] === 'membre@exemple.fr'), 'le membre reçoit son e-mail')
+})
