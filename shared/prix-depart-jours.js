@@ -151,11 +151,20 @@ export function detailDepart (jour) {
 // La cellule de la colonne « Prix de départ », ALLEGEE (recette de Thierry) : le
 // prix et la tranche, c'est tout ; le detail en info-bulle. `classes` : la
 // table des teintes de l'ecran (tranche -> classe), une seule pour tout l'ecran.
-export function celluleDepart (jour, classes = {}) {
+//
+// ⚠ `chiffres` EST LA SECONDE MOITIE, ET SON ABSENCE A ETE UN DEFAUT REEL.
+// Regle 2 de Thierry (3 novembre 2026) : le chiffre est toujours ecrit, la
+// couleur n'est qu'un repere. Cette pastille-ci etait la QUATRIEME de l'ecran
+// et la seule a montrer le nom NU : sur la meme ligne, la suggestion disait
+// « 3 · Haut » et le prix de depart « Haut ». Releve en review.
+// ⚠ A L'AFFICHAGE SEULEMENT : `jour.tranche` garde son nom, ici comme dans
+// tout ce que le module calcule.
+export function celluleDepart (jour, classes = {}, chiffres = {}) {
   if (!jour) return '<td class="yp-depart non-calc">—</td>'
   if (jour.statut !== 'calcule') return `<td class="yp-depart non-calc" title="${ech(detailDepart(jour))}">non calculé</td>`
+  const chiffre = chiffres[jour.tranche]
   return `<td class="yp-depart" title="${ech(detailDepart(jour))}"><span class="yp-depart-p">${ech(jour.prix)}&nbsp;€</span> `
-    + `<span class="yp-niv-badge ${ech(classes[jour.tranche] || '')}">${ech(jour.tranche)}</span></td>`
+    + `<span class="yp-niv-badge ${ech(classes[jour.tranche] || '')}">${chiffre ? `${chiffre} · ` : ''}${ech(jour.tranche)}</span></td>`
 }
 
 // Toute la colonne non calculee (bien sans comparables, sans strategie…) : la

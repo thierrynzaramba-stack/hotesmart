@@ -440,7 +440,11 @@ test('5b : le verdict week-end, le meilleur et le plus faible jour', async () =>
 test('LE TEST QUI COMPTE (5c) : les niveaux sous les noms YieldFlow, avec leur nombre de jours, et le rappel que c est une lecture', async () => {
   const { doc } = await monter(OK)
   const lignes = [...blocs(doc)[2].querySelectorAll('.mg-niv-l')].map(l => [...l.children].map(c => c.textContent.trim()).join(' | '))
-  assert.deepEqual(lignes, ['Base (Creux) | 106 jours', 'Moyen (Modéré) | 139 jours', 'Haut (Favorable) | 74 jours', 'Très haut ou Exceptionnel (Pic) | 46 jours'])
+  // ⚠ LE CHIFFRE EST ECRIT DEVANT LE NOM depuis le 3 novembre 2026 (regle 2
+  // de Thierry, avec l'echelle d'encre) : au bas de l'echelle le fond ne
+  // porte plus l'information, c'est « 1 · Base » qui la porte. La derniere
+  // ligne couvre deux niveaux, d'ou « 4-5 ».
+  assert.deepEqual(lignes, ['1 · Base (Creux) | 106 jours', '2 · Moyen (Modéré) | 139 jours', '3 · Haut (Favorable) | 74 jours', '4-5 · Très haut ou Exceptionnel (Pic) | 46 jours'])
   assert.match(blocs(doc)[2].textContent, /une lecture, pas un calcul de vos prix/)
 })
 

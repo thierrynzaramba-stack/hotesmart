@@ -93,9 +93,38 @@ test('sans aucun jour : on le dit', () => {
   assert.match(a.textContent, /Aucun jour à afficher/)
 })
 
-test('theme sombre : les couleurs des niveaux ont leur version sombre, sous les deux regles du depot', () => {
-  assert.match(SOURCE, /prefers-color-scheme: dark\)[\s\S]*:root:not\(\[data-theme="light"\]\)[\s\S]*--tc-pic/)
-  assert.match(SOURCE, /:root\[data-theme="dark"\][\s\S]*--tc-pic/)
+test('pas de mode sombre : aucune variante sombre des couleurs de niveaux', () => {
+  // ⚠⚠ CE TEST A ETE RETOURNE LE 2 NOVEMBRE 2026, SUR DOUBLE VALIDATION DE
+  // THIERRY : « pas de mode sombre sur YieldFlow pour l'instant ».
+  //
+  // Il gardait l'EXISTENCE de la variante sombre. Elle a ete retiree parce
+  // qu'elle etait un DEMI-mode sombre, et qu'un demi-mode sombre ment :
+  // — l'echelle s'INVERSAIT, « Pic » devenant la case la plus CLAIRE
+  //   (#a9c4ef) et « creux » la plus foncee, le contraire de ce que l'echelle
+  //   veut dire ;
+  // — et sur marche-global, quatre fonds de niveaux s'eclaircissaient pendant
+  //   que `public/style.css`, qui n'a aucun bloc sombre, continuait de peindre
+  //   le texte en #1a1a1a : contraste ~1,1:1, bloc illisible.
+  // Constate en recette le 1er novembre 2026, captures a l'appui.
+  //
+  // Il garde donc maintenant l'ABSENCE, pour qu'une variante sombre ne
+  // revienne pas par morceaux. Un vrai mode sombre sera un chantier a part.
+  const regles = SOURCE.replace(/\/\*[\s\S]*?\*\//g, ' ')
+  assert.doesNotMatch(regles, /prefers-color-scheme:\s*dark/,
+    'le module ne doit plus porter de regle sous prefers-color-scheme')
+  assert.doesNotMatch(regles, /:root\[data-theme="dark"\]/,
+    'ni sous [data-theme="dark"]')
+  // ⚠ ET L ECHELLE CLAIRE RESTE : c'est elle qui porte le sens. Elle n'est
+  // plus bleue depuis le 3 novembre 2026 — recette de Thierry : « le
+  // calendrier AirROI quitte le bleu, reserve au cliquable, et passe sur
+  // l'echelle d'encre ». Les quatre paliers sont des RENVOIS a --niveau-*,
+  // donc il n'y a plus d'hexa a epingler ici : ce qu'on garde, c'est que le
+  // palier le plus haut est le plus FONCE, ce que la variante sombre
+  // retiree inversait precisement.
+  // ⚠ ET LE RENVOI PORTE UN REPLI : ce module vit dans shared/, il doit rendre
+  // quelque chose meme si la feuille qui porte l echelle n est pas chargee.
+  assert.match(SOURCE, /--tc-pic:\s*var\(--niveau-5,\s*#222222\)/,
+    'l echelle claire reste : « Pic » est le plus fonce, et c est le sens')
 })
 
 test('REVIEW : jours dans le desordre et jour sans date — les mois sont tries, l illisible est ignore', () => {
