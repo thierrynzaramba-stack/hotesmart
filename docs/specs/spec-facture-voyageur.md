@@ -161,6 +161,10 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   l'adresse et le SIREN du voyageur ; la fiche ne montre aujourd'hui les
   coordonnées du voyageur qu'au titulaire. Un membre « réservations » en
   lecture voit-il seulement l'état, ou aussi le destinataire et le PDF ?
+  → **Réponse de Thierry (8 nov. 2026, 22 h 04) : A — un membre en lecture
+  voit seulement l'état** (lien envoyé, à confirmer, émise…), ni le
+  destinataire ni le PDF, comme pour les coordonnées du voyageur aujourd'hui.
+  Le serveur ne les lui envoie pas (pas de simple masquage).
 - **P3 — Un bien archivé.** Ses séjours passés restent-ils facturables ? Si
   oui, il faut un écran pour y accéder : le calendrier ne montre plus les
   biens archivés.
@@ -312,7 +316,9 @@ devient une facture à l'émission.
   (même exception nommée qu'au §5.1). Les endpoints gardent chaque geste :
   `reservations` en écriture pour remplir le formulaire et faire un avoir ;
   `reservations` ET `messages` en écriture pour envoyer le lien et confirmer
-  le total (P1) ; ce qu'un niveau lecture reçoit : P2.
+  le total (P1). **Un niveau lecture ne reçoit que l'état** — ni
+  destinataire, ni montants détaillés, ni PDF, ni URL signée — et c'est le
+  serveur qui les omet (P2).
 
 ### 5.4 L'émission, dans l'ordre
 
