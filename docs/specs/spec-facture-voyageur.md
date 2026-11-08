@@ -126,7 +126,19 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   les deux chantiers.** Ce fil n'a rien créé. Il a transmis ses besoins (§5 bis).
   **Thierry, le même soir : c'est ce fil (facturation) qui construit la
   table.** Proposition au §5 ter, soumise au fil compte de charges avant tout
-  code.
+  code. Thierry, 20 h 49 : **on termine la spec d'abord** ; la question des
+  tables en double se règle au moment de la mise en production.
+- **Q2 (8 nov. 2026) : la facture d'une réservation Airbnb porte le prix payé
+  par le voyageur** (net hôte + retenue Airbnb, tel que HôteSmart le
+  reconstruit). Thierry : les frais partagés d'Airbnb vont disparaître ; le
+  cas du supplément voyageur inconnu n'est donc pas traité.
+- **Q3 (8 nov. 2026) : la taxe de séjour figure sur la facture**, pour que la
+  facture arrive au total réellement payé, quel que soit le canal. Source :
+  la ligne `taxes_sejour` de la réservation (`origine = transmis`). **Quand
+  l'import ne la porte nulle part, l'hôte en saisit la valeur** — avant
+  l'envoi du lien, puisque la facture est émise dès que le voyageur valide le
+  formulaire. (Le barème par bien du lot 3 de la taxe de séjour n'existe pas
+  encore ; s'il arrive, pré-remplir cette saisie sera une question à poser.)
 
 ## 5. Données (proposition, à revoir après les réponses)
 
