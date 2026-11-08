@@ -30,9 +30,9 @@ HôteSmart doit permettre à l'hôte de la générer et de l'envoyer.
    remplit le formulaire : nom ou raison sociale, adresse, et pour une société
    son n° de TVA intracommunautaire et son SIREN s'il en a.
 5. La facture est **émise** — numéro, contenu figé, PDF — **jamais avant la
-   fin du séjour** (règle de Thierry, Q7) : automatiquement le jour du départ
-   si le formulaire est rempli (Q7 bis), ou à la validation s'il est rempli
-   après. Le voyageur la télécharge depuis le même lien.
+   fin du séjour** (règle de Thierry, Q7) : automatiquement 24 h après l'heure
+   de départ si le formulaire est rempli (Q7 bis), ou à la validation s'il est
+   rempli après. Le voyageur la télécharge depuis le même lien.
 6. L'hôte voit l'état sur la fiche (demandée, émise) et télécharge le PDF.
 
 ## 3. Ce qui existe déjà (lecture du dépôt, `main` = dde1004ff1211a4a813a3ed1b471d36d92018fcf)
@@ -160,14 +160,20 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   le voyageur remplit le formulaire avant son départ (Q7 bis), et un
   changement APRÈS la fin du séjour (remboursement tardif).
 - **Q7 bis (8 nov. 2026) : réponse A.** L'hôte envoie le lien à tout moment ;
-  le voyageur remplit le formulaire quand il veut ; **la facture est émise
-  automatiquement le jour du départ**, avec les montants à jour. D'ici là, le
-  lien affiche « Votre facture sera disponible le jour de votre départ ».
+  le voyageur remplit le formulaire quand il veut ; la facture est émise
+  automatiquement, avec les montants à jour. D'ici là, le lien affiche quand
+  elle sera disponible.
+  **Précisé par Thierry à 21 h 09 : l'émission a lieu 24 h après l'heure de
+  départ** (heure de départ du bien, `properties.checkout_time`), pas le jour
+  même.
   Conséquences : une réservation annulée avant le départ n'est jamais
   facturée (le lien le dit) ; l'émission automatique est une passe du cron,
   qui ne lit que les demandes complètes dont le départ est échu (aucun
   parcours de toutes les réservations) — `api/cron.js` se régénère en
   fichier complet, et la passe entre dans le coût du cron (carte 20).
+- **Q7, dernier cas (8 nov. 2026) : pas d'alerte.** Un changement après
+  l'émission (remboursement tardif…) est à la main de l'hôte : il fait
+  l'avoir, et il peut émettre une nouvelle facture.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
