@@ -195,6 +195,12 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   doit être vérifiée**. L'hôte confirme ou corrige le total ; **la facture
   n'est émise et le voyageur ne la reçoit qu'après ce geste.** Tant qu'il n'a
   pas confirmé : un rappel par jour.
+- **Q9 (8 nov. 2026) : la facture est dans la langue du pays où se trouve le
+  bien** (`properties.country`, lu par `lib/logement/lecture.js`). Un bien en
+  France → facture en français. HôteSmart sait le français, l'anglais et
+  l'espagnol ; un bien dans un autre pays sera une question le jour où il
+  existera (tous les biens actuels sont en France). La langue du formulaire et
+  du message au voyageur : Q9 bis.
 
 ## 5. Données (proposition, à revoir après les réponses)
 
