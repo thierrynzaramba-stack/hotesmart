@@ -423,9 +423,8 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
 **Prérequis, avant l'étape qui en dépend :**
 - **Les mentions légales** de la facture (actuelles et nouvelles, par régime
   de TVA, pour une société) **validées par un comptable** — avant l'étape 3.
-- **Les textes** « Votre facture est presque prête », « Votre facture est
-  disponible » et le message qui porte le lien **montrés à Thierry** — avant
-  l'étape 2.
+- ~~Les textes des trois messages~~ — **validés par Thierry le 8 novembre
+  2026** (§11).
 - **Le canal de la notification à l'hôte** (notification de l'appli, e-mail)
   — question à Thierry à l'étape 3, avec ce que le lot PWA 2 aura livré.
 - ~~L'accord du fil compte de charges sur le §5.1~~ — **obtenu le
@@ -514,7 +513,7 @@ nouvelle relecture — la règle de stockage privé du PDF avait disparu (1) ;
 la confirmation fait aussi partir un message, P1 la couvre désormais (2) ;
 `biens_entites` suit la règle d'accès de l'entité quel que soit l'endpoint (3).
 
-## 11. Les textes (proposition du 8 novembre 2026, à valider par Thierry)
+## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
 Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.
 `{prenom}` suit la règle de `lib/balises.js` (sans prénom : « Bonjour, »).
