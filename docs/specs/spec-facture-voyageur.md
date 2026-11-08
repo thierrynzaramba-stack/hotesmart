@@ -203,6 +203,11 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q9 bis (8 nov. 2026) : oui.** Le formulaire du voyageur et le message
   « Votre facture est disponible » sont dans **la langue du voyageur**
   (français, anglais ou espagnol) ; seule la facture suit le pays du bien.
+- **Q10 (8 nov. 2026) : réponse A.** Un membre qui a le droit
+  **« réservations » en écriture** peut envoyer le lien, confirmer le total et
+  faire un avoir. **Seul le titulaire** règle l'entité juridique (identité,
+  TVA, numérotation) : domaine `facturation`, déjà non délégable. Chaque geste
+  est gardé côté serveur (règle « un masquage par droit ne suffit jamais »).
 
 ## 5. Données (proposition, à revoir après les réponses)
 
