@@ -117,11 +117,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q10 — Où vit l'écran.** Tranchée, voir ci-dessous.
 - **Q11 — Supprimer.** Tranchée, voir ci-dessous.
 - **Q12 — La conservation.** Tranchée, voir ci-dessous.
-- **Q22 — La période comptable : par entité ou par compte ?** *Proposition* :
-  par **entité** (une SCI peut clôturer à une autre date que l'hôte en nom
-  propre). Ce serait alors une colonne de `entites_juridiques` (début
-  d'exercice), à demander au fil facturation ; par compte, elle vivrait dans
-  ce chantier.
+- **Q22 — La période comptable.** Tranchée, voir ci-dessous.
 - **Q13 — L'export pour le comptable** (tableau + justificatifs). V1 ou lot
   suivant ? *Proposition* : lot suivant ; la comptabilité elle-même
   (amortissements, liasse) reste hors d'HôteSmart.
@@ -241,6 +237,13 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   - les charges automatiques de plateforme ne sont matérialisées que pour N
     et N-1 ;
   - à la suppression du compte, tout est effacé avec lui (proposition).
+- **Q22 (8 nov. 2026, 22 h 50) : oui, par entité.** La période comptable se
+  règle sur l'entité juridique : une colonne `debut_exercice` (mois et jour,
+  vide possible) dans `entites_juridiques`, **demandée au fil facturation**
+  qui construit la table. Tant qu'elle est vide, **aucune purge** ne touche
+  les charges de cette entité, et l'écran demande de la régler — on ne
+  suppose pas une année civile à la place de l'hôte (même principe que
+  Q20). Les conséquences listées sous Q12 sont acceptées.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
