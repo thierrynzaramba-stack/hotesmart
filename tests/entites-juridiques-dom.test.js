@@ -181,6 +181,49 @@ test('les gestes : rattacher un logement, archiver SEULEMENT après confirmation
   assert.deepEqual(appels[2], { action: 'archiver', id: 'e2' })
 })
 
+test('un logement rattaché à une entité ARCHIVÉE le montre, et revenir au défaut est un vrai geste', async () => {
+  const etat = ETAT()
+  etat.biens[0].entite_id = 'e3'
+  const { r, appels, win } = await monter(etat)
+  const sel = r.querySelector('select[data-bien="b1"]')
+  assert.equal(sel.value, 'e3')
+  assert.ok(sel.selectedOptions[0].textContent.includes('[ej.bien_archivee Ancienne SARL]'))
+  assert.equal(sel.selectedOptions[0].disabled, true, 'on ne la choisit pas de nouveau')
+  sel.value = ''
+  sel.dispatchEvent(new win.Event('change'))
+  await attendre()
+  assert.deepEqual(appels[0], { action: 'rattacher', property_uuid: 'b1', entite_id: null })
+})
+
+test('LE TEST QUI COMPTE : un appel pour peindre l\'écran ; un geste = un envoi + une relecture', async () => {
+  // La case PERFORMANCE de la spec (§9, point 7) : on compte les appels.
+  const etat = ETAT()
+  const compte = { lire: 0, ecrire: 0 }
+  const dom = new JSDOM('<!doctype html><div id="r"></div>')
+  global.document = dom.window.document
+  const api = {
+    lire: async () => { compte.lire++; return JSON.parse(JSON.stringify(etat)) },
+    ecrire: async () => { compte.ecrire++; return { ok: true } }
+  }
+  const r = dom.window.document.getElementById('r')
+  await V.monterEntites({ racine: r, api, t, esc, confirmer: async () => true, langue: 'fr' })
+  assert.deepEqual(compte, { lire: 1, ecrire: 0 })
+  r.querySelector('.ej-carte[data-entite="e2"] [data-action="defaut"]').click()
+  await attendre(); await attendre()
+  assert.deepEqual(compte, { lire: 2, ecrire: 1 })
+})
+
+test('un rattachement refusé : le menu revient à la valeur enregistrée, et le bandeau le dit', async () => {
+  const refus = async () => { const e = new Error('archivee'); e.status = 409; e.code = 'archivee'; throw e }
+  const { r, win } = await monter(ETAT(), { ecrire: refus })
+  const sel = r.querySelector('select[data-bien="b2"]')
+  sel.value = 'e1'
+  sel.dispatchEvent(new win.Event('change'))
+  await attendre(); await attendre()
+  assert.equal(r.querySelector('select[data-bien="b2"]').value, 'e2', 'la valeur refusée ne reste pas affichée')
+  assert.equal(r.querySelector('.ej-bandeau').textContent, '[ej.err_archivee]')
+})
+
 test('une donnée du serveur est échappée, jamais interprétée', async () => {
   const etat = ETAT()
   etat.entites[0].nom = '<img src=x onerror=alert(1)>'

@@ -207,8 +207,13 @@ function monterEntites ({ racine, api, t, esc, confirmer, langue = 'fr' }) {
       await charger()
       return true
     } catch (e) {
-      if (form) montrerRefus(form, e, t)
-      else racine.querySelector('.ej-bandeau').textContent = t('ej.err_generic')
+      if (form) { montrerRefus(form, e, t); return false }
+      // ⚠ SANS FORMULAIRE (un menu de logement, un bouton) : on REPEINT depuis
+      // le dernier etat lu, sinon le menu garde la valeur que le serveur vient
+      // de refuser (constat 7 de la revue de 447ff3e0).
+      peindre()
+      racine.querySelector('.ej-bandeau').textContent = t(
+        e && e.code === 'archivee' ? 'ej.err_archivee' : e && e.code === 'panne' ? 'ej.err_panne' : 'ej.err_generic')
       return false
     }
   }
@@ -274,8 +279,16 @@ function monterEntites ({ racine, api, t, esc, confirmer, langue = 'fr' }) {
         <h2 class="h2">${esc(t('ej.empty_title'))}</h2>
         <p class="muted">${esc(t('ej.empty_text'))}</p>
       </div>` : ''
-    const options = (sel) => [`<option value=""${sel ? '' : ' selected'}>${esc(defaut ? t('ej.bien_defaut', { nom: defaut.nom }) : t('ej.bien_defaut_aucune'))}</option>`]
-      .concat(actives.map(e => `<option value="${esc(e.id)}"${sel === e.id ? ' selected' : ''}>${esc(e.nom)}</option>`)).join('')
+    // ⚠ UN LOGEMENT RATTACHE A UNE ENTITE ARCHIVEE LE MONTRE (constat 2 de la
+    // revue de 447ff3e0). Sans cette option, le menu affichait « Entite par
+    // defaut » alors que le logement emet sous l'archivee — donc ne facture
+    // plus (P4) —, et choisir « par defaut » ne declenchait aucun changement.
+    const options = (sel) => {
+      const archivee = sel && !actives.some(e => e.id === sel) ? etat.entites.find(e => e.id === sel) : null
+      return [`<option value=""${sel ? '' : ' selected'}>${esc(defaut ? t('ej.bien_defaut', { nom: defaut.nom }) : t('ej.bien_defaut_aucune'))}</option>`]
+        .concat(archivee ? [`<option value="${esc(archivee.id)}" selected disabled>${esc(t('ej.bien_archivee', { nom: archivee.nom }))}</option>`] : [])
+        .concat(actives.map(e => `<option value="${esc(e.id)}"${sel === e.id ? ' selected' : ''}>${esc(e.nom)}</option>`)).join('')
+    }
     const biens = etat.biens.length ? etat.biens.map(b => `
       <div class="ej-bien">
         <label for="ej-bien-${esc(b.id)}" class="ej-bien__nom">${esc(b.nom)}</label>

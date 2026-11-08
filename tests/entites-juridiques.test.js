@@ -44,7 +44,7 @@ function baseFactice (tables = {}) {
   const lignesDe = (t) => (etat.tables[t] = etat.tables[t] || [])
 
   function from (table) {
-    const q = { op: 'select', f: [], ou: null, ordre: null, unique: null, cols: null }
+    const q = { op: 'select', f: [], ou: null, ordre: null, desc: false, limite: null, unique: null, cols: null }
     const correspond = (r) => q.f.every(([c, v, mode]) => mode === 'is' ? (r[c] ?? null) === v : String(r[c]) === String(v)) &&
       (!q.ou || q.ou.some(([c, v]) => String(r[c]) === String(v)))
     const projeter = (r) => {
@@ -76,7 +76,8 @@ function baseFactice (tables = {}) {
         return { data: null, error: null }
       }
       let res = lignesDe(table).filter(correspond)
-      if (q.ordre) res = [...res].sort((x, y) => String(x[q.ordre]).localeCompare(String(y[q.ordre])))
+      if (q.ordre) res = [...res].sort((x, y) => String(x[q.ordre]).localeCompare(String(y[q.ordre])) * (q.desc ? -1 : 1))
+      if (q.limite !== null) res = res.slice(0, q.limite)
       res = res.map(projeter)
       if (q.unique === 'maybe') {
         if (res.length > 1) return { data: null, error: { message: 'plusieurs lignes' } }
@@ -93,7 +94,8 @@ function baseFactice (tables = {}) {
       eq (c, v) { q.f.push([c, v]); return chaine },
       is (c, v) { q.f.push([c, v, 'is']); return chaine },
       or (expr) { q.ou = expr.split(',').map(p => { const [c, , ...v] = p.split('.'); return [c, v.join('.')] }); return chaine },
-      order (c) { q.ordre = c; return chaine },
+      order (c, o) { q.ordre = c; q.desc = !!(o && o.ascending === false); return chaine },
+      limit (n) { q.limite = n; return chaine },
       insert (row) { q.op = 'insert'; q.row = row; return chaine },
       update (row) { q.op = 'update'; q.row = row; return chaine },
       upsert (row, opts) { q.op = 'upsert'; q.row = row; q.opts = opts; return chaine },
@@ -158,7 +160,10 @@ test('LE TEST QUI COMPTE : « meme compte » est garanti en base — cles compos
 
 test('la migration : une seule entite par defaut, prefixe fige, jamais sous le dernier emis, lignes < 60 car.', () => {
   assert.match(SQL, /create unique index if not exists\s+entites_juridiques_defaut_uidx\s+on public\.entites_juridiques \(user_id\)\s+where par_defaut/)
-  assert.match(SQL, /old\.dernier_emis is not null\s+and new\.prefixe <> old\.prefixe/)
+  assert.match(SQL, /if old\.dernier_emis is not null then\s+if new\.prefixe <> old\.prefixe then/)
+  // `dernier_emis` ne baisse jamais et ne revient jamais a vide (revue de 447ff3e0, constat 5).
+  assert.match(SQL, /if new\.dernier_emis is null\s+or new\.dernier_emis < old\.dernier_emis/)
+  assert.match(SQL, /before update\s+on public\.factures_voyageur_suites\s+for each row execute function\s+public\.fvs_suite_protegee\(\)/)
   assert.match(SQL, /prochain_numero > dernier_emis/)
   assert.match(SQL, /\(regime_tva = 'assujetti'\)\s+= \(taux_tva is not null\)/)
   const longues = SQL.split('\n').map((l, i) => [i + 1, l.length]).filter(([, n]) => n >= 60)
@@ -328,6 +333,32 @@ test('LE TEST QUI COMPTE : un membre `facturation: read` LIT (son perimetre) mai
   } finally { fini() }
 })
 
+test('LE TEST QUI COMPTE : meme un membre a qui TOUT est delegue en ecriture (facturation compris) n\'ecrit rien', async () => {
+  // ⚠ Constat 1 de la revue de 447ff3e0 : avec un seul membre `facturation:
+  // read`, garder les gestes sur `reservations` restait vert. Ce membre-ci a
+  // tout en `write` : seule la regle « facturation ne se delegue pas en
+  // ecriture » le refuse.
+  const tables = PARC()
+  Object.assign(tables.profile_permissions[0], { reservations: 'write', menages: 'write', prestataires: 'write',
+    messages: 'write', avis: 'write', reglages: 'write', facturation: 'write', equipe: 'write', property_scope: 'all' })
+  const { appeler, etat, fini } = monterApi(tables)
+  try {
+    const id = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
+    const avant = JSON.stringify(etat.tables)
+    for (const corps of [
+      { action: 'creer', entite: ENTITE_OK },
+      { action: 'modifier', id, entite: { ...ENTITE_OK, nom: 'Pirate' } },
+      { action: 'archiver', id },
+      { action: 'defaut', id },
+      { action: 'numerotation', id, numerotation: { prefixe: 'X', prochain_numero: 5 } },
+      { action: 'rattacher', property_uuid: BIEN_A1, entite_id: id }
+    ]) {
+      assert.equal((await appeler({ methode: 'POST', jeton: 'jeton-m', compte: A, corps })).code, 403, corps.action)
+    }
+    assert.equal(JSON.stringify(etat.tables), avant)
+  } finally { fini() }
+})
+
 test('un membre sans droit facturation, ou un compte dont on n\'est pas membre : refus', async () => {
   const tables = PARC()
   tables.profile_permissions[0].facturation = 'none'
@@ -398,6 +429,36 @@ test('LE TEST QUI COMPTE : numerotation (Q5) — reglable, jamais sous le dernie
     assert.equal(haut.corps.suite.prochain, `HS-${annee}-0040`)
     assert.equal(etat.tables.factures_voyageur_suites[0].dernier_emis, 15, 'le reglage ne touche pas au dernier emis')
   } finally { fini() }
+})
+
+test('LE TEST QUI COMPTE : une entite creee alors qu\'il en reste une active ne devient PAS celle par defaut', async () => {
+  // Constat 3 de la revue de 447ff3e0 : A par defaut, B active ; A archivee ;
+  // C creee. C ne doit pas devenir l'emetteur de tous les logements sans lien.
+  const { appeler, etat, fini } = monterApi()
+  try {
+    const a = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'A' } } })).corps.entite
+    const b = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'B' } } })).corps.entite
+    assert.deepEqual([a.par_defaut, b.par_defaut], [true, false])
+    await appeler({ methode: 'POST', corps: { action: 'archiver', id: a.id } })
+    const c = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'C' } } })).corps.entite
+    assert.equal(c.par_defaut, false)
+    assert.deepEqual(etat.tables.entites_juridiques.filter(e => e.par_defaut).map(e => e.nom), [], 'aucune par defaut : le titulaire choisit')
+  } finally { fini() }
+})
+
+test('le prefixe survit au 1er janvier ; le numero, lui, repart a 1', async () => {
+  const id = 'eeeeeeee-1111-4111-8111-000000000009'
+  const { db } = baseFactice({
+    entites_juridiques: [{ id, user_id: A, nom: 'SCI', par_defaut: true, archivee_le: null, cree_le: '1' }],
+    factures_voyageur_suites: [
+      { entite_id: id, user_id: A, annee: 2025, prefixe: 'OLD', prochain_numero: 7, dernier_emis: 6 },
+      { entite_id: id, user_id: A, annee: 2026, prefixe: 'SCI', prochain_numero: 42, dernier_emis: 41 }
+    ]
+  })
+  const r = await EJ.numerotation(A, id, { db, maintenant: new Date('2027-01-01T00:30:00+01:00') })
+  assert.deepEqual([r.suite.prefixe, r.suite.prochain_numero, r.suite.prochain], ['SCI', 1, 'SCI-2027-0001'])
+  const neuve = await EJ.numerotation(B, id, { db, maintenant: new Date('2027-01-01T00:30:00+01:00') })
+  assert.equal(neuve.suite.prefixe, 'F', 'sans passe, le prefixe par defaut')
 })
 
 test('l\'annee de la suite est celle de PARIS : le 31 decembre a 23 h 30 UTC est deja l\'annee suivante', () => {

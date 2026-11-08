@@ -22,7 +22,7 @@ aucune entité automatique, aucune reprise des comptes existants.
 
 | Table | Rôle |
 |---|---|
-| `entites_juridiques` | l'identité : type, nom, adresse, SIRET, TVA intracommunautaire, régime de TVA (`exonere`, `franchise`, `assujetti` + taux réglé par l'hôte), mentions d'une société, contact ; `debut_exercice` (« MM-JJ », vide possible et sans défaut — lu par le compte de charges pour sa purge au-delà de N-1) ; `par_defaut` (une seule par compte) ; `archivee_le` (on archive, on ne supprime jamais) |
+| `entites_juridiques` | l'identité : type, nom, adresse, SIRET, TVA intracommunautaire, régime de TVA (`exonere`, `franchise`, `assujetti` + taux réglé par l'hôte), mentions d'une société, contact ; `debut_exercice` (« MM-JJ », vide possible et sans défaut — lu par le compte de charges pour présenter ses totaux par exercice ; aucune purge, Thierry 22 h 53) ; `par_defaut` (une seule par compte) ; `archivee_le` (on archive, on ne supprime jamais) |
 | `biens_entites` | le lien **bien → entité** (`property_uuid` → `entite_id`). Pas de ligne = l'entité par défaut du compte |
 | `factures_voyageur_suites` | la suite des numéros de facture, par entité et par **année de Paris** : préfixe, prochain numéro, dernier émis |
 
@@ -36,12 +36,18 @@ aucune entité automatique, aucune reprise des comptes existants.
   la ligne d'un bien ; il aurait pu changer l'émetteur des factures (constat 4
   de la relecture de la spec).
 - **Une seule entité par défaut par compte** : index unique partiel ; la bascule
-  passe par la fonction SQL `entite_definir_defaut` (une transaction). La
-  **première** entité active créée devient celle par défaut. Une entité
-  archivée n'est jamais celle par défaut (contrainte).
+  passe par la fonction SQL `entite_definir_defaut` (une transaction). Une
+  entité créée devient celle par défaut **seulement s'il n'y a aucune autre
+  entité active** : si la par-défaut a été archivée et qu'il en reste une
+  active, la nouvelle n'émet pas d'office pour tous les logements — le compte
+  reste sans défaut et le titulaire choisit (revue de 447ff3e0, constat 3).
+  Une entité archivée n'est jamais celle par défaut (contrainte).
 - **Numérotation (Q5)** : le numéro de départ ne descend jamais sous le
-  dernier émis + 1 (contrainte) ; le préfixe ne change plus une fois un numéro
-  émis dans l'année (trigger). L'année est celle d'Europe/Paris.
+  dernier émis + 1 (contrainte) ; une suite entamée est protégée par le
+  trigger `fvs_suite_protegee` — préfixe figé, et `dernier_emis` qui ne baisse
+  jamais ni ne revient à vide (revue de 447ff3e0, constat 5). L'année est
+  celle d'Europe/Paris ; au 1er janvier, le préfixe de la dernière année connue
+  est repris et le numéro repart à 1.
 - **RLS active, aucune politique, `revoke all from anon, authenticated`** sur
   les trois tables : exception à la règle 5 de REVIEW.md, sur le précédent de
   `taxes_sejour`. Le navigateur ne lit ni n'écrit rien en direct.
@@ -73,7 +79,9 @@ délégable**), vue `shared/entites-juridiques-vue.js` : les entités actives
 (résumé, numérotation, modifier, utiliser par défaut, archiver après
 confirmation), **« Vos logements »** — l'entité de chaque logement se choisit
 ICI, pas sur la fiche du logement (Thierry, 8 novembre 2026) — et les entités
-archivées repliées. Le formulaire suit le type et le régime : forme, capital et
+archivées repliées. Un logement rattaché à une entité archivée le montre
+(option « archivée : ce logement ne peut plus facturer ») ; un geste refusé
+repeint l'écran depuis le dernier état lu. Le formulaire suit le type et le régime : forme, capital et
 RCS pour une société, taux pour un assujetti ; un champ caché part vide. Le
 début d'exercice se choisit jour et mois, les deux ou rien. Clés i18n `ej.*`
 (fr, en, es).
@@ -82,7 +90,9 @@ début d'exercice se choisit jour et mois, les deux ou rien. Clés i18n `ej.*`
 
 `tests/entites-juridiques.test.js` (migration, validation, début d'exercice,
 endpoint, numérotation, lectures exposées) et `tests/entites-juridiques-dom.test.js`
-(l'écran monté dans un DOM : aucun texte en dur, formulaire, gestes,
-échappement, page non délégable), éprouvés par onze mutations ;
+(l'écran monté dans un DOM : aucun texte en dur, formulaire, gestes, nombre
+d'appels, entité archivée, refus repeint, échappement, page non délégable),
+éprouvés par douze mutations et une contre-épreuve sur le code d'avant la
+revue ;
 `tests/ecrans-sans-biens-archives.test.js` couvre la liste des logements de
 l'écran ; `tests/pages-non-delegables.test.js` recense la page.

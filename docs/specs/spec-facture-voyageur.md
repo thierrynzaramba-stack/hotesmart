@@ -222,7 +222,7 @@ Thierry.
 | `taux_tva` | nombre, vide possible | obligatoire si `assujetti`, réglé par l'hôte |
 | `capital`, `rcs` | vide possible | mentions d'une société, à valider avec un comptable |
 | `email`, `telephone` | vide possible | contact imprimé |
-| `debut_exercice` | texte « MM-JJ », **vide possible, sans défaut** | demandé par le compte de charges (Thierry, 8 nov. 2026, 22 h 50) : la purge au-delà de N-1 dépend de l'exercice de chaque entité ; on ne suppose pas une année civile |
+| `debut_exercice` | texte « MM-JJ », **vide possible, sans défaut** | demandé par le compte de charges (Thierry, 8 nov. 2026, 22 h 50) pour présenter ses totaux par exercice — aucune purge (Thierry, 22 h 53 : « on garde tout ») ; on ne suppose pas une année civile |
 | `par_defaut` | booléen | **une seule** par compte (index unique partiel) |
 | `archivee_le` | horodatage, vide possible | on retire une entité, on ne la supprime pas : des factures et des charges y renvoient |
 | `cree_le`, `modifie_le` | horodatage | |

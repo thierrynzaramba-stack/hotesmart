@@ -47,7 +47,8 @@ create table if not exists
   -- VIDE POSSIBLE et sans defaut (Thierry, 8 nov.
   -- 2026, 22 h 50) : on ne suppose pas une annee
   -- civile a la place de l'hote. Lu par le compte
-  -- de charges (purge au-dela de N-1).
+  -- de charges : totaux par exercice (aucune purge,
+  -- Thierry 22 h 53).
   debut_exercice text,
   par_defaut boolean not null
     default false,
@@ -209,35 +210,49 @@ create table if not exists
       or prochain_numero > dernier_emis))
 );
 
--- ⚠ LE PREFIXE NE CHANGE PLUS UNE FOIS UN NUMERO
--- EMIS DANS L'ANNEE : deux series se
--- chevaucheraient.
+-- ⚠ UNE SUITE ENTAMEE EST PROTEGEE EN BASE :
+-- - le prefixe ne change plus une fois un numero
+--   emis dans l'annee (deux series se
+--   chevaucheraient) ;
+-- - `dernier_emis` ne baisse jamais et ne
+--   revient jamais a vide : sinon un UPDATE
+--   rendrait des numeros deja emis, et la
+--   contrainte `fvs_prochain_chk` ne verrait
+--   rien (revue de 447ff3e0, constat 5).
 create or replace function
-  public.fvs_prefixe_fige()
+  public.fvs_suite_protegee()
 returns trigger
 language plpgsql
 set search_path = public
 as $$
 begin
-  if old.dernier_emis is not null
-     and new.prefixe <> old.prefixe then
-    raise exception
-      'prefixe fige apres une emission'
-      using errcode = '23514';
+  if old.dernier_emis is not null then
+    if new.prefixe <> old.prefixe then
+      raise exception
+        'prefixe fige apres une emission'
+        using errcode = '23514';
+    end if;
+    if new.dernier_emis is null
+       or new.dernier_emis < old.dernier_emis
+    then
+      raise exception
+        'dernier numero emis en baisse'
+        using errcode = '23514';
+    end if;
   end if;
   return new;
 end
 $$;
 
 drop trigger if exists
-  fvs_prefixe_fige_trg
+  fvs_suite_protegee_trg
   on public.factures_voyageur_suites;
 
-create trigger fvs_prefixe_fige_trg
+create trigger fvs_suite_protegee_trg
   before update
   on public.factures_voyageur_suites
   for each row execute function
-  public.fvs_prefixe_fige();
+  public.fvs_suite_protegee();
 
 alter table
   public.factures_voyageur_suites
