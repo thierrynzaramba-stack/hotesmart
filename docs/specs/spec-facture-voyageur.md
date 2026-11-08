@@ -259,6 +259,13 @@ est gardé sur `reglages` en écriture et `reservations` en lecture
 (`api/logement.js`) : s'il affiche ou modifie l'entité d'un bien, il appelle
 cette garde-là en plus de la sienne — sinon le constat 4 se rouvre.
 
+**Un compte peut n'avoir AUCUNE entité** (Thierry, 8 novembre 2026, 22 h 15,
+réponse A, vaut pour les deux chantiers). Le titulaire crée la première dans
+Réglages, quand il en a besoin. Tant qu'elle manque, la facture et la charge
+sont bloquées avec leur motif, et le titulaire est prévenu (P4). **On ne
+remplit jamais une identité légale à sa place** : aucune entité créée
+automatiquement, aucune reprise des comptes existants.
+
 **Accord du fil compte de charges : 8 novembre 2026, 22 h 12** (sa spec
 alignée : branche `compte-de-charges` @ 69ed6715c9ef7a3474777e7369831c6f5b81e342).
 Il pose sa propre clé composite `(entite_juridique_id, user_id)` →
@@ -423,9 +430,8 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
   — question à Thierry à l'étape 3, avec ce que le lot PWA 2 aura livré.
 - ~~L'accord du fil compte de charges sur le §5.1~~ — **obtenu le
   8 novembre 2026** (§5.1).
-- **Un compte sans aucune entité** : est-ce permis, et qui crée la première,
-  quand ? Question posée à Thierry le 8 novembre 2026 (elle bloque aussi la
-  validation des charges) — avant l'étape 1.
+- ~~Un compte sans aucune entité~~ — **tranché par Thierry le 8 novembre
+  2026, 22 h 15 : réponse A** (§5.1).
 
 **Étapes**, chacune avec son go, ses tests et sa review :
 1. **L'entité juridique** : migration (staging d'abord), writer, endpoint,
