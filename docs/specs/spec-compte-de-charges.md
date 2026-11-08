@@ -115,9 +115,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q8 — Le domaine de l'adresse.** Tranchée, voir ci-dessous.
 - **Q9 — Les droits.** Tranchée, voir ci-dessous.
 - **Q10 — Où vit l'écran.** Tranchée, voir ci-dessous.
-- **Q11 — Supprimer.** *Proposition* : une facture « à vérifier » se supprime
-  (doublon, mauvais envoi) ; une facture validée s'**annule** avec un motif,
-  elle ne s'efface jamais.
+- **Q11 — Supprimer.** Tranchée, voir ci-dessous.
 - **Q12 — La conservation des justificatifs.** *Proposition* : tant que le
   compte existe. La durée légale de conservation des pièces justificatives
   (dix ans en droit commercial) est **à confirmer avec un comptable** ; le sort
@@ -218,6 +216,13 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
 - **Q10 (8 nov. 2026, 22 h 38) : d'accord, page `/charges` dans le menu ≡**
   (à côté de Réglages et Avis), visible du titulaire seul. Pas de sixième
   onglet de navigation.
+- **Q11 (8 nov. 2026, 22 h 39) : « supprimer à tout moment ».** Une facture
+  se supprime à tout moment, vérifiée ou non, **justificatif compris** (le
+  fichier est effacé du bucket). Le geste demande une confirmation qui le dit
+  (« le justificatif sera effacé définitivement »). Le résumé des totaux est
+  mis à jour dans la même écriture. ⚠ **Une charge automatique de plateforme
+  supprimée n'est jamais recréée** par la matérialisation quotidienne : une
+  trace de suppression (compte, réservation, date) est gardée, sans montant.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -258,7 +263,7 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
    l'expéditeur.
 
 **C. Le suivi.** Une liste filtrable par entité, bien, statut (à vérifier,
-validée, annulée) et mois ; consultation du justificatif. Toute facture
+validée, annulée) et mois ; consultation et suppression (Q11). Toute facture
 validée est considérée payée (Q2).
 
 ## 6. Données (proposition, à revoir après les réponses)
@@ -270,7 +275,7 @@ validée est considérée payée (Q2).
 | `id`, `user_id` | la facture, le compte |
 | `entite_juridique_id` | **non nul à la validation** (D3) ; proposée par la lecture. Clé étrangère **composite** (`entite_juridique_id`, `user_id`) → `entites_juridiques (id, user_id)` : une charge ne peut pas pointer l'entité d'un autre compte, garanti en base (même modèle que `biens_entites`). |
 | `bien_id` | uuid → `properties.id`, vide possible (Q1). ⚠ Nommé `bien_id` et non `property_id` : dans le dépôt, `property_id` d'une table enfant est la référence TEXTE du fournisseur (REVIEW.md règle 10). Exception raisonnée, déclarée comme celle de `docs/kb/price-log.md` : la clé UUID survit à un changement de fournisseur (décision E6). |
-| `statut` | `envoi`, `a_lire`, `a_verifier`, `validee`, `annulee` (+ motif), `illisible`, `sans_facture` |
+| `statut` | `envoi`, `a_lire`, `a_verifier`, `validee`, `annulee` (charge de plateforme dont la réservation est annulée), `illisible`, `sans_facture`. Une suppression (Q11) efface la ligne. |
 | `tentatives_lecture` | compteur des lectures **qui ont eu lieu et ont échoué** ; au troisième échec, `illisible` (l'hôte saisit à la main). Une panne du fournisseur d'IA ne compte pas. |
 | `fournisseur_nom`, `fournisseur_siret`, `numero_facture`, `date_facture` | lus puis validés |
 | `montant_ht_cents`, `montant_tva_cents`, `montant_ttc_cents` | centimes, euros seulement en V1 ; une TVA à 0 lue n'est pas une TVA vide (Q17) |
@@ -413,7 +418,7 @@ validée est considérée payée (Q2).
 1. **Prérequis** : la table des entités juridiques dans `main` (fil
    facturation, étape 1 de sa spec), avec sa lecture côté serveur (§3).
 2. **Le socle** : migration `charges`, bucket privé, writer, lecture IA,
-   endpoint d'écriture (créer, lire, valider, annuler, URL d'envoi et de
+   endpoint d'écriture (créer, lire, valider, supprimer, URL d'envoi et de
    consultation).
 3. **L'écran `/charges`**, ordinateur et téléphone : liste, ajout par photo ou
    fichier, formulaire de vérification.
