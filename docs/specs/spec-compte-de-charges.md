@@ -340,7 +340,12 @@ validée est considérée payée (Q2).
   2b1df50476cd0202a3ede64196b7634fb6acb06c) : `entitesDuCompte(userId)` et
   `entiteDuBien(userId, propertyUuid)` — ligne de `biens_entites`, sinon
   l'entité par défaut, sinon `null`, avec sa provenance. Elles ne gardent
-  rien : c'est l'endpoint des charges qui garde. *Proposition* : une entité
+  rien : c'est l'endpoint des charges qui garde. Formes rendues
+  (`facture-voyageur` @ 447ff3e035f7e05cecc08a169b574429befb8f0d) :
+  `{ ok, entites }`, `{ ok, entite, provenance }`, ou
+  `{ ok: false, motif: 'panne' }`. **Une panne n'est jamais une liste vide** :
+  l'endpoint rend 503, il ne conclut pas « aucune entité ». `debut_exercice`
+  (« MM-JJ », vide possible) figure dans `entitesDuCompte` (Q22). *Proposition* : une entité
   **archivée** n'est jamais proposée ni acceptée pour valider une nouvelle
   charge ; les charges déjà validées la gardent.
 - **La lecture** : `lib/charges/lecture.js`. Une demande à Haiku par document
