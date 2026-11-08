@@ -221,29 +221,21 @@ Chaque question attend la réponse de Thierry. Rien n'est codé avant.
   mis à jour dans la même écriture. ⚠ **Une charge automatique de plateforme
   supprimée n'est jamais recréée** par la matérialisation quotidienne : une
   trace de suppression (compte, réservation, date) est gardée, sans montant.
-- **Q12 (8 nov. 2026, 22 h 43) : « HôteSmart conserve seulement N et N-1 ;
-  l'hôte choisit sa période comptable ».** HôteSmart garde les charges de
-  l'exercice en cours et de l'exercice précédent, pas au-delà. L'exercice est
-  réglé par l'hôte (Q22). Conséquences proposées :
-  - **purge** à l'ouverture de l'exercice N+1 : tout ce qui est antérieur à
-    N-1 est effacé — lignes, justificatifs du bucket, résumé, traces de
-    suppression des charges de plateforme. Tâche du cron dédié, idempotente ;
-  - **prévenir avant** : l'hôte est averti (proposition : 30 jours avant)
-    de ce qui va être effacé, et peut télécharger ses justificatifs. La
-    conservation légale (plusieurs années, à confirmer avec un comptable)
-    reste la sienne : HôteSmart n'est pas son archive légale ;
-  - **l'export (Q13) doit exister avant la première purge**, soit au plus
-    tard à la fin du premier exercice N-1 ;
-  - les charges automatiques de plateforme ne sont matérialisées que pour N
-    et N-1 ;
-  - à la suppression du compte, tout est effacé avec lui (proposition).
+- **Q12 (8 nov. 2026) : HôteSmart garde tout, aucune purge pour le
+  moment.** À 22 h 43, Thierry avait d'abord décidé « HôteSmart conserve
+  seulement N et N-1 ; l'hôte choisit sa période comptable » ; **à 22 h 53, il
+  revient dessus : « on n'efface pas pour le moment, finalement on garde
+  tout »**. Donc : aucune purge, aucune tâche d'effacement, les charges et
+  leurs justificatifs restent tant que l'hôte ne les supprime pas (Q11). La
+  conservation légale (plusieurs années, à confirmer avec un comptable) reste
+  celle de l'hôte : HôteSmart n'est pas son archive légale. À la suppression
+  du compte, tout est effacé avec lui (proposition).
 - **Q22 (8 nov. 2026, 22 h 50) : oui, par entité.** La période comptable se
   règle sur l'entité juridique : une colonne `debut_exercice` (mois et jour,
-  vide possible) dans `entites_juridiques`, **demandée au fil facturation**
-  qui construit la table. Tant qu'elle est vide, **aucune purge** ne touche
-  les charges de cette entité, et l'écran demande de la régler — on ne
-  suppose pas une année civile à la place de l'hôte (même principe que
-  Q20). Les conséquences listées sous Q12 sont acceptées.
+  vide possible) dans `entites_juridiques`, demandée au fil facturation. Sans
+  purge (Q12, 22 h 53), elle ne sert plus qu'à **présenter les totaux par
+  exercice** (en cours, précédent). Tant qu'elle est vide, les totaux restent
+  par mois — on ne suppose pas une année civile à la place de l'hôte.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
