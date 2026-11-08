@@ -484,12 +484,20 @@ servies jusqu'au lot 2c-3, qui les reprend en contacts : la production reçoit
    (`lib/notif-hote-resa.js`, coordonnées du voyageur, prix, conditions) ; l'e-mail
    court du point d'envoi lui est retiré (`exclusions` du notifier) **quand ce
    relevé est parti ou attend dans la file**, et seulement alors. La notification
-   reste. **Le relevé suit SES réglages de f** (décision de Thierry du 8 novembre,
+   reste. **Le relevé suit les réglages du titulaire pour l'événement f
+   (Nouvelle réservation)** (décision de Thierry du 8 novembre,
    `lib/notifications/releve.js`) : e-mail décoché → pas de relevé ; heures
    calmes → la file (`releve:<id>`), d'où il part **seul**, au titulaire seul,
    jamais fondu dans le message regroupé ; la ligne ne porte que les références,
-   la réservation et le bien se **relisent** à la sortie (défaite pendant la nuit
-   → rien). La file en panne ne rend pas muet : il part tout de suite.
+   la réservation et le bien se **relisent** sur le compte de la ligne à la
+   sortie (défaite pendant la nuit → rien), et les réglages aussi (e-mail
+   décoché pendant la nuit → rien). La file en panne ne rend pas muet : il part
+   tout de suite. **Un relevé différé ne se perd jamais en silence** : une
+   lecture ratée le remet dans la file ; un envoi raté lève l'incident
+   `notif_hote_non_envoyee`, comme le chemin immédiat ; chaque relevé passe le
+   budget de la passe, et ce qui n'a pas le temps de partir revient dans la
+   file. Ce que la marge ne garantit pas : un relevé commencé, si le cycle est
+   tué pendant lui, a posé sa sentinelle et ne repartira pas.
 6. **Le code non résolu relit son bien** : les appelants passent la référence
    provider, et un membre peut avoir son périmètre en UUID. **Une référence
    Channex a la forme d'un UUID** : on cherche d'abord par la référence, puis par

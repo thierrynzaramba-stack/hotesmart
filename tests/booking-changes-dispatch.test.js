@@ -138,8 +138,8 @@ function chargerDispatcher({ events, menageThrows = false, accessThrows = false,
   })
   // PWA lot 2c-2 : le releve suit les reglages du titulaire (decision injectee).
   stub('lib/notifications/releve.js', {
-    decisionDuReleve: async (o) => { etat.releves.push(['decision', o.compte]); return decisionReleve },
-    differer: async (o) => { etat.releves.push(['differer', o.bookingId, o.a]); return fileEnPanne ? { ok: false, motif: 'ecriture_impossible' } : { ok: true } }
+    decisionDuReleve: async (o) => { etat.releves.push(['decision', o.compte, o.sejour]); return decisionReleve },
+    differer: async (o) => { etat.releves.push(['differer', o.compte, o.bookingId, o.propertyId, o.provider, o.a]); return fileEnPanne ? { ok: false, motif: 'ecriture_impossible' } : { ok: true } }
   })
   stub('lib/notif-hote-resa.js', {
     // La VRAIE regle « directe », pas une copie.
@@ -532,7 +532,11 @@ test('LE TEST QUI COMPTE : le releve suit les reglages du titulaire — decoche,
   const tard = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'Offline', decisionReleve: { envoyer: 'plus_tard', a: A } })
   await tard.mod.dispatchBookingChanges({})
   assert.strictEqual(tard.etat.appels.notifHote, 0, 'rien ne part pendant les heures calmes')
-  assert.deepStrictEqual(tard.etat.releves, [['decision', 'u1'], ['differer', '77', A]])
+  // Le contrat complet : le compte, la reservation, le bien, le provider, et le sejour lu dans le cœur.
+  assert.deepStrictEqual(tard.etat.releves, [
+    ['decision', 'u1', { arrivee: '2026-09-01', depart: '2026-09-05' }],
+    ['differer', 'u1', '77', 'uuid-channex', 'channex', A]
+  ])
   assert.deepStrictEqual(tard.etat.notifications[0].exclusions, { u1: ['email'] })
   // La file en panne ne rend pas muet : le releve part tout de suite.
   const panne = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'Offline', decisionReleve: { envoyer: 'plus_tard', a: A }, fileEnPanne: true })
