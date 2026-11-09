@@ -182,10 +182,11 @@ const ATTENDU = {
   // avec sa page (lot 4, 4a). Mesure AVANT en production le meme jour, sur
   // l'ancienne pop-up : 5 appels `/api` (dont `/api/yield-evenements` DEUX
   // fois) et 10 appels Supabase directs. Apres : UN appel d'ecran, aussi pour
-  // changer de logement. Les gestes (etape 3) passeront par
-  // `/api/yield-evenements` et s'ajouteront ici, nommes.
+  // changer de logement. Les gestes (etape 3, meme jour) passent par
+  // `/api/yield-evenements` — jamais au chargement.
   'apps/yield/evenements.html': {
-    '/api/ecran/evenements': 1
+    '/api/ecran/evenements': 1,   // l'ecran en un appel (et sa relecture apres un geste)
+    '/api/yield-evenements': 1    // les GESTES seulement : PUT (simuler, confirmer), PATCH (zone, crans d'avant)
   }
 }
 

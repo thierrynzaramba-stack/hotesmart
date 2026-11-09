@@ -10,8 +10,10 @@
 <link rel="stylesheet" href="/shared/theme.css">
 <link rel="stylesheet" href="/shared/ui.css">
 <link rel="stylesheet" href="/shared/yield-evenements.css">
-<!-- PAGE « CE QUI FAIT BOUGER VOS PRIX » — lot 4 du chantier, sous-lot 4a,
-     étape 2 : LECTURE SEULE. Spec : docs/specs/spec-yf-ecran-evenements.md.
+<!-- PAGE « CE QUI FAIT BOUGER VOS PRIX » — lot 4 du chantier, sous-lot 4a :
+     étape 2 (la lecture) et étape 3 (les gestes : choisir des nuits, leur
+     donner un niveau ou les remettre en automatique, la zone + / −, retirer
+     les crans d'avant). Spec : docs/specs/spec-yf-ecran-evenements.md.
      Dessin : docs/maquettes/evenements/maquette-evenements.html.
      ⚠ CETTE ADRESSE ÉTAIT UNE REDIRECTION vers la pop-up « Quand vos prix
      bougent » de Prédiction de prix (22 septembre 2026). Décision Q1 de
@@ -19,7 +21,8 @@
      pop-up reste en service, par le menu, jusqu'à la fin du lot 4 (4d) : les
      menus (components/sidebar.js, pages/calendrier.html) la visent
      directement, ils ne passent pas par cette adresse.
-     ⚠ UN APPEL AU CHARGEMENT : /api/ecran/evenements (tests/budget-ecran.test.js).
+     ⚠ UN APPEL AU CHARGEMENT : /api/ecran/evenements (tests/budget-ecran.test.js) ;
+     les gestes écrivent sur /api/yield-evenements (PUT, PATCH).
      RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
 <body>
@@ -83,15 +86,22 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte } from '/shared/compte-courant.js'
 import { lire as lireCache, ecrire as ecrireCache, oublier as oublierCache } from '/shared/cache-ecran.js'
 import { motif } from '/shared/yield-motifs.js'
-import { indexerNuits, rendreLegende, rendreFrise, rendreListe, jourLongPar, pourLeCache } from '/shared/yield-evenements-rendu.js'
+import {
+  indexerNuits, rendreLegende, rendreFrise, rendreListe, jourLongPar, pourLeCache, idEvenement, positionsParDate,
+  selectionTout, operationsPourNiveau, operationsPourRetrait, operationsPourLigne, phraseEnregistre, etiquetteNiveau,
+  libellePosition, largeurAffichee, POSITIONS_PAR_GESTE, ID_SANS_EVENEMENT
+} from '/shared/yield-evenements-rendu.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
 const $ = (sel) => document.querySelector(sel)
 
-// ⚠ LE SEUL ENDPOINT DE LA PAGE, en lecture (étape 2). Les gestes viendront à
-// l'étape 3, sur `PUT` / `PATCH /api/yield-evenements`.
+// ⚠ DEUX ENDPOINTS, ET UN SEUL AU CHARGEMENT (tests/budget-ecran.test.js) :
+// l'écran se lit en un appel ; les gestes (étape 3) écrivent sur
+// `PUT` / `PATCH /api/yield-evenements`, avec ses gardes d'écriture
+// (`reglages: write`) — masquer les gestes ne protège rien, le 403 si.
 const ECRAN = '/api/ecran/evenements'
+const ECRITURE = '/api/yield-evenements'
 const CACHE = 'yield-evenements'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -113,6 +123,24 @@ async function appelAPI (url) {
   return data
 }
 
+// L'écriture : même jeton relu, même compte. Elle NE LÈVE PAS sur un refus —
+// un 409 porte la nouvelle confirmation, un 503 ce qui est déjà écrit ; seule
+// une panne réseau lève.
+async function ecrire (methode, corps) {
+  let jeton = null
+  try {
+    const { data } = await supabase.auth.getSession()
+    jeton = (data && data.session && data.session.access_token) || null
+  } catch { /* pas de session : le serveur répondra 401 */ }
+  const res = await fetch(ECRITURE, {
+    method: methode,
+    headers: { 'Content-Type': 'application/json', ...(jeton ? { Authorization: `Bearer ${jeton}` } : {}), ...enteteCompte() },
+    body: JSON.stringify(corps)
+  })
+  const data = await res.json().catch(() => ({}))
+  return { ok: res.ok, status: res.status, data }
+}
+
 const fmt = {
   t,
   money: (n) => I18n.money(n, 'EUR'),
@@ -128,7 +156,28 @@ const jourLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 // ─── État de la page ────────────────────────────────────────────────────────
 // `seq` : le numéro de la dernière lecture demandée. Une réponse plus ancienne
 // est IGNORÉE — sinon passer vite de A à B puis à C peindrait B sous C.
-const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: null, moi: null, compte: null, bienVoulu: null, biens: [], seq: 0, depuisCache: false }
+const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: null, moi: null, compte: null, bienVoulu: null, biens: [], seq: 0, depuisCache: false,
+  // Les gestes (étape 3) : les nuits choisies dans l'événement ouvert, le geste
+  // en cours (calcul → confirmer → envoi), le dernier message, et `occupe`
+  // tant qu'une écriture est partie — un seul geste à la fois.
+  choix: new Set(), geste: null, message: null, occupe: false, cransConfirmer: null,
+  // `perime` : une écriture a réussi et l'écran ne l'a pas encore relue. Les
+  // lignes affichées sont alors celles d'AVANT : aucun geste ne part dessus.
+  perime: false }
+
+// ⚠ RÉGLER EXIGE UNE RÉPONSE FRAÎCHE DU SERVEUR : un écran peint depuis le cache
+// n'a ni l'état des nuits, ni la certitude des droits ni des lignes posées.
+const peutRegler = () => !!(etat.data && etat.data.droits_ecriture && !etat.depuisCache && !etat.perime && Array.isArray(etat.data.evenements))
+
+// Tout ce qui tient à l'événement ouvert s'oublie quand on en change.
+function oublierGestes () {
+  etat.choix = new Set()
+  etat.geste = null
+  etat.message = null
+  etat.cransConfirmer = null
+}
+
+const evenementOuvert = () => (etat.data && etat.ouvert ? (etat.data.evenements || []).find(e => idEvenement(e) === etat.ouvert) || null : null)
 
 function peindreSelecteur () {
   const sel = $('[data-bind="bien"]')
@@ -188,12 +237,16 @@ function peindre () {
   $('[data-bind="legende"]').innerHTML = rendreLegende(d.niveaux, d.niveaux_non_calculables, fmt)
   $('[data-bind="frise"]').innerHTML = rendreFrise(d, etat.idx, etat.ouvert, fmt)
   for (const b of document.querySelectorAll('[data-filtre]')) b.setAttribute('aria-pressed', String(b.dataset.filtre === etat.filtre))
-  $('[data-bind="liste"]').innerHTML = rendreListe(d, etat.idx, { filtre: etat.filtre, ouvert: etat.ouvert, nuit: etat.nuit }, fmt, jourLong)
+  $('[data-bind="liste"]').innerHTML = rendreListe(d, etat.idx, {
+    filtre: etat.filtre, ouvert: etat.ouvert, nuit: etat.nuit, ecrire: peutRegler(), choix: etat.choix,
+    geste: etat.geste, message: etat.message, occupe: etat.occupe, cransConfirmer: etat.cransConfirmer
+  }, fmt, jourLong)
 }
 
 function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
   etat.data = d
   etat.depuisCache = depuisCache
+  if (!depuisCache) etat.perime = false
   etat.idx = indexerNuits(d && d.nuits)
   const age = $('[data-bind="age"]')
   age.hidden = !depuisCache
@@ -233,6 +286,7 @@ async function charger () {
       etat.bienVoulu = null
       etat.ouvert = null
       etat.nuit = null
+      oublierGestes()
       // ⚠ L'ÉCRAN DU LOGEMENT REFUSÉ S'EFFACE AVANT LA RELECTURE (re-review de
       // l'étape 2) : sinon, si la relecture échoue, il restait affiché comme
       // « dernières données connues » — celles d'un logement que le serveur
@@ -271,14 +325,201 @@ function rendreLeFocus (attr, valeur, dansFrise) {
   if (el && el.focus) el.focus()
 }
 
+// ─── Les gestes (étape 3) ───────────────────────────────────────────────────
+// Spec §4 : la page CHOISIT des nuits, le serveur ÉCRIT des positions. Chaque
+// geste passe par `simuler` (« N nuits vont changer de prix ») puis par
+// `confirme: { nuits }` ; si le nombre a changé entre-temps, le serveur rend
+// 409 avec le nouveau compte, et la page redemande.
+
+const lignesPosees = () => (etat.data && etat.data.reglages_position && etat.data.reglages_position.lignes) || []
+
+function erreurDeGeste (r) {
+  if (!r) return t('yfe.err_reseau')
+  const code = r.data && r.data.error
+  if (r.status === 401 || r.status === 403) return t('yfe.err_refus')
+  if (code === 'geste_concurrent' || code === 'conflit_compte') return t('yfe.err_concurrent')
+  if (code === 'trop_de_positions') return t('yfe.err_trop', { max: POSITIONS_PAR_GESTE })
+  // ⚠ ARRÊTÉ EN ROUTE : ce qui est déjà écrit se dit, et l'écran se relit.
+  if (code === 'ecriture_impossible' && Array.isArray(r.data.ecrites)) return t('yfe.err_en_route', { n: r.data.ecrites.length })
+  if (code === 'simulation_impossible') return t('yfe.err_simulation')
+  return t('yfe.err_ecriture')
+}
+
+// ⚠ UN GESTE NE VAUT QUE POUR LE LOGEMENT QUI L'A VU NAÎTRE : une réponse qui
+// revient après un changement de logement, ou après un autre geste, s'ignore.
+const toujours = (g) => etat.geste === g && !!etat.data && etat.data.bien === g.bien
+
+function focusSur (selecteur) {
+  const el = document.querySelector(selecteur)
+  if (el && el.focus) el.focus()
+}
+
+async function lancerGeste (ev, source, libelle, operations) {
+  if (etat.occupe || !peutRegler()) return
+  const bien = etat.data.bien
+  etat.message = null
+  if (!operations.length) { etat.geste = { ev, source, etat: 'rien', libelle, bien }; peindre(); focusSur('[data-geste-annuler]'); return }
+  if (operations.length > POSITIONS_PAR_GESTE) {
+    etat.geste = { ev, source, etat: 'erreur', libelle, bien, message: t('yfe.err_trop', { max: POSITIONS_PAR_GESTE }) }
+    peindre(); focusSur('[data-geste-annuler]'); return
+  }
+  const g = { ev, source, etat: 'calcul', libelle, operations, bien }
+  etat.geste = g
+  etat.occupe = true
+  peindre()
+  let r = null
+  try { r = await ecrire('PUT', { bien, positions: operations, simuler: true }) } catch (e) { logger.error('Événements', e && e.message, e) }
+  etat.occupe = false
+  if (!toujours(g)) { peindre(); return }
+  if (r && r.ok && r.data && r.data.confirmation) { g.etat = 'confirmer'; g.apercu = r.data } else { g.etat = 'erreur'; g.message = erreurDeGeste(r) }
+  peindre()
+  focusSur(g.etat === 'confirmer' ? '[data-geste-appliquer]' : '[data-geste-annuler]')
+}
+
+async function appliquerGeste () {
+  const g = etat.geste
+  if (!g || g.etat !== 'confirmer' || etat.occupe || !peutRegler()) return
+  g.etat = 'envoi'
+  etat.occupe = true
+  peindre()
+  let r = null
+  try {
+    r = await ecrire('PUT', { bien: g.bien, positions: g.operations, confirme: { nuits: g.apercu.confirmation.nuits } })
+  } catch (e) { logger.error('Événements', e && e.message, e) }
+  if (!toujours(g)) { etat.occupe = false; peindre(); return }
+  if (r && r.ok) {
+    etat.geste = null
+    etat.choix = new Set()
+    etat.message = { ev: g.ev, texte: phraseEnregistre(r.data, fmt) }
+    etat.perime = true
+    // ⚠ OCCUPÉ JUSQU'À LA RELECTURE : sinon un second geste partirait sur les
+    // lignes d'avant celui-ci.
+    await charger()
+    etat.occupe = false
+    peindre()
+    return
+  }
+  etat.occupe = false
+  // Le compte a changé entre l'annonce et le clic : on redemande, avec le nouveau.
+  if (r && r.status === 409 && r.data && r.data.error === 'a_confirmer' && r.data.confirmation) {
+    g.etat = 'confirmer'
+    g.apercu = r.data
+    g.relance = true
+    peindre()
+    focusSur('[data-geste-appliquer]')
+    return
+  }
+  g.etat = 'erreur'
+  g.message = erreurDeGeste(r)
+  peindre()
+  focusSur('[data-geste-annuler]')
+  // ⚠ UN GESTE CONCURRENT OU ARRÊTÉ EN ROUTE A CHANGÉ LES LIGNES : on relit,
+  // pour que l'écran montre ce qui est réellement posé.
+  if (r && (r.status === 409 || (r.data && Array.isArray(r.data.ecrites) && r.data.ecrites.length))) { etat.perime = true; await charger() }
+}
+
+// La zone affichée (+ / −) et le retrait des crans d'avant : `PATCH`, sans
+// simulation — la largeur ne change aucun prix ; le retrait des crans se
+// confirme dans la carte avant de partir.
+async function reglerSegment (ev, corps, { dire = false } = {}) {
+  if (etat.occupe || !peutRegler()) return
+  const bien = etat.data.bien
+  etat.occupe = true
+  etat.message = null
+  etat.geste = null
+  peindre()
+  let r = null
+  try { r = await ecrire('PATCH', { bien, ...corps }) } catch (e) { logger.error('Événements', e && e.message, e) }
+  if (!etat.data || etat.data.bien !== bien) { etat.occupe = false; peindre(); return }
+  etat.cransConfirmer = null
+  if (r && r.ok) {
+    if (dire) etat.message = { ev, texte: t('yfe.enregistre') }
+    etat.perime = true
+    await charger()
+    etat.occupe = false
+    peindre()
+    return
+  }
+  etat.occupe = false
+  etat.message = { ev, texte: erreurDeGeste(r) }
+  peindre()
+}
+
+function surGeste (cible) {
+  const e = evenementOuvert()
+  const tout = cible.closest('[data-tout]')
+  if (tout) {
+    if (!e || etat.occupe) return true
+    etat.choix = new Set(selectionTout(e, tout.dataset.tout))
+    etat.geste = null
+    etat.message = null
+    peindre()
+    rendreLeFocus('data-tout', tout.dataset.tout, false)
+    return true
+  }
+  if (cible.closest('[data-choix-vider]')) {
+    if (etat.occupe) return true
+    etat.choix = new Set()
+    etat.geste = null
+    peindre()
+    return true
+  }
+  const niv = cible.closest('[data-niveau]')
+  if (niv) {
+    if (e) lancerGeste(etat.ouvert, 'choix', t('yfe.geste_niveau', { n: etat.choix.size, niveau: etiquetteNiveau(niv.dataset.niveau, t) }), operationsPourNiveau(e, etat.choix, niv.dataset.niveau, lignesPosees()))
+    return true
+  }
+  if (cible.closest('[data-auto]')) {
+    if (e) lancerGeste(etat.ouvert, 'choix', t('yfe.geste_auto', { n: etat.choix.size }), operationsPourRetrait(e, etat.choix, lignesPosees()))
+    return true
+  }
+  const ret = cible.closest('[data-retirer-ligne]')
+  if (ret) {
+    const l = lignesPosees().find(x => String(x.id) === ret.dataset.retirerLigne)
+    const carte = ret.closest('[data-ev]')
+    if (l) lancerGeste(carte ? carte.dataset.ev : ID_SANS_EVENEMENT, 'ligne', t('yfe.geste_retirer', { quoi: libellePosition(l, t, jourLong) }), operationsPourLigne(l))
+    return true
+  }
+  if (cible.closest('[data-geste-appliquer]')) { appliquerGeste(); return true }
+  if (cible.closest('[data-geste-annuler]')) {
+    if (!etat.occupe) { etat.geste = null; peindre() }
+    return true
+  }
+  const larg = cible.closest('[data-largeur]')
+  if (larg) {
+    if (!e) return true
+    const cote = larg.dataset.largeur === 'avant' ? 'avant' : 'apres'
+    const max = Number.isInteger(etat.data.rayonnement_max) ? etat.data.rayonnement_max : 4
+    const n = largeurAffichee(e)[cote] + (Number(larg.dataset.pas) < 0 ? -1 : 1)
+    if (n >= 0 && n <= max) reglerSegment(etat.ouvert, { segment: e.cle, ['weekends_' + cote]: n })
+    return true
+  }
+  if (cible.closest('[data-crans-retirer]')) {
+    if (!etat.occupe) { etat.cransConfirmer = etat.ouvert; peindre(); focusSur('[data-crans-confirmer]') }
+    return true
+  }
+  if (cible.closest('[data-crans-annuler]')) {
+    if (!etat.occupe) { etat.cransConfirmer = null; peindre() }
+    return true
+  }
+  if (cible.closest('[data-crans-confirmer]')) {
+    if (e && e.reglage_d_avant) reglerSegment(etat.ouvert, { segment: e.reglage_d_avant.cle, crans: null }, { dire: true })
+    return true
+  }
+  return false
+}
+
 document.addEventListener('click', (ev) => {
   const o = ev.target.closest && ev.target.closest('[data-ouvrir]')
   if (o) {
     const id = o.dataset.ouvrir
     const depuisFrise = !!o.closest('[data-bind="frise"]')
     const ouvrir = etat.ouvert !== id
+    // ⚠ UN GESTE EN VOL GARDE SON ÉVÉNEMENT : on n'en ouvre pas un autre sous lui.
+    if (etat.occupe) return
     etat.ouvert = ouvrir ? id : null
     etat.nuit = null
+    oublierGestes()
     // La frise ouvre l'événement de la barre, quel que soit le filtre.
     if (depuisFrise && ouvrir) etat.filtre = 'tous'
     peindre()
@@ -291,11 +532,24 @@ document.addEventListener('click', (ev) => {
   }
   const nuit = ev.target.closest && ev.target.closest('[data-nuit]')
   if (nuit) {
-    etat.nuit = etat.nuit === nuit.dataset.nuit ? null : nuit.dataset.nuit
+    const date = nuit.dataset.nuit
+    const e = evenementOuvert()
+    // Pour qui peut régler, une nuit qui a une position se CHOISIT ; le détail
+    // suit la dernière touchée. Sinon, toucher une nuit ouvre son détail.
+    if (peutRegler() && e && e.actif && positionsParDate(e).has(date)) {
+      if (etat.occupe) return
+      if (etat.choix.has(date)) etat.choix.delete(date); else etat.choix.add(date)
+      etat.nuit = date
+      etat.geste = null
+      etat.message = null
+    } else {
+      etat.nuit = etat.nuit === date ? null : date
+    }
     peindre()
-    rendreLeFocus('data-nuit', nuit.dataset.nuit, false)
+    rendreLeFocus('data-nuit', date, false)
     return
   }
+  if (ev.target.closest && surGeste(ev.target)) return
   const f = ev.target.closest && ev.target.closest('[data-filtre]')
   if (f) { etat.filtre = f.dataset.filtre; peindre() }
 })
@@ -303,6 +557,7 @@ $('[data-bind="bien"]').addEventListener('change', (ev) => {
   etat.bienVoulu = ev.target.value || null
   etat.ouvert = null
   etat.nuit = null
+  oublierGestes()
   const u = new URL(location.href)
   if (etat.bienVoulu) u.searchParams.set('bien', etat.bienVoulu); else u.searchParams.delete('bien')
   try { history.replaceState(null, '', u.pathname + u.search) } catch { /* sans historique */ }

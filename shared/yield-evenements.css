@@ -79,7 +79,12 @@
   font-size: var(--fs-caption); letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--muted); font-weight: var(--fw-semibold);
 }
-.yfe-ev { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--surface); }
+.yfe-ev { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; overflow: clip; background: var(--surface); }
+/* ⚠ `clip` ET PAS SEULEMENT `hidden` (étape 3) : `hidden` fait de la carte un
+   conteneur de défilement, et l'éditeur collé en bas d'écran (`sticky`) s'y
+   collerait à une carte qui ne défile pas — donc nulle part. `hidden` reste en
+   repli pour un navigateur qui ignore `clip` : l'éditeur y est seulement en
+   place, sous le calendrier. */
 .yfe-ev--ouvert { border-color: var(--ink); }
 .yfe-ev__tete {
   width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
@@ -106,6 +111,39 @@
 }
 .yfe-detail__date { font-weight: var(--fw-semibold); }
 .yfe-sans-nuit ul { margin: 6px 0 0; padding-inline-start: 18px; font-size: var(--fs-small); color: var(--muted); }
+
+/* ---------- Les gestes (étape 3) ---------- */
+.yfe-gestes { display: flex; flex-direction: column; gap: var(--gap-s); }
+.yfe-zone-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s) var(--gap-l); }
+.yfe-larg { display: inline-flex; align-items: center; gap: 6px; }
+.yfe-larg__btn { font-size: var(--fs-body); font-weight: var(--fw-bold); }
+.yfe-larges { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
+/* ⚠ L'ÉDITEUR RESTE EN BAS D'ÉCRAN tant que la carte est visible (spec §9 :
+   « l'éditeur s'ouvre en bas d'écran ») : on choisit des nuits en haut du
+   calendrier, on règle sans remonter ni descendre. */
+.yfe-editeur {
+  position: sticky; bottom: 0; z-index: 2;
+  display: flex; flex-direction: column; gap: var(--gap-s);
+  padding: 12px; border: 1px solid var(--ink); border-radius: var(--radius-tile);
+  background: var(--surface); box-shadow: var(--shadow-sheet);
+}
+.yfe-editeur__choix { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s); margin: 0; }
+.yfe-editeur__niveaux { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Une pastille de niveau est un bouton : sa couleur est celle du niveau
+   (règle 1 : la pastille, jamais la ligne), son chiffre est écrit (règle 2). */
+.yfe-editeur__niv { border: 0; cursor: pointer; padding: 8px 12px; font-size: var(--fs-small); min-height: 40px; }
+.yfe-editeur__niv:disabled, .yfe-gestes .btn:disabled, .yfe-geste .btn:disabled, .yfe-retirer:disabled { opacity: .55; cursor: default; }
+.yfe-geste {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-tile); background: var(--surface-2);
+}
+.yfe-geste__quoi { font-weight: var(--fw-semibold); margin: 0; }
+.yfe-geste p { margin: 0; }
+.yfe-geste__actions { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
+.yfe-message { font-size: var(--fs-small); font-weight: var(--fw-semibold); margin: 0; }
+.yfe-crans { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s); }
+.yfe-crans p { margin: 0; }
+.yfe-retirer { margin-inline-start: 6px; padding: 2px 10px; min-height: 0; height: auto; font-size: var(--fs-caption); }
 
 /* ---------- Le calendrier d'un événement ---------- */
 .yfe-cal { display: flex; flex-direction: column; gap: 6px; }
@@ -146,6 +184,10 @@
   .yfe-cal__tete, .yfe-cal__semaine { grid-template-columns: repeat(7, 150px); width: max-content; }
 }
 @media (max-width: 720px) {
+  /* La barre du bas (shared/ui.css, `.bottombar`) couvre le bas de l'écran
+     du téléphone : l'éditeur se colle AU-DESSUS d'elle. */
+  .yfe-editeur { bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .yfe-editeur__niv { flex: 1 1 calc(50% - 6px); }
   .yfe-cal__sep { display: block; font-size: 11px; color: var(--muted); font-weight: var(--fw-semibold); text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 2px 0; }
   .yfe-frise { padding: 12px; }
   /* Treize mois sur 350 px : un sur deux, sinon les noms se chevauchent. */

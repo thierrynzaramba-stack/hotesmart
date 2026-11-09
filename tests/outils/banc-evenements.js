@@ -138,6 +138,9 @@ function i18nFr () {
  * @param o.url     adresse de la page
  * @param o.cache   données à poser dans le cache de l'écran avant l'amorce
  * @param o.compteDelegue  si vrai, `enteteCompte()` rend un X-Compte
+ * @param o.ecriture (methode, corps, w) → { status, corps } — `PUT` / `PATCH
+ *                   /api/yield-evenements` (étape 3). Sans elle, l'écriture
+ *                   répond 404 : un test qui ne l'attend pas le verra.
  */
 async function monter (o = {}) {
   const html = lire('apps/yield/evenements.html')
@@ -146,8 +149,13 @@ async function monter (o = {}) {
   const w = dom.window
   const journal = { fetch: [], erreurs: [] }
   w.fetch = async (url, opts = {}) => {
-    const entree = { url: String(url), entetes: opts.headers || {} }
+    const entree = { url: String(url), entetes: opts.headers || {}, methode: opts.method || 'GET', corps: opts.body ? JSON.parse(opts.body) : null }
     journal.fetch.push(entree)
+    if (entree.url === '/api/yield-evenements' && o.ecriture) {
+      const r = await o.ecriture(entree.methode, entree.corps, w)
+      const status = r && r.status ? r.status : 200
+      return { ok: status >= 200 && status < 300, status, json: async () => (r && r.corps) || {} }
+    }
     if (entree.url.startsWith('/api/ecran/evenements')) {
       let d
       // `w` est passé : un test peut regarder l'écran AU MOMENT de l'appel,
@@ -196,7 +204,8 @@ async function monter (o = {}) {
   })
   const module = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
   const code = module
-    .replace(/^import [^\n]*from [^\n]*$/gm, '')
+    // Un import peut tenir sur plusieurs lignes : `[^'"]` traverse les retours.
+    .replace(/^import\s[^'"]*?from\s*['"][^'"]+['"]\s*$/gm, '')
     .replace(/^init\(\)\.catch\(/m, 'window.__amorce = init().catch(')
   w.eval(code)
   const attendre = () => new Promise(r => setTimeout(r, 0))
