@@ -506,7 +506,7 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
    facturation, étape 1 de sa spec), avec ses lectures côté serveur (§6).
 2. **Le socle** : migrations (`charges`, `charges_resume`,
    `charges_ota_supprimees`, `charges_adresses`), bucket privé, writer
-   (avec la mise à jour transactionnelle du résumé), lecture IA, endpoint
+   (le résumé tenu par trigger), lecture IA, endpoint
    d'écriture (créer, lire, valider, trancher un signal, supprimer, URL
    d'envoi et de consultation), et **le cron dédié** `api/cron-charges.js`
    (recalcul quotidien du résumé, effacement des `envoi` de plus de 24 h).
@@ -559,8 +559,9 @@ les faire lire par l'IA. Le modèle du §6 est choisi pour que ce lot n'ait rien
    donnée **non urgente**, servie par `charges_resume` que l'endpoint ne fait
    que lire (une somme en base sur les cellules du jour), avec l'heure du
    calcul affichée. Mais une facture lue doit y compter tout de suite (Q4) :
-   **le writer unique recalcule, dans une fonction SQL transactionnelle, la
-   cellule d'avant et la cellule d'après** de chaque charge écrite (une
+   **un trigger (`charges_resume_trg`, dans la même transaction que
+   l'écriture) recalcule la cellule d'avant et la cellule d'après** de chaque
+   charge écrite — aucun writer ne peut l'oublier (une
    validation qui change d'entité, de bien ou de jour la déplace ; un
    regroupement ou une suppression touche aussi les autres membres du
    groupe) — recalcul, jamais incrément. Le cron dédié recalcule tout une
