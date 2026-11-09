@@ -477,6 +477,15 @@ Cette alerte suit désormais le mode urgence ; seule la décision 7 garde
 | Q27 | « Évaluation du voyageur à faire », trouvée à l'inventaire | Quinzième événement (o), groupe Avis, notification et e-mail, non urgent |
 | Q28 | L'e-mail du « Nouveau message d'un voyageur » | Décoché par défaut pour cet événement seul — exception à Q23 |
 
+**Décisions du 9 novembre (2c-3, §16.3) :**
+
+| | Question | Décision |
+|---|---|---|
+| Q29 | Une liste qui porte l'e-mail ou le numéro d'un MEMBRE (pas du titulaire) | Comme le titulaire si ses droits couvrent le domaine et le bien : le canal se coche dans ses réglages, pas de contact. Sinon il reste un contact libre — personne ne perd une alerte |
+| Q30 | Se désinscrire, pour un contact libre | Un lien « Ne plus recevoir ces alertes » dans chaque e-mail ; un clic le retire, et le titulaire le voit dans Réglages. Rien dans le SMS |
+| Q31 | La langue d'un contact libre | Celle du titulaire |
+| Q32 | Le bouton « Tester » du bloc Alertes | Gardé : un essai par contact, au plus une fois par jour et par contact (pas de relais vers une adresse saisie) |
+
 ## 14. Découpage proposé, et ce que le lot ne fait pas
 
 **Découpage proposé** (un fil, une branche par sous-lot, chacun reviewé et
@@ -729,6 +738,11 @@ Les anciens envois (`sendAlertNotifications`, les SMS de `cron-overbooking`,
 - **Les réglages de GuestFlow restent dans `agent_alert_config`** : le délai
   d'alerte et la sourdine (`delais`) appartiennent à Messages. Seules les
   listes de destinataires déménagent.
+
+- **Décisions du 9 novembre** (Q29 à Q32, §13) : un membre listé reçoit par
+  ses réglages si ses droits suffisent, sinon il reste contact ; un lien de
+  désinscription dans chaque e-mail ; la langue du titulaire ; un essai par
+  contact, une fois par jour au plus.
 
 ### 16.4 Le bloc « Alertes » du tiroir de Messages
 
