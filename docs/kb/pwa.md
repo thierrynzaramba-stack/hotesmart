@@ -532,32 +532,45 @@ s'arrête jamais pour une notification).
 
 | Événement | Émetteur | Sujet, écran |
 |---|---|---|
-| b Urgence de l'IA | `lib/cron-classify.js`, escalade `intervention` | `urgence:<id>`, `/pages/messages?conv=<id>` |
-| c Information manquante | idem, escalade `info_unknown` ; et l'arrêt de l'agent au plafond d'appels | `info:<id>`, idem |
-| d Réponse à valider | idem, proposition posée en validation ; et la réponse automatique non délivrée | `brouillon:<id>`, idem |
-| e Nouveau message | `lib/record-message.js`, le writer unique de `messages` | `msg:<id>` (sonne), idem |
-| k Pause automatique | `lib/cron-alerting.js`, coupe-circuit | `pause:<ref>`, `/pages/messages?volet=ia` |
+| b Urgence de l'IA | `lib/cron-classify.js`, escalade `intervention` (si elle s'est écrite) | `conv:<id>`, `/pages/messages?conv=<id>` |
+| c Information manquante | idem, escalade `info_unknown` ; et l'arrêt de l'agent au plafond d'appels | `conv:<id>`, idem |
+| d Réponse à valider | idem, proposition posée en validation ; réponse automatique non délivrée ; et `lib/guestflow/brouillons-dus.js` quand une réponse différée est rendue à l'hôte (non délivrée, annulée par une garde, vide) | `conv:<id>`, idem |
+| e Nouveau message | `lib/record-message.js`, le writer unique de `messages` | `conv:<id>`, idem |
+| k Pause automatique | `lib/cron-alerting.js`, coupe-circuit | `pause:<ref>`, `/pages/messages?conv=<id>&volet=ia` |
 
 **Les règles, et pourquoi :**
-1. **Le bien et le prénom, jamais le texte** (spec §7, Q6) — ni le message du
-   voyageur, ni le résumé de l'IA : le module ne les reçoit même pas.
-2. **e part du writer unique**, après une **insertion réelle** d'un message de
+1. **UNE notification par conversation** (décision de Thierry du 9 novembre
+   2026) : b, c, d et e portent le **même sujet**, `conv:<réservation>`. La plus
+   récente remplace l'autre — « Nouveau message de Marie », puis « Réponse à
+   valider » à sa place — et **sonne** : chacune dit quelque chose de neuf
+   (l'anti-rejeu de l'agent garantit qu'un appel = un contenu neuf). Dans la
+   file (heures calmes), la plus récente remplace aussi la ligne qui attendait.
+2. **Le bien et le prénom, jamais le texte** (spec §7, Q6) — ni le message du
+   voyageur, ni le résumé de l'IA : le module ne les reçoit même pas. « Voyageur »
+   (le repli de la messagerie sans nom) n'est pas un prénom : la phrase dit
+   « un voyageur » dans la langue de la personne.
+3. **e part du writer unique**, après une **insertion réelle** d'un message de
    voyageur : jamais un doublon, jamais un écho réconcilié, jamais un sortant.
    Webhook, import récurrent et e-mail entrant passent tous par là (« le cœur
    d'abord »). **Un message de plus de six heures ne prévient pas** : un import
-   de rattrapage écrit des messages anciens. Un sujet par conversation, qui
-   **sonne** à chaque nouveau message.
-3. **Une escalade complétée réalerte** (le voyageur a réécrit) : la
-   notification remplace la précédente et sonne, comme les listes l'ont
-   toujours fait.
-4. **d n'est envoyé que si la proposition existe vraiment** : une insertion
-   refusée ne prévient personne (et se trace dans le bilan du cron). Le texte
-   dit si la réponse partira seule (délai GuestFlow réglé).
-5. **k au titulaire seul** (domaine `null`), **à la bascule seulement**. L'« e-mail
-   explicatif » que `docs/kb/alertes.md` §3 annonçait n'existait pas dans le
-   code : ligne corrigée.
-6. **Le bien se relit** (`lib/notifications/bien.js`, partagé avec j) : ses deux
-   identifiants et son nom, sur le compte.
+   de rattrapage écrit des messages anciens.
+4. **Ce qui prévient existe** : b, c et d ne partent que si leur tâche s'est
+   écrite (une insertion refusée est rejouée au cycle suivant et prévenait à
+   chaque fois).
+5. **Une réponse différée annoncée « elle partira seule » est suivie** : partie,
+   l'annonce qui attend en file est **retirée** (seulement elle : un nouveau
+   message arrivé depuis reste) ; rendue à l'hôte, « Réponse à valider » la
+   remplace.
+6. **k au titulaire seul** (domaine `null`), **à la bascule seulement**, sur le
+   volet des réglages de l'IA **du bien en pause** (le fil qui l'a déclenchée).
+   L'« e-mail explicatif » que `docs/kb/alertes.md` §3 annonçait n'existait pas
+   dans le code : ligne corrigée.
+7. **Le bien se relit** (`lib/notifications/bien.js`, partagé avec j) : ses deux
+   identifiants et son nom, sur le compte ; un bien archivé puis recréé sous la
+   même référence cède la place au bien actif.
+8. **Un émetteur léger reste léger** : le client de l'appelant descend jusqu'à
+   la lecture des appareils. Sans cela, le webhook chargeait le SDK de l'IA pour
+   une notification.
 
 **Limites connues :**
 - **Le délai d'alerte « information manquante » de GuestFlow** (`delais.alerte_info`,
@@ -565,6 +578,10 @@ s'arrête jamais pour une notification).
   code** — c'est le lot 3 du chantier délai, au fil messagerie. c part donc tout
   de suite, comme les listes aujourd'hui ; c'est l'endroit où ce lot branchera
   son délai.
+- **La file ne se purge pas quand l'hôte agit** depuis l'écran : une ligne b, c, d
+  ou e peut arriver périmée en fin de plage (l'hôte a déjà répondu).
+- **Les fils sans réservation d'un même bien partagent leur notification**
+  (`conv:bien:<ref>`) : rare.
 - **e ajoute le point d'envoi au chemin du webhook** : quelques lectures et un
-  envoi par appareil, dans la réponse au partenaire.
+  envoi par appareil, attendus avant de répondre au partenaire.
 - **Jusqu'au 2c-3, les listes d'`agent_alert_config` reçoivent aussi b et c.**

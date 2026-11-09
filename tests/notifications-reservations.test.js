@@ -109,15 +109,17 @@ function preparer ({ dejaAlerte = false, bienLisible = true } = {}) {
         eq (c, v) { f[c] = v; return chain },
         maybeSingle () {
           if (table === 'agent_tasks') return Promise.resolve({ data: dejaAlerte ? { id: 't1' } : null, error: null })
-          if (table === 'properties') {
-            etat.lecturesBien.push({ ...f })
-            if (!bienLisible) return Promise.resolve({ data: null, error: { message: 'panne' } })
-            if (f.user_id !== COMPTE) return Promise.resolve({ data: null, error: null })
-            if (f.provider_property_id === '209413' || f.id === UUID_BIEN) return Promise.resolve({ data: { id: UUID_BIEN, name: 'La bulle', provider_property_id: '209413' }, error: null })
-            if (f.provider_property_id === REF_CHANNEX || f.id === UUID_COLOMIERS) return Promise.resolve({ data: { id: UUID_COLOMIERS, name: 'Colomiers', provider_property_id: REF_CHANNEX }, error: null })
-            return Promise.resolve({ data: null, error: null })
-          }
           return Promise.resolve({ data: null, error: null })
+        },
+        // Le bien se lit en liste (lib/notifications/bien.js : plusieurs lignes possibles).
+        limit () {
+          if (table !== 'properties') return Promise.resolve({ data: [], error: null })
+          etat.lecturesBien.push({ ...f })
+          if (!bienLisible) return Promise.resolve({ data: null, error: { message: 'panne' } })
+          if (f.user_id !== COMPTE) return Promise.resolve({ data: [], error: null })
+          if (f.provider_property_id === '209413' || f.id === UUID_BIEN) return Promise.resolve({ data: [{ id: UUID_BIEN, name: 'La bulle', provider_property_id: '209413' }], error: null })
+          if (f.provider_property_id === REF_CHANNEX || f.id === UUID_COLOMIERS) return Promise.resolve({ data: [{ id: UUID_COLOMIERS, name: 'Colomiers', provider_property_id: REF_CHANNEX }], error: null })
+          return Promise.resolve({ data: [], error: null })
         },
         // Aucune configuration d'alerte : l'ancien code envoyait alors l'e-mail de repli.
         single () { return Promise.resolve({ data: null, error: { message: 'aucune' } }) },

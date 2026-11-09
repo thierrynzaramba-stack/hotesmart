@@ -1357,6 +1357,11 @@ L'agent prévient l'hôte et son équipe par le point d'envoi unique
 information manquante à chaque escalade (et à l'arrêt de l'agent au plafond),
 réponse à valider quand une proposition est posée (ou qu'une réponse
 automatique n'a pas été délivrée), nouveau message d'un voyageur depuis
-`lib/record-message.js`, pause automatique depuis le coupe-circuit. Jamais le
-texte du message, seulement le bien et le prénom. Les listes
-d'`agent_alert_config` restent servies jusqu'au lot 2c-3.
+`lib/record-message.js`, pause automatique depuis le coupe-circuit. **Une seule
+notification par conversation** (décision de Thierry du 9 novembre 2026) : la
+plus récente remplace l'autre et sonne. La passe des brouillons différés
+(`lib/guestflow/brouillons-dus.js`) retire l'annonce « elle partira seule » qui
+attend en file quand la réponse est partie, et prévient l'hôte quand elle lui
+est rendue (non délivrée, annulée, vide) ; injectable par `opts.notifications`,
+ne lève jamais. Jamais le texte du message, seulement le bien et le prénom. Les
+listes d'`agent_alert_config` restent servies jusqu'au lot 2c-3.

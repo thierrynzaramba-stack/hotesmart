@@ -103,9 +103,12 @@ test('sans prénom ni nom de bien, les phrases restent françaises : « d’un v
 
 function tablesDeBase () {
   return {
+    // ⚠ L'AUTRE compte EN PREMIER : sans le filtre de compte, c'est lui qu'on lirait.
     properties: [
-      { user_id: COMPTE, id: UUID_BIEN, provider_property_id: 'p1', name: 'La bulle' },
-      { user_id: AUTRE, id: 'uuid-autre', provider_property_id: 'p1', name: 'Bien d\'un autre' }
+      { user_id: AUTRE, id: 'uuid-autre', provider_property_id: 'p1', name: 'Bien d\'un autre' },
+      // Un bien archivé puis recréé sous la même référence : le bien actif gagne.
+      { user_id: COMPTE, id: 'uuid-archive', provider_property_id: 'p1', name: 'Ancienne bulle', archive_le: '2026-10-01T00:00:00Z' },
+      { user_id: COMPTE, id: UUID_BIEN, provider_property_id: 'p1', name: 'La bulle' }
     ],
     bookings_snapshot: [
       { user_id: AUTRE, booking_id: 'b1', snapshot: { firstName: 'Autre', arrival: '2099-01-01', departure: '2099-01-02' } },
@@ -119,24 +122,35 @@ function capte () {
   return { appels, deps: { notifier: async (o) => { appels.push(o); return { ok: true, erreurs: [] } } } }
 }
 
-test('LE TEST QUI COMPTE : une urgence et une information manquante — leur sujet, leur écran, les deux identifiants du bien', async () => {
+test('LE TEST QUI COMPTE : UNE notification par conversation (décision du 9 novembre) — urgence, information, réponse, message : le même sujet, et chacune sonne', async () => {
   const db = fakeSupabase(tablesDeBase())
   const c = capte()
+  const maintenant = Date.now()
+  await ev.notifierMessageVoyageur({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', envoyeLe: new Date(maintenant - 60e3).toISOString(), maintenant, db, deps: c.deps })
   await ev.notifierEscalade({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', type: 'intervention', guestName: 'Marie Dupont', arrival: '2026-11-12', departure: '2026-11-15', db, deps: c.deps })
-  await ev.notifierEscalade({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', type: 'info_unknown', guestName: 'Marie Dupont', rappel: true, db, deps: c.deps })
-  assert.deepStrictEqual(c.appels.map(o => [o.compte, o.code, o.sujet, o.chemin, o.rappel, o.bien, o.donnees]), [
-    [COMPTE, 'urgence_ia', 'urgence:b1', '/pages/messages?conv=b1', false, { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', prenom: 'Marie', arret: false }],
-    [COMPTE, 'info_manquante', 'info:b1', '/pages/messages?conv=b1', true, { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', prenom: 'Marie', arret: false }]
+  await ev.notifierEscalade({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', type: 'info_unknown', guestName: 'Marie Dupont', db, deps: c.deps })
+  await ev.notifierBrouillon({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', guestName: 'Marie', differe: true, db, deps: c.deps })
+  assert.deepStrictEqual(c.appels.map(o => [o.compte, o.code, o.sujet, o.chemin, o.rappel, o.bien]), [
+    [COMPTE, 'message_voyageur', 'conv:b1', '/pages/messages?conv=b1', true, { id: UUID_BIEN, ref: 'p1' }],
+    [COMPTE, 'urgence_ia', 'conv:b1', '/pages/messages?conv=b1', true, { id: UUID_BIEN, ref: 'p1' }],
+    [COMPTE, 'info_manquante', 'conv:b1', '/pages/messages?conv=b1', true, { id: UUID_BIEN, ref: 'p1' }],
+    [COMPTE, 'brouillon_ia', 'conv:b1', '/pages/messages?conv=b1', true, { id: UUID_BIEN, ref: 'p1' }]
   ])
-  assert.deepStrictEqual(c.appels[0].sejour, { arrivee: '2026-11-12', depart: '2026-11-15' })
+  assert.deepStrictEqual(c.appels[1].donnees, { bien: 'La bulle', prenom: 'Marie', arret: false })
+  assert.deepStrictEqual(c.appels[1].sejour, { arrivee: '2026-11-12', depart: '2026-11-15' })
+  assert.deepStrictEqual(c.appels[3].donnees, { bien: 'La bulle', prenom: 'Marie', differe: true, nonDelivree: false })
 })
 
-test('une réponse à valider : différée ou non délivrée, elle le dit', async () => {
+test('« Voyageur » n\'est pas un prénom ; une réservation inconnue n\'ouvre pas un fil au hasard ; l\'identifiant s\'encode', async () => {
   const c = capte()
-  await ev.notifierBrouillon({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', guestName: 'Marie', differe: true, db: fakeSupabase(tablesDeBase()), deps: c.deps })
-  await ev.notifierBrouillon({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', guestName: 'Marie', nonDelivree: true, db: fakeSupabase(tablesDeBase()), deps: c.deps })
-  assert.deepStrictEqual(c.appels.map(o => [o.code, o.sujet, o.donnees.differe, o.donnees.nonDelivree]),
-    [['brouillon_ia', 'brouillon:b1', true, false], ['brouillon_ia', 'brouillon:b1', false, true]])
+  const db = fakeSupabase(tablesDeBase())
+  await ev.notifierEscalade({ compte: COMPTE, propertyId: 'p1', bookingId: 'unknown', type: 'intervention', guestName: 'Voyageur', db, deps: c.deps })
+  await ev.notifierBrouillon({ compte: COMPTE, propertyId: 'p1', bookingId: 'a&b=c/d', guestName: 'Guest', db, deps: c.deps })
+  assert.deepStrictEqual(c.appels.map(o => [o.sujet, o.chemin, o.donnees.prenom]), [
+    ['conv:bien:p1', '/pages/messages', null],
+    ['conv:a&b=c/d', '/pages/messages?conv=a%26b%3Dc%2Fd', null]
+  ])
+  assert.strictEqual(textes.rediger('urgence_ia', 'en', c.appels[0].donnees).corps, 'A guest: the AI flagged an urgent message. Please reply.')
 })
 
 test('LE TEST QUI COMPTE : un nouveau message — récent seulement, prénom et séjour lus dans le cœur DU COMPTE, et il sonne', async () => {
@@ -146,20 +160,26 @@ test('LE TEST QUI COMPTE : un nouveau message — récent seulement, prénom et 
   assert.strictEqual(c.appels.length, 1)
   const o = c.appels[0]
   assert.deepStrictEqual([o.code, o.sujet, o.chemin, o.rappel, o.bien, o.donnees, o.sejour],
-    ['message_voyageur', 'msg:b1', '/pages/messages?conv=b1', true, { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', prenom: 'Marie' }, { arrivee: '2026-11-12', depart: '2026-11-15' }])
+    ['message_voyageur', 'conv:b1', '/pages/messages?conv=b1', true, { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', prenom: 'Marie' }, { arrivee: '2026-11-12', depart: '2026-11-15' }])
+  // La borne des six heures, au plus près : 5 h 50 prévient, 6 h 10 non.
+  await ev.notifierMessageVoyageur({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', envoyeLe: '2026-11-09T04:10:00Z', maintenant, db: fakeSupabase(tablesDeBase()), deps: c.deps })
+  assert.strictEqual(c.appels.length, 2, '5 h 50')
   // Un import de rattrapage écrit des messages anciens : pas de notification.
-  const r = await ev.notifierMessageVoyageur({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', envoyeLe: '2026-11-09T03:00:00Z', maintenant, db: fakeSupabase(tablesDeBase()), deps: c.deps })
-  assert.deepStrictEqual(r, { ok: true, ignore: true, raison: 'message_ancien' })
+  const r = await ev.notifierMessageVoyageur({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', envoyeLe: '2026-11-09T03:50:00Z', maintenant, db: fakeSupabase(tablesDeBase()), deps: c.deps })
+  assert.deepStrictEqual(r, { ok: true, ignore: true, raison: 'message_ancien' }, '6 h 10')
   const r2 = await ev.notifierMessageVoyageur({ compte: COMPTE, propertyId: 'p1', bookingId: 'b1', envoyeLe: 'n importe quoi', maintenant, db: fakeSupabase(tablesDeBase()), deps: c.deps })
   assert.strictEqual(r2.ignore, true)
-  assert.strictEqual(c.appels.length, 1)
+  assert.strictEqual(c.appels.length, 2)
 })
 
-test('la pause automatique : au titulaire, vers le volet des réglages de l\'IA', async () => {
+test('la pause automatique : au titulaire, vers les réglages de l\'IA DU BIEN EN PAUSE (le fil qui l\'a déclenchée)', async () => {
   const c = capte()
-  await ev.notifierPause({ compte: COMPTE, propertyId: 'p1', propertyUuid: UUID_BIEN, nom: 'La bulle', deps: c.deps })
-  assert.deepStrictEqual(c.appels.map(o => [o.code, o.sujet, o.chemin, o.bien, o.donnees]),
-    [['pause_automatique', 'pause:p1', '/pages/messages?volet=ia', { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle' }]])
+  await ev.notifierPause({ compte: COMPTE, propertyId: 'p1', propertyUuid: UUID_BIEN, nom: 'La bulle', bookingId: 'b 1', deps: c.deps })
+  await ev.notifierPause({ compte: COMPTE, propertyId: 'p1', deps: c.deps })
+  assert.deepStrictEqual(c.appels.map(o => [o.code, o.sujet, o.chemin, o.bien, o.donnees]), [
+    ['pause_automatique', 'pause:p1', '/pages/messages?conv=b%201&volet=ia', { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle' }],
+    ['pause_automatique', 'pause:p1', '/pages/messages?volet=ia', { id: undefined, ref: 'p1' }, { bien: null }]
+  ])
 })
 
 test('aucun de ces événements ne lève, même quand le point d\'envoi lève', async () => {
@@ -257,13 +277,22 @@ test('LE TEST QUI COMPTE : une urgence de l\'IA prévient par le point d\'envoi 
   const t = tables()
   const a = charger({ tables: t, messages: fil(), reponse: { type: 'intervention', reason: 'fuite', auto_reply: null, sub_tasks: [] } })
   await a.mod.processChannelPropertyMessages(U, bien, bilan())
-  assert.deepStrictEqual(a.notifs.map(([k, o]) => [k, o.compte, o.propertyId, o.bookingId, o.type, o.rappel]), [['escalade', U, P, B, 'intervention', false]])
+  assert.deepStrictEqual(a.notifs.map(([k, o]) => [k, o.compte, o.propertyId, o.bookingId, o.type, o.guestName]), [['escalade', U, P, B, 'intervention', 'Voyageur']])
+  // (« Voyageur » est le repli de la messagerie sans nom au cœur : `prenomDe` l'écarte, testé plus haut.)
   // Le voyageur réécrit : l'escalade du MÊME type est complétée — et l'hôte réalerté.
   // (Postérieur à la tâche posée au premier cycle, comme dans la vraie vie.)
   const b = charger({ tables: t, messages: [...fil(), { bookingId: B, sender: 'guest', message: 'Ça coule de plus en plus', time: new Date(Date.now() + 60e3).toISOString() }],
     reponse: { type: 'intervention', reason: 'fuite', auto_reply: null, sub_tasks: [] } })
   await b.mod.processChannelPropertyMessages(U, bien, bilan())
-  assert.deepStrictEqual(b.notifs.map(([k, o]) => [k, o.type, o.rappel]), [['escalade', 'intervention', true]])
+  assert.deepStrictEqual(b.notifs.map(([k, o]) => [k, o.type]), [['escalade', 'intervention']])
+})
+
+test('une escalade qui n\'a pas pu s\'écrire ne prévient pas — elle est rejouée au cycle suivant', async () => {
+  const bl = bilan()
+  const a = charger({ tables: tables(), messages: fil(), insertionsRefusees: ['agent_tasks'], reponse: { type: 'intervention', reason: 'fuite', auto_reply: null, sub_tasks: [] } })
+  await a.mod.processChannelPropertyMessages(U, bien, bl)
+  assert.deepStrictEqual(a.notifs, [])
+  assert.ok(bl.errors.some(e => e.context === 'escalade'))
 })
 
 test('une information manquante prévient ; l\'arrêt de l\'agent au plafond aussi, en le disant', async () => {
@@ -275,7 +304,7 @@ test('une information manquante prévient ; l\'arrêt de l\'agent au plafond aus
   for (let i = 0; i < 3; i++) t.guestflow_appels_ia.push({ user_id: U, property_id: P, booking_id: B, ok: true, created_at: recent(60 + i) })
   const b = charger({ tables: t, messages: fil('Encore une question'), reponse: { type: 'sympathy', reason: 'x', auto_reply: 'x', sub_tasks: [] } })
   await b.mod.processChannelPropertyMessages(U, bien, bilan())
-  assert.deepStrictEqual(b.notifs.map(([k, o]) => [k, o.type, o.arret, o.rappel]), [['escalade', 'info_unknown', true, false]])
+  assert.deepStrictEqual(b.notifs.map(([k, o]) => [k, o.type, o.arret]), [['escalade', 'info_unknown', true]])
 })
 
 test('LE TEST QUI COMPTE : une réponse posée en validation prévient — et seulement si elle existe vraiment', async () => {
@@ -320,7 +349,7 @@ test('LE TEST QUI COMPTE : le coupe-circuit prévient le titulaire à la bascule
     return require('../lib/cron-alerting')
   }
   await charge().checkMessageVolume({})
-  assert.deepStrictEqual(pauses, [{ compte: U, propertyId: P, propertyUuid: UUID_BIEN, nom: 'Ofuro Futari' }])
+  assert.deepStrictEqual(pauses, [{ compte: U, propertyId: P, propertyUuid: UUID_BIEN, nom: 'Ofuro Futari', bookingId: B }])
   assert.strictEqual(t.properties[0].automation_paused, true)
   // Le bien est déjà en pause : la bascule n'a pas lieu, personne n'est réalerté.
   await charge().checkMessageVolume({})

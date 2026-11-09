@@ -785,3 +785,62 @@ test('LE TEST QUI COMPTE : à la fin de la plage, le relevé part SEUL et au tit
   assert.equal(pushTitulaire[2], 'T1', 'le relevé n\'entre pas dans le regroupement : la notification reste seule')
   assert.ok(!e.journal.some(j => j[0] === 'email'), 'aucun e-mail regroupé n\'emporte le relevé')
 })
+
+// ─── 11. Lot 2c-2 : retirer une annonce sans emporter un message plus récent ─
+test('retirerSujet avec un code ne retire que la ligne de CET événement (une conversation = un sujet)', async () => {
+  const ligne = (code) => ligneFile({ id: code, code, sujet: 'conv:b1' })
+  // La réponse différée est partie, mais un NOUVEAU message attend depuis sur ce sujet : il reste.
+  const a = base({ notifications_file: [ligne('message_voyageur')] })
+  await file.retirerSujet({ compte: COMPTE, sujet: 'conv:b1', code: 'brouillon_ia', db: a.db })
+  assert.equal(a.etat.tables.notifications_file.length, 1)
+  // L'annonce de la réponse elle-même : retirée.
+  const b = base({ notifications_file: [ligne('brouillon_ia')] })
+  await file.retirerSujet({ compte: COMPTE, sujet: 'conv:b1', code: 'brouillon_ia', db: b.db })
+  assert.equal(b.etat.tables.notifications_file.length, 0)
+})
+
+// ─── 12. Lot 2c-2 : un émetteur léger ne charge pas le client du cron ───────
+test('LE TEST QUI COMPTE : prévenir d\'un message depuis le writer ne charge ni le client du cron ni le SDK de l\'IA', () => {
+  // Dans un processus neuf : le cache de ce fichier-ci a déjà tout chargé.
+  const { execFileSync } = require('node:child_process')
+  const script = `
+    process.env.SUPABASE_URL = 'http://localhost:54321'; process.env.SUPABASE_SERVICE_KEY = 'k'
+    // Des clés d'essai, générées ici et jamais affichées : sans clés, la lecture des
+    // appareils n'a pas lieu et le test ne prouverait rien.
+    const k = require('web-push').generateVAPIDKeys()
+    process.env.PUSH_VAPID_PUBLIC = k.publicKey; process.env.PUSH_VAPID_PRIVATE = k.privateKey
+    const lignes = {
+      profiles: [{ id: 'p', account_user_id: 'C', member_user_id: 'C', is_owner: true, active: true, access_mode: 'compte', email: 'h@e.fr', phone: null, notify_sms: true, notify_email: true }],
+      push_abonnements: [], notifications_reglages: [], properties: [], bookings_snapshot: [], messages: []
+    }
+    const appels = []
+    const db = { from (t) { appels.push(t); const b = { select: () => b, eq: () => b, in: () => b, is: () => b, gte: () => b, order: () => b, limit: () => b,
+      insert: () => Promise.resolve({ error: null }), upsert: () => Promise.resolve({ error: null }), delete: () => b, update: () => b,
+      maybeSingle: () => Promise.resolve({ data: (lignes[t] || [])[0] || null, error: null }),
+      then: (r) => r({ data: lignes[t] || [], error: null }) }; return b } }
+    require(${JSON.stringify(require('node:path').join(__dirname, '..', 'lib', 'record-message'))}).recordMessage({ userId: 'C', provider: 'channex', propertyId: 'p1', bookingId: 'b1',
+      direction: 'inbound', sender: 'guest', body: 'x', providerMsgId: 'm1', sentAt: new Date().toISOString(), supabase: db,
+      notifierMessage: undefined })
+      .then(() => {
+        const charge = Object.keys(require.cache)
+        console.log(JSON.stringify({
+          cron: charge.some(k => k.endsWith('/lib/cron-shared.js')),
+          ia: charge.some(k => k.includes('@anthropic-ai')),
+          appareils: appels.includes('push_abonnements')
+        }))
+      })
+  `
+  const lancer = (reglages) => {
+    const sortie = execFileSync(process.execPath, ['-e', script.replace('notifications_reglages: []', `notifications_reglages: ${reglages}`)],
+      { cwd: require('node:path').join(__dirname, '..'), encoding: 'utf8' })
+    return JSON.parse(sortie.trim().split('\n').pop())
+  }
+  // Notification cochée (défaut) : les appareils se lisent pour l'envoi.
+  const r = lancer('[]')
+  assert.equal(r.appareils, true, 'les appareils se lisent par le client du writer')
+  assert.deepEqual({ cron: r.cron, ia: r.ia }, { cron: false, ia: false })
+  // Notification décochée : les appareils se COMPTENT quand même (Q11) — par le même client.
+  const r2 = lancer(`[{ user_id: 'C', evenements: { message_voyageur: { push: false, email: true, sms: false, urgent: false } }, plages: [] }]`)
+  assert.equal(r2.appareils, true)
+  assert.deepEqual({ cron: r2.cron, ia: r2.ia }, { cron: false, ia: false })
+})
