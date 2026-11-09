@@ -28,6 +28,9 @@ import { canauxHtml, faitDateAffiche, avisHtml, sousTitre, fraicheurDuCompte, re
   // des libelles y vit avec sa garde — « le repli ne doit JAMAIS laisser sortir
   // le nom du partenaire technique » (21 octobre 2026).
   libelleDuCanal } from './logements-liste.js'
+// Les infos d'accueil se peignent et s'écrivent par le module commun : la fiche
+// et « Le remplir » (dans une conversation) partagent la même ligne.
+import { ligneInfoHtml, editeurInfoHtml } from './accueil-voyageur.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Le prix
@@ -760,6 +763,32 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
 }
 
 // ─── 3. Le logement ─────────────────────────────────────────────────────────
+// ─── Accueil du voyageur (lot du 8 novembre 2026) ─────────────────────────
+//
+// Les infos qui vivaient dans la base de connaissance (téléphone, horaires,
+// wifi), décision de Thierry du 6 novembre 2026. ⚠ RÉSERVÉ AU TITULAIRE : le
+// serveur ne l'envoie pas à un membre (`refuses: ['accueil']`), et le bloc
+// n'est alors pas rendu du tout — un `null` ici. `enEdition` : la clé de la
+// ligne en cours d'écriture, tenue par la page.
+export function accueilHtml (fiche, outils, { enEdition = null, peutModifier = true } = {}) {
+  const { t, esc } = outils
+  const a = fiche.accueil
+  if (a === undefined) return null
+  if (a === null) {
+    return (fiche.indisponibles || []).includes('accueil') ? nonLu('fiche.accueil_non_lu', outils) : null
+  }
+  // ⚠ UN BIEN ARCHIVÉ SE LIT, IL NE SE RÈGLE PLUS (review 1 du lot) : la base
+  // refuse d'écrire pour lui (`api/ecran/connaissance.js`, biens vivants
+  // seulement), et le crayon menait à « Seul le titulaire… », un refus faux.
+  const modifiable = peutModifier && !(fiche.bien && fiche.bien.archive_le)
+  const lignes = (a.faits || []).map(f => (modifiable && enEdition === f.cle
+    ? editeurInfoHtml(f, { t, esc })
+    : ligneInfoHtml(f, { t, esc, peutModifier: modifiable })))
+  return `<p class="fic-aide caption">${esc(t('fiche.accueil_aide'))}</p>
+    <div class="kb-faits" data-bind="accueil">${lignes.join('')}</div>
+    <p class="fic-erreur caption" data-bind="accueil-erreur" role="alert" hidden></p>`
+}
+
 export function logementHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, nombre } = outils
   const b = fiche.bien
@@ -1207,7 +1236,9 @@ export function ficheHtml (fiche, outils, droits = {}) {
   const gauche = [
     bloc('fiche.bloc_vente', venteHtml(fiche, o, { peutModifier }), o),
     bloc('fiche.bloc_prix', prixHtml(fiche, o, { peutModifier }), o),
-    bloc('fiche.bloc_logement', logementHtml(fiche, o, { peutModifier }), o)
+    bloc('fiche.bloc_logement', logementHtml(fiche, o, { peutModifier }), o),
+    refuse('accueil') ? '' : bloc('fiche.bloc_accueil',
+      accueilHtml(fiche, o, { enEdition: droits.accueilEnEdition || null }), o, ' data-bloc="accueil"')
   ].join('')
 
   const droite = [

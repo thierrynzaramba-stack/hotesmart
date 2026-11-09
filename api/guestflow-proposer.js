@@ -26,6 +26,7 @@ const { requirePermission } = require('../lib/require-permission')
 const { preparerLot, classifierLot, buildKnowledgeText, etatDesEnvois } = require('../lib/cron-classify')
 const { peutAppeler, noterAppel } = require('../lib/guestflow-garde')
 const { isAutomationPaused } = require('../lib/cron-shared')
+const { replisDuBien } = require('../lib/balises')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -103,7 +104,9 @@ module.exports = async function handler (req, res) {
 
     const { data: knowledge } = await supabase.from('knowledge')
       .select('*').eq('user_id', userId).eq('property_id', refBien)
-    const knowledgeText = buildKnowledgeText(knowledge || [])
+    // Les replis du bien (adresse de la fiche, horaires) : la meme chose que le
+    // cron — spec Accueil du voyageur, S3.
+    const knowledgeText = buildKnowledgeText(knowledge || [], { replis: replisDuBien(bien) })
     const blocEtat = await etatDesEnvois(userId, refBien, String(bookingId))
 
     let classification

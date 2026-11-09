@@ -448,6 +448,10 @@ h1, h2, h3, p { margin: 0; }
 .kb-fait__valeur { flex: 1; min-width: 0; font-size: var(--fs-small); overflow-wrap: anywhere; }
 .kb-a-remplir { color: var(--danger); font-weight: var(--fw-semibold); }
 .kb-fait--edition { flex-wrap: wrap; }
+/* Accueil du voyageur (fiche du logement) : le bloc porte déjà sa marge. */
+.fic-bloc .kb-faits { padding: 0; }
+/* « Le remplir » sur place, sous le refus d'une carte de la base. */
+.kb-carte-bloc .kb-fait--edition { padding: 8px 0; border-bottom: 0; }
 .kb-fait--edition input { flex: 1 1 100%; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0 10px; font-size: var(--fs-body); background: var(--surface); color: var(--ink); }
 .kb-icone { background: none; border: 0; padding: 6px; cursor: pointer; color: var(--info); flex: none; }
 .kb-icone .icon { width: 17px; height: 17px; }

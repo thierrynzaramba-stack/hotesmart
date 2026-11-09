@@ -26,7 +26,7 @@ function ecran (o = {}) {
   return {
     migration: true,
     biens: [{ ref: 'P1', nom: 'La bulle', photo: null }, { ref: 'P2', nom: 'Cœur', photo: null }],
-    bien: { ref: o.ref || 'P1', nom: o.ref === 'P2' ? 'Cœur' : 'La bulle', photo: null },
+    bien: { ref: o.ref || 'P1', id: o.ref === 'P2' ? 'u-2' : 'u-1', nom: o.ref === 'P2' ? 'Cœur' : 'La bulle', photo: null, adresse: true },
     faits: [
       { cle: 'telephone_hote', libelle: 'Téléphone', balise: '{telephone_hote}', valeur: '0600000000', aRemplir: false, horsIa: false, sansBalise: false },
       { cle: 'wifi_mdp', libelle: 'Mot de passe wifi', balise: '{wifi_mdp}', valeur: '', aRemplir: true, horsIa: false, sansBalise: false },
@@ -58,7 +58,7 @@ async function monter ({ repondre, selecteur = false, bien = 'P1', resa = null, 
   w.I18n = { date: (d) => d.toISOString().slice(0, 10) }
   w.__confirm = 0
   w.confirm = () => { w.__confirm++; return true }
-  w.eval(sansModule(lire('shared', 'confirmer.js')) + '\n' + sansModule(lire('shared', 'connaissance-vue.js'))
+  w.eval(sansModule(lire('shared', 'confirmer.js')) + '\n' + sansModule(lire('shared', 'accueil-voyageur.js')) + '\n' + sansModule(lire('shared', 'connaissance-vue.js'))
     + '\nwindow.__kb = { monterConnaissance, kbVersTexte, KB_INSERTION_RAPIDE, KB_MAX_TEXTE }')
   const envois = []
   const appel = async (chemin, corps) => {
@@ -93,7 +93,15 @@ test('LE TEST QUI COMPTE : UN appel peint tout l écran, sur le logement demand�
   assert.equal(b.envois.length, 1)
   assert.equal(b.envois[0].chemin, '/api/ecran/connaissance?bien=P2&resa=B9')
   assert.equal(b.racine.querySelectorAll('.kb-carte').length, 2)
-  assert.equal(b.racine.querySelectorAll('.kb-fait').length, 3)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : les infos du logement ont QUITTÉ la base — elle dit où elles sont (la fiche)', async () => {
+  const b = await monter({ bien: 'P2', repondre: () => ecran({ ref: 'P2' }) })
+  assert.equal(b.racine.querySelectorAll('.kb-fait').length, 0, 'aucune ligne d info dans la base')
+  const renvoi = b.racine.querySelector('[data-kb-infos-fiche]')
+  assert.equal(renvoi.firstChild.textContent.trim(), FR['kb.info_in_listing'])
+  assert.equal(renvoi.querySelector('a').getAttribute('href'), '/logements/u-2', 'la fiche DU logement affiché')
   b.fermer()
 })
 
@@ -121,18 +129,6 @@ test('LE TEST QUI COMPTE : l ambre ne sert QU AU « À revoir », et le cadenas 
   // Les trois états de vérification sont distincts à l'écran.
   assert.match(b.racine.querySelector('[data-kb-ouvrir="r1"] .kb-carte__pied').textContent, /^Vérifiée le 2026-06-01$/)
   assert.equal(b.racine.querySelector('[data-kb-ouvrir="r2"] .kb-carte__pied').textContent, 'Jamais vérifiée')
-  b.fermer()
-})
-
-test('une information vide se dit « À remplir », en rouge ; une clé sans balise le dit aussi', async () => {
-  const b = await monter()
-  const faits = [...b.racine.querySelectorAll('.kb-fait')]
-  const mdp = faits.find(x => x.textContent.includes('Mot de passe wifi'))
-  assert.equal(mdp.querySelector('.kb-a-remplir').textContent, 'À remplir')
-  const tel = faits.find(x => x.textContent.includes('Téléphone'))
-  assert.equal(tel.querySelector('.kb-a-remplir'), null)
-  const lits = faits.find(x => x.textContent.includes('equip_lits'))
-  assert.match(lits.textContent, /Lue par l’IA seulement/)
   b.fermer()
 })
 
@@ -261,10 +257,12 @@ test('supprimer une réponse Hors IA ne prétend pas que l IA s en servait (rece
   b.fermer()
 })
 
-test('une information du logement se corrige sur place ; Entrée enregistre UNE fois', async () => {
-  const b = await monter()
-  clic(b, b.racine.querySelector('[data-kb-modifier-fait="wifi_mdp"]'))
-  const champ = b.racine.querySelector('[data-kb-fait-saisie]')
+test('« Le remplir » : l info se corrige SOUS LA CARTE ; Entrée enregistre UNE fois', async () => {
+  const b = await monter({ resa: 'B9', utiliser: () => {}, repondre: (chemin, corps) => (corps ? { ok: true } : avecSignaux()) })
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r1"]'))
+  await reposer()
+  clic(b, b.racine.querySelector('[data-kb-remplir="wifi_mdp"]'))
+  const champ = b.racine.querySelector('[data-acc-saisie]')
   champ.value = '  secret  '
   assert.equal(b.vue.enEdition(), true, 'une saisie non enregistrée se sait')
   champ.dispatchEvent(new b.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
@@ -408,7 +406,7 @@ test('changer de logement au sélecteur PRÉVIENT la page (l adresse suit le log
   const { JSDOM: J } = require('jsdom')
   const d2 = new J('<!doctype html><body><div id="r"></div></body>', { runScripts: 'outside-only' })
   d2.window.I18n = { date: (x) => x.toISOString().slice(0, 10) }
-  d2.window.eval(sansModule(lire('shared', 'confirmer.js')) + '\n' + sansModule(lire('shared', 'connaissance-vue.js'))
+  d2.window.eval(sansModule(lire('shared', 'confirmer.js')) + '\n' + sansModule(lire('shared', 'accueil-voyageur.js')) + '\n' + sansModule(lire('shared', 'connaissance-vue.js'))
     + '\nwindow.__kb = { monterConnaissance }')
   const annonces = []
   const vue = d2.window.__kb.monterConnaissance({
@@ -424,16 +422,6 @@ test('changer de logement au sélecteur PRÉVIENT la page (l adresse suit le log
   await reposer()
   assert.deepEqual(annonces, ['P2'])
   vue.detruire(); d2.window.close()
-})
-
-test('un horaire vide montre son DÉFAUT, jamais « À remplir »', async () => {
-  const e = ecran()
-  e.faits.push({ cle: 'checkin', libelle: "Heure d'arrivée", balise: '{checkin}', valeur: '', defaut: '18:00', aRemplir: false, horsIa: false, sansBalise: false })
-  const b = await monter({ repondre: () => e })
-  const fait = [...b.racine.querySelectorAll('.kb-fait')].find(x => x.textContent.includes("Heure d'arrivée"))
-  assert.equal(fait.querySelector('.kb-a-remplir'), null)
-  assert.match(fait.querySelector('.kb-fait__valeur').textContent, /^18:00 par défaut$/)
-  b.fermer()
 })
 
 test('un texte trop long est refusé AVANT l envoi, sans « réessayez »', async () => {
@@ -497,24 +485,16 @@ test('un 400 qui n est pas « trop long » ne le prétend pas', async () => {
   b.fermer()
 })
 
-test('le serveur dit « trop long » par son CODE, et l écran le reprend', async () => {
-  const b = await monter({ repondre: (chemin, corps) => (corps ? { __statut: 400, __code: 'trop_long' } : ecran()) })
-  clic(b, b.racine.querySelector('[data-kb-modifier-fait="wifi_mdp"]'))
-  b.racine.querySelector('[data-kb-fait-saisie]').value = 'abc'
-  clic(b, b.racine.querySelector('[data-kb-fait-enregistrer]'))
+test('le serveur dit « trop long » par son CODE, et l écran le reprend (« Le remplir »)', async () => {
+  const b = await monter({ resa: 'B9', utiliser: () => {}, repondre: (chemin, corps) => (corps ? { __statut: 400, __code: 'trop_long' } : avecSignaux()) })
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r1"]'))
+  await reposer()
+  clic(b, b.racine.querySelector('[data-kb-remplir="wifi_mdp"]'))
+  b.racine.querySelector('[data-acc-saisie]').value = 'abc'
+  clic(b, b.racine.querySelector('[data-acc-enregistrer]'))
   await reposer()
   assert.equal(b.racine.querySelector('[data-kb-note]').textContent, 'Texte trop long : raccourcissez-le')
-  b.fermer()
-})
-
-test('une information vide en base mais présente sur la FICHE du logement montre la fiche, avant le défaut', async () => {
-  const e = ecran()
-  e.faits.push({ cle: 'adresse', libelle: 'Adresse', balise: '{adresse}', valeur: '', repli: '1 rue Fiche', defaut: null, aRemplir: false, horsIa: false, sansBalise: false })
-  e.faits.push({ cle: 'checkin', libelle: "Heure d'arrivée", balise: '{checkin}', valeur: '', repli: '16:00', defaut: '18:00', aRemplir: false, horsIa: false, sansBalise: false })
-  const b = await monter({ repondre: () => e })
-  const ligne = (lib) => [...b.racine.querySelectorAll('.kb-fait')].find(x => x.querySelector('.kb-fait__libelle').textContent === lib)
-  assert.equal(ligne('Adresse').querySelector('.kb-fait__valeur').textContent, '1 rue Fiche fiche du logement')
-  assert.equal(ligne("Heure d'arrivée").querySelector('.kb-fait__valeur').textContent, '16:00 fiche du logement')
+  assert.equal(b.racine.querySelector('[data-acc-saisie]').value, 'abc', 'la saisie n est pas perdue')
   b.fermer()
 })
 
@@ -606,11 +586,64 @@ test('LE TEST QUI COMPTE : R3 — une info manquante REFUSE, la nomme, et « Le 
     'le refus est sous SA carte')
   clic(b, b.racine.querySelector('[data-kb-remplir="wifi_mdp"]'))
   await reposer()
-  const champ = b.racine.querySelector('[data-kb-fait-saisie]')
-  assert.ok(champ, 'la ligne s ouvre en saisie')
+  const champ = b.racine.querySelector('[data-acc-saisie]')
+  assert.ok(champ, 'l info s ouvre en saisie')
+  assert.ok(champ.closest('.kb-carte-bloc').querySelector('[data-kb-ouvrir="r1"]'), 'SOUS la carte refusée, sur place')
   assert.equal(b.racine.querySelector('.kb-fait--edition label').textContent, 'Mot de passe wifi')
   assert.equal(b.d.activeElement, champ)
-  assert.equal(b.racine.querySelector('[data-kb-refus]'), null, 'le refus s efface')
+  assert.ok(b.racine.querySelector('[data-kb-refus]'), 'le refus reste lisible pendant la saisie')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : après « Le remplir », la base se relit et « Utiliser » passe — rien n est parti', async () => {
+  let e = avecSignaux()
+  const recus = []
+  const b = await monter({ resa: 'B9', utiliser: (x) => recus.push(x.texte),
+    repondre: (chemin, corps) => {
+      if (corps) {
+        e = avecSignaux()
+        e.reponses[0].manquants = []
+        e.reponses[0].apercu = 'Bonjour Ana,\nle wifi : secret'
+        return { ok: true }
+      }
+      return e
+    } })
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r1"]'))
+  await reposer()
+  clic(b, b.racine.querySelector('[data-kb-remplir="wifi_mdp"]'))
+  b.racine.querySelector('[data-acc-saisie]').value = 'secret'
+  clic(b, b.racine.querySelector('[data-acc-enregistrer]'))
+  await reposer()
+  assert.equal(recus.length, 0, 'enregistrer l info ne pose rien dans la conversation')
+  assert.equal(b.racine.querySelector('[data-acc-saisie]'), null, 'l éditeur s est refermé')
+  assert.equal(b.racine.querySelector('[data-kb-refus]'), null)
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r1"]'))
+  await reposer()
+  assert.deepEqual(recus, ['Bonjour Ana,\nle wifi : secret'])
+  b.fermer()
+})
+
+test('« Annuler » referme l éditeur sur place, la carte et son refus restent', async () => {
+  const b = await monter({ resa: 'B9', utiliser: () => {}, repondre: (chemin, corps) => (corps ? { ok: true } : avecSignaux()) })
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r1"]'))
+  await reposer()
+  clic(b, b.racine.querySelector('[data-kb-remplir="wifi_mdp"]'))
+  clic(b, b.racine.querySelector('[data-acc-annuler]'))
+  assert.equal(b.racine.querySelector('[data-acc-saisie]'), null)
+  assert.ok(b.racine.querySelector('[data-kb-refus]'))
+  assert.ok(b.racine.querySelector('[data-kb-remplir="wifi_mdp"]'))
+  assert.equal(ecritures(b).length, 0)
+  b.fermer()
+})
+
+test('une ADRESSE manquante ne se remplit pas dans la base : un lien mène à la fiche du logement', async () => {
+  const e = avecSignaux()
+  e.reponses[0].manquants = ['adresse']
+  const b = await monter({ resa: 'B9', utiliser: () => {}, repondre: () => e })
+  clic(b, b.racine.querySelector('[data-kb-utiliser="r1"]'))
+  await reposer()
+  assert.equal(b.racine.querySelector('[data-kb-remplir]'), null, 'l adresse n est pas une info de la base')
+  assert.equal(b.racine.querySelector('[data-kb-vers-fiche]').getAttribute('href'), '/logements/u-1')
   b.fermer()
 })
 

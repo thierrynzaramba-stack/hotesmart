@@ -22,7 +22,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
-const { refsDuPerimetre, peutLire, peutEcrire } = require('../lib/permissions')
+const { refsDuPerimetre, peutLire, peutEcrire, estTitulaireDuCompte } = require('../lib/permissions')
 const { lireFiche, lireListe, compterPourSuppression } = require('../lib/logement/lecture')
 const { compterAvantArchivage } = require('../lib/logement/archive')
 
@@ -63,7 +63,12 @@ function droitsDesBlocs (contexte, cible) {
     // (api/calendar.js, action `fullsync`), pas par `reglages`. Un membre peut
     // tenir le calendrier sans reconfigurer le bien, et l'inverse. Il descend
     // pour que l'ecran ne propose pas « Publier mes prix » a qui recevra 403.
-    reservations_write: peutEcrire(contexte, 'reservations', cible)
+    reservations_write: peutEcrire(contexte, 'reservations', cible),
+    // ⚠ LE BLOC « ACCUEIL DU VOYAGEUR » EST AU TITULAIRE SEUL (mot de passe
+    // wifi, telephone de l'hote) — la meme garde que la base de connaissance,
+    // d'ou ces infos viennent. Ici `accountUserId` vient de la RESSOURCE (le
+    // bien designe le compte) : la fonction ne retombe pas sur l'appelant.
+    titulaire: estTitulaireDuCompte(contexte)
   }
 }
 
