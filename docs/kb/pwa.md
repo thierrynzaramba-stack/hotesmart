@@ -524,3 +524,47 @@ servies jusqu'au lot 2c-3, qui les reprend en contacts : la production reçoit
 - **Le notifier tourne dans la boucle du dispatcher** : un appareil muet coûte
   jusqu'à 5 s, et le budget du dispatcher se vérifie entre deux événements.
 
+### 11.2 Messages (b, c, d, e, k)
+
+Un module, `lib/notifications/evenements-messages.js`, appelé par **son**
+émetteur pour chaque événement ; aucun ne lève (un émetteur de messagerie ne
+s'arrête jamais pour une notification).
+
+| Événement | Émetteur | Sujet, écran |
+|---|---|---|
+| b Urgence de l'IA | `lib/cron-classify.js`, escalade `intervention` | `urgence:<id>`, `/pages/messages?conv=<id>` |
+| c Information manquante | idem, escalade `info_unknown` ; et l'arrêt de l'agent au plafond d'appels | `info:<id>`, idem |
+| d Réponse à valider | idem, proposition posée en validation ; et la réponse automatique non délivrée | `brouillon:<id>`, idem |
+| e Nouveau message | `lib/record-message.js`, le writer unique de `messages` | `msg:<id>` (sonne), idem |
+| k Pause automatique | `lib/cron-alerting.js`, coupe-circuit | `pause:<ref>`, `/pages/messages?volet=ia` |
+
+**Les règles, et pourquoi :**
+1. **Le bien et le prénom, jamais le texte** (spec §7, Q6) — ni le message du
+   voyageur, ni le résumé de l'IA : le module ne les reçoit même pas.
+2. **e part du writer unique**, après une **insertion réelle** d'un message de
+   voyageur : jamais un doublon, jamais un écho réconcilié, jamais un sortant.
+   Webhook, import récurrent et e-mail entrant passent tous par là (« le cœur
+   d'abord »). **Un message de plus de six heures ne prévient pas** : un import
+   de rattrapage écrit des messages anciens. Un sujet par conversation, qui
+   **sonne** à chaque nouveau message.
+3. **Une escalade complétée réalerte** (le voyageur a réécrit) : la
+   notification remplace la précédente et sonne, comme les listes l'ont
+   toujours fait.
+4. **d n'est envoyé que si la proposition existe vraiment** : une insertion
+   refusée ne prévient personne (et se trace dans le bilan du cron). Le texte
+   dit si la réponse partira seule (délai GuestFlow réglé).
+5. **k au titulaire seul** (domaine `null`), **à la bascule seulement**. L'« e-mail
+   explicatif » que `docs/kb/alertes.md` §3 annonçait n'existait pas dans le
+   code : ligne corrigée.
+6. **Le bien se relit** (`lib/notifications/bien.js`, partagé avec j) : ses deux
+   identifiants et son nom, sur le compte.
+
+**Limites connues :**
+- **Le délai d'alerte « information manquante » de GuestFlow** (`delais.alerte_info`,
+  « si l'hôte agit, pas d'alerte ») est enregistré mais **n'est lu par aucun
+  code** — c'est le lot 3 du chantier délai, au fil messagerie. c part donc tout
+  de suite, comme les listes aujourd'hui ; c'est l'endroit où ce lot branchera
+  son délai.
+- **e ajoute le point d'envoi au chemin du webhook** : quelques lectures et un
+  envoi par appareil, dans la réponse au partenaire.
+- **Jusqu'au 2c-3, les listes d'`agent_alert_config` reçoivent aussi b et c.**

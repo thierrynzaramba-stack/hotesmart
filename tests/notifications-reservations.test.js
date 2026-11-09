@@ -150,7 +150,7 @@ test('LE TEST QUI COMPTE : le code non résolu prévient par le point d\'envoi, 
     bien: { id: UUID_BIEN, ref: '209413' },
     sejour: { arrivee: '2026-12-12', depart: '2026-12-15' },
     donnees: { bien: 'La bulle', prenom: 'Jean', arrivee: '2026-12-12' },
-    chemin: '/pages/messages', sujet: 'code:555'
+    chemin: '/pages/messages?conv=555', sujet: 'code:555'
   })
   // L'ancien e-mail de repli au titulaire ne part plus : c'est le point d'envoi qui
   // le porte, selon les réglages de chacun (sinon deux e-mails).

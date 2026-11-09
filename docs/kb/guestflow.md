@@ -1349,3 +1349,14 @@ bloc. Le résultat, lui, est identique, et c'est tout le cahier des charges.
 bien en validation manuelle et un en immédiat, ce qui est exactement ce qu'il
 faut pour vérifier l'écran. Pour les retirer, vider leur entrée du blob
 `agent_alert_config` du compte `6c413095`.
+
+## Notifications de l'hôte (PWA lot 2c-2)
+
+L'agent prévient l'hôte et son équipe par le point d'envoi unique
+(`lib/notifications/evenements-messages.js`, docs/kb/pwa.md §11.2) : urgence et
+information manquante à chaque escalade (et à l'arrêt de l'agent au plafond),
+réponse à valider quand une proposition est posée (ou qu'une réponse
+automatique n'a pas été délivrée), nouveau message d'un voyageur depuis
+`lib/record-message.js`, pause automatique depuis le coupe-circuit. Jamais le
+texte du message, seulement le bien et le prénom. Les listes
+d'`agent_alert_config` restent servies jusqu'au lot 2c-3.
