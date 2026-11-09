@@ -744,3 +744,81 @@ téléphone ; l'ajout par photo est pensé pour le téléphone d'abord.
 **Fonctions Vercel** : trois de plus (`api/charges.js`, `api/ecran/charges.js`,
 `api/cron-charges.js`), 67 → 70 sur 100 — à additionner aux deux du fil
 facturation.
+
+## 12. Trace des reviews du lot 2
+
+Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et
+SHA de tête lu, fichiers cités confrontés au diff de la plage.
+
+### Review 1 — sur `7de09c1a` (9 novembre 2026)
+
+Brief envoyé, tel quel :
+
+```
+- Chemin absolu : /home/claude/hotesmart
+- Branche : charges-lot2-socle
+- Plage exacte : c6a8c8ab1059f6d8ebd0cda3cee8a69809564d88..7de09c1abfe65ec08e0b61704342e86c6fdfc459
+```
+
+⚠ **Sa réponse n'a pas été conservée** : ni l'arbre et le SHA qu'elle dit
+avoir lus, ni ses fichiers cités ne peuvent être recopiés ici. Elle ne
+vaut donc pas trace. Ses quatorze constats — aucun de sécurité — ont été
+corrigés dans `bc48f47d` : résumé à `signal` vide, verrous ordonnés,
+`cle_doublon`, doublons à un seul niveau, suppression d'une racine, garde
+de coût, panne du stockage, délais, file par `modifie_le`, montants saisis,
+entité archivée, erreurs du cron, 413. C'est parce que cette trace manque
+que la review 2 a été lancée sur le lot entier.
+
+### Review 2 — sur `931ee7a2` (10 novembre 2026), la review de référence
+
+Réponse de la review, recopiée mot pour mot :
+
+```
+TRACE DE REVIEW
+Arbre lu : /home/claude/hotesmart
+Branche lue : charges-lot2-socle
+SHA de tête lu : 931ee7a20cf26513c1e7cf3a0a7e3bb6cbf04e88
+Plage relue : 9385a9e1ddfe3d957ffc9e79985b16122ef14bd1..931ee7a20cf26513c1e7cf3a0a7e3bb6cbf04e88
+Fichiers de la plage (17) : api/charges.js, api/cron-charges.js, docs/kb/compte-de-charges.md,
+  docs/specs/spec-compte-de-charges.md, lib/charges.js, lib/charges/lecture.js, lib/charges/regles.js,
+  migrations/2026-11-09-compte-de-charges.sql, tests/cache-prive-endpoints.test.js,
+  tests/charges-endpoint.test.js, tests/charges-lecture.test.js, tests/charges-migration.test.js,
+  tests/charges-regles.test.js, tests/charges-writer.test.js, tests/cron-charges.test.js,
+  tests/outils/base-enregistreuse.js, vercel.json
+Fichiers cités dans les constats :
+  lib/charges.js — dans la plage
+  api/cron-charges.js — dans la plage
+  api/charges.js — dans la plage
+  migrations/2026-11-09-compte-de-charges.sql — dans la plage
+  docs/specs/spec-compte-de-charges.md — dans la plage (référence)
+  tests/charges-writer.test.js — dans la plage
+  tests/charges-migration.test.js — dans la plage
+  tests/outils/base-enregistreuse.js — dans la plage
+  lib/entites-juridiques.js — HORS PLAGE — référence seulement (contrat de entiteDuBien, dans main)
+  lib/ia/journal.js — HORS PLAGE — référence seulement (la ligne ia_appels s'écrit après l'appel)
+  REVIEW.md — HORS PLAGE — référence seulement (règles 20 et 22)
+```
+
+**Confrontation, refaite par le fil** : `git diff --name-only
+9385a9e1..931ee7a2` rend les 17 fichiers ci-dessus ; les huit fichiers
+cités comme défaut y figurent tous. Les trois fichiers hors plage ne sont
+cités que comme référence, chacun avec sa raison : statut **accepté**.
+
+**Aucun constat de sécurité.** Statut des onze constats :
+
+| # | Sévérité | Objet | Statut |
+|---|---|---|---|
+| 1 | à corriger | une charge `a_lire` ne se valide pas à la main | **corrigé** `0cc34348` après décision de Thierry (Q29) |
+| 2 | à corriger | exception de l'entité archivée trop large et trop étroite | **corrigé** `0cc34348` |
+| 3 | à corriger | recalcul repartant toujours du premier compte ; étapes sans délai | **corrigé** `0cc34348` |
+| 4 | à corriger | purge d'une page par jour ; envois sans limite | **corrigé** `0cc34348` (purge paginée, 429 à 30) |
+| 5 | à corriger | fichier non effacé sans rattrapage | **dette** (KB, « Dettes connues ») |
+| 6 | mineur | plafond IA contournable en parallèle ; relecture d'un même fichier | **dette** (KB) |
+| 7 | mineur | regroupement en quatre écritures non atomiques | **dette** (KB) |
+| 8 | mineur | racine d'empreinte `a_lire` ou `illisible` | **dette** (KB) |
+| 9 | mineur | `coalesce(sum, 0)` dans le résumé | **corrigé** `0cc34348` (NULL avec motif) |
+| 10 | mineur | tests : retrait des rôles, double sans filtre | **corrigé** `0cc34348` (règles 20 et 22) |
+| 11 | mineur | index de la file `a_lire` | **corrigé** `0cc34348` |
+
+Deux reviews sans constat de sécurité : on pousse (CLAUDE.md, « une review
+par commit »). Les correctifs de `0cc34348` ne sont pas re-reviewés.
