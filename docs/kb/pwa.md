@@ -738,3 +738,61 @@ aucun ne lève.
   est alors en base : il n'est plus nouveau). Le webhook attend ces envois avant
   de répondre.
 
+
+### 11.5 Trace des reviews du lot 2c-2 (demandée par le chef de file, 9 novembre 2026)
+
+Arbre de toutes les reviews : `/home/claude/hotesmart`, branche
+`pwa-lot-2c2-evenements`. Une review par domaine, chacune sur des commits
+distincts ; celle d'Avis a eu une re-review (constat de sécurité), la dernière.
+
+⚠ **CE QUI EST MESURÉ ET CE QUI NE L'EST PLUS.** Les rapports des cinq
+premières reviews n'existaient que dans la conversation du fil. Elle a été
+compactée, et aucun rapport n'avait été écrit sur disque. La première ligne de
+chaque rapport (« Arbre lu — SHA ») et la liste exacte des fichiers cités dans
+ses constats ne sont donc **plus vérifiables**. Ce qui suit les remplace par ce
+que l'historique git mesure : la plage (parent → commit du domaine) et les
+fichiers que ses correctifs ont touchés, confrontés au diff de la plage. Ce
+n'est **pas** la liste des fichiers cités. Seule la re-review d'Avis a sa trace
+complète, relevée sur son rapport.
+
+| Review | Plage relue (SHA complets) | Correctifs | Fichiers corrigés HORS de la plage |
+|---|---|---|---|
+| Réservations | `176eaa5bc60b62c4396de99563437d31eed061bd..af97441e0ba2c9296af895b2d27754ab6bf5e333` | `d69b4c8491950e7072cedfd3d13d143ad66d51a3` | `docs/kb/pwa.md` (documentation seulement) |
+| Relevé (réservation directe) | `d69b4c8491950e7072cedfd3d13d143ad66d51a3..5634e89ba9e1fbf67a9d6d5efa2ccb9fca94495b` | `a48d710affc10ad2db4e803e1ff90260901d876b` | aucun |
+| Messages | `a48d710affc10ad2db4e803e1ff90260901d876b..f28d2c66965680a61b2439433fdbeed64438b319` | `85b458af23b1c49e7c9bc2d106cd601fead73082` | `lib/guestflow/brouillons-dus.js`, `lib/notifications/envoi.js`, `lib/notifications/file.js`, `lib/notifications/notifier.js`, et trois tests (`guestflow-brouillons-dus`, `notifications-envoi`, `record-message-echo`) |
+| Ménages | `85b458af23b1c49e7c9bc2d106cd601fead73082..2e9267b93bab1959988a8ee65459422c60959dd3` | `868cd04bc0043508da8fd79b88fcd41937a1a8c4` | `api/menages-public.js`, `tests/pwa-prendre-menage.test.js` |
+| Avis | `868cd04bc0043508da8fd79b88fcd41937a1a8c4..1a533dd4e7ac91c7d586b24d9b84d5935d245bf6` | `ad408e7202717a4a116856505b6ae5d639ceebe4` | `lib/avis/auto-validation.js`, `tests/avis-auto-validation.test.js` |
+| Re-review Avis (la dernière) | `1a533dd4e7ac91c7d586b24d9b84d5935d245bf6..ad408e7202717a4a116856505b6ae5d639ceebe4` | `c4a480c30430325fb7770b447c9bb3b217fb9461` | aucun |
+
+**Ce qui est passé hors plage, et pourquoi :**
+- **Messages (`85b458af`)** : la décision de Thierry « une notification par
+  conversation » et les correctifs de la review ont atteint le cœur d'envoi du
+  2c-1 (`envoi.js`, `file.js`, `notifier.js`) et l'émetteur des brouillons
+  différés (`brouillons-dus.js`). Ce code a été corrigé **sans review**, comme
+  la règle le permet hors sécurité. Il n'a été relu par personne.
+- **Ménages (`868cd04b`)** : `api/menages-public.js` porte la décision de
+  Thierry « le retrait d'un ménage accepté prévient comme un ménage refusé ».
+  C'est un ajout décidé après la review, **sans review**.
+- **Avis (`ad408e72`)** : `lib/avis/auto-validation.js` porte le constat D4
+  (« le rappel et l'échec de la publication automatique ne notifient pas »),
+  branché sur décision de Thierry. Ce fichier est **dans la plage de la
+  re-review**, qui l'a relu.
+
+**Re-review Avis, trace complète** (rapport du sous-agent) :
+- Première ligne : « Arbre lu : /home/claude/hotesmart — SHA :
+  ad408e7202717a4a116856505b6ae5d639ceebe4 ». C'est la tête de la plage.
+- Fichiers cités, confrontés au diff de la plage :
+
+| Fichier cité | Dans la plage | Rôle |
+|---|---|---|
+| `lib/notifications/evenements-avis.js` (l. 120-124, 140-143) | oui | constats 1 et 2 |
+| `lib/notifications/textes.js` (l. 101, 105-115, 125) | oui | constats 1 et 3 |
+| `docs/kb/pwa.md` (l. 704, 724) | oui | constat 2 |
+| `tests/notifications-avis.test.js` (l. 41, 239) | oui | constats 1 et 2 |
+| `lib/avis/auto-validation.js` (l. 169) | oui | constat 3 |
+| `docs/kb/avis-voyageurs.md` | oui | preuve seulement (citation du comportement Airbnb) |
+| `lib/avis/naissance.js` (`voyageurAEcrit`) | **non** | preuve seulement (la règle de l'écran, proposée pour le correctif) |
+
+**Pour la suite**, si le chef de file l'accepte : le rapport d'une review
+s'écrit sur disque, mot pour mot, dès réception et avant tout correctif. Sans
+cela, un compactage efface la seule preuve de l'arbre qu'elle a lu.
