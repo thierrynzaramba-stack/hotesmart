@@ -96,7 +96,7 @@ function stub (rel, exports) {
   require.cache[abs] = m
 }
 
-function preparer ({ dejaAlerte = false, bienLisible = true } = {}) {
+function preparer ({ dejaAlerte = false, bienLisible = true, marqueurIllisible = false, tacheRefusee = false } = {}) {
   const etat = { notifications: [], emails: [], sms: [], taches: [], lecturesBien: [] }
   const client = {
     // L'adresse de connexion du titulaire : l'ancien e-mail de repli la lisait ici.
@@ -113,6 +113,12 @@ function preparer ({ dejaAlerte = false, bienLisible = true } = {}) {
         },
         // Le bien se lit en liste (lib/notifications/bien.js : plusieurs lignes possibles).
         limit () {
+          // Le marqueur de la tâche se lit en liste (constat 4 de la review de
+          // rattrapage : `maybeSingle` levait sur deux tâches marquées).
+          if (table === 'agent_tasks') {
+            if (marqueurIllisible) return Promise.resolve({ data: null, error: { message: 'panne' } })
+            return Promise.resolve({ data: dejaAlerte ? [{ id: 't1' }, { id: 't2' }] : [], error: null })
+          }
           if (table !== 'properties') return Promise.resolve({ data: [], error: null })
           etat.lecturesBien.push({ ...f })
           if (!bienLisible) return Promise.resolve({ data: null, error: { message: 'panne' } })
@@ -123,7 +129,7 @@ function preparer ({ dejaAlerte = false, bienLisible = true } = {}) {
         },
         // Aucune configuration d'alerte : l'ancien code envoyait alors l'e-mail de repli.
         single () { return Promise.resolve({ data: null, error: { message: 'aucune' } }) },
-        insert (row) { etat.taches.push(row); return Promise.resolve({ error: null }) }
+        insert (row) { if (tacheRefusee) return Promise.resolve({ error: { message: 'refus' } }); etat.taches.push(row); return Promise.resolve({ error: null }) }
       }
       return chain
     }
@@ -185,8 +191,19 @@ test('appelé avec l\'UUID HôteSmart, le bien se retrouve ; une lecture en pann
   assert.deepStrictEqual(c.etat.notifications[0].bien, { id: REF_CHANNEX, ref: REF_CHANNEX })
 })
 
-test('une alerte déjà posée pour ce séjour ne prévient pas une seconde fois', async () => {
+test('une alerte déjà posée pour ce séjour ne prévient pas une seconde fois — même portée par DEUX tâches', async () => {
   const { alertMissingAccessCode, etat } = preparer({ dejaAlerte: true })
   await alertMissingAccessCode({ userId: COMPTE, propertyId: '209413', booking: RESA })
   assert.strictEqual(etat.notifications.length, 0)
+})
+
+test('LE TEST QUI COMPTE (review de rattrapage, constat 4) : sans mémoire, pas de sonnerie toutes les cinq minutes', async () => {
+  // Le marqueur illisible : on s'abstient, le cycle suivant relit.
+  const a = preparer({ marqueurIllisible: true })
+  assert.strictEqual(await a.alertMissingAccessCode({ userId: COMPTE, propertyId: '209413', booking: RESA }), false)
+  assert.deepStrictEqual([a.etat.taches.length, a.etat.notifications.length], [0, 0])
+  // La tâche — la mémoire — n'a pas pu s'écrire : pas de notification.
+  const b = preparer({ tacheRefusee: true })
+  await b.alertMissingAccessCode({ userId: COMPTE, propertyId: '209413', booking: RESA })
+  assert.strictEqual(b.etat.notifications.length, 0)
 })

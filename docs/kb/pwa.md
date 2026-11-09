@@ -796,3 +796,107 @@ complète, relevée sur son rapport.
 **Pour la suite**, si le chef de file l'accepte : le rapport d'une review
 s'écrit sur disque, mot pour mot, dès réception et avant tout correctif. Sans
 cela, un compactage efface la seule preuve de l'arbre qu'elle a lu.
+
+#### Review de rattrapage du lot 2c-2 (la dernière) — rapport mot pour mot
+
+Décision du chef de file du 9 novembre 2026 : la trace ci-dessus ne suffit pas,
+une review non tracée ne compte pas. Une review de rattrapage, unique, sur tout
+le lot. Brief : arbre `/home/claude/hotesmart`, branche `pwa-lot-2c2-evenements`,
+plage `176eaa5bc60b62c4396de99563437d31eed061bd..68a2056a4f729377344922c3639152444ad1e701`,
+priorités (a) correctifs non relus, (b) fichiers partagés, (c) ce que voit un
+membre selon ses droits. Rapport reçu le 9 novembre 2026, recopié avant tout
+correctif :
+
+> Arbre lu : /home/claude/hotesmart — branche : pwa-lot-2c2-evenements — SHA : 68a2056a4f729377344922c3639152444ad1e701 — plage : 176eaa5bc60b62c4396de99563437d31eed061bd..68a2056a4f729377344922c3639152444ad1e701
+>
+> **Constats**
+>
+> 1. **SÉCURITÉ (hors plage, préexistant)** — api/avis.js:496-498. La liste des évaluations envoie le prénom et le nom du voyageur, ses dates et le nom de la prestataire (`voyageur`, `arrivee`/`depart`, `menage_par`) à tout membre qui a `avis: read`. Le contrôle du droit `reservations` n'y est pas appliqué, alors que la liste des avis le fait (`voitSejours`, ligne 628).
+>    - Scénario : un membre qui a `avis` sans `reservations` ouvre /avis, puis la liste des évaluations. Il voit le nom complet de chaque voyageur. C'est exactement la donnée que le correctif S1 a retirée des notifications, au motif qu'une notification ne doit pas en dire plus que l'écran. Or l'écran la montre.
+>    - Pourquoi je cite un fichier hors plage : même classe de défaut que S1, et la justification de S1 repose sur cet écran.
+>    - Correctif : dans `evaluationsLister`, calculer `voitSejours` comme à la ligne 628, et renvoyer `voyageur`, `arrivee` et `depart` à `null` sans ce droit. Vérifier aussi `action=evaluation`.
+>
+> 2. **DÉFAUT** — lib/notifications/releve.js:69-71 et 111-119. La lecture du bien d'un relevé différé utilise `maybeSingle` sur `provider_property_id`. Elle échoue (PGRST116) dès que le compte a deux lignes pour la même référence, c'est-à-dire un bien archivé puis recréé — un cas déjà reconnu dans lib/notifications/bien.js:25-28.
+>    - Scénario : une réservation directe arrive pendant les heures calmes sur un tel bien. Le relevé est remis dans la file avec `a: maintenant` à chaque cycle, sans fin. Il ne part jamais et aucun incident n'est levé.
+>    - Conséquence : le titulaire n'a aucun e-mail pour cette réservation, puisque le point d'envoi lui a retiré l'e-mail court (lib/booking-changes-dispatch.js:199).
+>    - Toute autre erreur de lecture permanente produit la même boucle.
+>    - Ce n'est pas couvert par les tests : le simulateur de tests/notifications-envoi.test.js:837 n'échoue jamais sur plusieurs lignes.
+>    - Correctif : `.limit(5)` en gardant le bien actif (même règle que `bienDuCompte`), et un compteur de remises dans `contenu` qui lève l'incident au-delà de N essais.
+>
+> 3. **DÉFAUT** — lib/notifications/evenements-menages.js:111-117 et 146-152 (« Ménage sans personne »). Quand l'envoi se passe normalement mais que personne n'est joignable (titulaire sans appareil et sans e-mail, ou e-mail décoché), deux choses se combinent :
+>    - `rienNestParti` retire la mémoire « déjà prévenu », donc le même ménage est retenté à chaque cycle ;
+>    - ce résultat est compté comme envoyé (`r.ok` → `envoyes++`), donc ces ménages occupent les places du plafond de 20 à chaque cycle.
+>    - Scénario : dès qu'il y a 20 ménages dans ce cas, ce sont toujours les mêmes qui passent en premier ; ceux des autres comptes restent reportés indéfiniment.
+>    - Reproduit avec 25 ménages injoignables : 3 cycles donnent chacun 20 « envoyés » et 5 reportés, 60 insertions et 60 suppressions de mémoire, 0 mémoire conservée.
+>    - Correctif : garder la mémoire quand `r.ok` et qu'il n'y a aucune erreur (personne n'est joignable, réessayer n'y changera rien). Ne compter dans le plafond que ce qui est réellement parti.
+>
+> 4. **DÉFAUT** — lib/alert-notify.js:196-215 (nouvel appel au point d'envoi), qui s'appuie sur le dédoublonnage des lignes 149-156 et 164. L'erreur de lecture de `maybeSingle` est ignorée et le résultat de l'insertion de la tâche n'est pas vérifié.
+>    - Scénario : deux tâches portent le même marqueur, par exemple après deux passes concurrentes (cron-access.js:177 et cron-arrival-code.js:542/562 appellent cette fonction). À partir de là, la lecture échoue, `existing` vaut null, et chaque cycle de 5 minutes crée une nouvelle tâche et renvoie la notification.
+>    - Le code non résolu est urgent par défaut (il passe les heures calmes) et l'e-mail est coché par défaut : e-mail toutes les 5 minutes au titulaire et à chaque membre `reservations`.
+>    - Une insertion refusée produit le même rejeu. C'est le défaut corrigé dans cron-classify (`escaladeEcrite`).
+>    - Même schéma dans `alertMenageRefuse` (242-248, puis 273), avec un risque plus faible car l'appel se fait une fois par refus.
+>    - Correctif : `.limit(1)` au lieu de `maybeSingle`, abstention si la lecture échoue, notification seulement si l'insertion a réussi.
+>
+> 5. **MINEUR** — lib/notifications/evenements-menages.js:137-139. La lecture des mémoires utilise un `.in('booking_id', …)` non découpé.
+>    - Scénario : au-delà d'environ 130 clés, l'URL dépasse 8 000 caractères et la lecture échoue. Le repli tente alors une insertion (refusée en 23505) pour chaque ménage déjà prévenu, à chaque cycle, sans que ces tentatives comptent dans le plafond.
+>    - Correctif : lire par paquets de 100, comme `avisExistants`.
+>
+> 6. **MINEUR** — lib/booking-changes-dispatch.js:340. Un bien sans nom s'affiche avec sa référence provider (« Nouvelle réservation — 6f1c… »), contrairement à `textes.rediger`, qui affiche « votre logement ».
+>    - Correctif : `p.name || null`.
+>
+> 7. **MINEUR** — lib/alert-notify.js:209. Le code non résolu relève du domaine `reservations` mais ouvre `/pages/messages?conv=…`.
+>    - Scénario : un membre qui a `reservations` sans `messages` reçoit un lien vers un écran qui lui est refusé. Pas de fuite, l'écran est gardé.
+>    - Correctif : ouvrir `/calendrier`.
+>
+> 8. **MINEUR** — lib/guestflow/brouillons-dus.js:611. Un brouillon abandonné pour réservation annulée (`reservation_annulee`) ou séjour terminé (`sejour_termine`) déclenche quand même « Réponse à valider », sur une réservation annulée ou terminée.
+>    - Correctif : ne pas notifier pour ces deux motifs.
+>
+> Mesures :
+> - Les 14 fichiers de tests du lot passent : 427/427, à l'heure réelle et avec l'horloge décalée à J+30, J+60 et J+200.
+> - Contre-épreuve hors de l'arbre : les deux tests nouveaux sur `exclusions` et sur `retirerSujet` avec `code` échouent contre file.js et notifier.js d'avant le lot, donc ils testent bien les correctifs.
+>
+> Constats de sécurité : n° 1 (hors plage, préexistant). Aucun constat de sécurité sur les lignes de la plage : dans chaque domaine, le prénom du voyageur, le nom de la prestataire et les liens ne vont qu'à des membres qui voient déjà ces données à l'écran ; le relevé et la pause restent au titulaire seul ; les lectures sont filtrées par compte.
+>
+> **Fichiers cités**
+>
+> | Fichier | Dans la plage | Rôle |
+> |---|---|---|
+> | api/avis.js | non | constat n° 1 |
+> | lib/notifications/releve.js | oui | constat n° 2 |
+> | lib/notifications/bien.js | oui | preuve seulement |
+> | tests/notifications-envoi.test.js | oui | preuve seulement |
+> | lib/notifications/evenements-menages.js | oui | constats n° 3, 5 |
+> | lib/alert-notify.js | oui | constats n° 4, 7 |
+> | lib/cron-access.js | non | preuve seulement |
+> | lib/cron-arrival-code.js | non | preuve seulement |
+> | lib/cron-classify.js | oui | preuve seulement |
+> | lib/cron-channel-reviews.js | oui | preuve seulement |
+> | lib/booking-changes-dispatch.js | oui | constats n° 2 (preuve), 6 |
+> | lib/notifications/textes.js | oui | preuve seulement |
+> | lib/notifications/notifier.js | oui | preuve seulement (contre-épreuve) |
+> | lib/notifications/file.js | oui | preuve seulement (contre-épreuve) |
+> | lib/guestflow/brouillons-dus.js | oui | constat n° 8 |
+
+**Suite donnée** (correctifs sans nouvelle review — aucun constat de sécurité
+dans la plage) :
+- **1 (sécurité, hors plage, préexistant)** — NON corrigé dans ce lot :
+  `api/avis.js` n'est pas un fichier du lot, et le corriger ici mettrait deux
+  fils sur le même fichier. Signalé au chef de file et à Thierry pour le fil
+  qui tient les avis.
+- **2** — le relevé différé lit le bien en liste et garde le bien ACTIF (la
+  règle de `bien.js`) ; une lecture ratée est remise au plus `REMISES_MAX`
+  (12, une heure de cron) fois, puis l'incident `notif_hote_non_envoyee`.
+- **3** — un envoi sans erreur qui n'a joint personne garde sa mémoire
+  (`rienNestParti`, qui vaut aussi pour les avis) ; le lot « sans personne »
+  ne compte dans son plafond que ce qui est parti (`injoignables` à part).
+- **4** — `alert-notify.js` : le marqueur se lit en liste (`limit(1)`), une
+  lecture ratée s'abstient, et la notification ne part que si la tâche — la
+  mémoire — est écrite. Code non résolu et ménage refusé.
+- **5** — les mémoires du lot « sans personne » se lisent par paquets de cent.
+- **6** — un bien sans nom s'annonce « votre logement », plus par sa référence.
+- **7** — NON corrigé : quel écran ouvre le « code non résolu » est une
+  question produit (aujourd'hui la conversation, utile au titulaire pour
+  envoyer le code ; refusée à un membre qui a `reservations` sans `messages`).
+  Posée à Thierry.
+- **8** — un brouillon abandonné pour réservation annulée ou séjour terminé
+  est rendu à l'hôte sans « Réponse à valider ».

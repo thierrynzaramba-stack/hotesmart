@@ -164,17 +164,41 @@ test('LE TEST QUI COMPTE : le lot d\'un cycle — une lecture des mémoires, les
   const insertions = []
   const db = fakeSupabase(t)
   const espion = { from (table) { const q = db.from(table); const ins = q.insert; q.insert = (r) => { insertions.push(r.booking_id); return ins(r) }; return q } }
-  const c = capte()
+  const c = capte({ ok: true, push: 1, erreurs: [] })
   const liste = [{ compte: COMPTE, propertyId: 'p1', jour: '2026-11-12' }, { compte: COMPTE, propertyId: 'p1', jour: '2026-11-12' }]
   for (let i = 0; i < 25; i++) liste.push({ compte: COMPTE, propertyId: 'p1', jour: `2026-12-${String(i + 1).padStart(2, '0')}`, motif: 'jours' })
   const bilan = await ev.notifierMenagesSansPersonne({ liste, db: espion, deps: c.deps })
-  assert.deepStrictEqual(bilan, { envoyes: 20, deja: 1, reportes: 5, erreurs: 0 })
+  assert.deepStrictEqual(bilan, { envoyes: 20, injoignables: 0, deja: 1, reportes: 5, erreurs: 0 })
   assert.ok(!insertions.includes('notif:menage:p1:2026-11-12'), 'le déjà prévenu ne coûte même pas une insertion')
   assert.strictEqual(c.appels[0].donnees.motif, 'jours')
   // Le cycle suivant : les vingt sont mémorisés, les cinq partent.
-  const c2 = capte()
+  const c2 = capte({ ok: true, push: 1, erreurs: [] })
   const b2 = await ev.notifierMenagesSansPersonne({ liste, db: fakeSupabase(t), deps: c2.deps })
-  assert.deepStrictEqual(b2, { envoyes: 5, deja: 21, reportes: 0, erreurs: 0 })
+  assert.deepStrictEqual(b2, { envoyes: 5, injoignables: 0, deja: 21, reportes: 0, erreurs: 0 })
+})
+
+test('LE TEST QUI COMPTE (review de rattrapage, constat 3) : personne de joignable — la mémoire reste, le plafond est libre pour les autres', async () => {
+  const t = tablesDeBase()
+  // Envoi sans erreur, mais personne n'avait d'appareil ni d'e-mail.
+  const injoignable = capte({ ok: true, destinataires: 1, sans_canal: 0, push: 0, emails: 0, sms: 0, en_attente: 0, erreurs: [] })
+  const liste = Array.from({ length: 25 }, (_, i) => ({ compte: COMPTE, propertyId: 'p1', jour: `2026-12-${String(i + 1).padStart(2, '0')}` }))
+  const b1 = await ev.notifierMenagesSansPersonne({ liste, db: fakeSupabase(t), deps: injoignable.deps })
+  assert.deepStrictEqual(b1, { envoyes: 0, injoignables: 25, deja: 0, reportes: 0, erreurs: 0 })
+  const b2 = await ev.notifierMenagesSansPersonne({ liste, db: fakeSupabase(t), deps: injoignable.deps })
+  assert.deepStrictEqual([b2.deja, injoignable.appels.length], [25, 25], 'pas un second essai')
+  // Un vrai échec, lui, rend la mémoire : le cycle suivant réessaie.
+  assert.strictEqual(ev.rienNestParti({ ok: false, destinataires: 1, erreurs: ['exception'] }), true)
+  assert.strictEqual(ev.rienNestParti({ ok: true, destinataires: 1, erreurs: ['email_echec'] }), true)
+})
+
+test('les mémoires d\'un cycle se lisent par paquets de cent (review de rattrapage, constat 5)', async () => {
+  const t = tablesDeBase()
+  const tailles = []
+  const db = fakeSupabase(t)
+  const espion = { from (table) { const q = db.from(table); if (table === 'message_sent_log') { const i = q.in; q.in = (c, v) => { tailles.push(v.length); return i.call(q, c, v) } } return q } }
+  const liste = Array.from({ length: 230 }, (_, i) => ({ compte: COMPTE, propertyId: `p${i}`, jour: '2026-12-01' }))
+  await ev.notifierMenagesSansPersonne({ liste, db: espion, deps: capte({ ok: true, push: 1, erreurs: [] }).deps })
+  assert.deepStrictEqual(tailles, [100, 100, 30])
 })
 
 test('« sans jours réglés » se dit comme un réglage à faire, pas comme un manque de monde', () => {
@@ -231,16 +255,19 @@ function stub (rel, exports) {
   require.cache[abs] = m
 }
 
-function preparerRefus ({ dejaRefuse = false } = {}) {
+function preparerRefus ({ dejaRefuse = false, marqueurIllisible = false, tacheRefusee = false } = {}) {
   const hote = []
   const client = {
     from (table) {
       const chain = {
         select () { return chain },
         eq () { return chain },
-        maybeSingle () { return Promise.resolve({ data: table === 'agent_tasks' && dejaRefuse ? { id: 't1' } : null, error: null }) },
+        limit () {
+          if (table === 'agent_tasks' && marqueurIllisible) return Promise.resolve({ data: null, error: { message: 'panne' } })
+          return Promise.resolve({ data: table === 'agent_tasks' && dejaRefuse ? [{ id: 't1' }, { id: 't2' }] : [], error: null })
+        },
         single () { return Promise.resolve({ data: null, error: { message: 'aucune configuration' } }) },
-        insert () { return Promise.resolve({ error: null }) }
+        insert () { return Promise.resolve({ error: tacheRefusee ? { message: 'refus' } : null }) }
       }
       return chain
     }
@@ -262,6 +289,12 @@ test('LE TEST QUI COMPTE : un ménage refusé prévient l\'hôte et son équipe 
   const b = preparerRefus({ dejaRefuse: true })
   await b.alertMenageRefuse({ userId: COMPTE, propertyId: UUID_BIEN, bookingId: 'b1', departureDate: '2026-11-12', prenom: 'Régina' })
   assert.deepStrictEqual(b.hote, [])
+  // Sans mémoire (marqueur illisible, tâche refusée) : pas de notification (constat 4).
+  for (const o of [{ marqueurIllisible: true }, { tacheRefusee: true }]) {
+    const c = preparerRefus(o)
+    await c.alertMenageRefuse({ userId: COMPTE, propertyId: UUID_BIEN, bookingId: 'b1', departureDate: '2026-11-12', prenom: 'Régina' })
+    assert.deepStrictEqual(c.hote, [], JSON.stringify(o))
+  }
 })
 
 

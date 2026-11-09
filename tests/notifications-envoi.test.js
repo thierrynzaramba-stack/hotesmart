@@ -740,6 +740,37 @@ test('différé : la ligne ne porte RIEN du voyageur ; à la sortie, la réserva
   assert.deepEqual(r2, { ok: true, ignore: true, raison: 'reservation_defaite' })
 })
 
+test('review de rattrapage, constat 2 : DEUX lignes pour la même référence (bien archivé puis recréé) — le relevé part, avec le bien ACTIF', async () => {
+  const { db } = base({
+    bookings_snapshot: [{ user_id: COMPTE, booking_id: 'b1', snapshot: { status: 'confirmed', provider: 'channex', source: 'Offline' } }],
+    properties: [
+      { user_id: COMPTE, provider_property_id: 'p1', name: 'Ancien', cancellation_policy: 'flexible_j2', archive_le: '2026-10-01T00:00:00Z' },
+      { user_id: COMPTE, provider_property_id: 'p1', name: 'La bulle', cancellation_policy: 'j7', archive_le: null }
+    ]
+  })
+  const appels = []
+  const r = await releve.envoyerDiffere({ compte: COMPTE, contenu: { releve: { bookingId: 'b1', propertyId: 'p1' } }, maintenant: MIDI, db,
+    envoyer: async (o) => { appels.push([o.bien, o.politique]); return { ok: true } } })
+  assert.equal(r.ok, true)
+  assert.deepEqual(appels, [['La bulle', 'j7']])
+})
+
+test('review de rattrapage, constat 2 : une lecture qui échoue toujours ne remet pas le relevé sans fin — au bout de REMISES_MAX, l\'incident', async () => {
+  const panne = base({}, { pannes: ['bookings_snapshot'] })
+  const incidents = []
+  let ligne = { id: 'r1', user_id: COMPTE, compte_id: COMPTE, code: 'reservation', sujet: 'releve:b1', canaux: ['email'], a: new Date(MIDI).toISOString(),
+    contenu: { releve: { bookingId: 'b1', propertyId: 'p1', provider: 'channex' }, bienRef: 'p1' } }
+  const sorties = []
+  for (let i = 0; i < releve.REMISES_MAX; i++) {
+    const r = await releve.sortirDeLaFile({ ligne, maintenant: MIDI, db: panne.db, signaler: async (t, o) => { incidents.push([t, o.userId]) } })
+    sorties.push(r.remise ? 'remise' : 'incident')
+    const t = panne.etat.tables.notifications_file
+    if (r.remise) { ligne = { ...ligne, contenu: t[t.length - 1].contenu }; t.length = 0 }
+  }
+  assert.deepEqual(sorties, [...Array(releve.REMISES_MAX - 1).fill('remise'), 'incident'])
+  assert.deepEqual(incidents, [['notif_hote_non_envoyee', COMPTE]])
+})
+
 test('« suivre mes réglages » vaut au moment de partir : l\'e-mail décoché pendant la nuit retient le relevé', async () => {
   const { db } = base({
     bookings_snapshot: [{ user_id: COMPTE, booking_id: 'b1', snapshot: { status: 'confirmed', provider: 'channex', source: 'Offline' } }],

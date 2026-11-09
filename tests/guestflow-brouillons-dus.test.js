@@ -1071,6 +1071,16 @@ test('LE TEST QUI COMPTE (2c-2) : non délivrée, annulée par une garde, ou vid
   }
 })
 
+test('review de rattrapage, constat 8 : réservation annulée — la tâche est rendue, mais personne n\'est sonné pour y répondre', async () => {
+  const vus = []
+  const b = bancNominal({ taches: [tache()],
+    snapshots: [{ user_id: COMPTE, booking_id: 'BK1', snapshot: { status: 'cancelled', provider: 'channex', source: 'Airbnb' } }] })
+  const bilan = await lancer(b, { envoyer: async () => { throw new Error('ne doit pas etre appele') }, notifications: notificationsCaptees(vus) })
+  assert.equal(bilan.abandonnes, 1)
+  assert.match(b.etat.taches[0].summary, /reservation_annulee/)
+  assert.deepEqual(vus, [])
+})
+
 test('(2c-2) une notification qui lève n\'arrête pas la passe qui envoie', async () => {
   const b = bancNominal({ taches: [tache({ id: 't1' }), tache({ id: 't2', book_id: 'BK2' })] })
   const bilan = await lancer(b, {

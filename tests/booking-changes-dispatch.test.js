@@ -494,6 +494,14 @@ test('LE TEST QUI COMPTE : une vente RECENTE previent par le point d\'envoi, ave
   assert.strictEqual(n.exclusions, null, 'une OTA : aucun releve, rien a retirer')
 })
 
+test('review de rattrapage, constat 6 : un bien sans nom ne s\'annonce pas par sa reference provider', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [ev({ provider: 'channex', property_id: 'ref-sans-fiche' })], venteLe: ilYA(1),
+    notifHoteRetour: { ok: true, ignore: true, raison: 'source non Offline' } })
+  await mod.dispatchBookingChanges({})
+  assert.strictEqual(etat.notifications.length, 1)
+  assert.strictEqual(etat.notifications[0].donnees.bien, null, 'le texte dira « votre logement »')
+})
+
 test('LE TEST QUI COMPTE : pas de « nouvelle reservation » pour une vente ancienne, importee, de date inconnue, ou deja defaite', async () => {
   const cas = [
     [{ venteLe: ilYA(10) }, 'vendue il y a dix jours (bien connecte, migration)'],
