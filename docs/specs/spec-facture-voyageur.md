@@ -597,6 +597,44 @@ pour l'ancien trigger ; `numerotation` rend son nombre de requêtes et
 l'endpoint les additionne, un test vérifie le nombre exact ; le 23514 de
 l'upsert devient `suite_figee`. Chaque correction tuée par une mutation.
 
+**Review 3, la dernière** (sous-agent, 9 nov. 2026, sur consigne du chef de
+file : le nouveau code de D2 bis seulement, garde serveur au centre) — TRACE :
+- arbre lu : `/home/claude/hotesmart` ; branche : `facture-voyageur` ;
+- HEAD déclaré lu : `0aaa97b81606ca004a36f8063b8534964112d87b` ;
+- plages : A `c97ee4ea812f57a6ab66ec04ed6a4db51f4282a5..82374b63170f6534d15600e4a14afb2cc0048c12`
+  (étape 1a) et B `4e2566b852053179a5a7c8a48b52a1475a285bf8..0aaa97b81606ca004a36f8063b8534964112d87b`
+  (étape 1b) — le contenu du merge d'`accueil-voyageur` (4e2566b8) n'est pas
+  relu ;
+- tests du lot relancés par la review : 74/74 ;
+- fichiers cités, confrontés à `git diff --name-only` des deux plages : dans
+  le diff — `api/entites-juridiques.js`, `lib/entites-juridiques.js`,
+  `shared/entites-juridiques-vue.js`, `migrations/2026-11-08-entites-juridiques.sql`,
+  `tests/entites-juridiques.test.js`, `docs/kb/entites-juridiques.md`,
+  `docs/specs/spec-facture-voyageur.md`, `api/logement.js`,
+  `pages/logement.html`, `tests/logement-facturation.test.js` ; hors diff,
+  preuve seulement, aucun constat — `lib/require-permission.js`,
+  `lib/permissions.js`, `REVIEW.md`.
+
+Garde serveur, vérifiée : seul le titulaire du compte du logement crée,
+rattache, retire, modifie ou règle la numérotation ; un membre (même
+`facturation: write`, périmètre « all ») et un compte voisin sont refusés en
+403, X-Compte ou pas ; une entité d'un autre compte rend 404 ; le `modifier`
+de la fiche ne peut pas être vrai pour qui la fenêtre refuse.
+
+**1 sécurité, 4 autres constats** :
+1. **SÉCURITÉ** — le GET de la fenêtre rendait à un MEMBRE dans son
+   périmètre TOUTES les entités actives du compte, avec adresse, SIRET,
+   e-mail et téléphone, y compris celles rattachées à des logements hors de
+   son périmètre (mesuré : membre limité à A1, entité de A2 lue en entier).
+2. Création : un rattachement en panne rendait un 503 indiscernable d'une
+   création ratée, la fenêtre restait sur le formulaire, et chaque nouvel
+   envoi créait un doublon ; deux envois rapprochés partaient tous les deux.
+3. Le focus n'était pas rendu après un geste (le bouton d'origine, repeint,
+   était détaché).
+4. Le test de la page ne lisait que le source : il passait sans
+   `surFermeture`, qui rend le bouton inerte après la première fermeture.
+5. La spec annonçait des nombres de requêtes faux (`3 +`, « une de plus »).
+
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
 Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.
