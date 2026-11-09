@@ -148,3 +148,13 @@ test('le message du code n annonce pas l heure de depart synchronisee du bien : 
   const texte = texteEnvoye(taches)
   assert.ok(!texte.includes('13:00'), texte)
 })
+
+test('le message du code porte l adresse ENTIERE de la fiche (rue, code postal, ville)', async () => {
+  // Recette du 9 novembre 2026 : la fiche range l'adresse en trois champs.
+  const { mod, taches } = charger()
+  await mod.processArrivalCodes('u1', null,
+    { id: '0db6b39b', name: 'La bulle', provider: 'channex', address: '4 rue du bourg vieux', zip_code: '65200', city: 'Bagnères-de-Bigorre' },
+    [arrivante()], {})
+  const texte = texteEnvoye(taches)
+  assert.ok(texte.includes('4 rue du bourg vieux, 65200 Bagnères-de-Bigorre'), texte)
+})

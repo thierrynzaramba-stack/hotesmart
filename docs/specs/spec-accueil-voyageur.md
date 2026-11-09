@@ -127,6 +127,10 @@ voyageur reçoit — §2, S2.)
   (`buildKnowledgeText`, quatre appelants). Elle reçoit désormais aussi
   l'adresse de la fiche et les horaires effectifs. Un test compare, bien par
   bien, ce que l'IA lit avant et après le lot.
+- **S4bis. L'adresse envoyée est ENTIÈRE** (recette du 9 novembre 2026) :
+  rue, code postal et ville de la fiche, assemblés par `adresseDeLaFiche`. Une
+  rue saisie avec son code postal ne le reçoit pas deux fois ; sans rue, pas
+  d'adresse (un manque, pas « 65200 Bagnères-de-Bigorre »).
 - **S4. Aucune adresse perdue au déploiement.** La reprise (§3) passe AVANT le
   merge en production : sinon un bien dont l'adresse ne vivait que dans la base
   — **ou, pour un logement Beds24, que chez Beds24** — enverrait « [ADRESSE] »
@@ -163,15 +167,17 @@ voyageur reçoit — §2, S2.)
 
 **Mesuré en production le 9 novembre 2026** (requête en lecture seule, lancée
 par Thierry) : quatre logements en service, **tous Channex, aucun Beds24** — les
-deuxième et troisième listes sont vides. Aucune fiche vide. Deux **écarts**, où
-la base est plus complète que la fiche (sans ville ni code postal dans la
-fiche) : Cœur de vie 23 (« 23 rue de l'horloge » contre « 23 rue de l'Horloge,
-Bagnéres de Bigorre, 65200 ») et La bulle (« 4 rue du bourg vieux » contre
-« 4 Rue du Bourg Vieux, Bagnères-de-Bigorre, 65200 »). Choix proposé à Thierry :
-compléter ces deux fiches, par l'écran de la fiche, avant le go prod. Ofuro
-Futari et Colomiers n'ont pas de ligne dans la base ; leurs fiches n'ont pas de
-ville non plus, à compléter aussi (l'adresse de Colomiers semble être celle de
-Toulouse : à vérifier par Thierry).
+deuxième et troisième listes sont vides. Aucune fiche vide.
+⚠ **Et la recette du même jour a corrigé la lecture de cette mesure.** La
+requête ne lisait que `properties.address` ; or la fiche range l'adresse en
+TROIS champs (Adresse, Code postal, Ville). Cœur de vie 23 porte « 23 rue de
+l'horloge », 65200, Bagnères-de-Bigorre : sa fiche est complète. Ce qui ne
+l'était pas, c'est le lot, qui n'envoyait que la rue. Corrigé sur la branche :
+`{adresse}` assemble les trois champs (`adresseDeLaFiche`, lib/balises.js),
+sur tous les chemins (Channex, Beds24, répartiteur, code d'accès, IA, aperçu).
+Rien à reprendre dans les fiches : la conclusion « compléter deux fiches »,
+donnée à Thierry plus tôt dans la journée, était fausse, et il n'a rien
+modifié.
 
 ## 4. Inventaire du bloc « Infos du logement » (base de connaissance)
 
