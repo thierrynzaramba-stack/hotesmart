@@ -86,6 +86,9 @@ async function apiCall(endpoint, method = 'GET', body = null) {
       // pour afficher.
       erreur.code = data.error || null
       erreur.details = typeof data.message === 'string' ? data.message : null
+      // Le CHAMP refuse, quand le serveur le nomme (entites juridiques) : l'ecran
+      // pose le message sous ce champ-la.
+      erreur.champ = typeof data.champ === 'string' ? data.champ : null
       throw erreur
     }
 
@@ -278,6 +281,12 @@ export const api = {
   connaissance: {
     lire: (params = '') => apiCall(`ecran/connaissance${params ? '?' + params : ''}`, 'GET'),
     ecrire: (corps) => apiCall('ecran/connaissance', 'POST', corps)
+  },
+  // Les entites juridiques (facture voyageur, etape 1) : UN endpoint, qui peint
+  // tout l'ecran en GET et porte un geste a la fois en POST.
+  entitesJuridiques: {
+    lire: () => apiCall('entites-juridiques', 'GET'),
+    ecrire: (corps) => apiCall('entites-juridiques', 'POST', corps)
   },
   reservationDirecte: {
     creer:   (payload)   => apiCall('reservation-directe', 'POST', payload),

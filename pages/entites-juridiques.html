@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « ENTITÉS JURIDIQUES » — facture du voyageur, étape 1 (8 novembre
+     2026). Spec : docs/specs/spec-facture-voyageur.md §5.1 ; KB :
+     docs/kb/entites-juridiques.md.
+     L'identité légale qui émet les factures et porte les charges du compte.
+     La vue est `shared/entites-juridiques-vue.js` ; ses données viennent d'UN
+     endpoint, /api/entites-juridiques (GET peint tout, POST un geste à la fois).
+     ⚠ PAGE NON DÉLÉGABLE : réservée au titulaire, comme le domaine
+     `facturation` qu'elle règle — le serveur refuse l'écriture à un membre.
+     ⚠ L'APPLI INSTALLABLE : cette page charge `shared/nav.js` et n'enregistre
+     jamais de service worker elle-même.
+     RÈGLES : aucun hexa, aucun texte en dur (clés `ej.*`), zones de clic
+     ≥ 44 px, pas de défilement horizontal à 390 px. -->
+<style>
+  .ej-page { max-width: 760px; }
+  .ej-entete { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--gap-l); }
+  .ej-retour { display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
+    color: var(--muted); text-decoration: none; font-size: var(--fs-caption); }
+  .ej-retour:hover { color: var(--ink); text-decoration: underline; }
+  .ej-retour svg { width: 14px; height: 14px; transform: rotate(180deg); }
+  [data-ej-racine] { display: flex; flex-direction: column; gap: var(--gap-m); }
+  .ej-liste { display: flex; flex-direction: column; gap: var(--gap-m); }
+  .ej-carte__tete { display: flex; align-items: center; gap: var(--gap-s); flex-wrap: wrap; }
+  .ej-nom { margin: 0; overflow-wrap: anywhere; }
+  .ej-actions { display: flex; gap: var(--gap-s); flex-wrap: wrap; }
+  .ej-actions .btn, .ej-ajouter { min-height: 44px; }
+  .ej-ajouter { align-self: flex-start; }
+  .ej-num { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-s);
+    flex-wrap: wrap; padding-top: var(--gap-s); border-top: 1px solid var(--line); }
+  .ej-num p { margin: 0; }
+  .ej-form { display: flex; flex-direction: column; gap: var(--gap-m); width: 100%; }
+  .ej-champ { display: flex; flex-direction: column; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
+  .ej-champ label, .ej-champ legend { font-size: var(--fs-caption); font-weight: 600; color: var(--ink); padding: 0; }
+  .ej-champ input, .ej-champ select {
+    width: 100%; box-sizing: border-box; min-height: 44px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+    color: var(--ink); font: inherit; font-size: var(--fs-body); }
+  .ej-champ input:focus-visible, .ej-champ select:focus-visible {
+    outline: 2px solid var(--ink); outline-offset: 1px; border-color: var(--ink); }
+  /* L'état fautif se voit autrement que par la couleur : le message suit. */
+  .ej-champ [aria-invalid="true"] { border-color: var(--danger); }
+  .ej-erreur { font-size: var(--fs-caption); color: var(--danger); }
+  .ej-aide { font-size: var(--fs-caption); color: var(--muted); }
+  .ej-radios { display: flex; gap: var(--gap-m); flex-wrap: wrap; }
+  .ej-radio { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-weight: 400; }
+  .ej-radio input { width: 18px; height: 18px; min-height: 0; }
+  .ej-duo { display: grid; gap: var(--gap-m);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+  .ej-message { margin: 0; color: var(--danger); }
+  .ej-message:empty, .ej-bandeau:empty { display: none; }
+  .ej-bandeau { margin: 0; color: var(--danger); }
+  .ej-bien { display: grid; grid-template-columns: minmax(8em, 1fr) minmax(0, 1.4fr);
+    align-items: center; gap: var(--gap-s); padding: 6px 0; border-top: 1px solid var(--line); }
+  .ej-bien__nom { overflow-wrap: anywhere; }
+  .ej-bien select { width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; }
+  .ej-archivees summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--muted); }
+  .ej-archivee { padding: var(--gap-s) 0; border-top: 1px solid var(--line); }
+  .ej-archivee p { margin: 4px 0 0; }
+  .ej-vide { margin: 0; }
+  @media (max-width: 560px) {
+    .ej-bien { grid-template-columns: 1fr; }
+    .ej-actions { flex-direction: column; align-items: stretch; }
+    .ej-actions .btn, .ej-ajouter { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
+
+<main class="page ej-page">
+  <div class="ej-entete">
+    <a class="ej-retour" href="/settings">
+      <svg aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+      <span data-i18n="ej.back"></span>
+    </a>
+    <h1 class="h1" data-i18n="ej.title"></h1>
+    <p class="muted" data-i18n="ej.intro"></p>
+  </div>
+  <div data-ej-racine><p class="muted small" data-i18n="common.loading"></p></div>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+// ⚠ PAGE NON DÉLÉGABLE : l'entité juridique est réglée par le titulaire seul
+// (domaine `facturation`). Sur un compte partagé, la page le dit.
+import { exigerCompteProprePage } from '/shared/compte-courant.js'
+await exigerCompteProprePage({ nomPage: 'Les entités juridiques' })
+
+import { requireAuth } from '/components/auth-guard.js'
+import { getUser, signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { api } from '/shared/api-client.js'
+import { compteCourant, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
+import { confirmerDansLaPage } from '/shared/confirmer.js'
+import { monterEntites } from '/shared/entites-juridiques-vue.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+
+async function init () {
+  const session = await requireAuth()
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+  const user = await getUser()
+  $('[data-bind="initials"]').textContent = (user?.email || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis')
+  })
+  HSNav.render({ peutLire })
+  I18n.apply(document)
+
+  await monterEntites({
+    racine: $('[data-ej-racine]'),
+    api: api.entitesJuridiques,
+    t, esc,
+    langue: document.documentElement.lang || 'fr',
+    confirmer: async (titre, texte) => (await confirmerDansLaPage({
+      titre, texte, fermer: t('ej.cancel'),
+      boutons: [{ cle: 'oui', libelle: t('ej.archive'), principal: true }, { cle: 'non', libelle: t('ej.cancel') }]
+    })) === 'oui'
+  })
+}
+
+init().catch(e => logger.error('EntitesJuridiques', e.message, e))
+</script>
+</body>
+</html>
