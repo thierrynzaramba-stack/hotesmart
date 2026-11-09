@@ -60,6 +60,18 @@ test('le résumé est tenu par un TRIGGER (cellule d’avant et d’après), pas
   assert.match(sql, /new\.user_id, new\.entite_juridique_id/)
 })
 
+test('⚠ une facture SANS signal compte : jamais `signal = …` nu dans le résumé (NULL = x rend NULL, et la ligne sortait du total)', () => {
+  const fonction = sql.slice(sql.indexOf('public.charges_recalculer_cellule('), sql.indexOf('public.charges_resume_suivre()'))
+  assert.ok(fonction.length > 100, 'fonction du résumé trouvée')
+  const code = fonction.split('\n').filter(l => !l.trim().startsWith('--')).join('\n')
+  assert.doesNotMatch(code, /signal\s*=\s*'/)
+  assert.match(code, /signal is not distinct from\s+'commission_deja_comptee'/)
+})
+
+test('deux verrous de cellule se prennent TOUJOURS dans le même ordre (plus petite clé d’abord)', () => {
+  assert.match(sql, /least\(k_old, k_new\)\);[\s\S]{0,120}greatest\(k_old, k_new\)\);/)
+})
+
 test('collage manuel : aucune ligne de 60 caractères ou plus', () => {
   const longues = sql.split('\n').map((l, i) => [i + 1, l.length]).filter(([, n]) => n >= 60)
   assert.deepEqual(longues, [])

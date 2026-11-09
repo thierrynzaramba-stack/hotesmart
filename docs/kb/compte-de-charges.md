@@ -36,3 +36,28 @@ exercice. Spec (décisions de Thierry Q1 à Q23, 8-9 novembre 2026) :
 - Les lectures de l'entité viennent de `lib/entites-juridiques.js` (fil
   facturation) : `entitesDuCompte`, `entiteDuBien` — sans entité par défaut
   (D2 bis), un logement sans lien n'a pas d'entité.
+- **Un `signal` vide se compare par `is not distinct from`, jamais par `=`.**
+  `NULL = 'x'` rend NULL : la première version du résumé sortait du total
+  toutes les factures SANS signal, c'est-à-dire presque toutes (review du
+  lot 2). `tests/charges-migration.test.js` refuse un `signal = '…'` nu.
+- **Un groupe de doublons n'a qu'un niveau** : une racine (`groupe_doublon`
+  vide), des membres qui la désignent. Deux groupes qui se rencontrent
+  fusionnent ; une racine supprimée est d'abord remplacée par son plus ancien
+  membre (sinon chaque membre redevient une racine et le total compte la
+  facture plusieurs fois) ; un survivant seul perd son signal.
+- **Le doublon fournisseur se cherche sur `cle_doublon`** (SIREN ou nom
+  normalisé + numéro sans ponctuation), écrite par le writer à chaque lecture
+  et validation — jamais sur le numéro brut.
+- **Trois pannes ne comptent jamais comme un échec de lecture** : l'IA (dont
+  404, 429, 5xx, délai de 20 s dépassé, crédit épuisé), le stockage (tout
+  sauf un objet introuvable), et le compte des lectures du jour illisible.
+  Chacune laisse la charge `a_lire` avec un motif (`panne_ia`,
+  `plafond_ia`) et la renvoie en fin de file du cron, qui tourne par
+  `modifie_le` et ne prend une charge qu'après deux minutes (l'endpoint qui
+  vient de la confirmer est en train de la lire).
+- **Garde de coût** : `PLAFOND_LECTURES_JOUR = 50` lectures par compte sur
+  24 h glissantes, comptées dans `ia_appels` (fonction `charges-lecture`).
+  Au-delà, la charge attend ; rien n'est perdu. Valeur posée au lot 2, à
+  revoir sur la mesure réelle (spec §6).
+- **Une entité archivée** n'est acceptée à la validation que si la charge la
+  porte déjà (corriger une vieille facture sans changer d'entité).

@@ -59,6 +59,10 @@ create table if not exists public.charges (
   justificatif_type text,
   justificatif_octets int,
   justificatif_empreinte text,
+  -- « Même fournisseur, même numéro » NORMALISE
+  -- (lib/charges/regles.js, cleFournisseurNumero) :
+  -- « F 12 » et « F-12 » sont la meme facture.
+  cle_doublon text,
   groupe_doublon uuid
     references public.charges (id)
     on delete set null,
@@ -114,6 +118,9 @@ create index if not exists charges_empreinte_idx
   on public.charges
   (user_id, justificatif_empreinte)
   where justificatif_empreinte is not null;
+create index if not exists charges_cle_doublon_idx
+  on public.charges (user_id, cle_doublon)
+  where cle_doublon is not null;
 create index if not exists charges_groupe_idx
   on public.charges (groupe_doublon)
   where groupe_doublon is not null;
@@ -218,6 +225,26 @@ alter table public.charges_resume
 revoke all on public.charges_resume
   from anon, authenticated;
 
+-- La cle d'une cellule, pour son verrou. Les
+-- verrous se prennent TOUJOURS dans l'ordre de cette
+-- cle : deux ecritures croisees ne s'interbloquent
+-- pas (constat de review).
+create or replace function
+  public.charges_cle_cellule(
+    p_user uuid, p_entite uuid,
+    p_bien uuid, p_jour date)
+returns bigint
+language sql
+immutable
+set search_path = public
+as $$
+  select hashtext(
+    p_user::text || '|'
+    || coalesce(p_entite::text, '-') || '|'
+    || coalesce(p_bien::text, '-') || '|'
+    || p_jour::text)::bigint;
+$$;
+
 -- RECALCULE UNE CELLULE, a partir des charges.
 -- Ce qui compte (spec §6, Q4, Q14) :
 --  · s'additionnent `a_verifier` et `validee` ;
@@ -238,11 +265,9 @@ security definer
 set search_path = public
 as $$
 begin
-  perform pg_advisory_xact_lock(hashtext(
-    p_user::text || '|'
-    || coalesce(p_entite::text, '-') || '|'
-    || coalesce(p_bien::text, '-') || '|'
-    || p_jour::text));
+  perform pg_advisory_xact_lock(
+    public.charges_cle_cellule(
+      p_user, p_entite, p_bien, p_jour));
 
   delete from public.charges_resume r
   where r.user_id = p_user
@@ -279,7 +304,11 @@ begin
   from (
     select x.*,
       (x.statut in ('a_verifier', 'validee')
-       and not (x.signal = 'commission_deja_comptee'
+       -- ⚠ `is not distinct from`, PAS `=` : un
+       -- signal vide rend `=` NULL, et la ligne
+       -- sortait du total (constat de review).
+       and not (x.signal is not distinct from
+                  'commission_deja_comptee'
                 and not x.signal_tranche)
        and not (x.groupe_doublon is not null
                 and not x.signal_tranche)
@@ -309,7 +338,23 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  k_old bigint;
+  k_new bigint;
 begin
+  -- Les deux verrous d'abord, dans l'ordre des cles.
+  if tg_op = 'UPDATE' then
+    k_old := public.charges_cle_cellule(
+      old.user_id, old.entite_juridique_id,
+      old.bien_id, old.jour);
+    k_new := public.charges_cle_cellule(
+      new.user_id, new.entite_juridique_id,
+      new.bien_id, new.jour);
+    perform pg_advisory_xact_lock(
+      least(k_old, k_new));
+    perform pg_advisory_xact_lock(
+      greatest(k_old, k_new));
+  end if;
   if tg_op in ('UPDATE', 'DELETE') then
     perform public.charges_recalculer_cellule(
       old.user_id, old.entite_juridique_id,
@@ -346,13 +391,20 @@ declare
   n int := 0;
 begin
   for r in
-    select c.entite_juridique_id, c.bien_id, c.jour
-    from public.charges c
-    where c.user_id = p_user
-    union
-    select s.entite_juridique_id, s.bien_id, s.jour
-    from public.charges_resume s
-    where s.user_id = p_user
+    select u.entite_juridique_id, u.bien_id, u.jour
+    from (
+      select c.entite_juridique_id, c.bien_id,
+        c.jour
+      from public.charges c
+      where c.user_id = p_user
+      union
+      select s.entite_juridique_id, s.bien_id,
+        s.jour
+      from public.charges_resume s
+      where s.user_id = p_user
+    ) u
+    order by public.charges_cle_cellule(p_user,
+      u.entite_juridique_id, u.bien_id, u.jour)
   loop
     perform public.charges_recalculer_cellule(
       p_user, r.entite_juridique_id,
@@ -383,6 +435,10 @@ $$;
 -- ⚠ DES FONCTIONS `security definer` SONT APPELABLES
 -- PAR POSTGREST : sans ce retrait, n'importe quel
 -- compte connecte recalculerait le resume d'un autre.
+revoke execute on function
+  public.charges_cle_cellule(
+    uuid, uuid, uuid, date)
+  from public, anon, authenticated;
 revoke execute on function
   public.charges_recalculer_cellule(
     uuid, uuid, uuid, date)

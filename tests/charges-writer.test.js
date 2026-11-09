@@ -119,11 +119,14 @@ test('confirmer une charge d’un AUTRE compte : 404, rien n’est relu ni écri
 
 // ─── Appliquer une lecture ─────────────────────────────────────────────────
 
-test('⚠ une PANNE du fournisseur d’IA ne compte pas : aucune écriture', async () => {
+test('⚠ une PANNE du fournisseur d’IA ne compte pas : seul le motif est écrit, rien n’est compté', async () => {
   const { client, requetes } = baseEnregistreuse()
   const r = await charges.appliquerLecture(client, { compte: COMPTE, id: ID, resultat: { panne: true } })
   assert.equal(r.issue, 'panne')
-  assert.equal(requetes.length, 0)
+  assert.equal(requetes.length, 1)
+  assert.deepEqual(requetes[0].charge, { motif: 'panne_ia' }, 'ni tentative, ni statut')
+  assert.equal(filtre(requetes[0], 'statut'), 'a_lire')
+  sansFuite(requetes)
 })
 
 test('un ÉCHEC de lecture compte ; au troisième, la charge passe `illisible` et n’est plus relue', async () => {
@@ -329,8 +332,220 @@ test('lire en attente : une PANNE arrête la passe, sans rien compter', async ()
   let appels = 0
   const r = await charges.lireEnAttente(client, {
     lire: async () => { appels++; return { panne: true } }, echeance: Date.now() + 10000
-  })
+  }, { lectureAutorisee: async () => true })
   assert.equal(r.panne, true)
   assert.equal(appels, 1, 'la seconde charge n’est pas tentée')
-  assert.ok(!requetes.some(x => x.op === 'update'))
+  const majs = requetes.filter(x => x.op === 'update')
+  assert.equal(majs.length, 1, 'la charge en panne est seulement repoussée en fin de file')
+  assert.deepEqual(majs[0].charge, { motif: 'panne_ia' })
+})
+
+// ─── Correctifs de la review du lot 2 ──────────────────────────────────────
+// Chacun de ces tests rougit contre `7de09c1a` (contre-épreuve faite avant le
+// commit, REVIEW.md règle 19).
+
+const M1 = '66666666-6666-4666-8666-666666666661'
+const M2 = '66666666-6666-4666-8666-666666666662'
+const R2 = '77777777-7777-4777-8777-777777777772'
+
+// Une confirmation dont l'empreinte rencontre `autre`.
+function confirmationQuiRencontre (autre, { maj = { id: ID, statut: 'a_lire', groupe_doublon: null } } = {}) {
+  return baseEnregistreuse((r) => {
+    if (r.op === 'select' && r.unique) return { data: { id: ID, statut: 'envoi', justificatif_chemin: `${COMPTE}/${ID}` } }
+    if (r.op === 'update' && r.unique) return { data: maj }
+    if (r.op === 'select') return { data: [autre] }
+    return { data: null }
+  }, { download: () => ({ data: blob(PDF), error: null }) })
+}
+
+test('⚠ doublon : une racine rapprochée d’un de SES membres ne se désigne pas elle-même', async () => {
+  const { client, requetes } = confirmationQuiRencontre({ id: M1, groupe_doublon: ID, signal: 'doublon' })
+  const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID })
+  assert.equal(r.ok, true)
+  assert.ok(!requetes.some(x => x.op === 'update' && x.charge.groupe_doublon === ID && filtre(x, 'id') === ID),
+    'groupe_doublon = id : la charge sortirait du total')
+  assert.ok(!requetes.some(x => x.op === 'update' && 'groupe_doublon' in x.charge),
+    'déjà dans le même groupe : rien à regrouper')
+})
+
+test('⚠ doublon : la racine d’un groupe qui en rejoint un autre y emmène TOUS ses membres (un seul niveau)', async () => {
+  const { client, requetes } = confirmationQuiRencontre({ id: R2, groupe_doublon: null, signal: 'doublon' })
+  await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID })
+  const membres = requetes.find(x => x.op === 'update' && filtre(x, 'groupe_doublon') === ID)
+  assert.ok(membres, 'les membres de l’ancienne racine sont repointés')
+  assert.equal(membres.charge.groupe_doublon, R2)
+  const racine = requetes.find(x => x.op === 'update' && filtre(x, 'id') === ID && x.charge.groupe_doublon)
+  assert.equal(racine.charge.groupe_doublon, R2)
+  assert.ok(requetes.some(x => x.op === 'update' && filtre(x, 'id') === R2 && x.charge.signal_tranche === false),
+    'le groupe agrandi redemande une décision')
+  sansFuite(requetes)
+})
+
+test('⚠ supprimer la RACINE d’un groupe : le plus ancien membre la remplace AVANT l’effacement', async () => {
+  const { client, requetes } = baseEnregistreuse((r) => {
+    if (r.op === 'select' && r.unique) return { data: { id: ID, origine: 'fichier', booking_id: null, justificatif_chemin: 'x', groupe_doublon: null } }
+    if (r.op === 'select' && filtre(r, 'groupe_doublon') === ID) return { data: [{ id: M1 }, { id: M2 }] }
+    if (r.op === 'delete') return { data: [{ id: ID }] }
+    return { data: null }
+  })
+  const r = await charges.supprimer(client, { compte: COMPTE, id: ID })
+  assert.equal(r.ok, true)
+  const iDelete = requetes.findIndex(x => x.op === 'delete' && x.table === 'charges')
+  const iPromu = requetes.findIndex(x => x.op === 'update' && filtre(x, 'id') === M1 && x.charge.groupe_doublon === null)
+  const iRepointe = requetes.findIndex(x => x.op === 'update' && filtre(x, 'groupe_doublon') === ID && x.charge.groupe_doublon === M1)
+  assert.ok(iPromu >= 0 && iPromu < iDelete, 'le plus ancien devient racine, avant l’effacement')
+  assert.ok(iRepointe >= 0 && iRepointe < iDelete, 'les autres le désignent, avant l’effacement')
+  assert.equal(requetes[iPromu].charge.signal, undefined, 'deux membres restent : le signal reste')
+  sansFuite(requetes)
+})
+
+test('supprimer la racine d’un groupe de deux : le survivant n’est plus le doublon de rien', async () => {
+  const { client, requetes } = baseEnregistreuse((r) => {
+    if (r.op === 'select' && r.unique) return { data: { id: ID, origine: 'fichier', booking_id: null, justificatif_chemin: 'x', groupe_doublon: null } }
+    if (r.op === 'select' && filtre(r, 'groupe_doublon') === ID) return { data: [{ id: M1 }] }
+    if (r.op === 'delete') return { data: [{ id: ID }] }
+    return { data: null }
+  })
+  await charges.supprimer(client, { compte: COMPTE, id: ID })
+  const promu = requetes.find(x => x.op === 'update' && filtre(x, 'id') === M1)
+  assert.deepEqual(promu.charge, { groupe_doublon: null, signal: null, signal_tranche: false })
+})
+
+test('supprimer le dernier MEMBRE d’un groupe : la racine perd son signal', async () => {
+  const RACINE = '77777777-7777-4777-8777-777777777777'
+  const { client, requetes } = baseEnregistreuse((r) => {
+    if (r.op === 'select' && r.unique) return { data: { id: ID, origine: 'fichier', booking_id: null, justificatif_chemin: 'x', groupe_doublon: RACINE } }
+    if (r.op === 'select') return { data: [] }
+    if (r.op === 'delete') return { data: [{ id: ID }] }
+    return { data: null }
+  })
+  await charges.supprimer(client, { compte: COMPTE, id: ID })
+  const lib = requetes.find(x => x.op === 'update' && filtre(x, 'id') === RACINE)
+  assert.deepEqual(lib.charge, { signal: null, signal_tranche: false })
+  assert.equal(filtre(lib, 'signal'), 'doublon', 'un autre signal n’est pas effacé')
+  assert.ok(requetes.indexOf(lib) > requetes.findIndex(x => x.op === 'delete'))
+  sansFuite(requetes)
+})
+
+test('supprimer une racine : une panne en lisant ses membres REFUSE la suppression (pas de total compté deux fois)', async () => {
+  const { client, requetes } = baseEnregistreuse((r) => {
+    if (r.op === 'select' && r.unique) return { data: { id: ID, origine: 'fichier', booking_id: null, justificatif_chemin: 'x', groupe_doublon: null } }
+    if (r.op === 'select') return { error: { message: 'panne' } }
+    return { data: null }
+  })
+  const r = await charges.supprimer(client, { compte: COMPTE, id: ID })
+  assert.equal(r.statut, 503)
+  assert.ok(!requetes.some(x => x.op === 'delete'))
+})
+
+test('⚠ garde de coût : la lecture se compte dans `ia_appels`, par compte, sur 24 h ; au plafond ou illisible, NON', async () => {
+  const MAINTENANT = Date.parse('2026-11-09T12:00:00Z')
+  for (const [rep, attendu] of [[{ count: 0 }, true], [{ count: charges.PLAFOND_LECTURES_JOUR - 1 }, true],
+    [{ count: charges.PLAFOND_LECTURES_JOUR }, false], [{ error: { message: 'panne' } }, false], [{ count: null }, false]]) {
+    const { client, requetes } = baseEnregistreuse(() => rep)
+    assert.equal(await charges.lectureAutorisee(client, COMPTE, { maintenant: MAINTENANT }), attendu, JSON.stringify(rep))
+    const q = requetes[0]
+    assert.equal(q.table, 'ia_appels')
+    assert.equal(filtre(q, 'fonction'), 'charges-lecture')
+    assert.equal(filtre(q, 'user_id'), COMPTE)
+    assert.deepEqual(q.filtres.find(f => f[0] === 'gte'), ['gte', 'created_at', '2026-11-08T12:00:00.000Z'])
+    assert.equal(q.optionsSelect.count, 'exact')
+  }
+  assert.equal(charges.PLAFOND_LECTURES_JOUR, 50)
+})
+
+test('⚠ lire en attente : un compte AU PLAFOND n’est pas lu, rien n’est compté, et les autres comptes passent', async () => {
+  const PLEIN = '99999999-9999-4999-8999-999999999999'
+  const ID2 = '88888888-8888-4888-8888-888888888888'
+  const { client, requetes } = baseEnregistreuse((r) => {
+    if (r.op === 'select' && !r.unique) return { data: [{ id: ID2, user_id: PLEIN, justificatif_chemin: 'p' }, { id: ID, user_id: COMPTE, justificatif_chemin: 'a' }] }
+    if (r.op === 'select') return { data: { id: ID, statut: 'a_lire', tentatives_lecture: 0, cree_le: '2026-11-09T10:00:00Z' } }
+    return { data: null }
+  }, { download: () => ({ data: blob(PDF), error: null }) })
+  const lus = []
+  const r = await charges.lireEnAttente(client, {
+    lire: async ({ compte }) => { lus.push(compte); return { echec: true } }, echeance: Date.now() + 10000
+  }, { lectureAutorisee: async (db, compte) => compte !== PLEIN })
+  assert.deepEqual(lus, [COMPTE], 'seul le compte sous le plafond est lu')
+  assert.equal(r.plafonnes, 1)
+  const plafond = requetes.find(x => x.op === 'update' && filtre(x, 'id') === ID2)
+  assert.deepEqual(plafond.charge, { motif: 'plafond_ia' })
+  assert.equal(filtre(plafond, 'user_id'), PLEIN)
+})
+
+test('⚠ lire en attente : une PANNE DU STOCKAGE n’est pas un échec de lecture — rien n’est compté, la passe s’arrête', async () => {
+  const autres = '88888888-8888-4888-8888-888888888888'
+  const { client, requetes } = baseEnregistreuse((r) => (r.op === 'select' && !r.unique
+    ? { data: [{ id: ID, user_id: COMPTE, justificatif_chemin: 'a' }, { id: autres, user_id: COMPTE, justificatif_chemin: 'b' }] }
+    : { data: { id: ID, statut: 'a_lire', tentatives_lecture: 2 } }),
+  { download: () => ({ data: null, error: { status: 500, statusCode: '500', message: 'stockage indisponible' } }) })
+  let appels = 0
+  const r = await charges.lireEnAttente(client, {
+    lire: async () => { appels++; return { echec: true } }, echeance: Date.now() + 10000
+  }, { lectureAutorisee: async () => true })
+  assert.equal(appels, 0)
+  assert.equal(r.panne_stockage, true)
+  assert.ok(!requetes.some(x => x.op === 'update'), 'pas de tentative comptée, pas de passage `illisible`')
+})
+
+test('lire en attente : un fichier ABSENT (404) compte comme un échec ; la file tourne par `modifie_le`, après 2 minutes', async () => {
+  const MAINTENANT = Date.parse('2026-11-09T12:00:00Z')
+  const { client, requetes } = baseEnregistreuse((r) => (r.op === 'select' && !r.unique
+    ? { data: [{ id: ID, user_id: COMPTE, justificatif_chemin: 'a' }] }
+    : { data: { id: ID, statut: 'a_lire', tentatives_lecture: 0 } }),
+  { download: () => ({ data: null, error: { status: 400, statusCode: '404', message: 'Object not found' } }) })
+  await charges.lireEnAttente(client, { lire: async () => { throw new Error('pas appelé') }, echeance: Date.now() + 10000, maintenant: MAINTENANT },
+    { lectureAutorisee: async () => true })
+  const file = requetes[0]
+  assert.deepEqual(file.filtres.find(f => f[0] === 'lt'), ['lt', 'modifie_le', '2026-11-09T11:58:00.000Z'],
+    'une charge que l’endpoint lit en ce moment n’est pas prise')
+  assert.deepEqual(file.ordre, [['modifie_le', true]])
+  const maj = requetes.find(x => x.op === 'update')
+  assert.equal(maj.charge.tentatives_lecture, 1)
+})
+
+test('confirmer : stockage en panne -> 503 (rien n’est effacé) ; fichier absent -> 409 ; PDF trop gros -> 413', async () => {
+  const lu = (r) => (r.op === 'select' && r.unique ? { data: { id: ID, statut: 'envoi', justificatif_chemin: `${COMPTE}/${ID}` } } : { data: null })
+  let b = baseEnregistreuse(lu, { download: () => ({ data: null, error: { status: 503, statusCode: '503' } }) })
+  let r = await charges.confirmerEnvoi(b.client, { compte: COMPTE, id: ID })
+  assert.equal(r.statut, 503)
+  assert.ok(!b.requetes.some(x => x.op === 'delete') && !b.gestes.some(g => g.nom === 'remove'))
+  b = baseEnregistreuse(lu, { download: () => ({ data: null, error: { status: 404, statusCode: 'NoSuchKey' } }) })
+  r = await charges.confirmerEnvoi(b.client, { compte: COMPTE, id: ID })
+  assert.equal(r.statut, 409)
+  const gros = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(10 * 1024 * 1024)])
+  b = baseEnregistreuse(lu, { download: () => ({ data: blob(gros), error: null }) })
+  r = await charges.confirmerEnvoi(b.client, { compte: COMPTE, id: ID })
+  assert.deepEqual([r.statut, r.code], [413, 'trop_gros'])
+})
+
+test('doublon fournisseur : le rapprochement se fait sur la CLÉ normalisée, écrite à la validation', async () => {
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier())
+  await charges.valider(client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK, numero_facture: 'f 12' } },
+    { entites: entitesDouble({ entites: [E1] }) })
+  const maj = requetes.find(x => x.op === 'update')
+  assert.equal(maj.charge.cle_doublon, 'nom:edf|F12')
+  const cherche = requetes.find(x => x.op === 'select' && !x.unique && x.table === 'charges')
+  assert.equal(filtre(cherche, 'cle_doublon'), 'nom:edf|F12', '« F-12 » et « f 12 » sont la même facture')
+  assert.equal(filtre(cherche, 'numero_facture'), undefined)
+  sansFuite(requetes)
+})
+
+test('valider : une entité ARCHIVÉE reste acceptée si la charge la porte déjà (spec §6 : les validées la gardent)', async () => {
+  const ent = { entites: entitesDouble({ entites: [E1, EARCH] }) }
+  let b = baseEnregistreuse(chargeAVerifier({ statut: 'validee', entite_juridique_id: 'e9' }))
+  let r = await charges.valider(b.client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK, entite_juridique_id: 'e9' } }, ent)
+  assert.equal(r.ok, true)
+  b = baseEnregistreuse(chargeAVerifier({ statut: 'validee', entite_juridique_id: 'e1' }))
+  r = await charges.valider(b.client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK, entite_juridique_id: 'e9' } }, ent)
+  assert.equal(r.code, 'entite_archivee', 'jamais pour en changer')
+})
+
+test('valider : un montant qui n’est ni un entier ni des chiffres est refusé (`true`, `[5]`, « 1e3 »)', async () => {
+  const ent = { entites: entitesDouble({ entites: [E1] }) }
+  for (const v of [true, [5], '1e3', '12,5', ' 3 4 ']) {
+    const { client } = baseEnregistreuse(chargeAVerifier())
+    const r = await charges.valider(client, { compte: COMPTE, id: ID, champs: { ...CHAMPS_OK, montant_ttc_cents: v } }, ent)
+    assert.equal(r.code, 'montant_invalide', JSON.stringify(v))
+  }
 })

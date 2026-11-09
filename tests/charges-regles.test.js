@@ -23,6 +23,14 @@ test('les centimes saisis : entier >= 0, vide = null, le reste est INVALIDE (und
   assert.equal(R.centimesSaisis(null), null)
   assert.equal(R.centimesSaisis(12.5), undefined)
   assert.equal(R.centimesSaisis(-1), undefined)
+  // ⚠ `Number(v)` nu rendait 1 pour `true`, 5 pour `[5]`, 0 pour « » :
+  // des montants que personne n'a tapés.
+  assert.equal(R.centimesSaisis(true), undefined)
+  assert.equal(R.centimesSaisis([5]), undefined)
+  assert.equal(R.centimesSaisis('1e3'), undefined)
+  assert.equal(R.centimesSaisis('0x10'), undefined)
+  assert.equal(R.centimesSaisis('   '), null)
+  assert.equal(R.centimesSaisis(' 120 '), 120)
   assert.equal(R.centimesSaisis('abc'), undefined)
 })
 

@@ -12,7 +12,7 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
   const gestes = []
 
   function from (table) {
-    const r = { table, op: 'select', colonnes: null, charge: null, options: null, filtres: [], ordre: [], limite: null, unique: false, retour: null }
+    const r = { table, op: 'select', colonnes: null, optionsSelect: null, charge: null, options: null, filtres: [], ordre: [], limite: null, unique: false, retour: null }
     const fin = () => {
       requetes.push(r)
       const rep = repondre(r) || { data: null, error: null }
@@ -20,10 +20,11 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
         const d = Array.isArray(rep.data) ? (rep.data[0] || null) : rep.data
         return Promise.resolve({ data: rep.error ? null : (d === undefined ? null : d), error: rep.error || null })
       }
-      return Promise.resolve({ data: rep.data === undefined ? null : rep.data, error: rep.error || null })
+      // `count` n'est rendu que si le test le donne : `select(c, { count })`.
+      return Promise.resolve({ data: rep.data === undefined ? null : rep.data, error: rep.error || null, count: rep.count === undefined ? null : rep.count })
     }
     const q = {
-      select (c) { if (r.op === 'select') r.colonnes = c; else r.retour = c; return q },
+      select (c, o) { if (r.op === 'select') { r.colonnes = c; r.optionsSelect = o || null } else r.retour = c; return q },
       insert (x) { r.op = 'insert'; r.charge = x; return q },
       update (x) { r.op = 'update'; r.charge = x; return q },
       upsert (x, o) { r.op = 'upsert'; r.charge = x; r.options = o; return q },
@@ -31,6 +32,7 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
       eq (c, v) { r.filtres.push(['eq', c, v]); return q },
       neq (c, v) { r.filtres.push(['neq', c, v]); return q },
       lt (c, v) { r.filtres.push(['lt', c, v]); return q },
+      gte (c, v) { r.filtres.push(['gte', c, v]); return q },
       in (c, v) { r.filtres.push(['in', c, v]); return q },
       not (c, o, v) { r.filtres.push(['not', c, o, v]); return q },
       is (c, v) { r.filtres.push(['is', c, v]); return q },

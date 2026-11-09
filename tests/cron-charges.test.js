@@ -62,3 +62,36 @@ test('le recalcul quotidien parcourt les comptes PAR CURSEUR, et s’arrête à 
   assert.equal(arret.complet, false)
   assert.equal(vide.rpcs.length, 0)
 })
+
+test('⚠ une tâche qui rend `ok: false` est une ERREUR du passage, pas un zéro silencieux', async () => {
+  const avant = process.env.CRON_SECRET
+  process.env.CRON_SECRET = 'le-bon'
+  const { client } = baseEnregistreuse()
+  const absSdk = require.resolve('@supabase/supabase-js')
+  require('@supabase/supabase-js')
+  const vraiCreate = require.cache[absSdk].exports.createClient
+  require.cache[absSdk].exports.createClient = () => client
+  const absWriter = require.resolve('../lib/charges')
+  require('../lib/charges')
+  const vraiWriter = require.cache[absWriter].exports
+  require.cache[absWriter].exports = Object.assign({}, vraiWriter, {
+    purgerEnvois: async () => ({ ok: false, purges: 0 }),
+    lireEnAttente: async () => ({ ok: true, lues: 0, panne_stockage: true })
+  })
+  const absCron = require.resolve('../api/cron-charges')
+  delete require.cache[absCron]
+  try {
+    const handler = require('../api/cron-charges')
+    const { rep, res } = reponse()
+    await handler({ headers: { authorization: 'Bearer le-bon' } }, res)
+    assert.equal(rep.statut, 200)
+    const taches = rep.charge.errors.map(e => `${e.tache}:${e.error}`)
+    assert.ok(taches.includes('purge_envois:lecture des envois impossible'), taches.join(' | '))
+    assert.ok(taches.includes('lectures:stockage indisponible'), taches.join(' | '))
+  } finally {
+    require.cache[absSdk].exports.createClient = vraiCreate
+    require.cache[absWriter].exports = vraiWriter
+    delete require.cache[absCron]
+    if (avant === undefined) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = avant
+  }
+})

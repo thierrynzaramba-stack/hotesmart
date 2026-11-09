@@ -15,8 +15,13 @@ const { baseEnregistreuse } = require('./outils/base-enregistreuse')
 const TITULAIRE = '11111111-1111-4111-8111-111111111111'
 const MEMBRE = '22222222-2222-4222-8222-222222222222'
 
-async function appeler ({ methode = 'POST', corps = null, titulaire = true, repondre }) {
-  const { client, requetes, gestes } = baseEnregistreuse(repondre)
+async function appeler ({ methode = 'POST', corps = null, titulaire = true, repondre, stockage, lire }) {
+  const { client, requetes, gestes } = baseEnregistreuse(repondre, stockage)
+  // La lecture IA, remplacée quand le test le demande (jamais d'appel réel).
+  const absLecture = require.resolve('../lib/charges/lecture')
+  require('../lib/charges/lecture')
+  const vraieLecture = require.cache[absLecture].exports
+  if (lire) require.cache[absLecture].exports = Object.assign({}, vraieLecture, { lireDocument: lire })
   const absSdk = require.resolve('@supabase/supabase-js')
   require('@supabase/supabase-js')
   const vraiCreate = require.cache[absSdk].exports.createClient
@@ -51,6 +56,7 @@ async function appeler ({ methode = 'POST', corps = null, titulaire = true, repo
   } finally {
     require.cache[absSdk].exports.createClient = vraiCreate
     require.cache[absGarde].exports = vraieGarde
+    require.cache[absLecture].exports = vraieLecture
     delete require.cache[absEndpoint]
   }
   return { ...rep, requetes, gestes }
@@ -87,4 +93,45 @@ test('les refus du writer passent avec leur code HTTP', async () => {
   const r = await appeler({ corps: { action: 'envoi', type: 'text/html', octets: 10 } })
   assert.equal(r.statut, 400)
   assert.equal(r.charge.error, 'type_refuse')
+})
+
+// ─── Confirmer : la garde de coût et la course avec le cron ────────────────
+const ID = '33333333-3333-4333-8333-333333333333'
+const PDF = Buffer.from('%PDF-1.7\nune facture\n')
+const { blob } = require('./outils/base-enregistreuse')
+const confirmable = (count, apres = {}) => (r) => {
+  if (r.table === 'ia_appels') return { count }
+  if (r.table === 'charges' && r.op === 'select' && r.unique) return { data: apres.relue || { id: ID, statut: 'envoi', justificatif_chemin: `${TITULAIRE}/${ID}` } }
+  if (r.table === 'charges' && r.op === 'update' && r.unique && r.charge.statut === 'a_lire') return { data: { id: ID, statut: 'a_lire' } }
+  if (r.table === 'charges' && r.op === 'update' && r.unique) return { data: apres.lecture === undefined ? { id: ID, statut: 'a_verifier' } : apres.lecture }
+  return { data: [] }
+}
+
+test('⚠ confirmer AU PLAFOND du jour : l’IA n’est PAS appelée, la charge attend `a_lire` avec son motif', async () => {
+  let appels = 0
+  const r = await appeler({
+    corps: { action: 'confirmer', id: ID },
+    repondre: confirmable(50),
+    stockage: { download: () => ({ data: blob(PDF), error: null }) },
+    lire: async () => { appels++; return { echec: true } }
+  })
+  assert.equal(r.statut, 200)
+  assert.equal(appels, 0)
+  assert.equal(r.charge.issue, 'plafond')
+  const motif = r.requetes.find(x => x.op === 'update' && x.charge.motif === 'plafond_ia')
+  assert.ok(motif, 'le motif dit à l’écran pourquoi la lecture attend')
+  assert.ok(!r.requetes.some(x => x.op === 'update' && 'tentatives_lecture' in x.charge), 'rien n’est compté')
+})
+
+test('confirmer sous le plafond : la lecture a lieu tout de suite', async () => {
+  let appels = 0
+  const r = await appeler({
+    corps: { action: 'confirmer', id: ID },
+    repondre: confirmable(3),
+    stockage: { download: () => ({ data: blob(PDF), error: null }) },
+    lire: async () => { appels++; return { panne: true } }
+  })
+  assert.equal(r.statut, 200)
+  assert.equal(appels, 1)
+  assert.equal(r.charge.issue, 'panne')
 })

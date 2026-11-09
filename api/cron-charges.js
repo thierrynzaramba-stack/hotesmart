@@ -27,7 +27,10 @@ const { ecrireLePassage, ECRITURE_MAX_MS } = require('../lib/cron-stats')
 // Le mur de Vercel (`maxDuration` 60 s, vercel.json), et ce qu'on laisse
 // pour la mesure et la réponse.
 const MUR_MESURE_MS = 59000
-const BUDGET_LECTURES_MS = 35000
+// ⚠ LE BUDGET DES LECTURES BORNE LE DÉPART D'UNE LECTURE, PAS SA FIN : la
+// dernière commencée peut durer jusqu'au délai de l'IA (`DELAI_IA_MS`, 20 s).
+// 30 + 20 laisse de quoi écrire la mesure sous le mur.
+const BUDGET_LECTURES_MS = 30000
 const BUDGET_RECALCUL_MS = 15000
 const COMPTES_PAR_PAGE = 200
 
@@ -85,14 +88,26 @@ module.exports = async function handler (req, res) {
     } catch (e) { console.error('[cron-charges] mesure non journalisee :', e && e.message) }
   }
 
-  const bilan = { purges: 0, lues: 0, panne_ia: false, recalcul: null }
+  const bilan = { purges: 0, lues: 0, panne_ia: false, panne_stockage: false, plafonnes: 0, recalcul: null }
 
   // ⚠ CHAQUE TÂCHE A SON PROPRE `try` : une panne de l'une ne prive pas les
   // autres de leur passage.
+  // ⚠ UNE TÂCHE QUI REND `ok: false` EST UNE ERREUR, PAS UN ZÉRO : sans ce
+  // relais, une lecture de la file en panne passait pour « rien à faire ».
   try {
     const p = await chrono.mesure('purge_envois', () => purgerEnvois(supabase))
     bilan.purges = p.purges || 0
+    if (!p.ok) results.errors.push({ tache: 'purge_envois', error: 'lecture des envois impossible' })
   } catch (e) { results.errors.push({ tache: 'purge_envois', error: e.message }) }
+
+  // Le recalcul quotidien passe AVANT les lectures : à 3 h personne n'attend
+  // de formulaire, et placé après, il n'aurait que le temps qu'elles laissent.
+  if (estLePassageQuotidien()) {
+    try {
+      bilan.recalcul = await chrono.mesure('recalcul_resume', () =>
+        recalculerTousLesComptes(supabase, Math.min(Date.now() + BUDGET_RECALCUL_MS, t0 + BUDGET_LECTURES_MS)))
+    } catch (e) { results.errors.push({ tache: 'recalcul_resume', error: e.message }) }
+  }
 
   try {
     const l = await chrono.mesure('lectures', () => lireEnAttente(supabase, {
@@ -100,14 +115,11 @@ module.exports = async function handler (req, res) {
     }))
     bilan.lues = l.lues || 0
     bilan.panne_ia = !!l.panne
+    bilan.panne_stockage = !!l.panne_stockage
+    bilan.plafonnes = l.plafonnes || 0
+    if (!l.ok) results.errors.push({ tache: 'lectures', error: 'lecture de la file impossible' })
+    if (l.panne_stockage) results.errors.push({ tache: 'lectures', error: 'stockage indisponible' })
   } catch (e) { results.errors.push({ tache: 'lectures', error: e.message }) }
-
-  if (estLePassageQuotidien()) {
-    try {
-      bilan.recalcul = await chrono.mesure('recalcul_resume', () =>
-        recalculerTousLesComptes(supabase, Date.now() + BUDGET_RECALCUL_MS))
-    } catch (e) { results.errors.push({ tache: 'recalcul_resume', error: e.message }) }
-  }
 
   bilan.ms = Date.now() - t0
   console.log('[cron-charges] fin', JSON.stringify(bilan))

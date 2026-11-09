@@ -11,7 +11,7 @@ process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { lireDocument, estPanne, extraireJson } = require('../lib/charges/lecture')
+const { lireDocument, estPanne, extraireJson, DELAI_IA_MS } = require('../lib/charges/lecture')
 const { contexteIA } = require('../lib/ia/journal')
 
 const PDF = Buffer.from('%PDF-1.7\nfacture\n')
@@ -19,13 +19,16 @@ const JPEG = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3])
 
 function client (reponse, erreur) {
   const demandes = []
+  const options = []
   let contexte = null
   return {
     demandes,
+    options,
     contexte: () => contexte,
     messages: {
-      create: async (d) => {
+      create: async (d, o) => {
         demandes.push(d)
+        options.push(o)
         contexte = contexteIA()
         if (erreur) throw erreur
         return reponse
@@ -94,4 +97,18 @@ test('extraireJson : le premier objet d’un texte, ou null', () => {
   assert.deepEqual(extraireJson('a {"x": 1} b'), { x: 1 })
   assert.equal(extraireJson('pas de json'), null)
   assert.equal(extraireJson('{cassé'), null)
+})
+
+test('⚠ une lecture a un DÉLAI et aucune nouvelle tentative du SDK (sinon dix minutes, au-delà du mur de 60 s)', async () => {
+  const c = client(texte('{"montant_ttc": 12}'))
+  await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: c })
+  assert.deepEqual(c.options[0], { timeout: DELAI_IA_MS, maxRetries: 0 })
+  assert.ok(DELAI_IA_MS <= 20000)
+  const lent = Object.assign(new Error('Request timed out.'), { name: 'APIConnectionTimeoutError' })
+  const r = await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: client(null, lent) })
+  assert.equal(r.panne, true, 'un délai dépassé ne compte pas comme un échec')
+})
+
+test('⚠ 404 (modèle ou route introuvable) est une PANNE de configuration, jamais l’échec de CE document', () => {
+  assert.equal(estPanne({ status: 404, message: 'model: not_found' }), true)
 })

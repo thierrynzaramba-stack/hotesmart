@@ -68,10 +68,18 @@ module.exports = async function handler (req, res) {
       const r = await charges.confirmerEnvoi(supabase, { compte, id: corps.id })
       if (!r.ok) return rendre(res, r)
       // ⚠ LA LECTURE SE FAIT TOUT DE SUITE quand c'est possible : l'hôte attend
-      // son formulaire pré-rempli. Une PANNE laisse la charge `a_lire` : le
-      // cron dédié la relira, sans la compter comme un échec.
-      const resultat = await lireDocument({ octets: r.octets, type: r.type, compte })
+      // son formulaire pré-rempli. Une PANNE ou le PLAFOND du jour laissent la
+      // charge `a_lire` : le cron dédié la relira, sans compter d'échec.
+      const resultat = (await charges.lectureAutorisee(supabase, compte))
+        ? await lireDocument({ octets: r.octets, type: r.type, compte })
+        : { plafond: true }
       const a = await charges.appliquerLecture(supabase, { compte, id: r.charge.id, resultat })
+      if (!a.ok && a.code === 'pas_a_lire') {
+        // Une autre écriture est passée entre-temps (le cron) : l'hôte reçoit
+        // la charge telle qu'elle est, pas un refus pour un travail fait.
+        const l = await charges.lireCharge(supabase, { compte, id: r.charge.id })
+        return rendre(res, l, x => ({ issue: 'deja_lue', charge: x.charge }))
+      }
       if (!a.ok) return rendre(res, a)
       return res.status(200).json({ ok: true, issue: a.issue, charge: a.charge || r.charge })
     }
