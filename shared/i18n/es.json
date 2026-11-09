@@ -1165,5 +1165,6 @@
   "fiche.facturation_archivee": "{nom}, archivada: este alojamiento ya no puede facturar",
   "fiche.facturation_choisir": "Elegir la entidad",
   "fiche.facturation_modifier": "Cambiar de entidad",
-  "fiche.facturation_non_lue": "La facturación no se puede leer por ahora."
+  "fiche.facturation_non_lue": "La facturación no se puede leer por ahora.",
+  "ej.err_rattachement": "La entidad se ha creado, pero no se ha podido asignar a este alojamiento. Pulse «Usar para este alojamiento»."
 }

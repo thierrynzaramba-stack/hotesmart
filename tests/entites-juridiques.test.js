@@ -331,6 +331,7 @@ test('une entite creee depuis la fenetre d\'un logement est CHOISIE pour lui, et
     assert.equal(r.code, 200, JSON.stringify(r.corps))
     const id = r.corps.entite.id
     assert.equal(r.corps.entite_id, id)
+    assert.equal(r.corps.rattache, true)
     assert.deepEqual(etat.tables.biens_entites.map(l => [l.property_uuid, l.entite_id, l.user_id]), [[BIEN_A1, id, A]])
     assert.ok(etat.tables.entites_juridiques.every(e => !('par_defaut' in e)), 'aucune entite par defaut ecrite')
     // Les autres logements n'ont RIEN : pas de repli silencieux.
@@ -392,6 +393,7 @@ test('LE TEST QUI COMPTE : la garde de la fenetre — un membre lit SON logement
     assert.equal(lu.code, 200)
     assert.equal(lu.corps.titulaire, false)
     assert.equal(lu.corps.bien.entite_id, id)
+    assert.deepEqual(lu.corps.entites.map(e => e.id), [id], 'l\'entite de SON logement, et elle seule')
     assert.equal((await appeler({ jeton: 'jeton-m', bien: BIEN_A2 })).code, 403, 'hors de son perimetre, meme en lecture')
     for (const corps of [
       { action: 'creer', entite: ENTITE_OK },
@@ -461,6 +463,28 @@ test('LE TEST QUI COMPTE : un compte VOISIN est refuse en 403 sur le logement d\
   } finally { fini() }
 })
 
+test('LE TEST QUI COMPTE : un membre ne lit JAMAIS l\'entite d\'un logement hors de son perimetre (review 3, constat de securite)', async () => {
+  const { appeler, fini } = monterApi()
+  try {
+    // A2 (hors du perimetre de M) a sa propre entite, avec une identite privee.
+    const privee = (await appeler({ methode: 'POST', bien: BIEN_A2, corps: { action: 'creer',
+      entite: { ...ENTITE_OK, nom: 'Proprietaire de A2', adresse_ligne1: '9 rue Privee', telephone: '0600000000', email: 'a2@ex.fr' } } })).corps.entite.id
+    // A1 (dans son perimetre) n'a pas d'entite : M ne voit RIEN de la liste.
+    const sans = await appeler({ jeton: 'jeton-m' })
+    assert.equal(sans.code, 200)
+    assert.deepEqual(sans.corps.entites, [])
+    assert.deepEqual(sans.corps.numerotations, {})
+    const texte = JSON.stringify(sans.corps)
+    for (const fuite of ['Proprietaire de A2', '9 rue Privee', '0600000000', 'a2@ex.fr', privee]) {
+      assert.ok(!texte.includes(fuite), `fuite : ${fuite}`)
+    }
+    // Le titulaire, lui, voit la liste complete, qui sert a ses gestes.
+    const tit = await appeler()
+    assert.deepEqual(tit.corps.entites.map(e => e.id), [privee])
+    assert.ok(tit.corps.numerotations[privee])
+  } finally { fini() }
+})
+
 test('les gestes de l\'ancienne page n\'existent plus : « defaut » et « archiver » sont refuses', async () => {
   const { appeler, etat, fini } = monterApi()
   try {
@@ -483,7 +507,7 @@ test('une entite archivee : ne se choisit plus, ne se modifie plus', async () =>
   } finally { fini() }
 })
 
-test('creer : un refus de validation ne cree rien ; un rattachement en panne laisse l\'entite, et le dit', async () => {
+test('LE TEST QUI COMPTE : creer — un refus ne cree rien ; un rattachement en panne laisse l\'entite et le DIT (review 3, constat 2)', async () => {
   const { appeler, etat, fini } = monterApi()
   try {
     const refus = await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: '' } } })
@@ -491,7 +515,12 @@ test('creer : un refus de validation ne cree rien ; un rattachement en panne lai
     assert.equal((etat.tables.entites_juridiques || []).length, 0)
     etat.erreurUpsert = { code: '08006', message: 'connexion perdue' }
     const r = await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })
-    assert.equal(r.code, 503)
+    // 200 : la creation a reussi ; `rattache: false` dit ce qui manque — un
+    // 503 la rendait indiscernable d'une creation ratee (doublons au renvoi).
+    assert.equal(r.code, 200)
+    assert.equal(r.corps.rattache, false)
+    assert.equal(r.corps.entite_id, null)
+    assert.equal(r.corps.entite.id, etat.tables.entites_juridiques[0].id)
     assert.equal(etat.tables.entites_juridiques.length, 1, 'l\'entite existe')
     assert.equal((etat.tables.biens_entites || []).length, 0, 'mais elle n\'est pas choisie')
     assert.equal((await appeler()).corps.bien.entite_id, null)

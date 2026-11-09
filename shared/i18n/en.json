@@ -1165,5 +1165,6 @@
   "fiche.facturation_archivee": "{nom}, archived: this property can no longer issue invoices",
   "fiche.facturation_choisir": "Choose the entity",
   "fiche.facturation_modifier": "Change entity",
-  "fiche.facturation_non_lue": "Invoicing can’t be read right now."
+  "fiche.facturation_non_lue": "Invoicing can’t be read right now.",
+  "ej.err_rattachement": "The entity was created, but it couldn’t be set for this property. Tap “Use for this property”."
 }

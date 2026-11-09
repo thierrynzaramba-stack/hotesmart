@@ -101,15 +101,21 @@ place** : aucune entité automatique, aucune reprise des comptes existants.
     par le serveur — jamais de l'appelant ni de X-Compte.
   - `GET ?bien=` : `facturation` en lecture **dans le périmètre** (un membre
     hors périmètre est refusé, même en lecture) ; rend `titulaire`, le
-    logement et son `entite_id`, les entités **actives** du compte (plus celle
-    du logement si elle est archivée, pour le dire), et la numérotation de
-    l'année de chaque active **en automatique** (`fige` : une facture est déjà
-    partie cette année).
+    logement et son `entite_id`, et la numérotation de l'année de chaque
+    entité active **en automatique** (`fige` : une facture est déjà partie
+    cette année). **Au titulaire** : les entités actives du compte (plus celle
+    du logement si elle est archivée, pour le dire). ⚠ **À un membre : la
+    seule entité de CE logement** — constat de SÉCURITÉ de la review 3 : la
+    liste complète livrait l'adresse, le SIRET, l'e-mail et le téléphone
+    d'entités servant à des logements HORS de son périmètre. La liste ne sert
+    qu'aux gestes, qui sont au titulaire.
   - `POST` (`creer`, `modifier`, `rattacher`, `numerotation`) : `facturation`
     en écriture sur le logement, donc **titulaire seul** — un membre, même à
     qui tout est délégué, et un compte voisin sont refusés en **403**. `creer`
     rattache l'entité neuve au logement ; si ce rattachement tombe en panne,
-    l'entité existe et la réponse le dit. `rattacher` avec `entite_id: null`
+    la création a quand même réussi : **200 avec `rattache: false`** (un 503
+    la rendait indiscernable d'une création ratée, et chaque renvoi créait un
+    doublon — review 3, constat 2). `rattacher` avec `entite_id: null`
     **retire** l'entité de ce logement seulement. `defaut` et `archiver`
     n'existent plus (400).
   - En-têtes privés avant le premier refus, 405 compris ; `Server-Timing`
@@ -125,6 +131,10 @@ ce logement ne peut pas facturer », ou l'entité archivée qui ne facture plus.
 Puis les entités actives : « Choisir pour ce logement » / « Retirer de ce
 logement », « Modifier », la numérotation (réglable, figée, ou manuelle) ; et
 « Nouvelle entité ». **Un membre ne voit aucun geste** (et le serveur refuse).
+**Un geste à la fois** : pendant un envoi, le bouton du formulaire est éteint
+et tout autre geste est ignoré ; une entité créée mais non choisie fait sortir
+du formulaire, relire, et le bandeau dit de la choisir. Le focus revient au
+bouton d'ouverture même s'il a été repeint (`retourFocus`).
 Les styles sont posés une fois par le module (pas de feuille de plus). Un
 numéro de facture ne se coupe jamais en fin de ligne. Les refus sont dits dans
 la fenêtre, et **ne réveillent pas la barre d'erreur générique** : le client
@@ -151,11 +161,16 @@ AVANT `facture-voyageur`**. Ajouts seulement dans ses fichiers.
 - `shared/logement-fiche.js` : `facturationHtml` / `facturationBlocHtml`, bloc
   « Facturation » dans la colonne droite, après les avis ; le bouton « Choisir
   l'entité » / « Changer d'entité » n'existe que si `modifier` est vrai.
-- `pages/logement.html` : le clic charge la fenêtre **à la demande**
-  (`import()` dynamique : la fiche ne la paie pas tant qu'on ne l'ouvre pas),
-  une seule à la fois ; après chaque geste réussi, le bloc est repeint seul.
+- `shared/logement-facturation.js` : le geste d'ouverture (une seule fenêtre
+  à la fois, le logement de la fiche courante, le bloc repeint seul après
+  chaque geste réussi, le focus rendu au nouveau bouton). Un MODULE et pas du
+  code dans la page : ainsi il s'exécute dans un DOM de test (review 3,
+  constat 4 — le test qui lisait le source passait sans `surFermeture`).
+- `pages/logement.html` : le clic charge ce module et la fenêtre **à la
+  demande** (`import()` dynamique : la fiche ne les paie pas tant qu'on ne
+  l'ouvre pas).
 - Tests : `tests/logement-facturation.test.js` (la vraie garde de la fiche,
-  le bloc, la page).
+  le bloc, le geste exécuté dans un DOM : ouvrir, choisir, fermer, rouvrir).
 
 ## Les tests
 

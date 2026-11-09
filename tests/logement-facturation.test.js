@@ -295,15 +295,51 @@ test('la fiche place le bloc dans sa colonne droite, et ne le rend pas s\'il est
 // 3. La page
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('LE TEST QUI COMPTE : la page ouvre la fenêtre au clic, la charge à la demande, et repeint le bloc seul', () => {
+test('la page délègue au module, chargé au clic, avec le client partagé et la fiche COURANTE', () => {
   const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'logement.html'), 'utf8')
   assert.match(page, /if \(ev\.target\.closest\('\[data-bind="facturation"\]'\)\) \{ ouvrirFacturation\(\); return \}/)
-  // Chargée au clic, pas avec la page : aucun import statique de la vue.
-  assert.match(page, /await import\('\/shared\/entites-juridiques-vue\.js'\)/)
-  assert.doesNotMatch(page, /^import .*entites-juridiques-vue/m)
-  // Par le client partagé (refus déclarés « gérés »), sur le logement de la fiche.
-  assert.match(page, /api: api\.entitesJuridiques, bien, t, esc/)
-  assert.match(page, /if \(bloc\) bloc\.outerHTML = facturationBlocHtml\(ficheCourante, OUTILS\)/)
-  // Une seule fenêtre à la fois.
-  assert.match(page, /if \(fenetreFacturation \|\| !ficheCourante\) return/)
+  // Chargé au clic, pas avec la page : aucun import statique.
+  assert.match(page, /await import\('\/shared\/logement-facturation\.js'\)/)
+  assert.doesNotMatch(page, /^import .*(entites-juridiques-vue|logement-facturation)/m)
+  assert.match(page, /api: api\.entitesJuridiques, fiche: \(\) => ficheCourante, idDuBien/)
+})
+
+// ─── Le module du geste, exécuté dans un DOM (review 3, constat 4) ──────────
+
+async function monterPage () {
+  const dom = new JSDOM('<!doctype html><body><div id="fiche"></div></body>')
+  const d = dom.window.document
+  global.document = d
+  const fiche = { bien: { id: 'uuid-du-bien', nom: 'La bulle' }, facturation: { entite: null, modifier: true } }
+  d.getElementById('fiche').innerHTML = F.facturationBlocHtml(fiche, OUTILS)
+  const lus = []
+  const etat = { titulaire: true, bien: { id: 'uuid-du-bien', nom: 'La bulle', entite_id: null },
+    entites: [{ id: 'e1', nom: 'SCI Le Florian', archivee_le: null, numerotation_factures: 'manuel', type: 'societe', regime_tva: 'exonere' }], numerotations: {} }
+  const api = {
+    lire: async (bien) => { lus.push(bien); return JSON.parse(JSON.stringify(etat)) },
+    ecrire: async (corps) => { etat.bien.entite_id = corps.entite_id; return { ok: true } }
+  }
+  const vue = await import('../shared/entites-juridiques-vue.js')
+  const LF = await import('../shared/logement-facturation.js')
+  const ouvrir = () => LF.ouvrirFacturation({ doc: d, api, fiche: () => fiche, idDuBien: 'ref', outils: OUTILS, chargerVue: async () => vue })
+  return { d, fiche, lus, ouvrir }
+}
+
+test('LE TEST QUI COMPTE : ouvrir, choisir, fermer, ROUVRIR — le bloc est repeint, le bouton reste vivant, le focus revient', async () => {
+  const { d, fiche, lus, ouvrir } = await monterPage()
+  d.querySelector('[data-bind="facturation"]').focus()
+  assert.equal(await ouvrir(), true)
+  assert.deepEqual(lus, ['uuid-du-bien'], 'le logement de la fiche')
+  assert.equal(await ouvrir(), false, 'une seule fenêtre à la fois')
+  // Choisir l'entité : le bloc de la fiche est repeint seul.
+  d.querySelector('.ej-carte[data-entite="e1"] [data-action="choisir"]').click()
+  await new Promise(r => setTimeout(r, 0)); await new Promise(r => setTimeout(r, 0))
+  assert.deepEqual(fiche.facturation, { entite: { id: 'e1', nom: 'SCI Le Florian', archivee: false }, modifier: true })
+  assert.equal(d.querySelector('[data-bloc="facturation"] .fic-ligne__val').textContent, 'SCI Le Florian')
+  // Fermer : le focus revient au NOUVEAU bouton ; rouvrir marche.
+  d.dispatchEvent(new d.defaultView.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  assert.equal(d.querySelector('.ej-fenetre'), null)
+  assert.equal(d.activeElement, d.querySelector('[data-bind="facturation"]'))
+  assert.equal(await ouvrir(), true, 'le bouton n\'est pas devenu inerte')
+  d.dispatchEvent(new d.defaultView.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
 })

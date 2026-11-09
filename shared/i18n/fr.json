@@ -1165,5 +1165,6 @@
   "fiche.facturation_archivee": "{nom}, archivée : ce logement ne peut plus facturer",
   "fiche.facturation_choisir": "Choisir l’entité",
   "fiche.facturation_modifier": "Changer d’entité",
-  "fiche.facturation_non_lue": "La facturation n’est pas lisible pour l’instant."
+  "fiche.facturation_non_lue": "La facturation n’est pas lisible pour l’instant.",
+  "ej.err_rattachement": "L’entité est créée, mais elle n’a pas pu être choisie pour ce logement. Touchez « Choisir pour ce logement »."
 }

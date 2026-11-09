@@ -62,10 +62,21 @@ async function lireFenetre (req, res) {
   ])
   if (!ents.ok || !lien.ok) return res.status(503).json({ error: 'panne', motif: 'panne' })
 
-  // Les entités ACTIVES, plus celle du logement si elle est archivée : la
-  // fenêtre doit dire « l'entité de ce logement est archivée, il ne facture
-  // plus » (P4), sans proposer une archivée au choix.
-  const entites = ents.entites.filter(e => !e.archivee_le || e.id === lien.entite_id)
+  const titulaire = garde.userId === compte
+  // ⚠ UN MEMBRE NE VOIT QUE L'ENTITÉ DE CE LOGEMENT (constat de SÉCURITÉ de la
+  // review 3, 9 nov. 2026). La liste rendait toutes les entités actives du
+  // compte, adresse, SIRET, e-mail et téléphone compris — donc, à un membre
+  // limité à La bulle, l'identité d'une entité qui ne sert qu'à un logement
+  // hors de son périmètre (le profil « propriétaire » d'un compte qui gère les
+  // logements de plusieurs personnes lisait celle des autres). La liste ne
+  // sert qu'aux gestes, qui sont au titulaire seul : c'est à lui seul qu'elle
+  // revient.
+  // Pour le titulaire : les entités ACTIVES, plus celle du logement si elle
+  // est archivée — la fenêtre doit dire « l'entité de ce logement est
+  // archivée, il ne facture plus » (P4), sans proposer une archivée au choix.
+  const entites = titulaire
+    ? ents.entites.filter(e => !e.archivee_le || e.id === lien.entite_id)
+    : ents.entites.filter(e => e.id === lien.entite_id)
 
   // La numérotation de l'année, pour chaque entité ACTIVE en numérotation
   // AUTOMATIQUE : en manuelle, l'hôte saisit chaque numéro à l'émission (Q5 bis).
@@ -79,7 +90,7 @@ async function lireFenetre (req, res) {
 
   res.setHeader('Server-Timing', `db;desc="${requetes} requêtes";dur=${Date.now() - t0}`)
   return res.status(200).json({
-    titulaire: garde.userId === compte,
+    titulaire,
     bien: { id: garde.bien.id, nom: garde.bien.name || '', entite_id: lien.entite_id },
     entites,
     numerotations
@@ -108,10 +119,13 @@ async function geste (req, res) {
     const cree = await EJ.creer(compte, corps.entite, { db: base })
     if (!cree.ok) return repondreRefus(res, cree)
     const lie = await EJ.rattacherBien(compte, bienId, cree.entite.id, { db: base })
-    // ⚠ L'entité existe même si le rattachement échoue : on le dit, la
-    // fenêtre relit et la montre dans la liste, non choisie.
-    if (!lie.ok) return repondreRefus(res, lie)
-    return res.status(200).json({ ok: true, entite: cree.entite, entite_id: lie.entite_id })
+    // ⚠ LA CRÉATION A RÉUSSI MÊME SI LE RATTACHEMENT ÉCHOUE, ET LA RÉPONSE LE
+    // DIT (constat 2 de la review 3). Un 503 la rendait indiscernable d'une
+    // création ratée : la fenêtre restait sur le formulaire, et chaque nouvel
+    // envoi créait un doublon. Ici : 200, `rattache: false` — la fenêtre relit,
+    // montre l'entité non choisie, et dit pourquoi.
+    if (!lie.ok) return res.status(200).json({ ok: true, entite: cree.entite, entite_id: null, rattache: false, motif: lie.motif })
+    return res.status(200).json({ ok: true, entite: cree.entite, entite_id: lie.entite_id, rattache: true })
   }
 
   let r

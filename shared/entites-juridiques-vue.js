@@ -289,10 +289,21 @@ function monterFenetre ({ racine, api, bien, t, esc, langue = 'fr', surChangemen
     return true
   }
 
+  // ⚠ UN GESTE À LA FOIS (constat 2 de la review 3) : deux « Enregistrer »
+  // rapprochés partaient tous les deux, donc deux entités. Pendant l'envoi, le
+  // bouton du formulaire est éteint et tout autre geste est ignoré.
+  let enVol = false
   async function geste (corps, form) {
+    if (enVol) return false
+    enVol = true
+    const envoi = form ? form.querySelector('[type="submit"]') : null
+    if (envoi) envoi.disabled = true
+    let reponse
     try {
-      await api.ecrire({ ...corps, property_uuid: bien })
+      reponse = await api.ecrire({ ...corps, property_uuid: bien })
     } catch (e) {
+      enVol = false
+      if (envoi) envoi.disabled = false
       if (form) { montrerRefus(form, e, t); return false }
       // ⚠ SANS FORMULAIRE (un bouton) : on repeint depuis le dernier état lu,
       // et le bandeau dit pourquoi.
@@ -301,8 +312,16 @@ function monterFenetre ({ racine, api, bien, t, esc, langue = 'fr', surChangemen
       if (b) b.textContent = t(e && e.code === 'archivee' ? 'ej.err_archivee' : e && e.code === 'panne' ? 'ej.err_panne' : 'ej.err_generic')
       return false
     }
+    enVol = false
     mode = null
-    if (await charger() && typeof surChangement === 'function') {
+    const relu = await charger()
+    // Créée mais pas choisie (le rattachement a échoué) : la liste la montre,
+    // le bandeau dit quoi faire.
+    if (relu && reponse && reponse.rattache === false) {
+      const b = racine.querySelector('.ej-bandeau')
+      if (b) b.textContent = t('ej.err_rattachement')
+    }
+    if (relu && typeof surChangement === 'function') {
       try { surChangement(etat) } catch (e) { /* la fiche se débrouille */ }
     }
     return true
@@ -425,7 +444,7 @@ function monterFenetre ({ racine, api, bien, t, esc, langue = 'fr', surChangemen
  * ferment, la tabulation reste dedans, le focus revient d'où il venait).
  * @returns {{ fermer: Function, pret: Promise<void> }}
  */
-function ouvrirFenetre ({ doc, api, bien, t, esc, langue = 'fr', surChangement = null, surFermeture = null }) {
+function ouvrirFenetre ({ doc, api, bien, t, esc, langue = 'fr', surChangement = null, surFermeture = null, retourFocus = null }) {
   const d = doc || document
   injecterStyles(d)
   const avant = d.activeElement
@@ -448,7 +467,14 @@ function ouvrirFenetre ({ doc, api, bien, t, esc, langue = 'fr', surChangement =
     ferme = true
     d.removeEventListener('keydown', surTouche, true)
     voile.remove(); boite.remove()
-    try { if (avant && typeof avant.focus === 'function') avant.focus() } catch (e) {}
+    // ⚠ LE FOCUS REVIENT MÊME SI LE BOUTON D'ORIGINE A ÉTÉ REPEINT (constat 3
+    // de la review 3) : la fiche remplace son bloc après un geste, le bouton
+    // d'ouverture est alors détaché, et le focus tombait sur le corps de la
+    // page. `retourFocus` dit où aller à sa place.
+    try {
+      if (avant && avant.isConnected && typeof avant.focus === 'function') avant.focus()
+      else if (typeof retourFocus === 'function') { const el = retourFocus(); if (el) el.focus() }
+    } catch (e) {}
     if (typeof surFermeture === 'function') { try { surFermeture() } catch (e) {} }
   }
   // ⚠ `aria-modal` SANS PIÈGE DE FOCUS EST UN MENSONGE (constat mesuré sur

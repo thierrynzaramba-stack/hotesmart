@@ -500,10 +500,12 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
      existante** (`GET /api/calendar?booking=`) — une lecture de plus côté
      serveur, en parallèle, aucun appel de plus côté navigateur.
    - Étape 1 (D2 bis) : la fiche du logement montre le nom de l'entité **dans
-     la réponse existante** de `GET /api/logement?id=` (une lecture de plus
-     côté serveur, aucun appel de plus côté navigateur). La fenêtre, ouverte
-     par un geste, lit UN endpoint : `GET /api/entites-juridiques?bien=`
-     (entités du compte, entité du logement, numérotations).
+     la réponse existante** de `GET /api/logement?id=` (une ou deux lectures
+     de plus côté serveur — le lien du logement, puis son entité s'il en a
+     une —, en parallèle de la fiche ; aucun appel de plus côté navigateur).
+     La fenêtre, ouverte par un geste, lit UN endpoint :
+     `GET /api/entites-juridiques?bien=` (entités du compte, entité du
+     logement, numérotations).
 2. **Résumé pré-calculé : sans objet.** Une facture est un document comptable,
    donc une donnée temps réel, jamais un résumé.
 3. **Cache navigateur : aucun.** Ces écrans portent une identité et un
@@ -518,10 +520,10 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    endpoint pose `Server-Timing` avec son nombre de requêtes.
 8. **Mesure AVANT / APRÈS** (appels, requêtes, octets, sur staging) : la
    fiche du logement, mesurée au début de l'étape 1b (AVANT) puis après
-   (APRÈS : même nombre d'appels, une requête de plus) ; la fenêtre est neuve
-   (1 appel à l'ouverture, `Server-Timing` = 3 + une ou deux par entité en
-   numérotation automatique) ; la fiche de réservation au début de
-   l'étape 2. La page publique n'existe pas (AVANT sans objet).
+   (APRÈS : même nombre d'appels, une ou deux requêtes de plus) ; la fenêtre
+   est neuve (1 appel à l'ouverture, `Server-Timing` = 2 + une ou deux par
+   entité en numérotation automatique — corrigé après la review 3, qui a
+   relevé « 3 + ») ; la fiche de réservation au début de l'étape 2. La page publique n'existe pas (AVANT sans objet).
 
 **Mobile** : le bouton, l'état et la confirmation existent aussi sur la fiche
 du téléphone ; la page publique est pensée pour le téléphone d'abord.
@@ -634,6 +636,20 @@ de la fiche ne peut pas être vrai pour qui la fenêtre refuse.
 4. Le test de la page ne lisait que le source : il passait sans
    `surFermeture`, qui rend le bouton inerte après la première fermeture.
 5. La spec annonçait des nombres de requêtes faux (`3 +`, « une de plus »).
+
+Corrections (commit suivant la trace), sans nouvelle review — ⚠ sauf avis
+contraire du chef de file : CLAUDE.md prévoit une re-review des seuls
+correctifs quand une review trouve un défaut de SÉCURITÉ (le constat 1) ;
+c'est à lui de dire si elle s'applique à cette review annoncée « dernière » :
+1. GET de la fenêtre : le titulaire reçoit la liste, un membre la seule
+   entité de ce logement (et sa seule numérotation) ;
+2. `creer` rend 200 `rattache: false` si le rattachement échoue ; la fenêtre
+   sort du formulaire, relit et le dit ; un geste à la fois ;
+3. `retourFocus` : le focus revient au bouton repeint ;
+4. le geste d'ouverture passe dans `shared/logement-facturation.js`, testé
+   dans un DOM (ouvrir, choisir, fermer, rouvrir) ;
+5. les nombres de requêtes de la spec sont corrigés.
+Chaque correction tuée par une mutation.
 
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 

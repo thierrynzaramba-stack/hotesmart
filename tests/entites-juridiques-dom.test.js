@@ -246,6 +246,43 @@ test('un refus nommé se pose sous SON champ, avec aria-invalid', () => {
   assert.equal(bloc.querySelector('input').getAttribute('aria-invalid'), null, 'l\'ancien refus est effacé')
 })
 
+test('LE TEST QUI COMPTE : un geste à la fois — deux « Enregistrer » rapprochés ne créent qu\'UNE entité (review 3, constat 2)', async () => {
+  let liberer
+  const appels = []
+  const { r } = await monter(ETAT(), { ecrire: (corps) => { appels.push(corps); return new Promise(res => { liberer = () => res({ ok: true, rattache: true }) }) } })
+  r.querySelector('[data-action="ajouter"]').click()
+  const f = r.querySelector('.ej-carte[data-entite=""] form')
+  f.querySelector('#ej-nom').value = 'SCI Neuve'
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  assert.equal(f.querySelector('[type="submit"]').disabled, true, 'bouton éteint pendant l\'envoi')
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  r.querySelector('.ej-carte[data-entite="e1"] [data-action="choisir"]').click()
+  await attendre()
+  assert.equal(appels.length, 1, 'un seul envoi')
+  liberer(); await attendre(); await attendre()
+})
+
+test('LE TEST QUI COMPTE : créée mais pas choisie — la fenêtre sort du formulaire, relit, et dit quoi faire', async () => {
+  const etat = ETAT()
+  const lectures = []
+  const dom = new JSDOM('<!doctype html><div id="r"></div>')
+  global.document = dom.window.document
+  const r = dom.window.document.getElementById('r')
+  const api = {
+    lire: async () => { lectures.push(1); return JSON.parse(JSON.stringify(etat)) },
+    ecrire: async () => ({ ok: true, entite: { id: 'e9' }, entite_id: null, rattache: false })
+  }
+  await V.monterFenetre({ racine: r, api, bien: BIEN, t, esc })
+  r.querySelector('[data-action="ajouter"]').click()
+  const f = r.querySelector('.ej-carte[data-entite=""] form')
+  f.querySelector('#ej-nom').value = 'SCI Neuve'
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  await attendre(); await attendre()
+  assert.equal(lectures.length, 2, 'relue')
+  assert.equal(r.querySelector('.ej-carte[data-entite=""]'), null, 'plus de formulaire de création : pas de doublon au renvoi')
+  assert.equal(r.querySelector('.ej-bandeau').textContent, '[ej.err_rattachement]')
+})
+
 test('un geste refusé sans formulaire : la fenêtre se repeint depuis l\'état lu, et le bandeau le dit', async () => {
   const refus = async () => { const e = new Error('archivee'); e.status = 409; e.code = 'archivee'; throw e }
   const { r } = await monter(ETAT(), { ecrire: refus })
@@ -330,6 +367,21 @@ test('LE TEST QUI COMPTE : la fenêtre — voile, Échap et croix ferment, la ta
   doc.querySelector('.ej-voile').click()
   assert.equal(doc.querySelector('.ej-fenetre'), null)
   assert.equal(doc.querySelectorAll('#ej-styles').length, 1)
+})
+
+test('LE TEST QUI COMPTE : le focus revient même si le bouton d\'origine a été repeint (review 3, constat 3)', async () => {
+  const dom = new JSDOM('<!doctype html><div id="bloc"><button data-bind="facturation">o</button></div>')
+  const doc = dom.window.document
+  global.document = doc
+  doc.querySelector('[data-bind="facturation"]').focus()
+  const f = V.ouvrirFenetre({ doc, api: { lire: async () => ETAT(), ecrire: async () => ({ ok: true }) }, bien: BIEN, t, esc,
+    retourFocus: () => doc.querySelector('[data-bind="facturation"]') })
+  await f.pret
+  // La fiche repeint son bloc : l'ancien bouton est détaché.
+  doc.getElementById('bloc').innerHTML = '<button data-bind="facturation">n</button>'
+  f.fermer()
+  assert.equal(doc.activeElement, doc.querySelector('[data-bind="facturation"]'))
+  assert.equal(doc.activeElement.textContent, 'n', 'le NOUVEAU bouton')
 })
 
 test('LE TEST QUI COMPTE : l\'ancienne page n\'existe plus, ni son onglet, et la vue n\'a aucun hexa', () => {
