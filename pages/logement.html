@@ -659,9 +659,30 @@ $('[data-bind="fiche"]').addEventListener('click', (ev) => {
   if (sup) { supprimerLogement(sup); return }
   const arc = ev.target.closest('[data-bind="archiver"]')
   if (arc) { archiverLogement(arc); return }
+  // Facture voyageur, étape 1b : la fenêtre de l'entité juridique.
+  if (ev.target.closest('[data-bind="facturation"]')) { ouvrirFacturation(); return }
   const rea = ev.target.closest('[data-bind="reactiver"]')
   if (rea) reactiverLogement(rea)
 })
+
+// ─── Facturation : la fenêtre de l'entité juridique (facture voyageur, 1b) ──
+//
+// D2 bis (Thierry, 9 novembre 2026) : l'entité qui émet les factures de ce
+// logement se choisit ICI. Tout le geste vit dans shared/logement-facturation.js
+// (testé dans un DOM), chargé AU CLIC avec la fenêtre : la fiche n'en paie rien
+// tant qu'on ne l'ouvre pas.
+async function ouvrirFacturation () {
+  if (!ficheCourante) return
+  try {
+    const m = await import('/shared/logement-facturation.js')
+    await m.ouvrirFacturation({
+      doc: document, api: api.entitesJuridiques, fiche: () => ficheCourante, idDuBien,
+      outils: OUTILS, langue: I18n.lang || 'fr'
+    })
+  } catch (e) {
+    logger.error('Logement', 'fenetre facturation : ' + e.message)
+  }
+}
 
 // ─── Le dialogue partagé : couper l'assistant, publier, supprimer ─────────
 //

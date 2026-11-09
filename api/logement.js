@@ -25,6 +25,7 @@ const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, peutLire, peutEcrire, estTitulaireDuCompte } = require('../lib/permissions')
 const { lireFiche, lireListe, compterPourSuppression } = require('../lib/logement/lecture')
 const { compterAvantArchivage } = require('../lib/logement/archive')
+const { entiteDuBien } = require('../lib/entites-juridiques')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -160,6 +161,22 @@ module.exports = async function handler (req, res) {
     const bienId = garde.bien ? garde.bien.id : id
 
     const cible = garde.bien ? { id: garde.bien.id, ref: garde.bien.provider_property_id } : null
+
+    // ─── Le bloc « Facturation » : l'entité juridique de ce logement ───
+    // Facture voyageur, étape 1b (D2 bis, Thierry, 9 nov. 2026) : l'entité se
+    // choisit sur la fiche. Ici on la LIT seulement, en parallèle de la fiche ;
+    // les gestes passent par api/entites-juridiques.js, gardé sur
+    // `facturation` (PAS `reglages` : un membre `reglages: write` ne change pas
+    // l'émetteur des factures).
+    // ⚠ UN TROISIÈME DOMAINE, SA PROPRE VÉRIFICATION, comme `prestataires` et
+    // `avis` ci-dessus : sans `facturation` en lecture, le bloc est REFUSÉ —
+    // ni le nom de l'entité ni son absence ne descendent.
+    // ⚠ `.catch` : la lecture part AVANT `lireFiche` ; si la fiche lève, on
+    // sort par le 503 sans l'attendre, et une promesse rejetée non attendue
+    // ferait tomber la fonction.
+    const lectureFacturation = peutLire(garde.contexte, 'facturation', cible)
+      ? entiteDuBien(garde.accountUserId, bienId, { db: supabase }).catch(() => ({ ok: false, motif: 'panne' }))
+      : null
     try {
       const fiche = await lireFiche(supabase, {
         compte: garde.accountUserId, bienId,
@@ -168,6 +185,27 @@ module.exports = async function handler (req, res) {
       // La garde a deja rendu 404 pour un bien inconnu ; ici, c'est un bien
       // connu mais absent du compte proprietaire — on ne renseigne pas plus.
       if (!fiche) return res.status(404).json({ error: 'Bien introuvable' })
+      // Le bloc « Facturation » (voir plus haut) : refusé, illisible, ou lu.
+      if (lectureFacturation === null) {
+        fiche.refuses = [...(fiche.refuses || []), 'facturation']
+      } else {
+        const lu = await lectureFacturation
+        if (!lu.ok) {
+          // ⚠ UNE PANNE DE CE BLOC NE FAIT PAS TOMBER LA FICHE : il se dit
+          // illisible, comme les canaux ou les avis.
+          fiche.facturation = null
+          fiche.indisponibles = [...(fiche.indisponibles || []), 'facturation']
+        } else {
+          fiche.facturation = {
+            // Le nom seul, et l'archivage : l'adresse, le SIRET et le régime
+            // de TVA restent dans la fenêtre, gardée par son endpoint.
+            entite: lu.entite ? { id: lu.entite.id, nom: lu.entite.nom, archivee: !!lu.entite.archivee_le } : null,
+            // Le bouton ne s'affiche que si le serveur l'accepte : `facturation`
+            // en écriture, donc le titulaire du compte du bien, seul.
+            modifier: peutEcrire(garde.contexte, 'facturation', cible)
+          }
+        }
+      }
       return res.status(200).json(fiche)
     } catch (e) {
       // ⚠ UNE PANNE SE DIT 503, ELLE NE SE DEGUISE PAS EN FICHE VIDE. Un 200
