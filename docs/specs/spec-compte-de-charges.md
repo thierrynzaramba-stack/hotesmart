@@ -4,7 +4,8 @@ Demande de Thierry du 8 novembre 2026 (fil « compte de charges » du Projet).
 **Statut : étape 0 close le 9 novembre 2026 — les 23 questions du §4 sont
 tranchées par Thierry, chaque réponse inscrite et datée. Aucun code.**
 **Ajout du 9 novembre 2026 (23 h 05) : les factures récurrentes et la
-période couverte (§6 ter), Q24 à Q27 tranchées le soir même.** Ce qui
+période couverte (§6 ter), Q24 à Q27 tranchées le soir même ; Q28 (le
+cron dédié, quotidien) le même soir.** Ce qui
 reste « *proposition* » dans le texte est un choix technique non contredit,
 ou une précision soumise à Thierry avec la décision qu'elle accompagne.
 
@@ -128,6 +129,7 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
 - **Q25 — La mensualisation (énergie, taxe foncière).** Tranchée, voir ci-dessous et §6 ter.
 - **Q26 — Les avoirs et les remboursements.** Tranchée, voir ci-dessous et §6 ter.
 - **Q27 — Ce que fait une facture récurrente.** Tranchée, voir ci-dessous et §6 ter.
+- **Q28 — Le cron dédié et sa fréquence.** Tranchée, voir ci-dessous et §7.
 
 ### Réponses de Thierry
 
@@ -285,6 +287,19 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
   date habituelle ; il **pré-remplit** la nouvelle (entité, bien,
   catégorie, période) quand le fournisseur est reconnu. Les rythmes plus
   courts (un abonnement internet mensuel) ne sont pas tranchés.
+- **Q28 (9 nov. 2026, vers 23 h 55) : « une fois par jour et mise à jour
+  quand un document est ajouté, supprimé ou modifié ».** Question posée à la
+  demande du chef de file : le cron dédié `api/cron-charges.js` tournait
+  toutes les 5 minutes, sans décision de Thierry consignée. Il passe **une
+  fois par jour** (`17 2 * * *` UTC, la nuit à Paris). Tout ce qui suit un
+  document se fait **au geste** : la lecture IA à la confirmation de
+  l'envoi (`api/charges.js`), les totaux par le trigger à chaque écriture,
+  ajout, modification ou suppression. Le passage quotidien ne fait que le
+  rattrapage : effacer les envois jamais confirmés (24 h), recalculer les
+  totaux, relire ce qui est resté `a_lire` (panne de l'IA ou plafond au
+  moment du geste). Mesuré à vide : 2 lectures de `charges`, l'écriture de
+  la mesure du passage, 1 appel RPC, **aucun appel à l'IA ni au stockage**
+  (`tests/cron-charges.test.js`).
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -559,13 +574,16 @@ Trois défauts du modèle du §6, sur ces cas précis :
   fournisseur et l'hôte envoient le même PDF) **crée sa ligne, regroupée**
   avec la première (Q14) ; seul un **rejeu** du même e-mail par Brevo (même
   `email_uuid`, même empreinte) ne crée rien.
-- **La lecture par l'IA, elle, est différée** : une fonction de cron
-  **dédiée** (`api/cron-charges.js`, toutes les 5 minutes, sa propre limite de
-  60 s) lit les charges `a_lire` par index, avec un budget de temps qui
-  s'arrête avant la limite. Elle ne charge pas `api/cron.js` (précédent :
+- **La lecture par l'IA se fait à l'arrivée du document (Q28)** :
+  *proposition pour le lot 5*, le webhook enregistre la pièce puis la fait
+  lire dans la même invocation si son budget de temps le permet ; sinon,
+  ou en cas de panne, elle reste `a_lire`. Le **cron dédié quotidien**
+  (`api/cron-charges.js`, sa propre limite de 60 s, Q28) relit ce qui est
+  resté `a_lire`, par index, avec un budget de temps qui s'arrête avant la
+  limite. Il ne charge pas `api/cron.js` (précédent :
   `api/cron-messages.js`). Une lecture qui a eu lieu et a échoué incrémente
   `tentatives_lecture` ; au troisième échec, la charge passe `illisible` et
-  n'est plus relue — jamais une lecture facturée toutes les 5 minutes
+  n'est plus relue — jamais une lecture facturée en boucle
   (incident du 8 octobre, `lib/ia/journal.js`). Une panne du fournisseur
   d'IA (crédit épuisé, indisponibilité) **arrête le passage sans rien
   compter** : un quart d'heure de panne ne doit pas rendre toutes les
@@ -630,16 +648,17 @@ Trois défauts du modèle du §6, sur ces cas précis :
    `charges_ota_supprimees`, `charges_adresses`), bucket privé, writer
    (le résumé tenu par trigger), lecture IA, endpoint
    d'écriture (créer, lire, valider, trancher un signal, supprimer, URL
-   d'envoi et de consultation), et **le cron dédié** `api/cron-charges.js`
-   (recalcul quotidien du résumé, effacement des `envoi` de plus de 24 h).
+   d'envoi et de consultation), et **le cron dédié, quotidien (Q28)**
+   `api/cron-charges.js` (recalcul du résumé, effacement des `envoi` de plus
+   de 24 h, relecture de ce qui est resté `a_lire`).
 3. **L'écran `/charges`**, ordinateur et téléphone : liste, totaux
    « estimation », ajout par photo ou fichier, formulaire de vérification,
    signaux « Vérifier ».
 4. **Les commissions des plateformes** (§7 bis) : matérialisation
    quotidienne dans le cron dédié, signal `commission_deja_comptee`.
 5. **L'e-mail entrant** : adresse signée et bouton « Changer d'adresse »,
-   branche dans `api/inbound-email.js`, pièces jointes, lecture différée par
-   le cron dédié. ⚠ Ce lot touche le fichier qui fait entrer les réponses des
+   branche dans `api/inbound-email.js`, pièces jointes, lecture à l'arrivée
+   (Q28), le cron quotidien en rattrapage. ⚠ Ce lot touche le fichier qui fait entrer les réponses des
    voyageurs : sa review vérifie que ce chemin est intact.
 6. **La mesure** sur les vraies factures de Thierry : écart lu / validé, champ
    par champ. Elle décide si Mindee est utile.

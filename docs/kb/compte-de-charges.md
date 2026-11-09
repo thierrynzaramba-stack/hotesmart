@@ -14,7 +14,7 @@ exercice. Spec (décisions de Thierry Q1 à Q23, 8-9 novembre 2026) :
 | `lib/charges/regles.js` | Les règles pures : catégories (Q5), montants, dates, SIRET, type réel d'un fichier, entité proposée (Q6), clé de doublon (Q14), jour d'une charge. |
 | `lib/charges/lecture.js` | La lecture IA (Haiku, client partagé, `avecContexteIA` fonction `charges-lecture`). Trois issues : `ok`, `echec` (compte), `panne` (ne compte pas). |
 | `api/charges.js` | Les écritures, **titulaire seul** (`estTitulaireDuCompte`, pas le domaine `facturation`). |
-| `api/cron-charges.js` | Cron dédié, toutes les 5 min : purge des envois > 24 h, lectures `a_lire`, recalcul quotidien du résumé (passage de 3 h, Paris). |
+| `api/cron-charges.js` | Cron dédié, **une fois par jour** (Q28, `17 2 * * *` UTC) : purge des envois > 24 h, recalcul du résumé, relecture de ce qui est resté `a_lire`. Tout le reste se fait au geste (lecture à la confirmation, totaux par trigger). À vide : 2 lectures, la mesure, 1 RPC, 0 appel IA. |
 
 ## Règles à ne pas perdre
 

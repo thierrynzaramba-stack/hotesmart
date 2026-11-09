@@ -3,15 +3,20 @@
 // Spec : docs/specs/spec-compte-de-charges.md §6, §7, §11 point 2
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Toutes les 5 minutes, trois tâches, bornées et indépendantes :
+// ⚠ UNE FOIS PAR JOUR (Q28, décision de Thierry du 9 novembre 2026 :
+// « une fois par jour, et mise à jour quand un document est ajouté, supprimé
+// ou modifié »). Ce qui suit un document se fait AU GESTE, pas ici : la
+// lecture IA à la confirmation (`api/charges.js`), les totaux par le trigger
+// `charges_resume_trg` à chaque écriture. Ce passage ne fait que le
+// rattrapage, en trois tâches bornées et indépendantes, dans cet ordre :
 //   1. effacer les ENVOIS jamais confirmés depuis plus de 24 h — la seule
 //      exception à « on garde tout » (Q12, acceptée le 9 novembre 2026) ;
-//   2. lire les charges `a_lire` (lectures interrompues par une panne, et
-//      demain les pièces jointes reçues par e-mail, lot 5) ;
-//   3. UNE FOIS PAR JOUR (le passage de 3 h à Paris), recalculer le résumé
-//      des totaux de chaque compte, pour la cohérence : le trigger le tient à
-//      jour à chaque écriture, ce passage rattrape ce qu'un incident aurait
-//      laissé de travers.
+//   2. recalculer le résumé des totaux de chaque compte, pour la cohérence ;
+//   3. relire les charges restées `a_lire` (panne de l'IA ou plafond du
+//      jour au moment du geste).
+// À vide : 2 lectures de `charges`, l'écriture de la mesure, 1 appel RPC
+// (la liste des comptes), AUCUN appel à l'IA ni au stockage
+// (`tests/cron-charges.test.js` le tient).
 //
 // ⚠ POURQUOI UN CRON À PART, et pas une tâche de plus dans `api/cron.js` :
 // le cycle principal porte les codes d'accès, et sa limite de 60 s est déjà
@@ -35,14 +40,6 @@ const BUDGET_RECALCUL_MS = 15000
 const COMPTES_PAR_PAGE = 200
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
-
-const HEURE_PARIS = new Intl.DateTimeFormat('fr-FR',
-  { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false })
-/** Le passage quotidien : celui qui tombe entre 3 h 00 et 3 h 04 à Paris. */
-function estLePassageQuotidien (d = new Date()) {
-  const [h, m] = HEURE_PARIS.format(d).split(':').map(Number)
-  return h === 3 && m < 5
-}
 
 async function recalculerTousLesComptes (db, echeance) {
   let apres = null
@@ -100,14 +97,13 @@ module.exports = async function handler (req, res) {
     if (!p.ok) results.errors.push({ tache: 'purge_envois', error: 'lecture des envois impossible' })
   } catch (e) { results.errors.push({ tache: 'purge_envois', error: e.message }) }
 
-  // Le recalcul quotidien passe AVANT les lectures : à 3 h personne n'attend
-  // de formulaire, et placé après, il n'aurait que le temps qu'elles laissent.
-  if (estLePassageQuotidien()) {
-    try {
-      bilan.recalcul = await chrono.mesure('recalcul_resume', () =>
-        recalculerTousLesComptes(supabase, Math.min(Date.now() + BUDGET_RECALCUL_MS, t0 + BUDGET_LECTURES_MS)))
-    } catch (e) { results.errors.push({ tache: 'recalcul_resume', error: e.message }) }
-  }
+  // Le recalcul passe AVANT les lectures : la nuit personne n'attend de
+  // formulaire, et placé après, il n'aurait que le temps qu'elles laissent.
+  try {
+    bilan.recalcul = await chrono.mesure('recalcul_resume', () =>
+      recalculerTousLesComptes(supabase, Math.min(Date.now() + BUDGET_RECALCUL_MS, t0 + BUDGET_LECTURES_MS)))
+    if (!bilan.recalcul.complet) results.errors.push({ tache: 'recalcul_resume', error: 'echeance atteinte, recalcul incomplet' })
+  } catch (e) { results.errors.push({ tache: 'recalcul_resume', error: e.message }) }
 
   try {
     const l = await chrono.mesure('lectures', () => lireEnAttente(supabase, {
@@ -129,5 +125,4 @@ module.exports = async function handler (req, res) {
   return res.status(200).json({ ok: true, ...bilan, errors: results.errors })
 }
 
-module.exports.estLePassageQuotidien = estLePassageQuotidien
 module.exports.recalculerTousLesComptes = recalculerTousLesComptes

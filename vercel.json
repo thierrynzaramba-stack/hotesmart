@@ -38,7 +38,7 @@
     },
     {
       "path": "/api/cron-charges",
-      "schedule": "*/5 * * * *"
+      "schedule": "17 2 * * *"
     }
   ],
   "rewrites": [
