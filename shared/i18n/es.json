@@ -1096,7 +1096,7 @@
   "yfe.aucun_bien": "Ningún alojamiento accesible en esta cuenta.",
   "yfe.aucun_dans_filtre": "Ningún evento de este tipo en los próximos doce meses.",
   "yfe.cache_age": "Últimos datos conocidos (hace {minutes} min) · actualizando…",
-  "yfe.cache_echec": "Últimos datos conocidos: no se ha podido actualizar.",
+  "yfe.cache_echec": "Últimos datos conocidos: no se ha podido actualizar (no se muestran las noches vendidas ni los precios fijados a mano).",
   "yfe.calcule_a": "calculado a las {heure}",
   "yfe.coupe": "No se tiene en cuenta",
   "yfe.coupe_detail": "Esta fecha no se tiene en cuenta para este alojamiento: no cambia ningún precio.",
@@ -1153,7 +1153,7 @@
   "yfe.pos_tout": "todas las noches",
   "yfe.prix_main": "✎ {prix}",
   "yfe.prix_main_titre": "precio fijado a mano: {prix}, YieldFlow no toca esta noche",
-  "yfe.regle_ailleurs": "ajustada por otro evento",
+  "yfe.regle_ailleurs": "ajustada por «{nom}»",
   "yfe.regle_court": "ajustado",
   "yfe.regle_par_vous": "ajustado por usted",
   "yfe.sans_nuit_titre": "Estos ajustes no encuentran su noche este año:",
@@ -1164,5 +1164,11 @@
   "yfe.titre": "Lo que mueve sus precios",
   "yfe.vendue": "vendida",
   "yfe.vide": "Ningún evento en los próximos doce meses.",
-  "yfe.weekend": "{niveau} el fin de semana"
+  "yfe.weekend": "{niveau} el fin de semana",
+  "yfe.calcule_le": "calculado el {date} a las {heure}",
+  "yfe.prix_non_calculable": "precio no calculable",
+  "yfe.refus": "No tiene acceso a esta pantalla en esta cuenta.",
+  "yfe.reglage_non_applique": "su nivel {niveau} no se aplica",
+  "yfe.sans_evenement_titre": "Estos ajustes no tienen evento este año:",
+  "yfe.toucher_une_nuit": "Toque una noche para ver su detalle."
 }

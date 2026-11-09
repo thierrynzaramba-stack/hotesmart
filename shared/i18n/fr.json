@@ -1096,7 +1096,7 @@
   "yfe.aucun_bien": "Aucun logement accessible sur ce compte.",
   "yfe.aucun_dans_filtre": "Aucun événement de ce type dans les douze prochains mois.",
   "yfe.cache_age": "Dernières données connues (il y a {minutes} min) · mise à jour…",
-  "yfe.cache_echec": "Dernières données connues : la mise à jour n’a pas pu se faire.",
+  "yfe.cache_echec": "Dernières données connues : la mise à jour n’a pas pu se faire (les nuits vendues et les prix posés à la main ne sont pas affichés).",
   "yfe.calcule_a": "calculé à {heure}",
   "yfe.coupe": "Pas prise en compte",
   "yfe.coupe_detail": "Cette date n’est pas prise en compte pour ce logement : elle ne change aucun prix.",
@@ -1153,7 +1153,7 @@
   "yfe.pos_tout": "toutes les nuits",
   "yfe.prix_main": "✎ {prix}",
   "yfe.prix_main_titre": "prix posé à la main : {prix}, YieldFlow ne touche pas cette nuit",
-  "yfe.regle_ailleurs": "réglée par un autre événement",
+  "yfe.regle_ailleurs": "réglée par « {nom} »",
   "yfe.regle_court": "réglé",
   "yfe.regle_par_vous": "réglé par vous",
   "yfe.sans_nuit_titre": "Ces réglages ne trouvent pas leur nuit cette année :",
@@ -1164,5 +1164,11 @@
   "yfe.titre": "Ce qui fait bouger vos prix",
   "yfe.vendue": "vendue",
   "yfe.vide": "Aucun événement dans les douze prochains mois.",
-  "yfe.weekend": "{niveau} le week-end"
+  "yfe.weekend": "{niveau} le week-end",
+  "yfe.calcule_le": "calculé le {date} à {heure}",
+  "yfe.prix_non_calculable": "prix non calculable",
+  "yfe.refus": "Vous n’avez pas accès à cet écran sur ce compte.",
+  "yfe.reglage_non_applique": "votre niveau {niveau} ne s’applique pas",
+  "yfe.sans_evenement_titre": "Ces réglages n’ont pas d’événement cette année :",
+  "yfe.toucher_une_nuit": "Touchez une nuit pour lire son détail."
 }

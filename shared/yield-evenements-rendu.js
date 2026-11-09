@@ -14,6 +14,10 @@
 // niveau colore la PASTILLE ou la CASE, jamais la ligne (règle 1 de Thierry) ;
 // le CHIFFRE du niveau est toujours écrit (règle 2) : « 3 · Haut ».
 
+import { titreFerie, titrePont, titreWeekEnd } from './yield-libelles-feries.js'
+
+// ⚠ LES NOMS DU MOTEUR (lib/yield/suggestion.js, `NIVEAUX`), recopiés parce
+// qu'un module du navigateur ne lit pas le serveur — et un test exige l'égalité.
 export const NIVEAUX = ['Base', 'Moyen', 'Haut', 'Très haut', 'Exceptionnel']
 export const rangNiveau = nom => NIVEAUX.indexOf(nom)
 
@@ -40,13 +44,21 @@ export function etiquetteNiveau (nom, t) {
 /** La classe de la pastille d'un niveau (shared/yield-evenements.css). */
 export const classeNiveau = nom => (rangNiveau(nom) < 0 ? 'yfe-niv' : `yfe-niv yfe-niv--${rangNiveau(nom) + 1}`)
 
-/** Le nom affiché d'un événement : le nom brut du serveur, composé selon son type. */
-export function nomEvenement (e, t) {
+/**
+ * Le nom affiché d'un événement : le nom brut du serveur, composé selon son type.
+ * ⚠ EN FRANÇAIS, LES FÉRIÉS PASSENT PAR LA TABLE (`shared/yield-libelles-feries.js`,
+ * décision de Thierry du 2 novembre 2026 : « 11 novembre », « Pont de
+ * l’Ascension », « Week-end de Pâques », jamais « Week-end du Armistice 1918 »).
+ * La table n'existe qu'en français : en anglais et en espagnol, le nom brut est
+ * composé par les chaînes i18n — leur forme reste à trancher (spec §13).
+ */
+export function nomEvenement (e, t, francais = false) {
   const nom = e.nom || e.cle
   if (e.type === 'vacances_zone') return t('yfe.nom_vacances_zone', { nom })
   if (e.type === 'vacances_autre') return t('yfe.nom_vacances_autre', { nom })
-  if (e.type === 'pont') return t('yfe.nom_pont', { nom })
-  if (e.type === 'week_end_prolonge') return t('yfe.nom_week_end_prolonge', { nom })
+  if (e.type === 'ferie') return (francais && titreFerie(e.nom)) || nom
+  if (e.type === 'pont') return (francais && titrePont(e.nom)) || t('yfe.nom_pont', { nom })
+  if (e.type === 'week_end_prolonge') return (francais && e.nom ? titreWeekEnd(e.nom) : null) || t('yfe.nom_week_end_prolonge', { nom })
   return nom
 }
 
@@ -195,26 +207,48 @@ export function libellePosition (l, t, jourLong) {
 }
 
 // ─── Le HTML ────────────────────────────────────────────────────────────────
+//
+// `fmt` : { t, money(n), date(Date, opts), heure(Date), francais (bool),
+//           motif(code) → { titre, quoi } | null }
+// ⚠ `motif` traduit les codes du moteur par sa table (`shared/yield-motifs.js`,
+// dérivée du moteur et testée) — en français seulement ; ailleurs il rend `null`
+// et la page dit « non calculable » sans plus. « Un `null` dit pourquoi » est
+// la règle de YieldFlow (docs/kb/restitution-yield.md).
 
-/**
- * @param fmt { t, money(n), date(Date, opts), heure(Date) }
- */
+const nomDe = (e, fmt) => nomEvenement(e, fmt.t, fmt.francais)
+const motifDe = (code, fmt) => (code && typeof fmt.motif === 'function' ? fmt.motif(code) : null)
+const prixOuMotif = (p, fmt) => (p != null ? fmt.money(p) : fmt.t('yfe.prix_non_calculable'))
+
 export function rendreLegende (niveaux, motif, fmt) {
-  if (!niveaux || !niveaux.length) return `<p class="yfe-alerte">${esc(fmt.t('yfe.niveaux_non_calculables'))}</p>`
+  if (!niveaux || !niveaux.length) {
+    const m = motifDe(motif, fmt)
+    return `<p class="yfe-alerte">${esc(fmt.t('yfe.niveaux_non_calculables'))}${m ? ' ' + esc(m.quoi) : ''}</p>`
+  }
   return niveaux.map(n => `<span class="${classeNiveau(n.nom)} yfe-niv--legende">${esc(etiquetteNiveau(n.nom, fmt.t))} <span class="yfe-niv__prix num">${esc(fmt.money(n.prix))}</span></span>`).join('')
 }
 
 export function rendreFrise (data, idx, ouvert, fmt) {
   const mois = moisDeLaFenetre(data.fenetre)
   const { barres, couloirs } = barresDeLaFrise(data.evenements || [], idx, data.fenetre)
-  const etiquettes = mois.map(m => `<span class="yfe-frise__mois" style="inset-inline-start:${m.gauche.toFixed(3)}%">${esc(fmt.date(m.date, { month: 'short' }))}</span>`).join('')
+  // ⚠ L'ANNÉE SUR LE PREMIER MOIS, SUR JANVIER ET SUR LE DERNIER : treize mois
+  // portent deux fois « nov. », et sans l'année on ne sait pas lequel est lequel.
+  const etiquettes = mois.map((m, i) => {
+    const annee = i === 0 || i === mois.length - 1 || m.cle.endsWith('-01')
+    // Le 13e mois, partiel, commence près du bord : son nom s'aligne à droite
+    // plutôt que d'être coupé.
+    const place = m.gauche > 90 ? 'inset-inline-end:0' : `inset-inline-start:${m.gauche.toFixed(3)}%`
+    return `<span class="yfe-frise__mois" style="${place}">${esc(fmt.date(m.date, annee ? { month: 'short', year: 'numeric' } : { month: 'short' }))}</span>`
+  }).join('')
   const traits = mois.map(m => `<span class="yfe-frise__trait" style="inset-inline-start:${m.gauche.toFixed(3)}%"></span>`).join('')
   const lignes = barres.map(b => {
-    const nom = nomEvenement(b.e, fmt.t)
+    const nom = nomDe(b.e, fmt)
     const id = idEvenement(b.e)
-    return `<button type="button" class="${classeNiveau(b.niveau)} yfe-barre" data-ouvrir="${esc(id)}" aria-pressed="${ouvert === id}"`
+    // ⚠ LE CHIFFRE DU NIVEAU EST DIT (règle 2) : la barre n'a pas la place de
+    // l'écrire, son nom et son accessibilité le portent.
+    const etiquette = b.niveau ? `${nom} · ${etiquetteNiveau(b.niveau, fmt.t)}` : nom
+    return `<button type="button" class="${classeNiveau(b.niveau)} yfe-barre" data-ouvrir="${esc(id)}" aria-expanded="${ouvert === id}"`
       + ` style="inset-inline-start:${b.gauche.toFixed(3)}%;width:${b.largeur.toFixed(3)}%;top:${b.couloir * 22 + 4}px"`
-      + ` title="${esc(nom)}" aria-label="${esc(fmt.t('yfe.ouvrir_aria', { nom }))}">${esc(nom)}</button>`
+      + ` title="${esc(etiquette)}" aria-label="${esc(fmt.t('yfe.ouvrir_aria', { nom: etiquette }))}">${esc(nom)}</button>`
   }).join('')
   return `<div class="yfe-frise__mois-ligne">${etiquettes}</div>`
     + `<div class="yfe-frise__piste" style="height:${Math.max(1, couloirs) * 22 + 8}px">${traits}${lignes}</div>`
@@ -243,67 +277,100 @@ function crans (n, fmt) {
   return signe + fmt.t('yfe.crans', { n: Math.abs(n) })
 }
 
-function rendreJour (j, e, fmt) {
+/**
+ * CE QUE DIT UNE NUIT, en phrases : la case ne peut en montrer qu'une partie,
+ * le détail (sous le calendrier) et le nom accessible de la case disent tout.
+ * ⚠ PAS DANS UN `title` SEULEMENT (review de l'étape 2) : un `title` n'existe
+ * ni au toucher ni au clavier, et c'est sur le téléphone que l'hôte regarde.
+ */
+export function phrasesDeLaNuit (j, e, data, fmt) {
+  const n = j.nuit
+  const out = []
+  if (!n) return [fmt.t('yfe.hors_periode')]
+  if (rangNiveau(n.niveau) < 0) {
+    const m = motifDe((n.non_calculable || [])[0], fmt)
+    out.push(m ? `${fmt.t('yfe.non_calculable')} — ${m.quoi}` : fmt.t('yfe.non_calculable'))
+  } else {
+    out.push(`${etiquetteNiveau(n.niveau, fmt.t)} · ${prixOuMotif(n.prix, fmt)}`)
+  }
+  if (n.reglage_non_applique) {
+    const m = motifDe(n.reglage_non_applique.motif, fmt)
+    out.push(fmt.t('yfe.reglage_non_applique', { niveau: etiquetteNiveau(n.reglage_non_applique.niveau, fmt.t) || n.reglage_non_applique.niveau })
+      + (m ? ` — ${m.quoi}` : ''))
+  }
+  if (n.regle && n.regle.cle === e.cle) {
+    if (n.sans_reglage) {
+      out.push(fmt.t('yfe.sans_reglage', {
+        niveau: etiquetteNiveau(n.sans_reglage.niveau, fmt.t) || fmt.t('yfe.non_calculable'),
+        prix: prixOuMotif(n.sans_reglage.prix, fmt)
+      }))
+    }
+    if (n.regle.hors_zone_affichee) out.push(fmt.t('yfe.hors_zone_titre'))
+  } else if (n.regle) {
+    // Réglée par un AUTRE événement (le réveillon dans les vacances de Noël) :
+    // la nuit le dit, et nomme lequel, pour que l'hôte sache où la régler.
+    const autre = (data.evenements || []).find(x => x.cle === n.regle.cle && (x.nuits || []).includes(j.date))
+      || (data.evenements || []).find(x => x.cle === n.regle.cle)
+    out.push(fmt.t('yfe.regle_ailleurs', { nom: autre ? nomDe(autre, fmt) : n.regle.cle }))
+  }
+  if (n.prix_hote != null) out.push(fmt.t('yfe.prix_main_titre', { prix: fmt.money(n.prix_hote) }))
+  if (n.vendue) out.push(fmt.t('yfe.vendue'))
+  return out
+}
+
+function rendreJour (j, e, data, choisie, fmt) {
   const d = dateLocale(j.date)
   const num = d.getDate()
   const mois = num === 1 || jourSemaine(j.date) === 0 ? fmt.date(d, { month: 'short' }) : ''
   const n = j.nuit
   const classes = ['yfe-jour', 'yfe-jour--' + j.zone]
-  const titre = [fmt.date(d, { weekday: 'long', day: 'numeric', month: 'long' })]
   let corps = ''
   if (!n) {
     classes.push('yfe-jour--vide')
-    titre.push(fmt.t('yfe.hors_periode'))
     corps = `<span class="yfe-jour__vide">${esc(fmt.t('yfe.hors_periode'))}</span>`
   } else if (rangNiveau(n.niveau) < 0) {
-    titre.push(fmt.t('yfe.non_calculable'))
-    corps = `<span class="yfe-jour__vide">${esc(fmt.t('yfe.non_calculable'))}</span>`
+    const m = motifDe((n.non_calculable || [])[0], fmt)
+    corps = `<span class="yfe-jour__vide">${esc(m ? m.titre : fmt.t('yfe.non_calculable'))}</span>`
   } else {
-    titre.push(etiquetteNiveau(n.niveau, fmt.t) + (n.prix != null ? ' · ' + fmt.money(n.prix) : ''))
     corps = `<span class="${classeNiveau(n.niveau)}">${esc(etiquetteNiveau(n.niveau, fmt.t))}</span>`
-      + (n.prix != null ? `<span class="yfe-jour__prix num">${esc(fmt.money(n.prix))}</span>` : '')
+      + `<span class="yfe-jour__prix num">${esc(prixOuMotif(n.prix, fmt))}</span>`
   }
   const marques = []
-  if (n && n.regle && n.regle.cle === e.cle) {
-    classes.push('yfe-jour--regle')
-    marques.push(fmt.t('yfe.regle_court'))
-    if (n.sans_reglage && n.sans_reglage.niveau) {
-      titre.push(fmt.t('yfe.sans_reglage', { niveau: etiquetteNiveau(n.sans_reglage.niveau, fmt.t), prix: n.sans_reglage.prix != null ? fmt.money(n.sans_reglage.prix) : '—' }))
-    }
-    if (n.regle.hors_zone_affichee) titre.push(fmt.t('yfe.hors_zone_titre'))
-  } else if (n && n.regle) {
-    // Réglée, mais par un AUTRE événement (le réveillon dans les vacances de
-    // Noël) : la nuit le dit, pour que l'hôte sache où la régler.
-    titre.push(fmt.t('yfe.regle_ailleurs'))
-  }
-  if (n && n.prix_hote != null) {
-    marques.push(fmt.t('yfe.prix_main', { prix: fmt.money(n.prix_hote) }))
-    titre.push(fmt.t('yfe.prix_main_titre', { prix: fmt.money(n.prix_hote) }))
-  }
-  if (n && n.vendue) { marques.push(fmt.t('yfe.vendue')); titre.push(fmt.t('yfe.vendue')) }
-  return `<div class="${classes.join(' ')}" title="${esc(titre.join(' · '))}">`
+  if (n && n.regle && n.regle.cle === e.cle) { classes.push('yfe-jour--regle'); marques.push(fmt.t('yfe.regle_court')) }
+  if (n && n.prix_hote != null) marques.push(fmt.t('yfe.prix_main', { prix: fmt.money(n.prix_hote) }))
+  if (n && n.vendue) marques.push(fmt.t('yfe.vendue'))
+  const nomAccessible = [fmt.date(d, { weekday: 'long', day: 'numeric', month: 'long' }), ...phrasesDeLaNuit(j, e, data, fmt)].join(' · ')
+  return `<button type="button" class="${classes.join(' ')}" data-nuit="${esc(j.date)}" aria-pressed="${choisie === j.date}" aria-label="${esc(nomAccessible)}">`
     + `<span class="yfe-jour__tete"><span class="yfe-jour__num num">${num}</span><span class="yfe-jour__mois">${esc(mois)}</span></span>`
     + `<span class="yfe-jour__corps">${corps}</span>`
     + (marques.length ? `<span class="yfe-jour__marques">${marques.map(m => `<span>${esc(m)}</span>`).join('')}</span>` : '')
-    + `</div>`
+    + `</button>`
 }
 
-function rendreCalendrier (e, idx, fmt) {
+function rendreCalendrier (e, idx, data, choisie, fmt) {
   const semaines = semainesDeLEvenement(e, idx)
   if (!semaines.length) return ''
   const lundi = semaines[0].debut
   const tete = Array.from({ length: 7 }, (_, i) => `<span>${esc(fmt.date(dateLocale(decaler(lundi, i)), { weekday: 'short' }))}</span>`).join('')
   const corps = semaines.map(s => {
     const etiquette = fmt.t('yfe.semaine_du', { debut: fmt.date(dateLocale(s.debut), { day: 'numeric', month: 'short' }), fin: fmt.date(dateLocale(s.fin), { day: 'numeric', month: 'short' }) })
-    return `<span class="yfe-cal__sep">${esc(etiquette)}</span><div class="yfe-cal__semaine">${s.jours.map(j => rendreJour(j, e, fmt)).join('')}</div>`
+    return `<span class="yfe-cal__sep">${esc(etiquette)}</span><div class="yfe-cal__semaine">${s.jours.map(j => rendreJour(j, e, data, choisie, fmt)).join('')}</div>`
   }).join('')
-  return `<div class="yfe-cal"><div class="yfe-cal__tete">${tete}</div>${corps}</div>`
+  // ⚠ LE DÉTAIL DE LA NUIT TOUCHÉE, EN TEXTE VISIBLE : c'est lui qui porte
+  // « sans votre réglage », le prix posé à la main, le motif d'un « non
+  // calculable » — au toucher comme au clavier.
+  const jour = choisie ? semaines.flatMap(s => s.jours).find(j => j.date === choisie) : null
+  const detail = jour
+    ? `<div class="yfe-detail" role="status"><p class="yfe-detail__date">${esc(fmt.date(dateLocale(jour.date), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))}</p>`
+      + phrasesDeLaNuit(jour, e, data, fmt).map(x => `<p>${esc(x)}</p>`).join('') + `</div>`
+    : `<p class="caption muted">${esc(fmt.t('yfe.toucher_une_nuit'))}</p>`
+  return `<div class="yfe-cal"><div class="yfe-cal__tete">${tete}</div>${corps}</div>${detail}`
 }
 
 function rendreSansNuit (e, data, fmt, jourLong) {
   const rp = data.reglages_position || {}
   const lignes = new Map((rp.lignes || []).map(l => [l.id, l]))
-  const miennes = (rp.sans_nuit || []).filter(x => x.cle === e.cle && (!x.occurrence || x.occurrence.debut === e.debut))
+  const miennes = (rp.sans_nuit || []).filter(x => x.cle === e.cle && x.occurrence && x.occurrence.debut === e.debut)
   if (!miennes.length) return ''
   const items = miennes.map(x => {
     const l = lignes.get(x.ligne)
@@ -314,12 +381,34 @@ function rendreSansNuit (e, data, fmt, jourLong) {
 }
 
 /**
- * La liste, par mois. `ouvert` : l'identifiant de l'événement déplié, ou null.
+ * LES RÉGLAGES QUI N'ONT AUCUN ÉVÉNEMENT CETTE ANNÉE (le pont de l'Armistice
+ * quand le 11 novembre tombe un samedi, un événement non reconduit). Ils n'ont
+ * pas de carte : sans ce bloc, la page tairait ce que le serveur signale
+ * (décision 8 du registre : « un réglage sans cible est SIGNALÉ »).
+ */
+export function rendreSansEvenement (data, fmt, jourLong) {
+  const rp = data.reglages_position || {}
+  const lignes = new Map((rp.lignes || []).map(l => [l.id, l]))
+  const orphelines = (rp.sans_nuit || []).filter(x => !x.occurrence)
+  if (!orphelines.length) return ''
+  const items = orphelines.map(x => {
+    const l = lignes.get(x.ligne)
+    const nom = nomDe({ cle: x.cle, nom: x.nom, type: x.type }, fmt)
+    const quoi = l ? libellePosition(l, fmt.t, jourLong) : ''
+    return `<li>${esc(nom)}${quoi ? ' · ' + esc(quoi) : ''} — ${esc(fmt.t('yfe.motif_' + x.motif))}</li>`
+  }).join('')
+  return `<section class="yfe-sans-nuit yfe-sans-evenement"><p class="small">${esc(fmt.t('yfe.sans_evenement_titre'))}</p><ul>${items}</ul></section>`
+}
+
+/**
+ * La liste, par mois. `ui` : { filtre, ouvert (id d'événement ou null),
+ * nuit (date touchée dans l'événement ouvert, ou null) }.
  * @param jourLong (nomFrancaisDuJour) → nom du jour dans la langue de la page
  */
 export function rendreListe (data, idx, ui, fmt, jourLong) {
   const groupes = groupesParMois(data.evenements || [], data.fenetre, ui.filtre)
-  if (!groupes.length) return `<p class="muted">${esc(fmt.t((data.evenements || []).length ? 'yfe.aucun_dans_filtre' : 'yfe.vide'))}</p>`
+  const orphelines = rendreSansEvenement(data, fmt, jourLong)
+  if (!groupes.length) return `<p class="muted">${esc(fmt.t((data.evenements || []).length ? 'yfe.aucun_dans_filtre' : 'yfe.vide'))}</p>` + orphelines
   return groupes.map(g => {
     const cartes = g.evenements.map(e => {
       const id = idEvenement(e)
@@ -336,18 +425,18 @@ export function rendreListe (data, idx, ui, fmt, jourLong) {
           + `<span class="yfe-lz yfe-lz--rayonnement"></span>${esc(fmt.t('yfe.legende_rayonnement'))}`
           + `<span class="yfe-lz yfe-lz--regle"></span>${esc(fmt.t('yfe.legende_regle'))}</p>`
         detail = `<div class="yfe-ev__detail">`
-          + (e.actif ? legende + rendreCalendrier(e, idx, fmt) : `<p class="muted small">${esc(fmt.t('yfe.coupe_detail'))}</p>`)
+          + (e.actif ? legende + rendreCalendrier(e, idx, data, ui.nuit || null, fmt) : `<p class="muted small">${esc(fmt.t('yfe.coupe_detail'))}</p>`)
           + avant + rendreSansNuit(e, data, fmt, jourLong) + `</div>`
       }
       return `<article class="yfe-ev${ouvert ? ' yfe-ev--ouvert' : ''}" data-ev="${esc(id)}">`
         + `<button type="button" class="yfe-ev__tete" data-ouvrir="${esc(id)}" aria-expanded="${ouvert}">`
-        + `<span class="yfe-ev__titre"><span class="yfe-ev__nom">${esc(nomEvenement(e, fmt.t))}</span>${badges.join('')}</span>`
+        + `<span class="yfe-ev__titre"><span class="yfe-ev__nom">${esc(nomDe(e, fmt))}</span>${badges.join('')}</span>`
         + `<span class="yfe-ev__dates small muted">${esc(datesHtml(e, fmt))}</span>`
         + `<span class="yfe-ev__resume">${e.actif ? resumeHtml(r, fmt) : ''}</span>`
         + `</button>${detail}</article>`
     }).join('')
     return `<section class="yfe-mois"><h2 class="yfe-mois__titre">${esc(fmt.date(g.date, { month: 'long', year: 'numeric' }))}</h2>${cartes}</section>`
-  }).join('')
+  }).join('') + orphelines
 }
 
 /** Le nom d'un jour (« samedi ») dans la langue de la page, par une date de référence. */

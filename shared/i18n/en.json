@@ -1096,7 +1096,7 @@
   "yfe.aucun_bien": "No property available on this account.",
   "yfe.aucun_dans_filtre": "No event of this kind in the next twelve months.",
   "yfe.cache_age": "Last known data ({minutes} min ago) · updating…",
-  "yfe.cache_echec": "Last known data: the update could not be done.",
+  "yfe.cache_echec": "Last known data: the update could not be done (sold nights and prices set by hand are not shown).",
   "yfe.calcule_a": "calculated at {heure}",
   "yfe.coupe": "Not taken into account",
   "yfe.coupe_detail": "This date is not taken into account for this property: it changes no price.",
@@ -1153,7 +1153,7 @@
   "yfe.pos_tout": "every night",
   "yfe.prix_main": "✎ {prix}",
   "yfe.prix_main_titre": "price set by hand: {prix}, YieldFlow does not touch this night",
-  "yfe.regle_ailleurs": "set by another event",
+  "yfe.regle_ailleurs": "set by “{nom}”",
   "yfe.regle_court": "set",
   "yfe.regle_par_vous": "set by you",
   "yfe.sans_nuit_titre": "These settings find no night this year:",
@@ -1164,5 +1164,11 @@
   "yfe.titre": "What moves your prices",
   "yfe.vendue": "sold",
   "yfe.vide": "No event in the next twelve months.",
-  "yfe.weekend": "{niveau} at weekends"
+  "yfe.weekend": "{niveau} at weekends",
+  "yfe.calcule_le": "calculated on {date} at {heure}",
+  "yfe.prix_non_calculable": "price cannot be calculated",
+  "yfe.refus": "You do not have access to this screen on this account.",
+  "yfe.reglage_non_applique": "your level {niveau} does not apply",
+  "yfe.sans_evenement_titre": "These settings have no event this year:",
+  "yfe.toucher_une_nuit": "Tap a night to read its details."
 }

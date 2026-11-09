@@ -35,6 +35,14 @@ test('LE TEST QUI COMPTE (règle 2) : le chiffre du niveau est toujours écrit �
   const html = r.rendreLegende(d.niveaux, null, fmt) + r.rendreListe(d, idx, { filtre: 'tous', ouvert: r.idEvenement(noel) }, fmt, x => x)
   const pastilles = [...html.matchAll(/<span class="yfe-niv yfe-niv--(\d)[^"]*">([^<]*)/g)]
   assert.ok(pastilles.length > 20, `${pastilles.length} pastilles : le rendu doit en porter`)
+  // ⚠ ET LES BARRES DE LA FRISE : trop étroites pour l'écrire, elles le
+  // portent dans leur nom accessible et leur infobulle (review de l'étape 2).
+  const frise = r.rendreFrise(d, idx, null, fmt)
+  const barres = [...frise.matchAll(/<button type="button" class="yfe-niv yfe-niv--(\d) yfe-barre"[^>]*title="([^"]*)"[^>]*aria-label="([^"]*)"/g)]
+  assert.ok(barres.length > 10, `${barres.length} barres`)
+  for (const [, n, titre, aria] of barres) {
+    assert.ok(titre.includes(`${n} · yfe.niveau_${n}`) && aria.includes(`${n} · yfe.niveau_${n}`), `barre ${n} sans son chiffre : ${titre}`)
+  }
   for (const [, n, texte] of pastilles) {
     // Le texte est échappé (`&quot;`) : c'est le HTML tel que la page le pose.
     assert.match(texte, new RegExp(`^(yfe\\.(semaine|weekend)\\{&quot;niveau&quot;:&quot;)?${n} · yfe\\.niveau_${n}`), `pastille ${n} sans son chiffre : « ${texte} »`)
@@ -196,9 +204,20 @@ test('LE TEST QUI COMPTE : l’affichage instantané vient du cache du MÊME log
   let liberer
   const retenue = new Promise(res => { liberer = res })
   const vieux = { ...r.pourLeCache(d), niveaux: d.niveaux.map(n => ({ ...n, prix: n.prix + 1000 })) }
-  const pBanc = monter({ cache: vieux, ecran: async () => { await retenue; return d } })
-  // L'amorce attend le serveur : on regarde l'écran AVANT sa réponse.
+  // ⚠ ON REGARDE L'ÉCRAN AU MOMENT DE L'APPEL, avant la réponse (review de
+  // l'étape 2 : sans cela, retirer la peinture depuis le cache restait vert).
+  let avantReponse = null
+  const pBanc = monter({ cache: vieux, ecran: async (url, w) => {
+    avantReponse = { url, legende: w.document.querySelector('[data-bind="legende"]').textContent, barres: w.document.querySelectorAll('.yfe-barre').length, age: w.document.querySelector('[data-bind="age"]').hidden }
+    await retenue
+    return d
+  } })
   await new Promise(res => setTimeout(res, 20))
+  assert.ok(avantReponse, 'l’appel est parti')
+  assert.match(avantReponse.legende, /11\d\d €/, 'le cache est peint AVANT la réponse')
+  assert.ok(avantReponse.barres > 10)
+  assert.equal(avantReponse.age, false, 'et il dit qu’il s’agit des dernières données connues')
+  assert.equal(avantReponse.url, `/api/ecran/evenements?bien=${d.bien}`, 'sans logement dans l’adresse, on demande celui du cache')
   liberer()
   const b = await pBanc
   assert.equal(b.$('[data-bind="age"]').hidden, true, 'la réponse du serveur efface la mention « dernières données »')
@@ -229,18 +248,155 @@ test('le motif d’un calcul impossible est dit, et le sélecteur reste', async 
   assert.equal(b.$('[data-bind="bien-zone"]').hidden, false)
 })
 
-test('une nuit réglée DIT ce que le calcul disait ; une nuit à prix posé à la main et une nuit vendue le disent aussi', async () => {
+test('LE TEST QUI COMPTE (§5) : toucher une nuit en montre le détail EN TEXTE VISIBLE — « sans votre réglage », prix posé à la main, vendue', async () => {
+  // ⚠ PAS DANS UN `title` SEULEMENT (review de l'étape 2) : au toucher et au
+  // clavier, un `title` n'existe pas.
   const libre = await reponseEcran()
   const noel = libre.evenements.find(e => e.cle === NOEL)
   const p = noel.positions.find(x => x.date === '2026-12-22')
   const d = await reponseEcran({ lignes: [ligneDe(NOEL, p, 'Exceptionnel', 'l-1')], vendues: { '2026-12-23': [{ id: 'x' }] }, prixHote: new Map([['2026-12-24', 18900]]) })
   const b = await monter({ ecran: async () => d })
   await b.cliquer(b.$$('.yfe-barre').find(x => x.dataset.ouvrir.startsWith(NOEL + '|')))
-  const jour = (date) => b.$$('.yfe-ev--ouvert .yfe-jour').find(j => j.getAttribute('title').includes(new Date(`${date}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })))
-  const j22 = jour('2026-12-22')
-  assert.ok(j22.classList.contains('yfe-jour--regle'))
-  assert.match(j22.getAttribute('title'), /sans votre réglage : \d · /)
-  assert.match(jour('2026-12-23').textContent, /vendue/)
-  assert.match(jour('2026-12-24').textContent, /✎ 189 €/)
-  assert.match(b.$('.yfe-ev--ouvert .yfe-badge--regle').textContent, /réglé par vous/)
+  const nuit = (date) => b.$$('.yfe-ev--ouvert [data-nuit]').find(j => j.dataset.nuit === date)
+  assert.equal(nuit('2026-12-22').tagName, 'BUTTON', 'une nuit se touche : c’est un bouton')
+  assert.ok(nuit('2026-12-22').classList.contains('yfe-jour--regle'))
+  assert.match(nuit('2026-12-22').getAttribute('aria-label'), /sans votre réglage : \d · /)
+  await b.cliquer(nuit('2026-12-22'))
+  const detail = () => b.$('.yfe-ev--ouvert .yfe-detail')
+  assert.match(detail().textContent, /5 · Exceptionnel · 165 €/)
+  assert.match(detail().textContent, /sans votre réglage : \d · \S+ · ?|sans votre réglage : \d · /)
+  assert.equal(nuit('2026-12-22').getAttribute('aria-pressed'), 'true')
+  assert.equal(b.w.document.activeElement, nuit('2026-12-22'), 'le focus reste sur la nuit touchée')
+  await b.cliquer(nuit('2026-12-23'))
+  assert.match(detail().textContent, /vendue/)
+  await b.cliquer(nuit('2026-12-24'))
+  assert.match(detail().textContent, /prix posé à la main : 189 €/)
+  // Le réveillon est réglé par les vacances de Noël ici ; ouvert, il dit par QUI.
+  await b.cliquer(b.$$('.yfe-barre').find(x => x.dataset.ouvrir.startsWith('commercial:reveillon_noel|2026-12-24')))
+  const rev = b.$$('.yfe-ev--ouvert [data-nuit]').find(j => j.dataset.nuit === '2026-12-24')
+  assert.ok(rev, 'le réveillon s’ouvre')
+  assert.equal(b.journal.fetch.length, 1, 'aucun appel de plus pour lire une nuit')
+})
+
+test('LE TEST QUI COMPTE (sécurité) : une réponse qui ne se met pas en cache EFFACE le cache — un membre qui n’a plus aucun logement', async () => {
+  const d = await reponseEcran()
+  const r = await import(RENDU)
+  const b = await monter({ cache: r.pourLeCache(d), ecran: async () => ({ aujourdhui: '2026-11-09', biens: [], bien: null }) })
+  assert.equal(b.cache.lire('yield-evenements', b.MOI, b.COMPTE), null, 'l’écran du logement perdu reste dans le navigateur')
+  assert.equal(b.$$('.yfe-barre').length, 0)
+  assert.match(b.$('[data-bind="alertes"]').textContent, /Aucun logement accessible/)
+  // Un logement non calculable non plus ne se garde pas (on n'y repeindrait rien de juste).
+  const nu = await monter({ cache: r.pourLeCache(d), ecran: async () => ({ ...d, nuits: undefined, evenements: undefined, fenetre: undefined, indisponible: 'calcul_impossible' }) })
+  assert.equal(nu.cache.lire('yield-evenements', nu.MOI, nu.COMPTE), null)
+})
+
+test('LE TEST QUI COMPTE : une panne APRÈS un changement de logement ne laisse pas l’écran de l’ancien sous le nom du nouveau', async () => {
+  const d = await reponseEcran()
+  const autre = '33333333-3333-4333-8333-333333333333'
+  const b = await monter({ ecran: async (url) => { if (/bien=/.test(url)) throw Object.assign(new Error('panne'), { status: 503 }); return d } })
+  await b.choisir(b.$('[data-bind="bien"]'), autre)
+  assert.equal(b.$$('.yfe-barre').length, 0, 'la frise de La bulle ne reste pas')
+  assert.equal(b.$('[data-bind="legende"]').textContent, '')
+  assert.match(b.$('[data-bind="liste"]').textContent, /Impossible de charger/)
+  assert.equal(b.$('[data-bind="bien-zone"]').hidden, false, 'le sélecteur reste, pour choisir un autre logement')
+  assert.equal(b.$('[data-bind="bien"]').value, autre)
+})
+
+test('LE TEST QUI COMPTE : un logement demandé qui n’est plus servi (404) — l’adresse est nettoyée et la page se relit sans lui', async () => {
+  const d = await reponseEcran()
+  const perime = '44444444-4444-4444-8444-444444444444'
+  const b = await monter({ url: `https://hs.test/apps/yield/evenements?bien=${perime}`, ecran: async (url) => { if (url.includes(perime)) throw Object.assign(new Error('bien_introuvable'), { status: 404 }); return d } })
+  assert.deepEqual(b.journal.fetch.map(f => f.url), [`/api/ecran/evenements?bien=${perime}`, '/api/ecran/evenements'])
+  assert.equal(b.w.location.search, '')
+  assert.ok(b.$$('.yfe-barre').length > 10)
+  // Un 403 dit le refus, pas « réessayez ».
+  const refus = await monter({ ecran: async () => { throw Object.assign(new Error('Droit'), { status: 403 }) } })
+  assert.match(refus.$('[data-bind="liste"]').textContent, /pas accès à cet écran/)
+})
+
+test('LE TEST QUI COMPTE : une réponse en retard est ignorée — A puis B puis C, B arrive après C', async () => {
+  const d = await reponseEcran()
+  const B = '33333333-3333-4333-8333-333333333333'
+  const C = '55555555-5555-4555-8555-555555555555'
+  const biens = [...d.biens, { id: C, nom: 'Ofuro Futari' }]
+  let lacherB
+  const retenueB = new Promise(r => { lacherB = r })
+  const b = await monter({ ecran: async (url) => {
+    if (url.includes(B)) { await retenueB; return { ...d, biens, bien: B } }
+    if (url.includes(C)) return { ...d, biens, bien: C }
+    return { ...d, biens }
+  } })
+  const sel = b.$('[data-bind="bien"]')
+  sel.value = B; sel.dispatchEvent(new b.w.Event('change', { bubbles: true }))
+  await b.choisir(sel, C)
+  assert.match(b.$('[data-bind="sous-titre"]').textContent, /Ofuro Futari/)
+  lacherB()
+  await b.attendre(6)
+  assert.match(b.$('[data-bind="sous-titre"]').textContent, /Ofuro Futari/, 'la réponse de B, arrivée après C, a été peinte')
+  assert.equal(b.$('[data-bind="bien"]').value, C)
+  assert.equal(b.cache.lire('yield-evenements', b.MOI, b.COMPTE).donnees.bien, C)
+})
+
+test('LE TEST QUI COMPTE (« un null dit pourquoi ») : légende et nuit non calculables disent leur motif, par la table du moteur', async () => {
+  const r = await import(RENDU)
+  const { motif } = await import(path.join(__dirname, '..', 'shared/yield-motifs.js'))
+  const fmtFr = { ...fmt, motif }
+  const legende = r.rendreLegende(null, 'segment_sous_le_seuil', fmtFr)
+  assert.ok(legende.includes(motif('segment_sous_le_seuil').quoi.replace(/'/g, '&#39;')) || legende.includes(motif('segment_sous_le_seuil').quoi), legende)
+  const e = { cle: 'ferie:noel', nuits: ['2026-12-25'], actif: true }
+  const phrases = r.phrasesDeLaNuit({ date: '2026-12-25', nuit: { date: '2026-12-25', niveau: null, prix: null, non_calculable: ['aucune_grille'] } }, e, { evenements: [] }, fmtFr)
+  assert.match(phrases[0], new RegExp(motif('aucune_grille').quoi.slice(0, 20).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  // Un réglage posé qui ne s'applique pas le dit, avec son niveau.
+  const p2 = r.phrasesDeLaNuit({ date: '2026-12-25', nuit: { date: '2026-12-25', niveau: null, prix: null, non_calculable: ['aucune_grille'], reglage_non_applique: { niveau: 'Haut', motif: 'aucune_grille' } } }, e, { evenements: [] }, fmtFr)
+  assert.ok(p2.some(x => x.startsWith('yfe.reglage_non_applique{"niveau":"3 · yfe.niveau_3"}')), p2.join(' | '))
+  // Jamais un tiret pour un prix absent.
+  const p3 = r.phrasesDeLaNuit({ date: '2026-12-25', nuit: { date: '2026-12-25', niveau: 'Haut', prix: null } }, e, { evenements: [] }, fmtFr)
+  assert.deepEqual(p3, ['3 · yfe.niveau_3 · yfe.prix_non_calculable'])
+})
+
+test('LE TEST QUI COMPTE (décision 8) : un réglage dont l’événement n’a pas lieu cette année est SIGNALÉ, hors des cartes', async () => {
+  const r = await import(RENDU)
+  // Une ligne sur un événement de l'hôte qui n'existe pas dans la fenêtre.
+  const d = await reponseEcran({ lignes: [{ id: 'l-x', evenement: 'evenement:festival_disparu', zone: 'evenement', rang: 1, jour: 'samedi', nuit: null, niveau: 'Haut' }] })
+  const sn = d.reglages_position.sans_nuit.filter(x => x.motif === 'evenement_absent')
+  assert.equal(sn.length, 1, 'le serveur le signale')
+  const html = r.rendreListe(d, r.indexerNuits(d.nuits), { filtre: 'tous', ouvert: null }, fmt, x => x)
+  assert.match(html, /yfe\.sans_evenement_titre/)
+  assert.match(html, /yfe\.motif_evenement_absent/)
+})
+
+test('la table des fériés nomme les fériés en français ; l’égalité des cinq niveaux avec le moteur est tenue', async () => {
+  const r = await import(RENDU)
+  const S = require('../lib/yield/suggestion')
+  assert.deepEqual(r.NIVEAUX, S.NIVEAUX.map(n => n.nom))
+  const fr = { ...fmt, francais: true }
+  assert.equal(r.nomEvenement({ type: 'ferie', nom: 'Armistice 1918', cle: 'ferie:armistice_1918' }, fr.t, true), '11 novembre')
+  assert.equal(r.nomEvenement({ type: 'pont', nom: 'Ascension', cle: 'pont:pont_ascension' }, fr.t, true), 'Pont de l’Ascension')
+  assert.equal(r.nomEvenement({ type: 'week_end_prolonge', nom: 'Lundi de Pâques', cle: 'week_end_prolonge:lundi_de_paques' }, fr.t, true), 'Week-end de Pâques')
+  // Hors du français, la composition i18n.
+  assert.equal(r.nomEvenement({ type: 'pont', nom: 'Ascension', cle: 'pont:pont_ascension' }, fr.t, false), 'yfe.nom_pont{"nom":"Ascension"}')
+})
+
+test('LE TEST QUI COMPTE (règles V5) : aucun hexa dans la page, le rendu et la feuille ; chaque clé yfe existe en fr, en et es', () => {
+  const fs = require('node:fs')
+  const lire = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+  for (const f of ['apps/yield/evenements.html', 'shared/yield-evenements-rendu.js', 'shared/yield-evenements.css']) {
+    const code = lire(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '')
+    assert.doesNotMatch(code, /#[0-9a-fA-F]{3,8}\b(?![-\w])/, `${f} porte un hexa`)
+  }
+  const langues = ['fr', 'en', 'es'].map(l => JSON.parse(lire(`shared/i18n/${l}.json`)))
+  const code = lire('apps/yield/evenements.html') + lire('shared/yield-evenements-rendu.js')
+  const statiques = [...new Set([...code.matchAll(/'(yfe\.[a-z0-9_]+[a-z0-9])'/g)].map(m => m[1]))]
+  // Les familles composées à l'exécution, nommées une par une.
+  const dynamiques = [
+    ...['officiel', 'commercial', 'mien'].map(x => 'yfe.famille_' + x),
+    ...[1, 2, 3, 4, 5].map(n => 'yfe.niveau_' + n),
+    ...['position_absente', 'evenement_absent', 'rang_requis'].map(x => 'yfe.motif_' + x),
+    ...['bien_non_raccorde', 'calcul_impossible', 'configuration_incomplete'].map(x => 'yfe.indisponible_' + x),
+    ...['nuit_date', 'nuit_samedi_rattache', 'avant', 'apres', 'avant_jour', 'apres_jour', 'avant_sans_rang', 'apres_sans_rang'].map(x => 'yfe.pos_' + x)
+  ]
+  assert.ok(statiques.length > 40, `${statiques.length} clés lues : la lecture a échoué`)
+  for (const k of [...statiques, ...dynamiques]) {
+    for (const [i, l] of langues.entries()) assert.ok(k in l, `${k} absente en ${['fr', 'en', 'es'][i]}`)
+  }
 })

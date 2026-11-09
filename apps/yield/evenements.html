@@ -52,7 +52,7 @@
     </label>
   </div>
 
-  <div class="yfe-legende" data-bind="legende" data-i18n-attr="aria-label:yfe.legende_aria"></div>
+  <div class="yfe-legende" role="group" data-bind="legende" data-i18n-attr="aria-label:yfe.legende_aria"></div>
   <div class="stack" data-bind="alertes"></div>
 
   <section class="yfe-frise" data-bind="frise-zone" data-i18n-attr="aria-label:yfe.frise_aria" hidden>
@@ -82,6 +82,7 @@ import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
 import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte } from '/shared/compte-courant.js'
 import { lire as lireCache, ecrire as ecrireCache, oublier as oublierCache } from '/shared/cache-ecran.js'
+import { motif } from '/shared/yield-motifs.js'
 import { indexerNuits, rendreLegende, rendreFrise, rendreListe, jourLongPar, pourLeCache } from '/shared/yield-evenements-rendu.js'
 
 initErrorHandler()
@@ -91,6 +92,8 @@ const $ = (sel) => document.querySelector(sel)
 // ⚠ LE SEUL ENDPOINT DE LA PAGE, en lecture (étape 2). Les gestes viendront à
 // l'étape 3, sur `PUT` / `PATCH /api/yield-evenements`.
 const ECRAN = '/api/ecran/evenements'
+const CACHE = 'yield-evenements'
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // L'appel : jeton RELU à chaque fois (un onglet ouvert plus d'une heure aurait
 // un jeton expiré), compte délégué par `X-Compte`. Il LÈVE sur réponse non-ok.
@@ -113,27 +116,56 @@ async function appelAPI (url) {
 const fmt = {
   t,
   money: (n) => I18n.money(n, 'EUR'),
-  date: (d, o) => I18n.date(d, o)
+  date: (d, o) => I18n.date(d, o),
+  // La table des fériés et celle des motifs du moteur n'existent qu'en français.
+  get francais () { return I18n.lang === 'fr' },
+  motif: (code) => (I18n.lang === 'fr' ? motif(code) : null)
 }
 const jourLong = jourLongPar(fmt.date)
 const dateLocale = (iso) => { const [a, m, j] = String(iso).split('-').map(Number); return new Date(a, m - 1, j) }
+const jourLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 // ─── État de la page ────────────────────────────────────────────────────────
-const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, moi: null, compte: null, bienVoulu: null }
+// `seq` : le numéro de la dernière lecture demandée. Une réponse plus ancienne
+// est IGNORÉE — sinon passer vite de A à B puis à C peindrait B sous C.
+const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: null, moi: null, compte: null, bienVoulu: null, biens: [], seq: 0 }
+
+function peindreSelecteur () {
+  const sel = $('[data-bind="bien"]')
+  sel.innerHTML = etat.biens.map(b => `<option value="${esc(b.id)}">${esc(b.nom)}</option>`).join('')
+  const voulu = (etat.data && etat.data.bien) || etat.bienVoulu
+  if (voulu) sel.value = voulu
+  $('[data-bind="bien-zone"]').hidden = etat.biens.length < 2
+}
+
+function viderEcran (message) {
+  for (const z of ['frise-zone', 'filtres']) $(`[data-bind="${z}"]`).hidden = true
+  for (const z of ['legende', 'frise', 'alertes']) $(`[data-bind="${z}"]`).innerHTML = ''
+  $('[data-bind="sous-titre"]').textContent = ''
+  $('[data-bind="age"]').hidden = true
+  $('[data-bind="liste"]').innerHTML = `<p class="yfe-alerte">${esc(message)}</p>`
+}
+
+// L'heure du calcul, AVEC la date quand ce n'est pas aujourd'hui : un écran du
+// cache peut dater de la veille, et « calculé à 10:30 » se lirait du jour.
+function quandCalcule (iso) {
+  const d = new Date(iso)
+  if (isNaN(d)) return ''
+  const heure = I18n.time(d)
+  return jourLocal(d) === jourLocal(new Date())
+    ? t('yfe.calcule_a', { heure })
+    : t('yfe.calcule_le', { date: fmt.date(d, { day: 'numeric', month: 'long' }), heure })
+}
 
 function peindre () {
   const d = etat.data
   if (!d) return
-  const biens = d.biens || []
-  // Le sélecteur : seulement s'il y a un choix à faire.
-  const sel = $('[data-bind="bien"]')
-  sel.innerHTML = biens.map(b => `<option value="${esc(b.id)}">${esc(b.nom)}</option>`).join('')
-  if (d.bien) sel.value = d.bien
-  $('[data-bind="bien-zone"]').hidden = biens.length < 2
-  const nomBien = (biens.find(b => b.id === d.bien) || {}).nom || ''
+  etat.biens = d.biens || []
+  peindreSelecteur()
+  const nomBien = (etat.biens.find(b => b.id === d.bien) || {}).nom || ''
 
   const alertes = []
-  if (!biens.length) alertes.push(t('yfe.aucun_bien'))
+  if (!etat.biens.length) alertes.push(t('yfe.aucun_bien'))
   if (d.indisponible) alertes.push(t('yfe.indisponible_' + d.indisponible))
   if (d.vacances_incertaines_apres) alertes.push(t('yfe.alerte_vacances', { date: fmt.date(dateLocale(d.vacances_incertaines_apres), { day: 'numeric', month: 'long', year: 'numeric' }) }))
   if (d.prix_hote_illisibles) alertes.push(t('yfe.alerte_prix_main'))
@@ -143,19 +175,20 @@ function peindre () {
   const opts = { day: 'numeric', month: 'long', year: 'numeric' }
   $('[data-bind="sous-titre"]').textContent = calcule
     ? t('yfe.sous_titre', { bien: nomBien, debut: fmt.date(dateLocale(d.fenetre.debut), opts), fin: fmt.date(dateLocale(d.fenetre.fin), opts) })
-      + (d.calcule_a ? ' · ' + t('yfe.calcule_a', { heure: I18n.time(new Date(d.calcule_a)) }) : '')
+      + (d.calcule_a ? ' · ' + quandCalcule(d.calcule_a) : '')
     : nomBien
   $('[data-bind="frise-zone"]').hidden = !calcule
   $('[data-bind="filtres"]').hidden = !calcule
   if (!calcule) {
     $('[data-bind="legende"]').innerHTML = ''
+    $('[data-bind="frise"]').innerHTML = ''
     $('[data-bind="liste"]').innerHTML = ''
     return
   }
   $('[data-bind="legende"]').innerHTML = rendreLegende(d.niveaux, d.niveaux_non_calculables, fmt)
   $('[data-bind="frise"]').innerHTML = rendreFrise(d, etat.idx, etat.ouvert, fmt)
   for (const b of document.querySelectorAll('[data-filtre]')) b.setAttribute('aria-pressed', String(b.dataset.filtre === etat.filtre))
-  $('[data-bind="liste"]').innerHTML = rendreListe(d, etat.idx, { filtre: etat.filtre, ouvert: etat.ouvert }, fmt, jourLong)
+  $('[data-bind="liste"]').innerHTML = rendreListe(d, etat.idx, { filtre: etat.filtre, ouvert: etat.ouvert, nuit: etat.nuit }, fmt, jourLong)
 }
 
 function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
@@ -168,35 +201,65 @@ function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
 }
 
 async function charger () {
-  const params = etat.bienVoulu ? '?bien=' + encodeURIComponent(etat.bienVoulu) : ''
+  const n = ++etat.seq
+  const voulu = etat.bienVoulu
   try {
-    const d = await appelAPI(ECRAN + params)
+    const d = await appelAPI(ECRAN + (voulu ? '?bien=' + encodeURIComponent(voulu) : ''))
+    if (n !== etat.seq) return
     // ⚠ LE CACHE NE GARDE JAMAIS L'ÉTAT D'UNE NUIT (vendue, ouverte, ✎) : il
     // ne sert qu'à peindre tout de suite la frise et la liste, et la réponse du
     // serveur les remplace (spec §8, point 3).
-    if (etat.moi && etat.compte && d && d.bien && !d.indisponible) ecrireCache('yield-evenements', etat.moi, etat.compte, pourLeCache(d))
+    // ⚠ ET UNE RÉPONSE QUI NE SE MET PAS EN CACHE L'EFFACE (review de l'étape
+    // 2, constat de sécurité) : un membre qui n'a plus aucun logement reçoit
+    // 200 avec une liste vide — sans cela, l'écran du logement qu'il ne voit
+    // plus se repeindrait depuis le navigateur pendant douze heures.
+    if (etat.moi && etat.compte) {
+      if (d && d.bien && !d.indisponible && Array.isArray(d.evenements)) ecrireCache(CACHE, etat.moi, etat.compte, pourLeCache(d))
+      else oublierCache(CACHE, etat.moi, etat.compte)
+    }
     recevoir(d)
   } catch (e) {
-    // ⚠ UN REFUS DU SERVEUR EFFACE CE QUE LE CACHE AVAIT PEINT : les logements
-    // d'un périmètre que l'on n'a plus.
-    if (e && (e.status === 403 || e.status === 404) && etat.moi && etat.compte) oublierCache('yield-evenements', etat.moi, etat.compte)
-    const refus = !!(e && (e.status === 403 || e.status === 404))
+    if (n !== etat.seq) return
+    const statut = e && e.status
     logger.error('Événements', e && e.message, e)
-    // Un écran déjà peint depuis le cache RESTE, et dit qu'il n'a pas pu se
-    // mettre à jour ; un refus, lui, l'efface.
-    if (etat.data && !refus) {
+    // ⚠ UN REFUS EFFACE CE QUE LE CACHE AVAIT PEINT : les logements d'un
+    // périmètre que l'on n'a plus.
+    if ((statut === 403 || statut === 404) && etat.moi && etat.compte) oublierCache(CACHE, etat.moi, etat.compte)
+    // ⚠ UN LOGEMENT DEMANDÉ QUI N'EST PLUS SERVI (archivé, sorti du
+    // périmètre, favori périmé) : on retire `?bien=` de l'adresse et on
+    // relit SANS — sinon chaque rechargement redonnerait le même 404.
+    if (statut === 404 && voulu) {
+      etat.bienVoulu = null
+      etat.ouvert = null
+      etat.nuit = null
+      const u = new URL(location.href)
+      u.searchParams.delete('bien')
+      try { history.replaceState(null, '', u.pathname + u.search) } catch { /* sans historique */ }
+      return charger()
+    }
+    // ⚠ UN ÉCRAN DÉJÀ PEINT RESTE SEULEMENT S'IL EST CELUI DU LOGEMENT DEMANDÉ :
+    // après un changement de logement, garder l'ancien ferait lire les prix
+    // de La bulle sous le nom de Cœur de vie 23.
+    const memeBien = etat.data && (!voulu || etat.data.bien === voulu)
+    if (memeBien && statut !== 403 && statut !== 404) {
       const age = $('[data-bind="age"]')
       age.textContent = t('yfe.cache_echec')
       age.hidden = false
       return
     }
     etat.data = null
-    $('[data-bind="age"]').hidden = true
-    for (const z of ['frise-zone', 'filtres', 'bien-zone']) $(`[data-bind="${z}"]`).hidden = true
-    for (const z of ['legende', 'frise', 'alertes']) $(`[data-bind="${z}"]`).innerHTML = ''
-    $('[data-bind="sous-titre"]').textContent = ''
-    $('[data-bind="liste"]').innerHTML = `<p class="yfe-alerte">${esc(t('yfe.erreur'))}</p>`
+    if (statut === 403 || statut === 404) etat.biens = []
+    viderEcran(statut === 403 ? t('yfe.refus') : t('yfe.erreur'))
+    peindreSelecteur()
   }
+}
+
+// ⚠ LE FOCUS SURVIT AU REPEINT (review de l'étape 2) : chaque clic reconstruit
+// la frise et la liste, et sans cela le focus clavier retombait sur la page.
+function rendreLeFocus (attr, valeur, dansFrise) {
+  const zone = dansFrise ? $('[data-bind="frise"]') : document
+  const el = [...zone.querySelectorAll(`[${attr}]`)].find(x => x.getAttribute(attr) === valeur && (dansFrise || !x.closest('[data-bind="frise"]')))
+  if (el && el.focus) el.focus()
 }
 
 document.addEventListener('click', (ev) => {
@@ -204,14 +267,24 @@ document.addEventListener('click', (ev) => {
   if (o) {
     const id = o.dataset.ouvrir
     const depuisFrise = !!o.closest('[data-bind="frise"]')
-    etat.ouvert = etat.ouvert === id && !depuisFrise ? null : id
+    const ouvrir = etat.ouvert !== id
+    etat.ouvert = ouvrir ? id : null
+    etat.nuit = null
     // La frise ouvre l'événement de la barre, quel que soit le filtre.
-    if (depuisFrise) etat.filtre = 'tous'
+    if (depuisFrise && ouvrir) etat.filtre = 'tous'
     peindre()
-    if (depuisFrise) {
+    rendreLeFocus('data-ouvrir', id, depuisFrise)
+    if (depuisFrise && ouvrir) {
       const carte = [...document.querySelectorAll('[data-ev]')].find(a => a.dataset.ev === id)
       if (carte && carte.scrollIntoView) carte.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
+    return
+  }
+  const nuit = ev.target.closest && ev.target.closest('[data-nuit]')
+  if (nuit) {
+    etat.nuit = etat.nuit === nuit.dataset.nuit ? null : nuit.dataset.nuit
+    peindre()
+    rendreLeFocus('data-nuit', nuit.dataset.nuit, false)
     return
   }
   const f = ev.target.closest && ev.target.closest('[data-filtre]')
@@ -220,6 +293,7 @@ document.addEventListener('click', (ev) => {
 $('[data-bind="bien"]').addEventListener('change', (ev) => {
   etat.bienVoulu = ev.target.value || null
   etat.ouvert = null
+  etat.nuit = null
   const u = new URL(location.href)
   if (etat.bienVoulu) u.searchParams.set('bien', etat.bienVoulu); else u.searchParams.delete('bien')
   try { history.replaceState(null, '', u.pathname + u.search) } catch { /* sans historique */ }
@@ -246,10 +320,13 @@ async function init () {
   etat.moi = user && user.id
   etat.compte = compteCourant()
   const voulu = new URL(location.href).searchParams.get('bien')
-  etat.bienVoulu = voulu && /^[0-9a-f-]{36}$/i.test(voulu) ? voulu.toLowerCase() : null
-  // L'affichage instantané : le dernier écran connu de CE logement, s'il y en a un.
-  const cache = (etat.moi && etat.compte) ? lireCache('yield-evenements', etat.moi, etat.compte) : null
-  if (cache && cache.donnees && (!etat.bienVoulu || cache.donnees.bien === etat.bienVoulu)) {
+  etat.bienVoulu = voulu && UUID.test(voulu) ? voulu.toLowerCase() : null
+  // L'affichage instantané : le dernier écran connu de CE logement. Sans
+  // logement dans l'adresse, on DEMANDE celui du cache — sinon le serveur en
+  // choisirait un autre et l'écran basculerait sous les yeux de l'hôte.
+  const cache = (etat.moi && etat.compte) ? lireCache(CACHE, etat.moi, etat.compte) : null
+  if (cache && cache.donnees && cache.donnees.bien && (!etat.bienVoulu || cache.donnees.bien === etat.bienVoulu)) {
+    etat.bienVoulu = cache.donnees.bien
     recevoir(cache.donnees, { depuisCache: true, ageMs: cache.age_ms })
   }
   await charger()

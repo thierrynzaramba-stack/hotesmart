@@ -149,7 +149,9 @@ async function monter (o = {}) {
     journal.fetch.push(entree)
     if (entree.url.startsWith('/api/ecran/evenements')) {
       let d
-      try { d = await o.ecran(entree.url) } catch (e) {
+      // `w` est passé : un test peut regarder l'écran AU MOMENT de l'appel,
+      // avant la réponse (l'affichage instantané depuis le cache).
+      try { d = await o.ecran(entree.url, w) } catch (e) {
         if (e && e.status) return { ok: false, status: e.status, json: async () => ({ error: e.message }) }
         throw e
       }
@@ -162,6 +164,7 @@ async function monter (o = {}) {
   w.Element.prototype.scrollIntoView = function () {}
 
   const rendu = await import(path.join(RACINE, 'shared/yield-evenements-rendu.js'))
+  const { motif } = await import(path.join(RACINE, 'shared/yield-motifs.js'))
   const cache = await import(path.join(RACINE, 'shared/cache-ecran.js'))
   globalThis.localStorage = w.localStorage
   const MOI = 'u-moi'
@@ -174,6 +177,9 @@ async function monter (o = {}) {
     supabase: { auth: { getSession: async () => ({ data: { session: { access_token: 'jeton-relu' } } }) } },
     initErrorHandler: () => {},
     logger: { info () {}, error (...a) { journal.erreurs.push(a) }, warn () {} },
+    // ⚠ LE SEUL SYMBOLE RÉÉCRIT : le vrai `escapeHtml` vit dans
+    // `shared/properties.js`, qui importe le client d'API du navigateur et ne
+    // se charge pas sous Node. Même table de cinq caractères.
     esc: (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'),
     compteCourant: () => COMPTE,
     peutLire: () => true,
@@ -184,6 +190,7 @@ async function monter (o = {}) {
     lireCache: cache.lire,
     ecrireCache: cache.ecrire,
     oublierCache: cache.oublier,
+    motif,
     ...rendu
   })
   const module = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
@@ -198,7 +205,8 @@ async function monter (o = {}) {
     dom, w, d: w.document, journal, cache, MOI, COMPTE,
     $: (s) => w.document.querySelector(s),
     $$: (s) => [...w.document.querySelectorAll(s)],
-    cliquer: async (el) => { el.dispatchEvent(new w.MouseEvent('click', { bubbles: true })); await attendre(); await attendre() },
+    cliquer: async (el) => { el.dispatchEvent(new w.MouseEvent('click', { bubbles: true })); await attendre(); await attendre(); await attendre() },
+    attendre: async (n = 3) => { for (let i = 0; i < n; i++) await attendre() },
     choisir: async (sel, valeur) => { sel.value = valeur; sel.dispatchEvent(new w.Event('change', { bubbles: true })); await attendre(); await attendre(); await attendre() }
   }
 }

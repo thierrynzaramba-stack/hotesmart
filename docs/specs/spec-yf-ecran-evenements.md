@@ -372,3 +372,39 @@ sont listés sous l'événement avec leur motif. Les crans d'avant (Q6) sont
   mois sur deux.
 - Le menu ne mène pas encore ici (la pop-up reste la porte jusqu'à 4d) : la
   page s'ouvre par son adresse.
+
+**Review de l'étape 2, 9 novembre 2026** (`2eb8b2271c93cb52a7167b2e5dad8f4243418318..ed2523fe654280a9357f7eed4da154e40798e31e`,
+arbre `/home/claude/hotesmart`, branche `yf-ecran-evenements`, 16 fichiers du
+diff, chaque constat cité dans l'un d'eux) : **un constat de sécurité (faible)**
+et dix-sept autres. Corrigés :
+- **(sécurité)** une réponse qui ne se met pas en cache l'**efface** — un
+  membre qui n'a plus aucun logement recevait 200 avec une liste vide, et
+  l'écran du logement perdu se repeignait depuis le navigateur pendant 12 h ;
+- une panne après un changement de logement ne laisse plus l'écran de
+  l'ancien sous le nom du nouveau ; un `?bien=` qui n'est plus servi (404) est
+  retiré de l'adresse et la page se relit sans ; un 403 dit le refus ; une
+  réponse en retard est ignorée (A → B → C) ; sans logement dans l'adresse, la
+  page demande celui du cache ;
+- les **fériés** passent par la table de Thierry (`shared/yield-libelles-feries.js`,
+  « 11 novembre », « Pont de l’Ascension ») — en français ; **en anglais et en
+  espagnol, la forme reste à trancher** ;
+- « un `null` dit pourquoi » : le motif de la légende et d'une nuit non
+  calculable vient de la table du moteur (`shared/yield-motifs.js`, française :
+  ailleurs, « non calculable » seul), un niveau posé qui ne s'applique pas le
+  dit, plus aucun tiret pour un prix absent ;
+- les réglages dont l'événement n'a pas lieu cette année sont **signalés**,
+  hors des cartes (le serveur porte maintenant leur nom et leur type) ;
+- la barre de la frise dit le chiffre de son niveau (nom accessible et
+  infobulle) ; une nuit est un **bouton**, et la toucher montre son **détail en
+  texte visible** sous le calendrier (« sans votre réglage », ✎, vendue,
+  motif) — un `title` n'existe ni au toucher ni au clavier ; le focus survit au
+  repeint ;
+- l'heure du calcul porte sa date quand ce n'est pas aujourd'hui ; un écran du
+  cache en panne dit que les nuits vendues et les ✎ n'y sont pas ;
+- la frise nomme l'année (premier mois, janvier, dernier) ; les cases hors
+  zone s'atténuent par le fond, jamais par l'encre (contraste) ;
+- tests : la peinture depuis le cache est regardée AU MOMENT de l'appel ;
+  aucun hexa ; chaque clé `yfe.*` en fr / en / es, familles comprises ;
+  égalité des cinq niveaux avec le moteur.
+La re-review, une seule (règle « une review par commit » : constat de
+sécurité), porte sur le diff de ces correctifs.
