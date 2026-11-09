@@ -1,0 +1,145 @@
+/* ============================================================
+   HôteSmart — shared/yield-evenements.css
+   La page « Ce qui fait bouger vos prix » (apps/yield/evenements.html),
+   lot 4 du chantier, sous-lot 4a. Spec : docs/specs/spec-yf-ecran-evenements.md.
+
+   ⚠ UNE FEUILLE À ELLE, PAS UN AJOUT À shared/ui.css : ui.css est tenu par
+   d'autres lots en ce moment (accord du chef de file du 9 novembre 2026). La
+   page charge theme.css et ui.css sans les modifier, puis celle-ci.
+
+   ⚠ AUCUN HEXA (règle V5) : tout vient de shared/theme.css — y compris
+   l'échelle d'encre des cinq niveaux, copiée dans theme.css le 9 novembre
+   2026 sur décision de Thierry (tests/palette-niveaux.test.js garde les deux
+   copies identiques).
+
+   ⚠ LE NIVEAU COLORE LA PASTILLE OU LA CASE, JAMAIS LA LIGNE NI LA PAGE
+   (règle 1 de Thierry). L'encre du chiffre se prend DANS l'échelle : le 5 sur
+   les quatre premiers niveaux (contraste ≥ 4,7:1), le 1 sur le dernier.
+   ============================================================ */
+
+/* ---------- Les pastilles de niveau ---------- */
+.yfe-niv {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: var(--radius-pill);
+  font-size: 12px; font-weight: var(--fw-semibold); white-space: nowrap;
+  background: var(--surface-2); color: var(--muted);
+}
+.yfe-niv--1 { background: var(--niveau-1); color: var(--niveau-5); box-shadow: inset 0 0 0 1px var(--niveau-4); }
+.yfe-niv--2 { background: var(--niveau-2); color: var(--niveau-5); }
+.yfe-niv--3 { background: var(--niveau-3); color: var(--niveau-5); }
+.yfe-niv--4 { background: var(--niveau-4); color: var(--niveau-5); }
+.yfe-niv--5 { background: var(--niveau-5); color: var(--niveau-1); }
+.yfe-niv--legende { font-size: var(--fs-caption); padding: 5px 10px; }
+.yfe-niv__prix { font-weight: var(--fw-medium); }
+
+/* ---------- L'en-tête ---------- */
+.yfe-tete { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--gap-s) var(--gap-l); }
+.yfe-tete__titre { display: flex; flex-direction: column; gap: var(--gap-xs); flex: 1 1 320px; min-width: 0; }
+.yfe-bien { display: inline-flex; align-items: center; gap: var(--gap-s); font-size: var(--fs-small); }
+.yfe-bien select {
+  height: var(--control); padding: 0 12px; border-radius: var(--radius-tile);
+  border: 1px solid var(--border); background: var(--surface);
+}
+.yfe-legende { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.yfe-alerte { font-size: var(--fs-small); color: var(--muted); }
+
+/* ---------- La frise ---------- */
+.yfe-frise {
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 6px;
+}
+.yfe-frise__mois-ligne { position: relative; height: 18px; }
+.yfe-frise__mois {
+  position: absolute; top: 0; padding-inline-start: 6px;
+  font-size: 12px; color: var(--muted); font-weight: var(--fw-medium); white-space: nowrap;
+}
+.yfe-frise__piste { position: relative; }
+.yfe-frise__trait { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.yfe-barre {
+  position: absolute; height: 18px; border: 0; padding: 0 6px; border-radius: 4px;
+  font-size: 11px; font-weight: var(--fw-semibold); text-align: start;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.yfe-barre[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 2px; }
+.yfe-frise__aide { font-size: 12px; color: var(--muted); }
+
+/* ---------- Les filtres ---------- */
+.yfe-filtres { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
+.yfe-filtre {
+  min-height: var(--control); padding: 0 14px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--surface);
+  font-size: var(--fs-small); font-weight: var(--fw-medium);
+}
+.yfe-filtre[aria-pressed="true"] { border-color: var(--ink); font-weight: var(--fw-semibold); box-shadow: inset 0 0 0 1px var(--ink); }
+
+/* ---------- La liste, par mois ---------- */
+.yfe-liste { display: flex; flex-direction: column; gap: var(--gap-l); }
+.yfe-mois { display: flex; flex-direction: column; gap: 10px; }
+.yfe-mois__titre {
+  font-size: var(--fs-caption); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); font-weight: var(--fw-semibold);
+}
+.yfe-ev { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--surface); }
+.yfe-ev--ouvert { border-color: var(--ink); }
+.yfe-ev__tete {
+  width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  padding: 14px 16px; border: 0; background: transparent; text-align: start; min-height: 56px;
+}
+.yfe-ev__titre { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s); flex: 1 1 260px; min-width: 0; }
+.yfe-ev__nom { font-size: 17px; font-weight: var(--fw-semibold); }
+.yfe-ev__dates { flex: 1 1 100%; order: 3; }
+.yfe-ev__resume { display: inline-flex; flex-wrap: wrap; gap: var(--gap-s); }
+.yfe-badge {
+  font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill);
+  background: var(--surface-2); color: var(--ink); font-weight: var(--fw-semibold);
+}
+.yfe-badge--regle { box-shadow: inset 0 0 0 1px var(--ink); background: var(--surface); }
+.yfe-ev__detail { border-top: 1px solid var(--line); padding: var(--gap-m); display: flex; flex-direction: column; gap: var(--gap-m); }
+.yfe-legende-zones { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); }
+.yfe-lz { display: inline-block; width: 12px; height: 12px; border-radius: 3px; box-sizing: border-box; }
+.yfe-lz--evenement { border: 2px solid var(--ink); }
+.yfe-lz--rayonnement { border: 2px dashed var(--muted); }
+.yfe-lz--regle { box-shadow: inset 0 0 0 2px var(--ink); background: var(--surface-2); }
+.yfe-sans-nuit ul { margin: 6px 0 0; padding-inline-start: 18px; font-size: var(--fs-small); color: var(--muted); }
+
+/* ---------- Le calendrier d'un événement ---------- */
+.yfe-cal { display: flex; flex-direction: column; gap: 6px; }
+.yfe-cal__tete, .yfe-cal__semaine { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.yfe-cal__tete span {
+  padding: 0 4px; font-size: 11px; color: var(--muted); font-weight: var(--fw-semibold);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.yfe-cal__sep { display: none; }
+.yfe-jour {
+  display: flex; flex-direction: column; gap: 6px; padding: 6px;
+  border-radius: var(--radius-tile); border: 2px solid var(--line); background: var(--surface);
+  min-height: 92px; box-sizing: border-box;
+}
+.yfe-jour--evenement { border-color: var(--ink); }
+.yfe-jour--rayonnement { border: 2px dashed var(--muted); }
+.yfe-jour--hors, .yfe-jour--hors_zone { background: var(--surface-2); opacity: .6; }
+.yfe-jour--hors_zone { border-style: dashed; }
+.yfe-jour--vide { opacity: .45; }
+/* Une nuit RÉGLÉE par cet événement : un second trait d'encre, à l'intérieur.
+   Jamais l'ambre (règle 3 : l'ambre dit « fermée » ou « fait pour vous »). */
+.yfe-jour--regle { box-shadow: inset 0 0 0 2px var(--ink); opacity: 1; }
+.yfe-jour__tete { display: flex; justify-content: space-between; align-items: baseline; gap: var(--gap-xs); padding: 2px 3px 0; }
+.yfe-jour__num { font-size: var(--fs-body); font-weight: var(--fw-bold); }
+.yfe-jour__mois { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.yfe-jour__corps { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.yfe-jour__prix { font-size: var(--fs-body); font-weight: var(--fw-bold); }
+.yfe-jour__vide { font-size: 11px; color: var(--muted); text-align: center; }
+.yfe-jour__marques { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; font-size: 10px; color: var(--muted); }
+
+/* ---------- Téléphone : la même grille, 7 colonnes de 150 px qui défilent
+   (registre §1 : pas de composant linéaire). ---------- */
+@media (max-width: 1100px) {
+  .yfe-cal { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
+  .yfe-cal__tete, .yfe-cal__semaine { grid-template-columns: repeat(7, 150px); width: max-content; }
+}
+@media (max-width: 720px) {
+  .yfe-cal__sep { display: block; font-size: 11px; color: var(--muted); font-weight: var(--fw-semibold); text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 2px 0; }
+  .yfe-frise { padding: 12px; }
+  /* Treize mois sur 350 px : un sur deux, sinon les noms se chevauchent. */
+  .yfe-frise__mois:nth-child(even) { visibility: hidden; }
+}

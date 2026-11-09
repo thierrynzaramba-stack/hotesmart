@@ -321,3 +321,54 @@ Le constat 6 est la limite connue ci-dessus.
 **À mesurer sur staging avant la fin de 4a** : la durée et le nombre de
 requêtes de l'appel (`Server-Timing`) sur La bulle et Cœur de vie 23 —
 décision Q4 : au-delà d'1 s, le niveau des nuits passe en résumé quotidien.
+
+## 13. Réalisé — 4a, étape 2 : la page en lecture seule (9 novembre 2026)
+
+`apps/yield/evenements.html` (l'adresse `/apps/yield/evenements`, qui était
+une redirection vers la pop-up), rendu par `shared/yield-evenements-rendu.js`
+(fonctions pures), styles dans `shared/yield-evenements.css`, textes en
+fr / en / es (`yfe.*`). Socle **V5** (`theme.css` + `ui.css`, sans les
+modifier — `ui.css` est tenu par d'autres lots).
+
+**Les cinq gris des niveaux — décision de Thierry du 9 novembre 2026 (A)** :
+l'échelle d'encre n'existait que dans `public/style.css` (socle des écrans
+YieldFlow), et un test interdisait de la recopier. Elle est **copiée à
+l'identique** dans `shared/theme.css` ; `tests/palette-niveaux.test.js` exige
+désormais les deux copies égales à sa table (`docs/kb/charte-ui.md` §3).
+
+**Ce que la page montre** : en-tête (logement, fenêtre, heure du calcul),
+légende des cinq niveaux et leur prix, alertes (calendrier scolaire, ✎
+illisibles, motif d'indisponibilité), frise de treize mois (une barre par
+événement pris en compte, au jour près, couleur = son niveau le plus haut),
+filtres par famille, liste par mois. Un événement s'ouvre (clic sur sa carte
+ou sur sa barre) sur son calendrier, **lundi → dimanche** : niveau et prix de
+chaque nuit, cadre plein = l'événement, pointillé = son rayonnement dans la
+zone posée, atténué = hors zone ; une nuit **réglée** par cet événement porte
+un trait d'encre et « réglé », et son infobulle dit « sans votre réglage :
+… » ; une nuit **vendue**, une nuit **✎** le disent. Les réglages sans nuit
+sont listés sous l'événement avec leur motif. Les crans d'avant (Q6) sont
+**montrés** (« Réglage d'avant… »), sans bouton : les gestes sont l'étape 3.
+
+**Choix à connaître pour la recette :**
+- **Pas d'ambre** pour « réglé par vous » (la maquette en mettait) : règle 3
+  de Thierry, l'ambre dit « fermée » ou « fait pour vous ». Un trait d'encre.
+- **Une barre par OCCURRENCE** (§12) : férié, pont et week-end prolongé d'un
+  même jour férié sont trois barres, là où la maquette en dessinait une
+  (« Armistice — week-end prolongé »). Sur une frise d'un an, une barre d'une
+  nuit fait 1,2 % de la largeur : le nom n'y tient pas, il est dans
+  l'infobulle. **À regarder en recette** : un regroupement d'affichage est
+  possible, il ne change pas les positions.
+- Sans largeur posée, aucun week-end de rayonnement n'est affiché — sauf une
+  nuit réglée au-delà, toujours montrée (décision A du 7 novembre).
+- **Cache du navigateur** (§8, point 3) : la frise et la liste se peignent
+  tout de suite depuis le dernier écran **du même logement** ; l'état des
+  nuits (vendue, ouverte, ✎, prix du calendrier) n'y est **jamais** gardé. Un
+  refus du serveur (403, 404) efface ce que le cache avait peint ; une panne
+  le garde et le dit.
+- Fichiers statiques : comme les autres pages V5 (pas de `?v=`), point 5 de
+  la case performance aligné sur le socle.
+- **Téléphone** : la même grille, sept colonnes de 150 px qui défilent, une
+  ligne « Semaine du … » au-dessus de chaque semaine ; la frise ne nomme qu'un
+  mois sur deux.
+- Le menu ne mène pas encore ici (la pop-up reste la porte jusqu'à 4d) : la
+  page s'ouvre par son adresse.

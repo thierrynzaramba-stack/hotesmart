@@ -1,21 +1,266 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Vos événements</title>
-  <!-- ⚠ CETTE PAGE N'EXISTE PLUS COMME ECRAN (decision de Thierry, recette du
-       22 septembre 2026) : « Ce qui pilote vos prix » est devenu une POP-UP
-       ouverte depuis « Prédiction de prix » — un calendrier en tableau, les
-       evenements marques dessus, un bouton « Ajouter un evenement », la
-       couleur des cases suivant le niveau de prix. L'URL reste pour les
-       favoris et les liens deja partages : elle renvoie a la pop-up. -->
-  <meta http-equiv="refresh" content="0; url=/apps/yield/prix?evenements=1">
-  <link rel="stylesheet" href="/public/style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<link rel="stylesheet" href="/shared/yield-evenements.css">
+<!-- PAGE « CE QUI FAIT BOUGER VOS PRIX » — lot 4 du chantier, sous-lot 4a,
+     étape 2 : LECTURE SEULE. Spec : docs/specs/spec-yf-ecran-evenements.md.
+     Dessin : docs/maquettes/evenements/maquette-evenements.html.
+     ⚠ CETTE ADRESSE ÉTAIT UNE REDIRECTION vers la pop-up « Quand vos prix
+     bougent » de Prédiction de prix (22 septembre 2026). Décision Q1 de
+     Thierry (9 novembre 2026) : l'écran devient une page entière, ICI. La
+     pop-up reste en service, par le menu, jusqu'à la fin du lot 4 (4d) : les
+     menus (components/sidebar.js, pages/calendrier.html) la visent
+     directement, ils ne passent pas par cette adresse.
+     ⚠ UN APPEL AU CHARGEMENT : /api/ecran/evenements (tests/budget-ecran.test.js).
+     RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
 <body>
-  <p style="padding:24px;font-size:14px">Cette page a été remplacée par la pop-up « Événements » de
-    <a href="/apps/yield/prix?evenements=1">Prédiction de prix</a>.</p>
-  <script>location.replace('/apps/yield/prix?evenements=1')</script>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
+
+<main class="page yfe">
+  <div class="yfe-tete">
+    <div class="yfe-tete__titre">
+      <h1 class="h1" data-i18n="yfe.titre"></h1>
+      <p class="muted" data-bind="sous-titre"></p>
+      <p class="caption muted" data-bind="age" hidden></p>
+    </div>
+    <label class="yfe-bien" data-bind="bien-zone" hidden>
+      <span class="muted" data-i18n="yfe.logement"></span>
+      <select data-bind="bien"></select>
+    </label>
+  </div>
+
+  <div class="yfe-legende" data-bind="legende" data-i18n-attr="aria-label:yfe.legende_aria"></div>
+  <div class="stack" data-bind="alertes"></div>
+
+  <section class="yfe-frise" data-bind="frise-zone" data-i18n-attr="aria-label:yfe.frise_aria" hidden>
+    <div data-bind="frise"></div>
+    <p class="yfe-frise__aide" data-i18n="yfe.frise_aide"></p>
+  </section>
+
+  <div class="yfe-filtres" role="group" data-bind="filtres" data-i18n-attr="aria-label:yfe.filtres_aria" hidden>
+    <button type="button" class="yfe-filtre" data-filtre="tous" aria-pressed="true" data-i18n="yfe.filtre_tous"></button>
+    <button type="button" class="yfe-filtre" data-filtre="officiel" aria-pressed="false" data-i18n="yfe.filtre_officiel"></button>
+    <button type="button" class="yfe-filtre" data-filtre="commercial" aria-pressed="false" data-i18n="yfe.filtre_commercial"></button>
+    <button type="button" class="yfe-filtre" data-filtre="mien" aria-pressed="false" data-i18n="yfe.filtre_mien"></button>
+  </div>
+
+  <div class="yfe-liste" data-bind="liste"><p class="muted" data-i18n="common.loading"></p></div>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+import { requireAuth } from '/components/auth-guard.js'
+import { signOut, supabase } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte } from '/shared/compte-courant.js'
+import { lire as lireCache, ecrire as ecrireCache, oublier as oublierCache } from '/shared/cache-ecran.js'
+import { indexerNuits, rendreLegende, rendreFrise, rendreListe, jourLongPar, pourLeCache } from '/shared/yield-evenements-rendu.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+
+// ⚠ LE SEUL ENDPOINT DE LA PAGE, en lecture (étape 2). Les gestes viendront à
+// l'étape 3, sur `PUT` / `PATCH /api/yield-evenements`.
+const ECRAN = '/api/ecran/evenements'
+
+// L'appel : jeton RELU à chaque fois (un onglet ouvert plus d'une heure aurait
+// un jeton expiré), compte délégué par `X-Compte`. Il LÈVE sur réponse non-ok.
+async function appelAPI (url) {
+  let jeton = null
+  try {
+    const { data } = await supabase.auth.getSession()
+    jeton = (data && data.session && data.session.access_token) || null
+  } catch { /* pas de session : le serveur répondra 401 */ }
+  const res = await fetch(url, { headers: { ...(jeton ? { Authorization: `Bearer ${jeton}` } : {}), ...enteteCompte() } })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(data.error || t('yfe.erreur'))
+    err.status = res.status
+    throw err
+  }
+  return data
+}
+
+const fmt = {
+  t,
+  money: (n) => I18n.money(n, 'EUR'),
+  date: (d, o) => I18n.date(d, o)
+}
+const jourLong = jourLongPar(fmt.date)
+const dateLocale = (iso) => { const [a, m, j] = String(iso).split('-').map(Number); return new Date(a, m - 1, j) }
+
+// ─── État de la page ────────────────────────────────────────────────────────
+const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, moi: null, compte: null, bienVoulu: null }
+
+function peindre () {
+  const d = etat.data
+  if (!d) return
+  const biens = d.biens || []
+  // Le sélecteur : seulement s'il y a un choix à faire.
+  const sel = $('[data-bind="bien"]')
+  sel.innerHTML = biens.map(b => `<option value="${esc(b.id)}">${esc(b.nom)}</option>`).join('')
+  if (d.bien) sel.value = d.bien
+  $('[data-bind="bien-zone"]').hidden = biens.length < 2
+  const nomBien = (biens.find(b => b.id === d.bien) || {}).nom || ''
+
+  const alertes = []
+  if (!biens.length) alertes.push(t('yfe.aucun_bien'))
+  if (d.indisponible) alertes.push(t('yfe.indisponible_' + d.indisponible))
+  if (d.vacances_incertaines_apres) alertes.push(t('yfe.alerte_vacances', { date: fmt.date(dateLocale(d.vacances_incertaines_apres), { day: 'numeric', month: 'long', year: 'numeric' }) }))
+  if (d.prix_hote_illisibles) alertes.push(t('yfe.alerte_prix_main'))
+  $('[data-bind="alertes"]').innerHTML = alertes.map(a => `<p class="yfe-alerte">${esc(a)}</p>`).join('')
+
+  const calcule = !!(d.fenetre && Array.isArray(d.evenements))
+  const opts = { day: 'numeric', month: 'long', year: 'numeric' }
+  $('[data-bind="sous-titre"]').textContent = calcule
+    ? t('yfe.sous_titre', { bien: nomBien, debut: fmt.date(dateLocale(d.fenetre.debut), opts), fin: fmt.date(dateLocale(d.fenetre.fin), opts) })
+      + (d.calcule_a ? ' · ' + t('yfe.calcule_a', { heure: I18n.time(new Date(d.calcule_a)) }) : '')
+    : nomBien
+  $('[data-bind="frise-zone"]').hidden = !calcule
+  $('[data-bind="filtres"]').hidden = !calcule
+  if (!calcule) {
+    $('[data-bind="legende"]').innerHTML = ''
+    $('[data-bind="liste"]').innerHTML = ''
+    return
+  }
+  $('[data-bind="legende"]').innerHTML = rendreLegende(d.niveaux, d.niveaux_non_calculables, fmt)
+  $('[data-bind="frise"]').innerHTML = rendreFrise(d, etat.idx, etat.ouvert, fmt)
+  for (const b of document.querySelectorAll('[data-filtre]')) b.setAttribute('aria-pressed', String(b.dataset.filtre === etat.filtre))
+  $('[data-bind="liste"]').innerHTML = rendreListe(d, etat.idx, { filtre: etat.filtre, ouvert: etat.ouvert }, fmt, jourLong)
+}
+
+function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
+  etat.data = d
+  etat.idx = indexerNuits(d && d.nuits)
+  const age = $('[data-bind="age"]')
+  age.hidden = !depuisCache
+  age.textContent = depuisCache ? t('yfe.cache_age', { minutes: Math.max(1, Math.round(ageMs / 60000)) }) : ''
+  peindre()
+}
+
+async function charger () {
+  const params = etat.bienVoulu ? '?bien=' + encodeURIComponent(etat.bienVoulu) : ''
+  try {
+    const d = await appelAPI(ECRAN + params)
+    // ⚠ LE CACHE NE GARDE JAMAIS L'ÉTAT D'UNE NUIT (vendue, ouverte, ✎) : il
+    // ne sert qu'à peindre tout de suite la frise et la liste, et la réponse du
+    // serveur les remplace (spec §8, point 3).
+    if (etat.moi && etat.compte && d && d.bien && !d.indisponible) ecrireCache('yield-evenements', etat.moi, etat.compte, pourLeCache(d))
+    recevoir(d)
+  } catch (e) {
+    // ⚠ UN REFUS DU SERVEUR EFFACE CE QUE LE CACHE AVAIT PEINT : les logements
+    // d'un périmètre que l'on n'a plus.
+    if (e && (e.status === 403 || e.status === 404) && etat.moi && etat.compte) oublierCache('yield-evenements', etat.moi, etat.compte)
+    const refus = !!(e && (e.status === 403 || e.status === 404))
+    logger.error('Événements', e && e.message, e)
+    // Un écran déjà peint depuis le cache RESTE, et dit qu'il n'a pas pu se
+    // mettre à jour ; un refus, lui, l'efface.
+    if (etat.data && !refus) {
+      const age = $('[data-bind="age"]')
+      age.textContent = t('yfe.cache_echec')
+      age.hidden = false
+      return
+    }
+    etat.data = null
+    $('[data-bind="age"]').hidden = true
+    for (const z of ['frise-zone', 'filtres', 'bien-zone']) $(`[data-bind="${z}"]`).hidden = true
+    for (const z of ['legende', 'frise', 'alertes']) $(`[data-bind="${z}"]`).innerHTML = ''
+    $('[data-bind="sous-titre"]').textContent = ''
+    $('[data-bind="liste"]').innerHTML = `<p class="yfe-alerte">${esc(t('yfe.erreur'))}</p>`
+  }
+}
+
+document.addEventListener('click', (ev) => {
+  const o = ev.target.closest && ev.target.closest('[data-ouvrir]')
+  if (o) {
+    const id = o.dataset.ouvrir
+    const depuisFrise = !!o.closest('[data-bind="frise"]')
+    etat.ouvert = etat.ouvert === id && !depuisFrise ? null : id
+    // La frise ouvre l'événement de la barre, quel que soit le filtre.
+    if (depuisFrise) etat.filtre = 'tous'
+    peindre()
+    if (depuisFrise) {
+      const carte = [...document.querySelectorAll('[data-ev]')].find(a => a.dataset.ev === id)
+      if (carte && carte.scrollIntoView) carte.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    return
+  }
+  const f = ev.target.closest && ev.target.closest('[data-filtre]')
+  if (f) { etat.filtre = f.dataset.filtre; peindre() }
+})
+$('[data-bind="bien"]').addEventListener('change', (ev) => {
+  etat.bienVoulu = ev.target.value || null
+  etat.ouvert = null
+  const u = new URL(location.href)
+  if (etat.bienVoulu) u.searchParams.set('bien', etat.bienVoulu); else u.searchParams.delete('bien')
+  try { history.replaceState(null, '', u.pathname + u.search) } catch { /* sans historique */ }
+  $('[data-bind="liste"]').innerHTML = `<p class="muted">${esc(t('common.loading'))}</p>`
+  charger()
+})
+
+// ─── Démarrage ──────────────────────────────────────────────────────────────
+async function init () {
+  const session = await requireAuth()
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+  const user = session.user || null
+  $('[data-bind="initials"]').textContent = ((user && user.email) || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis')
+  })
+  HSNav.render({ peutLire })
+  I18n.apply(document)
+
+  etat.moi = user && user.id
+  etat.compte = compteCourant()
+  const voulu = new URL(location.href).searchParams.get('bien')
+  etat.bienVoulu = voulu && /^[0-9a-f-]{36}$/i.test(voulu) ? voulu.toLowerCase() : null
+  // L'affichage instantané : le dernier écran connu de CE logement, s'il y en a un.
+  const cache = (etat.moi && etat.compte) ? lireCache('yield-evenements', etat.moi, etat.compte) : null
+  if (cache && cache.donnees && (!etat.bienVoulu || cache.donnees.bien === etat.bienVoulu)) {
+    recevoir(cache.donnees, { depuisCache: true, ageMs: cache.age_ms })
+  }
+  await charger()
+}
+
+// ⚠ UNE PAGE VIDE ET MUETTE EST LE PIRE RETOUR.
+init().catch(e => {
+  logger.error('Événements', e && e.message, e)
+  const z = $('[data-bind="liste"]')
+  if (z) z.innerHTML = `<p class="yfe-alerte">${esc(t('yfe.erreur'))}</p>`
+})
+</script>
 </body>
 </html>
