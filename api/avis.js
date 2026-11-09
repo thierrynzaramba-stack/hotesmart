@@ -2220,7 +2220,14 @@ async function evaluationPublier (req, res, garde, options = {}) {
       await relacher()
       return res.status(503).json({ error: 'Évaluation illisible', detail: eFrais ? eFrais.message : 'introuvable' })
     }
+    // ⚠ LES DEUX COLONNES (re-revue de 22f2013, constat 2). Une prise faite
+    // « sans prestataire » ecrit ses meilleurs niveaux dans `answers_host`, qui
+    // l'emporte a la fusion : une prestataire autorisee entre-temps qui coche
+    // « tres sale » apres la prise aurait vu sa reponse masquee, et un avis
+    // positif serait parti. Sa colonne doit etre celle de la prise.
     const memes = JSON.stringify(trier(frais.answers_host)) === JSON.stringify(trier(options.auto.answers_host))
+      && (!('answers_cleaner' in options.auto)
+        || JSON.stringify(trier(frais.answers_cleaner ?? null)) === JSON.stringify(trier(options.auto.answers_cleaner ?? null)))
     let negatif = true
     try { negatif = estNegatif({ ...(frais.answers_cleaner || {}), ...(frais.answers_host || {}) }, e.grille_figee) } catch { negatif = true }
     if (!memes || negatif || frais.auto_publier_le || ['publiee', 'abandonnee', 'expiree', 'evaluee_ailleurs'].includes(frais.status)) {
@@ -2355,7 +2362,7 @@ const outilsAutoValidation = {
       json (b) { sortie.body = b; res.headersSent = true; return res },
     }
     await evaluationPublier({ method: 'POST', query: {}, body: { id: e.id } }, res, gardeDuTitulaire(e.user_id),
-      { auto: { answers_host: e.answers_host } })
+      { auto: { answers_host: e.answers_host, answers_cleaner: e.answers_cleaner ?? null } })
     return sortie
   },
 }

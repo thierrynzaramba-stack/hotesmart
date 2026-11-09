@@ -1074,6 +1074,20 @@ test('LE TEST QUI COMPTE : l’hote a change ses reponses apres la prise — la 
   assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
 })
 
+// Re-revue de 22f2013 (constat 2) : une prise « sans prestataire » ecrit ses
+// meilleurs niveaux dans `answers_host`, qui l'emporte a la fusion. Une
+// prestataire qui coche APRES la prise ne doit pas voir sa reponse masquee.
+test('LE TEST QUI COMPTE : la prestataire a coche APRES la prise — la publication automatique renonce', async () => {
+  const ev = evalA({ answers_cleaner: { etat: 'tres_sale' } })
+  const etat = preparer({ evaluations: [ev] })
+  const { outilsAutoValidation } = require('../api/avis')
+  // La prise avait lu une colonne prestataire VIDE.
+  const r = await outilsAutoValidation.publier({ ...ev, answers_cleaner: null })
+  assert.strictEqual(r.code, 409)
+  assert.strictEqual(r.body.motif, 'auto_annulee')
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
 test('LE TEST QUI COMPTE : une evaluation abandonnee apres la prise ne part pas', async () => {
   const ev = evalA({ status: 'abandonnee' })
   const etat = preparer({ evaluations: [ev] })
