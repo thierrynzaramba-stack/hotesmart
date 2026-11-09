@@ -583,8 +583,28 @@ Cités dans « points vérifiés », sans constat : `api/messages.js` (l. 156, l
 lecteur de `core_events`) et `api/cron.js` (l. 703, ce que le cron lit du bilan) —
 **preuve seulement**. Mutations faites sur une copie hors de l'arbre.
 
-**Commit non relu** : `51355e63` (correctifs de la dernière review), conforme à la
-règle. Ses fichiers : `api/avis.js`, `docs/specs/spec-evaluation-voyageur.md`,
+**Review 3, script de recette** — plage `c3ffaa535985565be64b94abed1083ac630748a1..f04b56391c7b5bc09e8a1988ee611eb684abec34`,
+tête déclarée lue `f04b56391c7b5bc09e8a1988ee611eb684abec34`. Diff de la plage :
+`scripts/recette-auto-sans-prestataire.js` seul (staging seulement). Constats, tous sur
+ce fichier :
+1. **sécurité** — la simulation crue imposée ne faisait rien : hors production, une
+   seule variable lève la simulation, `AVIS_PUBLICATION_REELLE=1`, et le script ne la
+   refusait pas. Corrigé : le script s'arrête si elle est posée, et relit chaque
+   publication (ECHEC si la réponse du canal n'est pas marquée simulation) ;
+2. exactitude — l'heure jouée calculée sur tous les décors armés : filtre `--compte`
+   et décors dont l'échéance passerait avant l'heure jouée écartés ;
+3. mineur — le journal des notifications lisait le mauvais champ.
+Cités comme **preuve seulement** : `api/avis.js` (`simulationActive`, l. 2034-2049 ;
+envoi, l. 2187), `lib/avis/auto-validation.js` (l. 293, 348, 377, 390-394),
+`lib/avis/notifications.js` (l. 90-94), `scripts/recette-avis-staging.js` (l. 92, 231),
+`docs/recette/recette-avis-lot4.md` (l. 19).
+⚠ **Pas de re-review du correctif de sécurité** : c'est la troisième review du lot,
+le plafond d'un lot d'envoi au voyageur. Le correctif est un refus de démarrer et une
+relecture après coup, dans un script de recette qui ne tourne que sur staging ; le
+chef de file tranche.
+
+**Commits non relus** : `51355e63` (correctifs de la dernière review), conforme à la
+règle ; et le correctif de la review 3 (script de recette). Ses fichiers : `api/avis.js`, `docs/specs/spec-evaluation-voyageur.md`,
 `lib/avis/auto-validation.js`, `scripts/armer-avis-sans-prestataire.js`,
 `tests/avis-auto-sans-prestataire.test.js`, `tests/avis-endpoint-evaluation.test.js`.
 
