@@ -21,7 +21,9 @@
 // ⚠ LE DELAI PLEIN OU RIEN (revue de 6e73da3, constat 1). Le plafond d'Airbnb
 // (echeance − 12 h) raccourcirait le delai des plus anciennes — jusqu'a
 // publier trois minutes apres le script, sans rappel. Celles-la ne sont PAS
-// armees : elles sont listees a part, « a publier a la main avant … ».
+// armees : elles sont listees a part, « a publier a la main avant … » — et
+// seulement elles : ce qui est deja arme une fois, ou attend une prestataire
+// autorisee, n'y figure jamais (re-revue de 22f2013).
 // ⚠ JAMAIS DEUX FOIS : `armerSansPrestataire` lit la marque `avis.auto_armee`
 // du journal ; une evaluation deja armee une fois, puis arretee par l'hote,
 // n'est pas rearmee si le script est relance.
@@ -94,7 +96,7 @@ const heureParis = (v) => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/P
       const ligne = `${String(nomDe.get(e.property_id) || e.property_id).padEnd(24)} ${String(e.booking_uid).padEnd(40)} échéance ${heureParis(e.deadline_at)}`
       if (r.erreur) { bilan.erreurs++; console.error(`  ERREUR  ${ligne} — ${r.erreur}`) }
       else if (r.arme) { bilan.armees++; console.log(`  ${ECRIRE ? 'armée  ' : 'à armer'} ${ligne} → publication le ${heureParis(r.quand)}`) }
-      else if (r.plafonne) { bilan.plafonnees++; aLaMain.push(ligne) }
+      else if (r.aLaMain) { bilan.plafonnees++; aLaMain.push(`${ligne} — ${r.motif}`) }
       else { bilan.ignorees++; motifs[r.motif] = (motifs[r.motif] || 0) + 1 }
     }
     curseur = data[data.length - 1].id

@@ -482,7 +482,8 @@ abandon. `auto_publier_le` repasse à nul ; l'évaluation est alors à lui (S2).
 plafonnée, jamais de balayage) :
 1. la config est relue : désactivée entre-temps → rien ;
 2. les questions de l'hôte sans réponse prennent le **meilleur niveau** de leur
-   grille (le premier, « je recommande » pour la recommandation) — et celles de
+   grille (la meilleure note non négative, « je recommande » pour la
+   recommandation) — et celles de
    la prestataire aussi quand on ne lui demande rien (9 novembre 2026) ;
 3. **jamais un avis négatif** : si les réponses le rendent négatif, rien ne part,
    il attend l'hôte ;

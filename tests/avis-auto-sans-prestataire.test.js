@@ -47,7 +47,16 @@ function base (tables = {}, { pannes = [], pannesEcriture = [], apres = {} } = {
       if (pannes.includes(table)) return { data: null, error: { message: 'panne simulee' } }
       if (q.op !== 'select' && pannesEcriture.includes(table)) return { data: null, error: { message: 'ecriture refusee' } }
       const lignes = lignesDe(table)
-      if (q.op === 'insert') { for (const l of [].concat(q.ligne)) lignes.push({ ...l }); return { data: null, error: null } }
+      if (q.op === 'insert') {
+        const ajoutees = [].concat(q.ligne).map((l, i) => ({ id: `${table}-${lignes.length + i + 1}`, ...l }))
+        lignes.push(...ajoutees)
+        return { data: ajoutees.map(l => ({ id: l.id })), error: null }
+      }
+      if (q.op === 'delete') {
+        const garder = lignes.filter(r => !garde(r))
+        lignes.length = 0; lignes.push(...garder)
+        return { data: null, error: null }
+      }
       if (q.op === 'upsert') {
         const l = q.ligne
         if (lignes.some(r => r.user_id === l.user_id && r.booking_uid === l.booking_uid)) return { data: [], error: null }
@@ -77,6 +86,7 @@ function base (tables = {}, { pannes = [], pannesEcriture = [], apres = {} } = {
       order () { return c },
       limit (n) { q.limite = n; return c },
       update (maj) { q.op = 'update'; q.maj = maj; return c },
+      delete () { q.op = 'delete'; return c },
       insert (ligne) { q.op = 'insert'; q.ligne = ligne; return c },
       upsert (ligne) { q.op = 'upsert'; q.ligne = ligne; return c },
       maybeSingle: async () => { const r = executer(); return { data: r.data && r.data[0] ? r.data[0] : (r.error ? null : null), error: r.error } },
@@ -344,7 +354,7 @@ test('le script exige le delai plein : plafonne par Airbnb, l’evaluation n’e
   const e = NEE({ deadline_at: iso(MAINTENANT + 30 * H) })
   const { etat, sb } = base({ guest_evaluations: [e], avis_auto_validation: REGLAGE_24H, menages: [] })
   const r = await armerSansPrestataire(sb, e, { maintenant: MAINTENANT, exigerDelaiPlein: true })
-  assert.deepStrictEqual(r, { arme: false, motif: 'delai plein impossible avant l echeance', plafonne: iso(MAINTENANT + 18 * H) })
+  assert.deepStrictEqual(r, { arme: false, motif: 'delai plein impossible avant l echeance', plafonne: iso(MAINTENANT + 18 * H), aLaMain: true })
   assert.strictEqual(etat.guest_evaluations[0].auto_publier_le, null)
   const loin = NEE({ deadline_at: iso(MAINTENANT + 5 * 24 * H) })
   const b = base({ guest_evaluations: [loin], avis_auto_validation: REGLAGE_24H, menages: [] })
@@ -423,4 +433,73 @@ test('une evaluation nee de l’objet Channex dont l’horloge echoue : comptee 
   assert.strictEqual(bilan.crees, 1)
   assert.strictEqual(bilan.erreurs, 0)
   assert.strictEqual(bilan.erreurs_armement, 1)
+})
+
+// ─── Constats de la re-revue de 22f2013 ─────────────────────────────────────
+test('le delai se juge APRES la marque et la prestataire : rien d’arrete ou d’attendu n’est propose « a la main »', async () => {
+  const proche = NEE({ deadline_at: iso(MAINTENANT + 30 * H) })
+  const marque = { user_id: 'u1', type: 'avis.auto_armee', subject_type: 'guest_evaluation', subject_id: 'ev-1' }
+  const a = base({ guest_evaluations: [proche], avis_auto_validation: REGLAGE_24H, menages: [], core_events: [marque] })
+  const ra = await armerSansPrestataire(a.sb, proche, { maintenant: MAINTENANT, exigerDelaiPlein: true })
+  assert.deepStrictEqual(ra, { arme: false, motif: 'deja armee une fois' })
+  const b = base({ guest_evaluations: [proche], avis_auto_validation: REGLAGE_24H, menages: MENAGE(), profiles: PROFIL({ eval_scope: 'selon_grille' }) })
+  const rb = await armerSansPrestataire(b.sb, proche, { maintenant: MAINTENANT, exigerDelaiPlein: true })
+  assert.deepStrictEqual(rb, { arme: false, motif: 'la prestataire participe' })
+})
+
+test('a moins de 12 h de la fermeture : pas d’horloge, mais listee « a la main »', async () => {
+  const urgente = NEE({ deadline_at: iso(MAINTENANT + 8 * H) })
+  const { sb } = base({ guest_evaluations: [urgente], avis_auto_validation: REGLAGE_24H, menages: [] })
+  const r = await armerSansPrestataire(sb, urgente, { maintenant: MAINTENANT, exigerDelaiPlein: true })
+  assert.strictEqual(r.arme, false)
+  assert.strictEqual(r.aLaMain, true)
+})
+
+test('a la naissance, un plafond qui ne laisse plus 6 h pour prevenir l’hote : pas d’horloge ; un delai court CHOISI reste arme', async () => {
+  const e = NEE({ deadline_at: iso(MAINTENANT + 15 * H) })              // plafond a +3 h
+  const a = base({ guest_evaluations: [e], avis_auto_validation: REGLAGE_24H, menages: [] })
+  assert.strictEqual((await armer(a.sb, e)).arme, false)
+  assert.strictEqual(a.etat.guest_evaluations[0].auto_publier_le, null)
+  const b = base({ guest_evaluations: [NEE()], avis_auto_validation: [{ user_id: 'u1', property_id: 'bien-1', heures: 1 }], menages: [] })
+  assert.deepStrictEqual(await armer(b.sb, NEE()), { arme: true, quand: iso(MAINTENANT + H) })
+})
+
+test('l’horloge n’a pas pu etre ecrite : la marque est retiree, un nouvel essai reste possible', async () => {
+  const { etat, sb } = base({ guest_evaluations: [NEE()], avis_auto_validation: REGLAGE_24H, menages: [] }, { pannesEcriture: ['guest_evaluations'] })
+  const r = await armer(sb, NEE())
+  assert.ok(r.erreur)
+  assert.strictEqual((etat.core_events || []).length, 0, 'pas de marque « deja armee » sans horloge')
+})
+
+test('midi a Paris, en heure d’hiver comme en heure d’ete', () => {
+  const { midiParis } = require('../lib/avis/naissance')
+  assert.strictEqual(new Date(midiParis('2026-11-09')).toISOString(), '2026-11-09T11:00:00.000Z')
+  assert.strictEqual(new Date(midiParis('2026-07-09')).toISOString(), '2026-07-09T10:00:00.000Z')
+  assert.strictEqual(new Date(midiParis('2026-03-29')).toISOString(), '2026-03-29T10:00:00.000Z', 'jour du passage a l heure d ete')
+  assert.strictEqual(new Date(midiParis('2026-10-25')).toISOString(), '2026-10-25T11:00:00.000Z', 'jour du retour a l heure d hiver')
+  assert.strictEqual(midiParis('pas une date'), null)
+})
+
+test('le jour du depart, une horloge non posee se voit dans `erreurs` (le seul champ que lit le cron)', async () => {
+  const { sb } = base({
+    menages: [{ user_id: 'u1', property_id: 'ref-1', booking_id: 'BK-1', departure_date: jourParis(MAINTENANT), status: 'pending', provider_id: null }],
+    bookings_snapshot: [{ user_id: 'u1', booking_id: 'BK-1', property_id: 'ref-1', snapshot: { provider: 'channex', source: 'Airbnb', status: 'confirmed' } }],
+    properties: [{ id: 'bien-1', user_id: 'u1', provider_property_id: 'ref-1' }],
+    guest_evaluations: [],
+  }, { pannes: ['avis_auto_validation'] })
+  const bilan = await naitreAuDepart(sb, { maintenant: MAINTENANT })
+  assert.strictEqual(bilan.crees, 1)
+  assert.strictEqual(bilan.erreurs_armement, 1)
+  assert.strictEqual(bilan.erreurs, 1)
+})
+
+test('reglage ou grille illisibles pres du plafond : on renonce et l’hote est prevenu, jamais de report dans les 12 dernieres heures', async () => {
+  for (const panne of ['avis_auto_validation', 'avis_criteres']) {
+    const { etat, sb } = base({ guest_evaluations: [ECHUE({ deadline_at: iso(MAINTENANT + 12.5 * H) })], avis_auto_validation: REGLAGE_24H, menages: [] }, { pannes: [panne] })
+    const o = outils()
+    await lancer(sb, o)
+    assert.strictEqual(o.appels.publier.length, 0, panne)
+    assert.strictEqual(etat.guest_evaluations[0].auto_publier_le, null, panne)
+    assert.ok((etat.agent_tasks || []).length, panne + ' : l hote est prevenu')
+  }
 })
