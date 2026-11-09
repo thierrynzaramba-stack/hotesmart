@@ -130,9 +130,12 @@ contenu. En tête : « Ce logement facture au nom de : X », ou « Aucune entit�
 ce logement ne peut pas facturer », ou l'entité archivée qui ne facture plus.
 Puis les entités actives : « Choisir pour ce logement » / « Retirer de ce
 logement », « Modifier », la numérotation (réglable, figée, ou manuelle) ; et
-« Nouvelle entité ». **Un membre ne voit aucun geste** (et le serveur refuse).
-**Un geste à la fois** : pendant un envoi, le bouton du formulaire est éteint
-et tout autre geste est ignoré ; une entité créée mais non choisie fait sortir
+« Nouvelle entité ». **Un membre ne voit aucun geste** (et le serveur refuse),
+et jamais « Aucune entité pour l'instant. Ajoutez-en une » : sa liste vide ne
+dit rien du compte (re-review, constat 1).
+**Un geste à la fois** : pendant un envoi, TOUTE la fenêtre est éteinte
+(boutons, champs) et tout changement de mode est ignoré ; un refus rallume
+tout (re-review, constat 2) ; une entité créée mais non choisie fait sortir
 du formulaire, relire, et le bandeau dit de la choisir. Le focus revient au
 bouton d'ouverture même s'il a été repeint (`retourFocus`).
 Les styles sont posés une fois par le module (pas de feuille de plus). Un

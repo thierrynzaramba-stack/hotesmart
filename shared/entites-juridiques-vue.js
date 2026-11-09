@@ -290,20 +290,36 @@ function monterFenetre ({ racine, api, bien, t, esc, langue = 'fr', surChangemen
   }
 
   // ⚠ UN GESTE À LA FOIS (constat 2 de la review 3) : deux « Enregistrer »
-  // rapprochés partaient tous les deux, donc deux entités. Pendant l'envoi, le
-  // bouton du formulaire est éteint et tout autre geste est ignoré.
+  // rapprochés partaient tous les deux, donc deux entités.
+  // ⚠ ET PENDANT L'ENVOI, TOUTE LA FENÊTRE ATTEND (constat 2 de la re-review) :
+  // seul « Enregistrer » était éteint ; « Annuler » laissait croire la
+  // création abandonnée (elle partait quand même), et une seconde saisie
+  // ouverte entre-temps était ignorée sans un mot, puis effacée à l'arrivée de
+  // la première réponse. Tous les boutons et champs de la fenêtre sont éteints
+  // pendant l'envoi, tout changement de mode est ignoré, et tout se rallume
+  // sur un refus.
   let enVol = false
+  const controles = () => [...racine.querySelectorAll('button, input, select')]
+  function attendre (oui) {
+    for (const el of controles()) {
+      if (oui) { el.dataset.ejAvant = el.disabled ? '1' : ''; el.disabled = true } else { el.disabled = el.dataset.ejAvant === '1'; delete el.dataset.ejAvant }
+    }
+  }
+  function changerMode (m) {
+    if (enVol) return
+    mode = m
+    peindre()
+  }
   async function geste (corps, form) {
     if (enVol) return false
     enVol = true
-    const envoi = form ? form.querySelector('[type="submit"]') : null
-    if (envoi) envoi.disabled = true
+    attendre(true)
     let reponse
     try {
       reponse = await api.ecrire({ ...corps, property_uuid: bien })
     } catch (e) {
       enVol = false
-      if (envoi) envoi.disabled = false
+      attendre(false)
       if (form) { montrerRefus(form, e, t); return false }
       // ⚠ SANS FORMULAIRE (un bouton) : on repeint depuis le dernier état lu,
       // et le bandeau dit pourquoi.
@@ -396,7 +412,11 @@ function monterFenetre ({ racine, api, bien, t, esc, langue = 'fr', surChangemen
         : `<p class="ej-actuelle">${esc(t('ej.actuelle', { nom: sienne.nom }))}</p>`
     const creation = mode && mode.edition === null
       ? `<li class="card ej-carte" data-entite="">${formulaireHtml(null, t, esc, langue)}</li>` : ''
-    const vide = !actives.length && !creation ? `<p class="muted">${esc(t('ej.empty_text'))}</p>` : ''
+    // « Aucune entité pour l'instant. Ajoutez-en une » : au titulaire seul. Un
+    // membre ne reçoit que l'entité de ce logement (constat de sécurité de la
+    // review 3) — une liste vide ne dit RIEN du compte, et il ne peut rien
+    // ajouter (constat 1 de la re-review).
+    const vide = etat.titulaire === true && !actives.length && !creation ? `<p class="muted">${esc(t('ej.empty_text'))}</p>` : ''
     const ajouter = etat.titulaire === true && !mode
       ? `<button type="button" class="btn btn--secondary ej-ajouter" data-action="ajouter">${esc(t('ej.add'))}</button>` : ''
     racine.innerHTML = `
@@ -409,18 +429,18 @@ function monterFenetre ({ racine, api, bien, t, esc, langue = 'fr', surChangemen
   }
 
   function brancher () {
-    racine.querySelector('[data-action="ajouter"]')?.addEventListener('click', () => { mode = { edition: null }; peindre() })
+    racine.querySelector('[data-action="ajouter"]')?.addEventListener('click', () => changerMode({ edition: null }))
     racine.querySelectorAll('.ej-carte').forEach(c => {
       const id = c.dataset.entite || null
       const form = c.querySelector('form.ej-form')
       if (form && !form.classList.contains('ej-form--num')) {
         brancherFormulaire(form, {
-          surAnnuler: () => { mode = null; peindre() },
+          surAnnuler: () => changerMode(null),
           surEnvoi: (entite) => geste(id ? { action: 'modifier', id, entite } : { action: 'creer', entite }, form)
         })
       }
       if (form && form.classList.contains('ej-form--num')) {
-        form.querySelector('[data-action="annuler"]').addEventListener('click', () => { mode = null; peindre() })
+        form.querySelector('[data-action="annuler"]').addEventListener('click', () => changerMode(null))
         form.addEventListener('submit', (ev) => {
           ev.preventDefault()
           geste({ action: 'numerotation', id, numerotation: {
@@ -431,8 +451,8 @@ function monterFenetre ({ racine, api, bien, t, esc, langue = 'fr', surChangemen
       }
       c.querySelector('[data-action="choisir"]')?.addEventListener('click', () => geste({ action: 'rattacher', entite_id: id }))
       c.querySelector('[data-action="retirer"]')?.addEventListener('click', () => geste({ action: 'rattacher', entite_id: null }))
-      c.querySelector('[data-action="modifier"]')?.addEventListener('click', () => { mode = { edition: id }; peindre() })
-      c.querySelector('[data-action="numerotation"]')?.addEventListener('click', () => { mode = { numerotation: id }; peindre() })
+      c.querySelector('[data-action="modifier"]')?.addEventListener('click', () => changerMode({ edition: id }))
+      c.querySelector('[data-action="numerotation"]')?.addEventListener('click', () => changerMode({ numerotation: id }))
     })
   }
 

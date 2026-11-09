@@ -686,6 +686,11 @@ Contre-épreuve : le test de sécurité rougit contre l'ancien endpoint.
    « Modifier » restaient actifs pendant l'envoi ; une seconde saisie était
    ignorée sans message puis effacée à l'arrivée de la première réponse.
 
+Corrections (commit suivant la trace) : le texte « ajoutez-en une » au
+titulaire seul ; pendant un envoi, toute la fenêtre éteinte et tout
+changement de mode ignoré, rallumée sur un refus. Chacune tuée par une
+mutation.
+
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
 Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.

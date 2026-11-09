@@ -114,6 +114,13 @@ test('une entité ARCHIVÉE sur ce logement : la fenêtre dit qu\'il ne facture 
   assert.equal(r.querySelector('.ej-carte[data-entite="e3"]'), null)
 })
 
+test('LE TEST QUI COMPTE : un membre sur un logement sans entité lit « aucune », jamais « ajoutez-en une » (re-review, constat 1)', async () => {
+  const { r } = await monter({ titulaire: false, bien: { id: BIEN, nom: 'La bulle', entite_id: null }, entites: [], numerotations: {} })
+  assert.equal(r.querySelector('.ej-alerte').textContent, '[ej.aucune]')
+  assert.ok(!r.textContent.includes('[ej.empty_text]'), 'une liste vide ne dit rien du compte à un membre')
+  assert.equal(r.querySelectorAll('button').length, 0)
+})
+
 test('un compte sans entité : la fenêtre le dit, et propose d\'en créer une', async () => {
   const { r } = await monter({ titulaire: true, bien: { id: BIEN, nom: 'La bulle', entite_id: null }, entites: [], numerotations: {} })
   assert.ok(r.textContent.includes('[ej.empty_text]'))
@@ -260,6 +267,28 @@ test('LE TEST QUI COMPTE : un geste à la fois — deux « Enregistrer » rappro
   await attendre()
   assert.equal(appels.length, 1, 'un seul envoi')
   liberer(); await attendre(); await attendre()
+})
+
+test('LE TEST QUI COMPTE : pendant l\'envoi, TOUTE la fenêtre attend ; sur un refus, tout se rallume (re-review, constat 2)', async () => {
+  let refuser
+  const appels = []
+  const { r } = await monter(ETAT(), { ecrire: (corps) => { appels.push(corps); return new Promise((res, rej) => { refuser = () => rej(Object.assign(new Error('x'), { code: 'entree_invalide', champ: 'nom', status: 400 })) }) } })
+  r.querySelector('[data-action="ajouter"]').click()
+  const f = r.querySelector('.ej-carte[data-entite=""] form')
+  f.querySelector('#ej-nom').value = 'SCI Neuve'
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  const tous = [...r.querySelectorAll('button, input, select')]
+  assert.ok(tous.length > 5 && tous.every(el => el.disabled), 'tout est éteint')
+  // Même si un clic passait : « Annuler », « Modifier » ne changent rien.
+  f.querySelector('[data-action="annuler"]').dispatchEvent(new f.ownerDocument.defaultView.MouseEvent('click', { bubbles: true }))
+  r.querySelector('.ej-carte[data-entite="e1"] [data-action="modifier"]').dispatchEvent(new f.ownerDocument.defaultView.MouseEvent('click', { bubbles: true }))
+  assert.ok(r.querySelector('.ej-carte[data-entite=""] form'), 'le formulaire de création est toujours là')
+  assert.equal(r.querySelector('.ej-carte[data-entite="e1"] form'), null, 'pas de second formulaire')
+  refuser(); await attendre(); await attendre()
+  assert.equal(appels.length, 1)
+  assert.ok(r.querySelectorAll('button:not([disabled])').length > 3, 'tout se rallume')
+  assert.equal(f.querySelector('#ej-nom').disabled, false)
+  assert.equal(f.querySelector('#ej-nom').getAttribute('aria-invalid'), 'true', 'et le refus est dit sous son champ')
 })
 
 test('LE TEST QUI COMPTE : créée mais pas choisie — la fenêtre sort du formulaire, relit, et dit quoi faire', async () => {
