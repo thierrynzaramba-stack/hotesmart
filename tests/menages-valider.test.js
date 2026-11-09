@@ -221,13 +221,13 @@ function preparerRelance ({ menages = [], faits = [], erreurLecture = null,
                             erreurMarqueur = null,
                             // Le lien de la prestataire : son jeton, et ce que sa PAGE montre.
                             // `null` = aucun lien ; `[]` = tous les biens.
-                            jeton = 'tok-regina', perimetre = [] } = {}) {
+                            jeton = 'tok-regina', perimetre = [], relanceLeve = false } = {}) {
   const etat = { notifs: [], marqueurs: [], lectures: [], hote: [] }
   const client = {
     from (table) {
-      const a = { table, f: {}, in: {}, is: {}, not: {}, limite: null }
+      const a = { table, f: {}, in: {}, is: {}, not: {}, limite: null, colonnes: null }
       const chain = {
-        select () { return chain },
+        select (c) { a.colonnes = c; return chain },
         eq (c, v) { a.f[c] = v; return chain },
         in (c, v) { a.in[c] = v; return chain },
         is (c, v) { a.is[c] = v; return chain },
@@ -296,7 +296,10 @@ function preparerRelance ({ menages = [], faits = [], erreurLecture = null,
   const absPresta = require.resolve(path.join(__dirname, '..', 'lib/cleaning/notifier-prestataire.js'))
   const mp = new Module(absPresta)
   mp.exports = {
-    notifierValidationAttendue: async (o) => { etat.notifs.push(o); return { sms: true, email: false } }
+    notifierValidationAttendue: async (o) => {
+      if (relanceLeve) throw new Error('Brevo en panne')
+      etat.notifs.push(o); return { sms: true, email: false }
+    }
   }
   mp.loaded = true
   require.cache[absPresta] = mp
@@ -537,4 +540,17 @@ test('(2c-2) un ménage validé par sa porteuse ne prévient pas l\'hôte', asyn
   const etat = preparerRelance({ menages: [DOFFICE({ vu_le: '2026-10-13T18:00:00Z', vu_par: REGINA })] })
   await require('../lib/cleaning/relance-validation').relancerValidations({}, { maintenant: A_NEUF_HEURES })
   assert.deepEqual(etat.hote, [])
+})
+
+test('(2c-2) la lecture des ménages porte le marqueur de la veille — sans lui, l\'hôte serait prévenu deux fois', async () => {
+  const etat = preparerRelance({ menages: [DOFFICE()] })
+  await require('../lib/cleaning/relance-validation').relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  for (const l of etat.lectures) assert.match(String(l.colonnes), /\brelance_vu_j1_le\b/)
+})
+
+test('LE TEST QUI COMPTE (2c-2) : une relance qui lève n\'emporte pas l\'information de l\'hôte (le marqueur, posé, empêche de la rejouer)', async () => {
+  const etat = preparerRelance({ menages: [DOFFICE()], relanceLeve: true })
+  await require('../lib/cleaning/relance-validation').relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.strictEqual(etat.marqueurs.length, 1)
+  assert.deepStrictEqual(etat.hote.map(o => o.jour), [DEPART])
 })

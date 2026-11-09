@@ -5151,14 +5151,20 @@ contre `70f805d`, chacun sur l'assertion qui nomme son défaut, et restent verts
 Quatre événements partent par le point d'envoi unique
 (`lib/notifications/evenements-menages.js`, docs/kb/pwa.md §11.3), chacun selon
 les réglages de chaque personne qui a le domaine `menages` sur le bien :
-- **Ménage sans personne** (`sync-menages-entite.js`) — **une fois par ménage**,
-  mémorisée dans `message_sent_log` : le writer repasse toutes les cinq minutes,
-  et h est urgent par défaut. Par ménage, pas par bien (l'incident fondateur
-  reste un par bien).
+- **Ménage sans personne** (`sync-menages-entite.js`) — **une fois par (compte,
+  bien, jour)**, mémorisée dans `message_sent_log` : le writer repasse toutes les
+  cinq minutes, et h est urgent par défaut. Seulement dans la fenêtre de
+  proposition et pour un ménage qui existe ; vingt au plus par cycle ; une
+  expiration de proposition (nouvel épisode) prévient sans la mémoire. Par
+  ménage, pas par bien (l'incident fondateur reste un par bien).
 - **Ménage pas encore vu** (`relance-validation.js`) — à la relance de la veille,
   une fois ; le jour même seulement si la veille n'a pas eu lieu. Le prénom de la
   prestataire est lu avec son jeton.
-- **Ménage refusé** et **disponibilités modifiées** (`lib/alert-notify.js`) — au
-  même rythme que les listes d'alerte.
+- **Ménage refusé** (`lib/alert-notify.js`) — une fois par refus ; **et le retrait
+  d'un ménage déjà accepté** depuis son application (`api/menages-public.js`,
+  décision de Thierry du 9 novembre 2026).
+- **Disponibilités modifiées** (`lib/alert-notify.js`) — à chaque changement
+  envoyé, comme les listes ; **la première du jour sonne, les suivantes
+  remplacent sans sonner** (décision du 9 novembre 2026).
 Aucune de ces notifications ne lève : la passe du ménage continue.
 

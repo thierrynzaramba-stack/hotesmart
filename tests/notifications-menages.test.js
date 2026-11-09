@@ -50,6 +50,7 @@ function fakeSupabase (tables, { insertionsRefusees = [] } = {}) {
       const b = {
         select () { return b },
         eq (c, v) { f[c] = v; return b },
+        in (c, v) { f[c] = { dans: v.map(String) }; return b },
         limit () { return b },
         maybeSingle () { return b },
         insert (row) { mode = 'insert'; charge = row; return b },
@@ -65,7 +66,7 @@ function fakeSupabase (tables, { insertionsRefusees = [] } = {}) {
             lignes.push({ ...charge })
             return res({ data: null, error: null })
           }
-          const garde = (l) => Object.entries(f).every(([c, v]) => String(l[c]) === String(v))
+          const garde = (l) => Object.entries(f).every(([c, v]) => v && v.dans ? v.dans.includes(String(l[c])) : String(l[c]) === String(v))
           if (mode === 'delete') {
             tables[table] = lignes.filter(l => !garde(l))
             return res({ data: null, error: null })
@@ -106,13 +107,27 @@ test('LE TEST QUI COMPTE : « ménage sans personne » ne prévient qu\'UNE fois
   const o = c.appels[0]
   assert.deepStrictEqual([o.compte, o.code, o.sujet, o.chemin, o.rappel, o.bien, o.donnees, o.sejour], [
     COMPTE, 'menage_sans_personne', `menage:${UUID_BIEN}:2026-11-12`, '/menages', true,
-    { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', jour: '2026-11-12' }, { arrivee: '2026-11-12', depart: '2026-11-12' }
+    { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', jour: '2026-11-12', motif: null }, { arrivee: '2026-11-12', depart: '2026-11-12' }
   ])
   // Un AUTRE jour sur le même bien : un autre ménage, une autre notification.
   await ev.notifierMenageSansPersonne({ compte: COMPTE, propertyId: UUID_BIEN, jour: '2026-11-13', db, deps: c.deps })
   assert.strictEqual(c.appels.length, 2)
   // La mémoire est celle de CE compte : l'autre hôte n'en hérite pas.
   assert.ok(t.message_sent_log.every(l => l.user_id === COMPTE && l.template_id === ev.SENTINELLE_SANS_PERSONNE))
+})
+
+test('LE TEST QUI COMPTE : rien n\'est parti → la mémoire s\'oublie (le cycle suivant réessaie) ; parti en partie, ou personne n\'a de canal → elle reste', async () => {
+  const cas = [
+    ['tout a raté, et le notifier dit pourtant ok', { ok: true, destinataires: 1, sans_canal: 0, push: 0, emails: 0, sms: 0, en_attente: 0, personne_joignable: false, erreurs: ['push_echec', 'email_echec'] }, 0],
+    ['exception APRÈS un premier envoi', { ok: false, destinataires: 2, sans_canal: 0, push: 1, emails: 0, sms: 0, en_attente: 0, erreurs: ['boum'] }, 1],
+    ['en file pour la fin de la plage', { ok: true, destinataires: 1, sans_canal: 0, push: 0, emails: 0, sms: 0, en_attente: 1, erreurs: [] }, 1],
+    ['personne n\'a de canal pour h', { ok: true, destinataires: 1, sans_canal: 1, push: 0, emails: 0, sms: 0, en_attente: 0, erreurs: [] }, 1]
+  ]
+  for (const [nom, bilan, reste] of cas) {
+    const t = tablesDeBase()
+    await ev.notifierMenageSansPersonne({ compte: COMPTE, propertyId: 'p1', jour: '2026-11-12', db: fakeSupabase(t), deps: capte(bilan).deps })
+    assert.strictEqual(t.message_sent_log.length, reste, nom)
+  }
 })
 
 test('un envoi qui n\'a joint personne s\'oublie (le cycle suivant réessaie) ; une mémoire illisible ne prévient pas', async () => {
@@ -133,14 +148,57 @@ test('un envoi qui n\'a joint personne s\'oublie (le cycle suivant réessaie) ; 
 
 // ─── i, l, m ────────────────────────────────────────────────────────────────
 
+test('la clé et le sujet tiennent à ce que l\'émetteur passe, pas à la relecture du bien : une lecture ratée ne fait pas un second h', async () => {
+  const t = tablesDeBase()
+  const c = capte()
+  const enPanne = { from (table) { if (table === 'properties') return { select: () => ({ eq: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: null, error: { message: 'panne' } }) }) }) }) }; return fakeSupabase(t).from(table) } }
+  await ev.notifierMenageSansPersonne({ compte: COMPTE, propertyId: 'p1', jour: '2026-11-12', db: enPanne, deps: c.deps })
+  await ev.notifierMenageSansPersonne({ compte: COMPTE, propertyId: 'p1', jour: '2026-11-12', db: fakeSupabase(t), deps: c.deps })
+  assert.strictEqual(c.appels.length, 1)
+  assert.strictEqual(c.appels[0].sujet, 'menage:p1:2026-11-12')
+})
+
+test('LE TEST QUI COMPTE : le lot d\'un cycle — une lecture des mémoires, les déjà prévenus sautés, vingt au plus, le reste au cycle suivant', async () => {
+  const t = tablesDeBase()
+  t.message_sent_log.push({ user_id: COMPTE, booking_id: 'notif:menage:p1:2026-11-12', template_id: ev.SENTINELLE_SANS_PERSONNE })
+  const insertions = []
+  const db = fakeSupabase(t)
+  const espion = { from (table) { const q = db.from(table); const ins = q.insert; q.insert = (r) => { insertions.push(r.booking_id); return ins(r) }; return q } }
+  const c = capte()
+  const liste = [{ compte: COMPTE, propertyId: 'p1', jour: '2026-11-12' }, { compte: COMPTE, propertyId: 'p1', jour: '2026-11-12' }]
+  for (let i = 0; i < 25; i++) liste.push({ compte: COMPTE, propertyId: 'p1', jour: `2026-12-${String(i + 1).padStart(2, '0')}`, motif: 'jours' })
+  const bilan = await ev.notifierMenagesSansPersonne({ liste, db: espion, deps: c.deps })
+  assert.deepStrictEqual(bilan, { envoyes: 20, deja: 1, reportes: 5, erreurs: 0 })
+  assert.ok(!insertions.includes('notif:menage:p1:2026-11-12'), 'le déjà prévenu ne coûte même pas une insertion')
+  assert.strictEqual(c.appels[0].donnees.motif, 'jours')
+  // Le cycle suivant : les vingt sont mémorisés, les cinq partent.
+  const c2 = capte()
+  const b2 = await ev.notifierMenagesSansPersonne({ liste, db: fakeSupabase(t), deps: c2.deps })
+  assert.deepStrictEqual(b2, { envoyes: 5, deja: 21, reportes: 0, erreurs: 0 })
+})
+
+test('« sans jours réglés » se dit comme un réglage à faire, pas comme un manque de monde', () => {
+  assert.strictEqual(textes.rediger('menage_sans_personne', 'fr', { bien: 'B', jour: '2026-11-12', motif: 'jours' }).corps,
+    'Ménage du 12/11 : aucune de vos prestataires n’a de jours réglés pour ce logement. Réglez leurs jours, ou confiez-le à quelqu’un.')
+})
+
+test('une expiration (uneFois: false) prévient sans mémoire : un nouvel épisode n\'est pas tu par le précédent', async () => {
+  const t = tablesDeBase()
+  t.message_sent_log.push({ user_id: COMPTE, booking_id: 'notif:menage:p1:2026-11-12', template_id: ev.SENTINELLE_SANS_PERSONNE })
+  const c = capte()
+  await ev.notifierMenageSansPersonne({ compte: COMPTE, propertyId: 'p1', jour: '2026-11-12', uneFois: false, db: fakeSupabase(t), deps: c.deps })
+  assert.strictEqual(c.appels.length, 1)
+  assert.strictEqual(t.message_sent_log.length, 1)
+})
+
 test('pas vu et refusé : le même sujet que « sans personne » — une notification par ménage', async () => {
   const c = capte()
   const db = fakeSupabase(tablesDeBase())
   await ev.notifierMenagePasVu({ compte: COMPTE, propertyId: 'p1', jour: '2026-11-12', prestataire: 'Régina', db, deps: c.deps })
   await ev.notifierMenageRefuse({ compte: COMPTE, propertyId: 'p1', jour: '2026-11-12T00:00:00Z', prestataire: 'Régina', db, deps: c.deps })
   assert.deepStrictEqual(c.appels.map(o => [o.code, o.sujet, o.rappel, o.bien, o.donnees]), [
-    ['menage_pas_vu', `menage:${UUID_BIEN}:2026-11-12`, true, { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', jour: '2026-11-12', prestataire: 'Régina' }],
-    ['menage_refuse', `menage:${UUID_BIEN}:2026-11-12`, true, { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', jour: '2026-11-12', prestataire: 'Régina' }]
+    ['menage_pas_vu', 'menage:p1:2026-11-12', true, { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', jour: '2026-11-12', prestataire: 'Régina' }],
+    ['menage_refuse', 'menage:p1:2026-11-12', true, { id: UUID_BIEN, ref: 'p1' }, { bien: 'La bulle', jour: '2026-11-12', prestataire: 'Régina' }]
   ])
 })
 
@@ -204,4 +262,23 @@ test('LE TEST QUI COMPTE : un ménage refusé prévient l\'hôte et son équipe 
   const b = preparerRefus({ dejaRefuse: true })
   await b.alertMenageRefuse({ userId: COMPTE, propertyId: UUID_BIEN, bookingId: 'b1', departureDate: '2026-11-12', prenom: 'Régina' })
   assert.deepStrictEqual(b.hote, [])
+})
+
+
+test('LE TEST QUI COMPTE (décision du 9 novembre) : disponibilités — la première du jour sonne, les suivantes remplacent sans sonner, le lendemain sonne de nouveau', async () => {
+  const t = tablesDeBase()
+  const c = capte()
+  const matin = Date.parse('2026-11-09T08:00:00Z')
+  for (const quand of [matin, matin + 60e3, matin + 3600e3, Date.parse('2026-11-09T22:30:00Z') /* 23 h 30 à Paris */, Date.parse('2026-11-09T23:30:00Z') /* 0 h 30 le 10 */]) {
+    await ev.notifierDisponibilites({ compte: COMPTE, propertyId: 'p1', providerId: 'lena', prestataire: 'Lena', maintenant: quand, db: fakeSupabase(t), deps: c.deps })
+  }
+  assert.deepStrictEqual(c.appels.map(o => o.rappel), [true, false, false, false, true])
+  // Une autre prestataire, le même jour : la sienne sonne.
+  await ev.notifierDisponibilites({ compte: COMPTE, propertyId: 'p1', providerId: 'lola', maintenant: matin, db: fakeSupabase(t), deps: c.deps })
+  assert.strictEqual(c.appels[5].rappel, true)
+  // La mémoire illisible : on sonne plutôt que de manquer.
+  const c2 = capte()
+  await ev.notifierDisponibilites({ compte: COMPTE, propertyId: 'p1', providerId: 'lena', maintenant: matin,
+    db: fakeSupabase(tablesDeBase(), { insertionsRefusees: ['message_sent_log'] }), deps: c2.deps })
+  assert.strictEqual(c2.appels[0].rappel, true)
 })
