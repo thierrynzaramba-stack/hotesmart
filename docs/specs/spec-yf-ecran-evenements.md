@@ -305,8 +305,9 @@ l'hôte peut changer de logement.
 dans `preparerContexte` (réservations de la grille, calendrier, lignes de
 position) fait perdre les événements avec les nuits — l'écran rend
 `indisponible: 'calcul_impossible'` et garde le sélecteur. L'ancien
-`GET /api/yield-evenements` isolait la grille et les positions. À porter au
-registre des dettes (numéro à demander au chef de file).
+`GET /api/yield-evenements` isolait la grille et les positions. **Dette 138**
+au registre (`docs/kb/dettes-v1.md`, numéro réservé par le chef de file le
+9 novembre 2026) : à solder au plus tard avant la redirection de 4d.
 
 **Review du 9 novembre 2026** (`db8b7715e967b7f5de3da8e422c3df0950f62f64..e05b7844c549656084150087358914f3bc697d04`,
 arbre `/home/claude/hotesmart`) : **aucun constat de sécurité**. Sept constats,
