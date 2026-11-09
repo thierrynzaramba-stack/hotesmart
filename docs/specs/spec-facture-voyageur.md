@@ -651,6 +651,41 @@ c'est à lui de dire si elle s'applique à cette review annoncée « dernière �
 5. les nombres de requêtes de la spec sont corrigés.
 Chaque correction tuée par une mutation.
 
+**Re-review des correctifs, par exception de Thierry** (9 nov. 2026, après
+le constat de sécurité de la review 3 ; la dernière : ce qu'elle trouve se
+corrige sans nouvelle review) — TRACE :
+- arbre lu : `/home/claude/hotesmart` ; branche : `facture-voyageur` ;
+- HEAD déclaré lu : `b19ce59e7bee85a6a655c908b0411478607cd86e` ;
+- plage : `0aaa97b81606ca004a36f8063b8534964112d87b..b19ce59e7bee85a6a655c908b0411478607cd86e`
+  (12 fichiers) ;
+- fichiers cités, confrontés à `git diff --name-only` de la plage : dans le
+  diff — `api/entites-juridiques.js`, `shared/entites-juridiques-vue.js`,
+  `shared/logement-facturation.js`, `pages/logement.html`,
+  `shared/i18n/{fr,en,es}.json`, `tests/entites-juridiques.test.js`,
+  `tests/entites-juridiques-dom.test.js`, `tests/logement-facturation.test.js`,
+  `docs/specs/spec-facture-voyageur.md`, `docs/kb/entites-juridiques.md` ;
+  hors diff, preuve seulement, aucun constat — `lib/permissions.js`,
+  `lib/require-permission.js`, `lib/entites-juridiques.js`,
+  `shared/api-client.js`, et deux tests qui rougissent sur une copie sans
+  `.git` (`tests/v2-marche-aucune-ecriture-calendrier.test.js`,
+  `tests/reponse-partenaire-execution.test.js`, verts dans l'arbre).
+
+Mesuré par sondes sur le vrai handler, quatre membres (périmètre `all` ou
+liste d'un logement ; `facturation` en lecture ou en écriture) × deux
+logements : un membre ne voit QUE l'entité du logement demandé (jamais celle
+d'un autre logement, ni une entité rattachée à rien) ; hors de sa liste,
+403. Garde inchangée : 100 POST de membres et du compte voisin → 403 ;
+entité d'un autre compte → 404 ; titulaire : liste complète et gestes.
+Contre-épreuve : le test de sécurité rougit contre l'ancien endpoint.
+
+**0 sécurité, 2 constats**, corrigés sans nouvelle review :
+1. Un membre, sur un logement sans entité (ou dont l'entité est archivée),
+   lisait « Aucune entité pour l'instant. Ajoutez celle qui émet vos
+   factures… » — faux quand le compte en a, et sans bouton.
+2. Le verrou ne couvrait que l'envoi : « Annuler », « Nouvelle entité » et
+   « Modifier » restaient actifs pendant l'envoi ; une seconde saisie était
+   ignorée sans message puis effacée à l'arrivée de la première réponse.
+
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
 Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.
