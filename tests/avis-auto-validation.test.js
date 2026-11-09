@@ -178,7 +178,11 @@ function outils ({ redaction = { ok: true, public_text: 'Texte' }, code = 200 } 
     publier: async (e) => { appels.publier.push(e); return { code, body: code === 200 ? { ok: true, simulation: true } : { error: 'refus' } } },
   }
 }
-const lancer = (sb, o, extra = {}) => executerAutoValidations(sb, { maintenant: MAINTENANT, outils: o, deps: { envoyer: async () => {} }, ...extra })
+// PWA lot 2c-2 : la notification de l'hôte passe par `deps.notifierEvaluation`
+// — capturée ici, jamais le vrai point d'envoi.
+const NOTIFS = []
+const lancer = (sb, o, extra = {}) => executerAutoValidations(sb, { maintenant: MAINTENANT, outils: o,
+  deps: { envoyer: async () => {}, notifierEvaluation: async (n) => { NOTIFS.push(n); return { ok: true } } }, ...extra })
 
 test('LE TEST QUI COMPTE : a l’echeance, les questions de l’hote prennent le meilleur niveau, le texte est garde, l’evaluation part', async () => {
   const { etat, sb } = base({ evaluations: [ECHUE()] })
@@ -393,6 +397,27 @@ test('M2 : le rappel est MARQUE, et la requete des rappels ne relit que les non 
   assert.strictEqual(etat.evaluations[0].auto_rappel_le, iso(MAINTENANT))
   const q = etat.requetes.find(x => x.table === 'guest_evaluations' && x.f.some(([op, c]) => op === 'gt'))
   assert.ok(q.f.some(([op, c, v]) => op === 'is' && c === 'auto_rappel_le' && v === null))
+})
+
+test('PWA 2c-2 : le rappel et l’échec de la publication automatique notifient l’hôte — sans la raison, une fois chacun', async () => {
+  NOTIFS.length = 0
+  const proche = base({ evaluations: [ECHUE({ auto_publier_le: iso(MAINTENANT + 3 * H) })] })
+  await lancer(proche.sb, outils())
+  await lancer(proche.sb, outils())
+  const echec = base({ evaluations: [ECHUE()] })
+  await lancer(echec.sb, outils({ code: 500 }))
+  const r = NOTIFS.map(n => ({ uid: n.bookingUid, auto: n.auto, publication: n.publication || null, echeance: n.echeance || null }))
+  assert.deepStrictEqual(r, [
+    { uid: 'BK-1', auto: 'rappel', publication: iso(MAINTENANT + 3 * H), echeance: null },
+    { uid: 'BK-1', auto: 'echec', publication: null, echeance: iso(MAINTENANT + 5 * 24 * H) }
+  ])
+  assert.ok(NOTIFS.every(n => n.maintenant === MAINTENANT && n.compte === 'u1' && n.propertyRef === 'ref-1'))
+  // La raison (parfois un message d'erreur interne) reste dans la tâche : la
+  // notification ne porte que ces clés.
+  assert.deepStrictEqual(NOTIFS.map(n => Object.keys(n).sort()), [
+    ['auto', 'bookingUid', 'compte', 'db', 'maintenant', 'propertyRef', 'publication'],
+    ['auto', 'bookingUid', 'compte', 'db', 'echeance', 'maintenant', 'propertyRef']
+  ])
 })
 
 test('M2 : une echeance passee avant la publication se DIT a l’hote', async () => {

@@ -231,6 +231,8 @@ test('(2c-2) les relances J-5 et J-1 préviennent aussi, et la J-1 se dit « der
   const vus = []
   await relancerEvaluations(sb, { maintenant: MAINTENANT, deps: { envoyer: async () => {}, notifierEvaluation: async (o) => { vus.push(o); return { ok: true } } } })
   assert.deepStrictEqual(vus.map(o => [o.bookingUid, o.rempli, o.derniere]).sort(), [['BK-1', false, true], ['BK-5', false, false]])
+  // L'horloge du cycle : « à publier avant » se juge contre ELLE (une échéance passée ne se dit pas).
+  assert.ok(vus.every(o => o.maintenant === MAINTENANT))
 })
 
 test('(2c-2) une notification qui lève ne défait pas la tâche', async () => {

@@ -1119,9 +1119,14 @@ Deux événements partent par le point d'envoi unique
 réglages de chaque personne qui a le domaine `avis` sur le bien :
 - **Nouvel avis** — depuis `upsertAvis`, le writer unique : seulement un avis que
   l'écriture ajoute (lu avant), reçu depuis moins de trois jours, dix au plus par
-  écriture ; une lecture ratée ne prévient personne. Le prénom, la note sur 5 et
-  le canal, jamais le texte.
-- **Évaluation du voyageur à faire** — depuis `noterEtEnvoyer`, une fois par
-  palier comme la tâche : la prestataire a rempli, puis J-5, puis J-1. Le lien
-  ouvre la fenêtre d'évaluation (`/avis?evaluer=`).
+  compte et par écriture ; une lecture ratée ne prévient personne. Le bien, la
+  note sur 5 (la conversion de l'écran, `lib/avis/echelle.js`) et le canal —
+  **jamais le nom du voyageur** (le domaine `avis` se délègue sans
+  `reservations`), jamais le texte.
+- **Avis masqué, puis révélé** — un avis Airbnb masqué s'annonce sans note ;
+  quand il devient visible, une seconde notification donne la vraie note.
+- **Évaluation du voyageur** — depuis `noterEtEnvoyer`, une fois par palier comme
+  la tâche : la prestataire a rempli, J-5, J-1, puis le rappel et l'échec de la
+  publication automatique. Formulation neutre (un membre en lecture seule la
+  reçoit aussi). Le lien ouvre la fenêtre d'évaluation (`/avis?evaluer=`).
 

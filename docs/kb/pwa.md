@@ -665,28 +665,63 @@ aucun ne lève.
 
 | Événement | Émetteur | Sujet, écran |
 |---|---|---|
-| n Nouvel avis | `lib/cron-channel-reviews.js` `upsertAvis`, le writer unique d'`ota_reviews` (poll Channex, webhook, import Beds24) | `avis:<id>`, `/avis` |
-| o Évaluation du voyageur à faire | `lib/avis/notifications.js` `noterEtEnvoyer` : la prestataire a rempli sa part, puis les relances J-5 et J-1 | `eval:<séjour>`, `/avis?evaluer=<séjour>` |
+| n Nouvel avis, puis sa révélation | `lib/cron-channel-reviews.js` `upsertAvis`, le writer unique d'`ota_reviews` (poll Channex, webhook, import Beds24) | `avis:<provider>:<id>`, `/avis` (masqué et séjour connu : `/avis?evaluer=<séjour>`) |
+| o Évaluation du voyageur | `lib/avis/notifications.js` `noterEtEnvoyer` : la prestataire a rempli sa part, les relances J-5 et J-1, et la publication automatique (`lib/avis/auto-validation.js` : rappel, échec) | `eval:<séjour>`, `/avis?evaluer=<séjour>` |
 
 **Les règles, et pourquoi :**
-1. **n ne prévient que d'un avis que l'écriture AJOUTE** : le writer lit, avant
-   d'écrire, les avis du lot déjà en base (par compte et par provider), et ne
-   prévient que de ceux qu'il a effectivement écrits (un groupe refusé ne
-   s'annonce pas). **Une lecture ratée ne prévient personne** : sans savoir ce
-   qui est nouveau, le premier poll d'un compte annoncerait tout son historique.
-2. **Un avis ancien n'est pas un nouvel avis** : reçu depuis plus de trois jours
-   (premier poll, import Beds24, bien qu'on connecte) — pas de notification.
-   Dix au plus par écriture.
-3. **Le prénom, la note sur 5 et le canal, jamais le texte de l'avis.** Le cœur
-   stocke la note sur 10 ; l'écran et la notification la disent sur 5.
-4. **o une fois par palier**, comme la tâche (son marqueur) : « la prestataire a
-   rempli », puis la relance J-5, puis la J-1 (« dernier jour »). Un sujet par
-   séjour : la relance remplace l'annonce, et sonne. L'échéance se dit en jour
-   de Paris.
+1. **⚠ NI LE NOM DU VOYAGEUR, NI LE TEXTE DE L'AVIS (constat S1 de la review,
+   sécurité).** Le domaine `avis` se délègue sans `reservations` : un membre
+   qui ne voit que les avis ne voit pas qui a séjourné, et la notification n'en
+   dit pas plus que l'écran. Un avis se dit par son bien, sa note et son canal
+   — « Nouvel avis — La bulle : 4,7/5 · Airbnb. » La spec (Q6) annonçait le
+   prénom : le fond l'emporte, signalé à Thierry.
+2. **La note est celle de l'écran** : `noteSur5Des` de `lib/avis/echelle.js`
+   (échelle par canal, un seul arrondi au dixième, demi vers le haut). Une note
+   à 0, d'un canal hors table ou d'un avis masqué ne se dit pas : jamais une
+   note devinée.
+3. **Un avis masqué** (Airbnb, `is_hidden`, note à 0 tant que l'hôte n'a pas
+   évalué le voyageur) s'annonce SANS note — « Avis déposé sur Airbnb, masqué
+   jusqu'à votre évaluation du voyageur. » — avec un lien vers l'évaluation du
+   séjour quand il est connu. **Sa révélation** (masqué en base, visible dans
+   l'écriture) prévient une fois, avec la vraie note, et remplace l'annonce
+   (même sujet). Décision de Thierry du 9 novembre 2026.
+4. **n ne prévient que d'un avis que l'écriture AJOUTE ou DÉMASQUE** : le writer
+   lit, avant d'écrire, l'état des avis déjà en base (par compte et par
+   provider, avec `is_hidden`), et ne prévient que de ceux qu'il a effectivement
+   écrits (un groupe refusé ne s'annonce pas). **Une lecture ratée ne prévient
+   personne** : sans savoir ce qui est nouveau, le premier poll d'un compte
+   annoncerait tout son historique. La lecture ne porte que sur les avis reçus
+   depuis moins de trente jours, par paquets de cent.
+5. **Un avis ancien n'est pas un nouvel avis** : reçu depuis plus de trois jours
+   (premier poll, import Beds24, bien qu'on connecte) — pas de notification. Une
+   révélation vaut jusqu'à trente jours après la réception. La réception de
+   Channex arrive sans fuseau : elle se lit en UTC (`instantUTC`).
+6. **Une mémoire par avis et par événement**, posée AVANT l'envoi :
+   `message_sent_log`, sentinelles `…00a3` (`notif:avis:<provider>:<id>`) et
+   `…00a4` (`notif:avis-revele:…`). Le webhook et le poll écrivent le même avis
+   à quelques secondes d'écart : lire « absent » des deux côtés ne suffit pas,
+   l'insertion tranche. Un envoi dont rien n'est parti retire la mémoire, et le
+   poll suivant réessaie ; une mémoire illisible ne prévient pas.
+7. **Dix au plus par compte et par écriture**, les plus récents d'abord : un
+   compte bavard ne fait pas taire les autres.
+8. **o une fois par palier**, comme la tâche (son marqueur) : « la prestataire a
+   rempli », la relance J-5, la J-1 (« dernier jour »), puis le rappel de la
+   publication automatique (jour et heure de Paris) et son échec. Un sujet par
+   séjour : chaque message remplace le précédent, et sonne. L'échéance se dit
+   en jour de Paris, et seulement si elle est à venir. **Formulation neutre** :
+   un membre en lecture seule la reçoit aussi et ne peut pas publier — le texte
+   dit l'état, pas un ordre. La raison d'un échec (parfois un message d'erreur
+   interne) reste dans la tâche.
 
 **Limites connues :**
 - **o** reste aussi envoyé aux listes d'`agent_alert_config` jusqu'au 2c-3
   (double e-mail possible, comme pour j, l et m).
 - **Une saisie manuelle d'avis** (l'hôte lui-même) ne passe pas par le writer :
   elle ne prévient pas, et c'est voulu.
+- **Le coût s'ajoute à l'écriture des avis** : une lecture par paquet de cent
+  avis récents, puis, par avis annoncé, une insertion de mémoire, la
+  résolution du bien et l'envoi — au plus dix par compte et par écriture. Le
+  reliquat d'un plafond ne part jamais (sa mémoire n'est pas posée, mais l'avis
+  est alors en base : il n'est plus nouveau). Le webhook attend ces envois avant
+  de répondre.
 
