@@ -45,7 +45,7 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
                      // Les menages dont un TOUR est en cours (`elargirToursEnCours`),
                      // et le journal des propositions (qui les a posees).
                      toursEnCours = [], offresJournal = [] } = {}) {
-  const etat = { inseres: [], majs: [], journal: [], incidents: [], requetes: [],
+  const etat = { hote: [], inseres: [], majs: [], journal: [], incidents: [], requetes: [],
                  notifs: [] }
 
   const client = {
@@ -215,6 +215,13 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
   for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
   require.cache[absNotify] = mn
   require.cache[absPresta] = mp
+  // PWA lot 2c-2 : ce que l'HÔTE apprend (« Ménage sans personne »), observé.
+  // La mémoire « une fois par ménage » a son propre banc (tests/notifications-menages.test.js).
+  const absHote = require.resolve(path.join(__dirname, '..', 'lib/notifications/evenements-menages.js'))
+  const mh = new Module(absHote)
+  mh.exports = { notifierMenageSansPersonne: async (o) => { etat.hote.push(o); return { ok: true } } }
+  mh.loaded = true
+  require.cache[absHote] = mh
   return etat
 }
 
@@ -891,6 +898,7 @@ test('une proposition expirée sur un ménage porté N\'ALERTE PAS', async () =>
   const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
   await expirerPropositions()
   assert.strictEqual(etat.incidents.length, 0)
+  assert.deepStrictEqual(etat.hote, [], 'porté : l\'hôte n\'est pas dérangé')
 })
 
 test('expirée SANS porteur : orphaned, et l\'hôte est alerté', async () => {
@@ -905,6 +913,8 @@ test('expirée SANS porteur : orphaned, et l\'hôte est alerté', async () => {
   assert.strictEqual(bilan.orphelins, 1)
   assert.strictEqual(etat.majs[0].row.status, 'orphaned')
   assert.strictEqual(etat.incidents.length, 1)
+  // PWA lot 2c-2 : l'hôte et son équipe, par le point d'envoi.
+  assert.deepStrictEqual(etat.hote.map(o => [o.compte, o.propertyId, o.jour]), [[U, '209413', jour(8)]])
 })
 
 test('chaque expiration laisse une trace au journal', async () => {
@@ -1078,6 +1088,8 @@ test('TROU DE GARDE un jour où un ménage existe : l\'hôte est alerté', async
   assert.strictEqual(etat.inseres[0].provider_id, null)
   assert.strictEqual(bilan.alertes, 1)
   assert.match(etat.incidents[0].detail.message, /personne n'est de garde/)
+  // PWA lot 2c-2 : l'hôte et son équipe, par le point d'envoi.
+  assert.deepStrictEqual(etat.hote.map(o => [o.compte, o.propertyId, o.jour]), [[U, String(etat.inseres[0].property_id), '2026-09-08']])
 })
 
 test('un départ lointain SANS proposition due n\'alerte PAS', async () => {
@@ -1416,6 +1428,7 @@ test('RANG : un tour EXPIRÉ dont un rang reste à solliciter N\'ALERTE PAS l\'h
   assert.deepStrictEqual(etat.journal.filter(l => l.event === 'expired').map(l => l.from_provider_id).sort(),
     [LENA, TIPHAINE].sort(), 'une ligne `expired` par personne du tour : aucune ne sera resollicitée')
   assert.strictEqual(etat.incidents.length, 0)
+  assert.deepStrictEqual(etat.hote, [], '(2c-2) ni l\'hôte ni son équipe : quelqu\'un va être sollicité')
 })
 
 test('RANG : le DERNIER rang expire sans réponse — là, l\'hôte est alerté', async () => {
@@ -1427,6 +1440,7 @@ test('RANG : le DERNIER rang expire sans réponse — là, l\'hôte est alerté'
   await expirerPropositions(null, { maintenant: T0 })
   assert.strictEqual(etat.incidents.length, 1)
   assert.strictEqual(etat.incidents[0].type, 'menage_non_assigne')
+  assert.deepStrictEqual(etat.hote.map(o => o.jour), ['2026-09-05'], '(2c-2) et son équipe, par le point d\'envoi')
 })
 
 test('BASCULE : une proposition posée par l\'ancien code entre dans la liste, échéance intacte', async () => {
@@ -1659,4 +1673,20 @@ test('ÉLARGIR [garde : panne du journal] une PANNE du journal n\'élargit rien'
   const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
   await poserPropositionsDues(null, { maintenant: T0 })
   assert.strictEqual(etat.majs.length, 0)
+})
+
+
+test('(2c-2) DEUX départs sans personne sur le même bien : UN incident fondateur, mais DEUX notifications — deux logements à confier', async () => {
+  const etat = preparer({
+    snaps: [SNAP({ departure: '2026-09-08' }), SNAP({ booking_id: 'B2', departure: '2026-09-09' })],
+    liaisons: [BAGNERES[0]],
+    exceptions: [
+      { user_id: U, provider_id: REGINA, date: '2026-09-08', available: false },
+      { user_id: U, provider_id: REGINA, date: '2026-09-09', available: false }
+    ]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages(null, { maintenant: Date.parse('2026-09-02T08:00:00Z') })
+  assert.strictEqual(etat.incidents.length, 1)
+  assert.deepStrictEqual(etat.hote.map(o => o.jour).sort(), ['2026-09-08', '2026-09-09'])
 })

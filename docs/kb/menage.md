@@ -5145,3 +5145,20 @@ ils lisaient `pages/menages.html` comme du TEXTE, et ont vu que les cases
 exécute le vrai script de la page, et juge des GESTES. Les sept tests rougissent
 contre `70f805d`, chacun sur l'assertion qui nomme son défaut, et restent verts
 à J+1, J+3, J+15, J+45, J+60, J+75, J+120, J+200 et J+400.
+
+## Notifications de l'hôte et de son équipe (PWA lot 2c-2, 9 novembre 2026)
+
+Quatre événements partent par le point d'envoi unique
+(`lib/notifications/evenements-menages.js`, docs/kb/pwa.md §11.3), chacun selon
+les réglages de chaque personne qui a le domaine `menages` sur le bien :
+- **Ménage sans personne** (`sync-menages-entite.js`) — **une fois par ménage**,
+  mémorisée dans `message_sent_log` : le writer repasse toutes les cinq minutes,
+  et h est urgent par défaut. Par ménage, pas par bien (l'incident fondateur
+  reste un par bien).
+- **Ménage pas encore vu** (`relance-validation.js`) — à la relance de la veille,
+  une fois ; le jour même seulement si la veille n'a pas eu lieu. Le prénom de la
+  prestataire est lu avec son jeton.
+- **Ménage refusé** et **disponibilités modifiées** (`lib/alert-notify.js`) — au
+  même rythme que les listes d'alerte.
+Aucune de ces notifications ne lève : la passe du ménage continue.
+

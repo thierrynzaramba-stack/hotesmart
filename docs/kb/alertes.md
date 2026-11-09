@@ -35,6 +35,11 @@ qui ont le domaine `messages` sur ce bien, selon leurs réglages ; jamais le tex
 du message ni le résumé de l'IA, seulement le bien et le prénom (docs/kb/pwa.md
 §11.2). Les listes ci-dessous restent servies jusqu'au 2c-3.
 
+**Le ménage refusé et les disponibilités modifiées partent AUSSI par le point
+d'envoi unique** (`lib/notifications/evenements-menages.js`, docs/kb/pwa.md
+§11.3), au même rythme que les listes : une fois par refus, à chaque changement
+envoyé (rien pour un jour de glisser).
+
 **Le code d'accès non résolu part AUSSI par le point
 d'envoi unique** (`lib/notifications/notifier.js`, docs/kb/pwa.md §11) : le
 titulaire et les membres qui ont le domaine `reservations` sur ce bien, chacun

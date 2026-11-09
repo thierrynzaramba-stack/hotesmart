@@ -222,7 +222,7 @@ function preparerRelance ({ menages = [], faits = [], erreurLecture = null,
                             // Le lien de la prestataire : son jeton, et ce que sa PAGE montre.
                             // `null` = aucun lien ; `[]` = tous les biens.
                             jeton = 'tok-regina', perimetre = [] } = {}) {
-  const etat = { notifs: [], marqueurs: [], lectures: [] }
+  const etat = { notifs: [], marqueurs: [], lectures: [], hote: [] }
   const client = {
     from (table) {
       const a = { table, f: {}, in: {}, is: {}, not: {}, limite: null }
@@ -276,7 +276,7 @@ function preparerRelance ({ menages = [], faits = [], erreurLecture = null,
           }
           if (table === 'profiles') {
             return Promise.resolve({
-              data: (a.in.id || []).map(id => ({ id, pwa_token: jeton })), error: null }).then(ok)
+              data: (a.in.id || []).map(id => ({ id, pwa_token: jeton, first_name: 'Régina' })), error: null }).then(ok)
           }
           if (table === 'public_tokens') {
             const jetons = a.in.token || []
@@ -300,6 +300,12 @@ function preparerRelance ({ menages = [], faits = [], erreurLecture = null,
   }
   mp.loaded = true
   require.cache[absPresta] = mp
+  // PWA lot 2c-2 : ce que l'HÔTE apprend (« Ménage pas encore vu »), observé.
+  const absHote = require.resolve(path.join(__dirname, '..', 'lib/notifications/evenements-menages.js'))
+  const mh = new Module(absHote)
+  mh.exports = { notifierMenagePasVu: async (o) => { etat.hote.push(o); return { ok: true } } }
+  mh.loaded = true
+  require.cache[absHote] = mh
   try { delete require.cache[require.resolve('../lib/cleaning/relance-validation')] } catch {}
   return etat
 }
@@ -499,4 +505,36 @@ test('relance : UN MARQUEUR QUI NE SE POSE PAS ANNULE L\'ENVOI', async () => {
   assert.equal(etat.notifs.length, 0, 'AUCUN SMS : on n\'envoie pas ce qu\'on ne sait pas marquer')
   assert.equal(bilan.erreurs, 1)
   assert.equal(bilan.relances, 0)
+})
+
+
+// ─── PWA lot 2c-2 : « Ménage pas encore vu » à l'hôte (docs/kb/pwa.md §11.3) ──
+
+test('LE TEST QUI COMPTE (2c-2) : à la relance de la veille, l\'hôte apprend que le ménage n\'est pas vu — une fois', async () => {
+  const etat = preparerRelance({ menages: [DOFFICE()] })
+  const { relancerValidations } = require('../lib/cleaning/relance-validation')
+  await relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.deepEqual(etat.hote.map(o => [o.compte, o.propertyId, o.jour, o.prestataire]), [[U, BIEN, DEPART, 'Régina']])
+  // Le marqueur posé, le cycle suivant ne relance plus — ni elle, ni l'hôte.
+  const etat2 = preparerRelance({ menages: [DOFFICE({ relance_vu_j1_le: '2026-10-14T07:05:00Z' })] })
+  await require('../lib/cleaning/relance-validation').relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.deepEqual(etat2.hote, [])
+})
+
+test('(2c-2) le jour même, l\'hôte n\'est prévenu que si la veille n\'a pas eu lieu', async () => {
+  // Relancée la veille : le matin, elle reçoit son second rappel, l'hôte rien de plus.
+  const deja = preparerRelance({ menages: [DOFFICE({ departure_date: '2026-10-14', relance_vu_j1_le: '2026-10-13T07:05:00Z' })] })
+  await require('../lib/cleaning/relance-validation').relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.equal(deja.notifs.length, 1)
+  assert.deepEqual(deja.hote, [])
+  // Attribuée le jour même (pas de veille) : l'hôte l'apprend maintenant.
+  const tard = preparerRelance({ menages: [DOFFICE({ departure_date: '2026-10-14' })] })
+  await require('../lib/cleaning/relance-validation').relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.deepEqual(tard.hote.map(o => o.jour), ['2026-10-14'])
+})
+
+test('(2c-2) un ménage validé par sa porteuse ne prévient pas l\'hôte', async () => {
+  const etat = preparerRelance({ menages: [DOFFICE({ vu_le: '2026-10-13T18:00:00Z', vu_par: REGINA })] })
+  await require('../lib/cleaning/relance-validation').relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.deepEqual(etat.hote, [])
 })

@@ -585,3 +585,47 @@ s'arrête jamais pour une notification).
 - **e ajoute le point d'envoi au chemin du webhook** : quelques lectures et un
   envoi par appareil, attendus avant de répondre au partenaire.
 - **Jusqu'au 2c-3, les listes d'`agent_alert_config` reçoivent aussi b et c.**
+
+### 11.3 Ménages (h, i, l, m)
+
+Un module, `lib/notifications/evenements-menages.js`, appelé par **son**
+émetteur ; aucun ne lève.
+
+| Événement | Émetteur | Sujet, écran |
+|---|---|---|
+| h Ménage sans personne | `lib/cleaning/sync-menages-entite.js` (trou de garde ou sans jours réglés ; proposition expirée que plus personne ne porte) | `menage:<bien>:<jour>`, `/menages` |
+| i Ménage pas vu | `lib/cleaning/relance-validation.js`, à la relance de la veille | idem |
+| l Ménage refusé | `lib/alert-notify.js` `alertMenageRefuse` | idem |
+| m Disponibilités modifiées | `lib/alert-notify.js`, jours habituels et exceptions (chaque changement envoyé ; un résumé pour un glisser) | `dispos:<prestataire>`, `/menages?presta=<id>` |
+
+**Les règles, et pourquoi :**
+1. **Une notification par ménage** : h, i et l portent le même sujet ; la plus
+   récente remplace l'autre et sonne (même règle que la conversation, §11.2).
+2. **h une fois par ménage, pas à chaque cycle.** Le writer réévalue les ménages
+   non assignés toutes les cinq minutes dans la fenêtre de proposition : sans
+   mémoire, h — urgent par défaut, donc qui passe la nuit — sonnerait toutes
+   les cinq minutes, le bruit qui avait fait couper son SMS le 17 septembre. La
+   mémoire est l'index unique de `message_sent_log` (même geste que le relevé de
+   réservation) : une ligne par (compte, bien, jour), posée **avant** l'envoi ;
+   un envoi qui n'a joint personne la retire (le cycle suivant réessaie) ; une
+   mémoire illisible **ne prévient pas** (l'incident fondateur part toujours).
+3. **h par ménage, pas par bien** : deux départs sans personne sont deux
+   logements à confier (l'incident fondateur, lui, reste un par bien).
+4. **i à la relance de la veille**, une fois (le marqueur de relance est posé
+   avant) ; **le jour même seulement si la veille n'a pas eu lieu** (ménage
+   attribué le jour même). Un ménage validé par sa porteuse ne prévient pas.
+5. **l une fois par refus** (la tâche marquée de l'émetteur), **m au rythme des
+   listes** : chaque changement envoyé, rien pour un jour de glisser (le résumé
+   de la plage viendra).
+6. **La date du ménage sert de séjour à la décision** : un ménage d'aujourd'hui
+   ou de demain passe les heures calmes.
+
+**Limites connues :**
+- **m** est routé sur **un** bien de la prestataire (celui que l'émetteur
+  choisit pour les listes) : un membre limité à un AUTRE de ses biens ne
+  l'apprend pas.
+- **La mémoire de h vit dans `message_sent_log`**, une table du journal des
+  envois aux voyageurs (clé `notif:menage:<bien>:<jour>`, gabarit sentinelle) :
+  aucun lecteur ne la confond avec un envoi (tous filtrent par réservation ou
+  par gabarit), mais elle compte dans la sonde de croissance de cette table.
+
