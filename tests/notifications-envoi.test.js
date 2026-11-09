@@ -320,9 +320,27 @@ test('des réglages illisibles ne rendent personne muet ; un événement sans te
   const b = await notifier({ compte: COMPTE, code: 'surreservation', donnees: { bien: 'B', nuits: [] }, chemin: '/', sujet: 's', maintenant: NUIT, db, deps: e.deps })
   assert.equal(b.maintenant, 1, 'les défauts s\'appliquent : urgent, maintenant')
   assert.ok(b.erreurs.includes('reglages_illisibles'))
-  const sansTexte = await notifier({ compte: COMPTE, code: 'avis', donnees: {}, chemin: '/', sujet: 's', maintenant: MIDI, db: base({ profiles: [proprio] }).db, deps: envois().deps })
-  assert.deepEqual([sansTexte.maintenant, sansTexte.personne_joignable], [0, false])
-  assert.ok(sansTexte.erreurs.includes('texte_absent'))
+  // Depuis le lot 2c-2, les quinze événements ont un texte (testé ci-dessous) :
+  // l'absence se simule, la garde reste.
+  const rediger = textes.rediger
+  textes.rediger = () => null
+  try {
+    const sansTexte = await notifier({ compte: COMPTE, code: 'avis', donnees: {}, chemin: '/', sujet: 's', maintenant: MIDI, db: base({ profiles: [proprio] }).db, deps: envois().deps })
+    assert.deepEqual([sansTexte.maintenant, sansTexte.personne_joignable], [0, false])
+    assert.ok(sansTexte.erreurs.includes('texte_absent'))
+  } finally { textes.rediger = rediger }
+})
+
+test('lot 2c-2 : chacun des quinze événements du catalogue a son texte, dans les trois langues, et son essai', () => {
+  const { EVENEMENTS } = require('../lib/notifications/catalogue')
+  const codes = EVENEMENTS.map(e => e.code)
+  assert.strictEqual(codes.length, 15)
+  for (const code of codes) {
+    for (const l of ['fr', 'en', 'es']) {
+      const t = textes.rediger(code, l, textes.exemple(code, MIDI))
+      assert.ok(t && t.titre && t.corps && !/undefined|null|NaN/.test(t.titre + t.corps), `${code}/${l}`)
+    }
+  }
 })
 
 test('`seulement` : l\'essai d\'une personne ne prévient aucun autre membre du compte', async () => {

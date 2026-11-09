@@ -1111,3 +1111,17 @@ QueryBuilder qui n'expose que `select`/`insert`/`update`/`upsert`/`delete`, et
 accepte tout dans n'importe quel ordre, restent **verts**.
 `tests/stats-avis.test.js` porte désormais un double qui a la **forme** du vrai
 client et refuse cet ordre.
+
+## Notifications de l'hôte et de son équipe (PWA lot 2c-2, 9 novembre 2026)
+
+Deux événements partent par le point d'envoi unique
+(`lib/notifications/evenements-avis.js`, docs/kb/pwa.md §11.4), selon les
+réglages de chaque personne qui a le domaine `avis` sur le bien :
+- **Nouvel avis** — depuis `upsertAvis`, le writer unique : seulement un avis que
+  l'écriture ajoute (lu avant), reçu depuis moins de trois jours, dix au plus par
+  écriture ; une lecture ratée ne prévient personne. Le prénom, la note sur 5 et
+  le canal, jamais le texte.
+- **Évaluation du voyageur à faire** — depuis `noterEtEnvoyer`, une fois par
+  palier comme la tâche : la prestataire a rempli, puis J-5, puis J-1. Le lien
+  ouvre la fenêtre d'évaluation (`/avis?evaluer=`).
+

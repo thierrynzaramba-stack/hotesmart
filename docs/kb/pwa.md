@@ -657,3 +657,36 @@ Un module, `lib/notifications/evenements-menages.js`, appelé par **son**
   sans personne de la fenêtre (vingt au plus par cycle).
 - **Jusqu'au 2c-3, double e-mail possible pour l et m** (les listes plus le
   point d'envoi), comme pour j.
+
+### 11.4 Avis (n, o)
+
+Un module, `lib/notifications/evenements-avis.js`, appelé par **son** émetteur ;
+aucun ne lève.
+
+| Événement | Émetteur | Sujet, écran |
+|---|---|---|
+| n Nouvel avis | `lib/cron-channel-reviews.js` `upsertAvis`, le writer unique d'`ota_reviews` (poll Channex, webhook, import Beds24) | `avis:<id>`, `/avis` |
+| o Évaluation du voyageur à faire | `lib/avis/notifications.js` `noterEtEnvoyer` : la prestataire a rempli sa part, puis les relances J-5 et J-1 | `eval:<séjour>`, `/avis?evaluer=<séjour>` |
+
+**Les règles, et pourquoi :**
+1. **n ne prévient que d'un avis que l'écriture AJOUTE** : le writer lit, avant
+   d'écrire, les avis du lot déjà en base (par compte et par provider), et ne
+   prévient que de ceux qu'il a effectivement écrits (un groupe refusé ne
+   s'annonce pas). **Une lecture ratée ne prévient personne** : sans savoir ce
+   qui est nouveau, le premier poll d'un compte annoncerait tout son historique.
+2. **Un avis ancien n'est pas un nouvel avis** : reçu depuis plus de trois jours
+   (premier poll, import Beds24, bien qu'on connecte) — pas de notification.
+   Dix au plus par écriture.
+3. **Le prénom, la note sur 5 et le canal, jamais le texte de l'avis.** Le cœur
+   stocke la note sur 10 ; l'écran et la notification la disent sur 5.
+4. **o une fois par palier**, comme la tâche (son marqueur) : « la prestataire a
+   rempli », puis la relance J-5, puis la J-1 (« dernier jour »). Un sujet par
+   séjour : la relance remplace l'annonce, et sonne. L'échéance se dit en jour
+   de Paris.
+
+**Limites connues :**
+- **o** reste aussi envoyé aux listes d'`agent_alert_config` jusqu'au 2c-3
+  (double e-mail possible, comme pour j, l et m).
+- **Une saisie manuelle d'avis** (l'hôte lui-même) ne passe pas par le writer :
+  elle ne prévient pas, et c'est voulu.
+
