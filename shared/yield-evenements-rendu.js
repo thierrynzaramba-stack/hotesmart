@@ -370,7 +370,11 @@ function rendreCalendrier (e, idx, data, choisie, fmt) {
 function rendreSansNuit (e, data, fmt, jourLong) {
   const rp = data.reglages_position || {}
   const lignes = new Map((rp.lignes || []).map(l => [l.id, l]))
-  const miennes = (rp.sans_nuit || []).filter(x => x.cle === e.cle && x.occurrence && x.occurrence.debut === e.debut)
+  // ⚠ UNE LIGNE `rang_requis` N'A PAS D'OCCURRENCE (le résolveur ne sait pas
+  // quel week-end elle vise) mais SON ÉVÉNEMENT existe : elle reste sur sa carte
+  // (re-review de l'étape 2), elle ne part pas dans « pas d'événement ».
+  const miennes = (rp.sans_nuit || []).filter(x => x.cle === e.cle &&
+    (x.occurrence ? x.occurrence.debut === e.debut : x.motif === 'rang_requis'))
   if (!miennes.length) return ''
   const items = miennes.map(x => {
     const l = lignes.get(x.ligne)
@@ -378,6 +382,11 @@ function rendreSansNuit (e, data, fmt, jourLong) {
     return `<li>${esc(quoi)} — ${esc(fmt.t('yfe.motif_' + x.motif))}</li>`
   }).join('')
   return `<div class="yfe-sans-nuit"><p class="small">${esc(fmt.t('yfe.sans_nuit_titre'))}</p><ul>${items}</ul></div>`
+}
+
+const cleLisible = cle => {
+  const brut = String(cle || '').split(':').slice(1).join(' ').replace(/_/g, ' ').trim()
+  return brut ? brut.charAt(0).toUpperCase() + brut.slice(1) : String(cle || '')
 }
 
 /**
@@ -389,11 +398,16 @@ function rendreSansNuit (e, data, fmt, jourLong) {
 export function rendreSansEvenement (data, fmt, jourLong) {
   const rp = data.reglages_position || {}
   const lignes = new Map((rp.lignes || []).map(l => [l.id, l]))
-  const orphelines = (rp.sans_nuit || []).filter(x => !x.occurrence)
+  const presents = new Set((data.evenements || []).map(e => e.cle))
+  const orphelines = (rp.sans_nuit || []).filter(x => !x.occurrence && (x.motif === 'evenement_absent' || !presents.has(x.cle)))
   if (!orphelines.length) return ''
   const items = orphelines.map(x => {
     const l = lignes.get(x.ligne)
-    const nom = nomDe({ cle: x.cle, nom: x.nom, type: x.type }, fmt)
+    // ⚠ UN ÉVÉNEMENT DE L'HÔTE ABSENT DES DONNÉES LUES n'a pas de nom au
+    // serveur : on rend sa clé lisible (« evenement:festival_jazz » →
+    // « Festival jazz ») plutôt que la clé brute — moins juste que le nom saisi,
+    // mais c'est lui qu'elle désigne.
+    const nom = nomDe({ cle: x.cle, nom: x.nom || cleLisible(x.cle), type: x.type }, fmt)
     const quoi = l ? libellePosition(l, fmt.t, jourLong) : ''
     return `<li>${esc(nom)}${quoi ? ' · ' + esc(quoi) : ''} — ${esc(fmt.t('yfe.motif_' + x.motif))}</li>`
   }).join('')

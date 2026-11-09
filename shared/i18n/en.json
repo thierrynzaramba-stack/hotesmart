@@ -1170,5 +1170,6 @@
   "yfe.refus": "You do not have access to this screen on this account.",
   "yfe.reglage_non_applique": "your level {niveau} does not apply",
   "yfe.sans_evenement_titre": "These settings have no event this year:",
-  "yfe.toucher_une_nuit": "Tap a night to read its details."
+  "yfe.toucher_une_nuit": "Tap a night to read its details.",
+  "yfe.maj_echec": "Last data: the update could not be done."
 }

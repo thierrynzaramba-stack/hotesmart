@@ -128,7 +128,7 @@ const jourLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 // ─── État de la page ────────────────────────────────────────────────────────
 // `seq` : le numéro de la dernière lecture demandée. Une réponse plus ancienne
 // est IGNORÉE — sinon passer vite de A à B puis à C peindrait B sous C.
-const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: null, moi: null, compte: null, bienVoulu: null, biens: [], seq: 0 }
+const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: null, moi: null, compte: null, bienVoulu: null, biens: [], seq: 0, depuisCache: false }
 
 function peindreSelecteur () {
   const sel = $('[data-bind="bien"]')
@@ -193,6 +193,7 @@ function peindre () {
 
 function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
   etat.data = d
+  etat.depuisCache = depuisCache
   etat.idx = indexerNuits(d && d.nuits)
   const age = $('[data-bind="age"]')
   age.hidden = !depuisCache
@@ -232,6 +233,13 @@ async function charger () {
       etat.bienVoulu = null
       etat.ouvert = null
       etat.nuit = null
+      // ⚠ L'ÉCRAN DU LOGEMENT REFUSÉ S'EFFACE AVANT LA RELECTURE (re-review de
+      // l'étape 2) : sinon, si la relecture échoue, il restait affiché comme
+      // « dernières données connues » — celles d'un logement que le serveur
+      // vient de refuser.
+      etat.data = null
+      etat.idx = new Map()
+      viderEcran(t('common.loading'))
       const u = new URL(location.href)
       u.searchParams.delete('bien')
       try { history.replaceState(null, '', u.pathname + u.search) } catch { /* sans historique */ }
@@ -243,7 +251,8 @@ async function charger () {
     const memeBien = etat.data && (!voulu || etat.data.bien === voulu)
     if (memeBien && statut !== 403 && statut !== 404) {
       const age = $('[data-bind="age"]')
-      age.textContent = t('yfe.cache_echec')
+      // Le cache n'a pas l'état des nuits ; une réponse du serveur, si.
+      age.textContent = t(etat.depuisCache ? 'yfe.cache_echec' : 'yfe.maj_echec')
       age.hidden = false
       return
     }

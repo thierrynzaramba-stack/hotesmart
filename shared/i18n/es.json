@@ -1170,5 +1170,6 @@
   "yfe.refus": "No tiene acceso a esta pantalla en esta cuenta.",
   "yfe.reglage_non_applique": "su nivel {niveau} no se aplica",
   "yfe.sans_evenement_titre": "Estos ajustes no tienen evento este año:",
-  "yfe.toucher_une_nuit": "Toque una noche para ver su detalle."
+  "yfe.toucher_une_nuit": "Toque una noche para ver su detalle.",
+  "yfe.maj_echec": "Últimos datos: no se ha podido actualizar."
 }

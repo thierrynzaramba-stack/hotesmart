@@ -53,13 +53,14 @@ function grille () {
  * @param o.reglages Map des réglages d'événement (crans, largeurs, coupures)
  * @param o.vendues  { date: [resa] }
  * @param o.prixHote Map date -> centimes (bien piloté)
+ * @param o.evenementsEnPlus événements déclarés supplémentaires
  */
 async function reponseEcran (o = {}) {
   const reglages = o.reglages || new Map()
   const lignes = o.lignes || []
   const coupees = new Set()
   for (const [cle, r] of reglages) if (r && r.actif === false) coupees.add(cle)
-  const evenements = [...DC.datesCommerciales('2023-01-01', '2027-12-31', { desactivees: coupees }), SALON]
+  const evenements = [...DC.datesCommerciales('2023-01-01', '2027-12-31', { desactivees: coupees }), SALON, ...(o.evenementsEnPlus || [])]
   const preparer = async (s, bien, compte, opt) => {
     const materiauxPositions = { reglages, zoneBien: 'C', vacances: VACANCES, evenements, debut: '2026-11-01', fin: opt.fin }
     const parDate = new Map()

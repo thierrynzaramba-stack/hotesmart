@@ -408,3 +408,17 @@ et dix-sept autres. Corrigés :
   égalité des cinq niveaux avec le moteur.
 La re-review, une seule (règle « une review par commit » : constat de
 sécurité), porte sur le diff de ces correctifs.
+
+**Re-review des correctifs, 9 novembre 2026** (`ed2523fe654280a9357f7eed4da154e40798e31e..bf0802ace83fbaa8be1f2d61364940096180f595`,
+même arbre, même branche) : **le constat de sécurité d'origine est fermé.** Un
+résiduel de la même famille (faible) et trois mineurs, corrigés sans nouvelle
+review (la re-review est la seule permise) :
+- **(sécurité, résiduel)** après un 404 sur `?bien=`, l'écran du logement
+  refusé s'efface AVANT la relecture — si celle-ci échouait, il restait
+  affiché comme « dernières données connues » ; et le message d'échec ne
+  prétend plus que les nuits vendues manquent quand l'écran vient du serveur ;
+- une ligne `rang_requis` reste sur la carte de son événement ;
+- un réglage sans événement dont le nom n'est pas connu affiche sa clé rendue
+  lisible, jamais la clé brute ;
+- tests : la nuit réglée par un autre événement le nomme ; un nom saisi piégé
+  (`<img …>`) ne devient jamais du HTML ; le pont absent est titré par la table.

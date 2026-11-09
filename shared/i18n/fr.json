@@ -1170,5 +1170,6 @@
   "yfe.refus": "Vous n’avez pas accès à cet écran sur ce compte.",
   "yfe.reglage_non_applique": "votre niveau {niveau} ne s’applique pas",
   "yfe.sans_evenement_titre": "Ces réglages n’ont pas d’événement cette année :",
-  "yfe.toucher_une_nuit": "Touchez une nuit pour lire son détail."
+  "yfe.toucher_une_nuit": "Touchez une nuit pour lire son détail.",
+  "yfe.maj_echec": "Dernières données : la mise à jour n’a pas pu se faire."
 }

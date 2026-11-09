@@ -271,11 +271,36 @@ test('LE TEST QUI COMPTE (§5) : toucher une nuit en montre le détail EN TEXTE 
   assert.match(detail().textContent, /vendue/)
   await b.cliquer(nuit('2026-12-24'))
   assert.match(detail().textContent, /prix posé à la main : 189 €/)
-  // Le réveillon est réglé par les vacances de Noël ici ; ouvert, il dit par QUI.
-  await b.cliquer(b.$$('.yfe-barre').find(x => x.dataset.ouvrir.startsWith('commercial:reveillon_noel|2026-12-24')))
-  const rev = b.$$('.yfe-ev--ouvert [data-nuit]').find(j => j.dataset.nuit === '2026-12-24')
-  assert.ok(rev, 'le réveillon s’ouvre')
   assert.equal(b.journal.fetch.length, 1, 'aucun appel de plus pour lire une nuit')
+})
+
+test('LE TEST QUI COMPTE : une nuit réglée par un AUTRE événement le dit, en le nommant — et un nom saisi par l’hôte est échappé', async () => {
+  // Les vacances de Noël règlent le 24 (le 1er jeudi) ; ouvert depuis le
+  // réveillon, le 24 dit par QUI il est réglé.
+  const libre = await reponseEcran()
+  const noel = libre.evenements.find(e => e.cle === NOEL)
+  const p24 = noel.positions.find(x => x.date === '2026-12-24')
+  const d = await reponseEcran({ lignes: [ligneDe(NOEL, p24, 'Haut', 'n-24')] })
+  const b = await monter({ ecran: async () => d })
+  await b.cliquer(b.$$('.yfe-barre').find(x => x.dataset.ouvrir === 'commercial:reveillon_noel|2026-12-24'))
+  const rev = b.$$('.yfe-ev--ouvert [data-nuit]').find(j => j.dataset.nuit === '2026-12-24')
+  await b.cliquer(rev)
+  assert.match(b.$('.yfe-ev--ouvert .yfe-detail').textContent, /réglée par « Vacances de Noël — votre zone »/)
+  // Un nom saisi par l'hôte, piégé : il ne devient jamais du HTML.
+  const piege = '<img src=x onerror=alert(1)>'
+  const segment = 'evenement:img_src_x_onerror_alert_1'
+  const p = await reponseEcran({ evenementsEnPlus: [{ id: 'ev-piege', nom: piege, segment, date_debut: '2027-04-09', date_fin: '2027-04-11' }] })
+  const occ = p.evenements.find(e => e.cle === segment)
+  const sam = occ.positions.find(x => x.zone === 'evenement' && x.jour === 'samedi')
+  const p2 = await reponseEcran({ evenementsEnPlus: [{ id: 'ev-piege', nom: piege, segment, date_debut: '2027-04-09', date_fin: '2027-04-11' }], lignes: [ligneDe(segment, sam, 'Haut', 'l-p')] })
+  const b2 = await monter({ ecran: async () => p2 })
+  // (le logo de la barre du haut est la seule image légitime de la page)
+  assert.equal(b2.$$('img[src="x"]').length, 0, 'le nom de l’hôte a été interprété comme du HTML')
+  await b2.cliquer(b2.$$('.yfe-barre').find(x => x.dataset.ouvrir.startsWith(segment + '|')))
+  const nuit = b2.$$('.yfe-ev--ouvert [data-nuit]').find(j => j.dataset.nuit === sam.date)
+  await b2.cliquer(nuit)
+  assert.equal(b2.$$('img[src="x"]').length, 0)
+  assert.ok(b2.$$('.yfe-ev__nom').some(x => x.textContent === piege), 'le nom s’affiche en texte')
 })
 
 test('LE TEST QUI COMPTE (sécurité) : une réponse qui ne se met pas en cache EFFACE le cache — un membre qui n’a plus aucun logement', async () => {
@@ -309,6 +334,14 @@ test('LE TEST QUI COMPTE : un logement demandé qui n’est plus servi (404) —
   assert.deepEqual(b.journal.fetch.map(f => f.url), [`/api/ecran/evenements?bien=${perime}`, '/api/ecran/evenements'])
   assert.equal(b.w.location.search, '')
   assert.ok(b.$$('.yfe-barre').length > 10)
+  // ⚠ ET SI LA RELECTURE ÉCHOUE, l'écran du logement refusé ne reste pas
+  // (re-review de l'étape 2, constat de sécurité résiduel).
+  const r = await import(RENDU)
+  const echec = await monter({ cache: r.pourLeCache(d), ecran: async (url) => { throw Object.assign(new Error('x'), { status: url.includes(d.bien) ? 404 : 503 }) } })
+  assert.deepEqual(echec.journal.fetch.map(f => f.url), [`/api/ecran/evenements?bien=${d.bien}`, '/api/ecran/evenements'])
+  assert.equal(echec.$$('.yfe-barre').length, 0, 'l’écran d’un logement refusé reste affiché')
+  assert.equal(echec.$('[data-bind="legende"]').textContent, '')
+  assert.equal(echec.cache.lire('yield-evenements', echec.MOI, echec.COMPTE), null)
   // Un 403 dit le refus, pas « réessayez ».
   const refus = await monter({ ecran: async () => { throw Object.assign(new Error('Droit'), { status: 403 }) } })
   assert.match(refus.$('[data-bind="liste"]').textContent, /pas accès à cet écran/)
@@ -363,6 +396,28 @@ test('LE TEST QUI COMPTE (décision 8) : un réglage dont l’événement n’a 
   const html = r.rendreListe(d, r.indexerNuits(d.nuits), { filtre: 'tous', ouvert: null }, fmt, x => x)
   assert.match(html, /yfe\.sans_evenement_titre/)
   assert.match(html, /yfe\.motif_evenement_absent/)
+  assert.equal(sn[0].type, 'evenement')
+  // Sans nom connu, la clé rendue lisible — jamais la clé brute.
+  assert.match(html, /Festival disparu/)
+  assert.doesNotMatch(html, /evenement:festival_disparu/)
+  // Un pont qui n'existe pas cette année (Noël 2026 tombe un vendredi) : le
+  // serveur porte son nom et son type, et la page le titre par la table.
+  const pont = await reponseEcran({ lignes: [{ id: 'l-p', evenement: 'pont:pont_noel', zone: 'evenement', rang: null, jour: null, nuit: null, niveau: 'Haut' }] })
+  const sp = pont.reglages_position.sans_nuit.find(x => x.cle === 'pont:pont_noel')
+  assert.deepEqual([sp.motif, sp.type, sp.nom], ['evenement_absent', 'pont', 'Noël'])
+  const htmlPont = r.rendreListe(pont, r.indexerNuits(pont.nuits), { filtre: 'tous', ouvert: null }, { ...fmt, francais: true }, x => x)
+  assert.match(htmlPont, /Pont du 25 décembre/)
+})
+
+test('une ligne `rang_requis` reste sur la carte de son événement, pas dans « pas d’événement cette année »', async () => {
+  const r = await import(RENDU)
+  const d = await reponseEcran({ lignes: [{ id: 'l-r', evenement: NOEL, zone: 'avant', rang: null, jour: null, nuit: null, niveau: 'Haut' }] })
+  const sn = d.reglages_position.sans_nuit.find(x => x.motif === 'rang_requis')
+  assert.ok(sn && !sn.occurrence)
+  const noel = d.evenements.find(e => e.cle === NOEL)
+  const html = r.rendreListe(d, r.indexerNuits(d.nuits), { filtre: 'tous', ouvert: r.idEvenement(noel) }, fmt, x => x)
+  assert.doesNotMatch(html, /yfe\.sans_evenement_titre/)
+  assert.match(html, /yfe\.sans_nuit_titre[\s\S]*yfe\.motif_rang_requis/)
 })
 
 test('la table des fériés nomme les fériés en français ; l’égalité des cinq niveaux avec le moteur est tenue', async () => {
