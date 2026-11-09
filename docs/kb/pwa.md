@@ -1029,3 +1029,66 @@ Les trois constats, mineurs, sont corrigés sans nouvelle review.
 
 **Re-test de Thierry sur staging `1c3f4b3d`, 9 novembre 2026 à 23:25** : cocher
 un jour des heures calmes ne fait plus sauter la page. Conforme.
+
+## 12. Lot 2c-3 — les contacts libres (10 novembre 2026)
+
+Branche `pwa-lot-2c3-contacts`, partie de `pwa-lot-2c2-evenements`
+(`a3ecc243`). Spec : §16.3, Q25 et Q29 à Q32 (décisions du 9 novembre). Quatre
+étapes, chacune avec sa review tracée.
+
+### 12.1 Étape 1 — la table des contacts libres et leur envoi
+
+Migration `migrations/2026-11-10-notifications-contacts.sql` (éprouvée sur un
+Postgres 16 jetable : appliquée deux fois, contraintes et cascade vérifiées) :
+- **`notifications_contacts`** : le compte, un nom, un e-mail et/ou un numéro
+  (l'un des deux exigé en base), les **biens** (des `properties.id` : la
+  référence provider change avec le provider, l'id du bien non), les
+  **alertes** (`urgences` et/ou `info_manquante`, rien d'autre en base), un
+  **jeton** de désinscription (deux UUID v4, sans extension), `desinscrit_le`
+  et `dernier_essai_le`. RLS activée, aucune policy.
+- **`notifications_file`** accueille les contacts : une ligne est pour une
+  personne (`user_id`) **ou** pour un contact (`contact_id`), jamais les deux
+  (contrainte), avec son index unique `(contact_id, sujet)` ; supprimer un
+  contact supprime ses lignes en attente.
+
+Module `lib/notifications/contacts.js` ; branché dans le point d'envoi
+(`notifier.js`, étape 4 de chaque envoi), l'envoi (`envoi.js`) et la file
+(`file.js`).
+
+**Les règles, et pourquoi :**
+1. **Chacun garde ce que sa liste recevait** (Q25) : `urgences` = b, j, l, m,
+   o (l'ancienne liste « intervention ») ; `info_manquante` = c. Aucun autre
+   événement ne lit même les contacts.
+2. **Pour SES biens, sur SON compte, jamais désinscrit** : chaque lecture
+   filtre `compte_id`. Sans identifiant de bien, la référence provider le
+   retrouve sur le compte (le bien actif, comme `bien.js`) ; sans bien du
+   tout, aucun contact.
+3. **Les HEURES et la LANGUE du titulaire** (§4, Q31), **pas ses canaux** : un
+   titulaire qui a tout décoché pour lui-même ne fait pas taire son gardien.
+   Seuls « urgent » et les plages du titulaire décident du moment ; la nuit,
+   la ligne du contact attend en file la fin de la plage du titulaire.
+4. **E-mail et SMS, jamais de notification** : un contact n'a pas d'appareil,
+   donc aucune lecture d'appareils, et son SMS part (clé Brevo du compte, comme
+   ses listes). Son e-mail n'a **pas de lien vers l'application** (il n'a pas
+   de compte), mais un lien « Ne plus recevoir ces alertes » (Q30).
+5. **⚠ Le lien de désinscription ouvre une page qui demande de confirmer**
+   (`/api/alertes-desinscription`, étape 3) : les messageries d'entreprise
+   ouvrent les liens d'un e-mail pour les analyser, et un lien qui agirait au
+   premier chargement désinscrirait le contact sans qu'il l'ait voulu. C'est
+   un clic de plus que la décision Q30 ; signalé à Thierry.
+6. **L'essai sur soi n'atteint jamais un contact** : il deviendrait un relais
+   vers une adresse saisie.
+7. **Relu à la sortie de la file** : désinscrit, plus réglé pour ce bien ou
+   cette alerte, ou d'un autre compte — la ligne est écartée ; une relecture
+   en panne la laisse en file. Un contact n'est jamais regroupé avec une
+   personne, et « vider ma file » ne prend jamais sa ligne.
+8. **Une panne de lecture des contacts se dit** (`contacts_illisibles` dans
+   le bilan) et ne prive pas les personnes du compte.
+9. **Une adresse du compte n'est pas un contact pour l'événement qu'elle reçoit
+   déjà** (Q29) : si l'e-mail ou le numéro d'un contact est celui d'un
+   DESTINATAIRE de cet événement (le titulaire, ou un membre dont les droits
+   couvrent le domaine et le bien), ce canal du contact se tait — la personne
+   le reçoit par ses réglages, une fois. Sur un événement ou un bien que ses
+   droits ne couvrent pas, elle n'est pas destinataire, et son adresse de
+   contact la prévient : rien n'est perdu. Les adresses se comparent sans casse
+   pour l'e-mail, et au format international pour le numéro.
