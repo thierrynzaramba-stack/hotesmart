@@ -33,9 +33,7 @@ test('SÉCURITÉ (S1) : un avis se dit par son bien, sa note SUR 5 et son canal 
   assert.strictEqual(textes.rediger('avis', 'fr', { bien: 'B' }).corps, 'Un voyageur a laissé un avis.')
 })
 
-test('un avis MASQUÉ se dit sans note ; sa RÉVÉLATION se dit avec la vraie note', () => {
-  assert.deepStrictEqual(textes.rediger('avis', 'fr', { bien: 'B', masque: true, note: 4.7, canal: 'airbnb' }),
-    { titre: 'Nouvel avis — B', corps: 'Avis déposé sur Airbnb, masqué jusqu’à votre évaluation du voyageur.' })
+test('la RÉVÉLATION d\'un avis se dit avec la vraie note', () => {
   assert.deepStrictEqual(textes.rediger('avis', 'es', { bien: 'B', revele: true, note: 4.5, canal: 'airbnb' }),
     { titre: 'Reseña revelada — B', corps: '4,5/5 · Airbnb.' })
   assert.strictEqual(textes.rediger('avis', 'en', { bien: 'B', revele: true }).corps, 'The review is now visible.')
@@ -50,6 +48,12 @@ test('l\'évaluation du voyageur : un ÉTAT, jamais un ordre (un membre en lectu
     for (const d of [{ rempli: true }, {}, { derniere: true }, { auto: 'echec' }, { auto: 'rappel' }]) {
       assert.ok(!/complétez|publiez|complete and publish|complete y publique/i.test(textes.rediger('evaluation_voyageur', l, { bien: 'B', ...d }).corps), `${l} ${JSON.stringify(d)}`)
     }
+  }
+})
+
+test('l\'échec sans échéance à venir ne promet pas une publication devenue impossible', () => {
+  for (const [l, attendu] of [['fr', 'La publication automatique n’a pas abouti.'], ['en', 'The automatic publication did not go through.'], ['es', 'La publicación automática no se completó.']]) {
+    assert.strictEqual(textes.rediger('evaluation_voyageur', l, { bien: 'B', auto: 'echec', echeance: null }).corps, attendu)
   }
 })
 
@@ -150,9 +154,9 @@ test('LE TEST QUI COMPTE : seul un avis NOUVEAU et RÉCENT prévient — pas un 
     lignes: [avis('a1'), avis('a2'), avis('a3', { received_at: ilYA(200) }), avis('a4', { received_at: null })],
     existants: new Map([[`${COMPTE}|channex|a2`, { cache: false }]]), maintenant: MAINTENANT, db: fauxClient({}), deps
   })
-  assert.deepStrictEqual(bilan, { envoyes: 1, reveles: 0, deja: 0, anciens: 2, plafond: 0 })
+  assert.deepStrictEqual(bilan, { envoyes: 1, reveles: 0, deja: 0, anciens: 2, masques: 0, vides: 0, plafond: 0 })
   assert.deepStrictEqual([vus[0].code, vus[0].sujet, vus[0].chemin, vus[0].rappel, vus[0].donnees],
-    ['avis', 'avis:channex:a1', '/avis', true, { bien: null, note: 4.5, canal: 'airbnb', masque: false, revele: false }])
+    ['avis', 'avis:channex:a1', '/avis', true, { bien: null, note: 4.5, canal: 'airbnb', revele: false }])
 })
 
 test('la note qui part est celle de l\'écran, pas la moitié de la note brute', async () => {
@@ -163,8 +167,8 @@ test('la note qui part est celle de l\'écran, pas la moitié de la note brute',
 
 test('SÉCURITÉ (S1) : rien de ce qui part ne porte le nom du voyageur', async () => {
   const { vus, deps } = capteur()
-  await ev.notifierNouveauxAvis({ lignes: [avis('a1'), avis('a2', { is_hidden: true, overall_score: 0 })], existants: new Map(), maintenant: MAINTENANT, db: fauxClient({}), deps })
-  assert.strictEqual(vus.length, 2)
+  await ev.notifierNouveauxAvis({ lignes: [avis('a1'), avis('a2', { overall_score: 9.4 })], existants: new Map([[`${COMPTE}|channex|a2`, { cache: true }]]), maintenant: MAINTENANT, db: fauxClient({}), deps })
+  assert.deepStrictEqual(vus.map(v => v.donnees.revele), [false, true], 'le nouveau et le révélé')
   assert.ok(!/Marie|Dupont/.test(JSON.stringify(vus)))
 })
 
@@ -179,14 +183,13 @@ test('la note est celle de L\'ÉCRAN : échelle par canal, un seul arrondi, et r
   try { assert.strictEqual(ev.noteDe(avis('x', { ota: 'canal-inconnu-test', overall_score: 4 })), null, 'sans échelle, pas de conversion') } finally { console.warn = avant }
 })
 
-test('un avis MASQUÉ : sans note, et le lien mène à l\'évaluation du séjour quand il est connu', async () => {
+test('LE TEST QUI COMPTE : un avis MASQUÉ ne prévient pas — Airbnb l\'ouvre au départ, que le voyageur écrive ou non (décision de Thierry)', async () => {
   const { vus, deps } = capteur()
-  await ev.notifierNouveauxAvis({
-    lignes: [avis('m1', { is_hidden: true, overall_score: 0, booking_uid: 'BK 7' }), avis('m2', { is_hidden: true, overall_score: 0 })],
+  const bilan = await ev.notifierNouveauxAvis({
+    lignes: [avis('m1', { is_hidden: true, overall_score: 0, booking_uid: 'BK 7' }), avis('m2', { is_hidden: true, overall_score: 9 })],
     existants: new Map(), maintenant: MAINTENANT, db: fauxClient({}), deps
   })
-  assert.deepStrictEqual(vus.map(v => [v.sujet, v.chemin, v.donnees.note, v.donnees.masque]),
-    [['avis:channex:m1', '/avis?evaluer=BK%207', null, true], ['avis:channex:m2', '/avis', null, true]])
+  assert.deepStrictEqual([vus.length, bilan.masques], [0, 2])
 })
 
 test('LE TEST QUI COMPTE : la RÉVÉLATION d\'un avis masqué prévient UNE fois, avec la vraie note, et remplace l\'annonce', async () => {
@@ -198,7 +201,22 @@ test('LE TEST QUI COMPTE : la RÉVÉLATION d\'un avis masqué prévient UNE fois
   const b2 = await ev.notifierNouveauxAvis({ lignes: [revele], existants, maintenant: MAINTENANT, db, deps })
   assert.deepStrictEqual([b1.reveles, b2.reveles, b2.deja], [1, 0, 1])
   assert.strictEqual(vus.length, 1)
-  assert.deepStrictEqual([vus[0].sujet, vus[0].donnees.note, vus[0].donnees.revele, vus[0].donnees.masque], ['avis:channex:m1', 4.7, true, false])
+  assert.deepStrictEqual([vus[0].sujet, vus[0].chemin, vus[0].donnees.note, vus[0].donnees.revele], ['avis:channex:m1', '/avis', 4.7, true])
+})
+
+test('LE TEST QUI COMPTE : un avis révélé VIDE (Airbnb le démasque au bout de 14 jours même sans rien d\'écrit) ne prévient pas', async () => {
+  const { vus, deps } = capteur()
+  const existants = new Map([[`${COMPTE}|channex|m1`, { cache: true }], [`${COMPTE}|channex|m2`, { cache: true }]])
+  const bilan = await ev.notifierNouveauxAvis({
+    lignes: [
+      avis('m1', { overall_score: 0, content: null, received_at: ilYA(14) }),
+      avis('m2', { overall_score: 0, content_public: 'Très bien', received_at: ilYA(14) }),
+      avis('v1', { overall_score: null, content: '' })
+    ],
+    existants, maintenant: MAINTENANT, db: fauxClient({}), deps
+  })
+  assert.deepStrictEqual([bilan.vides, bilan.reveles], [2, 1])
+  assert.deepStrictEqual(vus.map(v => [v.sujet, v.donnees.revele, v.donnees.note]), [['avis:channex:m2', true, null]], 'un texte sans note est un avis')
 })
 
 test('pas de révélation : un avis déjà visible, un avis encore masqué, une révélation de plus de trente jours', async () => {
@@ -236,7 +254,7 @@ test('LE TEST QUI COMPTE : le webhook et le poll écrivent le même avis en mêm
   assert.strictEqual(vus.length, 1)
 })
 
-test('mémoire illisible : on ne prévient pas ; rien n\'est parti : la mémoire est retirée et le poll suivant réessaie', async () => {
+test('mémoire illisible : on ne prévient pas ; rien n\'est parti : la perte se DIT au journal et la mémoire est retirée (un nouvel appel repart — le writer, lui, ne repasse pas)', async () => {
   const vus = []
   const enPanne = fauxClient({}, { panne: (table, op) => table === 'message_sent_log' && op === 'insert' })
   const r = await ev.notifierAvis({ compte: COMPTE, propertyRef: 'p1', provider: 'channex', externalId: 'a1', db: enPanne,
@@ -247,7 +265,11 @@ test('mémoire illisible : on ne prévient pas ; rien n\'est parti : la mémoire
   const db = fauxClient(t)
   let echec = true
   const deps = { notifier: async (o) => { vus.push(o); return echec ? { ok: false, destinataires: 1, erreurs: ['panne'] } : { ok: true, push: 1 } } }
-  await ev.notifierAvis({ compte: COMPTE, propertyRef: 'p1', provider: 'channex', externalId: 'a1', db, deps })
+  const journal = []
+  const avant = console.error
+  console.error = (m) => journal.push(String(m))
+  try { await ev.notifierAvis({ compte: COMPTE, propertyRef: 'p1', provider: 'channex', externalId: 'a1', db, deps }) } finally { console.error = avant }
+  assert.ok(journal.some(m => /notification perdue/.test(m)), journal.join(' | '))
   assert.strictEqual((t.message_sent_log || []).length, 0, 'mémoire retirée')
   echec = false
   await ev.notifierAvis({ compte: COMPTE, propertyRef: 'p1', provider: 'channex', externalId: 'a1', db, deps })

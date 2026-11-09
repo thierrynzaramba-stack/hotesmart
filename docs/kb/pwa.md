@@ -665,7 +665,7 @@ aucun ne lève.
 
 | Événement | Émetteur | Sujet, écran |
 |---|---|---|
-| n Nouvel avis, puis sa révélation | `lib/cron-channel-reviews.js` `upsertAvis`, le writer unique d'`ota_reviews` (poll Channex, webhook, import Beds24) | `avis:<provider>:<id>`, `/avis` (masqué et séjour connu : `/avis?evaluer=<séjour>`) |
+| n Nouvel avis, ou avis révélé | `lib/cron-channel-reviews.js` `upsertAvis`, le writer unique d'`ota_reviews` (poll Channex, webhook, import Beds24) | `avis:<provider>:<id>`, `/avis` |
 | o Évaluation du voyageur | `lib/avis/notifications.js` `noterEtEnvoyer` : la prestataire a rempli sa part, les relances J-5 et J-1, et la publication automatique (`lib/avis/auto-validation.js` : rappel, échec) | `eval:<séjour>`, `/avis?evaluer=<séjour>` |
 
 **Les règles, et pourquoi :**
@@ -679,12 +679,17 @@ aucun ne lève.
    (échelle par canal, un seul arrondi au dixième, demi vers le haut). Une note
    à 0, d'un canal hors table ou d'un avis masqué ne se dit pas : jamais une
    note devinée.
-3. **Un avis masqué** (Airbnb, `is_hidden`, note à 0 tant que l'hôte n'a pas
-   évalué le voyageur) s'annonce SANS note — « Avis déposé sur Airbnb, masqué
-   jusqu'à votre évaluation du voyageur. » — avec un lien vers l'évaluation du
-   séjour quand il est connu. **Sa révélation** (masqué en base, visible dans
-   l'écriture) prévient une fois, avec la vraie note, et remplace l'annonce
-   (même sujet). Décision de Thierry du 9 novembre 2026.
+3. **Un avis masqué ne prévient pas ; sa révélation, si** (décisions de Thierry
+   du 9 novembre 2026). L'objet Channex d'Airbnb naît au DÉPART, masqué
+   (`is_hidden`, note à 0) et vide, que le voyageur écrive ou non : l'annoncer
+   « déposé » aurait été faux après chaque séjour Airbnb sans avis (constat 1
+   de la re-review), et l'évaluation à faire est déjà annoncée par o. **Sa
+   révélation** (masqué en base, visible dans l'écriture) prévient une fois,
+   avec la vraie note — « Avis révélé — La bulle : 4,7/5 · Airbnb. »
+   ⚠ **Un avis visible mais VIDE n'est pas un avis** : l'objet Channex naît au
+   départ, caché et vide, et Airbnb le révèle au bout de 14 jours même si le
+   voyageur n'a rien écrit. Sans note ni texte (`voyageurAEcrit`, la règle de
+   l'écran), il ne prévient ni comme nouveau, ni comme révélé.
 4. **n ne prévient que d'un avis que l'écriture AJOUTE ou DÉMASQUE** : le writer
    lit, avant d'écrire, l'état des avis déjà en base (par compte et par
    provider, avec `is_hidden`), et ne prévient que de ceux qu'il a effectivement
@@ -700,8 +705,13 @@ aucun ne lève.
    `message_sent_log`, sentinelles `…00a3` (`notif:avis:<provider>:<id>`) et
    `…00a4` (`notif:avis-revele:…`). Le webhook et le poll écrivent le même avis
    à quelques secondes d'écart : lire « absent » des deux côtés ne suffit pas,
-   l'insertion tranche. Un envoi dont rien n'est parti retire la mémoire, et le
-   poll suivant réessaie ; une mémoire illisible ne prévient pas.
+   l'insertion tranche. Une mémoire illisible ne prévient pas.
+   ⚠ **Un envoi dont rien n'est parti est une notification PERDUE**, et elle se
+   dit au journal (`notification perdue`). La mémoire est retirée, mais le
+   writer ne repasse pas : au poll suivant, l'avis est en base (ou n'est plus
+   masqué), il n'est plus « nouveau ». Une vraie reprise jugerait « nouveau »
+   sur l'absence de la mémoire plutôt que sur l'absence en base : c'est un autre
+   comportement, donc un autre lot (constat 2 de la re-review).
 7. **Dix au plus par compte et par écriture**, les plus récents d'abord : un
    compte bavard ne fait pas taire les autres.
 8. **o une fois par palier**, comme la tâche (son marqueur) : « la prestataire a
@@ -711,7 +721,10 @@ aucun ne lève.
    en jour de Paris, et seulement si elle est à venir. **Formulation neutre** :
    un membre en lecture seule la reçoit aussi et ne peut pas publier — le texte
    dit l'état, pas un ordre. La raison d'un échec (parfois un message d'erreur
-   interne) reste dans la tâche.
+   interne) reste dans la tâche. Sans échéance à venir (délai passé, plateforme
+   qui n'a pas ouvert d'avis), l'échec dit seulement « La publication
+   automatique n'a pas abouti. » : il ne promet pas une publication devenue
+   impossible.
 
 **Limites connues :**
 - **o** reste aussi envoyé aux listes d'`agent_alert_config` jusqu'au 2c-3

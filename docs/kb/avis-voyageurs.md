@@ -1123,8 +1123,10 @@ réglages de chaque personne qui a le domaine `avis` sur le bien :
   note sur 5 (la conversion de l'écran, `lib/avis/echelle.js`) et le canal —
   **jamais le nom du voyageur** (le domaine `avis` se délègue sans
   `reservations`), jamais le texte.
-- **Avis masqué, puis révélé** — un avis Airbnb masqué s'annonce sans note ;
-  quand il devient visible, une seconde notification donne la vraie note.
+- **Avis révélé** — un avis Airbnb masqué ne prévient pas (l'objet naît au
+  départ, masqué et vide, que le voyageur écrive ou non) ; quand il devient
+  visible ET que le voyageur a écrit, une notification donne la vraie note. Un
+  avis révélé vide ne prévient pas.
 - **Évaluation du voyageur** — depuis `noterEtEnvoyer`, une fois par palier comme
   la tâche : la prestataire a rempli, J-5, J-1, puis le rappel et l'échec de la
   publication automatique. Formulation neutre (un membre en lecture seule la
