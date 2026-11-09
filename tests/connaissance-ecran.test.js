@@ -509,7 +509,8 @@ test('LE TEST QUI COMPTE : l écran et l aperçu suivent la FICHE du logement qu
   })
   assert.equal(r.statut, 200)
   assert.equal(r.requetes.length, 3, 'toujours trois requêtes')
-  assert.match(r.requetes.find(q => q.table === 'properties').colonnes, /address, checkin_time, checkout_time/)
+  // Le code postal et la ville complètent l'adresse (recette du 9 novembre).
+  assert.match(r.requetes.find(q => q.table === 'properties').colonnes, /address, zip_code, city, checkin_time, checkout_time/)
   const c = r.charge.reponses[0]
   assert.equal(c.apercu, 'Au 9 rue Fiche dès 16:00', 'ce que le voyageur recevra')
   assert.ok(c.segments.filter(s => s.cle).every(s => s.vide === false), 'pas d étiquette rouge : la fiche les remplit')

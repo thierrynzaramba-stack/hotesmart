@@ -37,7 +37,8 @@ test('les placeholders lisent la base de connaissance AVANT le provider', () => 
   assert.match(balises, /telephone_hote: b\.phone,/)
   // L'adresse de la FICHE d'abord : `adresseFiche` sur l'objet Beds24 (posée
   // par lib/cron-beds24-props.js), sinon `address`, qui EST la fiche ailleurs.
-  assert.match(balises, /adresse: b\.adresseFiche !== undefined \? b\.adresseFiche : b\.address,/)
+  // Ailleurs, l'adresse ASSEMBLÉE de la fiche (rue, code postal, ville).
+  assert.match(balises, /adresse: b\.adresseFiche !== undefined \? b\.adresseFiche : adresseDeLaFiche\(b\),/)
 })
 
 test('plus aucune lecture nue de `property.phone`', () => {
@@ -207,4 +208,14 @@ test('« message non envoye » a un libelle, et il REVEILLE', () => {
   // ⚠ Contrairement au remboursement automatique : un voyageur qui arrive et ne
   // recoit rien est urgent. L'anti-spam (1/h par bien) borne le bruit.
   assert.ok(!SANS_SMS.has('message_non_envoye'))
+})
+
+test('l adresse du chemin Channex voyage avec son code postal et sa ville', () => {
+  // Recette du 9 novembre 2026 : la fiche range l'adresse en trois champs.
+  // Sans eux, le voyageur Channex aurait reçu la rue seule.
+  assert.match(channexProps, /zip_code: p\.zip_code/)
+  assert.match(channexProps, /city: p\.city/)
+  const selectRecolle = channexProps.replace(/'\s*\+\s*'/g, '')
+  assert.match(selectRecolle, /select\('[^']*address, zip_code, city[^']*'\)/,
+    'le code postal et la ville doivent etre SELECTIONNES, pas seulement recopies')
 })

@@ -82,7 +82,7 @@ module.exports = async function handler(req, res) {
   // (spec Accueil du voyageur, S3). Une panne de cette lecture n'arrete pas la
   // simulation : l'IA lit alors la base seule, et ne s'invente pas d'adresse.
   const { data: fiche } = await supabase.from('properties')
-    .select('address, checkin_time, checkout_time').eq('id', garde.bien.id).maybeSingle()
+    .select('address, zip_code, city, checkin_time, checkout_time').eq('id', garde.bien.id).maybeSingle()
   const knowledgeText = buildKnowledgeText(knowledge || [], { replis: replisDuBien(fiche || {}) })
 
   // L'historique vient du client : on n'en garde que la forme attendue, borne.

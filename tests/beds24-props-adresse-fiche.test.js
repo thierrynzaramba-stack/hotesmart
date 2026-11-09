@@ -48,7 +48,7 @@ function charger ({ lignes, archives = [], archivesIllisibles = false, erreurAdr
         // code laissait le test « bornee, par compte » vert.
         const data = (filtre.user_id === 'u1' && filtre.provider === 'beds24' && refs)
           ? Object.entries(lignes).filter(([ref]) => refs.includes(ref))
-            .map(([ref, l]) => ({ provider_property_id: ref, address: l.address }))
+            .map(([ref, l]) => ({ provider_property_id: ref, address: l.address, zip_code: l.zip_code, city: l.city }))
           : []
         return Promise.resolve({ data, error: null, colonnes }).then(res, rej)
       },
@@ -131,7 +131,7 @@ test('une seule lecture des adresses par compte, bornee aux biens rendus par Bed
   const { mod, selects, lectures } = charger({ lignes: { 111: { id: 'a', active_at: 'x', address: 'A' }, 112: { id: 'b', active_at: 'x', address: 'B' }, 999: { id: 'z', active_at: 'x', address: 'Z' } } })
   const biens = [{ id: 111 }, { id: 112 }]
   await mod.materializeBeds24Properties('u1', biens, {})
-  assert.strictEqual(selects.filter(c => c === 'provider_property_id, address').length, 1)
+  assert.strictEqual(selects.filter(c => c === 'provider_property_id, address, zip_code, city').length, 1)
   const lecture = lectures.find(l => l.refs)
   assert.deepStrictEqual(lecture, { user_id: 'u1', provider: 'beds24', refs: ['111', '112'] },
     'la lecture est bornee au compte, au provider et aux biens rendus par l API')
@@ -143,4 +143,12 @@ test('objet NON decore (materialisation qui a renonce) : l adresse du provider r
   assert.strictEqual(replisDuBien({ address: 'Adresse Beds24' }).adresse, 'Adresse Beds24')
   // Et les autres chemins, ou `address` EST la fiche, ne changent pas.
   assert.strictEqual(replisDuBien({ address: '12 rue des Lilas' }).adresse, '12 rue des Lilas')
+})
+
+test('la decoration Beds24 assemble la rue, le code postal et la ville de la fiche', async () => {
+  // Recette du 9 novembre 2026 : la fiche range l'adresse en trois champs.
+  const { mod } = charger({ lignes: { 111: { id: 'a', active_at: 'x', address: '4 rue du bourg vieux', zip_code: '65200', city: 'Bagnères-de-Bigorre' } } })
+  const biens = [{ id: 111, address: 'Adresse Beds24' }]
+  await mod.materializeBeds24Properties('u1', biens, {})
+  assert.strictEqual(biens[0].adresseFiche, '4 rue du bourg vieux, 65200 Bagnères-de-Bigorre')
 })
