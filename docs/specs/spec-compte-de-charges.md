@@ -320,7 +320,7 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
 | `justificatif_chemin`, `justificatif_type`, `justificatif_octets`, `justificatif_empreinte` | fichier au nom **aléatoire** dans le bucket privé ; empreinte SHA-256, **indexée mais pas unique** : un doublon est regroupé, pas refusé (Q14) |
 | `groupe_doublon` | vide, ou l'`id` de la première charge du groupe de doublons possibles (Q14) ; clé `on delete set null` |
 | `signal` | vide, `doublon` (Q14) ou `commission_deja_comptee` (§7 bis) : la charge porte le signal « Vérifier » |
-| `signal_tranche` | booléen : l'hôte a tranché (garder). Tant qu'il ne l'a pas fait : un groupe de doublons compte **une fois**, une commission déjà comptée compte **zéro**, et le total est « estimation ». Quand la première charge d'un groupe est supprimée, les autres perdent leur `groupe_doublon` (`set null`), leur signal tombe s'il ne reste qu'elles, et le résumé de leurs cellules est recalculé. |
+| `signal_tranche` | booléen : l'hôte a tranché (garder). Tant qu'il ne l'a pas fait : un groupe de doublons compte **une fois**, une commission déjà comptée compte **zéro**, et le total est « estimation ». Quand la première charge (la racine) d'un groupe est supprimée, le writer la remplace d'abord par le plus ancien membre, que les autres désignent ; s'il reste seul, il perd son signal. Un groupe n'a qu'un niveau, et deux groupes qui se rencontrent fusionnent (review du lot 2). |
 | `lecture_ia` | jsonb : ce que l'IA a lu, champ par champ, avec sa confiance, le modèle et l'heure. **Jamais écrasé par la saisie** : l'écart lu / validé mesure la précision (étape 5). |
 | `cree_le`, `modifie_le`, `valide_le`, `valide_par` | |
 
