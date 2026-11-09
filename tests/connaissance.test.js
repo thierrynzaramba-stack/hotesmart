@@ -82,10 +82,13 @@ test('LE TEST QUI COMPTE : une valeur vide se dit « à remplir », jamais un bl
   const wifi = f.find(x => x.cle === 'wifi_nom')
   assert.equal(tel.aRemplir, false)
   assert.equal(wifi.aRemplir, true, 'une valeur d’espaces est vide')
-  assert.equal(f.find(x => x.cle === 'adresse').aRemplir, true, 'une clé absente est à remplir')
-  // Les six faits de la maquette sont là, dans l'ordre, même absents de la base.
-  assert.deepEqual(f.slice(0, 6).map(x => x.cle),
-    ['telephone_hote', 'adresse', 'checkin', 'checkout', 'wifi_nom', 'wifi_mdp'])
+  assert.equal(f.find(x => x.cle === 'wifi_mdp').aRemplir, true, 'une clé absente est à remplir')
+  // Les cinq infos de l'accueil sont là, dans l'ordre, même absentes de la
+  // base. L'adresse n'en est plus : une seule adresse, celle de la fiche
+  // (décision de Thierry du 8 novembre 2026).
+  assert.deepEqual(f.slice(0, 5).map(x => x.cle),
+    ['telephone_hote', 'checkin', 'checkout', 'wifi_nom', 'wifi_mdp'])
+  assert.equal(f.find(x => x.cle === 'adresse'), undefined)
   // Et une réponse rédigée n'est pas un fait.
   assert.ok(!f.some(x => x.cle === 'Parking'))
 })
@@ -170,10 +173,23 @@ test('LE TEST QUI COMPTE : « vide » suit le remplaceur AVEC LES REPLIS de l’
     assert.equal(segments[1].vide, r.manquants.includes(cle), `${cle} : l’écran et l’envoi disent la même chose`)
   }
   const f = faits([], { maintenant: MAINTENANT, replis })
-  const adresse = f.find(x => x.cle === 'adresse')
-  assert.equal(adresse.aRemplir, false, 'l’adresse part au voyageur depuis la fiche')
-  assert.equal(adresse.repli, '1 rue Fiche')
   assert.equal(f.find(x => x.cle === 'checkin').repli, '16:00')
+  // Une chaîne de replis (`replisDuBien`) se lit comme dans le remplaceur.
+  const chaine = faits([], { maintenant: MAINTENANT, replis: { checkin: ['  ', '15:30'] } })
+  assert.equal(chaine.find(x => x.cle === 'checkin').repli, '15:30')
   // Un repli blanc n'est pas une valeur (même règle que le remplaceur).
-  assert.equal(faits([], { replis: { adresse: '   ' } }).find(x => x.cle === 'adresse').aRemplir, true)
+  assert.equal(faits([], { replis: { telephone_hote: '   ' } }).find(x => x.cle === 'telephone_hote').aRemplir, true)
+})
+
+test('une ligne `adresse` restée dans la BASE ne rend pas l’étiquette « remplie » (balise de fiche)', () => {
+  // Constat de la review 1 du lot Accueil du voyageur : le remplaceur ignore
+  // la base pour `adresse` (`fiche: true`), l'aperçu doit dire la même chose.
+  const { remplacerBalises } = require('../lib/balises')
+  const connaissance = { adresse: 'Ancienne adresse de la base' }
+  const r = remplacerBalises('x {adresse} y', { reservation: {}, connaissance, replis: {} })
+  const { segments } = enEtiquettes('x {adresse} y', connaissance, {})
+  assert.deepEqual(r.manquants, ['adresse'])
+  assert.equal(segments[1].vide, true, 'l’aperçu dit « remplie » une adresse que l’envoi ne prendra pas')
+  // Et avec l'adresse de la fiche, plus de trou.
+  assert.equal(enEtiquettes('x {adresse} y', connaissance, { adresse: '1 rue Fiche' }).segments[1].vide, false)
 })

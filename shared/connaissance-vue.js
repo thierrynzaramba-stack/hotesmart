@@ -20,6 +20,10 @@
 // collision avec ceux de `pages/messages.html`.
 
 import { confirmerDansLaPage } from '/shared/confirmer.js'
+// « Le remplir » écrit une info d'accueil par le MÊME module que la fiche du
+// logement (lot « Accueil du voyageur », 8 novembre 2026) : deux copies
+// divergent.
+import { editeurInfoHtml, enregistrerInfo } from '/shared/accueil-voyageur.js'
 
 // Les quatre balises de l'insertion rapide, dans l'ordre de la maquette ; le
 // reste est derrière « Autre… ». Les LIBELLÉS viennent du serveur (BALISES).
@@ -198,10 +202,20 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     const refus = etat.refus && etat.refus.id === String(c.id) ? etat.refus : null
     const lignes = refus ? refus.lignes.map(l =>
       `<p class="kb-note" role="status" data-kb-refus>${esc(l)}</p>`).join('') : ''
-    const remplir = refus && refus.remplir
+    // ⚠ « LE REMPLIR » SE FAIT SUR PLACE, SOUS LE REFUS (décision de Thierry du
+    // 8 novembre 2026) : les infos d'accueil vivent dans la fiche du logement,
+    // mais on ne quitte pas la conversation pour en compléter une.
+    const fait = etat.mode === 'fait' && etat.fait && etat.fait.carte === String(c.id)
+      ? ((etat.donnees && etat.donnees.faits) || []).find(x => x.cle === etat.fait.cle) : null
+    const editeur = fait ? editeurInfoHtml(fait, { t, esc }) : ''
+    const remplir = refus && refus.remplir && !fait
       ? `<button type="button" class="kb-lien" data-kb-remplir="${esc(refus.remplir)}">${esc(t('kb.fill_it'))}</button>` : ''
-    return `<div class="kb-carte-bloc">${carte}${lignes}
-      <div class="kb-carte-bloc__actions">${remplir}
+    // L'adresse est la seule info qui ne se remplit pas ici : elle vit dans la
+    // fiche du logement (une seule adresse, décision du 8 novembre 2026).
+    const versFiche = refus && refus.fiche && lienFiche()
+      ? `<a class="kb-lien" href="${esc(lienFiche())}" data-kb-vers-fiche>${esc(t('kb.open_listing'))}</a>` : ''
+    return `<div class="kb-carte-bloc">${carte}${lignes}${editeur}
+      <div class="kb-carte-bloc__actions">${remplir}${versFiche}
         <button type="button" class="btn btn--secondary kb-utiliser" data-kb-utiliser="${esc(c.id)}">${esc(t('kb.use'))}</button>
       </div>
     </div>`
@@ -231,7 +245,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     // base de ce logement — là où l'hôte la complète, dans la même vue.
     const faits = (etat.donnees && etat.donnees.faits) || []
     const remplir = manquants.find(cle => faits.some(f => f.cle === cle)) || null
-    return { id: String(c.id), lignes, remplir }
+    return { id: String(c.id), lignes, remplir, fiche: manquants.includes('adresse') }
   }
 
   function utiliserReponse (id) {
@@ -246,37 +260,18 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     utiliser({ texte: String(c.apercu), resa: String(resa), ref: etat.ref, sujet: c.sujet })
   }
 
-  function faitHtml (f) {
-    const libelle = f.sansBalise ? esc(f.cle) : esc(f.libelle)
-    if (etat.mode === 'fait' && etat.fait && etat.fait.cle === f.cle) {
-      return `<div class="kb-fait kb-fait--edition">
-        <label class="kb-fait__libelle" for="kb-fait-saisie">${libelle}</label>
-        <input id="kb-fait-saisie" data-kb-fait-saisie value="${esc(f.valeur)}" maxlength="1000" autocomplete="off">
-        <div class="kb-actions">
-          <button type="button" class="btn btn--primary" data-kb-fait-enregistrer>${esc(t('kb.save'))}</button>
-          <button type="button" class="kb-lien" data-kb-annuler>${esc(t('kb.cancel'))}</button>
-        </div>
-      </div>`
-    }
-    // Une valeur vide AVEC un défaut (les horaires) montre ce que le voyageur
-    // recevra, marqué « par défaut » — pas un « À remplir » qui serait faux.
-    // … et la fiche du logement passe AVANT le défaut, comme dans le
-    // remplaceur : c'est ce que le voyageur recevra vraiment.
-    const vide = !String(f.valeur || '').trim()
-    const valeur = f.aRemplir
-      ? `<span class="kb-fait__valeur kb-a-remplir">${esc(t('kb.to_fill'))}</span>`
-      : vide && f.repli
-        ? `<span class="kb-fait__valeur">${esc(f.repli)} <span class="caption muted">${esc(t('kb.from_property'))}</span></span>`
-        : vide && f.defaut
-          ? `<span class="kb-fait__valeur">${esc(f.defaut)} <span class="caption muted">${esc(t('kb.by_default'))}</span></span>`
-          : `<span class="kb-fait__valeur">${esc(f.valeur)}</span>`
-    const sous = f.sansBalise ? `<span class="caption muted">${esc(t('kb.ai_only'))}</span>` : ''
-    const verrou = f.horsIa ? `<span class="kb-badge kb-badge--horsia">${icone('i-lock')}${esc(t('kb.no_ai'))}</span>` : ''
-    return `<div class="kb-fait">
-      <span class="kb-fait__libelle">${libelle}${sous}</span>${valeur}${verrou}
-      <button type="button" class="kb-icone" data-kb-modifier-fait="${esc(f.cle)}"
-        aria-label="${esc(t('kb.edit_info', { info: f.sansBalise ? f.cle : f.libelle }))}">${icone('i-edit')}</button>
-    </div>`
+  // ⚠ LES INFOS D'ACCUEIL ONT QUITTÉ LA BASE pour la fiche du logement (lot du
+  // 8 novembre 2026, décision de Thierry du 6 novembre). La base dit où elles
+  // sont ; elle ne les montre plus. L'UUID du bien vient du serveur : la page
+  // de la fiche s'ouvre par lui.
+  function lienFiche () {
+    const b = etat.donnees && etat.donnees.bien
+    return b && b.id ? `/logements/${encodeURIComponent(b.id)}` : null
+  }
+  function infosDansLaFicheHtml () {
+    const lien = lienFiche()
+    return `<p class="caption muted kb-info" data-kb-infos-fiche>${esc(t('kb.info_in_listing'))}${lien
+      ? ` <a class="kb-lien" href="${esc(lien)}">${esc(t('kb.open_listing'))}</a>` : ''}</p>`
   }
 
   function noteHtml () {
@@ -298,10 +293,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
         <button type="button" class="kb-lien" data-kb-ajouter>${icone('i-plus')}${esc(t('kb.add'))}</button>
       </div>
       <div class="kb-cartes">${cartes}</div>
-      <div class="kb-section">
-        <h3 class="kb-section__titre">${esc(t('kb.property_info'))}</h3>
-      </div>
-      <div class="kb-faits">${(r.faits || []).map(faitHtml).join('')}</div>`
+      ${infosDansLaFicheHtml()}`
   }
 
   function editeurHtml () {
@@ -356,7 +348,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     racine.innerHTML = `<div class="kb">${etat.mode === 'edition' ? editeurHtml() : listeHtml()}</div>`
     if (etat.mode === 'edition') remplirEditeur()
     if (etat.mode === 'fait') {
-      const champ = racine.querySelector('[data-kb-fait-saisie]')
+      const champ = racine.querySelector('[data-acc-saisie]')
       if (champ) champ.focus()
     }
   }
@@ -385,6 +377,9 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
   function videAInsertion (cle) {
     const b = balise(cle)
     if (!b || b.origine !== 'base') return false
+    // L'adresse n'est plus une info de la base : elle vient de la fiche, et le
+    // serveur dit seulement si elle y est.
+    if (cle === 'adresse') return !(etat.donnees && etat.donnees.bien && etat.donnees.bien.adresse === true)
     const f = ((etat.donnees && etat.donnees.faits) || []).find(x => x.cle === cle)
     return !f || f.aRemplir === true
   }
@@ -446,7 +441,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
   function enEdition () {
     if (enCours) return false
     if (etat.mode === 'fait' && etat.fait) {
-      const champ = racine.querySelector('[data-kb-fait-saisie]')
+      const champ = racine.querySelector('[data-acc-saisie]')
       return !!champ && champ.value.trim() !== String(etat.fait.initial || '').trim()
     }
     if (etat.mode !== 'edition' || !etat.edition) return false
@@ -600,15 +595,15 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
 
   async function enregistrerFait () {
     if (enCours || !etat.fait) return
-    const champ = racine.querySelector('[data-kb-fait-saisie]')
+    const champ = racine.querySelector('[data-acc-saisie]')
     if (!champ) return
     enCours = true
     geler(true)
     try {
-      await appel('/api/ecran/connaissance', {
-        action: 'enregistrer', bien: etat.ref, type: 'fixed', key: etat.fait.cle, value: champ.value.trim()
-      })
-      etat.mode = 'liste'; etat.fait = null
+      await enregistrerInfo(appel, { ref: etat.ref, cle: etat.fait.cle, valeur: champ.value })
+      // L'aperçu se recalcule à la relecture : « Utiliser » redevient possible
+      // si c'était la seule info qui manquait.
+      etat.mode = 'liste'; etat.fait = null; etat.refus = null
       await recharger()
       etat.note = { texte: t('kb.saved'), ok: true }
       peindre()
@@ -616,7 +611,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
       etat.note = { texte: texteErreur(err) }
       const valeur = champ.value
       peindre()
-      const neuf = racine.querySelector('[data-kb-fait-saisie]')
+      const neuf = racine.querySelector('[data-acc-saisie]')
       if (neuf) neuf.value = valeur
     } finally {
       enCours = false
@@ -666,13 +661,20 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     if (cible.hasAttribute('data-kb-annuler')) { revenirALaListe(); return }
     if (cible.hasAttribute('data-kb-enregistrer')) { enregistrer(); return }
     if (cible.hasAttribute('data-kb-supprimer')) { supprimer(); return }
-    if (cible.hasAttribute('data-kb-fait-enregistrer')) { enregistrerFait(); return }
+    if (cible.hasAttribute('data-acc-enregistrer')) { enregistrerFait(); return }
+    if (cible.hasAttribute('data-acc-annuler')) {
+      // Annuler « Le remplir » rend la carte et son refus, pas la liste nue.
+      etat.mode = 'liste'; etat.fait = null
+      peindre()
+      return
+    }
     if (cible.dataset.kbUtiliser != null) { utiliserReponse(cible.dataset.kbUtiliser); return }
-    const aModifier = cible.dataset.kbModifierFait != null ? cible.dataset.kbModifierFait : cible.dataset.kbRemplir
-    if (aModifier != null) {
-      const f = ((etat.donnees || {}).faits || []).find(x => x.cle === aModifier)
-      if (!f) return
-      etat.mode = 'fait'; etat.fait = { cle: f.cle, initial: f.valeur }; etat.note = null; etat.refus = null
+    if (cible.dataset.kbRemplir != null) {
+      const f = ((etat.donnees || {}).faits || []).find(x => x.cle === cible.dataset.kbRemplir)
+      if (!f || !etat.refus) return
+      etat.mode = 'fait'
+      etat.fait = { cle: f.cle, initial: f.valeur, carte: etat.refus.id }
+      etat.note = null
       peindre()
       return
     }
@@ -691,7 +693,7 @@ export function monterConnaissance ({ racine, appel, t, esc, bien = null, resa =
     if (ev.target.closest && ev.target.closest('[data-kb-message]')) { memoriserCurseur(); planifierApercu() }
   }
   function surTouche (ev) {
-    if (ev.key === 'Enter' && ev.target.matches && ev.target.matches('[data-kb-fait-saisie]')) {
+    if (ev.key === 'Enter' && ev.target.matches && ev.target.matches('[data-acc-saisie]')) {
       ev.preventDefault(); enregistrerFait()
     }
   }

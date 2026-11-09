@@ -2,6 +2,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { sendAlertNotifications } = require('../lib/alert-notify')
+const { replisDuBien } = require('../lib/balises')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -76,7 +77,13 @@ module.exports = async function handler(req, res) {
     .from('knowledge').select('*')
     .eq('user_id', user.id)
     .eq('property_id', String(refBien))
-  const knowledgeText = buildKnowledgeText(knowledge || [])
+  // La garde ne lit que l'identite du bien : l'adresse et les horaires de la
+  // fiche se lisent ici, pour que le simulateur voie ce que voit l'agent reel
+  // (spec Accueil du voyageur, S3). Une panne de cette lecture n'arrete pas la
+  // simulation : l'IA lit alors la base seule, et ne s'invente pas d'adresse.
+  const { data: fiche } = await supabase.from('properties')
+    .select('address, zip_code, city, checkin_time, checkout_time').eq('id', garde.bien.id).maybeSingle()
+  const knowledgeText = buildKnowledgeText(knowledge || [], { replis: replisDuBien(fiche || {}) })
 
   // L'historique vient du client : on n'en garde que la forme attendue, borne.
   // ⚠ LES HEURES SONT ATTRIBUEES ICI, DANS L'ORDRE RECU. Melanger l'horloge du
