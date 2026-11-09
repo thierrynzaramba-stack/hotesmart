@@ -529,6 +529,65 @@ indexée.
   objet jamais ouvert — une tâche « n'a pas été publiée automatiquement », une
   fois par séjour.
 
+### 10 ter. Trace des reviews du lot « sans prestataire » (9 novembre 2026)
+
+Branche `avis-auto-sans-prestataire`, partie de `main` `b7f511dc37fb5d27c5cc1f0017c7a136387db193`,
+arbre relu : `/home/claude/hotesmart-auto-avis`. Lot d'**envoi au voyageur** (la
+publication d'une évaluation chez le canal) : deux reviews, la seconde limitée aux
+correctifs et dernière. Règle de contrôle : chaque fichier cité doit être dans le
+diff de la **plage relue** ; un fichier hors plage est dit « preuve seulement » ou
+porte son constat et son motif.
+
+**Review 1** — plage `b7f511dc37fb5d27c5cc1f0017c7a136387db193..6e73da311cddc5e72ec62cc096454476c7c38ef1`,
+tête déclarée lue `6e73da311cddc5e72ec62cc096454476c7c38ef1`. Aucun constat de sécurité ;
+12 constats, corrigés dans `22f2013105779e6923bc972840aebb0bf625f047` (sauf 7 et 8, notés).
+Diff de la plage : `docs/specs/spec-evaluation-voyageur.md`, `lib/avis/auto-validation.js`,
+`lib/avis/naissance.js`, `scripts/armer-avis-sans-prestataire.js`,
+`tests/avis-auto-sans-prestataire.test.js`, `tests/avis-naissance.test.js`.
+
+| constat | fichiers cités | dans la plage ? |
+|---|---|---|
+| 1 — le script publie avant 24 h, parfois sans rappel | `scripts/armer-avis-sans-prestataire.js`, `lib/avis/auto-validation.js` | oui |
+| 2 — l'horloge part à minuit, avant le check-out | `lib/avis/naissance.js` | oui |
+| 3 — le script réarme ce que l'hôte a arrêté | `scripts/armer-avis-sans-prestataire.js`, `lib/avis/auto-validation.js` ; **`api/avis.js`** (l. 2089-2097, `laMainALHote`) | `api/avis.js` hors plage : **preuve seulement**, il montre les réactions de l'hôte qui ne laissent pas de trace ; le correctif (marque au journal) est dans `lib/avis/auto-validation.js` |
+| 4 — l'écriture de l'horloge ne vérifie pas les réponses | `lib/avis/auto-validation.js`, `tests/avis-auto-sans-prestataire.test.js` | oui |
+| 5 — reports d'une heure sans plafond | `lib/avis/auto-validation.js` | oui |
+| 6 — réponse de prestataire écrasée | `lib/avis/auto-validation.js` ; **`api/avis.js`** (l. 2223, relecture sous verrou) | `api/avis.js` hors plage : **constat d'interaction** ; corrigé d'abord côté prise (`siCleanerNul`, 22f20131), puis côté relecture sous verrou en `51355e63` sur le constat 2 de la dernière review — c'est là que `api/avis.js` entre au lot |
+| 7 — coût du cron | `lib/avis/naissance.js`, `lib/avis/auto-validation.js` | oui — non traité, noté |
+| 8 — armement manqué jamais rattrapé | `lib/avis/naissance.js` ; **`api/avis.js`** (l. 1182, naissance par le lien de la prestataire) | `api/avis.js` hors plage : **constat, non traité, avec motif** — cette naissance exige une prestataire autorisée (`api/avis.js` l. 1171), qui participe donc : ne pas armer y est juste |
+| 9 — détails du script | `scripts/armer-avis-sans-prestataire.js` | oui |
+| 10 — erreur d'armement comptée « non née » | **`lib/cron-channel-reviews.js`** | hors plage : **constat, le lot aurait dû y toucher** — corrigé en 22f20131, où le fichier entre au lot |
+| 11 — spec contraire | `docs/specs/spec-evaluation-voyageur.md` | oui |
+| 12 — tests qui passent pour de mauvaises raisons | `tests/avis-auto-sans-prestataire.test.js` | oui |
+
+Cités dans « points vérifiés », sans constat : `api/avis.js` (l. 1865, 2225) et
+`lib/avis/publication.js` (l. 110-119) — **preuve seulement** (la rédaction et la
+publication relisent bien la grille figée).
+
+**Dernière review** — plage `6e73da311cddc5e72ec62cc096454476c7c38ef1..22f2013105779e6923bc972840aebb0bf625f047`,
+tête déclarée lue `22f2013105779e6923bc972840aebb0bf625f047`. Aucun constat de sécurité ;
+5 constats, corrigés sans nouvelle review dans `51355e63267ba033ff7cbf55a4bebda455df0ce5`
+(règle : c'était la dernière). Diff de la plage : `docs/specs/spec-evaluation-voyageur.md`,
+`lib/avis/auto-validation.js`, `lib/avis/naissance.js`, `lib/cron-channel-reviews.js`,
+`scripts/armer-avis-sans-prestataire.js`, `tests/avis-auto-sans-prestataire.test.js`.
+
+| constat | fichiers cités | dans la plage ? |
+|---|---|---|
+| 1 — le délai jugé avant la marque et la prestataire | `scripts/armer-avis-sans-prestataire.js`, `lib/avis/auto-validation.js` | oui |
+| 2 — la relecture sous verrou ne compare que `answers_host` | **`api/avis.js`** (l. 2223-2225) | hors plage : **constat, le lot aurait dû y toucher** (la prise « sans prestataire » change ce que la relecture doit comparer) — corrigé en 51355e63, test dans `tests/avis-endpoint-evaluation.test.js` |
+| 3 — marque posée, horloge non écrite | `lib/avis/auto-validation.js` | oui |
+| 4 — « le premier » au lieu de « la meilleure note » | `docs/specs/spec-evaluation-voyageur.md` | oui |
+| 5 — délai raccourci à la naissance par objet Channex | `lib/avis/naissance.js` | oui |
+
+Cités dans « points vérifiés », sans constat : `api/messages.js` (l. 156, l'autre
+lecteur de `core_events`) et `api/cron.js` (l. 703, ce que le cron lit du bilan) —
+**preuve seulement**. Mutations faites sur une copie hors de l'arbre.
+
+**Commit non relu** : `51355e63` (correctifs de la dernière review), conforme à la
+règle. Ses fichiers : `api/avis.js`, `docs/specs/spec-evaluation-voyageur.md`,
+`lib/avis/auto-validation.js`, `scripts/armer-avis-sans-prestataire.js`,
+`tests/avis-auto-sans-prestataire.test.js`, `tests/avis-endpoint-evaluation.test.js`.
+
 ## 11. Lots
 
 0. **Étape 0 — lecture seule** :
