@@ -1,9 +1,8 @@
 # Spec de chantier — Le compte de charges : les factures reçues par l'hôte
 
 Demande de Thierry du 8 novembre 2026 (fil « compte de charges » du Projet).
-**Statut : étape 0 — Q1 à Q22 tranchées par Thierry le 8 novembre 2026,
-chaque réponse inscrite et datée ; Q23 (née de la relecture de cohérence)
-en attente. Aucun code.** Ce qui
+**Statut : étape 0 close le 9 novembre 2026 — les 23 questions du §4 sont
+tranchées par Thierry, chaque réponse inscrite et datée. Aucun code.** Ce qui
 reste « *proposition* » dans le texte est un choix technique non contredit,
 ou une précision soumise à Thierry avec la décision qu'elle accompagne.
 
@@ -101,8 +100,7 @@ précision **mesurée** à l'étape 5 ne suffit pas.
 
 ## 4. Questions
 
-Q1 à Q22 tranchées le 8 novembre 2026. **Q23**, née de la relecture de
-cohérence, attend Thierry.
+Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
 
 - **Q1 — Un bien précis.** Tranchée, voir ci-dessous.
 - **Q2 — Le suivi du paiement.** Tranchée, voir ci-dessous.
@@ -119,21 +117,7 @@ cohérence, attend Thierry.
 - **Q11 — Supprimer.** Tranchée, voir ci-dessous.
 - **Q12 — La conservation.** Tranchée, voir ci-dessous.
 - **Q22 — La période comptable.** Tranchée, voir ci-dessous.
-- **Q23 — Le statut d'une commission de plateforme à sa naissance.** Elle
-  vient du cœur, pas d'une lecture IA. *Proposition* : elle naît
-  **validée**, avec la mention **« depuis la réservation »** (et non
-  « vérifiée », qui dit que l'hôte l'a vérifiée), et ne rend pas le total
-  « estimation ». Sans entité (Q20), elle reste « à vérifier » et passe
-  validée dès que l'entité existe. Sinon, chaque séjour Airbnb ajouterait une
-  ligne à vérifier, et le total resterait « estimation » en permanence.
-- **Q13 — L'export pour le comptable.** Tranchée, voir ci-dessous.
-- **Q14 — Les doublons.** Tranchée, voir ci-dessous.
-- **Q15 — Le risque résiduel des pièces jointes.** Tranchée, voir ci-dessous.
-- **Q16 — Révoquer l'adresse.** Tranchée, voir ci-dessous.
-- **Q17 — La TVA récupérable.** Tranchée, voir ci-dessous.
-- **Q18 — Un bien hors de l'entité.** Tranchée, voir ci-dessous.
-- **Q19 — Les factures sans pièce jointe.** Tranchée, voir ci-dessous.
-- **Q20 — Un compte sans entité.** Tranchée, voir ci-dessous.
+- **Q23 — Le statut d'une commission de plateforme à sa naissance.** Tranchée, voir ci-dessous.
 
 ### Réponses de Thierry
 
@@ -207,7 +191,7 @@ cohérence, attend Thierry.
   seulement N et N-1 ; l'hôte choisit sa période comptable » ; **à 22 h 53, il
   revient dessus : « on n'efface pas pour le moment, finalement on garde
   tout »**. Donc : aucune purge, aucune tâche d'effacement (une seule
-  exception soumise à Thierry, §6 : un envoi de fichier jamais confirmé, qui
+  exception, acceptée le 9 novembre, §6 : un envoi de fichier jamais confirmé, qui
   n'est pas une charge), les charges et
   leurs justificatifs restent tant que l'hôte ne les supprime pas (Q11). La
   conservation légale (plusieurs années, à confirmer avec un comptable) reste
@@ -258,6 +242,12 @@ cohérence, attend Thierry.
   facture lisible » avec son expéditeur, son sujet et son texte, et l'hôte
   ajoute le PDF à la main. Ce texte sert aussi à lire l'e-mail de
   confirmation d'un transfert automatique (Gmail par exemple).
+- **Q23 (9 nov. 2026, 9 h 02) : d'accord.** Une commission de plateforme
+  naît **validée**, avec la mention **« depuis la réservation »** (pas
+  « vérifiée »), et ne rend pas le total « estimation ». Sans entité (Q20),
+  elle reste « à vérifier » et passe validée dès que l'entité existe. Le même
+  « ok » accepte l'exception de §6 : un envoi de fichier jamais confirmé est
+  effacé au bout de 24 h.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -361,8 +351,8 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
   consultation par URL signée de courte durée, délivrée au titulaire seul.
   Type vérifié sur le contenu relu (signature du fichier), pas sur le nom ;
   PDF 10 Mo au plus, image réduite sous la limite de l'API Claude
-  (propositions). ⚠ **Seule exception à « on garde tout » (Q12), soumise à
-  Thierry** : une ligne restée en `envoi` — un fichier jamais confirmé, donc
+  (propositions). ⚠ **Seule exception à « on garde tout » (Q12), acceptée
+  par Thierry le 9 novembre (Q23)** : une ligne restée en `envoi` — un fichier jamais confirmé, donc
   pas une charge — est effacée avec son fichier après 24 h, par le cron dédié.
 - **Accès** : RLS activée, aucune politique côté navigateur ; tout passe par
   les endpoints gardés (Q9). **Writer unique** : `lib/charges.js`.
@@ -471,7 +461,8 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
   « commissions des plateformes », montant TTC = `commission_cents` (HT et
   TVA vides : non transmis), bien = `property_uuid`, entité =
   `entiteDuBien`, `booking_id`, jour = `date_versement`. Pas de
-  justificatif, pas de lecture IA. **Statut de naissance : Q23.**
+  justificatif, pas de lecture IA. Elle naît **validée**, mention « depuis
+  la réservation » (Q23).
 - **Filtre** : celui des agrégats Revenus — `statut_canonique = 'confirmed'`
   et `est_blocage is not true` — et `commission_cents` non nul. **Le canal
   Booking.com est exclu quel que soit le fournisseur** (Channex ou Beds24) :
