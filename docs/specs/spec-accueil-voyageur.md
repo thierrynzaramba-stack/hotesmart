@@ -367,4 +367,16 @@ touche l'envoi au voyageur.
     tests neufs rougissent.
   - Corrigée sans nouvelle review (règle : la dernière review se corrige sans
     review) ; chaque correctif a un test qui rougit contre `60f9e66e`.
+- **Correctif de recette, SANS nouvelle review** (9 novembre 2026,
+  `555c2b78eeb2b09c2c416534f8e387160ac37baa`, au-dessus de `b6ca87a6`). Le lot
+  est à son plafond : trois reviews comptées, le maximum pour un lot qui touche
+  l'envoi au voyageur. Un correctif né d'une recette se commite sur la branche
+  du lot (règle 8) et passe sans review ; c'est le chef de file qui l'accepte.
+  Objet : l'adresse envoyée est entière (S4bis) — la fiche range rue, code
+  postal et ville en trois champs, le lot n'envoyait que la rue. Deux fichiers
+  entrent dans le lot pour ce seul motif, chacun pour deux colonnes ajoutées à
+  sa lecture (`zip_code`, `city`) : `lib/cron-channel-props.js` (objet du bien
+  sur le chemin Channex du cron) et `lib/cleaning/sync-menages.js` (contexte
+  du répartiteur des changements de réservation). Chaque test neuf rougit
+  contre `b6ca87a6`.
 
