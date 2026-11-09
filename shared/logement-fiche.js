@@ -1128,6 +1128,11 @@ export function avisBlocHtml (fiche, outils) {
 // bloc le dit en clair plutôt que de se taire.
 // ⚠ LE BOUTON SUIT LE SERVEUR (`facturation.modifier`, le titulaire seul) —
 // le masquage n'est que la seconde ligne : la fenêtre refuse en 403.
+// ⚠ « AUCUNE ENTITÉ » ET « ARCHIVÉE » VIVENT SOUS LA LIGNE, JAMAIS DEDANS
+// (recette de Thierry en production, 9 novembre 2026). Dans `.fic-ligne`, une
+// ligne flex qui ne passe pas à la ligne, `.fic-erreur` (`flex: 1 0 100%`)
+// réclamait toute la largeur À CÔTÉ de la clé : le message sortait du bloc à
+// droite. En paragraphe sous la ligne, il passe à la ligne dans le bloc.
 export function facturationHtml (fiche, outils) {
   const { t, esc } = outils
   const f = fiche.facturation
@@ -1135,17 +1140,18 @@ export function facturationHtml (fiche, outils) {
     return (fiche.indisponibles || []).includes('facturation') ? nonLu('fiche.facturation_non_lue', outils) : null
   }
   const e = f.entite
-  const valeur = !e
-    ? `<span class="fic-ligne__val fic-erreur">${esc(t('fiche.facturation_aucune'))}</span>`
+  const valeur = e && !e.archivee ? `<span class="fic-ligne__val">${esc(e.nom)}</span>` : ''
+  const alerte = !e
+    ? `<p class="fic-erreur" data-facturation-alerte>${esc(t('fiche.facturation_aucune'))}</p>`
     : e.archivee
-      ? `<span class="fic-ligne__val fic-erreur">${esc(t('fiche.facturation_archivee', { nom: e.nom }))}</span>`
-      : `<span class="fic-ligne__val">${esc(e.nom)}</span>`
+      ? `<p class="fic-erreur" data-facturation-alerte>${esc(t('fiche.facturation_archivee', { nom: e.nom }))}</p>`
+      : ''
   const bouton = f.modifier === true
     ? `<div class="fic-publier"><button type="button" class="btn btn--secondary" data-bind="facturation">`
       + `${esc(t(e && !e.archivee ? 'fiche.facturation_modifier' : 'fiche.facturation_choisir'))}</button></div>`
     : ''
   return `<div class="fic-facturation"><div class="fic-ligne">`
-    + `<span class="fic-ligne__cle caption">${esc(t('fiche.facturation_entite'))}</span>${valeur}</div>${bouton}</div>`
+    + `<span class="fic-ligne__cle caption">${esc(t('fiche.facturation_entite'))}</span>${valeur}</div>${alerte}${bouton}</div>`
 }
 
 // Le bloc entier, pour le repeindre seul quand la fenêtre change l'entité.

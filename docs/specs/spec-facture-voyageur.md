@@ -691,6 +691,37 @@ titulaire seul ; pendant un envoi, toute la fenêtre éteinte et tout
 changement de mode ignoré, rallumée sur un refus. Chacune tuée par une
 mutation.
 
+#### Correctif de mise en page « Aucune entité » (9 novembre 2026, après la mise en production)
+
+Recette de Thierry en production : sur Ofuro Futari et Colomiers, « Aucune
+entité : ce logement ne peut pas facturer » sortait du bloc Facturation à
+droite. Branche `facture-voyageur-mise-en-page`, partie de `main` =
+`9385a9e1ddfe3d957ffc9e79985b16122ef14bd1`.
+
+Review (sous-agent, une seule) :
+- arbre `/home/claude/hotesmart-mep`, HEAD lu
+  `ec0c8721309b5fd6f1904309f077935780352de6`, plage
+  `9385a9e1ddfe3d957ffc9e79985b16122ef14bd1..ec0c8721309b5fd6f1904309f077935780352de6` ;
+- fichiers cités : dans le diff — `shared/logement-fiche.js`,
+  `tests/logement-facturation.test.js` ; hors diff, cité pour son CSS comme le
+  brief le demandait — `pages/logement.html` ; preuve seulement —
+  `lib/entites-juridiques.js`, `shared/properties.js`,
+  `shared/logement-facturation.js`.
+
+**0 sécurité, 2 constats mineurs**, corrigés sans nouvelle review :
+1. Le `<p class="fic-erreur">` avait perdu le retour à la ligne forcé que
+   l'ancien `<span>` tenait de `.fic-ligne__val` : un nom d'entité archivée
+   SANS ESPACE (jusqu'à 200 caractères acceptés) faisait défiler la page de
+   côté (mesuré en review : 437 px pour un écran de 375). Ajout de
+   `.fic-facturation .fic-erreur { overflow-wrap: anywhere; }` dans
+   `pages/logement.html`. Mesuré dans Chrome sur la fiche de production, nom
+   de 80 caractères sans espace : 761 px de contenu pour 306 de place sans la
+   règle, la page défile ; avec la règle, rien ne déborde, à 340 comme à
+   540 px de bloc.
+2. Le test comparait des chaînes exactes (`tagName`, `className`) : il passe à
+   `classList.contains`, et garde la règle CSS ci-dessus (jsdom ne calcule pas
+   la mise en page).
+
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
 Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.
