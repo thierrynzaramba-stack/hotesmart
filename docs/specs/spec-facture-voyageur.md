@@ -123,7 +123,8 @@ confirme le total après le séjour, et la facture lui parvient par lien.
 | # | Sujet | Décision |
 |---|---|---|
 | D1 | Réservations concernées | **Toutes** : Airbnb, Booking, directes (Offline, moteur). |
-| D2 | Émetteur | **Une identité par compte, remplaçable pour un bien** (exemple : un bien détenu par une SCI). |
+| D2 | Émetteur | ~~Une identité par compte, remplaçable pour un bien~~ — **remplacée par D2 bis**. |
+| D2 bis | Où se règle l'émetteur (9 nov. 2026, 12 h 08, à la recette de l'étape 1) | **Sur la fiche de chaque logement**, dans une fenêtre : choisir une entité, la **retirer de ce logement** (elle reste pour les autres), **créer** une entité, la **modifier** (numérotation comprise). **Plus d'entité par défaut** : chaque logement choisit la sienne, et un logement sans entité ne facture pas. **Plus de page « Entités juridiques »** ni d'onglet dans les Réglages. |
 | D3 | Envoi | **Un lien sécurisé dans la conversation.** Motif : les voyageurs Airbnb n'ont souvent pas d'e-mail connu. |
 | Q1 | Qui remplit le formulaire | **Le voyageur.** |
 | Q2 | Montant d'une réservation Airbnb | **Le prix payé par le voyageur** (net hôte + retenue Airbnb). Thierry : les frais partagés d'Airbnb disparaissent ; le supplément voyageur inconnu n'est pas traité. |
@@ -174,8 +175,9 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   (ouverte depuis la notification, sans passer par le calendrier), émission,
   avoir. **Aucune nouvelle demande** sur un bien archivé : le serveur la
   refuse, quelle que soit la porte.
-- **P4 — Pas d'entité juridique.** Si le compte n'a pas d'entité par défaut
-  (ou si celle du bien est archivée), la confirmation ne peut pas émettre. Le
+- **P4 — Pas d'entité juridique.** Si le logement n'a pas d'entité (D2 bis :
+  plus de défaut), ou si la sienne est archivée, la confirmation ne peut pas
+  émettre. Le
   membre qui confirme ne peut pas la régler (titulaire seul). Proposition : la
   confirmation le dit, et le titulaire est prévenu.
   → **Réponse de Thierry (8 nov. 2026, 22 h 08) : A.** La confirmation dit
@@ -225,7 +227,6 @@ Thierry.
 | `email`, `telephone` | vide possible | contact imprimé |
 | `debut_exercice` | texte « MM-JJ », **vide possible, sans défaut** | demandé par le compte de charges (Thierry, 8 nov. 2026, 22 h 50) pour présenter ses totaux par exercice — aucune purge (Thierry, 22 h 53 : « on garde tout ») ; on ne suppose pas une année civile |
 | `numerotation_factures` | texte : `auto` (défaut) ou `manuel` | Q5 bis : en manuelle, l'hôte saisit chaque numéro à l'émission |
-| `par_defaut` | booléen | **une seule** par compte (index unique partiel) |
 | `archivee_le` | horodatage, vide possible | on retire une entité, on ne la supprime pas : des factures et des charges y renvoient |
 | `cree_le`, `modifie_le` | horodatage | |
 
@@ -239,19 +240,26 @@ d'un bien ; une colonne sur `properties` lui laisserait changer l'émetteur des
 factures (constat 4 de la relecture). **« Même compte » est garanti en base**,
 pas par le writer seul : clé étrangère composite `(entite_id, user_id)` →
 `entites_juridiques (id, user_id)`, et un trigger qui vérifie que le bien
-appartient au même `user_id`. Pas de ligne = l'entité par défaut du compte
-(D2). Nom de colonne `property_uuid`, exception E6 nommée (référence à
+appartient au même `user_id`. **Pas de ligne = pas d'entité : le logement ne
+facture pas** (D2 bis, plus de défaut). Nom de colonne `property_uuid`, exception E6 nommée (référence à
 `properties.id`, comme `taxes_sejour.property_uuid`).
 ⚠ C'est un changement par rapport à la proposition envoyée au fil compte de
 charges (colonne sur `properties`) : il faut le lui redire.
 
-**Où elle se règle** : test du dépôt « ce réglage a-t-il un sens si l'app
-n'existait pas ? » — oui, donc dans Réglages : une page **« Entités
-juridiques »** (`pages/entites-juridiques.html`, onglet-lien de `/settings`,
-non délégable). **Le choix de l'entité de chaque logement vit sur cette même
-page**, pas sur la fiche du logement (Thierry, 8 novembre 2026, à l'étape 1) :
-la fiche est gardée sur `reglages`, et c'est là qu'un membre aurait pu changer
-l'émetteur des factures.
+**Où elle se règle — SUR LA FICHE DU LOGEMENT (D2 bis, Thierry, 9 novembre
+2026, 12 h 08, à la recette de l'étape 1)**. La première version (une page
+« Entités juridiques » dans les Réglages, avec une entité par défaut) a été
+recettée sur staging puis **abandonnée** : il n'y a plus de page ni d'onglet.
+La fiche porte un bloc « Facturation » (l'entité du logement, ou « Aucune
+entité : ce logement ne peut pas facturer ») et un bouton qui ouvre une
+**fenêtre** : la liste des entités actives du compte avec « Choisir »,
+« Retirer de ce logement », « Modifier » et le réglage de la numérotation, et
+« Nouvelle entité » — une entité créée depuis la fenêtre est choisie pour ce
+logement. ⚠ **La fiche est gardée sur `reglages`** : la fenêtre ne passe PAS
+par l'endpoint de la fiche, elle a le sien (`/api/entites-juridiques`, garde
+`facturation`) — sinon un membre `reglages: write` changerait l'émetteur des
+factures (constat 4 de la relecture). Le bouton n'est montré qu'au
+titulaire, et le serveur refuse les autres en 403.
 
 **Accès** : RLS activée, **aucune politique**, et `revoke all from anon,
 authenticated` — exception à la règle 5 de REVIEW.md, nommée ici, sur le
@@ -267,8 +275,8 @@ est gardé sur `reglages` en écriture et `reservations` en lecture
 cette garde-là en plus de la sienne — sinon le constat 4 se rouvre.
 
 **Un compte peut n'avoir AUCUNE entité** (Thierry, 8 novembre 2026, 22 h 15,
-réponse A, vaut pour les deux chantiers). Le titulaire crée la première dans
-Réglages, quand il en a besoin. Tant qu'elle manque, la facture et la charge
+réponse A, vaut pour les deux chantiers). Le titulaire crée la première depuis
+la fiche d'un logement, quand il en a besoin. Tant qu'elle manque, la facture et la charge
 sont bloquées avec leur motif, et le titulaire est prévenu (P4). **On ne
 remplit jamais une identité légale à sa place** : aucune entité créée
 automatiquement, aucune reprise des comptes existants.
@@ -282,11 +290,12 @@ Il pose sa propre clé composite `(entite_juridique_id, user_id)` →
 le fil compte de charges ; elles ne gardent rien elles-mêmes — c'est
 l'endpoint appelant qui garde, et le sien est réservé au titulaire) :
 - `entitesDuCompte(userId)` : les entités du compte, **archivées comprises** —
-  `id, nom, siret, regime_tva, par_defaut, archivee_le`.
+  `id, nom, siret, regime_tva, archivee_le`… (plus de `par_defaut`, D2 bis).
 - `entiteDuBien(userId, propertyUuid)` : l'entité de sa ligne `biens_entites`,
-  sinon l'entité par défaut du compte, sinon `null` ; rendue **même archivée**,
-  avec `archivee_le` et sa provenance (`bien` ou `defaut`). C'est l'appelant
-  qui décide : la facture refuse une entité archivée (P4).
+  sinon `null` — **plus de repli sur une entité par défaut** (D2 bis) ; rendue
+  **même archivée**, avec `archivee_le` et sa provenance (`bien`, ou `null`).
+  C'est l'appelant qui décide : la facture refuse une entité archivée (P4).
+  Contrat redit au fil compte de charges le 9 novembre 2026.
 
 ### 5.2 La suite des numéros (propre à ce lot)
 
@@ -350,7 +359,7 @@ devient une facture à l'émission.
 - **Confirmation** (Q8 bis) : montants proposés, montants confirmés, **qui**
   a confirmé et **quand** ; date de la notification et du dernier rappel.
 - **L'émetteur est résolu et copié À L'ÉMISSION** : l'entité du bien
-  (`biens_entites`), sinon l'entité par défaut du compte. Aucune entité active
+  (`biens_entites`) — plus de défaut (D2 bis). Aucune entité active
   → l'émission est refusée avec son motif, et le titulaire est prévenu (P4).
 - **Facture émise, FIGÉE** : numéro, date, émetteur copié, destinataire
   copié, lignes copiées, mention de TVA, référence plateforme (Q14), langue du
@@ -454,8 +463,13 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
 
 **Étapes**, chacune avec son go, ses tests et sa review :
 1. **L'entité juridique** : migration (staging d'abord), writer, endpoint,
-   écran dans `/settings`, remplacement par bien sur la fiche du logement,
-   réglage de la numérotation et choix automatique / manuelle (Q5 bis).
+   **fenêtre sur la fiche du logement** (D2 bis : choisir, retirer, créer,
+   modifier), réglage de la numérotation et choix automatique / manuelle
+   (Q5 bis). Deux temps, sur consigne du chef de file (9 nov.) : (1a) tout ce
+   qui ne touche pas la fiche — base, writer, endpoint, fenêtre, retrait de
+   la page ; (1b) le bloc et la fenêtre branchés sur la fiche, APRÈS l'entrée
+   dans `main` de la branche `accueil-voyageur` (fil messagerie), qui tient
+   `api/logement.js` et `shared/logement-fiche.js`.
 2. **La demande et le formulaire** : tables, liens à jeton, page publique dans
    la langue du voyageur, bouton de la fiche de réservation (porte 1), saisie
    par l'hôte (Q12), état sur la fiche — ordinateur et téléphone.
@@ -484,9 +498,11 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    - Fiche de réservation : l'état de la facture arrive **dans la réponse
      existante** (`GET /api/calendar?booking=`) — une lecture de plus côté
      serveur, en parallèle, aucun appel de plus côté navigateur.
-   - Étape 1 : la page « Entités juridiques » lit UN endpoint,
-     `GET /api/entites-juridiques` (entités, logements, numérotation, lus en
-     parallèle côté serveur) ; `/settings` ne gagne qu'un lien, aucun appel.
+   - Étape 1 (D2 bis) : la fiche du logement montre le nom de l'entité **dans
+     la réponse existante** de `GET /api/logement?id=` (une lecture de plus
+     côté serveur, aucun appel de plus côté navigateur). La fenêtre, ouverte
+     par un geste, lit UN endpoint : `GET /api/entites-juridiques?bien=`
+     (entités du compte, entité du logement, numérotations).
 2. **Résumé pré-calculé : sans objet.** Une facture est un document comptable,
    donc une donnée temps réel, jamais un résumé.
 3. **Cache navigateur : aucun.** Ces écrans portent une identité et un
@@ -499,10 +515,11 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
 7. **Budget** : premier affichage < 1 s, écran complet < 2 s ; page publique
    = 1 appel ; un test compte les appels de chaque écran touché, et chaque
    endpoint pose `Server-Timing` avec son nombre de requêtes.
-8. **Mesure AVANT / APRÈS** (appels, requêtes, octets, sur staging) : la page
-   « Entités juridiques » est neuve (AVANT sans objet ; APRÈS : 1 appel, son
-   nombre de requêtes dans `Server-Timing` — 3 + une par entité active), et
-   `/settings` ne gagne aucun appel ; la fiche de réservation au début de
+8. **Mesure AVANT / APRÈS** (appels, requêtes, octets, sur staging) : la
+   fiche du logement, mesurée au début de l'étape 1b (AVANT) puis après
+   (APRÈS : même nombre d'appels, une requête de plus) ; la fenêtre est neuve
+   (1 appel à l'ouverture, `Server-Timing` = 3 + une ou deux par entité en
+   numérotation automatique) ; la fiche de réservation au début de
    l'étape 2. La page publique n'existe pas (AVANT sans objet).
 
 **Mobile** : le bouton, l'état et la confirmation existent aussi sur la fiche

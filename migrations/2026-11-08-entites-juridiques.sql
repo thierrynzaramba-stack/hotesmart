@@ -9,6 +9,14 @@
 -- Partagee avec le chantier « compte de charges »
 -- (decision de Thierry du 8 novembre 2026).
 --
+-- ⚠ PAS D'ENTITE PAR DEFAUT (Thierry, 9 nov. 2026,
+-- 12 h 08, D2 bis) : chaque logement choisit la
+-- sienne sur sa fiche ; sans ligne dans
+-- `biens_entites`, le logement ne facture pas.
+-- La version recettee sur staging le 9 nov. avait
+-- `par_defaut` : 2026-11-09-entites-sans-defaut.sql
+-- la retire la-bas (et ne fait rien ailleurs).
+--
 -- ⚠ UN COMPTE PEUT N'AVOIR AUCUNE ENTITE (Thierry,
 -- 8 nov. 2026, reponse A) : rien n'est cree ici pour
 -- les comptes existants, jamais d'identite remplie a
@@ -56,8 +64,6 @@ create table if not exists
   -- facture aussi ailleurs).
   numerotation_factures text not null
     default 'auto',
-  par_defaut boolean not null
-    default false,
   archivee_le timestamptz,
   cree_le timestamptz not null
     default now(),
@@ -90,19 +96,8 @@ create table if not exists
   constraint ej_exercice_chk check (
     debut_exercice is null
     or debut_exercice ~
-    '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'),
-  -- Une entite archivee n'est jamais celle
-  -- par defaut.
-  constraint ej_defaut_archive_chk
-    check (not (par_defaut
-      and archivee_le is not null))
+    '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
 );
-
--- UNE SEULE ENTITE PAR DEFAUT PAR COMPTE.
-create unique index if not exists
-  entites_juridiques_defaut_uidx
-  on public.entites_juridiques (user_id)
-  where par_defaut;
 
 create index if not exists
   entites_juridiques_user_idx
@@ -119,7 +114,7 @@ revoke all on public.entites_juridiques
 -- membre `reglages: write` ecrire toute la ligne
 -- d'un bien : une colonne la-bas lui laisserait
 -- changer l'emetteur des factures. Pas de ligne =
--- l'entite par defaut du compte.
+-- pas d'entite : le logement ne facture pas.
 -- `property_uuid` : exception E6 (properties.id),
 -- comme `taxes_sejour.property_uuid`.
 
@@ -307,47 +302,5 @@ alter table
 revoke all
   on public.factures_voyageur_suites
   from anon, authenticated;
-
--- L'ENTITE PAR DEFAUT, EN UNE TRANSACTION :
--- retirer l'ancienne puis poser la nouvelle.
--- Rend true si l'entite (active, du compte) est
--- desormais celle par defaut, false sinon.
-create or replace function
-  public.entite_definir_defaut(
-  p_user_id uuid,
-  p_entite_id uuid
-)
-returns boolean
-language plpgsql
-security invoker
-set search_path = public
-as $$
-begin
-  if not exists (
-    select 1 from entites_juridiques
-    where id = p_entite_id
-      and user_id = p_user_id
-      and archivee_le is null
-  ) then
-    return false;
-  end if;
-  update entites_juridiques
-    set par_defaut = false,
-        modifie_le = now()
-    where user_id = p_user_id
-      and par_defaut
-      and id <> p_entite_id;
-  update entites_juridiques
-    set par_defaut = true,
-        modifie_le = now()
-    where id = p_entite_id
-      and user_id = p_user_id;
-  return true;
-end
-$$;
-
-revoke all on function
-  public.entite_definir_defaut(uuid, uuid)
-  from public, anon, authenticated;
 
 notify pgrst, 'reload schema';

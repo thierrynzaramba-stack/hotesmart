@@ -15,7 +15,13 @@ async function compteAEnvoyer () {
   } catch { return null }
 }
 
-async function apiCall(endpoint, method = 'GET', body = null) {
+// ⚠ `refusGeres` : les statuts que L'ECRAN APPELANT dit lui-meme (un champ
+// refuse sous son champ, une panne dans sa fenetre). Ils sont journalises avec
+// `gere: true`, et la barre d'erreur (shared/error-handler.js) ne les repete
+// pas — sinon l'hote lit deux messages pour un refus, dont un « Une erreur est
+// survenue » qui fait croire a une panne (recette des entites juridiques,
+// 9 novembre 2026). Defaut : aucun, donc rien ne change pour les autres ecrans.
+async function apiCall(endpoint, method = 'GET', body = null, { refusGeres = [] } = {}) {
   try {
     // Récupère le token de session automatiquement
     const { data: { session } } = await supabase.auth.getSession()
@@ -46,7 +52,8 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     const data = await res.json()
 
     if (!res.ok) {
-      logger.error('API', data.error || 'Erreur serveur', { endpoint, status: res.status })
+      const gere = Array.isArray(refusGeres) && refusGeres.includes(res.status)
+      logger.error('API', data.error || 'Erreur serveur', { endpoint, status: res.status, ...(gere ? { gere: true } : {}) })
       // ⚠ Le STATUT est porte par l'erreur. Sans lui, les appelants devaient
       // deviner la nature de l'echec en testant le TEXTE du message — et
       // « Non autorisé » (401, session expiree) se confondait avec « Droits
@@ -89,6 +96,7 @@ async function apiCall(endpoint, method = 'GET', body = null) {
       // Le CHAMP refuse, quand le serveur le nomme (entites juridiques) : l'ecran
       // pose le message sous ce champ-la.
       erreur.champ = typeof data.champ === 'string' ? data.champ : null
+      if (gere) erreur.gere = true
       throw erreur
     }
 
@@ -96,7 +104,7 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     return data
 
   } catch (err) {
-    logger.error('API', err.message, { endpoint })
+    logger.error('API', err.message, { endpoint, ...(err && err.gere ? { gere: true } : {}) })
     throw err
   }
 }
@@ -284,9 +292,11 @@ export const api = {
   },
   // Les entites juridiques (facture voyageur, etape 1) : UN endpoint, qui peint
   // tout l'ecran en GET et porte un geste a la fois en POST.
+  // La fenetre « Facturation » de la fiche d'un logement (D2 bis) : tout passe
+  // par le logement. Ses refus et ses pannes sont dits DANS la fenetre.
   entitesJuridiques: {
-    lire: () => apiCall('entites-juridiques', 'GET'),
-    ecrire: (corps) => apiCall('entites-juridiques', 'POST', corps)
+    lire: (bien) => apiCall(`entites-juridiques?bien=${encodeURIComponent(bien)}`, 'GET', null, { refusGeres: [400, 404, 409, 503] }),
+    ecrire: (corps) => apiCall('entites-juridiques', 'POST', corps, { refusGeres: [400, 404, 409, 503] })
   },
   reservationDirecte: {
     creer:   (payload)   => apiCall('reservation-directe', 'POST', payload),

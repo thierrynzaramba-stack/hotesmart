@@ -238,8 +238,6 @@ const ECRANS = [
   // `cartesLister`, mais un appel d'ecran qui recomposerait sa propre liste
   // rendrait le bien archive sans que la ligne `cartes` ne le voie.
   { ecran: 'Avis V5 (appel d ecran : filtre et formulaire)', chemin: 'api/ecran/avis.js', query: {} },
-  // Facture voyageur, etape 1 : la liste des biens a rattacher a une entite.
-  { ecran: 'Entites juridiques (Reglages)', chemin: 'api/entites-juridiques.js', query: {} },
 ]
 
 // ⚠ `api/menages-public.js` N'EST PAS DANS CETTE LISTE, et la raison vaut

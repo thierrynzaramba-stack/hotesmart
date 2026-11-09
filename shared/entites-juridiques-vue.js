@@ -1,15 +1,20 @@
-// shared/entites-juridiques-vue.js — l'écran « Entités juridiques » (Réglages).
-// Spec : docs/specs/spec-facture-voyageur.md §5.1 · KB : docs/kb/entites-juridiques.md
+// shared/entites-juridiques-vue.js — la fenêtre « Facturation » de la fiche
+// d'un logement : l'entité juridique qui émet ses factures.
+// Spec : docs/specs/spec-facture-voyageur.md §4 (D2 bis), §5.1 · KB : docs/kb/entites-juridiques.md
 //
-// Un seul endpoint (`/api/entites-juridiques`) : GET peint tout l'écran, POST
-// porte un geste à la fois. L'écran est RÉSERVÉ AU TITULAIRE (la page appelle
-// `exigerCompteProprePage`) et le serveur le garantit : écriture `facturation`,
-// non délégable.
+// ⚠ D2 BIS (Thierry, 9 nov. 2026, 12 h 08) : plus de page « Entités
+// juridiques », plus d'entité par défaut. Sur la fiche d'un logement, une
+// fenêtre montre l'entité de CE logement (ou « aucune : il ne peut pas
+// facturer ») et la liste des entités du compte, avec :
+//   - « Choisir pour ce logement » / « Retirer de ce logement » (elle reste
+//     disponible pour les autres logements) ;
+//   - « Modifier » (numérotation comprise) et « Régler la numérotation » ;
+//   - « Nouvelle entité » : créée depuis ce logement, elle est choisie pour lui.
 //
-// Trois parties : les entités actives (une carte chacune, avec sa
-// numérotation), « Vos logements » (l'entité de chaque logement — décision de
-// Thierry du 8 novembre 2026 : le choix vit ICI, pas sur la fiche du logement),
-// et les entités archivées.
+// Un seul endpoint (`/api/entites-juridiques?bien=`) : GET à l'ouverture, POST
+// un geste à la fois puis une relecture. Les gestes ne sont montrés qu'au
+// TITULAIRE (`titulaire` de la réponse) — et le serveur refuse les autres en
+// 403 : ce n'est pas un masquage.
 //
 // RÈGLES : aucun hexa, aucun texte en dur (clés `ej.*`), tout texte venu du
 // serveur passe par `esc`.
@@ -195,80 +200,148 @@ function brancherFormulaire (form, { surEnvoi, surAnnuler }) {
   form.addEventListener('submit', (ev) => { ev.preventDefault(); surEnvoi(valeursDuFormulaire(form)) })
 }
 
+// Un numéro de facture ne se coupe jamais en fin de ligne (« HS-2026- » /
+// « 0012 » au téléphone, recette du 9 novembre 2026). Le texte traduit est
+// échappé PUIS le numéro y est posé dans son propre élément.
+const MARQUE = '\u0001'
+function numeroHtml (prochain, t, esc) {
+  return esc(t('ej.num_next', { numero: MARQUE })).replace(MARQUE, `<span class="ej-numero">${esc(prochain)}</span>`)
+}
+
+// Les styles de la fenêtre, posés UNE fois par le module (précédent :
+// shared/temperature-calendrier.js) : la fenêtre s'ouvre depuis une page qui
+// ne les charge pas, et une feuille de plus coûterait une requête.
+const STYLES = `
+  .ej-voile { position: fixed; inset: 0; z-index: 68; background: rgb(0 0 0 / 0.4); }
+  .ej-fenetre { position: fixed; z-index: 69; inset-block-start: 50%; inset-inline-start: 50%;
+    transform: translate(-50%, -50%); width: min(640px, calc(100vw - 24px)); max-height: min(92vh, 900px);
+    display: flex; flex-direction: column; gap: var(--gap-m); padding: 20px; overflow: auto;
+    background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); }
+  .ej-fenetre__tete { display: flex; align-items: flex-start; gap: var(--gap-s); }
+  .ej-fenetre__titre { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+  .ej-corps { display: flex; flex-direction: column; gap: var(--gap-m); }
+  .ej-actuelle { margin: 0; }
+  .ej-alerte { margin: 0; color: var(--danger); }
+  .ej-liste { display: flex; flex-direction: column; gap: var(--gap-m); margin: 0; padding: 0; list-style: none; }
+  .ej-carte { display: flex; flex-direction: column; gap: var(--gap-s); }
+  .ej-carte__tete { display: flex; align-items: center; gap: var(--gap-s); flex-wrap: wrap; }
+  .ej-nom { margin: 0; overflow-wrap: anywhere; }
+  .ej-carte p { margin: 0; }
+  .ej-actions { display: flex; gap: var(--gap-s); flex-wrap: wrap; }
+  .ej-actions .btn, .ej-ajouter { min-height: 44px; }
+  .ej-ajouter { align-self: flex-start; }
+  .ej-num { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-s);
+    flex-wrap: wrap; padding-top: var(--gap-s); border-top: 1px solid var(--line); }
+  .ej-numero { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ej-form { display: flex; flex-direction: column; gap: var(--gap-m); width: 100%; }
+  .ej-champ { display: flex; flex-direction: column; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
+  .ej-champ label, .ej-champ legend { font-size: var(--fs-caption); font-weight: 600; color: var(--ink); padding: 0; }
+  .ej-champ input, .ej-champ select { width: 100%; box-sizing: border-box; min-height: 44px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+    color: var(--ink); font: inherit; font-size: var(--fs-body); }
+  .ej-champ input:focus-visible, .ej-champ select:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; border-color: var(--ink); }
+  .ej-champ [aria-invalid="true"] { border-color: var(--danger); }
+  .ej-erreur { font-size: var(--fs-caption); color: var(--danger); }
+  .ej-aide { font-size: var(--fs-caption); color: var(--muted); }
+  .ej-radios { display: flex; gap: 0 var(--gap-m); flex-wrap: wrap; }
+  .ej-radio { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-weight: 400; }
+  .ej-radio input { width: 18px; height: 18px; min-height: 0; }
+  .ej-duo { display: grid; gap: var(--gap-m); grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+  .ej-message, .ej-bandeau { margin: 0; color: var(--danger); }
+  .ej-message:empty, .ej-bandeau:empty { display: none; }
+  @media (max-width: 560px) {
+    .ej-actions { flex-direction: column; align-items: stretch; }
+    .ej-actions .btn, .ej-ajouter { width: 100%; }
+  }
+`
+function injecterStyles (doc) {
+  if (!doc || doc.getElementById('ej-styles')) return
+  const s = doc.createElement('style')
+  s.id = 'ej-styles'
+  s.textContent = STYLES
+  doc.head.appendChild(s)
+}
+
 /**
- * Monte l'écran.
+ * Monte le contenu de la fenêtre dans `racine`.
  * @param {object} o
  * @param {Element} o.racine
- * @param {{ lire: Function, ecrire: Function }} o.api  le client partagé (jeton, X-Compte)
- * @param {Function} o.t     I18n.t
- * @param {Function} o.esc   échappement HTML
- * @param {Function} o.confirmer  (titre, texte) → Promise<boolean>
+ * @param {{ lire: Function, ecrire: Function }} o.api  le client partagé (`lire(bien)`, `ecrire(corps)`)
+ * @param {string}   o.bien   l'UUID du logement de la fiche
+ * @param {Function} o.t      I18n.t
+ * @param {Function} o.esc    échappement HTML
+ * @param {Function} [o.surChangement]  appelée avec l'état relu après chaque geste réussi
+ * @returns {Promise<void>}   résolue une fois le premier état peint
  */
-function monterEntites ({ racine, api, t, esc, confirmer, langue = 'fr' }) {
+function monterFenetre ({ racine, api, bien, t, esc, langue = 'fr', surChangement = null }) {
   let etat = null           // la dernière réponse du GET
-  let edition = null        // { id|null } : la carte en cours d'édition, ou la création
+  let mode = null           // null | { edition: id|null } | { numerotation: id }
 
   async function charger () {
     try {
-      etat = await api.lire()
+      etat = await api.lire(bien)
     } catch (e) {
-      racine.innerHTML = `<p class="ej-vide">${esc(e && e.status === 403 ? t('ej.no_access') : t('ej.err_panne'))}</p>`
-      return
+      etat = null
+      racine.innerHTML = `<p class="ej-alerte" role="alert">${esc(e && e.status === 403 ? t('ej.no_access') : t('ej.err_panne'))}</p>`
+      return false
     }
     peindre()
+    return true
   }
 
   async function geste (corps, form) {
     try {
-      await api.ecrire(corps)
-      edition = null
-      await charger()
-      return true
+      await api.ecrire({ ...corps, property_uuid: bien })
     } catch (e) {
       if (form) { montrerRefus(form, e, t); return false }
-      // ⚠ SANS FORMULAIRE (un menu de logement, un bouton) : on REPEINT depuis
-      // le dernier etat lu, sinon le menu garde la valeur que le serveur vient
-      // de refuser (constat 7 de la revue de 447ff3e0).
+      // ⚠ SANS FORMULAIRE (un bouton) : on repeint depuis le dernier état lu,
+      // et le bandeau dit pourquoi.
       peindre()
-      racine.querySelector('.ej-bandeau').textContent = t(
-        e && e.code === 'archivee' ? 'ej.err_archivee' : e && e.code === 'panne' ? 'ej.err_panne' : 'ej.err_generic')
+      const b = racine.querySelector('.ej-bandeau')
+      if (b) b.textContent = t(e && e.code === 'archivee' ? 'ej.err_archivee' : e && e.code === 'panne' ? 'ej.err_panne' : 'ej.err_generic')
       return false
     }
+    mode = null
+    if (await charger() && typeof surChangement === 'function') {
+      try { surChangement(etat) } catch (e) { /* la fiche se débrouille */ }
+    }
+    return true
   }
 
   function carte (e) {
-    const num = etat.numerotations[e.id]
-    if (edition && edition.id === e.id) {
-      return `<article class="card ej-carte" data-entite="${esc(e.id)}">${formulaireHtml(e, t, esc, langue)}</article>`
+    const actuelle = etat.bien.entite_id === e.id
+    if (mode && mode.edition === e.id) {
+      return `<li class="card ej-carte" data-entite="${esc(e.id)}">${formulaireHtml(e, t, esc, langue)}</li>`
     }
-    const badges = e.par_defaut ? `<span class="badge">${esc(t('ej.default_badge'))}</span>` : ''
-    // Manuelle : l'hote saisira chaque numero a l'emission (etape 3).
-    // Automatique : le prochain numero ; reglable tant qu'aucune facture de
-    // l'annee n'est partie, fige ensuite (la base refuse aussi).
-    const numero = e.numerotation_factures === 'manuel' ? `
-      <div class="ej-num" data-num="${esc(e.id)}">
-        <p class="small">${esc(t('ej.num_manual_info'))}</p>
-      </div>` : num ? `
-      <div class="ej-num" data-num="${esc(e.id)}">
-        <p class="small">${esc(t('ej.num_next', { numero: num.prochain }))}</p>
-        ${num.fige ? `<p class="small muted">${esc(t('ej.num_fige'))}</p>`
-    : `<button type="button" class="btn btn--secondary" data-action="numerotation">${esc(t('ej.num_edit'))}</button>`}
+    const titulaire = etat.titulaire === true
+    const num = etat.numerotations[e.id]
+    let numero = ''
+    if (e.numerotation_factures === 'manuel') {
+      numero = `<div class="ej-num"><p class="small">${esc(t('ej.num_manual_info'))}</p></div>`
+    } else if (num && mode && mode.numerotation === e.id) {
+      numero = `<div class="ej-num">${numerotationHtml(num)}</div>`
+    } else if (num) {
+      numero = `<div class="ej-num"><p class="small">${numeroHtml(num.prochain, t, esc)}</p>${
+        num.fige ? `<p class="small muted">${esc(t('ej.num_fige'))}</p>`
+          : titulaire ? `<button type="button" class="btn btn--secondary" data-action="numerotation">${esc(t('ej.num_edit'))}</button>` : ''}</div>`
+    }
+    const actions = titulaire ? `
+      <div class="ej-actions">
+        ${actuelle
+          ? `<button type="button" class="btn btn--secondary" data-action="retirer">${esc(t('ej.retirer'))}</button>`
+          : `<button type="button" class="btn btn--primary" data-action="choisir">${esc(t('ej.choisir'))}</button>`}
+        <button type="button" class="btn btn--secondary" data-action="modifier">${esc(t('ej.edit'))}</button>
       </div>` : ''
     return `
-    <article class="card ej-carte" data-entite="${esc(e.id)}">
-      <div class="ej-carte__tete"><h2 class="h2 ej-nom">${esc(e.nom)}</h2>${badges}</div>
+    <li class="card ej-carte" data-entite="${esc(e.id)}">
+      <div class="ej-carte__tete"><h3 class="h3 ej-nom">${esc(e.nom)}</h3>${actuelle ? `<span class="badge">${esc(t('ej.badge_actuelle'))}</span>` : ''}</div>
       <p class="muted small">${resume(e, t, esc).join('<br>')}</p>
       ${numero}
-      <div class="ej-actions">
-        <button type="button" class="btn btn--secondary" data-action="modifier">${esc(t('ej.edit'))}</button>
-        ${e.par_defaut ? '' : `<button type="button" class="btn btn--secondary" data-action="defaut">${esc(t('ej.make_default'))}</button>`}
-        <button type="button" class="btn btn--secondary" data-action="archiver">${esc(t('ej.archive'))}</button>
-      </div>
-    </article>`
+      ${actions}
+    </li>`
   }
 
-  function numerotationHtml (e) {
-    const s = etat.numerotations[e.id]
+  function numerotationHtml (s) {
     return `
     <form class="ej-form ej-form--num" novalidate>
       <p class="small muted">${esc(t('ej.num_help'))}</p>
@@ -294,87 +367,117 @@ function monterEntites ({ racine, api, t, esc, confirmer, langue = 'fr' }) {
 
   function peindre () {
     const actives = etat.entites.filter(e => !e.archivee_le)
-    const archivees = etat.entites.filter(e => e.archivee_le)
-    const defaut = actives.find(e => e.par_defaut)
-    const creation = edition && edition.id === null
-      ? `<article class="card ej-carte" data-entite="">${formulaireHtml(null, t, esc, langue)}</article>` : ''
-    const vide = !actives.length && !creation ? `
-      <div class="card ej-vide">
-        <h2 class="h2">${esc(t('ej.empty_title'))}</h2>
-        <p class="muted">${esc(t('ej.empty_text'))}</p>
-      </div>` : ''
-    // ⚠ UN LOGEMENT RATTACHE A UNE ENTITE ARCHIVEE LE MONTRE (constat 2 de la
-    // revue de 447ff3e0). Sans cette option, le menu affichait « Entite par
-    // defaut » alors que le logement emet sous l'archivee — donc ne facture
-    // plus (P4) —, et choisir « par defaut » ne declenchait aucun changement.
-    const options = (sel) => {
-      const archivee = sel && !actives.some(e => e.id === sel) ? etat.entites.find(e => e.id === sel) : null
-      return [`<option value=""${sel ? '' : ' selected'}>${esc(defaut ? t('ej.bien_defaut', { nom: defaut.nom }) : t('ej.bien_defaut_aucune'))}</option>`]
-        .concat(archivee ? [`<option value="${esc(archivee.id)}" selected disabled>${esc(t('ej.bien_archivee', { nom: archivee.nom }))}</option>`] : [])
-        .concat(actives.map(e => `<option value="${esc(e.id)}"${sel === e.id ? ' selected' : ''}>${esc(e.nom)}</option>`)).join('')
-    }
-    const biens = etat.biens.length ? etat.biens.map(b => `
-      <div class="ej-bien">
-        <label for="ej-bien-${esc(b.id)}" class="ej-bien__nom">${esc(b.nom)}</label>
-        <select id="ej-bien-${esc(b.id)}" data-bien="${esc(b.id)}">${options(b.entite_id)}</select>
-      </div>`).join('') : `<p class="muted">${esc(t('ej.biens_vide'))}</p>`
-    const archive = archivees.length ? `
-      <details class="ej-archivees">
-        <summary>${esc(t('ej.archived_section'))} (${archivees.length})</summary>
-        ${archivees.map(e => `<div class="ej-archivee"><strong>${esc(e.nom)}</strong> <span class="badge">${esc(t('ej.archived_badge'))}</span>
-          <p class="muted small">${resume(e, t, esc).join('<br>')}</p></div>`).join('')}
-      </details>` : ''
+    const sienne = etat.entites.find(e => e.id === etat.bien.entite_id) || null
+    // L'entité de CE logement, ou son absence — en tête, parce que c'est ce
+    // que l'hôte vient vérifier. Une archivée ne facture plus (P4).
+    const actuelle = !sienne
+      ? `<p class="ej-alerte">${esc(t('ej.aucune'))}</p>`
+      : sienne.archivee_le
+        ? `<p class="ej-alerte">${esc(t('ej.actuelle_archivee', { nom: sienne.nom }))}</p>`
+        : `<p class="ej-actuelle">${esc(t('ej.actuelle', { nom: sienne.nom }))}</p>`
+    const creation = mode && mode.edition === null
+      ? `<li class="card ej-carte" data-entite="">${formulaireHtml(null, t, esc, langue)}</li>` : ''
+    const vide = !actives.length && !creation ? `<p class="muted">${esc(t('ej.empty_text'))}</p>` : ''
+    const ajouter = etat.titulaire === true && !mode
+      ? `<button type="button" class="btn btn--secondary ej-ajouter" data-action="ajouter">${esc(t('ej.add'))}</button>` : ''
     racine.innerHTML = `
       <p class="ej-bandeau" role="alert"></p>
+      ${actuelle}
       ${vide}
-      <div class="ej-liste">${actives.map(carte).join('')}${creation}</div>
-      ${edition ? '' : `<button type="button" class="btn btn--primary ej-ajouter" data-action="ajouter">${esc(t('ej.add'))}</button>`}
-      <section class="card ej-biens">
-        <h2 class="h2">${esc(t('ej.biens_title'))}</h2>
-        <p class="muted small">${esc(t('ej.biens_help'))}</p>
-        ${biens}
-      </section>
-      ${archive}`
+      <ul class="ej-liste">${actives.map(carte).join('')}${creation}</ul>
+      ${ajouter}`
     brancher()
   }
 
   function brancher () {
-    racine.querySelector('[data-action="ajouter"]')?.addEventListener('click', () => { edition = { id: null }; peindre() })
+    racine.querySelector('[data-action="ajouter"]')?.addEventListener('click', () => { mode = { edition: null }; peindre() })
     racine.querySelectorAll('.ej-carte').forEach(c => {
       const id = c.dataset.entite || null
-      const form = c.querySelector('.ej-form')
+      const form = c.querySelector('form.ej-form')
       if (form && !form.classList.contains('ej-form--num')) {
         brancherFormulaire(form, {
-          surAnnuler: () => { edition = null; peindre() },
+          surAnnuler: () => { mode = null; peindre() },
           surEnvoi: (entite) => geste(id ? { action: 'modifier', id, entite } : { action: 'creer', entite }, form)
         })
       }
-      c.querySelector('[data-action="modifier"]')?.addEventListener('click', () => { edition = { id }; peindre() })
-      c.querySelector('[data-action="defaut"]')?.addEventListener('click', () => geste({ action: 'defaut', id }))
-      c.querySelector('[data-action="archiver"]')?.addEventListener('click', async () => {
-        if (await confirmer(t('ej.archive_confirm_title'), t('ej.archive_confirm_text'))) geste({ action: 'archiver', id })
-      })
-      c.querySelector('[data-action="numerotation"]')?.addEventListener('click', () => {
-        const zone = c.querySelector('.ej-num')
-        const e = etat.entites.find(x => x.id === id)
-        zone.innerHTML = numerotationHtml(e)
-        const f = zone.querySelector('form')
-        f.querySelector('[data-action="annuler"]').addEventListener('click', () => peindre())
-        f.addEventListener('submit', (ev) => {
+      if (form && form.classList.contains('ej-form--num')) {
+        form.querySelector('[data-action="annuler"]').addEventListener('click', () => { mode = null; peindre() })
+        form.addEventListener('submit', (ev) => {
           ev.preventDefault()
           geste({ action: 'numerotation', id, numerotation: {
-            prefixe: f.querySelector('#ej-prefixe').value.trim(),
-            prochain_numero: Number(f.querySelector('#ej-prochain').value.trim())
-          } }, f)
+            prefixe: form.querySelector('#ej-prefixe').value.trim(),
+            prochain_numero: Number(form.querySelector('#ej-prochain').value.trim())
+          } }, form)
         })
-      })
-    })
-    racine.querySelectorAll('select[data-bien]').forEach(s => {
-      s.addEventListener('change', () => geste({ action: 'rattacher', property_uuid: s.dataset.bien, entite_id: s.value || null }))
+      }
+      c.querySelector('[data-action="choisir"]')?.addEventListener('click', () => geste({ action: 'rattacher', entite_id: id }))
+      c.querySelector('[data-action="retirer"]')?.addEventListener('click', () => geste({ action: 'rattacher', entite_id: null }))
+      c.querySelector('[data-action="modifier"]')?.addEventListener('click', () => { mode = { edition: id }; peindre() })
+      c.querySelector('[data-action="numerotation"]')?.addEventListener('click', () => { mode = { numerotation: id }; peindre() })
     })
   }
 
-  return charger()
+  return charger().then(() => undefined)
 }
 
-export { CHAMPS, REGIMES, NUMEROTATIONS, champVisible, valeursDuFormulaire, resume, formulaireHtml, exerciceHtml, numerotationChoixHtml, montrerRefus, monterEntites }
+/**
+ * Ouvre la fenêtre par-dessus la page (voile + boîte, Échap et la croix
+ * ferment, la tabulation reste dedans, le focus revient d'où il venait).
+ * @returns {{ fermer: Function, pret: Promise<void> }}
+ */
+function ouvrirFenetre ({ doc, api, bien, t, esc, langue = 'fr', surChangement = null, surFermeture = null }) {
+  const d = doc || document
+  injecterStyles(d)
+  const avant = d.activeElement
+  const voile = d.createElement('div')
+  voile.className = 'ej-voile'
+  const boite = d.createElement('div')
+  boite.className = 'ej-fenetre'
+  boite.setAttribute('role', 'dialog')
+  boite.setAttribute('aria-modal', 'true')
+  boite.setAttribute('aria-labelledby', 'ej-fenetre-titre')
+  boite.innerHTML = `
+    <div class="ej-fenetre__tete">
+      <h2 class="h2 ej-fenetre__titre" id="ej-fenetre-titre">${esc(t('ej.fenetre_titre'))}</h2>
+      <button type="button" class="btn btn--secondary btn--icon" data-action="fermer" aria-label="${esc(t('ej.fermer'))}">×</button>
+    </div>
+    <div class="ej-corps"><p class="muted small">${esc(t('common.loading'))}</p></div>`
+  let ferme = false
+  const fermer = () => {
+    if (ferme) return
+    ferme = true
+    d.removeEventListener('keydown', surTouche, true)
+    voile.remove(); boite.remove()
+    try { if (avant && typeof avant.focus === 'function') avant.focus() } catch (e) {}
+    if (typeof surFermeture === 'function') { try { surFermeture() } catch (e) {} }
+  }
+  // ⚠ `aria-modal` SANS PIÈGE DE FOCUS EST UN MENSONGE (constat mesuré sur
+  // shared/confirmer.js) : la tabulation reste dans la fenêtre.
+  const focusables = () => [...boite.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled])')]
+    .filter(el => !el.closest('[hidden]'))
+  function surTouche (e) {
+    if (e.key === 'Escape') { e.preventDefault(); fermer(); return }
+    if (e.key !== 'Tab') return
+    const liste = focusables()
+    if (!liste.length) return
+    const premier = liste[0]
+    const dernier = liste[liste.length - 1]
+    const actif = d.activeElement
+    if (!boite.contains(actif)) { e.preventDefault(); premier.focus(); return }
+    if (e.shiftKey && actif === premier) { e.preventDefault(); dernier.focus(); return }
+    if (!e.shiftKey && actif === dernier) { e.preventDefault(); premier.focus() }
+  }
+  boite.querySelector('[data-action="fermer"]').addEventListener('click', fermer)
+  voile.addEventListener('click', fermer)
+  d.addEventListener('keydown', surTouche, true)
+  d.body.appendChild(voile)
+  d.body.appendChild(boite)
+  try { boite.querySelector('[data-action="fermer"]').focus() } catch (e) {}
+  const pret = monterFenetre({ racine: boite.querySelector('.ej-corps'), api, bien, t, esc, langue, surChangement })
+  return { fermer, pret }
+}
+
+export {
+  CHAMPS, REGIMES, NUMEROTATIONS, champVisible, valeursDuFormulaire, resume, formulaireHtml, exerciceHtml,
+  numerotationChoixHtml, montrerRefus, numeroHtml, monterFenetre, ouvrirFenetre
+}
