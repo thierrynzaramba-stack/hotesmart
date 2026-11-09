@@ -27,13 +27,16 @@ moment et seulement si le logement est prêt.
   la main** si besoin. Le message d'arrivée est **retenu** jusqu'à l'arrivée du PIN. **Une seule
   alerte par réservation** (pas de spam à chaque cycle).
 - **S'il manque une information au message** (l'adresse d'une fiche de logement vide, le téléphone,
-  le wifi… que le modèle cite) : le message **part quand même** en mode Auto — sans lui la porte
-  reste fermée —, avec un marqueur entre crochets à la place, et l'hôte reçoit l'alerte **« Code
-  d'accès envoyé avec une information manquante »** (SMS + e-mail), qui dit quoi renseigner et où.
-  Une seule fois par réservation. Si le canal a refusé l'envoi, l'alerte renvoie à la tâche de
-  transmission manuelle. En mode Test, pas d'alerte : la tâche à valider montre le texte. **Le code
-  lui-même n'est jamais concerné** : sans PIN, le message reste retenu (point précédent).
-  Décision de Thierry du 9 novembre 2026 (dette 137, option a).
+  le wifi… que le modèle cite, ou une balise inconnue du modèle) : le message **part quand même**
+  en mode Auto — sans lui la porte reste fermée —, avec un marqueur entre crochets à la place, et
+  l'alerte **« Code d'accès — information manquante dans le message »** part (SMS + e-mail) : quoi
+  renseigner et où, ou « la base n'a pas pu être lue » si c'est une panne. Une seule fois par
+  réservation. Si le canal a refusé l'envoi, elle renvoie à la tâche de transmission manuelle. En
+  mode Test, pas d'alerte : la tâche à valider montre le texte. **Le code lui-même n'est jamais
+  concerné** : sans PIN, le message reste retenu (point précédent). ⚠ Comme celle des messages
+  programmés, cette alerte part au **fondateur** (canal plateforme), pas à l'hôte du compte : un hôte
+  qui n'est pas le fondateur ne la reçoit pas. Décision de Thierry du 9 novembre 2026 (dette 137,
+  option a).
 - **Conditionné au ménage — seulement si un suivi ménage existe pour le bien.** « Suivi ménage
   existe » = **un prestataire est affecté au bien** OU **au moins un ménage a déjà été validé**.
   Dans ce cas, pour un **2ᵉ voyageur et suivants**, le code n'est envoyé qu'après **validation du

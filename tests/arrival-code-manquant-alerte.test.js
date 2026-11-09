@@ -7,10 +7,13 @@
 // marqueur « [ADRESSE] » partait en mode Auto sans que personne le sache.
 //
 // On traverse le VRAI `processArrivalCodes` en mode Auto, avec des doubles pour
-// tout ce qui sortirait du processus : la base (`cron-shared`), l'envoi
-// (`cron-messages`), le journal du cœur (`record-message`), les alertes
-// (`founder-notify`, `alert-notify`). Harnais de
-// tests/arrival-code-adresse-fiche.test.js.
+// tout ce qui sortirait du processus : la base (`cron-shared`), la serrure
+// (`providers/seam`), l'envoi (`cron-messages`), le journal du cœur
+// (`record-message`), les alertes (`founder-notify`, `alert-notify`).
+// ⚠ HARNAIS ETANCHE (review 1, constat 1) : la ligne `access_codes` porte un
+// `seam_code_id`, donc aucune creation de code, et la serrure est doublee. Sans
+// ca, chaque test lisait la cle Seam en base (28 requetes reelles), et un test
+// ne restait vert que parce que cette base etait injoignable.
 
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
@@ -38,14 +41,17 @@ function doubler (relatif, exports) {
   require.cache[abs] = m
 }
 
-function charger ({ mode = 'auto', envoi = { ok: true }, pin = '123456', modele = MODELE } = {}) {
-  const vus = { envois: [], alertes: [], taches: [], pinManquant: 0, journal: 0, codesActives: 0 }
+function charger ({
+  mode = 'auto', envoi = { ok: true }, pin = '123456', modele = MODELE,
+  connaissance = [], baseEnPanne = false, dejaEnvoye = false
+} = {}) {
+  const vus = { envois: [], alertes: [], taches: [], ordre: [], reseau: 0 }
   const table = (nom) => {
     const q = {
       select () { return q }, eq () { return q }, neq () { return q }, in () { return q },
       is () { return q }, not () { return q }, lte () { return q }, gte () { return q },
       order () { return q }, range () { return q },
-      update (row) { if (nom === 'access_codes' && row.status === 'active') vus.codesActives++; return q },
+      update (row) { if (nom === 'access_codes' && row.status === 'active') vus.ordre.push('actif'); return q },
       insert (row) {
         if (nom === 'agent_tasks') vus.taches.push(row)
         return Promise.resolve({ data: null, error: null })
@@ -55,17 +61,21 @@ function charger ({ mode = 'auto', envoi = { ok: true }, pin = '123456', modele 
       maybeSingle: async () => ({ data: null, error: null }),
       limit () {
         if (nom === 'access_codes') {
-          // Code ancien : aucun delai d'attente. `pin` null = PIN pas encore
-          // pose par la serrure (le message doit etre RETENU).
+          // Code ancien, deja cree chez la serrure : aucun delai, aucune
+          // creation. `pin` null = PIN pas encore pose (message RETENU).
           return Promise.resolve({ data: [{
-            id: 'ac-1', seam_code_id: null, code: pin, status: 'active',
+            id: 'ac-1', seam_code_id: 'seam-1', code: pin, status: 'active',
             created_at: '2026-01-01T00:00:00Z'
           }] })
         }
+        if (nom === 'message_sent_log' && dejaEnvoye) return Promise.resolve({ data: [{ id: 'deja' }], error: null })
         return Promise.resolve({ data: [], error: null })
       },
       then (res, rej) {
-        const data = nom === 'message_templates' ? [modele] : []
+        if (nom === 'knowledge' && baseEnPanne) {
+          return Promise.resolve({ data: null, error: { message: 'canceling statement due to statement timeout' } }).then(res, rej)
+        }
+        const data = nom === 'message_templates' ? [modele] : nom === 'knowledge' ? connaissance : []
         return Promise.resolve({ data, error: null }).then(res, rej)
       }
     }
@@ -78,17 +88,19 @@ function charger ({ mode = 'auto', envoi = { ok: true }, pin = '123456', modele 
     lireReglagesDuBien: async () => ({ mode, delais: null }),
     isAutomationPaused: async () => false
   })
+  doubler('lib/providers/seam.js', {
+    getSeamKey: async () => { vus.reseau++; return null },
+    generateCode: async () => { throw new Error('aucune creation de code dans ces tests') }
+  })
   doubler('lib/cron-messages.js', {
-    sendGuestMessage: async (cle, bien, booking, message) => { vus.envois.push(message); return envoi },
-    noterEnvoi: async () => {}
+    sendGuestMessage: async (cle, bien, booking, message) => { vus.envois.push(message); vus.ordre.push('envoi'); return envoi },
+    noterEnvoi: async () => { vus.ordre.push('noter') }
   })
-  doubler('lib/record-message.js', { recordMessage: async () => { vus.journal++; return { ok: true } } })
+  doubler('lib/record-message.js', { recordMessage: async () => { vus.ordre.push('journal'); return { ok: true } } })
   doubler('lib/founder-notify.js', {
-    reportIncident: async (type, opts) => { vus.alertes.push({ type, ...opts }); return { recorded: true } }
+    reportIncident: async (type, opts) => { vus.alertes.push({ type, ...opts }); vus.ordre.push('alerte'); return { recorded: true } }
   })
-  doubler('lib/alert-notify.js', {
-    alertMissingAccessCode: async () => { vus.pinManquant++ }
-  })
+  doubler('lib/alert-notify.js', { alertMissingAccessCode: async () => {} })
   delete require.cache[require.resolve('../lib/cles-migrees')]
   delete require.cache[require.resolve('../lib/cron-arrival-code')]
   const mod = require('../lib/cron-arrival-code')
@@ -104,6 +116,8 @@ const arrivante = () => ({
 const BIEN_SANS_ADRESSE = { id: '0db6b39b', name: 'La bulle', provider: 'channex', address: '' }
 const BIEN_AVEC_ADRESSE = { ...BIEN_SANS_ADRESSE, address: '4 rue du bourg vieux', zip_code: '65200', city: 'Bagnères-de-Bigorre' }
 const incompletes = (vus) => vus.alertes.filter(a => a.type === 'message_envoye_incomplet')
+// Le SMS tel que `reportIncident` le compose (lib/founder-notify.js) : coupe a 300.
+const smsDe = (a) => `HoteSmart ALERTE — ${LABELS[a.type]}\n${a.propertyName}\n${a.detail}`.slice(0, 300)
 
 test('LE TEST QUI COMPTE : fiche sans adresse, mode Auto — le code PART et l hote est PREVENU', async () => {
   const { mod, vus } = charger()
@@ -116,44 +130,75 @@ test('LE TEST QUI COMPTE : fiche sans adresse, mode Auto — le code PART et l h
   assert.strictEqual(a[0].userId, 'u1')
   assert.strictEqual(a[0].propertyId, '0db6b39b')
   assert.strictEqual(a[0].threshold, 1)
-  assert.match(a[0].detail, /ENVOYÉ/)
-  assert.match(a[0].detail, /Ana Lopez/)
+  assert.match(a[0].detail, /Code d'accès ENVOYÉ à Ana Lopez/)
   // Le NOM de l'information et le chemin de saisie AVEC le nom du logement —
   // jamais la cle technique ni le gabarit.
-  assert.match(a[0].detail, /il manque : Adresse/)
-  assert.match(a[0].detail, /Logements → La bulle → Le logement → Adresse/)
+  assert.match(a[0].detail, /il manque Adresse, à renseigner dans Logements → La bulle → Le logement → Adresse/)
   assert.ok(!a[0].detail.includes('<nom du logement>'))
-  assert.ok(!/\badresse\b/.test(a[0].detail.replace(/Adresse/g, '')), 'cle brute dans l alerte')
+  assert.ok(!a[0].detail.includes('peut-être bien renseignée'), 'la base a ete lue : aucune panne a annoncer')
+})
+
+test('l alerte part EN DERNIER : apres l envoi, le journal anti-doublon, le fil du coeur et le code actif', async () => {
+  // Review 1, constat 2 : une plateforme SMS lente ne doit plus pouvoir
+  // empecher le message d'entrer dans le fil, ni le code de passer « active ».
+  const { mod, vus } = charger()
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  assert.deepStrictEqual(vus.ordre, ['envoi', 'noter', 'journal', 'actif', 'alerte'])
+})
+
+test('le SMS porte la consigne : avec une information manquante, il tient entier dans 300 caracteres', async () => {
+  // Review 1, constat 3 : le SMS etait coupe avant « a renseigner dans ».
+  const { mod, vus } = charger()
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  const a = incompletes(vus)[0]
+  const brut = `HoteSmart ALERTE — ${LABELS[a.type]}\n${a.propertyName}\n${a.detail}`
+  assert.ok(brut.length <= 300, `SMS de ${brut.length} caracteres : ${brut}`)
+})
+
+test('deux informations manquantes : le SMS coupe garde au moins l endroit ou les renseigner', async () => {
+  const { mod, vus } = charger({ modele: { ...MODELE, template_text: 'Adresse {adresse}, wifi {wifi_mdp}. Code : {code_acces}' } })
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  const a = incompletes(vus)[0]
+  assert.match(a.detail, /il manque Adresse, Mot de passe wifi/)
+  assert.match(smsDe(a), /à renseigner dans Logements → La bulle/)
 })
 
 // Non-regression (vert contre le code d'avant) : rougit contre une alerte
-// posee sans condition sur les manquants — verifie.
+// posee sans aucune condition (ni a l'appel, ni dans la fonction) — verifie.
 test('fiche avec adresse : le code part, aucune alerte', async () => {
   const { mod, vus } = charger()
   await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
   assert.strictEqual(vus.envois.length, 1)
   assert.ok(vus.envois[0].includes('4 rue du bourg vieux, 65200 Bagnères-de-Bigorre'))
-  assert.strictEqual(incompletes(vus).length, 0)
   assert.strictEqual(vus.alertes.length, 0)
+  assert.strictEqual(vus.reseau, 0, 'aucune lecture de cle de serrure : le code est complet')
 })
 
-// Non-regression : rougit contre une alerte posee sans condition — verifie.
+// Non-regression : rougit contre une alerte posee sans aucune condition — verifie.
 test('modele sans {adresse} et fiche vide : rien ne manque, aucune alerte', async () => {
   // On ne previent QUE de ce que le modele demande vraiment.
   const { mod, vus } = charger({ modele: { ...MODELE, template_text: 'Bonjour {prenom}. Code : {code_acces}' } })
   await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
   assert.strictEqual(vus.envois.length, 1)
-  assert.strictEqual(incompletes(vus).length, 0)
+  assert.strictEqual(vus.alertes.length, 0)
 })
 
-test('le canal refuse l envoi : l alerte ne dit pas « envoye », elle renvoie a la tache', async () => {
+test('le canal refuse l envoi : l alerte dit « NON ENVOYÉ » et renvoie a la tache', async () => {
   const { mod, vus } = charger({ envoi: { ok: false, reason: 'pas de messagerie' } })
   await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
   assert.strictEqual(vus.taches.length, 1, 'la tache de transmission manuelle existe deja')
   const a = incompletes(vus)
   assert.strictEqual(a.length, 1)
-  assert.ok(!/ENVOYÉ/.test(a[0].detail), `l alerte ne doit pas annoncer un envoi qui n a pas eu lieu : ${a[0].detail}`)
-  assert.match(a[0].detail, /dans vos tâches/)
+  assert.match(a[0].detail, /NON ENVOYÉ par le canal \(voir vos tâches\)/)
+  assert.ok(!/ENVOYÉ à/.test(a[0].detail), `l alerte annonce un envoi qui n a pas eu lieu : ${a[0].detail}`)
+})
+
+test('canal e-mail pas encore branche (`differe`) : meme texte que le refus du canal', async () => {
+  // Review 1, constat 6 : le cas n'etait pas teste.
+  const { mod, vus } = charger({ envoi: { ok: false, differe: true, reason: 'canal e-mail a venir' } })
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  assert.strictEqual(vus.taches.length, 1)
+  assert.match(incompletes(vus)[0].detail, /NON ENVOYÉ par le canal/)
 })
 
 // Non-regression : rougit contre une alerte posee aussi en mode Test — verifie.
@@ -162,46 +207,79 @@ test('mode Test : pas d alerte — la tache a valider montre le texte a l hote',
   await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
   assert.strictEqual(vus.envois.length, 0)
   assert.strictEqual(vus.taches.length, 1)
-  assert.strictEqual(incompletes(vus).length, 0)
+  assert.strictEqual(vus.alertes.length, 0)
 })
 
 // Non-regression : rougit contre une alerte posee AVANT la garde du code — verifie.
 test('PIN pas encore pose ET adresse manquante : la garde du code gagne, rien ne part', async () => {
   // L'option (a) n'affaiblit pas `hasUnresolvedCode` : un message sans code
-  // reste RETENU. Et l'alerte « envoye incomplet » ne sonne pas pour un
-  // message qui n'est pas parti.
+  // reste RETENU. Et l'alerte « code incomplet » ne sonne pas pour un message
+  // qui n'est pas parti.
   const { mod, vus } = charger({ pin: null })
   await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
   assert.strictEqual(vus.envois.length, 0)
   assert.strictEqual(incompletes(vus).length, 0)
 })
 
-test('l alerte qui echoue ne casse pas la suite de l envoi : journal du coeur et code active', async () => {
-  // Garde une regression : sans le try/catch de l'alerte, l'exception remonte
-  // au `catch` general de l'envoi — le code est deja parti, donc rien ne se
-  // voit chez le voyageur, mais le message manque au fil du coeur et le code
-  // n'est jamais passe a « active ». Verifie contre cette version fautive.
+// Non-regression : rougit quand l'anti-doublon `message_sent_log` saute — verifie.
+test('deuxieme cycle : le code deja envoye ne repart pas, et l alerte ne sonne pas une seconde fois', async () => {
+  // Review 1, constat 6 : « une seule fois par reservation » n'etait pas mesure.
+  const { mod, vus } = charger({ dejaEnvoye: true })
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  assert.strictEqual(vus.envois.length, 0)
+  assert.strictEqual(vus.alertes.length, 0)
+})
+
+test('base de connaissance illisible : l alerte dit la panne, elle n accuse pas l hote', async () => {
+  // Review 1, constat 4 : le wifi tombait dans les manquants et l'alerte
+  // disait « a renseigner » alors que l'hote l'avait renseigne.
+  const { mod, vus } = charger({
+    baseEnPanne: true,
+    modele: { ...MODELE, template_text: 'Wifi {wifi_mdp}. Code : {code_acces}' }
+  })
+  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+  assert.strictEqual(vus.envois.length, 1, 'le code part quand meme (option a)')
+  const a = incompletes(vus)
+  assert.strictEqual(a.length, 1)
+  assert.match(a[0].detail, /n'a pas pu être lue à l'envoi/)
+  assert.ok(!/à renseigner dans/.test(a[0].detail), a[0].detail)
+})
+
+test('balise inconnue du modele : le code part et l alerte dit quoi corriger dans le modele', async () => {
+  // Review 1, constat 5 : `{heure_arrivee}` partait en clair, sans alerte.
+  const { mod, vus } = charger({ modele: { ...MODELE, template_text: 'Arrivee a {heure_arrivee}. Code : {code_acces}' } })
+  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+  assert.strictEqual(vus.envois.length, 1)
+  const a = incompletes(vus)
+  assert.strictEqual(a.length, 1)
+  assert.match(a[0].detail, /variable inconnue dans le modèle : \{heure_arrivee\}, à corriger dans GuestFlow → Messages/)
+})
+
+// Non-regression : vert contre le commit d'avant les correctifs (son try/catch
+// tenait deja) ; rougissait contre la version sans try/catch, l'alerte placee
+// avant le journal — verifie a la review 1.
+test('l alerte qui echoue ne casse pas la suite de l envoi : journal du coeur et code actif', async () => {
   const { vus } = charger()
   doubler('lib/founder-notify.js', { reportIncident: async () => { throw new Error('Brevo en panne') } })
   delete require.cache[require.resolve('../lib/cron-arrival-code')]
   const mod = require('../lib/cron-arrival-code')
   await assert.doesNotReject(() => mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {}))
-  assert.strictEqual(vus.envois.length, 1)
-  assert.strictEqual(vus.journal, 1, 'le message envoye doit entrer dans le fil du coeur')
-  assert.strictEqual(vus.codesActives, 1, 'le code doit passer a « active »')
+  assert.deepStrictEqual(vus.ordre, ['envoi', 'noter', 'journal', 'actif'])
 })
 
-test('buildMessageDetaille rend les manquants ; buildMessage garde son contrat (une chaine)', () => {
+test('buildMessageDetaille rend les manquants et les inconnues ; buildMessage garde son contrat (une chaine)', () => {
   const { buildMessage, buildMessageDetaille } = require('../lib/message-builder')
   const r = buildMessageDetaille(MODELE, arrivante(), 'Ana', '123456', {}, BIEN_SANS_ADRESSE)
   assert.deepStrictEqual(r.manquants, ['adresse'])
+  assert.deepStrictEqual(r.inconnues, [])
   assert.ok(r.texte.includes('[ADRESSE]'))
   assert.strictEqual(buildMessage(MODELE, arrivante(), 'Ana', '123456', {}, BIEN_SANS_ADRESSE), r.texte)
   assert.strictEqual(buildMessage({ template_text: '  ' }, arrivante(), 'Ana', '1', {}, {}), null)
   assert.strictEqual(buildMessageDetaille({ template_text: '' }, arrivante(), 'Ana', '1', {}, {}), null)
 })
 
-test('le type d alerte a un libelle, et il part aussi par SMS', () => {
+test('le type d alerte a un libelle neutre, et il part aussi par SMS', () => {
   assert.ok(LABELS.message_envoye_incomplet, 'sinon l objet de l alerte porterait la cle brute')
+  assert.ok(!/ENVOYÉ/.test(LABELS.message_envoye_incomplet), 'le meme type sert quand le canal a refuse l envoi')
   assert.ok(!SANS_SMS.has('message_envoye_incomplet'))
 })

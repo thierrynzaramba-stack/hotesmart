@@ -644,3 +644,14 @@ sur aucun écran** — `api_credit`, `booking_change_dispatch`, `circuit_breaker
 `volume`. Les élargir au bandeau d'un coup
 noierait exactement l'écran que la décision ci-dessus protège. Choisir lesquels
 le méritent est une décision produit.
+
+**Un type de plus depuis le 10 novembre 2026, sans écran lui aussi :**
+`message_envoye_incomplet` (dette 137, `lib/cron-arrival-code.js`). Le message
+du CODE D'ACCÈS est parti (ou attend dans les tâches si le canal l'a refusé) avec
+un trou : une information que le modèle cite et qui manque (adresse de la fiche,
+téléphone, wifi), ou une balise inconnue du modèle. Le message n'est pas retenu —
+sans lui la porte reste fermée —, l'alerte dit quoi renseigner et où, et elle
+signale une lecture ratée de la base au lieu d'accuser l'hôte. Une fois par
+réservation, en mode Auto seulement. Comme `message_non_envoye`, elle part au
+**fondateur** (`FOUNDER_PHONE` / `FOUNDER_EMAIL`), pas à l'hôte du compte : le
+compte recensé plus haut (20 / 17) date d'avant elle et n'a pas été remesuré.
