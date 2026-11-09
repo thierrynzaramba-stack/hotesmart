@@ -973,3 +973,56 @@ coche. Review, rapport recopié mot pour mot dès réception :
 Les quatre composants signalés hors plage ne sont pas des fichiers de ce fil
 (`apps/`, `shared/ui.css`) : transmis à Thierry et au chef de file, non
 corrigés ici.
+
+**Dette 140** (réservée par le chef de file le 9 novembre 2026 : les quatre
+composants signalés ci-dessus) : inscrite au registre sur la branche de
+documentation `dette-140-saut-de-page`, partie de `main` `9385a9e1`. Review,
+rapport recopié mot pour mot dès réception :
+
+> Arbre lu : /home/claude/hs-dette-140 — branche : dette-140-saut-de-page — SHA : c02c8ed6d7142844ba1ef9a59dc5b4889bf2c012 — plage : 9385a9e1ddfe3d957ffc9e79985b16122ef14bd1..c02c8ed6d7142844ba1ef9a59dc5b4889bf2c012
+>
+> **Ce qui a été vérifié et qui est juste :**
+> - **Numéros de ligne** : les quatre plages sont exactes au caractère (`prestataires.html:62-66`, `public.html:697-703`, `ui.css:831-833`, `ui.css:1299-1312`).
+> - **La case est bien dans un `label`** pour les quatre :
+>   - `prestataires.html:2070` ;
+>   - `public.html:3726` ;
+>   - `pages/calendrier.html:1582` ;
+>   - `pages/menages.html:1835` (le cas « figé » rend un `span`, sans case).
+> - **Les quatre cases sont bien en `position: absolute`.**
+> - **Aucun conteneur n'est positionné ailleurs.** J'ai cherché dans les feuilles chargées (`public/style.css`, `shared/theme.css`, `shared/ui.css`) et dans les blocs `<style>` des quatre pages : aucune règle ne positionne ces conteneurs, ni de règle `label { position }`, ni de `style` en ligne dans les gabarits.
+> - **« Trois des quatre posent `pointer-events: none` »** : exact. `.cal-chip input` est la seule sans.
+> - **Format** : 4 colonnes comme l'en-tête (`# | Dette | Coût si oubliée | Échéance`), même nombre de champs que les lignes voisines. La ligne est placée après la 137, avant « ## Règle du registre », dans l'ordre croissant.
+> - **Mesures** : les 1 636 px correspondent au message de `f66420bc`. Les 937 px sont attribués à la review et ne sont pas vérifiables ici. « RIEN N'A ÉTÉ MESURÉ DANS CES QUATRE PAGES » est honnête : aucune affirmation n'est présentée à tort comme mesurée.
+>
+> **Constats**
+>
+> 1. **MINEUR — `docs/kb/dettes-v1.md:152`** — Le « modèle » cité n'est pas dans cet arbre (`main`).
+>    - `f66420bc` n'est pas un ancêtre de HEAD (`merge-base --is-ancestor` négatif) : il est seulement sur `pwa-lot-2b-reglages`.
+>    - `tests/notifications-ecran.test.js` est absent de l'arbre.
+>    - Le `pages/settings.html` de `main` ne porte pas encore les règles `.jours`.
+>    - Correctif : ajouter « (branche `pwa-lot-2b-reglages`, pas encore dans `main`) ».
+>
+> 2. **MINEUR — même ligne, colonne Échéance (protocole de mesure)** — C'est une inférence de lecture, **non mesurée**.
+>    - Une case en `absolute` sans `top`/`left` se place à l'endroit qu'elle occuperait sans `absolute`, c'est-à-dire dans son label.
+>    - Elle ne s'en écarte que si une zone défilante non positionnée sépare le label de l'ancêtre qui la positionne : la case ne suit pas ce défilement. Les 1 636 px « plus bas » mesurés sur `/settings` vont dans ce sens.
+>    - Exemple dans cet arbre : `.men-cfg__corps { overflow-y: auto; }` à `shared/ui.css:1211`, non positionné.
+>    - Conséquence : une mesure faite sans avoir d'abord fait défiler cette zone peut conclure à tort « pas de saut ». C'est ce qui ferait appliquer à tort « le noter ici et ne rien changer ».
+>    - Correctif : écrire dans l'échéance « mesurer après avoir fait défiler la zone qui contient la case ».
+>
+> 3. **MINEUR — même ligne, fin de la colonne Échéance** — « ⚠ `apps/` et `shared/ui.css` ne se modifient pas sans l'accord de Thierry » est présenté comme une règle, mais aucune règle de ce type n'existe dans `CLAUDE.md`, `REVIEW.md` ni `docs/`. Correctif : donner sa source et sa date (« consigne de Thierry du … »), ou retirer la phrase.
+>
+> **Constat de sécurité : aucun**
+>
+> | Fichier | Dans la plage | Rôle |
+> |---|---|---|
+> | `docs/kb/dettes-v1.md` | oui | ligne 140 relue |
+> | `apps/menages/prestataires.html` | non | `.dispo-j` :62-66, gabarit :2070 |
+> | `apps/menages/public.html` | non | `.dispo-pastille` :697-703 (règles suivantes :719-722 sans `position`), gabarit :3726 |
+> | `shared/ui.css` | non | `.cal-chip` :831-833, `.men-cfg__pastille` :1299-1312, `.men-cfg__corps` :1211 (constat 2) |
+> | `pages/calendrier.html` | non | gabarit `.cal-chip` :1582 |
+> | `pages/menages.html` | non | gabarit `.men-cfg__pastille` :1835 |
+> | `public/style.css`, `shared/theme.css` | non | feuilles chargées, aucune règle de position sur les conteneurs |
+> | `pages/settings.html` | non | cité par la dette ; sans `.jours` dans `main` |
+> | `tests/notifications-ecran.test.js` | non | cité ; absent de cet arbre (constat 1) |
+
+Les trois constats, mineurs, sont corrigés sans nouvelle review.
