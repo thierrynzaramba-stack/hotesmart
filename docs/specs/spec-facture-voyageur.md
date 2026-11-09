@@ -533,6 +533,44 @@ nouvelle relecture — la règle de stockage privé du PDF avait disparu (1) ;
 la confirmation fait aussi partir un message, P1 la couvre désormais (2) ;
 `biens_entites` suit la règle d'accès de l'entité quel que soit l'endpoint (3).
 
+### 10 bis. Code de l'étape 1 — les revues
+
+**Review 1** (sous-agent, plage 4e194a5f..447ff3e0) : 8 constats, 0 sécurité,
+corrigés dans e4a764c1 ; le 8e est devenu la décision Q5 bis. ⚠ **Sa trace
+n'existe plus** (rapport perdu au compactage de la session, jamais écrit sur
+disque) : le chef de file ne la compte pas comme preuve (9 nov. 2026). Leçon :
+la trace d'une review s'écrit ICI dès son retour, avant toute correction.
+
+**Review 2, la dernière** (sous-agent, 9 nov. 2026, accord du chef de file sur
+la plage complète) — TRACE :
+- arbre lu : `/home/claude/hotesmart` ; branche : `facture-voyageur` ;
+- HEAD déclaré lu : `39e7924ef46b9fdd4dab40ce049c70e9ba234da2` ;
+- plage : `4e194a5fe1b492f7201eab203ca971fd7b27102e..39e7924ef46b9fdd4dab40ce049c70e9ba234da2`,
+  en priorité `447ff3e035f7e05cecc08a169b574429befb8f0d..39e7924e` ;
+- tests du lot relancés par la review : 38/38 ;
+- fichiers cités, confrontés à `git diff --name-only` de la plage : dans le
+  diff — `migrations/2026-11-08-entites-juridiques.sql`,
+  `lib/entites-juridiques.js`, `api/entites-juridiques.js`,
+  `tests/entites-juridiques.test.js`, `docs/kb/entites-juridiques.md`,
+  `docs/specs/spec-facture-voyageur.md` ; hors diff, preuve seulement, aucun
+  constat — `lib/require-permission.js`, `lib/permissions.js`.
+
+Vérifié sans constat : écriture réservée au titulaire (même un membre qui a
+tout en écriture), `rattacher` sur le compte du bien, RLS + revoke sur les
+trois tables et la fonction, en-têtes privés avant le premier refus, échappement
+de la vue, upsert de la numérotation qui passe par le trigger, année de Paris,
+panne ≠ liste vide, lignes SQL < 60 caractères.
+
+**0 sécurité, 3 constats**, corrigés sans nouvelle review :
+1. Le trigger ne garantissait pas « sans trou » en base : `dernier_emis`
+   pouvait sauter (15 → 40), la première émission n'était pas contrôlée, un
+   INSERT pouvait naître entamé, une suite entamée pouvait changer d'année ou
+   d'entité, ou être supprimée — et les tests ne lisaient que le texte SQL.
+2. `Server-Timing` sous-comptait : `numerotation` fait deux requêtes quand la
+   ligne de l'année n'existe pas.
+3. Un refus du trigger (23514) s'affichait comme une panne au lieu de
+   « suite figée ».
+
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
 Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.
