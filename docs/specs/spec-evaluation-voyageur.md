@@ -442,6 +442,28 @@ rien n'est négatif : `guest_evaluations.auto_publier_le` = maintenant + X h,
 une évaluation où personne n'a rien coché ne part pas « au meilleur niveau »
 (choix prudent de la nuit, à défaire si Thierry veut l'horloge dès la naissance).
 
+**Sans prestataire, l'horloge démarre à la naissance** (décision de Thierry du
+9 novembre 2026 : « si l'avis de la prestataire n'est pas demandé, ça doit
+envoyer un message positif en 24 h »). Mesure du jour en production : La bulle
+et Cœur de vie 23 réglées à 24 h, **zéro** publication automatique depuis le
+2 octobre, 14 évaluations expirées — aucune prestataire n'était autorisée à
+évaluer, donc « sa part finie » n'arrivait jamais. On ne lui demande rien quand
+la grille ne lui ouvre aucune question, quand le ménage du séjour n'a pas de
+prestataire, ou quand elle est inactive ou non autorisée (`eval_scope` autre que
+`selon_grille`). Alors :
+- à la **naissance** (départ, ou objet Channex), l'horloge part : maintenant +
+  X h, même plafond (échéance − 12 h), seulement sur une évaluation que personne
+  n'a touchée (`a_remplir`, aucune réponse, pas d'horloge) —
+  `armerSansPrestataire`, lib/avis/auto-validation.js ;
+- à l'**échéance**, **toutes** les questions vides prennent le meilleur niveau,
+  celles de la prestataire comprises ; la grille du bien se **fige dans
+  l'écriture de la prise** (sinon la publication lirait la grille par défaut) ;
+- si une prestataire est devenue autorisée entre-temps et que sa part est vide,
+  rien ne part et l'hôte est prévenu (comportement d'avant) ;
+- les évaluations nées **avant** ce lot reçoivent leur horloge par
+  `scripts/armer-avis-sans-prestataire.js` (à blanc, puis `--go`), décision de
+  Thierry du même jour : le délai part de l'exécution du script.
+
 **Ce qui l'arrête** — toute **réaction de l'hôte** : une réponse, un texte, un
 abandon. `auto_publier_le` repasse à nul ; l'évaluation est alors à lui (S2).
 
