@@ -24,13 +24,47 @@ test('les quatre tables : RLS activée, AUCUNE policy, rien pour anon ni authent
   assert.doesNotMatch(sql, /create policy/i, 'aucune policy : le navigateur ne lit rien ici')
 })
 
-test('⚠ les fonctions security definer ne sont PAS appelables par un compte connecté', () => {
-  const definer = [...sql.matchAll(/function\s+public\.(\w+)\(/g)].map(m => m[1])
-    .filter((n, i, a) => a.indexOf(n) === i)
-  assert.ok(definer.length >= 4, 'le relevé voit les fonctions')
-  for (const f of definer.filter(n => n !== 'charges_bien_meme_compte')) {
-    assert.match(sql, new RegExp(`revoke execute on function\\s+public\\.${f}\\(`), f)
+// Les fonctions `security definer` du fichier, et les rôles à qui chacune est
+// retirée. Supabase donne l'exécution DIRECTEMENT à `anon` et `authenticated`
+// (pas seulement par `public`) : un `revoke … from public` seul les laisse
+// passer. Rend la liste des fonctions qui ne sont pas fermées aux trois.
+function fonctionsOuvertes (texte) {
+  const definer = []
+  for (const m of texte.matchAll(/create or replace function\s+public\.(\w+)\(([\s\S]*?)\$\$/g)) {
+    if (/security definer/.test(m[2])) definer.push(m[1])
   }
+  const retraits = {}
+  for (const m of texte.matchAll(/revoke execute on function\s+public\.(\w+)\([^)]*\)\s+from ([^;]+);/g)) {
+    retraits[m[1]] = new Set(m[2].split(',').map(x => x.trim()))
+  }
+  const ouvertes = definer.filter(f => !['public', 'anon', 'authenticated'].every(r => retraits[f] && retraits[f].has(r)))
+  for (const m of texte.matchAll(/grant execute on function\s+public\.(\w+)\([^)]*\)\s+to ([^;]+);/g)) {
+    if (/\b(anon|authenticated|public)\b/.test(m[2])) ouvertes.push(m[1])
+  }
+  return { definer, ouvertes }
+}
+
+test('⚠ chaque fonction security definer est retirée à public, anon ET authenticated (et jamais rendue)', () => {
+  const { definer, ouvertes } = fonctionsOuvertes(sql)
+  assert.ok(definer.length >= 4, `le relevé voit les fonctions security definer (${definer.join(', ')})`)
+  assert.deepEqual(ouvertes, [])
+  // ⚠ CONTRE-ÉPREUVE (REVIEW.md règle 20) : un retrait à `public` seul, ou un
+  // grant à `authenticated`, doivent être vus.
+  const seulPublic = sql.replace(/(public\.charges_comptes\(uuid, int\)\s+from) public, anon, authenticated;/, '$1 public;')
+  assert.notEqual(seulPublic, sql, 'la contre-épreuve a bien modifié le texte')
+  assert.deepEqual(fonctionsOuvertes(seulPublic).ouvertes, ['charges_comptes'])
+  const rendue = sql + '\ngrant execute on function\n  public.charges_recalculer_compte(uuid)\n  to authenticated;\n'
+  assert.deepEqual(fonctionsOuvertes(rendue).ouvertes, ['charges_recalculer_compte'])
+})
+
+test('⚠ un montant que personne n’a lu est NULL dans le résumé, jamais 0 (le motif est dans `nb_sans_*`)', () => {
+  assert.doesNotMatch(sql, /coalesce\(sum\(c\.montant_/)
+  assert.match(sql, /ht_cents bigint,/)
+  assert.doesNotMatch(sql, /(ht|tva|ttc)_cents bigint not null/)
+})
+
+test('la file du cron se lit par index : `a_lire` par `modifie_le`', () => {
+  assert.match(sql, /on public\.charges \(modifie_le\)\s+where statut = 'a_lire'/)
 })
 
 test('la clé composite vise entites_juridiques (id, user_id), et la dépendance est écrite', () => {

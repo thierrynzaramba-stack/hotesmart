@@ -83,10 +83,13 @@ test('une action inconnue -> 400, sans requête', async () => {
 })
 
 test('envoi : le titulaire reçoit une URL d’envoi, sous son compte', async () => {
-  const r = await appeler({ corps: { action: 'envoi', type: 'application/pdf', octets: 1000 } })
+  const r = await appeler({
+    corps: { action: 'envoi', type: 'application/pdf', octets: 1000 },
+    repondre: (q) => (q.optionsSelect && q.optionsSelect.head ? { count: 0 } : { data: null })
+  })
   assert.equal(r.statut, 200)
   assert.ok(r.charge.url.includes(`${TITULAIRE}/`))
-  assert.equal(r.requetes[0].charge.user_id, TITULAIRE)
+  assert.equal(r.requetes.find(q => q.op === 'insert').charge.user_id, TITULAIRE)
 })
 
 test('les refus du writer passent avec leur code HTTP', async () => {

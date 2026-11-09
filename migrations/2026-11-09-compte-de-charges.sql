@@ -124,10 +124,15 @@ create index if not exists charges_cle_doublon_idx
 create index if not exists charges_groupe_idx
   on public.charges (groupe_doublon)
   where groupe_doublon is not null;
--- La file du cron dedie : envois a purger, lectures.
+-- La file du cron dedie : envois a purger (par
+-- cree_le), lectures restees en attente (par
+-- modifie_le, l'ordre de lib/charges.js).
 create index if not exists charges_file_idx
   on public.charges (statut, cree_le)
   where statut in ('envoi', 'a_lire');
+create index if not exists charges_a_lire_idx
+  on public.charges (modifie_le)
+  where statut = 'a_lire';
 -- Une commission par reservation et par compte.
 create unique index if not exists
   charges_ota_uidx
@@ -193,9 +198,11 @@ create table if not exists public.charges_resume (
   entite_juridique_id uuid,
   bien_id uuid,
   jour date not null,
-  ht_cents bigint not null default 0,
-  tva_cents bigint not null default 0,
-  ttc_cents bigint not null default 0,
+  -- ⚠ NULL, PAS 0, quand aucune facture comptee
+  -- n'a ce montant : `nb_sans_*` en dit le motif.
+  ht_cents bigint,
+  tva_cents bigint,
+  ttc_cents bigint,
   nb_factures int not null default 0,
   nb_non_verifiees int not null default 0,
   nb_signaux int not null default 0,
@@ -208,6 +215,15 @@ create table if not exists public.charges_resume (
 -- ⚠ UNE CELLULE « SANS ENTITE » OU « SANS BIEN » EST
 -- UNE SEULE CELLULE. Deux NULL sont differents pour
 -- Postgres : la cle les ramene a une valeur fixe.
+-- Rejouable sur une version anterieure de la table.
+alter table public.charges_resume
+  alter column ht_cents drop not null,
+  alter column ht_cents drop default,
+  alter column tva_cents drop not null,
+  alter column tva_cents drop default,
+  alter column ttc_cents drop not null,
+  alter column ttc_cents drop default;
+
 create unique index if not exists
   charges_resume_cellule_uidx
   on public.charges_resume (
@@ -283,12 +299,12 @@ begin
     nb_sans_ht, nb_sans_tva, nb_sans_ttc,
     calcule_le)
   select p_user, p_entite, p_bien, p_jour,
-    coalesce(sum(c.montant_ht_cents)
-      filter (where c.compte), 0),
-    coalesce(sum(c.montant_tva_cents)
-      filter (where c.compte), 0),
-    coalesce(sum(c.montant_ttc_cents)
-      filter (where c.compte), 0),
+    sum(c.montant_ht_cents)
+      filter (where c.compte),
+    sum(c.montant_tva_cents)
+      filter (where c.compte),
+    sum(c.montant_ttc_cents)
+      filter (where c.compte),
     count(*) filter (where c.compte),
     count(*) filter (where c.statut in (
       'a_lire', 'a_verifier', 'illisible')),

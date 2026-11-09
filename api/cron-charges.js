@@ -14,7 +14,7 @@
 //   2. recalculer le résumé des totaux de chaque compte, pour la cohérence ;
 //   3. relire les charges restées `a_lire` (panne de l'IA ou plafond du
 //      jour au moment du geste).
-// À vide : 2 lectures de `charges`, l'écriture de la mesure, 1 appel RPC
+// À vide : 2 lectures de `charges`, l'écriture de la mesure, 2 appels RPC
 // (la liste des comptes), AUCUN appel à l'IA ni au stockage
 // (`tests/cron-charges.test.js` le tient).
 //
@@ -24,7 +24,8 @@
 // Précédent : `api/cron-messages.js`.
 
 const { createClient } = require('@supabase/supabase-js')
-const { purgerEnvois, lireEnAttente } = require('../lib/charges')
+const crypto = require('node:crypto')
+const { purgerEnvois, lireEnAttente, avecDelai } = require('../lib/charges')
 const { lireDocument } = require('../lib/charges/lecture')
 const { demarrerPassage } = require('../lib/metriques-cron')
 const { ecrireLePassage, ECRITURE_MAX_MS } = require('../lib/cron-stats')
@@ -32,32 +33,55 @@ const { ecrireLePassage, ECRITURE_MAX_MS } = require('../lib/cron-stats')
 // Le mur de Vercel (`maxDuration` 60 s, vercel.json), et ce qu'on laisse
 // pour la mesure et la réponse.
 const MUR_MESURE_MS = 59000
-// ⚠ LE BUDGET DES LECTURES BORNE LE DÉPART D'UNE LECTURE, PAS SA FIN : la
-// dernière commencée peut durer jusqu'au délai de l'IA (`DELAI_IA_MS`, 20 s).
-// 30 + 20 laisse de quoi écrire la mesure sous le mur.
-const BUDGET_LECTURES_MS = 30000
+// ⚠ LES BUDGETS BORNENT LE DÉPART D'UNE ÉTAPE, PAS SA FIN : la dernière
+// lecture commencée peut durer le téléchargement (8 s) plus le délai de l'IA
+// (`DELAI_IA_MS`, 20 s). 25 + 8 + 20 laisse de quoi écrire la mesure sous
+// le mur.
+const BUDGET_PURGE_MS = 8000
+const BUDGET_LECTURES_MS = 25000
 const BUDGET_RECALCUL_MS = 15000
+const DELAI_RPC_MS = 8000
 const COMPTES_PAR_PAGE = 200
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
-async function recalculerTousLesComptes (db, echeance) {
-  let apres = null
-  let comptes = 0
-  for (;;) {
-    if (Date.now() > echeance) return { comptes, complet: false }
-    const { data, error } = await db.rpc('charges_comptes', { p_apres: apres, p_limite: COMPTES_PAR_PAGE })
-    if (error) throw new Error(error.message)
-    const ids = (data || []).map(x => (typeof x === 'string' ? x : x.charges_comptes || x.user_id)).filter(Boolean)
-    for (const id of ids) {
-      if (Date.now() > echeance) return { comptes, complet: false }
-      const { error: e } = await db.rpc('charges_recalculer_compte', { p_user: id })
-      if (e) throw new Error(e.message)
-      comptes++
-    }
-    if (ids.length < COMPTES_PAR_PAGE) return { comptes, complet: true }
-    apres = ids[ids.length - 1]
+/**
+ * Recalcule le résumé de chaque compte, dans l'ordre des comptes, borné par
+ * `echeance`.
+ * ⚠ LE POINT DE DÉPART TOURNE : il est tiré au hasard à chaque passage, et
+ * le parcours fait le tour (de `depart` à la fin, puis du début à `depart`).
+ * Repartir toujours du premier compte recalculerait chaque nuit les mêmes, et
+ * jamais la fin de la liste, dès que le budget ne suffit plus.
+ * `depart: null` : un seul parcours, du premier au dernier.
+ */
+async function recalculerTousLesComptes (db, echeance, { depart = crypto.randomUUID() } = {}) {
+  const rpc = async (nom, args) => {
+    const reste = Math.max(1, Math.min(DELAI_RPC_MS, echeance - Date.now() + DELAI_RPC_MS))
+    const r = await avecDelai(db.rpc(nom, args), reste)
+    if (r && r.delai) throw new Error(`${nom} : delai depasse`)
+    if (r && r.error) throw new Error(r.error.message)
+    return (r && r.data) || []
   }
+  let comptes = 0
+  const tours = depart ? [[depart, null], [null, depart]] : [[null, null]]
+  for (const [debut, borne] of tours) {
+    let apres = debut
+    for (;;) {
+      if (Date.now() > echeance) return { comptes, complet: false }
+      const data = await rpc('charges_comptes', { p_apres: apres, p_limite: COMPTES_PAR_PAGE })
+      const ids = data.map(x => (typeof x === 'string' ? x : x.charges_comptes || x.user_id)).filter(Boolean)
+      let fini = ids.length < COMPTES_PAR_PAGE
+      for (const id of ids) {
+        if (borne && id > borne) { fini = true; break }
+        if (Date.now() > echeance) return { comptes, complet: false }
+        await rpc('charges_recalculer_compte', { p_user: id })
+        comptes++
+      }
+      if (fini) break
+      apres = ids[ids.length - 1]
+    }
+  }
+  return { comptes, complet: true }
 }
 
 module.exports = async function handler (req, res) {
@@ -92,7 +116,7 @@ module.exports = async function handler (req, res) {
   // ⚠ UNE TÂCHE QUI REND `ok: false` EST UNE ERREUR, PAS UN ZÉRO : sans ce
   // relais, une lecture de la file en panne passait pour « rien à faire ».
   try {
-    const p = await chrono.mesure('purge_envois', () => purgerEnvois(supabase))
+    const p = await chrono.mesure('purge_envois', () => purgerEnvois(supabase, { echeance: t0 + BUDGET_PURGE_MS }))
     bilan.purges = p.purges || 0
     if (!p.ok) results.errors.push({ tache: 'purge_envois', error: 'lecture des envois impossible' })
   } catch (e) { results.errors.push({ tache: 'purge_envois', error: e.message }) }

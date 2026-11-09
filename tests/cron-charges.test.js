@@ -55,13 +55,13 @@ test('le recalcul quotidien parcourt les comptes PAR CURSEUR, et s’arrête à 
   const { client, rpcs } = baseEnregistreuse(undefined, {
     rpc: (nom, args) => (nom === 'charges_comptes' ? { data: pages.shift() || [], error: null } : { data: 1, error: null })
   })
-  const r = await recalculerTousLesComptes(client, Date.now() + 10000)
+  const r = await recalculerTousLesComptes(client, Date.now() + 10000, { depart: null })
   assert.equal(r.comptes, 201)
   assert.equal(r.complet, true)
   const curseurs = rpcs.filter(x => x.nom === 'charges_comptes').map(x => x.args.p_apres)
   assert.deepEqual(curseurs, [null, 'u199'])
   const vide = baseEnregistreuse(undefined, { rpc: () => ({ data: ['a'], error: null }) })
-  const arret = await recalculerTousLesComptes(vide.client, Date.now() - 1)
+  const arret = await recalculerTousLesComptes(vide.client, Date.now() - 1, { depart: null })
   assert.equal(arret.complet, false)
   assert.equal(vide.rpcs.length, 0)
 })
@@ -99,7 +99,7 @@ test('⚠ une tâche qui rend `ok: false` est une ERREUR du passage, pas un zér
   }
 })
 
-test('⚠ un passage À VIDE : 2 lectures de `charges`, la mesure, 1 RPC — ZÉRO appel à l’IA, zéro au stockage', async () => {
+test('⚠ un passage À VIDE : 2 lectures de `charges`, la mesure, 2 RPC — ZÉRO appel à l’IA, zéro au stockage', async () => {
   const avant = process.env.CRON_SECRET
   process.env.CRON_SECRET = 'le-bon'
   const b = baseEnregistreuse(() => ({ data: [], error: null }))
@@ -124,7 +124,8 @@ test('⚠ un passage À VIDE : 2 lectures de `charges`, la mesure, 1 RPC — ZÉ
     assert.equal(b.gestes.length, 0, 'aucun appel au stockage')
     const parTable = b.requetes.map(r => `${r.op} ${r.table}`).sort()
     assert.deepEqual(parTable, ['insert cron_stats', 'select charges', 'select charges'])
-    assert.deepEqual(b.rpcs.map(x => x.nom), ['charges_comptes'])
+    assert.deepEqual(b.rpcs.map(x => x.nom), ['charges_comptes', 'charges_comptes'],
+      'la liste des comptes, lue en deux tours (le départ tourne)')
     assert.ok(!b.requetes.some(r => r.table === 'ia_appels'), 'le plafond ne se lit que s’il y a quelque chose à lire')
   } finally {
     require.cache[absSdk].exports.createClient = vraiCreate
@@ -132,4 +133,20 @@ test('⚠ un passage À VIDE : 2 lectures de `charges`, la mesure, 1 RPC — ZÉ
     delete require.cache[absCron]
     if (avant === undefined) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = avant
   }
+})
+
+test('⚠ le recalcul part d’un point qui TOURNE et fait le tour : la fin de la liste n’est jamais oubliée', async () => {
+  const { recalculerTousLesComptes } = require('../api/cron-charges')
+  const tous = ['a1', 'b2', 'c3', 'd4', 'e5']
+  const { client, rpcs } = baseEnregistreuse(undefined, {
+    rpc: (nom, args) => {
+      if (nom !== 'charges_comptes') return { data: 1, error: null }
+      const suite = tous.filter(id => args.p_apres === null || id > args.p_apres)
+      return { data: suite.slice(0, args.p_limite), error: null }
+    }
+  })
+  const r = await recalculerTousLesComptes(client, Date.now() + 10000, { depart: 'c0' })
+  assert.equal(r.complet, true)
+  const faits = rpcs.filter(x => x.nom === 'charges_recalculer_compte').map(x => x.args.p_user)
+  assert.deepEqual(faits, ['c3', 'd4', 'e5', 'a1', 'b2'], 'de `c0` à la fin, puis du début à `c0`, chacun une fois')
 })

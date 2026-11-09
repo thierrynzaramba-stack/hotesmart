@@ -14,7 +14,7 @@ exercice. Spec (décisions de Thierry Q1 à Q23, 8-9 novembre 2026) :
 | `lib/charges/regles.js` | Les règles pures : catégories (Q5), montants, dates, SIRET, type réel d'un fichier, entité proposée (Q6), clé de doublon (Q14), jour d'une charge. |
 | `lib/charges/lecture.js` | La lecture IA (Haiku, client partagé, `avecContexteIA` fonction `charges-lecture`). Trois issues : `ok`, `echec` (compte), `panne` (ne compte pas). |
 | `api/charges.js` | Les écritures, **titulaire seul** (`estTitulaireDuCompte`, pas le domaine `facturation`). |
-| `api/cron-charges.js` | Cron dédié, **une fois par jour** (Q28, `17 2 * * *` UTC) : purge des envois > 24 h, recalcul du résumé, relecture de ce qui est resté `a_lire`. Tout le reste se fait au geste (lecture à la confirmation, totaux par trigger). À vide : 2 lectures, la mesure, 1 RPC, 0 appel IA. |
+| `api/cron-charges.js` | Cron dédié, **une fois par jour** (Q28, `17 2 * * *` UTC) : purge des envois > 24 h, recalcul du résumé, relecture de ce qui est resté `a_lire`. Tout le reste se fait au geste (lecture à la confirmation, totaux par trigger). À vide : 2 lectures, la mesure, 2 RPC, 0 appel IA. |
 
 ## Règles à ne pas perdre
 
@@ -59,5 +59,34 @@ exercice. Spec (décisions de Thierry Q1 à Q23, 8-9 novembre 2026) :
   24 h glissantes, comptées dans `ia_appels` (fonction `charges-lecture`).
   Au-delà, la charge attend ; rien n'est perdu. Valeur posée au lot 2, à
   revoir sur la mesure réelle (spec §6).
-- **Une entité archivée** n'est acceptée à la validation que si la charge la
-  porte déjà (corriger une vieille facture sans changer d'entité).
+- **Une charge validée garde son rattachement** : corrigée sans changer
+  d'entité ni de bien, elle passe même si l'entité a été archivée ou le bien
+  rattaché ailleurs depuis. Toute autre validation (charge neuve, rattachement
+  qui change) exige une entité active et un bien qui en relève (Q18).
+- **Saisie à la main d'une charge pas encore lue (Q29)** : `a_lire` est
+  validable ; la lecture IA qui arriverait ensuite n'écrit plus rien
+  (`appliquerLecture` ne touche qu'une charge `a_lire`).
+- **Bornes** : 30 envois ouverts par compte sur 24 h (au-delà, 429) ;
+  téléchargement du bucket borné à 8 s ; purge page après page jusqu'à son
+  échéance ; recalcul quotidien parti d'un point tiré au hasard et qui fait
+  le tour, pour qu'aucun compte ne soit oublié chaque nuit.
+- **Les sommes du résumé sont NULL**, pas 0, quand aucune facture comptée n'a
+  le montant ; `nb_sans_*` en donne le motif.
+- **Le double de test applique ses filtres `eq` sur les lectures** (REVIEW.md
+  règle 22) : `tests/outils/base-enregistreuse.js`.
+
+## Dettes connues (review du lot 2, 10 novembre 2026)
+
+- **Fichier non effacé** : un échec de `remove` n'est que journalisé ;
+  `supprimer` répond « ok ». À faire : une table des fichiers à effacer,
+  retentée par le passage quotidien (Q11 promet l'effacement).
+- **Plafond IA en parallèle** : le compte `ia_appels` est lu avant l'appel et
+  la ligne écrite après ; N confirmations simultanées passent toutes. Et un
+  même fichier (même empreinte) est relu et payé de nouveau. À faire : réserver
+  la place avant l'appel, reprendre la `lecture_ia` de même empreinte.
+- **Regroupement non atomique** : `regrouperDoublon` fait quatre écritures
+  indépendantes ; interrompu, le groupe peut rester à moitié posé. À faire :
+  une fonction SQL en une transaction.
+- **Racine d'empreinte** : la plus ancienne charge devient racine même
+  `a_lire` ou `illisible` ; si le doublon est lu et pas elle, le groupe compte
+  zéro. À faire : préférer une racine `a_verifier` ou `validee`.

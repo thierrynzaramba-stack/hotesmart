@@ -44,8 +44,11 @@ function sansFuite (requetes) {
 
 // ─── Ouvrir un envoi ───────────────────────────────────────────────────────
 
+// Le compte des envois ouverts du compte : `n` (0 par défaut).
+const envoisOuverts = (n = 0) => (r) => (r.optionsSelect && r.optionsSelect.head ? { count: n } : { data: null })
+
 test('ouvrir un envoi : le SERVEUR choisit le chemin, sous le compte, et l’enregistre avant l’URL', async () => {
-  const { client, requetes, gestes } = baseEnregistreuse()
+  const { client, requetes, gestes } = baseEnregistreuse(envoisOuverts(0))
   const r = await charges.ouvrirEnvoi(client, { compte: COMPTE, type: 'application/pdf', octets: 2000 })
   assert.equal(r.ok, true)
   const ins = requetes.find(x => x.op === 'insert')
@@ -53,7 +56,25 @@ test('ouvrir un envoi : le SERVEUR choisit le chemin, sous le compte, et l’enr
   assert.equal(ins.charge.statut, 'envoi')
   assert.equal(gestes[0].nom, 'createSignedUploadUrl')
   assert.equal(gestes[0].args[0], ins.charge.justificatif_chemin)
-  assert.ok(requetes.indexOf(ins) === 0, 'la ligne existe avant l’URL')
+  assert.ok(gestes.length === 1, 'la ligne existe avant l’URL')
+  sansFuite(requetes)
+})
+
+test('⚠ ouvrir un envoi : au-delà de 30 envois ouverts sur 24 h, 429 — et une panne du compte refuse (503)', async () => {
+  let b = baseEnregistreuse(envoisOuverts(charges.MAX_ENVOIS_OUVERTS))
+  let r = await charges.ouvrirEnvoi(b.client, { compte: COMPTE, type: 'application/pdf', octets: 2000 })
+  assert.deepEqual([r.statut, r.code], [429, 'trop_d_envois'])
+  assert.ok(!b.requetes.some(x => x.op === 'insert') && b.gestes.length === 0)
+  const q = b.requetes[0]
+  assert.equal(filtre(q, 'user_id'), COMPTE)
+  assert.equal(filtre(q, 'statut'), 'envoi')
+  assert.ok(q.filtres.some(f => f[0] === 'gte' && f[1] === 'cree_le'))
+  b = baseEnregistreuse(() => ({ error: { message: 'panne' } }))
+  r = await charges.ouvrirEnvoi(b.client, { compte: COMPTE, type: 'application/pdf', octets: 2000 })
+  assert.equal(r.statut, 503)
+  b = baseEnregistreuse(envoisOuverts(charges.MAX_ENVOIS_OUVERTS - 1))
+  assert.equal((await charges.ouvrirEnvoi(b.client, { compte: COMPTE, type: 'application/pdf', octets: 2000 })).ok, true)
+  assert.equal(charges.MAX_ENVOIS_OUVERTS, 30)
 })
 
 test('ouvrir un envoi : type refusé (400), fichier trop gros (413), image limitée sous l’API Claude', async () => {
@@ -64,7 +85,7 @@ test('ouvrir un envoi : type refusé (400), fichier trop gros (413), image limit
 })
 
 test('ouvrir un envoi : sans URL de stockage, la ligne est retirée (pas de charge fantôme)', async () => {
-  const { client, requetes } = baseEnregistreuse(undefined, {
+  const { client, requetes } = baseEnregistreuse(envoisOuverts(0), {
     createSignedUploadUrl: () => ({ data: null, error: { message: 'panne' } })
   })
   const r = await charges.ouvrirEnvoi(client, { compte: COMPTE, type: 'application/pdf', octets: 10 })
@@ -297,10 +318,12 @@ test('supprimer une facture : la ligne, puis le justificatif (Q11)', async () =>
 })
 
 test('consulter : une URL de 60 s, jamais le chemin ; un identifiant mal formé ne touche pas la base', async () => {
-  const { client, gestes } = baseEnregistreuse(() => ({ data: { id: ID, statut: 'validee', justificatif_chemin: `${COMPTE}/${ID}` } }))
+  const { client, gestes, requetes } = baseEnregistreuse(() => ({ data: { id: ID, statut: 'validee', justificatif_chemin: `${COMPTE}/${ID}` } }))
   const r = await charges.urlConsultation(client, { compte: COMPTE, id: ID })
   assert.equal(r.expire_dans_s, 60)
   assert.equal(gestes[0].args[1], 60)
+  assert.ok(!('chemin' in r) && !JSON.stringify(r).includes('justificatif_chemin'))
+  sansFuite(requetes)
   const vide = baseEnregistreuse()
   assert.equal((await charges.urlConsultation(vide.client, { compte: COMPTE, id: "x' or 1=1" })).statut, 400)
   assert.equal(vide.requetes.length, 0)
@@ -531,14 +554,47 @@ test('doublon fournisseur : le rapprochement se fait sur la CLÉ normalisée, é
   sansFuite(requetes)
 })
 
-test('valider : une entité ARCHIVÉE reste acceptée si la charge la porte déjà (spec §6 : les validées la gardent)', async () => {
-  const ent = { entites: entitesDouble({ entites: [E1, EARCH] }) }
-  let b = baseEnregistreuse(chargeAVerifier({ statut: 'validee', entite_juridique_id: 'e9' }))
-  let r = await charges.valider(b.client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK, entite_juridique_id: 'e9' } }, ent)
-  assert.equal(r.ok, true)
+test('⚠ valider : une charge VALIDÉE garde son rattachement — corrigée sans en changer, ni l’archivage ni le bien parti ailleurs ne la bloquent', async () => {
+  const ent = { entites: entitesDouble({ entites: [E1, EARCH], parBien: { [BIEN]: { id: 'e1' } } }) }
+  // Entité archivée depuis, bien passé depuis à une autre entité : la
+  // correction du montant passe, avec le même couple (entité, bien).
+  let b = baseEnregistreuse(chargeAVerifier({ statut: 'validee', entite_juridique_id: 'e9', bien_id: BIEN }))
+  let r = await charges.valider(b.client, { compte: COMPTE, valideur: COMPTE, id: ID,
+    champs: { ...CHAMPS_OK, entite_juridique_id: 'e9', bien_id: BIEN, montant_ttc_cents: 999 } }, ent)
+  assert.equal(r.ok, true, r.code)
+  // Changer d'entité vers une archivée : refusé.
   b = baseEnregistreuse(chargeAVerifier({ statut: 'validee', entite_juridique_id: 'e1' }))
   r = await charges.valider(b.client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK, entite_juridique_id: 'e9' } }, ent)
   assert.equal(r.code, 'entite_archivee', 'jamais pour en changer')
+  // Changer de bien : Q18 s'applique de nouveau.
+  b = baseEnregistreuse(chargeAVerifier({ statut: 'validee', entite_juridique_id: 'e9', bien_id: null }))
+  r = await charges.valider(b.client, { compte: COMPTE, valideur: COMPTE, id: ID,
+    champs: { ...CHAMPS_OK, entite_juridique_id: 'e9', bien_id: BIEN } }, ent)
+  assert.equal(r.code, 'entite_archivee', 'un rattachement qui change est une validation neuve')
+})
+
+test('⚠ valider : une charge NEUVE dont l’entité PROPOSÉE a été archivée depuis est refusée (spec §6)', async () => {
+  const ent = { entites: entitesDouble({ entites: [E1, EARCH] }) }
+  const b = baseEnregistreuse(chargeAVerifier({ statut: 'a_verifier', entite_juridique_id: 'e9' }))
+  const r = await charges.valider(b.client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK, entite_juridique_id: 'e9' } }, ent)
+  assert.equal(r.code, 'entite_archivee')
+  assert.ok(!b.requetes.some(x => x.op === 'update'))
+})
+
+test('⚠ Q29 : une charge pas encore lue (`a_lire`) se saisit à la main tout de suite, et la lecture d’après ne l’écrase pas', async () => {
+  const b = baseEnregistreuse(chargeAVerifier({ statut: 'a_lire' }))
+  const r = await charges.valider(b.client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: CHAMPS_OK },
+    { entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(r.ok, true, r.code)
+  const maj = b.requetes.find(x => x.op === 'update')
+  assert.equal(maj.charge.statut, 'validee')
+  assert.ok(maj.filtres.some(f => f[0] === 'in' && f[1] === 'statut' && f[2].includes('a_lire')))
+  // La lecture qui arrive ensuite n'écrit que sur une charge `a_lire`.
+  const l = baseEnregistreuse((q) => (q.op === 'select' ? { data: { id: ID, statut: 'validee', tentatives_lecture: 0 } } : { data: null }))
+  const a = await charges.appliquerLecture(l.client, { compte: COMPTE, id: ID, resultat: { ok: true, lu: { montant_ttc_cents: 1 } } },
+    { entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(a.code, 'pas_a_lire')
+  assert.ok(!l.requetes.some(x => x.op === 'update'))
 })
 
 test('valider : un montant qui n’est ni un entier ni des chiffres est refusé (`true`, `[5]`, « 1e3 »)', async () => {
@@ -548,4 +604,61 @@ test('valider : un montant qui n’est ni un entier ni des chiffres est refusé 
     const r = await charges.valider(client, { compte: COMPTE, id: ID, champs: { ...CHAMPS_OK, montant_ttc_cents: v } }, ent)
     assert.equal(r.code, 'montant_invalide', JSON.stringify(v))
   }
+})
+
+test('trancher une commission déjà comptée : la seule charge, dans son compte', async () => {
+  const { client, requetes } = baseEnregistreuse((r) => (r.op === 'select'
+    ? { data: { id: ID, signal: 'commission_deja_comptee', groupe_doublon: null } } : { data: null }))
+  const r = await charges.trancher(client, { compte: COMPTE, id: ID })
+  assert.equal(r.ok, true)
+  const maj = requetes.filter(x => x.op === 'update')
+  assert.equal(maj.length, 1)
+  assert.equal(filtre(maj[0], 'id'), ID)
+  sansFuite(requetes)
+})
+
+test('⚠ le double applique ses filtres (REVIEW.md règle 22) : une charge d’un AUTRE compte tendue au code ne revient pas', async () => {
+  const { client } = baseEnregistreuse(() => ({ data: { id: ID, user_id: AUTRE, statut: 'validee', justificatif_chemin: `${AUTRE}/${ID}` } }))
+  const r = await charges.urlConsultation(client, { compte: COMPTE, id: ID })
+  assert.equal(r.statut, 404, 'la ligne de l’autre compte est filtrée par `user_id`')
+})
+
+test('lire en attente : une lecture RÉUSSIE écrit dans le compte de la charge, et nulle part ailleurs', async () => {
+  const { client, requetes } = baseEnregistreuse((r) => {
+    if (r.op === 'select' && !r.unique && r.table === 'charges' && filtre(r, 'statut') === 'a_lire') return { data: [{ id: ID, user_id: COMPTE, justificatif_chemin: 'a' }] }
+    if (r.op === 'select' && r.unique) return { data: { id: ID, statut: 'a_lire', tentatives_lecture: 0, cree_le: '2026-11-09T10:00:00Z' } }
+    if (r.op === 'update' && r.unique) return { data: { id: ID, statut: 'a_verifier', numero_facture: null } }
+    return { data: [] }
+  }, { download: () => ({ data: blob(PDF), error: null }) })
+  const r = await charges.lireEnAttente(client, {
+    lire: async ({ compte }) => { assert.equal(compte, COMPTE); return { ok: true, lu: { montant_ttc_cents: 1200, fournisseur_nom: 'EDF' } } },
+    echeance: Date.now() + 10000
+  }, { lectureAutorisee: async () => true, entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(r.lues, 1)
+  assert.ok(requetes.some(x => x.op === 'update' && x.charge.statut === 'a_verifier'))
+  // La file est la SEULE lecture de tous les comptes (le cron sert tout le
+  // monde) ; tout ce qui suit porte le compte pris sur la ligne.
+  assert.equal(filtre(requetes[0], 'user_id'), undefined)
+  sansFuite(requetes.slice(1))
+})
+
+test('⚠ purger les envois : page après page jusqu’à l’échéance (le passage est quotidien)', async () => {
+  let pages = 0
+  const page = (n) => Array.from({ length: n }, (_, i) => ({ id: `${pages}-${i}`, user_id: COMPTE, justificatif_chemin: `${COMPTE}/${pages}-${i}` }))
+  const { client } = baseEnregistreuse((r) => {
+    if (r.op === 'select') { pages++; return { data: pages === 1 ? page(3) : page(1) } }
+    return { data: [{ id: 'x' }] }
+  })
+  const r = await charges.purgerEnvois(client, { limite: 3, echeance: Date.now() + 10000 })
+  assert.equal(pages, 2, 'une page pleine appelle la suivante')
+  assert.equal(r.purges, 4)
+  const arret = baseEnregistreuse((q) => (q.op === 'select' ? { data: page(3) } : { data: [{ id: 'x' }] }))
+  const r2 = await charges.purgerEnvois(arret.client, { limite: 3, echeance: Date.now() - 1 })
+  assert.equal(r2.complet, false)
+  assert.equal(arret.requetes.length, 0, 'échéance passée : rien n’est lu')
+})
+
+test('avecDelai : rend `{ delai: true }` passé le délai, la valeur sinon', async () => {
+  assert.deepEqual(await charges.avecDelai(new Promise(() => {}), 10), { delai: true })
+  assert.equal(await charges.avecDelai(Promise.resolve(7), 1000), 7)
 })

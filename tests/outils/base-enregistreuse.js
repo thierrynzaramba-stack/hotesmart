@@ -1,11 +1,12 @@
 // tests/outils/base-enregistreuse.js — un double de supabase-js qui ENREGISTRE
 // chaque requête (table, opération, charge, filtres, ordre, borne) et le
-// stockage (bucket, geste, chemin). `repondre(r)` rend `{ data, error }`.
+// stockage (bucket, geste, chemin). `repondre(r)` rend `{ data, error, count }`.
 //
-// ⚠ IL N'APPLIQUE AUCUN FILTRE DE LUI-MÊME : il rend ce que le test décide.
-// Un double qui filtrerait à la place du code rendrait le code conforme quoi
-// qu'il fasse — et les tests d'isolation par compte ne prouveraient rien. Les
-// tests AFFIRMENT les filtres posés, requête par requête.
+// ⚠ IL APPLIQUE SES FILTRES `eq` (REVIEW.md règle 22) : une ligne rendue par
+// le test qui porte la colonne filtrée avec une AUTRE valeur ne revient pas.
+// Une requête qui oublie `user_id` rend donc les lignes de l'autre compte que
+// le test lui tend — et le test le voit. Les tests d'isolation affirment EN
+// PLUS les filtres posés, requête par requête (`sansFuite`).
 
 function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stockage = {}) {
   const requetes = []
@@ -13,9 +14,21 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
 
   function from (table) {
     const r = { table, op: 'select', colonnes: null, optionsSelect: null, charge: null, options: null, filtres: [], ordre: [], limite: null, unique: false, retour: null }
+    // Une ligne passe si, pour chaque `eq`, elle n'a pas la colonne ou porte
+    // la même valeur (la règle 22, une ligne).
+    const garde = (l) => !l || typeof l !== 'object' ||
+      r.filtres.filter(f => f[0] === 'eq').every(([, c, v]) => !(c in l) || String(l[c]) === String(v))
     const fin = () => {
       requetes.push(r)
-      const rep = repondre(r) || { data: null, error: null }
+      const brut = repondre(r) || { data: null, error: null }
+      const rep = { ...brut }
+      // Seulement pour une LECTURE : une écriture rend les lignes APRÈS
+      // modification, et le filtre `statut = 'a_lire'` d'un update ne vaut
+      // plus pour la ligne devenue `a_verifier`.
+      if (r.op === 'select') {
+        if (Array.isArray(rep.data)) rep.data = rep.data.filter(garde)
+        else if (rep.data && typeof rep.data === 'object' && !garde(rep.data)) rep.data = null
+      }
       if (r.unique) {
         const d = Array.isArray(rep.data) ? (rep.data[0] || null) : rep.data
         return Promise.resolve({ data: rep.error ? null : (d === undefined ? null : d), error: rep.error || null })

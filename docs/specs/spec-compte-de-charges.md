@@ -130,6 +130,7 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
 - **Q26 — Les avoirs et les remboursements.** Tranchée, voir ci-dessous et §6 ter.
 - **Q27 — Ce que fait une facture récurrente.** Tranchée, voir ci-dessous et §6 ter.
 - **Q28 — Le cron dédié et sa fréquence.** Tranchée, voir ci-dessous et §7.
+- **Q29 — Saisir à la main une facture pas encore lue.** Tranchée, voir ci-dessous.
 
 ### Réponses de Thierry
 
@@ -298,8 +299,15 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
   rattrapage : effacer les envois jamais confirmés (24 h), recalculer les
   totaux, relire ce qui est resté `a_lire` (panne de l'IA ou plafond au
   moment du geste). Mesuré à vide : 2 lectures de `charges`, l'écriture de
-  la mesure du passage, 1 appel RPC, **aucun appel à l'IA ni au stockage**
-  (`tests/cron-charges.test.js`).
+  la mesure du passage, 2 appels RPC (la liste des comptes, lue en deux
+  tours car le point de départ tourne), **aucun appel à l'IA ni au
+  stockage** (`tests/cron-charges.test.js`).
+- **Q29 (10 nov. 2026, vers 0 h 15) : « oui, tout de suite ».** Question
+  née de la review du lot 2 : avec le cron quotidien (Q28), une facture que
+  l'IA n'a pas pu lire (photo floue, panne, plafond du jour) restait « en
+  lecture » jusqu'à une ou deux nuits. L'hôte peut la saisir à la main
+  aussitôt ; sa saisie fait foi, et la lecture qui arriverait ensuite ne
+  l'écrase pas.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
