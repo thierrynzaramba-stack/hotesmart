@@ -214,7 +214,7 @@ module.exports = async (req, res) => {
     // ⚠ UN BIEN ARCHIVÉ N'APPARAÎT NULLE PART (règle de Thierry, 3 novembre
     // 2026) — et on ne règle pas les réponses d'un logement qui ne loue plus.
     const { data: tousLesBiens, error: eB } = await supabase.from('properties')
-      .select('id, name, provider_property_id, photo_url, address, checkin_time, checkout_time')
+      .select('id, name, provider_property_id, photo_url, address, zip_code, city, checkin_time, checkout_time')
       .eq('user_id', accountUserId).is('archive_le', null).order('name')
     compteur.n++
     if (eB) throw new Error(eB.message)

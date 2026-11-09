@@ -259,6 +259,11 @@ test('LE TEST QUI COMPTE : une SEULE adresse, celle de la fiche — la ligne `ad
   }
   const p = mod.propertyDepuisContexte({ user_id: 'u1', property_id: '12345', provider: 'beds24' }, ctx)
   assert.strictEqual(p.address, '1 rue Fiche')
+  // Le code postal et la ville voyagent avec le bien (recette du 9 novembre).
+  const complet = mod.propertyDepuisContexte({ user_id: 'u1', property_id: '12345' },
+    { propsByKey: { 'u1|12345': { name: 'Bien', address: '1 rue Fiche', zip_code: '65200', city: 'Bagnères' } }, knowledgeByKey: {} })
+  const { replisDuBien } = require('../lib/balises')
+  assert.strictEqual(replisDuBien(complet).adresse, '1 rue Fiche, 65200 Bagnères')
   const vide = mod.propertyDepuisContexte({ user_id: 'u1', property_id: '12345' },
     { propsByKey: { 'u1|12345': { name: 'Bien' } }, knowledgeByKey: { 'u1|12345': { adresse: '9 rue Ancienne' } } })
   assert.strictEqual(vide.address, '', 'sans adresse dans la fiche, la base ne la remplace pas (alerte « info manquante »)')

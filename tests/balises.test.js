@@ -453,3 +453,24 @@ test('chaque balise de la base dit OU la remplir, et porte une etiquette lisible
     assert.ok(!/[{}]/.test(etiquetteDe(cle)), 'une etiquette ne montre jamais d accolades')
   }
 })
+
+test('LE TEST QUI COMPTE : {adresse} assemble la rue, le code postal et la ville de la fiche', () => {
+  // Recette du 9 novembre 2026. La fiche range l'adresse en trois champs ; la
+  // rue seule (« 23 rue de l'horloge ») n'est pas une adresse pour un voyageur.
+  const { replisDuBien, adresseDeLaFiche } = require('../lib/balises')
+  const coeur = { address: "23 rue de l'horloge", zip_code: '65200', city: 'Bagnères-de-Bigorre' }
+  const r = remplacerBalises('{adresse}', { reservation: RESA, connaissance: {}, replis: replisDuBien(coeur) })
+  assert.equal(r.texte, "23 rue de l'horloge, 65200 Bagnères-de-Bigorre")
+  // Saisie entière dans la rue (code postal dedans) : rien n'est doublé.
+  assert.equal(adresseDeLaFiche({ address: '4 Rue du Bourg Vieux, Bagnères-de-Bigorre, 65200', zip_code: '65200', city: 'Bagnères-de-Bigorre' }),
+    '4 Rue du Bourg Vieux, Bagnères-de-Bigorre, 65200')
+  // Une ville dans le NOM de la rue n'est pas la ville de l'adresse.
+  assert.equal(adresseDeLaFiche({ address: '12 avenue de Toulouse', zip_code: '31000', city: 'Toulouse' }),
+    '12 avenue de Toulouse, 31000 Toulouse')
+  assert.equal(adresseDeLaFiche({ address: '1 rue A, Toulouse', city: 'Toulouse' }), '1 rue A, Toulouse')
+  assert.equal(adresseDeLaFiche({ address: '1 rue A' }), '1 rue A')
+  // Sans rue, pas d'adresse : un manque, pas « 65200 Bagnères-de-Bigorre ».
+  assert.equal(adresseDeLaFiche({ address: '', zip_code: '65200', city: 'X' }), '')
+  // L'objet de l'API Beds24 non décoré nomme le code postal `postcode`.
+  assert.equal(adresseDeLaFiche({ address: '1 rue A', postcode: '31000', city: 'Toulouse' }), '1 rue A, 31000 Toulouse')
+})
