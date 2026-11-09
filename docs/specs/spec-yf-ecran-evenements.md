@@ -198,6 +198,21 @@ décidé (Q6) ; la place de la mesure en crans se juge à la recette de 4a.
      au début de 4a ;
    - **après** : mesurée en fin de 4a, puis de 4b et 4c.
 
+   **AVANT — mesuré en production le 9 novembre 2026** (navigateur de Thierry,
+   page `/apps/yield/prix?evenements=1` rechargée, pop-up ouverte) :
+
+   | bien | appels `/api` | appels Supabase directs | octets transférés (`/api`) | octets décodés (`/api`) | écran complet |
+   |---|---|---|---|---|---|
+   | La bulle | 5 | 10 | 30 088 | 204 808 | 2,5 s |
+   | Cœur de vie 23 | 5 | 10 | 43 516 | 284 424 | 2,7 s |
+
+   Les cinq appels : `yield-pilote`, `marche-comparables`, `yield-prix`, et
+   **`yield-evenements` deux fois** (une pour la page, une pour la pop-up, avec
+   la même réponse). Les octets des appels Supabase directs ne sont pas
+   mesurables depuis la page (autre origine, sans `Timing-Allow-Origin`), et le
+   **nombre de requêtes Supabase côté serveur** des anciens endpoints non plus :
+   aucun ne porte `Server-Timing`. Le nouvel appel d'écran le porte.
+
 ## 9. Téléphone
 
 Même grille que l'ordinateur, **7 colonnes de 150 px, défilement horizontal**,
@@ -227,3 +242,49 @@ titre, proposée) — à regarder à la recette de 4a.
 - le mode sombre (décision 9) ;
 - le changement de la règle des crans dans le moteur (écart des flèches de la
   recette du 8 novembre : fermé par construction, plus de crans posés).
+
+## 12. Réalisé — 4a, étape 1 : l'appel d'écran (9 novembre 2026)
+
+`GET /api/ecran/evenements?bien=<uuid>` (`api/ecran/evenements.js`), assemblée
+dans `lib/yield/ecran-evenements.js`. Lecture seule ; les gestes restent sur
+`PUT` / `PATCH /api/yield-evenements`. La page n'existe pas encore (étape 2).
+
+**Ce qu'il rend** : la liste des logements (archivés exclus, périmètre du
+membre jugé par `peutLire` sur chaque bien), le bien choisi (le premier par
+défaut), `droits_ecriture` (`reglages` en écriture sur le bien), `calcule_a`
+(l'heure du calcul), la fenêtre (aujourd'hui → un an, comme l'ancien GET), la
+légende des cinq niveaux et leur prix, les événements, les nuits, les réglages
+par position (lignes, `sans_nuit`, `hors_zone`), `rayonnement_max` et
+`vacances_incertaines_apres`. Un calcul en panne, un bien non raccordé ou une
+colonne absente rendent **200 avec la liste et un motif** (`indisponible`) :
+l'hôte peut changer de logement.
+
+**Choix de réalisation, à connaître pour l'étape 2 :**
+- **Un événement est une OCCURRENCE du résolveur** du lot 2
+  (`lib/yield/positions.js`), pas une période de segmentation comme l'ancien
+  écran : les vacances de Noël gardent toutes leurs nuits, réveillon compris.
+  C'est sur ces nuits que « le 2e samedi » se compte, et c'est la clé que les
+  lignes portent. La nuit dit quel réglage la gouverne (`regle.cle`).
+- **`positions`** de chaque événement : la position de chacune de ses nuits et
+  de son rayonnement jusqu'à `rayonnement_max` week-ends de chaque côté, quelle
+  que soit la zone affichée. Un test prouve qu'une position renvoyée telle
+  quelle règle cette nuit et aucune autre.
+- **Chaque nuit** porte un niveau et un prix, vendue ou fermée comprise
+  (tarifée comme ouverte et libre, la projection de « Prédiction de prix ») ;
+  son état réel voyage à côté (`vendue`, `ouverte` à trois états,
+  `prix_calendrier`). Sur une nuit réglée, **`sans_reglage`** = la même nuit
+  tarifée sans la ligne : niveau final et prix (« le calcul disait »).
+- **Le nom est brut** (`nom` + `type`) : « — votre zone », « Pont de… » se
+  composent dans la page par ses chaînes i18n.
+- **`reglage_d_avant`** (Q6) : les crans posés par les anciennes flèches,
+  `partage: true` quand la clé est large (« tous les week-ends prolongés »).
+- **`largeur`** est rendue telle que posée (`null` = aucune). ⚠ Si la page doit
+  afficher la largeur par défaut du résolveur (0), l'exporter de
+  `lib/yield/positions.js` (`largeurDe`) plutôt que la recopier — fichier à
+  annoncer au chef de file avant de l'ouvrir.
+- Les dates commerciales **coupées** restent montrées (`actif: false`, une
+  ligne par date, sans position) pour être reprises en 4d.
+
+**À mesurer sur staging avant la fin de 4a** : la durée et le nombre de
+requêtes de l'appel (`Server-Timing`) sur La bulle et Cœur de vie 23 —
+décision Q4 : au-delà d'1 s, le niveau des nuits passe en résumé quotidien.
