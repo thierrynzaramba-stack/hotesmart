@@ -894,9 +894,9 @@ dans la plage) :
   mémoire — est écrite. Code non résolu et ménage refusé.
 - **5** — les mémoires du lot « sans personne » se lisent par paquets de cent.
 - **6** — un bien sans nom s'annonce « votre logement », plus par sa référence.
-- **7** — NON corrigé : quel écran ouvre le « code non résolu » est une
-  question produit (aujourd'hui la conversation, utile au titulaire pour
-  envoyer le code ; refusée à un membre qui a `reservations` sans `messages`).
-  Posée à Thierry.
+- **7** — tranché par Thierry le 9 novembre 2026 : le « code non résolu »
+  ouvre la CONVERSATION, comme aujourd'hui — le titulaire y envoie le code. Un
+  membre qui a `reservations` sans `messages` tombe sur un écran refusé ; c'est
+  accepté (pas de fuite, l'écran est gardé).
 - **8** — un brouillon abandonné pour réservation annulée ou séjour terminé
   est rendu à l'hôte sans « Réponse à valider ».
