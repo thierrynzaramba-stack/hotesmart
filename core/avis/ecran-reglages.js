@@ -228,7 +228,7 @@ export async function monter (conteneur, options = {}) {
         methode: 'POST', corps: { action: 'auto-validation-maj', property_id: id, heures },
       })
       bien.heures = r.heures
-      etat.autoMessages[id] = { texte: r.heures ? `Activée : publication ${r.heures} h après la part de la prestataire.` : 'Désactivée.', ton: 'ok' }
+      etat.autoMessages[id] = { texte: r.heures ? `Activée : publication ${r.heures} h après la part de la prestataire, ou après le départ si vous ne lui demandez pas d’évaluer.` : 'Désactivée.', ton: 'ok' }
     } catch (err) {
       etat.autoMessages[id] = { texte: err.message || 'Réglage non enregistré.', ton: 'erreur' }
     } finally {
@@ -349,8 +349,9 @@ export function rendre (etat) {
       + `</div>`
   }).join('')
   const blocAuto = `<div class="card"><div class="card-title">Publication automatique</div>`
-    + `<div class="card-sub">Quand votre prestataire a rempli sa part et que vous ne réagissez pas, l’évaluation part seule : `
-    + `vos questions restées sans réponse prennent le meilleur niveau, et le texte de l’IA est conservé. `
+    + `<div class="card-sub">Quand votre prestataire a rempli sa part — ou, si vous ne lui demandez pas d’évaluer, `
+    + `à partir du départ du voyageur (midi) — et que vous ne réagissez pas, l’évaluation part seule : `
+    + `les questions restées sans réponse prennent le meilleur niveau, et le texte de l’IA est conservé. `
     + `Vous êtes prévenu quelques heures avant. Un avis négatif n’est jamais publié automatiquement : il vous attend toujours. `
     + `La publication tombe dans tous les cas au moins 12 heures avant la fin du délai d’Airbnb. `
     + `Elle se règle bien par bien, et chaque ligne est prise en compte aussitôt.</div>`
