@@ -134,6 +134,11 @@
   .fic-sauve { flex: none; min-width: 7.5em; text-align: end; color: var(--muted); }
   .fic-sauve[data-etat="enregistre"] { color: var(--ok); }
   .fic-erreur { flex: 1 0 100%; margin: 0; color: var(--danger); }
+  /* ⚠ Facturation : l'alerte « aucune entité » / « archivée » vit SOUS la ligne
+     clé/valeur, et porte le nom de l'entité (jusqu'à 200 caractères, sans
+     espace exigé). Même défaut D7 que `.fic-nom` : sans ce retour forcé, un
+     nom sans espace élargit la colonne et fait défiler la page de côté. */
+  .fic-facturation .fic-erreur { overflow-wrap: anywhere; }
   .fic-aide { margin: var(--gap-xs) 0 0; color: var(--muted); }
 
   /* L'interrupteur de l'assistant. La piste et le rond sont dessinés en CSS :

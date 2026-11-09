@@ -282,11 +282,17 @@ test('le bloc dit l\'entité, son absence ou son archivage, et le bouton suit le
   // la largeur à côté de la clé : le texte sortait du bloc à droite.
   for (const d of [sans, archivee]) {
     const alerte = d.querySelector('[data-facturation-alerte]')
-    assert.equal(alerte.tagName, 'P')
     assert.equal(alerte.closest('.fic-ligne'), null, 'l\'alerte n\'est pas dans la ligne clé/valeur')
-    assert.equal(alerte.previousElementSibling.className, 'fic-ligne', 'elle suit la ligne « Factures émises au nom de »')
+    assert.ok(alerte.previousElementSibling.classList.contains('fic-ligne'), 'elle suit la ligne « Factures émises au nom de »')
+    assert.ok(alerte.classList.contains('fic-erreur'))
     assert.equal(d.querySelector('.fic-ligne__val'), null, 'pas de valeur à droite de la clé')
   }
+  // jsdom ne calcule pas la mise en page : ce qui empêche un nom d'entité SANS
+  // ESPACE de pousser la page (défaut D7, mesuré en review à 437 px sur un
+  // écran de 375), c'est la règle de la page. Elle est gardée ici.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'pages', 'logement.html'), 'utf8')
+  assert.match(css, /\.fic-facturation \.fic-erreur\s*\{[^}]*overflow-wrap:\s*anywhere/,
+    'l\'alerte de facturation passe à la ligne même sans espace')
   const membre = doc(F.facturationBlocHtml({ facturation: { entite: null, modifier: false } }, OUTILS))
   assert.equal(membre.querySelector('[data-bind="facturation"]'), null, 'pas de bouton sans le droit du serveur')
   const illisible = doc(F.facturationBlocHtml({ facturation: null, indisponibles: ['facturation'] }, OUTILS))
