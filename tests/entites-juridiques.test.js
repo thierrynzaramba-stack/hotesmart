@@ -4,17 +4,19 @@
 //
 // Ce que ce fichier prouve, en APPELANT le code (REVIEW.md regle 20) :
 //   1. La migration porte les garde-fous en base : RLS + revoke sur les trois
-//      tables, cles composites « meme compte », trigger du bien, une seule
-//      entite par defaut, prefixe fige apres emission ; lignes < 60 car.
+//      tables, cles composites « meme compte », trigger du bien, suite des
+//      numeros figee apres emission ; PLUS D'ENTITE PAR DEFAUT (D2 bis) — et
+//      la migration de nettoyage la retire de staging ; lignes < 60 car.
 //   2. La validation ne fait aucune confiance au client (Q4 : un taux si et
 //      seulement si assujetti).
-//   3. L'endpoint : en-tetes prives avant le premier refus ; ecriture reservee
-//      au TITULAIRE (un membre `facturation: read` lit, n'ecrit pas) ; un
-//      membre ne voit que les biens de son perimetre ; le rattachement prend le
-//      compte du BIEN ; une entite d'un autre compte n'est jamais rattachee.
-//   4. La numerotation (Q5) : prefixe et prochain numero reglables, jamais en
-//      dessous du dernier emis + 1, prefixe fige apres une emission, annee de
-//      Paris.
+//   3. L'endpoint de la FENETRE d'un logement (D2 bis) : en-tetes prives avant
+//      le premier refus ; tout passe par le logement designe, dont vient le
+//      compte ; ecriture reservee au TITULAIRE (un membre lit dans son
+//      perimetre, n'ecrit rien ; un compte voisin est refuse en 403) ; une
+//      entite creee depuis un logement lui est rattachee ; retirer = plus
+//      d'entite, sans repli.
+//   4. La numerotation (Q5, Q5 bis) : reglable avant la premiere facture de
+//      l'annee, figee ensuite ; annee de Paris.
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -143,6 +145,7 @@ const ENTITE_OK = { type: 'personne_physique', nom: 'Thierry Exemple', adresse_l
 // ─── 1. La migration ─────────────────────────────────────────────────────────
 
 const SQL = fs.readFileSync(path.join(__dirname, '..', 'migrations', '2026-11-08-entites-juridiques.sql'), 'utf8')
+const SQL_SANS_DEFAUT = fs.readFileSync(path.join(__dirname, '..', 'migrations', '2026-11-09-entites-sans-defaut.sql'), 'utf8')
 
 test('LE TEST QUI COMPTE : la migration ferme les trois tables au navigateur (RLS + revoke, aucune politique)', () => {
   for (const t of ['entites_juridiques', 'biens_entites', 'factures_voyageur_suites']) {
@@ -162,8 +165,7 @@ test('LE TEST QUI COMPTE : « meme compte » est garanti en base — cles compos
   assert.doesNotMatch(SQL, /alter table\s+public\.properties/i)
 })
 
-test('la migration : une seule entite par defaut, suite FIGEE apres emission (prefixe, sans trou, jamais en baisse), lignes < 60 car.', () => {
-  assert.match(SQL, /create unique index if not exists\s+entites_juridiques_defaut_uidx\s+on public\.entites_juridiques \(user_id\)\s+where par_defaut/)
+test('la migration : suite FIGEE apres emission (prefixe, sans trou, jamais en baisse), lignes < 60 car.', () => {
   assert.match(SQL, /if new\.dernier_emis is not null\s+and new\.prefixe <> old\.prefixe then/)
   // Q5 bis (Thierry, 9 nov. 2026) : une suite entamee enchaine sans trou —
   // le prochain numero est toujours le dernier emis + 1, en base aussi.
@@ -180,8 +182,28 @@ test('la migration : une seule entite par defaut, suite FIGEE apres emission (pr
   assert.match(SQL, /on public\.factures_voyageur_suites\s+for each row execute function\s+public\.fvs_suite_protegee\(\)/)
   assert.match(SQL, /prochain_numero > dernier_emis/)
   assert.match(SQL, /\(regime_tva = 'assujetti'\)\s+= \(taux_tva is not null\)/)
-  const longues = SQL.split('\n').map((l, i) => [i + 1, l.length]).filter(([, n]) => n >= 60)
-  assert.deepEqual(longues, [], 'lignes trop longues pour le collage manuel')
+  for (const [nom, texte] of [['11-08', SQL], ['11-09', SQL_SANS_DEFAUT]]) {
+    const longues = texte.split('\n').map((l, i) => [i + 1, l.length]).filter(([, n]) => n >= 60)
+    assert.deepEqual(longues, [], `lignes trop longues pour le collage manuel (${nom})`)
+  }
+})
+
+test('LE TEST QUI COMPTE : plus d\'entite par defaut (D2 bis) — rien en base, et staging est nettoye', () => {
+  // La migration principale ne cree plus ni colonne, ni index, ni fonction.
+  assert.doesNotMatch(SQL.replace(/^\s*--.*$/gm, ''), /par_defaut|entite_definir_defaut|_defaut_uidx/)
+  // La migration de nettoyage retire ce que la version recettee (c97ee4ea) a
+  // cree sur staging — et ne fait rien ailleurs : tout est « if exists ».
+  assert.match(SQL_SANS_DEFAUT, /drop function if exists\s+public\.entite_definir_defaut\(uuid, uuid\);/)
+  assert.match(SQL_SANS_DEFAUT, /drop index if exists\s+public\.entites_juridiques_defaut_uidx;/)
+  assert.match(SQL_SANS_DEFAUT, /drop constraint if exists\s+ej_defaut_archive_chk;/)
+  assert.match(SQL_SANS_DEFAUT, /drop column if exists par_defaut;/)
+  const code = SQL_SANS_DEFAUT.replace(/^\s*--.*$/gm, '')
+  assert.doesNotMatch(code, /\b(create|insert|update|delete)\b/i, 'que des retraits')
+  // Et le writer ne lit ni n'ecrit plus la colonne.
+  const lib = fs.readFileSync(path.join(__dirname, '..', 'lib', 'entites-juridiques.js'), 'utf8')
+  assert.doesNotMatch(lib.replace(/^\s*(\/\/|\*).*$/gm, ''), /par_defaut|entite_definir_defaut/)
+  assert.ok(!EJ.CHAMPS.includes('par_defaut'))
+  assert.equal(EJ.definirDefaut, undefined)
 })
 
 // ─── 2. La validation ────────────────────────────────────────────────────────
@@ -244,9 +266,9 @@ test('validation : les refus nomment leur champ', () => {
   assert.equal(EJ.validerEntite(null).champ, 'type')
 })
 
-// ─── 3. L'endpoint ───────────────────────────────────────────────────────────
+// ─── 3. L'endpoint de la fenetre d'un logement (D2 bis) ──────────────────────
 
-const MODULES = ['../api/entites-juridiques', '../lib/require-permission', '../lib/entites-juridiques', '../lib/biens-vivants']
+const MODULES = ['../api/entites-juridiques', '../lib/require-permission', '../lib/entites-juridiques']
 
 function monterApi (tables = PARC()) {
   const { db, etat } = baseFactice(tables)
@@ -271,7 +293,9 @@ function monterApi (tables = PARC()) {
     if (avantShared) require.cache[absShared] = avantShared; else delete require.cache[absShared]
     for (const m of MODULES) delete require.cache[require.resolve(m)]
   }
-  async function appeler ({ methode = 'GET', jeton = 'jeton-a', compte = null, corps } = {}) {
+  // `bien` : le logement de la fenetre — `?bien=` en GET, `property_uuid` en
+  // POST (sauf si le corps le donne lui-meme, ou `bien: null` pour l'omettre).
+  async function appeler ({ methode = 'GET', jeton = 'jeton-a', compte = null, corps, bien = BIEN_A1 } = {}) {
     const r = { code: null, corps: null, entetes: {}, ordre: [] }
     r.setHeader = (k, v) => { r.entetes[k.toLowerCase()] = v; r.ordre.push(k.toLowerCase()); return r }
     r.status = (c) => { r.code = c; r.ordre.push('status'); return r }
@@ -279,7 +303,9 @@ function monterApi (tables = PARC()) {
     const headers = {}
     if (jeton) headers.authorization = `Bearer ${jeton}`
     if (compte) headers['x-compte'] = compte
-    await handler({ method: methode, headers, body: corps }, r)
+    const query = methode === 'GET' && bien ? { bien } : {}
+    const body = methode === 'POST' && corps && bien && !('property_uuid' in corps) ? { ...corps, property_uuid: bien } : corps
+    await handler({ method: methode, headers, query, body }, r)
     return r
   }
   return { appeler, etat, fini }
@@ -288,82 +314,102 @@ function monterApi (tables = PARC()) {
 test('LE TEST QUI COMPTE : en-tetes prives AVANT le premier refus, 405 compris', async () => {
   const { appeler, fini } = monterApi()
   try {
-    for (const cas of [{ methode: 'PUT' }, { jeton: null }, { jeton: 'faux' }, { methode: 'POST', jeton: null, corps: { action: 'creer' } }]) {
+    for (const cas of [{ methode: 'PUT' }, { jeton: null }, { jeton: 'faux' }, { methode: 'POST', jeton: null, corps: { action: 'creer' } },
+      { bien: null }, { methode: 'POST', corps: { action: 'defaut' } }]) {
       const r = await appeler(cas)
-      assert.ok([405, 401].includes(r.code), `code ${r.code}`)
+      assert.ok([405, 401, 400].includes(r.code), `code ${r.code}`)
       assert.equal(r.entetes['cache-control'], 'private, no-store')
       assert.ok(r.ordre.indexOf('cache-control') < r.ordre.indexOf('status'), 'en-tete pose avant le refus')
     }
   } finally { fini() }
 })
 
-test('le titulaire cree ses entites : la PREMIERE devient celle par defaut, une seule le reste', async () => {
+test('une entite creee depuis la fenetre d\'un logement est CHOISIE pour lui, et pour lui seul — aucune par defaut', async () => {
   const { appeler, etat, fini } = monterApi()
   try {
-    const r1 = await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })
-    assert.equal(r1.code, 200, JSON.stringify(r1.corps))
-    assert.equal(r1.corps.entite.par_defaut, true)
-    assert.equal(r1.corps.entite.user_id, undefined, 'le compte ne sort pas')
-    const sci = { type: 'societe', forme_juridique: 'SCI', nom: 'SCI Le Florian', regime_tva: 'exonere' }
-    const r2 = await appeler({ methode: 'POST', corps: JSON.stringify({ action: 'creer', entite: sci }) })
-    assert.equal(r2.corps.entite.par_defaut, false)
-    const d = await appeler({ methode: 'POST', corps: { action: 'defaut', id: r2.corps.entite.id } })
-    assert.equal(d.code, 200)
-    const defauts = etat.tables.entites_juridiques.filter(e => e.user_id === A && e.par_defaut)
-    assert.deepEqual(defauts.map(e => e.nom), ['SCI Le Florian'])
-    assert.ok(etat.tables.entites_juridiques.every(e => e.user_id === A), 'tout sur le compte A')
+    const r = await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })
+    assert.equal(r.code, 200, JSON.stringify(r.corps))
+    const id = r.corps.entite.id
+    assert.equal(r.corps.entite_id, id)
+    assert.equal(r.corps.rattache, true)
+    assert.deepEqual(etat.tables.biens_entites.map(l => [l.property_uuid, l.entite_id, l.user_id]), [[BIEN_A1, id, A]])
+    assert.ok(etat.tables.entites_juridiques.every(e => !('par_defaut' in e)), 'aucune entite par defaut ecrite')
+    // Les autres logements n'ont RIEN : pas de repli silencieux.
+    const autre = await appeler({ bien: BIEN_A2 })
+    assert.equal(autre.code, 200)
+    assert.equal(autre.corps.bien.entite_id, null)
+    assert.deepEqual(autre.corps.entites.map(e => e.id), [id], 'mais l\'entite est proposee au choix')
+    assert.equal((await EJ.entiteDuBien(A, BIEN_A2, { db: monterBase(etat) })).entite, null)
   } finally { fini() }
 })
 
-test('GET : entites, biens VIVANTS avec leur entite, numerotation de l\'annee ; Server-Timing compte les requetes', async () => {
-  const { appeler, fini } = monterApi()
+test('GET : le logement, son entite, les entites ACTIVES du compte (plus la sienne si archivee), la numerotation', async () => {
+  const { appeler, etat, fini } = monterApi()
   try {
-    const cree = await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })
-    const id = cree.corps.entite.id
-    await appeler({ methode: 'POST', corps: { action: 'rattacher', property_uuid: BIEN_A2, entite_id: id } })
+    const sienne = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'SCI' } } })).corps.entite.id
+    const autre = (await appeler({ methode: 'POST', bien: BIEN_A2, corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'Nom propre' } } })).corps.entite.id
+    const vieille = (await appeler({ methode: 'POST', bien: BIEN_A2, corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'Ancienne' } } })).corps.entite.id
+    etat.tables.entites_juridiques.find(e => e.id === vieille).archivee_le = '2026-11-01T00:00:00Z'
     const r = await appeler()
     assert.equal(r.code, 200)
     assert.equal(r.corps.titulaire, true)
-    assert.deepEqual(r.corps.entites.map(e => e.id), [id])
-    assert.deepEqual(r.corps.biens.map(b => [b.nom, b.entite_id]), [['Cœur de vie 23', id], ['La bulle', null]],
-      'le bien archive n\'y est pas ; le bien de B non plus')
+    assert.deepEqual(r.corps.bien, { id: BIEN_A1, nom: 'La bulle', entite_id: sienne })
+    assert.deepEqual(r.corps.entites.map(e => e.nom), ['SCI', 'Nom propre'], 'l\'archivee d\'un AUTRE logement n\'est pas proposee')
     const annee = EJ.anneeParis()
-    assert.equal(r.corps.numerotations[id].prochain, `F-${annee}-0001`)
-    assert.match(r.entetes['server-timing'], /db;desc="\d+ requêtes";dur=\d+/)
+    assert.equal(r.corps.numerotations[sienne].prochain, `F-${annee}-0001`)
+    assert.ok(r.corps.numerotations[autre])
+    assert.ok(!('user_id' in r.corps.entites[0]), 'le compte n\'est pas renvoye au navigateur')
+    // Le logement dont l'entite est archivee la voit, pour le dire (P4).
+    const a2 = await appeler({ bien: BIEN_A2 })
+    assert.equal(a2.corps.bien.entite_id, vieille)
+    assert.ok(a2.corps.entites.some(e => e.id === vieille && e.archivee_le))
+    assert.equal(a2.corps.numerotations[vieille], undefined, 'une archivee n\'emet plus')
   } finally { fini() }
 })
 
-test('LE TEST QUI COMPTE : un membre `facturation: read` LIT (son perimetre) mais n\'ECRIT RIEN', async () => {
+test('LE TEST QUI COMPTE : choisir puis RETIRER — le logement n\'a plus d\'entite, sans repli sur une autre', async () => {
   const { appeler, etat, fini } = monterApi()
   try {
-    await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })
-    const avant = JSON.stringify(etat.tables.entites_juridiques)
-    const lu = await appeler({ jeton: 'jeton-m', compte: A })
+    const e1 = (await appeler({ methode: 'POST', bien: BIEN_A2, corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
+    assert.equal((await appeler({ methode: 'POST', corps: { action: 'rattacher', entite_id: e1 } })).code, 200)
+    assert.equal((await appeler()).corps.bien.entite_id, e1)
+    assert.equal((await appeler({ methode: 'POST', corps: { action: 'rattacher', entite_id: null } })).code, 200)
+    const r = await appeler()
+    assert.equal(r.corps.bien.entite_id, null)
+    assert.deepEqual(etat.tables.biens_entites.map(l => l.property_uuid), [BIEN_A2], 'seul le lien de CE logement a disparu')
+    const lu = await EJ.entiteDuBien(A, BIEN_A1, { db: monterBase(etat) })
+    assert.deepEqual([lu.ok, lu.entite, lu.provenance], [true, null, null])
+    assert.ok(etat.tables.entites_juridiques.some(e => e.id === e1 && !e.archivee_le), 'l\'entite reste, pour les autres')
+  } finally { fini() }
+})
+
+test('LE TEST QUI COMPTE : la garde de la fenetre — un membre lit SON logement et n\'ecrit RIEN ; hors perimetre, 403', async () => {
+  const { appeler, etat, fini } = monterApi()
+  try {
+    const id = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
+    // M : `facturation: read`, perimetre = La bulle (A1).
+    const lu = await appeler({ jeton: 'jeton-m' })
+    const avant = JSON.stringify(etat.tables)
     assert.equal(lu.code, 200)
     assert.equal(lu.corps.titulaire, false)
-    assert.deepEqual(lu.corps.biens.map(b => b.nom), ['La bulle'], 'perimetre du membre : La bulle seule')
-    const id = lu.corps.entites[0].id
+    assert.equal(lu.corps.bien.entite_id, id)
+    assert.deepEqual(lu.corps.entites.map(e => e.id), [id], 'l\'entite de SON logement, et elle seule')
+    assert.equal((await appeler({ jeton: 'jeton-m', bien: BIEN_A2 })).code, 403, 'hors de son perimetre, meme en lecture')
     for (const corps of [
       { action: 'creer', entite: ENTITE_OK },
       { action: 'modifier', id, entite: { ...ENTITE_OK, nom: 'Pirate' } },
-      { action: 'archiver', id },
-      { action: 'defaut', id },
-      { action: 'numerotation', id, numerotation: { prefixe: 'X', prochain_numero: 5 } },
-      { action: 'rattacher', property_uuid: BIEN_A1, entite_id: id }
+      { action: 'rattacher', entite_id: null },
+      { action: 'numerotation', id, numerotation: { prefixe: 'X', prochain_numero: 5 } }
     ]) {
-      const r = await appeler({ methode: 'POST', jeton: 'jeton-m', compte: A, corps })
+      const r = await appeler({ methode: 'POST', jeton: 'jeton-m', corps })
       assert.equal(r.code, 403, `${corps.action} : ${r.code}`)
     }
-    assert.equal(JSON.stringify(etat.tables.entites_juridiques), avant, 'rien n\'a bouge')
-    assert.equal((etat.tables.biens_entites || []).length, 0)
+    assert.equal(JSON.stringify(etat.tables), avant, 'rien n\'a bouge')
   } finally { fini() }
 })
 
 test('LE TEST QUI COMPTE : meme un membre a qui TOUT est delegue en ecriture (facturation compris) n\'ecrit rien', async () => {
-  // ⚠ Constat 1 de la revue de 447ff3e0 : avec un seul membre `facturation:
-  // read`, garder les gestes sur `reservations` restait vert. Ce membre-ci a
-  // tout en `write` : seule la regle « facturation ne se delegue pas en
-  // ecriture » le refuse.
+  // `facturation` ne se delegue pas en ecriture : seule cette regle le refuse.
   const tables = PARC()
   Object.assign(tables.profile_permissions[0], { reservations: 'write', menages: 'write', prestataires: 'write',
     messages: 'write', avis: 'write', reglages: 'write', facturation: 'write', equipe: 'write', property_scope: 'all' })
@@ -371,66 +417,113 @@ test('LE TEST QUI COMPTE : meme un membre a qui TOUT est delegue en ecriture (fa
   try {
     const id = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
     const avant = JSON.stringify(etat.tables)
-    for (const corps of [
-      { action: 'creer', entite: ENTITE_OK },
-      { action: 'modifier', id, entite: { ...ENTITE_OK, nom: 'Pirate' } },
-      { action: 'archiver', id },
-      { action: 'defaut', id },
-      { action: 'numerotation', id, numerotation: { prefixe: 'X', prochain_numero: 5 } },
-      { action: 'rattacher', property_uuid: BIEN_A1, entite_id: id }
-    ]) {
-      assert.equal((await appeler({ methode: 'POST', jeton: 'jeton-m', compte: A, corps })).code, 403, corps.action)
+    for (const bien of [BIEN_A1, BIEN_A2]) {
+      for (const corps of [
+        { action: 'creer', entite: ENTITE_OK },
+        { action: 'modifier', id, entite: { ...ENTITE_OK, nom: 'Pirate' } },
+        { action: 'rattacher', entite_id: id },
+        { action: 'rattacher', entite_id: null },
+        { action: 'numerotation', id, numerotation: { prefixe: 'X', prochain_numero: 5 } }
+      ]) {
+        assert.equal((await appeler({ methode: 'POST', jeton: 'jeton-m', bien, corps })).code, 403, `${corps.action} sur ${bien}`)
+        assert.equal((await appeler({ methode: 'POST', jeton: 'jeton-m', compte: A, bien, corps })).code, 403, `${corps.action}, X-Compte`)
+      }
     }
     assert.equal(JSON.stringify(etat.tables), avant)
   } finally { fini() }
 })
 
-test('un membre sans droit facturation, ou un compte dont on n\'est pas membre : refus', async () => {
-  const tables = PARC()
-  tables.profile_permissions[0].facturation = 'none'
-  const { appeler, fini } = monterApi(tables)
-  try {
-    assert.equal((await appeler({ jeton: 'jeton-m', compte: A })).code, 403)
-    assert.equal((await appeler({ jeton: 'jeton-b', compte: A })).code, 403, 'B n\'est pas membre du compte A')
-    // Sans X-Compte, chacun ne voit que son propre compte.
-    const b = await appeler({ jeton: 'jeton-b' })
-    assert.equal(b.code, 200)
-    assert.deepEqual(b.corps.biens.map(x => x.nom), ['Chez B'])
-  } finally { fini() }
-})
-
-test('LE TEST QUI COMPTE : le rattachement prend le compte du BIEN, et refuse une entite d\'un autre compte', async () => {
+test('LE TEST QUI COMPTE : un compte VOISIN est refuse en 403 sur le logement d\'un autre, X-Compte ou pas', async () => {
   const { appeler, etat, fini } = monterApi()
   try {
     const ea = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
-    const eb = (await appeler({ methode: 'POST', jeton: 'jeton-b', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'B' } } })).corps.entite.id
-    // B vise le bien de A : la garde prend le compte du bien, B n'en est pas titulaire.
-    assert.equal((await appeler({ methode: 'POST', jeton: 'jeton-b', corps: { action: 'rattacher', property_uuid: BIEN_A1, entite_id: eb } })).code, 403)
-    // A rattache son bien a l'entite de B : introuvable sur le compte A.
-    const croise = await appeler({ methode: 'POST', corps: { action: 'rattacher', property_uuid: BIEN_A1, entite_id: eb } })
-    assert.equal(croise.code, 404)
-    assert.equal((etat.tables.biens_entites || []).length, 0)
-    // Le cas legitime, puis le retour a l'entite par defaut.
-    assert.equal((await appeler({ methode: 'POST', corps: { action: 'rattacher', property_uuid: BIEN_A1, entite_id: ea } })).code, 200)
-    assert.deepEqual(etat.tables.biens_entites.map(l => [l.property_uuid, l.entite_id, l.user_id]), [[BIEN_A1, ea, A]])
-    assert.equal((await appeler({ methode: 'POST', corps: { action: 'rattacher', property_uuid: BIEN_A1, entite_id: null } })).code, 200)
-    assert.equal(etat.tables.biens_entites.length, 0)
-    assert.equal((await appeler({ methode: 'POST', corps: { action: 'rattacher' } })).code, 400, 'bien requis')
+    const eb = (await appeler({ methode: 'POST', jeton: 'jeton-b', bien: BIEN_B1, corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'B' } } })).corps.entite.id
+    const avant = JSON.stringify(etat.tables)
+    // B vise le logement de A : le compte vient du LOGEMENT, B n'en est pas membre.
+    assert.equal((await appeler({ jeton: 'jeton-b' })).code, 403)
+    for (const corps of [
+      { action: 'creer', entite: { ...ENTITE_OK, nom: 'Pirate' } },
+      { action: 'rattacher', entite_id: eb },
+      { action: 'rattacher', entite_id: null },
+      { action: 'modifier', id: ea, entite: { ...ENTITE_OK, nom: 'Pirate' } },
+      { action: 'numerotation', id: ea, numerotation: { prefixe: 'X', prochain_numero: 5 } }
+    ]) {
+      assert.equal((await appeler({ methode: 'POST', jeton: 'jeton-b', corps })).code, 403, corps.action)
+      assert.equal((await appeler({ methode: 'POST', jeton: 'jeton-b', compte: A, corps })).code, 403, `${corps.action}, X-Compte`)
+    }
+    assert.equal(JSON.stringify(etat.tables), avant, 'rien n\'a bouge')
+    // A, sur SON logement, vise l'entite de B : introuvable sur le compte A.
+    assert.equal((await appeler({ methode: 'POST', corps: { action: 'rattacher', entite_id: eb } })).code, 404)
+    assert.equal((await appeler({ methode: 'POST', corps: { action: 'modifier', id: eb, entite: ENTITE_OK } })).code, 404)
+    assert.equal((await appeler({ methode: 'POST', corps: { action: 'numerotation', id: eb, numerotation: { prefixe: 'X', prochain_numero: 5 } } })).code, 404)
+    assert.equal(etat.tables.entites_juridiques.find(e => e.id === eb).nom, 'B')
+    // Un logement inconnu : 404 ; aucun logement : 400.
+    assert.equal((await appeler({ bien: 'aaaaaaaa-0000-4000-8000-00000000ffff' })).code, 404)
+    assert.equal((await appeler({ methode: 'POST', bien: null, corps: { action: 'creer', entite: ENTITE_OK } })).code, 400)
   } finally { fini() }
 })
 
-test('une entite archivee : n\'est plus celle par defaut, ne se modifie plus, ne se rattache plus, reste listee', async () => {
+test('LE TEST QUI COMPTE : un membre ne lit JAMAIS l\'entite d\'un logement hors de son perimetre (review 3, constat de securite)', async () => {
   const { appeler, fini } = monterApi()
   try {
+    // A2 (hors du perimetre de M) a sa propre entite, avec une identite privee.
+    const privee = (await appeler({ methode: 'POST', bien: BIEN_A2, corps: { action: 'creer',
+      entite: { ...ENTITE_OK, nom: 'Proprietaire de A2', adresse_ligne1: '9 rue Privee', telephone: '0600000000', email: 'a2@ex.fr' } } })).corps.entite.id
+    // A1 (dans son perimetre) n'a pas d'entite : M ne voit RIEN de la liste.
+    const sans = await appeler({ jeton: 'jeton-m' })
+    assert.equal(sans.code, 200)
+    assert.deepEqual(sans.corps.entites, [])
+    assert.deepEqual(sans.corps.numerotations, {})
+    const texte = JSON.stringify(sans.corps)
+    for (const fuite of ['Proprietaire de A2', '9 rue Privee', '0600000000', 'a2@ex.fr', privee]) {
+      assert.ok(!texte.includes(fuite), `fuite : ${fuite}`)
+    }
+    // Le titulaire, lui, voit la liste complete, qui sert a ses gestes.
+    const tit = await appeler()
+    assert.deepEqual(tit.corps.entites.map(e => e.id), [privee])
+    assert.ok(tit.corps.numerotations[privee])
+  } finally { fini() }
+})
+
+test('les gestes de l\'ancienne page n\'existent plus : « defaut » et « archiver » sont refuses', async () => {
+  const { appeler, etat, fini } = monterApi()
+  try {
     const id = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
-    assert.equal((await appeler({ methode: 'POST', corps: { action: 'archiver', id } })).code, 200)
-    const r = await appeler()
-    assert.equal(r.corps.entites[0].par_defaut, false)
-    assert.ok(r.corps.entites[0].archivee_le)
-    assert.equal(r.corps.numerotations[id], undefined, 'une archivee n\'emet plus')
+    for (const action of ['defaut', 'archiver']) {
+      const r = await appeler({ methode: 'POST', corps: { action, id } })
+      assert.equal(r.code, 400); assert.equal(r.corps.error, 'action_inconnue')
+    }
+    assert.equal(etat.tables.entites_juridiques[0].archivee_le, null)
+  } finally { fini() }
+})
+
+test('une entite archivee : ne se choisit plus, ne se modifie plus', async () => {
+  const { appeler, etat, fini } = monterApi()
+  try {
+    const id = (await appeler({ methode: 'POST', bien: BIEN_A2, corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
+    etat.tables.entites_juridiques[0].archivee_le = '2026-11-01T00:00:00Z'
+    assert.equal((await appeler({ methode: 'POST', corps: { action: 'rattacher', entite_id: id } })).code, 409)
     assert.equal((await appeler({ methode: 'POST', corps: { action: 'modifier', id, entite: ENTITE_OK } })).code, 409)
-    assert.equal((await appeler({ methode: 'POST', corps: { action: 'rattacher', property_uuid: BIEN_A1, entite_id: id } })).code, 409)
-    assert.equal((await appeler({ methode: 'POST', corps: { action: 'defaut', id } })).code, 404)
+  } finally { fini() }
+})
+
+test('LE TEST QUI COMPTE : creer — un refus ne cree rien ; un rattachement en panne laisse l\'entite et le DIT (review 3, constat 2)', async () => {
+  const { appeler, etat, fini } = monterApi()
+  try {
+    const refus = await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: '' } } })
+    assert.equal(refus.code, 400); assert.equal(refus.corps.champ, 'nom')
+    assert.equal((etat.tables.entites_juridiques || []).length, 0)
+    etat.erreurUpsert = { code: '08006', message: 'connexion perdue' }
+    const r = await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })
+    // 200 : la creation a reussi ; `rattache: false` dit ce qui manque — un
+    // 503 la rendait indiscernable d'une creation ratee (doublons au renvoi).
+    assert.equal(r.code, 200)
+    assert.equal(r.corps.rattache, false)
+    assert.equal(r.corps.entite_id, null)
+    assert.equal(r.corps.entite.id, etat.tables.entites_juridiques[0].id)
+    assert.equal(etat.tables.entites_juridiques.length, 1, 'l\'entite existe')
+    assert.equal((etat.tables.biens_entites || []).length, 0, 'mais elle n\'est pas choisie')
+    assert.equal((await appeler()).corps.bien.entite_id, null)
   } finally { fini() }
 })
 
@@ -469,7 +562,7 @@ test('LE TEST QUI COMPTE : numerotation (Q5, Q5 bis) — reglable avant la premi
 test('une entite en numerotation MANUELLE n\'a pas de suite a montrer ; une automatique, oui, non figee', async () => {
   const { appeler, fini } = monterApi()
   try {
-    const auto = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite
+    const auto = (await appeler({ methode: 'POST', bien: BIEN_A2, corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite
     const manu = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'Ailleurs', numerotation_factures: 'manuel' } } })).corps.entite
     assert.deepEqual([auto.numerotation_factures, manu.numerotation_factures], ['auto', 'manuel'])
     const r = await appeler()
@@ -481,20 +574,20 @@ test('une entite en numerotation MANUELLE n\'a pas de suite a montrer ; une auto
   } finally { fini() }
 })
 
-test('LE TEST QUI COMPTE : Server-Timing dit le NOMBRE EXACT de requetes de l\'ecran (review 2, constat 2)', async () => {
+test('LE TEST QUI COMPTE : Server-Timing dit le NOMBRE EXACT de requetes de la fenetre (review 2, constat 2)', async () => {
   const { appeler, etat, fini } = monterApi()
   try {
     const a = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
-    await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'B' } } })
-    await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'C', numerotation_factures: 'manuel' } } })
+    await appeler({ methode: 'POST', bien: BIEN_A2, corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'B' } } })
+    await appeler({ methode: 'POST', bien: BIEN_A2, corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'C', numerotation_factures: 'manuel' } } })
     // a a une suite cette annee (1 requete) ; B n'en a pas (2 : l'annee, puis
     // la precedente pour le prefixe) ; C est manuelle (0).
     await appeler({ methode: 'POST', corps: { action: 'numerotation', id: a, numerotation: { prefixe: 'HS', prochain_numero: 3 } } })
-    const ecran = new Set(['entites_juridiques', 'biens_entites', 'properties', 'factures_voyageur_suites'])
+    const fenetre = new Set(['entites_juridiques', 'biens_entites', 'factures_voyageur_suites'])
     etat.lectures.length = 0
     const r = await appeler()
-    const faites = etat.lectures.filter(t => ecran.has(t)).length
-    assert.equal(faites, 6, 'entites + liens + biens + 1 + 2')
+    const faites = etat.lectures.filter(t => fenetre.has(t)).length
+    assert.equal(faites, 5, 'entites + lien du logement + 1 + 2')
     assert.match(r.entetes['server-timing'], new RegExp(`db;desc="${faites} requêtes"`))
   } finally { fini() }
 })
@@ -512,25 +605,10 @@ test('un refus du trigger entre la lecture et l\'ecriture est « suite figee »,
   } finally { fini() }
 })
 
-test('LE TEST QUI COMPTE : une entite creee alors qu\'il en reste une active ne devient PAS celle par defaut', async () => {
-  // Constat 3 de la revue de 447ff3e0 : A par defaut, B active ; A archivee ;
-  // C creee. C ne doit pas devenir l'emetteur de tous les logements sans lien.
-  const { appeler, etat, fini } = monterApi()
-  try {
-    const a = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'A' } } })).corps.entite
-    const b = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'B' } } })).corps.entite
-    assert.deepEqual([a.par_defaut, b.par_defaut], [true, false])
-    await appeler({ methode: 'POST', corps: { action: 'archiver', id: a.id } })
-    const c = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'C' } } })).corps.entite
-    assert.equal(c.par_defaut, false)
-    assert.deepEqual(etat.tables.entites_juridiques.filter(e => e.par_defaut).map(e => e.nom), [], 'aucune par defaut : le titulaire choisit')
-  } finally { fini() }
-})
-
 test('le prefixe survit au 1er janvier ; le numero, lui, repart a 1', async () => {
   const id = 'eeeeeeee-1111-4111-8111-000000000009'
   const { db } = baseFactice({
-    entites_juridiques: [{ id, user_id: A, nom: 'SCI', par_defaut: true, archivee_le: null, cree_le: '1' }],
+    entites_juridiques: [{ id, user_id: A, nom: 'SCI', archivee_le: null, cree_le: '1' }],
     factures_voyageur_suites: [
       { entite_id: id, user_id: A, annee: 2025, prefixe: 'OLD', prochain_numero: 7, dernier_emis: 6 },
       { entite_id: id, user_id: A, annee: 2026, prefixe: 'SCI', prochain_numero: 42, dernier_emis: 41 }
@@ -545,32 +623,42 @@ test('le prefixe survit au 1er janvier ; le numero, lui, repart a 1', async () =
 test('l\'annee de la suite est celle de PARIS : le 31 decembre a 23 h 30 UTC est deja l\'annee suivante', () => {
   assert.equal(EJ.anneeParis(new Date('2026-12-31T23:30:00Z')), 2027)
   assert.equal(EJ.anneeParis(new Date('2026-12-31T22:30:00Z')), 2026)
-  assert.equal(EJ.formaterNumero('F', 2027, 3), 'F-2027-0003')
+  assert.equal(EJ.formaterNumero('F', 2026, 1), 'F-2026-0001')
 })
 
 // ─── 4. Les lectures exposees au compte de charges ───────────────────────────
 
-test('entiteDuBien : le lien du bien, sinon l\'entite par defaut, sinon null — rendue meme archivee', async () => {
+// Une base factice qui lit l'etat d'un endpoint monte (pour les lectures directes).
+function monterBase (etat) {
+  const { db } = baseFactice(etat.tables)
+  return db
+}
+
+test('LE TEST QUI COMPTE : entiteDuBien — le lien du bien, sinon NULL (plus de repli, D2 bis) ; rendue meme archivee', async () => {
   const ids = { e1: 'eeeeeeee-1111-4111-8111-000000000001', e2: 'eeeeeeee-1111-4111-8111-000000000002' }
   const base = baseFactice({
     entites_juridiques: [
-      { id: ids.e1, user_id: A, nom: 'Defaut', par_defaut: true, archivee_le: null, cree_le: '1' },
-      { id: ids.e2, user_id: A, nom: 'SCI', par_defaut: false, archivee_le: '2026-11-08T00:00:00Z', cree_le: '2' }
+      { id: ids.e1, user_id: A, nom: 'Nom propre', archivee_le: null, cree_le: '1' },
+      { id: ids.e2, user_id: A, nom: 'SCI', archivee_le: '2026-11-08T00:00:00Z', cree_le: '2' }
     ],
     biens_entites: [{ property_uuid: BIEN_A2, entite_id: ids.e2, user_id: A }]
   }).db
   const lie = await EJ.entiteDuBien(A, BIEN_A2, { db: base })
   assert.deepEqual([lie.provenance, lie.entite.nom, !!lie.entite.archivee_le], ['bien', 'SCI', true])
-  const defaut = await EJ.entiteDuBien(A, BIEN_A1, { db: base })
-  assert.deepEqual([defaut.provenance, defaut.entite.nom], ['defaut', 'Defaut'])
+  // A1 n'a pas de lien : RIEN, meme si le compte a une entite active.
+  const sansLien = await EJ.entiteDuBien(A, BIEN_A1, { db: base })
+  assert.deepEqual([sansLien.ok, sansLien.entite, sansLien.provenance], [true, null, null])
   const rien = await EJ.entiteDuBien(B, BIEN_B1, { db: base })
   assert.deepEqual([rien.ok, rien.entite, rien.provenance], [true, null, null])
   const liste = await EJ.entitesDuCompte(A, { db: base })
-  assert.deepEqual(liste.entites.map(e => e.nom), ['Defaut', 'SCI'], 'archivees comprises')
+  assert.deepEqual(liste.entites.map(e => e.nom), ['Nom propre', 'SCI'], 'archivees comprises')
+  assert.deepEqual(await EJ.lienDuBien(A, BIEN_A2, { db: base }), { ok: true, entite_id: ids.e2 })
+  assert.deepEqual(await EJ.lienDuBien(A, BIEN_A1, { db: base }), { ok: true, entite_id: null })
 })
 
 test('une panne de lecture n\'est pas une absence : motif `panne`, jamais une liste vide', async () => {
   const enPanne = { from: () => { const c = { select: () => c, eq: () => c, order: () => c, is: () => c, maybeSingle: () => c, then: (ok) => Promise.resolve({ data: null, error: { message: 'timeout' } }).then(ok) }; return c } }
   assert.deepEqual(await EJ.entitesDuCompte(A, { db: enPanne }), { ok: false, motif: 'panne' })
   assert.deepEqual(await EJ.entiteDuBien(A, BIEN_A1, { db: enPanne }), { ok: false, motif: 'panne' })
+  assert.deepEqual(await EJ.lienDuBien(A, BIEN_A1, { db: enPanne }), { ok: false, motif: 'panne' })
 })

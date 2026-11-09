@@ -1118,6 +1118,41 @@ export function avisBlocHtml (fiche, outils) {
   return `<div class="fic-avis">${note}</div>`
 }
 
+// ─── Facturation : l'entité juridique du logement ───────────────────────────
+//
+// Facture voyageur, étape 1b (D2 bis, Thierry, 9 novembre 2026) : l'entité qui
+// émet les factures de ce logement se choisit SUR SA FICHE. Ce bloc la DIT ; la
+// fenêtre qui la change (shared/entites-juridiques-vue.js) a son propre
+// endpoint, gardé sur `facturation` — pas celui de la fiche.
+// ⚠ AUCUNE ENTITÉ PAR DÉFAUT : sans entité, le logement ne facture pas, et le
+// bloc le dit en clair plutôt que de se taire.
+// ⚠ LE BOUTON SUIT LE SERVEUR (`facturation.modifier`, le titulaire seul) —
+// le masquage n'est que la seconde ligne : la fenêtre refuse en 403.
+export function facturationHtml (fiche, outils) {
+  const { t, esc } = outils
+  const f = fiche.facturation
+  if (f == null) {
+    return (fiche.indisponibles || []).includes('facturation') ? nonLu('fiche.facturation_non_lue', outils) : null
+  }
+  const e = f.entite
+  const valeur = !e
+    ? `<span class="fic-ligne__val fic-erreur">${esc(t('fiche.facturation_aucune'))}</span>`
+    : e.archivee
+      ? `<span class="fic-ligne__val fic-erreur">${esc(t('fiche.facturation_archivee', { nom: e.nom }))}</span>`
+      : `<span class="fic-ligne__val">${esc(e.nom)}</span>`
+  const bouton = f.modifier === true
+    ? `<div class="fic-publier"><button type="button" class="btn btn--secondary" data-bind="facturation">`
+      + `${esc(t(e && !e.archivee ? 'fiche.facturation_modifier' : 'fiche.facturation_choisir'))}</button></div>`
+    : ''
+  return `<div class="fic-facturation"><div class="fic-ligne">`
+    + `<span class="fic-ligne__cle caption">${esc(t('fiche.facturation_entite'))}</span>${valeur}</div>${bouton}</div>`
+}
+
+// Le bloc entier, pour le repeindre seul quand la fenêtre change l'entité.
+export function facturationBlocHtml (fiche, outils) {
+  return bloc('fiche.bloc_facturation', facturationHtml(fiche, outils), outils, ' data-bloc="facturation"')
+}
+
 // ─── 7. Réglages ────────────────────────────────────────────────────────────
 //
 // ⚠ LECTURE ET LIEN SEULEMENT (spec §3.7). La serrure se règle dans son app,
@@ -1244,6 +1279,8 @@ export function ficheHtml (fiche, outils, droits = {}) {
   const droite = [
     refuse('menage') ? '' : bloc('fiche.bloc_menage', menageHtml(fiche, o, refs), o),
     refuse('avis') ? '' : bloc('fiche.bloc_avis', avisBlocHtml(fiche, o), o),
+    // Facture voyageur, étape 1b : l'entité juridique du logement.
+    refuse('facturation') ? '' : facturationBlocHtml(fiche, o),
     bloc('fiche.bloc_reglages', reglagesHtml(fiche, o, refs), o)
   ].join('')
 

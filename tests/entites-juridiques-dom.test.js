@@ -1,19 +1,20 @@
-// tests/entites-juridiques-dom.test.js — l'écran « Entités juridiques »
-// (pages/entites-juridiques.html + shared/entites-juridiques-vue.js).
-// Spec : docs/specs/spec-facture-voyageur.md §5.1 · KB : docs/kb/entites-juridiques.md
+// tests/entites-juridiques-dom.test.js — la fenêtre « Facturation » de la fiche
+// d'un logement (shared/entites-juridiques-vue.js), D2 bis.
+// Spec : docs/specs/spec-facture-voyageur.md §4 (D2 bis), §5.1 · KB : docs/kb/entites-juridiques.md
 //
 // Ce que ce fichier prouve, en MONTANT la vue dans un vrai DOM :
 //   1. Aucun texte en dur : avec un `t` qui rend la clé entre crochets, tout ce
 //      qui s'affiche est une clé ou une donnée du serveur.
-//   2. Le formulaire suit le type et le régime (forme, capital, RCS pour une
-//      société ; taux pour un assujetti), et un champ caché part VIDE.
-//   3. Le début d'exercice part en « MM-JJ », vide s'il n'est pas choisi.
-//   4. Les gestes : créer, rattacher un logement, archiver SEULEMENT après
-//      confirmation ; un refus nommé se pose sous son champ.
-//   5. La page : non délégable AVANT tout, nav.js, aucun hexa.
-//   6. La numérotation (Q5 bis) : le choix automatique / manuelle part avec
-//      l'entité ; en automatique, réglable avant la première facture de
-//      l'année, figée ensuite ; en manuelle, aucune suite affichée.
+//   2. L'entité de CE logement est dite en tête — ou son absence, ou son
+//      archivage (P4) ; aucune « entité par défaut ».
+//   3. Les gestes portent le logement : choisir, retirer, créer (choisie pour
+//      ce logement), modifier, régler la numérotation ; un membre ne voit
+//      AUCUN geste (le serveur refuse de toute façon).
+//   4. Le formulaire suit le type et le régime, un champ caché part vide, un
+//      refus se pose sous son champ ; la numérotation auto / manuelle.
+//   5. Un appel à l'ouverture ; un geste = un envoi + une relecture.
+//   6. La fenêtre : voile, Échap et croix ferment, focus enfermé puis rendu.
+//   7. L'ancienne page n'existe plus, ni son onglet dans les Réglages.
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -23,7 +24,6 @@ const { JSDOM } = require('jsdom')
 
 const racine = path.join(__dirname, '..')
 const src = fs.readFileSync(path.join(racine, 'shared/entites-juridiques-vue.js'), 'utf8')
-const page = fs.readFileSync(path.join(racine, 'pages/entites-juridiques.html'), 'utf8')
 
 function chargerModule () {
   const code = src.replace(/^export \{([^}]*)\}$/m, (m, noms) => `module.exports = {${noms}}`)
@@ -37,29 +37,29 @@ const V = chargerModule()
 const t = (k, v) => `[${k}${v ? ' ' + Object.values(v).join(' ') : ''}]`
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-const E1 = { id: 'e1', type: 'personne_physique', nom: 'Thierry Exemple', adresse_ligne1: '1 rue Haute', code_postal: '65200', ville: 'Bagnères', regime_tva: 'exonere', taux_tva: null, par_defaut: true, archivee_le: null, debut_exercice: null }
-const E2 = { id: 'e2', type: 'societe', forme_juridique: 'SCI', nom: 'SCI Le Florian', regime_tva: 'assujetti', taux_tva: 10, par_defaut: false, archivee_le: null, debut_exercice: '07-01' }
-const E3 = { id: 'e3', type: 'societe', nom: 'Ancienne SARL', regime_tva: 'franchise', par_defaut: false, archivee_le: '2026-11-01T00:00:00Z' }
+const BIEN = 'aaaaaaaa-0000-4000-8000-000000000001'
+const E1 = { id: 'e1', type: 'personne_physique', nom: 'Thierry Exemple', adresse_ligne1: '1 rue Haute', code_postal: '65200', ville: 'Bagnères', regime_tva: 'exonere', taux_tva: null, archivee_le: null, debut_exercice: null, numerotation_factures: 'auto' }
+const E2 = { id: 'e2', type: 'societe', forme_juridique: 'SCI', nom: 'SCI Le Florian', regime_tva: 'assujetti', taux_tva: 10, archivee_le: null, debut_exercice: '07-01', numerotation_factures: 'auto' }
 const ETAT = () => ({
   titulaire: true,
-  entites: [E1, E2, E3],
-  biens: [{ id: 'b1', nom: 'La bulle', entite_id: null }, { id: 'b2', nom: 'Cœur de vie 23', entite_id: 'e2' }],
+  bien: { id: BIEN, nom: 'La bulle', entite_id: 'e2' },
+  entites: [{ ...E1 }, { ...E2 }],  // des COPIES : un test qui modifie une entite ne contamine pas les suivants
   numerotations: { e1: { prefixe: 'F', prochain_numero: 1, dernier_emis: null, fige: false, prochain: 'F-2026-0001' },
     e2: { prefixe: 'HS', prochain_numero: 12, dernier_emis: 11, fige: true, prochain: 'HS-2026-0012' } }
 })
 
-async function monter (etat = ETAT(), { confirmer = async () => true, ecrire } = {}) {
+async function monter (etat = ETAT(), { ecrire, surChangement } = {}) {
   const dom = new JSDOM('<!doctype html><div id="r"></div>')
   const doc = dom.window.document
   const appels = []
+  const lectures = []
   const api = {
-    lire: async () => JSON.parse(JSON.stringify(etat)),
+    lire: async (bien) => { lectures.push(bien); return JSON.parse(JSON.stringify(etat)) },
     ecrire: ecrire || (async (corps) => { appels.push(corps); return { ok: true } })
   }
-  // La vue n'utilise que `racine` et ses descendants.
   global.document = doc
-  await V.monterEntites({ racine: doc.getElementById('r'), api, t, esc, confirmer, langue: 'fr' })
-  return { doc, r: doc.getElementById('r'), appels, win: dom.window }
+  await V.monterFenetre({ racine: doc.getElementById('r'), api, bien: BIEN, t, esc, langue: 'fr', surChangement })
+  return { doc, r: doc.getElementById('r'), appels, lectures, win: dom.window }
 }
 const attendre = () => new Promise(r => setTimeout(r, 0))
 
@@ -75,45 +75,78 @@ function textesVisibles (el) {
 
 test('LE TEST QUI COMPTE : aucun texte en dur — tout est une clé ej.* ou une donnée du serveur', async () => {
   const { r } = await monter()
-  const donnees = ['Thierry Exemple', 'SCI Le Florian', 'Ancienne SARL', 'La bulle', 'Cœur de vie 23', 'SCI',
-    '1 rue Haute, 65200 Bagnères', '(1)']
+  const donnees = ['Thierry Exemple', 'SCI Le Florian', 'SCI', '1 rue Haute, 65200 Bagnères', 'HS-2026-0012', 'F-2026-0001']
   for (const s of textesVisibles(r)) {
-    const ok = s.startsWith('[') || donnees.some(d => s.includes(d))
-    assert.ok(ok, `texte en dur : « ${s} »`)
+    assert.ok(s.startsWith('[') || donnees.some(d => s.includes(d)) || s === ']', `texte en dur : « ${s} »`)
   }
 })
 
-test('la liste : badge par défaut, numérotation, archivées repliées, logements avec l\'entité par défaut nommée', async () => {
-  const { r } = await monter()
+test('LE TEST QUI COMPTE : l\'entité de CE logement est dite en tête, et marquée dans la liste', async () => {
+  const { r, lectures } = await monter()
+  assert.deepEqual(lectures, [BIEN], 'la fenêtre lit LE logement de la fiche')
+  assert.equal(r.querySelector('.ej-actuelle').textContent, '[ej.actuelle SCI Le Florian]')
   const cartes = [...r.querySelectorAll('.ej-carte')]
-  assert.deepEqual(cartes.map(c => c.dataset.entite), ['e1', 'e2'], 'les actives seulement')
-  assert.ok(cartes[0].textContent.includes('[ej.default_badge]'))
-  assert.ok(!cartes[1].textContent.includes('[ej.default_badge]'))
-  assert.ok(cartes[1].textContent.includes('HS-2026-0012'))
-  assert.ok(cartes[1].textContent.includes('[ej.tva_assujetti 10]'))
-  assert.ok(cartes[1].textContent.includes('[ej.exercice_label 01/07]'))
-  assert.ok(!cartes[0].querySelector('[data-action="defaut"]'), 'déjà par défaut : pas de bouton')
-  // e1 : aucune facture cette année, la suite se règle ; e2 : figée.
-  assert.ok(cartes[0].querySelector('[data-action="numerotation"]'))
-  assert.ok(!cartes[1].querySelector('[data-action="numerotation"]'), 'figée : plus de réglage')
-  assert.ok(cartes[1].textContent.includes('[ej.num_fige]'))
-  const arch = r.querySelector('details.ej-archivees')
-  assert.ok(arch.textContent.includes('Ancienne SARL'))
-  const sel = r.querySelector('select[data-bien="b1"]')
-  assert.equal(sel.value, '')
-  assert.ok(sel.options[0].textContent.includes('Thierry Exemple'), 'l\'option vide nomme l\'entité par défaut')
-  assert.deepEqual([...sel.options].map(o => o.value), ['', 'e1', 'e2'], 'pas d\'entité archivée proposée')
-  assert.equal(r.querySelector('select[data-bien="b2"]').value, 'e2')
+  assert.deepEqual(cartes.map(c => c.dataset.entite), ['e1', 'e2'])
+  assert.ok(cartes[1].textContent.includes('[ej.badge_actuelle]'))
+  assert.ok(!cartes[0].textContent.includes('[ej.badge_actuelle]'))
+  // Celle du logement : « Retirer » ; l'autre : « Choisir ».
+  assert.ok(cartes[1].querySelector('[data-action="retirer"]') && !cartes[1].querySelector('[data-action="choisir"]'))
+  assert.ok(cartes[0].querySelector('[data-action="choisir"]') && !cartes[0].querySelector('[data-action="retirer"]'))
+  assert.doesNotMatch(r.innerHTML, /default|defaut/i, 'plus aucune entité par défaut')
 })
 
-test('le compte sans entité : l\'écran le dit, et propose d\'en ajouter une', async () => {
-  const { r } = await monter({ titulaire: true, entites: [], biens: [], numerotations: {} })
-  assert.ok(r.textContent.includes('[ej.empty_title]'))
+test('LE TEST QUI COMPTE : sans entité, la fenêtre le DIT — aucun repli sur une autre', async () => {
+  const etat = ETAT()
+  etat.bien.entite_id = null
+  const { r } = await monter(etat)
+  assert.equal(r.querySelector('.ej-alerte').textContent, '[ej.aucune]')
+  assert.equal(r.querySelector('.ej-actuelle'), null)
+  assert.equal(r.querySelectorAll('[data-action="retirer"]').length, 0)
+  assert.equal(r.querySelectorAll('[data-action="choisir"]').length, 2)
+})
+
+test('une entité ARCHIVÉE sur ce logement : la fenêtre dit qu\'il ne facture plus, et ne la propose pas', async () => {
+  const etat = ETAT()
+  etat.entites.push({ ...E1, id: 'e3', nom: 'Ancienne SARL', archivee_le: '2026-11-01T00:00:00Z' })
+  etat.bien.entite_id = 'e3'
+  const { r } = await monter(etat)
+  assert.equal(r.querySelector('.ej-alerte').textContent, '[ej.actuelle_archivee Ancienne SARL]')
+  assert.equal(r.querySelector('.ej-carte[data-entite="e3"]'), null)
+})
+
+test('LE TEST QUI COMPTE : un membre sur un logement sans entité lit « aucune », jamais « ajoutez-en une » (re-review, constat 1)', async () => {
+  const { r } = await monter({ titulaire: false, bien: { id: BIEN, nom: 'La bulle', entite_id: null }, entites: [], numerotations: {} })
+  assert.equal(r.querySelector('.ej-alerte').textContent, '[ej.aucune]')
+  assert.ok(!r.textContent.includes('[ej.empty_text]'), 'une liste vide ne dit rien du compte à un membre')
+  assert.equal(r.querySelectorAll('button').length, 0)
+})
+
+test('un compte sans entité : la fenêtre le dit, et propose d\'en créer une', async () => {
+  const { r } = await monter({ titulaire: true, bien: { id: BIEN, nom: 'La bulle', entite_id: null }, entites: [], numerotations: {} })
+  assert.ok(r.textContent.includes('[ej.empty_text]'))
   assert.ok(r.querySelector('[data-action="ajouter"]'))
-  assert.ok(r.textContent.includes('[ej.biens_vide]'))
 })
 
-test('LE TEST QUI COMPTE : le formulaire suit le type et le régime ; un champ caché part VIDE', async () => {
+test('LE TEST QUI COMPTE : un membre (non titulaire) ne voit AUCUN geste', async () => {
+  const etat = ETAT()
+  etat.titulaire = false
+  etat.numerotations.e2.fige = false
+  const { r } = await monter(etat)
+  assert.equal(r.querySelectorAll('button').length, 0, 'ni choisir, ni retirer, ni modifier, ni régler, ni créer')
+  assert.equal(r.querySelector('.ej-actuelle').textContent, '[ej.actuelle SCI Le Florian]', 'mais il lit l\'entité')
+})
+
+test('les gestes portent le logement : choisir, retirer', async () => {
+  const { r, appels } = await monter()
+  r.querySelector('.ej-carte[data-entite="e1"] [data-action="choisir"]').click()
+  await attendre(); await attendre()
+  assert.deepEqual(appels[0], { action: 'rattacher', entite_id: 'e1', property_uuid: BIEN })
+  r.querySelector('.ej-carte[data-entite="e2"] [data-action="retirer"]').click()
+  await attendre(); await attendre()
+  assert.deepEqual(appels[1], { action: 'rattacher', entite_id: null, property_uuid: BIEN })
+})
+
+test('LE TEST QUI COMPTE : créer depuis la fenêtre — le formulaire suit le type et le régime, un champ caché part VIDE', async () => {
   const { r, appels } = await monter()
   r.querySelector('[data-action="ajouter"]').click()
   const f = r.querySelector('.ej-carte[data-entite=""] form')
@@ -126,7 +159,6 @@ test('LE TEST QUI COMPTE : le formulaire suit le type et le régime ; un champ c
   f.querySelector('#ej-nom').value = 'SCI Neuve'
   f.querySelector('#ej-forme').value = 'SCI'
   f.querySelector('#ej-taux').value = '5,5'
-  // Retour en personne physique exonérée : forme et taux ne partent plus.
   f.querySelector('input[value="personne_physique"]').checked = true
   f.querySelector('#ej-regime').value = 'exonere'
   f.dispatchEvent(new f.ownerDocument.defaultView.Event('change', { bubbles: true }))
@@ -136,47 +168,66 @@ test('LE TEST QUI COMPTE : le formulaire suit le type et le régime ; un champ c
   await attendre()
   assert.equal(appels.length, 1)
   assert.equal(appels[0].action, 'creer')
+  assert.equal(appels[0].property_uuid, BIEN, 'créée depuis CE logement')
   const e = appels[0].entite
-  assert.deepEqual([e.type, e.nom, e.regime_tva, e.forme_juridique, e.taux_tva, e.debut_exercice],
-    ['personne_physique', 'SCI Neuve', 'exonere', '', '', '07-01'])
-  assert.equal(e.numerotation_factures, 'auto', 'automatique par défaut')
+  assert.deepEqual([e.type, e.nom, e.regime_tva, e.forme_juridique, e.taux_tva, e.debut_exercice, e.numerotation_factures],
+    ['personne_physique', 'SCI Neuve', 'exonere', '', '', '07-01', 'auto'])
 })
 
-test('LE TEST QUI COMPTE : le choix de numérotation part avec l\'entité, et se relit à la modification', () => {
+test('modifier : le formulaire s\'ouvre sur la carte, garde le choix de numérotation, et part avec l\'id', async () => {
+  const etat = ETAT()
+  etat.entites[0].numerotation_factures = 'manuel'
+  delete etat.numerotations.e1
+  const { r, appels } = await monter(etat)
+  r.querySelector('.ej-carte[data-entite="e1"] [data-action="modifier"]').click()
+  const f = r.querySelector('.ej-carte[data-entite="e1"] form')
+  assert.equal(f.querySelector('#ej-nom').value, 'Thierry Exemple')
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  await attendre()
+  assert.equal(appels[0].action, 'modifier')
+  assert.equal(appels[0].id, 'e1')
+  assert.equal(appels[0].entite.numerotation_factures, 'manuel', 'la modification ne remet pas en automatique')
+})
+
+test('la numérotation : automatique réglable, figée sans bouton, manuelle sans suite ; le numéro ne se coupe pas', async () => {
+  const etat = ETAT()
+  const { r } = await monter(etat)
+  const c1 = r.querySelector('.ej-carte[data-entite="e1"]')
+  const c2 = r.querySelector('.ej-carte[data-entite="e2"]')
+  assert.ok(c1.querySelector('[data-action="numerotation"]'))
+  assert.ok(!c2.querySelector('[data-action="numerotation"]'), 'figée : plus de réglage')
+  assert.ok(c2.textContent.includes('[ej.num_fige]'))
+  assert.equal(c2.querySelector('.ej-numero').textContent, 'HS-2026-0012', 'le numéro dans son propre élément')
+  assert.match(src, /\.ej-numero \{ white-space: nowrap/)
+  const manuel = ETAT()
+  manuel.entites[0].numerotation_factures = 'manuel'
+  delete manuel.numerotations.e1
+  const m = await monter(manuel)
+  const cm = m.r.querySelector('.ej-carte[data-entite="e1"]')
+  assert.ok(cm.textContent.includes('[ej.num_manual_info]'))
+  assert.ok(!cm.textContent.includes('F-2026-0001'))
+})
+
+test('régler la numérotation : le geste part avec le logement ; un refus « suite figée » le dit dans le formulaire', async () => {
+  const refus = Object.assign(new Error('x'), { code: 'suite_figee', status: 409 })
+  const appels = []
+  const { r } = await monter(ETAT(), { ecrire: async (corps) => { appels.push(corps); throw refus } })
+  r.querySelector('.ej-carte[data-entite="e1"] [data-action="numerotation"]').click()
+  const f = r.querySelector('.ej-carte[data-entite="e1"] form.ej-form--num')
+  f.querySelector('#ej-prefixe').value = 'HS'
+  f.querySelector('#ej-prochain').value = '12'
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  await attendre()
+  assert.deepEqual(appels, [{ action: 'numerotation', id: 'e1', numerotation: { prefixe: 'HS', prochain_numero: 12 }, property_uuid: BIEN }])
+  assert.equal(f.querySelector('.ej-message').textContent, '[ej.err_suite_figee]')
+})
+
+test('le choix de numérotation part avec l\'entité', () => {
   const dom = new JSDOM(`<div>${V.formulaireHtml(null, t, esc, 'fr')}</div>`)
   const f = dom.window.document.querySelector('form.ej-form')
   assert.equal(f.querySelector('input[name="ej-numerotation"]:checked').value, 'auto')
   f.querySelector('input[name="ej-numerotation"][value="manuel"]').checked = true
   assert.equal(V.valeursDuFormulaire(f).numerotation_factures, 'manuel')
-  const dom2 = new JSDOM(`<div>${V.formulaireHtml({ ...E1, numerotation_factures: 'manuel' }, t, esc, 'fr')}</div>`)
-  const f2 = dom2.window.document.querySelector('form.ej-form')
-  assert.equal(V.valeursDuFormulaire(f2).numerotation_factures, 'manuel', 'la modification ne remet pas en automatique')
-})
-
-test('une entité en numérotation manuelle : ni suite ni réglage, une phrase qui dit que le numéro se saisit à l\'émission', async () => {
-  const etat = ETAT()
-  etat.entites[0] = { ...E1, numerotation_factures: 'manuel' }
-  delete etat.numerotations.e1
-  const { r } = await monter(etat)
-  const c = r.querySelector('.ej-carte[data-entite="e1"]')
-  assert.ok(c.textContent.includes('[ej.num_manual_info]'))
-  assert.ok(!c.textContent.includes('F-2026-0001'))
-  assert.ok(!c.querySelector('[data-action="numerotation"]'))
-})
-
-test('régler la numérotation : le geste part ; un refus « suite figée » le dit dans le formulaire', async () => {
-  const refus = Object.assign(new Error('x'), { code: 'suite_figee', status: 409 })
-  const appels = []
-  const { r } = await monter(ETAT(), { ecrire: async (corps) => { appels.push(corps); throw refus } })
-  const c = r.querySelector('.ej-carte[data-entite="e1"]')
-  c.querySelector('[data-action="numerotation"]').click()
-  const f = c.querySelector('form.ej-form--num')
-  f.querySelector('#ej-prefixe').value = 'HS'
-  f.querySelector('#ej-prochain').value = '12'
-  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
-  await attendre()
-  assert.deepEqual(appels, [{ action: 'numerotation', id: 'e1', numerotation: { prefixe: 'HS', prochain_numero: 12 } }])
-  assert.equal(f.querySelector('.ej-message').textContent, '[ej.err_suite_figee]')
 })
 
 test('le début d\'exercice : vide s\'il n\'est pas choisi, « incomplet » (donc refusé) s\'il manque le jour ou le mois', () => {
@@ -202,48 +253,79 @@ test('un refus nommé se pose sous SON champ, avec aria-invalid', () => {
   assert.equal(bloc.querySelector('input').getAttribute('aria-invalid'), null, 'l\'ancien refus est effacé')
 })
 
-test('les gestes : rattacher un logement, archiver SEULEMENT après confirmation', async () => {
-  const non = await monter(ETAT(), { confirmer: async () => false })
-  non.r.querySelector('.ej-carte[data-entite="e2"] [data-action="archiver"]').click()
-  await attendre(); await attendre()
-  assert.equal(non.appels.length, 0, 'refusé : rien ne part')
-
-  const { r, appels, win } = await monter()
-  const sel = r.querySelector('select[data-bien="b1"]')
-  sel.value = 'e2'
-  sel.dispatchEvent(new win.Event('change'))
+test('LE TEST QUI COMPTE : un geste à la fois — deux « Enregistrer » rapprochés ne créent qu\'UNE entité (review 3, constat 2)', async () => {
+  let liberer
+  const appels = []
+  const { r } = await monter(ETAT(), { ecrire: (corps) => { appels.push(corps); return new Promise(res => { liberer = () => res({ ok: true, rattache: true }) }) } })
+  r.querySelector('[data-action="ajouter"]').click()
+  const f = r.querySelector('.ej-carte[data-entite=""] form')
+  f.querySelector('#ej-nom').value = 'SCI Neuve'
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  assert.equal(f.querySelector('[type="submit"]').disabled, true, 'bouton éteint pendant l\'envoi')
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  r.querySelector('.ej-carte[data-entite="e1"] [data-action="choisir"]').click()
   await attendre()
-  assert.deepEqual(appels[0], { action: 'rattacher', property_uuid: 'b1', entite_id: 'e2' })
-  await attendre()
-  const sel2 = r.querySelector('select[data-bien="b2"]')
-  sel2.value = ''
-  sel2.dispatchEvent(new win.Event('change'))
-  await attendre()
-  assert.deepEqual(appels[1], { action: 'rattacher', property_uuid: 'b2', entite_id: null }, 'retour à l\'entité par défaut')
-  await attendre()
-  r.querySelector('.ej-carte[data-entite="e2"] [data-action="archiver"]').click()
-  await attendre(); await attendre()
-  assert.deepEqual(appels[2], { action: 'archiver', id: 'e2' })
+  assert.equal(appels.length, 1, 'un seul envoi')
+  liberer(); await attendre(); await attendre()
 })
 
-test('un logement rattaché à une entité ARCHIVÉE le montre, et revenir au défaut est un vrai geste', async () => {
+test('LE TEST QUI COMPTE : pendant l\'envoi, TOUTE la fenêtre attend ; sur un refus, tout se rallume (re-review, constat 2)', async () => {
+  let refuser
+  const appels = []
+  const { r } = await monter(ETAT(), { ecrire: (corps) => { appels.push(corps); return new Promise((res, rej) => { refuser = () => rej(Object.assign(new Error('x'), { code: 'entree_invalide', champ: 'nom', status: 400 })) }) } })
+  r.querySelector('[data-action="ajouter"]').click()
+  const f = r.querySelector('.ej-carte[data-entite=""] form')
+  f.querySelector('#ej-nom').value = 'SCI Neuve'
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  const tous = [...r.querySelectorAll('button, input, select')]
+  assert.ok(tous.length > 5 && tous.every(el => el.disabled), 'tout est éteint')
+  // Même si un clic passait : « Annuler », « Modifier » ne changent rien.
+  f.querySelector('[data-action="annuler"]').dispatchEvent(new f.ownerDocument.defaultView.MouseEvent('click', { bubbles: true }))
+  r.querySelector('.ej-carte[data-entite="e1"] [data-action="modifier"]').dispatchEvent(new f.ownerDocument.defaultView.MouseEvent('click', { bubbles: true }))
+  assert.ok(r.querySelector('.ej-carte[data-entite=""] form'), 'le formulaire de création est toujours là')
+  assert.equal(r.querySelector('.ej-carte[data-entite="e1"] form'), null, 'pas de second formulaire')
+  refuser(); await attendre(); await attendre()
+  assert.equal(appels.length, 1)
+  assert.ok(r.querySelectorAll('button:not([disabled])').length > 3, 'tout se rallume')
+  assert.equal(f.querySelector('#ej-nom').disabled, false)
+  assert.equal(f.querySelector('#ej-nom').getAttribute('aria-invalid'), 'true', 'et le refus est dit sous son champ')
+})
+
+test('LE TEST QUI COMPTE : créée mais pas choisie — la fenêtre sort du formulaire, relit, et dit quoi faire', async () => {
   const etat = ETAT()
-  etat.biens[0].entite_id = 'e3'
-  const { r, appels, win } = await monter(etat)
-  const sel = r.querySelector('select[data-bien="b1"]')
-  assert.equal(sel.value, 'e3')
-  assert.ok(sel.selectedOptions[0].textContent.includes('[ej.bien_archivee Ancienne SARL]'))
-  assert.equal(sel.selectedOptions[0].disabled, true, 'on ne la choisit pas de nouveau')
-  sel.value = ''
-  sel.dispatchEvent(new win.Event('change'))
-  await attendre()
-  assert.deepEqual(appels[0], { action: 'rattacher', property_uuid: 'b1', entite_id: null })
+  const lectures = []
+  const dom = new JSDOM('<!doctype html><div id="r"></div>')
+  global.document = dom.window.document
+  const r = dom.window.document.getElementById('r')
+  const api = {
+    lire: async () => { lectures.push(1); return JSON.parse(JSON.stringify(etat)) },
+    ecrire: async () => ({ ok: true, entite: { id: 'e9' }, entite_id: null, rattache: false })
+  }
+  await V.monterFenetre({ racine: r, api, bien: BIEN, t, esc })
+  r.querySelector('[data-action="ajouter"]').click()
+  const f = r.querySelector('.ej-carte[data-entite=""] form')
+  f.querySelector('#ej-nom').value = 'SCI Neuve'
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  await attendre(); await attendre()
+  assert.equal(lectures.length, 2, 'relue')
+  assert.equal(r.querySelector('.ej-carte[data-entite=""]'), null, 'plus de formulaire de création : pas de doublon au renvoi')
+  assert.equal(r.querySelector('.ej-bandeau').textContent, '[ej.err_rattachement]')
 })
 
-test('LE TEST QUI COMPTE : un appel pour peindre l\'écran ; un geste = un envoi + une relecture', async () => {
-  // La case PERFORMANCE de la spec (§9, point 7) : on compte les appels.
+test('un geste refusé sans formulaire : la fenêtre se repeint depuis l\'état lu, et le bandeau le dit', async () => {
+  const refus = async () => { const e = new Error('archivee'); e.status = 409; e.code = 'archivee'; throw e }
+  const { r } = await monter(ETAT(), { ecrire: refus })
+  r.querySelector('.ej-carte[data-entite="e1"] [data-action="choisir"]').click()
+  await attendre(); await attendre()
+  assert.equal(r.querySelector('.ej-bandeau').textContent, '[ej.err_archivee]')
+  assert.ok(r.querySelector('.ej-carte[data-entite="e2"] [data-action="retirer"]'), 'l\'état lu est toujours celui affiché')
+})
+
+test('LE TEST QUI COMPTE : un appel à l\'ouverture ; un geste = un envoi + une relecture, et la fiche est prévenue', async () => {
+  // La case PERFORMANCE de la spec (§9) : on compte les appels.
   const etat = ETAT()
   const compte = { lire: 0, ecrire: 0 }
+  const recus = []
   const dom = new JSDOM('<!doctype html><div id="r"></div>')
   global.document = dom.window.document
   const api = {
@@ -251,40 +333,104 @@ test('LE TEST QUI COMPTE : un appel pour peindre l\'écran ; un geste = un envoi
     ecrire: async () => { compte.ecrire++; return { ok: true } }
   }
   const r = dom.window.document.getElementById('r')
-  await V.monterEntites({ racine: r, api, t, esc, confirmer: async () => true, langue: 'fr' })
+  await V.monterFenetre({ racine: r, api, bien: BIEN, t, esc, langue: 'fr', surChangement: (e) => recus.push(e.bien.entite_id) })
   assert.deepEqual(compte, { lire: 1, ecrire: 0 })
-  r.querySelector('.ej-carte[data-entite="e2"] [data-action="defaut"]').click()
+  r.querySelector('.ej-carte[data-entite="e1"] [data-action="choisir"]').click()
   await attendre(); await attendre()
   assert.deepEqual(compte, { lire: 2, ecrire: 1 })
+  assert.deepEqual(recus, ['e2'], 'la fiche reçoit l\'état relu')
 })
 
-test('un rattachement refusé : le menu revient à la valeur enregistrée, et le bandeau le dit', async () => {
-  const refus = async () => { const e = new Error('archivee'); e.status = 409; e.code = 'archivee'; throw e }
-  const { r, win } = await monter(ETAT(), { ecrire: refus })
-  const sel = r.querySelector('select[data-bien="b2"]')
-  sel.value = 'e1'
-  sel.dispatchEvent(new win.Event('change'))
-  await attendre(); await attendre()
-  assert.equal(r.querySelector('select[data-bien="b2"]').value, 'e2', 'la valeur refusée ne reste pas affichée')
-  assert.equal(r.querySelector('.ej-bandeau').textContent, '[ej.err_archivee]')
+test('une lecture refusée ou en panne : la fenêtre le dit, sans liste', async () => {
+  for (const [status, cle] of [[403, '[ej.no_access]'], [503, '[ej.err_panne]']]) {
+    const dom = new JSDOM('<!doctype html><div id="r"></div>')
+    global.document = dom.window.document
+    const r = dom.window.document.getElementById('r')
+    const api = { lire: async () => { const e = new Error('x'); e.status = status; throw e }, ecrire: async () => ({}) }
+    await V.monterFenetre({ racine: r, api, bien: BIEN, t, esc })
+    assert.equal(r.textContent.trim(), cle)
+    assert.equal(r.querySelectorAll('button').length, 0)
+  }
 })
 
 test('une donnée du serveur est échappée, jamais interprétée', async () => {
   const etat = ETAT()
   etat.entites[0].nom = '<img src=x onerror=alert(1)>'
+  etat.bien.entite_id = 'e1'
   const { r } = await monter(etat)
   assert.equal(r.querySelector('img'), null)
   assert.ok(r.textContent.includes('<img src=x onerror=alert(1)>'))
 })
 
-test('LE TEST QUI COMPTE : la page est non délégable AVANT tout, charge nav.js, sans hexa ni service worker', () => {
-  const script = page.slice(page.indexOf('<script type="module">'))
-  const iGarde = script.indexOf('await exigerCompteProprePage(')
-  const iAutre = script.indexOf("import { requireAuth }")
-  assert.ok(iGarde > 0 && iGarde < iAutre, 'la garde de compte passe avant le reste')
-  assert.match(page, /<script src="\/shared\/nav\.js"><\/script>/)
-  const sansCommentaires = page.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
-  assert.doesNotMatch(sansCommentaires, /#[0-9a-fA-F]{3,8}\b/, 'aucun hexa')
-  assert.doesNotMatch(page, /serviceWorker\.register/)
-  assert.doesNotMatch(src, /#[0-9a-fA-F]{6}\b/, 'aucun hexa dans la vue')
+test('LE TEST QUI COMPTE : la fenêtre — voile, Échap et croix ferment, la tabulation reste dedans, le focus revient', async () => {
+  const dom = new JSDOM('<!doctype html><button id="ouvrir">o</button><button id="apres">a</button>')
+  const doc = dom.window.document
+  global.document = doc
+  const api = { lire: async () => ETAT(), ecrire: async () => ({ ok: true }) }
+  let fermetures = 0
+  doc.getElementById('ouvrir').focus()
+  const f = V.ouvrirFenetre({ doc, api, bien: BIEN, t, esc, surFermeture: () => { fermetures++ } })
+  await f.pret
+  const boite = doc.querySelector('.ej-fenetre')
+  assert.equal(boite.getAttribute('role'), 'dialog')
+  assert.equal(boite.getAttribute('aria-modal'), 'true')
+  assert.ok(doc.getElementById('ej-styles'), 'les styles sont posés une fois')
+  assert.ok(boite.querySelector('.ej-carte'), 'le contenu est monté dans la fenêtre')
+  // Tab depuis le dernier élément revient au premier.
+  const focusables = [...boite.querySelectorAll('button, input, select')]
+  focusables[focusables.length - 1].focus()
+  doc.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+  assert.equal(doc.activeElement, focusables[0], 'la tabulation est enfermée')
+  doc.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  assert.equal(doc.querySelector('.ej-fenetre'), null)
+  assert.equal(doc.querySelector('.ej-voile'), null)
+  assert.equal(doc.activeElement, doc.getElementById('ouvrir'), 'le focus revient d\'où il venait')
+  assert.equal(fermetures, 1)
+  // La croix et le voile ferment aussi ; les styles ne sont pas posés deux fois.
+  const g = V.ouvrirFenetre({ doc, api, bien: BIEN, t, esc })
+  await g.pret
+  doc.querySelector('.ej-fenetre [data-action="fermer"]').click()
+  assert.equal(doc.querySelector('.ej-fenetre'), null)
+  const h = V.ouvrirFenetre({ doc, api, bien: BIEN, t, esc })
+  await h.pret
+  doc.querySelector('.ej-voile').click()
+  assert.equal(doc.querySelector('.ej-fenetre'), null)
+  assert.equal(doc.querySelectorAll('#ej-styles').length, 1)
 })
+
+test('LE TEST QUI COMPTE : le focus revient même si le bouton d\'origine a été repeint (review 3, constat 3)', async () => {
+  const dom = new JSDOM('<!doctype html><div id="bloc"><button data-bind="facturation">o</button></div>')
+  const doc = dom.window.document
+  global.document = doc
+  doc.querySelector('[data-bind="facturation"]').focus()
+  const f = V.ouvrirFenetre({ doc, api: { lire: async () => ETAT(), ecrire: async () => ({ ok: true }) }, bien: BIEN, t, esc,
+    retourFocus: () => doc.querySelector('[data-bind="facturation"]') })
+  await f.pret
+  // La fiche repeint son bloc : l'ancien bouton est détaché.
+  doc.getElementById('bloc').innerHTML = '<button data-bind="facturation">n</button>'
+  f.fermer()
+  assert.equal(doc.activeElement, doc.querySelector('[data-bind="facturation"]'))
+  assert.equal(doc.activeElement.textContent, 'n', 'le NOUVEAU bouton')
+})
+
+test('LE TEST QUI COMPTE : l\'ancienne page n\'existe plus, ni son onglet, et la vue n\'a aucun hexa', () => {
+  assert.equal(fs.existsSync(path.join(racine, 'pages/entites-juridiques.html')), false)
+  const settings = fs.readFileSync(path.join(racine, 'pages/settings.html'), 'utf8')
+  assert.doesNotMatch(settings, /entites-juridiques/)
+  assert.doesNotMatch(src.replace(/^\s*\/\/.*$/gm, ''), /#[0-9a-fA-F]{3,8}\b/, 'aucun hexa dans la vue')
+  assert.doesNotMatch(src, /window\.confirm|alert\(/)
+})
+
+test('les refus de la fenêtre ne réveillent pas la barre d\'erreur générique (recette du 9 novembre 2026)', () => {
+  // La fenêtre dit elle-même ses refus (sous le champ, dans le bandeau) : le
+  // client les déclare « gérés », et la barre ne les répète pas
+  // (tests/barre-erreur-prod.test.js prouve le côté barre).
+  const client = fs.readFileSync(path.join(racine, 'shared/api-client.js'), 'utf8')
+  const bloc = client.slice(client.indexOf('entitesJuridiques: {'), client.indexOf('}', client.indexOf('entitesJuridiques: {') + 30) + 200)
+  assert.match(bloc, /lire: \(bien\) => apiCall\(`entites-juridiques\?bien=\$\{encodeURIComponent\(bien\)\}`, 'GET', null, \{ refusGeres: \[400, 404, 409, 503\] \}\)/)
+  assert.match(bloc, /ecrire: \(corps\) => apiCall\('entites-juridiques', 'POST', corps, \{ refusGeres: \[400, 404, 409, 503\] \}\)/)
+  assert.match(client, /const gere = Array\.isArray\(refusGeres\) && refusGeres\.includes\(res\.status\)/)
+  assert.match(client, /if \(gere\) erreur\.gere = true/)
+  assert.match(client, /logger\.error\('API', err\.message, \{ endpoint, \.\.\.\(err && err\.gere \? \{ gere: true \} : \{\}\) \}\)/)
+})
+
