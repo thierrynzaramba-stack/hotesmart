@@ -293,6 +293,16 @@ test('un bien inconnu ou absent rend le PREMIER bien en lecture', async () => {
   assert.equal(r.charge.bien.ref, 'P1')
 })
 
+test('la base porte l UUID du bien (lien vers sa fiche) et dit SEULEMENT si la fiche a une adresse', async () => {
+  const sans = await appeler({ query: { bien: 'P1' }, repondre: base() })
+  assert.deepEqual({ id: sans.charge.bien.id, adresse: sans.charge.bien.adresse }, { id: 'u-1', adresse: false })
+  const avec = await appeler({ query: { bien: 'P2' }, repondre: base() })
+  assert.deepEqual({ id: avec.charge.bien.id, adresse: avec.charge.bien.adresse }, { id: 'u-2', adresse: true })
+  assert.ok(!JSON.stringify(avec.charge).includes('9 rue Fiche') || avec.charge.reponses.length,
+    'l adresse elle-même ne descend pas dans la description du bien')
+  assert.equal(avec.charge.bien.address, undefined)
+})
+
 test('LE TEST QUI COMPTE : en écriture, le logement est OBLIGATOIRE et doit être du compte', async () => {
   // ⚠ RETOMBER SUR LE PREMIER BIEN, comme le fait la lecture, écrirait la
   // réponse d'un logement dans un AUTRE, sans un mot.
@@ -503,15 +513,80 @@ test('LE TEST QUI COMPTE : l écran et l aperçu suivent la FICHE du logement qu
   const c = r.charge.reponses[0]
   assert.equal(c.apercu, 'Au 9 rue Fiche dès 16:00', 'ce que le voyageur recevra')
   assert.ok(c.segments.filter(s => s.cle).every(s => s.vide === false), 'pas d étiquette rouge : la fiche les remplit')
-  const adresse = r.charge.faits.find(f => f.cle === 'adresse')
-  assert.equal(adresse.aRemplir, false)
-  assert.equal(adresse.repli, '9 rue Fiche')
+  // L'adresse n'est plus une info de la base (une seule adresse, celle de la
+  // fiche) ; l'heure d'arrivée, si, avec la fiche en repli.
+  assert.equal(r.charge.faits.find(f => f.cle === 'adresse'), undefined)
+  const checkin = r.charge.faits.find(f => f.cle === 'checkin')
+  assert.equal(checkin.aRemplir, false)
+  assert.equal(checkin.repli, '16:00')
+})
+
+test('LE TEST QUI COMPTE : écrire une ligne `adresse` dans la base est refusé (la fiche fait foi)', async () => {
+  const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'adresse', value: '1 rue X' }, repondre: base() })
+  assert.equal(r.statut, 400)
+  assert.equal(r.charge.error, 'adresse_dans_la_fiche')
+  assert.equal(r.requetes.filter(q => q.table === 'knowledge').length, 0, 'aucune écriture')
+})
+
+test('la fiche écrit par l UUID du bien (`bienId`), résolu dans les biens DU COMPTE', async () => {
+  const ok = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'wifi_nom', value: 'RESEAU' }, repondre: base() })
+  assert.equal(ok.statut, 200)
+  const ecrite = ok.requetes.find(q => q.table === 'knowledge')
+  assert.ok(ecrite, 'une écriture')
+  const autre = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bienId: 'uuid-d-un-autre-compte', type: 'fixed', key: 'wifi_nom', value: 'X' }, repondre: base() })
+  assert.equal(autre.statut, 403, 'hors du compte, comme une référence étrangère')
+  assert.equal(autre.requetes.filter(q => q.table === 'knowledge').length, 0)
 })
 
 test('les bornes de taille rendent un CODE stable, que l écran sait lire', async () => {
   const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'faq', key: 'S', value: 'x'.repeat(4001) }, repondre: base() })
   assert.equal(r.statut, 400)
   assert.equal(r.charge.error, 'trop_long')
-  const f = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'adresse', value: 'x'.repeat(1001) }, repondre: base() })
+  const f = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'wifi_nom', value: 'x'.repeat(1001) }, repondre: base() })
   assert.equal(f.charge.error, 'trop_long')
+})
+
+// ⚠ REVIEW 1 DU LOT ACCUEIL DU VOYAGEUR : la fiche ignore `X-Compte` (le bien
+// désigne le compte) ; la base, non. Sélecteur resté sur un compte où l'on est
+// MEMBRE, le titulaire d'un bien voyait le bloc d'accueil de SON bien et se
+// faisait refuser l'écriture par « Réservé au titulaire du compte ».
+const BIEN_DU_MEMBRE = '33333333-3333-4333-8333-333333333333'
+function avecBienDuMembre () {
+  const defaut = base()
+  return (r) => {
+    const f = (c) => (r.filtres.find(x => x[0] === 'eq' && x[1] === c) || [])[2]
+    if (r.table === 'properties' && f('user_id') === MEMBRE) {
+      const lignes = [{ id: BIEN_DU_MEMBRE, name: 'Chez moi', provider_property_id: 'PM', photo_url: null, address: null, checkin_time: null, checkout_time: null }]
+      return { data: f('id') && f('id') !== BIEN_DU_MEMBRE ? [] : lignes, error: null }
+    }
+    return defaut(r)
+  }
+}
+
+test('LE TEST QUI COMPTE : le bien désigné prime sur X-Compte quand il est À L APPELANT', async () => {
+  const r = await appeler({ methode: 'POST', titulaire: false, repondre: avecBienDuMembre(),
+    corps: { action: 'enregistrer', bienId: BIEN_DU_MEMBRE, type: 'fixed', key: 'wifi_nom', value: 'RESEAU' } })
+  assert.equal(r.statut, 200, JSON.stringify(r.charge))
+  const ecrite = r.requetes.find(q => q.table === 'knowledge' && q.op !== 'select')
+  assert.ok(ecrite, 'une écriture')
+  const charge = Array.isArray(ecrite.charge) ? ecrite.charge[0] : ecrite.charge
+  assert.equal(charge.user_id, MEMBRE, 'écrite sur le compte DU BIEN, pas sur celui du sélecteur')
+  assert.equal(String(charge.property_id), 'PM')
+})
+
+test('et ne crée aucun droit : un bien du compte où l on est membre reste refusé', async () => {
+  const r = await appeler({ methode: 'POST', titulaire: false, repondre: avecBienDuMembre(),
+    corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'wifi_nom', value: 'X' } })
+  assert.equal(r.statut, 403)
+  assert.equal(r.requetes.filter(q => q.table === 'knowledge').length, 0)
+  const autre = await appeler({ methode: 'POST', titulaire: false, repondre: avecBienDuMembre(),
+    corps: { action: 'enregistrer', bienId: '44444444-4444-4444-8444-444444444444', type: 'fixed', key: 'wifi_nom', value: 'X' } })
+  assert.equal(autre.statut, 403)
+  assert.equal(autre.requetes.filter(q => q.table === 'knowledge').length, 0)
+  // ⚠ ET LA BASCULE N'A PAS EU LIEU (review 2, constat 4) : sans cette
+  // assertion, retirer le filtre `user_id` de la requête de bascule laissait ce
+  // test vert — le 403 venait alors du second filtrage, plus de la garde.
+  const eqDe = (q, c) => (q.filtres.find(x => x[0] === 'eq' && x[1] === c) || [])[2]
+  assert.ok(!autre.requetes.some(q => q.table === 'properties' && eqDe(q, 'user_id') === MEMBRE && !eqDe(q, 'id')),
+    'les biens du membre ont été lus : la bascule a eu lieu vers un compte que le bien ne désigne pas')
 })

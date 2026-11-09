@@ -323,9 +323,12 @@ test('LE TEST QUI COMPTE : `reservations: read` seul ne donne ni les personnes, 
   assert.equal(r.body.avis, null)
   assert.equal(r.body.taxe, null)
   assert.equal(r.body.serrures, null)
-  assert.deepEqual(r.body.refuses.sort(), ['avis', 'menage', 'serrures', 'taxe'])
+  // ⚠ `accueil` AUSSI : un membre n'est jamais titulaire, et le bloc porte le
+  // mot de passe wifi (lot « Accueil du voyageur », 8 novembre 2026).
+  assert.deepEqual(r.body.refuses.sort(), ['accueil', 'avis', 'menage', 'serrures', 'taxe'])
+  assert.equal(r.body.accueil, null)
   const tables = vus.map(v => v.table)
-  for (const t of ['property_cleaning_providers', 'ota_reviews', 'taxes_sejour', 'property_locks', 'locks']) {
+  for (const t of ['property_cleaning_providers', 'ota_reviews', 'taxes_sejour', 'property_locks', 'locks', 'knowledge']) {
     assert.ok(!tables.includes(t), `${t} a ete interrogee sans le droit correspondant`)
   }
 })
@@ -351,6 +354,27 @@ test('le titulaire n est refuse sur rien', async () => {
   assert.deepEqual(r.body.refuses, [])
 })
 
+test('LE TEST QUI COMPTE : le TITULAIRE reçoit le bloc « Accueil du voyageur », sans référence du partenaire', async () => {
+  const { vus } = preparer()
+  const r = await appeler({ id: BIEN_A })
+  assert.equal(r.code, 200)
+  assert.ok(r.body.accueil && Array.isArray(r.body.accueil.faits), 'le bloc est lu')
+  assert.deepEqual(r.body.accueil.faits.slice(0, 5).map(f => f.cle),
+    ['telephone_hote', 'checkin', 'checkout', 'wifi_nom', 'wifi_mdp'])
+  assert.equal(r.body.accueil.ref, undefined, 'l écran écrit par l UUID du bien')
+  const k = vus.find(v => v.table === 'knowledge')
+  assert.ok(k, 'une lecture de la base')
+})
+
+test('LE TEST QUI COMPTE : un membre avec TOUS les droits en écriture ne reçoit pas l accueil (titulaire seul)', async () => {
+  const { vus } = membre({ reservations: 'write', prestataires: 'write', avis: 'write', reglages: 'write' })
+  const r = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.equal(r.code, 200)
+  assert.equal(r.body.accueil, null)
+  assert.ok(r.body.refuses.includes('accueil'))
+  assert.ok(!vus.some(v => v.table === 'knowledge'), 'la base n est même pas lue')
+})
+
 test('la reponse n est pas mise en cache par un intermediaire, et varie par compte', async () => {
   preparer()
   const r = await appeler({ id: BIEN_A })
@@ -367,7 +391,8 @@ test('LE TEST QUI COMPTE (M1) : `reglages: read` LIT la taxe et les serrures, ma
   const r = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
   assert.equal(r.code, 200)
   // Le droit de LECTURE est accorde : les deux blocs `reglages` sont servis.
-  assert.deepEqual(r.body.refuses, [])
+  // L'accueil, lui, reste au titulaire, quel que soit le droit du membre.
+  assert.deepEqual(r.body.refuses, ['accueil'])
   assert.deepEqual(r.body.taxe, { connue: false })
   assert.deepEqual(r.body.serrures, [])
   // Mais la garde DELETE exige `reglages: write` : on ne promet rien.
