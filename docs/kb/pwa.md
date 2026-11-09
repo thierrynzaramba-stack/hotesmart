@@ -900,3 +900,26 @@ dans la plage) :
   accepté (pas de fuite, l'écran est gardé).
 - **8** — un brouillon abandonné pour réservation annulée ou séjour terminé
   est rendu à l'hôte sans « Réponse à valider ».
+
+### 11.6 Recette du lot 2c-2 (Thierry, staging `f7b99a89`, 9 novembre 2026)
+
+Les quatorze événements du lot, par l'essai de chacun (`essai_evenement`,
+logement fictif), lancé depuis le Chrome de Thierry : **les quatorze
+conformes**, texte et arrivée, sur l'ordinateur et sur Android.
+- L'urgence semblait manquer sur Android : elle était arrivée, rangée par
+  Android dans le paquet des notifications HôteSmart, et le renvoi (même
+  sujet, sans `rappel`) l'avait remplacée sans sonner. Volet vidé, elle arrive
+  et sonne. Ce n'est pas un défaut : c'est ce que fait un sujet.
+- Les heures calmes ont joué pendant la recette (plage 22:00 → 07:00) :
+  « Ménage sans personne », urgent, est passé ; les trois autres ont attendu,
+  puis sont partis en UN message regroupé (« vider ma file »). Plage coupée
+  le temps de voir leurs textes, puis remise et relue en base.
+- L'essai ouvre toujours l'onglet Notifications : les liens propres à chaque
+  événement sont gardés par les tests, pas par cette recette.
+
+**Défaut trouvé, hors du lot (lot 2b)** : dans les heures calmes, cliquer un
+jour le coche bien, mais la page saute de plusieurs centaines de pixels. La
+case invisible (`.jours input`, `position: absolute`) est placée par rapport à
+un ancêtre lointain, et le focus fait défiler jusqu'à elle
+(`pages/settings.html`, `.jours label` sans `position: relative`). Correctif
+proposé à Thierry.
