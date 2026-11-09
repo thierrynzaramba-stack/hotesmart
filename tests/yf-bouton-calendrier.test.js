@@ -288,6 +288,65 @@ test('LE TEST QUI COMPTE : une panne du menu ne ferme pas le menu', async () => 
   b.fermer()
 })
 
+test('LE TEST QUI COMPTE (review du 10 novembre 2026) : en panne du menu, un bien NON pilote garde un geste, et le menu dit pourquoi', async () => {
+  // ⚠ LE TEST DE PANNE CI-DESSUS NE PRENAIT QU'UN BIEN PILOTE, qui garde son
+  // lien de reglages : il ne pouvait pas voir qu'un bien non pilote perdait
+  // TOUT geste, sans un mot. Sur main, le meme scenario affichait encore
+  // « Activer ». Le pied le dit, et mene aux reglages SANS `activer=1`.
+  const b = monter({ appel: async (chemin) => (chemin.startsWith('/api/yield-menu') ? { __statut: 503, __corps: { error: 'illisible' } } : {}) })
+  peupler(b, { biens: [MANUEL], jours: 1 })
+  const m = await ouvrir(b, MANUEL)
+  const pied = m.querySelector('.cal-yf-menu__pied')
+  assert.ok(pied, 'un bien non pilote reste sans aucun geste en panne')
+  assert.equal(pied.querySelector('.cal-yf-menu__refus').textContent, FR['cal.yf_unreadable'])
+  const href = pied.querySelector('a').getAttribute('href')
+  assert.ok(href.includes('bien=' + MANUEL.id), href)
+  assert.ok(!href.includes('activer=1'), 'en panne, on n ouvre aucun parcours sur un etat qu on n a pas lu')
+  assert.equal(m.querySelector('.cal-yf-menu__attente'), null)
+  b.fermer()
+  // Sans le droit d'ecriture, rien — comme partout.
+  const lecture = monter({ ecriture: false, appel: async () => ({ __statut: 503, __corps: { error: 'illisible' } }) })
+  peupler(lecture, { biens: [MANUEL], jours: 1 })
+  assert.equal((await ouvrir(lecture, MANUEL)).querySelector('.cal-yf-menu__pied'), null)
+  lecture.fermer()
+})
+
+test('LE TEST QUI COMPTE (review du 10 novembre 2026) : le lien « Envoyer mes prix » vise le logement CLIQUE, pas le premier de la liste', async () => {
+  // ⚠ LE BANC N'AVAIT QU'UN BIEN : « le premier » et « le clique » etaient le
+  // meme, et un lien vers `etat.biens[0]` passait au vert.
+  const AUTRE = { ...MANUEL, id: '44444444-4444-4444-8444-444444444444', name: 'Cœur de vie 23', provider_property_id: '169567' }
+  const b = banc({ biens: [MANUEL, AUTRE], faits: FAITS({
+    bien: AUTRE.id, pilote: 'calendrier', peut_basculer: false, raison_code: 'pilote_refuse_keep', raison: 'x'
+  }) })
+  const m = await ouvrir(b, AUTRE)
+  assert.equal(m.querySelector('.cal-yf-menu__pied a').getAttribute('href'), `/logements/${AUTRE.id}`)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE (review du 10 novembre 2026) : sans le droit « reglages », aucun pied non plus sur un REFUS — connu ou inconnu', async () => {
+  for (const faits of [
+    FAITS({ pilote: 'calendrier', peut_basculer: false, raison_code: 'pilote_refuse_keep', raison: 'x' }),
+    FAITS({ pilote: 'calendrier', peut_basculer: false, raison_code: 'autre_chose', raison: 'Un motif inconnu.' })
+  ]) {
+    const b = banc({ biens: [MANUEL], faits, ecriture: false })
+    const m = await ouvrir(b, MANUEL)
+    assert.equal(m.querySelector('.cal-yf-menu__pied'), null, `pied offert sans droit (${faits.raison_code})`)
+    b.fermer()
+  }
+})
+
+test('un refus inconnu, hors du français : une ligne traduite, la phrase du moteur en infobulle (review du 10 novembre 2026)', async () => {
+  const b = banc({ biens: [MANUEL], faits: FAITS({
+    pilote: 'calendrier', peut_basculer: false, raison_code: 'autre_chose', raison: 'Un motif que l écran ne connaît pas.'
+  }) })
+  b.window.I18n.lang = 'en'
+  const m = await ouvrir(b, MANUEL)
+  const refus = m.querySelector('.cal-yf-menu__refus')
+  assert.equal(refus.textContent, FR['cal.yf_refused'], 'la phrase française du moteur montrée à un hôte anglophone')
+  assert.equal(refus.getAttribute('title'), 'Un motif que l écran ne connaît pas.')
+  b.fermer()
+})
+
 test('le pied : « Reglages » sur un bien pilote, « Activer » sinon — et jamais une bascule', async () => {
   const pilote = banc()
   let m = await ouvrir(pilote, PILOTE)

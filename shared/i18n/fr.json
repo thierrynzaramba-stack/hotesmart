@@ -304,6 +304,8 @@
   "cal.yf_comparables": "Comparables",
   "cal.yf_settings": "Réglages du pilote",
   "cal.yf_activate": "Activer le pilote automatique",
+  "cal.yf_unreadable": "L’état du pilote n’a pas pu être lu.",
+  "cal.yf_refused": "Le pilote automatique ne peut pas être activé pour ce logement.",
   "cal.yf_window_days": "{n, plural, one {# jour} other {# jours}}",
   "cal.yf_window_months": "{n, plural, one {# mois} other {# mois}}",
   "cal.yf_comparables_none": "À choisir",

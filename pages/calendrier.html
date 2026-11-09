@@ -462,7 +462,7 @@ function brancherBulles (zone) {
 //
 // ⚠ RIEN DE NEUF N'EST CALCULE AU CHARGEMENT DU CALENDRIER. La couleur du
 // bouton se lit dans `pilote_tarifaire`, deja servi par /api/channel-property
-// avec la liste des biens. Les faits du menu — le compteur et les quatre
+// avec la liste des biens. Les faits du menu — le compteur et les trois
 // reperes — partent sur le CLIC, pour le SEUL bien clique. C'est l'exception
 // datee du 28 octobre 2026 a la regle « donnee non urgente = resume
 // pre-calcule » (spec §6 bis) : elle ne tient QUE parce que le comptage suit
@@ -576,18 +576,32 @@ function menuYfHtml (bien, d) {
   // prix » n'est pas basculable : le parcours d'activation refuse de s'ouvrir,
   // et c'est juste. Mais le pied affichait quand meme le bouton, qui ne
   // faisait RIEN au clic — une promesse muette, le pire des deux mondes.
-  // Trois etats, donc, et non deux :
-  //   · pilote            -> le lien vers ses reglages ;
-  //   · basculable        -> le bouton d'activation ;
-  //   · NON basculable    -> la RAISON, telle que la regle la donne, et
-  //                          aucun bouton.
+  // Plusieurs etats, donc, et non deux (spec §4) :
+  //   · pilote              -> le lien vers ses reglages ;
+  //   · menu en panne       -> on le DIT, et le lien vers les reglages ;
+  //   · basculable          -> le bouton d'activation ;
+  //   · refus connu (keep)  -> une ligne, et le lien vers la fiche ;
+  //   · refus inconnu       -> le verdict du moteur, et aucun geste.
   // ⚠ ET TANT QU'ON NE SAIT PAS (`d` absent, premier rendu), ON NE PROPOSE
   // RIEN sur un bien non pilote : afficher le bouton puis le retirer ferait
   // clignoter une promesse. Le menu porte deja sa ligne « Chargement… ».
   const sait = !!(d && typeof d.peut_basculer === 'boolean')
+  // ⚠ « PAS ENCORE DE REPONSE » N'EST PAS « REPONSE EN ECHEC » (review du
+  // 10 novembre 2026). En panne de `/api/yield-menu`, un bien non pilote
+  // perdait tout geste, sans un mot — la ligne « Chargement… » disparaissait,
+  // et l'hote qui a le droit d'activer ne voyait ni bouton ni raison.
+  const enPanne = !!(d && d.echec)
   let pied = ''
   if (peutRegler && on) {
     pied = `<div class="cal-yf-menu__pied"><a class="link cal-yf-menu__lien" href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a></div>`
+  } else if (peutRegler && enPanne) {
+    // En panne : on le DIT, et on mene aux reglages SANS `activer=1` — la page
+    // Prediction de prix lit elle-meme l'etat et la raison, et n'ouvre aucun
+    // parcours sur la foi d'un etat qu'on n'a pas pu lire.
+    pied = `<div class="cal-yf-menu__pied">
+      <p class="cal-yf-menu__refus">${esc(t('cal.yf_unreadable'))}</p>
+      <a class="link cal-yf-menu__lien" href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a>
+    </div>`
   } else if (peutRegler && sait && d.peut_basculer) {
     pied = `<div class="cal-yf-menu__pied"><a class="cal-yf-menu__activer" href="${esc(urlYf('prix', bien.id, { activer: '1' }))}">${esc(t('cal.yf_activate'))}</a></div>`
   } else if (peutRegler && sait && d.raison_code === 'pilote_refuse_keep') {
@@ -605,7 +619,12 @@ function menuYfHtml (bien, d) {
     // Tout autre refus : le verdict du moteur s'AFFICHE, il ne se recopie pas
     // (REVIEW.md regle 13). On ne sait pas quel geste le debloque, donc on
     // n'en propose aucun — plutot que d'en inventer un.
-    pied = `<div class="cal-yf-menu__pied"><p class="cal-yf-menu__refus">${esc(d.raison)}</p></div>`
+    // ⚠ LA PHRASE DU MOTEUR EST FRANCAISE (review du 10 novembre 2026) : en
+    // anglais ou en espagnol, une ligne traduite la remplace, et la phrase
+    // reste en infobulle. Aucun refus inconnu n'existe aujourd'hui
+    // (`peutPasserEnYieldflow` ne refuse qu'avec `pilote_refuse_keep`).
+    const francais = langue().slice(0, 2) === 'fr'
+    pied = `<div class="cal-yf-menu__pied"><p class="cal-yf-menu__refus" title="${esc(d.raison)}">${esc(francais ? d.raison : t('cal.yf_refused'))}</p></div>`
   }
   return `<div class="cal-yf-menu__entete">
       <span class="cal-yf-menu__titre" id="h-yf">${esc(t('cal.yf_title'))}</span>
@@ -695,9 +714,12 @@ async function ouvrirMenuYf (bienId, bouton, { clavier = false } = {}) {
     faits = await appel(`/api/yield-menu?bien=${encodeURIComponent(bienId)}`)
   } catch (e) {
     // ⚠ UNE PANNE DE REPERES NE FERME PAS LE MENU. Les quatre entrees mènent
-    // a des pages qui savent se charger seules ; se taire sur les reperes est
-    // exactement ce que la spec demande, et c'est tout ce qu'on perd.
+    // a des pages qui savent se charger seules, et les reperes se taisent.
+    // ⚠ MAIS CE N'EST PAS TOUT CE QU'ON PERD (review du 10 novembre 2026) :
+    // l'etat du pilote vient du meme appel. `echec` le dit au pied, qui
+    // l'annonce et mene aux reglages plutot que de se taire.
     logger.error('Calendrier', 'menu yieldflow', e)
+    faits = { echec: true }
   }
   // L'hote a pu refermer, ou ouvrir un autre bien, pendant l'appel.
   if (menuYf.bien !== bienId || menu.hidden) return

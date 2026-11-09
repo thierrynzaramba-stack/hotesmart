@@ -799,10 +799,25 @@
   // elle vaut quelle que soit la porte par laquelle on entre sur cet ecran.
   let activerDemande = false
 
+  // ⚠ LA DEMANDE QUITTE L'ADRESSE DES QU'ELLE EST LUE (review du 10 novembre
+  // 2026). Restee dans l'URL, un rechargement — ou un retour arriere servi sans
+  // le cache de pages — rouvrait la confirmation d'activation sans clic de
+  // l'hote. Rien ne s'ecrivait sans « Activer », mais une confirmation qui
+  // s'ouvre seule n'est pas un geste de l'hote. `bien` reste dans l'adresse.
+  function oublierActiverDansLAdresse () {
+    try {
+      const u = new URL(location.href)
+      if (!u.searchParams.has('activer')) return
+      u.searchParams.delete('activer')
+      history.replaceState(history.state, '', u.pathname + u.search + u.hash)
+    } catch (e) { /* sans historique : la demande ne vit plus qu'en memoire */ }
+  }
+
   async function init () {
     session = await requireAuth()
     if (!session) return
     activerDemande = new URLSearchParams(location.search).get('activer') === '1'
+    oublierActiverDansLAdresse()
     renderSidebar('yield-prix').catch(e => console.error('[yield-prix] sidebar', e))
     mois = new Date().toISOString().slice(0, 7)
     const ok = await chargerBiens()

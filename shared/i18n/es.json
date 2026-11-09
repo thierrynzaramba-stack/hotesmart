@@ -304,6 +304,8 @@
   "cal.yf_comparables": "Comparables",
   "cal.yf_settings": "Ajustes del piloto",
   "cal.yf_activate": "Activar el piloto automático",
+  "cal.yf_unreadable": "No se ha podido leer el estado del piloto.",
+  "cal.yf_refused": "El piloto automático no puede activarse para este alojamiento.",
   "cal.yf_window_days": "{n, plural, one {# día} other {# días}}",
   "cal.yf_window_months": "{n, plural, one {# mes} other {# meses}}",
   "cal.yf_comparables_none": "Por elegir",
