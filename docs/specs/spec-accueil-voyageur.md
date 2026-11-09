@@ -235,8 +235,16 @@ Toulouse : à vérifier par Thierry).
    |---|---|---|---|---|
    | fiche, AVANT | 1 (`/api/logement`) | non exposé (pas de Server-Timing) | 1 056 | 57 815 |
    | base, AVANT | 1 (`/api/ecran/connaissance`) | 3 | 1 156 | 11 047 |
-   | fiche, APRÈS | 1 | +1 (`knowledge`, en parallèle) | à mesurer en recette | à mesurer |
-   | base, APRÈS | 1 | 3 | à mesurer en recette | à mesurer |
+   | fiche, APRÈS | 1 (`/api/logement`) | +1 (`knowledge`, en parallèle ; non exposé) | 998 | 62 821 (transfert) |
+   | base, APRÈS | 1 (`/api/ecran/connaissance?bien=`) | 3 (Server-Timing) | 911 | 12 592 (transfert, deux appels) |
+
+   APRÈS mesuré le 9 novembre 2026 sur staging `5ed7fec0`, même logement.
+   ⚠ Staging porte aussi d'autres lots : la fiche y appelle en plus
+   `/api/membres` (143 octets), qui ne vient pas de ce lot, et l'octet de page
+   n'est donc pas comparable au chiffre près. Ce qui l'est : un seul appel
+   par écran, la base à trois requêtes, et des réponses API plus légères
+   (fiche 1 056 → 998, base 1 156 → 911 — la base ne porte plus les infos du
+   logement).
 
 ## 7. Tests (chacun rougit contre `dde1004f`)
 
@@ -265,6 +273,24 @@ Toulouse : à vérifier par Thierry).
 4. « Proposer une réponse » (IA) sur une question d'adresse : l'adresse de la
    fiche.
 5. Téléphone : mêmes gestes.
+
+**Recette du 9 novembre 2026 sur staging `5ed7fec0`** (faite dans le
+navigateur de Thierry, à sa demande, compte de recette) :
+1. Fiche : bloc présent ; nom wifi modifié sur place, relu après rechargement
+   — conforme. Un « Entrée » enregistre ; vider une valeur la supprime.
+2. Base : plus de bloc d'infos ; « Ouvrir la fiche » mène à la fiche —
+   conforme.
+3. Conversation : mot de passe wifi vidé → « Utiliser » refuse en nommant
+   l'info → « Le remplir » sur place, « Enregistré », la conversation reste
+   ouverte → « Utiliser » pose le texte avec la valeur — conforme. (Valeur de
+   recette remise à l'identique ; aucun message envoyé.)
+4. « Proposer une réponse » sur une question d'adresse : **non jouable sur
+   staging** — aucune conversation de recette ne pose cette question, et le
+   simulateur prévient l'hôte par alerte. Couvert par les tests
+   (`tests/connaissance-page.test.js`, `buildKnowledgeText` avec les replis du
+   bien) et par la review finale.
+5. Téléphone (vue de 390 px) : fiche, édition, base dans la conversation,
+   « Utiliser » — conformes, sans débordement.
 
 ## 9. Reviews du lot — la trace
 
