@@ -475,6 +475,19 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    la langue du voyageur, bouton de la fiche de réservation (porte 1), saisie
    par l'hôte (Q12), état sur la fiche — ordinateur et téléphone.
    ⚠ **Envoi au voyageur** (la porte 1 poste le lien) : review de plus.
+   Deux temps, accordés par le chef de file le 10 nov. 2026 : **(2a)** ce qui
+   ne touche aucun écran existant — migration, writer
+   `lib/factures-voyageur.js`, endpoint de l'hôte `api/factures-voyageur.js`
+   (`envoyer_lien`, `saisir`), page du voyageur `pages/facture.html` et son
+   endpoint `api/facture-publique.js` ; **(2b)** le bouton et l'état sur la
+   fiche de réservation (`api/calendar.js`, `pages/calendrier.html`,
+   `shared/calendrier-resa.js`), qui attend que `yf-bouton-calendrier` (fil
+   Calendrier) soit dans `main`. Choix techniques de 2a, détaillés dans
+   `docs/kb/facture-voyageur.md` : jeton dans le FRAGMENT de l'URL (jamais dans
+   les journaux), lecture de la page en `POST` ; anti-double-clic de 30 s en
+   base ; 20 formulaires au plus par jeton ; aucun lien neuf depuis un bien
+   archivé, une demande déjà en cours y va au bout (P3) ; le lien revient en
+   clair à l'hôte quand le message n'est pas sûrement arrivé (P5).
 3. **La confirmation et l'émission** : passe du cron, notification et rappel,
    confirmation des deux lignes, numérotation, PDF, message « Votre facture
    est disponible ». ⚠ **Envoi au voyageur** : review de plus.
@@ -529,7 +542,12 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
 du téléphone ; la page publique est pensée pour le téléphone d'abord.
 
 **Fonctions Vercel** : trois de plus au plus (entités, factures, page
-publique) : 67 → 70 sur 100.
+publique). ⚠ Chiffre corrigé le 10 novembre 2026 (chef de file, mesuré) :
+`main` en porte **69** (`find api -name '*.js'`, sous-dossiers compris — le
+« 67 » ne comptait pas `api/ecran/`), dont l'endpoint des entités de
+l'étape 1. L'étape 2 en ajoute deux (`api/factures-voyageur.js`,
+`api/facture-publique.js`) et le lot 2 du compte de charges deux autres :
+**73 sur 100**.
 
 ## 10. Relecture du 8 novembre 2026 (sous-agent, plage dde1004f..517a9930)
 
