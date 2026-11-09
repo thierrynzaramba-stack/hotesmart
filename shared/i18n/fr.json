@@ -1158,5 +1158,12 @@
   "ej.aucune": "Aucune entité : ce logement ne peut pas facturer.",
   "ej.choisir": "Choisir pour ce logement",
   "ej.retirer": "Retirer de ce logement",
-  "ej.badge_actuelle": "Ce logement"
+  "ej.badge_actuelle": "Ce logement",
+  "fiche.bloc_facturation": "Facturation",
+  "fiche.facturation_entite": "Factures émises au nom de",
+  "fiche.facturation_aucune": "Aucune entité : ce logement ne peut pas facturer",
+  "fiche.facturation_archivee": "{nom}, archivée : ce logement ne peut plus facturer",
+  "fiche.facturation_choisir": "Choisir l’entité",
+  "fiche.facturation_modifier": "Changer d’entité",
+  "fiche.facturation_non_lue": "La facturation n’est pas lisible pour l’instant."
 }

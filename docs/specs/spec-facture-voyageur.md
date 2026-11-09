@@ -467,9 +467,10 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    modifier), réglage de la numérotation et choix automatique / manuelle
    (Q5 bis). Deux temps, sur consigne du chef de file (9 nov.) : (1a) tout ce
    qui ne touche pas la fiche — base, writer, endpoint, fenêtre, retrait de
-   la page ; (1b) le bloc et la fenêtre branchés sur la fiche, APRÈS l'entrée
-   dans `main` de la branche `accueil-voyageur` (fil messagerie), qui tient
-   `api/logement.js` et `shared/logement-fiche.js`.
+   la page ; (1b) le bloc et la fenêtre branchés sur la fiche, codés
+   par-dessus `accueil-voyageur` (b6ca87a6, fil messagerie, qui tient
+   `api/logement.js` et `shared/logement-fiche.js`), avec son accord :
+   **`accueil-voyageur` passe en `main` AVANT `facture-voyageur`**.
 2. **La demande et le formulaire** : tables, liens à jeton, page publique dans
    la langue du voyageur, bouton de la fiche de réservation (porte 1), saisie
    par l'hôte (Q12), état sur la fiche — ordinateur et téléphone.

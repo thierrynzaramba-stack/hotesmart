@@ -1158,5 +1158,12 @@
   "ej.aucune": "No entity: this property cannot issue invoices.",
   "ej.choisir": "Use for this property",
   "ej.retirer": "Remove from this property",
-  "ej.badge_actuelle": "This property"
+  "ej.badge_actuelle": "This property",
+  "fiche.bloc_facturation": "Invoicing",
+  "fiche.facturation_entite": "Invoices issued as",
+  "fiche.facturation_aucune": "No entity: this property cannot issue invoices",
+  "fiche.facturation_archivee": "{nom}, archived: this property can no longer issue invoices",
+  "fiche.facturation_choisir": "Choose the entity",
+  "fiche.facturation_modifier": "Change entity",
+  "fiche.facturation_non_lue": "Invoicing can’t be read right now."
 }

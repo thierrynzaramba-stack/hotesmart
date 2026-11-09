@@ -273,6 +273,8 @@ import { api } from '/shared/api-client.js'
 import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie, canauxDeVente,
   listeDeSuppression, noteDeSuppression, listeDArchivage, accueilHtml } from '/shared/logement-fiche.js'
 import { enregistrerInfo } from '/shared/accueil-voyageur.js'
+// Facture voyageur, étape 1b : le bloc « Facturation » se repeint seul.
+import { facturationBlocHtml } from '/shared/logement-fiche.js'
 // ⚠ LA PRÉPARATION DE LA PHOTO EST PARTAGÉE avec l'écran d'aujourd'hui : elle
 // porte deux leçons de revue (une image sans dimensions, l'échelle de qualité
 // qui décide « trop lourde ») et une seconde copie les perdrait.
@@ -659,9 +661,44 @@ $('[data-bind="fiche"]').addEventListener('click', (ev) => {
   if (sup) { supprimerLogement(sup); return }
   const arc = ev.target.closest('[data-bind="archiver"]')
   if (arc) { archiverLogement(arc); return }
+  // Facture voyageur, étape 1b : la fenêtre de l'entité juridique.
+  if (ev.target.closest('[data-bind="facturation"]')) { ouvrirFacturation(); return }
   const rea = ev.target.closest('[data-bind="reactiver"]')
   if (rea) reactiverLogement(rea)
 })
+
+// ─── Facturation : la fenêtre de l'entité juridique (facture voyageur, 1b) ──
+//
+// D2 bis (Thierry, 9 novembre 2026) : l'entité qui émet les factures de ce
+// logement se choisit ICI. La fenêtre est chargée au CLIC, pas avec la page :
+// la fiche n'en paie rien tant qu'on ne l'ouvre pas. Elle a son endpoint
+// (`/api/entites-juridiques`, gardé sur `facturation`) ; ce que la fiche en
+// garde, c'est le nom de l'entité, repeint après chaque geste réussi.
+let fenetreFacturation = null
+async function ouvrirFacturation () {
+  if (fenetreFacturation || !ficheCourante) return
+  fenetreFacturation = 'ouverture'
+  try {
+    const { ouvrirFenetre } = await import('/shared/entites-juridiques-vue.js')
+    const bien = ficheCourante.bien && ficheCourante.bien.id ? ficheCourante.bien.id : idDuBien
+    fenetreFacturation = ouvrirFenetre({
+      doc: document, api: api.entitesJuridiques, bien, t, esc, langue: I18n.lang || 'fr',
+      surChangement: (etat) => {
+        const sienne = (etat.entites || []).find(e => e.id === etat.bien.entite_id) || null
+        ficheCourante.facturation = {
+          ...(ficheCourante.facturation || {}),
+          entite: sienne ? { id: sienne.id, nom: sienne.nom, archivee: !!sienne.archivee_le } : null
+        }
+        const bloc = $('[data-bloc="facturation"]')
+        if (bloc) bloc.outerHTML = facturationBlocHtml(ficheCourante, OUTILS)
+      },
+      surFermeture: () => { fenetreFacturation = null }
+    })
+  } catch (e) {
+    fenetreFacturation = null
+    logger.error('Logement', 'fenetre facturation : ' + e.message)
+  }
+}
 
 // ─── Le dialogue partagé : couper l'assistant, publier, supprimer ─────────
 //

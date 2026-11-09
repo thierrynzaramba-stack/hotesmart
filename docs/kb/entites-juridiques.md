@@ -133,11 +133,29 @@ les déclare `refusGeres` (`shared/api-client.js`), la barre ignore un journal
 défaut vu en recette le 9 novembre 2026, où un champ refusé était dit deux
 fois, dont une par « Une erreur est survenue ».
 
-⚠ **Le branchement sur la fiche (étape 1b) attend** que la branche
-`accueil-voyageur` du fil messagerie, qui tient `api/logement.js` et
-`shared/logement-fiche.js`, soit dans `main` (consigne du chef de file,
-9 novembre 2026). Il ajoutera le bloc « Facturation » (nom de l'entité, lu
-dans la réponse existante de la fiche) et le bouton, montré au titulaire seul.
+## Sur la fiche du logement (étape 1b)
+
+Codée par-dessus `accueil-voyageur` (b6ca87a6, fil messagerie), avec l'accord
+du chef de file du 9 novembre 2026 : **`accueil-voyageur` passe en `main`
+AVANT `facture-voyageur`**. Ajouts seulement dans ses fichiers.
+
+- `api/logement.js` lit l'entité du logement **en parallèle** de la fiche
+  (`entiteDuBien`), sous **son propre droit** `facturation` en lecture (comme
+  `prestataires` et `avis`) : sans lui, `refuses` porte `facturation` et rien
+  n'est lu. La réponse ne porte que `facturation: { entite: { id, nom,
+  archivee } | null, modifier }` — pas l'adresse, pas le SIRET — et `modifier`
+  vaut `peutEcrire('facturation')`, donc le titulaire seul. Une panne de ce
+  bloc ne fait pas tomber la fiche : `facturation: null` et `indisponibles`
+  porte `facturation`. Une lecture de plus côté serveur, **aucun appel de
+  plus** côté navigateur.
+- `shared/logement-fiche.js` : `facturationHtml` / `facturationBlocHtml`, bloc
+  « Facturation » dans la colonne droite, après les avis ; le bouton « Choisir
+  l'entité » / « Changer d'entité » n'existe que si `modifier` est vrai.
+- `pages/logement.html` : le clic charge la fenêtre **à la demande**
+  (`import()` dynamique : la fiche ne la paie pas tant qu'on ne l'ouvre pas),
+  une seule à la fois ; après chaque geste réussi, le bloc est repeint seul.
+- Tests : `tests/logement-facturation.test.js` (la vraie garde de la fiche,
+  le bloc, la page).
 
 ## Les tests
 

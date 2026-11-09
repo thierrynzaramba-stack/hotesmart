@@ -1158,5 +1158,12 @@
   "ej.aucune": "Ninguna entidad: este alojamiento no puede facturar.",
   "ej.choisir": "Usar para este alojamiento",
   "ej.retirer": "Quitar de este alojamiento",
-  "ej.badge_actuelle": "Este alojamiento"
+  "ej.badge_actuelle": "Este alojamiento",
+  "fiche.bloc_facturation": "Facturación",
+  "fiche.facturation_entite": "Facturas emitidas a nombre de",
+  "fiche.facturation_aucune": "Ninguna entidad: este alojamiento no puede facturar",
+  "fiche.facturation_archivee": "{nom}, archivada: este alojamiento ya no puede facturar",
+  "fiche.facturation_choisir": "Elegir la entidad",
+  "fiche.facturation_modifier": "Cambiar de entidad",
+  "fiche.facturation_non_lue": "La facturación no se puede leer por ahora."
 }
