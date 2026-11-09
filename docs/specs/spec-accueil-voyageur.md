@@ -101,7 +101,7 @@ voyageur reçoit — §2, S2.)
   échoue, l'objet n'est pas décoré et l'adresse Beds24 reste le repli.
   Le message du code d'accès, lui, n'a pas de garde sur les manquants : fiche
   vide, il part encore avec « [ADRESSE] » (comportement d'avant le lot,
-  dette 133, décision de Thierry attendue).
+  dette 137, décision de Thierry attendue).
   La lecture est **dédiée et faite avant toute garde** (review 2, constat 3) :
   posée dans la boucle de matérialisation, elle manquait aux biens archivés, à
   tout le compte quand une garde renonçait, et au bien dont la lecture
