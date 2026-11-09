@@ -365,8 +365,10 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
   un trigger, comme pour `biens_entites`.
 - **Les lectures de l'entité** viennent de `lib/entites-juridiques.js` (accord
   du fil facturation, `facture-voyageur` @
-  2b1df50476cd0202a3ede64196b7634fb6acb06c) : `entitesDuCompte(userId)` et
-  `entiteDuBien(userId, propertyUuid)` — ligne de `biens_entites`, sinon
+  2b1df50476cd0202a3ede64196b7634fb6acb06c, contrat reconfirmé à `39e7924e`
+  le 9 novembre) : `entitesDuCompte(userId, { db })` et
+  `entiteDuBien(userId, propertyUuid, { db })` (base injectée, provenance
+  `'bien'`, `'defaut'` ou `null`) — ligne de `biens_entites`, sinon
   l'entité par défaut, sinon `null`, avec sa provenance. Elles ne gardent
   rien : c'est l'endpoint des charges qui garde. Formes rendues
   (`facture-voyageur` @ 447ff3e035f7e05cecc08a169b574429befb8f0d) :
