@@ -438,9 +438,10 @@ automatique est active, avec le lien « ⚙ Configuration ».
 
 **Quand l'horloge démarre** — quand la **prestataire a fini sa part** et que
 rien n'est négatif : `guest_evaluations.auto_publier_le` = maintenant + X h,
-**plafonné à l'échéance − 12 h** pour tomber avant celle d'Airbnb. Jamais avant :
-une évaluation où personne n'a rien coché ne part pas « au meilleur niveau »
-(choix prudent de la nuit, à défaire si Thierry veut l'horloge dès la naissance).
+**plafonné à l'échéance − 12 h** pour tomber avant celle d'Airbnb. Jamais avant
+quand on attend sa part : une évaluation où personne n'a rien coché ne part pas
+« au meilleur niveau » (choix prudent de la nuit). ⚠ **Défait le 9 novembre 2026
+pour le cas où on ne demande RIEN à la prestataire** — paragraphe suivant.
 
 **Sans prestataire, l'horloge démarre à la naissance** (décision de Thierry du
 9 novembre 2026 : « si l'avis de la prestataire n'est pas demandé, ça doit
@@ -451,18 +452,28 @@ et Cœur de vie 23 réglées à 24 h, **zéro** publication automatique depuis l
 la grille ne lui ouvre aucune question, quand le ménage du séjour n'a pas de
 prestataire, ou quand elle est inactive ou non autorisée (`eval_scope` autre que
 `selon_grille`). Alors :
-- à la **naissance** (départ, ou objet Channex), l'horloge part : maintenant +
-  X h, même plafond (échéance − 12 h), seulement sur une évaluation que personne
-  n'a touchée (`a_remplir`, aucune réponse, pas d'horloge) —
+- à la **naissance**, l'horloge part : départ du jour → **midi, heure de Paris,
+  + X h** (la naissance a lieu à minuit, le voyageur encore dans les lieux) ;
+  objet Channex → maintenant + X h ; même plafond (échéance − 12 h) ; seulement
+  sur une évaluation que personne n'a touchée (`a_remplir`, colonnes de réponses
+  nulles, pas d'horloge — l'écriture est conditionnée aux quatre) —
   `armerSansPrestataire`, lib/avis/auto-validation.js ;
+- elle ne part **qu'une fois**, et c'est le journal qui le dit : la marque
+  `avis.auto_armee` (core_events) est posée **avant** l'horloge et lue avant tout
+  armement — certaines réactions de l'hôte (« Publier » ou « Rédiger » sans
+  réponse) ne laissent aucune trace sur la ligne ;
 - à l'**échéance**, **toutes** les questions vides prennent le meilleur niveau,
   celles de la prestataire comprises ; la grille du bien se **fige dans
   l'écriture de la prise** (sinon la publication lirait la grille par défaut) ;
 - si une prestataire est devenue autorisée entre-temps et que sa part est vide,
   rien ne part et l'hôte est prévenu (comportement d'avant) ;
+- une lecture en panne à l'échéance reporte d'une heure, **jamais au-delà du
+  plafond** : au plafond, rien ne part et l'hôte est prévenu ;
 - les évaluations nées **avant** ce lot reçoivent leur horloge par
-  `scripts/armer-avis-sans-prestataire.js` (à blanc, puis `--go`), décision de
-  Thierry du même jour : le délai part de l'exécution du script.
+  `scripts/armer-avis-sans-prestataire.js --nees-avant <déploiement>` (à blanc,
+  puis `--go`), décision de Thierry du même jour : le délai part de l'exécution
+  du script, et **le délai plein ou rien** — celles que le plafond raccourcirait
+  sont listées « à publier à la main », pas armées.
 
 **Ce qui l'arrête** — toute **réaction de l'hôte** : une réponse, un texte, un
 abandon. `auto_publier_le` repasse à nul ; l'évaluation est alors à lui (S2).
@@ -471,7 +482,8 @@ abandon. `auto_publier_le` repasse à nul ; l'évaluation est alors à lui (S2).
 plafonnée, jamais de balayage) :
 1. la config est relue : désactivée entre-temps → rien ;
 2. les questions de l'hôte sans réponse prennent le **meilleur niveau** de leur
-   grille (le premier, « je recommande » pour la recommandation) ;
+   grille (le premier, « je recommande » pour la recommandation) — et celles de
+   la prestataire aussi quand on ne lui demande rien (9 novembre 2026) ;
 3. **jamais un avis négatif** : si les réponses le rendent négatif, rien ne part,
    il attend l'hôte ;
 4. **le texte de l'IA est conservé** ; s'il n'y en a pas, il est rédigé ; si l'IA
