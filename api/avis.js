@@ -497,7 +497,10 @@ async function evaluationsLister (req, res, garde) {
 
   return res.status(200).json({
     // ⚠ CHAQUE LIGNE DIT LE SEJOUR (demande de Thierry du 2 octobre 2026 au
-    // soir) : le voyageur, les dates, le bien, qui a fait le menage, son avis
+    // soir), Y COMPRIS A UN MEMBRE SANS `reservations` : decision de Thierry
+    // du 9 novembre 2026, « pour evaluer quelqu'un, il faut savoir de qui on
+    // parle » (docs/kb/profils-et-droits.md). Ce n'est pas un oubli de garde.
+    // Le voyageur, les dates, le bien, qui a fait le menage, son avis
     // s'il est visible, et le notre s'il est publie. Notre texte n'est servi
     // qu'une fois PUBLIE — il est alors public chez Airbnb ; un brouillon reste
     // dans la fenetre d'evaluation, par `action=evaluation`.
