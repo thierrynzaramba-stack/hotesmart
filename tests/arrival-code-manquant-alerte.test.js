@@ -25,7 +25,8 @@ const path = require('node:path')
 const Module = require('node:module')
 
 // Les libelles se lisent sur le VRAI module, avant que le double le remplace.
-const { LABELS, SANS_SMS } = require('../lib/founder-notify')
+const { LABELS, SANS_SMS, texteSms } = require('../lib/founder-notify')
+const { OU_REMPLIR } = require('../lib/balises')
 
 const MODELE = {
   id: 'tmpl-1', lock_id: 'lock-1', event_type: 'menage_done', active: true,
@@ -116,8 +117,9 @@ const arrivante = () => ({
 const BIEN_SANS_ADRESSE = { id: '0db6b39b', name: 'La bulle', provider: 'channex', address: '' }
 const BIEN_AVEC_ADRESSE = { ...BIEN_SANS_ADRESSE, address: '4 rue du bourg vieux', zip_code: '65200', city: 'Bagnères-de-Bigorre' }
 const incompletes = (vus) => vus.alertes.filter(a => a.type === 'message_envoye_incomplet')
-// Le SMS tel que `reportIncident` le compose (lib/founder-notify.js) : coupe a 300.
-const smsDe = (a) => `HoteSmart ALERTE — ${LABELS[a.type]}\n${a.propertyName}\n${a.detail}`.slice(0, 300)
+// Le SMS tel que `reportIncident` le compose : la VRAIE fonction, importee
+// (review 2, constat 1), pas une copie.
+const smsDe = (a) => texteSms(LABELS[a.type], a.propertyName, a.detail)
 
 test('LE TEST QUI COMPTE : fiche sans adresse, mode Auto — le code PART et l hote est PREVENU', async () => {
   const { mod, vus } = charger()
@@ -131,9 +133,9 @@ test('LE TEST QUI COMPTE : fiche sans adresse, mode Auto — le code PART et l h
   assert.strictEqual(a[0].propertyId, '0db6b39b')
   assert.strictEqual(a[0].threshold, 1)
   assert.match(a[0].detail, /Code d'accès ENVOYÉ à Ana Lopez/)
-  // Le NOM de l'information et le chemin de saisie AVEC le nom du logement —
-  // jamais la cle technique ni le gabarit.
-  assert.match(a[0].detail, /il manque Adresse, à renseigner dans Logements → La bulle → Le logement → Adresse/)
+  // Le NOM de l'information, l'action du jour, puis le chemin de saisie AVEC
+  // le nom du logement — jamais la cle technique ni le gabarit.
+  assert.match(a[0].detail, /il y manque Adresse : envoyez-le-lui depuis Messages\. À renseigner dans Logements → La bulle → Le logement → Adresse\./)
   assert.ok(!a[0].detail.includes('<nom du logement>'))
   assert.ok(!a[0].detail.includes('peut-être bien renseignée'), 'la base a ete lue : aucune panne a annoncer')
 })
@@ -146,21 +148,43 @@ test('l alerte part EN DERNIER : apres l envoi, le journal anti-doublon, le fil 
   assert.deepStrictEqual(vus.ordre, ['envoi', 'noter', 'journal', 'actif', 'alerte'])
 })
 
-test('le SMS porte la consigne : avec une information manquante, il tient entier dans 300 caracteres', async () => {
-  // Review 1, constat 3 : le SMS etait coupe avant « a renseigner dans ».
-  const { mod, vus } = charger()
-  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
-  const a = incompletes(vus)[0]
-  const brut = `HoteSmart ALERTE — ${LABELS[a.type]}\n${a.propertyName}\n${a.detail}`
-  assert.ok(brut.length <= 300, `SMS de ${brut.length} caracteres : ${brut}`)
+test('le SMS porte TOUJOURS l action du jour : chaque information, deux logements, un nom long, envoye ou refuse', async () => {
+  // Review 2, constat 1 : avec une seule information manquante, le SMS etait
+  // encore coupe avant « envoyez-lui » selon les noms. On balaie toutes les
+  // balises qui ont un endroit de saisie, avec le plus long nom de logement
+  // en service et un nom de voyageur long, dans les deux branches.
+  // Celles qui MANQUENT vraiment sans base ni fiche : les horaires ont un
+  // defaut, ils ne manquent jamais.
+  const { buildMessageDetaille } = require('../lib/message-builder')
+  const cles = Object.keys(OU_REMPLIR).filter(c =>
+    buildMessageDetaille({ template_text: `{${c}}` }, arrivante(), 'Ana', '1', {}, BIEN_SANS_ADRESSE).manquants.length)
+  assert.deepStrictEqual(cles.sort(), ['adresse', 'telephone_hote', 'wifi_mdp', 'wifi_nom'], 'jeu d essai')
+  let cas = 0
+  for (const cle of cles) {
+    for (const nom of ['La bulle', 'Cœur de vie 23']) {
+      for (const voyageur of [{ firstName: 'Ana', lastName: 'Lopez' }, { firstName: 'Marie-Christine', lastName: 'Dupont-Lefebvre' }]) {
+        for (const envoi of [{ ok: true }, { ok: false, reason: 'pas de messagerie' }]) {
+          const { mod, vus } = charger({ envoi, modele: { ...MODELE, template_text: `Info {${cle}}. Code : {code_acces}` } })
+          await mod.processArrivalCodes('u1', null, { ...BIEN_SANS_ADRESSE, name: nom }, [{ ...arrivante(), ...voyageur }], {})
+          const a = incompletes(vus)
+          assert.strictEqual(a.length, 1, `${cle} / ${nom} : une alerte attendue`)
+          const action = envoi.ok ? /envoyez-le-lui depuis Messages\./ : /complétez-le dans vos tâches avant l'envoi\./
+          assert.match(smsDe(a[0]), action, `${cle} / ${nom} / ${voyageur.lastName} / envoi ${envoi.ok} : SMS coupe avant l action du jour\n${smsDe(a[0])}`)
+          cas++
+        }
+      }
+    }
+  }
+  assert.strictEqual(cas, cles.length * 8)
 })
 
-test('deux informations manquantes : le SMS coupe garde au moins l endroit ou les renseigner', async () => {
+test('deux informations manquantes : l action du jour tient dans le SMS, les deux chemins dans le texte', async () => {
   const { mod, vus } = charger({ modele: { ...MODELE, template_text: 'Adresse {adresse}, wifi {wifi_mdp}. Code : {code_acces}' } })
   await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
   const a = incompletes(vus)[0]
-  assert.match(a.detail, /il manque Adresse, Mot de passe wifi/)
-  assert.match(smsDe(a), /à renseigner dans Logements → La bulle/)
+  assert.match(a.detail, /il y manque Adresse, Mot de passe wifi/)
+  assert.match(smsDe(a), /envoyez-le-lui depuis Messages\./)
+  assert.match(a.detail, /À renseigner dans Logements → La bulle → Le logement → Adresse · Logements → La bulle → Accueil du voyageur → Mot de passe wifi\./)
 })
 
 // Non-regression (vert contre le code d'avant) : rougit contre une alerte
@@ -189,7 +213,7 @@ test('le canal refuse l envoi : l alerte dit « NON ENVOYÉ » et renvoie a la t
   assert.strictEqual(vus.taches.length, 1, 'la tache de transmission manuelle existe deja')
   const a = incompletes(vus)
   assert.strictEqual(a.length, 1)
-  assert.match(a[0].detail, /NON ENVOYÉ par le canal \(voir vos tâches\)/)
+  assert.match(a[0].detail, /NON ENVOYÉ par le canal, il y manque Adresse : complétez-le dans vos tâches avant l'envoi\./)
   assert.ok(!/ENVOYÉ à/.test(a[0].detail), `l alerte annonce un envoi qui n a pas eu lieu : ${a[0].detail}`)
 })
 
@@ -242,7 +266,22 @@ test('base de connaissance illisible : l alerte dit la panne, elle n accuse pas 
   const a = incompletes(vus)
   assert.strictEqual(a.length, 1)
   assert.match(a[0].detail, /n'a pas pu être lue à l'envoi/)
-  assert.ok(!/à renseigner dans/.test(a[0].detail), a[0].detail)
+  assert.ok(!/renseigner dans/.test(a[0].detail), a[0].detail)
+})
+
+test('base illisible ET fiche sans adresse : l adresse garde sa consigne, seul le wifi passe pour la panne', async () => {
+  // Review 2, constat 2 : l'adresse vient de la FICHE, lue meme quand la base
+  // ne l'est pas ; elle manque vraiment, elle ne doit pas etre « peut-etre
+  // renseignee ».
+  const { mod, vus } = charger({
+    baseEnPanne: true,
+    modele: { ...MODELE, template_text: 'Adresse {adresse}, wifi {wifi_mdp}. Code : {code_acces}' }
+  })
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  const d = incompletes(vus)[0].detail
+  assert.match(d, /À renseigner dans Logements → La bulle → Le logement → Adresse\./)
+  assert.match(d, /n'a pas pu être lue à l'envoi : Mot de passe wifi est peut-être bien renseigné/)
+  assert.ok(!/Adresse est peut-être/.test(d), d)
 })
 
 test('balise inconnue du modele : le code part et l alerte dit quoi corriger dans le modele', async () => {
@@ -252,19 +291,30 @@ test('balise inconnue du modele : le code part et l alerte dit quoi corriger dan
   assert.strictEqual(vus.envois.length, 1)
   const a = incompletes(vus)
   assert.strictEqual(a.length, 1)
-  assert.match(a[0].detail, /variable inconnue dans le modèle : \{heure_arrivee\}, à corriger dans GuestFlow → Messages/)
+  assert.match(a[0].detail, /il y manque \{heure_arrivee\} : envoyez-le-lui depuis Messages\./)
+  assert.match(a[0].detail, /Variable inconnue dans le modèle : \{heure_arrivee\}, à corriger dans GuestFlow → Messages\./)
 })
 
-// Non-regression : vert contre le commit d'avant les correctifs (son try/catch
-// tenait deja) ; rougissait contre la version sans try/catch, l'alerte placee
-// avant le journal — verifie a la review 1.
+// Non-regression : rougit contre la version sans try/catch dans l'alerte —
+// verifie (review 2, constat 3 : sans l'espion du journal, il restait vert).
 test('l alerte qui echoue ne casse pas la suite de l envoi : journal du coeur et code actif', async () => {
   const { vus } = charger()
   doubler('lib/founder-notify.js', { reportIncident: async () => { throw new Error('Brevo en panne') } })
   delete require.cache[require.resolve('../lib/cron-arrival-code')]
   const mod = require('../lib/cron-arrival-code')
-  await assert.doesNotReject(() => mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {}))
+  // Review 2, constat 3 : l'alerte etant la derniere instruction, le catch
+  // general de l'envoi avalerait aussi l'erreur — mais en journalisant
+  // « Erreur envoi booking », donc un envoi rate qui n'en est pas un. C'est le
+  // journal qui garde le try/catch de l'alerte.
+  const erreurs = []
+  const avant = console.error
+  console.error = (...x) => { erreurs.push(x.join(' ')) }
+  try {
+    await assert.doesNotReject(() => mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {}))
+  } finally { console.error = avant }
   assert.deepStrictEqual(vus.ordre, ['envoi', 'noter', 'journal', 'actif'])
+  assert.ok(erreurs.some(e => e.includes('alerte « code incomplet » non partie')), erreurs.join('\n'))
+  assert.ok(!erreurs.some(e => e.includes('Erreur envoi booking')), 'un envoi reussi journalise comme un echec')
 })
 
 test('buildMessageDetaille rend les manquants et les inconnues ; buildMessage garde son contrat (une chaine)', () => {

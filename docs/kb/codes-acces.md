@@ -29,7 +29,7 @@ moment et seulement si le logement est prêt.
 - **S'il manque une information au message** (l'adresse d'une fiche de logement vide, le téléphone,
   le wifi… que le modèle cite, ou une balise inconnue du modèle) : le message **part quand même**
   en mode Auto — sans lui la porte reste fermée —, avec un marqueur entre crochets à la place, et
-  l'alerte **« Code d'accès — information manquante dans le message »** part (SMS + e-mail) : quoi
+  l'alerte **« Code d'accès — information manquante »** part (SMS + e-mail) : quoi
   renseigner et où, ou « la base n'a pas pu être lue » si c'est une panne. Une seule fois par
   réservation. Si le canal a refusé l'envoi, elle renvoie à la tâche de transmission manuelle. En
   mode Test, pas d'alerte : la tâche à valider montre le texte. **Le code lui-même n'est jamais

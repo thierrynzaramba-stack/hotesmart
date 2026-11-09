@@ -99,3 +99,84 @@ Arbre lu : /home/claude/hotesmart-137 — branche : dette-137-code-acces — SHA
 **Rien de BLOQUANT ni de SÉCURITÉ trouvé.**
 
 Remarque, hors constat : `reportIncident` envoie au téléphone et à l'e-mail du fondateur (`FOUNDER_PHONE`/`FOUNDER_EMAIL`, founder-notify.js:309-310), pas à l'hôte du compte concerné. C'est le même destinataire que `prevenirManque`, donc pas une régression. Mais la phrase de codes-acces.md « l'hôte reçoit l'alerte » n'est vraie que pour le compte du fondateur.
+
+## Review 2 — reçue le 10 novembre 2026 (correctifs seulement)
+
+- Lancée sur : `/home/claude/hotesmart-137`, branche `dette-137-code-acces`,
+  plage `9b6d6f168e3c625b558d0156426960f675c57ad8..32ac03f3668f01a613f8fe9a655bf522559352dc`.
+- Contrôle d'arbre : arbre, branche et SHA déclarés conformes au brief.
+- Contrôle des fichiers cités : les sept fichiers « dans le diff » le sont.
+  `lib/balises.js` et `lib/record-message.js` sont hors du diff, lus pour le
+  contexte, et la review déclare qu'aucun constat n'y porte.
+
+### Rapport, mot pour mot
+
+Arbre lu : /home/claude/hotesmart-137 — branche : dette-137-code-acces — SHA lu : 32ac03f3668f01a613f8fe9a655bf522559352dc
+
+**Fichiers cités**
+- Dans le diff : `lib/cron-arrival-code.js`, `lib/founder-notify.js`, `lib/message-builder.js`, `tests/arrival-code-manquant-alerte.test.js`, `docs/kb/alertes.md`, `docs/kb/codes-acces.md`, `docs/kb/dettes-v1.md`
+- Hors diff, lus pour le contexte seulement, et aucun constat ne porte dessus : `lib/balises.js`, `lib/record-message.js`
+
+**Ce que j'ai mesuré (l'arbre n'a pas été modifié, les essais sont faits dans `/tmp/rev137`)**
+- Suite complète : **7763 tests, 7763 verts**.
+- Fichier du lot : 16/16 à l'heure réelle, 16/16 à J+60 et 16/16 à J+200.
+- Étanchéité : j'ai préchargé un compteur sur `fetch` et sur `net.Socket.connect`. Résultat : **0 connexion**, 16/16, 0,28 s.
+- Textes réels de l'alerte, branche par branche : `processArrivalCodes` lancé avec les mêmes doubles que le test.
+
+**Par catégorie**
+
+1. **L'alerte en dernier : pas de défaut créé.**
+   - `aPrevenir` n'est posé que dans la branche Auto (l. 728-730), après `noterEnvoi`. Donc pas d'alerte en mode Test.
+   - Si `sendGuestMessage` ou `noterEnvoi` lève, `aPrevenir` reste null : pas d'alerte. Et sans `noterEnvoi`, le cycle suivant réessaie.
+   - Une levée de `recordMessage` perdrait l'alerte, mais il n'en lève jamais : il a son propre filet (`lib/record-message.js:373-377`). Et la mise à jour d'`access_codes` renvoie une erreur, elle ne lève pas.
+   - `BASE_ILLISIBLE` : c'est le même objet qui circule de la l. 903 à la l. 913 (`connaissance ||` en l. 337 ne recharge pas la base), puis à la l. 916 et jusqu'à la l. 808.
+   - Mesuré : le symbole est invisible pour `Object.keys`, pour `JSON.stringify` et pour le remplaceur. Aucune fuite.
+2. **Texte de l'alerte : vrai** dans les cas envoyé, refusé, `differe`, balise inconnue, et manquant + inconnue. **Faux dans un cas** : base illisible + fiche sans adresse (constat 2). Le libellé est bien neutre (`founder-notify.js:111`).
+3. **`buildMessageDetaille` et `inconnues` : rien de cassé.**
+   - Seul lecteur en production : `cron-arrival-code.js:608`.
+   - `buildMessage` n'est lu que par des tests, et il rend toujours une chaîne.
+   - `inconnues` est toujours un tableau, donc `bati.inconnues.length` ne peut pas lever.
+4. **Tests : le harnais est étanche.** La composition du SMS en l. 120 et l. 154 est aujourd'hui fidèle à `founder-notify.js:299-302`, mais elle est recopiée, pas importée. Deux défauts : constats 1 et 3.
+5. **KB : elles disent vrai par rapport au code**, sauf pour le cas du constat 2.
+   - Le type est bien « sans écran » : aucun lecteur hors `founder-notify` et `cron-arrival-code`.
+   - « Une fois par réservation », « Auto seulement », « au fondateur » : vérifiés.
+
+**Constats**
+
+1. **MINEUR — le SMS coupe encore la consigne du jour, même avec UNE seule information manquante.**
+   - Où : `lib/cron-arrival-code.js:495-497` et `tests/arrival-code-manquant-alerte.test.js:149-156`.
+   - Ce qui se passe : « Envoyez-lui l'information depuis Messages. » est en fin de texte, donc coupé à 300 caractères dans ces cas mesurés :
+     | Cas | Longueur | Coupé à |
+     |---|---|---|
+     | `wifi_mdp`, La bulle / Ana Lopez (les noms du test) | 307 | « …depuis Me » |
+     | adresse, Cœur de vie 23 / Marie-Christine Dupont-Lefebvre | 313 | « …dep » |
+     | wifi, Cœur de vie 23 / Jean Martin | 321 | « …l'informa » |
+     | refus du canal, adresse, La bulle | 331 | « Complétez-le avant de l'envoyer » perdu |
+   - Ce qui tient : « à renseigner dans <chemin> » reste dans le SMS dans tous ces cas.
+   - Le test et le commit annoncent « tient entier dans 300 » en général, mais le test ne mesure que adresse + La bulle + Ana Lopez (279 caractères).
+   - Correctif :
+     - mettre l'action du jour avant le chemin, par exemple « …il manque X : envoyez-le-lui depuis Messages, et renseignez-le dans … » ;
+     - faire boucler le test sur toutes les balises de la base, avec « Cœur de vie 23 », un nom de voyageur long, et la branche « refus du canal » ;
+     - importer la composition du SMS depuis `founder-notify` au lieu de la recopier.
+
+2. **MINEUR — base illisible + fiche sans adresse : l'adresse est annoncée « peut-être bien renseignée ».**
+   - Où : `lib/cron-arrival-code.js:484-489`.
+   - Texte mesuré : « il manque Adresse — la base de connaissance n'a pas pu être lue à l'envoi, l'information est peut-être bien renseignée (Logements → La bulle → Le logement → Adresse) ».
+   - C'est faux : l'adresse vient de la fiche, qui a bien été lue. Elle manque vraiment, et la consigne « à renseigner dans » disparaît. Le commentaire des l. 474-475 dit pourtant que l'adresse vient de la fiche.
+   - Ce cas n'est pas testé : le test des l. 233-246 utilise `BIEN_AVEC_ADRESSE`.
+   - Il est rare : il faut une panne de lecture et une fiche vide en même temps.
+   - Correctif : séparer les manquants selon le drapeau `fiche` de la balise (`lib/balises.js:83`). L'adresse garde toujours « à renseigner dans » ; seules les informations de la base prennent la formule de la panne.
+
+3. **MINEUR (test) — le test « l'alerte qui échoue ne casse pas la suite » ne protège plus le try/catch de `prevenirCodeIncomplet`.**
+   - Où : `tests/arrival-code-manquant-alerte.test.js:258-268`, à comparer avec `lib/cron-arrival-code.js:479` et 501-503.
+   - Contre-épreuve hors de l'arbre (`git archive` de 32ac03f3, try/catch retiré) : **16/16 verts**.
+   - Pourquoi : l'alerte étant la dernière instruction, le catch extérieur (l. 811-813) avale l'erreur. Le seul symptôme est un journal faux : « Erreur envoi booking ARRIVANTE: Brevo en panne », alors que le code est bien parti.
+   - Le commit annonce que les tests de non-régression rougissent contre une version « sans try/catch » : ce n'est plus vrai pour celui-ci.
+   - Correctif : espionner `console.error` et exiger « alerte « code incomplet » non partie » sans « Erreur envoi booking ». Sinon, corriger l'annonce du commit.
+
+**Rien de BLOQUANT ni de SÉCURITÉ.**
+
+**Hors diff, non comptés, à mettre au registre si vous le jugez utile**
+- `reportIncident('send_failure')` est toujours attendu avant `noterEnvoi` (l. 696-698). C'est la même latence que le constat 2 de la review 1, sur la branche « refus du canal » : si Brevo bloque, le cron est coupé avant `noterEnvoi`, et au cycle suivant le code repart avec une seconde tâche.
+- Base illisible : `checkin` et `checkout` prennent leur valeur par défaut sans aucune alerte. C'est un comportement d'avant le lot.
+- Des accolades dans le nom du voyageur, ou dans une valeur de la base, sont signalées comme « variable inconnue dans le modèle ». Mesuré avec « {VIP} » dans le nom. Improbable, donc non retenu.
