@@ -4,7 +4,7 @@ Demande de Thierry du 8 novembre 2026 (fil « compte de charges » du Projet).
 **Statut : étape 0 close le 9 novembre 2026 — les 23 questions du §4 sont
 tranchées par Thierry, chaque réponse inscrite et datée. Aucun code.**
 **Ajout du 9 novembre 2026 (23 h 05) : les factures récurrentes et la
-période couverte (§6 ter), questions Q24 à Q27 OUVERTES.** Ce qui
+période couverte (§6 ter), Q24 à Q27 tranchées le soir même.** Ce qui
 reste « *proposition* » dans le texte est un choix technique non contredit,
 ou une précision soumise à Thierry avec la décision qu'elle accompagne.
 
@@ -124,10 +124,10 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
 - **Q12 — La conservation.** Tranchée, voir ci-dessous.
 - **Q22 — La période comptable.** Tranchée, voir ci-dessous.
 - **Q23 — Le statut d'une commission de plateforme à sa naissance.** Tranchée, voir ci-dessous.
-- **Q24 — L'étalement d'une charge sur sa période.** Ouverte, §6 ter.
-- **Q25 — La mensualisation (énergie, taxe foncière).** Ouverte, §6 ter.
-- **Q26 — Les avoirs et les remboursements.** Ouverte, §6 ter.
-- **Q27 — Ce que fait une facture récurrente.** Ouverte, §6 ter.
+- **Q24 — L'étalement d'une charge sur sa période.** Tranchée, voir ci-dessous et §6 ter.
+- **Q25 — La mensualisation (énergie, taxe foncière).** Tranchée, voir ci-dessous et §6 ter.
+- **Q26 — Les avoirs et les remboursements.** Tranchée, voir ci-dessous et §6 ter.
+- **Q27 — Ce que fait une facture récurrente.** Tranchée, voir ci-dessous et §6 ter.
 
 ### Réponses de Thierry
 
@@ -260,6 +260,31 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
   elle reste « à vérifier » et passe validée dès que l'entité existe. Le même
   « ok » accepte l'exception de §6 : un envoi de fichier jamais confirmé est
   effacé au bout de 24 h.
+- **Q24 (9 nov. 2026, vers 23 h 35) : « les deux, au choix ».** Une charge
+  qui couvre une période se lit de deux façons, au choix sur l'écran :
+  **étalée** au prorata des jours de sa période, ou **en entier à sa date**.
+  Le résumé tient donc les deux (§6 ter). La vue proposée par défaut se
+  tranchera avec l'écran (lot 3).
+- **Q25 (9 nov. 2026, vers 23 h 35) : la facture annuelle, une prévision
+  avant — « la facture finale fait foi, les échéanciers sont des
+  provisions ».** La facture annuelle d'énergie, ou l'avis de taxe
+  foncière, est la charge, sur sa période. Un échéancier n'est jamais une
+  charge : c'est une **provision**, montrée en prévision « estimation »
+  jusqu'à l'arrivée de la facture finale, qui la remplace.
+- **Q26 (9 nov. 2026, vers 23 h 38) : oui, en négatif.** L'avoir d'un
+  fournisseur est une charge **négative** qui diminue le total de sa
+  période. Une régularisation d'énergie en faveur de l'hôte n'en est pas
+  un : la facture finale (la consommation) remplace la provision, et le
+  « remboursement » n'est que l'écart entre les deux.
+- **Q27 (9 nov. 2026, vers 23 h 38) : « elle revient chaque année ».** La
+  facture récurrente est une facture **annuelle** (taxe foncière,
+  assurance, facture annuelle d'énergie). Avant que celle de l'année
+  arrive, HôteSmart fait les trois : il la **prévoit** avec le montant de
+  l'an dernier, étalé sur l'année et marqué « estimation », remplacé par la
+  vraie à son arrivée ; il **alerte** quand elle n'est pas arrivée à sa
+  date habituelle ; il **pré-remplit** la nouvelle (entité, bien,
+  catégorie, période) quand le fournisseur est reconnu. Les rythmes plus
+  courts (un abonnement internet mensuel) ne sont pas tranchés.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
@@ -454,7 +479,7 @@ Trois défauts du modèle du §6, sur ces cas précis :
   aujourd'hui.
 - **Le type de document**, lu par l'IA et corrigé par l'hôte : `facture`,
   `regularisation`, `avoir`, `echeancier`, `avis_impot`. **Un échéancier
-  n'est jamais compté comme une charge** (son rôle dépend de Q25).
+  n'est jamais compté comme une charge** : c'est une provision (Q25).
 - **La régularisation** : la charge est la **consommation de la période**,
   pas le solde. L'IA lit les deux ; l'écran les montre côte à côte avant la
   validation, le solde restant dans `lecture_ia`.
@@ -468,37 +493,31 @@ Trois défauts du modèle du §6, sur ces cas précis :
   dont les cellules du résumé font la somme — recalcul, jamais incrément.
   Une période se borne (au plus 366 jours) : au-delà, la charge se découpe.
 - **La récurrence (Q27)** : sur une charge validée, « Cette facture
-  revient » crée un **contrat** : fournisseur, entité, bien, catégorie,
-  rythme (mensuel, bimestriel, trimestriel, annuel), montant habituel. Ce
-  qu'il fait ensuite est la question Q27.
+  revient chaque année » crée un **contrat annuel** (voir plus bas).
 - **Le suivi des paiements reste hors V1 (Q2)** : rien ici ne suit un
   prélèvement comme « payé ». Les dates de prélèvement d'un échéancier
   restent dans `lecture_ia`, pour le lot qui ajoutera ce suivi.
 
-### Questions ouvertes
+### Ce que Thierry a tranché (Q24 à Q27, 9 novembre 2026) et ce qui en découle
 
-- **Q24 — L'étalement.** Une charge qui couvre une période compte-t-elle :
-  (A) *proposé* — répartie au prorata des jours de sa période ;
-  (B) en entier au jour de la facture, comme aujourd'hui ;
-  (C) les deux, au choix sur l'écran (deux résumés à tenir) ?
-- **Q25 — La mensualisation (énergie, taxe foncière).**
-  (A) *proposé* — la facture annuelle (ou l'avis) est la charge, étalée sur
-  sa période ; l'échéancier ne compte pas, mais en attendant la facture il
-  sert de **prévision** : son montant annuel est étalé et marqué
-  « estimation », puis remplacé par la facture quand elle arrive ;
-  (B) chaque mensualité est une charge du mois où elle est prélevée, et la
-  régularisation ajoute le solde, positif ou négatif — une vue « ce que j'ai
-  payé », proche du suivi des paiements écarté par Q2 ;
-  (C) seules les factures comptent : les mois sans facture restent vides
-  jusqu'à la régularisation.
-- **Q26 — Les avoirs et remboursements.** (A) *proposé* — un avoir ou un
-  remboursement est une charge **négative** (type `avoir`), qui diminue le
-  total de sa période ; (B) pas en V1 : l'hôte ne les saisit pas.
-- **Q27 — Ce que fait une facture récurrente** (plusieurs choix possibles) :
-  pré-remplir la suivante du même fournisseur (entité, bien, catégorie,
-  période) ; prévoir les mois pas encore facturés (montant habituel, marqué
-  « estimation ») ; alerter quand une facture attendue n'arrive pas ; créer
-  seule une charge sans document (abonnement prélevé sans facture).
+- **Deux lectures des totaux (Q24)** : étalée et à la date. *Proposition
+  technique* : la même cellule du jour porte les deux jeux de sommes
+  (`…_date` et `…_etale`), tenus par le même trigger — un seul résumé,
+  deux colonnes, plutôt que deux tables qui pourraient diverger.
+- **La facture finale fait foi (Q25)** : un échéancier (`echeancier`) et le
+  montant de l'an dernier (Q27) sont des **prévisions**, jamais des
+  charges : elles comptent dans le total « estimation » de leur période et
+  s'effacent quand la facture de cette période arrive. *Proposition* : si
+  les deux existent pour la même période, l'échéancier l'emporte (c'est
+  l'estimation de l'année en cours, l'an dernier n'est qu'un repli).
+- **L'avoir est négatif (Q26)** : type `avoir`, montants signés pour ce
+  seul type. La contrainte « montants ≥ 0 » reste vraie pour tout le reste.
+- **La facture annuelle (Q27)** : « Cette facture revient chaque année »
+  crée un **contrat annuel** (fournisseur, entité, bien, catégorie,
+  période habituelle, montant de la dernière facture). Il porte la
+  prévision N-1, l'alerte et le pré-remplissage. *Proposition* : l'alerte
+  est un signal « Vérifier » sur l'écran, levé un mois après la date
+  habituelle ; elle ne part pas par e-mail en V1.
 
 ## 7. L'adresse e-mail (détail)
 
@@ -624,10 +643,11 @@ Trois défauts du modèle du §6, sur ces cas précis :
    voyageurs : sa review vérifie que ce chemin est intact.
 6. **La mesure** sur les vraies factures de Thierry : écart lu / validé, champ
    par champ. Elle décide si Mindee est utile.
-7. **La période couverte et l'étalement** (§6 ter), selon Q24 à Q27 :
-   migration additive (période, type de document, montants signés si Q26 A,
-   table de répartition), lecture IA étendue, résumé réparti par jour, puis
-   le contrat récurrent. *Proposition* : placé **avant l'écran** (lot 3),
+7. **La période couverte et l'étalement** (§6 ter, Q24 à Q27) : migration
+   additive (période, type de document, avoir signé, table de répartition,
+   deux jeux de sommes dans le résumé), lecture IA étendue (période, type,
+   consommation et solde d'une régularisation), prévisions (échéancier,
+   N-1), puis le contrat annuel (prévision, alerte, pré-remplissage). *Proposition* : placé **avant l'écran** (lot 3),
    pour que l'écran naisse avec la période et le type de document plutôt
    que d'être repris.
 
