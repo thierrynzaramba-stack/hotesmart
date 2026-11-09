@@ -23,6 +23,7 @@ const R = require('../lib/yield/reference')
 const P = require('../lib/yield/positions')
 const S = require('../lib/yield/suggestion')
 const DC = require('../lib/yield/dates-commerciales')
+const { validerPosition } = require('../lib/yield/reglages-position')
 
 // ─── LE BANC DE L'ASSEMBLEE ─────────────────────────────────────────────────
 // ⚠ DATES FIGEES, ET LE TEMPS EST INJECTE : l'assemblee recoit `aujourdHui`,
@@ -55,8 +56,9 @@ const jourSuivant = j => new Date(Date.parse(`${j}T00:00:00Z`) + 864e5).toISOStr
 /**
  * Charge l'assemblee avec un `preparerContexte` qui rend un contexte BATI PAR
  * LES VRAIS MODULES sur la fixture. Options :
- *   lignes, reglages, coupees (Set de segments commerciaux coupes), vendues,
- *   sansLigneAuCalendrier (Set de dates), ouvertureConnue.
+ *   lignes, reglages, vendues, sansLigneAuCalendrier (Set de dates),
+ *   ouvertureConnue, pilote (bien pilote par YieldFlow), prixHote (Map date ->
+ *   centimes, ou une Error pour une lecture en panne).
  */
 function charger (o = {}) {
   const reglages = o.reglages || new Map()
@@ -88,14 +90,28 @@ function charger (o = {}) {
   Module._load = function (d, ...reste) {
     if (d === './contexte-du-bien') { const vrai = avant.apply(this, [d, ...reste]); return { ...vrai, preparerContexte: preparer } }
     if (d === './vacances') { const vrai = avant.apply(this, [d, ...reste]); return { ...vrai, etendueSource: async () => [{ zone: 'C', date_debut: '2025-09-01', date_fin: '2027-07-03' }] } }
+    if (d === '../prix-hote') {
+      return { prixHoteDuBien: async (s, id, de, a) => {
+        appels.push({ prixHote: [id, de, a] })
+        if (o.prixHote instanceof Error) throw o.prixHote
+        return o.prixHote || new Map()
+      } }
+    }
     return avant.apply(this, [d, ...reste])
   }
   const chemin = require.resolve('../lib/yield/ecran-evenements')
-  delete require.cache[chemin]
-  const E = require('../lib/yield/ecran-evenements')
-  Module._load = avant
-  delete require.cache[chemin]
-  const assembler = () => E.assemblerEcranEvenements(null, { id: 'bien-1', zone_scolaire: 'C', prix_minimum: 1, inventory_units: 1 }, 'compte-1', { aujourdHui: AUJ })
+  let E
+  // ⚠ LE CHARGEUR EST RETABLI MEME SI LE `require` LEVE : un double qui
+  // survit a son test fausserait tous les suivants.
+  try {
+    delete require.cache[chemin]
+    E = require('../lib/yield/ecran-evenements')
+  } finally {
+    Module._load = avant
+    delete require.cache[chemin]
+  }
+  const bien = { id: 'bien-1', zone_scolaire: 'C', prix_minimum: 1, inventory_units: 1, ...(o.pilote ? { pilote_tarifaire: 'yieldflow' } : {}) }
+  const assembler = () => E.assemblerEcranEvenements(null, bien, 'compte-1', { aujourdHui: AUJ })
   assembler.appels = appels
   assembler.materiaux = { reglages, zoneBien: 'C', vacances: VACANCES, evenements, debut: '2026-11-01', fin: '2027-11-09' }
   return assembler
@@ -116,10 +132,39 @@ test('LE TEST QUI COMPTE (§4) : une position rendue pour une nuit, renvoyée te
   const zones = new Set(noel.positions.map(p => p.zone))
   assert.deepEqual([...zones].sort(), ['apres', 'avant', 'evenement'], 'le rayonnement doit être rendu des deux côtés')
   const m = charger().materiaux
-  for (const p of noel.positions) {
-    const r = P.positionsDuContexte({ ...m, lignes: [ligneDe(NOEL, p, 'Haut', 'l-1')] })
-    assert.deepEqual([...r.parNuit.keys()], [p.date], `la position de ${p.date} (${JSON.stringify(p)}) ne règle pas exactement cette nuit`)
+  // ⚠ TOUS LES EVENEMENTS DE L'ANNEE, pas un seul (constat de review) : ferie,
+  // pont, week-end prolonge, vacances des deux zones, date commerciale, les
+  // miens. Chaque position passe d'abord la garde de l'ECRIVAIN
+  // (`validerPosition`, celle du `PUT`), puis l'aller-retour. Le resolveur
+  // tourne sur l'occurrence et ses marges : une ligne vaut chaque annee, et la
+  // Toussaint 2026 ne doit pas compter comme « une autre nuit » de la 2027.
+  let eprouvees = 0
+  const typesEprouves = new Set()
+  for (const e of ecran.evenements.filter(x => x.actif)) {
+    const fenetre = { debut: new Date(Date.parse(`${e.debut}T00:00:00Z`) - 36 * 864e5).toISOString().slice(0, 10),
+      fin: new Date(Date.parse(`${e.fin}T00:00:00Z`) + 36 * 864e5).toISOString().slice(0, 10) }
+    for (const p of e.positions) {
+      const l = ligneDe(e.cle, p, 'Haut', 'l-1')
+      const v = validerPosition(l)
+      assert.ok(v.ok, `${e.cle} ${p.date} : l’écrivain refuse la position rendue (${v.raison})`)
+      const r = P.positionsDuContexte({ ...m, ...fenetre, lignes: [l] })
+      assert.deepEqual([...r.parNuit.keys()], [p.date], `${e.cle} : la position de ${p.date} (${JSON.stringify(p)}) ne règle pas exactement cette nuit`)
+      eprouvees++
+    }
+    // « Tout le rayonnement » : une ligne PAR WEEK-END, ses nuits et elles seules.
+    for (const w of e.week_ends) {
+      const l = { id: 'w-1', evenement: e.cle, zone: w.zone, rang: w.rang, jour: null, nuit: null, niveau: 'Haut' }
+      assert.ok(validerPosition(l).ok, `${e.cle} : l’écrivain refuse le week-end ${w.zone} ${w.rang}`)
+      const r = P.positionsDuContexte({ ...m, ...fenetre, lignes: [l] })
+      assert.deepEqual([...r.parNuit.keys()].sort(), [...w.nuits].sort(), `${e.cle} : le week-end ${w.zone} ${w.rang}`)
+    }
+    typesEprouves.add(e.type)
   }
+  assert.ok(eprouvees > 300, `${eprouvees} positions éprouvées : le banc doit couvrir l’année`)
+  assert.deepEqual([...typesEprouves].sort(), ['commercial', 'evenement', 'ferie', 'pont', 'vacances_autre', 'vacances_zone', 'week_end_prolonge'])
+  // Les vacances commencent un SAMEDI : le 1er week-end avant n'a que son vendredi.
+  assert.deepEqual(noel.week_ends.map(w => [w.zone, w.rang, w.nuits.length]),
+    [['avant', 1, 1], ['avant', 2, 2], ['avant', 3, 2], ['avant', 4, 2], ['apres', 1, 2], ['apres', 2, 2], ['apres', 3, 2], ['apres', 4, 2]])
   // Et une date fixe : la nuit du réveillon se désigne par sa nuit, jamais par un jour de semaine.
   const rev = evenementDe(ecran, REVEILLON, '2026-12-24')
   assert.deepEqual(rev.positions.find(p => p.date === '2026-12-24'), { date: '2026-12-24', zone: 'evenement', nuit: 'date' })
@@ -191,6 +236,17 @@ test('LE TEST QUI COMPTE (§5) : « le calcul disait » est NOMMÉ — la même 
   const n = avec.nuits.find(x => x.date === '2026-12-22')
   assert.deepEqual([n.niveau, n.regle.niveau], ['Exceptionnel', 'Exceptionnel'])
   assert.deepEqual(n.sans_reglage, { niveau: libre.niveau, prix: libre.prix })
+  // ⚠ SANS AUCUN RÉGLAGE, pas « sans cette ligne » : le 24 réglé à la fois par
+  // le réveillon et par les vacances de Noël — « le calcul disait » est le
+  // calcul, pas le niveau des vacances (comme le journal du lot 2).
+  const libre24 = ecran.nuits.find(x => x.date === '2026-12-24')
+  const p24 = noel.positions.find(x => x.date === '2026-12-24')
+  const rev = evenementDe(ecran, REVEILLON, '2026-12-24').positions.find(x => x.zone === 'evenement')
+  const deux = await charger({ lignes: [ligneDe(NOEL, p24, 'Haut', 'n-24'), ligneDe(REVEILLON, rev, 'Exceptionnel', 'r-24')] })()
+  const n24 = deux.nuits.find(x => x.date === '2026-12-24')
+  assert.equal(n24.regle.cle, REVEILLON)
+  assert.notEqual(libre24.niveau, 'Haut', 'la fixture doit distinguer le calcul du niveau des vacances')
+  assert.deepEqual(n24.sans_reglage, { niveau: libre24.niveau, prix: libre24.prix })
   // Une nuit sans réglage n'a rien à comparer ; « au calcul » non plus.
   assert.equal(libre.sans_reglage, undefined)
   const calcul = await charger({ lignes: [ligneDe(NOEL, p, P.CALCUL, 'l-c')] })()
@@ -231,6 +287,36 @@ test('LE TEST QUI COMPTE (Q6) : les crans posés par les anciennes flèches sont
   assert.equal(ferieNoel.reglage_d_avant, null, 'une ligne qui ne porte qu’une largeur n’est pas un réglage')
   assert.deepEqual(ferieNoel.largeur, { avant: null, apres: 1 })
   assert.equal(evenementDe(ecran, 'ferie:jour_de_l_an').reglage_d_avant, null)
+  // ⚠ LES CLES QUE LE MOTEUR NE LIT PAS NE SE MONTRENT PAS (constat de review) :
+  // `evenement` (large) pour un événement de l'hôte, la clé fine d'un week-end
+  // prolongé ; et un crans sur le segment large `ferie` vaut pour chaque férié.
+  const autres = new Map([
+    ['evenement', { segment: 'evenement', crans: 2, actif: true }],
+    ['week_end_prolonge:noel', { segment: 'week_end_prolonge:noel', crans: 1, actif: true }],
+    ['ferie', { segment: 'ferie', crans: 1, actif: true }]
+  ])
+  const e2 = await charger({ reglages: autres })()
+  assert.equal(evenementDe(e2, SALON.segment).reglage_d_avant, null)
+  assert.ok(e2.evenements.filter(e => e.type === 'week_end_prolonge').every(e => e.reglage_d_avant === null))
+  assert.deepEqual(evenementDe(e2, 'ferie:noel').reglage_d_avant, { crans: 1, cle: 'ferie', partage: true })
+  assert.equal(evenementDe(e2, 'pont:pont_ascension').reglage_d_avant, null, 'un crans sur « ferie » ne vaut pas pour un pont')
+})
+
+test('LE TEST QUI COMPTE : une nuit à prix posé à la main (✎) le DIT, sur un bien piloté — le moteur ne la touchera pas', async () => {
+  const marques = new Map([['2026-12-22', 18900]])
+  const pilote = await charger({ pilote: true, prixHote: marques })()
+  assert.equal(pilote.nuits.find(n => n.date === '2026-12-22').prix_hote, 189)
+  assert.equal(pilote.nuits.find(n => n.date === '2026-12-23').prix_hote, undefined)
+  assert.equal(pilote.prix_hote_illisibles, undefined)
+  // Non piloté : les marques sont inertes (dette 22), on ne les lit même pas.
+  const libre = charger({ prixHote: marques })
+  const e = await libre()
+  assert.ok(e.nuits.every(n => n.prix_hote === undefined))
+  assert.equal(libre.appels.some(a => a.prixHote), false)
+  // Lecture en panne : l'écran reste, et il dit qu'il ne sait plus.
+  const panne = await charger({ pilote: true, prixHote: new Error('prix_hote : panne') })()
+  assert.equal(panne.prix_hote_illisibles, true)
+  assert.equal(panne.nuits.length, 366)
 })
 
 test('LE TEST QUI COMPTE : une date commerciale COUPÉE reste montrée, une fois, inactive et sans position', async () => {
@@ -269,7 +355,7 @@ const PROFIL = { id: 'profil-1', account_user_id: TITULAIRE, member_user_id: MEM
 
 const MODULES = ['../api/ecran/evenements', '../lib/require-permission', '../lib/permissions', '../lib/compte-requetes']
 
-function preparerEndpoint ({ user = TITULAIRE, profil = null, permissions = null, biens = [BIEN_A, BIEN_B, BIEN_NU, RANGE], assembler = null } = {}) {
+function preparerEndpoint ({ user = TITULAIRE, profil = null, permissions = null, biens = [BIEN_A, BIEN_B, BIEN_NU, RANGE], assembler = null, panneListe = false } = {}) {
   const etat = { tables: [], fetchs: 0, assemblees: [] }
   // ⚠ CHAQUE LECTURE DU DOUBLE PASSE PAR `fetch`, comme supabase-js : sinon le
   // compteur de `Server-Timing` ne serait jamais traverse.
@@ -291,6 +377,7 @@ function preparerEndpoint ({ user = TITULAIRE, profil = null, permissions = null
       async function lire () {
         await viaFetch('/rest/v1/' + nom)
         if (nom === 'properties') {
+          if (panneListe && !q.f.id) return { data: null, error: { message: 'relation properties : panne 10.0.0.12' } }
           let c = biens.filter(b => q.f.user_id == null || b.user_id === q.f.user_id)
           if ('archive_le' in q.f) c = c.filter(b => b.archive_le === q.f.archive_le)
           if (q.f.id) c = c.filter(b => b.id === q.f.id)
@@ -387,6 +474,22 @@ test('LE TEST QUI COMPTE : le sélecteur survit — bien non raccordé, calcul e
   assert.equal(panne.res.body.indisponible, 'calcul_impossible')
   assert.ok(!JSON.stringify(panne.res.body).includes('10.0.0.12'), 'le message brut de la base ne sort pas')
   assert.equal(panne.res.body.biens.length, 3)
+})
+
+test('un identifiant en majuscules est le même logement ; par défaut, le premier logement RACCORDÉ', async () => {
+  const maj = await appeler({}, { bien: BIEN_B.id.toUpperCase() })
+  assert.deepEqual([maj.res.code, maj.res.body.bien], [200, BIEN_B.id])
+  const defaut = await appeler({ biens: [BIEN_NU, BIEN_A, BIEN_B] }, {})
+  assert.equal(defaut.res.body.bien, BIEN_A.id, 'la page ne s’ouvre pas sur un logement sans canal')
+})
+
+test('colonne absente ou liste illisible : le motif est dit, jamais un message de la base', async () => {
+  const { zone_scolaire: _z, ...sansZone } = BIEN_A
+  const cfg = await appeler({ biens: [sansZone] }, {})
+  assert.deepEqual([cfg.res.code, cfg.res.body.indisponible], [200, 'configuration_incomplete'])
+  assert.equal(cfg.etat.assemblees.length, 0)
+  const panne = await appeler({ panneListe: true }, {})
+  assert.deepEqual([panne.res.code, panne.res.body], [503, { error: 'lecture_impossible' }])
 })
 
 test('un logement archivé n’est ni listé ni servi ; un identifiant mal formé est refusé', async () => {

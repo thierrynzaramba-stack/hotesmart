@@ -250,8 +250,9 @@ dans `lib/yield/ecran-evenements.js`. Lecture seule ; les gestes restent sur
 `PUT` / `PATCH /api/yield-evenements`. La page n'existe pas encore (étape 2).
 
 **Ce qu'il rend** : la liste des logements (archivés exclus, périmètre du
-membre jugé par `peutLire` sur chaque bien), le bien choisi (le premier par
-défaut), `droits_ecriture` (`reglages` en écriture sur le bien), `calcule_a`
+membre jugé par `peutLire` sur chaque bien), le bien choisi (par défaut le
+premier logement **raccordé** à un canal ; l'identifiant demandé se compare en
+minuscules), `droits_ecriture` (`reglages` en écriture sur le bien), `calcule_a`
 (l'heure du calcul), la fenêtre (aujourd'hui → un an, comme l'ancien GET), la
 légende des cinq niveaux et leur prix, les événements, les nuits, les réglages
 par position (lignes, `sans_nuit`, `hors_zone`), `rayonnement_max` et
@@ -267,23 +268,54 @@ l'hôte peut changer de logement.
   lignes portent. La nuit dit quel réglage la gouverne (`regle.cle`).
 - **`positions`** de chaque événement : la position de chacune de ses nuits et
   de son rayonnement jusqu'à `rayonnement_max` week-ends de chaque côté, quelle
-  que soit la zone affichée. Un test prouve qu'une position renvoyée telle
-  quelle règle cette nuit et aucune autre.
+  que soit la zone affichée — et **`week_ends`** : chaque week-end du
+  rayonnement comme unité (`{ zone, rang, nuits }`), pour « tout le
+  rayonnement » = une ligne `{ zone, rang }` par week-end (§4), que l'écrivain
+  accepte. Un test prouve, pour TOUS les événements de l'année, que chaque
+  position passe la garde de l'écrivain (`validerPosition`) et, renvoyée
+  telle quelle, règle cette nuit et aucune autre (et chaque week-end, ses
+  nuits et elles seules).
 - **Chaque nuit** porte un niveau et un prix, vendue ou fermée comprise
   (tarifée comme ouverte et libre, la projection de « Prédiction de prix ») ;
   son état réel voyage à côté (`vendue`, `ouverte` à trois états,
   `prix_calendrier`). Sur une nuit réglée, **`sans_reglage`** = la même nuit
-  tarifée sans la ligne : niveau final et prix (« le calcul disait »).
+  tarifée **sans aucun réglage de position** (comme le journal du lot 2) :
+  niveau et prix (« le calcul disait »). ⚠ Le niveau rendu est le niveau
+  **effectif** — celui que l'écran montre sur toute nuit non réglée ; le
+  journal (`recommandes`) garde le niveau **choisi**. Les deux diffèrent sur
+  une nuit que la preuve N-1 relève.
+- **Une nuit à prix posé à la main (✎)** porte `prix_hote` (en euros) sur un
+  bien piloté par YieldFlow : le moteur ne la touche jamais et la confirmation
+  du `PUT` ne la compte pas. Lecture en panne : `prix_hote_illisibles: true`,
+  l'écran reste.
 - **Le nom est brut** (`nom` + `type`) : « — votre zone », « Pont de… » se
   composent dans la page par ses chaînes i18n.
-- **`reglage_d_avant`** (Q6) : les crans posés par les anciennes flèches,
-  `partage: true` quand la clé est large (« tous les week-ends prolongés »).
+- **`reglage_d_avant`** (Q6) : les crans posés par les anciennes flèches, lus
+  par `reglagePour` — la règle du moteur, sur la nuit-type de l'occurrence —
+  et `partage: true` quand la clé est large (« tous les week-ends
+  prolongés », « tous les fériés »).
 - **`largeur`** est rendue telle que posée (`null` = aucune). ⚠ Si la page doit
   afficher la largeur par défaut du résolveur (0), l'exporter de
   `lib/yield/positions.js` (`largeurDe`) plutôt que la recopier — fichier à
   annoncer au chef de file avant de l'ouvrir.
 - Les dates commerciales **coupées** restent montrées (`actif: false`, une
   ligne par date, sans position) pour être reprises en 4d.
+
+**Limite connue (constat 6 de la review du 9 novembre 2026)** : toute panne
+dans `preparerContexte` (réservations de la grille, calendrier, lignes de
+position) fait perdre les événements avec les nuits — l'écran rend
+`indisponible: 'calcul_impossible'` et garde le sélecteur. L'ancien
+`GET /api/yield-evenements` isolait la grille et les positions. À porter au
+registre des dettes (numéro à demander au chef de file).
+
+**Review du 9 novembre 2026** (`db8b7715e967b7f5de3da8e422c3df0950f62f64..e05b7844c549656084150087358914f3bc697d04`,
+arbre `/home/claude/hotesmart`) : **aucun constat de sécurité**. Sept constats,
+corrigés sans nouvelle review (règle « une review par commit ») : nuits ✎
+signalées (1) ; `sans_reglage` sans aucun réglage, calculé sur un seul
+contexte (2) ; crans d'avant par la règle du moteur (3) ; `week_ends` (4) ;
+identifiant en minuscules et bien raccordé par défaut (5) ; tests étendus à
+toute l'année et à la garde de l'écrivain, chargeur rétabli en `finally` (7).
+Le constat 6 est la limite connue ci-dessus.
 
 **À mesurer sur staging avant la fin de 4a** : la durée et le nombre de
 requêtes de l'appel (`Server-Timing`) sur La bulle et Cœur de vie 23 —

@@ -92,7 +92,13 @@ async function traiter (req, res, t0) {
   if (!visibles.length) return rendre(200, { ...entete, bien: null })
   // ⚠ UN BIEN DEMANDE HORS DE LA LISTE N'EST PAS SERVI : ni archive, ni d'un
   // autre compte, ni hors du perimetre. On ne dit pas lequel des trois.
-  const choisi = demande ? visibles.find(b => b.id === String(demande)) : visibles[0]
+  // ⚠ EN MINUSCULES : `UUID_RE` accepte les majuscules, la base rend des
+  // minuscules — sans cela, un identifiant valide recevait 404 (review).
+  // ⚠ PAR DEFAUT, LE PREMIER BIEN RACCORDE : un bien sans canal n'a rien a
+  // calculer, et la page s'ouvrirait sur un motif plutot que sur un ecran.
+  const choisi = demande
+    ? visibles.find(b => b.id === String(demande).toLowerCase())
+    : (visibles.find(b => b.provider_property_id) || visibles[0])
   if (!choisi) return rendre(404, { error: 'bien_introuvable' })
 
   // ⚠ LA FICHE COMPLETE, PAS CELLE DE LA LISTE — le defaut du 11 septembre :
