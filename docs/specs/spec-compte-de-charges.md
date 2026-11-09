@@ -49,18 +49,22 @@ précision **mesurée** à l'étape 5 ne suffit pas.
 - **Aucune facture fournisseur, aucune charge** dans le code ni en base.
 - **L'entité juridique n'existe pas encore.** Proposée par le fil facturation
   (branche `facture-voyageur` @ 603de80cccc73022d245c093661d07c1a667d589,
-  §5.1) : table `entites_juridiques` (dont `siret`, `regime_tva`, `par_defaut`
-  unique par compte, `archivee_le` — jamais supprimée, unique `(id, user_id)`
+  §5.1 ; état de référence `facture-voyageur` @
+  82374b63170f6534d15600e4a14afb2cc0048c12) : table `entites_juridiques`
+  (dont `siret`, `regime_tva`, `archivee_le` — jamais supprimée, unique `(id, user_id)`
   comme cible de clés composites). Le lien bien → entité vit dans une **table
   à part**, `biens_entites` (`property_uuid` clé, `entite_id`, `user_id`) — pas
   sur `properties`, qu'un membre `reglages: write` peut réécrire en entier.
-  Pas de ligne = l'entité par défaut du compte. « Même compte » garanti en
+  **Pas d'entité par défaut** (décision D2 bis de Thierry, 9 novembre 2026,
+  12 h 08, au fil facturation) : l'entité se choisit sur la fiche de chaque
+  logement, et un logement sans ligne `biens_entites` n'a pas d'entité.
+  « Même compte » garanti en
   base (clé composite + trigger). RLS sans politique, `revoke` ; writer unique
   `lib/entites-juridiques.js`, écriture derrière `facturation` (titulaire
   seul). Ce chantier y a demandé **une seule colonne**, `debut_exercice`
   (Q22, livrée par le fil facturation). Il lit par deux fonctions serveur
   (§6) : les entités d'un compte, archivées comprises (`id`, `nom`, `siret`,
-  `regime_tva`, `par_defaut`, `archivee_le`, `debut_exercice`), et l'entité
+  `regime_tva`, `archivee_le`, `debut_exercice`), et l'entité
   d'un bien. Un compte peut n'avoir aucune entité (Q20, réponse A).
 - **L'e-mail entrant** : `api/inbound-email.js` reçoit tout `*@reply.hotesmart.fr`
   (Brevo). Le webhook n'est pas authentifiable : le contenu vient du POST, la
@@ -236,7 +240,9 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
   lue (vide).
 - **Q18 (8 nov. 2026, 23 h 05) : non.** Une facture ne peut pas être
   affectée à un bien qui ne relève pas de l'entité choisie (l'entité du bien
-  se lit par `entiteDuBien`). Le serveur refuse.
+  se lit par `entiteDuBien`). Le serveur refuse. Depuis D2 bis, un logement
+  **sans entité** ne relève d'aucune : le refus dit « rattachez d'abord ce
+  logement à une entité, depuis sa fiche ».
 - **Q19 (8 nov. 2026, 23 h 07) : d'accord.** Une facture dans le texte d'un
   e-mail ou derrière un lien n'est pas lue en V1 : l'e-mail apparaît « sans
   facture lisible » avec son expéditeur, son sujet et son texte, et l'hôte
@@ -251,8 +257,9 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
 - **Q20 (8 nov. 2026, 22 h 15, réponse A, transmise par le fil facturation —
   vaut pour les deux chantiers, `facture-voyageur` @
   0915104e44db83bd2304a2a67aca57228097014e §5.1) : un compte peut n'avoir
-  aucune entité juridique.** Le titulaire crée la première dans Réglages,
-  quand il en a besoin. Tant qu'elle manque, **une charge ne se valide pas** :
+  aucune entité juridique.** Le titulaire la crée quand il en a besoin —
+  depuis la fiche d'un logement depuis la décision D2 bis (9 novembre,
+  12 h 08), et non plus dans Réglages. Tant qu'elle manque, **une charge ne se valide pas** :
   l'écran dit pourquoi, et le titulaire est prévenu. **On ne remplit jamais
   une identité légale à sa place** : aucune entité créée automatiquement,
   aucune reprise des comptes existants. Conséquence ici : une facture peut
@@ -365,11 +372,13 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
   un trigger, comme pour `biens_entites`.
 - **Les lectures de l'entité** viennent de `lib/entites-juridiques.js` (accord
   du fil facturation, `facture-voyageur` @
-  2b1df50476cd0202a3ede64196b7634fb6acb06c, contrat reconfirmé à `39e7924e`
-  le 9 novembre) : `entitesDuCompte(userId, { db })` et
-  `entiteDuBien(userId, propertyUuid, { db })` (base injectée, provenance
-  `'bien'`, `'defaut'` ou `null`) — ligne de `biens_entites`, sinon
-  l'entité par défaut, sinon `null`, avec sa provenance. Elles ne gardent
+  2b1df50476cd0202a3ede64196b7634fb6acb06c ; contrat modifié par D2 bis,
+  état de référence `82374b63170f6534d15600e4a14afb2cc0048c12`) :
+  `entitesDuCompte(userId, { db })` (plus de colonne `par_defaut`) et
+  `entiteDuBien(userId, propertyUuid, { db })` — la ligne de `biens_entites`
+  (provenance `'bien'`), sinon `entite: null` (provenance `null`), **même si
+  le compte a des entités actives**. `lienDuBien` existe aussi (`entite_id`
+  seul) ; ce chantier n'en a pas besoin. Elles ne gardent
   rien : c'est l'endpoint des charges qui garde. Formes rendues
   (`facture-voyageur` @ 447ff3e035f7e05cecc08a169b574429befb8f0d) :
   `{ ok, entites }`, `{ ok, entite, provenance }`, ou
