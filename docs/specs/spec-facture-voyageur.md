@@ -224,6 +224,7 @@ Thierry.
 | `capital`, `rcs` | vide possible | mentions d'une société, à valider avec un comptable |
 | `email`, `telephone` | vide possible | contact imprimé |
 | `debut_exercice` | texte « MM-JJ », **vide possible, sans défaut** | demandé par le compte de charges (Thierry, 8 nov. 2026, 22 h 50) pour présenter ses totaux par exercice — aucune purge (Thierry, 22 h 53 : « on garde tout ») ; on ne suppose pas une année civile |
+| `numerotation_factures` | texte : `auto` (défaut) ou `manuel` | Q5 bis : en manuelle, l'hôte saisit chaque numéro à l'émission |
 | `par_defaut` | booléen | **une seule** par compte (index unique partiel) |
 | `archivee_le` | horodatage, vide possible | on retire une entité, on ne la supprime pas : des factures et des charges y renvoient |
 | `cree_le`, `modifie_le` | horodatage | |
@@ -293,11 +294,23 @@ l'endpoint appelant qui garde, et le sien est réservé au titulaire) :
 préfixe, prochain numéro.
 - **L'année est celle d'Europe/Paris** : une émission le 1er janvier à
   00 h 30 appartient à la nouvelle année.
-- **Réglages du titulaire (Q5)** : le numéro de départ ne peut jamais
-  descendre sous le dernier numéro émis + 1 ; le préfixe ne change plus une
-  fois un numéro émis dans l'année.
+- **Deux modes, au choix de l'hôte par entité (Q5 bis, Thierry, 9 nov.
+  2026)** — colonne `entites_juridiques.numerotation_factures` :
+  - **Automatique** (défaut) : HôteSmart enchaîne la suite. Le titulaire règle
+    le préfixe et le premier numéro **tant qu'aucune facture de l'année n'est
+    partie** ; ensuite **tout est figé**, et la suite n'a jamais de trou. Le
+    code refuse (`suite_figee`, 409) et la base aussi (trigger
+    `fvs_suite_protegee` : préfixe inchangé, `prochain_numero = dernier_emis
+    + 1`, `dernier_emis` jamais en baisse).
+  - **Manuelle** : l'hôte saisit lui-même chaque numéro à l'émission (étape 3),
+    celui de sa propre suite tenue ailleurs. HôteSmart refuse seulement un
+    numéro déjà utilisé pour la même entité. L'écran ne montre aucune suite.
 - **Contrainte unique en base** sur `(entité, numéro complet)` dans les
-  factures émises.
+  factures émises — elle porte aussi le refus du mode manuel.
+- ⚠ **Question pour Thierry à l'étape 3** : un hôte qui change de mode en
+  cours d'année (automatique → manuelle → automatique) peut avoir saisi un
+  numéro que la suite automatique atteindra plus tard. La contrainte unique
+  empêche le doublon ; reste à décider ce que voit l'hôte ce jour-là.
 - Les avoirs prennent leur numéro dans la même suite.
 
 ### 5.3 La demande et la facture
@@ -441,7 +454,7 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
 **Étapes**, chacune avec son go, ses tests et sa review :
 1. **L'entité juridique** : migration (staging d'abord), writer, endpoint,
    écran dans `/settings`, remplacement par bien sur la fiche du logement,
-   réglage de la numérotation.
+   réglage de la numérotation et choix automatique / manuelle (Q5 bis).
 2. **La demande et le formulaire** : tables, liens à jeton, page publique dans
    la langue du voyageur, bouton de la fiche de réservation (porte 1), saisie
    par l'hôte (Q12), état sur la fiche — ordinateur et téléphone.

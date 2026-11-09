@@ -36,7 +36,7 @@ function corpsDe (req) {
 }
 
 // Le code HTTP d'un refus du writer.
-const CODES = { entree_invalide: 400, introuvable: 404, archivee: 409, prefixe_fige: 409, numero_trop_bas: 409, panne: 503 }
+const CODES = { entree_invalide: 400, introuvable: 404, archivee: 409, suite_figee: 409, panne: 503 }
 function repondreRefus (res, r) {
   return res.status(CODES[r.motif] || 400).json({ error: r.motif, motif: r.motif, champ: r.champ || null })
 }
@@ -61,9 +61,10 @@ async function lireEcran (req, res) {
     return res.status(503).json({ error: 'panne', motif: 'panne' })
   }
 
-  // La numerotation de l'annee, pour chaque entite ACTIVE (une archivee
-  // n'emet plus).
-  const actives = ents.entites.filter(e => !e.archivee_le)
+  // La numerotation de l'annee, pour chaque entite ACTIVE en numerotation
+  // AUTOMATIQUE : une archivee n'emet plus, et en manuelle l'hote saisit
+  // chaque numero a l'emission (Q5 bis) — il n'y a pas de suite a montrer.
+  const actives = ents.entites.filter(e => !e.archivee_le && e.numerotation_factures !== 'manuel')
   const suites = await Promise.all(actives.map(e => compter(EJ.numerotation(compte, e.id, { db: base }))))
   if (suites.some(s => !s.ok)) return res.status(503).json({ error: 'panne', motif: 'panne' })
   const numerotations = {}

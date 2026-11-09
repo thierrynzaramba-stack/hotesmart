@@ -33,6 +33,8 @@ const CHAMPS = [
   { id: 'ej-tel', api: 'telephone', cle: 'ej.f_tel', max: 40, type: 'tel' }
 ]
 const REGIMES = ['exonere', 'franchise', 'assujetti']
+// Numerotation des factures (Q5 bis, Thierry, 9 nov. 2026).
+const NUMEROTATIONS = ['auto', 'manuel']
 
 /** Un champ s'affiche-t-il pour ce type et ce régime ? */
 function champVisible (c, type, regime) {
@@ -55,6 +57,7 @@ function valeursDuFormulaire (form) {
   const jour = form.querySelector('#ej-exercice-jour')?.value || ''
   const mois = form.querySelector('#ej-exercice-mois')?.value || ''
   e.debut_exercice = jour && mois ? `${mois}-${jour}` : (jour || mois ? 'incomplet' : '')
+  e.numerotation_factures = form.querySelector('input[name="ej-numerotation"]:checked')?.value || 'auto'
   return e
 }
 
@@ -78,6 +81,21 @@ function exerciceHtml (valeur, t, esc, langue) {
       </div>
       <span class="ej-aide">${esc(t('ej.f_exercice_aide'))}</span>
       <span class="ej-erreur" id="ej-exercice-err" hidden></span>
+    </fieldset>`
+}
+
+/** Le choix de numérotation : automatique (défaut) ou manuelle. */
+function numerotationChoixHtml (valeur, t, esc) {
+  const v = NUMEROTATIONS.includes(valeur) ? valeur : 'auto'
+  const radios = NUMEROTATIONS.map(n => `
+      <label class="ej-radio"><input type="radio" name="ej-numerotation" value="${n}"${v === n ? ' checked' : ''}>
+        <span>${esc(t('ej.num_mode_' + n))}</span></label>`).join('')
+  return `
+    <fieldset class="ej-champ" data-champ="numerotation_factures">
+      <legend>${esc(t('ej.f_numerotation'))}</legend>
+      <div class="ej-radios">${radios}</div>
+      <span class="ej-aide">${esc(t('ej.f_numerotation_aide'))}</span>
+      <span class="ej-erreur" id="ej-numerotation-err" hidden></span>
     </fieldset>`
 }
 
@@ -131,6 +149,7 @@ function formulaireHtml (e, t, esc, langue) {
     </div>
     ${CHAMPS.filter(c => ['ej-taux', 'ej-capital', 'ej-rcs', 'ej-email', 'ej-tel'].includes(c.id)).map(champ).join('')}
     ${exerciceHtml(v.debut_exercice, t, esc, langue)}
+    ${numerotationChoixHtml(v.numerotation_factures, t, esc)}
     <p class="ej-message" role="status" aria-live="polite"></p>
     <div class="ej-actions">
       <button type="submit" class="btn btn--primary">${esc(t('ej.save'))}</button>
@@ -149,9 +168,8 @@ function montrerRefus (form, err, t) {
   const code = err && err.code
   const texte = code === 'panne' ? t('ej.err_panne')
     : code === 'archivee' ? t('ej.err_archivee')
-      : code === 'prefixe_fige' ? t('ej.err_prefixe_fige')
-        : code === 'numero_trop_bas' ? t('ej.err_numero_trop_bas')
-          : champ ? t('ej.err_champ') : t('ej.err_generic')
+      : code === 'suite_figee' ? t('ej.err_suite_figee')
+        : champ ? t('ej.err_champ') : t('ej.err_generic')
   if (bloc) {
     const s = bloc.querySelector('.ej-erreur')
     s.textContent = texte; s.hidden = false
@@ -224,10 +242,17 @@ function monterEntites ({ racine, api, t, esc, confirmer, langue = 'fr' }) {
       return `<article class="card ej-carte" data-entite="${esc(e.id)}">${formulaireHtml(e, t, esc, langue)}</article>`
     }
     const badges = e.par_defaut ? `<span class="badge">${esc(t('ej.default_badge'))}</span>` : ''
-    const numero = num ? `
+    // Manuelle : l'hote saisira chaque numero a l'emission (etape 3).
+    // Automatique : le prochain numero ; reglable tant qu'aucune facture de
+    // l'annee n'est partie, fige ensuite (la base refuse aussi).
+    const numero = e.numerotation_factures === 'manuel' ? `
+      <div class="ej-num" data-num="${esc(e.id)}">
+        <p class="small">${esc(t('ej.num_manual_info'))}</p>
+      </div>` : num ? `
       <div class="ej-num" data-num="${esc(e.id)}">
         <p class="small">${esc(t('ej.num_next', { numero: num.prochain }))}</p>
-        <button type="button" class="btn btn--secondary" data-action="numerotation">${esc(t('ej.num_edit'))}</button>
+        ${num.fige ? `<p class="small muted">${esc(t('ej.num_fige'))}</p>`
+    : `<button type="button" class="btn btn--secondary" data-action="numerotation">${esc(t('ej.num_edit'))}</button>`}
       </div>` : ''
     return `
     <article class="card ej-carte" data-entite="${esc(e.id)}">
@@ -247,11 +272,10 @@ function monterEntites ({ racine, api, t, esc, confirmer, langue = 'fr' }) {
     return `
     <form class="ej-form ej-form--num" novalidate>
       <p class="small muted">${esc(t('ej.num_help'))}</p>
-      ${s.prefixe_fige ? `<p class="small">${esc(t('ej.num_locked'))}</p>` : ''}
       <div class="ej-duo">
         <div class="ej-champ" data-champ="prefixe">
           <label for="ej-prefixe">${esc(t('ej.num_prefix'))}</label>
-          <input id="ej-prefixe" maxlength="12" value="${esc(s.prefixe)}"${s.prefixe_fige ? ' readonly' : ''} aria-describedby="ej-prefixe-err">
+          <input id="ej-prefixe" maxlength="12" value="${esc(s.prefixe)}" aria-describedby="ej-prefixe-err">
           <span class="ej-erreur" id="ej-prefixe-err" hidden></span>
         </div>
         <div class="ej-champ" data-champ="prochain_numero">
@@ -353,4 +377,4 @@ function monterEntites ({ racine, api, t, esc, confirmer, langue = 'fr' }) {
   return charger()
 }
 
-export { CHAMPS, REGIMES, champVisible, valeursDuFormulaire, resume, formulaireHtml, exerciceHtml, montrerRefus, monterEntites }
+export { CHAMPS, REGIMES, NUMEROTATIONS, champVisible, valeursDuFormulaire, resume, formulaireHtml, exerciceHtml, numerotationChoixHtml, montrerRefus, monterEntites }

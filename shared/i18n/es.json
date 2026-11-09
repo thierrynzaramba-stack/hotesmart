@@ -1024,8 +1024,7 @@
   "ej.exercice_label": "Ejercicio a partir del {date}",
   "ej.num_next": "Próximo número de factura: {numero}",
   "ej.num_edit": "Ajustar la numeración",
-  "ej.num_help": "Si ya facturaba en otro lugar, continúe su serie: prefijo y próximo número.",
-  "ej.num_locked": "El prefijo ya no puede cambiar: ya se emitió una factura este año.",
+  "ej.num_help": "Se puede ajustar hasta que se emita la primera factura del año. Si ya facturaba en otro lugar, continúe su serie: prefijo y próximo número.",
   "ej.num_prefix": "Prefijo",
   "ej.num_start": "Próximo número",
   "ej.biens_title": "Sus alojamientos",
@@ -1038,6 +1037,11 @@
   "ej.err_generic": "No se pudo guardar. Inténtelo de nuevo.",
   "ej.err_panne": "Lectura imposible: compruebe la conexión e inténtelo de nuevo.",
   "ej.err_archivee": "Esta entidad está archivada.",
-  "ej.err_prefixe_fige": "El prefijo ya no puede cambiar este año.",
-  "ej.err_numero_trop_bas": "Este número ya se usó: elija uno mayor."
+  "ej.f_numerotation": "Numeración de las facturas",
+  "ej.f_numerotation_aide": "Elija «manual» si también factura fuera de HôteSmart y lleva su propia serie.",
+  "ej.num_mode_auto": "Automática: HôteSmart encadena los números",
+  "ej.num_mode_manuel": "Manual: usted introduce cada número",
+  "ej.num_manual_info": "Numeración manual: introducirá el número de cada factura al emitirla.",
+  "ej.num_fige": "Ya se emitió una factura este año: la serie está bloqueada y continúa sin huecos.",
+  "ej.err_suite_figee": "Ya se emitió una factura este año: la numeración ya no se puede modificar."
 }

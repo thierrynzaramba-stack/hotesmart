@@ -1024,8 +1024,7 @@
   "ej.exercice_label": "Exercice à partir du {date}",
   "ej.num_next": "Prochain numéro de facture : {numero}",
   "ej.num_edit": "Régler la numérotation",
-  "ej.num_help": "Si vous facturiez déjà ailleurs, reprenez votre suite : préfixe et prochain numéro.",
-  "ej.num_locked": "Le préfixe ne change plus : une facture a déjà été émise cette année.",
+  "ej.num_help": "Réglable tant qu’aucune facture de l’année n’est partie. Si vous facturiez déjà ailleurs, reprenez votre suite : préfixe et prochain numéro.",
   "ej.num_prefix": "Préfixe",
   "ej.num_start": "Prochain numéro",
   "ej.biens_title": "Vos logements",
@@ -1038,6 +1037,11 @@
   "ej.err_generic": "L’enregistrement a échoué. Réessayez.",
   "ej.err_panne": "Lecture impossible : vérifiez la connexion, puis réessayez.",
   "ej.err_archivee": "Cette entité est archivée.",
-  "ej.err_prefixe_fige": "Le préfixe ne change plus cette année.",
-  "ej.err_numero_trop_bas": "Ce numéro a déjà été utilisé : choisissez un numéro plus grand."
+  "ej.f_numerotation": "Numérotation des factures",
+  "ej.f_numerotation_aide": "Choisissez « manuelle » si vous facturez aussi en dehors d’HôteSmart et tenez votre propre suite.",
+  "ej.num_mode_auto": "Automatique : HôteSmart enchaîne les numéros",
+  "ej.num_mode_manuel": "Manuelle : vous saisissez chaque numéro",
+  "ej.num_manual_info": "Numérotation manuelle : vous saisirez le numéro de chaque facture au moment de l’émettre.",
+  "ej.num_fige": "Une facture est déjà partie cette année : la suite est figée et s’enchaîne sans trou.",
+  "ej.err_suite_figee": "Une facture est déjà partie cette année : la numérotation ne se modifie plus."
 }

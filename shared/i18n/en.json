@@ -1024,8 +1024,7 @@
   "ej.exercice_label": "Financial year from {date}",
   "ej.num_next": "Next invoice number: {numero}",
   "ej.num_edit": "Set numbering",
-  "ej.num_help": "If you already invoiced elsewhere, continue your sequence: prefix and next number.",
-  "ej.num_locked": "The prefix can no longer change: an invoice was already issued this year.",
+  "ej.num_help": "Can be set until the first invoice of the year is issued. If you already invoiced elsewhere, continue your sequence: prefix and next number.",
   "ej.num_prefix": "Prefix",
   "ej.num_start": "Next number",
   "ej.biens_title": "Your properties",
@@ -1038,6 +1037,11 @@
   "ej.err_generic": "Saving failed. Try again.",
   "ej.err_panne": "Cannot load: check the connection, then try again.",
   "ej.err_archivee": "This entity is archived.",
-  "ej.err_prefixe_fige": "The prefix can no longer change this year.",
-  "ej.err_numero_trop_bas": "This number was already used: choose a higher one."
+  "ej.f_numerotation": "Invoice numbering",
+  "ej.f_numerotation_aide": "Choose “manual” if you also invoice outside HôteSmart and keep your own sequence.",
+  "ej.num_mode_auto": "Automatic: HôteSmart numbers invoices in sequence",
+  "ej.num_mode_manuel": "Manual: you enter each number",
+  "ej.num_manual_info": "Manual numbering: you will enter the number of each invoice when you issue it.",
+  "ej.num_fige": "An invoice was already issued this year: the sequence is locked and continues without gaps.",
+  "ej.err_suite_figee": "An invoice was already issued this year: the numbering can no longer change."
 }

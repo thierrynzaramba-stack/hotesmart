@@ -11,6 +11,9 @@
 //   4. Les gestes : créer, rattacher un logement, archiver SEULEMENT après
 //      confirmation ; un refus nommé se pose sous son champ.
 //   5. La page : non délégable AVANT tout, nav.js, aucun hexa.
+//   6. La numérotation (Q5 bis) : le choix automatique / manuelle part avec
+//      l'entité ; en automatique, réglable avant la première facture de
+//      l'année, figée ensuite ; en manuelle, aucune suite affichée.
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -41,8 +44,8 @@ const ETAT = () => ({
   titulaire: true,
   entites: [E1, E2, E3],
   biens: [{ id: 'b1', nom: 'La bulle', entite_id: null }, { id: 'b2', nom: 'Cœur de vie 23', entite_id: 'e2' }],
-  numerotations: { e1: { prefixe: 'F', prochain_numero: 1, dernier_emis: null, prefixe_fige: false, prochain: 'F-2026-0001' },
-    e2: { prefixe: 'HS', prochain_numero: 12, dernier_emis: 11, prefixe_fige: true, prochain: 'HS-2026-0012' } }
+  numerotations: { e1: { prefixe: 'F', prochain_numero: 1, dernier_emis: null, fige: false, prochain: 'F-2026-0001' },
+    e2: { prefixe: 'HS', prochain_numero: 12, dernier_emis: 11, fige: true, prochain: 'HS-2026-0012' } }
 })
 
 async function monter (etat = ETAT(), { confirmer = async () => true, ecrire } = {}) {
@@ -90,6 +93,10 @@ test('la liste : badge par défaut, numérotation, archivées repliées, logemen
   assert.ok(cartes[1].textContent.includes('[ej.tva_assujetti 10]'))
   assert.ok(cartes[1].textContent.includes('[ej.exercice_label 01/07]'))
   assert.ok(!cartes[0].querySelector('[data-action="defaut"]'), 'déjà par défaut : pas de bouton')
+  // e1 : aucune facture cette année, la suite se règle ; e2 : figée.
+  assert.ok(cartes[0].querySelector('[data-action="numerotation"]'))
+  assert.ok(!cartes[1].querySelector('[data-action="numerotation"]'), 'figée : plus de réglage')
+  assert.ok(cartes[1].textContent.includes('[ej.num_fige]'))
   const arch = r.querySelector('details.ej-archivees')
   assert.ok(arch.textContent.includes('Ancienne SARL'))
   const sel = r.querySelector('select[data-bien="b1"]')
@@ -132,6 +139,44 @@ test('LE TEST QUI COMPTE : le formulaire suit le type et le régime ; un champ c
   const e = appels[0].entite
   assert.deepEqual([e.type, e.nom, e.regime_tva, e.forme_juridique, e.taux_tva, e.debut_exercice],
     ['personne_physique', 'SCI Neuve', 'exonere', '', '', '07-01'])
+  assert.equal(e.numerotation_factures, 'auto', 'automatique par défaut')
+})
+
+test('LE TEST QUI COMPTE : le choix de numérotation part avec l\'entité, et se relit à la modification', () => {
+  const dom = new JSDOM(`<div>${V.formulaireHtml(null, t, esc, 'fr')}</div>`)
+  const f = dom.window.document.querySelector('form.ej-form')
+  assert.equal(f.querySelector('input[name="ej-numerotation"]:checked').value, 'auto')
+  f.querySelector('input[name="ej-numerotation"][value="manuel"]').checked = true
+  assert.equal(V.valeursDuFormulaire(f).numerotation_factures, 'manuel')
+  const dom2 = new JSDOM(`<div>${V.formulaireHtml({ ...E1, numerotation_factures: 'manuel' }, t, esc, 'fr')}</div>`)
+  const f2 = dom2.window.document.querySelector('form.ej-form')
+  assert.equal(V.valeursDuFormulaire(f2).numerotation_factures, 'manuel', 'la modification ne remet pas en automatique')
+})
+
+test('une entité en numérotation manuelle : ni suite ni réglage, une phrase qui dit que le numéro se saisit à l\'émission', async () => {
+  const etat = ETAT()
+  etat.entites[0] = { ...E1, numerotation_factures: 'manuel' }
+  delete etat.numerotations.e1
+  const { r } = await monter(etat)
+  const c = r.querySelector('.ej-carte[data-entite="e1"]')
+  assert.ok(c.textContent.includes('[ej.num_manual_info]'))
+  assert.ok(!c.textContent.includes('F-2026-0001'))
+  assert.ok(!c.querySelector('[data-action="numerotation"]'))
+})
+
+test('régler la numérotation : le geste part ; un refus « suite figée » le dit dans le formulaire', async () => {
+  const refus = Object.assign(new Error('x'), { code: 'suite_figee', status: 409 })
+  const appels = []
+  const { r } = await monter(ETAT(), { ecrire: async (corps) => { appels.push(corps); throw refus } })
+  const c = r.querySelector('.ej-carte[data-entite="e1"]')
+  c.querySelector('[data-action="numerotation"]').click()
+  const f = c.querySelector('form.ej-form--num')
+  f.querySelector('#ej-prefixe').value = 'HS'
+  f.querySelector('#ej-prochain').value = '12'
+  f.dispatchEvent(new f.ownerDocument.defaultView.Event('submit', { cancelable: true }))
+  await attendre()
+  assert.deepEqual(appels, [{ action: 'numerotation', id: 'e1', numerotation: { prefixe: 'HS', prochain_numero: 12 } }])
+  assert.equal(f.querySelector('.ej-message').textContent, '[ej.err_suite_figee]')
 })
 
 test('le début d\'exercice : vide s\'il n\'est pas choisi, « incomplet » (donc refusé) s\'il manque le jour ou le mois', () => {

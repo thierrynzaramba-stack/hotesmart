@@ -22,7 +22,7 @@ aucune entité automatique, aucune reprise des comptes existants.
 
 | Table | Rôle |
 |---|---|
-| `entites_juridiques` | l'identité : type, nom, adresse, SIRET, TVA intracommunautaire, régime de TVA (`exonere`, `franchise`, `assujetti` + taux réglé par l'hôte), mentions d'une société, contact ; `debut_exercice` (« MM-JJ », vide possible et sans défaut — lu par le compte de charges pour présenter ses totaux par exercice ; aucune purge, Thierry 22 h 53) ; `par_defaut` (une seule par compte) ; `archivee_le` (on archive, on ne supprime jamais) |
+| `entites_juridiques` | l'identité : type, nom, adresse, SIRET, TVA intracommunautaire, régime de TVA (`exonere`, `franchise`, `assujetti` + taux réglé par l'hôte), mentions d'une société, contact ; `debut_exercice` (« MM-JJ », vide possible et sans défaut — lu par le compte de charges pour présenter ses totaux par exercice ; aucune purge, Thierry 22 h 53) ; `numerotation_factures` (`auto` par défaut, ou `manuel` — Q5 bis) ; `par_defaut` (une seule par compte) ; `archivee_le` (on archive, on ne supprime jamais) |
 | `biens_entites` | le lien **bien → entité** (`property_uuid` → `entite_id`). Pas de ligne = l'entité par défaut du compte |
 | `factures_voyageur_suites` | la suite des numéros de facture, par entité et par **année de Paris** : préfixe, prochain numéro, dernier émis |
 
@@ -42,12 +42,17 @@ aucune entité automatique, aucune reprise des comptes existants.
   active, la nouvelle n'émet pas d'office pour tous les logements — le compte
   reste sans défaut et le titulaire choisit (revue de 447ff3e0, constat 3).
   Une entité archivée n'est jamais celle par défaut (contrainte).
-- **Numérotation (Q5)** : le numéro de départ ne descend jamais sous le
-  dernier émis + 1 (contrainte) ; une suite entamée est protégée par le
-  trigger `fvs_suite_protegee` — préfixe figé, et `dernier_emis` qui ne baisse
-  jamais ni ne revient à vide (revue de 447ff3e0, constat 5). L'année est
-  celle d'Europe/Paris ; au 1er janvier, le préfixe de la dernière année connue
-  est repris et le numéro repart à 1.
+- **Numérotation (Q5, Q5 bis)** : l'hôte choisit par entité **automatique**
+  ou **manuelle** (Thierry, 9 novembre 2026). En automatique, préfixe et
+  premier numéro se règlent **tant qu'aucune facture de l'année n'est
+  partie** ; ensuite la suite est **figée** : `reglerNumerotation` refuse tout
+  (`suite_figee`, 409) et le trigger `fvs_suite_protegee` aussi — préfixe
+  inchangé, `prochain_numero = dernier_emis + 1` (pas de trou), `dernier_emis`
+  qui ne baisse jamais ni ne revient à vide (revue de 447ff3e0, constat 5).
+  En manuelle, l'hôte saisit chaque numéro à l'émission (étape 3) ; le GET ne
+  calcule aucune suite pour elle. L'année est celle d'Europe/Paris ; au
+  1er janvier, le préfixe de la dernière année connue est repris et le numéro
+  repart à 1.
 - **RLS active, aucune politique, `revoke all from anon, authenticated`** sur
   les trois tables : exception à la règle 5 de REVIEW.md, sur le précédent de
   `taxes_sejour`. Le navigateur ne lit ni n'écrit rien en direct.
@@ -65,7 +70,8 @@ aucune entité automatique, aucune reprise des comptes existants.
 - **Endpoint** : `api/entites-juridiques.js` — un écran, un endpoint.
   - `GET` : domaine `facturation` en lecture (délégable en lecture) ; rend les
     entités, les biens **vivants** du périmètre avec leur entité, et la
-    numérotation de l'année de chaque entité active.
+    numérotation de l'année de chaque entité active **en automatique**
+    (`fige` : une facture est déjà partie cette année).
   - `POST` (`creer`, `modifier`, `archiver`, `defaut`, `numerotation`) :
     `facturation` en écriture, donc **titulaire seul** ; `rattacher` prend le
     compte **du bien** désigné.

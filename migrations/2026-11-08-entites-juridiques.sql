@@ -50,6 +50,12 @@ create table if not exists
   -- de charges : totaux par exercice (aucune purge,
   -- Thierry 22 h 53).
   debut_exercice text,
+  -- Numerotation des factures (Thierry, 9 nov.
+  -- 2026) : `auto`, HoteSmart enchaine la suite ;
+  -- `manuel`, l'hote saisit chaque numero (il
+  -- facture aussi ailleurs).
+  numerotation_factures text not null
+    default 'auto',
   par_defaut boolean not null
     default false,
   archivee_le timestamptz,
@@ -78,6 +84,9 @@ create table if not exists
     or siret ~ '^[0-9]{14}$'),
   constraint ej_pays_chk check (
     pays ~ '^[A-Z]{2}$'),
+  constraint ej_numerotation_chk check (
+    numerotation_factures
+      in ('auto', 'manuel')),
   constraint ej_exercice_chk check (
     debut_exercice is null
     or debut_exercice ~
@@ -210,15 +219,16 @@ create table if not exists
       or prochain_numero > dernier_emis))
 );
 
--- ⚠ UNE SUITE ENTAMEE EST PROTEGEE EN BASE :
+-- ⚠ UNE SUITE ENTAMEE EST FIGEE EN BASE
+-- (Thierry, 9 nov. 2026 : en automatique,
+-- HoteSmart enchaine, sans trou) :
 -- - le prefixe ne change plus une fois un numero
---   emis dans l'annee (deux series se
---   chevaucheraient) ;
+--   emis dans l'annee ;
+-- - le prochain numero est TOUJOURS le dernier
+--   emis + 1 : on ne le releve plus (un trou) ;
 -- - `dernier_emis` ne baisse jamais et ne
---   revient jamais a vide : sinon un UPDATE
---   rendrait des numeros deja emis, et la
---   contrainte `fvs_prochain_chk` ne verrait
---   rien (revue de 447ff3e0, constat 5).
+--   revient jamais a vide (revue de 447ff3e0,
+--   constat 5).
 create or replace function
   public.fvs_suite_protegee()
 returns trigger
@@ -237,6 +247,12 @@ begin
     then
       raise exception
         'dernier numero emis en baisse'
+        using errcode = '23514';
+    end if;
+    if new.prochain_numero
+       <> new.dernier_emis + 1 then
+      raise exception
+        'suite figee : pas de trou'
         using errcode = '23514';
     end if;
   end if;

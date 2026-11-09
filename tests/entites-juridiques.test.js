@@ -158,9 +158,12 @@ test('LE TEST QUI COMPTE : « meme compte » est garanti en base — cles compos
   assert.doesNotMatch(SQL, /alter table\s+public\.properties/i)
 })
 
-test('la migration : une seule entite par defaut, prefixe fige, jamais sous le dernier emis, lignes < 60 car.', () => {
+test('la migration : une seule entite par defaut, suite FIGEE apres emission (prefixe, sans trou, jamais en baisse), lignes < 60 car.', () => {
   assert.match(SQL, /create unique index if not exists\s+entites_juridiques_defaut_uidx\s+on public\.entites_juridiques \(user_id\)\s+where par_defaut/)
   assert.match(SQL, /if old\.dernier_emis is not null then\s+if new\.prefixe <> old\.prefixe then/)
+  // Q5 bis (Thierry, 9 nov. 2026) : une suite entamee enchaine sans trou —
+  // le prochain numero est toujours le dernier emis + 1, en base aussi.
+  assert.match(SQL, /if new\.prochain_numero\s+<> new\.dernier_emis \+ 1 then\s+raise exception\s+'suite figee : pas de trou'/)
   // `dernier_emis` ne baisse jamais et ne revient jamais a vide (revue de 447ff3e0, constat 5).
   assert.match(SQL, /if new\.dernier_emis is null\s+or new\.dernier_emis < old\.dernier_emis/)
   assert.match(SQL, /before update\s+on public\.factures_voyageur_suites\s+for each row execute function\s+public\.fvs_suite_protegee\(\)/)
@@ -203,6 +206,18 @@ test('LE TEST QUI COMPTE : le debut d\'exercice est VIDE par defaut (aucune anne
   assert.match(SQL, /debut_exercice text,/)
   assert.doesNotMatch(SQL, /debut_exercice text\s+(not null|default)/, 'ni obligatoire ni par defaut en base')
   assert.ok(EJ.CHAMPS.includes('debut_exercice'), 'rendu par entitesDuCompte')
+})
+
+test('LE TEST QUI COMPTE : la numerotation (Q5 bis) est automatique par defaut, manuelle sur choix, rien d\'autre', () => {
+  assert.equal(EJ.validerEntite(ENTITE_OK).entite.numerotation_factures, 'auto')
+  assert.equal(EJ.validerEntite({ ...ENTITE_OK, numerotation_factures: '' }).entite.numerotation_factures, 'auto')
+  assert.equal(EJ.validerEntite({ ...ENTITE_OK, numerotation_factures: 'manuel' }).entite.numerotation_factures, 'manuel')
+  for (const mauvais of ['libre', 'AUTO', 1, true]) {
+    assert.equal(EJ.validerEntite({ ...ENTITE_OK, numerotation_factures: mauvais }).champ, 'numerotation_factures', `accepte : ${mauvais}`)
+  }
+  assert.match(SQL, /numerotation_factures text not null\s+default 'auto'/)
+  assert.match(SQL, /constraint ej_numerotation_chk check \(\s+numerotation_factures\s+in \('auto', 'manuel'\)\)/)
+  assert.ok(EJ.CHAMPS.includes('numerotation_factures'), 'rendu par entitesDuCompte')
 })
 
 test('validation : les refus nomment leur champ', () => {
@@ -408,7 +423,7 @@ test('une entite archivee : n\'est plus celle par defaut, ne se modifie plus, ne
   } finally { fini() }
 })
 
-test('LE TEST QUI COMPTE : numerotation (Q5) — reglable, jamais sous le dernier emis + 1, prefixe fige apres emission', async () => {
+test('LE TEST QUI COMPTE : numerotation (Q5, Q5 bis) — reglable avant la premiere facture de l\'annee, FIGEE ensuite', async () => {
   const { appeler, etat, fini } = monterApi()
   try {
     const id = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
@@ -421,13 +436,37 @@ test('LE TEST QUI COMPTE : numerotation (Q5) — reglable, jamais sous le dernie
     // L'etape 3 aura emis le numero 15 : la suite le sait.
     etat.tables.factures_voyageur_suites[0].dernier_emis = 15
     etat.tables.factures_voyageur_suites[0].prochain_numero = 16
-    const fige = await appeler({ methode: 'POST', corps: { action: 'numerotation', id, numerotation: { prefixe: 'XX', prochain_numero: 20 } } })
-    assert.equal(fige.code, 409); assert.equal(fige.corps.motif, 'prefixe_fige')
-    const bas = await appeler({ methode: 'POST', corps: { action: 'numerotation', id, numerotation: { prefixe: 'HS', prochain_numero: 15 } } })
-    assert.equal(bas.code, 409); assert.equal(bas.corps.motif, 'numero_trop_bas')
-    const haut = await appeler({ methode: 'POST', corps: { action: 'numerotation', id, numerotation: { prefixe: 'HS', prochain_numero: 40 } } })
-    assert.equal(haut.corps.suite.prochain, `HS-${annee}-0040`)
-    assert.equal(etat.tables.factures_voyageur_suites[0].dernier_emis, 15, 'le reglage ne touche pas au dernier emis')
+    const avant = JSON.stringify(etat.tables.factures_voyageur_suites)
+    // Plus AUCUN reglage : ni le prefixe, ni un numero plus bas, ni un numero
+    // plus haut (un trou), ni meme les valeurs actuelles.
+    for (const numerotation of [
+      { prefixe: 'XX', prochain_numero: 20 },
+      { prefixe: 'HS', prochain_numero: 15 },
+      { prefixe: 'HS', prochain_numero: 40 },
+      { prefixe: 'HS', prochain_numero: 16 }
+    ]) {
+      const r = await appeler({ methode: 'POST', corps: { action: 'numerotation', id, numerotation } })
+      assert.equal(r.code, 409, JSON.stringify(numerotation)); assert.equal(r.corps.motif, 'suite_figee')
+    }
+    assert.equal(JSON.stringify(etat.tables.factures_voyageur_suites), avant, 'la suite n\'a pas bouge')
+    const lu = await appeler()
+    assert.equal(lu.corps.numerotations[id].fige, true)
+    assert.equal(lu.corps.numerotations[id].prochain, `HS-${annee}-0016`)
+  } finally { fini() }
+})
+
+test('une entite en numerotation MANUELLE n\'a pas de suite a montrer ; une automatique, oui, non figee', async () => {
+  const { appeler, fini } = monterApi()
+  try {
+    const auto = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite
+    const manu = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'Ailleurs', numerotation_factures: 'manuel' } } })).corps.entite
+    assert.deepEqual([auto.numerotation_factures, manu.numerotation_factures], ['auto', 'manuel'])
+    const r = await appeler()
+    assert.equal(r.corps.numerotations[manu.id], undefined, 'manuelle : l\'hote saisit chaque numero a l\'emission')
+    assert.equal(r.corps.numerotations[auto.id].fige, false)
+    // Le mode se change par « modifier » ; la suite reapparait en automatique.
+    assert.equal((await appeler({ methode: 'POST', corps: { action: 'modifier', id: manu.id, entite: { ...ENTITE_OK, nom: 'Ailleurs' } } })).code, 200)
+    assert.ok((await appeler()).corps.numerotations[manu.id])
   } finally { fini() }
 })
 
