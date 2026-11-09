@@ -1111,3 +1111,40 @@ QueryBuilder qui n'expose que `select`/`insert`/`update`/`upsert`/`delete`, et
 accepte tout dans n'importe quel ordre, restent **verts**.
 `tests/stats-avis.test.js` porte désormais un double qui a la **forme** du vrai
 client et refuse cet ordre.
+
+## 16. La page `/avis` au socle V5 — 8 novembre 2026
+
+Spec du lot et maquettes : `docs/specs/avis-v5/`. Ce qui change, et ce qu'il
+faut savoir pour y toucher :
+
+- **Un appel au chargement** : `/api/ecran/avis`. Il appelle `cartesLister` et
+  `autoValidationLire` d'`api/avis.js` (exportés sous `module.exports.ecran`)
+  **tels quels** : les gardes de périmètre ne sont écrites qu'une fois. Avant :
+  trois appels `/api` et dix lectures Supabase du vieux socle, écran complet à
+  4,8 s (production, compte de Thierry, 734 séjours).
+- **« À traiter » remplace « En attente de notation »** et reçoit aussi les avis
+  **détectés** dans un message. Une carte qui n'avait qu'une détection, sans
+  évaluation, disparaît de Récents : elle n'avait rien d'autre à dire. Les
+  détections des Anciens sont servies **même section fermée**
+  (`anciens_a_traiter`, assemblées en mémoire, aucune lecture de plus).
+- **Le cache navigateur ne garde jamais les cartes** : seulement les chiffres,
+  les logements, les périodes et la publication automatique. Il ne connaît
+  pas les droits et ne se vide qu'à la déconnexion.
+- **La dernière lecture demandée gagne** (`monter` numérote ses lectures), et la
+  page peut relire avant la première réponse (`surPret`).
+- **Les textes passent par `t`** (I18n de la page). `TEXTES_FR` est le repli du
+  module, et il doit rester **identique** à `fr.json` —
+  `tests/avis-cartes-i18n.test.js` rougit sinon. Une origine que l'écran ne
+  connaît pas garde le libellé envoyé par le serveur.
+- **La photo du bien** vient de la liste `biens` de la réponse (`photo_url`),
+  retrouvée par `carte.bien_ref`. Un bien archivé n'est plus dans cette liste :
+  sa carte garde son nom, avec l'initiale à la place de la photo.
+- **Les gestes ne changent pas d'endpoint** : corriger, confirmer, saisir et
+  lister les séjours de la saisie passent toujours par `api/avis.js`, avec
+  leurs gardes d'écriture.
+- **`Server-Timing` compte les requêtes** par `lib/compte-requetes.js`
+  (`AsyncLocalStorage` sur `fetch`), parce que l'appel d'écran réutilise des
+  lectures qu'on ne peut pas compter une à une sans les réécrire.
+- **Reste du lot** : l'étape 2 met les trois chiffres en résumé
+  (`resume_bien_avis`, décision de Thierry du 8 novembre 2026), avec l'heure du
+  calcul à l'écran. La fenêtre d'évaluation est restylée dans un lot à part.

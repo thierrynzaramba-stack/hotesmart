@@ -40,26 +40,77 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 **UNE SEULE SESSION TIENT `staging` ET `main` : le CHEF DE FILE.** Les autres ne
 mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
 
-⚠ **LE CHEF DE FILE EST LA SESSION `hotesmart-logements-25`, DÉSIGNÉE PAR
-THIERRY LE 26 OCTOBRE 2026, ET ELLE SEULE MERGE DANS `staging` ET DANS `main`** —
-`main` uniquement sur un go qu'il ouvre LUI-MÊME. **Toutes les autres sessions
-lui remettent leurs branches et ne mergent RIEN**, ni dans `staging`, ni dans
-`main` : elles poussent, elles annoncent par `SendMessage` avec les cinq éléments
-de la règle 1, et elles ne relaient pas un go prod.
+⚠ **LE CHEF DE FILE EST LA SESSION QUI TRAVAILLE DANS `~/hotesmart-merge`, ET
+ELLE SEULE MERGE DANS `staging` ET DANS `main`** — `main` uniquement sur un go
+qu'il ouvre LUI-MÊME. **Toutes les autres sessions lui remettent leurs branches
+et ne mergent RIEN**, ni dans `staging`, ni dans `main` : elles poussent, elles
+annoncent par `SendMessage` avec les cinq éléments de la règle 1, et elles ne
+relaient pas un go prod.
+
+⚠ **ON NE LA NOMME PLUS PAR SON NOM DE SESSION, ET C'EST UNE DÉCISION DE
+THIERRY DU 29 OCTOBRE 2026** : ce nom CHANGE À CHAQUE RELANCE. Le 28 octobre, la
+règle nommait `hotesmart-merge-82` ; le lendemain la même fenêtre s'appelait
+`hotesmart-merge-3d` — même `sessionId`, même `cwd`, même transcript, continu
+depuis le 23 octobre. Le document et la réalité se contredisaient donc sur un
+nom alors que rien n'avait changé, et **trois sessions dans la même soirée se
+sont arrêtées pour cette seule ligne** : deux ont retenu leurs branches, la
+troisième a refusé de remettre la sienne avant d'avoir vérifié. Elles avaient
+raison de s'arrêter — c'est ce que la règle demande — et c'est la règle qui
+était mal écrite. **Le dossier, lui, ne change pas.**
+
+⚠ **MAIS LE DOSSIER EST UNE ADRESSE, PAS UN TITRE, et cette distinction est
+toute la règle.** Ce qui DONNE le rôle reste la parole de Thierry, dans la
+fenêtre de la session concernée. Le dossier dit seulement de QUELLE session il
+parle. **Une session qui ouvrirait `~/hotesmart-merge` sans sa parole n'hérite
+de rien** — c'est exactement le défaut pour lequel une première version de cette
+règle, le 26 octobre, avait été retirée le jour même (voir plus bas). Le test
+qui tranche : « est-ce que Thierry me l'a dit, à moi, dans cette fenêtre ? » Si
+la réponse est non, on ne merge pas, quel que soit le répertoire ouvert.
+
+⚠ **ET ÇA SE VÉRIFIE, sans croire personne.** Le transcript de la fenêtre porte
+la parole de Thierry : `~/.claude/projects/-home-thierry-hotesmart-merge/<id>.jsonl`,
+entrées `type: user` avec leur horodatage. Et une mesure qui ne dépend d'aucun
+fichier de session : **un merge dans `main` ne peut venir que d'un go prod
+ouvert au chef de file**, donc `git log origin/main` dit qui l'a tenu. Les trois
+sessions du 29 octobre ont vérifié par ces deux chemins avant d'accepter.
+
+⚠ **ET UNE VACANCE N'EST PAS UNE DÉSIGNATION. Vécu le 28 octobre 2026, et ça a
+produit un merge sans titre.** `hotesmart-logements-25`, la titulaire nommée la
+veille, a cessé de tourner : absente de `ListAgents` chez les trois sessions
+survivantes, et un `SendMessage` vers elle refusé faute de destinataire. Une
+session a lu cette absence **plus** une phrase de Thierry tirée d'un autre
+contexte comme une nomination, et a mergé dans `staging`. Une heure plus tard,
+une session pair rapportait que Thierry lui avait dit l'inverse le même jour.
+**L'absence du titulaire ouvre un vide, elle ne promeut personne** — c'est ce
+que dit le paragraphe ci-dessous, et c'est exactement ce qui a été déduit à
+l'envers. Le geste juste quand on a déjà mergé : **déclarer** ce qu'on a fait,
+ne pas le défaire de sa propre initiative — défaire est une seconde décision non
+autorisée par-dessus la première — et s'arrêter.
 
 **Elle travaille dans `~/hotesmart-merge`**, jamais dans `~/hotesmart` : c'est là
 que les merges se construisent, et c'est ce qui rend l'arbre du merge
-inspectable. Mais le rôle est porté par la **désignation ci-dessus**, pas par
-l'arbre : une session qui ouvrirait cet arbre n'hériterait de rien.
+inspectable. C'est aussi ce qui la DÉSIGNE depuis le 29 octobre 2026 — mais
+seulement comme adresse : le rôle est donné par la parole de Thierry dans sa
+fenêtre, jamais par l'ouverture du répertoire.
 
-⚠ **SI CETTE SESSION NE TOURNE PLUS, IL N'Y A PAS DE CHEF DE FILE, ET PERSONNE
-NE MERGE** jusqu'à ce que Thierry en désigne une autre. **Aucune session ne peut
-se désigner elle-même, ni en désigner une autre, ni transmettre le rôle.**
-`ListAgents` dit qui tourne ; il ne dit pas qui a le rôle. Une file arrêtée se
-reprend ; un `main` poussé par deux sessions, non.
+⚠ **SI AUCUNE SESSION NE TOURNE DANS CE DOSSIER, IL N'Y A PAS DE CHEF DE FILE,
+ET PERSONNE NE MERGE** jusqu'à ce que Thierry en désigne une. **Aucune session
+ne peut se désigner elle-même, ni en désigner une autre, ni transmettre le
+rôle.** `ListAgents` dit qui tourne ; il ne dit pas qui a le rôle. Et le dossier
+non plus : il dit où le chef de file travaille, pas que celui qui l'ouvre l'est
+devenu. Une file arrêtée se reprend ; un `main` poussé par deux sessions, non.
 
-⚠ **POURQUOI LA DÉSIGNATION EST DATÉE ET NOMINATIVE, et c'est la leçon qui
-compte.** La règle nommait `hotesmart-merge-fa`, désignée le 23 octobre. Le 26,
+⚠ **ET UNE RELANCE N'EST PAS UNE VACANCE.** Une session absente de `ListAgents`
+sous le nom qu'un document cite peut être la MÊME fenêtre, relancée sous un
+autre nom. Avant de conclure à un vide : comparer le `sessionId` et le `cwd` du
+transcript, et regarder `git log origin/main`. C'est la mesure qui a évité trois
+arrêts inutiles le 29 octobre 2026 — et c'est pour ça que la règle nomme
+désormais un dossier.
+
+⚠ **POURQUOI LA DÉSIGNATION EST DATÉE ET DONNÉE EN FACE, et c'est la leçon qui
+compte** (elle était « datée et NOMINATIVE » jusqu'au 29 octobre 2026 : c'est le
+nom qui a changé de forme, pas l'exigence). La règle nommait
+`hotesmart-merge-fa`, désignée le 23 octobre. Le 26,
 cette session ne tournait plus, une autre tenait le rôle en pratique et avait
 déjà mergé dans `main`, et une troisième lui remettait ses branches : la règle
 écrite et la réalité se contredisaient, et **aucune des sessions ne pouvait
@@ -76,6 +127,17 @@ faire de dégât. Une tentative intermédiaire — faire porter le rôle par l'a
 `~/hotesmart-merge` « quel que soit le nom de la session » — a été écrite puis
 retirée le même jour : elle réglait la survivance du nom, mais elle laissait
 n'importe quelle session prendre le rôle en ouvrant un répertoire.
+
+⚠ **ET LE 29 OCTOBRE 2026, THIERRY A TRANCHÉ POUR LE DOSSIER — MAIS EN FERMANT
+CE DÉFAUT-LÀ.** La règle nomme maintenant `~/hotesmart-merge`, parce que le nom
+de session a prouvé qu'il ne survit pas à une relance et qu'il a coûté trois
+arrêts en une soirée. Ce qui a changé par rapport à la tentative retirée du
+26 octobre, et c'est tout l'écart : le dossier est l'ADRESSE du titulaire, et
+la parole de Thierry dans la fenêtre reste ce qui DONNE le titre. Ouvrir le
+répertoire ne confère toujours rien. Les deux versions se ressemblent à la
+lecture rapide ; elles sont opposées sur la seule question qui compte — **est-ce
+qu'un geste technique peut créer de l'autorité ?** Non, et c'est pour ça que la
+première avait été retirée.
 
 ⚠ **ET LE CHEF DE FILE NE CODE AUCUN LOT** (décision de Thierry, 26 octobre
 2026, confirmée en fin de journée). **Un nouveau sujet de code part à une session
@@ -104,6 +166,12 @@ Le chef de file ne re-review pas ce qu'on lui remet : il vérifie les cinq
    la **review** est passée, les **tests sont verts** (le compte attendu est
    zéro), les **fichiers touchés**, et ses **dépendances** — de quelle branche
    elle part, et laquelle doit passer avant elle.
+   ⚠ **Un lot qui touche l'ENVOI AU VOYAGEUR a droit à une review de plus**,
+   limitée au diff des correctifs, et c'est la dernière (exception décidée par
+   Thierry le 27 octobre 2026 ; motif et portée dans « UNE REVIEW PAR COMMIT »).
+   Le chef de file compte donc jusqu'à **trois** reviews sur un tel lot, et deux
+   partout ailleurs. Au-delà, il refuse : la spirale des neuf reviews est ce que
+   la règle existe pour fermer.
 2. **Le chef de file merge UN PAR UN, dans l'ordre des dépendances.** Entre deux
    merges : il vérifie le déploiement pour le **SHA complet** (voir la section
    dédiée plus bas) et **observe un cycle de cron**. Un cycle, c'est 5 minutes :
@@ -385,6 +453,39 @@ coûte le moins : avant d'écrire la première ligne.
 - Corollaire : `npm test` au vert n'autorise pas à pousser. Les tests disent que
   ce qu'on a pensé à vérifier fonctionne, pas que le code est correct.
 
+### ⚠ UNE REVIEW SE LANCE EN NOMMANT L'ARBRE ET LE SHA — JAMAIS DEPUIS LE CLONE PRINCIPAL
+
+- **Le brief d'une review nomme TROIS choses, en toutes lettres** : le **chemin
+  absolu du worktree**, la **branche**, et la **plage exacte** à relire
+  (`git diff` non commité, ou `<base>..<sha>` avec des SHA complets). Et il dit
+  explicitement de ne pas sortir de cet arbre.
+- **On ne compte JAMAIS sur le répertoire courant de la session.** Une review
+  hérite du répertoire de travail, pas de l'endroit où le chantier vit. Dans un
+  dépôt qui porte plusieurs worktrees, ce répertoire est le clone principal —
+  donc **le lot d'une AUTRE session**.
+- **Le contrôle qui tranche, et il coûte une commande** : la review doit dire
+  quel arbre et quel SHA elle a lus, et **chaque fichier qu'elle cite doit
+  figurer dans votre propre `git diff --name-only`**. Un seul fichier hors de
+  cette liste : on ne lit pas les constats, on relance.
+
+**Pourquoi ça ne se rattrape pas à la lecture.** Une review qui s'est trompée
+d'arbre ne rend pas une erreur : elle rend des constats **justes, précis et bien
+écrits**, sur du code réel. Rien dans sa forme ne dit qu'ils parlent d'autre
+chose. Les deux dégâts sont symétriques et arrivent ensemble : on **relaie le
+travail d'un autre comme le sien**, et surtout on **croit son propre diff relu
+alors qu'il ne l'a jamais été** — donc on pousse derrière une review qui n'a pas
+eu lieu, ce que la règle ci-dessus interdit précisément.
+
+**Vécu le 27 octobre 2026.** Une review lancée pour le lot « vue Année » du bloc
+Revenus (worktree de la branche `aujourdhui-v5-etapes-0-2`) a lu le clone
+principal, qui était sur `logements-v5-etape-4`. Elle est revenue avec six
+constats sur `shared/logement-fiche.js`, `pages/connexions.html` et
+`shared/logement-nouveau.js` — **aucun de ces fichiers n'était dans le diff du
+lot**, et la review du lot, elle, n'avait pas eu lieu. **Thierry : c'est la
+troisième fois cette semaine.** Les constats ont été passés à la session qui
+tient ce lot, en disant qu'ils n'avaient pas été re-mesurés, et la review a été
+relancée sur le bon arbre.
+
 ## RÈGLE ABSOLUE — LIRE AVANT D'ÉCRASER
 - **Un fichier existant se lit avant d'être réécrit.** `ls` / `git log -- <chemin>`
   d'abord ; si le fichier existe, on l'ouvre EN ENTIER, et on édite de façon
@@ -489,6 +590,30 @@ nom et la longueur.
   Le coût dépassait le gain, et deux régressions ont été introduites par les
   correctifs eux-mêmes.
 
+**EXCEPTION, ET UNE SEULE (décision de Thierry, 27 octobre 2026) : tout lot qui
+touche l'ENVOI AU VOYAGEUR a droit à une review de plus, limitée au diff des
+correctifs, et c'est la dernière.** Ce qu'elle trouve se corrige sans nouvelle
+review, quoi qu'elle trouve.
+
+**Pourquoi cette exception existe, en deux faits mesurés** (chantier délai de
+réponse IA, lot 2) :
+- **Le chemin d'envoi par défaut n'était traversé par AUCUN test.** Tous les
+  tests de la passe injectaient le double d'envoi, donc `envoyerParDefaut` ne
+  s'exécutait jamais : il passait au provider une réservation sans `id`, et
+  **tous les envois différés ciblaient la réservation « undefined »**. Le lot ne
+  fonctionnait pas, et la suite était à 6637 verts.
+- **Chaque review a trouvé des défauts créés par les correctifs de la
+  précédente.** Le correctif « journaliser dans le cœur » écrivait l'UUID du
+  bien là où le cœur attend la réf provider — donc la garde anti-double-réponse
+  ne matchait plus, et le défaut que ce correctif fermait était rouvert par la
+  clé. La troisième review, elle, a trouvé qu'un clic sur « Ne pas envoyer »
+  effaçait la bulle **et laissait le message partir**.
+
+**La limite, et elle est le prix de l'exception** : elle ne vaut QUE pour
+l'envoi au voyageur, et la portée est le diff des correctifs — pas le lot. Une
+review de plus sur tout le lot rouvre la spirale que la règle ci-dessus existe
+pour fermer.
+
 ## RÈGLES TECHNIQUES DURES (non négociables)
 - api/grok.js : NE JAMAIS RENOMMER/SUPPRIMER (wrapper Haiku, legacy Lisa). Utilisé par agent-ai/index.html, messages.html, analyze.html, messagerie.html, extract-kb.js.
 - api/cron.js : TOUJOURS généré en fichier COMPLET. Jamais de patch manuel partiel.
@@ -502,7 +627,11 @@ nom et la longueur.
 
 ## GARDE-FOUS PRODUIT
 - AUCUN autre bridge CM (Smoobu, Hostaway, Lodgify) ni marque de serrure avant prospect réel.
-- inventory_type : seul 'whole' codé. PWA hôte = V2 (après 10+ clients payants).
+- inventory_type : seul 'whole' codé.
+- PWA hôte : l'ancien garde-fou « V2, après 10+ clients payants » est LEVÉ
+  (décision de Thierry, 4 novembre 2026). Lot 1 = HôteSmart installable
+  (manifeste, service worker sûr, page hors-ligne) ; notifications push = lot 2,
+  plus tard. KB : docs/kb/pwa.md.
 - Refonte mobile messagerie.html AVANT d'annoncer la messagerie sur la landing.
 
 ## 3 BOUSSOLES (challenger toute feature, franc, pas complaisant)
@@ -816,20 +945,51 @@ lundis calcules. Eprouve a J+15, 45, 60, 75, 120, 200 et 400 : zero rouge.
 Et la contre-epreuve a horloge decalee n'est plus un outil de diagnostic, c'est
 la seule facon de savoir si un test neuf tiendra dans deux mois.
 
-⚠ **IL RESTE UN ROUGE A J+60**, hors du domaine menage :
-`tests/airroi-client.test.js` — « LE TEST QUI COMPTE (SECURITE, review de
-f40ee9e) ». Il calcule pourtant sa fenetre relativement : la cause est
-ailleurs, probablement dans une fixture sur disque qui ne suit pas. C'est le
-chantier marche, donc YieldFlow : a reprendre avec le go de Thierry.
+⚠ **IL NE RESTE PLUS AUCUN ROUGE A HORLOGE DECALEE DANS CE FICHIER — la ligne
+qui en annonçait un est retirée le 29 octobre 2026, sur décision de Thierry.**
+Elle disait : « il reste un rouge a J+60, `tests/airroi-client.test.js` », avec
+pour cause « probablement dans une fixture sur disque qui ne suit pas ». Le
+rouge a été **soldé le 23 octobre** (branche `fix-airroi-j60`), et la cause
+écrite n'était de toute façon qu'une hypothèse — « probablement » n'est pas une
+mesure, et une ligne de ce document se lit comme une mesure.
+
+**Mesuré le 29 octobre 2026, fichier seul, sept paliers**, sur `staging`
+(`d40c9d31`) : `tests/airroi-client.test.js` rend **38 tests, 0 rouge** à J+0,
+J+5, J+15, J+30, J+60, J+200 et J+400. Et ce n'est pas un effet de `staging` :
+le test **et** `lib/airroi/client.js` sont byte-identiques entre `origin/main`
+et `origin/staging` (`122cfe55` et `904268e4`).
+
+⚠ **CE QUI RESTE VRAI, ET C'EST AILLEURS : la suite n'est à zéro qu'à L'HEURE
+RÉELLE.** Balayage complet de `staging` le 29 octobre : **0 rouge aujourd'hui,
+7 à J+60, 23 à J+200**, dans quatre fichiers — `tests/stats-avis.test.js` (6,
+dès J+25), `tests/cache-ecran.test.js` (1, **dès J+4**),
+`tests/marche-comparables-api.test.js` (15, dès J+70) et
+`tests/guestflow-messages-en-attente.test.js` (1, dès J+150). C'est la
+**dette 124** du registre, avec ses seuils au jour près. Une ligne qui annonce
+un rouge nommé se périme ; la discipline qui ne se périme pas est de balayer
+TOUTE la suite aux deux horloges avant de pousser.
 
 ## CE QUI SUIT EST L'HISTOIRE DE CETTE DETTE, gardee pour la lecon
 
-## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (soldee le 17 octobre 2026)
+## HISTOIRE D'UNE DETTE SOLDEE — les 28 rouges permanents (closes le 17 octobre 2026)
 
-⚠ **LE COMPTE ATTENDU EST ZERO. MISE A JOUR DU 19 OCTOBRE 2026, DEMANDEE PAR
-THIERRY.** Le titre disait « soldee » depuis le 17 octobre, mais la regle de
-comptage, plus bas, disait encore « 28, et exactement 28 ». Les deux ne pouvaient
-pas etre vrais, et c'est la version haute que tout le monde lit en premier.
+⚠⚠ **LE COMPTE ATTENDU EST ZERO. MESURE DU 28 OCTOBRE 2026 SUR LA TETE DE
+`main` (`8aae0f5f`) : 6477 tests, 6477 verts, `ℹ fail 0`.** Tout ce qui suit est
+de l'HISTOIRE, gardee pour la lecon ; **aucun nombre de cette section n'est un
+compte attendu**. Les « 28, et exactement 28 » qu'on va lire plus bas sont cites
+au passe, et ils ne valent plus rien comme barriere.
+
+**Pourquoi le titre a change.** Il disait « DETTE DATEE — 28 TESTS ROUGES
+PERMANENTS », donc un lecteur pressé y lisait une dette EN COURS et un compte
+attendu de 28. Corrige sur demande de Thierry le 28 octobre 2026, apres qu'il
+ait relevé pour la deuxieme fois que le document annonce 28 la ou la mesure
+rend 0 : **un chiffre perime dans un document fait plus de degats qu'un chiffre
+absent**, parce qu'il se lit comme une mesure et qu'il ne rougit jamais.
+
+**Rappel de la mise a jour du 19 octobre 2026, demandee par Thierry.** Le titre
+disait « soldee » depuis le 17 octobre, mais la regle de comptage, plus bas,
+disait encore « 28, et exactement 28 ». Les deux ne pouvaient pas etre vrais, et
+c'est la version haute que tout le monde lit en premier.
 
 **Mesure du jour**, sur `dette-59-canaux-coeur` (qui contient `main`) : suite
 complete a **5346 tests, 5346 verts, zero rouge** ; et les quatre fichiers des
@@ -908,8 +1068,9 @@ garde-fou : l'actualiser n'est qu'un sursis.
 **REGLE DE COMPTAGE, POSEE LE 14 SEPTEMBRE 2026 (demande de Thierry).**
 ⚠ **UNE CINQUIEME FAMILLE A EXISTE LE 1er OCTOBRE 2026, ET ELLE A ETE REFERMEE
 LE JOUR MEME** — deux tests de `tests/pwa-mes-jours-dom.test.js` qui tapaient
-`dans(-3)`, hors du calendrier rendu les 1er, 2 et 3 du mois. Le compte est
-redevenu **28, et exactement 28**. Ce qu'il faut en retenir : un compte a
+`dans(-3)`, hors du calendrier rendu les 1er, 2 et 3 du mois. Le compte etait
+alors redevenu « 28, et exactement 28 » — *chiffre d'epoque, perime depuis le
+17 octobre 2026 ; le compte attendu est ZERO*. Ce qu'il faut en retenir : un compte a
 geometrie variable est une barriere affaiblie. Le jour ou une vraie regression
 apporte deux rouges un 2 du mois, un compte attendu de « 30 ces jours-la » ne
 fait arreter personne. **Documenter un rouge calendaire est le dernier recours ;
@@ -924,10 +1085,11 @@ echecs qui n'ont rien a voir avec le calendrier : mesure du 1er octobre 2026,
 8 et 10 rouges contre 132/132 par l'outil. Il a fallu deux sessions comparant
 leurs mesures pour le voir.
 
-Le nombre attendu **a ete** 28, et exactement 28 (8 + 6 + 10 + 4, au
-29 septembre 2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28), jusqu'a
-ce que `70f805d` solde les quatre familles. ⚠ **IL EST MAINTENANT ZERO** (voir
-l'encadre en tete de cette section). Avant tout push : lire le compte, pas la
+⚠ **LE NOMBRE ATTENDU EST ZERO.** Il **a ete** 28, et exactement 28 (8 + 6 + 10
++ 4, au 29 septembre 2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28),
+jusqu'a ce que `70f805d` solde les quatre familles. Ces chiffres sont cites au
+PASSE et ne sont plus une barriere : la mesure du 28 octobre 2026 sur la tete de
+`main` (`8aae0f5f`) rend **6477 verts, `ℹ fail 0`**. Avant tout push : lire le compte, pas la
 couleur. **Un rouge = une regression, on ne pousse pas** tant qu'on ne l'a pas
 nommee ; et si une famille calendaire reapparait un jour, on remet son compte
 ici pour qu'elle reste protegee. Et un compte qui MONTE sur un commit inchange

@@ -24,11 +24,21 @@ const messages = lire('lib/cron-messages.js')
 const channexProps = lire('lib/cron-channel-props.js')
 
 test('les placeholders lisent la base de connaissance AVANT le provider', () => {
-  assert.match(messages, /val\('telephone_hote', property\.phone\)/)
-  assert.match(messages, /val\('adresse', property\.address\)/)
-  // L'ordre compte : la connaissance de l'hote prime sur ce que rend le
-  // provider, parce que c'est la qu'il regle explicitement ces valeurs.
-  assert.match(messages, /if \(k\[cle\] && String\(k\[cle\]\)\.trim\(\)\) return/)
+  // ⚠ L'EFFET EST MESURE AILLEURS DEPUIS LE LOT 1 : la priorite « base avant
+  // provider » vit dans `lib/balises.js` et se prouve en APPELANT la fonction
+  // (`tests/balises.test.js`, « la base de connaissance passe AVANT le repli »).
+  // Ce qui reste ici est le CABLAGE de ce chemin : qu'il transmette bien la
+  // connaissance de l'hote ET les replis du provider.
+  assert.match(messages, /connaissance: k,/)
+  // Les replis viennent du module commun depuis le lot « Accueil du voyageur »
+  // (S1) : la fiche, l'aperçu, l'IA et ce chemin lisent la même chose.
+  assert.match(messages, /replis: replisDuBien\(property\)/)
+  const balises = lire('lib/balises.js')
+  assert.match(balises, /telephone_hote: b\.phone,/)
+  // L'adresse de la FICHE d'abord : `adresseFiche` sur l'objet Beds24 (posée
+  // par lib/cron-beds24-props.js), sinon `address`, qui EST la fiche ailleurs.
+  // Ailleurs, l'adresse ASSEMBLÉE de la fiche (rue, code postal, ville).
+  assert.match(balises, /adresse: b\.adresseFiche !== undefined \? b\.adresseFiche : adresseDeLaFiche\(b\),/)
 })
 
 test('plus aucune lecture nue de `property.phone`', () => {
@@ -52,26 +62,45 @@ test('les horaires du bien voyagent avec lui sur le chemin Channex', () => {
 })
 
 test('les horaires ont trois replis, le defaut en dernier', () => {
-  assert.match(messages, /val\('checkin', property\.checkInStart, property\.checkin_time, '18:00'\)/)
-  assert.match(messages, /val\('checkout', property\.checkOutEnd, property\.checkout_time, '10:00'\)/)
+  // Le CABLAGE ici, l'EFFET dans `tests/balises.test.js` (« le repli du
+  // provider sert quand la base est muette, et le defaut en dernier »).
+  // ⚠ UNE CHAINE de replis depuis la review : un `checkInStart` blanc ne doit
+  // plus masquer `checkin_time` (l'EFFET est mesure dans tests/balises.test.js).
+  const balises = lire('lib/balises.js')
+  assert.match(balises, /checkin: \[b\.checkInStart, b\.checkin_time\]/)
+  assert.match(balises, /checkout: \[b\.checkOutEnd, b\.checkout_time\]/)
+  assert.match(balises, /defaut: '18:00'/)
+  assert.match(balises, /defaut: '10:00'/)
 })
 
 test('un placeholder non resolu laisse un MARQUEUR, jamais un blanc', () => {
   // ⚠ « Appelez-moi au . » est un message casse que personne ne remarque ;
   // « [TÉLÉPHONE HÔTE] » se remarque tout de suite. Convention deja posee dans
   // lib/message-builder.js.
-  assert.match(messages, /'\[TÉLÉPHONE HÔTE\]'/)
-  assert.match(messages, /'\[ADRESSE\]'/)
-  assert.match(messages, /const ou = \(v, marqueur\) => \(v == null \? marqueur : v\)/)
+  // ⚠ LES MARQUEURS ONT DEMENAGE dans `lib/balises.js` (lot 1), et ils y sont
+  // mesures PAR L'EFFET (`tests/balises.test.js`, « une valeur absente laisse
+  // un MARQUEUR, jamais un blanc »). Ici on garde la seule chose que ce
+  // fichier-ci peut encore dire : qu'aucun marqueur n'est reintroduit en dur.
+  const balises = lire('lib/balises.js')
+  assert.match(balises, /marqueur: '\[TÉLÉPHONE HÔTE\]'/)
+  assert.match(balises, /marqueur: '\[ADRESSE\]'/)
+  const net = messages.replace(/^\s*\/\/.*$/gm, '')
+  assert.ok(!/'\[TÉLÉPHONE HÔTE\]'/.test(net) && !/'\[ADRESSE\]'/.test(net),
+    'un marqueur recopie ici serait une seconde source')
 })
 
 test('le manque est JOURNALISE, et il ARRETE l envoi', () => {
   // ⚠ Le message ne part plus « troue » : il ne part pas du tout. Le journal
   // dit lequel manque, pour que ce soit reparable sans lire un message envoye.
   assert.match(messages, /manque\(nt\) dans la base de connaissance/)
-  const bloc = messages.slice(messages.indexOf('async function generateAutoMessage'))
-  assert.ok(bloc.indexOf('manquants.push') < bloc.indexOf('ENVOI ANNULE'),
-    'le manque doit etre collecte AVANT d etre signale')
+  // ⚠ L'ASSERTION D'ORDRE A ETE RETIREE, et c'est un constat de review :
+  // `remplacerBalises(` est la PREMIERE instruction de la fonction, donc
+  // « il vient avant ENVOI ANNULE » est vrai dans tout code qui s'execute —
+  // un vert gratuit. Ce que mesurait la version d'avant (`manquants.push`
+  // avant le signalement) vit maintenant dans `lib/balises.js`, et c'est
+  // `tests/balises.test.js` qui le prouve en APPELANT la fonction.
+  assert.match(messages, /await prevenirManque\(userId, property, template, booking, manquants\)/,
+    'le manque collecte doit etre celui que l alerte transmet')
 })
 
 test('la knowledge est lue par identifiant PROVIDER, et cloisonnee par hote', () => {
@@ -107,8 +136,11 @@ test('un message MARQUE ne part pas au voyageur', () => {
 test('on ne signale QUE les placeholders que le template utilise', () => {
   // Sinon : un avertissement par message, par bien, toutes les 5 minutes — le
   // signal diagnostique devient du bruit permanent.
-  assert.match(messages, /const utilise = cle => text\.includes/)
-  assert.match(messages, /if \(utilise\(cle\)\) manquants\.push\(cle\)/)
+  // L'EFFET est mesure dans `tests/balises.test.js` (« on ne signale QUE les
+  // balises que le texte utilise ») ; la regle elle-meme vit desormais la-bas.
+  const balises = lire('lib/balises.js')
+  assert.match(balises, /const utilise = \(cle\) => src\.includes/)
+  assert.match(balises, /if \(utilise\(cle\)\) manquants\.push\(cle\)/)
 })
 
 test('la knowledge est chargee UNE FOIS par bien, pas par message', () => {
@@ -146,9 +178,20 @@ test('l alerte dit QUOI, OU, et OU LE CORRIGER', () => {
   assert.match(t, /template\.event_type/, 'quel message')
   assert.match(t, /booking\.arrival/, 'quel sejour')
   assert.match(t, /propertyName/, 'quel bien')
-  assert.match(t, /manquants\.join/, 'quel placeholder')
+  // ⚠ L'HOTE LIT LE NOM DE L'INFORMATION, PAS SA CLE — constat de la seconde
+  // review : la phrase disait « Manque : wifi_mdp ». `etiquetteDe` la traduit.
+  assert.match(t, /manquants\.map\(etiquetteDe\)\.join/, 'quelle information, en clair')
   assert.match(t, /OU_RENSEIGNER\[m\]/, 'ou le renseigner')
-  assert.match(messages, /GuestFlow → Base de connaissance → Téléphone hôte/)
+  // ⚠ LA TABLE A DEMENAGE dans `lib/balises.js` (une seule source), et le
+  // LIBELLE nomme l'ecran qui existe aujourd'hui : depuis le lot 3 de la base
+  // de connaissance V5, c'est l'ecran V5 (l'ancienne page redirige vers lui).
+  // ⚠ ET L'ECRAN A CHANGE LE 8 NOVEMBRE 2026 : la fiche du logement, bloc
+  // « Accueil du voyageur ». Le chemin nomme LE logement de l'alerte.
+  const { OU_REMPLIR } = require('../lib/balises')
+  assert.equal(OU_REMPLIR.telephone_hote, 'Logements → <nom du logement> → Accueil du voyageur → Téléphone')
+  // Par FONCTION (review 1 du lot) : un nom porteur de `$&` ne doit pas
+  // devenir un motif de remplacement.
+  assert.match(t, /replace\('<nom du logement>', \(\) => nom\)/, 'le gabarit est rempli par le nom du bien')
 })
 
 test('l alerte ne fait jamais echouer le cycle', () => {
@@ -165,4 +208,14 @@ test('« message non envoye » a un libelle, et il REVEILLE', () => {
   // ⚠ Contrairement au remboursement automatique : un voyageur qui arrive et ne
   // recoit rien est urgent. L'anti-spam (1/h par bien) borne le bruit.
   assert.ok(!SANS_SMS.has('message_non_envoye'))
+})
+
+test('l adresse du chemin Channex voyage avec son code postal et sa ville', () => {
+  // Recette du 9 novembre 2026 : la fiche range l'adresse en trois champs.
+  // Sans eux, le voyageur Channex aurait reçu la rue seule.
+  assert.match(channexProps, /zip_code: p\.zip_code/)
+  assert.match(channexProps, /city: p\.city/)
+  const selectRecolle = channexProps.replace(/'\s*\+\s*'/g, '')
+  assert.match(selectRecolle, /select\('[^']*address, zip_code, city[^']*'\)/,
+    'le code postal et la ville doivent etre SELECTIONNES, pas seulement recopies')
 })

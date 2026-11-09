@@ -271,7 +271,8 @@ import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCou
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
 import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie, canauxDeVente,
-  listeDeSuppression, noteDeSuppression } from '/shared/logement-fiche.js'
+  listeDeSuppression, noteDeSuppression, listeDArchivage, accueilHtml } from '/shared/logement-fiche.js'
+import { enregistrerInfo } from '/shared/accueil-voyageur.js'
 // ⚠ LA PRÉPARATION DE LA PHOTO EST PARTAGÉE avec l'écran d'aujourd'hui : elle
 // porte deux leçons de revue (une image sans dimensions, l'échelle de qualité
 // qui décide « trop lourde ») et une seconde copie les perdrait.
@@ -559,7 +560,95 @@ $('[data-bind="fiche"]').addEventListener('change', (ev) => {
   if (mode) changerMode(mode)
 })
 
+// ─── Accueil du voyageur : une info à la fois, écrite sur place ────────────
+//
+// ⚠ LE BLOC SE REPEINT SEUL, JAMAIS LA FICHE ENTIÈRE : le bloc « Le logement »
+// porte des cases en cours de saisie, et repeindre la fiche les effacerait.
+// ⚠ ET L'ÉCRITURE PASSE PAR LE WRITER DE LA BASE (titulaire seul, garde
+// serveur), par l'UUID du bien : la fiche ne connaît pas la référence du
+// partenaire.
+let accueilEnEdition = null
+let accueilEnVol = false
+function peindreAccueil () {
+  const section = $('[data-bloc="accueil"]')
+  if (!section || !ficheCourante) return
+  const titre = section.querySelector('.fic-bloc__titre')
+  const corps = accueilHtml(ficheCourante, OUTILS, { enEdition: accueilEnEdition })
+  section.innerHTML = (titre ? titre.outerHTML : '') + (corps || '')
+  I18n.apply(section)
+}
+function erreurAccueil (texte) {
+  const e = $('[data-bind="accueil-erreur"]')
+  if (!e) return
+  e.hidden = !texte
+  e.textContent = texte || ''
+}
+async function enregistrerAccueil (cle) {
+  if (accueilEnVol || !ficheCourante || !bienCourant) return
+  const champ = $('[data-bloc="accueil"] [data-acc-saisie]')
+  if (!champ) return
+  const valeur = champ.value
+  accueilEnVol = true
+  for (const b of document.querySelectorAll('[data-bloc="accueil"] button')) b.disabled = true
+  // ⚠ ÉCRIRE ET RELIRE SONT DEUX ÉCHECS DIFFÉRENTS (review 1 du lot) : une
+  // relecture tombée après une écriture réussie disait « pas enregistrée », et
+  // l'hôte retapait une info déjà en base.
+  let ecrit = false
+  try {
+    await enregistrerInfo((chemin, corps) => api.connaissance.ecrire(corps), { bienId: bienCourant.id, cle, valeur })
+    ecrit = true
+    // Relu au serveur : l'état (« À remplir », « synchronisée », « par défaut »)
+    // vient de la même règle que l'envoi, il ne se devine pas ici.
+    const f = await api.logement.fiche(idDuBien)
+    // Le bloc relu peut être illisible (`indisponibles`) : on reprend CE drapeau
+    // seulement, les autres blocs n'ont pas été repeints.
+    const autres = (ficheCourante.indisponibles || []).filter(n => n !== 'accueil')
+    const illisible = (f.indisponibles || []).includes('accueil')
+    ficheCourante = { ...ficheCourante, accueil: f.accueil,
+      indisponibles: illisible ? [...autres, 'accueil'] : autres }
+    accueilEnEdition = null
+    peindreAccueil()
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    if (ecrit) {
+      accueilEnEdition = null
+      peindreAccueil()
+      erreurAccueil(t('fiche.accueil_relu_echec'))
+      return
+    }
+    peindreAccueil()
+    const neuf = $('[data-bloc="accueil"] [data-acc-saisie]')
+    if (neuf) neuf.value = valeur
+    erreurAccueil(t(e.status === 403 ? 'fiche.accueil_refus' : 'fiche.accueil_echec'))
+  } finally {
+    accueilEnVol = false
+    for (const b of document.querySelectorAll('[data-bloc="accueil"] button')) b.disabled = false
+  }
+}
+$('[data-bind="fiche"]').addEventListener('keydown', (ev) => {
+  if (!ev.target.matches || !ev.target.matches('[data-bloc="accueil"] [data-acc-saisie]')) return
+  if (ev.key === 'Enter') { ev.preventDefault(); enregistrerAccueil(accueilEnEdition) }
+  if (ev.key === 'Escape') { ev.preventDefault(); accueilEnEdition = null; peindreAccueil() }
+})
+
 $('[data-bind="fiche"]').addEventListener('click', (ev) => {
+  const accModifier = ev.target.closest('[data-acc-modifier]')
+  if (accModifier) {
+    if (accueilEnVol) return
+    accueilEnEdition = accModifier.dataset.accModifier
+    peindreAccueil()
+    const champ = $('[data-bloc="accueil"] [data-acc-saisie]')
+    if (champ) champ.focus()
+    return
+  }
+  if (ev.target.closest('[data-bloc="accueil"] [data-acc-annuler]')) {
+    if (accueilEnVol) return
+    accueilEnEdition = null
+    peindreAccueil()
+    return
+  }
+  const accEnregistrer = ev.target.closest('[data-acc-enregistrer]')
+  if (accEnregistrer) { enregistrerAccueil(accEnregistrer.dataset.accEnregistrer); return }
   const bouton = ev.target.closest('[data-bind="enregistrer"]')
   if (bouton) { envoyerBloc(bouton); return }
   const bascule = ev.target.closest('[data-bind="assistant"]')
@@ -567,8 +656,33 @@ $('[data-bind="fiche"]').addEventListener('click', (ev) => {
   const pub = ev.target.closest('[data-bind="publier"]')
   if (pub) { publierPrix(pub); return }
   const sup = ev.target.closest('[data-bind="supprimer"]')
-  if (sup) supprimerLogement(sup)
+  if (sup) { supprimerLogement(sup); return }
+  const arc = ev.target.closest('[data-bind="archiver"]')
+  if (arc) { archiverLogement(arc); return }
+  // Facture voyageur, étape 1b : la fenêtre de l'entité juridique.
+  if (ev.target.closest('[data-bind="facturation"]')) { ouvrirFacturation(); return }
+  const rea = ev.target.closest('[data-bind="reactiver"]')
+  if (rea) reactiverLogement(rea)
 })
+
+// ─── Facturation : la fenêtre de l'entité juridique (facture voyageur, 1b) ──
+//
+// D2 bis (Thierry, 9 novembre 2026) : l'entité qui émet les factures de ce
+// logement se choisit ICI. Tout le geste vit dans shared/logement-facturation.js
+// (testé dans un DOM), chargé AU CLIC avec la fenêtre : la fiche n'en paie rien
+// tant qu'on ne l'ouvre pas.
+async function ouvrirFacturation () {
+  if (!ficheCourante) return
+  try {
+    const m = await import('/shared/logement-facturation.js')
+    await m.ouvrirFacturation({
+      doc: document, api: api.entitesJuridiques, fiche: () => ficheCourante, idDuBien,
+      outils: OUTILS, langue: I18n.lang || 'fr'
+    })
+  } catch (e) {
+    logger.error('Logement', 'fenetre facturation : ' + e.message)
+  }
+}
 
 // ─── Le dialogue partagé : couper l'assistant, publier, supprimer ─────────
 //
@@ -871,6 +985,107 @@ async function supprimerLogement (bouton) {
   }
 }
 
+// ─── Archiver, et ranimer ──────────────────────────────────────────────────
+//
+// Lot « archiver un bien », etape 4. Go de Thierry du 31 octobre 2026.
+//
+// ⚠ ARCHIVER N'EST PAS SUPPRIMER, et le protocole le montre : pas de frappe du
+// nom, pas de bouton rouge, et la confirmation enumere ce qui est GARDE avant ce
+// qui s'arrete. La frappe du nom est « la seule garde qui demande de LIRE ce
+// qu'on supprime » — la demander pour un geste reversible la banaliserait.
+async function archiverLogement (bouton) {
+  const zone = document.querySelector('.fic-archiver')
+  bouton.disabled = true
+  direEtatArchive(zone, 'encours', t('fiche.enregistrement'))
+  let avant = null
+  try {
+    const r = await api.logement.compterArchivage(idDuBien)
+    avant = (r && r.archivage) || null
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    // ⚠ `null` PARTOUT, PAS DES ZEROS. `listeDArchivage` dira « nous n'avons
+    // pas pu compter », ce qui est exactement vrai — et surtout il ne dira pas
+    // « aucun sejour a venir », qui serait une affirmation inventee.
+    avant = { sejours_a_venir: null, taches_en_vol: null, pilote_actif: null, etait_facture: null }
+  }
+  direEtatArchive(zone, '', '')
+  bouton.disabled = false
+
+  const ok = await demander({
+    titre: t('fiche.archiver_titre'),
+    texte: t('fiche.archiver_texte'),
+    liste: listeDArchivage(avant, t),
+    ok: t('fiche.archiver_ok')
+  })
+  if (!ok) return
+
+  bouton.disabled = true
+  direEtatArchive(zone, 'encours', t('fiche.enregistrement'))
+  try {
+    const r = await api.logement.archiver(idDuBien, null)
+    // ⚠ UN ECHEC PARTIEL SE LIT. Le bien est archive — donc hors des boucles —
+    // mais si les taches IA n'ont pas pu etre closes, l'hote doit le savoir :
+    // elles resteraient dans « A valider ». Le serveur les rend dans `rates`.
+    if (r && Array.isArray(r.rates) && r.rates.length) {
+      logger.error('Logement', 'archivage partiel', { rates: r.rates })
+      direEtatArchive(zone, 'erreur', t('fiche.archive_partiel'))
+      bouton.disabled = false
+      return
+    }
+    // ⚠ LE NOMBRE DE MENAGES CREES SE DIT, et seulement s'il y en a (demande de
+    // Thierry du 3 novembre 2026). L'archivage cree desormais les menages de
+    // tous les sejours a venir, y compris au-dela des 180 jours du cron : sans
+    // cette phrase, l'hote ne saurait pas que la prestataire a du travail
+    // programme sur un logement qu'il vient de ranger.
+    //
+    // ⚠ `null` N'EST PAS `0`, et les deux se taisent ici pour des raisons
+    // differentes : `0` veut dire « tous les menages existaient deja », `null`
+    // « on n'a pas pu le savoir ». Annoncer « 0 ménage créé » sur une ignorance
+    // serait une affirmation fausse ; l'echec, lui, est deja dans `rates`.
+    const n = r && Number.isFinite(r.menages_crees) ? r.menages_crees : 0
+    direEtatArchive(zone, '', n > 0
+      ? t('fiche.archive_fait_menages', { n })
+      : t('fiche.archive_fait'))
+    await charger()
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    direEtatArchive(zone, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+    bouton.disabled = false
+  }
+}
+
+async function reactiverLogement (bouton) {
+  const zone = document.querySelector('.fic-archiver')
+  const ok = await demander({
+    titre: t('fiche.reactiver_titre'),
+    texte: t('fiche.reactiver_texte'),
+    ok: t('fiche.reactiver_ok')
+  })
+  if (!ok) return
+  bouton.disabled = true
+  direEtatArchive(zone, 'encours', t('fiche.enregistrement'))
+  try {
+    await api.logement.reactiver(idDuBien)
+    direEtatArchive(zone, '', t('fiche.reactive_fait'))
+    await charger()
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    direEtatArchive(zone, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+    bouton.disabled = false
+  }
+}
+
+// L'etat du bloc d'archive. ⚠ SES PROPRES ATTACHES (`data-etat-archive`,
+// `data-erreur-archive`) : partager celles du bloc « Supprimer » ferait ecrire
+// le resultat d'un geste dans le message de l'autre.
+function direEtatArchive (zone, etat, texte) {
+  if (!zone) return
+  const e = zone.querySelector('[data-etat-archive]')
+  const err = zone.querySelector('[data-erreur-archive]')
+  if (e) { e.textContent = etat === 'erreur' ? '' : (texte || ''); e.dataset.etat = etat || '' }
+  if (err) { err.hidden = etat !== 'erreur'; err.textContent = etat === 'erreur' ? (texte || '') : '' }
+}
+
 let enVol = false
 async function charger () {
   if (enVol) return
@@ -888,6 +1103,7 @@ async function charger () {
     // gardé par `reglages: write` ; ici on ne fait que ne pas le proposer.
     bienCourant = f.bien
     ficheCourante = f
+    accueilEnEdition = null
     // ⚠ LE REFUS DU SERVEUR EST SOUVERAIN, `peutEcrire` est la SECONDE garde
     // (constat de sécurité de la revue de l'étape 3, même famille que celui du
     // 21 octobre sur Supprimer). `peutEcrire` répond pour le COMPTE COURANT du

@@ -48,6 +48,18 @@
   --canal-direct: #0E1726;   /* la réservation directe est à NOUS : bleu nuit */
   --on-canal: #FFFFFF;
 
+  /* ⚠ UN SÉJOUR RÉSERVÉ N'EST PAS UN NIVEAU DE PRIX — décision de Thierry du
+     30 octobre 2026. Les barres de séjour de « Ce qui fait bouger vos prix »
+     empilent quatre années : UNE seule teinte à opacité décroissante
+     (100 / 60 / 40 / 25 % pour cette année, N-1, N-2, N-3), texte blanc sur
+     les deux premières. Sa raison, dans ses mots : « une teinte, des
+     transparences, aucune confusion avec un niveau ».
+     La maquette proposait #3F6F99, le bleu du niveau « Très haut » de SA
+     palette ; elle a été écartée le 30 octobre, et avec elle ce bleu : une
+     barre de la couleur d'un niveau se lit comme ce niveau.
+     C'est un ALIAS de --ink, pas un hexa de plus : la barre suit l'encre. */
+  --sejour: var(--ink);
+
   /* Prestataires de ménage : pastels des barres de garde (page Ménages V5).
      FROIDS OU NEUTRES SEULEMENT — jamais de rose ni de rouge, réservés aux
      alertes (décision de Thierry, 13 octobre 2026). La couleur est STABLE par
@@ -73,6 +85,15 @@
   --warn-soft: #FFF4E0;
   --danger: #B42318;
   --danger-soft: #FEF0EE;
+  /* ⚠ DEUX JETONS DE TEXTE, distincts de --ok / --danger, parce que ces
+     deux-la servent AUSSI de fond (.cal-toast--erreur, .men-mk--alerte) :
+     les eclaircir pour le mode sombre retournerait ces fonds. Mesure du
+     28 octobre 2026, sur --surface sombre (#141414) : --danger 2,80:1 et
+     --ok 3,44:1, tous deux SOUS le 4,5:1 d'un texte. Avec les jetons
+     ci-dessous : 6,66:1 et 10,57:1. En clair ils ne changent rien
+     (6,57:1 et 5,36:1 sur blanc, deja conformes). */
+  --ok-ink: #0F7A4F;
+  --danger-ink: #B42318;
 
   /* Typographie */
   --font: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -136,6 +157,8 @@
   --ok-soft: #10301F;
   --warn-soft: #3A2A0A;
   --danger-soft: #3A1512;
+  --ok-ink: #4ADE80;       /* 10,57:1 sur #141414 */
+  --danger-ink: #F87171;   /* 6,66:1 sur #141414 */
   --shadow-hover: 0 6px 20px rgba(0, 0, 0, .5);
   --shadow-sheet: 0 -8px 32px rgba(0, 0, 0, .6);
   --scrim: rgba(0, 0, 0, .6);

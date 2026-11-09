@@ -288,6 +288,102 @@ bien**, pas sur le maximum toutes zones — sinon la bannière se tait sur des m
 déjà hors couverture pour ce logement. Table vide : bannière quand même, c'est
 le pire cas.
 
+## 5 quater. ⚠ LA PALETTE DES CINQ NIVEAUX EST UN ÉLÉMENT DE STRUCTURE
+
+⚠⚠ **DÉCISION DE THIERRY, 29 OCTOBRE 2026, mot pour mot : « Cette palette est
+réutilisée pour toutes les prévisions. Enregistre-la comme élément de structure
+à ne jamais modifier ou substituer sans double validation de ma part. »**
+
+Elle n'est donc pas un choix d'écran : c'est **l'échelle commune à toute
+restitution de prévision** — Prédiction de prix, « Quand vos prix bougent », le
+marché, et ce qui viendra.
+
+| jeton | valeur | niveau | texte | classe |
+|---|---|---|---|---|
+| `--niveau-1` | `#F7F7F7` | 1 · Base | `--text` | `n-base` |
+| `--niveau-2` | `#EBEBEB` | 2 · Moyen | `--text` | `n-moyen` |
+| `--niveau-3` | `#D6D6D6` | 3 · Haut | `--text` | `n-haut` |
+| `--niveau-4` | `#8C8C8C` | 4 · Très haut | `--text` | `n-tres-haut` |
+| `--niveau-5` | `#222222` | 5 · Exceptionnel | `--bg` | `n-exceptionnel` |
+
+⚠ **CINQ VALEURS, PAS DIX** : l'échelle d'encre n'a pas d'accent par niveau.
+L'encre du texte est `--text` ou `--bg`, le liseré est `--niveau-4` ou
+`--niveau-5` — tout en jetons déjà là. Source unique : `public/style.css`.
+
+⚠ **LE CHIFFRE EST TOUJOURS ÉCRIT** (règle 2 de Thierry) : « 1 · Base » …
+« 5 · Exceptionnel ». Au bas de l'échelle, le fond ne porte plus
+l'information — `--niveau-1` est à ΔE 1,0 du fond « nuit passée ».
+
+**Les cinq règles, les deux corrections mesurées, et les vingt-cinq valeurs
+des cinq rampes comparées : `docs/kb/charte-ui.md` §3.** Elles ne sont pas
+recopiées ici — c'est tout l'objet d'une source unique.
+
+⚠ **TOUT CE QUI SUIVAIT ICI DÉCRIVAIT LA PALETTE PRUNE, ET A ÉTÉ RETIRÉ LE
+3 NOVEMBRE 2026.** On y lisait « une seule teinte prune », « les dix valeurs
+tiennent 269-272° », « dix valeurs, pas cinq », « la consigne *ni bleu ni
+ambre* ne s'applique pas à cette échelle », et trois tableaux de mesures. Rien
+de tout cela n'est vrai : l'échelle d'encre n'a **aucune teinte**, elle a
+**cinq** valeurs, et les trois couleurs réservées valent de nouveau partout.
+
+**Ces paragraphes ont vécu moins de vingt-quatre heures, et c'est précisément
+pourquoi ils sont retirés plutôt que corrigés.** Une description périmée se lit
+comme une mesure et ne rougit jamais — aucun test ne lit les `.md`. La seule
+protection est de ne pas en laisser traîner.
+
+**L'état courant, ses cinq règles, ses deux corrections mesurées et les
+vingt-cinq valeurs des cinq rampes comparées : `docs/kb/charte-ui.md` §3.**
+
+### Ce qui est tenu par un test, et pourquoi il faut un test
+
+Une règle écrite dans un document ne rougit jamais. `tests/palette-niveaux.test.js`
+tient **les cinq règles de Thierry**, une par test, et chacune a été prouvée par
+une mutation qui la fait rougir :
+
+1. les **cinq valeurs** sont dans la source unique, au caractère ;
+2. l'échelle n'a **aucune teinte** — saturation 0 % sur les cinq (règle 3) ;
+3. le **contraste texte/fond ≥ 4,5:1** sur les cinq (règle 5) ;
+4. aucune classe de niveau n'atteint une **ligne** ni la page (règle 1) ;
+5. aucun **dégradé**, aucune brillance (règle 4) ;
+6. le **chiffre** est écrit sur chaque pastille rendue (règle 2) ;
+7. toute déclaration `--niveau-*` est **nommée** — une de plus est une copie,
+   une de moins est une source amputée.
+
+⚠ **ET IL N'Y A PAS DE TEST « CES HEXAS N'APPARAISSENT QUE DANS LES FICHIERS
+NOMMÉS », ce qui était vrai des palettes colorées.** Trois des cinq densités
+**sont déjà des jetons du socle V5** — `#222222` = `--ink`, `#EBEBEB` = `--line`,
+`#F7F7F7` = `--surface-2` — donc elles vivent partout où le socle les emploie.
+Un gris n'est pas distinctif ; un **nom** l'est. Chercher la valeur était la
+bonne garde pour une teinte, c'est la mauvaise pour une encre.
+
+Son message d'échec **dit la règle en toutes lettres**, parce qu'un test dont
+l'échec n'explique pas la règle se contourne en changeant le test.
+
+Il épingle les **valeurs**, pas le goût : il n'empêche pas Thierry de changer la
+palette, il empêche qu'elle change **sans lui**.
+
+### Ce que la source unique a coûté, et les deux écarts qu'elle a révélés — CLOS
+
+La palette était **recopiée quatre fois** jusqu'au 30 octobre 2026 — trois dans
+`apps/yield/prix.html`, une en jetons dans `apps/yield/marche-global.html`. Les
+quatre copies **concordaient**, ce qui est précisément la situation dangereuse :
+rien ne rougissait, et la cinquième aurait divergé.
+
+⚠ **Les deux écarts que la règle avait révélés sont clos, et pas par où on le
+croyait :**
+
+1. **Le 5e niveau incomplet côté marché** — `marche-global.html` appariait le
+   fond d'un niveau avec l'accent d'un autre. Corrigé le 2 novembre sur
+   validation, puis rendu **sans objet** le 3 : l'échelle d'encre n'a plus
+   d'accent, donc plus de paire à déparier.
+2. **Le mode sombre divergent** — retiré de YieldFlow le 2 novembre, sur double
+   validation de Thierry (« pas de mode sombre sur YieldFlow pour l'instant »).
+
+⚠ **ET LA SOURCE UNIQUE A ENCORE BOUGÉ LE 3 NOVEMBRE** : les cinq classes
+`.n-base` … `.n-exceptionnel` ne vivent plus dans la page mais dans
+`public/style.css`, avec les jetons. Deux écrans les emploient — la Prédiction
+de prix et le marché — et les écrire dans chaque page refaisait exactement la
+copie que ce chantier venait de fermer. C'est d'ailleurs par là que le niveau
+avait atteint une **ligne** sur le marché, ce que la règle 1 interdit.
 ## 6. Mobile
 
 C'est là que l'hôte regarde. Sous 640 px : la barre de sélection passe en deux

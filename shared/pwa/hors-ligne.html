@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<!-- ⚠ `crossorigin` EST VOULU : une feuille de police chargée sans lui part en
+     mode « no-cors », sa réponse est opaque, et le service worker refuse de
+     mettre une réponse opaque en cache. Avec lui, la police préchargée par
+     le service worker se retrouve hors ligne. Même adresse que les pages V5. -->
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" crossorigin="anonymous">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE HORS-LIGNE — PWA lot 1. KB : docs/kb/pwa.md
+     Servie par le service worker (shared/pwa/service-worker.js) à la place
+     d'une page que le réseau n'a pas pu rendre. L'adresse affichée reste
+     celle demandée : « Réessayer » recharge donc la VRAIE page.
+     Tout ce qu'elle charge est dans la liste positive du service worker.
+     RÈGLES : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
+<style>
+  .hors-ligne {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--gap-l);
+    padding: var(--gap-l) var(--gap-m);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main class="hors-ligne">
+  <img src="/shared/logo.svg" width="56" height="56" alt="">
+  <h1 class="h2" data-i18n="offline.title"></h1>
+  <button type="button" class="btn btn--primary btn--lg" data-reessayer data-i18n="offline.retry"></button>
+</main>
+<script src="/shared/i18n/i18n.js"></script>
+<script>
+  (() => {
+    document.querySelector('[data-reessayer]').addEventListener('click', () => location.reload())
+    if (!window.I18n) return
+    I18n.init().then(() => { document.title = I18n.t('offline.title') }).catch(() => {})
+  })()
+</script>
+</body>
+</html>

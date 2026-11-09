@@ -191,7 +191,7 @@ function chargerAvecDouble ({ templates, accessCodeExistant }) {
   const m = new Module(abs)
   m.exports = {
     supabase: { from: table },
-    getPropertyMode: async () => 'auto',
+    getPropertyMode: async () => 'auto', lireReglagesDuBien: async () => ({ mode: 'auto', delais: null }),
     isAutomationPaused: async () => false
   }
   m.loaded = true

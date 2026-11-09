@@ -23,7 +23,14 @@
 //   · données                            on affiche.
 import { canauxHtml, faitDateAffiche, avisHtml, sousTitre, fraicheurDuCompte, releveDuCompteEnEchec,
   pastillesDesCanaux,
-  signalDuBien } from './logements-liste.js'
+  signalDuBien,
+  // ⚠ LE NOM D'UN CANAL VIENT DU MODULE COMMUN, il ne se recopie pas : la liste
+  // des libelles y vit avec sa garde — « le repli ne doit JAMAIS laisser sortir
+  // le nom du partenaire technique » (21 octobre 2026).
+  libelleDuCanal } from './logements-liste.js'
+// Les infos d'accueil se peignent et s'écrivent par le module commun : la fiche
+// et « Le remplir » (dans une conversation) partagent la même ligne.
+import { ligneInfoHtml, editeurInfoHtml } from './accueil-voyageur.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Le prix
@@ -271,6 +278,28 @@ export function calendrierHtml (fiche, { t, esc, icone }) {
 // changement d'état, là où un bouton qui change de nom l'oblige à deviner.
 export function assistantHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, icone } = outils
+
+  // ⚠ UN BIEN ARCHIVE N'A PLUS D'ASSISTANT A BASCULER, et l'encart disait
+  // « Assistant HôteSmart · Actif » sur un logement rangé — point 8 du constat
+  // de Thierry du 3 novembre 2026, vu en production sur Colomiers. C'était
+  // faux deux fois : rien ne tourne plus pour ce bien, et l'interrupteur
+  // proposait de mettre en pause une automatisation déjà arrêtée.
+  //
+  // ⚠ LA GARDE PASSE AVANT `peutModifier`, donc avant `signalHtml` : un lecteur
+  // sans droit de modification voyait le même encart. Les deux chemins la
+  // partagent, plutôt que deux copies qui divergeront.
+  //
+  // ⚠ ET IL N'Y A PAS D'INTERRUPTEUR DESACTIVE : un interrupteur grisé invite
+  // à chercher pourquoi on ne peut pas l'actionner. L'action disponible sur un
+  // bien archivé est « Réactiver », et elle vit dans son propre bloc.
+  const bien = fiche.bien || {}
+  if (bien.archive_le) {
+    return `<p class="fic-assistant caption" data-assistant="archive">
+      <span>${esc(t('fiche.assistant'))}</span>
+      <span class="fic-muet" data-assistant-etat>${esc(t('fiche.assistant_archive'))}</span>
+    </p>`
+  }
+
   if (!peutModifier) return signalHtml(fiche, outils)
   const enPause = (fiche.bien || {}).assistant_en_pause === true
   return `<p class="fic-assistant caption" data-assistant="${enPause ? 'pause' : 'actif'}">
@@ -734,6 +763,32 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
 }
 
 // ─── 3. Le logement ─────────────────────────────────────────────────────────
+// ─── Accueil du voyageur (lot du 8 novembre 2026) ─────────────────────────
+//
+// Les infos qui vivaient dans la base de connaissance (téléphone, horaires,
+// wifi), décision de Thierry du 6 novembre 2026. ⚠ RÉSERVÉ AU TITULAIRE : le
+// serveur ne l'envoie pas à un membre (`refuses: ['accueil']`), et le bloc
+// n'est alors pas rendu du tout — un `null` ici. `enEdition` : la clé de la
+// ligne en cours d'écriture, tenue par la page.
+export function accueilHtml (fiche, outils, { enEdition = null, peutModifier = true } = {}) {
+  const { t, esc } = outils
+  const a = fiche.accueil
+  if (a === undefined) return null
+  if (a === null) {
+    return (fiche.indisponibles || []).includes('accueil') ? nonLu('fiche.accueil_non_lu', outils) : null
+  }
+  // ⚠ UN BIEN ARCHIVÉ SE LIT, IL NE SE RÈGLE PLUS (review 1 du lot) : la base
+  // refuse d'écrire pour lui (`api/ecran/connaissance.js`, biens vivants
+  // seulement), et le crayon menait à « Seul le titulaire… », un refus faux.
+  const modifiable = peutModifier && !(fiche.bien && fiche.bien.archive_le)
+  const lignes = (a.faits || []).map(f => (modifiable && enEdition === f.cle
+    ? editeurInfoHtml(f, { t, esc })
+    : ligneInfoHtml(f, { t, esc, peutModifier: modifiable })))
+  return `<p class="fic-aide caption">${esc(t('fiche.accueil_aide'))}</p>
+    <div class="kb-faits" data-bind="accueil">${lignes.join('')}</div>
+    <p class="fic-erreur caption" data-bind="accueil-erreur" role="alert" hidden></p>`
+}
+
 export function logementHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, nombre } = outils
   const b = fiche.bien
@@ -806,6 +861,100 @@ export function supprimerHtml (fiche, outils, { peutSupprimer = false } = {}) {
     ${bouton(false)}
     <p class="caption fic-muet" data-raison data-motif="${esc(s.motif || 'inconnu')}">${esc(t(s.cle))}</p>
   </div>`
+}
+
+// ─── ARCHIVER, ET RANIMER ──────────────────────────────────────────────────
+//
+// Lot « archiver un bien », étape 4. Go de Thierry du 31 octobre 2026.
+//
+// ⚠ ARCHIVER N'EST PAS SUPPRIMER, ET LE BLOC LE DIT AVANT LE CLIC. Supprimer
+// efface ; archiver garde tout et arrête le reste. Les deux gestes vivent côte
+// à côte, et c'est justement pour ça que leur différence doit être écrite : un
+// hôte qui veut « retirer » un logement prendra le premier bouton qu'il
+// comprend.
+//
+// ⚠ ET IL SE RÈGLE SUR LE SERVEUR, comme le bloc « Supprimer » depuis le
+// 21 octobre : `archive_le` vient de la fiche, pas d'un calcul d'écran. Un
+// écran qui déduirait l'état d'archive afficherait « Réactiver » sur un bien
+// vivant le jour où la fiche changerait de forme.
+export function archiverHtml (fiche, outils, { peutArchiver = false } = {}) {
+  if (!peutArchiver) return null
+  const { t, esc, icone } = outils
+  // ⚠ `fiche.bien.archive_le`, PAS `fiche.archive_le` — defaut BLOQUANT trouve
+  // par Thierry en recette de staging le 3 novembre 2026, et il avait la cause
+  // exacte. `lireFiche` construit `{ bien: publier(bien), … }` : la colonne
+  // atterrit donc sous `bien`, comme TOUT le reste de la fiche (`fiche.bien.id`
+  // deux cents lignes plus haut). Mon bloc lisait un cran trop haut, donc
+  // `archive` valait TOUJOURS faux : la fiche d'un bien archive proposait encore
+  // « Archiver », le bouton « Reactiver » n'apparaissait JAMAIS, et l'hote
+  // archivait sans pouvoir revenir. C'est la troisieme fois que ce lot paye la
+  // meme faute, et la troisieme fois de la MEME facon : un test qui fabrique une
+  // forme que le serveur ne produit pas.
+  const b = (fiche && fiche.bien) || null
+  const archive = Boolean(b && b.archive_le)
+  // ⚠ PAS DE ROUGE : ce geste est réversible, et le rouge de cette charte est
+  // réservé à ce qui ne revient pas. Le confondre avec la suppression ferait
+  // hésiter l'hôte devant le seul des deux gestes qui se défait.
+  const bouton = archive
+    ? `<button type="button" class="btn btn--ghost" data-bind="reactiver">`
+      + `${icone('i-check', 'icon')}<span>${esc(t('fiche.reactiver'))}</span></button>`
+    : `<button type="button" class="btn btn--ghost" data-bind="archiver">`
+      + `${icone('i-archive', 'icon')}<span>${esc(t('fiche.archiver'))}</span></button>`
+  return `<div class="fic-archiver">
+    ${bouton}
+    <p class="caption fic-muet">${esc(t(archive ? 'fiche.archive_etat' : 'fiche.archiver_quoi'))}</p>
+    <span class="fic-sauve caption" data-etat-archive aria-live="polite"></span>
+    <p class="fic-erreur caption" data-erreur-archive hidden></p>
+  </div>`
+}
+
+// La phrase de la confirmation d'archivage, à partir des nombres du serveur.
+//
+// ⚠ OPTION 2 DE THIERRY (1er novembre 2026) : l'archivage est AUTORISÉ avec des
+// séjours à venir, et il l'ANNONCE — « N séjours à venir : leurs codes d'accès
+// continueront de fonctionner ». Refuser bloquerait le cas réel (« le provider
+// a supprimé l'annonce, les séjours sont perdus de toute façon ») ; ne rien
+// dire laisserait l'hôte croire que TOUT est coupé.
+export function listeDArchivage (avant, t) {
+  const l = []
+  // ⚠ `Number(null)` VAUT 0, ET 0 EST FINI. Une premiere version de ce helper
+  // rendait donc 0 pour une lecture ratee — c'est-a-dire « aucun sejour a
+  // venir », une affirmation inventee, sur le seul chiffre de cette fenetre qui
+  // engage un code d'acces. Le piege est deja ecrit dans la memoire du depot ;
+  // il s'est rejoue ici, et c'est le test qui l'a trouve.
+  const n = (x) => (x === null || x === undefined || x === '' || Number.isNaN(Number(x)))
+    ? null
+    : (Number.isFinite(Number(x)) ? Number(x) : null)
+  // ⚠ CE QUI RESTE EST DIT EN PREMIER, parce que c'est ce que l'hôte vient
+  // vérifier : son historique.
+  l.push(t('fiche.archiver_garde'))
+  const sejours = n(avant && avant.sejours_a_venir)
+  // ⚠ `null` N'EST PAS `0` : une lecture ratée ne dit pas « aucun séjour ».
+  if (sejours === null) l.push(t('fiche.archiver_sejours_inconnus'))
+  else if (sejours > 0) l.push(t('fiche.archiver_sejours', { n: sejours }))
+  const taches = n(avant && avant.taches_en_vol)
+  if (taches === null) l.push(t('fiche.archiver_taches_inconnues'))
+  else if (taches > 0) l.push(t('fiche.archiver_taches', { n: taches }))
+  if (avant && avant.pilote_actif === true) l.push(t('fiche.archiver_pilote'))
+  if (avant && avant.etait_facture === true) l.push(t('fiche.archiver_facturation'))
+  // ⚠ L'AVERTISSEMENT VIENT EN DERNIER, ET C'EST LE SEUL QUI DEMANDE UN GESTE A
+  // L'HOTE. Decision de Thierry du 1er novembre 2026 sur la dette 126 : ni
+  // ecriture chez le provider, ni refus — on AVERTIT, et il archive quand meme.
+  // Le cas couvert : un bien archive mais encore en vente recevrait une
+  // reservation sans code d'acces ni menage, parce que l'archivage coupe ces
+  // deux chemins. La phrase est donc une consigne, pas une information.
+  // ⚠ ET ELLE NE NOMME JAMAIS LE PARTENAIRE TECHNIQUE (regle du 21 octobre
+  // 2026) : avec un canal de vente connu, elle le nomme ; sans lui, elle parle
+  // du « gestionnaire de canaux ».
+  if (avant && avant.annonce_en_ligne === true) {
+    const canaux = Array.isArray(avant.canaux)
+      ? avant.canaux.map(c => libelleDuCanal({ ota: c })).filter(x => x && x !== 'Canal')
+      : []
+    l.push(canaux.length
+      ? t('fiche.archiver_annonce_en_ligne', { canaux: canaux.join(', ') })
+      : t('fiche.archiver_annonce_en_ligne_sans_canal'))
+  }
+  return l
 }
 
 // Ce que la confirmation ÉNUMÈRE, à partir des nombres du serveur.
@@ -969,6 +1118,41 @@ export function avisBlocHtml (fiche, outils) {
   return `<div class="fic-avis">${note}</div>`
 }
 
+// ─── Facturation : l'entité juridique du logement ───────────────────────────
+//
+// Facture voyageur, étape 1b (D2 bis, Thierry, 9 novembre 2026) : l'entité qui
+// émet les factures de ce logement se choisit SUR SA FICHE. Ce bloc la DIT ; la
+// fenêtre qui la change (shared/entites-juridiques-vue.js) a son propre
+// endpoint, gardé sur `facturation` — pas celui de la fiche.
+// ⚠ AUCUNE ENTITÉ PAR DÉFAUT : sans entité, le logement ne facture pas, et le
+// bloc le dit en clair plutôt que de se taire.
+// ⚠ LE BOUTON SUIT LE SERVEUR (`facturation.modifier`, le titulaire seul) —
+// le masquage n'est que la seconde ligne : la fenêtre refuse en 403.
+export function facturationHtml (fiche, outils) {
+  const { t, esc } = outils
+  const f = fiche.facturation
+  if (f == null) {
+    return (fiche.indisponibles || []).includes('facturation') ? nonLu('fiche.facturation_non_lue', outils) : null
+  }
+  const e = f.entite
+  const valeur = !e
+    ? `<span class="fic-ligne__val fic-erreur">${esc(t('fiche.facturation_aucune'))}</span>`
+    : e.archivee
+      ? `<span class="fic-ligne__val fic-erreur">${esc(t('fiche.facturation_archivee', { nom: e.nom }))}</span>`
+      : `<span class="fic-ligne__val">${esc(e.nom)}</span>`
+  const bouton = f.modifier === true
+    ? `<div class="fic-publier"><button type="button" class="btn btn--secondary" data-bind="facturation">`
+      + `${esc(t(e && !e.archivee ? 'fiche.facturation_modifier' : 'fiche.facturation_choisir'))}</button></div>`
+    : ''
+  return `<div class="fic-facturation"><div class="fic-ligne">`
+    + `<span class="fic-ligne__cle caption">${esc(t('fiche.facturation_entite'))}</span>${valeur}</div>${bouton}</div>`
+}
+
+// Le bloc entier, pour le repeindre seul quand la fenêtre change l'entité.
+export function facturationBlocHtml (fiche, outils) {
+  return bloc('fiche.bloc_facturation', facturationHtml(fiche, outils), outils, ' data-bloc="facturation"')
+}
+
 // ─── 7. Réglages ────────────────────────────────────────────────────────────
 //
 // ⚠ LECTURE ET LIEN SEULEMENT (spec §3.7). La serrure se règle dans son app,
@@ -1087,12 +1271,16 @@ export function ficheHtml (fiche, outils, droits = {}) {
   const gauche = [
     bloc('fiche.bloc_vente', venteHtml(fiche, o, { peutModifier }), o),
     bloc('fiche.bloc_prix', prixHtml(fiche, o, { peutModifier }), o),
-    bloc('fiche.bloc_logement', logementHtml(fiche, o, { peutModifier }), o)
+    bloc('fiche.bloc_logement', logementHtml(fiche, o, { peutModifier }), o),
+    refuse('accueil') ? '' : bloc('fiche.bloc_accueil',
+      accueilHtml(fiche, o, { enEdition: droits.accueilEnEdition || null }), o, ' data-bloc="accueil"')
   ].join('')
 
   const droite = [
     refuse('menage') ? '' : bloc('fiche.bloc_menage', menageHtml(fiche, o, refs), o),
     refuse('avis') ? '' : bloc('fiche.bloc_avis', avisBlocHtml(fiche, o), o),
+    // Facture voyageur, étape 1b : l'entité juridique du logement.
+    refuse('facturation') ? '' : facturationBlocHtml(fiche, o),
     bloc('fiche.bloc_reglages', reglagesHtml(fiche, o, refs), o)
   ].join('')
 
@@ -1104,12 +1292,18 @@ export function ficheHtml (fiche, outils, droits = {}) {
   // blocs de lecture. La spec le veut « en bas » : hors colonnes, il l'est sur
   // les deux écrans.
   const supprimer = bloc('fiche.bloc_supprimer', supprimerHtml(fiche, o, droits), o)
+  // ⚠ ARCHIVER EST AU-DESSUS DE SUPPRIMER, et l'ordre est le message : le geste
+  // reversible se lit AVANT celui qui ne revient pas. Un hote qui veut
+  // « retirer » un logement rencontre d'abord celui qui garde son historique.
+  const archiver = bloc('fiche.bloc_archiver',
+    archiverHtml(fiche, o, { peutArchiver: droits.peutSupprimer === true }), o)
 
   return `${avecActions ? dialogueHtml(o) : ''}${enTeteHtml(fiche, o, { peutModifier })}
     <div class="fic-colonnes">
       <div class="fic-col fic-col--gauche">${gauche}</div>
       <div class="fic-col fic-col--droite">${droite}</div>
     </div>
+    ${archiver}
     ${supprimer}`
 }
 

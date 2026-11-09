@@ -185,6 +185,10 @@ var T = {
     chargement: 'Chargement…', introuvable: 'Ce lien de réservation n’est plus valide.',
     panne: 'Le calendrier est momentanément indisponible. Merci de réessayer dans un instant.',
     ferme: 'Ce logement n’est pas ouvert à la réservation en ligne pour le moment.',
+    // ⚠ UN BIEN ARCHIVE N'EST PAS FERME « POUR LE MOMENT » : l'hôte l'a rangé,
+    // et rien ne dit qu'il reviendra. Promettre un retour prochain à un voyageur
+    // qui garde le lien est un mensonge, et il reviendra pour rien.
+    ferme_archive: 'Ce logement n’est plus proposé à la réservation.',
     titre_dates: 'Vos dates', titre_sejour: 'Votre séjour', titre_coordonnees: 'Vos coordonnées',
     voyageurs: 'Voyageurs', voyageur_un: 'voyageur', voyageur_n: 'voyageurs',
     aide_selection: 'Choisissez la date d’arrivée, puis la date de départ.',
@@ -229,6 +233,7 @@ var T = {
     chargement: 'Cargando…', introuvable: 'Este enlace de reserva ya no es válido.',
     panne: 'El calendario no está disponible en este momento. Inténtelo de nuevo en unos instantes.',
     ferme: 'Este alojamiento no está abierto a reservas en línea por el momento.',
+    ferme_archive: 'Este alojamiento ya no se ofrece para reservas.',
     titre_dates: 'Sus fechas', titre_sejour: 'Su estancia', titre_coordonnees: 'Sus datos',
     voyageurs: 'Huéspedes', voyageur_un: 'huésped', voyageur_n: 'huéspedes',
     aide_selection: 'Elija la fecha de llegada y después la de salida.',
@@ -273,6 +278,7 @@ var T = {
     chargement: 'Loading…', introuvable: 'This booking link is no longer valid.',
     panne: 'The calendar is temporarily unavailable. Please try again shortly.',
     ferme: 'This property is not open for online booking at the moment.',
+    ferme_archive: 'This property is no longer available for booking.',
     titre_dates: 'Your dates', titre_sejour: 'Your stay', titre_coordonnees: 'Your details',
     voyageurs: 'Guests', voyageur_un: 'guest', voyageur_n: 'guests',
     aide_selection: 'Pick your arrival date, then your departure date.',
@@ -498,7 +504,17 @@ async function charger() {
   $('lieu-bien').textContent = [bien.ville, bien.pays].filter(Boolean).join(', ');
   $('etat').hidden = true; $('contenu').hidden = false;
 
-  if (!d.ouvert) { $('bloc-ferme').hidden = false; return; }   // texte pose par appliquerLangue (data-t)
+  if (!d.ouvert) {
+    // ⚠ ON REECRIT `data-t`, ON NE POSE PAS QUE LE TEXTE : `appliquerLangue`
+    // relit cet attribut a chaque changement de langue. Poser le seul
+    // `textContent` ferait reapparaitre « pour le moment » au premier clic sur
+    // ES ou EN — le defaut serait invisible en francais, donc en recette.
+    if (d.raison === 'bien_archive') {
+      $('texte-ferme').setAttribute('data-t', 'ferme_archive');
+      $('texte-ferme').textContent = t.ferme_archive;
+    }
+    $('bloc-ferme').hidden = false; return;   // texte pose par appliquerLangue (data-t)
+  }
 
   paiement = d.paiement || { actif: false, mode: null };
   // ⚠ Un voyageur doit SAVOIR qu'il est sur une page de test, sinon il croit

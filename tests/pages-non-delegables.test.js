@@ -49,7 +49,9 @@ const NON_DELEGABLES = [
   'pages/biens-detail.html',        // connexion des annonces — `reglages`
   'apps/serrures/index.html',       // clé Seam
   'apps/sms/index.html',            // clé Brevo
-  'apps/agent-ai/knowledge.html',   // knowledge — `reglages`
+  'pages/connaissance.html',        // base de connaissance V5 (lot 3) : TITULAIRE seul,
+                                    // comme la page qu'elle remplace — l'endpoint
+                                    // /api/ecran/connaissance refuse un membre en 403
   'apps/agent-ai/analyze.html',     // conversations + clé Beds24
   'apps/menages/prestataires.html', // public_tokens — réservé au titulaire
     'apps/reservation-directe/index.html',     // liens de réservation et
@@ -193,6 +195,7 @@ test('RECENSEMENT : toute page authentifiée est classée', () => {
     'apps/agent-ai/messagerie.html', // redirection vers /messages (lot 2 etape 4), aucune session
     'apps/agent-ai/config.html',     // redirection vers /messages (go de Thierry, 12 octobre, apres recette 2)
     'apps/agent-ai/messages.html',   // redirection vers /messages (idem)
+    'apps/agent-ai/knowledge.html',  // redirection vers /messages?volet=connaissance (go de Thierry, 5 novembre, KB V5 lot 3)
     'pages/book.html'            // moteur de reservation : page VOYAGEUR,
                                  // jeton dans l'URL, aucune session, aucune
                                  // donnee de compte. Marque blanche : elle ne

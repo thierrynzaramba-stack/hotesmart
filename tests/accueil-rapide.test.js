@@ -28,6 +28,15 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
+// ⚠ jsdom N'EST ICI QUE POUR **PARSER** CE QUE LA PAGE A PRODUIT, pas pour la
+// faire tourner : le banc de ce fichier rend volontairement des chaines, et
+// `cache()` donne un noeud DOUBLE qui n'a ni `querySelectorAll` ni enfants.
+// Lire les pastilles a la regex marcherait aujourd'hui et mentirait le jour ou
+// les attributs changeraient d'ordre — on relit donc le HTML comme un
+// navigateur le lirait.
+const { JSDOM } = require('jsdom')
+const boutonsDe = (html) =>
+  Array.from(new JSDOM(`<div>${html}</div>`).window.document.querySelectorAll('.rev-an-puce'))
 const fs = require('fs')
 const path = require('path')
 
@@ -263,7 +272,8 @@ const estLeFichier = (url, nom) =>
 test('LE TEST QUI COMPTE : i18n demande la liste et le repli EN MEME TEMPS', async () => {
   // Preuve par l'execution : `langues.json` ne repond qu'une fois `fr.json`
   // demande. En file, on n'arriverait jamais a la seconde demande.
-  const src = lire('shared/i18n/i18n.js')
+  // Le moteur tel que le navigateur le RECOIT (api/i18n.js), empreinte posee.
+  const src = require('../lib/i18n-version').moteurI18n()
   const demandes = []
   let repondreLangues
   const rep = corps => ({ ok: true, json: async () => corps })
@@ -328,6 +338,54 @@ function faireStockage () {
 
 // `branchements.contexte` et `.onboarding` sont les deux promesses que le test
 // pilote. `appels` enregistre QUAND chaque lecture part.
+// La fenetre du banc. ⚠ `matchMedia` rend un objet COMPLET — `matches`,
+// `addEventListener` et `removeEventListener` — parce que la page s'abonne au
+// franchissement du seuil. Un objet qui n'aurait que `matches` ferait lever
+// l'abonnement, donc le meme defaut un cran plus loin.
+function fenetreDuBanc (options = {}) {
+  const etroit = options.etroit === true
+  // ⚠ UN `IntersectionObserver` QUI RETIENT SON RAPPEL ET SA CIBLE. Sans lui,
+  // la page sort tout de suite (`typeof window.IntersectionObserver !==
+  // 'function'`) et le chargement au defilement n'est atteignable par AUCUN
+  // test. `options.observateurs` est la liste que le test declenche ensuite :
+  // c'est elle qui joue le geste de l'hote.
+  const observateurs = options.observateurs
+  // ⚠ LA FENETRE N'AVAIT AUCUNE PLOMBERIE D'EVENEMENTS, et la page en a besoin :
+  // elle n'observe la sentinelle qu'au PREMIER DEFILEMENT (mesure au banc reel :
+  // sans ca, la sentinelle intersecte des le chargement a 1280x900, donc un
+  // troisieme appel au chargement). `options.ecouteurs` garde ce qui a ete
+  // enregistre, et le test joue le geste.
+  const ecouteurs = options.ecouteurs
+  return {
+    addEventListener (type, fn, reglages) {
+      if (Array.isArray(ecouteurs)) ecouteurs.push({ type: String(type), fn, reglages: reglages || {} })
+    },
+    removeEventListener () {},
+    IntersectionObserver: options.sansObservateur === true ? undefined : class {
+      constructor (rappel, reglages) {
+        this.rappel = rappel
+        this.reglages = reglages || {}
+        this.cibles = []
+        this.coupe = false
+        if (Array.isArray(observateurs)) observateurs.push(this)
+      }
+      observe (n) { this.cibles.push(n) }
+      unobserve (n) { this.cibles = this.cibles.filter(x => x !== n) }
+      disconnect () { this.coupe = true; this.cibles = [] }
+      // Le geste : « la sentinelle entre dans la fenetre ».
+      declencher () {
+        return this.rappel(this.cibles.map(c => ({ isIntersecting: true, target: c })), this)
+      }
+    },
+    matchMedia: (requete) => ({
+      media: String(requete),
+      matches: etroit && /max-width/.test(String(requete)),
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    })
+  }
+}
+
 function lancerRequireAuth (branchements, options = {}) {
   const appels = []
   const redirections = []
@@ -382,7 +440,8 @@ test("i18n : une langues.json en erreur est NOMMEE, pas parsee", async () => {
   // Sans le controle `r.ok`, un 404 renvoie la page d'erreur HTML au parseur
   // JSON : l'hote lit « Unexpected token < » au lieu du fichier manquant.
   // `load()` portait deja cette garde ; la lecture en ligne de langues.json, non.
-  const src = lire('shared/i18n/i18n.js')
+  // Le moteur tel que le navigateur le RECOIT (api/i18n.js), empreinte posee.
+  const src = require('../lib/i18n-version').moteurI18n()
   const fetchFaux = url => Promise.resolve(estLeFichier(url, 'langues.json')
     ? { ok: false, status: 404, json: async () => { throw new SyntaxError('Unexpected token <') } }
     : { ok: true, json: async () => ({}) })
@@ -521,6 +580,29 @@ test("une lecture de session impossible renvoie vers /login, elle ne rejette pas
 // ─── L'ouverture d'Aujourd'hui, EXECUTEE ─────────────────────────────────────
 
 // Le module de la page, prive de ses `import`, avec ses dependances injectees.
+// ⚠ LE BANC INJECTAIT `String` A LA PLACE DE `esc`, ET DONC AUCUN TEST
+// D'ECHAPPEMENT N'Y ETAIT VALABLE : `String('<img>')` rend `<img>`. Un double
+// PLUS PERMISSIF que le vrai valide du code qui ne peut pas tourner — c'est la
+// lecon deja payee sur `CacheEcran` et sur le module de courbe.
+//
+// ⚠ ET ON NE PEUT PAS LE `require` : `shared/properties.js` importe
+// `/shared/api-client.js` en chemin ABSOLU de navigateur, que Node ne resout
+// pas (`ERR_MODULE_NOT_FOUND`). On prend donc sa SOURCE, exactement comme ce
+// banc prend celle de la page — pas une reecriture.
+function escapeHtmlReel () {
+  const src = lire('shared/properties.js')
+  const i = src.indexOf('export function escapeHtml')
+  assert.notStrictEqual(i, -1, 'escapeHtml a disparu de shared/properties.js')
+  const fin = src.indexOf('\n}', i)
+  assert.notStrictEqual(fin, -1, 'la forme de escapeHtml a change : le decoupage ne tient plus')
+  const corps = src.slice(i, fin + 2).replace('export function', 'function')
+  // eslint-disable-next-line no-new-func
+  const f = new Function(`${corps}; return escapeHtml`)()
+  assert.strictEqual(f('<i>'), '&lt;i&gt;', 'le escapeHtml extrait n echappe pas : extraction ratee')
+  return f
+}
+const ESC = escapeHtmlReel()
+
 function batirAujourdhui (sansInit = false) {
   const html = lire('pages/aujourdhui.html')
   const ouvre = html.indexOf('<script type="module">')
@@ -552,7 +634,7 @@ function batirAujourdhui (sansInit = false) {
   // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
   // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
   // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
-  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran, repartirEnEuros }'
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran, repartirEnEuros, renderAnnee, renderEvenements }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -567,22 +649,127 @@ function ouvrirAujourdhui (options = {}) {
       ok: statut >= 200 && statut < 300,
       status: statut,
       // Un corps illisible : c'est `appel()` qui le transforme en `{}`.
-      json: async () => { if (options.corpsIllisible) throw new SyntaxError('<'); return options.corps || {} }
+      // ⚠ LE CORPS PEUT DEPENDRE DE L'URL. Un corps unique ne sait pas rendre
+      // deux PAGES differentes : la pagination au defilement demande la suite,
+      // et un double qui redonne la premiere page la ferait boucler.
+      json: async () => {
+        if (options.corpsIllisible) throw new SyntaxError('<')
+        return (typeof options.corps === 'function'
+          ? options.corps(String(url))
+          : options.corps) || {}
+      }
     })
   }
   const stubs = new Map()
   const elem = () => ({
-    hidden: false, textContent: '', innerHTML: '', value: '', style: {}, dataset: {},
-    classList: { add () {}, remove () {}, toggle () {}, contains: () => false },
-    addEventListener () {}, removeAttribute () {}, setAttribute () {}, remove () {},
-    appendChild () {}, closest: () => null, querySelector: () => null, querySelectorAll: () => []
+    hidden: false, textContent: '', value: '', style: {}, dataset: {},
+    // ⚠ ECRIRE `innerHTML` **DETACHE** LES ENFANTS, comme dans un vrai DOM.
+    // C'etait la derniere permissivite du banc, et elle cachait la moitie du
+    // constat GRAVE du 28 octobre 2026 : apres `zone.innerHTML = …`, la
+    // sentinelle du rendu PRECEDENT gardait son `parentNode`, donc la garde
+    // `marque.parentNode` ne pouvait pas mordre et la mutation qui la retirait
+    // restait verte. Un double plus permissif que le vrai VALIDE du code qui ne
+    // peut pas tourner.
+    _html: '',
+    get innerHTML () { return this._html },
+    set innerHTML (v) {
+      for (const n of this.enfants) n.parentNode = null
+      this.enfants = []
+      this._html = String(v)
+    },
+    // ⚠ UNE `classList` QUI RETIENT CE QU'ON LUI DIT. Elle etait faite de
+    // quatre fonctions vides et d'un `contains` qui rendait toujours `false` :
+    // aucune assertion ne pouvait juger une classe, donc aucune bascule de
+    // classe n'etait mesurable — et ce fichier le notait lui-meme plus bas
+    // (« le noeud du banc n'a pas de classList reelle »). Meme famille que le
+    // double d'`I18n.t` qui jetait ses parametres.
+    // `className` reste la source : la liste la lit et l'ecrit, pour qu'une
+    // affectation directe (`n.className = '…'`) et un `toggle` parlent du meme
+    // etat.
+    get classList () {
+      const n = this
+      const lire = () => String(n.className || '').split(/\s+/).filter(Boolean)
+      const ecrire = (l) => { n.className = l.join(' ') }
+      return {
+        add (...c) { const l = lire(); for (const x of c) if (!l.includes(x)) l.push(x); ecrire(l) },
+        remove (...c) { ecrire(lire().filter(x => !c.includes(x))) },
+        toggle (c, force) {
+          const a = force === undefined ? !lire().includes(c) : !!force
+          return a ? (this.add(c), true) : (this.remove(c), false)
+        },
+        contains: (c) => lire().includes(c)
+      }
+    },
+    addEventListener () {}, removeAttribute () {}, remove () {},
+    // ⚠ UN NOEUD CREE QUI SE DECLARE DEVIENT TROUVABLE. Le banc cle ses
+    // doubles sur la CHAINE du selecteur ; un noeud fabrique par
+    // `document.createElement` n'y etait donc pas, et `cache('[data-bind="…"]')`
+    // rendait un stub VIDE au lieu du noeud fabrique — une assertion qui lisait
+    // le vide et le prenait pour « rien n'a ete ajoute ». On enregistre le
+    // noeud sous son selecteur, comme un vrai DOM le rend trouvable des qu'il
+    // est attache.
+    // ⚠ `setAttribute` RANGE, IL N'ATTACHE PAS. Il remplissait la table des
+    // selecteurs, donc un noeud non attache y etait trouvable (voir
+    // `appendChild`). Et il n'ecrit dans `dataset` que pour les attributs
+    // `data-*` : un vrai DOM ne met pas `aria-pressed` dans `dataset`.
+    setAttribute (nom, val) {
+      if (/^data-/.test(String(nom))) this.dataset[String(nom).slice(5)] = val
+    },
+    // ⚠ CES TROIS-LA RETIENNENT, au lieu de ne rien faire. `appendChild` et
+    // `insertAdjacentHTML` etaient des fonctions vides : une page qui AJOUTE
+    // des cartes (la suite des avis au defilement) n'ecrivait donc nulle part,
+    // et aucune assertion ne pouvait juger ce qu'elle avait ajoute. Meme
+    // famille que la `classList` muette et que le double d'`I18n.t` qui jetait
+    // ses parametres.
+    enfants: [],
+    avant: '',
+    parentNode: null,
+    // ⚠ `appendChild` ATTACHE POUR DE VRAI : il pose `parentNode` **et** c'est
+    // LUI qui rend le noeud trouvable par son selecteur. Constat de la review
+    // du 28 octobre 2026 : quand c'etait `setAttribute` qui l'enregistrait, un
+    // noeud JAMAIS attache restait trouvable — le banc validait donc une page
+    // dont la sentinelle n'entrait pas dans le document, et la mutation qui
+    // retirait l'`appendChild` restait VERTE alors qu'elle rendait la fonction
+    // entierement morte en navigateur. Un double plus permissif que le vrai
+    // VALIDE du code qui ne peut pas tourner.
+    appendChild (n) {
+      this.enfants.push(n)
+      n.parentNode = this
+      const cle = n.dataset && n.dataset.bind
+      if (cle) stubs.set(`[data-bind="${cle}"]`, n)
+      return n
+    },
+    // ⚠ `beforebegin` EXIGE UN PARENT, comme dans un navigateur : sur un noeud
+    // detache, un vrai DOM LEVE une `DOMException`. Le double l'acceptait, et
+    // c'est ce qui cachait le constat GRAVE du second rendu.
+    insertAdjacentHTML (ou, html) {
+      if (String(ou) === 'beforebegin') {
+        if (!this.parentNode) {
+          throw new Error("insertAdjacentHTML('beforebegin') sur un noeud sans parent")
+        }
+        this.avant += String(html)
+      } else this.innerHTML += String(html)
+    },
+    closest: () => null, querySelector: () => null, querySelectorAll: () => [],
+    // ⚠ UN VRAI NOEUD PORTE SON DOCUMENT, et ce double ne le portait pas : un
+    // module qui lit `rail.ownerDocument.defaultView` — pour mesurer une
+    // gouttiere ou observer un redimensionnement — levait ici alors qu'il
+    // fonctionne en navigateur. Le double doit ressembler au vrai, sinon il
+    // fabrique des rouges qui n'existent nulle part ailleurs.
+    get ownerDocument () { return document_ }
   })
+  const ecouteursDoc = []
   const document_ = {
     documentElement: elem(),
     body: elem(),
     querySelector: sel => (stubs.has(sel) ? stubs.get(sel) : (stubs.set(sel, elem()), stubs.get(sel))),
     querySelectorAll: () => [],
-    addEventListener () {}, createElement: () => elem()
+    // ⚠ LE DOCUMENT AVALAIT SES ECOUTEURS, et c'est ce qui laissait survivre la
+    // mutation « la page n'appelle plus `brancherInfoBulles` » : la suite
+    // restait verte alors que les ⓘ ne s'ouvraient plus au doigt. Il les
+    // GARDE maintenant, et `toucherIbulle()` joue le geste.
+    addEventListener (type, fn) { ecouteursDoc.push({ type: String(type), fn }) },
+    createElement: () => elem()
   }
   // Chaque `.from(table)` cree une lecture que le test resout quand il veut.
   const supabase = {
@@ -619,7 +806,7 @@ function ouvrirAujourdhui (options = {}) {
     // sommaient a 936 sous un bandeau disant 935.
     // On rend le nombre NU plutot qu'un montant formate : le format appartient
     // a `Intl`, qu'on ne teste pas ici, et un nombre s'additionne.
-    t: (k) => k, date: () => 'LE-JOUR', time: () => '', pct: () => '',
+    t: (k, p) => (p ? `${k}{${Object.entries(p).map(([a2, b2]) => `${a2}=${b2}`).join(',')}}` : k), date: () => 'LE-JOUR', time: () => '', pct: () => '',
     money: (n) => String(n),
     apply () {},
     // Formate reellement : sans cela, rien ne peut asserter la note affichee.
@@ -652,6 +839,15 @@ function ouvrirAujourdhui (options = {}) {
     // `tests/aujourdhui.test.js` ; ici c'est le RENDU qu'on juge, et un double
     // qui vide la liste rend tout compte indistinguable de zero.
     if (cle === 'tachesOuvertes') return (t) => (Array.isArray(t) ? t : [])
+    // ⚠ `evenementsDuJour` PEUT RENDRE QUELQUE CHOSE. Le double rendait `[]`
+    // pour toute clef inconnue, donc le bloc du jour etait TOUJOURS a l'etat
+    // vide dans le banc : l'etat « il y a une arrivee » n'etait atteignable par
+    // aucun test, et la bascule qui en depend n'etait mesurable que dans un
+    // sens. La REGLE de composition d'un evenement a ses tests dans
+    // `tests/aujourdhui.test.js` ; ici c'est le RENDU qu'on juge.
+    if (cle === 'evenementsDuJour') {
+      return () => (Array.isArray(options.evenements) ? options.evenements : [])
+    }
     return cle === 'etatDesBiens' ? (() => new Map()) : (() => [])
   } })
 
@@ -670,7 +866,7 @@ function ouvrirAujourdhui (options = {}) {
     'requireAuth', 'supabase', 'signOut', 'initErrorHandler', 'logger', 'esc',
     'compteCourant', 'moi', 'peutLire', 'peutEcrire', 'estTitulaire', 'comptes',
     'basculerVers', 'enteteCompte', 'etatHtml',
-    'vueDesAvis', 'blocAvisHtml', 'enTeteAvisHtml', 'MUETS', 'libelleDuCanal', 'R',
+    'vueDesAvis', 'blocAvisHtml', 'enTeteAvisHtml', 'carteAvisHtml', 'MUETS', 'libelleDuCanal', 'R',
     'I18n', 'HSNav', 'document', 'window', 'location', 'fetch', 'localStorage', 'console',
     // ⚠ `CacheEcran` MANQUAIT, ET C'EST CE QUI TUAIT LE DEMARRAGE. La page fait
     // `import * as CacheEcran from '/shared/cache-ecran.js'` et s'en sert des
@@ -682,8 +878,33 @@ function ouvrirAujourdhui (options = {}) {
     // moitie du chemin qu'on croit eprouver, y compris la purge et la
     // peremption. Il ecrit dans le `localStorage` du banc, qui est deja faux.
     'CacheEcran',
+    // ⚠ LE MODULE DE COURBE MANQUAIT, et c'est la vue Annee ENTIERE qui ne
+    // s'executait jamais : `renderAnnee` appelle `courbeMensuelle`, donc le
+    // premier appel levait `courbeMensuelle is not defined`. Aucun test ne
+    // l'appelait, donc rien ne
+    // le disait — la page avait un ecran complet sans un seul garde-fou qui
+    // l'exerce. Meme lecon que `CacheEcran` deux lignes plus haut.
+    // ⚠ ET C'EST LE VRAI MODULE : un double rendrait des SVG inventes, donc des
+    // assertions sur une geometrie qui n'est pas celle qu'on livre.
+    'courbeMensuelle',
+    // ⚠ ET LE BRANCHEMENT DES ⓘ, pour la meme raison que les deux ci-dessus :
+    // la page appelle `brancherInfoBulles(document)` dans `init()`, donc son
+    // absence levait `brancherInfoBulles is not defined` et tuait le demarrage
+    // ENTIER — pas seulement les info-bulles. Le test l'a appris en rougissant.
+    // Le VRAI module, pas un double : un double qui ne branche rien laisserait
+    // croire que la page ouvre ses bulles au toucher.
+    'brancherInfoBulles',
+    // ⚠ QUATRIEME MODULE OUBLIE DANS CE BANC (apres `CacheEcran`,
+    // `courbeMensuelle` et `brancherInfoBulles`), et la quatrieme fois avec le
+    // MEME symptome : `armerLaSuiteDesAvis` appelle `brancherFleches`, donc son
+    // absence levait `brancherFleches is not defined` et tuait TOUT rendu des
+    // avis — 13 rouges. La lecon se repete parce que rien dans ce depot ne
+    // compare la liste des `import` de la page a celle des noms injectes ici.
+    // Le VRAI module, pas un double : un double qui ne branche rien laisserait
+    // croire que les fleches defilent.
+    'brancherFleches',
     batirAujourdhui(options.sansInit)
-  )(requireAuth, supabase, rien, rien, journal, String,
+  )(requireAuth, supabase, rien, rien, journal, ESC,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
     rien, () => ({}), () => '<h2 data-i18n="logements.vide_titre"></h2>',
     // ⚠ LE MODULE DES AVIS EST INJECTE POUR DE VRAI, pas double (constat MOYEN 3
@@ -694,12 +915,21 @@ function ouvrirAujourdhui (options = {}) {
     // trois. Resultat mesure : onze mutations du code neuf survivaient.
     // On injecte le MODULE REEL : un double rendrait un test qui mesure son
     // propre double, et c'est le rendu qu'on veut juger.
-    AVIS.vueDesAvis, AVIS.blocAvisHtml, AVIS.enTeteAvisHtml, AVIS.MUETS,
+    AVIS.vueDesAvis, AVIS.blocAvisHtml, AVIS.enTeteAvisHtml, AVIS.carteAvisHtml, AVIS.MUETS,
     (c) => ({ airbnb: 'Airbnb', booking: 'Booking.com' })[String((c || {}).ota || '')] || null,
     R,
-    I18n, { renderMenu: rien, render: rien }, document_, {}, { search: '', hash: '' },
+    // ⚠ LA FENETRE PORTE `matchMedia`, et ce n'est pas un bouchon de confort :
+    // la vue Annee choisit le repere de sa courbe avec elle (360 unites au
+    // telephone, 680 a l'ordinateur). Une fenetre vide faisait tomber la page
+    // au CHARGEMENT du module — 36 rouges le 27 octobre 2026 — et la rendre
+    // defensive cote page ne suffit pas : sans double ici, la branche etroite
+    // ne serait jamais eprouvee. `options.etroit` la choisit.
+    I18n, { renderMenu: rien, render: rien }, document_, fenetreDuBanc(options), { search: '', hash: '' },
     fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien },
-    require('../shared/cache-ecran.js'))
+    require('../shared/cache-ecran.js'),
+    require('../shared/courbe-mensuelle.js').courbeMensuelle,
+    require('../shared/ibulle.js').brancherInfoBulles,
+    require('../shared/rail-fleches.js').brancherFleches)
 
   return {
     // Le corps que le test a fourni. Depuis le lot (b), les tests nourrissent
@@ -717,6 +947,25 @@ function ouvrirAujourdhui (options = {}) {
     // L'element lui-meme, pour lire `hidden` et `textContent` : le double les
     // porte, et c'est sur eux que se jugent « masque » et « se tait ».
     cache: (sel) => document_.querySelector(sel),
+    // Le geste de l'hote : « je fais defiler ». C'est lui qui arme
+    // l'observation de la sentinelle (voir `armerLaSuiteDesAvis`).
+    defiler: () => {
+      for (const e of (options.ecouteurs || [])) if (e.type === 'scroll') e.fn({ type: 'scroll' })
+    },
+    // Le geste de l'hote sur telephone : « je touche la ⓘ ». Il part du MEME
+    // ecouteur que la page a pose, donc il tombe si elle ne le pose plus.
+    toucherIbulle: () => {
+      const btn = {
+        etat: 'false',
+        getAttribute: (n) => (n === 'aria-expanded' ? btn.etat : null),
+        setAttribute: (n, v) => { if (n === 'aria-expanded') btn.etat = String(v) }
+      }
+      btn.closest = (sel) => (sel === '[data-ibulle]' ? btn : null)
+      const clic = ecouteursDoc.find(e => e.type === 'click')
+      assert.ok(clic, 'la page ne pose AUCUN ecouteur de clic sur le document : les ⓘ ne s ouvrent pas au toucher')
+      clic.fn({ target: btn })
+      return btn.etat
+    },
     ouvrirSession: () => resoudreSession({ user: { id: 'u1', email: 'thierry@exemple.fr', user_metadata: {} } }),
     repondreI18n: () => resoudreI18n('fr'),
     resoudre: (table, charge) => {
@@ -1529,7 +1778,10 @@ test("LE TEST QUI COMPTE : le BANDEAU dit « non calculable », il n'affiche pas
   // contre `''` — et c'est cette distinction qu'on mesure.
   //
   // (Premiere version de ce test : j'assertais `classList.contains('muted')`.
-  // Le noeud du banc n'a pas de `classList` reelle, donc l'assertion echouait
+  // ⚠ CE COMMENTAIRE EST PERIME DEPUIS LE 29 OCTOBRE 2026 : le banc porte
+  // maintenant une `classList` REELLE, adossee a `className`. Il est garde pour
+  // l'histoire, pas comme une description de l'etat du banc.
+  // Le noeud du banc n'avait pas de `classList` reelle, donc l'assertion echouait
   // alors que la garde fonctionnait. Mesurer ce que le banc ne simule pas, c'est
   // se fabriquer un rouge et chercher un defaut la ou il n'y en a pas.)
   const p = bancRevenus({
@@ -1648,8 +1900,20 @@ test("RECENSEMENT : le mois ne s'affiche qu'UNE fois, et le selecteur Mois/Annee
   assert.deepEqual(bindings, [],
     'le mois est encore affiche a cote du total : il y est deux fois a l ecran')
   assert.match(src, /data-bind="revenue-month-nav"/, 'le mois des fleches a disparu aussi')
-  assert.ok(!/data-vue="mois"/.test(src),
-    'le selecteur Mois/Annee est encore la : un seul bouton visible, et sous 44 px')
+  // ⚠ CETTE ASSERTION EXIGEAIT LA DISPARITION DU SELECTEUR, et elle avait
+  // raison tant que la vue Annee n'existait pas : un selecteur a un seul choix
+  // ne selectionne rien. La vue Annee existe depuis le 27 octobre 2026, et la
+  // decision 5 de Thierry la ramene. Ce que son constat exigeait VRAIMENT, et
+  // qui reste vrai, c'est DEUX choix visibles et une cible de 44 px.
+  const vues = (src.match(/data-vue="(mois|annee)"/g) || [])
+  assert.deepEqual(vues.sort(), ['data-vue="annee"', 'data-vue="mois"'],
+    'le selecteur ne porte plus exactement DEUX choix : un selecteur a un seul bouton ne selectionne rien')
+  assert.ok(!/data-vue="[^"]*"[^>]*\bhidden\b/.test(src),
+    'un des deux choix est masque : on retombe sur le bouton sans effet de la recette')
+  const css = lire('shared/ui.css')
+  const bouton = (css.match(/\.seg__btn\s*\{[^}]*\}/) || [''])[0]
+  assert.match(bouton, /min-height:\s*var\(--control\)/,
+    'la cible du selecteur n est plus reglee sur --control : Thierry avait mesure 30 px')
 })
 
 test("RECENSEMENT : la barre dit le RECU en plein noir et l A VENIR en hachure grise", () => {
@@ -1783,7 +2047,16 @@ test("LE TEST QUI COMPTE : la barre a sa PROPRE colonne, elle ne suit plus le no
   // ajoutee a l'en-tete sans l'etre aux rangees decale TOUS les chiffres d'une
   // colonne vers la gauche, en silence — le tableau reste valide, il ment.
   const src = lire('pages/aujourdhui.html')
-  const enTete = (src.match(/<th scope="col"/g) || []).length
+  // ⚠ L'EN-TETE SE COMPTE SUR LE TABLEAU DU MOIS, PAS SUR LA PAGE. La vue Annee
+  // a pose un SECOND tableau le 27 octobre 2026 : compter tous les
+  // `<th scope="col">` de la page donnait 9 colonnes pour 5 cellules, et ce
+  // test rougissait sur un code juste. C'est la meme erreur que la premiere
+  // version de ce test (ci-dessus) : une mesure de balisage doit etre bornee a
+  // l'element qu'elle juge.
+  const tableauDuMois = (src.match(/<table class="rev-tbl">[\s\S]*?<\/table>/) || [''])[0]
+  assert.ok(/data-list="revenue-rows"/.test(tableauDuMois),
+    'le tableau du mois n a pas ete isole : la mesure porterait sur un autre')
+  const enTete = (tableauDuMois.match(/<th scope="col"/g) || []).length
   const parRangee = (lignes.match(/<tr>/g) || []).map((_, i) =>
     (lignes.split('<tr>')[i + 1] || '').match(/<t[hd][ >]/g) || [])
   for (const cells of parRangee) {
@@ -2026,4 +2299,2114 @@ test("LE TEST QUI COMPTE : l argent d un logement SUPPRIME ne se pose pas sur le
   assert.strictEqual(reserve.hidden, false, 'la reserve est masquee : l ecart serait MUET')
   assert.match(reserve.textContent, /revenue\.hors_biens/,
     'la reserve ne dit pas les sejours rattaches a aucun logement')
+})
+
+// ─── LA VUE ANNEE DU BLOC REVENUS ──────────────────────────────────────────
+// ⚠ AUCUN TEST NE JUGEAIT CE RENDU avant le 27 octobre 2026 : l'endpoint avait
+// les siens, l'ecran aucun. Ce qui suit APPELLE `renderAnnee` et lit ce qu'elle
+// pose, parce qu'un test qui cherche une forme dans le texte de la page ne dit
+// rien de l'execution (REVIEW.md regle 20).
+
+// Le montant d'un libelle, en euros entiers. ⚠ ON RETIRE TOUT CE QUI N'EST PAS
+// UN CHIFFRE : le separateur de milliers de `Intl` est une espace FINE
+// INSECABLE (U+202F), que `\s` ne couvre pas dans toutes les versions — une
+// comparaison de texte echouerait sans que rien ne soit visible a l'oeil.
+const euros = (texte) => Number(String(texte).replace(/[^\d]/g, ''))
+
+// Un mois ENCAISSE, et un mois seulement RESERVE : le partage recu/a venir
+// decide ou s'arrete le trait plein, donc quels mois sont « a venir ».
+const recuDe = (t) => ({ sejours: 1, total_cents: t, recu_cents: t, a_venir_cents: 0, bruts: 0, sans_montant: 0 })
+const aVenirDe = (t) => ({ sejours: 1, total_cents: t, recu_cents: 0, a_venir_cents: t, bruts: 0, sans_montant: 0 })
+
+// Un mois de l'annee, au format que l'endpoint rend.
+const mo = (total, sejours = 1) => ({
+  sejours, total_cents: total, recu_cents: total, a_venir_cents: 0, bruts: 0, sans_montant: 0
+})
+
+// ⚠ LES DATES SONT FIGEES **ET** INJECTEES : `renderAnnee` ne lit pas l'horloge,
+// elle lit `etat.aujourdHui`. Regle du depot : *dates relatives si le test lit
+// l'horloge, dates figees s'il injecte le temps.* Des dates relatives ici
+// feraient varier la tranche comparee d'un jour a l'autre.
+function bancAnnee (options = {}) {
+  const p = ouvrirAujourdhui({ sansInit: true, etroit: options.etroit === true })
+  const an = options.an || 2026
+  p.interne.etat.vueRevenus = 'annee'
+  p.interne.etat.anneeRevenus = an
+  p.interne.etat.anneeEtat = 'ok'
+  p.interne.etat.aujourdHui = options.aujourdHui || '2026-10-15'
+  p.interne.etat.biens = options.biens || [
+    { id: 'uuid-1', name: 'La bulle' }, { id: 'uuid-2', name: 'Colomiers' }
+  ]
+  p.interne.etat.filtreAnnee = options.filtre || null
+  // Les bandes deja chargees, comme si le clic sur la pastille avait rendu.
+  // ⚠ LA CLE DU CACHE EST « annee|bien » depuis la review : une bande ne vaut
+  // que pour la fenetre d'annees qu'elle couvre.
+  p.interne.etat.comparablesParBien = Object.fromEntries(
+    Object.entries(options.comparables || {}).map(([b, v]) => [`${options.an || 2026}|${b}`, v]))
+  p.interne.etat.annee = options.annee
+  p.interne.renderAnnee()
+  return p
+}
+
+test("LE TEST QUI COMPTE : l annee EN COURS se compare A DATE, pas sur douze mois", () => {
+  // ⚠ DECISION 2 DE THIERRY : « Le cumul a date ne vaut que pour l'annee en
+  // cours. » Le grand total doit donc s'arreter au mois courant — novembre et
+  // decembre sont DEJA RESERVES, ils se tracent mais ne se comptent pas dans la
+  // comparaison. Sommer douze mois ferait un chiffre qui n'a pas de pendant
+  // en N-1 et transformerait un carnet de reservations en chiffre d'affaires.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-15',
+    annee: {
+      total: { '2026-09': mo(10000), '2026-10': mo(20000), '2026-11': mo(500000) },
+      par_bien: {}, hors_biens: {}
+    }
+  })
+  const total = p.cache('[data-bind="revenue-annee-n"]').textContent
+  // ⚠ ON COMPARE LE NOMBRE, PAS UNE SOUS-CHAINE. Ma premiere version cherchait
+  // « 300 » dans le texte et refusait « 5000 » : elle acceptait donc **5 300 €**
+  // — la somme des douze mois — parce qu'elle contient « 300 ». Mesure du
+  // 27 octobre 2026 : la mutation « sommePeriode(..., 12) » laissait ce test
+  // VERT. Une assertion de sous-chaine sur un montant formate est un faux vert.
+  assert.strictEqual(euros(total), 300,
+    `le total de l en-tete vaut « ${total} » au lieu de 300 € : novembre (5 000 €, a venir) y est entre`)
+})
+
+test("LE TEST QUI COMPTE : une annee PASSEE se compare en ENTIER", () => {
+  // Le pendant de la decision 2 : sur 2025, les douze mois comptent — aucun
+  // n'est « a venir ». S'arreter en octobre inventerait une baisse de deux mois.
+  const p = bancAnnee({
+    an: 2025,
+    aujourdHui: '2026-10-15',
+    annee: {
+      total: { '2025-10': mo(10000), '2025-12': mo(30000) },
+      par_bien: {}, hors_biens: {}
+    }
+  })
+  const total = p.cache('[data-bind="revenue-annee-n"]').textContent
+  assert.strictEqual(euros(total), 400,
+    `le total de 2025 vaut « ${total} » au lieu de 400 € : decembre manque, l annee passee est tronquee au mois courant`)
+})
+
+test("LE TEST QUI COMPTE : aucun pourcentage au niveau du COMPTE", () => {
+  // ⚠ DECISION 1 DE THIERRY, confirmee le 27 octobre APRES la maquette — qui
+  // en portait un (« +14 % »). Les deux annees ne portent pas les memes
+  // logements : un bien arrive en cours d'annee gonfle N sans rien devoir a
+  // l'exploitation. L'ecart vit sur les LIGNES, ou les deux annees parlent du
+  // meme logement.
+  const p = bancAnnee({
+    annee: {
+      total: { '2026-05': mo(50000), '2025-05': mo(10000) },
+      par_bien: {}, hors_biens: {}
+    }
+  })
+  for (const b of ['revenue-annee-n', 'revenue-annee-n1', 'revenue-annee-periode']) {
+    const txt = p.cache(`[data-bind="${b}"]`).textContent
+    assert.ok(!/%/.test(txt),
+      `« ${b} » affiche « ${txt} » : un pourcentage est revenu au niveau du compte`)
+  }
+})
+
+test("LE TEST QUI COMPTE : la pastille pilote l EN-TETE, et l en-tete se NOMME", () => {
+  // ⚠ CE TEST A CHANGE DE REGLE LE 28 OCTOBRE 2026, ET CE N EST PAS UN
+  // REVIREMENT. Il exigeait que l en-tete NE suive PAS la pastille, et il avait
+  // raison tant que rien ne disait de quoi le grand chiffre parlait : « un
+  // chiffre qui change sous une pastille est ambigu ».
+  // La decision Q1 de Thierry leve l ambiguite autrement, et mieux : l en-tete
+  // suit la pastille ET SE NOMME (« La bulle · janvier -> octobre 2026 »). Ce
+  // que l ancien test protegeait — on sait toujours de quoi parle le chiffre —
+  // reste donc garde, par le prefixe au lieu de l immobilite.
+  const annee = {
+    total: { '2026-05': mo(50000), '2025-05': mo(40000) },
+    par_bien: {
+      'uuid-1': { '2026-05': mo(20000), '2025-05': mo(10000) },
+      'uuid-2': { '2026-05': mo(30000), '2025-05': mo(30000) }
+    },
+    hors_biens: {}
+  }
+  const biens = [{ id: 'uuid-1', name: 'A' }, { id: 'uuid-2', name: 'B' }]
+  const sansFiltre = bancAnnee({ annee, biens })
+  const tous = sansFiltre.cache('[data-bind="revenue-annee-n"]').textContent
+  const filtre = bancAnnee({ annee, biens, filtre: 'uuid-1' })
+  const duBien = filtre.cache('[data-bind="revenue-annee-n"]').textContent
+  assert.notStrictEqual(duBien, tous,
+    `l en-tete affiche « ${duBien} » comme sans filtre : la pastille ne le pilote pas`)
+  assert.strictEqual(euros(duBien), 200,
+    `l en-tete vaut ${euros(duBien)} € au lieu des 200 € du bien choisi`)
+  // ⚠ ET IL SE NOMME : sans le prefixe, le chiffre changerait sans qu on sache
+  // de quoi il parle — c est ce que l ancienne regle evitait en l immobilisant.
+  assert.match(filtre.cache('[data-bind="revenue-annee-periode"]').textContent, /^A ·/,
+    'l en-tete filtre ne nomme pas le logement : le chiffre change sans se declarer')
+  // Le compte, lui, n a toujours AUCUN pourcentage (decision 1, inchangee).
+  assert.strictEqual(sansFiltre.cache('[data-bind="revenue-annee-ecart"]').hidden, true,
+    'un pourcentage est apparu au niveau du compte')
+  assert.strictEqual(filtre.cache('[data-bind="revenue-annee-ecart"]').hidden, false,
+    'le logement choisi n affiche pas son ecart, alors que les deux annees parlent du meme bien')
+  // ⚠ ET LA COURBE, ELLE, A CHANGE DE SERIE — mesure par le NOMBRE du palier
+  // haut, pas par une sous-chaine. Ma premiere version cherchait `/50\s?000|500,0/`
+  // dans le SVG : avec 500 €, le SVG non filtre ecrit « 500 € » et « · 500 »,
+  // aucune des deux formes cherchees. Mutation `parMois = a.total` (la pastille
+  // ne filtre plus rien) : le test restait VERT. Meme famille de faux vert que
+  // deux tests plus haut, au meme endroit du raisonnement.
+  const hautDeLAxe = (p) => {
+    const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+    assert.ok(svg.includes('<svg'), 'la courbe ne rend plus de SVG')
+    const grads = [...svg.matchAll(/class="cm-grad"[^>]*>([^<]*)</g)].map(m => m[1])
+    return euros(grads[grads.length - 1])
+  }
+  const hautTous = hautDeLAxe(bancAnnee({ annee, biens }))
+  const hautFiltre = hautDeLAxe(filtre)
+  assert.ok(hautFiltre < hautTous,
+    `le haut de l axe vaut ${hautFiltre} filtre contre ${hautTous} pour le compte : la pastille ne filtre pas la courbe`)
+})
+
+test("LE TEST QUI COMPTE : un logement sans N-1 dit « nouveau », pas « +0 % »", () => {
+  // « Pas comparable » n est jamais « +0 % » : meme regle que « non calculable
+  // n est jamais zero ».
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-2', name: 'Colomiers' }],
+    annee: {
+      total: { '2026-05': mo(30000) },
+      par_bien: { 'uuid-2': { '2026-05': mo(30000) } },
+      hors_biens: {}
+    }
+  })
+  const lignes = p.cache('[data-list="revenue-annee-lignes"]').innerHTML
+  assert.ok(/nouveau/i.test(lignes),
+    'un logement sans annee precedente n est pas nomme comme tel')
+  assert.ok(!/\+0\s?%/.test(lignes),
+    'un logement sans annee precedente affiche « +0 % » : une absence devenue un fait')
+})
+
+test("LE TEST QUI COMPTE : le haut de l axe est un palier ROND", () => {
+  // Mesure au banc du 27 octobre 2026 : sur un maximum de 12 600 €, trois
+  // paliers calcules sur le maximum reel ecrivaient « 0 / 6,3 k / 12,6 k ».
+  // Un axe sert a SITUER, et 6,3 k ne situe rien.
+  const p = bancAnnee({
+    annee: { total: { '2026-05': mo(1260000) }, par_bien: {}, hors_biens: {} }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const grads = [...svg.matchAll(/class="cm-grad"[^>]*>([^<]*)</g)].map(m => m[1])
+  assert.strictEqual(grads.length, 3, `l axe porte ${grads.length} paliers, la maquette en veut 3`)
+  // Le palier du haut doit etre un multiple rond : 16 k, pas 12,6 k.
+  const chiffres = grads.map(g => Number(g.replace(/[^\d,.]/g, '').replace(',', '.')))
+  assert.ok(chiffres[2] > 12.6 && Number.isInteger(chiffres[2]),
+    `le haut de l axe vaut « ${grads[2]} » : il suit le maximum reel au lieu d etre releve`)
+})
+
+test("LE TEST QUI COMPTE : au telephone, le repere RETRECIT", () => {
+  // ⚠ LE `viewBox` EST MIS A L ECHELLE DE SON CADRE, DONC LES TEXTES AUSSI :
+  // 680 unites rendues dans 358 px affichent les libelles a 5,8 px. Mesure au
+  // banc le 27 octobre 2026 — graduations et initiales illisibles, et rien ne
+  // le signalait : le SVG etait parfaitement valide.
+  const donnees = { total: { '2026-05': mo(50000) }, par_bien: {}, hors_biens: {} }
+  const large = bancAnnee({ annee: donnees }).cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const etroit = bancAnnee({ annee: donnees, etroit: true }).cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  assert.match(large, /viewBox="0 0 680 220"/, 'le repere de l ordinateur a change')
+  assert.match(etroit, /viewBox="0 0 360 200"/,
+    'le telephone dessine encore dans le repere large : ses libelles tomberont a 5,8 px')
+})
+
+test("LE TEST QUI COMPTE : le trait « deja reserve » REJOINT le realise", () => {
+  // Sans chevauchement d un mois, le trait se couperait au changement de style
+  // et la courbe aurait un trou la ou il n y en a pas.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-15',
+    annee: {
+      total: { '2026-09': mo(10000), '2026-10': mo(20000), '2026-11': mo(30000) },
+      par_bien: {}, hors_biens: {}
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const pointilles = [...svg.matchAll(/<path d="([^"]*)"[^>]*stroke-dasharray/g)].map(m => m[1])
+  assert.strictEqual(pointilles.length, 1, 'il n y a plus exactement un trait pointille')
+  const points = (pointilles[0].match(/[ML]/g) || []).length
+  assert.ok(points >= 2,
+    `le trait « deja reserve » n a que ${points} point : il part de novembre au lieu de rejoindre octobre`)
+})
+
+// ─── CE QUE LA REVIEW DU 28 OCTOBRE 2026 A TROUVE, ET QUE RIEN NE GARDAIT ───
+// Trois constats GRAVES et quatre MOYENS portaient sur du rendu neuf qui
+// n'avait AUCUN garde-fou : les reserves, l'echappement, la fenetre des lignes,
+// l'arrondi. Chacun de ces tests ferme un de ces constats.
+
+test("LE TEST QUI COMPTE : un montant NON CALCULABLE ne s affiche pas « 0 € »", () => {
+  // ⚠ LE DEFAUT QUE LA VUE MOIS A FERME EN TROIS ENDROITS, rouvert en entier
+  // par la vue Annee — avec un porteur de plus, le POINT de la courbe. Avec
+  // `{sejours: 2, total_cents: 0, sans_montant: 2}`, l'ecran affirmait « 0 € »
+  // en tete, « 0 € » sur la ligne, posait un point PLEIN sur l'axe, et ne
+  // disait rien des deux sejours. « Non calculable » n'est JAMAIS zero.
+  const refus = { sejours: 2, total_cents: 0, recu_cents: 0, a_venir_cents: 0, bruts: 0, sans_montant: 2 }
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: { total: { '2026-09': refus }, par_bien: { 'uuid-1': { '2026-09': refus } }, hors_biens: {} }
+  })
+  // ⚠ ON ASSERTE LA CLE, PAS LE TEXTE : le banc rend les cles i18n telles
+  // quelles, et une reformulation francaise ne doit pas faire rougir un test
+  // qui parle d'une REGLE.
+  const entete = p.cache('[data-bind="revenue-annee-n"]').textContent
+  assert.strictEqual(entete, 'revenue.unavailable',
+    `l en-tete affiche « ${entete} » au lieu de « non calculable » : un faux zero la ou le coeur ne sait pas`)
+  const lignes = p.cache('[data-list="revenue-annee-lignes"]').innerHTML
+  assert.ok(!/>\s*0\s*€/.test(lignes), `la ligne affiche un faux zero : ${lignes.slice(0, 200)}`)
+  // ⚠ ET LA COURBE NE POSE PAS DE POINT SUR L AXE : un point plein a y=max dit
+  // « ce mois-la, zero euro ». Le module coupe le trait sur un `null`.
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  assert.ok(!/<circle[^>]*fill="var\(--ink\)"/.test(svg),
+    'la courbe pose un point plein : elle affirme zero euro la ou le montant est inconnu')
+  // Et les deux sejours sont COMPTES dans une reserve.
+  const res = { textContent: ibTotal(p) }
+  // ⚠ LE BANC N'INTERPOLE PAS `{n}` : on ne peut pas lire « 2 » dans le texte.
+  // On prouve donc que la reserve SUIT LA DONNEE par un contre-cas — sans
+  // sejour refuse, elle ne doit pas apparaitre. Une reserve posee en dur
+  // passerait le premier test et echouerait celui-ci.
+  assert.match(res.textContent, /revenue\.annee_ib_total_sans_montant/,
+    `la reserve ne parle pas des montants non calculables : « ${res.textContent} »`)
+  const sansRefus = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-09': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-09': mo(10000) } },
+      hors_biens: {}
+    }
+  })
+  assert.ok(!/revenue\.annee_ib_total_sans_montant/.test(ibTotal(sansRefus)),
+    'la reserve des montants non calculables s affiche sans aucun sejour refuse : elle est posee en dur')
+})
+
+test("LE TEST QUI COMPTE : l argent HORS BIENS de N-1 est declare, pas seulement celui de N", () => {
+  // ⚠ LE SECOND CONSTAT GRAVE, rejoue du cote N-1 : un bien SUPPRIME qui avait
+  // encaisse en juin 2025 mettait son montant dans le grand chiffre de N-1 et
+  // sur AUCUNE ligne, sans un mot. C'est le defaut deja paye sur la vue Mois
+  // (« 1 000 € d'ecart muet entre le bandeau et la somme des lignes »).
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      // ⚠ L'ARGENT HORS BIENS N'EXISTE QU'EN N-1 : c'est ce qui fait mordre.
+      // Avec du hors-biens des DEUX cotes, une reserve qui ne regarde que `an`
+      // serait quand meme rendue, et le test passerait sur un code faux.
+      total: { '2026-05': mo(10000), '2025-05': mo(10000), '2025-06': mo(99900) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000), '2025-05': mo(10000) } },
+      hors_biens: { '2025-06': mo(99900) }
+    }
+  })
+  const res = { textContent: ibTotal(p) }
+  assert.match(res.textContent, /revenue\.annee_hors_biens/,
+    `la reserve ne parle pas de l argent hors biens : « ${res.textContent} »`)
+})
+
+test("LE TEST QUI COMPTE : « nouveau » se verifie sur l ANNEE, pas sur la fenetre comparee", () => {
+  // ⚠ UN FAIT FAUX, MESURE : un bien qui a vendu en DECEMBRE 2025 et qui a du
+  // deja-reserve en NOVEMBRE 2026 n'a rien entre janvier et octobre des deux
+  // cotes. Il etait annonce « nouveau en 2026 » alors qu il exploite depuis
+  // l an dernier. Et ce lot avait SUPPRIME la formulation honnete qui existait
+  // (« pas d annee precedente a comparer ») pour la remplacer par ce fait.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-15',
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2025-12': mo(500000), '2026-11': mo(400000) },
+      par_bien: { 'uuid-1': { '2025-12': mo(500000), '2026-11': mo(400000) } },
+      hors_biens: {}
+    }
+  })
+  const lignes = p.cache('[data-list="revenue-annee-lignes"]').innerHTML
+  assert.ok(!/revenue\.annee_nouveau/.test(lignes),
+    `la ligne dit « nouveau » d un bien qui a vendu en 2025 : ${lignes.slice(0, 300)}`)
+  assert.match(lignes, /revenue\.sans_comparaison/,
+    'la ligne n explique pas pourquoi l ecart manque : une absence se dit avec son motif')
+})
+
+test("LE TEST QUI COMPTE : les lignes AFFICHEES somment au chiffre AFFICHE", () => {
+  // ⚠ LE CONSTAT DE RECETTE DE THIERRY DU 27 OCTOBRE, sur la vue Mois : deux
+  // biens a 100,50 € donnaient « 201 € » en tete et « 101 € + 101 € » en
+  // lignes. La vue Annee met le grand total et les lignes dans le MEME bloc,
+  // donc l ecart y saute encore plus aux yeux.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'A' }, { id: 'uuid-2', name: 'B' }],
+    annee: {
+      total: { '2026-05': mo(20100, 2) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10050) }, 'uuid-2': { '2026-05': mo(10050) } },
+      hors_biens: {}
+    }
+  })
+  const entete = euros(p.cache('[data-bind="revenue-annee-n"]').textContent)
+  const lignes = p.cache('[data-list="revenue-annee-lignes"]').innerHTML
+  const colonneN = [...lignes.matchAll(/<td class="rev-tbl__num">([^<]*)</g)].map(m => euros(m[1]))
+  const somme = colonneN.reduce((a, b) => a + b, 0)
+  assert.strictEqual(somme, entete,
+    `les lignes font ${somme} € pour un en-tete a ${entete} € : l arrondi par ligne ne concorde pas`)
+})
+
+test("LE TEST QUI COMPTE : la page BRANCHE l ouverture des ⓘ au toucher", async () => {
+  // ⚠ LA MUTATION QUI SURVIVAIT. Retirer `brancherInfoBulles(document)` de la
+  // page laissait la suite ENTIEREMENT verte : les textes etaient dans le DOM,
+  // les tests les lisaient par `innerHTML`, et personne ne touchait rien. Sur
+  // telephone, ou il n'y a pas de survol, les ⓘ seraient devenues muettes —
+  // c'est-a-dire que la demande de Thierry (« survol / toucher ») serait
+  // tombee en silence, et que le lot aurait RETIRE de l'information au lieu de
+  // la deplacer.
+  // ⚠ ET IL FAUT UN DEMARRAGE COMPLET : `bancAnnee` ouvre la page en
+  // `sansInit`, et le branchement vit dans `init()`. Un test ecrit sur
+  // `bancAnnee` aurait rougi pour la mauvaise raison.
+  const p = ouvrirAujourdhui({ corps: { biens: [], droits: { reservations: true } } })
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  assert.deepEqual(p.erreurs, [], `le demarrage a echoue : ${p.erreurs.join(' / ')}`)
+  assert.strictEqual(p.toucherIbulle(), 'true',
+    'un toucher sur une ⓘ ne l ouvre pas : la page ne branche pas shared/ibulle.js')
+})
+
+test("LE TEST QUI COMPTE : « une ligne a 0 ne s affiche pas » dans l info-bulle du total", () => {
+  // ⚠ LA DEMANDE DE THIERRY, mot pour mot, le 29 octobre 2026. Une info-bulle
+  // qui enumererait « 0 sejour sans montant · 0 sejour en brut · le perimetre
+  // est stable » serait plus longue que le paragraphe qu'elle remplace, et
+  // chaque ligne y dirait « rien a signaler » — donc rien.
+  //
+  // Un mois PROPRE : aucun sejour refuse, aucun brut, les deux annees portent
+  // les memes logements. Il ne reste que la mention systematique de
+  // l'estimation, qui n'est pas une reserve CONDITIONNELLE : les montants sont
+  // toujours estimes.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(10000), '2025-05': mo(9000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000), '2025-05': mo(9000) } },
+      hors_biens: {},
+      // ⚠ ET L AGREGAT « RESERVE A DATE » EST FOURNI. Sans lui, l info-bulle
+      // dit — a juste titre — que la comparaison a date n a pas pu etre lue :
+      // une reserve de plus, mais qui porte sur une PANNE, pas sur un zero.
+      // Le test a appris ce fait en rougissant.
+      reserve_a_date: rad({ '2025-11': {} })
+    }
+  })
+  const lignes = ibTotal(p).split('\n').filter((l) => l.trim() !== '')
+  // ⚠ IL RESTE LA PHRASE DE L'HONNETETE, et elle seule : c'est la decision de
+  // Thierry du 29 octobre 2026 (« plus de texte en clair sous les blocs »).
+  // Elle ne compte pas comme « une ligne a 0 » : elle ne depend d'aucun
+  // compte, elle dit la NATURE du chiffre. Ce que le test interdit, c'est
+  // qu'une reserve CONDITIONNELLE s'affiche quand son compte vaut zero.
+  assert.deepStrictEqual(lignes, ['revenue.note'],
+    `l info-bulle enumere des lignes a zero : ${JSON.stringify(lignes)}`)
+})
+
+test("LE TEST QUI COMPTE : les montants BRUTS sont dits dans la vue Annee aussi", () => {
+  // ⚠ UN RETRAIT DE FOND PAR OMISSION DE FORME, ce que la regle de refonte
+  // interdit nommement. La vue Mois dit les bruts DEUX fois ; la vue Annee ne
+  // les disait pas du tout, alors qu ils entrent dans le total et dans l ecart
+  // en % comme s ils etaient nets.
+  const avecBrut = { sejours: 1, total_cents: 50000, recu_cents: 50000, a_venir_cents: 0, bruts: 1, sans_montant: 0 }
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: { total: { '2026-05': avecBrut }, par_bien: { 'uuid-1': { '2026-05': avecBrut } }, hors_biens: {} }
+  })
+  const res = { textContent: ibTotal(p) }
+  assert.match(res.textContent, /revenue\.annee_ib_total_bruts/,
+    `la reserve ne parle pas des bruts : « ${res.textContent} »`)
+})
+
+test("LE TEST QUI COMPTE : un `total` ABSENT se dit, il ne s affiche pas « 0 € »", () => {
+  // La vue Mois ecrit la forme lache `!rev.total` ; la vue Annee testait
+  // `=== null`. Avec un `total` absent mais un `par_bien` peuplé, la garde
+  // stricte laissait passer : « 0 € » en tete au-dessus d une ligne a 1 234 €.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: { par_bien: { 'uuid-1': { '2026-05': mo(123400) } }, hors_biens: {} }
+  })
+  const etatTxt = p.cache('[data-bind="revenue-annee-etat"]')
+  assert.strictEqual(etatTxt.hidden, false,
+    'aucun message d etat : l ecran affirme un total alors que la lecture n en porte pas')
+})
+
+test("LE TEST QUI COMPTE : le nom d un logement est ECHAPPE partout", () => {
+  // Le nom vient du compte, donc d une saisie. Trois chemins l inserent en
+  // `innerHTML` : la pastille de filtre, la ligne du tableau, la carte
+  // telephone. Aucun n etait garde.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: '<img src=x onerror=alert(1)>' }],
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    }
+  })
+  for (const sel of ['[data-list="revenue-annee-filtres"]', '[data-list="revenue-annee-lignes"]',
+    '[data-list="revenue-annee-cartes"]']) {
+    const html = p.cache(sel).innerHTML
+    assert.ok(!/<img/i.test(html), `${sel} insere le nom sans l echapper : ${html.slice(0, 160)}`)
+    assert.match(html, /&lt;img/, `${sel} n a pas echappe le nom`)
+  }
+})
+
+test("LE TEST QUI COMPTE : les LIGNES comparent la meme fenetre que l en-tete", () => {
+  // Si les lignes somment douze mois quand l en-tete en somme dix, la colonne
+  // ne s explique plus par le total, et l ecart en % compare deux fenetres.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-15',
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-09': mo(10000), '2026-11': mo(500000) },
+      par_bien: { 'uuid-1': { '2026-09': mo(10000), '2026-11': mo(500000) } },
+      hors_biens: {}
+    }
+  })
+  const entete = euros(p.cache('[data-bind="revenue-annee-n"]').textContent)
+  const lignes = p.cache('[data-list="revenue-annee-lignes"]').innerHTML
+  const colonneN = [...lignes.matchAll(/<td class="rev-tbl__num">([^<]*)</g)].map(m => euros(m[1]))
+  assert.strictEqual(colonneN[0], entete,
+    `la ligne vaut ${colonneN[0]} € pour un en-tete a ${entete} € : novembre entre dans l une et pas dans l autre`)
+})
+
+test("LE TEST QUI COMPTE : le mois courant est designe sur l axe", () => {
+  // Il marque la frontiere entre le realise et le deja reserve. Sans lui, rien
+  // sur l axe ne dit ou elle passe.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-15',
+    annee: { total: { '2026-09': mo(10000), '2026-11': mo(20000) }, par_bien: {}, hors_biens: {} }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  assert.match(svg, /cm-mois--fort/, 'aucun mois n est designe sur l axe')
+  // Et sur une annee PASSEE, aucun mois n est « maintenant ».
+  const passe = bancAnnee({
+    an: 2025, aujourdHui: '2026-10-15',
+    annee: { total: { '2025-09': mo(10000) }, par_bien: {}, hors_biens: {} }
+  })
+  assert.ok(!/cm-mois--fort/.test(passe.cache('[data-bind="revenue-annee-courbe"]').innerHTML),
+    'une annee passee designe un mois courant : aucun de ses mois n est « maintenant »')
+})
+
+test("LE TEST QUI COMPTE : le mois courant garde sa COULEUR, pas seulement sa graisse", () => {
+  // ⚠ SPECIFICITE EGALE, L ORDRE TRANCHE. `.cm-mois--fort` (0,1,0) etait
+  // declaree AVANT `.cm-grad, .cm-mois` (0,1,0) : le `fill` de la seconde
+  // gagnait, le gras s appliquait et la couleur non. C est mot pour mot la
+  // classe de defaut que CLAUDE.md decrit pour `[hidden]`, et aucun test ne lit
+  // une valeur calculee.
+  const css = lire('shared/ui.css')
+  const iFort = css.indexOf('.cm-mois--fort')
+  const iBase = css.search(/\.cm-grad,\s*\.cm-mois\s*\{/)
+  assert.ok(iFort >= 0 && iBase >= 0, 'les deux regles de l axe ont disparu')
+  const compose = /\.cm-mois\.cm-mois--fort\s*\{/.test(css)
+  assert.ok(compose || iFort > iBase,
+    'la regle du mois courant est simple ET declaree avant la regle de base : son `fill` perd en silence')
+})
+
+// ─── LES TROIS CONSTATS DE LA RECETTE DU 28 OCTOBRE 2026 ───────────────────
+
+test("LE TEST QUI COMPTE : en vue Annee, le tableau du MOIS est masque", () => {
+  // ⚠ `renderAnnee()` est appele AU MILIEU de `renderRevenus`, et la fin de
+  // `renderRevenus` reaffichait le tableau du mois derriere lui. Thierry voyait
+  // donc, sous la courbe de l'annee, les lignes « aucun versement ce mois-ci ».
+  // Le test APPELLE `renderRevenus` en entier : un test qui n'appellerait que
+  // `renderAnnee` ne verrait jamais le defaut, puisqu'il vient de l'APRES.
+  const p = bancRevenus({
+    mois: '2026-10',
+    par_bien: { 'uuid-1': parBien({ sejours: 0, total_cents: 0, recu_cents: 0, a_venir_cents: 0 }) },
+    total: parBien({ sejours: 0, total_cents: 0, recu_cents: 0, a_venir_cents: 0 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.etat.vueRevenus = 'annee'
+  p.interne.etat.anneeRevenus = 2026
+  p.interne.etat.anneeEtat = 'ok'
+  p.interne.etat.aujourdHui = '2026-10-15'
+  p.interne.etat.annee = { total: { '2026-05': mo(10000) }, par_bien: {}, hors_biens: {} }
+  p.interne.renderRevenus()
+  // ⚠ LES DEUX FORMES, et c'est la regle « le mobile suit l'ordinateur » : la
+  // liste de cartes EST le tableau du mois a moins de 561 px. Ma premiere
+  // version ne jugeait que le `<table>` — mesure : la mutation qui laissait la
+  // liste telephone visible passait au VERT. Le telephone aurait garde sous la
+  // courbe de l'annee les cartes « aucun versement ce mois-ci ».
+  // ⚠ ON INTERROGE LES SELECTEURS QUE LA PAGE UTILISE, PAS DES EQUIVALENTS. Le
+  // banc cle ses doubles sur la CHAINE du selecteur : `.rev-liste:not(…)` et
+  // `[data-list="revenue-cards"]` designent le meme element dans un navigateur,
+  // mais rendent deux doubles DIFFERENTS ici. Ma premiere version lisait le
+  // mauvais — mesure : la mutation qui laissait la liste telephone visible
+  // passait au vert.
+  // ⚠ ET LA CHAINE SUIT LA PAGE QUAND LA PAGE CHANGE : le tableau « Reserve a
+  // date » a ajoute un 3e `.rev-tbl-wrap`, donc la negation nomme desormais
+  // les deux formes de l'annee. Ce test a rougi a ce changement — c'est son
+  // role, et c'est pourquoi il cite la chaine exacte plutot qu'un equivalent.
+  const formesDuMois = ['.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl)', '[data-list="revenue-cards"]']
+  for (const sel of formesDuMois) {
+    assert.strictEqual(p.cache(sel).hidden, true,
+      `${sel} reste affiche sous la courbe de l annee`)
+  }
+  // Et les deux reviennent quand on repasse au mois.
+  p.interne.etat.vueRevenus = 'mois'
+  p.interne.renderRevenus()
+  for (const sel of formesDuMois) {
+    assert.strictEqual(p.cache(sel).hidden, false,
+      `${sel} ne revient pas quand on repasse en vue Mois`)
+  }
+})
+
+test("LE TEST QUI COMPTE : une annee SANS AUCUNE ligne rend « — », pas « 0 € »", () => {
+  // ⚠ CONSTAT 2 DE LA RECETTE : « Studio Centre : colonne 2025 = 0 € alors
+  // qu il n a aucun sejour en 2025. » L endpoint ne rend que les mois qui
+  // portent quelque chose : l ABSENCE DE CLE est l information. « 0 € »
+  // affirme un encaissement nul ; le logement n existait pas.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'Studio Centre' }],
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    }
+  })
+  const lignes = p.cache('[data-list="revenue-annee-lignes"]').innerHTML
+  const cellules = [...lignes.matchAll(/<td class="rev-tbl__num[^"]*">([^<]*)</g)].map(m => m[1])
+  assert.ok(cellules.length >= 2, `pas assez de cellules rendues : ${lignes.slice(0, 200)}`)
+  assert.ok(!/0/.test(cellules[1]),
+    `la colonne N-1 affiche « ${cellules[1] }» : un faux zero pour une annee sans aucune ligne`)
+  assert.match(cellules[1], /—/,
+    `la colonne N-1 affiche « ${cellules[1]} » au lieu d un tiret`)
+  // ⚠ ET LE MOTIF EST A COTE, sur la meme ligne : un tiret seul ne dit rien.
+  assert.match(lignes, /revenue\.annee_nouveau/,
+    'le tiret de la colonne N-1 n est explique par aucun motif sur sa ligne')
+  // Au niveau du COMPTE, le motif ne peut pas vivre dans une colonne : il
+  // descend dans les reserves.
+  assert.match(ibTotal(p), /revenue\.annee_sans_n1/,
+    'l en-tete rend « — » sans qu aucune reserve ne dise pourquoi')
+})
+
+test("LE TEST QUI COMPTE : un mois SANS RIEN D ENCAISSE se trace en POINTILLE", () => {
+  // ⚠ CONSTAT 3 DE LA RECETTE : « octobre (0 € recu, 480 € a venir) se trace
+  // en plein ». Ma premiere version coupait le trait au MOIS COURANT, donc le
+  // mois courant entrait dans le plein — l ecran affirmait « encaisse » un
+  // argent qui n est que reserve. La frontiere suit la DONNEE : le plein
+  // s arrete au dernier mois qui a vraiment recu quelque chose.
+  const recu = (t) => ({ sejours: 1, total_cents: t, recu_cents: t, a_venir_cents: 0, bruts: 0, sans_montant: 0 })
+  const aVenir = (t) => ({ sejours: 1, total_cents: t, recu_cents: 0, a_venir_cents: t, bruts: 0, sans_montant: 0 })
+  const p = bancAnnee({
+    aujourdHui: '2026-10-15',
+    annee: {
+      total: { '2026-09': recu(30000), '2026-10': aVenir(48000), '2026-11': aVenir(20000) },
+      par_bien: {}, hors_biens: {}
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const plein = (svg.match(/<path d="([^"]*)"[^>]*stroke="var\(--ink\)"[^>]*stroke-width="2\.5"/) || [])[1] || ''
+  const pointille = (svg.match(/<path d="([^"]*)"[^>]*stroke-dasharray/) || [])[1] || ''
+  assert.ok(pointille, 'aucun trait pointille : le deja reserve ne se distingue pas')
+  // Le plein s arrete a septembre : il porte UN point, pas trois.
+  const ptsPlein = (plein.match(/[ML]/g) || []).length
+  assert.strictEqual(ptsPlein, 1,
+    `le trait plein porte ${ptsPlein} points : octobre (0 € recu) y est entre alors qu il n est que reserve`)
+  // Le pointille part de septembre et couvre octobre et novembre : trois points.
+  const ptsPointille = (pointille.match(/[ML]/g) || []).length
+  assert.strictEqual(ptsPointille, 3,
+    `le trait pointille porte ${ptsPointille} points : il ne rejoint pas le dernier mois encaisse`)
+})
+
+// ─── LA BANDE DES COMPARABLES (28 octobre 2026) ────────────────────────────
+
+test("LE TEST QUI COMPTE : sans logement choisi, AUCUNE bande n est tracee", () => {
+  // Un min-max de comparables n a aucun sens pour un compte entier, dont les
+  // logements ont chacun les leurs (decision Q2 de Thierry). Et sans bande,
+  // pas de marque de bande dans la legende : une legende qui nomme un trait
+  // absent est un mensonge de plus.
+  // ⚠ LA BANDE EST EN MEMOIRE, ET POURTANT RIEN NE DOIT SE TRACER. Ma premiere
+  // version ne fournissait aucune bande : le test passait meme avec un code
+  // qui ignorait la pastille, puisqu il n y avait rien a dessiner. Un test ne
+  // demontre une regle que si sa violation produirait quelque chose.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'A' }],
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    },
+    comparables: {
+      'uuid-1': {
+        releve_le: '2026-10-06',
+        mois: {
+          '2026-04': { nature: 'clos', min_cents: 500000, max_cents: 900000, comparables: 8, releve_le: '2026-10-06' },
+          '2026-05': { nature: 'clos', min_cents: 600000, max_cents: 950000, comparables: 8, releve_le: '2026-10-06' }
+        }
+      }
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  assert.ok(!/<polygon/.test(svg), 'une bande est tracee sans logement choisi')
+  assert.ok(!/rev-an-marque--bande/.test(p.cache('[data-bind="revenue-annee-legende"]').innerHTML),
+    'la legende nomme une bande qui n existe pas')
+  // ⚠ L INFO-BULLE N EST PAS VIDE : sans logement choisi, elle DIT pourquoi il
+  // n y a pas de bande. Ce qu elle ne doit pas porter, c est la phrase qui
+  // DATE un releve — elle affirmerait une comparaison qui n existe pas.
+  assert.match(ibComparables(p), /revenue\.annee_comparables_tous/,
+    `la note ne dit pas pourquoi il n y a pas de bande : « ${ibComparables(p)} »`)
+  assert.ok(!/revenue\.annee_ib_comparables/.test(ibComparables(p)),
+    'la note date un releve de comparables alors qu aucune bande n est tracee')
+})
+
+test("LE TEST QUI COMPTE : la bande se trace, et sa note DATE le releve", () => {
+  // ⚠ SANS LA DATE, l hote compare son mois en cours a une photo dont il
+  // ignore l age. Et les mots sont ceux de Thierry : « occupe », jamais
+  // « reserve », avec la mention de l estimation.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'A' }],
+    filtre: 'uuid-1',
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    },
+    comparables: {
+      'uuid-1': {
+        releve_le: '2026-10-06',
+        mois: {
+          '2026-04': { nature: 'clos', min_cents: 500000, max_cents: 900000, comparables: 8, releve_le: '2026-10-06' },
+          '2026-05': { nature: 'clos', min_cents: 600000, max_cents: 950000, comparables: 8, releve_le: '2026-10-06' }
+        }
+      }
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  assert.match(svg, /<polygon class="cm-bande"/, 'la bande des comparables n est pas tracee')
+  assert.match(p.cache('[data-bind="revenue-annee-legende"]').innerHTML, /rev-an-marque--bande/,
+    'la legende ne nomme pas la bande')
+  const note = { textContent: ibComparables(p), hidden: ibComparables(p) === '' }
+  assert.strictEqual(note.hidden, false, 'la note des comparables est masquee alors que la bande existe')
+  assert.match(note.textContent, /revenue\.annee_ib_comparables/,
+    `la note ne porte pas la phrase des comparables : « ${note.textContent} »`)
+})
+
+test("LE TEST QUI COMPTE : la bande ne DEPASSE jamais le haut de l axe", () => {
+  // Un comparable qui gagne deux fois plus que l hote aurait son plafond trace
+  // au-dessus de la zone dessinee, donc invisible — et l ecran montrerait une
+  // bande tronquee en affirmant qu elle est complete.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'A' }],
+    filtre: 'uuid-1',
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    },
+    comparables: {
+      'uuid-1': {
+        releve_le: '2026-10-06',
+        // ⚠ DEUX MOIS, et c'est necessaire : un mois SEUL ne fait pas un
+        // polygone — le module lui donne un TRAIT vertical, ce qui est la
+        // bonne reponse (un intervalle), mais ce test juge un polygone.
+        mois: {
+          '2026-04': { nature: 'clos', min_cents: 20000, max_cents: 4000000, comparables: 3, releve_le: '2026-10-06' },
+          '2026-05': { nature: 'clos', min_cents: 10000, max_cents: 5000000, comparables: 3, releve_le: '2026-10-06' }
+        }
+      }
+    }
+  })
+  // ⚠ ON JUGE LA GEOMETRIE, PAS LE LIBELLE. Ma premiere version lisait le
+  // palier haut avec `euros()`, qui retire tout ce qui n est pas un chiffre :
+  // « 50 k € » y devenait **50**, et le test rougissait sur un code juste.
+  // Un libelle en notation compacte ne se compare pas comme un montant — et
+  // ce que ce test veut vraiment dire est « la bande tient dans le cadre ».
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const poly = (svg.match(/<polygon class="cm-bande" points="([^"]*)"/) || [])[1]
+  assert.ok(poly, 'aucune bande tracee : le test ne demontre rien')
+  const ys = poly.split(' ').map(pt => Number(pt.split(',')[1])).filter(Number.isFinite)
+  assert.ok(ys.length, 'les points de la bande sont illisibles')
+  const plusHaut = Math.min(...ys)
+  assert.ok(plusHaut >= 0,
+    `le sommet de la bande est a y=${plusHaut}, donc HORS du cadre : l axe ne la couvre pas`)
+})
+
+test("LE TEST QUI COMPTE : les deux bandes se DISTINGUENT a l oeil", () => {
+  // ⚠ CONSTAT 2 DE LA RECETTE DU 28 OCTOBRE : « bande foncee et claire trop
+  // proches ». Elles etaient `--border` et `--line`, deux gris voisins a
+  // quatorze points de luminosite. Le remede n est pas une couleur vive —
+  // c est le MEME gris a deux DENSITES, qui tient aussi en mode sombre.
+  const comparables = {
+    'uuid-1': {
+      releve_le: '2026-10-06',
+      mois: {
+        '2026-04': { nature: 'clos', min_cents: 500000, max_cents: 900000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' },
+        '2026-05': { nature: 'clos', min_cents: 600000, max_cents: 950000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' },
+        '2026-11': { nature: 'futur', min_cents: 100000, max_cents: 300000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' },
+        '2026-12': { nature: 'futur', min_cents: 120000, max_cents: 320000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' }
+      }
+    }
+  }
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1', comparables,
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  // ⚠ ON LIT LE `style`, PAS L'ATTRIBUT `opacity`, ET CE N'EST PAS UN DETAIL DE
+  // FORME. Un attribut de presentation a la priorite la PLUS BASSE de la
+  // cascade : `shared/ui.css` porte `.cm-bande { opacity: .85 }`, donc
+  // l'attribut n'appliquait RIEN. Mesure de Thierry en recette sur staging le
+  // 28 octobre 2026, puis au banc chrome : attribut 0,15 et 0,07, opacite
+  // CALCULEE 0,85 et 0,85 — les deux bandes identiques.
+  // ⚠ ET CE TEST ETAIT VERT PENDANT TOUT CE TEMPS, deux lots de suite : il
+  // lisait ce que le code ECRIT, donc mon intention, jamais ce que l'hote VOIT.
+  // Il garde desormais ce que le module CONTROLE — la valeur qu'il pose —, et
+  // la CASCADE est mesuree dans un vrai navigateur par
+  // `tests/courbe-bande-rendu.test.js`, le seul endroit du depot qui le fasse.
+  const op = [...svg.matchAll(/<polygon class="cm-bande"[^>]*style="opacity:([\d.]+)"/g)].map(m => Number(m[1]))
+  assert.strictEqual(op.length, 2, `${op.length} bandes tracees au lieu de deux : ${svg.slice(0, 200)}`)
+  assert.strictEqual(/<polygon class="cm-bande"[^>]*\sopacity="/.test(svg), false,
+    'l opacite repart en ATTRIBUT : la regle `.cm-bande` de shared/ui.css l ecrasera')
+  const [a, b] = op.slice().sort((x, y) => y - x)
+  assert.ok(a / b >= 2,
+    `les deux bandes sont a ${a} et ${b} d opacite : moins du double, elles ne se distinguent pas`)
+  // ⚠ ET DISCRETES — CONSTAT DE LA RECETTE DU 29 OCTOBRE 2026 : « le gris est
+  // trop fonce, l'adoucir beaucoup, elle doit rester un fond discret derriere
+  // les courbes ». Les deux bornes tiennent ENSEMBLE, et c'est tout l'interet
+  // de les asserter au meme endroit : baisser la seule foncee aurait referme ce
+  // constat-ci en ouvrant celui du 28 (« bandes trop proches »), et remonter la
+  // claire pour les ecarter rouvrirait celui-ci. Le plafond vaut pour la plus
+  // FONCEE des deux ; la claire suit par le rapport.
+  assert.ok(a <= 0.2,
+    `la bande la plus foncee est a ${a} d opacite : ce n est plus un fond discret`)
+  // ⚠ ET UN PLANCHER, parce que les deux bornes d'au-dessus se satisfont aussi
+  // de `[0.002, 0.001]` : rapport de deux, plafond tenu, et DEUX BANDES
+  // INVISIBLES. Constat de la review du 28 octobre 2026. Une bande qu'on ne
+  // voit pas n'est pas « discrete », c'est une donnee qu'on a cessee d'afficher
+  // sans le dire.
+  const [, bas] = op.slice().sort((x, y) => y - x)
+  assert.ok(bas >= 0.05,
+    `la bande la plus claire est a ${bas} d opacite : elle n est plus visible`)
+})
+
+test("LE TEST QUI COMPTE : sous « Tous », l ecran DIT pourquoi il n y a pas de bande", () => {
+  // ⚠ CONSTAT 1 DE LA RECETTE : ne rien afficher etait juste — un min/max de
+  // comparables n a pas de sens pour un compte — mais un silence se lit comme
+  // une panne. L ecran explique, et la phrase disparait des qu un logement est
+  // choisi.
+  const annee = {
+    total: { '2026-05': mo(10000) },
+    par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+    hors_biens: {}
+  }
+  const biens = [{ id: 'uuid-1', name: 'A' }]
+  const tous = bancAnnee({ biens, annee })
+  const phrase = { textContent: ibComparables(tous), hidden: ibComparables(tous) === '' }
+  assert.strictEqual(phrase.hidden, false, 'aucune phrase sous « Tous » : le silence se lit comme une panne')
+  assert.match(phrase.textContent, /revenue\.annee_comparables_tous/,
+    `la phrase attendue n est pas rendue : « ${phrase.textContent} »`)
+  // Et elle s efface des qu un logement est choisi.
+  const choisi = bancAnnee({ biens, annee, filtre: 'uuid-1' })
+  assert.strictEqual(/annee_comparables_tous/.test(ibComparables(choisi)), false,
+    'la phrase de « Tous » reste affichee alors qu un logement est choisi')
+})
+
+// ─── « RESERVE A DATE » A L'ECRAN (28 octobre 2026) ────────────────────────
+
+const rad = (mois, o = {}) => ({
+  pivot: '2025-10-28', seuil: 5,
+  mois: Object.fromEntries(Object.entries(mois).map(([m, v]) => [m, {
+    sejours: 9, total_cents: 200000, sans_date_annulation: 0, non_fiables: 0,
+    sous_seuil: false, seuil: 5, ...v
+  }])),
+  par_bien: o.par_bien || {}
+})
+
+test("LE TEST QUI COMPTE : « reserve a date » ne couvre QUE les mois a venir", () => {
+  // ⚠ SUR UN MOIS DEJA CLOS DE N-1, LE REVENU FINAL EST CONNU, et c'est lui
+  // qui vaut. Comparer un etat intermediaire a un resultat final serait
+  // comparer deux choses differentes — et c'est precisement ce que ce lot
+  // existe pour eviter.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-05': {}, '2025-11': {}, '2025-12': {} })
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const gris = [...svg.matchAll(/<path d="([^"]*)"[^>]*stroke="var\(--muted\)"[^>]*stroke-dasharray/g)].map(m => m[1])
+  assert.strictEqual(gris.length, 1, 'le trait « reserve a date » n est pas trace')
+  const points = (gris[0].match(/[ML]/g) || []).length
+  assert.strictEqual(points, 2,
+    `${points} points sur le trait : mai 2025, deja clos, y est entre alors que son revenu FINAL est connu`)
+})
+
+test("LE TEST QUI COMPTE : un mois SOUS LE SEUIL n est pas trace, et se DIT", () => {
+  // Sans la phrase, l hote voit un trait qui s arrete et croit a un trou dans
+  // la donnee, alors que c est un refus raisonne.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({
+        '2025-11': { sejours: 2, sous_seuil: true },
+        '2025-12': {}
+      })
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const gris = (svg.match(/stroke="var\(--muted\)"[^>]*stroke-dasharray/g) || []).length
+  assert.strictEqual(gris, 1, 'le trait a disparu alors qu un mois sur deux passe le seuil')
+  assert.match(ibTotal(p), /revenue\.annee_rad_sous_seuil/,
+    'le mois refuse par le seuil n est explique nulle part')
+})
+
+test("LE TEST QUI COMPTE : la pastille pilote AUSSI « reserve a date »", () => {
+  // ⚠ SINON L'ECRAN SUPERPOSE DEUX PERIMETRES. Ma premiere version de
+  // l'endpoint agregeait sur le seul mois : la ligne aurait montre le COMPTE
+  // pendant que la courbe montrait un bien, sans le dire.
+  const annee = {
+    total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+    par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) } },
+    hors_biens: {},
+    reserve_a_date: {
+      ...rad({ '2025-11': { total_cents: 900000 }, '2025-12': { total_cents: 900000 } }),
+      par_bien: {
+        'uuid-1': {
+          '2025-11': { sejours: 9, total_cents: 100000, sans_date_annulation: 0, non_fiables: 0, sous_seuil: false, seuil: 5 },
+          '2025-12': { sejours: 9, total_cents: 100000, sans_date_annulation: 0, non_fiables: 0, sous_seuil: false, seuil: 5 }
+        }
+      }
+    }
+  }
+  const biens = [{ id: 'uuid-1', name: 'A' }]
+  const svgTous = bancAnnee({ aujourdHui: '2026-10-28', biens, annee }).cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const svgBien = bancAnnee({ aujourdHui: '2026-10-28', biens, annee, filtre: 'uuid-1' }).cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const haut = (svg) => {
+    const g = [...svg.matchAll(/class="cm-grad"[^>]*>([^<]*)</g)].map(m => m[1])
+    return g[g.length - 1]
+  }
+  assert.notStrictEqual(haut(svgBien), haut(svgTous),
+    'le haut de l axe est identique avec et sans pastille : la ligne « reserve a date » ne suit pas le filtre')
+})
+
+// ─── LE TABLEAU « RESERVE A DATE » (decision de Thierry, 28 octobre 2026) ───
+// ⚠ IL DOUBLE LA LIGNE POINTILLEE, IL NE LA REMPLACE PAS, et c'est une mesure
+// qui l'a decide : au banc, au niveau du compte, l'axe est tire par le pic
+// d'ete et les deux pointilles a 2 k € sur un axe a 16 k € se tassent au ras
+// de l'axe. La ligne dit la FORME, le tableau dit les NOMBRES.
+
+// Les cellules d'une ligne du tableau, dans l'ordre du balisage :
+// mois, reserve aujourd'hui, meme date l'an dernier, ecart.
+// ⚠ ON LIT `innerHTML`, PAS UN DOM. Le banc rend des noeuds STUB dont
+// `querySelectorAll` rend toujours `[]` : ma premiere version de cette aide
+// interrogeait le DOM, et les cinq tests comparaient donc zero ligne a zero
+// ligne. Trois ont rougi par chance (0 !== 2) ; celui du telephone, qui
+// comparait deux longueurs, etait VERT sur deux listes vides.
+// ⚠ LES RESERVES ET LES NOTES VIVENT DANS LES ⓘ DEPUIS LE 29 OCTOBRE 2026, plus
+// dans des paragraphes sous la courbe (demande de Thierry, dette 121 soldee).
+// Ces deux aides existent pour que les tests suivent l'INFORMATION et non son
+// emplacement : l'invariant « ce fait se DIT » n'a pas change, c'est le lieu qui
+// a bouge. Neuf tests ont rougi a ce deplacement — c'est leur role, et c'est
+// pourquoi ils lisent une aide plutot qu'un selecteur en dur.
+const ibTotal = (p) => String(p.cache('[data-bind="revenue-annee-ib-total-txt"]').textContent || '')
+// La ⓘ des comparables est DANS la legende, reconstruite a chaque rendu : on la
+// lit dans son HTML, comme le reste de la legende.
+const ibComparables = (p) => {
+  const h = String(p.cache('[data-bind="revenue-annee-legende"]').innerHTML || '')
+  const m = h.match(/class="ibulle__txt"[^>]*>([\s\S]*?)<\/span>/)
+  return m ? m[1] : ''
+}
+
+const sansBalises = (h) => String(h).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+const lignesDuTableauRad = (p) => {
+  const html = String(p.cache('[data-list="revenue-annee-rad-lignes"]').innerHTML)
+  return [...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(m => {
+    const cellules = [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(c => c[1])
+    return {
+      mois: sansBalises((m[1].match(/<th[^>]*>([\s\S]*?)<\/th>/) || ['', ''])[1]),
+      cellules,
+      textes: cellules.map(sansBalises)
+    }
+  })
+}
+
+// ⚠ LE MONTANT ET LE COMPTE DE SEJOURS, SEPAREMENT. `euros()` ratisse tous
+// les chiffres de la chaine : depuis que le double d'`I18n.t` rend ses
+// PARAMETRES, il ramasserait aussi le `n=4` de `revenue.stays`. Et c'est bien
+// pour cela que le double les rend : tant qu'il les jetait, le nombre de
+// sejours n'etait observable par AUCUNE assertion — la mutation « sAuj + 9 »
+// restait verte (constat de la review du 28 octobre 2026).
+const montantEtSejours = (txt) => {
+  const m = String(txt).match(/^(\S+)\s+revenue\.stays\{n=(\d+)\}$/)
+  return m ? { euros: Number(m[1]), sejours: Number(m[2]) } : { euros: null, sejours: null }
+}
+
+const cartesDuTableauRad = (p) => {
+  const html = String(p.cache('[data-list="revenue-annee-rad-cartes"]').innerHTML)
+  return [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)].map(m => ({
+    mois: sansBalises((m[1].match(/class="rev-carte__bien"[^>]*>([\s\S]*?)<\/span>\s*<\/span>/)
+      || m[1].match(/class="rev-carte__bien"[^>]*>([\s\S]*?)<\/span>/) || ['', ''])[1]),
+    html: m[1]
+  }))
+}
+
+test("LE TEST QUI COMPTE : le tableau « reserve a date » ne porte QUE les mois a venir", () => {
+  // Meme raison que pour la ligne : sur un mois clos, le revenu FINAL est
+  // connu, et comparer un etat intermediaire a un resultat final serait
+  // comparer deux choses differentes.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-05': recuDe(90000), '2026-09': recuDe(30000), '2026-11': aVenirDe(48000), '2026-12': aVenirDe(20000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-05': {}, '2025-09': {}, '2025-11': {}, '2025-12': {} })
+    }
+  })
+  const mois = lignesDuTableauRad(p).map(l => l.mois)
+  assert.strictEqual(mois.length, 2,
+    `${mois.length} lignes au tableau (${mois.join(', ')}) : un mois deja clos y est entre`)
+})
+
+test("LE TEST QUI COMPTE : le tableau SUIT LA PASTILLE, comme la ligne", () => {
+  // ⚠ SINON L'ECRAN SUPERPOSE DEUX PERIMETRES : la colonne N-1 dirait le
+  // COMPTE pendant que le reste de l'ecran dit un bien, sans le signaler.
+  const annee = {
+    total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+    par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) } },
+    hors_biens: {},
+    reserve_a_date: {
+      ...rad({ '2025-11': { total_cents: 900000, sejours: 31 } }),
+      par_bien: {
+        'uuid-1': {
+          '2025-11': { sejours: 7, total_cents: 100000, sans_date_annulation: 0, non_fiables: 0, sous_seuil: false, seuil: 5 }
+        }
+      }
+    }
+  }
+  const biens = [{ id: 'uuid-1', name: 'A' }]
+  const n1De = (o) => montantEtSejours(
+    lignesDuTableauRad(bancAnnee({ aujourdHui: '2026-10-28', biens, annee, ...o }))[0].textes[1])
+  assert.deepStrictEqual(n1De({}), { euros: 9000, sejours: 31 },
+    'la colonne N-1 sous « Tous » ne vaut pas le total du compte')
+  assert.deepStrictEqual(n1De({ filtre: 'uuid-1' }), { euros: 1000, sejours: 7 },
+    'la colonne N-1 ne change pas quand un logement est choisi : le tableau ignore la pastille')
+})
+
+test("LE TEST QUI COMPTE : sous le seuil, la ligne le DIT et ne montre AUCUN montant", () => {
+  // ⚠ UN MONTANT SOUS LE SEUIL SERAIT UNE AFFIRMATION QU'ON A REFUSE DE FAIRE.
+  // L'endpoint ne le rend meme pas — ce test garde l'ecran, qui ne doit pas
+  // non plus inventer un « 0 € » a sa place.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { sejours: 2, sous_seuil: true, total_cents: undefined } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.match(l.textes[1], /revenue\.annee_rad_sous_seuil_court/,
+    `la colonne N-1 dit « ${l.textes[1]} » au lieu de nommer le refus du seuil`)
+  assert.strictEqual(/\d/.test(l.textes[1]), false,
+    `un chiffre apparait sous le seuil : « ${l.textes[1]} »`)
+  assert.strictEqual(l.textes[2], '—',
+    `l ecart vaut « ${l.textes[2]} » alors qu il n y a pas de base de comparaison`)
+})
+
+test("LE TEST QUI COMPTE : l ecart porte son SIGNE, et le retard est rouge", () => {
+  // ⚠ LE SIGNE AVANT LA COULEUR. Un hote qui ne distingue pas le vert du rouge
+  // lit « +12 % » et « -68 % » (le trait d'union que rend `String(-68)`, pas un signe moins typographique) ; la couleur n'est jamais seule porteuse.
+  // ⚠ ET LE ROUGE EST PROPRE A CE TABLEAU : celui des biens emploie
+  // `rev-tbl__ecart--bas` (neutre), parce qu'un bien moins vendu que l'an
+  // dernier n'est pas une alarme. Ici, Thierry a demande « vert si en avance,
+  // rouge si en retard » — ne pas « harmoniser » les deux.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(150000), '2026-12': aVenirDe(50000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({
+        '2025-11': { total_cents: 100000 },   // 1 500 € contre 1 000 € : en avance
+        '2025-12': { total_cents: 100000 }    //   500 € contre 1 000 € : en retard
+      })
+    }
+  })
+  const [avance, retard] = lignesDuTableauRad(p)
+  assert.match(avance.textes[2], /^\+50 %$/, `le mois en avance dit « ${avance.textes[2]} »`)
+  assert.strictEqual(/--retard/.test(avance.cellules[2]), false,
+    'le mois en AVANCE porte la classe du retard')
+  assert.match(retard.textes[2], /^-50 %$/, `le mois en retard dit « ${retard.textes[2]} »`)
+  assert.match(retard.cellules[2], /rev-tbl__ecart--retard/,
+    'le mois en RETARD ne porte pas la classe rouge demandee')
+})
+
+test("LE TEST QUI COMPTE : au telephone, UNE LIGNE PAR MOIS, les memes que le tableau", () => {
+  // La forme telephone n'est pas un resume : c'est le meme contenu, en cartes.
+  // Deux listes qui divergent, c'est la regle « le mobile suit l'ordinateur »
+  // qui tombe — et elle est tombee une fois sur les couleurs du calendrier.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000), '2026-12': aVenirDe(20000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': {}, '2025-12': {} })
+    }
+  })
+  const tbl = lignesDuTableauRad(p).map(l => l.mois)
+  // ⚠ LA NON-VACUITE D'ABORD. Comparer deux longueurs egales est vrai aussi
+  // quand les deux listes sont vides, et c'est exactement le faux vert qu'a
+  // produit ma premiere version de ce test.
+  assert.strictEqual(tbl.length, 2, `${tbl.length} lignes au tableau au lieu de 2`)
+  const cartes = cartesDuTableauRad(p)
+  assert.strictEqual(cartes.length, tbl.length,
+    `${cartes.length} cartes au telephone contre ${tbl.length} lignes au tableau`)
+  assert.deepStrictEqual(cartes.map(c => c.mois), tbl,
+    'les cartes du telephone ne portent pas les memes mois que le tableau')
+  // ⚠ ET LE BLOC DISPARAIT QUAND IL N'A RIEN A DIRE : un titre seul au-dessus
+  // d'un tableau vide se lit comme une panne.
+  const vide = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: { total: { '2026-09': recuDe(30000) }, par_bien: {}, hors_biens: {} }
+  })
+  assert.strictEqual(vide.cache('[data-bind="revenue-annee-rad"]').hidden, true,
+    'le bloc « reserve a date » reste affiche alors qu aucun mois a venir ne porte quoi que ce soit')
+})
+
+// ─── LES CINQ CONSTATS DE LA REVIEW DU 28 OCTOBRE 2026 ─────────────────────
+
+test("LE TEST QUI COMPTE : la colonne du JOUR dit son montant ET ses sejours", () => {
+  // ⚠ CONSTAT DE LA REVIEW : mes cinq premiers tests ne lisaient que la colonne
+  // N-1 et l'ecart. La mutation « Math.round(nAuj / 100) + 777 » — un montant
+  // faux sur TOUTES les lignes et toutes les cartes — passait au VERT. C'est
+  // la moitie des nombres du tableau, et celle qui porte les deux autres
+  // constats graves.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': { ...aVenirDe(150000), sejours: 4 } },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 100000 } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.deepStrictEqual(montantEtSejours(l.textes[0]), { euros: 1500, sejours: 4 },
+    `la colonne du jour dit « ${l.textes[0]} » au lieu de 1 500 € et 4 sejours`)
+})
+
+test("LE TEST QUI COMPTE : un mois NON CALCULABLE ne devient pas « 0 € · -100 % »", () => {
+  // ⚠ CONSTAT GRAVE DE LA REVIEW. Un mois a venir ne portant qu'un sejour SANS
+  // MONTANT (blocage saisi en resa, canal sans prix) : `refuseTout` le refuse,
+  // la courbe coupe son trait, la reserve dit « sans montant ». Le tableau
+  // affirmait « 0 € reserve » et « -100 % » EN ROUGE. Une absence transformee
+  // en fait — et le meme ecran avait deja corrige ce defaut en trois endroits.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: {
+        '2026-09': recuDe(30000),
+        '2026-11': { sejours: 2, total_cents: 0, recu_cents: 0, a_venir_cents: 0, bruts: 0, sans_montant: 2 }
+      },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 200000 } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.match(l.textes[0], /revenue\.unavailable/,
+    `le mois refuse dit « ${l.textes[0]} » au lieu de nommer son motif`)
+  assert.strictEqual(/\d/.test(l.textes[0]), false, `un chiffre subsiste : « ${l.textes[0]} »`)
+  assert.strictEqual(l.textes[2], '—',
+    `l ecart vaut « ${l.textes[2]} » : il est calcule sur un 0 € qui n existe pas`)
+  assert.strictEqual(/--retard/.test(l.cellules[2]), false,
+    'un mois NON CALCULABLE est signale en rouge comme un retard')
+})
+
+test("LE TEST QUI COMPTE : un mois present en N-1 SEUL ne s affiche pas en retard", () => {
+  // Aucune ligne cote 2026 : « 0 € » serait arithmetiquement vrai, mais le
+  // « -100 % » rouge donnerait la meme alarme a « rien vendu » et a « ce mois
+  // n est pas encore ouvert a la vente » — une decision de l hote signalee
+  // comme un defaut.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 200000 } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.strictEqual(l.textes[0], '—', `la colonne du jour dit « ${l.textes[0]} » au lieu de « — »`)
+  assert.strictEqual(l.textes[2], '—', `l ecart vaut « ${l.textes[2]} » au lieu de « — »`)
+  assert.strictEqual(/--retard/.test(l.cellules[2]), false, 'le mois est signale en rouge')
+})
+
+test("LE TEST QUI COMPTE : un echec de lecture n emporte PAS le tableau de l annee d avant", () => {
+  // ⚠ CONSTAT GRAVE DE LA REVIEW. `renderAnnee` sort par `return` AVANT le code
+  // du tableau quand l etat est « chargement » ou « echec », et `videTout` ne
+  // connaissait pas le bloc neuf. L hote cliquait « ← 2025 » et lisait
+  // « Lecture impossible » au-dessus d un tableau peuple des pourcentages de
+  // 2026. C est la garantie que `chargerAnnee` enonce lui-meme.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(150000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 100000 } })
+    }
+  })
+  assert.strictEqual(lignesDuTableauRad(p).length, 1, 'le tableau n a pas rendu au depart')
+  for (const etat of ['chargement', 'echec']) {
+    p.interne.etat.anneeEtat = etat
+    p.interne.renderAnnee()
+    assert.strictEqual(p.cache('[data-bind="revenue-annee-rad"]').hidden, true,
+      `le bloc « reserve a date » reste affiche sous l etat « ${etat} »`)
+    assert.strictEqual(lignesDuTableauRad(p).length, 0,
+      `les lignes du tableau survivent a l etat « ${etat} »`)
+    assert.strictEqual(cartesDuTableauRad(p).length, 0,
+      `les cartes du telephone survivent a l etat « ${etat} »`)
+  }
+})
+
+test("LE TEST QUI COMPTE : sans agregat, le tableau SE TAIT et la panne se NOMME", () => {
+  // ⚠ CONSTAT DE LA REVIEW. `reserve_a_date` est `null` quand la RPC a echoue.
+  // Tous les `l.lan` etant absents, chaque ligne affirmait « pas assez de
+  // ventes a cette date l an dernier » sur une annee qui avait bien vendu — un
+  // fait que l ecran n a AUCUN moyen de connaitre — et l en-tete rendait
+  // « Meme date l an dernier () ».
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(150000) },
+      par_bien: {}, hors_biens: {}, indisponibles: ['reserve_a_date']
+    }
+  })
+  assert.strictEqual(p.cache('[data-bind="revenue-annee-rad"]').hidden, true,
+    'le tableau s affiche alors que l agregat manque')
+  assert.strictEqual(lignesDuTableauRad(p).length, 0, 'des lignes sont rendues sans agregat')
+  assert.strictEqual(p.cache('[data-bind="revenue-annee-rad-col-n1"]').textContent, '',
+    'l en-tete N-1 affiche sa parenthese vide')
+  const res = { textContent: ibTotal(p) }
+  assert.match(res.textContent, /revenue\.annee_rad_indispo/,
+    `la reserve dit « ${res.textContent} » au lieu de nommer la panne`)
+})
+
+// ─── LES TROIS CONSTATS DE LA RECETTE DU 28 OCTOBRE 2026 ───────────────────
+
+test("LE TEST QUI COMPTE : au telephone, le refus du seuil se dit UNE FOIS", () => {
+  // ⚠ CONSTAT DE RECETTE. La carte rendait « l'an dernier a la meme date :
+  // pas assez de ventes a cette date l'an dernier — » : trois formulations du
+  // meme refus sur une ligne. Le tableau, lui, a ses en-tetes de colonne pour
+  // dire de quoi on parle ; la carte n'en a pas, donc elle porte la phrase
+  // SEULE.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { sejours: 2, sous_seuil: true } })
+    }
+  })
+  const c = cartesDuTableauRad(p)
+  assert.strictEqual(c.length, 1, `${c.length} carte(s) au lieu d une`)
+  const phrase = sansBalises(c[0].html.replace(/[\s\S]*<p[^>]*>/, '').replace(/<\/p>[\s\S]*/, ''))
+  assert.strictEqual(phrase, 'revenue.annee_rad_sous_seuil_court',
+    `la carte dit « ${phrase} » : le refus y est formule plusieurs fois`)
+
+  // ⚠ ET LE CAS NORMAL GARDE SES TROIS MORCEAUX. Constat de la review : le
+  // test ne gardait que la branche du seuil, et trois mutations sur la MEME
+  // ligne — retirer le libelle, le montant N-1, l'ecart — laissaient la suite
+  // a 6599 verts. C'est ainsi que le libelle double est arrive jusqu'a la
+  // recette : la carte n'etait lue par aucune assertion de contenu.
+  const n = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(150000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 100000, sejours: 7 } })
+    }
+  })
+  const carte = cartesDuTableauRad(n)[0]
+  const bas = sansBalises(carte.html.replace(/[\s\S]*<p[^>]*>/, '').replace(/<\/p>[\s\S]*/, ''))
+  assert.match(bas, /^revenue\.annee_rad_mobile_n1\b/,
+    `la carte a perdu son libelle : « ${bas} »`)
+  assert.deepStrictEqual(montantEtSejours(bas.replace(/^revenue\.annee_rad_mobile_n1\s*/, '').replace(/\s*\+50 %$/, '')),
+    { euros: 1000, sejours: 7 }, `la carte a perdu le montant N-1 : « ${bas} »`)
+  assert.match(bas, /\+50 %$/, `la carte a perdu son ecart : « ${bas} »`)
+})
+
+test("LE TEST QUI COMPTE : un mois PARTIELLEMENT mesure dit ce que son total couvre", () => {
+  // ⚠ CONSTAT DE RECETTE : « 480 € · 3 sejours » avec deux sejours sans
+  // montant presente le total de UN sejour comme celui de trois. Le chiffre
+  // est juste, la phrase est fausse. `refuseTout` ne mord pas — le mois garde
+  // son total partiel, c'est une verite INCOMPLETE — donc c'est le COMPTE qui
+  // doit le dire.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: {
+        '2026-09': recuDe(30000),
+        '2026-11': { sejours: 3, total_cents: 48000, recu_cents: 0, a_venir_cents: 48000, bruts: 0, sans_montant: 2 }
+      },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 48000 } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.match(l.textes[0], /revenue\.annee_rad_sejours_partiel\{n=1,k=2\}/,
+    `la colonne du jour dit « ${l.textes[0]} » au lieu de 1 sejour et 2 sans montant`)
+  assert.strictEqual(/revenue\.stays/.test(l.textes[0]), false,
+    `le compte simple subsiste : « ${l.textes[0]} »`)
+  assert.strictEqual(euros(l.textes[0].replace(/revenue\.[\s\S]*/, '')), 480,
+    `le montant a change : « ${l.textes[0]} »`)
+  // Et un mois ENTIEREMENT mesure garde le compte simple.
+  const sain = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': { ...aVenirDe(48000), sejours: 3 } },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 48000 } })
+    }
+  })
+  assert.match(lignesDuTableauRad(sain)[0].textes[0], /revenue\.stays\{n=3\}/,
+    'un mois sans sejour non mesure a perdu son compte simple')
+})
+
+test("LE TEST QUI COMPTE : « 0 % » est GRIS NEUTRE dans les DEUX tableaux", () => {
+  // ⚠ CONSTAT DE RECETTE : le vert s'etendait jusqu'a 0 % par le seul fait que
+  // la condition testait `< 0`. Zero n'est ni une avance ni un retard. Et les
+  // deux tableaux du bloc se lisent l'un sous l'autre : un zero vert dans l'un
+  // et gris dans l'autre serait une difference que rien ne justifie.
+  const egal = { sejours: 9, total_cents: 48000, sans_date_annulation: 0, non_fiables: 0, sous_seuil: false, seuil: 5 }
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    biens: [{ id: 'uuid-1', name: 'A' }],
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      // Le bien fait le MEME chiffre sur la fenetre comparee des deux annees :
+      // l'ecart du tableau des biens vaut donc 0 % lui aussi.
+      par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2025-09': recuDe(30000) } },
+      hors_biens: {},
+      reserve_a_date: { ...rad({}), mois: { '2025-11': egal } }
+    }
+  })
+  const rad_ = lignesDuTableauRad(p)[0]
+  assert.match(rad_.textes[2], /^0 %$/, `l ecart « reserve a date » vaut « ${rad_.textes[2]} »`)
+  assert.match(rad_.cellules[2], /rev-tbl__ecart--nul/,
+    'le 0 % de « reserve a date » n est pas neutre : il reste vert')
+  assert.strictEqual(/--retard/.test(rad_.cellules[2]), false, 'le 0 % est signale en retard')
+
+  const biens = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  const cel = (biens.match(/<span class="rev-tbl__ecart[^"]*">0 %<\/span>/) || [''])[0]
+  assert.notStrictEqual(cel, '', `aucune cellule a « 0 % » dans le tableau des biens : ${biens.slice(0, 300)}`)
+  assert.match(cel, /rev-tbl__ecart--nul/, 'le 0 % du tableau des biens reste vert')
+})
+
+// ─── LE BLOC DU JOUR QUI N'A RIEN A DIRE (recette du 28 octobre 2026) ──────
+
+const blocDuJour = (o = {}) => {
+  const p = ouvrirAujourdhui({ sansInit: true, evenements: o.evenements })
+  p.interne.etat.aujourdHui = '2026-10-29'
+  p.interne.etat.menagesOk = o.menagesOk === undefined ? true : o.menagesOk
+  p.interne.renderEvenements()
+  return p
+}
+const grilleAPlat = (p) =>
+  p.cache('[data-bind="today-duo"]').classList.contains('auj-duo--plat')
+
+test("LE TEST QUI COMPTE : un jour SANS arrivee ni depart met la grille A PLAT", () => {
+  // ⚠ CONSTAT DE RECETTE : « quand A valider est plein et que le bloc
+  // Aujourd'hui n'a ni arrivee ni depart, la page montre un grand vide ».
+  // Mesure au banc reel (chrome, 1280 px) AVANT correctif : le bloc du jour
+  // fait 21 px de haut sur 821 px de large, « A valider » 716 px — la ligne de
+  // grille fait la hauteur de sa colonne la plus haute, donc le bloc du jour
+  // laissait 821 x 695 px de BLANC. Il ne s'etirait pas (`align-items: start`
+  // l'empeche deja) : c'est la PLACE RESERVEE qui etait vide. APRES : les deux
+  // blocs sont empiles, blanc mesure a ZERO, et la ligne tombe de 716 a 643 px
+  // parce que les cartes de « A valider » se replient moins sur toute la
+  // largeur.
+  const vide = blocDuJour({ evenements: [] })
+  assert.strictEqual(grilleAPlat(vide), true,
+    'la grille reste en deux colonnes alors que le jour n a qu une ligne a dire')
+  assert.match(vide.cache('[data-list="events"]').innerHTML, /today\.empty/,
+    'le bloc du jour ne dit pas qu il n y a rien')
+})
+
+test("LE TEST QUI COMPTE : « les menages ne sont pas lisibles » met AUSSI a plat", () => {
+  // La ligne « indisponible » fait exactement la meme hauteur qu'un « rien
+  // aujourd'hui », donc elle laisse exactement le meme blanc. Un correctif qui
+  // n'aurait ferme que l'etat vide aurait laisse la moitie du defaut — et
+  // c'est l'etat qu'un hote voit quand une lecture echoue, donc le pire moment
+  // pour lui montrer une page qui a l'air cassee.
+  const ko = blocDuJour({ menagesOk: false })
+  assert.strictEqual(grilleAPlat(ko), true,
+    'la grille reste en deux colonnes sur l etat « indisponible »')
+  assert.match(ko.cache('[data-list="events"]').innerHTML, /today\.unavailable/,
+    'le bloc ne dit pas que les menages sont illisibles')
+})
+
+test("LE TEST QUI COMPTE : des QU IL Y A une arrivee, la grille reprend ses deux colonnes", () => {
+  // ⚠ ET C'EST LA MOITIE QUI SE PERD. Une bascule qui ne remonte jamais laisse
+  // la page a plat pour le reste de la session : il suffit que le premier rendu
+  // tombe sur un jour vide — le cache, par exemple — pour que l'hote ne
+  // retrouve plus ses deux colonnes sans recharger.
+  // ⚠ ET ON MESURE SUR LE MEME BANC, APRES L'ETAT VIDE. Ma premiere version
+  // ouvrait un banc NEUF : la classe n'y avait jamais ete posee, donc
+  // l'assertion « pas a plat » etait vraie sans que `aPlat(false)` existe —
+  // mesure par mutation, elle restait VERTE en retirant la remontee. C'est la
+  // sequence reelle : le cache affiche un jour vide, puis la lecture arrive.
+  // ⚠ `options` EST LE MEME OBJET que celui passe au banc : le changer entre
+  // deux rendus suffit, et ca evite d'ajouter une poignee au banc pour un seul
+  // test.
+  const opts = { sansInit: true, evenements: [] }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.aujourdHui = '2026-10-29'
+  p.interne.etat.menagesOk = true
+  p.interne.renderEvenements()
+  assert.strictEqual(grilleAPlat(p), true, 'la grille n est pas passee a plat au premier rendu')
+
+  opts.evenements = [{
+    type: 'arrivee', heure: '15:00', bien: 'La bulle', bienId: 'uuid-1',
+    bookingId: 'B1', voyageur: 'Chloe', nuits: 3, codeEtat: 'transmis'
+  }]
+  p.interne.renderEvenements()
+  assert.strictEqual(grilleAPlat(p), false,
+    'la grille reste a plat alors que le jour porte une arrivee')
+  assert.match(p.cache('[data-list="events"]').innerHTML, /today\.arrival/,
+    'l arrivee n est pas rendue')
+})
+
+test("LE TEST QUI COMPTE : la classe « a plat » FAIT une seule colonne", () => {
+  // ⚠ LA BASCULE SANS SA REGLE NE FAIT RIEN, et aucun test du rendu ne le voit :
+  // mesure par mutation, vider `.auj-duo--plat` laissait les 112 tests VERTS.
+  // Le DOM du banc n'a pas de moteur de style, donc c'est la FEUILLE qu'on lit
+  // — meme methode que `tests/masquage-hidden.test.js`.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const regle = (sel) => {
+    const i = css.indexOf(sel + ' {')
+    assert.notStrictEqual(i, -1, `la regle « ${sel} » n existe pas dans shared/ui.css`)
+    return css.slice(i + sel.length + 2, css.indexOf('}', i))
+  }
+  // L'etat normal : deux colonnes au moins, et aucun etirement.
+  const duo = regle('.auj-duo')
+  assert.match(duo, /grid-template-columns:\s*repeat\(auto-fit/,
+    `.auj-duo ne pose plus ses colonnes : « ${duo.trim()} »`)
+  assert.match(duo, /align-items:\s*start/,
+    'sans `align-items: start`, le bloc du jour s etirerait vraiment a la hauteur de « A valider »')
+  // L'etat a plat : UNE colonne, et le bloc du jour ne s etend plus sur deux.
+  const plat = regle('.auj-duo--plat')
+  assert.match(plat, /grid-template-columns:\s*1fr/,
+    `.auj-duo--plat ne ramene pas a une colonne : « ${plat.trim()} »`)
+  const jour = regle('.auj-duo--plat > .auj-duo__jour')
+  assert.match(jour, /grid-column:\s*auto/,
+    `a plat, le bloc du jour garde son « span 2 » : « ${jour.trim()} »`)
+})
+
+// ─── LA SUITE DES AVIS AU DEFILEMENT (recette du 28 octobre 2026) ──────────
+
+const avisDeTest = (n, jour) => ({
+  id: String(n), bien_ref: 'P1', ota: 'airbnb',
+  recu_le: `2026-10-${String(jour).padStart(2, '0')}T10:00:00Z`,
+  note_sur_5: 4.6, texte: `Commentaire numero ${n}`, voyageur: 'Chloe'
+})
+
+// Le banc du bloc des avis : trois cartes rendues, l'observateur arme, et les
+// pages suivantes servies par URL.
+function bancSuiteAvis (pages = []) {
+  const observateurs = []
+  const ecouteurs = []
+  let appelees = 0
+  const options = {
+    sansInit: true,
+    observateurs,
+    ecouteurs,
+    corps: (url) => {
+      if (!url.includes('/api/ecran/avis-recents')) return {}
+      const page = pages[appelees++]
+      return page || { avis: [], fin: true }
+    }
+  }
+  const p = ouvrirAujourdhui(options)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.avisRefuse = false
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  // ⚠ LE GESTE FAIT PARTIE DU BANC, parce qu'il fait partie du contrat : la
+  // page n'observe la sentinelle qu'au premier defilement. Un banc qui armait
+  // sans geste mesurait un comportement que le navigateur n'a pas.
+  p.defiler()
+  return { p, observateurs, urls: p.urls, pagesDemandees: () => appelees }
+}
+const sentinelle = (p) => p.cache('[data-bind="reviews-sentinelle"]')
+
+test("LE TEST QUI COMPTE : trois avis au depart, et un observateur arme sur la sentinelle", () => {
+  // ⚠ TROIS AU DEPART, ET AUCUN APPEL DE PLUS AU CHARGEMENT. Le budget de cet
+  // ecran est de DEUX appels a l'ouverture : la suite ne doit partir qu'au
+  // GESTE de l'hote, jamais au rendu.
+  const b = bancSuiteAvis()
+  assert.strictEqual(b.observateurs.length, 1,
+    `${b.observateurs.length} observateur(s) : la sentinelle n est pas armee`)
+  assert.strictEqual(b.pagesDemandees(), 0,
+    'une page de suite est demandee des le rendu, sans que personne ait defile')
+  assert.strictEqual(b.observateurs[0].cibles.length, 1, 'l observateur n observe rien')
+})
+
+test("LE TEST QUI COMPTE : le defilement demande les plus ANCIENS, par le curseur des DEUX cles", async () => {
+  // ⚠ LE CURSEUR PORTE LA DATE **ET** L'IDENTIFIANT. Le tri est
+  // `(received_at desc, id desc)` : deux avis recus au meme instant ne se
+  // departagent que par `id`, et un curseur sur la seule date les sauterait
+  // tous les deux ou les rendrait deux fois.
+  const b = bancSuiteAvis([{ avis: [avisDeTest(4, 25), avisDeTest(5, 24), avisDeTest(6, 23)], fin: false }])
+  // ⚠ ON **ATTEND** LE GESTE. Sans `await`, l'assertion tombe avant le premier
+  // `await` interne d'`appel()` — donc avant que la requete soit partie : un
+  // faux rouge ici, et le meme defaut donnerait un faux VERT dans l'autre sens.
+  await b.observateurs[0].declencher()
+  const url = b.urls.find(x => x.includes('/api/ecran/avis-recents'))
+  assert.ok(url, `aucun appel a la suite des avis : ${b.urls.join(' | ')}`
+    + ` / erreurs du banc : ${b.p.erreurs.join(' / ')}`)
+  // Le curseur part de la TROISIEME carte — la plus ancienne des trois.
+  assert.match(url, /depuis=2026-10-26T10%3A00%3A00Z/, `l URL ne porte pas la date du curseur : ${url}`)
+  assert.match(url, /apres_id=3/, `l URL ne porte pas l identifiant du curseur : ${url}`)
+})
+
+test("LE TEST QUI COMPTE : les avis charges s AJOUTENT, ils ne remplacent pas", async () => {
+  // ⚠ ILS S'INSERENT AVANT LA SENTINELLE, et c'est ce qui garde l'ordre : une
+  // insertion a la fin mettrait les plus anciens APRES le marqueur, donc apres
+  // le lien « tous les avis ». Et on n'ecrase pas la zone : reconstruire le
+  // bloc entier ferait sauter la position de defilement au doigt.
+  const b = bancSuiteAvis([{ avis: [avisDeTest(4, 25), avisDeTest(5, 24), avisDeTest(6, 23)], fin: false }])
+  await b.observateurs[0].declencher()
+  const ajoute = sentinelle(b.p).avant
+  for (const n of [4, 5, 6]) {
+    assert.ok(ajoute.includes(`Commentaire numero ${n}`),
+      `l avis ${n} n a pas ete ajoute : « ${ajoute.slice(0, 200)} »`)
+  }
+  assert.strictEqual(/Commentaire numero 1/.test(ajoute), false,
+    'les trois premiers avis ont ete re-rendus : la zone a ete ecrasee')
+})
+
+test("LE TEST QUI COMPTE : au bout des 30 jours, le lien vers /avis — et plus un appel", async () => {
+  // ⚠ DECISION DE THIERRY, OPTION 3 : « 30 jours, puis un lien vers /avis ».
+  // Mesure en production le 28 octobre 2026 : 16 avis avec texte sur 30 jours
+  // contre 645 au total. Paginer jusqu'au premier aurait fait de l'accueil un
+  // second /avis, et rendu FAUX le compte de son propre en-tete.
+  // ⚠ ET L'OBSERVATEUR SE COUPE. Sans cela, chaque defilement de plus
+  // redemanderait la meme page vide — un appel par geste, pour rien.
+  const b = bancSuiteAvis([{ avis: [avisDeTest(4, 25)], fin: true }])
+  await b.observateurs[0].declencher()
+  assert.strictEqual(b.pagesDemandees(), 1, 'la page de fin n a pas ete demandee')
+  const fin = sentinelle(b.p)
+  assert.match(fin.innerHTML, /href="\/avis"/, `la sentinelle ne porte pas le lien : « ${fin.innerHTML} »`)
+  assert.match(fin.innerHTML, /reviews\.all/, 'le lien n est pas libelle')
+  assert.strictEqual(b.observateurs[0].coupe, true, 'l observateur continue d observer apres la fin')
+  await b.observateurs[0].declencher()
+  assert.strictEqual(b.pagesDemandees(), 1,
+    'un second defilement redemande une page alors que la fin est atteinte')
+})
+
+test("LE TEST QUI COMPTE : une lecture qui ECHOUE n affirme pas « plus rien »", async () => {
+  // ⚠ `null` N'EST PAS `[]`. L'endpoint rend `{ avis: null, indisponible: true }`
+  // quand il n'a PAS PU lire : traiter ca comme une fin de liste serait
+  // affirmer une absence. On s arrete, le lien vers /avis reste le chemin, et
+  // aucune carte n est inventee.
+  const b = bancSuiteAvis([{ avis: null, fin: true, indisponible: true }])
+  await b.observateurs[0].declencher()
+  const fin = sentinelle(b.p)
+  assert.match(fin.innerHTML, /href="\/avis"/, 'le chemin vers /avis a disparu sur un echec')
+  assert.strictEqual(fin.avant, '', `des cartes ont ete ajoutees sur un echec : « ${fin.avant} »`)
+})
+
+test("LE TEST QUI COMPTE : sans IntersectionObserver, les trois premiers avis RESTENT", () => {
+  // Un navigateur sans observateur ne doit pas perdre le bloc : il garde ses
+  // trois cartes et le lien de l en-tete. C est la degradation, pas la panne.
+  const p = ouvrirAujourdhui({ sansInit: true, sansObservateur: true })
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  const zone = p.cache('[data-list="reviews"]')
+  assert.match(zone.innerHTML, /Commentaire numero 1/, 'les avis ont disparu sans observateur')
+  assert.strictEqual(p.cache('[data-bind="reviews-section"]').hidden, false,
+    'la section est masquee alors qu elle a trois avis')
+})
+
+// ─── LES CINQ TROUS QUE LA REVIEW DU 29 OCTOBRE 2026 A MESURES VERTS ───────
+
+test("LE TEST QUI COMPTE : un SECOND rendu n emporte pas la suite au defilement", async () => {
+  // ⚠ CONSTAT GRAVE, ET IL CASSAIT LA FONCTION DANS LE CHEMIN NORMAL.
+  // `renderDerniersAvis()` est appele DEUX FOIS a chaque chargement — une fois
+  // depuis le cache, une fois apres la lecture serveur. Le vrai
+  // `IntersectionObserver` appelle son rappel DES LA PREMIERE OBSERVATION si la
+  // cible est dans la fenetre : un chargement pouvait donc partir au rendu 1,
+  // le rendu 2 remplacait la zone (DETACHANT la sentinelle 1), puis la promesse
+  // du rendu 1 se resolvait et coupait l'observateur du rendu 2 — plus aucun
+  // chargement pour le reste de la session, sans rien a l'ecran.
+  const opts = {
+    sansInit: true,
+    observateurs: [],
+    ecouteurs: [],
+    corps: (url) => url.includes('/api/ecran/avis-recents')
+      ? { avis: [avisDeTest(4, 25)], fin: false }
+      : {}
+  }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+
+  p.interne.renderDerniersAvis()          // rendu 1 (le cache)
+  p.defiler()                             // l hote a defile : on observe
+  const o1 = opts.observateurs[0]
+  const promesse = o1.declencher()        // l'observateur du rendu 1 part
+  p.interne.renderDerniersAvis()          // rendu 2 (la lecture serveur) arrive
+  const o2 = opts.observateurs[1]
+  await promesse                          // puis la promesse du rendu 1 se resout
+
+  assert.strictEqual(o1.coupe, true, 'l observateur du rendu 1 n a pas ete coupe')
+  assert.strictEqual(o2.coupe, false,
+    'le rendu 1, perime, a coupe l observateur du rendu 2 : plus aucun chargement de la session')
+  assert.deepStrictEqual(p.erreurs, [],
+    `ecrire depuis un rendu perime a leve : ${p.erreurs.join(' / ')}`)
+  // Et le rendu 2 marche toujours.
+  await o2.declencher()
+  assert.match(sentinelle(p).avant, /Commentaire numero 4/,
+    'le rendu courant ne charge plus rien')
+})
+
+test("LE TEST QUI COMPTE : la sentinelle est ATTACHEE, sinon rien ne peut la voir", () => {
+  // ⚠ CONSTAT DE LA REVIEW : la mutation qui retirait `zone.appendChild(marque)`
+  // laissait 119 tests verts, alors qu'en navigateur la fonction est
+  // ENTIEREMENT MORTE — un noeud detache n'intersecte jamais rien, et
+  // `insertAdjacentHTML('beforebegin')` y leve. Le double enregistrait alors le
+  // noeud dans la table des selecteurs des `setAttribute` ; c'est `appendChild`
+  // qui le fait maintenant, comme un vrai DOM.
+  const b = bancSuiteAvis()
+  const s = sentinelle(b.p)
+  assert.ok(s.parentNode, 'la sentinelle n est pas attachee a la zone des avis')
+  assert.strictEqual(b.observateurs[0].cibles[0], s,
+    'l observateur n observe pas la sentinelle attachee')
+})
+
+test("LE TEST QUI COMPTE : un curseur qui N AVANCE PAS arrete la suite", async () => {
+  // ⚠ CONSTAT DE LA REVIEW : la mutation qui figeait le curseur restait verte.
+  // Un serveur qui rend trois fois la meme ligne ferait redemander la MEME page
+  // indefiniment, en empilant les doublons sans borne.
+  const memeLigne = { avis: [avisDeTest(3, 26)], fin: false }
+  const b = bancSuiteAvis([memeLigne, memeLigne, memeLigne])
+  await b.observateurs[0].declencher()
+  assert.strictEqual(b.pagesDemandees(), 1, 'la premiere page n a pas ete demandee')
+  const fin = sentinelle(b.p)
+  assert.match(fin.innerHTML, /href="\/avis"/,
+    'la suite continue alors que le curseur ne bouge plus')
+  assert.strictEqual(b.observateurs[0].coupe, true, 'l observateur tourne encore')
+})
+
+test("LE TEST QUI COMPTE : l armement d avant est COUPE, jamais laisse vivant", () => {
+  // ⚠ CONSTAT DE LA REVIEW : retirer le `disconnect` d'entree laissait la suite
+  // verte. Deux rendus laisseraient deux observateurs vivants, donc deux
+  // chargements concurrents, chacun avec son propre `enCours`.
+  const opts = { sansInit: true, observateurs: [], ecouteurs: [], corps: () => ({}) }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  p.defiler()
+  p.interne.renderDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(opts.observateurs.length, 3, 'les trois rendus n ont pas arme')
+  const vivants = opts.observateurs.filter(o => !o.coupe)
+  assert.strictEqual(vivants.length, 1,
+    `${vivants.length} observateurs vivants : les rendus d avant n ont pas ete coupes`)
+})
+
+test("LE TEST QUI COMPTE : la vue MOIS aussi garde la ligne d un bien archive", async () => {
+  // ⚠ CONSTAT 1 DE LA REVUE DE 26339835, et c'est le bloc PRINCIPAL de l'ecran.
+  // J'avais corrige la vue Annee et laisse la vue Mois entiere : la RPC
+  // `revenus_du_mois` n'a aucun filtre d'archive, donc les euros du bien
+  // restaient dans le bandeau SANS ligne pour les porter ni reserve pour les
+  // expliquer. Un bandeau qui annonce plus que la somme de ses lignes est
+  // exactement la dette 118.
+  const p = ouvrirAujourdhui({
+    corps: {
+      biens: [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1', currency: 'EUR' }],
+      // La liste SEPAREE que l'endpoint rend desormais.
+      biens_archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }],
+      droits: { reservations: true, menage: true },
+      revenus: {
+        mois: '2026-11',
+        par_bien: {
+          'uuid-1': { sejours: 2, recu_cents: 20000, a_venir_cents: 0, total_cents: 20000, bruts: 0, sans_montant: 0 },
+          'uuid-2': { sejours: 1, recu_cents: 30000, a_venir_cents: 0, total_cents: 30000, bruts: 0, sans_montant: 0 }
+        },
+        hors_biens: { sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0, sans_montant: 0 },
+        total: { sejours: 3, recu_cents: 50000, a_venir_cents: 0, total_cents: 50000, bruts: 0, sans_montant: 0 }
+      }
+    }
+  })
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  assert.deepEqual(p.erreurs, [], `le demarrage a echoue : ${p.erreurs.join(' / ')}`)
+  const html = String(p.cache('[data-list="revenue-rows"]').innerHTML)
+  assert.ok(html.includes('Colomiers'),
+    'le bien archive n a pas de ligne dans la vue Mois : ses euros sont au bandeau et nulle part ailleurs')
+  assert.ok(html.includes('La bulle'), 'le bien vivant a perdu sa ligne')
+  assert.strictEqual((html.match(/marque-archive/g) || []).length, 1,
+    'la ligne du bien archive ne porte pas sa marque')
+})
+
+test("LE TEST QUI COMPTE : un bien ARCHIVE garde sa ligne de revenus, et elle le DIT", () => {
+  // ⚠ DECISION 1 DE THIERRY DU 31 OCTOBRE 2026 : « revenus d'un bien archive
+  // comptes dans le total, ligne marquee archive ». Les retirer changerait le
+  // total de l'annee RETROACTIVEMENT — ce que ce depot interdit deja pour les
+  // prix — et l'argent encaisse l'a bien ete.
+  // ⚠ ET C'EST CE QUI SOLDE LA DETTE 118 : un logement disparu n'avait pas de
+  // ligne, donc l'hote lisait la somme sans le detail par bien. Il en a une,
+  // nommee, marquee.
+  // ⚠ LE BIEN ARCHIVE N'EST **PAS** DANS `biens`, et c'est tout l'objet du
+  // constat 1 de la revue de 320aa4f8 : `api/ecran/aujourdhui` l'ECARTE
+  // (etape 3), donc l'ecran ne l'a QUE par la liste de l'endpoint des revenus.
+  // Ma premiere version injectait le bien dans `etat.biens` a la main — un
+  // chemin qui n'existe pas en production : le test etait vert et la ligne
+  // etait absente a l'ecran.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(30000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(10000) } },
+      hors_biens: {},
+      // La liste vient du SERVEUR, avec le NOM : sans lui, la ligne n'aurait
+      // rien a afficher dans sa colonne de gauche.
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  const html = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  assert.ok(html.includes('Colomiers'), 'le bien archive a perdu sa ligne')
+  assert.ok(html.includes('La bulle'), 'le bien vivant a perdu sa ligne')
+  const marques = (html.match(/marque-archive/g) || []).length
+  assert.strictEqual(marques, 1,
+    `${marques} marque(s) « archive » au lieu d une seule : la marque ne suit pas la liste du serveur`)
+  // Et c'est bien la ligne de Colomiers qui la porte.
+  const avant = html.slice(0, html.indexOf('marque-archive'))
+  assert.ok(avant.lastIndexOf('Colomiers') > avant.lastIndexOf('La bulle'),
+    'la marque est posee sur la mauvaise ligne')
+  // Les cartes du telephone la portent aussi : le mobile suit l'ordinateur.
+  const cartes = String(p.cache('[data-list="revenue-annee-cartes"]').innerHTML)
+  assert.strictEqual((cartes.match(/marque-archive/g) || []).length, 1,
+    'la version mobile ne marque pas le bien archive')
+})
+
+test("sans liste d archives, AUCUNE ligne n est marquee", () => {
+  // Le contre-cas : une marque posee en dur passerait le test precedent.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: { total: { '2026-05': mo(10000) }, par_bien: { 'uuid-1': { '2026-05': mo(10000) } }, hors_biens: {} }
+  })
+  const html = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  assert.ok(!html.includes('marque-archive'),
+    'une ligne est marquee « archive » alors que le serveur n en declare aucune')
+})
+
+test("LE TEST QUI COMPTE : un bien ARCHIVE a sa ligne mais PLUS de pastille de filtre", () => {
+  // ⚠ RETOUCHE DE RECETTE DU 3 NOVEMBRE 2026 (demande de Thierry). Les deux
+  // roles de la liste se separent : la LIGNE reste — les euros d'un bien rangé
+  // sont dans le total, c'est la dette 118 — mais la BARRE DE FILTRES ne
+  // propose que des biens vivants. On range un bien pour ne plus le piloter ;
+  // filtrer la courbe sur lui n'a pas d'usage.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(30000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(10000) } },
+      hors_biens: {},
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  // La ligne est bien la — sinon ce test passerait en retirant le bien partout,
+  // ce qui serait la dette 118 rouverte.
+  const lignes = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  assert.ok(lignes.includes('Colomiers'),
+    'le bien archive a perdu sa ligne : la retouche a retire le bien au lieu de sa seule pastille')
+
+  // ⚠ ON INTERROGE LES BOUTONS RENDUS, PAS UNE SOUS-CHAINE DU HTML : le nom
+  // « Colomiers » apparait ailleurs dans la page, et un `includes` sur le
+  // conteneur entier dirait n'importe quoi le jour ou la barre portera un
+  // libelle compose.
+  const puces = boutonsDe(String(p.cache('[data-list="revenue-annee-filtres"]').innerHTML))
+  assert.ok(puces.length >= 2,
+    `${puces.length} pastille(s) rendue(s) : le test ne lit rien, son vert ne vaudrait rien`)
+  const valeurs = puces.map(b => String(b.getAttribute('data-filtre') || ''))
+  assert.ok(valeurs.includes('uuid-1'), 'le bien vivant a perdu sa pastille')
+  assert.ok(!valeurs.includes('uuid-2'),
+    'le bien archive a encore une pastille de filtre : ' + valeurs.join(', '))
+  // Et « Tous » reste, sinon il n'y aurait plus de quoi revenir au compte.
+  assert.ok(valeurs.includes(''), 'la pastille « Tous » a disparu')
+})
+
+test("archiver le bien ACTUELLEMENT filtre rend la main a « Tous »", () => {
+  // ⚠ LE CUL-DE-SAC QUE LA GARDE EVITE, et c'est pour lui qu'elle lit les
+  // PASTILLES et non le tableau : le bien filtre hier est archive aujourd'hui.
+  // Si la garde testait `avecDonnees` — ou le tableau le lit encore —, le
+  // filtre survivrait SANS pastille allumee : ni le bien, ni « Tous », et
+  // l'en-tete comme la courbe parleraient d'un perimetre que plus aucun bouton
+  // ne montre.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    filtre: 'uuid-2',
+    annee: {
+      total: { '2026-05': mo(30000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(10000) } },
+      hors_biens: {},
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  assert.strictEqual(p.interne.etat.filtreAnnee, null,
+    'le filtre pose sur un bien archive a survecu a son archivage')
+  const tous = boutonsDe(String(p.cache('[data-list="revenue-annee-filtres"]').innerHTML))
+    .find(b => String(b.getAttribute('data-filtre') || '') === '')
+  assert.ok(tous, 'la pastille « Tous » est absente')
+  assert.strictEqual(tous.getAttribute('aria-pressed'), 'true',
+    '« Tous » n est pas allume : aucune pastille ne montre le perimetre affiche')
+  // ⚠ CE QUE CHAQUE ASSERTION ATTRAPE, ET CE QU'ELLE N'ATTRAPE PAS — constat de
+  // la revue de dabd46f4, et ma premiere version de ce commentaire affirmait
+  // ici une mesure FAUSSE (« sans la garde, le grand chiffre vaudrait 100 € »).
+  // MESURE : garde retiree ET la seule assertion `filtreAnnee` mise de cote, le
+  // test passe — `ℹ fail 0`. Donc tout ce test tient sur son assertion 1.
+  //
+  // La raison est en amont : `choisi` se resout dans `pourPastilles`, qui exclut
+  // les archives. `find('uuid-2')` rend donc TOUJOURS `undefined`, la garde ou
+  // non : l'en-tete vaut 300 € et « Tous » s'allume de toute facon.
+  //
+  // Les deux assertions qui suivent restent, mais pour ce qu'elles sont : un
+  // controle de COHERENCE, pas un filet. Elles mordraient si quelqu'un remettait
+  // la resolution de `choisi` sur `avecDonnees` — pour afficher le perimetre
+  // entier, par exemple — EN MEME TEMPS que la garde disparaitrait. C'est le seul
+  // etat du code ou l'ecran filtrerait sur un bien sans pastille, et c'est
+  // l'interet de les garder ; ce n'est pas ce que la mutation isolee de la garde
+  // demontre.
+  const total = p.cache('[data-bind="revenue-annee-n"]').textContent
+  assert.strictEqual(euros(total), 300,
+    `l en-tete vaut « ${total} » au lieu de 300 € : elle filtre encore sur le bien archive`)
+})
+
+test("LE TEST QUI COMPTE : la page BRANCHE les fleches du rail des avis", async () => {
+  // ⚠ LA MEME LECON QUE POUR LES ⓘ, et elle vaut d'etre reprise : sans ce
+  // test, retirer l'appel a `brancherFleches` de la page laisserait toute la
+  // suite VERTE — les six tests au vrai navigateur mesurent le MODULE sur une
+  // page de banc, pas le fait que l'accueil s'en serve. Or c'est exactement le
+  // defaut que Thierry a constate en production : le geste n'existait pas.
+  // La preuve est la marque que le module pose sur le rail qu'il a branche.
+  const opts = { sansInit: true, observateurs: [], ecouteurs: [], corps: () => ({}) }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  const rail = p.cache('[data-list="reviews"]')
+  assert.ok(rail.__railFleches,
+    'le rail n est pas branche : la page n appelle pas brancherFleches, donc aucune fleche ne defile')
+  assert.strictEqual(typeof rail.__railFleches.maj, 'function', 'le branchement ne rend pas son contrat')
+  // ⚠ ET LE RAPPEL DE CHARGEMENT EST CELUI DE CE RENDU. Branche une fois pour
+  // toutes, il garderait le `suivante` du premier rendu, dont la sentinelle est
+  // detachee — le defaut que la review du 28 octobre a trouve sur l observateur.
+  const premier = rail.__railFleches.charger
+  p.interne.renderDerniersAvis()
+  assert.notStrictEqual(rail.__railFleches.charger, premier,
+    'le rappel de chargement n a pas suivi le nouveau rendu : il pointe une sentinelle detachee')
+  // ⚠ ET CE RAPPEL DEMANDE VRAIMENT LA PAGE SUIVANTE. Comparer deux fonctions
+  // ne prouvait RIEN : une fonction vide est aussi « differente » a chaque
+  // rendu, et la mutation qui remplacait `suivante` par `() => {}` SURVIVAIT.
+  // Ce qui se mesure est l'effet : l'appel part vers l'endpoint des avis.
+  // ⚠ ET ON ATTEND LA PROMESSE. `suivante` est `async` et son premier `await`
+  // est la lecture de session : lire les URL dans le meme tour les trouve
+  // VIDES, et l'echec accuse le branchement. Ce fichier documente deja ce
+  // piege sur l'observateur — il s'est rejoue ici au premier essai.
+  const avant = p.urls.filter(u => u.includes('/api/ecran/avis-recents')).length
+  rail.__railFleches.charger()
+  await tours()
+  const apres = p.urls.filter(u => u.includes('/api/ecran/avis-recents')).length
+  assert.strictEqual(apres, avant + 1,
+    'le clic sur la fleche ne demande pas la page suivante des avis : le rappel branche ne fait rien')
+})
+
+test("LE TEST QUI COMPTE : sans liste d avis, les fleches ne s affichent pas", () => {
+  // ⚠ CONSTAT 2 DE LA REVUE DE fbb6baee. Les etats « vide » et « illisible »
+  // ne sont PAS dans `MUETS` : la section reste AFFICHEE, et
+  // `armerLaSuiteDesAvis` sort avant de brancher. Un hote sans avis note sur
+  // 30 jours voyait donc, a l'ordinateur, « Pas encore d'avis » encadre de deux
+  // boutons ronds d'allure cliquable — sans ecouteur, et `disabled` a false
+  // puisqu'aucun `maj()` n'avait tourne.
+  const opts = { sansInit: true, observateurs: [], ecouteurs: [], corps: () => ({}) }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  // D'abord une liste : les fleches se montrent.
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  for (const sel of ['[data-rail="prec"]', '[data-rail="suiv"]']) {
+    assert.strictEqual(p.cache(sel).hidden, false, `la fleche ${sel} reste masquee sur une vraie liste`)
+  }
+  // Puis plus aucun avis : elles disparaissent.
+  p.interne.etat.derniersAvis = []
+  p.interne.renderDerniersAvis()
+  for (const sel of ['[data-rail="prec"]', '[data-rail="suiv"]']) {
+    assert.strictEqual(p.cache(sel).hidden, true,
+      `la fleche ${sel} s affiche sans aucun avis a defiler`)
+    assert.strictEqual(p.cache(sel).disabled, true,
+      `la fleche ${sel} est encore active sans aucun avis a defiler`)
+  }
+  // Et une lecture RATEE n'est pas une liste vide : meme retrait.
+  p.interne.etat.avisConnu = false
+  p.interne.etat.derniersAvis = null
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(p.cache('[data-rail="suiv"]').hidden, true,
+    'la fleche s affiche alors que la lecture des avis a echoue')
+})
+
+test("LE TEST QUI COMPTE : les avis tiennent sur UNE SEULE ligne, a toutes les largeurs", () => {
+  // ⚠ DEMANDE DE THIERRY DU 29 OCTOBRE 2026 : « UNE SEULE ligne de cartes,
+  // aussi sur ordinateur. Les avis suivants se chargent en defilant
+  // horizontalement dans cette ligne. Jamais de 2e ligne. Cartes de meme
+  // hauteur. » C'etait une grille de trois colonnes qui s'allongeait vers le
+  // BAS a chaque chargement : le bloc poussait la page, et le meme geste —
+  // defiler la page — servait a lire l'ecran et a charger des avis.
+  // ⚠ CE TEST A REMPLACE celui qui exigeait la largeur de la sentinelle DANS
+  // le media de 720 px. L'invariant n'a pas change (la sentinelle doit occuper
+  // une place, sinon le defilement ne l'atteint jamais) ; c'est son
+  // implementation qui a bouge, parce que le rail n'est plus propre au
+  // telephone. Un test qui fige l'implementation d'un invariant rougit a la
+  // premiere refonte, et on est tente de le supprimer au lieu de le reporter.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const regle = (sel) => {
+    const i = css.indexOf(sel + ' {')
+    assert.notStrictEqual(i, -1, `la regle « ${sel} » n existe pas`)
+    return css.slice(i + sel.length + 2, css.indexOf('}', i))
+  }
+  // ⚠ LA REGLE GENERALE, PAS CELLE D'UN MEDIA : on lit la premiere occurrence,
+  // et `.grid-avis` est declaree avant toute media query (le commentaire du
+  // fichier dit pourquoi : a specificite egale, l'ordre tranche).
+  const rail = regle('.grid-avis')
+  assert.match(rail, /display:\s*flex/,
+    `.grid-avis n est pas un rail a toutes les largeurs : « ${rail.trim()} »`)
+  assert.match(rail, /overflow-x:\s*auto/,
+    'sans `overflow-x: auto`, les cartes debordent au lieu de defiler')
+  assert.match(rail, /align-items:\s*stretch/,
+    'les cartes n ont pas la meme hauteur : `align-items: stretch` manque')
+  // ⚠ ET AUCUN `grid-template-columns` : c'est lui qui faisait la 2e ligne.
+  assert.strictEqual(/grid-template-columns/.test(rail), false,
+    `.grid-avis garde des colonnes de grille : « ${rail.trim()} » — une 2e ligne reapparaitra`)
+  // Une largeur FIXE pour les enfants, sinon ils se compriment au lieu de
+  // faire defiler, et la « seule ligne » devient trois cartes ecrasees.
+  const enfants = regle('.grid-avis > *')
+  assert.match(enfants, /flex:\s*0\s+0\s+\d+px/,
+    `les cartes du rail n ont pas de largeur fixe : « ${enfants.trim()} »`)
+  // La sentinelle occupe une place DANS le rail, a toutes les largeurs.
+  const sent = regle('.grid-avis > .avis-suite')
+  assert.match(sent, /flex:\s*0\s+0\s+\d+px/,
+    `la sentinelle n a pas de largeur dans le rail : « ${sent.trim()} » — le defilement ne l atteindra pas`)
+  assert.match(regle('.avis-suite'), /min-height:\s*\d+px/,
+    'la sentinelle n a pas de hauteur')
+})
+
+test("LE TEST QUI COMPTE : AUCUNE observation avant le premier defilement", () => {
+  // ⚠ MESURE AU BANC REEL (chrome-headless, balisage REEL de la page, cas
+  // « journee vide » — celui que la retouche 3 raccourcit le plus) : a
+  // 1280x900, le haut de la sentinelle est a 1077 px et le `rootMargin` vaut
+  // 200 px, donc 1077 < 1100 : LE VRAI `IntersectionObserver` AURAIT TIRE DES
+  // LE CHARGEMENT. L'accueil serait passe a TROIS appels au chargement, alors
+  // que son budget est de DEUX et qu'un test le garde. Au telephone (390x844),
+  // le bord gauche est a 858 px, hors de portee : le defaut n'existait que sur
+  // ordinateur, et seul le banc navigateur pouvait le voir.
+  // ⚠ ET C'EST AUSSI LE CONTRAT : « quand on fait defiler on charge » sont les
+  // mots de la demande. Le geste n'est pas un garde-fou ajoute par-dessus.
+  const opts = { sansInit: true, observateurs: [], ecouteurs: [], corps: () => ({}) }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+
+  assert.strictEqual(opts.observateurs.length, 1, 'l observateur n est pas cree')
+  assert.strictEqual(opts.observateurs[0].cibles.length, 0,
+    'la sentinelle est observee AVANT tout defilement : un troisieme appel part au chargement')
+  // ⚠ ET L'ECOUTEUR ATTRAPE LE RAIL : un `scroll` ne bouillonne pas, donc sans
+  // la phase de CAPTURE, defiler le rail des avis au telephone — le seul geste
+  // possible la-bas — n armerait jamais rien.
+  const ecoute = opts.ecouteurs.find(e => e.type === 'scroll')
+  assert.ok(ecoute, `aucun ecouteur de defilement : ${JSON.stringify(opts.ecouteurs.map(e => e.type))}`)
+  assert.strictEqual(ecoute.reglages.capture, true,
+    'l ecouteur de defilement n est pas en phase de capture : le rail du telephone ne l atteint pas')
+
+  // Le geste, puis l observation.
+  p.defiler()
+  assert.strictEqual(opts.observateurs[0].cibles.length, 1,
+    'apres le defilement, la sentinelle n est toujours pas observee')
+})
+
+// ─── LE MOTIF DU MOIS ECARTE, DANS L'INFO-BULLE (recette du 28 octobre) ────
+
+// Une bande dont OCTOBRE est ecarte pour couverture partielle : l'endpoint le
+// dit par `partiels`, et aucun mois d'octobre n'est dans `mois`.
+const compAvecPartiel = (partiels = ['2026-10']) => ({
+  'uuid-1': {
+    releve_le: '2026-10-06',
+    partiels,
+    mois: {
+      '2026-09': { nature: 'clos', min_cents: 500000, max_cents: 900000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' },
+      '2026-11': { nature: 'futur', min_cents: 100000, max_cents: 300000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' }
+    }
+  }
+})
+
+// Les `<title>` de la courbe, dans l'ordre du balisage.
+const bullesDeLaCourbe = (p) =>
+  [...String(p.cache('[data-bind="revenue-annee-courbe"]').innerHTML)
+    .matchAll(/<title>([\s\S]*?)<\/title>/g)].map(m => m[1])
+
+test("LE TEST QUI COMPTE : le mois ECARTE dit son motif dans l info-bulle", () => {
+  // ⚠ DEMANDE DE THIERRY, MOT POUR MOT : « pas de phrase en plus sous la bande
+  // (le texte est deja trop long, c'est en dette), mets le motif dans
+  // l'info-bulle du mois en cours, au survol / au toucher ». Le motif existe
+  // deja en base, pose a l'ecriture ; l'ecran le jetait, et l'hote voyait « un
+  // trou entre septembre et novembre » sans explication.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1',
+    comparables: compAvecPartiel(),
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-10': recuDe(40000) },
+      par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-10': recuDe(40000) } },
+      hors_biens: {}
+    }
+  })
+  const bulles = bullesDeLaCourbe(p)
+  assert.ok(bulles.length >= 2, `${bulles.length} info-bulle(s) : la courbe ne trace plus de points`)
+  const oct = bulles.filter(b => /annee_comparables_partiel/.test(b))
+  assert.ok(oct.length >= 1, `aucune info-bulle ne porte le motif : ${bulles.join(' | ')}`)
+  // ⚠ ET C'EST LA FORMULATION DU MOIS EN COURS, pas l'autre.
+  assert.ok(oct.every(b => /annee_comparables_partiel(?!_autre)/.test(b)),
+    `octobre 2026 est le mois en cours, et l info-bulle dit : ${oct.join(' | ')}`)
+  // Septembre, qui a sa bande, ne dit rien.
+  const sept = bulles.filter(b => !/annee_comparables_partiel/.test(b))
+  assert.ok(sept.length >= 1,
+    'tous les mois portent le motif : il ne vise plus le mois ecarte')
+})
+
+test("LE TEST QUI COMPTE : un mois partiel qui n est PAS le mois en cours ne dit pas « en cours »", () => {
+  // ⚠ LE DERNIER MOIS DE LA FENETRE EST TRONQUE AUSSI — le calendrier AirROI
+  // porte ~360 jours. Une seule formulation aurait fini par annoncer « mois en
+  // cours » d'un mois de l'annee suivante. Deux cas, deux phrases.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1',
+    comparables: compAvecPartiel(['2026-12']),
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-12': aVenirDe(40000) },
+      par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-12': aVenirDe(40000) } },
+      hors_biens: {}
+    }
+  })
+  const porteuses = bullesDeLaCourbe(p).filter(b => /annee_comparables_partiel/.test(b))
+  assert.ok(porteuses.length >= 1, 'le mois partiel ne dit rien')
+  assert.ok(porteuses.every(b => /annee_comparables_partiel_autre/.test(b)),
+    `decembre n est pas le mois en cours, et l info-bulle dit : ${porteuses.join(' | ')}`)
+})
+
+test("LE TEST QUI COMPTE : AUCUNE phrase de plus sous la bande", () => {
+  // ⚠ C'EST L'AUTRE MOITIE DE LA DEMANDE, et la seule que le tableau ne montre
+  // pas : « pas de phrase en plus sous la bande ». Les trois paragraphes qui
+  // suivent la courbe sont deja une dette (121) ; le motif du mois partiel ne
+  // doit pas en faire un quatrieme.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1',
+    comparables: compAvecPartiel(),
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-10': recuDe(40000) },
+      par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-10': recuDe(40000) } },
+      hors_biens: {}
+    }
+  })
+  for (const sel of ['[data-bind="revenue-annee-note"]', '[data-bind="revenue-annee-comparables"]',
+    '[data-bind="revenue-annee-comparables-tous"]', '[data-bind="revenue-annee-reserves"]']) {
+    const n = p.cache(sel)
+    assert.strictEqual(/annee_comparables_partiel/.test(String(n.textContent || '')), false,
+      `${sel} porte le motif du mois partiel : c est une phrase de plus sous la bande`)
+  }
+})
+
+// ─── Un bien ARCHIVE n'a de ligne de revenus que s'il porte de l'argent ─────
+// Decision de Thierry du 6 novembre 2026, sur ce qu'il voyait en production :
+// « Colomiers · archive · aucun versement ce mois-ci · 0 € 0 € 0 € ». Vue Mois :
+// la ligne part. Vue Annee : Colomiers (2 402 € en 2026) RESTE, marque.
+const revenusMois = (parBien, total) => ({
+  mois: '2026-11',
+  par_bien: parBien,
+  hors_biens: { sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0, sans_montant: 0 },
+  total
+})
+
+test("LE TEST QUI COMPTE : vue MOIS, un bien archive SANS argent ce mois-ci n a plus de ligne", async () => {
+  const p = ouvrirAujourdhui({
+    corps: {
+      biens: [
+        { id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1', currency: 'EUR' },
+        // Un bien VIVANT sans sejour ce mois-ci : sa ligne a zero RESTE.
+        { id: 'uuid-3', name: 'Studio', provider_property_id: 'P3', currency: 'EUR' }
+      ],
+      biens_archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }],
+      droits: { reservations: true, menage: true },
+      revenus: revenusMois(
+        { 'uuid-1': { sejours: 2, recu_cents: 20000, a_venir_cents: 0, total_cents: 20000, bruts: 0, sans_montant: 0 } },
+        { sejours: 2, recu_cents: 20000, a_venir_cents: 0, total_cents: 20000, bruts: 0, sans_montant: 0 })
+    }
+  })
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  assert.deepEqual(p.erreurs, [], `le demarrage a echoue : ${p.erreurs.join(' / ')}`)
+  for (const sel of ['[data-list="revenue-rows"]', '[data-list="revenue-cards"]']) {
+    const html = String(p.cache(sel).innerHTML)
+    assert.ok(!html.includes('Colomiers'), `${sel} : le bien archive a zero garde sa ligne`)
+    assert.ok(!html.includes('marque-archive'), `${sel} : une marque « archive » reste affichee`)
+    assert.ok(html.includes('La bulle'), `${sel} : le bien vivant a perdu sa ligne`)
+    assert.ok(html.includes('Studio'), `${sel} : le bien VIVANT a zero a perdu sa ligne`)
+  }
+})
+
+test("vue MOIS, un bien archive dont le montant est INCONNU garde sa ligne", async () => {
+  // Un sejour dont on ne sait pas le prix n'est pas un sejour a zero euro.
+  const inconnu = { sejours: 1, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0, sans_montant: 1, refuses: { montant: 1 } }
+  const p = ouvrirAujourdhui({
+    corps: {
+      biens: [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1', currency: 'EUR' }],
+      biens_archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }],
+      droits: { reservations: true, menage: true },
+      revenus: revenusMois(
+        { 'uuid-1': { sejours: 1, recu_cents: 10000, a_venir_cents: 0, total_cents: 10000, bruts: 0, sans_montant: 0 }, 'uuid-2': inconnu },
+        { sejours: 2, recu_cents: 10000, a_venir_cents: 0, total_cents: 10000, bruts: 0, sans_montant: 1 })
+    }
+  })
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  const html = String(p.cache('[data-list="revenue-rows"]').innerHTML)
+  assert.ok(html.includes('Colomiers'), 'un montant inconnu a ete pris pour zero : la ligne est partie')
+  assert.strictEqual((html.match(/marque-archive/g) || []).length, 1)
+})
+
+test("LE TEST QUI COMPTE : vue ANNEE, un bien archive a zero sur les deux annees n a plus de ligne", () => {
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(20000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(0) } },
+      hors_biens: {},
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  for (const sel of ['[data-list="revenue-annee-lignes"]', '[data-list="revenue-annee-cartes"]']) {
+    const html = String(p.cache(sel).innerHTML)
+    assert.ok(!html.includes('Colomiers'), `${sel} : le bien archive a zero garde sa ligne`)
+    assert.ok(html.includes('La bulle'), `${sel} : le bien vivant a perdu sa ligne`)
+  }
+})
+
+test("vue ANNEE, un bien archive qui n a d euros qu en N-1 GARDE sa ligne", () => {
+  // Sinon la colonne N-1 ne serait plus la somme de ses lignes.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(20000), '2025-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2025-05': mo(10000) } },
+      hors_biens: {},
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  const html = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  assert.ok(html.includes('Colomiers'), 'le bien archive a perdu la ligne qui porte ses euros N-1')
+  assert.strictEqual((html.match(/marque-archive/g) || []).length, 1)
 })

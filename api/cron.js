@@ -93,6 +93,15 @@
 //   l'hote (api/avis.js). Jamais un avis negatif. ⚠ Pas de balayage : l'index
 //   partiel `guest_evaluations_auto_publier_idx`, 20 lectures et 5 publications
 //   par passage au plus, aucune quand il reste moins de 20 s au cycle.
+// Session #42 (chantier « delai de reponse IA », lot 2) : LES BROUILLONS ECHUS
+//   PARTENT (lib/guestflow/brouillons-dus.js). Le Mode Test / Mode Auto par
+//   bien devient un DELAI : le brouillon de l'IA attend N minutes, visible pour
+//   l'hote, et part de lui-meme s'il ne fait rien — le parachute de l'oubli.
+//   ⚠ Pas un balayage : deux index partiels sur (status, echeance), donc les
+//   taches ECHUES seulement. Claim atomique avant tout envoi, le MEME que
+//   celui de l'ecran (api/messages.js, action `reserver`), dans le meme ordre :
+//   c'est ce qui empeche le double message. Budget mur 20 s et 30 brouillons
+//   par cycle, parce que cette passe ENVOIE et tourne avant le dispatch.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -121,10 +130,12 @@ const { dispatchBookingChanges } = require('../lib/booking-changes-dispatch')
 const { purgerSiDue } = require('../lib/cron-purge-tentatives')
 const { rattraperBloquees } = require('../lib/moteur-creation')
 const { piloterLesBiens } = require('../lib/pilote-quotidien')
+const { releverSiDu: releverComparables, PLAFOND_RELEVE_90J_USD } = require('../lib/marche/comparables-releves')
 const { channelCall } = require('../lib/channel-fullsync')
 const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
 const { executerAutoValidations } = require('../lib/avis/auto-validation')
+const { envoyerBrouillonsDus } = require('../lib/guestflow/brouillons-dus')
 const { releverLesComptesDus } = require('../lib/canaux-du-bien')
 const { demarrerPassage } = require('../lib/metriques-cron')
 const { ecrireLePassage, purgerSiDue: purgerLesMesures,
@@ -203,6 +214,7 @@ module.exports = async function handler(req, res) {
     totalReviewsClassified: 0,
     totalMessagesClassified: 0,
     totalMenagesRattaches: 0,
+    totalComparablesReleves: 0,
     totalMenagesCrees: 0,
     totalBeds24Materialized: 0,
     totalTentativesAnonymisees: 0,
@@ -625,6 +637,62 @@ module.exports = async function handler(req, res) {
       results.errors.push({ context: 'pilote_yieldflow', error: err.message })
     }
 
+    // 4quindecies. RELEVÉ MENSUEL DES COMPARABLES (spec-revenus-comparables).
+    // ⚠ UN LOGEMENT PAR PASSAGE, et seulement s'il n'a pas déjà été relevé ce
+    // mois-ci : chaque comparable coûte 0,10 $ par point d'appel AirROI, et un
+    // passage qui traiterait tout le parc d'un coup dépasserait les garde-fous
+    // au milieu — laissant la moitié du travail fait sans qu'on sache laquelle.
+    // ⚠ La cadence se lit sur le MOIS, pas sur une durée en millisecondes : un
+    // « >= 30 jours » finirait par sauter un mois une fois par an.
+    // ⚠ LE CLIENT EST UNE FABRIQUE, PAS UNE INSTANCE, et c'est une correction :
+    // j'avais écrit qu'il n'était « construit QUE si la tâche est due », alors
+    // qu'il était évalué comme ARGUMENT, donc à chacun des 288 ticks du jour.
+    // Sans conséquence de coût, mais c'était l'inverse de ce qui était écrit.
+    // Le module ne l'appelle que s'il a vraiment un bien à relever.
+    try {
+      await chrono.mesure('comparables_releves', async () => {
+        const { creerClient } = require('../lib/airroi/client')
+        const { depotSupabase } = require('../lib/airroi/depot')
+        // ⚠ LE MARQUEUR EST FOURNI PAR LE CRON, et c'est la frontiere V2 qui
+        // l'impose : `cron_logs` n'est pas une table du marche, et un module
+        // de `lib/marche/` n'a pas le droit de la nommer
+        // (tests/explication-marche.test.js). Le marche calcule, le cron
+        // cadence.
+        const MARQ = 'comparables_releves'
+        const bilanComp = await releverComparables(results, {
+          supabase,
+          // ⚠ LE CLIENT DU RELEVE PORTE SON PROPRE PLAFOND PAR BIEN, et c'est
+          // la decision de Thierry du 28 octobre : le relevé mensuel est
+          // SEPARE de l'étude de marché. Le défaut (5 $ / 90 j) est partagé
+          // avec l'étude, qui en consomme déjà 3,50 à 4,50 — la série
+          // mensuelle s'y serait arrêtée au 4ᵉ mois. L'étude, elle, garde le
+          // défaut : elle construit son propre client.
+          client: () => creerClient({
+            depot: depotSupabase(supabase),
+            gardes: { plafondBien90jUsd: PLAFOND_RELEVE_90J_USD }
+          }),
+          marqueur: {
+            lire: async () => {
+              const { data } = await supabase.from('cron_logs')
+                .select('last_run').eq('id', MARQ).maybeSingle()
+              return data && data.last_run
+            },
+            ecrire: async (iso, ecrites) => {
+              await supabase.from('cron_logs').upsert({
+                id: MARQ, last_run: iso, total_messages: ecrites || 0,
+                total_replies: 0, errors: []
+              }, { onConflict: 'id' })
+            }
+          }
+        })
+        results.totalComparablesReleves = bilanComp?.ecrites || 0
+      })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur relevé comparables:', err.message)
+      results.errors.push({ context: 'comparables_releves', error: err.message })
+    }
+
     // 4quaterdecies bis. NAISSANCE DES ÉVALUATIONS AU JOUR DU DÉPART (spec §9 bis).
     // ⚠ Les départs du jour et des deux précédents seulement, par l'index sur
     // `menages.departure_date` : pas un balayage. Idempotente — une évaluation
@@ -680,6 +748,44 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur auto-validation avis:', err.message)
       results.errors.push({ context: 'auto_validation_avis', error: err.message })
+    }
+
+    // 4quindecies. LES BROUILLONS DE REPONSE IA ECHUS PARTENT (chantier « delai
+    // de reponse IA », lot 2 ; spec docs/specs/spec-delai-reponse-ia.md §4.4).
+    // Un bien peut regler un DELAI de reponse : le brouillon de l'IA attend N
+    // minutes dans `agent_tasks` avec son echeance (`send_after`), visible pour
+    // l'hote, et part de lui-meme si personne n'a rien fait. C'est aussi le
+    // PARACHUTE du Mode Test : un hote qui oublie une proposition laissait le
+    // voyageur sans reponse indefiniment.
+    // ⚠ AUCUN BALAYAGE : la lecture porte sur (`status`, `send_after`) par deux
+    // index PARTIELS (migration 2026-10-27-delai-reponse-ia), donc sur les
+    // taches ECHUES et non sur la table. Le volume suit le trafic reel, pas le
+    // parc — c'est la regle des 30 000 comptes.
+    // ⚠ CLAIM ATOMIQUE AVANT TOUT ENVOI, et l'ecran passe par le MEME claim
+    // (api/messages.js, action `reserver`) dans le MEME ordre : c'est ce qui
+    // empeche le double message quand l'hote clique pendant que le cron prend
+    // la tache. Tout est reverifie a l'echeance — kill switch, reglage relu,
+    // sejour termine —, parce que des heures ont pu passer depuis la pose.
+    // ⚠ Placee ICI, avant le dispatch : elle ENVOIE (un appel provider par
+    // brouillon), donc elle porte son propre budget mur de 20 s et un plafond
+    // de 30 par cycle. Le reliquat part au cycle suivant avec son echeance
+    // intacte ; sans ce budget, trente envois lents mangeaient les 60 s et
+    // affamaient le dispatch.
+    try {
+      await chrono.mesure('brouillons_dus', async () => {
+        const bilanBrouillons = await envoyerBrouillonsDus(results, {
+          resteMs: () => 55000 - chrono.total()
+        })
+        results.totalBrouillonsEnvoyes = bilanBrouillons?.envoyes || 0
+        results.totalBrouillonsReportes = bilanBrouillons?.reportes || 0
+        if (bilanBrouillons?.orphelines) {
+          results.totalBrouillonsOrphelins = bilanBrouillons.orphelines
+        }
+      })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur brouillons dus:', err.message)
+      results.errors.push({ context: 'brouillons_dus', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

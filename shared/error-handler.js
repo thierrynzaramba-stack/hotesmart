@@ -151,6 +151,12 @@ export function initErrorHandler() {
     // panne ».
     if (!estDev() && ATTENDUS.has(Number(data && data.status))) return
 
+    // ⚠ ET UN REFUS QUE L'ECRAN A DIT LUI-MEME NON PLUS. `gere: true` est pose
+    // par shared/api-client.js quand l'appelant a declare ce statut dans
+    // `refusGeres` (le champ refuse est montre sous son champ, la panne dans
+    // la fenetre). Opt-in : sans declaration, rien ne change.
+    if (!estDev() && data && data.gere === true) return
+
     const msg = document.getElementById('hs-debug-msg')
     msg.textContent = ''
     if (estDev()) {

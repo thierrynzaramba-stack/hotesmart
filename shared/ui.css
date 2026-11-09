@@ -83,7 +83,32 @@ h1, h2, h3, p { margin: 0; }
    Posee apres, cette regle aurait remis `display: grid` au telephone et le
    defilement horizontal n'aurait jamais eu lieu. `.grid-auto`, deux lignes
    plus haut, est a sa place pour exactement la meme raison. */
-.grid-avis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-l); align-items: start; }
+/* ⚠ UNE SEULE LIGNE DE CARTES, A TOUTES LES LARGEURS — demande de Thierry du
+   29 octobre 2026 : « UNE SEULE ligne de cartes, aussi sur ordinateur. Les avis
+   suivants se chargent en defilant horizontalement dans cette ligne (comme le
+   rail mobile). Jamais de 2e ligne. »
+   C'etait une grille de trois colonnes qui s'allongeait vers le BAS a chaque
+   chargement : le bloc poussait tout le reste de la page, et le defilement de
+   la page servait a la fois a lire l'ecran et a charger des avis. Le rail, lui,
+   borne le geste au bloc.
+   ⚠ `align-items: stretch` ET NON `start` : « cartes de meme hauteur », demande
+   dans le meme message. Avec `start`, une carte dont le commentaire tient sur
+   une ligne etait deux fois moins haute que sa voisine, et la ligne de cartes
+   paraissait cassee. */
+.grid-avis {
+  display: flex;
+  gap: var(--gap-l);
+  align-items: stretch;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  /* La barre de defilement disparait, le geste reste — comme `.scroll-x`. */
+  scrollbar-width: none;
+}
+.grid-avis::-webkit-scrollbar { display: none; }
+/* ⚠ UNE LARGEUR FIXE, SINON PAS DE RAIL : des cartes en `flex: 1` se
+   compriment pour tenir dans la ligne au lieu de la faire defiler, et la
+   « seule ligne » devient trois cartes ecrasees. */
+.grid-avis > * { flex: 0 0 300px; scroll-snap-align: start; }
 .section-head { display: flex; align-items: baseline; gap: 12px; }
 .section-head .h2 { flex: 1; }
 
@@ -136,6 +161,19 @@ h1, h2, h3, p { margin: 0; }
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 12px; border-radius: var(--radius-pill);
   background: var(--surface); font-size: var(--fs-caption); font-weight: var(--fw-semibold);
+}
+/* ⚠ LA MARQUE D'UN LOGEMENT ARCHIVE. Decision 1 de Thierry du 31 octobre
+   2026 : les revenus d'un bien archive restent COMPTES, et sa ligne est
+   marquee. Sobre a dessein — ce n'est pas une alerte, c'est un etat : un fond
+   neutre et le texte en gris, pas une couleur de la palette des niveaux, qui
+   est reservee aux previsions de prix. */
+.marque-archive {
+  display: inline-flex; align-items: center;
+  margin-inline-start: 6px; padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2); color: var(--muted);
+  font-size: 11px; font-weight: var(--fw-semibold);
+  white-space: nowrap; vertical-align: middle;
 }
 
 /* ---------- Cartes ---------- */
@@ -208,8 +246,32 @@ h1, h2, h3, p { margin: 0; }
 .msg-liste__outils { display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 10px; }
 .msg-recherche { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); }
 .msg-recherche input { flex: 1; border: 0; outline: 0; background: none; font-size: var(--fs-small); color: var(--ink); }
-.msg-filtres { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-.msg-filtres::-webkit-scrollbar { display: none; }
+/* ⚠ `.msg-pilules` SE GREFFE ICI, elle ne se recopie pas (chantier « delai de
+   reponse IA », lot 2). Les pilules de delai du volet « Reponse IA » demandent
+   exactement ce que les filtres font deja : defilement horizontal possible,
+   barre MASQUEE sur telephone. Ecrire une seconde regle identique, c'est
+   accepter qu'elles divergent — la regle du depot sur les modules communs vaut
+   aussi a l'interieur d'un fichier. */
+.msg-filtres, .msg-pilules { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.msg-filtres::-webkit-scrollbar, .msg-pilules::-webkit-scrollbar { display: none; }
+/* Les pilules du volet : meme hauteur de cible que les filtres, et `flex: none`
+   pour qu'elles ne se compriment pas au lieu de defiler. */
+.msg-pilules .tab { height: 36px; padding: 0 12px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; color: var(--info); font-weight: var(--fw-semibold); }
+.msg-pilules .tab[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); font-weight: var(--fw-bold); background: var(--surface); }
+@media (max-width: 720px) { .msg-pilules .tab { height: 44px; padding: 0 14px; } }
+/* ⚠ ET C'EST ICI QUE LA GREFFE S'ARRÊTE — recette du 28 octobre 2026 :
+   « Autre… » était coupé à droite sur ordinateur. La maquette validée portait
+   `flex-wrap: wrap` ; le défilement horizontal n'a de sens qu'au téléphone, où
+   la barre est masquée et le pouce fait le travail. Sur ordinateur, une rangée
+   qui défile cache une option sans le dire. Règle propre aux PILULES : les
+   filtres de la liste, eux, doivent rester sur une seule ligne. */
+@media (min-width: 721px) {
+  .msg-pilules { flex-wrap: wrap; overflow-x: visible; }
+}
+/* Un bouton `.btn` désactivé se grisait (`.btn:disabled`), une pilule non : le
+   gel du panneau pendant l'enregistrement ne se voyait pas. */
+.msg-pilules .tab:disabled { opacity: .5; cursor: not-allowed; }
+.msg-pilules .tab:disabled:hover { background: none; }
 .msg-filtres .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; }
 .msg-filtres .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
 .msg-deroule { overflow-y: auto; flex: 1; }
@@ -250,6 +312,28 @@ h1, h2, h3, p { margin: 0; }
 .bulle--hote { align-self: flex-end; background: var(--surface-2); color: var(--ink); border-end-end-radius: 4px; }
 .bulle--proposition { align-self: flex-end; background: var(--surface); border: 1.5px dashed var(--ink); border-end-end-radius: 4px; }
 .bulle__entete { display: flex; align-items: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); margin-bottom: 4px; }
+/* ⚠ L'ECHEANCE D'UN BROUILLON DIFFERE, ET C'EST LE SEUL AMBRE DE L'ECRAN
+   (chantier « delai de reponse IA », lot 2). `theme.css` reserve `--amber` a
+   « ce qu'HoteSmart a fait / attend », un seul moment par ecran : un brouillon
+   qui va partir tout seul est exactement cela. Rien d'autre dans ce fil ne doit
+   le porter.
+   La VARIANTE suspendue est GRISE : quand l'hote a ouvert le brouillon, plus
+   rien n'attend — c'est lui qui tient la main, donc l'ambre n'a plus d'objet. */
+.bulle__echeance { display: flex; align-items: center; gap: 6px; margin: -2px -6px 8px; padding: 7px 10px; border-radius: var(--radius-card); background: var(--amber-soft); color: var(--amber-text); font-size: var(--fs-small); font-weight: var(--fw-semibold); white-space: normal; }
+.bulle__echeance--suspendu { background: var(--surface-2); color: var(--muted); }
+.bulle__echeance .icon { width: 16px; height: 16px; flex: none; }
+/* Les gestes sous un brouillon differe : ce qui se passera sans rien faire, et
+   l'abandon. Bleu = cliquable, et le pied ne porte aucun bouton plein. */
+.bulle__pied { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; margin-top: 6px; }
+.bulle__pied .link { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; background: none; border: 0; padding: 0; color: var(--info); font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.bulle__pied .icon { width: 15px; height: 15px; }
+/* Le meme bandeau, au-dessus de la SAISIE : le mecanisme d'edition existant
+   descend la proposition hors du fil, donc sa bulle disparait avec son compte
+   a rebours. Les elements sont identiques — c'est le meme objet, seule sa
+   place change. */
+.msg-saisie__echeance { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 20px 0; }
+.msg-saisie__echeance .bulle__echeance { margin: 0; }
+.msg-saisie__echeance .bulle__pied { margin: 0; }
 .bulle-meta { align-self: flex-end; display: flex; align-items: center; gap: 5px; font-size: var(--fs-caption); color: var(--muted); margin: 2px 4px 8px; }
 .bulle-meta--voyageur { align-self: flex-start; }
 .bulle-meta .icon { width: 13px; height: 13px; }
@@ -308,8 +392,99 @@ h1, h2, h3, p { margin: 0; }
 .prog-carte [data-prog-suppr] { background: none; border: 0; padding: 4px; cursor: pointer; color: var(--muted); }
 .prog-carte [data-prog-suppr]:hover { color: var(--danger); }
 .prog-carte [data-prog-suppr] .icon { width: 15px; height: 15px; }
-.msg-tiroir__note { margin: 10px 18px 0; color: var(--danger); font-weight: var(--fw-semibold); }
+/* ⚠ COLLÉE EN BAS DU TIROIR, et c'est un constat de recette (28 octobre 2026 :
+   « après Enregistrer, aucun retour visible »). La note ÉTAIT bien écrite —
+   `noteReglage` la remplit — mais elle est le DERNIER enfant d'un panneau qui
+   défile en entier (`.msg-tiroir` est en `overflow-y: auto`), donc elle
+   atterrissait hors de l'écran : l'hôte lisait un silence là où le code
+   répondait. `position: sticky` la garde en vue tant qu'elle est affichée, sans
+   lutter contre le défilement de l'hôte — ce qu'un `scrollIntoView` aurait
+   fait. Le fond est opaque : sans lui, le texte du panneau défile dessous. */
+/* `env(safe-area-inset-bottom)` comme `.msg-saisie` : le tiroir est en
+   `inset-block: 0`, donc la dernière ligne d'une note épinglée passait sous
+   l'indicateur d'accueil de l'iPhone — le retour que ce correctif existe pour
+   rendre visible (constat de la review). */
+.msg-tiroir__note { position: sticky; bottom: 0; margin: 10px 0 0; padding: 10px 18px calc(14px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); color: var(--danger); font-weight: var(--fw-semibold); }
 .msg-tiroir__note--ok { color: var(--ok); }
+/* ---------- Base de connaissance V5 (lot 3) ----------
+   Le volet de l'ordinateur fait 440 px (maquette) ; les deux autres volets du
+   tiroir gardent leurs 360 px. La page téléphone (/connaissance) monte la MÊME
+   vue (`shared/connaissance-vue.js`) : ces règles valent pour les deux.
+   Charte : bleu = cliquable, l'ambre UNIQUEMENT pour « À revoir », le rouge
+   pour ce qui manque ou supprime, aucun fond noir. */
+.msg-tiroir--large { width: min(440px, 100vw); }
+.kb { display: flex; flex-direction: column; gap: 4px; padding: 6px 0 18px; }
+.kb-bien { display: flex; align-items: center; gap: 10px; padding: 8px 18px; }
+.kb-bien__photo { width: 40px; height: 40px; border-radius: var(--radius-card); object-fit: cover; flex: none; background: var(--surface-2); }
+.kb-bien__photo--vide { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.kb-bien__nom { font-weight: var(--fw-semibold); }
+.kb-bien select { flex: 1; min-width: 0; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 10px; font-size: var(--fs-body); }
+.kb-section { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 18px 4px; }
+.kb-section__titre { margin: 0; font-size: var(--fs-small); font-weight: var(--fw-bold); letter-spacing: var(--tracking-tight); }
+.kb-cartes { display: flex; flex-direction: column; gap: 8px; padding: 4px 18px; }
+.kb-carte { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.kb-carte:hover { box-shadow: var(--shadow-hover); }
+.kb-carte__tete { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kb-carte__tete .icon { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.kb-carte__sujet { font-weight: var(--fw-semibold); margin-inline-end: auto; }
+.kb-carte__texte { font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* « Utiliser » une réponse dans la conversation (spec kb-utiliser-reponse) :
+   la carte reste le bouton qui ouvre l'éditeur, l'action vit SOUS elle — un
+   bouton dans un bouton n'existe pas en HTML. */
+.kb-carte-bloc { display: flex; flex-direction: column; gap: 6px; }
+.kb-carte-bloc .kb-note { margin: 0; }
+.kb-carte-bloc__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 14px; }
+.kb-etiquette { display: inline-block; padding: 0 7px; margin: 0 1px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink); font-size: var(--fs-caption); font-weight: var(--fw-semibold); line-height: 1.7; white-space: nowrap; user-select: all; }
+.kb-etiquette--vide, .kb-manque { background: var(--danger-soft); color: var(--danger); }
+.kb-manque { padding: 0 3px; border-radius: 4px; font-weight: var(--fw-semibold); }
+.kb-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: var(--radius-pill); font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+.kb-badge .icon { width: 13px; height: 13px; }
+.kb-badge--revoir { background: var(--amber-soft); color: var(--amber-text); }
+.kb-badge--horsia { background: var(--surface-2); color: var(--muted); }
+.kb-faits { display: flex; flex-direction: column; padding: 0 18px; }
+.kb-fait { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.kb-fait:last-child { border-bottom: 0; }
+.kb-fait__libelle { display: flex; flex-direction: column; flex: 0 0 38%; font-size: var(--fs-small); color: var(--muted); }
+.kb-fait__valeur { flex: 1; min-width: 0; font-size: var(--fs-small); overflow-wrap: anywhere; }
+.kb-a-remplir { color: var(--danger); font-weight: var(--fw-semibold); }
+.kb-fait--edition { flex-wrap: wrap; }
+/* Accueil du voyageur (fiche du logement) : le bloc porte déjà sa marge. */
+.fic-bloc .kb-faits { padding: 0; }
+/* « Le remplir » sur place, sous le refus d'une carte de la base. */
+.kb-carte-bloc .kb-fait--edition { padding: 8px 0; border-bottom: 0; }
+.kb-fait--edition input { flex: 1 1 100%; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0 10px; font-size: var(--fs-body); background: var(--surface); color: var(--ink); }
+.kb-icone { background: none; border: 0; padding: 6px; cursor: pointer; color: var(--info); flex: none; }
+.kb-icone .icon { width: 17px; height: 17px; }
+.kb-lien { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 4px 0; color: var(--info); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.kb-lien .icon { width: 16px; height: 16px; }
+.kb-editeur { display: flex; flex-direction: column; gap: 12px; padding: 8px 18px; }
+.kb-champ { display: flex; flex-direction: column; gap: 4px; }
+.kb-champ input { height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0 10px; font-size: var(--fs-body); background: var(--surface); color: var(--ink); }
+.kb-message { min-height: 110px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); font-size: var(--fs-body); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; }
+.kb-message:focus, .kb-champ input:focus, .kb-fait--edition input:focus { border-color: var(--ink); outline: none; }
+.kb-insertion { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.kb-inserer { min-height: 34px; padding: 0 12px; border: 1px solid var(--info); border-radius: var(--radius-pill); background: var(--surface); color: var(--info); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.kb-autres { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
+.kb-apercu { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: var(--radius-card); background: var(--surface-2); }
+.kb-apercu__texte { margin: 0; font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.5em; }
+.kb-interrupteur { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.kb-interrupteur input { width: 20px; height: 20px; margin-top: 2px; flex: none; accent-color: var(--info); }
+.kb-interrupteur > span { display: flex; flex-direction: column; }
+.kb-interrupteur__titre { font-weight: var(--fw-semibold); }
+.kb-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.kb-supprimer { margin-inline-start: auto; background: none; border: 0; padding: 4px 0; color: var(--danger); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.kb-note { margin: 4px 18px; color: var(--danger); font-size: var(--fs-small); font-weight: var(--fw-semibold); }
+.kb-editeur .kb-note { margin: 0; }
+.kb-note--ok { color: var(--ok); }
+.kb-info, .kb-vide { margin: 6px 18px; }
+.kb button:disabled { opacity: .5; cursor: default; }
+/* La page téléphone : la vue plein écran, sous un en-tête de retour. */
+.kb-page { max-width: 640px; margin: 0 auto; padding-bottom: 96px; }
+.kb-page__entete { display: flex; align-items: center; gap: 10px; padding: 12px 18px 4px; }
+.kb-page__entete h1 { margin: 0; }
+@media (max-width: 899px) {
+  .kb-inserer, .kb-lien, .kb-supprimer, .kb-utiliser { min-height: 44px; }
+}
 @media (max-width: 899px) {
   .msg-retour { display: inline-flex; }
   /* En-tete du fil COMPACT (spec §4) : nom puis bien · dates, chacun sur sa
@@ -331,6 +506,12 @@ h1, h2, h3, p { margin: 0; }
   .bulle__actions .btn { flex: 1 1 100%; justify-content: center; }
   .bulle__actions [data-envoyer-prop] { order: -1; }
   .bulle-menu { order: 1; margin-inline-start: auto; }
+  /* La saisie PENDANT LA FRAPPE (recette du 7 novembre 2026) : le champ sur
+     toute la largeur, les boutons dessous, à droite. La classe se pose au
+     toucher du champ et ne se retire qu'APRÈS un clic hors de la saisie
+     (pages/messages.html) : les boutons ne bougent pas sous le doigt. */
+  .msg-saisie--frappe { flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
+  .msg-saisie--frappe textarea { flex: 1 1 100%; }
 }
 
 /* ---------- Barre du haut ---------- */
@@ -419,7 +600,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
      `flex: 1`), les chiffres passent dessous. */
   .section-head { flex-wrap: wrap; }
   .section-head .h2 { flex: 1 0 100%; }
-  .grid-avis { display: flex; }
+  /* ⚠ PLUS RIEN A BASCULER ICI : `.grid-avis` est un rail a TOUTES les
+     largeurs depuis le 29 octobre 2026. Seule la largeur des cartes change,
+     pour tenir dans 390 px. */
+  .grid-avis > * { flex: 0 0 268px; }
   /* Barre du bas sur fond noir (retouche charte du 11 octobre 2026) :
      inactifs en --on-ink-muted, actif en --on-ink, badge ambre inchange. */
   .bottombar {
@@ -1547,11 +1731,18 @@ body.men-cfg-ouvert { overflow: hidden; }
 
 /* Le sélecteur Mois / Année. */
 .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--line); }
+/* ⚠ 44 px DE HAUT, ET C'EST LE CONSTAT 5 DE LA RECETTE DU 27 OCTOBRE 2026.
+   Thierry avait mesuré 30 px sur ce bouton : `padding: 5px 14px` sur du 14 px
+   donne environ 27 px de haut, bien sous les 44 que la charte du lot exige et
+   que `--control` porte. Le sélecteur avait alors été RETIRÉ faute d'un second
+   choix ; il revient avec la vue Année, donc sa cible doit être réglée, pas
+   seulement son utilité. */
 .seg__btn {
   appearance: none;
   border: 0;
   border-radius: 999px;
-  padding: 5px 14px;
+  min-height: var(--control);
+  padding: 0 16px;
   font: inherit;
   font-size: 14px;
   color: var(--muted);
@@ -1566,3 +1757,486 @@ body.men-cfg-ouvert { overflow: hidden; }
    rougit nulle part : il rend juste l'element illisible. */
 .seg__btn.is-on { background: var(--ink); color: var(--surface); font-weight: 600; }
 .seg__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* ─── La vue ANNEE du bloc Revenus ────────────────────────────────────────
+   Forme reprise des maquettes `Accueil-revenus-annee-v5` (ordinateur) et
+   `-mobile-v5` (téléphone) : une période nommée, un grand total, les
+   pastilles de filtre, UNE courbe, puis le tableau par logement. */
+
+/* La période au-dessus du chiffre, et le total de N-1 à côté — SANS
+   pourcentage : voir le commentaire du balisage. `align-items: flex-end`
+   aligne le petit texte sur la ligne de base du grand nombre. */
+.rev-an-tete {
+  display: flex; align-items: flex-end; gap: 20px;
+  flex-wrap: wrap; margin: 16px 0 14px;
+}
+.rev-an-total {
+  display: block; font-size: 2rem; font-weight: 800;
+  letter-spacing: -0.03em; line-height: 1.1;
+}
+@media (min-width: 561px) {
+  .rev-an-total { font-size: 2.5rem; }
+}
+.rev-an-n1 { padding-bottom: 6px; display: flex; align-items: baseline; gap: 6px; }
+
+/* Les pastilles de filtre. ⚠ `min-height: var(--control)` — LA MAQUETTE DIT
+   36 px, ET ON NE LA SUIT PAS ICI : c'est le constat 5 de Thierry à la recette
+   du 27 octobre, une cible cliquable fait 44 px. La forme (pilule, bordure,
+   actif en plein) est celle de la maquette ; la hauteur est celle du dépôt. */
+.rev-an-filtres { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.rev-an-puce {
+  min-height: var(--control); padding: 0 14px;
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-size: .8125rem; font-weight: 600; cursor: pointer;
+}
+.rev-an-puce.is-on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.rev-an-puce:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* La légende : trois marques, et ce sont les MARQUES qui portent le sens, pas
+   la couleur. Le plein et le pointillé se distinguent en noir et blanc. */
+.rev-an-legende {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  margin-bottom: 6px; font-size: .75rem; color: var(--muted);
+}
+.rev-an-legende > span { display: inline-flex; align-items: center; gap: 6px; }
+.rev-an-marque { width: 16px; flex: 0 0 16px; }
+.rev-an-marque--plein { height: 2.5px; background: var(--ink); }
+.rev-an-marque--pointille { height: 0; border-top: 2px dashed var(--ink); }
+.rev-an-marque--n1 { height: 2px; background: var(--muted); }
+/* « N-1 reserve au … » : gris comme l'an dernier, pointille comme un ETAT a
+   une date — et non un resultat. Les deux marques grises coexistent. */
+.rev-an-marque--n1-pointille { height: 0; border-top: 2px dashed var(--muted); }
+/* La bande des comparables : un PAVE plein, pas un trait — elle couvre une
+   surface, et sa marque doit le dire. */
+.rev-an-marque--bande { height: 10px; background: var(--border); border-radius: 2px; }
+/* La bande du futur est la PLUS CLAIRE des deux (decision E) : l'occupe chez
+   les comparables se distingue de leur realise sans changer de forme. */
+.rev-an-marque--bande-futur { height: 10px; background: var(--line); border-radius: 2px; }
+/* Le fond de la bande. ⚠ Aucun hexa : les deux jetons existent deja au theme,
+   et un hexa en dur ici ne suivrait pas le mode sombre. */
+.cm-bande { opacity: .85; }
+.cm-bande-trait { stroke-width: 6; opacity: .85; }
+
+/* ⚠ LE MOIS COURANT EN GRAS SUR L'AXE : il marque où s'arrête le réalisé.
+   Il double le passage au pointillé, il ne le remplace pas. */
+/* ⚠ SELECTEUR COMPOSE, ET CE N'EST PAS DU STYLE : `.cm-mois--fort` et
+   `.cm-mois` ont la MEME specificite (0,1,0), et `.cm-grad, .cm-mois` est
+   declaree APRES, plus bas dans ce fichier. La regle simple perdait donc son
+   `fill` en silence — le gras s'appliquait, la couleur non. C'est mot pour mot
+   la classe de defaut que CLAUDE.md decrit pour `[hidden]`, et aucun test ne
+   lit une valeur calculee. Mesure de la review du 28 octobre 2026. */
+.cm-mois.cm-mois--fort { font-weight: 700; fill: var(--ink); }
+
+/* Le tableau de l'année : trois colonnes de chiffres, largeurs fixes pour que
+   les montants s'alignent d'une ligne à l'autre (maquette : 120 px chacune). */
+.rev-tbl--annee .rev-tbl__num { width: 110px; }
+/* ⚠ PAS DE PREFIXE `.rev-tbl--annee` : la forme TELEPHONE de ce tableau est
+   une liste de cartes, hors du `<table>`, et elle reutilise le meme balisage
+   d'ecart. Prefixees, ces deux regles laissaient le telephone sans gras ni
+   couleur — « le mobile suit l'ordinateur ». */
+.rev-tbl__ecart { font-weight: 700; color: var(--ok-ink); }
+.rev-tbl__ecart--bas { color: var(--ink); }
+/* ⚠ ROUGE POUR UN RETARD, et le SIGNE porte le sens autant que la couleur :
+   un hote qui ne distingue pas le vert du rouge lit « +12 % » et « -68 % » (le trait d'union que rend `String(-68)`, pas un signe moins typographique).
+   La couleur n'est jamais seule porteuse — regle du depot. */
+.rev-tbl__ecart--retard { color: var(--danger-ink); }
+/* ⚠ ZERO N'EST NI UNE AVANCE NI UN RETARD. Le vert s'etendait jusqu'a 0 % par
+   le seul fait que la condition testait `< 0` ; gris neutre, dans les DEUX
+   tableaux du bloc (decision de Thierry du 28 octobre 2026). */
+.rev-tbl__ecart--nul { color: var(--muted); font-weight: var(--fw-semibold); }
+
+/* ⚠ ET LE NEGATIF, LUI, DIFFERE ENTRE LES DEUX TABLEAUX, EXPRES : `--bas`
+   (encre) dans le tableau des biens, `--retard` (rouge) dans « Reserve a
+   date ». Un bien qui a moins vendu que l'an dernier est un FAIT, pas une
+   alarme ; un mois a venir en retard de rythme est une alarme, parce qu'il
+   reste du temps pour agir. Le zero, lui, est neutre des deux cotes : il
+   n'est ni un fait remarquable ni une alarme. */
+/* ─── Accueil : la grille « Aujourd'hui » / « À valider » ─────────────────
+   ⚠ CES REGLES ETAIENT EN LIGNE SUR LE `<div>`, ET C'EST POUR CA QU'ELLES
+   DEVIENNENT UNE CLASSE : un style en ligne gagne contre une classe, donc
+   l'etat « a plat » n'aurait jamais mordu.
+   ⚠ `align-items: start` EMPECHE DEJA L'ETIREMENT, et c'est mesure : au banc
+   a 1280 px, bloc gauche 21 px, bloc droit 716 px. Le bloc vide ne s'etire
+   PAS — ce qui restait, c'etaient 695 px de BLANC a sa gauche, parce que la
+   ligne de grille fait la hauteur de sa colonne la plus haute. */
+.auj-duo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 32px;
+  align-items: start;
+}
+.auj-duo__jour { grid-column: span 2; min-width: 0; }
+/* ⚠ QUAND LE JOUR N'A RIEN A DIRE, LA GRILLE SE MET A PLAT : une seule
+   colonne, la ligne d'etat vide au-dessus, « A valider » dessous sur toute la
+   largeur. Les 695 px de blanc disparaissent au lieu d'etre rognes (recette de
+   Thierry du 28 octobre 2026 : « le bloc vide doit rester compact et ne pas
+   s'etirer a la hauteur de A valider »).
+   ⚠ `gap` RESTE CELUI DE LA GRILLE — 32 px, repris A L'IDENTIQUE du style en
+   ligne d'avant, donc aucun changement visuel. Ma premiere version justifiait
+   ce 32 par « l'ecart des sections de cette page » : c'est FAUX, `.page` pose
+   `--gap-xl` (40 px, 18 px sous 720 px). La valeur est gardee parce qu'elle
+   etait la, pas parce qu'elle vaut autre chose. */
+.auj-duo--plat { grid-template-columns: 1fr; }
+.auj-duo--plat > .auj-duo__jour { grid-column: auto; }
+
+/* ─── La suite des avis, au defilement ───────────────────────────────────
+   La sentinelle est un enfant de la grille (ordinateur) ou du rail
+   (telephone) : elle doit donc OCCUPER une place, sinon elle est deja dans la
+   fenetre au premier rendu et declenche un chargement que personne n'a
+   demande.
+   ⚠ LE SEUIL EST CELUI DU RAIL — 720 px, celui de `.scroll-x` —, PAS 560.
+   Ma premiere version mettait 560 px, le seuil de `.rev-liste` : entre 561 et
+   720 px le bloc etait DEJA un rail et la sentinelle n'avait aucune largeur
+   (`flex: 0 0 auto` sur un contenu vide = 0 px), donc elle restait collee a la
+   derniere carte. Constat de la review du 28 octobre 2026.
+   ⚠ ET 268 px EST LA LARGEUR D'UNE CARTE (`.scroll-x .avis-carte`), pas un
+   nombre choisi : j'avais ecrit 160 px en l'annoncant comme « la largeur d'une
+   carte » — un chiffre faux dans un commentaire se lit comme une mesure. */
+/* ─── L'INFO-BULLE ⓘ ──────────────────────────────────────────────────────
+   Demande de Thierry du 29 octobre 2026 : « plus aucun paragraphe sous la
+   courbe ni sous le tableau. Tout passe en info-bulles ⓘ (survol / toucher). »
+   Elle solde la dette 121 — quatre paragraphes empiles dont une ligne de
+   reserves qui concatenait jusqu'a dix motifs.
+
+   ⚠ UN VRAI `<button>`, PAS UN `title=`. Trois raisons mesurables : un `title`
+   n'apparait pas au TOUCHER (la moitie de la demande), il n'est pas lisible au
+   clavier, et son texte n'est pas dans le DOM — donc intestable autrement qu'en
+   lisant un attribut, ce que ce depot vient de payer deux fois sur l'opacite
+   des bandes.
+
+   ⚠ ET PAS `hidden` POUR CACHER LE TEXTE : `[hidden]{display:none!important}`
+   est en tete de cette feuille, donc aucune regle de survol ne pourrait le
+   rouvrir. On cache par `display: none` sur la classe, et on ouvre au survol,
+   au focus clavier, et sur `aria-expanded="true"` que le clic pose (toucher). */
+.ibulle { position: relative; display: inline-flex; vertical-align: middle; }
+.ibulle__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  /* 24 px : la cible tactile minimale de cette feuille pour un bouton d'appoint
+     (`--control` vaut 44 px, reserve aux boutons d'action). */
+  width: 24px; height: 24px; padding: 0;
+  background: none; border: 0; border-radius: 50%;
+  color: var(--muted); cursor: pointer;
+}
+.ibulle__btn:hover, .ibulle__btn:focus-visible { color: var(--ink); background: var(--surface-2); }
+.ibulle__txt {
+  display: none;
+  position: absolute; z-index: 40; top: calc(100% + 6px); inset-inline-start: 0;
+  /* ⚠ UNE LARGEUR BORNEE PAR LA FENETRE, pas une largeur fixe : a 390 px, un
+     `width: 320px` depasse le bord et le texte devient illisible au toucher,
+     qui est justement le geste demande. */
+  width: max-content; max-width: min(320px, calc(100vw - 2 * var(--page-pad)));
+  padding: 10px 12px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-hover);
+  font-size: var(--fs-caption); font-weight: var(--fw-regular);
+  text-align: start; white-space: pre-line;
+}
+/* ⚠ LE SURVOL EST RESERVE AUX POINTEURS QUI SURVOLENT VRAIMENT (constat 2 de
+   la revue de 6d82af4d). Sur un navigateur tactile, `:hover` RESTE accroche a
+   l'element touche jusqu'au prochain toucher ailleurs : le premier doigt
+   ouvrait (`aria-expanded` ET `:hover`), le second rendait `aria-expanded` a
+   `false` mais `:hover` continuait d'ouvrir — la feuille ne se refermait pas,
+   et le geste demande paraissait casse. Le test jsdom ne lisait que
+   `aria-expanded`, donc il restait vert : c'est le faux vert exact contre
+   lequel ce lot a ete ecrit. */
+@media (hover: hover) and (pointer: fine) {
+  .ibulle:hover .ibulle__txt { display: block; }
+}
+.ibulle__btn:focus-visible + .ibulle__txt,
+.ibulle__btn[aria-expanded="true"] + .ibulle__txt { display: block; }
+/* ⚠ COLLEE AU BORD DROIT QUAND ELLE Y EST : sans cela, une ⓘ en fin de ligne
+   ouvre sa bulle hors de l'ecran a droite. */
+.ibulle--fin .ibulle__txt { inset-inline-start: auto; inset-inline-end: 0; }
+
+/* ⚠ A L'ORDINATEUR, LA BULLE DE LA LEGENDE S'ANCRE SUR LA LEGENDE, pas sur son
+   ⓘ (constat 1 de la revue de 6d82af4d, mesure au navigateur reel). `--fin`
+   colle le bord DROIT de la bulle a son ⓘ ; or `.rev-an-legende` est un flex
+   qui RETOURNE A LA LIGNE, et la ⓘ se retrouve alors pres du bord gauche :
+   une bulle de 320 px s'ouvrait a −29 px a 800 px de large, et a −231 px a
+   900 px. C'est le meme defaut que celui du telephone, de l'autre cote.
+   La legende, elle, est bornee par la carte : en lui rendant l'ancrage
+   (`position: static` sur la ⓘ), la bulle s'aligne sur son bord droit et
+   s'ouvre sous elle — donc jamais hors de l'ecran, quel que soit le nombre de
+   marques et la largeur de la fenetre. */
+@media (min-width: 721px) {
+  .rev-an-legende { position: relative; }
+  .rev-an-legende .ibulle--fin { position: static; }
+  .rev-an-legende .ibulle--fin .ibulle__txt {
+    inset-inline-start: auto; inset-inline-end: 0; top: calc(100% + 6px);
+  }
+}
+
+/* ⚠ AU TELEPHONE, LA BULLE SE POSE EN BAS DE L'ECRAN, et ce n'est pas un choix
+   d'esthetique : MESURE au navigateur reel (390 x 900, balisage reel de la vue
+   Annee), la bulle du total s'ouvrait de 196 px a 516 px — soit 126 px HORS
+   ECRAN. Le `max-width` ne suffit pas : il borne la LARGEUR, pas la position de
+   depart, et une ⓘ placee apres « Janvier → octobre 2026 » commence a 196 px.
+   Aligner sur le bord droit de l'ancre (`--fin`) ne ferait que deplacer le
+   debordement a gauche.
+   Sans JavaScript, la seule largeur qu'on connaisse au telephone est celle de
+   la FENETRE : la bulle devient une feuille basse, bornee par la fenetre, donc
+   jamais coupee — quelle que soit la position de la ⓘ qui l'ouvre. C'est le
+   geste que Thierry a demande (« toucher »), et sur telephone le seul qui
+   existe. Le precedent du depot est `.cal-yf-menu`, qui borne de la meme
+   facon. */
+@media (max-width: 720px) {
+  .ibulle__txt, .ibulle--fin .ibulle__txt {
+    position: fixed; top: auto; bottom: var(--page-pad);
+    inset-inline: var(--page-pad);
+    width: auto; max-width: none;
+  }
+}
+
+/* ⚠ LA SENTINELLE EST UNE CARTE DU RAIL, A TOUTES LES LARGEURS. Elle portait
+   sa largeur dans le media du telephone seulement, du temps ou l'ordinateur
+   avait une grille : depuis que le rail est global, l'ordinateur en a besoin
+   aussi — sans largeur, `flex: 0 0 300px` de la regle generale s'appliquerait,
+   ce qui marche, mais le `min-height` ne suffirait pas a la rendre atteignable
+   si elle etait vide. */
+.avis-suite { display: flex; align-items: center; justify-content: center; min-height: 40px; }
+.grid-avis > .avis-suite { flex: 0 0 180px; }
+
+/* ─── Les deux fleches du rail ─────────────────────────────────────────────
+   ⚠ A L'ORDINATEUR SEULEMENT, et c'est la demande : au telephone le doigt
+   defile le rail, et deux boutons par-dessus les cartes mangeraient la place
+   d'une carte sur trois. Le defaut qu'elles reparent est propre a la souris —
+   la barre de defilement est masquee, et une molette ordinaire ne defile pas
+   lateralement. */
+.rail-wrap { position: relative; }
+.rail-fleche { display: none; }
+@media (min-width: 721px) {
+  .rail-fleche {
+    display: inline-flex; align-items: center; justify-content: center;
+    position: absolute; top: 50%; transform: translateY(-50%); z-index: 3;
+    width: 36px; height: 36px; padding: 0;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 50%;
+    box-shadow: var(--shadow-hover); cursor: pointer;
+    font-size: 18px; line-height: 1;
+  }
+  /* A cheval sur le bord : la fleche ne recouvre pas le texte d'une carte. */
+  .rail-fleche--prec { inset-inline-start: -14px; }
+  .rail-fleche--suiv { inset-inline-end: -14px; }
+  .rail-fleche:hover:not(:disabled) { background: var(--surface-2); }
+  /* ⚠ GRISEE, PAS RETIREE : une fleche qui disparait au bout fait sauter la
+     mise en page et laisse l'hote chercher ce qui a bouge. */
+  .rail-fleche:disabled { opacity: .35; cursor: default; box-shadow: none; }
+}
+
+
+/* ─── Le tableau « Reserve a date » ───────────────────────────────────────
+   Il DOUBLE la ligne pointillee, il ne la remplace pas : au niveau du compte,
+   l'axe est tire par le pic d'ete et deux pointilles a 2 k € sur un axe a
+   16 k € se tassent au ras de l'axe. */
+.rev-rad { margin-top: 18px; }
+.rev-rad__titre { margin: 0 0 6px; font-weight: 700; color: var(--ink); }
+
+/* ⚠ LES LISTES DE L'ANNEE — celle des biens et celle de « Reserve a date » —
+   SONT LA FORME TELEPHONE DES TABLEAUX, et elles ne portent donc AUCUNE regle
+   d'affichage : elles suivent `.rev-liste` — cachees au-dessus de
+   561 px, en grille en dessous. La premiere version de celle des biens la forcait a
+   `display: grid`, heritage de la forme en cartes empilees : l'ordinateur
+   aurait affiche le tableau ET les cartes, l'un sous l'autre. La classe ne sert
+   plus qu'a distinguer les deux listes quand la vue Mois cache la sienne. */
+/* La courbe prend la largeur de sa carte et garde ses proportions. */
+.cm { display: block; width: 100%; height: auto; }
+.cm-grille { stroke: var(--line); stroke-width: 1; }
+.cm-axe { stroke: var(--line); stroke-width: 1.5; }
+.cm-grad, .cm-mois { font-size: 11px; fill: var(--muted); }
+
+/* ─── La fenêtre de confirmation DANS LA PAGE (shared/confirmer.js) ─────────
+   ⚠ Elle remplace `window.confirm` (décision de Thierry, 2 novembre 2026) :
+   « OK » et « Annuler » ne disent pas ce qu'ils font, et la boîte native
+   SUSPEND la page, donc elle bloque l'extension Chrome qui joue les recettes.
+   ⚠ Au-dessus de tout ce qui existe : `.msg-tiroir` est à z-index 40, la fiche
+   de /menages à 70, sa fenêtre de configuration à 60-61. ⚠ Mon commentaire
+   disait « le tiroir de /messages (z-index 60-61) » — un nombre écrit à la main
+   qui se lit comme une mesure et ne rougit jamais ; 60-61 est en réalité
+   `.men-cfg*`. 71 reste au-dessus des quatre, mais à UN cran de `.men-fiche` :
+   le jour où /menages importera cette fenêtre, c'est ce chiffre-là qu'il faudra
+   relire. */
+.hs-confirm__voile {
+  position: fixed; inset: 0; z-index: 70; background: rgb(0 0 0 / 0.4);
+}
+.hs-confirm {
+  position: fixed; z-index: 71; inset-block-start: 50%; inset-inline-start: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px)); max-height: min(90vh, 700px);
+  display: flex; flex-direction: column; gap: var(--gap-s);
+  padding: 20px; overflow: auto;
+  background: var(--surface); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-hover);
+}
+.hs-confirm__croix {
+  position: absolute; inset-block-start: 8px; inset-inline-end: 8px;
+}
+.hs-confirm__titre { margin: 0; padding-inline-end: 36px; font-weight: var(--fw-semibold); }
+.hs-confirm__texte { margin: 0; color: var(--muted); }
+/* ⚠ LES BOUTONS NOMMÉS SE LISENT EN ENTIER, Y COMPRIS AU TÉLÉPHONE : ils
+   s'empilent plutôt que de tronquer un libellé. Un bouton dont on ne lit pas
+   le nom ramène le défaut que cette fenêtre existe pour fermer. */
+.hs-confirm__pied {
+  display: flex; flex-wrap: wrap; gap: var(--gap-s); margin-block-start: 4px;
+}
+.hs-confirm__pied .btn { flex: 1 1 auto; white-space: normal; }
+
+/* ============================================================
+   PAGE « AVIS » (lot Avis V5, 8 novembre 2026)
+   Spec : docs/specs/avis-v5/spec-refonte-ui-v5-lot-avis.md
+   Préfixe `avp-` : `.avis-*` appartient déjà aux cartes d'avis de l'accueil.
+   ⚠ UN SEUL MOMENT AMBRE : la bulle « À traiter ». Les statuts ne passent
+   jamais par la couleur seule — toujours une icône ou un mot avec.
+   ============================================================ */
+.avp { gap: var(--gap-l); }
+.avp-h2 { margin: 0; font-size: 20px; font-weight: var(--fw-black); letter-spacing: -0.02em; }
+.avp-tete { display: flex; align-items: flex-start; gap: var(--gap-s); }
+.avp-tete__titre { flex: 1; min-width: 0; }
+.avp-tete .h1 { margin: 0; }
+.avp-auto { margin: 4px 0 0; font-size: var(--fs-caption); color: var(--muted); }
+.avp-auto a { color: var(--ink); font-weight: var(--fw-semibold); text-decoration: underline; }
+
+/* Filtres : des pastilles, qui passent à la ligne à l'ordinateur et défilent au téléphone. */
+.avp-filtres { display: flex; flex-wrap: wrap; gap: var(--gap-s) var(--gap-l); align-items: center; min-width: 0; }
+/* `min-width: 0` : sans lui, une rangee qui defile au telephone elargit la page entiere. */
+.avp-pastilles { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; max-width: 100%; }
+.avp-pastille {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink);
+  font: inherit; font-size: var(--fs-caption); font-weight: var(--fw-semibold); cursor: pointer; white-space: nowrap;
+}
+.avp-pastille--photo { padding-inline-start: 4px; }
+.avp-pastille[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.avp-pastille__photo { width: 28px; height: 28px; border-radius: var(--radius-pill); object-fit: cover; flex: none; }
+.avp-pastille__photo--vide { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: var(--fw-bold); }
+
+/* Les trois chiffres, sans carte autour. */
+.avp-chiffres { display: flex; flex-wrap: wrap; gap: var(--gap-xl); align-items: flex-end; }
+.avp-chiffre b { display: flex; align-items: center; gap: 6px; font-size: 30px; font-weight: var(--fw-black); letter-spacing: var(--tracking-tight); font-variant-numeric: tabular-nums; line-height: 1; }
+.avp-chiffre b .icon { width: 22px; height: 22px; }
+.avp-chiffre > span { display: block; margin-top: 6px; font-size: var(--fs-caption); color: var(--muted); }
+.avp-pos, .avp-neg { display: inline-flex; align-items: center; gap: 4px; }
+.avp-pos { color: var(--ok-ink); }
+.avp-neg { color: var(--danger-ink); margin-inline-start: 10px; }
+
+/* Le contenu rendu par core/avis/cartes.js : « À traiter », Récents, Anciens. */
+.avp-contenu { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
+
+/* « À traiter » : la bulle ambre. */
+.avp-atraiter { background: var(--amber-soft); border-radius: 20px; padding: 16px 20px 18px; }
+.avp-atraiter__tete { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; }
+.avp-atraiter__tete .avp-h2 { font-size: 16px; font-weight: var(--fw-bold); }
+.avp-lignes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.avp-ligne-atraiter { display: flex; align-items: center; gap: 14px; background: var(--surface); border-radius: 14px; padding: 10px 12px 10px 10px; }
+.avp-tuile { width: 52px; height: 52px; border-radius: var(--radius-tile); background: var(--surface-2); display: flex; align-items: center; justify-content: center; flex: none; }
+.avp-actions { display: flex; align-items: center; gap: var(--gap-s); flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.avp-citation { font-size: var(--fs-caption); font-style: italic; overflow-wrap: anywhere; }
+.avp-ligne-atraiter .avp-etat { font-size: 12.5px; color: var(--ink); }
+.avp-rien { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: var(--fs-small); }
+
+/* Récents / Anciens */
+.avp-section { display: flex; flex-direction: column; gap: 14px; }
+.avp-section__tete { display: flex; align-items: baseline; gap: 10px; }
+.avp-sous { font-size: var(--fs-caption); color: var(--muted); }
+.avp-grille { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 14px; }
+.avp-anciens { border-top: 1px solid var(--line); }
+.avp-anciens > summary { display: flex; align-items: center; gap: 12px; padding: 18px 0; cursor: pointer; list-style: none; }
+.avp-anciens > summary::-webkit-details-marker { display: none; }
+.avp-anciens[open] .avp-chevron { transform: rotate(90deg); }
+.avp-anciens[open] > summary { padding-bottom: 14px; }
+.avp-compte { font-size: var(--fs-caption); font-weight: var(--fw-bold); background: var(--surface-2); color: var(--muted); border-radius: var(--radius-pill); padding: 3px 10px; }
+
+/* Une carte = un séjour. */
+.avp-carte { border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.avp-carte__tete { display: flex; align-items: center; gap: 12px; }
+.avp-photo { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; flex: none; }
+.avp-photo--l { width: 52px; height: 52px; }
+.avp-photo--vide { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--muted); font-weight: var(--fw-bold); }
+.avp-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.avp-qui { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 15px; font-weight: var(--fw-bold); }
+.avp-infos { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.avp-source { font-size: 12px; color: var(--muted); }
+.avp-canal { width: 22px; height: 22px; border-radius: var(--radius-pill); color: var(--on-canal); font-size: 11px; font-weight: var(--fw-black); display: inline-flex; align-items: center; justify-content: center; flex: none; background: var(--muted); }
+.avp-canal--airbnb { background: var(--canal-airbnb); }
+.avp-canal--booking { background: var(--canal-booking); }
+.avp-canal--direct { background: var(--canal-direct); }
+.avp-son { display: flex; flex-direction: column; gap: 8px; }
+.avp-ligne { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.avp-note { display: inline-flex; align-items: center; gap: 5px; font-size: 20px; font-weight: var(--fw-black); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.avp-note .icon { width: 18px; height: 18px; }
+.avp-note__sur { font-size: 12px; color: var(--muted); font-weight: var(--fw-semibold); }
+.avp-prop {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border: 0;
+  border-radius: var(--radius-pill); font: inherit; font-size: 12.5px; font-weight: var(--fw-semibold);
+  background: var(--surface-2); color: var(--muted);
+}
+.avp-prop .icon { width: 14px; height: 14px; }
+.avp-prop--positif { background: var(--ok-soft); color: var(--ok-ink); }
+.avp-prop--remarque { background: var(--danger-soft); color: var(--danger-ink); }
+select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
+.avp-corrige { font-size: 12px; color: var(--muted); font-style: italic; }
+.avp-extrait { margin: 0; padding: 8px 12px; border-inline-start: 3px solid var(--border); font-style: italic; color: var(--muted); }
+.avp-texte { margin: 0; font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.avp-texte--replie { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.avp-plus { align-self: flex-start; background: none; border: 0; padding: 0; color: var(--ink); font: inherit; font-size: var(--fs-caption); font-weight: var(--fw-semibold); text-decoration: underline; cursor: pointer; }
+.avp-notre { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; font-size: var(--fs-caption); }
+.avp-notre .avp-texte { flex: 1 0 100%; color: var(--muted); font-size: var(--fs-caption); }
+.avp-notre .avp-plus { flex: 0 0 auto; }
+.avp-lib { font-weight: var(--fw-bold); }
+.avp-etat, .avp-origine { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.avp-etat .icon, .avp-origine .icon { width: 14px; height: 14px; }
+.avp-ok { color: var(--ok-ink); }
+.avp-delai { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: var(--fw-semibold); color: var(--muted); }
+.avp-delai .icon { width: 14px; height: 14px; }
+.avp-delai--urgent { color: var(--danger-ink); font-weight: var(--fw-bold); }
+.avp-notre .avp-evaluer { margin-inline-start: auto; }
+.avp-gris { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: var(--fs-caption); }
+.avp-gris .icon { width: 16px; height: 16px; }
+.avp-erreur { margin: 0; color: var(--danger-ink); font-size: var(--fs-caption); }
+.avp-erreur:empty { display: none; }
+
+/* La fenêtre de saisie et le volet des réglages : des <dialog> natifs. */
+.avp-feuille, .avp-volet { border: 0; padding: 0; background: var(--surface); color: var(--ink); }
+.avp-feuille::backdrop, .avp-volet::backdrop { background: var(--scrim); }
+.avp-feuille { width: min(520px, calc(100vw - 32px)); max-height: 90vh; border-radius: var(--radius-card); }
+.avp-feuille__corps { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 24px; }
+.avp-feuille__tete, .avp-volet__tete { display: flex; align-items: center; gap: 12px; }
+.avp-feuille__tete .avp-h2, .avp-volet__tete .avp-h2 { flex: 1; }
+.avp-feuille__pied { display: flex; justify-content: flex-end; gap: var(--gap-s); margin-top: 4px; }
+.avp-champ { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+.avp-champ select, .avp-champ input, .avp-champ textarea {
+  font: inherit; font-size: var(--fs-small); font-weight: var(--fw-regular); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; min-height: var(--control);
+}
+.avp-champ textarea { resize: vertical; min-height: 120px; }
+.avp-volet { position: fixed; inset-block: 0; inset-inline: auto 0; margin: 0; width: 480px; max-width: 100vw; height: 100vh; max-height: 100vh; border-inline-start: 1px solid var(--line); box-shadow: -12px 0 32px rgba(0, 0, 0, .12); }
+.avp-volet[open] { display: flex; flex-direction: column; }
+.avp-volet__tete { padding: 20px 20px 12px; }
+.avp-volet__corps { flex: 1; overflow-y: auto; padding: 4px 20px 24px; }
+
+@media (max-width: 899px) {
+  .avp { gap: var(--gap-m); }
+  .avp-saisir { width: var(--control); padding: 0; }
+  .avp-saisir__mot { display: none; }
+  .avp-filtres { flex-direction: column; align-items: stretch; gap: var(--gap-s); }
+  .avp-pastilles { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .avp-pastilles::-webkit-scrollbar { display: none; }
+  .avp-chiffres { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap-s); }
+  .avp-chiffre b { font-size: 22px; }
+  .avp-chiffre b .icon { width: 18px; height: 18px; }
+  .avp-chiffre > span { font-size: 11.5px; }
+  .avp-atraiter { padding: 10px; border-radius: 18px; }
+  .avp-ligne-atraiter { flex-wrap: wrap; align-items: flex-start; }
+  .avp-ligne-atraiter .avp-actions { width: 100%; }
+  .avp-photo--l, .avp-tuile { width: 44px; height: 44px; }
+  .avp-feuille { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; margin: 0; }
+  .avp-volet { width: 100vw; }
+}
+/* Deux formes d'un même texte (core/avis/cartes.js, `deuxFormes`) : la longue
+   à l'ordinateur, la courte au téléphone (spec du lot Avis, §4). */
+.avp-court { display: none; }
+@media (max-width: 899px) {
+  .avp-long { display: none; }
+  .avp-court { display: inline; }
+}

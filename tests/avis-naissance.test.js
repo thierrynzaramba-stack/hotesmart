@@ -94,7 +94,10 @@ test('un objet est ouvert seulement s il a une echeance future et pas d evaluati
 test('naissance sans objet : a_remplir, sans echeance ni objet inventes', async () => {
   const { etat, sb } = base()
   const r = await assurerEvaluation(sb, { ...SEJOUR, menageEventId: 'men-1' })
-  assert.deepStrictEqual(r, { cree: true, rattache: false })
+  assert.deepStrictEqual({ cree: r.cree, rattache: r.rattache }, { cree: true, rattache: false })
+  // La ligne nee est rendue (9 novembre 2026) : l'appelant arme son horloge
+  // sans la relire.
+  assert.strictEqual(r.evaluation.id, etat.evaluations[0].id)
   const e = etat.evaluations[0]
   assert.strictEqual(e.status, 'a_remplir')
   assert.strictEqual(e.deadline_at, null)
