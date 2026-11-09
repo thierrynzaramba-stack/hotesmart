@@ -130,6 +130,7 @@ confirme le total après le séjour, et la facture lui parvient par lien.
 | Q3 | Taxe de séjour | **Elle figure sur la facture**, pour arriver au total réellement payé, quel que soit le canal ou le collecteur. **Absente de l'import : l'hôte en saisit la valeur** — au moment de la confirmation (conséquence validée par Thierry : la balise envoie le lien sans geste de l'hôte). |
 | Q4 | Régime de TVA | **Trois choix dans la fiche de l'entité** : exonéré, franchise en base, assujetti. **Assujetti : l'hôte règle lui-même son taux.** Mentions validées par un comptable. |
 | Q5 | Numérotation | **Une suite par entité**, forme `F-2026-0001`, qui repart à 1 chaque année ; numéro donné à l'émission, jamais réutilisé. **L'hôte règle le préfixe et le numéro de départ.** |
+| Q5 bis | Automatique ou manuelle (9 nov. 2026, 9 h 04, après la revue de l'étape 1) | **L'hôte choisit, par entité** : numérotation **automatique** (HôteSmart enchaîne la suite), ou **manuelle** — il saisit lui-même chaque numéro, parce qu'il facture aussi ailleurs. |
 | Q6 | Corriger une facture émise | **Un avoir, dans ce lot** : bouton « Annuler par un avoir » sur la fiche ; avoir numéroté dans la même suite ; nouvelle facture ensuite. |
 | Q7 | Réservation qui change | **La facture n'est émise qu'en fin de séjour.** Un changement après l'émission : **pas d'alerte**, l'hôte fait l'avoir et peut émettre une nouvelle facture. |
 | Q7 bis | Formulaire rempli avant le départ | Le lien part à tout moment ; **émission 24 h après l'heure de départ**, avec les montants à jour. |
