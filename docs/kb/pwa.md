@@ -923,3 +923,53 @@ case invisible (`.jours input`, `position: absolute`) est placée par rapport à
 un ancêtre lointain, et le focus fait défiler jusqu'à elle
 (`pages/settings.html`, `.jours label` sans `position: relative`). Correctif
 proposé à Thierry.
+
+**Correctif du défaut (branche `pwa-lot-2b-reglages`, commit
+`f66420bcdfb1338eacde3293ad5903d592c0815b`)** : `position: relative` sur
+`.jours label` (`pages/settings.html`), et un test qui garde la règle.
+Éprouvé dans Chrome sur staging (règle injectée) : plus de saut, le jour se
+coche. Review, rapport recopié mot pour mot dès réception :
+
+> Arbre lu : /home/claude/hs-2b — branche : pwa-lot-2b-reglages — SHA : f66420bcdfb1338eacde3293ad5903d592c0815b — plage : e39652759228bc1bbbcc08ef2827d4b39a52e041..f66420bcdfb1338eacde3293ad5903d592c0815b
+>
+> **Constats**
+>
+> Aucun constat.
+>
+> Ce qui a été vérifié :
+> - **Le correctif ferme le défaut.** Je l'ai vérifié dans Chrome headless, sur une copie réduite de la mise en page placée dans /tmp (hors de l'arbre, supprimée ensuite).
+>   - Avant : la case est à y=1649 alors que son label est à y=234. Le focus fait défiler le document de 937 px.
+>   - Après : la case est à y=249, au centre de son label, et aucun défilement n'a lieu.
+>   - La cause est confirmée : `.content` est la zone qui défile (`overflow-y: auto`, public/style.css:59-63). Aucun ancêtre de la case n'était positionné (`.layout`, `.main`, `.card`). La case se plaçait donc par rapport à la fenêtre, en dehors de la zone qui défile.
+> - **Rien n'annule la règle.** La seule autre règle sur un label de la page est `label.f` (pages/settings.html:49), et elle ne vise pas ces labels. public/style.css n'a aucune règle `label` ou `input` qui joue ici. `.jours label:has(input:checked)` ne touche pas à `position`.
+> - **Aucun effet visuel sur la puce.**
+>   - Le label n'a pas de `z-index`, donc pas de nouveau contexte d'empilement.
+>   - Le label n'a pas d'`overflow`, donc l'`outline` de `:focus-visible` (sur le span, décalé de 2 px) n'est pas rogné.
+>   - La bordure, le fond (`:has`) et le gras du jour coché sont inchangés.
+>   - La case de 1 px reste dans le label, donc la zone de clic ne change pas.
+>   - Le rendu des plages n'est pas refait quand on coche un jour (gestionnaire lignes 884-894), donc le focus n'est pas perdu.
+> - **Contre-épreuve (`git archive` de e396527 dans /tmp, avec le nouveau test) :** 16 verts, 1 rouge, et c'est le nouveau test qui rougit, sur le message attendu « son label doit la contenir ».
+> - **Suite du fichier :** `node --test tests/notifications-ecran.test.js` lancé depuis /home/claude/hs-2b donne 17 tests, 17 verts, `fail 0`.
+>
+> **Hors plage, pour information (non mesuré dans les vraies pages) :** quatre autres composants ont la même construction, une case invisible en `position: absolute` dans un conteneur non positionné. Ils pourraient avoir le même saut de page :
+> - `.dispo-j` (apps/menages/prestataires.html:62-66)
+> - `.dispo-pastille` (apps/menages/public.html:697-703)
+> - `.cal-chip` (shared/ui.css:746-748)
+> - `.men-cfg__pastille` (shared/ui.css:1214-1227)
+>
+> **Constat de sécurité : aucun**
+>
+> **Fichiers cités**
+>
+> | Fichier | Dans la plage | Rôle |
+> |---|---|---|
+> | pages/settings.html | oui | preuve seulement |
+> | tests/notifications-ecran.test.js | oui | preuve seulement |
+> | public/style.css | non | preuve seulement (zone qui défile, aucun ancêtre positionné) |
+> | apps/menages/prestataires.html | non | information hors plage |
+> | apps/menages/public.html | non | information hors plage |
+> | shared/ui.css | non | information hors plage |
+
+Les quatre composants signalés hors plage ne sont pas des fichiers de ce fil
+(`apps/`, `shared/ui.css`) : transmis à Thierry et au chef de file, non
+corrigés ici.
