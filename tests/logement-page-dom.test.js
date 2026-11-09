@@ -66,18 +66,21 @@ const GARDE_SUPPRIMER = ligneDeLaPage(
 // dans la page fasse rougir le test.
 const MAIN = PAGE.slice(PAGE.indexOf('<main'), PAGE.indexOf('</main>') + 7)
 
-let M
-test.before(async () => { M = await import('../shared/logement-fiche.js') })
+let M, A
+test.before(async () => {
+  M = await import('../shared/logement-fiche.js')
+  A = await import('../shared/accueil-voyageur.js')
+})
 
 const FR = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', 'fr.json'), 'utf8'))
 
-function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, chemin = '/logements/b1', peutEcrireReservations = true } = {}) {
+function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, chemin = '/logements/b1', peutEcrireReservations = true, erreurEcriture = null, erreurRelecture = null, relue = null } = {}) {
   const dom = new JSDOM(
     `<!doctype html><html><head><style>[hidden]{display:none !important}</style></head>
      <body>${MAIN}</body></html>`,
     { pretendToBeVisual: true, url: `https://x.test${chemin}` })
   const { window } = dom
-  const etat = { appels: 0, demandes: [] }
+  const etat = { appels: 0, demandes: [], ecritures: [] }
 
   const I18n = {
     lang: 'fr',
@@ -96,7 +99,10 @@ function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, che
   }
   const api = {
     logement: {
-      fiche: async (id) => { etat.appels++; etat.demandes.push(id); if (erreur) throw erreur; return reponse }
+      fiche: async (id) => { etat.appels++; etat.demandes.push(id); if (erreur) throw erreur; if (erreurRelecture && etat.appels > 1) throw erreurRelecture; if (relue && etat.appels > 1) return relue; return reponse }
+    },
+    connaissance: {
+      ecrire: async (corps) => { etat.ecritures.push(corps); if (erreurEcriture) throw erreurEcriture; return { ok: true } }
     }
   }
 
@@ -105,6 +111,7 @@ function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, che
     I18n, api, logger: { error: () => {}, info: () => {} },
     Date, decodeURIComponent, Number, Intl, String, JSON, setTimeout,
     ficheHtml: M.ficheHtml, etatHtml: M.etatHtml, etatDeLaPage: M.etatDeLaPage,
+    accueilHtml: M.accueilHtml, enregistrerInfo: A.enregistrerInfo,
     // ⚠ DEUX DOMAINES DEPUIS L'ÉTAPE 3, ET C'EST LE FOND DU SUJET : la
     // suppression et les champs dépendent de `reglages`, mais « Publier mes
     // prix » est gardé côté serveur par `reservations`. Un double qui
@@ -131,7 +138,15 @@ function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, che
     ${ligneDeLaPage(/^const OUTILS = .*$/m, 'les outils du rendu')}
     ${fonctionDeLaPage('montrerEtat')}
     ${ligneDeLaPage(/^let enVol = .*$/m, 'le verrou enVol')}
+    ${ligneDeLaPage(/^let accueilEnEdition = .*$/m, 'l info en cours d écriture')}
+    ${ligneDeLaPage(/^let accueilEnVol = .*$/m, 'le verrou de l accueil')}
+    ${fonctionDeLaPage('peindreAccueil')}
+    ${fonctionDeLaPage('erreurAccueil')}
+    ${fonctionDeLaPage('enregistrerAccueil')}
     ${fonctionDeLaPage('charger')}
+    globalThis.__peindreAccueil = peindreAccueil
+    globalThis.__enregistrerAccueil = enregistrerAccueil
+    globalThis.__editer = (cle) => { accueilEnEdition = cle; peindreAccueil() }
     globalThis.__charger = charger
     globalThis.__montrerEtat = montrerEtat
     globalThis.__id = idDuBien
@@ -417,9 +432,13 @@ test('LE TEST QUI COMPTE : la page écrit PAR LE CLIENT D API, jamais par un app
   // propre — writer UNIQUE des colonnes d'archive. Deux écrans qui écriraient
   // `archive_le` divergeraient au premier correctif, comme
   // `public_tokens.property_ids` l'a fait.
+  // ⚠ ET UNE DE PLUS AVEC LE LOT « ACCUEIL DU VOYAGEUR » (8 novembre 2026) :
+  // `connaissance.ecrire`, le writer UNIQUE des infos d'accueil — le même que
+  // la base de connaissance, titulaire seul, par l'UUID du bien.
   const connus = new Set(['logement.fiche', 'logement.compterSuppression',
     'logement.compterArchivage', 'logement.archiver', 'logement.reactiver',
-    'bien.modifier', 'bien.supprimer', 'bien.pause', 'bien.photo', 'calendar.fullsync'])
+    'bien.modifier', 'bien.supprimer', 'bien.pause', 'bien.photo', 'calendar.fullsync',
+    'connaissance.ecrire'])
   for (const a of appels) assert.ok(connus.has(a), `appel non prévu : ${a}`)
 })
 
@@ -1217,4 +1236,78 @@ test('le titre d onglet suit le changement de langue', () => {
   // Et l événement existe bien : sinon l écouteur serait du code dormant.
   const i18n = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/i18n.modele.js'), 'utf8')
   assert.match(i18n, /dispatchEvent\(new CustomEvent\('i18n:changed'/)
+})
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. Accueil du voyageur : une info écrite sur place (lot du 8 novembre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ACCUEIL = { faits: [
+  { cle: 'telephone_hote', libelle: 'Téléphone', balise: '{telephone_hote}', valeur: '0600000000', aRemplir: false, horsIa: false, sansBalise: false },
+  { cle: 'wifi_mdp', libelle: 'Mot de passe wifi', balise: '{wifi_mdp}', valeur: '', aRemplir: true, horsIa: false, sansBalise: false }
+] }
+
+test('LE TEST QUI COMPTE : enregistrer une info d accueil écrit par l UUID du bien, relit, et ne repeint QUE le bloc', async () => {
+  const f = fiche({ accueil: ACCUEIL })
+  const { doc, ctx, etat } = monter({ reponse: f })
+  await ctx.__charger()
+  // Une case du bloc « Le logement » en cours de saisie : elle ne doit pas être
+  // effacée par l'écriture d'une info d'accueil.
+  const caseLogement = doc.querySelector('.fic-champs input')
+  assert.ok(caseLogement, 'le bloc Le logement est en saisie (droit d écriture)')
+  caseLogement.value = 'saisie en cours'
+  ctx.__editer('wifi_mdp')
+  const champ = doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]')
+  champ.value = 'secret'
+  // La relecture rend l'info remplie.
+  f.accueil = { faits: [ACCUEIL.faits[0], { ...ACCUEIL.faits[1], valeur: 'secret', aRemplir: false }] }
+  await ctx.__enregistrerAccueil('wifi_mdp')
+  assert.deepEqual(etat.ecritures, [{ action: 'enregistrer', bienId: 'b1', type: 'fixed', key: 'wifi_mdp', value: 'secret' }])
+  assert.equal(etat.appels, 2, 'la fiche est relue : l état vient du serveur')
+  assert.equal(doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]'), null, 'l éditeur se referme')
+  assert.equal(doc.querySelector('[data-acc-ligne="wifi_mdp"] .kb-fait__valeur').textContent, 'secret')
+  assert.equal(doc.querySelector('.fic-champs input').value, 'saisie en cours', 'le reste de la fiche n est pas repeint')
+})
+
+test('un refus du serveur (403) se dit, et la saisie n est pas perdue', async () => {
+  const err = new Error('Droits insuffisants'); err.status = 403
+  const { doc, ctx, etat } = monter({ reponse: fiche({ accueil: ACCUEIL }), erreurEcriture: err })
+  await ctx.__charger()
+  ctx.__editer('wifi_mdp')
+  doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value = 'secret'
+  await ctx.__enregistrerAccueil('wifi_mdp')
+  assert.equal(etat.ecritures.length, 1)
+  assert.equal(doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value, 'secret')
+  const e = doc.querySelector('[data-bind="accueil-erreur"]')
+  assert.equal(e.hidden, false)
+  assert.equal(e.textContent, '[fiche.accueil_refus]')
+})
+
+test('écrite mais pas relue : on ne dit pas « pas enregistrée » (l hôte retaperait une info déjà en base)', async () => {
+  // Constat de la review 1 du lot : les deux échecs étaient confondus.
+  const { doc, ctx, etat } = monter({ reponse: fiche({ accueil: ACCUEIL }), erreurRelecture: new Error('réseau') })
+  await ctx.__charger()
+  ctx.__editer('wifi_mdp')
+  doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value = 'secret'
+  await ctx.__enregistrerAccueil('wifi_mdp')
+  assert.equal(etat.ecritures.length, 1, 'l écriture est partie')
+  assert.equal(doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]'), null, 'l éditeur se referme : l info est en base')
+  const e = doc.querySelector('[data-bind="accueil-erreur"]')
+  assert.equal(e.hidden, false)
+  assert.equal(e.textContent, '[fiche.accueil_relu_echec]')
+})
+
+test('relue ILLISIBLE : le bloc le dit, au lieu de garder l ancien état', async () => {
+  // Un objet DISTINCT pour la relecture : muter celui du premier chargement
+  // passait contre le code d'avant, par aliasing (la page garde la référence).
+  const relue = fiche({ accueil: null })
+  relue.indisponibles = [...(relue.indisponibles || []), 'accueil']
+  const { doc, ctx } = monter({ reponse: fiche({ accueil: ACCUEIL }), relue })
+  await ctx.__charger()
+  ctx.__editer('wifi_mdp')
+  doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value = 'secret'
+  await ctx.__enregistrerAccueil('wifi_mdp')
+  const bloc = doc.querySelector('[data-bloc="accueil"]')
+  assert.ok(bloc.textContent.includes('fiche.accueil_non_lu'), bloc.textContent)
 })

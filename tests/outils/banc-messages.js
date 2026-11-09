@@ -45,8 +45,10 @@ const lire = (...p) => fs.readFileSync(path.join(RACINE, ...p), 'utf8')
 // module est donc evalue ici, et les tests CLIQUENT sur ce qu'il rend.
 // ⚠ `connaissance-vue` APRES `confirmer` : son import de `confirmerDansLaPage`
 // est retire ici, il lit donc le symbole que `confirmer` vient de poser.
+// ⚠ `accueil-voyageur` AVANT `connaissance-vue` : « Le remplir » en importe
+// l'éditeur et l'écriture d'une info (lot « Accueil du voyageur »).
 const PARTAGES = ['properties', 'aujourdhui', 'messages-programmes', 'calendrier-resa',
-  'confirmer', 'connaissance-vue']
+  'confirmer', 'accueil-voyageur', 'connaissance-vue']
 const scriptPartage = (nom) => lire('shared', nom + '.js')
   .replace(/^import[\s\S]*?from\s*'[^']*'\s*$/gm, '')
   .replace(/^export default /gm, 'const __defaut_' + nom.replace(/-/g, '_') + ' = ')

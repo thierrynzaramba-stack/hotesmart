@@ -30,8 +30,30 @@ test('LE TEST QUI COMPTE : la base de connaissance passe AVANT le repli du provi
     connaissance: { telephone_hote: 'BASE-TEL', adresse: 'BASE-ADRESSE' },
     replis: { telephone_hote: 'PROVIDER-TEL', adresse: 'PROVIDER-ADRESSE' }
   })
-  assert.equal(r.texte, 'tel BASE-TEL, adresse BASE-ADRESSE')
+  // ⚠ SAUF L'ADRESSE : une seule adresse, celle de la FICHE (décision de
+  // Thierry du 8 novembre 2026). Une ligne `adresse` restée dans la base ne
+  // passe plus devant celle que l'hôte corrige dans sa fiche.
+  assert.equal(r.texte, 'tel BASE-TEL, adresse PROVIDER-ADRESSE')
   assert.deepEqual(r.manquants, [])
+})
+
+test('LE TEST QUI COMPTE : une adresse SEULEMENT dans la base est un MANQUE (la fiche fait foi)', () => {
+  const r = remplacerBalises('adresse {adresse}', {
+    reservation: RESA, connaissance: { adresse: 'BASE-ADRESSE' }, replis: {}
+  })
+  assert.equal(r.texte, 'adresse [ADRESSE]')
+  assert.deepEqual(r.manquants, ['adresse'])
+})
+
+test('valeurEffective suit le remplaceur (base, fiche, défaut ; l adresse, fiche seule)', () => {
+  const { valeurEffective, replisDuBien } = require('../lib/balises')
+  const replis = replisDuBien({ address: '12 rue X', checkin_time: '16:00' })
+  assert.equal(valeurEffective('adresse', { adresse: 'BASE' }, replis), '12 rue X')
+  assert.equal(valeurEffective('checkin', {}, replis), '16:00')
+  assert.equal(valeurEffective('checkin', { checkin: '15:00' }, replis), '15:00')
+  assert.equal(valeurEffective('checkout', {}, replis), '10:00')
+  assert.equal(valeurEffective('wifi_nom', {}, replis), null)
+  assert.equal(valeurEffective('prenom', {}, replis), null, 'une balise de la réservation n est pas une info du logement')
 })
 
 test('le repli du provider sert quand la base est muette, et le defaut en dernier', () => {
@@ -430,4 +452,25 @@ test('chaque balise de la base dit OU la remplir, et porte une etiquette lisible
     assert.ok(etiquetteDe(cle) && etiquetteDe(cle) !== cle, `${cle} doit avoir une etiquette`)
     assert.ok(!/[{}]/.test(etiquetteDe(cle)), 'une etiquette ne montre jamais d accolades')
   }
+})
+
+test('LE TEST QUI COMPTE : {adresse} assemble la rue, le code postal et la ville de la fiche', () => {
+  // Recette du 9 novembre 2026. La fiche range l'adresse en trois champs ; la
+  // rue seule (« 23 rue de l'horloge ») n'est pas une adresse pour un voyageur.
+  const { replisDuBien, adresseDeLaFiche } = require('../lib/balises')
+  const coeur = { address: "23 rue de l'horloge", zip_code: '65200', city: 'Bagnères-de-Bigorre' }
+  const r = remplacerBalises('{adresse}', { reservation: RESA, connaissance: {}, replis: replisDuBien(coeur) })
+  assert.equal(r.texte, "23 rue de l'horloge, 65200 Bagnères-de-Bigorre")
+  // Saisie entière dans la rue (code postal dedans) : rien n'est doublé.
+  assert.equal(adresseDeLaFiche({ address: '4 Rue du Bourg Vieux, Bagnères-de-Bigorre, 65200', zip_code: '65200', city: 'Bagnères-de-Bigorre' }),
+    '4 Rue du Bourg Vieux, Bagnères-de-Bigorre, 65200')
+  // Une ville dans le NOM de la rue n'est pas la ville de l'adresse.
+  assert.equal(adresseDeLaFiche({ address: '12 avenue de Toulouse', zip_code: '31000', city: 'Toulouse' }),
+    '12 avenue de Toulouse, 31000 Toulouse')
+  assert.equal(adresseDeLaFiche({ address: '1 rue A, Toulouse', city: 'Toulouse' }), '1 rue A, Toulouse')
+  assert.equal(adresseDeLaFiche({ address: '1 rue A' }), '1 rue A')
+  // Sans rue, pas d'adresse : un manque, pas « 65200 Bagnères-de-Bigorre ».
+  assert.equal(adresseDeLaFiche({ address: '', zip_code: '65200', city: 'X' }), '')
+  // L'objet de l'API Beds24 non décoré nomme le code postal `postcode`.
+  assert.equal(adresseDeLaFiche({ address: '1 rue A', postcode: '31000', city: 'Toulouse' }), '1 rue A, 31000 Toulouse')
 })
