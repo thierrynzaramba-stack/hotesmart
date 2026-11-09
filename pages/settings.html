@@ -114,7 +114,7 @@
     .plage { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 0; border-bottom: 0.5px solid var(--border); font-size: 13px; }
     .plage input[type=time] { padding: 6px 8px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 13px; font-family: inherit; background: var(--bg); color: var(--text); }
     .jours { display: flex; gap: 4px; }
-    .jours label { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 11px; cursor: pointer; color: var(--text2); }
+    .jours label { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 11px; cursor: pointer; color: var(--text2); }
     .jours input { position: absolute; opacity: 0; width: 1px; height: 1px; }
     .jours input:checked + span { color: var(--text); font-weight: 600; }
     .jours label:has(input:checked) { border-color: var(--text2); background: var(--bg2); }

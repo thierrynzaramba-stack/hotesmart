@@ -403,3 +403,17 @@ test('le type d\'appareil, et le blocage lu sans rien demander', async () => {
     ['/api/push', 'POST', { action: 'langue', langue: 'en' }, true]
   ], 'la langue part en keepalive : elle survit à un rechargement')
 })
+
+test('recette du 9 novembre : cocher un jour des heures calmes ne fait pas sauter la page', () => {
+  // La case est invisible et en `position: absolute` : sans `position: relative`
+  // sur son label, elle se place par rapport à un ancêtre lointain (mesuré :
+  // 1 636 px plus bas), et le focus du clic fait défiler jusqu'à elle — le jour
+  // se coche, mais la page saute, et on croit qu'une autre page s'est ouverte.
+  const css = lire('pages/settings.html')
+  const regle = (sel) => {
+    const m = new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}').exec(css)
+    return m ? m[1] : ''
+  }
+  assert.match(regle('.jours input'), /position:\s*absolute/, 'la case est bien sortie du flux')
+  assert.match(regle('.jours label'), /position:\s*relative/, 'son label doit la contenir')
+})
