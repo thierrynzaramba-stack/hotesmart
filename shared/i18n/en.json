@@ -304,6 +304,8 @@
   "cal.yf_comparables": "Comparables",
   "cal.yf_settings": "Pilot settings",
   "cal.yf_activate": "Turn on the automatic pilot",
+  "cal.yf_unreadable": "The autopilot status could not be read.",
+  "cal.yf_refused": "The autopilot cannot be turned on for this property.",
   "cal.yf_window_days": "{n, plural, one {# day} other {# days}}",
   "cal.yf_window_months": "{n, plural, one {# month} other {# months}}",
   "cal.yf_comparables_none": "To choose",

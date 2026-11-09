@@ -85,7 +85,7 @@ d'une absence (règle du dépôt : `null` n'est pas 0).
 |---|---|---|
 | Prédiction des prix | `/apps/yield/prix?bien=<uuid>` | fenêtre du pilote — « 120 jours » / « 6 mois » |
 | Données marché | `/apps/yield/marche-global?bien=<uuid>` | marché relié — la localité |
-| Événements | `/apps/yield/prix?bien=<uuid>&evenements=1` | nombre d'événements à venir |
+| Événements | `/apps/yield/prix?bien=<uuid>&evenements=1` | **aucun** — le repère « N à venir » est retiré le 28 octobre 2026 (recette : il ne comptait que les dates ajoutées par l'hôte ; le vrai compte n'est pas servi sans calcul) |
 | Comparables | `/apps/yield/comparables?bien=<uuid>` | nombre de comparables retenus |
 
 ⚠ **Deux entrées mènent au même fichier, et c'est voulu** (décision de Thierry
@@ -126,9 +126,12 @@ serveur**. Jamais de bascule en un clic — décision du 22 septembre 2026, et
 elle vaut quelle que soit la porte par laquelle on entre sur l'écran. Trois
 gardes dans la page :
 
-1. la demande se **consomme dès que l'état du pilote est lu**, dans tous les
-   cas. Sans cela elle resterait armée et s'ouvrirait plus tard sur un AUTRE
-   bien — celui que l'hôte aurait choisi au sélecteur entre-temps ;
+1. la demande se **consomme à la première lecture de l'état du pilote, AVANT
+   la lecture** (review du 28 octobre 2026 : un 503 et un sélecteur vide
+   l'esquivaient), quelle qu'en soit l'issue. Sans cela elle resterait armée
+   et s'ouvrirait plus tard sur un `change` du sélecteur. Et **`activer` quitte
+   l'adresse dès qu'il est lu** (review du 10 novembre 2026) : un rechargement
+   ne rouvre rien ;
 2. **bien déjà piloté** → rien ne s'ouvre, il n'y a rien à activer ;
 3. **bascule refusée** (`peut_basculer` faux) → rien ne s'ouvre : le bouton
    d'état porte déjà la raison, et ouvrir un parcours qui finira en refus est
@@ -138,15 +141,26 @@ gardes dans la page :
 pas de « — », pas de 0. L'entrée reste cliquable : le repère est un confort,
 jamais la raison d'être de la ligne.
 
-**Pied du menu — TROIS états, et non deux** (recette du 28 octobre 2026,
-point 6) :
+**Pied du menu — les états** (recette du 28 octobre 2026, point 6 ; review du
+10 novembre 2026), tous masqués sans `reglages` en écriture :
 - bien piloté → lien « Réglages du pilote » → `/apps/yield/prix?bien=<uuid>` ;
 - bien non piloté **et basculable** → bouton « Activer le pilote automatique »
   → **la même page**, avec `?bien=<uuid>&activer=1`, qui ouvre le **parcours
   d'activation existant** et sa confirmation « N nuits ont déjà un prix au
   calendrier », comptée serveur ;
-- bien non piloté et **NON basculable** → la **raison**, telle que
-  `lib/pilote-tarifaire.js` la donne, et **aucun bouton**.
+- bien non piloté, refus **connu** (`raison_code = 'pilote_refuse_keep'`,
+  « Je garde mes prix ») → une ligne « Vos prix sont envoyés hors
+  d'HôteSmart. » et un lien « Envoyer mes prix depuis HôteSmart » vers
+  `/logements/<uuid>` — la fiche de CE logement, là où le réglage vit. ⚠ Le
+  refus se reconnaît à son **code**, jamais à ses mots ;
+- bien non piloté, refus **inconnu** → le verdict du moteur, **aucun geste**
+  (on ne sait pas lequel le débloquerait). Hors du français, une ligne
+  traduite le remplace et la phrase du moteur passe en infobulle. Aucun refus
+  inconnu n'existe aujourd'hui ;
+- **`/api/yield-menu` en panne**, bien non piloté → « L'état du pilote n'a pas
+  pu être lu. » et le lien « Réglages du pilote » **sans** `activer=1` (review
+  du 10 novembre 2026 : le pied se taisait, l'hôte perdait tout geste) ;
+- tant que la réponse n'est pas arrivée → rien, la ligne « Chargement… ».
 
 ⚠ **LE TROISIÈME ÉTAT EST NÉ D'UNE RECETTE, ET C'EST LE DÉFAUT LE PLUS
 INSTRUCTIF DU LOT.** Thierry clique « Activer le pilote automatique » sur
@@ -178,7 +192,9 @@ confirme puis écrit. La garde réelle reste le serveur.
 ## 5. D'où vient chaque fait du menu
 
 Un seul appel, **à l'ouverture du menu**, pour **le seul bien cliqué** :
-`GET /api/yield-menu?bien=<uuid>`. Lecture seule, cinq lectures en parallèle.
+`GET /api/yield-menu?bien=<uuid>`. Lecture seule : la fiche du bien, puis en
+parallèle le marché relié et les comparables, et les prix ajustés sur un bien
+piloté seulement — **3 lectures, 4 sur un bien piloté**, plus celles de la garde.
 
 | Fait | Source | Calcul ? |
 |---|---|---|
@@ -186,7 +202,6 @@ Un seul appel, **à l'ouverture du menu**, pour **le seul bien cliqué** :
 | bascule possible, et sa raison | `peutPasserEnYieldflow()` sur `rate_sync_mode` | aucun — la règle lit une colonne déjà lue |
 | fenêtre | `properties.pilote_fenetre_type/valeur`, et la fin par `finDeFenetre()` — **la règle du moteur**, jamais une approximation client (une approximation mois × 30 divergeait de 5 jours sur 12 mois, relevé en review de `c8e7dff`) | aucun |
 | marché relié | `marche_biens.localite` — une ligne par bien (`unique (property_id)`) | aucun |
-| événements à venir | `yield_events`, `date_fin >= aujourd'hui (Paris)` | un `count` sur une table de quelques lignes par bien |
 | comparables | `comparables_retenus`, `actif = true` | un `count`, plafonné par construction (l'étape B en retient quelques-uns) |
 | **N prix ajustés** | `price_display_log`, `source = 'engine'`, `created_at >= maintenant − 7 j` | un `count` — **voir §6** |
 
@@ -207,7 +222,7 @@ inventée, aucun 0 de remplacement.
 |---|---|---|
 | état du pilote (couleur du bouton, pastille) | **temps réel** | lu avec la page, déjà présent |
 | fenêtre, marché relié | **ni l'un ni l'autre** : réglage, pas une mesure | lu tel quel, aucune agrégation |
-| nb d'événements à venir, nb de comparables | **non urgent**, mais **comptage borné** sur des tables de quelques lignes par bien | compté au geste (§6 bis) |
+| nb de comparables | **non urgent**, mais **comptage borné** sur des tables de quelques lignes par bien | compté au geste (§6 bis) |
 | N prix ajustés cette semaine | **non urgent** | compté au geste (§6 bis) |
 
 ### Les huit points, un par un
@@ -230,14 +245,14 @@ inventée, aucun 0 de remplacement.
 5. **Fichiers statiques versionnés.** Sans objet : aucun fichier statique neuf.
    `shared/icons.svg` et `shared/ui.css` sont déjà servis par le mécanisme de
    la page.
-6. **Jamais de lecture tronquée à 1000 lignes.** Les trois comptages passent
+6. **Jamais de lecture tronquée à 1000 lignes.** Les deux comptages passent
    par `count: 'exact', head: true` : **aucune ligne n'est rapatriée**, donc la
    troncature de PostgREST ne peut pas s'appliquer. Les deux lectures de
    réglage (`properties`, `marche_biens`) rendent **une** ligne par
    construction.
 7. **Budget.** Chargement du calendrier : **inchangé, et gardé par un test**
    (`tests/budget-ecran.test.js` reçoit `pages/calendrier.html`). Ouverture du
-   menu : **1 appel, 5 requêtes Supabase**, et `Server-Timing` porte le nombre
+   menu : **1 appel, 3 requêtes Supabase (4 sur un bien piloté)** hors garde, et `Server-Timing` porte le nombre
    de requêtes.
 8. **Mesure AVANT / APRÈS.** §11.
 
@@ -245,7 +260,7 @@ inventée, aucun 0 de remplacement.
 
 **28 octobre 2026, décision de Thierry.** La règle d'architecture de CLAUDE.md
 dit : donnée non urgente = résumé pré-calculé une à deux fois par jour, servi
-par une API qui ne fait que lire. Les trois comptages de ce menu y dérogent, et
+par une API qui ne fait que lire. Les deux comptages de ce menu y dérogent, et
 voici à quelles conditions.
 
 **Ce qui est compté est déjà écrit.** Le moteur pose ses lignes dans
@@ -315,7 +330,7 @@ Aucun texte en dur, aucun emoji, aucun hexa hors `shared/theme.css`.
 | `tests/yf-bouton-calendrier.test.js` | le bouton est posé par `identiteBien()` (donc sur les DEUX écrans) ; deux états ; `aria-label` traduit ; absent sur Beds24 ; 44 px au téléphone |
 | idem | le menu **n'appelle jamais** `POST /api/yield-pilote` ni `/api/calendar` : pas de bascule en un clic |
 | idem | `N = 0` et `N` illisible → la ligne ambre est absente, jamais « 0 » |
-| `tests/yield-menu-endpoint.test.js` | lecture seule (405 sur POST), `no-store` posé **avant le premier refus**, garde par bien, `null` sur lecture en échec, `head: true` sur les trois comptages |
+| `tests/yield-menu-endpoint.test.js` | lecture seule (405 sur POST), `no-store` posé **avant le premier refus**, garde par bien, `null` sur lecture en échec, `head: true` sur les deux comptages |
 | `tests/yf-bien-demande.test.js` | les trois pages lisent `?bien=` **avec** la garde `data.some(...)` : un bien inconnu ou hors du compte laisse le sélecteur inchangé ; `?activer=1` ouvre la confirmation et **n'écrit rien** sans clic |
 | `tests/budget-ecran.test.js` | l'inventaire d'appels de `pages/calendrier.html`, chiffré |
 | `tests/masquage-hidden.test.js` | déjà en place — la page est dans son périmètre |
@@ -329,7 +344,7 @@ requêtes Supabase comptées dans le handler, octets mesurés sur la réponse r�
 |---|---|---|
 | Chargement du calendrier — sites d'appel | 8 (`/api/calendar` ×3, `/api/reservation-directe` ×3, `/api/messages` ×1, `/api/yield-pilote` ×1) | **8 — inchangé** |
 | Ouverture du menu — appels | — | 1 |
-| Ouverture du menu — requêtes Supabase | — | 5 |
+| Ouverture du menu — requêtes Supabase | — | 5 le 28 octobre ; **3, ou 4 sur un bien piloté**, depuis le retrait du repère des événements (recette du même jour) |
 | Ouverture du menu — octets | — | **178** (bien non piloté) à **210** (bien piloté) |
 
 **AVANT mesuré le 28 octobre 2026** sur `pages/calendrier.html` à `8aae0f5f`,
@@ -363,3 +378,54 @@ coûte ne part que sur un geste, et un test l'exécute pour le prouver
 4. **Lien « Tarification » du menu ⋯ et entrée de navigation** : les deux
    restent ; leur retrait est un lot suivant, après recette.
 5. L'index passe **sur staging d'abord**, et Thierry le colle lui-même.
+
+
+## 13. Review du lot — 10 novembre 2026 (la dernière)
+
+Demandée par le chef de file : la file n'avait aucune trace de la review de ce
+lot, sur staging depuis le 28 octobre. Les commits de recette en citaient cinq
+constats (`a270756c`) sans arbre ni plage.
+
+- **Arbre** : `/home/claude/hotesmart-bouton`, worktree de la branche
+  `yf-bouton-calendrier` — un arbre à part, jamais le clone principal, qui
+  porte un autre lot.
+- **Plage** : `88aebdc705a5e8b9fa8d370df1ab0223a5db8e13..6d9ceb93acb440ada507fce34ecd9db29833168e`
+  — 88aebdc7 est la tête de main, que 6d9ceb93 contient : ce diff est
+  exactement ce que le lot ajoute à main, merges de main exclus. 13 fichiers.
+- **Rapport complet** : `docs/specs/revues/review-yf-bouton-calendrier-2026-11-10.md`
+  (écrit sur disque par la review elle-même, copié ici tel quel).
+- **Fichiers cités** : `tests/yf-bien-demande.test.js`, `pages/calendrier.html`,
+  cette spec, `tests/yf-bouton-calendrier.test.js`, `apps/yield/prix.html`,
+  `api/yield-menu.js` — tous dans le diff.
+- **Aucun constat de sécurité.** Le correctif principal du lot (la demande
+  d'activation ne se rouvre plus seule) est **mesuré** juste, par un harnais
+  qui exécute la vraie fonction.
+
+Huit constats, corrigés sans nouvelle review (c'était la dernière) :
+1. **(test)** la garde « ne se rouvre jamais seule » n'était tenue que par le
+   texte du code, et une assertion ne pouvait pas échouer : un test exécute
+   maintenant la vraie `chargerPilote` (503, 503, 200, deux `change`, et le
+   sélecteur vide) ; il rougit contre main ;
+2. en panne de `/api/yield-menu`, un bien non piloté perdait tout geste : le
+   pied le dit et mène aux réglages, sans `activer=1` ;
+3. **(doc)** cette spec contredisait le code (repère retiré, trois états,
+   nombre de lectures) : réalignée ;
+4. **(test)** le lien « Envoyer mes prix » se teste avec deux logements ;
+5. **(test)** le masquage sans droit couvre les deux refus ;
+6. `activer` quitte l'adresse dès qu'il est lu ;
+7. un refus inconnu, hors du français : ligne traduite, phrase du moteur en
+   infobulle ;
+8. **(accessibilité, supposé)** l'ouverture au clavier se reconnaît à
+   `e.detail === 0` ; un lecteur d'écran pourrait envoyer `detail >= 1` et le
+   focus ne pas entrer dans le menu. **Non mesuré, non changé : à vérifier en
+   recette avec un lecteur d'écran réel.**
+
+**Contre-épreuves** : contre main (`88aebdc7`, `git archive`), 11 rouges dans
+les deux fichiers de tests du lot, dont celui de la demande rouverte ; huit
+mutations des correctifs, toutes rouges. Le test du masquage sur les refus est
+vert contre main (main n'avait pas ces pieds) : non-régression, éprouvée par
+mutation.
+
+**Hors lot** : la dette 120 que ce lot inscrit au registre est exacte —
+`components/sidebar.js` lit côté navigateur `api_key`, `seam_api_key` et
+`brevo_api_key`, dont deux facturables.
