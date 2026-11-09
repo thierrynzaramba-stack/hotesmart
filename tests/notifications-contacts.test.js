@@ -309,15 +309,46 @@ test('une relecture du contact en panne laisse la ligne en file pour le cycle su
   assert.equal(etat.tables.notifications_file.length, 1)
 })
 
-test('un contact et une personne ne sont jamais regroupés ; « vider ma file » ne prend jamais la ligne d\'un contact', async () => {
+test('« vider ma file » ne prend jamais la ligne d\'un contact', async () => {
   const { db, etat } = compte()
   etat.tables.notifications_file.push(ligneContact(), ligneContact({ id: 'l2', user_id: COMPTE, contact_id: null, canaux: ['email'] }))
-  const e = envois()
-  const moi = await file.viderFile({ seulement: COMPTE, maintenant: hiver('2026-11-11T08:00'), db, deps: e.deps })
+  const moi = await file.viderFile({ seulement: COMPTE, maintenant: hiver('2026-11-11T08:00'), db, deps: envois().deps })
   assert.equal(moi.dues, 1)
   assert.deepEqual(etat.tables.notifications_file.map(l => l.id), ['l1'])
-  const tous = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps: e.deps })
-  assert.equal(tous.groupes, 1)
+})
+
+test('LE TEST QUI COMPTE (review, constat 8) : deux contacts et le titulaire en file — chacun reçoit SA ligne, jamais celle d\'un autre', async () => {
+  const { db, etat } = compte({ contactsEnBase: [contact(), contact({ id: 'c-voisin', email: 'voisin@exemple.fr', telephone: '+33633333333' })] })
+  etat.tables.notifications_file.push(
+    ligneContact({ id: 'l1', contenu: { ...ligneContact().contenu, titre: 'Pour le gardien' } }),
+    ligneContact({ id: 'l2', contact_id: 'c-voisin', contenu: { ...ligneContact().contenu, titre: 'Pour le voisin' } }),
+    ligneContact({ id: 'l3', user_id: COMPTE, contact_id: null, canaux: ['email'], contenu: { ...ligneContact().contenu, titre: 'Pour le titulaire' } })
+  )
+  const e = envois()
+  const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps: e.deps })
+  assert.equal(bilan.groupes, 3)
+  const recu = (adresse) => e.sorties.filter(s => s[1] === adresse).map(s => s[2])
+  assert.deepEqual(recu('gardien@exemple.fr'), ['HôteSmart — Pour le gardien'])
+  assert.deepEqual(recu('voisin@exemple.fr'), ['HôteSmart — Pour le voisin'])
+  assert.deepEqual(recu('hote@exemple.fr'), ['HôteSmart — Pour le titulaire'])
+})
+
+test('plusieurs lignes d\'un contact partent en un message qui dit les heures de l\'HÔTE, pas les siennes', async () => {
+  const { db, etat } = compte()
+  etat.tables.notifications_file.push(ligneContact(), ligneContact({ id: 'l2', sujet: 'conv:2', contenu: { ...ligneContact().contenu, titre: 'Urgence — Autre' } }))
+  const e = envois()
+  await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps: e.deps })
+  assert.equal(e.sorties.filter(s => s[0] === 'email').length, 1)
+  assert.match(e.sorties[0][2], /2 alerte\(s\) reçue\(s\) pendant les heures calmes de l’hôte/)
+})
+
+test('un relevé de réservation rangé pour un contact n\'est jamais envoyé', async () => {
+  const { db, etat } = compte()
+  etat.tables.notifications_file.push(ligneContact({ contenu: { ...ligneContact().contenu, releve: { bookingId: 'b1', propertyId: 'ref-1' } } }))
+  const e = envois()
+  let releves = 0
+  const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T08:00'), db, deps: { ...e.deps, sortirReleve: async () => { releves++; return { envoye: true } } } })
+  assert.deepEqual([bilan.ecartees, releves, e.sorties.length], [1, 0, 0])
 })
 
 test('une ligne pour personne, ou pour une personne ET un contact, est refusée avant la base', async () => {
@@ -378,4 +409,52 @@ test('une adresse se compare comme la base la saisit : casse de l\'e-mail, espac
   for (const t of ['06 12 34 56 78', '0033 6 12 34 56 78', '+33 6.12.34.56.78', '+33612345678']) assert.equal(contacts.cleTelephone(t), '+33612345678', t)
   assert.equal(contacts.cleTelephone(''), null)
   assert.equal(contacts.cleEmail(null), null)
+})
+
+// ─── 6. Correctifs de la review de l'étape 1 ────────────────────────────────
+
+test('constat 2 : un `id` égal à la référence (lecture du bien en panne, référence Channex) se relit par la référence', async () => {
+  const REF_CHANNEX = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+  const { db } = base({ properties: [{ id: BIEN, user_id: COMPTE, provider_property_id: REF_CHANNEX, archive_le: null }], notifications_contacts: [contact()] })
+  const r = await contacts.contactsPour({ compte: COMPTE, code: 'urgence_ia', bien: { id: REF_CHANNEX, ref: REF_CHANNEX }, db })
+  assert.deepEqual(r.contacts.map(c => c.contactId), ['c-gardien'])
+  const panne = base({ notifications_contacts: [contact()] }, { pannes: ['properties'] })
+  assert.equal((await contacts.contactsPour({ compte: COMPTE, code: 'urgence_ia', bien: { id: REF_CHANNEX, ref: REF_CHANNEX }, db: panne.db })).ok, false, 'la panne se dit')
+})
+
+test('constat 3 : deux contacts à la même adresse n\'envoient qu\'une fois', async () => {
+  const { db } = compte({ contactsEnBase: [contact({ cree_le: '2026-01-01' }), contact({ id: 'c-double', email: 'GARDIEN@exemple.fr', telephone: '06 11 11 11 11', cree_le: '2026-02-01' })] })
+  const e = envois()
+  const b = await notifier({ compte: COMPTE, code: 'urgence_ia', bien: { id: BIEN }, donnees: DONNEES_URGENCE, chemin: '/', sujet: 's', maintenant: MIDI, db, deps: e.deps })
+  assert.deepEqual(e.sorties.filter(s => /gardien@/i.test(s[1]) || s[1] === '+33611111111' || s[1] === '06 11 11 11 11').map(s => s[0]), ['email', 'sms'])
+  assert.equal(b.contacts, 1)
+})
+
+test('constat 5 : au-delà du plafond, la coupe se dit dans le bilan', async () => {
+  const beaucoup = Array.from({ length: contacts.PLAFOND_CONTACTS }, (_, i) => contact({ id: `c${i}`, email: `c${i}@exemple.fr`, telephone: null, cree_le: `2026-01-01T00:00:${String(i % 60).padStart(2, '0')}Z` }))
+  const { db } = compte({ contactsEnBase: beaucoup })
+  const b = await notifier({ compte: COMPTE, code: 'urgence_ia', bien: { id: BIEN }, donnees: DONNEES_URGENCE, chemin: '/', sujet: 's', maintenant: MIDI, db, deps: envois().deps })
+  assert.ok(b.erreurs.includes('contacts_tronques'))
+  const peu = compte()
+  const b2 = await notifier({ compte: COMPTE, code: 'urgence_ia', bien: { id: BIEN }, donnees: DONNEES_URGENCE, chemin: '/', sujet: 's', maintenant: MIDI, db: peu.db, deps: envois().deps })
+  assert.ok(!b2.erreurs.includes('contacts_tronques'))
+})
+
+test('constat 7 : le script de recette compte à blanc sans rien afficher d\'une adresse, envoie avec --go, et refuse la production', async () => {
+  const { executer } = require('../scripts/vider-file-notifications')
+  const { db, etat } = compte()
+  etat.tables.notifications_file.push(ligneContact(), ligneContact({ id: 'l2', user_id: COMPTE, contact_id: null, a: new Date(hiver('2026-11-12T07:00')).toISOString() }))
+  const sorties = []
+  let passes = 0
+  const viderFile = async (o) => { passes++; sorties.push(['passe', o.maintenant]); return { prises: 1, messages: 1, ecartees: 0, reportees: 0, erreurs: [] } }
+  const ecrire = (t) => sorties.push(t)
+  assert.equal(await executer({ argv: [], db, maintenant: hiver('2026-11-11T08:00'), base: 'STAGING', viderFile, ecrire }), 0)
+  assert.equal(passes, 0, 'à blanc : rien ne part')
+  assert.match(sorties[0], /En file : 2 \(1 pour une personne, 1 pour un contact\) ; dues maintenant : 1 \(0 pour une personne, 1 pour un contact\)/)
+  assert.ok(!sorties.some(t => typeof t === 'string' && /@|\+33/.test(t)), 'aucune adresse affichée')
+  assert.equal(await executer({ argv: ['--go', '--tout'], db, maintenant: hiver('2026-11-11T08:00'), base: 'STAGING', viderFile, ecrire }), 0)
+  assert.equal(passes, 1)
+  assert.ok(sorties.find(x => Array.isArray(x))[1] > hiver('2026-11-12T07:00'), '--tout : au-delà de toutes les plages')
+  assert.equal(await executer({ argv: ['--go'], db, base: 'PRODUCTION', viderFile, ecrire }), 2)
+  assert.equal(passes, 1, 'la production est refusée')
 })

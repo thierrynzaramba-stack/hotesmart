@@ -1092,3 +1092,102 @@ Module `lib/notifications/contacts.js` ; branché dans le point d'envoi
    droits ne couvrent pas, elle n'est pas destinataire, et son adresse de
    contact la prévient : rien n'est perdu. Les adresses se comparent sans casse
    pour l'e-mail, et au format international pour le numéro.
+
+**Review de l'étape 1** (rapport recopié mot pour mot dès réception, avant
+tout correctif) :
+
+> Arbre lu : /home/claude/hs-2c3 — branche : pwa-lot-2c3-contacts — SHA : 586935e2ab3c6e282604067209fc49267cd0c674 — plage : a3ecc24389886928b782ed3d85ac724d8894864a..586935e2ab3c6e282604067209fc49267cd0c674
+>
+> **Constats**
+>
+> 1. **DÉFAUT (ordre de déploiement)** — `lib/notifications/file.js:111`
+>    - **Défaut :** `viderFile` demande maintenant la colonne `contact_id`. Si le code arrive en base avant la migration, PostgREST refuse la lecture, et la passe s'arrête en `lecture_impossible` pour **toutes** les lignes, y compris celles des personnes du compte.
+>    - **Scénario :** le merge part avant la migration. Plus aucune alerte des heures calmes ne sort, pour aucun hôte, jusqu'à ce que la migration soit appliquée. Les lignes restent en base : rien n'est perdu, tout est retardé. `contactsPour` rendrait aussi `contacts_illisibles` à chaque événement b, c, j, l, m, o.
+>    - **Correctif :** écrire dans les dépendances de la remise « migration appliquée sur staging et sur la prod AVANT le merge correspondant », avec sa vérification.
+>
+> 2. **MINEUR** — `lib/notifications/contacts.js:66`
+>    - **Défaut :** `idDuBien` prend `bien.id` sans le vérifier. Or, quand la lecture du bien est en panne, `bienDuCompte` (`lib/notifications/bien.js:45`) renvoie pour un bien Channex `id = ref`, c'est-à-dire l'identifiant Channex et non `properties.id`.
+>    - **Scénario :** la lecture de `properties` est en panne pendant une urgence (b). Les personnes sont prévenues, puisque leur périmètre se compare aux deux identifiants. Le gardien, lui, n'est pas prévenu : `contains('biens', [refChannex])` ne trouve rien, et le bilan rend `ok: true, contacts: []` sans le dire.
+>    - **Correctif :** quand `bien.id === bien.ref`, retrouver le bien par sa référence, comme si `id` était absent. Une panne doit alors rendre `ok: false`.
+>
+> 3. **MINEUR** — `lib/notifications/notifier.js:135-142`
+>    - **Défaut :** le dédoublonnage Q29 compare chaque contact aux personnes du compte, mais pas aux autres contacts.
+>    - **Scénario :** deux lignes de contact portent la même adresse, le même bien et la même alerte (saisie en double à l'étape 3, ou import de lignes libres à l'étape 2). Le gardien reçoit deux e-mails et deux SMS, ou deux lignes dans la file qui partent en deux messages. La migration n'empêche pas ce doublon.
+>    - **Correctif :** dans la boucle, ajouter les clés `e:`/`t:` de chaque contact traité à `adresses`.
+>
+> 4. **MINEUR (à tenir à l'étape 2)** — preuve : `lib/alert-notify.js:518-522` et `:206`
+>    - **Défaut :** les anciennes listes `agent_alert_config` envoient toujours (`sendAlertNotifications`, liste « intervention », y compris pour m).
+>    - **Scénario :** dès que le script de l'étape 2 remplit `notifications_contacts`, chaque adresse reprise reçoit tout en double : une fois par l'ancienne liste, une fois par le contact.
+>    - **Correctif :** le remplissage de la table et l'arrêt des anciens envois partent dans le même déploiement. Un test doit le garantir.
+>
+> 5. **MINEUR** — `lib/notifications/contacts.js:93`
+>    - **Défaut :** `.limit(50)` sans `order` coupe la liste en silence.
+>    - **Scénario :** au-delà de 50 contacts sur un même bien et une même alerte, une partie des contacts, choisie au hasard, n'est pas prévenue, sans aucune trace.
+>    - **Correctif :** si `data.length === 50`, ajouter une erreur `contacts_tronques` au bilan, ou paginer.
+>
+> 6. **MINEUR (texte)** — `lib/notifications/textes.js:409`, via `file.js:215`
+>    - **Défaut :** quand plusieurs lignes d'un contact partent ensemble, le titre dit « N alerte(s) pendant **vos** heures calmes ». Ce sont les heures du titulaire, pas celles du gardien.
+>    - **Correctif :** un titre propre aux contacts, par exemple « N alertes de la nuit ».
+>
+> 7. **MINEUR (recette)** — preuve : `api/push.js:153`
+>    - **Défaut :** « vider ma file » (`seulement`) ne prend jamais une ligne de contact, et c'est voulu. Mais staging n'a pas de cron.
+>    - **Scénario :** sur staging, le parcours « la nuit, le gardien attend la fin de la plage » ne peut pas être recetté de bout en bout.
+>    - **Correctif :** passer par un script de recette, sur le modèle de `scripts/piloter-yieldflow.js`, qui appelle `viderFile` sans `seulement`, en lecture seule à blanc puis avec `--go`.
+>
+> 8. **MINEUR (tests)** — `tests/notifications-contacts.test.js:312-321`
+>    - **Défaut :** le test « jamais regroupés » ne prouve pas ce qu'il annonce. Après le premier passage, il ne reste qu'une seule ligne en file, donc `groupes === 1` tiendrait même si la clé de regroupement ignorait `contact_id`.
+>    - **Manques :** aucun test ne met deux contacts d'un même compte en file pour vérifier que chacun ne reçoit que sa propre ligne. La branche « relevé » écarté pour un contact (`file.js:189`) n'est couverte par aucun test.
+>    - **Correctif :** ajouter ces deux cas.
+>
+> **Ce qui a été mesuré et ne pose pas de problème**
+> - **Tests :** 20/20 verts à l'heure réelle, et aussi à J+30 et J+200 avec `horloge-decalee.js`. Tous les instants sont injectés.
+> - **Non-régression :** 226/226 verts sur les fichiers `notifications-*`, `notif-hote-resa`, `avis-notifications` et `cleaning-notifier`.
+> - **Mutations faites à la main :** retirer le filtre `compte_id`, le filtre `desinscrit_le`, la garde `!seulement`, la comparaison Q29, ou le filtre de compte dans `relireContact` fait chacun rougir au moins un test.
+> - **Double de base :** il n'est pas plus permissif que la vraie base sur les points qui comptent (NULL distincts dans l'upsert, filtres appliqués). Il ne vérifie pas le format UUID ; c'est sans effet ici.
+> - **Migration :** elle peut être rejouée sans dégât. La contrainte XOR est vraie pour les lignes existantes. Les deux index uniques ne se gênent pas, puisque les NULL y sont distincts. L'upsert `onConflict: 'contact_id,sujet'` correspond exactement à l'index `(contact_id, sujet)`. La suppression d'un contact supprime ses lignes en file, et celle du compte supprime ses contacts. RLS activée, sans policy. Toutes les lignes font moins de 60 caractères.
+> - **Pas d'injection dans l'e-mail :** titre, corps, texte et lien sont tous échappés. Le jeton est encodé. Le sujet est débarrassé des retours à la ligne.
+> - **Rien ne lève :** `contactsPour` et `relireContact` sont sous `try`, et une panne de lecture laisse la ligne en file.
+>
+> **Constat de sécurité : aucun.**
+> - Chaque lecture filtre `compte_id`, au départ comme à la sortie de la file.
+> - Dans la file, un contact est regroupé par `contact_id` **et** par compte. Son SMS part avec la clé du compte de la ligne, et la relecture a vérifié que le contact appartient à ce compte.
+> - L'essai sur soi n'atteint jamais un contact, et deux barrières le garantissent : `!seulement`, et l'absence de bien dans l'essai.
+> - Le jeton n'est jamais rangé dans la file : il est relu au moment de l'envoi.
+>
+> **Fichiers cités**
+>
+> | Fichier | Dans la plage | Rôle |
+> |---|---|---|
+> | lib/notifications/file.js | oui | constats 1, 6, 8 |
+> | lib/notifications/contacts.js | oui | constats 2, 5 |
+> | lib/notifications/notifier.js | oui | constat 3 |
+> | lib/notifications/textes.js | oui | constat 6 |
+> | tests/notifications-contacts.test.js | oui | constat 8 |
+> | migrations/2026-11-10-notifications-contacts.sql | oui | vérifiée, sans constat |
+> | lib/notifications/envoi.js | oui | vérifié, sans constat |
+> | lib/notifications/bien.js | non | preuve seulement (constat 2) |
+> | lib/alert-notify.js | non | preuve seulement (constat 4) |
+> | api/push.js | non | preuve seulement (constat 7) |
+> | tests/outils/horloge-decalee.js | non | preuve seulement (contre-épreuve calendaire) |
+
+**Suite donnée** (aucun constat de sécurité : correctifs sans nouvelle review) :
+- **1** — dépendance de la remise : la migration
+  `2026-11-10-notifications-contacts` est appliquée sur staging, puis sur la
+  production, **avant** le merge correspondant, et vérifiée (la colonne
+  `contact_id` lue par `viderFile`).
+- **2** — un `id` égal à la référence se relit par la référence ; une panne
+  se dit (`contacts_illisibles`).
+- **3** — deux contacts à la même adresse n'envoient qu'une fois.
+- **4** — tenu aux étapes 2 et 4 : le script de reprise refuse d'écrire tant
+  que les anciennes listes envoient encore, et un test lie les deux.
+- **5** — au plus `PLAFOND_CONTACTS` (100) contacts par bien et par alerte, les
+  premiers créés d'abord ; au-delà, `contacts_tronques` dans le bilan.
+- **6** — le message regroupé d'un contact dit « N alerte(s) reçue(s) pendant
+  les heures calmes de l'hôte ».
+- **7** — `scripts/vider-file-notifications.js` : à blanc, il compte ce qui
+  attend (personnes et contacts, sans aucune adresse) ; `--go` fait la passe,
+  `--tout` n'attend pas la fin des plages ; refusé sur la production.
+- **8** — deux contacts et le titulaire en file : chacun reçoit sa ligne ; le
+  relevé rangé pour un contact n'est jamais envoyé (la garde explicite double
+  celle qui réserve le relevé au titulaire : sa mutation seule ne rougit pas,
+  et c'est attendu).
