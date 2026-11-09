@@ -271,10 +271,22 @@ test('le bloc dit l\'entité, son absence ou son archivage, et le bouton suit le
   assert.equal(avec.querySelector('.fic-ligne__val').textContent, 'SCI <b>', 'échappé')
   assert.equal(avec.querySelector('[data-bind="facturation"]').textContent, t('fiche.facturation_modifier'))
   const sans = doc(F.facturationBlocHtml({ facturation: { entite: null, modifier: true } }, OUTILS))
-  assert.equal(sans.querySelector('.fic-ligne__val').textContent, t('fiche.facturation_aucune'))
+  assert.equal(sans.querySelector('[data-facturation-alerte]').textContent, t('fiche.facturation_aucune'))
   assert.equal(sans.querySelector('[data-bind="facturation"]').textContent, t('fiche.facturation_choisir'))
-  const archivee = doc(F.facturationBlocHtml({ facturation: { entite: { id: 'e', nom: 'Vieille', archivee: true }, modifier: true } }, OUTILS))
-  assert.equal(archivee.querySelector('.fic-ligne__val').textContent, t('fiche.facturation_archivee', { nom: 'Vieille' }))
+  const archivee = doc(F.facturationBlocHtml({ facturation: { entite: { id: 'e', nom: 'Vieille <i>', archivee: true }, modifier: true } }, OUTILS))
+  assert.equal(archivee.querySelector('[data-facturation-alerte]').textContent, t('fiche.facturation_archivee', { nom: 'Vieille <i>' }), 'échappé')
+  assert.equal(avec.querySelector('[data-facturation-alerte]'), null, 'une entité active : aucune alerte')
+  // Mise en page (recette du 9 novembre 2026) : l'alerte est un paragraphe
+  // SOUS la ligne clé/valeur, jamais un enfant de `.fic-ligne` — la ligne est
+  // un flex qui ne passe pas à la ligne, et `.fic-erreur` y réclame 100 % de
+  // la largeur à côté de la clé : le texte sortait du bloc à droite.
+  for (const d of [sans, archivee]) {
+    const alerte = d.querySelector('[data-facturation-alerte]')
+    assert.equal(alerte.tagName, 'P')
+    assert.equal(alerte.closest('.fic-ligne'), null, 'l\'alerte n\'est pas dans la ligne clé/valeur')
+    assert.equal(alerte.previousElementSibling.className, 'fic-ligne', 'elle suit la ligne « Factures émises au nom de »')
+    assert.equal(d.querySelector('.fic-ligne__val'), null, 'pas de valeur à droite de la clé')
+  }
   const membre = doc(F.facturationBlocHtml({ facturation: { entite: null, modifier: false } }, OUTILS))
   assert.equal(membre.querySelector('[data-bind="facturation"]'), null, 'pas de bouton sans le droit du serveur')
   const illisible = doc(F.facturationBlocHtml({ facturation: null, indisponibles: ['facturation'] }, OUTILS))
