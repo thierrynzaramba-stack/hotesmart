@@ -1026,3 +1026,6 @@ rapport recopié mot pour mot dès réception :
 > | `tests/notifications-ecran.test.js` | non | cité ; absent de cet arbre (constat 1) |
 
 Les trois constats, mineurs, sont corrigés sans nouvelle review.
+
+**Re-test de Thierry sur staging `1c3f4b3d`, 9 novembre 2026 à 23:25** : cocher
+un jour des heures calmes ne fait plus sauter la page. Conforme.
