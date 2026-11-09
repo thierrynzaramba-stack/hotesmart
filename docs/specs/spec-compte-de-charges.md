@@ -2,7 +2,9 @@
 
 Demande de Thierry du 8 novembre 2026 (fil « compte de charges » du Projet).
 **Statut : étape 0 close le 9 novembre 2026 — les 23 questions du §4 sont
-tranchées par Thierry, chaque réponse inscrite et datée. Aucun code.** Ce qui
+tranchées par Thierry, chaque réponse inscrite et datée. Aucun code.**
+**Ajout du 9 novembre 2026 (23 h 05) : les factures récurrentes et la
+période couverte (§6 ter), questions Q24 à Q27 OUVERTES.** Ce qui
 reste « *proposition* » dans le texte est un choix technique non contredit,
 ou une précision soumise à Thierry avec la décision qu'elle accompagne.
 
@@ -122,6 +124,10 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
 - **Q12 — La conservation.** Tranchée, voir ci-dessous.
 - **Q22 — La période comptable.** Tranchée, voir ci-dessous.
 - **Q23 — Le statut d'une commission de plateforme à sa naissance.** Tranchée, voir ci-dessous.
+- **Q24 — L'étalement d'une charge sur sa période.** Ouverte, §6 ter.
+- **Q25 — La mensualisation (énergie, taxe foncière).** Ouverte, §6 ter.
+- **Q26 — Les avoirs et les remboursements.** Ouverte, §6 ter.
+- **Q27 — Ce que fait une facture récurrente.** Ouverte, §6 ter.
 
 ### Réponses de Thierry
 
@@ -320,7 +326,7 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
 | `justificatif_chemin`, `justificatif_type`, `justificatif_octets`, `justificatif_empreinte` | fichier au nom **aléatoire** dans le bucket privé ; empreinte SHA-256, **indexée mais pas unique** : un doublon est regroupé, pas refusé (Q14) |
 | `groupe_doublon` | vide, ou l'`id` de la première charge du groupe de doublons possibles (Q14) ; clé `on delete set null` |
 | `signal` | vide, `doublon` (Q14) ou `commission_deja_comptee` (§7 bis) : la charge porte le signal « Vérifier » |
-| `signal_tranche` | booléen : l'hôte a tranché (garder). Tant qu'il ne l'a pas fait : un groupe de doublons compte **une fois**, une commission déjà comptée compte **zéro**, et le total est « estimation ». Quand la première charge d'un groupe est supprimée, les autres perdent leur `groupe_doublon` (`set null`), leur signal tombe s'il ne reste qu'elles, et le résumé de leurs cellules est recalculé. |
+| `signal_tranche` | booléen : l'hôte a tranché (garder). Tant qu'il ne l'a pas fait : un groupe de doublons compte **une fois**, une commission déjà comptée compte **zéro**, et le total est « estimation ». Quand la première charge (la racine) d'un groupe est supprimée, le writer la remplace d'abord par le plus ancien membre, que les autres désignent ; s'il reste seul, il perd son signal. Un groupe n'a qu'un niveau, et deux groupes qui se rencontrent fusionnent (review du lot 2). |
 | `lecture_ia` | jsonb : ce que l'IA a lu, champ par champ, avec sa confiance, le modèle et l'heure. **Jamais écrasé par la saisie** : l'écart lu / validé mesure la précision (étape 5). |
 | `cree_le`, `modifie_le`, `valide_le`, `valide_par` | |
 
@@ -396,6 +402,103 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
   `lib/cron-shared.js`, appel journalisé (`avecContexteIA`, fonction
   `charges-lecture`). Garde de coût par compte et
   par jour (plafond à fixer à l'étape 2, sur la mesure de `ia_appels`).
+
+## 6 ter. Factures récurrentes, période couverte et étalement
+
+Demande de Thierry du 9 novembre 2026, 23 h 05 : « les factures récurrentes
+et la période de facturation avec étalement des paiements (électricité, gaz,
+et taxe) ».
+
+### Ce que font ces factures (constaté le 9 novembre 2026)
+
+- **Électricité et gaz mensualisés** : le fournisseur estime la consommation
+  de l'année et la prélève en mensualités égales — en général onze, parfois
+  dix ou douze —, puis émet une **facture de régularisation** qui solde
+  l'écart avec la consommation relevée ; ce solde peut être un
+  **remboursement**. Un nouvel échéancier suit chaque régularisation. Sans
+  mensualisation (« au réel »), une facture par mois ou tous les deux mois,
+  sur une période de consommation.
+- **Taxe foncière mensualisée** : dix prélèvements, le 15 de janvier à
+  octobre, calculés sur la taxe de l'année précédente ; l'avis de l'année
+  arrive en septembre et l'écart se règle en fin d'année. Sans
+  mensualisation : un paiement en octobre.
+
+Sources : fiches publiques de fournisseurs et de comparateurs d'énergie
+(EDF, Primeo, Selectra), et guides de la mensualisation de la taxe foncière
+(impots.gouv.fr, relayé par la presse), consultés le 9 novembre 2026.
+
+### Ce que ça change pour le compte de charges
+
+Trois défauts du modèle du §6, sur ces cas précis :
+
+1. **Un prélèvement n'est pas une charge, c'est une avance.** La charge est
+   la consommation (ou l'impôt) d'une **période**. Un échéancier envoyé par
+   l'hôte serait lu aujourd'hui comme une facture, et on compterait une
+   mensualité ou le total de l'année — ni l'un ni l'autre n'est la charge.
+2. **Une charge posée sur un seul jour fausse les mois.** Une taxe foncière
+   de 1 200 € datée du jour de l'avis charge septembre de 1 200 € et laisse
+   les onze autres mois vides : la lecture par mois et par bien devient
+   fausse, et la future rentabilité par bien avec elle.
+3. **La facture de régularisation porte deux montants** : la consommation
+   de la période (la charge) et le solde à payer (cette consommation moins
+   les mensualités déjà prélevées). Prendre le solde pour la charge oublie
+   tout ce qui a été prélevé. Et un solde négatif (un remboursement) est
+   aujourd'hui refusé par la base (montants ≥ 0).
+
+### Propositions
+
+- **La période couverte.** Une charge peut porter `periode_debut` et
+  `periode_fin`. L'IA les lit (« période de consommation du … au … » ;
+  « taxe foncière 2026 » = du 1er janvier au 31 décembre 2026) ; l'hôte les
+  corrige à la validation. Sans période, la charge vaut pour son jour, comme
+  aujourd'hui.
+- **Le type de document**, lu par l'IA et corrigé par l'hôte : `facture`,
+  `regularisation`, `avoir`, `echeancier`, `avis_impot`. **Un échéancier
+  n'est jamais compté comme une charge** (son rôle dépend de Q25).
+- **La régularisation** : la charge est la **consommation de la période**,
+  pas le solde. L'IA lit les deux ; l'écran les montre côte à côte avant la
+  validation, le solde restant dans `lecture_ia`.
+- **L'étalement (Q24)** : une charge à période est **répartie au prorata des
+  jours** de sa période. 1 200 € sur une année font 3,29 € par jour, soit
+  environ 102 € pour un mois de 31 jours. Arrondi au centime, le reste posé
+  sur le dernier jour : la somme des jours redonne le montant exact. Le
+  résumé est déjà tenu **par jour** (§6, §11) : l'étalement s'y pose sans
+  changer ce qu'il est. *Proposition technique* : une table de répartition
+  (une ligne par charge et par jour de sa période, écrite par le trigger),
+  dont les cellules du résumé font la somme — recalcul, jamais incrément.
+  Une période se borne (au plus 366 jours) : au-delà, la charge se découpe.
+- **La récurrence (Q27)** : sur une charge validée, « Cette facture
+  revient » crée un **contrat** : fournisseur, entité, bien, catégorie,
+  rythme (mensuel, bimestriel, trimestriel, annuel), montant habituel. Ce
+  qu'il fait ensuite est la question Q27.
+- **Le suivi des paiements reste hors V1 (Q2)** : rien ici ne suit un
+  prélèvement comme « payé ». Les dates de prélèvement d'un échéancier
+  restent dans `lecture_ia`, pour le lot qui ajoutera ce suivi.
+
+### Questions ouvertes
+
+- **Q24 — L'étalement.** Une charge qui couvre une période compte-t-elle :
+  (A) *proposé* — répartie au prorata des jours de sa période ;
+  (B) en entier au jour de la facture, comme aujourd'hui ;
+  (C) les deux, au choix sur l'écran (deux résumés à tenir) ?
+- **Q25 — La mensualisation (énergie, taxe foncière).**
+  (A) *proposé* — la facture annuelle (ou l'avis) est la charge, étalée sur
+  sa période ; l'échéancier ne compte pas, mais en attendant la facture il
+  sert de **prévision** : son montant annuel est étalé et marqué
+  « estimation », puis remplacé par la facture quand elle arrive ;
+  (B) chaque mensualité est une charge du mois où elle est prélevée, et la
+  régularisation ajoute le solde, positif ou négatif — une vue « ce que j'ai
+  payé », proche du suivi des paiements écarté par Q2 ;
+  (C) seules les factures comptent : les mois sans facture restent vides
+  jusqu'à la régularisation.
+- **Q26 — Les avoirs et remboursements.** (A) *proposé* — un avoir ou un
+  remboursement est une charge **négative** (type `avoir`), qui diminue le
+  total de sa période ; (B) pas en V1 : l'hôte ne les saisit pas.
+- **Q27 — Ce que fait une facture récurrente** (plusieurs choix possibles) :
+  pré-remplir la suivante du même fournisseur (entité, bien, catégorie,
+  période) ; prévoir les mois pas encore facturés (montant habituel, marqué
+  « estimation ») ; alerter quand une facture attendue n'arrive pas ; créer
+  seule une charge sans document (abonnement prélevé sans facture).
 
 ## 7. L'adresse e-mail (détail)
 
@@ -506,7 +609,7 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
    facturation, étape 1 de sa spec), avec ses lectures côté serveur (§6).
 2. **Le socle** : migrations (`charges`, `charges_resume`,
    `charges_ota_supprimees`, `charges_adresses`), bucket privé, writer
-   (avec la mise à jour transactionnelle du résumé), lecture IA, endpoint
+   (le résumé tenu par trigger), lecture IA, endpoint
    d'écriture (créer, lire, valider, trancher un signal, supprimer, URL
    d'envoi et de consultation), et **le cron dédié** `api/cron-charges.js`
    (recalcul quotidien du résumé, effacement des `envoi` de plus de 24 h).
@@ -521,6 +624,12 @@ consultation et suppression (Q11). Toute facture est considérée payée (Q2).
    voyageurs : sa review vérifie que ce chemin est intact.
 6. **La mesure** sur les vraies factures de Thierry : écart lu / validé, champ
    par champ. Elle décide si Mindee est utile.
+7. **La période couverte et l'étalement** (§6 ter), selon Q24 à Q27 :
+   migration additive (période, type de document, montants signés si Q26 A,
+   table de répartition), lecture IA étendue, résumé réparti par jour, puis
+   le contrat récurrent. *Proposition* : placé **avant l'écran** (lot 3),
+   pour que l'écran naisse avec la période et le type de document plutôt
+   que d'être repris.
 
 Plus tard : les ménages des prestataires (Q3), l'export comptable (Q13), la
 rentabilité par bien (résumé quotidien), la réception des factures
@@ -559,8 +668,9 @@ les faire lire par l'IA. Le modèle du §6 est choisi pour que ce lot n'ait rien
    donnée **non urgente**, servie par `charges_resume` que l'endpoint ne fait
    que lire (une somme en base sur les cellules du jour), avec l'heure du
    calcul affichée. Mais une facture lue doit y compter tout de suite (Q4) :
-   **le writer unique recalcule, dans une fonction SQL transactionnelle, la
-   cellule d'avant et la cellule d'après** de chaque charge écrite (une
+   **un trigger (`charges_resume_trg`, dans la même transaction que
+   l'écriture) recalcule la cellule d'avant et la cellule d'après** de chaque
+   charge écrite — aucun writer ne peut l'oublier (une
    validation qui change d'entité, de bien ou de jour la déplace ; un
    regroupement ou une suppression touche aussi les autres membres du
    groupe) — recalcul, jamais incrément. Le cron dédié recalcule tout une
