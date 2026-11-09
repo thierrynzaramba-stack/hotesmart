@@ -96,7 +96,13 @@ l'existence d'un fil) ; règle d'archivage de la collection (`clesArchivees`) ;
 - **D1 — Le rythme.** Fil : 10 secondes. Liste : une fois par minute au plus.
   Lu dans le « ok » du 9 novembre 2026 (« Je prends ton « ok » comme : le fil
   ouvert se met à jour toutes les 10 secondes, et la liste toutes les
-  minutes »). **À confirmer.**
+  minutes »). **À confirmer par Thierry avant le code** (le chef de file le
+  rappelle : le rythme est une décision de Thierry).
+- **D2 — La page restée ouverte sans personne devant** (proposé). Au bout de
+  15 minutes sans aucun geste dans la page (frappe, clic, défilement), onglet
+  pourtant affiché, le fil passe à une relecture par minute ; le premier geste
+  rétablit 10 secondes, avec une relecture immédiate. Effet chiffré au §6 :
+  360 relectures par heure deviennent 60 sur un écran oublié.
 - Le reste découle de la demande, sans décision produit nouvelle.
 
 ## 5. Inventaire (la forme ne supprime jamais le fond)
@@ -128,14 +134,37 @@ résumé, jamais de cache.
 7. **Budget** : le premier affichage ne change pas. La relecture vise
    **moins de 300 ms** et **moins d'1 Ko** quand rien n'est neuf. Un test
    compte les appels : un seul par cycle, aucun onglet caché.
-8. **Mesures** :
+8. **Coût par onglet ouvert, le chiffre qui compte** (demande du chef de file :
+   un compte peut garder la page ouverte toute la journée). Une relecture =
+   **1 appel HTTP** ; côté serveur, la garde de droits fait **3 requêtes**
+   (`auth.getUser`, le compte demandé, le profil — `lib/require-permission.js`)
+   et la relecture **3 lectures** en parallèle (messages du fil, propositions,
+   `dernier`), soit **environ 6 requêtes Supabase**. Compté au code, à
+   confirmer en recette par `Server-Timing`.
+
+   | situation de l'onglet | appels HTTP / minute | requêtes Supabase / minute | octets / minute |
+   |---|---|---|---|
+   | **caché** (autre onglet, fenêtre réduite, téléphone verrouillé) | **0** | **0** | **0** |
+   | affiché, fil ouvert, rien de neuf | 6 | ~36 | < 6 Ko (cible < 1 Ko par relecture) |
+   | affiché, fil ouvert, un message arrive ailleurs dans le compte | 6, + 1 relecture de la liste | ~36, + celles de `/api/messages?limit=50` | + 31 Ko, au plus une fois par minute |
+   | affiché, liste seule (téléphone, aucun fil ouvert) | 1 | ~6 | < 1 Ko |
+   | affiché, fil ouvert, 15 min sans geste (si D2 est retenu) | 1 | ~6 | < 1 Ko |
+
+   **Une journée de 10 heures, page affichée en continu, fil ouvert** : 3 600
+   appels et ~21 600 requêtes sans D2 ; 600 appels et ~3 600 requêtes avec D2
+   si personne ne touche la page. **Onglet caché toute la journée : rien.** La
+   règle « onglet caché = aucun appel » est tenue par un test (§8), pas par
+   l'intention.
+
+9. **Mesures** :
 
    | | appels | octets | requêtes Supabase |
    |---|---|---|---|
    | AVANT, ouverture (prod, 9 novembre 2026) | 5 | 31 094 pour `/api/messages`, 255 613 pour la page | non mesuré |
    | AVANT, toutes les 10 s | 0 (rien ne se relit) | 0 | 0 |
    | APRÈS, ouverture | 5 attendus, inchangé | à mesurer en recette | |
-   | APRÈS, toutes les 10 s, rien de neuf | 1 attendu | à mesurer en recette, cible < 1 Ko | 3 lectures attendues, à mesurer par `Server-Timing` |
+   | APRÈS, toutes les 10 s, rien de neuf | 1 attendu | à mesurer en recette, cible < 1 Ko | ~6 attendues (3 de garde + 3 lectures), à mesurer par `Server-Timing` |
+   | APRÈS, onglet caché | 0 | 0 | 0 |
 
 ## 7. Mobile
 
@@ -153,7 +182,9 @@ téléphone, la liste seule est relue toutes les 60 secondes (§2).
   défilement respecté et pastille ; aucun doublon après un envoi ; onglet caché
   = aucun appel, retour = une relecture immédiate ; changement de fil = réponse
   de l'ancien jetée ; trois échecs = mention, 401 = arrêt ; liste relue une fois
-  par minute au plus, et seulement quand `dernier` bouge.
+  par minute au plus, et seulement quand `dernier` bouge ; si D2 est retenu,
+  15 minutes sans geste = une relecture par minute, et le premier geste
+  rétablit 10 secondes.
 - Contre-épreuve : chaque test neuf rougit contre main ; horloge décalée à J+60
   et J+200.
 
