@@ -625,6 +625,9 @@ async function contexteDesSejours (userId, evaluations) {
 // ⚠ LES COMPTEURS PORTENT SUR TOUTE LA PERIODE, calcules par la base
 // (lib/stats-avis.js) : jamais sur les lignes servies.
 const MAX_AVIS_CARTES = 5000
+// Une borne, pas un usage : des detections qui dorment par centaines seraient
+// deja un defaut de tri, pas une liste a peindre.
+const MAX_ANCIENS_A_TRAITER = 100
 const MAX_EVALS_CARTES = 2000
 const PAGE_AVIS = 1000
 async function cartesLister (req, res, garde) {
@@ -686,8 +689,10 @@ async function cartesLister (req, res, garde) {
   // elle que la page lit pour son filtre et son formulaire (constat 3 de la
   // revue du 7 novembre 2026 — le lot avait filtre `lister`, que la page
   // n'appelle plus, et laisse celle-ci proposer le bien archive).
+  // ⚠ `photo_url` : la vignette du bien dans la refonte V5 (pastilles du
+  // filtre, cartes). Une colonne de la meme ligne, aucune lecture de plus.
   const { data: biens, error: eBiens } = await supabase.from('properties')
-    .select('id, name, provider_property_id, provider, ' + COLONNE_ARCHIVE).eq('user_id', userId)
+    .select('id, name, provider_property_id, provider, photo_url, ' + COLONNE_ARCHIVE).eq('user_id', userId)
     .not('provider_property_id', 'is', null).order('name')
   if (eBiens) return res.status(500).json({ error: 'Lecture impossible' })
   const nomParId = new Map((biens || []).map(b => [b.id, b.name]))
@@ -698,7 +703,13 @@ async function cartesLister (req, res, garde) {
   // sans eux pour savoir lesquelles partent, puis on lit leurs sejours.
   const maintenant = Date.now()
   const sansSejours = assemblerCartes({ evaluations: ev.data || [], avis, nomBien, voitSejours, maintenant })
-  const servies = [...sansSejours.attente, ...sansSejours.recents, ...(avecAnciens ? sansSejours.anciens : [])]
+  // ⚠ LES DETECTIONS DES ANCIENS SONT SERVIES MEME SECTION FERMEE (revue du lot
+  // Avis V5, constat 5) : la page les range dans « À traiter », et une bulle
+  // qui dirait « Rien ne vous attend » pendant qu'un message de voyageur ecrit
+  // trois semaines apres son depart attend une confirmation serait un
+  // mensonge. Elles sont deja assemblees en memoire : aucune lecture de plus.
+  const aTraiterAnciens = (liste) => liste.filter(c => (c.avis || []).some(a => a.detecte)).slice(0, MAX_ANCIENS_A_TRAITER)
+  const servies = [...sansSejours.attente, ...sansSejours.recents, ...(avecAnciens ? sansSejours.anciens : aTraiterAnciens(sansSejours.anciens))]
   const uids = servies.map(c => (c.cle.startsWith('sejour:') ? c.cle.slice(7) : null)).filter(Boolean)
   const sejours = await sejoursDe(userId, uids)
   const cartes = assemblerCartes({ evaluations: ev.data || [], avis, sejours, nomBien, voitSejours, maintenant })
@@ -713,6 +724,15 @@ async function cartesLister (req, res, garde) {
     cartes: { attente: cartes.attente, recents: cartes.recents, anciens: avecAnciens ? cartes.anciens.slice(0, MAX_LIGNES) : null },
     anciens_total: anciensTotal,
     anciens_tronques: avecAnciens && anciensTotal > MAX_LIGNES,
+    // Les cartes des Anciens qui portent une detection a confirmer, servies
+    // meme section fermee (voir plus haut). Section ouverte, la page les lit
+    // dans `cartes.anciens` et ignore ce champ.
+    anciens_a_traiter: aTraiterAnciens(cartes.anciens),
+    // Les cartes des Anciens qui n'ont QU'une detection, sans evaluation : la
+    // page les monte dans « À traiter », donc la section Anciens ne les montre
+    // plus — et son compte ne doit plus les compter. Compte exact, sur toute la
+    // section (la liste ci-dessus est bornee).
+    anciens_detection_seule: cartes.anciens.filter(c => (c.avis || []).length && c.avis.every(a => a.detecte) && !c.evaluation).length,
     // La liste lue a atteint une borne : des cartes anciennes peuvent manquer.
     liste_incomplete: avisTronques || (ev.data || []).length >= MAX_EVALS_CARTES,
     // La liste de CHOIX (filtre et formulaire de la page) : sans les biens
@@ -720,7 +740,7 @@ async function cartesLister (req, res, garde) {
     // elles, gardent leurs noms par les deux tables ci-dessus.
     biens: (biens || []).filter(b => !b[COLONNE_ARCHIVE])
       .filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
-      .map(b => ({ name: b.name, provider_property_id: b.provider_property_id })),
+      .map(b => ({ name: b.name, provider_property_id: b.provider_property_id, photo_url: b.photo_url || null })),
     periodes: Object.keys(PERIODES),
     // ⚠ `note_sur_5` ET PLUS `moyenne` (decision de Thierry, 20 octobre 2026 :
     // « tout sur 5 … meme regle partout ou une note globale s'affiche »). Un
@@ -2472,3 +2492,11 @@ async function router (req, res) {
 }
 
 module.exports.outilsAutoValidation = outilsAutoValidation
+
+// ⚠ L'APPEL D'ECRAN DE LA PAGE AVIS (api/ecran/avis.js) REUTILISE CES DEUX
+// LECTURES TELLES QUELLES, avec leurs gardes de perimetre : les recopier dans
+// l'endpoint d'ecran ferait deux versions de la meme regle, et le chantier
+// profils et droits a ferme dix fuites nees exactement de ca. Elles attendent
+// une garde de la forme `{ accountUserId, contexte }`, que `contexteDEcran`
+// produit comme `requirePermission`.
+module.exports.ecran = { cartesLister, autoValidationLire }
