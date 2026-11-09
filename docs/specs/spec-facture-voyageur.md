@@ -300,8 +300,9 @@ préfixe, prochain numéro.
     le préfixe et le premier numéro **tant qu'aucune facture de l'année n'est
     partie** ; ensuite **tout est figé**, et la suite n'a jamais de trou. Le
     code refuse (`suite_figee`, 409) et la base aussi (trigger
-    `fvs_suite_protegee` : préfixe inchangé, `prochain_numero = dernier_emis
-    + 1`, `dernier_emis` jamais en baisse).
+    `fvs_suite_protegee`, insert/update/delete : une suite naît vierge, un
+    numéro émis est toujours l'ancien prochain, préfixe et clés figés, pas de
+    trou, pas de suppression d'une suite entamée — KB entites-juridiques).
   - **Manuelle** : l'hôte saisit lui-même chaque numéro à l'émission (étape 3),
     celui de sa propre suite tenue ailleurs. HôteSmart refuse seulement un
     numéro déjà utilisé pour la même entité. L'écran ne montre aucune suite.
@@ -570,6 +571,13 @@ panne ≠ liste vide, lignes SQL < 60 caractères.
    ligne de l'année n'existe pas.
 3. Un refus du trigger (23514) s'affichait comme une panne au lieu de
    « suite figée ».
+
+Corrections (commit suivant la trace) : trigger réécrit sur
+`before insert or update or delete`, **éprouvé sur un vrai Postgres 16** par
+`scripts/eprouver-suites-factures.sh` — 20 gestes conformes, contre 8 écarts
+pour l'ancien trigger ; `numerotation` rend son nombre de requêtes et
+l'endpoint les additionne, un test vérifie le nombre exact ; le 23514 de
+l'upsert devient `suite_figee`. Chaque correction tuée par une mutation.
 
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 

@@ -37,13 +37,16 @@ const EJ = require('../lib/entites-juridiques')
 
 // ─── Une base factice : elle APPLIQUE les filtres demandes, rien de plus ──────
 function baseFactice (tables = {}) {
-  const etat = { tables: {}, ecritures: [] }
+  // `lectures` : une entree par requete (table visee) ; `erreurUpsert` : une
+  // erreur a rendre au prochain upsert (le refus d'un trigger, par exemple).
+  const etat = { tables: {}, ecritures: [], lectures: [], erreurUpsert: null }
   for (const [t, lignes] of Object.entries(tables)) etat.tables[t] = lignes.map(l => ({ ...l }))
   let n = 0
   const nouvelId = () => `eeeeeeee-0000-4000-8000-${String(++n).padStart(12, '0')}`
   const lignesDe = (t) => (etat.tables[t] = etat.tables[t] || [])
 
   function from (table) {
+    etat.lectures.push(table)
     const q = { op: 'select', f: [], ou: null, ordre: null, desc: false, limite: null, unique: null, cols: null }
     const correspond = (r) => q.f.every(([c, v, mode]) => mode === 'is' ? (r[c] ?? null) === v : String(r[c]) === String(v)) &&
       (!q.ou || q.ou.some(([c, v]) => String(r[c]) === String(v)))
@@ -69,6 +72,7 @@ function baseFactice (tables = {}) {
         etat.ecritures.push({ table, op: 'delete', n: cibles.length })
         return { data: null, error: null }
       } else if (q.op === 'upsert') {
+        if (etat.erreurUpsert) { const error = etat.erreurUpsert; etat.erreurUpsert = null; return { data: null, error } }
         const cles = q.opts.onConflict.split(',')
         const ex = lignes.find(r => cles.every(c => String(r[c]) === String(q.row[c])))
         if (ex) Object.assign(ex, q.row); else lignes.push({ ...q.row })
@@ -160,13 +164,20 @@ test('LE TEST QUI COMPTE : « meme compte » est garanti en base — cles compos
 
 test('la migration : une seule entite par defaut, suite FIGEE apres emission (prefixe, sans trou, jamais en baisse), lignes < 60 car.', () => {
   assert.match(SQL, /create unique index if not exists\s+entites_juridiques_defaut_uidx\s+on public\.entites_juridiques \(user_id\)\s+where par_defaut/)
-  assert.match(SQL, /if old\.dernier_emis is not null then\s+if new\.prefixe <> old\.prefixe then/)
+  assert.match(SQL, /if new\.dernier_emis is not null\s+and new\.prefixe <> old\.prefixe then/)
   // Q5 bis (Thierry, 9 nov. 2026) : une suite entamee enchaine sans trou —
   // le prochain numero est toujours le dernier emis + 1, en base aussi.
-  assert.match(SQL, /if new\.prochain_numero\s+<> new\.dernier_emis \+ 1 then\s+raise exception\s+'suite figee : pas de trou'/)
+  assert.match(SQL, /if new\.dernier_emis is not null\s+and new\.prochain_numero\s+<> new\.dernier_emis \+ 1 then\s+raise exception\s+'suite figee : pas de trou'/)
+  // Review 2, constat 1 : le trigger voit AUSSI l'INSERT et le DELETE, et un
+  // numero emis est toujours l'ancien prochain (ni saut, ni premiere emission
+  // libre). Epreuve sur un vrai Postgres : scripts/eprouver-suites-factures.sh.
+  assert.match(SQL, /before insert or update or delete\s+on public\.factures_voyageur_suites/)
+  assert.match(SQL, /if tg_op = 'DELETE' then\s+if old\.dernier_emis is not null then\s+raise exception\s+'suite entamee : suppression refusee'/)
+  assert.match(SQL, /if tg_op = 'INSERT' then\s+if new\.dernier_emis is not null then\s+raise exception\s+'une suite nait sans numero emis'/)
+  assert.match(SQL, /if new\.entite_id <> old\.entite_id\s+or new\.user_id <> old\.user_id\s+or new\.annee <> old\.annee then/)
+  assert.match(SQL, /if new\.dernier_emis\s+is distinct from old\.dernier_emis\s+and \(new\.dernier_emis is null\s+or new\.dernier_emis\s+<> old\.prochain_numero\) then/)
   // `dernier_emis` ne baisse jamais et ne revient jamais a vide (revue de 447ff3e0, constat 5).
-  assert.match(SQL, /if new\.dernier_emis is null\s+or new\.dernier_emis < old\.dernier_emis/)
-  assert.match(SQL, /before update\s+on public\.factures_voyageur_suites\s+for each row execute function\s+public\.fvs_suite_protegee\(\)/)
+  assert.match(SQL, /on public\.factures_voyageur_suites\s+for each row execute function\s+public\.fvs_suite_protegee\(\)/)
   assert.match(SQL, /prochain_numero > dernier_emis/)
   assert.match(SQL, /\(regime_tva = 'assujetti'\)\s+= \(taux_tva is not null\)/)
   const longues = SQL.split('\n').map((l, i) => [i + 1, l.length]).filter(([, n]) => n >= 60)
@@ -467,6 +478,37 @@ test('une entite en numerotation MANUELLE n\'a pas de suite a montrer ; une auto
     // Le mode se change par « modifier » ; la suite reapparait en automatique.
     assert.equal((await appeler({ methode: 'POST', corps: { action: 'modifier', id: manu.id, entite: { ...ENTITE_OK, nom: 'Ailleurs' } } })).code, 200)
     assert.ok((await appeler()).corps.numerotations[manu.id])
+  } finally { fini() }
+})
+
+test('LE TEST QUI COMPTE : Server-Timing dit le NOMBRE EXACT de requetes de l\'ecran (review 2, constat 2)', async () => {
+  const { appeler, etat, fini } = monterApi()
+  try {
+    const a = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
+    await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'B' } } })
+    await appeler({ methode: 'POST', corps: { action: 'creer', entite: { ...ENTITE_OK, nom: 'C', numerotation_factures: 'manuel' } } })
+    // a a une suite cette annee (1 requete) ; B n'en a pas (2 : l'annee, puis
+    // la precedente pour le prefixe) ; C est manuelle (0).
+    await appeler({ methode: 'POST', corps: { action: 'numerotation', id: a, numerotation: { prefixe: 'HS', prochain_numero: 3 } } })
+    const ecran = new Set(['entites_juridiques', 'biens_entites', 'properties', 'factures_voyageur_suites'])
+    etat.lectures.length = 0
+    const r = await appeler()
+    const faites = etat.lectures.filter(t => ecran.has(t)).length
+    assert.equal(faites, 6, 'entites + liens + biens + 1 + 2')
+    assert.match(r.entetes['server-timing'], new RegExp(`db;desc="${faites} requêtes"`))
+  } finally { fini() }
+})
+
+test('un refus du trigger entre la lecture et l\'ecriture est « suite figee », pas une panne (review 2, constat 3)', async () => {
+  const { appeler, etat, fini } = monterApi()
+  try {
+    const id = (await appeler({ methode: 'POST', corps: { action: 'creer', entite: ENTITE_OK } })).corps.entite.id
+    etat.erreurUpsert = { code: '23514', message: 'suite figee : pas de trou' }
+    const r = await appeler({ methode: 'POST', corps: { action: 'numerotation', id, numerotation: { prefixe: 'HS', prochain_numero: 3 } } })
+    assert.equal(r.code, 409); assert.equal(r.corps.motif, 'suite_figee')
+    etat.erreurUpsert = { code: '08006', message: 'connexion perdue' }
+    const p = await appeler({ methode: 'POST', corps: { action: 'numerotation', id, numerotation: { prefixe: 'HS', prochain_numero: 3 } } })
+    assert.equal(p.code, 503, 'une vraie panne reste une panne')
   } finally { fini() }
 })
 

@@ -65,7 +65,9 @@ async function lireEcran (req, res) {
   // AUTOMATIQUE : une archivee n'emet plus, et en manuelle l'hote saisit
   // chaque numero a l'emission (Q5 bis) — il n'y a pas de suite a montrer.
   const actives = ents.entites.filter(e => !e.archivee_le && e.numerotation_factures !== 'manuel')
-  const suites = await Promise.all(actives.map(e => compter(EJ.numerotation(compte, e.id, { db: base }))))
+  // Une suite coute 1 ou 2 requetes : c'est elle qui le dit (review 2, constat 2).
+  const suites = await Promise.all(actives.map(e => EJ.numerotation(compte, e.id, { db: base })))
+  requetes += suites.reduce((n, s) => n + (s.requetes || 0), 0)
   if (suites.some(s => !s.ok)) return res.status(503).json({ error: 'panne', motif: 'panne' })
   const numerotations = {}
   actives.forEach((e, i) => { numerotations[e.id] = suites[i].suite })

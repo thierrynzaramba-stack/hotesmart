@@ -219,16 +219,21 @@ create table if not exists
       or prochain_numero > dernier_emis))
 );
 
--- ⚠ UNE SUITE ENTAMEE EST FIGEE EN BASE
--- (Thierry, 9 nov. 2026 : en automatique,
--- HoteSmart enchaine, sans trou) :
--- - le prefixe ne change plus une fois un numero
---   emis dans l'annee ;
--- - le prochain numero est TOUJOURS le dernier
---   emis + 1 : on ne le releve plus (un trou) ;
--- - `dernier_emis` ne baisse jamais et ne
---   revient jamais a vide (revue de 447ff3e0,
---   constat 5).
+-- ⚠ LA SUITE EST GARDEE EN BASE, ET C'EST LA
+-- SEULE GARANTIE « SANS TROU » (Thierry,
+-- 9 nov. 2026 ; review 2 de l'etape 1,
+-- constat 1 : l'ancien trigger laissait sauter
+-- `dernier_emis`, ne voyait ni la premiere
+-- emission, ni l'INSERT, ni le DELETE) :
+-- - une ligne nait VIERGE (aucun numero emis) ;
+-- - ses cles (entite, compte, annee) ne
+--   bougent jamais ;
+-- - un numero emis est TOUJOURS l'ancien
+--   `prochain_numero` : ni saut, ni baisse,
+--   ni retour a vide ;
+-- - des qu'un numero est emis, le prefixe est
+--   fige et le prochain est le dernier + 1 ;
+-- - une suite entamee ne se supprime pas.
 create or replace function
   public.fvs_suite_protegee()
 returns trigger
@@ -236,25 +241,50 @@ language plpgsql
 set search_path = public
 as $$
 begin
-  if old.dernier_emis is not null then
-    if new.prefixe <> old.prefixe then
+  if tg_op = 'DELETE' then
+    if old.dernier_emis is not null then
       raise exception
-        'prefixe fige apres une emission'
+        'suite entamee : suppression refusee'
         using errcode = '23514';
     end if;
-    if new.dernier_emis is null
-       or new.dernier_emis < old.dernier_emis
-    then
+    return old;
+  end if;
+  if tg_op = 'INSERT' then
+    if new.dernier_emis is not null then
       raise exception
-        'dernier numero emis en baisse'
+        'une suite nait sans numero emis'
         using errcode = '23514';
     end if;
-    if new.prochain_numero
+    return new;
+  end if;
+  if new.entite_id <> old.entite_id
+     or new.user_id <> old.user_id
+     or new.annee <> old.annee then
+    raise exception
+      'cles de la suite figees'
+      using errcode = '23514';
+  end if;
+  if new.dernier_emis
+     is distinct from old.dernier_emis
+     and (new.dernier_emis is null
+       or new.dernier_emis
+          <> old.prochain_numero) then
+    raise exception
+      'numero emis hors de la suite'
+      using errcode = '23514';
+  end if;
+  if new.dernier_emis is not null
+     and new.prefixe <> old.prefixe then
+    raise exception
+      'prefixe fige apres une emission'
+      using errcode = '23514';
+  end if;
+  if new.dernier_emis is not null
+     and new.prochain_numero
        <> new.dernier_emis + 1 then
-      raise exception
-        'suite figee : pas de trou'
-        using errcode = '23514';
-    end if;
+    raise exception
+      'suite figee : pas de trou'
+      using errcode = '23514';
   end if;
   return new;
 end
@@ -265,7 +295,7 @@ drop trigger if exists
   on public.factures_voyageur_suites;
 
 create trigger fvs_suite_protegee_trg
-  before update
+  before insert or update or delete
   on public.factures_voyageur_suites
   for each row execute function
   public.fvs_suite_protegee();

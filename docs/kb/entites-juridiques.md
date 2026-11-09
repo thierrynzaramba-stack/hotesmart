@@ -46,10 +46,23 @@ aucune entité automatique, aucune reprise des comptes existants.
   ou **manuelle** (Thierry, 9 novembre 2026). En automatique, préfixe et
   premier numéro se règlent **tant qu'aucune facture de l'année n'est
   partie** ; ensuite la suite est **figée** : `reglerNumerotation` refuse tout
-  (`suite_figee`, 409) et le trigger `fvs_suite_protegee` aussi — préfixe
-  inchangé, `prochain_numero = dernier_emis + 1` (pas de trou), `dernier_emis`
-  qui ne baisse jamais ni ne revient à vide (revue de 447ff3e0, constat 5).
-  En manuelle, l'hôte saisit chaque numéro à l'émission (étape 3) ; le GET ne
+  (`suite_figee`, 409, y compris quand le trigger refuse entre la lecture et
+  l'écriture) et le trigger `fvs_suite_protegee` aussi.
+- ⚠ **Le trigger est la seule garantie « sans trou » en base** (review 2 de
+  l'étape 1, constat 1 : l'ancien laissait `dernier_emis` sauter de 15 à 40,
+  ne voyait ni la première émission, ni l'INSERT, ni le DELETE). Il porte
+  sur `before insert or update or delete` : une suite **naît vierge**
+  (`dernier_emis` vide) ; ses clés (entité, compte, année) ne bougent jamais ;
+  un numéro émis est **toujours l'ancien `prochain_numero`** — ni saut, ni
+  baisse, ni retour à vide ; dès qu'un numéro est émis, le préfixe est figé et
+  `prochain_numero = dernier_emis + 1` ; une suite entamée ne se supprime pas.
+  **Pour l'étape 3** : émettre, c'est verrouiller la ligne puis
+  `dernier_emis = prochain_numero, prochain_numero = prochain_numero + 1` ;
+  une année sans ligne se crée d'abord vierge. **Épreuve sur un vrai
+  Postgres** : `bash scripts/eprouver-suites-factures.sh` (cluster jetable
+  créé et détruit par le script, 20 gestes ; l'ancien trigger y faisait
+  8 écarts).
+- En manuelle, l'hôte saisit chaque numéro à l'émission (étape 3) ; le GET ne
   calcule aucune suite pour elle. L'année est celle d'Europe/Paris ; au
   1er janvier, le préfixe de la dernière année connue est repris et le numéro
   repart à 1.
@@ -102,3 +115,7 @@ d'appels, entité archivée, refus repeint, échappement, page non délégable),
 revue ;
 `tests/ecrans-sans-biens-archives.test.js` couvre la liste des logements de
 l'écran ; `tests/pages-non-delegables.test.js` recense la page.
+`Server-Timing` est vérifié au nombre exact (une suite coûte 1 ou 2 requêtes
+et le dit : `numerotation(...).requetes`). Les tests ne lisent que le texte du
+SQL : le comportement du trigger se prouve par
+`scripts/eprouver-suites-factures.sh`.
