@@ -1222,5 +1222,9 @@
   "yfe.err_trop": "Demasiadas noches para un solo cambio ({max} como máximo): elija menos.",
   "yfe.err_en_route": "El guardado se detuvo a mitad: {n, plural, =0 {no se escribió nada} one {se escribió # ajuste} other {se escribieron # ajustes}}. La pantalla se actualiza.",
   "yfe.err_simulation": "Falló el cálculo de lo que cambiaría: nada ha cambiado. Inténtelo de nuevo.",
-  "yfe.err_ecriture": "Se rechazó el guardado: nada ha cambiado."
+  "yfe.err_ecriture": "Se rechazó el guardado: nada ha cambiado.",
+  "yfe.err_session": "Su sesión ha caducado: vuelva a conectarse y empiece de nuevo. No se ha guardado nada.",
+  "yfe.effet_aucune_retrait": "Ninguna noche abierta cambia de precio hoy.",
+  "yfe.tenues_ailleurs": "{n, plural, one {# noche elegida está ajustada} other {# noches elegidas están ajustadas}} por «{noms}», que pasa antes: lo que ajuste aquí no se aplicará.",
+  "yfe.rien_ailleurs": "Estas noches están ajustadas por «{noms}», que pasa antes: vuélvalas a automático desde ese evento."
 }

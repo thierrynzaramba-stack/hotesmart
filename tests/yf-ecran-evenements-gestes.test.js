@@ -20,7 +20,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { reponseEcran, monter, NOEL } = require('./outils/banc-evenements')
+const { reponseEcran, monter, materiauxDuBanc, NOEL } = require('./outils/banc-evenements')
 const { lignesApres, cleDePosition: cleServeur } = require('../lib/yield/simuler-positions')
 const { validerPosition } = require('../lib/yield/reglages-position')
 const P = require('../lib/yield/positions')
@@ -91,7 +91,10 @@ test('LE TEST QUI COMPTE : la couverture de chaque nuit commence par la ligne qu
   let vues = 0
   for (const p of e.positions) {
     const r = regle.get(p.date)
-    if (!r || r.cle !== NOEL) { assert.ok(!(p.lignes || []).length || !r, `${p.date} : couverte sans être réglée`); continue }
+    // Une nuit tenue par un AUTRE événement : si Noël la couvre aussi, c'est
+    // que l'autre passe avant — et la position le dit (`devant`).
+    if (r && r.cle !== NOEL) { if ((p.lignes || []).length) assert.equal(p.devant, r.cle, `${p.date} : tenue ailleurs sans « devant »`); continue }
+    if (!r) { assert.ok(!(p.lignes || []).length, `${p.date} : couverte sans être réglée`); continue }
     assert.equal(p.lignes[0], r.ligne, `${p.date} : la première ligne de la couverture n'est pas celle du résolveur`)
     vues++
   }
@@ -192,14 +195,158 @@ test('« Remettre en automatique » sur des nuits déjà au calcul ne demande ri
   assert.deepEqual(r.operationsPourLigne(l), [{ evenement: NOEL, zone: 'evenement', rang: 3, jour: 'lundi', nuit: null, niveau: null }])
 })
 
-test('« chaque année » : sur une période réglée par l’hôte (ligne ou crans d’avant), jamais sur une automatique ni pour une ligne « au calcul » seule', async () => {
+test('« chaque année » : sur une période dont une nuit est tenue par un réglage de l’hôte (ou des crans d’avant) — jamais pour une ligne qui n’agit pas', async () => {
   const r = await import(RENDU)
+  const idxDe = d => r.indexerNuits(d.nuits)
   const { d, e } = await noelDe()
-  assert.equal(r.porteUnReglage(e, d), false)
+  assert.equal(r.porteUnReglage(e, idxDe(d)), false)
   const p = e.positions.find(x => x.date === SAM_19)
-  assert.equal(r.porteUnReglage(e, { reglages_position: { lignes: [ligne('a', p, 'calcul')] } }), false)
-  assert.equal(r.porteUnReglage(e, { reglages_position: { lignes: [ligne('a', p, 'Haut')] } }), true)
-  assert.equal(r.porteUnReglage({ ...e, reglage_d_avant: { crans: 1, cle: NOEL, partage: false } }, d), true)
+  const auCalcul = await noelDe([ligne('a', p, 'calcul')])
+  assert.equal(r.porteUnReglage(auCalcul.e, idxDe(auCalcul.d)), false, 'une ligne « au calcul » seule')
+  // ⚠ CONSTAT DE REVIEW : une ligne sans nuit cette année (« le 3e lundi »)
+  // et une ligne `rang_requis` ne règlent aucune nuit.
+  const inertes = await noelDe([
+    { id: 'l3', evenement: NOEL, zone: 'evenement', rang: 3, jour: 'lundi', nuit: null, niveau: 'Haut' },
+    { id: 'sr', evenement: NOEL, zone: 'avant', rang: null, jour: null, nuit: null, niveau: 'Haut' }
+  ])
+  assert.equal(r.porteUnReglage(inertes.e, idxDe(inertes.d)), false, 'des lignes qui n’agissent pas')
+  const regle = await noelDe([ligne('a', p, 'Haut')])
+  assert.equal(r.porteUnReglage(regle.e, idxDe(regle.d)), true)
+  assert.equal(r.porteUnReglage({ ...e, reglage_d_avant: { crans: 1, cle: NOEL, partage: false } }, idxDe(d)), true)
+})
+
+const REVEILLON = 'commercial:reveillon_noel'
+const JEU_24 = '2026-12-24'
+
+test('LE TEST QUI COMPTE (review) : deux événements sur une nuit — le serveur dit qui la reprendrait (`relais`) et qui passe avant (`devant`)', async () => {
+  const { e: noel0 } = await noelDe()
+  const p24 = noel0.positions.find(p => p.date === JEU_24)
+  const d = await reponseEcran({ lignes: [
+    { id: 'rev', evenement: REVEILLON, zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'Exceptionnel' },
+    ligne('noel-24', p24, 'Haut')
+  ] })
+  const noel = d.evenements.find(x => x.cle === NOEL)
+  const rev = d.evenements.find(x => x.cle === REVEILLON)
+  assert.equal(noel.positions.find(p => p.date === JEU_24).devant, REVEILLON, 'le réveillon passe avant les vacances')
+  assert.deepEqual(rev.positions.find(p => p.date === JEU_24).relais, { niveau: 'Haut', cle: NOEL }, 'sans le réveillon, Noël reprend le 24')
+  assert.equal(rev.positions.find(p => p.date === JEU_24).devant, undefined)
+  // Sans réglage ailleurs, rien n'est dit.
+  const { e: seul } = await noelDe([ligne('noel-24', p24, 'Haut')])
+  assert.ok(seul.positions.every(p => !p.devant && !p.relais))
+})
+
+test('LE TEST QUI COMPTE : `relais` et `devant` sont ceux de `positionsDuContexte` sur toute la matière — les raccourcis de l’assemblée ne changent rien', async () => {
+  // L'assemblée résout seulement ce qui est inconnu, sur les seules dates
+  // utiles, avec les occurrences calculées une fois (mesure : 24 résolutions
+  // et 148 ms ramenées à 6 ms). Le juge, ici, est la version sans raccourci.
+  const { e: noel0 } = await noelDe()
+  const p24 = noel0.positions.find(p => p.date === JEU_24)
+  const octobre = { id: 'ev-salon-2', nom: 'Salon du chocolat', segment: 'evenement:salon_du_chocolat', date_debut: '2027-10-14', date_fin: '2027-10-17' }
+  const lignes = [
+    { id: 'rev', evenement: REVEILLON, zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'Exceptionnel' },
+    ligne('noel-24', p24, 'Haut'),
+    { id: 'we-2', evenement: NOEL, zone: 'avant', rang: 2, jour: null, nuit: null, niveau: 'Moyen' },
+    { id: 'f25', evenement: 'ferie:noel', zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'calcul' },
+    { id: 'salon', evenement: 'evenement:salon_du_chocolat', zone: 'evenement', rang: null, jour: null, nuit: null, niveau: 'Haut' }
+  ]
+  const o = { lignes, evenementsEnPlus: [octobre] }
+  const d = await reponseEcran(o)
+  const m = materiauxDuBanc(o)
+  const ref = ls => P.positionsDuContexte({ ...m, lignes: ls }).parNuit
+  const parNuit = ref(lignes)
+  const dansLaFenetre = new Set(d.nuits.map(n => n.date))
+  let compares = 0
+  for (const cle of new Set(d.evenements.filter(e => e.positions.length).map(e => e.cle))) {
+    const occs = d.evenements.filter(e => e.cle === cle)
+    const autres = lignes.filter(l => l.evenement !== cle)
+    const sans = ref(autres)
+    const auCalcul = new Map()
+    for (const e of occs) for (const p of e.positions) auCalcul.set(`${p.zone}|${p.rang}|${p.jour}|${p.nuit}`, { id: `h:${p.date}`, evenement: cle, zone: p.zone, rang: p.rang ?? null, jour: p.jour ?? null, nuit: p.nuit ?? null, niveau: 'calcul' })
+    const devant = ref([...autres, ...auCalcul.values()])
+    for (const e of occs) {
+      for (const p of e.positions) {
+        if (!dansLaFenetre.has(p.date)) continue
+        const s = sans.get(p.date)
+        const v = devant.get(p.date)
+        const attenduRelais = s && s.cle !== cle && s.niveau !== 'calcul' ? { niveau: s.niveau, cle: s.cle } : undefined
+        const attenduDevant = v && v.cle !== cle ? v.cle : undefined
+        assert.deepEqual(p.relais, attenduRelais, `${cle} ${p.date} : relais`)
+        assert.equal(p.devant, attenduDevant, `${cle} ${p.date} : devant`)
+        compares++
+      }
+    }
+  }
+  assert.ok(compares > 300, `${compares} positions comparées`)
+  assert.ok(parNuit.size)
+})
+
+test('LE TEST QUI COMPTE (review) : « Remettre en automatique » depuis le réveillon rend le 24 au CALCUL — pas aux vacances de Noël', async () => {
+  const r = await import(RENDU)
+  const { e: noel0 } = await noelDe()
+  const p24 = noel0.positions.find(p => p.date === JEU_24)
+  const cas = [
+    // Le réveillon et Noël règlent le 24 : retirer celui du réveillon le donnait à Noël.
+    [{ id: 'rev', evenement: REVEILLON, zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'Exceptionnel' }, ligne('noel-24', p24, 'Haut')],
+    // Seul Noël règle le 24 : la page disait « déjà en automatique ».
+    [ligne('noel-24', p24, 'Haut')]
+  ]
+  for (const lignes of cas) {
+    const d = await reponseEcran({ lignes })
+    const rev = d.evenements.find(x => x.cle === REVEILLON)
+    const choix = new Set([JEU_24])
+    const ops = r.operationsPourRetrait(rev, choix, lignes)
+    assert.deepEqual(ops, [{ evenement: REVEILLON, zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'calcul' }])
+    const a = await avant(lignes)
+    const b = await apres(lignes, ops)
+    assert.equal(b.get(JEU_24).niveau, 'calcul', `le 24 reste réglé : ${JSON.stringify(b.get(JEU_24))}`)
+    memesAilleurs(a, b, choix)
+  }
+})
+
+test('LE TEST QUI COMPTE (review) : depuis Noël, le 24 tenu par le réveillon est NOMMÉ — rien de ce qu’on pose ici ne s’y applique', async () => {
+  const r = await import(RENDU)
+  const { e: noel0 } = await noelDe()
+  const p24 = noel0.positions.find(p => p.date === JEU_24)
+  const lignes = [{ id: 'rev', evenement: REVEILLON, zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'Exceptionnel' }]
+  const d = await reponseEcran({ lignes })
+  const noel = d.evenements.find(x => x.cle === NOEL)
+  assert.deepEqual(r.nuitsTenuesAilleurs(noel, new Set([JEU_24, SAM_19])), [{ date: JEU_24, cle: REVEILLON }])
+  assert.deepEqual(r.operationsPourRetrait(noel, new Set([JEU_24]), lignes), [], 'rien à écrire ici')
+  // Et un niveau posé depuis Noël n'y change rien (la page l'a dit avant).
+  const ops = r.operationsPourNiveau(noel, new Set([JEU_24]), 'Base', lignes)
+  const b = await apres(lignes, ops)
+  assert.deepEqual(b.get(JEU_24), { niveau: 'Exceptionnel', cle: REVEILLON })
+  void p24
+})
+
+test('LE TEST QUI COMPTE (review) : une ligne LARGE ne se retire jamais — elle décide d’autres nuits, une autre occurrence ou une autre année', async () => {
+  const r = await import(RENDU)
+  // Le Salon du chocolat, déclaré deux fois dans la fenêtre : 19-21 mars et
+  // 14-17 octobre 2027. Le jeudi d'octobre n'a pas de position en mars.
+  const SALON = 'evenement:salon_du_chocolat'
+  const octobre = { id: 'ev-salon-2', nom: 'Salon du chocolat', segment: SALON, date_debut: '2027-10-14', date_fin: '2027-10-17' }
+  const lignes = [{ id: 'tout', evenement: SALON, zone: 'evenement', rang: null, jour: null, nuit: null, niveau: 'Haut' }]
+  const d = await reponseEcran({ lignes, evenementsEnPlus: [octobre] })
+  const mars = d.evenements.find(x => x.cle === SALON && x.debut === '2027-03-19')
+  const choix = new Set(r.selectionTout(mars, 'evenement'))
+  const ops = r.operationsPourRetrait(mars, choix, lignes)
+  assert.ok(ops.every(o => o.niveau === 'calcul' && o.rang != null), `une ligne large retirée : ${JSON.stringify(ops)}`)
+  const proposees = lignesApres(lignes, ops)
+  const avantN = new Map((await reponseEcran({ lignes, evenementsEnPlus: [octobre] })).nuits.map(n => [n.date, n.regle && n.regle.niveau]))
+  const apresN = new Map((await reponseEcran({ lignes: proposees, evenementsEnPlus: [octobre] })).nuits.map(n => [n.date, n.regle && n.regle.niveau]))
+  for (const date of choix) assert.equal(apresN.get(date), 'calcul', date)
+  // ⚠ UNE POSITION VAUT POUR TOUTES LES OCCURRENCES (Q2, B) : le 1er vendredi,
+  // samedi et dimanche d'octobre SONT les positions choisies en mars — ils
+  // suivent. Le jeudi 14, position qu'aucune nuit de mars ne porte, garde le
+  // niveau de la ligne large : c'est lui que la review a vu tomber.
+  for (const date of ['2027-10-15', '2027-10-16', '2027-10-17']) assert.equal(apresN.get(date), 'calcul', `${date} : même position qu'en mars`)
+  assert.equal(avantN.get('2027-10-14'), 'Haut')
+  assert.equal(apresN.get('2027-10-14'), 'Haut', 'le jeudi d’octobre, jamais choisi, a perdu son niveau')
+  // ⚠ LE WEEK-END COUPÉ : la ligne de week-end vaut aussi pour le samedi des
+  // années où il est entier — choisir le seul vendredi la masque, sans la retirer.
+  const we = [{ id: 'we-1', evenement: NOEL, zone: 'avant', rang: 1, jour: null, nuit: null, niveau: 'Haut' }]
+  const { e } = await noelDe(we)
+  assert.deepEqual(r.operationsPourRetrait(e, new Set([VEN_18]), we).map(o => [o.zone, o.rang, o.jour, o.niveau]), [['avant', 1, 'vendredi', 'calcul']])
 })
 
 // ─── La page ────────────────────────────────────────────────────────────────
@@ -489,4 +636,81 @@ test('LE TEST QUI COMPTE : après un geste enregistré, si la relecture échoue,
   assert.match(b.$('[data-bind="age"]').textContent, /mise à jour n’a pas pu se faire/)
   assert.equal(b.$('.yfe-ev--ouvert [data-tout]'), null, 'un geste offert sur un écran qui ignore le précédent')
   assert.match(b.$('.yfe-ev--ouvert .yfe-message').textContent, /Enregistré/, 'ce qui est écrit reste dit')
+})
+
+test('LE TEST QUI COMPTE (review, sécurité) : pendant un changement de logement, l’écran de l’ancien n’offre AUCUN geste — et rien ne s’écrit', async () => {
+  // Le scénario mesuré par la review : la réponse du nouveau logement tarde,
+  // la frise de l'ancien reste peinte, on y ouvre Noël et on règle — le PUT
+  // partait sur l'ancien, puis « Appliquer » restait offert sous le nouveau nom.
+  // ⚠ TROIS GARDES ENSEMBLE : rien ne s'ouvre pendant le changement, rien ne
+  // se règle (`changementEnCours`), et la réponse d'un autre logement oublie
+  // tout (`recevoir`). Contre-épreuve : les trois ôtées, il rougit.
+  const d = await reponseEcran()
+  const autre = { ...d, bien: d.biens[1].id }
+  let relache
+  const b = await monter({
+    ecran: async (url) => {
+      if (!url.includes(d.biens[1].id)) return d
+      await new Promise(res => { relache = res })
+      return autre
+    },
+    ecriture: async () => ({ corps: { simulation: true, confirmation: CONF, visees: {}, sans_nuit: [] } })
+  })
+  await b.choisir(b.$('[data-bind="bien"]'), d.biens[1].id)
+  // Un repeint pendant l'attente (un filtre touché) : le sélecteur garde le logement DEMANDÉ.
+  await b.cliquer(b.$('[data-filtre="officiel"]'))
+  await b.cliquer(b.$('[data-filtre="tous"]'))
+  assert.equal(b.$('[data-bind="bien"]').value, d.biens[1].id, 'le sélecteur revient sur l’ancien logement')
+  await ouvrirNoel(b)
+  for (const s of ['[data-tout]', '[data-niveau]', '[data-largeur]']) assert.equal(b.$(s), null, `${s} offert sur l’écran de l’ancien logement`)
+  const n19 = b.$$('[data-nuit]').find(j => j.dataset.nuit === SAM_19)
+  if (n19) await b.cliquer(n19)
+  assert.equal(b.$('[data-niveau]'), null)
+  relache()
+  await b.attendre(6)
+  assert.equal(ecritures(b).length, 0, 'une écriture est partie')
+  await ouvrirNoel(b)
+  assert.ok(b.$('[data-tout="evenement"]'), 'le nouveau logement se règle une fois relu')
+})
+
+test('l’éditeur NOMME les nuits tenues par un autre événement ; « Remettre en automatique » sur elles le dit, sans appel', async () => {
+  const lignes = [{ id: 'rev', evenement: REVEILLON, zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'Exceptionnel' }]
+  const d = await reponseEcran({ lignes })
+  const b = await monter({ ecran: async () => d, ecriture: async () => ({ corps: {} }) })
+  await ouvrirNoel(b)
+  await b.cliquer(nuitDe(b, JEU_24))
+  assert.match(b.$('.yfe-editeur').textContent, /1 nuit choisie est réglée par « Réveillon de Noël », qui passe avant/)
+  await b.cliquer(b.$('[data-auto]'))
+  assert.match(b.$('.yfe-geste').textContent, /remettez-les en automatique depuis cet événement/)
+  assert.equal(ecritures(b).length, 0)
+})
+
+test('une session expirée (401) le dit ; un retrait sans effet ne parle pas d’un « niveau choisi »', async () => {
+  const r = await import(RENDU)
+  const f = { t: k => k, money: n => `${n} €`, date: () => 'x' }
+  assert.deepEqual(r.effetDuGeste({ confirmation: { pilote: true, nuits: 0 } }, f, { retrait: true }), ['yfe.effet_aucune_retrait'])
+  const d = await reponseEcran()
+  const b = await monter({ ecran: async () => d, ecriture: async () => ({ status: 401, corps: { error: 'non_authentifie' } }) })
+  await ouvrirNoel(b)
+  await b.cliquer(nuitDe(b, SAM_19))
+  await b.cliquer(b.$('[data-niveau="Haut"]'))
+  await b.attendre()
+  assert.match(b.$('.yfe-geste').textContent, /session a expiré/)
+})
+
+test('le focus survit aux gestes : « + » de la zone, « Effacer le choix », « Annuler »', async () => {
+  const d = await reponseEcran()
+  const b = await monter({ ecran: async () => d, ecriture: async (m, c) => ({ corps: c.simuler ? { simulation: true, confirmation: CONF, visees: {}, sans_nuit: [] } : {} }) })
+  await ouvrirNoel(b)
+  await b.cliquer(b.$('[data-largeur="apres"][data-pas="1"]'))
+  await b.attendre(6)
+  assert.equal(b.w.document.activeElement, b.$('[data-largeur="apres"][data-pas="1"]'))
+  await b.cliquer(nuitDe(b, SAM_19))
+  await b.cliquer(b.$('[data-choix-vider]'))
+  assert.equal(b.w.document.activeElement, b.$('[data-tout="evenement"]'))
+  await b.cliquer(nuitDe(b, SAM_19))
+  await b.cliquer(b.$('[data-niveau="Haut"]'))
+  await b.attendre()
+  await b.cliquer(b.$('[data-geste-annuler]'))
+  assert.equal(b.w.document.activeElement, b.$('.yfe-editeur [data-niveau]'))
 })

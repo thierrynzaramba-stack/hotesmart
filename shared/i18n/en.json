@@ -1222,5 +1222,9 @@
   "yfe.err_trop": "Too many nights for one change ({max} at most): select fewer.",
   "yfe.err_en_route": "Saving stopped part way: {n, plural, =0 {nothing was written} one {# setting was written} other {# settings were written}}. The screen is updating.",
   "yfe.err_simulation": "Working out what would change failed: nothing changed. Try again.",
-  "yfe.err_ecriture": "Saving was refused: nothing changed."
+  "yfe.err_ecriture": "Saving was refused: nothing changed.",
+  "yfe.err_session": "Your session has expired: sign in again, then start over. Nothing was saved.",
+  "yfe.effet_aucune_retrait": "No open night changes price today.",
+  "yfe.tenues_ailleurs": "{n, plural, one {# selected night is set} other {# selected nights are set}} by “{noms}”, which comes first: what you set here will not apply to {n, plural, one {it} other {them}}.",
+  "yfe.rien_ailleurs": "These nights are set by “{noms}”, which comes first: put them back to automatic from that event."
 }

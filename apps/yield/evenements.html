@@ -89,7 +89,7 @@ import { motif } from '/shared/yield-motifs.js'
 import {
   indexerNuits, rendreLegende, rendreFrise, rendreListe, jourLongPar, pourLeCache, idEvenement, positionsParDate,
   selectionTout, operationsPourNiveau, operationsPourRetrait, operationsPourLigne, phraseEnregistre, etiquetteNiveau,
-  libellePosition, largeurAffichee, POSITIONS_PAR_GESTE, ID_SANS_EVENEMENT
+  libellePosition, largeurAffichee, nuitsTenuesAilleurs, nomDeCle, POSITIONS_PAR_GESTE, ID_SANS_EVENEMENT
 } from '/shared/yield-evenements-rendu.js'
 
 initErrorHandler()
@@ -167,7 +167,12 @@ const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: n
 
 // ⚠ RÉGLER EXIGE UNE RÉPONSE FRAÎCHE DU SERVEUR : un écran peint depuis le cache
 // n'a ni l'état des nuits, ni la certitude des droits ni des lignes posées.
-const peutRegler = () => !!(etat.data && etat.data.droits_ecriture && !etat.depuisCache && !etat.perime && Array.isArray(etat.data.evenements))
+// ⚠ ET PENDANT UN CHANGEMENT DE LOGEMENT, RIEN NE SE RÈGLE (review de l'étape
+// 3, constat de sécurité) : l'écran encore peint est celui de l'ANCIEN
+// logement — un geste lancé là partait sur lui, puis sa confirmation restait
+// offerte sous le nom du nouveau, et « Appliquer » écrivait sur le premier.
+const changementEnCours = () => !!(etat.bienVoulu && etat.data && etat.data.bien !== etat.bienVoulu)
+const peutRegler = () => !!(etat.data && etat.data.droits_ecriture && !etat.depuisCache && !etat.perime && !changementEnCours() && Array.isArray(etat.data.evenements))
 
 // Tout ce qui tient à l'événement ouvert s'oublie quand on en change.
 function oublierGestes () {
@@ -182,7 +187,9 @@ const evenementOuvert = () => (etat.data && etat.ouvert ? (etat.data.evenements 
 function peindreSelecteur () {
   const sel = $('[data-bind="bien"]')
   sel.innerHTML = etat.biens.map(b => `<option value="${esc(b.id)}">${esc(b.nom)}</option>`).join('')
-  const voulu = (etat.data && etat.data.bien) || etat.bienVoulu
+  // Le logement DEMANDÉ d'abord : pendant un changement, le sélecteur ne
+  // revient pas sur l'ancien à chaque repeint.
+  const voulu = etat.bienVoulu || (etat.data && etat.data.bien)
   if (voulu) sel.value = voulu
   $('[data-bind="bien-zone"]').hidden = etat.biens.length < 2
 }
@@ -244,6 +251,14 @@ function peindre () {
 }
 
 function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
+  // ⚠ UN AUTRE LOGEMENT EFFACE TOUT CE QUI TENAIT AU PRÉCÉDENT : l'événement
+  // ouvert, la nuit, le choix, le geste — un geste n'appartient qu'au logement
+  // qui l'a vu naître (review de l'étape 3).
+  if (etat.data && d && etat.data.bien !== d.bien) {
+    etat.ouvert = null
+    etat.nuit = null
+    oublierGestes()
+  }
   etat.data = d
   etat.depuisCache = depuisCache
   if (!depuisCache) etat.perime = false
@@ -336,7 +351,8 @@ const lignesPosees = () => (etat.data && etat.data.reglages_position && etat.dat
 function erreurDeGeste (r) {
   if (!r) return t('yfe.err_reseau')
   const code = r.data && r.data.error
-  if (r.status === 401 || r.status === 403) return t('yfe.err_refus')
+  if (r.status === 401) return t('yfe.err_session')
+  if (r.status === 403) return t('yfe.err_refus')
   if (code === 'geste_concurrent' || code === 'conflit_compte') return t('yfe.err_concurrent')
   if (code === 'trop_de_positions') return t('yfe.err_trop', { max: POSITIONS_PAR_GESTE })
   // ⚠ ARRÊTÉ EN ROUTE : ce qui est déjà écrit se dit, et l'écran se relit.
@@ -354,16 +370,16 @@ function focusSur (selecteur) {
   if (el && el.focus) el.focus()
 }
 
-async function lancerGeste (ev, source, libelle, operations) {
+async function lancerGeste (ev, source, libelle, operations, { retrait = false, rien = null } = {}) {
   if (etat.occupe || !peutRegler()) return
   const bien = etat.data.bien
   etat.message = null
-  if (!operations.length) { etat.geste = { ev, source, etat: 'rien', libelle, bien }; peindre(); focusSur('[data-geste-annuler]'); return }
+  if (!operations.length) { etat.geste = { ev, source, etat: 'rien', libelle, bien, message: rien }; peindre(); focusSur('[data-geste-annuler]'); return }
   if (operations.length > POSITIONS_PAR_GESTE) {
     etat.geste = { ev, source, etat: 'erreur', libelle, bien, message: t('yfe.err_trop', { max: POSITIONS_PAR_GESTE }) }
     peindre(); focusSur('[data-geste-annuler]'); return
   }
-  const g = { ev, source, etat: 'calcul', libelle, operations, bien }
+  const g = { ev, source, etat: 'calcul', libelle, operations, bien, retrait }
   etat.geste = g
   etat.occupe = true
   peindre()
@@ -379,6 +395,9 @@ async function lancerGeste (ev, source, libelle, operations) {
 async function appliquerGeste () {
   const g = etat.geste
   if (!g || g.etat !== 'confirmer' || etat.occupe || !peutRegler()) return
+  // ⚠ LE LOGEMENT DU GESTE EST CELUI DE L'ÉCRAN, VÉRIFIÉ AVANT L'ENVOI — pas
+  // seulement au retour : la réponse ne répare pas une écriture partie ailleurs.
+  if (!toujours(g)) { etat.geste = null; peindre(); return }
   g.etat = 'envoi'
   etat.occupe = true
   peindre()
@@ -397,6 +416,7 @@ async function appliquerGeste () {
     await charger()
     etat.occupe = false
     peindre()
+    rendreLeFocus('data-ouvrir', g.ev, false)
     return
   }
   etat.occupe = false
@@ -421,7 +441,7 @@ async function appliquerGeste () {
 // La zone affichée (+ / −) et le retrait des crans d'avant : `PATCH`, sans
 // simulation — la largeur ne change aucun prix ; le retrait des crans se
 // confirme dans la carte avant de partir.
-async function reglerSegment (ev, corps, { dire = false } = {}) {
+async function reglerSegment (ev, corps, { dire = false, focus = null } = {}) {
   if (etat.occupe || !peutRegler()) return
   const bien = etat.data.bien
   etat.occupe = true
@@ -438,11 +458,24 @@ async function reglerSegment (ev, corps, { dire = false } = {}) {
     await charger()
     etat.occupe = false
     peindre()
+    redonnerLeFocus(focus, ev)
     return
   }
   etat.occupe = false
   etat.message = { ev, texte: erreurDeGeste(r) }
   peindre()
+  redonnerLeFocus(focus, ev)
+}
+
+// ⚠ LE FOCUS SURVIT AUSSI AUX GESTES (review de l'étape 3) : après chaque
+// repeint, il revient sur le contrôle touché — ou, s'il a disparu ou s'est
+// désactivé (« + » à la borne), sur l'en-tête de l'événement.
+function redonnerLeFocus (selecteurs, ev) {
+  for (const s of [].concat(selecteurs || [])) {
+    const el = document.querySelector(s)
+    if (el && !el.disabled && el.focus) { el.focus(); return }
+  }
+  if (ev) rendreLeFocus('data-ouvrir', ev, false)
 }
 
 function surGeste (cible) {
@@ -462,6 +495,7 @@ function surGeste (cible) {
     etat.choix = new Set()
     etat.geste = null
     peindre()
+    redonnerLeFocus('[data-tout="evenement"]', etat.ouvert)
     return true
   }
   const niv = cible.closest('[data-niveau]')
@@ -470,19 +504,30 @@ function surGeste (cible) {
     return true
   }
   if (cible.closest('[data-auto]')) {
-    if (e) lancerGeste(etat.ouvert, 'choix', t('yfe.geste_auto', { n: etat.choix.size }), operationsPourRetrait(e, etat.choix, lignesPosees()))
+    if (e) {
+      // Rien à écrire, mais des nuits tenues par un autre événement : on le
+      // dit, au lieu de « déjà en automatique » (constat de review).
+      const ailleurs = nuitsTenuesAilleurs(e, etat.choix)
+      lancerGeste(etat.ouvert, 'choix', t('yfe.geste_auto', { n: etat.choix.size }), operationsPourRetrait(e, etat.choix, lignesPosees()),
+        { retrait: true, rien: ailleurs.length ? t('yfe.rien_ailleurs', { noms: [...new Set(ailleurs.map(x => nomDeCle(x.cle, etat.data, fmt)))].join(' », « ') }) : null })
+    }
     return true
   }
   const ret = cible.closest('[data-retirer-ligne]')
   if (ret) {
     const l = lignesPosees().find(x => String(x.id) === ret.dataset.retirerLigne)
     const carte = ret.closest('[data-ev]')
-    if (l) lancerGeste(carte ? carte.dataset.ev : ID_SANS_EVENEMENT, 'ligne', t('yfe.geste_retirer', { quoi: libellePosition(l, t, jourLong) }), operationsPourLigne(l))
+    if (l) lancerGeste(carte ? carte.dataset.ev : ID_SANS_EVENEMENT, 'ligne', t('yfe.geste_retirer', { quoi: libellePosition(l, t, jourLong) }), operationsPourLigne(l), { retrait: true })
     return true
   }
   if (cible.closest('[data-geste-appliquer]')) { appliquerGeste(); return true }
   if (cible.closest('[data-geste-annuler]')) {
-    if (!etat.occupe) { etat.geste = null; peindre() }
+    if (!etat.occupe) {
+      const ev = etat.geste && etat.geste.ev
+      etat.geste = null
+      peindre()
+      redonnerLeFocus(['.yfe-editeur [data-niveau]', '[data-tout="evenement"]'], ev && ev !== ID_SANS_EVENEMENT ? ev : null)
+    }
     return true
   }
   const larg = cible.closest('[data-largeur]')
@@ -491,7 +536,10 @@ function surGeste (cible) {
     const cote = larg.dataset.largeur === 'avant' ? 'avant' : 'apres'
     const max = Number.isInteger(etat.data.rayonnement_max) ? etat.data.rayonnement_max : 4
     const n = largeurAffichee(e)[cote] + (Number(larg.dataset.pas) < 0 ? -1 : 1)
-    if (n >= 0 && n <= max) reglerSegment(etat.ouvert, { segment: e.cle, ['weekends_' + cote]: n })
+    if (n >= 0 && n <= max) {
+      reglerSegment(etat.ouvert, { segment: e.cle, ['weekends_' + cote]: n },
+        { focus: [`[data-largeur="${cote}"][data-pas="${larg.dataset.pas}"]`, `[data-largeur="${cote}"]:not([data-pas="${larg.dataset.pas}"])`] })
+    }
     return true
   }
   if (cible.closest('[data-crans-retirer]')) {
@@ -499,7 +547,7 @@ function surGeste (cible) {
     return true
   }
   if (cible.closest('[data-crans-annuler]')) {
-    if (!etat.occupe) { etat.cransConfirmer = null; peindre() }
+    if (!etat.occupe) { etat.cransConfirmer = null; peindre(); redonnerLeFocus('[data-crans-retirer]', etat.ouvert) }
     return true
   }
   if (cible.closest('[data-crans-confirmer]')) {
@@ -515,8 +563,10 @@ document.addEventListener('click', (ev) => {
     const id = o.dataset.ouvrir
     const depuisFrise = !!o.closest('[data-bind="frise"]')
     const ouvrir = etat.ouvert !== id
-    // ⚠ UN GESTE EN VOL GARDE SON ÉVÉNEMENT : on n'en ouvre pas un autre sous lui.
-    if (etat.occupe) return
+    // ⚠ UN GESTE EN VOL GARDE SON ÉVÉNEMENT : on n'en ouvre pas un autre sous
+    // lui. Et pendant un changement de logement, l'écran peint est celui de
+    // l'ancien : on n'y ouvre rien.
+    if (etat.occupe || changementEnCours()) return
     etat.ouvert = ouvrir ? id : null
     etat.nuit = null
     oublierGestes()

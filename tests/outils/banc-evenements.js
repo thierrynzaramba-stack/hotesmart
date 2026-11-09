@@ -48,6 +48,21 @@ function grille () {
   }
 }
 
+function evenementsDuBanc (o, coupees) {
+  return [...DC.datesCommerciales('2023-01-01', '2027-12-31', { desactivees: coupees }), SALON, ...(o.evenementsEnPlus || [])]
+}
+
+/**
+ * LA MATIÈRE DES POSITIONS du banc, telle que `preparerContexte` la donne à
+ * l'assemblée — pour qu'un test rejoue `positionsDuContexte` sur la même.
+ */
+function materiauxDuBanc (o = {}) {
+  const reglages = o.reglages || new Map()
+  const coupees = new Set()
+  for (const [cle, r] of reglages) if (r && r.actif === false) coupees.add(cle)
+  return { reglages, zoneBien: 'C', vacances: VACANCES, evenements: evenementsDuBanc(o, coupees), debut: '2026-11-01', fin: '2027-11-09' }
+}
+
 /**
  * @param o.lignes   lignes de réglage par position
  * @param o.reglages Map des réglages d'événement (crans, largeurs, coupures)
@@ -60,7 +75,7 @@ async function reponseEcran (o = {}) {
   const lignes = o.lignes || []
   const coupees = new Set()
   for (const [cle, r] of reglages) if (r && r.actif === false) coupees.add(cle)
-  const evenements = [...DC.datesCommerciales('2023-01-01', '2027-12-31', { desactivees: coupees }), SALON, ...(o.evenementsEnPlus || [])]
+  const evenements = evenementsDuBanc(o, coupees)
   const preparer = async (s, bien, compte, opt) => {
     const materiauxPositions = { reglages, zoneBien: 'C', vacances: VACANCES, evenements, debut: '2026-11-01', fin: opt.fin }
     const parDate = new Map()
@@ -221,4 +236,4 @@ async function monter (o = {}) {
   }
 }
 
-module.exports = { reponseEcran, monter, AUJ, NOEL, NIV }
+module.exports = { reponseEcran, monter, materiauxDuBanc, AUJ, NOEL, NIV }

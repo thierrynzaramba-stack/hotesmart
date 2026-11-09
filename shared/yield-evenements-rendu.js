@@ -293,37 +293,67 @@ export function operationsPourNiveau (e, choix, niveau, lignes = []) {
 }
 
 /**
- * LE GESTE « REMETTRE EN AUTOMATIQUE » : pour chaque nuit choisie, les lignes
- * de l'événement qui la couvrent, de la plus précise à la plus large.
- * - une ligne qui ne DÉCIDE d'aucune nuit hors du choix se retire ;
- * - une ligne qui en décide d'autres (le week-end entier, quand l'hôte ne
- *   choisit que le samedi) reste : la nuit choisie est alors rendue au calcul
- *   par SA position (`calcul`), sans toucher aux autres ;
- * - une ligne `calcul` rencontrée en chemin : la nuit est déjà au calcul.
- * ⚠ SANS CELA, retirer la ligne exacte d'un samedi rendait la main à la ligne
- * du week-end : la nuit restait réglée, et l'hôte croyait l'inverse.
+ * LE GESTE « REMETTRE EN AUTOMATIQUE » : chaque nuit choisie revient au
+ * calcul, et AUCUNE autre ne change — ni dans cette occurrence, ni une autre
+ * année (une ligne de position vaut chaque année).
+ * Pour chaque nuit, les lignes de l'événement qui la couvrent, de la plus
+ * précise à la plus large (`positions[].lignes`, par le serveur) :
+ * - la ligne de SA position (« le 2e samedi ») se retire : elle ne désigne
+ *   que cette position, d'une année à l'autre ;
+ * - la ligne d'un week-end du rayonnement se retire si ses DEUX nuits sont
+ *   choisies — l'hôte a choisi tout le week-end ;
+ * - toute ligne PLUS LARGE (le week-end dont une nuit seulement est choisie,
+ *   « toutes les nuits », « tous les samedis ») reste : elle décide d'autres
+ *   nuits, cette année ou une autre (constat de review : « tout l'événement »
+ *   des Salons de mars retirait la ligne, et le jeudi d'octobre — position
+ *   absente en mars — perdait son niveau). La nuit est rendue au calcul par SA
+ *   position (`calcul`), comme Q2, B le veut pour un niveau ;
+ * - une ligne « au calcul » rencontrée : la nuit y est déjà ;
+ * - enfin, si un AUTRE événement reprendrait la nuit (`relais`), elle est
+ *   rendue au calcul par sa position ici — sinon retirer le réveillon
+ *   donnait le 24 aux vacances de Noël, et l'hôte croyait l'inverse. Quand
+ *   un autre événement PASSE AVANT (`devant`), rien de ce qu'on écrit ici ne
+ *   s'appliquerait : la page le dit (`nuitsTenuesAilleurs`).
  * @param lignes `reglages_position.lignes` (id → evenement, zone, rang, jour, nuit, niveau)
  */
 export function operationsPourRetrait (e, choix, lignes) {
   const parDate = positionsParDate(e)
   const parId = new Map((lignes || []).map(l => [l.id, l]))
-  const tenues = new Set()
-  for (const p of e.positions || []) if (!choix.has(p.date) && (p.lignes || []).length) tenues.add(p.lignes[0])
+  const weekEndsChoisis = new Set((e.week_ends || [])
+    .filter(w => w.nuits.length === 2 && w.nuits.every(d => choix.has(d)))
+    .map(w => cleDePosition(positionDe(e.cle, { zone: w.zone, rang: w.rang }))))
   const ops = new Map()
   for (const d of [...choix].sort()) {
     const p = parDate.get(d)
     if (!p) continue
+    const exacte = positionDe(e.cle, p)
+    const kExacte = cleDePosition(exacte)
+    let auCalcul = false
+    let tenue = false
     for (const id of p.lignes || []) {
       const l = parId.get(id)
       if (!l) continue
-      if (l.niveau === CALCUL) break
-      if (!tenues.has(id)) { const pos = positionDe(e.cle, l); ops.set(cleDePosition(pos), { ...pos, niveau: null }); continue }
-      const pos = positionDe(e.cle, p)
-      ops.set(cleDePosition(pos), { ...pos, niveau: CALCUL })
+      if (l.niveau === CALCUL) { auCalcul = true; break }
+      const k = cleDePosition(positionDe(e.cle, l))
+      if (k === kExacte || weekEndsChoisis.has(k)) { ops.set(k, { ...positionDe(e.cle, l), niveau: null }); continue }
+      tenue = true
       break
     }
+    if (auCalcul) continue
+    if (tenue || (p.relais && !p.devant)) ops.set(kExacte, { ...exacte, niveau: CALCUL })
   }
   return [...ops.values()]
+}
+
+/**
+ * LES NUITS CHOISIES QU'UN AUTRE ÉVÉNEMENT RÈGLE ET QUI PASSE AVANT (`devant`,
+ * par le serveur) : ni un niveau ni « automatique » posé ici ne s'y
+ * appliquerait. L'éditeur les nomme, avec l'événement qui les tient.
+ * @returns [{ date, cle }]
+ */
+export function nuitsTenuesAilleurs (e, choix) {
+  const parDate = positionsParDate(e)
+  return [...choix].sort().map(d => parDate.get(d)).filter(p => p && p.devant).map(p => ({ date: p.date, cle: p.devant }))
 }
 
 /** Retirer UNE ligne (une ligne sans nuit, ou sans événement cette année). */
@@ -345,7 +375,7 @@ export function resumeDuChoix (choix, fmt) {
  * ⚠ SUR UN BIEN NON PILOTÉ, AUCUN MOT SUR L'ENVOI AU CANAL (observation de la
  * recette 2c, spec §4) ; sur une ouverture illisible, on ne promet rien.
  */
-export function effetDuGeste (apercu, fmt) {
+export function effetDuGeste (apercu, fmt, { retrait = false } = {}) {
   const c = (apercu && apercu.confirmation) || {}
   const out = []
   if (!c.pilote) out.push(fmt.t('yfe.effet_non_pilote'))
@@ -361,7 +391,7 @@ export function effetDuGeste (apercu, fmt) {
       ? fmt.t('yfe.effet_une_nuit', { du: fmt.date(dateLocale(c.du), opts), prix })
       : fmt.t('yfe.effet_nuits', { n: c.nuits, du: fmt.date(dateLocale(c.du), opts), au: fmt.date(dateLocale(c.au), opts), prix }))
     out.push(fmt.t('yfe.effet_envoi'))
-  } else out.push(fmt.t('yfe.effet_aucune'))
+  } else out.push(fmt.t(retrait ? 'yfe.effet_aucune_retrait' : 'yfe.effet_aucune'))
   const sansNuit = ((apercu && apercu.sans_nuit) || []).length
   if (sansNuit) out.push(fmt.t('yfe.effet_sans_nuit', { n: sansNuit }))
   return out
@@ -561,17 +591,31 @@ export function rendreGeste (g, fmt) {
   const fermer = `<button type="button" class="btn btn--secondary" data-geste-annuler>${esc(fmt.t('yfe.fermer'))}</button>`
   let corps = ''
   if (g.etat === 'calcul') corps = `<p class="muted small">${esc(fmt.t('yfe.calcul_en_cours'))}</p>`
-  else if (g.etat === 'rien') corps = `<p class="small">${esc(fmt.t('yfe.rien_a_remettre'))}</p><div class="yfe-geste__actions">${fermer}</div>`
+  else if (g.etat === 'rien') corps = `<p class="small">${esc(g.message || fmt.t('yfe.rien_a_remettre'))}</p><div class="yfe-geste__actions">${fermer}</div>`
   else if (g.etat === 'erreur') corps = `<p class="yfe-alerte">${esc(g.message)}</p><div class="yfe-geste__actions">${fermer}</div>`
   else {
     const envoi = g.etat === 'envoi'
     corps = (g.relance ? `<p class="yfe-alerte">${esc(fmt.t('yfe.a_confirmer_relance'))}</p>` : '')
-      + effetDuGeste(g.apercu, fmt).map(x => `<p class="small">${esc(x)}</p>`).join('')
+      + effetDuGeste(g.apercu, fmt, { retrait: !!g.retrait }).map(x => `<p class="small">${esc(x)}</p>`).join('')
       + `<div class="yfe-geste__actions">`
       + `<button type="button" class="btn btn--primary" data-geste-appliquer${desactive(envoi)}>${esc(fmt.t(envoi ? 'yfe.enregistrement' : 'yfe.appliquer'))}</button>`
       + `<button type="button" class="btn btn--secondary" data-geste-annuler${desactive(envoi)}>${esc(fmt.t('yfe.annuler'))}</button></div>`
   }
   return `<div class="yfe-geste" aria-live="polite">${tete}${corps}</div>`
+}
+
+/** Le nom d'un événement désigné par sa clé — celui de sa carte, sinon sa clé lisible. */
+export function nomDeCle (cle, data, fmt) {
+  const e = (data.evenements || []).find(x => x.cle === cle)
+  return e ? nomDe(e, fmt) : cleLisible(cle)
+}
+
+// Les nuits choisies qu'un autre événement tient, en le nommant (`devant`).
+function rendreTenuesAilleurs (e, data, choix, fmt) {
+  const ailleurs = nuitsTenuesAilleurs(e, choix)
+  if (!ailleurs.length) return ''
+  const noms = [...new Set(ailleurs.map(x => nomDeCle(x.cle, data, fmt)))].join(' », « ')
+  return `<p class="yfe-alerte">${esc(fmt.t('yfe.tenues_ailleurs', { n: ailleurs.length, noms }))}</p>`
 }
 
 /**
@@ -602,6 +646,7 @@ export function rendreGestes (e, data, ui, fmt) {
       + `<p class="yfe-editeur__choix"><strong>${esc(resumeDuChoix(ui.choix, fmt))}</strong>`
       + ` <button type="button" class="btn btn--secondary" data-choix-vider${occ}>${esc(fmt.t('yfe.choix_vider'))}</button></p>`
       + `<div class="yfe-editeur__niveaux">${pastilles}</div>`
+      + rendreTenuesAilleurs(e, data, ui.choix, fmt)
       + `<button type="button" class="btn btn--secondary" data-auto${occ}>${esc(fmt.t('yfe.remettre_auto'))}</button>`
       // Q2, B : ce que veut dire un réglage par position, dit AU MOMENT du geste.
       + `<p class="caption muted">${esc(fmt.t('yfe.chaque_annee_aide'))}</p>`
@@ -675,16 +720,20 @@ export function rendreSansEvenement (data, fmt, jourLong, ui = {}) {
 
 /**
  * « CHAQUE ANNÉE » (spec §6, registre §5) : sur toute période qui porte un
- * réglage de l'hôte — une ligne par position de cet événement, ou un réglage
- * d'avant en crans —, jamais sur une période automatique. Un réglage par
- * position ne porte pas de date : il vaut pour toutes les occurrences.
- * ⚠ UNE LIGNE « AU CALCUL » N'EST PAS UN RÉGLAGE QUI SE VOIT : elle rend la nuit
- * au calcul ; seule, elle laisserait croire l'événement réglé.
+ * réglage de l'hôte — une nuit de cette occurrence tenue par un de SES
+ * réglages (selon le résolveur, `nuits[].regle`), ou un réglage d'avant en
+ * crans —, jamais sur une période automatique. Un réglage par position ne
+ * porte pas de date : il vaut pour toutes les occurrences.
+ * ⚠ UNE LIGNE QUI N'AGIT PAS NE COMPTE PAS (constat de review) : « au
+ * calcul », sans nuit cette année, ou `rang_requis` — le badge dirait réglée
+ * une période dont aucune nuit ne l'est.
  */
-export function porteUnReglage (e, data) {
+export function porteUnReglage (e, idx) {
   if (e.reglage_d_avant) return true
-  const lignes = (data.reglages_position && data.reglages_position.lignes) || []
-  return lignes.some(l => l.evenement === e.cle && l.niveau != null && l.niveau !== CALCUL)
+  return (e.positions || []).some(p => {
+    const n = idx && typeof idx.get === 'function' ? idx.get(p.date) : null
+    return !!(n && n.regle && n.regle.cle === e.cle && n.regle.niveau !== CALCUL)
+  })
 }
 
 function rendreCransDAvant (e, ui, fmt) {
@@ -728,7 +777,7 @@ export function rendreListe (data, idx, ui, fmt, jourLong) {
       const r = resumeEvenement(e, idx)
       const badges = [`<span class="yfe-badge">${esc(fmt.t('yfe.famille_' + e.famille))}</span>`]
       if (r.regle) badges.push(`<span class="yfe-badge yfe-badge--regle">${esc(fmt.t('yfe.regle_par_vous'))}</span>`)
-      if (e.actif && porteUnReglage(e, data)) badges.push(`<span class="yfe-badge">${esc(fmt.t('yfe.chaque_annee'))}</span>`)
+      if (e.actif && porteUnReglage(e, idx)) badges.push(`<span class="yfe-badge">${esc(fmt.t('yfe.chaque_annee'))}</span>`)
       if (!e.actif) badges.push(`<span class="yfe-badge">${esc(fmt.t('yfe.coupe'))}</span>`)
       let detail = ''
       if (ouvert) {
