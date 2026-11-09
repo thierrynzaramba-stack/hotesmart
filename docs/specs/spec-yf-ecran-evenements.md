@@ -317,6 +317,18 @@ contexte (2) ; crans d'avant par la règle du moteur (3) ; `week_ends` (4) ;
 identifiant en minuscules et bien raccordé par défaut (5) ; tests étendus à
 toute l'année et à la garde de l'écrivain, chargeur rétabli en `finally` (7).
 Le constat 6 est la limite connue ci-dessus.
+**Trace complétée le 10 novembre 2026 (demande du chef de file)** — branche
+`yf-ecran-evenements`, commit relu `e05b7844`, correctifs `5a597b90`. Le
+diff relu porte cinq fichiers : `api/ecran/evenements.js`,
+`lib/yield/ecran-evenements.js`, `tests/ecran-evenements.test.js`,
+`tests/ecrans-sans-biens-archives.test.js`, cette spec. Les sept constats
+portent sur `lib/yield/ecran-evenements.js` (1, 2, 3, 4, 6),
+`api/ecran/evenements.js` (5) et `tests/ecran-evenements.test.js` (7) : tous
+dans le diff, et les correctifs n'ont touché que ces fichiers et cette spec.
+⚠ **Le rapport d'origine n'est plus lisible** (le contexte de la session a été
+compacté, aucun transcript sur disque) : cette correspondance est reconstruite
+depuis les constats tels qu'ils sont écrits ci-dessus et depuis le diff des
+correctifs, pas relue ligne à ligne dans le rapport.
 
 **À mesurer sur staging avant la fin de 4a** : la durée et le nombre de
 requêtes de l'appel (`Server-Timing`) sur La bulle et Cœur de vie 23 —
