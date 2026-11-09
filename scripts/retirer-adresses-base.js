@@ -66,6 +66,18 @@ async function main () {
       console.log(`- ${b.name || b.id} (${b.provider})${b.provider === 'beds24' ? ' — PERD SON ADRESSE au déploiement : la remplir dans la fiche' : ''}`)
     }
   } else console.log('Tous les logements en service ont une adresse dans leur fiche.')
+  // ⚠ ET L'AUTRE MOITIÉ DU CAS BEDS24 (review 3 du lot, constat 1) : la fiche
+  // d'un logement Beds24 est écrite UNE fois, à sa matérialisation, et rien ne
+  // la remet à jour depuis Beds24. Avant le lot, c'est l'adresse rendue par
+  // Beds24 à l'instant qui partait ; depuis, celle de la fiche. Si l'adresse a
+  // changé chez Beds24 depuis, le voyageur recevrait l'ancienne. Ce script n'a
+  // pas l'API Beds24 : il liste, et la comparaison se fait à l'œil, AVANT la
+  // production.
+  const beds24 = biens.filter(b => !b.archive_le && b.provider === 'beds24' && propre(b.address))
+  if (beds24.length) {
+    console.log(`Logements Beds24 en service — adresse de la fiche, À COMPARER avec Beds24 avant la production : ${beds24.length}`)
+    for (const b of beds24) console.log(`- ${b.name || b.id} : « ${propre(b.address)} »`)
+  }
 
   const lignes = await toutLire(() => sb.from('knowledge')
     .select('id, user_id, property_id, value').eq('type', 'fixed').eq('key', 'adresse').order('id'))

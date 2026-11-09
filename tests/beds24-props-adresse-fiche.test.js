@@ -28,6 +28,7 @@ function injecter (chemin, exports) {
 
 function charger ({ lignes, archives = [], archivesIllisibles = false, erreurAdresses = null }) {
   const selects = []
+  const lectures = []
   const table = () => {
     const filtre = {}
     let colonnes = null
@@ -40,10 +41,15 @@ function charger ({ lignes, archives = [], archivesIllisibles = false, erreurAdr
       maybeSingle: async () => ({ data: lignes[filtre.provider_property_id] || null, error: null }),
       // La lecture dediee des adresses : une LISTE, bornee par `.in`.
       then (res, rej) {
+        lectures.push({ user_id: filtre.user_id, provider: filtre.provider, refs })
         if (erreurAdresses) return Promise.resolve({ data: null, error: erreurAdresses }).then(res, rej)
-        const data = Object.entries(lignes)
-          .filter(([ref]) => !refs || refs.includes(ref))
-          .map(([ref, l]) => ({ provider_property_id: ref, address: l.address }))
+        // ⚠ LE DOUBLE APPLIQUE LES FILTRES (review 3, constat 2) : il rendait
+        // tout sans `.in` et ignorait le compte, donc retirer ces filtres du
+        // code laissait le test « bornee, par compte » vert.
+        const data = (filtre.user_id === 'u1' && filtre.provider === 'beds24' && refs)
+          ? Object.entries(lignes).filter(([ref]) => refs.includes(ref))
+            .map(([ref, l]) => ({ provider_property_id: ref, address: l.address }))
+          : []
         return Promise.resolve({ data, error: null, colonnes }).then(res, rej)
       },
       insert: async () => ({ error: null }),
@@ -64,7 +70,7 @@ function charger ({ lignes, archives = [], archivesIllisibles = false, erreurAdr
   const mod = require('../lib/cron-beds24-props')
   delete require.cache[require.resolve('../lib/cron-beds24-props')]
   for (const c of chemins) delete require.cache[c]
-  return { mod, selects }
+  return { mod, selects, lectures }
 }
 
 test('LE TEST QUI COMPTE : l objet Beds24 porte l adresse de la fiche, et le remplaceur la prend', async () => {
@@ -122,10 +128,13 @@ test('lecture des adresses en echec : aucune decoration, l adresse Beds24 reste 
 })
 
 test('une seule lecture des adresses par compte, bornee aux biens rendus par Beds24', async () => {
-  const { mod, selects } = charger({ lignes: { 111: { id: 'a', active_at: 'x', address: 'A' }, 112: { id: 'b', active_at: 'x', address: 'B' } } })
+  const { mod, selects, lectures } = charger({ lignes: { 111: { id: 'a', active_at: 'x', address: 'A' }, 112: { id: 'b', active_at: 'x', address: 'B' }, 999: { id: 'z', active_at: 'x', address: 'Z' } } })
   const biens = [{ id: 111 }, { id: 112 }]
   await mod.materializeBeds24Properties('u1', biens, {})
   assert.strictEqual(selects.filter(c => c === 'provider_property_id, address').length, 1)
+  const lecture = lectures.find(l => l.refs)
+  assert.deepStrictEqual(lecture, { user_id: 'u1', provider: 'beds24', refs: ['111', '112'] },
+    'la lecture est bornee au compte, au provider et aux biens rendus par l API')
   assert.deepStrictEqual(biens.map(b => b.adresseFiche), ['A', 'B'])
 })
 

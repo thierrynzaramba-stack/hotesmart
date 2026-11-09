@@ -137,6 +137,12 @@ voyageur reçoit — §2, S2.)
    la fiche seule fait foi. Sans ligne `adresse` dans la base, ils
    n'apparaissent pas dans la première liste — et ils perdraient leur adresse
    au déploiement. Leur adresse se recopie dans la fiche avant la production.
+   **Et une troisième** (review 3) : les logements Beds24 en service AVEC une
+   adresse de fiche. Cette fiche est écrite une seule fois, à la première
+   synchronisation, et rien ne la remet à jour depuis Beds24 ; avant le lot,
+   c'est l'adresse rendue par Beds24 à l'instant qui partait. Une adresse
+   changée chez Beds24 depuis ferait partir l'ancienne : on compare, à l'œil,
+   avant la production.
 2. Trois cas : identiques ou base vide → rien à faire ; fiche vide → l'adresse
    de la base est recopiée dans la fiche **par l'écran de la fiche** (le même
    chemin qu'à la main, qui la transmet aussi au canal) ; **écart** → Thierry
