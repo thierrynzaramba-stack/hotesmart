@@ -2195,6 +2195,16 @@ async function retirerMonMenage (req, res, token, { propertyId, bookingId, depar
   if (errLog) {
     console.error('[menages-public] trace de retrait NON ECRITE:', menage.id, errLog.message)
   }
+  // PWA lot 2c-2 (docs/kb/pwa.md §11.3) : le logement n'a plus personne —
+  // l'hote et les membres qui ont le domaine `menages` sur ce bien l'apprennent
+  // comme un « Menage refuse » (decision de Thierry du 9 novembre 2026). Une
+  // fois : le retrait n'arrive qu'une fois (l'ecriture conditionnee ci-dessus).
+  // Ne leve jamais, et ATTENDUE avant la reponse (une fonction serverless peut
+  // etre coupee apres).
+  await require('../lib/notifications/evenements-menages').notifierMenageRefuse({
+    compte: pt.user_id, propertyId: String(propertyId), jour: departureDate,
+    prestataire: profil.first_name || null, db: supabase
+  })
   return res.json({ success: true, status: 'orphaned' })
 }
 

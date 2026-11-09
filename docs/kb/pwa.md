@@ -435,7 +435,8 @@ reçoit 2b et tout le 2c ensemble (Q24).
   écrire une ligne « membre accepté » au nom d'un tiers dont il connaît
   l'identifiant, et ses notifications partiraient sur les appareils de ce
   tiers. La cause est antérieure au lot (la même ligne ouvre déjà le compte au
-  tiers) : **dette à inscrire au registre**.
+  tiers) : **dette 135** du registre (docs/kb/dettes-v1.md), corrigée dans un
+  lot à part après le 2c, sur go de Thierry (décision B du 8 novembre).
 - Une personne qui a décoché la notification d'un événement et coché le SMS,
   avec un appareil abonné mort, ne reçoit pas le SMS de cet événement : ses
   appareils sont comptés, pas sondés. Le premier événement envoyé en
@@ -447,3 +448,455 @@ reçoit 2b et tout le 2c ensemble (Q24).
 **Recette sur staging (pas de cron)** : l'essai et « vider ma file » se
 lancent depuis l'onglet Notifications ouvert (console du navigateur, avec la
 session), ou par moi dans le navigateur de Thierry.
+
+## 11. Lot 2c-2 — les autres événements (8 novembre 2026)
+
+Branche `pwa-lot-2c2-evenements`, partie de `pwa-lot-2c1-envoi`. Un commit par
+domaine, chacun avec sa review. Les listes d'`agent_alert_config` restent
+servies jusqu'au lot 2c-3, qui les reprend en contacts : la production reçoit
+2b et tout le 2c ensemble (Q24), elle ne voit jamais l'état intermédiaire.
+
+### 11.1 Réservations (f, g, j)
+
+| Événement | Émetteur | Sujet, écran |
+|---|---|---|
+| f Nouvelle réservation | `lib/booking-changes-dispatch.js`, consommateur « 3 ter » | `resa:<id>`, `/calendrier` |
+| g Annulation ou modification | idem | `resa:<id>` (remplace la vente, sonne), `/calendrier` |
+| j Code d'accès non résolu | `lib/alert-notify.js` `alertMissingAccessCode` | `code:<id>`, `/pages/messages` |
+
+**Les règles, et pourquoi :**
+1. **Une réservation ancienne n'est pas une nouvelle réservation.** Un bien
+   qu'on connecte, une migration, un `demapped` font arriver des `new` pour des
+   séjours vendus depuis longtemps. f ne part que pour une vente **récente** :
+   date de vente **fiable** (une importée porte la date de migration), de trois
+   jours au plus (`dateDeVente`, lib/yield/eclatement.js). Une date inconnue ne
+   prévient pas : la plateforme a déjà prévenu l'hôte.
+2. **« Annulée » veut dire annulée.** `cancelled` couvre aussi une réservation
+   passée en blocage ou revenue en demande : le ménage doit le savoir, l'hôte ne
+   reçoit pas « réservation annulée » pour son propre blocage.
+3. **Une modification dit ce qui a changé** — les quatre champs du cœur
+   (arrivée, départ, adultes, enfants), jamais un montant.
+4. **Dix annulations ou modifications au plus par compte et par cycle.** Le
+   reliquat ne part pas, et il est **tracé comme un échec** (`processing_errors`,
+   incident fondateur) : une rafale est une anomalie. Le plafond borne un cycle,
+   pas une journée. Les ventes n'y entrent pas : leur garde est la date de vente.
+5. **Une réservation directe** : le titulaire reçoit le relevé détaillé
+   (`lib/notif-hote-resa.js`, coordonnées du voyageur, prix, conditions) ; l'e-mail
+   court du point d'envoi lui est retiré (`exclusions` du notifier) **quand ce
+   relevé est parti ou attend dans la file**, et seulement alors. La notification
+   reste. **Le relevé suit les réglages du titulaire pour l'événement f
+   (Nouvelle réservation)** (décision de Thierry du 8 novembre,
+   `lib/notifications/releve.js`) : e-mail décoché → pas de relevé ; heures
+   calmes → la file (`releve:<id>`), d'où il part **seul**, au titulaire seul,
+   jamais fondu dans le message regroupé ; la ligne ne porte que les références,
+   la réservation et le bien se **relisent** sur le compte de la ligne à la
+   sortie (défaite pendant la nuit → rien), et les réglages aussi (e-mail
+   décoché pendant la nuit → rien). La file en panne ne rend pas muet : il part
+   tout de suite. **Un relevé différé ne se perd jamais en silence** : une
+   lecture ratée le remet dans la file ; un envoi raté lève l'incident
+   `notif_hote_non_envoyee`, comme le chemin immédiat ; chaque relevé passe le
+   budget de la passe, et ce qui n'a pas le temps de partir revient dans la
+   file. Ce que la marge ne garantit pas : un relevé commencé, si le cycle est
+   tué pendant lui, a posé sa sentinelle et ne repartira pas.
+6. **Le code non résolu relit son bien** : les appelants passent la référence
+   provider, et un membre peut avoir son périmètre en UUID. **Une référence
+   Channex a la forme d'un UUID** : on cherche d'abord par la référence, puis par
+   l'identifiant. L'ancien « e-mail de repli au titulaire » est remplacé.
+7. **Les textes ne laissent jamais de trou** : une annulation Channex arrive
+   parfois sans dates ni voyageur (« Un voyageur : réservation annulée. ») ; le
+   prénom, tapé par un visiteur pour une réservation directe, est borné à
+   40 caractères ; le canal se dit par `canalNormalise` (« Booking.com »,
+   « Airbnb », « Direct »), jamais par l'orthographe du partenaire.
+8. **Chaque événement rédigé a son essai** (`essai_evenement`, logement fictif).
+
+**Limites connues :**
+- **Jusqu'au 2c-3, double e-mail possible pour j** : si l'adresse du titulaire
+  figure aussi dans les listes de la configuration d'alertes, il reçoit les
+  deux, et celui de la configuration ne suit pas ses réglages.
+- **Une annulation Channex sans dates** part sans séjour : la décision « fin de
+  plage » ne sait pas que l'arrivée est proche. La cause est en amont (le
+  snapshot fusionné perd les dates), hors du lot.
+- **L'e-mail du titulaire vient de son profil** (`is_owner`), plus de
+  l'adresse de connexion : un profil sans e-mail ne reçoit pas d'e-mail.
+- **Le relevé va au titulaire seul**, jamais aux membres qui ont le domaine
+  `reservations` : il porte les coordonnées du voyageur. Les membres reçoivent la
+  notification et l'e-mail courts.
+- **Le notifier tourne dans la boucle du dispatcher** : un appareil muet coûte
+  jusqu'à 5 s, et le budget du dispatcher se vérifie entre deux événements.
+
+### 11.2 Messages (b, c, d, e, k)
+
+Un module, `lib/notifications/evenements-messages.js`, appelé par **son**
+émetteur pour chaque événement ; aucun ne lève (un émetteur de messagerie ne
+s'arrête jamais pour une notification).
+
+| Événement | Émetteur | Sujet, écran |
+|---|---|---|
+| b Urgence de l'IA | `lib/cron-classify.js`, escalade `intervention` (si elle s'est écrite) | `conv:<id>`, `/pages/messages?conv=<id>` |
+| c Information manquante | idem, escalade `info_unknown` ; et l'arrêt de l'agent au plafond d'appels | `conv:<id>`, idem |
+| d Réponse à valider | idem, proposition posée en validation ; réponse automatique non délivrée ; et `lib/guestflow/brouillons-dus.js` quand une réponse différée est rendue à l'hôte (non délivrée, annulée par une garde, vide) | `conv:<id>`, idem |
+| e Nouveau message | `lib/record-message.js`, le writer unique de `messages` | `conv:<id>`, idem |
+| k Pause automatique | `lib/cron-alerting.js`, coupe-circuit | `pause:<ref>`, `/pages/messages?conv=<id>&volet=ia` |
+
+**Les règles, et pourquoi :**
+1. **UNE notification par conversation** (décision de Thierry du 9 novembre
+   2026) : b, c, d et e portent le **même sujet**, `conv:<réservation>`. La plus
+   récente remplace l'autre — « Nouveau message de Marie », puis « Réponse à
+   valider » à sa place — et **sonne** : chacune dit quelque chose de neuf
+   (l'anti-rejeu de l'agent garantit qu'un appel = un contenu neuf). Dans la
+   file (heures calmes), la plus récente remplace aussi la ligne qui attendait.
+2. **Le bien et le prénom, jamais le texte** (spec §7, Q6) — ni le message du
+   voyageur, ni le résumé de l'IA : le module ne les reçoit même pas. « Voyageur »
+   (le repli de la messagerie sans nom) n'est pas un prénom : la phrase dit
+   « un voyageur » dans la langue de la personne.
+3. **e part du writer unique**, après une **insertion réelle** d'un message de
+   voyageur : jamais un doublon, jamais un écho réconcilié, jamais un sortant.
+   Webhook, import récurrent et e-mail entrant passent tous par là (« le cœur
+   d'abord »). **Un message de plus de six heures ne prévient pas** : un import
+   de rattrapage écrit des messages anciens.
+4. **Ce qui prévient existe** : b, c et d ne partent que si leur tâche s'est
+   écrite (une insertion refusée est rejouée au cycle suivant et prévenait à
+   chaque fois).
+5. **Une réponse différée annoncée « elle partira seule » est suivie** : partie,
+   l'annonce qui attend en file est **retirée** (seulement elle : un nouveau
+   message arrivé depuis reste) ; rendue à l'hôte, « Réponse à valider » la
+   remplace.
+6. **k au titulaire seul** (domaine `null`), **à la bascule seulement**, sur le
+   volet des réglages de l'IA **du bien en pause** (le fil qui l'a déclenchée).
+   L'« e-mail explicatif » que `docs/kb/alertes.md` §3 annonçait n'existait pas
+   dans le code : ligne corrigée.
+7. **Le bien se relit** (`lib/notifications/bien.js`, partagé avec j) : ses deux
+   identifiants et son nom, sur le compte ; un bien archivé puis recréé sous la
+   même référence cède la place au bien actif.
+8. **Un émetteur léger reste léger** : le client de l'appelant descend jusqu'à
+   la lecture des appareils. Sans cela, le webhook chargeait le SDK de l'IA pour
+   une notification.
+
+**Limites connues :**
+- **Le délai d'alerte « information manquante » de GuestFlow** (`delais.alerte_info`,
+  « si l'hôte agit, pas d'alerte ») est enregistré mais **n'est lu par aucun
+  code** — c'est le lot 3 du chantier délai, au fil messagerie. c part donc tout
+  de suite, comme les listes aujourd'hui ; c'est l'endroit où ce lot branchera
+  son délai.
+- **La file ne se purge pas quand l'hôte agit** depuis l'écran : une ligne b, c, d
+  ou e peut arriver périmée en fin de plage (l'hôte a déjà répondu).
+- **Les fils sans réservation d'un même bien partagent leur notification**
+  (`conv:bien:<ref>`) : rare.
+- **e ajoute le point d'envoi au chemin du webhook** : quelques lectures et un
+  envoi par appareil, attendus avant de répondre au partenaire.
+- **Jusqu'au 2c-3, les listes d'`agent_alert_config` reçoivent aussi b et c.**
+
+### 11.3 Ménages (h, i, l, m)
+
+Un module, `lib/notifications/evenements-menages.js`, appelé par **son**
+émetteur ; aucun ne lève.
+
+| Événement | Émetteur | Sujet, écran |
+|---|---|---|
+| h Ménage sans personne | `lib/cleaning/sync-menages-entite.js` (trou de garde ou sans jours réglés, **dans la fenêtre de proposition** ; proposition expirée que plus personne ne porte) | `menage:<bien>:<jour>`, `/menages` |
+| i Ménage pas vu | `lib/cleaning/relance-validation.js`, à la relance de la veille | idem |
+| l Ménage refusé | `lib/alert-notify.js` `alertMenageRefuse` ; et le **retrait** d'un ménage déjà accepté (`api/menages-public.js`) | idem |
+| m Disponibilités modifiées | `lib/alert-notify.js`, jours habituels et exceptions (chaque changement envoyé ; un résumé pour un glisser) | `dispos:<prestataire>`, `/menages?presta=<id>` |
+
+**Les règles, et pourquoi :**
+1. **Une notification par ménage** : h, i et l portent le même sujet ; la plus
+   récente remplace l'autre et sonne (même règle que la conversation, §11.2).
+   Le sujet et la clé tiennent à la référence que l'émetteur passe, jamais à la
+   relecture du bien (une lecture ratée faisait un second h).
+2. **h une fois par (compte, bien, jour), pas à chaque cycle.** Le writer
+   réévalue les ménages non assignés toutes les cinq minutes : sans mémoire, h —
+   urgent par défaut, donc qui passe la nuit — sonnerait toutes les cinq
+   minutes, le bruit qui avait fait couper son SMS le 17 septembre. La mémoire
+   est l'index unique de `message_sent_log` (même geste que le relevé de
+   réservation) : posée **avant** l'envoi ; **retirée si rien n'est parti ni
+   n'attend** (ni notification, ni e-mail, ni SMS, ni file) — le cycle suivant
+   réessaie ; gardée si une partie est partie (sinon la personne déjà prévenue
+   l'est toutes les cinq minutes) ou si personne n'a de canal pour h (rien à
+   réessayer) ; mémoire illisible = **pas** de notification (l'incident
+   fondateur part toujours).
+3. **h seulement dans la fenêtre de proposition**, et seulement pour un ménage
+   qui **existe** : la boucle de création alerte de J-30 à J+180 ; prévenir six
+   mois à l'avance usait la mémoire avant le moment où l'hôte peut agir, et une
+   réimportation aurait fait pleuvoir des h. La boucle des ménages en base
+   reprend le ménage quand il entre dans la fenêtre.
+4. **Un cycle lit les mémoires en une requête**, puis n'envoie que les nouveaux,
+   **vingt au plus** ; le reste part au cycle suivant.
+5. **L'expiration d'une proposition est un nouvel épisode** : son h part sans la
+   mémoire (elle n'arrive qu'une fois, `proposee_a` est vidé), pour qu'un h d'un
+   épisode précédent (« sans jours réglés », depuis réglés) ne la fasse pas taire.
+6. **h par ménage, pas par bien** : deux départs sans personne sont deux
+   logements à confier (l'incident fondateur, lui, reste un par bien). « Sans
+   jours réglés » se dit comme un réglage à faire.
+7. **i à la relance de la veille**, une fois (le marqueur de relance est posé
+   avant) ; **le jour même seulement si la veille n'a pas eu lieu** ; envoyé
+   **avant** la relance de la prestataire (une exception de celle-ci ne l'emporte
+   pas). Un ménage validé par sa porteuse ne prévient pas.
+8. **l une fois par refus**, et **le retrait d'un ménage accepté vaut un refus**
+   (décision de Thierry du 9 novembre 2026 : le logement n'a plus personne ; le
+   retrait n'arrive qu'une fois).
+9. **m : la première du jour sonne, les suivantes remplacent sans sonner**
+   (décision de Thierry du 9 novembre 2026) — par prestataire, jour de Paris,
+   mémoire dans `message_sent_log` ; mémoire illisible = elle sonne. Rien pour un
+   jour de glisser : le résumé de la plage viendra.
+10. **La date du ménage sert de séjour à la décision** : un ménage d'aujourd'hui
+    ou de demain passe les heures calmes.
+
+**Limites connues :**
+- **m** est routé sur **un** bien de la prestataire (celui que l'émetteur
+  choisit pour les listes) : un membre limité à un AUTRE de ses biens ne
+  l'apprend pas.
+- **Les mémoires vivent dans `message_sent_log`** (clés `notif:menage:…` et
+  `notif:dispos:…`, gabarits sentinelles `…00a1`, `…00a2`) : aucun lecteur ne
+  les confond avec un envoi au voyageur (tous filtrent par réservation ou par
+  gabarit), mais elles comptent dans la sonde de croissance de cette table, et
+  la règle de lecture de cette table les montre à un membre qui a le droit
+  `messages` (même compte, aucun écran ne les affiche).
+- **Une réservation annulée puis reprise le même jour** sur le même bien ne
+  rejoue pas h (même clé).
+- **Mise en production** : le premier cycle enverra h d'un coup pour les ménages
+  sans personne de la fenêtre (vingt au plus par cycle).
+- **Jusqu'au 2c-3, double e-mail possible pour l et m** (les listes plus le
+  point d'envoi), comme pour j.
+
+### 11.4 Avis (n, o)
+
+Un module, `lib/notifications/evenements-avis.js`, appelé par **son** émetteur ;
+aucun ne lève.
+
+| Événement | Émetteur | Sujet, écran |
+|---|---|---|
+| n Nouvel avis, ou avis révélé | `lib/cron-channel-reviews.js` `upsertAvis`, le writer unique d'`ota_reviews` (poll Channex, webhook, import Beds24) | `avis:<provider>:<id>`, `/avis` |
+| o Évaluation du voyageur | `lib/avis/notifications.js` `noterEtEnvoyer` : la prestataire a rempli sa part, les relances J-5 et J-1, et la publication automatique (`lib/avis/auto-validation.js` : rappel, échec) | `eval:<séjour>`, `/avis?evaluer=<séjour>` |
+
+**Les règles, et pourquoi :**
+1. **⚠ NI LE NOM DU VOYAGEUR, NI LE TEXTE DE L'AVIS (constat S1 de la review,
+   sécurité).** Le domaine `avis` se délègue sans `reservations` : un membre
+   qui ne voit que les avis ne voit pas qui a séjourné, et la notification n'en
+   dit pas plus que l'écran. Un avis se dit par son bien, sa note et son canal
+   — « Nouvel avis — La bulle : 4,7/5 · Airbnb. » La spec (Q6) annonçait le
+   prénom : le fond l'emporte, signalé à Thierry.
+2. **La note est celle de l'écran** : `noteSur5Des` de `lib/avis/echelle.js`
+   (échelle par canal, un seul arrondi au dixième, demi vers le haut). Une note
+   à 0, d'un canal hors table ou d'un avis masqué ne se dit pas : jamais une
+   note devinée.
+3. **Un avis masqué ne prévient pas ; sa révélation, si** (décisions de Thierry
+   du 9 novembre 2026). L'objet Channex d'Airbnb naît au DÉPART, masqué
+   (`is_hidden`, note à 0) et vide, que le voyageur écrive ou non : l'annoncer
+   « déposé » aurait été faux après chaque séjour Airbnb sans avis (constat 1
+   de la re-review), et l'évaluation à faire est déjà annoncée par o. **Sa
+   révélation** (masqué en base, visible dans l'écriture) prévient une fois,
+   avec la vraie note — « Avis révélé — La bulle : 4,7/5 · Airbnb. »
+   ⚠ **Un avis visible mais VIDE n'est pas un avis** : l'objet Channex naît au
+   départ, caché et vide, et Airbnb le révèle au bout de 14 jours même si le
+   voyageur n'a rien écrit. Sans note ni texte (`voyageurAEcrit`, la règle de
+   l'écran), il ne prévient ni comme nouveau, ni comme révélé.
+4. **n ne prévient que d'un avis que l'écriture AJOUTE ou DÉMASQUE** : le writer
+   lit, avant d'écrire, l'état des avis déjà en base (par compte et par
+   provider, avec `is_hidden`), et ne prévient que de ceux qu'il a effectivement
+   écrits (un groupe refusé ne s'annonce pas). **Une lecture ratée ne prévient
+   personne** : sans savoir ce qui est nouveau, le premier poll d'un compte
+   annoncerait tout son historique. La lecture ne porte que sur les avis reçus
+   depuis moins de trente jours, par paquets de cent.
+5. **Un avis ancien n'est pas un nouvel avis** : reçu depuis plus de trois jours
+   (premier poll, import Beds24, bien qu'on connecte) — pas de notification. Une
+   révélation vaut jusqu'à trente jours après la réception. La réception de
+   Channex arrive sans fuseau : elle se lit en UTC (`instantUTC`).
+6. **Une mémoire par avis et par événement**, posée AVANT l'envoi :
+   `message_sent_log`, sentinelles `…00a3` (`notif:avis:<provider>:<id>`) et
+   `…00a4` (`notif:avis-revele:…`). Le webhook et le poll écrivent le même avis
+   à quelques secondes d'écart : lire « absent » des deux côtés ne suffit pas,
+   l'insertion tranche. Une mémoire illisible ne prévient pas.
+   ⚠ **Un envoi dont rien n'est parti est une notification PERDUE**, et elle se
+   dit au journal (`notification perdue`). La mémoire est retirée, mais le
+   writer ne repasse pas : au poll suivant, l'avis est en base (ou n'est plus
+   masqué), il n'est plus « nouveau ». Une vraie reprise jugerait « nouveau »
+   sur l'absence de la mémoire plutôt que sur l'absence en base : c'est un autre
+   comportement, donc un autre lot (constat 2 de la re-review).
+7. **Dix au plus par compte et par écriture**, les plus récents d'abord : un
+   compte bavard ne fait pas taire les autres.
+8. **o une fois par palier**, comme la tâche (son marqueur) : « la prestataire a
+   rempli », la relance J-5, la J-1 (« dernier jour »), puis le rappel de la
+   publication automatique (jour et heure de Paris) et son échec. Un sujet par
+   séjour : chaque message remplace le précédent, et sonne. L'échéance se dit
+   en jour de Paris, et seulement si elle est à venir. **Formulation neutre** :
+   un membre en lecture seule la reçoit aussi et ne peut pas publier — le texte
+   dit l'état, pas un ordre. La raison d'un échec (parfois un message d'erreur
+   interne) reste dans la tâche. Sans échéance à venir (délai passé, plateforme
+   qui n'a pas ouvert d'avis), l'échec dit seulement « La publication
+   automatique n'a pas abouti. » : il ne promet pas une publication devenue
+   impossible.
+
+**Limites connues :**
+- **o** reste aussi envoyé aux listes d'`agent_alert_config` jusqu'au 2c-3
+  (double e-mail possible, comme pour j, l et m).
+- **Une saisie manuelle d'avis** (l'hôte lui-même) ne passe pas par le writer :
+  elle ne prévient pas, et c'est voulu.
+- **Le coût s'ajoute à l'écriture des avis** : une lecture par paquet de cent
+  avis récents, puis, par avis annoncé, une insertion de mémoire, la
+  résolution du bien et l'envoi — au plus dix par compte et par écriture. Le
+  reliquat d'un plafond ne part jamais (sa mémoire n'est pas posée, mais l'avis
+  est alors en base : il n'est plus nouveau). Le webhook attend ces envois avant
+  de répondre.
+
+
+### 11.5 Trace des reviews du lot 2c-2 (demandée par le chef de file, 9 novembre 2026)
+
+Arbre de toutes les reviews : `/home/claude/hotesmart`, branche
+`pwa-lot-2c2-evenements`. Une review par domaine, chacune sur des commits
+distincts ; celle d'Avis a eu une re-review (constat de sécurité), la dernière.
+
+⚠ **CE QUI EST MESURÉ ET CE QUI NE L'EST PLUS.** Les rapports des cinq
+premières reviews n'existaient que dans la conversation du fil. Elle a été
+compactée, et aucun rapport n'avait été écrit sur disque. La première ligne de
+chaque rapport (« Arbre lu — SHA ») et la liste exacte des fichiers cités dans
+ses constats ne sont donc **plus vérifiables**. Ce qui suit les remplace par ce
+que l'historique git mesure : la plage (parent → commit du domaine) et les
+fichiers que ses correctifs ont touchés, confrontés au diff de la plage. Ce
+n'est **pas** la liste des fichiers cités. Seule la re-review d'Avis a sa trace
+complète, relevée sur son rapport.
+
+| Review | Plage relue (SHA complets) | Correctifs | Fichiers corrigés HORS de la plage |
+|---|---|---|---|
+| Réservations | `176eaa5bc60b62c4396de99563437d31eed061bd..af97441e0ba2c9296af895b2d27754ab6bf5e333` | `d69b4c8491950e7072cedfd3d13d143ad66d51a3` | `docs/kb/pwa.md` (documentation seulement) |
+| Relevé (réservation directe) | `d69b4c8491950e7072cedfd3d13d143ad66d51a3..5634e89ba9e1fbf67a9d6d5efa2ccb9fca94495b` | `a48d710affc10ad2db4e803e1ff90260901d876b` | aucun |
+| Messages | `a48d710affc10ad2db4e803e1ff90260901d876b..f28d2c66965680a61b2439433fdbeed64438b319` | `85b458af23b1c49e7c9bc2d106cd601fead73082` | `lib/guestflow/brouillons-dus.js`, `lib/notifications/envoi.js`, `lib/notifications/file.js`, `lib/notifications/notifier.js`, et trois tests (`guestflow-brouillons-dus`, `notifications-envoi`, `record-message-echo`) |
+| Ménages | `85b458af23b1c49e7c9bc2d106cd601fead73082..2e9267b93bab1959988a8ee65459422c60959dd3` | `868cd04bc0043508da8fd79b88fcd41937a1a8c4` | `api/menages-public.js`, `tests/pwa-prendre-menage.test.js` |
+| Avis | `868cd04bc0043508da8fd79b88fcd41937a1a8c4..1a533dd4e7ac91c7d586b24d9b84d5935d245bf6` | `ad408e7202717a4a116856505b6ae5d639ceebe4` | `lib/avis/auto-validation.js`, `tests/avis-auto-validation.test.js` |
+| Re-review Avis (la dernière) | `1a533dd4e7ac91c7d586b24d9b84d5935d245bf6..ad408e7202717a4a116856505b6ae5d639ceebe4` | `c4a480c30430325fb7770b447c9bb3b217fb9461` | aucun |
+
+**Ce qui est passé hors plage, et pourquoi :**
+- **Messages (`85b458af`)** : la décision de Thierry « une notification par
+  conversation » et les correctifs de la review ont atteint le cœur d'envoi du
+  2c-1 (`envoi.js`, `file.js`, `notifier.js`) et l'émetteur des brouillons
+  différés (`brouillons-dus.js`). Ce code a été corrigé **sans review**, comme
+  la règle le permet hors sécurité. Il n'a été relu par personne.
+- **Ménages (`868cd04b`)** : `api/menages-public.js` porte la décision de
+  Thierry « le retrait d'un ménage accepté prévient comme un ménage refusé ».
+  C'est un ajout décidé après la review, **sans review**.
+- **Avis (`ad408e72`)** : `lib/avis/auto-validation.js` porte le constat D4
+  (« le rappel et l'échec de la publication automatique ne notifient pas »),
+  branché sur décision de Thierry. Ce fichier est **dans la plage de la
+  re-review**, qui l'a relu.
+
+**Re-review Avis, trace complète** (rapport du sous-agent) :
+- Première ligne : « Arbre lu : /home/claude/hotesmart — SHA :
+  ad408e7202717a4a116856505b6ae5d639ceebe4 ». C'est la tête de la plage.
+- Fichiers cités, confrontés au diff de la plage :
+
+| Fichier cité | Dans la plage | Rôle |
+|---|---|---|
+| `lib/notifications/evenements-avis.js` (l. 120-124, 140-143) | oui | constats 1 et 2 |
+| `lib/notifications/textes.js` (l. 101, 105-115, 125) | oui | constats 1 et 3 |
+| `docs/kb/pwa.md` (l. 704, 724) | oui | constat 2 |
+| `tests/notifications-avis.test.js` (l. 41, 239) | oui | constats 1 et 2 |
+| `lib/avis/auto-validation.js` (l. 169) | oui | constat 3 |
+| `docs/kb/avis-voyageurs.md` | oui | preuve seulement (citation du comportement Airbnb) |
+| `lib/avis/naissance.js` (`voyageurAEcrit`) | **non** | preuve seulement (la règle de l'écran, proposée pour le correctif) |
+
+**Pour la suite**, si le chef de file l'accepte : le rapport d'une review
+s'écrit sur disque, mot pour mot, dès réception et avant tout correctif. Sans
+cela, un compactage efface la seule preuve de l'arbre qu'elle a lu.
+
+#### Review de rattrapage du lot 2c-2 (la dernière) — rapport mot pour mot
+
+Décision du chef de file du 9 novembre 2026 : la trace ci-dessus ne suffit pas,
+une review non tracée ne compte pas. Une review de rattrapage, unique, sur tout
+le lot. Brief : arbre `/home/claude/hotesmart`, branche `pwa-lot-2c2-evenements`,
+plage `176eaa5bc60b62c4396de99563437d31eed061bd..68a2056a4f729377344922c3639152444ad1e701`,
+priorités (a) correctifs non relus, (b) fichiers partagés, (c) ce que voit un
+membre selon ses droits. Rapport reçu le 9 novembre 2026, recopié avant tout
+correctif :
+
+> Arbre lu : /home/claude/hotesmart — branche : pwa-lot-2c2-evenements — SHA : 68a2056a4f729377344922c3639152444ad1e701 — plage : 176eaa5bc60b62c4396de99563437d31eed061bd..68a2056a4f729377344922c3639152444ad1e701
+>
+> **Constats**
+>
+> 1. **SÉCURITÉ (hors plage, préexistant)** — api/avis.js:496-498. La liste des évaluations envoie le prénom et le nom du voyageur, ses dates et le nom de la prestataire (`voyageur`, `arrivee`/`depart`, `menage_par`) à tout membre qui a `avis: read`. Le contrôle du droit `reservations` n'y est pas appliqué, alors que la liste des avis le fait (`voitSejours`, ligne 628).
+>    - Scénario : un membre qui a `avis` sans `reservations` ouvre /avis, puis la liste des évaluations. Il voit le nom complet de chaque voyageur. C'est exactement la donnée que le correctif S1 a retirée des notifications, au motif qu'une notification ne doit pas en dire plus que l'écran. Or l'écran la montre.
+>    - Pourquoi je cite un fichier hors plage : même classe de défaut que S1, et la justification de S1 repose sur cet écran.
+>    - Correctif : dans `evaluationsLister`, calculer `voitSejours` comme à la ligne 628, et renvoyer `voyageur`, `arrivee` et `depart` à `null` sans ce droit. Vérifier aussi `action=evaluation`.
+>
+> 2. **DÉFAUT** — lib/notifications/releve.js:69-71 et 111-119. La lecture du bien d'un relevé différé utilise `maybeSingle` sur `provider_property_id`. Elle échoue (PGRST116) dès que le compte a deux lignes pour la même référence, c'est-à-dire un bien archivé puis recréé — un cas déjà reconnu dans lib/notifications/bien.js:25-28.
+>    - Scénario : une réservation directe arrive pendant les heures calmes sur un tel bien. Le relevé est remis dans la file avec `a: maintenant` à chaque cycle, sans fin. Il ne part jamais et aucun incident n'est levé.
+>    - Conséquence : le titulaire n'a aucun e-mail pour cette réservation, puisque le point d'envoi lui a retiré l'e-mail court (lib/booking-changes-dispatch.js:199).
+>    - Toute autre erreur de lecture permanente produit la même boucle.
+>    - Ce n'est pas couvert par les tests : le simulateur de tests/notifications-envoi.test.js:837 n'échoue jamais sur plusieurs lignes.
+>    - Correctif : `.limit(5)` en gardant le bien actif (même règle que `bienDuCompte`), et un compteur de remises dans `contenu` qui lève l'incident au-delà de N essais.
+>
+> 3. **DÉFAUT** — lib/notifications/evenements-menages.js:111-117 et 146-152 (« Ménage sans personne »). Quand l'envoi se passe normalement mais que personne n'est joignable (titulaire sans appareil et sans e-mail, ou e-mail décoché), deux choses se combinent :
+>    - `rienNestParti` retire la mémoire « déjà prévenu », donc le même ménage est retenté à chaque cycle ;
+>    - ce résultat est compté comme envoyé (`r.ok` → `envoyes++`), donc ces ménages occupent les places du plafond de 20 à chaque cycle.
+>    - Scénario : dès qu'il y a 20 ménages dans ce cas, ce sont toujours les mêmes qui passent en premier ; ceux des autres comptes restent reportés indéfiniment.
+>    - Reproduit avec 25 ménages injoignables : 3 cycles donnent chacun 20 « envoyés » et 5 reportés, 60 insertions et 60 suppressions de mémoire, 0 mémoire conservée.
+>    - Correctif : garder la mémoire quand `r.ok` et qu'il n'y a aucune erreur (personne n'est joignable, réessayer n'y changera rien). Ne compter dans le plafond que ce qui est réellement parti.
+>
+> 4. **DÉFAUT** — lib/alert-notify.js:196-215 (nouvel appel au point d'envoi), qui s'appuie sur le dédoublonnage des lignes 149-156 et 164. L'erreur de lecture de `maybeSingle` est ignorée et le résultat de l'insertion de la tâche n'est pas vérifié.
+>    - Scénario : deux tâches portent le même marqueur, par exemple après deux passes concurrentes (cron-access.js:177 et cron-arrival-code.js:542/562 appellent cette fonction). À partir de là, la lecture échoue, `existing` vaut null, et chaque cycle de 5 minutes crée une nouvelle tâche et renvoie la notification.
+>    - Le code non résolu est urgent par défaut (il passe les heures calmes) et l'e-mail est coché par défaut : e-mail toutes les 5 minutes au titulaire et à chaque membre `reservations`.
+>    - Une insertion refusée produit le même rejeu. C'est le défaut corrigé dans cron-classify (`escaladeEcrite`).
+>    - Même schéma dans `alertMenageRefuse` (242-248, puis 273), avec un risque plus faible car l'appel se fait une fois par refus.
+>    - Correctif : `.limit(1)` au lieu de `maybeSingle`, abstention si la lecture échoue, notification seulement si l'insertion a réussi.
+>
+> 5. **MINEUR** — lib/notifications/evenements-menages.js:137-139. La lecture des mémoires utilise un `.in('booking_id', …)` non découpé.
+>    - Scénario : au-delà d'environ 130 clés, l'URL dépasse 8 000 caractères et la lecture échoue. Le repli tente alors une insertion (refusée en 23505) pour chaque ménage déjà prévenu, à chaque cycle, sans que ces tentatives comptent dans le plafond.
+>    - Correctif : lire par paquets de 100, comme `avisExistants`.
+>
+> 6. **MINEUR** — lib/booking-changes-dispatch.js:340. Un bien sans nom s'affiche avec sa référence provider (« Nouvelle réservation — 6f1c… »), contrairement à `textes.rediger`, qui affiche « votre logement ».
+>    - Correctif : `p.name || null`.
+>
+> 7. **MINEUR** — lib/alert-notify.js:209. Le code non résolu relève du domaine `reservations` mais ouvre `/pages/messages?conv=…`.
+>    - Scénario : un membre qui a `reservations` sans `messages` reçoit un lien vers un écran qui lui est refusé. Pas de fuite, l'écran est gardé.
+>    - Correctif : ouvrir `/calendrier`.
+>
+> 8. **MINEUR** — lib/guestflow/brouillons-dus.js:611. Un brouillon abandonné pour réservation annulée (`reservation_annulee`) ou séjour terminé (`sejour_termine`) déclenche quand même « Réponse à valider », sur une réservation annulée ou terminée.
+>    - Correctif : ne pas notifier pour ces deux motifs.
+>
+> Mesures :
+> - Les 14 fichiers de tests du lot passent : 427/427, à l'heure réelle et avec l'horloge décalée à J+30, J+60 et J+200.
+> - Contre-épreuve hors de l'arbre : les deux tests nouveaux sur `exclusions` et sur `retirerSujet` avec `code` échouent contre file.js et notifier.js d'avant le lot, donc ils testent bien les correctifs.
+>
+> Constats de sécurité : n° 1 (hors plage, préexistant). Aucun constat de sécurité sur les lignes de la plage : dans chaque domaine, le prénom du voyageur, le nom de la prestataire et les liens ne vont qu'à des membres qui voient déjà ces données à l'écran ; le relevé et la pause restent au titulaire seul ; les lectures sont filtrées par compte.
+>
+> **Fichiers cités**
+>
+> | Fichier | Dans la plage | Rôle |
+> |---|---|---|
+> | api/avis.js | non | constat n° 1 |
+> | lib/notifications/releve.js | oui | constat n° 2 |
+> | lib/notifications/bien.js | oui | preuve seulement |
+> | tests/notifications-envoi.test.js | oui | preuve seulement |
+> | lib/notifications/evenements-menages.js | oui | constats n° 3, 5 |
+> | lib/alert-notify.js | oui | constats n° 4, 7 |
+> | lib/cron-access.js | non | preuve seulement |
+> | lib/cron-arrival-code.js | non | preuve seulement |
+> | lib/cron-classify.js | oui | preuve seulement |
+> | lib/cron-channel-reviews.js | oui | preuve seulement |
+> | lib/booking-changes-dispatch.js | oui | constats n° 2 (preuve), 6 |
+> | lib/notifications/textes.js | oui | preuve seulement |
+> | lib/notifications/notifier.js | oui | preuve seulement (contre-épreuve) |
+> | lib/notifications/file.js | oui | preuve seulement (contre-épreuve) |
+> | lib/guestflow/brouillons-dus.js | oui | constat n° 8 |
+
+**Suite donnée** (correctifs sans nouvelle review — aucun constat de sécurité
+dans la plage) :
+- **1 (sécurité, hors plage, préexistant)** — NON corrigé dans ce lot :
+  `api/avis.js` n'est pas un fichier du lot, et le corriger ici mettrait deux
+  fils sur le même fichier. Signalé au chef de file et à Thierry pour le fil
+  qui tient les avis.
+- **2** — le relevé différé lit le bien en liste et garde le bien ACTIF (la
+  règle de `bien.js`) ; une lecture ratée est remise au plus `REMISES_MAX`
+  (12, une heure de cron) fois, puis l'incident `notif_hote_non_envoyee`.
+- **3** — un envoi sans erreur qui n'a joint personne garde sa mémoire
+  (`rienNestParti`, qui vaut aussi pour les avis) ; le lot « sans personne »
+  ne compte dans son plafond que ce qui est parti (`injoignables` à part).
+- **4** — `alert-notify.js` : le marqueur se lit en liste (`limit(1)`), une
+  lecture ratée s'abstient, et la notification ne part que si la tâche — la
+  mémoire — est écrite. Code non résolu et ménage refusé.
+- **5** — les mémoires du lot « sans personne » se lisent par paquets de cent.
+- **6** — un bien sans nom s'annonce « votre logement », plus par sa référence.
+- **7** — tranché par Thierry le 9 novembre 2026 : le « code non résolu »
+  ouvre la CONVERSATION, comme aujourd'hui — le titulaire y envoie le code. Un
+  membre qui a `reservations` sans `messages` tombe sur un écran refusé ; c'est
+  accepté (pas de fuite, l'écran est gardé).
+- **8** — un brouillon abandonné pour réservation annulée ou séjour terminé
+  est rendu à l'hôte sans « Réponse à valider ».

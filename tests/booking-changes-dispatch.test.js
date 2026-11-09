@@ -8,6 +8,21 @@ const assert = require('node:assert')
 const path = require('node:path')
 const Module = require('node:module')
 
+// La VRAIE regle « reservation directe » (lib/notif-hote-resa.js), lue une fois
+// puis le cache vide : les doubles ci-dessous ne doivent rien heriter du module
+// reel (constat de review : une copie de la regle dans le double divergeait).
+const VRAI_ESTDIRECTE = (() => {
+  const env = { url: process.env.SUPABASE_URL, cle: process.env.SUPABASE_SERVICE_KEY }
+  process.env.SUPABASE_URL = env.url || 'http://localhost:54321'
+  process.env.SUPABASE_SERVICE_KEY = env.cle || 'test-key'
+  const avant = new Set(Object.keys(require.cache))
+  const f = require('../lib/notif-hote-resa').estDirecte
+  for (const k of Object.keys(require.cache)) if (!avant.has(k)) delete require.cache[k]
+  if (env.url === undefined) delete process.env.SUPABASE_URL
+  if (env.cle === undefined) delete process.env.SUPABASE_SERVICE_KEY
+  return f
+})()
+
 // ─── Injection de doubles dans le cache de require ───────────────────────────
 function stub(relPath, exports) {
   const abs = require.resolve(path.join(__dirname, '..', relPath))
@@ -18,12 +33,14 @@ function stub(relPath, exports) {
   return abs
 }
 
-function chargerDispatcher({ events, menageThrows = false, accessThrows = false, templateThrows = false, snapshotStatus = 'confirmed', notifHoteThrows = false, notifHoteRetour = null }) {
+function chargerDispatcher({ events, menageThrows = false, accessThrows = false, templateThrows = false, snapshotStatus = 'confirmed', notifHoteThrows = false, notifHoteRetour = null, venteLe = null, importee = false, source = 'airbnb', notifierThrows = false, idBien = null, statuts = {}, decisionReleve = { envoyer: 'maintenant' }, fileEnPanne = false }) {
   const etat = {
     updates: [],
     incidents: [],
     menageWrites: 0,
     notifsHote: [],
+    notifications: [],
+    releves: [],
     appels: { menages: 0, access: 0, templates: 0, notifHote: 0 }
   }
 
@@ -32,6 +49,14 @@ function chargerDispatcher({ events, menageThrows = false, accessThrows = false,
       select() { return q }, is() { return q }, order() { return q },
       in() { return q }, not() { return q }, eq(col, val) { q._eq = val; return q },
       limit: async () => ({ data: nom === 'booking_change_events' ? events : [], error: null }),
+      // PWA lot 2c-2 : la date de vente d'une reservation (garde « vente recente »).
+      // Sans `venteLe`, la date est inconnue : aucune notification de vente.
+      maybeSingle: async () => ({
+        data: nom === 'bookings_snapshot' && venteLe
+          ? { snapshot: { arrival: '2099-09-01', provider: 'channex' }, raw: { inserted_at: venteLe, ...(importee ? { meta: { is_imported: true } } : {}) } }
+          : null,
+        error: null
+      }),
       update(payload) { q._payload = payload; return q },
       insert: async (row) => { etat.inserts = etat.inserts || []; etat.inserts.push({ table: nom, row }); return { error: null } },
       then(res, rej) {
@@ -41,7 +66,7 @@ function chargerDispatcher({ events, menageThrows = false, accessThrows = false,
         // les tests tourneraient avec snapshot === null — la jointure par cle
         // composite, raison d'etre de ce commit, ne serait pas testee.
         const data = nom === 'bookings_snapshot'
-          ? events.map(e => ({ user_id: e.user_id, booking_id: e.booking_id, snapshot: { firstName: 'Jean', lastName: 'Dupont', arrival: '2026-09-01', departure: '2026-09-05', numAdult: 2, numChild: 0, source: 'airbnb', status: snapshotStatus, provider: e.provider } }))
+          ? events.map(e => ({ user_id: e.user_id, booking_id: e.booking_id, snapshot: { firstName: 'Jean', lastName: 'Dupont', arrival: '2026-09-01', departure: '2026-09-05', numAdult: 2, numChild: 0, source, status: statuts[e.booking_id] || snapshotStatus, provider: e.provider } }))
           : []
         return Promise.resolve({ data, error: null }).then(res, rej)
       }
@@ -78,7 +103,9 @@ function chargerDispatcher({ events, menageThrows = false, accessThrows = false,
       tokens: [{ token: 'tok', property_ids: [], user_id: 'u1' }],
       propsByKey: {
         [cle('u1', '12345')]:      { name: 'Bien test', provider: 'beds24', address: '1 rue A' },
-        [cle('u1', 'uuid-channex')]: { name: 'Bien Channex', provider: 'channex', address: '2 rue B' }
+        // L'identifiant HoteSmart du bien n'est pose qu'a la demande : il ouvre
+        // aussi le journal des prix (consommateur 4), que ces tests ne simulent pas.
+        [cle('u1', 'uuid-channex')]: { ...(idBien ? { id: idBien } : {}), name: 'Bien Channex', provider: 'channex', address: '2 rue B' }
       },
       knowledgeByKey: {
         [cle('u1', '12345')]: { telephone_hote: '0600000000', checkin: '15:00', checkout: '11:00' }
@@ -101,7 +128,22 @@ function chargerDispatcher({ events, menageThrows = false, accessThrows = false,
   // paresseuse — un consommateur ne doit pas imposer ses dependances au
   // chargement du module qui l'appelle — mais le stub reste necessaire pour
   // observer son comportement.
+  // PWA lot 2c-2 : le point d'envoi unique, observe.
+  stub('lib/notifications/notifier.js', {
+    notifier: async (o) => {
+      etat.notifications.push(o)
+      if (notifierThrows) throw new Error('notifier down')
+      return { ok: true, erreurs: [] }
+    }
+  })
+  // PWA lot 2c-2 : le releve suit les reglages du titulaire (decision injectee).
+  stub('lib/notifications/releve.js', {
+    decisionDuReleve: async (o) => { etat.releves.push(['decision', o.compte, o.sejour]); return decisionReleve },
+    differer: async (o) => { etat.releves.push(['differer', o.compte, o.bookingId, o.propertyId, o.provider, o.a]); return fileEnPanne ? { ok: false, motif: 'ecriture_impossible' } : { ok: true } }
+  })
   stub('lib/notif-hote-resa.js', {
+    // La VRAIE regle « directe », pas une copie.
+    estDirecte: VRAI_ESTDIRECTE,
     notifierNouvelleResa: async (o) => {
       etat.appels.notifHote++
       etat.notifsHote.push(o)
@@ -454,4 +496,131 @@ test('reservation annulee entre la detection et l\'effet : rien n\'est annonce',
   const { mod, etat } = chargerDispatcher({ events: [ev()], snapshotStatus: 'cancelled' })
   await mod.dispatchBookingChanges({})
   assert.strictEqual(etat.appels.notifHote, 0)
+})
+
+// ─── PWA lot 2c-2 : les notifications de l'hote et de son equipe ────────────
+const ilYA = (jours) => new Date(Date.now() - jours * 86400000).toISOString().slice(0, 19)
+
+test('LE TEST QUI COMPTE : une vente RECENTE previent par le point d\'envoi, avec les deux identifiants du bien', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [ev({ provider: 'channex', property_id: 'uuid-channex' })], venteLe: ilYA(1), idBien: 'uuid-hs-2',
+    notifHoteRetour: { ok: true, ignore: true, raison: 'source non Offline' } })
+  await mod.dispatchBookingChanges({})
+  assert.strictEqual(etat.notifications.length, 1)
+  const n = etat.notifications[0]
+  assert.deepStrictEqual({ compte: n.compte, code: n.code, bien: n.bien, sujet: n.sujet, chemin: n.chemin, rappel: n.rappel },
+    { compte: 'u1', code: 'reservation', bien: { ref: 'uuid-channex', id: 'uuid-hs-2' }, sujet: 'resa:77', chemin: '/calendrier', rappel: false })
+  assert.deepStrictEqual(n.donnees, { bien: 'Bien Channex', prenom: 'Jean', arrivee: '2026-09-01', depart: '2026-09-05', canal: 'airbnb', annulation: false, changements: null })
+  assert.strictEqual(n.exclusions, null, 'une OTA : aucun releve, rien a retirer')
+})
+
+test('review de rattrapage, constat 6 : un bien sans nom ne s\'annonce pas par sa reference provider', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [ev({ provider: 'channex', property_id: 'ref-sans-fiche' })], venteLe: ilYA(1),
+    notifHoteRetour: { ok: true, ignore: true, raison: 'source non Offline' } })
+  await mod.dispatchBookingChanges({})
+  assert.strictEqual(etat.notifications.length, 1)
+  assert.strictEqual(etat.notifications[0].donnees.bien, null, 'le texte dira « votre logement »')
+})
+
+test('LE TEST QUI COMPTE : pas de « nouvelle reservation » pour une vente ancienne, importee, de date inconnue, ou deja defaite', async () => {
+  const cas = [
+    [{ venteLe: ilYA(10) }, 'vendue il y a dix jours (bien connecte, migration)'],
+    [{ venteLe: ilYA(0), importee: true }, 'importee : sa date est celle de la migration'],
+    [{}, 'aucune ligne de date de vente'],
+    [{ venteLe: ilYA(0), snapshotStatus: 'cancelled' }, 'annulee entre la detection et l\'effet']
+  ]
+  for (const [o, nom] of cas) {
+    const { mod, etat } = chargerDispatcher({ events: [ev({ provider: 'channex', property_id: 'uuid-channex' })], ...o })
+    await mod.dispatchBookingChanges({})
+    assert.strictEqual(etat.notifications.length, 0, nom)
+  }
+})
+
+test('une reservation DIRECTE : l\'e-mail du titulaire est retire quand le releve detaille est parti — et seulement alors', async () => {
+  const parti = chargerDispatcher({ events: [ev({ provider: 'channex', property_id: 'uuid-channex' })], venteLe: ilYA(0), source: 'Offline' })
+  await parti.mod.dispatchBookingChanges({})
+  assert.strictEqual(parti.etat.appels.notifHote, 1)
+  assert.deepStrictEqual(parti.etat.notifications[0].exclusions, { u1: ['email'] })
+  // Le releve n'est pas parti (profil absent, Brevo) : le titulaire garde l'e-mail du point d'envoi.
+  const rate = chargerDispatcher({ events: [ev({ provider: 'channex', property_id: 'uuid-channex' })], venteLe: ilYA(0), source: 'Offline',
+    notifHoteRetour: { ok: false, raison: 'destinataire_absent' } })
+  await rate.mod.dispatchBookingChanges({})
+  assert.strictEqual(rate.etat.notifications[0].exclusions, null)
+})
+
+test('LE TEST QUI COMPTE : le releve suit les reglages du titulaire — decoche, il ne part pas ; heures calmes, il attend dans la file', async () => {
+  const resa = () => ev({ provider: 'channex', property_id: 'uuid-channex' })
+  // E-mail de « Nouvelle reservation » decoche : ni releve, ni retrait (il n'y a rien a retirer).
+  const non = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'Offline', decisionReleve: { envoyer: 'non', motif: 'email_decoche' } })
+  await non.mod.dispatchBookingChanges({})
+  assert.strictEqual(non.etat.appels.notifHote, 0)
+  assert.strictEqual(non.etat.notifications[0].exclusions, null)
+  // Heures calmes : dans la file, pour la fin de la plage ; l'e-mail court est retire au titulaire.
+  const A = Date.parse('2026-11-11T07:00:00+01:00')
+  const tard = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'Offline', decisionReleve: { envoyer: 'plus_tard', a: A } })
+  await tard.mod.dispatchBookingChanges({})
+  assert.strictEqual(tard.etat.appels.notifHote, 0, 'rien ne part pendant les heures calmes')
+  // Le contrat complet : le compte, la reservation, le bien, le provider, et le sejour lu dans le cœur.
+  assert.deepStrictEqual(tard.etat.releves, [
+    ['decision', 'u1', { arrivee: '2026-09-01', depart: '2026-09-05' }],
+    ['differer', 'u1', '77', 'uuid-channex', 'channex', A]
+  ])
+  assert.deepStrictEqual(tard.etat.notifications[0].exclusions, { u1: ['email'] })
+  // La file en panne ne rend pas muet : le releve part tout de suite.
+  const panne = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'Offline', decisionReleve: { envoyer: 'plus_tard', a: A }, fileEnPanne: true })
+  await panne.mod.dispatchBookingChanges({})
+  assert.strictEqual(panne.etat.appels.notifHote, 1)
+  // Une OTA ne consulte rien : le releve ne la concerne pas.
+  const ota = chargerDispatcher({ events: [resa()], venteLe: ilYA(0), source: 'BookingCom', decisionReleve: { envoyer: 'non' } })
+  await ota.mod.dispatchBookingChanges({})
+  assert.deepStrictEqual(ota.etat.releves, [])
+})
+
+test('annulation et modification : sur le meme sujet que la vente, et elles sonnent', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [
+    ev({ id: 'e1', type: 'cancelled' }),
+    ev({ id: 'e2', booking_id: '78', type: 'modified', changes: { arrival: { before: '2026-09-01', after: '2026-09-02' } } })
+  ], snapshotStatus: 'cancelled' })
+  await mod.dispatchBookingChanges({})
+  assert.deepStrictEqual(etat.notifications.map(n => [n.code, n.sujet, n.rappel, n.donnees.annulation]),
+    [['annulation_modification', 'resa:77', true, true], ['annulation_modification', 'resa:78', true, false]])
+  assert.deepStrictEqual(etat.notifications[1].donnees.changements, { arrival: { before: '2026-09-01', after: '2026-09-02' } })
+})
+
+test('« annulee » veut dire annulee : un passage en blocage ou en demande ne previent pas l\'hote', async () => {
+  for (const statut of ['blocked', 'request']) {
+    const { mod, etat } = chargerDispatcher({ events: [ev({ type: 'cancelled' })], snapshotStatus: statut })
+    await mod.dispatchBookingChanges({})
+    assert.strictEqual(etat.notifications.length, 0, statut)
+    assert.strictEqual(etat.appels.menages, 1, `${statut} : le menage, lui, est prevenu`)
+  }
+})
+
+test('LE TEST QUI COMPTE : dix annulations au plus par compte et par cycle — le reliquat est TRACE, et une vente passe quand meme', async () => {
+  const events = Array.from({ length: 14 }, (_, i) => ev({ id: `e${i}`, booking_id: String(100 + i), type: 'cancelled' }))
+  // Une vraie vente, APRES la rafale, sur le meme compte et dans le meme cycle.
+  events.push(ev({ id: 'vente', booking_id: '999', provider: 'channex', property_id: 'uuid-channex' }))
+  const { mod, etat } = chargerDispatcher({ events, snapshotStatus: 'cancelled', statuts: { 999: 'confirmed' }, venteLe: ilYA(0) })
+  const out = await mod.dispatchBookingChanges({})
+  assert.strictEqual(etat.notifications.filter(n => n.code === 'annulation_modification').length, 10)
+  assert.strictEqual(out.echecs, 4, 'les quatre de trop sont des echecs traces, pas un silence')
+  for (let i = 10; i < 14; i++) {
+    const maj = etat.updates.find(u => u.id === `e${i}`)
+    assert.ok(maj.payload.processing_errors.some(e => e.consommateur === 'notifications' && /plafond/.test(e.erreur)), `e${i}`)
+  }
+  assert.ok(etat.notifications.some(n => n.code === 'reservation' && n.sujet === 'resa:999'), 'la vente n\'entre pas dans le plafond des annulations')
+})
+
+test('le meme evenement journalise deux fois dans un cycle ne previent qu\'une fois', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [ev({ id: 'e1', type: 'cancelled' }), ev({ id: 'e1bis', type: 'cancelled' })], snapshotStatus: 'cancelled' })
+  await mod.dispatchBookingChanges({})
+  assert.strictEqual(etat.notifications.length, 1)
+})
+
+test('un point d\'envoi qui leve n\'emporte ni le menage ni les codes', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [ev({ type: 'cancelled' })], snapshotStatus: 'cancelled', notifierThrows: true })
+  const out = await mod.dispatchBookingChanges({})
+  assert.strictEqual(out.traites, 1)
+  assert.strictEqual(etat.appels.menages, 1)
+  const maj = etat.updates.find(u => u.id === 'e1')
+  assert.ok(maj.payload.processing_errors.some(e => e.consommateur === 'notifications'))
 })

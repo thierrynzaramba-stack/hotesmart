@@ -320,9 +320,27 @@ test('des réglages illisibles ne rendent personne muet ; un événement sans te
   const b = await notifier({ compte: COMPTE, code: 'surreservation', donnees: { bien: 'B', nuits: [] }, chemin: '/', sujet: 's', maintenant: NUIT, db, deps: e.deps })
   assert.equal(b.maintenant, 1, 'les défauts s\'appliquent : urgent, maintenant')
   assert.ok(b.erreurs.includes('reglages_illisibles'))
-  const sansTexte = await notifier({ compte: COMPTE, code: 'avis', donnees: {}, chemin: '/', sujet: 's', maintenant: MIDI, db: base({ profiles: [proprio] }).db, deps: envois().deps })
-  assert.deepEqual([sansTexte.maintenant, sansTexte.personne_joignable], [0, false])
-  assert.ok(sansTexte.erreurs.includes('texte_absent'))
+  // Depuis le lot 2c-2, les quinze événements ont un texte (testé ci-dessous) :
+  // l'absence se simule, la garde reste.
+  const rediger = textes.rediger
+  textes.rediger = () => null
+  try {
+    const sansTexte = await notifier({ compte: COMPTE, code: 'avis', donnees: {}, chemin: '/', sujet: 's', maintenant: MIDI, db: base({ profiles: [proprio] }).db, deps: envois().deps })
+    assert.deepEqual([sansTexte.maintenant, sansTexte.personne_joignable], [0, false])
+    assert.ok(sansTexte.erreurs.includes('texte_absent'))
+  } finally { textes.rediger = rediger }
+})
+
+test('lot 2c-2 : chacun des quinze événements du catalogue a son texte, dans les trois langues, et son essai', () => {
+  const { EVENEMENTS } = require('../lib/notifications/catalogue')
+  const codes = EVENEMENTS.map(e => e.code)
+  assert.strictEqual(codes.length, 15)
+  for (const code of codes) {
+    for (const l of ['fr', 'en', 'es']) {
+      const t = textes.rediger(code, l, textes.exemple(code, MIDI))
+      assert.ok(t && t.titre && t.corps && !/undefined|null|NaN/.test(t.titre + t.corps), `${code}/${l}`)
+    }
+  }
 })
 
 test('`seulement` : l\'essai d\'une personne ne prévient aucun autre membre du compte', async () => {
@@ -649,4 +667,229 @@ test('LE TEST QUI COMPTE : acquitter une surréservation retire sa ligne de la f
     restaurer.forEach(f => f())
     delete require.cache[k('../api/incidents-acquitter')]
   }
+})
+
+// ─── 9. Lot 2c-2 : un canal qu'une personne reçoit déjà autrement ───────────
+
+test('LE TEST QUI COMPTE : `exclusions` retire un canal à UNE personne, et à elle seule', async () => {
+  const { db } = base({ profiles: [proprio, membre()], profile_permissions: [droits({ reservations: 'read' })] })
+  const e = envois()
+  const b = await notifier({ compte: COMPTE, code: 'reservation', bien: { ref: 'ref-1' },
+    donnees: { bien: 'La bulle', prenom: 'Jean', arrivee: '2026-12-12', depart: '2026-12-15', canal: 'Offline' },
+    chemin: '/calendrier', sujet: 'resa:1', exclusions: { [COMPTE]: ['email'] }, maintenant: MIDI, db, deps: e.deps })
+  assert.equal(b.ok, true)
+  // Le titulaire d'une réservation directe reçoit déjà le relevé détaillé : pas d'e-mail ici.
+  assert.ok(!e.journal.some(j => j[0] === 'email' && j[1] === 'hote@exemple.fr'), 'pas de second e-mail au titulaire')
+  assert.ok(e.journal.some(j => j[0] === 'push' && j[1] === COMPTE), 'sa notification part')
+  // Le membre, lui, n'a rien reçu d'autre : il garde ses canaux.
+  assert.ok(e.journal.some(j => j[0] === 'email' && j[1] === 'membre@exemple.fr'), 'le membre reçoit son e-mail')
+})
+
+// ─── 10. Lot 2c-2 : le relevé d'une réservation directe suit les réglages ───
+// (décision de Thierry du 8 novembre 2026, lib/notifications/releve.js)
+const releve = require('../lib/notifications/releve')
+
+test('LE TEST QUI COMPTE : le relevé suit les réglages de « Nouvelle réservation » — décoché, différé, ou tout de suite', async () => {
+  const sans = base({})
+  assert.deepEqual(await releve.decisionDuReleve({ compte: COMPTE, maintenant: MIDI, db: sans.db }), { envoyer: 'maintenant' }, 'les défauts portent l\'e-mail')
+  const decoche = base({ notifications_reglages: [{ user_id: COMPTE, evenements: { reservation: { push: true, email: false, sms: false, urgent: false } }, plages: [] }] })
+  assert.deepEqual(await releve.decisionDuReleve({ compte: COMPTE, maintenant: MIDI, db: decoche.db }), { envoyer: 'non', motif: 'email_decoche' })
+  const calme = base({ notifications_reglages: [{ user_id: COMPTE, evenements: {}, plages: [NUIT_TOUS_LES_JOURS] }] })
+  const d = await releve.decisionDuReleve({ compte: COMPTE, maintenant: NUIT, db: calme.db })
+  assert.equal(d.envoyer, 'plus_tard')
+  assert.equal(d.a, hiver('2026-11-11T07:00'))
+  // Une arrivée le jour même passe les heures calmes, comme toute alerte du séjour.
+  const imminent = await releve.decisionDuReleve({ compte: COMPTE, maintenant: NUIT, sejour: { arrivee: '2026-11-11', depart: '2026-11-12' }, db: calme.db })
+  assert.equal(imminent.envoyer, 'maintenant')
+  // Des réglages illisibles ne rendent pas muet.
+  const panne = base({}, { pannes: ['notifications_reglages'] })
+  assert.equal((await releve.decisionDuReleve({ compte: COMPTE, maintenant: MIDI, db: panne.db })).envoyer, 'maintenant')
+})
+
+test('différé : la ligne ne porte RIEN du voyageur ; à la sortie, la réservation et le bien se relisent SUR LE COMPTE de la ligne', async () => {
+  const { db, etat } = base({
+    bookings_snapshot: [
+      // ⚠ Le même identifiant chez un AUTRE hôte (la clé du cœur est (user_id, booking_id)).
+      { user_id: AUTRE, booking_id: 'b1', snapshot: { status: 'confirmed', provider: 'channex', source: 'Offline', firstName: 'Autre', guestEmail: 'autre@exemple.fr' } },
+      { user_id: COMPTE, booking_id: 'b2', snapshot: { status: 'confirmed', provider: 'channex', source: 'Offline', firstName: 'Mauvaise', guestEmail: 'b2@exemple.fr' } },
+      { user_id: COMPTE, booking_id: 'b1', snapshot: { status: 'confirmed', provider: 'channex', source: 'Offline', firstName: 'Jean', guestEmail: 'jean@exemple.fr' } }
+    ],
+    properties: [
+      { user_id: AUTRE, provider_property_id: 'p1', name: 'Bien d\'un autre', cancellation_policy: 'flexible_j2' },
+      { user_id: COMPTE, provider_property_id: 'p2', name: 'Mauvais bien', cancellation_policy: 'non_remboursable' },
+      { user_id: COMPTE, provider_property_id: 'p1', name: 'La bulle', cancellation_policy: 'j7' }
+    ]
+  })
+  assert.equal((await releve.differer({ compte: COMPTE, bookingId: 'b1', propertyId: 'p1', provider: 'channex', a: hiver('2026-11-11T07:00'), db })).ok, true)
+  const ligne = etat.tables.notifications_file[0]
+  assert.deepEqual({ sujet: ligne.sujet, code: ligne.code, canaux: ligne.canaux, contenu: ligne.contenu },
+    { sujet: 'releve:b1', code: 'reservation', canaux: ['email'], contenu: { releve: { bookingId: 'b1', propertyId: 'p1', provider: 'channex' }, bienRef: 'p1' } })
+  assert.ok(!JSON.stringify(ligne).includes('jean@'), 'aucune coordonnée du voyageur dans la file')
+  const appels = []
+  const r = await releve.envoyerDiffere({ compte: COMPTE, contenu: ligne.contenu, maintenant: MIDI, db, envoyer: async (o) => { appels.push(o); return { ok: true } } })
+  assert.equal(r.ok, true)
+  assert.deepEqual(appels.map(o => [o.userId, o.bookingId, o.propertyId, o.bien, o.politique, o.snapshot.guestEmail]),
+    [[COMPTE, 'b1', 'p1', 'La bulle', 'j7', 'jean@exemple.fr']])
+  // Seul l'AUTRE hôte a cette réservation : rien ne part, et ce n'est pas « défaite ».
+  const r3 = await releve.envoyerDiffere({ compte: COMPTE, contenu: { releve: { bookingId: 'b9', propertyId: 'p1' } }, maintenant: MIDI, db,
+    envoyer: async () => { throw new Error('ne doit pas partir') } })
+  assert.deepEqual(r3, { ok: false, raison: 'reservation_introuvable' })
+  // Défaite pendant la nuit : elle ne s'annonce pas.
+  etat.tables.bookings_snapshot[2].snapshot.status = 'cancelled'
+  const r2 = await releve.envoyerDiffere({ compte: COMPTE, contenu: ligne.contenu, maintenant: MIDI, db, envoyer: async () => { throw new Error('ne doit pas partir') } })
+  assert.deepEqual(r2, { ok: true, ignore: true, raison: 'reservation_defaite' })
+})
+
+test('review de rattrapage, constat 2 : DEUX lignes pour la même référence (bien archivé puis recréé) — le relevé part, avec le bien ACTIF', async () => {
+  const { db } = base({
+    bookings_snapshot: [{ user_id: COMPTE, booking_id: 'b1', snapshot: { status: 'confirmed', provider: 'channex', source: 'Offline' } }],
+    properties: [
+      { user_id: COMPTE, provider_property_id: 'p1', name: 'Ancien', cancellation_policy: 'flexible_j2', archive_le: '2026-10-01T00:00:00Z' },
+      { user_id: COMPTE, provider_property_id: 'p1', name: 'La bulle', cancellation_policy: 'j7', archive_le: null }
+    ]
+  })
+  const appels = []
+  const r = await releve.envoyerDiffere({ compte: COMPTE, contenu: { releve: { bookingId: 'b1', propertyId: 'p1' } }, maintenant: MIDI, db,
+    envoyer: async (o) => { appels.push([o.bien, o.politique]); return { ok: true } } })
+  assert.equal(r.ok, true)
+  assert.deepEqual(appels, [['La bulle', 'j7']])
+})
+
+test('review de rattrapage, constat 2 : une lecture qui échoue toujours ne remet pas le relevé sans fin — au bout de REMISES_MAX, l\'incident', async () => {
+  const panne = base({}, { pannes: ['bookings_snapshot'] })
+  const incidents = []
+  let ligne = { id: 'r1', user_id: COMPTE, compte_id: COMPTE, code: 'reservation', sujet: 'releve:b1', canaux: ['email'], a: new Date(MIDI).toISOString(),
+    contenu: { releve: { bookingId: 'b1', propertyId: 'p1', provider: 'channex' }, bienRef: 'p1' } }
+  const sorties = []
+  for (let i = 0; i < releve.REMISES_MAX; i++) {
+    const r = await releve.sortirDeLaFile({ ligne, maintenant: MIDI, db: panne.db, signaler: async (t, o) => { incidents.push([t, o.userId]) } })
+    sorties.push(r.remise ? 'remise' : 'incident')
+    const t = panne.etat.tables.notifications_file
+    if (r.remise) { ligne = { ...ligne, contenu: t[t.length - 1].contenu }; t.length = 0 }
+  }
+  assert.deepEqual(sorties, [...Array(releve.REMISES_MAX - 1).fill('remise'), 'incident'])
+  assert.deepEqual(incidents, [['notif_hote_non_envoyee', COMPTE]])
+})
+
+test('« suivre mes réglages » vaut au moment de partir : l\'e-mail décoché pendant la nuit retient le relevé', async () => {
+  const { db } = base({
+    bookings_snapshot: [{ user_id: COMPTE, booking_id: 'b1', snapshot: { status: 'confirmed', provider: 'channex', source: 'Offline' } }],
+    notifications_reglages: [{ user_id: COMPTE, evenements: { reservation: { push: true, email: false, sms: false, urgent: false } }, plages: [] }]
+  })
+  const r = await releve.envoyerDiffere({ compte: COMPTE, contenu: { releve: { bookingId: 'b1', propertyId: 'p1' } }, maintenant: MIDI, db,
+    envoyer: async () => { throw new Error('ne doit pas partir') } })
+  assert.deepEqual(r, { ok: true, ignore: true, raison: 'email_decoche' })
+})
+
+test('LE TEST QUI COMPTE : un relevé différé ne se perd jamais en silence — lecture ratée remise en file, envoi raté signalé', async () => {
+  const ligne = { id: 'r1', user_id: COMPTE, compte_id: COMPTE, code: 'reservation', sujet: 'releve:b1', canaux: ['email'], a: new Date(hiver('2026-11-11T07:00')).toISOString(),
+    contenu: { releve: { bookingId: 'b1', propertyId: 'p1', provider: 'channex' }, bienRef: 'p1' } }
+  // Le cœur en panne au moment de partir : la ligne revient.
+  const panne = base({}, { pannes: ['bookings_snapshot'] })
+  const incidents = []
+  const r1 = await releve.sortirDeLaFile({ ligne, maintenant: MIDI, db: panne.db, signaler: async (t, o) => { incidents.push([t, o.userId]) } })
+  assert.equal(r1.remise, true)
+  assert.deepEqual(panne.etat.tables.notifications_file.map(l => [l.sujet, l.user_id, l.a]), [['releve:b1', COMPTE, new Date(MIDI).toISOString()]])
+  assert.deepEqual(incidents, [])
+  // Le relevé lui-même échoue (Brevo et repli muets) : un incident, comme le chemin immédiat.
+  const ok = base({ bookings_snapshot: [{ user_id: COMPTE, booking_id: 'b1', snapshot: { status: 'confirmed', provider: 'channex' } }] })
+  const r2 = await releve.sortirDeLaFile({ ligne, maintenant: MIDI, db: ok.db, envoyer: async () => ({ ok: false, raison: 'brevo muet' }),
+    signaler: async (t, o) => { incidents.push([t, o.userId, o.propertyId]) } })
+  assert.equal(r2.erreur, 'brevo muet')
+  assert.deepEqual(incidents, [['notif_hote_non_envoyee', COMPTE, 'p1']])
+})
+
+test('LE TEST QUI COMPTE : sans le temps de partir, un relevé PRIS revient dans la file', async () => {
+  const contenuReleve = { releve: { bookingId: 'b1', propertyId: 'p1', provider: 'channex' }, bienRef: 'p1' }
+  const { db, etat } = base({ ...AVEC_MEMBRE, notifications_file: [
+    ligneFile({ id: 'a1' }),
+    ligneFile({ id: 'r1', code: 'reservation', sujet: 'releve:b1', canaux: ['email'], contenu: contenuReleve })
+  ] })
+  // Le temps s'épuise APRÈS la prise du groupe : le relevé n'a pas le temps de partir.
+  let appels = 0
+  const resteMs = () => (appels++ === 0 ? 60000 : 1000)
+  const sortis = []
+  const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T07:05'), db, resteMs,
+    deps: { ...envois().deps, sortirReleve: async (o) => { sortis.push(o.ligne.id); return { envoye: true } } } })
+  assert.deepEqual(sortis, [])
+  assert.equal(bilan.reportees, 1)
+  assert.deepEqual(etat.tables.notifications_file.map(l => l.sujet), ['releve:b1'], 'le relevé est de retour')
+})
+
+test('LE TEST QUI COMPTE : à la fin de la plage, le relevé part SEUL et au titulaire seul — jamais fondu dans le regroupé', async () => {
+  const contenuReleve = { releve: { bookingId: 'b1', propertyId: 'p1', provider: 'channex' }, bienRef: 'p1' }
+  const { db } = base({ ...AVEC_MEMBRE, notifications_file: [
+    ligneFile({ id: 'a1' }),
+    ligneFile({ id: 'r1', code: 'reservation', sujet: 'releve:b1', canaux: ['email'], contenu: contenuReleve }),
+    // Une ligne de relevé chez un membre ne peut venir que d'une erreur : elle est écartée.
+    ligneFile({ id: 'r2', user_id: MEMBRE, code: 'reservation', sujet: 'releve:b1', canaux: ['email'], contenu: contenuReleve })
+  ] })
+  const e = envois()
+  const releves = []
+  const bilan = await file.viderFile({ maintenant: hiver('2026-11-11T07:05'), db,
+    deps: { ...e.deps, sortirReleve: async (o) => { releves.push([o.ligne.compte_id, o.ligne.contenu.releve.bookingId]); return { envoye: true } } } })
+  assert.deepEqual(releves, [[COMPTE, 'b1']])
+  assert.equal(bilan.ecartees, 1, 'la ligne du membre')
+  const pushTitulaire = e.journal.find(j => j[0] === 'push' && j[1] === COMPTE)
+  assert.equal(pushTitulaire[2], 'T1', 'le relevé n\'entre pas dans le regroupement : la notification reste seule')
+  assert.ok(!e.journal.some(j => j[0] === 'email'), 'aucun e-mail regroupé n\'emporte le relevé')
+})
+
+// ─── 11. Lot 2c-2 : retirer une annonce sans emporter un message plus récent ─
+test('retirerSujet avec un code ne retire que la ligne de CET événement (une conversation = un sujet)', async () => {
+  const ligne = (code) => ligneFile({ id: code, code, sujet: 'conv:b1' })
+  // La réponse différée est partie, mais un NOUVEAU message attend depuis sur ce sujet : il reste.
+  const a = base({ notifications_file: [ligne('message_voyageur')] })
+  await file.retirerSujet({ compte: COMPTE, sujet: 'conv:b1', code: 'brouillon_ia', db: a.db })
+  assert.equal(a.etat.tables.notifications_file.length, 1)
+  // L'annonce de la réponse elle-même : retirée.
+  const b = base({ notifications_file: [ligne('brouillon_ia')] })
+  await file.retirerSujet({ compte: COMPTE, sujet: 'conv:b1', code: 'brouillon_ia', db: b.db })
+  assert.equal(b.etat.tables.notifications_file.length, 0)
+})
+
+// ─── 12. Lot 2c-2 : un émetteur léger ne charge pas le client du cron ───────
+test('LE TEST QUI COMPTE : prévenir d\'un message depuis le writer ne charge ni le client du cron ni le SDK de l\'IA', () => {
+  // Dans un processus neuf : le cache de ce fichier-ci a déjà tout chargé.
+  const { execFileSync } = require('node:child_process')
+  const script = `
+    process.env.SUPABASE_URL = 'http://localhost:54321'; process.env.SUPABASE_SERVICE_KEY = 'k'
+    // Des clés d'essai, générées ici et jamais affichées : sans clés, la lecture des
+    // appareils n'a pas lieu et le test ne prouverait rien.
+    const k = require('web-push').generateVAPIDKeys()
+    process.env.PUSH_VAPID_PUBLIC = k.publicKey; process.env.PUSH_VAPID_PRIVATE = k.privateKey
+    const lignes = {
+      profiles: [{ id: 'p', account_user_id: 'C', member_user_id: 'C', is_owner: true, active: true, access_mode: 'compte', email: 'h@e.fr', phone: null, notify_sms: true, notify_email: true }],
+      push_abonnements: [], notifications_reglages: [], properties: [], bookings_snapshot: [], messages: []
+    }
+    const appels = []
+    const db = { from (t) { appels.push(t); const b = { select: () => b, eq: () => b, in: () => b, is: () => b, gte: () => b, order: () => b, limit: () => b,
+      insert: () => Promise.resolve({ error: null }), upsert: () => Promise.resolve({ error: null }), delete: () => b, update: () => b,
+      maybeSingle: () => Promise.resolve({ data: (lignes[t] || [])[0] || null, error: null }),
+      then: (r) => r({ data: lignes[t] || [], error: null }) }; return b } }
+    require(${JSON.stringify(require('node:path').join(__dirname, '..', 'lib', 'record-message'))}).recordMessage({ userId: 'C', provider: 'channex', propertyId: 'p1', bookingId: 'b1',
+      direction: 'inbound', sender: 'guest', body: 'x', providerMsgId: 'm1', sentAt: new Date().toISOString(), supabase: db,
+      notifierMessage: undefined })
+      .then(() => {
+        const charge = Object.keys(require.cache)
+        console.log(JSON.stringify({
+          cron: charge.some(k => k.endsWith('/lib/cron-shared.js')),
+          ia: charge.some(k => k.includes('@anthropic-ai')),
+          appareils: appels.includes('push_abonnements')
+        }))
+      })
+  `
+  const lancer = (reglages) => {
+    const sortie = execFileSync(process.execPath, ['-e', script.replace('notifications_reglages: []', `notifications_reglages: ${reglages}`)],
+      { cwd: require('node:path').join(__dirname, '..'), encoding: 'utf8' })
+    return JSON.parse(sortie.trim().split('\n').pop())
+  }
+  // Notification cochée (défaut) : les appareils se lisent pour l'envoi.
+  const r = lancer('[]')
+  assert.equal(r.appareils, true, 'les appareils se lisent par le client du writer')
+  assert.deepEqual({ cron: r.cron, ia: r.ia }, { cron: false, ia: false })
+  // Notification décochée : les appareils se COMPTENT quand même (Q11) — par le même client.
+  const r2 = lancer(`[{ user_id: 'C', evenements: { message_voyageur: { push: false, email: true, sms: false, urgent: false } }, plages: [] }]`)
+  assert.equal(r2.appareils, true)
+  assert.deepEqual({ cron: r2.cron, ia: r2.ia }, { cron: false, ia: false })
 })

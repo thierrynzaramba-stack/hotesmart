@@ -29,6 +29,29 @@ Un bouton **Tester** par canal dans la config : en cas d'échec, il affiche **l'
 - **Code d'accès non résolu**.
 - **Pause automatique** de son bien (voir §3).
 
+**Depuis le lot PWA 2c-2, l'urgence et l'information manquante détectées par
+l'IA (b, c) partent AUSSI par le point d'envoi unique** — titulaire et membres
+qui ont le domaine `messages` sur ce bien, selon leurs réglages ; jamais le texte
+du message ni le résumé de l'IA, seulement le bien et le prénom (docs/kb/pwa.md
+§11.2). Les listes ci-dessous restent servies jusqu'au 2c-3.
+
+**Le ménage refusé et les disponibilités modifiées partent AUSSI par le point
+d'envoi unique** (`lib/notifications/evenements-menages.js`, docs/kb/pwa.md
+§11.3), au même rythme que les listes : une fois par refus, à chaque changement
+envoyé (rien pour un jour de glisser).
+
+**Le code d'accès non résolu part AUSSI par le point
+d'envoi unique** (`lib/notifications/notifier.js`, docs/kb/pwa.md §11) : le
+titulaire et les membres qui ont le domaine `reservations` sur ce bien, chacun
+selon ses réglages (notification, e-mail, SMS sans appareil ; urgent par défaut,
+donc il passe les heures calmes). Les listes de la configuration ci-dessus restent
+servies jusqu'au lot 2c-3, qui les reprendra en contacts. L'ancien « e-mail de
+repli au titulaire » (envoyé quand la configuration n'avait envoyé aucun e-mail)
+est **remplacé** : le titulaire reçoit l'e-mail par défaut selon ses réglages.
+⚠ Jusqu'au 2c-3, si son adresse figure AUSSI dans les listes ci-dessus, il
+reçoit les deux e-mails, et celui de la configuration ne suit pas ses réglages
+(la production reçoit 2b et tout le 2c ensemble : elle ne voit pas cet état).
+
 ## 3. Kill switch (manuel) & coupe-circuit (automatique)
 
 ### Couper l'IA / Réactiver (manuel)
@@ -59,7 +82,11 @@ Deux protections tournent en fond (par heure glissante) :
   mettre le bien en pause.
 - **Coupe-circuit par conversation** : si une **même conversation boucle** (seuil ~6 messages IA en
   1h sur la même réservation), le **bien est mis en pause automatiquement** (`automation_paused`,
-  raison « coupe-circuit auto : boucle conversation »). L'hôte reçoit un **email explicatif**.
+  raison « coupe-circuit auto : boucle conversation »). ⚠ L'« email explicatif » à l'hôte
+  qu'annonçait cette ligne **n'existait pas dans le code** (mesuré le 9 novembre 2026 : seul
+  l'incident fondateur partait). Depuis le lot PWA 2c-2, le **titulaire** est prévenu par le
+  point d'envoi unique (« Pause automatique d'un bien », selon ses réglages ; docs/kb/pwa.md
+  §11.2), au moment de la bascule seulement.
 
 Effet identique au kill switch manuel (plus de réponses ni de codes créés ; réception + synchro
 continuent ; code déjà posé valable). **Réactivation en un clic** après vérification de la messagerie.
