@@ -310,7 +310,11 @@ test('LE TEST QUI COMPTE (review) : depuis Noël, le 24 tenu par le réveillon e
   const lignes = [{ id: 'rev', evenement: REVEILLON, zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'Exceptionnel' }]
   const d = await reponseEcran({ lignes })
   const noel = d.evenements.find(x => x.cle === NOEL)
-  assert.deepEqual(r.nuitsTenuesAilleurs(noel, new Set([JEU_24, SAM_19])), [{ date: JEU_24, cle: REVEILLON }])
+  assert.deepEqual(r.nuitsTenuesAilleurs(noel, new Set([JEU_24, SAM_19]), r.indexerNuits(d.nuits)), [{ date: JEU_24, cle: REVEILLON, auCalcul: false }])
+  // Tenue « au calcul » par le réveillon, la nuit est déjà en automatique : la page le sait.
+  const auCalcul = await reponseEcran({ lignes: [{ ...lignes[0], niveau: 'calcul' }] })
+  const noelC = auCalcul.evenements.find(x => x.cle === NOEL)
+  assert.deepEqual(r.nuitsTenuesAilleurs(noelC, new Set([JEU_24]), r.indexerNuits(auCalcul.nuits)), [{ date: JEU_24, cle: REVEILLON, auCalcul: true }])
   assert.deepEqual(r.operationsPourRetrait(noel, new Set([JEU_24]), lignes), [], 'rien à écrire ici')
   // Et un niveau posé depuis Noël n'y change rien (la page l'a dit avant).
   const ops = r.operationsPourNiveau(noel, new Set([JEU_24]), 'Base', lignes)
@@ -642,9 +646,10 @@ test('LE TEST QUI COMPTE (review, sécurité) : pendant un changement de logemen
   // Le scénario mesuré par la review : la réponse du nouveau logement tarde,
   // la frise de l'ancien reste peinte, on y ouvre Noël et on règle — le PUT
   // partait sur l'ancien, puis « Appliquer » restait offert sous le nouveau nom.
-  // ⚠ TROIS GARDES ENSEMBLE : rien ne s'ouvre pendant le changement, rien ne
-  // se règle (`changementEnCours`), et la réponse d'un autre logement oublie
-  // tout (`recevoir`). Contre-épreuve : les trois ôtées, il rougit.
+  // ⚠ QUATRE GARDES ENSEMBLE : l'écran de l'ancien ne se repeint plus pendant
+  // le changement (re-review), rien ne s'y ouvre, rien ne s'y règle
+  // (`changementEnCours`), et la réponse d'un autre logement oublie tout
+  // (`recevoir`). Contre-épreuve : les quatre ôtées, il rougit.
   const d = await reponseEcran()
   const autre = { ...d, bien: d.biens[1].id }
   let relache
@@ -656,16 +661,20 @@ test('LE TEST QUI COMPTE (review, sécurité) : pendant un changement de logemen
     },
     ecriture: async () => ({ corps: { simulation: true, confirmation: CONF, visees: {}, sans_nuit: [] } })
   })
-  await b.choisir(b.$('[data-bind="bien"]'), d.biens[1].id)
-  // Un repeint pendant l'attente (un filtre touché) : le sélecteur garde le logement DEMANDÉ.
-  await b.cliquer(b.$('[data-filtre="officiel"]'))
-  await b.cliquer(b.$('[data-filtre="tous"]'))
-  assert.equal(b.$('[data-bind="bien"]').value, d.biens[1].id, 'le sélecteur revient sur l’ancien logement')
+  // Noël est OUVERT sur l'ancien logement quand on change.
   await ouvrirNoel(b)
-  for (const s of ['[data-tout]', '[data-niveau]', '[data-largeur]']) assert.equal(b.$(s), null, `${s} offert sur l’écran de l’ancien logement`)
-  const n19 = b.$$('[data-nuit]').find(j => j.dataset.nuit === SAM_19)
-  if (n19) await b.cliquer(n19)
-  assert.equal(b.$('[data-niveau]'), null)
+  const barreNoel = b.$$('.yfe-barre').find(x => x.dataset.ouvrir.startsWith(NOEL + '|'))
+  await b.choisir(b.$('[data-bind="bien"]'), d.biens[1].id)
+  assert.equal(b.$$('.yfe-barre').length, 0, 'la frise de l’ancien logement reste peinte pendant le changement')
+  // Un repeint pendant l'attente (un filtre touché) : rien de l'ancien ne revient,
+  // et le sélecteur garde le logement DEMANDÉ.
+  b.$('[data-bind="filtres"]').hidden = false
+  await b.cliquer(b.$('[data-filtre="officiel"]'))
+  assert.equal(b.$$('.yfe-ev').length, 0, 'un repeint pendant le changement remet les cartes de l’ancien logement')
+  assert.equal(b.$('[data-bind="bien"]').value, d.biens[1].id, 'le sélecteur revient sur l’ancien logement')
+  // Une barre gardée en mémoire (un double clic, un lecteur d'écran) n'ouvre rien.
+  await b.cliquer(barreNoel)
+  for (const s of ['[data-tout]', '[data-niveau]', '[data-largeur]', '[data-nuit]']) assert.equal(b.$(s), null, `${s} offert sur l’écran de l’ancien logement`)
   relache()
   await b.attendre(6)
   assert.equal(ecritures(b).length, 0, 'une écriture est partie')
@@ -681,7 +690,24 @@ test('l’éditeur NOMME les nuits tenues par un autre événement ; « Remettre
   await b.cliquer(nuitDe(b, JEU_24))
   assert.match(b.$('.yfe-editeur').textContent, /1 nuit choisie est réglée par « Réveillon de Noël », qui passe avant/)
   await b.cliquer(b.$('[data-auto]'))
-  assert.match(b.$('.yfe-geste').textContent, /remettez-les en automatique depuis cet événement/)
+  assert.match(b.$('.yfe-geste').textContent, /Cette nuit est réglée par « Réveillon de Noël », qui passe avant : c’est depuis cet événement/)
+  // Une nuit tenue ailleurs ET une libre : le message compte (re-review).
+  await b.cliquer(b.$('[data-geste-annuler]'))
+  await b.cliquer(nuitDe(b, SAM_19))
+  await b.cliquer(b.$('[data-auto]'))
+  assert.match(b.$('.yfe-geste').textContent, /1 nuit choisie est réglée par « Réveillon de Noël ».*Les autres sont déjà en automatique/)
+  assert.equal(ecritures(b).length, 0)
+})
+
+test('une nuit qu’un autre événement tient « au calcul » est déjà en automatique : « Remettre en automatique » le dit (re-review)', async () => {
+  const lignes = [{ id: 'rev', evenement: REVEILLON, zone: 'evenement', rang: null, jour: null, nuit: 'date', niveau: 'calcul' }]
+  const d = await reponseEcran({ lignes })
+  const b = await monter({ ecran: async () => d, ecriture: async () => ({ corps: {} }) })
+  await ouvrirNoel(b)
+  await b.cliquer(nuitDe(b, JEU_24))
+  await b.cliquer(b.$('[data-auto]'))
+  assert.match(b.$('.yfe-geste').textContent, /déjà en automatique/)
+  assert.doesNotMatch(b.$('.yfe-geste').textContent, /depuis cet événement/)
   assert.equal(ecritures(b).length, 0)
 })
 
@@ -713,4 +739,32 @@ test('le focus survit aux gestes : « + » de la zone, « Effacer le choix », �
   await b.attendre()
   await b.cliquer(b.$('[data-geste-annuler]'))
   assert.equal(b.w.document.activeElement, b.$('.yfe-editeur [data-niveau]'))
+})
+
+test('le focus sur la section « sans événement » : « Annuler » revient à la ligne, « Appliquer » ne retombe pas sur la page (re-review)', async () => {
+  const orphelines = [
+    { id: 'o-1', evenement: 'evenement:festival_jazz', zone: 'evenement', rang: 1, jour: 'samedi', nuit: null, niveau: 'Haut' },
+    { id: 'o-2', evenement: 'evenement:festival_jazz', zone: 'evenement', rang: 1, jour: 'dimanche', nuit: null, niveau: 'Haut' }
+  ]
+  let lignes = orphelines
+  const b = await monter({
+    ecran: async () => reponseEcran({ lignes }),
+    ecriture: async (m, c) => {
+      if (c.simuler) return { corps: { simulation: true, confirmation: { pilote: false, nuits: 0 }, visees: {}, sans_nuit: [] } }
+      lignes = orphelines.filter(l => l.id !== 'o-1')
+      return { corps: { ok: true, ecrites: [], envoi: 'immediat', confirmation: { pilote: false, nuits: 0 } } }
+    }
+  })
+  await ouvrirNoel(b)
+  await b.cliquer(b.$('.yfe-sans-evenement [data-retirer-ligne="o-1"]'))
+  await b.attendre()
+  assert.ok(b.$('.yfe-sans-evenement .yfe-geste'), 'la confirmation s’affiche dans la section')
+  await b.cliquer(b.$('.yfe-sans-evenement [data-geste-annuler]'))
+  assert.equal(b.w.document.activeElement, b.$('[data-retirer-ligne="o-1"]'), 'le focus saute sur une autre carte')
+  await b.cliquer(b.$('[data-retirer-ligne="o-1"]'))
+  await b.attendre()
+  await b.cliquer(b.$('[data-geste-appliquer]'))
+  await b.attendre(8)
+  assert.notEqual(b.w.document.activeElement, b.w.document.body, 'le focus retombe sur la page')
+  assert.equal(b.w.document.activeElement, b.$('[data-retirer-ligne="o-2"]'))
 })

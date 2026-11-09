@@ -1226,5 +1226,6 @@
   "yfe.err_session": "Votre session a expiré : reconnectez-vous, puis recommencez. Rien n’a été enregistré.",
   "yfe.effet_aucune_retrait": "Aucune nuit ouverte ne change de prix aujourd’hui.",
   "yfe.tenues_ailleurs": "{n, plural, one {# nuit choisie est réglée} other {# nuits choisies sont réglées}} par « {noms} », qui passe avant : ce que vous posez ici ne s’y appliquera pas.",
-  "yfe.rien_ailleurs": "Ces nuits sont réglées par « {noms} », qui passe avant : remettez-les en automatique depuis cet événement."
+  "yfe.rien_ailleurs": "{n, plural, one {Cette nuit est réglée} other {Ces # nuits sont réglées}} par « {noms} », qui passe avant : c’est depuis cet événement que se fait le retour en automatique.",
+  "yfe.rien_ailleurs_partiel": "{n, plural, one {# nuit choisie est réglée} other {# nuits choisies sont réglées}} par « {noms} », qui passe avant : c’est depuis cet événement que se fait le retour en automatique. Les autres sont déjà en automatique."
 }

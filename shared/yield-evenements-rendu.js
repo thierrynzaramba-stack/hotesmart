@@ -349,11 +349,14 @@ export function operationsPourRetrait (e, choix, lignes) {
  * LES NUITS CHOISIES QU'UN AUTRE ÉVÉNEMENT RÈGLE ET QUI PASSE AVANT (`devant`,
  * par le serveur) : ni un niveau ni « automatique » posé ici ne s'y
  * appliquerait. L'éditeur les nomme, avec l'événement qui les tient.
- * @returns [{ date, cle }]
+ * @returns [{ date, cle, auCalcul }]
  */
-export function nuitsTenuesAilleurs (e, choix) {
+export function nuitsTenuesAilleurs (e, choix, idx = null) {
   const parDate = positionsParDate(e)
-  return [...choix].sort().map(d => parDate.get(d)).filter(p => p && p.devant).map(p => ({ date: p.date, cle: p.devant }))
+  // `auCalcul` : l'autre événement la tient « au calcul » — elle est déjà en
+  // automatique (constat de la re-review : la page disait de l'y remettre).
+  const auCalcul = d => { const n = idx && typeof idx.get === 'function' ? idx.get(d) : null; return !!(n && n.regle && n.regle.niveau === CALCUL) }
+  return [...choix].sort().map(d => parDate.get(d)).filter(p => p && p.devant).map(p => ({ date: p.date, cle: p.devant, auCalcul: auCalcul(p.date) }))
 }
 
 /** Retirer UNE ligne (une ligne sans nuit, ou sans événement cette année). */
@@ -700,7 +703,7 @@ export function rendreSansEvenement (data, fmt, jourLong, ui = {}) {
   const orphelines = (rp.sans_nuit || []).filter(x => !x.occurrence && (x.motif === 'evenement_absent' || !presents.has(x.cle)))
   // Le dernier réglage retiré emporte la section : « Enregistré » reste dit.
   if (!orphelines.length) {
-    return ui.message && ui.message.ev === ID_SANS_EVENEMENT ? `<p class="yfe-message" role="status">${esc(ui.message.texte)}</p>` : ''
+    return ui.message && ui.message.ev === ID_SANS_EVENEMENT ? `<p class="yfe-message yfe-sans-evenement" role="status" tabindex="-1">${esc(ui.message.texte)}</p>` : ''
   }
   const items = orphelines.map(x => {
     const l = lignes.get(x.ligne)
@@ -715,7 +718,7 @@ export function rendreSansEvenement (data, fmt, jourLong, ui = {}) {
   const g = ui.geste && ui.geste.ev === ID_SANS_EVENEMENT ? ui.geste : null
   const m = ui.message && ui.message.ev === ID_SANS_EVENEMENT ? ui.message : null
   return `<section class="yfe-sans-nuit yfe-sans-evenement"><p class="small">${esc(fmt.t('yfe.sans_evenement_titre'))}</p><ul>${items}</ul>`
-    + (m ? `<p class="yfe-message" role="status">${esc(m.texte)}</p>` : '') + rendreGeste(g, fmt) + `</section>`
+    + (m ? `<p class="yfe-message" role="status" tabindex="-1">${esc(m.texte)}</p>` : '') + rendreGeste(g, fmt) + `</section>`
 }
 
 /**

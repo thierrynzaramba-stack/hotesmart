@@ -422,3 +422,114 @@ review (la re-review est la seule permise) :
   lisible, jamais la clé brute ;
 - tests : la nuit réglée par un autre événement le nomme ; un nom saisi piégé
   (`<img …>`) ne devient jamais du HTML ; le pont absent est titré par la table.
+
+## 14. Réalisé — 4a, étape 3 : les gestes (9 novembre 2026)
+
+Pour qui a `reglages: write` (`droits_ecriture`), sur l'événement ouvert :
+
+- **Choisir des nuits** : toucher une nuit qui a une position la choisit
+  (le détail suit la dernière touchée) ; « Tout l'événement » ; « Tout le
+  rayonnement » (les week-ends de la zone affichée). Une case sans position
+  n'est pas un interrupteur.
+- **L'éditeur**, collé en bas d'écran (au-dessus de la barre du téléphone) :
+  « N nuits · du … au … », les **cinq pastilles** « 3 · Haut 140 € »,
+  « Remettre en automatique », et la phrase de Q2 (« un réglage vaut chaque
+  année, par position… »).
+- **La confirmation** (§4) : `PUT … simuler` → « N nuits vont changer de prix,
+  du … au … (de … à …). YieldFlow les enverra aux plateformes dans les
+  5 minutes. » — sans un mot d'envoi sur un bien non piloté, sans promesse si
+  l'ouverture est illisible — puis « Appliquer » renvoie ce nombre
+  (`confirme`). S'il a changé : 409, la page redit le nouveau et redemande.
+  Après l'enregistrement, l'écran se relit ; tant qu'il ne l'a pas fait,
+  aucun autre geste ne part (`perime`).
+- **La zone** « Avant / Après : N week-ends » − / + : `PATCH weekends_*`,
+  sans confirmation (elle ne change aucun prix), bornée de 0 à 4.
+- **Les crans d'avant** (Q6) : « Remettre en automatique » à côté, avec une
+  confirmation dans la carte (« les nuits reprendront le niveau calculé » ;
+  « commun à toutes les périodes de ce type » quand il l'est), `PATCH crans: null`.
+- **Une ligne sans nuit** (§5) porte « Retirer », confirmé comme un geste.
+- **« chaque année »** sur une période dont une nuit est tenue par un réglage
+  de l'hôte, ou qui porte des crans d'avant.
+- Sans droit, depuis le cache, pendant un changement de logement : aucun
+  geste (le serveur refuse de toute façon en 403 — masquer n'est qu'un confort).
+
+**Ce que le geste écrit** — la page ne calcule aucune position ni aucune
+précision de ligne ; le serveur donne, pour chaque nuit, les lignes de
+l'événement qui la couvrent (`positions[].lignes`), qui la reprendrait sans
+elles (`relais`) et qui passe avant (`devant`), **par le résolveur** :
+- un niveau → la position de chaque nuit (Q2, B) ; un week-end du rayonnement
+  choisi en entier (ses **deux** nuits) → une ligne de week-end, et la ligne
+  d'une de ses nuits se retire ; un week-end coupé s'écrit par sa nuit ;
+- « Remettre en automatique » → la ligne de la position se retire (celle du
+  week-end si ses deux nuits sont choisies) ; **une ligne plus large n'est
+  jamais retirée** (« toutes les nuits », « tous les samedis », le week-end
+  dont une nuit seulement est choisie : elle décide d'autres nuits, une autre
+  occurrence ou une autre année) — la nuit est rendue au calcul par sa
+  position (`calcul`) ; et si un autre événement la reprendrait (le réveillon
+  retiré, Noël reprend le 24), même chose : **« automatique » veut dire « au
+  calcul »**, pas « au réglage d'un autre événement ». C'est un choix de ma
+  part, à confirmer en recette ;
+- une nuit qu'un autre événement **tient et qui passe avant** (le 24 vu depuis
+  Noël quand le réveillon est réglé) est **nommée** dans l'éditeur : rien de
+  ce qu'on pose ici ne s'y applique, on la règle depuis cet événement.
+
+**Limite connue, voulue** : une position vaut pour toutes les occurrences —
+remettre en automatique « le 1er vendredi » du Salon de mars vaut aussi pour
+le 1er vendredi du Salon d'octobre (Q2, B). Le jeudi d'octobre, position
+absente en mars, n'est pas touché.
+
+**Performance** : aucun appel au chargement en plus (`tests/budget-ecran.test.js` :
+`/api/yield-evenements` pour les gestes seulement). Les annotations `relais` /
+`devant` ne résolvent que ce qui est inconnu, occurrence par occurrence, sur
+les seules dates et les seules lignes qui peuvent compter, sans la recherche
+des lignes sans nuit (inutile ici). Mesuré sur le banc : 279 lignes de réglage
+posées → 61 ms (394 ms avant), 542 lignes — toutes les positions de tous les
+événements, cas extrême — → 112 ms (989 ms avant) ; un compte réel en a
+aujourd'hui quelques-unes. Un test compare chaque nuit à `positionsDuContexte`
+sans raccourci. **La mesure sur staging (Q4, seuil 1 s) reste à faire à la
+fin de 4a.**
+
+**Review de l'étape 3, 9 novembre 2026** (`a7aa5718f0511e838c705730b9129e407e3b36b1..ebd6e3e7cc296f2ae13ef9f20aac25b800fa45aa`,
+arbre `/home/claude/hotesmart`, branche `yf-ecran-evenements`, chaque constat
+cité dans un fichier du diff) : **un constat de sécurité** et six autres,
+tous corrigés (`d3bf05be550b93a0525822a777a60d1158c1c53c`) :
+- **(sécurité, entre logements d'un même compte)** pendant un changement de
+  logement dont la réponse tardait, l'écran de l'ancien restait réglable : la
+  simulation partait pour lui, et « Appliquer » restait offert sous le nom du
+  nouveau. Désormais rien ne s'ouvre ni ne se règle pendant le changement, la
+  réponse d'un autre logement oublie le geste, « Appliquer » vérifie le
+  logement **avant** l'envoi, et le sélecteur garde le logement demandé ;
+- « Remettre en automatique » entre deux événements, et les nuits tenues
+  ailleurs (`relais`, `devant`) ;
+- une ligne large n'est plus retirée (elle décidait d'autres nuits) ;
+- le focus après chaque geste ; un retrait sans effet ne parle plus d'un
+  « niveau choisi » ; un 401 dit « session expirée » ; « chaque année » suit
+  les nuits réellement réglées ;
+- tests : réponse de logement différée, deux événements sur une nuit, deux
+  occurrences dans la fenêtre, invariant de couverture corrigé.
+La re-review, une seule (constat de sécurité), porte sur le diff de ces
+correctifs.
+
+**Re-review des correctifs, 9 novembre 2026** (`ebd6e3e7cc296f2ae13ef9f20aac25b800fa45aa..d3bf05be550b93a0525822a777a60d1158c1c53c`,
+même arbre, même branche) : **le constat de sécurité est fermé** (neuf
+scénarios rejoués, réponse du nouveau logement différée : aucune écriture
+ailleurs) ; `relais` / `devant` identiques au résolveur sans raccourci sur
+55 020 positions (420 tirages) ; aucune nuit non choisie ne change au retrait.
+**Aucun nouveau constat de sécurité.** Un partiel et quatre mineurs, corrigés
+sans nouvelle review (la re-review est la seule permise) :
+- le focus sur la section « sans événement » (« Annuler » revient à la ligne,
+  « Appliquer » ne retombe plus sur la page) ;
+- une nuit qu'un autre événement tient « au calcul » est déjà en automatique,
+  et le message compte les nuits concernées (« 1 nuit choisie… les autres
+  sont déjà en automatique ») ;
+- pendant un changement de logement, l'écran de l'ancien ne se repeint plus
+  (un filtre touché remettait ses trente cartes) — et la page ne se croit
+  plus en changement quand le serveur répond « aucun logement » ;
+- le coût des annotations (ci-dessus).
+
+**Contre-épreuves (REVIEW.md, règle 19)** : contre le code d'avant
+(`git archive a7aa5718`), le fichier de tests des gestes rend 19 rouges sur
+20 ; le vingtième — sans droit, aucun geste — est un test de non-régression du
+masquage, éprouvé par mutation. Trente-trois mutations du code de l'étape
+(retrait d'une garde, d'une règle d'écriture, d'un raccourci de résolution),
+toutes rouges.

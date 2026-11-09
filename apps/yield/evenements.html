@@ -171,7 +171,11 @@ const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: n
 // 3, constat de sécurité) : l'écran encore peint est celui de l'ANCIEN
 // logement — un geste lancé là partait sur lui, puis sa confirmation restait
 // offerte sous le nom du nouveau, et « Appliquer » écrivait sur le premier.
-const changementEnCours = () => !!(etat.bienVoulu && etat.data && etat.data.bien !== etat.bienVoulu)
+// `attendu` : le logement que la lecture EN VOL demande (`undefined` sans
+// lecture en vol). Pas `bienVoulu` seul : un membre qui n'a plus aucun
+// logement reçoit `bien: null`, et la page se serait crue en changement pour
+// toujours (re-review de l'étape 3).
+const changementEnCours = () => !!(etat.attendu && etat.data && etat.data.bien !== etat.attendu)
 const peutRegler = () => !!(etat.data && etat.data.droits_ecriture && !etat.depuisCache && !etat.perime && !changementEnCours() && Array.isArray(etat.data.evenements))
 
 // Tout ce qui tient à l'événement ouvert s'oublie quand on en change.
@@ -218,6 +222,17 @@ function peindre () {
   if (!d) return
   etat.biens = d.biens || []
   peindreSelecteur()
+  // ⚠ PENDANT UN CHANGEMENT DE LOGEMENT, L'ÉCRAN DE L'ANCIEN NE SE REPEINT PAS
+  // (re-review) : un filtre touché repeignait trente cartes et la frise de La
+  // bulle sous un sélecteur qui disait Cœur de vie 23.
+  if (changementEnCours()) {
+    $('[data-bind="sous-titre"]').textContent = (etat.biens.find(b => b.id === etat.bienVoulu) || {}).nom || ''
+    $('[data-bind="age"]').hidden = true
+    for (const z of ['frise-zone', 'filtres']) $(`[data-bind="${z}"]`).hidden = true
+    for (const z of ['legende', 'frise', 'alertes']) $(`[data-bind="${z}"]`).innerHTML = ''
+    $('[data-bind="liste"]').innerHTML = `<p class="muted">${esc(t('common.loading'))}</p>`
+    return
+  }
   const nomBien = (etat.biens.find(b => b.id === d.bien) || {}).nom || ''
 
   const alertes = []
@@ -272,9 +287,11 @@ function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
 async function charger () {
   const n = ++etat.seq
   const voulu = etat.bienVoulu
+  etat.attendu = voulu
   try {
     const d = await appelAPI(ECRAN + (voulu ? '?bien=' + encodeURIComponent(voulu) : ''))
     if (n !== etat.seq) return
+    etat.attendu = undefined
     // ⚠ LE CACHE NE GARDE JAMAIS L'ÉTAT D'UNE NUIT (vendue, ouverte, ✎) : il
     // ne sert qu'à peindre tout de suite la frise et la liste, et la réponse du
     // serveur les remplace (spec §8, point 3).
@@ -289,6 +306,7 @@ async function charger () {
     recevoir(d)
   } catch (e) {
     if (n !== etat.seq) return
+    etat.attendu = undefined
     const statut = e && e.status
     logger.error('Événements', e && e.message, e)
     // ⚠ UN REFUS EFFACE CE QUE LE CACHE AVAIT PEINT : les logements d'un
@@ -370,16 +388,16 @@ function focusSur (selecteur) {
   if (el && el.focus) el.focus()
 }
 
-async function lancerGeste (ev, source, libelle, operations, { retrait = false, rien = null } = {}) {
+async function lancerGeste (ev, source, libelle, operations, { retrait = false, rien = null, ligne = null } = {}) {
   if (etat.occupe || !peutRegler()) return
   const bien = etat.data.bien
   etat.message = null
-  if (!operations.length) { etat.geste = { ev, source, etat: 'rien', libelle, bien, message: rien }; peindre(); focusSur('[data-geste-annuler]'); return }
+  if (!operations.length) { etat.geste = { ev, source, etat: 'rien', libelle, bien, message: rien, ligne }; peindre(); focusSur('[data-geste-annuler]'); return }
   if (operations.length > POSITIONS_PAR_GESTE) {
-    etat.geste = { ev, source, etat: 'erreur', libelle, bien, message: t('yfe.err_trop', { max: POSITIONS_PAR_GESTE }) }
+    etat.geste = { ev, source, etat: 'erreur', libelle, bien, ligne, message: t('yfe.err_trop', { max: POSITIONS_PAR_GESTE }) }
     peindre(); focusSur('[data-geste-annuler]'); return
   }
-  const g = { ev, source, etat: 'calcul', libelle, operations, bien, retrait }
+  const g = { ev, source, etat: 'calcul', libelle, operations, bien, retrait, ligne }
   etat.geste = g
   etat.occupe = true
   peindre()
@@ -416,7 +434,10 @@ async function appliquerGeste () {
     await charger()
     etat.occupe = false
     peindre()
-    rendreLeFocus('data-ouvrir', g.ev, false)
+    // Le focus revient sur l'en-tête de l'événement ; sur la section « sans
+    // événement », sur la ligne suivante, ou sur le message (re-review).
+    if (g.ev === ID_SANS_EVENEMENT) redonnerLeFocus(['.yfe-sans-evenement [data-retirer-ligne]', '.yfe-sans-evenement .yfe-message, p.yfe-sans-evenement'], null)
+    else rendreLeFocus('data-ouvrir', g.ev, false)
     return
   }
   etat.occupe = false
@@ -507,9 +528,14 @@ function surGeste (cible) {
     if (e) {
       // Rien à écrire, mais des nuits tenues par un autre événement : on le
       // dit, au lieu de « déjà en automatique » (constat de review).
-      const ailleurs = nuitsTenuesAilleurs(e, etat.choix)
-      lancerGeste(etat.ouvert, 'choix', t('yfe.geste_auto', { n: etat.choix.size }), operationsPourRetrait(e, etat.choix, lignesPosees()),
-        { retrait: true, rien: ailleurs.length ? t('yfe.rien_ailleurs', { noms: [...new Set(ailleurs.map(x => nomDeCle(x.cle, etat.data, fmt)))].join(' », « ') }) : null })
+      // Seules comptent celles qu'un autre événement tient à un NIVEAU : une
+      // nuit qu'il tient « au calcul » est déjà en automatique ; et le message
+      // dit combien des nuits choisies sont concernées (re-review).
+      const ailleurs = nuitsTenuesAilleurs(e, etat.choix, etat.idx).filter(x => !x.auCalcul)
+      const noms = [...new Set(ailleurs.map(x => nomDeCle(x.cle, etat.data, fmt)))].join(' », « ')
+      const rien = !ailleurs.length ? null
+        : t(ailleurs.length === etat.choix.size ? 'yfe.rien_ailleurs' : 'yfe.rien_ailleurs_partiel', { n: ailleurs.length, noms })
+      lancerGeste(etat.ouvert, 'choix', t('yfe.geste_auto', { n: etat.choix.size }), operationsPourRetrait(e, etat.choix, lignesPosees()), { retrait: true, rien })
     }
     return true
   }
@@ -517,16 +543,22 @@ function surGeste (cible) {
   if (ret) {
     const l = lignesPosees().find(x => String(x.id) === ret.dataset.retirerLigne)
     const carte = ret.closest('[data-ev]')
-    if (l) lancerGeste(carte ? carte.dataset.ev : ID_SANS_EVENEMENT, 'ligne', t('yfe.geste_retirer', { quoi: libellePosition(l, t, jourLong) }), operationsPourLigne(l), { retrait: true })
+    if (l) lancerGeste(carte ? carte.dataset.ev : ID_SANS_EVENEMENT, 'ligne', t('yfe.geste_retirer', { quoi: libellePosition(l, t, jourLong) }), operationsPourLigne(l), { retrait: true, ligne: l.id })
     return true
   }
   if (cible.closest('[data-geste-appliquer]')) { appliquerGeste(); return true }
   if (cible.closest('[data-geste-annuler]')) {
     if (!etat.occupe) {
-      const ev = etat.geste && etat.geste.ev
+      const g = etat.geste
+      const ev = g && g.ev
       etat.geste = null
       peindre()
-      redonnerLeFocus(['.yfe-editeur [data-niveau]', '[data-tout="evenement"]'], ev && ev !== ID_SANS_EVENEMENT ? ev : null)
+      // Le focus revient d'où le geste est parti : la ligne retirée, sinon
+      // l'éditeur de l'événement — jamais une autre carte (re-review).
+      const retour = g && g.ligne != null
+        ? [`[data-retirer-ligne="${String(g.ligne).replace(/["\\]/g, '')}"]`]
+        : ev === ID_SANS_EVENEMENT ? [] : ['.yfe-editeur [data-niveau]', '[data-tout="evenement"]']
+      redonnerLeFocus(retour, ev && ev !== ID_SANS_EVENEMENT ? ev : null)
     }
     return true
   }
@@ -611,8 +643,10 @@ $('[data-bind="bien"]').addEventListener('change', (ev) => {
   const u = new URL(location.href)
   if (etat.bienVoulu) u.searchParams.set('bien', etat.bienVoulu); else u.searchParams.delete('bien')
   try { history.replaceState(null, '', u.pathname + u.search) } catch { /* sans historique */ }
-  $('[data-bind="liste"]').innerHTML = `<p class="muted">${esc(t('common.loading'))}</p>`
+  // La lecture part d'abord (elle pose `attendu`), puis l'écran de l'ancien
+  // logement s'efface tout de suite (`peindre` le sait).
   charger()
+  if (etat.data) peindre(); else $('[data-bind="liste"]').innerHTML = `<p class="muted">${esc(t('common.loading'))}</p>`
 })
 
 // ─── Démarrage ──────────────────────────────────────────────────────────────
