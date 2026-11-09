@@ -172,7 +172,13 @@ function appeler (chemin, query, lignes, tables) {
   const stop = installer(lignes, journal, tables)
   try {
     const abs = require.resolve(path.join(__dirname, '..', chemin))
-    delete require.cache[abs]
+    // ⚠ TOUT `api/` EST RECHARGE, PAS SEULEMENT L'ENDPOINT APPELE : l'appel
+    // d'ecran de la page Avis (`api/ecran/avis.js`) reutilise les lectures
+    // d'`api/avis.js`, et celui-ci, deja en cache depuis la ligne precedente,
+    // gardait le client du banc d'AVANT — le test lisait un autre journal et
+    // disait « n'a pas lu properties ».
+    const dossierApi = path.join(__dirname, '..', 'api') + path.sep
+    for (const k of Object.keys(require.cache)) if (k.startsWith(dossierApi)) delete require.cache[k]
     const handler = require(abs)
     const rep = { code: 0, corps: null, entetes: {} }
     const res = {
@@ -227,6 +233,11 @@ const ECRANS = [
   // ligne du dessus couvrait `lister`, que la page n'appelle plus.
   { ecran: 'Avis (cartes : le filtre et le formulaire de la page)', chemin: 'api/avis.js', query: { action: 'cartes' } },
   { ecran: 'Avis — reglage auto-validation', chemin: 'api/avis.js', query: { action: 'auto-validation' } },
+  // ⚠ L'APPEL D'ECRAN DE LA PAGE AVIS V5 (8 novembre 2026) : c'est desormais
+  // LUI que la page lit pour son filtre et son formulaire. Il reutilise
+  // `cartesLister`, mais un appel d'ecran qui recomposerait sa propre liste
+  // rendrait le bien archive sans que la ligne `cartes` ne le voie.
+  { ecran: 'Avis V5 (appel d ecran : filtre et formulaire)', chemin: 'api/ecran/avis.js', query: {} },
   // Facture voyageur, etape 1 : la liste des biens a rattacher a une entite.
   { ecran: 'Entites juridiques (Reglages)', chemin: 'api/entites-juridiques.js', query: {} },
 ]
