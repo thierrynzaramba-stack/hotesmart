@@ -126,6 +126,23 @@ test('LE TEST QUI COMPTE : l IA lit ce que le voyageur recevrait — adresse de 
   assert.ok(sansBien.includes('- checkin : 15:00'))
 })
 
+test('l IA ne reçoit pas le téléphone de l objet Beds24 : la fiche et le simulateur ne le voient pas (S1)', () => {
+  // Review finale du lot, constat 1 : seul l'objet de l'API Beds24 porte
+  // `phone`. Le cron Beds24 l'aurait donné à l'IA en Auto, alors que la fiche
+  // dit « À remplir » et que le simulateur (qui lit `properties`) l'ignore.
+  process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+  process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
+  const { buildKnowledgeText } = require('../lib/cron-classify')
+  const { replisDuBien } = require('../lib/balises')
+  const objetBeds24 = { address: '1 rue X', phone: '+33 6 11 22 33 44' }
+  const sansBase = buildKnowledgeText([{ type: 'fixed', key: 'wifi_nom', value: 'R' }], { replis: replisDuBien(objetBeds24) })
+  assert.ok(!sansBase.includes('+33 6 11 22 33 44'), sansBase)
+  assert.ok(!/telephone_hote/.test(sansBase), sansBase)
+  // Le téléphone de la BASE, lui, reste lu.
+  const avecBase = buildKnowledgeText([{ type: 'fixed', key: 'telephone_hote', value: '06 99 88 77 66' }], { replis: replisDuBien(objetBeds24) })
+  assert.ok(avecBase.includes('- telephone_hote : 06 99 88 77 66'), avecBase)
+})
+
 test('les quatre chemins de l IA lisent `lisible_par_ia` (select *) et passent par le bâtisseur', () => {
   for (const f of ['lib/cron-classify.js', 'api/simulate.js', 'api/guestflow-proposer.js']) {
     const src = sansCommentaires(lire(f))

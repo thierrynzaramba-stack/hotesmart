@@ -27,7 +27,7 @@ const MODELE = {
   template_text: 'Bonjour {prenom}, adresse : {adresse}. Code : {code_acces}'
 }
 
-function charger ({ connaissance = [] } = {}) {
+function charger ({ connaissance = [], modele = MODELE } = {}) {
   const taches = []
   const table = (nom) => {
     const q = {
@@ -54,7 +54,7 @@ function charger ({ connaissance = [] } = {}) {
         return Promise.resolve({ data: [], error: null })
       },
       then (res, rej) {
-        const data = nom === 'message_templates' ? [MODELE]
+        const data = nom === 'message_templates' ? [modele]
                    : nom === 'knowledge' ? connaissance : []
         return Promise.resolve({ data, error: null }).then(res, rej)
       }
@@ -134,4 +134,17 @@ test('chemin Beds24 : l adresse de la FICHE l emporte sur celle de l objet Beds2
   const texte = texteEnvoye(taches)
   assert.ok(texte.includes('Adresse de la fiche'), `recu : ${texte}`)
   assert.ok(!texte.includes('Adresse Beds24'))
+})
+
+test('le message du code n annonce pas l heure de depart synchronisee du bien : le code, lui, expire selon la base', async () => {
+  // Review finale du lot, constat 2. La fin de validite du code ne lit que la
+  // base (`cron-arrival-code.js`, `cron-access.js`) ; annoncer l'heure de
+  // depart Beds24 (`checkOutEnd`) dans le message qui porte le PIN aurait pu
+  // promettre un depart APRES l'expiration de ce PIN.
+  const { mod, taches } = charger({ modele: { ...MODELE, template_text: 'Depart avant {checkout}. Code : {code_acces}' } })
+  await mod.processArrivalCodes('u1', 'CLE24',
+    { id: '111', name: 'Gite', provider: 'beds24', address: 'A', adresseFiche: 'A', checkOutEnd: '13:00' },
+    [{ ...arrivante(), provider: 'beds24' }], {})
+  const texte = texteEnvoye(taches)
+  assert.ok(!texte.includes('13:00'), texte)
 })

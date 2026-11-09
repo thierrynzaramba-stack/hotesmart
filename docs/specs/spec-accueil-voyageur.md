@@ -100,8 +100,17 @@ voyageur reçoit — §2, S2.)
   fiche vide est un manque, pas un retour à l'adresse Beds24. Si cette lecture
   échoue, l'objet n'est pas décoré et l'adresse Beds24 reste le repli.
   Le message du code d'accès, lui, n'a pas de garde sur les manquants : fiche
-  vide, il part encore avec « [ADRESSE] » (comportement d'avant le lot,
-  dette 137, décision de Thierry attendue).
+  vide, il part encore avec « [ADRESSE] » (dette 137, décision de Thierry
+  attendue). Base ET fiche vides, c'était déjà le cas avant le lot ; adresse
+  dans la base SEULE, c'est une régression du lot, que seule la reprise S4
+  ferme — d'où S4 avant le go prod.
+  Du bien, ce message ne prend que l'ADRESSE : ses horaires restent ceux de la
+  réservation puis de la base, parce que la fin de validité du code ne lit que
+  la base (review finale, constat 2). Et l'IA ne reçoit pas le téléphone de
+  repli de l'objet Beds24, que ni la fiche ni le simulateur ne voient (review
+  finale, constat 1) : pour elle, la base seule fait foi sur le téléphone,
+  comme avant le lot. L'écart du téléphone ne vit donc plus que dans les
+  messages programmés du chemin Beds24.
   La lecture est **dédiée et faite avant toute garde** (review 2, constat 3) :
   posée dans la boucle de matérialisation, elle manquait aux biens archivés, à
   tout le compte quand une garde renonçait, et au bien dont la lecture
@@ -151,6 +160,18 @@ voyageur reçoit — §2, S2.)
    Thierry, par `scripts/retirer-adresses-base.js` (à blanc par défaut,
    `--go`, et `--go --prod` en production). Il refuse tant qu'un bien a une
    adresse de base sans adresse de fiche.
+
+**Mesuré en production le 9 novembre 2026** (requête en lecture seule, lancée
+par Thierry) : quatre logements en service, **tous Channex, aucun Beds24** — les
+deuxième et troisième listes sont vides. Aucune fiche vide. Deux **écarts**, où
+la base est plus complète que la fiche (sans ville ni code postal dans la
+fiche) : Cœur de vie 23 (« 23 rue de l'horloge » contre « 23 rue de l'Horloge,
+Bagnéres de Bigorre, 65200 ») et La bulle (« 4 rue du bourg vieux » contre
+« 4 Rue du Bourg Vieux, Bagnères-de-Bigorre, 65200 »). Choix proposé à Thierry :
+compléter ces deux fiches, par l'écran de la fiche, avant le go prod. Ofuro
+Futari et Colomiers n'ont pas de ligne dans la base ; leurs fiches n'ont pas de
+ville non plus, à compléter aussi (l'adresse de Colomiers semble être celle de
+Toulouse : à vérifier par Thierry).
 
 ## 4. Inventaire du bloc « Infos du logement » (base de connaissance)
 
@@ -244,3 +265,74 @@ voyageur reçoit — §2, S2.)
 4. « Proposer une réponse » (IA) sur une question d'adresse : l'adresse de la
    fiche.
 5. Téléphone : mêmes gestes.
+
+## 9. Reviews du lot — la trace
+
+Écrite ici pour survivre à un compactage de session (demande du chef de file,
+9 novembre 2026). Arbre de toutes les reviews : `/home/claude/hotesmart-accueil`,
+branche `accueil-voyageur`. Trois reviews COMPTÉES, le maximum pour un lot qui
+touche l'envoi au voyageur.
+
+- **Review 1 — NON TRACÉE, NON COMPTÉE.** Lancée sur la tête
+  `1f28ae24daa17c3e639e6db130e2ff45678bbc10`. Son rapport brut a été perdu au
+  compactage de la session : ni la plage déclarée, ni la liste des fichiers
+  cités ne peuvent être recopiées. Ce qu'on en sait par ses correctifs
+  (`46549681`) : un BLOQUANT sur le message du code d'accès
+  (`lib/message-builder.js`, `lib/cron-arrival-code.js`, fichiers hors du diff
+  — c'était le constat), un IMPORTANT sur le chemin Beds24, des mineurs.
+- **Review 2 — comptée.** Plage `1f28ae24daa17c3e639e6db130e2ff45678bbc10..46549681904ebb18d77edfec238e7347d5c182db`,
+  tête lue `46549681`. Fichiers cités, tous dans la plage : `lib/balises.js`,
+  `lib/cron-beds24-props.js`, `lib/message-builder.js`,
+  `lib/cron-arrival-code.js`, `scripts/retirer-adresses-base.js`,
+  `tests/arrival-code-adresse-fiche.test.js`,
+  `tests/cron-messages-placeholders.test.js`,
+  `tests/connaissance-ecran.test.js`. Lus seulement : `api/cron.js`,
+  `lib/cron-channel-props.js`, `lib/logement/lecture.js`. 0 sécurité. Corrigée
+  dans `a4f9bbfd08dee67b60f60864f2fbbc397ed97346`.
+- **Review 3 — comptée.** Plage `46549681904ebb18d77edfec238e7347d5c182db..a4f9bbfd08dee67b60f60864f2fbbc397ed97346`,
+  tête lue `a4f9bbfd`. Fichiers cités, tous dans la plage :
+  `scripts/retirer-adresses-base.js`, `docs/specs/spec-accueil-voyageur.md`,
+  `tests/beds24-props-adresse-fiche.test.js`. 0 bloquant, 0 sécurité.
+  Corrigée sans nouvelle review dans `53e7fca429b3fb64d31bab853ed5b903a25b1f16`.
+- **Review finale — comptée, la dernière** (9 novembre 2026, demandée par le
+  chef de file pour couvrir le code du lot).
+  - `pwd` → `/home/claude/hotesmart-accueil` ; branche → `accueil-voyageur` ;
+    `HEAD` → `60f9e66ee2a545dc745ff7a8c761ac82c970d07d`.
+  - Plage : tout le lot, `e1e27976e8f205dee641870f67e9cd869ea1f9cc..60f9e66ee2a545dc745ff7a8c761ac82c970d07d`
+    (39 fichiers) ; en priorité le commit de code,
+    `56d40f026ddf881467a53b334489065a06c95c33..1f28ae24daa17c3e639e6db130e2ff45678bbc10`.
+  - Verdict : 0 bloquant, 0 sécurité, 3 mineurs. Sur Channex et Beds24, aucun
+    message ne part vide, avec une balise brute, avec une adresse autre que
+    celle de la fiche (hors l'écart écrit en S2), ni avec la valeur d'un autre
+    logement ou d'un autre compte.
+  - Constat 1 (MINEUR) — l'IA du cron Beds24 recevait le téléphone de l'objet
+    Beds24, que la fiche, la proposition et le simulateur ignorent. Cités :
+    `lib/cron-classify.js:224`, `lib/balises.js:355`,
+    `api/guestflow-proposer.js:109`, `api/simulate.js:86`,
+    `lib/logement/lecture.js:868` (tous dans le diff). Corrigé : l'IA ne
+    reçoit plus de téléphone de repli.
+  - Constat 2 (MINEUR) — le message du code annonçait l'heure de départ
+    synchronisée (Beds24) alors que le code expire selon la base. Cités :
+    `lib/message-builder.js:50-54`, `lib/cron-arrival-code.js:115-121` et
+    `:327-328` (dans le diff) ; **HORS DIFF** `lib/cron-access.js:105-112`
+    (même règle de fin de fenêtre ; concerné si l'on corrigeait la fenêtre).
+    Corrigé autrement, sans toucher la fenêtre : le message du code reprend
+    les horaires d'avant le lot (réservation, puis base, puis défaut).
+  - Constat 3 (MINEUR) — la dette 137 disait « pas une régression » : faux
+    pour le cas « adresse dans la base seule ». Cités : `docs/kb/dettes-v1.md:150`,
+    `docs/specs/spec-accueil-voyageur.md:102-104` (dans le diff). Corrigé : la
+    dette et S2 distinguent les deux cas ; S4 conditionne le go prod.
+  - Lus seulement, hors diff : `api/cron.js`, `lib/cron-channel-props.js`,
+    `lib/cleaning/sync-menages.js`, `lib/require-permission.js`,
+    `lib/permissions.js`, `lib/channels/beds24.js`, `lib/cron-access.js`,
+    `lib/moteur-creation.js`, `lib/email-voyageur.js`, `lib/cron-bookings.js`,
+    `api/menages-public.js`, `api/extract-kb.js`, `pages/onboarding.html`,
+    `pages/messages.html`, `apps/agent-ai/analyze.html`,
+    `shared/api-client.js`, `shared/pwa/service-worker.js`, `vercel.json`,
+    `migrations/0000-schema-initial.sql`.
+  - Ses mesures : 14 fichiers de tests du lot à 499/499, aussi à J+60 et J+200 ;
+    suite complète 7627/7627 ; contre-épreuve sur `git archive e1e27976` : les
+    tests neufs rougissent.
+  - Corrigée sans nouvelle review (règle : la dernière review se corrige sans
+    review) ; chaque correctif a un test qui rougit contre `60f9e66e`.
+
