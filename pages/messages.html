@@ -200,7 +200,6 @@ const etat = {
   modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
   configIA: null,          // blob agent_alert_config.config ; null = illisible (volet ferme)
   prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
-  brevo: false,            // cle Brevo presente -> canal SMS ouvert
   tiroirVolet: 'ia', tiroirBien: null,
   // L'empreinte du volet IA au moment ou il a ete peint (voir renderTiroir).
   panneauRendu: null,
@@ -295,10 +294,8 @@ async function charger () {
             else etat.prompting.overrides[String(ligne.property_id)] = ligne.instructions || ''
           }
         }),
-      // La porte SMS : une cle Brevo enregistree, sinon le canal est ferme.
-      appel('/api/sms?action=config')
-        .then(r => { etat.brevo = r.configured === true })
-        .catch(() => { etat.brevo = false })
+      // (La porte Brevo n'est plus lue ici : elle ne servait qu'au volet des
+      // alertes, retire au lot PWA 2c-3. Reglages la lit pour les contacts.)
     ] : []),
     // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
     // sous RLS, jamais /api/channel-property (il interroge Beds24 en direct).
@@ -2438,16 +2435,18 @@ function voletIA (ref) {
       <p class="caption muted">${esc(t('messages.breaker_desc'))}</p>
       <a class="link small" href="/connaissance" data-ouvre-connaissance>${esc(t('messages.knowledge'))}</a>
     </div>
-    <h3 class="msg-tiroir__section">${esc(t('messages.tab_alerts'))}</h3>` + voletAlertes(ref)
+    <h3 class="msg-tiroir__section">${esc(t('messages.tab_alerts'))}</h3>
+    <div class="msg-tiroir__bloc">
+      <p class="caption muted" style="margin: 0">${esc(t('messages.alerts_moved'))}</p>
+      <a class="link small" href="/settings?onglet=notifications" data-qui-previent>${esc(t('messages.alerts_moved_link'))}</a>
+    </div>`
     // ⚠ UN SEUL « ENREGISTRER » POUR TOUT LE PANNEAU (demande de Thierry).
-    // Il couvre TROIS ecritures qui ne peuvent pas voyager ensemble : les
-    // delais et les alertes sont deux CIBLES de /api/agent-config, et
-    // « une cible par requete » est une garde posee en review (un POST du blob
-    // entier depuis deux onglets s'ecrasait) ; les consignes vivent dans une
-    // autre table, sous RLS. Donc trois requetes sequentielles, et un echec
-    // PARTIEL possible — c'est pourquoi `enregistrerPanneau` dit laquelle des
-    // trois n'est pas passee, au lieu d'un « erreur » global qui laisserait
-    // l'hote relancer les trois a l'aveugle.
+    // Il couvre DEUX ecritures qui ne peuvent pas voyager ensemble : les
+    // delais sont une CIBLE de /api/agent-config ; les consignes vivent dans
+    // une autre table, sous RLS. Donc deux requetes sequentielles, et un echec
+    // PARTIEL possible — c'est pourquoi `enregistrerPanneau` dit laquelle n'est
+    // pas passee. (Les alertes en etaient une troisieme jusqu'au lot PWA 2c-3 :
+    // qui est prevenu se regle desormais dans Reglages → Notifications.)
     //
     // ⚠ LA PAUSE N'EST PAS DANS CE BOUTON, ET C'EST VOLONTAIRE : couper
     // l'automatique est un geste d'URGENCE. Il part a la seconde ou la case
@@ -2455,45 +2454,12 @@ function voletIA (ref) {
     // pas un kill switch.
     + `<div class="msg-tiroir__bloc" style="border-bottom: 0">
       <button type="button" class="btn btn--primary btn--block" data-panneau-save ${etat.modeEnCours ? 'disabled' : ''}>${icone('i-check')}${esc(t('messages.panneau_save'))}</button>
-      <p class="caption muted" style="margin: 0">${esc(t('messages.alerts_hint'))}</p>
     </div>`
 }
 
-// ── Volet « Alertes » : 2 types x 2 canaux, porte Brevo, test apres
-// enregistrement (le serveur n'accepte que des destinataires EN BASE).
-function voletAlertes (ref) {
-  if (etat.configIA === null) {
-    return `<p class="caption muted" style="padding: 14px 18px">${esc(t('messages.load_error'))}</p>`
-  }
-  const cfg = etat.configIA[ref] || {}
-  const types = [['intervention', 'messages.alert_intervention'], ['info_unknown', 'messages.alert_info']]
-  return types.map(([k, cle]) => {
-    const a = cfg[k] || {}
-    return `<div class="msg-tiroir__bloc">
-      <span class="msg-tiroir__nom">${esc(t(cle))}</span>
-      <div class="msg-tiroir__canal">
-        <label class="row caption" style="gap: 6px">
-          <input type="checkbox" data-alerte="${k}|sms_enabled" ${a.sms_enabled && etat.brevo ? 'checked' : ''} ${etat.brevo && !etat.modeEnCours ? '' : 'disabled'}>
-          ${esc(t('messages.channel_sms'))}
-        </label>
-        ${etat.brevo
-          ? `<textarea rows="2" data-alerte="${k}|sms_lines" ${etat.modeEnCours ? 'disabled' : ''} placeholder="${esc(t('messages.recipients_sms_ph'))}">${esc(a.sms_lines || '')}</textarea>
-            <button type="button" class="link caption" data-tester="${k}|sms">${esc(t('messages.test_send'))}</button>`
-          : `<p class="caption muted">${esc(t('messages.sms_needs_brevo'))} <a class="link" href="/connexions">${esc(t('messages.sms_connect'))}</a></p>`}
-      </div>
-      <div class="msg-tiroir__canal">
-        <label class="row caption" style="gap: 6px">
-          <input type="checkbox" data-alerte="${k}|email_enabled" ${a.email_enabled !== false ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''} style="accent-color: var(--info)">
-          ${esc(t('messages.channel_email'))}
-        </label>
-        <textarea rows="2" data-alerte="${k}|email_lines" ${etat.modeEnCours ? 'disabled' : ''} placeholder="${esc(t('messages.recipients_email_ph'))}">${esc(a.email_lines || '')}</textarea>
-        <button type="button" class="link caption" data-tester="${k}|email">${esc(t('messages.test_send'))}</button>
-      </div>
-    </div>`
-  }).join('')
-  // Le bouton des alertes a disparu : un seul « Enregistrer » couvre le
-  // panneau (voir la note en fin de voletIA).
-}
+// ── Le volet « Alertes » (2 types x 2 canaux, porte Brevo, test) est RETIRE
+// (PWA lot 2c-3, etape 4 ; spec §16.8, inventaire) : les listes sont reprises en
+// contacts prevenus et en reglages, et un lien mene a Reglages → Notifications.
 
 function brancherTiroir (corps, ref) {
   // Le lien « Connaissances » mene a la base de connaissance V5 : l'ancienne
@@ -2623,34 +2589,13 @@ function brancherTiroir (corps, ref) {
   // Le filet a deja pose la note et degele le panneau ; ici on journalise.
   corps.querySelector('[data-panneau-save]')?.addEventListener('click', () =>
     enregistrerPanneau(corps, ref).catch(err => logger.error('Messages', 'enregistrement', err)))
-  corps.querySelectorAll('[data-tester]').forEach(x => x.addEventListener('click', () => {
-    const [type, canal] = x.dataset.tester.split('|')
-    testerCanal(corps, ref, type, canal)
-  }))
 }
 
 // Lire TOUT le panneau, en une fois, AVANT que quoi que ce soit ne re-rende.
 // C'est la seule facon de ne rien perdre : le conteneur est reconstruit a
 // chaque `renderTiroir()`, et ce qui n'a pas ete lu avant est perdu.
 function lireLePanneau (corps, ref) {
-  // ⚠ SANS CLE BREVO, LES CHAMPS SMS N'EXISTENT PAS A L'ECRAN — ET LES LIRE
-  // QUAND MEME LES EFFACE. `sms_enabled: etat.brevo && …checked` donnait
-  // `false` chez un hote sans Brevo : enregistrer le panneau aurait DESACTIVE
-  // ses SMS d'alerte sans qu'il touche a ce reglage. Le repli sur la valeur
-  // enregistree est la garde de l'ancien chemin.
-  const avant = (etat.configIA && etat.configIA[ref]) || {}
-  const lireType = (k) => ({
-    sms_enabled: etat.brevo
-      ? corps.querySelector('[data-alerte="' + k + '|sms_enabled"]')?.checked === true
-      : (avant[k] && avant[k].sms_enabled === true),
-    sms_lines: etat.brevo
-      ? (corps.querySelector('[data-alerte="' + k + '|sms_lines"]')?.value || '')
-      : ((avant[k] && avant[k].sms_lines) || ''),
-    email_enabled: corps.querySelector('[data-alerte="' + k + '|email_enabled"]')?.checked === true,
-    email_lines: corps.querySelector('[data-alerte="' + k + '|email_lines"]')?.value || ''
-  })
   return {
-    alertes: { intervention: lireType('intervention'), info_unknown: lireType('info_unknown') },
     consignes: {
       global: (corps.querySelector('[data-consignes="global"]')?.value || '').trim(),
       bien: (corps.querySelector('[data-consignes="bien"]')?.value || '').trim()
@@ -2678,12 +2623,9 @@ function lireLePanneau (corps, ref) {
 // Brevo se retrouvait avec une alerte SMS cochee qu'il n'a jamais reglee et qui
 // ne sera jamais enregistree — et tronquait la saisie.
 // Une photo du DOM se prend sur le DOM.
-const CHAMPS_DU_VOLET = ['[data-consignes="global"]', '[data-consignes="bien"]',
-  '[data-alerte="intervention|sms_lines"]', '[data-alerte="intervention|email_lines"]',
-  '[data-alerte="info_unknown|sms_lines"]', '[data-alerte="info_unknown|email_lines"]']
-const CASES_DU_VOLET = ['[data-alerte="intervention|sms_enabled"]',
-  '[data-alerte="intervention|email_enabled"]',
-  '[data-alerte="info_unknown|sms_enabled"]', '[data-alerte="info_unknown|email_enabled"]']
+// (Les champs et cases des alertes en sont sortis avec le volet, lot PWA 2c-3.)
+const CHAMPS_DU_VOLET = ['[data-consignes="global"]', '[data-consignes="bien"]']
+const CASES_DU_VOLET = []
 
 // ⚠ LA PHOTO NOTE AUSSI CE QUI ETAIT DEJA DESARME, et c'est ce qui rend le
 // degel juste. Le gel du panneau passe par un REPEINT (`geler` +
@@ -2741,16 +2683,15 @@ function reposerLaSaisie (corps, photo) {
   }
 }
 
-// ─── UN SEUL « ENREGISTRER », TROIS ECRITURES ───────────────────────────────
+// ─── UN SEUL « ENREGISTRER », DEUX ECRITURES ────────────────────────────────
 //
 // ⚠ ELLES NE PEUVENT PAS VOYAGER ENSEMBLE, et ce n'est pas un choix : les
-// delais et les alertes sont deux CIBLES de /api/agent-config, et l'endpoint
-// refuse par 400 une requete qui en porte deux (garde posee en review — un
-// POST du blob entier depuis deux onglets s'ecrasait). Les consignes, elles,
-// vivent dans `agent_prompting`, sous RLS.
+// delais sont une CIBLE de /api/agent-config ; les consignes vivent dans
+// `agent_prompting`, sous RLS. (Les alertes en etaient une troisieme, retiree
+// au lot PWA 2c-3.)
 //
 // ⚠ DONC L'ECHEC EST PARTIEL, ET IL SE DIT PARTIE PAR PARTIE. Un « erreur »
-// global laisserait l'hote relancer les trois a l'aveugle, sans savoir
+// global laisserait l'hote relancer les deux a l'aveugle, sans savoir
 // laquelle est passee — et re-poster les delais qui ont deja reussi n'est pas
 // anodin : ils gouvernent les envois.
 // ⚠ LE FILET, ET C'EST LE CONSTAT 5 DE LA REVUE DU 28 OCTOBRE 2026. Les deux
@@ -3198,15 +3139,8 @@ async function enregistrerLePanneau (corps, ref) {
     brouillonsRepris = 1
   }
 
-  // 2. Les alertes (cible `alertes`) — memes champs qu'avant.
-  try {
-    await appel('/api/agent-config', { alertes_ref: ref, alertes: saisi.alertes })
-  } catch (err) {
-    logger.error('Messages', 'alertes', err)
-    echoues.push(t('messages.partie_alertes'))
-  }
-
-  // 3. Les consignes (table `agent_prompting`, RLS).
+  // 2. Les consignes (table `agent_prompting`, RLS). Les alertes ne s'ecrivent
+  // plus d'ici (lot PWA 2c-3) : le serveur refuserait leur cible en 410.
   if (etat.prompting !== null) {
     try {
       await ecrireConsigne(compteCourant(), null, saisi.consignes.global)
@@ -3333,7 +3267,7 @@ function geler (corps, fige) {
 // ⚠ `geler(corps, false)` N'EST PAS L'INVERSE DE `geler(corps, true)`, ET CA SE
 // MESURE — constat d'une revue. Certains controles sont desarmes EN PERMANENCE
 // par le rendu : la case SMS d'un hote sans cle Brevo l'est toujours
-// (`etat.brevo && !etat.modeEnCours ? '' : 'disabled'`). Un relachement en bloc
+// (c'etait la case SMS du volet des alertes, retire au lot PWA 2c-3). Un relachement en bloc
 // la REARME, l'hote peut la cocher — et `lireLePanneau` ignore le DOM dans ce
 // cas, donc son geste est JETE EN SILENCE au prochain « Enregistrer », sans que
 // rien ne le signale.
@@ -3380,29 +3314,6 @@ function gelerEnTete (fige) {
   document.querySelectorAll('[data-ouvre-volet]').forEach(b => { b.disabled = fige === true })
 }
 
-
-// Le test part au premier destinataire EN BASE (api/alert-test n'accepte que
-// ceux-la — piege documente par l'ancienne page). Si l'ecran porte une
-// edition NON enregistree, on refuse : le test partirait a l'ANCIEN
-// destinataire en affichant un succes (releve en review).
-async function testerCanal (corps, ref, type, canal) {
-  if (etat.configIA === null) return
-  const cfg = (etat.configIA[ref] || {})[type] || {}
-  const lignes = String(canal === 'sms' ? cfg.sms_lines || '' : cfg.email_lines || '')
-  const champ = canal === 'sms' ? 'sms_lines' : 'email_lines'
-  const ecran = corps.querySelector(`[data-alerte="${type}|${champ}"]`)
-  if (ecran && ecran.value.trim() !== lignes.trim()) { noteReglage(t('messages.test_first_save')); return }
-  const premier = lignes.split('\n').map(l => l.trim()).filter(Boolean)[0] || ''
-  const to = premier.includes(':') ? premier.slice(premier.indexOf(':') + 1).trim() : premier
-  if (!to) { noteReglage(t('messages.test_first_save')); return }
-  try {
-    await appel('/api/alert-test', { channel: canal, to })
-    noteReglage(t('messages.test_sent'), true)
-  } catch (err) {
-    logger.error('Messages', 'test alerte', err)
-    noteReglage(err.message || t('messages.mode_error'))
-  }
-}
 
 // Le bien du fil ouvert, s'il y en a un ET qu'on le connait. `propertyId`
 // d'une conversation est la REFERENCE PROVIDER — la meme cle que `etat.biens`,
@@ -3463,17 +3374,14 @@ function editionPanneauNonEnregistree () {
   // D'ALERTE — qui restent editables — disparaissaient en silence. Mesure :
   // destinataire tape, clic sur un autre fil, champ vide, aucune note.
   if (etat.tiroirVolet !== 'ia') return null
-  if (!corps.querySelector('[data-alerte]')) return null
+  // ⚠ LE VOLET EST RENDU = SON BOUTON « ENREGISTRER » EST LA. Ce garde lisait
+  // les champs d'alerte, retires au lot PWA 2c-3 : il aurait alors toujours
+  // conclu « rien de saisi », et une consigne tapee aurait disparu en silence.
+  if (!corps.querySelector('[data-panneau-save]')) return null
   const lu = lireLePanneau(corps, ref)
-  const memeType = (k) => {
-    const a = rendu.lu.alertes[k]
-    const l = lu.alertes[k]
-    return l.sms_enabled === a.sms_enabled && String(l.sms_lines) === String(a.sms_lines)
-      && l.email_enabled === a.email_enabled && String(l.email_lines) === String(a.email_lines)
-  }
   const memesConsignes = lu.consignes.global === rendu.lu.consignes.global
     && lu.consignes.bien === rendu.lu.consignes.bien
-  if (!memeType('intervention') || !memeType('info_unknown') || !memesConsignes) return nom()
+  if (!memesConsignes) return nom()
   return null
 }
 

@@ -615,11 +615,13 @@ test('un echec de pause garde sa note, et le panneau ne bouge pas sous elle', as
   b.fermer()
 })
 
-test('LE TEST QUI COMPTE : un destinataire d alerte compte, meme consignes illisibles', async () => {
-  // ⚠ CONSTAT MESURE D UNE REVUE. `etat.prompting === null` est un etat
-  // documente ; `voletIA` ne rend alors AUCUN `[data-consignes="global"]`, donc
-  // `editionPanneauNonEnregistree` sortait par ce garde — et les destinataires
-  // d alerte, qui restent editables, disparaissaient en silence.
+test('LE TEST QUI COMPTE : consignes illisibles et plus de volet d alerte — rien a perdre, aucune fausse alerte', async () => {
+  // Ce test gardait les destinataires d alerte, seuls champs encore editables
+  // quand les consignes sont illisibles. Le volet des alertes est retire (lot
+  // PWA 2c-3) : il ne reste rien du DOM a perdre, et le garde ne doit pas
+  // pour autant inventer une saisie. (Qu'un delai tape reste signale, c'est
+  // « et il le DIT quand une saisie non enregistree est abandonnee » qui le
+  // garde, plus haut dans ce fichier.)
   const b = B.monter({ appel: async () => ({}) })
   B.peupler(b, {
     biens: [{ ref: AUTRE, nom: 'Maison Jardin' }, { ref: REF, nom: 'Loft Pilotable' }],
@@ -635,15 +637,8 @@ test('LE TEST QUI COMPTE : un destinataire d alerte compte, meme consignes illis
     ouverte: 'B-JARDIN'
   })
   b.msg.renderListe()
-  const champ = B.corps(b).querySelector('[data-alerte="intervention|email_lines"]')
-  assert.ok(champ, 'le destinataire reste editable quand les consignes sont illisibles')
-  champ.value = 'nouveau@exemple.test'
-  assert.equal(b.msg.editionPanneauNonEnregistree(), 'Maison Jardin',
-    'la saisie est vue, sans le bloc des consignes')
-  B.clic(b, b.doc.querySelector('[data-conv="B-LOFT"]'))
-  await B.reposer(b)
-  assert.equal(b.doc.querySelector('[data-bind="tiroir-note"]').textContent,
-    FR['messages.panneau_suit_le_fil'].replace('{nom}', 'Maison Jardin'))
+  assert.equal(B.corps(b).querySelector('[data-alerte]'), null, 'plus aucun champ d alerte')
+  assert.equal(b.msg.editionPanneauNonEnregistree(), null, 'rien de saisi : rien a signaler')
   b.fermer()
 })
 

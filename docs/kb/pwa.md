@@ -1029,3 +1029,1233 @@ Les trois constats, mineurs, sont corrigés sans nouvelle review.
 
 **Re-test de Thierry sur staging `1c3f4b3d`, 9 novembre 2026 à 23:25** : cocher
 un jour des heures calmes ne fait plus sauter la page. Conforme.
+
+## 12. Lot 2c-3 — les contacts libres (10 novembre 2026)
+
+Branche `pwa-lot-2c3-contacts`, partie de `pwa-lot-2c2-evenements`
+(`a3ecc243`). Spec : §16.3, Q25 et Q29 à Q32 (décisions du 9 novembre). Quatre
+étapes, chacune avec sa review tracée.
+
+### 12.1 Étape 1 — la table des contacts libres et leur envoi
+
+Migration `migrations/2026-11-10-notifications-contacts.sql` (éprouvée sur un
+Postgres 16 jetable : appliquée deux fois, contraintes et cascade vérifiées) :
+- **`notifications_contacts`** : le compte, un nom, un e-mail et/ou un numéro
+  (l'un des deux exigé en base), les **biens** (des `properties.id` : la
+  référence provider change avec le provider, l'id du bien non), les
+  **alertes** (`urgences` et/ou `info_manquante`, rien d'autre en base), un
+  **jeton** de désinscription (deux UUID v4, sans extension), `desinscrit_le`
+  et `dernier_essai_le`. RLS activée, aucune policy.
+- **`notifications_file`** accueille les contacts : une ligne est pour une
+  personne (`user_id`) **ou** pour un contact (`contact_id`), jamais les deux
+  (contrainte), avec son index unique `(contact_id, sujet)` ; supprimer un
+  contact supprime ses lignes en attente.
+
+Module `lib/notifications/contacts.js` ; branché dans le point d'envoi
+(`notifier.js`, étape 4 de chaque envoi), l'envoi (`envoi.js`) et la file
+(`file.js`).
+
+**Les règles, et pourquoi :**
+1. **Chacun garde ce que sa liste recevait** (Q25) : `urgences` = b, j, l, m,
+   o (l'ancienne liste « intervention ») ; `info_manquante` = c. Aucun autre
+   événement ne lit même les contacts.
+2. **Pour SES biens, sur SON compte, jamais désinscrit** : chaque lecture
+   filtre `compte_id`. Sans identifiant de bien, la référence provider le
+   retrouve sur le compte (le bien actif, comme `bien.js`) ; sans bien du
+   tout, aucun contact.
+3. **Les HEURES et la LANGUE du titulaire** (§4, Q31), **pas ses canaux** : un
+   titulaire qui a tout décoché pour lui-même ne fait pas taire son gardien.
+   Seuls « urgent » et les plages du titulaire décident du moment ; la nuit,
+   la ligne du contact attend en file la fin de la plage du titulaire.
+4. **E-mail et SMS, jamais de notification** : un contact n'a pas d'appareil,
+   donc aucune lecture d'appareils, et son SMS part (clé Brevo du compte, comme
+   ses listes). Son e-mail n'a **pas de lien vers l'application** (il n'a pas
+   de compte), mais un lien « Ne plus recevoir ces alertes » (Q30).
+5. **⚠ Le lien de désinscription ouvre une page qui demande de confirmer**
+   (`/api/alertes-desinscription`, étape 3) : les messageries d'entreprise
+   ouvrent les liens d'un e-mail pour les analyser, et un lien qui agirait au
+   premier chargement désinscrirait le contact sans qu'il l'ait voulu. C'est
+   un clic de plus que la décision Q30 ; signalé à Thierry.
+6. **L'essai sur soi n'atteint jamais un contact** : il deviendrait un relais
+   vers une adresse saisie.
+7. **Relu à la sortie de la file** : désinscrit, plus réglé pour ce bien ou
+   cette alerte, ou d'un autre compte — la ligne est écartée ; une relecture
+   en panne la laisse en file. Un contact n'est jamais regroupé avec une
+   personne, et « vider ma file » ne prend jamais sa ligne.
+8. **Une panne de lecture des contacts se dit** (`contacts_illisibles` dans
+   le bilan) et ne prive pas les personnes du compte.
+9. **Une adresse du compte n'est pas un contact pour l'événement qu'elle reçoit
+   déjà** (Q29) : si l'e-mail ou le numéro d'un contact est celui d'un
+   DESTINATAIRE de cet événement (le titulaire, ou un membre dont les droits
+   couvrent le domaine et le bien), ce canal du contact se tait — la personne
+   le reçoit par ses réglages, une fois. Sur un événement ou un bien que ses
+   droits ne couvrent pas, elle n'est pas destinataire, et son adresse de
+   contact la prévient : rien n'est perdu. Les adresses se comparent sans casse
+   pour l'e-mail, et au format international pour le numéro.
+
+**Review de l'étape 1** (rapport recopié mot pour mot dès réception, avant
+tout correctif) :
+
+> Arbre lu : /home/claude/hs-2c3 — branche : pwa-lot-2c3-contacts — SHA : 586935e2ab3c6e282604067209fc49267cd0c674 — plage : a3ecc24389886928b782ed3d85ac724d8894864a..586935e2ab3c6e282604067209fc49267cd0c674
+>
+> **Constats**
+>
+> 1. **DÉFAUT (ordre de déploiement)** — `lib/notifications/file.js:111`
+>    - **Défaut :** `viderFile` demande maintenant la colonne `contact_id`. Si le code arrive en base avant la migration, PostgREST refuse la lecture, et la passe s'arrête en `lecture_impossible` pour **toutes** les lignes, y compris celles des personnes du compte.
+>    - **Scénario :** le merge part avant la migration. Plus aucune alerte des heures calmes ne sort, pour aucun hôte, jusqu'à ce que la migration soit appliquée. Les lignes restent en base : rien n'est perdu, tout est retardé. `contactsPour` rendrait aussi `contacts_illisibles` à chaque événement b, c, j, l, m, o.
+>    - **Correctif :** écrire dans les dépendances de la remise « migration appliquée sur staging et sur la prod AVANT le merge correspondant », avec sa vérification.
+>
+> 2. **MINEUR** — `lib/notifications/contacts.js:66`
+>    - **Défaut :** `idDuBien` prend `bien.id` sans le vérifier. Or, quand la lecture du bien est en panne, `bienDuCompte` (`lib/notifications/bien.js:45`) renvoie pour un bien Channex `id = ref`, c'est-à-dire l'identifiant Channex et non `properties.id`.
+>    - **Scénario :** la lecture de `properties` est en panne pendant une urgence (b). Les personnes sont prévenues, puisque leur périmètre se compare aux deux identifiants. Le gardien, lui, n'est pas prévenu : `contains('biens', [refChannex])` ne trouve rien, et le bilan rend `ok: true, contacts: []` sans le dire.
+>    - **Correctif :** quand `bien.id === bien.ref`, retrouver le bien par sa référence, comme si `id` était absent. Une panne doit alors rendre `ok: false`.
+>
+> 3. **MINEUR** — `lib/notifications/notifier.js:135-142`
+>    - **Défaut :** le dédoublonnage Q29 compare chaque contact aux personnes du compte, mais pas aux autres contacts.
+>    - **Scénario :** deux lignes de contact portent la même adresse, le même bien et la même alerte (saisie en double à l'étape 3, ou import de lignes libres à l'étape 2). Le gardien reçoit deux e-mails et deux SMS, ou deux lignes dans la file qui partent en deux messages. La migration n'empêche pas ce doublon.
+>    - **Correctif :** dans la boucle, ajouter les clés `e:`/`t:` de chaque contact traité à `adresses`.
+>
+> 4. **MINEUR (à tenir à l'étape 2)** — preuve : `lib/alert-notify.js:518-522` et `:206`
+>    - **Défaut :** les anciennes listes `agent_alert_config` envoient toujours (`sendAlertNotifications`, liste « intervention », y compris pour m).
+>    - **Scénario :** dès que le script de l'étape 2 remplit `notifications_contacts`, chaque adresse reprise reçoit tout en double : une fois par l'ancienne liste, une fois par le contact.
+>    - **Correctif :** le remplissage de la table et l'arrêt des anciens envois partent dans le même déploiement. Un test doit le garantir.
+>
+> 5. **MINEUR** — `lib/notifications/contacts.js:93`
+>    - **Défaut :** `.limit(50)` sans `order` coupe la liste en silence.
+>    - **Scénario :** au-delà de 50 contacts sur un même bien et une même alerte, une partie des contacts, choisie au hasard, n'est pas prévenue, sans aucune trace.
+>    - **Correctif :** si `data.length === 50`, ajouter une erreur `contacts_tronques` au bilan, ou paginer.
+>
+> 6. **MINEUR (texte)** — `lib/notifications/textes.js:409`, via `file.js:215`
+>    - **Défaut :** quand plusieurs lignes d'un contact partent ensemble, le titre dit « N alerte(s) pendant **vos** heures calmes ». Ce sont les heures du titulaire, pas celles du gardien.
+>    - **Correctif :** un titre propre aux contacts, par exemple « N alertes de la nuit ».
+>
+> 7. **MINEUR (recette)** — preuve : `api/push.js:153`
+>    - **Défaut :** « vider ma file » (`seulement`) ne prend jamais une ligne de contact, et c'est voulu. Mais staging n'a pas de cron.
+>    - **Scénario :** sur staging, le parcours « la nuit, le gardien attend la fin de la plage » ne peut pas être recetté de bout en bout.
+>    - **Correctif :** passer par un script de recette, sur le modèle de `scripts/piloter-yieldflow.js`, qui appelle `viderFile` sans `seulement`, en lecture seule à blanc puis avec `--go`.
+>
+> 8. **MINEUR (tests)** — `tests/notifications-contacts.test.js:312-321`
+>    - **Défaut :** le test « jamais regroupés » ne prouve pas ce qu'il annonce. Après le premier passage, il ne reste qu'une seule ligne en file, donc `groupes === 1` tiendrait même si la clé de regroupement ignorait `contact_id`.
+>    - **Manques :** aucun test ne met deux contacts d'un même compte en file pour vérifier que chacun ne reçoit que sa propre ligne. La branche « relevé » écarté pour un contact (`file.js:189`) n'est couverte par aucun test.
+>    - **Correctif :** ajouter ces deux cas.
+>
+> **Ce qui a été mesuré et ne pose pas de problème**
+> - **Tests :** 20/20 verts à l'heure réelle, et aussi à J+30 et J+200 avec `horloge-decalee.js`. Tous les instants sont injectés.
+> - **Non-régression :** 226/226 verts sur les fichiers `notifications-*`, `notif-hote-resa`, `avis-notifications` et `cleaning-notifier`.
+> - **Mutations faites à la main :** retirer le filtre `compte_id`, le filtre `desinscrit_le`, la garde `!seulement`, la comparaison Q29, ou le filtre de compte dans `relireContact` fait chacun rougir au moins un test.
+> - **Double de base :** il n'est pas plus permissif que la vraie base sur les points qui comptent (NULL distincts dans l'upsert, filtres appliqués). Il ne vérifie pas le format UUID ; c'est sans effet ici.
+> - **Migration :** elle peut être rejouée sans dégât. La contrainte XOR est vraie pour les lignes existantes. Les deux index uniques ne se gênent pas, puisque les NULL y sont distincts. L'upsert `onConflict: 'contact_id,sujet'` correspond exactement à l'index `(contact_id, sujet)`. La suppression d'un contact supprime ses lignes en file, et celle du compte supprime ses contacts. RLS activée, sans policy. Toutes les lignes font moins de 60 caractères.
+> - **Pas d'injection dans l'e-mail :** titre, corps, texte et lien sont tous échappés. Le jeton est encodé. Le sujet est débarrassé des retours à la ligne.
+> - **Rien ne lève :** `contactsPour` et `relireContact` sont sous `try`, et une panne de lecture laisse la ligne en file.
+>
+> **Constat de sécurité : aucun.**
+> - Chaque lecture filtre `compte_id`, au départ comme à la sortie de la file.
+> - Dans la file, un contact est regroupé par `contact_id` **et** par compte. Son SMS part avec la clé du compte de la ligne, et la relecture a vérifié que le contact appartient à ce compte.
+> - L'essai sur soi n'atteint jamais un contact, et deux barrières le garantissent : `!seulement`, et l'absence de bien dans l'essai.
+> - Le jeton n'est jamais rangé dans la file : il est relu au moment de l'envoi.
+>
+> **Fichiers cités**
+>
+> | Fichier | Dans la plage | Rôle |
+> |---|---|---|
+> | lib/notifications/file.js | oui | constats 1, 6, 8 |
+> | lib/notifications/contacts.js | oui | constats 2, 5 |
+> | lib/notifications/notifier.js | oui | constat 3 |
+> | lib/notifications/textes.js | oui | constat 6 |
+> | tests/notifications-contacts.test.js | oui | constat 8 |
+> | migrations/2026-11-10-notifications-contacts.sql | oui | vérifiée, sans constat |
+> | lib/notifications/envoi.js | oui | vérifié, sans constat |
+> | lib/notifications/bien.js | non | preuve seulement (constat 2) |
+> | lib/alert-notify.js | non | preuve seulement (constat 4) |
+> | api/push.js | non | preuve seulement (constat 7) |
+> | tests/outils/horloge-decalee.js | non | preuve seulement (contre-épreuve calendaire) |
+
+**Suite donnée** (aucun constat de sécurité : correctifs sans nouvelle review) :
+- **1** — dépendance de la remise : la migration
+  `2026-11-10-notifications-contacts` est appliquée sur staging, puis sur la
+  production, **avant** le merge correspondant, et vérifiée (la colonne
+  `contact_id` lue par `viderFile`).
+- **2** — un `id` égal à la référence se relit par la référence ; une panne
+  se dit (`contacts_illisibles`).
+- **3** — deux contacts à la même adresse n'envoient qu'une fois.
+- **4** — tenu aux étapes 2 et 4 : le script de reprise refuse d'écrire tant
+  que les anciennes listes envoient encore, et un test lie les deux.
+- **5** — au plus `PLAFOND_CONTACTS` (100) contacts par bien et par alerte, les
+  premiers créés d'abord ; au-delà, `contacts_tronques` dans le bilan.
+- **6** — le message regroupé d'un contact dit « N alerte(s) reçue(s) pendant
+  les heures calmes de l'hôte ».
+- **7** — `scripts/vider-file-notifications.js` : à blanc, il compte ce qui
+  attend (personnes et contacts, sans aucune adresse) ; `--go` fait la passe,
+  `--tout` n'attend pas la fin des plages ; refusé sur la production.
+- **8** — deux contacts et le titulaire en file : chacun reçoit sa ligne ; le
+  relevé rangé pour un contact n'est jamais envoyé (la garde explicite double
+  celle qui réserve le relevé au titulaire : sa mutation seule ne rougit pas,
+  et c'est attendu).
+
+### 12.2 Étape 2 — la reprise des listes d'alertes
+
+Module `lib/notifications/reprise-listes.js` (pur : il ne lit ni n'écrit),
+script `scripts/reprendre-listes-alertes.js` (à blanc par défaut, `--go`,
+`--compte=<uuid>`, `--ignorer-bien=<ref>`), et l'écriture validée des contacts
+dans `lib/notifications/contacts.js` (`validerContact`, `creerContacts`), seul
+rédacteur de la table. *Règles telles que corrigées après la review ci-dessous.*
+
+**Les règles, et pourquoi :**
+1. **Ce que les listes n'envoyaient pas ne se reprend pas** : un canal décoché
+   (`sms_enabled` / `email_enabled` faux) ne devient rien ; une ligne se lit
+   comme à l'envoi (`parseLines`, lib/alert-notify.js) — un test compare les
+   deux lectures ligne pour ligne.
+2. **Une adresse que porte une PERSONNE du compte qui REÇOIT l'événement**
+   (titulaire ou membre, par l'e-mail ou le numéro de son profil, droits jugés
+   bien par bien avec l'id ET la référence du bien, comme les émetteurs les
+   passent) **passe par ses réglages** : le point d'envoi ferait taire un
+   contact à cette adresse. On ne coche que ce qui ne part pas déjà, chez une
+   personne qui reçoit l'événement, et chez celle à qui le canal coché
+   partirait vraiment — jamais chez une personne qui reçoit aussi un AUTRE
+   compte (membre ailleurs que sur ce compte et que sur son propre profil de
+   titulaire, ou compte à elle qui produit des événements : des biens en table
+   ou une clé Beds24) : ses réglages valent pour tous ses comptes, et la liste
+   d'un compte ne décide pas pour un autre (perte `personne_sur_plusieurs_comptes`).
+   Une clé de liste est une référence provider, ou l'id du bien quand il n'en
+   avait pas.
+3. **Le reste : un contact par adresse ET par ensemble d'alertes**, avec
+   l'union des biens où cet ensemble se répète. Une adresse en « urgences » sur
+   un bien et en « urgences + info » sur l'autre fait deux contacts — sinon le
+   premier bien recevrait une alerte que sa liste n'envoyait pas.
+4. **Une adresse désinscrite (Q30) ne revient par aucun contact**, même pour
+   un autre bien : « Ne plus recevoir ces alertes » vaut pour l'adresse. Ce
+   qu'elle ne recevra plus est compté à part, ce n'est pas une perte.
+5. **LA VÉRIFICATION, AVEC LES RÈGLES DU POINT D'ENVOI** : chaque (canal,
+   adresse, bien, événement) que délivrait une liste est recompté après la
+   reprise. Si une personne destinataire porte l'adresse, le contact se tait
+   (notifier.js), donc seul ce qui part à ces personnes compte, avec les règles
+   d'`envoi.js` : le canal coché ; ce que le titulaire a laissé ouvert sur le
+   profil (`notify_email`, `notify_sms`) ; le SMS d'une personne seulement sans
+   appareil abonné (Q11), une notification cochée le remplaçant. **Une perte
+   bloque le compte** (sortie 1) avec son motif : `canal_non_coche`,
+   `personne_sur_plusieurs_comptes`, `email_coupe_sur_le_profil`,
+   `sms_coupe_sur_le_profil`, `appareil_sans_notification`, `aucun_contact`,
+   `bien_introuvable` (l'ancienne liste n'avait pas besoin d'une ligne dans
+   `properties`, un contact si ; seul un humain peut dire qu'une clé est
+   abandonnée : `--ignorer-bien=`).
+6. **Ce qui change de forme se dit** : un SMS de liste vers une personne
+   équipée devient sa notification (Q11) ; un canal coché pour la liste d'un
+   bien part aussi pour les autres biens du compte (« envois EN PLUS »).
+7. **LA COUPURE SE FAIT COMPTE PAR COMPTE, PAR LA REPRISE** : contacts (une
+   seule écriture), réglages (le writer unique, l'état d'après du plan tel
+   quel, plages et langue intactes), puis les listes mises de côté
+   (`listes_reprises`, une pile gardée pour un retour arrière, la plus récente
+   d'abord) — seulement si la config, relue juste avant, n'a changé ni de
+   contenu ni d'`updated_at` depuis la lecture faite au début du compte. Une
+   fois coupé, tout émetteur, quelle que soit sa version, ne trouve plus de
+   liste. **Jamais de trou** : un compte bloqué ou arrêté en route garde ses
+   listes, et elles envoient — au pire **en double** de ses contacts déjà
+   créés, jusqu'à la relance, et le message le dit.
+8. **Tout se valide à blanc** : réglages réécrivables, contacts valides —
+   un `--go` qui échouerait au milieu se voit avant.
+9. **`--go` est fermé tant que `REPRISE_OUVERTE` est faux**
+   (lib/notifications/reprise-listes.js), ouvert à l'étape 4 quand plus rien
+   ne peut réécrire une liste (le tiroir Alertes de Messages, le
+   préremplissage de l'onboarding) ; **et il se lance après le déploiement du
+   lot sur la base visée**, SHA vérifié.
+10. **Aucune adresse en clair** : la première lettre d'un e-mail (si sa partie
+   locale en a au moins trois) et son domaine, les deux derniers chiffres d'un
+   numéro ; une base non reconnue est refusée ; une lecture en panne arrête le
+   compte sans rien écrire ; les contacts existants se lisent par curseur.
+
+**Rapport de la review de l'étape 2, reçu le 10 novembre 2026 à 01:12, recopié
+mot pour mot avant tout correctif** (sous-agent ; arbre `/home/claude/hs-2c3`,
+branche `pwa-lot-2c3-contacts`, plage
+`175074d30fff630013611d0e315abca7476bc926..adcf3519abe694288c1d39850c2e507e908d9e06` ;
+chaque fichier cité est dans le diff, les autres sont lus comme preuve) :
+
+> J'ai lu l'arbre `/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, tête `adcf3519abe694288c1d39850c2e507e908d9e06`, plage `175074d30fff630013611d0e315abca7476bc926..adcf3519abe694288c1d39850c2e507e908d9e06`. Tous les constats portent sur les quatre fichiers du diff. `node --test tests/notifications-reprise-listes.test.js` donne 21 verts sur 21.
+>
+> **Le principal :** un e-mail peut se perdre au `--go` alors que la vérification annonce « 0 perte » (constat 1, reproduit). Il y a un second écart prouvé (constat 4) et un troisième vraisemblable (constat 3). Aucune fuite de données entre comptes, aucune écriture en à blanc.
+>
+> ## 1. Sécurité
+>
+> Ce qui est sain :
+> - Toutes les lectures sont bornées au compte : `user_id`, `account_user_id`, `compte_id`.
+> - En à blanc, rien n'est écrit : le `return` est avant toute écriture, ligne 125.
+> - `--go` est bien refusé quand `LISTES_COUPEES` est absent. Il n'existe pas encore dans `lib/alert-notify.js`, donc refus aujourd'hui.
+>
+> **S1. Sécurité, effet inter-comptes, exploitation faible.** `scripts/reprendre-listes-alertes.js:130-140`, `lib/notifications/reprise-listes.js:107-108`.
+> - **Ce qui se passe :** les réglages de notification sont rangés par personne, et valent pour tous ses comptes et tous ses biens (en-tête de `reglages.js`). La liste du compte X coche donc un canal chez une personne, pour tous ses comptes. La vérification ne regarde que les pertes, jamais les ajouts. La règle 2 du KB (« ses réglages ne changent que pour ce qui lui part », `docs/kb/pwa.md:1211`) est fausse.
+> - **Scénario :** le membre M est dans `sms_lines` du bien A du compte X, et membre aussi du compte Y, sans appareil abonné. Après le `--go`, M reçoit par SMS les urgences de tous les biens de X, et aussi celles de Y. Ces SMS de Y partent sur la clé Brevo de Y (`envoi.js:138`), alors que rien dans Y n'a changé. Même chose pour un titulaire qui serait membre d'un autre compte.
+>
+> **S2. Mineur, confidentialité.** `lib/notifications/reprise-listes.js:222` et `:224`.
+> - **Ce qui se passe :** `masquer` cache seulement ce qui reste entre les 4 premiers et les 4 derniers caractères. Or les numéros de liste sont rangés au format local.
+> - **Mesuré :**
+>   - `06 12 34 56 78` s'affiche `0612****5678` : 8 chiffres sur 10 visibles.
+>   - `612345678` s'affiche `6123****5678` : un seul chiffre caché.
+>   - `j@exemple.fr` s'affiche `j***@exemple.fr` : l'adresse est entière.
+> - La règle 9 du KB (« aucune adresse en clair ») n'est donc pas tenue.
+>
+> ## 2. Justesse de la vérification « avant = après »
+>
+> **1. Défaut, confirmé par exécution.** `scripts/reprendre-listes-alertes.js:137`.
+> - **Ce qui se passe :** `evenements[code] = { ...effectif.evenements[code], [canal]: true }` repart à chaque tour de l'état d'avant, pas de ce qui vient d'être coché. Quand une personne a deux canaux pour le même événement, le second écrase le premier. Les clés triées passent `email` avant `sms`, donc c'est l'e-mail qui revient à sa valeur d'avant.
+> - **Pourquoi ce n'est pas vu :** le plan (`reglagesApres`, qui cumule correctement) ne dit aucune perte.
+> - **Scénario, reproduit :** l'adresse et le numéro du titulaire sont dans les deux listes « intervention ». Pendant le lot 2c-2, il a décoché l'e-mail de ces événements pour ne pas tout recevoir en double. Au `--go` : sortie 0, aucune perte annoncée. Ligne écrite : `{"push":true,"email":false,"sms":true,"urgent":true}`. L'e-mail que délivrait sa liste ne part plus, et rejouer ne corrige rien.
+>
+> **2. Défaut de méthode.** `lib/notifications/reprise-listes.js:166-191`.
+> - La vérification réutilise les fonctions du planificateur (`personneDe`, `destinataire`, `cocher`). Le motif `canal_non_coche` ne peut donc pas sortir : elle vérifie le plan contre lui-même.
+> - Seules les règles d'`envoi.js` sur le profil et les appareils (permis e-mail et SMS du profil, SMS seulement sans appareil) sont réellement contrôlées.
+> - Les constats 3 et 4 sont exactement dans cet angle mort.
+>
+> **3. Défaut, vraisemblable.** `scripts/reprendre-listes-alertes.js:91`.
+> - **Ce qui se passe :** le script juge les droits avec `bien: { id }` seul. Les émetteurs passent `{ id, ref }` (`bien.js`, `evenements-*.js`).
+> - **Mesuré :** pour un membre dont le périmètre porte l'ancien UUID d'un bien archivé puis recréé, `property_refs` reste égal à la référence, par le trigger. `dansPerimetre` rend alors `false` avec `{ id: nouveau }` et `true` avec `{ id: nouveau, ref }`.
+> - **Scénario :** le script juge que ce membre ne reçoit pas l'événement et crée un contact SMS à son numéro. À l'envoi réel, il le reçoit bien, donc ce contact se tait (`notifier.js:145-146`). Son SMS n'est pas coché, puisque le SMS est décoché par défaut. Rien ne part, et la vérification dit « 0 perte ».
+>
+> **4. Mineur, confirmé par simulation.** `lib/notifications/reprise-listes.js:92` et `:181-182`.
+> - **Ce qui se passe :** `personneDe` prend la première personne qui porte l'adresse. `notifier.js:136-146`, lui, fait taire le contact si n'importe quel destinataire de l'événement porte cette adresse.
+> - **Scénario :** deux membres partagent un numéro. M1, sans droits, est listé avant M2, qui en a. Le plan donne 1 contact, rien de coché, 0 perte. À l'envoi, le contact se tait à cause de M2, dont le SMS n'est pas coché : rien ne part.
+>
+> **5. Défaut, ou mineur.** `lib/notifications/reprise-listes.js:97`.
+> - **Ce qui se passe :** une référence de bien introuvable sort du compte « avant ». Le script finit en sortie 0 avec une simple mention.
+> - **Pourquoi c'est une perte :** l'ancienne liste n'avait pas besoin d'une ligne dans `properties`. Les biens Beds24 viennent de `fetchProperties(beds24Key)` (`api/cron.js:885-889`), et leur matérialisation est « non bloquante ». Le nouvel envoi, lui, n'atteint aucun contact sans ligne dans `properties` (`contacts.js`, `idDuBien`).
+> - C'est une perte, non bloquante, contraire à l'exigence. La phrase « aucun événement ne peut plus y naître » est affirmée, pas mesurée.
+>
+> ## 3. Le script
+>
+> **6. Défaut de conception : écritures partielles, et blocage pendant la coupure.** `scripts/reprendre-listes-alertes.js:120-146` et `:153`.
+> - **Écritures partielles :** les réglages s'écrivent personne par personne, puis vient l'insertion des contacts. Un refus d'`enregistrer` sur la deuxième personne arrête tout. La première est déjà écrite, et aucun contact n'est créé.
+> - **Pendant la coupure :** `--go` n'est permis qu'avec les listes coupées. Un blocage pour perte, ou un arrêt en cours de route, laisse donc les destinataires de ce compte sans rien, jusqu'à correction.
+> - **L'à blanc ne prévient pas :** il ne valide pas ce qui sera écrit (`validerEvenements`, `validerPlages`). Il dit « OK » là où le `--go` échouera.
+> - **Fenêtre :** l'état peut changer entre l'à blanc lancé avant la coupure et le `--go` (un appareil abonné avec la notification décochée, par exemple). Le compte se bloque alors entièrement, et tous ses contacts sont perdus, pas seulement la ligne fautive.
+>
+> **7. Mineur.** `scripts/reprendre-listes-alertes.js:153` et `:181`.
+> - **Ce qui se passe :** la garde lit `LISTES_COUPEES` dans le code de l'arbre local, pas dans la production.
+> - **Scénario :** un `--go` lancé depuis la branche de l'étape 4 avant son déploiement. La production envoie encore par les listes, donc tout est reçu en double.
+>
+> **8. Mineur, règle 6 du dépôt.** `scripts/reprendre-listes-alertes.js:103-104`.
+> - **Ce qui se passe :** `notifications_contacts` est lue sans pagination ni plafond.
+> - **Scénario :** au-delà de 1000 lignes, la lecture est tronquée en silence. Les adresses désinscrites ne sont plus toutes vues, donc une adresse désinscrite peut être recréée, contre Q30. Le volume est irréaliste aujourd'hui.
+>
+> **9. Mineur.** `scripts/reprendre-listes-alertes.js:143-144`.
+> - **Second rédacteur :** l'insertion directe court-circuite le module déclaré seul rédacteur de la table dans la migration (`lib/notifications/contacts.js`).
+> - **Format des numéros :** les numéros sont rangés au format local (`0611111111`). L'envoi reste correct, parce que `normalizePhone` les remet au format international.
+> - **Rejouer peut défaire une correction :** les contacts déjà en base sont comparés exactement (`memeContact`). Un contact que le titulaire a corrigé dans l'interface entre deux passages (alerte retirée, bien ajouté) est donc recréé, ce qui réactive l'alerte qu'il avait retirée.
+>
+> Le reste est sain :
+> - La pagination par clé de `lireConfigs` est correcte.
+> - Les pannes de lecture arrêtent bien le compte avant toute écriture.
+> - Une configuration illisible est traitée comme vide, exactement comme le faisait l'ancien envoi : aucune perte.
+>
+> ## 4. Les tests
+>
+> **10. Défaut.** `tests/notifications-reprise-listes.test.js:269`.
+> - `assert.equal(r.evenements.urgence_ia.email, true)` passerait contre un script qui ne coche rien : la valeur effective par défaut de l'e-mail est déjà `true`, et le spread la recopie.
+> - Aucun test ne met une personne dans les deux listes, avec un canal décoché au départ. C'est exactement le constat 1.
+>
+> **11. Mineur.** `tests/notifications-reprise-listes.test.js:81`.
+> - Le test de l'adresse du titulaire vérifie `reglagesApres`, le plan, pas la ligne réellement écrite. Or c'est entre le plan et l'écriture que le constat 1 se produit.
+>
+> **12. Mineur.** `tests/notifications-reprise-listes.test.js:256` et `:317`.
+> - Les assertions « pas en clair » ne vérifient que le numéro complet.
+> - Ligne 317 : `0600****0001` passe, avec 8 chiffres sur 10 visibles.
+>
+> **13. Mineur.** `tests/notifications-reprise-listes.test.js:126` et `:54`.
+> - Ligne 126 : le test fige comme correcte l'affirmation du constat 5 sur les biens introuvables.
+> - Ligne 54 : `effectifs = new Map()` donne au planificateur des réglages non effectifs. `push` y vaut `undefined`, ce qui n'est pas ce que fournit le script. Les tests de l'appareil compensent en passant leurs propres réglages.
+
+**Suite donnée** (constat S1 de sécurité : correctifs, puis UNE re-review des
+seuls correctifs) :
+- **S1** — une personne qui reçoit aussi un autre compte (membre ailleurs, ou
+  titulaire de biens à elle) n'est jamais cochée par la liste de celui-ci :
+  perte `personne_sur_plusieurs_comptes`, le compte ne s'écrit pas. Et ce qui
+  part EN PLUS dans le compte se compte et se dit (règle 6).
+- **S2** — `masquer` ne montre plus que l'initiale d'un e-mail (partie locale
+  d'au moins trois caractères) et les deux derniers chiffres d'un numéro ; le
+  test vérifie qu'aucun morceau du numéro n'apparaît.
+- **1** — la ligne écrite est l'état d'après du plan, tel quel ; un test lit la
+  ligne ÉCRITE d'un titulaire présent dans les deux listes, e-mail décoché au
+  départ.
+- **2 et 4** — la vérification suit le point d'envoi : le contact se tait dès
+  qu'UNE personne destinataire porte l'adresse, et c'est cette personne qui se
+  coche.
+- **3** — les droits se demandent avec `{ id, ref }`.
+- **5** — un bien introuvable est une perte ; `--ignorer-bien=` sur décision.
+- **6 et 7** — la coupure se fait compte par compte par la reprise elle-même
+  (règle 7) : plus d'interrupteur global, plus de trou ni de double envoi selon
+  l'ordre des déploiements ; validation complète à blanc ; coupure refusée si
+  la config a changé. `LISTES_COUPEES` disparaît au profit de
+  `REPRISE_OUVERTE` (règle 9). La suite donnée 4 de l'étape 1 est tenue ainsi.
+- **8** — contacts existants lus par curseur.
+- **9** — l'écriture passe par `creerContacts` (biens relus sur le compte, tout
+  ou rien) ; le numéro se range tel que saisi, espaces retirés (ce que la
+  liste envoyait). Le cas « contact corrigé entre deux passages puis recréé »
+  ne se produit plus : un compte repris n'a plus de liste.
+- **10 à 13** — tests réécrits sur des réglages effectifs ; la ligne écrite,
+  le bien introuvable et le masquage sont vérifiés.
+- **À tenir à l'étape 4** : le préremplissage des listes par
+  `pages/onboarding.html` (`seedAlertConfig`) recrée une liste « e-mail du
+  compte » pour tout nouveau compte, et le tiroir Alertes de Messages en
+  réécrit — les deux doivent cesser avant d'ouvrir `REPRISE_OUVERTE` (accord de
+  Thierry requis pour `pages/onboarding.html`).
+
+
+**Rapport de la re-review des correctifs de l'étape 2, reçu le 10 novembre 2026,
+recopié mot pour mot avant tout correctif** (sous-agent ; arbre
+`/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, plage
+`adcf3519abe694288c1d39850c2e507e908d9e06..9bdeb3f0cb5a7dc9107ab032a77985645fe98099` ;
+chaque fichier cité est dans le diff, les autres sont lus comme preuve) :
+
+> **Ce que j'ai lu :** arbre `/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, tête `9bdeb3f0cb5a7dc9107ab032a77985645fe98099`. Plage relue : `adcf3519abe694288c1d39850c2e507e908d9e06..9bdeb3f0cb5a7dc9107ab032a77985645fe98099`. Tous les constats portent sur les cinq fichiers du diff. Les autres fichiers n'ont servi que de preuve.
+>
+> Tests : `tests/notifications-reprise-listes.test.js` passe 32 sur 32, et `tests/notifications-*.test.js` 206 sur 206. Je n'ai rien écrit dans l'arbre : les simulations ont tourné dans `/tmp`, que j'ai supprimé ensuite.
+>
+> **Le verdict :** aucun nouveau constat de sécurité. S1 est fermé, mais trop largement : le correctif bloque tout membre, y compris ceux qui ne reçoivent aucun autre compte (R1). C'est un défaut à corriger sans nouvelle review. Les constats 1, 3, 4, 8, 9 et S2 sont réellement fermés.
+>
+> ## Les constats
+>
+> **R1. Défaut, régression créée par le correctif S1. Reproduit.**
+> - **Où :** `scripts/reprendre-listes-alertes.js:86-89` (`autresComptesDe`).
+> - **Ce qui se passe :** le code cherche les profils `member_user_id = userId, access_mode = 'compte'` dont `account_user_id` diffère du compte repris. Or chaque utilisateur, membre compris, a son propre profil de titulaire : `account_user_id = member_user_id = lui-même`. Ce profil est créé par `handle_new_user` (`migrations/0001-triggers-auth-users.sql:47-51`) et a été rattrapé pour les anciens comptes (`2026-09-01-profils-et-droits-structures.sql:315`).
+> - **Conséquence :** tout membre est jugé « sur plusieurs comptes ». La vérification par les biens (lignes 90-93) n'est jamais atteinte pour un membre, et aucun membre n'est jamais coché.
+> - **Scénario, simulé avec le vrai script et un faux client de base :** le numéro d'un membre destinataire est dans `sms_lines`. Le SMS est décoché par défaut. Résultat : 5 pertes `personne_sur_plusieurs_comptes`, sortie 1, compte bloqué.
+> - **Impact :** rien n'est perdu, puisque les listes continuent d'envoyer. Mais la reprise ne peut aboutir pour aucun compte de ce type. La règle 2 du KB (`docs/kb/pwa.md:1213-1215`) dit l'inverse.
+> - **Pourquoi les tests ne le voient pas :** la table `profiles` du faux client (`tests/...:303`, `:433`) ne contient pas ce profil propre.
+> - **À prévoir en corrigeant :** si on exclut `account_user_id === userId`, le critère « a des biens en table » laisse passer un titulaire Beds24 dont les biens ne sont pas encore enregistrés dans `properties`. Le cron traite ces comptes à partir de `fetchProperties` (`api/cron.js:885-889`), et l'enregistrement des biens y est non bloquant. C'est le seul trou S1 restant, et il est rare.
+>
+> **R2. Défaut mineur. Reproduit.**
+> - **Où :** `scripts/reprendre-listes-alertes.js:105-110`, avec `reprise-listes.js:124-130`.
+> - **Ce qui se passe :** une clé de liste n'est cherchée que dans `provider_property_id`. Or `seedAlertConfig` range certaines clés sous `p.provider_property_id || p.id`, et `bien.js` cherche ensuite par `id`.
+> - **Scénario :** une liste rangée sous l'UUID d'un bien existant, sans référence provider, sort `bien_introuvable`. Le compte est bloqué. La seule issue proposée, `--ignorer-bien=`, supprimerait une liste qui fonctionne.
+>
+> **R3. Défaut mineur : un double envoi reste possible. Reproduit.**
+> - **Où :** `scripts/reprendre-listes-alertes.js:204-219`, et `:42-56` puis `:239-241`.
+> - **Ce qui se passe :** les contacts et les réglages sont écrits avant la coupure. Si la coupure est refusée (`config_modifiee_entre_temps`) ou si un réglage échoue, les contacts restent créés et les listes restent actives. Chaque adresse reçoit alors tout en double jusqu'à la relance. Simulé : 1 contact créé, liste toujours présente, sortie 1.
+> - **Pourquoi la fenêtre est large :** toutes les configs sont lues au départ, puis traitées compte par compte. Un hôte qui touche à son mode ou à ses délais pendant que les comptes précédents sont traités déclenche ce cas.
+> - **Ce qui est faux dans le KB :** « ni double envoi » (`pwa.md:1244-1245`) et la suite donnée 9 (`:1382-1383`).
+> - **Suggestion :** relire la ligne de config au début de `repriseDuCompte`, et dire dans le message que les contacts sont déjà créés.
+>
+> **R4. Mineur.**
+> - **Où :** `scripts/reprendre-listes-alertes.js:215-216`.
+> - **Ce qui se passe :** la coupure conditionnelle ne repose que sur `updated_at`, et aucun trigger ne met cette colonne à jour (`0000-schema-initial.sql:1154-1159`). `scripts/rekeyer-json-config.js:70-71` écrit la config sans la changer.
+> - **Scénario :** un transfert de bien en même temps que la reprise passe la condition. La coupure réécrit alors la config lue avant le transfert, et l'ancienne clé revient. Le cas `updated_at` nul, lui, est correct (`.is(null)`).
+>
+> **R5. Mineur. Reproduit.**
+> - **Où :** `lib/notifications/reprise-listes.js:291`.
+> - **Ce qui se passe :** une seconde coupure écrase le `listes_reprises` déjà en place.
+> - **Scénario :** le préremplissage de l'onboarding ou le tiroir réécrit une liste, puis la reprise repasse. La liste d'origine, par exemple le SMS du gardien, disparaît de la copie gardée pour un retour arrière.
+>
+> **R6. Mineur, commentaire contradictoire.**
+> - **Où :** `reprise-listes.js:277-279`.
+> - **Ce qui se passe :** le commentaire dit « ni double envoi, ni trou, quel que soit l'ordre des déploiements ». L'en-tête du script (`:26-28`) dit l'inverse, et c'est lui qui a raison : couper avant que l'envoi aux contacts soit déployé sur la base laisse les gardiens sans rien.
+> - **La garde reste une consigne, pas un contrôle :** `REPRISE_OUVERTE` est lu dans l'arbre local, pas en production.
+>
+> **R7. Mineur : les lecteurs de `agent_alert_config` après `mettreDeCote`.**
+> - **Aucune casse :** `getPropertyMode`, `brouillons-dus` et `agent-config` pour le mode et les délais gardent `mode` et `delais`. `fusionnerBlobLegacy` accepte `listes_reprises` quand le blob est renvoyé. Un émetteur de n'importe quelle version ne trouve plus de liste.
+> - **Déjà connus :** le tiroir Alertes (POST `alertes_ref`) et `seedAlertConfig` recréent des listes. C'est déjà noté pour l'étape 4.
+> - **Changements non notés :**
+>   - `api/simulate.js:159` n'envoie plus aucune alerte une fois les listes coupées, et n'appelle pas le point d'envoi unique.
+>   - `api/alert-test.js:44-64` parcourt toute la config et accepte encore les adresses rangées sous `listes_reprises`.
+>
+> **R8. Mineur.**
+> - **Où :** `lib/notifications/contacts.js:156`.
+> - **Ce qui se passe :** `!ALERTES[a]` remonte la chaîne des prototypes, donc `validerContact` accepte `alertes: ['constructor']` (vérifié).
+> - **Impact :** la contrainte de la base refuse ensuite l'écriture, donc pas de dégât. Mais le refus arrive comme `ecriture_impossible`, pas comme `alertes_illisibles`. Utiliser `Object.hasOwn`. Les biens ne sont pas validés comme UUID non plus, sans conséquence aujourd'hui.
+>
+> **R9. Mineur.**
+> - **Où :** `reprise-listes.js:142`.
+> - **Ce qui se passe :** dès qu'une personne destinataire a le canal coché, on ne coche personne d'autre. C'est vrai même si cette personne ne peut pas recevoir : canal coupé sur son profil, ou appareil abonné sans notification.
+> - **Conséquence :** blocage évitable, sans danger.
+>
+> ## Ce qui est sain
+>
+> - **1 :** la ligne écrite est exactement l'état d'après du plan, qui cumule les canaux. Le test lit bien la ligne écrite.
+> - **2 et 4 :** la règle « le contact se tait dès qu'un destinataire porte l'adresse » est celle de `notifier.js:136-150`. Les règles d'appareil et de profil sont celles d'`envoi.js`.
+> - **3 :** les droits sont demandés avec `{ id, ref }` ; `dansPerimetre` traite `null` et `undefined` de la même façon.
+> - **8 :** les contacts existants sont lus par curseur.
+> - **9, `creerContacts` :** les biens sont relus sur le compte, et chaque valeur demandée doit correspondre exactement à un id rendu. La façon dont `.in()` met les valeurs entre guillemets ne compte donc pas. L'insertion est atomique.
+> - **S2 :** vérifié, plus aucun morceau de numéro visible.
+> - **En à blanc :** aucune écriture (`pourEnvoi` ne fait que lire), et aucune adresse en clair dans les sorties.
+>
+> Rien de neuf à mémoriser ; je n'ai rien tiré de la mémoire.
+
+**Suite donnée à la re-review** (aucun constat de sécurité : correctifs sans
+nouvelle review, la limite est atteinte) :
+- **R1** — son propre profil de titulaire ne fait plus d'un membre un membre
+  de deux comptes ; et le compte à lui produit des événements s'il a des biens
+  en table **ou une clé Beds24** (présence lue, jamais la clé) — le trou S1
+  restant que la re-review signalait est fermé.
+- **R2** — une clé de liste se cherche par référence provider, puis par id.
+- **R3** — la config se relit au début de chaque compte ; un arrêt après la
+  création des contacts le dit (« doubles envois jusqu'à la relance ») ; la
+  règle 7 dit « jamais de trou », plus « ni double envoi ».
+- **R4** — avant la coupure, la config se relit et se compare au contenu, pas
+  seulement à `updated_at` ; un transfert de bien simultané n'est plus défait.
+- **R5** — `listes_reprises` est une pile : une seconde coupure garde la
+  première copie.
+- **R6** — le commentaire de `mettreDeCote` dit que la coupure suit le
+  déploiement. `REPRISE_OUVERTE` reste une consigne lue dans l'arbre local :
+  le `--go` se lance de l'arbre déployé, SHA vérifié par `gh api`.
+- **R7** — noté pour l'étape 4 : `api/simulate.js` n'envoie plus d'alerte de
+  liste une fois un compte coupé (il n'appelle pas le point d'envoi unique) ;
+  `api/alert-test.js` accepte encore comme destinataire d'essai une adresse
+  rangée sous `listes_reprises` (les mêmes adresses qu'avant la coupure : pas
+  d'élargissement, mais à retirer avec le tiroir).
+- **R8** — `validerContact` refuse une alerte qui n'est pas une clé propre de
+  `ALERTES` (`Object.hasOwn`).
+- **R9** — le plan et la vérification lisent une seule règle « ce qui part à
+  une personne » ; la personne cochée est celle à qui le canal partirait.
+
+
+### 12.3 Étape 3 — le bloc « Contacts prévenus » et la page de désinscription
+
+Spec §16.8 (décisions Q33 et Q34 du 10 novembre 2026). Fichiers :
+`lib/notifications/contacts.js` (seul rédacteur de la table : lister, ajouter,
+modifier, retirer, réinscrire, réserver et rendre l'essai, jeton),
+`api/push.js` (l'endpoint de l'onglet), `api/alertes-desinscription.js` (la
+page publique), `lib/notifications/textes.js` (l'essai, la page, en trois
+langues), `pages/settings.html` (le bloc), `shared/push-appareil.js`
+(`contact`), `pages/guide.html`.
+
+**Les règles, et pourquoi :**
+1. **Le compte est la session, toujours.** Aucun identifiant de compte n'est lu
+   dans la requête ; chaque lecture et chaque écriture filtre sur le compte ; un
+   contact d'un autre compte rend « introuvable » (404), jamais « interdit » ;
+   chaque bien est relu sur le compte. Un membre sans logement à lui ne voit
+   pas le bloc (`contacts: null`), et le serveur refuserait ses biens.
+2. **Le jeton de désinscription ne sort jamais vers l'écran**, ni la clé Brevo
+   (seule sa présence est lue, comme `api/sms.js` la juge : une clé, et le SMS
+   pas désactivé).
+3. **L'essai (Q32, Q37)** : un par ADRESSE et par jour de Paris, dix par
+   compte et par jour. La trace vit hors de la ligne du contact, dans
+   `notifications_contacts_essais` (clé primaire compte, adresse, jour) :
+   retirer puis recréer un contact ne rend pas d'essai, et la clé primaire EST
+   la réservation (deux clics, une ligne). Réservé AVANT l'envoi ; seules les
+   adresses réservées partent ; jamais vers un désinscrit ; e-mail avec son
+   lien de désinscription, SMS par la clé Brevo du compte, langue du
+   titulaire. **Ce qui n'est pas parti est rendu, canal par canal** (et tout,
+   sur exception). **Le plafond du compte est tenu par la BASE** : chaque
+   adresse réservée prend un rang de 1 à 10, unique par compte et par jour ;
+   la remise efface clé par clé, en égalité exacte. Dix ADRESSES par jour : un
+   contact avec un e-mail et un numéro en compte deux, et le message le dit.
+   Les jours passés du compte partent à la réservation suivante. Un numéro se
+   normalise comme l'envoi le corrige (« 612345678 » = « 0612345678 »).
+4. **La page publique** : un GET ne change jamais rien (les messageries
+   d'entreprise ouvrent les liens) ; elle montre l'adresse masquée, les
+   logements de TOUTES les lignes que le bouton fera taire, et un bouton ; le
+   POST fait le geste. `no-store`,
+   `noindex`, une CSP `default-src 'none'`, aucun script, dans la langue du
+   titulaire.
+5. **Se désinscrire vaut pour l'ADRESSE dans ce compte** : tous les contacts
+   du compte qui portent l'une des adresses du lien se taisent, et reviennent
+   ensemble ; le même e-mail chez un autre hôte continue. Deux lignes d'une
+   même personne sans adresse commune (un e-mail seul, un numéro seul) restent
+   distinctes : la page parle de l'adresse. Le contact revient par le même
+   lien, le titulaire par « Réinscrire » (Q33).
+5 bis. **Quand l'adresse change** — l'e-mail ou le numéro, l'un suffit (Q35,
+   Q38) : la ligne repart inscrite et son jeton change (l'ancien lien ne fait
+   plus rien) ; l'écriture est conditionnée aux adresses lues (deux onglets ne
+   laissent pas un ancien e-mail avec le nouveau jeton). **L'adresse de
+   quelqu'un qui s'est désinscrit** (une autre ligne du compte), quand elle est
+   AJOUTÉE, ne s'enregistre qu'après confirmation (Q36) : 409
+   `adresse_desinscrite` avec sa date, puis `confirme: true`. Retirer une ligne
+   désinscrite, ou changer son adresse, efface cette trace : l'écran le dit
+   avant. La page publique dit l'état de l'adresse : une ligne encore active,
+   et le bouton propose d'arrêter.
+6. **Le budget** : le GET de l'onglet lit six tables, une fois chacune, en
+   parallèle (appareils, réglages, logements, contacts, porte Brevo, essais du
+   jour) — zéro appel ajouté côté navigateur ; un test les compte. Chaque lecture
+   du bloc tombe seule. Chaque geste fait un appel et rend la liste à jour,
+   refus compris ; une liste illisible fait relire l'onglet.
+   **Mesure avant/après (case 8)** : appels du navigateur 1 → 1 ; requêtes
+   Supabase du GET 2 → 6 (comptées par le test) ; les octets se mesurent à la
+   recette sur staging, sur un compte réel, et s'inscrivent ici.
+7. **Défense en profondeur assumée** : la désinscription filtre les lignes à
+   mettre à jour par le compte du jeton ET par leurs ids tirés de ce compte ;
+   les noms de logements de la page, par le compte ET par les biens du contact.
+   Une contre-épreuve qui retire l'un des deux filtres reste verte : c'est
+   l'autre qui tient.
+
+**Rapport de la review de l'étape 3, reçu le 10 novembre 2026, recopié mot pour
+mot avant tout correctif** (sous-agent ; arbre `/home/claude/hs-2c3`, branche
+`pwa-lot-2c3-contacts`, plage
+`56429490f108a57cb485a9a3fa056649765c634f..6f7d939f676ff02a26d331de8c22c305214fbf97` ;
+chaque fichier cité est dans le diff, les autres sont lus comme preuve) :
+
+> **Revue du commit `pwa-lot-2c3-contacts` (étape 3, contacts prévenus)**
+>
+> - **Arbre lu :** `/home/claude/hs-2c3`. Je n'ai rien ouvert hors de cet arbre ; la spec a été lue par `git show eab33920…`.
+> - **Branche :** `pwa-lot-2c3-contacts`.
+> - **SHA de tête :** `6f7d939f676ff02a26d331de8c22c305214fbf97`.
+> - **Plage relue :** `56429490f108a57cb485a9a3fa056649765c634f..6f7d939f676ff02a26d331de8c22c305214fbf97`, soit les 11 fichiers annoncés. Chaque constat ci-dessous porte sur l'un d'eux.
+> - **Tests :** les 3 fichiers touchés passent (72 sur 72), la suite complète aussi (7557 sur 7557, 0 rouge). `scripts/i18n-check.js` et `tests/masquage-hidden.test.js` passent.
+>
+> L'arbre est inchangé après tout ça (`git status` : seul `node_modules`, non suivi, déjà là avant). Pour vérifier deux constats, j'ai écrit deux scripts dans `/tmp/revue-2c3/`, hors de l'arbre.
+>
+> ## 1. Sécurité
+>
+> **S1 — Le plafond « un essai par jour » (Q32) se contourne : n'importe quel compte peut faire envoyer autant d'e-mails qu'il veut à une adresse de son choix. Gravité : sécurité.**
+> - **Où :** `api/push.js:264-282`, `lib/notifications/contacts.js:218-223` et `259-275`.
+> - **Ce qui se passe :** le plafond est porté par `dernier_essai_le`, une colonne de la ligne du contact. Un contact neuf a cette colonne vide. Il suffit donc de répéter « créer, essayer, retirer » : chaque nouvelle ligne a droit à son essai. Changer l'adresse d'un contact existant ne relance pas l'essai, ça c'est bien tenu.
+> - **Mesuré** (`/tmp/revue-2c3/relais.js`, avec le vrai `api/push.js` et une fausse base) : cinq boucles, cinq réponses 200, cinq e-mails vers `victime@exemple.fr` le même jour.
+> - **Sans même retirer :** 100 contacts sur la même adresse donnent 100 essais par jour.
+> - **Pourquoi c'est de la sécurité :** l'e-mail part par la clé plateforme (`envoi.js:52`). Le dépôt a déjà classé ce cas en sécurité (`api/push.js:251-254`, `envoi.js:68-70`), et Q32 dit en toutes lettres « pas de relais vers une adresse saisie ».
+> - **Ce qui limite les dégâts :** le texte est fixe (`textes.js:513`), sans aucun texte saisi par l'hôte. Le hameçonnage est donc limité. Restent l'inondation d'une boîte et la réputation de l'expéditeur de la plateforme.
+> - **Piste :** un plafond qui survit à la suppression, par exemple N essais par compte et par jour, ou une trace par adresse normalisée dans le compte.
+>
+> **S2 — Après un changement d'adresse, l'ancien destinataire garde la main sur l'abonnement du nouveau. Gravité : sécurité de faible portée (une ancienne clé garde son pouvoir).**
+> - **Où :** `lib/notifications/contacts.js:225-236` (`modifierContact`).
+> - **Ce qui se passe :** la modification n'écrit que nom, e-mail, numéro, alertes et logements. Le jeton de désinscription ne change pas.
+> - **Scénario :** le gardien est remplacé, et l'hôte remplace son e-mail par celui du nouveau gardien. Le lien de l'ancien gardien, présent dans ses anciens e-mails, continue de marcher :
+>   - en GET, il affiche l'adresse masquée du nouveau gardien et les noms des logements ;
+>   - en POST « arreter », il fait taire le nouveau gardien, et toutes les lignes du compte à sa nouvelle adresse (`contacts.js:303-309`).
+> - **Conséquence :** les urgences (code d'accès non résolu, ménage refusé) n'arrivent plus. L'hôte ne le voit qu'en ouvrant Réglages, et l'ancien gardien peut recommencer à chaque fois.
+> - **Mesuré** (`/tmp/revue-2c3/jeton.js`) : le jeton est identique après la modification, et l'ancien lien renvoie bien `nouveau@exemple.fr`.
+> - **Piste :** changer le jeton dès que la clé de l'e-mail ou du numéro change.
+>
+> ## 2. Justesse
+>
+> **D1 — Changer l'adresse d'un contact désinscrit le laisse désinscrit. Gravité : défaut.**
+> - **Où :** `contacts.js:232`.
+> - **Ce qui se passe :** `desinscrit_le` est conservé. L'écran affiche « S'est désinscrit le 09/11 » pour une adresse qui ne s'est jamais désinscrite, et cette adresse ne reçoit rien tant que l'hôte n'a pas cliqué « Réinscrire ».
+> - **Cas typique :** l'hôte corrige une adresse fautive qu'un inconnu avait désinscrite.
+> - **Côté tests :** `tests/notifications-contacts-ecran.test.js:294-310` passe exactement par ce cas (C1 désinscrit, adresse changée en `g2@`) sans rien vérifier sur l'état d'inscription.
+> - **À trancher par Thierry**, avec S2. Proposition : si l'adresse change, effacer la désinscription et changer le jeton ; sinon tout garder.
+>
+> **D2 — Une personne désinscrite peut être réajoutée sans que l'écran le signale. Gravité : défaut, à trancher.**
+> - **Où :** `contacts.js:218-236`.
+> - **Ce qui se passe :**
+>   - « Ajouter un contact », ou « Modifier » vers l'adresse d'une personne désinscrite du compte, crée une ligne active (avec un nouveau jeton) sans aucun avertissement.
+>   - « Retirer » supprime la ligne pour de bon, donc efface aussi la trace de la désinscription.
+> - **L'incohérence :** la reprise, elle, pose la règle « une adresse désinscrite ne revient par aucun contact » (`reprise-listes.js:15`). Q33 donne bien à l'hôte « Réinscrire », mais comme un geste visible ; ici la réinscription est silencieuse.
+>
+> **D3 — La page publique sous-estime ce que fait le bouton. Gravité : mineur.**
+> - **Où :** `api/alertes-desinscription.js:51-57` et `79`.
+> - **Ce qui se passe :** la page n'affiche que les logements de la ligne du lien, alors que le POST fait taire toutes les lignes à la même adresse.
+> - **Côté tests :** le test `:358` grave ce comportement (« seulement les logements de CE contact » : pas « Cœur de vie 23 »), alors que le test `:368-372` prouve que C2, qui porte « Cœur de vie 23 », est bien coupé.
+> - **Piste :** afficher l'union des logements des lignes concernées.
+>
+> **D4 — « La personne » est mal délimitée, dans les deux sens. Gravité : mineur.**
+> - **Où :** `contacts.js:303-305`.
+> - **Trop large :** deux personnes qui partagent un numéro, par exemple (A, P) et (B, P). La désinscription de A coupe aussi l'e-mail de B, et le « Recevoir à nouveau » de B réinscrit A contre son gré.
+> - **Trop étroite :** la reprise crée une ligne e-mail seule et une ligne SMS seule pour une même personne nommée (`reprise-listes.js:108-109`). Les deux ne sont pas reliées : après « C'est fait », les SMS continuent. Le texte de la page parle de l'adresse, donc c'est défendable, mais la KB §12.3 règle 5 promet « la personne ».
+>
+> **D5 — L'écran peut rester sur une liste périmée. Gravité : mineur.**
+> - **Où :** `api/push.js:137-138`, `pages/settings.html:903-909` et `948-954`.
+> - **Relecture en échec :** si la relecture de la liste échoue après un geste réussi, la réponse n'a pas de `contacts`. L'écran dit « Contact ajouté. », referme le formulaire, mais le contact n'apparaît pas, d'où un risque de doublon.
+> - **Refus sans liste :** les réponses 409 et 404 ne portent pas la liste non plus. Après « Un essai est déjà parti », le bouton « Envoyer un essai » reste actif.
+>
+> **D6 — L'essai peut être consommé sans être parti. Gravité : mineur.**
+> - **Où :** `api/push.js:159-162`, `contacts.js:277-279`.
+> - **Erreur ignorée :** `rendreEssai` ne lit pas son erreur. Si cette écriture échoue, l'hôte lit « L'essai n'est pas parti », puis au clic suivant un 409 « déjà parti aujourd'hui » qui est faux.
+> - **Remise sans condition :** autour de minuit, elle peut effacer la réservation d'un autre clic, et donc offrir un essai de plus.
+> - **Exception après réservation :** si `reglages.lire` lève une exception après la réservation, la réponse est un 500 et l'essai est consommé.
+>
+> **D7 — Le GET de l'onglet quand une lecture échoue. Gravité : mineur.**
+> - **Où :** `api/push.js:108-116`.
+> - **Membre sans logement :** `b.error || !l.ok` est testé avant « aucun logement ». Un membre sans logement dont la lecture des contacts tombe reçoit « Vos contacts prévenus n'ont pas pu être lus », pour un bloc qu'il ne voit jamais.
+> - **Troncature silencieuse :** `PLAFOND_BIENS = 1000` coupe sans le dire (règle 6 de la case performance). C'est pratiquement inatteignable.
+> - **Ce qui est correct :** une panne des logements ou des contacts donne `contacts_indisponibles`, sans faire tomber les appareils ni les réglages. Une panne de la porte Brevo donne `brevo: null`, donc aucune phrase affichée, ce qui est voulu.
+>
+> **D8 — Dépassement du plafond de 100. Gravité : mineur.**
+> - **Où :** `contacts.js:218-223` et `300-301`.
+> - **Ce qui se passe :** le contrôle du plafond n'est pas atomique (deux créations simultanées à 99 donnent 101). La reprise (`creerContacts`) n'a pas de plafond. Et la désinscription lit 101 lignes sans ordre : au-delà, des lignes à la même adresse peuvent rester actives.
+>
+> **Documentation — Mesure avant/après absente. Gravité : mineur.**
+> - **Où :** `docs/kb/pwa.md` §12.3.
+> - **Ce qui manque :** la case performance 8 (trois nombres mesurés : appels, requêtes, octets), alors que la spec §16.8 renvoie à ce paragraphe pour la trouver.
+>
+> ## 3. Les tests
+>
+> **Les deux tests existants modifiés : changements légitimes.**
+> - `cache-prive-endpoints` : j'ai recompté, il y a exactement 12 endpoints sans garde, et `api/alertes-desinscription.js` est nommé. Le plafond reste serré.
+> - `channel-webhook-register` : `send` est nécessaire. Sans lui, la nouvelle page lève une exception jusque dans son `catch`, et le balayage la déclare « inexaminable ». L'ajout n'affaiblit aucune assertion, et la page est réellement examinée (404 pour les deux valeurs).
+>
+> **Les tests nouveaux qui prouvent bien leur titre.**
+> - Le test du jour de Paris (`:143-161`) échouerait contre un jour UTC ou une fenêtre glissante de 24 h.
+> - Le test des deux clics (`:163-170`) échouerait sans l'écriture conditionnelle.
+> - Les tests « autre compte » échoueraient si le filtre sur le compte disparaissait, puisque la fausse base compte les lignes écrites.
+> - Le corps envoyé par l'écran est comparé en entier.
+>
+> **Les trous.**
+> - Aucun test ne couvre S1, S2, D1 ni D2.
+> - Le test `:358` fige D3 au lieu de le détecter.
+>
+> ## Vérifié, sans constat
+>
+> - **Compte :** le compte est toujours la session. Un `compte` placé dans le corps de la requête est ignoré (testé).
+> - **Filtrage :** chaque écriture filtre sur `compte_id`, chaque logement est relu sur le compte, et un id qui n'est pas un UUID ne va pas en base.
+> - **Jeton et clé Brevo :** le jeton n'est jamais renvoyé à l'écran (les colonnes lues l'excluent, et `contactEcran` ne garde qu'une liste fermée de champs). La clé Brevo n'est pas lue, seule `brevo_enabled` l'est.
+> - **Page publique :**
+>   - `private, no-store`, `noindex` et la CSP sont posés avant le premier refus, 405 compris ;
+>   - un GET n'écrit rien ;
+>   - le jeton est validé par `^[0-9a-f]{64}$` avant toute requête, ce qui correspond au format de la migration ;
+>   - toutes les valeurs insérées sont échappées, guillemets compris, et il n'y a aucun script.
+>   - La CSP n'a pas de `base-uri` : simple durcissement optionnel, puisqu'il n'y a aucun point d'injection.
+> - **Écran :** tout ce qui vient du serveur passe par `esc`, `message()` écrit en `textContent`, et aucune classe CSS ni aucun identifiant n'entre en collision avec le reste de la page.
+>
+> Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée** (deux constats de sécurité, S1 et S2 : correctifs, puis UNE
+re-review des seuls correctifs ; décisions de Thierry Q35 à Q37 du 10 novembre
+2026, spec `pwa-lot-2-spec` `61e0cd4f`) :
+- **S1** — l'essai vit dans `notifications_contacts_essais` (ajoutée à la
+  migration du lot, pas encore appliquée nulle part) : une fois par adresse et
+  par jour, dix par compte (Q37) ; la colonne `dernier_essai_le` disparaît.
+- **S2** — le jeton change dès que l'e-mail change.
+- **D1** — la ligne repart inscrite quand aucune ancienne adresse ne reste (Q35).
+- **D2** — confirmation pour l'adresse d'un désinscrit (Q36) ; retirer une
+  ligne désinscrite le dit avant.
+- **D3** — la page montre les logements de toutes les lignes concernées.
+- **D4** — c'est l'adresse qui se désinscrit, et la règle 5 le dit.
+- **D5** — la liste revient avec chaque réponse, refus compris ; une liste
+  illisible fait relire l'onglet.
+- **D6** — la remise retire ses propres lignes de réservation, lit son erreur,
+  et se fait aussi sur exception.
+- **D7** — chaque lecture du bloc tombe seule ; sans logement, pas de bloc ; un
+  nombre de logements au-delà du plafond rend « indisponible », jamais une
+  liste coupée.
+- **D8** — accepté : le plafond de 100 contacts n'est pas atomique (deux
+  créations simultanées à 99 donnent 101), et la reprise n'en a pas ; la
+  désinscription lit les lignes du compte triées, jusqu'à 1000.
+- **Documentation** — la mesure avant/après est à la règle 6.
+
+**Rapport de la re-review des correctifs de l'étape 3, reçu le 10 novembre 2026,
+recopié mot pour mot avant tout correctif** (sous-agent ; arbre
+`/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, plage
+`6f7d939f676ff02a26d331de8c22c305214fbf97..e319249238df75196c0113b93531af9a17b376fa` ;
+chaque fichier cité est dans le diff, les autres sont lus comme preuve) :
+
+> **Re-review des correctifs, étape 3 du lot 2c-3 (contacts prévenus)**
+>
+> - **Arbre lu :** `/home/claude/hs-2c3`. Je n'ai rien ouvert en dehors. La spec a été lue par `git show 61e0cd4f…`.
+> - **Branche :** `pwa-lot-2c3-contacts`.
+> - **SHA de tête :** `e319249238df75196c0113b93531af9a17b376fa`.
+> - **Plage relue :** `6f7d939f…..e3192492…`, soit les 7 fichiers annoncés. Chaque constat porte sur l'un d'eux.
+> - **Tests :** le fichier de l'étape passe à 31 sur 31. Les 20 fichiers de tests qui touchent ces modules passent à 426 sur 426, et la suite complète à 7566 sur 7566.
+> - **Arbre inchangé :** `git status` ne montre que `node_modules`, non suivi, déjà là avant. Mes scripts de vérification sont dans `/tmp/rr2c3/`, hors de l'arbre.
+>
+> **Verdict.** S2 est fermé pour le cas rapporté. S1 n'est fermé que si les essais arrivent un par un : deux constats de sécurité restent, R1 et R2.
+>
+> ## 1. S1 et S2
+>
+> **R1 — Le plafond de dix essais par compte ne tient pas quand les clics arrivent en même temps. Gravité : sécurité, de portée bornée.**
+> - **Où :** `lib/notifications/contacts.js:332-340` et `migrations/2026-11-10-notifications-contacts.sql:108-117`.
+> - **Ce qui se passe :** le serveur lit le nombre d'essais du jour, puis insère. La clé primaire ne protège qu'une adresse à une date ; rien ne protège le total du compte.
+> - **Mesuré** (`/tmp/rr2c3/course.js`, avec le vrai module et une fausse base) : 30 clics simultanés sur 30 adresses différentes donnent 30 réservations ; 100 clics en donnent 100. Le plafond attendu est 10.
+> - **Scénario :** 100 contacts `victime+1@gmail.com` à `victime+100@gmail.com` (le plafond par adresse ne connaît pas les alias), puis 100 POST en parallèle. Résultat : environ 100 e-mails partent par la clé de la plateforme vers la même boîte.
+> - **Limite :** une seule rafale par jour et par compte, puisque le compte dépasse ensuite 10. C'est bien mieux qu'avant (illimité), mais Q37 n'est pas tenu.
+> - **Test manquant :** le test « deux clics » ne porte que sur une même adresse.
+> - **Piste :** une borne posée en base, par exemple un rang de 1 à 10 unique par compte et par jour, ou une fonction SQL avec un verrou.
+>
+> **R2 — Une adresse piégée efface la réservation d'une autre adresse. Gravité : sécurité de faible portée (injection de filtre).**
+> - **Où :** `lib/notifications/contacts.js:350-351` (`rendreEssai`, filtre `.in('cle', …)`), et `RE_EMAIL` à la ligne 140, qui accepte `"`, `,`, `(` et `)`.
+> - **Ce qui se passe :** le client Supabase (postgrest-js 2.102.1) met entre guillemets une valeur qui contient une virgule, sans échapper les guillemets qu'elle contient déjà.
+>   - L'e-mail `a",e:victime@gmail.com,"b.c` est accepté par la validation.
+>   - La remise envoie alors le filtre `cle=in.("e:a",e:victime@gmail.com,"b.c")`. J'ai vérifié cette URL avec le vrai client.
+>   - Selon la grammaire des listes de PostgREST, ce filtre contient trois valeurs. Je ne l'ai pas éprouvé sur un vrai serveur.
+> - **Scénario :**
+>   1. Un essai part vers la victime.
+>   2. Un essai part vers le contact piégé ; Brevo refuse l'adresse, rien ne part, la réservation est rendue.
+>   3. Cette remise efface la réservation de `victime@gmail.com`, et pas la sienne.
+>   4. L'attaquant recommence au premier point.
+> - **Limite :** l'effacement reste dans le compte et le jour de l'attaquant. La ligne piégée reste comptée (+1 par tour), donc le plafond du compte borne l'attaque : environ 10 envois par jour à la même adresse au lieu d'un.
+> - **Piste :** effacer par clé exacte (`.eq('cle', k)`, deux clés au plus) et resserrer `RE_EMAIL`.
+>
+> **R3 — Deux formes d'un même numéro donnent deux adresses différentes. Gravité : mineur.**
+> - **Où :** `contacts.js:198-200` (`clesAdresse`, qui utilise `cleTelephone`).
+> - **Ce qui se passe :** « 612345678 » donne la clé `t:+612345678`, alors que l'envoi (`api/sms.js:138`) le corrige en `+33612345678`, le même numéro que « 0612345678 ». Ce numéro reçoit donc deux essais par jour, et la règle Q36 comme la désinscription ne relient pas ces deux formes.
+> - **Côté e-mail :** les alias (`+`, points de Gmail, `googlemail.com`) sont inhérents. C'est le plafond du compte qui borne, d'où l'importance de R1.
+>
+> **S2 : fermé pour le cas rapporté.** Un changement d'e-mail donne un nouveau jeton (32 octets aléatoires, au bon format), et l'ancien lien rend « lien plus valable ». La file des heures calmes relit l'e-mail et le jeton sur la même ligne (`file.js:148-150`), donc aucun ancien e-mail ne part avec un nouveau jeton. Restent trois points.
+>
+> **R4 — Le changement partiel d'adresse est plus étroit que Q35. Gravité : à faire trancher par Thierry.**
+> - **Où :** `contacts.js:287-295`.
+> - **Ce qui se passe :** le jeton ne change que si l'e-mail change, et la ligne ne repart inscrite que si aucune ancienne adresse ne reste. Q35 dit : « l'adresse change → il repart inscrit, l'ancien lien cesse de marcher ».
+>   - Si seul l'e-mail change (le numéro est gardé), la nouvelle adresse ne reçoit rien alors qu'elle ne s'est jamais désinscrite.
+>   - Si seul le numéro change, le jeton reste le même.
+> - **Pas une faille :** le lien vit dans les e-mails, et le détenteur d'un e-mail inchangé reste destinataire de la ligne. Mais c'est plus étroit que la décision.
+>
+> **R5 — Le lien d'une autre ligne agit sur les lignes ajoutées plus tard. Gravité : mineur.**
+> - **Où :** `contacts.js:375-376`.
+> - **Ce qui se passe :** le lien de toute ligne encore en place fait taire toutes les lignes du compte qui partagent une adresse avec elle, y compris une ligne ajoutée plus tard pour quelqu'un d'autre.
+> - **Scénario :** L1 (e-mail de l'ancien gardien, téléphone d'astreinte) reste en place pour un autre logement. L'hôte ajoute L2 (e-mail du nouveau gardien, même téléphone d'astreinte). Le lien de L1 fait taire L2, e-mail du nouveau gardien compris.
+> - **C'est D4 « trop large », déjà accepté.** Je le signale parce que la question était posée.
+>
+> **R6 — La modification ne vérifie pas l'e-mail lu. Gravité : mineur, théorique.**
+> - **Où :** `contacts.js:278-297`.
+> - **Ce qui se passe :** deux onglets lisent le contact avec l'ancien e-mail. Le premier enregistre le nouvel e-mail avec un nouveau jeton. Le second, avec son formulaire périmé, réécrit l'ancien e-mail sans changer le jeton. La ligne garde donc l'ancien e-mail avec le jeton créé pour le nouveau.
+> - **Exploitable** seulement si un e-mail est parti vers la nouvelle adresse entre les deux écritures.
+> - **Piste :** conditionner l'écriture à l'e-mail lu.
+>
+> ## 2. Q35, Q36 et D1 à D7
+>
+> **État de chaque constat :**
+> - **D1 (Q35) :** fermé quand toutes les adresses changent ; le changement partiel est R4.
+> - **D2 (Q36) :** fermé pour l'ajout, et pour la modification vers l'adresse d'une autre ligne. Voir R7 et R8.
+> - **D3 :** fermé, avec un test.
+> - **D4 :** la règle est documentée.
+> - **D5 :** fermé : la liste revient avec chaque réponse, refus compris.
+> - **D6 :** fermé : le jour est gardé dans la réservation, la remise ne retire que ses propres lignes, son erreur est lue, et l'exception est couverte.
+> - **D7 :** fermé.
+> - **Reprise des listes :** aucune régression. `creerContacts`, `cleEmail` et `cleTelephone` sont inchangés, aucune référence à `dernier_essai_le` ne reste (fichiers js, html et sql), et les tests de la reprise passent.
+>
+> **R7 — Fausse alerte « adresse désinscrite ». Gravité : défaut mineur.**
+> - **Où :** `contacts.js:289-290`.
+> - **Ce qui se passe :** le contrôle porte sur toutes les adresses de la nouvelle version, pas seulement sur celles qu'on ajoute.
+> - **Mesuré** (`/tmp/rr2c3/q36.js`, cas 1) : L1 (E, P) est active et L2 (E) est désinscrite. Changer seulement le numéro de L1 rend 409 « Cette adresse s'est désinscrite », alors que E n'est pas ajoutée.
+> - **Piste :** ne contrôler que les adresses absentes de l'ancienne version.
+>
+> **R8 — Q36 se contourne en deux modifications, sans avertissement. Gravité : mineur.**
+> - **Où :** `contacts.js:288-295`.
+> - **Mesuré** (cas 2) : L1 désinscrite par V. « Modifier » vers une autre adresse la fait repartir inscrite (Q35) ; « Modifier » de nouveau vers V la laisse active sur V, sans aucune confirmation.
+> - **Ce qui manque :** la trace s'efface à la première modification, et l'écran ne le dit pas, contrairement à « Retirer » (`pages/settings.html:956`). Ce n'est pas de la sécurité, mais D2 se rouvre par ce chemin.
+>
+> **R9 — La page publique montre l'état d'une seule ligne. Gravité : mineur.**
+> - **Où :** `api/alertes-desinscription.js:84`.
+> - **Ce qui se passe :** la page montre l'état de la ligne du lien, alors que le bouton agit sur toutes les lignes de l'adresse.
+> - **Q36 crée exactement ce cas :** L1 désinscrite, puis L2 ajoutée à la même adresse avec confirmation. L'ancien lien de L1 affiche « Recevoir à nouveau » alors que la personne reçoit déjà par L2.
+>
+> **R10 — Un échec partiel consomme l'adresse du canal qui a échoué. Gravité : mineur, pas une régression.**
+> - **Où :** `api/push.js:188-193`.
+> - **Ce qui se passe :** la réservation n'est rendue que si rien n'est parti.
+> - **Scénario :** l'e-mail part, mais le SMS échoue parce que Brevo n'est pas connecté, précisément le cas que l'essai sert à révéler. L'adresse SMS reste prise et compte dans les dix. L'hôte connecte Brevo, réessaie, et lit « déjà parti vers cette adresse ».
+>
+> **R11 — « 10 essais » compte des adresses, pas des clics. Gravité : à faire trancher.**
+> - **Où :** `contacts.js:336` et `api/push.js:79`.
+> - **Ce qui se passe :** un contact qui a un e-mail et un numéro consomme deux essais. Cinq clics peuvent donc afficher « Vous avez déjà envoyé 10 essais aujourd'hui ».
+>
+> **R12 — La table des essais n'est jamais purgée. Gravité : mineur.**
+> - **Où :** `migrations/2026-11-10-notifications-contacts.sql:108-117`.
+> - **Ce qui se passe :** seul le jour courant est lu, mais les lignes des jours passés restent. Le volume est faible.
+>
+> ## 3. Sécurité générale du diff
+>
+> - **Compte :** le compte est toujours celui de la session. Chaque nouvelle lecture ou écriture filtre sur le compte : essais du jour, recherche des désinscrits, remise de l'essai, lignes du lien. La réponse « adresse désinscrite » ne parle que d'une ligne du compte.
+> - **Jeton :** il ne sort jamais vers l'écran. La réponse ne porte que le motif, la date de désinscription, le bilan et la liste. `COLONNES_ECRAN` ne contient pas le jeton.
+> - **Confirmation (Q36) :** `confirme` n'est pris que s'il vaut exactement `true`.
+> - **Migration :** la nouvelle table a RLS activée, aucune policy, et une clé étrangère en cascade.
+> - **Injection :** R2 est la seule trouvée.
+>
+> Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée à la re-review** — deux constats de sécurité de plus (R1, R2) :
+Thierry a décidé le 10 novembre 2026 une troisième review, limitée à leur seul
+diff (`98ff0746`), et c'est la dernière. Les autres constats sont corrigés sans
+review, dans le commit suivant :
+- **R1** — le rang de 1 à 10, unique par compte et par jour, en base.
+- **R2** — remise par clé exacte ; e-mail sans guillemet, virgule,
+  parenthèse, chevron, point-virgule ni barre oblique inverse ; un bien est un
+  identifiant.
+- **R3** — un mobile sans 0 ni indicatif se normalise comme à l'envoi.
+- **R4** — tranché par Thierry (Q38) : une adresse qui change suffit, la ligne
+  repart inscrite et son jeton change.
+- **R5** — accepté (c'est D4) : le lien d'une ligne fait taire toutes les
+  lignes qui partagent une de ses adresses.
+- **R6** — l'écriture d'une modification est conditionnée aux adresses lues.
+- **R7** — Q36 ne regarde que les adresses ajoutées.
+- **R8** — changer l'adresse d'un désinscrit se confirme à l'écran.
+- **R9** — la page dit l'état de l'adresse, pas de la seule ligne.
+- **R10** — ce qui n'est pas parti est rendu, canal par canal.
+- **R11** — dix adresses par jour, et le message le dit.
+- **R12** — les jours passés du compte partent à la réservation suivante.
+
+**Rapport de la troisième review (R1 et R2 seuls), reçu le 10 novembre 2026,
+recopié mot pour mot avant tout correctif** (sous-agent ; arbre
+`/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, plage
+`e319249238df75196c0113b93531af9a17b376fa..98ff0746f19f5a426f6e22d3ac2ae274d28c3f4d`) :
+
+> **Revue n° 3 (dernière) — correctifs R1 et R2**
+>
+> - Arbre lu : `/home/claude/hs-2c3`, en chemins absolus. J'y suis resté même quand le répertoire de la session est passé à `hs-2c3b`, puis à `hs-spec`.
+> - Branche : `pwa-lot-2c3-contacts`.
+> - SHA de tête : `98ff0746f19f5a426f6e22d3ac2ae274d28c3f4d`.
+> - Plage : `e319249238df75196c0113b93531af9a17b376fa..98ff0746f19f5a426f6e22d3ac2ae274d28c3f4d`.
+> - À savoir : `/home/claude/hs-2c3/node_modules` est un lien vers `/home/claude/hotesmart/node_modules`. J'y ai lu postgrest-js par le chemin de l'arbre, comme le brief l'autorise.
+> - Tests : `node --test tests/notifications-contacts-ecran.test.js tests/notifications-reprise-listes.test.js` donne **69/69 verts**.
+>
+> **Verdict : R1 fermé, R2 fermé. Les deux correctifs n'ouvrent aucun constat de sécurité.**
+>
+> **R1 — le plafond tient-il ? Oui.**
+> - **Une réservation par adresse et par jour** : c'est la clé primaire (compte, adresse, jour).
+> - **Dix par compte et par jour** : c'est l'unicité (compte, jour, rang) avec un rang de 1 à 10, posée en base. Postgres la fait respecter même sous des clics simultanés.
+> - **Tout ou rien** : l'insertion de plusieurs lignes est une seule requête. Un conflit annule tout, et on relit.
+> - **Reprises épuisées** : on refuse sans rien écrire.
+> - **Jour de Paris** : il est calculé une seule fois, avant la boucle (`contacts.js:347`).
+> - **La remise** efface seulement la ligne de la réservation elle-même, et seulement si rien n'est parti (`api/push.js:189-191`). L'envoi traite chaque canal à part : si un canal est parti, la réservation reste.
+> - **Retirer puis recréer un contact** ne libère rien : la trace des essais n'est pas liée à la ligne du contact.
+> - **Le navigateur ne peut pas écrire** dans la table : la sécurité par ligne (RLS) est activée, sans aucune règle d'accès.
+>
+> **R2 — une saisie peut-elle encore entrer dans un filtre ? Non.**
+> - **`.eq`** (postgrest-js 2.102.1, `dist/index.cjs:1299-1300`) ajoute la valeur au paramètre d'URL, qui l'encode. Mesuré : `,` `(` `)` `"` `&amp;` `=` `#` `+` deviennent tous des `%XX`. Côté serveur, PostgREST lit tout ce qui suit `eq.` comme une seule valeur ; ce point vient de sa grammaire, je n'ai pas pu le mesurer dans l'arbre. Une valeur ne peut donc pas ajouter un second filtre.
+> - **`.in`** (`dist/index.cjs:1836-1841`) met entre guillemets une valeur qui contient `,()`, mais n'échappe pas un `"` à l'intérieur. C'était la faille d'origine. Les `.in` qui restent dans le module ne prennent plus de saisie :
+>   - lignes 181 et 238 : les biens, contrôlés comme UUID à la ligne 165 (les deux appelants passent par `validerContact`) ;
+>   - ligne 421 : des identifiants relus en base.
+> - **Les e-mails** n'entrent plus dans aucun filtre : `desinscriptionDe` et `lignesDuLien` trient en JavaScript.
+> - **La remise** n'utilise que des valeurs produites par `reserverEssai`, jamais par le client.
+> - **`contains('biens', …)`** (ligne 98) : la valeur vient des émetteurs ou de la base, pas d'une saisie.
+>
+> **Constats (aucun de sécurité)**
+>
+> 1. **Régression faible, sur la reprise des listes** — `lib/notifications/contacts.js:144`.
+>    - Le nouveau contrôle d'e-mail est plus strict que celui qui lit les listes (`lib/notifications/reprise-listes.js:55`, ancienne règle, hors du diff).
+>    - Scénario mesuré : une liste qui contient `Jean&lt;jean@exemple.fr&gt;`, `jean@exemple.fr;` ou `jean@exemple.fr,` est lue comme une adresse, prévue comme contact, puis refusée par `validerContact`.
+>    - Effet (`scripts/reprendre-listes-alertes.js:225-226`) : la reprise de **tout le compte** s'arrête avec « contact_invalide ». Le message ne dit pas quelle adresse bloque.
+>    - Rien n'est perdu : les listes restent en service, et cela se voit dès l'essai à blanc. Avant R2, les deux règles étaient identiques.
+>
+> 2. **Faible, déjà présent avant ces correctifs** — `lib/notifications/contacts.js:51-57` comparé à `api/sms.js:138`.
+>    - Le numéro `611111111` (accepté par la validation) donne la clé `t:+611111111`, mais l'envoi l'adresse à `+33611111111`.
+>    - Scénario : deux contacts, `0611111111` et `611111111`, reçoivent chacun un essai le même jour, sur le même téléphone.
+>    - Le plafond de dix par compte tient toujours, et le SMS part sur la clé Brevo du compte lui-même.
+>
+> 3. **Faible, point à mettre dans la remise** — `migrations/2026-11-10-notifications-contacts.sql:115-128`.
+>    - Avec `create table if not exists`, une table déjà créée dans la version précédente (sans rang) n'est pas modifiée.
+>    - Le code échoue alors en refusant : la lecture de `cle, rang` est en erreur, donc chaque essai rend « lecture_impossible ». Aucun contournement possible.
+>    - La KB indique que la table n'est encore appliquée nulle part, et aucun script ne vérifie cette migration. Il faut appliquer la version `98ff074` et vérifier que la contrainte `notifications_contacts_essais_rang` existe en base.
+>
+> 4. **Très faible, fonctionnel** — `lib/notifications/contacts.js:355-370`.
+>    - Les clics simultanés visent tous le plus petit rang libre. Au-delà de 5 clics vraiment simultanés sur des contacts différents, les derniers reçoivent « plafond_essais » alors qu'il reste des rangs.
+>    - Le refus est sûr, seul le motif est faux. Le test R1 accepte d'ailleurs ce cas (`ok &gt;= 1`).
+>
+> Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée à la troisième review** (aucun constat de sécurité ; R1 et R2
+fermés ; pas de quatrième review — décision de Thierry : c'était la dernière) :
+- **1** — la reprise NOMME l'adresse de liste que le contact refuse (masquée,
+  avec son motif) : à corriger dans la liste avant le `--go`, le compte garde
+  ses listes en attendant.
+- **2** — déjà corrigé (R3 de la re-review) : `612345678` = `0612345678`.
+- **3** — **À LA REMISE ET À L'APPLICATION DE LA MIGRATION** : la table
+  `notifications_contacts_essais` doit porter la colonne `rang` et la
+  contrainte `notifications_contacts_essais_rang` ; la migration n'est encore
+  appliquée nulle part, et `create table if not exists` ne corrigerait pas une
+  table créée par une version antérieure. Vérification après application :
+  `select conname from pg_constraint where conrelid =
+  'public.notifications_contacts_essais'::regclass` doit rendre la clé
+  primaire, la contrainte de rang et son contrôle de borne.
+- **4** — autant de reprises que de rangs : trente clics simultanés en font
+  passer exactement dix, et un test le dit.
+
+### 12.4 Étape 4 — l'ancien chemin des listes est coupé (10 novembre 2026)
+
+Go de Thierry du 10 novembre 2026 à 19 h 35 (`pages/messages.html` et
+`pages/onboarding.html` compris). Fichiers : `api/agent-config.js`,
+`api/alert-test.js`, `pages/messages.html`, `pages/onboarding.html`,
+`shared/i18n/{fr,en,es}.json`, `pages/guide.html`,
+`lib/notifications/reprise-listes.js` (`REPRISE_OUVERTE = true`).
+
+**Les règles, et pourquoi :**
+1. **Plus rien n'écrit une liste d'alertes.** Une reprise qui met les listes de
+   côté pendant qu'un écran les réécrit les ferait renaître au premier
+   enregistrement — et le titulaire croirait gérer ses contacts dans Réglages
+   alors que l'ancien envoi repartirait en parallèle. **La table ne s'écrit plus
+   que par le serveur** : la politique RLS d'écriture est retirée (la lecture
+   reste au domaine `reglages`, la RLS reste active), et **la base refuse de
+   défaire une reprise** — toute écriture qui GARDE un logement repris (qui
+   porte `listes_reprises`) doit garder sa pile, ou l'allonger, et ne lui
+   ajouter ni modifier aucune liste
+   (`migrations/2026-11-10-agent-alert-config-serveur-seul.sql`, code
+   `HS409`, rendu en **409** par l'endpoint). Ce verrou ferme la course
+   lecture → coupure → écriture : le blob relu avant la coupure porte encore
+   les listes et pas la pile. **Ce qu'il ne couvre pas, et c'est voulu** : le
+   retrait d'un logement de la config (les scripts de re-clé le font), donc
+   aussi une config remise à `null` ou `{}`, ou un logement retiré puis remis
+   — aucun écran ni endpoint ne le fait. Et pour un `--go` lancé AVANT le
+   déploiement, il ne protège que les logements déjà repris : sur un logement
+   qui n'avait pas de liste à la reprise, l'ancien Messages pourrait en créer
+   une, invisible une fois ce code déployé — d'où l'ordre de mise en service
+   ci-dessous (déployer, PUIS `--go`). D'où aussi, côté serveur :
+   `api/agent-config.js` refuse la cible `alertes` en **410**
+   (`alertes_dans_reglages`, rien n'est écrit), et une écriture legacy qui
+   APPORTE `intervention`, `info_unknown` ou `listes_reprises` est refusée
+   comme `delais` l'était déjà (« réservé à sa cible ») ; la recopie de la
+   valeur en base, elle, passe — un vieux client qui renvoie ce qu'il a lu ne
+   casse pas.
+2. **L'essai des listes est retiré** : `api/alert-test.js` garde sa garde
+   (405, 401, droit) puis rend **410** (`essai_dans_reglages`) et renvoie vers
+   « Envoyer un essai » des contacts prévenus. La garde passe AVANT le 410 :
+   l'endpoint ne dit rien à qui n'a pas de session.
+3. **Messages ne montre plus de listes** : le bloc « Alertes » du panneau
+   « Réponses de l'IA » devient une phrase et un lien « Qui est prévenu →
+   Réglages » (`/settings?onglet=notifications`). Le panneau enregistre
+   toujours les délais (avec l'aperçu et la propagation) et les consignes,
+   plus rien d'autre ; la garde « modifications non enregistrées » compare les
+   délais puis les consignes.
+4. **L'onboarding ne préremplit plus de liste** : il pose `mode: 'test'`,
+   rien d'autre. Un compte neuf naît sans liste, donc sans rien à reprendre.
+5. **L'ouverture de la reprise est LIÉE à la fermeture des rédacteurs** :
+   `tests/notifications-reprise-listes.test.js` (« LE TEST QUI COMPTE ») échoue
+   si `REPRISE_OUVERTE` est vrai et que Messages, l'onboarding, la liste des
+   clés réservées ou le 410 de l'essai laissent encore passer une liste.
+   Contre-épreuves : retirer `intervention` des clés réservées rend 2 rouges ;
+   remettre une liste dans l'onboarding en rend 1.
+
+**Inventaire (CLAUDE.md, « la forme ne supprime jamais le fond ») :**
+- les listes e-mail et SMS par type → **déplacées** : contacts prévenus et
+  réglages de la personne (Réglages → Notifications), par la reprise ;
+- « Tester » par canal → **déplacé** : « Envoyer un essai » d'un contact ;
+- la porte Brevo (indication « clé SMS absente ») → **déplacée** : le bloc des
+  contacts dit lui-même si le SMS d'un contact peut partir ;
+- le texte d'aide des alertes → **retiré** avec le bloc, remplacé par la
+  phrase du lien.
+
+**Ce qui reste, et c'est assumé :**
+- `lib/alert-notify.js` (`sendAlertNotifications`) reste en service : il ne lit
+  plus rien pour un compte repris (ses listes sont de côté, dans
+  `listes_reprises`), et il sert encore les comptes que la reprise a BLOQUÉS
+  (adresse refusée, autre compte, bien introuvable) jusqu'à ce que leur cas
+  soit réglé. Il disparaîtra avec le dernier compte bloqué.
+- **`api/simulate.js` n'envoie plus d'alerte pour un compte repris** : il
+  appelle l'ancien expéditeur, qui ne trouve plus de liste. Le simulateur ne
+  passe pas par le point d'envoi unique ; à reprendre si Thierry veut que la
+  simulation prévienne.
+- les clés i18n de l'ancien bloc (`messages.alerts_*` hors `alerts_moved*`)
+  ne sont plus lues ; elles partiront avec le ménage des traductions.
+
+**Ordre de mise en service (à la remise ; Q39, décision de Thierry du
+10 novembre 2026 : la procédure, pas d'écran de plus) :**
+1. appliquer `migrations/2026-11-10-notifications-contacts.sql` et
+   `migrations/2026-11-10-agent-alert-config-serveur-seul.sql` (staging, puis
+   prod) ; vérifier les contraintes de `notifications_contacts_essais` (§12.3,
+   suite donnée à la troisième review, point 3), et pour la seconde : une
+   seule politique sur `agent_alert_config` (`agent_alert_config_select`) et
+   le déclencheur `agent_alert_config_listes_reprises` (requêtes en tête du
+   fichier) ;
+2. **AVANT de déployer**, `node scripts/reprendre-listes-alertes.js` **à
+   blanc** sur la base visée : lire le plan, les pertes et les comptes
+   bloqués, et **régler chaque compte bloqué avec Thierry** (adresse à
+   corriger, bien introuvable à confirmer par `--ignorer-bien`, autre compte).
+   Un compte bloqué garde ses listes et leur envoi, mais plus aucun écran ne
+   les montre une fois ce code déployé : c'est pourquoi on règle AVANT ;
+3. déployer, vérifier le SHA complet ;
+4. `--go` aussitôt, sur le go de Thierry. Entre le déploiement et le `--go`,
+   les listes vivent sans écran ; après, seules celles d'un compte que le
+   `--go` bloque encore (un état changé depuis la passe à blanc) — à régler
+   avec Thierry dans la foulée, le compte rendu du script les nomme.
+
+
+**Review de l'étape 4** (sous-agent, arbre `/home/claude/hs-2c3`, branche
+`pwa-lot-2c3-contacts`, plage
+`a8f2ac7b3b66524623168c46c4edb8a42cbce785..0d762ec8f6b1f4fb55cc5f2b93114726004fa2de`)
+— rapport mot pour mot, consigné à réception, avant tout correctif :
+
+> **Arbre lu :** `/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, HEAD `0d762ec8f6b1f4fb55cc5f2b93114726004fa2de`. Plage relue : `a8f2ac7b3b66524623168c46c4edb8a42cbce785..0d762ec8f6b1f4fb55cc5f2b93114726004fa2de`. Je n'ai rien modifié dans l'arbre. Les essais de mutation ont été faits dans une copie à part (`git archive` vers `/tmp`), supprimée ensuite.
+>
+> **Ce que j'ai mesuré**
+> - Suite complète sur l'arbre réel : 7577 tests, 7577 verts, 0 rouge. `scripts/i18n-check.js` passe (925 clés dans les trois langues).
+> - Les deux contre-épreuves du KB sont vraies. Retirer `intervention` des clés réservées donne 2 rouges. Remettre une liste dans l'onboarding en donne 1.
+> - Retirer le 410 de la cible `alertes` donne 1 rouge. Même sans ce 410, rien n'est écrit : la requête tombe sur un 400.
+> - Remettre l'ancienne garde (`[data-alerte]`) sur « non enregistré » donne 1 rouge (« une consigne non enregistree ne disparait pas en silence »).
+>
+> **Réponses directes**
+> - **`api/alert-test.js`** : la garde passe avant le 410. L'ordre est 405, puis 401, puis `requirePermission`, puis 410.
+> - **`api/agent-config.js`** : je n'ai trouvé aucun chemin par l'API pour écrire une liste.
+>   - Une liste glissée ailleurs ne sert à rien : clé imbriquée, casse différente ou `__proto__`, l'émetteur ne la lit pas. Il ne lit que `config[ref][type]`, et le type ne peut être que `intervention` ou `info_unknown` (contrôle en `lib/cron-classify.js:1020`).
+>   - Aucune écriture par l'API n'efface `listes_reprises`, sauf dans la course du constat 3.
+>   - Aucune fuite entre comptes.
+> - **Autres rédacteurs** : aucun dans `pages/`, `apps/`, `api/` ou `lib/`. Dans `scripts/`, trois scripts réécrivent la config (rekeyer, transfert, migration des modes), mais ils déplacent des entrées sans jamais créer de liste.
+> - **Panneau de Messages** : les consignes s'enregistrent bien, et la garde « non enregistré » est juste.
+> - **Ancien client** : les pages se chargent par le réseau d'abord, donc seul un onglet resté ouvert peut renvoyer l'ancien corps.
+>   - Ancien Messages : les alertes reçoivent un 410, l'écran affiche « partie alertes non enregistrée », les délais et les consignes passent. Aucune perte.
+>   - Ancien onboarding : sa requête est refusée en 400, donc le mode n'est pas posé. Le mode retombe alors sur `test` par défaut. Aucune perte.
+>
+> **Sécurité : le diff n'introduit aucun constat de sécurité.** Le constat 1 est un chemin plus ancien que ce lot, signalé à la frontière.
+>
+> ---
+>
+> 1. **Fonctionnel (préexistant, avec un volet sécurité faible).** Un rédacteur de listes subsiste, et le test de liaison ne peut pas le voir. Lignes en cause : `api/agent-config.js:117`, `docs/kb/pwa.md:1945`, `tests/notifications-reprise-listes.test.js:531`.
+>    - La politique RLS `agent_alert_config_write FOR ALL TO authenticated USING can_write(user_id,'reglages')` (`migrations/2026-09-02-droits-lot6.sql:111`) est toujours en place.
+>    - Scénario : un titulaire, ou un membre qui a `reglages:write`, envoie un `PATCH /rest/v1/agent_alert_config` avec la clé publique et son propre jeton. Il peut recréer `intervention.email_lines` après la coupure, ce qui fait envoyer en double à côté des contacts. Il peut aussi écraser `listes_reprises` ou supprimer la ligne. Les clés réservées et le 410 sont contournés.
+>    - La règle 1 du §12.4 (« Plus rien n'écrit une liste ») est donc fausse.
+>    - Ce n'est pas une fuite entre comptes : la personne a déjà le droit d'écriture sur ce compte. Mais le relais d'e-mails par la clé plateforme, qu'alert-test fermait, reste atteignable par ce chemin.
+>    - Piste : ne laisser que la lecture en RLS (le serveur devient le seul rédacteur), ou ajouter un trigger qui refuse les clés réservées.
+>
+> 2. **Fonctionnel.** Les listes encore en service sont désormais invisibles et impossibles à modifier. Lignes en cause : `pages/messages.html:2115-2118`, `pages/guide.html:486`, `shared/i18n/fr.json:606`, `docs/kb/pwa.md:1985`.
+>    - Comptes touchés : tous les comptes entre le déploiement et le `--go`, puis indéfiniment ceux que la reprise bloque.
+>    - Scénario : l'ancienne prestataire est toujours dans `intervention.sms_lines`, et le compte est bloqué pour `bien_introuvable`.
+>      - Messages dit « se règle maintenant dans Réglages », mais Réglages ne montre pas ce numéro.
+>      - La cible `alertes` répond 410, et le POST legacy refuse la modification (clé réservée).
+>      - Ce numéro continue donc de recevoir le téléphone des voyageurs et leurs dates de séjour, et l'hôte n'a aucun moyen de l'arrêter.
+>    - Le guide affirme « ont été reprises ici », ce qui est faux pour ces comptes.
+>    - Pistes :
+>      - lancer la passe à blanc AVANT le déploiement et régler les comptes bloqués, puis enchaîner déploiement et `--go` ;
+>      - ou afficher en lecture seule les listes non reprises, avec une action pour les couper.
+>
+> 3. **Mineur.** Une course entre un enregistrement et la coupure peut faire renaître les listes. Lignes en cause : `api/agent-config.js:301→422` et `512→520`.
+>    - Les écritures `mode`, `delais` et legacy lisent la config puis la réécrivent sans vérifier qu'elle n'a pas changé (pas de comparaison sur `updated_at`). Le script, lui, vérifie avant de couper.
+>    - Scénario : agent-config lit la config, le script coupe, puis agent-config enregistre ce qu'il avait lu. Les listes reviennent, `listes_reprises` disparaît, et les contacts existent déjà : envoi en double jusqu'à une relance.
+>    - Le script ne relit pas la config après sa coupure. La fenêtre ne dure qu'un aller-retour avec la base, mais elle est réelle maintenant que `REPRISE_OUVERTE` vaut `true`.
+>    - Piste : faire échouer l'écriture si `updated_at` a changé depuis la lecture, et rendre 409.
+>
+> 4. **Tests.** Aucun test ne vérifie que les écritures conservent `listes_reprises`. Ligne en cause : `tests/delai-reponse-ia-lot1.test.js:321`.
+>    - Mutation mesurée : faire effacer `listes_reprises` par les cibles `mode` et `delais` et par la fusion legacy (`listes_reprises: undefined` sur les cibles, `delete` dans la fusion) ne fait rougir aucun test.
+>    - Résultat dans la copie : 3 rouges, les mêmes que sur la copie non modifiée (ils viennent de l'absence de dépôt git, pas de la mutation).
+>    - La copie de retour arrière peut donc être détruite par l'API sans qu'aucun test ne le signale.
+>
+> 5. **Tests mineurs** : plusieurs noms promettent plus que le test ne vérifie.
+>    - `tests/endpoints-reglages-2.test.js:112`, « la garde reste devant » : le test envoie une requête sans en-tête, donc c'est le refus du jeton absent (`api/alert-test.js:24`) qui répond, pas `requirePermission` (l.25). Supprimer `requirePermission` laisse le test vert. Il faudrait un jeton présent mais refusé par la garde.
+>    - `tests/endpoints-reglages-2.test.js:102`, « aucun envoi » : aucune assertion sur les envois.
+>    - `tests/messages-pause-levee-dom.test.js:618`, « un delai tape reste vu » : ce point n'est pas exercé dans ce test (il l'est à la l.216).
+>    - Test de liaison : `/status\(410\)/` passerait même si un envoi était réintroduit avant le `return`.
+>
+> 6. **Mineur (KB, guide, commentaire).**
+>    - `docs/kb/pwa.md:1961` dit « Le panneau n'enregistre plus que les consignes ; la garde … ne compare plus qu'elles ». C'est faux : le panneau enregistre toujours les délais (avec l'aperçu et la propagation), et la garde compare d'abord les délais.
+>    - `pages/guide.html:486` dit « les autres sont devenues des contacts prévenus ». Or l'adresse d'un membre de l'équipe passe dans SES réglages, et une adresse désinscrite ne devient rien.
+>    - `api/agent-config.js:255` : le commentaire « Les alertes du bien : les DEUX types… » est resté au-dessus de la validation des délais.
+>
+> 7. **Mineur (observation).** `REPRISE_OUVERTE` est une constante du code du script. Elle ne dit rien de ce qui tourne sur la base visée (`lib/notifications/reprise-listes.js:40`).
+>    - Scénario : un `--go` lancé avec l'environnement de production avant le déploiement de ce code couperait les listes pendant que l'ancien Messages accepte encore `alertes_ref`. Les listes seraient réécrites, d'où des doubles envois.
+>    - Seule la procédure du KB l'empêche. Le script pourrait le vérifier lui-même, par exemple en refusant le `--go` tant que le déploiement visé ne répond pas 410 sur `alertes_ref`.
+>
+> Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée à la review de l'étape 4** (Q39 tranchée par Thierry : la
+procédure ; go des correctifs le 10 novembre 2026) :
+- **1** — corrigé : `migrations/2026-11-10-agent-alert-config-serveur-seul.sql`
+  retire la politique d'écriture ; la RLS reste active et la lecture
+  inchangée. Aucune page n'écrivait la table en direct (mesuré : tout passe
+  par `/api/agent-config`), et `scripts/test-droits.js` attend déjà un refus
+  d'écriture sur le compte cible. Le test de liaison exige que la DERNIÈRE
+  migration qui nomme la politique la retire.
+- **2** — Q39 : **la procédure** (ordre de mise en service ci-dessus) — passe à
+  blanc avant le déploiement, comptes bloqués réglés avec Thierry, puis
+  déploiement et `--go` enchaînés. Pas d'écran de plus.
+- **3 et 7** — corrigés en base, pour toute écriture qui garde le logement
+  (limites : règle 1 ci-dessus) : le déclencheur
+  `agent_alert_config_listes_reprises` refuse toute écriture qui ferait
+  perdre la pile d'un logement repris ou lui ajouterait ou modifierait une
+  liste (code `HS409`), et l'endpoint le rend en 409 « rechargez et
+  recommencez ».
+  Éprouvé sur le banc Postgres 16 local, migration appliquée deux fois : un
+  changement de mode qui garde la pile passe ; réécrire le logement sans pile,
+  y remettre une liste, raccourcir la pile ou la remplacer par une chaîne
+  sont refusés en `HS409` ; un upsert `on conflict` qui ressuscite les listes
+  aussi ; une seconde reprise (pile allongée), un logement non repris, le
+  retrait d'un logement (re-clé), `updated_at` seul et la suppression de la
+  ligne passent.
+- **4** — corrigé : un test exige que les trois chemins d'écriture gardent la
+  pile telle quelle et ne rendent aucune liste ; un autre, que le code `HS409`
+  devienne 409 et qu'une autre panne reste un 500. Contre-épreuves : effacer
+  la pile dans la cible `mode`, la cible `delais` ou la fusion legacy, ou
+  retirer l'une ou l'autre traduction du 409, rend un rouge chacune.
+- **5** — corrigé : « sans session » ne prétend plus garder `requirePermission`,
+  et un test neuf envoie un jeton PRÉSENT que la garde refuse (401) — sans
+  compte désigné, la garde d'alert-test se ramène à une session valide, donc
+  pas de 403 possible ; retirer `requirePermission` le rougit. « Aucun envoi »
+  vérifie maintenant zéro appel réseau et zéro écriture. Le test des
+  consignes illisibles ne promet plus le délai tapé (gardé par « et il le DIT
+  quand une saisie non enregistree est abandonnee »). Le test de liaison
+  refuse un module d'envoi ou un `fetch` dans alert-test.
+- **6** — corrigé : règle 3 du §12.4 (le panneau enregistre aussi les
+  délais), phrase du guide (l'adresse d'un membre passe dans SES réglages ;
+  une adresse désinscrite ne devient rien), commentaire d'agent-config.
+
+
+**Re-review des correctifs de l'étape 4 — la seule** (sous-agent, arbre
+`/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, plage
+`0d762ec8f6b1f4fb55cc5f2b93114726004fa2de..33a01643e66a721765b6598a5e6b5cc23dc2612f`)
+— rapport mot pour mot, consigné à réception, avant tout correctif :
+
+> Je n'ai trouvé **aucun problème de sécurité** dans les correctifs. Il reste un défaut fonctionnel peu probable dans la migration, deux tests qui ne rougissent pas contre le défaut qu'ils nomment, et des phrases de la KB à préciser.
+>
+> **Arbre lu :** `/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, HEAD `33a01643e66a721765b6598a5e6b5cc23dc2612f`, plage `0d762ec8f6b1f4fb55cc5f2b93114726004fa2de..33a01643e66a721765b6598a5e6b5cc23dc2612f`. Je n'ai rien modifié dans l'arbre (`git status` : seul `node_modules`, non suivi, déjà présent). Les essais de mutation ont tourné dans une copie `git archive` sous `/tmp`, et la migration sur une base Postgres 16 jetable. Les deux sont supprimées.
+>
+> **Ce que j'ai mesuré et qui tient**
+> - **Les quatre fichiers de tests touchés :** 166 tests, 166 verts.
+> - **La migration est rejouable :** appliquée deux fois sans erreur. Il reste ensuite une seule politique, `agent_alert_config_select`, plus le déclencheur.
+> - **Le déclencheur refuse en `HS409` :**
+>   - retirer la pile ;
+>   - remettre une liste dans un logement repris ;
+>   - amputer un élément de la pile ;
+>   - remplacer le logement par une chaîne ;
+>   - un upsert `on conflict` qui ressuscite les listes.
+> - **Il laisse passer :**
+>   - un changement de mode qui garde la pile ;
+>   - la reprise, et une seconde reprise ;
+>   - un logement non repris ;
+>   - le retrait d'un logement (re-clé) ;
+>   - un changement de `user_id` ;
+>   - un `delete`.
+> - **Casse et doublons sans danger :** une clé `Intervention` ou une clé de bien en double sont sans effet, car l'émetteur lit `config[ref][type]` à la clé exacte (`lib/alert-notify.js:41`).
+> - **Aucun écrivain réel n'est cassé par le retrait de la politique.** Aucune écriture directe dans `pages/`, `apps/`, `shared/`, `api/`, `lib/` ni `supabase/functions/`, ni ici ni sur `origin/main`. La suppression de compte passe par la cascade (un DELETE, que le déclencheur ne vise pas). La re-clé, le transfert et `migrer-modes-vers-delais` gardent la pile ou retirent la clé, donc ils passent.
+> - **`api/agent-config.js` :** le 409 sort avant la propagation aux brouillons et avant le 200 du chemin legacy. L'aperçu n'écrit rien, donc il ne peut pas tomber sur `HS409`. Le message est juste dans le cas de la course.
+>
+> **Sécurité : aucun constat.**
+>
+> ---
+>
+> 1. **Fonctionnel, peu probable : un logement qui a à la fois sa pile et une liste bloque toutes les écritures du compte, avec un 409 sans issue.** `migrations/2026-11-10-agent-alert-config-serveur-seul.sql:63`
+>    - La condition `apres ?| array['intervention','info_unknown']` refuse une liste même si elle était déjà là et n'a pas bougé. Or agent-config réécrit toujours le blob entier.
+>    - **Mesuré au banc :** dans cet état, changer le mode du logement B seul est refusé en `HS409`, et `updated_at` seul aussi.
+>    - **Conséquence :** le mode et les délais de tous les logements du compte sont refusés en 409 « rechargez la page et recommencez », et recharger ne règle rien.
+>    - **Comment on arrive dans cet état :** un `--go` lancé sur une base avant cette migration (staging ?), ou un retrait puis ré-ajout du logement, ou un DELETE puis INSERT.
+>    - **La KB est fausse dans ce cas :** `docs/kb/pwa.md:2120` dit « `updated_at` seul … passe ».
+>    - **Correctif éprouvé au banc :** ne refuser qu'une liste ajoutée ou modifiée, `exists (select 1 from unnest(array['intervention','info_unknown']) k where apres ? k and (apres -&gt; k) is distinct from (avant -&gt; k))`.
+>      - Il refuse toujours : le blob périmé, une liste remise sur un logement repris, une liste modifiée.
+>      - Il laisse passer : le mode de B dans l'état mixte, une seconde reprise.
+>    - **À ajouter à la vérification d'application :** une requête comptant les logements qui portent à la fois `listes_reprises` et une liste. Le résultat attendu est 0.
+>    - **Détail :** `mettreDeCote` accepte une pile sous forme d'objet (`[avant]`), mais le déclencheur refuse cette transformation (mesuré). Ce cas n'arrive pas aujourd'hui, car aucun écrivain ne produit une telle pile.
+>
+> 2. **Tests, mineur : « -&gt; 409, rien de plus » ne vérifie pas le « rien de plus ».** `tests/delai-reponse-ia-lot1.test.js:360`
+>    - **Mutation :** renvoyer le 409 seulement après la propagation aux brouillons. Résultat : 123 tests, 123 verts (ce fichier et `guestflow-appliquer-delai`).
+>    - C'est pourtant l'ordre qui compte : il évite de réarmer, vers le voyageur, des brouillons selon un réglage refusé.
+>    - **Correctif :** donner au test un brouillon en attente (`taches`) et exiger `majTaches` et `lecturesTaches` vides.
+>
+> 3. **Tests, mineur : le correctif du constat 5 ne rougit pas contre le relais d'e-mail qu'il vise.** `tests/endpoints-reglages-2.test.js:114`, `tests/notifications-reprise-listes.test.js:545`
+>    - **Mutation :** remettre `sendPlatformEmail` (de `../lib/platform-notify`) dans alert-test avant le 410. Résultat : 51 tests, 51 verts.
+>    - **Cause 1 :** `ALERT_BREVO_API_KEY` n'existe pas dans les tests, donc l'envoi s'arrête avant tout `fetch`.
+>    - **Cause 2 :** l'expression du test de liaison ignore `platform-notify`, qui est le module qu'utilisait l'ancien endpoint.
+>    - Avec `ALERT_BREVO_API_KEY=x`, la même mutation donne 2 rouges.
+>    - **La KB est fausse :** `docs/kb/pwa.md:2134` dit « refuse un module d'envoi ».
+>    - **Correctif :** poser la clé dans le test (et vider `../lib/platform-notify` du cache), puis ajouter `platform-notify|sendPlatformEmail|sendSms` à l'expression.
+>
+> 4. **Tests, mineur : le test de liaison ne lit que du texte.** `tests/notifications-reprise-listes.test.js:549-557`
+>    - Neutraliser le corps du déclencheur (un `return new;` en tête) laisse 37 tests sur 37 verts. Le seul verrou des constats 3 et 7 n'a donc aucune garde automatique (la KB le dit honnêtement : banc manuel).
+>    - Le test passe aussi à tort si une écriture est rouverte par une politique d'un autre nom.
+>    - Même chose pour une migration du même jour dont le nom se trie avant `agent-alert-…`.
+>    - **Correctif :** au minimum, exiger dans le corps de la fonction les trois conditions (`? 'listes_reprises'`, `@&gt;`, la garde des listes). Et refuser toute politique `for all|insert|update|delete` sur cette table dans les migrations postérieures.
+>
+> 5. **Mineur, KB et guide : des phrases promettent plus que le code.**
+>    - **« quel que soit l'écrivain »** (`docs/kb/pwa.md:1952`, `:2111`) : le verrou ne vaut que pour une écriture qui garde le logement sous forme d'objet.
+>      - Mettre `config` à `null`, `[]` ou `{}` passe et efface toutes les piles du compte d'un coup (mesuré).
+>      - Retirer le logement puis le remettre avec une liste passe aussi, de même qu'un DELETE puis INSERT.
+>      - Ce n'est pas atteignable par un utilisateur aujourd'hui, mais la phrase est fausse.
+>    - **« l'ancien Messages se ferait refuser »** (`:1956`) : c'est vrai seulement pour un logement déjà repris. Sur un logement du même compte qui n'avait pas de liste au moment de la reprise, l'ancien Messages peut en créer une (mesuré : passe). Après le déploiement, cette liste devient invisible (le scénario du constat 2).
+>    - **« la seule fenêtre où une liste vit sans écran »** (`:2022`) : c'est faux dès qu'un compte reste bloqué, ou se bloque au `--go` parce que son état a changé depuis la passe à blanc. Ses listes vivent alors sans écran jusqu'à ce qu'on règle son cas.
+>    - **Guide** (`pages/guide.html:486`) : pour les événements que ses droits ne couvrent pas, l'adresse d'un membre devient un contact (Q29), pas seulement « ses propres réglages ».
+>
+> Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée à la re-review** (aucun constat de sécurité : corrigé sans
+nouvelle review, comme la règle le veut) :
+- **1** — corrigé : le verrou ne refuse plus qu'une liste AJOUTÉE ou MODIFIÉE ;
+  une liste déjà là à côté de la pile, laissée telle quelle, passe — un
+  logement dans cet état mixte ne bloque plus le compte. Une pile ancienne en
+  objet seul se compare comme une pile d'un élément, et peut rester telle
+  quelle ou passer en tableau. La vérification d'application compte les
+  logements à la fois repris et porteurs d'une liste (attendu : 0). Rejoué au
+  banc Postgres 16, migration appliquée deux fois : passent le mode d'un
+  logement repris, une seconde reprise, le mode d'un autre logement et
+  `updated_at` seul en état mixte, la reprise de la liste mixte, une pile
+  objet inchangée ou passée en tableau, un logement non repris, le retrait
+  d'un logement, la suppression de la ligne ; sont refusés en `HS409` le blob
+  périmé, une liste remise, une liste mixte modifiée, une pile amputée, vidée
+  de sa liste, en chaîne, une pile objet perdue, et l'upsert qui ressuscite.
+- **2** — corrigé : le test du 409 porte un brouillon en attente et exige
+  qu'il ne soit ni relu ni réarmé. Contre-épreuve : rendre le 409 APRÈS la
+  propagation rend un rouge.
+- **3** — corrigé : le test de l'essai retiré pose `ALERT_BREVO_API_KEY` et
+  recharge `lib/platform-notify` ; le test de liaison refuse aussi
+  `platform-notify`, `sendPlatformEmail`, `sendPlatformSms` et `sendSms`.
+  Contre-épreuve : remettre `sendPlatformEmail` avant le 410 rend 4 rouges
+  dans l'un, 1 dans l'autre.
+- **4** — corrigé : le test de liaison exige les trois conditions dans le
+  corps de la fonction et exactement deux `return new;` ; et il refuse, dans
+  toute migration autre que les deux d'origine, une politique sur
+  `agent_alert_config` qui ne soit pas `for select`. Contre-épreuves : un
+  `return new;` en tête, la garde des listes neutralisée, ou une migration
+  `2026-11-10-aaa-…` qui rouvre l'écriture rendent un rouge chacun. Le
+  comportement du déclencheur, lui, reste éprouvé au banc (pas de base dans
+  la suite).
+- **5** — corrigé : règle 1 du §12.4 (ce que le verrou couvre et ne couvre
+  pas, et pourquoi déployer AVANT le `--go`), point 4 de l'ordre de mise en
+  service, phrase du guide (Q29 : l'adresse d'un membre devient un contact
+  pour ce que ses droits ne couvrent pas).
+

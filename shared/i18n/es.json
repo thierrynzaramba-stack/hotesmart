@@ -903,6 +903,8 @@
   "messages.alerte_aide": "Una urgencia sale siempre de inmediato.",
   "messages.alerte_titre": "Información faltante: avisarme después",
   "messages.alerts_hint": "La prueba va al primer destinatario guardado.",
+  "messages.alerts_moved": "Quién recibe las urgencias y la información que falta — usted, su equipo y las personas sin cuenta, como un conserje — se ajusta ahora en Ajustes, pestaña Notificaciones.",
+  "messages.alerts_moved_link": "Quién recibe las alertas → Ajustes",
   "messages.alerts_save": "Guardar las alertas",
   "messages.archive": "Archivar",
   "messages.arrives_today": "Llega hoy",

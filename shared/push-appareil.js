@@ -175,6 +175,12 @@ export async function enregistrerLangue (jeton, langue) {
   return appelServeur(jeton, 'POST', { action: 'langue', langue }, { keepalive: true })
 }
 
+// LES CONTACTS PRÉVENUS (lot 2c-3) : un geste, et la liste à jour en retour.
+// Le compte est celui de la session ; rien d'autre n'est envoyé.
+export async function contact (jeton, corps) {
+  return appelServeur(jeton, 'POST', corps)
+}
+
 export async function essai (jeton) {
   return appelServeur(jeton, 'POST', { action: 'essai' })
 }
