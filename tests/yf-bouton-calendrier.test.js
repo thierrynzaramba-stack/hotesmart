@@ -187,10 +187,11 @@ test('les quatre entrees, dans l ordre, vers les pages EXISTANTES du bien', asyn
     FR['cal.yf_prediction'], FR['cal.yf_market'], FR['cal.yf_events'], FR['cal.yf_comparables']
   ], 'l ordre des entrees est une demande de Thierry')
   const href = liens.map(a => a.getAttribute('href'))
-  // ⚠ « Evenements » VISE `prix?evenements=1` ET C'EST VOULU :
-  // `apps/yield/evenements.html` est une REDIRECTION vers cette URL depuis le
-  // 22 septembre 2026 — l'ecran Evenements est une pop-up DANS la Prediction
-  // de prix. Et « Donnees marche » vise `marche-global`, la seule des trois
+  // ⚠ « Evenements » VISE `prix?evenements=1` ET C'EST VOULU : l'ecran
+  // Evenements est une pop-up DANS la Prediction de prix jusqu'a la fin du
+  // lot 4 (4d). `apps/yield/evenements.html` porte, depuis 4a (9 novembre
+  // 2026), le nouvel ecran en construction : le menu n'y menera qu'a la
+  // redirection, sur go de Thierry. Et « Donnees marche » vise `marche-global`, la seule des trois
   // pages marche qui soit au menu.
   assert.ok(href[0].startsWith('/apps/yield/prix?'), href[0])
   assert.ok(href[1].startsWith('/apps/yield/marche-global?'), href[1])
