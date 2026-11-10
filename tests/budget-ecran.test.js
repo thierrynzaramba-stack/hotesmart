@@ -177,6 +177,18 @@ const ATTENDU = {
   'pages/avis.html': {
     '/api/ecran/avis': 1,   // l'ecran en un appel (et ses relectures : filtre, geste)
     '/api/avis': 1          // les GESTES seulement : corriger, confirmer, saisir, sejours de la saisie
+  },
+  // ⚠ LA PAGE CHARGES NAIT DANS CE TEST LE 10 NOVEMBRE 2026 (compte de charges,
+  // lot 3, spec §13.7). Ecran neuf : pas de mesure AVANT. UN appel d'ecran
+  // peint la page entiere — file, totaux, liste, entites, logements — et la
+  // page suivante de la liste passe par LE MEME endpoint, avec un curseur.
+  // ⚠ L'ENVOI DU FICHIER NE FIGURE PAS ICI, ET C'EST VOULU : il part a l'URL
+  // signee du stockage que `envoi` rend, pas vers une fonction `/api`. Un
+  // geste, jamais au chargement. Ce qui part a l'execution est mesure en
+  // cliquant, dans tests/charges-page.test.js.
+  'pages/charges.html': {
+    '/api/ecran/charges': 1, // l'ecran en un appel (et « Afficher plus », et les relectures apres un geste)
+    '/api/charges': 1        // les GESTES seulement : envoi, confirmer, valider, trancher, supprimer, consulter
   }
 }
 

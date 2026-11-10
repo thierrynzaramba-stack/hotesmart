@@ -816,7 +816,9 @@ seulement ; la seconde lecture, **étalée** (Q24), viendra avec le lot 7.
 Entrée « Charges » dans le menu ≡, à côté de Réglages et Avis (Q10),
 **titulaire seul** (Q9). Le masquage ne protège rien : `/api/ecran/charges`
 refuse en 403 un membre délégué, **avant toute lecture**, comme
-`/api/charges`. Dans `shared/nav.js`, l'entrée suit `options.charges`, qui
+`/api/charges`. Et la page est **non délégable**
+(`tests/pages-non-delegables.test.js`) : sur un compte partagé, elle
+refuse avant de rien lire, par le garde-fou de compte propre. Dans `shared/nav.js`, l'entrée suit `options.charges`, qui
 vaut par défaut `options.reglages` — les deux droits sont « titulaire seul »
 aujourd'hui ; le jour où un domaine `charges` délégable existera (Q9), les
 pages passeront `options.charges` elles-mêmes.
@@ -838,7 +840,11 @@ Migration additive `2026-11-10-charges-resume-categorie.sql` :
 
 - `GET ?entite=<uuid|toutes>&periode=<exercice|exercice_precedent|12_mois>` :
   file « À traiter » (50 premières + compte exact), première page de la
-  liste, entités, logements, totaux — **en parallèle**.
+  liste, entités, logements, totaux — **en parallèle** (les entités
+  d'abord : la période dépend du début d'exercice de celle demandée).
+  Les logements en deux listes : `biens`, les actifs, seuls proposés dans la
+  fiche ; `biens_archives`, pour nommer la ligne d'une facture ancienne
+  (même partage que l'accueil, décision 1 du 31 octobre 2026).
 - `GET …&curseur=<jour|id>` : la page suivante de la liste, seule.
 - Garde `contexteDEcran`, puis `estTitulaireDuCompte` → 403 avant toute
   lecture ; `private, no-store` avant le premier refus, 405 compris.

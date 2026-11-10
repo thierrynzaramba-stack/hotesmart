@@ -238,6 +238,12 @@ const ECRANS = [
   // `cartesLister`, mais un appel d'ecran qui recomposerait sa propre liste
   // rendrait le bien archive sans que la ligne `cartes` ne le voie.
   { ecran: 'Avis V5 (appel d ecran : filtre et formulaire)', chemin: 'api/ecran/avis.js', query: {} },
+  // ⚠ LA PAGE CHARGES (lot 3 du compte de charges, 10 novembre 2026) : `biens`
+  // est ce que la fiche PROPOSE au rattachement ; un logement archive n'y a
+  // plus sa place. `biens_archives` est legitime pour la meme raison que sur
+  // l'accueil : une facture ancienne garde le nom de son logement, et sa ligne
+  // doit pouvoir le nommer et le marquer archive.
+  { ecran: 'Charges (fiche : logements proposes)', chemin: 'api/ecran/charges.js', query: {}, legitimes: ['biens_archives'] },
 ]
 
 // ⚠ `api/menages-public.js` N'EST PAS DANS CETTE LISTE, et la raison vaut

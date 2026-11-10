@@ -52,6 +52,9 @@ const NON_DELEGABLES = [
   'pages/connaissance.html',        // base de connaissance V5 (lot 3) : TITULAIRE seul,
                                     // comme la page qu'elle remplace — l'endpoint
                                     // /api/ecran/connaissance refuse un membre en 403
+  'pages/charges.html',             // compte de charges (lot 3) : TITULAIRE seul,
+                                    // lecture comprise (Q9) — /api/ecran/charges
+                                    // et /api/charges refusent un membre en 403
   'apps/agent-ai/analyze.html',     // conversations + clé Beds24
   'apps/menages/prestataires.html', // public_tokens — réservé au titulaire
     'apps/reservation-directe/index.html',     // liens de réservation et
