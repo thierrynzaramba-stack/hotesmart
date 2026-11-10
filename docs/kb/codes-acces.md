@@ -37,6 +37,14 @@ moment et seulement si le logement est prêt.
   programmés, cette alerte part au **fondateur** (canal plateforme), pas à l'hôte du compte : un hôte
   qui n'est pas le fondateur ne la reçoit pas. Décision de Thierry du 9 novembre 2026 (dette 137,
   option a).
+- **Si le canal refuse l'envoi** (réservation sans messagerie, refus du provider) : une **tâche
+  de transmission manuelle** chez l'hôte, avec le code et le texte — **une seule par réservation,
+  même quand la plateforme d'alerte est lente** : l'alerte part en dernier, après le journal qui
+  empêche de retraiter le code (dette 141, 10 novembre 2026 ; avant, une alerte lente laissait le
+  cron coupé sans ce journal, et le code était retraité au passage suivant — seconde tâche,
+  seconde tentative au canal). L'incident `send_failure` est consigné ; le **fondateur** reçoit
+  l'alerte **« Échecs d'envoi répétés »** à partir du **deuxième** refus sur le même logement
+  dans l'heure (seuil 2) — un refus isolé ne lui envoie rien.
 - **Conditionné au ménage — seulement si un suivi ménage existe pour le bien.** « Suivi ménage
   existe » = **un prestataire est affecté au bien** OU **au moins un ménage a déjà été validé**.
   Dans ce cas, pour un **2ᵉ voyageur et suivants**, le code n'est envoyé qu'après **validation du
