@@ -38,9 +38,9 @@ const BEDS24 = {
 
 // La reponse du menu, telle que `api/yield-menu.js` la rend.
 const FAITS = (o = {}) => ({
-  bien: PILOTE.id, pilote: 'yieldflow',
+  bien: PILOTE.id, pilote: 'yieldflow', peut_basculer: true, raison: null,
   fenetre: { type: 'jours', valeur: 120 }, fenetre_fin: '2027-02-25',
-  marche: 'Bagnères-de-Bigorre', evenements: 3, comparables: 7,
+  marche: 'Bagnères-de-Bigorre', comparables: 7,
   prix_ajustes: 12, jours: 7, ...o
 })
 
@@ -170,8 +170,11 @@ test("LE TEST QUI COMPTE : ouvrir le menu n'ecrit RIEN — jamais de bascule en 
 // 3. LE MENU
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function ouvrir (b, bien) {
-  geste(b, bouton(b, bien), 'click')
+// `clavier: true` = un clic sans geste de pointeur (`detail === 0`), ce que le
+// navigateur envoie sur Entree ou Espace. C'est ce qui decide si le menu
+// deplace le focus.
+async function ouvrir (b, bien, { clavier = false } = {}) {
+  geste(b, bouton(b, bien), 'click', clavier ? { detail: 0 } : {})
   await new Promise(r => setTimeout(r, 0))
   return menu(b)
 }
@@ -246,7 +249,12 @@ test('les reperes s affichent quand ils sont servis, et SE TAISENT sinon', async
   const avec = banc()
   let m = await ouvrir(avec, PILOTE)
   let reperes = [...m.querySelectorAll('.cal-yf-menu__repere')].map(e => e.textContent)
-  assert.deepEqual(reperes, ['120 jours', 'Bagnères-de-Bigorre', '3 à venir', '7 retenus'])
+  // ⚠ TROIS REPERES, ET PAS QUATRE. Celui de « Quand vos prix bougent » a ete
+  // retire le 28 octobre 2026 en recette : il comptait les seules dates
+  // AJOUTEES PAR L'HOTE et affichait « 0 à venir » sur un logement qui a
+  // forcement des vacances. Le vrai compte n'est pas servi sans calcul, et la
+  // regle du lot dit alors de ne rien afficher — jamais un chiffre faux.
+  assert.deepEqual(reperes, ['120 jours', 'Bagnères-de-Bigorre', '7 retenus'])
   avec.fermer()
 
   // ⚠ ZERO COMPARABLE DIT « A CHOISIR », PAS « 0 RETENUS » (demande de
@@ -261,7 +269,7 @@ test('les reperes s affichent quand ils sont servis, et SE TAISENT sinon', async
 
   // Tout illisible : les quatre entrees restent CLIQUABLES, et aucun repere
   // n'est invente. Une panne de confort ne ferme pas le menu.
-  const sans = banc({ faits: FAITS({ fenetre: null, marche: null, evenements: null, comparables: null }) })
+  const sans = banc({ faits: FAITS({ fenetre: null, marche: null, comparables: null }) })
   m = await ouvrir(sans, PILOTE)
   assert.equal(m.querySelectorAll('.cal-yf-menu__repere').length, 0, 'un repere a ete invente')
   assert.equal(m.querySelectorAll('.cal-yf-menu__entree').length, 4, 'les entrees doivent rester')
@@ -277,6 +285,65 @@ test('LE TEST QUI COMPTE : une panne du menu ne ferme pas le menu', async () => 
   assert.equal(m.hidden, false, 'le menu s est ferme sur une panne de reperes')
   assert.equal(m.querySelectorAll('.cal-yf-menu__entree').length, 4)
   assert.equal(m.querySelectorAll('.cal-yf-menu__repere').length, 0)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE (review du 10 novembre 2026) : en panne du menu, un bien NON pilote garde un geste, et le menu dit pourquoi', async () => {
+  // ⚠ LE TEST DE PANNE CI-DESSUS NE PRENAIT QU'UN BIEN PILOTE, qui garde son
+  // lien de reglages : il ne pouvait pas voir qu'un bien non pilote perdait
+  // TOUT geste, sans un mot. Sur main, le meme scenario affichait encore
+  // « Activer ». Le pied le dit, et mene aux reglages SANS `activer=1`.
+  const b = monter({ appel: async (chemin) => (chemin.startsWith('/api/yield-menu') ? { __statut: 503, __corps: { error: 'illisible' } } : {}) })
+  peupler(b, { biens: [MANUEL], jours: 1 })
+  const m = await ouvrir(b, MANUEL)
+  const pied = m.querySelector('.cal-yf-menu__pied')
+  assert.ok(pied, 'un bien non pilote reste sans aucun geste en panne')
+  assert.equal(pied.querySelector('.cal-yf-menu__refus').textContent, FR['cal.yf_unreadable'])
+  const href = pied.querySelector('a').getAttribute('href')
+  assert.ok(href.includes('bien=' + MANUEL.id), href)
+  assert.ok(!href.includes('activer=1'), 'en panne, on n ouvre aucun parcours sur un etat qu on n a pas lu')
+  assert.equal(m.querySelector('.cal-yf-menu__attente'), null)
+  b.fermer()
+  // Sans le droit d'ecriture, rien — comme partout.
+  const lecture = monter({ ecriture: false, appel: async () => ({ __statut: 503, __corps: { error: 'illisible' } }) })
+  peupler(lecture, { biens: [MANUEL], jours: 1 })
+  assert.equal((await ouvrir(lecture, MANUEL)).querySelector('.cal-yf-menu__pied'), null)
+  lecture.fermer()
+})
+
+test('LE TEST QUI COMPTE (review du 10 novembre 2026) : le lien « Envoyer mes prix » vise le logement CLIQUE, pas le premier de la liste', async () => {
+  // ⚠ LE BANC N'AVAIT QU'UN BIEN : « le premier » et « le clique » etaient le
+  // meme, et un lien vers `etat.biens[0]` passait au vert.
+  const AUTRE = { ...MANUEL, id: '44444444-4444-4444-8444-444444444444', name: 'Cœur de vie 23', provider_property_id: '169567' }
+  const b = banc({ biens: [MANUEL, AUTRE], faits: FAITS({
+    bien: AUTRE.id, pilote: 'calendrier', peut_basculer: false, raison_code: 'pilote_refuse_keep', raison: 'x'
+  }) })
+  const m = await ouvrir(b, AUTRE)
+  assert.equal(m.querySelector('.cal-yf-menu__pied a').getAttribute('href'), `/logements/${AUTRE.id}`)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE (review du 10 novembre 2026) : sans le droit « reglages », aucun pied non plus sur un REFUS — connu ou inconnu', async () => {
+  for (const faits of [
+    FAITS({ pilote: 'calendrier', peut_basculer: false, raison_code: 'pilote_refuse_keep', raison: 'x' }),
+    FAITS({ pilote: 'calendrier', peut_basculer: false, raison_code: 'autre_chose', raison: 'Un motif inconnu.' })
+  ]) {
+    const b = banc({ biens: [MANUEL], faits, ecriture: false })
+    const m = await ouvrir(b, MANUEL)
+    assert.equal(m.querySelector('.cal-yf-menu__pied'), null, `pied offert sans droit (${faits.raison_code})`)
+    b.fermer()
+  }
+})
+
+test('un refus inconnu, hors du français : une ligne traduite, la phrase du moteur en infobulle (review du 10 novembre 2026)', async () => {
+  const b = banc({ biens: [MANUEL], faits: FAITS({
+    pilote: 'calendrier', peut_basculer: false, raison_code: 'autre_chose', raison: 'Un motif que l écran ne connaît pas.'
+  }) })
+  b.window.I18n.lang = 'en'
+  const m = await ouvrir(b, MANUEL)
+  const refus = m.querySelector('.cal-yf-menu__refus')
+  assert.equal(refus.textContent, FR['cal.yf_refused'], 'la phrase française du moteur montrée à un hôte anglophone')
+  assert.equal(refus.getAttribute('title'), 'Un motif que l écran ne connaît pas.')
   b.fermer()
 })
 
@@ -358,6 +425,62 @@ test('la touche d echappement ferme, et un seul menu est ouvert a la fois', asyn
   b.fermer()
 })
 
+test("LE TEST QUI COMPTE : on ne propose pas une activation qu'on ne peut pas tenir", async () => {
+  // ⚠ RECETTE DE THIERRY DU 28 OCTOBRE 2026, POINT 6, SUR STAGING. Il clique
+  // « Activer le pilote automatique » sur « Maison Jardin » : la page s'ouvre
+  // sur le bon bien, et RIEN ne se passe — ni parcours, ni confirmation.
+  //
+  // Mesure du jour sur staging : ce bien est en `rate_sync_mode = 'keep'`
+  // (« Je garde mes prix »), donc `peut_basculer = false`, code
+  // `pilote_refuse_keep`. Ce n'etait PAS l'absence de grille, et ce n'etait
+  // pas un bug du parcours : le refus est JUSTE — YieldFlow proposerait des
+  // prix que rien ne pousse aux plateformes.
+  //
+  // Le defaut est en amont : le menu PROMETTAIT un geste impossible. Un bouton
+  // qui ne fait rien au clic est le pire des deux mondes — l'hote ne sait ni
+  // que c'est refuse, ni pourquoi, ni quoi faire.
+  const RAISON = 'Ce logement est réglé sur « Je garde mes prix » : activez d’abord l’envoi des prix.'
+  const refuse = banc({ biens: [MANUEL], faits: FAITS({ pilote: 'calendrier', peut_basculer: false, raison: RAISON }) })
+  const m = await ouvrir(refuse, MANUEL)
+  const pied = m.querySelector('.cal-yf-menu__pied')
+  assert.ok(pied, 'le pied doit exister pour porter la raison')
+  assert.equal(pied.querySelector('.cal-yf-menu__activer'), null,
+    'aucun bouton d activation sur un bien qui ne peut pas basculer')
+  assert.equal(pied.textContent.trim(), RAISON,
+    'la raison de la regle doit etre AFFICHEE, pas remplacee par un texte a nous')
+  // Et les quatre entrees de lecture restent : elles, rien ne les empeche.
+  assert.equal(m.querySelectorAll('.cal-yf-menu__entree').length, 4)
+  refuse.fermer()
+
+  // Le bien basculable, lui, garde son bouton.
+  const ok = banc({ biens: [MANUEL], faits: FAITS({ pilote: 'calendrier', peut_basculer: true }) })
+  const mo = await ouvrir(ok, MANUEL)
+  assert.ok(mo.querySelector('.cal-yf-menu__activer'), 'un bien basculable garde son bouton')
+  assert.equal(mo.querySelector('.cal-yf-menu__refus'), null)
+  ok.fermer()
+})
+
+test("tant qu'on ne SAIT pas, on ne promet rien : aucun bouton au premier rendu", async () => {
+  // ⚠ LE CLIGNOTEMENT EST UNE PROMESSE AUSSI. Le menu s'ouvre avant la
+  // reponse ; afficher le bouton d'activation puis le retirer ferait voir a
+  // l'hote un geste qui lui est ensuite repris. Sur un bien NON pilote, le
+  // pied attend de savoir.
+  let resoudre
+  const b = monter({ appel: () => new Promise(r => { resoudre = r }) })
+  peupler(b, { biens: [MANUEL], jours: 1 })
+  geste(b, bouton(b, MANUEL), 'click')
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(menu(b).hidden, false, 'le menu doit s ouvrir tout de suite')
+  assert.equal(menu(b).querySelector('.cal-yf-menu__activer'), null,
+    'le bouton d activation ne doit pas apparaitre avant qu on sache s il est possible')
+  assert.ok(menu(b).querySelector('.cal-yf-menu__attente'), 'la ligne d attente doit etre la')
+  // La reponse arrive : le bouton apparait, une seule fois.
+  resoudre(FAITS({ pilote: 'calendrier', peut_basculer: true }))
+  await new Promise(r => setTimeout(r, 0))
+  assert.ok(menu(b).querySelector('.cal-yf-menu__activer'))
+  b.fermer()
+})
+
 test("LE TEST QUI COMPTE : l'etat vient de la REPONSE, pas de la page chargee il y a une heure", async () => {
   // ⚠ CONSTAT DE LA RE-REVIEW DU 28 OCTOBRE 2026. `bien.pilote_tarifaire` date
   // du CHARGEMENT du calendrier. L'hote active le pilote dans un autre onglet,
@@ -395,12 +518,21 @@ test("LE TEST QUI COMPTE : le focus survit a l'arrivee des reperes", async () =>
   // detruit, le focus retombe sur `body` : l'hote au clavier voit sa
   // tabulation repartir du haut du document, menu ouvert, fleches inertes.
   const b = banc()
-  const m = await ouvrir(b, PILOTE)
+  const m = await ouvrir(b, PILOTE, { clavier: true })
   assert.ok(m.contains(b.doc.activeElement),
     'apres l arrivee des reperes, le focus doit etre reste DANS le menu')
   assert.ok(b.doc.activeElement.classList.contains('cal-yf-menu__entree'),
     `le focus est sur ${b.doc.activeElement.tagName}.${b.doc.activeElement.className}`)
   b.fermer()
+
+  // ⚠ ET AU DOIGT, ON NE DEPLACE RIEN. `focus()` peindrait un anneau que
+  // l'hote n'a pas demande — vu sur l'apercu du 28 octobre 2026, un cadre noir
+  // sur la premiere entree au telephone.
+  const tactile = banc()
+  const mt = await ouvrir(tactile, PILOTE)
+  assert.ok(!mt.contains(tactile.doc.activeElement),
+    'un menu ouvert au doigt ne doit pas prendre le focus')
+  tactile.fermer()
 })
 
 test('la fenetre au singulier dit « 1 jour », jamais « 1 jours »', async () => {
@@ -420,6 +552,60 @@ test('la fenetre au singulier dit « 1 jour », jamais « 1 jours »', async () 
     assert.equal(r, attendu, `fenetre ${fenetre.valeur} ${fenetre.type}`)
     b.fermer()
   }
+})
+
+test('LE TEST QUI COMPTE : « Quand vos prix bougent » n affiche AUCUN repere', async () => {
+  // ⚠ RECETTE DE THIERRY DU 28 OCTOBRE 2026. Le repere disait « N à venir » en
+  // comptant `yield_events` — les seules dates ajoutees par l hote — a cote
+  // d un ecran qui montre AUSSI les vacances scolaires, les jours feries, les
+  // ponts et les fetes du calendrier. Sur « Maison Jardin », sans date propre,
+  // il annoncait « 0 à venir » pour un ecran qui en liste 35.
+  // Le vrai compte n est PAS servi sans calcul (il demande le contexte jour
+  // par jour sur la fenetre historique), et la regle du lot dit alors de ne
+  // rien afficher. Mieux vaut pas de chiffre qu un chiffre faux.
+  const b = banc()
+  const m = await ouvrir(b, PILOTE)
+  const entrees = [...m.querySelectorAll('.cal-yf-menu__entree')]
+  const ev = entrees.find(a => a.textContent.includes(FR['cal.yf_events']))
+  assert.ok(ev, 'l entree existe toujours')
+  assert.equal(ev.querySelector('.cal-yf-menu__repere'), null,
+    'elle ne doit porter AUCUN repere')
+  assert.ok(!/à venir/.test(m.textContent), 'et plus aucun « à venir » nulle part')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : « Je garde mes prix » propose un GESTE, pas un paragraphe', async () => {
+  // ⚠ RECETTE DE THIERRY. Le refus affichait la phrase du moteur en cinq
+  // lignes et laissait l hote sans rien a faire. « Je garde mes prix » se
+  // change sur la fiche du logement, et c est a un clic.
+  const b = banc({ biens: [MANUEL], faits: FAITS({
+    pilote: 'calendrier', peut_basculer: false, raison_code: 'pilote_refuse_keep',
+    raison: 'Ce logement est réglé sur « Je garde mes prix » : HôteSmart n’envoie aucun tarif…'
+  }) })
+  const m = await ouvrir(b, MANUEL)
+  const pied = m.querySelector('.cal-yf-menu__pied')
+  assert.equal(pied.querySelector('p').textContent, FR['cal.yf_prices_outside'],
+    'une LIGNE, pas le paragraphe du moteur')
+  const lien = pied.querySelector('a')
+  assert.ok(lien, 'le geste doit exister')
+  assert.equal(lien.textContent, FR['cal.yf_send_prices'])
+  assert.equal(lien.getAttribute('href'), `/logements/${MANUEL.id}`,
+    'le lien ouvre la fiche de CE logement, la ou le reglage vit')
+  assert.ok(lien.classList.contains('link'), 'un lien bleu : le bleu est reserve au cliquable')
+  b.fermer()
+
+  // ⚠ ET UN REFUS INCONNU N AFFICHE PAS CE GESTE : on ne sait pas s il le
+  // debloquerait. On montre alors le verdict du moteur, tel quel.
+  const autre = banc({ biens: [MANUEL], faits: FAITS({
+    pilote: 'calendrier', peut_basculer: false, raison_code: 'autre_chose',
+    raison: 'Un motif que l écran ne connaît pas.'
+  }) })
+  const m2 = await ouvrir(autre, MANUEL)
+  assert.equal(m2.querySelector('.cal-yf-menu__pied a'), null,
+    'aucun geste propose sur un refus inconnu')
+  assert.equal(m2.querySelector('.cal-yf-menu__refus').textContent,
+    'Un motif que l écran ne connaît pas.', 'le verdict du moteur s affiche tel quel')
+  autre.fermer()
 })
 
 test('LE TEST QUI COMPTE : le focus ne revient au bouton que sur une fermeture DEMANDEE', async () => {
@@ -453,7 +639,7 @@ test('LE TEST QUI COMPTE : le focus ne revient au bouton que sur une fermeture D
 
   // 3. ECHAPPEMENT : fermeture DEMANDEE, le focus revient — c'est ce qu'on
   //    attend quand la main est au clavier.
-  await ouvrir(b, PILOTE)
+  await ouvrir(b, PILOTE, { clavier: true })
   b.doc.dispatchEvent(new b.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   assert.equal(menu(b).hidden, true)
   assert.equal(b.doc.activeElement, btn,
