@@ -492,6 +492,9 @@ Cette alerte suit désormais le mode urgence ; seule la décision 7 garde
 |---|---|---|
 | Q33 | Qui peut annuler la désinscription d'un contact | Le contact, par le même lien (« Recevoir à nouveau »), et le titulaire, par « Réinscrire » dans Réglages |
 | Q34 | Où vit le bloc « Contacts prévenus » | Dans l'onglet Notifications de `/settings`, sous « Heures calmes » |
+| Q35 | L'adresse d'un contact désinscrit change | Il repart inscrit : la nouvelle adresse ne s'est jamais désinscrite ; l'ancien lien cesse de marcher |
+| Q36 | Ajouter (ou mettre) l'adresse de quelqu'un qui s'est désinscrit | L'écran prévient (« s'est désinscrite le … ; lui renvoyer vos alertes ? ») et le titulaire confirme |
+| Q37 | La limite des essais | Une fois par jour et par adresse, même si le contact est retiré puis recréé ; dix essais par compte et par jour |
 
 ## 14. Découpage proposé, et ce que le lot ne fait pas
 
