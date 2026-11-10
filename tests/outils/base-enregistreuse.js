@@ -54,6 +54,7 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
       or (expr) { r.filtres.push(['or', expr]); return q },
       order (c, o) { r.ordre.push([c, (o || {}).ascending]); return q },
       limit (n) { r.limite = n; return q },
+      range (de, a) { r.plage = [de, a]; return q },
       maybeSingle () { r.unique = true; return fin() },
       single () { r.unique = true; return fin() },
       then (ok, ko) { return fin().then(ok, ko) }

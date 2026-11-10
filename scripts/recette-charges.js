@@ -208,15 +208,17 @@ async function principal () {
   }
   // ⚠ UNE LECTURE EN ERREUR LÈVE : « illisible » n'est jamais « absente ».
   async function lire (id) {
-    const { data, error } = await db.from('charges').select('id, statut, motif, montant_ttc_cents, montant_ht_cents, fournisseur_nom, numero_facture, jour, entite_juridique_id, bien_id, signal, groupe_doublon')
+    const { data, error } = await db.from('charges').select('id, statut, motif, montant_ttc_cents, montant_ht_cents, fournisseur_nom, numero_facture, jour, entite_juridique_id, bien_id, categorie, signal, groupe_doublon')
       .eq('id', id).eq('user_id', compte).maybeSingle()
     if (error) throw new Error(`lecture de la charge ${id} : ${error.message}`)
     return data
   }
-  const cle = (c) => `${c.entite_juridique_id || '-'}|${c.bien_id || '-'}|${c.jour}`
+  // ⚠ LA CATÉGORIE EST DANS LA CLÉ DEPUIS LE LOT 3 (migration 2026-11-10) : un
+  // même jour porte une cellule par catégorie.
+  const cle = (c) => `${c.entite_juridique_id || '-'}|${c.bien_id || '-'}|${c.categorie || '-'}|${c.jour}`
   async function cellules (jours) {
     const { data, error } = await db.from('charges_resume')
-      .select('entite_juridique_id, bien_id, jour, ttc_cents, nb_factures, nb_non_verifiees')
+      .select('entite_juridique_id, bien_id, categorie, jour, ttc_cents, nb_factures, nb_non_verifiees')
       .eq('user_id', compte).in('jour', jours)
     if (error) throw new Error(`lecture du résumé : ${error.message}`)
     return new Map((data || []).map(c => [cle(c), c]))

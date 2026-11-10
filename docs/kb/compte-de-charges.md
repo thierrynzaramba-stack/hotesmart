@@ -22,8 +22,8 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 
 | Fichier | Rôle |
 |---|---|
-| `migrations/2026-11-10-charges-resume-categorie.sql` | La cellule du résumé devient compte × entité × logement × **catégorie** × jour (Q30) ; `charges_totaux(compte, début, fin, entité)` rend **un objet** (total, par mois, par catégorie, par logement, heure du calcul). **À coller APRÈS** `2026-11-09`. Contrôle : `controle-charges-lot3.sql` (l'ancien contrôle cite les fonctions à 4 arguments, retirées). |
-| `lib/charges/ecran.js` | Les lectures de l'écran : file « À traiter » (50 + nombre exact), liste par curseur `jour\|id`, logements (actifs / archivés), totaux, bornes de période. |
+| `migrations/2026-11-10-charges-resume-categorie.sql` | La cellule du résumé devient compte × entité × logement × **catégorie** × jour (Q30) ; `charges_totaux(compte, début, fin, entité)` rend **un objet** (total, par mois, par catégorie, par logement, heure du calcul). **À coller APRÈS** `2026-11-09`. Contrôle : `migrations/2026-11-10-controle-charges.sql` (l'ancien contrôle cite les fonctions à 4 arguments, retirées). ⚠ **Après elle, `2026-11-09` ne se rejoue plus** : il remettrait les fonctions sans catégorie et l'ancien trigger (review du lot 3, constat 8). |
+| `lib/charges/ecran.js` | Les lectures de l'écran : file « À traiter » (50 + nombre exact), liste par curseur `jour\|cree_le\|id` (jour, puis arrivée), logements (actifs / archivés, lus page après page), totaux, bornes de période. |
 | `api/ecran/charges.js` | L'appel d'écran, **un seul** ; `?curseur=` pour « Afficher plus ». 405 avant la garde, **403 d'un membre avant toute lecture**. |
 | `pages/charges.html` | La page : ses deux endpoints en constantes, le dépôt du fichier à l'URL signée, la garde de compte propre (page non délégable). |
 | `shared/charges-vue.js` | **La vue unique** (ordinateur et téléphone) : À traiter, totaux, liste, fiche, ajout. Aucun appel réseau écrit dedans. |
@@ -91,8 +91,15 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   champ de montant vide part en `null`. Les montants saisis passent en
   centimes sans virgule flottante (`enCentimes`).
 - **Lot 3 — le curseur de la liste est validé AVANT d'entrer dans le filtre
-  PostgREST** (`jour` au format date, `id` UUID) : il est interpolé dans un
-  `or(...)`, un texte libre y ajouterait des conditions.
+  PostgREST** (`jour` au format date, `cree_le` au format instant et entre
+  guillemets, `id` UUID) : il est interpolé dans un `or(...)`, un texte libre
+  y ajouterait des conditions.
+- **Lot 3 — le total est « estimation »** pour les trois raisons de la spec
+  (§6) : une facture à lire, à vérifier ou illisible ; un signal non tranché ;
+  un montant absent. Une ligne de répartition sans facture comptée ne
+  s'affiche pas (son montant est écarté, pas « non lu »).
+- **Lot 3 — un PDF sans type** (certains sélecteurs Android, Windows) repart
+  avec le type annoncé à `envoi` : sinon le bucket le refuse.
 - **Lot 3 — une photo est réduite avant l'envoi** (`shared/photo-bien-client.js` :
   JPEG, 2000 px de côté, 2 Mo) : moins lourde en 4G, moins chère à lire. Un
   PDF part tel quel (10 Mo au plus).
@@ -103,6 +110,15 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   (tests/ecrans-sans-biens-archives.test.js).
 
 ## Dettes connues (review du lot 2, 10 novembre 2026)
+
+- **Lot 3 — `entitesDuCompte` et `liensDuCompte`** (lib/entites-juridiques.js,
+  fil facturation) lisent sans borne : PostgREST les tronquerait à 1000 lignes
+  sans erreur. Irréaliste aujourd'hui (quelques entités par compte), mais
+  contraire à la règle 6 ; à paginer chez leur propriétaire (review du lot 3,
+  constat 7).
+- **Lot 3 — statiques sans empreinte** : `shared/charges-vue.js` est importé
+  sans `?v=`, comme toutes les pages du dépôt aujourd'hui (point 5 de la case
+  performance, tenu par aucun outil).
 
 - **Fichier non effacé** : un échec de `remove` n'est que journalisé ;
   `supprimer` répond « ok ». À faire : une table des fichiers à effacer,

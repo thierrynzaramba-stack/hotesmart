@@ -7,6 +7,12 @@
 --
 -- A coller APRES 2026-11-09-compte-de-charges.sql.
 -- Rejouable. Lignes courtes : collage manuel.
+-- Controle : 2026-11-10-controle-charges.sql.
+--
+-- ⚠ APRES ELLE, 2026-11-09 NE SE REJOUE PLUS :
+-- elle remettrait les fonctions sans categorie
+-- et l'ancien trigger, et la repartition par
+-- categorie deviendrait fausse.
 --
 -- ⚠ LA CELLULE CHANGE DE CLE : compte x entite x
 -- bien x CATEGORIE x jour. Les cellules existantes

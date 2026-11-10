@@ -80,7 +80,8 @@ async function appeler ({ methode = 'GET', query = {}, titulaire = true, repondr
   return { rep, requetes, rpcs, ej, gardeAppelee }
 }
 
-const ligne = (n, jour = '2026-11-01', extra = {}) => ({ id: uuid(n), user_id: TITULAIRE, statut: 'validee', jour, montant_ttc_cents: 1000, ...extra })
+const CREE = '2026-10-15T08:30:00.123456+00:00'
+const ligne = (n, jour = '2026-11-01', extra = {}) => ({ id: uuid(n), user_id: TITULAIRE, statut: 'validee', jour, cree_le: CREE, montant_ttc_cents: 1000, ...extra })
 
 // ─── La garde ────────────────────────────────────────────────────────────────
 test('LE TEST QUI COMPTE : un POST est refusé en 405, en-tête privé posé AVANT, sans garde ni lecture', async () => {
@@ -194,20 +195,20 @@ test('les entités en panne rendent 503, sans autre lecture', async () => {
 })
 
 // ─── La liste, par curseur ───────────────────────────────────────────────────
-test('LE TEST QUI COMPTE : 51 lignes lues = une page de 50 et un curseur « jour|id » sur la 50e', async () => {
+test('LE TEST QUI COMPTE : 51 lignes lues = une page de 50 et un curseur « jour|arrivée|id » sur la 50e', async () => {
   const lignes = Array.from({ length: 51 }, (_, i) => ligne(100 - i, '2026-10-15'))
   const r = await appeler({ repondre: (q) => (q.optionsSelect && q.optionsSelect.count ? { data: [], error: null, count: 0 } : (q.table === 'charges' ? { data: lignes, error: null } : { data: [], error: null })) })
   const l = r.rep.corps.liste
   assert.equal(l.lignes.length, 50)
-  assert.equal(l.suite, `2026-10-15|${lignes[49].id}`)
+  assert.equal(l.suite, `2026-10-15|${CREE}|${lignes[49].id}`)
   const q = r.requetes.find(x => x.table === 'charges' && !(x.optionsSelect && x.optionsSelect.count))
   assert.equal(q.limite, 51)
-  assert.deepEqual(q.ordre, [['jour', false], ['id', false]])
+  assert.deepEqual(q.ordre, [['jour', false], ['cree_le', false], ['id', false]], 'jour, puis arrivée (spec §13.2)')
   assert.ok(q.filtres.some(f => f[0] === 'neq' && f[1] === 'statut' && f[2] === 'envoi'), 'un envoi pas encore confirmé n\'est pas une facture')
 })
 
 test('« Afficher plus » : la page suivante SEULE, filtrée par le curseur', async () => {
-  const r = await appeler({ query: { curseur: `2026-10-15|${uuid(51)}` } })
+  const r = await appeler({ query: { curseur: `2026-10-15|${CREE}|${uuid(51)}` } })
   assert.equal(r.rep.statut, 200)
   assert.deepEqual(Object.keys(r.rep.corps), ['liste'])
   assert.equal(r.requetes.length, 1)
@@ -216,11 +217,11 @@ test('« Afficher plus » : la page suivante SEULE, filtrée par le curseur', as
   const q = r.requetes[0]
   assert.equal(filtre(q, 'user_id'), TITULAIRE)
   const or = q.filtres.find(f => f[0] === 'or')
-  assert.equal(or[1], `jour.lt.2026-10-15,and(jour.eq.2026-10-15,id.lt.${uuid(51)})`)
+  assert.equal(or[1], `jour.lt.2026-10-15,and(jour.eq.2026-10-15,cree_le.lt."${CREE}"),and(jour.eq.2026-10-15,cree_le.eq."${CREE}",id.lt.${uuid(51)})`)
 })
 
 test('LE TEST QUI COMPTE : un curseur forgé est refusé AVANT d\'entrer dans le filtre (400)', async () => {
-  for (const c of ['2026-10-15', `2026-10-15|${uuid(1)},user_id.neq.x`, 'x|y', `15-10-2026|${uuid(1)}`]) {
+  for (const c of ['2026-10-15', `2026-10-15|${uuid(1)}`, `2026-10-15|${CREE}|${uuid(1)},user_id.neq.x`, `2026-10-15|${CREE}"),user_id.neq.(x|${uuid(1)}`, `2026-10-15|2026-10-15|${uuid(1)}`, 'x|y|z', `15-10-2026|${CREE}|${uuid(1)}`, `2026-10-15|${CREE}|${uuid(1)}|en-trop`]) {
     const r = await appeler({ query: { curseur: c } })
     assert.equal(r.rep.statut, 400, c)
     assert.equal(r.requetes.length, 0, c)
@@ -269,9 +270,25 @@ test('une période inconnue, ou d\'une autre forme d\'entité, retombe sur la pr
   assert.equal(ecran.bornesPeriode({ entite: { debut_exercice: 'n/a' }, aujourdhui: '2026-11-10' }).periode, '12_mois')
 })
 
-test('le curseur : « jour|uuid », rien d\'autre', () => {
+test('le curseur : « jour|arrivée|uuid », rien d\'autre', () => {
   assert.deepEqual(ecran.lireCurseur(''), { ok: true, curseur: null })
-  assert.deepEqual(ecran.lireCurseur(`2026-10-15|${uuid(3)}`), { ok: true, curseur: { jour: '2026-10-15', id: uuid(3) } })
-  assert.equal(ecran.lireCurseur('2026-10-15|pas-un-uuid').ok, false)
-  assert.equal(ecran.ecrireCurseur({ jour: '2026-10-15', id: uuid(3) }), `2026-10-15|${uuid(3)}`)
+  assert.deepEqual(ecran.lireCurseur(`2026-10-15|${CREE}|${uuid(3)}`), { ok: true, curseur: { jour: '2026-10-15', cree_le: CREE, id: uuid(3) } })
+  assert.equal(ecran.lireCurseur(`2026-10-15|2026-10-15T08:30:00Z|${uuid(3)}`).ok, true, 'un instant en Z')
+  assert.equal(ecran.lireCurseur(`2026-10-15|${CREE}|pas-un-uuid`).ok, false)
+  assert.equal(ecran.ecrireCurseur({ jour: '2026-10-15', cree_le: CREE, id: uuid(3) }), `2026-10-15|${CREE}|${uuid(3)}`)
+})
+
+test('LE TEST QUI COMPTE : les logements se lisent PAGE APRÈS PAGE — jamais tronqués à 1000 en silence', async () => {
+  const page1 = Array.from({ length: 1000 }, (_, i) => ({ id: uuid(5000 + i), name: `B${i}`, archive_le: null, user_id: TITULAIRE }))
+  const page2 = [{ id: uuid(9999), name: 'Le dernier', archive_le: null, user_id: TITULAIRE }]
+  const r = await appeler({
+    repondre: (q) => {
+      if (q.table !== 'properties') return { data: [], error: null, count: 0 }
+      return { data: q.plage && q.plage[0] === 0 ? page1 : page2, error: null }
+    }
+  })
+  const lectures = r.requetes.filter(q => q.table === 'properties')
+  assert.deepEqual(lectures.map(q => q.plage), [[0, 999], [1000, 1999]])
+  assert.equal(r.rep.corps.biens.length, 1001)
+  assert.ok(r.rep.corps.biens.some(b => b.nom === 'Le dernier'))
 })

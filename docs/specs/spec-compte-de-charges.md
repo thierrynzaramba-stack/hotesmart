@@ -845,7 +845,8 @@ Migration additive `2026-11-10-charges-resume-categorie.sql` :
   Les logements en deux listes : `biens`, les actifs, seuls proposés dans la
   fiche ; `biens_archives`, pour nommer la ligne d'une facture ancienne
   (même partage que l'accueil, décision 1 du 31 octobre 2026).
-- `GET …&curseur=<jour|id>` : la page suivante de la liste, seule.
+- `GET …&curseur=<jour|cree_le|id>` : la page suivante de la liste, seule
+  (tri : jour de la charge, puis arrivée, puis identifiant).
 - Garde `contexteDEcran`, puis `estTitulaireDuCompte` → 403 avant toute
   lecture ; `private, no-store` avant le premier refus, 405 compris.
 - Lecture seule. Les gestes restent sur `POST /api/charges` (lot 2).
@@ -882,6 +883,59 @@ V1).
 
 Une seule vue pour les deux écrans ; au téléphone, la fiche s'ouvre en plein
 écran et les totaux passent sous « À traiter ».
+
+### 13.10 Trace de la review du lot 3 (10 novembre 2026)
+
+Réponse de la review, recopiée mot pour mot :
+
+```
+TRACE DE REVIEW
+Arbre lu : /home/claude/hotesmart-lot3
+Branche lue : charges-lot3-ecran
+SHA de tête lu : 0be6cfbb321c8289602ba663771a08c5b9d15d31
+Plage relue : b02afc3156e8b85e195600733b252c835d295cd0..0be6cfbb321c8289602ba663771a08c5b9d15d31
+Fichiers de la plage (23) : api/ecran/charges.js, docs/kb/compte-de-charges.md, docs/specs/spec-compte-de-charges.md, lib/charges/ecran.js, migrations/2026-11-10-charges-resume-categorie.sql, pages/charges.html, pages/guide.html, shared/charges-vue.js, shared/i18n/en.json, shared/i18n/es.json, shared/i18n/fr.json, shared/nav.js, shared/ui.css, tests/budget-ecran.test.js, tests/charges-ecran.test.js, tests/charges-migration-categorie.test.js, tests/charges-page.test.js, tests/ecrans-sans-biens-archives.test.js, tests/nav-i18n-cles.test.js, tests/outils/banc-charges.js, tests/outils/base-enregistreuse.js, tests/pages-non-delegables.test.js, vercel.json
+Fichiers cités dans les constats :
+- shared/charges-vue.js — dans la plage
+- pages/charges.html — dans la plage
+- tests/charges-page.test.js — dans la plage
+- lib/charges/ecran.js — dans la plage
+- migrations/2026-11-10-charges-resume-categorie.sql — dans la plage
+- docs/kb/compte-de-charges.md — dans la plage
+- docs/specs/spec-compte-de-charges.md — dans la plage
+- migrations/2026-11-09-compte-de-charges.sql — HORS PLAGE, référence seulement (lot 2 : bucket et rejeu)
+- lib/charges.js — HORS PLAGE, référence seulement (codes de refus, doublon posé à la validation)
+- lib/entites-juridiques.js — HORS PLAGE, référence seulement (lectures appelées par l'écran)
+- scripts/recette-charges.js — HORS PLAGE, référence seulement (il lit le résumé dont la plage change la clé)
+```
+
+**Confrontation, refaite par le fil** : `git diff --name-only
+b02afc31..0be6cfbb` rend les 23 fichiers ci-dessus. Les quatre fichiers hors
+plage sont dans le même arbre et la même branche, cités chacun avec sa
+raison ; `scripts/recette-charges.js` porte le constat 9, conséquence directe
+du changement de clé fait DANS la plage : statut **accepté**. La review a
+aussi joué la suite (8043, 0 rouge) et les deux migrations sur un Postgres
+jetable.
+
+**Aucun constat de sécurité** (membre refusé avant toute lecture, compte de
+la garde sur chaque requête et sur `charges_totaux`, curseur validé avant le
+filtre, entité d'un autre compte en 404, `private, no-store` avant le 405,
+échappement relu à chaque `innerHTML`). Une review sans constat de sécurité :
+les correctifs ne sont pas re-reviewés (CLAUDE.md, « une review par
+commit »).
+
+| # | Sévérité | Objet | Statut |
+|---|---|---|---|
+| 1 | à corriger | « estimation » ignorait les signaux non tranchés et les montants absents (§6) | **corrigé** (trois raisons ; test de page) |
+| 2 | à corriger | un PDF sans type partait en `octet-stream`, refusé par le bucket | **corrigé** (type annoncé ; test sur la partie déposée) |
+| 3 | à corriger (test) | aucun test de l'échappement | **corrigé** (test d'injection ; contre-épreuve : `esc` neutralisée, il rougit) |
+| 4 | mineur | ligne de répartition sans facture comptée affichée « non lu » | **corrigé** (masquée) |
+| 5 | mineur | un 403 de geste disait « page réservée » ; codes sans texte | **corrigé** (sept clés `refus_*`) |
+| 6 | mineur | ordre aléatoire à l'intérieur d'un jour | **corrigé** (jour, arrivée, id ; curseur à trois parties) |
+| 7 | mineur | `properties` borné à 1000 ; entités sans borne | **corrigé** pour `properties` (page après page) ; **dette** pour lib/entites-juridiques.js (KB) |
+| 8 | mineur | `2026-11-09` ne se rejoue plus après `2026-11-10` | **écrit** (en-tête de la migration du lot 3, KB) |
+| 9 | mineur | la recette rangeait le résumé sans la catégorie | **corrigé** (`scripts/recette-charges.js`) |
+| 10 | mineur | le KB citait un contrôle absent du dépôt | **corrigé** (`migrations/2026-11-10-controle-charges.sql`) |
 
 ## 12. Trace des reviews du lot 2
 

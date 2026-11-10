@@ -178,8 +178,12 @@ export function monter (racine, deps) {
       + '</div>'
   }
 
-  function repartition (titre, lignes, nom) {
-    if (!lignes || !lignes.length) return ''
+  function repartition (titre, toutes, nom) {
+    // ⚠ UNE LIGNE SANS FACTURE COMPTÉE NE S'AFFICHE PAS : son montant n'est
+    // pas « non lu », il est écarté (un doublon non tranché, une facture en
+    // lecture). Elle est déjà dite par « N à vérifier » / « N à trancher ».
+    const lignes = (toutes || []).filter(r => Number(r.nb_factures) > 0)
+    if (!lignes.length) return ''
     return `<section class="chg-rep"><h3 class="chg-h3">${esc(titre)}</h3><ul>`
       + lignes.map(r => `<li><span>${esc(nom(r.cle))}</span><b>${montant(r.ttc)}</b></li>`).join('')
       + '</ul></section>'
@@ -194,13 +198,19 @@ export function monter (racine, deps) {
     } else {
       const bornes = `<p class="chg-mentions">${esc(t('charges.du_au', { debut: jourLisible(tot.debut), fin: jourLisible(tot.fin) }))}</p>`
       const s = tot.total || {}
-      // ⚠ « ESTIMATION » MÊME SANS FACTURE COMPTÉE : des factures en lecture ou
-      // à vérifier sont dans le périmètre, et leur montant n'y est pas encore.
+      // ⚠ « ESTIMATION », ET LES TROIS RAISONS DE LA SPEC (§6, Q4) : une
+      // facture en lecture, à vérifier ou illisible ; un signal non tranché
+      // (un doublon compte une fois tant que l'hôte n'a pas tranché) ; un
+      // montant absent dans une colonne. Même sans facture comptée : des
+      // factures en attente sont dans le périmètre.
+      const estimation = Boolean(s.nb_non_verifiees || s.nb_signaux || s.nb_sans_ttc || s.nb_sans_ht || s.nb_sans_tva)
       const mentions = [
-        s.nb_non_verifiees ? t('charges.estimation', { n: s.nb_non_verifiees }) : '',
+        estimation ? t('charges.estimation_mot') : '',
+        s.nb_non_verifiees ? t('charges.n_a_verifier', { n: s.nb_non_verifiees }) : '',
+        s.nb_signaux ? t('charges.n_a_trancher', { n: s.nb_signaux }) : '',
         tot.calcule_le ? t('charges.calcule_le', { date: instantLisible(tot.calcule_le) }) : ''
       ].filter(Boolean).join(' · ')
-      const ligneMentions = mentions ? `<p class="chg-mentions${s.nb_non_verifiees ? ' chg-mentions--estimation' : ''}">${esc(mentions)}</p>` : ''
+      const ligneMentions = mentions ? `<p class="chg-mentions${estimation ? ' chg-mentions--estimation' : ''}">${esc(mentions)}</p>` : ''
       if (!s.nb_factures) {
         corps = bornes + `<p class="muted">${esc(t('charges.totaux_vide'))}</p>` + ligneMentions
       } else {
@@ -503,6 +513,11 @@ export function monter (racine, deps) {
           return
         }
         type = 'image/jpeg'
+      } else if (corps.type !== type) {
+        // ⚠ UN PDF SANS TYPE (certains sélecteurs Android et Windows) : le
+        // fichier repartirait en `application/octet-stream`, que le bucket
+        // refuse. On lui donne le type qu'on annonce à `envoi`.
+        corps = fichier.slice(0, fichier.size, type)
       }
       if (corps.size > TYPES_ACCEPTES[type]) { statutEnvoi(t('charges.refus_trop_gros'), true); return }
       statutEnvoi(t('charges.envoi_en_cours'))
