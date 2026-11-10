@@ -740,6 +740,75 @@ Review (sous-agent, une seule) :
    `classList.contains`, et garde la règle CSS ci-dessus (jsdom ne calcule pas
    la mise en page).
 
+### 10 ter. Code de l'étape 2a — les revues
+
+#### Review 1 (sous-agent, 10 novembre 2026, sur tout 2a)
+
+- arbre `/home/claude/hotesmart-fv2`, branche `facture-voyageur-etape-2`,
+  HEAD lu `c1437af94385ea351030a7263b96a8a321793ff7`, base
+  `d6484f3f71f22ebd6eb1a1bf7b2d704393f49c75` (`git merge-base origin/main
+  HEAD`) ;
+- fichiers cités, confrontés à `git diff --name-only` de la plage : dans le
+  diff — `api/factures-voyageur.js`, `lib/factures-voyageur.js`,
+  `migrations/2026-11-10-factures-voyageur-demandes.sql`,
+  `tests/factures-voyageur.test.js`, `pages/facture.html` ; hors diff, preuve
+  seulement — `lib/cron-messages.js`, `lib/email-guestflow.js`,
+  `lib/canal-voyageur.js`, `lib/envoi-ota.js`, `lib/record-message.js`,
+  `lib/channels/channex.js`, `lib/cron-beds24.js`, `lib/cron-shared.js`,
+  `lib/balises.js`, `lib/require-permission.js`, `lib/permissions.js`,
+  `lib/bookings-snapshot-status.js`, `lib/bookings-snapshot.js`,
+  `lib/guestflow/brouillons-dus.js`, `api/channel-message.js`,
+  `api/messages.js`, `docs/kb/guestflow.md`, `docs/STAGING.md`, `REVIEW.md`,
+  `vercel.json`, `shared/pwa/service-worker.js`.
+- Mesures : 34/34 sur les fichiers du lot, épreuve Postgres 35/35, sonde de
+  concurrence conforme (un seul jeton pour deux appels simultanés).
+
+**1 constat de SÉCURITÉ, 5 bloquants, des mineurs.**
+
+- **S1** — le lien en clair est écrit dans le fil (`messages.body`), lu par
+  tout membre « messages » en lecture : il ouvre la page et lit — ou réécrit —
+  les coordonnées du voyageur, contre P2 et Q10. **Décision à Thierry** (le
+  lien est aussi dans la conversation de la plateforme, par nature : D3).
+- **B1** — le passage « sans canal » par l'identifiant seul s'appliquait aussi
+  à Beds24, où une saisie directe n'a aucun fil : faux « livré » ; et l'envoi
+  simulé de Beds24 (`dryRun`, staging) était compté livré.
+- **B2** — un e-mail incertain était classé « refus » (`sendGuestMessage` ne
+  transmet pas `incertain`) : l'hôte renverrait, le voyageur recevrait deux
+  messages.
+- **B3** — seules les annulations étaient refusées : `demapped` (ancienne copie
+  d'un séjour migré), `blocked` et `request` ouvraient une demande.
+- **B4** — le chemin d'envoi par défaut n'était traversé que pour Channex
+  (e-mail, Beds24, « sans canal », `differe` sans test : 4 mutations
+  survivantes).
+- **B5** — le lien ne lisait que `PUBLIC_BASE_URL`, absente de staging : les
+  liens de la recette auraient pointé vers la production.
+- Mineurs : anti-double-clic non gardé en concurrence par l'épreuve ; code
+  `55P03` partagé avec l'attente de verrou ; sujet de l'e-mail toujours en
+  français ; lien « remplissez » renvoyé sur une facture émise ; `saisir` en
+  deux transactions (demande orpheline possible) ; point final collé au lien ;
+  accessibilité de la page (erreurs non reliées, confirmation non annoncée,
+  langues sans nom, deux motifs sans phrase) ; réservation annulée non dite par
+  la page ; P3 lu trop strictement (aucun renvoi pour une demande en cours) ;
+  en-tête qui annonçait 404 au lieu de 403.
+
+**Corrections** (commit suivant la trace ; S1 attend la décision de Thierry) :
+- B1 : « sans canal » par l'identifiant réservé à Channex ; Beds24 sans canal
+  → `sans_canal`, rien ne part ; `dryRun` → `differe`, jamais « livré ».
+- B2 : un e-mail en échec est `incertain`, sauf « permanent » et « quota ».
+- B3 : seule une réservation confirmée se facture (`reservation_non_confirmee`).
+- B4 : le vrai chemin traversé pour l'e-mail, Beds24 (canal, saisie directe,
+  envoi simulé) et Channex « sans canal ».
+- B5 : `APP_URL` d'abord, puis `PUBLIC_BASE_URL`.
+- Mineurs corrigés : épreuve de concurrence (deux sessions ; rougit sans le
+  verrou), code dédié `FV429`, sujet de l'e-mail dans la langue du voyageur,
+  facture émise → 409, `fv_saisir_par_hote` en une transaction, jeton pris
+  sans le point final, accessibilité de la page, page « sans objet » dès
+  l'annulation, P3 (renvoi possible pour une demande en cours), en-tête 403.
+- Mineurs laissés, écrits en « Limites connues » de la KB : `differe` non
+  relancé, signature Beds24 des comptes gratuits, domaine dans l'URL, routage
+  par le provider du bien (règle du chemin commun).
+- Chacun tué par une mutation ; suite 7830/7830 ; épreuve Postgres 45/45.
+
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
 Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.

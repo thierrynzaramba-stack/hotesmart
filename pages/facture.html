@@ -64,6 +64,7 @@
   dl { margin: 0 0 8px; }
   dt { font-size: .85rem; color: var(--texte2); }
   dd { margin: 0 0 8px; overflow-wrap: anywhere; }
+  .sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 </style>
 </head>
 <body>
@@ -77,6 +78,7 @@
     </div>
   </header>
 
+  <p class="sr" id="annonce" role="status" aria-live="polite"></p>
   <p class="carte" id="chargement" data-t="chargement"></p>
   <p class="carte alerte" id="erreur" role="alert" hidden></p>
 
@@ -93,25 +95,25 @@
     </div>
 
     <form class="carte" id="formulaire" novalidate hidden>
-      <fieldset>
+      <fieldset aria-describedby="err-type">
         <legend data-t="vous_etes"></legend>
         <div class="types">
           <label><input type="radio" name="type" value="particulier"> <span data-t="particulier"></span></label>
           <label><input type="radio" name="type" value="societe"> <span data-t="societe"></span></label>
         </div>
-        <small class="alerte" data-erreur="type" hidden></small>
+        <small class="alerte" id="err-type" data-erreur="type" hidden></small>
       </fieldset>
-      <label class="champ"><span id="libelle-nom" data-t="nom_particulier"></span><input name="nom" autocomplete="name" maxlength="200"><small data-erreur="nom" hidden></small></label>
-      <label class="champ"><span data-t="adresse1"></span><input name="adresse1" autocomplete="address-line1" maxlength="200"><small data-erreur="adresse1" hidden></small></label>
-      <label class="champ"><span data-t="adresse2"></span><input name="adresse2" autocomplete="address-line2" maxlength="200"><small data-erreur="adresse2" hidden></small></label>
+      <label class="champ"><span id="libelle-nom" data-t="nom_particulier"></span><input name="nom" autocomplete="name" maxlength="200" aria-describedby="err-nom"><small id="err-nom" data-erreur="nom" hidden></small></label>
+      <label class="champ"><span data-t="adresse1"></span><input name="adresse1" autocomplete="address-line1" maxlength="200" aria-describedby="err-adresse1"><small id="err-adresse1" data-erreur="adresse1" hidden></small></label>
+      <label class="champ"><span data-t="adresse2"></span><input name="adresse2" autocomplete="address-line2" maxlength="200" aria-describedby="err-adresse2"><small id="err-adresse2" data-erreur="adresse2" hidden></small></label>
       <div class="duo">
-        <label class="champ"><span data-t="code_postal"></span><input name="code_postal" autocomplete="postal-code" maxlength="20"><small data-erreur="code_postal" hidden></small></label>
-        <label class="champ"><span data-t="ville"></span><input name="ville" autocomplete="address-level2" maxlength="120"><small data-erreur="ville" hidden></small></label>
+        <label class="champ"><span data-t="code_postal"></span><input name="code_postal" autocomplete="postal-code" maxlength="20" aria-describedby="err-code_postal"><small id="err-code_postal" data-erreur="code_postal" hidden></small></label>
+        <label class="champ"><span data-t="ville"></span><input name="ville" autocomplete="address-level2" maxlength="120" aria-describedby="err-ville"><small id="err-ville" data-erreur="ville" hidden></small></label>
       </div>
-      <label class="champ"><span data-t="pays"></span><input name="pays" autocomplete="country-name" maxlength="80"><small data-erreur="pays" hidden></small></label>
+      <label class="champ"><span data-t="pays"></span><input name="pays" autocomplete="country-name" maxlength="80" aria-describedby="err-pays"><small id="err-pays" data-erreur="pays" hidden></small></label>
       <div id="champs-societe" hidden>
-        <label class="champ"><span data-t="tva"></span><input name="tva" maxlength="20" autocapitalize="characters"><small data-erreur="tva" hidden></small></label>
-        <label class="champ"><span data-t="siren"></span><input name="siren" inputmode="numeric" maxlength="11"><small data-erreur="siren" hidden></small></label>
+        <label class="champ"><span data-t="tva"></span><input name="tva" maxlength="20" autocapitalize="characters" aria-describedby="err-tva"><small id="err-tva" data-erreur="tva" hidden></small></label>
+        <label class="champ"><span data-t="siren"></span><input name="siren" inputmode="numeric" maxlength="11" aria-describedby="err-siren"><small id="err-siren" data-erreur="siren" hidden></small></label>
       </div>
       <p class="alerte" id="erreur-form" role="alert" hidden></p>
       <button type="submit" class="principal" id="envoyer" data-t="enregistrer"></button>
@@ -131,7 +133,7 @@ var T = {
     annulee: 'Cette facture a été annulée par un avoir. Votre hôte peut en émettre une nouvelle.',
     sans_objet: 'Cette réservation a été annulée : aucune facture ne sera émise.',
     lien_invalide: 'Ce lien n’est pas valide. Vérifiez qu’il est complet, ou demandez-en un nouveau à votre hôte.',
-    lien_expire: 'Ce lien a expiré. Demandez un nouveau lien à votre hôte.',
+    lien_expire: 'Ce lien a expiré. Demandez un nouveau lien à votre hôte.', langue: 'Langue',
     panne: 'Le service est momentanément indisponible. Réessayez dans quelques minutes.',
     plafond: 'Ces coordonnées ont été modifiées trop souvent par ce lien. Contactez votre hôte.',
     verrouillee: 'Votre facture a déjà été émise : ses coordonnées ne peuvent plus changer.',
@@ -155,7 +157,7 @@ var T = {
     annulee: 'This invoice was cancelled by a credit note. Your host can issue a new one.',
     sans_objet: 'This booking was cancelled: no invoice will be issued.',
     lien_invalide: 'This link is not valid. Check that it is complete, or ask your host for a new one.',
-    lien_expire: 'This link has expired. Ask your host for a new link.',
+    lien_expire: 'This link has expired. Ask your host for a new link.', langue: 'Language',
     panne: 'The service is temporarily unavailable. Please try again in a few minutes.',
     plafond: 'These details have been changed too often through this link. Please contact your host.',
     verrouillee: 'Your invoice has already been issued: its details can no longer change.',
@@ -179,7 +181,7 @@ var T = {
     annulee: 'Esta factura fue anulada mediante una factura rectificativa. Su anfitrión puede emitir una nueva.',
     sans_objet: 'Esta reserva fue cancelada: no se emitirá ninguna factura.',
     lien_invalide: 'Este enlace no es válido. Compruebe que está completo o pida uno nuevo a su anfitrión.',
-    lien_expire: 'Este enlace ha caducado. Pida un nuevo enlace a su anfitrión.',
+    lien_expire: 'Este enlace ha caducado. Pida un nuevo enlace a su anfitrión.', langue: 'Idioma',
     panne: 'El servicio no está disponible en este momento. Vuelva a intentarlo en unos minutos.',
     plafond: 'Estos datos se han modificado demasiadas veces con este enlace. Contacte con su anfitrión.',
     verrouillee: 'Su factura ya ha sido emitida: sus datos ya no pueden cambiar.',
@@ -197,7 +199,11 @@ var T = {
 };
 var LANGUES = ['fr', 'en', 'es'];
 var lang = 'en', t = T.en, etat = null;
-var jeton = (location.hash || '').replace(/^#/, '');
+// ⚠ LES 43 CARACTÈRES DU JETON, PAS LE FRAGMENT ENTIER (review 1) : le message
+// met un point juste après le lien, et une messagerie peut l'inclure dans le
+// lien cliquable. Un caractère de jeton de plus, lui, rend le lien invalide.
+var trouve = (location.hash || '').replace(/^#/, '').match(/^([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/);
+var jeton = trouve ? trouve[1] : '';
 var $ = function (id) { return document.getElementById(id); };
 var form = $('formulaire');
 
@@ -218,6 +224,7 @@ function lendemain(iso) {
 function appliquerLangue(l) {
   lang = LANGUES.indexOf(l) >= 0 ? l : 'en'; t = T[lang];
   document.documentElement.lang = lang;
+  $('langues').setAttribute('aria-label', t.langue);
   var noeuds = document.querySelectorAll('[data-t]');
   for (var i = 0; i < noeuds.length; i++) noeuds[i].textContent = t[noeuds[i].getAttribute('data-t')] || '';
   var b = document.querySelectorAll('#langues button');
@@ -226,9 +233,15 @@ function appliquerLangue(l) {
   else if ($('erreur').dataset.motif) direErreur($('erreur').dataset.motif);
 }
 
+// Les motifs du serveur qui n'ont pas de phrase à leur nom.
+function phraseDe(motif) {
+  if (motif === 'introuvable') return t.lien_invalide;
+  if (motif === 'entree_invalide') return t.invalide;
+  return t[motif] || t.panne;
+}
 function direErreur(motif) {
   $('chargement').hidden = true; $('contenu').hidden = true;
-  var e = $('erreur'); e.dataset.motif = motif; e.textContent = t[motif] || t.panne; e.hidden = false;
+  var e = $('erreur'); e.dataset.motif = motif; e.textContent = phraseDe(motif); e.hidden = false;
 }
 
 function peindre() {
@@ -300,6 +313,14 @@ function marquer(champ, texte) {
   if (el && el.setAttribute) { el.setAttribute('aria-invalid', 'true'); }
 }
 
+// Le focus va à la première faute : sans lui, au clavier ou au lecteur
+// d'écran, l'envoi refusé ne dit rien (review 1).
+function focusErreur() {
+  var el = form.querySelector('[aria-invalid="true"]');
+  if (!el && !form.querySelector('[data-erreur="type"]').hidden) el = form.querySelector('input[name="type"]');
+  if (el) el.focus();
+}
+
 function lireFormulaire() {
   var d = { type: typeType() };
   ['nom', 'adresse1', 'adresse2', 'code_postal', 'ville', 'pays', 'tva', 'siren'].forEach(function (c) {
@@ -329,7 +350,7 @@ function appeler(corps) {
 }
 
 function charger() {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(jeton)) { direErreur('lien_invalide'); return; }
+  if (!jeton) { direErreur('lien_invalide'); return; }
   appeler({ action: 'lire', jeton: jeton }).then(function (r) {
     if (r.status !== 200 || !r.corps.ok) { direErreur(r.corps.motif || 'panne'); return; }
     etat = r.corps;
@@ -353,18 +374,21 @@ form.addEventListener('submit', function (ev) {
   ev.preventDefault();
   effacerErreurs();
   var d = lireFormulaire();
-  if (!verifier(d)) return;
+  if (!verifier(d)) { focusErreur(); return; }
   var bouton = $('envoyer');
   bouton.disabled = true; bouton.textContent = t.enregistrement;
   appeler({ action: 'enregistrer', jeton: jeton, destinataire: d }).then(function (r) {
     bouton.disabled = false; bouton.textContent = t.enregistrer;
     if (r.status === 200 && r.corps.ok) {
-      etat = r.corps; form.hidden = true; peindre(); return;
+      etat = r.corps; form.hidden = true; peindre();
+      $('annonce').textContent = t.enregistre;
+      $('modifier').focus();
+      return;
     }
     var m = r.corps.motif;
-    if (m === 'entree_invalide' && r.corps.champ) { marquer(r.corps.champ, t.invalide); return; }
-    if (m === 'verrouillee') { charger(); }
-    var e = $('erreur-form'); e.textContent = t[m] || t.panne; e.hidden = false;
+    if (m === 'entree_invalide' && r.corps.champ) { marquer(r.corps.champ, t.invalide); focusErreur(); return; }
+    if (m === 'verrouillee' || m === 'sans_objet') { charger(); }
+    var e = $('erreur-form'); e.textContent = phraseDe(m); e.hidden = false;
   }).catch(function () {
     bouton.disabled = false; bouton.textContent = t.enregistrer;
     var e = $('erreur-form'); e.textContent = t.panne; e.hidden = false;

@@ -20,6 +20,11 @@
 // ⚠ LE DÉPART EST RELU DANS LE CŒUR à chaque lecture, jamais copié dans la
 // demande (§5.5) : une réservation prolongée déplace la date annoncée.
 //
+// ⚠ UNE RÉSERVATION ANNULÉE N'EST JAMAIS FACTURÉE (§2.7), ET LA PAGE LE DIT TOUT
+// DE SUITE (review 1) : le statut est relu avec le départ ; une demande non émise
+// d'une réservation annulée se présente « sans objet » et ne s'enregistre plus,
+// sans attendre que la passe du cron (étape 3) l'écrive en base.
+//
 // ⚠ UN JETON MAL FORMÉ EST REFUSÉ AVANT TOUTE REQUÊTE. Un jeton bien formé mais
 // inconnu, et un jeton expiré, se disent différemment : « demandez un nouveau
 // lien à votre hôte » (Q13) n'a de sens que pour le second. Le dire ne révèle
@@ -48,7 +53,7 @@ function corpsDe (req) {
 
 const CODES = {
   entree_invalide: 400, lien_invalide: 404, lien_expire: 410,
-  verrouillee: 409, plafond: 429, introuvable: 404, panne: 503
+  verrouillee: 409, sans_objet: 409, plafond: 429, introuvable: 404, panne: 503
 }
 function repondreRefus (res, motif, champ = null) {
   return res.status(CODES[motif] || 400).json({ error: motif, motif, champ })
@@ -57,6 +62,7 @@ function repondreRefus (res, motif, champ = null) {
 // Le séjour et le logement : ce que le voyageur sait déjà, pour qu'il
 // reconnaisse sa réservation. Une lecture du cœur, une des propriétés.
 async function lireSejour (base, demande) {
+  const { estAnnulationVoyageur } = require('../lib/bookings-snapshot-status')
   const [resa, bien] = await Promise.all([
     base.from('bookings_snapshot').select('snapshot')
       .eq('user_id', demande.user_id).eq('booking_id', demande.booking_id).maybeSingle(),
@@ -67,6 +73,7 @@ async function lireSejour (base, demande) {
   const sp = (resa.data && resa.data.snapshot) || {}
   return {
     ok: true,
+    annulee: !!resa.data && estAnnulationVoyageur(sp, sp.provider),
     sejour: {
       logement: bien.data ? bien.data.name : null,
       arrivee: sp.arrival || null,
@@ -75,14 +82,20 @@ async function lireSejour (base, demande) {
   }
 }
 
+// Une demande pas encore émise d'une réservation annulée : « sans objet », vue
+// par la page, avant que la passe du cron ne l'écrive.
+const NON_EMISES = ['lien_envoye', 'formulaire_rempli', 'a_confirmer']
+const sansObjet = (demande, s) => s.annulee && NON_EMISES.includes(demande.statut)
+
 // L'état vu par la page. `modifiable` : le formulaire est encore ouvert.
-function etatVu (demande, sejour) {
+function etatVu (demande, s) {
+  const caduque = sansObjet(demande, s)
   return {
     langue: demande.langue,
-    statut: demande.statut,
-    modifiable: FV.MODIFIABLES.includes(demande.statut),
+    statut: caduque ? 'sans_objet' : demande.statut,
+    modifiable: !caduque && FV.MODIFIABLES.includes(demande.statut),
     destinataire: FV.destinataireVu(demande),
-    sejour
+    sejour: s.sejour
   }
 }
 
@@ -105,10 +118,14 @@ module.exports = async function handler (req, res) {
     requetes += 2
     const lu = await FV.lireParJeton(corps.jeton, { db: base })
     if (!lu.ok) return repondreRefus(res, lu.motif)
+    requetes += 2
+    const s = await lireSejour(base, lu.demande)
+    if (!s.ok) return repondreRefus(res, 'panne')
 
     if (action === 'enregistrer') {
       const v = FV.validerDestinataire(corps.destinataire)
       if (!v.ok) return repondreRefus(res, v.motif, v.champ)
+      if (sansObjet(lu.demande, s)) return repondreRefus(res, 'sans_objet')
       requetes++
       const r = await FV.enregistrerDestinataire(lu.demande.user_id, lu.demande.id, v.dest,
         { jetonId: lu.jeton.id, saisiPar: 'voyageur' }, { db: base })
@@ -121,11 +138,8 @@ module.exports = async function handler (req, res) {
       lu.demande = relu.demande
     }
 
-    requetes += 2
-    const s = await lireSejour(base, lu.demande)
-    if (!s.ok) return repondreRefus(res, 'panne')
     res.setHeader('Server-Timing', `db;desc="${requetes} requêtes";dur=${Date.now() - t0}`)
-    return res.status(200).json({ ok: true, ...etatVu(lu.demande, s.sejour) })
+    return res.status(200).json({ ok: true, ...etatVu(lu.demande, s) })
   } catch (e) {
     console.error('[facture-publique] exception', e.message)
     if (!res.headersSent) return res.status(500).json({ error: 'erreur', motif: 'erreur' })

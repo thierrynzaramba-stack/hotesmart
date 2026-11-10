@@ -42,6 +42,7 @@ const BIEN_A1 = 'aaaaaaaa-0000-4000-8000-000000000001'
 const BIEN_A2 = 'aaaaaaaa-0000-4000-8000-000000000002'
 const BIEN_ARCH = 'aaaaaaaa-0000-4000-8000-000000000003'
 const BIEN_B1 = 'bbbbbbbb-0000-4000-8000-000000000001'
+const BIEN_BX = 'aaaaaaaa-0000-4000-8000-000000000004'  // un bien Beds24
 
 const dans = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
 
@@ -222,7 +223,7 @@ function baseFactice (tables = {}) {
       const o = ouvrir(a)
       const recent = lignesDe('factures_voyageur_jetons').some(j => j.demande_id === o.id && j.porte === a.p_porte &&
         Date.now() - Date.parse(j.cree_le) < 30000)
-      if (recent) return { data: null, error: { code: '55P03', message: 'envoi trop rapproche' } }
+      if (recent) return { data: null, error: { code: 'FV429', message: 'envoi trop rapproche' } }
       const j = { id: nouvelId(), demande_id: o.id, user_id: a.p_user, jeton_hash: a.p_hash, porte: a.p_porte,
         expire_le: a.p_expire, cree_par: a.p_cree_par, cree_le: new Date().toISOString(), formulaires: 0, envoi: null }
       lignesDe('factures_voyageur_jetons').push(j)
@@ -247,6 +248,18 @@ function baseFactice (tables = {}) {
       etat.ecritures.push({ table: 'factures_voyageur', op: 'destinataire', id: d.id })
       return { data: 'ok', error: null }
     }
+    if (nom === 'fv_saisir_par_hote') {
+      // Une transaction : l'état d'avant revient si la saisie est refusée.
+      const avant = JSON.stringify(etat.tables.factures_voyageur || [])
+      const o = ouvrir({ p_user: a.p_user, p_property: a.p_property, p_booking: a.p_booking, p_langue: a.p_langue, p_cree_par: a.p_par })
+      const r = await rpc('fv_enregistrer_destinataire', { p_demande: o.id, p_user: a.p_user, p_jeton: null, p_dest: a.p_dest,
+        p_saisi_par: 'hote', p_saisi_par_user: a.p_par, p_max: 0 })
+      if (r.data !== 'ok') {
+        etat.tables.factures_voyageur = JSON.parse(avant)
+        return { data: null, error: { code: 'FV409', message: `saisie refusee : ${r.data}` } }
+      }
+      return { data: [{ r_demande: o.id, r_issue: 'ok' }], error: null }
+    }
     throw new Error(`rpc inattendue : ${nom}`)
   }
   return { db: { from, rpc }, etat }
@@ -268,7 +281,8 @@ const PARC = () => ({
     { id: BIEN_A1, user_id: A, name: 'La bulle', provider: 'channex', provider_property_id: 'P1', migration_target_property_id: null, archive_le: null },
     { id: BIEN_A2, user_id: A, name: 'Cœur de vie 23', provider: 'channex', provider_property_id: 'P2', migration_target_property_id: null, archive_le: null },
     { id: BIEN_ARCH, user_id: A, name: 'Colomiers', provider: 'channex', provider_property_id: 'P3', migration_target_property_id: null, archive_le: '2026-11-01T00:00:00Z' },
-    { id: BIEN_B1, user_id: B, name: 'Chez B', provider: 'channex', provider_property_id: 'PB', migration_target_property_id: null, archive_le: null }
+    { id: BIEN_B1, user_id: B, name: 'Chez B', provider: 'channex', provider_property_id: 'PB', migration_target_property_id: null, archive_le: null },
+    { id: BIEN_BX, user_id: A, name: 'Ofuro Futari', provider: 'beds24', provider_property_id: 'PX', migration_target_property_id: null, archive_le: null }
   ],
   bookings_snapshot: [
     { user_id: A, booking_id: 'R1', property_id: 'P1', snapshot: SNAP(), raw: { attributes: { customer: { language: 'fr' } } } },
@@ -276,6 +290,13 @@ const PARC = () => ({
     { user_id: A, booking_id: 'R_ANN', property_id: 'P1', snapshot: SNAP({ status: 'cancelled' }), raw: {} },
     { user_id: A, booking_id: 'R_OFF', property_id: 'P1', snapshot: SNAP({ source: 'Offline', guestEmail: null }), raw: {} },
     { user_id: A, booking_id: 'R_ARCH', property_id: 'P3', snapshot: SNAP(), raw: {} },
+    { user_id: A, booking_id: 'R_DEM', property_id: 'P1', snapshot: SNAP({ status: 'demapped' }), raw: {} },
+    { user_id: A, booking_id: 'R_BLK', property_id: 'P1', snapshot: SNAP({ status: 'blocked' }), raw: {} },
+    { user_id: A, booking_id: 'R_REQ', property_id: 'P1', snapshot: SNAP({ status: 'request' }), raw: {} },
+    { user_id: A, booking_id: 'R_MAIL', property_id: 'P1', snapshot: SNAP({ source: 'Offline', guestEmail: 'lea@exemple.test' }), raw: { attributes: { customer: { language: 'en' } } } },
+    { user_id: A, booking_id: 'R_DIRECT', property_id: 'P1', snapshot: SNAP({ source: 'direct' }), raw: {} },
+    { user_id: A, booking_id: 'R_BX', property_id: 'PX', snapshot: SNAP({ provider: 'beds24', source: 'Airbnb' }), raw: {} },
+    { user_id: A, booking_id: 'R_BX_DIRECT', property_id: 'PX', snapshot: SNAP({ provider: 'beds24', source: 'direct' }), raw: {} },
     { user_id: B, booking_id: 'R_B', property_id: 'PB', snapshot: SNAP(), raw: {} }
   ],
   profiles: PROFILS.map(p => p.profiles),
@@ -285,7 +306,7 @@ const PARC = () => ({
 
 // ─── Le montage d'un endpoint, modules factices dans le cache de require ─────
 const MODULES = ['../api/factures-voyageur', '../api/facture-publique', '../lib/require-permission', '../lib/factures-voyageur']
-function monter (fichier, { tables = PARC(), envoi = { ok: true, canal: 'ota' }, vraiEnvoi = false, canalChannex = null } = {}) {
+function monter (fichier, { tables = PARC(), envoi = { ok: true, canal: 'ota' }, vraiEnvoi = false, canalChannex = null, email = null, beds24 = null } = {}) {
   const { db, etat } = baseFactice(tables)
   etat.envois = []; etat.fil = []
   const jetons = { 'jeton-a': A, 'jeton-b': B, 'jeton-res': M_RES, 'jeton-tout': M_TOUT, 'jeton-ailleurs': M_AILLEURS }
@@ -308,9 +329,18 @@ function monter (fichier, { tables = PARC(), envoi = { ok: true, canal: 'ota' },
       }
     }
   } else {
-    // Le VRAI chemin commun ; seul le canal en bout est factice.
+    // Le VRAI chemin commun ; seuls les moteurs en bout sont factices.
     factices['lib/channels/channex'] = {
-      sendMessage: async (_cfg, { bookingId, message }) => { etat.envois.push({ bookingId, message }); return canalChannex || { success: true, status: 200 } }
+      sendMessage: async (_cfg, { bookingId, message }) => { etat.envois.push({ par: 'channex', bookingId, message }); return canalChannex || { success: true, status: 200 } }
+    }
+    factices['lib/email-guestflow'] = {
+      envoyerEmailVoyageur: async (p) => { etat.envois.push({ par: 'email', ...p }); return email || { ok: true, id: 'm1' } },
+      sujetPour: () => 'La bulle — un message de votre hôte',
+      compterEchecs: async () => 0, noterEchecEmail: async () => {}, MAX_TENTATIVES_EMAIL: 5
+    }
+    factices['lib/cron-beds24'] = {
+      fetchBookings: async () => [],
+      sendViaBeds24: async (key, bookingId, message) => { etat.envois.push({ par: 'beds24', key, bookingId, message }); return beds24 || { ok: true } }
     }
   }
   const avant = {}
@@ -634,4 +664,162 @@ test('LE TEST QUI COMPTE : le VRAI sendGuestMessage poste le lien au canal, avec
     assert.equal(r.corps.envoi, 'refus', JSON.stringify(r.corps))
     assert.equal(refuse.etat.fil.length, 0)
   } finally { refuse.fini() }
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. Les correctifs de la review 1 (10 novembre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('B3 : seule une réservation CONFIRMÉE se facture — demapped, blocked, request refusées', async () => {
+  const { appeler, etat, fini } = hote()
+  try {
+    for (const booking of ['R_DEM', 'R_BLK', 'R_REQ']) {
+      for (const corps of [{ action: 'envoyer_lien', booking }, { action: 'saisir', booking, destinataire: DEST_OK }]) {
+        const r = await appeler({ corps })
+        assert.equal(r.code, 409, `${booking} ${corps.action}`)
+        assert.equal(r.corps.motif, 'reservation_non_confirmee')
+      }
+    }
+    assert.equal(etat.envois.length, 0)
+    assert.equal((etat.tables.factures_voyageur || []).length, 0)
+  } finally { fini() }
+})
+
+test('une facture ÉMISE ne reçoit plus le lien « remplissez » (409), rien ne part', async () => {
+  const tables = PARC()
+  tables.factures_voyageur = [{ id: 'dddddddd-0000-4000-8000-999999999999', user_id: A, property_uuid: BIEN_A1, booking_id: 'R1', nature: 'facture', statut: 'emise', langue: 'fr' }]
+  const { appeler, etat, fini } = hote({ tables })
+  try {
+    const r = await appeler({ corps: { action: 'envoyer_lien', booking: 'R1' } })
+    assert.equal(r.code, 409); assert.equal(r.corps.motif, 'verrouillee')
+    assert.equal(etat.envois.length, 0)
+    assert.equal((etat.tables.factures_voyageur_jetons || []).length, 0)
+  } finally { fini() }
+})
+
+test('P3 : sur un bien archivé, une demande EN COURS peut recevoir à nouveau son lien', async () => {
+  const tables = PARC()
+  tables.factures_voyageur = [{ id: 'dddddddd-0000-4000-8000-999999999999', user_id: A, property_uuid: BIEN_ARCH, booking_id: 'R_ARCH', nature: 'facture', statut: 'formulaire_rempli', langue: 'fr' }]
+  const { appeler, etat, fini } = hote({ tables })
+  try {
+    const r = await appeler({ corps: { action: 'envoyer_lien', booking: 'R_ARCH' } })
+    assert.equal(r.code, 200, JSON.stringify(r.corps))
+    assert.equal(etat.tables.factures_voyageur.length, 1, 'la même demande')
+    assert.equal(etat.tables.factures_voyageur_jetons[0].demande_id, 'dddddddd-0000-4000-8000-999999999999')
+  } finally { fini() }
+})
+
+test('Q12 en UNE transaction : une saisie refusée ne laisse aucune demande orpheline', async () => {
+  const tables = PARC()
+  const { db, etat } = baseFactice(tables)
+  const v = FV.validerDestinataire(DEST_OK)
+  // La base refuse (verrou simulé par une demande émise existante d'une autre réservation : ici, refus forcé).
+  const r = await FV.saisirParHote(A, { propertyUuid: BIEN_A1, bookingId: 'R1', langue: 'fr', par: A, dest: v.dest }, { db })
+  assert.equal(r.ok, true)
+  assert.equal(etat.tables.factures_voyageur[0].statut, 'formulaire_rempli')
+  etat.tables.factures_voyageur[0].statut = 'emise'
+  const r2 = await FV.saisirParHote(A, { propertyUuid: BIEN_A1, bookingId: 'R1', langue: 'fr', par: A, dest: v.dest }, { db })
+  assert.equal(r2.ok, false); assert.equal(r2.motif, 'verrouillee')
+  assert.deepEqual(etat.rpcs.filter(x => x.nom === 'fv_saisir_par_hote').length, 2, 'un seul appel par saisie')
+})
+
+test('B2, B1 : l\'issue — e-mail sans cause sûre « incertain », quota « refus », envoi simulé jamais « livré »', () => {
+  const { issueDe } = require('../api/factures-voyageur')._interne
+  const { CANAL } = require('../lib/canal-voyageur')
+  const { classerEnvoiOta } = require('../lib/envoi-ota')
+  const i = (e) => issueDe(e, { CANAL, classerEnvoiOta })
+  assert.equal(i({ ok: true, canal: CANAL.EMAIL }), 'livre')
+  assert.equal(i({ ok: false, canal: CANAL.EMAIL, permanent: false, quota: false, error: 'injoignable' }), 'incertain')
+  assert.equal(i({ ok: false, canal: CANAL.EMAIL, quota: true }), 'refus')
+  assert.equal(i({ ok: false, canal: CANAL.EMAIL, permanent: true }), 'permanent')
+  assert.equal(i({ ok: true, dryRun: true, canal: CANAL.OTA }), 'differe')
+  assert.equal(i({ ok: false, differe: true, canal: CANAL.EMAIL }), 'differe')
+})
+
+test('B5 : le lien suit APP_URL d\'abord (staging), puis PUBLIC_BASE_URL', () => {
+  const avant = { a: process.env.APP_URL, p: process.env.PUBLIC_BASE_URL }
+  try {
+    process.env.APP_URL = 'https://hotesmart-staging.vercel.app/'
+    process.env.PUBLIC_BASE_URL = 'https://hotesmart.vercel.app'
+    assert.equal(FV.lienPublic('x'), 'https://hotesmart-staging.vercel.app/facture#x')
+    delete process.env.APP_URL
+    assert.equal(FV.lienPublic('x'), 'https://hotesmart.vercel.app/facture#x')
+  } finally {
+    if (avant.a === undefined) delete process.env.APP_URL; else process.env.APP_URL = avant.a
+    if (avant.p === undefined) delete process.env.PUBLIC_BASE_URL; else process.env.PUBLIC_BASE_URL = avant.p
+  }
+})
+
+test('B4 : le VRAI chemin — une directe avec e-mail part par e-mail, sujet dans la langue du voyageur, fil marqué « email »', async () => {
+  const { appeler, etat, fini } = hote({ vraiEnvoi: true })
+  try {
+    const r = await appeler({ corps: { action: 'envoyer_lien', booking: 'R_MAIL' } })
+    assert.equal(r.code, 200, JSON.stringify(r.corps))
+    assert.equal(r.corps.envoi, 'livre')
+    const [e] = etat.envois
+    assert.equal(e.par, 'email'); assert.equal(e.destinataire, 'lea@exemple.test'); assert.equal(e.bookingId, 'R_MAIL')
+    assert.equal(e.userId, A, 'la clé Brevo du compte propriétaire')
+    assert.equal(e.sujet, 'Your invoice — La bulle')
+    assert.match(e.texte, /^Hello Léa, to receive your invoice/)
+    assert.equal(etat.fil.length, 1); assert.equal(etat.fil[0].canal, 'email')
+  } finally { fini() }
+  const panne = hote({ vraiEnvoi: true, email: { ok: false, raison: 'brevo_injoignable', transitoire: true, incertain: true } })
+  try {
+    const r = await panne.appeler({ corps: { action: 'envoyer_lien', booking: 'R_MAIL' } })
+    assert.equal(r.corps.envoi, 'incertain', 'peut-être reçu : jamais « refus »')
+    assert.ok(r.corps.lien)
+    assert.equal(panne.etat.fil.length, 0)
+  } finally { panne.fini() }
+})
+
+test('B4 : le VRAI chemin — Channex « sans canal » (source direct) passe quand même, par l\'identifiant', async () => {
+  const { appeler, etat, fini } = hote({ vraiEnvoi: true })
+  try {
+    const r = await appeler({ corps: { action: 'envoyer_lien', booking: 'R_DIRECT' } })
+    assert.equal(r.code, 200, JSON.stringify(r.corps))
+    assert.equal(r.corps.envoi, 'livre')
+    assert.equal(etat.envois[0].par, 'channex'); assert.equal(etat.envois[0].bookingId, 'R_DIRECT')
+  } finally { fini() }
+})
+
+test('B1 : le VRAI chemin — Beds24 : un séjour de canal part ; une saisie directe ne part PAS ; un envoi simulé n\'est pas livré', async () => {
+  const tables = PARC()
+  tables.api_keys = [{ user_id: A, api_key: 'cle-beds24' }]
+  const ok = hote({ vraiEnvoi: true, tables })
+  try {
+    const r = await ok.appeler({ corps: { action: 'envoyer_lien', booking: 'R_BX' } })
+    assert.equal(r.code, 200, JSON.stringify(r.corps))
+    assert.equal(r.corps.envoi, 'livre')
+    assert.equal(ok.etat.envois[0].par, 'beds24'); assert.equal(ok.etat.envois[0].bookingId, 'R_BX')
+    assert.equal(ok.etat.envois[0].key, 'cle-beds24')
+    assert.equal(ok.etat.fil[0].provider, 'beds24')
+  } finally { ok.fini() }
+  const direct = hote({ vraiEnvoi: true, tables: (() => { const t = PARC(); t.api_keys = [{ user_id: A, api_key: 'k' }]; return t })() })
+  try {
+    const r = await direct.appeler({ corps: { action: 'envoyer_lien', booking: 'R_BX_DIRECT' } })
+    assert.equal(r.corps.envoi, 'sans_canal', JSON.stringify(r.corps))
+    assert.ok(r.corps.lien, 'le lien revient à l\'hôte')
+    assert.equal(direct.etat.envois.length, 0, 'aucun appel à Beds24')
+    assert.equal(direct.etat.fil.length, 0)
+  } finally { direct.fini() }
+  const simule = hote({ vraiEnvoi: true, beds24: { ok: true, dryRun: true }, tables: (() => { const t = PARC(); t.api_keys = [{ user_id: A, api_key: 'k' }]; return t })() })
+  try {
+    const r = await simule.appeler({ corps: { action: 'envoyer_lien', booking: 'R_BX' } })
+    assert.equal(r.corps.envoi, 'differe', 'staging : rien n\'est parti')
+    assert.ok(r.corps.lien)
+    assert.equal(simule.etat.fil.length, 0, 'pas de faux vert dans le fil')
+  } finally { simule.fini() }
+})
+
+test('voyageur : réservation annulée — la page dit « sans objet » tout de suite, et n\'enregistre plus', async () => {
+  const { tables, clair } = await lienEnvoye()
+  tables.bookings_snapshot.find(b => b.booking_id === 'R1').snapshot.status = 'cancelled'
+  const { appeler, etat, fini } = voyageur({ tables })
+  try {
+    const l = await appeler({ jeton: null, corps: { action: 'lire', jeton: clair } })
+    assert.equal(l.corps.statut, 'sans_objet'); assert.equal(l.corps.modifiable, false)
+    const r = await appeler({ jeton: null, corps: { action: 'enregistrer', jeton: clair, destinataire: DEST_OK } })
+    assert.equal(r.code, 409); assert.equal(r.corps.motif, 'sans_objet')
+    assert.equal(etat.tables.factures_voyageur[0].dest_nom, undefined, 'rien d\'écrit')
+  } finally { fini() }
 })

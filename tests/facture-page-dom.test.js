@@ -195,3 +195,50 @@ test('AUTONOME et au nom de l\'hôte : aucune ressource externe, aucune mention 
   const cles = Object.keys(T.fr).sort()
   for (const lg of ['en', 'es']) assert.deepEqual(Object.keys(T[lg]).sort(), cles, lg)
 })
+
+// ─── Correctifs de la review 1 (10 novembre 2026) ──────────────────────────
+test('un point collé au lien par la messagerie ne casse pas le jeton ; un caractère de jeton de plus, si', async () => {
+  const avecPoint = ouvrir({ hash: JETON + '.' })
+  await attendre()
+  assert.equal(avecPoint.appels.length, 1)
+  assert.equal(avecPoint.appels[0].corps.jeton, JETON)
+  const deTrop = ouvrir({ hash: JETON + 'x' })
+  await attendre()
+  assert.equal(deTrop.appels.length, 0)
+})
+
+test('accessibilité : erreurs reliées et focus sur la première, enregistrement annoncé, langues nommées', async () => {
+  const { d, dom } = ouvrir({ reponses: [{ status: 200, corps: ETAT() }, { status: 200, corps: ETAT({ statut: 'formulaire_rempli', destinataire: DEST }) }] })
+  await attendre()
+  assert.equal(d.getElementById('langues').getAttribute('aria-label'), 'Langue')
+  const f = d.getElementById('formulaire')
+  for (const c of ['nom', 'adresse1', 'ville', 'pays', 'siren', 'tva']) {
+    const id = f.elements[c].getAttribute('aria-describedby')
+    assert.equal(d.getElementById(id).getAttribute('data-erreur'), c, c)
+  }
+  f.querySelector('input[value="particulier"]').click()
+  f.dispatchEvent(new dom.window.Event('submit', { cancelable: true }))
+  await attendre()
+  assert.equal(d.activeElement, f.elements.nom, 'le focus va à la première faute')
+  assert.equal(f.elements.nom.getAttribute('aria-invalid'), 'true')
+  for (const [k, v] of Object.entries({ nom: 'Léa', adresse1: '1 rue', ville: 'Pau', pays: 'France' })) f.elements[k].value = v
+  f.dispatchEvent(new dom.window.Event('submit', { cancelable: true }))
+  await attendre()
+  const annonce = d.getElementById('annonce')
+  assert.equal(annonce.getAttribute('role'), 'status')
+  assert.equal(annonce.textContent, 'Vos coordonnées de facturation sont enregistrées.')
+})
+
+test('les motifs sans phrase à leur nom en ont une : introuvable, entrée invalide sans champ, sans objet', async () => {
+  const intro = ouvrir({ reponses: [{ status: 404, corps: { motif: 'introuvable' } }] })
+  await attendre()
+  assert.match(intro.d.getElementById('erreur').textContent, /not valid/)
+  const so = ouvrir({ reponses: [{ status: 200, corps: ETAT() }, { status: 409, corps: { motif: 'sans_objet' } }, { status: 200, corps: ETAT({ statut: 'sans_objet', modifiable: false }) }] })
+  await attendre()
+  const f = so.d.getElementById('formulaire')
+  f.querySelector('input[value="particulier"]').click()
+  for (const [k, v] of Object.entries({ nom: 'Léa', adresse1: '1 rue', ville: 'Pau', pays: 'France' })) f.elements[k].value = v
+  f.dispatchEvent(new so.dom.window.Event('submit', { cancelable: true }))
+  await attendre()
+  assert.match(so.d.getElementById('etat').textContent, /annulée : aucune facture/, 'l\'état relu après le refus')
+})

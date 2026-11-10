@@ -269,6 +269,9 @@ end $$;
 -- jeton de la meme porte cree il y a moins de
 -- 30 s est refuse (la ligne de la demande est
 -- verrouillee, donc deux appels se suivent).
+-- ⚠ CODE DEDIE `FV429`, pas `55P03` : `55P03` est
+-- aussi celui d'une attente de verrou expiree, qui
+-- se lirait « envoi trop rapproche » (review 1).
 create or replace function
   public.fv_nouveau_lien(
   p_user uuid, p_property uuid,
@@ -297,7 +300,7 @@ begin
        and j.cree_le
          > now() - interval '30 seconds') then
     raise exception 'envoi trop rapproche'
-      using errcode = '55P03';
+      using errcode = 'FV429';
   end if;
   insert into factures_voyageur_jetons
     (demande_id, user_id, jeton_hash, porte,
@@ -369,6 +372,37 @@ begin
   return 'ok';
 end $$;
 
+-- ── La saisie de l'hote (Q12), en UNE transaction
+-- Ouvrir (ou retrouver) la demande ET enregistrer
+-- le destinataire : en deux appels, un echec du
+-- second laissait une demande « lien envoye » sans
+-- aucun lien (review 1).
+create or replace function
+  public.fv_saisir_par_hote(
+  p_user uuid, p_property uuid,
+  p_booking text, p_langue text,
+  p_par uuid, p_dest jsonb)
+returns table (r_demande uuid,
+  r_issue text)
+language plpgsql security invoker
+set search_path = public as $$
+declare
+  v_id uuid; v_issue text;
+begin
+  select o.r_demande into v_id
+    from fv_ouvrir_demande(p_user, p_property,
+      p_booking, p_langue, p_par) o;
+  v_issue := fv_enregistrer_destinataire(v_id,
+    p_user, null, p_dest, 'hote', p_par, 0);
+  if v_issue <> 'ok' then
+    -- Rien ne reste : ni demande neuve, ni
+    -- saisie partielle.
+    raise exception 'saisie refusee : %', v_issue
+      using errcode = 'FV409';
+  end if;
+  return query select v_id, v_issue;
+end $$;
+
 alter table public.factures_voyageur
   enable row level security;
 alter table public.factures_voyageur_jetons
@@ -395,6 +429,10 @@ revoke execute on function
     uuid, uuid, jsonb, text, uuid, integer)
   from public, anon, authenticated;
 revoke execute on function
+  public.fv_saisir_par_hote(uuid, uuid, text,
+    text, uuid, jsonb)
+  from public, anon, authenticated;
+revoke execute on function
   public.fv_demande_protegee()
   from public, anon, authenticated;
 
@@ -409,6 +447,10 @@ grant execute on function
 grant execute on function
   public.fv_enregistrer_destinataire(uuid,
     uuid, uuid, jsonb, text, uuid, integer)
+  to service_role;
+grant execute on function
+  public.fv_saisir_par_hote(uuid, uuid, text,
+    text, uuid, jsonb)
   to service_role;
 
 notify pgrst, 'reload schema';

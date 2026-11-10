@@ -9,8 +9,8 @@
 //
 // ⚠ LA RÉSERVATION DÉSIGNE LE COMPTE ET LE BIEN (règle 11) : la garde résout
 // `booking` dans le cœur ; un `bien` envoyé par le client est ignoré. Une
-// réservation d'un autre compte rend 404, hors du périmètre 403 — avant tout
-// geste.
+// réservation inconnue rend 404 ; celle d'un autre compte, ou hors du
+// périmètre, 403 — avant tout geste.
 //
 // ⚠ DEUX DROITS POUR ENVOYER LE LIEN (P1, Thierry, 8 nov. 2026, 22 h 03) :
 // `reservations` ET `messages` en écriture, parce que le geste fait partir un
@@ -18,10 +18,18 @@
 // `reservations` en écriture suffit (Q10).
 //
 // ⚠ BIEN ARCHIVÉ (P3) : aucune NOUVELLE demande. Une demande déjà en cours va au
-// bout — l'hôte peut encore remplir son formulaire — mais aucun lien neuf ne
-// part d'un bien archivé.
+// bout : l'hôte peut encore remplir son formulaire, et renvoyer le lien à un
+// voyageur qui l'a perdu (review 1 : P3 n'interdit que les nouvelles).
 //
-// ⚠ UNE RÉSERVATION ANNULÉE N'EST JAMAIS FACTURÉE (§2.7) : aucun geste.
+// ⚠ SEULE UNE RÉSERVATION CONFIRMÉE SE FACTURE (§2.7, review 1, B3). Annulée :
+// jamais. `demapped` (ancienne copie d'un séjour qui continue sous un autre
+// identifiant après une migration), `blocked` (blocage du propriétaire, sans
+// voyageur), `request` (demande non confirmée) : aucun geste non plus — la
+// première ouvrirait une seconde demande pour le même séjour.
+//
+// ⚠ UNE FACTURE ÉMISE NE REÇOIT PLUS LE LIEN « REMPLISSEZ » : son formulaire
+// est verrouillé ; le lien de la facture partira avec « Votre facture est
+// disponible » (étape 3).
 //
 // ⚠ L'ENVOI : le chemin serveur commun (`sendGuestMessage`, lib/cron-messages.js),
 // qui route par la SOURCE de la réservation — messagerie du canal, e-mail pour
@@ -48,7 +56,8 @@ function corpsDe (req) {
 
 const CODES = {
   entree_invalide: 400, introuvable: 404, bien_introuvable: 409, bien_archive: 409,
-  reservation_annulee: 409, verrouillee: 409, trop_rapproche: 429, panne: 503
+  reservation_annulee: 409, reservation_non_confirmee: 409, verrouillee: 409,
+  trop_rapproche: 429, panne: 503
 }
 function repondreRefus (res, motif, champ = null) {
   return res.status(CODES[motif] || 400).json({ error: motif, motif, champ })
@@ -72,13 +81,35 @@ async function lireBrut (base, compte, bookingId) {
 }
 
 // L'issue d'un envoi, dans le vocabulaire du jeton.
+// ⚠ UN ENVOI SIMULÉ N'EST PAS LIVRÉ (review 1, B1) : sans
+// `SENDVIABEDS24_ENABLED` (staging), Beds24 rend `{ ok: true, dryRun: true }`.
+// Le compter « livré » mettrait le message dans le fil et garderait le lien.
+// ⚠ UN E-MAIL QUI ÉCHOUE SANS DIRE POURQUOI EST « INCERTAIN », PAS « REFUS »
+// (review 1, B2) : `sendGuestMessage` ne transmet pas le drapeau `incertain` du
+// moteur e-mail. Seuls « permanent » (rien n'y changera) et « quota » (Brevo a
+// répondu non : rien n'est parti) sont sûrs ; le reste a PEUT-ÊTRE abouti, et
+// un « refus » pousserait l'hôte à renvoyer — deux messages au voyageur.
 function issueDe (envoi, { CANAL, classerEnvoiOta }) {
-  if (envoi && envoi.ok === true) return 'livre'
+  if (envoi && envoi.ok === true) return envoi.dryRun === true ? 'differe' : 'livre'
   if (envoi && envoi.differe === true) return 'differe'
   if (envoi && envoi.canal === CANAL.AUCUN) return 'sans_canal'
-  if (envoi && envoi.canal === CANAL.EMAIL) return envoi.permanent ? 'permanent' : 'refus'
+  if (envoi && envoi.canal === CANAL.EMAIL) {
+    if (envoi.permanent === true) return 'permanent'
+    if (envoi.quota === true) return 'refus'
+    return 'incertain'
+  }
   return classerEnvoiOta(envoi)
 }
+
+// Seule une réservation confirmée se facture (review 1, B3).
+function refusDuStatut (snap, provider) {
+  const { readStatus, STATUS } = require('../lib/bookings-snapshot-status')
+  const statut = readStatus(snap, provider)
+  if (statut === STATUS.CANCELLED) return 'reservation_annulee'
+  if (statut !== STATUS.CONFIRMED) return 'reservation_non_confirmee'
+  return null
+}
+const ESTIME_CHANNEX = (provider) => provider === 'channex' || provider === 'channel'
 
 async function envoyerLien (req, res, corps) {
   const t0 = Date.now()
@@ -96,14 +127,19 @@ async function envoyerLien (req, res, corps) {
   const bookingId = String(garde.booking.booking_id)
   const snap = garde.booking.snapshot || {}
 
-  const { estAnnulationVoyageur } = require('../lib/bookings-snapshot-status')
-  if (estAnnulationVoyageur(snap, garde.bien.provider)) return repondreRefus(res, 'reservation_annulee')
+  const refusStatut = refusDuStatut(snap, garde.bien.provider)
+  if (refusStatut) return repondreRefus(res, refusStatut)
 
   const base = db()
-  requetes += 2
-  const [arch, brut] = await Promise.all([lireArchivage(base, garde.bien.id), lireBrut(base, compte, bookingId)])
-  if (!arch.ok || !brut.ok) return repondreRefus(res, 'panne')
-  if (arch.archive) return repondreRefus(res, 'bien_archive')
+  requetes += 3
+  const [arch, brut, active] = await Promise.all([
+    lireArchivage(base, garde.bien.id), lireBrut(base, compte, bookingId),
+    FV.demandeActive(compte, bookingId, { db: base })
+  ])
+  if (!arch.ok || !brut.ok || !active.ok) return repondreRefus(res, 'panne')
+  // P3 : sur un bien archivé, seulement une demande DÉJÀ en cours.
+  if (arch.archive && !active.demande) return repondreRefus(res, 'bien_archive')
+  if (active.demande && active.demande.statut === 'emise') return repondreRefus(res, 'verrouillee')
 
   const langue = FV.langueDeLaReservation({ snapshot: snap, raw: brut.raw })
   requetes++
@@ -121,8 +157,12 @@ async function envoyerLien (req, res, corps) {
   const decision = canalPour({ id: bookingId, ...snap })
 
   let envoi
-  if (decision.motif === MOTIF.PAS_D_EMAIL) {
+  if (decision.motif === MOTIF.PAS_D_EMAIL ||
+      (decision.motif === MOTIF.SANS_CANAL && !ESTIME_CHANNEX(garde.bien.provider))) {
     // Aucune destination : rien ne part (P5). Le lien revient à l'hôte.
+    // ⚠ BEDS24 « SANS CANAL » NE PASSE PAS (review 1, B1) : une saisie directe
+    // Beds24 n'a aucun fil (docs/kb/guestflow.md), et un envoi « accepté » y
+    // serait un faux vert.
     envoi = { ok: false, canal: CANAL.AUCUN, motif: decision.motif }
   } else {
     let beds24Key = null
@@ -132,15 +172,16 @@ async function envoyerLien (req, res, corps) {
       if (eK) console.error('[factures-voyageur] cle Beds24 illisible', eK.message)
       beds24Key = k ? k.api_key : null
     }
-    // ⚠ `sans_canal` PASSE QUAND MÊME, comme dans api/channel-message.js : le
-    // normaliseur Channex écrit `source: 'direct'` pour une réservation sans
-    // `ota_name`, que le filtre Beds24 classe « sans canal » alors que Channex
-    // accepte le message. On passe alors l'IDENTIFIANT nu, que le chemin commun
-    // route par le provider — c'est lui l'autorité.
+    // ⚠ CHANNEX « SANS CANAL » PASSE QUAND MÊME, comme dans
+    // api/channel-message.js : le normaliseur Channex écrit `source: 'direct'`
+    // pour une réservation sans `ota_name`, que le filtre Beds24 classe « sans
+    // canal » alors que Channex accepte le message. On passe alors
+    // l'IDENTIFIANT nu, que le chemin commun route par le provider — c'est lui
+    // l'autorité. Jamais pour Beds24 (ci-dessus).
     const reservation = decision.motif === MOTIF.SANS_CANAL ? bookingId : { id: bookingId, ...snap }
     try {
       envoi = await sendGuestMessage(beds24Key, garde.bien, reservation, message,
-        { userId: compte, eventType: 'facture_lien' })
+        { userId: compte, eventType: 'facture_lien', sujet: FV.sujetDuLien(langue, garde.bien.name) })
     } catch (e) {
       // L'appel a levé : le message est PEUT-ÊTRE parti. Jamais « refus ».
       console.error('[factures-voyageur] envoi en exception', e.message)
@@ -198,8 +239,8 @@ async function saisir (req, res, corps) {
   const bookingId = String(garde.booking.booking_id)
   const snap = garde.booking.snapshot || {}
 
-  const { estAnnulationVoyageur } = require('../lib/bookings-snapshot-status')
-  if (estAnnulationVoyageur(snap, garde.bien.provider)) return repondreRefus(res, 'reservation_annulee')
+  const refusStatut = refusDuStatut(snap, garde.bien.provider)
+  if (refusStatut) return repondreRefus(res, refusStatut)
 
   const base = db()
   requetes += 2
@@ -208,27 +249,32 @@ async function saisir (req, res, corps) {
   // P3 : sur un bien archivé, seulement une demande DÉJÀ en cours.
   if (arch.archive && !active.demande) return repondreRefus(res, 'bien_archive')
 
-  let demande = active.demande
-  if (!demande) {
+  let demandeId
+  let statut
+  if (active.demande) {
+    requetes++
+    const r = await FV.enregistrerDestinataire(compte, active.demande.id, v.dest,
+      { saisiPar: 'hote', saisiParUser: garde.userId }, { db: base })
+    if (!r.ok) return repondreRefus(res, r.motif)
+    demandeId = active.demande.id
+    statut = active.demande.statut === 'lien_envoye' ? 'formulaire_rempli' : active.demande.statut
+  } else {
+    // Pas encore de demande : l'ouvrir ET la remplir en UNE transaction
+    // (review 1 : en deux appels, un échec du second laissait une demande
+    // « lien envoyé » sans aucun lien).
     requetes += 2
     const brut = await lireBrut(base, compte, bookingId)
     if (!brut.ok) return repondreRefus(res, 'panne')
-    const ouverte = await FV.ouvrirDemande(compte, {
-      propertyUuid: garde.bien.id, bookingId,
-      langue: FV.langueDeLaReservation({ snapshot: snap, raw: brut.raw }), creePar: garde.userId
+    const r = await FV.saisirParHote(compte, {
+      propertyUuid: garde.bien.id, bookingId, par: garde.userId, dest: v.dest,
+      langue: FV.langueDeLaReservation({ snapshot: snap, raw: brut.raw })
     }, { db: base })
-    if (!ouverte.ok) return repondreRefus(res, ouverte.motif)
-    demande = ouverte.demande
+    if (!r.ok) return repondreRefus(res, r.motif)
+    demandeId = r.demande.id
+    statut = 'formulaire_rempli'
   }
-  requetes++
-  const r = await FV.enregistrerDestinataire(compte, demande.id, v.dest,
-    { saisiPar: 'hote', saisiParUser: garde.userId }, { db: base })
-  if (!r.ok) return repondreRefus(res, r.motif)
   res.setHeader('Server-Timing', `db;desc="${requetes} requêtes";dur=${Date.now() - t0}`)
-  return res.status(200).json({
-    ok: true,
-    demande: { id: demande.id, statut: demande.statut === 'lien_envoye' ? 'formulaire_rempli' : demande.statut }
-  })
+  return res.status(200).json({ ok: true, demande: { id: demandeId, statut } })
 }
 
 module.exports = async function handler (req, res) {
@@ -249,4 +295,4 @@ module.exports = async function handler (req, res) {
   }
 }
 
-module.exports._interne = { issueDe }
+module.exports._interne = { issueDe, refusDuStatut }

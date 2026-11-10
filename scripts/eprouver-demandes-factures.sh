@@ -104,5 +104,24 @@ essai "32. authenticated n'exécute pas la saisie" refus "set role authenticated
 essai "33. service_role exécute la fonction de lien" passe "set role service_role; select * from fv_nouveau_lien('$A', '$BIEN', 'R6', 'es', null, '$H4', 'fiche', now())"
 essai "34. un second compte, même référence : sa propre demande" passe "select * from fv_nouveau_lien('$B', '$BIEN', 'R6', 'es', null, '$H5', 'fiche', now())"
 vaut "35. deux demandes R6, une par compte" 2 "select count(*) from $F where booking_id = 'R6'"
+H6=$(printf '6%.0s' $(seq 64)); H7=$(printf '7%.0s' $(seq 64)); H8=$(printf '8%.0s' $(seq 64))
+essai "36. le double clic sort en FV429 (pas 55P03, qui est l'attente de verrou)" passe "do \$\$ begin perform fv_nouveau_lien('$A', '$BIEN', 'R1', 'fr', null, '$H8', 'disponible', now()); raise exception 'pas de refus'; exception when sqlstate 'FV429' then null; end \$\$"
+# 37. CONCURRENCE, demande existante : la ligne est verrouillée, donc le second
+# appel attend le premier, voit son jeton, et refuse. Sans `for update`, deux
+# jetons (sonde de la review 1 : l'épreuve ne le gardait pas).
+$P -c "select * from fv_ouvrir_demande('$A', '$BIEN', 'R7', 'fr', null)" >/dev/null
+( $P -c "begin; select * from fv_nouveau_lien('$A', '$BIEN', 'R7', 'fr', null, '$H6', 'fiche', now()); select pg_sleep(1.5); commit;" >/dev/null 2>&1 ) &
+sleep 0.5
+essai "37a. deux liens simultanés, même porte : le second est refusé" refus "select * from fv_nouveau_lien('$A', '$BIEN', 'R7', 'fr', null, '$H7', 'fiche', now())"
+wait
+vaut "37b. un seul jeton pour R7" 1 "select count(*) from $J j join $F f on f.id = j.demande_id where f.booking_id = 'R7'"
+DESTH="'{\"type\":\"particulier\",\"nom\":\"Léa\",\"adresse1\":\"1 rue\",\"ville\":\"Pau\",\"pays\":\"France\"}'::jsonb"
+vaut "38a. la saisie de l'hôte rend « ok »" ok "select r_issue from fv_saisir_par_hote('$A', '$BIEN', 'R8', 'fr', '$A', $DESTH)"
+vaut "38b. elle a ouvert la demande ET l'a remplie" "formulaire_rempli|hote|Léa" "select statut, saisi_par, dest_nom from $F where booking_id = 'R8'"
+essai "39a. saisie de l'hôte sur une facture émise : refusée" refus "select * from fv_saisir_par_hote('$A', '$BIEN', 'R1', 'fr', '$A', $DESTH)"
+vaut "39b. et rien n'a changé" "SCI X" "select dest_nom from $F where booking_id = 'R1'"
+essai "39c. saisie de l'hôte invalide sur une réservation neuve : refusée" refus "select * from fv_saisir_par_hote('$A', '$BIEN', 'R9', 'fr', '$A', '{\"siren\":\"12\"}'::jsonb)"
+vaut "39d. et aucune demande orpheline ne reste" 0 "select count(*) from $F where booking_id = 'R9'"
+essai "40. anon n'exécute pas la saisie de l'hôte" refus "set role anon; select * from fv_saisir_par_hote('$A', '$BIEN', 'R10', 'fr', null, '{}'::jsonb)"
 echo "BILAN : $ok conformes, $ko écarts"
 [ "$ko" = 0 ]
