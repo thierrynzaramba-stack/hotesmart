@@ -21,9 +21,13 @@ const { JSDOM } = require('jsdom')
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'pages', 'facture.html'), 'utf8')
 const JETON = 'A'.repeat(20) + '_-' + 'b'.repeat(21)
 
+// Dates RELATIVES : la page compare la date de mise à disposition à
+// aujourd'hui (règle du dépôt : dates relatives si le code lit l'horloge).
+const dans = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
+const longue = (iso) => new Intl.DateTimeFormat('fr', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(iso + 'T12:00:00Z'))
 const ETAT = (extra = {}) => ({
   ok: true, langue: 'fr', statut: 'lien_envoye', modifiable: true, destinataire: null,
-  sejour: { logement: 'La bulle', arrivee: '2026-12-01', depart: '2026-12-04' }, ...extra
+  sejour: { logement: 'La bulle', arrivee: dans(20), depart: dans(23) }, ...extra
 })
 const DEST = { type: 'societe', nom: 'SCI Le Florian', adresse1: '24 allée des Coustous', adresse2: null, code_postal: '65200', ville: 'Bagnères-de-Bigorre', pays: 'France', tva: 'FR12345678901', siren: '123456789' }
 
@@ -76,9 +80,9 @@ test('la page parle la langue de la DEMANDE (fr), dit le séjour et quand la fac
   assert.equal(d.documentElement.lang, 'fr')
   assert.equal(d.title, 'La bulle')
   assert.equal(d.querySelector('h1').textContent, 'Votre facture')
-  assert.equal(d.getElementById('sejour').textContent, 'Séjour à La bulle, du 1 décembre 2026 au 4 décembre 2026')
+  assert.equal(d.getElementById('sejour').textContent, `Séjour à La bulle, du ${longue(dans(20))} au ${longue(dans(23))}`)
   assert.equal(d.getElementById('etat').textContent,
-    'Votre facture sera disponible sur ce lien après votre séjour, à partir du 5 décembre 2026.')
+    `Votre facture sera disponible sur ce lien après votre séjour, à partir du ${longue(dans(24))}.`)
   assert.ok(visible(d.getElementById('formulaire')), 'formulaire ouvert sans destinataire')
   assert.ok(!visible(d.getElementById('recap')))
 })
@@ -241,4 +245,29 @@ test('les motifs sans phrase à leur nom en ont une : introuvable, entrée inval
   f.dispatchEvent(new so.dom.window.Event('submit', { cancelable: true }))
   await attendre()
   assert.match(so.d.getElementById('etat').textContent, /annulée : aucune facture/, 'l\'état relu après le refus')
+})
+
+// ─── Correctifs de la recette du 10 novembre 2026 ──────────────────────────
+test('recette : séjour fini — pas de date passée annoncée, « après votre séjour »', async () => {
+  const { d } = ouvrir({ reponses: [{ status: 200, corps: ETAT({ sejour: { logement: 'La bulle', arrivee: dans(-9), depart: dans(-5) } }) }] })
+  await attendre()
+  assert.equal(d.getElementById('etat').textContent, 'Votre facture sera disponible sur ce lien après votre séjour.')
+})
+
+test('recette : après un envoi vide, le focus va à « Particulier / Société », la première question', async () => {
+  const { d, dom } = ouvrir()
+  await attendre()
+  const f = d.getElementById('formulaire')
+  f.dispatchEvent(new dom.window.Event('submit', { cancelable: true }))
+  await attendre()
+  assert.equal(d.activeElement.name, 'type')
+})
+
+test('recette : le récapitulatif n\'écrit pas « (facultatif) »', async () => {
+  const { d } = ouvrir({ reponses: [{ status: 200, corps: ETAT({ statut: 'formulaire_rempli', destinataire: DEST }) }] })
+  await attendre()
+  const recap = d.getElementById('recap-liste').textContent
+  assert.match(recap, /N° de TVA intracommunautaireFR12345678901/)
+  assert.match(recap, /SIREN123456789/)
+  assert.doesNotMatch(recap, /facultatif/)
 })

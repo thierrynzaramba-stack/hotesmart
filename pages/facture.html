@@ -146,7 +146,8 @@ var T = {
     enregistre: 'Vos coordonnées de facturation sont enregistrées.', modifier: 'Modifier',
     requis: 'Ce champ est obligatoire.', invalide: 'Cette valeur n’est pas valide.',
     choisir: 'Choisissez une réponse.',
-    siren_format: '9 chiffres.', tva_format: 'Deux lettres de pays puis le numéro (ex. FR12345678901).'
+    siren_format: '9 chiffres.', tva_format: 'Deux lettres de pays puis le numéro (ex. FR12345678901).',
+    tva_court: 'N° de TVA intracommunautaire', siren_court: 'SIREN'
   },
   en: {
     titre: 'Your invoice', chargement: 'Loading…',
@@ -170,7 +171,8 @@ var T = {
     enregistre: 'Your billing details have been saved.', modifier: 'Edit',
     requis: 'This field is required.', invalide: 'This value is not valid.',
     choisir: 'Please choose one.',
-    siren_format: '9 digits.', tva_format: 'Two-letter country code then the number (e.g. DE123456789).'
+    siren_format: '9 digits.', tva_format: 'Two-letter country code then the number (e.g. DE123456789).',
+    tva_court: 'EU VAT number', siren_court: 'SIREN'
   },
   es: {
     titre: 'Su factura', chargement: 'Cargando…',
@@ -194,7 +196,8 @@ var T = {
     enregistre: 'Sus datos de facturación se han guardado.', modifier: 'Modificar',
     requis: 'Este campo es obligatorio.', invalide: 'Este valor no es válido.',
     choisir: 'Elija una opción.',
-    siren_format: '9 cifras.', tva_format: 'Código de país de dos letras y el número (p. ej. ES12345678Z).'
+    siren_format: '9 cifras.', tva_format: 'Código de país de dos letras y el número (p. ej. ES12345678Z).',
+    tva_court: 'N.º de IVA intracomunitario', siren_court: 'SIREN'
   }
 };
 var LANGUES = ['fr', 'en', 'es'];
@@ -254,7 +257,13 @@ function peindre() {
   if (etat.statut === 'sans_objet') texte = t.sans_objet;
   else if (etat.statut === 'emise') texte = t.emise;
   else if (etat.statut === 'annulee_par_avoir') texte = t.annulee;
-  else { var dl = dateLongue(lendemain(s.depart)); texte = dl ? fmt('attente', { date: dl }) : t.attente_sans; }
+  else {
+    // Une date déjà passée ne s'annonce pas (recette du 10 novembre 2026) :
+    // le séjour est fini, la facture attend la confirmation de l'hôte.
+    var dispo = lendemain(s.depart);
+    var dl = dispo && dispo > new Date().toISOString().slice(0, 10) ? dateLongue(dispo) : null;
+    texte = dl ? fmt('attente', { date: dl }) : t.attente_sans;
+  }
   $('etat').textContent = texte;
   var dest = etat.destinataire;
   $('recap').hidden = !(etat.modifiable && dest) || !form.hidden;
@@ -269,7 +278,9 @@ function peindreRecap(dest) {
   var lignes = [
     [dest.type === 'societe' ? t.nom_societe : t.nom_particulier, dest.nom],
     [t.adresse1, [dest.adresse1, dest.adresse2, [dest.code_postal, dest.ville].filter(Boolean).join(' '), dest.pays].filter(Boolean).join(', ')],
-    [t.tva, dest.tva], [t.siren, dest.siren]
+    // Les libellés courts : « (facultatif) » n'a de sens que dans le
+    // formulaire (recette du 10 novembre 2026).
+    [t.tva_court, dest.tva], [t.siren_court, dest.siren]
   ];
   for (var i = 0; i < lignes.length; i++) {
     if (!lignes[i][1]) continue;
@@ -315,9 +326,12 @@ function marquer(champ, texte) {
 
 // Le focus va à la première faute : sans lui, au clavier ou au lecteur
 // d'écran, l'envoi refusé ne dit rien (review 1).
+// Dans l'ordre du formulaire : « Particulier / Société » est la première
+// question (recette du 10 novembre 2026).
 function focusErreur() {
-  var el = form.querySelector('[aria-invalid="true"]');
-  if (!el && !form.querySelector('[data-erreur="type"]').hidden) el = form.querySelector('input[name="type"]');
+  var el = !form.querySelector('[data-erreur="type"]').hidden
+    ? form.querySelector('input[name="type"]')
+    : form.querySelector('[aria-invalid="true"]');
   if (el) el.focus();
 }
 
