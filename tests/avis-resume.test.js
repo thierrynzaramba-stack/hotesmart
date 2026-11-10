@@ -445,3 +445,30 @@ test('lecture : sans compte, elle refuse ; une période inconnue aussi', async (
   await assert.rejects(() => lireResumeAvis(fauxBase(), { periode: '30j' }), /userId requis/)
   await assert.rejects(() => lireResumeAvis(fauxBase(), { userId: U, periode: '3ans' }), /periode inconnue/)
 })
+
+// ─── Les constats de la revue du lot ────────────────────────────────────────
+test('constat 4 : une COLONNE absente est une vraie panne, pas une migration en attente', async () => {
+  const { migrationAbsente } = require('../lib/avis/resume')
+  for (const e of [{ code: '42703', message: 'column resume_bien_avis.notes_micro does not exist' },
+                   { code: 'PGRST204', message: "Could not find the 'notes_micro' column of 'resume_bien_avis' in the schema cache" },
+                   { message: 'column notes_micro does not exist' }]) {
+    assert.strictEqual(migrationAbsente(e), false, e.message)
+    const sb = fauxBase({ biens: [B('R1')], avis: [A()], pannes: { rpc: e } })
+    const r = await calculerResumeAvis(sb, { userId: U, maintenant: T0, alarme: sansAlarme })
+    assert.strictEqual(r.erreur, 'ecriture', e.message)
+    const lu = await lireResumeAvis(fauxBase({ pannes: { lectureResume: e } }), { userId: U, periode: '30j' })
+    assert.strictEqual(lu.erreur, true, e.message)
+  }
+  assert.strictEqual(migrationAbsente({ message: 'relation "public.resume_bien_avis" does not exist' }), true)
+})
+
+test('constat 5 : à blanc, une source inconnue ne déclenche AUCUNE alarme (l\'alarme écrit un incident)', async () => {
+  const alarmes = []
+  const sb = fauxBase({ biens: [B('R1')], avis: [A({ ota: 'canal-inconnu' })] })
+  await calculerResumeAvis(sb, { userId: U, maintenant: T0, aBlanc: true, alarme: async (c) => alarmes.push(c) })
+  assert.deepStrictEqual(alarmes, [])
+  // Et le registre est vide : un calcul reel suivant, sans source inconnue,
+  // ne sonne pas pour ce que l'appel a blanc a vu.
+  await calculerResumeAvis(fauxBase({ biens: [B('R1')], avis: [A()] }), { userId: U, maintenant: T0, alarme: async (c) => alarmes.push(c) })
+  assert.deepStrictEqual(alarmes, [])
+})

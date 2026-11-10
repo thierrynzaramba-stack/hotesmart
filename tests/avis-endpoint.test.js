@@ -140,6 +140,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
   require.cache[abs] = m
   for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
   globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => '{}' })
+  etat.client = client
   return etat
 }
 
@@ -1070,11 +1071,24 @@ test('geste refusé ou invalide : aucun recalcul', async () => {
   }
 })
 
-test('geste : un recalcul en échec ne change pas la réponse du geste', async () => {
-  // `recalculerApresGeste` ne leve jamais (lib/avis/resume.js) ; on le prouve
-  // ici avec le VRAI module, sur un double sans `rpc` : l'ecriture echoue, la
-  // saisie reste un 201.
-  preparer({})
+test('geste : une écriture du résumé REFUSÉE par la base ne change pas la réponse du geste', async () => {
+  // ⚠ LE VRAI MODULE, ET LE VRAI CHEMIN D'ECRITURE (revue du lot, constat 8) :
+  // la premiere version passait par un double SANS `rpc`, donc par un
+  // `TypeError` rattrape comme exception — le refus de la base n'etait jamais
+  // exerce. Ici la fonction SQL est appelee, et elle refuse.
+  const etat = preparer({})
+  const appels = []
+  etat.client.rpc = async (nom, p) => { appels.push([nom, p.p_user_id]); return { data: null, error: { message: 'deadlock detected' } } }
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({}, { action: 'create', bien: REF_A, texte: 'Très propre', source: 'sms' }, 'POST'), res)
+  assert.strictEqual(res.code, 201)
+  assert.deepStrictEqual(appels, [['resume_bien_avis_remplacer', PROD]], 'l écriture a été tentée, pour le compte, et refusée')
+})
+
+test('geste : un recalcul qui lève ne change pas non plus la réponse', async () => {
+  const etat = preparer({})
+  etat.client.rpc = async () => { throw new Error('réseau coupé') }
   const handler = require('../api/avis')
   const res = reponse()
   await handler(req({}, { action: 'create', bien: REF_A, texte: 'Très propre', source: 'sms' }, 'POST'), res)

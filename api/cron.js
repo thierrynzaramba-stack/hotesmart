@@ -792,12 +792,13 @@ module.exports = async function handler(req, res) {
     // 4sexdecies. LES TROIS CHIFFRES DE LA PAGE AVIS, CALCULÉS D'AVANCE (lot
     // Avis V5, étape 2 ; spec avis-v5 §10.4). Deux créneaux, 06:00 et 18:00
     // heure de Paris, et le logement neuf au tick suivant son apparition.
-    // ⚠ Hors créneau, un tick coûte DEUX lectures (le marqueur, puis le compte
-    // des biens) : rien n'est recalculé si rien n'a bougé. Placé APRÈS les
-    // classifications (un verdict de propreté frais compte au créneau) et
-    // AVANT le dispatch, avec son budget mur (10 s) et un plancher de 25 s
-    // laissé au reste du cycle : un chiffre peut attendre cinq minutes, un
-    // message de bienvenue non.
+    // ⚠ Hors créneau, un tick coûte TROIS lectures (le marqueur du créneau, le
+    // compte des biens, le marqueur des biens), plus un contrôle complet des
+    // références une fois par heure : rien n'est recalculé si rien n'a bougé.
+    // Placé APRÈS les classifications (un verdict de propreté frais compte au
+    // créneau) et AVANT le dispatch, avec son budget mur (10 s) et un plancher
+    // de 25 s laissé au reste du cycle : un chiffre peut attendre cinq
+    // minutes, un message de bienvenue non.
     try {
       await chrono.mesure('resume_avis', async () => {
         const bilanResume = await calculerResumesDus(results, {

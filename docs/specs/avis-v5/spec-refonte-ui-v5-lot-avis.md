@@ -462,20 +462,30 @@ global. Zéro écart exigé.
   sans fenêtre d'une heure à ne pas rater. Le début du créneau se calcule à
   l'heure de Paris (`heureDeParis`, `lib/cron-revenus-derives.js`), changement
   d'heure compris. Un marqueur `cron_logs` (`resume_avis`) n'est posé qu'une
-  fois le créneau fini ; ensuite un tick ne coûte que deux lectures. Budget mur
+  fois le créneau fini ; ensuite un tick sans rien à faire coûte **trois**
+  lectures (ce marqueur, le compte des biens, le marqueur des biens). Budget mur
   de 10 s, et aucun calcul ne commence s'il reste moins de 25 s au cycle : le
-  dispatch passe après. Un compte en échec est signalé **une** fois et repris au
-  créneau suivant — une alerte toutes les 5 minutes serait une alarme qu'on
-  coupe. Migration absente : une attente (`results.resumeAvisEnAttente`), pas
-  une alerte. Coût suivi dans `cron_stats` (carte 20).
+  dispatch passe après ; un passage interrompu se lit dans le bilan du cycle
+  (`results.resumeAvisBudgetAtteint`), et un créneau **pas fini deux heures
+  après** son ouverture alerte, une fois. Un compte en échec est signalé **une**
+  fois, retenu dans la mémoire du créneau (`cron_logs` `resume_avis_suivi`) et
+  **plus retenté avant le créneau suivant** — sans elle, un compte qui échoue
+  lentement mangeait le budget de chaque tick, bloquait tous les autres et
+  alertait toutes les 5 minutes (revue du lot, constat 1). Migration absente
+  (table ou fonction, **jamais une colonne**, qui est une vraie panne) : une
+  attente (`results.resumeAvisEnAttente`), pas une alerte. Coût suivi dans
+  `cron_stats` (carte 20).
 - **Premier calcul d'un logement neuf** : à chaque tick, les biens sont
   **comptés** (une requête `head`) ; si leur nombre a bougé depuis le tick
-  précédent (marqueur `resume_avis_biens`), les références sans ligne font
-  calculer leur compte. Un seul endroit, plutôt que les quatre chemins qui
-  posent `provider_property_id` (`api/channel-property.js`,
-  `lib/cron-beds24-props.js`, `lib/canaux-du-bien.js`, `lib/cles-migrees.js`).
-  Limite assumée : un re-keying qui change une référence sans changer le
-  nombre de biens attend le créneau suivant.
+  précédent (marqueur `resume_avis_biens`), **ou si le dernier contrôle complet
+  date de plus d'une heure**, les références sans ligne font calculer leur
+  compte. Un seul endroit, plutôt que les quatre chemins qui posent
+  `provider_property_id` (`api/channel-property.js`, `lib/cron-beds24-props.js`,
+  `lib/canaux-du-bien.js`, `lib/cles-migrees.js`). Le contrôle horaire existe
+  pour le re-keying : une référence réécrite en place ne change pas le nombre
+  de biens, et une seule référence attendue sans ligne fait dire « pas encore
+  calculé » à **toute** la page du compte (revue du lot, constat 2) — le pire
+  retard est donc d'une heure, pas de douze.
 - **Mise en service** : la table est vide au déploiement ; le premier tick
   après le collage de la migration calcule tous les comptes (marqueur absent),
   dans la limite du budget, puis les ticks suivants finissent.
@@ -512,6 +522,12 @@ global. Zéro écart exigé.
   élargi. Des lignes d'heures différentes (un bien calculé plus tard) :
   `calcule_le` = **la plus ancienne** — l'âge d'un chiffre est celui de sa
   partie la plus vieille. Table absente (migration pas collée) : même motif.
+- **Limite connue (revue du lot, constat 3)** : un compte dont **aucun** bien
+  n'a de référence provider — cela n'arrive que pendant une bascule — n'attend
+  aucune ligne ; s'il porte des avis orphelins, l'écran dit « 0 avis reçus »
+  là où l'ancien calcul les comptait, et le cron ne calcule pas ce compte (il
+  part des biens). État transitoire, sans liste de biens à choisir sur la
+  page ; il se referme dès qu'un bien retrouve sa référence.
 
 ### 10.6 L'écran
 
@@ -585,3 +601,26 @@ l'accueil, et à 18:00 sur Avis.
   `api/ecran/aujourdhui.js` et `lib/logement/lecture.js`, je préviens les
   fils qui les tiennent)*
 - **B** — dans un lot suivant ; l'écart est noté en dette d'ici là.
+
+### 10.10 Revue de l'étape 2 (10 novembre 2026)
+
+Une revue, par un agent distinct, sur l'arbre `/home/claude/hotesmart-avis-resume`,
+branche `avis-v5-resume`, plage
+`86c97cbfa1e6888a502f0d83fecb20953328341c..a428d51131531963360dca88287b2bef5fe55228`
+(SHA lu déclaré par la revue : `a428d511…`). **Aucun constat de sécurité** :
+filtrage par compte, périmètre du membre, recalcul sur le compte cible, droits
+de la fonction SQL et RLS de la table vérifiés — la migration a été rejouée
+deux fois sur un PostgreSQL 16 local. Donc pas de re-revue (règle « une revue
+par commit »). Chaque fichier cité est dans le diff de la plage ;
+`lib/stats-avis.js` n'est cité qu'en preuve.
+
+| # | gravité | fichier cité | constat | suite |
+|---|---|---|---|---|
+| 1 | défaut | `lib/cron-resume-avis.js` | un compte qui échoue lentement mange le budget de chaque tick, bloque les autres, alerte toutes les 5 min | corrigé : mémoire du créneau `resume_avis_suivi`, un compte en échec n'est plus retenté avant le créneau suivant ; test |
+| 2 | mineur | `lib/cron-resume-avis.js`, `lib/avis/resume.js`, `api/avis.js` | une référence réécrite à nombre de biens constant vide la page du compte jusqu'au créneau suivant | corrigé : contrôle complet au moins une fois par heure ; test |
+| 3 | mineur | `api/avis.js`, `lib/avis/resume.js` (+ `lib/stats-avis.js` en preuve) | compte sans aucun bien référencé, avis orphelins : « 0 avis » | limite documentée (§10.5) : état transitoire de bascule |
+| 4 | mineur | `lib/avis/resume.js` | « migration absente » attrapait aussi une colonne absente | corrigé : codes seuls (PGRST202/205, 42P01, 42883), log à la lecture ; test |
+| 5 | mineur | `scripts/remplir-resume-avis.js` | à blanc, l'alarme des sources inconnues écrivait un incident | corrigé dans le writer : pas d'alarme à blanc ; test |
+| 6 | mineur | `api/cron.js` | un passage interrompu ne se voyait nulle part | corrigé : `results.resumeAvisBudgetAtteint`, alerte unique si le créneau n'est pas fini deux heures après ; test |
+| 7 | mineur | `api/cron.js` | « deux lectures » annoncées, il y en a trois | corrigé (commentaire et §10.4) |
+| 8 | mineur | `tests/avis-endpoint.test.js` | le test « recalcul en échec » passait par un `TypeError`, pas par un refus de la base | corrigé : la fonction SQL est appelée et refuse ; second test pour l'exception |

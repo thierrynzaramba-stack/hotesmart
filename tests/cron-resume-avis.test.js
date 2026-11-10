@@ -8,7 +8,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { calculerResumesDus, debutDuCreneau, MARQUEUR_CRENEAU, MARQUEUR_BIENS } = require('../lib/cron-resume-avis')
+const { calculerResumesDus, debutDuCreneau, MARQUEUR_CRENEAU, MARQUEUR_BIENS, MARQUEUR_SUIVI } = require('../lib/cron-resume-avis')
 
 const iso = (s) => new Date(Date.parse(s)).toISOString()
 
@@ -86,6 +86,7 @@ const T = Date.parse('2026-11-10T05:20:00Z')        // 06:20 a Paris
 const CRENEAU = '2026-11-10T05:00:00.000Z'
 const AVANT = '2026-11-09T17:05:00.000Z'             // calcul du creneau precedent
 const APRES = '2026-11-10T05:10:00.000Z'             // deja calcule dans ce creneau
+const DIX_MIN_AVANT = '2026-11-10T05:10:00.000Z'     // dernier controle complet des biens
 const B = (user, ref) => ({ id: `p-${user}-${ref}`, user_id: user, provider_property_id: ref })
 const R = (user, ref, quand) => ({ user_id: user, property_id_ref: ref, periode: 'toujours', calcule_le: quand })
 
@@ -133,7 +134,7 @@ test('créneau fini et aucun bien nouveau : trois lectures, aucun calcul', async
   const sb = fauxBase({
     biens: [B('U1', 'R1')],
     resume: [R('U1', 'R1', AVANT)],
-    marqueurs: { [MARQUEUR_CRENEAU]: { last_run: CRENEAU }, [MARQUEUR_BIENS]: { last_run: AVANT, total_messages: 1 } }
+    marqueurs: { [MARQUEUR_CRENEAU]: { last_run: CRENEAU }, [MARQUEUR_BIENS]: { last_run: DIX_MIN_AVANT, total_messages: 1 } }
   })
   const k = calculateur(sb)
   const bilan = await calculerResumesDus({ errors: [] }, { supabase: sb, now: () => T, calculer: k.calculer })
@@ -240,7 +241,7 @@ test('un bien nouveau fait calculer SON compte au tick suivant, et seulement lui
   const sb = fauxBase({
     biens: [B('U1', 'R1'), B('U2', 'R2'), B('U2', 'R9')],
     resume: [R('U1', 'R1', APRES), R('U2', 'R2', APRES)],
-    marqueurs: { [MARQUEUR_CRENEAU]: { last_run: CRENEAU }, [MARQUEUR_BIENS]: { last_run: AVANT, total_messages: 2 } }
+    marqueurs: { [MARQUEUR_CRENEAU]: { last_run: CRENEAU }, [MARQUEUR_BIENS]: { last_run: DIX_MIN_AVANT, total_messages: 2 } }
   })
   const k = calculateur(sb)
   const bilan = await calculerResumesDus({ errors: [] }, { supabase: sb, now: () => T, calculer: k.calculer })
@@ -256,4 +257,77 @@ test('premier passage après la mise en service : tous les comptes sont calculé
   assert.deepStrictEqual(k.appels, ['U1', 'U2'], 'le contrôle des biens neufs ne refait pas ce que le créneau vient de faire')
   assert.strictEqual(sb.logs.find(l => l.id === MARQUEUR_CRENEAU).last_run, CRENEAU)
   assert.strictEqual(sb.logs.find(l => l.id === MARQUEUR_BIENS).total_messages, 2)
+})
+
+// ─── Les constats de la revue du lot ────────────────────────────────────────
+test('constat 1 : un compte qui échoue LENTEMENT n\'affame pas les autres, et n\'alerte qu\'une fois par créneau', async () => {
+  let t = T
+  const sb = fauxBase({ biens: [B('U1', 'R1'), B('U2', 'R2'), B('U3', 'R3')] })
+  const k = calculateur(sb, { U1: () => { t += 11000; return { ecrit: false, erreur: 'avis' } } })
+  const passage = async () => {
+    const results = { errors: [] }
+    await calculerResumesDus(results, { supabase: sb, now: () => t, calculer: k.calculer })
+    return results
+  }
+  const r1 = await passage()
+  assert.deepStrictEqual(k.appels, ['U1'], 'premier tick : U1 mange le budget')
+  assert.strictEqual(r1.errors.length, 1)
+  assert.strictEqual(r1.resumeAvisBudgetAtteint, true)
+  t += 5 * 60 * 1000
+  const r2 = await passage()
+  assert.deepStrictEqual(k.appels, ['U1', 'U2', 'U3'], 'tick suivant : U1 attend le créneau suivant, les autres passent')
+  assert.deepStrictEqual(r2.errors, [], 'pas de seconde alerte pour U1')
+  assert.strictEqual(sb.logs.find(l => l.id === MARQUEUR_CRENEAU).last_run, CRENEAU)
+  // Le creneau suivant le retente.
+  t = Date.parse('2026-11-10T17:05:00Z')
+  await passage()
+  assert.strictEqual(k.appels.filter(u => u === 'U1').length, 2)
+})
+
+test('constat 2 : une référence réécrite à nombre de biens constant est rattrapée dans l\'heure', async () => {
+  const sb = fauxBase({
+    biens: [B('U1', 'R1'), B('U2', 'NOUVELLE-REF')],
+    resume: [R('U1', 'R1', APRES), R('U2', 'ANCIENNE-REF', APRES)],
+    marqueurs: { [MARQUEUR_CRENEAU]: { last_run: CRENEAU }, [MARQUEUR_BIENS]: { last_run: DIX_MIN_AVANT, total_messages: 2 } }
+  })
+  const k = calculateur(sb)
+  await calculerResumesDus({ errors: [] }, { supabase: sb, now: () => T, calculer: k.calculer })
+  assert.deepStrictEqual(k.appels, [], 'dans l\'heure du dernier contrôle, le nombre seul décide')
+  await calculerResumesDus({ errors: [] }, { supabase: sb, now: () => Date.parse(DIX_MIN_AVANT) + 3600 * 1000, calculer: k.calculer })
+  assert.deepStrictEqual(k.appels, ['U2'], 'une heure après, le contrôle complet le voit')
+})
+
+test('constat 6 : un créneau pas fini deux heures après s\'alerte, une seule fois', async () => {
+  const sb = fauxBase({ biens: [B('U1', 'R1')] })
+  const k = calculateur(sb)
+  const deuxHeuresApres = Date.parse(CRENEAU) + 2 * 3600 * 1000 + 60000
+  const tick = async () => {
+    const results = { errors: [] }
+    await calculerResumesDus(results, { supabase: sb, now: () => deuxHeuresApres, resteMs: () => 10000, calculer: k.calculer })
+    return results
+  }
+  const r1 = await tick()
+  assert.strictEqual(r1.errors.length, 1)
+  assert.match(r1.errors[0].error, /creneau de 06:00 pas fini/)
+  assert.deepStrictEqual((await tick()).errors, [], 'une fois par créneau')
+  assert.deepStrictEqual(k.appels, [])
+})
+
+test('la mémoire du créneau illisible : on ne travaille pas, on le dit', async () => {
+  const sb = fauxBase({ biens: [B('U1', 'R1')] })
+  const lire = sb.from.bind(sb)
+  let n = 0
+  sb.from = (t) => {
+    const c = lire(t)
+    if (t !== 'cron_logs') return c
+    const ms = c.maybeSingle
+    c.maybeSingle = async () => (++n === 2 ? { data: null, error: { message: 'timeout' } } : ms())
+    return c
+  }
+  const k = calculateur(sb)
+  const results = { errors: [] }
+  const bilan = await calculerResumesDus(results, { supabase: sb, now: () => T, calculer: k.calculer })
+  assert.strictEqual(bilan.skipped, 'suivi_illisible')
+  assert.deepStrictEqual(k.appels, [])
+  assert.strictEqual(results.errors.length, 1)
 })
