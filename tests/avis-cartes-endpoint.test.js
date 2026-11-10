@@ -29,7 +29,10 @@ const jour = n => new Date(Date.now() + n * 86400000).toISOString()
 const j10 = n => jour(n).slice(0, 10)
 
 function preparer ({ user = PROD, profil = null, permissions = null, avis = [], evaluations = [], snapshots = [], menages = [], prestataires = [] } = {}) {
-  const etat = { requetes: [] }
+  // `resume_bien_avis` : vide tant qu'un test ne l'a pas rempli par le VRAI
+  // writer (`remplirResume`) — l'ecran lit les chiffres, il ne les calcule plus.
+  const resume = []
+  const etat = { requetes: [], resume }
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: user } }, error: null }) },
     from (nom) {
@@ -83,6 +86,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         else if (nom === 'guest_evaluations') lignes = evaluations
         else if (nom === 'bookings_snapshot') lignes = snapshots
         else if (nom === 'menages') lignes = menages
+        else if (nom === 'resume_bien_avis') lignes = resume
         else if (nom === 'profiles') {
           // Deux usages : la garde (profil du membre) et le nom des prestataires.
           if (q._ins.length) lignes = prestataires
@@ -105,7 +109,19 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
   const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
   require.cache[abs] = m
   for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
+  etat.client = client
   return etat
+}
+
+// ⚠ LES CHIFFRES DE LA PAGE SONT CEUX DU WRITER (lot Avis V5, etape 2). Ce
+// test les fait ecrire par le VRAI `calculerResumeAvis`, sur les memes avis que
+// les cartes : les regles de population (masque, objet vide) restent donc
+// prouvees de bout en bout, de la ligne d'avis au chiffre servi.
+async function remplirResume (etat, userId = PROD) {
+  const { calculerResumeAvis } = require('../lib/avis/resume')
+  const r = await calculerResumeAvis(etat.client, { userId, aBlanc: true, alarme: async () => {} })
+  etat.resume.push(...r.lignes.map(l => ({ ...l, user_id: userId, calcule_le: r.calcule_le })))
+  return r
 }
 const reponse = () => { const r = { code: null, body: null }; r.status = c => { r.code = c; return r }; r.json = b => { r.body = b; return r }; r.setHeader = () => {}; return r }
 const appeler = async (query, headers = {}) => {
@@ -120,7 +136,8 @@ const EVAL = { id: 'e1', user_id: PROD, booking_uid: 'u-masque', property_id: BI
 const SNAP = { user_id: PROD, booking_id: 'u-masque', property_id: REF_A, snapshot: { firstName: 'Angela', lastName: 'X', arrival: j10(-4), departure: j10(-3) } }
 
 test('LE TEST QUI COMPTE (points A, C, E) : le titulaire — une carte par sejour, trois sections, et le masque ne compte ni au total ni a la note', async () => {
-  preparer({ avis: [avisDe('a1', { overall_score: 8 }), MASQUE, avisDe('vieux', { received_at: jour(-90), overall_score: 10 })], evaluations: [EVAL], snapshots: [SNAP] })
+  const etat = preparer({ avis: [avisDe('a1', { overall_score: 8 }), MASQUE, avisDe('vieux', { received_at: jour(-90), overall_score: 10 })], evaluations: [EVAL], snapshots: [SNAP] })
+  await remplirResume(etat)
   const r = await appeler({ periode: 'toujours' })
   assert.equal(r.code, 200)
   assert.deepEqual(r.body.cartes.attente.map(c => c.cle), ['sejour:u-masque'])
@@ -200,7 +217,8 @@ test('LE TEST QUI COMPTE : un objet d avis VIDE ne fait PAS de carte, et ne comp
   // recu » dans la tuile, et « 0/10 » affiche — pendant que /logements disait
   // « Aucun avis » pour le meme bien.
   const VIDE = avisDe('objet-vide', { overall_score: null, content: null, content_public: null, is_hidden: false })
-  preparer({ avis: [avisDe('a1', { overall_score: 8 }), VIDE] })
+  const etat = preparer({ avis: [avisDe('a1', { overall_score: 8 }), VIDE] })
+  await remplirResume(etat)
   const r = await appeler({ periode: 'toujours', anciens: '1' })
   assert.equal(r.code, 200)
   const toutes = [...r.body.cartes.attente, ...r.body.cartes.recents, ...(r.body.cartes.anciens || [])]
@@ -229,4 +247,52 @@ test('LE TEST QUI COMPTE : plus AUCUN « /10 » ne descend vers l ecran', async 
   assert.ok(!/"note":/.test(brut), 'le champ `note` sur 10 ne descend plus : il invitait a reconvertir')
   const carte = [...r.body.cartes.recents, ...r.body.cartes.attente][0]
   assert.equal(carte.avis[0].note_sur_5, 4.5)
+})
+
+// ─── Les chiffres viennent du résumé (lot Avis V5, étape 2 ; spec §10.5) ────
+test('LE TEST QUI COMPTE : les chiffres sont LUS dans le résumé — plus aucun comptage d avis à la lecture', async () => {
+  const etat = preparer({ avis: [avisDe('a1', { overall_score: 8 })] })
+  const ecrit = await remplirResume(etat)
+  etat.requetes.length = 0
+  const r = await appeler({ periode: '30j' })
+  assert.equal(r.code, 200)
+  assert.equal(r.body.stats.total, 1)
+  assert.equal(r.body.stats.calcule_le, ecrit.calcule_le, 'l heure du calcul part avec les chiffres')
+  const comptages = etat.requetes.filter(q => q.table === 'ota_reviews' && (q._head || q._count === 'exact'))
+  assert.equal(comptages.length, 0, 'aucun comptage d avis : les quatre comptages de ratioProprete ont disparu')
+  const notes = etat.requetes.filter(q => q.table === 'ota_reviews' && (q._gts || []).some(([c]) => c === 'overall_score'))
+  assert.equal(notes.length, 0, 'aucune lecture des notes : notesDuPerimetre a disparu de l ecran')
+  assert.equal(etat.requetes.filter(q => q.table === 'resume_bien_avis').length, 1, 'une lecture du résumé')
+})
+
+test('sans résumé : « pas encore calculé », jamais un zéro', async () => {
+  preparer({ avis: [avisDe('a1')] })
+  const r = await appeler({ periode: '30j' })
+  assert.equal(r.code, 200)
+  assert.deepEqual(r.body.stats, { periode: '30j', motif: 'pas_encore_calcule' })
+})
+
+test('SECURITE : un membre limité ne lit que les lignes de SES biens, et un bien demandé seul ne lit que la sienne', async () => {
+  const etat = preparer({ ...membre({ avis: 'read', reservations: 'read', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }),
+    avis: [avisDe('a1', { overall_score: 10 }), avisDe('b1', { property_id_ref: REF_B, provider: 'beds24', ota: 'booking', overall_score: 2, ai_clean_verdict: 'remarque' })] })
+  await remplirResume(etat)
+  const r = await enTantQueMembre({ periode: 'toujours' })
+  assert.equal(r.code, 200)
+  assert.deepEqual([r.body.stats.total, r.body.stats.positif, r.body.stats.remarque, r.body.stats.note_sur_5], [1, 1, 0, 5], JSON.stringify(r.body.stats))
+  const lecture = etat.requetes.find(q => q.table === 'resume_bien_avis')
+  // Le perimetre part DANS la requete, tel que les cartes le posent : uuid et
+  // reference melanges (le trigger tient les deux), jamais la reference de B.
+  assert.equal(lecture._ins.length, 1)
+  assert.equal(lecture._ins[0][0], 'property_id_ref')
+  assert.ok(lecture._ins[0][1].includes(REF_A) && !lecture._ins[0][1].includes(REF_B), 'le périmètre part dans la requête')
+  assert.equal(lecture._f.user_id, PROD, 'le compte cible, jamais l identite du membre')
+})
+
+test('un bien demandé sans ligne (logement neuf) : « pas encore calculé », pas les chiffres des autres', async () => {
+  const etat = preparer({ avis: [avisDe('a1')] })
+  await remplirResume(etat)
+  etat.resume.splice(0, etat.resume.length, ...etat.resume.filter(l => l.property_id_ref !== REF_B))
+  const r = await appeler({ periode: 'toujours', bien: REF_B })
+  assert.equal(r.code, 200)
+  assert.equal(r.body.stats.motif, 'pas_encore_calcule')
 })

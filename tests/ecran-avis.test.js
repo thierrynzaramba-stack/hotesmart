@@ -50,7 +50,18 @@ const ARRIVEE_A = ilYa(7).slice(0, 10)
 const DEPART_A = ilYa(4).slice(0, 10)
 const SNAPSHOTS = [{ user_id: PROD, booking_id: 'resa-a1', snapshot: { firstName: 'Fabienne', lastName: 'Durand', arrival: ARRIVEE_A, departure: DEPART_A } }]
 
-function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVIS_A, AVIS_B], biens = [BIEN_A, BIEN_B], autoEnPanne = false, auto = [], evalsEnPanne = false, snapshots = SNAPSHOTS } = {}) {
+// Les chiffres de la page sont LUS dans `resume_bien_avis` (lot Avis V5,
+// etape 2) : une ligne par bien et par periode, comme le writer les ecrit.
+// ⚠ UNE DATE QU'AUCUN SEJOUR NE PEUT PORTER : les dates de sejour suivent
+// l'horloge, et un test refuse qu'une date de sejour descende sans le droit
+// `reservations`. Une heure de calcul le jour d'un sejour le ferait rougir a
+// J+4 (mesure par l'horloge decalee) pour une raison qui n'est pas la sienne.
+const CALCULE_LE = '2020-01-15T05:02:00.000Z'
+const ligneResume = (ref, periode, o = {}) => ({ user_id: PROD, property_id_ref: ref, periode, total: 1, positif: 1, remarque: 0,
+  rien_signale: 0, notes: 1, notes_micro: 4500000, calcule_le: CALCULE_LE, motif_non_calculable: null, ...o })
+const RESUME = ['15j', '30j', '6mois', 'toujours'].flatMap(p => [ligneResume(BIEN_A.provider_property_id, p), ligneResume(BIEN_B.provider_property_id, p)])
+
+function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVIS_A, AVIS_B], biens = [BIEN_A, BIEN_B], autoEnPanne = false, auto = [], evalsEnPanne = false, snapshots = SNAPSHOTS, resume = RESUME } = {}) {
   const etat = { tables: [], fetchs: 0 }
   // ⚠ CHAQUE LECTURE DU DOUBLE PASSE PAR `fetch`, comme supabase-js : sans ca,
   // le compteur de `Server-Timing` n'etait jamais traverse, et « 0 requêtes »
@@ -96,6 +107,11 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [AVI
         if (nom === 'bookings_snapshot') {
           let c = snapshots.filter(x => q.f.user_id == null || x.user_id === q.f.user_id)
           for (const i of q.ins) c = c.filter(x => i.v.includes(String(x[i.c])))
+          return Promise.resolve({ data: c, error: null })
+        }
+        if (nom === 'resume_bien_avis') {
+          let c = resume.filter(l => l.user_id === q.f.user_id && l.periode === q.f.periode)
+          for (const i of q.ins) c = c.filter(l => i.v.includes(String(l[i.c])))
           return Promise.resolve({ data: c, error: null })
         }
         if (nom === 'avis_auto_validation') {
@@ -145,6 +161,12 @@ test('le titulaire : UN appel rend les cartes, les chiffres, les biens (avec pho
   assert.deepEqual(Object.keys(res.body.cartes).sort(), ['anciens', 'attente', 'recents'])
   assert.equal(res.body.cartes.anciens, null, 'les anciens ne se lisent qu a l ouverture')
   assert.ok(res.body.stats && 'note_sur_5' in res.body.stats)
+  // Les chiffres sont LUS (lot Avis V5, etape 2) : la somme des deux lignes
+  // 30j, l'heure du calcul avec, et une seule lecture des avis — celle des
+  // cartes. Les quatre comptages et la lecture des notes ont disparu.
+  assert.deepEqual([res.body.stats.total, res.body.stats.note_sur_5, res.body.stats.calcule_le], [2, 4.5, CALCULE_LE])
+  assert.equal(etat.tables.filter(t => t === 'resume_bien_avis').length, 1)
+  assert.equal(etat.tables.filter(t => t === 'ota_reviews').length, 1, 'les avis ne sont lus que pour les cartes')
   assert.deepEqual(res.body.biens.map(b => [b.name, b.photo_url]), [['Colomiers', 'https://exemple.test/a.jpg'], ['La bulle', null]])
   assert.ok(Array.isArray(res.body.periodes) && res.body.periodes.includes('30j'))
   assert.deepEqual(res.body.publication_auto, { actifs: 1, total: 2 })

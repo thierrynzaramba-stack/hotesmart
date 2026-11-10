@@ -11,7 +11,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { calculerResumeAvis, recalculerApresGeste, MOTIF_INCOMPLET } = require('../lib/avis/resume')
+const { calculerResumeAvis, recalculerApresGeste, lireResumeAvis, MOTIF_INCOMPLET } = require('../lib/avis/resume')
 const { ratioProprete, notesDuPerimetre, PERIODES } = require('../lib/stats-avis')
 const { arrondiDixiemes, MICRO } = require('../lib/avis/echelle')
 const FAUX = require('./faux-postgrest')
@@ -35,7 +35,7 @@ function fauxBase ({ avis = [], biens = [], existantes = [], pannes = {}, maxRow
   const sb = {
     journal, resume, rpcs,
     from (table) {
-      const source = table === 'ota_reviews' ? avis : table === 'properties' ? biens : null
+      const source = table === 'ota_reviews' ? avis : table === 'properties' ? biens : table === 'resume_bien_avis' ? resume : null
       if (!source) throw new Error('faux : table inattendue ' + table)
       const appel = { table, eqs: [], ins: [], gts: [], gtes: [], ors: [], nonNuls: [], tris: [], head: false, count: null, limite: null }
       journal.push(appel)
@@ -58,6 +58,7 @@ function fauxBase ({ avis = [], biens = [], existantes = [], pannes = {}, maxRow
       }
       const repondre = () => {
         if (pannes[table]) return { data: null, count: null, error: pannes[table] }
+        if (table === 'resume_bien_avis' && pannes.lectureResume) return { data: null, count: null, error: pannes.lectureResume }
         const tous = retenues()
         const n = Math.min(appel.limite == null ? Infinity : appel.limite, maxRows)
         return {
@@ -380,4 +381,67 @@ test('parité : la somme des lignes rend ratioProprete et notesDuPerimetre, pour
       assert.ok(ratio.total > 0 || periode === '15j', qui + ' : le jeu doit compter quelque chose')
     }
   }
+})
+
+// ─── La lecture de l'écran ──────────────────────────────────────────────────
+// Le writer ecrit, l'ecran lit : un aller-retour par le meme double prouve que
+// la somme lue rend les chiffres de `ratioProprete` / `notesDuPerimetre`.
+async function ecrire (avis, biens = [B('R1'), B('R2')]) {
+  const sb = fauxBase({ biens, avis })
+  const r = await calculerResumeAvis(sb, { userId: U, maintenant: T0, alarme: sansAlarme })
+  assert.strictEqual(r.ecrit, true)
+  return sb
+}
+
+test('lecture : la somme des lignes, une note arrondie une fois, l\'heure du calcul', async () => {
+  const sb = await ecrire([A({ property_id_ref: 'R1', overall_score: 9 }), A({ property_id_ref: 'R2', overall_score: 8, ai_clean_verdict: 'remarque' })])
+  const s = await lireResumeAvis(sb, { userId: U, periode: '30j', refs: null, attendues: ['R1', 'R2'] })
+  assert.deepStrictEqual(
+    [s.total, s.positif, s.remarque, s.rien_signale, s.non_analyses, s.notes, s.note_sur_5, s.calcule_le],
+    [2, 1, 1, 0, 0, 2, 4.3, new Date(T0).toISOString()])
+  const seul = await lireResumeAvis(sb, { userId: U, periode: '30j', refs: ['R2'] })
+  assert.deepStrictEqual([seul.total, seul.note_sur_5], [1, 4])
+  const lecture = sb.journal.filter(a => a.table === 'resume_bien_avis').pop()
+  assert.ok(lecture.eqs.some(([c, v]) => c === 'user_id' && v === U))
+  assert.deepStrictEqual(lecture.ins, [['property_id_ref', ['R2']]])
+})
+
+test('lecture : un bien attendu sans ligne, ou un compte jamais calculé, rend « pas encore calculé »', async () => {
+  const sb = await ecrire([A()], [B('R1')])
+  assert.strictEqual((await lireResumeAvis(sb, { userId: U, periode: '30j', refs: null, attendues: ['R1', 'NEUF'] })).motif, 'pas_encore_calcule')
+  assert.strictEqual((await lireResumeAvis(sb, { userId: U, periode: '30j', refs: ['NEUF'] })).motif, 'pas_encore_calcule')
+  assert.strictEqual((await lireResumeAvis(fauxBase(), { userId: U, periode: '30j', refs: null })).motif, 'pas_encore_calcule')
+})
+
+test('lecture : aucun bien attendu et aucune ligne, c\'est zéro — pas une attente sans fin', async () => {
+  const s = await lireResumeAvis(fauxBase(), { userId: U, periode: '30j', refs: ['uuid-sans-ligne'], attendues: [] })
+  assert.deepStrictEqual([s.total, s.notes, s.note_sur_5, s.motif], [0, 0, null, undefined])
+})
+
+test('lecture : une ligne non calculable rend son motif, jamais une somme partielle', async () => {
+  const avis = []
+  for (let i = 0; i < 1500; i++) avis.push(A())
+  const sb = fauxBase({ biens: [B('R1')], avis, maxRows: 900 })
+  await calculerResumeAvis(sb, { userId: U, maintenant: T0, alarme: sansAlarme })
+  assert.strictEqual((await lireResumeAvis(sb, { userId: U, periode: 'toujours', refs: null })).motif, MOTIF_INCOMPLET)
+})
+
+test('lecture : l\'heure affichée est celle de la ligne la PLUS ANCIENNE', async () => {
+  const sb = await ecrire([A({ property_id_ref: 'R1' }), A({ property_id_ref: 'R2' })])
+  const r2 = sb.resume.find(l => l.property_id_ref === 'R2' && l.periode === '30j')
+  r2.calcule_le = new Date(T0 - 3600 * 1000).toISOString()
+  const s = await lireResumeAvis(sb, { userId: U, periode: '30j', refs: null })
+  assert.strictEqual(s.calcule_le, r2.calcule_le)
+})
+
+test('lecture : table absente = pas encore calculé ; autre panne = erreur dite', async () => {
+  const absente = fauxBase({ pannes: { lectureResume: { code: 'PGRST205', message: 'Could not find the table' } } })
+  assert.strictEqual((await lireResumeAvis(absente, { userId: U, periode: '30j' })).motif, 'pas_encore_calcule')
+  const panne = fauxBase({ pannes: { lectureResume: { message: 'timeout' } } })
+  assert.strictEqual((await lireResumeAvis(panne, { userId: U, periode: '30j' })).erreur, true)
+})
+
+test('lecture : sans compte, elle refuse ; une période inconnue aussi', async () => {
+  await assert.rejects(() => lireResumeAvis(fauxBase(), { periode: '30j' }), /userId requis/)
+  await assert.rejects(() => lireResumeAvis(fauxBase(), { userId: U, periode: '3ans' }), /periode inconnue/)
 })

@@ -502,9 +502,16 @@ global. Zéro écart exigé.
 - Réponse : `stats: { note_sur_5, notes, total, positif, remarque,
   rien_signale, non_analyses, periode, depuis, calcule_le }`, ou
   `{ motif }` quand ce n'est pas calculable.
-- Aucune ligne pour le périmètre : motif `pas_encore_calcule`. Des lignes
-  d'heures différentes (un bien calculé plus tard) : `calcule_le` = **la plus
-  ancienne** — l'âge d'un chiffre est celui de sa partie la plus vieille.
+- Un **bien attendu sans ligne** (logement neuf pas encore vu par le calcul),
+  ou un compte jamais calculé : motif `pas_encore_calcule`. Les références
+  attendues sont celles des **biens** du périmètre (`properties`), pas la liste
+  du périmètre elle-même : `refsDuPerimetre` y mélange les uuid et les
+  références (tenues par trigger), et un uuid n'a jamais de ligne — l'attendre
+  ferait dire « pas encore calculé » pour toujours. Le filtre de lecture, lui,
+  reste la liste du périmètre telle que les cartes la posent : rien n'est
+  élargi. Des lignes d'heures différentes (un bien calculé plus tard) :
+  `calcule_le` = **la plus ancienne** — l'âge d'un chiffre est celui de sa
+  partie la plus vieille. Table absente (migration pas collée) : même motif.
 
 ### 10.6 L'écran
 
