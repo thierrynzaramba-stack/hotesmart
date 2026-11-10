@@ -573,6 +573,6 @@ ce placement (jsdom ne mesure pas un `sticky`), éprouvé par mutation.
 0,96 s** côté serveur (`Server-Timing`), **14 requêtes**, 125 à 139 Ko
 (6,8 Ko compressés). Un geste complet — simulation 1,9 s, écriture 1,7 s,
 relecture 1,1 s — environ 4,5 s. **Décision de Thierry, 10 novembre 2026 :
-le résumé quotidien pré-calculé (Q4) fait l'objet d'un lot à part** ; l'écran
+le résumé quotidien pré-calculé (Q4) fait l'objet d'un lot à part** (dette 143) ; l'écran
 garde le calcul à l'ouverture d'ici là. Sur un compte réel, avec un historique
 de ventes, le calcul est probablement plus long : à mesurer en production.
