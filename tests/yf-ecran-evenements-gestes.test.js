@@ -768,3 +768,20 @@ test('le focus sur la section « sans événement » : « Annuler » revient à 
   assert.notEqual(b.w.document.activeElement, b.w.document.body, 'le focus retombe sur la page')
   assert.equal(b.w.document.activeElement, b.$('[data-retirer-ligne="o-2"]'))
 })
+
+test('LE TEST QUI COMPTE (recette du 10 novembre 2026) : l’éditeur est un enfant DIRECT du détail de la carte — sinon il ne reste pas en bas d’écran', async () => {
+  // ⚠ jsdom ne mesure pas un `sticky` : on garde ce qui le rend possible. Un
+  // élément collé ne monte que dans son parent ; enfermé dans `.yfe-gestes`
+  // (sous le calendrier), l'éditeur restait sous le bas d'un écran de
+  // portable, mesuré en recette sur staging (niveaux à 760 px, écran de 674).
+  const d = await reponseEcran()
+  const b = await monter({ ecran: async () => d, ecriture: async () => ({ corps: {} }) })
+  await ouvrirNoel(b)
+  await b.cliquer(nuitDe(b, SAM_19))
+  const ed = b.$('.yfe-ev--ouvert .yfe-editeur')
+  assert.ok(ed, 'l’éditeur n’apparaît pas')
+  assert.ok(ed.parentElement.classList.contains('yfe-ev__detail'), `parent : ${ed.parentElement.className}`)
+  assert.ok(ed.parentElement.querySelector(':scope > .yfe-cal'), 'le calendrier n’est pas dans le même parent')
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared/yield-evenements.css'), 'utf8')
+  assert.match(css, /\.yfe-editeur\s*\{[^}]*position:\s*sticky;[^}]*bottom:\s*0/, 'l’éditeur n’est plus collé en bas')
+})

@@ -655,9 +655,15 @@ export function rendreGestes (e, data, ui, fmt) {
       + `<p class="caption muted">${esc(fmt.t('yfe.chaque_annee_aide'))}</p>`
       + rendreGeste(ui.geste && ui.geste.source === 'choix' ? ui.geste : null, fmt) + `</div>`
   }
+  // ⚠ L'ÉDITEUR EST UN FRÈRE DU BLOC DES GESTES, PAS SON ENFANT (recette du
+  // 10 novembre 2026). Collé en bas d'écran (`sticky`), il ne peut monter que
+  // dans son parent : enfermé dans `.yfe-gestes`, qui commence SOUS le
+  // calendrier, il restait sous le bas d'un écran de portable — l'hôte devait
+  // défiler pour atteindre les niveaux de nuits qu'il venait de choisir. Posé
+  // dans `.yfe-ev__detail`, il reste visible tant que le calendrier l'est.
   return `<div class="yfe-gestes"><div class="yfe-zone-ctl" role="group" aria-label="${esc(fmt.t('yfe.zone_aria'))}">${zone}</div>`
     + `<p class="caption muted">${esc(fmt.t('yfe.zone_aide'))}</p>`
-    + `<div class="yfe-larges">${larges}</div>${editeur}</div>`
+    + `<div class="yfe-larges">${larges}</div></div>${editeur}`
 }
 
 function rendreSansNuit (e, data, fmt, jourLong, ui = {}) {

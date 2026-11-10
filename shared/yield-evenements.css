@@ -120,7 +120,11 @@
 .yfe-larges { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
 /* ⚠ L'ÉDITEUR RESTE EN BAS D'ÉCRAN tant que la carte est visible (spec §9 :
    « l'éditeur s'ouvre en bas d'écran ») : on choisit des nuits en haut du
-   calendrier, on règle sans remonter ni descendre. */
+   calendrier, on règle sans remonter ni descendre.
+   ⚠ `sticky` NE MONTE QUE DANS SON PARENT : l'éditeur est donc un enfant
+   direct de `.yfe-ev__detail`, qui contient le calendrier — pas de
+   `.yfe-gestes`, sous le calendrier (recette du 10 novembre 2026 ; un test
+   garde ce placement, jsdom ne sachant pas mesurer un `sticky`). */
 .yfe-editeur {
   position: sticky; bottom: 0; z-index: 2;
   display: flex; flex-direction: column; gap: var(--gap-s);
@@ -132,7 +136,7 @@
 /* Une pastille de niveau est un bouton : sa couleur est celle du niveau
    (règle 1 : la pastille, jamais la ligne), son chiffre est écrit (règle 2). */
 .yfe-editeur__niv { border: 0; cursor: pointer; padding: 8px 12px; font-size: var(--fs-small); min-height: 40px; }
-.yfe-editeur__niv:disabled, .yfe-gestes .btn:disabled, .yfe-geste .btn:disabled, .yfe-retirer:disabled { opacity: .55; cursor: default; }
+.yfe-editeur__niv:disabled, .yfe-gestes .btn:disabled, .yfe-editeur .btn:disabled, .yfe-geste .btn:disabled, .yfe-retirer:disabled { opacity: .55; cursor: default; }
 .yfe-geste {
   display: flex; flex-direction: column; gap: 6px;
   padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-tile); background: var(--surface-2);
