@@ -432,3 +432,80 @@ test('canal e-mail pas encore branche (`differe`) : toujours aucune alerte de co
   assert.deepStrictEqual(vus.alertes.map(a => a.type), [])
   assert.strictEqual(vus.taches.length, 1)
 })
+
+// ─── Dette 141, review 2 ────────────────────────────────────────────────────
+
+test('LE TEST QUI COMPTE : jour de dos-a-dos, deux codes refuses sur le meme logement — DEUX alertes, chacune avec la cle de SA reservation', async () => {
+  // Review 2, constat 1 : l'anti-spam (type, logement) taisait celui qui
+  // ARRIVE. La cle par reservation est eprouvee sur le vrai \`reportIncident\`
+  // dans tests/founder-notify-cle.test.js.
+  const { mod, vus } = charger({ envoi: { ok: false, reason: 'pas de messagerie' } })
+  const partant = { ...arrivante(), id: 'PARTANT', arrival: jour(-2), departure: jour(0), firstName: 'Paul', lastName: 'Martin' }
+  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [partant, arrivante()], {})
+  const a = nonEnvoyes(vus)
+  assert.deepStrictEqual(a.map(x => x.cle).sort(), ['code_acces:ARRIVANTE', 'code_acces:PARTANT'])
+  assert.ok(a.some(x => /Ana Lopez/.test(x.detail)), 'celui qui arrive ce soir n est pas nomme')
+})
+
+test('l alerte du code incomplet porte la cle de SA reservation', async () => {
+  const { mod, vus } = charger()
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  assert.strictEqual(incompletes(vus)[0].cle, 'code_incomplet:ARRIVANTE')
+})
+
+test('LE TEST QUI COMPTE : envoi INCERTAIN (coupure pendant l envoi) — l alerte dit « PEUT-ÊTRE REÇU », pas « NON ENVOYÉ »', async () => {
+  // Review 2, constat 2 : le code a peut-etre ete recu ; « a lui transmettre
+  // vous-meme » faisait renvoyer un code deja recu.
+  const { mod, vus } = charger({ envoi: { ok: false, incertain: true, error: 'network_error' } })
+  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+  const a = nonEnvoyes(vus)
+  assert.strictEqual(a.length, 1)
+  assert.strictEqual(a[0].detail,
+    "Code d'accès de Ana Lopez PEUT-ÊTRE REÇU (coupure pendant l'envoi) : vérifiez le fil avant de le lui transmettre, code et texte dans vos tâches. Motif : network_error (réservation ARRIVANTE).")
+  assert.ok(!/NON ENVOYÉ/.test(a[0].detail))
+  assert.match(smsDe(a[0]), /vérifiez le fil avant de le lui transmettre/)
+  assert.doesNotMatch(LABELS.code_acces_non_envoye, /NON ENVOYÉ/, 'le libelle contredirait le texte')
+})
+
+test('envoi INCERTAIN et information manquante : « PEUT-ÊTRE REÇU », puis le motif et la reservation en fin de texte', async () => {
+  // Review 2, constat 3 : le motif du canal n'etait ecrit nulle part.
+  const { mod, vus } = charger({ envoi: { ok: false, incertain: true, error: 'network_error' } })
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  assert.deepStrictEqual(vus.alertes.map(a => a.type), ['message_envoye_incomplet'])
+  const d = vus.alertes[0].detail
+  assert.match(d, /PEUT-ÊTRE REÇU \(coupure pendant l'envoi\), il y manque Adresse : vérifiez le fil, puis complétez-le dans vos tâches avant de le lui transmettre\./)
+  assert.ok(!/NON ENVOYÉ/.test(d))
+  assert.ok(d.endsWith('Motif du canal : network_error (réservation ARRIVANTE).'), d)
+})
+
+test('refus du canal et information manquante : le motif du refus est ecrit en fin de texte', async () => {
+  const { mod, vus } = charger({ envoi: { ok: false, reason: 'pas de messagerie' } })
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  assert.ok(incompletes(vus)[0].detail.endsWith('Motif du canal : pas de messagerie (réservation ARRIVANTE).'))
+})
+
+test('code ENVOYÉ avec une information manquante : aucun motif du canal (il n y a pas eu de refus)', async () => {
+  const { mod, vus } = charger()
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  assert.ok(!/Motif du canal/.test(incompletes(vus)[0].detail))
+})
+
+test('le motif d un refus Beds24 (objet ou tableau) est lisible, pas « [object Object] »', async () => {
+  // Review 2, constat 4 : `sendViaBeds24` rend `error: result.errors`.
+  const { mod, vus } = charger({ envoi: { ok: false, error: [{ code: 1020, message: 'no messaging' }] } })
+  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+  const d = nonEnvoyes(vus)[0].detail
+  assert.ok(!d.includes('[object Object]'), d)
+  assert.match(d, /Motif : \[\{"code":1020,"message":"no messaging"\}\]/)
+})
+
+test('refus du canal et balise INCONNUE (fiche complete) : UNE alerte, celle du code incomplet', async () => {
+  // Review 2, constat 7 : seul le test de forme tenait ce cas.
+  const { mod, vus } = charger({
+    envoi: { ok: false, reason: 'pas de messagerie' },
+    modele: { ...MODELE, template_text: 'Arrivee a {heure_arrivee}. Code : {code_acces}' }
+  })
+  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+  assert.deepStrictEqual(vus.alertes.map(a => a.type), ['message_envoye_incomplet'])
+  assert.match(vus.alertes[0].detail, /NON ENVOYÉ par le canal/)
+})

@@ -17,7 +17,9 @@
 //    sejour vivant et RESSUSCITE le menage annule, avec la garde du jour ;
 //  - les modeles de messages du bien redeviennent eligibles pour ce sejour.
 //    Si la reservation est inconnue du canal (cas Booking.com ci-dessus),
-//    l'envoi ECHOUERA — incident `send_failure`, aucun impact voyageur.
+//    l'envoi ECHOUERA — incident `send_failure`, aucun impact voyageur ;
+//    pour le CODE D'ACCES, `code_acces_non_envoye` : un SMS au fondateur par
+//    sejour, des le premier refus (dette 141).
 //
 // ⚠ AUCUN EVENEMENT DE CHANGEMENT N'EST ECRIT, ET C'EST VOULU. Un UPDATE direct
 // ne passe pas par `saveBookingSnapshot`, donc `booking_change_events` reste
