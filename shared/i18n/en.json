@@ -892,6 +892,8 @@
   "messages.recipients_sms_ph": "Name: +33612345678 — one line per recipient",
   "messages.reject_failed": "Reject not saved, try again",
   "messages.retry": "Retry",
+  "messages.new_message": "New message",
+  "messages.live_paused": "Updates paused",
   "messages.review_ask": "Review {name}?",
   "messages.review_open": "Review this guest",
   "messages.review_published": "Review published",

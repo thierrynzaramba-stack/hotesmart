@@ -892,6 +892,8 @@
   "messages.recipients_sms_ph": "Nombre: +33612345678 — una línea por destinatario",
   "messages.reject_failed": "Rechazo no guardado, inténtelo de nuevo",
   "messages.retry": "Reintentar",
+  "messages.new_message": "Mensaje nuevo",
+  "messages.live_paused": "Actualización interrumpida",
   "messages.review_ask": "¿Evaluar a {name}?",
   "messages.review_open": "Evaluar a este viajero",
   "messages.review_published": "Evaluación publicada",

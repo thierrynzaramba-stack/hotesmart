@@ -604,9 +604,166 @@ async function archiverFil(req, res) {
   return res.status(200).json({ ok: true, booking_id: bookingId, archivee: archiver })
 }
 
+// ─── Le fil en direct (docs/specs/spec-messages-fil-en-direct.md §3) ────────
+// `GET /api/messages?direct=1[&fil=<bookId>&depuis=<instant ISO>]`.
+// La page la pose toutes les 5 secondes quand un fil est ouvert et l'onglet
+// affiche (une fois par minute sans fil, rien quand l'onglet est cache). Elle
+// rend SEULEMENT ce qui est neuf : les messages du fil insérés depuis `depuis`, ses
+// propositions en attente, et l'instant du message le plus recent du compte
+// HORS de ce fil — que la page compare au sien pour savoir si la LISTE doit
+// etre relue.
+//
+// ⚠ LA COLLECTION N'EST PAS RELUE ICI. Elle lit jusqu'a 2000 messages et
+// toutes les reservations du compte (31 Ko mesures le 9 novembre 2026) :
+// toutes les 5 secondes, ce serait 22 Mo par heure et par ecran pour presque
+// toujours rien. Trois lectures indexees, et la garde.
+//
+// ⚠ LE CURSEUR EST L'ORDRE D'INSERTION (`created_at`, pose par la base), PAS
+// `sent_at` (review 1, constat 3). Le webhook Channex, son import de
+// rattrapage, Beds24 et l'e-mail entrant ecrivent des lignes dont `sent_at` est
+// ANTERIEUR a leur insertion : un curseur sur `sent_at` sautait pour toujours
+// le message du voyageur arrive apres la reponse de l'hote. Le serveur rend
+// `curseur` (le `created_at` de la derniere ligne rendue) et la page le
+// renvoie tel quel — une seule horloge, celle de la base.
+// ⚠ MEMES BARRIERES QUE LA COLLECTION : compte cible, filtre de perimetre sur
+// les TROIS lectures — un membre limite au bien A n'apprend rien du bien B,
+// pas meme l'heure de son dernier message —, et la regle d'archivage.
+const DIRECT_MAX = 200
+const DIRECT_FENETRE_MS = 7 * 86400000
+// Un instant ISO 8601 complet : date, heure, jusqu'a six decimales, fuseau.
+// `[T]` et non `T(` : tests/imports-manquants.test.js lit `T(` comme un appel.
+const INSTANT_ISO = /^(\d{4})-(\d{2})-(\d{2})[T](\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?(Z|[+-](\d{2}):?(\d{2}))$/
+// ⚠ LA FORME NE SUFFIT PAS : V8 lit `2026-02-30` comme le 2 mars, Postgres le
+// refuse (« out of range ») — un 503 pour ce qui est une demande invalide
+// (review 3, constat 5). Le curseur passant TEL QUEL a la base, chaque champ
+// doit exister : le jour dans son mois, l'heure < 24, les minutes et secondes
+// < 60, le decalage < 24 h.
+function instantExiste (brut) {
+  const m = INSTANT_ISO.exec(brut)
+  if (!m) return false
+  const [a, mo, j, h, mi, se] = m.slice(1, 7).map(Number)
+  if (mo < 1 || mo > 12 || j < 1 || h > 23 || mi > 59 || se > 59) return false
+  if (new Date(Date.UTC(a, mo - 1, j)).getUTCDate() !== j) return false
+  if (m[9] !== undefined && (Number(m[9]) > 23 || Number(m[10]) > 59)) return false
+  return true
+}
+async function lireEnDirect (req, res) {
+  const t0 = Date.now()
+  const { compterRequetes, requetesJusquIci } = require('../lib/compte-requetes')
+  const repondre = (statut, corps) => {
+    const n = requetesJusquIci()
+    res.setHeader('Server-Timing', `db;desc="${n == null ? '?' : n} requêtes";dur=${Date.now() - t0}`)
+    return res.status(statut).json(corps)
+  }
+  const { resultat } = await compterRequetes(async () => {
+    const garde = await requirePermission(req, res, {
+      domaine: 'messages', niveau: 'read', compteDelegue: true })
+    if (!garde.ok) return
+    const userId = garde.accountUserId
+    const filtreOr = filtrePerimetreSql(refsDuPerimetre(garde.contexte))
+
+    const filBrut = req.query.fil == null ? '' : String(req.query.fil).trim()
+    const fil = filBrut || null
+    if (fil && (fil.length > 200 || fil === '__SIM_ENABLED__')) {
+      return repondre(400, { error: 'Conversation invalide' })
+    }
+    let depuis = null
+    if (fil) {
+      // ⚠ LE CURSEUR PASSE TEL QUEL, A LA MICROSECONDE (review 2, constat 4).
+      // PostgREST rend `created_at` avec six decimales ; le reparser par
+      // `new Date` le tronquait a la milliseconde, et `gt` rendait de nouveau la
+      // ligne du curseur a CHAQUE cycle. On valide la forme, strictement, et on
+      // ne reecrit l'instant que s'il faut le ramener a la fenetre.
+      const brut = String(req.query.depuis || '')
+      const t = new Date(brut).getTime()
+      if (!instantExiste(brut) || !Number.isFinite(t)) return repondre(400, { error: 'Instant invalide' })
+      // Une page restee ouverte longtemps ne relit pas tout l'historique : au
+      // plus 7 jours, et `complet: false` au-dela de 200 messages.
+      const plancher = Date.now() - DIRECT_FENETRE_MS
+      depuis = t < plancher ? new Date(plancher).toISOString() : brut
+    }
+    // Perimetre vide ou refuse : rien, et la meme forme.
+    if (filtreOr === '') return repondre(200, { messages: [], taches: [], dernier: null, complet: true, curseur: depuis })
+
+    // ⚠ `dernier` EST PRIS HORS DU FIL OUVERT : la page tient deja ce fil a
+    // jour par la lecture ci-dessous. Compter ses messages ferait relire la
+    // liste entiere (31 Ko) a chaque message du voyageur avec qui l'hote est
+    // justement en train d'echanger — pour rien.
+    const dernierQ = (() => {
+      let q = supabase.from('messages').select('created_at').eq('user_id', userId)
+      if (fil) q = q.neq('booking_id', fil)
+      if (filtreOr) q = q.or(filtreOr)
+      return q.order('created_at', { ascending: false }).limit(1)
+    })()
+    const lectures = [dernierQ]
+    if (fil) {
+      const lire = (colonnes) => {
+        // `gt` : la ligne du curseur est deja chez la page. Deux cas perdus,
+        // tous deux infimes, et dits pour qu'on ne les croie pas fermes :
+        // deux insertions a la MEME microseconde coupees par la borne des 200 ;
+        // et `created_at = now()` etant l'instant de DEBUT de la transaction,
+        // deux insertions du meme fil a quelques millisecondes, lues ENTRE
+        // leurs deux commits, font sauter la premiere (review 2, constat 6).
+        let q = supabase.from('messages').select(colonnes)
+          .eq('user_id', userId).eq('booking_id', fil).gt('created_at', depuis)
+        if (filtreOr) q = q.or(filtreOr)
+        return q.order('created_at', { ascending: true }).limit(DIRECT_MAX + 1)
+      }
+      lectures.push((async () => {
+        // `origine` (dette 66) avec repli, comme la collection.
+        let r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind, created_at, origine')
+        if (r.error && /origine/.test(r.error.message || '')) {
+          r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind, created_at')
+        }
+        return r
+      })())
+      let qt = supabase.from('agent_tasks')
+        .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, send_after, suspendu_le, modifie_le')
+        .eq('user_id', userId).eq('book_id', fil).eq('status', 'pending_validation')
+      if (filtreOr) qt = qt.or(filtreOr)
+      lectures.push(qt.order('created_at', { ascending: true }).order('id', { ascending: true }).limit(50))
+      lectures.push(clesArchivees(supabase, [userId]))
+    }
+    const [d, m, tch, arch] = await Promise.all(lectures)
+    if (d.error || (m && m.error) || (tch && tch.error)) {
+      console.error('[messages] lecture en direct', (d.error || (m && m.error) || tch.error).message)
+      return repondre(503, { error: 'Lecture impossible' })
+    }
+    const dernier = (d.data && d.data[0] && d.data[0].created_at) || null
+    if (!fil) return repondre(200, { dernier })
+
+    let lignes = m.data || []
+    const complet = lignes.length <= DIRECT_MAX
+    lignes = lignes.slice(0, DIRECT_MAX)
+    // Un bien archive ne sort plus de Messages (decision du 6 novembre 2026),
+    // en direct pas plus que dans la collection. `clesArchivees` ne leve
+    // jamais : une lecture ratee ne retire rien.
+    const archive = (ref) => arch && arch.cles && arch.cles.size && ref != null
+      && arch.cles.has(cleDuBien(userId, String(ref)))
+    // Le curseur suit la derniere ligne RENDUE (sur une lecture coupee a 200,
+    // le cycle suivant reprend a la 201e), sinon il ne bouge pas.
+    const curseur = lignes.length ? lignes[lignes.length - 1].created_at : depuis
+    if ([...lignes, ...(tch.data || [])].some(l => archive(l.property_id))) {
+      return repondre(200, { messages: [], taches: [], dernier, complet: true, curseur })
+    }
+    const messages = lignes.map(l => ({
+      sender: l.sender, direction: l.direction, body: l.body, sent_at: l.sent_at,
+      kind: l.kind, origine: l.origine || null
+    }))
+    return repondre(200, { messages, taches: tch.data || [], dernier, complet, curseur })
+  })
+  return resultat
+}
+
 module.exports = async function handler(req, res) {
+  // ⚠ DONNEE DE COMPTE : jamais en cache, et l'en-tete AVANT le premier refus,
+  // le 405 compris (regle « chargement rapide », point 4 ; dette 90).
+  res.setHeader('Cache-Control', 'private, no-store')
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Methode non autorisee' })
+  }
+  if (req.method === 'GET' && req.query && req.query.direct === '1') {
+    return await lireEnDirect(req, res)
   }
 
   // L'archivage manuel est une ECRITURE : sa propre garde, avant la lecture.
@@ -736,6 +893,10 @@ module.exports = async function handler(req, res) {
   try {
     // Fenetre 6 mois.
     const since = new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000).toISOString()
+    // L'instant de cette lecture, horloge SERVEUR : le point de depart du fil
+    // en direct (`lireEnDirect`, curseur sur l'ordre d'insertion). Pris AVANT
+    // les lectures : ce qui s'insere pendant qu'elles tournent est relu.
+    const luLe = new Date().toISOString()
 
     // ── 2 SELECT (zero N+1) : messages recents + snapshots du user ──
     const [msgRes, snapRes] = await Promise.all([
@@ -940,13 +1101,13 @@ module.exports = async function handler(req, res) {
       const hasMore = fenetre.length > limite
       const bord = hasMore ? fenetre[limite - 1] : null
       return res.status(200).json({
-        conversations: page, archivage, has_more: hasMore,
+        conversations: page, archivage, has_more: hasMore, lu_le: luLe,
         next_before: bord ? (bord.lastTime || '') : null,
         next_before_id: bord ? String(bord.bookId) : null
       })
     }
 
-    return res.status(200).json({ conversations, archivage })
+    return res.status(200).json({ conversations, archivage, lu_le: luLe })
 
   } catch (e) {
     console.error('[messages] exception', e.message)
