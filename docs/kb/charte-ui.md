@@ -132,6 +132,15 @@ avaient un fond **et** un accent par niveau. Ici l'encre du texte est `--text`
 ou `--bg`, le liseré est `--niveau-4` ou `--niveau-5` : tout s'exprime en
 jetons déjà là. **Source unique : `public/style.css`.**
 
+⚠ **ET UNE COPIE NOMMÉE DANS LE SOCLE V5 depuis le 9 novembre 2026** —
+décision de Thierry (option A) : `shared/theme.css` déclare les mêmes cinq
+valeurs, pour « Ce qui fait bouger vos prix » (`apps/yield/evenements.html`),
+la première page V5 qui montre des niveaux. `tests/palette-niveaux.test.js`
+exige que les **deux** déclarations restent égales à sa table : une copie qui
+diverge rougit comme une source amputée. En V5, l'encre du chiffre se prend
+dans l'échelle (`--niveau-5` sur les niveaux 1 à 4, `--niveau-1` sur le 5),
+jamais dans `--ink`, qui s'inverse en mode sombre.
+
 ⚠ **ET CE N'EST PAS UN CHOIX DE FICHIER, C'EST UNE MESURE.** Le brief
 demandait `theme.css`. Relevé le 3 novembre sur les six écrans YieldFlow :
 **aucun ne charge `shared/theme.css`**, tous ne chargent que

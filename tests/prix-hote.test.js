@@ -150,9 +150,14 @@ test('LE TEST QUI COMPTE : l ecran « Quand vos prix bougent » — ce qui RESTE
   assert.ok(pop.includes("id=\"ev-ajouter\"") && PAGE.includes('+ Ajouter une période'),
     'le geste d ajout existe toujours — derriere un bouton desormais')
 
-  // FOND CONSERVE 3 : les deux portes d'entree historiques.
-  assert.match(lire('apps/yield/evenements.html'), /location\.replace\('\/apps\/yield\/prix\?evenements=1'\)/)
+  // FOND CONSERVE 3 : la porte d'entree du menu. ⚠ L'ADRESSE
+  // /apps/yield/evenements N'EN EST PLUS UNE depuis le lot 4 (4a, 9 novembre
+  // 2026) : decision Q1 de Thierry, l'ecran devient une page entiere a cette
+  // adresse. La pop-up reste en service jusqu'a 4d, et le menu la vise
+  // DIRECTEMENT — c'est cette porte-la qui doit tenir jusqu'a la redirection.
   assert.match(lire('components/sidebar.js'), /href="\/apps\/yield\/prix\?evenements=1"/)
+  assert.match(lire('apps/yield/evenements.html'), /const ECRAN = '\/api\/ecran\/evenements'/,
+    'l adresse /apps/yield/evenements porte le nouvel ecran (lot 4)')
 
   // FOND RETIRE, ET IL NE DOIT PAS REVENIR PAR INADVERTANCE : deux codes
   // couleur dans la meme case etaient le defaut principal de l'ancien ecran.

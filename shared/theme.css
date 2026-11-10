@@ -132,6 +132,22 @@
   --page-pad: 48px;
   --page-max: 1200px;
 
+  /* L'ÉCHELLE D'ENCRE DES CINQ NIVEAUX (1 · Base → 5 · Exceptionnel).
+     ⚠ C'EST UNE COPIE, ET ELLE EST VOULUE : décision de Thierry du 9 novembre
+     2026 (option A), pour « Ce qui fait bouger vos prix », la première page
+     V5 qui montre des niveaux. La source d'origine est public/style.css (le
+     socle des écrans YieldFlow) ; les deux portent les MÊMES valeurs, et
+     tests/palette-niveaux.test.js exige que l'une et l'autre restent égales à
+     la table qu'il nomme. Un élément de structure : il ne se modifie qu'avec
+     Thierry (docs/kb/charte-ui.md §3). Pas de variante sombre : ce sont des
+     densités d'encre, et l'encre du chiffre se prend DANS l'échelle (le 5 sur
+     les quatre premiers, le 1 sur le dernier), jamais dans --ink qui s'inverse. */
+  --niveau-1: #F7F7F7;
+  --niveau-2: #EBEBEB;
+  --niveau-3: #D6D6D6;
+  --niveau-4: #8C8C8C;
+  --niveau-5: #222222;
+
   /* Ombres */
   --shadow-hover: 0 6px 20px rgba(0, 0, 0, .12);
   --shadow-dot: 0 1px 3px rgba(0, 0, 0, .18);   /* pastilles du planning ménages */
