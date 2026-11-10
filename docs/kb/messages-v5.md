@@ -217,3 +217,32 @@ Décision de Thierry, en DEUX recettes ; inventaire champ par champ : spec
 - Migration `2026-10-12-messages-origine` : staging puis prod (collage
   Thierry), prouvée par `scripts/verifier-migration-messages-origine.js`
   (colonne par son nom + liste fermée par un INSERT refusé).
+
+## Le fil en direct (10 novembre 2026)
+
+Spec : `docs/specs/spec-messages-fil-en-direct.md`. Demande de Thierry du
+9 novembre 2026 : échanger avec le voyageur sans recharger la page. Rythme
+décidé par Thierry le 10 novembre 2026 à 01:06.
+
+- **Fil ouvert, onglet affiché : une relecture toutes les 5 secondes**, par
+  `GET /api/messages?direct=1&fil=<bookId>&apres=<instant>`. Elle rend les
+  messages du fil depuis `apres` (`>=`, la page fond les doublons), ses
+  propositions en attente, et `dernier` : l'instant du message le plus récent
+  du compte **hors du fil ouvert**.
+- **La liste** se relit (`/api/messages?limit=50`, l'appel d'ouverture) au plus
+  une fois par minute, et seulement quand `dernier` dépasse ce qu'elle connaît.
+  Sans fil ouvert : une relecture par minute (`direct=1` seul).
+- **Onglet caché : aucun appel.** 15 minutes sans geste : une par minute.
+  Échecs : 20 s, 40 s, 80 s, puis 2 min ; trois de suite affichent « Mise à
+  jour interrompue · Réessayer » ; un 401 arrête la relecture.
+- **Ce que l'hôte tient n'est pas redessiné** : la saisie est hors du fil ; un
+  élément du fil qui a le focus, ou un menu ouvert, fait attendre le rendu
+  (pastille « Nouveau message »). Hôte remonté lire : le fil ne saute pas.
+- **Pas de doublon** : une bulle posée par la page après un envoi porte
+  `_local`, et sa ligne du cœur la remplace (même texte sortant, moins de
+  deux minutes d'écart). Le point de reprise ignore les bulles `_local`.
+- **Lu tant que c'est à l'écran** : un message du voyageur arrivé dans le fil
+  ouvert est marqué lu une fois (`POST action=lu`).
+- Règles pures dans `shared/messages-direct.js` ; gardes serveur (compte
+  cible, périmètre sur les trois lectures, archivage, `private, no-store` dès
+  le 405, `Server-Timing` avec le nombre de requêtes) dans `api/messages.js`.

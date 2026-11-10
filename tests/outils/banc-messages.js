@@ -47,8 +47,10 @@ const lire = (...p) => fs.readFileSync(path.join(RACINE, ...p), 'utf8')
 // est retire ici, il lit donc le symbole que `confirmer` vient de poser.
 // ⚠ `accueil-voyageur` AVANT `connaissance-vue` : « Le remplir » en importe
 // l'éditeur et l'écriture d'une info (lot « Accueil du voyageur »).
+// ⚠ `messages-direct` : le rythme et la fusion du fil en direct, evalues POUR
+// DE VRAI comme les autres (spec-messages-fil-en-direct.md).
 const PARTAGES = ['properties', 'aujourdhui', 'messages-programmes', 'calendrier-resa',
-  'confirmer', 'accueil-voyageur', 'connaissance-vue']
+  'confirmer', 'accueil-voyageur', 'connaissance-vue', 'messages-direct']
 const scriptPartage = (nom) => lire('shared', nom + '.js')
   .replace(/^import[\s\S]*?from\s*'[^']*'\s*$/gm, '')
   .replace(/^export default /gm, 'const __defaut_' + nom.replace(/-/g, '_') + ' = ')
@@ -290,6 +292,8 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       noteReglage, bienDuFilOuvert, init, PILULES, confirmerDansLaPage, fenetreOuverte, OCCUPEE,
       reporterLePanneauSurLeFil, editionPanneauNonEnregistree, remettreCasePause,
       ouvrirConnaissance, utiliserDansLaSaisie, ouvrir, modifierProposition,
+      // Le fil en direct : le cycle, son etat, et son demarrage.
+      relireDirect, planifierDirect, direct, demarrerDirect, changerDeFilDirect, indexerTaches,
       // Un GETTER, pas une valeur : la vue est montee APRES l'evaluation.
       get vueConnaissance () { return vueConnaissance }
     }

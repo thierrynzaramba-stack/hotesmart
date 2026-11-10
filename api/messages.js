@@ -604,9 +604,126 @@ async function archiverFil(req, res) {
   return res.status(200).json({ ok: true, booking_id: bookingId, archivee: archiver })
 }
 
+// ─── Le fil en direct (docs/specs/spec-messages-fil-en-direct.md §3) ────────
+// `GET /api/messages?direct=1[&fil=<bookId>&apres=<instant ISO>]`.
+// La page la pose toutes les 5 secondes quand un fil est ouvert et l'onglet
+// affiche (une fois par minute sans fil, rien quand l'onglet est cache). Elle
+// rend SEULEMENT ce qui est neuf : les messages du fil depuis `apres`, ses
+// propositions en attente, et l'instant du message le plus recent du compte
+// HORS de ce fil — que la page compare au sien pour savoir si la LISTE doit
+// etre relue.
+//
+// ⚠ LA COLLECTION N'EST PAS RELUE ICI. Elle lit jusqu'a 2000 messages et
+// toutes les reservations du compte (31 Ko mesures le 9 novembre 2026) :
+// toutes les 5 secondes, ce serait 22 Mo par heure et par ecran pour presque
+// toujours rien. Trois lectures indexees, et la garde.
+//
+// ⚠ MEMES BARRIERES QUE LA COLLECTION : compte cible, filtre de perimetre sur
+// les TROIS lectures — un membre limite au bien A n'apprend rien du bien B,
+// pas meme l'heure de son dernier message —, et la regle d'archivage.
+const DIRECT_MAX = 200
+const DIRECT_FENETRE_MS = 7 * 86400000
+async function lireEnDirect (req, res) {
+  const t0 = Date.now()
+  const { compterRequetes, requetesJusquIci } = require('../lib/compte-requetes')
+  const repondre = (statut, corps) => {
+    const n = requetesJusquIci()
+    res.setHeader('Server-Timing', `db;desc="${n == null ? '?' : n} requêtes";dur=${Date.now() - t0}`)
+    return res.status(statut).json(corps)
+  }
+  const { resultat } = await compterRequetes(async () => {
+    const garde = await requirePermission(req, res, {
+      domaine: 'messages', niveau: 'read', compteDelegue: true })
+    if (!garde.ok) return
+    const userId = garde.accountUserId
+    const filtreOr = filtrePerimetreSql(refsDuPerimetre(garde.contexte))
+
+    const filBrut = req.query.fil == null ? '' : String(req.query.fil).trim()
+    const fil = filBrut || null
+    if (fil && (fil.length > 200 || fil === '__SIM_ENABLED__')) {
+      return repondre(400, { error: 'Conversation invalide' })
+    }
+    let apres = null
+    if (fil) {
+      const t = new Date(String(req.query.apres || '')).getTime()
+      if (!Number.isFinite(t)) return repondre(400, { error: 'Instant invalide' })
+      // Une page restee ouverte longtemps ne relit pas tout l'historique : au
+      // plus 7 jours, et `complet: false` au-dela de 200 messages.
+      apres = new Date(Math.max(t, Date.now() - DIRECT_FENETRE_MS)).toISOString()
+    }
+    // Perimetre vide ou refuse : rien, et la meme forme.
+    if (filtreOr === '') return repondre(200, { messages: [], taches: [], dernier: null, complet: true })
+
+    // ⚠ `dernier` EST PRIS HORS DU FIL OUVERT : la page tient deja ce fil a
+    // jour par la lecture ci-dessous. Compter ses messages ferait relire la
+    // liste entiere (31 Ko) a chaque message du voyageur avec qui l'hote est
+    // justement en train d'echanger — pour rien.
+    const dernierQ = (() => {
+      let q = supabase.from('messages').select('sent_at').eq('user_id', userId)
+      if (fil) q = q.neq('booking_id', fil)
+      if (filtreOr) q = q.or(filtreOr)
+      return q.order('sent_at', { ascending: false }).limit(1)
+    })()
+    const lectures = [dernierQ]
+    if (fil) {
+      const lire = (colonnes) => {
+        let q = supabase.from('messages').select(colonnes)
+          .eq('user_id', userId).eq('booking_id', fil).gte('sent_at', apres)
+        if (filtreOr) q = q.or(filtreOr)
+        return q.order('sent_at', { ascending: true }).limit(DIRECT_MAX + 1)
+      }
+      lectures.push((async () => {
+        // `origine` (dette 66) avec repli, comme la collection.
+        let r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind, origine')
+        if (r.error && /origine/.test(r.error.message || '')) {
+          r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind')
+        }
+        return r
+      })())
+      let qt = supabase.from('agent_tasks')
+        .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, send_after, suspendu_le, modifie_le')
+        .eq('user_id', userId).eq('book_id', fil).eq('status', 'pending_validation')
+      if (filtreOr) qt = qt.or(filtreOr)
+      lectures.push(qt.order('created_at', { ascending: true }).order('id', { ascending: true }).limit(50))
+      lectures.push(clesArchivees(supabase, [userId]))
+    }
+    const [d, m, tch, arch] = await Promise.all(lectures)
+    if (d.error || (m && m.error) || (tch && tch.error)) {
+      console.error('[messages] lecture en direct', (d.error || (m && m.error) || tch.error).message)
+      return repondre(503, { error: 'Lecture impossible' })
+    }
+    const dernier = (d.data && d.data[0] && d.data[0].sent_at) || null
+    if (!fil) return repondre(200, { dernier })
+
+    let lignes = m.data || []
+    const complet = lignes.length <= DIRECT_MAX
+    lignes = lignes.slice(0, DIRECT_MAX)
+    // Un bien archive ne sort plus de Messages (decision du 6 novembre 2026),
+    // en direct pas plus que dans la collection. `clesArchivees` ne leve
+    // jamais : une lecture ratee ne retire rien.
+    const archive = (ref) => arch && arch.cles && arch.cles.size && ref != null
+      && arch.cles.has(cleDuBien(userId, String(ref)))
+    if ([...lignes, ...(tch.data || [])].some(l => archive(l.property_id))) {
+      return repondre(200, { messages: [], taches: [], dernier, complet: true })
+    }
+    const messages = lignes.map(l => ({
+      sender: l.sender, direction: l.direction, body: l.body, sent_at: l.sent_at,
+      kind: l.kind, origine: l.origine || null
+    }))
+    return repondre(200, { messages, taches: tch.data || [], dernier, complet })
+  })
+  return resultat
+}
+
 module.exports = async function handler(req, res) {
+  // ⚠ DONNEE DE COMPTE : jamais en cache, et l'en-tete AVANT le premier refus,
+  // le 405 compris (regle « chargement rapide », point 4 ; dette 90).
+  res.setHeader('Cache-Control', 'private, no-store')
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Methode non autorisee' })
+  }
+  if (req.method === 'GET' && req.query && req.query.direct === '1') {
+    return await lireEnDirect(req, res)
   }
 
   // L'archivage manuel est une ECRITURE : sa propre garde, avant la lecture.

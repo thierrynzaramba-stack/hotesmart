@@ -30,8 +30,8 @@ nouveau message s'ajoute en bas, sans recharger la page.
 
 **La liste des conversations : au plus une fois par minute**, et seulement si
 quelque chose a changé. Chaque relecture du fil rend aussi l'heure du message
-le plus récent du compte. Si elle a bougé, la première page de la liste se
-relit (`/api/messages?limit=50`, l'appel d'aujourd'hui), au plus une fois par
+le plus récent du compte HORS du fil ouvert (le fil, lui, est déjà à jour).
+Si elle a bougé, la première page de la liste se relit (`/api/messages?limit=50`, l'appel d'aujourd'hui), au plus une fois par
 minute. Sans fil ouvert (liste seule, au téléphone par exemple), la page pose
 la même question toutes les 60 secondes.
 
@@ -71,8 +71,9 @@ sur l'onglet (`visibilitychange`), avec une relecture immédiate.
 Une forme neuve du **même endpoint**, pas une fonction de plus (le projet
 Vercel a un plafond de 100 fonctions) :
 
-`GET /api/messages?fil=<bookId>&apres=<instant ISO>`, et sans `fil` pour la
-liste seule.
+`GET /api/messages?direct=1&fil=<bookId>&apres=<instant ISO>`, et
+`direct=1` seul pour la liste seule (code : le paramètre `direct` distingue
+cette lecture de la collection, qui se lit sans paramètre).
 
 Elle rend :
 - `messages` : les messages du fil postérieurs à `apres`, triés du plus ancien
@@ -81,8 +82,10 @@ Elle rend :
   (`booking_id, sent_at`).
 - `taches` : les propositions en attente du fil (`agent_tasks`,
   `pending_validation`, mêmes colonnes que la page lit aujourd'hui).
-- `dernier` : l'instant du message le plus récent du compte. Index
-  `messages_user_sent_idx` (`user_id, sent_at DESC`), `limit(1)`.
+- `dernier` : l'instant du message le plus récent du compte, **hors du fil
+  ouvert** (`neq booking_id`) : un message du voyageur avec qui l'hôte échange
+  ne fait pas relire la liste entière. Index `messages_user_sent_idx`
+  (`user_id, sent_at DESC`), `limit(1)`.
 
 **Gardes, toutes celles de la collection** : compte cible et filtre de
 périmètre (un membre limité au bien A n'apprend rien du bien B, pas même
@@ -128,7 +131,10 @@ résumé, jamais de cache.
 2. **Donnée non urgente = résumé** : sans objet, tout est temps réel.
 3. **Cache navigateur** : aucun. Messages et propositions se relisent.
 4. **`private, no-store`** : oui, posé avant le premier refus, 405 compris.
-5. **Fichiers statiques versionnés** : sans objet, aucun fichier neuf.
+5. **Fichiers statiques versionnés** : un module neuf, `shared/messages-direct.js`,
+   servi comme les autres modules partagés de la page (aucun en-tête de cache
+   long, pas dans le cache du service worker) ; les trois dictionnaires gagnent
+   2 clés, leur empreinte se calcule au déploiement.
 6. **Lecture tronquée à 1000 lignes** : bornée par construction (`limit(200)`,
    `complet: false` au-delà), jamais silencieuse.
 7. **Budget** : le premier affichage ne change pas. La relecture vise
@@ -138,22 +144,23 @@ résumé, jamais de cache.
    un compte peut garder la page ouverte toute la journée). Une relecture =
    **1 appel HTTP** ; côté serveur, la garde de droits fait **3 requêtes**
    (`auth.getUser`, le compte demandé, le profil — `lib/require-permission.js`)
-   et la relecture **3 lectures** en parallèle (messages du fil, propositions,
-   `dernier`), soit **environ 6 requêtes Supabase**. Compté au code, à
+   et la relecture **4 lectures** en parallèle (messages du fil, propositions,
+   `dernier`, biens archivés), soit **environ 7 requêtes Supabase** fil ouvert,
+   et **environ 4** pour la liste seule (garde + `dernier`). Compté au code, à
    confirmer en recette par `Server-Timing`.
 
    | situation de l'onglet | appels HTTP / minute | requêtes Supabase / minute | octets / minute |
    |---|---|---|---|
    | **caché** (autre onglet, fenêtre réduite, téléphone verrouillé) | **0** | **0** | **0** |
-   | affiché, fil ouvert, rien de neuf | 12 | ~72 | < 12 Ko (cible < 1 Ko par relecture) |
-   | affiché, fil ouvert, un message arrive ailleurs dans le compte | 12, + 1 relecture de la liste | ~72, + celles de `/api/messages?limit=50` | + 31 Ko, au plus une fois par minute |
-   | affiché, liste seule (téléphone, aucun fil ouvert) | 1 | ~6 | < 1 Ko |
-   | affiché, fil ouvert, 15 min sans geste (si D2 est retenu) | 1 | ~6 | < 1 Ko |
+   | affiché, fil ouvert, rien de neuf | 12 | ~84 | < 12 Ko (cible < 1 Ko par relecture) |
+   | affiché, fil ouvert, un message arrive ailleurs dans le compte | 12, + 1 relecture de la liste | ~84, + celles de `/api/messages?limit=50` | + 31 Ko, au plus une fois par minute |
+   | affiché, liste seule (téléphone, aucun fil ouvert) | 1 | ~4 | < 1 Ko |
+   | affiché, fil ouvert, 15 min sans geste (D2) | 1 | ~7 | < 1 Ko |
 
    **Une journée de 10 heures, page affichée en continu, fil ouvert** :
-   - quelqu'un s'en sert toute la journée : 7 200 appels, ~43 200 requêtes ;
+   - quelqu'un s'en sert toute la journée : 7 200 appels, ~50 400 requêtes ;
    - personne ne la touche après le premier quart d'heure (D2) : ~765 appels
-     (180 le premier quart d'heure, puis une par minute), ~4 600 requêtes ;
+     (180 le premier quart d'heure, puis une par minute), ~5 400 requêtes ;
    - **onglet caché toute la journée : rien.** La règle « onglet caché = aucun
      appel » est tenue par un test (§8), pas par l'intention.
 
@@ -174,7 +181,7 @@ résumé, jamais de cache.
    | AVANT, ouverture (prod, 9 novembre 2026) | 5 | 31 094 pour `/api/messages`, 255 613 pour la page | non mesuré |
    | AVANT, toutes les 5 s | 0 (rien ne se relit) | 0 | 0 |
    | APRÈS, ouverture | 5 attendus, inchangé | à mesurer en recette | |
-   | APRÈS, toutes les 5 s, rien de neuf | 1 attendu | à mesurer en recette, cible < 1 Ko | ~6 attendues (3 de garde + 3 lectures), à mesurer par `Server-Timing` |
+   | APRÈS, toutes les 5 s, rien de neuf | 1 attendu | à mesurer en recette, cible < 1 Ko | ~7 attendues (3 de garde + 4 lectures), à mesurer par `Server-Timing` |
    | APRÈS, onglet caché | 0 | 0 | 0 |
 
 ## 7. Mobile

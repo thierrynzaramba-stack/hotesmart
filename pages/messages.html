@@ -90,7 +90,17 @@
         <span data-bind="fil-menu"></span>
       </span>
     </div>
+    <!-- Le fil en direct (spec-messages-fil-en-direct.md) : la mention discrète
+         après trois relectures ratées, et la pastille d'un message arrivé
+         pendant que l'hôte lisait plus haut ou avait un élément du fil en main. -->
+    <p class="caption muted" style="margin: 0; padding: 4px 20px" data-bind="fil-direct-panne" hidden>
+      <span data-i18n="messages.live_paused"></span> · <button type="button" class="link caption" data-bind="fil-direct-reessayer" data-i18n="messages.retry"></button>
+    </p>
     <div class="msg-fil__deroule" data-list="fil" hidden></div>
+    <button type="button" class="btn btn--secondary" style="align-self: center; margin: 6px 0" data-bind="fil-nouveau" hidden>
+      <span data-i18n="messages.new_message"></span>
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(90 12 12)"/></svg>
+    </button>
     <div class="msg-vide" data-bind="fil-vide">
       <svg class="icon" style="width:36px;height:36px" aria-hidden="true"><use href="/shared/icons.svg#i-message"/></svg>
       <span data-i18n="messages.select"></span>
@@ -158,6 +168,7 @@ import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/s
 import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, reinitialiserMoment, libelleJour, libelleHeure, libelleDelai as libelleDelaiBrut }
   from '/shared/messages-programmes.js'
 import { departEvaluable } from '/shared/calendrier-resa.js'
+import { delaiDirect, listeARelire, apresDuFil, fusionnerMessages, fusionnerTaches } from '/shared/messages-direct.js'
 import { confirmerDansLaPage, OCCUPEE } from '/shared/confirmer.js'
 
 initErrorHandler()
@@ -768,7 +779,7 @@ async function lancerEnvoi (c, entree) {
       etat.enEdition = null
       if (x) { await cloreTache(x, 'done', entree.texte, c, 'ia_modifiee'); return }
     }
-    c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message', origine })
+    c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message', origine, _local: true })
     c.lastTime = new Date().toISOString()
     renderFil(); renderListe()
   } catch (err) {
@@ -981,7 +992,7 @@ async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
     }
   }
   if (statut === 'done' && c) {
-    c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message', origine })
+    c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message', origine, _local: true })
     c.lastTime = new Date().toISOString()
   }
   retirerTache(x)
@@ -3639,6 +3650,201 @@ function ouvrir (bookId) {
       .catch(e => logger.error('Messages', 'read_at', e))
   }
   renderListe(); renderFil()
+  changerDeFilDirect()
+}
+
+// ─── Le fil en direct (docs/specs/spec-messages-fil-en-direct.md) ──────────
+// Fil ouvert et onglet affiché : une relecture ÉTROITE toutes les 5 secondes
+// (`GET /api/messages?direct=1&fil=…&apres=…`), qui rend seulement ce qui est
+// neuf. Sans fil : une par minute, pour savoir si la liste a changé. Onglet
+// caché : AUCUN appel. 15 minutes sans geste : une par minute. Les règles de
+// rythme et de fusion vivent dans `shared/messages-direct.js`, testées sans
+// navigateur ; ici, l'appel et le rendu.
+const direct = {
+  minuteur: null, enCours: false, echecs: 0, arret: false,
+  dernierGeste: Date.now(),
+  dernierConnu: null,      // instant du message le plus récent que la LISTE connaît
+  derniereListe: 0,        // dernière relecture de la liste (au plus une par minute)
+  differe: false,          // un rendu attend que l'hôte ait fini avec un élément du fil
+  generation: 0            // change à chaque changement de fil : la réponse d'avant est jetée
+}
+const ongletVisible = () => document.visibilityState === 'visible'
+const conversationOuverte = () => etat.ouverte === null ? null
+  : etat.conversations.find(x => String(x.bookId) === String(etat.ouverte)) || null
+// L'instant le plus récent que la liste connaît : le point de départ de la comparaison.
+const plusRecentDeLaListe = () => etat.conversations.reduce((max, c) => {
+  const t = new Date(c.lastTime || 0).getTime()
+  return Number.isFinite(t) && t > max ? t : max
+}, 0)
+
+function planifierDirect () {
+  clearTimeout(direct.minuteur)
+  direct.minuteur = null
+  if (direct.arret) return
+  const d = delaiDirect({ visible: ongletVisible(), filOuvert: etat.ouverte !== null,
+    inactifDepuisMs: Date.now() - direct.dernierGeste, echecs: direct.echecs })
+  if (d == null) return
+  direct.minuteur = setTimeout(() => { relireDirect().finally(planifierDirect) }, d)
+}
+
+// ⚠ UNE RELECTURE À LA FOIS, ET JAMAIS ONGLET CACHÉ : c'est ce qui tient le
+// coût d'une page gardée ouverte toute la journée (spec §6).
+async function relireDirect () {
+  if (direct.enCours || direct.arret || !ongletVisible()) return
+  direct.enCours = true
+  const generation = direct.generation
+  const c = conversationOuverte()
+  const params = new URLSearchParams({ direct: '1' })
+  if (c) {
+    params.set('fil', String(c.bookId))
+    params.set('apres', apresDuFil(c.messages) || new Date(Date.now() - 7 * 86400000).toISOString())
+  }
+  try {
+    const r = await appel('/api/messages?' + params.toString())
+    direct.echecs = 0
+    montrerPanneDirect(false)
+    // Règle 6 : la réponse d'un fil qu'on a quitté entre-temps est jetée.
+    if (generation !== direct.generation) return
+    if (c && Array.isArray(r.messages)) appliquerFil(c, r)
+    if (r.dernier) await traiterDernier(r.dernier)
+    if (direct.differe) rafraichirFil()
+  } catch (e) {
+    // Session expirée : la relecture s'arrête (règle 5), le reste de la page
+    // dira la déconnexion au prochain geste.
+    if (e.status === 401) { direct.arret = true; return }
+    direct.echecs++
+    if (direct.echecs >= 3) montrerPanneDirect(true)
+    logger.warn && logger.warn('Messages', 'relecture en direct', e.message)
+  } finally {
+    direct.enCours = false
+  }
+}
+
+function appliquerFil (c, r) {
+  const f = fusionnerMessages(c.messages, r.messages)
+  const sejours = etat.conversations
+    .filter(x => x.lastNight && !STATUTS_SANS_SEJOUR.has(String(x.status || '').toLowerCase()))
+    .map(x => ({ id: x.bookId, propId: x.propertyId, departure: String(x.lastNight).slice(0, 10) }))
+  const servies = tachesOuvertes(Array.isArray(r.taches) ? r.taches : [], { bookings: sejours, aujourdHui: etat.aujourdHui })
+  const t = fusionnerTaches(etat.taches, c.bookId, servies, etat.enEdition && etat.enEdition.tacheId)
+  if (!f.ajoutes && !f.remplaces && !t.change) {
+    if (r.complet === false) direct.derniereListe = 0
+    return
+  }
+  c.messages = f.messages
+  const plusRecent = apresDuFil(c.messages)
+  if (plusRecent && (!c.lastTime || new Date(plusRecent) > new Date(c.lastTime))) c.lastTime = plusRecent
+  if (t.change) { etat.taches = t.taches; indexerTaches(); majBadge(); renderFiltres() }
+  // Règle 4 : un message du voyageur arrivé dans le fil ouvert, onglet
+  // affiché, est LU — une fois par arrivée, par le writer habituel.
+  if (f.entrants && ongletVisible() && peutEcrireMessages()) {
+    c.readAt = new Date().toISOString()
+    appel('/api/messages', { action: 'lu', booking_id: String(c.bookId) })
+      .catch(e => logger.error('Messages', 'read_at', e))
+  }
+  // Plus de 200 messages neufs d'un coup : la liste (qui porte le fil entier)
+  // se relit au prochain cycle, sans attendre la minute.
+  if (r.complet === false) direct.derniereListe = 0
+  rafraichirFil()
+  renderListe()
+}
+
+// Règles 1 et 2 : rien de ce que l'hôte tient en main n'est redessiné, et le
+// défilement est respecté.
+function rafraichirFil () {
+  const deroule = $('[data-list="fil"]')
+  const actif = document.activeElement
+  const enMain = (actif && actif !== document.body && deroule.contains(actif))
+    || deroule.querySelector('details[open]')
+  if (enMain) { direct.differe = true; montrerPastille(true); return }
+  direct.differe = false
+  const enBas = deroule.scrollHeight - deroule.scrollTop - deroule.clientHeight < 80
+  const position = deroule.scrollTop
+  renderFil()
+  if (enBas) { montrerPastille(false); return }
+  deroule.scrollTop = position
+  montrerPastille(true)
+}
+function montrerPastille (oui) { $('[data-bind="fil-nouveau"]').hidden = !oui }
+function montrerPanneDirect (oui) { $('[data-bind="fil-direct-panne"]').hidden = !oui }
+
+async function traiterDernier (dernier) {
+  if (direct.dernierConnu === null) direct.dernierConnu = new Date(plusRecentDeLaListe()).toISOString()
+  if (!listeARelire({ dernier, dernierConnu: direct.dernierConnu, derniereListe: direct.derniereListe })) return
+  direct.derniereListe = Date.now()
+  await relireListe(dernier)
+}
+
+// La PREMIÈRE page de la liste, l'appel d'aujourd'hui — au plus une fois par
+// minute, et seulement quand le serveur annonce du neuf. Les pages suivantes
+// déjà chargées restent ; le fil ouvert garde ses bulles locales.
+async function relireListe (dernier) {
+  const r = await appel(`/api/messages?limit=${PAGE}`)
+  const parId = new Map(etat.conversations.map(x => [String(x.bookId), x]))
+  const neuves = []
+  for (const n of r.conversations || []) {
+    const ancienne = parId.get(String(n.bookId))
+    if (!ancienne) { neuves.push(n); continue }
+    const messages = String(n.bookId) === String(etat.ouverte)
+      ? fusionnerMessages(ancienne.messages, n.messages).messages
+      : n.messages
+    Object.assign(ancienne, n, { messages, readAt: ancienne.readAt && n.readAt
+      ? (new Date(ancienne.readAt) > new Date(n.readAt) ? ancienne.readAt : n.readAt)
+      : (ancienne.readAt || n.readAt) })
+  }
+  if (neuves.length) etat.conversations.unshift(...neuves)
+  direct.dernierConnu = dernier
+  await rechargerTaches()
+  renderFiltres(); renderListe()
+  if (etat.ouverte !== null) rafraichirFil()
+}
+
+function changerDeFilDirect () {
+  direct.generation++
+  direct.differe = false
+  montrerPastille(false)
+  planifierDirect()
+}
+
+// Un geste dans la page : la page n'est pas oubliée. S'il la réveille d'une
+// heure d'inactivité, la relecture repart tout de suite au rythme du fil.
+function gesteDirect () {
+  const etaitInactive = Date.now() - direct.dernierGeste >= 15 * 60000
+  direct.dernierGeste = Date.now()
+  if (etaitInactive) relireDirect().finally(planifierDirect)
+}
+
+function demarrerDirect () {
+  direct.dernierConnu = new Date(plusRecentDeLaListe()).toISOString()
+  document.addEventListener('visibilitychange', () => {
+    if (ongletVisible()) relireDirect().finally(planifierDirect)
+    else { clearTimeout(direct.minuteur); direct.minuteur = null }
+  })
+  for (const type of ['keydown', 'pointerdown', 'wheel', 'touchstart']) {
+    document.addEventListener(type, gesteDirect, { passive: true, capture: true })
+  }
+  const deroule = $('[data-list="fil"]')
+  deroule.addEventListener('scroll', () => {
+    gesteDirect()
+    if (deroule.scrollHeight - deroule.scrollTop - deroule.clientHeight < 80 && !direct.differe) montrerPastille(false)
+  }, { passive: true })
+  $('[data-bind="fil-nouveau"]').addEventListener('click', () => {
+    if (direct.differe) {
+      // L'hôte demande à voir : on lâche ce qu'il tenait dans le fil.
+      if (document.activeElement && deroule.contains(document.activeElement)) document.activeElement.blur()
+      deroule.querySelectorAll('details[open]').forEach(d => { d.open = false })
+      direct.differe = false
+      renderFil()
+    }
+    deroule.scrollTop = deroule.scrollHeight
+    montrerPastille(false)
+  })
+  $('[data-bind="fil-direct-reessayer"]').addEventListener('click', () => {
+    direct.echecs = 0
+    montrerPanneDirect(false)
+    relireDirect().finally(planifierDirect)
+  })
+  planifierDirect()
 }
 
 // ─── Démarrage ──────────────────────────────────────────────────────────────
@@ -3703,7 +3909,7 @@ async function init () {
   document.querySelectorAll('[data-filtre]').forEach(b => b.addEventListener('click', () => {
     etat.filtre = b.dataset.filtre; renderFiltres(); renderListe()
   }))
-  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
+  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil(); changerDeFilDirect() })
   // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
   const zoneTexte = $('[data-bind="texte"]')
   zoneTexte.addEventListener('input', () => {
@@ -3782,6 +3988,7 @@ async function init () {
     etat.filtre = filtreDemande
     renderFiltres(); renderListe()
   }
+  demarrerDirect()
 }
 
 init().catch(e => logger.error('Messages', e.message, e))
