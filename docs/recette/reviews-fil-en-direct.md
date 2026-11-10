@@ -253,3 +253,143 @@ Arbre lu : /home/claude/hotesmart-direct — branche : messages-fil-en-direct �
 - `scenarios.test.js` (scénario A : constat 2 ; scénario B : constat 3)
 - `micro.test.js` + `harnais-exports.js` (constat 4)
 - `scenario-d.test.js` (constat 7)
+
+## Review 3 — reçue le 10 novembre 2026 (correctifs de la review 2 seulement) — LA DERNIÈRE
+
+- Lancée sur : `/home/claude/hotesmart-direct`, branche `messages-fil-en-direct`,
+  plage `6b467ecee765e672b1687dd584a6bcc7bf12a082..4a3f9c7ebc16e07ef56658f14a5a5aa8c86ad4dd`.
+- Contrôle d'arbre : arbre, branche et SHA déclarés conformes au brief.
+- Contrôle des fichiers cités : les neuf fichiers « du diff » sont exactement
+  ceux de `git diff --name-only` de la plage. Les quatre fichiers « lus pour
+  le contexte » sont hors du diff, déclarés comme tels ; chaque constat porte
+  sur un fichier du diff.
+- Exception du 27 octobre 2026 : c'est la dernière review. Ce qu'elle trouve
+  se corrige sans nouvelle review.
+- Seule retouche de transcription : les entités HTML du transport (`&amp;`,
+  `&gt;`, `&lt;`) sont rendues par leur caractère.
+
+### Rapport, mot pour mot
+
+Arbre lu : /home/claude/hotesmart-direct — branche : messages-fil-en-direct — SHA lu : 4a3f9c7ebc16e07ef56658f14a5a5aa8c86ad4dd
+
+**Fichiers cités**
+- Fichiers du diff : `pages/messages.html`, `shared/messages-direct.js`, `api/messages.js`, `tests/messages-direct-dom.test.js`, `tests/messages-direct-api.test.js`, `tests/messages-direct-regles.test.js`, `docs/kb/messages-v5.md`, `docs/specs/spec-messages-fil-en-direct.md`, `docs/recette/reviews-fil-en-direct.md`
+- Fichiers lus pour le contexte (hors du diff) : `tests/outils/banc-messages.js`, `lib/guestflow/brouillons-dus.js`, `migrations/0000-schema-initial.sql`, `api/channel-message.js`
+
+**Comment j'ai mesuré.** Tous les essais sont dans `/tmp/revue3/`, hors de l'arbre. J'ai fait quatre copies par `git archive` :
+- `copie` : 4a3f9c7e ;
+- `avant` : 6b467ece ;
+- `contre` : 6b467ece avec les tests neufs ;
+- `correctif` : 4a3f9c7e avec le correctif essayé.
+
+Les trois fichiers du lot passent à 61/61 sur `copie`. À la fin, `git status` de l'arbre ne montre que `node_modules` et HEAD n'a pas bougé.
+
+---
+
+**1. IMPORTANT (envoi au voyageur, régression créée par le correctif 2) — une proposition partie dont la clôture échoue revient 5 s plus tard avec « Envoyer »** — `pages/messages.html:1024`, `pages/messages.html:1014-1018`, `shared/messages-direct.js:153`
+- **Mécanisme.**
+  1. Le cas : « Modifier puis Envoyer » d'une proposition **sans échéance**. Ce chemin ne réserve pas la tâche (`:744`), donc elle reste `pending_validation` en base jusqu'à la clôture.
+  2. Si le POST `action=proposition` échoue (503, 500, réseau, délai dépassé), `cloreTache` poursuit quand même et appelle `retirerTache`, qui note `closes.set(id, Date.now())`.
+  3. La relecture suivante est demandée **après** ce retrait, donc `lueA` est plus grand que l'instant noté. `retireeApres` rend faux, et la ligne du serveur, toujours `pending_validation`, revient dans le fil avec « Modifier » et « Envoyer ».
+  4. Un clic sur « Envoyer » réserve la tâche sans erreur, puisqu'elle est encore `pending_validation`, et poste le **texte IA d'origine**.
+- **Avant le correctif.** Le `Set` permanent cachait la tâche jusqu'au rechargement, ce que promet le commentaire `:975-978` (« au rechargement la proposition reviendra »). Ce commentaire est désormais faux.
+- **Mesuré** (`/tmp/revue3/scenario-e.test.js`, cas E 503 et E 500) :
+  - sur `copie` : bouton revenu = `true`, envois `["Texte retouche","Texte IA"]` ;
+  - sur `avant` : bouton revenu = `false`, envois `["Texte retouche"]`.
+- **Le chemin du bouton de la bulle n'est pas touché** (cas E3) : la tâche y est réservée (`sending`), et le serveur ne la rend pas.
+- **Correctif** (essayé, voir constat 2 pour la mesure) : réserver sur **tous** les chemins « Modifier puis Envoyer ». Il suffit de remplacer `if (x && valide(x.send_after))` par `if (x)` à `:744`. Après un échec de clôture, la tâche reste alors `sending`. Elle revient au bout de 10 minutes par la reprise des orphelines, avec « impossible de savoir si le message est parti » : c'est déjà le comportement du bouton de la bulle.
+- **Variante plus étroite** : dans `cloreTache`, retirer une tâche `done` avec `Infinity` au lieu de `Date.now()`, pour la garder cachée jusqu'au rechargement comme avant.
+
+**2. IMPORTANT (envoi au voyageur, présent à 6b467ece, laissé passer par le correctif 1) — le verrou d'écran du correctif 1 se contourne par trois gestes : le chemin sans échéance n'a aucun verrou serveur** — `pages/messages.html:742-744`, `:798`, `:3656`, `:906`, `:1075`
+- **Mécanisme.**
+  - `etatEnvoi = 'en_cours'` n'est posé qu'**après** `posterMessage`, et seulement sur l'objet affiché.
+  - Pendant l'appel au canal, la proposition n'est cachée que par `etat.enEdition`. Deux gestes effacent ce champ :
+    - changer de fil (`ouvrir`, `:3656`) ;
+    - « Modifier » sur une autre proposition (`:906`).
+  - Pendant la clôture, « Proposer une réponse » appelle `rechargerTaches` (`:1075`). Celle-ci remplace `etat.taches` par des objets neufs, sans `etatEnvoi`.
+  - Dans les trois cas, « Envoyer » revient à l'écran. Comme rien n'est réservé côté serveur, le clic réserve sans erreur et envoie le texte IA.
+- **Mesuré** :
+  - F (`scenario-f.test.js`) : aller sur le fil B2 puis revenir sur B1 pendant l'envoi. Envois `["Texte retouche","Texte IA"]`, sur `copie` **et** sur `avant`.
+  - F2 (même fichier) : « Modifier » sur x2 pendant l'envoi de x1. Même résultat, sur les deux copies.
+  - H (`scenario-h.test.js`) : « Proposer » pendant la clôture. Sur `copie`, les tâches passent de `[["x1","en_cours"]]` à `[["x1",null]]`, et les envois valent `["Texte retouche","Texte IA"]`. Même résultat sur `avant`.
+- **Ce qui est faux dans le commit.** Le message annonce que le double envoi est fermé. Il ne l'est que pour la seule fenêtre « cycle pendant la clôture ».
+- **Correctif essayé** (`/tmp/revue3/correctif-essaye.diff`, 31 lignes) :
+  - (a) réserver sur tous les chemins (`:744`) ;
+  - (b) poser `tacheDuGeste.etatEnvoi = 'en_cours'` dès l'entrée dans `lancerEnvoi`, et le retirer si la réservation ou `posterMessage` échoue (sans 409).
+- **Résultat du correctif essayé.**
+  - E, E3, F, F2, H, C, D, A et B sont verts.
+  - Les trois fichiers du lot plus `messages-v5`, `delai-reponse-ia-lot1`, `delai-reponse-ia-messages` et `proposition-par-rang` donnent 229/229.
+- **Effet de bord à connaître.** Un « Réessayer » après l'échec de `posterMessage` **et** de `relacher` reçoit 409 sur sa propre réservation. La page dit alors « déjà partie » et retire l'envoi de l'écran. Ce cas existe déjà sur le chemin avec échéance ; le correctif l'étend aux propositions sans échéance.
+
+**3. MINEUR (envoi au voyageur via le constat 2 ; seul, affichage) — `closes` et `lueA` lisent `Date.now()`, qui ne va pas toujours en avant** — `pages/messages.html:1024`, `:3732`, `:3843`
+- **Scénario.** Une relecture est en vol. Pendant ce temps, l'horloge du poste recule (resynchronisation NTP, sortie de veille), et l'hôte envoie puis clôt la proposition. Le retrait est alors daté **avant** `lueA`. La réponse, lue avant la clôture, ressuscite la proposition pour un cycle, avec ses boutons.
+- **Mesuré** (`scenario-i.test.js`, recul de 3 s) :
+  - sur `copie` : proposition revenue = `true`, puis « Modifier » et « Envoyer » donnent les envois `["Texte IA","Texte IA, complete"]` ;
+  - sur `avant` : la proposition ne revient pas (`false`).
+- **Correctif** (essayé, dans le diff ci-dessus) : une horloge logique `direct.tic`, incrémentée à chaque demande et à chaque retrait (`++direct.tic`), à la place de `Date.now()`. Avec ce compteur, l'égalité n'existe plus.
+- **Effet mesuré** : avec la réservation du constat 2 seule, la double saisie est refusée en 409, mais la proposition revient encore pour un cycle. Le compteur supprime ce retour : I passe au vert, et la suite reste à 229/229.
+
+**4. MINEUR (affichage, envoi au voyageur) — pendant la clôture, le fil montre le texte IA d'ORIGINE « Envoi… » alors que c'est le texte retouché qui est parti** — `pages/messages.html:798-800`, `shared/messages-direct.js:165`
+- **Mécanisme.** `etat.enEdition = null` rend la proposition au fil, avec l'état `en_cours`. À chaque cycle, `Object.assign(x, s)` y remet le `suggested_reply` du serveur, donc le texte IA.
+- **Mesuré** (`scenario-g.test.js`, quand la ligne du cœur est déjà lue) : le fil affiche `["Bonjour","01:34","PropositionTexte IA","Envoi…","Texte retouche","01:44"]`. L'hôte lit que le texte de l'IA part en plus du sien. Aucun bouton n'est affiché, donc pas de double envoi.
+- **Correctif (non essayé).**
+  - Ne pas dessiner une proposition dont le message est déjà parti : un état `partie`, gardé par `garder` mais filtré au rendu.
+  - Ou afficher `entree.texte`, en le protégeant de l'`Object.assign`.
+
+**5. MINEUR (régression de forme, sans fuite) — `depuis` accepte des dates impossibles que Postgres refuse** — `api/messages.js:634`, `:664-668`
+- **Mécanisme.** L'expression accepte `2026-02-30T08:00:00Z` ou `2026-11-31T…`, et V8 les parse en les reportant au mois suivant. Quand l'instant est dans la fenêtre des 7 jours, la chaîne brute part telle quelle à la base.
+- **Avant le correctif**, `toISOString()` normalisait la valeur, donc la base ne recevait jamais une date invalide.
+- **Mesuré** (node) : `INSTANT_ISO.test` rend `true` et `new Date(...)` est valide.
+- **Non mesuré contre une base** : le refus de Postgres (« date/time field value out of range »), qui donnerait un 503 « Lecture impossible » avec `console.error`, au lieu d'un 400. Seule une requête forgée sur son propre compte y arrive : la page n'envoie jamais ces valeurs.
+- **Correctif.** Vérifier jour et heure par aller-retour, par exemple que `Date.UTC(a, m-1, j).getUTCDate() === j` et que l'heure est inférieure à 24, avant de passer `brut`.
+
+**6. MINEUR (tests) — trois des quatre lignes du correctif 5 et la moitié « liste » du correctif 2 ne sont tenues par aucun test** — `tests/messages-direct-dom.test.js:587-593`
+- **Mesuré** (`/tmp/revue3/mutations.sh`, une copie neuve par mutation, trois fichiers du lot) :
+  - retirer l'estampille `_luLe` dans `relireListe` (`:3821`) : 0 rouge ;
+  - la retirer dans `chargerPageSuivante` (`:492`) : 0 rouge ;
+  - la retirer dans `charger` (`:269`) : 0 rouge ;
+  - déplacer `lueA` après `lireTachesOuvertes` dans `relireListe` : 0 rouge ;
+  - remplacer `>=` par `>` dans `retireeApres` : 0 rouge (sans portée avec `Date.now()`, sans objet avec le compteur).
+- **Pourquoi.** Le test `:587` pose `_luLe` lui-même dans la conversation. Il ne vérifie donc pas qu'une lecture l'estampille.
+- **Pour comparaison**, les mutations « sans plancher 7 j » et « `en_cours` retiré » donnent chacune 1 rouge.
+- **Contre-épreuve.** Les tests neufs contre 6b467ece (`/tmp/revue3/contre`) donnent 7 rouges. Ce sont ceux annoncés, plus le test unitaire de `fusionnerTaches` dont le contrat change. D passe, comme annoncé.
+- **Correctif.**
+  - Un test qui passe par la vraie lecture « Afficher plus » ou `relireListe` avec deux `lu_le` distincts.
+  - Un test où une tâche est retirée pendant `lireTachesOuvertes`.
+  - Les scénarios E, F, F2, H et I à porter dans le lot.
+
+---
+
+**Catégories sans constat réel**
+- **Sécurité des trois lectures de `lireEnDirect`.** Mesuré par `/tmp/revue3/mutations-securite.sh` :
+  - retirer `user_id` sur `dernier`, le fil et les tâches donne 5, 6 et 3 rouges ;
+  - retirer le filtre de périmètre sur chacune donne 2, 2 et 2 rouges ;
+  - garder seulement `Number.isFinite`, sans l'expression, donne 1 rouge.
+
+  Injection : l'expression est ancrée, sans le drapeau `m`. `…Z\n`, `…Z,or(user_id.neq.x)`, un espace à la place de `T` et des chiffres non latins sont refusés (mesuré). Les caractères admis (`0-9 - T : . Z +`) ne peuvent pas sortir d'un filtre `gt.`.
+- **Valeurs refusées à tort.** Aucune. La page n'envoie que `recul(...)`, au format `toISOString` en `Z`, ou le `curseur` du serveur, soit un `created_at` en `timestamptz` (`migrations/0000-schema-initial.sql:1772`) rendu avec jusqu'à 6 décimales et `+00:00`, soit `depuis` renvoyé tel quel. Toutes ces formes passent l'expression (mesuré). `URLSearchParams` encode `+` en `%2B`, et `URL` comme `querystring` le décodent en `+` (mesuré).
+- **`etatEnvoi = 'en_cours'` qui reste collé.** Ça n'arrive pas :
+  - sur le chemin `done`, `cloreTache` appelle toujours `retirerTache` (409, autre erreur ou succès) ;
+  - un échec d'envoi survient avant la pose ;
+  - changer de fil ne touche pas l'état.
+
+  Le seul retour anormal est celui du constat 1.
+- **Retrait pendant une lecture.** Fil et liste prennent chacun leur `lueA` avant leur propre lecture. Un retrait pendant le GET du fil est filtré. Un retrait pendant le GET de la liste précède `lueA`, mais la lecture des tâches lui est postérieure, donc elle voit l'état clos. Le cas du 409 suivi d'une tâche rendue par le cron revient bien (scénario A vert).
+- **`dernierConnu = dernier`.**
+  - Quand `dernier` est null, `traiterDernier` n'est pas appelé.
+  - Il n'y a pas de boucle : 1 relecture pour 1 message (scénario B, 1 lecture).
+  - Si la relecture de la liste échoue, `dernierConnu` reste inchangé et la relecture se refait 60 s plus tard.
+  - Seul coût résiduel : un message inséré entre la lecture du fil et la lecture de la liste coûte une relecture de plus, 60 s plus tard. Rien n'est perdu.
+- **`_luLe` des conversations.** Seuls `charger`, `chargerPageSuivante` et `relireListe` créent des conversations (vérifié par grep). Sans `lu_le` dans la réponse, la valeur retombe sur `etat.luLe`, comme avant. Une conversation qui a déjà un `_curseur` n'est pas affectée.
+
+---
+
+**Scénarios réutilisables** (dans `/tmp/revue3/`, choisir l'arbre avec `RACINE=/tmp/revue3/<copie|avant|correctif>`) :
+- `scenario-e.test.js` : constat 1 (E 503, E 500, E3 bouton de la bulle)
+- `scenario-f.test.js` : constat 2 (F changement de fil, F2 « Modifier » sur une autre proposition)
+- `scenario-h.test.js` : constat 2 (« Proposer » pendant la clôture)
+- `scenario-i.test.js` : constat 3 (horloge qui recule)
+- `scenario-g.test.js` : constat 4 (texte affiché pendant la clôture)
+- `mutations.sh` : constat 6 ; `mutations-securite.sh` : gardes de compte et de périmètre
+- `scenario-c.test.js`, `scenario-d.test.js`, `scenarios.test.js` : scénarios de la review 2 (C, D, A, B), repris avec `RACINE` pointé sur les copies
+- `correctif-essaye.diff` : le correctif essayé (réservation sur tous les chemins, `en_cours` dès le départ, horloge logique), appliqué dans `/tmp/revue3/correctif`

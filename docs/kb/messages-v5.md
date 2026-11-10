@@ -250,11 +250,18 @@ décidé par Thierry le 10 novembre 2026 à 01:06.
   cinq minutes d'écart), dans les deux ordres d'arrivée.
 - **Les propositions se fondent EN PLACE**, jamais remplacées : celle que
   l'hôte envoie reste tenue jusqu'à sa clôture (constat bloquant de la review 1 :
-  sinon la clôture ne partait pas et un second clic envoyait en double). Dès
-  que le message est parti, la proposition passe « en cours » AVANT la
-  clôture : un cycle qui tombe pendant la clôture ne remet pas le bouton
-  « Envoyer » à l'écran (review 2, constat 1). Une proposition retirée par la
-  page ne revient pas sur une réponse DEMANDÉE avant le retrait — mais elle
+  sinon la clôture ne partait pas et un second clic envoyait en double).
+  « Modifier puis Envoyer » RÉSERVE la proposition (`sending`) avant l'appel
+  au canal, avec ou sans échéance — comme le bouton de la bulle : sans
+  réservation, tout ce qui la remettait à l'écran (cycle pendant la clôture,
+  clôture ratée, changement de fil, « Modifier » une autre, « Proposer »)
+  rendait un « Envoyer » que le serveur acceptait (reviews 2 et 3). Elle est
+  « en cours » dès le geste et ne se dessine pas dans le fil : c'est le texte
+  de la saisie qui part, la bulle d'envoi le montre. Un échec d'envoi la
+  relâche et la rend au fil. Une proposition retirée par la
+  page (numéro d'une horloge LOGIQUE de la page, pas `Date.now()` que le
+  réglage du poste fait reculer) ne revient pas sur une réponse DEMANDÉE avant
+  le retrait — mais elle
   revient si le serveur la rend ensuite : le cron rend à l'hôte une réponse
   différée qu'il n'a pas pu délivrer, et la cacher pour toujours laissait
   l'hôte croire le voyageur servi (review 2, constat 2).

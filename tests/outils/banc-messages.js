@@ -294,6 +294,7 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       ouvrirConnaissance, utiliserDansLaSaisie, ouvrir, modifierProposition,
       // Le fil en direct : le cycle, son etat, et son demarrage.
       relireDirect, planifierDirect, direct, demarrerDirect, changerDeFilDirect, indexerTaches,
+      relireListe, chargerPageSuivante,
       // Un GETTER, pas une valeur : la vue est montee APRES l'evaluation.
       get vueConnaissance () { return vueConnaissance }
     }

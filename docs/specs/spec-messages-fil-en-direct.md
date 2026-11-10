@@ -111,7 +111,9 @@ Elle rend :
 périmètre (un membre limité au bien A n'apprend rien du bien B, pas même
 l'existence d'un fil) ; règle d'archivage de la collection (`clesArchivees`) ;
 `private, no-store` posé avant le premier refus. Bornes : `depuis` hors de la
-forme ISO complète (date, heure, jusqu'à six décimales, `Z` ou décalage) → 400 ;
+forme ISO complète (date, heure, jusqu'à six décimales, `Z` ou décalage) ou
+à une date qui n'existe pas (le 31 d'un mois de 30 jours, 24 h — V8 les
+reporte, Postgres les refuse) → 400 ;
 `depuis` plus vieux que 7 jours → ramené à 7 jours ; au plus 200 messages, et
 au-delà `complet: false` — le cycle suivant reprend au 201e par le curseur.
 

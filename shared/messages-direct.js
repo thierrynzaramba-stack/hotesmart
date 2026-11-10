@@ -137,9 +137,11 @@ const empreinteTache = (x) => [x.id, x.suggested_reply, x.summary, x.send_after,
  * - `bookId` : la portée — un fil, ou `null` pour toutes (relecture de la liste).
  * - Une proposition que la page envoie, qui a échoué, ou qui est dans la
  *   saisie reste, même absente de la réponse : c'est la page qui la gère.
- * - `closes` : `Map(identifiant → instant du retrait par la page)`, et
- *   `lueA` : l'instant où la réponse a été DEMANDÉE. Une proposition retirée
- *   APRÈS cette demande ne revient pas (la réponse est antérieure au retrait).
+ * - `closes` : `Map(identifiant → numéro du retrait par la page)`, et
+ *   `lueA` : le numéro de la DEMANDE de la réponse — une horloge logique de
+ *   la page, pas `Date.now()`, que le réglage du poste fait reculer (review 3,
+ *   constat 3). Une proposition retirée APRÈS cette demande ne revient pas (la
+ *   réponse est antérieure au retrait).
  *   ⚠ RETIRÉE AVANT, ELLE REVIENT (review 2, constat 2) : après un 409 « déjà
  *   partie », le cron peut rendre la tâche à l'hôte (envoi non délivré). Une
  *   mémoire sans date la cachait pour toujours — le voyageur n'avait rien

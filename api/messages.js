@@ -631,7 +631,22 @@ async function archiverFil(req, res) {
 const DIRECT_MAX = 200
 const DIRECT_FENETRE_MS = 7 * 86400000
 // Un instant ISO 8601 complet : date, heure, jusqu'a six decimales, fuseau.
-const INSTANT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:?\d{2})$/
+// `[T]` et non `T(` : tests/imports-manquants.test.js lit `T(` comme un appel.
+const INSTANT_ISO = /^(\d{4})-(\d{2})-(\d{2})[T](\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?(Z|[+-](\d{2}):?(\d{2}))$/
+// ⚠ LA FORME NE SUFFIT PAS : V8 lit `2026-02-30` comme le 2 mars, Postgres le
+// refuse (« out of range ») — un 503 pour ce qui est une demande invalide
+// (review 3, constat 5). Le curseur passant TEL QUEL a la base, chaque champ
+// doit exister : le jour dans son mois, l'heure < 24, les minutes et secondes
+// < 60, le decalage < 24 h.
+function instantExiste (brut) {
+  const m = INSTANT_ISO.exec(brut)
+  if (!m) return false
+  const [a, mo, j, h, mi, se] = m.slice(1, 7).map(Number)
+  if (mo < 1 || mo > 12 || j < 1 || h > 23 || mi > 59 || se > 59) return false
+  if (new Date(Date.UTC(a, mo - 1, j)).getUTCDate() !== j) return false
+  if (m[9] !== undefined && (Number(m[9]) > 23 || Number(m[10]) > 59)) return false
+  return true
+}
 async function lireEnDirect (req, res) {
   const t0 = Date.now()
   const { compterRequetes, requetesJusquIci } = require('../lib/compte-requetes')
@@ -661,7 +676,7 @@ async function lireEnDirect (req, res) {
       // ne reecrit l'instant que s'il faut le ramener a la fenetre.
       const brut = String(req.query.depuis || '')
       const t = new Date(brut).getTime()
-      if (!INSTANT_ISO.test(brut) || !Number.isFinite(t)) return repondre(400, { error: 'Instant invalide' })
+      if (!instantExiste(brut) || !Number.isFinite(t)) return repondre(400, { error: 'Instant invalide' })
       // Une page restee ouverte longtemps ne relit pas tout l'historique : au
       // plus 7 jours, et `complet: false` au-dela de 200 messages.
       const plancher = Date.now() - DIRECT_FENETRE_MS

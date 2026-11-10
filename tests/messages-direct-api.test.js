@@ -329,3 +329,29 @@ test('un curseur hors de la forme ISO complete est refuse (400)', async () => {
     assert.equal((await appeler({ direct: '1', fil: 'B1', depuis: d })).code, 400, d)
   }
 })
+
+test('un curseur a la forme juste mais a une date qui n existe pas est refuse (400), pas passe a la base', async () => {
+  // Review 3, constat 5 : V8 lit le 31 d'un mois de 30 jours comme le 1er du
+  // suivant ; le curseur passant TEL QUEL, Postgres l'aurait refuse — un 503.
+  // Dates construites DANS la fenetre de 7 jours, a l'horloge du test.
+  preparer()
+  const n = new Date()
+  const a = n.getUTCFullYear(), m = String(n.getUTCMonth() + 1).padStart(2, '0'), j = String(n.getUTCDate()).padStart(2, '0')
+  // Le 31 du premier mois a venir qui n'en a pas : V8 l'accepte (il n'accepte
+  // que jusqu'au 31) et le reporte ; il est dans l'avenir, donc dans la fenetre.
+  let mc = n.getUTCMonth(), ac = a
+  while (new Date(Date.UTC(ac, mc + 1, 0)).getUTCDate() === 31) { mc++; if (mc === 12) { mc = 0; ac++ } }
+  const trenteEtUn = `${ac}-${String(mc + 1).padStart(2, '0')}-31T08:00:00Z`
+  // Les deux que V8 ACCEPTE : ce sont elles qui partaient a la base.
+  for (const d of [trenteEtUn, `${a}-${m}-${j}T24:00:00Z`]) {
+    assert.ok(Number.isFinite(new Date(d).getTime()), 'jeu d essai : V8 accepte ' + d)
+    assert.equal((await appeler({ direct: '1', fil: 'B1', depuis: d })).code, 400, d)
+  }
+  for (const d of [`${a}-${m}-${j}T08:60:00Z`, `${a}-${m}-${j}T08:00:00+25:00`, `${a}-13-01T08:00:00Z`]) {
+    assert.equal((await appeler({ direct: '1', fil: 'B1', depuis: d })).code, 400, d)
+  }
+  // Et les formes que la page envoie reellement passent toujours.
+  for (const d of [new Date(Date.now() - MIN).toISOString(), pg(MIN, 42)]) {
+    assert.equal((await appeler({ direct: '1', fil: 'B1', depuis: d })).code, 200, d)
+  }
+})

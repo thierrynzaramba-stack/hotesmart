@@ -599,3 +599,304 @@ test('le premier curseur d un fil part de la lecture qui a produit SES messages,
     assert.ok(new Date(depuis) <= new Date(luConv), 'le fil part de la derniere lecture de la liste : ' + depuis)
   } finally { v.fermer() }
 })
+
+// ─── Review 3 : les scenarios qu'elle a rejoues, portes ici ─────────────────
+//
+// Une BASE simulee : le statut de chaque proposition (`reserver` la claime,
+// 409 si elle n'est plus `pending_validation`), ce qui part au voyageur, et ce
+// que le coeur rend. Les lectures (direct, RLS de `agent_tasks`) rendent les
+// propositions encore `pending_validation` — comme le vrai serveur.
+function monterBase ({ taches, conversations, cloture = null, envoi = null, lecture = null } = {}) {
+  const statuts = Object.fromEntries(taches.map(t => [t.id, 'pending_validation']))
+  const envois = [], coeur = []
+  const ouvertes = (fil) => taches.filter(t => statuts[t.id] === 'pending_validation' && (fil == null || t.book_id === fil)).map(t => ({ ...t }))
+  const v = monterDirect({
+    conversations: conversations || [conv('B1', [entrant('Bonjour', T1)]), conv('B2', [entrant('Autre', il(2 * MIN))], { guestName: 'Paul' })],
+    taches: taches.map(t => ({ ...t })),
+    repondre: (chemin, corps) => {
+      if (chemin.startsWith('/api/messages?direct=1')) {
+        const fil = new URL(chemin, 'https://x.test').searchParams.get('fil')
+        // La reponse est CALCULEE a la lecture ; `lecture` peut la retenir.
+        const rendu = { messages: [...coeur], taches: ouvertes(fil), dernier: T1, complet: true, curseur: 'C' }
+        return lecture ? lecture(rendu) : rendu
+      }
+      if (chemin === '/api/channel-message' || chemin === '/api/beds24') {
+        envois.push(corps.message)
+        coeur.push({ sender: 'host', direction: 'outbound', body: corps.message, sent_at: new Date().toISOString(), kind: 'message', origine: corps.origine })
+        return envoi ? envoi(envois.length) : { success: true }
+      }
+      if (chemin === '/api/guestflow-proposer') return { proposition: { id: 'x9' } }
+      if (corps && corps.action === 'relacher') {
+        if (statuts[corps.task_id] === 'sending') statuts[corps.task_id] = 'pending_validation'
+        return { ok: true, desarmee: true }
+      }
+      if (corps && corps.action === 'reserver') {
+        if (statuts[corps.task_id] !== 'pending_validation') return { __statut: 409, __corps: { error: 'deja_prise', statut: statuts[corps.task_id] } }
+        statuts[corps.task_id] = 'sending'; return { ok: true }
+      }
+      if (corps && corps.action === 'proposition') {
+        if (cloture) { const r = cloture(corps, statuts); if (r) return r }
+        if (!['pending_validation', 'sending'].includes(statuts[corps.task_id])) return { __statut: 409, __corps: { error: 'deja_close', statut: statuts[corps.task_id] } }
+        statuts[corps.task_id] = corps.statut; return { ok: true }
+      }
+      return { ok: true }
+    }
+  })
+  // La lecture RLS de `agent_tasks` (« Proposer », relecture de la liste).
+  const vraie = v.banc.window.__table
+  v.banc.window.__table = (nom) => {
+    if (nom !== 'agent_tasks') return vraie(nom)
+    const q = new Proxy({}, { get (_, cle) {
+      if (cle === 'then') return (ok, ko) => Promise.resolve({ data: ouvertes(null), error: null }).then(ok, ko)
+      return () => q
+    } })
+    return q
+  }
+  return { ...v, statuts, envois }
+}
+const proposition = (id, texte, extra = {}) => ({ id, book_id: 'B1', property_id: '209413', suggested_reply: texte, summary: '', status: 'pending_validation', created_at: il(MIN), ...extra })
+const envoyerRetouche = async (v, id, texte = 'Texte retouche') => {
+  v.msg.modifierProposition(id)
+  v.doc.querySelector('[data-bind="texte"]').value = texte
+  v.banc.window.envoyer()
+}
+const boutonEnvoyer = (v, id) => v.doc.querySelector(`[data-list="fil"] [data-envoyer-prop="${id}"]`)
+
+for (const statut of [503, 500]) {
+  test(`LE TEST QUI COMPTE : cloture en echec (${statut}) apres un envoi reussi — la proposition ne revient pas avec « Envoyer »`, async () => {
+    // Review 3, constat 1 : sans reservation, la tache restait
+    // `pending_validation` ; le cycle suivant la rendait, un clic envoyait le
+    // texte de l'IA en second.
+    const v = monterBase({ taches: [proposition('x1', 'Texte IA')], cloture: () => ({ __statut: statut, __corps: { error: 'Enregistrement impossible' } }) })
+    try {
+      await envoyerRetouche(v, 'x1')
+      for (let i = 0; i < 100 && v.msg.etat.taches.length; i++) await attendre(5)
+      assert.equal(v.msg.etat.taches.length, 0, 'jeu d essai : apres la cloture ratee, la page retire la proposition')
+      assert.equal(v.statuts.x1, 'sending', 'la proposition n a pas ete reservee')
+      await attendre(5)
+      await v.msg.relireDirect()
+      const b = boutonEnvoyer(v, 'x1')
+      if (b) { b.click(); for (let i = 0; i < 100 && v.envois.length < 2; i++) await attendre(5) }
+      assert.equal(b, null, 'le bouton « Envoyer » est revenu')
+      assert.deepEqual(v.envois, ['Texte retouche'])
+    } finally { v.fermer() }
+  })
+}
+
+test('cloture en echec par le bouton de la bulle : la proposition ne revient pas non plus', async () => {
+  // Review 3, scenario E3 : ce chemin reservait deja — garde de non-regression.
+  const v = monterBase({ taches: [proposition('x1', 'Texte IA')], cloture: () => ({ __statut: 503, __corps: { error: 'Enregistrement impossible' } }) })
+  try {
+    boutonEnvoyer(v, 'x1').click()
+    for (let i = 0; i < 100 && v.msg.etat.taches.length; i++) await attendre(5)
+    await attendre(5)
+    await v.msg.relireDirect()
+    assert.equal(boutonEnvoyer(v, 'x1'), null)
+    assert.deepEqual(v.envois, ['Texte IA'])
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : l hote change de fil et revient PENDANT l appel au canal — pas de « Envoyer », un seul envoi', async () => {
+  // Review 3, constat 2, scenario F.
+  const enVol = []
+  const v = monterBase({ taches: [proposition('x1', 'Texte IA')], envoi: (n) => n === 1 ? new Promise(r => enVol.push(() => r({ success: true }))) : { success: true } })
+  try {
+    await envoyerRetouche(v, 'x1')
+    for (let i = 0; i < 100 && !enVol.length; i++) await attendre(5)
+    assert.equal(enVol.length, 1, 'jeu d essai : l envoi est en vol')
+    v.msg.ouvrir('B2')
+    v.msg.ouvrir('B1')
+    const b = boutonEnvoyer(v, 'x1')
+    if (b) b.click()
+    await attendre(30)
+    enVol[0]()
+    await attendre(50)
+    assert.equal(b, null, 'le bouton « Envoyer » de la proposition en cours d envoi est a l ecran')
+    assert.deepEqual(v.envois, ['Texte retouche'])
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : « Modifier » une AUTRE proposition pendant l appel au canal — pas de « Envoyer » sur la premiere', async () => {
+  // Review 3, constat 2, scenario F2.
+  const enVol = []
+  const v = monterBase({
+    taches: [proposition('x1', 'Texte IA'), proposition('x2', 'Autre proposition', { created_at: il(MIN / 2) })],
+    envoi: (n) => n === 1 ? new Promise(r => enVol.push(() => r({ success: true }))) : { success: true }
+  })
+  try {
+    await envoyerRetouche(v, 'x1')
+    for (let i = 0; i < 100 && !enVol.length; i++) await attendre(5)
+    v.banc.repondreConfirm(true)
+    v.msg.modifierProposition('x2')
+    const b = boutonEnvoyer(v, 'x1')
+    if (b) b.click()
+    await attendre(30)
+    enVol[0]()
+    await attendre(50)
+    assert.equal(b, null)
+    assert.deepEqual(v.envois, ['Texte retouche'])
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : « Proposer » pendant la cloture — la proposition deja partie ne revient pas', async () => {
+  // Review 3, constat 2, scenario H : `rechargerTaches` remplace les objets ;
+  // l'etat « en cours » disparaissait avec eux.
+  let liberer
+  const v = monterBase({
+    taches: [proposition('x1', 'Texte IA')],
+    cloture: (corps, statuts) => corps.task_id === 'x1' && !liberer
+      ? new Promise(r => { liberer = () => { statuts.x1 = 'done'; r({ ok: true }) } }) : null
+  })
+  try {
+    await envoyerRetouche(v, 'x1')
+    for (let i = 0; i < 100 && !liberer; i++) await attendre(5)
+    assert.ok(liberer, 'jeu d essai : cloture en vol')
+    v.banc.window.proposer()
+    await attendre(30)
+    const b = boutonEnvoyer(v, 'x1')
+    if (b) b.click()
+    await attendre(30)
+    liberer()
+    await attendre(30)
+    assert.equal(b, null)
+    assert.deepEqual(v.envois, ['Texte retouche'])
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : l horloge du poste recule pendant une relecture — la proposition close ne revient pas', async () => {
+  // Review 3, constat 3, scenario I : retrait et demande etaient dates par
+  // `Date.now()`, que le reglage du poste fait reculer.
+  let libererLecture = null
+  const v = monterBase({
+    taches: [proposition('x1', 'Texte IA')],
+    // La premiere relecture est LUE maintenant (avant la cloture), rendue plus tard.
+    lecture: (rendu) => libererLecture ? rendu : new Promise(r => { libererLecture = () => r(rendu) })
+  })
+  const vraiNow = v.banc.window.Date.now.bind(v.banc.window.Date)
+  try {
+    const cycle = v.msg.relireDirect()
+    for (let i = 0; i < 100 && !libererLecture; i++) await attendre(5)
+    assert.ok(libererLecture, 'jeu d essai : la lecture est en vol')
+    v.banc.window.Date.now = () => vraiNow() - 3000
+    boutonEnvoyer(v, 'x1').click()
+    for (let i = 0; i < 100 && v.statuts.x1 !== 'done'; i++) await attendre(5)
+    await attendre(10)
+    assert.equal(v.statuts.x1, 'done', 'jeu d essai : la proposition est close')
+    libererLecture(); await cycle
+    assert.equal(v.msg.etat.taches.some(x => x.id === 'x1'), false, 'proposition close ressuscitee par une reponse lue avant la cloture')
+    assert.equal(v.doc.querySelector('[data-list="fil"] [data-modifier="x1"]'), null)
+  } finally { v.banc.window.Date.now = vraiNow; v.fermer() }
+})
+
+test('pendant la cloture d un texte retouche, le fil ne montre pas le texte de l IA « en cours d envoi »', async () => {
+  // Review 3, constat 4, scenario G : c'est le texte de la SAISIE qui est
+  // parti ; la proposition « Envoi… » y montrait celui de l'IA.
+  for (const coeurLu of [false, true]) {
+    let liberer
+    const v = monterBase({
+      taches: [proposition('x1', 'Texte IA')],
+      cloture: (corps, statuts) => !liberer ? new Promise(r => { liberer = () => { statuts.x1 = 'done'; r({ ok: true }) } }) : null,
+      lecture: (rendu) => coeurLu ? rendu : { ...rendu, messages: [] }
+    })
+    try {
+      await envoyerRetouche(v, 'x1')
+      for (let i = 0; i < 100 && !liberer; i++) await attendre(5)
+      assert.ok(liberer, 'jeu d essai : la cloture est en vol')
+      await v.msg.relireDirect()
+      const fil = [...v.doc.querySelectorAll('[data-list="fil"] .bulle')].map(b => b.textContent.trim())
+      assert.ok(!fil.some(t => /Texte IA/.test(t)), `coeur lu : ${coeurLu} — ${JSON.stringify(fil)}`)
+      liberer()
+      await attendre(20)
+    } finally { v.fermer() }
+  }
+})
+
+test('LE TEST QUI COMPTE : une proposition retiree PENDANT la lecture des propositions de la liste ne revient pas', async () => {
+  // Review 3, constat 6 : `lueA` doit etre pris AVANT `lireTachesOuvertes`.
+  let libererLecture = null
+  const v = monterBase({ taches: [proposition('x1', 'Texte IA')] })
+  const vraie = v.banc.window.__table
+  v.banc.window.__table = (nom) => {
+    if (nom !== 'agent_tasks') return vraie(nom)
+    const lue = [{ ...proposition('x1', 'Texte IA') }]   // lue AVANT le retrait
+    const q = new Proxy({}, { get (_, cle) {
+      if (cle === 'then') return (ok, ko) => new Promise(r => { libererLecture = () => r({ data: lue, error: null }) }).then(ok, ko)
+      return () => q
+    } })
+    return q
+  }
+  try {
+    const enVol = v.msg.relireListe(T1)
+    for (let i = 0; i < 100 && !libererLecture; i++) await attendre(5)
+    assert.ok(libererLecture, 'jeu d essai : la lecture des propositions est en vol')
+    v.banc.window.retirerTache(v.msg.etat.taches[0])
+    libererLecture()
+    await enVol
+    assert.equal(v.msg.etat.taches.length, 0, 'la proposition retiree pendant la lecture est revenue')
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : chaque lecture estampille SES conversations — premiere page, « Afficher plus », relecture', async () => {
+  // Review 3, constat 6 : le test du curseur par conversation posait `_luLe`
+  // lui-meme ; retirer l'estampille des lectures ne rougissait rien.
+  const LU_PAGE2 = il(40 * MIN), LU_RELUE = il(MIN)
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])],
+    repondre: (c) => {
+      if (c.startsWith('/api/messages?direct=1')) return { messages: [], taches: [], dernier: T1, complet: true, curseur: 'C' }
+      if (c.startsWith('/api/messages?limit=') && c.includes('before=')) {
+        return { conversations: [conv('B5', [entrant('Ancien', il(50 * MIN))], { guestName: 'Eva' })], lu_le: LU_PAGE2, has_more: false }
+      }
+      if (c.startsWith('/api/messages?limit=')) return { conversations: [conv('B1', [entrant('Bonjour', T1)]), conv('B6', [entrant('Neuf', il(30000))], { guestName: 'Zoe' })], lu_le: LU_RELUE }
+      return {}
+    }
+  })
+  try {
+    v.msg.etat.nextBefore = il(45 * MIN); v.msg.etat.nextBeforeId = 'B1'
+    await v.msg.chargerPageSuivante()
+    await v.msg.relireListe(T1)
+    const luLe = (id) => (v.msg.etat.conversations.find(c => c.bookId === id) || {})._luLe
+    assert.equal(luLe('B5'), LU_PAGE2, '« Afficher plus » n estampille pas ses conversations')
+    assert.equal(luLe('B6'), LU_RELUE, 'la relecture de la liste n estampille pas ses conversations')
+    // Et le fil ouvert part de SA lecture : ici B5, lue a la page 2.
+    v.msg.ouvrir('B5')
+    await v.msg.relireDirect()
+    const d = v.directs().map(a => new URL(a.chemin, 'https://x.test').searchParams).filter(p => p.get('fil') === 'B5')
+    assert.ok(d.length && new Date(d[0].get('depuis')) <= new Date(LU_PAGE2), 'le fil B5 ne part pas de sa propre lecture')
+  } finally { v.fermer() }
+})
+
+test('la premiere page, lue par la vraie initialisation, estampille ses conversations', async () => {
+  // Review 3, constat 6 : retirer l'estampille de `charger` ne rougissait rien.
+  const LU = il(25000)
+  const banc = B.monter({ appel: async (chemin) => chemin.startsWith('/api/messages?limit=')
+    ? { conversations: [conv('B1', [entrant('Bonjour', T1)])], lu_le: LU }
+    : chemin.startsWith('/api/messages?direct=1') ? { messages: [], taches: [], dernier: T1, complet: true, curseur: 'C' } : {} })
+  try {
+    await B.amorcer(banc)
+    await B.reposer(banc)
+    const c = banc.msg.etat.conversations.find(x => x.bookId === 'B1')
+    assert.ok(c, 'jeu d essai : la premiere page est lue')
+    assert.equal(c._luLe, LU)
+  } finally { banc.window.clearTimeout(banc.msg.direct.minuteur); banc.fermer() }
+})
+
+test('l envoi au canal echoue : la proposition est relachee, et ne reste pas cachee hors de la saisie', async () => {
+  // Review 3, constat 2 : l'etat « en cours » pose des le depart doit tomber
+  // quand rien n'est parti. Sinon, des que l'edition est quittee (changer de
+  // fil), la proposition reste invisible jusqu'au rechargement.
+  const v = monterBase({ taches: [proposition('x1', 'Texte IA')], envoi: () => ({ __statut: 500, __corps: { error: 'canal indisponible' } }) })
+  try {
+    await envoyerRetouche(v, 'x1')
+    for (let i = 0; i < 100 && v.statuts.x1 !== 'pending_validation' || i < 3; i++) await attendre(5)
+    await attendre(20)
+    assert.equal(v.statuts.x1, 'pending_validation', 'jeu d essai : la reservation est relachee')
+    const x = v.msg.etat.taches.find(t => t.id === 'x1')
+    assert.ok(x, 'la proposition a quitte l etat de la page')
+    assert.equal(x.envoiSaisie, undefined, 'la proposition reste marquee « envoyee depuis la saisie »')
+    assert.equal(x.etatEnvoi, undefined, 'la proposition reste « en cours »')
+    v.msg.ouvrir('B2'); v.msg.ouvrir('B1')
+    assert.ok(textesDuFil(v.doc).some(t => t.includes('Texte IA')), 'la proposition est cachee du fil : ' + JSON.stringify(textesDuFil(v.doc)))
+    assert.ok(boutonEnvoyer(v, 'x1'), 'la proposition relachee n a plus son bouton')
+  } finally { v.fermer() }
+})
