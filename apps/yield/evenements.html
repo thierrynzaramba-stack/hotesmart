@@ -1,21 +1,691 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Vos événements</title>
-  <!-- ⚠ CETTE PAGE N'EXISTE PLUS COMME ECRAN (decision de Thierry, recette du
-       22 septembre 2026) : « Ce qui pilote vos prix » est devenu une POP-UP
-       ouverte depuis « Prédiction de prix » — un calendrier en tableau, les
-       evenements marques dessus, un bouton « Ajouter un evenement », la
-       couleur des cases suivant le niveau de prix. L'URL reste pour les
-       favoris et les liens deja partages : elle renvoie a la pop-up. -->
-  <meta http-equiv="refresh" content="0; url=/apps/yield/prix?evenements=1">
-  <link rel="stylesheet" href="/public/style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<link rel="stylesheet" href="/shared/yield-evenements.css">
+<!-- PAGE « CE QUI FAIT BOUGER VOS PRIX » — lot 4 du chantier, sous-lot 4a :
+     étape 2 (la lecture) et étape 3 (les gestes : choisir des nuits, leur
+     donner un niveau ou les remettre en automatique, la zone + / −, retirer
+     les crans d'avant). Spec : docs/specs/spec-yf-ecran-evenements.md.
+     Dessin : docs/maquettes/evenements/maquette-evenements.html.
+     ⚠ CETTE ADRESSE ÉTAIT UNE REDIRECTION vers la pop-up « Quand vos prix
+     bougent » de Prédiction de prix (22 septembre 2026). Décision Q1 de
+     Thierry (9 novembre 2026) : l'écran devient une page entière, ICI. La
+     pop-up reste en service, par le menu, jusqu'à la fin du lot 4 (4d) : les
+     menus (components/sidebar.js, pages/calendrier.html) la visent
+     directement, ils ne passent pas par cette adresse.
+     ⚠ UN APPEL AU CHARGEMENT : /api/ecran/evenements (tests/budget-ecran.test.js) ;
+     les gestes écrivent sur /api/yield-evenements (PUT, PATCH).
+     RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
 <body>
-  <p style="padding:24px;font-size:14px">Cette page a été remplacée par la pop-up « Événements » de
-    <a href="/apps/yield/prix?evenements=1">Prédiction de prix</a>.</p>
-  <script>location.replace('/apps/yield/prix?evenements=1')</script>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
+
+<main class="page yfe">
+  <div class="yfe-tete">
+    <div class="yfe-tete__titre">
+      <h1 class="h1" data-i18n="yfe.titre"></h1>
+      <p class="muted" data-bind="sous-titre"></p>
+      <p class="caption muted" data-bind="age" hidden></p>
+    </div>
+    <label class="yfe-bien" data-bind="bien-zone" hidden>
+      <span class="muted" data-i18n="yfe.logement"></span>
+      <select data-bind="bien"></select>
+    </label>
+  </div>
+
+  <div class="yfe-legende" role="group" data-bind="legende" data-i18n-attr="aria-label:yfe.legende_aria"></div>
+  <div class="stack" data-bind="alertes"></div>
+
+  <section class="yfe-frise" data-bind="frise-zone" data-i18n-attr="aria-label:yfe.frise_aria" hidden>
+    <div data-bind="frise"></div>
+    <p class="yfe-frise__aide" data-i18n="yfe.frise_aide"></p>
+  </section>
+
+  <div class="yfe-filtres" role="group" data-bind="filtres" data-i18n-attr="aria-label:yfe.filtres_aria" hidden>
+    <button type="button" class="yfe-filtre" data-filtre="tous" aria-pressed="true" data-i18n="yfe.filtre_tous"></button>
+    <button type="button" class="yfe-filtre" data-filtre="officiel" aria-pressed="false" data-i18n="yfe.filtre_officiel"></button>
+    <button type="button" class="yfe-filtre" data-filtre="commercial" aria-pressed="false" data-i18n="yfe.filtre_commercial"></button>
+    <button type="button" class="yfe-filtre" data-filtre="mien" aria-pressed="false" data-i18n="yfe.filtre_mien"></button>
+  </div>
+
+  <div class="yfe-liste" data-bind="liste"><p class="muted" data-i18n="common.loading"></p></div>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+import { requireAuth } from '/components/auth-guard.js'
+import { signOut, supabase } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte } from '/shared/compte-courant.js'
+import { lire as lireCache, ecrire as ecrireCache, oublier as oublierCache } from '/shared/cache-ecran.js'
+import { motif } from '/shared/yield-motifs.js'
+import {
+  indexerNuits, rendreLegende, rendreFrise, rendreListe, jourLongPar, pourLeCache, idEvenement, positionsParDate,
+  selectionTout, operationsPourNiveau, operationsPourRetrait, operationsPourLigne, phraseEnregistre, etiquetteNiveau,
+  libellePosition, largeurAffichee, nuitsTenuesAilleurs, nomDeCle, POSITIONS_PAR_GESTE, ID_SANS_EVENEMENT
+} from '/shared/yield-evenements-rendu.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+
+// ⚠ DEUX ENDPOINTS, ET UN SEUL AU CHARGEMENT (tests/budget-ecran.test.js) :
+// l'écran se lit en un appel ; les gestes (étape 3) écrivent sur
+// `PUT` / `PATCH /api/yield-evenements`, avec ses gardes d'écriture
+// (`reglages: write`) — masquer les gestes ne protège rien, le 403 si.
+const ECRAN = '/api/ecran/evenements'
+const ECRITURE = '/api/yield-evenements'
+const CACHE = 'yield-evenements'
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// L'appel : jeton RELU à chaque fois (un onglet ouvert plus d'une heure aurait
+// un jeton expiré), compte délégué par `X-Compte`. Il LÈVE sur réponse non-ok.
+async function appelAPI (url) {
+  let jeton = null
+  try {
+    const { data } = await supabase.auth.getSession()
+    jeton = (data && data.session && data.session.access_token) || null
+  } catch { /* pas de session : le serveur répondra 401 */ }
+  const res = await fetch(url, { headers: { ...(jeton ? { Authorization: `Bearer ${jeton}` } : {}), ...enteteCompte() } })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(data.error || t('yfe.erreur'))
+    err.status = res.status
+    throw err
+  }
+  return data
+}
+
+// L'écriture : même jeton relu, même compte. Elle NE LÈVE PAS sur un refus —
+// un 409 porte la nouvelle confirmation, un 503 ce qui est déjà écrit ; seule
+// une panne réseau lève.
+async function ecrire (methode, corps) {
+  let jeton = null
+  try {
+    const { data } = await supabase.auth.getSession()
+    jeton = (data && data.session && data.session.access_token) || null
+  } catch { /* pas de session : le serveur répondra 401 */ }
+  const res = await fetch(ECRITURE, {
+    method: methode,
+    headers: { 'Content-Type': 'application/json', ...(jeton ? { Authorization: `Bearer ${jeton}` } : {}), ...enteteCompte() },
+    body: JSON.stringify(corps)
+  })
+  const data = await res.json().catch(() => ({}))
+  return { ok: res.ok, status: res.status, data }
+}
+
+const fmt = {
+  t,
+  money: (n) => I18n.money(n, 'EUR'),
+  date: (d, o) => I18n.date(d, o),
+  // La table des fériés et celle des motifs du moteur n'existent qu'en français.
+  get francais () { return I18n.lang === 'fr' },
+  motif: (code) => (I18n.lang === 'fr' ? motif(code) : null)
+}
+const jourLong = jourLongPar(fmt.date)
+const dateLocale = (iso) => { const [a, m, j] = String(iso).split('-').map(Number); return new Date(a, m - 1, j) }
+const jourLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+// ─── État de la page ────────────────────────────────────────────────────────
+// `seq` : le numéro de la dernière lecture demandée. Une réponse plus ancienne
+// est IGNORÉE — sinon passer vite de A à B puis à C peindrait B sous C.
+const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: null, moi: null, compte: null, bienVoulu: null, biens: [], seq: 0, depuisCache: false,
+  // Les gestes (étape 3) : les nuits choisies dans l'événement ouvert, le geste
+  // en cours (calcul → confirmer → envoi), le dernier message, et `occupe`
+  // tant qu'une écriture est partie — un seul geste à la fois.
+  choix: new Set(), geste: null, message: null, occupe: false, cransConfirmer: null,
+  // `perime` : une écriture a réussi et l'écran ne l'a pas encore relue. Les
+  // lignes affichées sont alors celles d'AVANT : aucun geste ne part dessus.
+  perime: false }
+
+// ⚠ RÉGLER EXIGE UNE RÉPONSE FRAÎCHE DU SERVEUR : un écran peint depuis le cache
+// n'a ni l'état des nuits, ni la certitude des droits ni des lignes posées.
+// ⚠ ET PENDANT UN CHANGEMENT DE LOGEMENT, RIEN NE SE RÈGLE (review de l'étape
+// 3, constat de sécurité) : l'écran encore peint est celui de l'ANCIEN
+// logement — un geste lancé là partait sur lui, puis sa confirmation restait
+// offerte sous le nom du nouveau, et « Appliquer » écrivait sur le premier.
+// `attendu` : le logement que la lecture EN VOL demande (`undefined` sans
+// lecture en vol). Pas `bienVoulu` seul : un membre qui n'a plus aucun
+// logement reçoit `bien: null`, et la page se serait crue en changement pour
+// toujours (re-review de l'étape 3).
+const changementEnCours = () => !!(etat.attendu && etat.data && etat.data.bien !== etat.attendu)
+const peutRegler = () => !!(etat.data && etat.data.droits_ecriture && !etat.depuisCache && !etat.perime && !changementEnCours() && Array.isArray(etat.data.evenements))
+
+// Tout ce qui tient à l'événement ouvert s'oublie quand on en change.
+function oublierGestes () {
+  etat.choix = new Set()
+  etat.geste = null
+  etat.message = null
+  etat.cransConfirmer = null
+}
+
+const evenementOuvert = () => (etat.data && etat.ouvert ? (etat.data.evenements || []).find(e => idEvenement(e) === etat.ouvert) || null : null)
+
+function peindreSelecteur () {
+  const sel = $('[data-bind="bien"]')
+  sel.innerHTML = etat.biens.map(b => `<option value="${esc(b.id)}">${esc(b.nom)}</option>`).join('')
+  // Le logement DEMANDÉ d'abord : pendant un changement, le sélecteur ne
+  // revient pas sur l'ancien à chaque repeint.
+  const voulu = etat.bienVoulu || (etat.data && etat.data.bien)
+  if (voulu) sel.value = voulu
+  $('[data-bind="bien-zone"]').hidden = etat.biens.length < 2
+}
+
+function viderEcran (message) {
+  for (const z of ['frise-zone', 'filtres']) $(`[data-bind="${z}"]`).hidden = true
+  for (const z of ['legende', 'frise', 'alertes']) $(`[data-bind="${z}"]`).innerHTML = ''
+  $('[data-bind="sous-titre"]').textContent = ''
+  $('[data-bind="age"]').hidden = true
+  $('[data-bind="liste"]').innerHTML = `<p class="yfe-alerte">${esc(message)}</p>`
+}
+
+// L'heure du calcul, AVEC la date quand ce n'est pas aujourd'hui : un écran du
+// cache peut dater de la veille, et « calculé à 10:30 » se lirait du jour.
+function quandCalcule (iso) {
+  const d = new Date(iso)
+  if (isNaN(d)) return ''
+  const heure = I18n.time(d)
+  return jourLocal(d) === jourLocal(new Date())
+    ? t('yfe.calcule_a', { heure })
+    : t('yfe.calcule_le', { date: fmt.date(d, { day: 'numeric', month: 'long' }), heure })
+}
+
+function peindre () {
+  const d = etat.data
+  if (!d) return
+  etat.biens = d.biens || []
+  peindreSelecteur()
+  // ⚠ PENDANT UN CHANGEMENT DE LOGEMENT, L'ÉCRAN DE L'ANCIEN NE SE REPEINT PAS
+  // (re-review) : un filtre touché repeignait trente cartes et la frise de La
+  // bulle sous un sélecteur qui disait Cœur de vie 23.
+  if (changementEnCours()) {
+    $('[data-bind="sous-titre"]').textContent = (etat.biens.find(b => b.id === etat.bienVoulu) || {}).nom || ''
+    $('[data-bind="age"]').hidden = true
+    for (const z of ['frise-zone', 'filtres']) $(`[data-bind="${z}"]`).hidden = true
+    for (const z of ['legende', 'frise', 'alertes']) $(`[data-bind="${z}"]`).innerHTML = ''
+    $('[data-bind="liste"]').innerHTML = `<p class="muted">${esc(t('common.loading'))}</p>`
+    return
+  }
+  const nomBien = (etat.biens.find(b => b.id === d.bien) || {}).nom || ''
+
+  const alertes = []
+  if (!etat.biens.length) alertes.push(t('yfe.aucun_bien'))
+  if (d.indisponible) alertes.push(t('yfe.indisponible_' + d.indisponible))
+  if (d.vacances_incertaines_apres) alertes.push(t('yfe.alerte_vacances', { date: fmt.date(dateLocale(d.vacances_incertaines_apres), { day: 'numeric', month: 'long', year: 'numeric' }) }))
+  if (d.prix_hote_illisibles) alertes.push(t('yfe.alerte_prix_main'))
+  $('[data-bind="alertes"]').innerHTML = alertes.map(a => `<p class="yfe-alerte">${esc(a)}</p>`).join('')
+
+  const calcule = !!(d.fenetre && Array.isArray(d.evenements))
+  const opts = { day: 'numeric', month: 'long', year: 'numeric' }
+  $('[data-bind="sous-titre"]').textContent = calcule
+    ? t('yfe.sous_titre', { bien: nomBien, debut: fmt.date(dateLocale(d.fenetre.debut), opts), fin: fmt.date(dateLocale(d.fenetre.fin), opts) })
+      + (d.calcule_a ? ' · ' + quandCalcule(d.calcule_a) : '')
+    : nomBien
+  $('[data-bind="frise-zone"]').hidden = !calcule
+  $('[data-bind="filtres"]').hidden = !calcule
+  if (!calcule) {
+    $('[data-bind="legende"]').innerHTML = ''
+    $('[data-bind="frise"]').innerHTML = ''
+    $('[data-bind="liste"]').innerHTML = ''
+    return
+  }
+  $('[data-bind="legende"]').innerHTML = rendreLegende(d.niveaux, d.niveaux_non_calculables, fmt)
+  $('[data-bind="frise"]').innerHTML = rendreFrise(d, etat.idx, etat.ouvert, fmt)
+  for (const b of document.querySelectorAll('[data-filtre]')) b.setAttribute('aria-pressed', String(b.dataset.filtre === etat.filtre))
+  $('[data-bind="liste"]').innerHTML = rendreListe(d, etat.idx, {
+    filtre: etat.filtre, ouvert: etat.ouvert, nuit: etat.nuit, ecrire: peutRegler(), choix: etat.choix,
+    geste: etat.geste, message: etat.message, occupe: etat.occupe, cransConfirmer: etat.cransConfirmer
+  }, fmt, jourLong)
+}
+
+function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
+  // ⚠ UN AUTRE LOGEMENT EFFACE TOUT CE QUI TENAIT AU PRÉCÉDENT : l'événement
+  // ouvert, la nuit, le choix, le geste — un geste n'appartient qu'au logement
+  // qui l'a vu naître (review de l'étape 3).
+  if (etat.data && d && etat.data.bien !== d.bien) {
+    etat.ouvert = null
+    etat.nuit = null
+    oublierGestes()
+  }
+  etat.data = d
+  etat.depuisCache = depuisCache
+  if (!depuisCache) etat.perime = false
+  etat.idx = indexerNuits(d && d.nuits)
+  const age = $('[data-bind="age"]')
+  age.hidden = !depuisCache
+  age.textContent = depuisCache ? t('yfe.cache_age', { minutes: Math.max(1, Math.round(ageMs / 60000)) }) : ''
+  peindre()
+}
+
+async function charger () {
+  const n = ++etat.seq
+  const voulu = etat.bienVoulu
+  etat.attendu = voulu
+  try {
+    const d = await appelAPI(ECRAN + (voulu ? '?bien=' + encodeURIComponent(voulu) : ''))
+    if (n !== etat.seq) return
+    etat.attendu = undefined
+    // ⚠ LE CACHE NE GARDE JAMAIS L'ÉTAT D'UNE NUIT (vendue, ouverte, ✎) : il
+    // ne sert qu'à peindre tout de suite la frise et la liste, et la réponse du
+    // serveur les remplace (spec §8, point 3).
+    // ⚠ ET UNE RÉPONSE QUI NE SE MET PAS EN CACHE L'EFFACE (review de l'étape
+    // 2, constat de sécurité) : un membre qui n'a plus aucun logement reçoit
+    // 200 avec une liste vide — sans cela, l'écran du logement qu'il ne voit
+    // plus se repeindrait depuis le navigateur pendant douze heures.
+    if (etat.moi && etat.compte) {
+      if (d && d.bien && !d.indisponible && Array.isArray(d.evenements)) ecrireCache(CACHE, etat.moi, etat.compte, pourLeCache(d))
+      else oublierCache(CACHE, etat.moi, etat.compte)
+    }
+    recevoir(d)
+  } catch (e) {
+    if (n !== etat.seq) return
+    etat.attendu = undefined
+    const statut = e && e.status
+    logger.error('Événements', e && e.message, e)
+    // ⚠ UN REFUS EFFACE CE QUE LE CACHE AVAIT PEINT : les logements d'un
+    // périmètre que l'on n'a plus.
+    if ((statut === 403 || statut === 404) && etat.moi && etat.compte) oublierCache(CACHE, etat.moi, etat.compte)
+    // ⚠ UN LOGEMENT DEMANDÉ QUI N'EST PLUS SERVI (archivé, sorti du
+    // périmètre, favori périmé) : on retire `?bien=` de l'adresse et on
+    // relit SANS — sinon chaque rechargement redonnerait le même 404.
+    if (statut === 404 && voulu) {
+      etat.bienVoulu = null
+      etat.ouvert = null
+      etat.nuit = null
+      oublierGestes()
+      // ⚠ L'ÉCRAN DU LOGEMENT REFUSÉ S'EFFACE AVANT LA RELECTURE (re-review de
+      // l'étape 2) : sinon, si la relecture échoue, il restait affiché comme
+      // « dernières données connues » — celles d'un logement que le serveur
+      // vient de refuser.
+      etat.data = null
+      etat.idx = new Map()
+      viderEcran(t('common.loading'))
+      const u = new URL(location.href)
+      u.searchParams.delete('bien')
+      try { history.replaceState(null, '', u.pathname + u.search) } catch { /* sans historique */ }
+      return charger()
+    }
+    // ⚠ UN ÉCRAN DÉJÀ PEINT RESTE SEULEMENT S'IL EST CELUI DU LOGEMENT DEMANDÉ :
+    // après un changement de logement, garder l'ancien ferait lire les prix
+    // de La bulle sous le nom de Cœur de vie 23.
+    const memeBien = etat.data && (!voulu || etat.data.bien === voulu)
+    if (memeBien && statut !== 403 && statut !== 404) {
+      const age = $('[data-bind="age"]')
+      // Le cache n'a pas l'état des nuits ; une réponse du serveur, si.
+      age.textContent = t(etat.depuisCache ? 'yfe.cache_echec' : 'yfe.maj_echec')
+      age.hidden = false
+      return
+    }
+    etat.data = null
+    if (statut === 403 || statut === 404) etat.biens = []
+    viderEcran(statut === 403 ? t('yfe.refus') : t('yfe.erreur'))
+    peindreSelecteur()
+  }
+}
+
+// ⚠ LE FOCUS SURVIT AU REPEINT (review de l'étape 2) : chaque clic reconstruit
+// la frise et la liste, et sans cela le focus clavier retombait sur la page.
+function rendreLeFocus (attr, valeur, dansFrise) {
+  const zone = dansFrise ? $('[data-bind="frise"]') : document
+  const el = [...zone.querySelectorAll(`[${attr}]`)].find(x => x.getAttribute(attr) === valeur && (dansFrise || !x.closest('[data-bind="frise"]')))
+  if (el && el.focus) el.focus()
+}
+
+// ─── Les gestes (étape 3) ───────────────────────────────────────────────────
+// Spec §4 : la page CHOISIT des nuits, le serveur ÉCRIT des positions. Chaque
+// geste passe par `simuler` (« N nuits vont changer de prix ») puis par
+// `confirme: { nuits }` ; si le nombre a changé entre-temps, le serveur rend
+// 409 avec le nouveau compte, et la page redemande.
+
+const lignesPosees = () => (etat.data && etat.data.reglages_position && etat.data.reglages_position.lignes) || []
+
+function erreurDeGeste (r) {
+  if (!r) return t('yfe.err_reseau')
+  const code = r.data && r.data.error
+  if (r.status === 401) return t('yfe.err_session')
+  if (r.status === 403) return t('yfe.err_refus')
+  if (code === 'geste_concurrent' || code === 'conflit_compte') return t('yfe.err_concurrent')
+  if (code === 'trop_de_positions') return t('yfe.err_trop', { max: POSITIONS_PAR_GESTE })
+  // ⚠ ARRÊTÉ EN ROUTE : ce qui est déjà écrit se dit, et l'écran se relit.
+  if (code === 'ecriture_impossible' && Array.isArray(r.data.ecrites)) return t('yfe.err_en_route', { n: r.data.ecrites.length })
+  if (code === 'simulation_impossible') return t('yfe.err_simulation')
+  return t('yfe.err_ecriture')
+}
+
+// ⚠ UN GESTE NE VAUT QUE POUR LE LOGEMENT QUI L'A VU NAÎTRE : une réponse qui
+// revient après un changement de logement, ou après un autre geste, s'ignore.
+const toujours = (g) => etat.geste === g && !!etat.data && etat.data.bien === g.bien
+
+function focusSur (selecteur) {
+  const el = document.querySelector(selecteur)
+  if (el && el.focus) el.focus()
+}
+
+async function lancerGeste (ev, source, libelle, operations, { retrait = false, rien = null, ligne = null } = {}) {
+  if (etat.occupe || !peutRegler()) return
+  const bien = etat.data.bien
+  etat.message = null
+  if (!operations.length) { etat.geste = { ev, source, etat: 'rien', libelle, bien, message: rien, ligne }; peindre(); focusSur('[data-geste-annuler]'); return }
+  if (operations.length > POSITIONS_PAR_GESTE) {
+    etat.geste = { ev, source, etat: 'erreur', libelle, bien, ligne, message: t('yfe.err_trop', { max: POSITIONS_PAR_GESTE }) }
+    peindre(); focusSur('[data-geste-annuler]'); return
+  }
+  const g = { ev, source, etat: 'calcul', libelle, operations, bien, retrait, ligne }
+  etat.geste = g
+  etat.occupe = true
+  peindre()
+  let r = null
+  try { r = await ecrire('PUT', { bien, positions: operations, simuler: true }) } catch (e) { logger.error('Événements', e && e.message, e) }
+  etat.occupe = false
+  if (!toujours(g)) { peindre(); return }
+  if (r && r.ok && r.data && r.data.confirmation) { g.etat = 'confirmer'; g.apercu = r.data } else { g.etat = 'erreur'; g.message = erreurDeGeste(r) }
+  peindre()
+  focusSur(g.etat === 'confirmer' ? '[data-geste-appliquer]' : '[data-geste-annuler]')
+}
+
+async function appliquerGeste () {
+  const g = etat.geste
+  if (!g || g.etat !== 'confirmer' || etat.occupe || !peutRegler()) return
+  // ⚠ LE LOGEMENT DU GESTE EST CELUI DE L'ÉCRAN, VÉRIFIÉ AVANT L'ENVOI — pas
+  // seulement au retour : la réponse ne répare pas une écriture partie ailleurs.
+  if (!toujours(g)) { etat.geste = null; peindre(); return }
+  g.etat = 'envoi'
+  etat.occupe = true
+  peindre()
+  let r = null
+  try {
+    r = await ecrire('PUT', { bien: g.bien, positions: g.operations, confirme: { nuits: g.apercu.confirmation.nuits } })
+  } catch (e) { logger.error('Événements', e && e.message, e) }
+  if (!toujours(g)) { etat.occupe = false; peindre(); return }
+  if (r && r.ok) {
+    etat.geste = null
+    etat.choix = new Set()
+    etat.message = { ev: g.ev, texte: phraseEnregistre(r.data, fmt) }
+    etat.perime = true
+    // ⚠ OCCUPÉ JUSQU'À LA RELECTURE : sinon un second geste partirait sur les
+    // lignes d'avant celui-ci.
+    await charger()
+    etat.occupe = false
+    peindre()
+    // Le focus revient sur l'en-tête de l'événement ; sur la section « sans
+    // événement », sur la ligne suivante, ou sur le message (re-review).
+    if (g.ev === ID_SANS_EVENEMENT) redonnerLeFocus(['.yfe-sans-evenement [data-retirer-ligne]', '.yfe-sans-evenement .yfe-message, p.yfe-sans-evenement'], null)
+    else rendreLeFocus('data-ouvrir', g.ev, false)
+    return
+  }
+  etat.occupe = false
+  // Le compte a changé entre l'annonce et le clic : on redemande, avec le nouveau.
+  if (r && r.status === 409 && r.data && r.data.error === 'a_confirmer' && r.data.confirmation) {
+    g.etat = 'confirmer'
+    g.apercu = r.data
+    g.relance = true
+    peindre()
+    focusSur('[data-geste-appliquer]')
+    return
+  }
+  g.etat = 'erreur'
+  g.message = erreurDeGeste(r)
+  peindre()
+  focusSur('[data-geste-annuler]')
+  // ⚠ UN GESTE CONCURRENT OU ARRÊTÉ EN ROUTE A CHANGÉ LES LIGNES : on relit,
+  // pour que l'écran montre ce qui est réellement posé.
+  if (r && (r.status === 409 || (r.data && Array.isArray(r.data.ecrites) && r.data.ecrites.length))) { etat.perime = true; await charger() }
+}
+
+// La zone affichée (+ / −) et le retrait des crans d'avant : `PATCH`, sans
+// simulation — la largeur ne change aucun prix ; le retrait des crans se
+// confirme dans la carte avant de partir.
+async function reglerSegment (ev, corps, { dire = false, focus = null } = {}) {
+  if (etat.occupe || !peutRegler()) return
+  const bien = etat.data.bien
+  etat.occupe = true
+  etat.message = null
+  etat.geste = null
+  peindre()
+  let r = null
+  try { r = await ecrire('PATCH', { bien, ...corps }) } catch (e) { logger.error('Événements', e && e.message, e) }
+  if (!etat.data || etat.data.bien !== bien) { etat.occupe = false; peindre(); return }
+  etat.cransConfirmer = null
+  if (r && r.ok) {
+    if (dire) etat.message = { ev, texte: t('yfe.enregistre') }
+    etat.perime = true
+    await charger()
+    etat.occupe = false
+    peindre()
+    redonnerLeFocus(focus, ev)
+    return
+  }
+  etat.occupe = false
+  etat.message = { ev, texte: erreurDeGeste(r) }
+  peindre()
+  redonnerLeFocus(focus, ev)
+}
+
+// ⚠ LE FOCUS SURVIT AUSSI AUX GESTES (review de l'étape 3) : après chaque
+// repeint, il revient sur le contrôle touché — ou, s'il a disparu ou s'est
+// désactivé (« + » à la borne), sur l'en-tête de l'événement.
+function redonnerLeFocus (selecteurs, ev) {
+  for (const s of [].concat(selecteurs || [])) {
+    const el = document.querySelector(s)
+    if (el && !el.disabled && el.focus) { el.focus(); return }
+  }
+  if (ev) rendreLeFocus('data-ouvrir', ev, false)
+}
+
+function surGeste (cible) {
+  const e = evenementOuvert()
+  const tout = cible.closest('[data-tout]')
+  if (tout) {
+    if (!e || etat.occupe) return true
+    etat.choix = new Set(selectionTout(e, tout.dataset.tout))
+    etat.geste = null
+    etat.message = null
+    peindre()
+    rendreLeFocus('data-tout', tout.dataset.tout, false)
+    return true
+  }
+  if (cible.closest('[data-choix-vider]')) {
+    if (etat.occupe) return true
+    etat.choix = new Set()
+    etat.geste = null
+    peindre()
+    redonnerLeFocus('[data-tout="evenement"]', etat.ouvert)
+    return true
+  }
+  const niv = cible.closest('[data-niveau]')
+  if (niv) {
+    if (e) lancerGeste(etat.ouvert, 'choix', t('yfe.geste_niveau', { n: etat.choix.size, niveau: etiquetteNiveau(niv.dataset.niveau, t) }), operationsPourNiveau(e, etat.choix, niv.dataset.niveau, lignesPosees()))
+    return true
+  }
+  if (cible.closest('[data-auto]')) {
+    if (e) {
+      // Rien à écrire, mais des nuits tenues par un autre événement : on le
+      // dit, au lieu de « déjà en automatique » (constat de review).
+      // Seules comptent celles qu'un autre événement tient à un NIVEAU : une
+      // nuit qu'il tient « au calcul » est déjà en automatique ; et le message
+      // dit combien des nuits choisies sont concernées (re-review).
+      const ailleurs = nuitsTenuesAilleurs(e, etat.choix, etat.idx).filter(x => !x.auCalcul)
+      const noms = [...new Set(ailleurs.map(x => nomDeCle(x.cle, etat.data, fmt)))].join(' », « ')
+      const rien = !ailleurs.length ? null
+        : t(ailleurs.length === etat.choix.size ? 'yfe.rien_ailleurs' : 'yfe.rien_ailleurs_partiel', { n: ailleurs.length, noms })
+      lancerGeste(etat.ouvert, 'choix', t('yfe.geste_auto', { n: etat.choix.size }), operationsPourRetrait(e, etat.choix, lignesPosees()), { retrait: true, rien })
+    }
+    return true
+  }
+  const ret = cible.closest('[data-retirer-ligne]')
+  if (ret) {
+    const l = lignesPosees().find(x => String(x.id) === ret.dataset.retirerLigne)
+    const carte = ret.closest('[data-ev]')
+    if (l) lancerGeste(carte ? carte.dataset.ev : ID_SANS_EVENEMENT, 'ligne', t('yfe.geste_retirer', { quoi: libellePosition(l, t, jourLong) }), operationsPourLigne(l), { retrait: true, ligne: l.id })
+    return true
+  }
+  if (cible.closest('[data-geste-appliquer]')) { appliquerGeste(); return true }
+  if (cible.closest('[data-geste-annuler]')) {
+    if (!etat.occupe) {
+      const g = etat.geste
+      const ev = g && g.ev
+      etat.geste = null
+      peindre()
+      // Le focus revient d'où le geste est parti : la ligne retirée, sinon
+      // l'éditeur de l'événement — jamais une autre carte (re-review).
+      const retour = g && g.ligne != null
+        ? [`[data-retirer-ligne="${String(g.ligne).replace(/["\\]/g, '')}"]`]
+        : ev === ID_SANS_EVENEMENT ? [] : ['.yfe-editeur [data-niveau]', '[data-tout="evenement"]']
+      redonnerLeFocus(retour, ev && ev !== ID_SANS_EVENEMENT ? ev : null)
+    }
+    return true
+  }
+  const larg = cible.closest('[data-largeur]')
+  if (larg) {
+    if (!e) return true
+    const cote = larg.dataset.largeur === 'avant' ? 'avant' : 'apres'
+    const max = Number.isInteger(etat.data.rayonnement_max) ? etat.data.rayonnement_max : 4
+    const n = largeurAffichee(e)[cote] + (Number(larg.dataset.pas) < 0 ? -1 : 1)
+    if (n >= 0 && n <= max) {
+      reglerSegment(etat.ouvert, { segment: e.cle, ['weekends_' + cote]: n },
+        { focus: [`[data-largeur="${cote}"][data-pas="${larg.dataset.pas}"]`, `[data-largeur="${cote}"]:not([data-pas="${larg.dataset.pas}"])`] })
+    }
+    return true
+  }
+  if (cible.closest('[data-crans-retirer]')) {
+    if (!etat.occupe) { etat.cransConfirmer = etat.ouvert; peindre(); focusSur('[data-crans-confirmer]') }
+    return true
+  }
+  if (cible.closest('[data-crans-annuler]')) {
+    if (!etat.occupe) { etat.cransConfirmer = null; peindre(); redonnerLeFocus('[data-crans-retirer]', etat.ouvert) }
+    return true
+  }
+  if (cible.closest('[data-crans-confirmer]')) {
+    if (e && e.reglage_d_avant) reglerSegment(etat.ouvert, { segment: e.reglage_d_avant.cle, crans: null }, { dire: true })
+    return true
+  }
+  return false
+}
+
+document.addEventListener('click', (ev) => {
+  const o = ev.target.closest && ev.target.closest('[data-ouvrir]')
+  if (o) {
+    const id = o.dataset.ouvrir
+    const depuisFrise = !!o.closest('[data-bind="frise"]')
+    const ouvrir = etat.ouvert !== id
+    // ⚠ UN GESTE EN VOL GARDE SON ÉVÉNEMENT : on n'en ouvre pas un autre sous
+    // lui. Et pendant un changement de logement, l'écran peint est celui de
+    // l'ancien : on n'y ouvre rien.
+    if (etat.occupe || changementEnCours()) return
+    etat.ouvert = ouvrir ? id : null
+    etat.nuit = null
+    oublierGestes()
+    // La frise ouvre l'événement de la barre, quel que soit le filtre.
+    if (depuisFrise && ouvrir) etat.filtre = 'tous'
+    peindre()
+    rendreLeFocus('data-ouvrir', id, depuisFrise)
+    if (depuisFrise && ouvrir) {
+      const carte = [...document.querySelectorAll('[data-ev]')].find(a => a.dataset.ev === id)
+      if (carte && carte.scrollIntoView) carte.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    return
+  }
+  const nuit = ev.target.closest && ev.target.closest('[data-nuit]')
+  if (nuit) {
+    const date = nuit.dataset.nuit
+    const e = evenementOuvert()
+    // Pour qui peut régler, une nuit qui a une position se CHOISIT ; le détail
+    // suit la dernière touchée. Sinon, toucher une nuit ouvre son détail.
+    if (peutRegler() && e && e.actif && positionsParDate(e).has(date)) {
+      if (etat.occupe) return
+      if (etat.choix.has(date)) etat.choix.delete(date); else etat.choix.add(date)
+      etat.nuit = date
+      etat.geste = null
+      etat.message = null
+    } else {
+      etat.nuit = etat.nuit === date ? null : date
+    }
+    peindre()
+    rendreLeFocus('data-nuit', date, false)
+    return
+  }
+  if (ev.target.closest && surGeste(ev.target)) return
+  const f = ev.target.closest && ev.target.closest('[data-filtre]')
+  if (f) { etat.filtre = f.dataset.filtre; peindre() }
+})
+$('[data-bind="bien"]').addEventListener('change', (ev) => {
+  etat.bienVoulu = ev.target.value || null
+  etat.ouvert = null
+  etat.nuit = null
+  oublierGestes()
+  const u = new URL(location.href)
+  if (etat.bienVoulu) u.searchParams.set('bien', etat.bienVoulu); else u.searchParams.delete('bien')
+  try { history.replaceState(null, '', u.pathname + u.search) } catch { /* sans historique */ }
+  // La lecture part d'abord (elle pose `attendu`), puis l'écran de l'ancien
+  // logement s'efface tout de suite (`peindre` le sait).
+  charger()
+  if (etat.data) peindre(); else $('[data-bind="liste"]').innerHTML = `<p class="muted">${esc(t('common.loading'))}</p>`
+})
+
+// ─── Démarrage ──────────────────────────────────────────────────────────────
+async function init () {
+  const session = await requireAuth()
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+  const user = session.user || null
+  $('[data-bind="initials"]').textContent = ((user && user.email) || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis')
+  })
+  HSNav.render({ peutLire })
+  I18n.apply(document)
+
+  etat.moi = user && user.id
+  etat.compte = compteCourant()
+  const voulu = new URL(location.href).searchParams.get('bien')
+  etat.bienVoulu = voulu && UUID.test(voulu) ? voulu.toLowerCase() : null
+  // L'affichage instantané : le dernier écran connu de CE logement. Sans
+  // logement dans l'adresse, on DEMANDE celui du cache — sinon le serveur en
+  // choisirait un autre et l'écran basculerait sous les yeux de l'hôte.
+  const cache = (etat.moi && etat.compte) ? lireCache(CACHE, etat.moi, etat.compte) : null
+  if (cache && cache.donnees && cache.donnees.bien && (!etat.bienVoulu || cache.donnees.bien === etat.bienVoulu)) {
+    etat.bienVoulu = cache.donnees.bien
+    recevoir(cache.donnees, { depuisCache: true, ageMs: cache.age_ms })
+  }
+  await charger()
+}
+
+// ⚠ UNE PAGE VIDE ET MUETTE EST LE PIRE RETOUR.
+init().catch(e => {
+  logger.error('Événements', e && e.message, e)
+  const z = $('[data-bind="liste"]')
+  if (z) z.innerHTML = `<p class="yfe-alerte">${esc(t('yfe.erreur'))}</p>`
+})
+</script>
 </body>
 </html>

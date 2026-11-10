@@ -34,6 +34,14 @@ const racine = path.join(__dirname, '..')
 const lire = (f) => fs.readFileSync(path.join(racine, f), 'utf8')
 
 const SOURCE = 'public/style.css'
+// ⚠ LA COPIE V5, DECISION DE THIERRY DU 9 NOVEMBRE 2026 (option A) : la page
+// « Ce qui fait bouger vos prix » (apps/yield/evenements.html) est la premiere
+// page V5 qui montre des niveaux, et le socle V5 ne charge pas
+// public/style.css. Les cinq valeurs y sont donc RECOPIEES — et ce fichier
+// exige que les DEUX copies restent egales a la table ci-dessous : une copie
+// qui diverge rougit, comme une source amputee.
+const COPIE_V5 = 'shared/theme.css'
+const SOURCES = [SOURCE, COPIE_V5]
 
 // ⚠ CINQ VALEURS, PAS DIX. Les palettes d'avant avaient un fond ET un accent
 // par niveau. L'echelle d'encre n'a que des densites : l'encre du texte est
@@ -74,11 +82,13 @@ const saturation = (h) => {
   return d ? d / (1 - Math.abs(2 * L - 1)) : 0
 }
 
-test('LE TEST QUI COMPTE : les cinq valeurs sont dans la source unique', () => {
-  const css = lire(SOURCE)
-  for (const n of ECHELLE) {
-    assert.match(css, new RegExp(`--${n.jeton}:\\s*${n.valeur};`),
-      `${SOURCE} doit declarer --${n.jeton}: ${n.valeur} (niveau ${n.niveau}).\n${REGLE}`)
+test('LE TEST QUI COMPTE : les cinq valeurs sont dans la source et dans sa copie V5, a l identique', () => {
+  for (const f of SOURCES) {
+    const css = lire(f)
+    for (const n of ECHELLE) {
+      assert.match(css, new RegExp(`--${n.jeton}:\\s*${n.valeur};`),
+        `${f} doit declarer --${n.jeton}: ${n.valeur} (niveau ${n.niveau}).\n${REGLE}`)
+    }
   }
 })
 
@@ -260,7 +270,7 @@ test('LE TEST QUI COMPTE : toute declaration --niveau-* porte une valeur NOMMEE'
   // palette d'octobre : elle etait recopiee QUATRE fois, les copies
   // CONCORDAIENT, rien ne rougissait, et la cinquieme aurait diverge.
   const attendues = new Map()
-  attendues.set(SOURCE, ECHELLE.map(n => `--${n.jeton}:${n.valeur.toLowerCase()}`))
+  for (const f of SOURCES) attendues.set(f, ECHELLE.map(n => `--${n.jeton}:${n.valeur.toLowerCase()}`))
   const faits = []
   for (const f of fichiersCouleur()) {
     if (!/\.(css|html)$/.test(f)) continue
@@ -314,8 +324,9 @@ test('LE TEST QUI COMPTE : toute declaration --niveau-* porte une valeur NOMMEE'
 // ne reutilise pas une teinte reservee, elle reutilise l'encre.
 //
 // ⚠ CE QUI GARDE REELLEMENT LA SOURCE UNIQUE, c'est le test des DECLARATIONS
-// ci-dessus : --niveau-1..5 ne se declarent que dans public/style.css, et
-// toute declaration en trop ou en moins rougit. Un gris n'est pas distinctif ;
+// ci-dessus : --niveau-1..5 ne se declarent que dans public/style.css et dans
+// sa copie V5 nommee (shared/theme.css, decision du 9 novembre 2026), et
+// toute declaration en trop, en moins ou differente rougit. Un gris n'est pas distinctif ;
 // un NOM l'est. Chercher la valeur etait la bonne garde pour une teinte, c'est
 // la mauvaise pour une encre.
 
@@ -441,10 +452,10 @@ test('LE TEST QUI COMPTE : les six ecrans YieldFlow chargent la police V5', () =
   // repli systeme ; sans la classe, la fonte est telechargee pour rien — une
   // requete reseau payee sans effet, ce que personne ne verrait.
   //
-  // ⚠ apps/yield/evenements.html est EXCLU et c est voulu : c est une
-  // redirection de 21 lignes vers prix?evenements=1 depuis le 22 septembre
-  // 2026. Lui charger une fonte serait une requete pour un ecran que personne
-  // ne regarde.
+  // ⚠ apps/yield/evenements.html est EXCLU et c est voulu : depuis le lot 4
+  // (4a, 9 novembre 2026) c est une page du socle V5 (shared/theme.css), dont
+  // la police vient du socle lui-meme — pas de la classe `police-v5` du socle
+  // legacy, que ce test garde sur les six autres ecrans.
   const ECRANS = ['comparables', 'index', 'marche-global', 'marche-temperature', 'marche', 'prix']
   const sansLien = []
   const sansClasse = []
