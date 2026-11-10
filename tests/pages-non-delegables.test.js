@@ -201,10 +201,13 @@ test('RECENSEMENT : toute page authentifiée est classée', () => {
     'apps/agent-ai/config.html',     // redirection vers /messages (go de Thierry, 12 octobre, apres recette 2)
     'apps/agent-ai/messages.html',   // redirection vers /messages (idem)
     'apps/agent-ai/knowledge.html',  // redirection vers /messages?volet=connaissance (go de Thierry, 5 novembre, KB V5 lot 3)
-    'pages/book.html'            // moteur de reservation : page VOYAGEUR,
+    'pages/book.html',           // moteur de reservation : page VOYAGEUR,
                                  // jeton dans l'URL, aucune session, aucune
                                  // donnee de compte. Marque blanche : elle ne
                                  // doit meme pas savoir que HoteSmart existe.
+    'pages/facture.html'         // facture du voyageur (etape 2) : page
+                                 // VOYAGEUR, jeton dans le fragment, aucune
+                                 // session ; elle ne recoit que SA demande.
   ]
 
   const classees = new Set([...NON_DELEGABLES, ...DELEGABLES, ...HORS_PERIMETRE])
