@@ -1194,51 +1194,198 @@ tout correctif) :
 
 ### 12.2 Étape 2 — la reprise des listes d'alertes
 
-Module `lib/notifications/reprise-listes.js` (pur : il ne lit ni n'écrit) et
+Module `lib/notifications/reprise-listes.js` (pur : il ne lit ni n'écrit),
 script `scripts/reprendre-listes-alertes.js` (à blanc par défaut, `--go`,
-`--compte=<uuid>`). Rien n'est retiré des listes : la coupure de leur envoi
-est l'étape 4.
+`--compte=<uuid>`, `--ignorer-bien=<ref>`), et l'écriture validée des contacts
+dans `lib/notifications/contacts.js` (`validerContact`, `creerContacts`), seul
+rédacteur de la table. *Règles telles que corrigées après la review ci-dessous.*
 
 **Les règles, et pourquoi :**
 1. **Ce que les listes n'envoyaient pas ne se reprend pas** : un canal décoché
    (`sms_enabled` / `email_enabled` faux) ne devient rien ; une ligne se lit
    comme à l'envoi (`parseLines`, lib/alert-notify.js) — un test compare les
    deux lectures ligne pour ligne.
-2. **L'adresse d'une PERSONNE du compte** (titulaire ou membre, reconnue par
-   l'e-mail ou le numéro de son profil, comme au point d'envoi) **coche le
-   canal dans SES réglages**, pour les événements que ses droits couvrent sur
-   ce bien ; pour les autres, un contact (Q29). Un événement qu'elle ne reçoit
-   pas ne se coche pas chez elle : ses réglages ne changent que pour ce qui lui
-   part. Les droits se jugent **bien par bien**.
-3. **Toute autre adresse : un contact par adresse ET par ensemble d'alertes**,
-   avec l'union des biens où cet ensemble se répète. Une adresse en
-   « urgences » sur un bien et en « urgences + info » sur l'autre fait deux
-   contacts — sinon le premier bien recevrait une alerte que sa liste
-   n'envoyait pas.
+2. **Une adresse que porte une PERSONNE du compte qui REÇOIT l'événement**
+   (titulaire ou membre, par l'e-mail ou le numéro de son profil, droits jugés
+   bien par bien avec l'id ET la référence du bien, comme les émetteurs les
+   passent) **passe par ses réglages** : le point d'envoi ferait taire un
+   contact à cette adresse. On ne coche que ce qui ne part pas déjà, chez une
+   personne qui reçoit l'événement — jamais chez une personne qui reçoit aussi
+   un AUTRE compte : ses réglages valent pour tous ses comptes, et la liste
+   d'un compte ne décide pas pour un autre (perte `personne_sur_plusieurs_comptes`).
+3. **Le reste : un contact par adresse ET par ensemble d'alertes**, avec
+   l'union des biens où cet ensemble se répète. Une adresse en « urgences » sur
+   un bien et en « urgences + info » sur l'autre fait deux contacts — sinon le
+   premier bien recevrait une alerte que sa liste n'envoyait pas.
 4. **Une adresse désinscrite (Q30) ne revient par aucun contact**, même pour
    un autre bien : « Ne plus recevoir ces alertes » vaut pour l'adresse. Ce
    qu'elle ne recevra plus est compté à part, ce n'est pas une perte.
 5. **LA VÉRIFICATION, AVEC LES RÈGLES DU POINT D'ENVOI** : chaque (canal,
    adresse, bien, événement) que délivrait une liste est recompté après la
-   reprise. Pour une personne destinataire, le contact se tait (notifier.js),
-   donc seul ce qui lui part compte, et trois règles d'`envoi.js` s'y
-   appliquent : le canal coché ; ce que le titulaire a laissé ouvert sur son
-   profil (`notify_email`, `notify_sms`) ; et le SMS d'une personne ne part que
-   **sans appareil abonné** (Q11), une notification cochée le remplaçant.
-   **Une perte bloque l'écriture du compte** (sortie 1), avec son motif :
-   `canal_non_coche`, `email_coupe_sur_le_profil`, `sms_coupe_sur_le_profil`,
-   `appareil_sans_notification`, `aucun_contact`.
+   reprise. Si une personne destinataire porte l'adresse, le contact se tait
+   (notifier.js), donc seul ce qui part à ces personnes compte, avec les règles
+   d'`envoi.js` : le canal coché ; ce que le titulaire a laissé ouvert sur le
+   profil (`notify_email`, `notify_sms`) ; le SMS d'une personne seulement sans
+   appareil abonné (Q11), une notification cochée le remplaçant. **Une perte
+   bloque le compte** (sortie 1) avec son motif : `canal_non_coche`,
+   `personne_sur_plusieurs_comptes`, `email_coupe_sur_le_profil`,
+   `sms_coupe_sur_le_profil`, `appareil_sans_notification`, `aucun_contact`,
+   `bien_introuvable` (l'ancienne liste n'avait pas besoin d'une ligne dans
+   `properties`, un contact si ; seul un humain peut dire qu'une clé est
+   abandonnée : `--ignorer-bien=`).
 6. **Ce qui change de forme se dit** : un SMS de liste vers une personne
-   équipée devient sa notification (Q11) — compté dans le compte rendu.
-7. **`--go` est refusé tant que les listes envoient** (`LISTES_COUPEES`,
-   lib/alert-notify.js, posé à l'étape 4) : sinon chaque adresse reprise
-   recevrait tout en double. La reprise part avec la coupure.
-8. **Les réglages d'abord, puis les contacts** ; un réglage s'écrit par le
-   writer unique (`reglages.enregistrer`), l'événement repris à partir de son
-   effectif avec le canal coché, ses **plages, sa langue et ses autres
-   événements intacts**. Rejouable : un contact identique n'est pas recréé, un
-   canal coché le reste.
-9. **Aucune adresse en clair** dans le compte rendu (« j***@exemple.fr »,
-   « +336****5678 ») ; une base non reconnue est refusée ; une lecture en panne
-   (biens, profils, appareils, droits, réglages, contacts) arrête le compte sans
-   rien écrire.
+   équipée devient sa notification (Q11) ; un canal coché pour la liste d'un
+   bien part aussi pour les autres biens du compte (« envois EN PLUS »).
+7. **LA COUPURE SE FAIT COMPTE PAR COMPTE, PAR LA REPRISE** : contacts (une
+   seule écriture), réglages (le writer unique, l'état d'après du plan tel
+   quel, plages et langue intactes), puis les listes mises de côté
+   (`listes_reprises`, gardées pour un retour arrière) — seulement si la config
+   n'a pas changé depuis sa lecture. Tout émetteur, quelle que soit sa version,
+   ne trouve plus de liste : ni double envoi, ni trou. Un arrêt en route laisse
+   les listes en service ; un second passage reprend où on s'est arrêté. Un
+   compte bloqué garde ses listes, et elles envoient.
+8. **Tout se valide à blanc** : réglages réécrivables, contacts valides —
+   un `--go` qui échouerait au milieu se voit avant.
+9. **`--go` est fermé tant que `REPRISE_OUVERTE` est faux**
+   (lib/notifications/reprise-listes.js), ouvert à l'étape 4 quand plus rien
+   ne peut réécrire une liste (le tiroir Alertes de Messages, le
+   préremplissage de l'onboarding) ; **et il se lance après le déploiement du
+   lot sur la base visée**, SHA vérifié.
+10. **Aucune adresse en clair** : la première lettre d'un e-mail (si sa partie
+   locale en a au moins trois) et son domaine, les deux derniers chiffres d'un
+   numéro ; une base non reconnue est refusée ; une lecture en panne arrête le
+   compte sans rien écrire ; les contacts existants se lisent par curseur.
+
+**Rapport de la review de l'étape 2, reçu le 10 novembre 2026 à 01:12, recopié
+mot pour mot avant tout correctif** (sous-agent ; arbre `/home/claude/hs-2c3`,
+branche `pwa-lot-2c3-contacts`, plage
+`175074d30fff630013611d0e315abca7476bc926..adcf3519abe694288c1d39850c2e507e908d9e06` ;
+chaque fichier cité est dans le diff, les autres sont lus comme preuve) :
+
+> J'ai lu l'arbre `/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, tête `adcf3519abe694288c1d39850c2e507e908d9e06`, plage `175074d30fff630013611d0e315abca7476bc926..adcf3519abe694288c1d39850c2e507e908d9e06`. Tous les constats portent sur les quatre fichiers du diff. `node --test tests/notifications-reprise-listes.test.js` donne 21 verts sur 21.
+>
+> **Le principal :** un e-mail peut se perdre au `--go` alors que la vérification annonce « 0 perte » (constat 1, reproduit). Il y a un second écart prouvé (constat 4) et un troisième vraisemblable (constat 3). Aucune fuite de données entre comptes, aucune écriture en à blanc.
+>
+> ## 1. Sécurité
+>
+> Ce qui est sain :
+> - Toutes les lectures sont bornées au compte : `user_id`, `account_user_id`, `compte_id`.
+> - En à blanc, rien n'est écrit : le `return` est avant toute écriture, ligne 125.
+> - `--go` est bien refusé quand `LISTES_COUPEES` est absent. Il n'existe pas encore dans `lib/alert-notify.js`, donc refus aujourd'hui.
+>
+> **S1. Sécurité, effet inter-comptes, exploitation faible.** `scripts/reprendre-listes-alertes.js:130-140`, `lib/notifications/reprise-listes.js:107-108`.
+> - **Ce qui se passe :** les réglages de notification sont rangés par personne, et valent pour tous ses comptes et tous ses biens (en-tête de `reglages.js`). La liste du compte X coche donc un canal chez une personne, pour tous ses comptes. La vérification ne regarde que les pertes, jamais les ajouts. La règle 2 du KB (« ses réglages ne changent que pour ce qui lui part », `docs/kb/pwa.md:1211`) est fausse.
+> - **Scénario :** le membre M est dans `sms_lines` du bien A du compte X, et membre aussi du compte Y, sans appareil abonné. Après le `--go`, M reçoit par SMS les urgences de tous les biens de X, et aussi celles de Y. Ces SMS de Y partent sur la clé Brevo de Y (`envoi.js:138`), alors que rien dans Y n'a changé. Même chose pour un titulaire qui serait membre d'un autre compte.
+>
+> **S2. Mineur, confidentialité.** `lib/notifications/reprise-listes.js:222` et `:224`.
+> - **Ce qui se passe :** `masquer` cache seulement ce qui reste entre les 4 premiers et les 4 derniers caractères. Or les numéros de liste sont rangés au format local.
+> - **Mesuré :**
+>   - `06 12 34 56 78` s'affiche `0612****5678` : 8 chiffres sur 10 visibles.
+>   - `612345678` s'affiche `6123****5678` : un seul chiffre caché.
+>   - `j@exemple.fr` s'affiche `j***@exemple.fr` : l'adresse est entière.
+> - La règle 9 du KB (« aucune adresse en clair ») n'est donc pas tenue.
+>
+> ## 2. Justesse de la vérification « avant = après »
+>
+> **1. Défaut, confirmé par exécution.** `scripts/reprendre-listes-alertes.js:137`.
+> - **Ce qui se passe :** `evenements[code] = { ...effectif.evenements[code], [canal]: true }` repart à chaque tour de l'état d'avant, pas de ce qui vient d'être coché. Quand une personne a deux canaux pour le même événement, le second écrase le premier. Les clés triées passent `email` avant `sms`, donc c'est l'e-mail qui revient à sa valeur d'avant.
+> - **Pourquoi ce n'est pas vu :** le plan (`reglagesApres`, qui cumule correctement) ne dit aucune perte.
+> - **Scénario, reproduit :** l'adresse et le numéro du titulaire sont dans les deux listes « intervention ». Pendant le lot 2c-2, il a décoché l'e-mail de ces événements pour ne pas tout recevoir en double. Au `--go` : sortie 0, aucune perte annoncée. Ligne écrite : `{"push":true,"email":false,"sms":true,"urgent":true}`. L'e-mail que délivrait sa liste ne part plus, et rejouer ne corrige rien.
+>
+> **2. Défaut de méthode.** `lib/notifications/reprise-listes.js:166-191`.
+> - La vérification réutilise les fonctions du planificateur (`personneDe`, `destinataire`, `cocher`). Le motif `canal_non_coche` ne peut donc pas sortir : elle vérifie le plan contre lui-même.
+> - Seules les règles d'`envoi.js` sur le profil et les appareils (permis e-mail et SMS du profil, SMS seulement sans appareil) sont réellement contrôlées.
+> - Les constats 3 et 4 sont exactement dans cet angle mort.
+>
+> **3. Défaut, vraisemblable.** `scripts/reprendre-listes-alertes.js:91`.
+> - **Ce qui se passe :** le script juge les droits avec `bien: { id }` seul. Les émetteurs passent `{ id, ref }` (`bien.js`, `evenements-*.js`).
+> - **Mesuré :** pour un membre dont le périmètre porte l'ancien UUID d'un bien archivé puis recréé, `property_refs` reste égal à la référence, par le trigger. `dansPerimetre` rend alors `false` avec `{ id: nouveau }` et `true` avec `{ id: nouveau, ref }`.
+> - **Scénario :** le script juge que ce membre ne reçoit pas l'événement et crée un contact SMS à son numéro. À l'envoi réel, il le reçoit bien, donc ce contact se tait (`notifier.js:145-146`). Son SMS n'est pas coché, puisque le SMS est décoché par défaut. Rien ne part, et la vérification dit « 0 perte ».
+>
+> **4. Mineur, confirmé par simulation.** `lib/notifications/reprise-listes.js:92` et `:181-182`.
+> - **Ce qui se passe :** `personneDe` prend la première personne qui porte l'adresse. `notifier.js:136-146`, lui, fait taire le contact si n'importe quel destinataire de l'événement porte cette adresse.
+> - **Scénario :** deux membres partagent un numéro. M1, sans droits, est listé avant M2, qui en a. Le plan donne 1 contact, rien de coché, 0 perte. À l'envoi, le contact se tait à cause de M2, dont le SMS n'est pas coché : rien ne part.
+>
+> **5. Défaut, ou mineur.** `lib/notifications/reprise-listes.js:97`.
+> - **Ce qui se passe :** une référence de bien introuvable sort du compte « avant ». Le script finit en sortie 0 avec une simple mention.
+> - **Pourquoi c'est une perte :** l'ancienne liste n'avait pas besoin d'une ligne dans `properties`. Les biens Beds24 viennent de `fetchProperties(beds24Key)` (`api/cron.js:885-889`), et leur matérialisation est « non bloquante ». Le nouvel envoi, lui, n'atteint aucun contact sans ligne dans `properties` (`contacts.js`, `idDuBien`).
+> - C'est une perte, non bloquante, contraire à l'exigence. La phrase « aucun événement ne peut plus y naître » est affirmée, pas mesurée.
+>
+> ## 3. Le script
+>
+> **6. Défaut de conception : écritures partielles, et blocage pendant la coupure.** `scripts/reprendre-listes-alertes.js:120-146` et `:153`.
+> - **Écritures partielles :** les réglages s'écrivent personne par personne, puis vient l'insertion des contacts. Un refus d'`enregistrer` sur la deuxième personne arrête tout. La première est déjà écrite, et aucun contact n'est créé.
+> - **Pendant la coupure :** `--go` n'est permis qu'avec les listes coupées. Un blocage pour perte, ou un arrêt en cours de route, laisse donc les destinataires de ce compte sans rien, jusqu'à correction.
+> - **L'à blanc ne prévient pas :** il ne valide pas ce qui sera écrit (`validerEvenements`, `validerPlages`). Il dit « OK » là où le `--go` échouera.
+> - **Fenêtre :** l'état peut changer entre l'à blanc lancé avant la coupure et le `--go` (un appareil abonné avec la notification décochée, par exemple). Le compte se bloque alors entièrement, et tous ses contacts sont perdus, pas seulement la ligne fautive.
+>
+> **7. Mineur.** `scripts/reprendre-listes-alertes.js:153` et `:181`.
+> - **Ce qui se passe :** la garde lit `LISTES_COUPEES` dans le code de l'arbre local, pas dans la production.
+> - **Scénario :** un `--go` lancé depuis la branche de l'étape 4 avant son déploiement. La production envoie encore par les listes, donc tout est reçu en double.
+>
+> **8. Mineur, règle 6 du dépôt.** `scripts/reprendre-listes-alertes.js:103-104`.
+> - **Ce qui se passe :** `notifications_contacts` est lue sans pagination ni plafond.
+> - **Scénario :** au-delà de 1000 lignes, la lecture est tronquée en silence. Les adresses désinscrites ne sont plus toutes vues, donc une adresse désinscrite peut être recréée, contre Q30. Le volume est irréaliste aujourd'hui.
+>
+> **9. Mineur.** `scripts/reprendre-listes-alertes.js:143-144`.
+> - **Second rédacteur :** l'insertion directe court-circuite le module déclaré seul rédacteur de la table dans la migration (`lib/notifications/contacts.js`).
+> - **Format des numéros :** les numéros sont rangés au format local (`0611111111`). L'envoi reste correct, parce que `normalizePhone` les remet au format international.
+> - **Rejouer peut défaire une correction :** les contacts déjà en base sont comparés exactement (`memeContact`). Un contact que le titulaire a corrigé dans l'interface entre deux passages (alerte retirée, bien ajouté) est donc recréé, ce qui réactive l'alerte qu'il avait retirée.
+>
+> Le reste est sain :
+> - La pagination par clé de `lireConfigs` est correcte.
+> - Les pannes de lecture arrêtent bien le compte avant toute écriture.
+> - Une configuration illisible est traitée comme vide, exactement comme le faisait l'ancien envoi : aucune perte.
+>
+> ## 4. Les tests
+>
+> **10. Défaut.** `tests/notifications-reprise-listes.test.js:269`.
+> - `assert.equal(r.evenements.urgence_ia.email, true)` passerait contre un script qui ne coche rien : la valeur effective par défaut de l'e-mail est déjà `true`, et le spread la recopie.
+> - Aucun test ne met une personne dans les deux listes, avec un canal décoché au départ. C'est exactement le constat 1.
+>
+> **11. Mineur.** `tests/notifications-reprise-listes.test.js:81`.
+> - Le test de l'adresse du titulaire vérifie `reglagesApres`, le plan, pas la ligne réellement écrite. Or c'est entre le plan et l'écriture que le constat 1 se produit.
+>
+> **12. Mineur.** `tests/notifications-reprise-listes.test.js:256` et `:317`.
+> - Les assertions « pas en clair » ne vérifient que le numéro complet.
+> - Ligne 317 : `0600****0001` passe, avec 8 chiffres sur 10 visibles.
+>
+> **13. Mineur.** `tests/notifications-reprise-listes.test.js:126` et `:54`.
+> - Ligne 126 : le test fige comme correcte l'affirmation du constat 5 sur les biens introuvables.
+> - Ligne 54 : `effectifs = new Map()` donne au planificateur des réglages non effectifs. `push` y vaut `undefined`, ce qui n'est pas ce que fournit le script. Les tests de l'appareil compensent en passant leurs propres réglages.
+
+**Suite donnée** (constat S1 de sécurité : correctifs, puis UNE re-review des
+seuls correctifs) :
+- **S1** — une personne qui reçoit aussi un autre compte (membre ailleurs, ou
+  titulaire de biens à elle) n'est jamais cochée par la liste de celui-ci :
+  perte `personne_sur_plusieurs_comptes`, le compte ne s'écrit pas. Et ce qui
+  part EN PLUS dans le compte se compte et se dit (règle 6).
+- **S2** — `masquer` ne montre plus que l'initiale d'un e-mail (partie locale
+  d'au moins trois caractères) et les deux derniers chiffres d'un numéro ; le
+  test vérifie qu'aucun morceau du numéro n'apparaît.
+- **1** — la ligne écrite est l'état d'après du plan, tel quel ; un test lit la
+  ligne ÉCRITE d'un titulaire présent dans les deux listes, e-mail décoché au
+  départ.
+- **2 et 4** — la vérification suit le point d'envoi : le contact se tait dès
+  qu'UNE personne destinataire porte l'adresse, et c'est cette personne qui se
+  coche.
+- **3** — les droits se demandent avec `{ id, ref }`.
+- **5** — un bien introuvable est une perte ; `--ignorer-bien=` sur décision.
+- **6 et 7** — la coupure se fait compte par compte par la reprise elle-même
+  (règle 7) : plus d'interrupteur global, plus de trou ni de double envoi selon
+  l'ordre des déploiements ; validation complète à blanc ; coupure refusée si
+  la config a changé. `LISTES_COUPEES` disparaît au profit de
+  `REPRISE_OUVERTE` (règle 9). La suite donnée 4 de l'étape 1 est tenue ainsi.
+- **8** — contacts existants lus par curseur.
+- **9** — l'écriture passe par `creerContacts` (biens relus sur le compte, tout
+  ou rien) ; le numéro se range tel que saisi, espaces retirés (ce que la
+  liste envoyait). Le cas « contact corrigé entre deux passages puis recréé »
+  ne se produit plus : un compte repris n'a plus de liste.
+- **10 à 13** — tests réécrits sur des réglages effectifs ; la ligne écrite,
+  le bien introuvable et le masquage sont vérifiés.
+- **À tenir à l'étape 4** : le préremplissage des listes par
+  `pages/onboarding.html` (`seedAlertConfig`) recrée une liste « e-mail du
+  compte » pour tout nouveau compte, et le tiroir Alertes de Messages en
+  réécrit — les deux doivent cesser avant d'ouvrir `REPRISE_OUVERTE` (accord de
+  Thierry requis pour `pages/onboarding.html`).
+
