@@ -76,7 +76,8 @@ const MESSAGES_REFUS = {
   contact_introuvable: 'Ce contact n’existe plus. Rechargez la page.',
   contact_desinscrit: 'Ce contact s’est désinscrit : réinscrivez-le avant de lui envoyer un essai.',
   essai_deja_fait: 'Un essai est déjà parti vers cette adresse aujourd’hui. Vous pourrez recommencer demain.',
-  plafond_essais: 'Vous avez déjà envoyé 10 essais aujourd’hui. Vous pourrez recommencer demain.',
+  plafond_essais: 'Dix adresses ont déjà reçu un essai aujourd’hui (un contact avec un e-mail et un numéro en compte deux). Vous pourrez recommencer demain.',
+  contact_modifie_entre_temps: 'Ce contact vient d’être modifié ailleurs : rechargez la page, puis recommencez.',
   adresse_desinscrite: 'Cette adresse s’est désinscrite de vos alertes.',
   essai_non_parti: 'L’essai n’est pas parti. Vérifiez l’adresse, et pour un SMS votre compte Brevo.',
   lecture_impossible: 'Lecture impossible, réessayez.'
@@ -155,7 +156,7 @@ async function repondreContacts (res, userId, r) {
     const code = ['ecriture_impossible', 'lecture_impossible', 'biens_illisibles'].includes(r.motif) ? 503
       : r.motif === 'contact_introuvable' ? 404
         : r.motif === 'essai_non_parti' ? 502
-          : ['essai_deja_fait', 'plafond_contacts', 'plafond_essais', 'adresse_desinscrite'].includes(r.motif) ? 409 : 400
+          : ['essai_deja_fait', 'plafond_contacts', 'plafond_essais', 'adresse_desinscrite', 'contact_modifie_entre_temps'].includes(r.motif) ? 409 : 400
     return res.status(code).json({
       error: MESSAGES_REFUS[r.motif] || 'Écriture impossible, réessayez.', motif: r.motif,
       ...(r.desinscrit_le ? { desinscrit_le: r.desinscrit_le } : {}), ...liste
@@ -187,11 +188,15 @@ async function essaiContact ({ userId, id }) {
     })
     parti = { email: !!bilan.email, sms: !!bilan.sms }
   } catch (e) { console.error('push: essai contact:', e && e.message) }
-  if (!parti.email && !parti.sms) {
-    const rendu = await contactsMod.rendreEssai({ compte: userId, reserve: r.reserve })
+  // ⚠ CE QUI N'EST PAS PARTI EST RENDU, canal par canal (re-review, R10) : un
+  // e-mail parti et un SMS refusé faute de Brevo ne consomment que l'e-mail —
+  // l'hôte connecte Brevo, et réessaie le SMS le jour même.
+  const nonParties = r.reserve.cles.filter(k => (k.startsWith('e:') && !parti.email) || (k.startsWith('t:') && !parti.sms))
+  if (nonParties.length) {
+    const rendu = await contactsMod.rendreEssai({ compte: userId, reserve: { ...r.reserve, cles: nonParties } })
     if (!rendu.ok) console.error('push: essai contact non rendu')
-    return { ok: false, motif: 'essai_non_parti' }
   }
+  if (!parti.email && !parti.sms) return { ok: false, motif: 'essai_non_parti' }
   return { ok: true, bilan: parti }
 }
 

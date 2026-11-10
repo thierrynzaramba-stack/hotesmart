@@ -935,6 +935,14 @@ $('n-contact-form').onclick = async (ev) => {
     biens: [...f.querySelectorAll('[data-c-bien]:checked')].map(x => x.dataset.cBien)
   }
   const id = contactOuvert === 'nouveau' ? null : contactOuvert
+  // ⚠ CHANGER L'ADRESSE D'UN CONTACT DÉSINSCRIT LE RÉINSCRIT (Q35, Q38) ET
+  // EFFACE CETTE TRACE (re-review, R8) : l'écran le dit avant, comme pour
+  // « Retirer ».
+  const avant = id && contactsVus ? contactsVus.liste.find(x => x.id === id) : null
+  const cle = (x) => String(x || '').trim().toLowerCase().replace(/\s/g, '')
+  if (avant && avant.desinscrit_le && (cle(avant.email) !== cle(contact.email) || cle(avant.telephone) !== cle(contact.telephone))) {
+    if (!window.confirm('Ce contact s’était désinscrit. Changer son adresse le réinscrit, et efface cette trace : rien ne vous préviendra si vous remettez l’ancienne adresse plus tard. Continuer ?')) return
+  }
   ev.target.disabled = true
   try {
     const ok = await gesteContact(id ? { action: 'contact_modifier', id, contact } : { action: 'contact_creer', contact },

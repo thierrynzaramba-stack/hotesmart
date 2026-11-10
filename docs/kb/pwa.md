@@ -1530,7 +1530,13 @@ langues), `pages/settings.html` (le bloc), `shared/push-appareil.js`
    la réservation (deux clics, une ligne). Réservé AVANT l'envoi ; seules les
    adresses réservées partent ; jamais vers un désinscrit ; e-mail avec son
    lien de désinscription, SMS par la clé Brevo du compte, langue du
-   titulaire ; **rendu si rien n'est parti, ou sur exception**.
+   titulaire. **Ce qui n'est pas parti est rendu, canal par canal** (et tout,
+   sur exception). **Le plafond du compte est tenu par la BASE** : chaque
+   adresse réservée prend un rang de 1 à 10, unique par compte et par jour ;
+   la remise efface clé par clé, en égalité exacte. Dix ADRESSES par jour : un
+   contact avec un e-mail et un numéro en compte deux, et le message le dit.
+   Les jours passés du compte partent à la réservation suivante. Un numéro se
+   normalise comme l'envoi le corrige (« 612345678 » = « 0612345678 »).
 4. **La page publique** : un GET ne change jamais rien (les messageries
    d'entreprise ouvrent les liens) ; elle montre l'adresse masquée, les
    logements de TOUTES les lignes que le bouton fera taire, et un bouton ; le
@@ -1543,13 +1549,16 @@ langues), `pages/settings.html` (le bloc), `shared/push-appareil.js`
    même personne sans adresse commune (un e-mail seul, un numéro seul) restent
    distinctes : la page parle de l'adresse. Le contact revient par le même
    lien, le titulaire par « Réinscrire » (Q33).
-5 bis. **Quand l'adresse change** : le jeton change dès que l'e-mail change
-   (l'ancien lien ne fait plus rien) ; la ligne repart inscrite quand aucune de
-   ses anciennes adresses ne reste (Q35) — une adresse gardée garde l'état de
-   la personne. **L'adresse de quelqu'un qui s'est désinscrit** (une autre
-   ligne du compte) ne s'ajoute qu'après confirmation (Q36) : 409
+5 bis. **Quand l'adresse change** — l'e-mail ou le numéro, l'un suffit (Q35,
+   Q38) : la ligne repart inscrite et son jeton change (l'ancien lien ne fait
+   plus rien) ; l'écriture est conditionnée aux adresses lues (deux onglets ne
+   laissent pas un ancien e-mail avec le nouveau jeton). **L'adresse de
+   quelqu'un qui s'est désinscrit** (une autre ligne du compte), quand elle est
+   AJOUTÉE, ne s'enregistre qu'après confirmation (Q36) : 409
    `adresse_desinscrite` avec sa date, puis `confirme: true`. Retirer une ligne
-   désinscrite efface cette trace, et l'écran le dit avant.
+   désinscrite, ou changer son adresse, efface cette trace : l'écran le dit
+   avant. La page publique dit l'état de l'adresse : une ligne encore active,
+   et le bouton propose d'arrêter.
 6. **Le budget** : le GET de l'onglet lit six tables, une fois chacune, en
    parallèle (appareils, réglages, logements, contacts, porte Brevo, essais du
    jour) — zéro appel ajouté côté navigateur ; un test les compte. Chaque lecture
@@ -1826,3 +1835,100 @@ chaque fichier cité est dans le diff, les autres sont lus comme preuve) :
 > - **Injection :** R2 est la seule trouvée.
 >
 > Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée à la re-review** — deux constats de sécurité de plus (R1, R2) :
+Thierry a décidé le 10 novembre 2026 une troisième review, limitée à leur seul
+diff (`98ff0746`), et c'est la dernière. Les autres constats sont corrigés sans
+review, dans le commit suivant :
+- **R1** — le rang de 1 à 10, unique par compte et par jour, en base.
+- **R2** — remise par clé exacte ; e-mail sans guillemet, virgule,
+  parenthèse, chevron, point-virgule ni barre oblique inverse ; un bien est un
+  identifiant.
+- **R3** — un mobile sans 0 ni indicatif se normalise comme à l'envoi.
+- **R4** — tranché par Thierry (Q38) : une adresse qui change suffit, la ligne
+  repart inscrite et son jeton change.
+- **R5** — accepté (c'est D4) : le lien d'une ligne fait taire toutes les
+  lignes qui partagent une de ses adresses.
+- **R6** — l'écriture d'une modification est conditionnée aux adresses lues.
+- **R7** — Q36 ne regarde que les adresses ajoutées.
+- **R8** — changer l'adresse d'un désinscrit se confirme à l'écran.
+- **R9** — la page dit l'état de l'adresse, pas de la seule ligne.
+- **R10** — ce qui n'est pas parti est rendu, canal par canal.
+- **R11** — dix adresses par jour, et le message le dit.
+- **R12** — les jours passés du compte partent à la réservation suivante.
+
+**Rapport de la troisième review (R1 et R2 seuls), reçu le 10 novembre 2026,
+recopié mot pour mot avant tout correctif** (sous-agent ; arbre
+`/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, plage
+`e319249238df75196c0113b93531af9a17b376fa..98ff0746f19f5a426f6e22d3ac2ae274d28c3f4d`) :
+
+> **Revue n° 3 (dernière) — correctifs R1 et R2**
+>
+> - Arbre lu : `/home/claude/hs-2c3`, en chemins absolus. J'y suis resté même quand le répertoire de la session est passé à `hs-2c3b`, puis à `hs-spec`.
+> - Branche : `pwa-lot-2c3-contacts`.
+> - SHA de tête : `98ff0746f19f5a426f6e22d3ac2ae274d28c3f4d`.
+> - Plage : `e319249238df75196c0113b93531af9a17b376fa..98ff0746f19f5a426f6e22d3ac2ae274d28c3f4d`.
+> - À savoir : `/home/claude/hs-2c3/node_modules` est un lien vers `/home/claude/hotesmart/node_modules`. J'y ai lu postgrest-js par le chemin de l'arbre, comme le brief l'autorise.
+> - Tests : `node --test tests/notifications-contacts-ecran.test.js tests/notifications-reprise-listes.test.js` donne **69/69 verts**.
+>
+> **Verdict : R1 fermé, R2 fermé. Les deux correctifs n'ouvrent aucun constat de sécurité.**
+>
+> **R1 — le plafond tient-il ? Oui.**
+> - **Une réservation par adresse et par jour** : c'est la clé primaire (compte, adresse, jour).
+> - **Dix par compte et par jour** : c'est l'unicité (compte, jour, rang) avec un rang de 1 à 10, posée en base. Postgres la fait respecter même sous des clics simultanés.
+> - **Tout ou rien** : l'insertion de plusieurs lignes est une seule requête. Un conflit annule tout, et on relit.
+> - **Reprises épuisées** : on refuse sans rien écrire.
+> - **Jour de Paris** : il est calculé une seule fois, avant la boucle (`contacts.js:347`).
+> - **La remise** efface seulement la ligne de la réservation elle-même, et seulement si rien n'est parti (`api/push.js:189-191`). L'envoi traite chaque canal à part : si un canal est parti, la réservation reste.
+> - **Retirer puis recréer un contact** ne libère rien : la trace des essais n'est pas liée à la ligne du contact.
+> - **Le navigateur ne peut pas écrire** dans la table : la sécurité par ligne (RLS) est activée, sans aucune règle d'accès.
+>
+> **R2 — une saisie peut-elle encore entrer dans un filtre ? Non.**
+> - **`.eq`** (postgrest-js 2.102.1, `dist/index.cjs:1299-1300`) ajoute la valeur au paramètre d'URL, qui l'encode. Mesuré : `,` `(` `)` `"` `&amp;` `=` `#` `+` deviennent tous des `%XX`. Côté serveur, PostgREST lit tout ce qui suit `eq.` comme une seule valeur ; ce point vient de sa grammaire, je n'ai pas pu le mesurer dans l'arbre. Une valeur ne peut donc pas ajouter un second filtre.
+> - **`.in`** (`dist/index.cjs:1836-1841`) met entre guillemets une valeur qui contient `,()`, mais n'échappe pas un `"` à l'intérieur. C'était la faille d'origine. Les `.in` qui restent dans le module ne prennent plus de saisie :
+>   - lignes 181 et 238 : les biens, contrôlés comme UUID à la ligne 165 (les deux appelants passent par `validerContact`) ;
+>   - ligne 421 : des identifiants relus en base.
+> - **Les e-mails** n'entrent plus dans aucun filtre : `desinscriptionDe` et `lignesDuLien` trient en JavaScript.
+> - **La remise** n'utilise que des valeurs produites par `reserverEssai`, jamais par le client.
+> - **`contains('biens', …)`** (ligne 98) : la valeur vient des émetteurs ou de la base, pas d'une saisie.
+>
+> **Constats (aucun de sécurité)**
+>
+> 1. **Régression faible, sur la reprise des listes** — `lib/notifications/contacts.js:144`.
+>    - Le nouveau contrôle d'e-mail est plus strict que celui qui lit les listes (`lib/notifications/reprise-listes.js:55`, ancienne règle, hors du diff).
+>    - Scénario mesuré : une liste qui contient `Jean&lt;jean@exemple.fr&gt;`, `jean@exemple.fr;` ou `jean@exemple.fr,` est lue comme une adresse, prévue comme contact, puis refusée par `validerContact`.
+>    - Effet (`scripts/reprendre-listes-alertes.js:225-226`) : la reprise de **tout le compte** s'arrête avec « contact_invalide ». Le message ne dit pas quelle adresse bloque.
+>    - Rien n'est perdu : les listes restent en service, et cela se voit dès l'essai à blanc. Avant R2, les deux règles étaient identiques.
+>
+> 2. **Faible, déjà présent avant ces correctifs** — `lib/notifications/contacts.js:51-57` comparé à `api/sms.js:138`.
+>    - Le numéro `611111111` (accepté par la validation) donne la clé `t:+611111111`, mais l'envoi l'adresse à `+33611111111`.
+>    - Scénario : deux contacts, `0611111111` et `611111111`, reçoivent chacun un essai le même jour, sur le même téléphone.
+>    - Le plafond de dix par compte tient toujours, et le SMS part sur la clé Brevo du compte lui-même.
+>
+> 3. **Faible, point à mettre dans la remise** — `migrations/2026-11-10-notifications-contacts.sql:115-128`.
+>    - Avec `create table if not exists`, une table déjà créée dans la version précédente (sans rang) n'est pas modifiée.
+>    - Le code échoue alors en refusant : la lecture de `cle, rang` est en erreur, donc chaque essai rend « lecture_impossible ». Aucun contournement possible.
+>    - La KB indique que la table n'est encore appliquée nulle part, et aucun script ne vérifie cette migration. Il faut appliquer la version `98ff074` et vérifier que la contrainte `notifications_contacts_essais_rang` existe en base.
+>
+> 4. **Très faible, fonctionnel** — `lib/notifications/contacts.js:355-370`.
+>    - Les clics simultanés visent tous le plus petit rang libre. Au-delà de 5 clics vraiment simultanés sur des contacts différents, les derniers reçoivent « plafond_essais » alors qu'il reste des rangs.
+>    - Le refus est sûr, seul le motif est faux. Le test R1 accepte d'ailleurs ce cas (`ok &gt;= 1`).
+>
+> Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée à la troisième review** (aucun constat de sécurité ; R1 et R2
+fermés ; pas de quatrième review — décision de Thierry : c'était la dernière) :
+- **1** — la reprise NOMME l'adresse de liste que le contact refuse (masquée,
+  avec son motif) : à corriger dans la liste avant le `--go`, le compte garde
+  ses listes en attendant.
+- **2** — déjà corrigé (R3 de la re-review) : `612345678` = `0612345678`.
+- **3** — **À LA REMISE ET À L'APPLICATION DE LA MIGRATION** : la table
+  `notifications_contacts_essais` doit porter la colonne `rang` et la
+  contrainte `notifications_contacts_essais_rang` ; la migration n'est encore
+  appliquée nulle part, et `create table if not exists` ne corrigerait pas une
+  table créée par une version antérieure. Vérification après application :
+  `select conname from pg_constraint where conrelid =
+  'public.notifications_contacts_essais'::regclass` doit rendre la clé
+  primaire, la contrainte de rang et son contrôle de borne.
+- **4** — autant de reprises que de rangs : trente clics simultanés en font
+  passer exactement dix, et un test le dit.

@@ -518,3 +518,14 @@ test('`--compte=` ne reprend que ce compte ; un compte sans liste active ne comp
   assert.match(sorties.join('\n'), /0 compte\(s\) avec des listes actives/)
   assert.equal(etat.ecritures.length, 0)
 })
+
+test('une adresse de liste que le contact refuse bloque le compte en la NOMMANT (masquée), sans rien écrire', async () => {
+  const config = { 'ref-1': { intervention: liste({ email_lines: 'Jean : jean@exemple.fr;' }) } }
+  const { db, etat } = compte({ agent_alert_config: [{ user_id: COMPTE, config, updated_at: MAJ }] })
+  const sorties = []
+  assert.equal(await lancer({ argv: [], db, ecrire: t => sorties.push(t) }), 1)
+  assert.match(sorties.join('\n'), /contact non valide \(email_illisible\) : j\*\*\*@exemple\.fr; — à corriger dans la liste/)
+  assert.doesNotMatch(sorties.join('\n'), /jean@exemple/)
+  assert.equal(etat.ecritures.length, 0)
+})
+

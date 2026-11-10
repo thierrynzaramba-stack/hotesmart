@@ -223,7 +223,15 @@ async function repriseDuCompte ({ compte, db, go, ignores, destinataires, ecrire
   }
   for (const c of plan.contacts) {
     const v = contactsMod.validerContact(c)
-    if (!v.ok) { ecrire(`  ⚠ contact non valide (${v.motif}) : rien n'est écrit pour ce compte.`); return { ok: false, motif: 'contact_invalide' } }
+    // ⚠ L'ADRESSE QUI BLOQUE SE NOMME (masquée), avec son motif : une liste
+    // peut porter une adresse que l'ancien envoi acceptait et que le contact
+    // refuse (« Jean <jean@…> », un « ; » final) — c'est à corriger dans la
+    // liste avant le --go (troisième review de l'étape 3, constat 1).
+    if (!v.ok) {
+      const adresse = c.email ? reprise.masquer('email', c.email) : reprise.masquer('sms', c.telephone)
+      ecrire(`  ⚠ contact non valide (${v.motif}) : ${adresse} — à corriger dans la liste ; rien n'est écrit pour ce compte, ses listes restent en service.`)
+      return { ok: false, motif: 'contact_invalide' }
+    }
   }
   if (!go) { ecrire('  · listes de ce compte : seraient coupées.'); return { ok: true, plan } }
 

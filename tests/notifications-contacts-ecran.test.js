@@ -45,7 +45,7 @@ function base (tables = {}) {
       const garde = () => {
         let l = etat.tables[table].filter(r => q.f.every(([op, c, v]) =>
           op === 'eq' ? r[c] === v : op === 'is' ? (r[c] ?? null) === v : op === 'in' ? v.map(String).includes(String(r[c]))
-            : op === 'notnull' ? r[c] != null : true))
+            : op === 'notnull' ? r[c] != null : op === 'lt' ? String(r[c]) < String(v) : true))
         if (q.ordre) l = [...l].sort((a, b) => String(a[q.ordre]).localeCompare(String(b[q.ordre])))
         if (q.limite != null) l = l.slice(0, q.limite)
         return l
@@ -90,6 +90,7 @@ function base (tables = {}) {
         is (c, v) { q.f.push(['is', c, v]); return chaine },
         in (c, v) { q.f.push(['in', c, v]); return chaine },
         not (c, op, v) { if (op === 'is' && v === null) q.f.push(['notnull', c]); return chaine },
+        lt (c, v) { q.f.push(['lt', c, v]); return chaine },
         order (c) { q.ordre = c; return chaine },
         limit (k) { q.limite = k; return chaine },
         insert (rows) { q.op = 'insert'; q.rows = [].concat(rows); return chaine },
@@ -165,13 +166,13 @@ test('LE TEST QUI COMPTE (Q32, Q37) : un essai par ADRESSE et par JOUR DE PARIS 
   // C2 porte la MÊME adresse e-mail (casse près) et un numéro : seul le SMS part.
   const r2 = await contacts.reserverEssai({ compte: A, id: C2, maintenant: midi, db })
   assert.deepEqual(r2.canaux, ['sms'])
+  // Rendu : la réservation de CET essai seulement.
+  await contacts.rendreEssai({ compte: A, reserve: r2.reserve, db })
+  assert.deepEqual(etat.tables.notifications_contacts_essais.map(x => x.cle), ['e:gardien@exemple.fr'])
+  assert.deepEqual((await contacts.reserverEssai({ compte: A, id: C2, maintenant: midi, db })).canaux, ['sms'])
   // 23:30 à Paris le 10 = 22:30 UTC : encore le 10 ; 00:30 à Paris le 11 = 23:30 UTC le 10 : déjà le 11.
   assert.equal((await contacts.reserverEssai({ compte: A, id: C1, maintenant: Date.parse('2026-11-10T22:30:00Z'), db })).motif, 'essai_deja_fait')
   assert.equal((await contacts.reserverEssai({ compte: A, id: C1, maintenant: Date.parse('2026-11-10T23:30:00Z'), db })).ok, true)
-  // Rendu : la réservation de CET essai seulement.
-  await contacts.rendreEssai({ compte: A, reserve: r2.reserve, db })
-  assert.deepEqual(etat.tables.notifications_contacts_essais.map(x => x.cle).sort(), ['e:gardien@exemple.fr', 'e:gardien@exemple.fr'])
-  assert.deepEqual((await contacts.reserverEssai({ compte: A, id: C2, maintenant: midi, db })).canaux, ['sms'])
   // Désinscrit : refusé.
   etat.tables.notifications_contacts.find(x => x.id === C1).desinscrit_le = '2026-11-09T00:00:00Z'
   assert.equal((await contacts.reserverEssai({ compte: A, id: C1, maintenant: Date.parse('2026-11-12T10:00:00Z'), db })).motif, 'contact_desinscrit')
@@ -209,7 +210,8 @@ test('LE TEST QUI COMPTE (re-review, R1 de sécurité) : trente clics SIMULTANÉ
   const midi = Date.parse('2026-11-10T11:00:00Z')
   const r = await Promise.all(contactsDuTest.map(c => contacts.reserverEssai({ compte: A, id: c.id, maintenant: midi, db })))
   const ok = r.filter(x => x.ok).length
-  assert.ok(ok >= 1 && ok <= 10, `${ok} réservations`)
+  // Autant de reprises que de rangs : exactement dix passent, aucun de plus.
+  assert.equal(ok, 10, `${ok} réservations`)
   assert.ok(etat.tables.notifications_contacts_essais.length <= 10)
   assert.deepEqual([...new Set(etat.tables.notifications_contacts_essais.map(x => x.rang))].length, etat.tables.notifications_contacts_essais.length, 'un rang par réservation')
   assert.ok(r.filter(x => !x.ok).every(x => x.motif === 'plafond_essais'))
@@ -270,18 +272,63 @@ test('LE TEST QUI COMPTE (constat S2, Q35) : une adresse qui change = un nouveau
   assert.deepEqual([c1.jeton, c1.desinscrit_le], [garde, '2026-11-09T00:00:00Z'])
 })
 
-test('une adresse GARDÉE garde la personne : seul le numéro change → même jeton, toujours désinscrite ; seul l\'e-mail change → nouveau jeton, toujours désinscrite', async () => {
+test('Q38 : UNE adresse qui change suffit — seul le numéro, ou seul l\'e-mail : nouveau jeton, ligne réinscrite', async () => {
   const t = donnees()
   t.notifications_contacts[1].desinscrit_le = '2026-11-09T00:00:00Z'
   const { db, etat } = base(t)
   const c2 = etat.tables.notifications_contacts.find(x => x.id === C2)
-  // Sa propre ligne désinscrite ne lui demande pas de confirmation.
-  const r = await contacts.modifierContact({ compte: A, id: C2, contact: { email: 'gardien@exemple.fr', telephone: '0622222222', alertes: ['urgences'], biens: [BIEN_A2] }, db })
+  const r = await contacts.modifierContact({ compte: A, id: C2, contact: { email: 'GARDIEN@exemple.fr', telephone: '0622222222', alertes: ['urgences'], biens: [BIEN_A2] }, db })
   assert.equal(r.ok, true, JSON.stringify(r))
-  assert.deepEqual([c2.jeton, c2.desinscrit_le], [J2, '2026-11-09T00:00:00Z'])
-  await contacts.modifierContact({ compte: A, id: C2, contact: { email: 'autre@exemple.fr', telephone: '0622222222', alertes: ['urgences'], biens: [BIEN_A2] }, db })
   assert.notEqual(c2.jeton, J2)
-  assert.equal(c2.desinscrit_le, '2026-11-09T00:00:00Z')
+  assert.equal(c2.desinscrit_le, null)
+  c2.desinscrit_le = '2026-11-09T00:00:00Z'
+  const j = c2.jeton
+  await contacts.modifierContact({ compte: A, id: C2, contact: { email: 'autre@exemple.fr', telephone: '0622222222', alertes: ['urgences'], biens: [BIEN_A2] }, db })
+  assert.deepEqual([c2.jeton !== j, c2.desinscrit_le], [true, null])
+})
+
+test('re-review R7 : garder sa propre adresse ne demande pas de confirmation, même si une AUTRE ligne désinscrite la porte', async () => {
+  const t = donnees()
+  // C1 (e-mail du gardien) désinscrit ; C2 porte le même e-mail et un numéro. On ne change que le numéro de C2.
+  t.notifications_contacts[0].desinscrit_le = '2026-11-09T00:00:00Z'
+  const { db } = base(t)
+  const r = await contacts.modifierContact({ compte: A, id: C2, contact: { email: 'GARDIEN@exemple.fr', telephone: '0699999999', alertes: ['urgences'], biens: [BIEN_A2] }, db })
+  assert.equal(r.ok, true, JSON.stringify(r))
+})
+
+test('re-review R6 : une adresse modifiée ailleurs entre la lecture et l\'écriture — refusé, rien n\'est écrit', async () => {
+  const { db, etat } = base(donnees())
+  const c1 = etat.tables.notifications_contacts.find(x => x.id === C1)
+  const piege = { from: (t) => {
+    const c = db.from(t)
+    if (t !== 'notifications_contacts') return c
+    const maj = c.update
+    c.update = (v) => { c1.email = 'onglet2@exemple.fr'; return maj.call(c, v) }
+    return c
+  } }
+  const r = await contacts.modifierContact({ compte: A, id: C1, contact: { email: 'onglet1@exemple.fr', alertes: ['urgences'], biens: [BIEN_A] }, db: piege })
+  assert.deepEqual([r.ok, r.motif, c1.email, c1.jeton], [false, 'contact_modifie_entre_temps', 'onglet2@exemple.fr', J1])
+})
+
+test('re-review R3 : « 612345678 » est le même numéro que « 0612345678 » — une seule adresse', async () => {
+  assert.equal(contacts.cleTelephone('612345678'), '+33612345678')
+  assert.equal(contacts.cleTelephone('06 12 34 56 78'), '+33612345678')
+  const t = donnees()
+  t.notifications_contacts.push({ id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', compte_id: A, email: null, telephone: '612345678', biens: [BIEN_A], alertes: ['urgences'], jeton: '3'.repeat(64), desinscrit_le: null })
+  t.notifications_contacts.push({ id: 'dddddddd-dddd-4ddd-8ddd-ddddddddddd2', compte_id: A, email: null, telephone: '0612345678', biens: [BIEN_A], alertes: ['urgences'], jeton: '4'.repeat(64), desinscrit_le: null })
+  const { db } = base(t)
+  const midi = Date.parse('2026-11-10T11:00:00Z')
+  assert.equal((await contacts.reserverEssai({ compte: A, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', maintenant: midi, db })).ok, true)
+  assert.equal((await contacts.reserverEssai({ compte: A, id: 'dddddddd-dddd-4ddd-8ddd-ddddddddddd2', maintenant: midi, db })).motif, 'essai_deja_fait')
+})
+
+test('re-review R12 : les essais des jours passés du compte partent à la réservation suivante', async () => {
+  const { db, etat } = base({ ...donnees(), notifications_contacts_essais: [
+    { compte_id: A, cle: 'e:vieux@exemple.fr', jour: '2026-11-08', rang: 1 },
+    { compte_id: B, cle: 'e:autre@exemple.fr', jour: '2026-11-08', rang: 1 }
+  ] })
+  await contacts.reserverEssai({ compte: A, id: C1, maintenant: Date.parse('2026-11-10T11:00:00Z'), db })
+  assert.deepEqual(etat.tables.notifications_contacts_essais.map(x => [x.compte_id, x.jour]).sort(), [[A, '2026-11-10'], [B, '2026-11-08']].sort())
 })
 
 test('LE TEST QUI COMPTE (Q36) : l\'adresse d\'une personne désinscrite n\'est ajoutée qu\'après confirmation du titulaire', async () => {
@@ -295,8 +342,10 @@ test('LE TEST QUI COMPTE (Q36) : l\'adresse d\'une personne désinscrite n\'est 
   assert.equal(etat.tables.notifications_contacts.length, avant)
   assert.equal((await contacts.ajouterContact({ compte: A, contact: c, confirme: true, db })).ok, true)
   assert.equal(etat.tables.notifications_contacts.length, avant + 1)
-  // Modifier une AUTRE ligne vers cette adresse : même règle.
-  const m = await contacts.modifierContact({ compte: A, id: C2, contact: { email: 'gardien@exemple.fr', alertes: ['urgences'], biens: [BIEN_A2] }, db })
+  // Modifier une AUTRE ligne, qui ne la portait pas, vers cette adresse : même règle.
+  const C3 = 'c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3'
+  etat.tables.notifications_contacts.push({ id: C3, compte_id: A, nom: 'Voisin', email: 'voisin@exemple.fr', telephone: null, biens: [BIEN_A], alertes: ['urgences'], jeton: '5'.repeat(64), desinscrit_le: null })
+  const m = await contacts.modifierContact({ compte: A, id: C3, contact: { email: 'gardien@exemple.fr', alertes: ['urgences'], biens: [BIEN_A2] }, db })
   assert.equal(m.motif, 'adresse_desinscrite')
   // Le désinscrit d'un AUTRE compte ne compte pas.
   const { db: db2 } = base({ ...donnees(), notifications_contacts: [{ ...donnees().notifications_contacts[2], desinscrit_le: '2026-11-09T00:00:00Z' }] })
@@ -318,7 +367,7 @@ test('LE TEST QUI COMPTE (Q30) : se désinscrire vaut pour la PERSONNE dans ce c
 
 // ─── 2. L'endpoint de l'onglet ───────────────────────────────────────────────
 
-function monterApi ({ tables = donnees(), envoi = async () => ({ push: 0, email: true, sms: false, erreurs: [] }) } = {}) {
+function monterApi ({ tables = donnees(), envoi = async (p) => ({ push: 0, email: p.canaux.includes('email'), sms: p.canaux.includes('sms'), erreurs: [] }) } = {}) {
   const { db, etat } = base(tables)
   const jetons = { 'jeton-a': A, 'jeton-b': B }
   const appelsEnvoi = []
@@ -488,6 +537,16 @@ test('LE TEST QUI COMPTE (Q37) : l\'essai ne part qu\'aux adresses RÉSERVÉES �
   } finally { fini() }
 })
 
+test('re-review R10 : l\'e-mail part, le SMS non — seule l\'adresse du SMS est rendue, et il se réessaie le jour même', async () => {
+  const { appeler, etat, fini } = monterApi({ envoi: async (p) => ({ push: 0, email: p.canaux.includes('email'), sms: false, erreurs: ['sms_echec'] }) })
+  try {
+    const r = await appeler({ corps: { action: 'contact_essai', id: C2 } })
+    assert.deepEqual([r.code, r.corps.bilan], [200, { email: true, sms: false }])
+    assert.deepEqual(etat.tables.notifications_contacts_essais.map(x => x.cle), ['e:gardien@exemple.fr'])
+    assert.equal(r.corps.contacts.liste.find(c => c.id === C2).essai_possible, true, 'le SMS reste à essayer')
+  } finally { fini() }
+})
+
 test('POST : une adresse désinscrite rend 409 `adresse_desinscrite` avec sa date et la liste ; `confirme` l\'ajoute (Q36)', async () => {
   const t = donnees()
   t.notifications_contacts[0].desinscrit_le = '2026-11-09T00:00:00Z'
@@ -565,6 +624,16 @@ test('POST arreter puis reprendre : la personne se désinscrit, puis revient par
   const retour = await ouvrirPage({ methode: 'POST', body: `jeton=${J1}&action=reprendre`, tables: r.etat.tables })
   assert.equal(retour.code, 200)
   assert.ok(retour.etat.tables.notifications_contacts.filter(c => c.compte_id === A).every(c => !c.desinscrit_le))
+})
+
+test('re-review R9 : la page dit l\'état de l\'ADRESSE — une ligne encore active, et le bouton propose d\'arrêter', async () => {
+  const t = donnees()
+  t.notifications_contacts[0].desinscrit_le = '2026-11-09T00:00:00Z'
+  const r = await ouvrirPage({ query: { jeton: J1 }, tables: t })
+  assert.match(r.html, /name="action" value="arreter"/)
+  t.notifications_contacts[1].desinscrit_le = '2026-11-09T00:00:00Z'
+  const tout = await ouvrirPage({ query: { jeton: J1 }, tables: t })
+  assert.match(tout.html, /name="action" value="reprendre"/)
 })
 
 test('un jeton inconnu ou mal formé : « lien plus valable », 404, rien écrit ; une autre méthode : 405', async () => {
@@ -725,3 +794,25 @@ test('l\'écran : une réponse sans liste (relecture impossible) fait relire l\'
   await f.attendre()
   assert.equal(f.lectures.n, n)
 })
+
+test('re-review R8 : changer l\'adresse d\'un contact désinscrit se confirme — refusé, rien ne part', async () => {
+  for (const accord of [false, true]) {
+    const vus = []
+    const e = await ouvrirSettings({ contactsServeur: blocServeur(), confirmer: (t) => { vus.push(t); return accord } })
+    e.w.document.querySelector(`[data-contact-modifier="${C2}"]`).click()
+    e.$('c-tel').value = '0699999999'
+    e.$('c-enregistrer').click()
+    await e.attendre()
+    assert.match(vus[0], /s’était désinscrit/)
+    assert.equal(e.appels.length, accord ? 1 : 0)
+  }
+  // Sans changement d'adresse, aucune question.
+  const vus = []
+  const f = await ouvrirSettings({ contactsServeur: blocServeur(), confirmer: (t) => { vus.push(t); return true } })
+  f.w.document.querySelector(`[data-contact-modifier="${C2}"]`).click()
+  f.$('c-nom').value = 'Autre nom'
+  f.$('c-enregistrer').click()
+  await f.attendre()
+  assert.deepEqual([vus.length, f.appels.length], [0, 1])
+})
+

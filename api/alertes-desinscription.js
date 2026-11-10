@@ -81,7 +81,9 @@ async function handler (req, res, { db = null } = {}) {
     if (req.method === 'GET') {
       const biens = await nomsDesBiens(c.compte_id, lu.lignes, base)
       return envoyerPage(res, 200, textes.pageDesinscription({
-        langue, etat: c.desinscrit_le ? 'desinscrit' : 'inscrit', adresse: adresseMasquee(c), biens, jeton
+        // L'état de l'ADRESSE, pas de la seule ligne du lien (re-review, R9) :
+        // une ligne encore active, et le bouton propose d'arrêter.
+        langue, etat: lu.lignes.some(l => !l.desinscrit_le) ? 'inscrit' : 'desinscrit', adresse: adresseMasquee(c), biens, jeton
       }))
     }
 
