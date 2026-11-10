@@ -655,3 +655,24 @@ signale une lecture ratée de la base au lieu d'accuser l'hôte. Une fois par
 réservation, en mode Auto seulement. Comme `message_non_envoye`, elle part au
 **fondateur** (`FOUNDER_PHONE` / `FOUNDER_EMAIL`), pas à l'hôte du compte : le
 compte recensé plus haut (20 / 17) date d'avant elle et n'a pas été remesuré.
+
+**Et un autre depuis le 10 novembre 2026, sans écran non plus :**
+`code_acces_non_envoye` (dette 141, `lib/cron-arrival-code.js`, « CODE D'ACCÈS — ENVOI
+NON CONFIRMÉ »). Le canal a refusé le message du CODE D'ACCÈS (réservation sans messagerie,
+refus du provider), ou la connexion a été coupée pendant l'envoi — messagerie du canal ou
+e-mail (`incertain` : le texte dit alors « PEUT-ÊTRE REÇU ») : l'hôte a sa tâche de transmission manuelle, et le
+**fondateur** est prévenu **dès le premier refus** (seuil 1, SMS + e-mail) — décision de
+Thierry du 10 novembre 2026. Avant, ce cas passait par `send_failure`, seuil 2, libellé
+« Échecs d'envoi répétés », et son anti-spam par logement était partagé avec les messages
+programmés : un refus isolé ne prévenait personne. Pour un même modèle de code, une seule
+alerte : s'il manque aussi une information, seule `message_envoye_incomplet` part (son
+texte dit « NON ENVOYÉ par le canal » ou « PEUT-ÊTRE REÇU », motif en fin). Elle part
+après le journal anti-doublon.
+
+⚠ **Ces deux types ont un anti-spam PAR RÉSERVATION ET PAR MODÈLE** (`reportIncident(…, { cle })`,
+`lib/founder-notify.js`) : par défaut, l'anti-spam porte sur (type, logement) pendant une
+heure, et un second code refusé le même jour sur le même logement — celui du voyageur qui
+ARRIVE, un jour de dos-à-dos — était consigné sans rien envoyer. La clé vit dans
+`detail.cle`, jamais dans `property_id` (RLS). Sans clé, rien ne change pour les autres
+types ; avec une clé, le pied de l'e-mail dit « 1 par fait ». L'appelant garantit déjà un seul appel par réservation et par modèle
+(`message_sent_log`).

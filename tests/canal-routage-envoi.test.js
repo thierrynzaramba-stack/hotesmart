@@ -308,8 +308,15 @@ test('les deux moteurs ne parlent pas de la meme chose avec le meme mot', () => 
 
 test('le code d\'acces n\'alerte pas le fondateur pour un canal pas encore branche', () => {
   const arr = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-arrival-code.js'), 'utf8')
-  assert.ok(/if \(!sendResult\.differe\) \{\s*\n\s*await reportIncident\('send_failure'/.test(arr),
+  // Dette 141 : l'alerte est NOTEE sous la condition et part en toute fin ;
+  // le comportement est tenu par tests/arrival-code-manquant-alerte.test.js
+  // (`differe` : aucune alerte « envoi impossible »).
+  assert.ok(/if \(!sendResult\.differe\) \{\s*\n(\s*\/\/.*\n)*\s*echecAPrevenir = /.test(arr),
     'l\'incident est conditionne : « pas branche » n\'est pas « a echoue »')
+  // Decision du 10 novembre 2026 : un type propre, seuil 1.
+  assert.strictEqual((arr.match(/reportIncident\('code_acces_non_envoye'/g) || []).length, 1, 'un seul site d\'alerte')
+  assert.ok(!/reportIncident\('send_failure'/.test(arr), 'plus de send_failure pour le code')
+  assert.ok(/if \(echecAPrevenir && !aPrevenir\) \{/.test(arr), 'et il ne part que pour un echec note, sans doublon')
   // Le filet, lui, reste inconditionnel : une porte fermee devant un voyageur.
   assert.ok(/task_type: 'auto_message'/.test(arr), 'la tache a l\'hote subsiste')
 })
@@ -343,6 +350,29 @@ test('LE TEST QUI COMPTE : `quota` traverse sendGuestMessage', async () => {
   assert.strictEqual(r.ok, false)
   assert.strictEqual(r.quota, true, 'sans ce champ, le plafond compte un quota comme une panne')
   assert.strictEqual(r.permanent, false)
+})
+
+test('LE TEST QUI COMPTE : `incertain` traverse sendGuestMessage (Brevo coupe pendant l envoi)', async () => {
+  // Dette 141, review 3, constat 1 : le drapeau etait perdu sur la branche
+  // e-mail, donc le code d'acces d'une reservation Offline s'annoncait « NON
+  // ENVOYÉ : a lui transmettre vous-meme » alors qu'il etait peut-etre recu.
+  // La forme de la reponse est celle que `envoyerHtml` rend quand le fetch leve
+  // (lib/email-guestflow.js).
+  remise()
+  etat.reponseEmail = { ok: false, raison: 'brevo_injoignable: socket hang up', permanent: false, incertain: true }
+  const r = await sendGuestMessage(null, BIEN_CHANNEX,
+    { id: 'c87f24ce', source: 'Offline', guestEmail: 'v@exemple.test' }, 'bonjour',
+    { userId: 'U', eventType: 'arrival_code' })
+  assert.strictEqual(r.ok, false)
+  assert.strictEqual(r.incertain, true)
+  assert.strictEqual(r.canal, 'email')
+  // Et un refus net n'est pas incertain.
+  remise()
+  etat.reponseEmail = { ok: false, permanent: true, raison: 'brevo_400: Invalid email address' }
+  const r2 = await sendGuestMessage(null, BIEN_CHANNEX,
+    { id: 'c87f24ce', source: 'Offline', guestEmail: 'v@exemple.test' }, 'bonjour',
+    { userId: 'U', eventType: 'arrival_code' })
+  assert.strictEqual(r2.incertain, false)
 })
 
 test('`permanent` traverse aussi, et commande l\'abandon', async () => {
