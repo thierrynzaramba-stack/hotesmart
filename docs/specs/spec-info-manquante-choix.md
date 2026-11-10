@@ -1,6 +1,6 @@
 # Spec — Information manquante : l'hôte répond par Oui / Non / Autre, l'IA rédige, la base apprend
 
-**Statut : PROJET, à valider par Thierry avant la première ligne de code.**
+**Statut : VALIDÉE par Thierry le 10 novembre 2026** (décisions du §10).
 Numéro au registre : demandé au chef de file le 10 novembre 2026, pas encore
 reçu. Domaine messagerie / GuestFlow. Ce lot touche l'**envoi au voyageur** :
 trois reviews au plus, et Thierry doit être présent juste après le merge.
@@ -162,11 +162,10 @@ Chaque étape fait l'objet de sa propre remise au chef de file.
 - `api/messages.js` : la lecture du fil en direct, déjà en production.
 - La dette 144 est indépendante (code d'accès).
 
-## 10. À trancher par Thierry avant le code
+## 10. Décisions de Thierry (10 novembre 2026)
 
-1. **La carte aussi pour une « intervention » (urgence) ?** Proposition :
-   **non**. Une intervention n'est pas une question à laquelle on répond par oui
-   ou non. Elle garde son alerte.
-2. **L'étape 2 (réponses prêtes) après la recette de l'étape 1**, ou les deux
-   ensemble ? Proposition : **après**, pour recetter la rédaction seule
-   d'abord.
+1. **Pas de carte pour une « intervention » (urgence).** Elle garde son
+   alerte : une intervention n'est pas une question à laquelle on répond par
+   oui ou non. La carte ne lit que les tâches `info_unknown`.
+2. **Deux étapes** : la carte et le bouton « IA » d'abord, puis, après leur
+   recette, les réponses prêtes.
