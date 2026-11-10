@@ -1,8 +1,7 @@
 # Spec — Information manquante : l'hôte répond par Oui / Non / Autre, l'IA rédige, la base apprend
 
 **Statut : VALIDÉE par Thierry le 10 novembre 2026** (décisions du §10).
-Numéro au registre : demandé au chef de file le 10 novembre 2026, pas encore
-reçu. Domaine messagerie / GuestFlow. Ce lot touche l'**envoi au voyageur** :
+Aucun numéro de dette : c'est un lot neuf (chef de file, 10 novembre 2026). Domaine messagerie / GuestFlow. Ce lot touche l'**envoi au voyageur** :
 trois reviews au plus, et Thierry doit être présent juste après le merge.
 
 ## 0. La demande (Thierry, 10 novembre 2026)
@@ -24,8 +23,11 @@ réponse prête existante, elle propose sa modification.**
   statut **`pending`**, avec `sub_tasks: [{ question, summary,
   suggested_reply }]` : une entrée par question. `suggested_reply` est une
   **note interne pour l'hôte**, jamais un texte pour le voyageur. Il prévient
-  aussi l'hôte par SMS ou e-mail (`sendAlertNotifications`), après le délai
-  « alerte info manquante » et en tenant compte de la sourdine.
+  aussi l'hôte par SMS ou e-mail (`sendAlertNotifications`). ⚠ **Mesuré
+  dans le code le 10 novembre 2026 : l'alerte part DANS LE TOUR de
+  classification.** Le réglage « alerte info manquante » (`alerte_info`,
+  `api/agent-config.js`) est enregistré, mais aucun code de `lib/` ne le lit
+  encore, et la migration l'a posé à 0 partout (docs/kb/guestflow.md).
 - **La page Messages ne montre pas cette tâche.** Ses deux lectures de
   propositions (`pages/messages.html`, au chargement et à la relecture ;
   `api/messages.js`, fil en direct) ne prennent que `pending_validation`.
@@ -51,11 +53,18 @@ réponse prête existante, elle propose sa modification.**
   langue, avec les connaissances du logement. Le texte arrive **dans la zone de
   saisie** : rien ne part. L'hôte relit, modifie et envoie par le chemin
   d'envoi existant (même routage, mêmes gardes).
-- Quand la réponse part, la tâche `info_unknown` est **close** (`done`), et
-  l'alerte SMS ou e-mail qui n'était pas encore partie ne part plus : la règle
-  du 27 octobre (« si l'hôte agit, pas de SMS ») s'applique.
+- Quand la réponse part, la tâche `info_unknown` est **close** (`done`). La
+  carte disparaît, et la ligne « À valider » d'Aujourd'hui avec elle.
+  ⚠ **La clôture ne retire aucune alerte** : l'alerte est déjà partie au
+  moment de la classification (§1). Le jour où le délai `alerte_info` sera
+  appliqué, la règle du 27 octobre (« si l'hôte agit, pas de SMS ») devra
+  relire le statut de la tâche avant d'envoyer.
+- La carte ne se montre que si l'hôte n'a **pas répondu depuis** la tâche :
+  le cron ne clôt jamais une tâche `pending` quand l'hôte répond à la main,
+  donc une tâche ouverte n'est pas forcément une question en attente. Vaut
+  réponse un message sortant qui n'est pas un message automatique (modèle).
 - La carte ne remplace rien. Aujourd'hui garde sa liste, et l'alerte garde son
-  délai et sa sourdine.
+  circuit.
 
 ### B. Le bouton « IA » dans la zone de saisie
 
@@ -89,23 +98,49 @@ réponse prête existante, elle propose sa modification.**
 - **Un endpoint neuf : `POST /api/guestflow-rediger`**. Il a trois actions, et
   aucune n'écrit dans la base de connaissance.
   - `choix` : `{ bookingId, tacheId, choix: [{ question, reponse: 'oui'|'non'|'autre', precision? }] }`
-    rend `{ texte }`.
+    rend `{ texte }`. ⚠ **La `question` renvoyée doit être celle de la base,
+    au caractère** : le cron COMPLÈTE la tâche quand le voyageur écrit encore,
+    et des choix pris sur l'ancienne carte, appliqués par position,
+    répondraient à des questions que l'hôte n'a jamais lues. Écart :
+    `409 questions_changees`, et la page relit la carte.
   - `texte` : `{ bookingId, brouillon }` rend `{ texte }`.
   - `base` : `{ bookingId, tacheId, envoye }` rend `{ propositions: [{ action:
     'creer'|'modifier', id?, sujet, texte, avant? }] }`.
 - **Gardes.** `requirePermission` avec `domaine: 'messages'`, `niveau:
   'write'`, booking requis, donc le compte et le bien désignés par la
-  réservation, comme `api/guestflow-proposer.js`. La garde de coût IA
-  (`lib/guestflow-garde.js` : plafond par jour, délai après échecs). Le kill
-  switch du bien. Chaque appel IA est journalisé (`avecContexteIA`).
+  réservation, comme `api/guestflow-proposer.js`. Le kill switch du bien.
+  Chaque appel IA est journalisé (`avecContexteIA`, étiquette
+  `guestflow_rediger`).
+- ⚠ **Plafond de coût PROPRE À L'HÔTE (décision de Thierry du 10 novembre
+  2026 : « 3 est trop petit de toute façon »)** : **10 rédactions par
+  conversation sur 24 h**, comptées dans le journal `ia_appels` sous
+  l'étiquette `guestflow_rediger`. Elles ne touchent **jamais** le plafond de
+  l'agent (`guestflow_appels_ia`, 3 appels) : sinon trois clics de l'hôte
+  arrêteraient l'agent sur la conversation (tâche « L'agent IA s'est
+  arrêté… ») et réveilleraient le fondateur pour un geste voulu. Journal
+  illisible : on n'appelle pas (503). Relever le plafond de l'agent lui-même
+  est un autre sujet, proposé au chef de file comme dette.
   `private, no-store` avant le premier refus, et le nombre de requêtes dans
   `Server-Timing`.
-- **Lectures des propositions.** `pages/messages.html` (deux lectures) et
-  `api/messages.js` (fil en direct) prennent aussi les tâches `info_unknown`
-  au statut `pending`. Le filtre change, pas le nombre de requêtes.
+- **Lecture des tâches.** ⚠ **Jamais dans `taches`** : la page affiche
+  `taches` en PROPOSITION, et « Envoyer » y ferait partir `suggested_reply` —
+  une NOTE INTERNE pour l'hôte — au voyageur. Le fil en direct
+  (`GET /api/messages?direct=1&fil=…`) lit les deux statuts en UNE lecture
+  (`in('status', ['pending_validation', 'pending'])`, les plus récentes
+  d'abord, borne 50) et rend un champ NEUF, `infos: [{ id, book_id,
+  property_id, created_at, maj, questions }]` : les questions seules, ni la
+  note interne, ni le résumé ; ni intervention, ni tâche système (pause,
+  arrêt de l'agent). `taches` garde exactement sa forme d'avant. Le nombre de
+  requêtes ne change pas. Les deux lectures directes de `pages/messages.html`
+  (au chargement, et « Proposer ») ne changent pas : la carte vient du fil en
+  direct, relu à l'ouverture de la conversation.
 - **Clôture.** L'envoi d'une réponse rédigée depuis la carte clôt la tâche
-  `info_unknown` par une action du writer existant (`POST /api/messages`). Le
-  statut est relu avant l'écriture, comme pour les propositions.
+  `info_unknown` par `POST /api/messages { action: 'info_traitee', task_id }`.
+  Le statut est relu avant l'écriture, et l'`UPDATE` porte la condition
+  `status = 'pending'` (course avec un second clic, ou avec le cron qui
+  complète la tâche). Une proposition ou une intervention y rend 404 (elles
+  ont leur circuit), une tâche système 409 `sans_question`. Rien n'est écrit
+  dans le journal `conversations` : il porte les réponses de l'agent.
 - **Droits.** Un membre délégué qui a `messages: write` mais pas le droit
   d'écrire dans la base ne voit pas la carte C, et le writer de la base le
   refuse en 403 (règle « un masquage par droit ne suffit jamais »).
@@ -125,7 +160,7 @@ vivent dans la zone de saisie jusqu'à l'envoi.
 | 3 | Cache navigateur | Aucun : ce sont des tâches et des messages (temps réel). |
 | 4 | `private, no-store` avant le premier refus | Oui, sur `/api/guestflow-rediger`, 405 compris. |
 | 5 | Fichiers statiques versionnés | Le JS ajouté vit dans un module partagé versionné (`shared/…`). |
-| 6 | Pas de lecture tronquée à 1000 lignes | Lectures bornées : une tâche, une réservation, les réponses prêtes d'un logement (bien moins de 1000). |
+| 6 | Pas de lecture tronquée à 1000 lignes | Lectures bornées : une tâche, les 30 derniers messages du fil, les réponses prêtes d'un logement (bien moins de 1000), au plus 10 lignes du journal. Les tâches du fil en direct sont lues des plus récentes aux plus anciennes : la borne des 50 ne peut pas cacher la proposition du jour derrière de vieilles tâches jamais closes. |
 | 7 | Budget par écran | **Aucun appel périodique ajouté** : le fil en direct reste à 12 appels par minute. Chaque geste (« Rédiger », « IA », proposition de base) coûte un POST et un appel IA. Tenu par un test qui compte les appels de la page. |
 | 8 | Mesure avant / après | Avant, mesuré en production le 10 novembre 2026 : une relecture du fil = 7 requêtes, 423 octets. Après : identique hors gestes, à remesurer en recette. |
 
@@ -134,7 +169,7 @@ vivent dans la zone de saisie jusqu'à l'envoi.
 | Existant | Sort |
 |---|---|
 | Tâche `info_unknown` et ses `sub_tasks` | **Conservée.** La carte la lit. |
-| Alerte SMS / e-mail de l'info manquante (délai, sourdine) | **Conservée.** Elle ne part plus si l'hôte a répondu avant l'échéance. |
+| Alerte SMS / e-mail de l'info manquante | **Conservée, inchangée.** Elle part dans le tour de classification (§1) : la clôture ne la retire pas. |
 | Liste « À valider » d'Aujourd'hui | **Conservée.** |
 | « Proposer une réponse », qui ne dépose rien sur `info_unknown` | **Conservé.** La carte prend le relais dans la conversation. |
 | « Réponses prêtes » et « Utiliser » dans la saisie | **Conservés.** |
@@ -169,3 +204,6 @@ Chaque étape fait l'objet de sa propre remise au chef de file.
    oui ou non. La carte ne lit que les tâches `info_unknown`.
 2. **Deux étapes** : la carte et le bouton « IA » d'abord, puis, après leur
    recette, les réponses prêtes.
+3. **Le plafond de l'hôte est le sien** : 10 rédactions par conversation sur
+   24 h, sans toucher les 3 appels de l'agent (« 3 est trop petit de toute
+   façon »).

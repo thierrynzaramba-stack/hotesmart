@@ -20,6 +20,7 @@ const { etatMenage } = require('../lib/cron-arrival-code')
 const { etatArchivage } = require('../lib/archivage-conversations')
 const { readStatus } = require('../lib/bookings-snapshot-status')
 const { clesArchivees, cleDuBien } = require('../lib/biens-vivants')
+const { questionsDe } = require('../lib/guestflow/rediger')
 
 // Jour de Paris (celui des biens), YYYY-MM-DD, a un decalage de jours pres.
 //
@@ -298,6 +299,50 @@ async function cloreProposition(req, res) {
     if (eJ) console.error('[messages] journal conversations non ecrit', eJ.message)
   }
   return res.status(200).json({ ok: true, task_id: tache.id, statut })
+}
+
+// ─── Clore une « information manquante » (spec-info-manquante-choix.md §3) ───
+// La page l'appelle APRÈS l'envoi réussi d'une réponse rédigée depuis la carte
+// Oui / Non / Autre : la tâche `info_unknown` passe de `pending` à `done`.
+// ⚠ Rien ne part d'ici : l'envoi au voyageur a déjà eu lieu, par le chemin
+// d'envoi existant. Et rien n'est écrit dans le journal `conversations` : il
+// porte les réponses de l'AGENT, et celle-ci est celle de l'hôte.
+// ⚠ Le cron ne clôt jamais une tâche `pending` quand l'hôte répond : sans ce
+// geste, la carte et la ligne « À valider » d'Aujourd'hui resteraient.
+async function cloreInfo (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, task_type, summary, sub_tasks, property_id, book_id')
+    .eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Tâche introuvable' })
+  // Périmètre par bien, 404 pas 403 — même règle que cloreProposition.
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Tâche introuvable' })
+  }
+  // Une proposition se clôt par `action: 'proposition'`, une intervention garde
+  // son circuit (décision de Thierry du 10 novembre 2026) : 404 ici, comme une
+  // tâche qui n'existe pas pour ce geste.
+  if (tache.task_type !== 'info_unknown') return res.status(404).json({ error: 'Tâche introuvable' })
+  if (tache.status !== 'pending') return res.status(409).json({ error: 'deja_close', statut: tache.status })
+  // Les tâches système (pause, arrêt de l'agent) ne portent pas de question :
+  // la carte ne les montre pas, et leur cycle appartient au cron.
+  if (!questionsDe(tache).length) return res.status(409).json({ error: 'sans_question' })
+  // La condition de statut dans l'UPDATE ferme la course entre deux clics, et
+  // avec le cron qui COMPLÈTE la tâche (`.eq('status', 'pending')` chez lui aussi).
+  const { data: maj, error: eU } = await supabase.from('agent_tasks')
+    .update({ status: 'done', updated_at: new Date().toISOString() })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending')
+    .select('id')
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
+  return res.status(200).json({ ok: true, task_id: tache.id, statut: 'done' })
 }
 
 // ─── Le CLAIM, avant que l'ecran envoie (chantier « delai de reponse IA ») ───
@@ -683,7 +728,7 @@ async function lireEnDirect (req, res) {
       depuis = t < plancher ? new Date(plancher).toISOString() : brut
     }
     // Perimetre vide ou refuse : rien, et la meme forme.
-    if (filtreOr === '') return repondre(200, { messages: [], taches: [], dernier: null, complet: true, curseur: depuis })
+    if (filtreOr === '') return repondre(200, { messages: [], taches: [], infos: [], dernier: null, complet: true, curseur: depuis })
 
     // ⚠ `dernier` EST PRIS HORS DU FIL OUVERT : la page tient deja ce fil a
     // jour par la lecture ci-dessous. Compter ses messages ferait relire la
@@ -717,11 +762,21 @@ async function lireEnDirect (req, res) {
         }
         return r
       })())
+      // ⚠ UNE SEULE LECTURE POUR DEUX CHAMPS (spec-info-manquante-choix.md §3) :
+      // les propositions (`pending_validation`) ET les tâches « information
+      // manquante » (`pending`). Le tri se fait ICI, plus bas — une tâche
+      // `pending` ne doit JAMAIS sortir dans `taches`, que la page affiche en
+      // proposition : « Envoyer » y partirait avec `suggested_reply`, qui est
+      // une NOTE INTERNE pour l'hôte.
+      // ⚠ LES PLUS RÉCENTES D'ABORD, puis remises à l'endroit : une tâche
+      // `pending` n'est jamais close par le cron quand l'hôte répond à la main,
+      // donc un fil peut en accumuler — en ASC, la borne des 50 couperait
+      // justement la proposition du jour.
       let qt = supabase.from('agent_tasks')
-        .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, send_after, suspendu_le, modifie_le')
-        .eq('user_id', userId).eq('book_id', fil).eq('status', 'pending_validation')
+        .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, updated_at, send_after, suspendu_le, modifie_le, sub_tasks')
+        .eq('user_id', userId).eq('book_id', fil).in('status', ['pending_validation', 'pending'])
       if (filtreOr) qt = qt.or(filtreOr)
-      lectures.push(qt.order('created_at', { ascending: true }).order('id', { ascending: true }).limit(50))
+      lectures.push(qt.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(50))
       lectures.push(clesArchivees(supabase, [userId]))
     }
     const [d, m, tch, arch] = await Promise.all(lectures)
@@ -744,13 +799,31 @@ async function lireEnDirect (req, res) {
     // le cycle suivant reprend a la 201e), sinon il ne bouge pas.
     const curseur = lignes.length ? lignes[lignes.length - 1].created_at : depuis
     if ([...lignes, ...(tch.data || [])].some(l => archive(l.property_id))) {
-      return repondre(200, { messages: [], taches: [], dernier, complet: true, curseur })
+      return repondre(200, { messages: [], taches: [], infos: [], dernier, complet: true, curseur })
     }
     const messages = lignes.map(l => ({
       sender: l.sender, direction: l.direction, body: l.body, sent_at: l.sent_at,
       kind: l.kind, origine: l.origine || null
     }))
-    return repondre(200, { messages, taches: tch.data || [], dernier, complet, curseur })
+    const lues = (tch.data || []).slice().reverse()
+    // `taches` : EXACTEMENT ce que la page recevait avant — les propositions,
+    // mêmes colonnes, rien de plus.
+    const taches = lues.filter(x => x.status === 'pending_validation').map(x => {
+      const t = { ...x }
+      delete t.sub_tasks
+      delete t.updated_at
+      return t
+    })
+    // `infos` : les QUESTIONS seules (lib/guestflow/rediger.js `questionsDe`) —
+    // ni `suggested_reply`, ni le résumé. Une intervention, une tâche système
+    // (pause, arrêt) ou une tâche sans question n'y entre pas.
+    const infos = lues.map(x => ({ x, questions: questionsDe(x) }))
+      .filter(({ questions }) => questions.length)
+      .map(({ x, questions }) => ({
+        id: x.id, book_id: x.book_id, property_id: x.property_id,
+        created_at: x.created_at, maj: x.updated_at || x.created_at, questions
+      }))
+    return repondre(200, { messages, taches, infos, dernier, complet, curseur })
   })
   return resultat
 }
@@ -777,6 +850,10 @@ module.exports = async function handler(req, res) {
   // Etape 3 : Envoyer / Rejeter une proposition clot la tache (et le journal).
   if (req.method === 'POST' && req.body && req.body.action === 'proposition') {
     return await cloreProposition(req, res)
+  }
+  // Information manquante : la réponse est partie depuis la carte, la tâche se clôt.
+  if (req.method === 'POST' && req.body && req.body.action === 'info_traitee') {
+    return await cloreInfo(req, res)
   }
   // Chantier « delai de reponse IA » : le claim AVANT l'envoi, son relachement,
   // et le brouillon que l'hote a ecrit.

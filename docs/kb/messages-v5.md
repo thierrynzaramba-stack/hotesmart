@@ -271,3 +271,39 @@ décidé par Thierry le 10 novembre 2026 à 01:06.
 - Règles pures dans `shared/messages-direct.js` ; gardes serveur (compte
   cible, périmètre sur les trois lectures, archivage, `private, no-store` dès
   le 405, `Server-Timing` avec le nombre de requêtes) dans `api/messages.js`.
+
+## Information manquante : Oui / Non / Autre, l'IA rédige (étape 1, 10 novembre 2026)
+
+Spec : `docs/specs/spec-info-manquante-choix.md`. Demande de Thierry du
+10 novembre 2026. Étape 1 = la carte et le bouton « IA » ; l'étape 2 (la base
+apprend : réponse prête à créer ou à modifier) vient après sa recette.
+
+- **Serveur.** `POST /api/guestflow-rediger`, actions `choix` (la carte) et
+  `texte` (le bouton « IA » de la saisie). Il rend `{ texte }` et **n'écrit
+  rien** : le texte va dans la saisie, l'hôte relit et envoie par le chemin
+  d'envoi existant. Gardes de « Proposer » (messages en écriture,
+  réservation requise, clé sur la référence provider, kill switch), appel
+  étiqueté `guestflow_rediger` au journal `ia_appels`.
+- **⚠ Le plafond de l'hôte est le sien** (décision de Thierry : « 3 est trop
+  petit de toute façon ») : 10 rédactions par conversation sur 24 h, comptées
+  dans `ia_appels`. Jamais dans `guestflow_appels_ia` : trois clics y
+  arrêteraient l'agent sur le fil et réveilleraient le fondateur.
+- **⚠ Une tâche `pending` ne sort JAMAIS dans `taches`.** La page affiche
+  `taches` en proposition, et « Envoyer » y ferait partir `suggested_reply` —
+  une note INTERNE — au voyageur. Le fil en direct lit les deux statuts en une
+  lecture et rend un champ neuf, `infos` (les questions seules). Ni
+  intervention (décision 1), ni tâche système (pause, arrêt de l'agent).
+- **⚠ La question revient du client, au caractère.** Le cron complète la
+  tâche quand le voyageur écrit encore : des choix pris sur l'ancienne carte,
+  appliqués par position, répondraient à des questions jamais lues.
+  Écart : `409 questions_changees`.
+- **La carte ne se montre que si l'hôte n'a pas répondu depuis la tâche** : le
+  cron ne clôt jamais une tâche `pending` quand l'hôte répond à la main. Après
+  un envoi depuis la carte, `POST /api/messages { action: 'info_traitee' }`
+  la clôt (`pending` → `done`, sous condition de statut).
+- **L'alerte n'est pas retirée par la clôture** : elle part dans le tour de
+  classification (le réglage `alerte_info` est enregistré mais aucun code de
+  `lib/` ne le lit encore).
+- Règles pures : `lib/guestflow/rediger.js` (serveur) et
+  `shared/info-manquante.js` (page), copies tenues par
+  `tests/info-manquante-regles.test.js`.
