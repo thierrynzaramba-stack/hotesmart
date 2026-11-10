@@ -1503,3 +1503,46 @@ nouvelle review, la limite est atteinte) :
 - **R9** — le plan et la vérification lisent une seule règle « ce qui part à
   une personne » ; la personne cochée est celle à qui le canal partirait.
 
+
+### 12.3 Étape 3 — le bloc « Contacts prévenus » et la page de désinscription
+
+Spec §16.8 (décisions Q33 et Q34 du 10 novembre 2026). Fichiers :
+`lib/notifications/contacts.js` (seul rédacteur de la table : lister, ajouter,
+modifier, retirer, réinscrire, réserver et rendre l'essai, jeton),
+`api/push.js` (l'endpoint de l'onglet), `api/alertes-desinscription.js` (la
+page publique), `lib/notifications/textes.js` (l'essai, la page, en trois
+langues), `pages/settings.html` (le bloc), `shared/push-appareil.js`
+(`contact`), `pages/guide.html`.
+
+**Les règles, et pourquoi :**
+1. **Le compte est la session, toujours.** Aucun identifiant de compte n'est lu
+   dans la requête ; chaque lecture et chaque écriture filtre sur le compte ; un
+   contact d'un autre compte rend « introuvable » (404), jamais « interdit » ;
+   chaque bien est relu sur le compte. Un membre sans logement à lui ne voit
+   pas le bloc (`contacts: null`), et le serveur refuserait ses biens.
+2. **Le jeton de désinscription ne sort jamais vers l'écran**, ni la clé Brevo
+   (seule sa présence est lue, comme `api/sms.js` la juge : une clé, et le SMS
+   pas désactivé).
+3. **L'essai (Q32)** : réservé AVANT l'envoi par une écriture conditionnelle à
+   la valeur lue (deux clics n'en font partir qu'un) ; un par contact et par
+   jour de Paris ; jamais vers un désinscrit ; envoyé par le point d'envoi des
+   contacts (e-mail avec son lien de désinscription, SMS par la clé Brevo du
+   compte), dans la langue du titulaire ; **rendu si rien n'est parti**.
+4. **La page publique** : un GET ne change jamais rien (les messageries
+   d'entreprise ouvrent les liens) ; elle montre l'adresse masquée, les
+   logements de CE contact et un bouton ; le POST fait le geste. `no-store`,
+   `noindex`, une CSP `default-src 'none'`, aucun script, dans la langue du
+   titulaire.
+5. **Se désinscrire vaut pour la PERSONNE dans ce compte** : tous les contacts
+   du compte qui portent la même adresse se taisent, et reviennent ensemble ;
+   le même e-mail chez un autre hôte continue. Le contact revient par le même
+   lien, le titulaire par « Réinscrire » (Q33).
+6. **Le budget** : le GET de l'onglet lit cinq tables, une fois chacune, en
+   parallèle (appareils, réglages, logements, contacts, porte Brevo) — zéro
+   appel ajouté côté navigateur ; un test les compte. Chaque geste fait un
+   appel et rend la liste à jour.
+7. **Défense en profondeur assumée** : la désinscription filtre les lignes à
+   mettre à jour par le compte du jeton ET par leurs ids tirés de ce compte ;
+   les noms de logements de la page, par le compte ET par les biens du contact.
+   Une contre-épreuve qui retire l'un des deux filtres reste verte : c'est
+   l'autre qui tient.

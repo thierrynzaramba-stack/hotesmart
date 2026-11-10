@@ -212,7 +212,12 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   // tout le monde, aucune donnee de compte, recense dans PUBLIC_ATTENDU.
   // Leve a 11 le 5 novembre 2026, et NOMME : `api/i18n.js` (le moteur i18n
   // avec l'empreinte des dictionnaires), public par nature, meme recensement.
-  assert.ok(SANS_GARDE_ATTENDU.length <= 11,
+  // Leve a 12 le 10 novembre 2026, et NOMME : `api/alertes-desinscription.js`
+  // (PWA lot 2c-3), la page de desinscription d'un contact libre — publique par
+  // nature, sans session : le jeton de 64 caracteres porte par chaque e-mail du
+  // contact est la seule cle, et il ne vaut que pour la personne de ce contact.
+  // Elle pose `private, no-store` avant tout refus, comme une garde.
+  assert.ok(SANS_GARDE_ATTENDU.length <= 12,
     `${SANS_GARDE_ATTENDU.length} endpoints sans garde :\n  ` + SANS_GARDE_ATTENDU.join('\n  ') +
     '\nUn de plus qu attendu : soit il est public par nature (webhook, cron, manifest,\n' +
     'page publique), soit il lui manque sa garde. Nommez-le avant de lever le plafond.')

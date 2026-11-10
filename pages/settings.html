@@ -119,6 +119,13 @@
     .jours input:checked + span { color: var(--text); font-weight: 600; }
     .jours label:has(input:checked) { border-color: var(--text2); background: var(--bg2); }
     .jours input:focus-visible + span { outline: 2px solid var(--text2); outline-offset: 2px; }
+    /* Lot 2c-3 : les contacts prévenus. */
+    .contact { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 0.5px solid var(--border); font-size: 13px; flex-wrap: wrap; }
+    .contact .qui { flex: 1; min-width: 200px; }
+    .contact .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .contact.parti .qui { color: var(--text2); }
+    .choix { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: 13px; margin-top: 4px; }
+    .choix label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
     @media (max-width: 640px) { .grid2, .biens { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -214,6 +221,17 @@
     </div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
       <button class="btn" id="n-enregistrer" hidden>Enregistrer</button>
+    </div>
+    <!-- LOT 2c-3 (spec §16.8, Q33, Q34) : les contacts prévenus du COMPTE de la
+         personne connectée — montré seulement si elle a des logements. Chaque
+         geste a son propre appel, indépendant du bouton « Enregistrer » ci-dessus. -->
+    <div class="card" id="n-contacts" hidden>
+      <div class="card-title">Contacts prévenus</div>
+      <div class="card-sub">Des personnes sans accès à HôteSmart — un gardien, un voisin — reçoivent par e-mail ou par SMS les alertes que vous leur confiez, pour les logements choisis. Elles suivent vos heures calmes, reçoivent dans votre langue, et peuvent se désinscrire par le lien de chaque e-mail.</div>
+      <div id="n-brevo" class="card-sub" hidden></div>
+      <div id="n-contacts-liste"></div>
+      <div id="n-contact-form" hidden></div>
+      <button class="btn-ghost" id="n-contact-ajouter" style="margin-top:12px">Ajouter un contact</button>
     </div>
   </div>
 </div>
@@ -800,6 +818,143 @@ async function rendreNotifications () {
     : '<div class="card-sub" style="margin:0">Aucun appareil abonné pour le moment.</div>'
 
   rendreReglages(etat)
+  rendreContacts(etat)
+}
+
+// ─── Lot 2c-3 : les contacts prévenus (spec §16.8) ─────────────────────────
+// La liste VIENT DU SERVEUR à chaque geste (`/api/push` rend la liste à jour) :
+// cette page ne tient que le formulaire ouvert, qu'une relecture ne referme pas.
+const ALERTES_ECRAN = [['urgences', 'Urgences', 'une intervention à faire : demande que l’IA ne sait pas traiter, code d’accès non résolu, ménage refusé, disponibilités modifiées, évaluation du voyageur'],
+  ['info_manquante', 'Info manquante', 'l’IA n’a pas trouvé la réponse à une question de voyageur']]
+let contactsVus = null, contactOuvert = null
+
+function dateCourte (t) {
+  return t ? new Date(t).toLocaleDateString('fr-FR') : ''
+}
+
+function rendreContacts (etat) {
+  if (etat.contacts_indisponibles) message('Vos contacts prévenus n’ont pas pu être lus. Rechargez la page.')
+  if (etat.contacts === undefined) return
+  contactsVus = etat.contacts
+  const k = contactsVus
+  $('n-contacts').hidden = !k
+  if (!k) return
+  $('n-brevo').hidden = k.brevo !== false
+  if (k.brevo === false) $('n-brevo').innerHTML = 'Sans compte Brevo connecté, les SMS de vos contacts ne partent pas. <a href="/connexions">Connecter Brevo</a>'
+  const nomDe = (id) => (k.biens.find(b => String(b.id) === String(id)) || {}).nom || 'Logement retiré'
+  $('n-contacts-liste').innerHTML = (k.liste.length
+    ? k.liste.map(c => {
+        const alertes = ALERTES_ECRAN.filter(([a]) => c.alertes.includes(a)).map(([, nom]) => nom).join(' · ')
+        const adresses = [c.email, c.telephone].filter(Boolean).map(esc).join(' · ')
+        const etatLigne = c.desinscrit_le
+          ? `<div class="card-sub" style="margin:4px 0 0">S’est désinscrit le ${esc(dateCourte(c.desinscrit_le))} : ne reçoit plus rien.</div>`
+          : (c.telephone && k.brevo === false ? '<div class="card-sub" style="margin:4px 0 0">Ses SMS ne partent pas : compte Brevo non connecté.</div>' : '')
+        const essai = c.desinscrit_le ? ''
+          : `<button class="btn-ghost" data-contact-essai="${esc(c.id)}"${c.essai_possible ? '' : ' disabled title="Un essai est déjà parti aujourd’hui : vous pourrez recommencer demain."'}>${c.essai_possible ? 'Envoyer un essai' : 'Essai envoyé aujourd’hui'}</button>`
+        return `<div class="contact${c.desinscrit_le ? ' parti' : ''}" data-contact="${esc(c.id)}">
+          <div class="qui"><div style="font-weight:500">${esc(c.nom || 'Sans nom')}</div>
+            <div>${adresses}</div>
+            <div class="card-sub" style="margin:4px 0 0">${esc(alertes)} — ${esc(c.biens.map(nomDe).join(', '))}</div>${etatLigne}</div>
+          <div class="actions">${c.desinscrit_le ? `<button class="btn-ghost" data-contact-reinscrire="${esc(c.id)}">Réinscrire</button>` : ''}
+            ${essai}<button class="btn-ghost" data-contact-modifier="${esc(c.id)}">Modifier</button>
+            <button class="btn-danger" data-contact-retirer="${esc(c.id)}">Retirer</button></div></div>`
+      }).join('')
+    : '<div class="card-sub" style="margin:0">Aucun contact pour le moment.</div>')
+    + (k.tronque ? `<div class="card-sub" style="margin:8px 0 0">Seuls les ${k.plafond} premiers contacts sont affichés.</div>` : '')
+  $('n-contact-ajouter').disabled = k.liste.length >= k.plafond
+  $('n-contact-ajouter').hidden = contactOuvert !== null
+}
+
+function ouvrirContact (id) {
+  const k = contactsVus
+  if (!k) return
+  const c = id ? k.liste.find(x => x.id === id) : null
+  if (id && !c) return
+  contactOuvert = id || 'nouveau'
+  const v = c || { nom: '', email: '', telephone: '', alertes: ['urgences'], biens: k.biens.filter(b => !b.archive).map(b => b.id) }
+  // Un logement archivé ne se propose que s'il est déjà choisi.
+  const biens = k.biens.filter(b => !b.archive || v.biens.map(String).includes(String(b.id)))
+  $('n-contact-form').innerHTML = `<div style="border-top:0.5px solid var(--border);margin-top:12px;padding-top:4px">
+    <div class="grid2">
+      <div><label class="f" for="c-nom">Nom</label><input class="f" id="c-nom" maxlength="80" autocomplete="off" value="${esc(v.nom || '')}"></div>
+      <div></div>
+      <div><label class="f" for="c-email">E-mail</label><input class="f" id="c-email" type="email" autocomplete="off" value="${esc(v.email || '')}"></div>
+      <div><label class="f" for="c-tel">Numéro (SMS)</label><input class="f" id="c-tel" type="tel" autocomplete="off" value="${esc(v.telephone || '')}"></div>
+    </div>
+    <label class="f">Ce qu’il reçoit</label>
+    <div class="choix">${ALERTES_ECRAN.map(([a, nom, quoi]) => `<label title="${esc(quoi)}"><input type="checkbox" data-c-alerte="${a}"${v.alertes.includes(a) ? ' checked' : ''}> ${esc(nom)}</label>`).join('')}</div>
+    <label class="f">Pour les logements</label>
+    <div class="choix">${biens.map(b => `<label><input type="checkbox" data-c-bien="${esc(b.id)}"${v.biens.map(String).includes(String(b.id)) ? ' checked' : ''}> ${esc(b.nom || 'Logement')}</label>`).join('')}</div>
+    <div class="panel-actions"><button class="btn-ghost" id="c-annuler">Annuler</button><button class="btn" id="c-enregistrer">Enregistrer le contact</button></div>
+  </div>`
+  $('n-contact-form').hidden = false
+  $('n-contact-ajouter').hidden = true
+  $('c-nom').focus()
+}
+
+function fermerContact () {
+  contactOuvert = null
+  $('n-contact-form').hidden = true
+  $('n-contact-form').innerHTML = ''
+  $('n-contact-ajouter').hidden = false
+}
+
+// Un geste sur les contacts : un appel, la liste à jour en retour.
+async function gesteContact (corps, reussite) {
+  const r = await P.contact(await jetonActuel(), corps)
+  if (!r.ok) { message(r.error || 'Écriture impossible, réessayez.'); return false }
+  if (r.contacts !== undefined) rendreContacts({ contacts: r.contacts })
+  if (reussite) message(reussite, 'ok')
+  return true
+}
+
+$('n-contact-ajouter').onclick = () => ouvrirContact(null)
+
+$('n-contact-form').onclick = async (ev) => {
+  if (ev.target.id === 'c-annuler') { fermerContact(); return }
+  if (ev.target.id !== 'c-enregistrer') return
+  const f = $('n-contact-form')
+  const contact = {
+    nom: $('c-nom').value.trim() || null,
+    email: $('c-email').value.trim() || null,
+    telephone: $('c-tel').value.trim() || null,
+    alertes: [...f.querySelectorAll('[data-c-alerte]:checked')].map(x => x.dataset.cAlerte),
+    biens: [...f.querySelectorAll('[data-c-bien]:checked')].map(x => x.dataset.cBien)
+  }
+  const id = contactOuvert === 'nouveau' ? null : contactOuvert
+  ev.target.disabled = true
+  try {
+    const ok = await gesteContact(id ? { action: 'contact_modifier', id, contact } : { action: 'contact_creer', contact },
+      id ? 'Contact enregistré.' : 'Contact ajouté.')
+    if (ok) { fermerContact(); rendreContacts({ contacts: contactsVus }) }
+  } catch (e) { message(e.message) }
+  finally { ev.target.disabled = false }
+}
+
+$('n-contacts-liste').onclick = async (ev) => {
+  const b = ev.target.closest('button')
+  if (!b || !b.dataset) return
+  const d = b.dataset
+  try {
+    if (d.contactModifier) { ouvrirContact(d.contactModifier); return }
+    b.disabled = true
+    if (d.contactRetirer) {
+      if (!window.confirm('Retirer ce contact ? Il ne recevra plus aucune alerte.')) { b.disabled = false; return }
+      const ok = await gesteContact({ action: 'contact_retirer', id: d.contactRetirer }, 'Contact retiré.')
+      if (ok && contactOuvert === d.contactRetirer) fermerContact()
+    } else if (d.contactReinscrire) {
+      await gesteContact({ action: 'contact_reinscrire', id: d.contactReinscrire }, 'Contact réinscrit : il reçoit de nouveau vos alertes.')
+    } else if (d.contactEssai) {
+      const r = await P.contact(await jetonActuel(), { action: 'contact_essai', id: d.contactEssai })
+      if (!r.ok) message(r.error || 'L’essai n’est pas parti, réessayez.')
+      else {
+        const par = [r.bilan && r.bilan.email ? 'e-mail' : null, r.bilan && r.bilan.sms ? 'SMS' : null].filter(Boolean).join(' et ')
+        message(`Essai envoyé par ${par}.`, 'ok')
+      }
+      if (r.contacts !== undefined) rendreContacts({ contacts: r.contacts })
+    }
+  } catch (e) { message(e.message) }
+  finally { if (document.body.contains(b)) b.disabled = false }
 }
 
 // ─── Lot 2b : quand vous prévenir, et les heures calmes ────────────────────

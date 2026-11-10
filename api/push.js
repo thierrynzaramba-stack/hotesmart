@@ -9,10 +9,21 @@
 //   POST   /api/push { action: 'langue', langue }                 (lot 2b)
 //   POST   /api/push { action: 'essai_evenement', code }          (lot 2c-1)
 //   POST   /api/push { action: 'vider_ma_file' }                  (lot 2c-1)
+//   POST   /api/push { action: 'contact_creer', contact }        (lot 2c-3, §16.8)
+//   POST   /api/push { action: 'contact_modifier', id, contact }
+//   POST   /api/push { action: 'contact_retirer' | 'contact_reinscrire' | 'contact_essai', id }
 //   DELETE /api/push { endpoint } | { id }        → retirer un de MES appareils
 //
 // ⚠ C'EST L'ENDPOINT D'ÉCRAN DE L'ONGLET NOTIFICATIONS de `/settings` : un seul
-// GET à l'ouverture, ses deux lectures (appareils, réglages) en parallèle.
+// GET à l'ouverture, ses lectures (appareils, réglages, contacts prévenus) en
+// parallèle.
+//
+// ⚠ LES CONTACTS PRÉVENUS (lot 2c-3) SONT CEUX DU COMPTE DE L'APPELANT, et de
+// lui seul : le compte est la session, aucun identifiant de compte n'est lu
+// dans la requête. Un contact d'un autre compte rend « introuvable »
+// (lib/notifications/contacts.js filtre chaque lecture et chaque écriture sur
+// le compte) ; chaque bien est relu sur le compte ; le jeton de désinscription
+// ne sort jamais vers l'écran.
 //
 // ⚠ LA GARDE EST LA PERSONNE CONNECTÉE, SUR SES PROPRES APPAREILS. Aucun compte,
 // aucun bien n'entre ici : un abonnement appartient à une personne, et chaque
@@ -51,7 +62,106 @@ const MESSAGES_REFUS = {
   jour_illisible: 'Un jour est illisible.',
   trop_de_plages: 'Six plages au plus.',
   aucun_moment_libre: 'Vos heures calmes couvrent toute la semaine : ce qui n’est pas urgent n’arriverait jamais. Laissez au moins un moment libre.',
-  langue_inconnue: 'Langue inconnue.'
+  langue_inconnue: 'Langue inconnue.',
+  // Lot 2c-3 — les contacts prévenus.
+  contact_illisible: 'Contact illisible.',
+  adresse_absente: 'Donnez un e-mail ou un numéro.',
+  email_illisible: 'Cet e-mail est mal écrit.',
+  telephone_illisible: 'Ce numéro est mal écrit (7 à 15 chiffres, « + » permis devant).',
+  alertes_illisibles: 'Choisissez au moins une alerte.',
+  biens_absents: 'Choisissez au moins un logement.',
+  bien_hors_compte: 'Un logement choisi n’est pas l’un des vôtres.',
+  biens_illisibles: 'Lecture impossible, réessayez.',
+  plafond_contacts: 'Vous avez déjà 100 contacts : retirez-en un d’abord.',
+  contact_introuvable: 'Ce contact n’existe plus. Rechargez la page.',
+  contact_desinscrit: 'Ce contact s’est désinscrit : réinscrivez-le avant de lui envoyer un essai.',
+  essai_deja_fait: 'Un essai est déjà parti vers ce contact aujourd’hui. Vous pourrez recommencer demain.',
+  lecture_impossible: 'Lecture impossible, réessayez.'
+}
+
+// ─── Les contacts prévenus (lot 2c-3, spec §16.8) ──────────────────────────
+const contactsMod = require('../lib/notifications/contacts')
+const PLAFOND_BIENS = 1000
+
+function client () {
+  return require('../lib/cron-shared').supabase
+}
+
+// Ce que l'écran montre d'un contact : jamais son jeton.
+function contactEcran (c, maintenant = Date.now()) {
+  return {
+    id: c.id, nom: c.nom || null, email: c.email || null, telephone: c.telephone || null,
+    biens: c.biens || [], alertes: c.alertes || [], desinscrit_le: c.desinscrit_le || null,
+    essai_possible: contactsMod.essaiPossible(c, maintenant), cree_le: c.cree_le || null
+  }
+}
+
+// Le bloc de l'écran : `null` quand l'appelant n'a aucun bien (un membre sans
+// compte à lui ne le voit pas). Ses lectures en parallèle.
+async function contactsDeLEcran ({ userId, db = client() }) {
+  // Une panne ici ne fait tomber ni les appareils ni les réglages de l'onglet.
+  try { return await lireContactsDeLEcran({ userId, db }) } catch (e) { return { ok: false } }
+}
+
+async function lireContactsDeLEcran ({ userId, db }) {
+  const [b, l, k] = await Promise.all([
+    db.from('properties').select('id, name, archive_le').eq('user_id', userId).order('name').limit(PLAFOND_BIENS),
+    contactsMod.listerContacts({ compte: userId, db }),
+    // La porte Brevo, comme l'envoi la juge (api/sms.js) : une clé, et le SMS
+    // pas désactivé. La clé elle-même n'est jamais lue.
+    db.from('api_keys').select('brevo_enabled').eq('user_id', userId).not('brevo_api_key', 'is', null).maybeSingle()
+  ])
+  if (b.error || !l.ok) return { ok: false }
+  const biens = (b.data || []).map(p => ({ id: p.id, nom: p.name || null, archive: !!p.archive_le }))
+  if (!biens.length) return { ok: true, contacts: null }
+  return {
+    ok: true,
+    contacts: {
+      biens,
+      liste: l.contacts.map(c => contactEcran(c)),
+      tronque: l.tronque,
+      plafond: contactsMod.PLAFOND_CONTACTS,
+      // Une lecture en panne de la porte ne ferme rien : l'écran ne fait que
+      // prévenir, et l'envoi juge seul.
+      brevo: k.error ? null : !!(k.data && k.data.brevo_enabled !== false)
+    }
+  }
+}
+
+async function repondreContacts (res, userId, r) {
+  if (!r.ok) {
+    const code = ['ecriture_impossible', 'lecture_impossible', 'biens_illisibles'].includes(r.motif) ? 503
+      : r.motif === 'contact_introuvable' ? 404 : r.motif === 'essai_deja_fait' || r.motif === 'plafond_contacts' ? 409 : 400
+    return res.status(code).json({ error: MESSAGES_REFUS[r.motif] || 'Écriture impossible, réessayez.', motif: r.motif })
+  }
+  const lu = await contactsDeLEcran({ userId })
+  return res.status(200).json({ ok: true, ...(r.bilan ? { bilan: r.bilan } : {}), contacts: lu.ok ? lu.contacts : undefined })
+}
+
+// L'ESSAI D'UN CONTACT (Q32) : réservé d'abord (une fois par jour, deux clics
+// n'en font partir qu'un), envoyé par le point d'envoi des contacts — e-mail
+// avec son lien de désinscription, SMS par la clé Brevo du compte —, dans la
+// langue du titulaire. Rien n'est parti : l'essai du jour est rendu.
+async function essaiContact ({ userId, id }) {
+  const r = await contactsMod.reserverEssai({ compte: userId, id })
+  if (!r.ok) return r
+  const c = r.contact
+  const lu = await reglages.lire({ userId })
+  const langue = lu.ok ? lu.reglages.langue : 'fr'
+  const t = textes.essaiContact(langue)
+  const canaux = [c.email ? 'email' : null, c.telephone ? 'sms' : null].filter(Boolean)
+  const { envoyerMaintenant } = require('../lib/notifications/envoi')
+  const bilan = await envoyerMaintenant({
+    personne: { contact: { contactId: c.id, jeton: c.jeton }, email: c.email, telephone: c.telephone },
+    canaux, compte: userId,
+    contenu: { titre: t.titre, corps: t.corps, chemin: null, sujet: `essai_contact:${c.id}`, langue }
+  })
+  const parti = { email: !!bilan.email, sms: !!bilan.sms }
+  if (!parti.email && !parti.sms) {
+    await contactsMod.rendreEssai({ compte: userId, id, avant: r.avant })
+    return { ok: false, motif: 'essai_non_parti' }
+  }
+  return { ok: true, bilan: parti }
 }
 
 // Le catalogue fusionné avec les réglages de la personne, dans l'ordre de l'écran.
@@ -88,9 +198,13 @@ module.exports = async function handler (req, res) {
 
   try {
     if (req.method === 'GET') {
-      const [r, g] = await Promise.all([abonnements.lister({ userId }), reglages.lire({ userId })])
+      const [r, g, k] = await Promise.all([abonnements.lister({ userId }), reglages.lire({ userId }), contactsDeLEcran({ userId })])
       if (!r.ok) return res.status(503).json({ error: 'Lecture impossible, réessayez.' })
-      const corps = { pret: !!cles, cle_publique: cles ? cles.publique : null, appareils: r.appareils }
+      const corps = {
+        pret: !!cles, cle_publique: cles ? cles.publique : null, appareils: r.appareils,
+        // Des contacts illisibles ne font tomber ni les appareils ni les réglages.
+        ...(k.ok ? { contacts: k.contacts } : { contacts_indisponibles: true })
+      }
       // ⚠ DES RÉGLAGES ILLISIBLES NE FONT PAS TOMBER LES APPAREILS (constat de
       // review) : la gestion des appareils du lot 2a reste servie, et l'écran dit
       // que les réglages sont indisponibles.
@@ -144,6 +258,27 @@ module.exports = async function handler (req, res) {
       })
       if (!bilan.ok) return res.status(503).json({ error: 'Essai impossible, réessayez.', bilan })
       return res.status(200).json({ ok: true, bilan })
+    }
+
+    // LOT 2c-3 — LES CONTACTS PRÉVENUS. Le compte est TOUJOURS l'appelant.
+    if (corps.action === 'contact_creer') {
+      return repondreContacts(res, userId, await contactsMod.ajouterContact({ compte: userId, contact: corps.contact }))
+    }
+    if (corps.action === 'contact_modifier') {
+      return repondreContacts(res, userId, await contactsMod.modifierContact({ compte: userId, id: corps.id, contact: corps.contact }))
+    }
+    if (corps.action === 'contact_retirer') {
+      return repondreContacts(res, userId, await contactsMod.retirerContact({ compte: userId, id: corps.id }))
+    }
+    if (corps.action === 'contact_reinscrire') {
+      return repondreContacts(res, userId, await contactsMod.reinscrireContact({ compte: userId, id: corps.id }))
+    }
+    if (corps.action === 'contact_essai') {
+      const r = await essaiContact({ userId, id: corps.id })
+      if (!r.ok && r.motif === 'essai_non_parti') {
+        return res.status(502).json({ error: 'L’essai n’est pas parti. Vérifiez l’adresse, et pour un SMS votre compte Brevo.', motif: r.motif })
+      }
+      return repondreContacts(res, userId, r)
     }
 
     // Ce qui attend la fin de MES heures calmes part tout de suite (la recette
