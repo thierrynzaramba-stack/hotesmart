@@ -75,7 +75,10 @@ const MESSAGES_REFUS = {
   plafond_contacts: 'Vous avez déjà 100 contacts : retirez-en un d’abord.',
   contact_introuvable: 'Ce contact n’existe plus. Rechargez la page.',
   contact_desinscrit: 'Ce contact s’est désinscrit : réinscrivez-le avant de lui envoyer un essai.',
-  essai_deja_fait: 'Un essai est déjà parti vers ce contact aujourd’hui. Vous pourrez recommencer demain.',
+  essai_deja_fait: 'Un essai est déjà parti vers cette adresse aujourd’hui. Vous pourrez recommencer demain.',
+  plafond_essais: 'Vous avez déjà envoyé 10 essais aujourd’hui. Vous pourrez recommencer demain.',
+  adresse_desinscrite: 'Cette adresse s’est désinscrite de vos alertes.',
+  essai_non_parti: 'L’essai n’est pas parti. Vérifiez l’adresse, et pour un SMS votre compte Brevo.',
   lecture_impossible: 'Lecture impossible, réessayez.'
 }
 
@@ -87,12 +90,13 @@ function client () {
   return require('../lib/cron-shared').supabase
 }
 
-// Ce que l'écran montre d'un contact : jamais son jeton.
-function contactEcran (c, maintenant = Date.now()) {
+// Ce que l'écran montre d'un contact : jamais son jeton. `essais` : les
+// adresses essayées aujourd'hui par le compte (Q37).
+function contactEcran (c, essais) {
   return {
     id: c.id, nom: c.nom || null, email: c.email || null, telephone: c.telephone || null,
     biens: c.biens || [], alertes: c.alertes || [], desinscrit_le: c.desinscrit_le || null,
-    essai_possible: contactsMod.essaiPossible(c, maintenant), cree_le: c.cree_le || null
+    essai_possible: contactsMod.essaiPossible(c, essais), cree_le: c.cree_le || null
   }
 }
 
@@ -104,21 +108,33 @@ async function contactsDeLEcran ({ userId, db = client() }) {
 }
 
 async function lireContactsDeLEcran ({ userId, db }) {
-  const [b, l, k] = await Promise.all([
-    db.from('properties').select('id, name, archive_le').eq('user_id', userId).order('name').limit(PLAFOND_BIENS),
-    contactsMod.listerContacts({ compte: userId, db }),
+  // Chaque lecture tombe seule : une panne des contacts ne cache pas l'absence
+  // de logement (constat D7).
+  const enPanne = (p) => Promise.resolve().then(p).catch(() => ({ ok: false, error: true }))
+  const [b, l, k, e] = await Promise.all([
+    db.from('properties').select('id, name, archive_le').eq('user_id', userId).order('name').limit(PLAFOND_BIENS + 1),
+    enPanne(() => contactsMod.listerContacts({ compte: userId, db })),
     // La porte Brevo, comme l'envoi la juge (api/sms.js) : une clé, et le SMS
     // pas désactivé. La clé elle-même n'est jamais lue.
-    db.from('api_keys').select('brevo_enabled').eq('user_id', userId).not('brevo_api_key', 'is', null).maybeSingle()
+    enPanne(() => db.from('api_keys').select('brevo_enabled').eq('user_id', userId).not('brevo_api_key', 'is', null).maybeSingle()),
+    enPanne(() => contactsMod.essaisDuJour({ compte: userId, db }))
   ])
-  if (b.error || !l.ok) return { ok: false }
-  const biens = (b.data || []).map(p => ({ id: p.id, nom: p.name || null, archive: !!p.archive_le }))
-  if (!biens.length) return { ok: true, contacts: null }
+  if (b.error) return { ok: false }
+  // ⚠ SANS LOGEMENT, PAS DE BLOC — même si les contacts sont illisibles : un
+  // membre sans compte à lui ne doit pas lire une panne d'un bloc qu'il ne voit
+  // jamais (constat D7 de review).
+  if (!(b.data || []).length) return { ok: true, contacts: null }
+  // Plus de logements que le plafond : on ne montre pas une liste coupée en
+  // silence (règle 6 de la case performance).
+  if (b.data.length > PLAFOND_BIENS || !l.ok) return { ok: false }
+  const biens = b.data.map(p => ({ id: p.id, nom: p.name || null, archive: !!p.archive_le }))
+  // Des essais illisibles : aucun essai proposé (le serveur jugerait de toute façon).
+  const essais = e.ok ? e : null
   return {
     ok: true,
     contacts: {
       biens,
-      liste: l.contacts.map(c => contactEcran(c)),
+      liste: l.contacts.map(c => contactEcran(c, essais)),
       tronque: l.tronque,
       plafond: contactsMod.PLAFOND_CONTACTS,
       // Une lecture en panne de la porte ne ferme rien : l'écran ne fait que
@@ -128,37 +144,52 @@ async function lireContactsDeLEcran ({ userId, db }) {
   }
 }
 
+// ⚠ LA LISTE À JOUR REVIENT AVEC CHAQUE RÉPONSE, REFUS COMPRIS (constat D5 de
+// review) : après « déjà essayé », « introuvable » ou une désinscription, l'écran
+// se remet d'accord avec le serveur sans recharger. Une relecture impossible le
+// dit (`contacts_indisponibles`) : l'écran relit alors tout l'onglet.
 async function repondreContacts (res, userId, r) {
+  const lu = await contactsDeLEcran({ userId })
+  const liste = lu.ok ? { contacts: lu.contacts } : { contacts_indisponibles: true }
   if (!r.ok) {
     const code = ['ecriture_impossible', 'lecture_impossible', 'biens_illisibles'].includes(r.motif) ? 503
-      : r.motif === 'contact_introuvable' ? 404 : r.motif === 'essai_deja_fait' || r.motif === 'plafond_contacts' ? 409 : 400
-    return res.status(code).json({ error: MESSAGES_REFUS[r.motif] || 'Écriture impossible, réessayez.', motif: r.motif })
+      : r.motif === 'contact_introuvable' ? 404
+        : r.motif === 'essai_non_parti' ? 502
+          : ['essai_deja_fait', 'plafond_contacts', 'plafond_essais', 'adresse_desinscrite'].includes(r.motif) ? 409 : 400
+    return res.status(code).json({
+      error: MESSAGES_REFUS[r.motif] || 'Écriture impossible, réessayez.', motif: r.motif,
+      ...(r.desinscrit_le ? { desinscrit_le: r.desinscrit_le } : {}), ...liste
+    })
   }
-  const lu = await contactsDeLEcran({ userId })
-  return res.status(200).json({ ok: true, ...(r.bilan ? { bilan: r.bilan } : {}), contacts: lu.ok ? lu.contacts : undefined })
+  return res.status(200).json({ ok: true, ...(r.bilan ? { bilan: r.bilan } : {}), ...liste })
 }
 
-// L'ESSAI D'UN CONTACT (Q32) : réservé d'abord (une fois par jour, deux clics
-// n'en font partir qu'un), envoyé par le point d'envoi des contacts — e-mail
-// avec son lien de désinscription, SMS par la clé Brevo du compte —, dans la
-// langue du titulaire. Rien n'est parti : l'essai du jour est rendu.
+// L'ESSAI D'UN CONTACT (Q32, Q37) : réservé d'abord, une ligne par adresse
+// (une fois par jour et par adresse, dix par compte, même si le contact est
+// retiré puis recréé), envoyé par le point d'envoi des contacts — e-mail avec
+// son lien de désinscription, SMS par la clé Brevo du compte —, dans la langue
+// du titulaire, aux SEULES adresses réservées. Rien n'est parti, ou une
+// exception en route : la réservation est rendue.
 async function essaiContact ({ userId, id }) {
   const r = await contactsMod.reserverEssai({ compte: userId, id })
   if (!r.ok) return r
   const c = r.contact
-  const lu = await reglages.lire({ userId })
-  const langue = lu.ok ? lu.reglages.langue : 'fr'
-  const t = textes.essaiContact(langue)
-  const canaux = [c.email ? 'email' : null, c.telephone ? 'sms' : null].filter(Boolean)
-  const { envoyerMaintenant } = require('../lib/notifications/envoi')
-  const bilan = await envoyerMaintenant({
-    personne: { contact: { contactId: c.id, jeton: c.jeton }, email: c.email, telephone: c.telephone },
-    canaux, compte: userId,
-    contenu: { titre: t.titre, corps: t.corps, chemin: null, sujet: `essai_contact:${c.id}`, langue }
-  })
-  const parti = { email: !!bilan.email, sms: !!bilan.sms }
+  let parti = { email: false, sms: false }
+  try {
+    const lu = await reglages.lire({ userId })
+    const langue = lu.ok ? lu.reglages.langue : 'fr'
+    const t = textes.essaiContact(langue)
+    const { envoyerMaintenant } = require('../lib/notifications/envoi')
+    const bilan = await envoyerMaintenant({
+      personne: { contact: { contactId: c.id, jeton: c.jeton }, email: c.email, telephone: c.telephone },
+      canaux: r.canaux, compte: userId,
+      contenu: { titre: t.titre, corps: t.corps, chemin: null, sujet: `essai_contact:${c.id}`, langue }
+    })
+    parti = { email: !!bilan.email, sms: !!bilan.sms }
+  } catch (e) { console.error('push: essai contact:', e && e.message) }
   if (!parti.email && !parti.sms) {
-    await contactsMod.rendreEssai({ compte: userId, id, avant: r.avant })
+    const rendu = await contactsMod.rendreEssai({ compte: userId, reserve: r.reserve })
+    if (!rendu.ok) console.error('push: essai contact non rendu')
     return { ok: false, motif: 'essai_non_parti' }
   }
   return { ok: true, bilan: parti }
@@ -261,11 +292,13 @@ module.exports = async function handler (req, res) {
     }
 
     // LOT 2c-3 — LES CONTACTS PRÉVENUS. Le compte est TOUJOURS l'appelant.
+    // `confirme` : le titulaire a vu « cette adresse s'est désinscrite » et
+    // choisi de lui renvoyer ses alertes (Q36).
     if (corps.action === 'contact_creer') {
-      return repondreContacts(res, userId, await contactsMod.ajouterContact({ compte: userId, contact: corps.contact }))
+      return repondreContacts(res, userId, await contactsMod.ajouterContact({ compte: userId, contact: corps.contact, confirme: corps.confirme === true }))
     }
     if (corps.action === 'contact_modifier') {
-      return repondreContacts(res, userId, await contactsMod.modifierContact({ compte: userId, id: corps.id, contact: corps.contact }))
+      return repondreContacts(res, userId, await contactsMod.modifierContact({ compte: userId, id: corps.id, contact: corps.contact, confirme: corps.confirme === true }))
     }
     if (corps.action === 'contact_retirer') {
       return repondreContacts(res, userId, await contactsMod.retirerContact({ compte: userId, id: corps.id }))
@@ -274,11 +307,7 @@ module.exports = async function handler (req, res) {
       return repondreContacts(res, userId, await contactsMod.reinscrireContact({ compte: userId, id: corps.id }))
     }
     if (corps.action === 'contact_essai') {
-      const r = await essaiContact({ userId, id: corps.id })
-      if (!r.ok && r.motif === 'essai_non_parti') {
-        return res.status(502).json({ error: 'L’essai n’est pas parti. Vérifiez l’adresse, et pour un SMS votre compte Brevo.', motif: r.motif })
-      }
-      return repondreContacts(res, userId, r)
+      return repondreContacts(res, userId, await essaiContact({ userId, id: corps.id }))
     }
 
     // Ce qui attend la fin de MES heures calmes part tout de suite (la recette

@@ -22,8 +22,9 @@
 -- aleatoires, sans extension.
 -- `desinscrit_le` : le contact s'est retire ; la
 -- ligne reste, pour que le titulaire le voie.
--- `dernier_essai_le` : un essai par jour au plus
--- (Q32).
+-- Les essais (Q32, Q37) vivent dans
+-- `notifications_contacts_essais`, plus bas : pas
+-- sur la ligne, que l'on peut retirer et recréer.
 --
 -- RLS ACTIVEE, AUCUNE POLICY. Seule la cle service
 -- y touche. Writer unique : lib/notifications/
@@ -44,7 +45,6 @@ create table if not exists
     gen_random_uuid()::text
     || gen_random_uuid()::text, '-', ''),
   desinscrit_le timestamptz,
-  dernier_essai_le timestamptz,
   cree_le timestamptz not null default now(),
   maj_le timestamptz not null default now(),
   constraint notifications_contacts_coord
@@ -91,3 +91,30 @@ create unique index if not exists
   notifications_file_contact_sujet_uidx
   on public.notifications_file
   (contact_id, sujet);
+
+-- LES ESSAIS DES CONTACTS (étape 3, Q37 du
+-- 10 novembre 2026) : une adresse reçoit au plus
+-- UN essai par jour, et un compte en envoie au
+-- plus dix. La trace vit HORS de la ligne du
+-- contact : retirer puis recréer un contact ne
+-- rend pas d'essai (constat de SÉCURITÉ de
+-- review : sinon, un relais d'e-mails illimité
+-- vers n'importe quelle adresse). `cle` est
+-- l'adresse normalisée (« e:… » ou « t:… »), le
+-- jour celui de Paris. La clé primaire EST la
+-- réservation : deux clics, une seule ligne.
+-- Écrite par lib/notifications/contacts.js seul.
+
+create table if not exists
+  public.notifications_contacts_essais (
+  compte_id uuid not null
+    references auth.users (id)
+    on delete cascade,
+  cle text not null,
+  jour date not null,
+  cree_le timestamptz not null default now(),
+  primary key (compte_id, cle, jour)
+);
+
+alter table public.notifications_contacts_essais
+  enable row level security;

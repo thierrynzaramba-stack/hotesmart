@@ -8,8 +8,9 @@
 //
 // ⚠ PUBLIQUE, SANS SESSION : le jeton de 64 caractères porté par chaque e-mail
 // du contact est la seule clé, et il ne vaut que pour CE contact (et les autres
-// contacts du même compte qui portent la même adresse : c'est la personne qui se
-// désinscrit, lib/notifications/contacts.js).
+// contacts du même compte qui portent la même adresse : c'est l'ADRESSE qui se
+// désinscrit, lib/notifications/contacts.js `lignesDuLien`). Il change quand
+// l'adresse du contact change (Q35) : un ancien lien ne fait plus rien.
 // ⚠ UN GET NE CHANGE JAMAIS RIEN : les messageries d'entreprise ouvrent les liens
 // d'un e-mail pour les inspecter. Le geste est le bouton, donc un POST.
 // ⚠ `private, no-store` et non indexée, AVANT le premier refus ; aucun script ;
@@ -48,10 +49,12 @@ async function langueDuCompte (compte, db) {
   } catch { return 'fr' }
 }
 
-async function nomsDesBiens (contact, db) {
-  const ids = Array.isArray(contact.biens) ? contact.biens.map(String) : []
+// Les logements de TOUTES les lignes que le bouton fera taire (constat D3 de
+// review) : la page dit ce que fait le geste, pas moins.
+async function nomsDesBiens (compte, lignes, db) {
+  const ids = [...new Set(lignes.flatMap(l => (Array.isArray(l.biens) ? l.biens : []).map(String)))]
   if (!ids.length) return []
-  const { data, error } = await db.from('properties').select('name').eq('user_id', contact.compte_id).in('id', ids)
+  const { data, error } = await db.from('properties').select('name').eq('user_id', compte).in('id', ids)
   if (error) return []
   return (data || []).map(p => p.name).filter(Boolean).sort()
 }
@@ -69,14 +72,14 @@ async function handler (req, res, { db = null } = {}) {
   const base = db || client()
   const jeton = String(req.method === 'GET' ? ((req.query && req.query.jeton) || '') : (champs(req).jeton || ''))
   try {
-    const lu = await contacts.contactParJeton({ jeton, db: base })
+    const lu = await contacts.lignesDuLien({ jeton, db: base })
     if (!lu.ok) return envoyerPage(res, 503, textes.pageDesinscription({ langue: 'fr', etat: 'panne' }))
     if (!lu.contact) return envoyerPage(res, 404, textes.pageDesinscription({ langue: 'fr', etat: 'invalide' }))
     const c = lu.contact
     const langue = await langueDuCompte(c.compte_id, base)
 
     if (req.method === 'GET') {
-      const biens = await nomsDesBiens(c, base)
+      const biens = await nomsDesBiens(c.compte_id, lu.lignes, base)
       return envoyerPage(res, 200, textes.pageDesinscription({
         langue, etat: c.desinscrit_le ? 'desinscrit' : 'inscrit', adresse: adresseMasquee(c), biens, jeton
       }))

@@ -1523,26 +1523,188 @@ langues), `pages/settings.html` (le bloc), `shared/push-appareil.js`
 2. **Le jeton de désinscription ne sort jamais vers l'écran**, ni la clé Brevo
    (seule sa présence est lue, comme `api/sms.js` la juge : une clé, et le SMS
    pas désactivé).
-3. **L'essai (Q32)** : réservé AVANT l'envoi par une écriture conditionnelle à
-   la valeur lue (deux clics n'en font partir qu'un) ; un par contact et par
-   jour de Paris ; jamais vers un désinscrit ; envoyé par le point d'envoi des
-   contacts (e-mail avec son lien de désinscription, SMS par la clé Brevo du
-   compte), dans la langue du titulaire ; **rendu si rien n'est parti**.
+3. **L'essai (Q32, Q37)** : un par ADRESSE et par jour de Paris, dix par
+   compte et par jour. La trace vit hors de la ligne du contact, dans
+   `notifications_contacts_essais` (clé primaire compte, adresse, jour) :
+   retirer puis recréer un contact ne rend pas d'essai, et la clé primaire EST
+   la réservation (deux clics, une ligne). Réservé AVANT l'envoi ; seules les
+   adresses réservées partent ; jamais vers un désinscrit ; e-mail avec son
+   lien de désinscription, SMS par la clé Brevo du compte, langue du
+   titulaire ; **rendu si rien n'est parti, ou sur exception**.
 4. **La page publique** : un GET ne change jamais rien (les messageries
    d'entreprise ouvrent les liens) ; elle montre l'adresse masquée, les
-   logements de CE contact et un bouton ; le POST fait le geste. `no-store`,
+   logements de TOUTES les lignes que le bouton fera taire, et un bouton ; le
+   POST fait le geste. `no-store`,
    `noindex`, une CSP `default-src 'none'`, aucun script, dans la langue du
    titulaire.
-5. **Se désinscrire vaut pour la PERSONNE dans ce compte** : tous les contacts
-   du compte qui portent la même adresse se taisent, et reviennent ensemble ;
-   le même e-mail chez un autre hôte continue. Le contact revient par le même
+5. **Se désinscrire vaut pour l'ADRESSE dans ce compte** : tous les contacts
+   du compte qui portent l'une des adresses du lien se taisent, et reviennent
+   ensemble ; le même e-mail chez un autre hôte continue. Deux lignes d'une
+   même personne sans adresse commune (un e-mail seul, un numéro seul) restent
+   distinctes : la page parle de l'adresse. Le contact revient par le même
    lien, le titulaire par « Réinscrire » (Q33).
-6. **Le budget** : le GET de l'onglet lit cinq tables, une fois chacune, en
-   parallèle (appareils, réglages, logements, contacts, porte Brevo) — zéro
-   appel ajouté côté navigateur ; un test les compte. Chaque geste fait un
-   appel et rend la liste à jour.
+5 bis. **Quand l'adresse change** : le jeton change dès que l'e-mail change
+   (l'ancien lien ne fait plus rien) ; la ligne repart inscrite quand aucune de
+   ses anciennes adresses ne reste (Q35) — une adresse gardée garde l'état de
+   la personne. **L'adresse de quelqu'un qui s'est désinscrit** (une autre
+   ligne du compte) ne s'ajoute qu'après confirmation (Q36) : 409
+   `adresse_desinscrite` avec sa date, puis `confirme: true`. Retirer une ligne
+   désinscrite efface cette trace, et l'écran le dit avant.
+6. **Le budget** : le GET de l'onglet lit six tables, une fois chacune, en
+   parallèle (appareils, réglages, logements, contacts, porte Brevo, essais du
+   jour) — zéro appel ajouté côté navigateur ; un test les compte. Chaque lecture
+   du bloc tombe seule. Chaque geste fait un appel et rend la liste à jour,
+   refus compris ; une liste illisible fait relire l'onglet.
+   **Mesure avant/après (case 8)** : appels du navigateur 1 → 1 ; requêtes
+   Supabase du GET 2 → 6 (comptées par le test) ; les octets se mesurent à la
+   recette sur staging, sur un compte réel, et s'inscrivent ici.
 7. **Défense en profondeur assumée** : la désinscription filtre les lignes à
    mettre à jour par le compte du jeton ET par leurs ids tirés de ce compte ;
    les noms de logements de la page, par le compte ET par les biens du contact.
    Une contre-épreuve qui retire l'un des deux filtres reste verte : c'est
    l'autre qui tient.
+
+**Rapport de la review de l'étape 3, reçu le 10 novembre 2026, recopié mot pour
+mot avant tout correctif** (sous-agent ; arbre `/home/claude/hs-2c3`, branche
+`pwa-lot-2c3-contacts`, plage
+`56429490f108a57cb485a9a3fa056649765c634f..6f7d939f676ff02a26d331de8c22c305214fbf97` ;
+chaque fichier cité est dans le diff, les autres sont lus comme preuve) :
+
+> **Revue du commit `pwa-lot-2c3-contacts` (étape 3, contacts prévenus)**
+>
+> - **Arbre lu :** `/home/claude/hs-2c3`. Je n'ai rien ouvert hors de cet arbre ; la spec a été lue par `git show eab33920…`.
+> - **Branche :** `pwa-lot-2c3-contacts`.
+> - **SHA de tête :** `6f7d939f676ff02a26d331de8c22c305214fbf97`.
+> - **Plage relue :** `56429490f108a57cb485a9a3fa056649765c634f..6f7d939f676ff02a26d331de8c22c305214fbf97`, soit les 11 fichiers annoncés. Chaque constat ci-dessous porte sur l'un d'eux.
+> - **Tests :** les 3 fichiers touchés passent (72 sur 72), la suite complète aussi (7557 sur 7557, 0 rouge). `scripts/i18n-check.js` et `tests/masquage-hidden.test.js` passent.
+>
+> L'arbre est inchangé après tout ça (`git status` : seul `node_modules`, non suivi, déjà là avant). Pour vérifier deux constats, j'ai écrit deux scripts dans `/tmp/revue-2c3/`, hors de l'arbre.
+>
+> ## 1. Sécurité
+>
+> **S1 — Le plafond « un essai par jour » (Q32) se contourne : n'importe quel compte peut faire envoyer autant d'e-mails qu'il veut à une adresse de son choix. Gravité : sécurité.**
+> - **Où :** `api/push.js:264-282`, `lib/notifications/contacts.js:218-223` et `259-275`.
+> - **Ce qui se passe :** le plafond est porté par `dernier_essai_le`, une colonne de la ligne du contact. Un contact neuf a cette colonne vide. Il suffit donc de répéter « créer, essayer, retirer » : chaque nouvelle ligne a droit à son essai. Changer l'adresse d'un contact existant ne relance pas l'essai, ça c'est bien tenu.
+> - **Mesuré** (`/tmp/revue-2c3/relais.js`, avec le vrai `api/push.js` et une fausse base) : cinq boucles, cinq réponses 200, cinq e-mails vers `victime@exemple.fr` le même jour.
+> - **Sans même retirer :** 100 contacts sur la même adresse donnent 100 essais par jour.
+> - **Pourquoi c'est de la sécurité :** l'e-mail part par la clé plateforme (`envoi.js:52`). Le dépôt a déjà classé ce cas en sécurité (`api/push.js:251-254`, `envoi.js:68-70`), et Q32 dit en toutes lettres « pas de relais vers une adresse saisie ».
+> - **Ce qui limite les dégâts :** le texte est fixe (`textes.js:513`), sans aucun texte saisi par l'hôte. Le hameçonnage est donc limité. Restent l'inondation d'une boîte et la réputation de l'expéditeur de la plateforme.
+> - **Piste :** un plafond qui survit à la suppression, par exemple N essais par compte et par jour, ou une trace par adresse normalisée dans le compte.
+>
+> **S2 — Après un changement d'adresse, l'ancien destinataire garde la main sur l'abonnement du nouveau. Gravité : sécurité de faible portée (une ancienne clé garde son pouvoir).**
+> - **Où :** `lib/notifications/contacts.js:225-236` (`modifierContact`).
+> - **Ce qui se passe :** la modification n'écrit que nom, e-mail, numéro, alertes et logements. Le jeton de désinscription ne change pas.
+> - **Scénario :** le gardien est remplacé, et l'hôte remplace son e-mail par celui du nouveau gardien. Le lien de l'ancien gardien, présent dans ses anciens e-mails, continue de marcher :
+>   - en GET, il affiche l'adresse masquée du nouveau gardien et les noms des logements ;
+>   - en POST « arreter », il fait taire le nouveau gardien, et toutes les lignes du compte à sa nouvelle adresse (`contacts.js:303-309`).
+> - **Conséquence :** les urgences (code d'accès non résolu, ménage refusé) n'arrivent plus. L'hôte ne le voit qu'en ouvrant Réglages, et l'ancien gardien peut recommencer à chaque fois.
+> - **Mesuré** (`/tmp/revue-2c3/jeton.js`) : le jeton est identique après la modification, et l'ancien lien renvoie bien `nouveau@exemple.fr`.
+> - **Piste :** changer le jeton dès que la clé de l'e-mail ou du numéro change.
+>
+> ## 2. Justesse
+>
+> **D1 — Changer l'adresse d'un contact désinscrit le laisse désinscrit. Gravité : défaut.**
+> - **Où :** `contacts.js:232`.
+> - **Ce qui se passe :** `desinscrit_le` est conservé. L'écran affiche « S'est désinscrit le 09/11 » pour une adresse qui ne s'est jamais désinscrite, et cette adresse ne reçoit rien tant que l'hôte n'a pas cliqué « Réinscrire ».
+> - **Cas typique :** l'hôte corrige une adresse fautive qu'un inconnu avait désinscrite.
+> - **Côté tests :** `tests/notifications-contacts-ecran.test.js:294-310` passe exactement par ce cas (C1 désinscrit, adresse changée en `g2@`) sans rien vérifier sur l'état d'inscription.
+> - **À trancher par Thierry**, avec S2. Proposition : si l'adresse change, effacer la désinscription et changer le jeton ; sinon tout garder.
+>
+> **D2 — Une personne désinscrite peut être réajoutée sans que l'écran le signale. Gravité : défaut, à trancher.**
+> - **Où :** `contacts.js:218-236`.
+> - **Ce qui se passe :**
+>   - « Ajouter un contact », ou « Modifier » vers l'adresse d'une personne désinscrite du compte, crée une ligne active (avec un nouveau jeton) sans aucun avertissement.
+>   - « Retirer » supprime la ligne pour de bon, donc efface aussi la trace de la désinscription.
+> - **L'incohérence :** la reprise, elle, pose la règle « une adresse désinscrite ne revient par aucun contact » (`reprise-listes.js:15`). Q33 donne bien à l'hôte « Réinscrire », mais comme un geste visible ; ici la réinscription est silencieuse.
+>
+> **D3 — La page publique sous-estime ce que fait le bouton. Gravité : mineur.**
+> - **Où :** `api/alertes-desinscription.js:51-57` et `79`.
+> - **Ce qui se passe :** la page n'affiche que les logements de la ligne du lien, alors que le POST fait taire toutes les lignes à la même adresse.
+> - **Côté tests :** le test `:358` grave ce comportement (« seulement les logements de CE contact » : pas « Cœur de vie 23 »), alors que le test `:368-372` prouve que C2, qui porte « Cœur de vie 23 », est bien coupé.
+> - **Piste :** afficher l'union des logements des lignes concernées.
+>
+> **D4 — « La personne » est mal délimitée, dans les deux sens. Gravité : mineur.**
+> - **Où :** `contacts.js:303-305`.
+> - **Trop large :** deux personnes qui partagent un numéro, par exemple (A, P) et (B, P). La désinscription de A coupe aussi l'e-mail de B, et le « Recevoir à nouveau » de B réinscrit A contre son gré.
+> - **Trop étroite :** la reprise crée une ligne e-mail seule et une ligne SMS seule pour une même personne nommée (`reprise-listes.js:108-109`). Les deux ne sont pas reliées : après « C'est fait », les SMS continuent. Le texte de la page parle de l'adresse, donc c'est défendable, mais la KB §12.3 règle 5 promet « la personne ».
+>
+> **D5 — L'écran peut rester sur une liste périmée. Gravité : mineur.**
+> - **Où :** `api/push.js:137-138`, `pages/settings.html:903-909` et `948-954`.
+> - **Relecture en échec :** si la relecture de la liste échoue après un geste réussi, la réponse n'a pas de `contacts`. L'écran dit « Contact ajouté. », referme le formulaire, mais le contact n'apparaît pas, d'où un risque de doublon.
+> - **Refus sans liste :** les réponses 409 et 404 ne portent pas la liste non plus. Après « Un essai est déjà parti », le bouton « Envoyer un essai » reste actif.
+>
+> **D6 — L'essai peut être consommé sans être parti. Gravité : mineur.**
+> - **Où :** `api/push.js:159-162`, `contacts.js:277-279`.
+> - **Erreur ignorée :** `rendreEssai` ne lit pas son erreur. Si cette écriture échoue, l'hôte lit « L'essai n'est pas parti », puis au clic suivant un 409 « déjà parti aujourd'hui » qui est faux.
+> - **Remise sans condition :** autour de minuit, elle peut effacer la réservation d'un autre clic, et donc offrir un essai de plus.
+> - **Exception après réservation :** si `reglages.lire` lève une exception après la réservation, la réponse est un 500 et l'essai est consommé.
+>
+> **D7 — Le GET de l'onglet quand une lecture échoue. Gravité : mineur.**
+> - **Où :** `api/push.js:108-116`.
+> - **Membre sans logement :** `b.error || !l.ok` est testé avant « aucun logement ». Un membre sans logement dont la lecture des contacts tombe reçoit « Vos contacts prévenus n'ont pas pu être lus », pour un bloc qu'il ne voit jamais.
+> - **Troncature silencieuse :** `PLAFOND_BIENS = 1000` coupe sans le dire (règle 6 de la case performance). C'est pratiquement inatteignable.
+> - **Ce qui est correct :** une panne des logements ou des contacts donne `contacts_indisponibles`, sans faire tomber les appareils ni les réglages. Une panne de la porte Brevo donne `brevo: null`, donc aucune phrase affichée, ce qui est voulu.
+>
+> **D8 — Dépassement du plafond de 100. Gravité : mineur.**
+> - **Où :** `contacts.js:218-223` et `300-301`.
+> - **Ce qui se passe :** le contrôle du plafond n'est pas atomique (deux créations simultanées à 99 donnent 101). La reprise (`creerContacts`) n'a pas de plafond. Et la désinscription lit 101 lignes sans ordre : au-delà, des lignes à la même adresse peuvent rester actives.
+>
+> **Documentation — Mesure avant/après absente. Gravité : mineur.**
+> - **Où :** `docs/kb/pwa.md` §12.3.
+> - **Ce qui manque :** la case performance 8 (trois nombres mesurés : appels, requêtes, octets), alors que la spec §16.8 renvoie à ce paragraphe pour la trouver.
+>
+> ## 3. Les tests
+>
+> **Les deux tests existants modifiés : changements légitimes.**
+> - `cache-prive-endpoints` : j'ai recompté, il y a exactement 12 endpoints sans garde, et `api/alertes-desinscription.js` est nommé. Le plafond reste serré.
+> - `channel-webhook-register` : `send` est nécessaire. Sans lui, la nouvelle page lève une exception jusque dans son `catch`, et le balayage la déclare « inexaminable ». L'ajout n'affaiblit aucune assertion, et la page est réellement examinée (404 pour les deux valeurs).
+>
+> **Les tests nouveaux qui prouvent bien leur titre.**
+> - Le test du jour de Paris (`:143-161`) échouerait contre un jour UTC ou une fenêtre glissante de 24 h.
+> - Le test des deux clics (`:163-170`) échouerait sans l'écriture conditionnelle.
+> - Les tests « autre compte » échoueraient si le filtre sur le compte disparaissait, puisque la fausse base compte les lignes écrites.
+> - Le corps envoyé par l'écran est comparé en entier.
+>
+> **Les trous.**
+> - Aucun test ne couvre S1, S2, D1 ni D2.
+> - Le test `:358` fige D3 au lieu de le détecter.
+>
+> ## Vérifié, sans constat
+>
+> - **Compte :** le compte est toujours la session. Un `compte` placé dans le corps de la requête est ignoré (testé).
+> - **Filtrage :** chaque écriture filtre sur `compte_id`, chaque logement est relu sur le compte, et un id qui n'est pas un UUID ne va pas en base.
+> - **Jeton et clé Brevo :** le jeton n'est jamais renvoyé à l'écran (les colonnes lues l'excluent, et `contactEcran` ne garde qu'une liste fermée de champs). La clé Brevo n'est pas lue, seule `brevo_enabled` l'est.
+> - **Page publique :**
+>   - `private, no-store`, `noindex` et la CSP sont posés avant le premier refus, 405 compris ;
+>   - un GET n'écrit rien ;
+>   - le jeton est validé par `^[0-9a-f]{64}$` avant toute requête, ce qui correspond au format de la migration ;
+>   - toutes les valeurs insérées sont échappées, guillemets compris, et il n'y a aucun script.
+>   - La CSP n'a pas de `base-uri` : simple durcissement optionnel, puisqu'il n'y a aucun point d'injection.
+> - **Écran :** tout ce qui vient du serveur passe par `esc`, `message()` écrit en `textContent`, et aucune classe CSS ni aucun identifiant n'entre en collision avec le reste de la page.
+>
+> Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée** (deux constats de sécurité, S1 et S2 : correctifs, puis UNE
+re-review des seuls correctifs ; décisions de Thierry Q35 à Q37 du 10 novembre
+2026, spec `pwa-lot-2-spec` `61e0cd4f`) :
+- **S1** — l'essai vit dans `notifications_contacts_essais` (ajoutée à la
+  migration du lot, pas encore appliquée nulle part) : une fois par adresse et
+  par jour, dix par compte (Q37) ; la colonne `dernier_essai_le` disparaît.
+- **S2** — le jeton change dès que l'e-mail change.
+- **D1** — la ligne repart inscrite quand aucune ancienne adresse ne reste (Q35).
+- **D2** — confirmation pour l'adresse d'un désinscrit (Q36) ; retirer une
+  ligne désinscrite le dit avant.
+- **D3** — la page montre les logements de toutes les lignes concernées.
+- **D4** — c'est l'adresse qui se désinscrit, et la règle 5 le dit.
+- **D5** — la liste revient avec chaque réponse, refus compris ; une liste
+  illisible fait relire l'onglet.
+- **D6** — la remise retire ses propres lignes de réservation, lit son erreur,
+  et se fait aussi sur exception.
+- **D7** — chaque lecture du bloc tombe seule ; sans logement, pas de bloc ; un
+  nombre de logements au-delà du plafond rend « indisponible », jamais une
+  liste coupée.
+- **D8** — accepté : le plafond de 100 contacts n'est pas atomique (deux
+  créations simultanées à 99 donnent 101), et la reprise n'en a pas ; la
+  désinscription lit les lignes du compte triées, jusqu'à 1000.
+- **Documentation** — la mesure avant/après est à la règle 6.
+
