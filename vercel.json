@@ -14,6 +14,12 @@
     "api/cron-messages.js": {
       "maxDuration": 60
     },
+    "api/cron-charges.js": {
+      "maxDuration": 60
+    },
+    "api/charges.js": {
+      "maxDuration": 60
+    },
     "api/pwa.js": {
       "includeFiles": "shared/{theme.css,pwa/service-worker.js}"
     },
@@ -29,6 +35,10 @@
     {
       "path": "/api/cron-messages",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron-charges",
+      "schedule": "17 2 * * *"
     }
   ],
   "rewrites": [
