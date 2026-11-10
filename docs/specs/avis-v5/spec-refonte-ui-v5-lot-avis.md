@@ -1,8 +1,10 @@
 # Spec — Refonte UI V5, lot « Avis »
 
-**Statut : questions Q1 et Q2 tranchées par Thierry le 8 novembre 2026 (§7) ;
-étape 1 à lancer sur son go.**
-Branche `refonte-avis-v5`, partie de `main` à `dde1004ff1211a4a813a3ed1b471d36d92018fcf`.
+**Statut : étape 1 en production le 9 novembre 2026 (`main` `47901ed6`). Étape 2
+(résumé des trois chiffres, §10) : spec écrite le 10 novembre 2026, questions Q3 et
+Q4 à trancher par Thierry avant le code.**
+Étape 1 : branche `refonte-avis-v5`, partie de `main` à `dde1004ff1211a4a813a3ed1b471d36d92018fcf`.
+Étape 2 : branche `avis-v5-resume`, partie de `main` à `d355d2cd9a584533e6de20809da0f32e9b8a4e9c`.
 
 Maquette : `maquette/avis-desktop.html` (ordinateur) et `maquette/avis-mobile.html`
 (téléphone), données fictives. Elle fait foi pour la forme ; cette spec fait foi pour
@@ -369,3 +371,176 @@ Chaque étape : une review, zéro rouge, remise au chef de file avec les cinq é
 - le budget : un appel d'écran au chargement, le même à 1 et à 12 biens ;
 - « À traiter » : les détections et les évaluations y sont, et seulement elles ;
 - horloge décalée (`tests/outils/horloge-decalee.js`) sur tout test daté.
+
+## 10. Étape 2 — les trois chiffres en résumé (Q1 = A)
+
+Spec écrite le 10 novembre 2026. **Le code ne démarre qu'après le go de Thierry
+et ses réponses à Q3 et Q4 (§10.9).**
+
+### 10.1 Catégorie
+
+La note /5, le nombre d'avis reçus et la propreté (👍 / 👎) sont des données
+**non urgentes** : elles passent en résumé, calculé deux fois par jour, avec
+l'heure du calcul à l'écran. Rien d'autre de la page ne bouge : les cartes,
+« À traiter », les détections et les évaluations restent lues à l'ouverture —
+ce sont des choses à faire, pas des statistiques.
+
+### 10.2 La table `resume_bien_avis`
+
+Migration `migrations/2026-11-10-resume-bien-avis.sql`.
+
+| colonne | contenu |
+|---|---|
+| `user_id` uuid | le compte |
+| `property_id_ref` text | la référence provider du bien (celle d'`ota_reviews`) |
+| `periode` text | `15j`, `30j`, `6mois`, `toujours` (les clés de `lib/stats-avis.js`) |
+| `total`, `positif`, `remarque`, `rien_signale` int | avis reçus et propreté — même population que `ratioProprete` |
+| `notes` int, `notes_micro` bigint | nombre de notes et leur somme en micro-unités /5 — même population et même conversion que `notesDuPerimetre` |
+| `calcule_le` timestamptz NOT NULL | l'heure du calcul |
+| `motif_non_calculable` text | `null` quand c'est calculé ; sinon les compteurs sont `null`, jamais 0 |
+
+Clé primaire `(user_id, property_id_ref, periode)`. RLS activée, **aucune
+policy** : seule l'API, en clé de service, la lit et l'écrit.
+
+Trois choix, écrits pour qu'on ne les défasse pas :
+1. **La clé est la référence, pas `properties.id`.** `ota_reviews.property_id_ref`
+   n'a pas de clé étrangère : un re-keying ou un bien supprimé laissent des avis
+   dont la référence ne désigne plus aucun bien. Ils comptent aujourd'hui dans
+   le global (`lib/stats-avis.js`, « le global n'est pas la somme des biens
+   affichés ») ; une clé UUID les perdrait, et la note du compte changerait.
+2. **Pas de colonne `jour`** (la spec performance §4.1 en prévoyait une) :
+   personne ne lit l'historique. Une ligne courante par clé, remplacée.
+3. **La note n'est pas stockée : la somme et le nombre le sont.** Un membre
+   limité à deux biens sur quatre voit la somme de ses deux lignes divisée par
+   leur nombre — jamais une moyenne de moyennes (défaut refermé le 20 octobre
+   2026). L'écran fait donc **une addition** sur au plus une ligne par bien du
+   périmètre, puis `arrondiDixiemes`. C'est la seule agrégation à la lecture,
+   et elle est nommée comme exemption.
+
+### 10.3 Le writer unique
+
+`lib/avis/resume.js`, `calculerResumeAvis(sb, { userId, maintenant })` :
+- **une lecture** paginée par curseur des avis qui comptent du compte
+  (confirmés, visibles, le voyageur a écrit), colonnes `id, ota, overall_score,
+  property_id_ref, ai_clean_verdict, received_at` — les quatre périodes en une
+  passe ;
+- la répartition par référence et par période en mémoire, avec les prédicats
+  et la conversion **importés** de `lib/stats-avis.js` et `lib/avis/echelle.js`,
+  aucun recopié ;
+- une ligne par (référence, période) pour **chaque bien du compte, archivés
+  compris** (décision du 3 novembre 2026 : leurs avis restent dans la note
+  globale), et pour chaque référence orpheline qui porte des avis. Un bien sans
+  avis a ses lignes **à zéro, avec l'heure** : un zéro calculé est un fait ;
+- puis la suppression des lignes du compte qu'il n'a pas réécrites ;
+- **un échec de lecture n'écrit rien** : les lignes d'avant restent, avec leur
+  heure, et l'erreur part dans `results.errors` (carte 20). Une lecture
+  incomplète (plafond atteint) écrit des `null` avec le motif
+  `lecture_incomplete`.
+
+**Parité avant de brancher l'écran** : `scripts/verifier-parite-resume-avis.js`
+compare, en lecture seule sur la production, chaque ligne au calcul actuel
+(`ratioProprete` + `notesDuPerimetre`), quatre périodes, bien par bien et en
+global. Zéro écart exigé.
+
+### 10.4 Quand il tourne
+
+- **Cron, deux créneaux : 06:00 et 18:00 heure de Paris.** Garde
+  `heureDeParis` (`lib/cron-revenus-derives.js` — écrite en UTC, l'heure
+  glisserait deux fois par an), marqueur `cron_logs` par compte et par créneau
+  posé avant le travail, budget mur ; le reliquat passe au tick suivant du même
+  créneau. Coût suivi dans `cron_stats` (carte 20). `api/cron.js` est
+  régénéré en entier (règle du dépôt).
+- **Premier calcul d'un logement neuf** : à chaque passage du cron (5 min), un
+  bien dont la référence n'a encore aucune ligne fait calculer son compte. Un
+  seul endroit, plutôt que les quatre chemins qui posent
+  `provider_property_id` (`api/channel-property.js`, `lib/cron-beds24-props.js`,
+  `lib/canaux-du-bien.js`, `lib/cles-migrees.js`).
+- **Mise en service** : la table est vide au déploiement.
+  `scripts/remplir-resume-avis.js` (à blanc, puis `--go`) la remplit juste
+  après le merge prod ; sans lui, la page dirait « pas encore calculés »
+  jusqu'au premier créneau.
+- **Après un geste de l'hôte sur la page** : voir Q3.
+
+### 10.5 L'endpoint d'écran
+
+- `/api/ecran/avis` lit `resume_bien_avis` — **une requête** : le compte, la
+  période, les références du périmètre ou le bien demandé — au lieu de
+  `ratioProprete` + `noteMoyenne` (cinq requêtes). Même périmètre que
+  `cartes` : un membre limité ne lit que ses biens, un bien hors périmètre
+  rend 403.
+- Les chiffres sortent de `cartesLister`. L'action `cartes` n'est plus appelée
+  par aucune page (aucun appel dans `pages/`, `core/`, `shared/`, `apps/`,
+  `components/`) ; si elle reste, elle lit la même fonction de lecture du
+  résumé — jamais un second calcul.
+- Réponse : `stats: { note_sur_5, notes, total, positif, remarque,
+  rien_signale, non_analyses, periode, depuis, calcule_le }`, ou
+  `{ motif }` quand ce n'est pas calculable.
+- Aucune ligne pour le périmètre : motif `pas_encore_calcule`. Des lignes
+  d'heures différentes (un bien calculé plus tard) : `calcule_le` = **la plus
+  ancienne** — l'âge d'un chiffre est celui de sa partie la plus vieille.
+
+### 10.6 L'écran
+
+- Sous les trois chiffres : **« Calculé à 06:02 »** (aujourd'hui), « Calculé
+  hier à 18:01 », sinon « Calculé le 8 nov. à 18:01 ». Même ligne au
+  téléphone, sous les trois colonnes.
+- Pas encore calculé : « Les chiffres n'ont pas encore été calculés. » —
+  jamais 0.
+- Lecture incomplète : « Les chiffres n'ont pas pu être calculés en entier. »
+- Aucune note sur la période : « Aucune note sur cette période » au lieu de
+  « — » (règle du dépôt : un `null` se dit, jamais un tiret).
+- Le cache navigateur garde l'heure avec les chiffres.
+- Textes en fr, en, es.
+
+### 10.7 Performance (huit points)
+
+1. Un endpoint d'écran : inchangé, un appel.
+2. Résumé : c'est l'objet de l'étape.
+3. Cache : les chiffres et leur heure, rien d'autre de neuf.
+4. `private, no-store` : inchangé, test existant.
+5. Fichiers statiques : sans objet (clés ajoutées aux fichiers i18n versionnés).
+6. Lectures : celle du writer est paginée par curseur ; celle de l'écran est
+   bornée par le nombre de références du compte.
+7. Budget : `tests/budget-ecran.test.js` inchangé (un appel à 1 comme à
+   12 biens) ; `Server-Timing` porte le compte de requêtes.
+8. **Mesure AVANT** — production, compte de Thierry, 9 novembre 2026 :
+   1 appel, **14 requêtes**, 654 à 1 401 ms côté serveur. Attendu : 14 → 10
+   (quatre comptages et une lecture de notes remplacés par une lecture). La
+   mesure APRÈS se prend en production après le merge et se consigne ici.
+
+### 10.8 Tests attendus
+
+- le writer, chiffres écrits en clair, quatre périodes : avis masqué, objet
+  vide, détection non confirmée, source inconnue, avis sans date (seulement
+  dans `toujours`), bien archivé, référence orpheline ;
+- la parité avec `ratioProprete` et `notesDuPerimetre` sur les mêmes données ;
+- un échec de lecture n'écrit rien et ne supprime rien ;
+- le membre limité : la somme de ses biens seulement ; hors périmètre, 403 ;
+- l'endpoint ne charge plus `ratioProprete` ni `noteMoyenne` ;
+- les créneaux 06:00 / 18:00 en heure d'été et d'hiver, le marqueur, le bien
+  neuf rattrapé au tick suivant ;
+- l'écran : heure (aujourd'hui, hier, date), pas encore calculé, aucune note ;
+- horloge décalée sur tout test daté, et chaque test neuf rougit contre le
+  code d'avant (`git archive`, REVIEW.md règle 19).
+
+### 10.9 Questions à Thierry
+
+**Q3 — Après un geste de l'hôte sur la page Avis** (saisir un avis reçu,
+confirmer une détection, corriger la propreté), les trois chiffres :
+- **A** — se recalculent tout de suite pour son compte (même writer, une
+  lecture de plus par geste). *(recommandé : l'hôte voit son geste compté ;
+  tout le reste attend le créneau suivant)*
+- **B** — attendent le prochain calcul, jusqu'à 12 h ; l'heure affichée le
+  dit.
+
+**Q4 — L'accueil (note 30 jours) et la liste des logements (note, nombre
+d'avis) calculent la note eux-mêmes, à chaque ouverture.** Une fois la page
+Avis passée au résumé, deux écrans peuvent montrer deux notes différentes
+pendant quelques heures : un avis reçu à 10:00 compte tout de suite à
+l'accueil, et à 18:00 sur Avis.
+- **A** — dans cette étape, l'accueil et la liste des logements lisent la même
+  table. *(recommandé : une note, un chiffre, partout — c'était prévu par la
+  spec performance §4.1 ; deux fichiers d'autres écrans,
+  `api/ecran/aujourdhui.js` et `lib/logement/lecture.js`, je préviens les
+  fils qui les tiennent)*
+- **B** — dans un lot suivant ; l'écart est noté en dette d'ici là.
