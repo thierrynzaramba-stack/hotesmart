@@ -119,3 +119,24 @@ test('une cle sur un type ne change rien aux autres types', async () => {
   await reportIncident('send_failure', { ...BIEN, detail: 'Autre message' })
   assert.strictEqual(envois.sms.length, 2, 'send_failure garde son anti-spam par logement')
 })
+
+test('un `detail` OBJET avec une cle : la cle s ajoute, le reste du detail est garde, le SMS porte le message', async () => {
+  // Review 3, constat 6 : la branche `{ ...detail, cle }` n'etait tenue par
+  // aucun test (aucun appelant ne la prend aujourd'hui ; la fonction est partagee).
+  remise()
+  await reportIncident('prix_non_pousses', { ...BIEN, detail: { message: 'Prix', canaux: ['airbnb'] }, cle: 'k1' })
+  assert.deepStrictEqual(table[0].detail, { message: 'Prix', canaux: ['airbnb'], cle: 'k1' })
+  assert.ok(envois.sms[0].endsWith('Prix'), envois.sms[0])
+  const r = await reportIncident('prix_non_pousses', { ...BIEN, detail: { message: 'Prix', canaux: ['airbnb'] }, cle: 'k1' })
+  assert.strictEqual(r.alerted, false, 'la meme cle se tait')
+})
+
+test('le pied de l e-mail dit la maille de l anti-spam : « par fait » avec une cle, « par type et par bien » sans', async () => {
+  // Review 3, constat 3 : le second e-mail d'un dos-a-dos disait « 1 par type
+  // et par bien », dementi par sa propre existence.
+  remise()
+  await reportIncident('code_acces_non_envoye', { ...BIEN, detail: 'A', cle: 'code_acces:A:t' })
+  await reportIncident('send_failure', { ...BIEN, detail: 'B' })
+  assert.match(envois.emails[0].html, /Anti-spam : 1 par fait toutes les 60 min/)
+  assert.match(envois.emails[1].html, /Anti-spam : 1 par type et par bien toutes les 60 min/)
+})

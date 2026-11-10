@@ -45,6 +45,8 @@ function doubler (relatif, exports) {
 function charger ({
   mode = 'auto', envoi = { ok: true }, pin = '123456', modele = MODELE,
   connaissance = [], baseEnPanne = false, dejaEnvoye = false,
+  // Review 3, constat 2 : plusieurs modeles de code actifs.
+  modeles = null,
   // Dette 141 : le comportement de la plateforme d'alerte, par type.
   alerte = null
 } = {}) {
@@ -78,7 +80,7 @@ function charger ({
         if (nom === 'knowledge' && baseEnPanne) {
           return Promise.resolve({ data: null, error: { message: 'canceling statement due to statement timeout' } }).then(res, rej)
         }
-        const data = nom === 'message_templates' ? [modele] : nom === 'knowledge' ? connaissance : []
+        const data = nom === 'message_templates' ? (modeles || [modele]) : nom === 'knowledge' ? connaissance : []
         return Promise.resolve({ data, error: null }).then(res, rej)
       }
     }
@@ -168,19 +170,22 @@ test('le SMS porte TOUJOURS l action du jour : chaque information, deux logement
   for (const cle of cles) {
     for (const nom of ['La bulle', 'Cœur de vie 23']) {
       for (const voyageur of [{ firstName: 'Ana', lastName: 'Lopez' }, { firstName: 'Marie-Christine', lastName: 'Dupont-Lefebvre' }]) {
-        for (const envoi of [{ ok: true }, { ok: false, reason: 'pas de messagerie' }]) {
+        for (const envoi of [{ ok: true }, { ok: false, reason: 'pas de messagerie' }, { ok: false, incertain: true, error: 'network_error' }]) {
           const { mod, vus } = charger({ envoi, modele: { ...MODELE, template_text: `Info {${cle}}. Code : {code_acces}` } })
           await mod.processArrivalCodes('u1', null, { ...BIEN_SANS_ADRESSE, name: nom }, [{ ...arrivante(), ...voyageur }], {})
           const a = incompletes(vus)
           assert.strictEqual(a.length, 1, `${cle} / ${nom} : une alerte attendue`)
-          const action = envoi.ok ? /envoyez-le-lui depuis Messages\./ : /complétez-le dans vos tâches avant l'envoi\./
+          // Review 3, constat 4 : la branche incertaine, la plus longue.
+          const action = envoi.ok ? /envoyez-le-lui depuis Messages\./
+            : envoi.incertain ? /PEUT-ÊTRE REÇU \(coupure\), il y manque .* : vérifiez le fil avant de le compléter dans vos tâches\./
+              : /complétez-le dans vos tâches avant l'envoi\./
           assert.match(smsDe(a[0]), action, `${cle} / ${nom} / ${voyageur.lastName} / envoi ${envoi.ok} : SMS coupe avant l action du jour\n${smsDe(a[0])}`)
           cas++
         }
       }
     }
   }
-  assert.strictEqual(cas, cles.length * 8)
+  assert.strictEqual(cas, cles.length * 12)
 })
 
 test('deux informations manquantes : l action du jour tient dans le SMS, les deux chemins dans le texte', async () => {
@@ -443,14 +448,24 @@ test('LE TEST QUI COMPTE : jour de dos-a-dos, deux codes refuses sur le meme log
   const partant = { ...arrivante(), id: 'PARTANT', arrival: jour(-2), departure: jour(0), firstName: 'Paul', lastName: 'Martin' }
   await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [partant, arrivante()], {})
   const a = nonEnvoyes(vus)
-  assert.deepStrictEqual(a.map(x => x.cle).sort(), ['code_acces:ARRIVANTE', 'code_acces:PARTANT'])
+  assert.deepStrictEqual(a.map(x => x.cle).sort(), ['code_acces:ARRIVANTE:tmpl-1', 'code_acces:PARTANT:tmpl-1'])
   assert.ok(a.some(x => /Ana Lopez/.test(x.detail)), 'celui qui arrive ce soir n est pas nomme')
 })
 
-test('l alerte du code incomplet porte la cle de SA reservation', async () => {
+test('l alerte du code incomplet porte la cle de SA reservation et de SON modele', async () => {
   const { mod, vus } = charger()
   await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
-  assert.strictEqual(incompletes(vus)[0].cle, 'code_incomplet:ARRIVANTE')
+  assert.strictEqual(incompletes(vus)[0].cle, 'code_incomplet:ARRIVANTE:tmpl-1')
+})
+
+test('deux modeles de code refuses pour la MEME reservation : deux alertes, deux cles (la maille du journal)', async () => {
+  // Review 3, constat 2 : la cle par reservation seule taisait le second modele.
+  const { mod, vus } = charger({
+    envoi: { ok: false, reason: 'pas de messagerie' },
+    modeles: [MODELE, { ...MODELE, id: 'tmpl-2', template_text: 'Second : {code_acces}' }]
+  })
+  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+  assert.deepStrictEqual(nonEnvoyes(vus).map(x => x.cle).sort(), ['code_acces:ARRIVANTE:tmpl-1', 'code_acces:ARRIVANTE:tmpl-2'])
 })
 
 test('LE TEST QUI COMPTE : envoi INCERTAIN (coupure pendant l envoi) — l alerte dit « PEUT-ÊTRE REÇU », pas « NON ENVOYÉ »', async () => {
@@ -473,7 +488,7 @@ test('envoi INCERTAIN et information manquante : « PEUT-ÊTRE REÇU », puis le
   await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
   assert.deepStrictEqual(vus.alertes.map(a => a.type), ['message_envoye_incomplet'])
   const d = vus.alertes[0].detail
-  assert.match(d, /PEUT-ÊTRE REÇU \(coupure pendant l'envoi\), il y manque Adresse : vérifiez le fil, puis complétez-le dans vos tâches avant de le lui transmettre\./)
+  assert.match(d, /PEUT-ÊTRE REÇU \(coupure\), il y manque Adresse : vérifiez le fil avant de le compléter dans vos tâches\./)
   assert.ok(!/NON ENVOYÉ/.test(d))
   assert.ok(d.endsWith('Motif du canal : network_error (réservation ARRIVANTE).'), d)
 })

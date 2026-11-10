@@ -352,6 +352,29 @@ test('LE TEST QUI COMPTE : `quota` traverse sendGuestMessage', async () => {
   assert.strictEqual(r.permanent, false)
 })
 
+test('LE TEST QUI COMPTE : `incertain` traverse sendGuestMessage (Brevo coupe pendant l envoi)', async () => {
+  // Dette 141, review 3, constat 1 : le drapeau etait perdu sur la branche
+  // e-mail, donc le code d'acces d'une reservation Offline s'annoncait « NON
+  // ENVOYÉ : a lui transmettre vous-meme » alors qu'il etait peut-etre recu.
+  // La forme de la reponse est celle que `envoyerHtml` rend quand le fetch leve
+  // (lib/email-guestflow.js).
+  remise()
+  etat.reponseEmail = { ok: false, raison: 'brevo_injoignable: socket hang up', permanent: false, incertain: true }
+  const r = await sendGuestMessage(null, BIEN_CHANNEX,
+    { id: 'c87f24ce', source: 'Offline', guestEmail: 'v@exemple.test' }, 'bonjour',
+    { userId: 'U', eventType: 'arrival_code' })
+  assert.strictEqual(r.ok, false)
+  assert.strictEqual(r.incertain, true)
+  assert.strictEqual(r.canal, 'email')
+  // Et un refus net n'est pas incertain.
+  remise()
+  etat.reponseEmail = { ok: false, permanent: true, raison: 'brevo_400: Invalid email address' }
+  const r2 = await sendGuestMessage(null, BIEN_CHANNEX,
+    { id: 'c87f24ce', source: 'Offline', guestEmail: 'v@exemple.test' }, 'bonjour',
+    { userId: 'U', eventType: 'arrival_code' })
+  assert.strictEqual(r2.incertain, false)
+})
+
 test('`permanent` traverse aussi, et commande l\'abandon', async () => {
   remise()
   etat.reponseEmail = { ok: false, permanent: true, raison: 'brevo_400: Invalid email address' }

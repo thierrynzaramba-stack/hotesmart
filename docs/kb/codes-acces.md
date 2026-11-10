@@ -45,10 +45,11 @@ moment et seulement si le logement est prêt.
   seconde tentative au canal). Le **fondateur** est prévenu **dès le premier refus** (SMS +
   e-mail) : alerte **« CODE D'ACCÈS — ENVOI NON CONFIRMÉ »** — à transmettre soi-même, code et
   texte dans les tâches (décision de Thierry du 10 novembre 2026 ; avant, `send_failure`
-  n'alertait qu'au deuxième refus dans l'heure). L'anti-spam porte sur **la réservation**, pas
-  sur le logement : deux codes refusés le même jour sur le même logement (jour de dos-à-dos)
-  donnent **deux** alertes. Si la coupure est survenue **pendant** l'envoi, le texte dit
-  **« PEUT-ÊTRE REÇU »** — vérifier le fil avant de renvoyer (la tâche de l'hôte, elle, dit
+  n'alertait qu'au deuxième refus dans l'heure). L'anti-spam porte sur **la réservation et le modèle**,
+  pas sur le logement : deux codes refusés le même jour sur le même logement (jour de
+  dos-à-dos), ou deux modèles de code d'une même réservation, donnent **deux** alertes. Si la
+  connexion a été coupée **pendant** l'envoi — messagerie du canal ou e-mail —, le texte dit
+  **« PEUT-ÊTRE REÇU »** : vérifier le fil avant de renvoyer (la tâche de l'hôte, elle, dit
   encore « impossible » : dette 144). Pour un même modèle de code, une seule alerte : s'il
   manque aussi une information, c'est l'alerte « information manquante » qui part — elle dit
   déjà « NON ENVOYÉ par le canal » (ou « PEUT-ÊTRE REÇU »), et le motif du canal en fin de
