@@ -28,6 +28,10 @@ const { assurerEvaluation, echeanceDuDepart } = require('../lib/avis/naissance')
 // Lot 6 : l'hote est prevenu quand la prestataire a rempli sa part (spec §10).
 const { prevenirHote } = require('../lib/avis/notifications')
 const { normaliserHeures, lireHeures, HEURES_MIN, HEURES_MAX } = require('../lib/avis/auto-validation')
+// Les trois chiffres de la page se recalculent APRES un geste de l'hote sur la
+// page (decision Q3 de Thierry, 10 novembre 2026 ; spec avis-v5 §10.4). Lu a
+// l'appel, pas destructure : un test peut remplacer la fonction sur le module.
+const resumeAvis = require('../lib/avis/resume')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -340,6 +344,9 @@ async function creer (req, res, garde) {
     console.error('[avis] classification immediate echec:', e.message)
   }
 
+  // APRES la classification : le pouce de cet avis compte tout de suite.
+  await resumeAvis.recalculerApresGeste(supabase, userId)
+
   return res.status(201).json({ ok: true, id: cree.id, verdict: verdict ? verdict.verdict : null })
 }
 
@@ -383,6 +390,9 @@ async function valider (req, res, garde) {
     console.error('[avis] validation echec:', error.message)
     return res.status(500).json({ error: 'Enregistrement impossible' })
   }
+  // Seule une detection CONFIRMEE entre dans les chiffres ; l'ignorer ne
+  // change rien a ce qui est compte (une detection en attente ne l'est pas).
+  if (statut === 'confirme') await resumeAvis.recalculerApresGeste(supabase, userId)
   return res.status(200).json({ ok: true, statut })
 }
 
@@ -445,6 +455,7 @@ async function requalifier (req, res, garde) {
     console.error('[avis] requalification echec:', error.message)
     return res.status(500).json({ error: 'Enregistrement impossible' })
   }
+  await resumeAvis.recalculerApresGeste(supabase, userId)
   return res.status(200).json({ ok: true, verdict, verdict_source: 'humain' })
 }
 

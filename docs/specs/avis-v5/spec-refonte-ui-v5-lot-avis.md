@@ -454,22 +454,39 @@ global. Zéro écart exigé.
 
 ### 10.4 Quand il tourne
 
-- **Cron, deux créneaux : 06:00 et 18:00 heure de Paris.** Garde
-  `heureDeParis` (`lib/cron-revenus-derives.js` — écrite en UTC, l'heure
-  glisserait deux fois par an), marqueur `cron_logs` par compte et par créneau
-  posé avant le travail, budget mur ; le reliquat passe au tick suivant du même
-  créneau. Coût suivi dans `cron_stats` (carte 20). `api/cron.js` est
-  régénéré en entier (règle du dépôt).
-- **Premier calcul d'un logement neuf** : à chaque passage du cron (5 min), un
-  bien dont la référence n'a encore aucune ligne fait calculer son compte. Un
-  seul endroit, plutôt que les quatre chemins qui posent
-  `provider_property_id` (`api/channel-property.js`, `lib/cron-beds24-props.js`,
-  `lib/canaux-du-bien.js`, `lib/cles-migrees.js`).
-- **Mise en service** : la table est vide au déploiement.
-  `scripts/remplir-resume-avis.js` (à blanc, puis `--go`) la remplit juste
-  après le merge prod ; sans lui, la page dirait « pas encore calculés »
-  jusqu'au premier créneau.
-- **Après un geste de l'hôte sur la page** : voir Q3.
+- **Cron, deux créneaux : 06:00 et 18:00 heure de Paris** (`lib/cron-resume-avis.js`,
+  tâche `resume_avis`, placée après les classifications et avant le dispatch).
+  Un compte est **dû tant que ses lignes sont plus anciennes que le dernier
+  créneau ouvert** : la garde regarde l'âge des lignes, pas l'heure du tick, donc
+  un créneau manqué (cron en panne, budget épuisé) se rattrape au tick suivant,
+  sans fenêtre d'une heure à ne pas rater. Le début du créneau se calcule à
+  l'heure de Paris (`heureDeParis`, `lib/cron-revenus-derives.js`), changement
+  d'heure compris. Un marqueur `cron_logs` (`resume_avis`) n'est posé qu'une
+  fois le créneau fini ; ensuite un tick ne coûte que deux lectures. Budget mur
+  de 10 s, et aucun calcul ne commence s'il reste moins de 25 s au cycle : le
+  dispatch passe après. Un compte en échec est signalé **une** fois et repris au
+  créneau suivant — une alerte toutes les 5 minutes serait une alarme qu'on
+  coupe. Migration absente : une attente (`results.resumeAvisEnAttente`), pas
+  une alerte. Coût suivi dans `cron_stats` (carte 20).
+- **Premier calcul d'un logement neuf** : à chaque tick, les biens sont
+  **comptés** (une requête `head`) ; si leur nombre a bougé depuis le tick
+  précédent (marqueur `resume_avis_biens`), les références sans ligne font
+  calculer leur compte. Un seul endroit, plutôt que les quatre chemins qui
+  posent `provider_property_id` (`api/channel-property.js`,
+  `lib/cron-beds24-props.js`, `lib/canaux-du-bien.js`, `lib/cles-migrees.js`).
+  Limite assumée : un re-keying qui change une référence sans changer le
+  nombre de biens attend le créneau suivant.
+- **Mise en service** : la table est vide au déploiement ; le premier tick
+  après le collage de la migration calcule tous les comptes (marqueur absent),
+  dans la limite du budget, puis les ticks suivants finissent.
+  `scripts/remplir-resume-avis.js` (à blanc, puis `--go`) reste nécessaire pour
+  **staging, qui n'a pas de cron**, et pour vérifier la production à la main.
+- **Après un geste de l'hôte sur la page** (Q3 = A) : `api/avis.js` appelle
+  `recalculerApresGeste` après la saisie d'un avis (après sa classification),
+  après la confirmation d'une détection (pas après « Ignorer », qui ne change
+  aucun chiffre) et après une correction de propreté. Le recalcul est attendu
+  — une fonction Vercel peut être figée dès la réponse partie — et il ne lève
+  jamais : un échec ne transforme pas un geste enregistré en erreur.
 
 ### 10.5 L'endpoint d'écran
 

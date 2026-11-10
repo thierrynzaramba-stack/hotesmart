@@ -11,7 +11,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { calculerResumeAvis, MOTIF_INCOMPLET } = require('../lib/avis/resume')
+const { calculerResumeAvis, recalculerApresGeste, MOTIF_INCOMPLET } = require('../lib/avis/resume')
 const { ratioProprete, notesDuPerimetre, PERIODES } = require('../lib/stats-avis')
 const { arrondiDixiemes, MICRO } = require('../lib/avis/echelle')
 const FAUX = require('./faux-postgrest')
@@ -278,6 +278,26 @@ test('une écriture refusée par la base se dit', async () => {
   const r = await calculerResumeAvis(sb, { userId: U, maintenant: T0, alarme: sansAlarme })
   assert.strictEqual(r.ecrit, false)
   assert.strictEqual(r.erreur, 'ecriture')
+})
+
+test('la fonction ou la table absente (migration pas encore collée) se dit à part : c\'est une attente', async () => {
+  for (const e of [{ code: 'PGRST202', message: 'Could not find the function public.resume_bien_avis_remplacer' },
+                   { code: '42P01', message: 'relation "public.resume_bien_avis" does not exist' }]) {
+    const sb = fauxBase({ biens: [B('R1')], avis: [A()], pannes: { rpc: e } })
+    const r = await calculerResumeAvis(sb, { userId: U, maintenant: T0, alarme: sansAlarme })
+    assert.strictEqual(r.erreur, 'migration_absente', e.code)
+  }
+})
+
+test('après un geste : le recalcul ne lève jamais, même sur un client cassé', async () => {
+  const casse = { from () { throw new Error('client cassé') } }
+  const r = await recalculerApresGeste(casse, U, { maintenant: T0 })
+  assert.strictEqual(r.ecrit, false)
+  assert.strictEqual(r.erreur, 'exception')
+  const sb = fauxBase({ biens: [B('R1')], avis: [A()] })
+  const ok = await recalculerApresGeste(sb, U, { maintenant: T0, alarme: sansAlarme })
+  assert.strictEqual(ok.ecrit, true)
+  assert.strictEqual(sb.rpcs[0].p.p_user_id, U)
 })
 
 test('à blanc : calcule, n\'écrit pas', async () => {
