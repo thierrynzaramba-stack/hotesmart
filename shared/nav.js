@@ -138,6 +138,12 @@
     }
     if (options.reglages) parts.push(`<a class="menu__item" href="/settings">${icon('i-settings')}<span data-i18n="nav.settings"></span></a>`);
     if (options.avis) parts.push(`<a class="menu__item" href="/avis">${icon('i-review')}<span data-i18n="nav.reviews"></span></a>`);
+    // Le compte de charges : titulaire seul (Q9). `options.charges` vaut par
+    // défaut `options.reglages`, les deux droits étant « titulaire seul » ; le
+    // jour où un domaine `charges` délégable existera, les pages le passeront
+    // elles-mêmes. ⚠ Le masquage ne protège rien : /api/ecran/charges et
+    // /api/charges refusent un membre en 403 (spec du compte de charges §13.4).
+    if (options.charges ?? options.reglages) parts.push(`<a class="menu__item" href="/charges">${icon('i-euro')}<span data-i18n="nav.charges"></span></a>`);
     parts.push(`<a class="menu__item" href="/guide">${icon('i-help')}<span data-i18n="nav.help"></span></a>`);
     parts.push(`<div class="menu__item">${icon('i-globe')}<span data-menu-langue></span></div>`);
     parts.push(`<button type="button" class="menu__item" data-menu-sortie>${icon('i-logout')}<span data-i18n="nav.logout"></span></button>`);

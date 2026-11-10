@@ -49,8 +49,12 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
       in (c, v) { r.filtres.push(['in', c, v]); return q },
       not (c, o, v) { r.filtres.push(['not', c, o, v]); return q },
       is (c, v) { r.filtres.push(['is', c, v]); return q },
+      // `or` est enregistré tel quel (texte PostgREST) : le test l'affirme, le
+      // double ne l'applique pas.
+      or (expr) { r.filtres.push(['or', expr]); return q },
       order (c, o) { r.ordre.push([c, (o || {}).ascending]); return q },
       limit (n) { r.limite = n; return q },
+      range (de, a) { r.plage = [de, a]; return q },
       maybeSingle () { r.unique = true; return fin() },
       single () { r.unique = true; return fin() },
       then (ok, ko) { return fin().then(ok, ko) }

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « CHARGES » — lot 3 du compte de charges.
+     Spec : docs/specs/spec-compte-de-charges.md §13. Les charges vivent dans
+     le menu ≡ (Q10), titulaire seul (Q9) : aucun onglet de la barre n'est
+     actif ici.
+     Le contenu (À traiter, totaux, liste, fiche) est rendu par
+     /shared/charges-vue.js, une seule vue pour l'ordinateur et le téléphone.
+     ⚠ UN APPEL AU CHARGEMENT : /api/ecran/charges (tests/budget-ecran.test.js).
+     Les autres ne partent que sur un geste.
+     ⚠ AUCUN CACHE NAVIGATEUR (§13.7, point 3) : des montants et des
+     justificatifs, et une file qui change à chaque envoi.
+     RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
+
+<main class="page chg">
+  <div class="chg-tete">
+    <h1 class="h1" data-i18n="charges.titre"></h1>
+    <!-- UN SEUL BOUTON (Q32) : PDF, JPEG ou PNG ; au téléphone, le sélecteur
+         du système propose l'appareil photo. -->
+    <button type="button" class="btn btn--primary chg-ajouter" data-action="ajouter" data-i18n-attr="aria-label:charges.ajouter">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg>
+      <span class="chg-ajouter__mot" data-i18n="charges.ajouter"></span>
+    </button>
+    <input type="file" data-bind="fichier" accept="application/pdf,image/jpeg,image/png" hidden>
+  </div>
+  <p class="chg-envoi" data-bind="envoi" role="status"></p>
+
+  <div class="chg-haut">
+    <section class="chg-bloc" data-bind="a-traiter"><p class="muted" data-i18n="common.loading"></p></section>
+    <section class="chg-bloc" data-bind="totaux"></section>
+  </div>
+  <section class="chg-bloc" data-bind="liste"></section>
+</main>
+
+<!-- La fiche d'une facture : un volet à droite à l'ordinateur, plein écran au
+     téléphone (§13.3). Rempli par /shared/charges-vue.js. -->
+<dialog class="chg-fiche" data-bind="fiche" aria-labelledby="chg-fiche-titre"></dialog>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+import { requireAuth } from '/components/auth-guard.js'
+import { signOut, supabase } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte, exigerCompteProprePage } from '/shared/compte-courant.js'
+import { preparerJpeg } from '/shared/photo-bien-client.js'
+import { monter } from '/shared/charges-vue.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+
+// ⚠ LES DEUX SEULS ENDPOINTS DE LA PAGE. L'écran se peint avec le premier, en
+// UN appel ; le second ne sert qu'aux gestes (envoyer, valider, trancher,
+// supprimer, consulter).
+const ECRAN = '/api/ecran/charges'
+const CHARGES = '/api/charges'
+
+// L'appel : jeton RELU à chaque fois (un onglet ouvert plus d'une heure aurait
+// un jeton expiré), compte par `X-Compte`. Il LÈVE sur réponse non-ok, avec le
+// statut et le code du refus, que la vue traduit.
+async function appelAPI (url, methode = 'GET', corps = null) {
+  let jeton = null
+  try {
+    const { data } = await supabase.auth.getSession()
+    jeton = (data && data.session && data.session.access_token) || null
+  } catch { /* pas de session : le serveur répondra 401 */ }
+  const opts = {
+    method: methode,
+    headers: { 'Content-Type': 'application/json', ...(jeton ? { Authorization: `Bearer ${jeton}` } : {}), ...enteteCompte() }
+  }
+  if (corps) opts.body = JSON.stringify(corps)
+  const res = await fetch(url, opts)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(data.error || 'erreur')
+    err.status = res.status
+    err.code = data.error || null
+    throw err
+  }
+  return data
+}
+
+// Le fichier part DIRECTEMENT au stockage, par l'URL signée que `envoi` vient
+// de rendre (lot 2) : il ne traverse pas nos fonctions. Même forme que le
+// client Supabase (`uploadToSignedUrl`) : un formulaire, sans écrasement.
+async function deposer (url, blob) {
+  const corps = new FormData()
+  corps.append('cacheControl', '3600')
+  corps.append('', blob)
+  const res = await fetch(url, { method: 'PUT', headers: { 'x-upsert': 'false' }, body: corps })
+  if (!res.ok) {
+    const err = new Error('depot')
+    err.status = res.status
+    throw err
+  }
+}
+
+async function init () {
+  await I18n.init()
+  // ⚠ PAGE NON DÉLÉGABLE (Q9, tests/pages-non-delegables.test.js) : sur un
+  // compte partagé, elle refuse AVANT toute lecture, au lieu de laisser
+  // l'appel d'écran répondre 403. Le serveur reste la garde réelle.
+  await exigerCompteProprePage({ nomPage: t('charges.titre') })
+  const session = await requireAuth()
+  if (!session) return
+  document.addEventListener('i18n:changed', () => location.reload())
+  const user = session.user || null
+  $('[data-bind="initials"]').textContent = ((user && user.email) || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis')
+  })
+  HSNav.render({ peutLire })
+  I18n.apply(document)
+
+  // ⚠ LE BOUTON D'AJOUT N'EXISTE QUE POUR LE TITULAIRE ; le serveur refuse
+  // de toute façon un membre en 403, lecture comprise (Q9).
+  $('[data-action="ajouter"]').hidden = !estTitulaire()
+
+  const vue = monter(document.body, {
+    charger: (qs) => appelAPI(ECRAN + (qs ? '?' + qs : '')),
+    agir: (corps) => appelAPI(CHARGES, 'POST', corps),
+    deposer,
+    reduireImage: preparerJpeg,
+    ouvrirOnglet: () => window.open('', '_blank'),
+    confirmer: (texte) => window.confirm(texte),
+    t,
+    langue: I18n.lang
+  })
+  await vue.recharger()
+}
+
+// ⚠ UNE PAGE VIDE ET MUETTE EST LE PIRE RETOUR : l'hôte ne sait pas s'il n'a
+// pas de facture ou si quelque chose est cassé.
+init().catch(e => {
+  logger.error('Charges', e && e.message, e)
+  const z = $('[data-bind="a-traiter"]')
+  if (z) { z.innerHTML = '<p class="chg-erreur"></p>'; z.firstChild.textContent = t('charges.erreur_serveur') }
+})
+</script>
+</body>
+</html>
