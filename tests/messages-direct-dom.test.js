@@ -24,7 +24,7 @@ const conv = (bookId, messages, extra = {}) => ({
 })
 const entrant = (body, sent_at) => ({ sender: 'guest', direction: 'inbound', body, sent_at, kind: 'message', origine: null })
 
-function monterDirect ({ conversations, ouverte = 'B1', repondre = () => ({}), taches = [] } = {}) {
+function monterDirect ({ conversations, ouverte = 'B1', repondre = () => ({}), taches = [], luLe = LU_LE } = {}) {
   const appels = []
   const banc = B.monter({ appel: async (chemin, corps) => {
     appels.push({ chemin, corps })
@@ -41,7 +41,7 @@ function monterDirect ({ conversations, ouverte = 'B1', repondre = () => ({}), t
   msg.indexerTaches()
   msg.etat.ouverte = ouverte
   // L'instant de la lecture de la liste, tel que la collection le rend.
-  msg.etat.luLe = LU_LE
+  msg.etat.luLe = luLe
   msg.renderListe(); msg.renderFil()
   // Les ecouteurs du direct (pastille, defilement, onglet) : ceux de la page.
   msg.demarrerDirect()
@@ -258,7 +258,8 @@ test('LE TEST QUI COMPTE : la liste se relit seulement si du neuf est annonce, e
   const v = monterDirect({
     conversations: [conv('B1', [entrant('Bonjour', T1)])], ouverte: null,
     repondre: (c) => c.startsWith('/api/messages?direct=1') ? { dernier }
-      : c.startsWith('/api/messages?limit=') ? { conversations: [conv('B3', [entrant('Nouveau voyageur', dernier)], { guestName: 'Paul' })] } : {}
+      // Comme la production : la collection rend son `lu_le` (review 2, constat 7).
+      : c.startsWith('/api/messages?limit=') ? { conversations: [conv('B3', [entrant('Nouveau voyageur', dernier)], { guestName: 'Paul' })], lu_le: new Date().toISOString() } : {}
   })
   try {
     await v.msg.relireDirect()
@@ -456,5 +457,145 @@ test('le defilement n est pas un geste : la page qui defile seule reste « oubli
     v.delais.length = 0
     v.msg.planifierDirect()
     assert.deepEqual(v.delais, [60000])
+  } finally { v.fermer() }
+})
+
+// ─── Review 2 : les quatre scenarios qu'elle a rejoues, portes ici ───────────
+
+test('LE TEST QUI COMPTE : 409 a l envoi, puis le cron REND la proposition a l hote — elle revient', async () => {
+  // Review 2, constat 2 : la memoire des propositions retirees n'avait pas de
+  // date ; une tache retiree sur un 409 « deja partie », puis rendue par le
+  // cron (envoi non delivre), restait cachee pour toujours.
+  const tache = { id: 'x1', book_id: 'B1', property_id: '209413', suggested_reply: 'Le code est 4821', summary: '',
+    status: 'pending_validation', created_at: il(MIN), send_after: il(1000) }
+  let serveur = []
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])], taches: [{ ...tache }],
+    repondre: (chemin, corps) => {
+      if (chemin.startsWith('/api/messages?direct=1')) return { messages: [], taches: serveur.map(x => ({ ...x })), dernier: T1, complet: true, curseur: 'C' }
+      if (corps && corps.action === 'reserver') return { __statut: 409, __corps: { error: 'deja_close', statut: 'sending' } }
+      return { ok: true }
+    }
+  })
+  try {
+    v.doc.querySelector('[data-envoyer-prop="x1"]').click()
+    for (let i = 0; i < 50 && v.msg.etat.taches.length; i++) await attendre(5)
+    assert.equal(v.msg.etat.taches.length, 0, 'jeu d essai : sur le 409, la proposition est retiree')
+    await attendre(5)
+    serveur = [{ ...tache, send_after: null, summary: 'Reponse differee NON DELIVREE : verifiez-la et renvoyez-la.' }]
+    await v.msg.relireDirect()
+    assert.ok(v.msg.etat.taches.some(x => x.id === 'x1'), 'la proposition rendue a l hote ne revient jamais')
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : pendant la cloture d une proposition SANS echeance, aucun bouton « Envoyer » — un seul envoi', async () => {
+  // Review 2, constat 1 : sur ce chemin la tache reste pending_validation en
+  // base jusqu'a la cloture ; un cycle la remettait a l'ecran avec « Envoyer ».
+  const base = { statut: 'pending_validation' }
+  const coeur = [], envois = []
+  let libererCloture
+  const tache = { id: 'x1', book_id: 'B1', property_id: '209413', suggested_reply: 'Texte IA', summary: '', status: 'pending_validation', created_at: il(MIN) }
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])], taches: [{ ...tache }],
+    repondre: (chemin, corps) => {
+      if (chemin.startsWith('/api/messages?direct=1')) return { messages: [...coeur], taches: base.statut === 'pending_validation' ? [{ ...tache }] : [], dernier: T1, complet: true, curseur: 'C' }
+      if (chemin === '/api/channel-message' || chemin === '/api/beds24') {
+        envois.push(corps.message)
+        coeur.push({ sender: 'host', direction: 'outbound', body: corps.message, sent_at: new Date().toISOString(), kind: 'message', origine: corps.origine })
+        return { success: true }
+      }
+      if (corps && corps.action === 'reserver') {
+        if (base.statut !== 'pending_validation') return { __statut: 409, __corps: { error: 'deja_close', statut: base.statut } }
+        base.statut = 'sending'; return { ok: true }
+      }
+      if (corps && corps.action === 'proposition') return new Promise(r => { libererCloture = () => { base.statut = 'done'; r({ ok: true }) } })
+      return { ok: true }
+    }
+  })
+  try {
+    v.msg.modifierProposition('x1')
+    v.doc.querySelector('[data-bind="texte"]').value = 'Texte retouche'
+    v.banc.window.envoyer()
+    for (let i = 0; i < 100 && !libererCloture; i++) await attendre(5)
+    assert.ok(libererCloture, 'jeu d essai : la cloture est en vol')
+    await v.msg.relireDirect()
+    const bouton = v.doc.querySelector('[data-list="fil"] [data-envoyer-prop="x1"]')
+    assert.equal(bouton, null, 'le bouton « Envoyer » de la proposition deja partie est revenu')
+    libererCloture()
+    await attendre(30)
+    assert.deepEqual(envois, ['Texte retouche'])
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : l hote change de fil pendant l envoi, la liste est relue — la cloture part quand meme', async () => {
+  // Review 2, scenario D.
+  let libererEnvoi
+  const posts = []
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)]), conv('B2', [entrant('Autre', il(2 * MIN))], { guestName: 'Paul' })],
+    taches: [{ id: 'x1', book_id: 'B1', property_id: '209413', suggested_reply: 'Texte IA', summary: '', status: 'pending_validation',
+      created_at: il(MIN), send_after: new Date(Date.now() + 10 * MIN).toISOString() }],
+    repondre: (chemin, corps) => {
+      if (corps) posts.push(corps.action || chemin)
+      if (chemin.startsWith('/api/messages?direct=1')) return { messages: [], taches: [], dernier: new Date().toISOString(), complet: true, curseur: 'C' }
+      if (chemin.startsWith('/api/messages?limit=')) return { conversations: [conv('B1', [entrant('Bonjour', T1)]), conv('B2', [entrant('Autre', il(1000))], { guestName: 'Paul' })], lu_le: new Date().toISOString() }
+      if (chemin === '/api/beds24' || chemin === '/api/channel-message') return new Promise(r => { libererEnvoi = () => r({ success: true }) })
+      return { ok: true }
+    }
+  })
+  try {
+    v.msg.modifierProposition('x1')
+    v.doc.querySelector('[data-bind="texte"]').value = 'Texte retouche'
+    v.banc.window.envoyer()
+    for (let i = 0; i < 100 && !libererEnvoi; i++) await attendre(5)
+    assert.ok(libererEnvoi, 'jeu d essai : l envoi doit etre en vol')
+    v.msg.ouvrir('B2')
+    await v.msg.relireDirect()
+    libererEnvoi()
+    for (let i = 0; i < 100 && !posts.includes('proposition'); i++) await attendre(5)
+    assert.ok(posts.includes('proposition'), 'la cloture n est jamais partie : ' + JSON.stringify(posts))
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : un message dans un AUTRE fil — la liste est relue UNE fois, pas a chaque minute', async () => {
+  // Review 2, constat 3 : le « dernier » connu etait remplace par le lastTime
+  // de la liste, qui ne le rattrapait jamais ; la liste (31 Ko) etait relue
+  // chaque minute pour un seul message.
+  const V0 = Date.now() - 2 * MIN
+  const M = new Date(V0 - 3000).toISOString()
+  let lectures = 0
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])], luLe: new Date(V0 - 30000).toISOString(),
+    repondre: (chemin) => {
+      if (chemin.startsWith('/api/messages?direct=1')) return { messages: [], taches: [], dernier: M, complet: true, curseur: 'C' }
+      if (chemin.startsWith('/api/messages?limit=')) {
+        const luLe = new Date(V0 + lectures * MIN).toISOString(); lectures++
+        return { conversations: [conv('B1', [entrant('Bonjour', T1)]), conv('B2', [entrant('Coucou', M)], { guestName: 'Paul' })], lu_le: luLe }
+      }
+      return { ok: true }
+    }
+  })
+  try {
+    for (let minute = 0; minute < 4; minute++) {
+      v.msg.direct.derniereListe = Date.now() - 61000
+      await v.msg.relireDirect()
+    }
+    assert.equal(lectures, 1, 'un seul message neuf, liste relue ' + lectures + ' fois')
+  } finally { v.fermer() }
+})
+
+test('le premier curseur d un fil part de la lecture qui a produit SES messages, pas de la derniere lecture de la liste', async () => {
+  // Review 2, constat 5 : une conversation chargee par « Afficher plus » (ou
+  // sortie de la page 1) gardait le `lu_le` global, plus recent que ses
+  // messages ; une insertion antidatee entre les deux ne s'affichait jamais.
+  const luConv = il(30 * MIN)
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)], { _luLe: luConv })], luLe: new Date().toISOString(),
+    repondre: (c) => c.startsWith('/api/messages?direct=1') ? { messages: [], taches: [], dernier: T1, complet: true, curseur: 'C' } : {}
+  })
+  try {
+    await v.msg.relireDirect()
+    const depuis = new URL(v.directs()[0].chemin, 'https://x.test').searchParams.get('depuis')
+    assert.ok(new Date(depuis) <= new Date(luConv), 'le fil part de la derniere lecture de la liste : ' + depuis)
   } finally { v.fermer() }
 })

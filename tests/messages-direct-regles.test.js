@@ -159,12 +159,21 @@ test('LE TEST QUI COMPTE : la fusion des propositions se fait EN PLACE — l obj
   assert.equal(r.change, true)
 })
 
-test('LE TEST QUI COMPTE : une proposition close par la page ne ressuscite pas sur une reponse lue avant la cloture', () => {
+test('LE TEST QUI COMPTE : une proposition retiree par la page ne ressuscite pas sur une reponse DEMANDEE avant le retrait', () => {
   // Review 1, constat 5a.
   const lue = [{ id: 7, book_id: 'B1', suggested_reply: 'rejetee' }]
-  const r = R.fusionnerTaches([], 'B1', lue, null, new Set(['7']))
+  const r = R.fusionnerTaches([], 'B1', lue, null, new Map([['7', 2000]]), 1000)
   assert.equal(r.taches.length, 0)
   assert.equal(r.change, false)
+})
+
+test('LE TEST QUI COMPTE : retiree AVANT la demande, elle REVIENT — le cron l a rendue a l hote', () => {
+  // Review 2, constat 2 : apres un 409 « deja partie », le cron peut rendre la
+  // tache (envoi non delivre). Une memoire sans date la cachait pour toujours.
+  const lue = [{ id: 7, book_id: 'B1', suggested_reply: 'Reponse differee NON DELIVREE' }]
+  const r = R.fusionnerTaches([], 'B1', lue, null, new Map([['7', 1000]]), 2000)
+  assert.equal(r.taches.map(x => x.id).join(','), '7')
+  assert.equal(r.change, true)
 })
 
 test('la portee `null` fond TOUTES les propositions (relecture de la liste) sans perdre celle qu on envoie', () => {

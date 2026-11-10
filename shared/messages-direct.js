@@ -137,17 +137,22 @@ const empreinteTache = (x) => [x.id, x.suggested_reply, x.summary, x.send_after,
  * - `bookId` : la portée — un fil, ou `null` pour toutes (relecture de la liste).
  * - Une proposition que la page envoie, qui a échoué, ou qui est dans la
  *   saisie reste, même absente de la réponse : c'est la page qui la gère.
- * - `closes` : les identifiants que la page vient de clore ou de retirer.
- *   Une réponse lue AVANT la clôture et traitée APRÈS ne les ressuscite pas.
+ * - `closes` : `Map(identifiant → instant du retrait par la page)`, et
+ *   `lueA` : l'instant où la réponse a été DEMANDÉE. Une proposition retirée
+ *   APRÈS cette demande ne revient pas (la réponse est antérieure au retrait).
+ *   ⚠ RETIRÉE AVANT, ELLE REVIENT (review 2, constat 2) : après un 409 « déjà
+ *   partie », le cron peut rendre la tâche à l'hôte (envoi non délivré). Une
+ *   mémoire sans date la cachait pour toujours — le voyageur n'avait rien
+ *   reçu, et l'hôte croyait le contraire.
  * @returns {{ taches: object[], change: boolean }}
  */
-export function fusionnerTaches (toutes, bookId, duServeur, enEditionId = null, closes = null) {
+export function fusionnerTaches (toutes, bookId, duServeur, enEditionId = null, closes = null, lueA = 0) {
   const dansPortee = (x) => bookId == null || String(x.book_id) === String(bookId)
   const garder = (x) => x.etatEnvoi === 'en_cours' || x.etatEnvoi === 'echec'
     || (enEditionId != null && String(x.id) === String(enEditionId))
-  const fermees = closes instanceof Set ? closes : new Set()
+  const retireeApres = (id) => closes instanceof Map && closes.has(id) && closes.get(id) >= lueA
   const servies = new Map((duServeur || [])
-    .filter(x => x && dansPortee(x) && !fermees.has(String(x.id)))
+    .filter(x => x && dansPortee(x) && !retireeApres(String(x.id)))
     .map(x => [String(x.id), x]))
   const taches = []
   let change = false

@@ -89,21 +89,29 @@ Elle rend :
   curseur sur `sent_at` sautait pour toujours le message du voyageur arrivé
   après la réponse de l'hôte.
 - `curseur` : le `created_at` de la dernière ligne rendue (inchangé si rien),
-  que la page renvoie tel quel au cycle suivant. Au premier cycle d'un fil, la
-  page part de `lu_le` — l'instant, horloge serveur, que la collection rend
-  désormais avec sa lecture — moins deux minutes de recouvrement (deux
-  horloges : Vercel et la base), que la fusion dédoublonne.
+  que la page renvoie tel quel au cycle suivant — et que le serveur passe
+  TEL QUEL à la base : `created_at` est à la microseconde, et le reparser
+  par `new Date` le tronquait à la milliseconde, donc la dernière ligne
+  revenait à chaque cycle (review 2, constat 4). Au premier cycle d'un fil, la
+  page part du `lu_le` de la lecture qui a produit LES MESSAGES DE CE FIL
+  (première page, « Afficher plus » ou relecture de la liste — review 2,
+  constat 5) — l'instant, horloge serveur, que la collection rend avec sa
+  lecture — moins deux minutes de recouvrement (deux horloges : Vercel et la
+  base), que la fusion dédoublonne.
 - `taches` : les propositions en attente du fil (`agent_tasks`,
   `pending_validation`, mêmes colonnes que la page lit aujourd'hui).
 - `dernier` : le `created_at` du message le plus récent du compte, **hors du
   fil ouvert** (`neq booking_id`) : un message du voyageur avec qui l'hôte
-  échange ne fait pas relire la liste entière. Comparé à `lu_le` de la
-  dernière lecture de la liste.
+  échange ne fait pas relire la liste entière. La page le compare au
+  `dernier` qu'elle a déjà vu — une seule horloge, celle de la base : un même
+  message ne fait relire la liste qu'une fois (review 2, constat 3). Le
+  `lu_le` de la collection ne sert qu'à initialiser.
 
 **Gardes, toutes celles de la collection** : compte cible et filtre de
 périmètre (un membre limité au bien A n'apprend rien du bien B, pas même
 l'existence d'un fil) ; règle d'archivage de la collection (`clesArchivees`) ;
-`private, no-store` posé avant le premier refus. Bornes : `depuis` invalide → 400 ;
+`private, no-store` posé avant le premier refus. Bornes : `depuis` hors de la
+forme ISO complète (date, heure, jusqu'à six décimales, `Z` ou décalage) → 400 ;
 `depuis` plus vieux que 7 jours → ramené à 7 jours ; au plus 200 messages, et
 au-delà `complet: false` — le cycle suivant reprend au 201e par le curseur.
 

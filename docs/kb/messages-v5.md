@@ -230,10 +230,13 @@ décidé par Thierry le 10 novembre 2026 à 01:06.
   d'insertion — PAS `sent_at`, que le webhook, l'import et Beds24 écrivent
   dans le passé), le `curseur` suivant, les propositions en attente, et
   `dernier` : le `created_at` du message le plus récent du compte **hors du
-  fil ouvert**. Premier cycle d'un fil : `lu_le` de la collection (horloge
-  serveur) moins deux minutes.
+  fil ouvert**. Premier cycle d'un fil : le `lu_le` (horloge serveur) de la
+  lecture qui a produit les messages de CE fil, moins deux minutes. Le
+  curseur est renvoyé TEL QUEL à la base : il est à la microseconde, et le
+  tronquer faisait revenir la dernière ligne à chaque cycle.
 - **La liste** se relit (`/api/messages?limit=50`, l'appel d'ouverture) au plus
-  une fois par minute, et seulement quand `dernier` dépasse ce qu'elle connaît.
+  une fois par minute, et seulement quand `dernier` dépasse le dernier
+  `dernier` déjà vu (une seule horloge : un message = une relecture).
   Sans fil ouvert : une relecture par minute (`direct=1` seul).
 - **Onglet caché : aucun appel.** 15 minutes sans geste : une par minute.
   Échecs : 20 s, 40 s, 80 s, puis 2 min ; trois de suite affichent « Mise à
@@ -247,8 +250,14 @@ décidé par Thierry le 10 novembre 2026 à 01:06.
   cinq minutes d'écart), dans les deux ordres d'arrivée.
 - **Les propositions se fondent EN PLACE**, jamais remplacées : celle que
   l'hôte envoie reste tenue jusqu'à sa clôture (constat bloquant de la review 1 :
-  sinon la clôture ne partait pas et un second clic envoyait en double), et
-  une proposition close par la page ne revient pas.
+  sinon la clôture ne partait pas et un second clic envoyait en double). Dès
+  que le message est parti, la proposition passe « en cours » AVANT la
+  clôture : un cycle qui tombe pendant la clôture ne remet pas le bouton
+  « Envoyer » à l'écran (review 2, constat 1). Une proposition retirée par la
+  page ne revient pas sur une réponse DEMANDÉE avant le retrait — mais elle
+  revient si le serveur la rend ensuite : le cron rend à l'hôte une réponse
+  différée qu'il n'a pas pu délivrer, et la cacher pour toujours laissait
+  l'hôte croire le voyageur servi (review 2, constat 2).
 - **Lu tant que c'est à l'écran** : un message du voyageur arrivé dans le fil
   ouvert est marqué lu une fois (`POST action=lu`) — pas sur une page oubliée ;
   le premier geste lit alors le fil.

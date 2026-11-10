@@ -630,6 +630,8 @@ async function archiverFil(req, res) {
 // pas meme l'heure de son dernier message —, et la regle d'archivage.
 const DIRECT_MAX = 200
 const DIRECT_FENETRE_MS = 7 * 86400000
+// Un instant ISO 8601 complet : date, heure, jusqu'a six decimales, fuseau.
+const INSTANT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:?\d{2})$/
 async function lireEnDirect (req, res) {
   const t0 = Date.now()
   const { compterRequetes, requetesJusquIci } = require('../lib/compte-requetes')
@@ -652,11 +654,18 @@ async function lireEnDirect (req, res) {
     }
     let depuis = null
     if (fil) {
-      const t = new Date(String(req.query.depuis || '')).getTime()
-      if (!Number.isFinite(t)) return repondre(400, { error: 'Instant invalide' })
+      // ⚠ LE CURSEUR PASSE TEL QUEL, A LA MICROSECONDE (review 2, constat 4).
+      // PostgREST rend `created_at` avec six decimales ; le reparser par
+      // `new Date` le tronquait a la milliseconde, et `gt` rendait de nouveau la
+      // ligne du curseur a CHAQUE cycle. On valide la forme, strictement, et on
+      // ne reecrit l'instant que s'il faut le ramener a la fenetre.
+      const brut = String(req.query.depuis || '')
+      const t = new Date(brut).getTime()
+      if (!INSTANT_ISO.test(brut) || !Number.isFinite(t)) return repondre(400, { error: 'Instant invalide' })
       // Une page restee ouverte longtemps ne relit pas tout l'historique : au
       // plus 7 jours, et `complet: false` au-dela de 200 messages.
-      depuis = new Date(Math.max(t, Date.now() - DIRECT_FENETRE_MS)).toISOString()
+      const plancher = Date.now() - DIRECT_FENETRE_MS
+      depuis = t < plancher ? new Date(plancher).toISOString() : brut
     }
     // Perimetre vide ou refuse : rien, et la meme forme.
     if (filtreOr === '') return repondre(200, { messages: [], taches: [], dernier: null, complet: true, curseur: depuis })
@@ -674,9 +683,12 @@ async function lireEnDirect (req, res) {
     const lectures = [dernierQ]
     if (fil) {
       const lire = (colonnes) => {
-        // `gt` : la ligne du curseur est deja chez la page. Deux insertions a
-        // la MEME microseconde, coupees par la borne des 200, sont le seul cas
-        // perdu — et il demande 200 messages neufs en cinq secondes.
+        // `gt` : la ligne du curseur est deja chez la page. Deux cas perdus,
+        // tous deux infimes, et dits pour qu'on ne les croie pas fermes :
+        // deux insertions a la MEME microseconde coupees par la borne des 200 ;
+        // et `created_at = now()` etant l'instant de DEBUT de la transaction,
+        // deux insertions du meme fil a quelques millisecondes, lues ENTRE
+        // leurs deux commits, font sauter la premiere (review 2, constat 6).
         let q = supabase.from('messages').select(colonnes)
           .eq('user_id', userId).eq('booking_id', fil).gt('created_at', depuis)
         if (filtreOr) q = q.or(filtreOr)

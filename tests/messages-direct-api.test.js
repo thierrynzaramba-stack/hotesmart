@@ -21,6 +21,17 @@ const AUTRE_COMPTE = '33333333-3333-4333-8333-333333333333'
 const MODULES = ['../lib/require-permission', '../lib/permissions', '../lib/biens-vivants', '../api/messages']
 const MIN = 60000
 const il = (ms) => new Date(Date.now() - ms).toISOString()
+// ⚠ LE DOUBLE COMPARE LES INSTANTS A LA MICROSECONDE, COMME POSTGRES (review 2,
+// constat 4) : a la milliseconde, il ne voyait pas le curseur tronque qui
+// faisait revenir la derniere ligne a chaque cycle.
+function micro (iso) {
+  const m = String(iso).match(/^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}:?\d{2})$/)
+  if (!m) return BigInt(new Date(iso).getTime()) * 1000n
+  const secondes = BigInt(new Date(m[1] + m[3]).getTime()) * 1000n
+  return secondes + BigInt((m[2] || '').padEnd(6, '0'))
+}
+// created_at tel que PostgREST le rend : six decimales et +00:00.
+const pg = (ms, us) => new Date(Date.now() - ms).toISOString().replace('Z', '').slice(0, 23) + String(us).padStart(3, '0') + '+00:00'
 
 // Deux fils : B1 sur le bien A (209413), B2 sur le bien B (169567).
 // `sent_at` est l'instant du PROVIDER, `created_at` l'ordre d'INSERTION en
@@ -71,11 +82,11 @@ function preparer ({ membre = false, perimetre = ['209413'], lignes = LIGNES, ta
         rows = rows.filter(r => Object.entries(q.eq).every(([k, v]) => String(r[k]) === String(v)))
           .filter(r => Object.entries(q.neq).every(([k, v]) => String(r[k]) !== String(v)))
           .filter(r => Object.entries(q.gte).every(([k, v]) => new Date(r[k]) >= new Date(v)))
-          .filter(r => Object.entries(q.gt).every(([k, v]) => new Date(r[k]) > new Date(v)))
+          .filter(r => Object.entries(q.gt).every(([k, v]) => micro(r[k]) > micro(v)))
           .filter(passeOr)
         if (q.ordre) {
           const [col, asc] = q.ordre
-          rows = [...rows].sort((a, b) => (new Date(a[col]) - new Date(b[col])) * (asc ? 1 : -1))
+          rows = [...rows].sort((a, b) => { const d = micro(a[col]) - micro(b[col]); return (d > 0n ? 1 : d < 0n ? -1 : 0) * (asc ? 1 : -1) })
         }
         if (q.limite != null) rows = rows.slice(0, q.limite)
         return { data: rows, error: null }
@@ -296,4 +307,25 @@ test('la collection rend l instant de sa lecture (horloge serveur), point de dep
   assert.equal(res.code, 200)
   const t = new Date(res.body.lu_le).getTime()
   assert.ok(t >= avant - 1000 && t <= Date.now() + 1000, 'lu_le absent ou faux : ' + res.body.lu_le)
+})
+
+test('LE TEST QUI COMPTE : le curseur a la MICROSECONDE, renvoye tel quel — la derniere ligne ne revient pas', async () => {
+  // Review 2, constat 4 : le serveur reparsait le curseur par `new Date` et le
+  // tronquait a la milliseconde ; `gt` rendait la ligne a chaque cycle.
+  const c1 = pg(2 * MIN, 456)
+  preparer({ lignes: [{ user_id: PROD, booking_id: 'B1', property_id: '209413', sender: 'guest', direction: 'inbound',
+    body: 'Bonjour', sent_at: c1, created_at: c1, kind: 'message', origine: null }], taches: [] })
+  const r1 = await appeler({ direct: '1', fil: 'B1', depuis: il(10 * MIN) })
+  assert.deepEqual(r1.body.messages.map(m => m.body), ['Bonjour'])
+  assert.equal(r1.body.curseur, c1)
+  const r2 = await appeler({ direct: '1', fil: 'B1', depuis: r1.body.curseur })
+  assert.deepEqual(r2.body.messages, [], 'la derniere ligne revient a chaque cycle')
+  assert.equal(r2.body.curseur, c1, 'le curseur a ete reecrit')
+})
+
+test('un curseur hors de la forme ISO complete est refuse (400)', async () => {
+  preparer()
+  for (const d of ['2026-11-10', '2026-11-10T08:00:00', '1731225600000', '2026-11-10T08:00:00.1234567Z']) {
+    assert.equal((await appeler({ direct: '1', fil: 'B1', depuis: d })).code, 400, d)
+  }
 })

@@ -266,6 +266,7 @@ async function charger () {
       etat.conversations = r.conversations || []
       // L'instant de la lecture, horloge SERVEUR : le point de depart du fil en direct.
       etat.luLe = r.lu_le || null
+      for (const c of etat.conversations) c._luLe = etat.luLe
       etat.hasMore = r.has_more === true
       etat.nextBefore = r.next_before != null ? r.next_before : null
       etat.nextBeforeId = r.next_before_id || null
@@ -486,7 +487,11 @@ async function chargerPageSuivante () {
   try {
     const r = await appel(`/api/messages?limit=${PAGE}&before=${encodeURIComponent(etat.nextBefore)}&before_id=${encodeURIComponent(etat.nextBeforeId || '')}`)
     const connus = new Set(etat.conversations.map(c => String(c.bookId)))
-    for (const c of r.conversations || []) if (!connus.has(String(c.bookId))) etat.conversations.push(c)
+    for (const c of r.conversations || []) {
+      if (connus.has(String(c.bookId))) continue
+      c._luLe = r.lu_le || null
+      etat.conversations.push(c)
+    }
     etat.hasMore = r.has_more === true
     etat.nextBefore = r.next_before != null ? r.next_before : null
     etat.nextBeforeId = r.next_before_id || null
@@ -785,6 +790,12 @@ async function lancerEnvoi (c, entree) {
     // (releve en review). La bulle porte l'avatar hote, pas le robot.
     if (entree.valideTache) {
       const x = etat.taches.find(v => String(v.id) === String(entree.valideTache)) || tacheDuGeste
+      // ⚠ « EN COURS » JUSQU'A SA CLOTURE (review 2, constat 1). Sortie de la
+      // saisie sans etat, la proposition DEJA PARTIE revenait dans le fil au
+      // prochain cycle — le serveur la rend encore tant que la cloture n'est pas
+      // arrivee — avec son bouton « Envoyer » : un clic la renvoyait, texte IA
+      // d'origine. `cloreTache` la retire ensuite quoi qu'il arrive.
+      if (x) x.etatEnvoi = 'en_cours'
       etat.enEdition = null
       if (x) { await cloreTache(x, 'done', entree.texte, c, 'ia_modifiee'); return }
     }
@@ -1010,7 +1021,7 @@ async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
 // edition en cours, badge, rendus.
 function retirerTache (x) {
   // Une reponse du direct lue AVANT ce retrait ne la fait pas revenir.
-  direct.closes.add(String(x.id))
+  direct.closes.set(String(x.id), Date.now())
   etat.taches = etat.taches.filter(v => String(v.id) !== String(x.id))
   indexerTaches()
   if (etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)) etat.enEdition = null
@@ -3686,7 +3697,11 @@ const direct = {
   derniereListe: 0,        // dernière relecture de la liste (au plus une par minute)
   differe: false,          // un rendu attend que l'hôte ait fini avec un élément du fil
   generation: 0,           // change à chaque changement de fil : la réponse d'avant est jetée
-  closes: new Set()        // propositions closes ou retirées par la page (review 1, constat 5)
+  // Propositions closes ou retirées par la page, avec l'INSTANT du retrait
+  // (reviews 1 et 2) : une réponse lue AVANT le retrait ne les ressuscite pas,
+  // mais une proposition que le serveur rend APRÈS (le cron l'a rendue à
+  // l'hôte, envoi non délivré) revient.
+  closes: new Map()
 }
 const ongletVisible = () => document.visibilityState === 'visible'
 const pageOubliee = () => Date.now() - direct.dernierGeste >= RYTHME.inactifApresMs
@@ -3714,11 +3729,12 @@ async function relireDirect () {
   const generation = direct.generation
   const c = conversationOuverte()
   const params = new URLSearchParams({ direct: '1' })
+  const lueA = Date.now()
   if (c) {
     params.set('fil', String(c.bookId))
     // Le curseur d'insertion rendu par le serveur ; au premier cycle d'un fil,
     // l'instant de la lecture de la liste (review 1, constat 3).
-    params.set('depuis', c._curseur || recul(etat.luLe))
+    params.set('depuis', c._curseur || recul(c._luLe || etat.luLe))
   }
   try {
     const r = await appel('/api/messages?' + params.toString())
@@ -3726,7 +3742,7 @@ async function relireDirect () {
     montrerPanneDirect(false)
     // Règle 6 : la réponse d'un fil qu'on a quitté entre-temps est jetée.
     if (generation !== direct.generation) return
-    if (c && Array.isArray(r.messages)) appliquerFil(c, r)
+    if (c && Array.isArray(r.messages)) appliquerFil(c, r, lueA)
     if (r.dernier) await traiterDernier(r.dernier)
     if (direct.differe) rafraichirFil()
   } catch (e) {
@@ -3741,14 +3757,14 @@ async function relireDirect () {
   }
 }
 
-function appliquerFil (c, r) {
+function appliquerFil (c, r, lueA = Date.now()) {
   if (r.curseur) c._curseur = r.curseur
   const f = fusionnerMessages(c.messages, r.messages)
   const sejours = etat.conversations
     .filter(x => x.lastNight && !STATUTS_SANS_SEJOUR.has(String(x.status || '').toLowerCase()))
     .map(x => ({ id: x.bookId, propId: x.propertyId, departure: String(x.lastNight).slice(0, 10) }))
   const servies = tachesOuvertes(Array.isArray(r.taches) ? r.taches : [], { bookings: sejours, aujourdHui: etat.aujourdHui })
-  const t = fusionnerTaches(etat.taches, c.bookId, servies, etat.enEdition && etat.enEdition.tacheId, direct.closes)
+  const t = fusionnerTaches(etat.taches, c.bookId, servies, etat.enEdition && etat.enEdition.tacheId, direct.closes, lueA)
   if (!f.ajoutes && !f.remplaces && !t.change) return
   c.messages = f.messages
   const plusRecent = apresDuFil(c.messages)
@@ -3800,6 +3816,9 @@ async function traiterDernier (dernier) {
 // déjà chargées restent ; le fil ouvert garde ses bulles locales.
 async function relireListe (dernier) {
   const r = await appel(`/api/messages?limit=${PAGE}`)
+  // Chaque conversation porte l'instant de la lecture qui a produit ses
+  // messages : le premier cycle de SON fil part de la (review 2, constat 5).
+  for (const n of r.conversations || []) n._luLe = r.lu_le || null
   const parId = new Map(etat.conversations.map(x => [String(x.bookId), x]))
   const neuves = []
   for (const n of r.conversations || []) {
@@ -3814,13 +3833,17 @@ async function relireListe (dernier) {
   }
   if (neuves.length) etat.conversations.unshift(...neuves)
   if (r.lu_le) etat.luLe = r.lu_le
-  direct.dernierConnu = r.lu_le ? recul(r.lu_le) : dernier
+  // ⚠ L'HORLOGE DE LA BASE, PAS UN RECUL (review 2, constat 3) : reculer de
+  // deux minutes a chaque relecture faisait relire la liste trois fois pour
+  // un seul message. `dernier` est un `created_at` ; le suivant le depassera.
+  direct.dernierConnu = dernier
   // ⚠ LES PROPOSITIONS SE FONDENT, ELLES NE SONT PAS REMPLACÉES (review 1,
   // constat BLOQUANT) : celle que l'hôte envoie (`sending` côté serveur, donc
   // absente de la lecture) doit rester, sinon sa clôture ne part jamais.
+  const lueA = Date.now()
   const lues = await lireTachesOuvertes()
   if (lues) {
-    const t = fusionnerTaches(etat.taches, null, lues, etat.enEdition && etat.enEdition.tacheId, direct.closes)
+    const t = fusionnerTaches(etat.taches, null, lues, etat.enEdition && etat.enEdition.tacheId, direct.closes, lueA)
     etat.taches = t.taches
     indexerTaches(); majBadge()
   }

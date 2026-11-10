@@ -138,3 +138,118 @@ Arbre lu : /home/claude/hotesmart-direct — branche : messages-fil-en-direct �
 - `course-doublon.test.js` (constat 2)
 - `insertion-tardive.test.js` (constat 3)
 - `menu-ouvert.test.js` (constat 6)
+
+## Review 2 — reçue le 10 novembre 2026 (correctifs seulement)
+
+- Lancée sur : `/home/claude/hotesmart-direct`, branche `messages-fil-en-direct`,
+  plage `e6173c9811df80d458740a4eaf5f12cca20806ac..6b467ecee765e672b1687dd584a6bcc7bf12a082`.
+- Contrôle d'arbre : arbre, branche et SHA déclarés conformes au brief.
+- Contrôle des fichiers cités : les huit fichiers « du diff » le sont. Les cinq
+  fichiers « lus pour le contexte » sont hors du diff, déclarés comme tels ;
+  chaque constat porte sur un fichier du diff.
+
+### Rapport, mot pour mot
+
+Arbre lu : /home/claude/hotesmart-direct — branche : messages-fil-en-direct — SHA lu : 6b467ecee765e672b1687dd584a6bcc7bf12a082
+
+**Fichiers cités**
+- Fichiers du diff : `pages/messages.html`, `api/messages.js`, `shared/messages-direct.js`, `tests/messages-direct-api.test.js`, `tests/messages-direct-dom.test.js`, `tests/messages-direct-regles.test.js`, `docs/specs/spec-messages-fil-en-direct.md`, `docs/kb/messages-v5.md`
+- Fichiers lus pour le contexte : `lib/guestflow/brouillons-dus.js`, `lib/record-message.js`, `migrations/0000-schema-initial.sql`, `tests/outils/banc-messages.js`, `lib/channels/channex.js`
+
+**Comment j'ai mesuré.** Tous les essais sont dans `/tmp/revue2/`, hors de l'arbre. Les scénarios ont été rejoués dans le vrai banc. Les mutations et les correctifs essayés l'ont été sur deux copies `git archive`, l'une de 6b467ece, l'autre de e6173c98. À la fin, `git status` de l'arbre ne montre que `node_modules`. Les trois fichiers `messages-direct-*` passent à 53/53. La suite complète sur la copie donne 7833/7836. Les 3 rouges viennent de la copie (pas de `.git`) : les deux fichiers concernés passent à 16/16 dans l'arbre.
+
+---
+
+**1. IMPORTANT (envoi au voyageur) — double envoi encore possible par « Modifier puis Envoyer »** — `pages/messages.html:786-789`
+- **Origine.** Ce défaut n'a pas été créé par les correctifs. Il est présent depuis e6173c98 et absent avant le lot, parce qu'aucun rendu périodique n'existait. Il se trouve dans la fonction que le correctif a modifiée, et le message du commit annonce « plus d'envoi en double ».
+- **Cas.** Une proposition **sans échéance**. Sur ce chemin, `lancerEnvoi` ne réserve pas la tâche : elle reste `pending_validation` jusqu'à ce que la clôture arrive.
+- **Mécanisme.**
+  1. Une fois le message parti, `etat.enEdition = null` est posé **avant** `await cloreTache(...)`.
+  2. La tâche n'a pas d'`etatEnvoi`.
+  3. Un cycle qui tombe pendant la clôture rend la ligne du cœur, et le serveur rend encore la tâche. Le fil est alors redessiné avec la proposition **et son bouton « Envoyer »**.
+  4. Un clic réserve la tâche avec succès et la renvoie, cette fois avec le texte IA d'origine.
+- **Mesuré** (`/tmp/revue2/scenario-c.test.js`) : bouton présent pendant la clôture, puis messages postés `["Texte retouche","Texte IA"]`. Même résultat sur e6173c98.
+- **Fenêtre.** Elle dure autant que le POST `action=proposition`, démarrage à froid compris. Même sans clic, la proposition déjà partie réapparaît le temps de la clôture, ce qui invite à cliquer.
+- **Correctif** (essayé : scénario fermé, 60/60 sur `messages-direct-dom` et `messages-v5*`) :
+  ```js
+  const x = etat.taches.find(...) || tacheDuGeste
+  if (x) x.etatEnvoi = 'en_cours'
+  etat.enEdition = null
+  ```
+  `cloreTache('done')` appelle toujours `retirerTache` ensuite, donc l'état ne reste pas collé.
+
+**2. IMPORTANT (régression du correctif 5a, envoi au voyageur, rare) — une proposition rendue à l'hôte ne revient jamais** — `pages/messages.html:1013`, `shared/messages-direct.js:148-150`
+- **Mécanisme.** `direct.closes` est une mémoire permanente. Or `retirerTache` est aussi appelé après un 409 de `reserver`, `brouillon` ou `reprendre`, c'est-à-dire quand le cron a pris la tâche (`sending`).
+- **Scénario.**
+  1. Le cron réserve une réponse différée à son échéance.
+  2. L'hôte clique « Envoyer » dans les 5 s, reçoit un 409, et lit « déjà partie ».
+  3. L'envoi du cron échoue. `brouillons-dus.js` rend la tâche en `pending_validation` (« Réponse différée NON DÉLIVRÉE… renvoyez-la »).
+  4. La page filtre cet identifiant pour toujours : ni bulle ni badge jusqu'au rechargement. Le voyageur n'a rien reçu, et l'hôte croit le contraire.
+- **Mesuré** (`/tmp/revue2/scenarios.test.js`, scénario A) : après 3 cycles, la page affiche `[]` à 6b467ece et `['x1']` à e6173c98.
+- **Test qui fige ce défaut.** `tests/messages-direct-regles.test.js:162` encode « ne ressuscite pas » sans borne : un test qui fige un bug (REVIEW.md, règle 17).
+- **Correctif** (essayé : scénario A vert, et le test 5a de la page reste vert) :
+  - `closes` devient une `Map(id → instant du retrait)`.
+  - `relireDirect` et `relireListe` notent `t0` avant leur lecture.
+  - On n'écarte une ligne du serveur que si elle a été retirée **après** `t0`, autrement dit seulement pour une réponse lue avant la clôture : exactement le cas du constat 5a.
+
+**3. MINEUR (coût, régression du correctif) — trois relectures de la liste (31 Ko) pour un seul message arrivé ailleurs** — `pages/messages.html:3817` (et `:3860`)
+- **Mécanisme.** `dernierConnu = recul(lu_le)` recule de 2 minutes à chaque relecture. Le même message `dernier` redéclenche donc une relecture à +60 s, puis à +120 s.
+- **Effet au chargement.** Un message arrivé dans les 2 minutes qui précèdent le chargement fait relire la liste dès le premier cycle.
+- **Mesuré** (scénario B) : 3 relectures à 6b467ece, 1 à e6173c98. La ligne de la case performance (« + 31 Ko ») ne compte donc pas ces deux relectures supplémentaires.
+- **Pourquoi le test ne le voit pas.** Le test DOM `:256` répond sans `lu_le` : il passe par la branche `: dernier`, que la production ne prend jamais.
+- **Correctif** (essayé : 1 relecture, 21/21) : `direct.dernierConnu = dernier`. Une seule horloge, celle de la base. Le `recul(lu_le)` ne sert plus qu'à l'initialisation.
+
+**4. MINEUR (coût, promesse fausse) — la dernière ligne du fil revient à chaque cycle en production** — `api/messages.js:655-659` et `:681`
+- **Mécanisme.**
+  - PostgREST rend `created_at` à la microseconde. Le dépôt l'a mesuré : `11:07:58.499367`.
+  - Le serveur reparse le curseur par `new Date(...)`, ce qui le tronque à la milliseconde : `…27.042456+00:00` devient `…27.042Z`.
+  - `gt` rend donc de nouveau la ligne du curseur, à chaque cycle, tant que le fil est ouvert.
+- **Ce qui n'en souffre pas.** Rien n'est perdu, et `deja` empêche tout doublon à l'écran.
+- **Ce qui est faux.** Le commit dit que « rien de neuf ne renvoie plus la dernière ligne », et la spec annonce « < 1 Ko par relecture ». Le constat 8 de la review 1 n'est donc pas résolu.
+- **Mesuré** (`/tmp/revue2/micro.test.js`, avec un double qui compare à la microseconde comme Postgres) : cycles 2 et 3, la ligne revient.
+- **Pourquoi les tests ne le voient pas.** Leur double compare à la milliseconde, et leurs horodatages en ont 3 chiffres (`tests/messages-direct-api.test.js:149`).
+- **Correctif.**
+  - Valider `depuis` par une expression stricte (ISO, jusqu'à 6 décimales, `Z` ou décalage) et le passer **tel quel** quand il est dans la fenêtre des 7 jours.
+  - Ne garder le `toISOString()` que pour le cas où la valeur est ramenée à 7 jours.
+  - Faire comparer le double à la microseconde.
+
+**5. MINEUR — le premier curseur est global, pas propre à chaque conversation** — `pages/messages.html:3721` (et `:3816`)
+- **Mécanisme.** `etat.luLe` avance à chaque relecture de la page 1. Une conversation hors de la page 1 (chargée par « Afficher plus », ou sortie du haut de la liste) a des messages plus vieux que ce `luLe`.
+- **Scénario.** Une insertion antidatée dans cette conversation (import de rattrapage, e-mail daté) ne la fait pas remonter en page 1. Deux minutes plus tard, et le constat 3 y suffit puisqu'il relit à +120 s, ouvrir le fil part après le message : il ne s'affiche pas avant un rechargement.
+- **Correctif.** Estampiller `c._luLe` par la lecture qui a produit ses messages (`charger`, `chargerPageSuivante`, `relireListe`), et partir de `c._curseur || recul(c._luLe)`.
+
+**6. MINEUR (commentaire inexact)** — `api/messages.js:677-679`
+- **Ce qui est écrit.** « Seul cas perdu » : deux insertions à la même microseconde, coupées par la borne des 200.
+- **Ce qui manque.** Il y a un autre cas : `created_at = now()` est l'instant de **début** de transaction, alors que la ligne devient visible au commit. Deux insertions d'un même fil à quelques millisecondes d'écart, lues entre leurs deux commits, font sauter la première.
+- **Correctif.** Probabilité infime : corriger le commentaire suffit.
+
+**7. MINEUR (tests) — le BLOQUANT n'est tenu que globalement**
+- **Mesuré sur la copie.**
+  - Retirer `|| tacheDuGeste` (`:787`) : 21/21 restent verts.
+  - Remettre `rechargerTaches()` dans `relireListe` : 21/21 restent verts.
+  - Le test `:290` passe avec l'une ou l'autre moitié du correctif. Le cas qui exige `tacheDuGeste` (l'hôte change de fil pendant l'envoi) n'est pas testé.
+- **Correctif.** `/tmp/revue2/scenario-d.test.js` est prêt à reprendre. Il rougit contre e6173c98 et contre la mutation de `tacheDuGeste`, et passe à 6b467ece.
+- **Autres tests à ajouter :**
+  - le constat 4 (double à la microseconde) ;
+  - le constat 3 (`lu_le` dans la réponse de liste du test `:256`) ;
+  - les scénarios A et C ci-dessus.
+
+---
+
+**Catégories sans constat réel**
+- **Sécurité.**
+  - Les trois lectures gardent compte et périmètre. Retirer `user_id` sur chacune : 5, 6 et 3 rouges.
+  - `lu_le` n'est qu'un instant serveur.
+  - Le `curseur` de la branche « archivé » ne rend qu'un horodatage du même compte, déjà filtré par le périmètre.
+- **`fusionnerMessages` et `aDejaSaLigne`.** Ni la passe finale ni le remplacement ne retire jamais une ligne du serveur, seulement des bulles `_local`. Le second envoi d'un texte identique, à moins de 5 minutes, reste invisible au plus un cycle (assumé dans le commit).
+- **Marquage lu.**
+  - Une écriture par arrivée, et une au réveil d'une page oubliée.
+  - La ligne qui revient au constat 4 n'est pas comptée comme entrante.
+  - Les gestes en rafale sont bornés par `pageOubliee()`.
+- **Correctif BLOQUANT 1.** Il tient dans les deux variantes rejouées : relecture pendant l'envoi, et changement de fil pendant l'envoi (scénario D).
+
+**Scénarios réutilisables** (dans `/tmp/revue2/`)
+- `scenario-c.test.js` (constat 1)
+- `scenarios.test.js` (scénario A : constat 2 ; scénario B : constat 3)
+- `micro.test.js` + `harnais-exports.js` (constat 4)
+- `scenario-d.test.js` (constat 7)
