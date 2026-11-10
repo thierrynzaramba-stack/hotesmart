@@ -545,3 +545,34 @@ sans nouvelle review (la re-review est la seule permise) :
 masquage, éprouvé par mutation. Trente-trois mutations du code de l'étape
 (retrait d'une garde, d'une règle d'écriture, d'un raccourci de résolution),
 toutes rouges.
+
+## 15. Recette sur staging — 10 novembre 2026
+
+Faite dans Chrome sur staging (`eb1956a0`), compte de recette, logement
+« Recette — Loft Pilotable » (non piloté : rien n'est parti aux plateformes),
+sur go de Thierry pour les gestes qui écrivent.
+
+**Conforme** : la page, la frise (33 événements), la grille 90 → 140 € ; deux
+nuits de Noël (21 et 22 décembre) choisies, « 4 · Très haut » → la
+confirmation du bien non piloté, « Appliquer » → 125 € avec « sans votre
+réglage : 3 · Haut, 115 € », les badges « réglé par vous » et « chaque
+année », **aucune autre nuit changée** (comparaison des 28 cases avant /
+après) ; « Remettre en automatique » → retour exact à l'état de départ ; la
+zone + / − montre puis retire le week-end voisin, le focus passe au bouton
+voisin quand celui touché se désactive à la borne.
+
+**Un défaut, corrigé sur la branche du lot** : l'éditeur ne restait pas en
+bas d'écran. Mesuré : niveaux à 760 px pour un écran de 674 px, après le
+choix de deux nuits — il fallait défiler. Cause : un élément `sticky` ne monte
+que dans son parent, et l'éditeur était enfermé dans `.yfe-gestes`, sous le
+calendrier. Il est désormais enfant direct de `.yfe-ev__detail` ; un test garde
+ce placement (jsdom ne mesure pas un `sticky`), éprouvé par mutation.
+
+**Mesure Q4 (seuil 1 s)**, deux logements de recette, peu d'historique :
+`GET /api/ecran/evenements` en **0,84 à 1,14 s** dans le navigateur, **0,75 à
+0,96 s** côté serveur (`Server-Timing`), **14 requêtes**, 125 à 139 Ko
+(6,8 Ko compressés). Un geste complet — simulation 1,9 s, écriture 1,7 s,
+relecture 1,1 s — environ 4,5 s. **Décision de Thierry, 10 novembre 2026 :
+le résumé quotidien pré-calculé (Q4) fait l'objet d'un lot à part** ; l'écran
+garde le calcul à l'ouverture d'ici là. Sur un compte réel, avec un historique
+de ventes, le calcul est probablement plus long : à mesurer en production.
