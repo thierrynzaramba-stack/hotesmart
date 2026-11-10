@@ -238,6 +238,11 @@ const ECRANS = [
   // `cartesLister`, mais un appel d'ecran qui recomposerait sa propre liste
   // rendrait le bien archive sans que la ligne `cartes` ne le voie.
   { ecran: 'Avis V5 (appel d ecran : filtre et formulaire)', chemin: 'api/ecran/avis.js', query: {} },
+  // ⚠ L'APPEL D'ECRAN DE « CE QUI FAIT BOUGER VOS PRIX » (lot 4, 4a) : son
+  // selecteur de logements vient de `biens`. Le bien archive DEMANDE par
+  // `?bien=` (404, sans son nom) est prouve dans tests/ecran-evenements.test.js :
+  // une reponse 404 ne porte pas le bien vivant que ce banc exige d'y voir.
+  { ecran: 'Ce qui fait bouger vos prix (selecteur)', chemin: 'api/ecran/evenements.js', query: {} },
   // ⚠ LA PAGE CHARGES (lot 3 du compte de charges, 10 novembre 2026) : `biens`
   // est ce que la fiche PROPOSE au rattachement ; un logement archive n'y a
   // plus sa place. `biens_archives` est legitime pour la meme raison que sur

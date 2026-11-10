@@ -178,6 +178,16 @@ const ATTENDU = {
     '/api/ecran/avis': 1,   // l'ecran en un appel (et ses relectures : filtre, geste)
     '/api/avis': 1          // les GESTES seulement : corriger, confirmer, saisir, sejours de la saisie
   },
+  // ⚠ « CE QUI FAIT BOUGER VOS PRIX » ENTRE DANS CE TEST LE 9 NOVEMBRE 2026,
+  // avec sa page (lot 4, 4a). Mesure AVANT en production le meme jour, sur
+  // l'ancienne pop-up : 5 appels `/api` (dont `/api/yield-evenements` DEUX
+  // fois) et 10 appels Supabase directs. Apres : UN appel d'ecran, aussi pour
+  // changer de logement. Les gestes (etape 3, meme jour) passent par
+  // `/api/yield-evenements` — jamais au chargement.
+  'apps/yield/evenements.html': {
+    '/api/ecran/evenements': 1,   // l'ecran en un appel (et sa relecture apres un geste)
+    '/api/yield-evenements': 1    // les GESTES seulement : PUT (simuler, confirmer), PATCH (zone, crans d'avant)
+  },
   // ⚠ LA PAGE CHARGES NAIT DANS CE TEST LE 10 NOVEMBRE 2026 (compte de charges,
   // lot 3, spec §13.7). Ecran neuf : pas de mesure AVANT. UN appel d'ecran
   // peint la page entiere — file, totaux, liste, entites, logements — et la

@@ -1,0 +1,199 @@
+/* ============================================================
+   HôteSmart — shared/yield-evenements.css
+   La page « Ce qui fait bouger vos prix » (apps/yield/evenements.html),
+   lot 4 du chantier, sous-lot 4a. Spec : docs/specs/spec-yf-ecran-evenements.md.
+
+   ⚠ UNE FEUILLE À ELLE, PAS UN AJOUT À shared/ui.css : ui.css est tenu par
+   d'autres lots en ce moment (accord du chef de file du 9 novembre 2026). La
+   page charge theme.css et ui.css sans les modifier, puis celle-ci.
+
+   ⚠ AUCUN HEXA (règle V5) : tout vient de shared/theme.css — y compris
+   l'échelle d'encre des cinq niveaux, copiée dans theme.css le 9 novembre
+   2026 sur décision de Thierry (tests/palette-niveaux.test.js garde les deux
+   copies identiques).
+
+   ⚠ LE NIVEAU COLORE LA PASTILLE OU LA CASE, JAMAIS LA LIGNE NI LA PAGE
+   (règle 1 de Thierry). L'encre du chiffre se prend DANS l'échelle : le 5 sur
+   les quatre premiers niveaux (contraste ≥ 4,7:1), le 1 sur le dernier.
+   ============================================================ */
+
+/* ---------- Les pastilles de niveau ---------- */
+.yfe-niv {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: var(--radius-pill);
+  font-size: 12px; font-weight: var(--fw-semibold); white-space: nowrap;
+  background: var(--surface-2); color: var(--muted);
+}
+.yfe-niv--1 { background: var(--niveau-1); color: var(--niveau-5); box-shadow: inset 0 0 0 1px var(--niveau-4); }
+.yfe-niv--2 { background: var(--niveau-2); color: var(--niveau-5); }
+.yfe-niv--3 { background: var(--niveau-3); color: var(--niveau-5); }
+.yfe-niv--4 { background: var(--niveau-4); color: var(--niveau-5); }
+.yfe-niv--5 { background: var(--niveau-5); color: var(--niveau-1); }
+.yfe-niv--legende { font-size: var(--fs-caption); padding: 5px 10px; }
+.yfe-niv__prix { font-weight: var(--fw-medium); }
+
+/* ---------- L'en-tête ---------- */
+.yfe-tete { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--gap-s) var(--gap-l); }
+.yfe-tete__titre { display: flex; flex-direction: column; gap: var(--gap-xs); flex: 1 1 320px; min-width: 0; }
+.yfe-bien { display: inline-flex; align-items: center; gap: var(--gap-s); font-size: var(--fs-small); }
+.yfe-bien select {
+  height: var(--control); padding: 0 12px; border-radius: var(--radius-tile);
+  border: 1px solid var(--border); background: var(--surface);
+}
+.yfe-legende { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.yfe-alerte { font-size: var(--fs-small); color: var(--muted); }
+
+/* ---------- La frise ---------- */
+.yfe-frise {
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 6px;
+}
+.yfe-frise__mois-ligne { position: relative; height: 18px; overflow: hidden; }
+.yfe-frise__mois {
+  position: absolute; top: 0; padding-inline-start: 6px;
+  font-size: 12px; color: var(--muted); font-weight: var(--fw-medium); white-space: nowrap;
+}
+.yfe-frise__piste { position: relative; }
+.yfe-frise__trait { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.yfe-barre {
+  position: absolute; height: 18px; border: 0; padding: 0 6px; border-radius: 4px;
+  font-size: 11px; font-weight: var(--fw-semibold); text-align: start;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.yfe-barre[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 2px; }
+.yfe-frise__aide { font-size: 12px; color: var(--muted); }
+
+/* ---------- Les filtres ---------- */
+.yfe-filtres { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
+.yfe-filtre {
+  min-height: var(--control); padding: 0 14px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--surface);
+  font-size: var(--fs-small); font-weight: var(--fw-medium);
+}
+.yfe-filtre[aria-pressed="true"] { border-color: var(--ink); font-weight: var(--fw-semibold); box-shadow: inset 0 0 0 1px var(--ink); }
+
+/* ---------- La liste, par mois ---------- */
+.yfe-liste { display: flex; flex-direction: column; gap: var(--gap-l); }
+.yfe-mois { display: flex; flex-direction: column; gap: 10px; }
+.yfe-mois__titre {
+  font-size: var(--fs-caption); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); font-weight: var(--fw-semibold);
+}
+.yfe-ev { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; overflow: clip; background: var(--surface); }
+/* ⚠ `clip` ET PAS SEULEMENT `hidden` (étape 3) : `hidden` fait de la carte un
+   conteneur de défilement, et l'éditeur collé en bas d'écran (`sticky`) s'y
+   collerait à une carte qui ne défile pas — donc nulle part. `hidden` reste en
+   repli pour un navigateur qui ignore `clip` : l'éditeur y est seulement en
+   place, sous le calendrier. */
+.yfe-ev--ouvert { border-color: var(--ink); }
+.yfe-ev__tete {
+  width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  padding: 14px 16px; border: 0; background: transparent; text-align: start; min-height: 56px;
+}
+.yfe-ev__titre { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s); flex: 1 1 260px; min-width: 0; }
+.yfe-ev__nom { font-size: 17px; font-weight: var(--fw-semibold); }
+.yfe-ev__dates { flex: 1 1 100%; order: 3; }
+.yfe-ev__resume { display: inline-flex; flex-wrap: wrap; gap: var(--gap-s); }
+.yfe-badge {
+  font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill);
+  background: var(--surface-2); color: var(--ink); font-weight: var(--fw-semibold);
+}
+.yfe-badge--regle { box-shadow: inset 0 0 0 1px var(--ink); background: var(--surface); }
+.yfe-ev__detail { border-top: 1px solid var(--line); padding: var(--gap-m); display: flex; flex-direction: column; gap: var(--gap-m); }
+.yfe-legende-zones { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); }
+.yfe-lz { display: inline-block; width: 12px; height: 12px; border-radius: 3px; box-sizing: border-box; }
+.yfe-lz--evenement { border: 2px solid var(--ink); }
+.yfe-lz--rayonnement { border: 2px dashed var(--muted); }
+.yfe-lz--regle { box-shadow: inset 0 0 0 2px var(--ink); background: var(--surface-2); }
+.yfe-detail {
+  border: 1px solid var(--border); border-radius: var(--radius-tile); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-small);
+}
+.yfe-detail__date { font-weight: var(--fw-semibold); }
+.yfe-sans-nuit ul { margin: 6px 0 0; padding-inline-start: 18px; font-size: var(--fs-small); color: var(--muted); }
+
+/* ---------- Les gestes (étape 3) ---------- */
+.yfe-gestes { display: flex; flex-direction: column; gap: var(--gap-s); }
+.yfe-zone-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s) var(--gap-l); }
+.yfe-larg { display: inline-flex; align-items: center; gap: 6px; }
+.yfe-larg__btn { font-size: var(--fs-body); font-weight: var(--fw-bold); }
+.yfe-larges { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
+/* ⚠ L'ÉDITEUR RESTE EN BAS D'ÉCRAN tant que la carte est visible (spec §9 :
+   « l'éditeur s'ouvre en bas d'écran ») : on choisit des nuits en haut du
+   calendrier, on règle sans remonter ni descendre.
+   ⚠ `sticky` NE MONTE QUE DANS SON PARENT : l'éditeur est donc un enfant
+   direct de `.yfe-ev__detail`, qui contient le calendrier — pas de
+   `.yfe-gestes`, sous le calendrier (recette du 10 novembre 2026 ; un test
+   garde ce placement, jsdom ne sachant pas mesurer un `sticky`). */
+.yfe-editeur {
+  position: sticky; bottom: 0; z-index: 2;
+  display: flex; flex-direction: column; gap: var(--gap-s);
+  padding: 12px; border: 1px solid var(--ink); border-radius: var(--radius-tile);
+  background: var(--surface); box-shadow: var(--shadow-sheet);
+}
+.yfe-editeur__choix { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s); margin: 0; }
+.yfe-editeur__niveaux { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Une pastille de niveau est un bouton : sa couleur est celle du niveau
+   (règle 1 : la pastille, jamais la ligne), son chiffre est écrit (règle 2). */
+.yfe-editeur__niv { border: 0; cursor: pointer; padding: 8px 12px; font-size: var(--fs-small); min-height: 40px; }
+.yfe-editeur__niv:disabled, .yfe-gestes .btn:disabled, .yfe-editeur .btn:disabled, .yfe-geste .btn:disabled, .yfe-retirer:disabled { opacity: .55; cursor: default; }
+.yfe-geste {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-tile); background: var(--surface-2);
+}
+.yfe-geste__quoi { font-weight: var(--fw-semibold); margin: 0; }
+.yfe-geste p { margin: 0; }
+.yfe-geste__actions { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
+.yfe-message { font-size: var(--fs-small); font-weight: var(--fw-semibold); margin: 0; }
+.yfe-crans { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s); }
+.yfe-crans p { margin: 0; }
+.yfe-retirer { margin-inline-start: 6px; padding: 2px 10px; min-height: 0; height: auto; font-size: var(--fs-caption); }
+
+/* ---------- Le calendrier d'un événement ---------- */
+.yfe-cal { display: flex; flex-direction: column; gap: 6px; }
+.yfe-cal__tete, .yfe-cal__semaine { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.yfe-cal__tete span {
+  padding: 0 4px; font-size: 11px; color: var(--muted); font-weight: var(--fw-semibold);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.yfe-cal__sep { display: none; }
+.yfe-jour {
+  display: flex; flex-direction: column; gap: 6px; padding: 6px;
+  border-radius: var(--radius-tile); border: 2px solid var(--line); background: var(--surface);
+  min-height: 92px; box-sizing: border-box; text-align: start; color: var(--ink);
+}
+.yfe-jour[aria-pressed="true"] { outline: 3px solid var(--ink); outline-offset: 2px; }
+.yfe-jour--evenement { border-color: var(--ink); }
+.yfe-jour--rayonnement { border: 2px dashed var(--muted); }
+/* ⚠ ON ATTÉNUE LE FOND ET LE BORD, JAMAIS L'ENCRE (review de l'étape 2) : une
+   opacité sur la case faisait passer la pastille 4 et le prix sous 4,5:1. */
+.yfe-jour--hors, .yfe-jour--hors_zone { background: var(--surface-2); border-color: var(--line); }
+.yfe-jour--hors_zone { border-style: dashed; }
+.yfe-jour--vide .yfe-jour__num { color: var(--muted); }
+/* Une nuit RÉGLÉE par cet événement : un second trait d'encre, à l'intérieur.
+   Jamais l'ambre (règle 3 : l'ambre dit « fermée » ou « fait pour vous »). */
+.yfe-jour--regle { box-shadow: inset 0 0 0 2px var(--ink); }
+.yfe-jour__tete { display: flex; justify-content: space-between; align-items: baseline; gap: var(--gap-xs); padding: 2px 3px 0; }
+.yfe-jour__num { font-size: var(--fs-body); font-weight: var(--fw-bold); }
+.yfe-jour__mois { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.yfe-jour__corps { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.yfe-jour__prix { font-size: var(--fs-body); font-weight: var(--fw-bold); }
+.yfe-jour__vide { font-size: 11px; color: var(--muted); text-align: center; }
+.yfe-jour__marques { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; font-size: 10px; color: var(--muted); }
+
+/* ---------- Téléphone : la même grille, 7 colonnes de 150 px qui défilent
+   (registre §1 : pas de composant linéaire). ---------- */
+@media (max-width: 1100px) {
+  .yfe-cal { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
+  .yfe-cal__tete, .yfe-cal__semaine { grid-template-columns: repeat(7, 150px); width: max-content; }
+}
+@media (max-width: 720px) {
+  /* La barre du bas (shared/ui.css, `.bottombar`) couvre le bas de l'écran
+     du téléphone : l'éditeur se colle AU-DESSUS d'elle. */
+  .yfe-editeur { bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .yfe-editeur__niv { flex: 1 1 calc(50% - 6px); }
+  .yfe-cal__sep { display: block; font-size: 11px; color: var(--muted); font-weight: var(--fw-semibold); text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 2px 0; }
+  .yfe-frise { padding: 12px; }
+  /* Treize mois sur 350 px : un sur deux, sinon les noms se chevauchent. */
+  .yfe-frise__mois:nth-child(even) { visibility: hidden; }
+}
