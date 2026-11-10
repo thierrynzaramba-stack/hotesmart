@@ -486,6 +486,13 @@ Cette alerte suit désormais le mode urgence ; seule la décision 7 garde
 | Q31 | La langue d'un contact libre | Celle du titulaire |
 | Q32 | Le bouton « Tester » du bloc Alertes | Gardé : un essai par contact, au plus une fois par jour et par contact (pas de relais vers une adresse saisie) |
 
+**Décisions du 10 novembre (2c-3, étape 3, §16.8) :**
+
+| | Question | Décision |
+|---|---|---|
+| Q33 | Qui peut annuler la désinscription d'un contact | Le contact, par le même lien (« Recevoir à nouveau »), et le titulaire, par « Réinscrire » dans Réglages |
+| Q34 | Où vit le bloc « Contacts prévenus » | Dans l'onglet Notifications de `/settings`, sous « Heures calmes » |
+
 ## 14. Découpage proposé, et ce que le lot ne fait pas
 
 **Découpage proposé** (un fil, une branche par sous-lot, chacun reviewé et
@@ -778,3 +785,64 @@ elles.
 2. **2c-2 — les treize autres événements**, un par un.
 3. **2c-3 — les contacts libres**, la reprise d'`agent_alert_config` et le
    déménagement du bloc « Alertes ».
+
+### 16.8 Étape 3 du 2c-3 — le bloc « Contacts prévenus » (10 novembre 2026)
+
+**Ce que voit le titulaire** (onglet Notifications, sous « Heures calmes »,
+Q34) — seulement s'il a des biens : un membre sans bien à lui ne le voit pas.
+- La liste de ses contacts : nom, e-mail et/ou numéro, ses biens, ce qu'il
+  reçoit (« Urgences », « Info manquante ») ; un contact désinscrit le dit,
+  avec sa date, et porte « Réinscrire » (Q33).
+- Pour chacun : « Modifier », « Retirer » (avec confirmation), « Envoyer un
+  essai » — une fois par jour au plus (Q32), refusé pour un contact
+  désinscrit ; le bouton dit quand il redevient possible.
+- « Ajouter un contact » : nom, e-mail, numéro (l'un des deux au moins), les
+  biens, les alertes. Sans compte Brevo connecté, une phrase dit que les SMS
+  ne partent pas, avec le lien vers Connexions (la porte Brevo de l'ancien
+  tiroir).
+- Une phrase dit que ces contacts suivent ses heures calmes, reçoivent dans
+  sa langue, et peuvent se désinscrire par le lien de chaque e-mail.
+
+**L'endpoint** : `/api/push`, l'endpoint de l'onglet. GET rend en plus
+`contacts` (la liste, ses biens, la porte Brevo) quand l'appelant a des
+biens ; POST `contact_creer`, `contact_modifier`, `contact_retirer`,
+`contact_reinscrire`, `contact_essai`. **La garde est la session : le compte
+est toujours celui de l'appelant**, aucun identifiant de compte n'est accepté ;
+un contact d'un autre compte rend « introuvable » ; chaque bien est relu sur
+le compte. Le jeton de désinscription ne sort jamais vers l'écran.
+
+**La page de désinscription** : `/api/alertes-desinscription?jeton=…`,
+publique, sans session. GET montre l'adresse masquée, les biens concernés et
+UN bouton — « Ne plus recevoir ces alertes », ou « Recevoir à nouveau » si
+c'est déjà fait (Q33) ; POST fait le geste. Deux clics parce que les
+messageries d'entreprise ouvrent les liens d'un e-mail pour les inspecter : un
+GET ne change jamais rien. Dans la langue du titulaire (Q31), `no-store`,
+non indexée, sans script.
+
+**Inventaire** (règle « la forme ne supprime jamais le fond ») — le bloc
+« Alertes » du tiroir de Messages (`voletAlertes`, pages/messages.html) :
+| Ce qu'il porte | Où ça va |
+|---|---|
+| Deux types × deux canaux, par bien | Conservé : un contact porte ses alertes et ses biens ; le canal est son e-mail et/ou son numéro |
+| Les destinataires « Nom : valeur », une ligne chacun | Conservé : un contact par personne, nom et adresse séparés |
+| La porte Brevo (SMS fermé sans clé, lien Connexions) | Conservé (phrase + lien) |
+| « Tester » par canal, après enregistrement | Conservé : « Envoyer un essai » par contact, une fois par jour (Q32) |
+| Champs grisés pendant un changement de mode | Retiré avec raison : il protégeait l'écriture conjointe du mode et des listes dans le même tiroir ; les contacts ne s'écrivent plus là |
+| L'adresse du titulaire dans sa propre liste | Déplacé : ses réglages (§16.3) |
+Le tiroir lui-même est l'étape 4 (lien « Qui est prévenu → Réglages »).
+
+**Case PERFORMANCE de l'étape 3 :**
+1. Endpoint d'écran : `/api/push` GET, ses lectures en parallèle côté serveur
+   (appareils, réglages, biens, contacts, porte Brevo).
+2. Donnée non urgente : sans objet (une liste réglée par le titulaire).
+3. Cache navigateur : aucun.
+4. `private, no-store` : inchangé, avant le premier refus ; la page de
+   désinscription aussi.
+5. Statiques : sans changement.
+6. Lecture tronquée : plafond de 100 contacts par compte, lu à 101 pour le
+   savoir ; au-delà, l'écran le dit.
+7. Budget : zéro appel ajouté à l'ouverture de l'onglet (le GET existant) ;
+   chaque geste fait un appel et rend la liste à jour.
+8. Mesure avant/après : appels, requêtes et octets du GET de l'onglet,
+   mesurés au lot (KB pwa §12.3).
+
