@@ -799,10 +799,25 @@
   // elle vaut quelle que soit la porte par laquelle on entre sur cet ecran.
   let activerDemande = false
 
+  // ⚠ LA DEMANDE QUITTE L'ADRESSE DES QU'ELLE EST LUE (review du 10 novembre
+  // 2026). Restee dans l'URL, un rechargement — ou un retour arriere servi sans
+  // le cache de pages — rouvrait la confirmation d'activation sans clic de
+  // l'hote. Rien ne s'ecrivait sans « Activer », mais une confirmation qui
+  // s'ouvre seule n'est pas un geste de l'hote. `bien` reste dans l'adresse.
+  function oublierActiverDansLAdresse () {
+    try {
+      const u = new URL(location.href)
+      if (!u.searchParams.has('activer')) return
+      u.searchParams.delete('activer')
+      history.replaceState(history.state, '', u.pathname + u.search + u.hash)
+    } catch (e) { /* sans historique : la demande ne vit plus qu'en memoire */ }
+  }
+
   async function init () {
     session = await requireAuth()
     if (!session) return
     activerDemande = new URLSearchParams(location.search).get('activer') === '1'
+    oublierActiverDansLAdresse()
     renderSidebar('yield-prix').catch(e => console.error('[yield-prix] sidebar', e))
     mois = new Date().toISOString().slice(0, 7)
     const ok = await chargerBiens()
@@ -875,6 +890,20 @@
     // Pendant la lecture, le bouton ne repond pas : il porte encore l'etat du
     // bien precedent (releve en relecture).
     etat.disabled = true
+    // ⚠ LA DEMANDE SE CONSOMME ICI, ET PAS PLUS BAS — constat de la review du
+    // 28 octobre 2026, et mon commentaire affirmait deja « dans tous les
+    // cas » alors que DEUX chemins l'esquivaient : le retour sur bien absent
+    // (juste en dessous) et le `catch` du « reglage illisible ».
+    // Le scenario coutait cher : l'hote clique « Activer le pilote
+    // automatique » depuis le calendrier, `/api/yield-pilote` repond 503,
+    // l'ecran dit « reglage illisible » — et la demande restait ARMEE. En
+    // choisissant ce meme logement au selecteur plus tard, la confirmation
+    // d'activation s'ouvrait TOUTE SEULE, sur un `change` et non sur son
+    // clic.
+    // On la prend et on l'eteint des qu'on sait de quel bien il s'agit ; la
+    // suite travaille sur la copie locale.
+    const activerCeBien = activerDemande
+    activerDemande = false
     if (!bien) { bloc.hidden = true; etat.hidden = true; return }
     let d
     try {
@@ -919,8 +948,7 @@
     // ⚠ LA DEMANDE SE CONSOMME DES QUE L'ETAT EST LU, dans tous les cas. Sans
     // cela, elle resterait armee et s'ouvrirait plus tard sur un AUTRE bien,
     // celui que l'hote aurait choisi au selecteur entre-temps.
-    if (activerDemande) {
-      activerDemande = false
+    if (activerCeBien) {
       // ⚠⚠ ET L'OUVERTURE N'A LIEU QUE SI LE BIEN AFFICHE EST BIEN CELUI QU'ON
       // A DEMANDE — constat de la review du 28 octobre 2026, et c'est le plus
       // grave du lot. La garde de `chargerBiens` protege le SELECTEUR : un
