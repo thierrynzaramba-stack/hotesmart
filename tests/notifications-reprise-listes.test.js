@@ -133,6 +133,15 @@ test('LE TEST QUI COMPTE (constat 4) : deux personnes au même numéro — c\'es
   assert.deepEqual([p.contacts.length, p.cocher.has(MEMBRE), p.cocher.get(MEMBRE2).length, p.pertes.length], [0, false, 5, 0])
 })
 
+test('on coche la personne à qui le canal PARTIRAIT : pas celle qui a le canal coché mais coupé sur son profil (re-review, R9)', () => {
+  const m1 = { userId: MEMBRE, titulaire: false, email: null, telephone: '0655555555', smsPermis: false }
+  const m2 = { userId: MEMBRE2, titulaire: false, email: null, telephone: '0655555555' }
+  const reglages = new Map([[MEMBRE, effectifsAvec(pourTous({ sms: true }))]])
+  const p = reprise.planifier({ lignes: lignesDe({ 'ref-1': { intervention: sms('0655555555') } }), biensParRef: biens,
+    personnes: [titulaire, m1, m2], destinataire: () => true, reglages })
+  assert.deepEqual([p.cocher.has(MEMBRE), (p.cocher.get(MEMBRE2) || []).length, p.pertes.length], [false, 5, 0])
+})
+
 test('LE TEST QUI COMPTE (constat S1) : une personne qui reçoit aussi un AUTRE compte n\'est jamais cochée par la liste de celui-ci — c\'est une perte, dite', () => {
   const ailleurs = { ...membre, autresComptes: true }
   const s = reprise.planifier({ lignes: lignesDe({ 'ref-1': { intervention: sms('0622222222') } }), biensParRef: biens,
@@ -204,9 +213,13 @@ test('un canal resté décoché dans les réglages n\'est pas une perte : la rep
 test('la coupure met les listes de côté, et rien d\'autre ne bouge dans la config', () => {
   const config = { 'ref-1': { mode: 'auto', delais: { x: 1 }, intervention: liste({ email_lines: 'g@exemple.fr' }), info_unknown: liste() }, 'ref-2': { mode: 'test' }, divers: 'texte' }
   const c = reprise.mettreDeCote(config, '2026-11-10T00:00:00Z')
-  assert.deepEqual(c['ref-1'], { mode: 'auto', delais: { x: 1 }, listes_reprises: { le: '2026-11-10T00:00:00Z', intervention: config['ref-1'].intervention, info_unknown: config['ref-1'].info_unknown } })
+  assert.deepEqual(c['ref-1'], { mode: 'auto', delais: { x: 1 }, listes_reprises: [{ le: '2026-11-10T00:00:00Z', intervention: config['ref-1'].intervention, info_unknown: config['ref-1'].info_unknown }] })
   assert.deepEqual([c['ref-2'], c.divers], [{ mode: 'test' }, 'texte'])
   assert.deepEqual(reprise.lignesDeLaConfig(c), [], 'plus rien à servir pour l\'ancien envoi')
+  // Une liste réécrite puis coupée à nouveau : la première copie reste (re-review, R5).
+  const reecrite = { ...c, 'ref-1': { ...c['ref-1'], intervention: liste({ email_lines: 'neuf@exemple.fr' }) } }
+  const c2 = reprise.mettreDeCote(reecrite, '2026-11-11T00:00:00Z')
+  assert.deepEqual(c2['ref-1'].listes_reprises.map(x => [x.le, x.intervention.email_lines]), [['2026-11-11T00:00:00Z', 'neuf@exemple.fr'], ['2026-11-10T00:00:00Z', 'g@exemple.fr']])
 })
 
 test('une adresse se montre masquée dans un compte rendu : la première lettre d\'un e-mail, les deux derniers chiffres d\'un numéro', () => {
@@ -236,6 +249,7 @@ test('un contact se valide avant tout : une adresse, une forme lisible, des aler
   assert.equal(motif({ telephone: '12', alertes: ['urgences'], biens: [A] }), 'telephone_illisible')
   assert.equal(motif({ email: 'g@exemple.fr', alertes: ['avis'], biens: [A] }), 'alertes_illisibles')
   assert.equal(motif({ email: 'g@exemple.fr', alertes: [], biens: [A] }), 'alertes_illisibles')
+  assert.equal(motif({ email: 'g@exemple.fr', alertes: ['constructor'], biens: [A] }), 'alertes_illisibles', 'pas de chaîne de prototypes (re-review, R8)')
   assert.equal(motif({ email: 'g@exemple.fr', alertes: ['urgences'], biens: [] }), 'biens_absents')
   assert.equal(validerContact({ email: 'g@exemple.fr', alertes: ['urgences'], biens: [A] }).ok, true)
 })
@@ -250,7 +264,7 @@ function base (tables = {}, { pannes = [] } = {}) {
       const q = { f: [], op: 'select', limite: null }
       const garde = () => {
         let l = etat.tables[table].filter(r => q.f.every(([op, c, v]) =>
-          op === 'eq' ? r[c] === v : op === 'is' ? (r[c] ?? null) === v : op === 'in' ? v.includes(r[c]) : op === 'gt' ? String(r[c]) > String(v) : true))
+          op === 'eq' ? r[c] === v : op === 'is' ? (r[c] ?? null) === v : op === 'notnull' ? r[c] != null : op === 'in' ? v.includes(r[c]) : op === 'gt' ? String(r[c]) > String(v) : true))
         if (q.ordre) l = [...l].sort((a, b) => String(a[q.ordre]).localeCompare(String(b[q.ordre])))
         if (q.limite != null) l = l.slice(0, q.limite)
         return l
@@ -276,6 +290,7 @@ function base (tables = {}, { pannes = [] } = {}) {
         select () { return chaine },
         eq (c, v) { q.f.push(['eq', c, v]); return chaine },
         is (c, v) { q.f.push(['is', c, v]); return chaine },
+        not (c, op, v) { if (op === 'is' && v === null) q.f.push(['notnull', c]); return chaine },
         in (c, v) { q.f.push(['in', c, v]); return chaine },
         gt (c, v) { q.f.push(['gt', c, v]); return chaine },
         order (c) { q.ordre = c; return chaine },
@@ -358,7 +373,7 @@ test('LE TEST QUI COMPTE (constat 1) : `--go` — la ligne ÉCRITE porte TOUS le
     [COMPTE, 'Gardien', null, '+33698765432', [A], ['urgences']]
   ].sort())
   const cfg = etat.tables.agent_alert_config[0]
-  assert.deepEqual([cfg.config['ref-1'].intervention, cfg.config['ref-1'].mode, cfg.config['ref-1'].listes_reprises.intervention], [undefined, 'auto', config['ref-1'].intervention])
+  assert.deepEqual([cfg.config['ref-1'].intervention, cfg.config['ref-1'].mode, cfg.config['ref-1'].listes_reprises[0].intervention], [undefined, 'auto', config['ref-1'].intervention])
   // L'ordre : contacts, réglages, puis la coupure.
   assert.deepEqual(etat.ecritures.map(w => w.table), ['notifications_contacts', 'notifications_reglages', 'agent_alert_config'])
   // Rejoué : plus de liste, rien de nouveau.
@@ -381,7 +396,23 @@ test('LE TEST QUI COMPTE (constat 6) : une config modifiée entre la lecture et 
   const sorties = []
   assert.equal(await lancer({ argv: ['--go'], db: versRelue, ecrire: t => sorties.push(t) }), 1)
   assert.ok(etat.tables.agent_alert_config[0].config['ref-1'].intervention, 'la liste est toujours là')
-  assert.match(sorties.join('\n'), /config_modifiee_entre_temps — listes toujours en service/)
+  assert.match(sorties.join('\n'), /config_modifiee_entre_temps — listes toujours en service, relancer — contacts déjà créés : doubles envois jusqu'à la relance/)
+})
+
+test('LE TEST QUI COMPTE (re-review, R4) : une config réécrite SANS toucher `updated_at` (un transfert de bien) n\'est pas coupée', async () => {
+  const { db, etat } = compte()
+  const transfert = { from: (t) => {
+    if (t === 'notifications_reglages' || t === 'notifications_contacts') {
+      const cfg = etat.tables.agent_alert_config[0]
+      if (cfg.config['ref-1']) cfg.config = { 'ref-2': cfg.config['ref-1'] }
+    }
+    return db.from(t)
+  } }
+  const sorties = []
+  assert.equal(await lancer({ argv: ['--go'], db: transfert, ecrire: t => sorties.push(t) }), 1)
+  assert.ok(etat.tables.agent_alert_config[0].config['ref-2'].intervention, 'la config transférée reste, liste comprise')
+  assert.equal(etat.tables.agent_alert_config[0].config['ref-1'], undefined, 'l\'ancienne clé ne revient pas')
+  assert.match(sorties.join('\n'), /config_modifiee_entre_temps/)
 })
 
 test('une perte bloque le compte : rien n\'est écrit, ses listes restent, sortie 1', async () => {
@@ -403,6 +434,13 @@ test('un bien introuvable bloque le compte, et `--ignorer-bien=` lève le blocag
   const s2 = []
   assert.equal(await lancer({ argv: ['--go', '--ignorer-bien=ref-vieux'], db: decide.db, ecrire: t => s2.push(t) }), 0)
   assert.match(s2.join('\n'), /bien\(s\) ignoré\(s\) sur décision : ref-vieux/)
+})
+
+test('une clé de liste peut être l\'id du bien, pour un bien sans référence provider (re-review, R2)', async () => {
+  const { db, etat } = compte({ agent_alert_config: [{ user_id: COMPTE, config: { [A]: { intervention: liste({ email_lines: 'gardien@exemple.fr' }) } }, updated_at: MAJ }],
+    properties: [{ id: A, user_id: COMPTE, provider_property_id: null, archive_le: null }] })
+  assert.equal(await lancer({ argv: ['--go'], db }), 0)
+  assert.deepEqual(etat.tables.notifications_contacts.map(c => c.biens), [[A]])
 })
 
 test('à blanc, il valide ce que le `--go` écrirait : des réglages en base non réécrivables bloquent dès l\'à blanc (constat 6)', async () => {
@@ -428,6 +466,21 @@ test('les appareils, les permis et les autres comptes se lisent comme au point d
   const s2 = []
   assert.equal(await lancer({ argv: ['--go'], db: coupe.db, ecrire: t => s2.push(t) }), 1)
   assert.deepEqual([coupe.etat.ecritures.length, /sms_coupe_sur_le_profil/.test(s2.join('\n'))], [0, true])
+  // Le membre qui n'a que SON profil de titulaire (chaque utilisateur en a un) n'est pas « ailleurs » (re-review, R1).
+  const seul = compte({ agent_alert_config: [{ user_id: COMPTE, config: { 'ref-1': { intervention: sms('06 22 22 22 22') } }, updated_at: MAJ }] })
+  seul.etat.tables.profiles.push({ account_user_id: COMPTE, member_user_id: MEMBRE, is_owner: false, access_mode: 'compte', email: 'membre@exemple.fr', phone: '0622222222' },
+    { account_user_id: MEMBRE, member_user_id: MEMBRE, is_owner: true, access_mode: 'compte' })
+  const tous = async ({ compte: c }) => ({ ok: true, personnes: [{ userId: c, titulaire: true }, { userId: MEMBRE, titulaire: false }] })
+  assert.equal(await lancer({ argv: ['--go'], db: seul.db, destinataires: tous }), 0)
+  assert.equal(seul.etat.tables.notifications_reglages.find(r => r.user_id === MEMBRE).evenements.urgence_ia.sms, true)
+  // Le même membre avec une clé Beds24 à lui : son compte produit des événements — perte dite.
+  const beds = compte({ agent_alert_config: [{ user_id: COMPTE, config: { 'ref-1': { intervention: sms('06 22 22 22 22') } }, updated_at: MAJ }],
+    api_keys: [{ user_id: MEMBRE, api_key: 'present' }] })
+  beds.etat.tables.profiles.push(...seul.etat.tables.profiles.slice(1).map(p => ({ ...p })))
+  const s4 = []
+  assert.equal(await lancer({ argv: ['--go'], db: beds.db, destinataires: tous, ecrire: t => s4.push(t) }), 1)
+  assert.match(s4.join('\n'), /personne_sur_plusieurs_comptes/)
+  assert.doesNotMatch(s4.join('\n'), /present/, 'la clé n\'est jamais lue ni montrée')
   // Membre d'un autre compte : perte dite, rien d'écrit.
   const ailleurs = compte({ agent_alert_config: [{ user_id: COMPTE, config, updated_at: MAJ }] })
   ailleurs.etat.tables.profiles.push({ account_user_id: AUTRE, member_user_id: COMPTE, is_owner: false, access_mode: 'compte' })

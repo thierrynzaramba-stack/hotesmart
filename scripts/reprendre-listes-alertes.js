@@ -17,8 +17,9 @@
 // ⚠ LA COUPURE SE FAIT COMPTE PAR COMPTE, PAR LA REPRISE ELLE-MÊME : les
 // listes du compte sont mises de côté (`listes_reprises`) une fois ses contacts
 // et ses réglages écrits. Tout émetteur, quelle que soit sa version, ne trouve
-// plus de liste à servir : ni double envoi, ni trou (review de l'étape 2,
-// constats 6 et 7). Un compte bloqué GARDE ses listes, et elles envoient.
+// plus de liste à servir (review de l'étape 2, constats 6 et 7). Jamais de
+// trou : un compte bloqué ou arrêté en route GARDE ses listes, et elles
+// envoient — au pire en double de ses contacts déjà créés, jusqu'à la relance.
 // ⚠ UNE PERTE BLOQUE LE COMPTE : rien n'est écrit pour lui, sortie 1.
 // ⚠ `--go` EST REFUSÉ TANT QUE `REPRISE_OUVERTE` EST FAUX
 // (lib/notifications/reprise-listes.js) : il s'ouvre à l'étape 4, quand plus
@@ -81,20 +82,45 @@ async function compterAppareilsParDefaut ({ userId, db }) {
 }
 
 // La personne reçoit-elle aussi les événements d'un AUTRE compte ? Membre
-// ailleurs, ou titulaire de biens à elle : ses réglages valent là aussi.
+// ailleurs, ou titulaire d'un compte à elle qui en produit : ses réglages
+// valent là aussi.
+// ⚠ SON PROPRE PROFIL DE TITULAIRE N'EST PAS « AILLEURS » (re-review, R1) :
+// chaque utilisateur en a un (`account_user_id = member_user_id = lui`,
+// handle_new_user). Le compter faisait de tout membre un membre de deux comptes.
+// Son propre compte produit des événements s'il a des biens en table, ou une
+// clé Beds24 : le cron traite ses biens depuis Beds24, sans attendre qu'ils
+// soient en table. On ne lit de `api_keys` que la présence d'une clé, jamais
+// la clé.
 async function autresComptesDe ({ userId, compte, db }) {
   const { data: ailleurs, error } = await db.from('profiles').select('account_user_id')
     .eq('member_user_id', userId).eq('access_mode', 'compte').limit(50)
   if (error) return { ok: false }
-  if ((ailleurs || []).some(p => p.account_user_id && p.account_user_id !== compte)) return { ok: true, oui: true }
+  if ((ailleurs || []).some(p => p.account_user_id && p.account_user_id !== compte && p.account_user_id !== userId)) return { ok: true, oui: true }
   if (userId === compte) return { ok: true, oui: false }
   const { data: siens, error: e2 } = await db.from('properties').select('id').eq('user_id', userId).limit(1)
   if (e2) return { ok: false }
-  return { ok: true, oui: (siens || []).length > 0 }
+  if ((siens || []).length) return { ok: true, oui: true }
+  const { data: cles, error: e3 } = await db.from('api_keys').select('user_id').eq('user_id', userId).not('api_key', 'is', null).limit(1)
+  if (e3) return { ok: false }
+  return { ok: true, oui: (cles || []).length > 0 }
 }
 
-async function repriseDuCompte ({ compte, config, majLe, db, go, ignores, destinataires, ecrire, planifier,
+// Une config comparable : les clés triées, à toute profondeur.
+function canonique (v) {
+  if (Array.isArray(v)) return `[${v.map(canonique).join(',')}]`
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canonique(v[k])}`).join(',')}}`
+  return JSON.stringify(v ?? null)
+}
+
+async function repriseDuCompte ({ compte, db, go, ignores, destinataires, ecrire, planifier,
   compterAppareils = compterAppareilsParDefaut, maintenant = () => new Date().toISOString() }) {
+  // ⚠ RELUE ICI, pas au départ du script (re-review, R3) : les comptes passent
+  // les uns après les autres, et une config lue au départ a eu le temps de
+  // changer — la coupure serait alors refusée APRÈS la création des contacts.
+  const { data: ligneConfig, error: eL } = await db.from('agent_alert_config').select('config, updated_at').eq('user_id', compte).maybeSingle()
+  if (eL) return { ok: false, motif: 'listes_illisibles' }
+  const config = ligneConfig && ligneConfig.config
+  const majLe = (ligneConfig && ligneConfig.updated_at) ?? null
   const lignes = reprise.lignesDeLaConfig(config)
   if (!lignes.length) return { ok: true, vide: true }
   const refs = [...new Set(lignes.map(l => l.ref))]
@@ -103,8 +129,11 @@ async function repriseDuCompte ({ compte, config, majLe, db, go, ignores, destin
   if (eP) return { ok: false, motif: 'biens_illisibles' }
   if ((props || []).length >= PLAFOND_BIENS) return { ok: false, motif: 'trop_de_biens' }
   const biensParRef = new Map()
+  // Une clé de liste est une référence provider, ou l'id du bien quand il n'en
+  // avait pas (`seedAlertConfig` : `provider_property_id || id` ; re-review, R2).
   for (const ref of refs) {
-    const l = (props || []).filter(p => String(p.provider_property_id) === ref)
+    let l = (props || []).filter(p => p.provider_property_id != null && String(p.provider_property_id) === ref)
+    if (!l.length) l = (props || []).filter(p => String(p.id) === ref)
     const choisi = l.find(p => !p.archive_le) || l[0]
     if (choisi) biensParRef.set(ref, String(choisi.id))
   }
@@ -201,22 +230,33 @@ async function repriseDuCompte ({ compte, config, majLe, db, go, ignores, destin
   // L'ordre : les contacts (une seule écriture), les réglages, puis la coupure.
   // Tant que la coupure n'est pas faite, les listes envoient : un arrêt en route
   // ne laisse aucun trou, et un second passage reprend où on s'est arrêté.
+  // ⚠ UN ARRÊT APRÈS LA CRÉATION DES CONTACTS ET AVANT LA COUPURE fait recevoir
+  // en DOUBLE (la liste et le contact) jusqu'à la relance — jamais rien de
+  // perdu. Le message le dit (re-review, R3).
+  const doublon = plan.contacts.length ? ' — contacts déjà créés : doubles envois jusqu\'à la relance' : ''
   if (plan.contacts.length) {
     const r = await contactsMod.creerContacts({ compte, contacts: plan.contacts, db })
-    if (!r.ok) return { ok: false, motif: `contacts_non_ecrits (${r.motif})` }
+    if (!r.ok) return { ok: false, motif: `contacts_non_ecrits (${r.motif}) — listes toujours en service, relancer` }
   }
   for (const w of aEcrire) {
     const r = await reglagesMod.enregistrer({ userId: w.userId, evenements: w.evenements, plages: w.plages, db })
-    if (!r.ok) return { ok: false, motif: `reglages_non_ecrits (${r.motif}) — listes toujours en service, relancer` }
+    if (!r.ok) return { ok: false, motif: `reglages_non_ecrits (${r.motif}) — listes toujours en service, relancer${doublon}` }
   }
   // ⚠ LA COUPURE NE PASSE QUE SI LA CONFIG N'A PAS CHANGÉ depuis sa lecture :
-  // sinon on couperait une liste que le plan n'a pas reprise.
+  // sinon on couperait une liste que le plan n'a pas reprise. `updated_at` ne
+  // suffit pas — aucun trigger ne le tient, et un transfert de bien réécrit la
+  // config sans le toucher (re-review, R4) : le contenu se compare aussi.
+  const { data: relue, error: eR2 } = await db.from('agent_alert_config').select('config, updated_at').eq('user_id', compte).maybeSingle()
+  if (eR2 || !relue) return { ok: false, motif: `coupure_impossible — listes toujours en service, relancer${doublon}` }
+  if (canonique(relue.config) !== canonique(config) || (relue.updated_at ?? null) !== majLe) {
+    return { ok: false, motif: `config_modifiee_entre_temps — listes toujours en service, relancer${doublon}` }
+  }
   const le = maintenant()
   let q = db.from('agent_alert_config').update({ config: reprise.mettreDeCote(config, le), updated_at: le }).eq('user_id', compte)
   q = majLe == null ? q.is('updated_at', null) : q.eq('updated_at', majLe)
   const { data: coupe, error: eU } = await q.select('user_id')
-  if (eU) return { ok: false, motif: 'coupure_impossible — listes toujours en service, relancer' }
-  if (!coupe || coupe.length !== 1) return { ok: false, motif: 'config_modifiee_entre_temps — listes toujours en service, relancer' }
+  if (eU) return { ok: false, motif: `coupure_impossible — listes toujours en service, relancer${doublon}` }
+  if (!coupe || coupe.length !== 1) return { ok: false, motif: `config_modifiee_entre_temps — listes toujours en service, relancer${doublon}` }
   ecrire('  · listes de ce compte coupées (gardées dans listes_reprises).')
   return { ok: true, plan, ecrit: true }
 }
@@ -237,7 +277,9 @@ async function executer ({ argv = [], db, base = 'INCONNUE', repriseOuverte, des
   let code = 0
   let comptes = 0
   for (const row of c.lignes) {
-    const r = await repriseDuCompte({ compte: row.user_id, config: row.config, majLe: row.updated_at ?? null, db, go, ignores,
+    // La ligne lue ici ne sert qu'à trouver les comptes : chacun relit la sienne.
+    if (!reprise.lignesDeLaConfig(row.config).length) continue
+    const r = await repriseDuCompte({ compte: row.user_id, db, go, ignores,
       destinataires, ecrire, planifier, compterAppareils, ...(maintenant ? { maintenant } : {}) })
     if (r.vide) continue
     comptes++

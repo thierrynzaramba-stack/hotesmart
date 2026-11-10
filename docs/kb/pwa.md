@@ -1210,9 +1210,14 @@ rédacteur de la table. *Règles telles que corrigées après la review ci-desso
    bien par bien avec l'id ET la référence du bien, comme les émetteurs les
    passent) **passe par ses réglages** : le point d'envoi ferait taire un
    contact à cette adresse. On ne coche que ce qui ne part pas déjà, chez une
-   personne qui reçoit l'événement — jamais chez une personne qui reçoit aussi
-   un AUTRE compte : ses réglages valent pour tous ses comptes, et la liste
+   personne qui reçoit l'événement, et chez celle à qui le canal coché
+   partirait vraiment — jamais chez une personne qui reçoit aussi un AUTRE
+   compte (membre ailleurs que sur ce compte et que sur son propre profil de
+   titulaire, ou compte à elle qui produit des événements : des biens en table
+   ou une clé Beds24) : ses réglages valent pour tous ses comptes, et la liste
    d'un compte ne décide pas pour un autre (perte `personne_sur_plusieurs_comptes`).
+   Une clé de liste est une référence provider, ou l'id du bien quand il n'en
+   avait pas.
 3. **Le reste : un contact par adresse ET par ensemble d'alertes**, avec
    l'union des biens où cet ensemble se répète. Une adresse en « urgences » sur
    un bien et en « urgences + info » sur l'autre fait deux contacts — sinon le
@@ -1239,11 +1244,13 @@ rédacteur de la table. *Règles telles que corrigées après la review ci-desso
 7. **LA COUPURE SE FAIT COMPTE PAR COMPTE, PAR LA REPRISE** : contacts (une
    seule écriture), réglages (le writer unique, l'état d'après du plan tel
    quel, plages et langue intactes), puis les listes mises de côté
-   (`listes_reprises`, gardées pour un retour arrière) — seulement si la config
-   n'a pas changé depuis sa lecture. Tout émetteur, quelle que soit sa version,
-   ne trouve plus de liste : ni double envoi, ni trou. Un arrêt en route laisse
-   les listes en service ; un second passage reprend où on s'est arrêté. Un
-   compte bloqué garde ses listes, et elles envoient.
+   (`listes_reprises`, une pile gardée pour un retour arrière, la plus récente
+   d'abord) — seulement si la config, relue juste avant, n'a changé ni de
+   contenu ni d'`updated_at` depuis la lecture faite au début du compte. Une
+   fois coupé, tout émetteur, quelle que soit sa version, ne trouve plus de
+   liste. **Jamais de trou** : un compte bloqué ou arrêté en route garde ses
+   listes, et elles envoient — au pire **en double** de ses contacts déjà
+   créés, jusqu'à la relance, et le message le dit.
 8. **Tout se valide à blanc** : réglages réécrivables, contacts valides —
    un `--go` qui échouerait au milieu se voit avant.
 9. **`--go` est fermé tant que `REPRISE_OUVERTE` est faux**
@@ -1388,4 +1395,111 @@ seuls correctifs) :
   compte » pour tout nouveau compte, et le tiroir Alertes de Messages en
   réécrit — les deux doivent cesser avant d'ouvrir `REPRISE_OUVERTE` (accord de
   Thierry requis pour `pages/onboarding.html`).
+
+
+**Rapport de la re-review des correctifs de l'étape 2, reçu le 10 novembre 2026,
+recopié mot pour mot avant tout correctif** (sous-agent ; arbre
+`/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, plage
+`adcf3519abe694288c1d39850c2e507e908d9e06..9bdeb3f0cb5a7dc9107ab032a77985645fe98099` ;
+chaque fichier cité est dans le diff, les autres sont lus comme preuve) :
+
+> **Ce que j'ai lu :** arbre `/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, tête `9bdeb3f0cb5a7dc9107ab032a77985645fe98099`. Plage relue : `adcf3519abe694288c1d39850c2e507e908d9e06..9bdeb3f0cb5a7dc9107ab032a77985645fe98099`. Tous les constats portent sur les cinq fichiers du diff. Les autres fichiers n'ont servi que de preuve.
+>
+> Tests : `tests/notifications-reprise-listes.test.js` passe 32 sur 32, et `tests/notifications-*.test.js` 206 sur 206. Je n'ai rien écrit dans l'arbre : les simulations ont tourné dans `/tmp`, que j'ai supprimé ensuite.
+>
+> **Le verdict :** aucun nouveau constat de sécurité. S1 est fermé, mais trop largement : le correctif bloque tout membre, y compris ceux qui ne reçoivent aucun autre compte (R1). C'est un défaut à corriger sans nouvelle review. Les constats 1, 3, 4, 8, 9 et S2 sont réellement fermés.
+>
+> ## Les constats
+>
+> **R1. Défaut, régression créée par le correctif S1. Reproduit.**
+> - **Où :** `scripts/reprendre-listes-alertes.js:86-89` (`autresComptesDe`).
+> - **Ce qui se passe :** le code cherche les profils `member_user_id = userId, access_mode = 'compte'` dont `account_user_id` diffère du compte repris. Or chaque utilisateur, membre compris, a son propre profil de titulaire : `account_user_id = member_user_id = lui-même`. Ce profil est créé par `handle_new_user` (`migrations/0001-triggers-auth-users.sql:47-51`) et a été rattrapé pour les anciens comptes (`2026-09-01-profils-et-droits-structures.sql:315`).
+> - **Conséquence :** tout membre est jugé « sur plusieurs comptes ». La vérification par les biens (lignes 90-93) n'est jamais atteinte pour un membre, et aucun membre n'est jamais coché.
+> - **Scénario, simulé avec le vrai script et un faux client de base :** le numéro d'un membre destinataire est dans `sms_lines`. Le SMS est décoché par défaut. Résultat : 5 pertes `personne_sur_plusieurs_comptes`, sortie 1, compte bloqué.
+> - **Impact :** rien n'est perdu, puisque les listes continuent d'envoyer. Mais la reprise ne peut aboutir pour aucun compte de ce type. La règle 2 du KB (`docs/kb/pwa.md:1213-1215`) dit l'inverse.
+> - **Pourquoi les tests ne le voient pas :** la table `profiles` du faux client (`tests/...:303`, `:433`) ne contient pas ce profil propre.
+> - **À prévoir en corrigeant :** si on exclut `account_user_id === userId`, le critère « a des biens en table » laisse passer un titulaire Beds24 dont les biens ne sont pas encore enregistrés dans `properties`. Le cron traite ces comptes à partir de `fetchProperties` (`api/cron.js:885-889`), et l'enregistrement des biens y est non bloquant. C'est le seul trou S1 restant, et il est rare.
+>
+> **R2. Défaut mineur. Reproduit.**
+> - **Où :** `scripts/reprendre-listes-alertes.js:105-110`, avec `reprise-listes.js:124-130`.
+> - **Ce qui se passe :** une clé de liste n'est cherchée que dans `provider_property_id`. Or `seedAlertConfig` range certaines clés sous `p.provider_property_id || p.id`, et `bien.js` cherche ensuite par `id`.
+> - **Scénario :** une liste rangée sous l'UUID d'un bien existant, sans référence provider, sort `bien_introuvable`. Le compte est bloqué. La seule issue proposée, `--ignorer-bien=`, supprimerait une liste qui fonctionne.
+>
+> **R3. Défaut mineur : un double envoi reste possible. Reproduit.**
+> - **Où :** `scripts/reprendre-listes-alertes.js:204-219`, et `:42-56` puis `:239-241`.
+> - **Ce qui se passe :** les contacts et les réglages sont écrits avant la coupure. Si la coupure est refusée (`config_modifiee_entre_temps`) ou si un réglage échoue, les contacts restent créés et les listes restent actives. Chaque adresse reçoit alors tout en double jusqu'à la relance. Simulé : 1 contact créé, liste toujours présente, sortie 1.
+> - **Pourquoi la fenêtre est large :** toutes les configs sont lues au départ, puis traitées compte par compte. Un hôte qui touche à son mode ou à ses délais pendant que les comptes précédents sont traités déclenche ce cas.
+> - **Ce qui est faux dans le KB :** « ni double envoi » (`pwa.md:1244-1245`) et la suite donnée 9 (`:1382-1383`).
+> - **Suggestion :** relire la ligne de config au début de `repriseDuCompte`, et dire dans le message que les contacts sont déjà créés.
+>
+> **R4. Mineur.**
+> - **Où :** `scripts/reprendre-listes-alertes.js:215-216`.
+> - **Ce qui se passe :** la coupure conditionnelle ne repose que sur `updated_at`, et aucun trigger ne met cette colonne à jour (`0000-schema-initial.sql:1154-1159`). `scripts/rekeyer-json-config.js:70-71` écrit la config sans la changer.
+> - **Scénario :** un transfert de bien en même temps que la reprise passe la condition. La coupure réécrit alors la config lue avant le transfert, et l'ancienne clé revient. Le cas `updated_at` nul, lui, est correct (`.is(null)`).
+>
+> **R5. Mineur. Reproduit.**
+> - **Où :** `lib/notifications/reprise-listes.js:291`.
+> - **Ce qui se passe :** une seconde coupure écrase le `listes_reprises` déjà en place.
+> - **Scénario :** le préremplissage de l'onboarding ou le tiroir réécrit une liste, puis la reprise repasse. La liste d'origine, par exemple le SMS du gardien, disparaît de la copie gardée pour un retour arrière.
+>
+> **R6. Mineur, commentaire contradictoire.**
+> - **Où :** `reprise-listes.js:277-279`.
+> - **Ce qui se passe :** le commentaire dit « ni double envoi, ni trou, quel que soit l'ordre des déploiements ». L'en-tête du script (`:26-28`) dit l'inverse, et c'est lui qui a raison : couper avant que l'envoi aux contacts soit déployé sur la base laisse les gardiens sans rien.
+> - **La garde reste une consigne, pas un contrôle :** `REPRISE_OUVERTE` est lu dans l'arbre local, pas en production.
+>
+> **R7. Mineur : les lecteurs de `agent_alert_config` après `mettreDeCote`.**
+> - **Aucune casse :** `getPropertyMode`, `brouillons-dus` et `agent-config` pour le mode et les délais gardent `mode` et `delais`. `fusionnerBlobLegacy` accepte `listes_reprises` quand le blob est renvoyé. Un émetteur de n'importe quelle version ne trouve plus de liste.
+> - **Déjà connus :** le tiroir Alertes (POST `alertes_ref`) et `seedAlertConfig` recréent des listes. C'est déjà noté pour l'étape 4.
+> - **Changements non notés :**
+>   - `api/simulate.js:159` n'envoie plus aucune alerte une fois les listes coupées, et n'appelle pas le point d'envoi unique.
+>   - `api/alert-test.js:44-64` parcourt toute la config et accepte encore les adresses rangées sous `listes_reprises`.
+>
+> **R8. Mineur.**
+> - **Où :** `lib/notifications/contacts.js:156`.
+> - **Ce qui se passe :** `!ALERTES[a]` remonte la chaîne des prototypes, donc `validerContact` accepte `alertes: ['constructor']` (vérifié).
+> - **Impact :** la contrainte de la base refuse ensuite l'écriture, donc pas de dégât. Mais le refus arrive comme `ecriture_impossible`, pas comme `alertes_illisibles`. Utiliser `Object.hasOwn`. Les biens ne sont pas validés comme UUID non plus, sans conséquence aujourd'hui.
+>
+> **R9. Mineur.**
+> - **Où :** `reprise-listes.js:142`.
+> - **Ce qui se passe :** dès qu'une personne destinataire a le canal coché, on ne coche personne d'autre. C'est vrai même si cette personne ne peut pas recevoir : canal coupé sur son profil, ou appareil abonné sans notification.
+> - **Conséquence :** blocage évitable, sans danger.
+>
+> ## Ce qui est sain
+>
+> - **1 :** la ligne écrite est exactement l'état d'après du plan, qui cumule les canaux. Le test lit bien la ligne écrite.
+> - **2 et 4 :** la règle « le contact se tait dès qu'un destinataire porte l'adresse » est celle de `notifier.js:136-150`. Les règles d'appareil et de profil sont celles d'`envoi.js`.
+> - **3 :** les droits sont demandés avec `{ id, ref }` ; `dansPerimetre` traite `null` et `undefined` de la même façon.
+> - **8 :** les contacts existants sont lus par curseur.
+> - **9, `creerContacts` :** les biens sont relus sur le compte, et chaque valeur demandée doit correspondre exactement à un id rendu. La façon dont `.in()` met les valeurs entre guillemets ne compte donc pas. L'insertion est atomique.
+> - **S2 :** vérifié, plus aucun morceau de numéro visible.
+> - **En à blanc :** aucune écriture (`pourEnvoi` ne fait que lire), et aucune adresse en clair dans les sorties.
+>
+> Rien de neuf à mémoriser ; je n'ai rien tiré de la mémoire.
+
+**Suite donnée à la re-review** (aucun constat de sécurité : correctifs sans
+nouvelle review, la limite est atteinte) :
+- **R1** — son propre profil de titulaire ne fait plus d'un membre un membre
+  de deux comptes ; et le compte à lui produit des événements s'il a des biens
+  en table **ou une clé Beds24** (présence lue, jamais la clé) — le trou S1
+  restant que la re-review signalait est fermé.
+- **R2** — une clé de liste se cherche par référence provider, puis par id.
+- **R3** — la config se relit au début de chaque compte ; un arrêt après la
+  création des contacts le dit (« doubles envois jusqu'à la relance ») ; la
+  règle 7 dit « jamais de trou », plus « ni double envoi ».
+- **R4** — avant la coupure, la config se relit et se compare au contenu, pas
+  seulement à `updated_at` ; un transfert de bien simultané n'est plus défait.
+- **R5** — `listes_reprises` est une pile : une seconde coupure garde la
+  première copie.
+- **R6** — le commentaire de `mettreDeCote` dit que la coupure suit le
+  déploiement. `REPRISE_OUVERTE` reste une consigne lue dans l'arbre local :
+  le `--go` se lance de l'arbre déployé, SHA vérifié par `gh api`.
+- **R7** — noté pour l'étape 4 : `api/simulate.js` n'envoie plus d'alerte de
+  liste une fois un compte coupé (il n'appelle pas le point d'envoi unique) ;
+  `api/alert-test.js` accepte encore comme destinataire d'essai une adresse
+  rangée sous `listes_reprises` (les mêmes adresses qu'avant la coupure : pas
+  d'élargissement, mais à retirer avec le tiroir).
+- **R8** — `validerContact` refuse une alerte qui n'est pas une clé propre de
+  `ALERTES` (`Object.hasOwn`).
+- **R9** — le plan et la vérification lisent une seule règle « ce qui part à
+  une personne » ; la personne cochée est celle à qui le canal partirait.
 
