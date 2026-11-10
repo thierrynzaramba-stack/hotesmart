@@ -100,20 +100,40 @@ for (const [nom, corps] of [
   ['même numéro, autre format', { channel: 'sms', to: '+33612345678' }]
 ]) {
   test(`alert-test retiré : ${nom} -> 410, aucun envoi`, async () => {
-    preparer({ user: PROD, config: CONFIG, compteurTests: 0 })
-    const handler = require('../api/alert-test')
-    const res = reponse()
-    await handler(req({ method: 'POST', body: corps }), res)
-    assert.strictEqual(res.code, 410)
-    assert.match(String(res.body?.error || ''), /Réglages/)
+    const etat = preparer({ user: PROD, config: CONFIG, compteurTests: 0 })
+    const appels = []
+    const fetchAvant = global.fetch
+    global.fetch = async (url) => { appels.push(String(url)); return { ok: true, json: async () => ({}), text: async () => '' } }
+    try {
+      const handler = require('../api/alert-test')
+      const res = reponse()
+      await handler(req({ method: 'POST', body: corps }), res)
+      assert.strictEqual(res.code, 410)
+      assert.match(String(res.body?.error || ''), /Réglages/)
+    } finally { global.fetch = fetchAvant }
+    assert.deepStrictEqual(appels, [], 'aucun appel réseau : ni Brevo, ni SMS')
+    assert.deepStrictEqual(etat.ecritures, [], 'aucune écriture : pas même un compteur d\'essai')
   })
 }
 
-test('alert-test retiré : sans session, toujours 401 (la garde reste devant)', async () => {
+test('alert-test retiré : sans session, toujours 401', async () => {
   preparer({ user: PROD, config: CONFIG })
   const handler = require('../api/alert-test')
   const res = reponse()
   await handler(req({ method: 'POST', body: { channel: 'sms', to: '0612345678' }, headers: {} }), res)
+  assert.strictEqual(res.code, 401)
+})
+
+test('alert-test retiré : un jeton PRÉSENT mais refusé par la session -> 401 de requirePermission, avant le 410', async () => {
+  // Constat 5 de la review de l'étape 4 : le test précédent s'arrête au jeton
+  // ABSENT, avant `requirePermission`. Ici le jeton est là, et c'est la garde
+  // qui le refuse. (Sans compte désigné, la garde d'alert-test se ramène à
+  // « une session valide » : chacun est titulaire de son propre compte —
+  // c'est pourquoi aucun 403 n'est attendu ici.)
+  preparer({ user: null, config: CONFIG })
+  const handler = require('../api/alert-test')
+  const res = reponse()
+  await handler(req({ method: 'POST', body: { channel: 'sms', to: '0612345678' } }), res)
   assert.strictEqual(res.code, 401)
 })
 

@@ -183,6 +183,19 @@ function fusionnerBlobLegacy (existant, entrant) {
   return { blob: sortie, rejets }
 }
 
+// ⚠ UNE LISTE REPRISE NE REVIENT PAS (PWA lot 2c-3, étape 4, constats 3 et 7
+// de la review). Le verrou est EN BASE (migrations/2026-11-10-agent-alert-
+// config-serveur-seul.sql) : si la reprise a mis les listes d'un bien de côté
+// entre notre lecture et notre écriture, le blob relu les porte encore, et la
+// base refuse l'écriture avec ce code. 409 : relire et recommencer suffit.
+const CODE_REPRISE_GARDEE = 'HS409';
+function refusReprise (res) {
+  return res.status(409).json({
+    error: 'La configuration a changé pendant l\'enregistrement : rechargez la page et recommencez.',
+    motif: 'config_modifiee_entre_temps'
+  });
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -252,8 +265,8 @@ module.exports = async (req, res) => {
       if (cible === 'mode' && mode !== 'test' && mode !== 'auto') {
         return res.status(400).json({ error: 'Payload invalide' });
       }
-      // Les alertes du bien : les DEUX types, chacun borne champ par champ —
-      // jamais un objet libre dans le blob.
+      // Les délais du bien, bornés champ par champ — jamais un objet libre
+      // dans le blob.
       let delaisValides = null;
       if (cible === 'delais') {
         delaisValides = delaisPropres(delais);
@@ -426,6 +439,7 @@ module.exports = async (req, res) => {
           { onConflict: 'user_id' }
         );
       if (eW) {
+        if (eW.code === CODE_REPRISE_GARDEE) return refusReprise(res);
         console.error('[agent-config] POST cible error:', eW);
         return res.status(500).json({ error: eW.message });
       }
@@ -526,6 +540,7 @@ module.exports = async (req, res) => {
       );
 
     if (error) {
+      if (error.code === CODE_REPRISE_GARDEE) return refusReprise(res);
       console.error('[agent-config] POST error:', error);
       return res.status(500).json({ error: error.message });
     }

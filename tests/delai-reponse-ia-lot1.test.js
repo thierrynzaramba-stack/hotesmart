@@ -45,7 +45,7 @@ const BIEN = '0544fd9a'
 // `tests/guestflow-appliquer-delai.test.js`, dont le double applique vraiment
 // `eq`, `gt`, `order` et `limit`.
 function preparer ({ config = null, lectureEnPanne = false, taches = [],
-  tachesIllisibles = false, tachesLevent = false } = {}) {
+  tachesIllisibles = false, tachesLevent = false, erreurEcriture = null } = {}) {
   const etat = { ecritures: [], majTaches: [], lecturesTaches: [] }
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: COMPTE } }, error: null }) },
@@ -61,7 +61,7 @@ function preparer ({ config = null, lectureEnPanne = false, taches = [],
         gt (c, v) { q._f['>' + c] = v; return q },
         limit () { return q }, order () { return q }, not () { return q }, is () { return q },
         update (patch) { q._maj = patch; return q },
-        upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: null }) },
+        upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: erreurEcriture }) },
         single: async () => rep(nom), maybeSingle: async () => rep(nom),
         // Thenable, comme le vrai client : un `await` rend `{ data, error }`.
         then (ok, ko) {
@@ -334,6 +334,41 @@ test('LE TEST QUI COMPTE (PWA lot 2c-3, étape 4) : un POST legacy qui APPORTE u
     { config: { [BIEN]: { mode: 'test', intervention: enBase } } }
   )
   assert.equal(res.code, 200, 'recopier la valeur en base reste permis')
+})
+
+test('LE TEST QUI COMPTE (PWA lot 2c-3, constat 4 de la review de l\'étape 4) : aucune écriture ne perd la pile `listes_reprises`', async () => {
+  // La pile est le seul retour arrière d'une reprise : elle garde les listes
+  // telles qu'elles étaient. Les trois chemins d'écriture relisent le blob et
+  // le réécrivent — chacun doit la garder telle quelle.
+  const pile = [{ le: '2026-11-10T20:00:00.000Z', intervention: { email_enabled: true, email_lines: 'a@b.c' } }]
+  const enBase = { config: { [BIEN]: { mode: 'test', listes_reprises: pile, delais: { reponse_ia: null, alerte_info: 15 } } } }
+  const cas = [
+    ['cible mode', { mode_ref: BIEN, mode: 'auto' }],
+    ['cible delais', { delais_ref: BIEN, delais: { reponse_ia: 15, alerte_info: 15 } }],
+    ['legacy', { config: { [BIEN]: { mode: 'auto' } } }],
+    ['legacy qui recopie la pile', { config: { [BIEN]: { mode: 'auto', listes_reprises: pile } } }]
+  ]
+  for (const [nom, corps] of cas) {
+    const { res, etat } = await postConfig(corps, JSON.parse(JSON.stringify(enBase)))
+    assert.equal(res.code, 200, nom)
+    const ecrit = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN]
+    assert.deepEqual(ecrit.listes_reprises, pile, `${nom} : la pile est gardée`)
+    assert.ok(!('intervention' in ecrit) && !('info_unknown' in ecrit), `${nom} : aucune liste ne revient`)
+  }
+})
+
+test('LE TEST QUI COMPTE (PWA lot 2c-3, constats 3 et 7) : la base refuse de défaire une reprise -> 409, rien de plus', async () => {
+  // Le verrou vit en base (migration 2026-11-10-agent-alert-config-serveur-
+  // seul) ; l'endpoint traduit son code. Les trois chemins d'écriture.
+  for (const corps of [{ mode_ref: BIEN, mode: 'auto' },
+    { delais_ref: BIEN, delais: { reponse_ia: 15, alerte_info: 15 } },
+    { config: { [BIEN]: { mode: 'auto' } } }]) {
+    const { res } = await postConfig(corps, { config: { [BIEN]: { mode: 'test' } }, erreurEcriture: { code: 'HS409', message: 'refus' } })
+    assert.equal(res.code, 409, JSON.stringify(corps))
+    assert.equal(res.body.motif, 'config_modifiee_entre_temps')
+  }
+  const { res } = await postConfig({ mode_ref: BIEN, mode: 'auto' }, { config: { [BIEN]: { mode: 'test' } }, erreurEcriture: { code: '08006', message: 'panne' } })
+  assert.equal(res.code, 500, 'une autre panne reste une panne')
 })
 
 test('agent-config legacy : un bien absent de la charge survit', async () => {

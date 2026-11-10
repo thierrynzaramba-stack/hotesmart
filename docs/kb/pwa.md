@@ -1945,7 +1945,16 @@ Go de Thierry du 10 novembre 2026 à 19 h 35 (`pages/messages.html` et
 1. **Plus rien n'écrit une liste d'alertes.** Une reprise qui met les listes de
    côté pendant qu'un écran les réécrit les ferait renaître au premier
    enregistrement — et le titulaire croirait gérer ses contacts dans Réglages
-   alors que l'ancien envoi repartirait en parallèle. D'où, côté serveur :
+   alors que l'ancien envoi repartirait en parallèle. **La table ne s'écrit plus
+   que par le serveur** : la politique RLS d'écriture est retirée (la lecture
+   reste au domaine `reglages`, la RLS reste active), et **la base refuse de
+   défaire une reprise** — un logement qui porte `listes_reprises` garde toute
+   sa pile et ne reprend ni `intervention` ni `info_unknown`, quel que soit
+   l'écrivain (`migrations/2026-11-10-agent-alert-config-serveur-seul.sql`,
+   code `HS409`, rendu en **409** par l'endpoint). Ce verrou ferme aussi la
+   course lecture → coupure → écriture, et un `--go` lancé avant le
+   déploiement : l'ancien Messages se ferait refuser. D'où aussi, côté
+   serveur :
    `api/agent-config.js` refuse la cible `alertes` en **410**
    (`alertes_dans_reglages`, rien n'est écrit), et une écriture legacy qui
    APPORTE `intervention`, `info_unknown` ou `listes_reprises` est refusée
@@ -1958,9 +1967,10 @@ Go de Thierry du 10 novembre 2026 à 19 h 35 (`pages/messages.html` et
    l'endpoint ne dit rien à qui n'a pas de session.
 3. **Messages ne montre plus de listes** : le bloc « Alertes » du panneau
    « Réponses de l'IA » devient une phrase et un lien « Qui est prévenu →
-   Réglages » (`/settings?onglet=notifications`). Le panneau n'enregistre plus
-   que les consignes ; la garde « modifications non enregistrées » ne compare
-   plus qu'elles.
+   Réglages » (`/settings?onglet=notifications`). Le panneau enregistre
+   toujours les délais (avec l'aperçu et la propagation) et les consignes,
+   plus rien d'autre ; la garde « modifications non enregistrées » compare les
+   délais puis les consignes.
 4. **L'onboarding ne préremplit plus de liste** : il pose `mode: 'test'`,
    rien d'autre. Un compte neuf naît sans liste, donc sans rien à reprendre.
 5. **L'ouverture de la reprise est LIÉE à la fermeture des rédacteurs** :
@@ -1992,13 +2002,136 @@ Go de Thierry du 10 novembre 2026 à 19 h 35 (`pages/messages.html` et
 - les clés i18n de l'ancien bloc (`messages.alerts_*` hors `alerts_moved*`)
   ne sont plus lues ; elles partiront avec le ménage des traductions.
 
-**Ordre de mise en service (à la remise) :**
-1. appliquer `migrations/2026-11-10-notifications-contacts.sql` (staging, puis
-   prod) et vérifier les contraintes de `notifications_contacts_essais`
-   (§12.3, suite donnée à la troisième review, point 3) ;
-2. déployer, vérifier le SHA complet ;
-3. `node scripts/reprendre-listes-alertes.js` **à blanc** : lire le plan, les
-   pertes et les comptes bloqués, les montrer à Thierry ;
-4. `--go` seulement sur son go, après le déploiement de CE code — sinon
-   l'ancien Messages réécrirait les listes que la reprise vient de mettre de
-   côté.
+**Ordre de mise en service (à la remise ; Q39, décision de Thierry du
+10 novembre 2026 : la procédure, pas d'écran de plus) :**
+1. appliquer `migrations/2026-11-10-notifications-contacts.sql` et
+   `migrations/2026-11-10-agent-alert-config-serveur-seul.sql` (staging, puis
+   prod) ; vérifier les contraintes de `notifications_contacts_essais` (§12.3,
+   suite donnée à la troisième review, point 3), et pour la seconde : une
+   seule politique sur `agent_alert_config` (`agent_alert_config_select`) et
+   le déclencheur `agent_alert_config_listes_reprises` (requêtes en tête du
+   fichier) ;
+2. **AVANT de déployer**, `node scripts/reprendre-listes-alertes.js` **à
+   blanc** sur la base visée : lire le plan, les pertes et les comptes
+   bloqués, et **régler chaque compte bloqué avec Thierry** (adresse à
+   corriger, bien introuvable à confirmer par `--ignorer-bien`, autre compte).
+   Un compte bloqué garde ses listes et leur envoi, mais plus aucun écran ne
+   les montre une fois ce code déployé : c'est pourquoi on règle AVANT ;
+3. déployer, vérifier le SHA complet ;
+4. `--go` aussitôt, sur le go de Thierry : les minutes entre le déploiement et
+   le `--go` sont la seule fenêtre où une liste vit sans écran.
+
+
+**Review de l'étape 4** (sous-agent, arbre `/home/claude/hs-2c3`, branche
+`pwa-lot-2c3-contacts`, plage
+`a8f2ac7b3b66524623168c46c4edb8a42cbce785..0d762ec8f6b1f4fb55cc5f2b93114726004fa2de`)
+— rapport mot pour mot, consigné à réception, avant tout correctif :
+
+> **Arbre lu :** `/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, HEAD `0d762ec8f6b1f4fb55cc5f2b93114726004fa2de`. Plage relue : `a8f2ac7b3b66524623168c46c4edb8a42cbce785..0d762ec8f6b1f4fb55cc5f2b93114726004fa2de`. Je n'ai rien modifié dans l'arbre. Les essais de mutation ont été faits dans une copie à part (`git archive` vers `/tmp`), supprimée ensuite.
+>
+> **Ce que j'ai mesuré**
+> - Suite complète sur l'arbre réel : 7577 tests, 7577 verts, 0 rouge. `scripts/i18n-check.js` passe (925 clés dans les trois langues).
+> - Les deux contre-épreuves du KB sont vraies. Retirer `intervention` des clés réservées donne 2 rouges. Remettre une liste dans l'onboarding en donne 1.
+> - Retirer le 410 de la cible `alertes` donne 1 rouge. Même sans ce 410, rien n'est écrit : la requête tombe sur un 400.
+> - Remettre l'ancienne garde (`[data-alerte]`) sur « non enregistré » donne 1 rouge (« une consigne non enregistree ne disparait pas en silence »).
+>
+> **Réponses directes**
+> - **`api/alert-test.js`** : la garde passe avant le 410. L'ordre est 405, puis 401, puis `requirePermission`, puis 410.
+> - **`api/agent-config.js`** : je n'ai trouvé aucun chemin par l'API pour écrire une liste.
+>   - Une liste glissée ailleurs ne sert à rien : clé imbriquée, casse différente ou `__proto__`, l'émetteur ne la lit pas. Il ne lit que `config[ref][type]`, et le type ne peut être que `intervention` ou `info_unknown` (contrôle en `lib/cron-classify.js:1020`).
+>   - Aucune écriture par l'API n'efface `listes_reprises`, sauf dans la course du constat 3.
+>   - Aucune fuite entre comptes.
+> - **Autres rédacteurs** : aucun dans `pages/`, `apps/`, `api/` ou `lib/`. Dans `scripts/`, trois scripts réécrivent la config (rekeyer, transfert, migration des modes), mais ils déplacent des entrées sans jamais créer de liste.
+> - **Panneau de Messages** : les consignes s'enregistrent bien, et la garde « non enregistré » est juste.
+> - **Ancien client** : les pages se chargent par le réseau d'abord, donc seul un onglet resté ouvert peut renvoyer l'ancien corps.
+>   - Ancien Messages : les alertes reçoivent un 410, l'écran affiche « partie alertes non enregistrée », les délais et les consignes passent. Aucune perte.
+>   - Ancien onboarding : sa requête est refusée en 400, donc le mode n'est pas posé. Le mode retombe alors sur `test` par défaut. Aucune perte.
+>
+> **Sécurité : le diff n'introduit aucun constat de sécurité.** Le constat 1 est un chemin plus ancien que ce lot, signalé à la frontière.
+>
+> ---
+>
+> 1. **Fonctionnel (préexistant, avec un volet sécurité faible).** Un rédacteur de listes subsiste, et le test de liaison ne peut pas le voir. Lignes en cause : `api/agent-config.js:117`, `docs/kb/pwa.md:1945`, `tests/notifications-reprise-listes.test.js:531`.
+>    - La politique RLS `agent_alert_config_write FOR ALL TO authenticated USING can_write(user_id,'reglages')` (`migrations/2026-09-02-droits-lot6.sql:111`) est toujours en place.
+>    - Scénario : un titulaire, ou un membre qui a `reglages:write`, envoie un `PATCH /rest/v1/agent_alert_config` avec la clé publique et son propre jeton. Il peut recréer `intervention.email_lines` après la coupure, ce qui fait envoyer en double à côté des contacts. Il peut aussi écraser `listes_reprises` ou supprimer la ligne. Les clés réservées et le 410 sont contournés.
+>    - La règle 1 du §12.4 (« Plus rien n'écrit une liste ») est donc fausse.
+>    - Ce n'est pas une fuite entre comptes : la personne a déjà le droit d'écriture sur ce compte. Mais le relais d'e-mails par la clé plateforme, qu'alert-test fermait, reste atteignable par ce chemin.
+>    - Piste : ne laisser que la lecture en RLS (le serveur devient le seul rédacteur), ou ajouter un trigger qui refuse les clés réservées.
+>
+> 2. **Fonctionnel.** Les listes encore en service sont désormais invisibles et impossibles à modifier. Lignes en cause : `pages/messages.html:2115-2118`, `pages/guide.html:486`, `shared/i18n/fr.json:606`, `docs/kb/pwa.md:1985`.
+>    - Comptes touchés : tous les comptes entre le déploiement et le `--go`, puis indéfiniment ceux que la reprise bloque.
+>    - Scénario : l'ancienne prestataire est toujours dans `intervention.sms_lines`, et le compte est bloqué pour `bien_introuvable`.
+>      - Messages dit « se règle maintenant dans Réglages », mais Réglages ne montre pas ce numéro.
+>      - La cible `alertes` répond 410, et le POST legacy refuse la modification (clé réservée).
+>      - Ce numéro continue donc de recevoir le téléphone des voyageurs et leurs dates de séjour, et l'hôte n'a aucun moyen de l'arrêter.
+>    - Le guide affirme « ont été reprises ici », ce qui est faux pour ces comptes.
+>    - Pistes :
+>      - lancer la passe à blanc AVANT le déploiement et régler les comptes bloqués, puis enchaîner déploiement et `--go` ;
+>      - ou afficher en lecture seule les listes non reprises, avec une action pour les couper.
+>
+> 3. **Mineur.** Une course entre un enregistrement et la coupure peut faire renaître les listes. Lignes en cause : `api/agent-config.js:301→422` et `512→520`.
+>    - Les écritures `mode`, `delais` et legacy lisent la config puis la réécrivent sans vérifier qu'elle n'a pas changé (pas de comparaison sur `updated_at`). Le script, lui, vérifie avant de couper.
+>    - Scénario : agent-config lit la config, le script coupe, puis agent-config enregistre ce qu'il avait lu. Les listes reviennent, `listes_reprises` disparaît, et les contacts existent déjà : envoi en double jusqu'à une relance.
+>    - Le script ne relit pas la config après sa coupure. La fenêtre ne dure qu'un aller-retour avec la base, mais elle est réelle maintenant que `REPRISE_OUVERTE` vaut `true`.
+>    - Piste : faire échouer l'écriture si `updated_at` a changé depuis la lecture, et rendre 409.
+>
+> 4. **Tests.** Aucun test ne vérifie que les écritures conservent `listes_reprises`. Ligne en cause : `tests/delai-reponse-ia-lot1.test.js:321`.
+>    - Mutation mesurée : faire effacer `listes_reprises` par les cibles `mode` et `delais` et par la fusion legacy (`listes_reprises: undefined` sur les cibles, `delete` dans la fusion) ne fait rougir aucun test.
+>    - Résultat dans la copie : 3 rouges, les mêmes que sur la copie non modifiée (ils viennent de l'absence de dépôt git, pas de la mutation).
+>    - La copie de retour arrière peut donc être détruite par l'API sans qu'aucun test ne le signale.
+>
+> 5. **Tests mineurs** : plusieurs noms promettent plus que le test ne vérifie.
+>    - `tests/endpoints-reglages-2.test.js:112`, « la garde reste devant » : le test envoie une requête sans en-tête, donc c'est le refus du jeton absent (`api/alert-test.js:24`) qui répond, pas `requirePermission` (l.25). Supprimer `requirePermission` laisse le test vert. Il faudrait un jeton présent mais refusé par la garde.
+>    - `tests/endpoints-reglages-2.test.js:102`, « aucun envoi » : aucune assertion sur les envois.
+>    - `tests/messages-pause-levee-dom.test.js:618`, « un delai tape reste vu » : ce point n'est pas exercé dans ce test (il l'est à la l.216).
+>    - Test de liaison : `/status\(410\)/` passerait même si un envoi était réintroduit avant le `return`.
+>
+> 6. **Mineur (KB, guide, commentaire).**
+>    - `docs/kb/pwa.md:1961` dit « Le panneau n'enregistre plus que les consignes ; la garde … ne compare plus qu'elles ». C'est faux : le panneau enregistre toujours les délais (avec l'aperçu et la propagation), et la garde compare d'abord les délais.
+>    - `pages/guide.html:486` dit « les autres sont devenues des contacts prévenus ». Or l'adresse d'un membre de l'équipe passe dans SES réglages, et une adresse désinscrite ne devient rien.
+>    - `api/agent-config.js:255` : le commentaire « Les alertes du bien : les DEUX types… » est resté au-dessus de la validation des délais.
+>
+> 7. **Mineur (observation).** `REPRISE_OUVERTE` est une constante du code du script. Elle ne dit rien de ce qui tourne sur la base visée (`lib/notifications/reprise-listes.js:40`).
+>    - Scénario : un `--go` lancé avec l'environnement de production avant le déploiement de ce code couperait les listes pendant que l'ancien Messages accepte encore `alertes_ref`. Les listes seraient réécrites, d'où des doubles envois.
+>    - Seule la procédure du KB l'empêche. Le script pourrait le vérifier lui-même, par exemple en refusant le `--go` tant que le déploiement visé ne répond pas 410 sur `alertes_ref`.
+>
+> Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée à la review de l'étape 4** (Q39 tranchée par Thierry : la
+procédure ; go des correctifs le 10 novembre 2026) :
+- **1** — corrigé : `migrations/2026-11-10-agent-alert-config-serveur-seul.sql`
+  retire la politique d'écriture ; la RLS reste active et la lecture
+  inchangée. Aucune page n'écrivait la table en direct (mesuré : tout passe
+  par `/api/agent-config`), et `scripts/test-droits.js` attend déjà un refus
+  d'écriture sur le compte cible. Le test de liaison exige que la DERNIÈRE
+  migration qui nomme la politique la retire.
+- **2** — Q39 : **la procédure** (ordre de mise en service ci-dessus) — passe à
+  blanc avant le déploiement, comptes bloqués réglés avec Thierry, puis
+  déploiement et `--go` enchaînés. Pas d'écran de plus.
+- **3 et 7** — corrigés en base, quel que soit l'écrivain : le déclencheur
+  `agent_alert_config_listes_reprises` refuse toute écriture qui ferait
+  perdre la pile d'un logement repris ou lui rendrait une liste (code
+  `HS409`), et l'endpoint le rend en 409 « rechargez et recommencez ».
+  Éprouvé sur le banc Postgres 16 local, migration appliquée deux fois : un
+  changement de mode qui garde la pile passe ; réécrire le logement sans pile,
+  y remettre une liste, raccourcir la pile ou la remplacer par une chaîne
+  sont refusés en `HS409` ; un upsert `on conflict` qui ressuscite les listes
+  aussi ; une seconde reprise (pile allongée), un logement non repris, le
+  retrait d'un logement (re-clé), `updated_at` seul et la suppression de la
+  ligne passent.
+- **4** — corrigé : un test exige que les trois chemins d'écriture gardent la
+  pile telle quelle et ne rendent aucune liste ; un autre, que le code `HS409`
+  devienne 409 et qu'une autre panne reste un 500. Contre-épreuves : effacer
+  la pile dans la cible `mode`, la cible `delais` ou la fusion legacy, ou
+  retirer l'une ou l'autre traduction du 409, rend un rouge chacune.
+- **5** — corrigé : « sans session » ne prétend plus garder `requirePermission`,
+  et un test neuf envoie un jeton PRÉSENT que la garde refuse (401) — sans
+  compte désigné, la garde d'alert-test se ramène à une session valide, donc
+  pas de 403 possible ; retirer `requirePermission` le rougit. « Aucun envoi »
+  vérifie maintenant zéro appel réseau et zéro écriture. Le test des
+  consignes illisibles ne promet plus le délai tapé (gardé par « et il le DIT
+  quand une saisie non enregistree est abandonnee »). Le test de liaison
+  refuse un module d'envoi ou un `fetch` dans alert-test.
+- **6** — corrigé : règle 3 du §12.4 (le panneau enregistre aussi les
+  délais), phrase du guide (l'adresse d'un membre passe dans SES réglages ;
+  une adresse désinscrite ne devient rien), commentaire d'agent-config.

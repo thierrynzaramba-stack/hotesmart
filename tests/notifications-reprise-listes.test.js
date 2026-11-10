@@ -540,6 +540,21 @@ test('LE TEST QUI COMPTE : la reprise n\'est OUVERTE que si plus rien n\'écrit 
   assert.ok(!/email_lines|sms_lines|info_unknown|intervention/.test(onboarding), 'l\'onboarding ne préremplit plus de liste')
   const config = lire('api/agent-config.js')
   assert.match(config, /const CLES_RESERVEES_AUX_CIBLES = \[[^\]]*'intervention'[^\]]*'info_unknown'[^\]]*'listes_reprises'/, 'une liste apportée en legacy est refusée')
-  assert.match(sansCommentaires(lire('api/alert-test.js')), /status\(410\)/, 'l\'essai des listes est retiré')
+  const essai = sansCommentaires(lire('api/alert-test.js'))
+  assert.match(essai, /status\(410\)/, 'l\'essai des listes est retiré')
+  assert.ok(!/fetch\(|alert-notify|brevo|notifications\/envoi|require\(['"]\.\/sms/i.test(essai), 'et il n\'envoie plus rien : aucun module d\'envoi, aucun appel réseau')
+  // Constat 1 de la review de l'étape 4 : la RLS laissait écrire la table en
+  // direct par PostgREST, à côté de l'endpoint. La DERNIÈRE migration qui
+  // nomme la politique d'écriture doit la RETIRER, et le verrou en base doit
+  // exister (constats 3 et 7) — avec sa traduction en 409 dans l'endpoint.
+  const dossier = path.join(__dirname, '..', 'migrations')
+  const qui = fs.readdirSync(dossier).filter(f => f.endsWith('.sql')).sort()
+    .filter(f => /agent_alert_config_write/.test(fs.readFileSync(path.join(dossier, f), 'utf8').replace(/--.*$/gm, '')))
+  const derniere = sansCommentaires(fs.readFileSync(path.join(dossier, qui[qui.length - 1]), 'utf8').replace(/--.*$/gm, ''))
+  assert.match(derniere, /drop policy if exists agent_alert_config_write/, 'la dernière migration retire l\'écriture directe')
+  assert.ok(!/create policy agent_alert_config_write/.test(derniere), 'sans la recréer')
+  assert.match(derniere, /create trigger agent_alert_config_listes_reprises\s+before update on public\.agent_alert_config/, 'le verrou en base existe')
+  assert.match(derniere, /errcode = 'HS409'/)
+  assert.match(sansCommentaires(lire('api/agent-config.js')), /CODE_REPRISE_GARDEE = 'HS409'/, 'l\'endpoint traduit le refus de la base')
 })
 

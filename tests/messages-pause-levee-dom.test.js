@@ -615,11 +615,13 @@ test('un echec de pause garde sa note, et le panneau ne bouge pas sous elle', as
   b.fermer()
 })
 
-test('LE TEST QUI COMPTE : consignes illisibles et plus de volet d alerte — rien a perdre, aucune fausse alerte ; un delai tape reste vu', async () => {
+test('LE TEST QUI COMPTE : consignes illisibles et plus de volet d alerte — rien a perdre, aucune fausse alerte', async () => {
   // Ce test gardait les destinataires d alerte, seuls champs encore editables
   // quand les consignes sont illisibles. Le volet des alertes est retire (lot
   // PWA 2c-3) : il ne reste rien du DOM a perdre, et le garde ne doit pas
-  // pour autant inventer une saisie. Les delais, eux, vivent dans l etat.
+  // pour autant inventer une saisie. (Qu'un delai tape reste signale, c'est
+  // « et il le DIT quand une saisie non enregistree est abandonnee » qui le
+  // garde, plus haut dans ce fichier.)
   const b = B.monter({ appel: async () => ({}) })
   B.peupler(b, {
     biens: [{ ref: AUTRE, nom: 'Maison Jardin' }, { ref: REF, nom: 'Loft Pilotable' }],
