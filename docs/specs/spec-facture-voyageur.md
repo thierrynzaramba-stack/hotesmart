@@ -194,6 +194,15 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   fiche avec un bouton « Copier », pour le lien du formulaire comme pour
   « Votre facture est disponible » ; l'état dit que le message n'est pas
   parti. (2) Langue inconnue ou autre que fr/en/es : **anglais**.
+- **P2 bis — Le lien dans la conversation** (review 1 du code de l'étape 2a,
+  constat de SÉCURITÉ S1). Le lien du formulaire est une clé : il ouvre — et
+  permet de réécrire — les coordonnées du voyageur. Il vit dans la
+  conversation (D3), donc un membre « messages » en lecture le recevait.
+  → **Réponse de Thierry (10 nov. 2026) : le cacher.** Dans HôteSmart, le
+  serveur remplace le lien par « [lien de facture] » dans les messages rendus
+  à qui n'a pas « réservations » en écriture sur ce logement
+  (`api/messages.js`). Il reste dans la conversation de la plateforme, pour qui
+  a accès à ce compte-là.
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
   → **Réponse de Thierry (8 nov. 2026, 22 h 09) : A.** Les rappels
@@ -791,7 +800,11 @@ Review (sous-agent, une seule) :
   la page ; P3 lu trop strictement (aucun renvoi pour une demande en cours) ;
   en-tête qui annonçait 404 au lieu de 403.
 
-**Corrections** (commit suivant la trace ; S1 attend la décision de Thierry) :
+**Corrections** (deux commits suivant la trace) :
+- S1 : décision de Thierry du 10 nov. 2026 (§4 bis, P2 bis) — le serveur
+  cache le lien dans `api/messages.js` (ajout seul) à qui n'a pas
+  « réservations » en écriture sur le logement ; bien inconnu : caché aussi.
+  `tests/messages-lien-facture-masque.test.js` appelle l'endpoint réel.
 - B1 : « sans canal » par l'identifiant réservé à Channex ; Beds24 sans canal
   → `sans_canal`, rien ne part ; `dryRun` → `differe`, jamais « livré ».
 - B2 : un e-mail en échec est `incertain`, sauf « permanent » et « quota ».

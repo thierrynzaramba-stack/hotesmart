@@ -20,6 +20,11 @@ const { etatMenage } = require('../lib/cron-arrival-code')
 const { etatArchivage } = require('../lib/archivage-conversations')
 const { readStatus } = require('../lib/bookings-snapshot-status')
 const { clesArchivees, cleDuBien } = require('../lib/biens-vivants')
+// Facture voyageur, étape 2a (décision de Thierry du 10 novembre 2026, S1) :
+// le lien du formulaire de facture est caché à qui n'a pas « réservations »
+// en écriture — voir plus bas, à la construction des conversations.
+const { peutEcrire } = require('../lib/permissions')
+const { masquerLiensFacture } = require('../lib/factures-voyageur')
 
 // Jour de Paris (celui des biens), YYYY-MM-DD, a un decalage de jours pres.
 //
@@ -817,6 +822,19 @@ module.exports = async function handler(req, res) {
         kind:      m.kind,
         origine:   m.origine || null
       })
+    }
+
+    // ⚠ LE LIEN DE FACTURE, CACHÉ PAR LE SERVEUR (facture voyageur, étape 2a ;
+    // décision de Thierry du 10 novembre 2026). Le lien `/facture#<jeton>` est
+    // une clé : il ouvre les coordonnées du voyageur, et permet de les
+    // réécrire. Un membre qui n'a pas « réservations » en écriture sur ce bien
+    // (Q10, P2) ne le reçoit pas : il lit « [lien de facture] ». Le titulaire,
+    // lui, le voit. ⚠ Bien inconnu (`propertyId` vide) : caché aussi — échouer
+    // fermé. Ce n'est pas un masquage d'écran : le corps ne quitte pas le
+    // serveur.
+    for (const conv of Object.values(convMap)) {
+      if (peutEcrire(garde.contexte, 'reservations', { ref: conv.propertyId })) continue
+      for (const msg of conv.messages) msg.body = masquerLiensFacture(msg.body)
     }
 
     if (nullBookingCount > 0) {

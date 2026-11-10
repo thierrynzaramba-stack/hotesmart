@@ -36,9 +36,14 @@ chaque envoi crée un jeton neuf ; les précédents restent valables jusqu'à le
 propre expiration, `max(départ, envoi) + 1 an` (Q13).
 ⚠ **MAIS LE LIEN EN CLAIR VIT DANS LA CONVERSATION** (review 1, S1) : c'est le
 principe même de D3. Il est dans le message de la plateforme (ou l'e-mail), et
-dans le fil HôteSmart (`messages.body`) quand l'envoi est livré. Qui lit la
-conversation peut ouvrir le lien — voir la décision de Thierry sur S1 au §10 ter
-de la spec.
+dans le fil HôteSmart (`messages.body`) quand l'envoi est livré. **Décision de
+Thierry du 10 novembre 2026 (P2 bis) : dans HôteSmart, le SERVEUR le cache** —
+`api/messages.js` remplace `/facture#<jeton>` par « [lien de facture] » dans
+les messages rendus à qui n'a pas « réservations » en écriture sur ce logement
+(bien inconnu : caché aussi). Ce n'est pas un masquage d'écran : le jeton ne
+quitte pas le serveur. Il reste dans la conversation de la plateforme, pour qui
+a accès à ce compte-là. Motif unique : `masquerLiensFacture`
+(lib/factures-voyageur.js).
 
 ⚠ **LE JETON VOYAGE DANS LE FRAGMENT** (`/facture#<jeton>`). Un fragment n'est
 envoyé à aucun serveur : le jeton n'entre ni dans les journaux de Vercel, ni
