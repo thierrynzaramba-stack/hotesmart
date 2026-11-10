@@ -2,7 +2,7 @@
 
 **Statut : étape 1 en production le 9 novembre 2026 (`main` `47901ed6`). Étape 2
 (résumé des trois chiffres, §10) : spec écrite le 10 novembre 2026, questions Q3 et
-Q4 à trancher par Thierry avant le code.**
+Q4 tranchées par Thierry le 10 novembre 2026 (§10.9) : Q3 = A, Q4 = B.**
 Étape 1 : branche `refonte-avis-v5`, partie de `main` à `dde1004ff1211a4a813a3ed1b471d36d92018fcf`.
 Étape 2 : branche `avis-v5-resume`, partie de `main` à `d355d2cd9a584533e6de20809da0f32e9b8a4e9c`.
 
@@ -374,8 +374,9 @@ Chaque étape : une review, zéro rouge, remise au chef de file avec les cinq é
 
 ## 10. Étape 2 — les trois chiffres en résumé (Q1 = A)
 
-Spec écrite le 10 novembre 2026. **Le code ne démarre qu'après le go de Thierry
-et ses réponses à Q3 et Q4 (§10.9).**
+Spec écrite le 10 novembre 2026. **Q3 = A et Q4 = B, tranchées par Thierry le
+même jour (§10.9).** Conséquence de Q4 : l'accueil et la liste des logements ne
+sont pas touchés par cette étape (dette 142).
 
 ### 10.1 Catégorie
 
@@ -525,6 +526,9 @@ global. Zéro écart exigé.
 
 ### 10.9 Questions à Thierry
 
+**Q3 = A, tranchée par Thierry le 10 novembre 2026 à 14:47** : après un geste
+de l'hôte sur la page, son compte est recalculé tout de suite.
+
 **Q3 — Après un geste de l'hôte sur la page Avis** (saisir un avis reçu,
 confirmer une détection, corriger la propreté), les trois chiffres :
 - **A** — se recalculent tout de suite pour son compte (même writer, une
@@ -532,6 +536,10 @@ confirmer une détection, corriger la propreté), les trois chiffres :
   tout le reste attend le créneau suivant)*
 - **B** — attendent le prochain calcul, jusqu'à 12 h ; l'heure affichée le
   dit.
+
+**Q4 = B, tranchée par Thierry le 10 novembre 2026 à 14:47** : l'accueil et la
+liste des logements restent sur leur calcul à l'ouverture dans cette étape ;
+l'écart est inscrit au registre (dette 142).
 
 **Q4 — L'accueil (note 30 jours) et la liste des logements (note, nombre
 d'avis) calculent la note eux-mêmes, à chaque ouverture.** Une fois la page
