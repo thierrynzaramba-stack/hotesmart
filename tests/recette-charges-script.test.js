@@ -6,7 +6,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
-const { pdfDeRecette, factureDeRecette, refusDeBase } = require('../scripts/recette-charges')
+const { pdfDeRecette, factureDeRecette, refusDeBase, bilan, compteRendu } = require('../scripts/recette-charges')
 const { typeReel } = require('../lib/charges/regles')
 
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'recette-charges.js')
@@ -40,4 +40,33 @@ test('le PDF de recette est un PDF : signature lue dans le contenu, table xref j
 test('le PDF échappe les parenthèses et remplace ce qui n’est pas ASCII', () => {
   const t = pdfDeRecette(['a (b) \\ é']).toString('latin1')
   assert.match(t, /\(a \\\(b\\\) \\\\ \?\) Tj/)
+})
+
+test('⚠ le bilan : un seul échec suffit à rendre la recette EN ÉCHEC, et rien de vérifié n’est pas un succès', () => {
+  assert.equal(bilan([{ ok: true }, { ok: true }]).code, 0)
+  const unEchec = bilan([{ ok: true }, { ok: false }, { ok: null }])
+  assert.equal(unEchec.code, 1)
+  assert.match(unEchec.texte, /^RECETTE EN ÉCHEC : 1 vérification\(s\) passée\(s\), 1 en échec, 1 non vérifiée/)
+  assert.equal(bilan([{ ok: null }]).code, 1, 'rien de vérifié')
+  assert.equal(bilan([]).code, 1, 'rien du tout')
+  const nonVu = bilan([{ ok: true }, { ok: null }])
+  assert.equal(nonVu.code, 0)
+  assert.match(nonVu.texte, /RECETTE OK : 1 .*1 non vérifiée/)
+})
+
+test('⚠ une vérification qui rend `null` (une charge disparue) est un ÉCHEC, pas un « non vérifié »', () => {
+  const lignes = []
+  const { resultats, verifier, ignorer } = compteRendu(l => lignes.push(l))
+  const disparue = null
+  verifier('7c lue par le cron', disparue && disparue.statut === 'a_verifier')
+  verifier('2b', undefined)
+  verifier('1a', true)
+  ignorer('4 avec entité', 'aucune entité')
+  assert.deepEqual(resultats.map(r => r.ok), [false, false, true, null])
+  assert.equal(bilan(resultats).code, 1, 'la recette est EN ÉCHEC')
+  assert.match(lignes[0], /^✘ 7c/)
+  // Contre-épreuve : sans le `null`, le même compte rendu passe.
+  const ok = compteRendu(() => {})
+  ok.verifier('1a', true); ok.ignorer('4', 'raison')
+  assert.equal(bilan(ok.resultats).code, 0)
 })

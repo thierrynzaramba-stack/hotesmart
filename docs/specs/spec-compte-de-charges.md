@@ -822,3 +822,38 @@ cités que comme référence, chacun avec sa raison : statut **accepté**.
 
 Deux reviews sans constat de sécurité : on pousse (CLAUDE.md, « une review
 par commit »). Les correctifs de `0cc34348` ne sont pas re-reviewés.
+
+### Review 3 — le script de recette `scripts/recette-charges.js` (10 novembre 2026)
+
+Réponse de la review, recopiée mot pour mot :
+
+```
+TRACE DE REVIEW
+Arbre lu : /home/claude/hotesmart
+Branche lue : charges-lot2-socle
+SHA de tête lu : d3e66d300ed2e1fd9c7921a44570e721f4800722
+Plage relue : 48c33eb797cc37d9f8909b1c39c09811c30f0b0a..d3e66d300ed2e1fd9c7921a44570e721f4800722
+Fichiers de la plage (2) : scripts/recette-charges.js, tests/recette-charges-script.test.js
+Fichiers cités dans les constats : scripts/recette-charges.js (dans la plage) ; tests/recette-charges-script.test.js (dans la plage) ; lib/charges.js et api/cron-charges.js (HORS PLAGE — lus comme référence pour dire ce que le script déclenche, aucun constat ne porte sur eux)
+```
+
+**Confrontation, refaite par le fil** : la plage contient exactement ces deux
+fichiers ; les deux fichiers hors plage ne portent aucun constat : statut
+**accepté**. **Aucun constat de sécurité** (garde STAGING avant toute
+lecture, production hors d'atteinte, aucun secret affiché).
+
+| # | Sévérité | Objet | Statut |
+|---|---|---|---|
+| 1 | bloquant | une vérification à `null` comptée « non vérifiée » : « RECETTE OK » sur un échec | **corrigé** (`compteRendu` : vrai ou échec ; test de comportement) |
+| 2 | à corriger | le passage du cron touche tout staging, sans le dire | **corrigé** (compté et annoncé avant, coût IA compris ; 7c « non vérifié » si d'autres charges passent avant) |
+| 3 | à corriger | nettoyage ni vérifié pour les fichiers, ni pour les lignes jamais lues | **corrigé** (retrait de chaque fichier, vérification par identifiant et par la liste du dossier ; une lecture en erreur lève) |
+| 4 | à corriger | un Ctrl-C saute le nettoyage | **corrigé** (drapeau sur SIGINT, le `finally` nettoie) |
+| 5 | à corriger | un bucket public n'était qu'un avertissement | **corrigé** (vérifications 0 et 2c) |
+| 6 | mineur | 2a et 6a passaient sur un système cassé | **corrigé** (+1 facture et +120 € exactement ; une ligne vieillie exigée) |
+| 7 | mineur | étape 1 hors du chemin de l'endpoint ; marge d'horloge de 5 s | **corrigé** (même chemin ; attente de 150 s) |
+| 8 | mineur | numéro de facture identique d'une recette à l'autre | **corrigé** (horodaté) |
+
+Le déroulé `--go` a aussi été joué contre une base simulée en mémoire
+(stockage, IA, cron compris) : 18 vérifications passées, aucune ligne ni
+aucun fichier de la recette restant. Aucun constat de sécurité : pas de
+re-review.
