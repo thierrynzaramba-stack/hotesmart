@@ -168,7 +168,7 @@ import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/s
 import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, reinitialiserMoment, libelleJour, libelleHeure, libelleDelai as libelleDelaiBrut }
   from '/shared/messages-programmes.js'
 import { departEvaluable } from '/shared/calendrier-resa.js'
-import { delaiDirect, listeARelire, apresDuFil, fusionnerMessages, fusionnerTaches } from '/shared/messages-direct.js'
+import { delaiDirect, listeARelire, apresDuFil, fusionnerMessages, fusionnerTaches, aDejaSaLigne, RYTHME } from '/shared/messages-direct.js'
 import { confirmerDansLaPage, OCCUPEE } from '/shared/confirmer.js'
 
 initErrorHandler()
@@ -264,6 +264,8 @@ async function charger () {
   const lectures = [
     appel(`/api/messages?limit=${PAGE}`).then(r => {
       etat.conversations = r.conversations || []
+      // L'instant de la lecture, horloge SERVEUR : le point de depart du fil en direct.
+      etat.luLe = r.lu_le || null
       etat.hasMore = r.has_more === true
       etat.nextBefore = r.next_before != null ? r.next_before : null
       etat.nextBeforeId = r.next_before_id || null
@@ -711,6 +713,13 @@ function envoisDe (bookId) {
 }
 async function lancerEnvoi (c, entree) {
   entree.etatEnvoi = 'en_cours'
+  // ⚠ LA PROPOSITION EST TENUE PAR SON OBJET DES LE DEBUT (review 1 du fil en
+  // direct, constat BLOQUANT). La chercher de nouveau dans `etat.taches` APRES
+  // l'envoi la perdait si une relecture l'avait retiree entre-temps : la
+  // cloture ne partait jamais, la tache restait `sending`, revenait a l'hote
+  // dix minutes plus tard « impossible de savoir si le message est parti » —
+  // et un second clic l'envoyait en double. Meme regle que `envoyerProposition`.
+  const tacheDuGeste = entree.valideTache ? tacheParId(entree.valideTache) : null
   renderFil()
   // ⚠ LE CLAIM MANQUAIT SUR CE CHEMIN, ET C'ETAIT UN CONSTAT GRAVE DE LA REVUE
   // (constat 3, 27 octobre 2026). Je ne l'avais pose que sur
@@ -726,7 +735,7 @@ async function lancerEnvoi (c, entree) {
   //
   // Un seul verrou, le meme pour les deux chemins.
   if (entree.valideTache) {
-    const x = tacheParId(entree.valideTache)
+    const x = tacheDuGeste
     if (x && valide(x.send_after)) {
       // ⚠ LA SAUVEGARDE DU BROUILLON D'ABORD, ET C'EST UNE COURSE QUE J'AVAIS
       // CREEE (constat 5 de la troisieme revue). Cliquer « Envoyer » declenche
@@ -775,11 +784,11 @@ async function lancerEnvoi (c, entree) {
     // doit jamais clore la proposition avec un texte qui n'est pas le sien
     // (releve en review). La bulle porte l'avatar hote, pas le robot.
     if (entree.valideTache) {
-      const x = etat.taches.find(v => String(v.id) === String(entree.valideTache))
+      const x = etat.taches.find(v => String(v.id) === String(entree.valideTache)) || tacheDuGeste
       etat.enEdition = null
       if (x) { await cloreTache(x, 'done', entree.texte, c, 'ia_modifiee'); return }
     }
-    c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message', origine, _local: true })
+    if (!aDejaSaLigne(c.messages, entree.texte)) c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message', origine, _local: true })
     c.lastTime = new Date().toISOString()
     renderFil(); renderListe()
   } catch (err) {
@@ -992,7 +1001,7 @@ async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
     }
   }
   if (statut === 'done' && c) {
-    c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message', origine, _local: true })
+    if (!aDejaSaLigne(c.messages, texte)) c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message', origine, _local: true })
     c.lastTime = new Date().toISOString()
   }
   retirerTache(x)
@@ -1000,6 +1009,8 @@ async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
 // Retrait local d'une proposition (close ici ou ailleurs) : liste, index,
 // edition en cours, badge, rendus.
 function retirerTache (x) {
+  // Une reponse du direct lue AVANT ce retrait ne la fait pas revenir.
+  direct.closes.add(String(x.id))
   etat.taches = etat.taches.filter(v => String(v.id) !== String(x.id))
   indexerTaches()
   if (etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)) etat.enEdition = null
@@ -1033,16 +1044,24 @@ async function proposer () {
     btn.disabled = etat.pauses[String(c.propertyId)] === true
   }
 }
-async function rechargerTaches () {
+// Les propositions ouvertes, lues — `null` si la lecture echoue.
+async function lireTachesOuvertes () {
   const { data, error } = await supabase.from('agent_tasks')
     .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, send_after, suspendu_le, modifie_le')
     .in('status', ['pending_validation']).eq('user_id', compteCourant())
     .order('created_at', { ascending: false }).limit(200)
-  if (error) return
+  if (error) return null
   const sejours = etat.conversations
     .filter(c => c.lastNight && !STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase()))
     .map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
-  etat.taches = tachesOuvertes(data || [], { bookings: sejours, aujourdHui: etat.aujourdHui })
+  return tachesOuvertes(data || [], { bookings: sejours, aujourdHui: etat.aujourdHui })
+}
+// « Proposer » : un geste de l'hote, la liste REMPLACEE (comportement d'avant
+// le fil en direct). Le cycle du direct, lui, FOND (`relireListe`).
+async function rechargerTaches () {
+  const lues = await lireTachesOuvertes()
+  if (!lues) return
+  etat.taches = lues
   indexerTaches()
   majBadge()
 }
@@ -3666,16 +3685,16 @@ const direct = {
   dernierConnu: null,      // instant du message le plus récent que la LISTE connaît
   derniereListe: 0,        // dernière relecture de la liste (au plus une par minute)
   differe: false,          // un rendu attend que l'hôte ait fini avec un élément du fil
-  generation: 0            // change à chaque changement de fil : la réponse d'avant est jetée
+  generation: 0,           // change à chaque changement de fil : la réponse d'avant est jetée
+  closes: new Set()        // propositions closes ou retirées par la page (review 1, constat 5)
 }
 const ongletVisible = () => document.visibilityState === 'visible'
+const pageOubliee = () => Date.now() - direct.dernierGeste >= RYTHME.inactifApresMs
+// Recul de deux minutes sur un instant du serveur : les horloges de Vercel et
+// de la base ne sont pas la meme, et le recouvrement se dedoublonne.
+const recul = (iso) => new Date((iso ? new Date(iso).getTime() : Date.now()) - 2 * 60000).toISOString()
 const conversationOuverte = () => etat.ouverte === null ? null
   : etat.conversations.find(x => String(x.bookId) === String(etat.ouverte)) || null
-// L'instant le plus récent que la liste connaît : le point de départ de la comparaison.
-const plusRecentDeLaListe = () => etat.conversations.reduce((max, c) => {
-  const t = new Date(c.lastTime || 0).getTime()
-  return Number.isFinite(t) && t > max ? t : max
-}, 0)
 
 function planifierDirect () {
   clearTimeout(direct.minuteur)
@@ -3697,7 +3716,9 @@ async function relireDirect () {
   const params = new URLSearchParams({ direct: '1' })
   if (c) {
     params.set('fil', String(c.bookId))
-    params.set('apres', apresDuFil(c.messages) || new Date(Date.now() - 7 * 86400000).toISOString())
+    // Le curseur d'insertion rendu par le serveur ; au premier cycle d'un fil,
+    // l'instant de la lecture de la liste (review 1, constat 3).
+    params.set('depuis', c._curseur || recul(etat.luLe))
   }
   try {
     const r = await appel('/api/messages?' + params.toString())
@@ -3711,7 +3732,7 @@ async function relireDirect () {
   } catch (e) {
     // Session expirée : la relecture s'arrête (règle 5), le reste de la page
     // dira la déconnexion au prochain geste.
-    if (e.status === 401) { direct.arret = true; return }
+    if (e.status === 401) { direct.arret = true; montrerPanneDirect(true); return }
     direct.echecs++
     if (direct.echecs >= 3) montrerPanneDirect(true)
     logger.warn && logger.warn('Messages', 'relecture en direct', e.message)
@@ -3721,30 +3742,25 @@ async function relireDirect () {
 }
 
 function appliquerFil (c, r) {
+  if (r.curseur) c._curseur = r.curseur
   const f = fusionnerMessages(c.messages, r.messages)
   const sejours = etat.conversations
     .filter(x => x.lastNight && !STATUTS_SANS_SEJOUR.has(String(x.status || '').toLowerCase()))
     .map(x => ({ id: x.bookId, propId: x.propertyId, departure: String(x.lastNight).slice(0, 10) }))
   const servies = tachesOuvertes(Array.isArray(r.taches) ? r.taches : [], { bookings: sejours, aujourdHui: etat.aujourdHui })
-  const t = fusionnerTaches(etat.taches, c.bookId, servies, etat.enEdition && etat.enEdition.tacheId)
-  if (!f.ajoutes && !f.remplaces && !t.change) {
-    if (r.complet === false) direct.derniereListe = 0
-    return
-  }
+  const t = fusionnerTaches(etat.taches, c.bookId, servies, etat.enEdition && etat.enEdition.tacheId, direct.closes)
+  if (!f.ajoutes && !f.remplaces && !t.change) return
   c.messages = f.messages
   const plusRecent = apresDuFil(c.messages)
   if (plusRecent && (!c.lastTime || new Date(plusRecent) > new Date(c.lastTime))) c.lastTime = plusRecent
   if (t.change) { etat.taches = t.taches; indexerTaches(); majBadge(); renderFiltres() }
   // Règle 4 : un message du voyageur arrivé dans le fil ouvert, onglet
-  // affiché, est LU — une fois par arrivée, par le writer habituel.
-  if (f.entrants && ongletVisible() && peutEcrireMessages()) {
-    c.readAt = new Date().toISOString()
-    appel('/api/messages', { action: 'lu', booking_id: String(c.bookId) })
-      .catch(e => logger.error('Messages', 'read_at', e))
-  }
-  // Plus de 200 messages neufs d'un coup : la liste (qui porte le fil entier)
-  // se relit au prochain cycle, sans attendre la minute.
-  if (r.complet === false) direct.derniereListe = 0
+  // affiché, est LU — une fois par arrivée, par le writer habituel. ⚠ PAS SUR
+  // UNE PAGE OUBLIÉE (review 1, constat 11) : personne n'est devant l'écran,
+  // le « non lu » doit rester ; le premier geste le lèvera (`gesteDirect`).
+  // (Plus de 200 messages neufs d'un coup — `complet: false` — : le cycle
+  // suivant reprend au curseur, c'est-à-dire au 201e.)
+  if (f.entrants && ongletVisible() && !pageOubliee()) marquerLuDirect(c)
   rafraichirFil()
   renderListe()
 }
@@ -3754,8 +3770,12 @@ function appliquerFil (c, r) {
 function rafraichirFil () {
   const deroule = $('[data-list="fil"]')
   const actif = document.activeElement
-  const enMain = (actif && actif !== document.body && deroule.contains(actif))
-    || deroule.querySelector('details[open]')
+  // ⚠ LE FIL DÉROULÉ, L'EN-TÊTE (son menu ⋯) ET LE BANDEAU D'ÉCHÉANCE : les
+  // trois sont redessinés par `renderFil` (review 1, constat 6). La saisie,
+  // elle, ne l'est pas : on peut taper pendant qu'un message arrive.
+  const tenus = [deroule, $('[data-bind="fil-entete"]'), $('[data-bind="saisie-echeance"]')]
+  const enMain = (actif && actif !== document.body && tenus.some(z => z && z.contains(actif)))
+    || tenus.some(z => z && z.querySelector('details[open]'))
   if (enMain) { direct.differe = true; montrerPastille(true); return }
   direct.differe = false
   const enBas = deroule.scrollHeight - deroule.scrollTop - deroule.clientHeight < 80
@@ -3769,7 +3789,7 @@ function montrerPastille (oui) { $('[data-bind="fil-nouveau"]').hidden = !oui }
 function montrerPanneDirect (oui) { $('[data-bind="fil-direct-panne"]').hidden = !oui }
 
 async function traiterDernier (dernier) {
-  if (direct.dernierConnu === null) direct.dernierConnu = new Date(plusRecentDeLaListe()).toISOString()
+  if (direct.dernierConnu === null) direct.dernierConnu = recul(etat.luLe)
   if (!listeARelire({ dernier, dernierConnu: direct.dernierConnu, derniereListe: direct.derniereListe })) return
   direct.derniereListe = Date.now()
   await relireListe(dernier)
@@ -3785,18 +3805,35 @@ async function relireListe (dernier) {
   for (const n of r.conversations || []) {
     const ancienne = parId.get(String(n.bookId))
     if (!ancienne) { neuves.push(n); continue }
-    const messages = String(n.bookId) === String(etat.ouverte)
-      ? fusionnerMessages(ancienne.messages, n.messages).messages
-      : n.messages
+    // Les messages se FONDENT : une bulle locale ou un message deja lu en
+    // direct ne disparait pas parce que la liste est relue.
+    const messages = fusionnerMessages(ancienne.messages, n.messages).messages
     Object.assign(ancienne, n, { messages, readAt: ancienne.readAt && n.readAt
       ? (new Date(ancienne.readAt) > new Date(n.readAt) ? ancienne.readAt : n.readAt)
       : (ancienne.readAt || n.readAt) })
   }
   if (neuves.length) etat.conversations.unshift(...neuves)
-  direct.dernierConnu = dernier
-  await rechargerTaches()
+  if (r.lu_le) etat.luLe = r.lu_le
+  direct.dernierConnu = r.lu_le ? recul(r.lu_le) : dernier
+  // ⚠ LES PROPOSITIONS SE FONDENT, ELLES NE SONT PAS REMPLACÉES (review 1,
+  // constat BLOQUANT) : celle que l'hôte envoie (`sending` côté serveur, donc
+  // absente de la lecture) doit rester, sinon sa clôture ne part jamais.
+  const lues = await lireTachesOuvertes()
+  if (lues) {
+    const t = fusionnerTaches(etat.taches, null, lues, etat.enEdition && etat.enEdition.tacheId, direct.closes)
+    etat.taches = t.taches
+    indexerTaches(); majBadge()
+  }
   renderFiltres(); renderListe()
   if (etat.ouverte !== null) rafraichirFil()
+}
+
+// Le writer habituel de l'état lu, depuis le direct.
+function marquerLuDirect (c) {
+  if (!peutEcrireMessages()) return
+  c.readAt = new Date().toISOString()
+  appel('/api/messages', { action: 'lu', booking_id: String(c.bookId) })
+    .catch(e => logger.error('Messages', 'read_at', e))
 }
 
 function changerDeFilDirect () {
@@ -3809,13 +3846,18 @@ function changerDeFilDirect () {
 // Un geste dans la page : la page n'est pas oubliée. S'il la réveille d'une
 // heure d'inactivité, la relecture repart tout de suite au rythme du fil.
 function gesteDirect () {
-  const etaitInactive = Date.now() - direct.dernierGeste >= 15 * 60000
+  const etaitInactive = pageOubliee()
   direct.dernierGeste = Date.now()
-  if (etaitInactive) relireDirect().finally(planifierDirect)
+  if (!etaitInactive) return
+  // L'hôte revient devant le fil : ce qui est arrivé pendant son absence est
+  // maintenant sous ses yeux.
+  const c = conversationOuverte()
+  if (c && ongletVisible() && nonLue(c)) marquerLuDirect(c)
+  relireDirect().finally(planifierDirect)
 }
 
 function demarrerDirect () {
-  direct.dernierConnu = new Date(plusRecentDeLaListe()).toISOString()
+  direct.dernierConnu = recul(etat.luLe)
   document.addEventListener('visibilitychange', () => {
     if (ongletVisible()) relireDirect().finally(planifierDirect)
     else { clearTimeout(direct.minuteur); direct.minuteur = null }
@@ -3824,8 +3866,10 @@ function demarrerDirect () {
     document.addEventListener(type, gesteDirect, { passive: true, capture: true })
   }
   const deroule = $('[data-list="fil"]')
+  // ⚠ LE DÉFILEMENT N'EST PAS UN GESTE (review 1, constat 7) : la page fait
+  // défiler le fil elle-même à chaque message, et une page oubliée sur un fil
+  // actif serait restée à 5 s. La molette, le doigt et le clavier suffisent.
   deroule.addEventListener('scroll', () => {
-    gesteDirect()
     if (deroule.scrollHeight - deroule.scrollTop - deroule.clientHeight < 80 && !direct.differe) montrerPastille(false)
   }, { passive: true })
   $('[data-bind="fil-nouveau"]').addEventListener('click', () => {
@@ -3841,6 +3885,7 @@ function demarrerDirect () {
   })
   $('[data-bind="fil-direct-reessayer"]').addEventListener('click', () => {
     direct.echecs = 0
+    direct.arret = false
     montrerPanneDirect(false)
     relireDirect().finally(planifierDirect)
   })

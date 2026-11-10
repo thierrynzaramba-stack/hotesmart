@@ -225,10 +225,13 @@ Spec : `docs/specs/spec-messages-fil-en-direct.md`. Demande de Thierry du
 décidé par Thierry le 10 novembre 2026 à 01:06.
 
 - **Fil ouvert, onglet affiché : une relecture toutes les 5 secondes**, par
-  `GET /api/messages?direct=1&fil=<bookId>&apres=<instant>`. Elle rend les
-  messages du fil depuis `apres` (`>=`, la page fond les doublons), ses
-  propositions en attente, et `dernier` : l'instant du message le plus récent
-  du compte **hors du fil ouvert**.
+  `GET /api/messages?direct=1&fil=<bookId>&depuis=<curseur>`. Elle rend les
+  messages du fil **insérés** après le curseur (`created_at`, l'ordre
+  d'insertion — PAS `sent_at`, que le webhook, l'import et Beds24 écrivent
+  dans le passé), le `curseur` suivant, les propositions en attente, et
+  `dernier` : le `created_at` du message le plus récent du compte **hors du
+  fil ouvert**. Premier cycle d'un fil : `lu_le` de la collection (horloge
+  serveur) moins deux minutes.
 - **La liste** se relit (`/api/messages?limit=50`, l'appel d'ouverture) au plus
   une fois par minute, et seulement quand `dernier` dépasse ce qu'elle connaît.
   Sans fil ouvert : une relecture par minute (`direct=1` seul).
@@ -236,13 +239,19 @@ décidé par Thierry le 10 novembre 2026 à 01:06.
   Échecs : 20 s, 40 s, 80 s, puis 2 min ; trois de suite affichent « Mise à
   jour interrompue · Réessayer » ; un 401 arrête la relecture.
 - **Ce que l'hôte tient n'est pas redessiné** : la saisie est hors du fil ; un
-  élément du fil qui a le focus, ou un menu ouvert, fait attendre le rendu
-  (pastille « Nouveau message »). Hôte remonté lire : le fil ne saute pas.
+  élément qui a le focus dans le fil, son en-tête ou le bandeau d'échéance, ou
+  le menu ⋯ ouvert, fait attendre le rendu (pastille « Nouveau message »).
+  Hôte remonté lire : le fil ne saute pas. Le défilement n'est pas un geste.
 - **Pas de doublon** : une bulle posée par la page après un envoi porte
   `_local`, et sa ligne du cœur la remplace (même texte sortant, moins de
-  deux minutes d'écart). Le point de reprise ignore les bulles `_local`.
+  cinq minutes d'écart), dans les deux ordres d'arrivée.
+- **Les propositions se fondent EN PLACE**, jamais remplacées : celle que
+  l'hôte envoie reste tenue jusqu'à sa clôture (constat bloquant de la review 1 :
+  sinon la clôture ne partait pas et un second clic envoyait en double), et
+  une proposition close par la page ne revient pas.
 - **Lu tant que c'est à l'écran** : un message du voyageur arrivé dans le fil
-  ouvert est marqué lu une fois (`POST action=lu`).
+  ouvert est marqué lu une fois (`POST action=lu`) — pas sur une page oubliée ;
+  le premier geste lit alors le fil.
 - Règles pures dans `shared/messages-direct.js` ; gardes serveur (compte
   cible, périmètre sur les trois lectures, archivage, `private, no-store` dès
   le 405, `Server-Timing` avec le nombre de requêtes) dans `api/messages.js`.

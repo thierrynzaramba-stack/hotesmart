@@ -15,6 +15,8 @@ const il = (ms) => new Date(Date.now() - ms).toISOString()
 const jour = (d) => new Date(Date.now() + d * 86400000).toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' })
 
 const T1 = il(10 * MIN), T2 = il(5 * MIN)
+const LU_LE = il(20000)
+const attendre = (ms) => new Promise(r => setTimeout(r, ms))
 const conv = (bookId, messages, extra = {}) => ({
   bookId, propertyId: '209413', provider: 'channex', ota: 'Airbnb', platform: 'airbnb',
   guestName: 'Ana Lopez', firstNight: jour(0), lastNight: jour(3), status: 'confirmed',
@@ -38,6 +40,8 @@ function monterDirect ({ conversations, ouverte = 'B1', repondre = () => ({}), t
   msg.etat.taches = taches
   msg.indexerTaches()
   msg.etat.ouverte = ouverte
+  // L'instant de la lecture de la liste, tel que la collection le rend.
+  msg.etat.luLe = LU_LE
   msg.renderListe(); msg.renderFil()
   // Les ecouteurs du direct (pastille, defilement, onglet) : ceux de la page.
   msg.demarrerDirect()
@@ -52,7 +56,7 @@ test('LE TEST QUI COMPTE : un message du voyageur apparait dans le fil ouvert, s
   const v = monterDirect({
     conversations: [conv('B1', [entrant('Bonjour', T1)])],
     repondre: (chemin) => chemin.startsWith('/api/messages?direct=1')
-      ? { messages: [entrant('Bonjour', T1), neuf], taches: [], dernier: T1, complet: true } : {}
+      ? { messages: [entrant('Bonjour', T1), neuf], taches: [], dernier: T1, complet: true, curseur: 'CURSEUR-1' } : {}
   })
   try {
     assert.deepEqual(textesDuFil(v.doc), ['Bonjour'])
@@ -61,8 +65,13 @@ test('LE TEST QUI COMPTE : un message du voyageur apparait dans le fil ouvert, s
     assert.equal(v.directs().length, 1, 'une relecture = un appel')
     const url = new URL(v.directs()[0].chemin, 'https://x.test')
     assert.equal(url.searchParams.get('fil'), 'B1')
-    assert.equal(url.searchParams.get('apres'), new Date(T1).toISOString())
+    // Premier cycle : l'instant de la lecture de la liste, moins deux minutes
+    // de recouvrement (deux horloges serveur) — review 1, constat 3.
+    assert.equal(url.searchParams.get('depuis'), new Date(Date.parse(LU_LE) - 2 * MIN).toISOString())
     assert.ok(!v.appels.some(a => a.chemin.startsWith('/api/messages?limit')), 'la liste entiere a ete relue pour rien')
+    // Cycle suivant : le curseur RENDU par le serveur, tel quel.
+    await v.msg.relireDirect()
+    assert.equal(new URL(v.directs()[1].chemin, 'https://x.test').searchParams.get('depuis'), 'CURSEUR-1')
   } finally { v.fermer() }
 })
 
@@ -166,9 +175,6 @@ test('LE TEST QUI COMPTE : aucun doublon — le message envoye depuis la page n 
   try {
     await v.msg.relireDirect()
     assert.equal(textesDuFil(v.doc).filter(t => t === 'Le code est 4821').length, 1)
-    // Le point de reprise ignore la bulle locale : il part du dernier message du COEUR.
-    const url = new URL(v.directs()[0].chemin, 'https://x.test')
-    assert.equal(url.searchParams.get('apres'), new Date(T1).toISOString())
   } finally { v.fermer() }
 })
 
@@ -278,5 +284,177 @@ test('rien de neuf : la relecture ne redessine rien et n ecrit rien', async () =
     await v.msg.relireDirect()
     assert.equal(v.doc.querySelector('[data-list="fil"]').firstElementChild, avant, 'le fil a ete redessine pour rien')
     assert.equal(v.appels.filter(a => a.corps).length, 0, 'une ecriture est partie pour rien')
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : « Modifier puis Envoyer » — une relecture de la liste PENDANT l envoi ne fait pas perdre la cloture', async () => {
+  // Review 1, constat BLOQUANT : la relecture de la liste ecrasait les
+  // propositions ; celle en cours d'envoi disparaissait, sa cloture ne partait
+  // jamais, la tache restait `sending` et revenait a l'hote dix minutes plus
+  // tard — un second clic envoyait le message en double.
+  let libererEnvoi
+  const posts = []
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])],
+    taches: [{ id: 'x1', book_id: 'B1', property_id: '209413', suggested_reply: 'Texte IA', summary: '', status: 'pending_validation',
+      created_at: il(MIN), send_after: new Date(Date.now() + 10 * MIN).toISOString() }],
+    repondre: (chemin, corps) => {
+      if (corps) posts.push(corps.action || chemin)
+      if (chemin.startsWith('/api/messages?direct=1')) return { messages: [], taches: [], dernier: new Date().toISOString(), complet: true, curseur: 'C' }
+      if (chemin.startsWith('/api/messages?limit=')) return { conversations: [conv('B1', [entrant('Bonjour', T1)]), conv('B2', [entrant('Autre', il(1000))], { guestName: 'Paul' })], lu_le: new Date().toISOString() }
+      if (chemin === '/api/beds24' || chemin === '/api/channel-message') return new Promise(r => { libererEnvoi = () => r({ success: true }) })
+      return { ok: true }
+    }
+  })
+  try {
+    v.msg.modifierProposition('x1')
+    v.doc.querySelector('[data-bind="texte"]').value = 'Texte retouche'
+    v.banc.window.envoyer()
+    for (let i = 0; i < 100 && !libererEnvoi; i++) await attendre(5)
+    assert.ok(libererEnvoi, 'jeu d essai : l envoi doit etre en vol')
+    await v.msg.relireDirect()
+    assert.ok(v.appels.some(a => a.chemin.startsWith('/api/messages?limit=')), 'jeu d essai : la liste doit avoir ete relue pendant l envoi')
+    libererEnvoi()
+    for (let i = 0; i < 100 && !posts.includes('proposition'); i++) await attendre(5)
+    assert.ok(posts.includes('proposition'), 'la proposition envoyee n a jamais ete close : ' + JSON.stringify(posts))
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : la ligne du coeur ramenee PENDANT la cloture d une proposition — une seule bulle', async () => {
+  // Review 1, constat 2.
+  const coeur = []
+  let libererCloture
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])],
+    taches: [{ id: 'x1', book_id: 'B1', property_id: '209413', suggested_reply: 'Avec plaisir', summary: '', status: 'pending_validation', created_at: il(MIN) }],
+    repondre: (chemin, corps) => {
+      if (chemin.startsWith('/api/messages?direct=1')) return { messages: [...coeur], taches: [], dernier: T1, complet: true, curseur: 'C' }
+      if (chemin === '/api/beds24' || chemin === '/api/channel-message') {
+        coeur.push({ sender: 'host', direction: 'outbound', body: corps.message, sent_at: new Date().toISOString(), kind: 'message', origine: 'ia_validee' })
+        return { success: true }
+      }
+      if (corps && corps.action === 'proposition') return new Promise(r => { libererCloture = () => r({ ok: true }) })
+      return { ok: true }
+    }
+  })
+  try {
+    v.doc.querySelector('[data-envoyer-prop="x1"]').click()
+    for (let i = 0; i < 100 && !libererCloture; i++) await attendre(5)
+    assert.ok(libererCloture, 'jeu d essai : la cloture doit etre en vol')
+    await v.msg.relireDirect()
+    libererCloture()
+    await attendre(30)
+    await v.msg.relireDirect()
+    assert.equal(textesDuFil(v.doc).filter(t => t === 'Avec plaisir').length, 1, 'doublon : ' + JSON.stringify(textesDuFil(v.doc)))
+  } finally { v.fermer() }
+})
+
+test('le menu ⋯ ouvert dans l en-tete du fil n est pas referme sous la main de l hote', async () => {
+  // Review 1, constat 6 : le seul <details> de la page est dans l'en-tete.
+  const neuf = entrant('Une question', il(2000))
+  let reponse = { messages: [neuf], taches: [], dernier: T1, complet: true, curseur: 'C' }
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])],
+    repondre: (c) => c.startsWith('/api/messages?direct=1') ? reponse : {}
+  })
+  try {
+    const menu = v.doc.querySelector('[data-bind="fil-menu"] details')
+    assert.ok(menu, 'jeu d essai : le menu du fil existe')
+    menu.open = true
+    await v.msg.relireDirect()
+    assert.equal(v.doc.querySelector('[data-bind="fil-menu"] details'), menu, 'le menu a ete redessine')
+    assert.equal(menu.open, true)
+    assert.equal(v.doc.querySelector('[data-bind="fil-nouveau"]').hidden, false)
+    menu.open = false
+    reponse = { messages: [], taches: [], dernier: T1, complet: true, curseur: 'C' }
+    await v.msg.relireDirect()
+    assert.ok(textesDuFil(v.doc).includes('Une question'), 'le rendu differe n a jamais eu lieu')
+  } finally { v.fermer() }
+})
+
+test('une proposition rejetee pendant qu un cycle etait en vol ne revient pas', async () => {
+  // Review 1, constat 5a.
+  const tache = { id: 'x1', book_id: 'B1', property_id: '209413', suggested_reply: 'Non merci', summary: '', status: 'pending_validation', created_at: il(MIN) }
+  let liberer
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])], taches: [tache],
+    repondre: (c) => c.startsWith('/api/messages?direct=1')
+      ? new Promise(r => { liberer = () => r({ messages: [], taches: [{ ...tache }], dernier: T1, complet: true, curseur: 'C' }) })
+      : { ok: true }
+  })
+  try {
+    const enVol = v.msg.relireDirect()
+    await B.reposer(v.banc)
+    v.banc.window.retirerTache(v.msg.etat.taches[0])
+    liberer()
+    await enVol
+    assert.equal(v.msg.etat.taches.length, 0, 'la proposition retiree est revenue')
+    assert.ok(!textesDuFil(v.doc).some(t => t.includes('Non merci')))
+  } finally { v.fermer() }
+})
+
+test('retour sur l onglet : une relecture IMMEDIATE, puis le rythme', async () => {
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])],
+    repondre: (c) => c.startsWith('/api/messages?direct=1') ? { messages: [], taches: [], dernier: T1, complet: true, curseur: 'C' } : {}
+  })
+  try {
+    v.etatVue.visible = false
+    v.doc.dispatchEvent(new v.banc.window.Event('visibilitychange'))
+    assert.equal(v.msg.direct.minuteur, null, 'onglet cache : le minuteur doit tomber')
+    v.etatVue.visible = true
+    v.delais.length = 0
+    v.doc.dispatchEvent(new v.banc.window.Event('visibilitychange'))
+    await B.reposer(v.banc)
+    assert.equal(v.directs().length, 1, 'pas de relecture immediate au retour')
+    assert.ok(v.delais.includes(5000))
+  } finally { v.fermer() }
+})
+
+test('page oubliee : un message arrive mais reste NON LU ; le premier geste le lit, relit et remet 5 s', async () => {
+  // Review 1, constat 11 : personne n'est devant l'ecran.
+  const neuf = entrant('Vous etes la ?', il(2000))
+  let reponse = { messages: [neuf], taches: [], dernier: T1, complet: true, curseur: 'C' }
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])],
+    repondre: (c) => c.startsWith('/api/messages?direct=1') ? reponse : {}
+  })
+  try {
+    v.msg.direct.dernierGeste = Date.now() - 16 * MIN
+    await v.msg.relireDirect()
+    assert.ok(textesDuFil(v.doc).includes('Vous etes la ?'), 'le message doit s afficher')
+    assert.equal(v.appels.filter(a => a.corps && a.corps.action === 'lu').length, 0, 'marque lu alors que personne n etait la')
+    reponse = { messages: [], taches: [], dernier: T1, complet: true, curseur: 'C' }
+    v.delais.length = 0
+    v.doc.dispatchEvent(new v.banc.window.KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    await B.reposer(v.banc)
+    assert.equal(v.appels.filter(a => a.corps && a.corps.action === 'lu').length, 1, 'le geste de retour doit lire le fil ouvert')
+    assert.equal(v.directs().length, 2, 'le geste de retour doit relire tout de suite')
+    assert.ok(v.delais.includes(5000), 'le rythme du fil doit revenir')
+  } finally { v.fermer() }
+})
+
+test('session expiree (401) : la relecture s arrete ET le dit', async () => {
+  const v = monterDirect({
+    conversations: [conv('B1', [entrant('Bonjour', T1)])],
+    repondre: (c) => c.startsWith('/api/messages?direct=1') ? { __statut: 401, __corps: { error: 'x' } } : {}
+  })
+  try {
+    await v.msg.relireDirect()
+    assert.equal(v.msg.direct.arret, true)
+    assert.equal(v.doc.querySelector('[data-bind="fil-direct-panne"]').hidden, false, 'l arret est silencieux')
+  } finally { v.fermer() }
+})
+
+test('le defilement n est pas un geste : la page qui defile seule reste « oubliee »', () => {
+  // Review 1, constat 7 : la page fait defiler le fil a chaque message ; si
+  // `scroll` comptait comme un geste, une page oubliee restait a 5 s.
+  const v = monterDirect({ conversations: [conv('B1', [entrant('Bonjour', T1)])] })
+  try {
+    v.msg.direct.dernierGeste = Date.now() - 16 * MIN
+    v.doc.querySelector('[data-list="fil"]').dispatchEvent(new v.banc.window.Event('scroll'))
+    v.delais.length = 0
+    v.msg.planifierDirect()
+    assert.deepEqual(v.delais, [60000])
   } finally { v.fermer() }
 })

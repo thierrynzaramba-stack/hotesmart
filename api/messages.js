@@ -605,10 +605,10 @@ async function archiverFil(req, res) {
 }
 
 // ─── Le fil en direct (docs/specs/spec-messages-fil-en-direct.md §3) ────────
-// `GET /api/messages?direct=1[&fil=<bookId>&apres=<instant ISO>]`.
+// `GET /api/messages?direct=1[&fil=<bookId>&depuis=<instant ISO>]`.
 // La page la pose toutes les 5 secondes quand un fil est ouvert et l'onglet
 // affiche (une fois par minute sans fil, rien quand l'onglet est cache). Elle
-// rend SEULEMENT ce qui est neuf : les messages du fil depuis `apres`, ses
+// rend SEULEMENT ce qui est neuf : les messages du fil insérés depuis `depuis`, ses
 // propositions en attente, et l'instant du message le plus recent du compte
 // HORS de ce fil — que la page compare au sien pour savoir si la LISTE doit
 // etre relue.
@@ -618,6 +618,13 @@ async function archiverFil(req, res) {
 // toutes les 5 secondes, ce serait 22 Mo par heure et par ecran pour presque
 // toujours rien. Trois lectures indexees, et la garde.
 //
+// ⚠ LE CURSEUR EST L'ORDRE D'INSERTION (`created_at`, pose par la base), PAS
+// `sent_at` (review 1, constat 3). Le webhook Channex, son import de
+// rattrapage, Beds24 et l'e-mail entrant ecrivent des lignes dont `sent_at` est
+// ANTERIEUR a leur insertion : un curseur sur `sent_at` sautait pour toujours
+// le message du voyageur arrive apres la reponse de l'hote. Le serveur rend
+// `curseur` (le `created_at` de la derniere ligne rendue) et la page le
+// renvoie tel quel — une seule horloge, celle de la base.
 // ⚠ MEMES BARRIERES QUE LA COLLECTION : compte cible, filtre de perimetre sur
 // les TROIS lectures — un membre limite au bien A n'apprend rien du bien B,
 // pas meme l'heure de son dernier message —, et la regle d'archivage.
@@ -643,40 +650,43 @@ async function lireEnDirect (req, res) {
     if (fil && (fil.length > 200 || fil === '__SIM_ENABLED__')) {
       return repondre(400, { error: 'Conversation invalide' })
     }
-    let apres = null
+    let depuis = null
     if (fil) {
-      const t = new Date(String(req.query.apres || '')).getTime()
+      const t = new Date(String(req.query.depuis || '')).getTime()
       if (!Number.isFinite(t)) return repondre(400, { error: 'Instant invalide' })
       // Une page restee ouverte longtemps ne relit pas tout l'historique : au
       // plus 7 jours, et `complet: false` au-dela de 200 messages.
-      apres = new Date(Math.max(t, Date.now() - DIRECT_FENETRE_MS)).toISOString()
+      depuis = new Date(Math.max(t, Date.now() - DIRECT_FENETRE_MS)).toISOString()
     }
     // Perimetre vide ou refuse : rien, et la meme forme.
-    if (filtreOr === '') return repondre(200, { messages: [], taches: [], dernier: null, complet: true })
+    if (filtreOr === '') return repondre(200, { messages: [], taches: [], dernier: null, complet: true, curseur: depuis })
 
     // ⚠ `dernier` EST PRIS HORS DU FIL OUVERT : la page tient deja ce fil a
     // jour par la lecture ci-dessous. Compter ses messages ferait relire la
     // liste entiere (31 Ko) a chaque message du voyageur avec qui l'hote est
     // justement en train d'echanger — pour rien.
     const dernierQ = (() => {
-      let q = supabase.from('messages').select('sent_at').eq('user_id', userId)
+      let q = supabase.from('messages').select('created_at').eq('user_id', userId)
       if (fil) q = q.neq('booking_id', fil)
       if (filtreOr) q = q.or(filtreOr)
-      return q.order('sent_at', { ascending: false }).limit(1)
+      return q.order('created_at', { ascending: false }).limit(1)
     })()
     const lectures = [dernierQ]
     if (fil) {
       const lire = (colonnes) => {
+        // `gt` : la ligne du curseur est deja chez la page. Deux insertions a
+        // la MEME microseconde, coupees par la borne des 200, sont le seul cas
+        // perdu — et il demande 200 messages neufs en cinq secondes.
         let q = supabase.from('messages').select(colonnes)
-          .eq('user_id', userId).eq('booking_id', fil).gte('sent_at', apres)
+          .eq('user_id', userId).eq('booking_id', fil).gt('created_at', depuis)
         if (filtreOr) q = q.or(filtreOr)
-        return q.order('sent_at', { ascending: true }).limit(DIRECT_MAX + 1)
+        return q.order('created_at', { ascending: true }).limit(DIRECT_MAX + 1)
       }
       lectures.push((async () => {
         // `origine` (dette 66) avec repli, comme la collection.
-        let r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind, origine')
+        let r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind, created_at, origine')
         if (r.error && /origine/.test(r.error.message || '')) {
-          r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind')
+          r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind, created_at')
         }
         return r
       })())
@@ -692,7 +702,7 @@ async function lireEnDirect (req, res) {
       console.error('[messages] lecture en direct', (d.error || (m && m.error) || tch.error).message)
       return repondre(503, { error: 'Lecture impossible' })
     }
-    const dernier = (d.data && d.data[0] && d.data[0].sent_at) || null
+    const dernier = (d.data && d.data[0] && d.data[0].created_at) || null
     if (!fil) return repondre(200, { dernier })
 
     let lignes = m.data || []
@@ -703,14 +713,17 @@ async function lireEnDirect (req, res) {
     // jamais : une lecture ratee ne retire rien.
     const archive = (ref) => arch && arch.cles && arch.cles.size && ref != null
       && arch.cles.has(cleDuBien(userId, String(ref)))
+    // Le curseur suit la derniere ligne RENDUE (sur une lecture coupee a 200,
+    // le cycle suivant reprend a la 201e), sinon il ne bouge pas.
+    const curseur = lignes.length ? lignes[lignes.length - 1].created_at : depuis
     if ([...lignes, ...(tch.data || [])].some(l => archive(l.property_id))) {
-      return repondre(200, { messages: [], taches: [], dernier, complet: true })
+      return repondre(200, { messages: [], taches: [], dernier, complet: true, curseur })
     }
     const messages = lignes.map(l => ({
       sender: l.sender, direction: l.direction, body: l.body, sent_at: l.sent_at,
       kind: l.kind, origine: l.origine || null
     }))
-    return repondre(200, { messages, taches: tch.data || [], dernier, complet })
+    return repondre(200, { messages, taches: tch.data || [], dernier, complet, curseur })
   })
   return resultat
 }
@@ -853,6 +866,10 @@ module.exports = async function handler(req, res) {
   try {
     // Fenetre 6 mois.
     const since = new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000).toISOString()
+    // L'instant de cette lecture, horloge SERVEUR : le point de depart du fil
+    // en direct (`lireEnDirect`, curseur sur l'ordre d'insertion). Pris AVANT
+    // les lectures : ce qui s'insere pendant qu'elles tournent est relu.
+    const luLe = new Date().toISOString()
 
     // ── 2 SELECT (zero N+1) : messages recents + snapshots du user ──
     const [msgRes, snapRes] = await Promise.all([
@@ -1057,13 +1074,13 @@ module.exports = async function handler(req, res) {
       const hasMore = fenetre.length > limite
       const bord = hasMore ? fenetre[limite - 1] : null
       return res.status(200).json({
-        conversations: page, archivage, has_more: hasMore,
+        conversations: page, archivage, has_more: hasMore, lu_le: luLe,
         next_before: bord ? (bord.lastTime || '') : null,
         next_before_id: bord ? String(bord.bookId) : null
       })
     }
 
-    return res.status(200).json({ conversations, archivage })
+    return res.status(200).json({ conversations, archivage, lu_le: luLe })
 
   } catch (e) {
     console.error('[messages] exception', e.message)

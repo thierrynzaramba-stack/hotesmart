@@ -55,10 +55,10 @@ export function listeARelire ({ dernier, dernierConnu, derniereListe = 0, mainte
 }
 
 /**
- * L'instant à partir duquel demander la suite du fil : le plus récent des
- * messages VENUS DU SERVEUR. Une bulle posée par la page après un envoi
- * (`_local`) porte l'heure du navigateur, qui peut avancer sur celle du
- * serveur : s'en servir ferait sauter des messages.
+ * Le plus récent des messages VENUS DU SERVEUR (l'heure affichée dans la
+ * liste). Une bulle posée par la page après un envoi (`_local`) porte l'heure
+ * du navigateur : elle ne compte pas. ⚠ Ce n'est PAS le curseur de la relecture,
+ * qui suit l'ordre d'insertion en base (`curseur`, rendu par le serveur).
  */
 export function apresDuFil (messages) {
   let max = null
@@ -72,18 +72,38 @@ export function apresDuFil (messages) {
 
 const corps = (m) => String((m && m.body) || '').trim()
 
+// ⚠ CINQ MINUTES, ET DEUX HORLOGES (review 1, constat 9) : la bulle locale
+// porte l'heure du navigateur, la ligne du cœur celle du serveur. Deux minutes
+// laissaient un doublon pour toujours sur un poste décalé de plus. Le prix :
+// un même texte renvoyé à moins de cinq minutes peut être pris pour sa
+// propre bulle — il disparaît alors jusqu'au cycle qui ramène sa ligne.
+export const FENETRE_JUMELLE_MS = 5 * 60000
+const jumelles = (local, ligne) => ligne && !ligne._local && ligne.direction === 'outbound'
+  && corps(ligne) === corps(local)
+  && instant(ligne.sent_at) !== null && instant(local.sent_at) !== null
+  && Math.abs(instant(ligne.sent_at) - instant(local.sent_at)) <= FENETRE_JUMELLE_MS
+
+/**
+ * La ligne du cœur d'un message que la page s'apprête à poser comme bulle
+ * locale est-elle DÉJÀ là ? (Un cycle peut l'avoir ramenée pendant l'envoi.)
+ */
+export function aDejaSaLigne (messages, texte, maintenant = Date.now()) {
+  const local = { direction: 'outbound', body: texte, sent_at: new Date(maintenant).toISOString() }
+  return (messages || []).some(m => jumelles(local, m))
+}
+
 /**
  * Fond les messages neufs dans ceux du fil, sans doublon.
- * - Le serveur rend les messages À PARTIR de l'instant demandé (`>=`) : celui
- *   qu'on connaît déjà revient, et il est reconnu (même instant, même sens,
- *   même texte).
+ * - Une ligne déjà connue (même instant, même sens, même texte) est reconnue.
  * - Un message envoyé depuis la page est déjà affiché (`_local`). Sa ligne du
- *   cœur le REMPLACE au lieu de s'ajouter : même sens sortant, même texte, à
- *   moins de deux minutes d'écart (spec §2, règle 3).
+ *   cœur le REMPLACE au lieu de s'ajouter (spec §2, règle 3).
+ * - ⚠ ET DANS LES DEUX ORDRES (review 1, constat 2) : si la ligne du cœur est
+ *   arrivée AVANT que la page pose sa bulle, la passe finale retire la bulle
+ *   locale jumelle. Sans elle, le doublon restait pour toujours.
  * @returns {{ messages: object[], ajoutes: number, entrants: number, remplaces: number }}
  */
 export function fusionnerMessages (existants, nouveaux) {
-  const messages = [...(existants || [])]
+  let messages = [...(existants || [])]
   let ajoutes = 0, entrants = 0, remplaces = 0
   const tries = [...(nouveaux || [])].sort((a, b) => (instant(a.sent_at) || 0) - (instant(b.sent_at) || 0))
   for (const n of tries) {
@@ -93,38 +113,58 @@ export function fusionnerMessages (existants, nouveaux) {
       && instant(e.sent_at) === tn && corps(e) === corps(n))
     if (deja) continue
     if (n.direction === 'outbound') {
-      const i = messages.findIndex(e => e._local && e.direction === 'outbound' && corps(e) === corps(n)
-        && tn !== null && instant(e.sent_at) !== null && Math.abs(instant(e.sent_at) - tn) <= 120000)
+      const i = messages.findIndex(e => e._local && jumelles(e, n))
       if (i >= 0) { messages[i] = { ...n }; remplaces++; continue }
     }
     messages.push({ ...n })
     ajoutes++
     if (n.direction === 'inbound') entrants++
   }
+  const avant = messages.length
+  messages = messages.filter(e => !(e._local && messages.some(l => jumelles(e, l))))
+  remplaces += avant - messages.length
   return { messages, ajoutes, entrants, remplaces }
 }
 
+const empreinteTache = (x) => [x.id, x.suggested_reply, x.summary, x.send_after,
+  x.suspendu_le, x.modifie_le, x.etatEnvoi].join('|')
+
 /**
- * Les propositions en attente du fil, telles que le serveur les rend, fondues
- * dans celles que la page tient. Une proposition que la page est en train
- * d'envoyer, qui a échoué, ou qui est descendue dans la saisie reste à l'écran
- * même si le serveur ne la rend plus : c'est la page qui la gère, pas le cycle.
+ * Les propositions en attente telles que le serveur les rend, fondues EN
+ * PLACE dans celles que la page tient (review 1, constat 5 : un objet neuf
+ * laissait `envoyerProposition` écrire son état sur une copie qui n'était
+ * plus à l'écran).
+ * - `bookId` : la portée — un fil, ou `null` pour toutes (relecture de la liste).
+ * - Une proposition que la page envoie, qui a échoué, ou qui est dans la
+ *   saisie reste, même absente de la réponse : c'est la page qui la gère.
+ * - `closes` : les identifiants que la page vient de clore ou de retirer.
+ *   Une réponse lue AVANT la clôture et traitée APRÈS ne les ressuscite pas.
  * @returns {{ taches: object[], change: boolean }}
  */
-export function fusionnerTaches (toutes, bookId, duServeur, enEditionId = null) {
-  const cle = String(bookId)
+export function fusionnerTaches (toutes, bookId, duServeur, enEditionId = null, closes = null) {
+  const dansPortee = (x) => bookId == null || String(x.book_id) === String(bookId)
   const garder = (x) => x.etatEnvoi === 'en_cours' || x.etatEnvoi === 'echec'
     || (enEditionId != null && String(x.id) === String(enEditionId))
-  const autres = (toutes || []).filter(x => String(x.book_id) !== cle)
-  const avant = (toutes || []).filter(x => String(x.book_id) === cle)
-  const servies = new Map((duServeur || []).map(x => [String(x.id), x]))
-  const resultat = []
-  for (const x of avant) {
+  const fermees = closes instanceof Set ? closes : new Set()
+  const servies = new Map((duServeur || [])
+    .filter(x => x && dansPortee(x) && !fermees.has(String(x.id)))
+    .map(x => [String(x.id), x]))
+  const taches = []
+  let change = false
+  for (const x of toutes || []) {
+    if (!dansPortee(x)) { taches.push(x); continue }
     const s = servies.get(String(x.id))
-    if (s) { resultat.push({ ...s, ...(x.etatEnvoi ? { etatEnvoi: x.etatEnvoi } : {}) }); servies.delete(String(x.id)) }
-    else if (garder(x)) resultat.push(x)
+    if (s) {
+      const avant = empreinteTache(x)
+      const etatEnvoi = x.etatEnvoi
+      Object.assign(x, s)
+      if (etatEnvoi) x.etatEnvoi = etatEnvoi
+      if (empreinteTache(x) !== avant) change = true
+      taches.push(x)
+      servies.delete(String(x.id))
+    } else if (garder(x)) taches.push(x)
+    else change = true
   }
-  for (const s of servies.values()) resultat.push({ ...s })
-  const empreinte = (l) => l.map(x => [x.id, x.suggested_reply, x.send_after, x.suspendu_le, x.etatEnvoi].join('|')).sort().join('#')
-  return { taches: [...autres, ...resultat], change: empreinte(avant) !== empreinte(resultat) }
+  for (const s of servies.values()) { taches.push({ ...s }); change = true }
+  return { taches, change }
 }

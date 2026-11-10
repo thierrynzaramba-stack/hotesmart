@@ -53,12 +53,16 @@ sur l'onglet (`visibilitychange`), avec une relecture immédiate.
    une pastille « Nouveau message ↓ » le ramène en bas.
 3. **Aucun doublon.** Un message que l'hôte vient d'envoyer depuis la page est
    déjà affiché. Quand sa ligne revient du serveur, elle remplace la bulle
-   locale au lieu de s'ajouter (même sens, même texte, envoyé à moins de deux
-   minutes d'écart).
+   locale au lieu de s'ajouter (même sens, même texte, envoyé à moins de cinq
+   minutes d'écart — deux horloges), et dans les DEUX ordres : si la ligne
+   est arrivée avant que la page pose sa bulle, la bulle n'est pas posée, ou
+   est retirée au cycle suivant (review 1, constats 2 et 9).
 4. **Lu tant que c'est à l'écran.** Un message du voyageur qui arrive dans le
    fil ouvert, onglet affiché, est lu : la page le marque comme d'habitude
    (`POST /api/messages action=lu`, writer unique), une fois par arrivée et pas
-   à chaque relecture.
+   à chaque relecture. ⚠ Pas sur une page oubliée (15 minutes sans geste) :
+   personne n'est devant l'écran, le « non lu » reste ; le premier geste lit le
+   fil ouvert (review 1, constat 11 — choix fait par défaut, réversible).
 5. **Une panne ne casse rien.** Une relecture ratée se retente plus tard (20 s,
    puis 40 s, jusqu'à 2 min), sans message d'erreur. Après trois échecs de
    suite, une mention discrète « Mise à jour interrompue · Réessayer » apparaît
@@ -71,28 +75,37 @@ sur l'onglet (`visibilitychange`), avec une relecture immédiate.
 Une forme neuve du **même endpoint**, pas une fonction de plus (le projet
 Vercel a un plafond de 100 fonctions) :
 
-`GET /api/messages?direct=1&fil=<bookId>&apres=<instant ISO>`, et
+`GET /api/messages?direct=1&fil=<bookId>&depuis=<curseur>`, et
 `direct=1` seul pour la liste seule (code : le paramètre `direct` distingue
 cette lecture de la collection, qui se lit sans paramètre).
 
 Elle rend :
-- `messages` : les messages du fil postérieurs à `apres`, triés du plus ancien
-  au plus récent, mêmes champs que la collection (`sender`, `direction`,
-  `body`, `sent_at`, `kind`, `origine`). Index `messages_booking_sent_idx`
-  (`booking_id, sent_at`).
+- `messages` : les messages du fil **insérés en base** après le curseur
+  (`created_at > depuis`), dans l'ordre d'insertion, mêmes champs que la
+  collection (`sender`, `direction`, `body`, `sent_at`, `kind`, `origine`).
+  ⚠ **Le curseur est l'ordre d'INSERTION, pas `sent_at`** (review 1,
+  constat 3) : le webhook Channex, son import de rattrapage, Beds24 et
+  l'e-mail entrant écrivent des lignes dont `sent_at` précède l'insertion ; un
+  curseur sur `sent_at` sautait pour toujours le message du voyageur arrivé
+  après la réponse de l'hôte.
+- `curseur` : le `created_at` de la dernière ligne rendue (inchangé si rien),
+  que la page renvoie tel quel au cycle suivant. Au premier cycle d'un fil, la
+  page part de `lu_le` — l'instant, horloge serveur, que la collection rend
+  désormais avec sa lecture — moins deux minutes de recouvrement (deux
+  horloges : Vercel et la base), que la fusion dédoublonne.
 - `taches` : les propositions en attente du fil (`agent_tasks`,
   `pending_validation`, mêmes colonnes que la page lit aujourd'hui).
-- `dernier` : l'instant du message le plus récent du compte, **hors du fil
-  ouvert** (`neq booking_id`) : un message du voyageur avec qui l'hôte échange
-  ne fait pas relire la liste entière. Index `messages_user_sent_idx`
-  (`user_id, sent_at DESC`), `limit(1)`.
+- `dernier` : le `created_at` du message le plus récent du compte, **hors du
+  fil ouvert** (`neq booking_id`) : un message du voyageur avec qui l'hôte
+  échange ne fait pas relire la liste entière. Comparé à `lu_le` de la
+  dernière lecture de la liste.
 
 **Gardes, toutes celles de la collection** : compte cible et filtre de
 périmètre (un membre limité au bien A n'apprend rien du bien B, pas même
 l'existence d'un fil) ; règle d'archivage de la collection (`clesArchivees`) ;
-`private, no-store` posé avant le premier refus. Bornes : `apres` invalide → 400 ;
-`apres` plus vieux que 7 jours → ramené à 7 jours ; au plus 200 messages, et au-delà
-`complet: false`, qui fait relire le fil entier par la page.
+`private, no-store` posé avant le premier refus. Bornes : `depuis` invalide → 400 ;
+`depuis` plus vieux que 7 jours → ramené à 7 jours ; au plus 200 messages, et
+au-delà `complet: false` — le cycle suivant reprend au 201e par le curseur.
 
 ## 4. Décisions de Thierry
 
@@ -152,8 +165,9 @@ résumé, jamais de cache.
    | situation de l'onglet | appels HTTP / minute | requêtes Supabase / minute | octets / minute |
    |---|---|---|---|
    | **caché** (autre onglet, fenêtre réduite, téléphone verrouillé) | **0** | **0** | **0** |
-   | affiché, fil ouvert, rien de neuf | 12 | ~84 | < 12 Ko (cible < 1 Ko par relecture) |
-   | affiché, fil ouvert, un message arrive ailleurs dans le compte | 12, + 1 relecture de la liste | ~84, + celles de `/api/messages?limit=50` | + 31 Ko, au plus une fois par minute |
+   | affiché, fil ouvert, rien de neuf | 12 | ~84 | < 12 Ko sans proposition en attente (< 1 Ko par relecture : plus aucune ligne déjà connue ne revient) ; + le texte des propositions en attente du fil, à chaque relecture |
+   | affiché, fil ouvert, un message arrive ailleurs dans le compte | 12, + 2 pour la relecture de la liste (la collection, puis les propositions lues sous RLS) | ~84, + celles de `/api/messages?limit=50` et 1 | + 31 Ko, au plus une fois par minute |
+   | affiché, fil ouvert, un message du voyageur arrive dans le fil | 12, + 1 (`POST action=lu`) | ~84, + celles de la garde et de l'écriture | < 1 Ko de plus |
    | affiché, liste seule (téléphone, aucun fil ouvert) | 1 | ~4 | < 1 Ko |
    | affiché, fil ouvert, 15 min sans geste (D2) | 1 | ~7 | < 1 Ko |
 
@@ -191,9 +205,9 @@ téléphone, la liste seule est relue toutes les 60 secondes (§2).
 
 ## 8. Tests
 
-- Endpoint : messages après `apres` seulement, triés ; `taches` du fil ;
+- Endpoint : messages insérés après le curseur seulement, triés ; `taches` du fil ;
   `dernier` ; périmètre (membre limité au bien A : rien du bien B, ni messages,
-  ni propositions, ni `dernier` venu de B) ; archivage ; `apres` invalide → 400 ;
+  ni propositions, ni `dernier` venu de B) ; archivage ; `depuis` invalide → 400 ;
   borne 7 jours ; `complet: false` au-delà de 200 ; `no-store` sur 405 et 401.
 - Page (DOM, banc existant de Messages, horloge factice) : un nouveau message
   apparaît sans recharger ; saisie et éditeur de proposition intacts ;
@@ -222,5 +236,6 @@ téléphone, la liste seule est relue toutes les 60 secondes (§2).
   pour ce lot. Il faut ajouter `messages` et `agent_tasks` à la publication, et
   prouver que la RLS filtre bien le flux par compte et par périmètre. Une
   relecture toutes les 5 secondes suffit à cette échelle, sans migration.
-- **Biens Beds24** : leurs messages entrent par un autre chemin, non mesuré
-  ici. La page les montrera dès qu'ils sont dans le cœur, à leur rythme.
+- **Biens Beds24** : leurs messages entrent par le relevé du cron. Le curseur
+  suivant l'ordre d'insertion, la page les montre au cycle qui suit leur
+  entrée dans le cœur — au rythme du relevé, pas en direct.

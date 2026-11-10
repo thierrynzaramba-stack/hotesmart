@@ -93,7 +93,7 @@ test('LE TEST QUI COMPTE : la bulle posee par la page apres un envoi est REMPLAC
 
 test('une bulle locale ne mange pas un message identique envoye bien plus tard, ni un autre texte', () => {
   const local = { sent_at: '2026-11-10T08:00:00Z', direction: 'outbound', body: 'Merci', _local: true }
-  const tard = { sent_at: '2026-11-10T08:03:00Z', direction: 'outbound', body: 'Merci' }
+  const tard = { sent_at: '2026-11-10T08:06:00Z', direction: 'outbound', body: 'Merci' }
   const autre = { sent_at: '2026-11-10T08:00:01Z', direction: 'outbound', body: 'Merci beaucoup' }
   const r = R.fusionnerMessages([local], [tard, autre])
   assert.equal(r.messages.length, 3)
@@ -118,4 +118,62 @@ test('les propositions inchangees ne demandent aucun rendu, et l etat d envoi te
   const r = R.fusionnerTaches([x], 'B1', [{ id: 1, book_id: 'B1', suggested_reply: 'a' }])
   assert.equal(r.change, false)
   assert.equal(r.taches[0].etatEnvoi, 'echec')
+})
+
+test('LE TEST QUI COMPTE : la ligne du coeur arrivee AVANT la bulle locale — la bulle est retiree, pas doublee', () => {
+  // Review 1, constat 2 : un cycle ramene la ligne pendant l'envoi, la page
+  // pose sa bulle APRES. Au cycle suivant la ligne n'est plus « neuve » : sans
+  // la passe finale, le doublon restait pour toujours.
+  const coeur = { sent_at: '2026-11-10T08:00:01Z', direction: 'outbound', body: 'Avec plaisir', kind: 'message' }
+  const local = { sent_at: '2026-11-10T08:00:02Z', direction: 'outbound', body: 'Avec plaisir', _local: true }
+  const r = R.fusionnerMessages([coeur, local], [coeur])
+  assert.equal(r.messages.length, 1)
+  assert.equal(r.messages[0]._local, undefined)
+  assert.equal(r.remplaces, 1, 'un retrait doit demander un rendu')
+})
+
+test('une horloge de poste decalee de 4 minutes ne laisse pas de doublon', () => {
+  // Review 1, constat 9 : deux horloges, la fenetre est de 5 minutes.
+  const local = { sent_at: '2026-11-10T08:04:00Z', direction: 'outbound', body: 'Ok', _local: true }
+  const coeur = { sent_at: '2026-11-10T08:00:00Z', direction: 'outbound', body: 'Ok' }
+  assert.equal(R.fusionnerMessages([local], [coeur]).messages.length, 1)
+  assert.equal(R.FENETRE_JUMELLE_MS, 5 * MIN)
+})
+
+test('aDejaSaLigne : la page ne pose pas sa bulle si la ligne du coeur est deja la', () => {
+  const t = Date.parse('2026-11-10T08:00:00Z')
+  const coeur = { sent_at: '2026-11-10T07:59:58Z', direction: 'outbound', body: 'Le code est 4821' }
+  assert.equal(R.aDejaSaLigne([coeur], 'Le code est 4821 ', t), true)
+  assert.equal(R.aDejaSaLigne([coeur], 'Autre texte', t), false)
+  assert.equal(R.aDejaSaLigne([{ ...coeur, _local: true }], 'Le code est 4821', t), false, 'une bulle locale n est pas une ligne du coeur')
+  assert.equal(R.aDejaSaLigne([{ ...coeur, direction: 'inbound' }], 'Le code est 4821', t), false)
+})
+
+test('LE TEST QUI COMPTE : la fusion des propositions se fait EN PLACE — l objet que la page tient reste le bon', () => {
+  // Review 1, constat 5b : `envoyerProposition` ecrit `etatEnvoi` sur l'objet
+  // qu'il tient ; un objet neuf a l'ecran restait fige.
+  const x = { id: 1, book_id: 'B1', suggested_reply: 'a' }
+  const r = R.fusionnerTaches([x], 'B1', [{ id: 1, book_id: 'B1', suggested_reply: 'b' }])
+  assert.equal(r.taches[0], x, 'un objet neuf a remplace celui de la page')
+  assert.equal(x.suggested_reply, 'b')
+  assert.equal(r.change, true)
+})
+
+test('LE TEST QUI COMPTE : une proposition close par la page ne ressuscite pas sur une reponse lue avant la cloture', () => {
+  // Review 1, constat 5a.
+  const lue = [{ id: 7, book_id: 'B1', suggested_reply: 'rejetee' }]
+  const r = R.fusionnerTaches([], 'B1', lue, null, new Set(['7']))
+  assert.equal(r.taches.length, 0)
+  assert.equal(r.change, false)
+})
+
+test('la portee `null` fond TOUTES les propositions (relecture de la liste) sans perdre celle qu on envoie', () => {
+  // Review 1, constat BLOQUANT : la relecture de la liste ECRASAIT les
+  // propositions — celle que l'hote envoyait (`sending` cote serveur, donc
+  // absente de la lecture) disparaissait, et sa cloture ne partait jamais.
+  const enEnvoi = { id: 1, book_id: 'B1', suggested_reply: 'je l envoie', etatEnvoi: 'en_cours' }
+  const autre = { id: 2, book_id: 'B2', suggested_reply: 'x' }
+  const r = R.fusionnerTaches([enEnvoi, autre], null, [{ id: 2, book_id: 'B2', suggested_reply: 'x' }, { id: 3, book_id: 'B3', suggested_reply: 'neuve' }])
+  assert.equal(r.taches.map(x => x.id).join(','), '1,2,3')
+  assert.equal(r.taches[0], enEnvoi)
 })
