@@ -164,6 +164,29 @@ const ATTENDU = {
     // l'accueil — un appel par bien, 72 requetes, 586 Ko. Un test d'execution
     // le garde en plus de celui-ci : tests/yf-bouton-calendrier.test.js.
     '/api/yield-menu': 1
+  },
+  // ⚠ LA PAGE AVIS ENTRE DANS CE TEST LE 8 NOVEMBRE 2026, avec sa refonte V5
+  // (docs/specs/avis-v5). Mesure AVANT en production le meme jour : 3 appels
+  // `/api` au chargement (`membres`, `avis?action=auto-validation`,
+  // `avis?action=cartes`), derriere dix lectures Supabase du vieux socle, ecran
+  // complet a 4,8 s. Apres : UN appel d'ecran.
+  // ⚠ LES DEUX SITES SONT DES CONSTANTES, posees une fois en tete du module :
+  // c'est l'INVENTAIRE que ce test garde. Ce qui part a l'execution (un seul
+  // appel au chargement, le meme a 1 et a 12 logements) est mesure en cliquant,
+  // dans tests/avis-v5.test.js.
+  'pages/avis.html': {
+    '/api/ecran/avis': 1,   // l'ecran en un appel (et ses relectures : filtre, geste)
+    '/api/avis': 1          // les GESTES seulement : corriger, confirmer, saisir, sejours de la saisie
+  },
+  // ⚠ « CE QUI FAIT BOUGER VOS PRIX » ENTRE DANS CE TEST LE 9 NOVEMBRE 2026,
+  // avec sa page (lot 4, 4a). Mesure AVANT en production le meme jour, sur
+  // l'ancienne pop-up : 5 appels `/api` (dont `/api/yield-evenements` DEUX
+  // fois) et 10 appels Supabase directs. Apres : UN appel d'ecran, aussi pour
+  // changer de logement. Les gestes (etape 3, meme jour) passent par
+  // `/api/yield-evenements` — jamais au chargement.
+  'apps/yield/evenements.html': {
+    '/api/ecran/evenements': 1,   // l'ecran en un appel (et sa relecture apres un geste)
+    '/api/yield-evenements': 1    // les GESTES seulement : PUT (simuler, confirmer), PATCH (zone, crans d'avant)
   }
 }
 

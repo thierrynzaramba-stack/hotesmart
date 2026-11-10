@@ -438,9 +438,42 @@ automatique est active, avec le lien « ⚙ Configuration ».
 
 **Quand l'horloge démarre** — quand la **prestataire a fini sa part** et que
 rien n'est négatif : `guest_evaluations.auto_publier_le` = maintenant + X h,
-**plafonné à l'échéance − 12 h** pour tomber avant celle d'Airbnb. Jamais avant :
-une évaluation où personne n'a rien coché ne part pas « au meilleur niveau »
-(choix prudent de la nuit, à défaire si Thierry veut l'horloge dès la naissance).
+**plafonné à l'échéance − 12 h** pour tomber avant celle d'Airbnb. Jamais avant
+quand on attend sa part : une évaluation où personne n'a rien coché ne part pas
+« au meilleur niveau » (choix prudent de la nuit). ⚠ **Défait le 9 novembre 2026
+pour le cas où on ne demande RIEN à la prestataire** — paragraphe suivant.
+
+**Sans prestataire, l'horloge démarre à la naissance** (décision de Thierry du
+9 novembre 2026 : « si l'avis de la prestataire n'est pas demandé, ça doit
+envoyer un message positif en 24 h »). Mesure du jour en production : La bulle
+et Cœur de vie 23 réglées à 24 h, **zéro** publication automatique depuis le
+2 octobre, 14 évaluations expirées — aucune prestataire n'était autorisée à
+évaluer, donc « sa part finie » n'arrivait jamais. On ne lui demande rien quand
+la grille ne lui ouvre aucune question, quand le ménage du séjour n'a pas de
+prestataire, ou quand elle est inactive ou non autorisée (`eval_scope` autre que
+`selon_grille`). Alors :
+- à la **naissance**, l'horloge part : départ du jour → **midi, heure de Paris,
+  + X h** (la naissance a lieu à minuit, le voyageur encore dans les lieux) ;
+  objet Channex → maintenant + X h ; même plafond (échéance − 12 h) ; seulement
+  sur une évaluation que personne n'a touchée (`a_remplir`, colonnes de réponses
+  nulles, pas d'horloge — l'écriture est conditionnée aux quatre) —
+  `armerSansPrestataire`, lib/avis/auto-validation.js ;
+- elle ne part **qu'une fois**, et c'est le journal qui le dit : la marque
+  `avis.auto_armee` (core_events) est posée **avant** l'horloge et lue avant tout
+  armement — certaines réactions de l'hôte (« Publier » ou « Rédiger » sans
+  réponse) ne laissent aucune trace sur la ligne ;
+- à l'**échéance**, **toutes** les questions vides prennent le meilleur niveau,
+  celles de la prestataire comprises ; la grille du bien se **fige dans
+  l'écriture de la prise** (sinon la publication lirait la grille par défaut) ;
+- si une prestataire est devenue autorisée entre-temps et que sa part est vide,
+  rien ne part et l'hôte est prévenu (comportement d'avant) ;
+- une lecture en panne à l'échéance reporte d'une heure, **jamais au-delà du
+  plafond** : au plafond, rien ne part et l'hôte est prévenu ;
+- les évaluations nées **avant** ce lot reçoivent leur horloge par
+  `scripts/armer-avis-sans-prestataire.js --nees-avant <déploiement>` (à blanc,
+  puis `--go`), décision de Thierry du même jour : le délai part de l'exécution
+  du script, et **le délai plein ou rien** — celles que le plafond raccourcirait
+  sont listées « à publier à la main », pas armées.
 
 **Ce qui l'arrête** — toute **réaction de l'hôte** : une réponse, un texte, un
 abandon. `auto_publier_le` repasse à nul ; l'évaluation est alors à lui (S2).
@@ -449,7 +482,9 @@ abandon. `auto_publier_le` repasse à nul ; l'évaluation est alors à lui (S2).
 plafonnée, jamais de balayage) :
 1. la config est relue : désactivée entre-temps → rien ;
 2. les questions de l'hôte sans réponse prennent le **meilleur niveau** de leur
-   grille (le premier, « je recommande » pour la recommandation) ;
+   grille (la meilleure note non négative, « je recommande » pour la
+   recommandation) — et celles de
+   la prestataire aussi quand on ne lui demande rien (9 novembre 2026) ;
 3. **jamais un avis négatif** : si les réponses le rendent négatif, rien ne part,
    il attend l'hôte ;
 4. **le texte de l'IA est conservé** ; s'il n'y en a pas, il est rédigé ; si l'IA
@@ -493,6 +528,85 @@ indexée.
 - **Un échec se dit** : avis négatif, rédaction refusée, plateforme qui refuse,
   objet jamais ouvert — une tâche « n'a pas été publiée automatiquement », une
   fois par séjour.
+
+### 10 ter. Trace des reviews du lot « sans prestataire » (9 novembre 2026)
+
+Branche `avis-auto-sans-prestataire`, partie de `main` `b7f511dc37fb5d27c5cc1f0017c7a136387db193`,
+arbre relu : `/home/claude/hotesmart-auto-avis`. Lot d'**envoi au voyageur** (la
+publication d'une évaluation chez le canal) : deux reviews, la seconde limitée aux
+correctifs et dernière. Règle de contrôle : chaque fichier cité doit être dans le
+diff de la **plage relue** ; un fichier hors plage est dit « preuve seulement » ou
+porte son constat et son motif.
+
+**Review 1** — plage `b7f511dc37fb5d27c5cc1f0017c7a136387db193..6e73da311cddc5e72ec62cc096454476c7c38ef1`,
+tête déclarée lue `6e73da311cddc5e72ec62cc096454476c7c38ef1`. Aucun constat de sécurité ;
+12 constats, corrigés dans `22f2013105779e6923bc972840aebb0bf625f047` (sauf 7 et 8, notés).
+Diff de la plage : `docs/specs/spec-evaluation-voyageur.md`, `lib/avis/auto-validation.js`,
+`lib/avis/naissance.js`, `scripts/armer-avis-sans-prestataire.js`,
+`tests/avis-auto-sans-prestataire.test.js`, `tests/avis-naissance.test.js`.
+
+| constat | fichiers cités | dans la plage ? |
+|---|---|---|
+| 1 — le script publie avant 24 h, parfois sans rappel | `scripts/armer-avis-sans-prestataire.js`, `lib/avis/auto-validation.js` | oui |
+| 2 — l'horloge part à minuit, avant le check-out | `lib/avis/naissance.js` | oui |
+| 3 — le script réarme ce que l'hôte a arrêté | `scripts/armer-avis-sans-prestataire.js`, `lib/avis/auto-validation.js` ; **`api/avis.js`** (l. 2089-2097, `laMainALHote`) | `api/avis.js` hors plage : **preuve seulement**, il montre les réactions de l'hôte qui ne laissent pas de trace ; le correctif (marque au journal) est dans `lib/avis/auto-validation.js` |
+| 4 — l'écriture de l'horloge ne vérifie pas les réponses | `lib/avis/auto-validation.js`, `tests/avis-auto-sans-prestataire.test.js` | oui |
+| 5 — reports d'une heure sans plafond | `lib/avis/auto-validation.js` | oui |
+| 6 — réponse de prestataire écrasée | `lib/avis/auto-validation.js` ; **`api/avis.js`** (l. 2223, relecture sous verrou) | `api/avis.js` hors plage : **constat d'interaction** ; corrigé d'abord côté prise (`siCleanerNul`, 22f20131), puis côté relecture sous verrou en `51355e63` sur le constat 2 de la dernière review — c'est là que `api/avis.js` entre au lot |
+| 7 — coût du cron | `lib/avis/naissance.js`, `lib/avis/auto-validation.js` | oui — non traité, noté |
+| 8 — armement manqué jamais rattrapé | `lib/avis/naissance.js` ; **`api/avis.js`** (l. 1182, naissance par le lien de la prestataire) | `api/avis.js` hors plage : **constat, non traité, avec motif** — cette naissance exige une prestataire autorisée (`api/avis.js` l. 1171), qui participe donc : ne pas armer y est juste |
+| 9 — détails du script | `scripts/armer-avis-sans-prestataire.js` | oui |
+| 10 — erreur d'armement comptée « non née » | **`lib/cron-channel-reviews.js`** | hors plage : **constat, le lot aurait dû y toucher** — corrigé en 22f20131, où le fichier entre au lot |
+| 11 — spec contraire | `docs/specs/spec-evaluation-voyageur.md` | oui |
+| 12 — tests qui passent pour de mauvaises raisons | `tests/avis-auto-sans-prestataire.test.js` | oui |
+
+Cités dans « points vérifiés », sans constat : `api/avis.js` (l. 1865, 2225) et
+`lib/avis/publication.js` (l. 110-119) — **preuve seulement** (la rédaction et la
+publication relisent bien la grille figée).
+
+**Dernière review** — plage `6e73da311cddc5e72ec62cc096454476c7c38ef1..22f2013105779e6923bc972840aebb0bf625f047`,
+tête déclarée lue `22f2013105779e6923bc972840aebb0bf625f047`. Aucun constat de sécurité ;
+5 constats, corrigés sans nouvelle review dans `51355e63267ba033ff7cbf55a4bebda455df0ce5`
+(règle : c'était la dernière). Diff de la plage : `docs/specs/spec-evaluation-voyageur.md`,
+`lib/avis/auto-validation.js`, `lib/avis/naissance.js`, `lib/cron-channel-reviews.js`,
+`scripts/armer-avis-sans-prestataire.js`, `tests/avis-auto-sans-prestataire.test.js`.
+
+| constat | fichiers cités | dans la plage ? |
+|---|---|---|
+| 1 — le délai jugé avant la marque et la prestataire | `scripts/armer-avis-sans-prestataire.js`, `lib/avis/auto-validation.js` | oui |
+| 2 — la relecture sous verrou ne compare que `answers_host` | **`api/avis.js`** (l. 2223-2225) | hors plage : **constat, le lot aurait dû y toucher** (la prise « sans prestataire » change ce que la relecture doit comparer) — corrigé en 51355e63, test dans `tests/avis-endpoint-evaluation.test.js` |
+| 3 — marque posée, horloge non écrite | `lib/avis/auto-validation.js` | oui |
+| 4 — « le premier » au lieu de « la meilleure note » | `docs/specs/spec-evaluation-voyageur.md` | oui |
+| 5 — délai raccourci à la naissance par objet Channex | `lib/avis/naissance.js` | oui |
+
+Cités dans « points vérifiés », sans constat : `api/messages.js` (l. 156, l'autre
+lecteur de `core_events`) et `api/cron.js` (l. 703, ce que le cron lit du bilan) —
+**preuve seulement**. Mutations faites sur une copie hors de l'arbre.
+
+**Review 3, script de recette** — plage `c3ffaa535985565be64b94abed1083ac630748a1..f04b56391c7b5bc09e8a1988ee611eb684abec34`,
+tête déclarée lue `f04b56391c7b5bc09e8a1988ee611eb684abec34`. Diff de la plage :
+`scripts/recette-auto-sans-prestataire.js` seul (staging seulement). Constats, tous sur
+ce fichier :
+1. **sécurité** — la simulation crue imposée ne faisait rien : hors production, une
+   seule variable lève la simulation, `AVIS_PUBLICATION_REELLE=1`, et le script ne la
+   refusait pas. Corrigé : le script s'arrête si elle est posée, et relit chaque
+   publication (ECHEC si la réponse du canal n'est pas marquée simulation) ;
+2. exactitude — l'heure jouée calculée sur tous les décors armés : filtre `--compte`
+   et décors dont l'échéance passerait avant l'heure jouée écartés ;
+3. mineur — le journal des notifications lisait le mauvais champ.
+Cités comme **preuve seulement** : `api/avis.js` (`simulationActive`, l. 2034-2049 ;
+envoi, l. 2187), `lib/avis/auto-validation.js` (l. 293, 348, 377, 390-394),
+`lib/avis/notifications.js` (l. 90-94), `scripts/recette-avis-staging.js` (l. 92, 231),
+`docs/recette/recette-avis-lot4.md` (l. 19).
+⚠ **Pas de re-review du correctif de sécurité** : c'est la troisième review du lot,
+le plafond d'un lot d'envoi au voyageur. Le correctif est un refus de démarrer et une
+relecture après coup, dans un script de recette qui ne tourne que sur staging ; le
+chef de file tranche.
+
+**Commits non relus** : `51355e63` (correctifs de la dernière review), conforme à la
+règle ; et le correctif de la review 3 (script de recette). Ses fichiers : `api/avis.js`, `docs/specs/spec-evaluation-voyageur.md`,
+`lib/avis/auto-validation.js`, `scripts/armer-avis-sans-prestataire.js`,
+`tests/avis-auto-sans-prestataire.test.js`, `tests/avis-endpoint-evaluation.test.js`.
 
 ## 11. Lots
 

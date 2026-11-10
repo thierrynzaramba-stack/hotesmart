@@ -30,8 +30,15 @@ test('les placeholders lisent la base de connaissance AVANT le provider', () => 
   // Ce qui reste ici est le CABLAGE de ce chemin : qu'il transmette bien la
   // connaissance de l'hote ET les replis du provider.
   assert.match(messages, /connaissance: k,/)
-  assert.match(messages, /telephone_hote: property\.phone,/)
-  assert.match(messages, /adresse: property\.address,/)
+  // Les replis viennent du module commun depuis le lot « Accueil du voyageur »
+  // (S1) : la fiche, l'aperçu, l'IA et ce chemin lisent la même chose.
+  assert.match(messages, /replis: replisDuBien\(property\)/)
+  const balises = lire('lib/balises.js')
+  assert.match(balises, /telephone_hote: b\.phone,/)
+  // L'adresse de la FICHE d'abord : `adresseFiche` sur l'objet Beds24 (posée
+  // par lib/cron-beds24-props.js), sinon `address`, qui EST la fiche ailleurs.
+  // Ailleurs, l'adresse ASSEMBLÉE de la fiche (rue, code postal, ville).
+  assert.match(balises, /adresse: b\.adresseFiche !== undefined \? b\.adresseFiche : adresseDeLaFiche\(b\),/)
 })
 
 test('plus aucune lecture nue de `property.phone`', () => {
@@ -59,9 +66,9 @@ test('les horaires ont trois replis, le defaut en dernier', () => {
   // provider sert quand la base est muette, et le defaut en dernier »).
   // ⚠ UNE CHAINE de replis depuis la review : un `checkInStart` blanc ne doit
   // plus masquer `checkin_time` (l'EFFET est mesure dans tests/balises.test.js).
-  assert.match(messages, /checkin: \[property\.checkInStart, property\.checkin_time\]/)
-  assert.match(messages, /checkout: \[property\.checkOutEnd, property\.checkout_time\]/)
   const balises = lire('lib/balises.js')
+  assert.match(balises, /checkin: \[b\.checkInStart, b\.checkin_time\]/)
+  assert.match(balises, /checkout: \[b\.checkOutEnd, b\.checkout_time\]/)
   assert.match(balises, /defaut: '18:00'/)
   assert.match(balises, /defaut: '10:00'/)
 })
@@ -175,9 +182,16 @@ test('l alerte dit QUOI, OU, et OU LE CORRIGER', () => {
   // review : la phrase disait « Manque : wifi_mdp ». `etiquetteDe` la traduit.
   assert.match(t, /manquants\.map\(etiquetteDe\)\.join/, 'quelle information, en clair')
   assert.match(t, /OU_RENSEIGNER\[m\]/, 'ou le renseigner')
-  // ⚠ LA TABLE A DEMENAGE dans `lib/balises.js` (une seule source), mais le
-  // LIBELLE ne change pas : il nomme l'ecran qui existe aujourd'hui.
-  assert.match(lire('lib/balises.js'), /GuestFlow → Base de connaissance → Téléphone hôte/)
+  // ⚠ LA TABLE A DEMENAGE dans `lib/balises.js` (une seule source), et le
+  // LIBELLE nomme l'ecran qui existe aujourd'hui : depuis le lot 3 de la base
+  // de connaissance V5, c'est l'ecran V5 (l'ancienne page redirige vers lui).
+  // ⚠ ET L'ECRAN A CHANGE LE 8 NOVEMBRE 2026 : la fiche du logement, bloc
+  // « Accueil du voyageur ». Le chemin nomme LE logement de l'alerte.
+  const { OU_REMPLIR } = require('../lib/balises')
+  assert.equal(OU_REMPLIR.telephone_hote, 'Logements → <nom du logement> → Accueil du voyageur → Téléphone')
+  // Par FONCTION (review 1 du lot) : un nom porteur de `$&` ne doit pas
+  // devenir un motif de remplacement.
+  assert.match(t, /replace\('<nom du logement>', \(\) => nom\)/, 'le gabarit est rempli par le nom du bien')
 })
 
 test('l alerte ne fait jamais echouer le cycle', () => {
@@ -194,4 +208,14 @@ test('« message non envoye » a un libelle, et il REVEILLE', () => {
   // ⚠ Contrairement au remboursement automatique : un voyageur qui arrive et ne
   // recoit rien est urgent. L'anti-spam (1/h par bien) borne le bruit.
   assert.ok(!SANS_SMS.has('message_non_envoye'))
+})
+
+test('l adresse du chemin Channex voyage avec son code postal et sa ville', () => {
+  // Recette du 9 novembre 2026 : la fiche range l'adresse en trois champs.
+  // Sans eux, le voyageur Channex aurait reçu la rue seule.
+  assert.match(channexProps, /zip_code: p\.zip_code/)
+  assert.match(channexProps, /city: p\.city/)
+  const selectRecolle = channexProps.replace(/'\s*\+\s*'/g, '')
+  assert.match(selectRecolle, /select\('[^']*address, zip_code, city[^']*'\)/,
+    'le code postal et la ville doivent etre SELECTIONNES, pas seulement recopies')
 })

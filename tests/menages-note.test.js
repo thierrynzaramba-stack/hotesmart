@@ -43,7 +43,17 @@ function preparer ({ user = PROD, profil = null, permissions = null,
       const chain = {
         select () { return chain },
         eq (c, v) { a.f[c] = v; return chain },
-        in () { return chain }, not () { return chain }, order () { return chain },
+        in () { return chain }, // ⚠ `is` COMPLETE CE DOUBLE depuis le filtre des biens archives :
+        // `sansArchives` (lib/biens-vivants.js) LEVE sur une chaine qui n'a pas
+        // `.is`, et c'est VOULU — un double incomplet doit echouer bruyamment
+        // plutot que de valider du code qui ne peut pas tourner.
+        //
+        // ⚠ IL NE FAIT QUE CHAINER, et il ne mesure donc PAS que la garde est
+        // posee : ces tests ne parlent pas d'archivage. C'est
+        // tests/ecrans-sans-biens-archives.test.js qui le mesure, avec un
+        // double qui APPLIQUE le filtre.
+ is () { return chain },
+ not () { return chain }, order () { return chain },
         neq () { return chain }, gte () { return chain }, lte () { return chain },
         limit () { return chain },
         range (from) { return Promise.resolve(from === 0 ? { data: [], error: null } : { data: [], error: null }) },

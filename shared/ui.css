@@ -406,6 +406,85 @@ h1, h2, h3, p { margin: 0; }
    rendre visible (constat de la review). */
 .msg-tiroir__note { position: sticky; bottom: 0; margin: 10px 0 0; padding: 10px 18px calc(14px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); color: var(--danger); font-weight: var(--fw-semibold); }
 .msg-tiroir__note--ok { color: var(--ok); }
+/* ---------- Base de connaissance V5 (lot 3) ----------
+   Le volet de l'ordinateur fait 440 px (maquette) ; les deux autres volets du
+   tiroir gardent leurs 360 px. La page téléphone (/connaissance) monte la MÊME
+   vue (`shared/connaissance-vue.js`) : ces règles valent pour les deux.
+   Charte : bleu = cliquable, l'ambre UNIQUEMENT pour « À revoir », le rouge
+   pour ce qui manque ou supprime, aucun fond noir. */
+.msg-tiroir--large { width: min(440px, 100vw); }
+.kb { display: flex; flex-direction: column; gap: 4px; padding: 6px 0 18px; }
+.kb-bien { display: flex; align-items: center; gap: 10px; padding: 8px 18px; }
+.kb-bien__photo { width: 40px; height: 40px; border-radius: var(--radius-card); object-fit: cover; flex: none; background: var(--surface-2); }
+.kb-bien__photo--vide { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.kb-bien__nom { font-weight: var(--fw-semibold); }
+.kb-bien select { flex: 1; min-width: 0; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 10px; font-size: var(--fs-body); }
+.kb-section { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 18px 4px; }
+.kb-section__titre { margin: 0; font-size: var(--fs-small); font-weight: var(--fw-bold); letter-spacing: var(--tracking-tight); }
+.kb-cartes { display: flex; flex-direction: column; gap: 8px; padding: 4px 18px; }
+.kb-carte { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.kb-carte:hover { box-shadow: var(--shadow-hover); }
+.kb-carte__tete { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kb-carte__tete .icon { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.kb-carte__sujet { font-weight: var(--fw-semibold); margin-inline-end: auto; }
+.kb-carte__texte { font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* « Utiliser » une réponse dans la conversation (spec kb-utiliser-reponse) :
+   la carte reste le bouton qui ouvre l'éditeur, l'action vit SOUS elle — un
+   bouton dans un bouton n'existe pas en HTML. */
+.kb-carte-bloc { display: flex; flex-direction: column; gap: 6px; }
+.kb-carte-bloc .kb-note { margin: 0; }
+.kb-carte-bloc__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 14px; }
+.kb-etiquette { display: inline-block; padding: 0 7px; margin: 0 1px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink); font-size: var(--fs-caption); font-weight: var(--fw-semibold); line-height: 1.7; white-space: nowrap; user-select: all; }
+.kb-etiquette--vide, .kb-manque { background: var(--danger-soft); color: var(--danger); }
+.kb-manque { padding: 0 3px; border-radius: 4px; font-weight: var(--fw-semibold); }
+.kb-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: var(--radius-pill); font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+.kb-badge .icon { width: 13px; height: 13px; }
+.kb-badge--revoir { background: var(--amber-soft); color: var(--amber-text); }
+.kb-badge--horsia { background: var(--surface-2); color: var(--muted); }
+.kb-faits { display: flex; flex-direction: column; padding: 0 18px; }
+.kb-fait { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.kb-fait:last-child { border-bottom: 0; }
+.kb-fait__libelle { display: flex; flex-direction: column; flex: 0 0 38%; font-size: var(--fs-small); color: var(--muted); }
+.kb-fait__valeur { flex: 1; min-width: 0; font-size: var(--fs-small); overflow-wrap: anywhere; }
+.kb-a-remplir { color: var(--danger); font-weight: var(--fw-semibold); }
+.kb-fait--edition { flex-wrap: wrap; }
+/* Accueil du voyageur (fiche du logement) : le bloc porte déjà sa marge. */
+.fic-bloc .kb-faits { padding: 0; }
+/* « Le remplir » sur place, sous le refus d'une carte de la base. */
+.kb-carte-bloc .kb-fait--edition { padding: 8px 0; border-bottom: 0; }
+.kb-fait--edition input { flex: 1 1 100%; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0 10px; font-size: var(--fs-body); background: var(--surface); color: var(--ink); }
+.kb-icone { background: none; border: 0; padding: 6px; cursor: pointer; color: var(--info); flex: none; }
+.kb-icone .icon { width: 17px; height: 17px; }
+.kb-lien { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 4px 0; color: var(--info); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.kb-lien .icon { width: 16px; height: 16px; }
+.kb-editeur { display: flex; flex-direction: column; gap: 12px; padding: 8px 18px; }
+.kb-champ { display: flex; flex-direction: column; gap: 4px; }
+.kb-champ input { height: 40px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0 10px; font-size: var(--fs-body); background: var(--surface); color: var(--ink); }
+.kb-message { min-height: 110px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); font-size: var(--fs-body); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; }
+.kb-message:focus, .kb-champ input:focus, .kb-fait--edition input:focus { border-color: var(--ink); outline: none; }
+.kb-insertion { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.kb-inserer { min-height: 34px; padding: 0 12px; border: 1px solid var(--info); border-radius: var(--radius-pill); background: var(--surface); color: var(--info); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.kb-autres { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
+.kb-apercu { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: var(--radius-card); background: var(--surface-2); }
+.kb-apercu__texte { margin: 0; font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.5em; }
+.kb-interrupteur { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.kb-interrupteur input { width: 20px; height: 20px; margin-top: 2px; flex: none; accent-color: var(--info); }
+.kb-interrupteur > span { display: flex; flex-direction: column; }
+.kb-interrupteur__titre { font-weight: var(--fw-semibold); }
+.kb-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.kb-supprimer { margin-inline-start: auto; background: none; border: 0; padding: 4px 0; color: var(--danger); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.kb-note { margin: 4px 18px; color: var(--danger); font-size: var(--fs-small); font-weight: var(--fw-semibold); }
+.kb-editeur .kb-note { margin: 0; }
+.kb-note--ok { color: var(--ok); }
+.kb-info, .kb-vide { margin: 6px 18px; }
+.kb button:disabled { opacity: .5; cursor: default; }
+/* La page téléphone : la vue plein écran, sous un en-tête de retour. */
+.kb-page { max-width: 640px; margin: 0 auto; padding-bottom: 96px; }
+.kb-page__entete { display: flex; align-items: center; gap: 10px; padding: 12px 18px 4px; }
+.kb-page__entete h1 { margin: 0; }
+@media (max-width: 899px) {
+  .kb-inserer, .kb-lien, .kb-supprimer, .kb-utiliser { min-height: 44px; }
+}
 @media (max-width: 899px) {
   .msg-retour { display: inline-flex; }
   /* En-tete du fil COMPACT (spec §4) : nom puis bien · dates, chacun sur sa
@@ -427,6 +506,12 @@ h1, h2, h3, p { margin: 0; }
   .bulle__actions .btn { flex: 1 1 100%; justify-content: center; }
   .bulle__actions [data-envoyer-prop] { order: -1; }
   .bulle-menu { order: 1; margin-inline-start: auto; }
+  /* La saisie PENDANT LA FRAPPE (recette du 7 novembre 2026) : le champ sur
+     toute la largeur, les boutons dessous, à droite. La classe se pose au
+     toucher du champ et ne se retire qu'APRÈS un clic hors de la saisie
+     (pages/messages.html) : les boutons ne bougent pas sous le doigt. */
+  .msg-saisie--frappe { flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
+  .msg-saisie--frappe textarea { flex: 1 1 100%; }
 }
 
 /* ---------- Barre du haut ---------- */
@@ -817,6 +902,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-yf-menu__activer { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 10px 14px; border-radius: var(--radius-pill); background: var(--info); color: var(--on-ink); font-size: var(--fs-small); font-weight: var(--fw-semibold); text-align: center; text-decoration: none; }
 .cal-yf-menu__activer:hover { box-shadow: var(--shadow-hover); }
 .cal-yf-menu__attente { padding: 14px 10px; font-size: var(--fs-caption); color: var(--muted); }
+/* Le refus de bascule : la phrase de la regle, lisible, SANS bouton. Un hote
+   qui lit pourquoi c'est impossible et quel geste le debloque est mieux servi
+   qu'un bouton qui ne fait rien. */
+.cal-yf-menu__refus { margin: 0; padding: 2px 6px 4px; font-size: var(--fs-caption); color: var(--muted); line-height: 1.45; }
 .cal-yf-voile { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 54; }
 
 @media (max-width: 899px) {
@@ -1992,3 +2081,162 @@ body.men-cfg-ouvert { overflow: hidden; }
   display: flex; flex-wrap: wrap; gap: var(--gap-s); margin-block-start: 4px;
 }
 .hs-confirm__pied .btn { flex: 1 1 auto; white-space: normal; }
+
+/* ============================================================
+   PAGE « AVIS » (lot Avis V5, 8 novembre 2026)
+   Spec : docs/specs/avis-v5/spec-refonte-ui-v5-lot-avis.md
+   Préfixe `avp-` : `.avis-*` appartient déjà aux cartes d'avis de l'accueil.
+   ⚠ UN SEUL MOMENT AMBRE : la bulle « À traiter ». Les statuts ne passent
+   jamais par la couleur seule — toujours une icône ou un mot avec.
+   ============================================================ */
+.avp { gap: var(--gap-l); }
+.avp-h2 { margin: 0; font-size: 20px; font-weight: var(--fw-black); letter-spacing: -0.02em; }
+.avp-tete { display: flex; align-items: flex-start; gap: var(--gap-s); }
+.avp-tete__titre { flex: 1; min-width: 0; }
+.avp-tete .h1 { margin: 0; }
+.avp-auto { margin: 4px 0 0; font-size: var(--fs-caption); color: var(--muted); }
+.avp-auto a { color: var(--ink); font-weight: var(--fw-semibold); text-decoration: underline; }
+
+/* Filtres : des pastilles, qui passent à la ligne à l'ordinateur et défilent au téléphone. */
+.avp-filtres { display: flex; flex-wrap: wrap; gap: var(--gap-s) var(--gap-l); align-items: center; min-width: 0; }
+/* `min-width: 0` : sans lui, une rangee qui defile au telephone elargit la page entiere. */
+.avp-pastilles { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; max-width: 100%; }
+.avp-pastille {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink);
+  font: inherit; font-size: var(--fs-caption); font-weight: var(--fw-semibold); cursor: pointer; white-space: nowrap;
+}
+.avp-pastille--photo { padding-inline-start: 4px; }
+.avp-pastille[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.avp-pastille__photo { width: 28px; height: 28px; border-radius: var(--radius-pill); object-fit: cover; flex: none; }
+.avp-pastille__photo--vide { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: var(--fw-bold); }
+
+/* Les trois chiffres, sans carte autour. */
+.avp-chiffres { display: flex; flex-wrap: wrap; gap: var(--gap-xl); align-items: flex-end; }
+.avp-chiffre b { display: flex; align-items: center; gap: 6px; font-size: 30px; font-weight: var(--fw-black); letter-spacing: var(--tracking-tight); font-variant-numeric: tabular-nums; line-height: 1; }
+.avp-chiffre b .icon { width: 22px; height: 22px; }
+.avp-chiffre > span { display: block; margin-top: 6px; font-size: var(--fs-caption); color: var(--muted); }
+.avp-pos, .avp-neg { display: inline-flex; align-items: center; gap: 4px; }
+.avp-pos { color: var(--ok-ink); }
+.avp-neg { color: var(--danger-ink); margin-inline-start: 10px; }
+
+/* Le contenu rendu par core/avis/cartes.js : « À traiter », Récents, Anciens. */
+.avp-contenu { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
+
+/* « À traiter » : la bulle ambre. */
+.avp-atraiter { background: var(--amber-soft); border-radius: 20px; padding: 16px 20px 18px; }
+.avp-atraiter__tete { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; }
+.avp-atraiter__tete .avp-h2 { font-size: 16px; font-weight: var(--fw-bold); }
+.avp-lignes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.avp-ligne-atraiter { display: flex; align-items: center; gap: 14px; background: var(--surface); border-radius: 14px; padding: 10px 12px 10px 10px; }
+.avp-tuile { width: 52px; height: 52px; border-radius: var(--radius-tile); background: var(--surface-2); display: flex; align-items: center; justify-content: center; flex: none; }
+.avp-actions { display: flex; align-items: center; gap: var(--gap-s); flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.avp-citation { font-size: var(--fs-caption); font-style: italic; overflow-wrap: anywhere; }
+.avp-ligne-atraiter .avp-etat { font-size: 12.5px; color: var(--ink); }
+.avp-rien { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: var(--fs-small); }
+
+/* Récents / Anciens */
+.avp-section { display: flex; flex-direction: column; gap: 14px; }
+.avp-section__tete { display: flex; align-items: baseline; gap: 10px; }
+.avp-sous { font-size: var(--fs-caption); color: var(--muted); }
+.avp-grille { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 14px; }
+.avp-anciens { border-top: 1px solid var(--line); }
+.avp-anciens > summary { display: flex; align-items: center; gap: 12px; padding: 18px 0; cursor: pointer; list-style: none; }
+.avp-anciens > summary::-webkit-details-marker { display: none; }
+.avp-anciens[open] .avp-chevron { transform: rotate(90deg); }
+.avp-anciens[open] > summary { padding-bottom: 14px; }
+.avp-compte { font-size: var(--fs-caption); font-weight: var(--fw-bold); background: var(--surface-2); color: var(--muted); border-radius: var(--radius-pill); padding: 3px 10px; }
+
+/* Une carte = un séjour. */
+.avp-carte { border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.avp-carte__tete { display: flex; align-items: center; gap: 12px; }
+.avp-photo { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; flex: none; }
+.avp-photo--l { width: 52px; height: 52px; }
+.avp-photo--vide { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--muted); font-weight: var(--fw-bold); }
+.avp-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.avp-qui { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 15px; font-weight: var(--fw-bold); }
+.avp-infos { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.avp-source { font-size: 12px; color: var(--muted); }
+.avp-canal { width: 22px; height: 22px; border-radius: var(--radius-pill); color: var(--on-canal); font-size: 11px; font-weight: var(--fw-black); display: inline-flex; align-items: center; justify-content: center; flex: none; background: var(--muted); }
+.avp-canal--airbnb { background: var(--canal-airbnb); }
+.avp-canal--booking { background: var(--canal-booking); }
+.avp-canal--direct { background: var(--canal-direct); }
+.avp-son { display: flex; flex-direction: column; gap: 8px; }
+.avp-ligne { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.avp-note { display: inline-flex; align-items: center; gap: 5px; font-size: 20px; font-weight: var(--fw-black); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.avp-note .icon { width: 18px; height: 18px; }
+.avp-note__sur { font-size: 12px; color: var(--muted); font-weight: var(--fw-semibold); }
+.avp-prop {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border: 0;
+  border-radius: var(--radius-pill); font: inherit; font-size: 12.5px; font-weight: var(--fw-semibold);
+  background: var(--surface-2); color: var(--muted);
+}
+.avp-prop .icon { width: 14px; height: 14px; }
+.avp-prop--positif { background: var(--ok-soft); color: var(--ok-ink); }
+.avp-prop--remarque { background: var(--danger-soft); color: var(--danger-ink); }
+select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
+.avp-corrige { font-size: 12px; color: var(--muted); font-style: italic; }
+.avp-extrait { margin: 0; padding: 8px 12px; border-inline-start: 3px solid var(--border); font-style: italic; color: var(--muted); }
+.avp-texte { margin: 0; font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.avp-texte--replie { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.avp-plus { align-self: flex-start; background: none; border: 0; padding: 0; color: var(--ink); font: inherit; font-size: var(--fs-caption); font-weight: var(--fw-semibold); text-decoration: underline; cursor: pointer; }
+.avp-notre { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; font-size: var(--fs-caption); }
+.avp-notre .avp-texte { flex: 1 0 100%; color: var(--muted); font-size: var(--fs-caption); }
+.avp-notre .avp-plus { flex: 0 0 auto; }
+.avp-lib { font-weight: var(--fw-bold); }
+.avp-etat, .avp-origine { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.avp-etat .icon, .avp-origine .icon { width: 14px; height: 14px; }
+.avp-ok { color: var(--ok-ink); }
+.avp-delai { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: var(--fw-semibold); color: var(--muted); }
+.avp-delai .icon { width: 14px; height: 14px; }
+.avp-delai--urgent { color: var(--danger-ink); font-weight: var(--fw-bold); }
+.avp-notre .avp-evaluer { margin-inline-start: auto; }
+.avp-gris { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: var(--fs-caption); }
+.avp-gris .icon { width: 16px; height: 16px; }
+.avp-erreur { margin: 0; color: var(--danger-ink); font-size: var(--fs-caption); }
+.avp-erreur:empty { display: none; }
+
+/* La fenêtre de saisie et le volet des réglages : des <dialog> natifs. */
+.avp-feuille, .avp-volet { border: 0; padding: 0; background: var(--surface); color: var(--ink); }
+.avp-feuille::backdrop, .avp-volet::backdrop { background: var(--scrim); }
+.avp-feuille { width: min(520px, calc(100vw - 32px)); max-height: 90vh; border-radius: var(--radius-card); }
+.avp-feuille__corps { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 24px; }
+.avp-feuille__tete, .avp-volet__tete { display: flex; align-items: center; gap: 12px; }
+.avp-feuille__tete .avp-h2, .avp-volet__tete .avp-h2 { flex: 1; }
+.avp-feuille__pied { display: flex; justify-content: flex-end; gap: var(--gap-s); margin-top: 4px; }
+.avp-champ { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+.avp-champ select, .avp-champ input, .avp-champ textarea {
+  font: inherit; font-size: var(--fs-small); font-weight: var(--fw-regular); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; min-height: var(--control);
+}
+.avp-champ textarea { resize: vertical; min-height: 120px; }
+.avp-volet { position: fixed; inset-block: 0; inset-inline: auto 0; margin: 0; width: 480px; max-width: 100vw; height: 100vh; max-height: 100vh; border-inline-start: 1px solid var(--line); box-shadow: -12px 0 32px rgba(0, 0, 0, .12); }
+.avp-volet[open] { display: flex; flex-direction: column; }
+.avp-volet__tete { padding: 20px 20px 12px; }
+.avp-volet__corps { flex: 1; overflow-y: auto; padding: 4px 20px 24px; }
+
+@media (max-width: 899px) {
+  .avp { gap: var(--gap-m); }
+  .avp-saisir { width: var(--control); padding: 0; }
+  .avp-saisir__mot { display: none; }
+  .avp-filtres { flex-direction: column; align-items: stretch; gap: var(--gap-s); }
+  .avp-pastilles { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .avp-pastilles::-webkit-scrollbar { display: none; }
+  .avp-chiffres { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap-s); }
+  .avp-chiffre b { font-size: 22px; }
+  .avp-chiffre b .icon { width: 18px; height: 18px; }
+  .avp-chiffre > span { font-size: 11.5px; }
+  .avp-atraiter { padding: 10px; border-radius: 18px; }
+  .avp-ligne-atraiter { flex-wrap: wrap; align-items: flex-start; }
+  .avp-ligne-atraiter .avp-actions { width: 100%; }
+  .avp-photo--l, .avp-tuile { width: 44px; height: 44px; }
+  .avp-feuille { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; margin: 0; }
+  .avp-volet { width: 100vw; }
+}
+/* Deux formes d'un même texte (core/avis/cartes.js, `deuxFormes`) : la longue
+   à l'ordinateur, la courte au téléphone (spec du lot Avis, §4). */
+.avp-court { display: none; }
+@media (max-width: 899px) {
+  .avp-long { display: none; }
+  .avp-court { display: inline; }
+}

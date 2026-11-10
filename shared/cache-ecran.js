@@ -177,6 +177,15 @@ export function lire (ecran, moi, compte) {
 
 // À appeler à la déconnexion. Efface TOUS les écrans, de TOUS les comptes :
 // la personne suivante sur ce poste ne doit rien retrouver.
+// Oublie UN ecran, pour un utilisateur et un compte : quand le serveur refuse
+// (403), les chiffres et les logements gardes viennent d'un perimetre que
+// l'on n'a plus — ils ne doivent pas se repeindre a la prochaine visite.
+export function oublier (ecran, moi, compte) {
+  const k = cle(ecran, moi, compte)
+  if (!k) return false
+  try { localStorage.removeItem(k); return true } catch { return false }
+}
+
 export function oublierTout () {
   try {
     const aJeter = []

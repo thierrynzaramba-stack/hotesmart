@@ -41,7 +41,11 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      jetons = [], erreurJetons = null,
                      // La migration pas encore collee : le `select` qui nomme
                      // `vu_le` echoue, celui qui ne la nomme pas passe.
-                     erreurColonneMenages = null } = {}) {
+                     erreurColonneMenages = null,
+                     // Les reservations, lues pour les seuls biens ARCHIVES
+                     // (dernier depart a venir, constat 5 de la revue du
+                     // 7 novembre 2026).
+                     resas = [] } = {}) {
   const etat = { lectures: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -51,6 +55,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
       etat.lectures.push(a)
       const rep = () => {
         if (table === 'properties') return { data: biens, error: erreurBiens }
+        if (table === 'bookings_snapshot') return { data: resas, error: null }
         if (table === 'property_cleaning_providers') {
           return { data: erreurLiaisons ? null : liaisons, error: erreurLiaisons }
         }
@@ -1423,4 +1428,40 @@ test('la NOTE sort avec sa date : une consigne changee hier soir doit alerter', 
   const m = res.body.menages.find(x => x.note)
   assert.ok(m, 'la note est bien la')
   assert.strictEqual(m.noteLe, '2026-10-13T20:30:00Z')
+})
+
+// ─── Un bien ARCHIVE : au planning jusqu'a son dernier depart ──────────────
+// Constat 5 de la revue du 7 novembre 2026 : cet ecran (`pages/menages.html`)
+// ne filtrait aucun archivage. Decision de Thierry du 3 novembre 2026 : un bien
+// archive reste jusqu'au DERNIER DEPART, puis disparait.
+const dansJours = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
+const BIENS_AV = [
+  { provider_property_id: BIEN, name: 'Colomiers', provider: 'channex', archive_le: '2026-11-03T10:00:00Z' },
+  { provider_property_id: 'B2', name: 'La bulle', provider: 'channex', archive_le: null }
+]
+
+test('LE TEST QUI COMPTE : un bien archive SANS depart a venir quitte le planning, avec ses menages', async () => {
+  const { handler } = preparer({ biens: BIENS_AV, menages: [MENAGE()], resas: [] })
+  const res = reponse(); await handler(get(), res)
+  assert.strictEqual(res.code, 200, `refus inattendu (${res.code})`)
+  assert.deepStrictEqual(res.body.biens.map(b => b.id), ['B2'], 'le bien archive epuise reste au planning')
+  assert.ok(!JSON.stringify(res.body).includes('Colomiers'))
+})
+
+test('un bien archive AVEC un depart a venir reste au planning (meme hors de la fenetre affichee)', async () => {
+  const { handler } = preparer({
+    biens: BIENS_AV, menages: [MENAGE()],
+    resas: [{ property_id: BIEN, snapshot: { status: 'confirmed', departure: dansJours(21) } }]
+  })
+  const res = reponse(); await handler(get(), res)
+  assert.deepStrictEqual(res.body.biens.map(b => b.id).sort(), [BIEN, 'B2'].sort())
+})
+
+test('un depart a venir ANNULE ne garde pas le bien archive', async () => {
+  const { handler } = preparer({
+    biens: BIENS_AV,
+    resas: [{ property_id: BIEN, snapshot: { status: 'cancelled', departure: dansJours(21) } }]
+  })
+  const res = reponse(); await handler(get(), res)
+  assert.deepStrictEqual(res.body.biens.map(b => b.id), ['B2'])
 })

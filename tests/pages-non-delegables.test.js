@@ -49,7 +49,9 @@ const NON_DELEGABLES = [
   'pages/biens-detail.html',        // connexion des annonces — `reglages`
   'apps/serrures/index.html',       // clé Seam
   'apps/sms/index.html',            // clé Brevo
-  'apps/agent-ai/knowledge.html',   // knowledge — `reglages`
+  'pages/connaissance.html',        // base de connaissance V5 (lot 3) : TITULAIRE seul,
+                                    // comme la page qu'elle remplace — l'endpoint
+                                    // /api/ecran/connaissance refuse un membre en 403
   'apps/agent-ai/analyze.html',     // conversations + clé Beds24
   'apps/menages/prestataires.html', // public_tokens — réservé au titulaire
     'apps/reservation-directe/index.html',     // liens de réservation et
@@ -95,6 +97,12 @@ const DELEGABLES = [
   // api-client pose X-Compte — meme classement que les deux anciennes pages.
   'pages/calendrier.html',
   'pages/avis.html',                // api/avis honore X-Compte (compteDelegue), domaine `avis`
+  // « Ce qui fait bouger vos prix » (lot 4, 4a, 9 novembre 2026) : ce n'est plus
+  // une redirection, c'est l'écran. `/api/ecran/evenements` lit la liste des
+  // logements du COMPTE COURANT (X-Compte, posé par enteteCompte()) et juge le
+  // périmètre du membre bien par bien (`peutLire`) ; un bien hors périmètre
+  // n'est ni listé ni servi. Lecture seule à cette étape.
+  'apps/yield/evenements.html',
   // ⚠ DELEGABLE, comme le calendrier dont elle lit les memes chiffres.
   // `/api/yield` garde `reservations` en LECTURE. La delegation passe par le
   // BIEN, pas par `compteDelegue` : `property_id` designe le compte, donc la
@@ -189,10 +197,10 @@ test('RECENSEMENT : toute page authentifiée est classée', () => {
     'pages/diagnostic.html', 'pages/channels-test.html',
     'pages/index.html',          // simple redirection vers /pages/aujourdhui (refonte UI V5, lot 1)
     'apps/menages/public.html',  // PWA prestataire : jeton, pas de session
-    'apps/yield/evenements.html', // redirection vers la pop-up de prix.html (22 sept. 2026), aucune session
     'apps/agent-ai/messagerie.html', // redirection vers /messages (lot 2 etape 4), aucune session
     'apps/agent-ai/config.html',     // redirection vers /messages (go de Thierry, 12 octobre, apres recette 2)
     'apps/agent-ai/messages.html',   // redirection vers /messages (idem)
+    'apps/agent-ai/knowledge.html',  // redirection vers /messages?volet=connaissance (go de Thierry, 5 novembre, KB V5 lot 3)
     'pages/book.html'            // moteur de reservation : page VOYAGEUR,
                                  // jeton dans l'URL, aucune session, aucune
                                  // donnee de compte. Marque blanche : elle ne

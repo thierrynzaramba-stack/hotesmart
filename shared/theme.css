@@ -48,6 +48,18 @@
   --canal-direct: #0E1726;   /* la réservation directe est à NOUS : bleu nuit */
   --on-canal: #FFFFFF;
 
+  /* ⚠ UN SÉJOUR RÉSERVÉ N'EST PAS UN NIVEAU DE PRIX — décision de Thierry du
+     30 octobre 2026. Les barres de séjour de « Ce qui fait bouger vos prix »
+     empilent quatre années : UNE seule teinte à opacité décroissante
+     (100 / 60 / 40 / 25 % pour cette année, N-1, N-2, N-3), texte blanc sur
+     les deux premières. Sa raison, dans ses mots : « une teinte, des
+     transparences, aucune confusion avec un niveau ».
+     La maquette proposait #3F6F99, le bleu du niveau « Très haut » de SA
+     palette ; elle a été écartée le 30 octobre, et avec elle ce bleu : une
+     barre de la couleur d'un niveau se lit comme ce niveau.
+     C'est un ALIAS de --ink, pas un hexa de plus : la barre suit l'encre. */
+  --sejour: var(--ink);
+
   /* Prestataires de ménage : pastels des barres de garde (page Ménages V5).
      FROIDS OU NEUTRES SEULEMENT — jamais de rose ni de rouge, réservés aux
      alertes (décision de Thierry, 13 octobre 2026). La couleur est STABLE par
@@ -119,6 +131,22 @@
   --gap-xl: 40px;
   --page-pad: 48px;
   --page-max: 1200px;
+
+  /* L'ÉCHELLE D'ENCRE DES CINQ NIVEAUX (1 · Base → 5 · Exceptionnel).
+     ⚠ C'EST UNE COPIE, ET ELLE EST VOULUE : décision de Thierry du 9 novembre
+     2026 (option A), pour « Ce qui fait bouger vos prix », la première page
+     V5 qui montre des niveaux. La source d'origine est public/style.css (le
+     socle des écrans YieldFlow) ; les deux portent les MÊMES valeurs, et
+     tests/palette-niveaux.test.js exige que l'une et l'autre restent égales à
+     la table qu'il nomme. Un élément de structure : il ne se modifie qu'avec
+     Thierry (docs/kb/charte-ui.md §3). Pas de variante sombre : ce sont des
+     densités d'encre, et l'encre du chiffre se prend DANS l'échelle (le 5 sur
+     les quatre premiers, le 1 sur le dernier), jamais dans --ink qui s'inverse. */
+  --niveau-1: #F7F7F7;
+  --niveau-2: #EBEBEB;
+  --niveau-3: #D6D6D6;
+  --niveau-4: #8C8C8C;
+  --niveau-5: #222222;
 
   /* Ombres */
   --shadow-hover: 0 6px 20px rgba(0, 0, 0, .12);

@@ -105,9 +105,27 @@ async function chargerAvec (recherche, biens = BIENS) {
     ech: (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
     compteCourant: () => 'U1',
     etat: (m, e) => { vu.etat = { m, e } },
-    supabase: { from: () => ({ select: () => ({ order: () => ({ eq: async () => ({ data: biens, error: null }) }) }) }) }
+    // ⚠ `is` AJOUTE A CHAQUE MAILLON depuis le filtre des biens archives : la
+    // page enveloppe desormais sa chaine par `sansArchives`, qui LEVE si `.is`
+    // manque. Ce double chaine seulement — ce banc parle du bien DEMANDE par
+    // l'URL, pas de l'archivage.
+    supabase: { from: () => {
+      const q = {
+        select: () => q, order: () => q, is: () => q,
+        eq: async () => ({ data: biens, error: null }),
+        then: (ok) => ok({ data: biens, error: null })
+      }
+      return q
+    } },
+    // ⚠ LE VRAI `sansArchives`, depuis le module commun : ce banc retire les
+    // `import` de la page, donc chaque dependance neuve doit lui etre fournie.
+    // Un double local accepterait un appel ecrit a l'envers que le vrai refuse.
+    sansArchives: new Function(
+      require('node:fs').readFileSync(
+        require('node:path').join(__dirname, '..', 'shared', 'biens-vivants.js'), 'utf8')
+        .replace(/^export /gm, '') + '\nreturn sansArchives')()
   }
-  window.eval('const { el, ech, compteCourant, etat, supabase } = window.__ctx\n'
+  window.eval('const { el, ech, compteCourant, etat, supabase, sansArchives } = window.__ctx\n'
     + fn + '\nwindow.__chargerBiens = chargerBiens')
   const ok = await window.__chargerBiens()
   return { ok, select: window.document.getElementById('yp-bien'), vu, fermer: () => window.close() }
@@ -163,9 +181,9 @@ test("LE TEST QUI COMPTE : ?activer=1 ouvre la CONFIRMATION, il n'ecrit rien", (
     'le parametre n est pas lu')
 
   // Le bloc qui consomme la demande, isole pour etre juge sur SON contenu.
-  const i = src.indexOf('if (activerDemande) {')
+  const i = src.indexOf('if (activerCeBien) {')
   assert.ok(i > 0, 'le bloc qui consomme la demande est introuvable')
-  const bloc = extraire(src.slice(i), 'if (activerDemande) {')
+  const bloc = extraire(src.slice(i), 'if (activerCeBien) {')
 
   // ⚠ IL APPELLE LA CONFIRMATION, PAS LA BASCULE. `confirmerBascule` ouvre le
   // parcours — fenetre obligatoire, compte des nuits releu SERVEUR, bouton
@@ -178,13 +196,34 @@ test("LE TEST QUI COMPTE : ?activer=1 ouvre la CONFIRMATION, il n'ecrit rien", (
   assert.doesNotMatch(bloc, /fetch\(|appel\(/,
     'aucun appel reseau ne part de la lecture du parametre')
 
-  // ⚠ LA DEMANDE SE CONSOMME AVANT D'OUVRIR, ET DANS TOUS LES CAS. Sans cela
-  // elle resterait armee et s'ouvrirait plus tard sur un AUTRE bien — celui
-  // que l'hote aurait choisi au selecteur entre-temps.
-  const iFaux = bloc.indexOf('activerDemande = false')
-  const iOuvre = bloc.indexOf('confirmerBascule')
-  assert.ok(iFaux > 0 && iFaux < iOuvre,
-    'la demande doit etre consommee AVANT d ouvrir le parcours')
+  // ⚠ LA DEMANDE SE CONSOMME HORS DE CE BLOC — correctif de la review du
+  // 28 octobre 2026. Elle etait eteinte DANS le `if`, donc DEUX chemins
+  // l'esquivaient : le retour sur bien absent, et le `catch` du « reglage
+  // illisible ». Un 503 laissait la demande ARMEE, et la confirmation
+  // d'activation s'ouvrait plus tard TOUTE SEULE, sur un `change` du
+  // selecteur — pas sur un clic de l'hote.
+  // ⚠ ET MON TEST NE POUVAIT PAS LE VOIR : le banc n'evalue que le bloc
+  // INTERIEUR, avec la demande posee a la main. Il etait structurellement
+  // aveugle aux retours exterieurs — exactement la forme decrite par la
+  // regle 22 de REVIEW.md, prise en defaut dans le lot qui l'a ecrite.
+  // On garde donc la PLACE de l'extinction, au niveau de la fonction.
+  assert.doesNotMatch(bloc, /activerDemande = false/,
+    'l extinction ne doit plus vivre dans ce bloc : deux chemins l esquivaient')
+  const fn = src.slice(src.indexOf('async function chargerPilote'), src.indexOf('function confirmerBascule'))
+  const iPrise = fn.indexOf('const activerCeBien = activerDemande')
+  const iEteint = fn.indexOf('activerDemande = false')
+  const iRetour = fn.indexOf('if (!bien) {')
+  const iCatch = fn.indexOf('catch')
+  assert.ok(iPrise > 0 && iEteint > iPrise, 'la demande se prend, puis s eteint')
+  assert.ok(iRetour > 0 && iEteint < iRetour, 'AVANT le retour sur bien absent')
+  assert.ok(iCatch > 0 && iEteint < iCatch, 'et AVANT le catch du « reglage illisible »')
+  // ⚠ ET INCONDITIONNELLEMENT — une mutation l'a montre : ma premiere version
+  // ne gardait que la PLACE, donc `if (!bien) activerDemande = false` passait
+  // au vert tout en reouvrant exactement le defaut (la demande survivait au
+  // 503). Le geste doit etre nu : une affectation seule sur sa ligne, juste
+  // apres la prise.
+  assert.match(fn, /const activerCeBien = activerDemande\s*\n\s*activerDemande = false\s*\n/,
+    'l extinction doit suivre la prise, seule sur sa ligne et sans condition')
 
   // Les QUATRE refus. Le comportement est eprouve par le test suivant, qui
   // execute le bloc ; ici on garde que la condition les porte tous les quatre,
@@ -209,7 +248,7 @@ test("LE TEST QUI COMPTE : ?activer=1 n'ouvre RIEN si le bien affiche n'est pas 
   //
   // ON EXECUTE LE VRAI BLOC, extrait de la page par equilibre des accolades.
   const src = sansCommentaires(lire('apps/yield/prix.html'))
-  const bloc = extraire(src, 'if (activerDemande) {')
+  const bloc = extraire(src, 'if (activerCeBien) {')
 
   const essai = ({ recherche, affiche, yf = false, bloque = false }) => {
     const dom = new JSDOM(`<select id="yp-bien"><option value="${BIENS[0].id}">A</option><option value="${BIENS[1].id}">B</option></select>`,
@@ -223,10 +262,9 @@ test("LE TEST QUI COMPTE : ?activer=1 n'ouvre RIEN si le bien affiche n'est pas 
       yf, bloque
     }
     window.eval('const { el, confirmerBascule, yf, bloque } = window.__ctx\n'
-      + 'let activerDemande = true\n' + bloc + '\nwindow.__vu = activerDemande')
-    const consommee = window.__vu === false
+      + 'const activerCeBien = true\n' + bloc)
     window.close()
-    return { ouvertures: vu, consommee }
+    return { ouvertures: vu }
   }
 
   // Le cas normal : le bien demande EST celui affiche -> le parcours s'ouvre.
@@ -247,10 +285,83 @@ test("LE TEST QUI COMPTE : ?activer=1 n'ouvre RIEN si le bien affiche n'est pas 
   for (const [quoi, cas] of refus) {
     const r = essai(cas)
     assert.deepEqual(r.ouvertures, [], `${quoi} : un parcours d activation s est ouvert`)
-    // ⚠ ET LA DEMANDE EST CONSOMMEE DANS TOUS LES CAS : armee, elle
-    // s'ouvrirait plus tard sur le bien que l'hote choisirait au selecteur.
-    assert.equal(r.consommee, true, `${quoi} : la demande est restee armee`)
+    // ⚠ « ET LA DEMANDE EST CONSOMMEE » ETAIT ASSERTE ICI, ET NE POUVAIT PAS
+    // ECHOUER (review du 10 novembre 2026) : le banc posait lui-meme la valeur
+    // qu'il verifiait. La consommation est maintenant EPROUVEE par le test
+    // suivant, qui execute la vraie `chargerPilote`.
   }
+})
+
+// ⚠ LA GARDE « LA DEMANDE NE SE ROUVRE JAMAIS SEULE », EXECUTEE — review du
+// 10 novembre 2026. Les assertions plus haut ne lisaient que le texte du code
+// (REVIEW.md regle 20) : la mutation qui RE-ARME la demande dans le `catch` —
+// exactement le defaut du 28 octobre — laissait toute la suite verte.
+// Ici, la VRAIE `chargerPilote`, extraite de la page, tourne avec un `fetch`
+// double ; l'hote arrive sur `?bien=B&activer=1`, puis change deux fois de
+// logement au selecteur. Contre-epreuve : sur main 88aebdc7, le scenario
+// « 503, 503, 200 » ouvre la confirmation sur un `change`.
+async function rejouerDemande (statuts, { selecteurVide = false, ensuite = null } = {}) {
+  const src = lire('apps/yield/prix.html')
+  const fn = extraire(src, 'async function chargerPilote')
+  const [A, B] = BIENS.map(b => b.id)
+  const dom = new JSDOM(`<select id="yp-bien"><option value="">—</option><option value="${A}">A</option><option value="${B}">B</option></select>
+    <div id="yp-pilote"></div><button id="yp-etat"></button><div id="yp-confirm"></div>`,
+  { runScripts: 'outside-only', url: `https://exemple.test/apps/yield/prix?bien=${B}&activer=1` })
+  const w = dom.window
+  const ouvertures = []
+  let n = 0
+  w.__ctx = {
+    el: id => w.document.getElementById(id),
+    session: { access_token: 'jeton' },
+    enteteCompte: () => ({}),
+    confirmerBascule: v => ouvertures.push({ v, bien: w.document.getElementById('yp-bien').value, quand: phase }),
+    fenetreHtml: () => '',
+    brancherFenetre: () => {},
+    fetch: async () => {
+      const st = statuts[Math.min(n++, statuts.length - 1)]
+      return { ok: st === 200, json: async () => (st === 200 ? { pilote: 'calendrier', peut_basculer: true } : { error: 'illisible' }) }
+    }
+  }
+  let phase = 'arrivee'
+  w.eval('const { el, session, enteteCompte, confirmerBascule, fenetreHtml, brancherFenetre, fetch } = window.__ctx\n'
+    + 'let enCoursPilote = 0\nlet nuitsPrixHote = null\nlet activerDemande = true\n'
+    + fn + '\nwindow.chargerPilote = chargerPilote')
+  const sel = w.document.getElementById('yp-bien')
+  sel.value = selecteurVide ? '' : B
+  await w.chargerPilote()
+  phase = 'change'
+  for (const id of ensuite || [A, B]) { sel.value = id; await w.chargerPilote() }
+  w.close()
+  return ouvertures
+}
+
+test('LE TEST QUI COMPTE : la demande d activation se consomme a la PREMIERE lecture, quelle qu en soit l issue — jamais rouverte par un `change`', async () => {
+  // Le cas normal : le serveur repond, la confirmation s'ouvre UNE fois, a
+  // l'arrivee, sur le bien demande — et plus jamais ensuite.
+  assert.deepEqual(await rejouerDemande([200, 200, 200]), [{ v: 'yieldflow', bien: BIENS[1].id, quand: 'arrivee' }])
+  // ⚠ LE DEFAUT DU 28 OCTOBRE : un 503 a l'arrivee (« reglage illisible »),
+  // puis l'hote change de logement et revient. La demande ne doit plus rien
+  // ouvrir : il n'a pas recliqué « Activer ».
+  assert.deepEqual(await rejouerDemande([503, 503, 200]), [], 'la confirmation s est rouverte sur un `change`')
+  assert.deepEqual(await rejouerDemande([503, 200, 200]), [], 'la confirmation s est rouverte sur un `change`')
+  // L'autre chemin qui l'esquivait : aucun bien choisi a la lecture.
+  assert.deepEqual(await rejouerDemande([200, 200, 200], { selecteurVide: true, ensuite: [BIENS[1].id] }), [], 'la demande a survecu a un selecteur vide')
+})
+
+test('LE TEST QUI COMPTE : `activer=1` quitte l adresse des qu il est lu — un rechargement ne rouvre rien (review du 10 novembre 2026)', () => {
+  const src = sansCommentaires(lire('apps/yield/prix.html'))
+  const fn = extraire(src, 'function oublierActiverDansLAdresse')
+  const [, B] = BIENS.map(b => b.id)
+  const dom = new JSDOM('', { runScripts: 'outside-only', url: `https://exemple.test/apps/yield/prix?bien=${B}&activer=1#x` })
+  dom.window.eval(fn + '\noublierActiverDansLAdresse()')
+  assert.equal(dom.window.location.search, `?bien=${B}`, 'le logement reste, la demande part')
+  assert.equal(dom.window.location.hash, '#x')
+  dom.window.close()
+  // Et l'appel suit la lecture, dans `init` : lu, puis oublie.
+  const init = extraire(src, 'async function init')
+  const iLu = init.indexOf("activerDemande = new URLSearchParams(location.search).get('activer') === '1'")
+  const iOubli = init.indexOf('oublierActiverDansLAdresse()')
+  assert.ok(iLu > 0 && iOubli > iLu, 'la demande doit quitter l adresse juste apres avoir ete lue')
 })
 
 test("le parcours d'activation garde ses deux confirmations, quelle que soit la porte", () => {

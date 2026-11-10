@@ -4332,3 +4332,94 @@ test("LE TEST QUI COMPTE : AUCUNE phrase de plus sous la bande", () => {
       `${sel} porte le motif du mois partiel : c est une phrase de plus sous la bande`)
   }
 })
+
+// ─── Un bien ARCHIVE n'a de ligne de revenus que s'il porte de l'argent ─────
+// Decision de Thierry du 6 novembre 2026, sur ce qu'il voyait en production :
+// « Colomiers · archive · aucun versement ce mois-ci · 0 € 0 € 0 € ». Vue Mois :
+// la ligne part. Vue Annee : Colomiers (2 402 € en 2026) RESTE, marque.
+const revenusMois = (parBien, total) => ({
+  mois: '2026-11',
+  par_bien: parBien,
+  hors_biens: { sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0, sans_montant: 0 },
+  total
+})
+
+test("LE TEST QUI COMPTE : vue MOIS, un bien archive SANS argent ce mois-ci n a plus de ligne", async () => {
+  const p = ouvrirAujourdhui({
+    corps: {
+      biens: [
+        { id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1', currency: 'EUR' },
+        // Un bien VIVANT sans sejour ce mois-ci : sa ligne a zero RESTE.
+        { id: 'uuid-3', name: 'Studio', provider_property_id: 'P3', currency: 'EUR' }
+      ],
+      biens_archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }],
+      droits: { reservations: true, menage: true },
+      revenus: revenusMois(
+        { 'uuid-1': { sejours: 2, recu_cents: 20000, a_venir_cents: 0, total_cents: 20000, bruts: 0, sans_montant: 0 } },
+        { sejours: 2, recu_cents: 20000, a_venir_cents: 0, total_cents: 20000, bruts: 0, sans_montant: 0 })
+    }
+  })
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  assert.deepEqual(p.erreurs, [], `le demarrage a echoue : ${p.erreurs.join(' / ')}`)
+  for (const sel of ['[data-list="revenue-rows"]', '[data-list="revenue-cards"]']) {
+    const html = String(p.cache(sel).innerHTML)
+    assert.ok(!html.includes('Colomiers'), `${sel} : le bien archive a zero garde sa ligne`)
+    assert.ok(!html.includes('marque-archive'), `${sel} : une marque « archive » reste affichee`)
+    assert.ok(html.includes('La bulle'), `${sel} : le bien vivant a perdu sa ligne`)
+    assert.ok(html.includes('Studio'), `${sel} : le bien VIVANT a zero a perdu sa ligne`)
+  }
+})
+
+test("vue MOIS, un bien archive dont le montant est INCONNU garde sa ligne", async () => {
+  // Un sejour dont on ne sait pas le prix n'est pas un sejour a zero euro.
+  const inconnu = { sejours: 1, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0, sans_montant: 1, refuses: { montant: 1 } }
+  const p = ouvrirAujourdhui({
+    corps: {
+      biens: [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1', currency: 'EUR' }],
+      biens_archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }],
+      droits: { reservations: true, menage: true },
+      revenus: revenusMois(
+        { 'uuid-1': { sejours: 1, recu_cents: 10000, a_venir_cents: 0, total_cents: 10000, bruts: 0, sans_montant: 0 }, 'uuid-2': inconnu },
+        { sejours: 2, recu_cents: 10000, a_venir_cents: 0, total_cents: 10000, bruts: 0, sans_montant: 1 })
+    }
+  })
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  const html = String(p.cache('[data-list="revenue-rows"]').innerHTML)
+  assert.ok(html.includes('Colomiers'), 'un montant inconnu a ete pris pour zero : la ligne est partie')
+  assert.strictEqual((html.match(/marque-archive/g) || []).length, 1)
+})
+
+test("LE TEST QUI COMPTE : vue ANNEE, un bien archive a zero sur les deux annees n a plus de ligne", () => {
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(20000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(0) } },
+      hors_biens: {},
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  for (const sel of ['[data-list="revenue-annee-lignes"]', '[data-list="revenue-annee-cartes"]']) {
+    const html = String(p.cache(sel).innerHTML)
+    assert.ok(!html.includes('Colomiers'), `${sel} : le bien archive a zero garde sa ligne`)
+    assert.ok(html.includes('La bulle'), `${sel} : le bien vivant a perdu sa ligne`)
+  }
+})
+
+test("vue ANNEE, un bien archive qui n a d euros qu en N-1 GARDE sa ligne", () => {
+  // Sinon la colonne N-1 ne serait plus la somme de ses lignes.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }],
+    annee: {
+      total: { '2026-05': mo(20000), '2025-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2025-05': mo(10000) } },
+      hors_biens: {},
+      archives: [{ id: 'uuid-2', nom: 'Colomiers', photo_url: null }]
+    }
+  })
+  const html = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  assert.ok(html.includes('Colomiers'), 'le bien archive a perdu la ligne qui porte ses euros N-1')
+  assert.strictEqual((html.match(/marque-archive/g) || []).length, 1)
+})

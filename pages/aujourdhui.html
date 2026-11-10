@@ -1848,9 +1848,28 @@ function renderRevenus () {
     ? etat.ecran.biens_archives
     : []
   const vus = new Set((etat.biens || []).map(b => String(b.id)))
+  // ⚠ ET UN BIEN ARCHIVE N'A DE LIGNE QUE S'IL PORTE DE L'ARGENT CE MOIS-CI —
+  // decision de Thierry du 6 novembre 2026, sur ce qu'il a vu en production :
+  // « Colomiers · archivé · aucun versement ce mois-ci · 0 € 0 € 0 € ». La ligne
+  // d'un bien archive existe pour PORTER ses euros (dette 118, juste au-dessus) :
+  // a zero, elle n'explique rien du total et montre un bien rangé comme s'il
+  // vivait encore. Le bandeau ne bouge pas : il ne perd que des zeros.
+  // ⚠ « De l'argent », c'est un montant NON NUL — un remboursement compte — OU
+  // un montant INCONNU (`refuses.montant`, `sans_montant`) : un sejour dont on
+  // ne sait pas le prix n'est pas un sejour a zero euro, et retirer sa ligne
+  // cacherait justement ce que l'ecran ne sait pas.
+  // ⚠ LE FILTRE PASSE AVANT LA REPARTITION, pour que `repartirEnEuros` ne
+  // distribue les centimes qu'entre les lignes AFFICHEES.
+  // ⚠ UN BIEN VIVANT GARDE SA LIGNE A ZERO : « aucun versement ce mois-ci » est
+  // une information sur un logement qu'on pilote encore.
+  const porteDeLArgent = (d) => Boolean(d) && (
+    Number(d.total_cents || 0) !== 0 || Number(d.recu_cents || 0) !== 0 ||
+    Number(d.a_venir_cents || 0) !== 0 || Number(d.sans_montant || 0) > 0 ||
+    Number((d.refuses && d.refuses.montant) || 0) > 0)
   const biensAvecArchives = (etat.biens || []).concat(
     archivesEcran
       .filter(x => x && x.id != null && !vus.has(String(x.id)))
+      .filter(x => porteDeLArgent(parBien[String(x.id)]))
       .map(x => ({ id: x.id, name: x.nom || '', photo_url: x.photo_url || null, archive: true })))
   const donnees = biensAvecArchives.map(b => parBien[String(b.id)] || null)
   const recusParBien = repartirEnEuros(donnees.map(d => (d ? d.recu_cents : 0)))
@@ -2317,7 +2336,20 @@ function renderAnnee () {
       .map(x => ({ id: x.id, name: x.nom || '', photo_url: x.photo_url || null })))
   const avecDonnees = biensPourRevenus.filter(b => {
     const pm = a.par_bien && a.par_bien[String(b.id)]
-    return pm && Object.keys(pm).length > 0
+    if (!(pm && Object.keys(pm).length > 0)) return false
+    // ⚠ UN BIEN ARCHIVE N'A DE LIGNE QUE S'IL PORTE DE L'ARGENT SUR LA PERIODE
+    // AFFICHEE — meme decision de Thierry que la vue Mois (6 novembre 2026), et
+    // il l'a precisee pour cette vue-ci : Colomiers, 2 402 € encaisses en 2026,
+    // RESTE, marque « archive ». La periode, ce sont les DEUX colonnes de la
+    // ligne, a la meme tranche que leurs totaux (`jusquAu`) : un bien qui n'a
+    // d'euros qu'en N-1 garde sa ligne, sinon le total N-1 ne serait plus la
+    // somme de ses lignes. Un montant inconnu compte comme de l'argent, pour la
+    // raison dite en vue Mois. Un bien VIVANT n'est pas concerne.
+    if (!archives.has(String(b.id))) return true
+    return [an, an - 1].some(y => {
+      const bi = bilanPeriode(pm, y, 'total_cents', jusquAu)
+      return !bi.absente && (bi.total !== 0 || bi.sansMontant > 0 || bi.refuse)
+    })
   })
   // ⚠ UN BIEN ARCHIVE GARDE SA LIGNE MAIS N'EST PLUS UNE PASTILLE DE FILTRE
   // (retouche de recette du 3 novembre 2026, demande de Thierry). Les deux

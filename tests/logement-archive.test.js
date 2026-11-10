@@ -15,6 +15,19 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const A = require('../lib/logement/archive.js')
 
+// ⚠ UN DOUBLE DE CREATION DES MENAGES, FOURNI A CHAQUE APPEL. Depuis la demande
+// de Thierry du 3 novembre 2026, `archiver` cree les menages des sejours a venir
+// AVANT de poser le drapeau — et son defaut fait un `require` de
+// `lib/cleaning/sync-menages-entite`, qui cree son client Supabase au niveau
+// module : il leve « supabaseUrl is required » dans ce banc. Le double rend
+// « rien a creer », ce qui est l'etat de ces fixtures ; le test dedie plus bas
+// mesure la vraie creation.
+const SANS_MENAGE = async () => ({ crees: 0, erreurs: 0 })
+// ⚠ L'ABONNEMENT AUSSI EST INJECTE (decision « stop abonnement » du 7 novembre
+// 2026) : sans ce double, chaque archivage du banc chargerait le vrai module de
+// facturation — client Stripe et Supabase — et tenterait un appel reseau.
+const SANS_FACTURATION = async () => ({ skipped: 'beta' })
+
 const T = '2026-10-31T10:00:00.000Z'
 
 // ─── Le double ─────────────────────────────────────────────────────────────
@@ -23,7 +36,10 @@ function banc (etat = {}) {
   const base = {
     properties: etat.properties || [],
     agent_tasks: etat.agent_tasks || [],
-    cron_logs: etat.cron_logs || []
+    cron_logs: etat.cron_logs || [],
+    // La base de connaissance du bien : l'archivage ne doit JAMAIS y ecrire
+    // (decision de Thierry du 7 novembre 2026, « on garde la configuration »).
+    knowledge: etat.knowledge || []
   }
   const journal = []
   const pannes = etat.pannes || {}
@@ -39,6 +55,12 @@ function banc (etat = {}) {
         in (col, vals) { ctx.filtres.push(l => vals.map(String).includes(String(l[col]))); return chaine },
         update (champs) { ctx.op = 'update'; ctx.champs = champs; return chaine },
         delete () { ctx.op = 'delete'; return chaine },
+        // ⚠ `insert` ET `upsert` EXISTENT AUSSI (constat 2 de la revue de
+        // 0ccd215d) : sans eux, une ecriture de ce type levait une TypeError
+        // que le `try` de chaque etape d'`archiver` avalait — le test de la
+        // base de connaissance restait vert sur un `upsert` qui la modifiait.
+        insert (lignes) { ctx.op = 'insert'; ctx.champs = lignes; return chaine },
+        upsert (lignes) { ctx.op = 'upsert'; ctx.champs = lignes; return chaine },
         async maybeSingle () {
           if (pannes[table + ':select']) return { data: null, error: { message: pannes[table + ':select'] } }
           const r = appliquer()
@@ -54,9 +76,18 @@ function banc (etat = {}) {
           for (const c of voulues) sortie[c] = l[c]
           return { data: sortie, error: null }
         },
-        then (resoudre) { return chaine.executer().then(resoudre) },
+        // ⚠ LE REJET EST TRANSMIS (constat 4 de la revue de 0ccd215d) : sans le
+        // second argument, un refus du double sortait en `unhandledRejection`
+        // au lieu d'atteindre le `try` de l'appelant.
+        then (resoudre, rejeter) { return chaine.executer().then(resoudre, rejeter) },
         async executer () {
           const quoi = ctx.table + ':' + ctx.op
+          // ⚠ TOUTE TENTATIVE D'ECRITURE EST NOTEE AVANT TOUT REFUS : un test
+          // qui interdit d'ecrire dans une table doit voir la tentative, meme
+          // si elle echoue ensuite.
+          if (['update', 'delete', 'insert', 'upsert'].includes(ctx.op)) {
+            (journal.tentatives = journal.tentatives || []).push({ op: ctx.op, table: ctx.table })
+          }
           if (pannes[quoi]) return { data: null, error: { message: pannes[quoi] } }
           // ⚠ TOUTE ECRITURE EST CLOISONNEE. La cle de service contourne la
           // RLS par conception : c'est au code de filtrer, et c'est donc au
@@ -68,6 +99,12 @@ function banc (etat = {}) {
             }
           }
           const touchees = appliquer()
+          if (ctx.op === 'insert' || ctx.op === 'upsert') {
+            const lignes = Array.isArray(ctx.champs) ? ctx.champs : [ctx.champs]
+            base[ctx.table].push(...lignes.map(l => ({ ...l })))
+            journal.push({ op: ctx.op, table: ctx.table, n: lignes.length })
+            return { data: lignes, error: null }
+          }
           if (ctx.op === 'update') {
             for (const l of touchees) Object.assign(l, ctx.champs)
             journal.push({ op: 'update', table: ctx.table, n: touchees.length, champs: ctx.champs })
@@ -98,7 +135,7 @@ test("LE TEST QUI COMPTE : `active_at` n est JAMAIS efface, une FIN est posee", 
   // le bien a ete actif : le trial du compte demarre au PREMIER `active_at`,
   // donc l'effacer reecrit une date de debut de periode d'essai.
   const b = banc({ properties: [unBien()] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', parQui: 'moi', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', parQui: 'moi', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, true, `archivage refuse : ${JSON.stringify(r)}`)
   const bien = b.base.properties[0]
   assert.strictEqual(bien.active_at, '2026-07-19T00:00:00Z',
@@ -113,7 +150,7 @@ test("LE TEST QUI COMPTE : un bien JAMAIS facture ne recoit pas de fin de factur
   // 30 octobre 2026). Poser une fin sur un bien jamais actif inventerait une
   // periode de facturation qui n'a pas existe.
   const b = banc({ properties: [unBien({ active_at: null })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(b.base.properties[0].facturable_jusqu_au, null,
     'une fin de facturation est posee sur un bien qui n a jamais ete facture')
   assert.strictEqual(r.etait_facture, false)
@@ -126,7 +163,7 @@ test("LE TEST QUI COMPTE : l archivage ETEINT le pilote tarifaire", async () => 
   // annonce retiree. Le filtre de `scripts/piloter-yieldflow.js` est la seconde
   // ligne de defense ; celle-ci dit l'INTENTION dans la donnee.
   const b = banc({ properties: [unBien({ pilote_tarifaire: 'yieldflow' })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(b.base.properties[0].pilote_tarifaire, 'calendrier',
     'le pilote reste sur `yieldflow` : il pousserait des prix pour une annonce retiree')
   assert.strictEqual(r.pilote_eteint, true, 'le compte rendu ne dit pas que le pilote a ete eteint')
@@ -146,7 +183,7 @@ test("LE TEST QUI COMPTE : reactiver NE RALLUME PAS YieldFlow", async () => {
 
 test("un bien deja sur `calendrier` ne voit pas son pilote touche", async () => {
   const b = banc({ properties: [unBien({ pilote_tarifaire: 'calendrier' })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.pilote_eteint, false,
     'le compte rendu annonce une extinction qui n a pas eu lieu')
 })
@@ -166,7 +203,7 @@ test("LE TEST QUI COMPTE : les taches IA EN VOL sont closes, et SEULES celles-la
     { id: 't6', user_id: 'compte-2', property_id: 'cle-channex', status: 'pending' }
   ]
   const b = banc({ properties: [unBien()], agent_tasks: taches })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.taches_closes, 2, `${r.taches_closes} tache(s) closes au lieu de 2`)
   const etat = Object.fromEntries(b.base.agent_tasks.map(t => [t.id, t.status]))
   assert.strictEqual(etat.t1, 'archived', 'une tache `pending` n est pas close')
@@ -189,7 +226,7 @@ test("LE TEST QUI COMPTE : le marqueur d import est retire de la file", async ()
       { id: 'messages_import:compte-1:autre-bien', last_run: '2026-10-30T19:00:00Z' }
     ]
   })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.marqueur_retire, true, 'le marqueur n a pas ete retire')
   const restants = b.base.cron_logs.map(l => l.id)
   assert.ok(!restants.includes('messages_import:compte-1:cle-channex'),
@@ -206,7 +243,7 @@ test("LE TEST QUI COMPTE : un echec partiel ne se tait pas", async () => {
     agent_tasks: [{ id: 't1', user_id: 'compte-1', property_id: 'cle-channex', status: 'pending' }],
     pannes: { 'agent_tasks:update': 'colonne status absente' }
   })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, true, 'un echec de nettoyage a annule l archivage')
   assert.strictEqual(b.base.properties[0].archive_le, T, 'le bien n est pas archive')
   assert.ok(Array.isArray(r.rates) && r.rates.length === 1, `les rates ne sont pas remontes : ${JSON.stringify(r.rates)}`)
@@ -216,7 +253,7 @@ test("LE TEST QUI COMPTE : un echec partiel ne se tait pas", async () => {
 
 test("LE TEST QUI COMPTE : rearchiver ne REDATE pas", async () => {
   const b = banc({ properties: [unBien({ archive_le: '2026-10-01T00:00:00Z' })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, true)
   assert.strictEqual(r.deja_archive, true, 'le rearchivage n est pas signale comme tel')
   assert.strictEqual(b.base.properties[0].archive_le, '2026-10-01T00:00:00Z',
@@ -225,7 +262,7 @@ test("LE TEST QUI COMPTE : rearchiver ne REDATE pas", async () => {
 
 test("LE TEST QUI COMPTE : le bien d un AUTRE compte est introuvable", async () => {
   const b = banc({ properties: [unBien({ user_id: 'compte-2' })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, false)
   assert.strictEqual(r.motif_refus, 'bien_introuvable', 'un bien d un autre compte a ete atteint')
   assert.strictEqual(b.base.properties[0].archive_le, null, 'le bien d un autre compte a ete archive')
@@ -236,7 +273,7 @@ test("un bien SANS cle provider s archive quand meme, et le dit", async () => {
   // rien a nettoyer dans les tables enfant, mais le bien doit sortir des
   // boucles et des ecrans.
   const b = banc({ properties: [unBien({ provider_property_id: null })] })
-  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE })
   assert.strictEqual(r.ok, true)
   assert.strictEqual(b.base.properties[0].archive_le, T)
   assert.strictEqual(r.taches_closes, null, 'un nettoyage est annonce sans cle provider')
@@ -560,4 +597,199 @@ test("reactiver un bien vivant est sans effet, et le dit", async () => {
   const r = await A.reactiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
   assert.strictEqual(r.ok, true)
   assert.strictEqual(r.deja_vivant, true)
+})
+
+// ─── Les menages des sejours a venir, crees dans le geste ───────────────────
+test("LE TEST QUI COMPTE : l archivage cree les menages des sejours a venir, AVANT de poser le drapeau", async () => {
+  // ⚠ DEMANDE DE THIERRY DU 3 NOVEMBRE 2026, apres une mesure que je lui avais
+  // signalee : les menages ne sont crees que jusqu a 180 jours avant le depart
+  // (`JOURS_AVANT`). Un sejour a venir AU-DELA de six mois sur un bien qu on
+  // archive n avait donc pas de menage, et n en aurait JAMAIS eu — la couche
+  // sync ecarte les biens archives. Le voyageur arrivait, personne ne venait.
+  const b = banc({ properties: [unBien()] })
+  const appels = []
+  const r = await A.archiver(b.client, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T,
+    synchroniserFacturation: SANS_FACTURATION, creerMenages: async (results, o) => { appels.push(o); return { crees: 3, erreurs: 0 } }
+  })
+  assert.equal(r.ok, true)
+  assert.equal(r.menages_crees, 3, 'le compte des menages crees ne remonte pas a la confirmation')
+  assert.equal(appels.length, 1, 'la creation des menages n a pas ete appelee')
+
+  // ⚠ LA FENETRE EST ELARGIE : sans cela, un sejour a dix mois reste sans
+  // menage. Et elle est BORNEE AU BIEN, sinon un geste d hote declencherait un
+  // balayage de tout le parc de tous les comptes.
+  assert.ok(appels[0].joursAvant > 180,
+    `la fenetre vaut ${appels[0].joursAvant} jours : elle ne depasse pas celle du cron`)
+  assert.ok(Number.isFinite(appels[0].joursAvant),
+    'la fenetre n est pas un nombre fini : `jour(Infinity)` rend « Invalid Date », donc un filtre qui ecarte tout')
+  assert.deepEqual(appels[0].borneAuBien, { userId: 'compte-1', propertyId: 'cle-channex' },
+    'la creation n est pas bornee a ce bien, ou pas par une cle composite')
+})
+
+test("LE TEST QUI COMPTE : les menages sont crees AVANT la pose du drapeau", async () => {
+  // ⚠ C EST L ORDRE QUI FAIT TOUT, et c est le seul defaut vraiment dangereux
+  // de ce correctif : `synchroniserMenages` ecarte les biens archives
+  // (`clesArchivees`). Appelee APRES la pose, elle ne creerait RIEN et le
+  // compte rendu annoncerait « 0 menage cree » sans que personne ne comprenne.
+  const b = banc({ properties: [unBien()] })
+  const ordre = []
+  const clientEspion = {
+    from (table) {
+      const q = b.client.from(table)
+      if (table !== 'properties') return q
+      return new Proxy(q, {
+        get (cible, p) {
+          if (p === 'update') { ordre.push('drapeau'); }
+          const v = cible[p]
+          return typeof v === 'function' ? v.bind(cible) : v
+        }
+      })
+    }
+  }
+  await A.archiver(clientEspion, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T,
+    synchroniserFacturation: SANS_FACTURATION, creerMenages: async () => { ordre.push('menages'); return { crees: 1, erreurs: 0 } }
+  })
+  assert.deepEqual(ordre.slice(0, 2), ['menages', 'drapeau'],
+    `l ordre observe est ${ordre.join(' -> ')} : le drapeau est pose avant la creation, donc rien ne sera cree`)
+})
+
+test("un echec de creation NE BLOQUE PAS l archivage, et il se DIT", async () => {
+  // Le geste de l hote est d archiver ; creer les menages en retard est un
+  // service rendu au passage. On refuse de perdre le geste, et on ne tait pas
+  // l echec — c est la regle des `rates` de ce fichier.
+  const b = banc({ properties: [unBien()] })
+  const r = await A.archiver(b.client, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T,
+    synchroniserFacturation: SANS_FACTURATION, creerMenages: async () => { throw new Error('sync indisponible') }
+  })
+  assert.equal(r.ok, true, 'l archivage a ete refuse pour un echec de creation de menages')
+  assert.equal(r.menages_crees, null, '`menages_crees` doit valoir null, jamais 0, quand on ne sait pas')
+  assert.ok((r.rates || []).some(x => x.quoi === 'menages_a_venir' && /sync indisponible/.test(x.detail)),
+    `l echec de creation est tu : ${JSON.stringify(r.rates)}`)
+})
+
+// ─── L'abonnement, tout de suite (decision de Thierry du 7 novembre 2026) ───
+// « stop abonnement » : archiver un bien recalcule l'abonnement du compte
+// immediatement, sans jamais en creer un.
+test("LE TEST QUI COMPTE : l archivage recalcule l abonnement APRES que le drapeau est ECRIT, sans jamais en creer", async () => {
+  // ⚠ L'ORDRE SE MESURE A L'EXECUTION, PAS A L'ACCES (constat 5 de la revue de
+  // 9fc95ec9). Ma premiere version notait « drapeau » quand le code touchait
+  // `.update` : une requete construite puis attendue APRES le recalcul passait
+  // au vert, alors que le bien etait encore compte. Ici, le double du recalcul
+  // regarde la LIGNE : le banc n'y ecrit `archive_le` qu'a l'execution.
+  const b = banc({ properties: [unBien()] })
+  const appels = []
+  const r = await A.archiver(b.client, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE,
+    synchroniserFacturation: async (compte, email, o) => {
+      appels.push({ compte, o, deja_ecrit: b.base.properties[0].archive_le === T })
+      return { qty: 1, updated: true, direction: 'down' }
+    }
+  })
+  assert.equal(r.ok, true)
+  assert.deepEqual(appels, [{ compte: 'compte-1', o: { creer: false }, deja_ecrit: true }],
+    `appels ${JSON.stringify(appels)} : recalcule avant que le drapeau soit ecrit, pour un autre compte, ou en pouvant creer`)
+  assert.deepEqual(r.abonnement, { qty: 1, updated: true, direction: 'down' })
+  assert.equal(r.rates, null)
+})
+
+test("LE TEST QUI COMPTE : le chemin PAR DEFAUT (production) appelle la vraie facturation en `creer: false`", async () => {
+  // ⚠ CONSTAT 4 DE LA REVUE DE 9fc95ec9 : tous les archivages du banc injectaient
+  // le double, donc le chemin de production n'etait traverse par AUCUN test —
+  // la mutation qui oubliait de transmettre `{ creer: false }` restait verte.
+  // C'est le defaut de « l'envoi par defaut » que CLAUDE.md raconte.
+  const absBilling = require.resolve('../lib/billing')
+  const avant = require.cache[absBilling]
+  const appels = []
+  const m = new (require('node:module'))(absBilling)
+  m.exports = { syncAccountBilling: async (...args) => { appels.push(args); return { qty: 0 } } }
+  m.loaded = true
+  require.cache[absBilling] = m
+  try {
+    const b = banc({ properties: [unBien()] })
+    const r = await A.archiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE })
+    assert.equal(r.ok, true)
+    assert.deepEqual(appels, [['compte-1', null, { creer: false }]])
+    assert.deepEqual(r.abonnement, { qty: 0 })
+  } finally {
+    if (avant) require.cache[absBilling] = avant; else delete require.cache[absBilling]
+  }
+})
+
+test("LE TEST QUI COMPTE : un bien DEJA archive rejoue le recalcul, et dit s il echoue encore", async () => {
+  // ⚠ CONSTAT 2 DE LA REVUE DE 9fc95ec9 : apres un premier echec Stripe, l'ecran
+  // rend le bouton ; le second clic repondait « deja archive » sans rien
+  // recalculer, et l'ecran disait « fait ». Le bien restait facture.
+  const b = banc({ properties: [unBien({ archive_le: '2026-10-30T09:00:00.000Z' })] })
+  const appels = []
+  const r = await A.archiver(b.client, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE,
+    synchroniserFacturation: async (compte, email, o) => { appels.push(o); return { error: 'Stripe indisponible' } }
+  })
+  assert.equal(r.ok, true)
+  assert.equal(r.deja_archive, true)
+  assert.deepEqual(appels, [{ creer: false }], 'le second clic ne rejoue pas le recalcul')
+  assert.ok((r.rates || []).some(x => x.quoi === 'abonnement'), 'l echec repete est tu : l ecran dirait « fait »')
+})
+
+test("un bien JAMAIS active n appelle pas la facturation : il n a jamais ete compte", async () => {
+  // Constat 7 de la revue de 9fc95ec9 : deux appels Stripe pour rien, et une
+  // fausse alerte « archive partiel » le jour ou Stripe est en panne.
+  const b = banc({ properties: [unBien({ active_at: null })] })
+  let appele = false
+  const r = await A.archiver(b.client, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE,
+    synchroniserFacturation: async () => { appele = true; return { qty: 0 } }
+  })
+  assert.equal(r.ok, true)
+  assert.equal(appele, false)
+  assert.deepEqual(r.abonnement, { skipped: 'jamais_facture' })
+})
+
+test("un recalcul d abonnement en ECHEC n empeche pas l archivage, et il se DIT", async () => {
+  for (const sync of [
+    async () => ({ error: 'Stripe indisponible' }),
+    async () => { throw new Error('Stripe indisponible') }
+  ]) {
+    const b = banc({ properties: [unBien()] })
+    const r = await A.archiver(b.client, {
+      bienId: 'uuid-bien', compte: 'compte-1', maintenant: T, creerMenages: SANS_MENAGE, synchroniserFacturation: sync
+    })
+    assert.equal(r.ok, true, 'l archivage a ete refuse pour un echec de facturation')
+    assert.equal(r.abonnement, null)
+    assert.ok((r.rates || []).some(x => x.quoi === 'abonnement' && /Stripe indisponible/.test(x.detail)),
+      `l echec de l abonnement est tu : ${JSON.stringify(r.rates)}`)
+  }
+})
+
+// ─── La base de connaissance d'un bien archive est GARDEE ───────────────────
+// Decision de Thierry du 7 novembre 2026 : un bien archive disparait de la
+// liste des biens de la base de connaissance, « mais sa configuration est
+// gardee » — ses faits et ses reponses doivent etre intacts s'il est reactive.
+test("LE TEST QUI COMPTE : l archivage ne supprime ni ne modifie la configuration de la base de connaissance", async () => {
+  const KB = [
+    { id: 'k1', user_id: 'compte-1', property_id: 'cle-channex', type: 'fixed', key: 'wifi', value: 'Livebox-1234' },
+    { id: 'k2', user_id: 'compte-1', property_id: 'cle-channex', type: 'qa', key: 'parking', value: 'Place 12, au sous-sol.' }
+  ]
+  const avant = JSON.parse(JSON.stringify(KB))
+  const b = banc({ properties: [unBien()], knowledge: KB })
+  const r = await A.archiver(b.client, {
+    bienId: 'uuid-bien', compte: 'compte-1', maintenant: T,
+    synchroniserFacturation: SANS_FACTURATION, creerMenages: SANS_MENAGE
+  })
+  assert.equal(r.ok, true)
+  // ⚠ `rates` NUL : une ecriture ratee sur la base de connaissance finirait
+  // ici, avalee par le `try` de son etape (constat 2 de la revue de 0ccd215d).
+  assert.equal(r.rates, null, `un echec partiel : ${JSON.stringify(r.rates)}`)
+  const tentativesKB = () => (b.journal.tentatives || []).filter(j => j.table === 'knowledge')
+  assert.deepEqual(b.base.knowledge, avant, 'la base de connaissance du bien a ete supprimee ou modifiee')
+  assert.deepEqual(tentativesKB(), [], `l archivage a tente d ecrire dans la base de connaissance : ${JSON.stringify(tentativesKB())}`)
+  // ⚠ ET LA REACTIVATION AUSSI (constat 1 de la revue de 0ccd215d) : la
+  // decision dit que la configuration doit etre intacte « s'il est reactive ».
+  const r2 = await A.reactiver(b.client, { bienId: 'uuid-bien', compte: 'compte-1', maintenant: T })
+  assert.equal(r2.ok, true)
+  assert.deepEqual(b.base.knowledge, avant, 'la reactivation a supprime ou modifie la base de connaissance')
+  assert.deepEqual(tentativesKB(), [], `la reactivation a tente d ecrire dans la base de connaissance : ${JSON.stringify(tentativesKB())}`)
 })

@@ -254,6 +254,49 @@ test("LE TEST QUI COMPTE : l annonce encore EN LIGNE est signalée, et l hôte a
     'une lecture ratée affirme que l annonce est en ligne')
 })
 
+test("LE TEST QUI COMPTE : sur un bien ARCHIVE, l encart ne dit plus « Actif »", () => {
+  // ⚠ POINT 8 DU CONSTAT DE THIERRY DU 3 NOVEMBRE 2026, vu en production sur
+  // Colomiers : la fiche d un logement archivé affichait
+  // « Assistant HôteSmart · Actif ». Faux deux fois — rien ne tourne plus pour
+  // ce bien, et l interrupteur proposait de mettre en pause une automatisation
+  // déjà arrêtée.
+  const f = fiche()
+  f.bien = { ...f.bien, archive_le: '2026-11-03T20:42:19.342Z' }
+  const d = doc(M.assistantHtml(f, OUTILS(), { peutModifier: true }))
+
+  const encart = d.querySelector('.fic-assistant')
+  assert.ok(encart, 'l encart d état a disparu : l hôte ne sait plus où il en est')
+  assert.equal(encart.getAttribute('data-assistant'), 'archive')
+  assert.equal(d.querySelector('[data-assistant-etat]').textContent, FR['fiche.assistant_archive'])
+  assert.ok(!encart.textContent.includes(FR['fiche.assistant_actif']),
+    'l encart dit encore « Actif » sur un bien archivé')
+
+  // ⚠ AUCUN INTERRUPTEUR, meme desactive : un interrupteur grise invite a
+  // chercher pourquoi il ne s actionne pas. L action d un bien archive est
+  // « Reactiver », et elle vit dans son propre bloc.
+  assert.equal(d.querySelector('[role="switch"]'), null,
+    'un interrupteur est rendu sur un bien archivé')
+  assert.equal(d.querySelector('[data-bind="assistant"]'), null,
+    'le bouton de bascule est encore branché sur un bien archivé')
+})
+
+test("sans droit de modification non plus, un bien ARCHIVE ne dit pas « Actif »", () => {
+  // ⚠ LA GARDE EST AVANT `peutModifier` POUR CETTE RAISON : le chemin du
+  // lecteur passe par `signalHtml`, qui ne connaît pas l archivage. Deux
+  // gardes, une par chemin, auraient divergé au premier changement.
+  const f = fiche()
+  f.bien = { ...f.bien, archive_le: '2026-11-03T20:42:19.342Z' }
+  const d = doc(M.assistantHtml(f, OUTILS(), { peutModifier: false }))
+  assert.equal(d.querySelector('[data-assistant-etat]').textContent, FR['fiche.assistant_archive'])
+})
+
+test("un bien VIVANT garde son interrupteur et son « Actif »", () => {
+  // Le contre-cas : sans lui, retirer l encart pour tout le monde passerait.
+  const d = doc(M.assistantHtml(fiche(), OUTILS(), { peutModifier: true }))
+  assert.ok(d.querySelector('[role="switch"]'), 'le bien vivant a perdu son interrupteur')
+  assert.equal(d.querySelector('[data-assistant-etat]').textContent, FR['fiche.assistant_actif'])
+})
+
 test('l en-tête porte le nom, la ville · capacité et le FAIT DATÉ — mais PAS les pastilles', () => {
   const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
   assert.equal(d.querySelector('.fic-nom').textContent, 'La bulle')
@@ -1930,4 +1973,64 @@ test('et le rendu de la fiche ne montre pas les deux phrases ensemble', () => {
   assert.match(texte, /Aucun canal relié/)
   assert.equal(d.querySelector('.fic-fraicheur'), null,
     'aucune ligne de fraîcheur sous un logement qui n a aucun canal')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Accueil du voyageur (lot du 8 novembre 2026) : les infos venues de la base
+// ═══════════════════════════════════════════════════════════════════════════
+
+const FAITS_ACCUEIL = [
+  { cle: 'telephone_hote', libelle: 'Téléphone', balise: '{telephone_hote}', valeur: '0600000000', aRemplir: false, horsIa: false, sansBalise: false },
+  { cle: 'checkin', libelle: "Heure d'arrivée", balise: '{checkin}', valeur: '', repli: '16:00', defaut: '18:00', aRemplir: false, horsIa: false, sansBalise: false },
+  { cle: 'checkout', libelle: 'Heure de départ', balise: '{checkout}', valeur: '', repli: null, defaut: '10:00', aRemplir: false, horsIa: false, sansBalise: false },
+  { cle: 'wifi_nom', libelle: 'Nom wifi', balise: '{wifi_nom}', valeur: 'RESEAU<b>', aRemplir: false, horsIa: true, sansBalise: false },
+  { cle: 'wifi_mdp', libelle: 'Mot de passe wifi', balise: '{wifi_mdp}', valeur: '', aRemplir: true, horsIa: false, sansBalise: false },
+  { cle: 'equip_lits', libelle: 'equip_lits', balise: null, valeur: 'deux lits', aRemplir: false, horsIa: false, sansBalise: true }
+]
+
+test('LE TEST QUI COMPTE : le bloc « Accueil du voyageur » suit « Le logement », et dit ce que le voyageur recevra', () => {
+  const d = doc(M.ficheHtml(fiche({ accueil: { faits: FAITS_ACCUEIL } }), OUTILS(), { peutSupprimer: true }))
+  const titres = [...d.querySelectorAll('.fic-col--gauche .fic-bloc__titre')].map(x => x.textContent)
+  assert.deepEqual(titres, ['Où il est en vente', 'Prix', 'Le logement', 'Accueil du voyageur'])
+  const ligne = (cle) => d.querySelector(`[data-acc-ligne="${cle}"]`)
+  assert.equal(ligne('telephone_hote').querySelector('.kb-fait__valeur').textContent, '0600000000')
+  assert.equal(ligne('checkin').querySelector('.kb-fait__valeur').textContent, `16:00 ${FR['acc.synced']}`,
+    'l heure synchronisée passe avant le défaut, comme dans l envoi')
+  assert.equal(ligne('checkout').querySelector('.kb-fait__valeur').textContent, `10:00 ${FR['kb.by_default']}`)
+  assert.equal(ligne('wifi_mdp').querySelector('.kb-a-remplir').textContent, FR['kb.to_fill'])
+  assert.equal(ligne('checkin').querySelector('.kb-a-remplir'), null, 'un horaire vide n est jamais « À remplir »')
+  assert.match(ligne('equip_lits').textContent, new RegExp(FR['kb.ai_only']))
+  assert.ok(ligne('wifi_nom').querySelector('.kb-badge--horsia'), 'le cadenas Hors IA suit la ligne')
+  assert.equal(ligne('wifi_nom').querySelector('b'), null, 'une valeur de l hôte n entre jamais en HTML')
+  assert.equal(d.querySelectorAll('[data-acc-modifier]').length, 6, 'chaque info se corrige')
+  // L'adresse n'y est pas : elle reste dans « Le logement », et c'est la seule.
+  assert.equal(ligne('adresse'), null)
+})
+
+test('l info en cours d écriture devient un champ, au même endroit — valeur échappée', () => {
+  const d = doc(M.ficheHtml(fiche({ accueil: { faits: FAITS_ACCUEIL } }), OUTILS(),
+    { peutSupprimer: true, accueilEnEdition: 'wifi_nom' }))
+  const champ = d.querySelector('[data-bloc="accueil"] [data-acc-saisie]')
+  assert.equal(champ.value, 'RESEAU<b>')
+  assert.equal(d.querySelector('[data-acc-edition="wifi_nom"] label').textContent, 'Nom wifi')
+  assert.equal(d.querySelector('[data-acc-ligne="wifi_nom"]'), null)
+  assert.ok(d.querySelector('[data-acc-enregistrer="wifi_nom"]'))
+})
+
+test('LE TEST QUI COMPTE : refusé par le serveur (membre), le bloc n existe PAS ; illisible, il le DIT', () => {
+  const refuse = doc(M.ficheHtml(fiche({ accueil: null, refuses: ['accueil'] }), OUTILS(), { peutSupprimer: true }))
+  assert.equal(refuse.querySelector('[data-bloc="accueil"]'), null)
+  assert.ok(![...refuse.querySelectorAll('.fic-bloc__titre')].some(x => x.textContent === 'Accueil du voyageur'))
+  const panne = doc(M.ficheHtml(fiche({ accueil: null, indisponibles: ['accueil'] }), OUTILS(), { peutSupprimer: true }))
+  assert.equal(panne.querySelector('[data-bloc="accueil"] [data-non-lu]').textContent, FR['fiche.accueil_non_lu'])
+})
+
+test('un bien ARCHIVÉ montre ses infos d accueil, sans crayon ni champ (la base refuse de les écrire)', () => {
+  // Review 1 du lot : le crayon menait à un refus « Seul le titulaire… », faux.
+  const f = fiche({ accueil: { faits: FAITS_ACCUEIL } })
+  f.bien = { ...f.bien, archive_le: '2026-11-01T10:00:00Z' }
+  const d = doc(M.ficheHtml(f, OUTILS(), { peutSupprimer: true, accueilEnEdition: 'wifi_nom' }))
+  assert.ok(d.querySelector('[data-acc-ligne="telephone_hote"]'), 'les infos restent lisibles')
+  assert.equal(d.querySelectorAll('[data-acc-modifier]').length, 0)
+  assert.equal(d.querySelector('[data-bloc="accueil"] [data-acc-saisie]'), null)
 })

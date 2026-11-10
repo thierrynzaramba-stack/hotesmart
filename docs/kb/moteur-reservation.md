@@ -700,3 +700,31 @@ dire à `prevenirDuRepli` « confirmation NON envoyée ». Les tests
 `tests/confirmation-hote.test.js` qui défendent aujourd'hui « elle PART
 TOUJOURS » devront changer de sens dans le même commit — sans quoi ils
 défendront une règle abandonnée.
+
+## 13. Un bien archivé entre le paiement et la création (5 novembre 2026)
+
+**Décision de Thierry (lot « filtre biens vivants ») : « la réservation se
+crée, avec alerte fondateur ».** Un voyageur peut avoir payé par le lien de
+réservation juste avant que l'hôte archive son bien. Le paiement est légitime :
+le lien lui a vendu ce séjour. Refuser à la création, ce serait rembourser
+d'office une vente faite.
+
+- `creerDepuisTentative` (lib/moteur-creation.js) **ne bloque rien** : aucune
+  garde n'est appelée sur ce chemin. Après la création réussie et la
+  confirmation au voyageur, `signalerSiArchive` lit l'état du bien par
+  `estArchive` (lib/biens-vivants.js, la lecture par clé) et, s'il est
+  archivé, ouvre l'incident `reservation_sur_bien_archive` — SMS et e-mail
+  fondateur, avec les faits (dates, montant, voyageur, heure, code) et
+  l'identifiant de la réservation créée.
+- ⚠ **Rien ne lève à cet endroit.** On est après l'encaissement ET après la
+  création chez le provider : `estArchive` rend `false` sur une lecture ratée,
+  et le tout est sous `try`. Une alerte manquée coûte moins cher qu'une
+  exception qui ferait croire à un échec alors que la réservation existe.
+- ⚠ **`reportIncident`, pas `envoyerAlerteBrute`** : ce n'est pas de l'argent
+  en suspens, la réservation est faite (voir `alerterReveil`). L'anti-spam par
+  bien et par heure s'applique ; l'incident est persisté à chaque fois.
+- Les échecs (refus certain, issue incertaine) gardent leur chemin : aucune
+  alerte « réservation créée » là où rien n'existe.
+
+Tests : `tests/moteur-creation.test.js` (fin du fichier) et
+`tests/founder-notify-sans-sms.test.js` (le type réveille et a un libellé).

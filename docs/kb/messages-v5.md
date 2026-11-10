@@ -217,3 +217,57 @@ Décision de Thierry, en DEUX recettes ; inventaire champ par champ : spec
 - Migration `2026-10-12-messages-origine` : staging puis prod (collage
   Thierry), prouvée par `scripts/verifier-migration-messages-origine.js`
   (colonne par son nom + liste fermée par un INSERT refusé).
+
+## Le fil en direct (10 novembre 2026)
+
+Spec : `docs/specs/spec-messages-fil-en-direct.md`. Demande de Thierry du
+9 novembre 2026 : échanger avec le voyageur sans recharger la page. Rythme
+décidé par Thierry le 10 novembre 2026 à 01:06.
+
+- **Fil ouvert, onglet affiché : une relecture toutes les 5 secondes**, par
+  `GET /api/messages?direct=1&fil=<bookId>&depuis=<curseur>`. Elle rend les
+  messages du fil **insérés** après le curseur (`created_at`, l'ordre
+  d'insertion — PAS `sent_at`, que le webhook, l'import et Beds24 écrivent
+  dans le passé), le `curseur` suivant, les propositions en attente, et
+  `dernier` : le `created_at` du message le plus récent du compte **hors du
+  fil ouvert**. Premier cycle d'un fil : le `lu_le` (horloge serveur) de la
+  lecture qui a produit les messages de CE fil, moins deux minutes. Le
+  curseur est renvoyé TEL QUEL à la base : il est à la microseconde, et le
+  tronquer faisait revenir la dernière ligne à chaque cycle.
+- **La liste** se relit (`/api/messages?limit=50`, l'appel d'ouverture) au plus
+  une fois par minute, et seulement quand `dernier` dépasse le dernier
+  `dernier` déjà vu (une seule horloge : un message = une relecture).
+  Sans fil ouvert : une relecture par minute (`direct=1` seul).
+- **Onglet caché : aucun appel.** 15 minutes sans geste : une par minute.
+  Échecs : 20 s, 40 s, 80 s, puis 2 min ; trois de suite affichent « Mise à
+  jour interrompue · Réessayer » ; un 401 arrête la relecture.
+- **Ce que l'hôte tient n'est pas redessiné** : la saisie est hors du fil ; un
+  élément qui a le focus dans le fil, son en-tête ou le bandeau d'échéance, ou
+  le menu ⋯ ouvert, fait attendre le rendu (pastille « Nouveau message »).
+  Hôte remonté lire : le fil ne saute pas. Le défilement n'est pas un geste.
+- **Pas de doublon** : une bulle posée par la page après un envoi porte
+  `_local`, et sa ligne du cœur la remplace (même texte sortant, moins de
+  cinq minutes d'écart), dans les deux ordres d'arrivée.
+- **Les propositions se fondent EN PLACE**, jamais remplacées : celle que
+  l'hôte envoie reste tenue jusqu'à sa clôture (constat bloquant de la review 1 :
+  sinon la clôture ne partait pas et un second clic envoyait en double).
+  « Modifier puis Envoyer » RÉSERVE la proposition (`sending`) avant l'appel
+  au canal, avec ou sans échéance — comme le bouton de la bulle : sans
+  réservation, tout ce qui la remettait à l'écran (cycle pendant la clôture,
+  clôture ratée, changement de fil, « Modifier » une autre, « Proposer »)
+  rendait un « Envoyer » que le serveur acceptait (reviews 2 et 3). Elle est
+  « en cours » dès le geste et ne se dessine pas dans le fil : c'est le texte
+  de la saisie qui part, la bulle d'envoi le montre. Un échec d'envoi la
+  relâche et la rend au fil. Une proposition retirée par la
+  page (numéro d'une horloge LOGIQUE de la page, pas `Date.now()` que le
+  réglage du poste fait reculer) ne revient pas sur une réponse DEMANDÉE avant
+  le retrait — mais elle
+  revient si le serveur la rend ensuite : le cron rend à l'hôte une réponse
+  différée qu'il n'a pas pu délivrer, et la cacher pour toujours laissait
+  l'hôte croire le voyageur servi (review 2, constat 2).
+- **Lu tant que c'est à l'écran** : un message du voyageur arrivé dans le fil
+  ouvert est marqué lu une fois (`POST action=lu`) — pas sur une page oubliée ;
+  le premier geste lit alors le fil.
+- Règles pures dans `shared/messages-direct.js` ; gardes serveur (compte
+  cible, périmètre sur les trois lectures, archivage, `private, no-store` dès
+  le 405, `Server-Timing` avec le nombre de requêtes) dans `api/messages.js`.

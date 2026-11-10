@@ -44,6 +44,14 @@
           data-i18n-attr="aria-label:messages.drawer_scheduled;title:messages.drawer_scheduled;data-legende:messages.drawer_scheduled">
           <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-scheduled"/></svg>
         </button>
+        <!-- Base de connaissance V5 (lot 3) : à côté de « Messages programmés »
+             (décision du 3 novembre 2026). Ordinateur : le volet de 440 px ;
+             téléphone : le même volet, plein écran par-dessus Messages
+             (décision du 7 novembre 2026, spec kb-utiliser-reponse). -->
+        <button type="button" class="msg-btnrond" data-ouvre-volet="connaissance" hidden
+          data-i18n-attr="aria-label:kb.title;title:kb.title;data-legende:kb.title">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-book"/></svg>
+        </button>
         <button type="button" class="msg-btnrond" data-ouvre-volet="ia" hidden
           data-i18n-attr="aria-label:messages.tab_ia;title:messages.tab_ia;data-legende:messages.tab_ia">
           <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
@@ -82,7 +90,17 @@
         <span data-bind="fil-menu"></span>
       </span>
     </div>
+    <!-- Le fil en direct (spec-messages-fil-en-direct.md) : la mention discrète
+         après trois relectures ratées, et la pastille d'un message arrivé
+         pendant que l'hôte lisait plus haut ou avait un élément du fil en main. -->
+    <p class="caption muted" style="margin: 0; padding: 4px 20px" data-bind="fil-direct-panne" hidden>
+      <span data-i18n="messages.live_paused"></span> · <button type="button" class="link caption" data-bind="fil-direct-reessayer" data-i18n="messages.retry"></button>
+    </p>
     <div class="msg-fil__deroule" data-list="fil" hidden></div>
+    <button type="button" class="btn btn--secondary" style="align-self: center; margin: 6px 0" data-bind="fil-nouveau" hidden>
+      <span data-i18n="messages.new_message"></span>
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(90 12 12)"/></svg>
+    </button>
     <div class="msg-vide" data-bind="fil-vide">
       <svg class="icon" style="width:36px;height:36px" aria-hidden="true"><use href="/shared/icons.svg#i-message"/></svg>
       <span data-i18n="messages.select"></span>
@@ -96,6 +114,16 @@
     <div class="msg-saisie__echeance" data-bind="saisie-echeance" hidden></div>
     <div class="msg-saisie" data-bind="saisie" hidden>
       <textarea rows="1" data-bind="texte" data-i18n-attr="placeholder:messages.write;aria-label:messages.write"></textarea>
+      <!-- La base de connaissance À CÔTÉ DE LA SAISIE (recette du 7 novembre
+           2026, demande de Thierry). Au téléphone, le bouton d'en-tête ne vit
+           que sur la LISTE : pour l'atteindre il fallait quitter le fil, et la
+           page s'ouvrait sur le premier logement, sans voyageur. Celui-ci est
+           DANS le fil. Même attribut que l'en-tête, donc même branchement
+           (titulaire seul, le volet par-dessus, gel pendant une écriture). -->
+      <button type="button" class="btn btn--secondary btn--icon" data-ouvre-volet="connaissance" hidden
+        data-i18n-attr="aria-label:kb.title;title:kb.title">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-book"/></svg>
+      </button>
       <button type="button" class="btn btn--secondary btn--icon" data-bind="proposer" data-i18n-attr="aria-label:messages.propose;title:messages.propose">
         <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
       </button>
@@ -140,6 +168,7 @@ import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/s
 import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, reinitialiserMoment, libelleJour, libelleHeure, libelleDelai as libelleDelaiBrut }
   from '/shared/messages-programmes.js'
 import { departEvaluable } from '/shared/calendrier-resa.js'
+import { delaiDirect, listeARelire, apresDuFil, fusionnerMessages, fusionnerTaches, aDejaSaLigne, RYTHME } from '/shared/messages-direct.js'
 import { confirmerDansLaPage, OCCUPEE } from '/shared/confirmer.js'
 
 initErrorHandler()
@@ -167,6 +196,7 @@ const etat = {
   pausesLues: false,
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
+  saisieRemplie: null,     // { bookId, textes, vide } : textes posés par « Utiliser », remplis pour CE fil
   modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
   configIA: null,          // blob agent_alert_config.config ; null = illisible (volet ferme)
   prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
@@ -233,6 +263,9 @@ async function charger () {
   const lectures = [
     appel(`/api/messages?limit=${PAGE}`).then(r => {
       etat.conversations = r.conversations || []
+      // L'instant de la lecture, horloge SERVEUR : le point de depart du fil en direct.
+      etat.luLe = r.lu_le || null
+      for (const c of etat.conversations) c._luLe = etat.luLe
       etat.hasMore = r.has_more === true
       etat.nextBefore = r.next_before != null ? r.next_before : null
       etat.nextBeforeId = r.next_before_id || null
@@ -266,6 +299,14 @@ async function charger () {
     ] : []),
     // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
     // sous RLS, jamais /api/channel-property (il interroge Beds24 en direct).
+    //
+    // ⚠ **NON FILTREE SUR L'ARCHIVAGE**, et c'est raisonne : c'est une table de
+    // CORRESPONDANCE cle provider -> nom, pas une liste de choix. Meme decision
+    // que pour les deux tables de noms de `api/avis.js`.
+    // ⚠ CE N'EST PLUS ELLE QUI DECIDE DE CE QUI S'AFFICHE : depuis la decision
+    // de Thierry du 6 novembre 2026, les conversations d'un bien archive ne
+    // sortent plus de `/api/messages` (filtre serveur, `clesArchivees`). Cette
+    // table nomme ce que le serveur rend ; filtrer ici n'ajouterait rien.
     supabase.from('properties').select('id, name, provider_property_id, photo_url').eq('user_id', compteCourant())
       .then(({ data, error }) => {
         if (error) { logger.error('Messages', 'biens', error); return }
@@ -443,7 +484,11 @@ async function chargerPageSuivante () {
   try {
     const r = await appel(`/api/messages?limit=${PAGE}&before=${encodeURIComponent(etat.nextBefore)}&before_id=${encodeURIComponent(etat.nextBeforeId || '')}`)
     const connus = new Set(etat.conversations.map(c => String(c.bookId)))
-    for (const c of r.conversations || []) if (!connus.has(String(c.bookId))) etat.conversations.push(c)
+    for (const c of r.conversations || []) {
+      if (connus.has(String(c.bookId))) continue
+      c._luLe = r.lu_le || null
+      etat.conversations.push(c)
+    }
     etat.hasMore = r.has_more === true
     etat.nextBefore = r.next_before != null ? r.next_before : null
     etat.nextBeforeId = r.next_before_id || null
@@ -556,6 +601,7 @@ function renderFil () {
     ...c.messages.map(m => ({ quand: valide(m.sent_at) ? m.sent_at : dernierInstant, type: 'message', m })),
     ...tachesDe(c)
       .filter(x => !(etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)))
+      .filter(x => !x.envoiSaisie)
       .map(x => ({ quand: valide(x.created_at) ? x.created_at : dernierInstant, type: 'proposition', x }))
   // ⚠ UN DÉPARTAGE DÉTERMINISTE, ET C'EST UN CONSTAT DE RECETTE (28 octobre
   // 2026 : « après F5, une proposition modifiée change de place »). Deux tâches
@@ -635,6 +681,12 @@ function renderFil () {
   // La saisie (etape 2) : retiree sans droit d'ecriture, jamais grisee.
   const saisie = $('[data-bind="saisie"]')
   saisie.hidden = !peutEcrireMessages()
+  // ⚠ LE CHAMP SE REMESURE UNE FOIS VISIBLE — recette de Thierry du
+  // 8 novembre 2026 : au téléphone, la saisie est cachée pendant le changement
+  // de fil, un champ caché mesure 0, et la hauteur de zéro prise là restait
+  // collée au champ (« sa hauteur se réduit en ouvrant plusieurs conversations
+  // à la suite »).
+  if (!saisie.hidden) ajusterHauteur($('[data-bind="texte"]'))
   const enPause = etat.pauses[String(c.propertyId)] === true
   const btnIA = $('[data-bind="proposer"]')
   btnIA.disabled = enPause
@@ -664,6 +716,25 @@ function envoisDe (bookId) {
 }
 async function lancerEnvoi (c, entree) {
   entree.etatEnvoi = 'en_cours'
+  // ⚠ LA PROPOSITION EST TENUE PAR SON OBJET DES LE DEBUT (review 1 du fil en
+  // direct, constat BLOQUANT). La chercher de nouveau dans `etat.taches` APRES
+  // l'envoi la perdait si une relecture l'avait retiree entre-temps : la
+  // cloture ne partait jamais, la tache restait `sending`, revenait a l'hote
+  // dix minutes plus tard « impossible de savoir si le message est parti » —
+  // et un second clic l'envoyait en double. Meme regle que `envoyerProposition`.
+  const tacheDuGeste = entree.valideTache ? tacheParId(entree.valideTache) : null
+  // ⚠ ET ELLE EST « EN COURS » DES LE DEPART, PAS APRES L'APPEL AU CANAL
+  // (review 3, constat 2). Tenue seulement par `etat.enEdition`, elle revenait
+  // dans le fil avec « Envoyer » des qu'un geste effacait l'edition — changer
+  // de fil, « Modifier » une autre proposition — pendant que le message
+  // partait. `envoiSaisie` la retire du fil (review 3, constat 4) : c'est le
+  // texte de la SAISIE qui part, et la bulle d'envoi le montre deja en bas du
+  // fil ; dessiner la proposition « Envoi… » y montrait le texte de l'IA, que
+  // personne n'envoie.
+  if (tacheDuGeste) { tacheDuGeste.etatEnvoi = 'en_cours'; tacheDuGeste.envoiSaisie = true }
+  const lacherTache = () => {
+    if (tacheDuGeste && tacheDuGeste.envoiSaisie) { delete tacheDuGeste.etatEnvoi; delete tacheDuGeste.envoiSaisie }
+  }
   renderFil()
   // ⚠ LE CLAIM MANQUAIT SUR CE CHEMIN, ET C'ETAIT UN CONSTAT GRAVE DE LA REVUE
   // (constat 3, 27 octobre 2026). Je ne l'avais pose que sur
@@ -678,9 +749,20 @@ async function lancerEnvoi (c, entree) {
   // DEUXIEME message au voyageur.
   //
   // Un seul verrou, le meme pour les deux chemins.
+  //
+  // ⚠ ET IL VAUT AUSSI SANS ECHEANCE (review 3, constats 1 et 2). Une
+  // proposition sans `send_after` n'etait pas reservee : elle restait
+  // `pending_validation` en base jusqu'a la cloture, donc tout ce qui la
+  // remettait a l'ecran — une cloture ratee, un changement de fil, « Proposer »
+  // — rendait un « Envoyer » que le serveur acceptait, et le texte de l'IA
+  // partait en second. Reservee, elle est `sending` : le serveur ne la rend
+  // plus, et un second clic recoit 409. Une cloture ratee la laisse
+  // `sending` ; la reprise des orphelines du cron la rend a l'hote dix
+  // minutes plus tard, « impossible de savoir si le message est parti » —
+  // le traitement du bouton de la bulle.
   if (entree.valideTache) {
-    const x = tacheParId(entree.valideTache)
-    if (x && valide(x.send_after)) {
+    const x = tacheDuGeste
+    if (x) {
       // ⚠ LA SAUVEGARDE DU BROUILLON D'ABORD, ET C'EST UNE COURSE QUE J'AVAIS
       // CREEE (constat 5 de la troisieme revue). Cliquer « Envoyer » declenche
       // d'abord le `blur` du champ, donc un POST `brouillon` NON ATTENDU ; le
@@ -710,6 +792,7 @@ async function lancerEnvoi (c, entree) {
           return
         }
         logger.error('Messages', 'reservation avant envoi', err)
+        lacherTache()
         entree.etatEnvoi = 'echec'
         renderFil()
         return
@@ -728,11 +811,17 @@ async function lancerEnvoi (c, entree) {
     // doit jamais clore la proposition avec un texte qui n'est pas le sien
     // (releve en review). La bulle porte l'avatar hote, pas le robot.
     if (entree.valideTache) {
-      const x = etat.taches.find(v => String(v.id) === String(entree.valideTache))
+      const x = etat.taches.find(v => String(v.id) === String(entree.valideTache)) || tacheDuGeste
+      // ⚠ « EN COURS » JUSQU'A SA CLOTURE (review 2, constat 1). Sortie de la
+      // saisie sans etat, la proposition DEJA PARTIE revenait dans le fil au
+      // prochain cycle — le serveur la rend encore tant que la cloture n'est pas
+      // arrivee — avec son bouton « Envoyer » : un clic la renvoyait, texte IA
+      // d'origine. `cloreTache` la retire ensuite quoi qu'il arrive.
+      if (x) { x.etatEnvoi = 'en_cours'; x.envoiSaisie = true }
       etat.enEdition = null
       if (x) { await cloreTache(x, 'done', entree.texte, c, 'ia_modifiee'); return }
     }
-    c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message', origine })
+    if (!aDejaSaLigne(c.messages, entree.texte)) c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message', origine, _local: true })
     c.lastTime = new Date().toISOString()
     renderFil(); renderListe()
   } catch (err) {
@@ -744,6 +833,7 @@ async function lancerEnvoi (c, entree) {
       try { await appel('/api/messages', { action: 'relacher', task_id: String(entree.valideTache) }) }
       catch (e2) { logger.error('Messages', 'relachement', e2) }
     }
+    lacherTache()
     entree.etatEnvoi = 'echec'
     renderFil()
   }
@@ -753,6 +843,14 @@ async function envoyer () {
   const zone = $('[data-bind="texte"]')
   const texte = zone.value.trim()
   if (!c || !texte) return
+  // ⚠ UN TEXTE POSÉ PAR « UTILISER » NE PART QUE DANS SA CONVERSATION —
+  // constat 1 de la review du lot, mesuré : rempli pour Ana (logement P2), il
+  // restait dans la saisie PARTAGÉE après un changement de fil, et « Envoyer »
+  // le postait à Marie — mot de passe wifi d'une autre maison compris. Le
+  // champ garde le texte (rien n'est jeté), et le dit.
+  if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
+  etat.saisieRemplie = null
+  effacerNoteChamp()
   zone.value = ''
   ajusterHauteur(zone)
   const entree = { texte, etatEnvoi: 'en_cours' }
@@ -827,6 +925,7 @@ function modifierProposition (id) {
     && !window.confirm(t('messages.draft_replace'))) return
   zone.value = x.suggested_reply || ''
   ajusterHauteur(zone)
+  etat.saisieRemplie = null
   etat.enEdition = { tacheId: x.id, bookId: String(etat.ouverte) }
   // ⚠ OUVRIR SUSPEND L'ECHEANCE (regle 2 du chantier). Sans ca, l'hote
   // corrigerait un texte qui part sous ses doigts. L'appel est optimiste :
@@ -897,9 +996,11 @@ async function rejeterProposition (id) {
 }
 // Cloture cote serveur, puis retrait de l'ecran et badge a jour.
 //  - done : si la cloture echoue APRES un envoi reussi, la bulle part quand
-//    meme (le message EST parti) ; au rechargement la proposition reviendra
-//    au-dessus du message envoye et « Rejeter » la fermera — on ne renvoie
-//    jamais deux fois tout seul.
+//    meme (le message EST parti) et la proposition quitte l'ecran. Elle est
+//    RESERVEE (`sending`) sur les deux chemins d'envoi : le serveur ne la
+//    rend plus ; la reprise des orphelines du cron la rendra a l'hote dix
+//    minutes plus tard, « impossible de savoir si le message est parti » —
+//    on ne renvoie jamais deux fois tout seul (review 3, constat 1).
 //  - ignored : RIEN n'est parti — un rejet que le serveur n'a pas enregistre
 //    ne disparait pas de l'ecran, il se dit et se retente (releve en review).
 async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
@@ -936,7 +1037,7 @@ async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
     }
   }
   if (statut === 'done' && c) {
-    c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message', origine })
+    if (!aDejaSaLigne(c.messages, texte)) c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message', origine, _local: true })
     c.lastTime = new Date().toISOString()
   }
   retirerTache(x)
@@ -944,6 +1045,8 @@ async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
 // Retrait local d'une proposition (close ici ou ailleurs) : liste, index,
 // edition en cours, badge, rendus.
 function retirerTache (x) {
+  // Une reponse du direct lue AVANT ce retrait ne la fait pas revenir.
+  direct.closes.set(String(x.id), ++direct.tic)
   etat.taches = etat.taches.filter(v => String(v.id) !== String(x.id))
   indexerTaches()
   if (etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)) etat.enEdition = null
@@ -977,16 +1080,24 @@ async function proposer () {
     btn.disabled = etat.pauses[String(c.propertyId)] === true
   }
 }
-async function rechargerTaches () {
+// Les propositions ouvertes, lues — `null` si la lecture echoue.
+async function lireTachesOuvertes () {
   const { data, error } = await supabase.from('agent_tasks')
     .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, send_after, suspendu_le, modifie_le')
     .in('status', ['pending_validation']).eq('user_id', compteCourant())
     .order('created_at', { ascending: false }).limit(200)
-  if (error) return
+  if (error) return null
   const sejours = etat.conversations
     .filter(c => c.lastNight && !STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase()))
     .map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
-  etat.taches = tachesOuvertes(data || [], { bookings: sejours, aujourdHui: etat.aujourdHui })
+  return tachesOuvertes(data || [], { bookings: sejours, aujourdHui: etat.aujourdHui })
+}
+// « Proposer » : un geste de l'hote, la liste REMPLACEE (comportement d'avant
+// le fil en direct). Le cycle du direct, lui, FOND (`relireListe`).
+async function rechargerTaches () {
+  const lues = await lireTachesOuvertes()
+  if (!lues) return
+  etat.taches = lues
   indexerTaches()
   majBadge()
 }
@@ -1621,8 +1732,13 @@ function renderTiroir () {
   const tiroir = $('[data-bind="tiroir"]')
   if (tiroir.hidden) return
   sauverTextesProgrammes()
-  $('[data-bind="tiroir-titre"]').textContent =
-    t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled' : 'messages.tab_ia')
+  // ⚠ QUITTER LE VOLET « BASE DE CONNAISSANCE », C'EST DÉMONTER SA VUE : elle
+  // écoute `selectionchange` sur le DOCUMENT, qui survit au `innerHTML` des
+  // autres volets.
+  if (vueConnaissance && etat.tiroirVolet !== 'connaissance') demonterConnaissance()
+  tiroir.classList.toggle('msg-tiroir--large', etat.tiroirVolet === 'connaissance')
+  $('[data-bind="tiroir-titre"]').textContent = t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled'
+    : etat.tiroirVolet === 'connaissance' ? 'kb.title' : 'messages.tab_ia')
   const corps = $('[data-bind="tiroir-corps"]')
   const sel = $('[data-bind="tiroir-bien"]')
   const refs = [...etat.biens.keys()]
@@ -1632,6 +1748,7 @@ function renderTiroir () {
   gelerEnTete(etat.panneauEnCours === true)
   const ref = etat.tiroirBien
   if (!ref) { corps.innerHTML = `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`; return }
+  if (etat.tiroirVolet === 'connaissance') { peindreConnaissance(corps, ref); return }
   if (etat.tiroirVolet === 'programmes') {
     // Les messages programmes du bien se chargent a l'OUVERTURE du volet,
     // jamais au boot de la page.
@@ -1654,6 +1771,212 @@ function renderTiroir () {
   // panneau fraichement peint se declarait « modifie ». Comparer a ce qui a ete
   // peint ne modelise aucun defaut : c'est exactement la question posee.
   etat.panneauRendu = { ref, lu: lireLePanneau(corps, ref) }
+}
+
+// ─── Volet « Base de connaissance » (chantier KB V5, lot 3) ─────────────────
+// La vue vit dans `shared/connaissance-vue.js`, PARTAGÉE avec la page
+// téléphone : rien de la carte, de l'éditeur ni des « Infos du logement »
+// n'est écrit ici. Elle lit et écrit par `/api/ecran/connaissance`, un appel
+// pour peindre tout l'écran.
+let vueConnaissance = null
+// ⚠ LE MODULE SE CHARGE À LA PREMIÈRE OUVERTURE DU VOLET, PAS AVEC LA PAGE.
+// Messages est l'écran le plus ouvert du produit : un import statique ferait
+// payer ses ~28 Ko à CHAQUE ouverture de Messages, y compris par l'hôte qui
+// n'ouvre jamais la base (règle « tout lot qui touche le front respecte le
+// chargement rapide »). Le banc remplace cet `import()` par le module qu'il a
+// déjà évalué (tests/outils/banc-messages.js).
+let moduleConnaissance = null
+// ⚠ MONTÉE UNE FOIS PAR BIEN, PAS À CHAQUE RENDU DU TIROIR. `renderTiroir` est
+// rappelé par bien d'autres chemins (fin d'une écriture, repointage sur le
+// fil) : remonter la vue à chaque fois relirait l'écran ET effacerait la
+// réponse que l'hôte est en train d'écrire.
+// ⚠ DÉMONTER UNE VUE EN PLEINE SAISIE SE DIT — constat de review. Changer de
+// volet ou de logement au sélecteur du tiroir effaçait une réponse en cours
+// sans un mot (la dette D4 des autres volets, élargie à celui-ci) ; le
+// repointage sur le fil, lui, le disait déjà. La note part sous le tiroir,
+// là où l'hôte la lit.
+function demonterConnaissance () {
+  if (!vueConnaissance) return
+  const perdue = vueConnaissance.enEdition()
+  vueConnaissance.detruire()
+  vueConnaissance = null
+  if (perdue) noteReglage(t('kb.edit_dropped'))
+}
+// La réservation pour laquelle la vue doit être montée : celle du fil ouvert,
+// s'il séjourne dans CE logement — sinon aucune (l'aperçu prend alors le
+// prochain séjour, et « Utiliser » n'existe pas).
+function resaPourLaBase (ref) {
+  const duFil = bienDuFilOuvert()
+  return duFil === String(ref) && etat.ouverte !== null ? String(etat.ouverte) : null
+}
+async function peindreConnaissance (corps, ref) {
+  // ⚠ LA VUE SE REMONTE AUSSI QUAND LA CONVERSATION CHANGE SOUS ELLE — même
+  // logement, autre voyageur. Montée pour une réservation, elle remplit ses
+  // textes pour CE voyageur : la garder après un changement de fil mettrait
+  // « Bonjour Ana » dans la conversation de Marie (spec kb-utiliser-reponse, R1).
+  const resa = resaPourLaBase(ref)
+  if (vueConnaissance && vueConnaissance.ref === String(ref) && corps.contains(vueConnaissance.racine)) {
+    if (vueConnaissance.resa === resa) return
+    // Même logement, autre fil, et une réponse prête EN COURS D'ÉCRITURE : on
+    // ne l'efface pas pour un changement de fil (constat 6). La vue garde sa
+    // réservation d'avant ; « Utiliser » y est refusé au geste, qui la remonte
+    // une fois l'écriture finie.
+    if (vueConnaissance.enEdition()) return
+  }
+  demonterConnaissance()
+  corps.innerHTML = `<div data-kb-racine><p class="muted small kb-vide">${esc(t('common.loading'))}</p></div>`
+  const racine = corps.firstElementChild
+  try {
+    if (!moduleConnaissance) moduleConnaissance = await import('/shared/connaissance-vue.js')
+  } catch (err) {
+    logger.error('Messages', 'base de connaissance', err)
+    if (corps.contains(racine)) racine.innerHTML = `<p class="caption muted kb-vide">${esc(t('messages.load_error'))}</p>`
+    return
+  }
+  // ⚠ LE TIROIR A PU CHANGER PENDANT LE CHARGEMENT : autre volet, autre bien,
+  // tiroir refermé, ou un second rendu qui a déjà posé sa propre racine. On ne
+  // monte que si CETTE racine est encore celle du volet demandé.
+  if (!corps.contains(racine) || etat.tiroirVolet !== 'connaissance' || String(etat.tiroirBien) !== String(ref)
+    || $('[data-bind="tiroir"]').hidden) return
+  // L'aperçu se remplit avec le voyageur du fil ouvert — s'il séjourne dans
+  // CE logement ; sinon le serveur prend le prochain séjour du bien.
+  // ⚠ ET LA RESA SE RELIT ICI, APRÈS LE CHARGEMENT DU MODULE : le fil a pu
+  // changer pendant l'`import()`.
+  const resaMontee = resaPourLaBase(ref)
+  vueConnaissance = moduleConnaissance.monterConnaissance({
+    racine, appel, t, esc, bien: ref,
+    resa: resaMontee,
+    // « Utiliser » n'existe qu'avec une conversation ouverte dans CE logement,
+    // et pour qui peut écrire dans la saisie.
+    utiliser: resaMontee && peutEcrireMessages() ? utiliserDansLaSaisie : null,
+    // Le serveur peut peindre un AUTRE bien que celui demandé (bien archivé,
+    // bien inconnu) : le sélecteur du tiroir suit ce qui est affiché, sinon il
+    // nommerait un logement dont on lit les réponses d'un autre.
+    onBien: (vu) => {
+      if (!vu || !etat.biens.has(vu) || vu === etat.tiroirBien) return
+      etat.tiroirBien = vu
+      const sel = $('[data-bind="tiroir-bien"]')
+      if (sel) sel.value = vu
+    }
+  })
+}
+// Depuis le lien du volet « Réponses de l'IA » : on change de volet, on ne
+// referme pas le tiroir. Au téléphone aussi : depuis le 7 novembre 2026 la base
+// s'ouvre PAR-DESSUS Messages, jamais dans une autre page (spec
+// kb-utiliser-reponse §3). Ce qui retenait le départ vers la page (envoi en
+// cours, « Modifier », « Non envoyé ») et le texte gardé au départ n'existent
+// plus : on ne quitte plus rien, donc rien n'est coupé ni perdu.
+function ouvrirConnaissance () {
+  etat.tiroirVolet = 'connaissance'
+  ouvrirTiroir(true)
+}
+
+// « Utiliser » une réponse prête (spec kb-utiliser-reponse) : le texte, déjà
+// rempli par le serveur pour CE voyageur, va À LA SUITE de ce qui est tapé, et
+// la base se referme sur la conversation. ⚠ RIEN NE PART (R4) : l'envoi reste
+// le bouton « Envoyer », avec tout ce qui l'entoure — validation d'une
+// proposition en cours de « Modifier » (R5), échec « Non envoyé · Réessayer ».
+function utiliserDansLaSaisie ({ texte, resa, ref }) {
+  // ⚠ LA CONVERSATION A PU CHANGER SOUS LA VUE, et c'est revérifié AU GESTE :
+  // le fil ouvert doit être celui pour lequel le texte a été rempli (R1), dans
+  // le logement de ce texte (R2). Sinon on le dit, et la vue se remonte sur le
+  // fil ouvert.
+  if (etat.ouverte === null || String(etat.ouverte) !== String(resa) || bienDuFilOuvert() !== String(ref)) {
+    noteReglage(t('kb.use_other_conv'))
+    renderTiroir()
+    return false
+  }
+  const saisie = $('[data-bind="saisie"]')
+  const zone = $('[data-bind="texte"]')
+  if (!saisie || saisie.hidden || !zone) return false
+  // ⚠ LE CHAMP PORTE DÉJÀ UN TEXTE PRÉPARÉ POUR UNE AUTRE CONVERSATION :
+  // on n'y ajoute rien (constat 3 de la review 2, mesuré : la marque passait
+  // au fil de Marie et le texte d'Ana partait avec le sien).
+  if (saisieRemplieAilleurs()) { noteReglage(t('kb.use_wrong_conv')); return false }
+  const avant = zone.value.replace(/\s+$/, '')
+  zone.value = avant ? avant + '\n' + texte : String(texte)
+  ajusterHauteur(zone)
+  // Pour QUI ces textes ont été remplis : la saisie est partagée entre les
+  // fils de la page, et chacun porte un prénom et les infos d'un logement.
+  // TOUS sont gardés, pas le dernier (constat 1 de la review 2).
+  const r = etat.saisieRemplie
+  if (r && String(r.bookId) === String(resa)) { r.textes.push(String(texte)); r.vide = false }
+  else etat.saisieRemplie = { bookId: String(resa), textes: [String(texte)] }
+  ouvrirTiroir(false)
+  zone.focus()
+  try { zone.setSelectionRange(zone.value.length, zone.value.length) } catch {}
+  return true
+}
+// Le champ porte-t-il un texte de la base rempli pour une AUTRE conversation ?
+function saisieRemplieAilleurs () {
+  const r = etat.saisieRemplie
+  const zone = $('[data-bind="texte"]')
+  if (!r || !zone || !zone.value.trim() || String(r.bookId) === String(etat.ouverte)) return false
+  return !r.vide || textePoseRevenu(r, zone.value)
+}
+// ⚠ UN CHAMP VIDÉ N'OUBLIE PAS TOUT DE SUITE POUR QUI IL AVAIT ÉTÉ REMPLI —
+// constat 1 de la review 3, mesuré : vider le champ puis annuler (Ctrl+Z)
+// remettait le texte d'Ana, sans marque, et il partait chez Marie. La marque
+// passe « vide » ; à la frappe suivante, si un texte posé est revenu tel quel,
+// elle reprend, sinon (l'hôte écrit le sien) elle est abandonnée.
+const textePoseRevenu = (r, valeur) => r.textes.some(tx => String(valeur).includes(tx))
+// Le champ, une fois retirés les textes posés par « Utiliser » : ce qui reste
+// est ce que l'hôte a écrit lui-même (ou le texte de l'IA d'un « Modifier »).
+function sansTextesPoses (valeur) {
+  const r = etat.saisieRemplie
+  let v = String(valeur || '')
+  if (!r) return v
+  for (const tx of [...r.textes].reverse()) {
+    const i = v.lastIndexOf(tx)
+    if (i >= 0) v = v.slice(0, i) + v.slice(i + tx.length)
+  }
+  return v
+}
+// Une note sur le CHAMP se lit sous le champ, tiroir ouvert ou non : dans le
+// tiroir, le repointage du panneau sur le nouveau fil l'effaçait (constat 5
+// de la review 2).
+function noteChamp (texte) {
+  const note = $('[data-bind="saisie-etat"]')
+  note.hidden = false
+  note.textContent = texte
+}
+// La note R7 dit l'état d'un fil précis : elle tombe quand on change de fil et
+// quand un envoi passe (constat 2 de la review 3 — « il ne partira pas ici »
+// restait affiché dans la bonne conversation, après l'envoi). Seules les deux
+// notes R7 sont effacées : les autres messages de la saisie ont leur vie.
+function effacerNoteChamp () {
+  const note = $('[data-bind="saisie-etat"]')
+  if (!note || note.hidden) return
+  if (note.textContent === t('kb.use_wrong_conv')) {
+    note.hidden = true
+    note.textContent = ''
+  }
+}
+// Changer de fil avec un texte de la base dans le champ. S'il n'y a QUE des
+// textes posés, tels quels, ils sont RETIRÉS (ils étaient remplis pour l'autre
+// voyageur). S'il reste quoi que ce soit d'autre — une retouche, une phrase
+// ajoutée avant ou après, le texte d'une proposition —, on ne devine pas ce
+// qui est à qui : TOUT reste, la marque aussi, et « Envoyer » le refusera ici
+// (constats 1, 2 et 4 de la review 2 : retirer seulement le texte posé
+// laissait partir ailleurs, sans marque, ce qui était écrit pour Ana). Le
+// retrait se fait EN SILENCE (recette de Thierry du 8 novembre 2026 : la note
+// « retiré du champ » était de trop) ; le texte qui reste, lui, le dit.
+function rangerSaisieRemplie (bookId) {
+  const r = etat.saisieRemplie
+  const zone = $('[data-bind="texte"]')
+  if (!r || !zone || String(r.bookId) === String(bookId)) return
+  // Champ vide : la marque reste, « vide » — une annulation peut remettre le
+  // texte dans le fil suivant (constat 1 de la review 3).
+  if (!zone.value.trim()) { r.vide = true; return }
+  if (r.vide && !textePoseRevenu(r, zone.value)) { etat.saisieRemplie = null; return }
+  r.vide = false
+  if (!sansTextesPoses(zone.value).trim()) {
+    zone.value = ''
+    ajusterHauteur(zone)
+    etat.saisieRemplie = null
+    return
+  }
+  noteChamp(t('kb.use_wrong_conv'))
 }
 
 // ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
@@ -2110,7 +2433,7 @@ function voletIA (ref) {
     <div class="msg-tiroir__bloc">
       <span class="msg-tiroir__nom">${esc(t('messages.breaker_title'))}</span>
       <p class="caption muted">${esc(t('messages.breaker_desc'))}</p>
-      <a class="link small" href="/apps/agent-ai/knowledge">${esc(t('messages.knowledge'))}</a>
+      <a class="link small" href="/connaissance" data-ouvre-connaissance>${esc(t('messages.knowledge'))}</a>
     </div>
     <h3 class="msg-tiroir__section">${esc(t('messages.tab_alerts'))}</h3>
     <div class="msg-tiroir__bloc">
@@ -2139,6 +2462,13 @@ function voletIA (ref) {
 // contacts prevenus et en reglages, et un lien mene a Reglages → Notifications.
 
 function brancherTiroir (corps, ref) {
+  // Le lien « Connaissances » mene a la base de connaissance V5 : l'ancienne
+  // page redirige vers elle (lot 3, decision de Thierry du 5 novembre 2026).
+  // Il change de VOLET, il ne quitte plus Messages — au telephone non plus.
+  corps.querySelector('[data-ouvre-connaissance]')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    ouvrirConnaissance()
+  })
   const d = delaisEnCours(ref)
   // Les pilules : un clic POSE la valeur dans l'etat d'edition, et re-rend.
   // Rien ne part au serveur avant « Enregistrer » (demande de Thierry : un
@@ -3005,6 +3335,11 @@ function editionPanneauNonEnregistree () {
   if (!ref) return null
   const nom = () => (etat.biens.get(String(ref)) || {}).name || String(ref)
 
+  // 0. Le volet « Base de connaissance » : la vue sait si une réponse ou une
+  // information est en cours d'écriture. Le repointage sur le fil la
+  // remonterait sur un autre logement, et le texte partirait sans un mot.
+  if (etat.tiroirVolet === 'connaissance') return vueConnaissance && vueConnaissance.enEdition() ? nom() : null
+
   // 1. Les delais : ils vivent dans `etat.delaisEdit`, pas dans le DOM.
   const e = etat.delaisEdit
   if (e && e.ref === ref) {
@@ -3226,6 +3561,9 @@ function dateLongue (jour) {
   return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
 }
 function ouvrir (bookId) {
+  // La note R7 du fil d'avant ne vaut plus ici (constat 2 de la review 3) ;
+  // celle du nouveau fil, s'il y en a une, est posée plus bas.
+  if (String(bookId) !== String(etat.ouverte)) effacerNoteChamp()
   // Le statut d'evaluation se REDEMANDE a chaque ouverture : une publication
   // faite depuis la fiche resa, ou un echec transitoire, ne fige rien.
   etat.evaluations.delete(String(bookId))
@@ -3239,12 +3577,21 @@ function ouvrir (bookId) {
     enregistrerBrouillonEnCours()
     const zone = $('[data-bind="texte"]')
     const xEd = tacheParId(etat.enEdition.tacheId)
-    if (xEd && zone.value.trim() === String(xEd.suggested_reply || '').trim()) {
+    // Le texte de l'IA, plus seulement des réponses posées par « Utiliser »
+    // dans CE fil, n'est pas une retouche de l'hôte : il repart lui aussi
+    // (constat 2 de la review 2 — sans ça, l'ajout le faisait passer pour
+    // retouché, et il restait dans la saisie du fil suivant).
+    const ia = String(xEd ? xEd.suggested_reply || '' : '').trim()
+    const r = etat.saisieRemplie
+    const poses = r && String(r.bookId) === String(etat.enEdition.bookId)
+    if (xEd && (zone.value.trim() === ia || (poses && sansTextesPoses(zone.value).trim() === ia))) {
       zone.value = ''
       ajusterHauteur(zone)
+      if (poses) etat.saisieRemplie = null
     }
     etat.enEdition = null
   }
+  rangerSaisieRemplie(bookId)
   etat.ouverte = bookId
   // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry
   // du 30 octobre 2026 (« le volet s'est encore ouvert sur Maison Jardin »), et
@@ -3257,6 +3604,9 @@ function ouvrir (bookId) {
   // La bascule de volet continue de ne rien repointer ; c'est l'ouverture d'un
   // fil qui repointe, et elle seule.
   reporterLePanneauSurLeFil()
+  // La base ouverte suit la CONVERSATION, pas seulement le logement : même
+  // logement, autre voyageur, et sa vue se remonte pour lui (R1).
+  if (etat.tiroirVolet === 'connaissance' && $('[data-bind="tiroir"]').hidden === false) renderTiroir()
   const c = etat.conversations.find(x => String(x.bookId) === String(bookId))
   // L'ouverture POSE l'etat lu (etape 2) — optimiste a l'ecran, silencieux en
   // cas de refus (un profil en lecture seule n'ecrit pas, l'heuristique reste).
@@ -3266,6 +3616,244 @@ function ouvrir (bookId) {
       .catch(e => logger.error('Messages', 'read_at', e))
   }
   renderListe(); renderFil()
+  changerDeFilDirect()
+}
+
+// ─── Le fil en direct (docs/specs/spec-messages-fil-en-direct.md) ──────────
+// Fil ouvert et onglet affiché : une relecture ÉTROITE toutes les 5 secondes
+// (`GET /api/messages?direct=1&fil=…&apres=…`), qui rend seulement ce qui est
+// neuf. Sans fil : une par minute, pour savoir si la liste a changé. Onglet
+// caché : AUCUN appel. 15 minutes sans geste : une par minute. Les règles de
+// rythme et de fusion vivent dans `shared/messages-direct.js`, testées sans
+// navigateur ; ici, l'appel et le rendu.
+const direct = {
+  minuteur: null, enCours: false, echecs: 0, arret: false,
+  dernierGeste: Date.now(),
+  dernierConnu: null,      // instant du message le plus récent que la LISTE connaît
+  derniereListe: 0,        // dernière relecture de la liste (au plus une par minute)
+  differe: false,          // un rendu attend que l'hôte ait fini avec un élément du fil
+  generation: 0,           // change à chaque changement de fil : la réponse d'avant est jetée
+  // Propositions closes ou retirées par la page, avec le NUMÉRO du retrait
+  // (reviews 1 et 2) : une réponse lue AVANT le retrait ne les ressuscite pas,
+  // mais une proposition que le serveur rend APRÈS (le cron l'a rendue à
+  // l'hôte, envoi non délivré) revient.
+  closes: new Map(),
+  // ⚠ UNE HORLOGE LOGIQUE, PAS `Date.now()` (review 3, constat 3) : l'heure du
+  // poste recule (resynchronisation, sortie de veille), et un retrait date
+  // AVANT la demande d'une lecture faisait revenir la proposition close.
+  // Chaque demande de lecture et chaque retrait prend le numero suivant.
+  tic: 0
+}
+const ongletVisible = () => document.visibilityState === 'visible'
+const pageOubliee = () => Date.now() - direct.dernierGeste >= RYTHME.inactifApresMs
+// Recul de deux minutes sur un instant du serveur : les horloges de Vercel et
+// de la base ne sont pas la meme, et le recouvrement se dedoublonne.
+const recul = (iso) => new Date((iso ? new Date(iso).getTime() : Date.now()) - 2 * 60000).toISOString()
+const conversationOuverte = () => etat.ouverte === null ? null
+  : etat.conversations.find(x => String(x.bookId) === String(etat.ouverte)) || null
+
+function planifierDirect () {
+  clearTimeout(direct.minuteur)
+  direct.minuteur = null
+  if (direct.arret) return
+  const d = delaiDirect({ visible: ongletVisible(), filOuvert: etat.ouverte !== null,
+    inactifDepuisMs: Date.now() - direct.dernierGeste, echecs: direct.echecs })
+  if (d == null) return
+  direct.minuteur = setTimeout(() => { relireDirect().finally(planifierDirect) }, d)
+}
+
+// ⚠ UNE RELECTURE À LA FOIS, ET JAMAIS ONGLET CACHÉ : c'est ce qui tient le
+// coût d'une page gardée ouverte toute la journée (spec §6).
+async function relireDirect () {
+  if (direct.enCours || direct.arret || !ongletVisible()) return
+  direct.enCours = true
+  const generation = direct.generation
+  const c = conversationOuverte()
+  const params = new URLSearchParams({ direct: '1' })
+  const lueA = ++direct.tic
+  if (c) {
+    params.set('fil', String(c.bookId))
+    // Le curseur d'insertion rendu par le serveur ; au premier cycle d'un fil,
+    // l'instant de la lecture de la liste (review 1, constat 3).
+    params.set('depuis', c._curseur || recul(c._luLe || etat.luLe))
+  }
+  try {
+    const r = await appel('/api/messages?' + params.toString())
+    direct.echecs = 0
+    montrerPanneDirect(false)
+    // Règle 6 : la réponse d'un fil qu'on a quitté entre-temps est jetée.
+    if (generation !== direct.generation) return
+    if (c && Array.isArray(r.messages)) appliquerFil(c, r, lueA)
+    if (r.dernier) await traiterDernier(r.dernier)
+    if (direct.differe) rafraichirFil()
+  } catch (e) {
+    // Session expirée : la relecture s'arrête (règle 5), le reste de la page
+    // dira la déconnexion au prochain geste.
+    if (e.status === 401) { direct.arret = true; montrerPanneDirect(true); return }
+    direct.echecs++
+    if (direct.echecs >= 3) montrerPanneDirect(true)
+    logger.warn && logger.warn('Messages', 'relecture en direct', e.message)
+  } finally {
+    direct.enCours = false
+  }
+}
+
+function appliquerFil (c, r, lueA = ++direct.tic) {
+  if (r.curseur) c._curseur = r.curseur
+  const f = fusionnerMessages(c.messages, r.messages)
+  const sejours = etat.conversations
+    .filter(x => x.lastNight && !STATUTS_SANS_SEJOUR.has(String(x.status || '').toLowerCase()))
+    .map(x => ({ id: x.bookId, propId: x.propertyId, departure: String(x.lastNight).slice(0, 10) }))
+  const servies = tachesOuvertes(Array.isArray(r.taches) ? r.taches : [], { bookings: sejours, aujourdHui: etat.aujourdHui })
+  const t = fusionnerTaches(etat.taches, c.bookId, servies, etat.enEdition && etat.enEdition.tacheId, direct.closes, lueA)
+  if (!f.ajoutes && !f.remplaces && !t.change) return
+  c.messages = f.messages
+  const plusRecent = apresDuFil(c.messages)
+  if (plusRecent && (!c.lastTime || new Date(plusRecent) > new Date(c.lastTime))) c.lastTime = plusRecent
+  if (t.change) { etat.taches = t.taches; indexerTaches(); majBadge(); renderFiltres() }
+  // Règle 4 : un message du voyageur arrivé dans le fil ouvert, onglet
+  // affiché, est LU — une fois par arrivée, par le writer habituel. ⚠ PAS SUR
+  // UNE PAGE OUBLIÉE (review 1, constat 11) : personne n'est devant l'écran,
+  // le « non lu » doit rester ; le premier geste le lèvera (`gesteDirect`).
+  // (Plus de 200 messages neufs d'un coup — `complet: false` — : le cycle
+  // suivant reprend au curseur, c'est-à-dire au 201e.)
+  if (f.entrants && ongletVisible() && !pageOubliee()) marquerLuDirect(c)
+  rafraichirFil()
+  renderListe()
+}
+
+// Règles 1 et 2 : rien de ce que l'hôte tient en main n'est redessiné, et le
+// défilement est respecté.
+function rafraichirFil () {
+  const deroule = $('[data-list="fil"]')
+  const actif = document.activeElement
+  // ⚠ LE FIL DÉROULÉ, L'EN-TÊTE (son menu ⋯) ET LE BANDEAU D'ÉCHÉANCE : les
+  // trois sont redessinés par `renderFil` (review 1, constat 6). La saisie,
+  // elle, ne l'est pas : on peut taper pendant qu'un message arrive.
+  const tenus = [deroule, $('[data-bind="fil-entete"]'), $('[data-bind="saisie-echeance"]')]
+  const enMain = (actif && actif !== document.body && tenus.some(z => z && z.contains(actif)))
+    || tenus.some(z => z && z.querySelector('details[open]'))
+  if (enMain) { direct.differe = true; montrerPastille(true); return }
+  direct.differe = false
+  const enBas = deroule.scrollHeight - deroule.scrollTop - deroule.clientHeight < 80
+  const position = deroule.scrollTop
+  renderFil()
+  if (enBas) { montrerPastille(false); return }
+  deroule.scrollTop = position
+  montrerPastille(true)
+}
+function montrerPastille (oui) { $('[data-bind="fil-nouveau"]').hidden = !oui }
+function montrerPanneDirect (oui) { $('[data-bind="fil-direct-panne"]').hidden = !oui }
+
+async function traiterDernier (dernier) {
+  if (direct.dernierConnu === null) direct.dernierConnu = recul(etat.luLe)
+  if (!listeARelire({ dernier, dernierConnu: direct.dernierConnu, derniereListe: direct.derniereListe })) return
+  direct.derniereListe = Date.now()
+  await relireListe(dernier)
+}
+
+// La PREMIÈRE page de la liste, l'appel d'aujourd'hui — au plus une fois par
+// minute, et seulement quand le serveur annonce du neuf. Les pages suivantes
+// déjà chargées restent ; le fil ouvert garde ses bulles locales.
+async function relireListe (dernier) {
+  const r = await appel(`/api/messages?limit=${PAGE}`)
+  // Chaque conversation porte l'instant de la lecture qui a produit ses
+  // messages : le premier cycle de SON fil part de la (review 2, constat 5).
+  for (const n of r.conversations || []) n._luLe = r.lu_le || null
+  const parId = new Map(etat.conversations.map(x => [String(x.bookId), x]))
+  const neuves = []
+  for (const n of r.conversations || []) {
+    const ancienne = parId.get(String(n.bookId))
+    if (!ancienne) { neuves.push(n); continue }
+    // Les messages se FONDENT : une bulle locale ou un message deja lu en
+    // direct ne disparait pas parce que la liste est relue.
+    const messages = fusionnerMessages(ancienne.messages, n.messages).messages
+    Object.assign(ancienne, n, { messages, readAt: ancienne.readAt && n.readAt
+      ? (new Date(ancienne.readAt) > new Date(n.readAt) ? ancienne.readAt : n.readAt)
+      : (ancienne.readAt || n.readAt) })
+  }
+  if (neuves.length) etat.conversations.unshift(...neuves)
+  if (r.lu_le) etat.luLe = r.lu_le
+  // ⚠ L'HORLOGE DE LA BASE, PAS UN RECUL (review 2, constat 3) : reculer de
+  // deux minutes a chaque relecture faisait relire la liste trois fois pour
+  // un seul message. `dernier` est un `created_at` ; le suivant le depassera.
+  direct.dernierConnu = dernier
+  // ⚠ LES PROPOSITIONS SE FONDENT, ELLES NE SONT PAS REMPLACÉES (review 1,
+  // constat BLOQUANT) : celle que l'hôte envoie (`sending` côté serveur, donc
+  // absente de la lecture) doit rester, sinon sa clôture ne part jamais.
+  const lueA = ++direct.tic
+  const lues = await lireTachesOuvertes()
+  if (lues) {
+    const t = fusionnerTaches(etat.taches, null, lues, etat.enEdition && etat.enEdition.tacheId, direct.closes, lueA)
+    etat.taches = t.taches
+    indexerTaches(); majBadge()
+  }
+  renderFiltres(); renderListe()
+  if (etat.ouverte !== null) rafraichirFil()
+}
+
+// Le writer habituel de l'état lu, depuis le direct.
+function marquerLuDirect (c) {
+  if (!peutEcrireMessages()) return
+  c.readAt = new Date().toISOString()
+  appel('/api/messages', { action: 'lu', booking_id: String(c.bookId) })
+    .catch(e => logger.error('Messages', 'read_at', e))
+}
+
+function changerDeFilDirect () {
+  direct.generation++
+  direct.differe = false
+  montrerPastille(false)
+  planifierDirect()
+}
+
+// Un geste dans la page : la page n'est pas oubliée. S'il la réveille d'une
+// heure d'inactivité, la relecture repart tout de suite au rythme du fil.
+function gesteDirect () {
+  const etaitInactive = pageOubliee()
+  direct.dernierGeste = Date.now()
+  if (!etaitInactive) return
+  // L'hôte revient devant le fil : ce qui est arrivé pendant son absence est
+  // maintenant sous ses yeux.
+  const c = conversationOuverte()
+  if (c && ongletVisible() && nonLue(c)) marquerLuDirect(c)
+  relireDirect().finally(planifierDirect)
+}
+
+function demarrerDirect () {
+  direct.dernierConnu = recul(etat.luLe)
+  document.addEventListener('visibilitychange', () => {
+    if (ongletVisible()) relireDirect().finally(planifierDirect)
+    else { clearTimeout(direct.minuteur); direct.minuteur = null }
+  })
+  for (const type of ['keydown', 'pointerdown', 'wheel', 'touchstart']) {
+    document.addEventListener(type, gesteDirect, { passive: true, capture: true })
+  }
+  const deroule = $('[data-list="fil"]')
+  // ⚠ LE DÉFILEMENT N'EST PAS UN GESTE (review 1, constat 7) : la page fait
+  // défiler le fil elle-même à chaque message, et une page oubliée sur un fil
+  // actif serait restée à 5 s. La molette, le doigt et le clavier suffisent.
+  deroule.addEventListener('scroll', () => {
+    if (deroule.scrollHeight - deroule.scrollTop - deroule.clientHeight < 80 && !direct.differe) montrerPastille(false)
+  }, { passive: true })
+  $('[data-bind="fil-nouveau"]').addEventListener('click', () => {
+    if (direct.differe) {
+      // L'hôte demande à voir : on lâche ce qu'il tenait dans le fil.
+      if (document.activeElement && deroule.contains(document.activeElement)) document.activeElement.blur()
+      deroule.querySelectorAll('details[open]').forEach(d => { d.open = false })
+      direct.differe = false
+      renderFil()
+    }
+    deroule.scrollTop = deroule.scrollHeight
+    montrerPastille(false)
+  })
+  $('[data-bind="fil-direct-reessayer"]').addEventListener('click', () => {
+    direct.echecs = 0
+    direct.arret = false
+    montrerPanneDirect(false)
+    relireDirect().finally(planifierDirect)
+  })
+  planifierDirect()
 }
 
 // ─── Démarrage ──────────────────────────────────────────────────────────────
@@ -3304,6 +3892,8 @@ async function init () {
   document.querySelectorAll('[data-ouvre-volet]').forEach(b => {
     b.hidden = !reglagesIci()
     b.addEventListener('click', () => {
+      // Au téléphone comme à l'ordinateur : le tiroir. Il couvre l'écran du
+      // téléphone (`width: min(440px, 100vw)`), par-dessus la conversation.
       const tiroir = $('[data-bind="tiroir"]')
       const deja = !tiroir.hidden && etat.tiroirVolet === b.dataset.ouvreVolet
       etat.tiroirVolet = b.dataset.ouvreVolet
@@ -3328,10 +3918,23 @@ async function init () {
   document.querySelectorAll('[data-filtre]').forEach(b => b.addEventListener('click', () => {
     etat.filtre = b.dataset.filtre; renderFiltres(); renderListe()
   }))
-  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
+  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil(); changerDeFilDirect() })
   // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
   const zoneTexte = $('[data-bind="texte"]')
-  zoneTexte.addEventListener('input', () => ajusterHauteur(zoneTexte))
+  zoneTexte.addEventListener('input', () => {
+    ajusterHauteur(zoneTexte)
+    // Un champ vidé à la main garde sa marque, « vide » : une annulation peut
+    // remettre le texte posé (constat 1 de la review 3). À la frappe suivante,
+    // un texte posé revenu tel quel la reprend ; le texte de l'hôte l'abandonne.
+    const r = etat.saisieRemplie
+    if (r) {
+      if (!zoneTexte.value.trim()) r.vide = true
+      else if (r.vide) {
+        if (textePoseRevenu(r, zoneTexte.value)) r.vide = false
+        else etat.saisieRemplie = null
+      }
+    }
+  })
   // ⚠ LE BROUILLON DE L'HOTE S'ENREGISTRE QUAND IL QUITTE L'EDITEUR
   // (decision 6 de Thierry, 27 octobre 2026). Sans ca, la reprise du compte a
   // rebours enverrait le texte de l'IA — la version que l'hote avait
@@ -3345,6 +3948,21 @@ async function init () {
   })
   $('[data-bind="envoyer"]').addEventListener('click', envoyer)
   $('[data-bind="proposer"]').addEventListener('click', proposer)
+  // Au téléphone, le champ prend TOUTE LA LARGEUR pendant la frappe, les
+  // boutons passent dessous (recette du 7 novembre 2026, demande de Thierry :
+  // avec le livre en plus, le champ n'avait plus qu'un tiers de la largeur).
+  // La mise en page est dans ui.css, réservée au téléphone.
+  //
+  // ⚠ ON NE REPLIE JAMAIS AU `blur`. Il part au toucher d'un bouton de la
+  // saisie, AVANT son `click` : replier à cet instant déplacerait le bouton
+  // sous le doigt, et le clic tomberait à côté — sur « Envoyer » compris. On
+  // replie APRÈS un clic ailleurs dans la page, quand il a déjà trouvé sa cible.
+  const barreSaisie = $('[data-bind="saisie"]')
+  zoneTexte.addEventListener('focus', () => barreSaisie.classList.add('msg-saisie--frappe'))
+  document.addEventListener('click', (e) => {
+    if (barreSaisie.contains(e.target) || document.activeElement === zoneTexte) return
+    barreSaisie.classList.remove('msg-saisie--frappe')
+  })
 
   // Filtre demandé par l'URL (lien « n de plus » de l'accueil, étape 4).
   const params = new URLSearchParams(location.search)
@@ -3368,11 +3986,18 @@ async function init () {
     etat.tiroirVolet = voletDemande
     ouvrirTiroir(true)
   }
+  // La redirection de l'ancienne base de connaissance (?volet=connaissance) :
+  // le volet, par-dessus Messages au téléphone comme à l'ordinateur.
+  if (voletDemande === 'connaissance' && reglagesIci()) {
+    etat.tiroirVolet = 'connaissance'
+    ouvrirTiroir(true)
+  }
   const filtreDemande = params.get('filtre')
   if (filtreDemande === 'nonlus' || filtreDemande === 'avalider') {
     etat.filtre = filtreDemande
     renderFiltres(); renderListe()
   }
+  demarrerDirect()
 }
 
 init().catch(e => logger.error('Messages', e.message, e))

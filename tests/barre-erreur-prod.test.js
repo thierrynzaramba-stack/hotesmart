@@ -217,6 +217,21 @@ test('LE TEST QUI COMPTE (G1) : un 401, un 403 ou un 404 n allument RIEN en prod
   assert.equal(q.visible(), true)
 })
 
+test('un refus que l\'ecran a dit lui-meme (`gere: true`) n\'allume RIEN en production ; sans le drapeau, si', async () => {
+  // Recette des entites juridiques (9 novembre 2026) : un champ refuse etait dit
+  // sous son champ ET par « Une erreur est survenue » en bas de l'ecran.
+  const p = await monter('hotesmart.vercel.app')
+  for (const status of [400, 409, 503]) {
+    p.emettre('ERROR', 'API', 'entree_invalide', { endpoint: 'entites-juridiques', status, gere: true })
+    assert.equal(p.visible(), false, `un ${status} gere ne doit pas allumer la barre`)
+  }
+  p.emettre('ERROR', 'API', 'entree_invalide', { endpoint: 'entites-juridiques', gere: true })
+  assert.equal(p.visible(), false, 'le second journal (sans statut) porte aussi le drapeau')
+  // Contre-epreuve : le meme refus SANS drapeau allume la barre, comme avant.
+  p.emettre('ERROR', 'API', 'entree_invalide', { endpoint: 'logement', status: 400 })
+  assert.equal(p.visible(), true)
+})
+
 test('LE TEST QUI COMPTE (G1c) : la barre ne RECOUVRE PAS la navigation basse', async () => {
   // `.bottombar` est en `position: fixed; bottom: 0`, haute d environ 66 px :
   // une barre d erreur a `bottom: 0` masquait les libelles et la moitie des
