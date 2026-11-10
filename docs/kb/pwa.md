@@ -1191,3 +1191,54 @@ tout correctif) :
   relevé rangé pour un contact n'est jamais envoyé (la garde explicite double
   celle qui réserve le relevé au titulaire : sa mutation seule ne rougit pas,
   et c'est attendu).
+
+### 12.2 Étape 2 — la reprise des listes d'alertes
+
+Module `lib/notifications/reprise-listes.js` (pur : il ne lit ni n'écrit) et
+script `scripts/reprendre-listes-alertes.js` (à blanc par défaut, `--go`,
+`--compte=<uuid>`). Rien n'est retiré des listes : la coupure de leur envoi
+est l'étape 4.
+
+**Les règles, et pourquoi :**
+1. **Ce que les listes n'envoyaient pas ne se reprend pas** : un canal décoché
+   (`sms_enabled` / `email_enabled` faux) ne devient rien ; une ligne se lit
+   comme à l'envoi (`parseLines`, lib/alert-notify.js) — un test compare les
+   deux lectures ligne pour ligne.
+2. **L'adresse d'une PERSONNE du compte** (titulaire ou membre, reconnue par
+   l'e-mail ou le numéro de son profil, comme au point d'envoi) **coche le
+   canal dans SES réglages**, pour les événements que ses droits couvrent sur
+   ce bien ; pour les autres, un contact (Q29). Un événement qu'elle ne reçoit
+   pas ne se coche pas chez elle : ses réglages ne changent que pour ce qui lui
+   part. Les droits se jugent **bien par bien**.
+3. **Toute autre adresse : un contact par adresse ET par ensemble d'alertes**,
+   avec l'union des biens où cet ensemble se répète. Une adresse en
+   « urgences » sur un bien et en « urgences + info » sur l'autre fait deux
+   contacts — sinon le premier bien recevrait une alerte que sa liste
+   n'envoyait pas.
+4. **Une adresse désinscrite (Q30) ne revient par aucun contact**, même pour
+   un autre bien : « Ne plus recevoir ces alertes » vaut pour l'adresse. Ce
+   qu'elle ne recevra plus est compté à part, ce n'est pas une perte.
+5. **LA VÉRIFICATION, AVEC LES RÈGLES DU POINT D'ENVOI** : chaque (canal,
+   adresse, bien, événement) que délivrait une liste est recompté après la
+   reprise. Pour une personne destinataire, le contact se tait (notifier.js),
+   donc seul ce qui lui part compte, et trois règles d'`envoi.js` s'y
+   appliquent : le canal coché ; ce que le titulaire a laissé ouvert sur son
+   profil (`notify_email`, `notify_sms`) ; et le SMS d'une personne ne part que
+   **sans appareil abonné** (Q11), une notification cochée le remplaçant.
+   **Une perte bloque l'écriture du compte** (sortie 1), avec son motif :
+   `canal_non_coche`, `email_coupe_sur_le_profil`, `sms_coupe_sur_le_profil`,
+   `appareil_sans_notification`, `aucun_contact`.
+6. **Ce qui change de forme se dit** : un SMS de liste vers une personne
+   équipée devient sa notification (Q11) — compté dans le compte rendu.
+7. **`--go` est refusé tant que les listes envoient** (`LISTES_COUPEES`,
+   lib/alert-notify.js, posé à l'étape 4) : sinon chaque adresse reprise
+   recevrait tout en double. La reprise part avec la coupure.
+8. **Les réglages d'abord, puis les contacts** ; un réglage s'écrit par le
+   writer unique (`reglages.enregistrer`), l'événement repris à partir de son
+   effectif avec le canal coché, ses **plages, sa langue et ses autres
+   événements intacts**. Rejouable : un contact identique n'est pas recréé, un
+   canal coché le reste.
+9. **Aucune adresse en clair** dans le compte rendu (« j***@exemple.fr »,
+   « +336****5678 ») ; une base non reconnue est refusée ; une lecture en panne
+   (biens, profils, appareils, droits, réglages, contacts) arrête le compte sans
+   rien écrire.
