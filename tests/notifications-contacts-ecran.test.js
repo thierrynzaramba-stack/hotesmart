@@ -53,10 +53,18 @@ function base (tables = {}) {
       const executer = () => {
         if (q.op === 'insert') {
           // La clé primaire de la table des essais (compte, adresse, jour) : tout ou rien.
+          // Et l'unicité du RANG par compte et par jour, avec sa borne de 1 à 10.
           if (table === 'notifications_contacts_essais') {
             const cle = (r) => `${r.compte_id}|${r.cle}|${r.jour}`
+            const rang = (r) => `${r.compte_id}|${r.jour}|${r.rang}`
             const pris = new Set(etat.tables[table].map(cle))
-            if (q.rows.some(r => pris.has(cle(r)))) return { data: null, error: { code: '23505', message: 'duplicate key' } }
+            const rangs = new Set(etat.tables[table].map(rang))
+            if (q.rows.some(r => !(r.rang >= 1 && r.rang <= 10))) return { data: null, error: { code: '23514', message: 'check' } }
+            const vus = new Set()
+            for (const r of q.rows) {
+              if (pris.has(cle(r)) || rangs.has(rang(r)) || vus.has(rang(r))) return { data: null, error: { code: '23505', message: 'duplicate key' } }
+              vus.add(rang(r))
+            }
           }
           etat.ecritures.push({ table, op: 'insert', rows: q.rows })
           etat.tables[table].push(...q.rows.map((r, i) => ({ id: `00000000-0000-4000-8000-${String(++etat.n).padStart(12, '0')}`, jeton: `${'9'.repeat(63)}${i}`, desinscrit_le: null, cree_le: '2026-11-10T00:00:00Z', ...r })))
@@ -193,6 +201,45 @@ test('LE TEST QUI COMPTE (constat S1 de sécurité) : créer, essayer, retirer, 
     motifs.push(r.ok ? 'ok' : r.motif)
   }
   assert.deepEqual([motifs.filter(m => m === 'ok').length, motifs[10]], [10, 'plafond_essais'])
+})
+
+test('LE TEST QUI COMPTE (re-review, R1 de sécurité) : trente clics SIMULTANÉS sur trente adresses — dix réservations au plus, tenues par le rang', async () => {
+  const contactsDuTest = Array.from({ length: 30 }, (_, i) => ({ id: `eeeeeeee-eeee-4eee-8eee-eeeeeeeeee${String(i).padStart(2, '0')}`, compte_id: A, email: `victime+${i}@gmail.com`, telephone: null, biens: [BIEN_A], alertes: ['urgences'], jeton: 'a'.repeat(64), desinscrit_le: null }))
+  const { db, etat } = base({ ...donnees(), notifications_contacts: contactsDuTest })
+  const midi = Date.parse('2026-11-10T11:00:00Z')
+  const r = await Promise.all(contactsDuTest.map(c => contacts.reserverEssai({ compte: A, id: c.id, maintenant: midi, db })))
+  const ok = r.filter(x => x.ok).length
+  assert.ok(ok >= 1 && ok <= 10, `${ok} réservations`)
+  assert.ok(etat.tables.notifications_contacts_essais.length <= 10)
+  assert.deepEqual([...new Set(etat.tables.notifications_contacts_essais.map(x => x.rang))].length, etat.tables.notifications_contacts_essais.length, 'un rang par réservation')
+  assert.ok(r.filter(x => !x.ok).every(x => x.motif === 'plafond_essais'))
+})
+
+test('la borne est dans la MIGRATION : un rang de 1 à 10, unique par compte et par jour — c\'est elle que la fausse base imite', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations/2026-11-10-notifications-contacts.sql'), 'utf8').replace(/--.*$/gm, '')
+  const table = /create table if not exists\s+public\.notifications_contacts_essais\s*\(([\s\S]*?)\n\);/.exec(sql)[1]
+  assert.match(table, /rang smallint not null\s+check \(rang between 1 and 10\)/)
+  assert.match(table, /unique \(compte_id, jour, rang\)/)
+  assert.match(table, /primary key \(compte_id, cle, jour\)/)
+  assert.equal(contacts.PLAFOND_ESSAIS_JOUR, 10, 'le plafond du code est celui de la base')
+})
+
+test('LE TEST QUI COMPTE (re-review, R2 de sécurité) : une adresse qui porterait un filtre est refusée ; la remise efface clé par clé, en égalité exacte', async () => {
+  for (const email of ['a",e:victime@gmail.com,"b.c', 'a,b@exemple.fr', 'a(b)@exemple.fr', 'a;b@exemple.fr', 'a\\b@exemple.fr', 'x@exem"ple.fr']) {
+    assert.equal(contacts.validerContact({ email, alertes: ['urgences'], biens: [BIEN_A] }).motif, 'email_illisible', email)
+  }
+  assert.equal(contacts.validerContact({ email: 'g@exemple.fr', alertes: ['urgences'], biens: ['x",id.neq.0,"y'] }).motif, 'biens_illisibles')
+  const { db } = base(donnees())
+  const filtres = []
+  const espion = { from: (t) => {
+    const c = db.from(t)
+    if (t !== 'notifications_contacts_essais') return c
+    for (const m of ['eq', 'in']) { const f = c[m]; c[m] = (k, v) => { filtres.push([m, k]); return f.call(c, k, v) } }
+    return c
+  } }
+  await contacts.rendreEssai({ compte: A, reserve: { cles: ['e:g@exemple.fr', 't:+33611111111'], jour: '2026-11-10' }, db: espion })
+  assert.equal(filtres.some(([m]) => m === 'in'), false)
+  assert.equal(filtres.filter(([m, k]) => m === 'eq' && k === 'cle').length, 2)
 })
 
 test('deux clics simultanés : un seul essai réservé (la clé primaire de la réservation)', async () => {

@@ -105,6 +105,13 @@ create unique index if not exists
 -- réservation : deux clics, une seule ligne.
 -- Écrite par lib/notifications/contacts.js seul.
 
+-- ⚠ LE PLAFOND DU COMPTE EST TENU PAR LA BASE
+-- (constat de SÉCURITÉ de la re-review) : chaque
+-- adresse réservée prend un RANG de 1 à 10, unique
+-- par compte et par jour. Lire le compte puis
+-- insérer laissait passer cent clics simultanés ;
+-- un onzième rang, lui, n'existe pas.
+
 create table if not exists
   public.notifications_contacts_essais (
   compte_id uuid not null
@@ -112,8 +119,12 @@ create table if not exists
     on delete cascade,
   cle text not null,
   jour date not null,
+  rang smallint not null
+    check (rang between 1 and 10),
   cree_le timestamptz not null default now(),
-  primary key (compte_id, cle, jour)
+  primary key (compte_id, cle, jour),
+  constraint notifications_contacts_essais_rang
+    unique (compte_id, jour, rang)
 );
 
 alter table public.notifications_contacts_essais

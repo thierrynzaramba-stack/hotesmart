@@ -1708,3 +1708,121 @@ re-review des seuls correctifs ; décisions de Thierry Q35 à Q37 du 10 novembre
   désinscription lit les lignes du compte triées, jusqu'à 1000.
 - **Documentation** — la mesure avant/après est à la règle 6.
 
+**Rapport de la re-review des correctifs de l'étape 3, reçu le 10 novembre 2026,
+recopié mot pour mot avant tout correctif** (sous-agent ; arbre
+`/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, plage
+`6f7d939f676ff02a26d331de8c22c305214fbf97..e319249238df75196c0113b93531af9a17b376fa` ;
+chaque fichier cité est dans le diff, les autres sont lus comme preuve) :
+
+> **Re-review des correctifs, étape 3 du lot 2c-3 (contacts prévenus)**
+>
+> - **Arbre lu :** `/home/claude/hs-2c3`. Je n'ai rien ouvert en dehors. La spec a été lue par `git show 61e0cd4f…`.
+> - **Branche :** `pwa-lot-2c3-contacts`.
+> - **SHA de tête :** `e319249238df75196c0113b93531af9a17b376fa`.
+> - **Plage relue :** `6f7d939f…..e3192492…`, soit les 7 fichiers annoncés. Chaque constat porte sur l'un d'eux.
+> - **Tests :** le fichier de l'étape passe à 31 sur 31. Les 20 fichiers de tests qui touchent ces modules passent à 426 sur 426, et la suite complète à 7566 sur 7566.
+> - **Arbre inchangé :** `git status` ne montre que `node_modules`, non suivi, déjà là avant. Mes scripts de vérification sont dans `/tmp/rr2c3/`, hors de l'arbre.
+>
+> **Verdict.** S2 est fermé pour le cas rapporté. S1 n'est fermé que si les essais arrivent un par un : deux constats de sécurité restent, R1 et R2.
+>
+> ## 1. S1 et S2
+>
+> **R1 — Le plafond de dix essais par compte ne tient pas quand les clics arrivent en même temps. Gravité : sécurité, de portée bornée.**
+> - **Où :** `lib/notifications/contacts.js:332-340` et `migrations/2026-11-10-notifications-contacts.sql:108-117`.
+> - **Ce qui se passe :** le serveur lit le nombre d'essais du jour, puis insère. La clé primaire ne protège qu'une adresse à une date ; rien ne protège le total du compte.
+> - **Mesuré** (`/tmp/rr2c3/course.js`, avec le vrai module et une fausse base) : 30 clics simultanés sur 30 adresses différentes donnent 30 réservations ; 100 clics en donnent 100. Le plafond attendu est 10.
+> - **Scénario :** 100 contacts `victime+1@gmail.com` à `victime+100@gmail.com` (le plafond par adresse ne connaît pas les alias), puis 100 POST en parallèle. Résultat : environ 100 e-mails partent par la clé de la plateforme vers la même boîte.
+> - **Limite :** une seule rafale par jour et par compte, puisque le compte dépasse ensuite 10. C'est bien mieux qu'avant (illimité), mais Q37 n'est pas tenu.
+> - **Test manquant :** le test « deux clics » ne porte que sur une même adresse.
+> - **Piste :** une borne posée en base, par exemple un rang de 1 à 10 unique par compte et par jour, ou une fonction SQL avec un verrou.
+>
+> **R2 — Une adresse piégée efface la réservation d'une autre adresse. Gravité : sécurité de faible portée (injection de filtre).**
+> - **Où :** `lib/notifications/contacts.js:350-351` (`rendreEssai`, filtre `.in('cle', …)`), et `RE_EMAIL` à la ligne 140, qui accepte `"`, `,`, `(` et `)`.
+> - **Ce qui se passe :** le client Supabase (postgrest-js 2.102.1) met entre guillemets une valeur qui contient une virgule, sans échapper les guillemets qu'elle contient déjà.
+>   - L'e-mail `a",e:victime@gmail.com,"b.c` est accepté par la validation.
+>   - La remise envoie alors le filtre `cle=in.("e:a",e:victime@gmail.com,"b.c")`. J'ai vérifié cette URL avec le vrai client.
+>   - Selon la grammaire des listes de PostgREST, ce filtre contient trois valeurs. Je ne l'ai pas éprouvé sur un vrai serveur.
+> - **Scénario :**
+>   1. Un essai part vers la victime.
+>   2. Un essai part vers le contact piégé ; Brevo refuse l'adresse, rien ne part, la réservation est rendue.
+>   3. Cette remise efface la réservation de `victime@gmail.com`, et pas la sienne.
+>   4. L'attaquant recommence au premier point.
+> - **Limite :** l'effacement reste dans le compte et le jour de l'attaquant. La ligne piégée reste comptée (+1 par tour), donc le plafond du compte borne l'attaque : environ 10 envois par jour à la même adresse au lieu d'un.
+> - **Piste :** effacer par clé exacte (`.eq('cle', k)`, deux clés au plus) et resserrer `RE_EMAIL`.
+>
+> **R3 — Deux formes d'un même numéro donnent deux adresses différentes. Gravité : mineur.**
+> - **Où :** `contacts.js:198-200` (`clesAdresse`, qui utilise `cleTelephone`).
+> - **Ce qui se passe :** « 612345678 » donne la clé `t:+612345678`, alors que l'envoi (`api/sms.js:138`) le corrige en `+33612345678`, le même numéro que « 0612345678 ». Ce numéro reçoit donc deux essais par jour, et la règle Q36 comme la désinscription ne relient pas ces deux formes.
+> - **Côté e-mail :** les alias (`+`, points de Gmail, `googlemail.com`) sont inhérents. C'est le plafond du compte qui borne, d'où l'importance de R1.
+>
+> **S2 : fermé pour le cas rapporté.** Un changement d'e-mail donne un nouveau jeton (32 octets aléatoires, au bon format), et l'ancien lien rend « lien plus valable ». La file des heures calmes relit l'e-mail et le jeton sur la même ligne (`file.js:148-150`), donc aucun ancien e-mail ne part avec un nouveau jeton. Restent trois points.
+>
+> **R4 — Le changement partiel d'adresse est plus étroit que Q35. Gravité : à faire trancher par Thierry.**
+> - **Où :** `contacts.js:287-295`.
+> - **Ce qui se passe :** le jeton ne change que si l'e-mail change, et la ligne ne repart inscrite que si aucune ancienne adresse ne reste. Q35 dit : « l'adresse change → il repart inscrit, l'ancien lien cesse de marcher ».
+>   - Si seul l'e-mail change (le numéro est gardé), la nouvelle adresse ne reçoit rien alors qu'elle ne s'est jamais désinscrite.
+>   - Si seul le numéro change, le jeton reste le même.
+> - **Pas une faille :** le lien vit dans les e-mails, et le détenteur d'un e-mail inchangé reste destinataire de la ligne. Mais c'est plus étroit que la décision.
+>
+> **R5 — Le lien d'une autre ligne agit sur les lignes ajoutées plus tard. Gravité : mineur.**
+> - **Où :** `contacts.js:375-376`.
+> - **Ce qui se passe :** le lien de toute ligne encore en place fait taire toutes les lignes du compte qui partagent une adresse avec elle, y compris une ligne ajoutée plus tard pour quelqu'un d'autre.
+> - **Scénario :** L1 (e-mail de l'ancien gardien, téléphone d'astreinte) reste en place pour un autre logement. L'hôte ajoute L2 (e-mail du nouveau gardien, même téléphone d'astreinte). Le lien de L1 fait taire L2, e-mail du nouveau gardien compris.
+> - **C'est D4 « trop large », déjà accepté.** Je le signale parce que la question était posée.
+>
+> **R6 — La modification ne vérifie pas l'e-mail lu. Gravité : mineur, théorique.**
+> - **Où :** `contacts.js:278-297`.
+> - **Ce qui se passe :** deux onglets lisent le contact avec l'ancien e-mail. Le premier enregistre le nouvel e-mail avec un nouveau jeton. Le second, avec son formulaire périmé, réécrit l'ancien e-mail sans changer le jeton. La ligne garde donc l'ancien e-mail avec le jeton créé pour le nouveau.
+> - **Exploitable** seulement si un e-mail est parti vers la nouvelle adresse entre les deux écritures.
+> - **Piste :** conditionner l'écriture à l'e-mail lu.
+>
+> ## 2. Q35, Q36 et D1 à D7
+>
+> **État de chaque constat :**
+> - **D1 (Q35) :** fermé quand toutes les adresses changent ; le changement partiel est R4.
+> - **D2 (Q36) :** fermé pour l'ajout, et pour la modification vers l'adresse d'une autre ligne. Voir R7 et R8.
+> - **D3 :** fermé, avec un test.
+> - **D4 :** la règle est documentée.
+> - **D5 :** fermé : la liste revient avec chaque réponse, refus compris.
+> - **D6 :** fermé : le jour est gardé dans la réservation, la remise ne retire que ses propres lignes, son erreur est lue, et l'exception est couverte.
+> - **D7 :** fermé.
+> - **Reprise des listes :** aucune régression. `creerContacts`, `cleEmail` et `cleTelephone` sont inchangés, aucune référence à `dernier_essai_le` ne reste (fichiers js, html et sql), et les tests de la reprise passent.
+>
+> **R7 — Fausse alerte « adresse désinscrite ». Gravité : défaut mineur.**
+> - **Où :** `contacts.js:289-290`.
+> - **Ce qui se passe :** le contrôle porte sur toutes les adresses de la nouvelle version, pas seulement sur celles qu'on ajoute.
+> - **Mesuré** (`/tmp/rr2c3/q36.js`, cas 1) : L1 (E, P) est active et L2 (E) est désinscrite. Changer seulement le numéro de L1 rend 409 « Cette adresse s'est désinscrite », alors que E n'est pas ajoutée.
+> - **Piste :** ne contrôler que les adresses absentes de l'ancienne version.
+>
+> **R8 — Q36 se contourne en deux modifications, sans avertissement. Gravité : mineur.**
+> - **Où :** `contacts.js:288-295`.
+> - **Mesuré** (cas 2) : L1 désinscrite par V. « Modifier » vers une autre adresse la fait repartir inscrite (Q35) ; « Modifier » de nouveau vers V la laisse active sur V, sans aucune confirmation.
+> - **Ce qui manque :** la trace s'efface à la première modification, et l'écran ne le dit pas, contrairement à « Retirer » (`pages/settings.html:956`). Ce n'est pas de la sécurité, mais D2 se rouvre par ce chemin.
+>
+> **R9 — La page publique montre l'état d'une seule ligne. Gravité : mineur.**
+> - **Où :** `api/alertes-desinscription.js:84`.
+> - **Ce qui se passe :** la page montre l'état de la ligne du lien, alors que le bouton agit sur toutes les lignes de l'adresse.
+> - **Q36 crée exactement ce cas :** L1 désinscrite, puis L2 ajoutée à la même adresse avec confirmation. L'ancien lien de L1 affiche « Recevoir à nouveau » alors que la personne reçoit déjà par L2.
+>
+> **R10 — Un échec partiel consomme l'adresse du canal qui a échoué. Gravité : mineur, pas une régression.**
+> - **Où :** `api/push.js:188-193`.
+> - **Ce qui se passe :** la réservation n'est rendue que si rien n'est parti.
+> - **Scénario :** l'e-mail part, mais le SMS échoue parce que Brevo n'est pas connecté, précisément le cas que l'essai sert à révéler. L'adresse SMS reste prise et compte dans les dix. L'hôte connecte Brevo, réessaie, et lit « déjà parti vers cette adresse ».
+>
+> **R11 — « 10 essais » compte des adresses, pas des clics. Gravité : à faire trancher.**
+> - **Où :** `contacts.js:336` et `api/push.js:79`.
+> - **Ce qui se passe :** un contact qui a un e-mail et un numéro consomme deux essais. Cinq clics peuvent donc afficher « Vous avez déjà envoyé 10 essais aujourd'hui ».
+>
+> **R12 — La table des essais n'est jamais purgée. Gravité : mineur.**
+> - **Où :** `migrations/2026-11-10-notifications-contacts.sql:108-117`.
+> - **Ce qui se passe :** seul le jour courant est lu, mais les lignes des jours passés restent. Le volume est faible.
+>
+> ## 3. Sécurité générale du diff
+>
+> - **Compte :** le compte est toujours celui de la session. Chaque nouvelle lecture ou écriture filtre sur le compte : essais du jour, recherche des désinscrits, remise de l'essai, lignes du lien. La réponse « adresse désinscrite » ne parle que d'une ligne du compte.
+> - **Jeton :** il ne sort jamais vers l'écran. La réponse ne porte que le motif, la date de désinscription, le bilan et la liste. `COLONNES_ECRAN` ne contient pas le jeton.
+> - **Confirmation (Q36) :** `confirme` n'est pris que s'il vaut exactement `true`.
+> - **Migration :** la nouvelle table a RLS activée, aucune policy, et une clé étrangère en cascade.
+> - **Injection :** R2 est la seule trouvée.
+>
+> Rien de nouveau à proposer pour la mémoire.
