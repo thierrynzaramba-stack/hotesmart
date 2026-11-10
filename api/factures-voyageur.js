@@ -162,27 +162,27 @@ async function envoyerLien (req, res, corps) {
   const decision = canalPour({ id: bookingId, ...snap })
 
   let envoi
-  if (decision.motif === MOTIF.PAS_D_EMAIL ||
-      (decision.motif === MOTIF.SANS_CANAL && !ESTIME_CHANNEX(garde.bien.provider))) {
+  if (!ESTIME_CHANNEX(garde.bien.provider)) {
+    // ⚠ BEDS24 : HÔTESMART N'ENVOIE PAS LE LIEN LUI-MÊME (décision de Thierry
+    // du 10 novembre 2026, dernière review, S1). Les conversations Beds24 sont
+    // relues CHEZ BEDS24 (lib/cron-beds24.js fetchMessages pour l'IA et
+    // `agent_tasks.source_thread`, api/beds24.js pour l'écran, api/extract-kb.js)
+    // sans passer par le writer du fil : le masque n'y passe pas, et le jeton
+    // serait en clair pour l'IA et pour un membre en lecture. Le lien revient à
+    // l'hôte, qui le transmet (comme P5). Le masquage à la lecture Beds24 est un
+    // chantier à part, avec le fil de synchronisation.
+    envoi = { ok: false, canal: CANAL.AUCUN, motif: 'beds24' }
+  } else if (decision.motif === MOTIF.PAS_D_EMAIL) {
     // Aucune destination : rien ne part (P5). Le lien revient à l'hôte.
-    // ⚠ BEDS24 « SANS CANAL » NE PASSE PAS (review 1, B1) : une saisie directe
-    // Beds24 n'a aucun fil (docs/kb/guestflow.md), et un envoi « accepté » y
-    // serait un faux vert.
     envoi = { ok: false, canal: CANAL.AUCUN, motif: decision.motif }
   } else {
-    let beds24Key = null
-    if (garde.bien.provider === 'beds24') {
-      requetes++
-      const { data: k, error: eK } = await base.from('api_keys').select('api_key').eq('user_id', compte).maybeSingle()
-      if (eK) console.error('[factures-voyageur] cle Beds24 illisible', eK.message)
-      beds24Key = k ? k.api_key : null
-    }
+    const beds24Key = null
     // ⚠ CHANNEX « SANS CANAL » PASSE QUAND MÊME, comme dans
     // api/channel-message.js : le normaliseur Channex écrit `source: 'direct'`
     // pour une réservation sans `ota_name`, que le filtre Beds24 classe « sans
     // canal » alors que Channex accepte le message. On passe alors
     // l'IDENTIFIANT nu, que le chemin commun route par le provider — c'est lui
-    // l'autorité. Jamais pour Beds24 (ci-dessus).
+    // l'autorité. (Beds24 n'arrive jamais ici : voir plus haut.)
     const reservation = decision.motif === MOTIF.SANS_CANAL ? bookingId : { id: bookingId, ...snap }
     try {
       envoi = await sendGuestMessage(beds24Key, garde.bien, reservation, message,

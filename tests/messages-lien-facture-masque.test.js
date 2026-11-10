@@ -27,24 +27,40 @@ const JETON = 'Q'.repeat(30) + '_-' + 'z'.repeat(11)
 const LIEN = `https://hotesmart.vercel.app/facture#${JETON}`
 const TEXTE = FV.texteDuLien('fr', 'Léa', LIEN)
 
-test('le masque : toutes les formes du lien, et il échoue FERMÉ', () => {
+test('le masque : toutes les formes du lien, et il échoue FERMÉ (dernière review, M1)', () => {
   const m = FV.masquerLiensFacture
+  // La ponctuation finale reste.
   assert.equal(m(TEXTE),
     'Bonjour Léa, pour recevoir votre facture, merci de renseigner vos coordonnées de facturation ici : [lien de facture]. Votre facture sera disponible sur ce même lien après votre séjour.')
-  // Un caractère de jeton collé après (italique Markdown) : masqué quand même.
-  assert.equal(m(`_${LIEN}_`), '_[lien de facture]_')
-  assert.equal(m(`${LIEN}x`), '[lien de facture]x')
-  // `\_` échappé (réponse e-mail convertie en Markdown).
-  assert.equal(m(`voir ${LIEN.replace(/_/g, '\\_')} merci`), 'voir [lien de facture] merci')
-  // Dans une URL de redirection, encodé.
-  assert.equal(m(`https://r.example/?u=https%3A%2F%2Fhotesmart.vercel.app%2Ffacture%23${JETON}`), '[lien de facture]')
-  // En entité HTML, sans schéma, en majuscules, deux fois.
-  assert.equal(m(`/facture&#35;${JETON}`), '[lien de facture]')
-  assert.equal(m(`HTTPS://H.APP/FACTURE#${JETON}`), '[lien de facture]')
+  // Toute forme du jeton, puisque le MOT entier part : italique, échappement,
+  // encodage simple ou double, entités, ancre décalée, caractère invisible.
+  for (const forme of [`_${LIEN}_`, `${LIEN}x`, LIEN.replace(/_/g, '\\_'), LIEN.replace('#', '\\#'),
+    `https://r.example/?u=https%3A%2F%2Fhotesmart.vercel.app%2Ffacture%23${JETON}`,
+    `h.app%252Ffacture%2523${JETON}`, `/facture&amp;#x23;${JETON}`, `/facture&num;${JETON}`,
+    `h.app/facture/#${JETON}`, `h.app/facture?utm=x#${JETON}`, `HTTPS://H.APP/FACTURE#${JETON}`,
+    `h.app/facture#${JETON.slice(0, 20)}​${JETON.slice(20)}`]) {
+    const r = m(`voir ${forme} merci`)
+    assert.ok(!r.includes(JETON.slice(0, 20)) && !r.includes(JETON.slice(20)), `fuite : ${forme} → ${r}`)
+    assert.match(r, /^voir \[lien de facture\]/)
+  }
+  // Le jeton SÉPARÉ de son lien par la coupure des lignes d'une citation.
+  const coupe = m(`> ici : https://hotesmart.vercel.app/facture#\n> ${JETON}.`)
+  assert.equal(coupe, '> ici : [lien de facture]\n> [lien de facture].')
+  const coupe2 = m(`> ${LIEN.slice(0, 40)}\n> ${LIEN.slice(40)}`)
+  assert.ok(!coupe2.includes(LIEN.slice(40)), coupe2)
+  // Dans un lien Markdown, et deux fois.
+  assert.equal(m(`[ici](${LIEN})`), '[ici]([lien de facture])')
   assert.equal(m(`/facture#${JETON} et /facture#${JETON}`), '[lien de facture] et [lien de facture]')
-  // Ce qui n'est pas un lien de facture ne bouge pas.
-  assert.equal(m('Bonjour, la facture # 12 et /facture#court'), 'Bonjour, la facture # 12 et /facture#court')
+  // Rien ne bouge sans lien, ni un mot long en minuscules ; idempotent.
+  assert.equal(m('Bonjour, la facture # 12 et anticonstitutionnellement'), 'Bonjour, la facture # 12 et anticonstitutionnellement')
+  assert.equal(m(m(TEXTE)), m(TEXTE))
+  assert.equal(m(`sans le mot : ${JETON}`), `sans le mot : ${JETON}`, 'hors d\'un texte qui parle de facture, rien')
   assert.equal(m(null), null)
+  // Le prix, assumé et écrit (KB) : un autre lien en /facture… est masqué
+  // aussi dans la COPIE du fil.
+  assert.equal(m('voir monsite.fr/factures/12 ok'), 'voir [lien de facture] ok')
+  // Linéaire : un corps hostile ne coûte rien.
+  const t0 = Date.now(); m('http://'.repeat(5000) + ' facture'); assert.ok(Date.now() - t0 < 200)
 })
 
 // ─── Une base factice : elle APPLIQUE les filtres de recordMessage ────────────

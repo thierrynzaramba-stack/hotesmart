@@ -45,8 +45,13 @@ lui, et la comparaison des échos se fait sur le texte masqué. L'hôte qui envo
 reçoit le lien dans la réponse de l'endpoint (« Copier » sur la fiche, 2b) ; il
 peut aussi le renvoyer. Le lien reste dans la conversation de la PLATEFORME
 (ou l'e-mail), pour qui a accès à ce compte-là. Motif unique :
-`masquerLiensFacture` (lib/factures-voyageur.js) — il échoue fermé (43
-caractères pris sans regarder la suite) et reconnaît `\_`, `%2F…%23`, `&#35;`.
+`masquerLiensFacture` (lib/factures-voyageur.js) — il échoue fermé : tout le
+MOT qui contient `/facture` (ou `%2F`, `%252F`) part en bloc, quelle que
+soit la forme du jeton, et dans un texte qui parle de facture tout morceau de
+20 caractères base64url est pris pour un jeton séparé de son lien.
+⚠ **Le masque est posé aussi à la SOURCE des textes du voyageur** qui n'entrent
+pas par `recordMessage` : `corpsUtile` (`api/inbound-email.js` — une réponse
+qui cite notre e-mail) et `guest_message` (`api/channel-webhook.js`).
 
 ⚠ **LE JETON VOYAGE DANS LE FRAGMENT** (`/facture#<jeton>`). Un fragment n'est
 envoyé à aucun serveur : le jeton n'entre ni dans les journaux de Vercel, ni
@@ -86,7 +91,8 @@ la passe du cron. **Une facture émise** ne reçoit plus le lien « remplissez �
 ne transmet pas ce drapeau du moteur e-mail) — seuls « permanent » et « quota »
 sont sûrs. Une saisie directe Beds24 n'a aucun fil : `sans_canal`, rien ne part.
 Une réservation Channex classée « sans canal » (source `direct`) passe quand même,
-par l'identifiant : c'est Channex qui tranche.
+par l'identifiant : c'est Channex qui tranche. **Beds24 : rien ne part** (P2
+quater), le lien revient à l'hôte.
 
 ⚠ **LA PAGE NE REÇOIT QUE SA DEMANDE** : langue, état, destinataire saisi, nom
 du logement et dates du séjour. Ni l'identité de l'hôte avant l'émission, ni
@@ -121,6 +127,20 @@ passeraient pour la mauvaise raison.
   le lien revient à l'hôte, qui le transmet.
 - **Routage par le provider du BIEN** (chemin commun) : pendant une migration,
   une réservation peut partir par l'autre provider — même règle que le cron.
+- **Beds24 : HôteSmart n'envoie pas le lien** (décision de Thierry du
+  10 novembre 2026, P2 quater) : les conversations Beds24 sont relues chez
+  Beds24, hors du writer du fil. Le lien revient à l'hôte (`sans_canal`,
+  motif `beds24`). Dette 138.
+- **L'hôte qui colle lui-même le lien** dans une proposition GuestFlow (ou un
+  message Beds24) le fait entrer en clair : la proposition est écrite hors de
+  `recordMessage`, et la masquer enverrait « [lien de facture] » au voyageur.
+  Le geste sûr est le bouton de la fiche.
+- **L'IA voit « [lien de facture] »** dans le fil, et peut le recopier à un
+  voyageur qui redemande son lien ; la porte 3 (GuestFlow, étape 5) y mettra un
+  vrai lien.
+- **Faux positifs du masque**, dans la COPIE du fil seulement (le message parti
+  est intact) : un autre lien en `/facture…`, ou une longue référence avec
+  chiffres dans un message qui parle de facture.
 - **Deux envois du lien à moins de 10 minutes** : le fil n'en montre qu'un —
   masqués, leurs textes sont identiques, et la déduplication des sortants de
   `recordMessage` les confond. Les deux jetons, eux, sont en base.

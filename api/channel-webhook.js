@@ -149,6 +149,9 @@ function urlWebhookDeCeFichier (req) {
 const { pushAvailabilityOnce } = require('../lib/channel-availability')
 // Double ecriture vers la table source de verite `messages` (etape 2 messagerie unifiee).
 const { recordMessage } = require('../lib/record-message')
+// Facture voyageur, étape 2a (décision de Thierry du 10 novembre 2026) : le
+// lien du formulaire de facture n'entre jamais en clair dans `conversations`.
+const { masquerLiensFacture } = require('../lib/factures-voyageur')
 const { enUTC } = require('../lib/channels/channex')
 
 const { surveillerReponse } = require('../lib/reponse-partenaire')
@@ -336,7 +339,7 @@ async function handleMessage(payload) {
     .select('id')
     .eq('property_id', String(providerPropertyId))
     .eq('book_id', payload.booking_id || null)
-    .eq('guest_message', payload.message || '')
+    .eq('guest_message', masquerLiensFacture(payload.message || ''))   // même texte que l'insertion
     .is('agent_reply', null)
     .gte('created_at', since)
     .limit(1)
@@ -351,7 +354,9 @@ async function handleMessage(payload) {
       user_id:      owner.user_id,
       property_id:  String(cleDuCoeur),
       book_id:      payload.booking_id || null,
-      guest_message: payload.message || '',
+      // Masqué (facture voyageur 2a, dernière review, S2) : un voyageur qui
+      // recolle le lien ne le fait pas entrer en clair dans le fil.
+      guest_message: masquerLiensFacture(payload.message || ''),
       guest_name:   '',
       agent_reply:  null
     })

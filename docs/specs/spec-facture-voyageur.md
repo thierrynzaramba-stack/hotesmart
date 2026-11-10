@@ -214,6 +214,13 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   tout le monde — l'hôte compris, qui le retrouve sur la fiche de réservation
   (« Copier », « Renvoyer »). Le masque à l'affichage de P2 bis devient inutile
   et est retiré de `api/messages.js`.
+- **P2 quater — Beds24** (dernière review de l'étape 2a, S1). Les
+  conversations Beds24 sont relues CHEZ Beds24, sans passer par le writer du
+  fil : le masque n'y passe pas.
+  → **Réponse de Thierry (10 nov. 2026) : pour une réservation Beds24,
+  HôteSmart n'envoie pas le lien lui-même** ; il le crée et le rend à l'hôte
+  (« Copier »), comme une réservation sans e-mail. Le masquage à la lecture
+  Beds24 est un chantier à part, avec le fil de synchronisation (dette 138).
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
   → **Réponse de Thierry (8 nov. 2026, 22 h 09) : A.** Les rappels
@@ -869,8 +876,7 @@ ses correctifs).
   `%2F…%23`, `&#35;`) ; « bien inconnu » non testé ; une configuration Brevo
   illisible donnait « incertain » alors que Brevo n'avait pas été appelé.
 
-**Corrections, sans nouvelle review** (règle : ce que trouve la dernière
-review se corrige sans review de plus) :
+**Corrections** (relues par la review 3, la dernière, ci-dessous) :
 - P2 ter : `lib/record-message.js` (AJOUT SEUL, fichier du fil Messagerie)
   masque le corps AVANT toute comparaison — l'envoi, l'écho de la
   synchronisation et la réponse e-mail du voyageur passent tous par lui, et
@@ -881,6 +887,57 @@ review se corrige sans review de plus) :
 - Brevo non appelé → `refus`.
 - Tests : le vrai writer du fil traversé de bout en bout (envoi, écho, réponse
   qui cite le lien) ; 5 mutations, toutes tuées.
+
+#### Review 3 — la dernière (sous-agent, 10 novembre 2026, sur le correctif S1-bis)
+
+La review de plus qu'accorde l'exception « envoi au voyageur », limitée au
+diff du correctif ; ce qu'elle trouve se corrige SANS nouvelle review.
+
+- arbre `/home/claude/hotesmart-fv2`, branche `facture-voyageur-etape-2`,
+  HEAD lu `935a132a168c6f125d0135a85ba3d73fe552c063`, plage
+  `3029d14f1299578d616c4180bdc5e024a6d075e5..935a132a168c6f125d0135a85ba3d73fe552c063` ;
+- fichiers cités : dans le diff — `lib/factures-voyageur.js`,
+  `lib/record-message.js`, `api/factures-voyageur.js`, `api/messages.js` ;
+  hors diff, preuve seulement — `lib/cron-classify.js`, `lib/cron-beds24.js`,
+  `api/beds24.js`, `api/extract-kb.js`, `api/inbound-email.js`,
+  `api/channel-webhook.js`, `api/channel-message.js`, `pages/messages.html`,
+  `apps/agent-ai/analyze.html`, `lib/cron-messages.js`,
+  `lib/email-guestflow.js`, `lib/channels/channex.js`,
+  `lib/guestflow/journal-envoi-ia.js`, `lib/ia/journal.js`,
+  `migrations/0000-schema-initial.sql`, `migrations/2026-09-02-droits-lot2.sql`,
+  `migrations/2026-09-02-droits-lot4.sql`,
+  `migrations/2026-11-10-factures-voyageur-demandes.sql`.
+- Mesures : 52/52 sur le lot ; 530/530 sur les 15 fichiers qui utilisent
+  `record-message` ; contre-épreuve 7 rouges ; `api/messages.js` identique à
+  `main`, `lib/record-message.js` en ajout seul ; aucun chargement circulaire.
+
+**3 constats de SÉCURITÉ, 3 mineurs. Corrigés sans nouvelle review :**
+- **S1 — Beds24** : le fil est relu chez Beds24 (IA, `source_thread`, écran
+  `api/beds24.js`, `api/extract-kb.js`). → Décision de Thierry (§4 bis,
+  P2 quater) : HôteSmart n'envoie plus le lien pour une réservation Beds24 ;
+  il le rend à l'hôte. Dette 138 pour le masquage à la lecture.
+- **S2 — la réponse du voyageur qui cite le lien** : masquée dans `messages`,
+  en clair dans `conversations` / `agent_tasks.guest_message` / la copie à
+  l'hôte. → Masque à la source : `corpsUtile` de `api/inbound-email.js`, et
+  `guest_message` (insertion et déduplication) de `api/channel-webhook.js`.
+  Ferme aussi M2 (la déduplication de l'e-mail comparait un texte brut à un
+  texte masqué).
+- **S3 — l'hôte colle lui-même le lien dans une proposition GuestFlow** :
+  écrit hors de `recordMessage` (`suggested_reply`, `agent_reply`). Masquer
+  la proposition enverrait « [lien de facture] » au voyageur : **documenté**
+  (KB), pas corrigé — c'est l'hôte qui colle la clé, et « Copier » sur la
+  fiche (2b) dira de l'envoyer par le bouton.
+- **M1** — le masque était une liste de formes : il prend maintenant tout le
+  MOT qui contient `/facture` (ou `%2F`, `%252F`), quelle que soit la forme du
+  jeton, et, dans un texte qui parle de facture, tout morceau de 20 caractères
+  base64url (le jeton séparé de son lien par la coupure d'une citation). Prix
+  assumé : un autre lien en `/facture…` est masqué aussi dans la copie du fil.
+- **M3** — l'IA voit « [lien de facture] » et pourrait le recopier à un
+  voyageur qui redemande son lien : documenté ; la porte 3 (GuestFlow,
+  étape 5) insérera un vrai lien.
+- Tests : Beds24 (deux cas), masque (toutes les formes sondées, coupure,
+  idempotence, coût), `tests/inbound-email.test.js` (ajout : la citation est
+  masquée partout) ; 4 mutations tuées. Suite 7836/7836.
 
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 

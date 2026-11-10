@@ -789,33 +789,24 @@ test('B4 : le VRAI chemin — Channex « sans canal » (source direct) passe qua
   } finally { fini() }
 })
 
-test('B1 : le VRAI chemin — Beds24 : un séjour de canal part ; une saisie directe ne part PAS ; un envoi simulé n\'est pas livré', async () => {
-  const tables = PARC()
-  tables.api_keys = [{ user_id: A, api_key: 'cle-beds24' }]
-  const ok = hote({ vraiEnvoi: true, tables })
-  try {
-    const r = await ok.appeler({ corps: { action: 'envoyer_lien', booking: 'R_BX' } })
-    assert.equal(r.code, 200, JSON.stringify(r.corps))
-    assert.equal(r.corps.envoi, 'livre')
-    assert.equal(ok.etat.envois[0].par, 'beds24'); assert.equal(ok.etat.envois[0].bookingId, 'R_BX')
-    assert.equal(ok.etat.envois[0].key, 'cle-beds24')
-    assert.equal(ok.etat.fil[0].provider, 'beds24')
-  } finally { ok.fini() }
-  const direct = hote({ vraiEnvoi: true, tables: (() => { const t = PARC(); t.api_keys = [{ user_id: A, api_key: 'k' }]; return t })() })
-  try {
-    const r = await direct.appeler({ corps: { action: 'envoyer_lien', booking: 'R_BX_DIRECT' } })
-    assert.equal(r.corps.envoi, 'sans_canal', JSON.stringify(r.corps))
-    assert.ok(r.corps.lien, 'le lien revient à l\'hôte')
-    assert.equal(direct.etat.envois.length, 0, 'aucun appel à Beds24')
-    assert.equal(direct.etat.fil.length, 0)
-  } finally { direct.fini() }
-  const simule = hote({ vraiEnvoi: true, beds24: { ok: true, dryRun: true }, tables: (() => { const t = PARC(); t.api_keys = [{ user_id: A, api_key: 'k' }]; return t })() })
-  try {
-    const r = await simule.appeler({ corps: { action: 'envoyer_lien', booking: 'R_BX' } })
-    assert.equal(r.corps.envoi, 'differe', 'staging : rien n\'est parti')
-    assert.ok(r.corps.lien)
-    assert.equal(simule.etat.fil.length, 0, 'pas de faux vert dans le fil')
-  } finally { simule.fini() }
+test('Beds24 (décision de Thierry, dernière review) : HôteSmart n\'envoie RIEN — le lien revient à l\'hôte, « sans_canal »', async () => {
+  // Les conversations Beds24 sont relues chez Beds24, hors du writer du fil :
+  // le jeton y serait en clair pour l'IA et pour un membre en lecture.
+  for (const booking of ['R_BX', 'R_BX_DIRECT']) {
+    const tables = PARC()
+    tables.api_keys = [{ user_id: A, api_key: 'cle-beds24' }]
+    const h = hote({ vraiEnvoi: true, tables })
+    try {
+      const r = await h.appeler({ corps: { action: 'envoyer_lien', booking } })
+      assert.equal(r.code, 200, JSON.stringify(r.corps))
+      assert.equal(r.corps.envoi, 'sans_canal', booking)
+      assert.match(r.corps.lien, /\/facture#[A-Za-z0-9_-]{43}$/, 'le lien revient à l\'hôte')
+      assert.equal(h.etat.envois.length, 0, `${booking} : aucun appel à Beds24`)
+      assert.equal(h.etat.fil.length, 0)
+      assert.equal(h.etat.tables.factures_voyageur_jetons[0].envoi, 'sans_canal')
+      assert.equal(h.etat.tables.factures_voyageur_jetons[0].envoi_motif, 'beds24')
+    } finally { h.fini() }
+  }
 })
 
 test('voyageur : réservation annulée — la page dit « sans objet » tout de suite, et n\'enregistre plus', async () => {
