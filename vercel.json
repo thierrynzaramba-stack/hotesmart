@@ -59,6 +59,10 @@
       "destination": "/pages/book"
     },
     {
+      "source": "/facture",
+      "destination": "/pages/facture"
+    },
+    {
       "source": "/api/book-webhook/:jeton",
       "destination": "/api/book-webhook?jeton=:jeton"
     },

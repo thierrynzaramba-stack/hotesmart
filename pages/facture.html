@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Invoice</title>
+<!--
+  pages/facture.html — la page du VOYAGEUR pour sa facture (facture voyageur,
+  étape 2). Spec : docs/specs/spec-facture-voyageur.md §2, §5.3, §9.
+  KB : docs/kb/facture-voyageur.md
+
+  LE JETON EST DANS LE FRAGMENT (`/facture#<jeton>`) : il n'est envoyé à aucun
+  serveur, donc ni aux journaux ni dans un Referer. La page le POSTE dans le
+  corps de sa seule requête, `POST /api/facture-publique`.
+
+  AU NOM DE L'HÔTE, comme les messages (§11) : aucune marque HôteSmart. Le
+  titre de l'onglet devient le nom du logement dès que l'API répond.
+
+  AUTONOME, comme pages/book.html : aucun CSS ni JS externe, et les trois
+  langues (fr, en, es) dans un seul objet. La langue vient de la demande — celle
+  du voyageur (Q9 bis) —, le voyageur peut en changer.
+
+  UN ÉCRAN = UN APPEL (§9) : `lire` à l'ouverture ; `enregistrer` rend l'état
+  relu, sans second appel.
+-->
+  <!-- `hidden` doit masquer : voir l'en-tête de public/style.css et
+       CLAUDE.md. Cette page ne charge aucune des trois feuilles. -->
+  <style>[hidden] { display: none !important; }</style>
+<style>
+  :root {
+    --fond: #fbfbfa; --carte: #ffffff; --trait: #e6e4e0;
+    --texte: #1f1e1c; --texte2: #6f6b65; --accent: #2f6f5e; --accent-doux: #e8f0ed;
+    --refuse: #b4342f; --rayon: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fond); color: var(--texte);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 16px; }
+  h1 { font-size: 1.35rem; margin: 0; }
+  .langues { display: flex; gap: 2px; flex-shrink: 0; border: 1px solid var(--trait); border-radius: 8px; padding: 2px; background: var(--carte); }
+  .langues button { border: 0; background: none; padding: 6px 10px; border-radius: 6px; font: inherit; font-size: .85rem; color: var(--texte2); cursor: pointer; min-height: 36px; }
+  .langues button[aria-pressed="true"] { background: var(--accent-doux); color: var(--accent); font-weight: 600; }
+  .carte { background: var(--carte); border: 1px solid var(--trait); border-radius: var(--rayon); padding: 16px; margin-bottom: 16px; }
+  .sejour { color: var(--texte2); margin: 0 0 4px; overflow-wrap: anywhere; }
+  .note { margin: 0; }
+  .alerte { color: var(--refuse); margin: 0; overflow-wrap: anywhere; }
+  .ok { color: var(--accent); margin: 0 0 12px; font-weight: 600; }
+  fieldset { border: 0; padding: 0; margin: 0 0 12px; }
+  legend { font-weight: 600; margin-bottom: 6px; }
+  .types { display: flex; gap: 8px; flex-wrap: wrap; }
+  .types label { display: flex; align-items: center; gap: 6px; border: 1px solid var(--trait); border-radius: 8px; padding: 8px 12px; min-height: 44px; cursor: pointer; }
+  .champ { display: block; margin-bottom: 12px; }
+  .champ span { display: block; font-size: .9rem; color: var(--texte2); margin-bottom: 4px; }
+  .champ input { width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--trait); border-radius: 8px; min-height: 44px; background: var(--carte); color: var(--texte); }
+  .champ input[aria-invalid="true"] { border-color: var(--refuse); }
+  .champ small { display: block; color: var(--refuse); margin-top: 4px; }
+  .duo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px; }
+  button.principal { width: 100%; border: 0; border-radius: 8px; background: var(--accent); color: var(--carte); font: inherit; font-weight: 600; padding: 12px; min-height: 48px; cursor: pointer; }
+  button.principal:disabled { opacity: .6; cursor: default; }
+  button.lien { border: 0; background: none; color: var(--accent); font: inherit; padding: 8px 0; min-height: 44px; cursor: pointer; text-decoration: underline; }
+  dl { margin: 0 0 8px; }
+  dt { font-size: .85rem; color: var(--texte2); }
+  dd { margin: 0 0 8px; overflow-wrap: anywhere; }
+  .sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 data-t="titre"></h1>
+    <div class="langues" role="group" id="langues">
+      <button type="button" data-lang="fr" lang="fr">FR</button>
+      <button type="button" data-lang="en" lang="en">EN</button>
+      <button type="button" data-lang="es" lang="es">ES</button>
+    </div>
+  </header>
+
+  <p class="sr" id="annonce" role="status" aria-live="polite"></p>
+  <p class="carte" id="chargement" data-t="chargement"></p>
+  <p class="carte alerte" id="erreur" role="alert" hidden></p>
+
+  <section id="contenu" hidden>
+    <div class="carte">
+      <p class="sejour" id="sejour"></p>
+      <p class="note" id="etat"></p>
+    </div>
+
+    <div class="carte" id="recap" hidden>
+      <p class="ok" data-t="enregistre"></p>
+      <dl id="recap-liste"></dl>
+      <button type="button" class="lien" id="modifier" data-t="modifier"></button>
+    </div>
+
+    <form class="carte" id="formulaire" novalidate hidden>
+      <fieldset aria-describedby="err-type">
+        <legend data-t="vous_etes"></legend>
+        <div class="types">
+          <label><input type="radio" name="type" value="particulier"> <span data-t="particulier"></span></label>
+          <label><input type="radio" name="type" value="societe"> <span data-t="societe"></span></label>
+        </div>
+        <small class="alerte" id="err-type" data-erreur="type" hidden></small>
+      </fieldset>
+      <label class="champ"><span id="libelle-nom" data-t="nom_particulier"></span><input name="nom" autocomplete="name" maxlength="200" aria-describedby="err-nom"><small id="err-nom" data-erreur="nom" hidden></small></label>
+      <label class="champ"><span data-t="adresse1"></span><input name="adresse1" autocomplete="address-line1" maxlength="200" aria-describedby="err-adresse1"><small id="err-adresse1" data-erreur="adresse1" hidden></small></label>
+      <label class="champ"><span data-t="adresse2"></span><input name="adresse2" autocomplete="address-line2" maxlength="200" aria-describedby="err-adresse2"><small id="err-adresse2" data-erreur="adresse2" hidden></small></label>
+      <div class="duo">
+        <label class="champ"><span data-t="code_postal"></span><input name="code_postal" autocomplete="postal-code" maxlength="20" aria-describedby="err-code_postal"><small id="err-code_postal" data-erreur="code_postal" hidden></small></label>
+        <label class="champ"><span data-t="ville"></span><input name="ville" autocomplete="address-level2" maxlength="120" aria-describedby="err-ville"><small id="err-ville" data-erreur="ville" hidden></small></label>
+      </div>
+      <label class="champ"><span data-t="pays"></span><input name="pays" autocomplete="country-name" maxlength="80" aria-describedby="err-pays"><small id="err-pays" data-erreur="pays" hidden></small></label>
+      <div id="champs-societe" hidden>
+        <label class="champ"><span data-t="tva"></span><input name="tva" maxlength="20" autocapitalize="characters" aria-describedby="err-tva"><small id="err-tva" data-erreur="tva" hidden></small></label>
+        <label class="champ"><span data-t="siren"></span><input name="siren" inputmode="numeric" maxlength="11" aria-describedby="err-siren"><small id="err-siren" data-erreur="siren" hidden></small></label>
+      </div>
+      <p class="alerte" id="erreur-form" role="alert" hidden></p>
+      <button type="submit" class="principal" id="envoyer" data-t="enregistrer"></button>
+    </form>
+  </section>
+</main>
+<script>
+// Les trois langues sont ICI (comme pages/book.html). Le serveur ne rend que
+// des CODES (statut, motif) : aucune phrase ne vient de l'API.
+var T = {
+  fr: {
+    titre: 'Votre facture', chargement: 'Chargement…',
+    sejour: 'Séjour à {logement}, du {arrivee} au {depart}', sejour_sans: 'Votre séjour',
+    attente: 'Votre facture sera disponible sur ce lien après votre séjour, à partir du {date}.',
+    attente_sans: 'Votre facture sera disponible sur ce lien après votre séjour.',
+    emise: 'Votre facture a été émise. Elle sera téléchargeable sur ce lien.',
+    annulee: 'Cette facture a été annulée par un avoir. Votre hôte peut en émettre une nouvelle.',
+    sans_objet: 'Cette réservation a été annulée : aucune facture ne sera émise.',
+    lien_invalide: 'Ce lien n’est pas valide. Vérifiez qu’il est complet, ou demandez-en un nouveau à votre hôte.',
+    lien_expire: 'Ce lien a expiré. Demandez un nouveau lien à votre hôte.', langue: 'Langue',
+    panne: 'Le service est momentanément indisponible. Réessayez dans quelques minutes.',
+    plafond: 'Ces coordonnées ont été modifiées trop souvent par ce lien. Contactez votre hôte.',
+    verrouillee: 'Votre facture a déjà été émise : ses coordonnées ne peuvent plus changer.',
+    vous_etes: 'Vous êtes', particulier: 'Un particulier', societe: 'Une société',
+    nom_particulier: 'Nom et prénom', nom_societe: 'Raison sociale',
+    adresse1: 'Adresse', adresse2: 'Complément d’adresse (facultatif)',
+    code_postal: 'Code postal', ville: 'Ville', pays: 'Pays',
+    tva: 'N° de TVA intracommunautaire (facultatif)', siren: 'SIREN (facultatif)',
+    enregistrer: 'Enregistrer', enregistrement: 'Enregistrement…',
+    enregistre: 'Vos coordonnées de facturation sont enregistrées.', modifier: 'Modifier',
+    requis: 'Ce champ est obligatoire.', invalide: 'Cette valeur n’est pas valide.',
+    choisir: 'Choisissez une réponse.',
+    siren_format: '9 chiffres.', tva_format: 'Deux lettres de pays puis le numéro (ex. FR12345678901).'
+  },
+  en: {
+    titre: 'Your invoice', chargement: 'Loading…',
+    sejour: 'Stay at {logement}, from {arrivee} to {depart}', sejour_sans: 'Your stay',
+    attente: 'Your invoice will be available at this link after your stay, from {date}.',
+    attente_sans: 'Your invoice will be available at this link after your stay.',
+    emise: 'Your invoice has been issued. It will be available for download at this link.',
+    annulee: 'This invoice was cancelled by a credit note. Your host can issue a new one.',
+    sans_objet: 'This booking was cancelled: no invoice will be issued.',
+    lien_invalide: 'This link is not valid. Check that it is complete, or ask your host for a new one.',
+    lien_expire: 'This link has expired. Ask your host for a new link.', langue: 'Language',
+    panne: 'The service is temporarily unavailable. Please try again in a few minutes.',
+    plafond: 'These details have been changed too often through this link. Please contact your host.',
+    verrouillee: 'Your invoice has already been issued: its details can no longer change.',
+    vous_etes: 'You are', particulier: 'An individual', societe: 'A company',
+    nom_particulier: 'Full name', nom_societe: 'Company name',
+    adresse1: 'Address', adresse2: 'Address line 2 (optional)',
+    code_postal: 'Postcode', ville: 'City', pays: 'Country',
+    tva: 'EU VAT number (optional)', siren: 'SIREN (French companies, optional)',
+    enregistrer: 'Save', enregistrement: 'Saving…',
+    enregistre: 'Your billing details have been saved.', modifier: 'Edit',
+    requis: 'This field is required.', invalide: 'This value is not valid.',
+    choisir: 'Please choose one.',
+    siren_format: '9 digits.', tva_format: 'Two-letter country code then the number (e.g. DE123456789).'
+  },
+  es: {
+    titre: 'Su factura', chargement: 'Cargando…',
+    sejour: 'Estancia en {logement}, del {arrivee} al {depart}', sejour_sans: 'Su estancia',
+    attente: 'Su factura estará disponible en este enlace después de su estancia, a partir del {date}.',
+    attente_sans: 'Su factura estará disponible en este enlace después de su estancia.',
+    emise: 'Su factura ha sido emitida. Podrá descargarla en este enlace.',
+    annulee: 'Esta factura fue anulada mediante una factura rectificativa. Su anfitrión puede emitir una nueva.',
+    sans_objet: 'Esta reserva fue cancelada: no se emitirá ninguna factura.',
+    lien_invalide: 'Este enlace no es válido. Compruebe que está completo o pida uno nuevo a su anfitrión.',
+    lien_expire: 'Este enlace ha caducado. Pida un nuevo enlace a su anfitrión.', langue: 'Idioma',
+    panne: 'El servicio no está disponible en este momento. Vuelva a intentarlo en unos minutos.',
+    plafond: 'Estos datos se han modificado demasiadas veces con este enlace. Contacte con su anfitrión.',
+    verrouillee: 'Su factura ya ha sido emitida: sus datos ya no pueden cambiar.',
+    vous_etes: 'Usted es', particulier: 'Un particular', societe: 'Una empresa',
+    nom_particulier: 'Nombre y apellidos', nom_societe: 'Razón social',
+    adresse1: 'Dirección', adresse2: 'Complemento de dirección (opcional)',
+    code_postal: 'Código postal', ville: 'Ciudad', pays: 'País',
+    tva: 'N.º de IVA intracomunitario (opcional)', siren: 'SIREN (empresas francesas, opcional)',
+    enregistrer: 'Guardar', enregistrement: 'Guardando…',
+    enregistre: 'Sus datos de facturación se han guardado.', modifier: 'Modificar',
+    requis: 'Este campo es obligatorio.', invalide: 'Este valor no es válido.',
+    choisir: 'Elija una opción.',
+    siren_format: '9 cifras.', tva_format: 'Código de país de dos letras y el número (p. ej. ES12345678Z).'
+  }
+};
+var LANGUES = ['fr', 'en', 'es'];
+var lang = 'en', t = T.en, etat = null;
+// ⚠ LES 43 CARACTÈRES DU JETON, PAS LE FRAGMENT ENTIER (review 1) : le message
+// met un point juste après le lien, et une messagerie peut l'inclure dans le
+// lien cliquable. Un caractère de jeton de plus, lui, rend le lien invalide.
+var trouve = (location.hash || '').replace(/^#/, '').match(/^([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/);
+var jeton = trouve ? trouve[1] : '';
+var $ = function (id) { return document.getElementById(id); };
+var form = $('formulaire');
+
+function fmt(cle, vars) {
+  return String(t[cle] || '').replace(/\{(\w+)\}/g, function (m, k) { return vars && vars[k] != null ? vars[k] : ''; });
+}
+function dateLongue(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return null;
+  try { return new Intl.DateTimeFormat(lang, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(iso + 'T12:00:00Z')); }
+  catch (e) { return iso; }
+}
+function lendemain(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return null;
+  var d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function appliquerLangue(l) {
+  lang = LANGUES.indexOf(l) >= 0 ? l : 'en'; t = T[lang];
+  document.documentElement.lang = lang;
+  $('langues').setAttribute('aria-label', t.langue);
+  var noeuds = document.querySelectorAll('[data-t]');
+  for (var i = 0; i < noeuds.length; i++) noeuds[i].textContent = t[noeuds[i].getAttribute('data-t')] || '';
+  var b = document.querySelectorAll('#langues button');
+  for (var j = 0; j < b.length; j++) b[j].setAttribute('aria-pressed', String(b[j].getAttribute('data-lang') === lang));
+  if (etat) peindre();
+  else if ($('erreur').dataset.motif) direErreur($('erreur').dataset.motif);
+}
+
+// Les motifs du serveur qui n'ont pas de phrase à leur nom.
+function phraseDe(motif) {
+  if (motif === 'introuvable') return t.lien_invalide;
+  if (motif === 'entree_invalide') return t.invalide;
+  return t[motif] || t.panne;
+}
+function direErreur(motif) {
+  $('chargement').hidden = true; $('contenu').hidden = true;
+  var e = $('erreur'); e.dataset.motif = motif; e.textContent = phraseDe(motif); e.hidden = false;
+}
+
+function peindre() {
+  var s = etat.sejour || {};
+  $('erreur').hidden = true; $('chargement').hidden = true; $('contenu').hidden = false;
+  if (s.logement) document.title = s.logement;
+  var a = dateLongue(s.arrivee), d = dateLongue(s.depart);
+  $('sejour').textContent = s.logement && a && d ? fmt('sejour', { logement: s.logement, arrivee: a, depart: d }) : t.sejour_sans;
+  var texte;
+  if (etat.statut === 'sans_objet') texte = t.sans_objet;
+  else if (etat.statut === 'emise') texte = t.emise;
+  else if (etat.statut === 'annulee_par_avoir') texte = t.annulee;
+  else { var dl = dateLongue(lendemain(s.depart)); texte = dl ? fmt('attente', { date: dl }) : t.attente_sans; }
+  $('etat').textContent = texte;
+  var dest = etat.destinataire;
+  $('recap').hidden = !(etat.modifiable && dest) || !form.hidden;
+  if (etat.modifiable && !dest) form.hidden = false;
+  if (!etat.modifiable) form.hidden = true;
+  if (dest) peindreRecap(dest);
+  $('libelle-nom').textContent = typeType() === 'societe' ? t.nom_societe : t.nom_particulier;
+}
+
+function peindreRecap(dest) {
+  var dl = $('recap-liste'); dl.textContent = '';
+  var lignes = [
+    [dest.type === 'societe' ? t.nom_societe : t.nom_particulier, dest.nom],
+    [t.adresse1, [dest.adresse1, dest.adresse2, [dest.code_postal, dest.ville].filter(Boolean).join(' '), dest.pays].filter(Boolean).join(', ')],
+    [t.tva, dest.tva], [t.siren, dest.siren]
+  ];
+  for (var i = 0; i < lignes.length; i++) {
+    if (!lignes[i][1]) continue;
+    var dt = document.createElement('dt'); dt.textContent = lignes[i][0];
+    var dd = document.createElement('dd'); dd.textContent = lignes[i][1];
+    dl.appendChild(dt); dl.appendChild(dd);
+  }
+}
+
+function typeType() {
+  var r = form.querySelector('input[name="type"]:checked');
+  return r ? r.value : null;
+}
+function suivreType() {
+  var s = typeType() === 'societe';
+  $('champs-societe').hidden = !s;
+  $('libelle-nom').textContent = s ? t.nom_societe : t.nom_particulier;
+}
+
+function remplirFormulaire(dest) {
+  if (!dest) return;
+  var radios = form.querySelectorAll('input[name="type"]');
+  for (var i = 0; i < radios.length; i++) radios[i].checked = radios[i].value === dest.type;
+  ['nom', 'adresse1', 'adresse2', 'code_postal', 'ville', 'pays', 'tva', 'siren'].forEach(function (c) {
+    form.elements[c].value = dest[c] || '';
+  });
+  suivreType();
+}
+
+function effacerErreurs() {
+  var s = form.querySelectorAll('[data-erreur]');
+  for (var i = 0; i < s.length; i++) { s[i].hidden = true; s[i].textContent = ''; }
+  var ins = form.querySelectorAll('input[aria-invalid]');
+  for (var j = 0; j < ins.length; j++) ins[j].removeAttribute('aria-invalid');
+  $('erreur-form').hidden = true;
+}
+function marquer(champ, texte) {
+  var s = form.querySelector('[data-erreur="' + champ + '"]');
+  if (s) { s.textContent = texte; s.hidden = false; }
+  var el = form.elements[champ];
+  if (el && el.setAttribute) { el.setAttribute('aria-invalid', 'true'); }
+}
+
+// Le focus va à la première faute : sans lui, au clavier ou au lecteur
+// d'écran, l'envoi refusé ne dit rien (review 1).
+function focusErreur() {
+  var el = form.querySelector('[aria-invalid="true"]');
+  if (!el && !form.querySelector('[data-erreur="type"]').hidden) el = form.querySelector('input[name="type"]');
+  if (el) el.focus();
+}
+
+function lireFormulaire() {
+  var d = { type: typeType() };
+  ['nom', 'adresse1', 'adresse2', 'code_postal', 'ville', 'pays', 'tva', 'siren'].forEach(function (c) {
+    d[c] = form.elements[c].value.trim();
+  });
+  if (d.type !== 'societe') { d.tva = ''; d.siren = ''; }
+  return d;
+}
+// La même règle que le serveur (lib/factures-voyageur.js validerDestinataire) :
+// le serveur reste l'autorité, ceci évite un aller-retour pour une faute.
+function verifier(d) {
+  var ok = true;
+  if (d.type !== 'particulier' && d.type !== 'societe') { marquer('type', t.choisir); ok = false; }
+  ['nom', 'adresse1', 'ville', 'pays'].forEach(function (c) { if (!d[c]) { marquer(c, t.requis); ok = false; } });
+  if (d.siren && !/^\d{9}$/.test(d.siren.replace(/\s/g, ''))) { marquer('siren', t.siren_format); ok = false; }
+  if (d.tva && !/^[A-Z]{2}[A-Z0-9]{2,13}$/.test(d.tva.replace(/[\s.-]/g, '').toUpperCase())) { marquer('tva', t.tva_format); ok = false; }
+  return ok;
+}
+
+function appeler(corps) {
+  return fetch('/api/facture-publique', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(corps), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer'
+  }).then(function (r) {
+    return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, corps: j }; });
+  });
+}
+
+function charger() {
+  if (!jeton) { direErreur('lien_invalide'); return; }
+  appeler({ action: 'lire', jeton: jeton }).then(function (r) {
+    if (r.status !== 200 || !r.corps.ok) { direErreur(r.corps.motif || 'panne'); return; }
+    etat = r.corps;
+    var demandee = new URLSearchParams(location.search).get('lang');
+    appliquerLangue(LANGUES.indexOf(demandee) >= 0 ? demandee : etat.langue);
+    remplirFormulaire(etat.destinataire);
+  }).catch(function () { direErreur('panne'); });
+}
+
+form.addEventListener('change', function (ev) { if (ev.target && ev.target.name === 'type') suivreType(); });
+$('modifier').addEventListener('click', function () {
+  remplirFormulaire(etat.destinataire); form.hidden = false; $('recap').hidden = true;
+  var premier = form.querySelector('input[name="type"]:checked') || form.querySelector('input');
+  if (premier) premier.focus();
+});
+$('langues').addEventListener('click', function (ev) {
+  var b = ev.target.closest('button[data-lang]');
+  if (b) appliquerLangue(b.getAttribute('data-lang'));
+});
+form.addEventListener('submit', function (ev) {
+  ev.preventDefault();
+  effacerErreurs();
+  var d = lireFormulaire();
+  if (!verifier(d)) { focusErreur(); return; }
+  var bouton = $('envoyer');
+  bouton.disabled = true; bouton.textContent = t.enregistrement;
+  appeler({ action: 'enregistrer', jeton: jeton, destinataire: d }).then(function (r) {
+    bouton.disabled = false; bouton.textContent = t.enregistrer;
+    if (r.status === 200 && r.corps.ok) {
+      etat = r.corps; form.hidden = true; peindre();
+      $('annonce').textContent = t.enregistre;
+      $('modifier').focus();
+      return;
+    }
+    var m = r.corps.motif;
+    if (m === 'entree_invalide' && r.corps.champ) { marquer(r.corps.champ, t.invalide); focusErreur(); return; }
+    if (m === 'verrouillee' || m === 'sans_objet') { charger(); }
+    var e = $('erreur-form'); e.textContent = phraseDe(m); e.hidden = false;
+  }).catch(function () {
+    bouton.disabled = false; bouton.textContent = t.enregistrer;
+    var e = $('erreur-form'); e.textContent = t.panne; e.hidden = false;
+  });
+});
+
+appliquerLangue((navigator.language || 'en').slice(0, 2));
+charger();
+</script>
+</body>
+</html>
