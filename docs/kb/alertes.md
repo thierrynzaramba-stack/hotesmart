@@ -655,3 +655,14 @@ signale une lecture ratée de la base au lieu d'accuser l'hôte. Une fois par
 réservation, en mode Auto seulement. Comme `message_non_envoye`, elle part au
 **fondateur** (`FOUNDER_PHONE` / `FOUNDER_EMAIL`), pas à l'hôte du compte : le
 compte recensé plus haut (20 / 17) date d'avant elle et n'a pas été remesuré.
+
+**Et un autre depuis le 10 novembre 2026, sans écran non plus :**
+`code_acces_non_envoye` (dette 141, `lib/cron-arrival-code.js`, « Code d'accès non
+envoyé »). Le canal a refusé le message du CODE D'ACCÈS (réservation sans messagerie,
+refus du provider) : l'hôte a sa tâche de transmission manuelle, et le **fondateur** est
+prévenu **dès le premier refus** (seuil 1, SMS + e-mail) — décision de Thierry du
+10 novembre 2026. Avant, ce cas passait par `send_failure`, seuil 2, libellé « Échecs
+d'envoi répétés », et son anti-spam par logement était partagé avec les messages
+programmés : un refus isolé ne prévenait personne. Une seule alerte par code : s'il
+manque aussi une information, seule `message_envoye_incomplet` part (son texte dit
+« NON ENVOYÉ par le canal »). Elle part après le journal anti-doublon.

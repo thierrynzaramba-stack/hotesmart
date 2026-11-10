@@ -313,8 +313,10 @@ test('le code d\'acces n\'alerte pas le fondateur pour un canal pas encore branc
   // (`differe` : aucune alerte « envoi impossible »).
   assert.ok(/if \(!sendResult\.differe\) \{\s*\n(\s*\/\/.*\n)*\s*echecAPrevenir = /.test(arr),
     'l\'incident est conditionne : « pas branche » n\'est pas « a echoue »')
-  assert.strictEqual((arr.match(/reportIncident\('send_failure'/g) || []).length, 1, 'un seul site d\'alerte')
-  assert.ok(/if \(echecAPrevenir\) \{/.test(arr), 'et il ne part que pour un echec note')
+  // Decision du 10 novembre 2026 : un type propre, seuil 1.
+  assert.strictEqual((arr.match(/reportIncident\('code_acces_non_envoye'/g) || []).length, 1, 'un seul site d\'alerte')
+  assert.ok(!/reportIncident\('send_failure'/.test(arr), 'plus de send_failure pour le code')
+  assert.ok(/if \(echecAPrevenir && !aPrevenir\) \{/.test(arr), 'et il ne part que pour un echec note, sans doublon')
   // Le filet, lui, reste inconditionnel : une porte fermee devant un voyageur.
   assert.ok(/task_type: 'auto_message'/.test(arr), 'la tache a l\'hote subsiste')
 })

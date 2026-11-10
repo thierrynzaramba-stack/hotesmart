@@ -42,9 +42,12 @@ moment et seulement si le logement est prêt.
   même quand la plateforme d'alerte est lente** : l'alerte part en dernier, après le journal qui
   empêche de retraiter le code (dette 141, 10 novembre 2026 ; avant, une alerte lente laissait le
   cron coupé sans ce journal, et le code était retraité au passage suivant — seconde tâche,
-  seconde tentative au canal). L'incident `send_failure` est consigné ; le **fondateur** reçoit
-  l'alerte **« Échecs d'envoi répétés »** à partir du **deuxième** refus sur le même logement
-  dans l'heure (seuil 2) — un refus isolé ne lui envoie rien.
+  seconde tentative au canal). Le **fondateur** est prévenu **dès le premier refus** (SMS +
+  e-mail) : alerte **« Code d'accès non envoyé »** — à transmettre soi-même, code et texte dans
+  les tâches (décision de Thierry du 10 novembre 2026 ; avant, `send_failure` n'alertait qu'au
+  deuxième refus dans l'heure). Une seule alerte par code : s'il manque aussi une information,
+  c'est l'alerte « information manquante » qui part, et elle dit déjà « NON ENVOYÉ par le canal ».
+  Un canal e-mail pas encore branché (`differe`) n'alerte pas.
 - **Conditionné au ménage — seulement si un suivi ménage existe pour le bien.** « Suivi ménage
   existe » = **un prestataire est affecté au bien** OU **au moins un ménage a déjà été validé**.
   Dans ce cas, pour un **2ᵉ voyageur et suivants**, le code n'est envoyé qu'après **validation du
