@@ -220,7 +220,7 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   → **Réponse de Thierry (10 nov. 2026) : pour une réservation Beds24,
   HôteSmart n'envoie pas le lien lui-même** ; il le crée et le rend à l'hôte
   (« Copier »), comme une réservation sans e-mail. Le masquage à la lecture
-  Beds24 est un chantier à part, avec le fil de synchronisation (dette 138).
+  Beds24 est un chantier à part, avec le fil de synchronisation (dette 142).
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
   → **Réponse de Thierry (8 nov. 2026, 22 h 09) : A.** Les rappels
@@ -915,7 +915,7 @@ diff du correctif ; ce qu'elle trouve se corrige SANS nouvelle review.
 - **S1 — Beds24** : le fil est relu chez Beds24 (IA, `source_thread`, écran
   `api/beds24.js`, `api/extract-kb.js`). → Décision de Thierry (§4 bis,
   P2 quater) : HôteSmart n'envoie plus le lien pour une réservation Beds24 ;
-  il le rend à l'hôte. Dette 138 pour le masquage à la lecture.
+  il le rend à l'hôte. Dette 142 pour le masquage à la lecture.
 - **S2 — la réponse du voyageur qui cite le lien** : masquée dans `messages`,
   en clair dans `conversations` / `agent_tasks.guest_message` / la copie à
   l'hôte. → Masque à la source : `corpsUtile` de `api/inbound-email.js`, et

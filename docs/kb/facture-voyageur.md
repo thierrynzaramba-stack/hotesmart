@@ -130,7 +130,7 @@ passeraient pour la mauvaise raison.
 - **Beds24 : HôteSmart n'envoie pas le lien** (décision de Thierry du
   10 novembre 2026, P2 quater) : les conversations Beds24 sont relues chez
   Beds24, hors du writer du fil. Le lien revient à l'hôte (`sans_canal`,
-  motif `beds24`). Dette 138.
+  motif `beds24`). Dette 142.
 - **L'hôte qui colle lui-même le lien** dans une proposition GuestFlow (ou un
   message Beds24) le fait entrer en clair : la proposition est écrite hors de
   `recordMessage`, et la masquer enverrait « [lien de facture] » au voyageur.
