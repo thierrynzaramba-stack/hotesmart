@@ -1,123 +1,107 @@
 // tests/messages-lien-facture-masque.test.js — le lien du formulaire de facture
-// est CACHÉ par le serveur à qui n'a pas « réservations » en écriture.
-// Décision de Thierry du 10 novembre 2026 (facture voyageur 2a, review 1, S1).
-// Spec : docs/specs/spec-facture-voyageur.md §10 ter ; KB : docs/kb/facture-voyageur.md
+// n'est JAMAIS écrit en clair dans la conversation.
+// Décisions de Thierry du 10 novembre 2026 (facture voyageur 2a) : S1 (le
+// cacher), puis S1-bis (« ne jamais l'enregistrer ») après la re-review, qui a
+// montré qu'un masque à l'affichage laissait le jeton lisible par la base
+// (`messages_select`), recopié dans `agent_tasks.source_thread` et lu par l'IA.
+// Spec : docs/specs/spec-facture-voyageur.md §4 bis (P2 bis, P2 ter), §10 ter.
 //
 // Le lien `/facture#<jeton>` est une CLÉ : il ouvre les coordonnées de
-// facturation du voyageur et permet de les réécrire. Il vit dans la
-// conversation (D3) ; un membre qui ne fait que LIRE les messages ne doit pas
-// le recevoir de /api/messages (P2, Q10). Ce fichier APPELLE l'endpoint réel.
+// facturation du voyageur et permet de les réécrire. Ce fichier APPELLE le
+// writer unique du fil (lib/record-message.js) avec une base factice qui
+// applique ses filtres : notre envoi, l'écho de la synchronisation et une
+// réponse e-mail du voyageur arrivent tous masqués, et l'écho se reconnaît
+// toujours.
 
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const path = require('node:path')
-const Module = require('node:module')
 
 const FV = require('../lib/factures-voyageur')
+const { recordMessage } = require('../lib/record-message')
 
-const A = '11111111-1111-4111-8111-111111111111'       // titulaire
-const LECTEUR = '33333333-3333-4333-8333-333333333333' // messages: read, reservations: read
-const ECRIVAIN = '44444444-4444-4444-8444-444444444444' // reservations: write
-const AILLEURS = '55555555-5555-4555-8555-555555555555' // reservations: write, mais sur un AUTRE bien
+const A = '11111111-1111-4111-8111-111111111111'
 const JETON = 'Q'.repeat(30) + '_-' + 'z'.repeat(11)
 const LIEN = `https://hotesmart.vercel.app/facture#${JETON}`
-const RECENT = new Date(Date.now() - 86400000).toISOString()
 const TEXTE = FV.texteDuLien('fr', 'Léa', LIEN)
 
-test('le masque : lien entier, sans schéma, point final hors du jeton ; le reste du texte intact', () => {
-  assert.equal(FV.masquerLiensFacture(TEXTE),
+test('le masque : toutes les formes du lien, et il échoue FERMÉ', () => {
+  const m = FV.masquerLiensFacture
+  assert.equal(m(TEXTE),
     'Bonjour Léa, pour recevoir votre facture, merci de renseigner vos coordonnées de facturation ici : [lien de facture]. Votre facture sera disponible sur ce même lien après votre séjour.')
-  assert.equal(FV.masquerLiensFacture(`voir hotesmart-staging.vercel.app/facture#${JETON} et /facture#${JETON}.`), 'voir hotesmart-staging.vercel.app[lien de facture] et [lien de facture].')
-  assert.equal(FV.masquerLiensFacture('Bonjour, rien à cacher /facture#court'), 'Bonjour, rien à cacher /facture#court')
-  assert.equal(FV.masquerLiensFacture(null), null)
-  assert.ok(!FV.masquerLiensFacture(TEXTE).includes(JETON))
+  // Un caractère de jeton collé après (italique Markdown) : masqué quand même.
+  assert.equal(m(`_${LIEN}_`), '_[lien de facture]_')
+  assert.equal(m(`${LIEN}x`), '[lien de facture]x')
+  // `\_` échappé (réponse e-mail convertie en Markdown).
+  assert.equal(m(`voir ${LIEN.replace(/_/g, '\\_')} merci`), 'voir [lien de facture] merci')
+  // Dans une URL de redirection, encodé.
+  assert.equal(m(`https://r.example/?u=https%3A%2F%2Fhotesmart.vercel.app%2Ffacture%23${JETON}`), '[lien de facture]')
+  // En entité HTML, sans schéma, en majuscules, deux fois.
+  assert.equal(m(`/facture&#35;${JETON}`), '[lien de facture]')
+  assert.equal(m(`HTTPS://H.APP/FACTURE#${JETON}`), '[lien de facture]')
+  assert.equal(m(`/facture#${JETON} et /facture#${JETON}`), '[lien de facture] et [lien de facture]')
+  // Ce qui n'est pas un lien de facture ne bouge pas.
+  assert.equal(m('Bonjour, la facture # 12 et /facture#court'), 'Bonjour, la facture # 12 et /facture#court')
+  assert.equal(m(null), null)
 })
 
-const PROFIL = (id, membre, perms) => ({
-  p: { id, account_user_id: A, member_user_id: membre, active: true, accepted_at: '2026-10-01T00:00:00Z' },
-  d: { profile_id: id, ...perms }
-})
-const PROFILS = [
-  PROFIL('p-l', LECTEUR, { messages: 'read', reservations: 'read', property_scope: 'all' }),
-  PROFIL('p-e', ECRIVAIN, { messages: 'read', reservations: 'write', property_scope: 'all' }),
-  PROFIL('p-a', AILLEURS, { messages: 'read', reservations: 'write', property_scope: 'list', property_ids: [], property_refs: ['ref-b'] })
-]
-const MODULES = ['../api/messages', '../lib/require-permission', '../lib/permissions', '../lib/cron-shared', '../lib/cron-arrival-code', '../lib/biens-vivants', '../lib/factures-voyageur']
-
-function preparer () {
-  const jetons = { 'j-a': A, 'j-l': LECTEUR, 'j-e': ECRIVAIN, 'j-x': AILLEURS }
-  const tables = {
-    messages: [
-      { booking_id: 'BK-1', property_id: 'ref-a', provider: 'channex', sender: 'host', direction: 'outbound', body: TEXTE, sent_at: RECENT, kind: 'message' },
-      { booking_id: 'BK-1', property_id: 'ref-a', provider: 'channex', sender: 'guest', direction: 'inbound', body: 'Merci !', sent_at: RECENT, kind: 'message' }
-    ],
-    bookings_snapshot: [{ booking_id: 'BK-1', snapshot: { firstName: 'Léa', arrival: '2026-12-01', departure: '2026-12-04' } }],
-    properties: [{ user_id: A, provider_property_id: 'ref-a', archive_le: null }],
-    profiles: PROFILS.map(x => x.p),
-    profile_permissions: PROFILS.map(x => x.d)
-  }
-  const client = {
-    auth: { getUser: async (j) => (jetons[j] ? { data: { user: { id: jetons[j] } }, error: null } : { data: null, error: { message: 'x' } }) },
-    from (nom) {
-      const q = { eq: {} }
-      const executer = () => {
-        const lignes = (tables[nom] || []).filter(r => Object.entries(q.eq).every(([k, v]) => !(k in r) || String(r[k]) === String(v)))
-        return { data: lignes, error: null }
-      }
-      const c = {
-        select () { return c },
-        eq (k, v) { q.eq[k] = v; return c },
-        in () { return c }, not () { return c }, gte () { return c }, neq () { return c }, or () { return c },
-        order () { return c }, limit () { return c },
-        maybeSingle: async () => { const r = executer(); return { data: r.data[0] || null, error: null } },
-        single: async () => { const r = executer(); return { data: r.data[0] || null, error: null } },
-        then (ok, ko) { return Promise.resolve(executer()).then(ok, ko) }
-      }
-      return c
+// ─── Une base factice : elle APPLIQUE les filtres de recordMessage ────────────
+function base () {
+  const lignes = { messages: [], bookings_snapshot: [{ user_id: A, booking_id: 'BK-1', snapshot: { source: 'Airbnb' } }] }
+  let n = 0
+  function from (table) {
+    const q = { f: [], op: 'select', row: null, unique: false }
+    const ok = (r) => q.f.every(([c, v]) => (v === null ? (r[c] ?? null) === null : String(r[c]) === String(v)))
+    function executer () {
+      const t = (lignes[table] = lignes[table] || [])
+      if (q.op === 'insert') { t.push({ id: `m${++n}`, created_at: new Date().toISOString(), provider_msg_id: null, ...q.row }); return { data: null, error: null } }
+      if (q.op === 'update') { for (const r of t.filter(ok)) Object.assign(r, q.row); return { data: null, error: null } }
+      const res = t.filter(ok)
+      return q.unique ? { data: res[0] || null, error: null } : { data: res, error: null }
     }
+    const c = {
+      select () { return c }, order () { return c }, limit () { return c },
+      eq (k, v) { q.f.push([k, v]); return c },
+      is (k, v) { q.f.push([k, v]); return c },
+      gte () { return c },
+      insert (row) { q.op = 'insert'; q.row = row; return c },
+      update (row) { q.op = 'update'; q.row = row; return c },
+      maybeSingle () { q.unique = true; return c },
+      then (o, k) { return Promise.resolve(executer()).then(o, k) }
+    }
+    return c
   }
-  const absShared = require.resolve(path.join(__dirname, '..', 'lib/cron-shared'))
-  const mShared = new Module(absShared); mShared.exports = { supabase: client, anthropic: null }; mShared.loaded = true
-  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
-  const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
-  require.cache[abs] = m
-  for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
-  require.cache[absShared] = mShared
+  return { db: { from }, lignes }
 }
 
-async function lister (jeton) {
-  const res = { code: null, body: null }
-  res.status = c => { res.code = c; return res }; res.json = b => { res.body = b; return res }; res.setHeader = () => {}
-  const headers = { authorization: `Bearer ${jeton}` }
-  if (jeton !== 'j-a') headers['x-compte'] = A
-  await require('../api/messages')({ method: 'GET', query: {}, body: null, headers }, res)
-  return res
-}
-const corps = (res) => res.body.conversations[0].messages.map(m => m.body)
-
-test('LE TEST QUI COMPTE : un membre qui ne fait que LIRE ne reçoit pas le lien ; le titulaire, si', async () => {
-  preparer()
-  const lecteur = await lister('j-l')
-  assert.equal(lecteur.code, 200, JSON.stringify(lecteur.body))
-  assert.ok(!JSON.stringify(lecteur.body).includes(JETON), 'le jeton a quitté le serveur')
-  assert.match(corps(lecteur)[0], /ici : \[lien de facture\]\. Votre facture/)
-  assert.equal(corps(lecteur)[1], 'Merci !', 'le reste de la conversation intact')
-  const titulaire = await lister('j-a')
-  assert.ok(corps(titulaire)[0].includes(LIEN))
+test('LE TEST QUI COMPTE : notre envoi entre dans le fil MASQUÉ — le jeton n\'est nulle part en base', async () => {
+  const { db, lignes } = base()
+  const r = await recordMessage({ supabase: db, userId: A, provider: 'channex', propertyId: 'P1', bookingId: 'BK-1',
+    direction: 'outbound', sender: 'host', body: TEXTE, kind: 'message', origine: 'hote' })
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.equal(lignes.messages.length, 1)
+  assert.match(lignes.messages[0].body, /ici : \[lien de facture\]\. Votre facture/)
+  assert.ok(!JSON.stringify(lignes).includes(JETON), 'le jeton est en base')
 })
 
-test('« réservations » en écriture sur CE bien voit le lien ; sur un autre bien seulement, non', async () => {
-  preparer()
-  assert.ok(corps(await lister('j-e'))[0].includes(LIEN))
-  // AILLEURS n'a pas BK-1 dans son périmètre : la conversation ne lui parvient
-  // pas (filtre SQL du périmètre, simulé ici par un double permissif) — et si
-  // elle lui parvenait, le lien resterait caché.
-  const x = await lister('j-x')
-  assert.equal(x.code, 200)
-  for (const conv of x.body.conversations || []) {
-    for (const m of conv.messages) assert.ok(!m.body.includes(JETON))
-  }
+test('l\'écho de la synchronisation (texte EN CLAIR) se reconnaît toujours : aucun doublon, aucun jeton', async () => {
+  const { db, lignes } = base()
+  await recordMessage({ supabase: db, userId: A, provider: 'channex', propertyId: 'P1', bookingId: 'BK-1',
+    direction: 'outbound', sender: 'host', body: TEXTE, kind: 'message' })
+  const echo = await recordMessage({ supabase: db, userId: A, provider: 'channex', propertyId: 'P1', bookingId: 'BK-1',
+    direction: 'outbound', sender: 'host', body: TEXTE, providerMsgId: 'cx-1', sentAt: new Date().toISOString(), kind: 'message' })
+  assert.equal(echo.reason, 'echo_reconcilie', JSON.stringify(echo))
+  assert.equal(lignes.messages.length, 1, 'l\'écho n\'a pas créé de seconde ligne')
+  assert.equal(lignes.messages[0].provider_msg_id, 'cx-1')
+  assert.ok(!JSON.stringify(lignes).includes(JETON))
+})
+
+test('la réponse du voyageur qui CITE le lien (e-mail en Markdown) entre masquée elle aussi', async () => {
+  const { db, lignes } = base()
+  await recordMessage({ supabase: db, userId: A, provider: 'channex', propertyId: 'P1', bookingId: 'BK-1',
+    direction: 'inbound', sender: 'guest', body: `> ${LIEN.replace(/_/g, '\\_')}\nMerci, c'est fait !`,
+    providerMsgId: 'mail-1', sentAt: new Date().toISOString(), kind: 'message' })
+  assert.equal(lignes.messages[0].body, '> [lien de facture]\nMerci, c\'est fait !')
 })

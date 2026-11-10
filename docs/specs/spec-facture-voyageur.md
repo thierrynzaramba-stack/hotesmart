@@ -203,6 +203,17 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   à qui n'a pas « réservations » en écriture sur ce logement
   (`api/messages.js`). Il reste dans la conversation de la plateforme, pour qui
   a accès à ce compte-là.
+- **P2 ter — Ne jamais l'enregistrer** (re-review du code de l'étape 2a,
+  constat de SÉCURITÉ S1-bis). Le cacher à l'affichage ne suffisait pas : en
+  clair dans la table `messages`, le lien restait lisible directement par la
+  base (règle `messages_select`), recopié dans `agent_tasks.source_thread`, et
+  lu par l'IA, qui pouvait le recopier dans une réponse.
+  → **Réponse de Thierry (10 nov. 2026) : ne jamais l'enregistrer.** Le lien
+  est remplacé par « [lien de facture] » AVANT d'être écrit dans la
+  conversation, par le writer unique du fil (`lib/record-message.js`), pour
+  tout le monde — l'hôte compris, qui le retrouve sur la fiche de réservation
+  (« Copier », « Renvoyer »). Le masque à l'affichage de P2 bis devient inutile
+  et est retiré de `api/messages.js`.
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
   → **Réponse de Thierry (8 nov. 2026, 22 h 09) : A.** Les rappels
@@ -802,9 +813,8 @@ Review (sous-agent, une seule) :
 
 **Corrections** (deux commits suivant la trace) :
 - S1 : décision de Thierry du 10 nov. 2026 (§4 bis, P2 bis) — le serveur
-  cache le lien dans `api/messages.js` (ajout seul) à qui n'a pas
-  « réservations » en écriture sur le logement ; bien inconnu : caché aussi.
-  `tests/messages-lien-facture-masque.test.js` appelle l'endpoint réel.
+  cachait le lien dans `api/messages.js` ; **remplacé après la re-review par
+  P2 ter** (ci-dessous).
 - B1 : « sans canal » par l'identifiant réservé à Channex ; Beds24 sans canal
   → `sans_canal`, rien ne part ; `dryRun` → `differe`, jamais « livré ».
 - B2 : un e-mail en échec est `incertain`, sauf « permanent » et « quota ».
@@ -821,6 +831,56 @@ Review (sous-agent, une seule) :
   relancé, signature Beds24 des comptes gratuits, domaine dans l'URL, routage
   par le provider du bien (règle du chemin commun).
 - Chacun tué par une mutation ; suite 7830/7830 ; épreuve Postgres 45/45.
+
+#### Review 2 — la re-review des correctifs (sous-agent, 10 novembre 2026)
+
+C'est la re-review UNIQUE qu'ouvre un constat de sécurité (et, le lot touchant
+l'envoi au voyageur, la seule review de plus qu'il pourra avoir sur le diff de
+ses correctifs).
+
+- arbre `/home/claude/hotesmart-fv2`, branche `facture-voyageur-etape-2`,
+  HEAD lu `3029d14f1299578d616c4180bdc5e024a6d075e5`, plage
+  `c1437af94385ea351030a7263b96a8a321793ff7..3029d14f1299578d616c4180bdc5e024a6d075e5` ;
+- fichiers cités, confrontés à `git diff --name-only` de la plage : dans le
+  diff — `api/messages.js`, `lib/factures-voyageur.js`,
+  `api/factures-voyageur.js`, `docs/kb/facture-voyageur.md` ; hors diff, preuve
+  seulement — `migrations/2026-09-02-droits-lot4.sql`,
+  `migrations/2026-09-02-droits-lot2.sql`, `migrations/0000-schema-initial.sql`,
+  `lib/channels/channex.js`, `lib/cron-classify.js`, `lib/record-message.js`,
+  `api/guestflow-proposer.js`, `api/ecran/aujourdhui.js`, `api/inbound-email.js`,
+  `pages/messages.html`, `shared/supabase.js`, `lib/cron-messages.js`,
+  `lib/cron-beds24.js`, `lib/canal-voyageur.js`, `lib/envoi-ota.js`,
+  `lib/email-guestflow.js`, `lib/permissions.js`,
+  `lib/bookings-snapshot-status.js`, `lib/bookings-snapshot.js`,
+  `docs/STAGING.md`.
+- Mesures : 50/50 sur les trois fichiers ; contre le code d'avant les
+  correctifs, 16 tests rougissent pour la bonne raison ; 16 mutations,
+  14 tuées ; épreuve Postgres 45/45, concurrence qui rougit sans le verrou.
+  B1 à B5 fermés ; `api/messages.js` en ajout seul.
+
+**1 constat de SÉCURITÉ, aucun bloquant, 4 mineurs.**
+- **S1-bis** — le masque était à l'affichage : en clair dans `messages`, le
+  jeton restait lisible directement par la base (`messages_select`, membre
+  « messages » en lecture, sonde Postgres avec la règle recopiée), recopié dans
+  `agent_tasks.source_thread`, lu par l'IA. **Décision de Thierry : ne jamais
+  l'enregistrer** (§4 bis, P2 ter).
+- Mineurs : le masque échouait OUVERT (un caractère de jeton collé après le
+  laissait passer ; mutation survivante) ; formes non attrapées (`\_` échappé,
+  `%2F…%23`, `&#35;`) ; « bien inconnu » non testé ; une configuration Brevo
+  illisible donnait « incertain » alors que Brevo n'avait pas été appelé.
+
+**Corrections, sans nouvelle review** (règle : ce que trouve la dernière
+review se corrige sans review de plus) :
+- P2 ter : `lib/record-message.js` (AJOUT SEUL, fichier du fil Messagerie)
+  masque le corps AVANT toute comparaison — l'envoi, l'écho de la
+  synchronisation et la réponse e-mail du voyageur passent tous par lui, et
+  l'écho se reconnaît toujours ; `api/messages.js` revient à l'identique de
+  `main` ; le lien revient TOUJOURS à l'hôte qui l'envoie.
+- Le masque échoue fermé et reconnaît `\_`, `%2F`/`%23`, `&#35;`, les
+  majuscules ; « bien inconnu » sans objet (le masque d'affichage est retiré).
+- Brevo non appelé → `refus`.
+- Tests : le vrai writer du fil traversé de bout en bout (envoi, écho, réponse
+  qui cite le lien) ; 5 mutations, toutes tuées.
 
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 

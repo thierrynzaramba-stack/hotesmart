@@ -89,6 +89,8 @@ async function lireBrut (base, compte, bookingId) {
 // moteur e-mail. Seuls « permanent » (rien n'y changera) et « quota » (Brevo a
 // répondu non : rien n'est parti) sont sûrs ; le reste a PEUT-ÊTRE abouti, et
 // un « refus » pousserait l'hôte à renvoyer — deux messages au voyageur.
+// Les raisons de lib/email-guestflow.js rendues AVANT l'appel d'envoi à Brevo.
+const AVANT_ENVOI_EMAIL = /^(compte_inconnu|config_illisible|lecture_config_impossible|brevo_non_configure|brevo_desactive|senders_|aucun_expediteur_verifie|texte_vide)/
 function issueDe (envoi, { CANAL, classerEnvoiOta }) {
   if (envoi && envoi.ok === true) return envoi.dryRun === true ? 'differe' : 'livre'
   if (envoi && envoi.differe === true) return 'differe'
@@ -96,6 +98,9 @@ function issueDe (envoi, { CANAL, classerEnvoiOta }) {
   if (envoi && envoi.canal === CANAL.EMAIL) {
     if (envoi.permanent === true) return 'permanent'
     if (envoi.quota === true) return 'refus'
+    // Brevo n'a pas été APPELÉ (configuration ou expéditeur illisibles,
+    // absents) : rien n'est parti, c'est sûr (re-review, mineur).
+    if (AVANT_ENVOI_EMAIL.test(String(envoi.error || ''))) return 'refus'
     return 'incertain'
   }
   return classerEnvoiOta(envoi)
@@ -219,9 +224,11 @@ async function envoyerLien (req, res, corps) {
     ok: true,
     demande: { id: ouvert.demande.id, statut: ouvert.demande.statut },
     envoi: issue,
-    // Le lien EN CLAIR seulement quand le message n'est pas sûrement arrivé :
-    // l'hôte le transmet lui-même (P5) — bouton « Copier ».
-    lien: issue === 'livre' ? null : ouvert.lien
+    // Le lien EN CLAIR revient TOUJOURS à l'hôte qui l'envoie : quand le
+    // message n'est pas sûrement arrivé, il le transmet lui-même (P5) ; et même
+    // livré, le fil ne le montre plus — il est écrit masqué (décision de Thierry
+    // du 10 nov. 2026, P2 ter) —, donc la fiche le lui rend (« Copier »).
+    lien: ouvert.lien
   })
 }
 

@@ -34,16 +34,19 @@ nouvelle demande).
 (256 bits). Un lien perdu ne se relit pas dans cette table : il se renvoie, et
 chaque envoi crée un jeton neuf ; les précédents restent valables jusqu'à leur
 propre expiration, `max(départ, envoi) + 1 an` (Q13).
-⚠ **MAIS LE LIEN EN CLAIR VIT DANS LA CONVERSATION** (review 1, S1) : c'est le
-principe même de D3. Il est dans le message de la plateforme (ou l'e-mail), et
-dans le fil HôteSmart (`messages.body`) quand l'envoi est livré. **Décision de
-Thierry du 10 novembre 2026 (P2 bis) : dans HôteSmart, le SERVEUR le cache** —
-`api/messages.js` remplace `/facture#<jeton>` par « [lien de facture] » dans
-les messages rendus à qui n'a pas « réservations » en écriture sur ce logement
-(bien inconnu : caché aussi). Ce n'est pas un masquage d'écran : le jeton ne
-quitte pas le serveur. Il reste dans la conversation de la plateforme, pour qui
-a accès à ce compte-là. Motif unique : `masquerLiensFacture`
-(lib/factures-voyageur.js).
+⚠ **ET LE LIEN N'EST JAMAIS ÉCRIT EN CLAIR DANS LA CONVERSATION** (décisions
+de Thierry du 10 novembre 2026, P2 bis puis P2 ter). Le lien est une CLÉ : il
+ouvre — et permet de réécrire — les coordonnées du voyageur. Le cacher à
+l'affichage ne suffisait pas (la base le laissait lire, l'IA le recopiait).
+Le writer unique du fil, `lib/record-message.js`, le remplace par « [lien de
+facture] » AVANT d'écrire, pour tout le monde, l'hôte compris : l'envoi, l'écho
+de la synchronisation et une réponse du voyageur qui le cite passent tous par
+lui, et la comparaison des échos se fait sur le texte masqué. L'hôte qui envoie
+reçoit le lien dans la réponse de l'endpoint (« Copier » sur la fiche, 2b) ; il
+peut aussi le renvoyer. Le lien reste dans la conversation de la PLATEFORME
+(ou l'e-mail), pour qui a accès à ce compte-là. Motif unique :
+`masquerLiensFacture` (lib/factures-voyageur.js) — il échoue fermé (43
+caractères pris sans regarder la suite) et reconnaît `\_`, `%2F…%23`, `&#35;`.
 
 ⚠ **LE JETON VOYAGE DANS LE FRAGMENT** (`/facture#<jeton>`). Un fragment n'est
 envoyé à aucun serveur : le jeton n'entre ni dans les journaux de Vercel, ni
@@ -118,6 +121,9 @@ passeraient pour la mauvaise raison.
   le lien revient à l'hôte, qui le transmet.
 - **Routage par le provider du BIEN** (chemin commun) : pendant une migration,
   une réservation peut partir par l'autre provider — même règle que le cron.
+- **Deux envois du lien à moins de 10 minutes** : le fil n'en montre qu'un —
+  masqués, leurs textes sont identiques, et la déduplication des sortants de
+  `recordMessage` les confond. Les deux jetons, eux, sont en base.
 
 ## Les langues
 

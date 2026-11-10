@@ -154,7 +154,7 @@ function baseFactice (tables = {}) {
   function from (table) {
     etat.lectures.push(table)
     const q = { op: 'select', f: [], ou: null, pas: [], unique: null, cols: null }
-    const correspond = (r) => q.f.every(([c, v]) => String(r[c]) === String(v)) &&
+    const correspond = (r) => q.f.every(([c, v]) => String(r[c] ?? null) === String(v)) &&
       (!q.ou || q.ou.some(([c, v]) => String(r[c]) === String(v))) &&
       q.pas.every(([c, liste]) => !liste.includes(String(r[c])))
     const projeter = (r) => {
@@ -188,6 +188,8 @@ function baseFactice (tables = {}) {
       select (cols) { q.cols = cols; return chaine },
       eq (c, v) { q.f.push([c, v]); return chaine },
       not (c, op, v) { assert.equal(op, 'in'); q.pas.push([c, v.replace(/[()]/g, '').split(',')]); return chaine },
+      is (c, v) { q.f.push([c, v === null ? 'null' : v]); return chaine },
+      gte () { return chaine },
       or (expr) { q.ou = expr.split(',').map(p => { const [c, , ...v] = p.split('.'); return [c, v.join('.')] }); return chaine },
       limit () { return chaine },
       order () { return chaine },
@@ -306,7 +308,7 @@ const PARC = () => ({
 
 // ─── Le montage d'un endpoint, modules factices dans le cache de require ─────
 const MODULES = ['../api/factures-voyageur', '../api/facture-publique', '../lib/require-permission', '../lib/factures-voyageur']
-function monter (fichier, { tables = PARC(), envoi = { ok: true, canal: 'ota' }, vraiEnvoi = false, canalChannex = null, email = null, beds24 = null } = {}) {
+function monter (fichier, { tables = PARC(), envoi = { ok: true, canal: 'ota' }, vraiEnvoi = false, vraiFil = false, canalChannex = null, email = null, beds24 = null } = {}) {
   const { db, etat } = baseFactice(tables)
   etat.envois = []; etat.fil = []
   const jetons = { 'jeton-a': A, 'jeton-b': B, 'jeton-res': M_RES, 'jeton-tout': M_TOUT, 'jeton-ailleurs': M_AILLEURS }
@@ -317,9 +319,9 @@ function monter (fichier, { tables = PARC(), envoi = { ok: true, canal: 'ota' },
   }
   const factices = {
     'node_modules/@supabase/supabase-js': { createClient: () => client },
-    'lib/cron-shared': { supabase: client },
-    'lib/record-message': { recordMessage: async (p) => { etat.fil.push(p); return { ok: true } } }
+    'lib/cron-shared': { supabase: client }
   }
+  if (!vraiFil) factices['lib/record-message'] = { recordMessage: async (p) => { etat.fil.push(p); return { ok: true } } }
   if (!vraiEnvoi) {
     factices['lib/cron-messages'] = {
       sendGuestMessage: async (key, property, booking, message, options) => {
@@ -350,7 +352,7 @@ function monter (fichier, { tables = PARC(), envoi = { ok: true, canal: 'ota' },
     const m = new Module(abs); m.exports = exp; m.loaded = true
     require.cache[abs] = m
   }
-  const recharges = [...MODULES, ...(vraiEnvoi ? ['../lib/cron-messages'] : [])]
+  const recharges = [...MODULES, ...(vraiEnvoi ? ['../lib/cron-messages'] : []), ...(vraiFil ? ['../lib/record-message'] : [])]
   for (const m of recharges) delete require.cache[require.resolve(m)]
   const handler = require(fichier)
   const fini = () => {
@@ -395,7 +397,9 @@ test('envoyer le lien : une demande, un jeton HACHÉ, le message §11.1 dans la 
     const r = await appeler({ corps: { action: 'envoyer_lien', booking: 'R1' } })
     assert.equal(r.code, 200, JSON.stringify(r.corps))
     assert.equal(r.corps.envoi, 'livre')
-    assert.equal(r.corps.lien, null, 'livré : le lien ne revient pas à l\'écran')
+    // Livré, le lien revient QUAND MÊME à l'hôte : le fil ne le montre plus
+    // (écrit masqué, P2 ter) — la fiche le lui rend (« Copier »).
+    assert.match(r.corps.lien, /\/facture#[A-Za-z0-9_-]{43}$/)
     assert.equal(r.corps.demande.statut, 'lien_envoye')
     const [d] = etat.tables.factures_voyageur
     assert.equal(d.user_id, A); assert.equal(d.property_uuid, BIEN_A1); assert.equal(d.booking_id, 'R1'); assert.equal(d.langue, 'fr')
@@ -731,6 +735,9 @@ test('B2, B1 : l\'issue — e-mail sans cause sûre « incertain », quota « re
   assert.equal(i({ ok: true, canal: CANAL.EMAIL }), 'livre')
   assert.equal(i({ ok: false, canal: CANAL.EMAIL, permanent: false, quota: false, error: 'injoignable' }), 'incertain')
   assert.equal(i({ ok: false, canal: CANAL.EMAIL, quota: true }), 'refus')
+  for (const raison of ['brevo_non_configure', 'lecture_config_impossible', 'config_illisible: x', 'senders_503', 'aucun_expediteur_verifie']) {
+    assert.equal(i({ ok: false, canal: CANAL.EMAIL, error: raison }), 'refus', `${raison} : Brevo pas appelé, rien n'est parti`)
+  }
   assert.equal(i({ ok: false, canal: CANAL.EMAIL, permanent: true }), 'permanent')
   assert.equal(i({ ok: true, dryRun: true, canal: CANAL.OTA }), 'differe')
   assert.equal(i({ ok: false, differe: true, canal: CANAL.EMAIL }), 'differe')
@@ -821,5 +828,19 @@ test('voyageur : réservation annulée — la page dit « sans objet » tout de 
     const r = await appeler({ jeton: null, corps: { action: 'enregistrer', jeton: clair, destinataire: DEST_OK } })
     assert.equal(r.code, 409); assert.equal(r.corps.motif, 'sans_objet')
     assert.equal(etat.tables.factures_voyageur[0].dest_nom, undefined, 'rien d\'écrit')
+  } finally { fini() }
+})
+
+test('LE TEST QUI COMPTE (P2 ter) : le VRAI writer du fil écrit le message MASQUÉ — aucun jeton en clair en base', async () => {
+  const { appeler, etat, fini } = hote({ vraiFil: true })
+  try {
+    const r = await appeler({ corps: { action: 'envoyer_lien', booking: 'R1' } })
+    assert.equal(r.code, 200, JSON.stringify(r.corps))
+    assert.equal(r.corps.envoi, 'livre')
+    const clair = r.corps.lien.split('#')[1]
+    assert.equal(etat.tables.messages.length, 1)
+    assert.match(etat.tables.messages[0].body, /ici : \[lien de facture\]\. Votre facture/)
+    assert.ok(!JSON.stringify(etat.tables).includes(clair), 'le jeton en clair est en base')
+    assert.ok(etat.envois[0].message.includes(clair), 'le voyageur, lui, reçoit le vrai lien')
   } finally { fini() }
 })
