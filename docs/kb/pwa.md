@@ -1932,3 +1932,73 @@ fermés ; pas de quatrième review — décision de Thierry : c'était la derni�
   primaire, la contrainte de rang et son contrôle de borne.
 - **4** — autant de reprises que de rangs : trente clics simultanés en font
   passer exactement dix, et un test le dit.
+
+### 12.4 Étape 4 — l'ancien chemin des listes est coupé (10 novembre 2026)
+
+Go de Thierry du 10 novembre 2026 à 19 h 35 (`pages/messages.html` et
+`pages/onboarding.html` compris). Fichiers : `api/agent-config.js`,
+`api/alert-test.js`, `pages/messages.html`, `pages/onboarding.html`,
+`shared/i18n/{fr,en,es}.json`, `pages/guide.html`,
+`lib/notifications/reprise-listes.js` (`REPRISE_OUVERTE = true`).
+
+**Les règles, et pourquoi :**
+1. **Plus rien n'écrit une liste d'alertes.** Une reprise qui met les listes de
+   côté pendant qu'un écran les réécrit les ferait renaître au premier
+   enregistrement — et le titulaire croirait gérer ses contacts dans Réglages
+   alors que l'ancien envoi repartirait en parallèle. D'où, côté serveur :
+   `api/agent-config.js` refuse la cible `alertes` en **410**
+   (`alertes_dans_reglages`, rien n'est écrit), et une écriture legacy qui
+   APPORTE `intervention`, `info_unknown` ou `listes_reprises` est refusée
+   comme `delais` l'était déjà (« réservé à sa cible ») ; la recopie de la
+   valeur en base, elle, passe — un vieux client qui renvoie ce qu'il a lu ne
+   casse pas.
+2. **L'essai des listes est retiré** : `api/alert-test.js` garde sa garde
+   (405, 401, droit) puis rend **410** (`essai_dans_reglages`) et renvoie vers
+   « Envoyer un essai » des contacts prévenus. La garde passe AVANT le 410 :
+   l'endpoint ne dit rien à qui n'a pas de session.
+3. **Messages ne montre plus de listes** : le bloc « Alertes » du panneau
+   « Réponses de l'IA » devient une phrase et un lien « Qui est prévenu →
+   Réglages » (`/settings?onglet=notifications`). Le panneau n'enregistre plus
+   que les consignes ; la garde « modifications non enregistrées » ne compare
+   plus qu'elles.
+4. **L'onboarding ne préremplit plus de liste** : il pose `mode: 'test'`,
+   rien d'autre. Un compte neuf naît sans liste, donc sans rien à reprendre.
+5. **L'ouverture de la reprise est LIÉE à la fermeture des rédacteurs** :
+   `tests/notifications-reprise-listes.test.js` (« LE TEST QUI COMPTE ») échoue
+   si `REPRISE_OUVERTE` est vrai et que Messages, l'onboarding, la liste des
+   clés réservées ou le 410 de l'essai laissent encore passer une liste.
+   Contre-épreuves : retirer `intervention` des clés réservées rend 2 rouges ;
+   remettre une liste dans l'onboarding en rend 1.
+
+**Inventaire (CLAUDE.md, « la forme ne supprime jamais le fond ») :**
+- les listes e-mail et SMS par type → **déplacées** : contacts prévenus et
+  réglages de la personne (Réglages → Notifications), par la reprise ;
+- « Tester » par canal → **déplacé** : « Envoyer un essai » d'un contact ;
+- la porte Brevo (indication « clé SMS absente ») → **déplacée** : le bloc des
+  contacts dit lui-même si le SMS d'un contact peut partir ;
+- le texte d'aide des alertes → **retiré** avec le bloc, remplacé par la
+  phrase du lien.
+
+**Ce qui reste, et c'est assumé :**
+- `lib/alert-notify.js` (`sendAlertNotifications`) reste en service : il ne lit
+  plus rien pour un compte repris (ses listes sont de côté, dans
+  `listes_reprises`), et il sert encore les comptes que la reprise a BLOQUÉS
+  (adresse refusée, autre compte, bien introuvable) jusqu'à ce que leur cas
+  soit réglé. Il disparaîtra avec le dernier compte bloqué.
+- **`api/simulate.js` n'envoie plus d'alerte pour un compte repris** : il
+  appelle l'ancien expéditeur, qui ne trouve plus de liste. Le simulateur ne
+  passe pas par le point d'envoi unique ; à reprendre si Thierry veut que la
+  simulation prévienne.
+- les clés i18n de l'ancien bloc (`messages.alerts_*` hors `alerts_moved*`)
+  ne sont plus lues ; elles partiront avec le ménage des traductions.
+
+**Ordre de mise en service (à la remise) :**
+1. appliquer `migrations/2026-11-10-notifications-contacts.sql` (staging, puis
+   prod) et vérifier les contraintes de `notifications_contacts_essais`
+   (§12.3, suite donnée à la troisième review, point 3) ;
+2. déployer, vérifier le SHA complet ;
+3. `node scripts/reprendre-listes-alertes.js` **à blanc** : lire le plan, les
+   pertes et les comptes bloqués, les montrer à Thierry ;
+4. `--go` seulement sur son go, après le déploiement de CE code — sinon
+   l'ancien Messages réécrirait les listes que la reprise vient de mettre de
+   côté.

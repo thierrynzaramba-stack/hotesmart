@@ -603,6 +603,8 @@
   "messages.alerte_aide": "An emergency always goes out right away.",
   "messages.alerte_titre": "Missing info: notify me after",
   "messages.alerts_hint": "The test goes to the first saved recipient.",
+  "messages.alerts_moved": "Who is alerted about emergencies and missing information — you, your team, and people without an account such as a caretaker — is now set in Settings, Notifications tab.",
+  "messages.alerts_moved_link": "Who is alerted → Settings",
   "messages.alerts_save": "Save alerts",
   "messages.archive": "Archive",
   "messages.arrives_today": "Arrives today",

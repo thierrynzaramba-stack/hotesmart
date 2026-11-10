@@ -79,54 +79,42 @@ const profilActif = (o = {}) => ({ id: 'p1', account_user_id: PROD, member_user_
 const perms = (o = {}) => ({ profile_id: 'p1', property_scope: 'all', property_ids: [], property_refs: [], ...o })
 const req = (o = {}) => ({ method: 'GET', headers: { authorization: 'Bearer tok' }, query: {}, body: {}, ...o })
 
-// ─── alert-test : le destinataire doit etre deja configure ──────────────────
+// ─── alert-test : RETIRÉ (PWA lot 2c-3, étape 4) ────────────────────────────
+// Il était le bouton « Tester » des listes d'alertes, et ses tests gardaient
+// sa contrainte « destinataire déjà configuré » (pas de relais par la clé
+// plateforme). Les listes sont reprises en contacts prévenus, dont l'essai vit
+// dans /api/push (une fois par adresse et par jour, dix par compte, tenu par la
+// base — tests/notifications-contacts-ecran.test.js). L'endpoint répond 410 et
+// n'envoie plus RIEN : c'est ce que ces tests gardent désormais, pour toute
+// charge, configurée ou non — le relais qu'ils fermaient ne peut pas revenir.
 
 const CONFIG = { '0544fd9a': { info_unknown: {
   sms_lines: 'Thierry : 06 12 34 56 78', email_lines: 'Thierry : hote@exemple.fr',
   sms_numbers: [], email_addresses: []
 } } }
 
-test('alert-test : destinataire NON configure -> 403, aucun envoi', async () => {
+for (const [nom, corps] of [
+  ['destinataire NON configuré', { channel: 'sms', to: '+33600000000' }],
+  ['e-mail arbitraire', { channel: 'email', to: 'attaquant@ailleurs.fr' }],
+  ['destinataire configuré', { channel: 'email', to: 'hote@exemple.fr' }],
+  ['même numéro, autre format', { channel: 'sms', to: '+33612345678' }]
+]) {
+  test(`alert-test retiré : ${nom} -> 410, aucun envoi`, async () => {
+    preparer({ user: PROD, config: CONFIG, compteurTests: 0 })
+    const handler = require('../api/alert-test')
+    const res = reponse()
+    await handler(req({ method: 'POST', body: corps }), res)
+    assert.strictEqual(res.code, 410)
+    assert.match(String(res.body?.error || ''), /Réglages/)
+  })
+}
+
+test('alert-test retiré : sans session, toujours 401 (la garde reste devant)', async () => {
   preparer({ user: PROD, config: CONFIG })
   const handler = require('../api/alert-test')
   const res = reponse()
-  await handler(req({ method: 'POST', body: { channel: 'sms', to: '+33600000000' } }), res)
-  assert.strictEqual(res.code, 403)
-})
-
-test('alert-test : EMAIL arbitraire -> 403 (la cle plateforme n\'est pas un relais)', async () => {
-  preparer({ user: PROD, config: CONFIG })
-  const handler = require('../api/alert-test')
-  const res = reponse()
-  await handler(req({ method: 'POST', body: { channel: 'email', to: 'attaquant@ailleurs.fr' } }), res)
-  assert.strictEqual(res.code, 403)
-})
-
-test('alert-test : destinataire configure -> accepte (chemin passant)', async () => {
-  preparer({ user: PROD, config: CONFIG })
-  const handler = require('../api/alert-test')
-  const res = reponse()
-  await handler(req({ method: 'POST', body: { channel: 'email', to: 'hote@exemple.fr' } }), res)
-  assert.notStrictEqual(res.code, 403, 'un destinataire configure doit passer la contrainte')
-})
-
-test('alert-test : meme numero, format different -> accepte', async () => {
-  // La config est saisie a la main : « 06 12 34 56 78 » doit reconnaitre
-  // « +33612345678 ».
-  preparer({ user: PROD, config: CONFIG })
-  const handler = require('../api/alert-test')
-  const res = reponse()
-  await handler(req({ method: 'POST', body: { channel: 'sms', to: '+33612345678' } }), res)
-  assert.notStrictEqual(res.code, 403)
-})
-
-test('alert-test : aucune config -> 400 explicite, pas un envoi', async () => {
-  preparer({ user: PROD, config: null })
-  const handler = require('../api/alert-test')
-  const res = reponse()
-  await handler(req({ method: 'POST', body: { channel: 'sms', to: '0612345678' } }), res)
-  assert.strictEqual(res.code, 400)
-  assert.match(String(res.body?.error || ''), /configuration/i)
+  await handler(req({ method: 'POST', body: { channel: 'sms', to: '0612345678' }, headers: {} }), res)
+  assert.strictEqual(res.code, 401)
 })
 
 // ─── endpoints channel : hors perimetre -> 403, dans le perimetre -> passe ──
@@ -171,24 +159,8 @@ for (const [nom, mod, faireReq] of CAS) {
   })
 }
 
-test('la limite de debit d\'alert-test se declenche', async () => {
-  // La contrainte sur le destinataire est contournable (agent-config accepte
-  // n'importe quelle config sans validation) : la limite de debit est la parade
-  // qui borne le volume quoi qu'il arrive.
-  preparer({ user: PROD, config: CONFIG, compteurTests: 99 })
-  const handler = require('../api/alert-test')
-  const res = reponse()
-  await handler(req({ method: 'POST', body: { channel: 'sms', to: '0612345678' } }), res)
-  assert.strictEqual(res.code, 429, 'au-dela du plafond horaire, aucun envoi')
-})
-
-test('sous le plafond, le test passe la limite de debit', async () => {
-  preparer({ user: PROD, config: CONFIG, compteurTests: 2 })
-  const handler = require('../api/alert-test')
-  const res = reponse()
-  await handler(req({ method: 'POST', body: { channel: 'sms', to: '0612345678' } }), res)
-  assert.notStrictEqual(res.code, 429)
-})
+// (Les deux tests de la limite de débit d'alert-test sont retirés avec lui :
+// il n'y a plus d'envoi à borner. Voir l'en-tête de la section alert-test.)
 
 // ⚠ Le test « la session Airbnb appartient au compte PROPRIETAIRE » a ete RETIRE :
 // il etait INATTEIGNABLE. channel-airbnb-connect appelle le gestionnaire de

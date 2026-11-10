@@ -603,6 +603,8 @@
   "messages.alerte_aide": "Une urgence part toujours tout de suite.",
   "messages.alerte_titre": "Info manquante : me prévenir après",
   "messages.alerts_hint": "Le test part au premier destinataire enregistré.",
+  "messages.alerts_moved": "Qui est prévenu des urgences et des infos manquantes — vous, votre équipe, et les personnes sans compte comme un gardien — se règle maintenant dans Réglages, onglet Notifications.",
+  "messages.alerts_moved_link": "Qui est prévenu → Réglages",
   "messages.alerts_save": "Enregistrer les alertes",
   "messages.archive": "Archiver",
   "messages.arrives_today": "Arrive aujourd’hui",

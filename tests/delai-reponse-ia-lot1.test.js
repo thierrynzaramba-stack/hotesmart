@@ -304,16 +304,36 @@ test('agent-config legacy : une cle absente de la charge est PRESERVEE', async (
   // (pages/onboarding.html:344) fait GET du blob, merge cote client, POST du
   // tout. Entre son GET et son POST, une autre session peut ecrire : le POST
   // passait par-dessus. Depuis ce lot, le serveur relit et merge.
+  // (La charge portait aussi une liste `intervention` : depuis le lot PWA 2c-3,
+  // une liste APPORTEE est refusee — test suivant. Le merge, lui, ne change pas.)
   const { res, etat } = await postConfig(
-    { config: { [BIEN]: { mode: 'test', intervention: { email_enabled: true, email_lines: 'a@b.c' } } } },
-    { config: { [BIEN]: { mode: 'auto', delais: { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } } } } }
+    { config: { [BIEN]: { mode: 'test' } } },
+    { config: { [BIEN]: { mode: 'auto', intervention: { email_enabled: true, email_lines: 'a@b.c' }, delais: { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } } } } }
   )
   assert.equal(res.code, 200)
   const blob = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config
   assert.deepEqual(blob[BIEN].delais, { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } },
     'LES DELAIS DU BIEN SURVIVENT a un POST legacy qui ne les mentionne pas')
   assert.equal(blob[BIEN].mode, 'test', 'le champ fourni, lui, est bien applique')
-  assert.deepEqual(blob[BIEN].intervention, { email_enabled: true, email_lines: 'a@b.c' })
+  assert.deepEqual(blob[BIEN].intervention, { email_enabled: true, email_lines: 'a@b.c' }, 'la liste en base survit aussi')
+})
+
+test('LE TEST QUI COMPTE (PWA lot 2c-3, étape 4) : un POST legacy qui APPORTE une liste d\'alertes est refusé ; la recopier telle qu\'en base passe', async () => {
+  for (const cle of ['intervention', 'info_unknown', 'listes_reprises']) {
+    const { res, etat } = await postConfig(
+      { config: { [BIEN]: { mode: 'test', [cle]: { email_enabled: true, email_lines: 'nouveau@b.c' } } } },
+      { config: { [BIEN]: { mode: 'test' } } }
+    )
+    assert.equal(res.code, 400, cle)
+    assert.match(JSON.stringify(res.body.refusees), new RegExp(`${cle} \\(réservé à sa cible\\)`))
+    assert.equal(etat.ecritures.filter(e => e.table === 'agent_alert_config').length, 0, 'rien n\'est écrit')
+  }
+  const enBase = { email_enabled: true, email_lines: 'a@b.c' }
+  const { res } = await postConfig(
+    { config: { [BIEN]: { mode: 'test', intervention: enBase } } },
+    { config: { [BIEN]: { mode: 'test', intervention: enBase } } }
+  )
+  assert.equal(res.code, 200, 'recopier la valeur en base reste permis')
 })
 
 test('agent-config legacy : un bien absent de la charge survit', async () => {
@@ -746,7 +766,10 @@ test('⚠ les cibles `mode` et `alertes` ne touchent AUCUNE tache', async () => 
   ]) {
     const taches = tachesEnAttente()
     const { res, etat } = await postConfig(corps, { config: { [BIEN]: { mode: 'test' } }, taches })
-    assert.equal(res.code, 200, JSON.stringify(corps))
+    // La cible `alertes` est FERMÉE depuis le lot PWA 2c-3 : 410, et rien d'écrit.
+    const alertes = 'alertes_ref' in corps
+    assert.equal(res.code, alertes ? 410 : 200, JSON.stringify(corps))
+    if (alertes) assert.equal(etat.ecritures.filter(e => e.table === 'agent_alert_config').length, 0)
     assert.equal(etat.majTaches.length, 0, 'aucune tache touchee')
     assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z')
     assert.equal(res.body.brouillons, undefined)

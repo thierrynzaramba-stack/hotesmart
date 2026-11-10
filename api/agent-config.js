@@ -106,7 +106,15 @@ function delaisPropres (d) {
 // gagne, toujours. Un reglage d'envoi ne se change que par sa cible.
 //
 // La dette restante (le seeder devrait passer par des cibles) est notee au KB.
-const CLES_RESERVEES_AUX_CIBLES = ['delais']
+//
+// ⚠ LES LISTES D'ALERTES NE S'ÉCRIVENT PLUS (PWA lot 2c-3, étape 4 ; docs/kb/
+// pwa.md §12.4). Elles sont reprises en contacts prévenus et en réglages par
+// `scripts/reprendre-listes-alertes.js`, qui les met de côté sous
+// `listes_reprises` en coupant le compte. Une liste RÉÉCRITE après la coupure
+// enverrait en double de son contact : `intervention`, `info_unknown` et leur
+// copie de retour arrière sont donc réservées, comme `delais` — et leur cible
+// (`alertes_ref`) est fermée. Recopier la valeur en base reste permis.
+const CLES_RESERVEES_AUX_CIBLES = ['delais', 'intervention', 'info_unknown', 'listes_reprises']
 
 function fusionnerBlobLegacy (existant, entrant) {
   const base = existant || {}
@@ -227,9 +235,18 @@ module.exports = async (req, res) => {
     if ([viseMode, viseAlertes, viseDelais].filter(Boolean).length > 1) {
       return res.status(400).json({ error: 'Une cible par requête' });
     }
-    if (viseMode || viseAlertes || viseDelais) {
-      const cible = viseMode ? 'mode' : viseAlertes ? 'alertes' : 'delais';
-      const refBrute = cible === 'mode' ? mode_ref : cible === 'alertes' ? alertes_ref : delais_ref;
+    // ⚠ LA CIBLE DES ALERTES EST FERMÉE (lot 2c-3, étape 4) : qui est prévenu
+    // se règle dans Réglages → Notifications (les réglages de chacun et les
+    // contacts prévenus). 410 : la ressource existait, elle ne revient pas.
+    if (viseAlertes) {
+      return res.status(410).json({
+        error: 'Les alertes se règlent désormais dans Réglages → Notifications (vos réglages et vos contacts prévenus).',
+        motif: 'alertes_dans_reglages'
+      });
+    }
+    if (viseMode || viseDelais) {
+      const cible = viseMode ? 'mode' : 'delais';
+      const refBrute = cible === 'mode' ? mode_ref : delais_ref;
       const ref = String(refBrute || '').trim();
       if (!ref || ref.length > 64) return res.status(400).json({ error: 'Payload invalide' });
       if (cible === 'mode' && mode !== 'test' && mode !== 'auto') {
@@ -281,21 +298,6 @@ module.exports = async (req, res) => {
       // 27 octobre 2026).
       const sourdineFournie = !!(delais && typeof delais === 'object' && !Array.isArray(delais)
         && delais.sourdine !== undefined);
-      let alertesPropres = null;
-      if (cible === 'alertes') {
-        if (!alertes || typeof alertes !== 'object') return res.status(400).json({ error: 'Payload invalide' });
-        alertesPropres = {};
-        for (const type of ['intervention', 'info_unknown']) {
-          const a = alertes[type];
-          if (!a || typeof a !== 'object') return res.status(400).json({ error: 'Payload invalide' });
-          const sms = String(a.sms_lines || ''); const email = String(a.email_lines || '');
-          if (sms.length > 2000 || email.length > 2000) return res.status(400).json({ error: 'Destinataires trop longs' });
-          alertesPropres[type] = {
-            sms_enabled: a.sms_enabled === true, sms_lines: sms,
-            email_enabled: a.email_enabled === true, email_lines: email
-          };
-        }
-      }
       const { data: lu, error: eL } = await supabase
         .from('agent_alert_config')
         .select('config').eq('user_id', userId).maybeSingle();
@@ -413,14 +415,10 @@ module.exports = async (req, res) => {
 
       blob[ref] = cible === 'mode'
         ? { ...(blob[ref] || {}), mode, ...(delaisAlignes ? { delais: delaisAlignes } : {}) }
-        : cible === 'delais'
-          // Le bloc ENTIER remplace le precedent : les trois reglages voyagent
-          // ensemble et l'ecran les envoie ensemble. Un merge champ par champ
-          // laisserait une sourdine orpheline apres un changement de forme.
-          ? { ...(blob[ref] || {}), delais: delaisValides, mode: modeDerive }
-          : { ...(blob[ref] || {}),
-              intervention: { ...((blob[ref] || {}).intervention || {}), ...alertesPropres.intervention },
-              info_unknown: { ...((blob[ref] || {}).info_unknown || {}), ...alertesPropres.info_unknown } };
+        // Le bloc ENTIER remplace le precedent : les trois reglages voyagent
+        // ensemble et l'ecran les envoie ensemble. Un merge champ par champ
+        // laisserait une sourdine orpheline apres un changement de forme.
+        : { ...(blob[ref] || {}), delais: delaisValides, mode: modeDerive };
       const { error: eW } = await supabase
         .from('agent_alert_config')
         .upsert(
@@ -498,9 +496,7 @@ module.exports = async (req, res) => {
 
       return res.status(200).json(cible === 'mode'
         ? { ok: true, mode_ref: ref, mode }
-        : cible === 'delais'
-          ? { ok: true, delais_ref: ref, delais: delaisValides, brouillons }
-          : { ok: true, alertes_ref: ref, alertes: alertesPropres });
+        : { ok: true, delais_ref: ref, delais: delaisValides, brouillons });
     }
 
     if (!config || typeof config !== 'object' || Array.isArray(config)) {

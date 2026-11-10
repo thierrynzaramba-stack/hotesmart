@@ -328,8 +328,7 @@ const lancer = (o) => executer({ base: 'STAGING', repriseOuverte: true, destinat
 test('LE TEST QUI COMPTE : `--go` est refusé tant que la reprise n\'est pas ouverte — rien n\'est écrit', async () => {
   const { db, etat } = compte()
   const sorties = []
-  assert.equal(reprise.REPRISE_OUVERTE, false, 'elle s\'ouvre à l\'étape 4')
-  const code = await lancer({ argv: ['--go'], db, repriseOuverte: reprise.REPRISE_OUVERTE, ecrire: t => sorties.push(t) })
+  const code = await lancer({ argv: ['--go'], db, repriseOuverte: false, ecrire: t => sorties.push(t) })
   assert.equal(code, 2)
   assert.equal(etat.ecritures.length, 0)
   assert.match(sorties[0], /REPRISE_OUVERTE/)
@@ -527,5 +526,20 @@ test('une adresse de liste que le contact refuse bloque le compte en la NOMMANT 
   assert.match(sorties.join('\n'), /contact non valide \(email_illisible\) : j\*\*\*@exemple\.fr; — à corriger dans la liste/)
   assert.doesNotMatch(sorties.join('\n'), /jean@exemple/)
   assert.equal(etat.ecritures.length, 0)
+})
+
+test('LE TEST QUI COMPTE : la reprise n\'est OUVERTE que si plus rien n\'écrit de liste — Messages, l\'onboarding, et le serveur', () => {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const lire = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+  const sansCommentaires = (t) => t.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  if (!reprise.REPRISE_OUVERTE) return
+  const messages = sansCommentaires(lire('pages/messages.html'))
+  assert.ok(!/alertes_ref|data-alerte|\/api\/alert-test/.test(messages), 'Messages n\'écrit ni ne teste plus de liste')
+  const onboarding = sansCommentaires(lire('pages/onboarding.html'))
+  assert.ok(!/email_lines|sms_lines|info_unknown|intervention/.test(onboarding), 'l\'onboarding ne préremplit plus de liste')
+  const config = lire('api/agent-config.js')
+  assert.match(config, /const CLES_RESERVEES_AUX_CIBLES = \[[^\]]*'intervention'[^\]]*'info_unknown'[^\]]*'listes_reprises'/, 'une liste apportée en legacy est refusée')
+  assert.match(sansCommentaires(lire('api/alert-test.js')), /status\(410\)/, 'l\'essai des listes est retiré')
 })
 
