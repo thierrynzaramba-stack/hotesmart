@@ -400,8 +400,11 @@ Migration `migrations/2026-11-10-resume-bien-avis.sql`.
 | `calcule_le` timestamptz NOT NULL | l'heure du calcul |
 | `motif_non_calculable` text | `null` quand c'est calculé ; sinon les compteurs sont `null`, jamais 0 |
 
-Clé primaire `(user_id, property_id_ref, periode)`. RLS activée, **aucune
-policy** : seule l'API, en clé de service, la lit et l'écrit.
+Clé primaire `(user_id, periode, property_id_ref)` — dans cet ordre, celui de
+la lecture de l'écran (un compte, une période, ses biens). Contrainte
+`resume_complet` : soit tous les compteurs et pas de motif, soit un motif et
+aucun compteur — un zéro avec motif est refusé par la base. RLS activée,
+**aucune policy** : seule l'API, en clé de service, la lit et l'écrit.
 
 Trois choix, écrits pour qu'on ne les défasse pas :
 1. **La clé est la référence, pas `properties.id`.** `ota_reviews.property_id_ref`
@@ -432,7 +435,13 @@ Trois choix, écrits pour qu'on ne les défasse pas :
   compris** (décision du 3 novembre 2026 : leurs avis restent dans la note
   globale), et pour chaque référence orpheline qui porte des avis. Un bien sans
   avis a ses lignes **à zéro, avec l'heure** : un zéro calculé est un fait ;
-- puis la suppression des lignes du compte qu'il n'a pas réécrites ;
+- puis le **remplacement des lignes du compte en une fois**, par la fonction
+  SQL `resume_bien_avis_remplacer` (une transaction : effacer et réécrire
+  aboutissent ensemble ou pas du tout). Elle **refuse un calcul périmé** :
+  `calcule_le` est l'heure de la LECTURE, et un calcul qui a lu avant un autre
+  ne peut pas écraser celui-ci — sinon le cron de 18:00, parti avant un geste
+  de l'hôte (Q3) et arrivé après, effacerait l'avis qu'il vient de saisir. Un
+  verrou par compte empêche deux remplacements de se chevaucher ;
 - **un échec de lecture n'écrit rien** : les lignes d'avant restent, avec leur
   heure, et l'erreur part dans `results.errors` (carte 20). Une lecture
   incomplète (plafond atteint) écrit des `null` avec le motif
