@@ -367,6 +367,11 @@ test('refus du canal ET information manquante : « envoi impossible » d abord, 
   const premiere = vus.ordre.indexOf('alerte')
   assert.ok(premiere > vus.ordre.indexOf('noter') && premiere > vus.ordre.indexOf('actif'), vus.ordre.join(' > '))
   assert.strictEqual(vus.alertes[0].threshold, 2, 'le seuil de l alerte ne change pas')
+  // Review 1, constat 4 : le logement fixe le perimetre du seuil et de
+  // l'anti-spam (null = tout le parc).
+  assert.strictEqual(vus.alertes[0].userId, 'u1')
+  assert.strictEqual(vus.alertes[0].propertyId, '0db6b39b')
+  assert.strictEqual(vus.alertes[0].propertyName, 'La bulle')
   assert.match(vus.alertes[0].detail, /^Envoi du code d'arrivée impossible \(booking ARRIVANTE\) : pas de messagerie$/)
 })
 
