@@ -308,8 +308,13 @@ test('les deux moteurs ne parlent pas de la meme chose avec le meme mot', () => 
 
 test('le code d\'acces n\'alerte pas le fondateur pour un canal pas encore branche', () => {
   const arr = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-arrival-code.js'), 'utf8')
-  assert.ok(/if \(!sendResult\.differe\) \{\s*\n\s*await reportIncident\('send_failure'/.test(arr),
+  // Dette 141 : l'alerte est NOTEE sous la condition et part en toute fin ;
+  // le comportement est tenu par tests/arrival-code-manquant-alerte.test.js
+  // (`differe` : aucune alerte « envoi impossible »).
+  assert.ok(/if \(!sendResult\.differe\) \{\s*\n(\s*\/\/.*\n)*\s*echecAPrevenir = /.test(arr),
     'l\'incident est conditionne : « pas branche » n\'est pas « a echoue »')
+  assert.strictEqual((arr.match(/reportIncident\('send_failure'/g) || []).length, 1, 'un seul site d\'alerte')
+  assert.ok(/if \(echecAPrevenir\) \{/.test(arr), 'et il ne part que pour un echec note')
   // Le filet, lui, reste inconditionnel : une porte fermee devant un voyageur.
   assert.ok(/task_type: 'auto_message'/.test(arr), 'la tache a l\'hote subsiste')
 })

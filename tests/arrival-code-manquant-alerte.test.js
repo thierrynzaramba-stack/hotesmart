@@ -44,7 +44,9 @@ function doubler (relatif, exports) {
 
 function charger ({
   mode = 'auto', envoi = { ok: true }, pin = '123456', modele = MODELE,
-  connaissance = [], baseEnPanne = false, dejaEnvoye = false
+  connaissance = [], baseEnPanne = false, dejaEnvoye = false,
+  // Dette 141 : le comportement de la plateforme d'alerte, par type.
+  alerte = null
 } = {}) {
   const vus = { envois: [], alertes: [], taches: [], ordre: [], reseau: 0 }
   const table = (nom) => {
@@ -99,7 +101,10 @@ function charger ({
   })
   doubler('lib/record-message.js', { recordMessage: async () => { vus.ordre.push('journal'); return { ok: true } } })
   doubler('lib/founder-notify.js', {
-    reportIncident: async (type, opts) => { vus.alertes.push({ type, ...opts }); vus.ordre.push('alerte'); return { recorded: true } }
+    reportIncident: async (type, opts) => {
+      vus.alertes.push({ type, ...opts }); vus.ordre.push('alerte')
+      return alerte ? alerte(type) : { recorded: true }
+    }
   })
   doubler('lib/alert-notify.js', { alertMissingAccessCode: async () => {} })
   delete require.cache[require.resolve('../lib/cles-migrees')]
@@ -332,4 +337,59 @@ test('le type d alerte a un libelle neutre, et il part aussi par SMS', () => {
   assert.ok(LABELS.message_envoye_incomplet, 'sinon l objet de l alerte porterait la cle brute')
   assert.ok(!/ENVOYÉ/.test(LABELS.message_envoye_incomplet), 'le meme type sert quand le canal a refuse l envoi')
   assert.ok(!SANS_SMS.has('message_envoye_incomplet'))
+})
+
+// ─── Dette 141 : l'alerte « envoi impossible » part APRES le journal ─────────
+//
+// Attendue avant `noterEnvoi`, une plateforme d'alerte lente (SMS et e-mail
+// sans delai maximum, cron coupe a 60 s) laissait la fonction coupee sans
+// journal anti-doublon : au cycle suivant, le code etait retraite comme jamais
+// envoye — seconde tache a l'hote, seconde tentative au canal.
+const attendreQue = async (cond) => { for (let i = 0; i < 200 && !cond(); i++) await new Promise(r => setTimeout(r, 2)) }
+
+test('LE TEST QUI COMPTE : le canal refuse et la plateforme d alerte ne rend jamais — journal anti-doublon et code actif sont DEJA ecrits', async () => {
+  const { mod, vus } = charger({ envoi: { ok: false, reason: 'pas de messagerie' }, alerte: () => new Promise(() => {}) })
+  // Ne se resout jamais : c'est la coupure du cron qu'on simule.
+  mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+  await attendreQue(() => vus.ordre.includes('alerte'))
+  assert.ok(vus.ordre.includes('alerte'), 'jeu d essai : l alerte doit etre appelee')
+  assert.deepStrictEqual(vus.alertes.map(a => a.type), ['send_failure'])
+  const avant = vus.ordre.slice(0, vus.ordre.indexOf('alerte'))
+  assert.ok(avant.includes('noter'), `le journal anti-doublon attend l alerte : ${vus.ordre.join(' > ')}`)
+  assert.ok(avant.includes('actif'), `le code reste en attente derriere l alerte : ${vus.ordre.join(' > ')}`)
+  assert.strictEqual(vus.taches.length, 1, 'la tache de transmission manuelle existe deja')
+})
+
+test('refus du canal ET information manquante : « envoi impossible » d abord, puis « code incomplet », les deux en dernier', async () => {
+  const { mod, vus } = charger({ envoi: { ok: false, reason: 'pas de messagerie' } })
+  await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  assert.deepStrictEqual(vus.alertes.map(a => a.type), ['send_failure', 'message_envoye_incomplet'])
+  const premiere = vus.ordre.indexOf('alerte')
+  assert.ok(premiere > vus.ordre.indexOf('noter') && premiere > vus.ordre.indexOf('actif'), vus.ordre.join(' > '))
+  assert.strictEqual(vus.alertes[0].threshold, 2, 'le seuil de l alerte ne change pas')
+  assert.match(vus.alertes[0].detail, /^Envoi du code d'arrivée impossible \(booking ARRIVANTE\) : pas de messagerie$/)
+})
+
+test('l alerte « envoi impossible » qui echoue ne tait pas celle du code incomplet, et ne se journalise pas en envoi rate', async () => {
+  const { mod, vus } = charger({
+    envoi: { ok: false, reason: 'pas de messagerie' },
+    alerte: (type) => { if (type === 'send_failure') throw new Error('Brevo en panne'); return { recorded: true } }
+  })
+  const erreurs = []
+  const avant = console.error
+  console.error = (...x) => { erreurs.push(x.join(' ')) }
+  try {
+    await mod.processArrivalCodes('u1', null, BIEN_SANS_ADRESSE, [arrivante()], {})
+  } finally { console.error = avant }
+  assert.deepStrictEqual(vus.alertes.map(a => a.type), ['send_failure', 'message_envoye_incomplet'])
+  assert.ok(erreurs.some(e => e.includes('alerte « envoi impossible » non partie')), erreurs.join('\n'))
+  assert.ok(!erreurs.some(e => e.includes('Erreur envoi booking')), 'une alerte ratee journalisee comme un envoi rate')
+})
+
+test('canal e-mail pas encore branche (`differe`) : toujours aucune alerte « envoi impossible »', async () => {
+  // Non-regression : la condition `!differe` a suivi l'alerte en fin de fonction.
+  const { mod, vus } = charger({ envoi: { ok: false, differe: true, reason: 'canal e-mail a venir' } })
+  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+  assert.deepStrictEqual(vus.alertes.map(a => a.type), [])
+  assert.strictEqual(vus.taches.length, 1)
 })
