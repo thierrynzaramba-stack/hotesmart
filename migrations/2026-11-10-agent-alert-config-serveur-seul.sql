@@ -18,8 +18,12 @@
 --
 -- 2. LA BASE REFUSE DE DÉFAIRE UNE REPRISE. Pour chaque logement de l'ancienne
 --    config qui porte `listes_reprises`, la nouvelle config, si elle garde ce
---    logement, doit garder toute la pile et ne porter ni `intervention` ni
---    `info_unknown`. Ferme la course lecture → coupure → écriture
+--    logement, doit garder toute la pile et ne pas AJOUTER ni MODIFIER
+--    `intervention` ou `info_unknown`. (Une liste déjà présente À CÔTÉ de la
+--    pile, et laissée telle quelle, passe : sinon un logement dans cet état
+--    mixte bloquerait toute écriture du compte, mode et délais compris, sans
+--    issue — constat 1 de la re-review. Cet état ne doit pas exister : la
+--    vérification ci-dessous le compte.) Ferme la course lecture → coupure → écriture
 --    (api/agent-config.js relit, le script coupe, l'endpoint réécrit ce qu'il
 --    avait lu) et un `--go` lancé avant le déploiement (l'ancien Messages
 --    réécrirait les listes). Un logement RETIRÉ de la config reste permis
@@ -32,6 +36,10 @@
 --   select tgname from pg_trigger
 --    where tgrelid = 'public.agent_alert_config'::regclass and not tgisinternal;
 --     -> agent_alert_config_listes_reprises
+--   select count(*) from agent_alert_config c, jsonb_each(c.config) e
+--    where jsonb_typeof(c.config) = 'object' and jsonb_typeof(e.value) = 'object'
+--      and e.value ? 'listes_reprises' and e.value ?| array['intervention','info_unknown'];
+--     -> 0 (aucun logement à la fois repris et porteur d'une liste)
 
 drop policy if exists agent_alert_config_write on public.agent_alert_config;
 
@@ -43,6 +51,7 @@ declare
   ref text;
   avant jsonb;
   apres jsonb;
+  pile_avant jsonb;
 begin
   if jsonb_typeof(old.config) is distinct from 'object' then
     return new;
@@ -57,10 +66,19 @@ begin
       continue;
     end if;
     apres := new.config -> ref;
+    -- Une pile ancienne en objet seul (forme que `mettreDeCote` sait lire)
+    -- se compare comme une pile d'un élément.
+    pile_avant := case jsonb_typeof(avant -> 'listes_reprises')
+      when 'array' then avant -> 'listes_reprises'
+      else jsonb_build_array(avant -> 'listes_reprises') end;
+    -- La pile est gardée telle quelle, ou allongée (une seconde reprise).
     if jsonb_typeof(apres) is distinct from 'object'
        or not (apres ? 'listes_reprises')
-       or not ((apres -> 'listes_reprises') @> (avant -> 'listes_reprises'))
-       or (apres ?| array['intervention', 'info_unknown']) then
+       or not ((apres -> 'listes_reprises') = (avant -> 'listes_reprises')
+               or (jsonb_typeof(apres -> 'listes_reprises') = 'array'
+                   and (apres -> 'listes_reprises') @> pile_avant))
+       or exists (select 1 from unnest(array['intervention', 'info_unknown']) k
+                   where apres ? k and (apres -> k) is distinct from (avant -> k)) then
       raise exception using
         errcode = 'HS409',
         message = 'La configuration a changé pendant l''enregistrement : rechargez la page et recommencez.',

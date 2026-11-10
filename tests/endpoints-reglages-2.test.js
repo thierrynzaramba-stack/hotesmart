@@ -104,13 +104,24 @@ for (const [nom, corps] of [
     const appels = []
     const fetchAvant = global.fetch
     global.fetch = async (url) => { appels.push(String(url)); return { ok: true, json: async () => ({}), text: async () => '' } }
+    // ⚠ LA CLÉ DE LA PLATEFORME EST POSÉE (constat 3 de la re-review) : sans
+    // elle, `sendPlatformEmail` s'arrête avant tout `fetch`, et un relais
+    // d'e-mail remis dans l'endpoint resterait vert. Lue au chargement du
+    // module : on le recharge.
+    const cleAvant = process.env.ALERT_BREVO_API_KEY
+    process.env.ALERT_BREVO_API_KEY = 'cle-test'
+    try { delete require.cache[require.resolve('../lib/platform-notify')] } catch {}
     try {
       const handler = require('../api/alert-test')
       const res = reponse()
       await handler(req({ method: 'POST', body: corps }), res)
       assert.strictEqual(res.code, 410)
       assert.match(String(res.body?.error || ''), /Réglages/)
-    } finally { global.fetch = fetchAvant }
+    } finally {
+      global.fetch = fetchAvant
+      if (cleAvant === undefined) delete process.env.ALERT_BREVO_API_KEY; else process.env.ALERT_BREVO_API_KEY = cleAvant
+      try { delete require.cache[require.resolve('../lib/platform-notify')] } catch {}
+    }
     assert.deepStrictEqual(appels, [], 'aucun appel réseau : ni Brevo, ni SMS')
     assert.deepStrictEqual(etat.ecritures, [], 'aucune écriture : pas même un compteur d\'essai')
   })

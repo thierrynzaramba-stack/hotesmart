@@ -542,7 +542,7 @@ test('LE TEST QUI COMPTE : la reprise n\'est OUVERTE que si plus rien n\'écrit 
   assert.match(config, /const CLES_RESERVEES_AUX_CIBLES = \[[^\]]*'intervention'[^\]]*'info_unknown'[^\]]*'listes_reprises'/, 'une liste apportée en legacy est refusée')
   const essai = sansCommentaires(lire('api/alert-test.js'))
   assert.match(essai, /status\(410\)/, 'l\'essai des listes est retiré')
-  assert.ok(!/fetch\(|alert-notify|brevo|notifications\/envoi|require\(['"]\.\/sms/i.test(essai), 'et il n\'envoie plus rien : aucun module d\'envoi, aucun appel réseau')
+  assert.ok(!/fetch\(|alert-notify|platform-notify|sendPlatformEmail|sendPlatformSms|sendSms|brevo|notifications\/envoi|require\(['"]\.\/sms/i.test(essai), 'et il n\'envoie plus rien : aucun module d\'envoi, aucun appel réseau')
   // Constat 1 de la review de l'étape 4 : la RLS laissait écrire la table en
   // direct par PostgREST, à côté de l'endpoint. La DERNIÈRE migration qui
   // nomme la politique d'écriture doit la RETIRER, et le verrou en base doit
@@ -555,6 +555,24 @@ test('LE TEST QUI COMPTE : la reprise n\'est OUVERTE que si plus rien n\'écrit 
   assert.ok(!/create policy agent_alert_config_write/.test(derniere), 'sans la recréer')
   assert.match(derniere, /create trigger agent_alert_config_listes_reprises\s+before update on public\.agent_alert_config/, 'le verrou en base existe')
   assert.match(derniere, /errcode = 'HS409'/)
+  // Constat 4 de la re-review : le texte seul ne garde pas le verrou. On
+  // exige ses trois conditions dans le corps de la fonction, et aucune sortie
+  // anticipée avant la boucle hors du seul cas « ancienne config illisible ».
+  const corps = derniere.slice(derniere.indexOf('agent_alert_config_garder_reprises()'), derniere.indexOf('create trigger'))
+  assert.match(corps, /avant \? 'listes_reprises'/, 'la condition « logement repris »')
+  assert.match(corps, /@> pile_avant/, 'la pile gardée ou allongée')
+  assert.match(corps, /\(apres -> k\) is distinct from \(avant -> k\)/, 'aucune liste ajoutée ni modifiée')
+  assert.equal((corps.match(/return new;/g) || []).length, 2, 'une sortie pour une config illisible, une en fin de boucle — pas de raccourci')
+  // Et aucune politique ne rouvre l'écriture, quel que soit son nom ou l'ordre
+  // des fichiers : seules les deux migrations d'origine en posaient une.
+  const ORIGINE = ['0000-schema-initial.sql', '2026-09-02-droits-lot6.sql']
+  for (const f of fs.readdirSync(dossier).filter(f => f.endsWith('.sql') && !ORIGINE.includes(f))) {
+    const sql = fs.readFileSync(path.join(dossier, f), 'utf8').replace(/--.*$/gm, '')
+    for (const instr of sql.split(';')) {
+      if (!/create\s+policy/i.test(instr) || !/\bon\s+(public\.)?agent_alert_config\b/i.test(instr)) continue
+      assert.match(instr, /\bfor\s+select\b/i, `${f} : une politique d'écriture sur agent_alert_config rouvre l'écriture directe`)
+    }
+  }
   assert.match(sansCommentaires(lire('api/agent-config.js')), /CODE_REPRISE_GARDEE = 'HS409'/, 'l\'endpoint traduit le refus de la base')
 })
 

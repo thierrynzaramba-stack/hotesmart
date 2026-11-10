@@ -363,9 +363,16 @@ test('LE TEST QUI COMPTE (PWA lot 2c-3, constats 3 et 7) : la base refuse de dé
   for (const corps of [{ mode_ref: BIEN, mode: 'auto' },
     { delais_ref: BIEN, delais: { reponse_ia: 15, alerte_info: 15 } },
     { config: { [BIEN]: { mode: 'auto' } } }]) {
-    const { res } = await postConfig(corps, { config: { [BIEN]: { mode: 'test' } }, erreurEcriture: { code: 'HS409', message: 'refus' } })
+    // Un brouillon en attente : un réglage REFUSÉ ne doit ni le relire ni le
+    // réarmer vers le voyageur (constat 2 de la re-review).
+    const taches = [{ id: 'tache-1', user_id: COMPTE, property_id: BIEN, status: 'pending_validation',
+      created_at: '2026-11-11T10:00:00Z', send_after: '2026-11-11T12:00:00Z', suspendu_le: null }]
+    const { res, etat } = await postConfig(corps, { config: { [BIEN]: { mode: 'test' } }, taches, erreurEcriture: { code: 'HS409', message: 'refus' } })
     assert.equal(res.code, 409, JSON.stringify(corps))
     assert.equal(res.body.motif, 'config_modifiee_entre_temps')
+    assert.deepEqual(etat.lecturesTaches, [], 'aucun brouillon relu')
+    assert.deepEqual(etat.majTaches, [], 'aucun brouillon réarmé')
+    assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z')
   }
   const { res } = await postConfig({ mode_ref: BIEN, mode: 'auto' }, { config: { [BIEN]: { mode: 'test' } }, erreurEcriture: { code: '08006', message: 'panne' } })
   assert.equal(res.code, 500, 'une autre panne reste une panne')

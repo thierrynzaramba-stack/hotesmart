@@ -1948,13 +1948,20 @@ Go de Thierry du 10 novembre 2026 à 19 h 35 (`pages/messages.html` et
    alors que l'ancien envoi repartirait en parallèle. **La table ne s'écrit plus
    que par le serveur** : la politique RLS d'écriture est retirée (la lecture
    reste au domaine `reglages`, la RLS reste active), et **la base refuse de
-   défaire une reprise** — un logement qui porte `listes_reprises` garde toute
-   sa pile et ne reprend ni `intervention` ni `info_unknown`, quel que soit
-   l'écrivain (`migrations/2026-11-10-agent-alert-config-serveur-seul.sql`,
-   code `HS409`, rendu en **409** par l'endpoint). Ce verrou ferme aussi la
-   course lecture → coupure → écriture, et un `--go` lancé avant le
-   déploiement : l'ancien Messages se ferait refuser. D'où aussi, côté
-   serveur :
+   défaire une reprise** — toute écriture qui GARDE un logement repris (qui
+   porte `listes_reprises`) doit garder sa pile, ou l'allonger, et ne lui
+   ajouter ni modifier aucune liste
+   (`migrations/2026-11-10-agent-alert-config-serveur-seul.sql`, code
+   `HS409`, rendu en **409** par l'endpoint). Ce verrou ferme la course
+   lecture → coupure → écriture : le blob relu avant la coupure porte encore
+   les listes et pas la pile. **Ce qu'il ne couvre pas, et c'est voulu** : le
+   retrait d'un logement de la config (les scripts de re-clé le font), donc
+   aussi une config remise à `null` ou `{}`, ou un logement retiré puis remis
+   — aucun écran ni endpoint ne le fait. Et pour un `--go` lancé AVANT le
+   déploiement, il ne protège que les logements déjà repris : sur un logement
+   qui n'avait pas de liste à la reprise, l'ancien Messages pourrait en créer
+   une, invisible une fois ce code déployé — d'où l'ordre de mise en service
+   ci-dessous (déployer, PUIS `--go`). D'où aussi, côté serveur :
    `api/agent-config.js` refuse la cible `alertes` en **410**
    (`alertes_dans_reglages`, rien n'est écrit), et une écriture legacy qui
    APPORTE `intervention`, `info_unknown` ou `listes_reprises` est refusée
@@ -2018,8 +2025,10 @@ Go de Thierry du 10 novembre 2026 à 19 h 35 (`pages/messages.html` et
    Un compte bloqué garde ses listes et leur envoi, mais plus aucun écran ne
    les montre une fois ce code déployé : c'est pourquoi on règle AVANT ;
 3. déployer, vérifier le SHA complet ;
-4. `--go` aussitôt, sur le go de Thierry : les minutes entre le déploiement et
-   le `--go` sont la seule fenêtre où une liste vit sans écran.
+4. `--go` aussitôt, sur le go de Thierry. Entre le déploiement et le `--go`,
+   les listes vivent sans écran ; après, seules celles d'un compte que le
+   `--go` bloque encore (un état changé depuis la passe à blanc) — à régler
+   avec Thierry dans la foulée, le compte rendu du script les nomme.
 
 
 **Review de l'étape 4** (sous-agent, arbre `/home/claude/hs-2c3`, branche
@@ -2108,10 +2117,12 @@ procédure ; go des correctifs le 10 novembre 2026) :
 - **2** — Q39 : **la procédure** (ordre de mise en service ci-dessus) — passe à
   blanc avant le déploiement, comptes bloqués réglés avec Thierry, puis
   déploiement et `--go` enchaînés. Pas d'écran de plus.
-- **3 et 7** — corrigés en base, quel que soit l'écrivain : le déclencheur
+- **3 et 7** — corrigés en base, pour toute écriture qui garde le logement
+  (limites : règle 1 ci-dessus) : le déclencheur
   `agent_alert_config_listes_reprises` refuse toute écriture qui ferait
-  perdre la pile d'un logement repris ou lui rendrait une liste (code
-  `HS409`), et l'endpoint le rend en 409 « rechargez et recommencez ».
+  perdre la pile d'un logement repris ou lui ajouterait ou modifierait une
+  liste (code `HS409`), et l'endpoint le rend en 409 « rechargez et
+  recommencez ».
   Éprouvé sur le banc Postgres 16 local, migration appliquée deux fois : un
   changement de mode qui garde la pile passe ; réécrire le logement sans pile,
   y remettre une liste, raccourcir la pile ou la remplacer par une chaîne
@@ -2135,3 +2146,116 @@ procédure ; go des correctifs le 10 novembre 2026) :
 - **6** — corrigé : règle 3 du §12.4 (le panneau enregistre aussi les
   délais), phrase du guide (l'adresse d'un membre passe dans SES réglages ;
   une adresse désinscrite ne devient rien), commentaire d'agent-config.
+
+
+**Re-review des correctifs de l'étape 4 — la seule** (sous-agent, arbre
+`/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, plage
+`0d762ec8f6b1f4fb55cc5f2b93114726004fa2de..33a01643e66a721765b6598a5e6b5cc23dc2612f`)
+— rapport mot pour mot, consigné à réception, avant tout correctif :
+
+> Je n'ai trouvé **aucun problème de sécurité** dans les correctifs. Il reste un défaut fonctionnel peu probable dans la migration, deux tests qui ne rougissent pas contre le défaut qu'ils nomment, et des phrases de la KB à préciser.
+>
+> **Arbre lu :** `/home/claude/hs-2c3`, branche `pwa-lot-2c3-contacts`, HEAD `33a01643e66a721765b6598a5e6b5cc23dc2612f`, plage `0d762ec8f6b1f4fb55cc5f2b93114726004fa2de..33a01643e66a721765b6598a5e6b5cc23dc2612f`. Je n'ai rien modifié dans l'arbre (`git status` : seul `node_modules`, non suivi, déjà présent). Les essais de mutation ont tourné dans une copie `git archive` sous `/tmp`, et la migration sur une base Postgres 16 jetable. Les deux sont supprimées.
+>
+> **Ce que j'ai mesuré et qui tient**
+> - **Les quatre fichiers de tests touchés :** 166 tests, 166 verts.
+> - **La migration est rejouable :** appliquée deux fois sans erreur. Il reste ensuite une seule politique, `agent_alert_config_select`, plus le déclencheur.
+> - **Le déclencheur refuse en `HS409` :**
+>   - retirer la pile ;
+>   - remettre une liste dans un logement repris ;
+>   - amputer un élément de la pile ;
+>   - remplacer le logement par une chaîne ;
+>   - un upsert `on conflict` qui ressuscite les listes.
+> - **Il laisse passer :**
+>   - un changement de mode qui garde la pile ;
+>   - la reprise, et une seconde reprise ;
+>   - un logement non repris ;
+>   - le retrait d'un logement (re-clé) ;
+>   - un changement de `user_id` ;
+>   - un `delete`.
+> - **Casse et doublons sans danger :** une clé `Intervention` ou une clé de bien en double sont sans effet, car l'émetteur lit `config[ref][type]` à la clé exacte (`lib/alert-notify.js:41`).
+> - **Aucun écrivain réel n'est cassé par le retrait de la politique.** Aucune écriture directe dans `pages/`, `apps/`, `shared/`, `api/`, `lib/` ni `supabase/functions/`, ni ici ni sur `origin/main`. La suppression de compte passe par la cascade (un DELETE, que le déclencheur ne vise pas). La re-clé, le transfert et `migrer-modes-vers-delais` gardent la pile ou retirent la clé, donc ils passent.
+> - **`api/agent-config.js` :** le 409 sort avant la propagation aux brouillons et avant le 200 du chemin legacy. L'aperçu n'écrit rien, donc il ne peut pas tomber sur `HS409`. Le message est juste dans le cas de la course.
+>
+> **Sécurité : aucun constat.**
+>
+> ---
+>
+> 1. **Fonctionnel, peu probable : un logement qui a à la fois sa pile et une liste bloque toutes les écritures du compte, avec un 409 sans issue.** `migrations/2026-11-10-agent-alert-config-serveur-seul.sql:63`
+>    - La condition `apres ?| array['intervention','info_unknown']` refuse une liste même si elle était déjà là et n'a pas bougé. Or agent-config réécrit toujours le blob entier.
+>    - **Mesuré au banc :** dans cet état, changer le mode du logement B seul est refusé en `HS409`, et `updated_at` seul aussi.
+>    - **Conséquence :** le mode et les délais de tous les logements du compte sont refusés en 409 « rechargez la page et recommencez », et recharger ne règle rien.
+>    - **Comment on arrive dans cet état :** un `--go` lancé sur une base avant cette migration (staging ?), ou un retrait puis ré-ajout du logement, ou un DELETE puis INSERT.
+>    - **La KB est fausse dans ce cas :** `docs/kb/pwa.md:2120` dit « `updated_at` seul … passe ».
+>    - **Correctif éprouvé au banc :** ne refuser qu'une liste ajoutée ou modifiée, `exists (select 1 from unnest(array['intervention','info_unknown']) k where apres ? k and (apres -&gt; k) is distinct from (avant -&gt; k))`.
+>      - Il refuse toujours : le blob périmé, une liste remise sur un logement repris, une liste modifiée.
+>      - Il laisse passer : le mode de B dans l'état mixte, une seconde reprise.
+>    - **À ajouter à la vérification d'application :** une requête comptant les logements qui portent à la fois `listes_reprises` et une liste. Le résultat attendu est 0.
+>    - **Détail :** `mettreDeCote` accepte une pile sous forme d'objet (`[avant]`), mais le déclencheur refuse cette transformation (mesuré). Ce cas n'arrive pas aujourd'hui, car aucun écrivain ne produit une telle pile.
+>
+> 2. **Tests, mineur : « -&gt; 409, rien de plus » ne vérifie pas le « rien de plus ».** `tests/delai-reponse-ia-lot1.test.js:360`
+>    - **Mutation :** renvoyer le 409 seulement après la propagation aux brouillons. Résultat : 123 tests, 123 verts (ce fichier et `guestflow-appliquer-delai`).
+>    - C'est pourtant l'ordre qui compte : il évite de réarmer, vers le voyageur, des brouillons selon un réglage refusé.
+>    - **Correctif :** donner au test un brouillon en attente (`taches`) et exiger `majTaches` et `lecturesTaches` vides.
+>
+> 3. **Tests, mineur : le correctif du constat 5 ne rougit pas contre le relais d'e-mail qu'il vise.** `tests/endpoints-reglages-2.test.js:114`, `tests/notifications-reprise-listes.test.js:545`
+>    - **Mutation :** remettre `sendPlatformEmail` (de `../lib/platform-notify`) dans alert-test avant le 410. Résultat : 51 tests, 51 verts.
+>    - **Cause 1 :** `ALERT_BREVO_API_KEY` n'existe pas dans les tests, donc l'envoi s'arrête avant tout `fetch`.
+>    - **Cause 2 :** l'expression du test de liaison ignore `platform-notify`, qui est le module qu'utilisait l'ancien endpoint.
+>    - Avec `ALERT_BREVO_API_KEY=x`, la même mutation donne 2 rouges.
+>    - **La KB est fausse :** `docs/kb/pwa.md:2134` dit « refuse un module d'envoi ».
+>    - **Correctif :** poser la clé dans le test (et vider `../lib/platform-notify` du cache), puis ajouter `platform-notify|sendPlatformEmail|sendSms` à l'expression.
+>
+> 4. **Tests, mineur : le test de liaison ne lit que du texte.** `tests/notifications-reprise-listes.test.js:549-557`
+>    - Neutraliser le corps du déclencheur (un `return new;` en tête) laisse 37 tests sur 37 verts. Le seul verrou des constats 3 et 7 n'a donc aucune garde automatique (la KB le dit honnêtement : banc manuel).
+>    - Le test passe aussi à tort si une écriture est rouverte par une politique d'un autre nom.
+>    - Même chose pour une migration du même jour dont le nom se trie avant `agent-alert-…`.
+>    - **Correctif :** au minimum, exiger dans le corps de la fonction les trois conditions (`? 'listes_reprises'`, `@&gt;`, la garde des listes). Et refuser toute politique `for all|insert|update|delete` sur cette table dans les migrations postérieures.
+>
+> 5. **Mineur, KB et guide : des phrases promettent plus que le code.**
+>    - **« quel que soit l'écrivain »** (`docs/kb/pwa.md:1952`, `:2111`) : le verrou ne vaut que pour une écriture qui garde le logement sous forme d'objet.
+>      - Mettre `config` à `null`, `[]` ou `{}` passe et efface toutes les piles du compte d'un coup (mesuré).
+>      - Retirer le logement puis le remettre avec une liste passe aussi, de même qu'un DELETE puis INSERT.
+>      - Ce n'est pas atteignable par un utilisateur aujourd'hui, mais la phrase est fausse.
+>    - **« l'ancien Messages se ferait refuser »** (`:1956`) : c'est vrai seulement pour un logement déjà repris. Sur un logement du même compte qui n'avait pas de liste au moment de la reprise, l'ancien Messages peut en créer une (mesuré : passe). Après le déploiement, cette liste devient invisible (le scénario du constat 2).
+>    - **« la seule fenêtre où une liste vit sans écran »** (`:2022`) : c'est faux dès qu'un compte reste bloqué, ou se bloque au `--go` parce que son état a changé depuis la passe à blanc. Ses listes vivent alors sans écran jusqu'à ce qu'on règle son cas.
+>    - **Guide** (`pages/guide.html:486`) : pour les événements que ses droits ne couvrent pas, l'adresse d'un membre devient un contact (Q29), pas seulement « ses propres réglages ».
+>
+> Rien de nouveau à proposer pour la mémoire.
+
+**Suite donnée à la re-review** (aucun constat de sécurité : corrigé sans
+nouvelle review, comme la règle le veut) :
+- **1** — corrigé : le verrou ne refuse plus qu'une liste AJOUTÉE ou MODIFIÉE ;
+  une liste déjà là à côté de la pile, laissée telle quelle, passe — un
+  logement dans cet état mixte ne bloque plus le compte. Une pile ancienne en
+  objet seul se compare comme une pile d'un élément, et peut rester telle
+  quelle ou passer en tableau. La vérification d'application compte les
+  logements à la fois repris et porteurs d'une liste (attendu : 0). Rejoué au
+  banc Postgres 16, migration appliquée deux fois : passent le mode d'un
+  logement repris, une seconde reprise, le mode d'un autre logement et
+  `updated_at` seul en état mixte, la reprise de la liste mixte, une pile
+  objet inchangée ou passée en tableau, un logement non repris, le retrait
+  d'un logement, la suppression de la ligne ; sont refusés en `HS409` le blob
+  périmé, une liste remise, une liste mixte modifiée, une pile amputée, vidée
+  de sa liste, en chaîne, une pile objet perdue, et l'upsert qui ressuscite.
+- **2** — corrigé : le test du 409 porte un brouillon en attente et exige
+  qu'il ne soit ni relu ni réarmé. Contre-épreuve : rendre le 409 APRÈS la
+  propagation rend un rouge.
+- **3** — corrigé : le test de l'essai retiré pose `ALERT_BREVO_API_KEY` et
+  recharge `lib/platform-notify` ; le test de liaison refuse aussi
+  `platform-notify`, `sendPlatformEmail`, `sendPlatformSms` et `sendSms`.
+  Contre-épreuve : remettre `sendPlatformEmail` avant le 410 rend 4 rouges
+  dans l'un, 1 dans l'autre.
+- **4** — corrigé : le test de liaison exige les trois conditions dans le
+  corps de la fonction et exactement deux `return new;` ; et il refuse, dans
+  toute migration autre que les deux d'origine, une politique sur
+  `agent_alert_config` qui ne soit pas `for select`. Contre-épreuves : un
+  `return new;` en tête, la garde des listes neutralisée, ou une migration
+  `2026-11-10-aaa-…` qui rouvre l'écriture rendent un rouge chacun. Le
+  comportement du déclencheur, lui, reste éprouvé au banc (pas de base dans
+  la suite).
+- **5** — corrigé : règle 1 du §12.4 (ce que le verrou couvre et ne couvre
+  pas, et pourquoi déployer AVANT le `--go`), point 4 de l'ordre de mise en
+  service, phrase du guide (Q29 : l'adresse d'un membre devient un contact
+  pour ce que ses droits ne couvrent pas).
+
