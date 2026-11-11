@@ -71,6 +71,21 @@ test('LE TEST QUI COMPTE : pas de carte pour une tache de SECOURS du cron (sorti
   }
 })
 
+test('LE TEST QUI COMPTE : dans l autre sens — chaque sous-tache « message entier » a texte FIXE du cron est connue ici (review 2, constat 2)', () => {
+  // Le cron pose `question: message` (le message ENTIER du voyageur) avec un
+  // `summary` fixe : un motif systeme ou un texte de secours. Un texte neuf
+  // ajoute au cron sans passer par ici donnerait une carte Oui / Non / Autre
+  // sur un paragraphe : il doit rougir.
+  const source = lire('lib/cron-classify.js')
+  const trouves = [...source.matchAll(/question: message, summary: (MOTIF_[A-Z_]+|'((?:[^'\\]|\\.)*)')/g)]
+  assert.ok(trouves.length >= 3, 'le motif de recherche ne trouve plus les sous-taches du cron')
+  for (const m of trouves) {
+    if (m[1].startsWith('MOTIF_')) assert.ok(['MOTIF_PAUSE', 'MOTIF_ARRET'].includes(m[1]), m[1] + ' inconnu de lib/guestflow/rediger.js')
+    else assert.ok(R.SOUS_TACHES_DE_SECOURS.includes(m[2].replace(/\\'/g, "'")), `« ${m[2]} » inconnu de lib/guestflow/rediger.js`)
+  }
+})
+
+
 test('questionsDe : sous-taches absentes, vides ou mal formees ne font pas de question ; bornes tenues', () => {
   assert.deepEqual(R.questionsDe(tache({ sub_tasks: null })), [])
   assert.deepEqual(R.questionsDe(tache({ sub_tasks: [{ question: '   ' }, { question: 42 }, null] })), [])

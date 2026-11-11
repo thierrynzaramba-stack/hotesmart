@@ -78,3 +78,90 @@ Les 4 fichiers de test du lot passent (72 sur 72), et `scripts/i18n-check.js` es
   - L'ordre de `taches` est conservé (récentes d'abord, puis remises à l'endroit).
   - « Modifier puis Envoyer » est intact, `cloreInfoTraitee` ne peut pas lever d'erreur dans le `try`, et le rendu de la carte est retardé pendant une saisie dans le fil.
   - Le chemin « Utiliser » est inchangé, hors le constat 1.
+
+## Review 2 — reçue le 11 novembre 2026 (diff des correctifs)
+
+Plage : `36b7c848e860ecfb83bbad1cb7e3aa67018d67e6..0e69c9c40622a49c09202120d65d946d8b7ef0cc`,
+worktree `/home/claude/hotesmart-infoetape1`. Contrôle : chaque fichier cité
+figure dans `git diff --name-only` de la plage.
+
+---
+
+**Arbre lu :** `/home/claude/hotesmart-infoetape1` (`pwd`), branche `info-manquante-etape-1`, HEAD `0e69c9c40622a49c09202120d65d946d8b7ef0cc`. Plage relue : `36b7c848e860ecfb83bbad1cb7e3aa67018d67e6..0e69c9c40622a49c09202120d65d946d8b7ef0cc`, soit un commit. Tous les fichiers cités ci-dessous sont dans `git diff --name-only` de cette plage.
+
+**Ce que j'ai lancé :**
+- Les 4 fichiers de test du lot passent : 80 sur 80.
+- **Contre-épreuve**, sur une copie de `36b7c848` faite par `git archive` dans `/tmp` :
+  - les tests neufs sont rouges contre le code d'avant, **sauf un** (constat 3 ci-dessous) ;
+  - le test du délai de 30 s ne rougit pas : il bloque, puisque sans délai l'appel ne revient jamais.
+- **Mutations**, et une sonde qui joue le scénario du constat 1, dans une copie hors de l'arbre.
+
+Rien n'a été modifié dans le worktree. Les copies dans `/tmp` sont supprimées.
+
+**Aucun constat bloquant. Aucun constat de sécurité serveur.** Les correctifs 2, 4 et 5 ferment leur constat. Le correctif 1 ferme le scénario reproduit (texte marqué), mais pas sa variante avec un texte non marqué (constat 1 ci-dessous).
+
+---
+
+**1. IMPORTANT — `pages/messages.html:1001-1007` (`redigerInfo`)**
+- **Défaut :** le correctif ne revérifie que la marque. Un texte **non marqué**, écrit chez un autre voyageur pendant la rédaction, reçoit la réponse d'Ana. La page dit ensuite qu'il est prêt, et il part chez Ana.
+- **Scénario, mesuré avec le banc réel :**
+  - Ana (B1) : choix, puis « Rédiger ».
+  - Chez Marie (B2), l'hôte tape « Bonjour Marie, le code du portail est 4321 », puis revient chez Ana.
+  - L'IA répond. Résultat :
+    - la saisie contient `"Bonjour Marie, le code du portail est 4321\nHello Ana, yes…"` ;
+    - la marque passe à B1 ;
+    - la note dit « Réponse rédigée dans la saisie : relisez-la, puis envoyez. »
+  - « Envoyer » poste ce texte entier à Ana, puis clôt la tâche.
+  - Le texte de Marie ne peut plus partir chez Marie : sa saisie porte maintenant la marque d'Ana.
+- **Même chemin** avec « Modifier » une proposition de Marie, retouchée, pendant la rédaction (le texte retouché reste dans la saisie, sans marque).
+- **Pourquoi pas bloquant :** un texte tapé n'a jamais été protégé par la page. « Envoyer » seul l'enverrait aussi. Mais la rédaction l'enrobe et invite à l'envoyer.
+- **Correction :**
+  - un compteur de changements de fil, incrémenté dans `ouvrir()` quand le fil change ;
+  - au clic, garder ce compteur et `zone.value` ;
+  - au retour, si le compteur a bougé **et** que la saisie a changé, jeter la réponse avec `noteChamp(...)`.
+  
+  Cela ferme toute la famille A → B → A (texte marqué, tapé, retouché, Ctrl+Z), sans pénaliser un simple coup d'œil sur un autre fil. Ajouter le test de la sonde.
+
+**2. MINEUR — `lib/guestflow/rediger.js:30` et `:62` (`SOUS_TACHES_DE_SECOURS`)**
+- **Défaut, en deux parties :**
+  - une tâche de secours n'a plus de carte, donc plus aucun geste de la V5 ne la clôt. Le bouton « IA » cité par la spec ne clôt rien. Elle reste dans « À valider » d'Aujourd'hui jusqu'au départ du voyageur ;
+  - il existe une troisième voie de secours au cron, non couverte. Quand le modèle classe `info_unknown` **sans** `sub_tasks`, la question devient le message entier du voyageur, avec un `summary` libre. Même défaut « oui global », et la liste des deux textes fixes ne peut pas le voir.
+- **Correction :** décision produit, à écrire dans la spec. Soit accepter que la tâche reste ouverte, soit poser au cron un texte fixe pour cette troisième voie et l'ajouter à la liste.
+- **Copies (point 4) :** les deux textes sont identiques octet pour octet à ceux du cron. Le test vérifie bien la citation exacte, guillemet fermant compris, mais seulement dans un sens : il ne verrait pas un nouveau texte de secours ajouté au cron.
+
+**3. MINEUR — tests : deux branches neuves ne sont tenues par aucun test**
+- **`tests/info-manquante-messages-api.test.js:289` (`updated_at` nul) :**
+  - ce test passe aussi contre le code d'avant ;
+  - il passe si on retire `.is('updated_at', null)` ;
+  - il passe si on le remplace par `.eq('updated_at', null)`. Or en vrai PostgREST, cela donne une erreur de type (`eq.null` sur un `timestamptz`), donc un 503 et une tâche jamais close.
+  - Cause : le double compare par `String()`, donc `'null' === 'null'`, et `majs` n'enregistre pas les `is`.
+  - Portée faible : la colonne a `DEFAULT now()`, donc la branche est presque morte. Correction : enregistrer `q.is` dans `majs` et l'affirmer.
+- **`pages/messages.html:1053-1054` :** la garde ajoutée au retour de `redigerBrouillon` n'est couverte par aucun test (suite verte une fois la ligne retirée). Elle n'est atteignable que par un chemin tiré par les cheveux (la saisie revenue exactement à `avant` avec une marque d'un autre fil). Elle est sans danger.
+
+**4. MINEUR — `pages/messages.html:1113-1117` (`cloreInfoTraitee`), un 409 `questions_changees`**
+- **Ce qui est vérifié :**
+  - pas d'erreur journalisée ;
+  - pas de carte ressuscitée à tort. Si le cron a complété la tâche avant l'envoi, `infoAAfficher` masque la carte, puisque l'hôte a répondu après `maj`. S'il l'a complétée entre la lecture et l'`UPDATE`, la carte revient avec les **nouvelles** questions et les choix remis à zéro, ce qui est juste.
+- **Défaut :** le refus est muet dans Messages. La tâche reste dans « À valider », comme la spec le veut. Mais aucune carte ni aucun geste de la V5 ne permet ensuite de la clore.
+- **Correction (facultative) :** sur `questions_changees`, poser `etat.infoNote = { bookId, cle: 'messages.info.erreur.questions_changees' }` pour ce fil.
+
+**5. MINEUR — `pages/messages.html:3946` et `:1052` (`ouvrir` / `redigerBrouillon`)**
+- **Défaut :** après A → B → A, le champ n'est plus figé. Si l'hôte tape, la réponse de l'IA est jetée (c'est voulu, `zone.value !== avant`), mais sans aucune note. Sans danger, seulement de l'interface.
+
+---
+
+**Vérifié sans rien trouver de plus :**
+- **Constat 2 :**
+  - `Promise.race` + `clearTimeout` dans `finally` ; une réponse tardive est ignorée (test probant) ;
+  - `iaEnCours` est remis à `null` dans les deux `finally` ;
+  - le champ figé tombe au plus tard après 30 s, et tout de suite au changement de fil.
+- **Constat 4, format :**
+  - `infos.maj` et la relecture comparent la même colonne, lue par le même client, en chaîne brute. Aucune normalisation côté page (`majInfos` affecte tel quel), et la borne de 40 caractères suffit (32 pour un `timestamptz`).
+  - Course avec le cron : sous `READ COMMITTED`, l'`UPDATE` réévalue sa condition `updated_at` après l'écriture du cron, donc 0 ligne, une relecture, et 409 `questions_changees` (test probant par mutation).
+  - `maj` absent : la vérification de version saute, l'`UPDATE` reste conditionné. Seul cas réel : une page en cache pendant un déploiement.
+  - `booking_id` : 404 avant le contrôle de périmètre, sans fuite.
+- **Constat 1, autres chemins :**
+  - délai dépassé puis réponse tardive : la réponse est ignorée ;
+  - plusieurs changements de fil avec un texte marqué : refusé ;
+  - « Modifier » dans le même fil : même voyageur, accepté ;
+  - champ vidé puis Ctrl+Z : la marque « vide » d'un autre fil est remplacée, comme le fait déjà « Utiliser ». Ce n'est pas ouvert par le correctif, et je ne l'ai pas éprouvé dans un vrai navigateur (Ctrl+Z après une écriture par script).

@@ -320,6 +320,13 @@ apprend : réponse prête à créer ou à modifier) vient après sa recette.
   constat 1, bloquant, reproduit) : pendant la rédaction, l'hôte peut aller
   « Utiliser » le wifi d'un autre voyageur et revenir ; ajouter la réponse et
   reprendre la marque faisait partir ce texte chez le mauvais voyageur.
+  **Et un texte TAPÉ ailleurs, sans marque, aussi** (review 2, constat 1) : la
+  page compte ses changements de conversation (`etat.changementsDeFil`) ; si
+  l'hôte est passé par un autre fil ET que la saisie a changé, la rédaction
+  est jetée, avec la note « relancez-la ». Un coup d'œil, saisie intacte, ne
+  coûte rien.
+- Une clôture refusée parce que le voyageur a posé une nouvelle question
+  entre-temps se DIT dans le fil (« elle reste dans À valider »).
 - **Une rédaction ne tient pas la page** : délai de 30 s
   (`DELAI_REDACTION_MS`), et changer de conversation libère le champ figé par
   le bouton « IA ».

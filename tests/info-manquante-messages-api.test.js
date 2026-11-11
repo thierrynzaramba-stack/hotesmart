@@ -69,7 +69,12 @@ function preparer ({ membre = false, droit = 'write', perimetre = ['209413'], ta
         // Le cron qui ecrit ENTRE la lecture de la tache et son UPDATE.
         if (q.patch && etat.avantMaj) { etat.avantMaj(); etat.avantMaj = null }
         let rows = nom === 'agent_tasks' ? etat.taches : []
-        rows = rows.filter(r => Object.entries(q.eq).every(([k, v]) => String(r[k]) === String(v)))
+        rows = rows.filter(r => Object.entries(q.eq).every(([k, v]) => {
+          // Comme PostgREST : `eq` avec null sur une date est une ERREUR de
+          // type, pas un filtre (`is` est le seul chemin vers null).
+          if (v === null) throw new Error('double : eq(' + k + ', null) — PostgREST refuse, utiliser is()')
+          return String(r[k]) === String(v)
+        }))
           .filter(r => Object.entries(q.neq).every(([k, v]) => String(r[k]) !== String(v)))
           .filter(r => Object.entries(q.in).every(([k, vs]) => vs.map(String).includes(String(r[k]))))
           .filter(r => Object.entries(q.is).every(([k, v]) => v === null ? r[k] == null : r[k] === v))
@@ -77,7 +82,7 @@ function preparer ({ membre = false, droit = 'write', perimetre = ['209413'], ta
         if (q.patch) {
           if (erreurMaj) return { data: null, error: erreurMaj }
           for (const r of rows) Object.assign(r, q.patch)
-          etat.majs.push({ table: nom, patch: q.patch, ids: rows.map(r => r.id), eq: { ...q.eq } })
+          etat.majs.push({ table: nom, patch: q.patch, ids: rows.map(r => r.id), eq: { ...q.eq }, is: { ...q.is } })
           return { data: rows.map(r => ({ id: r.id })), error: null }
         }
         if (q.ordre) {
@@ -293,6 +298,8 @@ test('une tache jamais mise a jour (updated_at nul) se clot sur sa date de creat
   const r = await appeler({ method: 'POST', body: { action: 'info_traitee', task_id: 'info', maj: info.created_at } })
   assert.equal(r.code, 200)
   assert.equal(etat.majs[0].eq.status, 'pending')
+  assert.ok(!('updated_at' in etat.majs[0].eq), 'eq(updated_at, …) sur une tache jamais mise a jour')
+  assert.deepEqual(etat.majs[0].is, { updated_at: null }, 'la version nulle se teste par is(), seul chemin PostgREST')
 })
 
 test('demande invalide -> 400 ; ecriture impossible -> 503', async () => {

@@ -148,7 +148,15 @@ réponse prête existante, elle propose sa modification.**
   sortie de l'IA illisible, ou emoji répondant à une question. Leur `question`
   est le message entier du voyageur, qui peut porter plusieurs demandes ;
   Oui / Non / Autre y donnerait un « oui » global. L'hôte garde le bouton
-  « IA » de la saisie.
+  « IA » de la saisie. ⚠ **Ce que ça laisse, et c'est assumé** (review 2,
+  constat 2) : sans carte, aucun geste de Messages ne clôt ces tâches ; elles
+  restent dans « À valider » d'Aujourd'hui comme avant le lot, où aucune tâche
+  `info_unknown` ne se clôturait depuis Messages. Et une troisième voie du cron
+  n'est PAS reconnue : quand le modèle classe `info_unknown` sans sous-tâches,
+  la question devient le message entier avec un résumé libre — la carte
+  s'affiche alors sur ce message, comme une seule question. Le contrôle
+  `tests/info-manquante-regles.test.js` lit le cron dans les deux sens pour
+  les textes FIXES ; un résumé libre ne peut pas se reconnaître.
 - **Clôture.** L'envoi d'une réponse rédigée depuis la carte clôt la tâche
   `info_unknown` par `POST /api/messages { action: 'info_traitee', task_id,
   maj, booking_id }`. ⚠ `maj` est la version de la tâche sur laquelle l'hôte
