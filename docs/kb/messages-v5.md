@@ -287,7 +287,8 @@ apprend : réponse prête à créer ou à modifier) vient après sa recette.
 - **⚠ Le plafond de l'hôte est le sien** (décision de Thierry : « 3 est trop
   petit de toute façon ») : 10 rédactions par conversation sur 24 h, comptées
   dans `ia_appels`. Jamais dans `guestflow_appels_ia` : trois clics y
-  arrêteraient l'agent sur le fil et réveilleraient le fondateur.
+  arrêteraient l'agent sur le fil et réveilleraient le fondateur. Relever les
+  3 appels de l'agent : dette 145.
 - **⚠ Une tâche `pending` ne sort JAMAIS dans `taches`.** La page affiche
   `taches` en proposition, et « Envoyer » y ferait partir `suggested_reply` —
   une note INTERNE — au voyageur. Le fil en direct lit les deux statuts en une
@@ -304,6 +305,16 @@ apprend : réponse prête à créer ou à modifier) vient après sa recette.
 - **L'alerte n'est pas retirée par la clôture** : elle part dans le tour de
   classification (le réglage `alerte_info` est enregistré mais aucun code de
   `lib/` ne le lit encore).
+- **La page** (`pages/messages.html`, ajouts seuls) : la carte arrive par le
+  fil en direct (au plus 5 s après l'ouverture du fil, aucun appel de plus),
+  en fin de fil ; « Rédiger la réponse » MET le texte À LA SUITE de la saisie,
+  marqué pour ce voyageur comme un texte posé par « Utiliser » ; une
+  rédaction revenue après un changement de fil est jetée. Le bouton « IA »
+  n'apparaît que si du texte est tapé, fige le champ pendant la rédaction,
+  REMPLACE le texte, et « Annuler » le rend tant que la version rédigée n'a pas
+  été retouchée. La tâche se clôt après l'envoi RÉUSSI de l'entrée née de la
+  carte (« Réessayer » compris), jamais pour un autre message.
 - Règles pures : `lib/guestflow/rediger.js` (serveur) et
   `shared/info-manquante.js` (page), copies tenues par
-  `tests/info-manquante-regles.test.js`.
+  `tests/info-manquante-regles.test.js` ; la page par
+  `tests/info-manquante-dom.test.js` (banc `tests/outils/banc-messages.js`).

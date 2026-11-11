@@ -256,6 +256,14 @@ test('chaque refus du serveur a sa phrase, et une erreur inconnue retombe sur «
   assert.equal(F.cleErreur(undefined), 'messages.info.erreur.autre')
 })
 
+test('chaque cle que le module rend existe dans les trois langues', () => {
+  const cles = new Set(['en_pause', 'garde_ia', 'ia_indisponible', 'deja_traitee', 'questions_changees', 'sans_question', 'deja_close', 'inconnue'].map(F.cleErreur))
+  for (const lang of ['fr', 'en', 'es']) {
+    const dico = JSON.parse(lire(`shared/i18n/${lang}.json`))
+    for (const cle of cles) assert.ok(typeof dico[cle] === 'string' && dico[cle].trim(), `${lang} : ${cle}`)
+  }
+})
+
 test('relireApres : la carte se relit quand la tache a bouge ailleurs, pas sur une panne', () => {
   for (const c of ['deja_traitee', 'sans_question', 'questions_changees', 'deja_close']) assert.equal(F.relireApres(c), true, c)
   for (const c of ['garde_ia', 'ia_indisponible', 'en_pause', undefined]) assert.equal(F.relireApres(c), false, String(c))

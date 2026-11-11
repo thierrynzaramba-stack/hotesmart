@@ -18,7 +18,7 @@ export const REPONSES = Object.freeze(['oui', 'non', 'autre'])
 export const MAX_PRECISION = 300
 export const MAX_BROUILLON = 4000
 
-const instant = (x) => { const t = new Date(x).getTime(); return Number.isFinite(t) ? t : null }
+const momentInfo = (x) => { const t = new Date(x).getTime(); return Number.isFinite(t) ? t : null }
 
 /**
  * La carte à montrer sous le fil, ou `null`.
@@ -30,12 +30,12 @@ const instant = (x) => { const t = new Date(x).getTime(); return Number.isFinite
  */
 export function infoAAfficher (infos, messages) {
   const liste = (Array.isArray(infos) ? infos : [])
-    .filter(x => x && x.id != null && Array.isArray(x.questions) && x.questions.length && instant(x.maj || x.created_at) != null)
+    .filter(x => x && x.id != null && Array.isArray(x.questions) && x.questions.length && momentInfo(x.maj || x.created_at) != null)
   if (!liste.length) return null
-  const plusRecente = liste.reduce((a, b) => instant(b.maj || b.created_at) > instant(a.maj || a.created_at) ? b : a)
-  const depuis = instant(plusRecente.maj || plusRecente.created_at)
+  const plusRecente = liste.reduce((a, b) => momentInfo(b.maj || b.created_at) > momentInfo(a.maj || a.created_at) ? b : a)
+  const depuis = momentInfo(plusRecente.maj || plusRecente.created_at)
   const repondu = (Array.isArray(messages) ? messages : []).some(m =>
-    m && m.direction === 'outbound' && m.kind !== 'auto' && instant(m.sent_at) != null && instant(m.sent_at) > depuis)
+    m && m.direction === 'outbound' && m.kind !== 'auto' && momentInfo(m.sent_at) != null && momentInfo(m.sent_at) > depuis)
   return repondu ? null : plusRecente
 }
 

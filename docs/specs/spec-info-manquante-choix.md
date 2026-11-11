@@ -119,7 +119,7 @@ réponse prête existante, elle propose sa modification.**
   arrêteraient l'agent sur la conversation (tâche « L'agent IA s'est
   arrêté… ») et réveilleraient le fondateur pour un geste voulu. Journal
   illisible : on n'appelle pas (503). Relever le plafond de l'agent lui-même
-  est un autre sujet, proposé au chef de file comme dette.
+  est un autre sujet : dette 145.
   `private, no-store` avant le premier refus, et le nombre de requêtes dans
   `Server-Timing`.
 - **Lecture des tâches.** ⚠ **Jamais dans `taches`** : la page affiche

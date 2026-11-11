@@ -49,8 +49,10 @@ const lire = (...p) => fs.readFileSync(path.join(RACINE, ...p), 'utf8')
 // l'éditeur et l'écriture d'une info (lot « Accueil du voyageur »).
 // ⚠ `messages-direct` : le rythme et la fusion du fil en direct, evalues POUR
 // DE VRAI comme les autres (spec-messages-fil-en-direct.md).
+// ⚠ `info-manquante` : la carte Oui / Non / Autre et le bouton « IA »
+// (spec-info-manquante-choix.md), evalues pour de vrai eux aussi.
 const PARTAGES = ['properties', 'aujourdhui', 'messages-programmes', 'calendrier-resa',
-  'confirmer', 'accueil-voyageur', 'connaissance-vue', 'messages-direct']
+  'confirmer', 'accueil-voyageur', 'connaissance-vue', 'messages-direct', 'info-manquante']
 const scriptPartage = (nom) => lire('shared', nom + '.js')
   .replace(/^import[\s\S]*?from\s*'[^']*'\s*$/gm, '')
   .replace(/^export default /gm, 'const __defaut_' + nom.replace(/-/g, '_') + ' = ')
@@ -295,6 +297,9 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       // Le fil en direct : le cycle, son etat, et son demarrage.
       relireDirect, planifierDirect, direct, demarrerDirect, changerDeFilDirect, indexerTaches,
       relireListe, chargerPageSuivante,
+      // Information manquante : l'envoi de la saisie, le bouton « IA » et son
+      // « Annuler » (la carte, elle, se clique dans le fil).
+      envoyer, redigerBrouillon, annulerIA, peindreSaisieIA,
       // Un GETTER, pas une valeur : la vue est montee APRES l'evaluation.
       get vueConnaissance () { return vueConnaissance }
     }
