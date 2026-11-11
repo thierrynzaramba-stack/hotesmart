@@ -1,6 +1,6 @@
 # Avis V5 — traduire les avis écrits dans une autre langue
 
-**Statut : décisions de Thierry du 11 novembre 2026 (10:12 à 10:14) ; spec
+**Statut : décisions de Thierry du 11 novembre 2026 (10:12 à 10:18) ; spec
 écrite sur la branche `avis-traduction`, partie de `main` à
 `f4b2597cfdf43b86025c2d75c7fe5f9d645184aa`. Aucun code avant l'accord du chef de
 file sur les fichiers partagés (§9).**
@@ -34,9 +34,9 @@ Demande de Thierry (11 novembre 2026, 10:12) : « les commentaires en langue
   attendre une traduction. Un avis pas encore traduit s'affiche dans sa langue,
   sans mention.
 
-**Point ouvert, à trancher par Thierry (Q4)** : la fiche ménage de l'hôte
-(`/menages`) montre aussi l'extrait de propreté d'un ménage. Le traduire dans la
-langue de l'hôte, comme la page Avis ?
+- **Q4 = A** : l'extrait est traduit **partout où il apparaît**, donc aussi dans
+  la fiche d'un ménage de la page Ménages de l'hôte (`/menages`), dans la langue
+  de l'hôte.
 
 ## 3. Ce qui change
 
@@ -98,7 +98,15 @@ par `avecContexteIA`, comme la classification.
   recopiée.
 - Changer de langue d'affichage recharge les cartes dans la nouvelle langue.
 
-### 3.4 L'application de la prestataire
+### 3.4 La fiche ménage de l'hôte (Q4)
+
+- `api/garde.js` : le retour d'un ménage porte l'extrait traduit dans la langue
+  demandée par l'écran (`?langue=`), avec sa langue source ; même lecture
+  embarquée, aucune requête de plus.
+- `pages/menages.html` : l'extrait traduit, avec « Traduit de l'anglais · Voir
+  l'original ».
+
+### 3.5 L'application de la prestataire
 
 - `api/menages-public.js` : l'extrait de propreté porte sa version française
   (`extrait_traduit`) et sa langue source (`extrait_langue`) quand l'extrait
@@ -169,5 +177,5 @@ Neufs : `migrations/2026-11-11-avis-traductions.sql`, `lib/avis/traduction.js`,
 Partagés : `api/cron.js` (une tâche), `api/avis.js`, `lib/avis/cartes.js`,
 `core/avis/cartes.js`, `api/menages-public.js`, `apps/menages/public.html`,
 `shared/ui.css` (bloc de la page Avis seulement), `shared/i18n/*.json` (ajouts de
-clés seulement), `pages/avis.html` (passage de la langue). Si Q4 = oui :
-`api/garde.js` et `pages/menages.html`.
+clés seulement), `pages/avis.html` (passage de la langue), `api/garde.js` et
+`pages/menages.html` (Q4).
