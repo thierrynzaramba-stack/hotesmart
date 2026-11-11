@@ -50,7 +50,7 @@ function preparer ({ membre = false, droit = 'write', perimetre = ['209413'], ta
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: membre ? MEMBRE : PROD } }, error: null }) },
     from (nom) {
-      const q = { eq: {}, neq: {}, gt: {}, gte: {}, in: {}, or: null, ordre: null, limite: null, patch: null }
+      const q = { eq: {}, neq: {}, gt: {}, gte: {}, in: {}, or: null, ordre: null, limite: null, patch: null, colonnes: null }
       const passeOr = (ligne) => {
         if (!q.or) return true
         const m = q.or.match(/(\w+)\.in\.\(([^)]*)\)/)
@@ -82,11 +82,14 @@ function preparer ({ membre = false, droit = 'write', perimetre = ['209413'], ta
           rows = [...rows].sort((a, b) => (new Date(a[col]) - new Date(b[col])) * (asc ? 1 : -1))
         }
         if (q.limite != null) rows = rows.slice(0, q.limite)
-        return { data: rows.map(r => ({ ...r })), error: null }
+        // Comme PostgREST : seules les colonnes DEMANDÉES reviennent. Sans ça,
+        // une colonne oubliée dans le `select` passerait inaperçue.
+        const proj = (r) => q.colonnes ? Object.fromEntries(q.colonnes.filter(k => k in r).map(k => [k, r[k]])) : { ...r }
+        return { data: rows.map(proj), error: null }
       }
       const un = (r) => ({ data: Array.isArray(r.data) ? (r.data[0] || null) : r.data, error: r.error })
       const c = {
-        select () { return c },
+        select (cols) { if (!q.patch && typeof cols === 'string' && cols.trim() !== '*') q.colonnes = cols.split(',').map(x => x.trim()); return c },
         update (patch) { q.patch = patch; return c },
         eq (k, v) { q.eq[k] = v; return c },
         neq (k, v) { q.neq[k] = v; return c },
@@ -154,18 +157,22 @@ test('LE TEST QUI COMPTE : `infos` rend les QUESTIONS de l info manquante ouvert
 })
 
 test('ni intervention (decision 1), ni tache close, ni tache systeme (pause, arret) dans `infos`', async () => {
-  preparer()
-  const brut = JSON.stringify((await direct()).body)
+  preparer({ taches: tachesDeReference().filter(x => x.id !== 'autre-bien') })
+  const corps = (await direct()).body
+  assert.deepEqual((corps.infos || []).map(x => x.id), ['info'], 'seule l info manquante ouverte')
+  const brut = JSON.stringify(corps)
   for (const x of ['Fuite d eau', 'QUESTION CLOSE', 'MESSAGE ENTIER', 'MESSAGE EN PAUSE']) assert.ok(!brut.includes(x), x + ' est sorti')
 })
 
 test('LE TEST QUI COMPTE : compte et perimetre tiennent sur `infos` — rien d un autre compte, rien du bien B pour un membre limite', async () => {
   preparer()
-  let brut = JSON.stringify((await direct()).body)
-  assert.ok(!brut.includes('AUTRE COMPTE'), 'une tache d un autre compte est sortie')
+  let corps = (await direct()).body
+  assert.ok((corps.infos || []).some(x => x.id === 'info'), 'le titulaire voit l info de son compte')
+  assert.ok(!JSON.stringify(corps).includes('AUTRE COMPTE'), 'une tache d un autre compte est sortie')
   preparer({ membre: true, droit: 'read', perimetre: ['209413'] })
-  brut = JSON.stringify((await direct()).body)
-  assert.ok(!brut.includes('QUESTION DU BIEN B'), 'une tache du bien B est sortie pour un membre limite au bien A')
+  corps = (await direct()).body
+  assert.deepEqual((corps.infos || []).map(x => x.id), ['info'], 'le membre voit l info de SON bien')
+  assert.ok(!JSON.stringify(corps).includes('QUESTION DU BIEN B'), 'une tache du bien B est sortie pour un membre limite au bien A')
 })
 
 test('le nombre de lectures ne change pas : UNE lecture des taches, statut en `in`, les plus recentes d abord', async () => {
