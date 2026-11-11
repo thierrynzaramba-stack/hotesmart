@@ -2141,14 +2141,21 @@ function ouvrirFicheResa (bienId, resaId) {
   let dernierRetour = null       // { cle, vars, erreur } : survit a la relecture
   const encoreLaFiche = () => !$('[data-bind="feuille"]').hidden && encoreCetteResa()
   const dateCourte = (iso) => iso ? dateIntl(String(iso).slice(0, 10), langue()) : ''
+  // ⚠ LA ZONE D'ANNONCE (`role="status"`) EST POSEE UNE FOIS et n'est jamais
+  // repeinte (review 1 de 2b, constat 8) : recreee a chaque relecture, un
+  // lecteur d'ecran pouvait perdre l'annonce. Seul `[data-fac-contenu]` change.
   function peindreFacture (f) {
     const zone = corps.querySelector('[data-fiche-facture]')
     if (!zone) return
+    if (!zone.querySelector('[data-fac-retour]')) {
+      zone.innerHTML = '<div data-fac-contenu></div><p class="caption" data-fac-retour role="status" style="margin: 6px 0 0"></p>'
+    }
+    const contenu = zone.querySelector('[data-fac-contenu]')
     const p = presentationFacture(f)
-    if (!p) { zone.innerHTML = ''; return }
+    if (!p) { contenu.innerHTML = ''; return }
     const dest = p.destinataire
     const lignesDest = dest ? [dest.nom, [dest.code_postal, dest.ville].filter(Boolean).join(' '), dest.pays].filter(Boolean).join(', ') : ''
-    zone.innerHTML = `
+    contenu.innerHTML = `
       <div data-fac style="margin-top: 14px">
         <p class="caption muted" style="margin: 0 0 4px">${esc(t('cal.fac_titre'))}</p>
         <p data-fac-statut style="margin: 0">${esc(t(p.statut))}</p>
@@ -2164,7 +2171,6 @@ function ouvrirFicheResa (bienId, resaId) {
           <label class="caption muted" for="fac-lien-texte">${esc(t('cal.fac_lien_label'))}</label>
           <input type="text" id="fac-lien-texte" readonly data-fac-lien-texte style="width: 100%">
         </div>
-        <p class="caption" data-fac-retour role="status" style="margin: 6px 0 0"></p>
         <form data-fac-form hidden novalidate style="margin-top: 8px"></form>
       </div>`
     if (lienCourant && lienVisible) montrerLien(zone, lienCourant)
@@ -2189,8 +2195,14 @@ function ouvrirFicheResa (bienId, resaId) {
     champ.value = lien
     champ.addEventListener('focus', () => champ.select())
   }
-  const boutonsFacture = (zone, actifs) =>
-    zone.querySelectorAll('[data-fac-envoyer], [data-fac-copier], [data-fac-saisir], [data-fac-form] button').forEach(b => { b.disabled = !actifs })
+  // ⚠ FORMULAIRE OUVERT = « Envoyer », « Copier » et « Remplir » restent
+  // coupes (review 1 de 2b, constat 3) : leur relecture repeint la fiche et
+  // effacait la saisie en cours. Ils reviennent a la fermeture du formulaire.
+  const boutonsFacture = (zone, actifs) => {
+    const formOuvert = !!zone.querySelector('[data-fac-form]:not([hidden])')
+    zone.querySelectorAll('[data-fac-envoyer], [data-fac-copier], [data-fac-saisir]').forEach(b => { b.disabled = !actifs || formOuvert })
+    zone.querySelectorAll('[data-fac-form] button').forEach(b => { b.disabled = !actifs })
+  }
   // UN site d'appel pour tous les gestes (tests/budget-ecran.test.js) : ils ne
   // partent qu'au clic, jamais a l'ouverture de la fiche.
   const posterFacture = (corpsPost) => appel('/api/factures-voyageur', { booking: resaCourante, ...corpsPost })
@@ -2199,8 +2211,21 @@ function ouvrirFicheResa (bienId, resaId) {
     const cle = cleRefusFacture(code, e && e.status)
     dire(zone, { cle, vars: { champ: libelles[e && e.champ] || '' }, erreur: true })
   }
-  async function copierDansLePressePapiers (lien) {
-    try { await navigator.clipboard.writeText(lien); return true } catch { return false }
+  // ⚠ SAFARI REFUSE UNE COPIE DEMANDEE APRES UNE ATTENTE RESEAU (review 1 de
+  // 2b, constat 7) : le geste de l'utilisateur est alors « consomme ». La copie
+  // est donc DEMANDEE tout de suite, dans le clic, avec un `ClipboardItem`
+  // nourri par la PROMESSE du lien ; Chrome l'accepte aussi. Sans
+  // `ClipboardItem`, repli `writeText` une fois le lien en main. Rend une
+  // promesse de booleen, jamais d'exception.
+  function demanderCopie (lienP) {
+    const cb = navigator.clipboard
+    try {
+      if (cb && typeof cb.write === 'function' && typeof window.ClipboardItem === 'function') {
+        const item = new window.ClipboardItem({ 'text/plain': lienP.then(l => new Blob([l], { type: 'text/plain' })) })
+        return cb.write([item]).then(() => true, () => false)
+      }
+    } catch { /* on tente le repli */ }
+    return lienP.then(l => (cb && typeof cb.writeText === 'function' ? cb.writeText(l).then(() => true, () => false) : false), () => false)
   }
   async function envoyerLienFacture (zone) {
     if (!window.confirm(t('cal.fac_confirm_envoi'))) return
@@ -2214,6 +2239,9 @@ function ouvrirFicheResa (bienId, resaId) {
       if (rep.envoi !== 'livre' && lienCourant) montrerLien(zone, lienCourant)
       dire(zone, { cle: cleRetourEnvoiFacture(rep.envoi), erreur: !['livre', 'differe'].includes(rep.envoi) })
       await lireDetailFiche()
+      // Une relecture echouee ne repeint rien : sans ceci, les boutons
+      // restaient coupes jusqu'a la prochaine ouverture de la fiche.
+      boutonsFacture(zone, true)
     } catch (e) {
       if (!encoreLaFiche()) return
       refus(zone, e); boutonsFacture(zone, true)
@@ -2221,19 +2249,19 @@ function ouvrirFicheResa (bienId, resaId) {
   }
   async function copierLienFacture (zone) {
     boutonsFacture(zone, false)
+    const nouveau = !lienCourant
+    // Rien n'est attendu avant `demanderCopie` : c'est la condition de Safari.
+    const lienP = nouveau ? posterFacture({ action: 'copier_lien' }).then(rep => rep.lien) : Promise.resolve(lienCourant)
+    const copieP = demanderCopie(lienP)
     try {
-      let nouveau = false
-      if (!lienCourant) {
-        const rep = await posterFacture({ action: 'copier_lien' })
-        if (!encoreLaFiche()) return
-        lienCourant = rep.lien
-        nouveau = true
-      }
-      montrerLien(zone, lienCourant)
-      const copie = await copierDansLePressePapiers(lienCourant)
+      const lien = await lienP
+      if (!encoreLaFiche()) return
+      lienCourant = lien
+      montrerLien(zone, lien)
+      const copie = await copieP
       dire(zone, { cle: copie ? 'cal.fac_copie_ok' : 'cal.fac_copie_manuelle' })
       if (nouveau) await lireDetailFiche()
-      else boutonsFacture(zone, true)
+      boutonsFacture(zone, true)
     } catch (e) {
       if (!encoreLaFiche()) return
       refus(zone, e); boutonsFacture(zone, true)
@@ -2246,6 +2274,9 @@ function ouvrirFicheResa (bienId, resaId) {
     ['code_postal', 'cal.fac_f_cp', 20], ['ville', 'cal.fac_f_ville', 120], ['pays', 'cal.fac_f_pays', 80],
     ['tva', 'cal.fac_f_tva', 20], ['siren', 'cal.fac_f_siren', 11]
   ]
+  // Les champs que le serveur exige (validerDestinataire) : dits a l'aide
+  // technique, pas seulement refuses apres coup.
+  const OBLIGATOIRES = ['nom', 'adresse1', 'ville', 'pays']
   function ouvrirSaisieFacture (zone, dest) {
     const form = zone.querySelector('[data-fac-form]')
     if (!form) return
@@ -2259,18 +2290,19 @@ function ouvrirFicheResa (bienId, resaId) {
       </fieldset>
       ${CHAMPS_DEST.map(([c, cle, max]) => `<div data-fac-champ="${c}"${!societe && (c === 'tva' || c === 'siren') ? ' hidden' : ''}>
         <label class="caption muted" for="fac-${c}">${esc(t(cle))}</label>
-        <input type="text" id="fac-${c}" name="${c}" maxlength="${max}" value="${esc(v[c] || '')}" style="width: 100%">
+        <input type="text" id="fac-${c}" name="${c}" maxlength="${max}" value="${esc(v[c] || '')}"${OBLIGATOIRES.includes(c) ? ' required aria-required="true"' : ''} style="width: 100%">
       </div>`).join('')}
       <span class="row" style="gap: 8px; margin-top: 8px">
         <button type="submit" class="btn btn--primary" data-fac-enregistrer>${esc(t('cal.fac_f_enregistrer'))}</button>
         <button type="button" class="link" data-fac-fermer>${esc(t('cal.fac_f_annuler'))}</button>
       </span>`
     form.hidden = false
+    boutonsFacture(zone, true)
     const typeChoisi = () => form.querySelector('input[name="fac-type"]:checked').value
     form.querySelectorAll('input[name="fac-type"]').forEach(x => x.addEventListener('change', () => {
       for (const c of ['tva', 'siren']) form.querySelector(`[data-fac-champ="${c}"]`).hidden = typeChoisi() !== 'societe'
     }))
-    form.querySelector('[data-fac-fermer]').addEventListener('click', () => { form.hidden = true; form.innerHTML = '' })
+    form.querySelector('[data-fac-fermer]').addEventListener('click', () => { form.hidden = true; form.innerHTML = ''; boutonsFacture(zone, true) })
     form.querySelector('#fac-nom').focus()
     // ⚠ `onsubmit`, PAS `addEventListener` : le meme <form> se rouvre apres
     // « Annuler », et un second ecouteur ferait partir DEUX saisies.
@@ -2278,6 +2310,10 @@ function ouvrirFicheResa (bienId, resaId) {
       ev.preventDefault()
       const destinataire = { type: typeChoisi() }
       for (const [c] of CHAMPS_DEST) destinataire[c] = form.querySelector(`#fac-${c}`).value
+      // ⚠ UN PARTICULIER N'A NI TVA NI SIREN (review 1 de 2b, constat 2) : une
+      // valeur tapee puis cachee (retour a « particulier ») partait quand meme,
+      // et le serveur la refusait sur un champ que l'hote ne voyait plus.
+      if (destinataire.type !== 'societe') { destinataire.tva = ''; destinataire.siren = '' }
       const libelles = Object.fromEntries(CHAMPS_DEST.map(([c, cle]) => [c, t(cle)]))
       boutonsFacture(zone, false)
       try {
@@ -2285,6 +2321,10 @@ function ouvrirFicheResa (bienId, resaId) {
         if (!encoreLaFiche()) return
         dire(zone, { cle: 'cal.fac_saisie_ok' })
         await lireDetailFiche()
+        boutonsFacture(zone, true)
+        // Le formulaire a disparu avec la relecture : le focus revient au
+        // geste qui le rouvre, pas dans le vide.
+        zone.querySelector('[data-fac-saisir]')?.focus()
       } catch (e) {
         if (!encoreLaFiche()) return
         refus(zone, e, libelles)

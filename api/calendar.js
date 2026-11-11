@@ -274,11 +274,13 @@ module.exports = async function handler(req, res) {
       let requetesDetail = 1
       // La FACTURE du voyageur (etape 2b) : sa demande active et ses derniers
       // liens, lues EN PARALLELE de la reservation — aucun appel de plus ne
-      // part du navigateur (spec-facture-voyageur §9.1). Bornee aux biens que
-      // la garde vient de resoudre. Une panne ne fait pas tomber la fiche :
-      // elle rend « indisponible », jamais « aucune demande ».
+      // part du navigateur (spec-facture-voyageur §9.1). Bornee au compte que
+      // la garde vient de designer ; une demande d'un autre bien que celui de
+      // la reservation est dite « indisponible », sans detail. Une panne ne
+      // fait pas tomber la fiche : elle rend « indisponible », jamais
+      // « aucune demande ».
       requetesDetail++
-      const factureLue = FV.lireDemandeDeLaFiche(gardeGet.compte, String(req.query.booking), ownedIds, { db: supabase })
+      const factureLue = FV.lireDemandeDeLaFiche(gardeGet.compte, String(req.query.booking), { db: supabase })
         .catch(e => { console.error('[calendar] lecture facture', e.message); return { ok: false } })
       const lireDetail = (avecRaw) => supabase
         .from('bookings_snapshot')

@@ -147,6 +147,15 @@ déjà obtenu (par « Envoyer » ou « Copier ») est recopié tel quel : pas de
 jeton de plus, et l'anti-double-clic de 30 s ne le refuse pas. Rouvrir la fiche
 en crée un neuf — le lien en clair n'est jamais relu.
 
+⚠ **LA DEMANDE EST LUE PAR COMPTE ET RÉSERVATION, PAS PAR BIEN** (review 1 de
+2b) : rattachée à un autre bien que celui de la réservation, elle est dite
+`{ indisponible: true }`, sans détail — jamais « aucune demande ».
+
+⚠ **LA COPIE EST DEMANDÉE DANS LE CLIC** : Safari refuse une copie demandée
+après une attente réseau. Un `ClipboardItem` nourri par la PROMESSE du lien
+part tout de suite ; sans `ClipboardItem`, repli `writeText`. Si le
+presse-papiers refuse, le lien reste affiché et la fiche le dit.
+
 ⚠ **APRÈS CHAQUE GESTE, L'ÉTAT EST RELU** par la même lecture `?booking=` :
 l'écran affiche toujours ce que le serveur sait, pas ce que le geste a supposé.
 
@@ -174,6 +183,13 @@ l'écran affiche toujours ce que le serveur sait, pas ce que le geste a supposé
 - **Faux positifs du masque**, dans la COPIE du fil seulement (le message parti
   est intact) : un autre lien en `/facture…`, ou une longue référence avec
   chiffres dans un message qui parle de facture.
+- **Beds24 : pas de fiche, donc pas de bloc Facture** (P2 sexies, Thierry,
+  11 nov. 2026 : plus tard, en dette) — le calendrier V5 n'affiche pas les
+  biens Beds24. Le serveur sait rendre un lien sans message (`copier_lien`) ;
+  c'est l'écran qui manque.
+- **« Copier » puis « Envoyer » à moins de 30 s** : la même porte (`fiche`)
+  porte l'anti-double-clic de la base, « Envoyer » rend 429 et la fiche dit
+  « réessayez dans 30 secondes ».
 - **Un jeton sans issue** (`envoi` vide) se lit « lien créé, sans message
   confirmé » :
   c'est le cas de « Copier un lien », mais aussi d'un envoi interrompu entre la

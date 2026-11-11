@@ -211,6 +211,7 @@
   "cal.fac_lien_cree": "Last link created on {date}, with no confirmed message.",
   "cal.fac_lien_label": "Billing form link",
   "cal.fac_modifier": "Edit billing details",
+  "cal.fac_note_annulee": "Booking cancelled: it is not invoiced.",
   "cal.fac_note_beds24": "Beds24 booking: HôteSmart does not send the link; copy it and pass it on yourself.",
   "cal.fac_note_non_confirmee": "An invoice becomes possible once the booking is confirmed.",
   "cal.fac_note_sans_email": "This booking has no email address: copy the link and pass it on yourself.",

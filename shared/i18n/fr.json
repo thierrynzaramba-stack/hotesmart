@@ -211,6 +211,7 @@
   "cal.fac_lien_cree": "Dernier lien créé le {date}, sans message confirmé.",
   "cal.fac_lien_label": "Lien du formulaire de facturation",
   "cal.fac_modifier": "Modifier les coordonnées",
+  "cal.fac_note_annulee": "Réservation annulée : elle ne se facture pas.",
   "cal.fac_note_beds24": "Réservation Beds24 : HôteSmart n'envoie pas le lien, copiez-le et transmettez-le vous-même.",
   "cal.fac_note_non_confirmee": "La facture sera possible une fois la réservation confirmée.",
   "cal.fac_note_sans_email": "Cette réservation n'a pas d'adresse : copiez le lien et transmettez-le vous-même.",

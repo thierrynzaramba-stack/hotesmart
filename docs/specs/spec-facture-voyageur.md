@@ -228,6 +228,19 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   porte un bouton « Copier un lien », présent même quand le message est
   parti ; chaque clic crée un lien NEUF, sans envoyer de message, et les liens
   précédents restent valables jusqu'à leur expiration.
+  → **Précision de Thierry (11 nov. 2026, après la review 1 de 2b) : dans UNE
+  ouverture de la fiche, un second clic recopie le lien déjà obtenu** (par
+  « Copier » ou « Envoyer ») au lieu d'en créer un neuf ; rouvrir la fiche en
+  crée un neuf. Motif : pas de lien en trop, et la base refuse de toute façon
+  un second lien de la même porte à moins de 30 s.
+- **P2 sexies — Beds24 sur la fiche** (review 1 de 2b, constat 1). Le
+  calendrier V5 n'affiche pas les biens Beds24 : leurs réservations n'ont pas
+  de fiche, donc pas de bloc Facture, et P2 quater (« le lien revient à
+  l'hôte ») n'a aucun chemin écran.
+  → **Réponse de Thierry (11 nov. 2026) : plus tard, noté en dette.**
+  L'étape 2b couvre les biens du calendrier (Channex) ; pour Beds24, le
+  serveur sait déjà rendre un lien sans message (`copier_lien`), c'est l'écran
+  qui manque (registre des dettes).
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
   → **Réponse de Thierry (8 nov. 2026, 22 h 09) : A.** Les rappels
@@ -1005,6 +1018,59 @@ diff du correctif ; ce qu'elle trouve se corrige SANS nouvelle review.
 - Tests : Beds24 (deux cas), masque (toutes les formes sondées, coupure,
   idempotence, coût), `tests/inbound-email.test.js` (ajout : la citation est
   masquée partout) ; 4 mutations tuées. Suite 7836/7836.
+
+### 10 quater. Code de l'étape 2b — les revues
+
+#### Review 1 (sous-agent, 11 novembre 2026, sur tout 2b)
+
+Arbre `/home/claude/hotesmart-fv2b`, branche `facture-voyageur-etape-2b`,
+plage `669d081fd522f31d6cc40371c9b3427488b052b3..605ebf8c040bef4ac6a916497be13f787fe1add2`
+(13 fichiers ; chaque fichier cité est dans le diff — contrôle fait).
+**Aucun constat de sécurité.** Gardes mesurées par la revue : membre limité à
+un autre bien, membre « facturation » seul, compte voisin, listes mêlées — 403
+ou 404, aucune lecture de facture, aucun jeton ; un membre en lecture ne reçoit
+que l'état. Refactor `ouvrirUnLien` : même ordre de refus et même comptage pour
+`envoyer_lien`. Syntaxe PostgREST mesurée sur l'URL produite.
+
+1. **MAJEUR — Beds24 : la fiche ne s'ouvre pas.** Le calendrier V5 exclut les
+   biens Beds24 ; la branche `sansEnvoi: 'beds24'` n'est atteinte que par les
+   tests, et P2 quater (« le lien revient à l'hôte ») n'a aucun chemin écran.
+   → **Question à Thierry.**
+2. MINEUR — un SIREN ou une TVA tapé puis caché (retour à « particulier »)
+   part quand même et bloque l'enregistrement sur un champ invisible.
+3. MINEUR — « Copier » ou « Envoyer » efface le formulaire « Remplir à sa
+   place » en cours ; une relecture échouée laisse les boutons désactivés.
+4. MINEUR — une demande rattachée à un AUTRE bien du compte s'affiche
+   « Aucune demande » avec les trois gestes : une présence dite absence.
+5. MINEUR — P2 quinquies : le code recopie le lien déjà obtenu dans une même
+   ouverture de la fiche, la décision dit « chaque clic crée un lien neuf » ;
+   « Copier » puis « Envoyer » dans les 30 s rend 429 (même porte `fiche`).
+   → **Question à Thierry** (déjà signalée).
+6. MINEUR — réservation annulée : la note dit « possible une fois
+   confirmée ».
+7. MINEUR — iPhone : la copie après l'attente réseau est refusée par Safari ;
+   le repli (lien affiché) serait systématique au premier clic.
+8. MINEUR — accessibilité : zone `role="status"` recréée à chaque peinture ;
+   focus perdu après l'enregistrement ; champs obligatoires non signalés.
+9. MINEUR — tests manquants : membre limité à un bien, membre « facturation »
+   seul (mesurés par la revue, à inscrire).
+**Suites données** (correctifs sans nouvelle review sauf la dernière permise
+au lot, l'envoi au voyageur) : 1 tranché par Thierry (P2 sexies, dette) ;
+2 TVA et SIREN vidés pour un particulier ; 3 formulaire ouvert = « Envoyer »,
+« Copier », « Remplir » coupés, et les boutons reviennent après toute
+relecture ; 4 demande lue par compte et réservation, « indisponible » si son
+bien n'est pas celui de la réservation ; 5 tranché par Thierry (précision de
+P2 quinquies) ; 6 clé `cal.fac_note_annulee` ; 7 copie demandée DANS le clic
+(`ClipboardItem` nourri par la promesse du lien, repli `writeText`) ; 8 zone
+d'annonce posée une fois, `aria-required` sur les quatre champs exigés, focus
+rendu à « Modifier les coordonnées » ; 9 tests ajoutés (membre limité à un
+autre bien, membre « facturation » seul, sur les deux endpoints). Chaque
+correctif a son test, et chaque test rougit quand on retire son correctif
+(mutations faites, cinq sur cinq).
+Notés sans correction : la lecture de la facture part même quand la
+réservation finit en 404 (une requête, sans fuite — c'est le prix du
+parallèle) ; une réponse tardive d'une ouverture PRÉCÉDENTE de la même
+réservation peut repeindre la fiche rouverte (même réservation, pas de fuite).
 
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 

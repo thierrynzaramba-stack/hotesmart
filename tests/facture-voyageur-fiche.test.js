@@ -31,6 +31,8 @@ const AUTRE = '22222222-2222-4222-8222-222222222222'    // un autre compte
 const M_LECTURE = '33333333-3333-4333-8333-333333333333' // membre : réservations en lecture
 const M_RES = '44444444-4444-4444-8444-444444444444'     // membre : réservations en écriture, messages en lecture
 const M_TOUT = '55555555-5555-4555-8555-555555555555'    // membre : réservations ET messages en écriture
+const M_AILLEURS = '66666666-6666-4666-8666-666666666666' // membre : tout en écriture, mais sur Ofuro Futari seulement
+const M_FACT = '77777777-7777-4777-8777-777777777777'     // membre : « facturation » en écriture, rien d'autre
 const BIEN = 'aaaaaaaa-0000-4000-8000-000000000001'
 const BIEN_BX = 'aaaaaaaa-0000-4000-8000-000000000002'  // Beds24
 const BIEN_ARCH = 'aaaaaaaa-0000-4000-8000-000000000003'
@@ -120,10 +122,13 @@ test('P2 quater et P5 : Beds24 et directe sans adresse — pas d\'« envoyer »,
   assert.equal(avecMail.gestes.envoyer, true)
 })
 
-test('une demande d\'un AUTRE bien que celui de la réservation est ignorée', () => {
-  const e = FV.etatPourLaFiche(DEMANDE({ property_uuid: BIEN_BX }), DROITS_TOUS)
-  assert.equal(e.statut, null)
-  assert.equal(e.destinataire, null)
+test('une demande d\'un AUTRE bien que celui de la réservation : « indisponible », sans détail, pour tous (review 1, constat 4)', () => {
+  // Ni « aucune demande » (une présence dite absence, avec des gestes que le
+  // serveur refuserait), ni ses détails.
+  for (const droits of [DROITS_TOUS, { ...DROITS_TOUS, ecritureResa: false, ecritureMessages: false }]) {
+    assert.deepEqual(FV.etatPourLaFiche(DEMANDE({ property_uuid: BIEN_BX }), droits), { indisponible: true })
+    assert.deepEqual(FV.etatPourLaFiche(DEMANDE({ property_uuid: BIEN_BX, statut: 'emise' }), droits), { indisponible: true })
+  }
 })
 
 // Le module commun aux deux écrans : des CLÉS, pas des phrases.
@@ -145,6 +150,9 @@ test('presentationFacture (module commun) : clés d\'état, d\'envoi, de note et
   const lecture = M.presentationFacture({ statut: 'lien_envoye', gestes: { envoyer: false, copier: false, saisir: false } })
   assert.deepEqual(lecture.boutons, { envoyer: null, copier: false, saisir: null })
   assert.equal(M.presentationFacture(FV.etatPourLaFiche(null, { ...DROITS_TOUS, provider: 'beds24' })).note, 'cal.fac_note_beds24')
+  // Une annulée ne se facturera JAMAIS : pas « une fois confirmée » (review 1, constat 6).
+  assert.equal(M.presentationFacture(FV.etatPourLaFiche(null, { ...DROITS_TOUS, snapshot: SNAP({ status: 'cancelled' }) })).note, 'cal.fac_note_annulee')
+  assert.equal(M.cleRefusFacture('reservation_annulee', 409), 'cal.fac_note_annulee')
   assert.equal(M.cleRefusFacture('trop_rapproche', 429), 'cal.fac_err_trop_rapproche')
   assert.equal(M.cleRefusFacture('Droits insuffisants', 403), 'cal.fac_err_droits')
   assert.equal(M.cleRetourEnvoiFacture('sans_canal'), 'cal.fac_ret_sans_canal')
@@ -268,7 +276,9 @@ const PERM = (id, membre, perms) => ({
 const MEMBRES = [
   PERM('p-lec', M_LECTURE, { reservations: 'read', messages: 'read' }),
   PERM('p-res', M_RES, { reservations: 'write', messages: 'read' }),
-  PERM('p-tout', M_TOUT, { reservations: 'write', messages: 'write' })
+  PERM('p-tout', M_TOUT, { reservations: 'write', messages: 'write' }),
+  PERM('p-ailleurs', M_AILLEURS, { reservations: 'write', messages: 'write', property_scope: 'list', property_ids: [BIEN_BX], property_refs: ['PX'] }),
+  PERM('p-fact', M_FACT, { facturation: 'write' })
 ]
 const PARC = () => ({
   properties: [
@@ -284,6 +294,7 @@ const PARC = () => ({
     { user_id: A, booking_id: 'R_EMISE', property_id: 'P1', snapshot: SNAP(), raw: {} },
     { user_id: A, booking_id: 'R_ARCH', property_id: 'P3', snapshot: SNAP(), raw: {} },
     { user_id: A, booking_id: 'R_BX', property_id: 'PX', snapshot: SNAP({ provider: 'beds24' }), raw: {} },
+    { user_id: A, booking_id: 'R_DEPL', property_id: 'P1', snapshot: SNAP(), raw: {} },
     { user_id: AUTRE, booking_id: 'R_B', property_id: 'PB', snapshot: SNAP(), raw: {} }
   ],
   factures_voyageur: [
@@ -291,6 +302,8 @@ const PARC = () => ({
       dest_type: 'particulier', dest_nom: 'Léa Martin', dest_adresse_ligne1: '3 rue Haute', dest_code_postal: '31000', dest_ville: 'Toulouse', dest_pays: 'France' },
     { id: 'd-ancienne', user_id: A, property_uuid: BIEN, booking_id: 'R1', nature: 'facture', statut: 'annulee_par_avoir', dest_nom: 'NE DOIT PAS SORTIR' },
     { id: 'd-emise', user_id: A, property_uuid: BIEN, booking_id: 'R_EMISE', nature: 'facture', statut: 'emise' },
+    // Une demande ÉMISE, rattachée à un AUTRE bien du compte que celui de la réservation.
+    { id: 'd-depl', user_id: A, property_uuid: BIEN_BX, booking_id: 'R_DEPL', nature: 'facture', statut: 'emise', dest_nom: 'SUR UN AUTRE BIEN' },
     { id: 'd-autre', user_id: AUTRE, property_uuid: BIEN_AUTRE, booking_id: 'R_B', nature: 'facture', statut: 'lien_envoye', dest_nom: 'COMPTE VOISIN' }
   ],
   factures_voyageur_jetons: [
@@ -301,7 +314,8 @@ const PARC = () => ({
   api_keys: []
 })
 
-const JETONS = { 'jeton-a': A, 'jeton-autre': AUTRE, 'jeton-lecture': M_LECTURE, 'jeton-res': M_RES, 'jeton-tout': M_TOUT }
+const JETONS = { 'jeton-a': A, 'jeton-autre': AUTRE, 'jeton-lecture': M_LECTURE, 'jeton-res': M_RES, 'jeton-tout': M_TOUT,
+  'jeton-ailleurs': M_AILLEURS, 'jeton-fact': M_FACT }
 const RECHARGES = ['../api/calendar', '../api/factures-voyageur', '../lib/require-permission', '../lib/permissions',
   '../lib/factures-voyageur', '../lib/calendrier-writer']
 
@@ -364,7 +378,9 @@ test('LE TEST QUI COMPTE : la fiche du TITULAIRE reçoit l\'état de la facture 
     assert.equal(lecturesFacture(etat).length, 1)
     assert.deepEqual(q.f.find(([c]) => c === 'user_id'), ['user_id', A])
     assert.deepEqual(q.f.find(([c]) => c === 'booking_id'), ['booking_id', 'R1'])
-    assert.deepEqual(q.dans, [['property_uuid', [BIEN]]])
+    // Bornée au compte et à la réservation — pas aux biens (review 1, constat 4).
+    assert.deepEqual(q.dans, [])
+    assert.ok(!q.f.some(([c]) => c === 'property_uuid'))
     assert.match(q.cols, /factures_voyageur_jetons\(/, 'les jetons arrivent par embarquement : une requête, pas deux')
     assert.ok(!/jeton_hash|envoi_motif/.test(q.cols), 'ni l\'empreinte du jeton ni le motif technique ne sont lus')
     assert.match(r.entetes['server-timing'], /^db;desc="\d+ req/)
@@ -421,6 +437,30 @@ test('compte voisin : refusé AVANT toute lecture de facture ; et sa demande ne 
     const r2 = await appeler(fiche('R_B', BIEN))
     assert.equal(r2.code, 404)
     assert.ok(!JSON.stringify(r2.corps || {}).includes('COMPTE VOISIN'))
+  } finally { fini() }
+})
+
+test('review 1, constat 4 : une demande ÉMISE rattachée à un autre bien — « indisponible », ni gestes ni détail', async () => {
+  const { appeler, fini } = monter('../api/calendar')
+  try {
+    const r = await appeler(fiche('R_DEPL'))
+    assert.equal(r.code, 200)
+    assert.deepEqual(r.corps.facture, { indisponible: true })
+    assert.ok(!JSON.stringify(r.corps).includes('SUR UN AUTRE BIEN'))
+  } finally { fini() }
+})
+
+test('review 1, constat 9 : membre limité à un AUTRE bien, membre « facturation » seul — refusés, aucune lecture de facture', async () => {
+  const { appeler, etat, fini } = monter('../api/calendar')
+  try {
+    assert.equal((await appeler(fiche('R1', BIEN, { jeton: 'jeton-ailleurs' }))).code, 403)
+    assert.equal((await appeler(fiche('R1', BIEN, { jeton: 'jeton-fact' }))).code, 403)
+    // Par le bien qu'il a, il ne lit pas la réservation d'un autre bien.
+    const r = await appeler(fiche('R1', BIEN_BX, { jeton: 'jeton-ailleurs' }))
+    assert.equal(r.code, 404)
+    assert.ok(!JSON.stringify(r.corps || {}).includes('Léa Martin'))
+    assert.equal(r.corps.facture, undefined, 'rien de la facture ne sort d\'une fiche refusée')
+    assert.ok(etat, 'base consultée')
   } finally { fini() }
 })
 
@@ -485,6 +525,15 @@ test('« copier » : `reservations` en écriture SUFFIT (pas de « messages ») 
     const env = await appeler({ methode: 'POST', jeton: 'jeton-res', corps: { action: 'envoyer_lien', booking: 'R1' } })
     assert.equal(env.code, 403)
     assert.equal(env.corps.motif, 'droits_messages')
+  } finally { fini() }
+})
+
+test('« copier » : membre hors de son périmètre, membre « facturation » seul — 403, aucun jeton (review 1, constat 9)', async () => {
+  const { appeler, etat, fini } = monter('../api/factures-voyageur')
+  try {
+    assert.equal((await appeler(copier('R1', 'jeton-ailleurs'))).code, 403)
+    assert.equal((await appeler(copier('R1', 'jeton-fact'))).code, 403)
+    assert.equal(etat.rpcs.length, 0)
   } finally { fini() }
 })
 
@@ -749,5 +798,77 @@ test('LE MOBILE SUIT L\'ORDINATEUR : le même bloc, les mêmes gestes, sur la fi
     zone.querySelector('[data-fac-copier]').click()
     for (let i = 0; i < 6; i++) await attendre()
     assert.deepEqual(b.copies, [LIEN])
+  } finally { b.fermer() }
+})
+
+// ─── Les corrections de la review 1 (constats 2, 3, 7, 8), côté page ────────
+
+test('review 1, constat 2 : un SIREN tapé puis CACHÉ (retour à « particulier ») ne part pas', async () => {
+  const b = bancFiche({ reponses: { saisir: { ok: true } } })
+  try {
+    const zone = await ouvrirFiche(b)
+    zone.querySelector('[data-fac-saisir]').click()
+    const form = zone.querySelector('[data-fac-form]')
+    const choisir = (v) => { const x = form.querySelector(`input[value="${v}"]`); x.checked = true; x.dispatchEvent(new b.window.Event('change', { bubbles: true })) }
+    choisir('societe')
+    form.querySelector('#fac-siren').value = '12'
+    form.querySelector('#fac-tva').value = 'XX'
+    choisir('particulier')
+    for (const [c, v] of Object.entries({ nom: 'Léa Martin', adresse1: '3 rue Haute', ville: 'Toulouse', pays: 'France' })) form.querySelector('#fac-' + c).value = v
+    form.dispatchEvent(new b.window.Event('submit', { bubbles: true, cancelable: true }))
+    for (let i = 0; i < 6; i++) await attendre()
+    const d = posts(b)[0].corps.destinataire
+    assert.equal(d.type, 'particulier')
+    assert.equal(d.siren, '')
+    assert.equal(d.tva, '')
+  } finally { b.fermer() }
+})
+
+test('review 1, constats 3 et 8 : formulaire ouvert = « Envoyer » et « Copier » coupés ; champs obligatoires dits ; focus rendu après l\'enregistrement', async () => {
+  const b = bancFiche({ reponses: { saisir: { ok: true } }, apres: { saisir: etatFacture({ statut: 'formulaire_rempli', saisiPar: 'hote',
+    destinataire: { type: 'particulier', nom: 'Léa Martin', adresse1: '3 rue Haute', ville: 'Toulouse', pays: 'France' } }) } })
+  try {
+    const zone = await ouvrirFiche(b)
+    const annonce = zone.querySelector('[data-fac-retour]')
+    zone.querySelector('[data-fac-saisir]').click()
+    assert.equal(zone.querySelector('[data-fac-envoyer]').disabled, true)
+    assert.equal(zone.querySelector('[data-fac-copier]').disabled, true)
+    for (const c of ['nom', 'adresse1', 'ville', 'pays']) assert.equal(zone.querySelector('#fac-' + c).getAttribute('aria-required'), 'true', c)
+    assert.equal(zone.querySelector('#fac-adresse2').hasAttribute('required'), false)
+    zone.querySelector('[data-fac-fermer]').click()
+    assert.equal(zone.querySelector('[data-fac-envoyer]').disabled, false, 'fermer le formulaire rend les gestes')
+    zone.querySelector('[data-fac-saisir]').click()
+    const form = zone.querySelector('[data-fac-form]')
+    for (const [c, v] of Object.entries({ nom: 'Léa Martin', adresse1: '3 rue Haute', ville: 'Toulouse', pays: 'France' })) form.querySelector('#fac-' + c).value = v
+    form.dispatchEvent(new b.window.Event('submit', { bubbles: true, cancelable: true }))
+    for (let i = 0; i < 8; i++) await attendre()
+    assert.match(zone.textContent, /Coordonnées enregistrées\./)
+    assert.equal(zone.querySelector('[data-fac-retour]'), annonce, 'la zone d\'annonce n\'est pas recréée par la relecture')
+    assert.equal(b.doc.activeElement, zone.querySelector('[data-fac-saisir]'), 'le focus revient à « Modifier les coordonnées »')
+    assert.equal(b.doc.activeElement.textContent, 'Modifier les coordonnées')
+  } finally { b.fermer() }
+})
+
+test('review 1, constat 7 (Safari) : la copie est DEMANDÉE dans le clic, avant la réponse du serveur, avec le lien rendu', async () => {
+  const ordre = []
+  let liberer
+  const b = bancFiche({ reponses: { copier_lien: () => new Promise(ok => { liberer = () => { ordre.push('reponse'); ok({ ok: true, lien: LIEN }) } }) } })
+  try {
+    const ecrits = []
+    b.window.ClipboardItem = class { constructor (o) { this.o = o } }
+    Object.defineProperty(b.window.navigator, 'clipboard', { configurable: true,
+      value: { write: async (items) => { ordre.push('copie'); ecrits.push(items) }, writeText: async () => { ordre.push('writeText') } } })
+    const zone = await ouvrirFiche(b)
+    zone.querySelector('[data-fac-copier]').click()
+    for (let i = 0; i < 4; i++) await attendre()
+    assert.deepEqual(ordre, ['copie'], 'la copie est demandée AVANT la réponse — dans le geste')
+    liberer()
+    for (let i = 0; i < 8; i++) await attendre()
+    const blob = await ecrits[0][0].o['text/plain']
+    // jsdom n'a pas `Blob.text()` : on le lit comme le navigateur le lirait.
+    const texte = await new Promise(ok => { const fr = new b.window.FileReader(); fr.onload = () => ok(fr.result); fr.readAsText(blob) })
+    assert.equal(texte, LIEN, 'le presse-papiers reçoit le lien rendu par le serveur')
+    assert.ok(!ordre.includes('writeText'))
+    assert.match(zone.textContent, /Lien copié\./)
   } finally { b.fermer() }
 })

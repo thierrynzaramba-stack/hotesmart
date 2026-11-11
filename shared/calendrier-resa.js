@@ -144,7 +144,8 @@ export function presentationFacture (f) {
   if (f.dernierMessage) envoi = { cle: CLES_ENVOI_FACTURE[f.dernierMessage.issue] || 'cal.fac_envoi_incertain', le: f.dernierMessage.le || null }
   else if (f.dernierLien) envoi = { cle: 'cal.fac_lien_cree', le: f.dernierLien }
   let note = null
-  if (f.bloquee) note = 'cal.fac_note_non_confirmee'
+  if (f.bloquee === 'reservation_annulee') note = 'cal.fac_note_annulee'
+  else if (f.bloquee) note = 'cal.fac_note_non_confirmee'
   else if (f.sansEnvoi === 'beds24') note = 'cal.fac_note_beds24'
   else if (f.sansEnvoi === 'pas_d_email') note = 'cal.fac_note_sans_email'
   const g = f.gestes || {}
@@ -170,7 +171,7 @@ export function cleRefusFacture (code, statut) {
   const k = ({
     trop_rapproche: 'cal.fac_err_trop_rapproche', verrouillee: 'cal.fac_err_verrouillee',
     bien_archive: 'cal.fac_err_archive', reservation_non_confirmee: 'cal.fac_note_non_confirmee',
-    reservation_annulee: 'cal.fac_note_non_confirmee', droits_messages: 'cal.fac_err_droits',
+    reservation_annulee: 'cal.fac_note_annulee', droits_messages: 'cal.fac_err_droits',
     panne: 'cal.fac_err_panne', entree_invalide: 'cal.fac_err_champ'
   })[code]
   if (k) return k
