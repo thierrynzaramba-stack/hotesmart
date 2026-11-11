@@ -83,6 +83,10 @@
       "destination": "/pages/avis"
     },
     {
+      "source": "/charges",
+      "destination": "/pages/charges"
+    },
+    {
       "source": "/guide",
       "destination": "/pages/guide"
     },

@@ -131,6 +131,7 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
 - **Q27 — Ce que fait une facture récurrente.** Tranchée, voir ci-dessous et §6 ter.
 - **Q28 — Le cron dédié et sa fréquence.** Tranchée, voir ci-dessous et §7.
 - **Q29 — Saisir à la main une facture pas encore lue.** Tranchée, voir ci-dessous.
+- **Q30 à Q33 — L'écran (lot 3).** Tranchées, voir ci-dessous et §13.
 
 ### Réponses de Thierry
 
@@ -302,6 +303,15 @@ Q1 à Q22 tranchées le 8 novembre 2026, Q23 le 9 novembre.
   la mesure du passage, 2 appels RPC (la liste des comptes, lue en deux
   tours car le point de départ tourne), **aucun appel à l'IA ni au
   stockage** (`tests/cron-charges.test.js`).
+- **Q30 (10 nov. 2026, vers 20 h 45) : oui, les totaux se lisent aussi par
+  catégorie.** La catégorie entre dans la clé des cellules du résumé, au
+  lot 3, pendant qu'il n'y a encore aucune facture en production (§13.5).
+- **Q31 (10 nov. 2026, vers 20 h 45) : « À traiter » d'abord**, puis les
+  totaux, puis toutes les factures.
+- **Q32 (10 nov. 2026, vers 20 h 45) : un seul bouton** « Ajouter une
+  facture » ; le téléphone propose lui-même photo ou fichier.
+- **Q33 (10 nov. 2026, vers 20 h 45) : les 12 derniers mois** quand les
+  totaux se lisent par mois (entité sans début d'exercice, Q22).
 - **Q29 (10 nov. 2026, vers 0 h 15) : « oui, tout de suite ».** Question
   née de la review du lot 2 : avec le cron quotidien (Q28), une facture que
   l'IA n'a pas pu lire (photo floue, panne, plafond du jour) restait « en
@@ -744,6 +754,199 @@ téléphone ; l'ajout par photo est pensé pour le téléphone d'abord.
 **Fonctions Vercel** : trois de plus (`api/charges.js`, `api/ecran/charges.js`,
 `api/cron-charges.js`), 67 → 70 sur 100 — à additionner aux deux du fil
 facturation.
+
+## 13. Lot 3 — l'écran `/charges`
+
+Choix de Thierry du 10 novembre 2026 (20 h 43) : **l'écran avant la période
+et l'étalement** (lot 7). L'écran naît donc avec les totaux **à la date**
+seulement ; la seconde lecture, **étalée** (Q24), viendra avec le lot 7.
+
+### 13.1 Catégorie de chaque donnée affichée (règle d'architecture)
+
+| Donnée | Catégorie | Source |
+|---|---|---|
+| File « À traiter », liste des factures, fiche d'une facture | **temps réel** | `charges`, lue par index (`user_id`, `statut`) |
+| Totaux (montants, répartitions, mention « estimation ») | **non urgent** | `charges_resume`, tenu par trigger, recalculé chaque nuit ; jamais calculé à la lecture ; l'heure du calcul est affichée |
+| Entités, logements | référence | `entitesDuCompte`, `properties` + `biens_entites` |
+
+### 13.2 La page, de haut en bas (Q31)
+
+1. **En-tête** : « Charges », et **un seul bouton** « Ajouter une facture »
+   (Q32 ; PDF, JPEG, PNG). L'envoi va directement au bucket par l'URL
+   signée (`envoi`), puis `confirmer` : la fiche s'ouvre pré-remplie par la
+   lecture, ou « lecture en attente » si l'IA est en panne ou au plafond.
+2. **À traiter** (temps réel), avec son nombre exact :
+   - **à vérifier** (lue par l'IA) → ouvrir la fiche ;
+   - **en lecture** (`a_lire`) → « Lecture en cours », ou son motif (panne,
+     plafond du jour) → « Saisir à la main » (Q29) ;
+   - **illisible** → « Saisir à la main » ;
+   - **doublon non tranché** → « Vérifier » : les factures du groupe,
+     « Garder les deux » ou supprimer l'une (Q14, Q11).
+3. **Totaux** (non urgent) : un choix d'**entité** (« Toutes », ou une
+   entité) et de **période** :
+   - une entité **avec** début d'exercice : « Exercice en cours » ou
+     « Exercice précédent » (Q22) ;
+   - une entité **sans**, et « Toutes » : **les 12 derniers mois** (Q33).
+   Affichés : TTC, HT et TVA (Q17) ; « estimation · N à vérifier » tant
+   qu'une facture du périmètre n'est pas vérifiée (Q4) ; « N sans HT » quand
+   un montant n'a pas été lu (jamais un 0 inventé) ; « calculé à HH:MM » ;
+   et trois répartitions : **par mois**, **par catégorie** (Q30), **par
+   logement**.
+4. **Toutes les factures** (temps réel) : les plus récentes d'abord (jour de
+   la charge, puis arrivée), **50 par page**, « Afficher plus » par curseur.
+   Chaque ligne : jour, fournisseur, catégorie, logement, TTC, état
+   (vérifiée, à vérifier, doublon, en lecture, illisible).
+
+### 13.3 La fiche d'une facture
+
+- Panneau à droite à l'ordinateur, plein écran au téléphone : **une seule
+  vue**, `shared/charges-vue.js`.
+- Champs : fournisseur, SIRET, numéro, date, HT, TVA, TTC, catégorie (Q5),
+  entité (les actives ; une archivée seulement si la facture la porte déjà),
+  logement (ceux de l'entité, Q18 ; vide possible, Q1).
+- **Sans entité active**, le bouton « Valider » est remplacé par
+  l'explication et le chemin vers la fiche d'un logement (Q20, D2 bis).
+- « Voir la facture » : URL de 60 s, nouvel onglet.
+- « Supprimer » : confirmation qui dit que le justificatif sera effacé
+  définitivement (Q11).
+- Une facture validée porte la mention **« vérifiée »** (Q4).
+
+### 13.4 Le menu
+
+Entrée « Charges » dans le menu ≡, à côté de Réglages et Avis (Q10),
+**titulaire seul** (Q9). Le masquage ne protège rien : `/api/ecran/charges`
+refuse en 403 un membre délégué, **avant toute lecture**, comme
+`/api/charges`. Et la page est **non délégable**
+(`tests/pages-non-delegables.test.js`) : sur un compte partagé, elle
+refuse avant de rien lire, par le garde-fou de compte propre. Dans `shared/nav.js`, l'entrée suit `options.charges`, qui
+vaut par défaut `options.reglages` — les deux droits sont « titulaire seul »
+aujourd'hui ; le jour où un domaine `charges` délégable existera (Q9), les
+pages passeront `options.charges` elles-mêmes.
+
+### 13.5 Données : la catégorie dans le résumé (Q30)
+
+Migration additive `2026-11-10-charges-resume-categorie.sql` :
+- la cellule devient compte × entité × logement × **catégorie** × jour
+  (catégorie vide possible : une facture pas encore classée) ; l'index
+  unique, le verrou, `charges_recalculer_cellule` et le trigger suivent ; les
+  cellules existantes sont reconstruites (zéro facture en production, celles
+  de staging effacées par la recette) ;
+- une fonction **`charges_totaux(compte, début, fin, entité)`** rend en
+  **un seul objet** le total du périmètre, les trois répartitions et l'heure
+  du calcul. Un objet et pas des lignes : aucune lecture ne peut être
+  tronquée à 1000 (règle 6). Retirée à `public`, `anon`, `authenticated`.
+
+### 13.6 L'endpoint d'écran `/api/ecran/charges`
+
+- `GET ?entite=<uuid|toutes>&periode=<exercice|exercice_precedent|12_mois>` :
+  file « À traiter » (50 premières + compte exact), première page de la
+  liste, entités, logements, totaux — **en parallèle** (les entités
+  d'abord : la période dépend du début d'exercice de celle demandée).
+  Les logements en deux listes : `biens`, les actifs, seuls proposés dans la
+  fiche ; `biens_archives`, pour nommer la ligne d'une facture ancienne
+  (même partage que l'accueil, décision 1 du 31 octobre 2026).
+- `GET …&curseur=<jour|cree_le|id>` : la page suivante de la liste, seule
+  (tri : jour de la charge, puis arrivée, puis identifiant).
+- Garde `contexteDEcran`, puis `estTitulaireDuCompte` → 403 avant toute
+  lecture ; `private, no-store` avant le premier refus, 405 compris.
+- Lecture seule. Les gestes restent sur `POST /api/charges` (lot 2).
+
+### 13.7 Case PERFORMANCE (les huit points)
+
+1. **Un écran = un endpoint** : `/api/ecran/charges`, lectures en parallèle.
+2. **Non urgent = résumé** : les totaux viennent de `charges_resume` par
+   `charges_totaux`, l'heure du calcul est affichée.
+3. **Cache navigateur : aucun** (montants, justificatifs, file qui change à
+   chaque envoi).
+4. **`private, no-store`** sur l'endpoint d'écran, avant le premier refus.
+5. **Statiques versionnés** : la page et `shared/charges-vue.js` suivent la
+   règle d'empreinte du dépôt.
+6. **Aucune lecture tronquée** : liste et file paginées par curseur, totaux
+   en un objet.
+7. **Budget** : premier affichage < 1 s, écran complet < 2 s ; **1 appel**
+   pour peindre l'écran, tenu par un test qui compte les appels ;
+   `Server-Timing` porte le nombre de requêtes.
+8. **Mesure** : écran neuf, AVANT sans objet. **APRÈS, mesuré sur staging le
+   11 novembre 2026 à 02:40** (déploiement de `staging` 4325b991, compte de
+   recette à une facture, ordinateur, cache navigateur chaud), relevé par
+   l'API Performance du navigateur :
+   - **1 appel** `/api` au chargement (`/api/ecran/charges`) ;
+   - **7 requêtes** Supabase côté serveur (`Server-Timing : total 7
+     requêtes`, 251 ms) ;
+   - **1 492 octets** transférés pour l'appel d'écran (1 192 de corps) ;
+     13 219 octets pour toute la page, fichiers statiques en cache ;
+   - écran complet à **653 ms** du début de la navigation (budget : 2 s).
+
+   Hors de ce lot et commun à toutes les pages : une lecture Supabase directe
+   du navigateur (`onboarding_state`, par la garde d'authentification).
+
+### 13.8 Inventaire
+
+Écran neuf : aucune fonction existante à conserver. Chaque geste du lot 2 a
+sa place : `envoi` + `confirmer` (bouton d'ajout), `valider` (fiche),
+`trancher` (doublon), `supprimer` (fiche), `consulter` (« Voir la
+facture »). Hors de ce lot, et dit à l'écran nulle part tant qu'ils
+n'existent pas : l'adresse e-mail (lot 5), les commissions des plateformes
+(lot 4), la vue étalée et les factures annuelles (lot 7), l'export (après la
+V1).
+
+### 13.9 Mobile
+
+Une seule vue pour les deux écrans ; au téléphone, la fiche s'ouvre en plein
+écran et les totaux passent sous « À traiter ».
+
+### 13.10 Trace de la review du lot 3 (10 novembre 2026)
+
+Réponse de la review, recopiée mot pour mot :
+
+```
+TRACE DE REVIEW
+Arbre lu : /home/claude/hotesmart-lot3
+Branche lue : charges-lot3-ecran
+SHA de tête lu : 0be6cfbb321c8289602ba663771a08c5b9d15d31
+Plage relue : b02afc3156e8b85e195600733b252c835d295cd0..0be6cfbb321c8289602ba663771a08c5b9d15d31
+Fichiers de la plage (23) : api/ecran/charges.js, docs/kb/compte-de-charges.md, docs/specs/spec-compte-de-charges.md, lib/charges/ecran.js, migrations/2026-11-10-charges-resume-categorie.sql, pages/charges.html, pages/guide.html, shared/charges-vue.js, shared/i18n/en.json, shared/i18n/es.json, shared/i18n/fr.json, shared/nav.js, shared/ui.css, tests/budget-ecran.test.js, tests/charges-ecran.test.js, tests/charges-migration-categorie.test.js, tests/charges-page.test.js, tests/ecrans-sans-biens-archives.test.js, tests/nav-i18n-cles.test.js, tests/outils/banc-charges.js, tests/outils/base-enregistreuse.js, tests/pages-non-delegables.test.js, vercel.json
+Fichiers cités dans les constats :
+- shared/charges-vue.js — dans la plage
+- pages/charges.html — dans la plage
+- tests/charges-page.test.js — dans la plage
+- lib/charges/ecran.js — dans la plage
+- migrations/2026-11-10-charges-resume-categorie.sql — dans la plage
+- docs/kb/compte-de-charges.md — dans la plage
+- docs/specs/spec-compte-de-charges.md — dans la plage
+- migrations/2026-11-09-compte-de-charges.sql — HORS PLAGE, référence seulement (lot 2 : bucket et rejeu)
+- lib/charges.js — HORS PLAGE, référence seulement (codes de refus, doublon posé à la validation)
+- lib/entites-juridiques.js — HORS PLAGE, référence seulement (lectures appelées par l'écran)
+- scripts/recette-charges.js — HORS PLAGE, référence seulement (il lit le résumé dont la plage change la clé)
+```
+
+**Confrontation, refaite par le fil** : `git diff --name-only
+b02afc31..0be6cfbb` rend les 23 fichiers ci-dessus. Les quatre fichiers hors
+plage sont dans le même arbre et la même branche, cités chacun avec sa
+raison ; `scripts/recette-charges.js` porte le constat 9, conséquence directe
+du changement de clé fait DANS la plage : statut **accepté**. La review a
+aussi joué la suite (8043, 0 rouge) et les deux migrations sur un Postgres
+jetable.
+
+**Aucun constat de sécurité** (membre refusé avant toute lecture, compte de
+la garde sur chaque requête et sur `charges_totaux`, curseur validé avant le
+filtre, entité d'un autre compte en 404, `private, no-store` avant le 405,
+échappement relu à chaque `innerHTML`). Une review sans constat de sécurité :
+les correctifs ne sont pas re-reviewés (CLAUDE.md, « une review par
+commit »).
+
+| # | Sévérité | Objet | Statut |
+|---|---|---|---|
+| 1 | à corriger | « estimation » ignorait les signaux non tranchés et les montants absents (§6) | **corrigé** (trois raisons ; test de page) |
+| 2 | à corriger | un PDF sans type partait en `octet-stream`, refusé par le bucket | **corrigé** (type annoncé ; test sur la partie déposée) |
+| 3 | à corriger (test) | aucun test de l'échappement | **corrigé** (test d'injection ; contre-épreuve : `esc` neutralisée, il rougit) |
+| 4 | mineur | ligne de répartition sans facture comptée affichée « non lu » | **corrigé** (masquée) |
+| 5 | mineur | un 403 de geste disait « page réservée » ; codes sans texte | **corrigé** (sept clés `refus_*`) |
+| 6 | mineur | ordre aléatoire à l'intérieur d'un jour | **corrigé** (jour, arrivée, id ; curseur à trois parties) |
+| 7 | mineur | `properties` borné à 1000 ; entités sans borne | **corrigé** pour `properties` (page après page) ; **dette** pour lib/entites-juridiques.js (KB) |
+| 8 | mineur | `2026-11-09` ne se rejoue plus après `2026-11-10` | **écrit** (en-tête de la migration du lot 3, KB) |
+| 9 | mineur | la recette rangeait le résumé sans la catégorie | **corrigé** (`scripts/recette-charges.js`) |
+| 10 | mineur | le KB citait un contrôle absent du dépôt | **corrigé** (`migrations/2026-11-10-controle-charges.sql`) |
 
 ## 12. Trace des reviews du lot 2
 
