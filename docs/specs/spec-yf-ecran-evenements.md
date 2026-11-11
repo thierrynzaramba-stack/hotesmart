@@ -632,10 +632,15 @@ n'est pas une vente (dettes 63-64) ; une demande ou une option de cette année
 n'a pas de prix acquis. Aucun des trois n'a de barre. Une nuit de cette année
 déjà vendue reste signalée par `vendue` (4a), sans changement.
 
-**Le prix d'une nuit** = `prix_total` du séjour (prix payé par le voyageur,
-`eclatement.prixVoyageur`) ÷ ses nuits — **le même chiffre que les barres de
+**Le prix d'une nuit** = `prix_par_nuit` d'`eclater` (prix payé par le
+voyageur, réparti uniformément) — **le même chiffre que les barres de
 Prédiction de prix**, pris à la même source (§16.4). Prix inconnu : la barre
-existe, la nuit dit « prix inconnu » au survol, jamais 0.
+existe, la nuit dit « prix inconnu » au survol, jamais 0 ; la pastille de
+l'année compte ces nuits à part (`prix_inconnus`), jamais au CA.
+
+**Une nuit passée de l'année N-k qui tombe après aujourd'hui** (fin du 13e
+mois, reculée d'un an) **n'est pas encore jouée** : ni vendue, ni « restée
+vide ». Elle ne compte pas au bilan, et la page ne l'écrit pas « — ».
 
 **Le délai** = jours entre la **date de vente** et l'arrivée, en comparant des
 JOURS, pas des instants (`docs/kb/prix-voyageur.md`). **Seulement si la date
@@ -673,26 +678,36 @@ avant d'aller plus loin.
 
 ### 16.4 Où vit chaque règle
 
-- **L'assemblage d'un séjour** (ligne brute + éclatement → `{ booking_id,
-  arrivee, depart, statut, canal, prix_total, date_vente, date_vente_fiable }`)
-  vit aujourd'hui **dans `api/yield-prix.js`** (§ « Les séjours, pour les deux
-  colonnes de planning »). Il est **déplacé** dans `lib/yield/sejours.js` et
-  appelé par les deux écrans — sans quoi le prix d'une nuit de 2025
-  divergerait entre Prédiction de prix et cet écran. ⚠ `api/yield-prix.js` est
-  le fichier d'un AUTRE écran : il est annoncé au chef de file avant d'être
-  ouvert, et la suite de Prédiction de prix doit rester verte sans retouche.
-- **L'alignement** (§16.3) : fonction pure dans `lib/yield/sejours.js`.
-- **Les lignes de la pile et le CA de la pastille** : assemblés côté serveur
-  dans `lib/yield/ecran-evenements.js` ; la page ne calcule ni prix, ni délai,
-  ni décalage.
+- **Le séjour vendu** : `sejoursVendus` (`lib/yield/sejours.js`), lu sur
+  `eclater` — **la même source que les barres de Prédiction de prix**
+  (`prix_par_nuit`, `date_vente`, `canal`). ⚠ **Corrigé à l'étape 1** : la
+  conception prévoyait de déplacer l'assemblée de `api/yield-prix.js` ; c'était
+  inutile, les deux écrans lisent déjà le même `eclater`. `api/yield-prix.js`
+  **n'est pas touché**.
+- **L'alignement** (§16.3) : `alignerAnnee`, fonction pure, même fichier.
+- **Ce que l'écran reçoit** (`GET /api/ecran/evenements`) :
+  - `sejours: { liste, premiere_nuit }` — **une seule liste**, en dates
+    réelles : `{ debut, fin (dernière nuit), nuits, prix_nuit, canal, delai }`.
+    Rendre les barres par événement répéterait les mêmes séjours une trentaine
+    de fois ;
+  - `evenements[].annees` — une entrée par année passée **présente** :
+    `{ recul, annee, decalage, alignement, ca, nuits, prix_inconnus? }`. La page
+    met en face de chaque nuit affichée la nuit `date − decalage` ; elle ne
+    calcule ni prix, ni délai, ni décalage, ni CA ;
+  - `couches: { eteintes, lisibles }`.
+- **La zone affichée** sur laquelle le CA se compte (l'événement et les
+  week-ends de sa largeur posée) : `nuitsDeLaZoneAffichee`, la même règle que
+  `largeurAffichee` / `weekEndsAffiches` de la page — un test compare les deux
+  sur tous les événements de l'année.
 
 ### 16.5 Le choix des couches (S2)
 
 - **Table `preferences_ecran`** : `user_id`, `compte_id`, `ecran` (texte),
   `valeur` (jsonb), `mis_a_jour_le` ; clé `(user_id, compte_id, ecran)` ; **RLS
-  active**, lecture et écriture limitées à `user_id = auth.uid()`.
-  Migration `2026-11-11-preferences-ecran`, appliquée staging puis prod sur go,
-  prouvée par script.
+  active, aucune policy, `revoke all`** : tout passe par l'endpoint (clé de
+  service), qui n'écrit que la ligne de l'appelant. Migration
+  `2026-11-11-preferences-ecran`, appliquée staging puis prod sur go, prouvée
+  par `scripts/verifier-migration-preferences-ecran.js`.
 - **On stocke ce qui est ÉTEINT** (`{ "eteintes": ["n3"] }`), en clés
   **relatives** (`n1`, `n2`, `n3`, puis `comparables`) : une couche nouvelle
   (4c) est allumée par défaut, et le choix tient d'une saison à l'autre.

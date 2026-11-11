@@ -448,7 +448,8 @@ test('LE TEST QUI COMPTE : l’en-tête privé est posé avant le premier refus,
   const { res } = await appeler({}, {}, 'POST')
   assert.equal(res.code, 405)
   assert.equal(res.entetes['cache-control'], 'private, no-store')
-  assert.equal(res.entetes.allow, 'GET')
+  // 4b : le PUT des couches (spec §16.5), sur le meme endpoint.
+  assert.equal(res.entetes.allow, 'GET, PUT')
   const sansSession = await appeler({ user: null }, {}, 'GET')
   assert.equal(sansSession.res.code, 401)
   assert.equal(sansSession.res.entetes['cache-control'], 'private, no-store')
