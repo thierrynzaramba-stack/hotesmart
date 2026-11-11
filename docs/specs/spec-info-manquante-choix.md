@@ -119,7 +119,7 @@ réponse prête existante, elle propose sa modification.**
   arrêteraient l'agent sur la conversation (tâche « L'agent IA s'est
   arrêté… ») et réveilleraient le fondateur pour un geste voulu. Journal
   illisible : on n'appelle pas (503). Relever le plafond de l'agent lui-même
-  est un autre sujet : dette 145.
+  est un autre sujet : dette 146.
   ⚠ **Limite connue (review 1, constat 3)** : la ligne du journal est écrite
   APRÈS la réponse du modèle, et son échec est silencieux. Des demandes
   simultanées (deux onglets, un script d'un membre autorisé) lisent toutes le
