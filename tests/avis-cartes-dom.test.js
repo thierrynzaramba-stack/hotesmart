@@ -206,7 +206,40 @@ test('les chiffres : sur 5, une decimale a la francaise, et un echec dit comme t
   assert.match(t, /182propreté saluée · remarques/)
   assert.ok(d.querySelector('.avp-pos use[href$="#i-thumb-up"]') && d.querySelector('.avp-neg use[href$="#i-thumb-down"]'))
   assert.match(doc(rendreStats({ erreur: true })).body.textContent, /Les compteurs n’ont pas pu être calculés\. Rechargez pour réessayer\./)
-  assert.match(doc(rendreStats({ total: 0, note_sur_5: null, notes: 0, positif: 0, remarque: 0 })).body.textContent, /—/)
+  // ⚠ PLUS DE TIRET (lot Avis V5, etape 2 ; spec §10.6) : sans note sur la
+  // periode, on le DIT. Un « — » se lit comme une valeur manquante sans motif.
+  const sans = doc(rendreStats({ total: 0, note_sur_5: null, notes: 0, positif: 0, remarque: 0 })).body.textContent
+  assert.match(sans, /Aucune note\s*sur cette période/)
+  assert.doesNotMatch(sans, /—/)
+})
+
+// ─── L'heure du calcul et les motifs (lot Avis V5, étape 2 ; spec §10.6) ─────
+// ⚠ LE TEMPS ET LE FUSEAU SONT INJECTES : dates figees (regle du depot), et
+// l'heure de Paris quel que soit le fuseau de la machine qui lance les tests.
+const PARIS = { fuseau: 'Europe/Paris', maintenant: Date.parse('2026-11-10T13:00:00Z') }
+const S = (calcule_le) => ({ total: 3, note_sur_5: 4.7, notes: 3, positif: 2, remarque: 1, rien_signale: 0, periode: '30j', calcule_le })
+
+test('l\'heure du calcul : aujourd\'hui, hier, sinon la date — toujours affichée sous les chiffres', () => {
+  const ligne = (iso) => doc(rendreStats(S(iso), PARIS)).querySelector('.avp-calcule').textContent
+  assert.equal(ligne('2026-11-10T05:02:00Z'), 'Calculé à 06:02')
+  assert.equal(ligne('2026-11-09T17:01:00Z'), 'Calculé hier à 18:01')
+  assert.match(ligne('2026-11-08T17:01:00Z'), /^Calculé le 8 nov\.? à 18:01$/)
+  // Minuit a Paris n'est pas minuit UTC : le jour se compte a l'heure de l'hote.
+  assert.equal(ligne('2026-11-09T23:30:00Z'), 'Calculé à 00:30')
+})
+
+test('« pas encore calculé » et « incomplet » remplacent les chiffres — jamais un zéro', () => {
+  const pas = doc(rendreStats({ periode: '30j', motif: 'pas_encore_calcule' }, PARIS))
+  assert.equal(pas.body.textContent, 'Les chiffres n’ont pas encore été calculés.')
+  assert.equal(pas.querySelectorAll('.avp-chiffre').length, 0)
+  const inc = doc(rendreStats({ periode: '30j', motif: 'lecture_incomplete' }, PARIS))
+  assert.equal(inc.body.textContent, 'Les chiffres n’ont pas pu être calculés en entier.')
+  assert.doesNotMatch(inc.body.textContent, /0/)
+})
+
+test('sans heure de calcul (périmètre vide), pas de ligne d\'heure inventée', () => {
+  const d = doc(rendreStats({ total: 0, positif: 0, remarque: 0, rien_signale: 0, note_sur_5: null, notes: 0, calcule_le: null, periode: '30j' }, PARIS))
+  assert.equal(d.querySelector('.avp-calcule'), null)
 })
 
 test('la traduction de la page passe partout : aucun texte francais quand `t` est fourni', () => {
