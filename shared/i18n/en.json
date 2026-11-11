@@ -787,7 +787,7 @@
   "messages.info.erreur.garde_ia": "Too many replies written for this conversation today: write this one yourself.",
   "messages.info.erreur.ia_indisponible": "The assistant did not respond: try again.",
   "messages.info.erreur.questions_changees": "The guest wrote again in the meantime: the questions have changed.",
-  "messages.info.erreur.saisie_changee": "You switched conversations while the reply was being written: start it again.",
+  "messages.info.erreur.saisie_changee": "The message box changed while the reply was being written: check it or clear it, then start again.",
   "messages.info.non": "No",
   "messages.info.oui": "Yes",
   "messages.info.precision": "Give details (e.g. garage 200 m away)",

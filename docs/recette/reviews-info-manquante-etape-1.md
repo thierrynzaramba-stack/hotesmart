@@ -165,3 +165,86 @@ Rien n'a été modifié dans le worktree. Les copies dans `/tmp` sont supprimée
   - plusieurs changements de fil avec un texte marqué : refusé ;
   - « Modifier » dans le même fil : même voyageur, accepté ;
   - champ vidé puis Ctrl+Z : la marque « vide » d'un autre fil est remplacée, comme le fait déjà « Utiliser ». Ce n'est pas ouvert par le correctif, et je ne l'ai pas éprouvé dans un vrai navigateur (Ctrl+Z après une écriture par script).
+
+## Review 3 — reçue le 11 novembre 2026 (diff des correctifs de la review 2 ; DERNIÈRE)
+
+Plage : `0e69c9c40622a49c09202120d65d946d8b7ef0cc..6845b5ae85eace1ff75b796876a8a75115170c8b`,
+worktree `/home/claude/hotesmart-infoetape1`. Contrôle : chaque fichier cité
+figure dans `git diff --name-only` de la plage. Ses constats se corrigent sans
+nouvelle review (exception « envoi au voyageur » du 27 octobre 2026).
+
+---
+
+Arbre lu : `/home/claude/hotesmart-infoetape1` (`pwd`). Branche `info-manquante-etape-1`, HEAD `6845b5ae85eace1ff75b796876a8a75115170c8b`. Plage relue : `0e69c9c40622a49c09202120d65d946d8b7ef0cc..6845b5ae85eace1ff75b796876a8a75115170c8b` (un commit). Tous les fichiers cités ci-dessous figurent dans `git diff --name-only` de cette plage.
+
+Je n'ai rien modifié dans le worktree : `git status` ne montre que `node_modules`, qui était déjà là. Les contre-épreuves, les mutations et les sondes ont tourné sur une copie faite par `git archive` dans `/tmp`, supprimée depuis.
+
+**Aucun constat bloquant, aucun constat de sécurité.** Les correctifs 2, 3, 4 et 5 ferment leur constat. Le correctif 1 ferme le scénario mesuré en review 2. Mais la note qu'il affiche invite à relancer, et la relance retombe sur le même état final (constat 1 ci-dessous).
+
+---
+
+**1. IMPORTANT (non bloquant) — `pages/messages.html:1012-1015` et `:1005`, texte de `shared/i18n/fr.json:790`**
+- **Défaut :** quand la rédaction est jetée, le texte tapé chez Marie reste dans la saisie. La note dit seulement « relancez-la ». Si l'hôte relance, la réponse s'ajoute à ce texte comme s'il était à Ana.
+- **Scénario, mesuré avec le banc réel :**
+  - B1 (Ana) : « Rédiger ».
+  - Chez B2, l'hôte tape « Bonjour Marie, le code du portail est 4321 », puis revient sur B1.
+  - La rédaction est jetée, la note s'affiche. Le bouton « Rédiger » reste actif ; un clic donne :
+    - saisie : `"Bonjour Marie, le code du portail est 4321\nHello Ana, yes…"` ;
+    - marque B1, note « relisez-la, puis envoyez ».
+  - « Envoyer » poste ce texte à B1 et clôt la tâche.
+- **Même chose par la première garde** (ligne 1005) : la réponse arrive pendant que l'hôte est chez Marie, puis il revient.
+- **Portée :** c'est l'état final du constat 1 de la review 2, avec un clic de plus — et c'est la page qui demande ce clic.
+- **Correction, sans nouvelle review :** changer le texte de la note pour ces deux chemins. Par exemple : « La saisie a changé pendant que vous étiez dans une autre conversation : vérifiez-la ou videz-la, puis relancez. »
+  - Variante plus sûre, à noter en dette : mémoriser `{ bookId, valeur }` au moment de la jetée, et refuser une relance tant que la saisie vaut encore cette valeur.
+
+**2. MINEUR, existait avant ce diff — `pages/messages.html:1028` (pose de l'engagement) et `:890-891` (`envoyer`)**
+- **Défaut :** l'engagement d'une rédaction RÉUSSIE (`etat.infoEngagee`) survit à deux choses :
+  - le retrait de son texte par `rangerSaisieRemplie` quand on change de fil ;
+  - une rédaction suivante jetée.
+
+  Le message suivant de l'hôte dans ce fil, quel qu'il soit, clôt alors la tâche.
+- **Scénario, mesuré :**
+  - Rédaction 1 réussie ; aller-retour B1 → B2 → B1 ; la saisie revient vide.
+  - L'engagement est toujours là : `{B1, ti1, maj}`.
+  - « Je vérifie et je reviens vers vous », puis « Envoyer » : la clôture part, et la question disparaît de « À valider ».
+  - Même résultat après une rédaction 2 jetée.
+- **Réponse à ta question 3 :** les chemins de jetée ne posent jamais l'engagement (vérifié par le test et par sonde). Le reste vient d'avant. Pas de mauvais destinataire, et le serveur vérifie toujours `maj`.
+- **Correction (ou dette) :** garder le texte rédigé dans l'engagement, et ne l'attacher dans `envoyer()` que si le texte envoyé le contient encore.
+
+**3. MINEUR — `pages/messages.html:1068-1071` (`redigerBrouillon`)**
+- **Défaut :** la note donne une cause fausse. Elle dit « Vous avez changé de conversation » même quand le champ a changé dans le même fil.
+- **Scénario, mesuré :** pendant une rédaction « IA » sur B1, « Modifier » une proposition de B1. `readOnly` ne bloque pas une écriture par script. Résultat : la note « changé de conversation » avec `changementsDeFil = 0`. La jetée elle-même est juste.
+- **Correction :** une clé générique, « La saisie a changé pendant la rédaction : vérifiez-la, puis relancez. » Elle sert aussi au constat 1.
+
+**4. MINEUR — `tests/info-manquante-dom.test.js` : deux branches neuves ne sont tenues par aucun test**
+- La note de la première garde de `redigerInfo` (`:1005`) : la retirer laisse 25 tests sur 25 verts.
+- Le `bookId` de la note de clôture refusée (`:1139`) : le remplacer par `etat.ouverte` laisse 25 sur 25 verts.
+- Le comportement actuel, lui, est juste (mesuré) : la note est cachée sur B2 et dans la liste, et visible au retour sur B1.
+- **Correction :** deux tests. Réponse ou 409 reçus pendant que l'hôte est sur B2 → note absente sur B2, présente sur B1.
+
+**5. MINEUR — `tests/info-manquante-regles.test.js:80`**
+- **Défaut :** la vérification « dans l'autre sens » ne voit qu'une sous-tâche écrite sur une seule ligne, avec des apostrophes.
+- **Mesuré :** un texte de secours ajouté au cron sur une ligne, entre apostrophes, fait bien rougir le test. Le même texte entre guillemets doubles, ou réparti sur plusieurs lignes, laisse le test vert. La troisième voie du cron est justement écrite sur plusieurs lignes.
+- **Correction :** lire `summary:` sans exiger la même ligne (par exemple `/question:\s*message,\s*summary:\s*…/`) et accepter `"`. Ou l'écrire dans la spec comme limite.
+
+---
+
+**Vérifié sans rien trouver de plus :**
+- **Question 1 (mauvais destinataire) :**
+  - Tout retour sur A passe par `ouvrir(A)` depuis un fil différent de A, donc le compteur bouge toujours. Le bouton « retour » ne compte pas, mais l'`ouvrir` qui suit compte.
+  - Mesuré : retour liste → B2 (frappe) → retour liste → B1 donne une rédaction jetée.
+  - Réponse arrivée pendant la liste : jetée, la note s'affiche sur B1 seulement.
+  - `?conv=` n'agit qu'à l'`init`, avant toute rédaction.
+  - Texte modifié puis remis à l'identique : la saisie est revenue à ce qu'elle était au clic dans A, donc il est accepté.
+  - « Utiliser » ou « Modifier » chez Marie, puis retour : texte non retouché, il est retiré par `ouvrir` et la réponse est acceptée sur une saisie vide ; texte retouché, la réponse est jetée.
+- **Question 2 (la note) :**
+  - « relancez » n'est jamais posée quand le texte a été mis dans la saisie : les trois chemins posent la note puis s'arrêtent.
+  - « Réponse envoyée » n'arrive qu'après `posterMessage` réussi.
+  - Le cron ne change la version d'une tâche `info_unknown` en attente que sur un nouveau message du voyageur, donc « nouvelle question » est exact.
+- **Question 4 (contre-épreuve et mutations) :**
+  - Les tests 9, 11 et 13 sont rouges contre `0e69c9c`. Le 10 (non-régression) et le 12 (garde qui existait déjà) sont verts, ce qui est attendu.
+  - Chaque mutation est tuée par son test : compteur retiré → test 9 ; `&&` remplacé par `||` → test 10 ; garde de `redigerBrouillon` retirée → test 12 ; note retirée → test 11 ; note de clôture non repeinte → test 13.
+  - Côté API, remplacer `is` par `eq(updated_at, null)`, ou retirer `is`, fait rougir le test. L'ancien double + `eq` reste vert : c'est donc le nouveau double qui attrape le défaut.
+- **Spec :** l'affirmation « aucune tâche `info_unknown` ne se clôturait depuis Messages avant le lot » est exacte. Avant le lot, la clôture d'une proposition n'acceptait que `pending_validation` ou `sending`.
+- **Exécutions :** les 3 fichiers de test du lot passent (69 sur 69). `scripts/i18n-check.js` est vert, avec 1331 clés dans les trois langues.
+- **Non éprouvé :** le Ctrl+Z dans un vrai navigateur.

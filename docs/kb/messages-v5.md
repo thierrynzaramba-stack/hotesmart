@@ -323,8 +323,15 @@ apprend : réponse prête à créer ou à modifier) vient après sa recette.
   **Et un texte TAPÉ ailleurs, sans marque, aussi** (review 2, constat 1) : la
   page compte ses changements de conversation (`etat.changementsDeFil`) ; si
   l'hôte est passé par un autre fil ET que la saisie a changé, la rédaction
-  est jetée, avec la note « relancez-la ». Un coup d'œil, saisie intacte, ne
-  coûte rien.
+  est jetée, avec la note « vérifiez-la ou videz-la, puis relancez ». Un coup
+  d'œil, saisie intacte, ne coûte rien. **Et la relance est REFUSÉE tant que
+  l'hôte n'a pas touché la saisie** (review 3, constat 1) : sinon le clic que
+  la note demande ajoutait la réponse au texte de l'autre voyageur.
+- **L'engagement de clôture tombe** quand on quitte le fil de la réponse
+  rédigée, quand la saisie est vidée, ou quand une rédaction suivante est
+  jetée (review 3, constat 2) : un « je reviens vers vous » ne clôt jamais la
+  question. Laisser une question ouverte ne coûte rien ; la clore à tort la
+  fait disparaître d'« À valider ».
 - Une clôture refusée parce que le voyageur a posé une nouvelle question
   entre-temps se DIT dans le fil (« elle reste dans À valider »).
 - **Une rédaction ne tient pas la page** : délai de 30 s

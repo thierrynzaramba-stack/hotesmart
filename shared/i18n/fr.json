@@ -787,7 +787,7 @@
   "messages.info.erreur.garde_ia": "Trop de rédactions sur cette conversation aujourd’hui : écrivez celle-ci à la main.",
   "messages.info.erreur.ia_indisponible": "L’assistant n’a pas répondu : réessayez.",
   "messages.info.erreur.questions_changees": "Le voyageur a écrit entre-temps : les questions ont changé.",
-  "messages.info.erreur.saisie_changee": "Vous avez changé de conversation pendant la rédaction : relancez-la.",
+  "messages.info.erreur.saisie_changee": "La saisie a changé pendant la rédaction : vérifiez-la ou videz-la, puis relancez.",
   "messages.info.non": "Non",
   "messages.info.oui": "Oui",
   "messages.info.precision": "Précisez (ex. garage à 200 m)",

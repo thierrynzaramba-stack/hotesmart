@@ -157,6 +157,10 @@ réponse prête existante, elle propose sa modification.**
   s'affiche alors sur ce message, comme une seule question. Le contrôle
   `tests/info-manquante-regles.test.js` lit le cron dans les deux sens pour
   les textes FIXES ; un résumé libre ne peut pas se reconnaître.
+- **Clôture : seulement l'envoi qui porte encore la réponse de la carte.**
+  L'engagement tombe quand l'hôte quitte la conversation, vide la saisie, ou
+  qu'une rédaction suivante est jetée (review 3, constat 2) : dans le doute, la
+  question reste ouverte.
 - **Clôture.** L'envoi d'une réponse rédigée depuis la carte clôt la tâche
   `info_unknown` par `POST /api/messages { action: 'info_traitee', task_id,
   maj, booking_id }`. ⚠ `maj` est la version de la tâche sur laquelle l'hôte

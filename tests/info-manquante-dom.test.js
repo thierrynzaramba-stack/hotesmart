@@ -67,6 +67,9 @@ function monter ({ conversations = [conv('B1', [entrant('Can I come with my dog?
 const cliquer = (el) => el.dispatchEvent(new el.ownerDocument.defaultView.MouseEvent('click', { bubbles: true }))
 const choix = (v, i, r) => cliquer(v.carte().querySelector(`[data-info-choix="${i}"][data-info-reponse="${r}"]`))
 const taper = (champ, texte) => { champ.value = texte; champ.dispatchEvent(new champ.ownerDocument.defaultView.Event('input', { bubbles: true })) }
+// La saisie : son écouteur `input` est branché par `init()`, que ce banc
+// n'appelle pas — on joue le même geste par la fonction qu'il appelle.
+const taperSaisie = (v, texte) => { v.zone().value = texte; v.msg.apresFrappeSaisie() }
 const attendre = () => new Promise(r => setTimeout(r, 0))
 
 test('la carte arrive par le fil en direct : une ligne par question, Oui / Non / Autre, et jamais une proposition', async () => {
@@ -246,7 +249,7 @@ test('LE TEST QUI COMPTE : un texte TAPE (sans marque) chez un autre voyageur pe
     await attendre(); await attendre()
     assert.equal(v.zone().value, 'Bonjour Marie, le code du portail est 4321', 'la reponse d Ana a enrobe le texte de Marie')
     assert.notEqual(v.msg.etat.saisieRemplie && v.msg.etat.saisieRemplie.bookId, 'B1', 'le texte de Marie a pris la marque d Ana')
-    assert.match(v.doc.querySelector('[data-bind="info-etat"]').textContent, /changé de conversation/)
+    assert.match(v.doc.querySelector('[data-bind="info-etat"]').textContent, /vérifiez-la ou videz-la/)
     assert.equal(v.msg.etat.infoEngagee, undefined, 'l envoi suivant clorait la tache')
   } finally { v.fermer() }
 })
@@ -285,7 +288,7 @@ test('« IA » : une frappe apres le retour dans le fil jette la version redigee
     d.resoudre({ ok: true, texte: REDIGE })
     await enCours
     assert.equal(v.zone().value, 'oui chien, et le parking ?')
-    assert.match(v.doc.querySelector('[data-bind="info-etat"]').textContent, /changé de conversation/)
+    assert.match(v.doc.querySelector('[data-bind="info-etat"]').textContent, /vérifiez-la ou videz-la/)
   } finally { v.fermer() }
 })
 
@@ -318,6 +321,169 @@ test('la reponse est partie mais la tache a change -> la cloture refusee se DIT 
     assert.equal(v.envois().length, 1)
     assert.match(v.doc.querySelector('[data-bind="info-etat"]').textContent, /reste dans « À valider »/)
     assert.equal(v.banc.journal.length, 0, 'un refus attendu a ete journalise comme une erreur')
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : apres une redaction jetee, RELANCER est refuse tant que l hote n a pas touche la saisie (review 3, constat 1)', async () => {
+  let d = differe()
+  const v = monter({
+    conversations: [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: (chemin) => chemin === '/api/guestflow-rediger' ? d.p : { ok: true }
+  })
+  try {
+    await v.msg.relireDirect()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre()
+    v.msg.ouvrir('B2')
+    v.zone().value = 'Bonjour Marie, le code du portail est 4321'
+    v.msg.ouvrir('B1')
+    d.resoudre({ ok: true, texte: REDIGE })
+    await attendre(); await attendre()
+    assert.equal(v.redactions().length, 1)
+    // L'hote relance sans toucher la saisie : refuse, rien ne part au modele.
+    d = differe()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre(); await attendre()
+    assert.equal(v.redactions().length, 1, 'la relance a ajoute la reponse d Ana au texte de Marie')
+    assert.equal(v.zone().value, 'Bonjour Marie, le code du portail est 4321')
+    assert.match(v.doc.querySelector('[data-bind="info-etat"]').textContent, /vérifiez-la ou videz-la/)
+    // L'hote vide la saisie : la relance passe.
+    taperSaisie(v, '')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    d.resoudre({ ok: true, texte: REDIGE })
+    await attendre(); await attendre()
+    assert.equal(v.redactions().length, 2)
+    assert.equal(v.zone().value, REDIGE)
+  } finally { v.fermer() }
+})
+
+test('une saisie douteuse RETOUCHEE par l hote (il l a verifiee) -> la relance redevient permise', async () => {
+  let d = differe()
+  const v = monter({
+    conversations: [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: (chemin) => chemin === '/api/guestflow-rediger' ? d.p : { ok: true }
+  })
+  try {
+    await v.msg.relireDirect()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre()
+    v.msg.ouvrir('B2')
+    v.zone().value = 'Bonjour'
+    v.msg.ouvrir('B1')
+    d.resoudre({ ok: true, texte: REDIGE })
+    await attendre(); await attendre()
+    taperSaisie(v, 'Bonjour Ana,')
+    d = differe()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    d.resoudre({ ok: true, texte: REDIGE })
+    await attendre(); await attendre()
+    assert.equal(v.redactions().length, 2)
+    assert.equal(v.zone().value, 'Bonjour Ana,\n' + REDIGE)
+  } finally { v.fermer() }
+})
+
+test('« IA » : une frappe dans LE MEME fil pendant la redaction n est pas douteuse — la relance reste permise', async () => {
+  let d = differe()
+  const v = monter({ repondre: (chemin) => chemin === '/api/guestflow-rediger' ? d.p : {} })
+  try {
+    v.zone().value = 'oui chien'
+    const enCours = v.msg.redigerBrouillon()
+    await attendre()
+    v.zone().value = 'oui chien, et le parking ?'
+    d.resoudre({ ok: true, texte: REDIGE })
+    await enCours
+    d = differe()
+    const relance = v.msg.redigerBrouillon()
+    await attendre()
+    assert.equal(v.redactions().length, 2, 'la relance de son propre texte a ete refusee')
+    d.resoudre({ ok: true, texte: REDIGE })
+    await relance
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : quitter le fil d une reponse redigee — l envoi suivant ne clot plus la tache (review 3, constat 2)', async () => {
+  const v = monter({
+    conversations: [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: (chemin) => chemin === '/api/guestflow-rediger' ? { ok: true, texte: REDIGE } : { ok: true }
+  })
+  try {
+    await v.msg.relireDirect()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre(); await attendre()
+    v.msg.ouvrir('B2'); v.msg.ouvrir('B1')
+    assert.equal(v.zone().value, '', 'jeu d essai : le texte redige est retire au changement de fil')
+    v.zone().value = 'Je verifie et je reviens vers vous'
+    await v.msg.envoyer()
+    await attendre(); await attendre()
+    assert.equal(v.envois().length, 1)
+    assert.equal(v.clotures().length, 0, 'un « je reviens vers vous » a clos la question')
+  } finally { v.fermer() }
+})
+
+test('saisie VIDEE apres la redaction -> l envoi suivant ne clot pas la tache', async () => {
+  const v = monter({ repondre: (chemin) => chemin === '/api/guestflow-rediger' ? { ok: true, texte: REDIGE } : { ok: true } })
+  try {
+    await v.msg.relireDirect()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre(); await attendre()
+    taperSaisie(v, '')
+    v.zone().value = 'Je regarde'
+    await v.msg.envoyer()
+    await attendre(); await attendre()
+    assert.equal(v.clotures().length, 0)
+  } finally { v.fermer() }
+})
+
+test('la note d une redaction revenue pendant que l hote est AILLEURS : absente la-bas, presente au retour (review 3, constat 4)', async () => {
+  const d = differe()
+  const v = monter({
+    conversations: [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: (chemin) => chemin === '/api/guestflow-rediger' ? d.p : {}
+  })
+  try {
+    await v.msg.relireDirect()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre()
+    v.msg.ouvrir('B2')
+    d.resoudre({ ok: true, texte: REDIGE })
+    await attendre(); await attendre()
+    const note = v.doc.querySelector('[data-bind="info-etat"]')
+    assert.equal(note.hidden, true, 'la note d Ana s affiche chez Marie')
+    v.msg.ouvrir('B1')
+    assert.equal(note.hidden, false)
+    assert.match(note.textContent, /vérifiez-la ou videz-la/)
+  } finally { v.fermer() }
+})
+
+test('la cloture refusee pendant que l hote est AILLEURS : la note attend le fil d Ana (review 3, constat 4)', async () => {
+  const cloture = differe()
+  const v = monter({
+    conversations: [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: (chemin, corps) => chemin === '/api/guestflow-rediger' ? { ok: true, texte: REDIGE }
+      : chemin === '/api/messages' && corps && corps.action === 'info_traitee' ? cloture.p : { ok: true }
+  })
+  try {
+    await v.msg.relireDirect()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre(); await attendre()
+    await v.msg.envoyer()
+    await attendre(); await attendre()
+    v.msg.ouvrir('B2')
+    cloture.resoudre({ __statut: 409, __corps: { error: 'questions_changees' } })
+    await attendre(); await attendre(); await attendre()
+    const note = v.doc.querySelector('[data-bind="info-etat"]')
+    assert.equal(note.hidden, true, 'la note d Ana s affiche chez Marie')
+    v.msg.ouvrir('B1')
+    assert.equal(note.hidden, false)
+    assert.match(note.textContent, /reste dans « À valider »/)
   } finally { v.fermer() }
 })
 

@@ -787,7 +787,7 @@
   "messages.info.erreur.garde_ia": "Demasiadas redacciones en esta conversación hoy: escriba esta a mano.",
   "messages.info.erreur.ia_indisponible": "El asistente no respondió: inténtelo de nuevo.",
   "messages.info.erreur.questions_changees": "El huésped ha vuelto a escribir: las preguntas han cambiado.",
-  "messages.info.erreur.saisie_changee": "Cambió de conversación durante la redacción: vuelva a lanzarla.",
+  "messages.info.erreur.saisie_changee": "El cuadro de texto cambió durante la redacción: revíselo o vacíelo y vuelva a lanzarla.",
   "messages.info.non": "No",
   "messages.info.oui": "Sí",
   "messages.info.precision": "Precise (p. ej. garaje a 200 m)",

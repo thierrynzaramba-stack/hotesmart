@@ -891,6 +891,7 @@ async function envoyer () {
   if (eng && String(eng.bookId) === String(c.bookId)) { entree.info = { tacheId: eng.tacheId, maj: eng.maj }; etat.infoEngagee = null }
   // Le texte part : « Annuler » et la note de rédaction n'ont plus d'objet.
   etat.iaAnnuler = null
+  etat.saisieDouteuse = null
   if (etat.infoNote && String(etat.infoNote.bookId) === String(c.bookId)) etat.infoNote = null
   envoisDe(c.bookId).push(entree)
   lancerEnvoi(c, entree)
@@ -988,6 +989,7 @@ async function redigerInfo (c) {
   const zone = $('[data-bind="texte"]')
   if (!zone) return
   if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
+  if (saisieDouteuse(ici)) { etat.infoNote = { bookId: ici, cle: 'messages.info.erreur.saisie_changee' }; peindreSaisieIA(); return }
   // La VERSION de la tâche sur laquelle l'hôte a tranché : la clôture ne vaudra
   // que pour elle (review 1, constat 4).
   const maj = ((c.infos || []).find(x => String(x.id) === String(e.tacheId)) || {}).maj || null
@@ -1002,17 +1004,14 @@ async function redigerInfo (c) {
     // La conversation a changé pendant la rédaction : ce texte est celui d'un
     // AUTRE voyageur, il ne va pas dans cette saisie. La note attend le retour
     // dans ce fil.
-    if (String(etat.ouverte) !== ici) { etat.infoNote = { bookId: ici, cle: 'messages.info.erreur.saisie_changee' }; return }
+    if (String(etat.ouverte) !== ici) { jeterRedaction(ici, true); return }
     // ⚠ L'HÔTE EST PASSÉ PAR UN AUTRE FIL ET LA SAISIE A CHANGÉ (review 2,
     // constat 1, mesuré) : un texte TAPÉ chez Marie, sans marque, revenait
     // ici ; la réponse d'Ana s'y ajoutait, la marque passait à Ana, et la
     // note disait « relisez, puis envoyez ». On ne devine pas à qui est ce
     // texte : la rédaction est jetée, et on le dit. Un simple coup d'œil à un
     // autre fil, saisie intacte, ne coûte rien.
-    if ((etat.changementsDeFil || 0) !== fil0 && zone.value !== saisie0) {
-      etat.infoNote = { bookId: ici, cle: 'messages.info.erreur.saisie_changee' }
-      return
-    }
+    if ((etat.changementsDeFil || 0) !== fil0 && zone.value !== saisie0) { jeterRedaction(ici, true); return }
     // ⚠ ET LA SAISIE A PU ÊTRE REMPLIE POUR UN AUTRE VOYAGEUR ENTRE-TEMPS
     // (review 1, constat 1, BLOQUANT, reproduit) : aller chez Marie,
     // « Utiliser » son wifi, revenir chez Ana — le texte de Marie reste, marqué
@@ -1053,7 +1052,9 @@ async function redigerBrouillon () {
   if (etat.pauses[String(c.propertyId)] === true) return
   if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
   const ici = String(c.bookId)
+  if (saisieDouteuse(ici)) { etat.infoNote = { bookId: ici, cle: 'messages.info.erreur.saisie_changee' }; peindreSaisieIA(); return }
   const avant = zone.value
+  const fil0 = etat.changementsDeFil || 0
   etat.iaEnCours = ici
   etat.infoNote = null
   etat.iaAnnuler = null
@@ -1066,7 +1067,9 @@ async function redigerBrouillon () {
     // Le champ a bougé (autre fil, ou frappe après le retour dans ce fil) : la
     // version rédigée n'écrase rien, et on le dit (review 2, constat 5).
     if (String(etat.ouverte) !== ici || zone.value !== avant) {
-      etat.infoNote = { bookId: ici, cle: 'messages.info.erreur.saisie_changee' }
+      // Douteuse seulement si l'hôte est passé par un autre fil : une frappe
+      // dans CE fil est son propre texte.
+      jeterRedaction(ici, (etat.changementsDeFil || 0) !== fil0)
       return
     }
     // Même garde qu'au clic, refaite au retour (review 1, constat 1).
@@ -1088,6 +1091,36 @@ async function redigerBrouillon () {
     etat.iaEnCours = null
     peindreSaisieIA()
   }
+}
+
+// Une rédaction JETÉE (review 3, constats 1 et 2) : la note, l'engagement de
+// clôture qui tombe (la réponse de la carte n'est plus dans la saisie), et —
+// si l'hôte est passé par un autre fil — la saisie DOUTEUSE : elle peut porter
+// un texte écrit pour un autre voyageur, et relancer y ajouterait la réponse.
+// La relance est refusée tant que l'hôte n'a pas touché la saisie (frappe ou
+// effacement) : c'est lui qui dit à qui est ce texte, pas la page.
+function jeterRedaction (ici, douteuse) {
+  etat.infoNote = { bookId: ici, cle: 'messages.info.erreur.saisie_changee' }
+  if (etat.infoEngagee && String(etat.infoEngagee.bookId) === ici) etat.infoEngagee = null
+  if (douteuse) etat.saisieDouteuse = { bookId: ici }
+}
+function saisieDouteuse (ici) {
+  const d = etat.saisieDouteuse
+  const zone = $('[data-bind="texte"]')
+  return !!(d && String(d.bookId) === String(ici) && zone && zone.value.trim())
+}
+
+// Une frappe dans la saisie (écouteur `input`, branché par `init`).
+function apresFrappeSaisie () {
+  const zone = $('[data-bind="texte"]')
+  if (!zone) return
+  if (etat.iaAnnuler && zone.value !== etat.iaAnnuler.apres) etat.iaAnnuler = null
+  // L'hôte a touché la saisie : il l'a vérifiée, la relance redevient permise.
+  etat.saisieDouteuse = null
+  // Saisie vidée : la réponse de la carte n'y est plus, l'envoi suivant ne la
+  // clora pas.
+  if (!zone.value.trim() && etat.infoEngagee && String(etat.infoEngagee.bookId) === String(etat.ouverte)) etat.infoEngagee = null
+  peindreSaisieIA()
 }
 
 function annulerIA () {
@@ -3976,6 +4009,12 @@ function ouvrir (bookId) {
   // sait si l'hôte est passé ailleurs pendant qu'elle tournait (review 2,
   // constat 1).
   if (String(bookId) !== String(etat.ouverte)) etat.changementsDeFil = (etat.changementsDeFil || 0) + 1
+  // Quitter le fil d'une réponse rédigée depuis la carte : son texte peut être
+  // retiré ici (`rangerSaisieRemplie`), et l'envoi suivant n'est plus forcément
+  // cette réponse. On ne clora pas sur un « je reviens vers vous » (review 3,
+  // constat 2) — une question laissée ouverte ne coûte rien, une question
+  // close à tort disparaît d'« À valider ».
+  if (etat.infoEngagee && String(etat.infoEngagee.bookId) !== String(bookId)) etat.infoEngagee = null
   etat.ouverte = bookId
   // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry
   // du 30 octobre 2026 (« le volet s'est encore ouvert sur Maison Jardin »), et
@@ -4338,10 +4377,7 @@ async function init () {
   // texte est tapé ; une retouche de la version rédigée retire « Annuler ».
   $('[data-bind="ia-rediger"]').addEventListener('click', redigerBrouillon)
   $('[data-bind="ia-annuler"]').addEventListener('click', annulerIA)
-  zoneTexte.addEventListener('input', () => {
-    if (etat.iaAnnuler && zoneTexte.value !== etat.iaAnnuler.apres) etat.iaAnnuler = null
-    peindreSaisieIA()
-  })
+  zoneTexte.addEventListener('input', apresFrappeSaisie)
   // Au téléphone, le champ prend TOUTE LA LARGEUR pendant la frappe, les
   // boutons passent dessous (recette du 7 novembre 2026, demande de Thierry :
   // avec le livre en plus, le champ n'avait plus qu'un tiers de la largeur).

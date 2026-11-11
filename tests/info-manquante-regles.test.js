@@ -77,12 +77,24 @@ test('LE TEST QUI COMPTE : dans l autre sens — chaque sous-tache « message en
   // ajoute au cron sans passer par ici donnerait une carte Oui / Non / Autre
   // sur un paragraphe : il doit rougir.
   const source = lire('lib/cron-classify.js')
-  const trouves = [...source.matchAll(/question: message, summary: (MOTIF_[A-Z_]+|'((?:[^'\\]|\\.)*)')/g)]
+  // Sur une ou plusieurs lignes, entre apostrophes ou guillemets doubles
+  // (review 3, constat 5). Un `summary` qui n'est ni un motif ni un texte fixe
+  // (`classification.reason`, la troisieme voie) ne se reconnait pas : limite
+  // ecrite dans la spec.
+  const trouves = [...source.matchAll(/question:\s*message,\s*summary:\s*(MOTIF_[A-Z_]+|'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g)]
   assert.ok(trouves.length >= 3, 'le motif de recherche ne trouve plus les sous-taches du cron')
   for (const m of trouves) {
     if (m[1].startsWith('MOTIF_')) assert.ok(['MOTIF_PAUSE', 'MOTIF_ARRET'].includes(m[1]), m[1] + ' inconnu de lib/guestflow/rediger.js')
-    else assert.ok(R.SOUS_TACHES_DE_SECOURS.includes(m[2].replace(/\\'/g, "'")), `« ${m[2]} » inconnu de lib/guestflow/rediger.js`)
+    else {
+      const texte = m[2] != null ? m[2].replace(/\\'/g, "'") : m[3].replace(/\\"/g, '"')
+      assert.ok(R.SOUS_TACHES_DE_SECOURS.includes(texte), `« ${texte} » inconnu de lib/guestflow/rediger.js`)
+    }
   }
+  // Le motif lui-meme est eprouve : multi-lignes et guillemets doubles.
+  const essai = 'sub_tasks: [{ question: message,\n      summary: "Texte de secours neuf", suggested_reply: null }]'
+  const vus = [...essai.matchAll(/question:\s*message,\s*summary:\s*(MOTIF_[A-Z_]+|'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g)]
+  assert.equal(vus.length, 1)
+  assert.equal(vus[0][3], 'Texte de secours neuf')
 })
 
 

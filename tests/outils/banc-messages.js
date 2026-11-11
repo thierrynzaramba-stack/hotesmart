@@ -299,7 +299,7 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       relireListe, chargerPageSuivante,
       // Information manquante : l'envoi de la saisie, le bouton « IA » et son
       // « Annuler » (la carte, elle, se clique dans le fil).
-      envoyer, redigerBrouillon, annulerIA, peindreSaisieIA,
+      envoyer, redigerBrouillon, annulerIA, peindreSaisieIA, apresFrappeSaisie,
       // Un GETTER, pas une valeur : la vue est montee APRES l'evaluation.
       get vueConnaissance () { return vueConnaissance }
     }
