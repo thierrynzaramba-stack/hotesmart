@@ -59,6 +59,12 @@ const TACHES = [
   // attendaient la fin des heures calmes partent, regroupees par personne.
   // Juste apres les brouillons et avant le dispatch : elle ENVOIE aussi.
   'notifications_file',
+  // ⚠ AJOUTEE LE 10 NOVEMBRE 2026 (lot Avis V5, etape 2) : les trois chiffres
+  // de la page Avis, calcules a 06:00 et 18:00 heure de Paris et pour le
+  // logement neuf. APRES les classifications (un verdict frais compte), AVANT
+  // le dispatch, avec un budget mur de 10 s et un plancher de 25 s laisse au
+  // reste du cycle.
+  'resume_avis',
   'dispatch_changements',
   // Dette 59, 19 octobre 2026 — la seule entree neuve de ce lot.
   'releve_canaux'

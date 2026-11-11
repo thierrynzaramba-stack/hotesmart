@@ -15,7 +15,7 @@ const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { sansArchives, COLONNE: COLONNE_ARCHIVE } = require('../lib/biens-vivants')
-const { ratioProprete, noteMoyenne, notesDuPerimetre, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
+const { ratioProprete, notesDuPerimetre, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 const { assemblerCartes } = require('../lib/avis/cartes')
 const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origine')
 const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
@@ -28,6 +28,10 @@ const { assurerEvaluation, echeanceDuDepart } = require('../lib/avis/naissance')
 // Lot 6 : l'hote est prevenu quand la prestataire a rempli sa part (spec §10).
 const { prevenirHote } = require('../lib/avis/notifications')
 const { normaliserHeures, lireHeures, HEURES_MIN, HEURES_MAX } = require('../lib/avis/auto-validation')
+// Les trois chiffres de la page se recalculent APRES un geste de l'hote sur la
+// page (decision Q3 de Thierry, 10 novembre 2026 ; spec avis-v5 §10.4). Lu a
+// l'appel, pas destructure : un test peut remplacer la fonction sur le module.
+const resumeAvis = require('../lib/avis/resume')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -340,6 +344,9 @@ async function creer (req, res, garde) {
     console.error('[avis] classification immediate echec:', e.message)
   }
 
+  // APRES la classification : le pouce de cet avis compte tout de suite.
+  await resumeAvis.recalculerApresGeste(supabase, userId)
+
   return res.status(201).json({ ok: true, id: cree.id, verdict: verdict ? verdict.verdict : null })
 }
 
@@ -383,6 +390,9 @@ async function valider (req, res, garde) {
     console.error('[avis] validation echec:', error.message)
     return res.status(500).json({ error: 'Enregistrement impossible' })
   }
+  // Seule une detection CONFIRMEE entre dans les chiffres ; l'ignorer ne
+  // change rien a ce qui est compte (une detection en attente ne l'est pas).
+  if (statut === 'confirme') await resumeAvis.recalculerApresGeste(supabase, userId)
   return res.status(200).json({ ok: true, statut })
 }
 
@@ -445,6 +455,7 @@ async function requalifier (req, res, garde) {
     console.error('[avis] requalification echec:', error.message)
     return res.status(500).json({ error: 'Enregistrement impossible' })
   }
+  await resumeAvis.recalculerApresGeste(supabase, userId)
   return res.status(200).json({ ok: true, verdict, verdict_source: 'humain' })
 }
 
@@ -717,11 +728,22 @@ async function cartesLister (req, res, garde) {
   const sejours = await sejoursDe(userId, uids)
   const cartes = assemblerCartes({ evaluations: ev.data || [], avis, sejours, nomBien, voitSejours, maintenant })
 
+  // ⚠ LES TROIS CHIFFRES SONT LUS, PLUS CALCULES (lot Avis V5, etape 2 ; spec
+  // avis-v5 §10.5). Ils viennent de `resume_bien_avis`, calcule a 06:00 et
+  // 18:00 et apres chaque geste de l'hote sur la page : une lecture au lieu de
+  // quatre comptages et d'une lecture de notes, et l'heure du calcul part avec.
+  // Meme perimetre qu'avant : le bien demande, sinon les biens du membre, sinon
+  // tout le compte (references orphelines comprises).
   const refsStats = bienDemande ? [bienDemande] : (refs === null ? null : refs.map(String))
-  const [ratio, moy] = await Promise.all([
-    ratioProprete(supabase, { userId, periode, refs: refsStats }),
-    noteMoyenne(supabase, { userId, periode, refs: refsStats }),
-  ])
+  // ⚠ LES REFERENCES ATTENDUES SONT CELLES DES BIENS, PAS LA LISTE DU
+  // PERIMETRE : `refsDuPerimetre` y melange les uuid (`property_ids`) et les
+  // references (`property_refs`, tenues par trigger). Un uuid n'a jamais de
+  // ligne ; l'attendre ferait dire « pas encore calcule » pour toujours.
+  const refsDesBiens = (biens || []).map(b => String(b.provider_property_id))
+  const attendues = bienDemande ? [bienDemande]
+    : refsStats === null ? refsDesBiens
+    : refsDesBiens.filter(r => refsStats.includes(r))
+  const stats = await resumeAvis.lireResumeAvis(supabase, { userId, periode, refs: refsStats, attendues })
   const anciensTotal = cartes.anciens.length
   return res.status(200).json({
     cartes: { attente: cartes.attente, recents: cartes.recents, anciens: avecAnciens ? cartes.anciens.slice(0, MAX_LIGNES) : null },
@@ -750,7 +772,9 @@ async function cartesLister (req, res, garde) {
     // champ sur 10 qui subsisterait inviterait un ecran a le rediviser : c'est
     // exactement le defaut qu'on referme — la page divisait une moyenne DEJA
     // arrondie, donc arrondissait deux fois.
-    stats: { ...ratio, note_sur_5: moy.note_sur_5, notes: moy.notes, ...(moy.erreur ? { erreur: true } : {}) },
+    // Un `motif` (pas encore calcule, lecture incomplete) remplace les
+    // chiffres : jamais un zero a leur place.
+    stats,
   })
 }
 

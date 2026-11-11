@@ -298,7 +298,7 @@ rien parce qu'il ne balaie rien est le faux vert de cette famille.
 | Table | Clé | Contenu | Remplace |
 |---|---|---|---|
 | `resume_bien_jour` | `(property_id, jour)` | CA 30 j, CA 30 j précédents, TO, TO précédent, nuitées, min/max mensuels sur 12 mois, `calcule_le`, `motif_non_calculable` | les **72 requêtes** `yield` d'`Aujourd'hui` |
-| `resume_bien_avis` | `(property_id, jour)` | note /5 sur 30 j, note globale, nombre d'avis, nombre de **notes**, 3 compteurs de propreté, `calcule_le` | `stats-avis` à la lecture |
+| `resume_bien_avis` | **livrée sous une autre clé** : `(user_id, periode, property_id_ref)` — voir la spec Avis V5 §10.2 | par période (15 j, 30 j, 6 mois, tout) : nombre d'avis, 3 compteurs de propreté, nombre de **notes** et leur **somme** en micro-unités (jamais une moyenne), `calcule_le`, `motif_non_calculable` | `stats-avis` à la lecture **sur la page Avis** (10 novembre 2026) ; l'accueil et la liste des logements restent à brancher (dette 145) |
 | `resume_bien_prix` | `(property_id, jour)` | niveau de grille, prédiction, fourchette, `calcule_le` | le calcul du moteur à l'ouverture du calendrier |
 | `resume_prestataire_jour` | `(provider_id, jour)` | note moyenne, nombre de ménages, `calcule_le` | agrégation à la lecture |
 | `resume_compte_jour` | `(user_id, jour)` | « fait pour vous » 7 j (3 compteurs), statistiques IA, `calcule_le` | 3 comptages `head` + stats IA |

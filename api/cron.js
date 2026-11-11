@@ -135,6 +135,7 @@ const { channelCall } = require('../lib/channel-fullsync')
 const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
 const { executerAutoValidations } = require('../lib/avis/auto-validation')
+const { calculerResumesDus } = require('../lib/cron-resume-avis')
 const { envoyerBrouillonsDus } = require('../lib/guestflow/brouillons-dus')
 const { viderFile: viderFileNotifications } = require('../lib/notifications/file')
 const { releverLesComptesDus } = require('../lib/canaux-du-bien')
@@ -811,6 +812,29 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur file des notifications:', err.message)
       results.errors.push({ context: 'notifications_file', error: err.message })
+    }
+
+    // 4sexdecies. LES TROIS CHIFFRES DE LA PAGE AVIS, CALCULÉS D'AVANCE (lot
+    // Avis V5, étape 2 ; spec avis-v5 §10.4). Deux créneaux, 06:00 et 18:00
+    // heure de Paris, et le logement neuf au tick suivant son apparition.
+    // ⚠ Hors créneau, un tick coûte TROIS lectures (le marqueur du créneau, le
+    // compte des biens, le marqueur des biens), plus un contrôle complet des
+    // références une fois par heure : rien n'est recalculé si rien n'a bougé.
+    // Placé APRÈS les classifications (un verdict de propreté frais compte au
+    // créneau) et AVANT le dispatch, avec son budget mur (10 s) et un plancher
+    // de 25 s laissé au reste du cycle : un chiffre peut attendre cinq
+    // minutes, un message de bienvenue non.
+    try {
+      await chrono.mesure('resume_avis', async () => {
+        const bilanResume = await calculerResumesDus(results, {
+          supabase, resteMs: () => 55000 - chrono.total()
+        })
+        results.totalResumesAvis = bilanResume?.calcules || 0
+      })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur résumé avis:', err.message)
+      results.errors.push({ context: 'resume_avis', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.
