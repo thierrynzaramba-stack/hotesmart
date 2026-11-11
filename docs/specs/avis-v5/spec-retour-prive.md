@@ -39,16 +39,18 @@ accueil — restait invisible dans HôteSmart.
 
 ## 3. Ce qui change
 
-- `api/avis.js` : `content_private` entre dans `CHAMPS`. Il sort sous le droit
-  `avis`, comme le texte public — pas sous `reservations` : c'est le contenu de
-  l'avis, pas l'identité du voyageur ni ses dates.
+- `api/avis.js` : `content_private` est lu par `cartesLister` **seulement** — pas
+  ajouté à `CHAMPS`, que partage l'action `list`, qui ne sait pas qu'un avis est
+  masqué (revue, constat 1). Il sort sous le droit `avis`, comme le texte
+  public — pas sous `reservations` : c'est le contenu de l'avis, pas l'identité
+  du voyageur ni ses dates.
 - `lib/avis/cartes.js` : chaque avis de carte porte `texte_prive`, `null` pour un
   avis masqué (Airbnb ne montre rien tant que l'avis est caché, et la carte n'en
   montre que la présence).
 - `core/avis/cartes.js` : sous le texte public, un bloc « Retour privé » avec une
   ligne qui dit qu'il n'est pas publié ; le texte se replie au-delà de
-  220 caractères, comme le public. Dans l'en-tête de la carte, la marque
-  « Retour privé ».
+  220 caractères, comme le public. Dans l'en-tête de la carte, sous les
+  infos du séjour, la marque « Retour privé ».
 - Textes en fr, en, es.
 
 ## 4. Inventaire (règle « la forme ne supprime jamais le fond »)
@@ -102,3 +104,22 @@ Sept mutations ; cinq rougissent du premier coup. Les deux qui survivaient :
 - **retirer la garde « masqué » de `blocRetourPrive`** reste vert, et c'est
   attendu : `blocSonAvis` sort AVANT pour un avis masqué. La garde est une
   seconde ligne ; la marque d'en-tête, elle, est testée sur l'avis masqué.
+
+## 9. Revue (11 novembre 2026)
+
+Une revue, par un agent distinct, sur l'arbre `/home/claude/hotesmart-avis-prive`,
+branche `avis-retour-prive`, plage
+`f7b44299987bf3aa1fca3f1f6a7db9b11c51d413..377c9043b85f66cef1b132d05bdf470a7e89a9e4`
+(SHA lu déclaré : `377c9043…`). **Aucun constat de sécurité** : ni autre compte,
+ni autre bien, ni membre sans droit `avis`, ni prestataire — vérifié par
+exécution et par deux mutations hors de l'arbre. Pas de re-revue. Chaque fichier
+cité est dans le diff de la plage ; `docs/kb/avis-voyageurs.md` n'est cité qu'en
+preuve.
+
+| # | gravité | fichier cité | constat | suite |
+|---|---|---|---|---|
+| 1 | défaut (vie privée) | `api/avis.js` | `CHAMPS` est partagé avec l'action `list`, qui ne sait pas qu'un avis est masqué : le retour privé d'un avis masqué y sortait (mesuré) | corrigé : lu par `cartesLister` seul ; `content_private` remis dans les interdits de `CHAMPS` ; test de `list` ; la mutation rougit (2 tests) |
+| 2 | mineur | `core/avis/cartes.js` | dans « À traiter », la ligne d'une évaluation montre le bloc « Retour privé » sans la marque d'en-tête | accepté : la ligne est déjà dans « À traiter », et lire le retour privé avant d'évaluer le voyageur est voulu |
+| 3 | mineur | `shared/ui.css` | jeton `--radius-sm` inexistant, la valeur de repli s'appliquait | corrigé : `--radius-tile` |
+| 4 | mineur | `shared/ui.css` | marque sans retour à la ligne dans l'en-tête : au téléphone, les infos se cassaient | corrigé : la marque vit dans la colonne d'identité, sous les infos |
+| 5 | mineur | `tests/avis-cartes-endpoint.test.js` | l'assertion « rien pour Booking » ne prouvait que sa fixture | corrigé : retirée, avec la raison (c'est le writer qui ne pose jamais de retour privé Booking) |

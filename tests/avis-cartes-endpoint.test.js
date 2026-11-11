@@ -303,12 +303,15 @@ test('un bien demandé sans ligne (logement neuf) : « pas encore calculé », p
 const toutesLesCartes = (body) => [...(body.cartes.attente || []), ...(body.cartes.recents || []), ...(body.cartes.anciens || [])]
 const avisParId = (body) => Object.fromEntries(toutesLesCartes(body).flatMap(c => c.avis).map(a => [a.id, a]))
 
-test('LE TEST QUI COMPTE : la carte porte le retour privé ; rien pour un avis masqué ni pour Booking', async () => {
+// ⚠ PAS D'ASSERTION « RIEN POUR BOOKING » ICI (revue du lot, constat 5) : aucun
+// code de la page ne filtre par canal, c'est le WRITER qui ne pose jamais de
+// retour prive pour Booking (`extraireContenu`, lib/cron-channel-reviews.js).
+// Une fixture deja nulle ne prouvait que la fixture.
+test('LE TEST QUI COMPTE : la carte porte le retour privé ; rien pour un avis masqué ni pour un texte blanc', async () => {
   const etat = preparer({ avis: [
     avisDe('a1', { content_private: 'Le chauffage ne marchait pas.' }),
     avisDe('vide', { content_private: '   ' }),
-    { ...MASQUE, content_private: 'Ne doit pas sortir.' },
-    avisDe('b1', { provider: 'beds24', ota: 'booking', content_private: null })
+    { ...MASQUE, content_private: 'Ne doit pas sortir.' }
   ] })
   const r = await appeler({ periode: 'toujours' })
   assert.equal(r.code, 200)
@@ -316,7 +319,6 @@ test('LE TEST QUI COMPTE : la carte porte le retour privé ; rien pour un avis m
   assert.equal(a.a1.texte_prive, 'Le chauffage ne marchait pas.')
   assert.equal(a.vide.texte_prive, null, 'un texte blanc n est pas un retour')
   assert.equal(a.m.texte_prive, null, 'un avis masqué ne montre rien')
-  assert.equal(a.b1.texte_prive, null)
   assert.doesNotMatch(JSON.stringify(r.body), /Ne doit pas sortir/)
   // ⚠ LE DOUBLE RENVOIE LA LIGNE ENTIERE, quelle que soit la selection : sans
   // cette assertion, retirer la colonne de la lecture restait vert (mesure par

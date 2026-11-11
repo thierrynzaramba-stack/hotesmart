@@ -341,11 +341,15 @@ function carte (c, ctx, cle) {
   const avis = c.avis.length
     ? c.avis.map((a, k) => blocSonAvis(a, ctx, `${cle}-${k}`)).join('')
     : `<p class="avp-gris">${ECHAPPER(ctx.T('avis.pas_recu'))}</p>`
+  // ⚠ LA MARQUE VIT DANS LA COLONNE D'IDENTITE, sous les infos (revue du lot,
+  // constat 4) : posee en ligne a cote d'elles, sans retour a la ligne, elle
+  // ecrasait la colonne au telephone et cassait les infos lettre par lettre.
   return `<li class="avp-carte" data-cle="${ECHAPPER(c.cle)}">`
     + `<div class="avp-carte__tete">${vignette(c, ctx)}`
     + `<div class="avp-id"><span class="avp-qui">${ECHAPPER(nomDu(c, ctx.T))}</span>`
-    + `<span class="avp-infos">${infosDu(c, ctx).map(ECHAPPER).join(' · ')}</span></div>`
+    + `<span class="avp-infos">${infosDu(c, ctx).map(ECHAPPER).join(' · ')}</span>`
     + (aUnRetourPrive(c) ? `<span class="avp-marque-prive">${ICONE('i-lock')}${ECHAPPER(ctx.T('avis.retour_prive'))}</span>` : '')
+    + `</div>`
     + (canal.ecrit ? `<span class="avp-source">${ECHAPPER(canal.phrase || canal.libelle)}</span>` : '')
     + `${pastilleCanal(canal)}</div>`
     + avis + blocNotreAvis(c, ctx, cle)

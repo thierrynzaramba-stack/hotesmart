@@ -424,8 +424,9 @@ test('LE TEST QUI COMPTE : le retour privé s\'affiche sous le texte public, à 
   // SOUS le public : le texte public vient avant, dans le meme bloc.
   const textes = [...li.querySelectorAll('.avp-son .avp-texte')].map(p => p.textContent)
   assert.deepEqual(textes, ['Super séjour', 'Le chauffage ne marchait pas la première nuit.'])
-  // La marque, dans l'EN-TETE de la carte : on la repere sans lire.
-  assert.equal(li.querySelector('.avp-carte__tete .avp-marque-prive').textContent, 'Retour privé')
+  // La marque, dans l'EN-TETE de la carte (colonne d'identite, sous les infos) :
+  // on la repere sans lire.
+  assert.equal(li.querySelector('.avp-carte__tete .avp-id .avp-marque-prive').textContent, 'Retour privé')
 })
 
 test('le retour privé est échappé, et se replie au-delà de 220 caractères comme le public', () => {
