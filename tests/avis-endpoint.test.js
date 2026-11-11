@@ -140,6 +140,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
   require.cache[abs] = m
   for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
   globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => '{}' })
+  etat.client = client
   return etat
 }
 
@@ -973,4 +974,123 @@ test('list : périmètre vide -> la période DEMANDÉE est renvoyée, pas 30j fi
   await handler({ ...req({ action: 'list', periode: '6mois' }),
                   headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
   assert.strictEqual(res.body.ratio.periode, '6mois')
+})
+
+// ─── Le recalcul des trois chiffres après un geste (Q3, 10 novembre 2026) ───
+// Decision de Thierry : apres un geste de l'hote sur la page Avis — saisir un
+// avis, confirmer une detection, corriger une proprete — les chiffres se
+// recalculent TOUT DE SUITE pour son compte (spec avis-v5 §10.4).
+//
+// ⚠ LE RECALCUL EST OBSERVE, PAS EXECUTE : `lib/avis/resume.js` a ses propres
+// tests. Ici on prouve trois choses de l'endpoint — il le demande pour le BON
+// compte (le compte cible, jamais l'identite d'un membre), APRES l'ecriture,
+// et jamais pour un geste refuse ou sans effet sur les chiffres.
+const resumeAvisModule = require('../lib/avis/resume')
+
+async function avecRecalculObserve (etat, fn) {
+  const appels = []
+  const vrai = resumeAvisModule.recalculerApresGeste
+  resumeAvisModule.recalculerApresGeste = async (sb, userId) => {
+    appels.push({ userId, ecrituresAvant: etat.ecritures.filter(e => e.table === 'ota_reviews').length })
+    return { ecrit: true }
+  }
+  try { await fn() } finally { resumeAvisModule.recalculerApresGeste = vrai }
+  return appels
+}
+
+test('geste : saisir un avis recalcule le compte, APRÈS l\'écriture', async () => {
+  const etat = preparer({})
+  const handler = require('../api/avis')
+  const res = reponse()
+  const appels = await avecRecalculObserve(etat, () =>
+    handler(req({}, { action: 'create', bien: REF_A, texte: 'Très propre', source: 'sms' }, 'POST'), res))
+  assert.strictEqual(res.code, 201)
+  assert.deepStrictEqual(appels.map(a => a.userId), [PROD])
+  assert.ok(appels[0].ecrituresAvant >= 1, 'le recalcul vient après l\'insertion')
+})
+
+test('geste : un membre délégué déclenche le recalcul du COMPTE CIBLE, pas le sien', async () => {
+  const etat = preparer({
+    user: MEMBRE,
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'write', property_scope: 'all' }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  const appels = await avecRecalculObserve(etat, () =>
+    handler({ ...req({}, { action: 'create', bien: REF_A, texte: 'Impeccable', source: 'sms' }, 'POST'),
+              headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res))
+  assert.strictEqual(res.code, 201)
+  assert.deepStrictEqual(appels.map(a => a.userId), [PROD])
+})
+
+test('geste : confirmer une détection recalcule ; l\'ignorer ne recalcule pas', async () => {
+  for (const [statut, attendus] of [['confirme', 1], ['ignore', 0]]) {
+    const etat = preparer({ avis: [DETECTION] })
+    const handler = require('../api/avis')
+    const res = reponse()
+    const appels = await avecRecalculObserve(etat, () => handler(reqValider(DETECTION.id, statut), res))
+    assert.strictEqual(res.code, 200, statut)
+    assert.strictEqual(appels.length, attendus, statut)
+    if (attendus) {
+      assert.strictEqual(appels[0].userId, PROD)
+      assert.strictEqual(appels[0].ecrituresAvant, 1, 'le recalcul vient après la mise à jour')
+    }
+  }
+})
+
+test('geste : corriger la propreté recalcule, après la mise à jour', async () => {
+  const etat = preparer({ avis: [AVIS_AUTO] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  const appels = await avecRecalculObserve(etat, () => handler(reqRequalif(AVIS_AUTO.id, 'remarque'), res))
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(appels.map(a => [a.userId, a.ecrituresAvant]), [[PROD, 1]])
+})
+
+test('geste refusé ou invalide : aucun recalcul', async () => {
+  const membreLecture = {
+    user: MEMBRE,
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'read', property_scope: 'all' }
+  }
+  const cas = [
+    ['saisie sans droit', { ...membreLecture }, (h, r) => h({ ...req({}, { action: 'create', bien: REF_A, texte: 'x', source: 'sms' }, 'POST'),
+      headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, r), 403],
+    ['saisie invalide', {}, (h, r) => h(req({}, { action: 'create', bien: REF_A, texte: '   ', source: 'sms' }, 'POST'), r), 400],
+    ['detection deja tranchee', { avis: [{ ...DETECTION, statut: 'confirme' }] }, (h, r) => h(reqValider(DETECTION.id, 'confirme'), r), 409],
+    ['proprete d\'une detection', { avis: [{ ...AVIS_AUTO, statut: 'detecte' }] }, (h, r) => h(reqRequalif(AVIS_AUTO.id, 'positif'), r), 409]
+  ]
+  for (const [nom, opts, appeler, code] of cas) {
+    const etat = preparer(opts)
+    const handler = require('../api/avis')
+    const res = reponse()
+    const appels = await avecRecalculObserve(etat, () => appeler(handler, res))
+    assert.strictEqual(res.code, code, nom)
+    assert.strictEqual(appels.length, 0, nom)
+  }
+})
+
+test('geste : une écriture du résumé REFUSÉE par la base ne change pas la réponse du geste', async () => {
+  // ⚠ LE VRAI MODULE, ET LE VRAI CHEMIN D'ECRITURE (revue du lot, constat 8) :
+  // la premiere version passait par un double SANS `rpc`, donc par un
+  // `TypeError` rattrape comme exception — le refus de la base n'etait jamais
+  // exerce. Ici la fonction SQL est appelee, et elle refuse.
+  const etat = preparer({})
+  const appels = []
+  etat.client.rpc = async (nom, p) => { appels.push([nom, p.p_user_id]); return { data: null, error: { message: 'deadlock detected' } } }
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({}, { action: 'create', bien: REF_A, texte: 'Très propre', source: 'sms' }, 'POST'), res)
+  assert.strictEqual(res.code, 201)
+  assert.deepStrictEqual(appels, [['resume_bien_avis_remplacer', PROD]], 'l écriture a été tentée, pour le compte, et refusée')
+})
+
+test('geste : un recalcul qui lève ne change pas non plus la réponse', async () => {
+  const etat = preparer({})
+  etat.client.rpc = async () => { throw new Error('réseau coupé') }
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({}, { action: 'create', bien: REF_A, texte: 'Très propre', source: 'sms' }, 'POST'), res)
+  assert.strictEqual(res.code, 201)
 })

@@ -1,8 +1,10 @@
 # Spec — Refonte UI V5, lot « Avis »
 
-**Statut : questions Q1 et Q2 tranchées par Thierry le 8 novembre 2026 (§7) ;
-étape 1 à lancer sur son go.**
-Branche `refonte-avis-v5`, partie de `main` à `dde1004ff1211a4a813a3ed1b471d36d92018fcf`.
+**Statut : étape 1 en production le 9 novembre 2026 (`main` `47901ed6`). Étape 2
+(résumé des trois chiffres, §10) : spec écrite le 10 novembre 2026, questions Q3 et
+Q4 tranchées par Thierry le 10 novembre 2026 (§10.9) : Q3 = A, Q4 = B.**
+Étape 1 : branche `refonte-avis-v5`, partie de `main` à `dde1004ff1211a4a813a3ed1b471d36d92018fcf`.
+Étape 2 : branche `avis-v5-resume`, partie de `main` à `d355d2cd9a584533e6de20809da0f32e9b8a4e9c`.
 
 Maquette : `maquette/avis-desktop.html` (ordinateur) et `maquette/avis-mobile.html`
 (téléphone), données fictives. Elle fait foi pour la forme ; cette spec fait foi pour
@@ -369,3 +371,263 @@ Chaque étape : une review, zéro rouge, remise au chef de file avec les cinq é
 - le budget : un appel d'écran au chargement, le même à 1 et à 12 biens ;
 - « À traiter » : les détections et les évaluations y sont, et seulement elles ;
 - horloge décalée (`tests/outils/horloge-decalee.js`) sur tout test daté.
+
+## 10. Étape 2 — les trois chiffres en résumé (Q1 = A)
+
+Spec écrite le 10 novembre 2026. **Q3 = A et Q4 = B, tranchées par Thierry le
+même jour (§10.9).** Conséquence de Q4 : l'accueil et la liste des logements ne
+sont pas touchés par cette étape (dette 145).
+
+### 10.1 Catégorie
+
+La note /5, le nombre d'avis reçus et la propreté (👍 / 👎) sont des données
+**non urgentes** : elles passent en résumé, calculé deux fois par jour, avec
+l'heure du calcul à l'écran. Rien d'autre de la page ne bouge : les cartes,
+« À traiter », les détections et les évaluations restent lues à l'ouverture —
+ce sont des choses à faire, pas des statistiques.
+
+### 10.2 La table `resume_bien_avis`
+
+Migration `migrations/2026-11-10-resume-bien-avis.sql`.
+
+| colonne | contenu |
+|---|---|
+| `user_id` uuid | le compte |
+| `property_id_ref` text | la référence provider du bien (celle d'`ota_reviews`) |
+| `periode` text | `15j`, `30j`, `6mois`, `toujours` (les clés de `lib/stats-avis.js`) |
+| `total`, `positif`, `remarque`, `rien_signale` int | avis reçus et propreté — même population que `ratioProprete` |
+| `notes` int, `notes_micro` bigint | nombre de notes et leur somme en micro-unités /5 — même population et même conversion que `notesDuPerimetre` |
+| `calcule_le` timestamptz NOT NULL | l'heure du calcul |
+| `motif_non_calculable` text | `null` quand c'est calculé ; sinon les compteurs sont `null`, jamais 0 |
+
+Clé primaire `(user_id, periode, property_id_ref)` — dans cet ordre, celui de
+la lecture de l'écran (un compte, une période, ses biens). Contrainte
+`resume_complet` : soit tous les compteurs et pas de motif, soit un motif et
+aucun compteur — un zéro avec motif est refusé par la base. RLS activée,
+**aucune policy** : seule l'API, en clé de service, la lit et l'écrit.
+
+Trois choix, écrits pour qu'on ne les défasse pas :
+1. **La clé est la référence, pas `properties.id`.** `ota_reviews.property_id_ref`
+   n'a pas de clé étrangère : un re-keying ou un bien supprimé laissent des avis
+   dont la référence ne désigne plus aucun bien. Ils comptent aujourd'hui dans
+   le global (`lib/stats-avis.js`, « le global n'est pas la somme des biens
+   affichés ») ; une clé UUID les perdrait, et la note du compte changerait.
+2. **Pas de colonne `jour`** (la spec performance §4.1 en prévoyait une) :
+   personne ne lit l'historique. Une ligne courante par clé, remplacée.
+3. **La note n'est pas stockée : la somme et le nombre le sont.** Un membre
+   limité à deux biens sur quatre voit la somme de ses deux lignes divisée par
+   leur nombre — jamais une moyenne de moyennes (défaut refermé le 20 octobre
+   2026). L'écran fait donc **une addition** sur au plus une ligne par bien du
+   périmètre, puis `arrondiDixiemes`. C'est la seule agrégation à la lecture,
+   et elle est nommée comme exemption.
+
+### 10.3 Le writer unique
+
+`lib/avis/resume.js`, `calculerResumeAvis(sb, { userId, maintenant })` :
+- **une lecture** paginée par curseur des avis qui comptent du compte
+  (confirmés, visibles, le voyageur a écrit), colonnes `id, ota, overall_score,
+  property_id_ref, ai_clean_verdict, received_at` — les quatre périodes en une
+  passe ;
+- la répartition par référence et par période en mémoire, avec les prédicats
+  et la conversion **importés** de `lib/stats-avis.js` et `lib/avis/echelle.js`,
+  aucun recopié ;
+- une ligne par (référence, période) pour **chaque bien du compte, archivés
+  compris** (décision du 3 novembre 2026 : leurs avis restent dans la note
+  globale), et pour chaque référence orpheline qui porte des avis. Un bien sans
+  avis a ses lignes **à zéro, avec l'heure** : un zéro calculé est un fait ;
+- puis le **remplacement des lignes du compte en une fois**, par la fonction
+  SQL `resume_bien_avis_remplacer` (une transaction : effacer et réécrire
+  aboutissent ensemble ou pas du tout). Elle **refuse un calcul périmé** :
+  `calcule_le` est l'heure de la LECTURE, et un calcul qui a lu avant un autre
+  ne peut pas écraser celui-ci — sinon le cron de 18:00, parti avant un geste
+  de l'hôte (Q3) et arrivé après, effacerait l'avis qu'il vient de saisir. Un
+  verrou par compte empêche deux remplacements de se chevaucher ;
+- **un échec de lecture n'écrit rien** : les lignes d'avant restent, avec leur
+  heure, et l'erreur part dans `results.errors` (carte 20). Une lecture
+  incomplète (plafond atteint) écrit des `null` avec le motif
+  `lecture_incomplete`.
+
+**Parité avant de brancher l'écran** : `scripts/verifier-parite-resume-avis.js`
+compare, en lecture seule sur la production, chaque ligne au calcul actuel
+(`ratioProprete` + `notesDuPerimetre`), quatre périodes, bien par bien et en
+global. Zéro écart exigé.
+
+**Mesuré en production le 11 novembre 2026 à 02:51** (lancé par Thierry, branche
+à `72647b65`, base `cjmrizpdyhrcurmgyrhs — PRODUCTION`) : **2 comptes, 168
+comparaisons, 0 écart** — le compte de Thierry à 4 références et 685 avis, et un
+compte à 1 référence sans avis. Six chiffres comparés par période et par
+périmètre : avis reçus, pouces haut, remarques, non évoquée, nombre de notes,
+note sur 5.
+
+### 10.4 Quand il tourne
+
+- **Cron, deux créneaux : 06:00 et 18:00 heure de Paris** (`lib/cron-resume-avis.js`,
+  tâche `resume_avis`, placée après les classifications et avant le dispatch).
+  Un compte est **dû tant que ses lignes sont plus anciennes que le dernier
+  créneau ouvert** : la garde regarde l'âge des lignes, pas l'heure du tick, donc
+  un créneau manqué (cron en panne, budget épuisé) se rattrape au tick suivant,
+  sans fenêtre d'une heure à ne pas rater. Le début du créneau se calcule à
+  l'heure de Paris (`heureDeParis`, `lib/cron-revenus-derives.js`), changement
+  d'heure compris. Un marqueur `cron_logs` (`resume_avis`) n'est posé qu'une
+  fois le créneau fini ; ensuite un tick sans rien à faire coûte **trois**
+  lectures (ce marqueur, le compte des biens, le marqueur des biens). Budget mur
+  de 10 s, et aucun calcul ne commence s'il reste moins de 25 s au cycle : le
+  dispatch passe après ; un passage interrompu se lit dans le bilan du cycle
+  (`results.resumeAvisBudgetAtteint`), et un créneau **pas fini deux heures
+  après** son ouverture alerte, une fois. Un compte en échec est signalé **une**
+  fois, retenu dans la mémoire du créneau (`cron_logs` `resume_avis_suivi`) et
+  **plus retenté avant le créneau suivant** — sans elle, un compte qui échoue
+  lentement mangeait le budget de chaque tick, bloquait tous les autres et
+  alertait toutes les 5 minutes (revue du lot, constat 1). Migration absente
+  (table ou fonction, **jamais une colonne**, qui est une vraie panne) : une
+  attente (`results.resumeAvisEnAttente`), pas une alerte. Coût suivi dans
+  `cron_stats` (carte 20).
+- **Premier calcul d'un logement neuf** : à chaque tick, les biens sont
+  **comptés** (une requête `head`) ; si leur nombre a bougé depuis le tick
+  précédent (marqueur `resume_avis_biens`), **ou si le dernier contrôle complet
+  date de plus d'une heure**, les références sans ligne font calculer leur
+  compte. Un seul endroit, plutôt que les quatre chemins qui posent
+  `provider_property_id` (`api/channel-property.js`, `lib/cron-beds24-props.js`,
+  `lib/canaux-du-bien.js`, `lib/cles-migrees.js`). Le contrôle horaire existe
+  pour le re-keying : une référence réécrite en place ne change pas le nombre
+  de biens, et une seule référence attendue sans ligne fait dire « pas encore
+  calculé » à **toute** la page du compte (revue du lot, constat 2) — le pire
+  retard est donc d'une heure, pas de douze.
+- **Mise en service** : la table est vide au déploiement ; le premier tick
+  après le collage de la migration calcule tous les comptes (marqueur absent),
+  dans la limite du budget, puis les ticks suivants finissent.
+  `scripts/remplir-resume-avis.js` (à blanc, puis `--go`) reste nécessaire pour
+  **staging, qui n'a pas de cron**, et pour vérifier la production à la main.
+- **Après un geste de l'hôte sur la page** (Q3 = A) : `api/avis.js` appelle
+  `recalculerApresGeste` après la saisie d'un avis (après sa classification),
+  après la confirmation d'une détection (pas après « Ignorer », qui ne change
+  aucun chiffre) et après une correction de propreté. Le recalcul est attendu
+  — une fonction Vercel peut être figée dès la réponse partie — et il ne lève
+  jamais : un échec ne transforme pas un geste enregistré en erreur.
+
+### 10.5 L'endpoint d'écran
+
+- `/api/ecran/avis` lit `resume_bien_avis` — **une requête** : le compte, la
+  période, les références du périmètre ou le bien demandé — au lieu de
+  `ratioProprete` + `noteMoyenne` (cinq requêtes). Même périmètre que
+  `cartes` : un membre limité ne lit que ses biens, un bien hors périmètre
+  rend 403.
+- Les chiffres sortent de `cartesLister`. L'action `cartes` n'est plus appelée
+  par aucune page (aucun appel dans `pages/`, `core/`, `shared/`, `apps/`,
+  `components/`) ; si elle reste, elle lit la même fonction de lecture du
+  résumé — jamais un second calcul.
+- Réponse : `stats: { note_sur_5, notes, total, positif, remarque,
+  rien_signale, non_analyses, periode, depuis, calcule_le }`, ou
+  `{ motif }` quand ce n'est pas calculable.
+- Un **bien attendu sans ligne** (logement neuf pas encore vu par le calcul),
+  ou un compte jamais calculé : motif `pas_encore_calcule`. Les références
+  attendues sont celles des **biens** du périmètre (`properties`), pas la liste
+  du périmètre elle-même : `refsDuPerimetre` y mélange les uuid et les
+  références (tenues par trigger), et un uuid n'a jamais de ligne — l'attendre
+  ferait dire « pas encore calculé » pour toujours. Le filtre de lecture, lui,
+  reste la liste du périmètre telle que les cartes la posent : rien n'est
+  élargi. Des lignes d'heures différentes (un bien calculé plus tard) :
+  `calcule_le` = **la plus ancienne** — l'âge d'un chiffre est celui de sa
+  partie la plus vieille. Table absente (migration pas collée) : même motif.
+- **Limite connue (revue du lot, constat 3)** : un compte dont **aucun** bien
+  n'a de référence provider — cela n'arrive que pendant une bascule — n'attend
+  aucune ligne ; s'il porte des avis orphelins, l'écran dit « 0 avis reçus »
+  là où l'ancien calcul les comptait, et le cron ne calcule pas ce compte (il
+  part des biens). État transitoire, sans liste de biens à choisir sur la
+  page ; il se referme dès qu'un bien retrouve sa référence.
+
+### 10.6 L'écran
+
+- Sous les trois chiffres : **« Calculé à 06:02 »** (aujourd'hui), « Calculé
+  hier à 18:01 », sinon « Calculé le 8 nov. à 18:01 ». Même ligne au
+  téléphone, sous les trois colonnes.
+- Pas encore calculé : « Les chiffres n'ont pas encore été calculés. » —
+  jamais 0.
+- Lecture incomplète : « Les chiffres n'ont pas pu être calculés en entier. »
+- Aucune note sur la période : « Aucune note sur cette période » au lieu de
+  « — » (règle du dépôt : un `null` se dit, jamais un tiret).
+- Le cache navigateur garde l'heure avec les chiffres.
+- Textes en fr, en, es.
+
+### 10.7 Performance (huit points)
+
+1. Un endpoint d'écran : inchangé, un appel.
+2. Résumé : c'est l'objet de l'étape.
+3. Cache : les chiffres et leur heure, rien d'autre de neuf.
+4. `private, no-store` : inchangé, test existant.
+5. Fichiers statiques : sans objet (clés ajoutées aux fichiers i18n versionnés).
+6. Lectures : celle du writer est paginée par curseur ; celle de l'écran est
+   bornée par le nombre de références du compte.
+7. Budget : `tests/budget-ecran.test.js` inchangé (un appel à 1 comme à
+   12 biens) ; `Server-Timing` porte le compte de requêtes.
+8. **Mesure AVANT** — production, compte de Thierry, 9 novembre 2026 :
+   1 appel, **14 requêtes**, 654 à 1 401 ms côté serveur. Attendu : 14 → 10
+   (quatre comptages et une lecture de notes remplacés par une lecture). La
+   mesure APRÈS se prend en production après le merge et se consigne ici.
+
+### 10.8 Tests attendus
+
+- le writer, chiffres écrits en clair, quatre périodes : avis masqué, objet
+  vide, détection non confirmée, source inconnue, avis sans date (seulement
+  dans `toujours`), bien archivé, référence orpheline ;
+- la parité avec `ratioProprete` et `notesDuPerimetre` sur les mêmes données ;
+- un échec de lecture n'écrit rien et ne supprime rien ;
+- le membre limité : la somme de ses biens seulement ; hors périmètre, 403 ;
+- l'endpoint ne charge plus `ratioProprete` ni `noteMoyenne` ;
+- les créneaux 06:00 / 18:00 en heure d'été et d'hiver, le marqueur, le bien
+  neuf rattrapé au tick suivant ;
+- l'écran : heure (aujourd'hui, hier, date), pas encore calculé, aucune note ;
+- horloge décalée sur tout test daté, et chaque test neuf rougit contre le
+  code d'avant (`git archive`, REVIEW.md règle 19).
+
+### 10.9 Questions à Thierry
+
+**Q3 = A, tranchée par Thierry le 10 novembre 2026 à 14:47** : après un geste
+de l'hôte sur la page, son compte est recalculé tout de suite.
+
+**Q3 — Après un geste de l'hôte sur la page Avis** (saisir un avis reçu,
+confirmer une détection, corriger la propreté), les trois chiffres :
+- **A** — se recalculent tout de suite pour son compte (même writer, une
+  lecture de plus par geste). *(recommandé : l'hôte voit son geste compté ;
+  tout le reste attend le créneau suivant)*
+- **B** — attendent le prochain calcul, jusqu'à 12 h ; l'heure affichée le
+  dit.
+
+**Q4 = B, tranchée par Thierry le 10 novembre 2026 à 14:47** : l'accueil et la
+liste des logements restent sur leur calcul à l'ouverture dans cette étape ;
+l'écart est inscrit au registre (dette 145).
+
+**Q4 — L'accueil (note 30 jours) et la liste des logements (note, nombre
+d'avis) calculent la note eux-mêmes, à chaque ouverture.** Une fois la page
+Avis passée au résumé, deux écrans peuvent montrer deux notes différentes
+pendant quelques heures : un avis reçu à 10:00 compte tout de suite à
+l'accueil, et à 18:00 sur Avis.
+- **A** — dans cette étape, l'accueil et la liste des logements lisent la même
+  table. *(recommandé : une note, un chiffre, partout — c'était prévu par la
+  spec performance §4.1 ; deux fichiers d'autres écrans,
+  `api/ecran/aujourdhui.js` et `lib/logement/lecture.js`, je préviens les
+  fils qui les tiennent)*
+- **B** — dans un lot suivant ; l'écart est noté en dette d'ici là.
+
+### 10.10 Revue de l'étape 2 (10 novembre 2026)
+
+Une revue, par un agent distinct, sur l'arbre `/home/claude/hotesmart-avis-resume`,
+branche `avis-v5-resume`, plage
+`86c97cbfa1e6888a502f0d83fecb20953328341c..a428d51131531963360dca88287b2bef5fe55228`
+(SHA lu déclaré par la revue : `a428d511…`). **Aucun constat de sécurité** :
+filtrage par compte, périmètre du membre, recalcul sur le compte cible, droits
+de la fonction SQL et RLS de la table vérifiés — la migration a été rejouée
+deux fois sur un PostgreSQL 16 local. Donc pas de re-revue (règle « une revue
+par commit »). Chaque fichier cité est dans le diff de la plage ;
+`lib/stats-avis.js` n'est cité qu'en preuve.
+
+| # | gravité | fichier cité | constat | suite |
+|---|---|---|---|---|
+| 1 | défaut | `lib/cron-resume-avis.js` | un compte qui échoue lentement mange le budget de chaque tick, bloque les autres, alerte toutes les 5 min | corrigé : mémoire du créneau `resume_avis_suivi`, un compte en échec n'est plus retenté avant le créneau suivant ; test |
+| 2 | mineur | `lib/cron-resume-avis.js`, `lib/avis/resume.js`, `api/avis.js` | une référence réécrite à nombre de biens constant vide la page du compte jusqu'au créneau suivant | corrigé : contrôle complet au moins une fois par heure ; test |
+| 3 | mineur | `api/avis.js`, `lib/avis/resume.js` (+ `lib/stats-avis.js` en preuve) | compte sans aucun bien référencé, avis orphelins : « 0 avis » | limite documentée (§10.5) : état transitoire de bascule |
+| 4 | mineur | `lib/avis/resume.js` | « migration absente » attrapait aussi une colonne absente | corrigé : codes seuls (PGRST202/205, 42P01, 42883), log à la lecture ; test |
+| 5 | mineur | `scripts/remplir-resume-avis.js` | à blanc, l'alarme des sources inconnues écrivait un incident | corrigé dans le writer : pas d'alarme à blanc ; test |
+| 6 | mineur | `api/cron.js` | un passage interrompu ne se voyait nulle part | corrigé : `results.resumeAvisBudgetAtteint`, alerte unique si le créneau n'est pas fini deux heures après ; test |
+| 7 | mineur | `api/cron.js` | « deux lectures » annoncées, il y en a trois | corrigé (commentaire et §10.4) |
+| 8 | mineur | `tests/avis-endpoint.test.js` | le test « recalcul en échec » passait par un `TypeError`, pas par un refus de la base | corrigé : la fonction SQL est appelée et refuse ; second test pour l'exception |

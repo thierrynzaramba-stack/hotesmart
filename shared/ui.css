@@ -2116,6 +2116,10 @@ body.men-cfg-ouvert { overflow: hidden; }
 .avp-chiffre b { display: flex; align-items: center; gap: 6px; font-size: 30px; font-weight: var(--fw-black); letter-spacing: var(--tracking-tight); font-variant-numeric: tabular-nums; line-height: 1; }
 .avp-chiffre b .icon { width: 22px; height: 22px; }
 .avp-chiffre > span { display: block; margin-top: 6px; font-size: var(--fs-caption); color: var(--muted); }
+/* Sans note sur la periode : on le dit, a la taille d'un texte, pas d'un chiffre. */
+.avp-chiffre b.avp-chiffre__sans { font-size: var(--fs-body); font-weight: var(--fw-semibold); letter-spacing: normal; }
+/* L'heure du calcul (lot Avis V5, etape 2) : sous les trois chiffres, sur sa ligne. */
+.avp-calcule { flex-basis: 100%; margin: 0; font-size: var(--fs-caption); color: var(--muted); }
 .avp-pos, .avp-neg { display: inline-flex; align-items: center; gap: 4px; }
 .avp-pos { color: var(--ok-ink); }
 .avp-neg { color: var(--danger-ink); margin-inline-start: 10px; }
@@ -2226,6 +2230,7 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
   .avp-chiffre b { font-size: 22px; }
   .avp-chiffre b .icon { width: 18px; height: 18px; }
   .avp-chiffre > span { font-size: 11.5px; }
+  .avp-calcule { grid-column: 1 / -1; }
   .avp-atraiter { padding: 10px; border-radius: 18px; }
   .avp-ligne-atraiter { flex-wrap: wrap; align-items: flex-start; }
   .avp-ligne-atraiter .avp-actions { width: 100%; }

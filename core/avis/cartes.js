@@ -109,6 +109,13 @@ export const TEXTES_FR = {
   'avis.avis_recus': 'avis reçus',
   'avis.proprete_lib': 'propreté saluée · remarques',
   'avis.stats_ko': 'Les compteurs n’ont pas pu être calculés. Rechargez pour réessayer.',
+  'avis.calcule_aujourdhui': 'Calculé à {heure}',
+  'avis.calcule_hier': 'Calculé hier à {heure}',
+  'avis.calcule_le': 'Calculé le {date} à {heure}',
+  'avis.chiffres_pas_encore': 'Les chiffres n’ont pas encore été calculés.',
+  'avis.chiffres_incomplets': 'Les chiffres n’ont pas pu être calculés en entier.',
+  'avis.aucune_note': 'Aucune note',
+  'avis.sur_periode': 'sur cette période',
   'avis.acces_refuse': 'Vous n’avez pas accès aux avis de ce compte.',
   'avis.illisibles': 'Avis illisibles',
   'avis.correction_ko': 'Correction impossible.',
@@ -395,20 +402,50 @@ function contexte (data, opts) {
   return { T: traducteur(opts.t, langue), langue, photos, peutEcrire: Boolean(opts.peutEcrire), avecBus: Boolean(opts.avecBus) }
 }
 
+// ⚠ L'HEURE DU CALCUL, TOUJOURS AFFICHEE (regle d'architecture du depot) : les
+// trois chiffres sont calcules a 06:00 et 18:00 (lot Avis V5, etape 2), et un
+// chiffre dont personne ne sait l'age se lit comme un chiffre d'il y a une
+// seconde. « Calcule a 06:02 » aujourd'hui, « hier a 18:01 », sinon la date.
+// `fuseau` est injectable pour les tests ; absent, c'est celui du navigateur.
+const jourDe = (d, fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+export function libelleCalcul (iso, T, { langue = 'fr', maintenant = Date.now(), fuseau } = {}) {
+  const d = iso ? new Date(iso) : null
+  if (!d || isNaN(d)) return ''
+  try {
+    const heure = d.toLocaleTimeString(langue, { hour: '2-digit', minute: '2-digit', timeZone: fuseau })
+    const jour = jourDe(d, fuseau)
+    if (jour === jourDe(new Date(maintenant), fuseau)) return T('avis.calcule_aujourdhui', { heure })
+    if (jour === jourDe(new Date(maintenant - 86400000), fuseau)) return T('avis.calcule_hier', { heure })
+    const date = d.toLocaleDateString(langue, { day: 'numeric', month: 'short', timeZone: fuseau })
+    return T('avis.calcule_le', { date, heure })
+  } catch { return '' }
+}
+
 export function rendreStats (s, opts = {}) {
   if (!s) return ''
   const ctx = contexte(null, opts)
   const { T } = ctx
   if (s.erreur) return `<p class="avp-erreur">${ECHAPPER(T('avis.stats_ko'))}</p>`
+  // ⚠ UN MOTIF REMPLACE LES CHIFFRES, JAMAIS UN ZERO : un compte pas encore
+  // calcule n'a pas « 0 avis », il n'a pas encore de chiffres.
+  if (s.motif) {
+    const texte = s.motif === 'lecture_incomplete' ? T('avis.chiffres_incomplets') : T('avis.chiffres_pas_encore')
+    return `<p class="avp-calcule">${ECHAPPER(texte)}</p>`
+  }
   // ⚠ SUR 5, comme partout ailleurs (decision de Thierry, 20 octobre 2026). La
   // note descend DEJA convertie et arrondie une seule fois : on l'affiche, on
-  // ne la recalcule pas.
-  const moy = s.note_sur_5 == null ? '—' : uneDecimale(s.note_sur_5, ctx.langue)
-  const sousNote = [T('avis.sur_5'), s.notes ? T('avis.n_notes', { n: s.notes }) : ''].filter(Boolean).join(' · ')
-  return `<div class="avp-chiffre"><b>${ICONE('i-review', 'icon--fill')}${ECHAPPER(moy)}</b><span>${ECHAPPER(sousNote)}</span></div>`
+  // ne la recalcule pas. Sans note sur la periode, on le DIT — pas de tiret,
+  // qui se lit comme une valeur manquante sans motif.
+  const note = s.note_sur_5 == null
+    ? `<div class="avp-chiffre"><b class="avp-chiffre__sans">${ICONE('i-review', 'icon--fill')}${ECHAPPER(T('avis.aucune_note'))}</b><span>${ECHAPPER(T('avis.sur_periode'))}</span></div>`
+    : `<div class="avp-chiffre"><b>${ICONE('i-review', 'icon--fill')}${ECHAPPER(uneDecimale(s.note_sur_5, ctx.langue))}</b>`
+      + `<span>${ECHAPPER([T('avis.sur_5'), s.notes ? T('avis.n_notes', { n: s.notes }) : ''].filter(Boolean).join(' · '))}</span></div>`
+  const quand = libelleCalcul(s.calcule_le, T, { langue: ctx.langue, maintenant: opts.maintenant, fuseau: opts.fuseau })
+  return note
     + `<div class="avp-chiffre"><b>${ECHAPPER(s.total)}</b><span>${ECHAPPER(T('avis.avis_recus'))}</span></div>`
     + `<div class="avp-chiffre"><b><span class="avp-pos">${ICONE('i-thumb-up')}${ECHAPPER(s.positif)}</span>`
     + `<span class="avp-neg">${ICONE('i-thumb-down')}${ECHAPPER(s.remarque)}</span></b><span>${ECHAPPER(T('avis.proprete_lib'))}</span></div>`
+    + (quand ? `<p class="avp-calcule">${ECHAPPER(quand)}</p>` : '')
 }
 
 /**
