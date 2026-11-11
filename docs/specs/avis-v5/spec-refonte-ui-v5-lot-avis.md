@@ -452,6 +452,13 @@ compare, en lecture seule sur la production, chaque ligne au calcul actuel
 (`ratioProprete` + `notesDuPerimetre`), quatre périodes, bien par bien et en
 global. Zéro écart exigé.
 
+**Mesuré en production le 11 novembre 2026 à 02:51** (lancé par Thierry, branche
+à `72647b65`, base `cjmrizpdyhrcurmgyrhs — PRODUCTION`) : **2 comptes, 168
+comparaisons, 0 écart** — le compte de Thierry à 4 références et 685 avis, et un
+compte à 1 référence sans avis. Six chiffres comparés par période et par
+périmètre : avis reçus, pouces haut, remarques, non évoquée, nombre de notes,
+note sur 5.
+
 ### 10.4 Quand il tourne
 
 - **Cron, deux créneaux : 06:00 et 18:00 heure de Paris** (`lib/cron-resume-avis.js`,
