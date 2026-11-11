@@ -7,8 +7,9 @@ Postgres par `scripts/eprouver-demandes-factures.sh` (45 gestes).
 L'émetteur, lui, vit dans `docs/kb/entites-juridiques.md`.
 
 Étape 2a (10 novembre 2026) : la base, le lien envoyé dans la conversation, la
-page du voyageur, la saisie par l'hôte. L'étape 2b ajoutera le bouton et l'état
-sur la fiche de réservation ; l'étape 3, l'émission.
+page du voyageur, la saisie par l'hôte. Étape 2b (11 novembre 2026) : l'état et
+les gestes sur la fiche de réservation, ordinateur et téléphone (section « La
+fiche de réservation » ci-dessous). L'étape 3 : l'émission.
 
 ## Les pièces
 
@@ -17,7 +18,9 @@ sur la fiche de réservation ; l'étape 3, l'émission.
 | `factures_voyageur` | une ligne par DEMANDE ; elle deviendra la facture à l'émission (étape 3) |
 | `factures_voyageur_jetons` | un jeton par ENVOI d'un lien, stocké haché, avec l'issue du message |
 | `lib/factures-voyageur.js` | writer unique ; ne garde rien, reçoit un compte déjà vérifié |
-| `api/factures-voyageur.js` | les gestes de l'HÔTE : `envoyer_lien` (porte 1), `saisir` (Q12) |
+| `api/factures-voyageur.js` | les gestes de l'HÔTE : `envoyer_lien` (porte 1), `copier_lien` (P2 quinquies, aucun message), `saisir` (Q12) |
+| `api/calendar.js` `?booking=` | l'ÉTAT de la demande sur la fiche de réservation (`facture`), dans la réponse existante (étape 2b) |
+| `shared/calendrier-resa.js` | `presentationFacture` : l'état et les boutons en CLÉS de texte, une règle pour les deux écrans |
 | `api/facture-publique.js` | la page du VOYAGEUR, par son jeton : `lire`, `enregistrer` |
 | `pages/facture.html` | la page publique, servie sur `/facture#<jeton>` |
 
@@ -117,6 +120,36 @@ leur accorde EXECUTE nominativement). L'épreuve Postgres le vérifie avec les
 droits par défaut de Supabase rejoués — sans eux, les refus du navigateur
 passeraient pour la mauvaise raison.
 
+## La fiche de réservation (étape 2b)
+
+⚠ **L'ÉTAT ARRIVE DANS LA RÉPONSE QUE LA FICHE LIT DÉJÀ** (`GET
+/api/calendar?booking=`) : une lecture de plus côté serveur, EN PARALLÈLE de la
+réservation, aucun appel de plus à l'ouverture (mesure AVANT / APRÈS : spec
+§9). La lecture prend la demande active et ses 20 derniers jetons en UNE
+requête (embarquement PostgREST par `demande_id`).
+
+⚠ **LES DROITS SONT ÉVALUÉS PAR LE SERVEUR, ET IL OMET** (`etatPourLaFiche`) :
+- un niveau LECTURE ne reçoit que `{ statut, gestes }` — ni destinataire, ni
+  dates d'envoi (P2) ;
+- `gestes.envoyer` exige `reservations` ET `messages` en écriture (P1) ;
+  `copier` et `saisir`, `reservations` en écriture (Q10, P2 quinquies) ;
+- une facture émise, une réservation non confirmée : aucun geste ;
+- Beds24 (P2 quater) et directe sans adresse (P5) : pas d'« envoyer »,
+  « copier » oui, et `sansEnvoi` dit pourquoi ;
+- le motif technique d'un échec d'envoi (`envoi_motif`) ne sort pas.
+L'écran ne fait que traduire (`presentationFacture`, des clés de
+shared/i18n) ; un bouton absent reste refusé par `api/factures-voyageur.js`.
+
+⚠ **« COPIER UN LIEN » N'ENVOIE RIEN** (P2 quinquies, Thierry, 11 nov. 2026) :
+un jeton neuf, l'issue du jeton reste vide, rien dans le fil. La fiche dit
+alors « lien créé, sans message confirmé ». Dans UNE ouverture de la fiche, le lien
+déjà obtenu (par « Envoyer » ou « Copier ») est recopié tel quel : pas de
+jeton de plus, et l'anti-double-clic de 30 s ne le refuse pas. Rouvrir la fiche
+en crée un neuf — le lien en clair n'est jamais relu.
+
+⚠ **APRÈS CHAQUE GESTE, L'ÉTAT EST RELU** par la même lecture `?booking=` :
+l'écran affiche toujours ce que le serveur sait, pas ce que le geste a supposé.
+
 ## Limites connues
 
 - **Le lien nomme le domaine** `hotesmart.vercel.app` tant qu'un domaine propre
@@ -141,6 +174,11 @@ passeraient pour la mauvaise raison.
 - **Faux positifs du masque**, dans la COPIE du fil seulement (le message parti
   est intact) : un autre lien en `/facture…`, ou une longue référence avec
   chiffres dans un message qui parle de facture.
+- **Un jeton sans issue** (`envoi` vide) se lit « lien créé, sans message
+  confirmé » :
+  c'est le cas de « Copier un lien », mais aussi d'un envoi interrompu entre la
+  création du jeton et la note de son issue (fonction tuée) — d'où « sans
+  message CONFIRMÉ », jamais « message envoyé » ni « aucun message ».
 - **Deux envois du lien à moins de 10 minutes** : le fil n'en montre qu'un —
   masqués, leurs textes sont identiques, et la déduplication des sortants de
   `recordMessage` les confond. Les deux jetons, eux, sont en base.

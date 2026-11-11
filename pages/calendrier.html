@@ -131,7 +131,8 @@ import { api } from '/shared/api-client.js'
 import { toISO, computeDays, buildStateFromInventory, loadCalendarData, PARAMS }
   from '/shared/calendar-core.js'
 import { mapResa, familleSource, LIBELLE_CANAL, libelleStatut, droitsResa, badgeSansEmailVisible,
-  TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, brancherEvaluation }
+  TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, brancherEvaluation,
+  presentationFacture, cleRetourEnvoiFacture, cleRefusFacture }
   from '/shared/calendrier-resa.js'
 import { ACTIONS_BARRE, RUBRIQUES_POPUP, CHAMPS_FICHE, etatDeNuit, prixIntl, dateIntl }
   from '/shared/calendrier-contrat.js'
@@ -278,7 +279,13 @@ async function appel (chemin, corpsPost) {
     ...(corpsPost ? { body: JSON.stringify(corpsPost) } : {})
   })
   const corps = await r.json().catch(() => ({}))
-  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.code || corps.error; throw e }
+  if (!r.ok) {
+    const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.code || corps.error
+    // Le motif et le champ refuses (api/factures-voyageur.js) : la fiche dit
+    // QUEL champ corriger, et pourquoi un geste est refuse.
+    e.motif = corps.motif || null; e.champ = corps.champ || null
+    throw e
+  }
   return corps
 }
 
@@ -2037,6 +2044,7 @@ function ouvrirFicheResa (bienId, resaId) {
       <span data-fiche-evaluation></span>
       <button type="button" class="btn btn--secondary" data-fiche-conv disabled>${esc(t('cal.open_conversation'))}</button>
       <p class="caption muted" data-fiche-conv-note hidden></p>
+      <div data-fiche-facture></div>
     </div>
     ${droits.modifiable ? `<div class="msg-tiroir__bloc">
       <label class="caption muted">${esc(t('cal.fiche_arrivee'))}</label><input type="date" data-f="arrivee" value="${r.startISO}">
@@ -2067,7 +2075,10 @@ function ouvrirFicheResa (bienId, resaId) {
   // du total) vient d'un second appel, par booking_id : jamais dans le
   // listing (minimisation). Une lecture echouee n'affiche rien — la fiche
   // reste juste, pas de champ invente.
-  appel(`/api/calendar?property_ids=${encodeURIComponent(bienId)}&start=${r.startISO}&end=${String(r.checkout).slice(0, 10)}&booking=${encodeURIComponent(resaCourante)}`).then(d => {
+  // ⚠ L'ETAT DE LA FACTURE ARRIVE DANS CETTE MEME REPONSE (etape 2b) : aucun
+  // appel de plus a l'ouverture. Apres un geste sur la facture, c'est CETTE
+  // lecture qui est refaite — l'etat affiche est toujours celui du serveur.
+  const lireDetailFiche = () => appel(`/api/calendar?property_ids=${encodeURIComponent(bienId)}&start=${r.startISO}&end=${String(r.checkout).slice(0, 10)}&booking=${encodeURIComponent(resaCourante)}`).then(d => {
     // Reponse en retard : la feuille peut montrer une AUTRE reservation —
     // on n'ecrit que si c'est encore la meme (sinon le tel: de A s'injecte
     // dans la fiche de B).
@@ -2112,7 +2123,178 @@ function ouvrirFicheResa (bienId, resaId) {
           ${parNuit ? `<p class="caption muted" style="margin: 8px 0 0">${esc(t('cal.price_per_night'))}</p>${parNuit}` : `<p class="caption muted">${esc(t('cal.per_night_unavailable'))}</p>`}
         </div>
       </details>`
+    peindreFacture(d.facture)
   }).catch(e => logger.error('Calendrier', 'detail reservation', e))
+
+  // ─── La facture du voyageur (etape 2b, spec-facture-voyageur §7) ──────────
+  // UN composant pour l'ordinateur et le telephone (cette fiche est la meme sur
+  // les deux). Les DROITS viennent du serveur (`facture.gestes`) ; les clés de
+  // texte, du module commun (presentationFacture). Un bouton absent reste
+  // refuse par api/factures-voyageur.js : le masquage n'est pas la garde.
+  // ⚠ LE LIEN EN CLAIR N'EST JAMAIS RELU : la base n'en garde que l'empreinte.
+  // Celui qu'un geste vient d'obtenir est garde ICI, le temps de cette
+  // ouverture de la fiche : « Copier un lien » le recopie tel quel au lieu d'en
+  // creer un de plus (et l'anti-double-clic de 30 s ne le refuse pas). Rouvrir
+  // la fiche en cree un neuf (P2 quinquies).
+  let lienCourant = null
+  let lienVisible = false        // montre a l'hote : apres « Copier », ou quand le message n'est pas parti
+  let dernierRetour = null       // { cle, vars, erreur } : survit a la relecture
+  const encoreLaFiche = () => !$('[data-bind="feuille"]').hidden && encoreCetteResa()
+  const dateCourte = (iso) => iso ? dateIntl(String(iso).slice(0, 10), langue()) : ''
+  function peindreFacture (f) {
+    const zone = corps.querySelector('[data-fiche-facture]')
+    if (!zone) return
+    const p = presentationFacture(f)
+    if (!p) { zone.innerHTML = ''; return }
+    const dest = p.destinataire
+    const lignesDest = dest ? [dest.nom, [dest.code_postal, dest.ville].filter(Boolean).join(' '), dest.pays].filter(Boolean).join(', ') : ''
+    zone.innerHTML = `
+      <div data-fac style="margin-top: 14px">
+        <p class="caption muted" style="margin: 0 0 4px">${esc(t('cal.fac_titre'))}</p>
+        <p data-fac-statut style="margin: 0">${esc(t(p.statut))}</p>
+        ${p.envoi ? `<p class="caption muted" data-fac-envoi style="margin: 2px 0 0">${esc(t(p.envoi.cle, { date: dateCourte(p.envoi.le) }))}</p>` : ''}
+        ${dest ? `<p class="caption" data-fac-dest style="margin: 4px 0 0; overflow-wrap: anywhere">${esc(lignesDest)}${p.saisiPar ? ' — ' + esc(t(p.saisiPar === 'hote' ? 'cal.fac_saisi_hote' : 'cal.fac_saisi_voyageur')) : ''}</p>` : ''}
+        ${p.note ? `<p class="caption muted" data-fac-note style="margin: 4px 0 0">${esc(t(p.note))}</p>` : ''}
+        ${p.boutons.envoyer || p.boutons.copier || p.boutons.saisir ? `<div class="row" style="gap: 8px; flex-wrap: wrap; margin-top: 8px">
+          ${p.boutons.envoyer ? `<button type="button" class="btn btn--secondary" data-fac-envoyer>${esc(t(p.boutons.envoyer))}</button>` : ''}
+          ${p.boutons.copier ? `<button type="button" class="btn btn--secondary" data-fac-copier>${esc(t('cal.fac_copier'))}</button>` : ''}
+          ${p.boutons.saisir ? `<button type="button" class="link" data-fac-saisir>${esc(t(p.boutons.saisir))}</button>` : ''}
+        </div>` : ''}
+        <div data-fac-lien hidden style="margin-top: 8px">
+          <label class="caption muted" for="fac-lien-texte">${esc(t('cal.fac_lien_label'))}</label>
+          <input type="text" id="fac-lien-texte" readonly data-fac-lien-texte style="width: 100%">
+        </div>
+        <p class="caption" data-fac-retour role="status" style="margin: 6px 0 0"></p>
+        <form data-fac-form hidden novalidate style="margin-top: 8px"></form>
+      </div>`
+    if (lienCourant && lienVisible) montrerLien(zone, lienCourant)
+    if (dernierRetour) dire(zone, dernierRetour)
+    zone.querySelector('[data-fac-envoyer]')?.addEventListener('click', () => envoyerLienFacture(zone))
+    zone.querySelector('[data-fac-copier]')?.addEventListener('click', () => copierLienFacture(zone))
+    zone.querySelector('[data-fac-saisir]')?.addEventListener('click', () => ouvrirSaisieFacture(zone, dest))
+  }
+  function dire (zone, retour) {
+    dernierRetour = retour
+    const el = zone.querySelector('[data-fac-retour]')
+    if (!el) return
+    el.textContent = retour ? t(retour.cle, retour.vars || {}) : ''
+    el.classList.toggle('msg-echec', !!(retour && retour.erreur))
+  }
+  function montrerLien (zone, lien) {
+    const bloc = zone.querySelector('[data-fac-lien]')
+    if (!bloc) return
+    bloc.hidden = false
+    lienVisible = true
+    const champ = bloc.querySelector('[data-fac-lien-texte]')
+    champ.value = lien
+    champ.addEventListener('focus', () => champ.select())
+  }
+  const boutonsFacture = (zone, actifs) =>
+    zone.querySelectorAll('[data-fac-envoyer], [data-fac-copier], [data-fac-saisir], [data-fac-form] button').forEach(b => { b.disabled = !actifs })
+  // UN site d'appel pour tous les gestes (tests/budget-ecran.test.js) : ils ne
+  // partent qu'au clic, jamais a l'ouverture de la fiche.
+  const posterFacture = (corpsPost) => appel('/api/factures-voyageur', { booking: resaCourante, ...corpsPost })
+  const refus = (zone, e, libelles = {}) => {
+    const code = e && (e.motif || e.code)
+    const cle = cleRefusFacture(code, e && e.status)
+    dire(zone, { cle, vars: { champ: libelles[e && e.champ] || '' }, erreur: true })
+  }
+  async function copierDansLePressePapiers (lien) {
+    try { await navigator.clipboard.writeText(lien); return true } catch { return false }
+  }
+  async function envoyerLienFacture (zone) {
+    if (!window.confirm(t('cal.fac_confirm_envoi'))) return
+    boutonsFacture(zone, false)
+    try {
+      const rep = await posterFacture({ action: 'envoyer_lien' })
+      if (!encoreLaFiche()) return
+      lienCourant = rep.lien || lienCourant
+      // Livre : le lien est dans la conversation, masque dans HoteSmart (P2
+      // ter). Sinon : il est montre ici, pour que l'hote le transmette.
+      if (rep.envoi !== 'livre' && lienCourant) montrerLien(zone, lienCourant)
+      dire(zone, { cle: cleRetourEnvoiFacture(rep.envoi), erreur: !['livre', 'differe'].includes(rep.envoi) })
+      await lireDetailFiche()
+    } catch (e) {
+      if (!encoreLaFiche()) return
+      refus(zone, e); boutonsFacture(zone, true)
+    }
+  }
+  async function copierLienFacture (zone) {
+    boutonsFacture(zone, false)
+    try {
+      let nouveau = false
+      if (!lienCourant) {
+        const rep = await posterFacture({ action: 'copier_lien' })
+        if (!encoreLaFiche()) return
+        lienCourant = rep.lien
+        nouveau = true
+      }
+      montrerLien(zone, lienCourant)
+      const copie = await copierDansLePressePapiers(lienCourant)
+      dire(zone, { cle: copie ? 'cal.fac_copie_ok' : 'cal.fac_copie_manuelle' })
+      if (nouveau) await lireDetailFiche()
+      else boutonsFacture(zone, true)
+    } catch (e) {
+      if (!encoreLaFiche()) return
+      refus(zone, e); boutonsFacture(zone, true)
+    }
+  }
+  // « Remplir a sa place » (Q12) : les champs du formulaire du voyageur
+  // (pages/facture.html), memes noms que validerDestinataire.
+  const CHAMPS_DEST = [
+    ['nom', 'cal.fac_f_nom', 200], ['adresse1', 'cal.fac_f_adresse1', 200], ['adresse2', 'cal.fac_f_adresse2', 200],
+    ['code_postal', 'cal.fac_f_cp', 20], ['ville', 'cal.fac_f_ville', 120], ['pays', 'cal.fac_f_pays', 80],
+    ['tva', 'cal.fac_f_tva', 20], ['siren', 'cal.fac_f_siren', 11]
+  ]
+  function ouvrirSaisieFacture (zone, dest) {
+    const form = zone.querySelector('[data-fac-form]')
+    if (!form) return
+    const v = dest || {}
+    const societe = v.type === 'societe'
+    form.innerHTML = `
+      <fieldset style="border: 0; padding: 0; margin: 0">
+        <legend class="caption muted">${esc(t('cal.fac_f_type'))}</legend>
+        <label><input type="radio" name="fac-type" value="particulier"${societe ? '' : ' checked'}> ${esc(t('cal.fac_f_particulier'))}</label>
+        <label style="margin-left: 12px"><input type="radio" name="fac-type" value="societe"${societe ? ' checked' : ''}> ${esc(t('cal.fac_f_societe'))}</label>
+      </fieldset>
+      ${CHAMPS_DEST.map(([c, cle, max]) => `<div data-fac-champ="${c}"${!societe && (c === 'tva' || c === 'siren') ? ' hidden' : ''}>
+        <label class="caption muted" for="fac-${c}">${esc(t(cle))}</label>
+        <input type="text" id="fac-${c}" name="${c}" maxlength="${max}" value="${esc(v[c] || '')}" style="width: 100%">
+      </div>`).join('')}
+      <span class="row" style="gap: 8px; margin-top: 8px">
+        <button type="submit" class="btn btn--primary" data-fac-enregistrer>${esc(t('cal.fac_f_enregistrer'))}</button>
+        <button type="button" class="link" data-fac-fermer>${esc(t('cal.fac_f_annuler'))}</button>
+      </span>`
+    form.hidden = false
+    const typeChoisi = () => form.querySelector('input[name="fac-type"]:checked').value
+    form.querySelectorAll('input[name="fac-type"]').forEach(x => x.addEventListener('change', () => {
+      for (const c of ['tva', 'siren']) form.querySelector(`[data-fac-champ="${c}"]`).hidden = typeChoisi() !== 'societe'
+    }))
+    form.querySelector('[data-fac-fermer]').addEventListener('click', () => { form.hidden = true; form.innerHTML = '' })
+    form.querySelector('#fac-nom').focus()
+    // ⚠ `onsubmit`, PAS `addEventListener` : le meme <form> se rouvre apres
+    // « Annuler », et un second ecouteur ferait partir DEUX saisies.
+    form.onsubmit = async (ev) => {
+      ev.preventDefault()
+      const destinataire = { type: typeChoisi() }
+      for (const [c] of CHAMPS_DEST) destinataire[c] = form.querySelector(`#fac-${c}`).value
+      const libelles = Object.fromEntries(CHAMPS_DEST.map(([c, cle]) => [c, t(cle)]))
+      boutonsFacture(zone, false)
+      try {
+        await posterFacture({ action: 'saisir', destinataire })
+        if (!encoreLaFiche()) return
+        dire(zone, { cle: 'cal.fac_saisie_ok' })
+        await lireDetailFiche()
+      } catch (e) {
+        if (!encoreLaFiche()) return
+        refus(zone, e, libelles)
+        boutonsFacture(zone, true)
+        const fautif = e && e.champ && form.querySelector(`#fac-${e.champ}`)
+        if (fautif) fautif.focus()
+      }
+    }
+  }
+  lireDetailFiche()
   appel(`/api/messages?booking_id=${encodeURIComponent(resaCourante)}`).then(rep => {
     // Reponse en retard : la feuille peut montrer une AUTRE resa — le bouton
     // de conversation de A ne doit pas s'armer dans la fiche de B.

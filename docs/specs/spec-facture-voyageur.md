@@ -522,6 +522,17 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    base ; 20 formulaires au plus par jeton ; aucun lien neuf depuis un bien
    archivé, une demande déjà en cours y va au bout (P3) ; le lien revient en
    clair à l'hôte quand le message n'est pas sûrement arrivé (P5).
+   **Ce que 2b livre** (11 nov. 2026, fichiers accordés par le chef de file) :
+   le bloc « Facture du voyageur » de la fiche de réservation — le même
+   composant à l'ordinateur et au téléphone — avec l'état de la demande, le
+   dernier message, le destinataire saisi, et trois gestes : « Envoyer le
+   lien » / « Renvoyer le lien », « Copier un lien » (P2 quinquies, action
+   `copier_lien`, aucun message) et « Remplir à sa place » / « Modifier les
+   coordonnées » (Q12). Les droits sont décidés par le SERVEUR
+   (`etatPourLaFiche`, lib/factures-voyageur.js) ; l'écran traduit
+   (`presentationFacture`, shared/calendrier-resa.js). « Envoyer » demande une
+   confirmation. Copier passe par le presse-papiers ; s'il refuse, le lien
+   reste affiché et la fiche le dit.
 3. **La confirmation et l'émission** : passe du cron, notification et rappel,
    confirmation des deux lignes, numérotation, PDF, message « Votre facture
    est disponible ». ⚠ **Envoi au voyageur** : review de plus.
@@ -587,6 +598,39 @@ l'étape 2b, base `main` = 669d081fd522f31d6cc40371c9b3427488b052b3).**
   L'endpoint ne pose aujourd'hui **aucun** `Server-Timing` sur ce chemin.
 - `/api/messages` n'est pas touché par l'étape 2b : ses requêtes ne sont pas
   comptées ici.
+
+**Fiche de réservation, APRÈS (code de l'étape 2b, même méthode).**
+- **Appels à l'ouverture : 2**, les mêmes — l'état de la facture arrive dans
+  la réponse de `?booking=` (champ `facture`). Gardé par le banc de la page
+  (`tests/facture-voyageur-fiche.test.js`, « ouvrir la fiche ne coûte AUCUN
+  appel de plus ») et par l'inventaire de `tests/budget-ecran.test.js`, où
+  `/api/factures-voyageur` entre comme GESTE (au clic seulement).
+- **Requêtes de `?booking=` : 7 pour le titulaire, 8 pour un membre (+1)**,
+  la lecture de la facture partant EN PARALLÈLE de celle de la réservation
+  (test « la lecture de la facture part EN PARALLÈLE »). Le chemin pose
+  désormais `Server-Timing` (compteur plancher : la résolution des biens et
+  la garde n'y sont pas comptées, et c'est écrit dans l'en-tête).
+- **Octets** : à mesurer sur staging à la recette (le champ `facture` pèse
+  ~200 octets de corps sur le double, sans demande).
+
+**Case performance de l'étape 2b** (règle du front, CLAUDE.md) :
+1. *Un écran = un endpoint* : la fiche lisait déjà `GET /api/calendar?booking=`
+   en un appel ; l'état de la facture y entre, aucun appel de plus. Les gestes
+   (`envoyer_lien`, `copier_lien`, `saisir`) sont des ÉCRITURES au clic, par
+   un seul site d'appel (`posterFacture`).
+2. *Résumé pré-calculé* : sans objet — une demande de facture est une donnée
+   temps réel.
+3. *Cache navigateur* : aucun — coordonnées d'un voyageur et lien-clé.
+4. *`private, no-store`* : posé par la garde de `api/calendar.js` et en tête
+   de `api/factures-voyageur.js`, avant le premier refus (inchangé).
+5. *Statiques versionnés* : les dictionnaires suivent `?v=` (empreinte
+   calculée au déploiement) ; `shared/calendrier-resa.js` est servi sans
+   cache long (revalidé), comme avant le lot.
+6. *Lectures tronquées* : la seule lecture ajoutée rend UNE demande et 20
+   jetons au plus, bornés explicitement.
+7. *Budget* : la fiche reste à 2 appels à l'ouverture ; test du banc et
+   inventaire chiffré.
+8. *Mesure AVANT / APRÈS* : ci-dessus.
 
 **Mobile** : le bouton, l'état et la confirmation existent aussi sur la fiche
 du téléphone ; la page publique est pensée pour le téléphone d'abord.

@@ -117,6 +117,66 @@ export function messageCapacite (adultes, enfants, capacite) {
     : null
 }
 
+// ─── La facture du voyageur, sur la fiche (étape 2b du lot facture) ─────────
+// UNE règle pour l'ordinateur et le téléphone : ce que dit l'état, et quels
+// boutons montrer. Le SERVEUR a déjà décidé des droits (`facture.gestes`,
+// lib/factures-voyageur.js `etatPourLaFiche`) ; ce module ne fait que les
+// traduire en CLÉS de texte (shared/i18n), jamais en phrases.
+// ⚠ UN BOUTON ABSENT ICI RESTE REFUSÉ PAR LE SERVEUR (api/factures-voyageur.js) :
+// le masquage est un confort, la garde est ailleurs.
+const CLES_STATUT_FACTURE = {
+  lien_envoye: 'cal.fac_statut_attente', formulaire_rempli: 'cal.fac_statut_rempli',
+  a_confirmer: 'cal.fac_statut_a_confirmer', emise: 'cal.fac_statut_emise'
+}
+// L'issue du DERNIER message qui a porté un lien (lib/envoi-ota.js).
+const CLES_ENVOI_FACTURE = {
+  livre: 'cal.fac_envoi_livre', differe: 'cal.fac_envoi_differe', incertain: 'cal.fac_envoi_incertain',
+  refus: 'cal.fac_envoi_refus', permanent: 'cal.fac_envoi_refus', sans_canal: 'cal.fac_envoi_sans_canal'
+}
+export function presentationFacture (f) {
+  if (!f || typeof f !== 'object') return null
+  const aucun = { envoyer: null, copier: false, saisir: null }
+  if (f.indisponible) return { statut: 'cal.fac_indisponible', envoi: null, note: null, destinataire: null, saisiPar: null, boutons: aucun }
+  const statut = f.statut == null ? 'cal.fac_statut_aucune' : (CLES_STATUT_FACTURE[f.statut] || 'cal.fac_statut_inconnu')
+  // Le dernier MESSAGE d'abord ; sinon le dernier lien créé sans message
+  // (« Copier un lien », P2 quinquies).
+  let envoi = null
+  if (f.dernierMessage) envoi = { cle: CLES_ENVOI_FACTURE[f.dernierMessage.issue] || 'cal.fac_envoi_incertain', le: f.dernierMessage.le || null }
+  else if (f.dernierLien) envoi = { cle: 'cal.fac_lien_cree', le: f.dernierLien }
+  let note = null
+  if (f.bloquee) note = 'cal.fac_note_non_confirmee'
+  else if (f.sansEnvoi === 'beds24') note = 'cal.fac_note_beds24'
+  else if (f.sansEnvoi === 'pas_d_email') note = 'cal.fac_note_sans_email'
+  const g = f.gestes || {}
+  return {
+    statut, envoi, note,
+    destinataire: f.destinataire || null,
+    saisiPar: f.saisiPar || null,
+    boutons: {
+      envoyer: g.envoyer ? (f.dernierMessage ? 'cal.fac_renvoyer' : 'cal.fac_envoyer') : null,
+      copier: !!g.copier,
+      saisir: g.saisir ? (f.destinataire ? 'cal.fac_modifier' : 'cal.fac_saisir') : null
+    }
+  }
+}
+// Ce que l'hôte lit APRÈS « Envoyer le lien », selon l'issue rendue.
+export function cleRetourEnvoiFacture (issue) {
+  return ({ livre: 'cal.fac_ret_livre', differe: 'cal.fac_ret_differe', incertain: 'cal.fac_ret_incertain',
+    refus: 'cal.fac_ret_refus', permanent: 'cal.fac_ret_refus', sans_canal: 'cal.fac_ret_sans_canal' })[issue] || 'cal.fac_ret_incertain'
+}
+// Un refus de l'endpoint, dit à l'hôte. `code` = le motif rendu par
+// api/factures-voyageur.js ; `statut` = le code HTTP.
+export function cleRefusFacture (code, statut) {
+  const k = ({
+    trop_rapproche: 'cal.fac_err_trop_rapproche', verrouillee: 'cal.fac_err_verrouillee',
+    bien_archive: 'cal.fac_err_archive', reservation_non_confirmee: 'cal.fac_note_non_confirmee',
+    reservation_annulee: 'cal.fac_note_non_confirmee', droits_messages: 'cal.fac_err_droits',
+    panne: 'cal.fac_err_panne', entree_invalide: 'cal.fac_err_champ'
+  })[code]
+  if (k) return k
+  return statut === 403 ? 'cal.fac_err_droits' : 'cal.save_error'
+}
+
 // ⚠ LES PICTOGRAMMES VIENNENT DU SPRITE, JAMAIS D'UN EMOJI (règle V5, rappel de
 // Thierry du 20 octobre 2026). Ces deux blocs affichaient « ⭐ » et « ✓ » : un
 // emoji ne suit ni la couleur du thème ni le mode sombre, il change de dessin

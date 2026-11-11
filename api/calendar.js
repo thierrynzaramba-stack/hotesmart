@@ -40,6 +40,9 @@ const { readStatus, colonneRawAbsente } = require('../lib/bookings-snapshot')
 // net hote, la reconstruction passe par meta.amount_type).
 const { prixVoyageur, dateDeVente } = require('../lib/yield/eclatement')
 const { taxeSejourDe } = require('../lib/taxe-sejour/lecture')
+// La facture du voyageur sur la fiche (etape 2b) : lecture et etat, UNE regle
+// avec l'endpoint des gestes (api/factures-voyageur.js).
+const FV = require('../lib/factures-voyageur')
 
 // Le detail par nuit TEL QUE LE CANAL LE SERT (Channex : rooms[].days en
 // objet date -> montant, ou rooms[].meta.days_breakdown en tableau). Beds24
@@ -232,7 +235,10 @@ module.exports = async function handler(req, res) {
         return null
       }
     }
-    return { biens, compte: g.accountUserId, titulaire: g.userId === g.accountUserId }
+    // `contexte` : les droits de l'appelant, pour qu'un chemin évalue un AUTRE
+    // domaine sur un bien précis sans recharger le profil (la facture de la
+    // fiche, étape 2b : `reservations` et `messages` en écriture).
+    return { biens, compte: g.accountUserId, titulaire: g.userId === g.accountUserId, contexte: g.contexte }
   }
 
   // ===== GET : inventory + reservations =====
@@ -262,6 +268,18 @@ module.exports = async function handler(req, res) {
       owned.forEach(p => { if (p.provider_property_id != null) provDe[String(p.provider_property_id)] = p.provider })
       const provIdsB = Object.keys(provDe)
       if (!provIdsB.length) return res.status(404).json({ error: 'Reservation introuvable' })
+      const t0Detail = Date.now()
+      // ⚠ COMPTEUR PLANCHER : la session et les lectures de ce chemin ; la
+      // resolution des biens et la garde des droits ne sont pas comptees.
+      let requetesDetail = 1
+      // La FACTURE du voyageur (etape 2b) : sa demande active et ses derniers
+      // liens, lues EN PARALLELE de la reservation — aucun appel de plus ne
+      // part du navigateur (spec-facture-voyageur §9.1). Bornee aux biens que
+      // la garde vient de resoudre. Une panne ne fait pas tomber la fiche :
+      // elle rend « indisponible », jamais « aucune demande ».
+      requetesDetail++
+      const factureLue = FV.lireDemandeDeLaFiche(gardeGet.compte, String(req.query.booking), ownedIds, { db: supabase })
+        .catch(e => { console.error('[calendar] lecture facture', e.message); return { ok: false } })
       const lireDetail = (avecRaw) => supabase
         .from('bookings_snapshot')
         .select('booking_id, property_id, snapshot' + (avecRaw ? ', raw' : ''))
@@ -271,10 +289,11 @@ module.exports = async function handler(req, res) {
         .order('property_id', { ascending: true })
         .order('updated_at', { ascending: false })
         .limit(1)
+      requetesDetail++
       let { data: rows, error: errD } = await lireDetail(true)
       // Meme repli que le listing : la colonne raw peut manquer (migration,
       // cache de schema) — la fiche rend alors ce que le snapshot porte.
-      if (errD && colonneRawAbsente(errD)) ({ data: rows, error: errD } = await lireDetail(false))
+      if (errD && colonneRawAbsente(errD)) { requetesDetail++; ({ data: rows, error: errD } = await lireDetail(false)) }
       if (errD) {
         console.error('[calendar] lecture detail reservation', errD.message)
         return res.status(500).json({ error: 'Erreur lecture reservation' })
@@ -302,6 +321,20 @@ module.exports = async function handler(req, res) {
       const netCanal = raw && Number(raw.amount) > 0 ? Number(raw.amount) : null
       const fraisCanal = (!annulee && canalFiche === 'airbnb' && pv.valeur != null && netCanal != null && pv.valeur > netCanal)
         ? Math.round((pv.valeur - netCanal) * 100) / 100 : null
+      // Les droits sur le bien de CETTE reservation : un membre en lecture ne
+      // recoit que l'etat (P2) — c'est etatPourLaFiche qui omet, pas l'ecran.
+      const lue = await factureLue
+      const bienFiche = owned.find(p => String(p.provider_property_id) === String(ligne.property_id)) || null
+      const cibleFiche = bienFiche ? { id: bienFiche.id, ref: bienFiche.provider_property_id } : null
+      const facture = !lue || !lue.ok || !cibleFiche
+        ? { indisponible: true }
+        : FV.etatPourLaFiche(lue.demande, {
+          ecritureResa: peutEcrire(gardeGet.contexte, 'reservations', cibleFiche),
+          ecritureMessages: peutEcrire(gardeGet.contexte, 'messages', cibleFiche),
+          propertyUuid: bienFiche.id, provider, snapshot: s, bookingId: ligne.booking_id
+        })
+      res.setHeader('Server-Timing',
+        `db;desc="${requetesDetail} req (plancher : biens et droits non comptes)";dur=${Date.now() - t0Detail}`)
       return res.status(200).json({
         booking_id: String(ligne.booking_id),
         guestEmail: gardeGet.titulaire ? (s.guestEmail || null) : null,
@@ -325,7 +358,8 @@ module.exports = async function handler(req, res) {
             .filter(f => f.libelle || f.montant)).slice(0, 50)
           return l.length ? l : null
         })(),
-        currency: s.currency || null
+        currency: s.currency || null,
+        facture
       })
     }
 
