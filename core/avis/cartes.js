@@ -116,6 +116,8 @@ export const TEXTES_FR = {
   'avis.chiffres_incomplets': 'Les chiffres n’ont pas pu être calculés en entier.',
   'avis.aucune_note': 'Aucune note',
   'avis.sur_periode': 'sur cette période',
+  'avis.retour_prive': 'Retour privé',
+  'avis.retour_prive_sous': 'Non publié : le voyageur l’a écrit pour l’hôte.',
   'avis.acces_refuse': 'Vous n’avez pas accès aux avis de ce compte.',
   'avis.illisibles': 'Avis illisibles',
   'avis.correction_ko': 'Correction impossible.',
@@ -267,8 +269,28 @@ function blocSonAvis (a, ctx, cle) {
     + `<div class="avp-ligne"><span class="sr-only">${ECHAPPER(T('avis.son_avis'))}</span>${note(a, ctx)}${proprete(a, ctx)}</div>`
     + (a.extrait ? `<p class="avp-extrait">« ${ECHAPPER(a.extrait)} »</p>` : '')
     + (texte ? texteRepliable(texte, cle, ctx) : `<p class="avp-gris">${ECHAPPER(T('avis.sans_texte'))}</p>`)
+    + blocRetourPrive(a, ctx, cle)
     + '</div>'
 }
+
+// ⚠ LE RETOUR PRIVE, SOUS LE TEXTE PUBLIC (decision de Thierry du 11 novembre
+// 2026, spec avis-v5/spec-retour-prive.md). C'est souvent LA que le voyageur
+// met ses reproches — un avis peut etre bon en public et justifier un 4 en
+// prive. La ligne qui le suit dit pourquoi il est a part : il n'est pas publie.
+function blocRetourPrive (a, ctx, cle) {
+  if (a.masque || !a.texte_prive) return ''
+  const { T } = ctx
+  return `<div class="avp-prive">`
+    + `<span class="avp-prive__tete">${ICONE('i-lock')}<span class="avp-lib">${ECHAPPER(T('avis.retour_prive'))}</span>`
+    + `<span class="avp-prive__sous">${ECHAPPER(T('avis.retour_prive_sous'))}</span></span>`
+    + texteRepliable(a.texte_prive, cle + '-p', ctx)
+    + '</div>'
+}
+
+// La marque de l'en-tete : on repere la carte en parcourant la liste, sans la
+// lire (Q2 = A). Aucune IA : la marque dit qu'il y a un retour prive, pas qu'il
+// est negatif.
+const aUnRetourPrive = (c) => c.avis.some(a => !a.masque && a.texte_prive)
 
 function delai (j, ctx) {
   if (j === null || j === undefined) return ''
@@ -323,6 +345,7 @@ function carte (c, ctx, cle) {
     + `<div class="avp-carte__tete">${vignette(c, ctx)}`
     + `<div class="avp-id"><span class="avp-qui">${ECHAPPER(nomDu(c, ctx.T))}</span>`
     + `<span class="avp-infos">${infosDu(c, ctx).map(ECHAPPER).join(' · ')}</span></div>`
+    + (aUnRetourPrive(c) ? `<span class="avp-marque-prive">${ICONE('i-lock')}${ECHAPPER(ctx.T('avis.retour_prive'))}</span>` : '')
     + (canal.ecrit ? `<span class="avp-source">${ECHAPPER(canal.phrase || canal.libelle)}</span>` : '')
     + `${pastilleCanal(canal)}</div>`
     + avis + blocNotreAvis(c, ctx, cle)

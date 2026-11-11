@@ -296,3 +296,42 @@ test('un bien demandé sans ligne (logement neuf) : « pas encore calculé », p
   assert.equal(r.code, 200)
   assert.equal(r.body.stats.motif, 'pas_encore_calcule')
 })
+
+// ─── Le retour privé (décisions de Thierry du 11 novembre 2026) ─────────────
+// Spec : docs/specs/avis-v5/spec-retour-prive.md. Il sort sous le droit `avis`
+// (Q1 = B : le titulaire ET les membres `avis`), sur le perimetre de biens.
+const toutesLesCartes = (body) => [...(body.cartes.attente || []), ...(body.cartes.recents || []), ...(body.cartes.anciens || [])]
+const avisParId = (body) => Object.fromEntries(toutesLesCartes(body).flatMap(c => c.avis).map(a => [a.id, a]))
+
+test('LE TEST QUI COMPTE : la carte porte le retour privé ; rien pour un avis masqué ni pour Booking', async () => {
+  const etat = preparer({ avis: [
+    avisDe('a1', { content_private: 'Le chauffage ne marchait pas.' }),
+    avisDe('vide', { content_private: '   ' }),
+    { ...MASQUE, content_private: 'Ne doit pas sortir.' },
+    avisDe('b1', { provider: 'beds24', ota: 'booking', content_private: null })
+  ] })
+  const r = await appeler({ periode: 'toujours' })
+  assert.equal(r.code, 200)
+  const a = avisParId(r.body)
+  assert.equal(a.a1.texte_prive, 'Le chauffage ne marchait pas.')
+  assert.equal(a.vide.texte_prive, null, 'un texte blanc n est pas un retour')
+  assert.equal(a.m.texte_prive, null, 'un avis masqué ne montre rien')
+  assert.equal(a.b1.texte_prive, null)
+  assert.doesNotMatch(JSON.stringify(r.body), /Ne doit pas sortir/)
+  // ⚠ LE DOUBLE RENVOIE LA LIGNE ENTIERE, quelle que soit la selection : sans
+  // cette assertion, retirer la colonne de la lecture restait vert (mesure par
+  // mutation). C'est la lecture REELLE qui doit la demander.
+  const lecture = etat.requetes.find(q => q.table === 'ota_reviews' && /\bbooking_uid\b/.test(String(q._col || '')))
+  assert.ok(lecture, 'la lecture des avis pour les cartes')
+  assert.match(String(lecture._col), /\bcontent_private\b/)
+})
+
+test('SECURITE : un membre « avis » lit le retour privé de SES biens, jamais celui des autres', async () => {
+  preparer({ ...membre({ avis: 'read', reservations: 'none', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }),
+    avis: [avisDe('a1', { content_private: 'Privé de A' }),
+           avisDe('b1', { property_id_ref: REF_B, content_private: 'Privé de B' })] })
+  const r = await enTantQueMembre({ periode: 'toujours' })
+  assert.equal(r.code, 200)
+  assert.equal(avisParId(r.body).a1.texte_prive, 'Privé de A')
+  assert.doesNotMatch(JSON.stringify(r.body), /Privé de B/)
+})

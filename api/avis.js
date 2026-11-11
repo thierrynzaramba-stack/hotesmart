@@ -61,13 +61,17 @@ const MAX_TEXTE   = 5000
 // ferme rien : le domaine `avis` donne acces au CONTENU des avis, pas a
 // l'identite des voyageurs ni a leurs sejours, qui relevent de `reservations`.
 //
-// `content_private` est retire pour la meme raison de moindre exposition : la
-// page ne l'affiche pas, l'extrait de proprete suffit. L'ajouter un jour est une
-// decision a prendre, pas un defaut a laisser.
+// ⚠ `content_private` Y EST DEPUIS LE 11 NOVEMBRE 2026, ET C'EST UNE DECISION
+// (Thierry, spec avis-v5/spec-retour-prive.md). Il en avait ete retire « pour
+// moindre exposition », avec la mention « l'ajouter un jour est une decision a
+// prendre ». Elle a ete prise : un avis bon en public et critique en prive
+// (La bulle, sejour du 27 au 29 octobre) ne se voyait que chez Airbnb. Il sort
+// sous le droit `avis` (Q1 = B : le titulaire ET les membres `avis`), comme le
+// texte public : c'est le CONTENU de l'avis, pas l'identite du voyageur.
 //
 // Regle a tenir en modifiant cette liste : une colonne qui n'est pas rendue par
 // pages/avis.html n'a rien a y faire.
-const CHAMPS = `id, provider, source, ota, content, content_public,
+const CHAMPS = `id, provider, source, ota, content, content_public, content_private,
   overall_score, received_at, ai_clean_verdict, ai_clean_excerpt, ai_analyzed_at,
   property_id_ref, statut, verdict_source`
 

@@ -484,8 +484,14 @@ test('list : ni le nom du voyageur ni ses dates de séjour ne sortent', async ()
   // absent de tout code source. Le test est resté vert pendant qu'un commit
   // réintroduisait `stay_start` et `stay_end` dans `CHAMPS` — exactement ce
   // qu'il prétend interdire. Une comparaison de chaîne ne peut pas se tromper.
+  // ⚠ `content_private` N'EST PLUS INTERDIT DEPUIS LE 11 NOVEMBRE 2026, ET
+  // C'EST UNE DECISION DE THIERRY, pas un relachement : le retour prive du
+  // voyageur s'affiche sur la page Avis, sous le droit `avis` (spec
+  // avis-v5/spec-retour-prive.md, Q1 = B). Il etait ici au titre de la
+  // « moindre exposition », en attendant cette decision. Le nom et les dates
+  // du voyageur, eux, restent sous `reservations`.
   const CHAMPS_INTERDITS = ['guest_name', 'stay_start', 'stay_end', 'booking_uid',
-                            'ota_reservation_id', 'content_private']
+                            'ota_reservation_id']
   const fs = require('node:fs')
   const src = fs.readFileSync(require('node:path').join(__dirname, '..', 'api/avis.js'), 'utf8')
   const debut = src.indexOf('const CHAMPS = `')
