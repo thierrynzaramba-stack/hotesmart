@@ -1,6 +1,6 @@
 # Avis V5 — traduire les avis écrits dans une autre langue
 
-**Statut : décisions de Thierry du 11 novembre 2026 (10:12 à 10:18) ; spec
+**Statut : décisions de Thierry du 11 novembre 2026 (10:12 à 10:36) ; spec
 écrite sur la branche `avis-traduction`, partie de `main` à
 `f4b2597cfdf43b86025c2d75c7fe5f9d645184aa`. Aucun code avant l'accord du chef de
 file sur les fichiers partagés (§9).**
@@ -28,6 +28,7 @@ Demande de Thierry (11 novembre 2026, 10:12) : « les commentaires en langue
 - Par défaut, on montre **la traduction**, avec la mention « Traduit de
   l'anglais · Voir l'original ». Un clic montre l'original, un second revient à
   la traduction.
+- **Q5 = A, le coût de l'IA** (condition du chef de file, 10:34) : voir §3.6.
 - **Ce qui n'est pas une décision produit, et suit la règle du dépôt** (« donnée
   non urgente = calculée en tâche de fond, servie prête ») : la traduction est
   faite **à l'arrivée de l'avis**, gardée en base, et l'écran ne fait jamais
@@ -75,12 +76,12 @@ par `avecContexteIA`, comme la classification.
   propreté soit traduit dans le même appel ; un avis encore non classé après
   48 h est traduit sans attendre, pour qu'une classification en échec ne bloque
   pas la traduction.
-- Tâche `traduction_avis` dans `api/cron.js`, **après** `classification_avis`.
-  Lot de 10 avis au plus, budget de 12 s par passage. Un passage sans travail
-  coûte une requête.
-- **L'historique** : la même file, vidée par le cron (≈ 70 avis par heure), ou
-  plus vite par `scripts/traduire-avis.js` (à blanc par défaut, `--go`,
-  `--max N`), lancé par Thierry.
+- Tâche `traduction_avis` dans `api/cron.js`, **après** `classification_avis`,
+  en **ajout seul** (le lot 2 PWA tient aussi ce fichier : aucune ligne existante
+  n'est réécrite). Plafonds au §3.6. Un passage sans travail coûte une requête
+  et **zéro appel à l'IA**.
+- **L'historique** : par `scripts/traduire-avis.js`, lancé une fois par Thierry
+  après la mise en production (§3.6).
 
 ### 3.3 La page Avis
 
@@ -115,6 +116,27 @@ par `avecContexteIA`, comme la classification.
 - `apps/menages/public.html` : l'extrait traduit, avec « Traduit de l'anglais ·
   Voir l'original ».
 
+### 3.6 Le coût de l'IA (Q5 = A, décision de Thierry, 10:36)
+
+- **Par passage de cron : 10 appels au plus**, et moins si le budget de temps du
+  passage (12 s) est atteint avant.
+- **Par jour : 100 appels au plus**, pour toute la plateforme, soit au plus
+  ≈ 0,30 € par jour (≈ 0,3 centime par avis traduit, Haiku). Le compte du jour
+  vit dans `cron_logs` (`traduction_avis_jour` : jour de Paris, nombre
+  d'appels) ; au plafond, la tâche s'arrête jusqu'au lendemain et le dit dans
+  son bilan, sans alerte (rien n'est urgent).
+- **Rien à traduire : zéro appel.** La file est lue d'abord ; l'IA n'est appelée
+  que pour un avis qui en sort.
+- **Un appel par avis**, quel que soit le nombre de champs et de langues ; un
+  appel qui échoue compte quand même dans le plafond du jour.
+- **L'historique** : `scripts/traduire-avis.js`, ≈ 650 avis, donc ≈ 650 appels,
+  ≈ 2 €. À blanc par défaut, il dit le nombre d'avis à traduire et le coût
+  estimé ; `--go` traduit, `--max N` borne (défaut et plafond : 800). Il ne
+  consomme pas le plafond du jour du cron. Lancé par Thierry, une fois, après
+  la mise en production.
+- Chaque appel est journalisé par `avecContexteIA` (bien, séjour, tâche), comme
+  la classification.
+
 ## 4. Inventaire (règle « la forme ne supprime jamais le fond »)
 
 Rien n'est retiré. L'original reste à un clic partout. L'extrait de propreté, le
@@ -127,8 +149,11 @@ traduit : c'est l'hôte qui l'écrit.
 
 1. Un écran = un endpoint : inchangé (`/api/ecran/avis`), la traduction arrive
    dans la même réponse.
-2. Donnée non urgente pré-calculée : oui, c'est l'objet de la tâche de fond ;
-   rien n'est traduit à la lecture.
+2. Donnée non urgente pré-calculée : oui, c'est l'objet de la tâche de fond.
+   **La page Avis, la fiche ménage de l'hôte et l'application de la prestataire
+   lisent une traduction déjà calculée, jamais traduite à l'ouverture**
+   (condition du chef de file). Un test le garde : aucun des trois endpoints
+   n'appelle l'IA.
 3. Cache navigateur : sans objet, les cartes ne sont pas mises en cache (seuls
    les chiffres le sont).
 4. `private, no-store` : inchangé, test existant.
