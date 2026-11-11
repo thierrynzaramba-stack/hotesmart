@@ -459,6 +459,12 @@ test('une seule vue : la fiche plein écran et les totaux sous « À traiter » 
   const css = lire('shared/ui.css')
   const bloc = css.slice(css.indexOf('/* ═══ PAGE CHARGES'))
   assert.match(bloc, /@media \(max-width: 899px\)[\s\S]*\.chg-haut \{ grid-template-columns: minmax\(0, 1fr\); \}/)
-  assert.match(bloc, /@media \(max-width: 899px\)[\s\S]*\.chg-fiche \{ width: 100vw; \}/)
+  assert.match(bloc, /@media \(max-width: 899px\)[\s\S]*\.chg-fiche \{ width: 100%; \}/)
+  // ⚠ RECETTE DU 11 NOVEMBRE : `100vw` compte la barre de défilement (la fiche
+  // débordait à gauche), et un montant coupé au milieu se lisait « 1761,9 / 0 € ».
+  assert.doesNotMatch(bloc.replace(/\/\*[\s\S]*?\*\//g, ''), /100vw/)
+  assert.match(bloc, /\.chg-chiffre b \{[^}]*white-space: nowrap;/)
+  assert.doesNotMatch(bloc, /\.chg-chiffre b \{[^}]*overflow-wrap: anywhere/)
+  assert.match(bloc, /\.chg-chiffre--fort \{ grid-column: 1 \/ -1; \}/)
   assert.ok(!/#[0-9A-Fa-f]{3,6}\b/.test(bloc), 'aucun hexa hors de theme.css')
 })
