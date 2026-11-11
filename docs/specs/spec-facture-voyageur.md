@@ -221,6 +221,13 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   HôteSmart n'envoie pas le lien lui-même** ; il le crée et le rend à l'hôte
   (« Copier »), comme une réservation sans e-mail. Le masquage à la lecture
   Beds24 est un chantier à part, avec le fil de synchronisation (dette 142).
+- **P2 quinquies — Copier un lien quand le message est parti** (début de
+  l'étape 2b). Le lien n'est gardé nulle part en clair (jeton haché, §5.3) :
+  rouvrir la fiche ne peut pas « relire » le lien d'un envoi passé.
+  → **Réponse de Thierry (11 nov. 2026, 3 h) : oui, toujours.** La fiche
+  porte un bouton « Copier un lien », présent même quand le message est
+  parti ; chaque clic crée un lien NEUF, sans envoyer de message, et les liens
+  précédents restent valables jusqu'à leur expiration.
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
   → **Réponse de Thierry (8 nov. 2026, 22 h 09) : A.** Les rappels
@@ -564,6 +571,22 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    est neuve (1 appel à l'ouverture, `Server-Timing` = 2 + une ou deux par
    entité en numérotation automatique — corrigé après la review 3, qui a
    relevé « 3 + ») ; la fiche de réservation au début de l'étape 2. La page publique n'existe pas (AVANT sans objet).
+
+**Fiche de réservation, mesure AVANT (11 novembre 2026, 2 h 50, début de
+l'étape 2b, base `main` = 669d081fd522f31d6cc40371c9b3427488b052b3).**
+- **Appels à l'ouverture**, mesurés sur staging dans le navigateur (session de
+  Thierry, réservation Airbnb à venir, `performance.getEntriesByType`) :
+  **2** — `GET /api/calendar?booking=` (**717 octets** transférés, 417 de
+  corps, 481 ms) et `GET /api/messages?booking_id=` (**362 octets**, 62 de
+  corps, 327 ms). Total **1 079 octets**. Un troisième appel (`/api/avis`, par
+  le bus) ne part qu'à partir du jour du départ : il n'est pas parti ici.
+- **Requêtes de `GET /api/calendar?booking=`**, comptées sur le code (double
+  Supabase qui compte chaque `from()` et chaque `auth.getUser`, script hors
+  dépôt) : **6 pour le titulaire** (1 session + 3 `properties` + 1 `profiles`
+  + 1 `bookings_snapshot`), **7 pour un membre** (+ `profile_permissions`).
+  L'endpoint ne pose aujourd'hui **aucun** `Server-Timing` sur ce chemin.
+- `/api/messages` n'est pas touché par l'étape 2b : ses requêtes ne sont pas
+  comptées ici.
 
 **Mobile** : le bouton, l'état et la confirmation existent aussi sur la fiche
 du téléphone ; la page publique est pensée pour le téléphone d'abord.
