@@ -866,8 +866,19 @@ Migration additive `2026-11-10-charges-resume-categorie.sql` :
 7. **Budget** : premier affichage < 1 s, écran complet < 2 s ; **1 appel**
    pour peindre l'écran, tenu par un test qui compte les appels ;
    `Server-Timing` porte le nombre de requêtes.
-8. **Mesure** : écran neuf, AVANT sans objet ; APRÈS mesuré sur staging
-   (appels, requêtes, octets) et noté ici.
+8. **Mesure** : écran neuf, AVANT sans objet. **APRÈS, mesuré sur staging le
+   11 novembre 2026 à 02:40** (déploiement de `staging` 4325b991, compte de
+   recette à une facture, ordinateur, cache navigateur chaud), relevé par
+   l'API Performance du navigateur :
+   - **1 appel** `/api` au chargement (`/api/ecran/charges`) ;
+   - **7 requêtes** Supabase côté serveur (`Server-Timing : total 7
+     requêtes`, 251 ms) ;
+   - **1 492 octets** transférés pour l'appel d'écran (1 192 de corps) ;
+     13 219 octets pour toute la page, fichiers statiques en cache ;
+   - écran complet à **653 ms** du début de la navigation (budget : 2 s).
+
+   Hors de ce lot et commun à toutes les pages : une lecture Supabase directe
+   du navigateur (`onboarding_state`, par la garde d'authentification).
 
 ### 13.8 Inventaire
 
