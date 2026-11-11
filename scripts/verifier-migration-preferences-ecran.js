@@ -108,8 +108,13 @@ const ECRAN = 'verif_migration'
   if (!tableLa) {
     rat('cloisonnement NON EPROUVE : la table n\'existe pas, aucun refus ne prouve rien')
   } else {
+    // ⚠ SEUL LE REFUS DE DROIT (42501) PROUVE LE CLOISONNEMENT : une panne
+    // reseau, une cle absente ou une table renommee rendent aussi une erreur,
+    // et les lire « ne lit pas » serait un faux vert (review de l'etape 1).
+    const refus = e => e && e.code === '42501'
     const { error: eAnon } = await anon.from(TABLE).select('ecran').limit(1)
-    if (eAnon) ok('la cle anonyme ne lit pas la table')
+    if (refus(eAnon)) ok('la cle anonyme est refusee (42501)')
+    else if (eAnon) rat('la cle anonyme echoue pour une AUTRE raison : ' + (eAnon.code || '?') + ' ' + String(eAnon.message).slice(0, 60))
     else rat('la cle ANONYME lit la table')
 
     if (process.env.TEST_EMAIL && process.env.TEST_PASSWORD) {
@@ -119,7 +124,8 @@ const ECRAN = 'verif_migration'
       if (eS) rat('session de test impossible : ' + eS.message.slice(0, 60))
       else {
         const { data: vues, error: eA } = await c.from(TABLE).select('ecran').limit(1)
-        if (eA) ok(`une session AUTHENTIFIEE (${s.user.email}) ne lit pas la table`)
+        if (refus(eA)) ok(`une session AUTHENTIFIEE (${s.user.email}) est refusee (42501)`)
+        else if (eA) rat('la session authentifiee echoue pour une AUTRE raison : ' + (eA.code || '?') + ' ' + String(eA.message).slice(0, 60))
         else if ((vues || []).length === 0) {
           rat('une session authentifiee n\'est pas REFUSEE (elle lit 0 ligne) : '
               + 'le privilege de table devrait refuser')

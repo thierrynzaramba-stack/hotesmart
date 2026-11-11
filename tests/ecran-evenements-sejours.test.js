@@ -74,14 +74,76 @@ test('LE TEST QUI COMPTE (S1) : Pâques en face de Pâques — le recul de 52 se
   assert.equal(decaler('2027-03-29', -364), '2026-03-30')
 })
 
-test('LE TEST QUI COMPTE (S1) : une date fixe tombe à 3 jours au plus de sa date, et toujours le même jour de semaine', () => {
+// L'occurrence affichee telle que l'ecran la passe : date fixe et nuit principale.
+const commercialeDe = (cle, date) => {
+  const o = P.occurrences({ zoneBien: 'C', vacances: [], evenements: MATERIAUX.evenements, debut: decaler(date, -20), fin: decaler(date, 20) })
+    .find(x => x.cle === cle && x.nuits.includes(date))
+  assert.ok(o, `${cle} absente le ${date}`)
+  return o
+}
+const affichee = o => ({ cle: o.cle, debut: o.debut, date_fixe: o.date_fixe, principale: SJ.nuitPrincipale(o) })
+
+test('LE TEST QUI COMPTE (S4) : une date fixe est mise en face de la MÊME nuit, exactement — le réveillon sous le réveillon', () => {
   const noel = ferieQuiTombeLe('2026-12-25')
+  const reveillon = commercialeDe('commercial:reveillon_nouvel_an', '2026-12-31')
   for (const k of SJ.RECULS) {
-    const a = SJ.alignerAnnee({ cle: noel.cle, debut: noel.debut }, k, MATERIAUX)
-    const p = decaler(noel.debut, -a.decalage)
+    for (const [o, mmjj] of [[noel, '12-25'], [reveillon, '12-31']]) {
+      const a = SJ.alignerAnnee(affichee(o), k, MATERIAUX)
+      assert.deepEqual([a.alignement, decaler(SJ.nuitPrincipale(o), -a.decalage), a.annee],
+        ['date', `${2026 - k}-${mmjj}`, 2026 - k], `${o.cle}, recul ${k}`)
+    }
+  }
+  // Contre-epreuve : arrondi a la semaine, le reveillon 2026 tombait sur le
+  // 1er janvier 2026 — le defaut que S4 ferme.
+  assert.equal(decaler('2026-12-31', -364), '2026-01-01')
+})
+
+test('LE TEST QUI COMPTE (S4) : une date fixe à samedi rattaché s’aligne sur SA nuit, pas sur le samedi', () => {
+  // Saint-Valentin 2028 tombe un lundi : l'occurrence commence le samedi 12
+  // (rattache). C'est le 14 qui doit tomber sur le 14 fevrier de chaque annee.
+  const evenements = DC.datesCommerciales('2023-01-01', '2028-12-31')
+  const sv = P.occurrences({ zoneBien: 'C', vacances: [], evenements, debut: '2028-01-25', fin: '2028-03-01' })
+    .find(x => x.cle === 'commercial:saint_valentin')
+  assert.equal(sv.debut, '2028-02-12', 'la fixture a bien un samedi rattaché AVANT la date')
+  for (const k of SJ.RECULS) {
+    const a = SJ.alignerAnnee(affichee(sv), k, { zoneBien: 'C', vacances: [], evenements })
+    assert.equal(decaler('2028-02-14', -a.decalage), `${2028 - k}-02-14`, `recul ${k}`)
+  }
+  // Et dans l'autre sens : c'est l'occurrence PASSEE qui a son samedi avant
+  // (2028, vue depuis 2029). Le repere est la nuit `date` des deux cotes.
+  const e29 = DC.datesCommerciales('2023-01-01', '2029-12-31')
+  const sv29 = P.occurrences({ zoneBien: 'C', vacances: [], evenements: e29, debut: '2029-01-25', fin: '2029-03-01' })
+    .find(x => x.cle === 'commercial:saint_valentin')
+  const a29 = SJ.alignerAnnee(affichee(sv29), 1, { zoneBien: 'C', vacances: [], evenements: e29 })
+  assert.equal(decaler('2029-02-14', -a29.decalage), '2028-02-14')
+})
+
+test('LE TEST QUI COMPTE : l’année affichée est celle de l’occurrence trouvée — ni sautée ni répétée autour du 1er janvier', () => {
+  const jourDeLAn = ferieQuiTombeLe('2027-01-01')
+  const vacancesNoel = { cle: `${R.SEGMENTS.VACANCES_ZONE}:${R.nomCourt('Vacances de Noël')}`, debut: '2026-12-19' }
+  assert.deepEqual(SJ.RECULS.map(k => SJ.alignerAnnee(affichee(jourDeLAn), k, MATERIAUX).annee), [2026, 2025, 2024])
+  assert.deepEqual(SJ.RECULS.map(k => SJ.alignerAnnee(vacancesNoel, k, MATERIAUX).annee), [2025, 2024, 2023])
+  // Un evenement de l'hote a cheval sur le 1er janvier, arrondi a la semaine :
+  // 2026-12-31 moins 364 jours tombe le 1er janvier 2026 — l'annee est celle
+  // de l'occurrence trouvee, 2025.
+  const fete = ['2023', '2024', '2025', '2026'].map(a => ({ ...SALON, segment: 'evenement:fete', date_debut: `${a}-12-31`, date_fin: `${Number(a) + 1}-01-01` }))
+  const avecFete = { ...MATERIAUX, evenements: [...MATERIAUX.evenements, ...fete] }
+  assert.deepEqual(SJ.RECULS.map(k => {
+    const a = SJ.alignerAnnee({ cle: 'evenement:fete', debut: '2026-12-31' }, k, avecFete)
+    return [a.alignement, a.annee]
+  }), [['evenement', 2025], ['evenement', 2024], ['evenement', 2023]])
+  // En repli, l'annee de l'evenement moins k — pas celle d'une date reculee
+  // de 52 semaines (le reveillon 2026 moins 364 jours tombe en 2026).
+  assert.deepEqual(SJ.RECULS.map(k => SJ.alignerAnnee({ cle: 'evenement:inconnu', debut: '2026-12-31' }, k, MATERIAUX).annee), [2025, 2024, 2023])
+})
+
+test('hors date fixe, l’écart est arrondi à la semaine : le jour de semaine tient', () => {
+  const vacancesNoel = { cle: `${R.SEGMENTS.VACANCES_ZONE}:${R.nomCourt('Vacances de Noël')}`, debut: '2026-12-19' }
+  for (const k of SJ.RECULS) {
+    const a = SJ.alignerAnnee(vacancesNoel, k, MATERIAUX)
     assert.equal(a.alignement, 'evenement')
-    assert.equal(jourSemaine(p), jourSemaine(noel.debut), `recul ${k}`)
-    assert.ok(Math.abs(ecart(`${2026 - k}-12-25`, p)) <= 3, `recul ${k} : ${p}`)
+    assert.equal(a.decalage % 7, 0)
+    assert.equal(jourSemaine(decaler('2026-12-19', -a.decalage)), jourSemaine('2026-12-19'))
   }
 })
 
@@ -166,6 +228,38 @@ test('deux séjours sur la même nuit : le premier arrivé tient la nuit (surré
   assert.deepEqual(['2026-02-07', '2026-02-08', '2026-02-09'].map(d => index.get(d).prix_nuit), [1, 1, 2])
 })
 
+test('LE TEST QUI COMPTE : parité avec Prédiction de prix — même prix par vraie réservation passée par `eclater`, même séjour sur une nuit disputée', () => {
+  const { eclater } = require('../lib/yield/eclatement')
+  const lignes = [
+    { booking_id: 'b-1', user_id: 'u1', property_id: 'p',
+      snapshot: { provider: 'beds24', source: 'airbnb', status: 'confirmed', arrival: '2026-02-01', departure: '2026-02-06', amount: 600 },
+      raw: { price: 600, bookingTime: '2026-01-05T10:12:00Z' } },
+    { booking_id: 'c-2', user_id: 'u1', property_id: 'p',
+      snapshot: { provider: 'channex', source: 'BookingCom', status: 'confirmed', arrival: '2026-02-03', departure: '2026-02-07', amount: 380.5 },
+      raw: { amount: '380.50', inserted_at: '2026-01-20T07:00:00Z',
+        rooms: [{ meta: { price_details: { guest_view: { total: { amount: '42800', decimal_places: 2 } } } } }] } }
+  ]
+  const eclatements = lignes.map(l => eclater(l, { defaultProvider: l.snapshot.provider }))
+  assert.ok(eclatements.every(e => e.compte && e.prix_total > 0), 'la fixture passe bien par eclater')
+  const liste = SJ.sejoursVendus(eclatements)
+  for (const e of eclatements) {
+    const s = liste.find(x => x.debut === e.nuits[0].date)
+    // Ce que les barres de Prediction de prix portent : `prix_total` d'eclater.
+    assert.equal(s.prix_nuit, Math.round(e.prix_total / e.nuits.length * 100) / 100)
+  }
+  // La nuit disputee (3 au 5 fevrier) : le meme sejour des deux cotes.
+  const jours = Array.from({ length: 7 }, (_, i) => decaler('2026-02-01', i))
+  const bruts = lignes.map((l, i) => ({ booking_id: l.booking_id, arrivee: l.snapshot.arrival, depart: l.snapshot.departure,
+    confirme: true, statut: 'confirmed', prix_total: eclatements[i].prix_total }))
+  const prediction = SJ.segmentsParJour(SJ.barres(bruts, { jours, decalage: 0 }), jours.length)
+  const index = SJ.indexParNuit(liste)
+  for (const [i, d] of jours.entries()) {
+    const p = prediction[i]
+    const ici = index.get(d)
+    assert.equal(ici ? ici.debut : null, p ? p.arrivee : null, d)
+  }
+})
+
 // ─── 3. LE BILAN D'UNE ANNEE ET LES LIGNES PRESENTES ────────────────────────
 
 test('LE TEST QUI COMPTE : le bilan compte les nuits PASSÉES ; un prix inconnu est compté à part, jamais au CA', () => {
@@ -200,8 +294,8 @@ function grille () {
   }
 }
 
-function charger ({ eclatements = [], reglages = new Map() } = {}) {
-  const evenements = MATERIAUX.evenements
+function charger ({ eclatements = [], reglages = new Map(), aujourdHui = AUJ, enPlus = [] } = {}) {
+  const evenements = [...MATERIAUX.evenements, ...enPlus]
   const appels = []
   const preparer = async (s, bien, compte, opt) => {
     appels.push(opt)
@@ -234,7 +328,7 @@ function charger ({ eclatements = [], reglages = new Map() } = {}) {
   const bien = { id: 'bien-1', zone_scolaire: 'C', prix_minimum: 1, inventory_units: 1 }
   // ⚠ LE CLIENT EST NUL : une lecture de plus (bookings_snapshot ou autre)
   // leverait — c'est la garde de la decision S3.
-  const assembler = () => E.assemblerEcranEvenements(null, bien, 'compte-1', { aujourdHui: AUJ })
+  const assembler = () => E.assemblerEcranEvenements(null, bien, 'compte-1', { aujourdHui })
   assembler.appels = appels
   assembler.E = E
   return assembler
@@ -257,15 +351,50 @@ test('LE TEST QUI COMPTE : chaque événement porte ses années ; une date comme
   const reglages = new Map([[DC.cleSegment(DC.DATES[0].cle), { actif: false }]])
   const ecran = await charger({ eclatements: [ecl('2024-01-02', 2)], reglages })()
   assert.ok(ecran.evenements.length > 10)
+  let dates = 0
   for (const e of ecran.evenements) {
     assert.ok(Array.isArray(e.annees), e.cle)
     if (e.actif === false) assert.deepEqual(e.annees, [])
     for (const a of e.annees) {
-      assert.equal(a.decalage % 7, 0, `${e.cle} : jour de semaine`)
-      assert.ok(['evenement', 'semaines'].includes(a.alignement))
+      assert.ok(['date', 'evenement', 'semaines'].includes(a.alignement), a.alignement)
+      // Une date fixe : sa nuit tombe sur LA nuit de la meme cle cette
+      // annee-la (le 25 decembre pour Noel, le lundi de Paques pour Paques) ;
+      // sinon, le jour de semaine tient.
+      if (a.alignement === 'date') {
+        const p = (e.positions.find(x => x.nuit === 'date') || {}).date || e.debut
+        const passee = decaler(p, -a.decalage)
+        const la = P.occurrences({ zoneBien: 'C', vacances: VACANCES, evenements: MATERIAUX.evenements, debut: decaler(passee, -10), fin: decaler(passee, 10) })
+          .find(x => x.cle === e.cle && SJ.nuitPrincipale(x) === passee)
+        assert.ok(la, `${e.cle}, recul ${a.recul} : ${passee} n'est pas sa nuit`)
+        assert.equal(e.date_fixe, true)
+        dates++
+      } else assert.equal(a.decalage % 7, 0, `${e.cle} : jour de semaine`)
     }
   }
+  assert.ok(dates > 0, 'des dates fixes dans la fixture')
   assert.ok(ecran.evenements.some(e => e.actif === false), 'la fixture coupe bien une date commerciale')
+})
+
+test('LE TEST QUI COMPTE (S4) : à l’écran, une date fixe à samedi rattaché s’aligne sur SA nuit — la Saint-Valentin 2028', async () => {
+  const ecran = await charger({ aujourdHui: '2027-12-01', enPlus: DC.datesCommerciales('2028-01-01', '2028-12-31'), eclatements: [ecl('2024-02-14', 1, { prix: 90 })] })()
+  const sv = ecran.evenements.find(e => e.cle === 'commercial:saint_valentin' && e.debut === '2028-02-12')
+  assert.ok(sv, 'la Saint-Valentin 2028 et son samedi rattaché sont montrés')
+  assert.deepEqual(sv.annees.map(a => decaler('2028-02-14', -a.decalage)), ['2027-02-14', '2026-02-14', '2025-02-14'])
+})
+
+test('LE TEST QUI COMPTE : les occurrences passées calculées UNE fois donnent les mêmes années qu’un calcul par événement', async () => {
+  const assembler = charger({ eclatements: [ecl('2023-06-01', 2)] })
+  const ecran = await assembler()
+  let comparees = 0
+  for (const e of ecran.evenements.filter(x => x.actif !== false)) {
+    const principale = (e.positions.find(p => p.zone === 'evenement' && p.nuit === 'date') || {}).date || e.debut
+    for (const a of e.annees) {
+      const seul = SJ.alignerAnnee({ cle: e.cle, debut: e.debut, date_fixe: e.date_fixe, principale }, a.recul, MATERIAUX)
+      assert.deepEqual([a.decalage, a.alignement, a.annee], [seul.decalage, seul.alignement, seul.annee], `${e.cle}, recul ${a.recul}`)
+      comparees++
+    }
+  }
+  assert.ok(comparees > 60, `${comparees} années comparées`)
 })
 
 test('LE TEST QUI COMPTE : la zone dont le serveur compte le CA est EXACTEMENT celle que la page affiche', async () => {
@@ -280,6 +409,44 @@ test('LE TEST QUI COMPTE : la zone dont le serveur compte le CA est EXACTEMENT c
     if (page.length > (e.nuits || []).length) elargis++
   }
   assert.ok(elargis > 0, 'au moins un evenement elargi : sinon le test ne compare que les nuits')
+})
+
+test('LE TEST QUI COMPTE : un événement commencé il y a six mois garde les séjours de ses années passées — et son CA', async () => {
+  // Review de l'etape 1, reproduit : au 1er octobre 2026, une saison de
+  // l'hote du 1er avril au 31 octobre. Le sejour du 10 au 12 avril 2023
+  // manquait a la liste ET au CA (0 € au lieu de 300 €).
+  const saison = { id: 'ev-saison', nom: 'Saison', segment: 'evenement:saison', date_debut: '2026-04-01', date_fin: '2026-10-31' }
+  const ecran = await charger({ aujourdHui: '2026-10-01', enPlus: [saison], eclatements: [ecl('2023-04-10', 3, { prix: 100 })] })()
+  const e = ecran.evenements.find(x => x.cle === saison.segment)
+  assert.ok(e, 'la saison est montrée : une de ses nuits tombe dans la fenêtre')
+  const a2023 = e.annees.find(a => a.recul === 3)
+  assert.deepEqual([a2023.annee, a2023.nuits, a2023.ca], [2023, 3, 300])
+  assert.ok(ecran.sejours.liste.some(s => s.debut === '2023-04-10'), 'la page peut le dessiner')
+})
+
+test('LE TEST QUI COMPTE : le CA d’une année compte les week-ends AFFICHÉS — et seulement eux', async () => {
+  const large = new Map([[HIVER, { weekends_avant: 1, weekends_apres: 0 }]])
+  const sonde = (await charger({ reglages: large, eclatements: [ecl('2023-01-01', 1)] })()).evenements.find(e => e.cle === HIVER && e.debut === '2027-02-20')
+  const we = sonde.week_ends.find(w => w.zone === 'avant' && w.rang === 1)
+  const d = sonde.annees.find(a => a.recul === 1).decalage
+  // Un sejour l'an dernier, EXACTEMENT sur les nuits du week-end d'avant.
+  const passees = we.nuits.map(n => decaler(n, -d))
+  const eclatements = [ecl('2023-01-01', 1), ecl(passees[0], passees.length, { prix: 80 })]
+  const avec = (await charger({ reglages: large, eclatements })()).evenements.find(e => e.cle === HIVER && e.debut === '2027-02-20')
+  const sans = (await charger({ eclatements })()).evenements.find(e => e.cle === HIVER && e.debut === '2027-02-20')
+  assert.deepEqual([avec.annees[0].nuits, avec.annees[0].ca], [we.nuits.length, 80 * we.nuits.length], 'largeur 1 : le week-end compte')
+  assert.deepEqual([sans.annees[0].nuits, sans.annees[0].ca], [0, 0], 'sans largeur : il ne compte pas')
+})
+
+test('LE TEST QUI COMPTE (§16.7, point 3) : le cache du navigateur ne garde jamais les séjours — il garde le bilan des années', async () => {
+  const rendu = await import(path.join(__dirname, '..', 'shared/yield-evenements-rendu.js'))
+  const ecran = await charger({ eclatements: [ecl('2026-02-07', 3), ecl('2026-12-20', 2)] })()
+  assert.ok(ecran.sejours.liste.length > 0)
+  const c = rendu.pourLeCache(ecran)
+  assert.equal('sejours' in c, false)
+  assert.deepEqual(c.evenements.map(e => e.annees), ecran.evenements.map(e => e.annees))
+  // Meme sans nuits (un ecran indisponible), les sejours ne passent pas.
+  assert.equal('sejours' in rendu.pourLeCache({ bien: 'x', sejours: { liste: [1] } }), false)
 })
 
 // ─── 5. L'ENDPOINT : LES COUCHES (decision S2) ─────────────────────────────

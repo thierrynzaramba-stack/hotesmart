@@ -590,6 +590,7 @@ de ventes, le calcul est probablement plus long : à mesurer en production.
 | S1 | Quelle nuit de l'année passée mettre en face | **Calé sur l'événement** : l'occurrence de l'événement en N-k est mise en face de celle de cette année (Pâques sous Pâques, vacances sous vacances). Si l'événement n'existait pas cette année-là, recul de 52 semaines par année, et l'écran le dit |
 | S2 | Le choix des couches (N-1, N-2, N-3, puis comparables en 4c) | **Chacun le sien** : gardé par personne ET par compte, sur tous ses appareils. Un membre qui éteint 2023 ne l'éteint pas pour le titulaire |
 | S3 | Le calcul des séjours passés | **Sur les réservations déjà lues** par l'écran (aucune lecture de plus). Leur calcul de nuit entre dans le lot de la **dette 143**, qui supprime cette lecture |
+| S4 | Une date fixe (réveillons, Noël, 14 juillet, Saint-Valentin…), décidée après la review de l'étape 1 | **Même date exacte** : le réveillon 2026 sous le réveillon 2025. Contrepartie acceptée : les week-ends autour de la date ne tombent plus sur les mêmes jours de semaine les années passées. Pâques, les vacances, les ponts et les événements de l'hôte restent calés à la semaine |
 
 ⚠ **S3 est une exception datée à la règle « non urgent = résumé ».** Elle tient
 parce que l'écran lit déjà toutes les réservations du compte à chaque
@@ -647,34 +648,53 @@ JOURS, pas des instants (`docs/kb/prix-voyageur.md`). **Seulement si la date
 de vente est fiable** (`date_vente_fiable`) ; sinon pas de pastille, et le
 survol dit « délai inconnu » (dates de vente perdues à la migration).
 
-### 16.3 L'alignement des années (S1)
+### 16.3 L'alignement des années (S1, S4)
 
-Pour un événement ouvert (occurrence de clé `K`, première nuit `d0`) et une
-année `N-k` (k = 1, 2, 3) :
+Pour un événement ouvert (occurrence de clé `K`) et une année `N-k`
+(k = 1, 2, 3) — `alignerAnnee`, `lib/yield/sejours.js` :
 
-1. on cherche l'occurrence de **la même clé** `K` dans l'année `N-k`, par le
-   même résolveur que les réglages (`occurrences()` de `lib/yield/positions.js`),
-   sur une fenêtre centrée sur `d0` reculé de `k` ans ; s'il y en a plusieurs,
-   la plus proche ;
-2. **décalage = l'écart entre les deux premières nuits, arrondi à la semaine
-   la plus proche** (multiple de 7 jours) : le jour de semaine tient et les
-   séjours restent entiers — la même raison que le recul de 52 semaines de
-   `lib/yield/sejours.js`, appliquée à l'événement. Une date fixe (Noël,
-   réveillon) tombe ainsi à **3 jours au plus** de sa date ; un événement
-   mobile (Pâques, vacances) tombe **en face de lui-même** ;
-3. **sans occurrence** cette année-là (événement de l'hôte créé depuis,
+1. on cherche l'occurrence de **la même clé** `K` l'année `N-k`, par le même
+   résolveur que les réglages (`occurrences()` de `lib/yield/positions.js`),
+   à **45 jours au plus** du même jour calendaire ; s'il y en a plusieurs, la
+   plus proche ;
+2. **une date fixe** (clé `ferie:` ou `commercial:`, désignée par SA nuit) :
+   sa nuit `date` est mise en face de la nuit `date` de l'occurrence trouvée,
+   **exactement** (S4) — le réveillon sous le réveillon, la Saint-Valentin
+   sous la Saint-Valentin (jamais sous son samedi rattaché). Pour une date
+   mobile (lundi de Pâques, Ascension), l'écart exact est déjà un multiple de
+   7. `alignement: 'date'` ;
+3. **tout le reste** (vacances, ponts, week-ends prolongés, événements de
+   l'hôte) : **écart entre les premières nuits, arrondi à la semaine** — le
+   jour de semaine tient. `alignement: 'evenement'` ;
+4. **sans occurrence** cette année-là (événement de l'hôte créé depuis,
    vacances absentes de la source, date commerciale coupée) : **recul de
-   52 semaines × k** (`DECALAGE_N1 × k`), et l'écran le dit sur la pastille
-   de l'année (« pas de Pâques 2024 trouvées : comparé à 52 semaines avant »).
+   52 semaines × k** (`DECALAGE_N1 × k`), `alignement: 'semaines'`, et
+   l'écran le dit sur la pastille de l'année.
+
+**L'année affichée** est celle de l'occurrence trouvée (en repli : l'année de
+l'événement moins k), jamais celle d'une date reculée : autour du 1er janvier,
+l'arrondi faisait sauter ou répéter une année (constat 3 de la review).
 
 Toute la zone affichée (événement + rayonnement) recule du même décalage : une
-seule barre continue par séjour, jamais un séjour découpé.
+seule barre continue par séjour, jamais un séjour découpé. ⚠ Conséquence de
+S4 : autour d'une date fixe, les week-ends de la zone tombent les années
+passées sur d'autres jours de semaine (au plus 3 jours d'écart).
 
-⚠ **Ce que le calcul lit pour les années passées** : les vacances scolaires et
-les événements de l'hôte **sur trois ans de plus**. Ils doivent venir de la
-lecture que l'écran fait déjà, **élargie**, pas d'une lecture ajoutée. Si ce
-n'est pas possible sans une requête de plus, l'étape 1 le dit et le mesure
-avant d'aller plus loin.
+**Coût** : les occurrences des trois années passées sont calculées **une
+fois** pour tout l'écran (constat 4 : un appel au résolveur par événement et
+par année coûtait 180 à 410 ms) ; un test prouve que les décalages sont les
+mêmes qu'un calcul événement par événement.
+
+**Ce que le calcul lit** : la matière du résolveur que l'écran lit déjà
+(`ctx.materiauxPositions`), qui commence **aujourd'hui moins trois ans**. Elle
+n'est **pas élargie** (ce serait changer les bornes du moteur). **Mesuré le
+11 novembre 2026** (constat 5) : les occurrences de l'année dont l'année N-3
+frôle cette borne sont l'Armistice, le réveillon de Noël, Noël et le week-end
+prolongé de Noël — fériés et week-ends prolongés **calculés**, dates
+commerciales **calculées depuis la borne** : aucun ne manque. Seules des
+vacances ou un événement de l'hôte **entièrement antérieurs** à la borne
+manqueraient ; leur occurrence de cette année serait alors déjà passée, donc
+absente de l'écran. Si cela arrivait quand même, le repli est dit.
 
 ### 16.4 Où vit chaque règle
 
@@ -726,7 +746,7 @@ avant d'aller plus loin.
 | élément | devient |
 |---|---|
 | l'ancienne pop-up « Quand vos prix bougent » | **sans objet** : elle ne montrait aucun séjour |
-| les barres « cette année » et « N-1 » de Prédiction de prix | **conservées, inchangées** ; seule leur assemblée est déplacée dans `lib/yield/sejours.js`, et leur recul reste 52 semaines (S1 vaut pour cet écran) |
+| les barres « cette année » et « N-1 » de Prédiction de prix | **conservées, inchangées** — `api/yield-prix.js` n'est pas touché ; elles lisent le même `eclater`, et leur recul reste 52 semaines (S1 et S4 valent pour cet écran) |
 | la mention « vendue » d'une nuit (4a) | **conservée** |
 | libellé « YieldFlow les enverra » pour **une** nuit | **corrigé** (singulier), promis au chef de file le 10 novembre 2026 |
 
@@ -737,8 +757,10 @@ avant d'aller plus loin.
 2. **Non urgent** : séjours N-1 à N-3 calculés à la lecture **sur les
    réservations déjà lues** (S3, exception datée → dette 143). L'heure du
    calcul est celle que l'écran affiche déjà (`calcule_a`).
-3. **Cache navigateur** : aucun ajouté. Les séjours de cette année sont des
-   réservations : **jamais** servis depuis un cache.
+3. **Cache navigateur** : aucun ajouté, et le cache de la page (4a) **ne garde
+   pas les séjours** : `pourLeCache` les retire (constat 1 de la review). Ce
+   sont des réservations : **jamais** servies depuis un cache. Le bilan des
+   années (`evenements[].annees`) y reste.
 4. **`private, no-store`** avant le premier refus, sur GET comme sur PUT, 405
    compris.
 5. **Statiques versionnés** : inchangé (`?v=<empreinte>`).
@@ -763,12 +785,43 @@ passent à la ligne. Aperçu desktop ET mobile à la recette.
 
 ### 16.9 Étapes
 
-1. **Serveur** : assemblée des séjours déplacée (Prédiction de prix
-   inchangée), alignement, lignes de la pile et CA par année dans l'appel
-   d'écran, table et PUT des couches. Tests, dont : Pâques en face de Pâques,
-   Noël à 3 jours au plus, repli à 52 semaines dit, parité du prix d'une nuit
-   avec Prédiction de prix, aucune relecture de `bookings_snapshot`, la ligne
-   d'un autre utilisateur jamais touchée. Review.
+1. **Serveur** : séjours vendus lus sur `eclater`, alignement (S1, S4), bilan
+   par année dans l'appel d'écran, table et PUT des couches. Tests, dont :
+   Pâques en face de Pâques, le réveillon sous le réveillon, repli à
+   52 semaines dit, parité du prix d'une nuit avec Prédiction de prix, aucune
+   relecture de `bookings_snapshot`, la ligne d'un autre utilisateur jamais
+   touchée. Review. **Fait** (§16.10).
 2. **Page** : la pile, les barres, les pastilles de couches, le libellé
-   singulier ; téléphone. Review.
+   singulier ; téléphone. Review. ⚠ **À tenir, relevé par la review de
+   l'étape 1** : la page n'écrit **pas** « — » sur une nuit dont la nuit
+   passée est antérieure à `sejours.premiere_nuit` (le bien ne vendait pas
+   encore) ni sur une nuit passée qui tombe à partir d'aujourd'hui (pas encore
+   jouée) ; elle dit le repli `alignement: 'semaines'` sur la pastille.
 3. **Recette sur staging** (desktop et mobile), puis mesure APRÈS.
+
+### 16.10 Réalisé — étape 1, le serveur (11 novembre 2026)
+
+Branche `yf-ecran-sejours`, worktree `/home/claude/hotesmart-sejours`. Commit
+relu : `ad4a6576faab022c54edbb356e746a6efa2092c2` (plage
+`3ffcfeb55d721f1b88360ac2ce2c873cea188d52..ad4a6576faab022c54edbb356e746a6efa2092c2`).
+Rapport complet : `docs/specs/revues/review-yf-ecran-sejours-etape1-2026-11-11.md`.
+
+**Review : aucun constat de sécurité** (le PUT n'écrit que la ligne de
+l'appelant, refus avant toute écriture, en-tête privé avant le premier refus,
+table fermée au navigateur). Neuf constats, corrigés sans nouvelle review
+(règle « une review par commit ») :
+
+| # | constat | correction |
+|---|---|---|
+| 1 | les séjours partaient dans le cache du navigateur de la page (`pourLeCache`) | `pourLeCache` les retire ; test |
+| 2 | un événement commencé avant la borne de la liste perdait ses séjours et son CA | l'index du CA porte sur tous les séjours ; la liste est bornée par les événements montrés ; test (saison d'avril à octobre) |
+| 3 | l'année de la pastille sautait ou se répétait autour du 1er janvier | l'année de l'occurrence trouvée ; test (réveillon, jour de l'an) |
+| 4 | 114 appels au résolveur, 180 à 410 ms | occurrences passées calculées une fois ; test de parité |
+| 5 | matière non élargie, non mesurée | mesuré et écrit au §16.3 |
+| 6 | parité du prix avec Prédiction de prix non testée | test sur de vraies réservations passées par `eclater`, et la nuit disputée |
+| 7 | le test de la zone ne gardait pas le CA | test : le week-end affiché compte, le même sans largeur non |
+| 8 | spec contradictoire (§16.6, §16.9) | corrigée |
+| 9 | le script de preuve lisait toute erreur comme un refus | seul `42501` prouve le cloisonnement |
+
+Et une décision de produit portée à Thierry depuis la review : **S4** (§16.1).
+

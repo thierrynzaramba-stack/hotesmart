@@ -829,8 +829,16 @@ export function jourLongPar (date) {
   }
 }
 
-/** Ce qu'on garde dans le cache du navigateur : jamais l'état d'une nuit (vendue, ouverte, ✎). */
+/**
+ * Ce qu'on garde dans le cache du navigateur : jamais l'état d'une nuit
+ * (vendue, ouverte, ✎), et jamais les SÉJOURS (4b) — ce sont des
+ * réservations : elles se relisent, elles ne s'affichent pas depuis un cache
+ * (spec §16.7, point 3). Le cache garde le reste de l'écran, dont le bilan des
+ * années passées (`evenements[].annees`).
+ */
 export function pourLeCache (data) {
-  if (!data || !Array.isArray(data.nuits)) return data
-  return { ...data, nuits: data.nuits.map(({ vendue, ouverte, prix_hote, prix_calendrier, ...reste }) => reste) }
+  if (!data || typeof data !== 'object') return data
+  const { sejours, ...reste } = data
+  if (!Array.isArray(reste.nuits)) return reste
+  return { ...reste, nuits: reste.nuits.map(({ vendue, ouverte, prix_hote, prix_calendrier, ...r }) => r) }
 }
