@@ -125,6 +125,8 @@
   "avis.chiffres_incomplets": "Las cifras no se han podido calcular por completo.",
   "avis.aucune_note": "Sin nota",
   "avis.sur_periode": "en este periodo",
+  "avis.retour_prive": "Comentario privado",
+  "avis.retour_prive_sous": "No publicado: el huésped lo escribió para el anfitrión.",
   "avis.sur_5": "sobre 5",
   "avis.texte_requis": "Copia lo que dijo el huésped.",
   "avis.titre": "Reseñas",

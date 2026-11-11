@@ -125,6 +125,8 @@
   "avis.chiffres_incomplets": "Les chiffres n’ont pas pu être calculés en entier.",
   "avis.aucune_note": "Aucune note",
   "avis.sur_periode": "sur cette période",
+  "avis.retour_prive": "Retour privé",
+  "avis.retour_prive_sous": "Non publié : le voyageur l’a écrit pour l’hôte.",
   "avis.sur_5": "sur 5",
   "avis.texte_requis": "Recopiez ce que le voyageur a dit.",
   "avis.titre": "Avis",

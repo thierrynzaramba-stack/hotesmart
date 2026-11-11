@@ -484,6 +484,13 @@ test('list : ni le nom du voyageur ni ses dates de séjour ne sortent', async ()
   // absent de tout code source. Le test est resté vert pendant qu'un commit
   // réintroduisait `stay_start` et `stay_end` dans `CHAMPS` — exactement ce
   // qu'il prétend interdire. Une comparaison de chaîne ne peut pas se tromper.
+  // ⚠ `content_private` RESTE INTERDIT ICI, et la raison a change le
+  // 11 novembre 2026. Le retour prive s'affiche sur la page Avis (decision de
+  // Thierry, spec avis-v5/spec-retour-prive.md) — mais il est lu par
+  // `cartesLister` seul, qui ne montre rien d'un avis masque. `CHAMPS` sert
+  // aussi l'action `list`, qui l'aurait sorti pour un avis encore masque par
+  // Airbnb (revue du lot, constat 1, mesure par execution). Cette liste garde
+  // donc `list`.
   const CHAMPS_INTERDITS = ['guest_name', 'stay_start', 'stay_end', 'booking_uid',
                             'ota_reservation_id', 'content_private']
   const fs = require('node:fs')
@@ -1093,4 +1100,18 @@ test('geste : un recalcul qui lève ne change pas non plus la réponse', async (
   const res = reponse()
   await handler(req({}, { action: 'create', bien: REF_A, texte: 'Très propre', source: 'sms' }, 'POST'), res)
   assert.strictEqual(res.code, 201)
+})
+
+// ─── Le retour privé ne sort pas par `list` (revue du lot retour privé, constat 1)
+// La page Avis l'affiche depuis le 11 novembre 2026, mais par `cartes` seul, qui
+// ne montre rien d'un avis masque. `list` ne sait pas qu'un avis est masque :
+// la colonne n'y est pas lue du tout.
+test('list : le retour privé ne sort pas, même pour un avis masqué', async () => {
+  preparer({ avis: [{ ...AVIS_A, provider: 'channex', ota: 'airbnb', is_hidden: true, content_private: 'SECRET-MASQUE' },
+                    { ...AVIS_A, id: 'r9', content_private: 'SECRET-VISIBLE' }] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'list' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.doesNotMatch(JSON.stringify(res.body), /SECRET-/)
 })

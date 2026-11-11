@@ -61,9 +61,14 @@ const MAX_TEXTE   = 5000
 // ferme rien : le domaine `avis` donne acces au CONTENU des avis, pas a
 // l'identite des voyageurs ni a leurs sejours, qui relevent de `reservations`.
 //
-// `content_private` est retire pour la meme raison de moindre exposition : la
-// page ne l'affiche pas, l'extrait de proprete suffit. L'ajouter un jour est une
-// decision a prendre, pas un defaut a laisser.
+// `content_private` n'est PAS dans cette liste, et c'est voulu — mais il est
+// lu par `cartesLister` depuis le 11 novembre 2026 (decision de Thierry, spec
+// avis-v5/spec-retour-prive.md : le retour prive s'affiche sur la page Avis,
+// sous le droit `avis`). ⚠ SEULEMENT LA (revue du lot, constat 1) : `CHAMPS`
+// sert aussi l'action `list`, qui ne sait pas qu'un avis est masque par
+// Airbnb ; la le texte prive d'un avis masque serait sorti. `cartesLister`,
+// lui, passe chaque avis par `avisPourCarte`, qui ne montre RIEN d'un avis
+// masque.
 //
 // Regle a tenir en modifiant cette liste : une colonne qui n'est pas rendue par
 // pages/avis.html n'a rien a y faire.
@@ -681,7 +686,9 @@ async function cartesLister (req, res, garde) {
       // ⚠ Sans le droit `reservations`, le nom et les dates ne sont meme pas
       // LUS (regle de CHAMPS_AVEC_SEJOUR) ; la reservation reste lue, elle range
       // l'avis dans la carte de son sejour.
-      .select(`${CHAMPS}, booking_uid, ${voitSejours ? 'stay_start, stay_end, guest_name, ' : ''}cache:raw->attributes->is_hidden`)
+      // ⚠ `content_private` est lu ICI SEULEMENT (voir CHAMPS) : chaque avis
+      // passe ensuite par `avisPourCarte`, qui ne montre rien d'un avis masque.
+      .select(`${CHAMPS}, content_private, booking_uid, ${voitSejours ? 'stay_start, stay_end, guest_name, ' : ''}cache:raw->attributes->is_hidden`)
       .eq('user_id', userId).neq('statut', 'ignore')
     if (bienDemande) q = q.eq('property_id_ref', bienDemande)
     else if (filtre) q = q.or(filtre)

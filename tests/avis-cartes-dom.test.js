@@ -405,3 +405,47 @@ test('LE TEST QUI COMPTE : plus aucun « /10 » nulle part — ni sur une carte,
     assert.doesNotMatch(code, /\d\s*\/\s*10\b|sur 10\b/, `${f} affiche encore une note sur 10`)
   }
 })
+
+// ─── Le retour privé (décisions de Thierry du 11 novembre 2026) ─────────────
+// Spec : docs/specs/avis-v5/spec-retour-prive.md. Le texte prive s'affiche SOUS
+// le public, a part, et la carte porte la marque dans son en-tete.
+const avecPrive = (texte_prive, extraAvis = {}) => carte({
+  avis: [{ id: 'a1', masque: false, note_sur_5: 4, texte: 'Super séjour', texte_prive, extrait: null, verdict: 'rien_signale', verdict_source: null, analyse: true, detecte: false, ...extraAvis }]
+})
+
+test('LE TEST QUI COMPTE : le retour privé s\'affiche sous le texte public, à part, et la carte porte la marque', () => {
+  const d = doc(rendre(donnees({ recents: [avecPrive('Le chauffage ne marchait pas la première nuit.')] }), { peutEcrire: false }))
+  const li = d.querySelector('.avp-carte')
+  const prive = li.querySelector('.avp-son .avp-prive')
+  assert.ok(prive, 'le bloc du retour privé')
+  assert.equal(prive.querySelector('.avp-lib').textContent, 'Retour privé')
+  assert.equal(prive.querySelector('.avp-prive__sous').textContent, 'Non publié : le voyageur l’a écrit pour l’hôte.')
+  assert.equal(prive.querySelector('.avp-texte').textContent, 'Le chauffage ne marchait pas la première nuit.')
+  // SOUS le public : le texte public vient avant, dans le meme bloc.
+  const textes = [...li.querySelectorAll('.avp-son .avp-texte')].map(p => p.textContent)
+  assert.deepEqual(textes, ['Super séjour', 'Le chauffage ne marchait pas la première nuit.'])
+  // La marque, dans l'EN-TETE de la carte (colonne d'identite, sous les infos) :
+  // on la repere sans lire.
+  assert.equal(li.querySelector('.avp-carte__tete .avp-id .avp-marque-prive').textContent, 'Retour privé')
+})
+
+test('le retour privé est échappé, et se replie au-delà de 220 caractères comme le public', () => {
+  const long = 'Bruit <b>la nuit</b> & odeur. '.repeat(10)
+  const d = doc(rendre(donnees({ recents: [avecPrive(long)] }), { peutEcrire: false }))
+  const p = d.querySelector('.avp-prive .avp-texte')
+  assert.equal(p.textContent, long)
+  assert.equal(d.querySelectorAll('.avp-prive b').length, 0, 'aucune balise injectée')
+  assert.ok(p.classList.contains('avp-texte--replie'))
+  assert.ok(d.querySelector('.avp-prive [data-plus]'), 'le bouton « Voir tout »')
+  // Les deux textes ont des cles distinctes : deplier l'un ne deplie pas l'autre.
+  const cles = [...d.querySelectorAll('.avp-son [data-texte]')].map(x => x.getAttribute('data-texte'))
+  assert.equal(new Set(cles).size, cles.length)
+})
+
+test('sans retour privé, ou sur un avis masqué : ni bloc, ni marque', () => {
+  for (const c of [avecPrive(null), avecPrive(''), avecPrive('Visible ?', { masque: true, texte: null })]) {
+    const d = doc(rendre(donnees({ recents: [c] }), { peutEcrire: false }))
+    assert.equal(d.querySelector('.avp-prive'), null)
+    assert.equal(d.querySelector('.avp-marque-prive'), null)
+  }
+})
