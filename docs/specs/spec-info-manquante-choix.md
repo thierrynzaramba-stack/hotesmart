@@ -120,6 +120,13 @@ réponse prête existante, elle propose sa modification.**
   arrêté… ») et réveilleraient le fondateur pour un geste voulu. Journal
   illisible : on n'appelle pas (503). Relever le plafond de l'agent lui-même
   est un autre sujet : dette 145.
+  ⚠ **Limite connue (review 1, constat 3)** : la ligne du journal est écrite
+  APRÈS la réponse du modèle, et son échec est silencieux. Des demandes
+  simultanées (deux onglets, un script d'un membre autorisé) lisent toutes le
+  même compte et passent ensemble ; une écriture du journal en échec ne compte
+  pas. C'est un plafond de coût, pas une garde de sécurité : il borne l'usage
+  normal, pas un abus délibéré. Le rendre exact demande une réservation
+  atomique (compter et inscrire en une opération).
   `private, no-store` avant le premier refus, et le nombre de requêtes dans
   `Server-Timing`.
 - **Lecture des tâches.** ⚠ **Jamais dans `taches`** : la page affiche
@@ -133,9 +140,22 @@ réponse prête existante, elle propose sa modification.**
   arrêt de l'agent). `taches` garde exactement sa forme d'avant. Le nombre de
   requêtes ne change pas. Les deux lectures directes de `pages/messages.html`
   (au chargement, et « Proposer ») ne changent pas : la carte vient du fil en
-  direct, relu à l'ouverture de la conversation.
+  direct, donc elle apparaît **au premier cycle, au plus 5 s après l'ouverture
+  de la conversation** — aucun appel de plus n'est lancé à l'ouverture (review
+  1, constat 6). Une carte périmée d'une visite précédente reste sans danger :
+  un clic reçoit 409 et la carte se relit.
+- **Pas de carte pour les tâches de SECOURS du cron** (review 1, constat 5) :
+  sortie de l'IA illisible, ou emoji répondant à une question. Leur `question`
+  est le message entier du voyageur, qui peut porter plusieurs demandes ;
+  Oui / Non / Autre y donnerait un « oui » global. L'hôte garde le bouton
+  « IA » de la saisie.
 - **Clôture.** L'envoi d'une réponse rédigée depuis la carte clôt la tâche
-  `info_unknown` par `POST /api/messages { action: 'info_traitee', task_id }`.
+  `info_unknown` par `POST /api/messages { action: 'info_traitee', task_id,
+  maj, booking_id }`. ⚠ `maj` est la version de la tâche sur laquelle l'hôte
+  a tranché (review 1, constat 4) : si le cron l'a complétée depuis (le
+  voyageur a écrit une nouvelle question), le serveur rend `409
+  questions_changees`, rien n'est écrit, et la tâche reste dans « À valider ».
+  L'`UPDATE` porte la même condition (`updated_at` inchangé).
   Le statut est relu avant l'écriture, et l'`UPDATE` porte la condition
   `status = 'pending'` (course avec un second clic, ou avec le cron qui
   complète la tâche). Une proposition ou une intervention y rend 404 (elles

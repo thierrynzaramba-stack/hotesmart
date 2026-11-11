@@ -316,11 +316,20 @@ async function cloreInfo (req, res) {
   const userId = garde.accountUserId
   const taskId = String(req.body.task_id || '').trim()
   if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+  // La version de la tâche sur laquelle la réponse a été rédigée (`maj` de
+  // `infos`), et son séjour. Facultatifs pour la forme, ils DÉCIDENT quand ils
+  // sont là (review 1, constat 4) : le cron complète la tâche quand le voyageur
+  // écrit encore, et clore sur l'ancienne version ferait disparaître d'« À
+  // valider » une question à laquelle personne n'a répondu.
+  const maj = req.body.maj == null ? null : String(req.body.maj)
+  const bookingId = req.body.booking_id == null ? null : String(req.body.booking_id)
+  if ((maj && maj.length > 40) || (bookingId && bookingId.length > 200)) return res.status(400).json({ error: 'Demande invalide' })
   const { data: tache, error: eT } = await supabase.from('agent_tasks')
-    .select('id, status, task_type, summary, sub_tasks, property_id, book_id')
+    .select('id, status, task_type, summary, sub_tasks, property_id, book_id, created_at, updated_at')
     .eq('user_id', userId).eq('id', taskId).maybeSingle()
   if (eT) return res.status(503).json({ error: 'Lecture impossible' })
   if (!tache) return res.status(404).json({ error: 'Tâche introuvable' })
+  if (bookingId && String(tache.book_id) !== bookingId) return res.status(404).json({ error: 'Tâche introuvable' })
   // Périmètre par bien, 404 pas 403 — même règle que cloreProposition.
   const refs = refsDuPerimetre(garde.contexte)
   if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
@@ -334,14 +343,24 @@ async function cloreInfo (req, res) {
   // Les tâches système (pause, arrêt de l'agent) ne portent pas de question :
   // la carte ne les montre pas, et leur cycle appartient au cron.
   if (!questionsDe(tache).length) return res.status(409).json({ error: 'sans_question' })
-  // La condition de statut dans l'UPDATE ferme la course entre deux clics, et
-  // avec le cron qui COMPLÈTE la tâche (`.eq('status', 'pending')` chez lui aussi).
-  const { data: maj, error: eU } = await supabase.from('agent_tasks')
+  const courante = tache.updated_at || tache.created_at || null
+  if (maj && String(courante) !== maj) return res.status(409).json({ error: 'questions_changees' })
+  // La condition de statut ET de version dans l'UPDATE ferme la course entre
+  // deux clics, et avec le cron qui COMPLÈTE la tâche entre la lecture et
+  // l'écriture (il pose `updated_at`).
+  let qMaj = supabase.from('agent_tasks')
     .update({ status: 'done', updated_at: new Date().toISOString() })
     .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending')
-    .select('id')
+  qMaj = tache.updated_at ? qMaj.eq('updated_at', tache.updated_at) : qMaj.is('updated_at', null)
+  const { data: fait, error: eU } = await qMaj.select('id')
   if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
-  if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
+  if (!fait || !fait.length) {
+    // Rien écrit : close entre-temps, ou complétée par le cron. On relit pour
+    // le dire juste (la relecture n'a lieu que dans cette course).
+    const { data: apres } = await supabase.from('agent_tasks').select('status')
+      .eq('user_id', userId).eq('id', tache.id).maybeSingle()
+    return res.status(409).json({ error: apres && apres.status === 'pending' ? 'questions_changees' : 'deja_close' })
+  }
   return res.status(200).json({ ok: true, task_id: tache.id, statut: 'done' })
 }
 

@@ -60,6 +60,17 @@ test('LE TEST QUI COMPTE : pas de carte pour une intervention, une tache close, 
   assert.deepEqual(R.questionsDe(null), [])
 })
 
+test('LE TEST QUI COMPTE : pas de carte pour une tache de SECOURS du cron (sortie illisible, garde emoji) — copies tenues contre la source', () => {
+  const source = lire('lib/cron-classify.js')
+  for (const motif of R.SOUS_TACHES_DE_SECOURS) {
+    const echappe = motif.replace(/'/g, "\\'")
+    assert.ok(source.includes(`summary: '${echappe}'`), `le cron ne pose plus « ${motif} » : la copie est perimee`)
+    assert.deepEqual(R.questionsDe(tache({ sub_tasks: [{ question: 'Tout le message du voyageur, avec deux demandes ?', summary: motif }] })), [], motif)
+    // Une seule sous-tache de secours suffit, meme a cote de vraies questions.
+    assert.deepEqual(R.questionsDe(tache({ sub_tasks: [{ question: QUESTIONS[0], summary: 'animal' }, { question: 'Message entier', summary: motif }] })), [], motif + ' (mixte)')
+  }
+})
+
 test('questionsDe : sous-taches absentes, vides ou mal formees ne font pas de question ; bornes tenues', () => {
   assert.deepEqual(R.questionsDe(tache({ sub_tasks: null })), [])
   assert.deepEqual(R.questionsDe(tache({ sub_tasks: [{ question: '   ' }, { question: 42 }, null] })), [])

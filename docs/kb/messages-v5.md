@@ -313,7 +313,18 @@ apprend : réponse prête à créer ou à modifier) vient après sa recette.
   n'apparaît que si du texte est tapé, fige le champ pendant la rédaction,
   REMPLACE le texte, et « Annuler » le rend tant que la version rédigée n'a pas
   été retouchée. La tâche se clôt après l'envoi RÉUSSI de l'entrée née de la
-  carte (« Réessayer » compris), jamais pour un autre message.
+  carte (« Réessayer » compris), jamais pour un autre message — et seulement si
+  la tâche n'a pas été complétée depuis (`maj`, sinon 409 `questions_changees`
+  et la tâche reste dans « À valider »).
+- **⚠ La marque de la saisie se revérifie AU RETOUR de l'IA** (review 1,
+  constat 1, bloquant, reproduit) : pendant la rédaction, l'hôte peut aller
+  « Utiliser » le wifi d'un autre voyageur et revenir ; ajouter la réponse et
+  reprendre la marque faisait partir ce texte chez le mauvais voyageur.
+- **Une rédaction ne tient pas la page** : délai de 30 s
+  (`DELAI_REDACTION_MS`), et changer de conversation libère le champ figé par
+  le bouton « IA ».
+- **Pas de carte pour les tâches de secours du cron** (sortie illisible, garde
+  emoji) : leur question est le message entier du voyageur.
 - Règles pures : `lib/guestflow/rediger.js` (serveur) et
   `shared/info-manquante.js` (page), copies tenues par
   `tests/info-manquante-regles.test.js` ; la page par

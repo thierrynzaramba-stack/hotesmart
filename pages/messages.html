@@ -179,7 +179,7 @@ import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOU
   from '/shared/messages-programmes.js'
 import { departEvaluable } from '/shared/calendrier-resa.js'
 import { delaiDirect, listeARelire, apresDuFil, fusionnerMessages, fusionnerTaches, aDejaSaLigne, RYTHME } from '/shared/messages-direct.js'
-import { infoAAfficher, etatInitial as etatInfoInitial, memeCarte, choisir as choisirInfo, preciser as preciserInfo, pretARediger, corpsChoix, iaPossible, corpsTexte, cleErreur, relireApres, REPONSES as REPONSES_INFO, MAX_PRECISION as MAX_PRECISION_INFO }
+import { infoAAfficher, etatInitial as etatInfoInitial, memeCarte, choisir as choisirInfo, preciser as preciserInfo, pretARediger, corpsChoix, iaPossible, corpsTexte, cleErreur, relireApres, REPONSES as REPONSES_INFO, MAX_PRECISION as MAX_PRECISION_INFO, DELAI_REDACTION_MS }
   from '/shared/info-manquante.js'
 import { confirmerDansLaPage, OCCUPEE } from '/shared/confirmer.js'
 
@@ -888,7 +888,7 @@ async function envoyer () {
   // Une réponse rédigée depuis la carte « Information manquante » : CETTE
   // entrée clora la tâche à son premier envoi réussi (retry compris).
   const eng = etat.infoEngagee
-  if (eng && String(eng.bookId) === String(c.bookId)) { entree.info = eng.tacheId; etat.infoEngagee = null }
+  if (eng && String(eng.bookId) === String(c.bookId)) { entree.info = { tacheId: eng.tacheId, maj: eng.maj }; etat.infoEngagee = null }
   // Le texte part : « Annuler » et la note de rédaction n'ont plus d'objet.
   etat.iaAnnuler = null
   if (etat.infoNote && String(etat.infoNote.bookId) === String(c.bookId)) etat.infoNote = null
@@ -988,21 +988,30 @@ async function redigerInfo (c) {
   const zone = $('[data-bind="texte"]')
   if (!zone) return
   if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
+  // La VERSION de la tâche sur laquelle l'hôte a tranché : la clôture ne vaudra
+  // que pour elle (review 1, constat 4).
+  const maj = ((c.infos || []).find(x => String(x.id) === String(e.tacheId)) || {}).maj || null
   etat.iaEnCours = ici
   etat.infoNote = null
   renderFil()
   try {
-    const r = await appel('/api/guestflow-rediger', corpsChoix(e, c.bookId))
+    const r = await avecDelaiIA(appel('/api/guestflow-rediger', corpsChoix(e, c.bookId)))
     // La conversation a changé pendant la rédaction : ce texte est celui d'un
     // AUTRE voyageur, il ne va pas dans cette saisie.
     if (String(etat.ouverte) !== ici) return
+    // ⚠ ET LA SAISIE A PU ÊTRE REMPLIE POUR UN AUTRE VOYAGEUR ENTRE-TEMPS
+    // (review 1, constat 1, BLOQUANT, reproduit) : aller chez Marie,
+    // « Utiliser » son wifi, revenir chez Ana — le texte de Marie reste, marqué
+    // pour elle. Y ajouter la réponse d'Ana et reprendre la marque faisait
+    // partir le wifi de Marie chez Ana. La garde du clic se refait au retour.
+    if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
     const avant = zone.value.replace(/\s+$/, '')
     zone.value = avant ? avant + '\n' + r.texte : String(r.texte)
     const m = etat.saisieRemplie
     if (m && String(m.bookId) === ici) { m.textes.push(String(r.texte)); m.vide = false }
     else etat.saisieRemplie = { bookId: ici, textes: [String(r.texte)] }
     ajusterHauteur(zone)
-    etat.infoEngagee = { bookId: ici, tacheId: e.tacheId }
+    etat.infoEngagee = { bookId: ici, tacheId: e.tacheId, maj }
     etat.infoNote = { bookId: ici, cle: 'messages.info.pret' }
     zone.focus()
     try { zone.setSelectionRange(zone.value.length, zone.value.length) } catch {}
@@ -1039,8 +1048,10 @@ async function redigerBrouillon () {
   zone.readOnly = true
   peindreSaisieIA()
   try {
-    const r = await appel('/api/guestflow-rediger', corpsTexte(c.bookId, avant))
+    const r = await avecDelaiIA(appel('/api/guestflow-rediger', corpsTexte(c.bookId, avant)))
     if (String(etat.ouverte) !== ici || zone.value !== avant) return
+    // Même garde qu'au clic, refaite au retour (review 1, constat 1).
+    if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
     const marque = etat.saisieRemplie
     zone.value = String(r.texte)
     // La version rédigée est écrite POUR ce voyageur (sa langue, son prénom) :
@@ -1096,10 +1107,23 @@ function peindreSaisieIA () {
 // La réponse rédigée depuis la carte est partie : la tâche se clôt. La carte,
 // elle, est déjà retirée par la bulle de l'envoi (l'hôte a répondu depuis la
 // tâche). Un 409 dit qu'elle l'était déjà : rien à signaler.
-function cloreInfoTraitee (c, tacheId) {
-  c.infos = (c.infos || []).filter(x => String(x.id) !== String(tacheId))
-  appel('/api/messages', { action: 'info_traitee', task_id: String(tacheId) })
+// ⚠ La version et le séjour partent avec la clôture : si le voyageur a écrit
+// une nouvelle question entre la rédaction et l'envoi, le serveur refuse (409
+// `questions_changees`) et la tâche reste dans « À valider » (review 1, constat 4).
+function cloreInfoTraitee (c, info) {
+  c.infos = (c.infos || []).filter(x => String(x.id) !== String(info.tacheId))
+  appel('/api/messages', { action: 'info_traitee', task_id: String(info.tacheId), maj: info.maj || null, booking_id: String(c.bookId) })
     .catch(err => { if (err.status !== 409) logger.error('Messages', 'cloture information manquante', err) })
+}
+
+// Une rédaction ne tient pas la page : au-delà du délai, l'écran l'abandonne
+// (review 1, constat 2). Une réponse tardive est ignorée — la course est jouée.
+function avecDelaiIA (promesse) {
+  let minuteur
+  const delai = new Promise((_, rejeter) => {
+    minuteur = setTimeout(() => { const e = new Error('delai'); e.code = 'ia_indisponible'; rejeter(e) }, DELAI_REDACTION_MS)
+  })
+  return Promise.race([promesse, delai]).finally(() => clearTimeout(minuteur))
 }
 
 // ─── Propositions : Envoyer / Modifier / Rejeter (etape 3) ───────────────────
@@ -3917,6 +3941,9 @@ function ouvrir (bookId) {
     etat.enEdition = null
   }
   rangerSaisieRemplie(bookId)
+  // Une rédaction « IA » en cours ne fige pas le champ d'une AUTRE conversation
+  // (review 1, constat 2) : sa réponse sera jetée, le champ ayant changé de fil.
+  if (etat.iaEnCours != null && String(etat.iaEnCours) !== String(bookId)) $('[data-bind="texte"]').readOnly = false
   etat.ouverte = bookId
   // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry
   // du 30 octobre 2026 (« le volet s'est encore ouvert sur Maison Jardin »), et

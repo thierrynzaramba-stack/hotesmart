@@ -17,6 +17,9 @@
 export const REPONSES = Object.freeze(['oui', 'non', 'autre'])
 export const MAX_PRECISION = 300
 export const MAX_BROUILLON = 4000
+// Une rédaction ne tient pas la page plus longtemps : au-delà, elle est
+// abandonnée côté écran et l'hôte peut écrire (review 1, constat 2).
+export const DELAI_REDACTION_MS = 30000
 
 const momentInfo = (x) => { const t = new Date(x).getTime(); return Number.isFinite(t) ? t : null }
 

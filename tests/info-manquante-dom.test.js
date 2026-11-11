@@ -120,7 +120,8 @@ test('LE TEST QUI COMPTE : l envoi de la reponse redigee clot la tache, APRES l 
     await attendre(); await attendre()
     assert.equal(v.envois().length, 1, 'le message part par le chemin d envoi existant')
     assert.equal(v.envois()[0].corps.message, REDIGE)
-    assert.deepEqual(v.clotures().map(a => a.corps), [{ action: 'info_traitee', task_id: 'ti1' }])
+    assert.deepEqual(v.clotures().map(a => a.corps), [{ action: 'info_traitee', task_id: 'ti1', maj: INFO.maj, booking_id: 'B1' }],
+      'la cloture porte la VERSION de la tache sur laquelle l hote a tranche, et son sejour')
     const iEnvoi = v.appels.indexOf(v.envois()[0]), iCloture = v.appels.indexOf(v.clotures()[0])
     assert.ok(iEnvoi < iCloture, 'la cloture est partie avant l envoi')
     assert.equal(v.carte(), null, 'la carte reste apres la reponse')
@@ -196,6 +197,71 @@ test('LE TEST QUI COMPTE : le texte redige est marque pour son fil — changer d
     await v.msg.envoyer()
     await attendre(); await attendre()
     assert.equal(v.clotures().length, 0)
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : la saisie remplie pour un AUTRE voyageur pendant la redaction -> la reponse ne s y ajoute pas, rien ne part (review 1, constat 1)', async () => {
+  const d = differe()
+  const v = monter({
+    conversations: [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: (chemin) => chemin === '/api/guestflow-rediger' ? d.p : { ok: true }
+  })
+  try {
+    await v.msg.relireDirect()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre()
+    // Chez Marie : « Utiliser » son wifi, puis une retouche ; retour chez Ana.
+    // Le texte reste dans la saisie, marque pour Marie (rangerSaisieRemplie).
+    v.msg.ouvrir('B2')
+    v.zone().value = 'Bonjour Marie, WIFI DE MARIE : xyz'
+    v.msg.etat.saisieRemplie = { bookId: 'B2', textes: ['WIFI DE MARIE : xyz'] }
+    v.msg.ouvrir('B1')
+    assert.equal(v.zone().value, 'Bonjour Marie, WIFI DE MARIE : xyz', 'jeu d essai : le texte de Marie reste, marque')
+    d.resoudre({ ok: true, texte: REDIGE })
+    await attendre(); await attendre()
+    assert.equal(v.zone().value, 'Bonjour Marie, WIFI DE MARIE : xyz', 'la reponse d Ana s est ajoutee au texte de Marie')
+    assert.equal(v.msg.etat.saisieRemplie.bookId, 'B2', 'la marque de Marie a ete reprise pour Ana')
+    await v.msg.envoyer()
+    await attendre()
+    assert.equal(v.envois().length, 0, 'le wifi de Marie est parti chez Ana')
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE : une redaction trop longue est abandonnee — la page reste libre (review 1, constat 2)', async () => {
+  const d = differe()
+  const v = monter({ repondre: (chemin) => chemin === '/api/guestflow-rediger' ? d.p : {} })
+  try {
+    const vrai = v.banc.window.setTimeout
+    // Le delai de 30 s, joue tout de suite ; les autres minuteurs, intacts.
+    v.banc.window.setTimeout = (fn, ms, ...a) => ms === 30000 ? vrai(fn, 0, ...a) : vrai(fn, ms, ...a)
+    v.zone().value = 'oui chien'
+    await v.msg.redigerBrouillon()
+    assert.equal(v.zone().readOnly, false, 'le champ reste fige')
+    assert.equal(v.msg.etat.iaEnCours, null, 'la page reste bloquee')
+    assert.equal(v.zone().value, 'oui chien')
+    assert.match(v.doc.querySelector('[data-bind="info-etat"]').textContent, /n’a pas répondu/)
+    d.resoudre({ ok: true, texte: REDIGE })
+    await attendre(); await attendre()
+    assert.equal(v.zone().value, 'oui chien', 'la reponse tardive a ecrase le texte')
+  } finally { v.fermer() }
+})
+
+test('changer de fil pendant une redaction « IA » libere le champ de l autre fil', async () => {
+  const d = differe()
+  const v = monter({
+    conversations: [conv('B1', [entrant('Can I come?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: (chemin) => chemin === '/api/guestflow-rediger' ? d.p : {}
+  })
+  try {
+    v.zone().value = 'oui chien'
+    const enCours = v.msg.redigerBrouillon()
+    await attendre()
+    assert.equal(v.zone().readOnly, true)
+    v.msg.ouvrir('B2')
+    assert.equal(v.zone().readOnly, false, 'Marie ne peut pas recevoir de reponse pendant la redaction pour Ana')
+    d.resoudre({ ok: true, texte: REDIGE })
+    await enCours
   } finally { v.fermer() }
 })
 

@@ -50,7 +50,7 @@ function preparer ({ membre = false, droit = 'write', perimetre = ['209413'], ta
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: membre ? MEMBRE : PROD } }, error: null }) },
     from (nom) {
-      const q = { eq: {}, neq: {}, gt: {}, gte: {}, in: {}, or: null, ordre: null, limite: null, patch: null, colonnes: null }
+      const q = { eq: {}, neq: {}, gt: {}, gte: {}, in: {}, is: {}, or: null, ordre: null, limite: null, patch: null, colonnes: null }
       const passeOr = (ligne) => {
         if (!q.or) return true
         const m = q.or.match(/(\w+)\.in\.\(([^)]*)\)/)
@@ -66,10 +66,13 @@ function preparer ({ membre = false, droit = 'write', perimetre = ['209413'], ta
           return { data: { profile_id: 'p1', property_scope: 'selected', property_ids: [], property_refs: perimetre, messages: droit, reservations: 'read' }, error: null }
         }
         if (nom === 'properties') return { data: [], error: null }
+        // Le cron qui ecrit ENTRE la lecture de la tache et son UPDATE.
+        if (q.patch && etat.avantMaj) { etat.avantMaj(); etat.avantMaj = null }
         let rows = nom === 'agent_tasks' ? etat.taches : []
         rows = rows.filter(r => Object.entries(q.eq).every(([k, v]) => String(r[k]) === String(v)))
           .filter(r => Object.entries(q.neq).every(([k, v]) => String(r[k]) !== String(v)))
           .filter(r => Object.entries(q.in).every(([k, vs]) => vs.map(String).includes(String(r[k]))))
+          .filter(r => Object.entries(q.is).every(([k, v]) => v === null ? r[k] == null : r[k] === v))
           .filter(passeOr)
         if (q.patch) {
           if (erreurMaj) return { data: null, error: erreurMaj }
@@ -97,7 +100,8 @@ function preparer ({ membre = false, droit = 'write', perimetre = ['209413'], ta
         gte (k, v) { q.gte[k] = v; return c },
         in (k, v) { q.in[k] = v; return c },
         or (e) { q.or = e; return c },
-        not () { return c }, is () { return c },
+        not () { return c },
+        is (k, v) { q.is[k] = v; return c },
         order (col, o) { if (!q.ordre) q.ordre = [col, !o || o.ascending !== false]; return c },
         limit (n) { q.limite = n; return c },
         single: async () => un(executer()),
@@ -204,13 +208,14 @@ test('`taches` reste dans l ordre d avant : du plus ancien au plus recent', asyn
 
 test('LE TEST QUI COMPTE : info_traitee clot la tache (pending -> done), sous condition de statut', async () => {
   const etat = preparer()
+  const version = etat.taches.find(x => x.id === 'info').updated_at
   const res = await clore('info')
   assert.equal(res.code, 200)
   assert.deepEqual(res.body, { ok: true, task_id: 'info', statut: 'done' })
   assert.equal(etat.majs.length, 1)
   assert.equal(etat.majs[0].patch.status, 'done')
   assert.ok(etat.majs[0].patch.updated_at)
-  assert.deepEqual(etat.majs[0].eq, { id: 'info', user_id: PROD, status: 'pending' })
+  assert.deepEqual(etat.majs[0].eq, { id: 'info', user_id: PROD, status: 'pending', updated_at: version }, 'l ecriture est conditionnee au statut ET a la version lue')
   assert.equal(etat.taches.find(x => x.id === 'info').status, 'done')
   assert.equal(res.entetes['cache-control'], 'private, no-store')
 })
@@ -248,6 +253,46 @@ test('un membre en LECTURE seule ne clot rien (403)', async () => {
   const r = await clore('info')
   assert.equal(r.code, 403)
   assert.equal(etat.majs.length, 0)
+})
+
+test('LE TEST QUI COMPTE : la reponse a ete redigee sur une version DEPASSEE de la tache -> 409 questions_changees, rien ecrit', async () => {
+  // Review 1, constat 4 : le cron a complete la tache (nouvelle question)
+  // entre la redaction et l'envoi.
+  const etat = preparer()
+  const r = await appeler({ method: 'POST', body: { action: 'info_traitee', task_id: 'info', maj: il(60 * MIN), booking_id: 'B1' } })
+  assert.equal(r.code, 409)
+  assert.equal(r.body.error, 'questions_changees')
+  assert.equal(etat.majs.length, 0)
+  assert.equal(etat.taches.find(x => x.id === 'info').status, 'pending')
+})
+
+test('la bonne version et le bon sejour -> close ; un autre sejour -> 404', async () => {
+  const etat = preparer()
+  const maj = etat.taches.find(x => x.id === 'info').updated_at
+  assert.equal((await appeler({ method: 'POST', body: { action: 'info_traitee', task_id: 'info', maj, booking_id: 'B2' } })).code, 404)
+  assert.equal(etat.majs.length, 0)
+  const r = await appeler({ method: 'POST', body: { action: 'info_traitee', task_id: 'info', maj, booking_id: 'B1' } })
+  assert.equal(r.code, 200)
+  assert.equal(etat.majs.length, 1)
+})
+
+test('le cron complete la tache ENTRE la lecture et l ecriture -> rien ecrit, 409 questions_changees', async () => {
+  const etat = preparer()
+  const maj = etat.taches.find(x => x.id === 'info').updated_at
+  etat.avantMaj = () => { etat.taches.find(x => x.id === 'info').updated_at = new Date().toISOString() }
+  const r = await appeler({ method: 'POST', body: { action: 'info_traitee', task_id: 'info', maj, booking_id: 'B1' } })
+  assert.equal(r.code, 409)
+  assert.equal(r.body.error, 'questions_changees')
+  assert.equal(etat.taches.find(x => x.id === 'info').status, 'pending')
+})
+
+test('une tache jamais mise a jour (updated_at nul) se clot sur sa date de creation', async () => {
+  const t = tachesDeReference()
+  const info = t.find(x => x.id === 'info'); info.updated_at = null
+  const etat = preparer({ taches: t })
+  const r = await appeler({ method: 'POST', body: { action: 'info_traitee', task_id: 'info', maj: info.created_at } })
+  assert.equal(r.code, 200)
+  assert.equal(etat.majs[0].eq.status, 'pending')
 })
 
 test('demande invalide -> 400 ; ecriture impossible -> 503', async () => {
