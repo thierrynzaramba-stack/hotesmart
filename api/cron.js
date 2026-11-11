@@ -136,6 +136,7 @@ const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
 const { executerAutoValidations } = require('../lib/avis/auto-validation')
 const { calculerResumesDus } = require('../lib/cron-resume-avis')
+const { traduireAvisDus } = require('../lib/cron-traduction-avis')
 const { envoyerBrouillonsDus } = require('../lib/guestflow/brouillons-dus')
 const { releverLesComptesDus } = require('../lib/canaux-du-bien')
 const { demarrerPassage } = require('../lib/metriques-cron')
@@ -810,6 +811,27 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur résumé avis:', err.message)
       results.errors.push({ context: 'resume_avis', error: err.message })
+    }
+
+    // 4septdecies. LES TRADUCTIONS DES AVIS (spec avis-v5
+    // spec-traduction-avis.md). Un avis écrit dans une autre langue est traduit
+    // en fr/en/es ICI, et les écrans lisent la traduction toute faite.
+    // ⚠ Le coût est une décision de Thierry (Q5 = A) : 10 appels à l'IA au plus
+    // par passage, 100 par jour, et ZÉRO quand la file est vide. Placé APRÈS
+    // les classifications (l'extrait de propreté est traduit dans le même
+    // appel) et AVANT le dispatch, avec son budget mur (12 s) et le même
+    // plancher de 25 s laissé au reste du cycle.
+    try {
+      await chrono.mesure('traduction_avis', async () => {
+        const bilanTraduction = await traduireAvisDus(results, {
+          supabase, resteMs: () => 55000 - chrono.total()
+        })
+        results.totalTraductionsAvis = bilanTraduction?.traduits || 0
+      })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur traduction avis:', err.message)
+      results.errors.push({ context: 'traduction_avis', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

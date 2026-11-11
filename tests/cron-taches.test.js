@@ -61,6 +61,12 @@ const TACHES = [
   // le dispatch, avec un budget mur de 10 s et un plancher de 25 s laisse au
   // reste du cycle.
   'resume_avis',
+  // ⚠ AJOUTEE LE 11 NOVEMBRE 2026 (spec avis-v5 spec-traduction-avis.md) : les
+  // traductions des avis. APRES les classifications (l'extrait est traduit
+  // dans le meme appel), AVANT le dispatch, budget mur de 12 s, plancher de
+  // 25 s, et le plafond de cout decide par Thierry (10 par passage, 100 par
+  // jour, zero si la file est vide).
+  'traduction_avis',
   'dispatch_changements',
   // Dette 59, 19 octobre 2026 — la seule entree neuve de ce lot.
   'releve_canaux'
