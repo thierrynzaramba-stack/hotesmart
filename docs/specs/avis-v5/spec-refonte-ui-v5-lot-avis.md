@@ -376,7 +376,7 @@ Chaque étape : une review, zéro rouge, remise au chef de file avec les cinq é
 
 Spec écrite le 10 novembre 2026. **Q3 = A et Q4 = B, tranchées par Thierry le
 même jour (§10.9).** Conséquence de Q4 : l'accueil et la liste des logements ne
-sont pas touchés par cette étape (dette 142).
+sont pas touchés par cette étape (dette 145).
 
 ### 10.1 Catégorie
 
@@ -595,7 +595,7 @@ confirmer une détection, corriger la propreté), les trois chiffres :
 
 **Q4 = B, tranchée par Thierry le 10 novembre 2026 à 14:47** : l'accueil et la
 liste des logements restent sur leur calcul à l'ouverture dans cette étape ;
-l'écart est inscrit au registre (dette 142).
+l'écart est inscrit au registre (dette 145).
 
 **Q4 — L'accueil (note 30 jours) et la liste des logements (note, nombre
 d'avis) calculent la note eux-mêmes, à chaque ouverture.** Une fois la page

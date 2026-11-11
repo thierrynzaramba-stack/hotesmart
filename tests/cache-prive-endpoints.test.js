@@ -212,7 +212,16 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   // tout le monde, aucune donnee de compte, recense dans PUBLIC_ATTENDU.
   // Leve a 11 le 5 novembre 2026, et NOMME : `api/i18n.js` (le moteur i18n
   // avec l'empreinte des dictionnaires), public par nature, meme recensement.
-  assert.ok(SANS_GARDE_ATTENDU.length <= 11,
+  // Leve a 12 le 9 novembre 2026, et NOMME : `api/cron-charges.js`, le cron
+  // dedie du compte de charges (spec-compte-de-charges §7). Un cron, garde par
+  // `CRON_SECRET` comme `api/cron-messages.js` ; il ne SERT aucune donnee de
+  // compte (sa reponse est un bilan de comptes, sans une ligne de charge).
+  // Leve a 13 le 10 novembre 2026, et NOMME : `api/facture-publique.js` (la
+  // page du VOYAGEUR pour sa facture, etape 2 de la facture voyageur). Pas de
+  // session par nature : la cle est un jeton de 256 bits, stocke HACHE, porte
+  // dans le corps. Elle pose `private, no-store` ELLE-MEME avant son premier
+  // refus — garde par tests/factures-voyageur.test.js.
+  assert.ok(SANS_GARDE_ATTENDU.length <= 13,
     `${SANS_GARDE_ATTENDU.length} endpoints sans garde :\n  ` + SANS_GARDE_ATTENDU.join('\n  ') +
     '\nUn de plus qu attendu : soit il est public par nature (webhook, cron, manifest,\n' +
     'page publique), soit il lui manque sa garde. Nommez-le avant de lever le plafond.')

@@ -37,6 +37,25 @@ moment et seulement si le logement est prêt.
   programmés, cette alerte part au **fondateur** (canal plateforme), pas à l'hôte du compte : un hôte
   qui n'est pas le fondateur ne la reçoit pas. Décision de Thierry du 9 novembre 2026 (dette 137,
   option a).
+- **Si le canal refuse l'envoi** (réservation sans messagerie, refus du provider) : une **tâche
+  de transmission manuelle** chez l'hôte, avec le code et le texte — **une seule par réservation,
+  même quand la plateforme d'alerte est lente** : l'alerte part en dernier, après le journal qui
+  empêche de retraiter le code (dette 141, 10 novembre 2026 ; avant, une alerte lente laissait le
+  cron coupé sans ce journal, et le code était retraité au passage suivant — seconde tâche,
+  seconde tentative au canal). Le **fondateur** est prévenu **dès le premier refus** (SMS +
+  e-mail) : alerte **« CODE D'ACCÈS — ENVOI NON CONFIRMÉ »** — à transmettre soi-même, code et
+  texte dans les tâches (décision de Thierry du 10 novembre 2026 ; avant, `send_failure`
+  n'alertait qu'au deuxième refus dans l'heure). L'anti-spam porte sur **la réservation et le modèle**,
+  pas sur le logement : deux codes refusés le même jour sur le même logement (jour de
+  dos-à-dos), ou deux modèles de code d'une même réservation, donnent **deux** alertes. Si la
+  connexion a été coupée **pendant** l'envoi — messagerie du canal ou e-mail —, le texte dit
+  **« PEUT-ÊTRE REÇU »** : vérifier le fil avant de renvoyer (la tâche de l'hôte, elle, dit
+  encore « impossible » : dette 144). Pour un même modèle de code, une seule alerte : s'il
+  manque aussi une information, c'est l'alerte « information manquante » qui part — elle dit
+  déjà « NON ENVOYÉ par le canal » (ou « PEUT-ÊTRE REÇU »), et le motif du canal en fin de
+  texte. Deux modèles de code actifs sur un logement donnent chacun leur alerte. Un canal
+  e-mail pas encore branché (`differe`, qui n'existe plus en production) n'alerte pas pour le
+  refus lui-même — mais l'alerte « information manquante » part s'il en manque une.
 - **Conditionné au ménage — seulement si un suivi ménage existe pour le bien.** « Suivi ménage
   existe » = **un prestataire est affecté au bien** OU **au moins un ménage a déjà été validé**.
   Dans ce cas, pour un **2ᵉ voyageur et suivants**, le code n'est envoyé qu'après **validation du

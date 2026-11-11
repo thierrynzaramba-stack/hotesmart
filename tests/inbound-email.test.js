@@ -572,3 +572,22 @@ test('l\'encart de /connexions explique le circuit', () => {
     'le changement d\'habitude est dit')
   assert.ok(/une copie par e-mail/.test(html), 'et le filet aussi')
 })
+
+// ─── Facture voyageur, étape 2a (décision de Thierry du 10 novembre 2026) ────
+// Une réponse qui CITE notre e-mail — l'extraction de Brevo vide, donc le texte
+// brut et tout le fil cité — porte le lien du formulaire de facture, qui est
+// une clé. Il ne doit entrer en clair NULLE PART : ni dans le fil, ni dans
+// `conversations`, ni dans la copie à l'hôte (dernière review, S2).
+test('LE TEST QUI COMPTE : le lien de facture cité par le voyageur est masqué à la source', async () => {
+  const jeton = 'Q'.repeat(30) + '_-' + 'z'.repeat(11)
+  remise(mail({ champs: {
+    ExtractedMarkdownMessage: '',
+    RawTextBody: `C'est fait, merci !\n\n> Le 10 nov., vous avez écrit :\n> ici : https://hotesmart.vercel.app/facture#\n> ${jeton}. Votre facture…`
+  } }))
+  await appel()
+  assert.strictEqual(etat.messages.length, 1)
+  const traces = JSON.stringify({ m: etat.messages, c: etat.conversations, t: etat.taches, k: etat.copies })
+  assert.ok(!traces.includes(jeton), 'le jeton est sorti en clair')
+  assert.ok(etat.messages[0].body.includes('[lien de facture]'))
+  assert.ok(etat.messages[0].body.startsWith('C\'est fait, merci !'), 'le message lui-même est intact')
+})
