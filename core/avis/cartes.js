@@ -26,6 +26,8 @@
 // shared/i18n/fr.json — deux copies d'un texte divergent, celle-ci ne le peut
 // pas sans rougir.
 
+import { paire, mention, installer as installerBascules } from '../../shared/avis-traduction.js'
+
 const ECHAPPER = (t) => String(t == null ? '' : t)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
@@ -117,6 +119,9 @@ export const TEXTES_FR = {
   'avis.aucune_note': 'Aucune note',
   'avis.sur_periode': 'sur cette période',
   'avis.retour_prive': 'Retour privé',
+  'traduction.traduit': 'Traduit ({langues})',
+  'traduction.voir_original': 'Voir l’original',
+  'traduction.voir_traduction': 'Voir la traduction',
   'avis.retour_prive_sous': 'Non publié : le voyageur l’a écrit pour l’hôte.',
   'avis.acces_refuse': 'Vous n’avez pas accès aux avis de ce compte.',
   'avis.illisibles': 'Avis illisibles',
@@ -261,14 +266,21 @@ function texteRepliable (texte, cle, ctx) {
     + (long ? `<button type="button" class="avp-plus" data-plus="${ECHAPPER(cle)}">${ECHAPPER(ctx.T('avis.voir_tout'))}</button>` : '')
 }
 
+// ⚠ UN AVIS TRADUIT S'AFFICHE TRADUIT, L'ORIGINAL A UN CLIC (decision de
+// Thierry du 11 novembre 2026, spec avis-v5/spec-traduction-avis.md). La
+// traduction arrive toute faite (`a.traduction`, par champ) ; sans elle, rien ne
+// change. Une seule bascule par avis : l'extrait, le texte et le retour prive
+// passent ensemble (shared/avis-traduction.js).
 function blocSonAvis (a, ctx, cle) {
   const { T } = ctx
   if (a.masque) return `<p class="avp-gris">${ICONE('i-lock')}${ECHAPPER(T('avis.masque'))}</p>`
   const texte = a.texte || ''
-  return `<div class="avp-son">`
+  const tr = a.traduction || {}
+  return `<div class="avp-son" data-trad-zone="${ECHAPPER(cle)}">`
     + `<div class="avp-ligne"><span class="sr-only">${ECHAPPER(T('avis.son_avis'))}</span>${note(a, ctx)}${proprete(a, ctx)}</div>`
-    + (a.extrait ? `<p class="avp-extrait">« ${ECHAPPER(a.extrait)} »</p>` : '')
-    + (texte ? texteRepliable(texte, cle, ctx) : `<p class="avp-gris">${ECHAPPER(T('avis.sans_texte'))}</p>`)
+    + mention(a.traduction, cle, T, ctx.langue)
+    + (a.extrait ? paire(a.extrait, tr.extrait, (t) => `<p class="avp-extrait">« ${ECHAPPER(t)} »</p>`) : '')
+    + (texte ? paire(texte, tr.public, (t, s) => texteRepliable(t, cle + s, ctx)) : `<p class="avp-gris">${ECHAPPER(T('avis.sans_texte'))}</p>`)
     + blocRetourPrive(a, ctx, cle)
     + '</div>'
 }
@@ -283,7 +295,7 @@ function blocRetourPrive (a, ctx, cle) {
   return `<div class="avp-prive">`
     + `<span class="avp-prive__tete">${ICONE('i-lock')}<span class="avp-lib">${ECHAPPER(T('avis.retour_prive'))}</span>`
     + `<span class="avp-prive__sous">${ECHAPPER(T('avis.retour_prive_sous'))}</span></span>`
-    + texteRepliable(a.texte_prive, cle + '-p', ctx)
+    + paire(a.texte_prive, (a.traduction || {}).prive, (t, s) => texteRepliable(t, cle + '-p' + s, ctx))
     + '</div>'
 }
 
@@ -393,11 +405,13 @@ function ligneDetection (a, c, ctx, cle) {
   const texte = a.texte || ''
   const infos = [T('avis.detecte'), T('avis.a_confirmer'), c.bien || T('avis.bien_inconnu'),
     a.recu_le ? T('avis.recu_le', { date: dateCourte(a.recu_le, ctx.langue, true) }) : ''].filter(Boolean)
-  return `<li class="avp-ligne-atraiter avp-ligne-atraiter--detection" data-detection="${ECHAPPER(a.id)}">`
+  const tr = a.traduction || {}
+  return `<li class="avp-ligne-atraiter avp-ligne-atraiter--detection" data-detection="${ECHAPPER(a.id)}" data-trad-zone="${ECHAPPER(cle)}">`
     + `<span class="avp-tuile">${ICONE('i-message')}</span>`
     + `<div class="avp-id"><span class="avp-qui">${ECHAPPER(nomCourt(c, T))}${proprete(a, ctx)}</span>`
-    + (a.extrait ? `<span class="avp-citation">« ${ECHAPPER(a.extrait)} »</span>` : '')
-    + (texte ? texteRepliable(texte, cle, ctx) : '')
+    + (a.extrait ? paire(a.extrait, tr.extrait, (t) => `<span class="avp-citation">« ${ECHAPPER(t)} »</span>`) : '')
+    + (texte ? paire(texte, tr.public, (t, s) => texteRepliable(t, cle + s, ctx)) : '')
+    + mention(a.traduction, cle, T, ctx.langue)
     + `<span class="avp-infos">${infos.map(ECHAPPER).join(' · ')}</span></div>`
     + (ctx.peutEcrire
       ? `<div class="avp-actions"><button type="button" class="btn btn--secondary" data-valider="${ECHAPPER(a.id)}" data-statut="ignore">${ECHAPPER(T('avis.ignorer'))}</button>`
@@ -545,11 +559,17 @@ export async function monter (conteneur, options = {}) {
   const { charger: lire, actions = {}, bus = null, peutEcrire = false, filtres = () => ({}), surDonnees = () => {}, zoneStats = null, initiales = null, surPret = () => {}, surEchec = () => {}, t = null, langue = 'fr' } = options
   if (typeof lire !== 'function') throw new Error('[avis] les cartes exigent une lecture')
   const T = traducteur(t, langue)
+  // Les bascules « Voir l'original » : deleguees, la liste est repeinte.
+  installerBascules(conteneur, T)
   const etat = { data: null, anciensOuverts: false, seq: 0 }
   const alerter = (m) => { try { (conteneur.ownerDocument.defaultView || window).alert(m) } catch { /* sans fenetre */ } }
   const params = (anciens) => {
     const f = filtres() || {}
-    return [f.periode ? `periode=${encodeURIComponent(f.periode)}` : '', f.bien ? `bien=${encodeURIComponent(f.bien)}` : '', anciens ? 'anciens=1' : '']
+    // ⚠ LA LANGUE DE LECTURE PART AVEC LA LECTURE (spec spec-traduction-avis
+    // §3.3) : le serveur ne renvoie que la traduction de cette langue. Le
+    // francais est sa langue par defaut, donc il ne part pas.
+    const lg = ['en', 'es'].includes(String(langue).slice(0, 2)) ? String(langue).slice(0, 2) : ''
+    return [f.periode ? `periode=${encodeURIComponent(f.periode)}` : '', f.bien ? `bien=${encodeURIComponent(f.bien)}` : '', anciens ? 'anciens=1' : '', lg ? `langue=${lg}` : '']
       .filter(Boolean).join('&')
   }
   const afficher = () => {

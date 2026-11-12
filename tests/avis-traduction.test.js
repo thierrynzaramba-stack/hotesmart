@@ -178,3 +178,18 @@ test('migration absente : les CODES de table et de fonction, jamais une colonne'
   assert.equal(T.migrationAbsente({ message: 'relation "public.autre" does not exist' }), false)
   assert.equal(T.migrationAbsente(null), false)
 })
+
+// ─── Aucun écran ne traduit (condition du chef de file, 11 novembre 2026) ───
+test('⚠ LES ÉCRANS LISENT, ILS NE TRADUISENT JAMAIS : aucun n’appelle l’IA ni le traducteur', () => {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const ecrans = ['api/avis.js', 'api/ecran/avis.js', 'api/garde.js', 'api/menages-public.js',
+    'lib/avis/cartes.js', 'core/avis/cartes.js', 'shared/avis-traduction.js', 'pages/avis.html', 'pages/menages.html', 'apps/menages/public.html']
+  for (const f of ecrans) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    assert.doesNotMatch(src, /traduireLigne|cron-traduction-avis|traduireAvisDus|avis_a_traduire/, f)
+  }
+  // Et le module des écrans n'expose que la lecture : `traductionPour` ne fait
+  // aucun appel (pas de client, pas de promesse).
+  assert.equal(T.traductionPour.constructor.name, 'Function', 'synchrone')
+})

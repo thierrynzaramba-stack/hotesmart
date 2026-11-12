@@ -25,9 +25,12 @@ Demande de Thierry (11 novembre 2026, 10:12) : « les commentaires en langue
   française.
 - **Q3 = A** : **l'historique est traduit aussi**, une fois pour toutes
   (≈ 680 avis, coût d'IA estimé de l'ordre de 2 €).
-- Par défaut, on montre **la traduction**, avec la mention « Traduit de
-  l'anglais · Voir l'original ». Un clic montre l'original, un second revient à
-  la traduction.
+- Par défaut, on montre **la traduction**, avec la mention « Traduit (anglais)
+  · Voir l'original ». Un clic montre l'original, un second revient à la
+  traduction. (La mention ne dit pas « de l'anglais » : l'article et l'élision
+  changent avec chaque langue et chaque nom de langue — « du japonais », « del
+  inglés » — et une règle de grammaire recopiée par langue serait fausse un jour
+  sur deux.)
 - **Q5 = A, le coût de l'IA** (condition du chef de file, 10:34) : voir §3.6.
 - **Ce qui n'est pas une décision produit, et suit la règle du dépôt** (« donnée
   non urgente = calculée en tâche de fond, servie prête ») : la traduction est
@@ -94,9 +97,12 @@ par `avecContexteIA`, comme la classification.
   masqué, déjà dans la langue de lecture, pas encore traduit, traduction
   périmée).
 - `core/avis/cartes.js` : le texte traduit à la place de l'original, avec la
-  ligne « Traduit de l'anglais · Voir l'original ». Le nom de la langue vient
+  ligne « Traduit (anglais) · Voir l'original ». **Une seule bascule par avis** :
+  l'extrait, le texte public et le retour privé passent ensemble. L'original est
+  dans la page, masqué : basculer ne coûte aucun appel. Le nom de la langue vient
   d'`Intl.DisplayNames` dans la langue de lecture : aucune liste de langues
-  recopiée.
+  recopiée. Le rendu vit dans `shared/avis-traduction.js`, partagé avec la fiche
+  ménage (§3.4).
 - Changer de langue d'affichage recharge les cartes dans la nouvelle langue.
 
 ### 3.4 La fiche ménage de l'hôte (Q4)
@@ -110,11 +116,17 @@ par `avecContexteIA`, comme la classification.
 ### 3.5 L'application de la prestataire
 
 - `api/menages-public.js` : l'extrait de propreté porte sa version française
-  (`extrait_traduit`) et sa langue source (`extrait_langue`) quand l'extrait
+  (`extraitTraduit`) et sa langue source (`extraitLangue`) quand l'extrait
   n'est pas en français. Toujours ni le texte complet, ni le retour privé, ni le
-  nom du voyageur.
-- `apps/menages/public.html` : l'extrait traduit, avec « Traduit de l'anglais ·
-  Voir l'original ».
+  nom du voyageur — ni leurs traductions : seul `textes.extrait` est lu.
+  ⚠ **Une lecture de plus**, ajoutée après celle des avis : le lot 2 PWA tient
+  aussi ce fichier, et le chef de file l'a ouvert en **ajouts seulement**. Elle
+  ne coupe rien (en échec ou avant la migration, la liste sort sans
+  traduction). Une fois le lot PWA en production, elle pourra rejoindre la
+  lecture des avis, comme sur la page Avis.
+- `apps/menages/public.html` : l'extrait traduit, avec « Traduit (anglais) ·
+  Voir l'original ». Rendu en ligne, sans module partagé : la page doit tenir
+  hors ligne.
 
 ### 3.6 Le coût de l'IA (Q5 = A, décision de Thierry, 10:36)
 
@@ -147,8 +159,11 @@ traduit : c'est l'hôte qui l'écrit.
 
 ## 5. Case « performance » (règle du dépôt, huit points)
 
-1. Un écran = un endpoint : inchangé (`/api/ecran/avis`), la traduction arrive
-   dans la même réponse.
+1. Un écran = un endpoint : inchangé (`/api/ecran/avis`, `/api/garde`,
+   `/api/menages-public`), la traduction arrive dans la même réponse. Page Avis
+   et fiche ménage : **zéro requête de plus** (lecture embarquée). Application
+   de la prestataire : **une requête de plus**, et seulement quand elle a des
+   avis avec extrait (§3.5).
 2. Donnée non urgente pré-calculée : oui, c'est l'objet de la tâche de fond.
    **La page Avis, la fiche ménage de l'hôte et l'application de la prestataire
    lisent une traduction déjà calculée, jamais traduite à l'ouverture**

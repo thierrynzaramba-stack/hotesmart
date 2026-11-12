@@ -17,6 +17,13 @@ const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { sansArchives, COLONNE: COLONNE_ARCHIVE } = require('../lib/biens-vivants')
 const { ratioProprete, notesDuPerimetre, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 const { assemblerCartes } = require('../lib/avis/cartes')
+const traductionAvis = require('../lib/avis/traduction')
+// Les langues de lecture des traductions d'avis (spec spec-traduction-avis).
+const LANGUES_LECTURE = traductionAvis.LANGUES
+// La relation `avis_traductions` absente du schema (migration du 11 novembre
+// 2026 pas encore appliquee) : PostgREST rend PGRST200 pour une ressource
+// embarquee inconnue ; la table ou la fonction absentes ont leurs propres codes.
+const traductionAbsente = (e) => !!e && (String(e.code) === 'PGRST200' || traductionAvis.migrationAbsente(e))
 const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origine')
 const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
@@ -665,6 +672,9 @@ async function cartesLister (req, res, garde) {
   }
   const voitSejours = !garde.contexte || peutLire(garde.contexte, 'reservations', null)
   const avecAnciens = String(req.query?.anciens || '') === '1'
+  // La langue de lecture (spec avis-v5 spec-traduction-avis.md §3.3) : seule la
+  // traduction de CETTE langue est servie. Une valeur inconnue vaut le francais.
+  const langue = LANGUES_LECTURE.includes(String(req.query?.langue || '')) ? String(req.query.langue) : 'fr'
 
   // Les evaluations du perimetre. ⚠ `origine_texte` arrive avec la migration du
   // 8 octobre : avant elle, on relit sans, et l'origine se deduit du statut.
@@ -680,20 +690,32 @@ async function cartesLister (req, res, garde) {
   if (ev.error) return res.status(503).json({ error: 'Évaluations illisibles', detail: ev.error.message })
 
   // Les avis du perimetre, PAGINES (jamais tronques en silence a 1000 lignes).
+  // ⚠ LA TRADUCTION EST EMBARQUEE DANS LA MEME LECTURE (`avis_traductions` par
+  // sa cle etrangere) : aucune requete de plus (spec spec-traduction-avis §5).
+  // Avant la migration du 11 novembre 2026, la relation n'existe pas : on relit
+  // SANS, une fois, et la page reste juste — sans traduction.
   const avis = []
+  let avecTraduction = true
   for (let debut = 0; debut < MAX_AVIS_CARTES; debut += PAGE_AVIS) {
-    let q = supabase.from('ota_reviews')
-      // ⚠ Sans le droit `reservations`, le nom et les dates ne sont meme pas
-      // LUS (regle de CHAMPS_AVEC_SEJOUR) ; la reservation reste lue, elle range
-      // l'avis dans la carte de son sejour.
-      // ⚠ `content_private` est lu ICI SEULEMENT (voir CHAMPS) : chaque avis
-      // passe ensuite par `avisPourCarte`, qui ne montre rien d'un avis masque.
-      .select(`${CHAMPS}, content_private, booking_uid, ${voitSejours ? 'stay_start, stay_end, guest_name, ' : ''}cache:raw->attributes->is_hidden`)
-      .eq('user_id', userId).neq('statut', 'ignore')
-    if (bienDemande) q = q.eq('property_id_ref', bienDemande)
-    else if (filtre) q = q.or(filtre)
-    const { data, error } = await q.order('received_at', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
-      .range(debut, debut + PAGE_AVIS - 1)
+    const lirePage = (traduite) => {
+      let q = supabase.from('ota_reviews')
+        // ⚠ Sans le droit `reservations`, le nom et les dates ne sont meme pas
+        // LUS (regle de CHAMPS_AVEC_SEJOUR) ; la reservation reste lue, elle range
+        // l'avis dans la carte de son sejour.
+        // ⚠ `content_private` est lu ICI SEULEMENT (voir CHAMPS) : chaque avis
+        // passe ensuite par `avisPourCarte`, qui ne montre rien d'un avis masque.
+        .select(`${CHAMPS}, content_private, booking_uid, ${voitSejours ? 'stay_start, stay_end, guest_name, ' : ''}cache:raw->attributes->is_hidden${traduite ? ', traduction:avis_traductions(empreinte, textes)' : ''}`)
+        .eq('user_id', userId).neq('statut', 'ignore')
+      if (bienDemande) q = q.eq('property_id_ref', bienDemande)
+      else if (filtre) q = q.or(filtre)
+      return q.order('received_at', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
+        .range(debut, debut + PAGE_AVIS - 1)
+    }
+    let { data, error } = await lirePage(avecTraduction)
+    if (error && avecTraduction && traductionAbsente(error)) {
+      avecTraduction = false
+      ;({ data, error } = await lirePage(false))
+    }
     if (error) {
       console.error('[avis] cartes : lecture echec:', error.message)
       return res.status(500).json({ error: 'Lecture impossible' })
@@ -723,7 +745,7 @@ async function cartesLister (req, res, garde) {
   // Les sejours, pour les seules cartes servies : on assemble une premiere fois
   // sans eux pour savoir lesquelles partent, puis on lit leurs sejours.
   const maintenant = Date.now()
-  const sansSejours = assemblerCartes({ evaluations: ev.data || [], avis, nomBien, voitSejours, maintenant })
+  const sansSejours = assemblerCartes({ evaluations: ev.data || [], avis, nomBien, voitSejours, maintenant, langue })
   // ⚠ LES DETECTIONS DES ANCIENS SONT SERVIES MEME SECTION FERMEE (revue du lot
   // Avis V5, constat 5) : la page les range dans « À traiter », et une bulle
   // qui dirait « Rien ne vous attend » pendant qu'un message de voyageur ecrit
@@ -733,7 +755,7 @@ async function cartesLister (req, res, garde) {
   const servies = [...sansSejours.attente, ...sansSejours.recents, ...(avecAnciens ? sansSejours.anciens : aTraiterAnciens(sansSejours.anciens))]
   const uids = servies.map(c => (c.cle.startsWith('sejour:') ? c.cle.slice(7) : null)).filter(Boolean)
   const sejours = await sejoursDe(userId, uids)
-  const cartes = assemblerCartes({ evaluations: ev.data || [], avis, sejours, nomBien, voitSejours, maintenant })
+  const cartes = assemblerCartes({ evaluations: ev.data || [], avis, sejours, nomBien, voitSejours, maintenant, langue })
 
   // ⚠ LES TROIS CHIFFRES SONT LUS, PLUS CALCULES (lot Avis V5, etape 2 ; spec
   // avis-v5 §10.5). Ils viennent de `resume_bien_avis`, calcule a 06:00 et

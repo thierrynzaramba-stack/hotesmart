@@ -9,6 +9,7 @@ const { avisDuPrestataire, filtresAttribution, MAX_IDS } = require('../lib/attri
 const { alertMenageRefuse, alertReglesModifiees, alertPlageModifiee } = require('../lib/alert-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 const { colonneAbsente } = require('../lib/colonne-absente')
+const traductionAvis = require('../lib/avis/traduction')
 // Le moteur de garde (lot 3.3) : c'est LUI qui dit qui remplace, jamais un
 // « rang 2 » lu en dur — un rang 2 en conge ou non attitre ce jour-la n'est pas
 // la remplacante de ce jour.
@@ -1082,6 +1083,45 @@ function extraitEstPrive (a) {
   return true
 }
 
+// ⚠ L'EXTRAIT TRADUIT EN FRANCAIS (decision de Thierry du 11 novembre 2026,
+// spec avis-v5 spec-traduction-avis.md §3.5) : l'application de la
+// prestataire n'existe qu'en francais, elle lit donc la version francaise d'un
+// extrait ecrit dans une autre langue, l'original a un clic.
+//
+// ⚠ L'EXTRAIT SEUL, comme avant : la traduction du texte public et celle du
+// retour prive ne sortent JAMAIS d'ici — seul `textes.extrait` est lu.
+//
+// ⚠ UNE LECTURE A PART, AJOUTEE (le lot 2 PWA tient la lecture des avis de ce
+// fichier ; on n'en reecrit aucune ligne). Elle ne coupe rien : en echec, ou
+// avant la migration, la liste sort telle quelle, sans traduction. `content`
+// n'y sert qu'a l'empreinte, cote serveur : une traduction PERIMEE n'est jamais
+// servie (lib/avis/traduction.js, `traductionPour`).
+async function ajouterExtraitsTraduits (userId, avis, lignes) {
+  const avecExtrait = new Map((lignes || []).filter(l => l && l.ai_clean_excerpt).map(l => [String(l.id), l]))
+  if (!avecExtrait.size || !Array.isArray(avis)) return
+  const { data, error } = await supabase.from('ota_reviews')
+    .select('id, content, traduction:avis_traductions(empreinte, textes)')
+    .eq('user_id', userId).in('id', [...avecExtrait.keys()])
+  if (error) {
+    if (String(error.code) !== 'PGRST200' && !traductionAvis.migrationAbsente(error)) {
+      console.error('[menages-public] extraits traduits echec:', error.message)
+    }
+    return
+  }
+  const parId = new Map((data || []).map(d => [String(d.id), d]))
+  for (const a of avis) {
+    const l = avecExtrait.get(String(a.id))
+    const d = parId.get(String(a.id))
+    if (!l || !d) continue
+    const ligne = { content_public: l.content_public, content: d.content, content_private: l.content_private, ai_clean_excerpt: l.ai_clean_excerpt }
+    const tr = traductionAvis.traductionPour(ligne, Array.isArray(d.traduction) ? d.traduction[0] : d.traduction, 'fr')
+    if (tr && tr.extrait) {
+      a.extraitTraduit = tr.extrait.texte
+      a.extraitLangue = tr.extrait.source
+    }
+  }
+}
+
 // ─── Vue « Avis » de la prestataire (spec-prestataires-menage §6) ───────────
 //
 // ⚠ CE QUE LA PRESTATAIRE VOIT, ET SEULEMENT CELA :
@@ -1724,6 +1764,9 @@ async function avisDeLaPrestataire (req, res, token) {
         // « 287031 » ne dit rien a une femme de menage.
         bienNom: null
       }))
+      // L'extrait en francais quand il est ecrit dans une autre langue (spec
+      // avis-v5 spec-traduction-avis.md §3.5).
+      await ajouterExtraitsTraduits(userId, avis, data)
 
       // Le nom lisible du bien. Il ne peut PAS etre resolu par le front : sa
       // liste de biens est construite a partir des reservations de la fenetre

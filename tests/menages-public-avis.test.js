@@ -56,6 +56,9 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
                      erreurToken = null,      // panne de lecture du token
                      erreurProfil = null,     // panne de lecture du profil
                      periodesDemandees = [],
+                     // La lecture des extraits traduits en panne (ou la
+                     // relation pas encore connue de PostgREST).
+                     erreurTraduction = null,
                      journal = [] } = {}) {
   const client = {
     from (table) {
@@ -114,6 +117,7 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
             a.ins.every(f => f.v.includes(String(b[f.c])))), error: null }
         }
         if (table === 'ota_reviews') {
+          if (erreurTraduction && /avis_traductions/.test(String(a.colonnes || ''))) return { data: null, count: null, error: erreurTraduction }
           if (erreurListe && !a.head) return { data: null, count: null, error: erreurListe }
           const d = avis.filter(v =>
             (a.f.user_id == null || v.user_id === a.f.user_id) &&
@@ -213,7 +217,10 @@ test('la requête ne SÉLECTIONNE pas les colonnes interdites', async () => {
   const journal = preparer({})
   const handler = require('../api/menages-public')
   await handler(req({ detail: '1' }), reponse())
-  const lecture = journal.filter(j => j.table === 'ota_reviews' && j.colonnes && !j.head).pop()
+  // ⚠ LA LECTURE DE LA LISTE, nommee par ce qu'elle lit (l'extrait) : depuis
+  // le 11 novembre 2026, une seconde lecture la suit, celle des extraits
+  // traduits (testee plus bas), et « la derniere » ne la designait plus.
+  const lecture = journal.filter(j => j.table === 'ota_reviews' && j.colonnes && !j.head && j.colonnes.includes('ai_clean_excerpt')).pop()
   assert.ok(lecture, 'la liste doit être lue')
   for (const champ of ['guest_name', 'raw', 'ota_reservation_id']) {
     assert.ok(!lecture.colonnes.includes(champ), `${champ} ne doit pas être sélectionné`)
@@ -630,4 +637,59 @@ test('un token réellement inconnu rend toujours 401', async () => {
   const res = reponse()
   await handler({ method: 'GET', query: { token: 'lien-revoque' }, headers: {} }, res)
   assert.strictEqual(res.code, 401)
+})
+
+// ─── L'extrait traduit en français (décision de Thierry du 11 novembre 2026) ─
+// Spec : docs/specs/avis-v5/spec-traduction-avis.md §3.5. L'application de la
+// prestataire est en français : elle lit la version française de l'extrait,
+// et RIEN d'autre du texte — ni sa traduction, ni celle du retour privé.
+const { empreinteAvis } = require('../lib/avis/traduction')
+const AVIS_EN = (() => {
+  const a = { ...AVIS_BASE, id: 'avis-en', ai_clean_excerpt: 'the kettle was dirty',
+    content: 'Great stay.\nBetween us, the kettle was dirty', content_public: 'Great stay.',
+    content_private: 'Between us, the kettle was dirty' }
+  return { ...a, traduction: { empreinte: empreinteAvis(a), textes: {
+    public: { source: 'en', fr: 'Super séjour.', es: 'Gran estancia.' },
+    prive: { source: 'en', fr: 'Entre nous, la bouilloire était sale', es: 'Entre nosotros, la tetera estaba sucia' },
+    extrait: { source: 'en', fr: 'la bouilloire était sale', es: 'la tetera estaba sucia' } } } }
+})()
+
+test('LE TEST QUI COMPTE : l’extrait sort en français, avec sa langue, et rien d’autre du texte', async () => {
+  const journal = preparer({ avis: [AVIS_EN] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  const a = res.body.avis[0]
+  assert.strictEqual(a.extrait, 'the kettle was dirty', 'l’original reste : il est à un clic')
+  assert.strictEqual(a.extraitTraduit, 'la bouilloire était sale')
+  assert.strictEqual(a.extraitLangue, 'en')
+  const brut = JSON.stringify(res.body)
+  for (const interdit of ['Super séjour', 'Entre nous', 'Between us', 'Great stay', 'tetera']) {
+    assert.ok(!brut.includes(interdit), interdit + ' ne doit pas sortir')
+  }
+  // La lecture ajoutée ne demande que l'empreinte et la traduction.
+  const lecture = journal.find(j => j.table === 'ota_reviews' && /avis_traductions/.test(String(j.colonnes || '')))
+  assert.ok(lecture, 'la traduction est lue')
+  assert.strictEqual(lecture.colonnes, 'id, content, traduction:avis_traductions(empreinte, textes)')
+  assert.strictEqual(lecture.f.user_id, U, 'cloisonnée au compte')
+})
+
+test('⚠ une traduction PÉRIMÉE ne sort pas', async () => {
+  preparer({ avis: [{ ...AVIS_EN, ai_clean_excerpt: 'the kettle' }] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.avis[0].extraitTraduit, undefined)
+})
+
+test('la lecture des traductions en panne, ou avant la migration : la liste sort quand même', async () => {
+  for (const erreur of [{ code: 'PGRST200', message: 'relation' }, { code: '57014', message: 'timeout' }]) {
+    preparer({ avis: [AVIS_EN], erreurTraduction: erreur })
+    const handler = require('../api/menages-public')
+    const res = reponse()
+    await handler(req({ detail: '1' }), res)
+    assert.strictEqual(res.code, 200)
+    assert.strictEqual(res.body.avis[0].extrait, 'the kettle was dirty')
+    assert.strictEqual(res.body.avis[0].extraitTraduit, undefined)
+  }
 })

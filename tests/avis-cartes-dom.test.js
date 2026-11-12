@@ -449,3 +449,70 @@ test('sans retour privé, ou sur un avis masqué : ni bloc, ni marque', () => {
     assert.equal(d.querySelector('.avp-marque-prive'), null)
   }
 })
+
+// ─── La traduction (décisions de Thierry du 11 novembre 2026) ──────────────
+// Spec : docs/specs/avis-v5/spec-traduction-avis.md. La carte montre la
+// traduction, la mention et la bascule ; l'original est dans la page, masqué.
+const traduite = (extraAvis = {}) => carte({
+  avis: [{ id: 'a1', masque: false, note_sur_5: 4, texte: 'Great stay', texte_prive: 'The heating was weak',
+    extrait: 'very clean', verdict: 'positif', verdict_source: null, analyse: true, detecte: false,
+    traduction: { public: { source: 'en', texte: 'Super séjour' }, prive: { source: 'en', texte: 'Le chauffage était faible' },
+      extrait: { source: 'en', texte: 'très propre' } },
+    ...extraAvis }]
+})
+const visibles = (racine, sel) => [...racine.querySelectorAll(sel)].filter(e => !e.closest('[hidden]')).map(e => e.textContent.trim())
+
+test('LE TEST QUI COMPTE : un avis traduit montre la TRADUCTION, la mention « Traduit (anglais) », et l’original masqué', () => {
+  const d = doc(rendre(donnees({ recents: [traduite()] }), { peutEcrire: false }))
+  const son = d.querySelector('.avp-son')
+  assert.ok(son.getAttribute('data-trad-zone'), 'la zone de bascule')
+  assert.deepEqual(visibles(son, '.avp-texte'), ['Super séjour', 'Le chauffage était faible'])
+  assert.deepEqual(visibles(son, '.avp-extrait'), ['« très propre »'])
+  assert.match(son.querySelector('.avt-mention').textContent, /^Traduit \(anglais\) · Voir l’original$/)
+  // L'original est dans la page, masque : basculer ne coute aucun appel.
+  assert.deepEqual([...son.querySelectorAll('.avt-o .avp-texte')].map(p => p.textContent), ['Great stay', 'The heating was weak'])
+})
+
+test('la bascule montre l’original, puis revient à la traduction', async () => {
+  const dom = new JSDOM('<!doctype html><body><div id="c"></div></body>')
+  global.window = dom.window
+  const c = dom.window.document.getElementById('c')
+  await monter(c, { charger: async () => donnees({ recents: [traduite()] }) })
+  const bouton = c.querySelector('[data-trad-bascule]')
+  bouton.dispatchEvent(new dom.window.Event('click', { bubbles: true }))
+  assert.deepEqual(visibles(c, '.avp-son .avp-texte'), ['Great stay', 'The heating was weak'])
+  assert.deepEqual(visibles(c, '.avp-son .avp-extrait'), ['« very clean »'])
+  assert.equal(bouton.textContent, 'Voir la traduction')
+  bouton.dispatchEvent(new dom.window.Event('click', { bubbles: true }))
+  assert.deepEqual(visibles(c, '.avp-son .avp-texte'), ['Super séjour', 'Le chauffage était faible'])
+  assert.equal(bouton.textContent, 'Voir l’original')
+  delete global.window
+})
+
+test('sans traduction : l’original seul, ni mention ni double', () => {
+  const d = doc(rendre(donnees({ recents: [traduite({ traduction: null })] }), { peutEcrire: false }))
+  assert.equal(d.querySelectorAll('.avt-mention, .avt-t, .avt-o').length, 0)
+  assert.deepEqual(visibles(d, '.avp-son .avp-texte'), ['Great stay', 'The heating was weak'])
+})
+
+test('un seul champ traduit (le retour privé) : lui seul a deux versions, la mention dit sa langue', () => {
+  const d = doc(rendre(donnees({ recents: [traduite({ texte: 'Très bien', extrait: null, traduction: { prive: { source: 'de', texte: 'Le chauffage était faible' } } })] }), { peutEcrire: false }))
+  assert.deepEqual(visibles(d, '.avp-son .avp-texte'), ['Très bien', 'Le chauffage était faible'])
+  assert.match(d.querySelector('.avt-mention').textContent, /Traduit \(allemand\)/)
+})
+
+test('XSS : une traduction est échappée comme l’original', () => {
+  const d = doc(rendre(donnees({ recents: [traduite({ traduction: { public: { source: 'en', texte: '<img src=x onerror=alert(1)>' } } })] })))
+  assert.equal(d.querySelectorAll('img').length, 0)
+})
+
+test('la langue de lecture part avec la lecture — sauf le français, langue par défaut du serveur', async () => {
+  for (const [langue, attendu] of [['fr', 'periode=30j'], ['en', 'periode=30j&langue=en'], ['es-ES', 'periode=30j&langue=es'], ['de', 'periode=30j']]) {
+    const dom = new JSDOM('<!doctype html><body><div id="c"></div></body>')
+    global.window = dom.window
+    const lues = []
+    await monter(dom.window.document.getElementById('c'), { charger: async (p) => { lues.push(p); return donnees({}) }, filtres: () => ({ periode: '30j' }), langue })
+    assert.deepEqual(lues, [attendu], langue)
+    delete global.window
+  }
+})

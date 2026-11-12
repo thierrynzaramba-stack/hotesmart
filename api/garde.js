@@ -42,6 +42,7 @@ const { extraitVerifie } = require('../lib/extrait-verifie')
 const { colonneAbsente } = require('../lib/colonne-absente')
 const { archivesEpuisees } = require('../lib/biens-vivants')
 const { isActiveStatus } = require('../lib/bookings-snapshot-status')
+const traductionAvis = require('../lib/avis/traduction')
 
 // ⚠ UNE VALIDATION NE VAUT QUE POUR QUI L'A POSEE. Un menage change de main —
 // l'hote reassigne, une collegue accepte, le moteur pose une remplacante apres
@@ -409,13 +410,19 @@ module.exports = async function handler (req, res) {
     // booking.
     const avisParMenage = {}
     const passes = (menagesRows || []).filter(m => m.departure_date < todayEnParis())
+    // La langue de lecture de l'hote, pour l'extrait traduit (spec avis-v5
+    // spec-traduction-avis.md §3.4, Q4 = A). Une valeur inconnue vaut le francais.
+    const langue = traductionAvis.LANGUES.includes(String(req.query.langue || '')) ? String(req.query.langue) : 'fr'
     if (avecAvis && avecNoms && passes.length) {
-      const { data: avis, error: errAvis } = await supabase.from('ota_reviews')
-        // ⚠ NI `guest_name`, NI `content`, NI `raw`. `content_private` et
-        // `content_public` servent UNIQUEMENT a decider de l'etiquette, ici, cote
-        // serveur : ils ne partent jamais au front. C'est la meme regle que la
-        // PWA prestataire.
-        .select('booking_uid, property_id_ref, ai_clean_verdict, ai_clean_excerpt, content_private, content_public, verdict_source')
+      const lireAvis = (traduite) => supabase.from('ota_reviews')
+        // ⚠ NI `guest_name`, NI `raw`. `content_private`, `content_public` et
+        // `content` servent UNIQUEMENT ici, cote serveur — l'etiquette « retour
+        // prive », et l'empreinte qui dit si la traduction est encore vraie. Ils
+        // ne partent jamais au front. C'est la meme regle que la PWA prestataire.
+        // ⚠ LA TRADUCTION EST EMBARQUEE DANS LA MEME LECTURE (aucune requete de
+        // plus) ; avant la migration du 11 novembre 2026, on relit sans.
+        .select('booking_uid, property_id_ref, ai_clean_verdict, ai_clean_excerpt, content_private, content_public, verdict_source'
+          + (traduite ? ', content, traduction:avis_traductions(empreinte, textes)' : ''))
         .eq('user_id', userId)
         // ⚠ `statut = 'confirme'` : c'est la VALIDATION HUMAINE. Une detection en
         // attente n'est pas un fait, et l'afficher sur un planning en ferait un.
@@ -423,6 +430,10 @@ module.exports = async function handler (req, res) {
         .in('property_id_ref', [...new Set(passes.map(m => String(m.property_id)))])
         .in('booking_uid', [...new Set(passes.map(m => String(m.booking_id)))])
         .limit(LOT_MENAGES)
+      let { data: avis, error: errAvis } = await lireAvis(true)
+      if (errAvis && (String(errAvis.code) === 'PGRST200' || traductionAvis.migrationAbsente(errAvis))) {
+        ;({ data: avis, error: errAvis } = await lireAvis(false))
+      }
       if (errAvis) {
         // ⚠ Ne COUPE PAS l'ecran : sans retour, le planning reste juste. C'est la
         // difference avec les liaisons, dont l'absence rendrait la garde FAUSSE.
@@ -448,9 +459,16 @@ module.exports = async function handler (req, res) {
                          !dejaLa.humain)
           if (!prime) continue
         }
+        // L'extrait dans la langue de l'hote, s'il est ecrit dans une autre :
+        // la traduction toute faite, verifiee a l'empreinte (jamais perimee).
+        const tr = a.ai_clean_excerpt
+          ? traductionAvis.traductionPour(a, Array.isArray(a.traduction) ? a.traduction[0] : a.traduction, langue)
+          : null
         avisParMenage[cle] = {
           verdict: a.ai_clean_verdict,
           extrait: a.ai_clean_excerpt || null,
+          extrait_traduit: (tr && tr.extrait && tr.extrait.texte) || null,
+          extrait_langue: (tr && tr.extrait && tr.extrait.source) || null,
           // ⚠ « RETOUR PRIVE » DES QU'IL N'EST PAS CERTAINEMENT PUBLIC. Un extrait
           // a cheval entre le public et le prive sortait sinon comme public, et
           // l'hote lisait sur son planning une phrase que le voyageur n'avait pas

@@ -2194,6 +2194,10 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .avp-notre { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; font-size: var(--fs-caption); }
 .avp-notre .avp-texte { flex: 1 0 100%; color: var(--muted); font-size: var(--fs-caption); }
 .avp-notre .avp-plus { flex: 0 0 auto; }
+/* La traduction d'un avis (spec avis-v5 spec-traduction-avis.md) : la mention
+   et sa bascule « Voir l'original », sur la page Avis et la fiche ménage. */
+.avt-mention { margin: 0; font-size: var(--fs-caption); color: var(--muted); }
+.avt-bascule { background: none; border: 0; padding: 0; color: var(--ink); font: inherit; font-weight: var(--fw-semibold); text-decoration: underline; cursor: pointer; }
 .avp-lib { font-weight: var(--fw-bold); }
 .avp-etat, .avp-origine { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
 .avp-etat .icon, .avp-origine .icon { width: 14px; height: 14px; }

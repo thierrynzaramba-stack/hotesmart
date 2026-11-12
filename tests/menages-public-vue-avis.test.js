@@ -83,6 +83,8 @@ function contexte ({ reponses = [], enLigne = true, reveils = [], stockage = {},
   const els = new Map()
   const get = id => { if (!els.has(id)) els.set(id, elem(id)); return els.get(id) }
   const appels = []
+  // Les ecouteurs de clic poses sur le document (la bascule de traduction).
+  const clics = []
   // ⚠ PLUS DE BOUTONS D'ONGLET : LA PORTE EST `#entete-ratio`. C'est elle que
   // `majPorteAvis` branche, et c'est le SEUL chemin vers la vue Avis depuis la
   // suppression de la barre. Sans element reel ici, le branchement de la porte
@@ -97,7 +99,7 @@ function contexte ({ reponses = [], enLigne = true, reveils = [], stockage = {},
       querySelectorAll: () => [],
       // Le vrai listener de re-sonde est branche ici : on le retient pour
       // pouvoir le declencher, au lieu de faire semblant de le couvrir.
-      addEventListener (ev, fn) { if (ev === 'visibilitychange') reveils.push(fn) },
+      addEventListener (ev, fn) { if (ev === 'visibilitychange') reveils.push(fn); if (ev === 'click') clics.push(fn) },
       visibilityState: 'visible'
     },
     navigator: { onLine: enLigne },
@@ -132,7 +134,7 @@ function contexte ({ reponses = [], enLigne = true, reveils = [], stockage = {},
   const lire = expr => vm.runInContext(expr, ctx)
   // Un reveil comme le navigateur en produit : l'onglet redevient visible.
   const reveiller = () => { reveils.forEach(fn => fn()) }
-  return { ctx, els, get, appels, lire, porte, reveils, reveiller, stockage }
+  return { ctx, els, get, appels, lire, porte, reveils, reveiller, stockage, clics }
 }
 
 const RATIO_OK = { total: 98, positif: 10, remarque: 15, rien_signale: 73, periode: 'toujours' }
@@ -939,4 +941,44 @@ test('une période inconnue passée en argument retombe sur la mémoire locale',
     reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
   await ctx.chargerAvis('trimestre')
   assert.ok(appels[0].includes('periode=30j'), appels[0])
+})
+
+// ─── L'extrait traduit (décision de Thierry du 11 novembre 2026) ────────────
+// Spec : docs/specs/avis-v5/spec-traduction-avis.md §3.5.
+test('LE TEST QUI COMPTE : l’extrait traduit s’affiche en français, l’original masqué, et la bascule les échange', async () => {
+  const { JSDOM } = require('jsdom')
+  const { ctx, get, clics } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+    { id: '1', verdict: 'remarque', extrait: 'the kettle was dirty', extraitTraduit: 'la bouilloire était sale', extraitLangue: 'en', bien: 'C', bienNom: 'C' },
+    { id: '2', verdict: 'positif', extrait: 'très propre', bien: 'C', bienNom: 'C' }
+  ] })
+  const dom = new JSDOM(`<!doctype html><body><div id="l">${get('avis-liste').innerHTML}</div></body>`)
+  const d = dom.window.document
+  const [traduite, francaise] = d.querySelectorAll('.avis-card')
+  assert.strictEqual(traduite.querySelector('.avt-t').textContent, 'la bouilloire était sale')
+  assert.strictEqual(traduite.querySelector('.avt-o').hidden, true)
+  assert.strictEqual(traduite.querySelector('.avt-o').textContent, 'the kettle was dirty')
+  assert.match(traduite.querySelector('.avis-trad').textContent, /^Traduit \(anglais\) · Voir l’original$/)
+  assert.strictEqual(francaise.querySelector('.avis-trad'), null, 'rien de plus pour un extrait déjà en français')
+
+  assert.ok(clics.length >= 1, 'la bascule est branchée sur le document')
+  const bouton = traduite.querySelector('.avis-trad-bascule')
+  const cliquer = () => clics.forEach(fn => fn({ target: bouton }))
+  cliquer()
+  assert.strictEqual(traduite.querySelector('.avt-t').hidden, true)
+  assert.strictEqual(traduite.querySelector('.avt-o').hidden, false)
+  assert.strictEqual(bouton.textContent, 'Voir la traduction')
+  cliquer()
+  assert.strictEqual(traduite.querySelector('.avt-t').hidden, false)
+  assert.strictEqual(bouton.textContent, 'Voir l’original')
+})
+
+test('un extrait traduit hostile est ÉCHAPPÉ, comme l’original', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+    { id: '1', verdict: 'remarque', extrait: 'x', extraitTraduit: '<img src=x onerror="alert(1)">', extraitLangue: '"><b>', bien: 'C', bienNom: 'C' }
+  ] })
+  const html = get('avis-liste').innerHTML
+  assert.ok(!html.includes('<img'))
+  assert.ok(!html.includes('<b>'))
 })

@@ -65,6 +65,7 @@ async function traiter (req, res, t0) {
     periode: req.query && req.query.periode,
     bien: req.query && req.query.bien,
     anciens: req.query && req.query.anciens,
+    langue: req.query && req.query.langue,
   }
 
   const cartes = reponseCaptee()
