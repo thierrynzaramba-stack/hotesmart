@@ -191,7 +191,7 @@ l'écran affiche toujours ce que le serveur sait, pas ce que le geste a supposé
 - **Beds24 : pas de fiche, donc pas de bloc Facture** (P2 sexies, Thierry,
   11 nov. 2026 : plus tard, en dette) — le calendrier V5 n'affiche pas les
   biens Beds24. Le serveur sait rendre un lien sans message (`copier_lien`) ;
-  c'est l'écran qui manque.
+  c'est l'écran qui manque. Dette 147.
 - **« Copier » puis « Envoyer » à moins de 30 s** : la même porte (`fiche`)
   porte l'anti-double-clic de la base, « Envoyer » rend 429 et la fiche dit
   « réessayez dans 30 secondes ».

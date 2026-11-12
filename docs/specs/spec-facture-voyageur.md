@@ -240,7 +240,7 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   → **Réponse de Thierry (11 nov. 2026) : plus tard, noté en dette.**
   L'étape 2b couvre les biens du calendrier (Channex) ; pour Beds24, le
   serveur sait déjà rendre un lien sans message (`copier_lien`), c'est l'écran
-  qui manque (registre des dettes).
+  qui manque (**dette 147**, `docs/kb/dettes-v1.md`).
 - **P2 septies — Une demande rattachée à un autre logement que celui du
   séjour** (review 2 de 2b ; cas rare : logement recréé, séjour déplacé).
   → **Réponse de Thierry (12 nov. 2026) : « la facture est émise à la fin de
