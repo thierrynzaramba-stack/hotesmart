@@ -504,6 +504,8 @@ test('un seul champ traduit (le retour privé) : lui seul a deux versions, la me
 test('XSS : une traduction est échappée comme l’original', () => {
   const d = doc(rendre(donnees({ recents: [traduite({ traduction: { public: { source: 'en', texte: '<img src=x onerror=alert(1)>' } } })] })))
   assert.equal(d.querySelectorAll('img').length, 0)
+  // La traduction EST rendue, comme texte (revue du lot, constat 7).
+  assert.equal(d.querySelector('.avt-t .avp-texte').textContent, '<img src=x onerror=alert(1)>')
 })
 
 test('la langue de lecture part avec la lecture — sauf le français, langue par défaut du serveur', async () => {

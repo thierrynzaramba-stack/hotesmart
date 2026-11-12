@@ -63,7 +63,11 @@ const LOT = 20
   const parametres = (limite) => ({
     p_limite: limite,
     p_classe_avant: new Date(maintenant - 48 * 3600 * 1000).toISOString(),
-    p_echec_avant: new Date(maintenant).toISOString()
+    p_echec_avant: new Date(maintenant).toISOString(),
+    // Le script prend AUSSI les avis longs (le cron les lui laisse) et ceux qui
+    // ont deja echoue trois fois : c'est une relance volontaire de Thierry.
+    p_longueur_max: null,
+    p_echecs_max: null
   })
 
   if (!ECRIRE) {

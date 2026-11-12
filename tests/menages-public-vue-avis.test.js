@@ -981,4 +981,7 @@ test('un extrait traduit hostile est ÉCHAPPÉ, comme l’original', async () =>
   const html = get('avis-liste').innerHTML
   assert.ok(!html.includes('<img'))
   assert.ok(!html.includes('<b>'))
+  // La traduction EST rendue (echappee) : sans cela, le test passait contre le
+  // code d'avant, qui ne la montrait pas du tout (revue du lot, constat 7).
+  assert.ok(html.includes('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;'))
 })

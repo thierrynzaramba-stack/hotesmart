@@ -25,10 +25,17 @@ test('l’empreinte d’un avis prend le public COMME L’ÉCRAN : content_publi
 })
 
 // ─── Les champs envoyés ─────────────────────────────────────────────────────
-test('seuls les champs non vides partent ; un texte trop long est tronqué avant l’envoi', () => {
+test('seuls les champs non vides partent ; un champ trop long ne part PAS (jamais une traduction de texte coupé)', () => {
   assert.deepEqual(T.champsDe({ texte_public: 'Great stay', texte_prive: '   ', texte_extrait: null }), { public: 'Great stay' })
-  const long = 'x'.repeat(T.MAX_CARACTERES + 50)
-  assert.equal(T.champsDe({ texte_public: long }).public.length, T.MAX_CARACTERES)
+  const long = 'x'.repeat(T.MAX_CARACTERES + 1)
+  assert.deepEqual(T.champsDe({ texte_public: long, texte_prive: 'Weak heating' }), { prive: 'Weak heating' })
+  assert.deepEqual(T.champsDe({ texte_public: 'x'.repeat(T.MAX_CARACTERES) }).public.length, T.MAX_CARACTERES)
+})
+
+test('le plafond de réponse couvre trois versions, même d’un texte en idéogrammes', () => {
+  // 400 caractères chinois ≈ 1 200 à 1 400 tokens de sortie (revue, constat 2).
+  assert.ok(T.maxTokensPour({ public: '很'.repeat(400) }) >= 1400)
+  assert.equal(T.maxTokensPour({ public: 'x'.repeat(T.MAX_CARACTERES), prive: 'x'.repeat(T.MAX_CARACTERES), extrait: 'x'.repeat(T.MAX_CARACTERES) }), T.MAX_TOKENS)
 })
 
 // ─── La réponse du modèle ───────────────────────────────────────────────────
@@ -111,11 +118,40 @@ test('une erreur d’API est un échec, pas une exception ; et elle compte comme
   assert.equal(r.appel, true)
 })
 
-test('rien à traduire : aucun appel', async () => {
+test('rien à traduire : aucun appel, et une RÉUSSITE vide (la ligne sort de la file jusqu’au prochain texte)', async () => {
   const client = fauxClient(BONNE)
-  const r = await T.traduireLigne({ ...LIGNE, texte_public: '', texte_prive: null }, { anthropic: client })
+  const r = await T.traduireLigne({ ...LIGNE, texte_public: '\t\n', texte_prive: null }, { anthropic: client })
   assert.equal(r.appel, false)
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.textes, {})
   assert.equal(client.appels.length, 0)
+})
+
+test('⚠ L’EXTRAIT A UNE BORNE SERRÉE : il ne peut pas porter une phrase entière du retour privé', () => {
+  const champs = { extrait: 'very clean', prive: 'The heating was weak and the neighbours were noisy' }
+  const fuite = { extrait: { source: 'en', fr: 'très propre — et le voisin a dit que le chauffage était faible et que les voisins étaient bruyants', es: 'muy limpio' },
+    prive: { source: 'en', fr: 'Le chauffage était faible', es: 'La calefacción era débil' } }
+  assert.equal(T.lireReponse(JSON.stringify(fuite), champs).motif, 'traduction_trop_longue')
+  const juste = { ...fuite, extrait: { source: 'en', fr: 'très propre', es: 'muy limpio' } }
+  assert.equal(T.lireReponse(JSON.stringify(juste), champs).ok, true)
+})
+
+test('⚠ un appel du cron porte sa durée maximale et AUCUNE relance ; le script, rien', async () => {
+  const cron = fauxClient(BONNE)
+  const opts = []
+  const espion = { messages: { create: async (args, o) => { opts.push(o); return cron.messages.create(args) } } }
+  await T.traduireLigne(LIGNE, { anthropic: espion, timeoutMs: 12345.6 })
+  assert.deepEqual(opts[0], { timeout: 12345, maxRetries: 0 })
+  await T.traduireLigne(LIGNE, { anthropic: espion })
+  assert.equal(opts[1], undefined)
+})
+
+test('une réponse coupée au plafond se dit : « reponse_tronquee », pas « json_illisible »', async () => {
+  const client = { messages: { create: async () => ({ stop_reason: 'max_tokens', content: [{ text: '{"public":{"source":"en","fr":"Appart' }] }) } }
+  const r = await T.traduireLigne(LIGNE, { anthropic: client })
+  assert.equal(r.ok, false)
+  assert.equal(r.motif, 'reponse_tronquee')
+  assert.equal(r.appel, true)
 })
 
 // ─── L'écriture ─────────────────────────────────────────────────────────────
@@ -133,6 +169,18 @@ test('une réussite pose la traduction ET efface l’échec', async () => {
   assert.deepEqual(opts, { onConflict: 'review_id' })
   assert.deepEqual(payload, { review_id: 'r1', user_id: 'u1', empreinte: 'E1', textes: BONNE,
     traduit_le: '2026-11-11T10:00:00.000Z', echec_le: null, echec_empreinte: null, echecs: 0 })
+})
+
+test('les tentatives d’un lot sont notées en UNE écriture, sans toucher aux traductions', async () => {
+  const sb = fauxSb()
+  await T.noterTentatives(sb, [{ ...LIGNE, echecs: 0 }, { ...LIGNE, id: 'r2', empreinte: 'E2', echecs: 2 }], { maintenant: Date.parse('2026-11-11T10:00:00Z') })
+  assert.equal(sb.ecrits.length, 1)
+  assert.deepEqual(sb.ecrits[0].payload, [
+    { review_id: 'r1', user_id: 'u1', echec_le: '2026-11-11T10:00:00.000Z', echec_empreinte: 'E1', echecs: 1 },
+    { review_id: 'r2', user_id: 'u1', echec_le: '2026-11-11T10:00:00.000Z', echec_empreinte: 'E2', echecs: 3 }
+  ])
+  assert.equal(await T.noterTentatives(sb, []), null)
+  assert.equal(sb.ecrits.length, 1, 'rien à noter : aucune écriture')
 })
 
 test('⚠ un échec ne touche PAS la dernière traduction réussie : ni textes ni empreinte dans le payload', async () => {

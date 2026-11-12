@@ -81,7 +81,7 @@ par `avecContexteIA`, comme la classification.
   pas la traduction.
 - Tâche `traduction_avis` dans `api/cron.js`, **après** `classification_avis`,
   en **ajout seul** (le lot 2 PWA tient aussi ce fichier : aucune ligne existante
-  n'est réécrite). Plafonds au §3.6. Un passage sans travail coûte une requête
+  n'est réécrite). Plafonds au §3.6. Un passage sans travail coûte deux requêtes
   et **zéro appel à l'IA**.
 - **L'historique** : par `scripts/traduire-avis.js`, lancé une fois par Thierry
   après la mise en production (§3.6).
@@ -131,20 +131,33 @@ par `avecContexteIA`, comme la classification.
 ### 3.6 Le coût de l'IA (Q5 = A, décision de Thierry, 10:36)
 
 - **Par passage de cron : 10 appels au plus**, et moins si le budget de temps du
-  passage (12 s) est atteint avant.
+  passage (12 s) est atteint avant. Un appel ne part qu'avant cette échéance,
+  dure **20 s au plus** sans relance, jamais au-delà du reste du cycle moins
+  25 s, et ne part pas s'il a moins de 3 s devant lui.
+- **Le compte du jour est RÉSERVÉ avant le premier appel** (le lot entier), puis
+  ce qui n'est pas parti est rendu ; **la tentative est notée avant chaque
+  appel**. Un passage coupé par la plateforme en plein appel ne perd donc ni le
+  compte ni la tentative : l'avis est écarté 24 h au lieu de repasser en tête,
+  hors plafond (revue, constat 1).
+- **Un avis de plus de 3 000 caractères** (public + privé + extrait) ne passe
+  pas par le cron : il attend le script. **Trois échecs sur le même texte**
+  sortent l'avis de la file ; un texte qui change l'y remet (revue, constat 2).
 - **Par jour : 100 appels au plus**, pour toute la plateforme, soit au plus
   ≈ 0,30 € par jour (≈ 0,3 centime par avis traduit, Haiku). Le compte du jour
   vit dans `cron_logs` (`traduction_avis_jour` : jour de Paris, nombre
   d'appels) ; au plafond, la tâche s'arrête jusqu'au lendemain et le dit dans
   son bilan, sans alerte (rien n'est urgent).
 - **Rien à traduire : zéro appel.** La file est lue d'abord ; l'IA n'est appelée
-  que pour un avis qui en sort.
+  que pour un avis qui en sort. Un passage sans travail coûte **deux** requêtes
+  (le compte du jour, puis la file). Un texte fait seulement de blancs n'entre
+  pas dans la file ; s'il y entrait, il serait écrit comme une réussite vide.
 - **Un appel par avis**, quel que soit le nombre de champs et de langues ; un
   appel qui échoue compte quand même dans le plafond du jour.
 - **L'historique** : `scripts/traduire-avis.js`, ≈ 650 avis, donc ≈ 650 appels,
   ≈ 2 €. À blanc par défaut, il dit le nombre d'avis à traduire et le coût
   estimé ; `--go` traduit, `--max N` borne (défaut et plafond : 800). Il ne
-  consomme pas le plafond du jour du cron. Lancé par Thierry, une fois, après
+  consomme pas le plafond du jour du cron. Il prend aussi les avis longs et
+  ceux qui ont échoué trois fois : c'est une relance volontaire. Lancé par Thierry, une fois, après
   la mise en production.
 - Chaque appel est journalisé par `avecContexteIA` (bien, séjour, tâche), comme
   la classification.
@@ -219,3 +232,26 @@ Partagés : `api/cron.js` (une tâche), `api/avis.js`, `lib/avis/cartes.js`,
 `shared/ui.css` (bloc de la page Avis seulement), `shared/i18n/*.json` (ajouts de
 clés seulement), `pages/avis.html` (passage de la langue), `api/garde.js` et
 `pages/menages.html` (Q4).
+
+## 10. Revue (12 novembre 2026)
+
+Une revue, par un agent distinct, sur l'arbre `/home/claude/hotesmart-avis-trad`,
+branche `avis-traduction`, plage
+`f4b2597cfdf43b86025c2d75c7fe5f9d645184aa..e413390f5b10be57c0826445786fb8fe31f05763`
+(SHA lu déclaré : `e413390f…`). **Aucun constat de sécurité** : rien ne sort
+vers un autre compte, un membre hors de ses biens, la prestataire ni un avis
+masqué. La revue a appliqué la migration sur un vrai Postgres 16 : empreintes
+SQL et JS identiques (chaîne vide, `null`, retour à la ligne, unicode), file
+juste, `authenticated` refusé. Pas de re-revue. Chaque fichier cité est dans le
+diff de la plage.
+
+| # | gravité | fichier cité | constat | suite |
+|---|---|---|---|---|
+| 1 | défaut (coût) | `lib/cron-traduction-avis.js`, `lib/avis/traduction.js` | un appel sans durée bornée pouvait dépasser le cycle ; coupé par la plateforme, il était payé sans être compté, et l'avis repassait hors plafond | corrigé : compte réservé avant, tentative notée avant chaque appel, `timeout` et `maxRetries: 0`, avis de plus de 3 000 caractères laissés au script |
+| 2 | défaut (coût) | `lib/avis/traduction.js`, migration | plafond de réponse trop bas (idéogrammes, textes longs) : réponse coupée à chaque essai, pour toujours | corrigé : plafond calculé sur trois versions, motif `reponse_tronquee`, sortie de file après 3 échecs sur le même texte |
+| 3 | défaut (vie privée, défense en profondeur) | `lib/avis/traduction.js` | la traduction de l'extrait, faite dans le même appel que le retour privé, pouvait être assez longue pour en porter une phrase jusqu'à la prestataire | corrigé : borne serrée sur l'extrait (2 × longueur + 40) |
+| 4 | mineur | `lib/avis/traduction.js` | un champ tronqué avant l'envoi s'affichait traduit à la place de l'original complet | corrigé : un champ trop long n'est plus traduit, il garde son original |
+| 5 | mineur | migration | `btrim` (SQL) et `trim` (JS) ne retirent pas les mêmes blancs : un retour privé fait de tabulations revenait toutes les 24 h | corrigé : `~ '\S'` en SQL, et « rien à traduire » écrit comme une réussite vide |
+| 6 | mineur | `api/avis.js`, `api/garde.js`, `api/menages-public.js` | le repli sans traduction était silencieux | corrigé : journalisé une fois par instance ; à la recette, vérifier `Server-Timing` à 10 |
+| 7 | mineur | 4 tests | passaient contre le code d'avant | corrigés : ils affirment la lecture tentée ou le rendu ; contre-épreuve par mutation (5 rouges) |
+| 8 | mineur | spec §3.2 | un passage sans travail coûte 2 requêtes, pas 1 ; la file calcule un md5 sur tous les avis à chaque passage | spec corrigée ; le md5 est négligeable aujourd'hui (≈ 700 avis) et grandit avec eux — à surveiller dans la carte 20 |

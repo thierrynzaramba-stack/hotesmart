@@ -43,6 +43,7 @@ const { colonneAbsente } = require('../lib/colonne-absente')
 const { archivesEpuisees } = require('../lib/biens-vivants')
 const { isActiveStatus } = require('../lib/bookings-snapshot-status')
 const traductionAvis = require('../lib/avis/traduction')
+let repliTraductionDit = false
 
 // ⚠ UNE VALIDATION NE VAUT QUE POUR QUI L'A POSEE. Un menage change de main —
 // l'hote reassigne, une collegue accepte, le moteur pose une remplacante apres
@@ -432,6 +433,8 @@ module.exports = async function handler (req, res) {
         .limit(LOT_MENAGES)
       let { data: avis, error: errAvis } = await lireAvis(true)
       if (errAvis && (String(errAvis.code) === 'PGRST200' || traductionAvis.migrationAbsente(errAvis))) {
+        // Le repli se dit, une fois par instance (revue du lot, constat 6).
+        if (!repliTraductionDit) { repliTraductionDit = true; console.warn('[garde] traductions illisibles, retours servis sans elles :', errAvis.code || errAvis.message) }
         ;({ data: avis, error: errAvis } = await lireAvis(false))
       }
       if (errAvis) {

@@ -72,11 +72,17 @@ $$;
 -- donc rien a traduire. On attend la classification
 -- (l'extrait est traduit dans le meme appel), sauf
 -- au-dela de p_classe_avant. Un echec sur la meme
--- empreinte attend p_echec_avant avant de repasser.
+-- empreinte attend p_echec_avant avant de repasser,
+-- et sort de la file apres p_echecs_max essais (un
+-- texte qui change y revient). p_longueur_max ecarte
+-- les avis trop longs pour un passage de cron : le
+-- script les traduit. Null = pas de borne.
 create or replace function public.avis_a_traduire(
   p_limite integer,
   p_classe_avant timestamptz,
-  p_echec_avant timestamptz
+  p_echec_avant timestamptz,
+  p_longueur_max integer,
+  p_echecs_max integer
 )
 returns table (
   id uuid,
@@ -122,10 +128,13 @@ as $$
              a.texte_prive, a.texte_extrait)
              as empreinte
       from a
-     where length(btrim(coalesce(
-             a.texte_public, ''))) > 0
-        or length(btrim(coalesce(
-             a.texte_prive, ''))) > 0
+     where (coalesce(a.texte_public, '') ~ '\S'
+            or coalesce(a.texte_prive, '') ~ '\S')
+       and (p_longueur_max is null
+            or length(coalesce(a.texte_public, ''))
+               + length(coalesce(a.texte_prive, ''))
+               + length(coalesce(a.texte_extrait, ''))
+               <= p_longueur_max)
   )
   select e.id, e.user_id, e.property_id_ref,
          e.booking_uid, e.texte_public,
@@ -137,7 +146,8 @@ as $$
    where (t.empreinte is distinct from e.empreinte)
      and not coalesce(
            t.echec_empreinte = e.empreinte
-           and t.echec_le >= p_echec_avant,
+           and (t.echec_le >= p_echec_avant
+                or t.echecs >= p_echecs_max),
            false)
    order by e.received_at desc nulls last, e.id
    limit greatest(0, least(coalesce(p_limite, 0),
@@ -152,10 +162,10 @@ grant execute on function
   to service_role;
 
 revoke execute on function
-  public.avis_a_traduire(
-    integer, timestamptz, timestamptz)
+  public.avis_a_traduire(integer, timestamptz,
+    timestamptz, integer, integer)
   from public, anon, authenticated;
 grant execute on function
-  public.avis_a_traduire(
-    integer, timestamptz, timestamptz)
+  public.avis_a_traduire(integer, timestamptz,
+    timestamptz, integer, integer)
   to service_role;

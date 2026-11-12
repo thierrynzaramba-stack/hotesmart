@@ -24,6 +24,15 @@ const LANGUES_LECTURE = traductionAvis.LANGUES
 // 2026 pas encore appliquee) : PostgREST rend PGRST200 pour une ressource
 // embarquee inconnue ; la table ou la fonction absentes ont leurs propres codes.
 const traductionAbsente = (e) => !!e && (String(e.code) === 'PGRST200' || traductionAvis.migrationAbsente(e))
+// Le repli se DIT, une fois par instance (revue du lot, constat 6) : une
+// relation que PostgREST ne verrait jamais ferait disparaitre les traductions
+// et couterait une requete par page, sans un mot.
+let repliTraductionDit = false
+const direRepliTraduction = (e) => {
+  if (repliTraductionDit) return
+  repliTraductionDit = true
+  console.warn('[avis] traductions illisibles, page servie sans elles :', e && (e.code || e.message))
+}
 const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origine')
 const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
@@ -713,6 +722,7 @@ async function cartesLister (req, res, garde) {
     }
     let { data, error } = await lirePage(avecTraduction)
     if (error && avecTraduction && traductionAbsente(error)) {
+      direRepliTraduction(error)
       avecTraduction = false
       ;({ data, error } = await lirePage(false))
     }

@@ -1096,6 +1096,7 @@ function extraitEstPrive (a) {
 // avant la migration, la liste sort telle quelle, sans traduction. `content`
 // n'y sert qu'a l'empreinte, cote serveur : une traduction PERIMEE n'est jamais
 // servie (lib/avis/traduction.js, `traductionPour`).
+let repliTraductionDit = false
 async function ajouterExtraitsTraduits (userId, avis, lignes) {
   const avecExtrait = new Map((lignes || []).filter(l => l && l.ai_clean_excerpt).map(l => [String(l.id), l]))
   if (!avecExtrait.size || !Array.isArray(avis)) return
@@ -1105,6 +1106,10 @@ async function ajouterExtraitsTraduits (userId, avis, lignes) {
   if (error) {
     if (String(error.code) !== 'PGRST200' && !traductionAvis.migrationAbsente(error)) {
       console.error('[menages-public] extraits traduits echec:', error.message)
+    } else if (!repliTraductionDit) {
+      // Le repli se dit, une fois par instance (revue du lot, constat 6).
+      repliTraductionDit = true
+      console.warn('[menages-public] traductions illisibles, extraits servis sans elles :', error.code || error.message)
     }
     return
   }

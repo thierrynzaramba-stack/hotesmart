@@ -674,20 +674,24 @@ test('LE TEST QUI COMPTE : l’extrait sort en français, avec sa langue, et rie
   assert.strictEqual(lecture.f.user_id, U, 'cloisonnée au compte')
 })
 
-test('⚠ une traduction PÉRIMÉE ne sort pas', async () => {
-  preparer({ avis: [{ ...AVIS_EN, ai_clean_excerpt: 'the kettle' }] })
+test('⚠ une traduction PÉRIMÉE ne sort pas — elle a pourtant été lue', async () => {
+  const journal = preparer({ avis: [{ ...AVIS_EN, ai_clean_excerpt: 'the kettle' }] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req({ detail: '1' }), res)
+  // ⚠ Sans cette assertion, le test passait contre le code d'AVANT (revue du
+  // lot, constat 7) : rien n'etait lu, donc rien ne sortait.
+  assert.ok(journal.some(j => j.table === 'ota_reviews' && /avis_traductions/.test(String(j.colonnes || ''))), 'la traduction est lue')
   assert.strictEqual(res.body.avis[0].extraitTraduit, undefined)
 })
 
 test('la lecture des traductions en panne, ou avant la migration : la liste sort quand même', async () => {
   for (const erreur of [{ code: 'PGRST200', message: 'relation' }, { code: '57014', message: 'timeout' }]) {
-    preparer({ avis: [AVIS_EN], erreurTraduction: erreur })
+    const journal = preparer({ avis: [AVIS_EN], erreurTraduction: erreur })
     const handler = require('../api/menages-public')
     const res = reponse()
     await handler(req({ detail: '1' }), res)
+    assert.ok(journal.some(j => j.table === 'ota_reviews' && /avis_traductions/.test(String(j.colonnes || ''))), 'la lecture a bien été tentée')
     assert.strictEqual(res.code, 200)
     assert.strictEqual(res.body.avis[0].extrait, 'the kettle was dirty')
     assert.strictEqual(res.body.avis[0].extraitTraduit, undefined)

@@ -58,7 +58,11 @@ test('⚠ un avis masqué par Airbnb n’entre pas dans la file (même règle qu
 test('la file : détection écartée, classification attendue, échec récent écarté, limite bornée', () => {
   assert.match(code, /r\.statut <> 'ignore'/)
   assert.match(code, /r\.ai_analyzed_at is not null\s+or r\.verdict_source = 'humain'\s+or r\.received_at is null\s+or r\.received_at < p_classe_avant/)
-  assert.match(code, /t\.echec_empreinte = e\.empreinte\s+and t\.echec_le >= p_echec_avant/)
+  assert.match(code, /t\.echec_empreinte = e\.empreinte\s+and \(t\.echec_le >= p_echec_avant\s+or t\.echecs >= p_echecs_max\)/,
+    'un échec récent attend ; trois échecs sur le même texte sortent de la file')
+  assert.match(code, /coalesce\(a\.texte_public, ''\) ~ '\\S'\s+or coalesce\(a\.texte_prive, ''\) ~ '\\S'/,
+    'un texte fait de blancs (tabulations, retours) n’entre pas : même règle que trim() en JS')
+  assert.match(code, /p_longueur_max is null\s+or length\(coalesce\(a\.texte_public, ''\)\)\s+\+ length\(coalesce\(a\.texte_prive, ''\)\)\s+\+ length\(coalesce\(a\.texte_extrait, ''\)\)\s+<= p_longueur_max/)
   assert.match(code, /t\.empreinte is distinct from e\.empreinte/)
   assert.match(code, /limit greatest\(0, least\(coalesce\(p_limite, 0\),\s*1000\)\)/)
 })
