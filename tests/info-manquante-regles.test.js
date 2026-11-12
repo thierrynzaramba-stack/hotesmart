@@ -151,28 +151,43 @@ test('validerBrouillon : vide ou trop long refuse, sinon nettoye', () => {
 
 // ─── Serveur : le texte envoye au modele, et ce qui en revient ──────────────
 
-test('promptRedaction (choix) : chaque decision de l hote, la langue du voyageur, rien d invente', () => {
+test('promptRedaction (choix) : chaque decision de l hote, et RIEN d autre — la conversation ne donne que la langue et le ton', () => {
   const p = R.promptRedaction({
-    guestName: 'Anna', bienNom: 'La bulle', knowledgeText: 'Parking : rue Voltaire', consignes: 'Signer Thierry',
+    guestName: 'Anna', bienNom: 'La bulle', consignes: 'Signer Thierry',
     fil: [{ source: 'guest', message: 'Can I come with my dog?' }, { source: 'auto', message: 'Bienvenue' }],
     choix: [{ question: QUESTIONS[0], reponse: 'oui', precision: '' }, { question: QUESTIONS[1], reponse: 'autre', precision: 'garage a 200 m' }]
   })
-  assert.match(p, /langue du voyageur/)
-  assert.match(p, /N'invente RIEN/)
+  assert.match(p, /CE QUE L'HÔTE RÉPOND — le message dit ceci, et RIEN d'autre/)
   assert.match(p, /Décision de l'hôte : OUI/)
   assert.match(p, /Décision de l'hôte : AUTRE — garage a 200 m/)
+  assert.match(p, /N'aborde AUCUN autre sujet/)
+  assert.match(p, /N'ajoute AUCUNE information — code, mot de passe/)
+  assert.match(p, /elle n'apporte aucun contenu au message/)
+  assert.match(p, /langue du voyageur/)
   assert.match(p, /\[VOYAGEUR\] Can I come with my dog\?/)
   assert.match(p, /\[MESSAGE AUTOMATIQUE\] Bienvenue/)
-  assert.match(p, /Parking : rue Voltaire/)
   assert.match(p, /Signer Thierry/)
+  assert.match(p, /pour le ton et la signature seulement/)
   assert.doesNotMatch(p, /BROUILLON/)
 })
 
-test('promptRedaction (brouillon) : le sens de l hote garde EXACTEMENT', () => {
+test('LE TEST QUI COMPTE : la base de connaissance n entre JAMAIS dans le texte du modele (recette du 12 novembre 2026)', () => {
+  // Mesure sur staging : le modele y avait pris le code de la porte, que
+  // personne n'avait demande. Meme si un appelant la passait encore, elle
+  // ne sort pas.
+  for (const entree of [{ choix: [{ question: QUESTIONS[0], reponse: 'oui', precision: '' }] }, { brouillon: 'oui chien' }]) {
+    const p = R.promptRedaction({ guestName: 'Anna', fil: [], knowledgeText: 'Code de la porte : 4321', ...entree })
+    assert.doesNotMatch(p, /4321/)
+    assert.doesNotMatch(p, /BASE DE CONNAISSANCE/)
+  }
+})
+
+test('promptRedaction (brouillon) : le sens de l hote garde EXACTEMENT, et rien d autre', () => {
   const p = R.promptRedaction({ guestName: 'Anna', fil: [], brouillon: 'oui chien, non moto' })
-  assert.match(p, /garde EXACTEMENT son sens/)
-  assert.match(p, /BROUILLON DE L'HÔTE :\noui chien, non moto/)
-  assert.doesNotMatch(p, /DÉCISIONS DE L'HÔTE/)
+  assert.match(p, /Garde EXACTEMENT le sens du brouillon/)
+  assert.match(p, /BROUILLON DE L'HÔTE — le message dit ceci, et RIEN d'autre :\noui chien, non moto/)
+  assert.match(p, /N'aborde AUCUN autre sujet/)
+  assert.doesNotMatch(p, /CE QUE L'HÔTE RÉPOND/)
 })
 
 test('texteDe : le texte seul, sans guillemets autour, borne ; rien d utilisable -> vide', () => {

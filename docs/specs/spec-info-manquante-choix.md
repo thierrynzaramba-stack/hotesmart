@@ -50,7 +50,12 @@ réponse prête existante, elle propose sa modification.**
   200 m »).
 - Le bouton **« Rédiger la réponse »** est actif dès que chaque question a un
   choix. L'IA rédige alors la réponse au voyageur à partir des choix, dans sa
-  langue, avec les connaissances du logement. Le texte arrive **dans la zone de
+  langue, en s'appuyant sur la conversation. ⚠ **Sans la base de
+  connaissance** (recette du 12 novembre 2026, décision de Thierry : « les
+  choix, plus la conversation ») : sur staging, le modèle a répondu à une autre
+  question restée ouverte et y a mis le code de la porte, pris dans la base.
+  Le message ne dit que les décisions de l'hôte ; la conversation donne la
+  demande, la langue, le prénom et le ton. Le texte arrive **dans la zone de
   saisie** : rien ne part. L'hôte relit, modifie et envoie par le chemin
   d'envoi existant (même routage, mêmes gardes).
 - Quand la réponse part, la tâche `info_unknown` est **close** (`done`). La
@@ -70,7 +75,8 @@ réponse prête existante, elle propose sa modification.**
 
 - L'hôte tape une réponse brute (« oui chien, non moto, parking rue Voltaire »)
   et clique sur **« IA »**. L'IA en fait une réponse rédigée, dans la langue du
-  voyageur, avec le fil et les connaissances du logement. Le texte de la zone
+  voyageur, avec le fil — **sans la base de connaissance**, même règle que la
+  carte : le message ne dit que ce que dit le brouillon. Le texte de la zone
   est remplacé, et une action **« Annuler »** rend le texte de l'hôte. Rien ne
   part.
 - Le bouton n'apparaît que si du texte est tapé.

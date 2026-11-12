@@ -132,7 +132,7 @@ test('LE TEST QUI COMPTE : choix -> le texte redige revient, et RIEN n est ecrit
   assert.match(p, /Décision de l'hôte : OUI/)
   assert.match(p, /Décision de l'hôte : AUTRE — garage a 200 m/)
   assert.match(p, /Can I come with my dog/)
-  assert.match(p, /Parking : Rue Voltaire/)
+  assert.doesNotMatch(p, /Rue Voltaire/, 'la base de connaissance est entree dans le texte du modele')
   assert.match(p, /Signer Thierry/)
   assert.doesNotMatch(p, /NOTE INTERNE/, 'la note interne de la tache ne part pas au modele')
   assert.doesNotMatch(p, /SECRET/, 'les connaissances d un autre bien non plus')
@@ -161,7 +161,7 @@ test('texte -> le brouillon de l hote, mis en forme ; rien d ecrit', async () =>
   const res = await appeler({ action: 'texte', bookingId: 'B1', brouillon: ' oui chien, non moto ' })
   assert.equal(res.code, 200)
   assert.equal(res.body.texte, 'Hello Anna, yes for the dog!')
-  assert.match(etat.prompts[0], /BROUILLON DE L'HÔTE :\noui chien, non moto/)
+  assert.match(etat.prompts[0], /BROUILLON DE L'HÔTE — le message dit ceci, et RIEN d'autre :\noui chien, non moto/)
   assert.deepEqual(etat.ecritures, [])
   assert.ok(!etat.lectures.some(q => q.table === 'agent_tasks'), 'le bouton IA ne lit aucune tache')
 })
@@ -294,7 +294,8 @@ test('le fil donne au modele : les 30 plus RECENTS, lus dans le coeur pour ce se
   assert.deepEqual(m.eq, { user_id: PROD, booking_id: 'B1' })
   assert.deepEqual(m.ordre, ['sent_at', { ascending: false }])
   assert.equal(m.limite, 30)
-  const k = etat.lectures.find(q => q.table === 'knowledge')
-  assert.deepEqual(k.eq, { user_id: PROD, property_id: REF }, 'cle sur la REFERENCE provider, jamais l UUID')
+  // Recette du 12 novembre 2026 : la base de connaissance n'est plus lue —
+  // le modele y avait pris un code de porte que personne n'avait demande.
+  assert.ok(!etat.lectures.some(q => q.table === 'knowledge'), 'la base de connaissance est lue')
   assert.deepEqual(etat.consignesLues, [PROD, REF])
 })

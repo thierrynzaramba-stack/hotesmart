@@ -24,9 +24,8 @@
 //  - 502 ia_indisponible : le modèle n'a pas répondu, ou rien d'utilisable.
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
-const { buildKnowledgeText, loadPromptingInstructions, modeleConfigure, requeteClassification } = require('../lib/cron-classify')
+const { loadPromptingInstructions, modeleConfigure, requeteClassification } = require('../lib/cron-classify')
 const { isAutomationPaused, anthropic } = require('../lib/cron-shared')
-const { replisDuBien } = require('../lib/balises')
 const { avecContexteIA } = require('../lib/ia/journal')
 const { compterRequetes, requetesJusquIci } = require('../lib/compte-requetes')
 const R = require('../lib/guestflow/rediger')
@@ -132,16 +131,15 @@ module.exports = async function handler (req, res) {
         source: m.direction === 'inbound' ? 'guest' : (m.kind === 'auto' ? 'auto' : 'host'),
         message: m.body || ''
       }))
-      const { data: knowledge } = await supabase.from('knowledge')
-        .select('*').eq('user_id', userId).eq('property_id', refBien)
-      // « Hors IA » s'applique ici aussi : buildKnowledgeText filtre.
-      const knowledgeText = buildKnowledgeText(knowledge || [], { replis: replisDuBien(bien) })
+      // ⚠ PAS DE BASE DE CONNAISSANCE (recette du 12 novembre 2026, décision de
+      // Thierry : « les choix, plus la conversation ») : le modèle y avait pris
+      // un code de porte que personne n'avait demandé. Voir promptRedaction.
       const consignesLues = await loadPromptingInstructions(userId, refBien)
       const consignes = [consignesLues.global, consignesLues.propertyOverride].filter(Boolean).join('\n')
 
       const guestName = [snap.firstName, snap.lastName].filter(Boolean).join(' ').trim() || 'Voyageur'
       const prompt = R.promptRedaction({
-        guestName, bienNom: bien.name, fil, knowledgeText, consignes, ...entree
+        guestName, bienNom: bien.name, fil, consignes, ...entree
       })
 
       // ⚠ Pas de `noterAppel` (journal de l'AGENT) : l'appel est tracé par

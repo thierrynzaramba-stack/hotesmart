@@ -284,6 +284,12 @@ apprend : réponse prête à créer ou à modifier) vient après sa recette.
   d'envoi existant. Gardes de « Proposer » (messages en écriture,
   réservation requise, clé sur la référence provider, kill switch), appel
   étiqueté `guestflow_rediger` au journal `ia_appels`.
+- **⚠ Le modèle ne reçoit PAS la base de connaissance** (recette du
+  12 novembre 2026, décision de Thierry : « les choix, plus la
+  conversation »). Mesuré sur staging : avec la base, il a répondu à une autre
+  question du voyageur restée ouverte et y a mis le code de la porte. Le
+  message ne dit que les décisions (ou le brouillon) de l'hôte ; la
+  conversation sert à la demande, la langue, le prénom et le ton.
 - **⚠ Le plafond de l'hôte est le sien** (décision de Thierry : « 3 est trop
   petit de toute façon ») : 10 rédactions par conversation sur 24 h, comptées
   dans `ia_appels`. Jamais dans `guestflow_appels_ia` : trois clics y
