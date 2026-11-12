@@ -28,6 +28,15 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 | `pages/charges.html` | La page : ses deux endpoints en constantes, le dépôt du fichier à l'URL signée, la garde de compte propre (page non délégable). |
 | `shared/charges-vue.js` | **La vue unique** (ordinateur et téléphone) : À traiter, totaux, liste, fiche, ajout. Aucun appel réseau écrit dedans. |
 
+## Lot 7a — la période, le type de document, l'étalement (spec §14)
+
+| Fichier | Rôle |
+|---|---|
+| `migrations/2026-11-13-charges-periode.sql` | `charges.type_document` (facture, régularisation, avoir, échéancier, avis d'impôt), `periode_debut` / `periode_fin` (les deux ou aucune, 366 jours au plus), avoir négatif seul ; colonnes étalées du résumé ; recalcul **par série** (compte × entité × logement × catégorie) sur une plage ; `charges_totaux` rend les deux lectures. **À coller APRÈS** `2026-11-10`. Contrôle : `migrations/2026-11-13-controle-charges-periode.sql` (10 lignes). |
+| `lib/charges/regles.js` | `TYPES_DOCUMENT`, `periodeSaisie`, `signerMontants`, `centimesSignes` ; la lecture normalise type, période et solde. |
+| `lib/charges/lecture.js` | La consigne lit le type, la période couverte et, pour une régularisation, la consommation et le solde. |
+| `shared/charges-vue.js` | Fiche : type, période, aide par type, solde lu ; liste : type et période ; totaux : « Étalé » et « À la date » côte à côte (Q34). |
+
 ## Règles à ne pas perdre
 
 - **Les totaux ne se calculent jamais à la lecture.** Le trigger
@@ -108,6 +117,23 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 - **Lot 3 — `biens` ne porte que les logements actifs** (ce que la fiche
   propose) ; `biens_archives` sert à nommer une ligne ancienne
   (tests/ecrans-sans-biens-archives.test.js).
+
+- **Lot 7a — l'échéancier n'est compté nulle part** (Q25) : ni charge, ni
+  encore prévision (7b). La base l'exclut du calcul (`type_document <>
+  'echeancier'`), pas l'écran.
+- **Lot 7a — l'avoir est négatif, et lui seul** (Q26) : l'hôte et l'IA lisent
+  le montant tel qu'imprimé, `signerMontants` pose le signe, la contrainte
+  `charges_montants_ck` refuse un avoir positif comme une facture négative.
+- **Lot 7a — une régularisation compte sa CONSOMMATION** ; le solde lu reste
+  dans `lecture_ia.solde_ttc_cents`, montré à côté, jamais compté.
+- **Lot 7a — les compteurs restent ceux des DOCUMENTS, à leur date** : seuls
+  les montants s'étalent. `nb_etale` est un indicateur (« ce jour porte de
+  l'étalé »), jamais un compte : une facture annuelle y est 365 fois.
+- **Lot 7a — le verrou est celui de la SÉRIE**, sur tous les chemins : le
+  trigger prend les deux séries (avant / après) dans l'ordre, le recalcul du
+  compte les parcourt dans l'ordre de leur clé.
+- **Lot 7a — sur tout le temps, étalé = à la date** pour chaque compte : c'est
+  le contrôle 9 de la migration.
 
 ## Dettes connues (review du lot 2, 10 novembre 2026)
 

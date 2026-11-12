@@ -108,27 +108,58 @@ test('« À traiter » : son nombre exact, et le geste qui convient à chaque é
 // ─── Les totaux ─────────────────────────────────────────────────────────────
 test('LE TEST QUI COMPTE : les totaux disent « non lu », l\'estimation et l\'heure du calcul — jamais un 0 inventé', async () => {
   const totaux = {
-    total: { ht: 10000, tva: null, ttc: 12000, nb_factures: 3, nb_non_verifiees: 2, nb_signaux: 0, nb_sans_ht: 1, nb_sans_tva: 3, nb_sans_ttc: 0 },
-    par_mois: [{ cle: '2026-10', ttc: 5000, nb_factures: 1 }, { cle: '2026-11', ttc: 7000, nb_factures: 2 }],
+    total: { ht: 10000, tva: null, ttc: 12000, ht_etale: 10000, tva_etale: null, ttc_etale: 12000, nb_etale: 3, nb_factures: 3, nb_non_verifiees: 2, nb_signaux: 0, nb_sans_ht: 1, nb_sans_tva: 3, nb_sans_ttc: 0 },
+    par_mois: [{ cle: '2026-10', ttc: 5000, ttc_etale: 5000, nb_factures: 1, nb_etale: 1 }, { cle: '2026-11', ttc: 7000, ttc_etale: 7000, nb_factures: 2, nb_etale: 2 }],
     // ⚠ Une ligne SANS facture comptée (un doublon écarté, une lecture en
     // cours) ne s'affiche pas : son montant n'est pas « non lu ».
-    par_categorie: [{ cle: 'energie', ttc: 7000, nb_factures: 2 }, { cle: null, ttc: null, nb_factures: 1 }, { cle: 'menage', ttc: null, nb_factures: 0 }],
-    par_bien: [{ cle: BIEN, ttc: 6000, nb_factures: 1 }, { cle: BIEN_VIEUX, ttc: 4000, nb_factures: 1 }, { cle: null, ttc: 2000, nb_factures: 1 }],
+    par_categorie: [{ cle: 'energie', ttc: 7000, ttc_etale: 7000, nb_factures: 2, nb_etale: 2 }, { cle: null, ttc: null, ttc_etale: null, nb_factures: 1, nb_etale: 1 }, { cle: 'menage', ttc: null, ttc_etale: null, nb_factures: 0, nb_etale: 0 }],
+    par_bien: [{ cle: BIEN, ttc: 6000, ttc_etale: 6000, nb_factures: 1, nb_etale: 1 }, { cle: BIEN_VIEUX, ttc: 4000, ttc_etale: 4000, nb_factures: 1, nb_etale: 1 }, { cle: null, ttc: 2000, ttc_etale: 2000, nb_factures: 1, nb_etale: 1 }],
     calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30'
   }
   const b = await monter({ ecran: () => reponseEcran({ totaux }) })
   try {
     const z = b.$('[data-bind="totaux"]')
-    const chiffres = [...z.querySelectorAll('.chg-chiffre')].map(el => [...el.children].map(texte).join(' '))
-    assert.match(chiffres[0], /^TTC 120,00\s?€$/)
-    assert.match(chiffres[1], /^HT 100,00\s?€ 1 sans montant lu$/)
-    assert.match(chiffres[2], /^TVA non lu 3 sans montant lu$/)
+    const chiffres = [...z.querySelectorAll('.chg-chiffre')].map(el => [...el.querySelectorAll(':scope > span, small, b')].map(texte).join(' '))
+    assert.match(chiffres[0], /^TTC Étalé 120,00\s?€ À la date 120,00\s?€$/)
+    assert.match(chiffres[1], /^HT Étalé 100,00\s?€ À la date 100,00\s?€ 1 sans montant lu$/)
+    assert.match(chiffres[2], /^TVA Étalé non lu À la date non lu 3 sans montant lu$/)
     assert.match(texte(z.querySelector('.chg-mentions--estimation')), /Estimation · 2 à vérifier · Calculé le/)
     assert.match(texte(z), /Du 1 déc\.? 2025 au 30 nov\.? 2026/)
-    const reps = [...z.querySelectorAll('.chg-rep')].map(el => [...el.querySelectorAll('h3, li > *')].map(texte).join(' '))
-    assert.match(reps[0], /Par mois octobre 2026 50,00\s?€ novembre 2026 70,00\s?€/)
-    assert.match(reps[1], /^Par catégorie Eau, électricité, gaz 70,00\s?€ Sans catégorie non lu$/, 'la ligne Ménage, sans facture comptée, est absente')
-    assert.match(reps[2], /Studio 60,00\s?€ Ancien · archivé 40,00\s?€ Sans logement 20,00\s?€/)
+    const reps = [...z.querySelectorAll('.chg-rep')].map(el => [...el.querySelectorAll('h3, .chg-rep__nom, b')].map(texte).join(' '))
+    assert.match(reps[0], /Par mois octobre 2026 50,00\s?€ 50,00\s?€ novembre 2026 70,00\s?€ 70,00\s?€/)
+    assert.match(reps[1], /^Par catégorie Eau, électricité, gaz 70,00\s?€ 70,00\s?€ Sans catégorie non lu non lu$/, 'la ligne Ménage, sans facture comptée, est absente')
+    assert.match(reps[2], /Studio 60,00\s?€ 60,00\s?€ Ancien · archivé 40,00\s?€ 40,00\s?€ Sans logement 20,00\s?€ 20,00\s?€/)
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (Q34) : une facture annuelle se lit ÉTALÉE et À LA DATE côte à côte ; un mois sans facture à sa date vaut 0, pas « non lu »', async () => {
+  // Une taxe foncière de 1 200 € sur 2026, datée de septembre : octobre en
+  // porte 101,91 € étalés et rien à la date ; septembre, 98,63 € étalés et
+  // les 1 200 € à la date.
+  const totaux = {
+    total: { ht: 120000, tva: null, ttc: 120000, ht_etale: 20054, tva_etale: null, ttc_etale: 20054, nb_etale: 61, nb_factures: 1, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 1, nb_sans_ttc: 0 },
+    par_mois: [{ cle: '2026-09', ttc: 120000, ttc_etale: 9863, nb_factures: 1, nb_etale: 30 }, { cle: '2026-10', ttc: null, ttc_etale: 10191, nb_factures: 0, nb_etale: 31 }],
+    par_categorie: [{ cle: 'impots_taxes', ttc: 120000, ttc_etale: 20054, nb_factures: 1, nb_etale: 61 }],
+    par_bien: [],
+    calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30'
+  }
+  const b = await monter({ ecran: () => reponseEcran({ totaux }) })
+  try {
+    const z = b.$('[data-bind="totaux"]')
+    const rep = [...z.querySelectorAll('.chg-rep')][0]
+    const lignes = [...rep.querySelectorAll('li')].map(li => [...li.querySelectorAll('.chg-rep__nom, small, b')].map(texte).join(' '))
+    assert.match(lignes[0], /^septembre 2026 Étalé 98,63\s?€ À la date 1\s?200,00\s?€$/)
+    assert.match(lignes[1], /^octobre 2026 Étalé 101,91\s?€ À la date 0,00\s?€$/, 'un mois porté par l\'étalement seul s\'affiche, et sa lecture à la date vaut 0')
+  } finally { b.fermer() }
+})
+
+test('« aucune facture comptée » ne se dit que si AUCUNE des deux lectures n\'a de montant', async () => {
+  const totaux = { total: { ht: null, tva: null, ttc: null, ht_etale: 5000, tva_etale: null, ttc_etale: 5000, nb_etale: 30, nb_factures: 0, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [{ cle: '2026-11', ttc: null, ttc_etale: 5000, nb_factures: 0, nb_etale: 30 }], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30' }
+  const b = await monter({ ecran: () => reponseEcran({ totaux }) })
+  try {
+    const z = b.$('[data-bind="totaux"]')
+    assert.doesNotMatch(texte(z), /Aucune facture comptée/)
+    assert.equal(z.querySelectorAll('.chg-chiffre').length, 3)
   } finally { b.fermer() }
 })
 
@@ -349,6 +380,70 @@ test('une commission de plateforme ne se modifie pas : champs figés, ni « Vali
     assert.equal(f.querySelector('[data-geste="voir"]'), null)
     assert.ok(f.querySelector('[data-champ="montant_ttc_cents"]').disabled)
     assert.ok(f.querySelector('[data-geste="supprimer"]'))
+  } finally { b.fermer() }
+})
+
+// ─── Lot 7a : type de document et période ───────────────────────────────────
+test('les types de document de la vue sont ceux du serveur (lib/charges/regles.js fait foi)', async () => {
+  const vue = await import(path.join(racine, 'shared/charges-vue.js'))
+  assert.deepEqual(vue.TYPES_DOCUMENT, require('../lib/charges/regles').TYPES_DOCUMENT)
+  // Et le contrôle de la période dit la même chose que le serveur.
+  const { periodeSaisie } = require('../lib/charges/regles')
+  for (const [d, f] of [['', ''], ['2026-01-01', '2026-12-31'], ['2026-01-01', '2027-01-01'], ['2026-01-01', '2027-01-02'], ['2026-02-01', ''], ['2026-03-01', '2026-02-01'], ['2028-01-01', '2028-12-31']]) {
+    const serveur = periodeSaisie(d, f)
+    assert.equal(vue.controlePeriode(d, f), serveur.ok ? null : serveur.code, `${d} → ${f}`)
+  }
+})
+
+test('LE TEST QUI COMPTE : la fiche envoie le type et la période ; un avoir se saisit SANS signe et se montre négatif dans la liste', async () => {
+  const avoir = facture(1, { statut: 'a_verifier', type_document: 'avoir', montant_ht_cents: -5000, montant_tva_cents: -1000, montant_ttc_cents: -6000 })
+  const b = await monter({ ecran: () => reponseEcran({ aTraiter: [avoir], liste: [avoir] }), geste: () => ({ ok: true }) })
+  try {
+    assert.match(texte(b.$('[data-bind="liste"] .chg-ligne')), /Avoir/)
+    assert.match(texte(b.$('[data-bind="liste"] .chg-ligne__ttc')), /^-60,00\s?€$/)
+    await b.cliquer(b.$(`[data-bind="liste"] [data-ouvrir="${avoir.id}"]`))
+    const f = b.$('[data-bind="fiche"]')
+    assert.equal(f.querySelector('[data-champ="type_document"]').value, 'avoir')
+    assert.equal(f.querySelector('[data-champ="montant_ttc_cents"]').value, '60,00', 'le montant tel qu\'imprimé')
+    assert.match(texte(f.querySelector('[data-bind="aide-type"]')), /Un avoir diminue le total/)
+    b.saisir(f.querySelector('[data-champ="periode_debut"]'), '2026-01-01')
+    b.saisir(f.querySelector('[data-champ="periode_fin"]'), '2026-12-31')
+    await b.cliquer(f.querySelector('[data-geste="valider"]'))
+    const [g] = b.gestes()
+    assert.equal(g.champs.type_document, 'avoir')
+    assert.equal(g.champs.montant_ttc_cents, 6000, 'positif : c\'est le serveur qui pose le signe')
+    assert.equal(g.champs.periode_debut, '2026-01-01')
+    assert.equal(g.champs.periode_fin, '2026-12-31')
+  } finally { b.fermer() }
+})
+
+test('une période incomplète ou de plus d\'un an est refusée dans la fiche, et RIEN ne part', async () => {
+  const c = facture(1, { statut: 'a_verifier' })
+  const b = await monter({ ecran: () => reponseEcran({ aTraiter: [c] }) })
+  try {
+    await b.cliquer(b.$(`[data-ouvrir="${c.id}"]`))
+    const f = b.$('[data-bind="fiche"]')
+    b.saisir(f.querySelector('[data-champ="periode_debut"]'), '2026-01-01')
+    await b.cliquer(f.querySelector('[data-geste="valider"]'))
+    assert.match(texte(f.querySelector('[data-bind="fiche-retour"]')), /un début et une fin/)
+    b.saisir(f.querySelector('[data-champ="periode_fin"]'), '2027-01-02')
+    await b.cliquer(f.querySelector('[data-geste="valider"]'))
+    assert.match(texte(f.querySelector('[data-bind="fiche-retour"]')), /au plus un an/)
+    assert.deepEqual(b.gestes(), [])
+  } finally { b.fermer() }
+})
+
+test('une régularisation montre son SOLDE lu à côté de la consommation, et le type change l\'aide sans rien envoyer', async () => {
+  const c = facture(1, { statut: 'a_verifier', type_document: 'regularisation', periode_debut: '2025-10-01', periode_fin: '2026-09-30', solde_lu: -4520 })
+  const b = await monter({ ecran: () => reponseEcran({ aTraiter: [c] }) })
+  try {
+    assert.match(texte(b.$('[data-bind="a-traiter"] .chg-ligne')), /Régularisation · 1 oct\.? 2025 → 30 sept\.? 2026/)
+    await b.cliquer(b.$(`[data-ouvrir="${c.id}"]`))
+    const aide = b.$('[data-bind="aide-type"]')
+    assert.match(texte(aide), /consommation de la période .* Solde lu : -45,20\s?€/)
+    await b.choisir(b.$('[data-champ="type_document"]'), 'echeancier')
+    assert.match(texte(aide), /ne compte pas dans les totaux/)
+    assert.deepEqual(b.gestes(), [])
   } finally { b.fermer() }
 })
 

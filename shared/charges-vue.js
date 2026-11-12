@@ -65,6 +65,23 @@ export function enSaisie (cents, langue = 'fr') {
   return `${Math.floor(cents / 100)}${sep}${String(cents % 100).padStart(2, '0')}`
 }
 
+// Les types de document (lot 7a) : la MÊME liste que lib/charges/regles.js
+// (TYPES_DOCUMENT), comparée par tests/charges-page.test.js.
+export const TYPES_DOCUMENT = ['facture', 'regularisation', 'avoir', 'echeancier', 'avis_impot']
+
+/**
+ * La période saisie, contrôlée comme le serveur (`periodeSaisie`) : les deux
+ * bornes ou aucune, dans l'ordre, 366 jours au plus. Le code du refus, ou
+ * `null`. Le serveur reste la garde : ceci évite seulement un aller-retour.
+ */
+export function controlePeriode (debut, fin) {
+  if (!debut && !fin) return null
+  const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))
+  if (!ok(debut) || !ok(fin) || debut > fin) return 'periode_invalide'
+  const jours = Math.round((Date.parse(fin + 'T00:00:00Z') - Date.parse(debut + 'T00:00:00Z')) / 86400000) + 1
+  return jours > 366 ? 'periode_trop_longue' : null
+}
+
 /** La racine d'un groupe de doublons : la première facture, ou elle-même. */
 const racineDe = (c) => c.groupe_doublon || c.id
 
@@ -103,6 +120,10 @@ export function monter (racine, deps) {
     const d = iso ? new Date(iso) : null
     return d && !isNaN(d) ? new Intl.DateTimeFormat(langue, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(d) : ''
   }
+
+  const periodeLisible = (c) => (c && c.periode_debut && c.periode_fin
+    ? t('charges.periode_courte', { debut: jourLisible(c.periode_debut), fin: jourLisible(c.periode_fin) })
+    : '')
 
   const etat = {
     entite: 'toutes', periode: '',
@@ -143,7 +164,11 @@ export function monter (racine, deps) {
   const ACTION_DE = { a_verifier: 'charges.ouvrir', a_lire: 'charges.saisir_main', panne: 'charges.saisir_main', plafond: 'charges.saisir_main', illisible: 'charges.saisir_main', doublon: 'charges.verifier' }
   function ligne (c, avecAction) {
     const e = etatDe(c)
-    const infos = [c.categorie ? nomCategorie(c.categorie) : '', nomBien(c.bien_id)].filter(Boolean).join(' · ')
+    const infos = [
+      c.type_document && c.type_document !== 'facture' ? (connu('charges.type_' + c.type_document) || '') : '',
+      periodeLisible(c),
+      c.categorie ? nomCategorie(c.categorie) : '', nomBien(c.bien_id)
+    ].filter(Boolean).join(' · ')
     const action = avecAction && e && ACTION_DE[e] ? `<span class="chg-ligne__action">${esc(t(ACTION_DE[e]))}</span>` : ''
     return `<li><button type="button" class="chg-ligne" data-ouvrir="${esc(c.id)}">`
       + `<span class="chg-ligne__jour">${esc(jourLisible(c.jour))}</span>`
@@ -178,14 +203,25 @@ export function monter (racine, deps) {
       + '</div>'
   }
 
+  // ⚠ DEUX LECTURES (Q34, lot 7a) : « Étalé » (la charge du jour, une facture
+  // à période répartie au prorata) et « À la date » (la facture entière à son
+  // jour). Sans aucune facture dans une lecture, son montant est 0 — une
+  // absence vraie, pas un montant non lu ; avec des factures mais aucun
+  // montant lu, il reste « non lu ».
+  const parLecture = (somme, nb) => (Number(nb) > 0 ? montant(somme) : esc(fmtMontant.format(0)))
+  const deuxLectures = (etale, nbEtale, date, nbDate) =>
+    `<span class="chg-lecture"><small>${esc(t('charges.etale'))}</small><b>${parLecture(etale, nbEtale)}</b></span>`
+    + `<span class="chg-lecture chg-lecture--date"><small>${esc(t('charges.a_la_date'))}</small><b>${parLecture(date, nbDate)}</b></span>`
+
   function repartition (titre, toutes, nom) {
-    // ⚠ UNE LIGNE SANS FACTURE COMPTÉE NE S'AFFICHE PAS : son montant n'est
-    // pas « non lu », il est écarté (un doublon non tranché, une facture en
-    // lecture). Elle est déjà dite par « N à vérifier » / « N à trancher ».
-    const lignes = (toutes || []).filter(r => Number(r.nb_factures) > 0)
+    // ⚠ UNE LIGNE SANS FACTURE COMPTÉE, NI À SA DATE NI ÉTALÉE, NE S'AFFICHE
+    // PAS : son montant n'est pas « non lu », il est écarté (un doublon non
+    // tranché, une facture en lecture). Il est déjà dit par « N à vérifier » /
+    // « N à trancher ».
+    const lignes = (toutes || []).filter(r => Number(r.nb_factures) > 0 || Number(r.nb_etale) > 0)
     if (!lignes.length) return ''
     return `<section class="chg-rep"><h3 class="chg-h3">${esc(titre)}</h3><ul>`
-      + lignes.map(r => `<li><span>${esc(nom(r.cle))}</span><b>${montant(r.ttc)}</b></li>`).join('')
+      + lignes.map(r => `<li><span class="chg-rep__nom">${esc(nom(r.cle))}</span>${deuxLectures(r.ttc_etale, r.nb_etale, r.ttc, r.nb_factures)}</li>`).join('')
       + '</ul></section>'
   }
 
@@ -211,15 +247,15 @@ export function monter (racine, deps) {
         tot.calcule_le ? t('charges.calcule_le', { date: instantLisible(tot.calcule_le) }) : ''
       ].filter(Boolean).join(' · ')
       const ligneMentions = mentions ? `<p class="chg-mentions${estimation ? ' chg-mentions--estimation' : ''}">${esc(mentions)}</p>` : ''
-      if (!s.nb_factures) {
+      if (!s.nb_factures && !s.nb_etale) {
         corps = bornes + `<p class="muted">${esc(t('charges.totaux_vide'))}</p>` + ligneMentions
       } else {
         const sans = (n) => (n ? `<span class="chg-chiffre__sans">${esc(t('charges.sans_montant', { n }))}</span>` : '')
         corps = bornes
           + '<div class="chg-chiffres">'
-          + `<div class="chg-chiffre chg-chiffre--fort"><span>${esc(t('charges.ttc'))}</span><b>${montant(s.ttc)}</b>${sans(s.nb_sans_ttc)}</div>`
-          + `<div class="chg-chiffre"><span>${esc(t('charges.ht'))}</span><b>${montant(s.ht)}</b>${sans(s.nb_sans_ht)}</div>`
-          + `<div class="chg-chiffre"><span>${esc(t('charges.tva'))}</span><b>${montant(s.tva)}</b>${sans(s.nb_sans_tva)}</div>`
+          + `<div class="chg-chiffre chg-chiffre--fort"><span>${esc(t('charges.ttc'))}</span><div class="chg-lectures">${deuxLectures(s.ttc_etale, s.nb_etale, s.ttc, s.nb_factures)}</div>${sans(s.nb_sans_ttc)}</div>`
+          + `<div class="chg-chiffre"><span>${esc(t('charges.ht'))}</span><div class="chg-lectures">${deuxLectures(s.ht_etale, s.nb_etale, s.ht, s.nb_factures)}</div>${sans(s.nb_sans_ht)}</div>`
+          + `<div class="chg-chiffre"><span>${esc(t('charges.tva'))}</span><div class="chg-lectures">${deuxLectures(s.tva_etale, s.nb_etale, s.tva, s.nb_factures)}</div>${sans(s.nb_sans_tva)}</div>`
           + '</div>'
           + ligneMentions
           + '<div class="chg-reps">'
@@ -325,6 +361,17 @@ export function monter (racine, deps) {
     return `<label class="chg-champ"><span>${esc(libelle)}${facultatif ? ` <span class="muted">${esc(t('charges.facultatif'))}</span>` : ''}</span>${controle}</label>`
   }
 
+  // Ce que le type change au calcul, dit sous son champ (lot 7a).
+  function aideType (type, c) {
+    if (type === 'regularisation') {
+      const solde = c ? (c.solde_lu ?? (c.lecture_ia && c.lecture_ia.solde_ttc_cents)) : null
+      return t('charges.aide_regularisation') + (Number.isInteger(solde) ? ' ' + t('charges.solde_lu', { montant: fmtMontant.format(solde / 100) }) : '')
+    }
+    if (type === 'avoir') return t('charges.aide_avoir')
+    if (type === 'echeancier') return t('charges.aide_echeancier')
+    return ''
+  }
+
   function peindreFiche (c) {
     const e = etatDe(c)
     const ota = c.origine === 'ota'
@@ -349,8 +396,11 @@ export function monter (racine, deps) {
       : e === 'illisible' ? t('charges.illisible_aide')
         : ota ? t('charges.commission_aide') : ''
     const verifiee = c.statut === 'validee' && c.valide_le ? `<p class="chg-verifiee">${esc(t('charges.validee_le', { date: jourLisible(c.valide_le) }))}</p>` : ''
+    // ⚠ UN AVOIR SE SAISIT TEL QU'IMPRIMÉ (Q26) : le champ montre le montant
+    // sans signe, et c'est le serveur qui le rend négatif.
     const montantChamp = (cle, libelle) => champ(cle, libelle,
-      `<input type="text" inputmode="decimal" autocomplete="off" data-champ="${cle}" value="${esc(enSaisie(c[cle], langue))}"${fige}>`)
+      `<input type="text" inputmode="decimal" autocomplete="off" data-champ="${cle}" value="${esc(enSaisie(Number.isInteger(c[cle]) ? Math.abs(c[cle]) : c[cle], langue))}"${fige}>`)
+    const type = c.type_document || 'facture'
 
     dialogue().innerHTML = '<div class="chg-fiche__tete">'
       + `<h2 class="chg-h2" id="chg-fiche-titre">${esc(t('charges.fiche_titre'))}</h2>`
@@ -365,6 +415,13 @@ export function monter (racine, deps) {
       + champ('fournisseur_siret', t('charges.champ_siret'), `<input type="text" inputmode="numeric" maxlength="20" data-champ="fournisseur_siret" value="${esc(c.fournisseur_siret || '')}"${fige}>`, true)
       + champ('numero_facture', t('charges.champ_numero'), `<input type="text" maxlength="100" data-champ="numero_facture" value="${esc(c.numero_facture || '')}"${fige}>`, true)
       + champ('date_facture', t('charges.champ_date'), `<input type="date" data-champ="date_facture" value="${esc(c.date_facture || '')}"${fige}>`)
+      + champ('type_document', t('charges.champ_type'), `<select data-champ="type_document"${fige}>`
+        + TYPES_DOCUMENT.map(k => `<option value="${k}"${k === type ? ' selected' : ''}>${esc(t('charges.type_' + k))}</option>`).join('') + '</select>')
+      + `<fieldset class="chg-periode"><legend>${esc(t('charges.champ_periode'))} <span class="muted">${esc(t('charges.facultatif'))}</span></legend>`
+      + champ('periode_debut', t('charges.periode_du'), `<input type="date" data-champ="periode_debut" value="${esc(c.periode_debut || '')}"${fige}>`)
+      + champ('periode_fin', t('charges.periode_au'), `<input type="date" data-champ="periode_fin" value="${esc(c.periode_fin || '')}"${fige}>`)
+      + '</fieldset>'
+      + `<p class="chg-note" data-bind="aide-type">${esc(aideType(type, c))}</p>`
       + '<div class="chg-montants">'
       + montantChamp('montant_ht_cents', t('charges.champ_ht'))
       + montantChamp('montant_tva_cents', t('charges.champ_tva'))
@@ -408,8 +465,13 @@ export function monter (racine, deps) {
       date_facture: v('date_facture') || null,
       categorie: v('categorie'),
       entite_juridique_id: v('entite_juridique_id'),
-      bien_id: v('bien_id') || null
+      bien_id: v('bien_id') || null,
+      type_document: v('type_document') || 'facture',
+      periode_debut: v('periode_debut') || null,
+      periode_fin: v('periode_fin') || null
     }
+    const p = controlePeriode(champs.periode_debut, champs.periode_fin)
+    if (p) return { refus: p }
     for (const k of ['montant_ht_cents', 'montant_tva_cents', 'montant_ttc_cents']) {
       const c = enCentimes(v(k))
       if (c === undefined) return { refus: 'montant_invalide' }
@@ -559,6 +621,11 @@ export function monter (racine, deps) {
     const el = ev.target
     if (el.dataset && el.dataset.choix === 'entite') { etat.entite = el.value; etat.periode = ''; recharger(); return }
     if (el.dataset && el.dataset.choix === 'periode') { etat.periode = el.value; recharger(); return }
+    if (el.dataset && el.dataset.champ === 'type_document') {
+      const aide = dialogue().querySelector('[data-bind="aide-type"]')
+      if (aide) aide.textContent = aideType(el.value, etat.fiche)
+      return
+    }
     if (el.dataset && el.dataset.champ === 'entite_juridique_id') {
       const b = dialogue().querySelector('[data-champ="bien_id"]')
       if (b) b.innerHTML = optionsBiens(el.value, etat.fiche && String(etat.fiche.entite_juridique_id || '') === el.value ? etat.fiche.bien_id : null)

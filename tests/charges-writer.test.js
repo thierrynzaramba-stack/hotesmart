@@ -662,3 +662,63 @@ test('avecDelai : rend `{ delai: true }` passé le délai, la valeur sinon', asy
   assert.deepEqual(await charges.avecDelai(new Promise(() => {}), 10), { delai: true })
   assert.equal(await charges.avecDelai(Promise.resolve(7), 1000), 7)
 })
+
+// ─── Lot 7a : type de document, période, avoir (spec §14.2, Q25, Q26) ───────
+
+test('LE TEST QUI COMPTE (Q26) : valider un AVOIR écrit des montants NÉGATIFS, à partir de la saisie sans signe', async () => {
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier())
+  const r = await charges.valider(client, { compte: COMPTE, valideur: COMPTE, id: ID,
+    champs: { ...CHAMPS_OK, type_document: 'avoir', montant_ttc_cents: 6000, montant_ht_cents: 5000, montant_tva_cents: null } },
+  { entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(r.ok, true)
+  const maj = requetes.find(x => x.op === 'update')
+  assert.equal(maj.charge.type_document, 'avoir')
+  assert.equal(maj.charge.montant_ttc_cents, -6000)
+  assert.equal(maj.charge.montant_ht_cents, -5000)
+  assert.equal(maj.charge.montant_tva_cents, null, 'un montant absent reste absent')
+  // Et toute autre facture reste positive.
+  const f = baseEnregistreuse(chargeAVerifier())
+  await charges.valider(f.client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK, type_document: 'facture' } },
+    { entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(f.requetes.find(x => x.op === 'update').charge.montant_ttc_cents, 12000)
+})
+
+test('valider : la période (les deux bornes ou aucune, un an au plus) et le type sont contrôlés AVANT toute écriture', async () => {
+  for (const [champs, code] of [
+    [{ periode_debut: '2026-01-01' }, 'periode_invalide'],
+    [{ periode_debut: '2026-03-01', periode_fin: '2026-02-01' }, 'periode_invalide'],
+    [{ periode_debut: '2026-01-01', periode_fin: '2027-01-02' }, 'periode_trop_longue'],
+    [{ type_document: 'devis' }, 'type_invalide']
+  ]) {
+    const { client, requetes } = baseEnregistreuse(chargeAVerifier())
+    const r = await charges.valider(client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK, ...champs } },
+      { entites: entitesDouble({ entites: [E1] }) })
+    assert.equal(r.code, code, JSON.stringify(champs))
+    assert.equal(requetes.filter(x => x.op === 'update').length, 0)
+  }
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier())
+  await charges.valider(client, { compte: COMPTE, valideur: COMPTE, id: ID,
+    champs: { ...CHAMPS_OK, type_document: 'avis_impot', periode_debut: '2026-01-01', periode_fin: '2026-12-31' } },
+  { entites: entitesDouble({ entites: [E1] }) })
+  const maj = requetes.find(x => x.op === 'update')
+  assert.deepEqual([maj.charge.type_document, maj.charge.periode_debut, maj.charge.periode_fin], ['avis_impot', '2026-01-01', '2026-12-31'])
+})
+
+test('valider sans type envoyé garde celui que la charge porte (un écran resté ouvert ne le remet pas à « facture »)', async () => {
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier({ type_document: 'regularisation' }))
+  await charges.valider(client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK } },
+    { entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(requetes.find(x => x.op === 'update').charge.type_document, 'regularisation')
+})
+
+test('une lecture d\'avoir s\'écrit NÉGATIVE ; le type et la période lus sont écrits ; le solde reste dans la lecture', async () => {
+  const lu = { type_document: 'avoir', periode_debut: '2026-01-01', periode_fin: '2026-03-31', solde_ttc_cents: null,
+    fournisseur_nom: 'EDF', montant_ttc_cents: 3000, montant_ht_cents: 2500, montant_tva_cents: 500 }
+  const { client, requetes } = baseEnregistreuse((r) => (r.op === 'select'
+    ? { data: { id: ID, statut: 'a_lire', tentatives_lecture: 0, cree_le: '2026-11-09T10:00:00Z' } } : { data: { id: ID } }))
+  await charges.appliquerLecture(client, { compte: COMPTE, id: ID, resultat: { ok: true, lu } }, { entites: entitesDouble({ entites: [E1] }) })
+  const maj = requetes.find(x => x.op === 'update').charge
+  assert.deepEqual([maj.montant_ttc_cents, maj.montant_ht_cents, maj.montant_tva_cents], [-3000, -2500, -500])
+  assert.deepEqual([maj.type_document, maj.periode_debut, maj.periode_fin], ['avoir', '2026-01-01', '2026-03-31'])
+  assert.equal(maj.lecture_ia.montant_ttc_cents, 3000, 'la lecture est gardée telle quelle, sans signe')
+})

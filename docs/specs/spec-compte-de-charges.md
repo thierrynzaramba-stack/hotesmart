@@ -1003,6 +1003,17 @@ le prorata, arrondi au centime ; le reste se pose sur le dernier jour, donc
 la somme des jours redonne **exactement** le montant. Écrivain unique : le
 trigger, comme pour le résumé.
 
+*Ce qui a été construit (13 novembre 2026)* : **pas de table de
+répartition**. Le recalcul d'une série calcule la part de chaque jour à la
+volée, depuis `charges`, et l'écrit directement dans les colonnes étalées
+du résumé. Une facture annuelle ne pèse donc pas 365 lignes de plus. La
+part est un **arrondi cumulé** (`charges_part`) : le jour *k* sur *n* reçoit
+⌊m·k/n⌋ − ⌊m·(k−1)/n⌋. La somme se télescope et redonne le montant exact, et
+deux jours ne diffèrent jamais de plus d'un centime — mieux que de tout
+poser sur le dernier jour. Mesuré en local : 1 200 € sur 2026 font 365
+cellules, 101,91 € en janvier, 92,06 € en février, la somme exacte, et le
+recalcul tient en 12 ms.
+
 **Le résumé** porte les deux lectures dans la même cellule du jour :
 `…_cents` (à la date, comme aujourd'hui) et `…_etale_cents` (la somme des
 répartitions du jour). Un seul résumé, deux jeux de colonnes, tenus par le

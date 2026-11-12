@@ -106,3 +106,30 @@ test('le jour d’une charge : la date de la facture, sinon le jour de réceptio
   assert.deepEqual(R.jourDeLaCharge('2026-10-31', '2026-11-09'), { jour: '2026-10-31', date_repli: false })
   assert.deepEqual(R.jourDeLaCharge(null, '2026-11-09'), { jour: '2026-11-09', date_repli: true })
 })
+
+// ─── Lot 7a : type de document, période, signe (spec §14.2) ─────────────────
+const r7 = require('../lib/charges/regles')
+
+test('la période : les deux bornes ou aucune, dans l\'ordre, 366 jours au plus (un an bissextile passe)', () => {
+  assert.deepEqual(r7.periodeSaisie('', null), { ok: true, debut: null, fin: null })
+  assert.deepEqual(r7.periodeSaisie('2026-01-01', '2026-12-31'), { ok: true, debut: '2026-01-01', fin: '2026-12-31' })
+  assert.equal(r7.periodeSaisie('2028-01-01', '2028-12-31').ok, true)
+  assert.equal(r7.periodeSaisie('2026-01-01', '2027-01-01').ok, true, '366 jours')
+  assert.equal(r7.periodeSaisie('2026-01-01', '2027-01-02').code, 'periode_trop_longue')
+  assert.equal(r7.periodeSaisie('2026-01-01', '').code, 'periode_invalide')
+  assert.equal(r7.periodeSaisie('2026-03-01', '2026-02-01').code, 'periode_invalide')
+  assert.equal(r7.periodeSaisie('2026-02-30', '2026-03-01').code, 'periode_invalide')
+})
+
+test('le signe : l\'avoir seul est négatif ; un montant absent reste absent', () => {
+  assert.deepEqual(r7.signerMontants('avoir', { montant_ht_cents: 500, montant_tva_cents: null, montant_ttc_cents: -600 }),
+    { montant_ht_cents: -500, montant_tva_cents: null, montant_ttc_cents: -600 })
+  assert.deepEqual(r7.signerMontants('facture', { montant_ttc_cents: 600 }), { montant_ttc_cents: 600 })
+})
+
+test('la lecture : type inconnu → « facture » ; période incohérente → aucune ; solde lu pour une régularisation SEULEMENT, signé', () => {
+  const a = r7.normaliserLecture({ type_document: 'devis', periode_debut: '2026-05-01', periode_fin: '2026-04-01', solde_ttc: 12 })
+  assert.deepEqual([a.type_document, a.periode_debut, a.periode_fin, a.solde_ttc_cents], ['facture', null, null, null])
+  const b = r7.normaliserLecture({ type_document: 'regularisation', periode_debut: '2025-10-01', periode_fin: '2026-09-30', solde_ttc: '-45,20' })
+  assert.deepEqual([b.type_document, b.periode_debut, b.periode_fin, b.solde_ttc_cents], ['regularisation', '2025-10-01', '2026-09-30', -4520])
+})
