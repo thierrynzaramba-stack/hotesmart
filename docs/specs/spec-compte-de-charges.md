@@ -1019,8 +1019,8 @@ logement × catégorie, sur la plage de jours), jamais jour par jour, et le
 verrou se prend **par série** sur tous les chemins d'écriture. Mesuré en
 local avant la review.
 
-**`charges_totaux`** rend les deux lectures dans le même objet : la bascule
-« Étalé / À la date » ne fait **aucun appel** au serveur.
+**`charges_totaux`** rend les deux lectures dans le même objet : afficher
+les deux côte à côte (Q34) ne coûte **aucun appel** de plus.
 
 ### 14.3 Sous-lot 7a — lecture par l'IA
 
@@ -1041,8 +1041,11 @@ qu'aujourd'hui : rien d'inventé, `null` si c'est absent.
   côte, le second en lecture seule.
 - **Liste** : la période sous le fournisseur (« 1er janv. → 31 déc. 2026 ») ;
   un avoir est marqué « Avoir », avec son montant en négatif.
-- **Totaux** : une bascule **« Étalé / À la date »** au-dessus des chiffres.
-  Vue par défaut : **Q34**.
+- **Totaux : les deux lectures côte à côte (Q34)**, sans bascule. Chaque
+  chiffre (TTC, HT, TVA) et chaque ligne de répartition (par mois, par
+  catégorie, par logement) porte deux montants : **« Étalé »** d'abord (la
+  charge du mois), **« À la date »** ensuite (ce qui a été facturé ce
+  mois-là). Au téléphone, les deux montants passent l'un sous l'autre.
 
 ### 14.5 Sous-lot 7b — l'échéancier, une provision (Q25)
 
@@ -1085,9 +1088,8 @@ qu'aujourd'hui : rien d'inventé, `null` si c'est absent.
 
 ### 14.7 Case PERFORMANCE (les huit points, pour 7a, 7b et 7c)
 
-1. **Un endpoint d'écran** : toujours `/api/ecran/charges`. La bascule
-   « Étalé / À la date » ne coûte aucun appel (les deux lectures arrivent
-   ensemble).
+1. **Un endpoint d'écran** : toujours `/api/ecran/charges`. Les deux
+   lectures (Q34) arrivent dans le même objet : aucun appel de plus.
 2. **Non urgent pré-calculé** : totaux et prévisions dans le résumé, au
    geste ; alerte par le cron quotidien. L'heure du calcul reste affichée.
 3. **Cache navigateur** : aucun, comme au lot 3.
@@ -1104,10 +1106,25 @@ qu'aujourd'hui : rien d'inventé, `null` si c'est absent.
 ### 14.8 Inventaire et mobile
 
 Rien n'est retiré de l'écran du lot 3 : tout s'y ajoute (type, période,
-bascule, prévisions, signal du contrat). Une seule vue
+seconde lecture des totaux, prévisions, signal du contrat). Une seule vue
 (`shared/charges-vue.js`) : le téléphone reçoit tout en même temps.
 
-### 14.9 Questions pour Thierry
+### 14.9 Questions pour Thierry, et ce qui est retenu
+
+**Réponse du 12 novembre 2026, vers 23 h 05** :
+- **Q34 : « les deux ».** Pas de vue par défaut : les totaux montrent les
+  deux lectures **en même temps** (§14.4).
+
+**Q35 à Q37 sont restées sans réponse.** Les propositions recommandées sont
+retenues comme **hypothèses de travail**, dites à Thierry le même soir. Elles
+ne concernent que 7b et 7c, et se confirmeront à leur recette :
+- **Q35 → retirée automatiquement**, avec une mention dans la fiche de la
+  facture qui la remplace.
+- **Q36 → un mois** après la date habituelle.
+- **Q37 → non** : la lecture « à la date » ne montre que les documents
+  reçus ; les prévisions vivent dans la lecture étalée.
+
+Les questions, telles qu'elles ont été posées :
 
 - **Q34** — La vue des totaux proposée par défaut : **étalée** (la vraie
   charge de chaque mois ; la taxe foncière compte 1/12 chaque mois) ou
