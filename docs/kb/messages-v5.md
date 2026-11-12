@@ -271,3 +271,75 @@ décidé par Thierry le 10 novembre 2026 à 01:06.
 - Règles pures dans `shared/messages-direct.js` ; gardes serveur (compte
   cible, périmètre sur les trois lectures, archivage, `private, no-store` dès
   le 405, `Server-Timing` avec le nombre de requêtes) dans `api/messages.js`.
+
+## Information manquante : Oui / Non / Autre, l'IA rédige (étape 1, 10 novembre 2026)
+
+Spec : `docs/specs/spec-info-manquante-choix.md`. Demande de Thierry du
+10 novembre 2026. Étape 1 = la carte et le bouton « IA » ; l'étape 2 (la base
+apprend : réponse prête à créer ou à modifier) vient après sa recette.
+
+- **Serveur.** `POST /api/guestflow-rediger`, actions `choix` (la carte) et
+  `texte` (le bouton « IA » de la saisie). Il rend `{ texte }` et **n'écrit
+  rien** : le texte va dans la saisie, l'hôte relit et envoie par le chemin
+  d'envoi existant. Gardes de « Proposer » (messages en écriture,
+  réservation requise, clé sur la référence provider, kill switch), appel
+  étiqueté `guestflow_rediger` au journal `ia_appels`.
+- **⚠ Le plafond de l'hôte est le sien** (décision de Thierry : « 3 est trop
+  petit de toute façon ») : 10 rédactions par conversation sur 24 h, comptées
+  dans `ia_appels`. Jamais dans `guestflow_appels_ia` : trois clics y
+  arrêteraient l'agent sur le fil et réveilleraient le fondateur. Relever les
+  3 appels de l'agent : dette 146.
+- **⚠ Une tâche `pending` ne sort JAMAIS dans `taches`.** La page affiche
+  `taches` en proposition, et « Envoyer » y ferait partir `suggested_reply` —
+  une note INTERNE — au voyageur. Le fil en direct lit les deux statuts en une
+  lecture et rend un champ neuf, `infos` (les questions seules). Ni
+  intervention (décision 1), ni tâche système (pause, arrêt de l'agent).
+- **⚠ La question revient du client, au caractère.** Le cron complète la
+  tâche quand le voyageur écrit encore : des choix pris sur l'ancienne carte,
+  appliqués par position, répondraient à des questions jamais lues.
+  Écart : `409 questions_changees`.
+- **La carte ne se montre que si l'hôte n'a pas répondu depuis la tâche** : le
+  cron ne clôt jamais une tâche `pending` quand l'hôte répond à la main. Après
+  un envoi depuis la carte, `POST /api/messages { action: 'info_traitee' }`
+  la clôt (`pending` → `done`, sous condition de statut).
+- **L'alerte n'est pas retirée par la clôture** : elle part dans le tour de
+  classification (le réglage `alerte_info` est enregistré mais aucun code de
+  `lib/` ne le lit encore).
+- **La page** (`pages/messages.html`, ajouts seuls) : la carte arrive par le
+  fil en direct (au plus 5 s après l'ouverture du fil, aucun appel de plus),
+  en fin de fil ; « Rédiger la réponse » MET le texte À LA SUITE de la saisie,
+  marqué pour ce voyageur comme un texte posé par « Utiliser » ; une
+  rédaction revenue après un changement de fil est jetée. Le bouton « IA »
+  n'apparaît que si du texte est tapé, fige le champ pendant la rédaction,
+  REMPLACE le texte, et « Annuler » le rend tant que la version rédigée n'a pas
+  été retouchée. La tâche se clôt après l'envoi RÉUSSI de l'entrée née de la
+  carte (« Réessayer » compris), jamais pour un autre message — et seulement si
+  la tâche n'a pas été complétée depuis (`maj`, sinon 409 `questions_changees`
+  et la tâche reste dans « À valider »).
+- **⚠ La marque de la saisie se revérifie AU RETOUR de l'IA** (review 1,
+  constat 1, bloquant, reproduit) : pendant la rédaction, l'hôte peut aller
+  « Utiliser » le wifi d'un autre voyageur et revenir ; ajouter la réponse et
+  reprendre la marque faisait partir ce texte chez le mauvais voyageur.
+  **Et un texte TAPÉ ailleurs, sans marque, aussi** (review 2, constat 1) : la
+  page compte ses changements de conversation (`etat.changementsDeFil`) ; si
+  l'hôte est passé par un autre fil ET que la saisie a changé, la rédaction
+  est jetée, avec la note « vérifiez-la ou videz-la, puis relancez ». Un coup
+  d'œil, saisie intacte, ne coûte rien. **Et la relance est REFUSÉE tant que
+  l'hôte n'a pas touché la saisie** (review 3, constat 1) : sinon le clic que
+  la note demande ajoutait la réponse au texte de l'autre voyageur.
+- **L'engagement de clôture tombe** quand on quitte le fil de la réponse
+  rédigée, quand la saisie est vidée, ou quand une rédaction suivante est
+  jetée (review 3, constat 2) : un « je reviens vers vous » ne clôt jamais la
+  question. Laisser une question ouverte ne coûte rien ; la clore à tort la
+  fait disparaître d'« À valider ».
+- Une clôture refusée parce que le voyageur a posé une nouvelle question
+  entre-temps se DIT dans le fil (« elle reste dans À valider »).
+- **Une rédaction ne tient pas la page** : délai de 30 s
+  (`DELAI_REDACTION_MS`), et changer de conversation libère le champ figé par
+  le bouton « IA ».
+- **Pas de carte pour les tâches de secours du cron** (sortie illisible, garde
+  emoji) : leur question est le message entier du voyageur.
+- Règles pures : `lib/guestflow/rediger.js` (serveur) et
+  `shared/info-manquante.js` (page), copies tenues par
+  `tests/info-manquante-regles.test.js` ; la page par
+  `tests/info-manquante-dom.test.js` (banc `tests/outils/banc-messages.js`).

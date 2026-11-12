@@ -127,11 +127,21 @@
       <button type="button" class="btn btn--secondary btn--icon" data-bind="proposer" data-i18n-attr="aria-label:messages.propose;title:messages.propose">
         <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
       </button>
+      <!-- Le bouton « IA » (spec-info-manquante-choix.md §2 B) : la réponse
+           brute de l'hôte, rédigée par l'IA dans la langue du voyageur. Il
+           n'apparaît que si du texte est tapé ; « Annuler » rend le texte de
+           l'hôte tant qu'il n'a pas retouché la version rédigée. Rien ne part. -->
+      <button type="button" class="btn btn--secondary" data-bind="ia-rediger" hidden
+        data-i18n-attr="aria-label:messages.ia.aria;title:messages.ia.aria" data-i18n="messages.ia.bouton"></button>
+      <button type="button" class="btn btn--secondary" data-bind="ia-annuler" hidden data-i18n="messages.ia.annuler"></button>
       <button type="button" class="btn btn--primary btn--icon" data-bind="envoyer" data-i18n-attr="aria-label:messages.send;title:messages.send">
         <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-send"/></svg>
       </button>
     </div>
     <p class="caption muted" style="margin: 0; padding: 0 20px 10px" data-bind="saisie-etat" hidden></p>
+    <!-- L'état de la rédaction par l'IA (carte et bouton « IA ») : il appartient
+         à UNE conversation et ne se montre que dans la sienne. -->
+    <p class="caption muted" style="margin: 0; padding: 0 20px 10px" data-bind="info-etat" role="status" hidden></p>
   </section>
 </main>
 
@@ -169,6 +179,8 @@ import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOU
   from '/shared/messages-programmes.js'
 import { departEvaluable } from '/shared/calendrier-resa.js'
 import { delaiDirect, listeARelire, apresDuFil, fusionnerMessages, fusionnerTaches, aDejaSaLigne, RYTHME } from '/shared/messages-direct.js'
+import { infoAAfficher, etatInitial as etatInfoInitial, memeCarte, choisir as choisirInfo, preciser as preciserInfo, pretARediger, corpsChoix, iaPossible, corpsTexte, cleErreur, relireApres, REPONSES as REPONSES_INFO, MAX_PRECISION as MAX_PRECISION_INFO, DELAI_REDACTION_MS }
+  from '/shared/info-manquante.js'
 import { confirmerDansLaPage, OCCUPEE } from '/shared/confirmer.js'
 
 initErrorHandler()
@@ -544,6 +556,8 @@ function renderFil () {
     // « selectionnez une conversation ». Invisible sur telephone, visible sur
     // ordinateur.
     peindreEcheanceSaisie()
+    // Même raison pour l'état de la rédaction par l'IA : il appartient à un fil.
+    peindreSaisieIA()
     return
   }
   document.body.dataset.fil = '1'
@@ -671,6 +685,11 @@ function renderFil () {
     b.addEventListener('click', () => rejeterProposition(b.dataset.rejeter)))
   deroule.querySelectorAll('[data-reprendre]').forEach(b =>
     b.addEventListener('click', () => reprendreEcheance(b.dataset.reprendre)))
+  // Information manquante (spec-info-manquante-choix.md §2 A) : la carte en fin
+  // de fil, donc sous le dernier message du voyageur — elle ne se montre que si
+  // l'hôte n'a pas répondu depuis la tâche.
+  deroule.insertAdjacentHTML('beforeend', carteInfo(c))
+  brancherCarteInfo(c, deroule)
   // Dette 67 : au sejour TERMINE, la proposition « Evaluer {prenom} ? » en
   // fin de fil — par le BUS du coeur seulement (meme writer que la fiche
   // resa : la fenetre standard avis.evaluer et ses boutons a niveaux).
@@ -691,6 +710,7 @@ function renderFil () {
   const btnIA = $('[data-bind="proposer"]')
   btnIA.disabled = enPause
   btnIA.title = enPause ? t('messages.paused') : t('messages.propose')
+  peindreSaisieIA()
 }
 
 // ─── Envoi manuel (etape 2) ──────────────────────────────────────────────────
@@ -802,6 +822,10 @@ async function lancerEnvoi (c, entree) {
   try {
     const origine = entree.valideTache ? 'ia_modifiee' : 'hote'
     await posterMessage(c, entree.texte, origine)
+    // Information manquante : la réponse rédigée depuis la carte est PARTIE, la
+    // tâche se clôt (spec §2 A). Seulement l'entrée née de ce geste — jamais le
+    // « Réessayer » d'un vieux message du même fil.
+    if (entree.info) cloreInfoTraitee(c, entree.info)
     // Parti : la bulle definitive viendra du coeur (double ecriture messages).
     const liste = envoisDe(c.bookId)
     liste.splice(liste.indexOf(entree), 1)
@@ -858,12 +882,306 @@ async function envoyer () {
   // proposition a son premier envoi reussi (retry compris), aucune autre.
   const ed = etat.enEdition
   if (ed && String(ed.bookId) === String(c.bookId)) entree.valideTache = ed.tacheId
+  // Une réponse rédigée depuis la carte « Information manquante » : CETTE
+  // entrée clora la tâche à son premier envoi réussi (retry compris).
+  const eng = etat.infoEngagee
+  if (eng && String(eng.bookId) === String(c.bookId)) { entree.info = { tacheId: eng.tacheId, maj: eng.maj }; etat.infoEngagee = null }
+  // Le texte part : « Annuler » et la note de rédaction n'ont plus d'objet.
+  etat.iaAnnuler = null
+  etat.saisieDouteuse = null
+  if (etat.infoNote && String(etat.infoNote.bookId) === String(c.bookId)) etat.infoNote = null
   envoisDe(c.bookId).push(entree)
   lancerEnvoi(c, entree)
 }
 function reessayer (c, index) {
   const entree = (etat.envois.get(String(c.bookId)) || [])[index]
   if (entree) lancerEnvoi(c, entree)
+}
+
+// ─── Information manquante : Oui / Non / Autre, l'IA rédige ─────────────────
+// Spec docs/specs/spec-info-manquante-choix.md, étape 1 (A : la carte ; B : le
+// bouton « IA » de la saisie). Règles pures dans shared/info-manquante.js ; ici,
+// l'appel et le rendu. ⚠ RIEN NE PART D'ICI : le texte rédigé va dans la
+// saisie, et l'envoi reste le bouton « Envoyer », avec tout ce qui l'entoure.
+//
+// État (absent tant que rien n'a servi) :
+//   etat.infoCarte   { bookId, tacheId, questions, choix } — la carte affichée
+//   etat.iaEnCours   bookId d'une rédaction en cours (une seule à la fois)
+//   etat.infoEngagee { bookId, tacheId } — la saisie porte la réponse de la carte
+//   etat.iaAnnuler   { bookId, avant, apres, marque } — « Annuler » du bouton IA
+//   etat.infoNote    { bookId, cle } — la note sous la saisie, pour CE fil
+
+// `infos` est rendu EN ENTIER à chaque relecture du fil en direct.
+function majInfos (c, infos) {
+  if (!Array.isArray(infos)) return false
+  const avant = JSON.stringify(c.infos || [])
+  c.infos = infos
+  return avant !== JSON.stringify(infos)
+}
+
+// Les clés en toutes lettres : le contrôle des traductions lit les clés
+// littérales de la page, une clé fabriquée lui échappe.
+const LIBELLE_REPONSE_INFO = { oui: 'messages.info.oui', non: 'messages.info.non', autre: 'messages.info.autre' }
+
+function carteInfo (c) {
+  // Sans droit d'écriture, ni carte ni rédaction : rien ne pourrait partir (le
+  // serveur refuse de toute façon, 403).
+  if (!peutEcrireMessages()) return ''
+  const info = infoAAfficher(c.infos, c.messages)
+  if (!info) return ''
+  const ici = String(c.bookId)
+  // Une tâche COMPLÉTÉE par le cron (nouvelles questions) remet les choix à zéro :
+  // ils ont été pris sur des questions qui ne sont plus celles-là.
+  if (!etat.infoCarte || etat.infoCarte.bookId !== ici || !memeCarte(etat.infoCarte, info)) {
+    etat.infoCarte = { ...etatInfoInitial(info), bookId: ici }
+  }
+  const e = etat.infoCarte
+  const enCours = etat.iaEnCours === ici
+  const enPause = etat.pauses[String(c.propertyId)] === true
+  const off = enCours ? ' disabled' : ''
+  const lignes = e.questions.map((q, i) => {
+    const ch = e.choix[i]
+    const pilules = REPONSES_INFO.map(r => `<button type="button" class="tab" aria-pressed="${ch.reponse === r}" data-info-choix="${i}" data-info-reponse="${r}"${off}>${esc(t(LIBELLE_REPONSE_INFO[r]))}</button>`).join('')
+    const precision = ch.reponse === 'autre'
+      ? `<input type="text" maxlength="${MAX_PRECISION_INFO}" data-info-precision="${i}" value="${esc(ch.precision)}" placeholder="${esc(t('messages.info.precision'))}" aria-label="${esc(t('messages.info.precision'))}"${off}>`
+      : ''
+    return `<div class="info-carte__q"><span>${esc(q)}</span><span class="msg-pilules" role="group" aria-label="${esc(q)}">${pilules}</span>${precision}</div>`
+  }).join('')
+  // ⚠ AUCUN BLANC ENTRE LES BALISES : `.bulle` est en `pre-wrap` (voir la carte
+  // de proposition, recette du 28 octobre 2026). `.info-carte` le remet à
+  // `normal`, et le gabarit reste collé quand même.
+  return `<div class="bulle bulle--proposition info-carte" data-bind="info-carte"><span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.info.titre'))}</span><span class="caption muted">${esc(t(enPause ? 'messages.info.erreur.en_pause' : 'messages.info.aide'))}</span>${lignes}<span class="bulle__actions"><button type="button" class="btn btn--primary" data-info-rediger${!pretARediger(e) || enCours || enPause ? ' disabled' : ''}>${icone('i-ai')}${esc(t(enCours ? 'messages.info.redaction' : 'messages.info.rediger'))}</button></span></div>`
+}
+
+function brancherCarteInfo (c, deroule) {
+  const carte = deroule.querySelector('[data-bind="info-carte"]')
+  if (!carte) return
+  carte.querySelectorAll('[data-info-choix]').forEach(b => b.addEventListener('click', () => {
+    const i = Number(b.dataset.infoChoix)
+    etat.infoCarte = choisirInfo(etat.infoCarte, i, b.dataset.infoReponse)
+    renderFil()
+    if (b.dataset.infoReponse === 'autre') $('[data-list="fil"]').querySelector(`[data-info-precision="${i}"]`)?.focus()
+  }))
+  const rediger = carte.querySelector('[data-info-rediger]')
+  carte.querySelectorAll('[data-info-precision]').forEach(champ => {
+    // À la frappe, PAS de rendu : le champ garderait mal son curseur. On met
+    // l'état à jour et on réveille « Rédiger la réponse » sur place.
+    champ.addEventListener('input', () => {
+      etat.infoCarte = preciserInfo(etat.infoCarte, Number(champ.dataset.infoPrecision), champ.value)
+      if (rediger) rediger.disabled = !pretARediger(etat.infoCarte) || etat.iaEnCours != null || etat.pauses[String(c.propertyId)] === true
+    })
+    champ.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); redigerInfo(c) } })
+  })
+  rediger?.addEventListener('click', () => redigerInfo(c))
+}
+
+// « Rédiger la réponse » : le texte va À LA SUITE de ce qui est tapé, comme
+// « Utiliser » une réponse prête, et il est MARQUÉ pour ce voyageur (la saisie
+// est partagée entre les fils : il ne doit pas partir chez un autre).
+async function redigerInfo (c) {
+  const ici = String(c.bookId)
+  const e = etat.infoCarte
+  if (!e || e.bookId !== ici || !pretARediger(e) || etat.iaEnCours != null || !peutEcrireMessages()) return
+  if (etat.pauses[String(c.propertyId)] === true) return
+  const zone = $('[data-bind="texte"]')
+  if (!zone) return
+  if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
+  if (saisieDouteuse(ici)) { etat.infoNote = { bookId: ici, cle: 'messages.info.erreur.saisie_changee' }; peindreSaisieIA(); return }
+  // La VERSION de la tâche sur laquelle l'hôte a tranché : la clôture ne vaudra
+  // que pour elle (review 1, constat 4).
+  const maj = ((c.infos || []).find(x => String(x.id) === String(e.tacheId)) || {}).maj || null
+  // Ce que la page était au clic : le fil, et la saisie.
+  const fil0 = etat.changementsDeFil || 0
+  const saisie0 = zone.value
+  etat.iaEnCours = ici
+  etat.infoNote = null
+  renderFil()
+  try {
+    const r = await avecDelaiIA(appel('/api/guestflow-rediger', corpsChoix(e, c.bookId)))
+    // La conversation a changé pendant la rédaction : ce texte est celui d'un
+    // AUTRE voyageur, il ne va pas dans cette saisie. La note attend le retour
+    // dans ce fil.
+    if (String(etat.ouverte) !== ici) { jeterRedaction(ici, true); return }
+    // ⚠ L'HÔTE EST PASSÉ PAR UN AUTRE FIL ET LA SAISIE A CHANGÉ (review 2,
+    // constat 1, mesuré) : un texte TAPÉ chez Marie, sans marque, revenait
+    // ici ; la réponse d'Ana s'y ajoutait, la marque passait à Ana, et la
+    // note disait « relisez, puis envoyez ». On ne devine pas à qui est ce
+    // texte : la rédaction est jetée, et on le dit. Un simple coup d'œil à un
+    // autre fil, saisie intacte, ne coûte rien.
+    if ((etat.changementsDeFil || 0) !== fil0 && zone.value !== saisie0) { jeterRedaction(ici, true); return }
+    // ⚠ ET LA SAISIE A PU ÊTRE REMPLIE POUR UN AUTRE VOYAGEUR ENTRE-TEMPS
+    // (review 1, constat 1, BLOQUANT, reproduit) : aller chez Marie,
+    // « Utiliser » son wifi, revenir chez Ana — le texte de Marie reste, marqué
+    // pour elle. Y ajouter la réponse d'Ana et reprendre la marque faisait
+    // partir le wifi de Marie chez Ana. La garde du clic se refait au retour.
+    if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
+    const avant = zone.value.replace(/\s+$/, '')
+    zone.value = avant ? avant + '\n' + r.texte : String(r.texte)
+    const m = etat.saisieRemplie
+    if (m && String(m.bookId) === ici) { m.textes.push(String(r.texte)); m.vide = false }
+    else etat.saisieRemplie = { bookId: ici, textes: [String(r.texte)] }
+    ajusterHauteur(zone)
+    etat.infoEngagee = { bookId: ici, tacheId: e.tacheId, maj }
+    etat.infoNote = { bookId: ici, cle: 'messages.info.pret' }
+    zone.focus()
+    try { zone.setSelectionRange(zone.value.length, zone.value.length) } catch {}
+  } catch (err) {
+    etat.infoNote = { bookId: ici, cle: cleErreur(err.code) }
+    // La tâche a bougé ailleurs (traitée, complétée) : la carte se relit au
+    // lieu d'inviter à répondre à une question qui n'est plus celle-là.
+    if (relireApres(err.code)) {
+      if (err.code !== 'questions_changees') c.infos = (c.infos || []).filter(x => String(x.id) !== String(e.tacheId))
+      relireDirect()
+    }
+    if (err.status !== 409 && err.status !== 429) logger.error('Messages', 'redaction information manquante', err)
+  } finally {
+    etat.iaEnCours = null
+    renderFil()
+  }
+}
+
+// Le bouton « IA » : le texte de l'hôte est REMPLACÉ par sa version rédigée, et
+// « Annuler » le rend tant que la version rédigée n'a pas été retouchée.
+async function redigerBrouillon () {
+  const c = conversationOuverte()
+  const zone = $('[data-bind="texte"]')
+  if (!c || !zone || etat.iaEnCours != null || !peutEcrireMessages() || !iaPossible(zone.value)) return
+  if (etat.pauses[String(c.propertyId)] === true) return
+  if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
+  const ici = String(c.bookId)
+  if (saisieDouteuse(ici)) { etat.infoNote = { bookId: ici, cle: 'messages.info.erreur.saisie_changee' }; peindreSaisieIA(); return }
+  const avant = zone.value
+  const fil0 = etat.changementsDeFil || 0
+  etat.iaEnCours = ici
+  etat.infoNote = null
+  etat.iaAnnuler = null
+  // Pendant la rédaction, le champ ne bouge pas : sinon ce que l'hôte taperait
+  // entre-temps serait écrasé par la version rédigée.
+  zone.readOnly = true
+  peindreSaisieIA()
+  try {
+    const r = await avecDelaiIA(appel('/api/guestflow-rediger', corpsTexte(c.bookId, avant)))
+    // Le champ a bougé (autre fil, ou frappe après le retour dans ce fil) : la
+    // version rédigée n'écrase rien, et on le dit (review 2, constat 5).
+    if (String(etat.ouverte) !== ici || zone.value !== avant) {
+      // Douteuse seulement si l'hôte est passé par un autre fil : une frappe
+      // dans CE fil est son propre texte.
+      jeterRedaction(ici, (etat.changementsDeFil || 0) !== fil0)
+      return
+    }
+    // Même garde qu'au clic, refaite au retour (review 1, constat 1).
+    if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
+    const marque = etat.saisieRemplie
+    zone.value = String(r.texte)
+    // La version rédigée est écrite POUR ce voyageur (sa langue, son prénom) :
+    // elle porte la marque, comme un texte posé par « Utiliser ».
+    etat.saisieRemplie = { bookId: ici, textes: [zone.value] }
+    etat.iaAnnuler = { bookId: ici, avant, apres: zone.value, marque }
+    ajusterHauteur(zone)
+    zone.focus()
+    try { zone.setSelectionRange(zone.value.length, zone.value.length) } catch {}
+  } catch (err) {
+    etat.infoNote = { bookId: ici, cle: cleErreur(err.code) }
+    if (err.status !== 409 && err.status !== 429) logger.error('Messages', 'redaction IA de la saisie', err)
+  } finally {
+    zone.readOnly = false
+    etat.iaEnCours = null
+    peindreSaisieIA()
+  }
+}
+
+// Une rédaction JETÉE (review 3, constats 1 et 2) : la note, l'engagement de
+// clôture qui tombe (la réponse de la carte n'est plus dans la saisie), et —
+// si l'hôte est passé par un autre fil — la saisie DOUTEUSE : elle peut porter
+// un texte écrit pour un autre voyageur, et relancer y ajouterait la réponse.
+// La relance est refusée tant que l'hôte n'a pas touché la saisie (frappe ou
+// effacement) : c'est lui qui dit à qui est ce texte, pas la page.
+function jeterRedaction (ici, douteuse) {
+  etat.infoNote = { bookId: ici, cle: 'messages.info.erreur.saisie_changee' }
+  if (etat.infoEngagee && String(etat.infoEngagee.bookId) === ici) etat.infoEngagee = null
+  if (douteuse) etat.saisieDouteuse = { bookId: ici }
+}
+function saisieDouteuse (ici) {
+  const d = etat.saisieDouteuse
+  const zone = $('[data-bind="texte"]')
+  return !!(d && String(d.bookId) === String(ici) && zone && zone.value.trim())
+}
+
+// Une frappe dans la saisie (écouteur `input`, branché par `init`).
+function apresFrappeSaisie () {
+  const zone = $('[data-bind="texte"]')
+  if (!zone) return
+  if (etat.iaAnnuler && zone.value !== etat.iaAnnuler.apres) etat.iaAnnuler = null
+  // L'hôte a touché la saisie : il l'a vérifiée, la relance redevient permise.
+  etat.saisieDouteuse = null
+  // Saisie vidée : la réponse de la carte n'y est plus, l'envoi suivant ne la
+  // clora pas.
+  if (!zone.value.trim() && etat.infoEngagee && String(etat.infoEngagee.bookId) === String(etat.ouverte)) etat.infoEngagee = null
+  peindreSaisieIA()
+}
+
+function annulerIA () {
+  const a = etat.iaAnnuler
+  const zone = $('[data-bind="texte"]')
+  etat.iaAnnuler = null
+  if (a && zone && String(a.bookId) === String(etat.ouverte) && zone.value === a.apres) {
+    zone.value = a.avant
+    etat.saisieRemplie = a.marque
+    ajusterHauteur(zone)
+    zone.focus()
+  }
+  peindreSaisieIA()
+}
+
+// Le bouton « IA », « Annuler » et la note : repeints à chaque rendu du fil et
+// à chaque frappe, pour le fil OUVERT seulement.
+function peindreSaisieIA () {
+  const btn = $('[data-bind="ia-rediger"]'), ann = $('[data-bind="ia-annuler"]')
+  const note = $('[data-bind="info-etat"]'), zone = $('[data-bind="texte"]')
+  if (!btn || !ann || !note || !zone) return
+  const c = conversationOuverte()
+  const ici = c ? String(c.bookId) : null
+  const enPause = !!c && etat.pauses[String(c.propertyId)] === true
+  btn.hidden = !c || !peutEcrireMessages() || !(iaPossible(zone.value) || etat.iaEnCours === ici)
+  btn.disabled = etat.iaEnCours != null || enPause
+  btn.textContent = t(etat.iaEnCours === ici ? 'messages.ia.redaction' : 'messages.ia.bouton')
+  btn.title = enPause ? t('messages.paused') : t('messages.ia.aria')
+  const a = etat.iaAnnuler
+  ann.hidden = !(a && ici && a.bookId === ici && zone.value === a.apres)
+  const n = etat.infoNote
+  if (n && ici && n.bookId === ici) { note.hidden = false; note.textContent = t(n.cle) }
+  else { note.hidden = true; note.textContent = '' }
+}
+
+// La réponse rédigée depuis la carte est partie : la tâche se clôt. La carte,
+// elle, est déjà retirée par la bulle de l'envoi (l'hôte a répondu depuis la
+// tâche). Un 409 dit qu'elle l'était déjà : rien à signaler.
+// ⚠ La version et le séjour partent avec la clôture : si le voyageur a écrit
+// une nouvelle question entre la rédaction et l'envoi, le serveur refuse (409
+// `questions_changees`) et la tâche reste dans « À valider » (review 1, constat 4).
+function cloreInfoTraitee (c, info) {
+  c.infos = (c.infos || []).filter(x => String(x.id) !== String(info.tacheId))
+  appel('/api/messages', { action: 'info_traitee', task_id: String(info.tacheId), maj: info.maj || null, booking_id: String(c.bookId) })
+    .catch(err => {
+      // La réponse est partie, la tâche reste ouverte : l'hôte le lit dans
+      // ce fil (review 2, constat 4), au lieu d'un refus muet.
+      if (err.code === 'questions_changees') {
+        etat.infoNote = { bookId: String(c.bookId), cle: 'messages.info.cloture_refusee' }
+        peindreSaisieIA()
+        return
+      }
+      if (err.status !== 409) logger.error('Messages', 'cloture information manquante', err)
+    })
+}
+
+// Une rédaction ne tient pas la page : au-delà du délai, l'écran l'abandonne
+// (review 1, constat 2). Une réponse tardive est ignorée — la course est jouée.
+function avecDelaiIA (promesse) {
+  let minuteur
+  const delai = new Promise((_, rejeter) => {
+    minuteur = setTimeout(() => { const e = new Error('delai'); e.code = 'ia_indisponible'; rejeter(e) }, DELAI_REDACTION_MS)
+  })
+  return Promise.race([promesse, delai]).finally(() => clearTimeout(minuteur))
 }
 
 // ─── Propositions : Envoyer / Modifier / Rejeter (etape 3) ───────────────────
@@ -3592,6 +3910,19 @@ function ouvrir (bookId) {
     etat.enEdition = null
   }
   rangerSaisieRemplie(bookId)
+  // Une rédaction « IA » en cours ne fige pas le champ d'une AUTRE conversation
+  // (review 1, constat 2) : sa réponse sera jetée, le champ ayant changé de fil.
+  if (etat.iaEnCours != null && String(etat.iaEnCours) !== String(bookId)) $('[data-bind="texte"]').readOnly = false
+  // Chaque changement de conversation se COMPTE : une rédaction qui revient
+  // sait si l'hôte est passé ailleurs pendant qu'elle tournait (review 2,
+  // constat 1).
+  if (String(bookId) !== String(etat.ouverte)) etat.changementsDeFil = (etat.changementsDeFil || 0) + 1
+  // Quitter le fil d'une réponse rédigée depuis la carte : son texte peut être
+  // retiré ici (`rangerSaisieRemplie`), et l'envoi suivant n'est plus forcément
+  // cette réponse. On ne clora pas sur un « je reviens vers vous » (review 3,
+  // constat 2) — une question laissée ouverte ne coûte rien, une question
+  // close à tort disparaît d'« À valider ».
+  if (etat.infoEngagee && String(etat.infoEngagee.bookId) !== String(bookId)) etat.infoEngagee = null
   etat.ouverte = bookId
   // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry
   // du 30 octobre 2026 (« le volet s'est encore ouvert sur Maison Jardin »), et
@@ -3706,6 +4037,8 @@ function appliquerFil (c, r, lueA = ++direct.tic) {
     .map(x => ({ id: x.bookId, propId: x.propertyId, departure: String(x.lastNight).slice(0, 10) }))
   const servies = tachesOuvertes(Array.isArray(r.taches) ? r.taches : [], { bookings: sejours, aujourdHui: etat.aujourdHui })
   const t = fusionnerTaches(etat.taches, c.bookId, servies, etat.enEdition && etat.enEdition.tacheId, direct.closes, lueA)
+  // Information manquante : seule `infos` a changé, le fil se repeint (carte).
+  if (majInfos(c, r.infos) && !f.ajoutes && !f.remplaces && !t.change) { rafraichirFil(); return }
   if (!f.ajoutes && !f.remplaces && !t.change) return
   c.messages = f.messages
   const plusRecent = apresDuFil(c.messages)
@@ -3948,6 +4281,11 @@ async function init () {
   })
   $('[data-bind="envoyer"]').addEventListener('click', envoyer)
   $('[data-bind="proposer"]').addEventListener('click', proposer)
+  // Le bouton « IA » (spec-info-manquante-choix.md §2 B) : visible dès qu'un
+  // texte est tapé ; une retouche de la version rédigée retire « Annuler ».
+  $('[data-bind="ia-rediger"]').addEventListener('click', redigerBrouillon)
+  $('[data-bind="ia-annuler"]').addEventListener('click', annulerIA)
+  zoneTexte.addEventListener('input', apresFrappeSaisie)
   // Au téléphone, le champ prend TOUTE LA LARGEUR pendant la frappe, les
   // boutons passent dessous (recette du 7 novembre 2026, demande de Thierry :
   // avec le livre en plus, le champ n'avait plus qu'un tiers de la largeur).
