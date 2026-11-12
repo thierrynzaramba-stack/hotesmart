@@ -2177,13 +2177,15 @@ function ouvrirFicheResa (bienId, resaId) {
     zone.querySelector('[data-fac-copier]')?.addEventListener('click', () => copierLienFacture(zone))
     zone.querySelector('[data-fac-saisir]')?.addEventListener('click', () => ouvrirSaisieFacture(zone, dest))
   }
-  // ⚠ LA ZONE D'ANNONCE N'EST ECRITE QUE SI LE TEXTE CHANGE (review 2 de 2b,
-  // constat 6) : reecrire le meme texte la faisait annoncer deux fois.
+  // ⚠ LA ZONE D'ANNONCE EST VIDEE AU DEPART DE CHAQUE GESTE, PUIS ECRITE
+  // (review 3 de 2b) : deux gestes au meme resultat — deux « Copier », deux
+  // refus — donnent deux annonces. Elle n'est jamais reecrite par une
+  // relecture (`peindreFacture` ne l'appelle pas) : c'etait la cause de la
+  // double annonce (review 2, constat 6).
   function dire (zone, retour) {
     const el = zone.querySelector('[data-fac-retour]')
     if (!el) return
-    const texte = retour ? t(retour.cle, retour.vars || {}) : ''
-    if (el.textContent !== texte) el.textContent = texte
+    el.textContent = retour ? t(retour.cle, retour.vars || {}) : ''
     el.classList.toggle('msg-echec', !!(retour && retour.erreur))
   }
   function montrerLien (zone, lien) {
@@ -2235,6 +2237,7 @@ function ouvrirFicheResa (bienId, resaId) {
   }
   async function envoyerLienFacture (zone) {
     if (!window.confirm(t('cal.fac_confirm_envoi'))) return
+    dire(zone, null)
     boutonsFacture(zone, false)
     try {
       const rep = await posterFacture({ action: 'envoyer_lien' })
@@ -2254,6 +2257,7 @@ function ouvrirFicheResa (bienId, resaId) {
     }
   }
   async function copierLienFacture (zone) {
+    dire(zone, null)
     boutonsFacture(zone, false)
     const nouveau = !lienCourant
     // Rien n'est attendu avant `demanderCopie` : c'est la condition de Safari.
@@ -2321,6 +2325,7 @@ function ouvrirFicheResa (bienId, resaId) {
       // et le serveur la refusait sur un champ que l'hote ne voyait plus.
       if (destinataire.type !== 'societe') { destinataire.tva = ''; destinataire.siren = '' }
       const libelles = Object.fromEntries(CHAMPS_DEST.map(([c, cle]) => [c, t(cle)]))
+      dire(zone, null)
       boutonsFacture(zone, false)
       try {
         await posterFacture({ action: 'saisir', destinataire })

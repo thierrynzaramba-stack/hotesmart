@@ -33,6 +33,7 @@ const M_RES = '44444444-4444-4444-8444-444444444444'     // membre : réservatio
 const M_TOUT = '55555555-5555-4555-8555-555555555555'    // membre : réservations ET messages en écriture
 const M_AILLEURS = '66666666-6666-4666-8666-666666666666' // membre : tout en écriture, mais sur Ofuro Futari seulement
 const M_FACT = '77777777-7777-4777-8777-777777777777'     // membre : « facturation » en écriture, rien d'autre
+const M_ICI = '88888888-8888-4888-8888-888888888888'      // membre : tout en écriture, mais sur La bulle seulement
 const BIEN = 'aaaaaaaa-0000-4000-8000-000000000001'
 const BIEN_BX = 'aaaaaaaa-0000-4000-8000-000000000002'  // Beds24
 const BIEN_ARCH = 'aaaaaaaa-0000-4000-8000-000000000003'
@@ -283,7 +284,8 @@ const MEMBRES = [
   PERM('p-res', M_RES, { reservations: 'write', messages: 'read' }),
   PERM('p-tout', M_TOUT, { reservations: 'write', messages: 'write' }),
   PERM('p-ailleurs', M_AILLEURS, { reservations: 'write', messages: 'write', property_scope: 'list', property_ids: [BIEN_BX], property_refs: ['PX'] }),
-  PERM('p-fact', M_FACT, { facturation: 'write' })
+  PERM('p-fact', M_FACT, { facturation: 'write' }),
+  PERM('p-ici', M_ICI, { reservations: 'write', messages: 'write', property_scope: 'list', property_ids: [BIEN], property_refs: ['P1'] })
 ]
 const PARC = () => ({
   properties: [
@@ -320,7 +322,7 @@ const PARC = () => ({
 })
 
 const JETONS = { 'jeton-a': A, 'jeton-autre': AUTRE, 'jeton-lecture': M_LECTURE, 'jeton-res': M_RES, 'jeton-tout': M_TOUT,
-  'jeton-ailleurs': M_AILLEURS, 'jeton-fact': M_FACT }
+  'jeton-ailleurs': M_AILLEURS, 'jeton-fact': M_FACT, 'jeton-ici': M_ICI }
 const RECHARGES = ['../api/calendar', '../api/factures-voyageur', '../lib/require-permission', '../lib/permissions',
   '../lib/factures-voyageur', '../lib/calendrier-writer']
 
@@ -942,4 +944,49 @@ test('review 2, constat 6 : la zone d\'annonce n\'est écrite qu\'une fois par m
     assert.equal(annonce.textContent, 'Lien copié.')
     assert.equal(ecritures, 1, 'une seule écriture, malgré la relecture')
   } finally { b.fermer() }
+})
+
+// ─── Review 3 : le périmètre de P2 septies, et l'annonce de chaque geste ───
+
+test('review 3 : P2 septies et périmètre — limité au bien de la DEMANDE : rien ; limité au bien de la RÉSERVATION : la demande', async () => {
+  // R_DEPL : réservation sur La bulle (BIEN), demande rattachée à Ofuro Futari (BIEN_BX).
+  const fiches = monter('../api/calendar')
+  try {
+    const ailleurs = await fiches.appeler(fiche('R_DEPL', BIEN_BX, { jeton: 'jeton-ailleurs' }))
+    assert.equal(ailleurs.code, 404, 'par le bien de la demande, la réservation n\'est pas lisible')
+    assert.equal(ailleurs.corps.facture, undefined)
+    assert.equal((await fiches.appeler(fiche('R_DEPL', BIEN, { jeton: 'jeton-ailleurs' }))).code, 403)
+    const ici = await fiches.appeler(fiche('R_DEPL', BIEN, { jeton: 'jeton-ici' }))
+    assert.equal(ici.code, 200)
+    assert.equal(ici.corps.facture.statut, 'lien_envoye', 'la demande suit le logement du séjour')
+    assert.deepEqual(ici.corps.facture.gestes, { envoyer: true, copier: true, saisir: true })
+  } finally { fiches.fini() }
+  const gestes = monter('../api/factures-voyageur')
+  try {
+    for (const action of ['copier_lien', 'envoyer_lien', 'saisir']) {
+      const r = await gestes.appeler({ methode: 'POST', jeton: 'jeton-ailleurs', corps: { action, booking: 'R_DEPL',
+        destinataire: { type: 'particulier', nom: 'X', adresse1: 'Y', ville: 'Z', pays: 'France' } } })
+      assert.equal(r.code, 403, action)
+    }
+    assert.equal(gestes.etat.rpcs.length, 0, 'aucun jeton')
+    assert.equal(gestes.etat.envois.length, 0, 'aucun message')
+  } finally { gestes.fini() }
+})
+
+test('review 3 : deux gestes au même résultat donnent DEUX annonces (deux « Copier », deux refus)', async () => {
+  for (const [rep, attendu] of [[{ ok: true, lien: LIEN }, 'Lien copié.'],
+    [{ __statut: 429, __corps: { error: 'trop_rapproche', motif: 'trop_rapproche' } }, 'Un lien vient d\'être créé : réessayez dans 30 secondes.']]) {
+    const b = bancFiche({ reponses: { copier_lien: rep } })
+    try {
+      const zone = await ouvrirFiche(b)
+      const annonce = zone.querySelector('[data-fac-retour]')
+      const dits = []
+      new b.window.MutationObserver(() => { if (annonce.textContent) dits.push(annonce.textContent) }).observe(annonce, { childList: true, characterData: true, subtree: true })
+      for (let n = 0; n < 2; n++) {
+        zone.querySelector('[data-fac-copier]').click()
+        for (let i = 0; i < 8; i++) await attendre()
+      }
+      assert.deepEqual(dits, [attendu, attendu])
+    } finally { b.fermer() }
+  }
 })

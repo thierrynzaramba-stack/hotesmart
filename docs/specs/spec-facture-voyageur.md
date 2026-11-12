@@ -546,7 +546,10 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    clair à l'hôte quand le message n'est pas sûrement arrivé (P5).
    ⚠ **Étape 3 (P2 septies)** : l'entité qui émet se résout sur le logement du
    SÉJOUR (bien de la réservation, relu à l'émission), pas sur le
-   `property_uuid` de la demande.
+   `property_uuid` de la demande. **Et la page du voyageur aussi**
+   (`api/facture-publique.js`, `lireSejour`, review 3 de 2b) : le nom du
+   logement se lit par la réservation (`bookings_snapshot.property_id` →
+   `properties`), pas par `demande.property_uuid`.
    **Ce que 2b livre** (11 nov. 2026, fichiers accordés par le chef de file) :
    le bloc « Facture du voyageur » de la fiche de réservation — le même
    composant à l'ordinateur et au téléphone — avec l'état de la demande, le
@@ -1117,8 +1120,41 @@ l'endpoint appliquent la MÊME règle (droits et gestes du bien de la
 réservation) ; 3 la promesse du Blob a son gestionnaire ; 4 test d'une
 relecture échouée après « Envoyer » et après « Copier » ; 5 test scindé : 403
 sans aucune lecture de facture, 404 sans rien qui sorte ; 6 la zone d'annonce
-n'est écrite que si le texte change. Mutations : chaque correctif retiré fait
-rougir son test (4 sur 4, plus la règle P2 septies).
+n'est écrite que si le texte change (⚠ corrigé par la review 3 : cette
+condition rendait muet un second geste ; la double annonce venait de la ligne
+déjà retirée). Mutations : les correctifs 3 et 4, et la règle P2 septies,
+retirés, font rougir leurs tests ; pour le 6, voir la review 3.
+
+#### Review 3 — la dernière (sous-agent, 12 novembre 2026, sur les correctifs de la review 2)
+
+Arbre `/home/claude/hotesmart-fv2b`, branche `facture-voyageur-etape-2b`,
+plage `6d16f3c95145d9a89966278dead13119b8213a05..970aa447b5030fb81fad336f2191973807a366c7`
+(6 fichiers). **Aucun constat de sécurité, aucun double envoi.** P2 septies
+mesuré sur 17 cas : les droits suivent le bien de la réservation, sur la fiche
+comme sur l'endpoint ; une réservation lisible ne mène qu'à la demande du même
+identifiant dans le même compte (deux index uniques).
+
+1. MINEUR — le correctif 6 (écrire seulement si le texte change) rendait
+   MUET un second geste au même résultat (deux « Copier », deux 429) ; la
+   double annonce venait de la ligne déjà retirée.
+2. MINEUR — la trace de la review 2 affirmait « 4 sur 4 » : faux pour le 6.
+3. MINEUR — P2 septies n'atteint pas la page du voyageur :
+   `api/facture-publique.js` nomme le logement d'après `demande.property_uuid`
+   (séjour déplacé → ancien nom affiché).
+4. MINEUR — pas de test pour un membre limité au bien de la DEMANDE (pas à
+   celui de la réservation).
+5. MINEUR — commentaire périmé dans `etatPourLaFiche` ; `property_uuid` lu
+   sans servir.
+
+**Suites données (sans nouvelle review : c'était la dernière)** : 1 l'annonce
+est vidée au départ de chaque geste puis écrite sans condition — deux gestes,
+deux annonces, et toujours aucune réécriture à la relecture ; 2 corrigé ici :
+le test du 6 garde la vraie cause (la ligne retirée), pas la condition ; 3
+**reporté à l'étape 3** (`api/facture-publique.js` n'est pas dans les fichiers
+accordés à 2b) — ajouté à son périmètre au §7 ; 4 tests ajoutés (membre limité
+au bien de la demande : fiche 404, trois gestes 403 ; membre limité au bien de
+la réservation : la demande s'affiche) ; 5 commentaire corrigé, `property_uuid`
+retiré de la lecture.
 
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
