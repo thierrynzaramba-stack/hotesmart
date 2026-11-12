@@ -15,6 +15,7 @@
 // le CHIFFRE du niveau est toujours écrit (règle 2) : « 3 · Haut ».
 
 import { titreFerie, titrePont, titreWeekEnd } from './yield-libelles-feries.js'
+import { familleSource, estOffline, LIBELLE_CANAL } from './calendrier-resa.js'
 
 // ⚠ LES NOMS DU MOTEUR (lib/yield/suggestion.js, `NIVEAUX`), recopiés parce
 // qu'un module du navigateur ne lit pas le serveur — et un test exige l'égalité.
@@ -393,7 +394,8 @@ export function effetDuGeste (apercu, fmt, { retrait = false } = {}) {
     out.push(c.du && c.du === c.au
       ? fmt.t('yfe.effet_une_nuit', { du: fmt.date(dateLocale(c.du), opts), prix })
       : fmt.t('yfe.effet_nuits', { n: c.nuits, du: fmt.date(dateLocale(c.du), opts), au: fmt.date(dateLocale(c.au), opts), prix }))
-    out.push(fmt.t('yfe.effet_envoi'))
+    // Singulier pour une nuit (promis au chef de file le 10 novembre 2026).
+    out.push(fmt.t('yfe.effet_envoi', { n: c.nuits }))
   } else out.push(fmt.t(retrait ? 'yfe.effet_aucune_retrait' : 'yfe.effet_aucune'))
   const sansNuit = ((apercu && apercu.sans_nuit) || []).length
   if (sansNuit) out.push(fmt.t('yfe.effet_sans_nuit', { n: sansNuit }))
@@ -484,10 +486,10 @@ function crans (n, fmt) {
  * ⚠ PAS DANS UN `title` SEULEMENT (review de l'étape 2) : un `title` n'existe
  * ni au toucher ni au clavier, et c'est sur le téléphone que l'hôte regarde.
  */
-export function phrasesDeLaNuit (j, e, data, fmt) {
+export function phrasesDeLaNuit (j, e, data, fmt, eteintes = []) {
   const n = j.nuit
   const out = []
-  if (!n) return [fmt.t('yfe.hors_periode')]
+  if (!n) return [fmt.t('yfe.hors_periode'), ...(pileDeLaNuit(j.date, e, data, eteintes) || []).map(l => phraseDeLigne(l, fmt))]
   if (rangNiveau(n.niveau) < 0) {
     const m = motifDe((n.non_calculable || [])[0], fmt)
     out.push(m ? `${fmt.t('yfe.non_calculable')} — ${m.quoi}` : fmt.t('yfe.non_calculable'))
@@ -516,7 +518,151 @@ export function phrasesDeLaNuit (j, e, data, fmt) {
   }
   if (n.prix_hote != null) out.push(fmt.t('yfe.prix_main_titre', { prix: fmt.money(n.prix_hote) }))
   if (n.vendue) out.push(fmt.t('yfe.vendue'))
+  // 4b : les séjours de la pile, en mots — au toucher (le téléphone n'a pas
+  // de survol) comme au lecteur d'écran.
+  for (const l of pileDeLaNuit(j.date, e, data, eteintes) || []) out.push(phraseDeLigne(l, fmt))
   return out
+}
+
+// ─── 4b : LES SÉJOURS DE QUATRE ANNÉES (spec §16.2) ─────────────────────────
+// ⚠ LE SERVEUR A TOUT CALCULÉ : le séjour, son prix par nuit, son délai, le
+// DÉCALAGE de chaque année (calé sur l'événement, S1 ; date exacte pour une
+// date fixe, S4) et le bilan de chaque pastille. La page met en face de chaque
+// nuit affichée la nuit `date − décalage`, et RIEN d'autre.
+
+/** Les couches, en clés relatives (« l'an dernier », pas « 2025 ») — les mêmes que le serveur. */
+export const COUCHE_DU_RECUL = { 1: 'n1', 2: 'n2', 3: 'n3' }
+
+// L'index nuit → séjour, une fois par réponse (une case le demande sept fois
+// par semaine, sur quatre lignes).
+const indexDesReponses = new WeakMap()
+function indexDesSejours (data) {
+  const s = data && data.sejours
+  if (!s || !Array.isArray(s.liste)) return null
+  let m = indexDesReponses.get(s)
+  if (!m) {
+    m = new Map()
+    // Premier arrivé, premier servi : la même règle que le serveur.
+    for (const x of s.liste) {
+      if (!x || typeof x.debut !== 'string' || typeof x.fin !== 'string') continue
+      for (let d = x.debut; d <= x.fin; d = decaler(d, 1)) if (!m.has(d)) m.set(d, x)
+    }
+    indexDesReponses.set(s, m)
+  }
+  return m
+}
+
+/** Les années passées allumées d'un événement, dans l'ordre (N-1 d'abord). */
+export function anneesAllumees (e, eteintes = []) {
+  return (e && Array.isArray(e.annees) ? e.annees : []).filter(a => !eteintes.includes(COUCHE_DU_RECUL[a.recul]))
+}
+
+/**
+ * LES LIGNES DE LA PILE D'UNE NUIT : cette année d'abord, toujours ; puis
+ * chaque année passée allumée. Toujours dans le même ordre, et toujours
+ * présentes, pour que les cases d'une semaine s'alignent.
+ * ⚠ SANS LA LISTE DES SÉJOURS, PAS DE PILE (null) : un écran peint depuis le
+ * cache n'en a pas (§16.7, point 3), et une ligne de « — » y dirait « pas
+ * encore réservée » d'une nuit peut-être vendue.
+ * @returns null | [{ recul, annee, etat, sejour?, debut?, fin? }] — etat :
+ *   'vendue' | 'vide' | 'avant' (le bien ne vendait pas encore) |
+ *   'a_venir' (la nuit passée n'est pas encore jouée)
+ */
+export function pileDeLaNuit (date, e, data, eteintes = []) {
+  const index = indexDesSejours(data)
+  if (!index) return null
+  const auj = data.aujourdhui || (data.fenetre && data.fenetre.debut) || null
+  const premiere = data.sejours.premiere_nuit || null
+  const ligne = (recul, annee, decalage) => {
+    const p = decaler(date, -decalage)
+    const base = { recul, annee }
+    if (recul > 0) {
+      if (auj && p >= auj) return { ...base, etat: 'a_venir' }
+      if (!premiere || p < premiere) return { ...base, etat: 'avant' }
+    }
+    const s = index.get(p)
+    if (!s) return { ...base, etat: 'vide', passee: !!(auj && p < auj) }
+    return { ...base, etat: 'vendue', sejour: s, debut: p === s.debut, fin: p === s.fin }
+  }
+  return [ligne(0, Number(date.slice(0, 4)), 0),
+    ...anneesAllumees(e, eteintes).map(a => ligne(a.recul, a.annee, a.decalage))]
+}
+
+function libelleCanalDe (source, fmt) {
+  if (!source) return null
+  if (estOffline(source)) return fmt.t('yfe.canal_direct')
+  const fam = familleSource(source)
+  // Une source inconnue s'affiche telle quelle plutôt que d'être rangée en « Direct ».
+  return fam !== 'direct' || String(source).toLowerCase().includes('direct') ? LIBELLE_CANAL[fam] : String(source)
+}
+
+/** La phrase d'une ligne : au survol, dans le détail de la nuit, et pour un lecteur d'écran. */
+export function phraseDeLigne (l, fmt) {
+  const an = String(l.annee)
+  if (l.etat === 'a_venir') return fmt.t('yfe.sejour_a_venir', { annee: an })
+  if (l.etat === 'avant') return fmt.t('yfe.sejour_avant', { annee: an })
+  if (l.etat === 'vide') return fmt.t(l.recul === 0 && !l.passee ? 'yfe.sejour_libre' : 'yfe.sejour_vide', { annee: an })
+  const s = l.sejour
+  const morceaux = [an, fmt.t('yfe.sejour_nuits', { n: s.nuits }),
+    s.prix_nuit != null ? fmt.t('yfe.sejour_prix', { prix: fmt.money(s.prix_nuit) }) : fmt.t('yfe.sejour_prix_inconnu')]
+  const canal = libelleCanalDe(s.canal, fmt)
+  if (canal) morceaux.push(canal)
+  morceaux.push(s.delai != null ? fmt.t('yfe.sejour_delai_long', { n: s.delai }) : fmt.t('yfe.sejour_delai_inconnu'))
+  return morceaux.join(' · ')
+}
+
+function rendreLigne (l, date, fmt) {
+  const js = jourSemaine(date)
+  const classes = ['yfe-sejour', 'yfe-sejour--a' + l.recul, 'yfe-sejour--' + l.etat]
+  // L'année sur le LUNDI seulement (registre §1) : la ligne se lit sur la semaine.
+  const an = js === 0 ? `<span class="yfe-sejour__an" aria-hidden="true">${esc(String(l.annee).slice(-2))}</span>` : ''
+  let corps = ''
+  if (l.etat === 'vendue') {
+    const s = l.sejour
+    // Une barre CONTINUE d'une case à l'autre ; arrondie à ses vraies
+    // extrémités seulement, et coupée — pas finie — au bord d'une semaine.
+    if (!l.debut && js !== 0) classes.push('yfe-sejour--suite-avant')
+    if (!l.fin && js !== 6) classes.push('yfe-sejour--suite-apres')
+    if (l.debut) classes.push('yfe-sejour--debut')
+    if (l.fin) classes.push('yfe-sejour--fin')
+    corps = `<span class="yfe-sejour__prix num">${esc(s.prix_nuit != null ? fmt.money(s.prix_nuit) : fmt.t('yfe.sejour_prix_court_inconnu'))}</span>`
+      + (l.fin && s.delai != null ? `<span class="yfe-sejour__delai num">${esc(fmt.t('yfe.sejour_delai', { n: s.delai }))}</span>` : '')
+  } else if (l.etat === 'vide') {
+    corps = `<span class="yfe-sejour__prix">${esc(fmt.t('yfe.sejour_vide_court'))}</span>`
+  }
+  return `<span class="${classes.join(' ')}" title="${esc(phraseDeLigne(l, fmt))}">${an}${corps}</span>`
+}
+
+/**
+ * LES PASTILLES DES ANNÉES (« Afficher dans chaque nuit ») : une par année
+ * passée présente, avec son bilan sur la zone affichée. Le choix est gardé
+ * par personne et par compte (S2) ; la page l'écrit, le serveur ne le devine
+ * pas.
+ */
+export function rendreCouches (e, ui, fmt) {
+  const annees = e && Array.isArray(e.annees) ? e.annees : []
+  if (!annees.length) return ''
+  const eteintes = (ui.couches && ui.couches.eteintes) || []
+  const boutons = annees.map(a => {
+    const cle = COUCHE_DU_RECUL[a.recul]
+    const on = !eteintes.includes(cle)
+    const label = [String(a.annee), fmt.money(a.ca), fmt.t('yfe.couche_nuits', { n: a.nuits })].join(' · ')
+    return `<button type="button" class="yfe-couche yfe-couche--a${a.recul}" data-couche="${esc(cle)}" aria-pressed="${on}">`
+      + `<span class="yfe-couche__pastille" aria-hidden="true"></span>${esc(label)}</button>`
+  }).join('')
+  const notes = []
+  for (const a of annees) {
+    if (a.prix_inconnus) notes.push(fmt.t('yfe.couche_prix_inconnus', { annee: String(a.annee), n: a.prix_inconnus }))
+    // ⚠ LE REPLI SE DIT (S1) : sans l'événement cette année-là, la ligne
+    // compare à 52 semaines avant — pas « au même événement ».
+    if (a.alignement === 'semaines') notes.push(fmt.t('yfe.couche_repli', { annee: String(a.annee), n: a.recul * 52 }))
+  }
+  const garde = ui.couches && ui.couches.lisibles === false ? 'yfe.couches_illisibles' : 'yfe.couches_garde'
+  const echec = ui.couchesMessage ? `<p class="yfe-message" role="status">${esc(ui.couchesMessage)}</p>` : ''
+  return `<div class="yfe-couches" role="group" aria-label="${esc(fmt.t('yfe.couches_aria'))}">`
+    + `<span class="small muted">${esc(fmt.t('yfe.couches_titre'))}</span>${boutons}`
+    + `<p class="caption muted yfe-couches__garde">${esc(fmt.t(garde))}</p>`
+    + notes.map(n => `<p class="caption muted">${esc(n)}</p>`).join('') + echec + `</div>`
 }
 
 // ⚠ DEUX MODES POUR UNE CASE. En lecture, toucher une nuit ouvre son détail
@@ -550,11 +696,16 @@ function rendreJour (j, e, data, sel, fmt) {
   if (n && n.regle && n.regle.cle === e.cle) { classes.push('yfe-jour--regle'); marques.push(fmt.t('yfe.regle_court')) }
   if (n && n.prix_hote != null) marques.push(fmt.t('yfe.prix_main', { prix: fmt.money(n.prix_hote) }))
   if (n && n.vendue) marques.push(fmt.t('yfe.vendue'))
-  const nomAccessible = [fmt.date(d, { weekday: 'long', day: 'numeric', month: 'long' }), ...phrasesDeLaNuit(j, e, data, fmt)].join(' · ')
+  const eteintes = sel.eteintes || []
+  const nomAccessible = [fmt.date(d, { weekday: 'long', day: 'numeric', month: 'long' }), ...phrasesDeLaNuit(j, e, data, fmt, eteintes)].join(' · ')
+  const pile = pileDeLaNuit(j.date, e, data, eteintes)
   return `<button type="button" class="${classes.join(' ')}" data-nuit="${esc(j.date)}"${etatDeLaCase(j, sel)} aria-label="${esc(nomAccessible)}">`
     + `<span class="yfe-jour__tete"><span class="yfe-jour__num num">${num}</span><span class="yfe-jour__mois">${esc(mois)}</span></span>`
     + `<span class="yfe-jour__corps">${corps}</span>`
     + (marques.length ? `<span class="yfe-jour__marques">${marques.map(m => `<span>${esc(m)}</span>`).join('')}</span>` : '')
+    // ⚠ LA PILE EST DANS LE BOUTON MAIS MUETTE : le nom accessible de la case
+    // dit déjà chaque ligne en mots ; la lire deux fois noierait la nuit.
+    + (pile ? `<span class="yfe-pile" aria-hidden="true">${pile.map(l => rendreLigne(l, j.date, fmt)).join('')}</span>` : '')
     + `</button>`
 }
 
@@ -574,7 +725,7 @@ function rendreCalendrier (e, idx, data, sel, fmt) {
   const jour = choisie ? semaines.flatMap(s => s.jours).find(j => j.date === choisie) : null
   const detail = jour
     ? `<div class="yfe-detail" role="status"><p class="yfe-detail__date">${esc(fmt.date(dateLocale(jour.date), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))}</p>`
-      + phrasesDeLaNuit(jour, e, data, fmt).map(x => `<p>${esc(x)}</p>`).join('') + `</div>`
+      + phrasesDeLaNuit(jour, e, data, fmt, sel.eteintes || []).map(x => `<p>${esc(x)}</p>`).join('') + `</div>`
     : `<p class="caption muted">${esc(fmt.t(sel.ecrire ? 'yfe.toucher_pour_choisir' : 'yfe.toucher_une_nuit'))}</p>`
   return `<div class="yfe-cal"><div class="yfe-cal__tete">${tete}</div>${corps}</div>${detail}`
 }
@@ -794,14 +945,18 @@ export function rendreListe (data, idx, ui, fmt, jourLong) {
         // événement que son origine dirait non ajustable non plus.
         const reglable = ecrire && e.actif && !(e.droits && e.droits.ajustable === false)
         const g2 = ui.geste && ui.geste.ev === id ? ui.geste : null
-        const sel = { ecrire: reglable, nuit: ui.nuit || null, choix, positions: reglable ? positionsParDate(e) : new Map() }
+        const eteintes = (ui.couches && ui.couches.eteintes) || []
+        const sel = { ecrire: reglable, nuit: ui.nuit || null, choix, positions: reglable ? positionsParDate(e) : new Map(), eteintes }
         const uiCarte = { ...ui, ecrire: reglable, choix, geste: g2 }
         const legende = `<p class="yfe-legende-zones caption"><span class="yfe-lz yfe-lz--evenement"></span>${esc(fmt.t('yfe.legende_evenement'))}`
           + `<span class="yfe-lz yfe-lz--rayonnement"></span>${esc(fmt.t('yfe.legende_rayonnement'))}`
           + `<span class="yfe-lz yfe-lz--regle"></span>${esc(fmt.t('yfe.legende_regle'))}</p>`
         const message = ui.message && ui.message.ev === id ? `<p class="yfe-message" role="status">${esc(ui.message.texte)}</p>` : ''
         detail = `<div class="yfe-ev__detail">`
-          + (e.actif ? legende + rendreCalendrier(e, idx, data, sel, fmt) : `<p class="muted small">${esc(fmt.t('yfe.coupe_detail'))}</p>`)
+          // 4b : les pastilles des années, au-dessus du calendrier qu'elles
+          // remplissent (maquette) — pour tous, réglage ou non : c'est un
+          // affichage.
+          + (e.actif ? rendreCouches(e, ui, fmt) + legende + rendreCalendrier(e, idx, data, sel, fmt) : `<p class="muted small">${esc(fmt.t('yfe.coupe_detail'))}</p>`)
           + message
           + (reglable ? rendreGestes(e, data, uiCarte, fmt) : '')
           + rendreCransDAvant(e, { ...uiCarte, ecrire: ecrire && e.actif }, fmt)

@@ -825,3 +825,26 @@ table fermée au navigateur). Neuf constats, corrigés sans nouvelle review
 
 Et une décision de produit portée à Thierry depuis la review : **S4** (§16.1).
 
+
+### 16.11 Étape 2, la page (12 novembre 2026)
+
+- **La pile** (`pileDeLaNuit`, `shared/yield-evenements-rendu.js`) : cette
+  année, puis chaque année passée allumée ; états `vendue`, `vide` (« — »),
+  `avant` (le bien ne vendait pas encore) et `a_venir` (pas encore jouée),
+  ces deux derniers **sans « — »**. Sans `sejours.liste` (écran peint depuis
+  le cache) : **pas de pile du tout**.
+- **Les barres** : continues d'une case à l'autre (elles traversent l'espace
+  entre deux cases, au-dessus du bord de la voisine, sous l'éditeur collé),
+  arrondies à leurs vraies extrémités, **coupées au bord d'une semaine** ;
+  prix sur chaque nuit, délai au bout, année sur le lundi. La pile est muette
+  pour un lecteur d'écran : le nom de la case dit chaque ligne en mots, et le
+  **détail de la nuit** aussi (le téléphone n'a pas de survol).
+- **Les pastilles** (`rendreCouches`) : bilan de l'année, repli à 52 semaines
+  dit, prix inconnus comptés à part. Un clic redessine tout de suite, puis
+  `PUT /api/ecran/evenements` ; un échec le dit et la visite garde son choix,
+  même après une relecture ; le cache garde le choix, jamais les séjours.
+- **Libellé** : `yfe.effet_envoi` au singulier pour une nuit.
+- ⚠ **À regarder à la recette** : le texte blanc sur la barre de l'an dernier
+  (60 %) mesure **4,3:1** sur fond blanc, sous le 4,5:1 du texte courant. La
+  décision 4 du registre fixe 60 % et le texte blanc ; si la recette le juge
+  trop pâle, 65 % passe à 4,6:1.

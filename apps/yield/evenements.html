@@ -125,14 +125,15 @@ async function appelAPI (url) {
 
 // L'écriture : même jeton relu, même compte. Elle NE LÈVE PAS sur un refus —
 // un 409 porte la nouvelle confirmation, un 503 ce qui est déjà écrit ; seule
-// une panne réseau lève.
-async function ecrire (methode, corps) {
+// une panne réseau lève. `url` : les réglages par défaut ; les couches (4b)
+// s'écrivent sur l'endpoint d'écran.
+async function ecrire (methode, corps, url = ECRITURE) {
   let jeton = null
   try {
     const { data } = await supabase.auth.getSession()
     jeton = (data && data.session && data.session.access_token) || null
   } catch { /* pas de session : le serveur répondra 401 */ }
-  const res = await fetch(ECRITURE, {
+  const res = await fetch(url, {
     method: methode,
     headers: { 'Content-Type': 'application/json', ...(jeton ? { Authorization: `Bearer ${jeton}` } : {}), ...enteteCompte() },
     body: JSON.stringify(corps)
@@ -163,7 +164,12 @@ const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: n
   choix: new Set(), geste: null, message: null, occupe: false, cransConfirmer: null,
   // `perime` : une écriture a réussi et l'écran ne l'a pas encore relue. Les
   // lignes affichées sont alors celles d'AVANT : aucun geste ne part dessus.
-  perime: false }
+  perime: false,
+  // 4b : les couches (années affichées sous chaque nuit), à cette personne sur
+  // ce compte (S2). ⚠ UNE FOIS TOUCHÉES, LA VISITE GARDE SON CHOIX : une
+  // relecture après un geste ne doit pas rallumer une année que l'hôte vient
+  // d'éteindre, même si l'enregistrement a échoué.
+  couches: { eteintes: [], lisibles: true }, couchesTouchees: false, couchesMessage: null, couchesSeq: 0 }
 
 // ⚠ RÉGLER EXIGE UNE RÉPONSE FRAÎCHE DU SERVEUR : un écran peint depuis le cache
 // n'a ni l'état des nuits, ni la certitude des droits ni des lignes posées.
@@ -261,7 +267,8 @@ function peindre () {
   for (const b of document.querySelectorAll('[data-filtre]')) b.setAttribute('aria-pressed', String(b.dataset.filtre === etat.filtre))
   $('[data-bind="liste"]').innerHTML = rendreListe(d, etat.idx, {
     filtre: etat.filtre, ouvert: etat.ouvert, nuit: etat.nuit, ecrire: peutRegler(), choix: etat.choix,
-    geste: etat.geste, message: etat.message, occupe: etat.occupe, cransConfirmer: etat.cransConfirmer
+    geste: etat.geste, message: etat.message, occupe: etat.occupe, cransConfirmer: etat.cransConfirmer,
+    couches: etat.couches, couchesMessage: etat.couchesMessage
   }, fmt, jourLong)
 }
 
@@ -278,6 +285,9 @@ function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
   etat.depuisCache = depuisCache
   if (!depuisCache) etat.perime = false
   etat.idx = indexerNuits(d && d.nuits)
+  if (!etat.couchesTouchees && d && d.couches && Array.isArray(d.couches.eteintes)) {
+    etat.couches = { eteintes: d.couches.eteintes.slice(), lisibles: d.couches.lisibles !== false }
+  }
   const age = $('[data-bind="age"]')
   age.hidden = !depuisCache
   age.textContent = depuisCache ? t('yfe.cache_age', { minutes: Math.max(1, Math.round(ageMs / 60000)) }) : ''
@@ -589,7 +599,40 @@ function surGeste (cible) {
   return false
 }
 
+// 4b : allumer / éteindre une année. Le dessin suit tout de suite ;
+// l'enregistrement part ensuite, et un échec le DIT sans défaire le choix.
+// `couchesSeq` : seul le dernier clic parle — un échec d'un clic dépassé ne
+// remplace pas le succès du suivant.
+async function basculerCouche (cle) {
+  const eteintes = new Set(etat.couches.eteintes)
+  if (eteintes.has(cle)) eteintes.delete(cle); else eteintes.add(cle)
+  etat.couches = { ...etat.couches, eteintes: [...eteintes] }
+  etat.couchesTouchees = true
+  etat.couchesMessage = null
+  const n = ++etat.couchesSeq
+  peindre()
+  rendreLeFocus('data-couche', cle, false)
+  let ok = false
+  try {
+    const r = await ecrire('PUT', { couches: { eteintes: etat.couches.eteintes } }, ECRAN)
+    ok = r.ok
+  } catch (e) { logger.error('Événements', 'couches', e) }
+  if (n !== etat.couchesSeq) return
+  // ⚠ LE CACHE GARDE LE DERNIER CHOIX : sinon la prochaine ouverture peindrait
+  // d'abord les années d'avant, puis les éteindrait sous les yeux de l'hôte.
+  if (ok && etat.data && etat.moi && etat.compte && !etat.depuisCache) {
+    ecrireCache(CACHE, etat.moi, etat.compte, pourLeCache({ ...etat.data, couches: { eteintes: etat.couches.eteintes, lisibles: true } }))
+  }
+  if (!ok) {
+    etat.couchesMessage = t('yfe.couches_non_enregistre')
+    peindre()
+    rendreLeFocus('data-couche', cle, false)
+  }
+}
+
 document.addEventListener('click', (ev) => {
+  const couche = ev.target.closest && ev.target.closest('[data-couche]')
+  if (couche) { basculerCouche(couche.dataset.couche); return }
   const o = ev.target.closest && ev.target.closest('[data-ouvrir]')
   if (o) {
     const id = o.dataset.ouvrir
