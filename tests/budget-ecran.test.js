@@ -163,7 +163,18 @@ const ATTENDU = {
     // partirait avec la page, ce serait le defaut mesure le 22 octobre sur
     // l'accueil — un appel par bien, 72 requetes, 586 Ko. Un test d'execution
     // le garde en plus de celui-ci : tests/yf-bouton-calendrier.test.js.
-    '/api/yield-menu': 1
+    '/api/yield-menu': 1,
+    // ⚠ LA FACTURE DU VOYAGEUR, ET ELLE NE PART QU'AU CLIC (11 novembre 2026,
+    // etape 2b du lot facture). Les deux reponses que ce test exige :
+    //   A QUOI IL SERT : les GESTES de l'hote sur la facture, depuis la fiche
+    //   d'une reservation — envoyer le lien, copier un lien, remplir a la place
+    //   du voyageur. UN site d'appel (`posterFacture`) pour les trois.
+    //   POURQUOI IL N'ENTRE PAS DANS L'APPEL D'ECRAN : ce sont des ECRITURES,
+    //   declenchees par un geste. L'ETAT de la facture, lui, arrive dans la
+    //   reponse que la fiche lit deja (`/api/calendar?booking=`) : aucun appel
+    //   de plus a l'ouverture de la fiche (mesure AVANT/APRES dans
+    //   docs/specs/spec-facture-voyageur.md §9).
+    '/api/factures-voyageur': 1
   },
   // ⚠ LA PAGE AVIS ENTRE DANS CE TEST LE 8 NOVEMBRE 2026, avec sa refonte V5
   // (docs/specs/avis-v5). Mesure AVANT en production le meme jour : 3 appels

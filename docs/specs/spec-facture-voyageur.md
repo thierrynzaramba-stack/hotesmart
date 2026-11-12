@@ -221,6 +221,35 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   HôteSmart n'envoie pas le lien lui-même** ; il le crée et le rend à l'hôte
   (« Copier »), comme une réservation sans e-mail. Le masquage à la lecture
   Beds24 est un chantier à part, avec le fil de synchronisation (dette 142).
+- **P2 quinquies — Copier un lien quand le message est parti** (début de
+  l'étape 2b). Le lien n'est gardé nulle part en clair (jeton haché, §5.3) :
+  rouvrir la fiche ne peut pas « relire » le lien d'un envoi passé.
+  → **Réponse de Thierry (11 nov. 2026, 3 h) : oui, toujours.** La fiche
+  porte un bouton « Copier un lien », présent même quand le message est
+  parti ; chaque clic crée un lien NEUF, sans envoyer de message, et les liens
+  précédents restent valables jusqu'à leur expiration.
+  → **Précision de Thierry (11 nov. 2026, après la review 1 de 2b) : dans UNE
+  ouverture de la fiche, un second clic recopie le lien déjà obtenu** (par
+  « Copier » ou « Envoyer ») au lieu d'en créer un neuf ; rouvrir la fiche en
+  crée un neuf. Motif : pas de lien en trop, et la base refuse de toute façon
+  un second lien de la même porte à moins de 30 s.
+- **P2 sexies — Beds24 sur la fiche** (review 1 de 2b, constat 1). Le
+  calendrier V5 n'affiche pas les biens Beds24 : leurs réservations n'ont pas
+  de fiche, donc pas de bloc Facture, et P2 quater (« le lien revient à
+  l'hôte ») n'a aucun chemin écran.
+  → **Réponse de Thierry (11 nov. 2026) : plus tard, noté en dette.**
+  L'étape 2b couvre les biens du calendrier (Channex) ; pour Beds24, le
+  serveur sait déjà rendre un lien sans message (`copier_lien`), c'est l'écran
+  qui manque (**dette 147**, `docs/kb/dettes-v1.md`).
+- **P2 septies — Une demande rattachée à un autre logement que celui du
+  séjour** (review 2 de 2b ; cas rare : logement recréé, séjour déplacé).
+  → **Réponse de Thierry (12 nov. 2026) : « la facture est émise à la fin de
+  la réservation, donc on la rapporte au logement du séjour ».** La fiche
+  montre la demande comme celle du séjour, avec les droits et les gestes du
+  bien de la RÉSERVATION ; les gestes la reprennent (jamais de seconde
+  demande). ⚠ **Conséquence pour l'étape 3 : l'entité qui émet est celle du
+  logement du séjour au moment de l'émission** (bien de la réservation, relu),
+  pas le `property_uuid` figé dans la demande.
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
   → **Réponse de Thierry (8 nov. 2026, 22 h 09) : A.** Les rappels
@@ -515,6 +544,23 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    base ; 20 formulaires au plus par jeton ; aucun lien neuf depuis un bien
    archivé, une demande déjà en cours y va au bout (P3) ; le lien revient en
    clair à l'hôte quand le message n'est pas sûrement arrivé (P5).
+   ⚠ **Étape 3 (P2 septies)** : l'entité qui émet se résout sur le logement du
+   SÉJOUR (bien de la réservation, relu à l'émission), pas sur le
+   `property_uuid` de la demande. **Et la page du voyageur aussi**
+   (`api/facture-publique.js`, `lireSejour`, review 3 de 2b) : le nom du
+   logement se lit par la réservation (`bookings_snapshot.property_id` →
+   `properties`), pas par `demande.property_uuid`.
+   **Ce que 2b livre** (11 nov. 2026, fichiers accordés par le chef de file) :
+   le bloc « Facture du voyageur » de la fiche de réservation — le même
+   composant à l'ordinateur et au téléphone — avec l'état de la demande, le
+   dernier message, le destinataire saisi, et trois gestes : « Envoyer le
+   lien » / « Renvoyer le lien », « Copier un lien » (P2 quinquies, action
+   `copier_lien`, aucun message) et « Remplir à sa place » / « Modifier les
+   coordonnées » (Q12). Les droits sont décidés par le SERVEUR
+   (`etatPourLaFiche`, lib/factures-voyageur.js) ; l'écran traduit
+   (`presentationFacture`, shared/calendrier-resa.js). « Envoyer » demande une
+   confirmation. Copier passe par le presse-papiers ; s'il refuse, le lien
+   reste affiché et la fiche le dit.
 3. **La confirmation et l'émission** : passe du cron, notification et rappel,
    confirmation des deux lignes, numérotation, PDF, message « Votre facture
    est disponible ». ⚠ **Envoi au voyageur** : review de plus.
@@ -564,6 +610,55 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    est neuve (1 appel à l'ouverture, `Server-Timing` = 2 + une ou deux par
    entité en numérotation automatique — corrigé après la review 3, qui a
    relevé « 3 + ») ; la fiche de réservation au début de l'étape 2. La page publique n'existe pas (AVANT sans objet).
+
+**Fiche de réservation, mesure AVANT (11 novembre 2026, 2 h 50, début de
+l'étape 2b, base `main` = 669d081fd522f31d6cc40371c9b3427488b052b3).**
+- **Appels à l'ouverture**, mesurés sur staging dans le navigateur (session de
+  Thierry, réservation Airbnb à venir, `performance.getEntriesByType`) :
+  **2** — `GET /api/calendar?booking=` (**717 octets** transférés, 417 de
+  corps, 481 ms) et `GET /api/messages?booking_id=` (**362 octets**, 62 de
+  corps, 327 ms). Total **1 079 octets**. Un troisième appel (`/api/avis`, par
+  le bus) ne part qu'à partir du jour du départ : il n'est pas parti ici.
+- **Requêtes de `GET /api/calendar?booking=`**, comptées sur le code (double
+  Supabase qui compte chaque `from()` et chaque `auth.getUser`, script hors
+  dépôt) : **6 pour le titulaire** (1 session + 3 `properties` + 1 `profiles`
+  + 1 `bookings_snapshot`), **7 pour un membre** (+ `profile_permissions`).
+  L'endpoint ne pose aujourd'hui **aucun** `Server-Timing` sur ce chemin.
+- `/api/messages` n'est pas touché par l'étape 2b : ses requêtes ne sont pas
+  comptées ici.
+
+**Fiche de réservation, APRÈS (code de l'étape 2b, même méthode).**
+- **Appels à l'ouverture : 2**, les mêmes — l'état de la facture arrive dans
+  la réponse de `?booking=` (champ `facture`). Gardé par le banc de la page
+  (`tests/facture-voyageur-fiche.test.js`, « ouvrir la fiche ne coûte AUCUN
+  appel de plus ») et par l'inventaire de `tests/budget-ecran.test.js`, où
+  `/api/factures-voyageur` entre comme GESTE (au clic seulement).
+- **Requêtes de `?booking=` : 7 pour le titulaire, 8 pour un membre (+1)**,
+  la lecture de la facture partant EN PARALLÈLE de celle de la réservation
+  (test « la lecture de la facture part EN PARALLÈLE »). Le chemin pose
+  désormais `Server-Timing` (compteur plancher : la résolution des biens et
+  la garde n'y sont pas comptées, et c'est écrit dans l'en-tête).
+- **Octets** : à mesurer sur staging à la recette (le champ `facture` pèse
+  ~200 octets de corps sur le double, sans demande).
+
+**Case performance de l'étape 2b** (règle du front, CLAUDE.md) :
+1. *Un écran = un endpoint* : la fiche lisait déjà `GET /api/calendar?booking=`
+   en un appel ; l'état de la facture y entre, aucun appel de plus. Les gestes
+   (`envoyer_lien`, `copier_lien`, `saisir`) sont des ÉCRITURES au clic, par
+   un seul site d'appel (`posterFacture`).
+2. *Résumé pré-calculé* : sans objet — une demande de facture est une donnée
+   temps réel.
+3. *Cache navigateur* : aucun — coordonnées d'un voyageur et lien-clé.
+4. *`private, no-store`* : posé par la garde de `api/calendar.js` et en tête
+   de `api/factures-voyageur.js`, avant le premier refus (inchangé).
+5. *Statiques versionnés* : les dictionnaires suivent `?v=` (empreinte
+   calculée au déploiement) ; `shared/calendrier-resa.js` est servi sans
+   cache long (revalidé), comme avant le lot.
+6. *Lectures tronquées* : la seule lecture ajoutée rend UNE demande et 20
+   jetons au plus, bornés explicitement.
+7. *Budget* : la fiche reste à 2 appels à l'ouverture ; test du banc et
+   inventaire chiffré.
+8. *Mesure AVANT / APRÈS* : ci-dessus.
 
 **Mobile** : le bouton, l'état et la confirmation existent aussi sur la fiche
 du téléphone ; la page publique est pensée pour le téléphone d'abord.
@@ -938,6 +1033,128 @@ diff du correctif ; ce qu'elle trouve se corrige SANS nouvelle review.
 - Tests : Beds24 (deux cas), masque (toutes les formes sondées, coupure,
   idempotence, coût), `tests/inbound-email.test.js` (ajout : la citation est
   masquée partout) ; 4 mutations tuées. Suite 7836/7836.
+
+### 10 quater. Code de l'étape 2b — les revues
+
+#### Review 1 (sous-agent, 11 novembre 2026, sur tout 2b)
+
+Arbre `/home/claude/hotesmart-fv2b`, branche `facture-voyageur-etape-2b`,
+plage `669d081fd522f31d6cc40371c9b3427488b052b3..605ebf8c040bef4ac6a916497be13f787fe1add2`
+(13 fichiers ; chaque fichier cité est dans le diff — contrôle fait).
+**Aucun constat de sécurité.** Gardes mesurées par la revue : membre limité à
+un autre bien, membre « facturation » seul, compte voisin, listes mêlées — 403
+ou 404, aucune lecture de facture, aucun jeton ; un membre en lecture ne reçoit
+que l'état. Refactor `ouvrirUnLien` : même ordre de refus et même comptage pour
+`envoyer_lien`. Syntaxe PostgREST mesurée sur l'URL produite.
+
+1. **MAJEUR — Beds24 : la fiche ne s'ouvre pas.** Le calendrier V5 exclut les
+   biens Beds24 ; la branche `sansEnvoi: 'beds24'` n'est atteinte que par les
+   tests, et P2 quater (« le lien revient à l'hôte ») n'a aucun chemin écran.
+   → **Question à Thierry.**
+2. MINEUR — un SIREN ou une TVA tapé puis caché (retour à « particulier »)
+   part quand même et bloque l'enregistrement sur un champ invisible.
+3. MINEUR — « Copier » ou « Envoyer » efface le formulaire « Remplir à sa
+   place » en cours ; une relecture échouée laisse les boutons désactivés.
+4. MINEUR — une demande rattachée à un AUTRE bien du compte s'affiche
+   « Aucune demande » avec les trois gestes : une présence dite absence.
+5. MINEUR — P2 quinquies : le code recopie le lien déjà obtenu dans une même
+   ouverture de la fiche, la décision dit « chaque clic crée un lien neuf » ;
+   « Copier » puis « Envoyer » dans les 30 s rend 429 (même porte `fiche`).
+   → **Question à Thierry** (déjà signalée).
+6. MINEUR — réservation annulée : la note dit « possible une fois
+   confirmée ».
+7. MINEUR — iPhone : la copie après l'attente réseau est refusée par Safari ;
+   le repli (lien affiché) serait systématique au premier clic.
+8. MINEUR — accessibilité : zone `role="status"` recréée à chaque peinture ;
+   focus perdu après l'enregistrement ; champs obligatoires non signalés.
+9. MINEUR — tests manquants : membre limité à un bien, membre « facturation »
+   seul (mesurés par la revue, à inscrire).
+**Suites données** (correctifs sans nouvelle review sauf la dernière permise
+au lot, l'envoi au voyageur) : 1 tranché par Thierry (P2 sexies, dette) ;
+2 TVA et SIREN vidés pour un particulier ; 3 formulaire ouvert = « Envoyer »,
+« Copier », « Remplir » coupés, et les boutons reviennent après toute
+relecture ; 4 demande lue par compte et réservation, « indisponible » si son
+bien n'est pas celui de la réservation ; 5 tranché par Thierry (précision de
+P2 quinquies) ; 6 clé `cal.fac_note_annulee` ; 7 copie demandée DANS le clic
+(`ClipboardItem` nourri par la promesse du lien, repli `writeText`) ; 8 zone
+d'annonce posée une fois, `aria-required` sur les quatre champs exigés, focus
+rendu à « Modifier les coordonnées » ; 9 tests ajoutés (membre limité à un
+autre bien, membre « facturation » seul, sur les deux endpoints). Chaque
+correctif a son test, et chaque test rougit quand on retire son correctif
+(mutations faites, cinq sur cinq).
+Notés sans correction : la lecture de la facture part même quand la
+réservation finit en 404 (une requête, sans fuite — c'est le prix du
+parallèle) ; une réponse tardive d'une ouverture PRÉCÉDENTE de la même
+réservation peut repeindre la fiche rouverte (même réservation, pas de fuite).
+
+#### Review 2 — la re-review des correctifs (sous-agent, 11 novembre 2026)
+
+Arbre `/home/claude/hotesmart-fv2b`, branche `facture-voyageur-etape-2b`,
+plage `605ebf8c040bef4ac6a916497be13f787fe1add2..6d16f3c95145d9a89966278dead13119b8213a05`
+(10 fichiers ; `api/factures-voyageur.js` et `shared/error-handler.js` lus
+pour le contexte seulement). **Aucun constat de sécurité.** Ordre garde →
+réservation → facture vérifié et mesuré : 403 et 404 avant toute sortie, la
+lecture de facture jetée sur un 404.
+
+1. MINEUR — constat 4 : « indisponible » est justifié par « des gestes que le
+   serveur refuserait », mais l'endpoint ACCEPTE `copier_lien` sur une demande
+   rattachée à un autre bien (mesuré : 200, jeton créé) ; et pour le
+   titulaire, la fiche dit à jamais « indisponible pour le moment ».
+2. MINEUR — conséquence : un membre limité à un bien obtient par
+   `copier_lien` un lien vers une demande rattachée à un bien hors de son
+   périmètre (sa réservation est dans son périmètre ; seul le rattachement
+   est périmé). Une règle pour les deux chemins.
+3. MINEUR — Safari : la promesse du `Blob` donnée au `ClipboardItem` n'a pas
+   de gestionnaire ; sur un refus (429), rejet non rattrapé → barre d'erreur
+   générique par-dessus le bon message.
+4. MINEUR — la seconde moitié du constat 3 (boutons rendus après une relecture
+   ÉCHOUÉE) n'a pas de test : retirer la ligne laisse 37/37.
+5. MINEUR — le test du constat 9 annonce « aucune lecture de facture » et ne
+   le vérifie pas.
+6. MINEUR — la zone d'annonce est réécrite avec le même texte à chaque
+   relecture : annonce double possible.
+
+**Suites données** : 1 et 2 tranchés par Thierry (P2 septies) — la demande
+suit le logement du séjour ; plus d'« indisponible » pour ce cas, la fiche et
+l'endpoint appliquent la MÊME règle (droits et gestes du bien de la
+réservation) ; 3 la promesse du Blob a son gestionnaire ; 4 test d'une
+relecture échouée après « Envoyer » et après « Copier » ; 5 test scindé : 403
+sans aucune lecture de facture, 404 sans rien qui sorte ; 6 la zone d'annonce
+n'est écrite que si le texte change (⚠ corrigé par la review 3 : cette
+condition rendait muet un second geste ; la double annonce venait de la ligne
+déjà retirée). Mutations : les correctifs 3 et 4, et la règle P2 septies,
+retirés, font rougir leurs tests ; pour le 6, voir la review 3.
+
+#### Review 3 — la dernière (sous-agent, 12 novembre 2026, sur les correctifs de la review 2)
+
+Arbre `/home/claude/hotesmart-fv2b`, branche `facture-voyageur-etape-2b`,
+plage `6d16f3c95145d9a89966278dead13119b8213a05..970aa447b5030fb81fad336f2191973807a366c7`
+(6 fichiers). **Aucun constat de sécurité, aucun double envoi.** P2 septies
+mesuré sur 17 cas : les droits suivent le bien de la réservation, sur la fiche
+comme sur l'endpoint ; une réservation lisible ne mène qu'à la demande du même
+identifiant dans le même compte (deux index uniques).
+
+1. MINEUR — le correctif 6 (écrire seulement si le texte change) rendait
+   MUET un second geste au même résultat (deux « Copier », deux 429) ; la
+   double annonce venait de la ligne déjà retirée.
+2. MINEUR — la trace de la review 2 affirmait « 4 sur 4 » : faux pour le 6.
+3. MINEUR — P2 septies n'atteint pas la page du voyageur :
+   `api/facture-publique.js` nomme le logement d'après `demande.property_uuid`
+   (séjour déplacé → ancien nom affiché).
+4. MINEUR — pas de test pour un membre limité au bien de la DEMANDE (pas à
+   celui de la réservation).
+5. MINEUR — commentaire périmé dans `etatPourLaFiche` ; `property_uuid` lu
+   sans servir.
+
+**Suites données (sans nouvelle review : c'était la dernière)** : 1 l'annonce
+est vidée au départ de chaque geste puis écrite sans condition — deux gestes,
+deux annonces, et toujours aucune réécriture à la relecture ; 2 corrigé ici :
+le test du 6 garde la vraie cause (la ligne retirée), pas la condition ; 3
+**reporté à l'étape 3** (`api/facture-publique.js` n'est pas dans les fichiers
+accordés à 2b) — ajouté à son périmètre au §7 ; 4 tests ajoutés (membre limité
+au bien de la demande : fiche 404, trois gestes 403 ; membre limité au bien de
+la réservation : la demande s'affiche) ; 5 commentaire corrigé, `property_uuid`
+retiré de la lecture.
 
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
