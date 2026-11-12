@@ -147,9 +147,14 @@ déjà obtenu (par « Envoyer » ou « Copier ») est recopié tel quel : pas de
 jeton de plus, et l'anti-double-clic de 30 s ne le refuse pas. Rouvrir la fiche
 en crée un neuf — le lien en clair n'est jamais relu.
 
-⚠ **LA DEMANDE EST LUE PAR COMPTE ET RÉSERVATION, PAS PAR BIEN** (review 1 de
-2b) : rattachée à un autre bien que celui de la réservation, elle est dite
-`{ indisponible: true }`, sans détail — jamais « aucune demande ».
+⚠ **LA DEMANDE EST LUE PAR COMPTE ET RÉSERVATION, PAS PAR BIEN, ET ELLE SUIT
+LE LOGEMENT DU SÉJOUR** (review 1 de 2b, puis décision de Thierry du 12 nov.
+2026, P2 septies : « la facture est émise à la fin de la réservation, donc on
+la rapporte au logement du séjour »). Rattachée à un autre bien (logement
+recréé, séjour déplacé), elle s'affiche comme celle du séjour, avec les
+droits et les gestes du bien de la RÉSERVATION — jamais « aucune demande »,
+qui proposerait d'en ouvrir une seconde. ⚠ À l'étape 3, l'entité qui émet
+se résout sur le logement du séjour, relu à l'émission.
 
 ⚠ **LA COPIE EST DEMANDÉE DANS LE CLIC** : Safari refuse une copie demandée
 après une attente réseau. Un `ClipboardItem` nourri par la PROMESSE du lien

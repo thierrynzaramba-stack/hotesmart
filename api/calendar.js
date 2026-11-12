@@ -275,10 +275,10 @@ module.exports = async function handler(req, res) {
       // La FACTURE du voyageur (etape 2b) : sa demande active et ses derniers
       // liens, lues EN PARALLELE de la reservation — aucun appel de plus ne
       // part du navigateur (spec-facture-voyageur §9.1). Bornee au compte que
-      // la garde vient de designer ; une demande d'un autre bien que celui de
-      // la reservation est dite « indisponible », sans detail. Une panne ne
-      // fait pas tomber la fiche : elle rend « indisponible », jamais
-      // « aucune demande ».
+      // la garde vient de designer et a la reservation ; la demande suit le
+      // LOGEMENT DU SEJOUR (P2 septies) : les droits sont ceux du bien de la
+      // reservation. Une panne ne fait pas tomber la fiche : elle rend
+      // « indisponible », jamais « aucune demande ».
       requetesDetail++
       const factureLue = FV.lireDemandeDeLaFiche(gardeGet.compte, String(req.query.booking), { db: supabase })
         .catch(e => { console.error('[calendar] lecture facture', e.message); return { ok: false } })
@@ -333,7 +333,7 @@ module.exports = async function handler(req, res) {
         : FV.etatPourLaFiche(lue.demande, {
           ecritureResa: peutEcrire(gardeGet.contexte, 'reservations', cibleFiche),
           ecritureMessages: peutEcrire(gardeGet.contexte, 'messages', cibleFiche),
-          propertyUuid: bienFiche.id, provider, snapshot: s, bookingId: ligne.booking_id
+          provider, snapshot: s, bookingId: ligne.booking_id
         })
       res.setHeader('Server-Timing',
         `db;desc="${requetesDetail} req (plancher : biens et droits non comptes)";dur=${Date.now() - t0Detail}`)

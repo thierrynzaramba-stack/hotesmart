@@ -58,7 +58,7 @@ const DEMANDE = (extra = {}) => ({
   ],
   ...extra
 })
-const DROITS_TOUS = { ecritureResa: true, ecritureMessages: true, propertyUuid: BIEN, provider: 'channex', snapshot: SNAP(), bookingId: 'R1' }
+const DROITS_TOUS = { ecritureResa: true, ecritureMessages: true, provider: 'channex', snapshot: SNAP(), bookingId: 'R1' }
 
 test('LE TEST QUI COMPTE (P2) : un niveau LECTURE ne reçoit que l\'état — ni destinataire, ni envois, ni gestes', () => {
   const e = FV.etatPourLaFiche(DEMANDE(), { ...DROITS_TOUS, ecritureResa: false, ecritureMessages: false })
@@ -122,13 +122,18 @@ test('P2 quater et P5 : Beds24 et directe sans adresse — pas d\'« envoyer »,
   assert.equal(avecMail.gestes.envoyer, true)
 })
 
-test('une demande d\'un AUTRE bien que celui de la réservation : « indisponible », sans détail, pour tous (review 1, constat 4)', () => {
-  // Ni « aucune demande » (une présence dite absence, avec des gestes que le
-  // serveur refuserait), ni ses détails.
-  for (const droits of [DROITS_TOUS, { ...DROITS_TOUS, ecritureResa: false, ecritureMessages: false }]) {
-    assert.deepEqual(FV.etatPourLaFiche(DEMANDE({ property_uuid: BIEN_BX }), droits), { indisponible: true })
-    assert.deepEqual(FV.etatPourLaFiche(DEMANDE({ property_uuid: BIEN_BX, statut: 'emise' }), droits), { indisponible: true })
-  }
+test('P2 septies : une demande rattachée à un AUTRE bien suit le LOGEMENT DU SÉJOUR — dite telle quelle, droits du bien de la réservation', () => {
+  // Décision de Thierry du 12 novembre 2026 : « la facture est émise à la fin
+  // de la réservation, donc on la rapporte au logement du séjour ». Jamais
+  // « aucune demande » (une présence dite absence, qui proposerait d'en ouvrir
+  // une seconde).
+  const e = FV.etatPourLaFiche(DEMANDE({ property_uuid: BIEN_BX }), DROITS_TOUS)
+  assert.equal(e.statut, 'formulaire_rempli')
+  assert.equal(e.destinataire.nom, 'SCI Le Florian')
+  assert.deepEqual(e.gestes, { envoyer: true, copier: true, saisir: true })
+  assert.deepEqual(FV.etatPourLaFiche(DEMANDE({ property_uuid: BIEN_BX, statut: 'emise' }), DROITS_TOUS).gestes, { envoyer: false, copier: false, saisir: false })
+  assert.deepEqual(FV.etatPourLaFiche(DEMANDE({ property_uuid: BIEN_BX }), { ...DROITS_TOUS, ecritureResa: false }),
+    { statut: 'formulaire_rempli', gestes: { envoyer: false, copier: false, saisir: false } })
 })
 
 // Le module commun aux deux écrans : des CLÉS, pas des phrases.
@@ -302,8 +307,8 @@ const PARC = () => ({
       dest_type: 'particulier', dest_nom: 'Léa Martin', dest_adresse_ligne1: '3 rue Haute', dest_code_postal: '31000', dest_ville: 'Toulouse', dest_pays: 'France' },
     { id: 'd-ancienne', user_id: A, property_uuid: BIEN, booking_id: 'R1', nature: 'facture', statut: 'annulee_par_avoir', dest_nom: 'NE DOIT PAS SORTIR' },
     { id: 'd-emise', user_id: A, property_uuid: BIEN, booking_id: 'R_EMISE', nature: 'facture', statut: 'emise' },
-    // Une demande ÉMISE, rattachée à un AUTRE bien du compte que celui de la réservation.
-    { id: 'd-depl', user_id: A, property_uuid: BIEN_BX, booking_id: 'R_DEPL', nature: 'facture', statut: 'emise', dest_nom: 'SUR UN AUTRE BIEN' },
+    // Une demande rattachée à un AUTRE bien du compte que celui de la réservation (bien recréé, séjour déplacé).
+    { id: 'd-depl', user_id: A, property_uuid: BIEN_BX, booking_id: 'R_DEPL', nature: 'facture', statut: 'lien_envoye', dest_nom: 'SUR UN AUTRE BIEN' },
     { id: 'd-autre', user_id: AUTRE, property_uuid: BIEN_AUTRE, booking_id: 'R_B', nature: 'facture', statut: 'lien_envoye', dest_nom: 'COMPTE VOISIN' }
   ],
   factures_voyageur_jetons: [
@@ -440,27 +445,41 @@ test('compte voisin : refusé AVANT toute lecture de facture ; et sa demande ne 
   } finally { fini() }
 })
 
-test('review 1, constat 4 : une demande ÉMISE rattachée à un autre bien — « indisponible », ni gestes ni détail', async () => {
-  const { appeler, fini } = monter('../api/calendar')
+test('P2 septies : une demande rattachée à un autre bien s\'affiche sur la fiche du séjour, et « copier » la reprend (pas de seconde demande)', async () => {
+  const fiches = monter('../api/calendar')
   try {
-    const r = await appeler(fiche('R_DEPL'))
+    const r = await fiches.appeler(fiche('R_DEPL'))
     assert.equal(r.code, 200)
-    assert.deepEqual(r.corps.facture, { indisponible: true })
-    assert.ok(!JSON.stringify(r.corps).includes('SUR UN AUTRE BIEN'))
-  } finally { fini() }
+    assert.equal(r.corps.facture.statut, 'lien_envoye')
+    assert.equal(r.corps.facture.destinataire, null)
+    assert.deepEqual(r.corps.facture.gestes, { envoyer: true, copier: true, saisir: true })
+  } finally { fiches.fini() }
+  const gestes = monter('../api/factures-voyageur')
+  try {
+    const c = await gestes.appeler({ methode: 'POST', corps: { action: 'copier_lien', booking: 'R_DEPL' } })
+    assert.equal(c.code, 200, JSON.stringify(c.corps))
+    assert.equal(c.corps.demande.id, 'd-depl', 'la demande existante, pas une seconde')
+  } finally { gestes.fini() }
 })
 
-test('review 1, constat 9 : membre limité à un AUTRE bien, membre « facturation » seul — refusés, aucune lecture de facture', async () => {
+test('review 1, constat 9 : membre limité à un AUTRE bien, membre « facturation » seul — 403 AVANT toute lecture de facture', async () => {
   const { appeler, etat, fini } = monter('../api/calendar')
   try {
     assert.equal((await appeler(fiche('R1', BIEN, { jeton: 'jeton-ailleurs' }))).code, 403)
     assert.equal((await appeler(fiche('R1', BIEN, { jeton: 'jeton-fact' }))).code, 403)
-    // Par le bien qu'il a, il ne lit pas la réservation d'un autre bien.
+    assert.equal(lecturesFacture(etat).length, 0, 'aucune lecture de facture derrière un 403')
+  } finally { fini() }
+})
+
+test('review 1, constat 9 : par le bien qu\'il a, un membre limité n\'obtient RIEN de la réservation d\'un autre bien (404)', async () => {
+  // La lecture de la facture part en parallèle et peut avoir eu lieu : ce
+  // test ne garde que ce qui SORT.
+  const { appeler, fini } = monter('../api/calendar')
+  try {
     const r = await appeler(fiche('R1', BIEN_BX, { jeton: 'jeton-ailleurs' }))
     assert.equal(r.code, 404)
+    assert.equal(r.corps.facture, undefined)
     assert.ok(!JSON.stringify(r.corps || {}).includes('Léa Martin'))
-    assert.equal(r.corps.facture, undefined, 'rien de la facture ne sort d\'une fiche refusée')
-    assert.ok(etat, 'base consultée')
   } finally { fini() }
 })
 
@@ -583,12 +602,13 @@ const etatFacture = (o = {}) => ({ statut: null, bloquee: null, sansEnvoi: null,
   dernierMessage: null, dernierLien: null, gestes: { envoyer: true, copier: true, saisir: true }, ...o })
 
 // `reponses` : ce que rend le serveur, par action ; `facture` : l'état lu par la fiche.
-function bancFiche ({ large = true, facture = etatFacture(), reponses = {}, apres = null } = {}) {
+function bancFiche ({ large = true, facture = etatFacture(), reponses = {}, apres = null, relectureEchoue = false } = {}) {
   const lus = []
   let factureCourante = facture
   const b = B.monter({ large, appel: async (chemin, corps) => {
     if (chemin.startsWith('/api/calendar?') && chemin.includes('booking=')) {
       lus.push(chemin)
+      if (relectureEchoue && lus.length > 1) return { __statut: 500, __corps: { error: 'panne' } }
       return { booking_id: 'R1', currency: 'EUR', totalVoyageur: { valeur: 100 }, facture: factureCourante }
     }
     if (chemin.startsWith('/api/messages')) return { has_conversation: false }
@@ -870,5 +890,56 @@ test('review 1, constat 7 (Safari) : la copie est DEMANDÉE dans le clic, avant 
     assert.equal(texte, LIEN, 'le presse-papiers reçoit le lien rendu par le serveur')
     assert.ok(!ordre.includes('writeText'))
     assert.match(zone.textContent, /Lien copié\./)
+  } finally { b.fermer() }
+})
+
+// ─── Les corrections de la review 2 (constats 3, 4, 6), côté page ──────────
+
+test('review 2, constat 4 : une relecture ÉCHOUÉE après un geste rend quand même les boutons', async () => {
+  for (const action of ['envoyer_lien', 'copier_lien']) {
+    const b = bancFiche({ relectureEchoue: true, reponses: { envoyer_lien: { ok: true, envoi: 'livre', lien: LIEN }, copier_lien: { ok: true, lien: LIEN } } })
+    try {
+      const zone = await ouvrirFiche(b)
+      zone.querySelector(action === 'envoyer_lien' ? '[data-fac-envoyer]' : '[data-fac-copier]').click()
+      for (let i = 0; i < 8; i++) await attendre()
+      assert.equal(b.lus.length, 2, 'la relecture a bien été tentée')
+      assert.equal(zone.querySelector('[data-fac-envoyer]').disabled, false, action)
+      assert.equal(zone.querySelector('[data-fac-copier]').disabled, false, action)
+    } finally { b.fermer() }
+  }
+})
+
+test('review 2, constat 3 : un refus du serveur pendant une copie Safari ne laisse AUCUN rejet non rattrapé', async () => {
+  const rejets = []
+  const ecoute = (e) => rejets.push(e)
+  process.on('unhandledRejection', ecoute)
+  const b = bancFiche({ reponses: { copier_lien: { __statut: 429, __corps: { error: 'trop_rapproche', motif: 'trop_rapproche' } } } })
+  try {
+    // Le navigateur refuse l'écriture SANS lire l'objet (document sans focus) :
+    // la promesse du Blob n'est alors consommée par personne.
+    b.window.ClipboardItem = class { constructor (o) { this.o = o } }
+    Object.defineProperty(b.window.navigator, 'clipboard', { configurable: true, value: { write: async () => { throw new Error('pas de focus') } } })
+    const zone = await ouvrirFiche(b)
+    zone.querySelector('[data-fac-copier]').click()
+    for (let i = 0; i < 8; i++) await attendre()
+    await new Promise(r => setTimeout(r, 20))
+    assert.match(zone.textContent, /réessayez dans 30 secondes/)
+    assert.deepEqual(rejets.map(e => String(e && e.message)), [], 'aucun rejet non rattrapé')
+  } finally { process.off('unhandledRejection', ecoute); b.fermer() }
+})
+
+test('review 2, constat 6 : la zone d\'annonce n\'est écrite qu\'une fois par message (pas de double annonce)', async () => {
+  const b = bancFiche({ reponses: { copier_lien: { ok: true, lien: LIEN } },
+    apres: { copier_lien: etatFacture({ statut: 'lien_envoye', dernierLien: new Date().toISOString() }) } })
+  try {
+    const zone = await ouvrirFiche(b)
+    const annonce = zone.querySelector('[data-fac-retour]')
+    let ecritures = 0
+    new b.window.MutationObserver((m) => { ecritures += m.length }).observe(annonce, { childList: true, characterData: true, subtree: true })
+    zone.querySelector('[data-fac-copier]').click()
+    for (let i = 0; i < 8; i++) await attendre()
+    assert.equal(b.lus.length, 2, 'la fiche a été relue')
+    assert.equal(annonce.textContent, 'Lien copié.')
+    assert.equal(ecritures, 1, 'une seule écriture, malgré la relecture')
   } finally { b.fermer() }
 })

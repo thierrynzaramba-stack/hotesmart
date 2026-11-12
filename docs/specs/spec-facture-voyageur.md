@@ -241,6 +241,15 @@ confirme le total après le séjour, et la facture lui parvient par lien.
   L'étape 2b couvre les biens du calendrier (Channex) ; pour Beds24, le
   serveur sait déjà rendre un lien sans message (`copier_lien`), c'est l'écran
   qui manque (registre des dettes).
+- **P2 septies — Une demande rattachée à un autre logement que celui du
+  séjour** (review 2 de 2b ; cas rare : logement recréé, séjour déplacé).
+  → **Réponse de Thierry (12 nov. 2026) : « la facture est émise à la fin de
+  la réservation, donc on la rapporte au logement du séjour ».** La fiche
+  montre la demande comme celle du séjour, avec les droits et les gestes du
+  bien de la RÉSERVATION ; les gestes la reprennent (jamais de seconde
+  demande). ⚠ **Conséquence pour l'étape 3 : l'entité qui émet est celle du
+  logement du séjour au moment de l'émission** (bien de la réservation, relu),
+  pas le `property_uuid` figé dans la demande.
 - **P6 — La fin des rappels.** Un rappel par jour, jusqu'à quand ? Jusqu'à
   la confirmation, ou s'arrêter au bout d'un délai ?
   → **Réponse de Thierry (8 nov. 2026, 22 h 09) : A.** Les rappels
@@ -535,6 +544,9 @@ choisi pour limiter ce que ce lot-là aura à reprendre.
    base ; 20 formulaires au plus par jeton ; aucun lien neuf depuis un bien
    archivé, une demande déjà en cours y va au bout (P3) ; le lien revient en
    clair à l'hôte quand le message n'est pas sûrement arrivé (P5).
+   ⚠ **Étape 3 (P2 septies)** : l'entité qui émet se résout sur le logement du
+   SÉJOUR (bien de la réservation, relu à l'émission), pas sur le
+   `property_uuid` de la demande.
    **Ce que 2b livre** (11 nov. 2026, fichiers accordés par le chef de file) :
    le bloc « Facture du voyageur » de la fiche de réservation — le même
    composant à l'ordinateur et au téléphone — avec l'état de la demande, le
@@ -1071,6 +1083,42 @@ Notés sans correction : la lecture de la facture part même quand la
 réservation finit en 404 (une requête, sans fuite — c'est le prix du
 parallèle) ; une réponse tardive d'une ouverture PRÉCÉDENTE de la même
 réservation peut repeindre la fiche rouverte (même réservation, pas de fuite).
+
+#### Review 2 — la re-review des correctifs (sous-agent, 11 novembre 2026)
+
+Arbre `/home/claude/hotesmart-fv2b`, branche `facture-voyageur-etape-2b`,
+plage `605ebf8c040bef4ac6a916497be13f787fe1add2..6d16f3c95145d9a89966278dead13119b8213a05`
+(10 fichiers ; `api/factures-voyageur.js` et `shared/error-handler.js` lus
+pour le contexte seulement). **Aucun constat de sécurité.** Ordre garde →
+réservation → facture vérifié et mesuré : 403 et 404 avant toute sortie, la
+lecture de facture jetée sur un 404.
+
+1. MINEUR — constat 4 : « indisponible » est justifié par « des gestes que le
+   serveur refuserait », mais l'endpoint ACCEPTE `copier_lien` sur une demande
+   rattachée à un autre bien (mesuré : 200, jeton créé) ; et pour le
+   titulaire, la fiche dit à jamais « indisponible pour le moment ».
+2. MINEUR — conséquence : un membre limité à un bien obtient par
+   `copier_lien` un lien vers une demande rattachée à un bien hors de son
+   périmètre (sa réservation est dans son périmètre ; seul le rattachement
+   est périmé). Une règle pour les deux chemins.
+3. MINEUR — Safari : la promesse du `Blob` donnée au `ClipboardItem` n'a pas
+   de gestionnaire ; sur un refus (429), rejet non rattrapé → barre d'erreur
+   générique par-dessus le bon message.
+4. MINEUR — la seconde moitié du constat 3 (boutons rendus après une relecture
+   ÉCHOUÉE) n'a pas de test : retirer la ligne laisse 37/37.
+5. MINEUR — le test du constat 9 annonce « aucune lecture de facture » et ne
+   le vérifie pas.
+6. MINEUR — la zone d'annonce est réécrite avec le même texte à chaque
+   relecture : annonce double possible.
+
+**Suites données** : 1 et 2 tranchés par Thierry (P2 septies) — la demande
+suit le logement du séjour ; plus d'« indisponible » pour ce cas, la fiche et
+l'endpoint appliquent la MÊME règle (droits et gestes du bien de la
+réservation) ; 3 la promesse du Blob a son gestionnaire ; 4 test d'une
+relecture échouée après « Envoyer » et après « Copier » ; 5 test scindé : 403
+sans aucune lecture de facture, 404 sans rien qui sorte ; 6 la zone d'annonce
+n'est écrite que si le texte change. Mutations : chaque correctif retiré fait
+rougir son test (4 sur 4, plus la règle P2 septies).
 
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 

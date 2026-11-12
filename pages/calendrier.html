@@ -2138,7 +2138,6 @@ function ouvrirFicheResa (bienId, resaId) {
   // la fiche en cree un neuf (P2 quinquies).
   let lienCourant = null
   let lienVisible = false        // montre a l'hote : apres « Copier », ou quand le message n'est pas parti
-  let dernierRetour = null       // { cle, vars, erreur } : survit a la relecture
   const encoreLaFiche = () => !$('[data-bind="feuille"]').hidden && encoreCetteResa()
   const dateCourte = (iso) => iso ? dateIntl(String(iso).slice(0, 10), langue()) : ''
   // ⚠ LA ZONE D'ANNONCE (`role="status"`) EST POSEE UNE FOIS et n'est jamais
@@ -2174,16 +2173,17 @@ function ouvrirFicheResa (bienId, resaId) {
         <form data-fac-form hidden novalidate style="margin-top: 8px"></form>
       </div>`
     if (lienCourant && lienVisible) montrerLien(zone, lienCourant)
-    if (dernierRetour) dire(zone, dernierRetour)
     zone.querySelector('[data-fac-envoyer]')?.addEventListener('click', () => envoyerLienFacture(zone))
     zone.querySelector('[data-fac-copier]')?.addEventListener('click', () => copierLienFacture(zone))
     zone.querySelector('[data-fac-saisir]')?.addEventListener('click', () => ouvrirSaisieFacture(zone, dest))
   }
+  // ⚠ LA ZONE D'ANNONCE N'EST ECRITE QUE SI LE TEXTE CHANGE (review 2 de 2b,
+  // constat 6) : reecrire le meme texte la faisait annoncer deux fois.
   function dire (zone, retour) {
-    dernierRetour = retour
     const el = zone.querySelector('[data-fac-retour]')
     if (!el) return
-    el.textContent = retour ? t(retour.cle, retour.vars || {}) : ''
+    const texte = retour ? t(retour.cle, retour.vars || {}) : ''
+    if (el.textContent !== texte) el.textContent = texte
     el.classList.toggle('msg-echec', !!(retour && retour.erreur))
   }
   function montrerLien (zone, lien) {
@@ -2221,7 +2221,13 @@ function ouvrirFicheResa (bienId, resaId) {
     const cb = navigator.clipboard
     try {
       if (cb && typeof cb.write === 'function' && typeof window.ClipboardItem === 'function') {
-        const item = new window.ClipboardItem({ 'text/plain': lienP.then(l => new Blob([l], { type: 'text/plain' })) })
+        // ⚠ LA PROMESSE DU BLOB A SON GESTIONNAIRE (review 2 de 2b, constat 3) :
+        // sur un refus du serveur, le navigateur peut l'abandonner sans la
+        // lire, et son rejet non rattrape affichait la barre d'erreur
+        // generique par-dessus le bon message.
+        const blobP = lienP.then(l => new Blob([l], { type: 'text/plain' }))
+        blobP.catch(() => {})
+        const item = new window.ClipboardItem({ 'text/plain': blobP })
         return cb.write([item]).then(() => true, () => false)
       }
     } catch { /* on tente le repli */ }
