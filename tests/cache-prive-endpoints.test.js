@@ -221,7 +221,12 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   // session par nature : la cle est un jeton de 256 bits, stocke HACHE, porte
   // dans le corps. Elle pose `private, no-store` ELLE-MEME avant son premier
   // refus — garde par tests/factures-voyageur.test.js.
-  assert.ok(SANS_GARDE_ATTENDU.length <= 13,
+  // Leve a 14 le 10 novembre 2026, et NOMME : `api/alertes-desinscription.js`
+  // (PWA lot 2c-3), la page de desinscription d'un contact libre — publique par
+  // nature, sans session : le jeton de 64 caracteres porte par chaque e-mail du
+  // contact est la seule cle, et il ne vaut que pour la personne de ce contact.
+  // Elle pose `private, no-store` avant tout refus, comme une garde.
+  assert.ok(SANS_GARDE_ATTENDU.length <= 14,
     `${SANS_GARDE_ATTENDU.length} endpoints sans garde :\n  ` + SANS_GARDE_ATTENDU.join('\n  ') +
     '\nUn de plus qu attendu : soit il est public par nature (webhook, cron, manifest,\n' +
     'page publique), soit il lui manque sa garde. Nommez-le avant de lever le plafond.')

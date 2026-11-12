@@ -275,6 +275,14 @@ implémentations — et un jour, une seule des deux corrigée.
   qu'est HôteSmart. La marque blanche protège l'illusion du voyageur, pas la sienne.
 - **Destinataire** : le profil `is_owner` du compte. `notify_email = false` est un refus
   explicite, respecté — et ce n'est **pas** une panne, donc aucun incident.
+- **Il suit les réglages de notifications du titulaire** (décision de Thierry du
+  8 novembre 2026, PWA lot 2c-2, `lib/notifications/releve.js`, docs/kb/pwa.md §11) :
+  l'e-mail de « Nouvelle réservation » décoché → pas de relevé ; pendant ses heures
+  calmes → il attend la fin de la plage dans `notifications_file` et part **seul**, relu
+  dans le cœur au moment de partir (une réservation défaite pendant la nuit ne
+  s'annonce pas) ; un séjour imminent passe les heures calmes. La file en panne ne
+  rend pas muet : il part tout de suite. La règle « directe » (`estDirecte`) vit dans
+  ce module, et le dispatcher la lit — elle n'est pas recopiée.
 
 ### ⚠️ La dédup passe par `message_sent_log`, avec un `template_id` sentinelle
 
@@ -1341,3 +1349,19 @@ bloc. Le résultat, lui, est identique, et c'est tout le cahier des charges.
 bien en validation manuelle et un en immédiat, ce qui est exactement ce qu'il
 faut pour vérifier l'écran. Pour les retirer, vider leur entrée du blob
 `agent_alert_config` du compte `6c413095`.
+
+## Notifications de l'hôte (PWA lot 2c-2)
+
+L'agent prévient l'hôte et son équipe par le point d'envoi unique
+(`lib/notifications/evenements-messages.js`, docs/kb/pwa.md §11.2) : urgence et
+information manquante à chaque escalade (et à l'arrêt de l'agent au plafond),
+réponse à valider quand une proposition est posée (ou qu'une réponse
+automatique n'a pas été délivrée), nouveau message d'un voyageur depuis
+`lib/record-message.js`, pause automatique depuis le coupe-circuit. **Une seule
+notification par conversation** (décision de Thierry du 9 novembre 2026) : la
+plus récente remplace l'autre et sonne. La passe des brouillons différés
+(`lib/guestflow/brouillons-dus.js`) retire l'annonce « elle partira seule » qui
+attend en file quand la réponse est partie, et prévient l'hôte quand elle lui
+est rendue (non délivrée, annulée, vide) ; injectable par `opts.notifications`,
+ne lève jamais. Jamais le texte du message, seulement le bien et le prénom. Les
+listes d'`agent_alert_config` restent servies jusqu'au lot 2c-3.

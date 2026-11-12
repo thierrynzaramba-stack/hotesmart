@@ -126,8 +126,15 @@ conflit-là », pas « ce bien ne m'intéresse plus ».
 État de référence des numéros (qui reçoit quoi) : `docs/kb/alertes.md`,
 section « Qui est joignable, et où ».
 
-**L'hôte est prévenu en premier** (SMS + email, via `platform-notify`), le
-fondateur reste en copie pour la supervision. Première version : l'alarme ne
+**L'hôte est prévenu en premier**, le fondateur reste en copie pour la
+supervision. ⚠ **Depuis le lot PWA 2c-1 (8 novembre 2026), l'hôte est prévenu
+par le point d'envoi unique** (`lib/notifications/notifier.js`,
+`docs/kb/pwa.md` §10) : le titulaire ET les membres qui peuvent acquitter
+(`reservations` en écriture sur le bien), chacun selon ses réglages — la
+notification sur ses appareils, l'e-mail, et le SMS (clé Brevo du compte)
+seulement s'il n'a aucun appareil abonné. La surréservation est urgente par
+défaut, avec le SMS coché (décision Q26), et chaque relance **sonne** de nouveau
+(`rappel`). Le fondateur garde son propre canal (`envoyerAlerteBrute`). Première version : l'alarme ne
 partait qu'au canal fondateur alors que le bouton est filtré sur le propriétaire
 du bien — le fondateur recevait un SMS toutes les 45 min sans pouvoir l'éteindre,
 l'hôte avait le bouton sans jamais être averti. Le cycle ne pouvait pas se boucler.

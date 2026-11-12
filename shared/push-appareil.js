@@ -1,5 +1,5 @@
-// shared/push-appareil.js — les notifications push SUR CET APPAREIL (PWA lot 2a).
-// Spec : docs/specs/spec-pwa-lot2-notifications.md §6, §9.8-9.10 · KB : docs/kb/pwa.md §8
+// shared/push-appareil.js — les notifications push SUR CET APPAREIL (PWA lots 2a et 2b).
+// Spec : docs/specs/spec-pwa-lot2-notifications.md §6, §9.8-9.10, §15 · KB : docs/kb/pwa.md §8-9
 //
 // Un seul module pour tout ce que le navigateur fait des notifications :
 // s'abonner (sur un geste), se désabonner, et oublier l'appareil à la
@@ -48,6 +48,27 @@ export function libelleAppareil () {
   return nav ? `${nav} sur ${systeme}` : systeme
 }
 
+// LE TYPE D'APPAREIL, pour dire le BON chemin quand les notifications sont
+// bloquées (décision Q21 : « le plus simple et clair pour l'utilisateur »).
+// Rend 'iphone' (iPhone et iPad), 'android' (Chrome sous Android),
+// 'android-autre' (Samsung Internet, Firefox, Edge, Opera sous Android : leurs
+// menus ne sont pas ceux de Chrome) ou 'ordinateur'.
+export function plateforme () {
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || ''
+  if (/iPhone|iPad|iPod/.test(ua) ||
+    (/Macintosh/.test(ua) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1)) return 'iphone'
+  if (/Android/.test(ua)) {
+    return /Chrome\//.test(ua) && !/SamsungBrowser|Firefox|EdgA|OPR/.test(ua) ? 'android' : 'android-autre'
+  }
+  return 'ordinateur'
+}
+
+// La permission est-elle DÉJÀ refusée sur cet appareil ? Se lit sans rien
+// demander : l'écran le dit dès l'ouverture, avant tout clic.
+export function bloquee () {
+  return pris() && Notification.permission === 'denied'
+}
+
 async function enregistrement () {
   if (!pris()) return null
   try { return (await navigator.serviceWorker.getRegistration('/')) || null } catch { return null }
@@ -83,7 +104,7 @@ function memeCle (sub, octets) {
   return a.length === octets.length && a.every((v, i) => v === octets[i])
 }
 
-async function appelServeur (jeton, methode, corps) {
+async function appelServeur (jeton, methode, corps, { keepalive = false } = {}) {
   const ctl = new AbortController()
   const minuteur = setTimeout(() => ctl.abort(), DELAI_SERVEUR_MS * 3)
   try {
@@ -92,6 +113,7 @@ async function appelServeur (jeton, methode, corps) {
       headers: { authorization: `Bearer ${jeton}`, ...(corps ? { 'content-type': 'application/json' } : {}) },
       body: corps ? JSON.stringify(corps) : undefined,
       cache: 'no-store',
+      keepalive,
       signal: ctl.signal
     })
     let d = {}
@@ -136,6 +158,27 @@ export async function abonner ({ session }) {
   if (userId) ecrireLocal(CLE_TITULAIRE, userId)
   if (r.empreinte) ecrireLocal(CLE_EMPREINTE, r.empreinte)
   return { ok: true, empreinte: r.empreinte }
+}
+
+// LES RÉGLAGES DE LA PERSONNE (lot 2b) : le tableau des événements et les heures
+// calmes, enregistrés ensemble.
+export async function enregistrerReglages (jeton, { evenements, plages }) {
+  return appelServeur(jeton, 'POST', { action: 'reglages', evenements, plages })
+}
+
+// LA LANGUE DE LA PERSONNE (lot 2b), dans laquelle ses notifications lui
+// arriveront. Appelée par le sélecteur du menu ≡ (shared/nav.js), seulement sur
+// ce geste.
+// ⚠ `keepalive` : si la page se recharge malgré l'attente de shared/nav.js
+// (réseau lent), le navigateur termine quand même l'envoi.
+export async function enregistrerLangue (jeton, langue) {
+  return appelServeur(jeton, 'POST', { action: 'langue', langue }, { keepalive: true })
+}
+
+// LES CONTACTS PRÉVENUS (lot 2c-3) : un geste, et la liste à jour en retour.
+// Le compte est celui de la session ; rien d'autre n'est envoyé.
+export async function contact (jeton, corps) {
+  return appelServeur(jeton, 'POST', corps)
 }
 
 export async function essai (jeton) {

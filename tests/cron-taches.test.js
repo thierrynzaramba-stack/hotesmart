@@ -55,6 +55,10 @@ const TACHES = [
   // du cycle. Elle porte son propre budget mur de 20 s et un plafond de 30 par
   // cycle : le reliquat part au cycle suivant, avec son echeance intacte.
   'brouillons_dus',
+  // ⚠ AJOUTEE LE 8 NOVEMBRE 2026 (PWA lot 2c-1) : les notifications qui
+  // attendaient la fin des heures calmes partent, regroupees par personne.
+  // Juste apres les brouillons et avant le dispatch : elle ENVOIE aussi.
+  'notifications_file',
   // ⚠ AJOUTEE LE 10 NOVEMBRE 2026 (lot Avis V5, etape 2) : les trois chiffres
   // de la page Avis, calcules a 06:00 et 18:00 heure de Paris et pour le
   // logement neuf. APRES les classifications (un verdict frais compte), AVANT
@@ -116,4 +120,12 @@ test('le releve des canaux est borne en temps et en nombre', () => {
 
 test('le cycle journalise son bilan de canaux dans results', () => {
   assert.match(source, /results\.canaux = /)
+})
+
+// PWA lot 2c-1 (seconde review) : la passe de la file reçoit le budget du cycle.
+// Sans lui, elle enverrait jusqu'à son plafond même quand le cycle n'a plus le
+// temps — et un groupe pris serait perdu au moment où la fonction est tuée.
+test('la passe de la file des notifications reçoit le budget du cycle', () => {
+  const bloc = source.slice(source.indexOf("chrono.mesure('notifications_file'"))
+  assert.match(bloc.slice(0, 400), /viderFileNotifications\(\{\s*resteMs:\s*\(\)\s*=>\s*55000 - chrono\.total\(\)\s*\}\)/)
 })

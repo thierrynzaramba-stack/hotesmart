@@ -405,3 +405,55 @@ test('l\'écran et le serveur comptent le délai dans le MÊME référentiel', (
     assert.strictEqual(mp(j), serveur(j), `même instant le ${j}`)
   }
 })
+
+// ─── PWA lot 2c-2 : le retrait prévient l'hôte comme un refus (docs/kb/pwa.md §11.3) ──
+// Décision de Thierry du 9 novembre 2026 : le logement n'a plus personne,
+// l'hôte et son équipe l'apprennent comme « Ménage refusé ».
+
+function retraitExecutable ({ majReussie = true } = {}) {
+  const hote = []
+  const chaine = (resultat) => {
+    const c = { select: () => c, eq: () => c, in: () => c, limit: () => Promise.resolve(resultat), maybeSingle: () => Promise.resolve(resultat), then: (r) => Promise.resolve(resultat).then(r) }
+    return c
+  }
+  const supabase = {
+    from (table) {
+      if (table === 'public_tokens') return chaine({ data: { user_id: 'compte-1', property_ids: [] }, error: null })
+      if (table === 'menage_done') return chaine({ data: [], error: null })
+      if (table === 'menage_assignment_log') return { insert: async () => ({ error: null }) }
+      if (table === 'menages') {
+        return {
+          select: () => chaine({ data: { id: 'm1', provider_id: 'regina', status: 'accepted' }, error: null }),
+          update: () => chaine({ data: majReussie ? [{ id: 'm1' }] : [], error: null })
+        }
+      }
+      throw new Error('table inattendue ' + table)
+    }
+  }
+  const retirer = fonctionDuServeur('retirerMonMenage', {
+    supabase, console,
+    profilActifDuJeton: async () => ({ profil: { id: 'regina', first_name: 'Régina' } }),
+    refuserPorteur: () => { throw new Error('ne doit pas refuser') },
+    delaiDeRetrait: async () => ({ heures: 0 }),
+    todayInParis: () => '2000-01-01',
+    minuitParis: () => 0,
+    require: (m) => {
+      assert.strictEqual(m, '../lib/notifications/evenements-menages')
+      return { notifierMenageRefuse: async (o) => { hote.push(o); return { ok: true } } }
+    }
+  })
+  const res = { code: 200, corps: null, status (c) { this.code = c; return this }, json (b) { this.corps = b; return this } }
+  return { retirer, res, hote }
+}
+
+test('LE TEST QUI COMPTE (2c-2) : un retrait prévient l\'hôte et son équipe comme un refus — une fois, et seulement s\'il a eu lieu', async () => {
+  const a = retraitExecutable()
+  await a.retirer({}, a.res, 'tok', { propertyId: '209413', bookingId: 'b1', departureDate: '2099-12-01' })
+  assert.deepStrictEqual(a.res.corps, { success: true, status: 'orphaned' })
+  assert.deepStrictEqual(a.hote.map(o => [o.compte, o.propertyId, o.jour, o.prestataire]), [['compte-1', '209413', '2099-12-01', 'Régina']])
+  // L'hôte a réassigné entre la lecture et l'écriture : rien n'a changé de main, rien ne part.
+  const b = retraitExecutable({ majReussie: false })
+  await b.retirer({}, b.res, 'tok', { propertyId: '209413', bookingId: 'b1', departureDate: '2099-12-01' })
+  assert.strictEqual(b.res.code, 409)
+  assert.deepStrictEqual(b.hote, [])
+})
