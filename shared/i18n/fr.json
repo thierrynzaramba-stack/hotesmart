@@ -390,6 +390,7 @@
   "charges.lecture_attente": "La lecture reprendra seule cette nuit. Vous pouvez aussi saisir la facture à la main maintenant.",
   "charges.lecture_en_cours": "Lecture de la facture…",
   "charges.liste_vide": "Aucune facture pour l'instant. Ajoutez la première.",
+  "charges.montant_etale_non_lu": "Un montant étalé sur la période n'a pas été lu",
   "charges.n_a_trancher": "{n} à trancher",
   "charges.n_a_verifier": "{n} à vérifier",
   "charges.non_lu": "non lu",

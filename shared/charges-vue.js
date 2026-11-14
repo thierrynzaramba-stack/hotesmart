@@ -208,7 +208,9 @@ export function monter (racine, deps) {
   // jour). Sans aucune facture dans une lecture, son montant est 0 — une
   // absence vraie, pas un montant non lu ; avec des factures mais aucun
   // montant lu, il reste « non lu ».
-  const parLecture = (somme, nb) => (Number(nb) > 0 ? montant(somme) : esc(fmtMontant.format(0)))
+  // ⚠ Un indicateur ABSENT (des totaux d'avant le lot 7a) ne vaut pas 0 : on
+  // ne sait pas, donc « non lu » (review du lot 7a, constat 8).
+  const parLecture = (somme, nb) => (nb == null ? montant(somme) : Number(nb) > 0 ? montant(somme) : esc(fmtMontant.format(0)))
   const deuxLectures = (etale, nbEtale, date, nbDate) =>
     `<span class="chg-lecture"><small>${esc(t('charges.etale'))}</small><b>${parLecture(etale, nbEtale)}</b></span>`
     + `<span class="chg-lecture chg-lecture--date"><small>${esc(t('charges.a_la_date'))}</small><b>${parLecture(date, nbDate)}</b></span>`
@@ -239,7 +241,11 @@ export function monter (racine, deps) {
       // (un doublon compte une fois tant que l'hôte n'a pas tranché) ; un
       // montant absent dans une colonne. Même sans facture comptée : des
       // factures en attente sont dans le périmètre.
-      const estimation = Boolean(s.nb_non_verifiees || s.nb_signaux || s.nb_sans_ttc || s.nb_sans_ht || s.nb_sans_tva)
+      // ⚠ ET LA LECTURE ÉTALÉE A SES PROPRES RAISONS (review du lot 7a,
+      // constat 1) : une facture à vérifier datée HORS de la période peut
+      // s'y étaler. Ses indicateurs viennent du résumé, jour par jour.
+      const etaleIncertain = Boolean(s.nb_etale_nv || s.nb_etale_signal || s.nb_etale_sans_ht || s.nb_etale_sans_tva || s.nb_etale_sans_ttc)
+      const estimation = Boolean(s.nb_non_verifiees || s.nb_signaux || s.nb_sans_ttc || s.nb_sans_ht || s.nb_sans_tva || etaleIncertain)
       const mentions = [
         estimation ? t('charges.estimation_mot') : '',
         s.nb_non_verifiees ? t('charges.n_a_verifier', { n: s.nb_non_verifiees }) : '',
@@ -250,12 +256,16 @@ export function monter (racine, deps) {
       if (!s.nb_factures && !s.nb_etale) {
         corps = bornes + `<p class="muted">${esc(t('charges.totaux_vide'))}</p>` + ligneMentions
       } else {
-        const sans = (n) => (n ? `<span class="chg-chiffre__sans">${esc(t('charges.sans_montant', { n }))}</span>` : '')
+        // « N sans montant lu » compte les DOCUMENTS de la période ; un montant
+        // manquant qui ne s'y trouve que par l'étalement se dit sans nombre.
+        const sans = (n, etale) => (n
+          ? `<span class="chg-chiffre__sans">${esc(t('charges.sans_montant', { n }))}</span>`
+          : etale ? `<span class="chg-chiffre__sans">${esc(t('charges.montant_etale_non_lu'))}</span>` : '')
         corps = bornes
           + '<div class="chg-chiffres">'
-          + `<div class="chg-chiffre chg-chiffre--fort"><span>${esc(t('charges.ttc'))}</span><div class="chg-lectures">${deuxLectures(s.ttc_etale, s.nb_etale, s.ttc, s.nb_factures)}</div>${sans(s.nb_sans_ttc)}</div>`
-          + `<div class="chg-chiffre"><span>${esc(t('charges.ht'))}</span><div class="chg-lectures">${deuxLectures(s.ht_etale, s.nb_etale, s.ht, s.nb_factures)}</div>${sans(s.nb_sans_ht)}</div>`
-          + `<div class="chg-chiffre"><span>${esc(t('charges.tva'))}</span><div class="chg-lectures">${deuxLectures(s.tva_etale, s.nb_etale, s.tva, s.nb_factures)}</div>${sans(s.nb_sans_tva)}</div>`
+          + `<div class="chg-chiffre chg-chiffre--fort"><span>${esc(t('charges.ttc'))}</span><div class="chg-lectures">${deuxLectures(s.ttc_etale, s.nb_etale, s.ttc, s.nb_factures)}</div>${sans(s.nb_sans_ttc, s.nb_etale_sans_ttc)}</div>`
+          + `<div class="chg-chiffre"><span>${esc(t('charges.ht'))}</span><div class="chg-lectures">${deuxLectures(s.ht_etale, s.nb_etale, s.ht, s.nb_factures)}</div>${sans(s.nb_sans_ht, s.nb_etale_sans_ht)}</div>`
+          + `<div class="chg-chiffre"><span>${esc(t('charges.tva'))}</span><div class="chg-lectures">${deuxLectures(s.tva_etale, s.nb_etale, s.tva, s.nb_factures)}</div>${sans(s.nb_sans_tva, s.nb_etale_sans_tva)}</div>`
           + '</div>'
           + ligneMentions
           + '<div class="chg-reps">'

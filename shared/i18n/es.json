@@ -390,6 +390,7 @@
   "charges.lecture_attente": "La lectura se reanudará sola esta noche. También puede introducir la factura a mano ahora.",
   "charges.lecture_en_cours": "Leyendo la factura…",
   "charges.liste_vide": "Aún no hay facturas. Añada la primera.",
+  "charges.montant_etale_non_lu": "Un importe repartido en el periodo no se ha leído",
   "charges.n_a_trancher": "{n} por resolver",
   "charges.n_a_verifier": "{n} por verificar",
   "charges.non_lu": "no leído",

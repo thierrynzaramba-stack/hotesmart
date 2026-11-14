@@ -3,6 +3,9 @@
 -- l'etalement (spec §14.2, Q24 a Q26).
 -- A coller APRES 2026-11-10-charges-resume-...
 -- Rejouable. Lignes courtes : collage manuel.
+-- ⚠ APRES ELLE, 2026-11-10 (ET 2026-11-09) NE SE
+-- REJOUENT PLUS : elles remettraient le recalcul
+-- par cellule et des totaux sans lecture etalee.
 -- Controle : 2026-11-13-controle-charges-
 --   periode.sql.
 --
@@ -23,7 +26,12 @@
 -- ⚠ L'ECHEANCIER N'EST COMPTE NULLE PART (Q25) :
 -- ni charge, ni encore prevision (sous-lot 7b).
 -- ⚠ LES COMPTEURS RESTENT CEUX DES DOCUMENTS, a
--- leur date : seuls les montants s'etalent.
+-- leur date : seuls les montants s'etalent. La
+-- lecture etalee porte en plus ses INDICATEURS
+-- d'estimation (review du lot 7a, constat 1).
+-- ⚠ VERROU DU COMPTE D'ABORD, sur tous les
+-- chemins : sans lui, le cron et un UPDATE de
+-- plusieurs lignes s'interbloquaient (constat 5).
 
 -- ─── 1. La facture : type et periode ───────────
 alter table public.charges
@@ -88,24 +96,51 @@ alter table public.charges_resume
 alter table public.charges_resume
   add column if not exists nb_etale int
     not null default 0;
+-- Les raisons d'estimation de la lecture etalee,
+-- par jour : une facture a verifier, un signal
+-- non tranche, un montant non lu, PARMI celles
+-- qui s'etalent sur ce jour. INDICATEURS aussi,
+-- jamais des comptes (constat 1 de la review).
+alter table public.charges_resume
+  add column if not exists nb_etale_nv int
+    not null default 0;
+alter table public.charges_resume
+  add column if not exists nb_etale_signal int
+    not null default 0;
+alter table public.charges_resume
+  add column if not exists nb_etale_sans_ht int
+    not null default 0;
+alter table public.charges_resume
+  add column if not exists nb_etale_sans_tva int
+    not null default 0;
+alter table public.charges_resume
+  add column if not exists nb_etale_sans_ttc int
+    not null default 0;
 
 -- ─── 3. Le recalcul par serie ──────────────────
 -- La part d'un montant pour le k-ieme jour de n :
--- ARRONDI CUMULE. La somme des n parts redonne
--- EXACTEMENT le montant (elle se telescope), et
--- l'ecart d'un jour a l'autre est d'un centime au
--- plus. Vrai aussi pour un montant negatif.
-create or replace function public.charges_part(
-  m bigint, k int, n int)
-returns bigint
+-- ARRONDI CUMULE, floor(m.k/n) - floor(m.(k-1)/n).
+-- La somme des n parts redonne EXACTEMENT le
+-- montant (elle se telescope), et deux jours ne
+-- different jamais de plus d'un centime. Vrai
+-- aussi pour un montant negatif. La formule est
+-- ECRITE dans la requete : une fonction a
+-- `search_path` fixe n'y serait pas integree, et
+-- coutait le double (review, constat 4).
+drop function if exists
+  public.charges_part(bigint, int, int);
+
+-- Le verrou d'un COMPTE : clef a deux entiers,
+-- donc un espace distinct des verrous de serie.
+create or replace function
+  public.charges_verrou_compte(p_user uuid)
+returns void
 language sql
-immutable
 set search_path = public
 as $$
-  select case when m is null then null
-    else floor(m::numeric * k / n)::bigint
-      - floor(m::numeric * (k - 1) / n)::bigint
-    end;
+  select pg_advisory_xact_lock(
+    hashtext('charges-compte'),
+    hashtext(p_user::text));
 $$;
 
 create or replace function
@@ -139,6 +174,7 @@ security definer
 set search_path = public
 as $$
 begin
+  perform public.charges_verrou_compte(p_user);
   perform pg_advisory_xact_lock(
     public.charges_cle_serie(p_user,
       p_entite, p_bien, p_categorie));
@@ -160,7 +196,9 @@ begin
     nb_sans_ht, nb_sans_tva, nb_sans_ttc,
     ht_etale_cents, tva_etale_cents,
     ttc_etale_cents, nb_etale,
-    calcule_le)
+    nb_etale_nv, nb_etale_signal,
+    nb_etale_sans_ht, nb_etale_sans_tva,
+    nb_etale_sans_ttc, calcule_le)
   with x as (
     select c.*,
       (c.statut in ('a_verifier', 'validee')
@@ -213,13 +251,30 @@ begin
   ),
   e as (
     select s.jour,
-      sum(public.charges_part(
-        x.montant_ht_cents, s.k, s.n)) as ht,
-      sum(public.charges_part(
-        x.montant_tva_cents, s.k, s.n)) as tva,
-      sum(public.charges_part(
-        x.montant_ttc_cents, s.k, s.n)) as ttc,
-      count(*) as nb
+      sum(floor(x.montant_ht_cents::numeric
+          * s.k / s.n)::bigint
+        - floor(x.montant_ht_cents::numeric
+          * (s.k - 1) / s.n)::bigint) as ht,
+      sum(floor(x.montant_tva_cents::numeric
+          * s.k / s.n)::bigint
+        - floor(x.montant_tva_cents::numeric
+          * (s.k - 1) / s.n)::bigint) as tva,
+      sum(floor(x.montant_ttc_cents::numeric
+          * s.k / s.n)::bigint
+        - floor(x.montant_ttc_cents::numeric
+          * (s.k - 1) / s.n)::bigint) as ttc,
+      count(*) as nb,
+      count(*) filter (
+        where x.statut = 'a_verifier') as nv,
+      count(*) filter (
+        where x.signal is not null
+          and not x.signal_tranche) as sg,
+      count(*) filter (
+        where x.montant_ht_cents is null) as sh,
+      count(*) filter (
+        where x.montant_tva_cents is null) as sv,
+      count(*) filter (
+        where x.montant_ttc_cents is null) as st
     from x
     cross join lateral (
       select g::date as jour,
@@ -240,7 +295,9 @@ begin
     coalesce(a.ns, 0), coalesce(a.sh, 0),
     coalesce(a.sv, 0), coalesce(a.st, 0),
     e.ht, e.tva, e.ttc, coalesce(e.nb, 0),
-    now()
+    coalesce(e.nv, 0), coalesce(e.sg, 0),
+    coalesce(e.sh, 0), coalesce(e.sv, 0),
+    coalesce(e.st, 0), now()
   from a full join e on e.jour = a.jour;
 end $$;
 
@@ -256,7 +313,9 @@ as $$
 declare
   k_old bigint;
   k_new bigint;
+  u uuid := coalesce(new.user_id, old.user_id);
 begin
+  perform public.charges_verrou_compte(u);
   if tg_op = 'UPDATE' then
     k_old := public.charges_cle_serie(
       old.user_id, old.entite_juridique_id,
@@ -277,6 +336,26 @@ begin
         coalesce(old.periode_debut, old.jour)),
       greatest(old.jour,
         coalesce(old.periode_fin, old.jour)));
+  end if;
+  -- Meme serie et meme plage : un seul recalcul
+  -- suffit (le premier a deja tout relu).
+  if tg_op = 'UPDATE'
+    and k_old = k_new
+    and old.user_id = new.user_id
+    and old.entite_juridique_id
+      is not distinct from new.entite_juridique_id
+    and old.bien_id is not distinct from new.bien_id
+    and old.categorie
+      is not distinct from new.categorie
+    and least(old.jour, coalesce(
+      old.periode_debut, old.jour))
+      = least(new.jour, coalesce(
+        new.periode_debut, new.jour))
+    and greatest(old.jour, coalesce(
+      old.periode_fin, old.jour))
+      = greatest(new.jour, coalesce(
+        new.periode_fin, new.jour)) then
+    return null;
   end if;
   if tg_op in ('INSERT', 'UPDATE') then
     perform public.charges_recalculer_serie(
@@ -304,6 +383,7 @@ declare
   r record;
   n int := 0;
 begin
+  perform public.charges_verrou_compte(p_user);
   for r in
     select u.entite_juridique_id, u.bien_id,
       u.categorie, min(u.d0) as d0,
@@ -415,6 +495,16 @@ as $$
         'ttc_etale', sum(c.ttc_etale_cents),
         'nb_etale',
           coalesce(sum(c.nb_etale), 0),
+        'nb_etale_nv',
+          coalesce(sum(c.nb_etale_nv), 0),
+        'nb_etale_signal',
+          coalesce(sum(c.nb_etale_signal), 0),
+        'nb_etale_sans_ht',
+          coalesce(sum(c.nb_etale_sans_ht), 0),
+        'nb_etale_sans_tva',
+          coalesce(sum(c.nb_etale_sans_tva), 0),
+        'nb_etale_sans_ttc',
+          coalesce(sum(c.nb_etale_sans_ttc), 0),
         'nb_factures',
           coalesce(sum(c.nb_factures), 0),
         'nb_non_verifiees',
@@ -450,7 +540,7 @@ $$;
 -- `anon` et `authenticated` : on retire tout, et
 -- seul le serveur (service_role) appelle.
 revoke execute on function
-  public.charges_part(bigint, int, int)
+  public.charges_verrou_compte(uuid)
   from public, anon, authenticated;
 revoke execute on function
   public.charges_cle_serie(

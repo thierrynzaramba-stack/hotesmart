@@ -383,6 +383,30 @@ test('une commission de plateforme ne se modifie pas : champs figés, ni « Vali
   } finally { b.fermer() }
 })
 
+test('LE TEST QUI COMPTE (review du lot 7a, constat 1) : une facture à vérifier qui ne fait que S\'ÉTALER sur la période rend le total « estimation »', async () => {
+  // Datée de janvier 2027, elle couvre 2026 : aucun compteur « à la date »
+  // dans la période, mais ses indicateurs étalés y sont.
+  const totaux = { total: { ht: null, tva: null, ttc: null, ht_etale: 100000, tva_etale: null, ttc_etale: 120000, nb_etale: 365, nb_etale_nv: 365, nb_etale_signal: 0, nb_etale_sans_ht: 0, nb_etale_sans_tva: 365, nb_etale_sans_ttc: 0, nb_factures: 0, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30' }
+  const b = await monter({ ecran: () => reponseEcran({ totaux }) })
+  try {
+    const z = b.$('[data-bind="totaux"]')
+    assert.match(texte(z.querySelector('.chg-mentions--estimation')), /^Estimation · Calculé le/)
+    const tva = [...z.querySelectorAll('.chg-chiffre')][2]
+    assert.match(texte(tva), /Étalé\s*non lu/)
+    assert.match(texte(tva), /Un montant étalé sur la période n'a pas été lu/, 'le manque est dit, sans nombre de documents')
+  } finally { b.fermer() }
+})
+
+test('des totaux d\'AVANT le lot 7a (sans indicateur étalé) ne montrent pas « 0 € » étalé : on ne sait pas', async () => {
+  const totaux = { total: { ht: 10000, tva: 2000, ttc: 12000, nb_factures: 1, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [{ cle: '2026-11', ttc: 12000, nb_factures: 1 }], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30' }
+  const b = await monter({ ecran: () => reponseEcran({ totaux }) })
+  try {
+    const z = b.$('[data-bind="totaux"]')
+    assert.match(texte(z.querySelector('.chg-chiffre')), /Étalé\s*non lu\s*À la date\s*120,00/)
+    assert.doesNotMatch(texte(z), /Étalé\s*0,00/)
+  } finally { b.fermer() }
+})
+
 // ─── Lot 7a : type de document et période ───────────────────────────────────
 test('les types de document de la vue sont ceux du serveur (lib/charges/regles.js fait foi)', async () => {
   const vue = await import(path.join(racine, 'shared/charges-vue.js'))

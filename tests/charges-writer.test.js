@@ -722,3 +722,15 @@ test('une lecture d\'avoir s\'écrit NÉGATIVE ; le type et la période lus sont
   assert.deepEqual([maj.type_document, maj.periode_debut, maj.periode_fin], ['avoir', '2026-01-01', '2026-03-31'])
   assert.equal(maj.lecture_ia.montant_ttc_cents, 3000, 'la lecture est gardée telle quelle, sans signe')
 })
+
+test('valider SANS période envoyée garde celle que la charge porte ; envoyée vide, elle s\'efface (review du lot 7a, constat 6)', async () => {
+  const porte = { type_document: 'avis_impot', periode_debut: '2026-01-01', periode_fin: '2026-12-31' }
+  const a = baseEnregistreuse(chargeAVerifier(porte))
+  await charges.valider(a.client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK } }, { entites: entitesDouble({ entites: [E1] }) })
+  const m = a.requetes.find(x => x.op === 'update').charge
+  assert.deepEqual([m.periode_debut, m.periode_fin], ['2026-01-01', '2026-12-31'])
+  const b = baseEnregistreuse(chargeAVerifier(porte))
+  await charges.valider(b.client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK, periode_debut: null, periode_fin: null } }, { entites: entitesDouble({ entites: [E1] }) })
+  const n = b.requetes.find(x => x.op === 'update').charge
+  assert.deepEqual([n.periode_debut, n.periode_fin], [null, null])
+})

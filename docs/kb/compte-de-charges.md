@@ -132,8 +132,22 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 - **Lot 7a — le verrou est celui de la SÉRIE**, sur tous les chemins : le
   trigger prend les deux séries (avant / après) dans l'ordre, le recalcul du
   compte les parcourt dans l'ordre de leur clé.
-- **Lot 7a — sur tout le temps, étalé = à la date** pour chaque compte : c'est
-  le contrôle 9 de la migration.
+- **Lot 7a — sur tout le temps, étalé = à la date** pour chaque compte (HT,
+  TVA et TTC) : c'est le contrôle 9 de la migration.
+- **Lot 7a — l'oracle** : `scripts/oracle-resume-charges.sql`, en lecture
+  seule, recalcule tout le résumé en force brute et le compare aux 18
+  colonnes. **0 écart attendu**, à jouer après chaque migration du résumé,
+  en local, sur staging et en prod. Les tests du dépôt lisent le SQL ;
+  l'oracle, lui, l'exécute.
+- **Lot 7a — le verrou du COMPTE d'abord** (`charges_verrou_compte`), sur
+  le trigger, le recalcul d'une série et celui du compte entier : sans lui,
+  le cron et un UPDATE de plusieurs lignes s'interbloquaient.
+- **Lot 7a — la lecture étalée a ses indicateurs d'estimation**
+  (`nb_etale_nv`, `nb_etale_signal`, `nb_etale_sans_*`) : une facture à
+  vérifier datée hors de la période peut s'y étaler. Indicateurs, jamais
+  des comptes.
+- **Lot 7a — après la migration 2026-11-13, ni 2026-11-10 ni 2026-11-09 ne
+  se rejouent.**
 
 ## Dettes connues (review du lot 2, 10 novembre 2026)
 

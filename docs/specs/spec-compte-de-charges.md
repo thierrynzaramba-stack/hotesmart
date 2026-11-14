@@ -1010,9 +1010,17 @@ du résumé. Une facture annuelle ne pèse donc pas 365 lignes de plus. La
 part est un **arrondi cumulé** (`charges_part`) : le jour *k* sur *n* reçoit
 ⌊m·k/n⌋ − ⌊m·(k−1)/n⌋. La somme se télescope et redonne le montant exact, et
 deux jours ne diffèrent jamais de plus d'un centime — mieux que de tout
-poser sur le dernier jour. Mesuré en local : 1 200 € sur 2026 font 365
-cellules, 101,91 € en janvier, 92,06 € en février, la somme exacte, et le
-recalcul tient en 12 ms.
+poser sur le dernier jour. Mesuré en local, sur une base presque vide :
+1 200 € sur 2026 font 365 cellules, 101,91 € en janvier, 92,06 € en février,
+la somme exacte, et le recalcul tient en 12 ms.
+
+**Coût mesuré après la review** (Postgres 16 local, un compte de **3 001
+charges**, 4 logements × 5 catégories, un quart à période, 15 novembre
+2026) : insérer une facture annuelle **105 ms** ; un UPDATE qui ne change
+ni la série ni la plage **55 ms** (un seul recalcul) ; recalculer tout le
+compte **0,9 s** ; `charges_totaux` sur 12 mois **7,6 ms**. La formule de la
+part est écrite dans la requête (une fonction à `search_path` fixe n'y était
+pas intégrée et coûtait le double).
 
 **Le résumé** porte les deux lectures dans la même cellule du jour :
 `…_cents` (à la date, comme aujourd'hui) et `…_etale_cents` (la somme des
@@ -1148,6 +1156,48 @@ Les questions, telles qu'elles ont été posées :
 - **Q37** — Les prévisions dans la vue **à la date** : non (cette vue ne
   montre que des documents reçus, les prévisions vivent dans la vue
   étalée), ou oui, posées à la date habituelle ?
+
+### 14.10 Trace de la review du sous-lot 7a (15 novembre 2026)
+
+Réponse de la review, recopiée mot pour mot :
+
+```
+TRACE DE REVIEW
+Arbre lu : /home/claude/hotesmart-lot3
+Branche lue : charges-lot7-periode
+SHA de tête lu : 0b7c1cb6b1168ab4d05a3c9c73873a5de41a3de7
+Plage relue : 082d376e85c644687efb57d13101a13e311ebb67..0b7c1cb6b1168ab4d05a3c9c73873a5de41a3de7
+Fichiers de la plage (19) : docs/kb/compte-de-charges.md, docs/specs/spec-compte-de-charges.md, lib/charges.js, lib/charges/ecran.js, lib/charges/lecture.js, lib/charges/regles.js, migrations/2026-11-13-charges-periode.sql, migrations/2026-11-13-controle-charges-periode.sql, shared/charges-vue.js, shared/i18n/en.json, shared/i18n/es.json, shared/i18n/fr.json, shared/ui.css, tests/charges-ecran.test.js, tests/charges-lecture.test.js, tests/charges-migration-periode.test.js, tests/charges-page.test.js, tests/charges-regles.test.js, tests/charges-writer.test.js
+Fichiers cités dans les constats :
+- migrations/2026-11-13-charges-periode.sql : dans la plage
+- migrations/2026-11-13-controle-charges-periode.sql : dans la plage
+- shared/charges-vue.js : dans la plage
+- lib/charges.js : dans la plage
+- lib/charges/lecture.js : dans la plage
+- tests/charges-migration-periode.test.js : dans la plage
+- docs/specs/spec-compte-de-charges.md : dans la plage
+- migrations/2026-11-10-charges-resume-categorie.sql : HORS PLAGE, référence seulement (le lot 3 qu'on ne doit plus rejouer)
+```
+
+**Confrontation, refaite par le fil** : `git diff --name-only 082d376e
+0b7c1cb6` rend les 19 fichiers ci-dessus ; le seul fichier hors plage est
+cité comme référence, avec sa raison : statut **accepté**. La review a joué
+les trois migrations dans un Postgres jetable et comparé le résumé à un
+oracle en force brute sur 1 800 écritures aléatoires : 0 écart.
+
+**Aucun constat de sécurité** : les correctifs ne sont pas re-reviewés
+(« une review par commit »).
+
+| # | Sévérité | Objet | Statut |
+|---|---|---|---|
+| 1 | à corriger | l'étalé pouvait contenir une facture à vérifier ou sans montant lu, datée hors de la période, sans « Estimation » | **corrigé** : indicateurs étalés par jour au résumé, rendus par `charges_totaux`, lus par la vue (test de page) |
+| 2 | à corriger | le contrôle disait « ok » sur une migration à moitié collée (contrainte vérifiée à son nom) | **corrigé** : contraintes et trigger vérifiés à leur DÉFINITION, HT/TVA/TTC comparés ; contre-épreuve faite (contrainte du lot 2 remise : ligne 2 à `false`) |
+| 3 | à corriger | les tests de la migration ne voyaient pas une erreur de recalcul | **corrigé** : `scripts/oracle-resume-charges.sql` (lecture seule, 18 colonnes), joué en local sur 1 500 écritures aléatoires : 0 écart ; contre-épreuve « left join » : 7 626 écarts ; plus trois assertions de texte qui disent ce qu'elles ne voient pas |
+| 4 | mineur | coût, et une mesure sans sa plage | **corrigé** : formule écrite dans la requête, un seul recalcul quand rien ne bouge ; mesure refaite et datée (§14.2) |
+| 5 | mineur | interblocage cron / UPDATE de plusieurs lignes | **corrigé** : verrou du compte d'abord, sur les trois chemins |
+| 6 | mineur | une période non envoyée était effacée | **corrigé** : gardée, comme le type ; envoyée vide, elle s'efface (test) |
+| 7 | mineur | un avoir lu avec son signe tombait à « non lu » | **corrigé** : lu signé puis en valeur absolue ; consigne précisée (test) |
+| 8 | mineur | rejouer 2026-11-10 après 7a ; un « 0 » inventé si les indicateurs manquent | **corrigé** : en-tête de la migration ; la vue dit « non lu » sans indicateur (test) |
 
 ## 12. Trace des reviews du lot 2
 

@@ -133,3 +133,10 @@ test('la lecture : type inconnu → « facture » ; période incohérente → au
   const b = r7.normaliserLecture({ type_document: 'regularisation', periode_debut: '2025-10-01', periode_fin: '2026-09-30', solde_ttc: '-45,20' })
   assert.deepEqual([b.type_document, b.periode_debut, b.periode_fin, b.solde_ttc_cents], ['regularisation', '2025-10-01', '2026-09-30', -4520])
 })
+
+test('un avoir lu AVEC son signe (« -30,00 ») se lit en valeur absolue, pas « non lu » (review du lot 7a, constat 7)', () => {
+  const a = r7.normaliserLecture({ type_document: 'avoir', montant_ttc: -30, montant_ht: '-25,00', montant_tva: 5 })
+  assert.deepEqual([a.montant_ttc_cents, a.montant_ht_cents, a.montant_tva_cents], [3000, 2500, 500])
+  // Une facture ordinaire négative reste illisible : le signe n'y a pas de sens.
+  assert.equal(r7.normaliserLecture({ type_document: 'facture', montant_ttc: -30 }).montant_ttc_cents, null)
+})

@@ -390,6 +390,7 @@
   "charges.lecture_attente": "Reading will resume on its own tonight. You can also enter the invoice manually now.",
   "charges.lecture_en_cours": "Reading the invoice…",
   "charges.liste_vide": "No invoice yet. Add the first one.",
+  "charges.montant_etale_non_lu": "A spread amount in the period was not read",
   "charges.n_a_trancher": "{n} to resolve",
   "charges.n_a_verifier": "{n} to check",
   "charges.non_lu": "not read",
