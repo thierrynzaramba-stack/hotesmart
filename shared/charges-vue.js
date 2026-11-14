@@ -418,9 +418,10 @@ export function monter (racine, deps) {
       + champ('type_document', t('charges.champ_type'), `<select data-champ="type_document"${fige}>`
         + TYPES_DOCUMENT.map(k => `<option value="${k}"${k === type ? ' selected' : ''}>${esc(t('charges.type_' + k))}</option>`).join('') + '</select>')
       + `<fieldset class="chg-periode"><legend>${esc(t('charges.champ_periode'))} <span class="muted">${esc(t('charges.facultatif'))}</span></legend>`
+      + '<div class="chg-periode__dates">'
       + champ('periode_debut', t('charges.periode_du'), `<input type="date" data-champ="periode_debut" value="${esc(c.periode_debut || '')}"${fige}>`)
       + champ('periode_fin', t('charges.periode_au'), `<input type="date" data-champ="periode_fin" value="${esc(c.periode_fin || '')}"${fige}>`)
-      + '</fieldset>'
+      + '</div></fieldset>'
       + `<p class="chg-note" data-bind="aide-type">${esc(aideType(type, c))}</p>`
       + '<div class="chg-montants">'
       + montantChamp('montant_ht_cents', t('charges.champ_ht'))
