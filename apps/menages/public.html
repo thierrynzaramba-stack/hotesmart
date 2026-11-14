@@ -832,6 +832,9 @@
                            border-radius: var(--radius-pill); min-height: var(--control);
                            padding: 0 12px; font-family: var(--font); font-size: 12px; color: var(--ink); }
     .avis-sans-detail { color: var(--muted); font-style: italic; }
+    .avis-trad { margin-top: 6px; font-size: 12px; color: var(--muted); }
+    .avis-trad-bascule { background: none; border: 0; padding: 0; color: inherit; font: inherit;
+                         font-weight: var(--fw-semibold); text-decoration: underline; cursor: pointer; }
     .badge-prive { background: var(--surface-2); border: 1px solid var(--line);
                    border-radius: var(--radius-pill); padding: 3px 10px; font-size: 11px;
                    font-weight: var(--fw-semibold); color: var(--muted); }
@@ -5620,7 +5623,15 @@ if ("serviceWorker" in navigator && !APERCU) {
     // et la requalification par l'hote l'efface. On le DIT au lieu de laisser
     // un blanc. Le cas est invisible aujourd'hui (1 remarque sur 70, avec
     // extrait) : il apparaitra au premier tag negatif.
-    const texte = a.extrait
+    // ⚠ UN EXTRAIT ECRIT DANS UNE AUTRE LANGUE S'AFFICHE EN FRANCAIS, l'original
+    // a un clic (decision de Thierry du 11 novembre 2026, spec avis-v5
+    // spec-traduction-avis.md §3.5). La traduction arrive toute faite du
+    // serveur ; la page ne traduit rien. Rendu en ligne, sans module partage :
+    // cette page doit tenir hors ligne.
+    const traduit = a.extrait && a.extraitTraduit
+    const texte = traduit
+      ? `<span class="avt-t">${echapper(a.extraitTraduit)}</span><span class="avt-o" hidden>${echapper(a.extrait)}</span>`
+      : a.extrait
       ? echapper(a.extrait)
       : `<span class="avis-sans-detail">${neg
           ? 'Propreté signalée, sans détail rapporté par le voyageur.'
@@ -5633,8 +5644,28 @@ if ("serviceWorker" in navigator && !APERCU) {
         ${a.prive ? '<span class="badge-prive">retour privé</span>' : ''}
       </div>
       <div class="avis-texte">${texte}</div>
+      ${traduit ? `<div class="avis-trad">${echapper('Traduit (' + nomDeLangue(a.extraitLangue) + ')')} · <button type="button" class="avis-trad-bascule">Voir l’original</button></div>` : ''}
     </div>`
   }
+
+  // Le nom d'une langue en francais (« anglais »), par Intl : aucune liste
+  // recopiee. Sans Intl.DisplayNames, le code.
+  function nomDeLangue (code) {
+    try { return new Intl.DisplayNames(['fr'], { type: 'language' }).of(String(code || '')) || String(code || '') } catch { return String(code || '') }
+  }
+
+  // La bascule traduction / original, deleguee : la liste est repeinte.
+  document.addEventListener('click', (ev) => {
+    const b = ev.target && ev.target.closest ? ev.target.closest('.avis-trad-bascule') : null
+    if (!b) return
+    const carte = b.closest('.avis-card')
+    if (!carte) return
+    const versOriginal = b.dataset.original !== '1'
+    carte.querySelectorAll('.avt-t').forEach(e => { e.hidden = versOriginal })
+    carte.querySelectorAll('.avt-o').forEach(e => { e.hidden = !versOriginal })
+    b.dataset.original = versOriginal ? '1' : ''
+    b.textContent = versOriginal ? 'Voir la traduction' : 'Voir l’original'
+  })
 
   // ─── Helpers dates ─────────────────────────────────────────────────────────
   function formatDate(date) { return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) }
