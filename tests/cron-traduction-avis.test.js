@@ -51,8 +51,8 @@ function traducteur ({ ok = true, leve = false } = {}) {
   const fn = async (l) => {
     appels.push(l.id)
     if (leve) throw new Error('panne')
-    return ok ? { ok: true, textes: { public: { source: 'en', fr: 'Bon séjour', es: 'Buena estancia' } }, appel: true }
-      : { ok: false, motif: 'json_illisible', appel: true }
+    return ok ? { ok: true, textes: { public: { source: 'en', fr: 'Bon séjour', es: 'Buena estancia' } }, appels: 1 }
+      : { ok: false, motif: 'json_illisible', appels: 1 }
   }
   fn.appels = appels
   return fn
@@ -161,7 +161,7 @@ test('⚠ un traducteur qui LÈVE : l’appel est compté, le passage continue e
 test('le budget de temps du passage arrête la boucle ; le reste du cycle aussi', async () => {
   const sb = fauxBase({ file: file(5) })
   const now = horloge()
-  const traduire = async (l) => { now.avancer(5000); return { ok: true, textes: {}, appel: true } }
+  const traduire = async (l) => { now.avancer(5000); return { ok: true, textes: {}, appels: 1 } }
   const b = await C.traduireAvisDus({ errors: [] }, { supabase: sb, now, traduire })
   assert.equal(b.interrompu, 'budget')
   assert.equal(b.appels, 3, '0 s, 5 s, 10 s partent ; à 15 s le budget de 12 s est dépassé')
@@ -215,7 +215,7 @@ test('⚠ LE COMPTE EST RÉSERVÉ ET LA TENTATIVE NOTÉE AVANT L’APPEL : un pa
   const vu = []
   const traduire = async (l) => {
     vu.push({ id: l.id, reserve: sb.journal.marqueurs.map(m => m.total_messages), tentatives: sb.journal.ecrits.filter(e => e.echec_le).map(e => e.review_id) })
-    return { ok: true, textes: {}, appel: true }
+    return { ok: true, textes: {}, appels: 1 }
   }
   await C.traduireAvisDus({ errors: [] }, { supabase: sb, now: horloge(), traduire })
   assert.deepEqual(vu, [
@@ -224,21 +224,62 @@ test('⚠ LE COMPTE EST RÉSERVÉ ET LA TENTATIVE NOTÉE AVANT L’APPEL : un pa
   ])
 })
 
-test('⚠ chaque appel porte sa durée maximale : 20 s, et jamais au-delà du reste du cycle moins 25 s', async () => {
+test('⚠ chaque appel porte sa durée pleine (20 s) : il ne part que si elle tient dans le reste du cycle moins 25 s', async () => {
   const durees = []
-  const traduire = async (l, d) => { durees.push(d.timeoutMs); return { ok: true, textes: {}, appel: true } }
+  const traduire = async (l, d) => { durees.push(d.timeoutMs); return { ok: true, textes: {}, appels: 1 } }
   await C.traduireAvisDus({ errors: [] }, { supabase: fauxBase({ file: file(1) }), now: horloge(), traduire })
-  await C.traduireAvisDus({ errors: [] }, { supabase: fauxBase({ file: file(1) }), now: horloge(), traduire, resteMs: () => 31000 })
-  assert.deepEqual(durees, [20000, 6000])
+  await C.traduireAvisDus({ errors: [] }, { supabase: fauxBase({ file: file(1) }), now: horloge(), traduire, resteMs: () => 45000 })
+  assert.deepEqual(durees, [20000, 20000], 'jamais un délai raccourci : un appel coupé par NOTRE délai serait payé et compté en échec')
 })
 
-test('moins de 3 s devant lui, l’appel ne part pas, et la réservation est rendue', async () => {
+test('pas de quoi lancer un appel complet : la file n’est même pas lue', async () => {
   const sb = fauxBase({ file: file(2) })
   const traduire = traducteur()
-  const b = await C.traduireAvisDus({ errors: [] }, { supabase: sb, now: horloge(), traduire, resteMs: () => 27000 })
+  const b = await C.traduireAvisDus({ errors: [] }, { supabase: sb, now: horloge(), traduire, resteMs: () => 44999 })
+  assert.equal(b.skipped, 'temps')
+  assert.equal(sb.journal.rpc.length, 0)
+  assert.equal(sb.journal.marqueurs.length, 0)
+  assert.equal(traduire.appels.length, 0)
+})
+
+// ─── Deux appels pour un avis avec extrait (Q6 = A, 15 novembre 2026) ───────
+const avecExtrait = (i) => ({ ...ligne(i), texte_extrait: 'very clean ' + i })
+
+test('⚠ LE PLAFOND SE COMPTE EN APPELS : un avis avec extrait en coûte deux, cinq tiennent dans un passage', async () => {
+  const sb = fauxBase({ file: Array.from({ length: 10 }, (_, i) => avecExtrait(i + 1)) })
+  const vus = []
+  const traduire = async (l) => { vus.push(l.id); return { ok: true, textes: {}, appels: 2 } }
+  const b = await C.traduireAvisDus({ errors: [] }, { supabase: sb, now: horloge(), traduire })
+  assert.equal(vus.length, 5)
+  assert.equal(b.appels, 10)
+  assert.deepEqual(sb.journal.marqueurs.map(m => m.total_messages), [10], 'réservé : 5 avis × 2 appels')
+})
+
+test('⚠ le plafond du jour en appels : à 97, un avis à 2 appels passe, le suivant non', async () => {
+  const sb = fauxBase({ file: [avecExtrait(1), avecExtrait(2)], marqueur: { last_run: '2026-11-11T06:00:00Z', total_messages: 97 } })
+  const vus = []
+  const traduire = async (l) => { vus.push(l.id); return { ok: true, textes: {}, appels: 2 } }
+  const b = await C.traduireAvisDus({ errors: [] }, { supabase: sb, now: horloge(), traduire })
+  assert.deepEqual(vus, ['r1'])
+  assert.equal(b.appels_jour, 99)
+})
+
+test('un avis à deux appels ne part que si ses DEUX appels tiennent (40 s + 25 s)', async () => {
+  const sb = fauxBase({ file: [avecExtrait(1)] })
+  const traduire = traducteur()
+  const b = await C.traduireAvisDus({ errors: [] }, { supabase: sb, now: horloge(), traduire, resteMs: () => 60000 })
   assert.equal(b.interrompu, 'budget')
   assert.equal(traduire.appels.length, 0)
-  assert.deepEqual(sb.journal.marqueurs.map(m => m.total_messages), [2, 0])
+  assert.deepEqual(sb.journal.marqueurs.map(m => m.total_messages), [2, 0], 'la réservation est rendue')
+})
+
+test('« rien à traduire » n’est pas compté comme une traduction', async () => {
+  const sb = fauxBase({ file: file(1) })
+  const b = await C.traduireAvisDus({ errors: [] }, { supabase: sb, now: horloge(),
+    traduire: async () => ({ ok: true, textes: {}, motif: 'rien_a_traduire', appels: 0 }) })
+  assert.equal(b.traduits, 0)
+  assert.equal(b.vides, 1)
+  assert.equal(b.appels, 0)
 })
 
 test('une tentative qui ne s’écrit pas arrête le passage AVANT l’appel', async () => {

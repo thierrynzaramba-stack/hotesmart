@@ -82,13 +82,16 @@ test('⚠ RIEN N’EST ÉCRIT SANS ÊTRE VALIDE : chaque défaut refuse la répo
   }
 })
 
-// ─── Un appel ───────────────────────────────────────────────────────────────
-function fauxClient (reponse) {
+// ─── Les appels ─────────────────────────────────────────────────────────────
+// Un client qui rend, appel apres appel, les reponses de la liste (la derniere
+// se repete). Il garde chaque demande pour qu'on lise ce que l'IA a RECU.
+function fauxClient (...reponses) {
   const appels = []
   return {
     appels,
     messages: {
       async create (args) {
+        const reponse = reponses[Math.min(appels.length, reponses.length - 1)]
         appels.push(args)
         if (reponse instanceof Error) throw reponse
         return { content: [{ text: typeof reponse === 'string' ? reponse : JSON.stringify(reponse) }] }
@@ -98,52 +101,98 @@ function fauxClient (reponse) {
 }
 const LIGNE = { id: 'r1', user_id: 'u1', property_id_ref: '209413', booking_uid: 'b1',
   texte_public: CHAMPS.public, texte_prive: CHAMPS.prive, texte_extrait: null, empreinte: 'E1', echecs: 0 }
+const EXTRAIT_EN = { extrait: { source: 'en', fr: 'très propre', es: 'muy limpio' } }
+const LIGNE_EXTRAIT = { ...LIGNE, texte_extrait: 'very clean' }
+const promptDe = (demande) => demande.messages[0].content
 
-test('UN appel par avis, au modèle Haiku, avec les seuls champs non vides', async () => {
+test('sans extrait : UN appel, au modèle Haiku, avec les seuls champs non vides', async () => {
   const client = fauxClient(BONNE)
   const r = await T.traduireLigne(LIGNE, { anthropic: client })
   assert.equal(r.ok, true)
-  assert.equal(r.appel, true)
+  assert.equal(r.appels, 1)
+  assert.equal(T.appelsPrevus(LIGNE), 1)
   assert.equal(client.appels.length, 1)
   assert.equal(client.appels[0].model, T.MODELE)
-  const prompt = client.appels[0].messages[0].content
-  assert.match(prompt, /Very clean flat/)
-  assert.doesNotMatch(prompt, /"extrait":/, 'un champ vide ne part pas')
+  assert.match(promptDe(client.appels[0]), /Very clean flat/)
+  assert.doesNotMatch(promptDe(client.appels[0]), /"extrait":/, 'un champ vide ne part pas')
+})
+
+test('⚠ LE TEST QUI COMPTE : L’EXTRAIT EST TRADUIT PAR UN APPEL QUI NE VOIT NI LE RETOUR PRIVÉ NI LE TEXTE PUBLIC', async () => {
+  // Decision de Thierry du 15 novembre 2026 (Q6 = A), apres la seconde revue :
+  // la prestataire ne lit que l'extrait ; un appel ne peut pas rendre ce qu'il
+  // n'a pas recu. Ce test rougit contre la version a un seul appel.
+  const client = fauxClient(BONNE, EXTRAIT_EN)
+  const r = await T.traduireLigne(LIGNE_EXTRAIT, { anthropic: client })
+  assert.equal(r.ok, true)
+  assert.equal(r.appels, 2)
+  assert.equal(T.appelsPrevus(LIGNE_EXTRAIT), 2)
+  assert.equal(client.appels.length, 2)
+  const [a, b] = client.appels.map(promptDe)
+  assert.match(a, /Very clean flat/)
+  assert.match(a, /Le chauffage était faible/)
+  assert.doesNotMatch(a, /"extrait":/, 'l’appel des textes ne voit pas l’extrait')
+  assert.match(b, /"extrait":"very clean"/)
+  assert.doesNotMatch(b, /Le chauffage était faible/, 'l’appel de l’extrait ne voit JAMAIS le retour privé')
+  assert.doesNotMatch(b, /Very clean flat/, 'ni le texte public')
+  assert.deepEqual(r.textes, { ...BONNE, ...EXTRAIT_EN })
+})
+
+test('⚠ un appel ne rend QUE ses champs : un retour privé glissé dans la réponse de l’extrait la fait refuser', async () => {
+  const inversee = { extrait: EXTRAIT_EN.extrait, prive: { source: 'fr', en: 'The heating was weak', es: 'La calefacción era débil' } }
+  const r = await T.traduireLigne(LIGNE_EXTRAIT, { anthropic: fauxClient(BONNE, inversee) })
+  assert.equal(r.ok, false)
+  assert.equal(r.motif, 'champ_invente')
+  assert.equal(r.appels, 2)
+})
+
+test('un extrait en idéogrammes fidèlement traduit est accepté (la borne serrée a disparu)', () => {
+  const champs = { extrait: '浴室非常干净，床也很舒服，厨房用具齐全' }
+  const fidele = { extrait: { source: 'zh', fr: 'La salle de bain était très propre, le lit très confortable et la cuisine bien équipée',
+    en: 'The bathroom was very clean, the bed very comfortable and the kitchen well equipped',
+    es: 'El baño estaba muy limpio, la cama muy cómoda y la cocina bien equipada' } }
+  assert.equal(T.lireReponse(JSON.stringify(fidele), champs).ok, true)
+})
+
+test('tout ou rien : l’appel A en échec, l’appel B ne part pas', async () => {
+  const client = fauxClient('pas du JSON', EXTRAIT_EN)
+  const r = await T.traduireLigne(LIGNE_EXTRAIT, { anthropic: client })
+  assert.equal(r.ok, false)
+  assert.equal(r.motif, 'json_illisible')
+  assert.equal(r.appels, 1)
+  assert.equal(client.appels.length, 1)
+})
+
+test('l’appel B en échec : l’avis échoue, et les deux appels sont comptés', async () => {
+  const r = await T.traduireLigne(LIGNE_EXTRAIT, { anthropic: fauxClient(BONNE, 'pas du JSON') })
+  assert.equal(r.ok, false)
+  assert.equal(r.appels, 2)
 })
 
 test('une erreur d’API est un échec, pas une exception ; et elle compte comme un appel', async () => {
   const r = await T.traduireLigne(LIGNE, { anthropic: fauxClient(new Error('overloaded')) })
   assert.equal(r.ok, false)
   assert.equal(r.motif, 'appel_en_echec')
-  assert.equal(r.appel, true)
+  assert.equal(r.appels, 1)
 })
 
 test('rien à traduire : aucun appel, et une RÉUSSITE vide (la ligne sort de la file jusqu’au prochain texte)', async () => {
   const client = fauxClient(BONNE)
   const r = await T.traduireLigne({ ...LIGNE, texte_public: '\t\n', texte_prive: null }, { anthropic: client })
-  assert.equal(r.appel, false)
+  assert.equal(r.appels, 0)
   assert.equal(r.ok, true)
+  assert.equal(r.motif, 'rien_a_traduire')
   assert.deepEqual(r.textes, {})
   assert.equal(client.appels.length, 0)
 })
 
-test('⚠ L’EXTRAIT A UNE BORNE SERRÉE : il ne peut pas porter une phrase entière du retour privé', () => {
-  const champs = { extrait: 'very clean', prive: 'The heating was weak and the neighbours were noisy' }
-  const fuite = { extrait: { source: 'en', fr: 'très propre — et le voisin a dit que le chauffage était faible et que les voisins étaient bruyants', es: 'muy limpio' },
-    prive: { source: 'en', fr: 'Le chauffage était faible', es: 'La calefacción era débil' } }
-  assert.equal(T.lireReponse(JSON.stringify(fuite), champs).motif, 'traduction_trop_longue')
-  const juste = { ...fuite, extrait: { source: 'en', fr: 'très propre', es: 'muy limpio' } }
-  assert.equal(T.lireReponse(JSON.stringify(juste), champs).ok, true)
-})
-
-test('⚠ un appel du cron porte sa durée maximale et AUCUNE relance ; le script, rien', async () => {
-  const cron = fauxClient(BONNE)
+test('⚠ chaque appel du cron porte sa durée maximale et AUCUNE relance ; le script, rien', async () => {
+  const cron = fauxClient(BONNE, EXTRAIT_EN)
   const opts = []
   const espion = { messages: { create: async (args, o) => { opts.push(o); return cron.messages.create(args) } } }
-  await T.traduireLigne(LIGNE, { anthropic: espion, timeoutMs: 12345.6 })
-  assert.deepEqual(opts[0], { timeout: 12345, maxRetries: 0 })
+  await T.traduireLigne(LIGNE_EXTRAIT, { anthropic: espion, timeoutMs: 12345.6 })
+  assert.deepEqual(opts, [{ timeout: 12345, maxRetries: 0 }, { timeout: 12345, maxRetries: 0 }])
   await T.traduireLigne(LIGNE, { anthropic: espion })
-  assert.equal(opts[1], undefined)
+  assert.equal(opts[2], undefined)
 })
 
 test('une réponse coupée au plafond se dit : « reponse_tronquee », pas « json_illisible »', async () => {
@@ -151,7 +200,7 @@ test('une réponse coupée au plafond se dit : « reponse_tronquee », pas « js
   const r = await T.traduireLigne(LIGNE, { anthropic: client })
   assert.equal(r.ok, false)
   assert.equal(r.motif, 'reponse_tronquee')
-  assert.equal(r.appel, true)
+  assert.equal(r.appels, 1)
 })
 
 // ─── L'écriture ─────────────────────────────────────────────────────────────

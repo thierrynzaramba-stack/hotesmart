@@ -66,3 +66,13 @@ test('la file : détection écartée, classification attendue, échec récent é
   assert.match(code, /t\.empreinte is distinct from e\.empreinte/)
   assert.match(code, /limit greatest\(0, least\(coalesce\(p_limite, 0\),\s*1000\)\)/)
 })
+
+test('le compteur d’échecs ne vaut que pour le texte en cours : un texte qui change repart de zéro', () => {
+  assert.match(code, /case when t\.echec_empreinte = e\.empreinte\s+then coalesce\(t\.echecs, 0\)\s+else 0 end/)
+})
+
+test('la première forme de la file (3 paramètres) est retirée avant la création de la nouvelle', () => {
+  const retrait = code.indexOf('drop function if exists public.avis_a_traduire(\n  integer, timestamptz, timestamptz);')
+  assert.ok(retrait > 0)
+  assert.ok(retrait < code.indexOf('create or replace function public.avis_a_traduire('))
+})

@@ -77,6 +77,12 @@ $$;
 -- texte qui change y revient). p_longueur_max ecarte
 -- les avis trop longs pour un passage de cron : le
 -- script les traduit. Null = pas de borne.
+-- La premiere forme (3 parametres) a pu etre
+-- essayee : create or replace en ajouterait une
+-- seconde au lieu de la remplacer.
+drop function if exists public.avis_a_traduire(
+  integer, timestamptz, timestamptz);
+
 create or replace function public.avis_a_traduire(
   p_limite integer,
   p_classe_avant timestamptz,
@@ -139,7 +145,12 @@ as $$
   select e.id, e.user_id, e.property_id_ref,
          e.booking_uid, e.texte_public,
          e.texte_prive, e.texte_extrait,
-         e.empreinte, coalesce(t.echecs, 0)
+         e.empreinte,
+         -- Le compteur ne vaut que pour CE texte :
+         -- un texte qui change repart de zero.
+         case when t.echec_empreinte = e.empreinte
+              then coalesce(t.echecs, 0)
+              else 0 end
     from e
     left join public.avis_traductions t
       on t.review_id = e.id

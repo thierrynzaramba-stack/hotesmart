@@ -6,7 +6,8 @@
 //
 // Usage : node --env-file=<fichier d'env> scripts/traduire-avis.js            (a blanc)
 //         node --env-file=<fichier d'env> scripts/traduire-avis.js --go       (traduit)
-//         ... --max N   borne le nombre d'avis traduits (defaut et plafond : 800)
+//         ... --max N   borne le nombre d'AVIS traduits (defaut et plafond : 800) ;
+//                       un avis coute un appel, deux s'il a un extrait (Q6 = A)
 //
 // ⚠ A BLANC PAR DEFAUT : la sortie dit combien d'avis sont a traduire, donc
 //   combien d'appels a l'IA, et le cout estime. Rien n'est appele.
@@ -44,6 +45,9 @@ const MAX = (() => {
 // ≈ 0,3 centime par avis (Haiku 4.5, mesure de la spec §3.6) : une ESTIMATION,
 // le cout reel se lit dans `ia_appels`.
 const COUT_ESTIME_PAR_APPEL_EUR = 0.003
+// L'appel de l'extrait seul (Q6 = A) : ≈ 300 tokens en entree, 100 en sortie,
+// ≈ 0,08 centime (seconde revue du lot).
+const COUT_ESTIME_PAR_APPEL_EXTRAIT_EUR = 0.0008
 const LOT = 20
 
 ;(async () => {
@@ -76,18 +80,23 @@ const LOT = 20
       console.error(traduction.migrationAbsente(error) ? 'Migration 2026-11-11-avis-traductions absente : arret.' : 'File illisible : ' + error.message)
       process.exit(1)
     }
-    const n = (data || []).length
-    const appels = Math.min(n, MAX)
-    console.log(`\n${n >= 1000 ? 'au moins ' : ''}${n} avis a traduire ; avec --go : ${appels} appel(s) a l'IA, `
-      + `cout estime ≈ ${(appels * COUT_ESTIME_PAR_APPEL_EUR).toFixed(2)} €`)
+    const file = data || []
+    const retenus = file.slice(0, MAX)
+    // Un avis coute UN appel (public + prive), plus UN pour son extrait s'il en a
+    // un (decision de Thierry du 15 novembre 2026, Q6 = A).
+    const appelsTexte = retenus.filter(l => traduction.groupesDe(l).some(g => !('extrait' in g))).length
+    const appelsExtrait = retenus.filter(l => traduction.groupesDe(l).some(g => 'extrait' in g)).length
+    const cout = appelsTexte * COUT_ESTIME_PAR_APPEL_EUR + appelsExtrait * COUT_ESTIME_PAR_APPEL_EXTRAIT_EUR
+    console.log(`\n${file.length >= 1000 ? 'au moins ' : ''}${file.length} avis a traduire ; avec --go : ${retenus.length} avis, `
+      + `${appelsTexte + appelsExtrait} appel(s) a l'IA (${appelsTexte} texte, ${appelsExtrait} extrait), cout estime ≈ ${cout.toFixed(2)} €`)
     process.exit(0)
   }
 
-  const bilan = { traduits: 0, echecs: 0, appels: 0 }
+  const bilan = { avis: 0, traduits: 0, vides: 0, echecs: 0, appels: 0 }
   const motifs = {}
   const vus = new Set()
-  while (bilan.appels < MAX) {
-    const demande = Math.min(LOT, MAX - bilan.appels)
+  while (bilan.avis < MAX) {
+    const demande = Math.min(LOT, MAX - bilan.avis)
     const { data, error } = await sb.rpc('avis_a_traduire', parametres(demande))
     if (error) { console.error('File illisible : ' + error.message); process.exit(1) }
     // Un avis deja tente dans CE lancement ne repasse pas : un echec garde son
@@ -95,18 +104,20 @@ const LOT = 20
     const lignes = (data || []).filter(l => !vus.has(l.id))
     if (!lignes.length) break
     for (const ligne of lignes) {
-      if (bilan.appels >= MAX) break
+      if (bilan.avis >= MAX) break
       vus.add(ligne.id)
+      bilan.avis++
       const r = await traduction.traduireLigne(ligne)
-      if (r.appel !== false) bilan.appels++
-      if (r.ok) bilan.traduits++
+      bilan.appels += Number.isInteger(r.appels) ? r.appels : 0
+      if (r.ok && r.motif === 'rien_a_traduire') bilan.vides++
+      else if (r.ok) bilan.traduits++
       else { bilan.echecs++; motifs[r.motif] = (motifs[r.motif] || 0) + 1 }
       const err = await traduction.ecrireResultat(sb, ligne, r)
       if (err) { console.error(`  ecriture ${ligne.id} : ${err.message}`); process.exit(1) }
     }
-    console.log(`  … ${bilan.traduits} traduit(s), ${bilan.echecs} echec(s), ${bilan.appels} appel(s)`)
+    console.log(`  … ${bilan.traduits} traduit(s), ${bilan.vides} sans texte, ${bilan.echecs} echec(s), ${bilan.appels} appel(s)`)
     if ((data || []).length < demande) break
   }
-  console.log(`\n${bilan.traduits} traduit(s), ${bilan.echecs} echec(s), ${bilan.appels} appel(s) a l'IA`
+  console.log(`\n${bilan.traduits} traduit(s), ${bilan.vides} sans texte, ${bilan.echecs} echec(s), ${bilan.appels} appel(s) a l'IA`
     + (Object.keys(motifs).length ? ` — motifs : ${JSON.stringify(motifs)}` : ''))
 })().catch(e => { console.error(e && e.message || e); process.exit(1) })
