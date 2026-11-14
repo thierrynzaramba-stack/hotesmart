@@ -307,12 +307,24 @@ test('envoyer à une personne : tous ses appareils, les morts supprimés, les su
 
 // ─── 5. L'endpoint /api/push ─────────────────────────────────────────────────
 
+function reglagesVides () {
+  const chaine = {
+    select () { return chaine },
+    eq () { return chaine },
+    maybeSingle () { return Promise.resolve({ data: null, error: null }) }
+  }
+  return chaine
+}
+
 function monterApi ({ lignes = [], env = {} } = {}) {
   const { db, etat } = baseFactice(lignes)
   const jetons = { 'jeton-a': A, 'jeton-b': B }
   const client = {
     auth: { getUser: async (j) => (jetons[j] ? { data: { user: { id: jetons[j] } }, error: null } : { data: null, error: { message: 'invalide' } }) },
-    from: (t) => db.from(t)
+    // Lot 2b : le GET lit aussi les réglages de la personne. Ici, personne n'en
+    // a enregistré (les défauts) ; leurs écritures sont éprouvées dans
+    // tests/notifications-reglages.test.js.
+    from: (t) => t === 'notifications_reglages' ? reglagesVides() : db.from(t)
   }
   const absSupa = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
   const mSupa = new Module(absSupa); mSupa.exports = { createClient: () => client }; mSupa.loaded = true
@@ -322,7 +334,7 @@ function monterApi ({ lignes = [], env = {} } = {}) {
   const avantShared = require.cache[absShared]
   require.cache[absSupa] = mSupa
   require.cache[absShared] = mShared
-  for (const m of ['../api/push', '../lib/require-permission', '../lib/push/abonnements', '../lib/push/envoyer']) {
+  for (const m of ['../api/push', '../lib/require-permission', '../lib/push/abonnements', '../lib/push/envoyer', '../lib/notifications/reglages']) {
     delete require.cache[require.resolve(m)]
   }
   const handler = require('../api/push')
@@ -333,7 +345,7 @@ function monterApi ({ lignes = [], env = {} } = {}) {
     for (const [k, v] of Object.entries(sauve)) { if (v === undefined) delete process.env[k]; else process.env[k] = v }
     if (avantSupa) require.cache[absSupa] = avantSupa; else delete require.cache[absSupa]
     if (avantShared) require.cache[absShared] = avantShared; else delete require.cache[absShared]
-    for (const m of ['../api/push', '../lib/require-permission', '../lib/push/abonnements', '../lib/push/envoyer']) {
+    for (const m of ['../api/push', '../lib/require-permission', '../lib/push/abonnements', '../lib/push/envoyer', '../lib/notifications/reglages']) {
       delete require.cache[require.resolve(m)]
     }
   }

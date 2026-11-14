@@ -9,6 +9,21 @@ const SESSION_USER_KEY = 'hs_auth_user_id'
  * BETA : verifie uniquement l'AUTHENTIFICATION. Ni l'onboarding ni l'abonnement ne
  * bloquent l'acces a l'app. Retourne la session, ou redirige vers login si absente.
  */
+// LA PAGE DE CONNEXION, AVEC L'ÉCRAN À RETROUVER (PWA lot 2c-1, spec §9.7).
+// Une notification touchée avec une session expirée ouvre son écran
+// (`/messages?…`) : après la connexion, on y revient au lieu de l'accueil.
+// pages/login.html FILTRE `next` (chemin du même site seulement) : ce n'est pas
+// ici que se tient la garde contre la redirection ouverte, c'est là-bas.
+// ⚠ JAMAIS EN BOUCLE : la page de connexion elle-même n'est pas un « next ».
+function adresseDeConnexion () {
+  const LOGIN = '/pages/login.html'
+  try {
+    const chemin = window.location && window.location.pathname
+    if (typeof chemin !== 'string' || !chemin.startsWith('/') || chemin.startsWith('/pages/login')) return LOGIN
+    return LOGIN + '?next=' + encodeURIComponent(chemin + (window.location.search || ''))
+  } catch { return LOGIN }
+}
+
 export async function requireAuth() {
   // ⚠ REQUIREAUTH NE REJETTE JAMAIS. Les appelants font tous
   // `const session = await requireAuth()` sans `catch` : un rejet les laisse
@@ -23,7 +38,7 @@ export async function requireAuth() {
     console.error('[auth-guard] lecture de session impossible:', e)
   }
   if (!session) {
-    window.location.replace('/pages/login.html')
+    window.location.replace(adresseDeConnexion())
     return null
   }
 

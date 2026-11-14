@@ -855,17 +855,15 @@ test('LE TEST QUI COMPTE : un refus ne DETRUIT PAS la saisie non enregistree', a
     config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } },
     prompting: { global: 'ancien global', overrides: {} }
   })
+  // (Les destinataires d alerte en etaient l autre moitie : le volet des
+  // alertes est retire au lot PWA 2c-3, les consignes restent.)
   const champ = B.corps(b).querySelector('[data-consignes="bien"]')
-  const mail = B.corps(b).querySelector('[data-alerte="intervention|email_lines"]')
   champ.value = 'CONSIGNE-TAPEE-A-LA-MAIN'
-  mail.value = 'nouveau@exemple.test'
   b.msg.etat.modeEnCours = true
   await b.msg.enregistrerPanneau(B.corps(b), REF)
   assert.equal(b.note(), FR['messages.reglage_en_cours'], 'le refus se dit')
   assert.equal(B.corps(b).querySelector('[data-consignes="bien"]').value,
     'CONSIGNE-TAPEE-A-LA-MAIN', 'sa consigne est toujours la')
-  assert.equal(B.corps(b).querySelector('[data-alerte="intervention|email_lines"]').value,
-    'nouveau@exemple.test', 'et son destinataire aussi')
   b.fermer()
 })
 
@@ -1166,19 +1164,16 @@ test('LE TEST QUI COMPTE : FERMER la fenetre ne touche pas a la saisie du volet'
   b.repondreFenetre('continuer')
   B.clic(b, B.pilManuel(b))
   await B.reposer(b)
-  // L hote tape deux choses qui ne vivent QUE dans le DOM.
+  // L hote tape ce qui ne vit QUE dans le DOM : la consigne (le destinataire
+  // d alerte en etait l autre exemple, retire avec le volet au lot PWA 2c-3).
   const consigne = B.corps(b).querySelector('[data-consignes="bien"]')
-  const destinataire = B.corps(b).querySelector('[data-alerte="intervention|email_lines"]')
-  assert.ok(consigne && destinataire, 'les deux champs sont rendus')
+  assert.ok(consigne, 'le champ est rendu')
   consigne.value = 'Ne jamais donner le code avant 15 h'
-  destinataire.value = 'moi@exemple.test'
   b.repondreFenetre(null)              // on FERME la fenetre de l arriere
   await b.msg.enregistrerPanneau(B.corps(b), REF)
   await B.reposer(b)
   assert.equal(B.corps(b).querySelector('[data-consignes="bien"]').value,
     'Ne jamais donner le code avant 15 h', 'la consigne est encore la')
-  assert.equal(B.corps(b).querySelector('[data-alerte="intervention|email_lines"]').value,
-    'moi@exemple.test', 'et le destinataire aussi')
   // Et les controles sont rendus a l hote, sans repeindre.
   assert.equal(B.boutonSave(b).disabled, false)
   assert.equal(B.casePause(b).disabled, false)
@@ -1207,32 +1202,21 @@ test('LE TEST QUI COMPTE : la question du mode manuel GELE la page', async () =>
   b.fermer()
 })
 
-test('LE TEST QUI COMPTE : sans Brevo, la case SMS reste desarmee apres une fermeture', async () => {
-  // ⚠ CONSTAT MESURE D UNE REVUE, DEUX DEFAUTS EN UN. `geler(corps, false)`
-  // n est PAS l inverse de `geler(corps, true)` : le rendu desarme la case SMS
-  // EN PERMANENCE quand l hote n a pas de cle Brevo, et un relachement en bloc
-  // la REARMAIT. Et `reposerLaSaisie` la COCHAIT, parce que `lireLePanneau`
-  // rend dans ce cas la valeur ENREGISTREE et non le DOM. L hote se retrouvait
-  // avec une alerte SMS cochee et cliquable qu il n a jamais reglee — et son
-  // geste aurait ete jete en silence au prochain « Enregistrer ».
-  const { b } = bancEnregistrement({ echues: 2 })
-  b.msg.etat.brevo = false
-  b.msg.etat.configIA[REF] = { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 },
-    intervention: { sms_enabled: true, sms_lines: '0600000000', email_enabled: true, email_lines: '' },
-    info_unknown: { sms_enabled: false, sms_lines: '', email_enabled: true, email_lines: '' } }
-  b.repondreFenetre('continuer')
-  B.clic(b, B.pilManuel(b))
-  await B.reposer(b)
-  const caseSms = B.corps(b).querySelector('[data-alerte="intervention|sms_enabled"]')
-  assert.ok(caseSms, 'la case existe')
-  assert.equal(caseSms.disabled, true, 'sans Brevo, le rendu la desarme')
-  const cocheeAvant = caseSms.checked
-  b.repondreFenetre(null)
+test('LE TEST QUI COMPTE (PWA lot 2c-3) : le volet ne porte plus AUCUN champ d alerte — un lien mene a Reglages, et « Enregistrer » n ecrit plus d alertes', async () => {
+  // Ce test gardait la case SMS d un hote sans Brevo (desarmee en permanence,
+  // et que le degel ne devait pas rearmer). Le volet des alertes est retire :
+  // qui est prevenu se regle dans Reglages → Notifications. Ce qui se garde
+  // desormais : plus aucun champ, plus aucune ecriture `alertes_ref`, et le lien.
+  const { b, envoyes } = bancEnregistrement({ echues: 0 })
+  assert.equal(B.corps(b).querySelector('[data-alerte]'), null, 'aucun champ d alerte')
+  assert.equal(B.corps(b).querySelector('[data-tester]'), null, 'aucun bouton « Tester »')
+  const lien = B.corps(b).querySelector('[data-qui-previent]')
+  assert.ok(lien, 'le lien est la')
+  assert.equal(lien.getAttribute('href'), '/settings?onglet=notifications')
+  assert.equal(lien.textContent.trim(), FR['messages.alerts_moved_link'])
   await b.msg.enregistrerPanneau(B.corps(b), REF)
   await B.reposer(b)
-  const apres = B.corps(b).querySelector('[data-alerte="intervention|sms_enabled"]')
-  assert.equal(apres.disabled, true, 'elle est TOUJOURS desarmee : le degel ne rend que ce qu il a pris')
-  assert.equal(apres.checked, cocheeAvant, 'et son etat n a pas bouge')
+  assert.ok(!(envoyes || []).some(e => JSON.stringify(e).includes('alertes_ref')), 'aucune ecriture des alertes')
   b.fermer()
 })
 

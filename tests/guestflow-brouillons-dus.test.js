@@ -1039,3 +1039,53 @@ test('LE TEST QUI COMPTE : une cloture affamee se DIT dans le bilan', async () =
   assert.equal(bilan.interrompu, true, 'la passe se declare interrompue')
   assert.equal(results.totalBrouillonsCloturesReportees, 1, 'le rapport du cycle aussi')
 })
+
+// ════════════════════════════════════════════════════════════════════════════
+// PWA lot 2c-2 : ce que la passe dit à l'hôte (docs/kb/pwa.md §11.2)
+// ════════════════════════════════════════════════════════════════════════════
+// La proposition différée a été annoncée « Elle partira seule si vous ne faites
+// rien ». Partie, l'annonce qui attend en file est retirée ; rendue à l'hôte,
+// « Réponse à valider » la remplace.
+
+const notificationsCaptees = (vus) => ({
+  notifierBrouillon: async (o) => { vus.push(['brouillon', o.compte, o.propertyId, String(o.bookingId), o.guestName, o.nonDelivree]) },
+  retirerAnnonce: async (o) => { vus.push(['retirer', o.compte, o.propertyId, String(o.bookingId)]) }
+})
+
+test('LE TEST QUI COMPTE (2c-2) : partie, l\'annonce en attente est retirée — et rien d\'autre', async () => {
+  const vus = []
+  await lancer(bancNominal({ taches: [tache()] }), { envoyer: async () => ({ ok: true, canal: 'ota' }), notifications: notificationsCaptees(vus) })
+  assert.deepEqual(vus, [['retirer', COMPTE, REF, 'BK1']])
+})
+
+test('LE TEST QUI COMPTE (2c-2) : non délivrée, annulée par une garde, ou vide — l\'hôte est prévenu', async () => {
+  const cas = [
+    ['non delivree', bancNominal({ taches: [tache()] }), { envoyer: async () => ({ ok: false, error: 'not_supported' }) }, true],
+    ['kill switch', bancNominal({ taches: [tache()], biens: [{ ...bienOuvert, automation_paused: true }] }), { envoyer: async () => { throw new Error('non') } }, false],
+    ['vide', bancNominal({ taches: [tache({ suggested_reply: '   ' })] }), { envoyer: async () => { throw new Error('non') } }, false]
+  ]
+  for (const [nom, b, opts, nonDelivree] of cas) {
+    const vus = []
+    await lancer(b, { ...opts, notifications: notificationsCaptees(vus) })
+    assert.deepEqual(vus, [['brouillon', COMPTE, REF, 'BK1', 'Alice', nonDelivree]], nom)
+  }
+})
+
+test('review de rattrapage, constat 8 : réservation annulée — la tâche est rendue, mais personne n\'est sonné pour y répondre', async () => {
+  const vus = []
+  const b = bancNominal({ taches: [tache()],
+    snapshots: [{ user_id: COMPTE, booking_id: 'BK1', snapshot: { status: 'cancelled', provider: 'channex', source: 'Airbnb' } }] })
+  const bilan = await lancer(b, { envoyer: async () => { throw new Error('ne doit pas etre appele') }, notifications: notificationsCaptees(vus) })
+  assert.equal(bilan.abandonnes, 1)
+  assert.match(b.etat.taches[0].summary, /reservation_annulee/)
+  assert.deepEqual(vus, [])
+})
+
+test('(2c-2) une notification qui lève n\'arrête pas la passe qui envoie', async () => {
+  const b = bancNominal({ taches: [tache({ id: 't1' }), tache({ id: 't2', book_id: 'BK2' })] })
+  const bilan = await lancer(b, {
+    envoyer: async () => ({ ok: true, canal: 'ota' }),
+    notifications: { notifierBrouillon: async () => { throw new Error('boum') }, retirerAnnonce: async () => { throw new Error('boum') } }
+  })
+  assert.equal(bilan.envoyes, 2)
+})

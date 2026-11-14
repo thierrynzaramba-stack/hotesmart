@@ -1112,6 +1112,26 @@ accepte tout dans n'importe quel ordre, restent **verts**.
 `tests/stats-avis.test.js` porte désormais un double qui a la **forme** du vrai
 client et refuse cet ordre.
 
+## Notifications de l'hôte et de son équipe (PWA lot 2c-2, 9 novembre 2026)
+
+Deux événements partent par le point d'envoi unique
+(`lib/notifications/evenements-avis.js`, docs/kb/pwa.md §11.4), selon les
+réglages de chaque personne qui a le domaine `avis` sur le bien :
+- **Nouvel avis** — depuis `upsertAvis`, le writer unique : seulement un avis que
+  l'écriture ajoute (lu avant), reçu depuis moins de trois jours, dix au plus par
+  compte et par écriture ; une lecture ratée ne prévient personne. Le bien, la
+  note sur 5 (la conversion de l'écran, `lib/avis/echelle.js`) et le canal —
+  **jamais le nom du voyageur** (le domaine `avis` se délègue sans
+  `reservations`), jamais le texte.
+- **Avis révélé** — un avis Airbnb masqué ne prévient pas (l'objet naît au
+  départ, masqué et vide, que le voyageur écrive ou non) ; quand il devient
+  visible ET que le voyageur a écrit, une notification donne la vraie note. Un
+  avis révélé vide ne prévient pas.
+- **Évaluation du voyageur** — depuis `noterEtEnvoyer`, une fois par palier comme
+  la tâche : la prestataire a rempli, J-5, J-1, puis le rappel et l'échec de la
+  publication automatique. Formulation neutre (un membre en lecture seule la
+  reçoit aussi). Le lien ouvre la fenêtre d'évaluation (`/avis?evaluer=`).
+
 ## 16. La page `/avis` au socle V5 — 8 novembre 2026
 
 Spec du lot et maquettes : `docs/specs/avis-v5/`. Ce qui change, et ce qu'il

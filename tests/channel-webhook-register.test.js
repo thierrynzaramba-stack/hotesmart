@@ -127,6 +127,8 @@ function reponse () {
   const r = { code: null, body: null }
   r.status = (c) => { r.code = c; return r }
   r.json = (b) => { r.body = b; return r }
+  // Une page HTML répond par `send` (api/alertes-desinscription.js, PWA lot 2c-3).
+  r.send = (b) => { r.body = b; return r }
   r.setHeader = () => {}
   return r
 }

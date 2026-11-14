@@ -29,7 +29,7 @@ function stub (rel, exports) {
 }
 
 function preparer ({ tacheDuJour = null } = {}) {
-  const etat = { sms: [], emails: [], ecritures: [] }
+  const etat = { sms: [], emails: [], ecritures: [], hote: [] }
   const client = {
     from (table) {
       const f = {}
@@ -72,10 +72,15 @@ function preparer ({ tacheDuJour = null } = {}) {
   require.cache[abs] = m
   stub('api/sms', { sendSms: async (to, msg) => { etat.sms.push(msg); return { ok: true } } })
   stub('lib/platform-notify', { sendPlatformEmail: async (to, sujet, html) => { etat.emails.push(html); return { ok: true } } })
+  // PWA lot 2c-2 : ce que l'hôte et son équipe reçoivent par le point d'envoi, observé.
+  stub('lib/notifications/evenements-menages.js', {
+    notifierDisponibilites: async (o) => { etat.hote.push(o); return { ok: true } },
+    notifierMenageRefuse: async (o) => { etat.hote.push({ refus: true, ...o }); return { ok: true } }
+  })
   delete require.cache[require.resolve('../lib/alert-notify')]
   const { alertReglesModifiees } = require('../lib/alert-notify')
-  const alerter = texte => alertReglesModifiees({
-    userId: COMPTE, providerId: LENA, propertyId: BIEN, prenom: 'Lena', texte, rassurer: false })
+  const alerter = (texte, o = {}) => alertReglesModifiees({
+    userId: COMPTE, providerId: LENA, propertyId: BIEN, prenom: 'Lena', texte, rassurer: false, ...o })
   return { alerter, etat }
 }
 
@@ -123,4 +128,24 @@ test('la répétition IMMÉDIATE du même changement ne renvoie rien', async () 
   assert.ok(!etat.ecritures.some(e => e.table === 'agent_tasks'), 'tâche inchangée')
   assert.strictEqual(etat.sms.length, 0)
   assert.strictEqual(etat.emails.length, 0)
+})
+
+
+// ─── PWA lot 2c-2 : « Disponibilités modifiées » (docs/kb/pwa.md §11.3) ─────
+
+test('LE TEST QUI COMPTE (2c-2) : chaque changement envoyé prévient aussi par le point d\'envoi — au même rythme que les listes', async () => {
+  const { alerter, etat } = preparer()
+  await alerter(ABSENTE)
+  assert.deepStrictEqual(etat.hote.map(o => [o.compte, o.propertyId, o.providerId, o.prestataire]), [[COMPTE, BIEN, LENA, 'Lena']])
+  // Le second changement du jour (la tâche existe) : aussi.
+  const second = preparer({ tacheDuJour: { id: 't1', summary: ABSENTE } })
+  await second.alerter(AUTRE)
+  assert.strictEqual(second.etat.hote.length, 1)
+  // Un jour d'un GLISSER (`envoyer: false`) : ni SMS, ni notification — le résumé de
+  // la plage viendra. Premier jour, puis jour suivant de la même plage.
+  for (const tacheDuJour of [null, { id: 't1', summary: ABSENTE }]) {
+    const g = preparer({ tacheDuJour })
+    await g.alerter(AUTRE, { envoyer: false })
+    assert.deepStrictEqual([g.etat.sms.length, g.etat.hote.length], [0, 0])
+  }
 })

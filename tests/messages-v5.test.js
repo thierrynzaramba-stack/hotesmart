@@ -413,7 +413,9 @@ test('messages etape 4 : passer en Auto exige une confirmation, et l\'etat est R
   // `delais` : l'invariant est le meme — l'ecran poste une CIBLE, le merge vit
   // au serveur, et jamais le blob entier depuis deux onglets.
   assert.ok(/delais_ref: ref, delais:/.test(src), 'l ecran poste une CIBLE, pas le blob entier')
-  assert.ok(/alertes_ref: ref,/.test(src), 'les alertes aussi, et dans leur propre requete')
+  // Les alertes avaient leur propre requete ; elles ne s'ecrivent plus d'ici
+  // (lot PWA 2c-3 : qui est prevenu se regle dans Reglages → Notifications).
+  assert.ok(!/alertes_ref/.test(src), 'l ecran n ecrit plus d alertes')
 })
 
 test('messages etape 4 : les reglages IA sont reserves au TITULAIRE (dette 68)', () => {
@@ -497,13 +499,13 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
     'kill switch (pause) par bien': 'data-tiroir-pause',
     'consignes generales de l\'IA': 'data-consignes="global"',
     'consignes du logement': 'data-consignes="bien"',
-    'intervention / SMS actif': 'data-alerte="${k}|sms_enabled"',
-    'intervention / destinataires SMS': 'data-alerte="${k}|sms_lines"',
-    'intervention / e-mail actif': 'data-alerte="${k}|email_enabled"',
-    'intervention / destinataires e-mail': 'data-alerte="${k}|email_lines"',
-    'les DEUX types d\'alerte': "[['intervention', 'messages.alert_intervention'], ['info_unknown', 'messages.alert_info']]",
-    'bouton Tester par canal': 'data-tester',
-    'porte SMS sans cle Brevo (lien /connexions)': 'messages.sms_needs_brevo',
+    // ⚠ LES ALERTES SONT DÉPLACÉES, PAS PERDUES (lot PWA 2c-3, étape 4 ; spec
+    // §16.8, inventaire) : les deux types × deux canaux, les destinataires, la
+    // porte Brevo et « Tester » vivent dans Réglages → Notifications (les
+    // réglages de chacun, et les contacts prévenus avec leur essai). Ce qui
+    // reste ici, c'est le chemin pour y aller.
+    'lien « Qui est prevenu → Reglages »': 'data-qui-previent',
+    'qui mene a l onglet Notifications': 'href="/settings?onglet=notifications"',
     'garde des appels IA (circuit breaker, en etat)': 'messages.breaker_desc',
     // ⚠ « CE QU'IL VALIDE SEUL (AUTO) » EST SORTI DE L'INVENTAIRE, ET C'EST UN
     // RETRAIT DÉCIDÉ, pas une omission : Thierry a demandé le 28 octobre 2026
@@ -517,8 +519,7 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
     'lien Connaissances': 'data-ouvre-connaissance',
     'choix du logement en tete du panneau': 'data-bind="tiroir-bien"',
     'bouton Messages programmes (en-tete)': 'data-ouvre-volet="programmes"',
-    'bouton Reponses de l\'IA (en-tete)': 'data-ouvre-volet="ia"',
-    'alertes EN BAS du volet IA': "voletAlertes(ref)"
+    'bouton Reponses de l\'IA (en-tete)': 'data-ouvre-volet="ia"'
   }
   // Et les verrous de la revue de ddfc88a :
   assert.ok(/\[hidden\] \{ display: none !important; \}/.test(lire('shared/ui.css')),
@@ -543,19 +544,20 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
     'champs de l\'inventaire §12 bis ABSENTS du tiroir : ' + manquants.join(' ; '))
 })
 
-test('tiroir alertes : merge serveur borne, SMS preserve sans Brevo, test depuis la BASE', () => {
-  const api = lire('api/agent-config.js')
-  assert.ok(api.includes('alertes_ref') && /for \(const type of \['intervention', 'info_unknown'\]\)/.test(api),
-    'le POST cible merge les DEUX types au serveur (jamais le blob entier depuis l\'ecran)')
-  assert.ok(/length > 2000/.test(api), 'destinataires bornes champ par champ')
+test('tiroir alertes : RETIRÉES de l ecran (lot PWA 2c-3) — rien ne les ecrit plus, et le serveur le refuse', () => {
+  // Ce test gardait le volet des alertes (merge serveur borne, SMS preserve
+  // sans Brevo, test depuis la base). Le volet est retire : qui est prevenu se
+  // regle dans Reglages → Notifications. Ce qui se garde maintenant : l ecran
+  // n ecrit ni ne teste plus de liste ; le refus serveur est eprouve PAR APPEL
+  // (tests/delai-reponse-ia-lot1.test.js : 410 sur la cible, 400 sur une liste
+  // apportee en legacy ; tests/endpoints-reglages-2.test.js : alert-test 410).
   const src = sansCommentaires(html())
-  assert.ok(/sms_enabled: etat\.brevo[\s\S]{0,120}avant\[k\] && avant\[k\]\.sms_enabled/.test(src),
-    'sans cle Brevo, les champs SMS absents de l\'ecran PRESERVENT la base')
+  assert.ok(!/alertes_ref/.test(src), 'aucune ecriture des alertes')
+  assert.ok(!/\/api\/alert-test/.test(src), 'aucun essai de liste')
+  assert.ok(!/data-alerte/.test(src), 'aucun champ d alerte')
+  assert.ok(!/\/api\/sms\?action=config/.test(src), 'la porte Brevo n est plus lue ici (une lecture de moins a l ouverture)')
   assert.ok(/const relu = await appel\('\/api\/agent-config'\)[\s\S]*?etat\.configIA = relu\.config/.test(src),
     'l\'ecran montre la base RELUE apres chaque enregistrement')
-  assert.ok(/'\/api\/alert-test', \{ channel: canal, to \}/.test(src), 'le test passe par alert-test')
-  assert.ok(/\(etat\.configIA\[ref\] \|\| \{\}\)\[type\]/.test(src),
-    'le destinataire du test vient de la base ENREGISTREE (piege documente par l\'ancienne page)')
   // Les consignes : meme table, mais INSERT d'abord puis delete des AUTRES
   // lignes, chaque erreur lue — plus de fenetre de perte ni de doublons
   // silencieux (releve en review de 634ee15).
@@ -568,14 +570,13 @@ test('tiroir : une lecture echouee FERME le volet, elle ne montre jamais un faux
   // Un formulaire vide enregistre aurait efface destinataires et consignes
   // de la base (releve en review de 634ee15).
   const src = sansCommentaires(html())
-  assert.ok(/etat\.modes = null; etat\.configIA = null/.test(src), 'blob illisible = volet Alertes ferme')
-  assert.ok(/if \(etat\.configIA === null\) \{\s*return `<p/.test(src), 'le volet Alertes le dit au lieu de se rendre')
+  // (Le volet Alertes, qui se fermait sur un blob illisible, est retire au lot
+  // PWA 2c-3 ; le blob illisible ferme toujours les reglages qui en dependent.)
+  assert.ok(/etat\.modes = null; etat\.configIA = null/.test(src), 'blob illisible = reglages fermes')
   assert.ok(/etat\.prompting = null; return/.test(src), 'consignes illisibles = bloc ferme')
   assert.ok(/etat\.prompting === null \? `<p/.test(src), 'et le bloc le dit')
   // Pendant une ecriture, les champs gelent (une frappe serait ecartee).
   assert.ok(/function geler \(corps, fige\)/.test(src) && /geler\(corps, true\)/.test(src), 'champs geles pendant le POST')
-  // Le test refuse une edition non enregistree (il partirait a l'ANCIEN destinataire).
-  assert.ok(/ecran\.value\.trim\(\) !== lignes\.trim\(\)/.test(src), 'tester exige l\'ecran = la base')
   // Et le serveur refuse un POST a double cible.
   //
   // ⚠ CE TEST GARDAIT LA FORMULATION, PAS LA REGLE (27 octobre 2026). Il

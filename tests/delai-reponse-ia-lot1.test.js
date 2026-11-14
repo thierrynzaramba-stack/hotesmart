@@ -45,7 +45,7 @@ const BIEN = '0544fd9a'
 // `tests/guestflow-appliquer-delai.test.js`, dont le double applique vraiment
 // `eq`, `gt`, `order` et `limit`.
 function preparer ({ config = null, lectureEnPanne = false, taches = [],
-  tachesIllisibles = false, tachesLevent = false } = {}) {
+  tachesIllisibles = false, tachesLevent = false, erreurEcriture = null } = {}) {
   const etat = { ecritures: [], majTaches: [], lecturesTaches: [] }
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: COMPTE } }, error: null }) },
@@ -61,7 +61,7 @@ function preparer ({ config = null, lectureEnPanne = false, taches = [],
         gt (c, v) { q._f['>' + c] = v; return q },
         limit () { return q }, order () { return q }, not () { return q }, is () { return q },
         update (patch) { q._maj = patch; return q },
-        upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: null }) },
+        upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: erreurEcriture }) },
         single: async () => rep(nom), maybeSingle: async () => rep(nom),
         // Thenable, comme le vrai client : un `await` rend `{ data, error }`.
         then (ok, ko) {
@@ -304,16 +304,78 @@ test('agent-config legacy : une cle absente de la charge est PRESERVEE', async (
   // (pages/onboarding.html:344) fait GET du blob, merge cote client, POST du
   // tout. Entre son GET et son POST, une autre session peut ecrire : le POST
   // passait par-dessus. Depuis ce lot, le serveur relit et merge.
+  // (La charge portait aussi une liste `intervention` : depuis le lot PWA 2c-3,
+  // une liste APPORTEE est refusee — test suivant. Le merge, lui, ne change pas.)
   const { res, etat } = await postConfig(
-    { config: { [BIEN]: { mode: 'test', intervention: { email_enabled: true, email_lines: 'a@b.c' } } } },
-    { config: { [BIEN]: { mode: 'auto', delais: { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } } } } }
+    { config: { [BIEN]: { mode: 'test' } } },
+    { config: { [BIEN]: { mode: 'auto', intervention: { email_enabled: true, email_lines: 'a@b.c' }, delais: { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } } } } }
   )
   assert.equal(res.code, 200)
   const blob = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config
   assert.deepEqual(blob[BIEN].delais, { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } },
     'LES DELAIS DU BIEN SURVIVENT a un POST legacy qui ne les mentionne pas')
   assert.equal(blob[BIEN].mode, 'test', 'le champ fourni, lui, est bien applique')
-  assert.deepEqual(blob[BIEN].intervention, { email_enabled: true, email_lines: 'a@b.c' })
+  assert.deepEqual(blob[BIEN].intervention, { email_enabled: true, email_lines: 'a@b.c' }, 'la liste en base survit aussi')
+})
+
+test('LE TEST QUI COMPTE (PWA lot 2c-3, étape 4) : un POST legacy qui APPORTE une liste d\'alertes est refusé ; la recopier telle qu\'en base passe', async () => {
+  for (const cle of ['intervention', 'info_unknown', 'listes_reprises']) {
+    const { res, etat } = await postConfig(
+      { config: { [BIEN]: { mode: 'test', [cle]: { email_enabled: true, email_lines: 'nouveau@b.c' } } } },
+      { config: { [BIEN]: { mode: 'test' } } }
+    )
+    assert.equal(res.code, 400, cle)
+    assert.match(JSON.stringify(res.body.refusees), new RegExp(`${cle} \\(réservé à sa cible\\)`))
+    assert.equal(etat.ecritures.filter(e => e.table === 'agent_alert_config').length, 0, 'rien n\'est écrit')
+  }
+  const enBase = { email_enabled: true, email_lines: 'a@b.c' }
+  const { res } = await postConfig(
+    { config: { [BIEN]: { mode: 'test', intervention: enBase } } },
+    { config: { [BIEN]: { mode: 'test', intervention: enBase } } }
+  )
+  assert.equal(res.code, 200, 'recopier la valeur en base reste permis')
+})
+
+test('LE TEST QUI COMPTE (PWA lot 2c-3, constat 4 de la review de l\'étape 4) : aucune écriture ne perd la pile `listes_reprises`', async () => {
+  // La pile est le seul retour arrière d'une reprise : elle garde les listes
+  // telles qu'elles étaient. Les trois chemins d'écriture relisent le blob et
+  // le réécrivent — chacun doit la garder telle quelle.
+  const pile = [{ le: '2026-11-10T20:00:00.000Z', intervention: { email_enabled: true, email_lines: 'a@b.c' } }]
+  const enBase = { config: { [BIEN]: { mode: 'test', listes_reprises: pile, delais: { reponse_ia: null, alerte_info: 15 } } } }
+  const cas = [
+    ['cible mode', { mode_ref: BIEN, mode: 'auto' }],
+    ['cible delais', { delais_ref: BIEN, delais: { reponse_ia: 15, alerte_info: 15 } }],
+    ['legacy', { config: { [BIEN]: { mode: 'auto' } } }],
+    ['legacy qui recopie la pile', { config: { [BIEN]: { mode: 'auto', listes_reprises: pile } } }]
+  ]
+  for (const [nom, corps] of cas) {
+    const { res, etat } = await postConfig(corps, JSON.parse(JSON.stringify(enBase)))
+    assert.equal(res.code, 200, nom)
+    const ecrit = etat.ecritures.find(e => e.table === 'agent_alert_config').row.config[BIEN]
+    assert.deepEqual(ecrit.listes_reprises, pile, `${nom} : la pile est gardée`)
+    assert.ok(!('intervention' in ecrit) && !('info_unknown' in ecrit), `${nom} : aucune liste ne revient`)
+  }
+})
+
+test('LE TEST QUI COMPTE (PWA lot 2c-3, constats 3 et 7) : la base refuse de défaire une reprise -> 409, rien de plus', async () => {
+  // Le verrou vit en base (migration 2026-11-10-agent-alert-config-serveur-
+  // seul) ; l'endpoint traduit son code. Les trois chemins d'écriture.
+  for (const corps of [{ mode_ref: BIEN, mode: 'auto' },
+    { delais_ref: BIEN, delais: { reponse_ia: 15, alerte_info: 15 } },
+    { config: { [BIEN]: { mode: 'auto' } } }]) {
+    // Un brouillon en attente : un réglage REFUSÉ ne doit ni le relire ni le
+    // réarmer vers le voyageur (constat 2 de la re-review).
+    const taches = [{ id: 'tache-1', user_id: COMPTE, property_id: BIEN, status: 'pending_validation',
+      created_at: '2026-11-11T10:00:00Z', send_after: '2026-11-11T12:00:00Z', suspendu_le: null }]
+    const { res, etat } = await postConfig(corps, { config: { [BIEN]: { mode: 'test' } }, taches, erreurEcriture: { code: 'HS409', message: 'refus' } })
+    assert.equal(res.code, 409, JSON.stringify(corps))
+    assert.equal(res.body.motif, 'config_modifiee_entre_temps')
+    assert.deepEqual(etat.lecturesTaches, [], 'aucun brouillon relu')
+    assert.deepEqual(etat.majTaches, [], 'aucun brouillon réarmé')
+    assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z')
+  }
+  const { res } = await postConfig({ mode_ref: BIEN, mode: 'auto' }, { config: { [BIEN]: { mode: 'test' } }, erreurEcriture: { code: '08006', message: 'panne' } })
+  assert.equal(res.code, 500, 'une autre panne reste une panne')
 })
 
 test('agent-config legacy : un bien absent de la charge survit', async () => {
@@ -746,7 +808,10 @@ test('⚠ les cibles `mode` et `alertes` ne touchent AUCUNE tache', async () => 
   ]) {
     const taches = tachesEnAttente()
     const { res, etat } = await postConfig(corps, { config: { [BIEN]: { mode: 'test' } }, taches })
-    assert.equal(res.code, 200, JSON.stringify(corps))
+    // La cible `alertes` est FERMÉE depuis le lot PWA 2c-3 : 410, et rien d'écrit.
+    const alertes = 'alertes_ref' in corps
+    assert.equal(res.code, alertes ? 410 : 200, JSON.stringify(corps))
+    if (alertes) assert.equal(etat.ecritures.filter(e => e.table === 'agent_alert_config').length, 0)
     assert.equal(etat.majTaches.length, 0, 'aucune tache touchee')
     assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z')
     assert.equal(res.body.brouillons, undefined)

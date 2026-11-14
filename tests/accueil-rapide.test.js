@@ -393,6 +393,7 @@ function lancerRequireAuth (branchements, options = {}) {
   const window = {
     location: {
       pathname: options.pathname || '/pages/aujourdhui',
+      search: options.search || '',
       replace: u => redirections.push(u)
     }
   }
@@ -573,8 +574,20 @@ test("une lecture de session impossible renvoie vers /login, elle ne rejette pas
   const r = lancerRequireAuth({ contexte: Promise.resolve({}), onboarding: Promise.resolve({ data: null, error: null }) },
     { getSessionLeve: true })
   assert.strictEqual(await r.promesse, null)
-  assert.deepEqual(r.redirections, ['/pages/login.html'],
+  // PWA lot 2c-1 : la page demandée part en `next`, pour y revenir après la
+  // connexion (une notification touchée avec une session expirée).
+  assert.deepEqual(r.redirections, ['/pages/login.html?next=%2Fpages%2Faujourdhui'],
     'une session illisible laisse la page sur son squelette au lieu de renvoyer vers /login')
+})
+
+test('PWA lot 2c-1 : la connexion ramène à l\'écran demandé (chemin et paramètres), jamais à elle-même', async () => {
+  const sans = { contexte: Promise.resolve({}), onboarding: Promise.resolve({ data: null, error: null }) }
+  const messages = lancerRequireAuth(sans, { getSessionLeve: true, pathname: '/pages/messages', search: '?fil=abc&x=1' })
+  await messages.promesse
+  assert.deepEqual(messages.redirections, ['/pages/login.html?next=' + encodeURIComponent('/pages/messages?fil=abc&x=1')])
+  const login = lancerRequireAuth(sans, { getSessionLeve: true, pathname: '/pages/login.html' })
+  await login.promesse
+  assert.deepEqual(login.redirections, ['/pages/login.html'], 'la page de connexion n\'est pas un next')
 })
 
 // ─── L'ouverture d'Aujourd'hui, EXECUTEE ─────────────────────────────────────
