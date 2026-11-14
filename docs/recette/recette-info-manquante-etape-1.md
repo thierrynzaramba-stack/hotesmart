@@ -45,3 +45,21 @@ les mêmes choix.
 Non éprouvé sur staging, et c'est attendu : l'envoi réel et la clôture
 `info_traitee` (Channex staging refuse les réservations de test) — en
 production, Thierry présent.
+
+## Passe 2 — 14 novembre 2026, après le correctif (staging `b19ad581`, qui contient `b4e0ac42`)
+
+Même décor (tâche « RECETTE chien et moto » sur `STG-RECETTE-GARDE-1`), même
+geste : chien OUI, moto AUTRE « non dans l'appartement, mais garage fermé à
+200 m ».
+
+| Pièce | Résultat |
+|---|---|
+| La carte apparaît (au premier cycle du fil en direct, un peu plus de 7 s) | conforme |
+| « Rédiger la réponse » : le texte ne dit QUE les deux décisions (chien oui ; moto non dans l'appartement, garage fermé à 200 m), en français, sans code, sans horaire, sans autre sujet | **conforme** (une tournure maladroite du modèle — « l'utiliser le garage » — que l'hôte relit avant d'envoyer) |
+| Bouton « IA » sur un brouillon : version fidèle, sans ajout ; « Annuler » proposé | conforme |
+| Saisie vidée, rien envoyé | conforme |
+| Pause remise sur « Loft Pilotable », vérifiée après rechargement (la carte redit « L'IA est en pause », « Rédiger » inactif) | fait |
+
+**Recette de l'étape 1 sur staging : CONFORME.** Restent, comme prévu, l'envoi
+réel et la clôture `info_traitee`, à vérifier en production, Thierry présent.
+La tâche de test est à clore par Thierry (requête donnée dans la session).
