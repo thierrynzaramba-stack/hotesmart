@@ -940,9 +940,10 @@ mêmes endpoints, mêmes corps, mêmes confirmations, même ordre.
 
 AVANT : **15 appels** au chargement, dont 5 `/api`, 8 lectures Supabase,
 2 `getUser`, et 376 746 octets du dépôt (gzip 130 526) (§6 bis). Les sites
-d'appel `/api` d'avant (`/api/yield-prix` 1, `/api/yield-pilote` 6,
-`/api/yield-grille` 2, `/api/yield-marche` 1, `/api/yield-evenements` 3,
-`/api/marche-comparables` 1) entrent dans `tests/budget-ecran.test.js` au
+d'appel `/api` d'avant, comptés comme `tests/budget-ecran.test.js` les compte
+(lignes hors commentaires) : `/api/yield-prix` 1, `/api/yield-pilote` 5,
+`/api/yield-grille` 2, `/api/yield-marche` 1, `/api/yield-evenements` 2,
+`/api/marche-comparables` 1. Ils entrent dans `tests/budget-ecran.test.js` au
 premier commit de code.
 
 ⚠ L'outil de mesure (`tests/outils/mesurer-pages-outils.js`) plante sur cette
