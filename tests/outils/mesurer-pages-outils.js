@@ -48,12 +48,27 @@ const API = (u, e) => {
     ] } }
   }
   if (u.startsWith('/api/stripe')) return { body: { url: 'https://stripe.test/x' } }
+  // YieldFlow (lot 2) : des réponses MINIMALES et vraies dans leur forme — la
+  // mesure compte les appels au chargement, pas le rendu d'une étude complète.
+  if (u.startsWith('/api/yield-marche')) return { body: { etat: 'marche_inconnu', motif: 'aucun marché relié' } }
+  if (u.startsWith('/api/marche-temperature')) return { body: { etat: 'marche_inconnu', motif: 'aucun marché relié' } }
+  if (u.startsWith('/api/marche-global')) return { body: { etat: 'marche_inconnu', motif: 'aucun marché relié' } }
+  if (u.startsWith('/api/marche-comparables')) return { body: { etat: 'marche_inconnu', motif: 'aucun marché relié' } }
+  if (u.startsWith('/api/yield-exceptions')) return { body: { exceptions: [] } }
+  if (u.startsWith('/api/yield-pilote')) return { body: { actif: false } }
+  if (u.startsWith('/api/yield-grille')) return { body: { grille: [] } }
+  if (u.startsWith('/api/yield-evenements')) return { body: { evenements: [] } }
+  if (u.startsWith('/api/yield-prix')) return { body: { jours: [] } }
+  // L'écran de synthèse : une seule lecture au chargement ; un refus garde le
+  // compte d'appels exact sans fabriquer une synthèse complète.
+  if (u.startsWith('/api/yield?')) return { status: 503, body: { error: 'mesure' } }
+  if (u.startsWith('/api/yield')) return { body: {} }
   return null
 }
 
 const TABLES = {
   api_keys: { data: { api_key: null, seam_api_key: 'x', seam_enabled: true, brevo_api_key: 'k', brevo_enabled: true }, error: null },
-  properties: { data: [{ id: 'b1' }], error: null },
+  properties: { data: [{ id: 'b1', name: 'La bulle' }, { id: 'b2', name: 'Cœur de vie 23' }], error: null },
   onboarding_state: { data: { current_step: 7, completed: true, data: {} }, error: null },
   accounts: { data: { is_beta: false }, error: null },
   subscriptions: (req) => req.filtres.some(f => f[1] === 'module')
@@ -85,11 +100,20 @@ function injecter (w, journal, supabase) {
   const { sansArchives } = evaluerModule(w, 'shared/biens-vivants.js', {})
   const CONFIG = evaluerModule(w, 'shared/config.js', {}).default
   const pageOutil = evaluerModule(w, 'shared/page-outil.js', {})
+  // Les modules YieldFlow (lot 2), sans import : exécutés tels quels.
+  const yieldFlow = {}
+  for (const m of ['shared/temperature-calendrier.js', 'shared/yield-motifs.js', 'shared/prix-depart-jours.js',
+    'shared/yield-libelles-feries.js', 'shared/yield-niveau-periode.js']) {
+    const fichier = require('path').join(RACINE, m)
+    if (require('fs').existsSync(fichier)) Object.assign(yieldFlow, evaluerModule(w, m, {}))
+  }
+  delete yieldFlow.default
   const { renderSidebar } = evaluerModule(w, 'components/sidebar.js', {
     getUser, signOut, supabase, CONFIG, sansArchives, renderOnboardingBanner, ...cc
   })
   return {
-    ...cc, ...pageOutil, requireAuth, markOnboardingCompleted, renderSidebar, renderOnboardingBanner,
+    ...yieldFlow, ...cc, ...pageOutil, requireAuth, markOnboardingCompleted, renderSidebar, renderOnboardingBanner, sansArchives,
+    apiClient: { calendar: { save: async () => ({}), retirerPrixHote: async () => ({}) } },
     supabase, getUser, getSession, signOut,
     initErrorHandler: () => {}, logger: { info () {}, warn () {}, error () {} },
     escapeHtml: (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
@@ -124,10 +148,14 @@ async function mesurer (rel) {
 }
 
 async function main () {
+  // Une page qui lève dans un écouteur ne doit pas arrêter la mesure : l'erreur
+  // est rapportée avec la page.
+  const rejets = []
+  process.on('unhandledRejection', e => rejets.push(String(e && (e.stack || e))))
   const pages = process.argv.slice(2)
   if (!pages.length) { console.error('usage : node tests/outils/mesurer-pages-outils.js <page.html> …'); process.exit(2) }
   const sortie = []
-  for (const p of pages) sortie.push(await mesurer(p))
+  for (const p of pages) { const r = await mesurer(p); r.erreurs.push(...rejets.splice(0)); sortie.push(r) }
   if (process.env.JSON) { console.log(JSON.stringify(sortie, null, 2)); return }
   for (const r of sortie) {
     console.log(`\n## ${r.page}`)
@@ -144,4 +172,4 @@ async function main () {
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1) })
 module.exports = { mesurer, API, TABLES, injecter, SESSION }
-void path; void RACINE
+void path
