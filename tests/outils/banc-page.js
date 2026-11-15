@@ -189,7 +189,9 @@ async function monterPage (rel, o = {}) {
     const code = sansImports(m).replace(/^init\(\)\.catch\(/m, 'await init().catch(')
     w.eval(`window.__amorces.push((async () => {\n${code}\n})().catch(e => { window.__erreurBanc = e }))`)
   }
-  await Promise.race([Promise.all(w.__amorces), new Promise(r => setTimeout(r, 2000))])
+  // Borné : une page dont la garde ne se résout jamais (compte partagé) ne
+  // fait pas pendre le banc.
+  await Promise.race([Promise.all(w.__amorces), new Promise(r => setTimeout(r, o.attenteMax || 2000))])
   await stabiliser(journal)
   if (w.__erreurBanc) journal.erreurs.push(String(w.__erreurBanc && (w.__erreurBanc.stack || w.__erreurBanc)))
 

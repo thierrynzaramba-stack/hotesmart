@@ -2567,4 +2567,11 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
   .out-feuille { width: 100%; max-width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; margin: 0; }
   .out-modale { padding: 0; }
   .out-modale__boite { height: 100vh; border-radius: 0; max-width: none; }
+  /* ⚠ LE MENU ≡ SOUS LE BANDEAU D'INCITATION, PAS DESSOUS (constat 1 de la
+     review du lot 1). Les pages outils gardent le bandeau que posait l'ancienne
+     barre latérale (components/onboarding-banner.js, collant en haut, au-dessus
+     de tout) ; le menu du socle s'ouvre en `fixed` à 64 px, donc SOUS lui —
+     barre du haut et section « Compte » cachées. Le bandeau publie sa hauteur
+     MESURÉE dans `--bandeau-h` (0 sans bandeau : rien ne bouge). */
+  .out-page .menu { top: calc(64px + var(--bandeau-h, 0px)); }
 }

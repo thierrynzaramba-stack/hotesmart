@@ -14,7 +14,7 @@
      mêmes appels (/api/sms), mêmes gestes, mêmes messages.
      RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
-<body>
+<body class="out-page">
 
 <header class="topbar">
   <a class="topbar__brand" href="/pages/aujourdhui">
@@ -169,7 +169,7 @@ import { requireAuth } from '/components/auth-guard.js'
 import { signOut } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { renderOnboardingBanner } from '/components/onboarding-banner.js'
-import { esc, afficherRetour, monterCoquille } from '/shared/page-outil.js'
+import { esc, afficherRetour, monterCoquille, formaterDate } from '/shared/page-outil.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -258,8 +258,21 @@ function updateBanner (on) {
 }
 
 // ── Modèles ────────────────────────────────────────────────────────────────
+// ⚠ LE TEXTE D'UN MODÈLE EST LE CONTENU D'UN SMS AU VOYAGEUR, PAS UN TEXTE
+// D'INTERFACE : il partait en français, quelle que soit la langue de l'hôte,
+// et il le reste (constat 6 de la review du lot 1). Le faire suivre la langue
+// de l'interface changerait ce que reçoit le voyageur : c'est une décision
+// produit, signalée à Thierry (spec-integration-v5-lot-1.md §8, point 6).
+// Seuls les emoji en sont retirés (règle du socle V5, même point).
+const MODELES = {
+  checkin: "Bonjour, voici vos informations d'arrivée : le code de la boîte à clés est [CODE]. Bon séjour !",
+  checkout: "Bonjour, c'est l'heure du départ. Merci de laisser les clés dans la boîte et de bien fermer la porte. À bientôt !",
+  menage: "Bonjour, un ménage est prévu aujourd'hui au logement. Merci de vous y rendre à [HEURE].",
+  bienvenue: "Bienvenue dans votre logement ! N'hésitez pas à nous contacter si vous avez besoin de quoi que ce soit. Bon séjour !",
+  incident: 'Bonjour, nous avons signalé un incident dans votre logement. Notre équipe va vous contacter rapidement. Merci.'
+}
 function useTemplate (k) {
-  $('#message').value = t('sms.texte_' + k)
+  $('#message').value = MODELES[k]
   updateCount()
 }
 
@@ -305,8 +318,8 @@ function renderHistory (logs) {
   $('#statError').textContent = I18n.num(logs.filter(l => l.status === 'error').length)
   if (!logs.length) { $('#smsList').innerHTML = `<p class="out-vide">${esc(t('sms.vide'))}</p>`; return }
   $('#smsList').innerHTML = logs.map(log => {
-    const d = new Date(log.created_at)
-    const quand = I18n.date(d, { day: '2-digit', month: '2-digit' }) + ' ' + I18n.time(d)
+    const quand = [formaterDate(I18n, log.created_at, { day: '2-digit', month: '2-digit' }),
+      formaterDate(I18n, log.created_at, { hour: '2-digit', minute: '2-digit' })].filter(Boolean).join(' ')
     const erreur = log.status === 'error'
     return `<div class="out-ligne">
       <div class="out-ligne__corps">
@@ -344,7 +357,7 @@ async function init () {
   if (!session) return
   document.addEventListener('i18n:changed', () => location.reload())
   monterCoquille({
-    HSNav, I18n, session,
+    HSNav, I18n, session, titre: t('sms.titre'),
     compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
     deconnexion: () => signOut()
   })

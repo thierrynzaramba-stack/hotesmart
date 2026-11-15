@@ -172,8 +172,10 @@
   // menages, messages, logements, logement, logement-nouveau). Les pages outils
   // intégrées la prennent ici ; les sept copies restent en place cette nuit et
   // seront remplacées par cet appel dans un lot à part. D'ici là,
-  // tests/nav-i18n-cles.test.js exige qu'elles disent EXACTEMENT ce que dit
-  // cette liste : une copie qui divergerait rougit.
+  // tests/integration-v5-lot-1.test.js exige qu'elles disent EXACTEMENT ce
+  // que dit cette liste — adresse, clé, icône, droit, ordre — et
+  // tests/nav-i18n-cles.test.js que leurs clés existent dans les trois
+  // langues : une copie qui divergerait rougit.
   // Les droits sont ceux des copies : YieldFlow suit `reservations` en lecture
   // (l'app est délégable), les autres restent au titulaire, comme dans
   // l'ancienne barre latérale. ⚠ Masquer une entrée ne ferme pas la page :

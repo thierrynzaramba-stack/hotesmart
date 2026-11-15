@@ -15,7 +15,7 @@
      de la spec dit où chaque chose est passée.
      RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
-<body>
+<body class="out-page">
 
 <header class="topbar">
   <a class="topbar__brand" href="/pages/aujourdhui">
@@ -136,7 +136,7 @@ import { requireAuth } from '/components/auth-guard.js'
 import { signOut } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { renderOnboardingBanner } from '/components/onboarding-banner.js'
-import { esc, afficherRetour, monterCoquille } from '/shared/page-outil.js'
+import { esc, afficherRetour, monterCoquille, formaterDate } from '/shared/page-outil.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -288,7 +288,7 @@ async function loadCodes (carte, btn) {
     const res = await fetch(`/api/serrures?action=codes&lock_id=${encodeURIComponent(s.id)}`, { headers: entete() })
     const data = await res.json()
     const codes = data.codes || []
-    const jour = (d) => I18n.date(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const jour = (d) => formaterDate(I18n, d)
     if (!codes.length) {
       list.innerHTML = `<p class="out-aide">${esc(t('serrures.aucun_code'))}</p>`
     } else {
@@ -355,7 +355,7 @@ async function generateCode () {
     const data = await res.json()
 
     if (data.success && data.code) {
-      const jour = (d) => I18n.date(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' })
+      const jour = (d) => formaterDate(I18n, d)
       $('#code-pin-display').textContent = data.code.code
       $('#code-validity').textContent = t('serrures.validite', { debut: jour(data.code.starts_at), fin: jour(data.code.ends_at) })
       $('#code-result').hidden = false
@@ -415,7 +415,7 @@ async function init () {
   if (!session) return
   document.addEventListener('i18n:changed', () => location.reload())
   monterCoquille({
-    HSNav, I18n, session,
+    HSNav, I18n, session, titre: t('serrures.titre'),
     compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
     deconnexion: () => signOut()
   })

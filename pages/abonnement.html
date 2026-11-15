@@ -17,7 +17,7 @@
      développeur. Recette avec Thierry juste après le merge (CLAUDE.md, règle 5).
      RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
-<body>
+<body class="out-page">
 
 <header class="topbar">
   <a class="topbar__brand" href="/pages/aujourdhui">
@@ -74,7 +74,7 @@
 <script type="module">
 import { exigerCompteProprePage, compteCourant, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
 import { supabase, getUser, signOut } from '/shared/supabase.js'
-import { esc, monterCoquille } from '/shared/page-outil.js'
+import { esc, monterCoquille, formaterDate } from '/shared/page-outil.js'
 
 const t = (k, v) => I18n.t(k, v)
 // Un prix au centime, dans la langue de la page (`I18n.money` arrondit à
@@ -90,21 +90,24 @@ const MODULES = [
     required: true,
     price: 19.99,
     detail: () => t('abo.detail_guestflow', { prix: prix(9.90) }),
-    unite: 'abo.unite_biens'
+    unite: 'abo.unite_biens',
+    combien: 'abo.combien_biens'
   },
   {
     id: 'menage',
     required: false,
     price: 6.90,
     detail: () => t('abo.detail_menage'),
-    unite: 'abo.unite_biens'
+    unite: 'abo.unite_biens',
+    combien: 'abo.combien_biens'
   },
   {
     id: 'serrure',
     required: false,
     price: 9.99,
     detail: () => t('abo.detail_serrure', { prix: prix(2.99) }),
-    unite: 'abo.unite_serrures'
+    unite: 'abo.unite_serrures',
+    combien: 'abo.combien_serrures'
   },
   {
     id: 'caution',
@@ -112,6 +115,7 @@ const MODULES = [
     price: 9.99,
     detail: () => t('abo.detail_caution'),
     unite: 'abo.unite_biens',
+    combien: 'abo.combien_biens',
     comingSoon: true
   }
 ]
@@ -125,7 +129,7 @@ const TON = { trialing: 'ok', active: 'ok', past_due: 'attente', unpaid: 'attent
 const content = document.getElementById('content')
 const banners = document.getElementById('banners')
 const banniere = (texte, type = 'ok') => `<p class="out-retour out-retour--${type}" role="${type === 'erreur' ? 'alert' : 'status'}">${esc(texte)}</p>`
-const jour = (d) => I18n.date(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' })
+const jour = (d) => formaterDate(I18n, d)
 let user = null
 
 async function loadAndRender () {
@@ -246,7 +250,9 @@ function openQtyModal (moduleId) {
   if (!mod) return
   currentModule = mod
   const unite = t(mod.unite)
-  qtyTitle.textContent = t('abo.combien', { unite })
+  // Une clé par unité : « ¿Cuántas cerraduras? » s'accorde, « {unite} » non
+  // (constat 9 de la review du lot 1).
+  qtyTitle.textContent = t(mod.combien)
   qtyDesc.textContent = mod.id === 'guestflow'
     ? t('abo.qty_guestflow', { prix1: prix(19.99), prix2: prix(9.90) })
     : mod.id === 'serrure'
@@ -365,7 +371,7 @@ async function init () {
   if (!user) { window.location.replace('/pages/login.html'); return }
 
   monterCoquille({
-    HSNav, I18n, session: { user },
+    HSNav, I18n, session: { user }, titre: t('abo.titre'),
     compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
     // ── Déconnexion : comme l'ancien lien « Se déconnecter » de la page, la
     // session d'onglet est vidée AVANT la déconnexion.

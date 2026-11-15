@@ -54,7 +54,13 @@ function injecteur (o = {}) {
         journal.sessionAuMomentDeLaSortie = w.sessionStorage.length
       },
       requireAuth: async () => { journal.ordre.push('requireAuth'); return SESSION },
-      exigerCompteProprePage: async () => { journal.ordre.push('garde'); return true },
+      // ⚠ `garde: 'refus'` : la VRAIE garde, sur un compte partagé, remplace la
+      // page par son refus et ne se résout JAMAIS (shared/compte-courant.js).
+      exigerCompteProprePage: async () => {
+        journal.ordre.push('garde')
+        if (o.garde === 'refus') await new Promise(() => {})
+        return true
+      },
       compteCourant: () => 'u-moi',
       peutLire: o.peutLire || (() => true),
       estTitulaire: () => o.titulaire !== false,
@@ -158,8 +164,7 @@ test('aucune icône dessinée : <use href="/shared/icons.svg#…"> seulement, et
 const DYNAMIQUES = {
   'abo.statut_': ['trialing', 'active', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'unpaid', 'none'],
   'abo.module_': ['guestflow', 'menage', 'serrure', 'caution'],
-  'abo.desc_': ['guestflow', 'menage', 'serrure', 'caution'],
-  'sms.texte_': ['checkin', 'checkout', 'menage', 'bienvenue', 'incident']
+  'abo.desc_': ['guestflow', 'menage', 'serrure', 'caution']
 }
 function clesDe (src) {
   const s = new Set()
@@ -293,7 +298,11 @@ function blocOutils () {
   return UI.slice(debut, prochain >= 0 ? finEnTete + prochain : UI.length)
 }
 
-test('LE TEST QUI COMPTE : le bloc PAGES OUTILS n habille que des classes `out-` (aucune règle d un autre fil retouchée)', () => {
+// ⚠ CE TEST NE GARDE QUE LE BLOC DU LOT. Qu'aucune ligne existante de
+// shared/ui.css ne soit modifiée se vérifie sur le DIFF du lot, à la review
+// (`git diff --numstat` : 0 suppression) — pas dans un test permanent, que les
+// blocs des autres fils feraient rougir à chaque merge.
+test('LE TEST QUI COMPTE : le bloc PAGES OUTILS n habille que des classes `out-`', () => {
   const css = blocOutils().replace(/\/\*[\s\S]*?\*\//g, '')
   const selecteurs = []
   for (const m of css.matchAll(/([^{}@]+)\{[^{}]*\}/g)) {
@@ -319,7 +328,104 @@ test('LE TEST QUI COMPTE : le pont `.out-pont` couvre chaque variable de l ancie
   assert.deepEqual(orphelines, [], 'variables de l\'assistant définies nulle part sur la page des connexions : sa fenêtre serait transparente')
   // Et le pont n'invente pas de couleur : uniquement des alias.
   for (const m of pont.matchAll(/--[\w-]+\s*:\s*([^;]+);/g)) assert.match(m[1].trim(), /^var\(--[\w-]+\)$/, `alias attendu : ${m[0]}`)
-  assert.match(lire('pages/connexions.html'), /<body class="out-pont">/)
+  assert.match(lire('pages/connexions.html'), /<body class="[^"]*\bout-pont\b[^"]*">/)
+})
+
+// ─── Le texte riche : seule protection d'une donnée serveur (constat 4) ─────
+// `rendreRiche` échappe AVANT de poser ses trois marques. L'adresse
+// d'expédition enregistrée (une donnée serveur) passe par lui jusqu'à
+// innerHTML : sans l'échappement, une adresse piégée devenait du HTML.
+test('LE TEST QUI COMPTE (SÉCURITÉ) : rendreRiche échappe tout, et ne pose que gras, code et liens FOURNIS', () => {
+  const { JSDOM } = require('jsdom')
+  const w = new JSDOM('<!doctype html><body></body>', { runScripts: 'outside-only' }).window
+  const { rendreRiche } = evaluerModule(w, 'shared/page-outil.js', {})
+  const pieges = [
+    '<img src=x onerror=alert(1)>',
+    '"><script>alert(1)</script>',
+    "**<b onmouseover='x'>gras</b>**",
+    '[clic](inconnu) et [clic](js)',
+    '`<svg onload=alert(1)>`',
+    '[a](lien)" onclick="x'
+  ]
+  for (const p of pieges) {
+    const div = w.document.createElement('div')
+    div.innerHTML = rendreRiche(p, { js: 'javascript:alert(1)'.replace('javascript:', '/x?'), lien: 'https://exemple.test/a"b' })
+    const balises = [...div.querySelectorAll('*')].map(e => e.tagName.toLowerCase())
+    assert.ok(balises.every(b => ['b', 'code', 'a'].includes(b)), `balise inattendue pour ${p} : ${balises.join(',')}`)
+    for (const e of div.querySelectorAll('*')) {
+      for (const a of e.attributes) assert.ok(['class', 'href', 'target', 'rel'].includes(a.name), `attribut injecté ${a.name} pour ${p}`)
+    }
+    assert.ok(!div.querySelector('img, script, svg'))
+  }
+  const ok = w.document.createElement('div')
+  ok.innerHTML = rendreRiche('Allez dans **API Keys**, clé `seam_`, voir [la console](seam) ou [rien](absent).', { seam: 'https://console.seam.co' })
+  assert.equal(ok.querySelector('b').textContent, 'API Keys')
+  assert.equal(ok.querySelector('code').textContent, 'seam_')
+  const liens = [...ok.querySelectorAll('a')]
+  assert.equal(liens.length, 1, 'un nom de lien inconnu reste du texte')
+  assert.equal(liens[0].getAttribute('href'), 'https://console.seam.co')
+  assert.equal(liens[0].getAttribute('rel'), 'noopener')
+  assert.match(ok.textContent, /ou rien\.$/)
+  const interne = w.document.createElement('div')
+  interne.innerHTML = rendreRiche('[Serrures](s)', { s: '/apps/serrures' })
+  assert.equal(interne.querySelector('a').getAttribute('target'), null, 'un lien interne reste dans l onglet')
+})
+
+test('LE TEST QUI COMPTE (SÉCURITÉ) : une adresse d expédition piégée reste du TEXTE à l écran', async () => {
+  const piege = '<img src=x onerror=alert(1)>@x.test'
+  const b = await monter('pages/connexions.html', {
+    api: (u, e) => {
+      if (u.includes('action=config')) return { body: { configured: true, enabled: true, senderEmail: piege } }
+      if (u.includes('action=senders')) return { body: { configured: true, senders: [{ email: 'a@x.test', name: '<b>Thierry</b>' }] } }
+      return { body: u.startsWith('/api/channel-property') ? { properties: [] } : { connected: false } }
+    }
+  })
+  try {
+    assert.equal(b.$('#sender-aide img'), null, 'l adresse enregistrée a été interprétée comme du HTML')
+    assert.ok(b.texte('#sender-aide').includes(piege))
+    assert.equal(b.$('#brevo-sender option').textContent, '<b>Thierry</b> — a@x.test')
+  } finally { b.fermer() }
+})
+
+// ─── La garde de compte propre, éprouvée par son COMPORTEMENT (constat 3) ───
+// La vraie garde, sur un compte partagé, remplace la page par son refus et ne
+// se résout jamais. Rien ne doit être parti avant : ni lecture de la base, ni
+// `/api`, ni session — les dictionnaires seuls.
+for (const p of PAGES) {
+  test(`LE TEST QUI COMPTE (SÉCURITÉ) : ${p} — garde refusée, RIEN ne part (ni /api, ni base, ni session)`, async () => {
+    const b = await monter(p, { garde: 'refus', attenteMax: 300, api: () => ({ body: {} }) })
+    try {
+      assert.ok(b.journal.ordre.includes('garde'), 'la garde n a pas été appelée')
+      assert.deepEqual(b.journal.fetch.filter(f => !f.url.startsWith('/shared/i18n/')).map(f => f.url), [])
+      assert.deepEqual(b.journal.supabase.map(r => r.table), [])
+      assert.deepEqual(b.journal.auth, [], 'getUser est parti avant la garde')
+      assert.ok(!b.journal.ordre.includes('requireAuth'), 'la session est lue avant la garde')
+    } finally { b.fermer() }
+  })
+}
+
+// ─── Le nom de la page dans l'onglet (constat 11) ────────────────────────────
+test('chaque page garde son nom dans l onglet du navigateur, dans la langue de l hôte', async () => {
+  const attendu = {
+    'apps/serrures/index.html': 'HôteSmart — Serrures connectées',
+    'apps/sms/index.html': 'HôteSmart — SMS',
+    'pages/connexions.html': 'HôteSmart — Connexions API',
+    'pages/abonnement.html': 'HôteSmart — Mon abonnement'
+  }
+  for (const [p, titre] of Object.entries(attendu)) {
+    const b = await monter(p, { api: () => ({ body: {} }) })
+    try { assert.equal(b.d.title, titre) } finally { b.fermer() }
+  }
+})
+
+// ─── Le bandeau d'incitation ne recouvre pas le menu ≡ (constat 1) ──────────
+test('au téléphone, le menu ≡ des pages outils s ouvre SOUS le bandeau d incitation', () => {
+  const css = blocOutils().replace(/\/\*[\s\S]*?\*\//g, '')
+  const mobile = css.slice(css.indexOf('@media (max-width: 720px)'))
+  assert.match(mobile, /\.out-page \.menu \{ top: calc\(64px \+ var\(--bandeau-h, 0px\)\); \}/)
+  // Le 64 px est celui du socle : si le socle bouge, cette règle doit suivre.
+  assert.match(UI, /\.menu \{ position: fixed; inset-inline: var\(--gap-m\); top: 64px;/)
+  for (const p of PAGES) assert.match(lire(p), /<body class="out-page[" ]/, `${p} : pas de classe out-page`)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -336,7 +442,8 @@ test('serrures : la configuration se lit au chargement, la clé est masquée, l 
     assert.equal(b.$('#seamEnabled').checked, true)
     assert.equal(b.texte('#statusText'), 'Seam connecté et actif')
     assert.equal(b.texte('#topStatus'), 'Seam · Actif')
-    assert.ok(b.journal.ordre.indexOf('garde') < b.journal.ordre.indexOf('requireAuth'), 'la garde de compte propre passe AVANT la session')
+    const iGarde = b.journal.ordre.indexOf('garde')
+    assert.ok(iGarde >= 0 && iGarde < b.journal.ordre.indexOf('requireAuth'), 'la garde de compte propre passe AVANT la session')
     assert.ok(b.journal.ordre.includes('bandeau'), 'le bandeau d incitation que la barre latérale posait est gardé')
   } finally { b.fermer() }
 })
@@ -435,6 +542,25 @@ test('serrures : générer un code envoie la serrure, le voyageur et les bornes,
     assert.match(b.texte('#code-validity'), /^Valide du \d\d\/\d\d\/2026 au \d\d\/\d\d\/2026$/)
     await b.cliquer(b.$('[data-action="copier"]'))
     assert.equal(b.journal.presse, '4321')
+  } finally { b.fermer() }
+})
+
+test('serrures : un code créé sans bornes lisibles est MONTRÉ quand même (constat 5)', async () => {
+  const lock = { device_id: 'dev-1', properties: { name: 'Porte' }, capabilities_supported: ['online_access_codes'] }
+  const b = await monter('apps/serrures/index.html', {
+    api: (u, e) => {
+      if (u.includes('action=locks')) return { body: { locks: [lock] } }
+      if (e.corps && e.corps.action === 'generateCode') return { body: { success: true, code: { code: '4321' } } }
+      return { body: {} }
+    }
+  })
+  try {
+    await b.cliquer(b.$('[data-onglet="locks"]'))
+    await b.cliquer(b.$('[data-action="generer"]'))
+    await b.cliquer(b.$('#modal-generate'))
+    assert.equal(b.texte('#code-pin-display'), '4321')
+    assert.equal(b.$('#code-result').hidden, false, 'le code créé chez Seam n est pas montré')
+    assert.equal(b.$('#modal-generate').hidden, true, 'un second code reste possible par erreur')
   } finally { b.fermer() }
 })
 
@@ -700,6 +826,82 @@ test('abonnement : annuler demande confirmation ; sans elle, RIEN ne part', asyn
     await b.cliquer(b.$('[data-action="cancel"][data-module="menage"]'))
     assert.equal(b.journal.confirmations.length, 1)
     assert.equal(b.journal.fetch.filter(f => f.url.startsWith('/api/stripe')).length, 0)
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (ARGENT) : annuler — CE module part à Stripe, avec la session, puis l écran se relit', async () => {
+  let lectures = 0
+  const b = await monter('pages/abonnement.html', {
+    tables: {
+      accounts: { data: { is_beta: false }, error: null },
+      subscriptions: () => { lectures++; return { data: [{ module: 'menage', status: 'active', current_period_end: '2026-12-01T00:00:00Z', cancel_at_period_end: false }], error: null } }
+    },
+    api: (u, e) => (e.corps && e.corps.action === 'cancel_subscription') ? { body: { ok: true } } : null
+  })
+  try {
+    assert.equal(lectures, 1)
+    await b.cliquer(b.$('[data-action="cancel"][data-module="menage"]'))
+    assert.equal(b.journal.confirmations.length, 1)
+    const c = b.journal.fetch.filter(f => f.url.startsWith('/api/stripe'))
+    assert.equal(c.length, 1)
+    assert.equal(c[0].url, '/api/stripe?action=cancel_subscription')
+    assert.equal(c[0].methode, 'POST')
+    assert.deepEqual(c[0].corps, { action: 'cancel_subscription', module: 'menage' })
+    assert.equal(c[0].entetes.Authorization, 'Bearer jeton-session')
+    assert.equal(b.texte('#banners'), 'Annulation enregistrée. Vous conservez l\'accès jusqu\'à la fin de la période.')
+    assert.equal(lectures, 2, 'l écran ne s est pas relu après l annulation')
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (ARGENT) : une annulation refusée par le serveur se DIT, et rien n est relu', async () => {
+  const b = await monter('pages/abonnement.html', {
+    tables: SUBS([{ module: 'menage', status: 'active', cancel_at_period_end: false }]),
+    api: (u, e) => (e.corps && e.corps.action === 'cancel_subscription') ? { status: 409, body: { error: 'Abonnement introuvable chez Stripe' } } : null
+  })
+  try {
+    await b.cliquer(b.$('[data-action="cancel"][data-module="menage"]'))
+    assert.equal(b.texte('#banners'), 'Abonnement introuvable chez Stripe')
+    assert.match(b.$('#banners p').className, /out-retour--erreur/)
+    assert.equal(b.journal.supabase.filter(r => r.table === 'subscriptions').length, 1)
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (ARGENT) : « Gérer le paiement » ouvre le PORTAIL, et rien d autre', async () => {
+  const b = await monter('pages/abonnement.html', {
+    tables: SUBS([{ module: 'guestflow', status: 'trialing', trial_ends_at: '2026-11-30T12:00:00Z' }]),
+    api: (u, e) => (e.corps && e.corps.action === 'portal') ? { body: { url: 'https://billing.stripe.test/p' } } : null
+  })
+  try {
+    await b.cliquer(b.$('[data-action="portal"]'))
+    const c = b.journal.fetch.filter(f => f.url.startsWith('/api/stripe'))
+    assert.equal(c.length, 1)
+    assert.equal(c[0].url, '/api/stripe?action=portal')
+    assert.deepEqual(c[0].corps, { action: 'portal' })
+    assert.equal(c[0].entetes.Authorization, 'Bearer jeton-session')
+    assert.equal(b.journal.navigations.length, 1, 'la page ne part pas vers le portail')
+    assert.equal(b.texte('#banners'), '')
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (ARGENT) : un portail refusé se DIT, sans navigation', async () => {
+  const b = await monter('pages/abonnement.html', {
+    tables: SUBS([{ module: 'serrure', status: 'past_due' }]),
+    api: (u, e) => (e.corps && e.corps.action === 'portal') ? { status: 400, body: {} } : null
+  })
+  try {
+    await b.cliquer(b.$('[data-action="portal"]'))
+    assert.equal(b.texte('#banners'), 'Erreur Portal')
+    assert.equal(b.journal.navigations.length, 0)
+  } finally { b.fermer() }
+})
+
+test('une échéance illisible ne bloque pas la page d abonnement (constat 5)', async () => {
+  const b = await monter('pages/abonnement.html', {
+    tables: SUBS([{ module: 'guestflow', status: 'trialing', trial_ends_at: 'pas-une-date', quantity: 1 }])
+  })
+  try {
+    assert.equal(b.$$('#content article').length, 4, 'la page est restée sur « Chargement… »')
+    assert.ok(b.$('[data-action="portal"]'), 'les gestes sont là')
   } finally { b.fermer() }
 })
 

@@ -72,13 +72,29 @@ export function afficherRetour (el, texte, type = 'ok', delai = 4000) {
   if (delai > 0) minuteries.set(el, setTimeout(() => { el.textContent = '' }, delai))
 }
 
+// ─── Une date pour l'écran, qui ne lève JAMAIS ─────────────────────────────
+// `I18n.date` (Intl) LÈVE sur une date illisible, là où l'ancien
+// `toLocaleDateString` rendait « Invalid Date » : un code créé chez Seam sans
+// bornes n'était alors jamais montré, et une échéance illisible bloquait la
+// page d'abonnement sur « Chargement… » (constat 5 de la review du lot 1).
+// Une date qui ne se lit pas s'affiche vide ; le reste de l'écran tient.
+export function formaterDate (I18n, valeur, options = { day: '2-digit', month: '2-digit', year: 'numeric' }) {
+  if (valeur == null || valeur === '') return ''
+  const d = valeur instanceof Date ? valeur : new Date(valeur)
+  if (Number.isNaN(d.getTime())) return ''
+  try { return I18n.date(d, options) } catch { return '' }
+}
+
 // ─── La coquille V5 : barre du haut, menu ≡, barre du bas ───────────────────
 // Les MÊMES droits que les écrans V5 (appel de pages/aujourdhui.html) :
 // Réglages au titulaire, Avis selon le droit, la section Outils de
 // `HSNav.outils` (une seule liste, shared/nav.js). Le sélecteur de compte n'a
 // rien de propre aux pages outils : il est celui du menu.
 export function monterCoquille (o) {
-  const { HSNav, I18n, session, compte, deconnexion } = o
+  const { HSNav, I18n, session, compte, deconnexion, titre } = o
+  // Le nom de la page dans l'onglet du navigateur, comme l'ancienne page le
+  // portait (« HôteSmart — Serrures »…), dans la langue de l'hôte.
+  if (titre) document.title = `HôteSmart — ${titre}`
   const initiales = document.querySelector('[data-bind="initials"]')
   if (initiales) initiales.textContent = ((session && session.user && session.user.email) || '').slice(0, 2).toUpperCase()
   HSNav.renderMenu({

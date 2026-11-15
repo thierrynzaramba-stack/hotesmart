@@ -19,7 +19,7 @@
      transparente.
      RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
-<body class="out-pont">
+<body class="out-page out-pont">
 
 <header class="topbar">
   <a class="topbar__brand" href="/pages/aujourdhui">
@@ -580,7 +580,7 @@ async function init () {
   if (!session) return
   document.addEventListener('i18n:changed', () => location.reload())
   monterCoquille({
-    HSNav, I18n, session,
+    HSNav, I18n, session, titre: t('cnx.titre'),
     compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
     deconnexion: () => signOut()
   })
