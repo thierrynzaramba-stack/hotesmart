@@ -38,6 +38,10 @@ const BIENS = { data: [{ id: 'B1', name: 'La bulle' }, { id: 'B2', name: 'Cœur 
 function injecteur ({ compte = null } = {}) {
   return (w, journal, supabase) => {
     journal.coquille = []
+    // La charte, comme la page la charge par son <link> (que jsdom ne suit
+    // pas) : comparables lit ses couleurs de carte dans les jetons, et refuse
+    // de peindre si l'un manque (review 2b, constat 9).
+    const charte = w.document.createElement('style'); charte.textContent = lire('shared/theme.css'); w.document.head.append(charte)
     const mod = (rel) => { const m = evaluerModule(w, rel, {}); delete m.default; return m }
     const existe = (rel) => fs.existsSync(path.join(RACINE, rel))
     return {
@@ -465,4 +469,18 @@ test('2b (téléphone) : le pied collant se pose au-dessus de la barre du bas du
   assert.ok(bloc.startsWith('@media (max-width: 720px)'), 'la barre du bas est fixe sous 721 px')
   // …et le pied de la page remonte à cette même largeur.
   assert.match(src, /@media \(max-width: 720px\) \{\s*\.cp-pied \{ bottom: calc\(70px \+ env\(safe-area-inset-bottom, 0px\)\); \}/)
+})
+
+test('LE TEST QUI COMPTE (2b, review constats 2, 8, 10) : le pied passe SOUS le menu ≡ et la barre du bas ; les verdicts enfoncés ont la couleur de leur point ; les boutons passent à la ligne', () => {
+  const src = lire(COMPARABLES)
+  const ui = lire('shared/ui.css')
+  const zPied = Number((/\.cp-pied \{[^}]*z-index:\s*(\d+)/.exec(src) || [])[1])
+  const zMenu = Number((/\.topbar__actions \.menu \{[^}]*z-index:\s*(\d+)|\.menu \{[^}]*z-index:\s*(\d+)/.exec(ui) || []).slice(1).find(Boolean))
+  const zBas = Number((/\.bottombar \{[^}]*z-index:\s*(\d+)/.exec(ui) || [])[1])
+  assert.ok(Number.isFinite(zPied) && Number.isFinite(zMenu) && Number.isFinite(zBas), `${zPied} ${zMenu} ${zBas}`)
+  assert.ok(zPied < zMenu && zPied < zBas, `le pied (${zPied}) doit rester sous le menu (${zMenu}) et la barre du bas (${zBas})`)
+  assert.match(src, /#cp-map \{[^}]*isolation: isolate/, 'les couches Leaflet restent chez elles')
+  assert.match(src, /\[aria-pressed="true"\]\.similaire \{ background: var\(--yf-carte-similaire\); border-color: var\(--yf-carte-similaire\);/)
+  assert.match(src, /\[aria-pressed="true"\]\.non \{ background: var\(--yf-carte-non\); border-color: var\(--yf-carte-non\);/)
+  assert.match(src, /\.btn\.cp-btn \{ white-space: normal; height: auto; min-height: var\(--control\);/)
 })

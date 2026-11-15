@@ -64,11 +64,13 @@
   .cp-badge { font-size: var(--fs-caption); padding: 2px 8px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
   .cp-source { font-size: var(--fs-caption); font-weight: var(--fw-semibold); color: var(--ok-ink); }
   .cp-verdict { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  .cp-verdict button[aria-pressed="true"].similaire { background: var(--ok); border-color: var(--ok); color: var(--on-ink); }
+  /* Le bouton enfoncé prend la couleur EXACTE du point qu'il peint sur la carte
+     (lien voulu par l'ancien code ; review 2b, constat 8). */
+  .cp-verdict button[aria-pressed="true"].similaire { background: var(--yf-carte-similaire); border-color: var(--yf-carte-similaire); color: var(--on-ink); }
   .cp-explication { font-size: var(--fs-small); color: var(--muted); line-height: 1.45; margin: 10px 0 0; }
   .cp-alerte { font-size: var(--fs-small); font-weight: var(--fw-semibold); color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 6px 10px; margin: 8px 0 0; }
   .cp-verdict button.en-avant { outline: 2px solid var(--warn); outline-offset: 1px; }
-  .cp-verdict button[aria-pressed="true"].non { background: var(--muted); border-color: var(--muted); color: var(--on-ink); }
+  .cp-verdict button[aria-pressed="true"].non { background: var(--yf-carte-non); border-color: var(--yf-carte-non); color: var(--on-ink); }
   .cp-fondateur { font-size: var(--fs-small); font-weight: var(--fw-semibold); color: var(--ok-ink); margin-top: 10px; }
   .cp-entete-fiche { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
   .cp-lien { font-size: var(--fs-small); font-weight: var(--fw-semibold); color: var(--info); text-decoration: underline; }
@@ -94,7 +96,16 @@
   .cp-fourchette { display: block; font-size: var(--fs-caption); color: var(--muted); }
   .cp-avert { font-size: var(--fs-small); color: var(--ink); background: var(--surface-2); border-radius: 6px; padding: 6px 8px; }
   .cp-pied { position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 10px 0; margin-top: 12px;
-    display: flex; flex-wrap: wrap; align-items: center; gap: 10px; z-index: 500; }
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px; z-index: 5; }
+  /* ⚠ z-index 5, et non plus 500 (review du lot 2b, constat 2) : le 500 passait
+     au-dessus des couches Leaflet, que `isolation: isolate` sur #cp-map garde
+     désormais chez elles. À 500, le pied se peignait PAR-DESSUS le menu ≡ du
+     socle (z-index 20) au téléphone, et prenait les touches de ses dernières
+     entrées. Sous 10 : la barre du bas du socle reste au-dessus de lui. */
+  /* Les boutons de la page passent à la ligne, comme les anciens .cp-btn : .btn
+     du socle impose `nowrap` et une hauteur fixe, et « Recoger los precios de
+     sus comparables » touche la largeur utile à 390 px (review 2b, constat 10). */
+  .btn.cp-btn { white-space: normal; height: auto; min-height: var(--control); padding-block: 8px; }
   @media (max-width: 640px) {
     .cp-carte { padding: 12px; }
     #cp-map { height: 60vh; }
@@ -267,9 +278,17 @@
   // `var()` : la valeur CALCULEE du jeton est lue au chargement.
   const JETONS_CARTE = { neutre: '--yf-carte-neutre', similaire: '--yf-carte-similaire', non: '--yf-carte-non', hote: '--yf-carte-hote', equipements: '--yf-carte-equipements', ouvert: '--ink', bord: '--surface' }
   const COULEUR = {}
+  // ⚠ UN JETON VIDE EST UNE PANNE, PAS UNE COULEUR (review 2b, constat 9) : une
+  // charte absente ou d'avant les --yf-carte-* rend '' — Leaflet peindrait alors
+  // les points de la couleur de leur bord, blancs sur blanc. On le dit, et la
+  // liste prend le relais, comme sans Leaflet.
+  let couleursCompletes = true
   const lireCouleurs = () => {
     const css = getComputedStyle(document.documentElement)
     for (const [k, v] of Object.entries(JETONS_CARTE)) COULEUR[k] = css.getPropertyValue(v).trim()
+    const vides = Object.entries(JETONS_CARTE).filter(([k]) => !COULEUR[k]).map(([, v]) => v)
+    couleursCompletes = !vides.length
+    if (vides.length) console.error('comparables : jetons de couleur absents de la charte', vides.join(', '))
   }
   // Un bien qui a l'un des equipements RARES de l'hote porte un contour violet
   // (§21.6). La regle est au SERVEUR (une seule liste des rares).
@@ -342,6 +361,10 @@
   // L'etape C est remplie UNE fois par logement : une nouvelle validation des
   // comparables n'efface pas une saisie en cours (review de dd8c060).
   let strategieAffichee = false
+  // Ce qui a été saisi ou jugé et pas encore envoyé : 'a' (description), 'b'
+  // (jugements), 'c' (stratégie et séjour minimum). Chaque enregistrement
+  // réussi efface sa part.
+  const nonEnregistre = new Set()
   // §22.7 : la note de coherence de chaque comparable (sa mention), et le
   // dernier etat des prix de depart.
   let prixDepart = null
@@ -364,7 +387,17 @@
     await I18n.init()
     session = await requireAuth()
     if (!session) return
-    document.addEventListener('i18n:changed', () => location.reload())
+    // ⚠ CETTE PAGE ÉCRIT : un changement de langue recharge, et ne doit pas
+    // effacer EN SILENCE des choix non enregistrés (review 2b, constat 3). Si
+    // l'hôte refuse, la page reste : ses textes fixes ont déjà changé de langue,
+    // les autres changeront au prochain chargement.
+    document.addEventListener('i18n:changed', () => {
+      if (nonEnregistre.size && !confirm(t('cp.langue_perte'))) return
+      location.reload()
+    })
+    for (const [etape, zone] of [['a', 'cp-etape-a'], ['c', 'cp-etape-c']]) {
+      for (const evt of ['input', 'change']) el(zone).addEventListener(evt, () => nonEnregistre.add(etape))
+    }
     monterCoquille({
       HSNav, I18n, session, titre: t('cp.titre'),
       compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
@@ -421,6 +454,9 @@
   }
   // Un nombre et son nom, accordes par la langue (« 1 voyageur », « 3 voyageurs »).
   const pluriel = (n, cle) => t(cle, { n: Number(n) })
+  // Le nombre d'avis tel que l'ancienne page l'écrivait (« 1234 avis ») : `#`
+  // le grouperait par milliers (review 2b, constat 1). `n` choisit le pluriel.
+  const nAvis = n => t('cp.n_avis', { n: Number(n), v: String(n) })
   function afficherRecap (p) {
     const z = el('cp-recap-texte')
     z.replaceChildren()
@@ -543,6 +579,7 @@
     el('cp-valider-a').disabled = false
     if (!r.ok || !r.d || !r.d.profil) return dire('cp-message-a', (r.d && r.d.message) || t('cp.enregistrement_impossible'), 'cp-erreur')
     dire('cp-message-a', '')
+    nonEnregistre.delete('a')
     profil = r.d.profil
     afficherRecap(profil)
     montrerFormulaire(false)
@@ -628,7 +665,11 @@
   function dessinerCarte () {
     const L = window.L
     // Message a lui (review de 995f025 : la note du serveur l'effacait).
-    if (!L) { el('cp-map').hidden = true; montrerErreurCarte(t('cp.carte_panne')); return }
+    if (!L || !couleursCompletes) {
+      el('cp-map').hidden = true
+      if (!couleursCompletes) document.querySelector('.cp-legende').hidden = true
+      montrerErreurCarte(t('cp.carte_panne')); return
+    }
     if (!carte) {
       carte = L.map(el('cp-map'), { scrollWheelZoom: false })
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19,
@@ -715,7 +756,7 @@
     if (Number.isFinite(c.voyageurs)) morceaux.push(pluriel(c.voyageurs, 'cp.n_voyageurs'))
     if (Number.isFinite(c.chambres)) morceaux.push(c.chambres === 0 ? t('cp.studio') : pluriel(c.chambres, 'cp.n_chambres'))
     if (Number.isFinite(d.lits)) morceaux.push(pluriel(d.lits, 'cp.n_lits'))
-    if (Number.isFinite(d.salles_de_bain)) morceaux.push(t('cp.n_sdb', { v: virgule(d.salles_de_bain), n: d.salles_de_bain > 1 ? 2 : 1 }))
+    if (Number.isFinite(d.salles_de_bain)) morceaux.push(t('cp.n_sdb', { v: virgule(d.salles_de_bain), n: d.salles_de_bain > 1 ? 2 : d.salles_de_bain === 1 ? 1 : 0 }))
     if (Number.isFinite(c.distance_km)) morceaux.push(t(c.position_approchee ? 'cp.distance_environ' : 'cp.distance', { v: virgule(c.distance_km) }))
     const ligne = document.createElement('p'); ligne.className = 'cp-ligne'; ligne.textContent = morceaux.join(' · ')
     const activite = document.createElement('p'); activite.className = 'cp-ligne'
@@ -733,8 +774,8 @@
     const blocs = document.createElement('dl'); blocs.className = 'cp-blocs'
     const ajouter = (titre, valeur) => { if (!valeur) return; const dt = document.createElement('dt'); dt.textContent = titre; const dd = document.createElement('dd'); dd.textContent = valeur; blocs.append(dt, dd) }
     ajouter(t('cp.d_type'), [d.type, d.logement_entier === true ? t('cp.entier') : d.logement_entier === false ? t('cp.partage') : ''].filter(Boolean).join(' · '))
-    if (Number.isFinite(d.note)) ajouter(t('cp.d_note'), `${t('cp.note_sur5', { v: virgule(d.note) })}${Number.isFinite(d.avis) ? ` (${pluriel(d.avis, 'cp.n_avis')})` : ''}`)
-    else if (Number.isFinite(d.avis)) ajouter(t('cp.d_avis'), pluriel(d.avis, 'cp.n_avis'))
+    if (Number.isFinite(d.note)) ajouter(t('cp.d_note'), `${t('cp.note_sur5', { v: virgule(d.note) })}${Number.isFinite(d.avis) ? ` (${nAvis(d.avis)})` : ''}`)
+    else if (Number.isFinite(d.avis)) ajouter(t('cp.d_avis'), nAvis(d.avis))
     const n = d.notes || {}
     const sous = [['cp.sn_proprete', n.proprete], ['cp.sn_exactitude', n.exactitude], ['cp.sn_arrivee', n.arrivee], ['cp.sn_communication', n.communication], ['cp.sn_emplacement', n.emplacement], ['cp.sn_qualite_prix', n.rapport_qualite]]
       .filter(([, v]) => Number.isFinite(v)).map(([k, v]) => `${t(k)} ${virgule(v)}`)
@@ -786,6 +827,7 @@
         // Un second clic sur le meme bouton annule le jugement.
         b.addEventListener('click', () => {
           touches.add(id)
+          nonEnregistre.add('b')
           if (jugements.get(id) === etat) jugements.delete(id); else jugements.set(id, etat)
           // La fiche est reconstruite : le focus revient sur le meme bouton, et
           // la page ne defile pas (review de 995f025).
@@ -820,6 +862,7 @@
     majCompte()
     if (!r.ok || !r.d || !Array.isArray(r.d.retenus)) return dire('cp-message-b', (r.d && r.d.message) || t('cp.enregistrement_impossible'), 'cp-erreur')
     dire('cp-message-b', t('cp.retenus_ok', { n: r.d.retenus.length }), 'cp-ok')
+    nonEnregistre.delete('b')
     retenusEnregistres = r.d.retenus.length
     afficherStrategie()
   }
@@ -862,6 +905,7 @@
     el('cp-valider-c').disabled = false
     if (!r.ok || !r.d || !r.d.profil) return dire('cp-message-c', (r.d && r.d.message) || t('cp.enregistrement_impossible'), 'cp-erreur')
     profil = r.d.profil
+    nonEnregistre.delete('c')
     dire('cp-message-c', t('cp.strategie_ok'), 'cp-ok')
     // Les prix de depart suivent la strategie : on les relit (cache seulement).
     let g

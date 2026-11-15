@@ -61,35 +61,47 @@ function leafletSimule () {
 }
 const visibles = L => L.points.filter(p => !p.retire)
 
-async function monter (serveur, { sansLeaflet = false } = {}) {
+// Options ajoutées par la review du lot 2b (constats 3, 7 et 9) : la langue de
+// l'hôte, le compte délégué, la réponse au `confirm`, et une charte modifiable.
+// La console virtuelle RELÈVE les erreurs (dont la navigation qu'un rechargement
+// tente, et que jsdom n'implémente pas) au lieu de les imprimer.
+async function monter (serveur, { sansLeaflet = false, langue = 'fr', compte = null, confirmer = true, theme = THEME } = {}) {
+  const { VirtualConsole } = require('jsdom')
+  const consoleV = new VirtualConsole()
+  const journal = { erreurs: [], navigations: 0, confirmations: [], eq: [] }
+  consoleV.on('jsdomError', e => { if (/navigation/i.test(String(e && e.message))) journal.navigations++; else journal.erreurs.push(String(e && e.message)) })
+  consoleV.on('error', (...a) => journal.erreurs.push(a.map(String).join(' ')))
   const dom = new JSDOM(HTML.replace(/<script type="module">[\s\S]*?<\/script>/, '').replace(/<script src="https:\/\/cdnjs[^>]*><\/script>/, ''),
-    { runScripts: 'outside-only', url: 'https://staging.example/apps/yield/comparables' })
+    { runScripts: 'outside-only', url: 'https://staging.example/apps/yield/comparables', virtualConsole: consoleV })
   const w = dom.window
+  w.confirm = (m) => { journal.confirmations.push(m); return confirmer }
   // La charte, comme la page la charge par son <link> (que jsdom ne suit pas).
-  const style = w.document.createElement('style'); style.textContent = THEME; w.document.head.append(style)
+  const style = w.document.createElement('style'); style.textContent = theme; w.document.head.append(style)
   const L = leafletSimule()
   if (!sansLeaflet) w.L = L
   const appels = []
   // ⚠ LE SOCLE V5 : le VRAI moteur de traduction sur les VRAIS dictionnaires.
   // Les dictionnaires ne sont pas des appels de la page au serveur.
-  const socle = socleV5(w)
+  const socle = socleV5(w, { langue })
   Object.assign(w, socle.symboles)
   w.fetch = async (url, opts = {}) => {
     const dico = socle.dictionnaire(url)
     if (dico) return dico
     const corps = opts.body ? JSON.parse(opts.body) : null
-    appels.push({ url, methode: opts.method || 'GET', corps })
+    appels.push({ url, methode: opts.method || 'GET', corps, entetes: opts.headers || {} })
     return serveur({ url, methode: opts.method || 'GET', corps })
   }
   w.requireAuth = async () => ({ access_token: 'jeton-factice' })
   w.renderSidebar = async () => {}
-  w.compteCourant = () => null
-  w.enteteCompte = () => ({})
+  // Le contrat de shared/compte-courant.js : l'en-tête n'existe que pour un
+  // compte délégué. Ce que le banc vérifie, c'est que la page le POSE.
+  w.compteCourant = () => compte
+  w.enteteCompte = () => (compte ? { 'X-Compte': compte } : {})
   w.initErrorHandler = () => {}
   // La VRAIE table des tranches, depuis le module commun (jamais recopiee).
   w.TRANCHE = new w.Function(fs.readFileSync(path.join(__dirname, '..', 'shared', 'prix-depart-jours.js'), 'utf8').replace(/^export /gm, '') + '\nreturn TRANCHE')()
   const biens = { data: [{ id: 'B1', name: 'La bulle' }, { id: 'B2', name: 'Cœur de vie' }], error: null }
-  w.supabase = { from: () => { const q = { select: () => q, order: () => q, eq: () => q,
+  w.supabase = { from: () => { const q = { select: () => q, order: () => q, eq: (k, v) => { journal.eq.push([k, v]); return q },
     // ⚠ `is` COMPLETE CE DOUBLE depuis le filtre des biens archives :
     // `sansArchives` LEVE sur une chaine qui n'a pas `.is`, et c'est voulu — un
     // double incomplet doit echouer bruyamment plutot que de valider du code
@@ -107,7 +119,7 @@ async function monter (serveur, { sansLeaflet = false } = {}) {
   const script = /<script type="module">([\s\S]*?)<\/script>/.exec(HTML)[1].replace(/^\s*import .*$/gm, '')
   w.eval(`(async () => {${script}})()`)
   await attendre()
-  return { w, doc: w.document, appels, L }
+  return { w, doc: w.document, appels, L, journal }
 }
 
 function serveur ({ profil = null, cache = null, retenus = [], fondateur = [], encore = false, chercher = () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [] }), plus = () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [] }) } = {}) {
@@ -809,4 +821,161 @@ test('REVIEW (428fe8c) : d anciens comparables qui ne sont plus proposes — l h
 
 test('§22.11, telephone : la fourchette ne se coupe pas (espaces insecables) et les cellules se resserrent sous 640 px', () => {
   assert.match(HTML, /@media \(max-width: 640px\) \{[\s\S]*\.cp-prix td, \.cp-prix th \{ padding-left: 4px; padding-right: 4px; \}/)
+})
+
+// ─── Review du lot 2b (intégration V5) : constats 1, 3, 4, 5, 6, 7 et 9 ─────
+
+const DICOS = Object.fromEntries(['fr', 'en', 'es'].map(l => [l, JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', `${l}.json`), 'utf8'))]))
+
+// Un serveur qui répond aux SIX gestes de la page, et une lecture qui suit
+// l'avancée : après la stratégie, des prix restent à relever.
+function serveurSixGestes () {
+  let lectures = 0
+  return ({ methode, corps }) => {
+    if (methode === 'GET') {
+      lectures++
+      return lectures === 1
+        ? reponse({ etat: 'calcule', profil: null, retenus: [], fondateur: [], comparables: null })
+        : reponse({ etat: 'calcule', profil: { ...PROFIL, strategie: 'juste', sejour_min: 1 }, retenus: IDS3, fondateur: [], comparables: CARTES, prix_depart: { etat: 'a_capturer', a_capturer: 2 } })
+    }
+    if (corps.action === 'profil') return reponse({ etat: 'enregistre', profil: PROFIL })
+    if (corps.action === 'chercher') return reponse({ etat: 'calcule', comparables: CARTES.slice(0, 20), retenus: [], encore: true })
+    if (corps.action === 'plus') return reponse({ etat: 'calcule', comparables: CARTES, retenus: [], encore: false })
+    if (corps.action === 'retenir') return reponse({ etat: 'enregistre', retenus: corps.choix.map(c => c.listing_id) })
+    if (corps.action === 'strategie') return reponse({ etat: 'enregistre', profil: { ...PROFIL, strategie: corps.strategie, sejour_min: 1 } })
+    if (corps.action === 'prix') return reponse(PRIX_CALCULE)
+    return reponse({}, 400)
+  }
+}
+async function parcourirSixGestes (p) {
+  const { doc, L } = p
+  const set = (id, v) => { doc.getElementById(id).value = v }
+  set('cp-adresse', '12 rue des Thermes'); set('cp-voyageurs', '2'); set('cp-chambres', '1'); set('cp-pieces', '2'); set('cp-sdb', '1')
+  doc.getElementById('cp-valider-a').click(); await attendre()
+  doc.getElementById('cp-plus').click(); await attendre()
+  for (const id of IDS3) { cliquerPoint(L, id); juger(doc, 'equivalent') }
+  doc.getElementById('cp-valider-b').click(); await attendre()
+  doc.querySelector('input[name="strategie"][value="qualite"]').checked = true
+  doc.getElementById('cp-valider-c').click(); await attendre()
+  doc.getElementById('cp-relever').click(); await attendre()
+}
+
+// ⚠ LES DEUX TESTS DU CONSTAT 7 SONT DE COUVERTURE : le code d'avant faisait
+// déjà juste, ils passent donc contre lui — c'est voulu. Ils sont éprouvés par
+// MUTATION (spec §11.6) : retirer `...enteteCompte()` d'`appeler`, retirer le
+// filtre `user_id`, ou remettre une phrase française en dur dans la fiche
+// rougit chacun le sien.
+test('LE TEST QUI COMPTE (review 2b, constat 7) : délégué, l en-tête de compte part avec CHAQUE appel — la lecture et les six gestes — et les logements sont ceux du compte', async () => {
+  const p = await monter(serveurSixGestes(), { compte: 'C-autre' })
+  await parcourirSixGestes(p)
+  const faits = p.appels.map(a => (a.methode === 'GET' ? 'GET' : a.corps.action))
+  for (const g of ['GET', 'profil', 'chercher', 'plus', 'retenir', 'strategie', 'prix']) assert.ok(faits.includes(g), `geste absent du parcours : ${g} (${faits.join(', ')})`)
+  for (const a of p.appels) {
+    assert.equal(a.entetes['X-Compte'], 'C-autre', `${a.methode} ${a.corps ? a.corps.action : ''} : sans en-tête de compte`)
+    assert.match(a.url, /^\/api\/marche-comparables\?property_id=B1$/)
+  }
+  assert.deepEqual(p.journal.eq, [['user_id', 'C-autre']], 'la liste des logements n est pas celle du compte délégué')
+  // Titulaire : aucun en-tête, aucun filtre de compte (comme avant).
+  const q = await monter(serveurSixGestes())
+  await parcourirSixGestes(q)
+  assert.ok(q.appels.length >= 7 && q.appels.every(a => !('X-Compte' in a.entetes)))
+  assert.deepEqual(q.journal.eq, [])
+})
+
+// La fiche COMPLÈTE et l'étape D, rendues : c'est là que vivaient les phrases
+// que le test du formulaire ne voyait pas (review 2b, constat 7).
+const FICHE_COMPLETE = { ...CARTES[0], details: { ...CARTES[0].details, description: 'Bel appartement.', type: 'Entire rental unit', logement_entier: true, lits: 2, salles_de_bain: 0,
+  note: 4.87, avis: 1234, notes: { proprete: 4.9, exactitude: 4.8, arrivee: 5, communication: 5, emplacement: 4.7, rapport_qualite: 4.6 },
+  superhote: true, coup_de_coeur: true, hote: 'Sophie', gestion_pro: false, reservation_instantanee: true, sejour_min: 2, annulation: 'Moderate',
+  arrivee: '3:00 PM', depart: '11:00 AM', equipements_airbnb: ['Hot tub', 'Wifi'], nb_photos: 12 } }
+const PRIX_PHASE1 = { ...PRIX_CALCULE, prix: { ...PRIX_CALCULE.prix, niveaux_source: 'phase1', repli: 'peu_mouvants', phase1_localite: null, hotes_mouvants: 1 } }
+async function rendreToutLaPage (langue) {
+  const p = await monter(({ methode }) => (methode === 'GET'
+    ? reponse({ etat: 'calcule', profil: { ...PROFIL, strategie: 'juste', sejour_min: 2 }, retenus: IDS3, fondateur: [], comparables: [FICHE_COMPLETE, ...CARTES.slice(1)], prix_depart: PRIX_PHASE1 })
+    : reponse({}, 400)), { langue })
+  cliquerPoint(p.L, FICHE_COMPLETE.listing_id)
+  return p
+}
+// Les morceaux de français FIXE de chaque clé cp.* (entre ses variables), assez
+// longs pour ne pas être un nom propre ou un sigle partagé.
+function morceauxFrancais (langue) {
+  const out = []
+  for (const [k, v] of Object.entries(DICOS.fr)) {
+    if (!k.startsWith('cp.') || DICOS[langue][k] === v) continue
+    for (const m of v.replace(/\{[^{}]*\{[^}]*\}[^{}]*\}/g, '\u0000').replace(/\{[^}]*\}/g, '\u0000').replace(/\*\*/g, '').split('\u0000')) {
+      const x = m.trim()
+      if (x.length >= 18 && !DICOS[langue][k].includes(x)) out.push([k, x])
+    }
+  }
+  return out
+}
+
+test('LE TEST QUI COMPTE (review 2b, constat 7) : en anglais et en espagnol, la fiche COMPLÈTE et les prix de départ parlent la langue de l hôte — aucune phrase française, aucune clé brute', async () => {
+  for (const langue of ['en', 'es']) {
+    const { doc, journal } = await rendreToutLaPage(langue)
+    assert.deepEqual(journal.erreurs, [], journal.erreurs.join('\n'))
+    const texte = doc.querySelector('main').textContent
+    assert.ok(doc.querySelector('#cp-fiche .cp-nom'), `${langue} : la fiche est rendue`)
+    assert.ok(doc.querySelectorAll('#cp-zone-prix tbody tr').length === 4, `${langue} : les prix sont rendus`)
+    assert.doesNotMatch(texte, /\bcp\.[a-z0-9_]+/, `${langue} : une clé brute à l écran`)
+    const restes = morceauxFrancais(langue).filter(([, x]) => texte.includes(x))
+    assert.deepEqual(restes, [], `${langue} : du français resté à l écran`)
+  }
+})
+
+test('LE TEST QUI COMPTE (review 2b, constats 4, 5, 6) : l anglais se lit — « the market of », « cheaper than », « 0 bathrooms » ; le français d avant est intact', async () => {
+  const en = await rendreToutLaPage('en')
+  const t = en.doc.querySelector('main').textContent
+  assert.match(t, /come from the market of your town \(/)
+  assert.doesNotMatch(t, /the your town/)
+  assert.match(t, /sell the night 10% cheaper than those accepting 1 night/)
+  assert.doesNotMatch(t, /than than|same price than/)
+  assert.match(en.doc.getElementById('cp-fiche').textContent, /0 bathrooms/)
+  assert.equal(DICOS.en['cp.studio_0'], 'studio (0 bedrooms)')
+  const es = await rendreToutLaPage('es')
+  assert.match(es.doc.getElementById('cp-fiche').textContent, /0 baños/)
+  const fr = await rendreToutLaPage('fr')
+  const f = fr.doc.getElementById('cp-fiche').textContent
+  assert.match(f, /0 salle de bain/, 'le français d avant : « 0 salle de bain »')
+  // Constat 1 : le nombre d'avis tel que l'ancienne page l'écrivait, sans
+  // séparateur de milliers.
+  assert.match(f, /4,87 sur 5 \(1234 avis\)/)
+  assert.match(fr.doc.querySelector('main').textContent, /vendent la nuit 10 % moins cher que ceux qui acceptent 1 nuit/)
+})
+
+test('LE TEST QUI COMPTE (review 2b, constat 3) : changer de langue avec des choix non enregistrés DEMANDE avant de recharger ; sans rien en cours, recharge', async () => {
+  // Rien en cours : la page recharge, sans question.
+  const a = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  a.doc.dispatchEvent(new a.w.CustomEvent('i18n:changed', { detail: { lang: 'en' } }))
+  assert.deepEqual(a.journal.confirmations, [])
+  assert.equal(a.journal.navigations, 1, 'la page recharge')
+  // Un jugement non enregistré : la question, et un refus garde la page.
+  const b = await monter(serveur({ profil: PROFIL, cache: CARTES }), { confirmer: false })
+  cliquerPoint(b.L, CARTES[0].listing_id); juger(b.doc, 'equivalent')
+  b.doc.dispatchEvent(new b.w.CustomEvent('i18n:changed', { detail: { lang: 'en' } }))
+  assert.deepEqual(b.journal.confirmations, [DICOS.fr['cp.langue_perte']])
+  assert.equal(b.journal.navigations, 0, 'le refus garde la page et les jugements')
+  assert.equal(b.doc.querySelector('#cp-fiche button[data-verdict="equivalent"]').getAttribute('aria-pressed'), 'true')
+  // Une saisie dans la description compte aussi ; l'enregistrer la solde.
+  const c = await monter(serveur(), { confirmer: false })
+  const set = (id, v) => { c.doc.getElementById(id).value = v; c.doc.getElementById(id).dispatchEvent(new c.w.Event('input', { bubbles: true })) }
+  set('cp-adresse', '12 rue des Thermes'); set('cp-voyageurs', '2'); set('cp-chambres', '1'); set('cp-pieces', '2'); set('cp-sdb', '1')
+  c.doc.dispatchEvent(new c.w.CustomEvent('i18n:changed', { detail: { lang: 'en' } }))
+  assert.equal(c.journal.confirmations.length, 1)
+  c.doc.getElementById('cp-valider-a').click(); await attendre()
+  c.doc.dispatchEvent(new c.w.CustomEvent('i18n:changed', { detail: { lang: 'en' } }))
+  assert.equal(c.journal.confirmations.length, 1, 'la description est enregistrée : plus rien à perdre')
+  assert.equal(c.journal.navigations, 1)
+})
+
+test('LE TEST QUI COMPTE (review 2b, constat 9) : une charte sans les jetons de la carte ne peint pas des points invisibles — la carte se dit en panne, la liste prend le relais', async () => {
+  const sansJetons = THEME.replace(/--yf-carte-[a-z]+:\s*#[0-9A-Fa-f]+;/g, '')
+  assert.notEqual(sansJetons, THEME)
+  const p = await monter(serveur({ profil: PROFIL, cache: CARTES }), { theme: sansJetons })
+  assert.equal(visibles(p.L).length, 0, 'aucun point peint')
+  assert.equal(p.doc.getElementById('cp-map').hidden, true)
+  assert.equal(p.doc.querySelector('.cp-legende').hidden, true)
+  assert.equal(p.doc.getElementById('cp-carte-erreur').textContent, DICOS.fr['cp.carte_panne'])
+  assert.match(p.journal.erreurs.join('\n'), /jetons de couleur absents de la charte.*--yf-carte-neutre/)
+  assert.ok(p.doc.querySelectorAll('.cp-liste-biens li').length > 0, 'la liste reste')
 })

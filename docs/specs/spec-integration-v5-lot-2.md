@@ -426,6 +426,14 @@ d'appel. AVANT : 12 appels (§6 bis). APRÈS : §11.5.
 3. Leaflet et ses tuiles viennent toujours de cdnjs et d'OpenStreetMap
    (inchangé) ; leurs contrôles (« + », « − », attribution) ne se traduisent
    pas — l'attribution d'OpenStreetMap passe par le dictionnaire.
+4. **Changer de langue sur cette page** (ajout de la review, constat 3).
+   L'ancienne page n'avait pas de sélecteur de langue ; le menu ≡ du socle en
+   porte un, et changer de langue RECHARGE l'écran. Avec des choix non
+   enregistrés (jugements, description, stratégie), la page demande d'abord ;
+   si l'hôte refuse, elle reste, avec ses textes fixes déjà dans la nouvelle
+   langue et le reste dans l'ancienne jusqu'au prochain chargement. Lecture
+   retenue : ne jamais perdre un choix en silence ; un écran à deux langues
+   pendant quelques minutes est le moindre défaut.
 
 ### 11.5 Mesures, contre-épreuve, téléphone
 
@@ -443,8 +451,15 @@ retargeté sur le socle V5 sans perdre une assertion : chaque phrase
 française y est affirmée rendue, au caractère ; les attentes « noir » et
 « blanc » du contour d'un point se lisent dans la charte (`--ink`,
 `--surface`) au lieu d'être écrites en dur — la couleur du contour d'un bien
-ouvert passe ainsi de `#111` à l'encre de la charte (`#222222`), seul écart
-de couleur du sous-lot, voulu.
+ouvert passe ainsi de `#111` à l'encre de la charte (`#222222`).
+
+⚠ **Corrigé après la review (constat 8) : ce n'est PAS le seul écart de
+couleur.** Changent aussi, vers les jetons de la charte : le contour du point
+de l'hôte (`#111` → `--ink`), l'ambre des alertes, `.cp-source`, `.cp-erreur`
+et `.cp-ok` (§11.2). Les verdicts enfoncés, eux, gardent la couleur EXACTE du
+point qu'ils peignent (`--yf-carte-similaire` `#1F8A4C`, `--yf-carte-non`
+`#5F6368`) : le premier jet les avait passés à `--ok` et `--muted`, ce qui
+cassait le lien voulu par l'ancien code entre le bouton et son point.
 
 **Horloge décalée**, fichiers touchés et voisins : J+60 **194 / 194** ; J+200
 192 / 194 — les 2 rouges sont dans `tests/marche-comparables-api.test.js`, un
@@ -456,3 +471,168 @@ comparables » se pose au-dessus de la barre du bas du socle (fixe sous
 721 px) au lieu de glisser dessous ; formulaire, fiche et tableau des prix
 tiennent dans la largeur. Les boutons prennent le style du socle
 (`btn--primary` est cerclé d'encre dans la charte V5, pas plein).
+
+### 11.6 Review 1 du sous-lot 2b — rapport tel quel
+
+Brief : arbre `/home/claude/hv5-lot2b-revue` (worktree détaché), branche
+`integration-v5-lot-2b`, plage
+`a237e786d85f4303caca8f5e4328403bdfaddb45..105c278e44f28f67ef51e7fdcae08be2bd3d8cf0`.
+**Trace vérifiée avant lecture des constats** : le worktree est bien à
+`105c278e44f28f67ef51e7fdcae08be2bd3d8cf0`, sans modification ; les dix
+fichiers que la review liste sont exactement ceux de mon
+`git diff --name-only` sur la plage. Elle cite aussi `shared/ui.css`, qui
+n'est pas dans le diff : comme **contexte** (le menu ≡ et `.btn` du socle sur
+lesquels la page s'appuie), jamais comme lieu d'un constat — les lignes citées
+(116-121, 549, 629) ont été relues dans l'arbre de la review et sont
+exactes.
+
+> ## Trace
+>
+> - Arbre lu : `/home/claude/hv5-lot2b-revue` (worktree détaché). `git rev-parse HEAD` = `105c278e44f28f67ef51e7fdcae08be2bd3d8cf0`. `git status --short` est vide : aucun fichier modifié, aucun commit, aucun checkout.
+> - Plage : `a237e786d85f4303caca8f5e4328403bdfaddb45..105c278e44f28f67ef51e7fdcae08be2bd3d8cf0`, trois commits : e036eb15, e034f612, 105c278e.
+> - Fichiers du diff (`git diff --name-only`) :
+>   - apps/yield/comparables.html
+>   - docs/specs/spec-integration-v5-lot-2.md
+>   - shared/i18n/en.json
+>   - shared/i18n/es.json
+>   - shared/i18n/fr.json
+>   - shared/theme.css
+>   - tests/budget-ecran.test.js
+>   - tests/comparables-page-dom.test.js
+>   - tests/integration-v5-lot-2.test.js
+>   - tests/v2-marche-aucune-ecriture-calendrier.test.js
+> - Contrôles faits :
+>   - J'ai comparé l'ancienne page (`git show a237e786:…`) à la nouvelle, branche par branche.
+>   - J'ai vérifié les 219 clés employées dans les trois langues : rien ne manque. Les variables sont les mêmes d'une langue à l'autre. Aucun `{var}` n'est placé dans un cas de pluriel. Les espaces insécables de `cp.fourchette` sont gardées.
+>   - J'ai fait un rendu complet de la page avec une fiche et des prix de départ entièrement remplis, en fr, en et es, avec le vrai moteur i18n (banc `monterPage`, script jetable hors de l'arbre, supprimé ensuite). Résultat : 0 erreur, aucune clé brute affichée.
+>   - J'ai lancé les tests touchés et leurs voisins, tous verts :
+>     - comparables-page-dom : 52/52
+>     - integration-v5-lot-2 : 22/22
+>     - v2-marche-aucune-ecriture-calendrier : 12/12
+>     - budget-ecran : 15/15
+>     - pages-non-delegables : 38/38
+>     - yf-bien-demande : 12/12
+>     - palette-niveaux : 9/9
+>     - biens-vivants-parite : 4/4
+>     - i18n-doublons : 20/20
+>     - i18n-parametres : 4/4
+>     - masquage-hidden : 8/8
+>     - nav-i18n-cles : 8/8
+>     - `scripts/i18n-check.js` : 2192 clés dans chacune des trois langues.
+> - Ce que j'ai vérifié et qui est **conforme** :
+>   - **Corps des POST et URL :** identiques pour les six actions (profil, chercher, plus, retenir, stratégie, prix).
+>   - **Compte et logement :** `enteteCompte()` est toujours présent dans `appeler`. La lecture des logements garde `eq('user_id', compte)` et `sansArchives`, et la garde `?bien=` est inchangée.
+>   - **États de la page :** les jetons `jeton` et `rechercheEnCours` sont conservés, de même que le focus après un verdict, le défilement, le second clic qui annule le verdict et l'ordre de l'étape D.
+>   - **Données serveur :** toujours posées en `textContent` ou `setAttribute`.
+>   - **HTML Leaflet :** l'attribution et l'infobulle reçoivent un texte du dictionnaire passé par `esc()`.
+>   - **Texte riche :** `appliquerRiches` échappe le texte avant de poser ses marques.
+>   - **Couleurs de la carte :** `lireCouleurs()` s'exécute après `I18n.init`, après les feuilles chargées, et avant la légende et `charger()`.
+>   - **Texte français :** aucun texte n'est évalué au niveau du module. Le français rendu est identique, sauf le point 1 ci-dessous.
+>
+> ## Constats
+>
+> 1. **AUTRE — écart de texte français non déclaré.**
+>    - Où : shared/i18n/fr.json:524 (`cp.n_avis`) ; appel à apps/yield/comparables.html:736.
+>    - Défaut : le moteur remplace `#` par `Intl.NumberFormat(lang)`, qui groupe les milliers. L'ancien code écrivait le nombre brut.
+>    - Scénario mesuré au banc : une annonce à 1234 avis affiche « 4,87 sur 5 (1 234 avis) », avec une espace fine insécable U+202F. L'ancienne page affichait « (1234 avis) ». Les autres comptes avec `#` restent sous 1000 en pratique.
+>    - La spec §11.5 dit que « chaque phrase française » est rendue au caractère.
+>    - Correction : soit accepter l'écart et le nommer dans §11.5, soit passer le nombre en `{v}` brut à côté du `n` qui choisit le pluriel.
+>
+> 2. **AUTRE (téléphone) — le pied collant passe par-dessus le menu ≡.**
+>    - Où : apps/yield/comparables.html:96-97 (`.cp-pied { … z-index: 500 }`) et :108-110.
+>    - Défaut : au téléphone, le menu du socle est `position: fixed; top: 64px; z-index: 20` (shared/ui.css:549, 629), sans hauteur maximale. `.topbar__actions` ne crée pas de contexte d'empilement. Le pied (z-index 500, collé à 70 px du bas) se peint donc au-dessus du menu.
+>    - Scénario : à l'étape B, l'hôte ouvre ≡. Le menu peut porter une douzaine d'entrées (compte, Réglages, Avis, Aide, six Outils, langue, Déconnexion). Ses dernières entrées passent sous la barre « Valider mes comparables », qui prend aussi leurs touches.
+>    - Le 500 servait à passer au-dessus des couches Leaflet. Depuis `isolation: isolate` sur `#cp-map`, il n'est plus nécessaire.
+>    - Correction : `z-index` entre 1 et 9. Le pied vient après la carte dans le DOM, et la barre du bas est à 10.
+>
+> 3. **AUTRE — un changement de langue efface le travail non enregistré.**
+>    - Où : apps/yield/comparables.html:367 (`i18n:changed` → `location.reload()`).
+>    - Défaut : le motif repris de 2a convient à des écrans en lecture seule. Ici, les verdicts ne sont envoyés qu'au clic sur « Valider mes comparables », et l'ancienne page n'avait pas de sélecteur de langue.
+>    - Scénario : l'hôte juge huit biens, puis change de langue dans le menu ≡. La page se recharge et les huit verdicts sont perdus, sans prévenir. Même chose pour un profil ou une stratégie en cours de saisie.
+>    - Correction : demander confirmation, ou poser une garde `beforeunload`, quand des verdicts ou une saisie ne sont pas enregistrés. Ou bien re-rendre la page sans la recharger.
+>
+> 4. **AUTRE (traduction anglaise) — « the your town market ».**
+>    - Où : shared/i18n/en.json:628 (`cp.phase1`) avec en.json:624 (`cp.votre_ville`).
+>    - Rendu mesuré : « So the season and the weekend come from **the your town market** ». Le français et l'espagnol sont corrects.
+>    - Correction : « …come from the market of {ville} (…) ».
+>
+> 5. **AUTRE (traduction anglaise) — « at the same price than ».**
+>    - Où : shared/i18n/en.json:649 (`cp.sejour_comp`, qui contient « than ») avec en.json:648 (`cp.meme_prix`).
+>    - Rendu mesuré : « sell the night **at the same price than** those accepting 1 night ».
+>    - Correction : retirer « than » de `cp.sejour_comp` en anglais, et le porter dans chaque sens : « {p} cheaper than », « {p} dearer than », « at the same price as ». Les clés sont propres à chaque langue, le français ne change pas.
+>
+> 6. **AUTRE (traduction) — règle de pluriel française codée en dur.**
+>    - Où : apps/yield/comparables.html:718 (`n: d.salles_de_bain > 1 ? 2 : 1`) ; shared/i18n/en.json:526 (`cp.studio_0`).
+>    - Rendu mesuré :
+>      - dans la fiche : « 0 bathroom » en anglais, « 0 baño » en espagnol ;
+>      - dans le rappel du profil, sur la même page : « 0 bathrooms » ;
+>      - « studio (0 bedroom) » en anglais.
+>    - Correction : `n: d.salles_de_bain > 1 ? 2 : d.salles_de_bain === 1 ? 1 : 0`. Le français reste identique à l'ancien (« 0 salle de bain », « 1,5 salles de bain ») et l'anglais et l'espagnol s'accordent. Écrire aussi « studio (0 bedrooms) ».
+>
+> 7. **AUTRE (tests) — les tests 2b ne couvrent ni l'en-tête de compte, ni la page entière en anglais et en espagnol.**
+>    - Où : tests/integration-v5-lot-2.test.js:393-409 ; tests/comparables-page-dom.test.js:86-87 (`enteteCompte = () => ({})`, `compteCourant = () => null`).
+>    - En-tête de compte : aucun test ne vérifie que `X-Compte` et `property_id` partent avec le GET et les six POST. Aucun ne vérifie non plus `eq('user_id', compte)` sur la lecture des logements. Pour les écrans 2a, qui ne font que lire, c'est le rôle du test « restent DÉLÉGABLES… l'en-tête de compte ». Il n'a pas été étendu à la seule page du lot qui écrit. Retirer `...enteteCompte()` de `appeler` laisserait toute la suite au vert.
+>    - Langues : le test anglais/espagnol ne regarde que le formulaire statique. Un texte français resté en dur dans la fiche ou l'étape D passerait, et les constats 4 et 5 aussi.
+>    - Correction :
+>      - Ajouter un test avec `compte: 'C-autre'` qui parcourt les six gestes et vérifie l'en-tête de chacun.
+>      - Ajouter un rendu complet en anglais et en espagnol, fiche et prix inclus. Il doit refuser les phrases françaises connues et toute clé `cp.*` affichée brute.
+>
+> 8. **AUTRE (couleurs, spec) — §11.5 annonce un seul écart de couleur, il y en a plusieurs.**
+>    - Où : docs/specs/spec-integration-v5-lot-2.md:446 (« seul écart de couleur du sous-lot ») ; apps/yield/comparables.html:67, :71, :641.
+>    - Ce qui change en plus du contour d'un bien ouvert :
+>      - le contour du point de l'hôte passe aussi de `#111` à `--ink` (:641) ;
+>      - les verdicts enfoncés passent de #1F8A4C à `--ok` #0F7A4F, et de #5F6368 à `--muted` #717171. Ils ne reprennent donc plus la couleur exacte du point qu'ils peignent sur la carte, alors que l'ancien code liait volontairement le vert du bouton à celui du point ;
+>      - l'ambre des alertes, `.cp-source`, `.cp-erreur` et `.cp-ok` changent aussi (cohérent avec §11.2, mais contraire à la phrase de §11.5).
+>    - Correction : corriger §11.5. Si le lien bouton = point doit être gardé, utiliser `var(--yf-carte-similaire)` et `var(--yf-carte-non)` pour les verdicts enfoncés.
+>
+> 9. **AUTRE (faible) — aucune garde si un jeton de couleur est vide.**
+>    - Où : apps/yield/comparables.html:270-273 (`lireCouleurs`).
+>    - Défaut : si `theme.css` est absent ou périmé (antérieur aux `--yf-carte-*`), `getPropertyValue` rend `''`. Leaflet prend alors `fillColor || color`, et les points sont peints de la couleur du bord : blancs sur blanc, invisibles. La légende est vide, sans aucun signal. L'ancienne table en dur ne pouvait pas faillir ainsi.
+>    - Le risque reste faible : la feuille est revalidée à chaque chargement et le service worker passe d'abord par le réseau.
+>    - Correction : si une valeur lue est vide, journaliser l'erreur et afficher le message « carte en panne », pour que la liste prenne le relais.
+>
+> 10. **AUTRE (téléphone, non mesuré) — libellés longs dans des boutons qui ne passent pas à la ligne.**
+>     - Où : boutons `btn` d'apps/yield/comparables.html (:896-897 `#cp-relever`, :503 `#cp-chercher`).
+>     - Défaut : `.btn` impose `white-space: nowrap` et une hauteur fixe (shared/ui.css:116-121). Les anciens `.cp-btn` passaient à la ligne.
+>     - Scénario : la recette à 390 px s'est faite en français. « Recoger los precios de sus comparables » (38 caractères) est à la limite de la largeur utile, environ 316 px, et peut déborder de la carte.
+>     - Correction : mesurer en espagnol à 390 px. Si ça déborde, ajouter `white-space: normal; height: auto; min-height: var(--control)` sur ces boutons.
+>
+> Constats de sécurité : 0
+
+### 11.7 Correctifs de la review 1 (2b) — sans nouvelle review
+
+**Zéro constat de sécurité : les dix se corrigent sans seconde review**
+(CLAUDE.md, « une review par commit »).
+
+| constat | correctif | test |
+|---|---|---|
+| 1 | `cp.n_avis` reçoit le nombre BRUT en `{v}`, `n` ne choisit que le pluriel : « (1234 avis) », comme avant | rendu fr « 4,87 sur 5 (1234 avis) » |
+| 2 | `.cp-pied` à `z-index: 5` (sous le menu ≡ à 20 et la barre du bas à 10) ; les couches Leaflet restent chez elles par `isolation: isolate` | source : pied < menu et < barre du bas, lus dans `ui.css` |
+| 3 | `i18n:changed` demande avant de recharger s'il reste un choix non enregistré (description, jugements, stratégie) ; chaque enregistrement réussi solde sa part. §11.4 point 4 | rendu : rien en cours → recharge sans question ; jugement → question, refus garde la page ; description saisie → question, enregistrée → plus de question |
+| 4 | en : « …come from the market of {ville} (…) » | rendu en : « the market of your town », jamais « the your town » |
+| 5 | en : « than » / « as » porté par chaque sens ; fr et es inchangés | rendu en : « 10% cheaper than those accepting 1 night » |
+| 6 | `n: > 1 ? 2 : === 1 ? 1 : 0` ; en « studio (0 bedrooms) » | rendu : « 0 bathrooms », « 0 baños », et en fr « 0 salle de bain » comme avant |
+| 7 | deux tests de COUVERTURE (le code faisait déjà juste) | voir ci-dessous |
+| 8 | verdicts enfoncés sur `--yf-carte-similaire` et `--yf-carte-non` (couleur exacte de leur point) ; §11.5 corrigée | source |
+| 9 | un jeton vide → erreur journalisée, carte et légende masquées, « carte en panne », la liste prend le relais | rendu avec une charte sans `--yf-carte-*` |
+| 10 | `.btn.cp-btn` passe à la ligne (`white-space: normal; height: auto; min-height: var(--control)`), comme les anciens `.cp-btn` | source ; et mesuré ci-dessous |
+
+**Contre-épreuve** (arbre de `105c278e` extrait par `git archive`, nouveau
+banc copié dedans) : les tests des constats 3, 4-5-6 et 9 **rougissent**
+contre le code d'avant les correctifs. Les deux tests du constat 7 y
+**passent**, et c'est voulu : ils couvrent un comportement qui était déjà
+juste. Ils sont éprouvés par **mutation**, une à la fois, sur le code
+corrigé : retirer `...enteteCompte()` d'`appeler` → le test du compte rougit ;
+retirer le filtre `user_id` → il rougit ; remettre en dur la phrase française
+de `cp.explication` dans la fiche → le test des langues rougit.
+
+**Banc** : `tests/comparables-page-dom.test.js` reçoit quatre options
+(`langue`, `compte`, `confirmer`, `theme`) et une console virtuelle qui
+relève les erreurs et les rechargements ; le banc de
+`tests/integration-v5-lot-2.test.js` charge désormais la charte comme la page
+la charge par son `<link>` (sans elle, comparables refuse à juste titre de
+peindre sa carte).
+
+**Téléphone, constat 10 mesuré** : Chrome sans tête, page en espagnol dans un
+cadre de 390 px : `#cp-relever` (« Recoger los precios de sus comparables »)
+va de 61 à 314 px, aucun bouton ne déborde.
