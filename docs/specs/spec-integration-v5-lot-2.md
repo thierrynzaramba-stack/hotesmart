@@ -891,3 +891,74 @@ code corrigé, une à la fois :
 - remplacer la relecture par `const rendu = true` → il rougit ;
 - faire porter le total sur `source.length` au lieu de `ecoulees.length` → le
   test « aucune période écoulée » rougit.
+
+## 13. Sous-lot 2d — « Prédiction de prix » (`apps/yield/prix.html`) — SPEC SEULE, PAS DE CODE
+
+Écrit AVANT le code, et **arrêté là pour cette nuit**. Branche
+`integration-v5-lot-2d`, partie de 2c (`f45c53f5`). Si la review de 2c
+apporte des correctifs, cette branche se rebase sur le 2c corrigé avant tout
+code.
+
+**Pourquoi le code n'est pas écrit cette nuit.** C'est l'écran qui ÉCRIT des
+prix. Il pèse 2 814 lignes, porte environ 460 textes français en dur, 72
+lignes de couleurs, 6 endpoints et 19 fichiers de tests qui le lisent. Il
+touche l'argent : la règle 5 veut que Thierry soit là pour tester juste après
+le merge. Le commencer à cinq heures du matin, c'est le livrer à moitié ou le
+livrer sans review. Lecture retenue : la spec maintenant, le code dans une
+session qui a le temps de le finir.
+
+### 13.1 Inventaire (à compléter ligne par ligne au moment du code)
+
+« Retiré » : aucune ligne. Les chemins d'écriture restent identiques :
+mêmes endpoints, mêmes corps, mêmes confirmations, même ordre.
+
+| Fonction / information | Sort |
+|---|---|
+| Titre « Prédiction de prix » ; barre : logement (vivants, compte courant, `?bien=`), bouton ACTIVÉ / DÉSACTIVÉ, mois précédent / suivant, CA du bandeau, bouton « Quand vos prix bougent » | conservé |
+| **Bascule du pilote** (`/api/yield-pilote`, POST) : confirmation SOUS le bouton dans les deux sens, « N nuits ont déjà un prix au calendrier », « N nuits gardent votre prix YieldFlow » ; l'activation exige une fenêtre ; la demande `?activer=` quitte l'adresse dès qu'elle est lue | conservé |
+| **Fenêtre d'ouverture** (`/api/yield-pilote`, POST) : saisie, nuits qui sortent de la fenêtre annoncées et comptées (le serveur exige le même nombre), confirmation du retrait, « dernier passage » en bas de page | conservé |
+| Bande des douze mois (radar), légende unique, tendance du mois quand elle agit, compteurs du mois | conservé |
+| **Grille du bien** en tête, et la **grille fixée par l'hôte** (`/api/yield-grille`, POST) : ✎ par niveau, vérification serveur, « N nuits vont changer de prix », « Appliquer » ; fourchette Exceptionnel | conservé |
+| Tableau du mois : une ligne par nuit, groupée par segment, en-tête de groupe (niveau du contexte), appariement N-1 en clair, preuve sur la ligne, « Pourquoi ? » (audit replié, mécanique intacte), pied du mois (totaux) | conservé |
+| **Le ✎ de l'hôte sur une nuit** (`apiClient.calendar.save(..., { prix_hote: true })`) et son retrait (`retirerPrixHote`, confirmation « Retirer votre prix du JJ/MM/AAAA ? ») | conservé |
+| Colonne « Prix de départ » (§22.13, `/api/marche-comparables?jours=1`, lecture seule) | conservé |
+| Grille du marché repliée (`/api/yield-marche`, lue à l'ouverture du bloc) | conservé |
+| **« Quand vos prix bougent »** (fenêtre modale, `/api/yield-evenements`) : douze mois en un appel, niveau de la grille par période, ajout d'un événement (récurrence unique / annuelle / annuelle mobile, saisie qui survit), reconduire, régler, supprimer (confirmation « Supprimer « nom » ? »), `null` motivé | conservé |
+| Libellés de fériés, ponts et week-ends (`shared/yield-libelles-feries.js`), niveaux de période (`shared/yield-niveau-periode.js`), tranches (`shared/prix-depart-jours.js`), motifs (`shared/yield-motifs.js`) | conservés **en français** si le module est commun à un écran V5 qui les affiche ainsi (même lecture que §8 point 2 et §12.4 point 1) — à vérifier module par module au moment du code |
+| La barre latérale et son sous-menu YieldFlow | déplacé (§3.4), « Prédiction de prix » marqué comme écran courant ; l'entrée « Événements » du sous-menu (`?evenements=1`) ouvre la fenêtre modale, comme avant |
+
+### 13.2 Forme
+
+- Coquille V5 (barre du haut, menu ≡, barre du bas), comme 2a à 2c.
+- La fenêtre modale « Quand vos prix bougent » reste une fenêtre modale. Au
+  téléphone, elle doit passer au-dessus de la barre du bas fixe (z-index) et
+  se fermer sans elle. **À mesurer à 390 px.**
+- Les cinq teintes de niveaux sont déjà dans `ui.css` (`.out-pont .n-*`,
+  lot 2a). Les autres couleurs en dur passent sur les jetons de la charte.
+
+### 13.3 Performance — les huit points (à remplir au code)
+
+AVANT : **15 appels** au chargement, dont 5 `/api`, 8 lectures Supabase,
+2 `getUser`, et 376 746 octets du dépôt (gzip 130 526) (§6 bis). Les sites
+d'appel `/api` d'avant (`/api/yield-prix` 1, `/api/yield-pilote` 6,
+`/api/yield-grille` 2, `/api/yield-marche` 1, `/api/yield-evenements` 3,
+`/api/marche-comparables` 1) entrent dans `tests/budget-ecran.test.js` au
+premier commit de code.
+
+⚠ L'outil de mesure (`tests/outils/mesurer-pages-outils.js`) plante sur cette
+page avec ses réponses minimales : `grilleDuBien` lit `grille.base` sur une
+réponse qui n'en a pas. La mesure APRÈS demande une réponse `/api/yield-prix`
+réaliste. **Le code de la page n'est pas en cause** : le serveur rend
+toujours la grille.
+
+### 13.4 Ce que le code devra prouver en plus des sous-lots précédents
+
+- **Chaque écriture** (bascule, fenêtre, grille, ✎, retrait du ✎,
+  événements ×4) part avec le même corps, l'en-tête de compte, la même
+  confirmation. Il faut un test qui parcourt les gestes en délégué, comme le
+  constat 7 de 2b.
+- La page entière se rend en anglais et en espagnol, mois et fenêtre modale
+  compris, sans phrase française ni clé brute.
+- Les 19 fichiers de tests qui lisent la page sont retargetés sans perdre une
+  assertion.
+- Le test réel (règle 5) se fait avec Thierry, juste après le merge.
