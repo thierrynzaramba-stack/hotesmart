@@ -639,7 +639,7 @@ va de 61 à 314 px, aucun bouton ne déborde.
 ## 12. Sous-lot 2c — « Tarification dynamique » (`apps/yield/index.html`)
 
 Écrit AVANT le code. Branche `integration-v5-lot-2c`, partie de 2b
-(`105c278e`). **« Prédiction de prix » (`prix.html`, 2 814 lignes, l'écran
+(`105c278e`), puis **rebasée sur 2b corrigé (`e40effbd`)** après sa review. **« Prédiction de prix » (`prix.html`, 2 814 lignes, l'écran
 qui POUSSE des prix) devient le sous-lot 2d** : le plus gros et le plus
 risqué, il passe en dernier et seul (lecture la plus raisonnable, Thierry
 dort).
@@ -674,3 +674,86 @@ fonds d'alerte et d'erreur) passent sur les jetons d'état de la charte
 (`--ok-ink`, `--danger-ink`, `--warn`, `--warn-soft`, `--info`…) — mêmes
 sens, teintes de la charte. Les montants, pourcentages et nombres se forment
 par la langue (`I18n.num`) ; en français, le rendu d'avant.
+
+### 12.3 Performance — les huit points
+
+1. **Endpoint d'écran** — non tenu, comme avant : la page lit ses logements
+   (RLS), puis `/api/yield`. Un `/api/ecran/…` serait un fichier `api/`.
+2. **Donnée non urgente** — sans objet pour le lot : la synthèse lit
+   `/api/yield` comme avant, rien n'est ajouté ni déplacé (le fond ne change
+   pas).
+3. **Cache navigateur** — aucun ajouté.
+4. **`private, no-store`** — aucun endpoint touché.
+5. **Statiques versionnés** — comme au lot 1 (§8 point 4).
+6. **Lecture tronquée** — la liste des logements d'un compte, inchangée.
+7. **Budget** — `tests/budget-ecran.test.js` compte désormais
+   `apps/yield/index.html` : `/api/yield` 1 site, `/api/yield-exceptions` 2
+   sites (POST, DELETE), exactement ceux de l'ancien écran.
+8. **Mesure AVANT / APRÈS** — §12.5.
+
+### 12.4 Dans le doute, pour Thierry
+
+1. **Les motifs du moteur restent en français** (`shared/yield-motifs.js`,
+   titres et infobulles des badges « Limites ») : le module est commun avec
+   l'écran V5 « Ce qui fait bouger vos prix », qui les affiche aussi en
+   français. Les traduire est un lot de contenu à part.
+2. **Les messages que l'API écrit** (`error`, `message` de `/api/yield` et
+   `/api/yield-exceptions`) restent en français (`api/` hors du lot).
+3. **Un mot en italique perdu** : « la part des ventes *finales* » s'écrit
+   désormais sans italique (le dictionnaire ne porte que le gras `**`). Le
+   texte est identique au caractère.
+4. **Couleurs** : vert de hausse, rouge de baisse, ambre et indigo des motifs
+   passent sur les jetons d'état de la charte (§12.2) — mêmes sens, teintes
+   de la charte.
+5. **L'onglet du navigateur** garde « HôteSmart — Tarification » ; le titre de
+   la page reste « Tarification dynamique ».
+
+### 12.5 Mesures, contre-épreuve, horloge, téléphone
+
+**APRÈS** (même outil, même compte, `tests/outils/mesurer-pages-outils.js`) :
+**12 → 10 appels** au chargement (`/api` 2 → 2, Supabase 8 → 5, `getUser`
+2 → 1, dictionnaires 0 → 2) ; octets du dépôt 224 201 → 409 533 (gzip
+79 962 → 129 491), le socle V5 commun aux écrans V5. Le lot ajoute 139 clés
+`yfs.*` aux trois dictionnaires.
+
+**Tests retargetés, sans perdre une assertion** :
+- `tests/yield-ecran.test.js` exécute toujours le VRAI code de rendu de la
+  page sur une réponse fabriquée. Il lui donne désormais le vrai moteur i18n
+  (`moteurI18nNode`, ajouté à `tests/outils/banc-page.js`, qui lit les vrais
+  dictionnaires) et les vrais `tHtml` / `brut` / `jourIso` /
+  `moisIso` : chaque phrase française y est affirmée au caractère, rendue.
+- `tests/yield-motifs.test.js` lit la source TRADUITE
+  (`tests/outils/source-traduite.js`) : les reprises des motifs retirés
+  (« N-1 est reconstruit, jamais observé », « période(s) fermée(s) à la
+  vente ») sont cherchées dans le texte qui s'affiche.
+- `tests/budget-ecran.test.js` compte la page (§12.3 point 7).
+- ⚠ Pour garder ces deux phrases au caractère, deux clés françaises gardent
+  le « (s) » d'avant au lieu d'un pluriel (`yfs.src_fermees`,
+  `yfs.src_hors_reference`) ; l'anglais et l'espagnol accordent.
+
+**Tests nouveaux (4, dans `tests/integration-v5-lot-2.test.js`)** :
+- socle, coquille, sous-menu marqué, trois vues en onglets du socle ;
+- la page entière en anglais et en espagnol ;
+- sécurité (non-régression) : nom du logement, motifs déclarés, événements,
+  calendrier scolaire et erreur du serveur restent du texte ;
+- non-régression : déclarer une période part au même endpoint, avec le même
+  corps, puis relit tout, avec le texte d'avant au caractère.
+
+**Contre-épreuve** : l'arbre de `105c278e` est extrait par `git archive` et
+reçoit les outils de test du lot. Les deux tests « LE TEST QUI COMPTE »
+**rougissent**. Les deux tests de non-régression **passent**, et c'est voulu :
+l'ancien écran faisait déjà juste. Ils sont éprouvés par **mutation** sur le
+code du lot, une mutation à la fois :
+- `<h2>${ech(d.bien.name)}</h2>` → `<h2>${d.bien.name}</h2>` : le test de
+  sécurité rougit ;
+- `brut()` posé sur le « manque » du calendrier scolaire : il rougit.
+
+**Horloge décalée**, fichiers touchés et voisins (9 fichiers) : J+60
+**149 / 149**, J+200 **149 / 149**. Suite complète, après le rebase sur 2b
+corrigé : **8 752 / 8 752**.
+
+**Téléphone** (Chrome sans tête, cadre de 390 px, fr et es, réponse remplie) :
+la page ne déborde pas (largeur du document 375). Le seul contenu plus large
+que l'écran est la rangée de liens du sous-menu YieldFlow, qui défile dans son
+propre conteneur (`.out-yf`), comme sur les écrans 2a et 2b. Les tableaux
+défilent dans `.yf-scroll`, comme avant.
