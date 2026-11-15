@@ -636,3 +636,41 @@ peindre sa carte).
 **Téléphone, constat 10 mesuré** : Chrome sans tête, page en espagnol dans un
 cadre de 390 px : `#cp-relever` (« Recoger los precios de sus comparables »)
 va de 61 à 314 px, aucun bouton ne déborde.
+## 12. Sous-lot 2c — « Tarification dynamique » (`apps/yield/index.html`)
+
+Écrit AVANT le code. Branche `integration-v5-lot-2c`, partie de 2b
+(`105c278e`). **« Prédiction de prix » (`prix.html`, 2 814 lignes, l'écran
+qui POUSSE des prix) devient le sous-lot 2d** : le plus gros et le plus
+risqué, il passe en dernier et seul (lecture la plus raisonnable, Thierry
+dort).
+
+### 12.1 Inventaire
+
+« Retiré » : aucune ligne. Le seul chemin d'écriture reste
+`/api/yield-exceptions` (POST, DELETE), avec les mêmes corps, la même
+confirmation, le même rechargement complet après le geste.
+
+| Fonction / information | Sort |
+|---|---|
+| Titre « Tarification dynamique » et sous-titre « Ce qui s'est passé, où on en est, et ce qui est normal » | conservé |
+| Trois vues (Pilotage par défaut, Bilan, Exploration) en onglets, l'état `aria-selected` | conservé (onglets du socle `.seg`) |
+| Barre : logement (vivants, compte courant), Du / Au / Détail (mois, année, jour) en Exploration seulement, Année en Bilan seulement, « Afficher » en Exploration seulement ; l'avertissement « N périodes demandées : c'est trop… » au-delà de 100 périodes, le bouton bloqué | conservé |
+| États : lecture du cœur, lecture impossible, erreur du serveur, aucun logement, liste illisible ; jeton contre les réponses périmées | conservé |
+| Bloc Sources : nom du logement, cadrage selon la vue, fenêtre, pivot, années d'historique ; alertes (calendrier scolaire incomplet, aucune réservation, périodes fermées à la vente avec leur sens en Bilan et en Pilotage, jours hors référence, limites de lecture) ; pied (réservations, nuits d'historique, capacité, prix plancher) | conservé |
+| Réalisé : tableau par période (CA, vs N-1, nuitées, occupation, vs N-1 en points, prix moyen, RevPAR, délai médian, limites), mois à venir écartés en Pilotage, total des périodes écoulées, légendes « capacité estimée » et « occupation en personnes » | conservé |
+| À date : portefeuille contre le même délai N-1, délai, N-1 disqualifié, réservations N-1 écartées, les deux explications | conservé |
+| Référence : prix médian par type de période, étendue, nuits, réservations, seuils du moteur, nuits de longs séjours et sans prix écartées | conservé |
+| Rythme de vente : part des ventes faites par palier, délai médian, nuits datées, limites, trois explications | conservé |
+| Projection : prix attendu, jours sur repli, part attendue, nuitées à terminaison et fourchette, avance / retard, limites, quatre explications | conservé |
+| Événements à venir : calendrier scolaire absent ou borné, liste (période, jours, événement, compte comme, zones en vacances), deux explications | conservé |
+| Périodes hors référence : formulaire (Du, Au, Motif, « Déclarer ») pour qui a le droit d'écrire, phrase de lecture seule sinon, liste et « Supprimer » avec confirmation, retours (déclarée / supprimée / écran non rafraîchi / refus traduit), quatre explications | conservé |
+| Les motifs du moteur (`shared/yield-motifs.js` : titres et infobulles) | conservé, **en français** (module commun à l'écran V5 « Ce qui fait bouger vos prix », qui fait de même ; §8 point 2) |
+| Le sous-menu YieldFlow | déplacé (§3.4), « Tarification dynamique » marqué comme écran courant |
+
+### 12.2 Forme
+
+Les couleurs en dur (vert hausse, rouge baisse, ambre et indigo des motifs,
+fonds d'alerte et d'erreur) passent sur les jetons d'état de la charte
+(`--ok-ink`, `--danger-ink`, `--warn`, `--warn-soft`, `--info`…) — mêmes
+sens, teintes de la charte. Les montants, pourcentages et nombres se forment
+par la langue (`I18n.num`) ; en français, le rendu d'avant.
