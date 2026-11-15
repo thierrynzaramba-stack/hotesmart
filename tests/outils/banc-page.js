@@ -333,4 +333,27 @@ function socleV5 (w, { langue = 'fr' } = {}) {
   return { symboles, dictionnaire }
 }
 
-module.exports = { monterPage, evaluerModule, doubleSupabase, octetsStatiques, sansImports, stabiliser, socleV5, RACINE }
+// ─── Le VRAI moteur i18n, hors navigateur (lot 2c) ────────────────────────────
+// Pour les bancs qui exécutent le script d'une page comme un module Node
+// (tests/yield-ecran.test.js) : le moteur servi par api/i18n.js, évalué dans un
+// contexte minimal (un `document` qui ne contient rien à traduire, le
+// stockage qui fixe la langue, un `fetch` qui lit les VRAIS dictionnaires).
+// REVIEW.md règle 22 : la traduction est la vraie, jamais un double.
+async function moteurI18nNode (langue = 'fr') {
+  const vm = require('vm')
+  const { moteurI18n } = require(path.join(RACINE, 'lib/i18n-version.js'))
+  const lireJson = (u) => {
+    const f = path.join(RACINE, String(u).split('?')[0])
+    const texte = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null
+    return Promise.resolve({ ok: !!texte, json: async () => JSON.parse(texte) })
+  }
+  const documentVide = { documentElement: { dataset: {}, lang: '', dir: '' }, querySelectorAll: () => [], dispatchEvent () {} }
+  const ctx = { window: {}, document: documentVide, navigator: { language: langue }, fetch: lireJson,
+    localStorage: { getItem: () => langue, setItem () {} }, Intl, console, CustomEvent: class {}, Promise, JSON }
+  vm.createContext(ctx)
+  vm.runInContext(moteurI18n(), ctx)
+  await ctx.window.I18n.init()
+  return ctx.window.I18n
+}
+
+module.exports = { monterPage, evaluerModule, doubleSupabase, octetsStatiques, sansImports, stabiliser, socleV5, moteurI18nNode, RACINE }

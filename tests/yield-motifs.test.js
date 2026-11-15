@@ -225,7 +225,11 @@ const ECRAN = path.join(RACINE, 'apps/yield/index.html')
 // Les codes que l'ecran peut reellement rendre : ceux qu'il cite en clair, plus
 // ceux qui lui arrivent par un champ de l'API qu'il affiche sans les nommer.
 function codesAffichables () {
-  const src = fs.readFileSync(ECRAN, 'utf8')
+  // ⚠ LA SOURCE AVEC SES TEXTES (intégration V5, lot 2c) : les phrases de
+  // l'écran vivent dans shared/i18n/fr.json ; tests/outils/source-traduite.js
+  // les remet à côté de leur clé, là où les reprises ci-dessous les cherchent.
+  void ECRAN
+  const src = require('./outils/source-traduite').sourceTraduite('apps/yield/index.html')
   const cites = new Set([...src.matchAll(/['"]([a-z][a-z0-9_]{6,})['"]/g)].map(m => m[1]))
 
   // ⚠ LES CHAMPS RELAYES EN BLOC. `badges(r.non_calculable)`,

@@ -243,6 +243,13 @@ const ATTENDU = {
   // chercher, plus, retenir, stratégie, relever), jamais au chargement.
   'apps/yield/comparables.html': {
     '/api/marche-comparables': 1
+  },
+  // Sous-lot 2c (spec §12) : la synthèse « Tarification dynamique ». Une
+  // lecture (/api/yield) au chargement, au changement de vue ou de logement ;
+  // le seul chemin d'écriture, /api/yield-exceptions (POST, DELETE), sur geste.
+  'apps/yield/index.html': {
+    '/api/yield': 1,
+    '/api/yield-exceptions': 2
   }
 }
 

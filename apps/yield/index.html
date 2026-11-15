@@ -1,211 +1,171 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Tarification</title>
-  <link rel="stylesheet" href="/public/style.css">
-  <!-- ⚠ LA POLICE DU SOCLE V5 SUR LES ÉCRANS YIELDFLOW — demande de Thierry du
-       30 octobre 2026. L'URL est IDENTIQUE à celle des pages V5
-       (pages/aujourdhui.html, pages/calendrier.html) : même fichier, donc
-       même entrée de cache navigateur, aucune requête supplémentaire pour un
-       hôte qui vient d'une page V5.
-       ⚠ ET LA CLASSE `police-v5` POSÉE SUR LA BALISE BODY EST LA SECONDE
-       MOITIÉ : sans elle, la fonte serait téléchargée sans être appliquée. La
-       règle `body` de public/style.css n'est PAS touchée, parce que cette
-       feuille sert aussi des écrans antérieurs à V5 que ce lot ne change pas. -->
-  <!-- ⚠ LE PRECONNECT EST LA MOITIE QU'ON OUBLIE — releve en review. Une
-       feuille tierce BLOQUANTE ajoutee a six ecrans, c'est un DNS puis un TLS
-       de plus devant le premier affichage, contre le budget « premier
-       affichage < 1 s » de CLAUDE.md. Les pages V5 de reference
-       (pages/aujourdhui.html, pages/calendrier.html) le portent ; ces ecrans
-       ne l'avaient pas, et le test n'epinglait que l'URL. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>
-    /* ─── Barre de sélection ─────────────────────────────────────────────── */
-    /* ⚠ `hidden` NE MASQUE RIEN ICI SANS CETTE REGLE — relevé en review.
-       `public/style.css` ne porte pas de `[hidden] { display: none }`, et nos
-       propres règles posent `display: flex` sur `.yf-champ` et `inline-flex`
-       sur `.btn` : une règle d'auteur bat le `display: none` de la feuille du
-       navigateur. Résultat : en Pilotage et en Bilan, l'hôte voyait et pouvait
-       modifier « Du », « Au » et « Détail » — des champs que la vue IGNORE.
-       Il saisissait des dates, cliquait, et recevait les 12 mois glissants
-       sans que rien ne le lui dise. */
-    [hidden] { display: none !important; }
-    .yf-barre { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 18px; }
-    .yf-champ { display: flex; flex-direction: column; gap: 4px; }
-    .yf-champ label { font-size: 11px; color: var(--text3); font-weight: 500; }
-    .yf-champ select, .yf-champ input { min-width: 130px; }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « TARIFICATION DYNAMIQUE » (YieldFlow) — intégrée au socle V5 le
+     15 novembre 2026 (docs/specs/spec-integration-v5-lot-2.md §12). La FORME
+     change, pas le fond : même lecture (/api/yield), même seul chemin
+     d'écriture (/api/yield-exceptions), mêmes blocs, mêmes états.
+     ⚠ `hidden` masque grâce à la règle `[hidden] { display: none !important }`
+     en tête de shared/ui.css : Du, Au et Détail ne s'affichent qu'en
+     Exploration (relevé en review, l'hôte saisissait des dates ignorées).
+     RÈGLES V5 : aucun hexa, aucun texte en dur. -->
+<style>
+  /* ─── Barre de sélection ─────────────────────────────────────────────── */
+  .yf-barre { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .yf-champ { display: flex; flex-direction: column; gap: 4px; }
+  .yf-champ label { font-size: var(--fs-caption); color: var(--muted); font-weight: var(--fw-medium); }
+  .yf-champ .out-saisie { min-width: 130px; }
 
-    /* ─── Blocs ──────────────────────────────────────────────────────────── */
-    .yf-bloc { background: var(--bg); border: 0.5px solid var(--border);
-               border-radius: var(--radius-lg); padding: 16px; margin-bottom: 16px; }
-    .yf-bloc h2 { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
-    .yf-bloc .yf-sous { font-size: 11px; color: var(--text3); margin: 0 0 14px; }
+  /* ─── Blocs ──────────────────────────────────────────────────────────── */
+  #yf-contenu { display: flex; flex-direction: column; gap: var(--gap-m); }
+  .yf-bloc { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px 18px; }
+  .yf-bloc h2 { font-size: 16px; font-weight: var(--fw-bold); margin: 0 0 4px; }
+  .yf-bloc .yf-sous { font-size: var(--fs-caption); color: var(--muted); margin: 0 0 14px; }
 
-    /* ─── Cartes d'indicateur ────────────────────────────────────────────── */
-    .yf-cartes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-    .yf-carte { border: 0.5px solid var(--border); border-radius: var(--radius);
-                padding: 12px; background: var(--bg2); min-width: 0; }
-    .yf-carte-titre { font-size: 11px; color: var(--text3); font-weight: 500; margin-bottom: 6px; }
-    .yf-valeur { font-size: 21px; font-weight: 600; line-height: 1.15; word-break: break-word; }
-    .yf-valeur.inconnu { font-size: 13px; font-weight: 500; color: #8A6D3B; }
-    .yf-compare { font-size: 11px; margin-top: 5px; color: var(--text2); }
-    .yf-hausse { color: #0F7B3E; font-weight: 600; }
-    .yf-baisse { color: #B02A37; font-weight: 600; }
-    .yf-neutre { color: var(--text3); }
+  /* ─── Le vocabulaire du « je ne sais pas » ───────────────────────────── */
+  /* ⚠ Un motif n'est JAMAIS une erreur rouge : c'est une limite honnête de
+     la donnée. Le rouge est réservé aux pannes. */
+  .yf-motif { display: inline-block; font-size: 11px; line-height: 1.45;
+              background: var(--warn-soft); color: var(--warn); border: 1px solid var(--amber-soft);
+              border-radius: 4px; padding: 2px 6px; margin: 3px 3px 0 0; cursor: help; }
+  .yf-motif.estime { background: var(--surface-2); color: var(--info); border-color: var(--line); }
+  .yf-motif.inconnu { background: var(--danger-soft); color: var(--danger-ink); border-color: var(--danger-soft); }
+  .yf-explications { margin: 10px 0 0; padding-inline-start: 18px; font-size: var(--fs-caption); color: var(--muted); line-height: 1.6; }
+  .yf-explications li { margin-bottom: 5px; }
+  .yf-explications strong { color: var(--ink); }
 
-    /* ─── Le vocabulaire du « je ne sais pas » ───────────────────────────── */
-    /* ⚠ Un motif n'est JAMAIS une erreur rouge : c'est une limite honnête de
-       la donnée. Le rouge est réservé aux pannes. */
-    .yf-motif { display: inline-block; font-size: 10.5px; line-height: 1.45;
-                background: #FFF8E6; color: #8A6D3B; border: 0.5px solid #F0DFB0;
-                border-radius: 4px; padding: 2px 6px; margin: 3px 3px 0 0; cursor: help; }
-    .yf-motif.estime { background: #EEF2FF; color: #3A4A8A; border-color: #C9D2F5; }
-    .yf-motif.inconnu { background: #FDECEA; color: #842029; border-color: #F5C2C7; }
-    .yf-explications { margin-top: 10px; font-size: 11px; color: var(--text2); line-height: 1.6; }
-    .yf-explications li { margin-bottom: 5px; }
-    .yf-explications strong { color: var(--text); }
+  /* ─── Tableaux ───────────────────────────────────────────────────────── */
+  .yf-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .yf-table { width: 100%; border-collapse: collapse; font-size: var(--fs-caption); min-width: 560px; }
+  .yf-table th { text-align: end; font-weight: var(--fw-medium); color: var(--muted); font-size: 11px;
+                 padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .yf-table th:first-child, .yf-table td:first-child { text-align: start; }
+  .yf-table td { text-align: end; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .yf-table tr:last-child td { border-bottom: none; }
+  .yf-table .yf-inconnu { color: var(--warn); font-size: 11px; white-space: normal; }
+  /* ⚠ La colonne « Limites » peut porter trois badges : sans cette règle elle
+     héritait de `nowrap` et poussait le tableau bien au-delà de sa largeur
+     minimale, allongeant le défilement sur mobile pour rien. */
+  .yf-table td:last-child { white-space: normal; min-width: 120px; }
+  .yf-table tbody tr:hover { background: var(--surface-2); }
+  .yf-hausse { color: var(--ok-ink); font-weight: var(--fw-semibold); }
+  .yf-baisse { color: var(--danger-ink); font-weight: var(--fw-semibold); }
+  .yf-neutre { color: var(--muted); }
 
-    /* ─── Tableaux ───────────────────────────────────────────────────────── */
-    .yf-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    .yf-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 560px; }
-    .yf-table th { text-align: right; font-weight: 500; color: var(--text3); font-size: 10.5px;
-                   padding: 6px 8px; border-bottom: 0.5px solid var(--border); white-space: nowrap; }
-    .yf-table th:first-child, .yf-table td:first-child { text-align: left; }
-    .yf-table td { text-align: right; padding: 7px 8px; border-bottom: 0.5px solid var(--border);
-                   white-space: nowrap; }
-    .yf-table tr:last-child td { border-bottom: none; }
-    .yf-table .yf-inconnu { color: #8A6D3B; font-size: 10.5px; white-space: normal; }
-    /* ⚠ La colonne « Limites » peut porter trois badges : sans cette règle elle
-       héritait de `nowrap` et poussait le tableau bien au-delà de sa largeur
-       minimale, allongeant le défilement sur mobile pour rien. */
-    .yf-table td:last-child { white-space: normal; min-width: 120px; }
-    .yf-table tbody tr:hover { background: var(--bg2); }
+  /* ─── Fourchette de projection ───────────────────────────────────────── */
+  .yf-fourchette { font-size: 11px; color: var(--muted); white-space: nowrap; }
 
-    /* ─── Onglets de vue ─────────────────────────────────────────────────── */
-    .yf-onglets { display: flex; gap: 2px; margin-bottom: 16px;
-                  border-bottom: 0.5px solid var(--border); }
-    .yf-onglet { background: none; border: none; border-bottom: 2px solid transparent;
-                 padding: 8px 14px; font-size: 13px; font-weight: 500; color: var(--text3);
-                 cursor: pointer; font-family: inherit; }
-    .yf-onglet:hover { color: var(--text2); }
-    .yf-onglet.actif { color: var(--text); border-bottom-color: var(--text); }
-    .yf-onglet:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+  /* ─── Saisie des exceptions ──────────────────────────────────────────── */
+  .yf-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
+             padding: 12px; background: var(--surface-2); border-radius: var(--radius-tile); margin-bottom: 12px; }
+  .yf-form .yf-champ { flex: 1 1 130px; }
+  .yf-form .out-saisie { width: 100%; }
+  .yf-liste { list-style: none; margin: 0; padding: 0; font-size: var(--fs-caption); }
+  .yf-liste li { display: flex; gap: 10px; align-items: baseline; padding: 8px 0;
+                 border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .yf-liste li:last-child { border-bottom: none; }
+  .yf-motif-texte { flex: 1 1 160px; color: var(--muted); }
+  .yf-sup { background: none; border: none; color: var(--danger-ink); cursor: pointer;
+            font-size: var(--fs-caption); padding: 2px 6px; border-radius: 4px; font-family: inherit; }
+  .yf-sup:hover { background: var(--danger-soft); }
+  /* `yf-ok` et `yf-ko` se distinguent : « Période déclarée » n'est pas un refus. */
+  .yf-ok { font-size: var(--fs-caption); color: var(--ok-ink); padding: 8px 0; font-weight: var(--fw-medium); }
+  .yf-ko { font-size: var(--fs-caption); color: var(--danger-ink); padding: 8px 0; font-weight: var(--fw-medium); }
+  .yf-alerte { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-tile);
+               background: var(--warn-soft); color: var(--warn); font-size: var(--fs-caption); line-height: 1.6; }
 
-    /* ─── Fourchette de projection ───────────────────────────────────────── */
-    .yf-fourchette { font-size: 10.5px; color: var(--text3); white-space: nowrap; }
+  .yf-etat { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius-card);
+             background: var(--surface); color: var(--muted); font-size: var(--fs-small); margin: 0; }
+  .yf-etat.erreur { border-color: var(--danger-soft); background: var(--danger-soft); color: var(--danger-ink); }
+  .yf-pied { font-size: 11px; color: var(--muted); line-height: 1.7; margin-top: 4px; }
 
-    /* ─── Saisie des exceptions ──────────────────────────────────────────── */
-    /* ⚠ CES CLASSES N'EXISTAIENT NULLE PART — relevé en review. `yf-ok` et
-       `yf-ko` rendaient un texte IDENTIQUE : l'hôte ne distinguait pas
-       « Période déclarée » d'un refus. Et `yf-alerte` porte le bandeau de dette
-       du calendrier scolaire, qui s'affichait comme un paragraphe ordinaire. */
-    .yf-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
-               padding: 12px; background: var(--bg2); border-radius: var(--radius);
-               margin-bottom: 12px; }
-    .yf-form .yf-champ { flex: 1 1 130px; }
-    .yf-form input { width: 100%; }
-    .yf-liste { list-style: none; margin: 0; padding: 0; font-size: 12px; }
-    .yf-liste li { display: flex; gap: 10px; align-items: baseline; padding: 8px 0;
-                   border-bottom: 0.5px solid var(--border); flex-wrap: wrap; }
-    .yf-liste li:last-child { border-bottom: none; }
-    .yf-motif-texte { flex: 1 1 160px; color: var(--text2); }
-    .yf-sup { background: none; border: none; color: #B02A37; cursor: pointer;
-              font-size: 11px; padding: 2px 6px; border-radius: 4px; font-family: inherit; }
-    .yf-sup:hover { background: #FDECEA; }
-    .yf-ok { font-size: 12px; color: #0F7B3E; padding: 8px 0; font-weight: 500; }
-    .yf-ko { font-size: 12px; color: #842029; padding: 8px 0; font-weight: 500; }
-    .yf-alerte { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius);
-                 background: #FFF3CD; color: #856404; font-size: 12px; line-height: 1.6; }
-
-    .yf-etat { padding: 20px; border: 0.5px solid var(--border); border-radius: var(--radius-lg);
-               background: var(--bg); color: var(--text2); font-size: 13px; }
-    .yf-etat.erreur { border-color: #F5C2C7; background: #FFF5F5; color: #842029; }
-    .yf-pied { font-size: 10.5px; color: var(--text3); line-height: 1.7; margin-top: 4px; }
-
-    @media (max-width: 640px) {
-      .yf-barre { gap: 8px; }
-      .yf-champ { flex: 1 1 46%; }
-      .yf-champ select, .yf-champ input { min-width: 0; width: 100%; }
-      .yf-cartes { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
-      .yf-valeur { font-size: 18px; }
-      .yf-bloc { padding: 13px; }
-    }
-  </style>
+  @media (max-width: 640px) {
+    .yf-barre { gap: 8px; }
+    .yf-champ { flex: 1 1 46%; }
+    .yf-champ .out-saisie { min-width: 0; width: 100%; }
+    .yf-bloc { padding: 13px; }
+  }
+</style>
 </head>
-<body class="police-v5">
-<!-- ⚠ LE CONTRAT DE MISE EN PAGE EST `.layout > .sidebar + .main`, ET L'ID
-     DOIT ETRE `sidebar` : `components/sidebar.js` fait
-     `document.getElementById('sidebar')` puis `if (!sidebar) return`.
-     Ces pages portaient `sidebar-root` et n'avaient pas le conteneur : le menu
-     n'etait jamais rendu, SANS la moindre erreur, et l'app devenait un
-     cul-de-sac des qu'on y entrait. Mesure du 14 septembre 2026. -->
-<div class="layout">
-<div class="sidebar" id="sidebar"></div>
-<div class="main">
-<!-- ⚠ `.content` PORTE LE DEFILEMENT, ET C'EST LA MOITIE DU CONTRAT.
-     `.layout` est en `height:100vh; overflow:hidden` et `.main` aussi
-     (public/style.css) : sans `.content` — qui est le seul a porter
-     `flex:1; overflow-y:auto` — tout ce qui depasse la fenetre est TRONQUE,
-     sans barre de defilement. Ces pages vivaient hors du conteneur, donc le
-     body scrollait ; en les y ramenant pour retrouver le menu, on heritait
-     aussi de sa contrainte de hauteur. Releve en review le 14 septembre 2026,
-     avant livraison. `.content` apporte au passage le retrait de 24 px des
-     autres pages : `.header` n'est style NULLE PART, le titre etait colle au
-     rail de la sidebar. -->
-<div class="content">
-  <div class="header">
-    <h1>Tarification dynamique</h1>
-    <p class="subtitle">Ce qui s’est passé, où on en est, et ce qui est normal</p>
+<body class="out-page out-pont">
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
   </div>
+</header>
+
+<main class="page out">
+  <div class="out-tete">
+    <div class="out-tete__titre">
+      <h1 class="h1" data-i18n="yfs.titre"></h1>
+      <p class="out-sous" data-i18n="yfs.sous_titre"></p>
+    </div>
+  </div>
+  <nav class="seg out-yf" data-yf-onglets data-i18n-attr="aria-label:yfnav.aria"></nav>
 
   <!-- ⚠ LE CADRAGE PAR DEFAUT EST PROSPECTIF — decision de Thierry, spec §7.1.
        Au 20 decembre, l'annee en cours n'interesse plus le pilotage : les
-       decisions portent sur les mois qui sont devant. Une app qui ouvre sur le
-       realise de l'annee ouvre sur ce qu'on ne peut plus changer. -->
-  <div class="yf-onglets" role="tablist">
-    <button class="yf-onglet actif" id="yf-vue-pilotage" role="tab" data-vue="pilotage">Pilotage</button>
-    <button class="yf-onglet" id="yf-vue-bilan" role="tab" data-vue="bilan">Bilan</button>
-    <button class="yf-onglet" id="yf-vue-exploration" role="tab" data-vue="exploration">Exploration</button>
+       decisions portent sur les mois qui sont devant. -->
+  <div class="seg out-onglets yf-onglets" role="tablist" data-i18n-attr="aria-label:yfs.vues">
+    <button type="button" class="seg__btn is-on yf-onglet actif" id="yf-vue-pilotage" role="tab" data-vue="pilotage" data-i18n="yfs.vue_pilotage"></button>
+    <button type="button" class="seg__btn yf-onglet" id="yf-vue-bilan" role="tab" data-vue="bilan" data-i18n="yfs.vue_bilan"></button>
+    <button type="button" class="seg__btn yf-onglet" id="yf-vue-exploration" role="tab" data-vue="exploration" data-i18n="yfs.vue_exploration"></button>
   </div>
 
   <div class="yf-barre">
     <div class="yf-champ">
-      <label for="yf-bien">Logement</label>
-      <select id="yf-bien"></select>
+      <label for="yf-bien" data-i18n="yfm.logement"></label>
+      <select id="yf-bien" class="out-saisie"></select>
     </div>
     <div class="yf-champ yf-si-exploration">
-      <label for="yf-debut">Du</label>
-      <input type="date" id="yf-debut">
+      <label for="yf-debut" data-i18n="yfs.du"></label>
+      <input type="date" id="yf-debut" class="out-saisie">
     </div>
     <div class="yf-champ yf-si-exploration">
-      <label for="yf-fin">Au</label>
-      <input type="date" id="yf-fin">
+      <label for="yf-fin" data-i18n="yfs.au"></label>
+      <input type="date" id="yf-fin" class="out-saisie">
     </div>
     <div class="yf-champ yf-si-exploration">
-      <label for="yf-granularite">Détail</label>
-      <select id="yf-granularite">
-        <option value="mois" selected>Par mois</option>
-        <option value="annee">Par année</option>
-        <option value="jour">Par jour</option>
+      <label for="yf-granularite" data-i18n="yfs.detail"></label>
+      <select id="yf-granularite" class="out-saisie">
+        <option value="mois" selected data-i18n="yfs.par_mois"></option>
+        <option value="annee" data-i18n="yfs.par_annee"></option>
+        <option value="jour" data-i18n="yfs.par_jour"></option>
       </select>
     </div>
     <div class="yf-champ yf-si-bilan">
-      <label for="yf-annee">Année</label>
-      <select id="yf-annee"></select>
+      <label for="yf-annee" data-i18n="yfs.annee"></label>
+      <select id="yf-annee" class="out-saisie"></select>
     </div>
-    <button class="btn" id="yf-charger">Afficher</button>
+    <button type="button" class="btn btn--primary" id="yf-charger" data-i18n="yfs.afficher"></button>
   </div>
 
   <div id="yf-contenu"></div>
-</div><!-- .content -->
-</div>
+</main>
 
-</div><!-- .layout -->
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
 
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
 <script type="module">
   // ⚠ LOT 4.2 — L'ECRAN DE RESTITUTION. LECTURE SEULE INTEGRALE : cette page
   // n'ecrit rien, nulle part. La saisie des exceptions viendra au lot 4.3.
@@ -220,40 +180,38 @@
   // SOURCE UNIQUE : /api/yield (lot 4.1). Aucune autre lecture serveur, sauf la
   // liste des logements du selecteur.
   import { requireAuth } from '/components/auth-guard.js'
-  import { renderSidebar } from '/components/sidebar.js'
-  import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { compteCourant, enteteCompte, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
   import { sansArchives } from '/shared/biens-vivants.js'
-  import { supabase } from '/shared/supabase.js'
+  import { supabase, signOut } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
+  import { renderOnboardingBanner } from '/components/onboarding-banner.js'
+  import { monterCoquille, tHtml, brut, jourIso, moisIso } from '/shared/page-outil.js'
+  import { monterOngletsYieldFlow } from '/shared/yieldflow-onglets.js'
   import { motif, nomSegment, refus, MOTIFS, DRAPEAUX_ECRAN, NIVEAUX_REFERENCE } from '/shared/yield-motifs.js'
 
   initErrorHandler()
 
   let session = null
   const el = id => document.getElementById(id)
+  const t = (k, v) => I18n.t(k, v)
+  // Une traduction posee en HTML : chaque valeur est echappee, sauf brut().
+  const th = (k, v) => tHtml(t, k, v)
 
   // ─── Formatage ────────────────────────────────────────────────────────────
+  // Dans la langue de l'hote ; en francais, le rendu d'avant.
   const euros = v => v == null ? null :
-    new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR',
-      maximumFractionDigits: 0 }).format(v)
+    I18n.num(v, { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
   const eurosPrecis = v => v == null ? null :
-    new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v)
-  const pourcent = v => v == null ? null : `${(v * 100).toFixed(1).replace('.', ',')} %`
-  const nombre = v => v == null ? null : new Intl.NumberFormat('fr-FR').format(v)
-  const jours = v => v == null ? null : `${new Intl.NumberFormat('fr-FR').format(v)} j`
+    I18n.num(v, { style: 'currency', currency: 'EUR' })
+  const pourcent = v => v == null ? null : t('yfm.pct', { v: I18n.num(v * 100, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })
+  const nombre = v => v == null ? null : I18n.num(v)
+  const jours = v => v == null ? null : t('yfs.jours_court', { v: I18n.num(v) })
 
-  const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
-    'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  // « 2026 », « octobre 2026 », « 4 octobre 2026 » : dans la langue de l'hote.
   function nomPeriode (cle) {
     if (/^\d{4}$/.test(cle)) return cle
-    if (/^\d{4}-\d{2}$/.test(cle)) {
-      const [a, m] = cle.split('-')
-      return `${MOIS[Number(m) - 1]} ${a}`
-    }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(cle)) {
-      const [a, m, j] = cle.split('-')
-      return `${Number(j)} ${MOIS[Number(m) - 1]} ${a}`
-    }
+    if (/^\d{4}-\d{2}$/.test(cle)) return moisIso(I18n, cle)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cle)) return jourIso(I18n, cle)
     return cle
   }
 
@@ -332,9 +290,18 @@
   }
 
   async function init () {
+    await I18n.init()
     session = await requireAuth()
     if (!session) return
-    renderSidebar('yield').catch(e => console.error('[yield] sidebar', e))
+    document.addEventListener('i18n:changed', () => location.reload())
+    monterCoquille({
+      HSNav, I18n, session, titre: t('yfs.titre_onglet'),
+      compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
+      deconnexion: () => signOut()
+    })
+    monterOngletsYieldFlow(document.querySelector('[data-yf-onglets]'), 'synthese', t)
+    // Le bandeau d'incitation que l'ancienne barre latérale posait : gardé.
+    renderOnboardingBanner().catch(() => {})
 
     const an = new Date().getFullYear()
     el('yf-annee').innerHTML = [an, an - 1, an - 2]
@@ -379,6 +346,7 @@
   function appliquerVue () {
     for (const b of document.querySelectorAll('.yf-onglet')) {
       b.classList.toggle('actif', b.dataset.vue === vue)
+      b.classList.toggle('is-on', b.dataset.vue === vue)
       b.setAttribute('aria-selected', b.dataset.vue === vue ? 'true' : 'false')
     }
     for (const e of document.querySelectorAll('.yf-si-exploration')) {
@@ -414,8 +382,7 @@
     const trop = periodes > PERIODES_LISIBLES
     el('yf-charger').disabled = trop
     if (trop) {
-      etat(`${periodes} périodes demandées : c’est trop pour un seul écran, et trop `
-        + `pour être lu. Réduisez la fenêtre, ou choisissez un détail moins fin.`)
+      etat(t('yfs.trop_de_periodes', { n: periodes }))
     }
   }
 
@@ -429,12 +396,12 @@
     let q = sansArchives(supabase.from('properties').select('id, name')).order('name')
     if (compte) q = q.eq('user_id', compte)
     const { data, error } = await q
-    if (error) { etat('Impossible de lire la liste des logements.', true); return false }
+    if (error) { etat(t('yfm.biens_illisibles'), true); return false }
     // ⚠ UNE LISTE VIDE SE DIT. Un membre au périmètre restreint peut n'avoir
     // aucun logement visible : sans message, la page resterait blanche, ce qui
     // se lit comme une panne.
     if (!data || !data.length) {
-      etat('Aucun logement accessible sur ce compte.')
+      etat(t('yfm.aucun_bien'))
       el('yf-charger').disabled = true
       return false
     }
@@ -450,7 +417,7 @@
     // réponse de la dernière demande s'affiche.
     const jeton = ++enCours
     el('yf-charger').disabled = true
-    etat('Lecture du cœur de données…')
+    etat(t('yfs.lecture'))
     const f = fenetreCourante()
     const p = new URLSearchParams({
       property_id: el('yf-bien').value,
@@ -466,7 +433,7 @@
       // Une requête obsolète qui échoue ne doit pas réactiver le bouton
       // pendant qu'une requête plus récente est en vol.
       if (jeton === enCours) {
-        etat(`Lecture impossible : ${e.message}`, true)
+        etat(t('yfs.lecture_impossible', { message: e.message }), true)
         el('yf-charger').disabled = false
       }
       return false
@@ -480,7 +447,7 @@
     // échecs : sur `!r.ok` il affichait l'erreur et retournait sans toucher
     // `yf-contenu`. L'appelant annonçait alors « la référence a été
     // recalculée » pendant que l'écran gardait les chiffres d'AVANT.
-    if (!r.ok) { etat(data?.error || `Erreur ${r.status}`, true); return false }
+    if (!r.ok) { etat(data?.error || t('yfs.erreur_statut', { statut: r.status }), true); return false }
     el('yf-contenu').innerHTML = rendre(data)
     bienAffiche = data.bien.id
     brancherExceptions()
@@ -516,15 +483,15 @@
   async function declarerException (ev) {
     ev.preventDefault()
     if (bienAffiche && bienAffiche !== el('yf-bien').value) {
-      retourExc('Le logement sélectionné a changé : affichez-le d’abord.', true); return
+      retourExc(t('yfs.exc_logement_change'), true); return
     }
     const debut = el('yf-exc-debut').value
     const fin = el('yf-exc-fin').value
     const motif = el('yf-exc-motif').value.trim()
-    if (!debut || !fin || !motif) { retourExc('Remplissez les trois champs.', true); return }
-    if (fin < debut) { retourExc('La date de fin précède la date de début.', true); return }
+    if (!debut || !fin || !motif) { retourExc(t('yfs.exc_trois_champs'), true); return }
+    if (fin < debut) { retourExc(t('yfs.exc_fin_avant'), true); return }
     el('yf-exc-ajouter').disabled = true
-    retourExc('Enregistrement…')
+    retourExc(t('cp.enregistrement'))
     try {
       const r = await fetch('/api/yield-exceptions', {
         method: 'POST',
@@ -536,12 +503,9 @@
       if (!r.ok) { retourExc(refus(data?.error), true); return }
       // Le rechargement complet EST la preuve : les chiffres changent.
       const rendu = await charger()
-      retourExc(rendu
-        ? 'Période déclarée — la référence a été recalculée.'
-        : 'Période déclarée, mais l’écran n’a pas pu être rafraîchi : les chiffres'
-          + ' ci-dessus sont ceux d’AVANT. Rechargez la page.', !rendu)
+      retourExc(t(rendu ? 'yfs.exc_declaree' : 'yfs.exc_declaree_sans_rafraichir'), !rendu)
     } catch (e) {
-      retourExc(`Enregistrement impossible : ${e.message}`, true)
+      retourExc(t('yfs.exc_enregistrement_impossible', { message: e.message }), true)
     } finally {
       const b = el('yf-exc-ajouter')
       if (b) b.disabled = false
@@ -551,12 +515,12 @@
   async function supprimerException (id) {
     if (!id) return
     if (bienAffiche && bienAffiche !== el('yf-bien').value) {
-      retourExc('Le logement sélectionné a changé : affichez-le d’abord.', true); return
+      retourExc(t('yfs.exc_logement_change'), true); return
     }
     // Une exception est une DÉCLARATION, pas une archive : la corriger fait
     // partie de l'usage normal. On confirme quand même — elle change les
     // chiffres de référence.
-    if (!window.confirm('Supprimer cette période ? La référence sera recalculée.')) return
+    if (!window.confirm(t('yfs.exc_confirmer'))) return
     try {
       const p = new URLSearchParams({ property_id: bienAffiche, id })
       const r = await fetch(`/api/yield-exceptions?${p}`, {
@@ -566,12 +530,9 @@
       const data = await r.json()
       if (!r.ok) { retourExc(refus(data?.error), true); return }
       const rendu = await charger()
-      retourExc(rendu
-        ? 'Période supprimée — la référence a été recalculée.'
-        : 'Période supprimée, mais l’écran n’a pas pu être rafraîchi : les chiffres'
-          + ' ci-dessus sont ceux d’AVANT. Rechargez la page.', !rendu)
+      retourExc(t(rendu ? 'yfs.exc_supprimee' : 'yfs.exc_supprimee_sans_rafraichir'), !rendu)
     } catch (e) {
-      retourExc(`Suppression impossible : ${e.message}`, true)
+      retourExc(t('yfs.exc_suppression_impossible', { message: e.message }), true)
     }
   }
 
@@ -604,12 +565,10 @@
     const v = d.sources.vacances
     const alertes = []
     if (v && !v.complete) {
-      alertes.push(`<li><strong>Calendrier scolaire incomplet.</strong> ${ech(v.manque || '')}
-        Les périodes concernées sont classées « hors vacances » : leur référence est faussée.</li>`)
+      alertes.push(`<li>${th('yfs.src_scolaire', { manque: v.manque || '' })}</li>`)
     }
     if (!d.sources.reservations_du_bien) {
-      alertes.push(`<li><strong>Aucune réservation sur ce logement.</strong>
-        Tous les indicateurs ci-dessous sont vides pour cette raison, et non parce que rien ne s’est vendu.</li>`)
+      alertes.push(`<li>${th('yfs.src_aucune_resa')}</li>`)
     }
     // ⚠ LE SIGNAL LE PLUS ACTIONNABLE DU PILOTAGE, ET IL ETAIT NOYE.
     // Un hôte dont huit des douze prochains mois sont fermés doit le savoir
@@ -620,17 +579,11 @@
       (a.drapeaux || []).includes('periode_fermee_a_la_vente'))
     if (fermes.length) {
       const liste = fermes.slice(0, 4).map(a => nomPeriode(a.periode)).join(', ')
-      alertes.push(`<li><strong>${fermes.length} période(s) fermée(s) à la vente</strong>
-        sur ${d.a_date.length} — ${ech(liste)}${fermes.length > 4 ? '…' : ''}.
-        ${vue === 'bilan'
-          ? `Ces périodes n’étaient pas vendables : leur zéro n’est pas un résultat commercial.`
-          : `Aucun prix ne peut s’y vendre : c’est le premier geste à faire avant toute
-             décision tarifaire.`}</li>`)
+      alertes.push(`<li>${th('yfs.src_fermees', { n: fermes.length, total: d.a_date.length, liste: `${liste}${fermes.length > 4 ? '…' : ''}` })}
+        ${th(vue === 'bilan' ? 'yfs.src_fermees_bilan' : 'yfs.src_fermees_pilotage')}</li>`)
     }
     if (d.sources.jours_hors_reference) {
-      alertes.push(`<li><strong>${nombre(d.sources.jours_hors_reference)} jour(s) hors référence.</strong>
-        Périodes que vous avez déclarées exceptionnelles : elles comptent dans le réalisé,
-        jamais dans ce qui est « normal ».</li>`)
+      alertes.push(`<li>${th('yfs.src_hors_reference', { n: Number(d.sources.jours_hors_reference), v: nombre(d.sources.jours_hors_reference) })}</li>`)
     }
     // ⚠ TOUT CE QUI N'A PAS TROUVÉ SA PLACE AILLEURS S'AFFICHE ICI. Un motif
     // sans chemin d'affichage est perdu aussi sûrement qu'un motif non traduit.
@@ -640,24 +593,18 @@
     ])].filter(c => ['hors_fenetre_du_contexte', 'date_invalide', 'fenetre_invalide',
       'segment_non_reconnu', 'periode_trop_longue', 'parametres_invalides'].includes(c))
     if (restes.length) {
-      alertes.push(`<li><strong>Limites de lecture.</strong> ${restes.map(c => badgeMotif(c)).join(' ')}</li>`)
+      alertes.push(`<li>${th('yfs.src_limites')} ${restes.map(c => badgeMotif(c)).join(' ')}</li>`)
     }
     const cadrage = vue === 'pilotage'
-      ? `<strong>Les 12 prochains mois</strong> — ce sur quoi vous pouvez encore agir`
-      : (vue === 'bilan'
-        ? `<strong>Bilan ${d.fenetre.debut.slice(0, 4)}</strong> — ce qui est joué`
-        : `Fenêtre libre`)
+      ? th('yfs.cadrage_pilotage')
+      : (vue === 'bilan' ? th('yfs.cadrage_bilan', { annee: d.fenetre.debut.slice(0, 4) }) : th('yfs.cadrage_libre'))
     return `<div class="yf-bloc">
       <h2>${ech(d.bien.name)}</h2>
-      <p class="yf-sous">${cadrage} · ${nomPeriode(d.fenetre.debut)} →
-        ${nomPeriode(d.fenetre.fin)} · portefeuille observé au
-        ${nomPeriode(d.fenetre.pivot)} · référence sur ${d.historique.ans} ans</p>
+      <p class="yf-sous">${th('yfs.src_sous', { cadrage: brut(cadrage), debut: nomPeriode(d.fenetre.debut), fin: nomPeriode(d.fenetre.fin), pivot: nomPeriode(d.fenetre.pivot), ans: d.historique.ans })}</p>
       ${alertes.length ? `<ul class="yf-explications">${alertes.join('')}</ul>` : ''}
       <p class="yf-pied">
-        ${nombre(d.sources.reservations_du_bien)} réservation(s) de ce logement ·
-        ${nombre(d.reference.nuits_vues)} nuit(s) d’historique ·
-        capacité ${d.bien.capacity ? `${d.bien.capacity} personne(s)` : 'non renseignée'}
-        ${d.bien.prix_minimum ? ` · prix plancher ${eurosPrecis(d.bien.prix_minimum / 100)}` : ''}
+        ${th('yfs.src_pied', { resas: nombre(d.sources.reservations_du_bien), nuits: nombre(d.reference.nuits_vues), capacite: d.bien.capacity ? t('yfs.capacite_personnes', { n: d.bien.capacity }) : t('yfs.capacite_inconnue') })}
+        ${d.bien.prix_minimum ? ` · ${th('yfs.prix_plancher', { prix: eurosPrecis(d.bien.prix_minimum / 100) })}` : ''}
       </p>
     </div>`
   }
@@ -672,9 +619,8 @@
       ? d.realise.filter(r => situation(r.periode, d.fenetre.aujourdhui) !== 'periode_a_venir')
       : d.realise
     if (!source.length) {
-      return bloc('Réalisé', 'Ce qui s’est vendu',
-        `<p class="yf-etat">Aucune période écoulée dans cette fenêtre —
-        tout est devant vous, dans « À date ».</p>`)
+      return bloc(th('yfs.realise'), th('yfs.realise_sous_court'),
+        `<p class="yf-etat">${th('yfs.realise_vide')}</p>`)
     }
     // ⚠ LES DRAPEAUX SE POSENT UNE FOIS PAR LIGNE, PAS PAR CELLULE.
     // Première version : « Estimé » sur chaque colonne qui divise — 66 badges
@@ -722,20 +668,19 @@
     const total = ecoulees.reduce((s, r) => s + (r.ca || 0), 0)
     const nuitees = ecoulees.reduce((s, r) => s + (r.nuitees || 0), 0)
     const aVenir = source.length - ecoulees.length
-    return bloc('Réalisé', 'Ce qui s’est vendu, et ce que ça valait l’an dernier',
+    return bloc(th('yfs.realise'), th('yfs.realise_sous'),
       `<div class="yf-scroll"><table class="yf-table">
         <thead><tr>
-          <th>Période</th><th>CA</th><th>vs N-1</th><th>Nuitées</th>
-          <th>Occupation</th><th>vs N-1</th><th>Prix moyen</th><th>RevPAR</th>
-          <th>Délai médian</th><th>Limites</th>
+          <th>${th('yfs.col_periode')}</th><th>${th('yfs.col_ca')}</th><th>${th('yfs.col_vs_n1')}</th><th>${th('yfs.col_nuitees')}</th>
+          <th>${th('yfs.col_occupation')}</th><th>${th('yfs.col_vs_n1')}</th><th>${th('yfs.col_prix_moyen')}</th><th>${th('yfs.col_revpar')}</th>
+          <th>${th('yfs.col_delai_median')}</th><th>${th('yfs.col_limites')}</th>
         </tr></thead>
         <tbody>${lignes}</tbody>
       </table></div>
       <p class="yf-pied">${ecoulees.length
-        ? `Périodes écoulées : <strong>${euros(total)}</strong> sur ${nombre(nuitees)} nuitée(s).`
-        : `Aucune période écoulée dans cette fenêtre — un total n’aurait rien à additionner.`}${
-        aVenir ? ` ${aVenir} période(s) en cours ou à venir, exclues du total :
-      leur portefeuille se lit dans « À date ».` : ''}
+        ? th('yfs.realise_total', { total: euros(total), nuitees: nombre(nuitees) })
+        : th('yfs.realise_sans_total')}${
+        aVenir ? ` ${th('yfs.realise_a_venir', { n: aVenir })}` : ''}
       ${legendeEstimee(source)}${legendePersonnes(source)}</p>`)
   }
 
@@ -758,7 +703,7 @@
   function blocPickup (d) {
     const avenir = d.a_date.filter(a => a.a_date || a.a_date_n1)
     if (!avenir.length) {
-      return bloc('À date', 'Le portefeuille déjà vendu', `<p class="yf-etat">Rien à comparer sur cette fenêtre.</p>`)
+      return bloc(th('yfs.a_date'), th('yfs.a_date_sous_court'), `<p class="yf-etat">${th('yfs.a_date_vide')}</p>`)
     }
     // ⚠ LES DRAPEAUX QUI DISQUALIFIENT LE N-1 DOIVENT NUANCER SES COLONNES.
     // `pickup.js` annule `ecart` et `variation` quand le N-1 est aveugle,
@@ -772,7 +717,7 @@
       const n = a.a_date, n1 = a.a_date_n1
       const dq = (a.drapeaux || []).filter(x => DISQUALIFIENT.includes(x))
       const delai = a.delai_jours == null ? ''
-        : (a.delai_jours > 0 ? `à ${a.delai_jours} j du début` : 'période commencée')
+        : (a.delai_jours > 0 ? t('yfs.a_x_jours', { n: a.delai_jours }) : t('yfs.periode_commencee'))
       // Ce qui a été écarté du portefeuille, avec son dénominateur : « 6 sur 9 »
       // se lit, « 6 » ne se lit pas. `pickup.js` a été corrigé en review pour
       // fournir ce dénominateur — encore faut-il l'afficher.
@@ -780,7 +725,7 @@
         ? (a.ecartes_n1.sans_date_de_vente || 0) + (a.ecartes_n1.date_de_vente_non_fiable || 0)
         : 0
       return `<tr>
-        <td>${nomPeriode(a.periode)}<div class="yf-pied">${delai}</div></td>
+        <td>${ech(nomPeriode(a.periode))}<div class="yf-pied">${ech(delai)}</div></td>
         <td>${cell(euros(n ? n.ca : null))}</td>
         <td>${dq.length ? `<span class="yf-inconnu">${badges(dq)}</span>`
                         : cell(euros(n1 ? n1.ca : null))}</td>
@@ -790,24 +735,20 @@
                         : cell(nombre(n1 ? n1.nuitees : null))}</td>
         <td>${badges((a.drapeaux || []).filter(x =>
           x !== 'portefeuille_n1_reconstruit' && !DISQUALIFIENT.includes(x)))}${
-          perdues ? `<div class="yf-pied">${perdues} réservation(s) N-1 écartée(s) sur ${a.candidats_n1 || perdues}</div>` : ''}</td>
+          perdues ? `<div class="yf-pied">${th('yfs.n1_ecartees', { n: perdues, sur: a.candidats_n1 || perdues })}</div>` : ''}</td>
       </tr>`
     }).join('')
-    return bloc('À date', `Ce qui est déjà vendu, contre le même délai l’an dernier`,
+    return bloc(th('yfs.a_date'), th('yfs.a_date_sous'),
       `<div class="yf-scroll"><table class="yf-table">
         <thead><tr>
-          <th>Période</th><th>CA à date</th><th>CA N-1</th><th>Écart</th>
-          <th>Nuitées</th><th>N-1</th><th>Ce qu’il faut savoir</th>
+          <th>${th('yfs.col_periode')}</th><th>${th('yfs.col_ca_a_date')}</th><th>${th('yfs.col_ca_n1')}</th><th>${th('yfs.col_ecart')}</th>
+          <th>${th('yfs.col_nuitees')}</th><th>${th('yfs.col_n1')}</th><th>${th('yfs.col_a_savoir')}</th>
         </tr></thead>
         <tbody>${lignes}</tbody>
       </table></div>
       <ul class="yf-explications">
-        <li><strong>Le N-1 est reconstruit, jamais observé</strong> — sur toutes les lignes,
-        c’est pourquoi ce n’est pas répété dans la colonne. Une réservation vendue avant
-        cette date puis annulée depuis a disparu du portefeuille de comparaison :
-        le N-1 est sous-estimé, donc la progression affichée est flattée.</li>
-        <li><strong>« Fermé à la vente » n’est pas « rien vendu ».</strong> Un calendrier
-        fermé explique un zéro : ce n’est pas un échec commercial, c’est une décision.</li>
+        <li>${th('yfs.a_date_expl_1')}</li>
+        <li>${th('yfs.a_date_expl_2')}</li>
       </ul>`)
   }
 
@@ -815,8 +756,8 @@
   function blocReference (d) {
     const segs = Object.entries(d.reference.par_segment || {})
     if (!segs.length) {
-      return bloc('Référence', 'Ce qui est normal pour ce logement',
-        `<p class="yf-etat">${badgeMotif('aucun_historique')} Pas assez d’historique.</p>`)
+      return bloc(th('yfs.reference'), th('yfs.reference_sous_court'),
+        `<p class="yf-etat">${badgeMotif('aucun_historique')} ${th('yfs.pas_assez_historique')}</p>`)
     }
     const lignes = segs
       .sort((a, b) => b[1].echantillon - a[1].echantillon)
@@ -834,25 +775,19 @@
           <td>${nombre(v.reservations)}</td>
         </tr>`
       }).join('')
-    return bloc('Référence', `Prix médian par type de période, sur ${d.historique.ans} ans`,
+    return bloc(th('yfs.reference'), th('yfs.reference_sous', { ans: d.historique.ans }),
       `<div class="yf-scroll"><table class="yf-table">
         <thead><tr>
-          <th>Type de période</th><th>Prix médian</th><th>Étendue</th>
-          <th>Nuits</th><th>Réservations</th>
+          <th>${th('yfs.col_type_periode')}</th><th>${th('yfs.col_prix_median')}</th><th>${th('yfs.col_etendue')}</th>
+          <th>${th('yfs.col_nuits')}</th><th>${th('yfs.col_reservations')}</th>
         </tr></thead>
         <tbody>${lignes}</tbody>
       </table></div>
       <ul class="yf-explications">
-        <li><strong>Médiane, pas moyenne.</strong> Une nuit bradée ne déplace pas la médiane.</li>
-        <li><strong>Seuil : ${d.reference.seuil} nuits et ${d.reference.seuil_reservations} réservations.</strong>
-        En dessous, la référence se tait : une médiane calculée sur si peu de nuits est un
-        accident, pas une norme. (Ces deux seuils viennent du moteur — ils ne sont recopiés
-        nulle part.)</li>
-        ${d.reference.nuits_long_sejour ? `<li><strong>${nombre(d.reference.nuits_long_sejour)} nuit(s)
-        de longs séjours</strong> écartées : un tarif dégressif sur quatre semaines fabriquerait la norme
-        au lieu de la mesurer.</li>` : ''}
-        ${d.reference.nuits_sans_prix ? `<li><strong>${nombre(d.reference.nuits_sans_prix)} nuit(s)
-        sans prix connu</strong> écartées du calcul.</li>` : ''}
+        <li>${th('yfs.ref_expl_mediane')}</li>
+        <li>${th('yfs.ref_expl_seuil', { nuits: d.reference.seuil, resas: d.reference.seuil_reservations })}</li>
+        ${d.reference.nuits_long_sejour ? `<li>${th('yfs.ref_expl_longs', { n: nombre(d.reference.nuits_long_sejour) })}</li>` : ''}
+        ${d.reference.nuits_sans_prix ? `<li>${th('yfs.ref_expl_sans_prix', { n: nombre(d.reference.nuits_sans_prix) })}</li>` : ''}
       </ul>`)
   }
 
@@ -863,8 +798,8 @@
   function blocRythme (d) {
     const segs = Object.entries((d.courbe && d.courbe.par_segment) || {})
     if (!segs.length) {
-      return bloc('Rythme de vente', 'Quand une nuit se vend',
-        `<p class="yf-etat">${badgeMotif('aucun_historique')} Pas assez d’historique daté.</p>`)
+      return bloc(th('yfs.rythme'), th('yfs.rythme_sous_court'),
+        `<p class="yf-etat">${badgeMotif('aucun_historique')} ${th('yfs.pas_assez_historique_date')}</p>`)
     }
     const paliers = d.courbe.paliers.filter(j => j > 0)
     const lignes = segs
@@ -881,26 +816,20 @@
         <td>${v.nuits_sans_date_fiable ? badgeMotif('date_de_vente_non_fiable') : ''}${
           v.non_calculable ? badgeMotif(v.non_calculable) : ''}</td>
       </tr>`).join('')
-    return bloc('Rythme de vente', 'Part des ventes déjà faites, tant de jours avant la nuit',
+    return bloc(th('yfs.rythme'), th('yfs.rythme_sous'),
       `<div class="yf-scroll"><table class="yf-table">
         <thead><tr>
-          <th>Type de période</th>
-          ${paliers.map(j => `<th>${j} j avant</th>`).join('')}
-          <th>Délai médian</th><th>Nuits datées</th><th>Limites</th>
+          <th>${th('yfs.col_type_periode')}</th>
+          ${paliers.map(j => `<th>${th('yfs.j_avant', { n: j })}</th>`).join('')}
+          <th>${th('yfs.col_delai_median')}</th><th>${th('yfs.col_nuits_datees')}</th><th>${th('yfs.col_limites')}</th>
         </tr></thead>
         <tbody>${lignes}</tbody>
       </table></div>
       <ul class="yf-explications">
-        <li><strong>Ce n’est pas un taux d’occupation.</strong> C’est la part des ventes
-        <em>finales</em> déjà réalisées à ce délai : « 36 % à 30 jours » veut dire qu’un tiers
-        de ce qui se vendra était vendu un mois avant.</li>
-        <li><strong>Seules les dates de vente fiables comptent.</strong> Une date recréée lors
-        d’une migration placerait toutes les ventes au même jour et écraserait la courbe.
-        ${d.courbe.nuits_sans_date_fiable
-          ? `<strong>${nombre(d.courbe.nuits_sans_date_fiable)} nuit(s)</strong> sont dans ce cas.`
-          : ''}</li>
-        <li>Un segment sous le seuil ne montre pas de courbe : un rythme calculé sur
-        quelques nuits est une anecdote.</li>
+        <li>${th('yfs.rythme_expl_1')}</li>
+        <li>${th('yfs.rythme_expl_2')}
+        ${d.courbe.nuits_sans_date_fiable ? th('yfs.rythme_expl_2_n', { n: nombre(d.courbe.nuits_sans_date_fiable) }) : ''}</li>
+        <li>${th('yfs.rythme_expl_3')}</li>
       </ul>`)
   }
 
@@ -908,8 +837,8 @@
   function blocProjection (d) {
     const utiles = d.projection.filter(p => p.prix_attendu_moyen != null || p.non_calculable.length)
     if (!utiles.length) {
-      return bloc('Projection', 'Ce que l’historique laisse attendre',
-        `<p class="yf-etat">Rien à projeter sur cette fenêtre.</p>`)
+      return bloc(th('yfs.projection'), th('yfs.projection_sous'),
+        `<p class="yf-etat">${th('yfs.projection_vide')}</p>`)
     }
     const lignes = utiles.map(p => {
       const avance = p.avance_retard
@@ -919,18 +848,16 @@
       // et jamais importé : seul un compteur nu survivait.
       const niv = NIVEAUX_REFERENCE.segment_x_jour
       const replis = p.jours_replies
-        ? `<div class="yf-pied" title="${ech(niv.quoi)}">${p.jours_replies}/${p.jours_projetes}
-           jour(s) sur ${ech(niv.titre.toLowerCase())}</div>` : ''
+        ? `<div class="yf-pied" title="${ech(niv.quoi)}">${th('yfs.jours_replies', { n: p.jours_replies, sur: p.jours_projetes, niveau: niv.titre.toLowerCase() })}</div>` : ''
       return `<tr>
-        <td>${nomPeriode(p.periode)}</td>
+        <td>${ech(nomPeriode(p.periode))}</td>
         <td>${cell(eurosPrecis(p.prix_attendu_moyen))}${replis}</td>
         <td>${cell(p.part_attendue_a_ce_delai == null ? null : pourcent(p.part_attendue_a_ce_delai))}</td>
         <td>${p.nuitees_finales_extrapolees == null
           ? cell(null)
           : `<strong>${nombre(p.nuitees_finales_extrapolees)}</strong>${
               p.nuitees_finales_min != null
-                ? `<div class="yf-fourchette">de ${nombre(p.nuitees_finales_min)}
-                   à ${nombre(p.nuitees_finales_max)}</div>` : ''}`}</td>
+                ? `<div class="yf-fourchette">${th('yfs.fourchette', { min: nombre(p.nuitees_finales_min), max: nombre(p.nuitees_finales_max) })}</div>` : ''}`}</td>
         <td>${avance == null
           ? cell(null)   // le POURQUOI est dans « Limites » : le répéter ici
                          // doublerait le badge sur chaque ligne
@@ -939,25 +866,19 @@
           .filter(x => x !== 'periode_fermee_a_la_vente'))}</td>
       </tr>`
     }).join('')
-    return bloc('Projection', 'Ce que l’historique laisse attendre',
+    return bloc(th('yfs.projection'), th('yfs.projection_sous'),
       `<div class="yf-scroll"><table class="yf-table">
         <thead><tr>
-          <th>Période</th><th>Prix attendu / nuit</th><th>Part déjà vendue attendue</th>
-          <th>Nuitées à terminaison</th><th>Avance / retard</th><th>Limites</th>
+          <th>${th('yfs.col_periode')}</th><th>${th('yfs.col_prix_attendu')}</th><th>${th('yfs.col_part_attendue')}</th>
+          <th>${th('yfs.col_nuitees_terminaison')}</th><th>${th('yfs.col_avance')}</th><th>${th('yfs.col_limites')}</th>
         </tr></thead>
         <tbody>${lignes}</tbody>
       </table></div>
       <ul class="yf-explications">
-        <li><strong>« Part déjà vendue » est une part des ventes finales, pas un taux d’occupation.</strong>
-        On extrapole le total attendu depuis ce qui est déjà vendu — on ne multiplie jamais la capacité.</li>
-        <li><strong>L’avance ou le retard se mesure contre l’occupation de l’an dernier.</strong>
-        Sans elle, le moteur préfère ne rien dire plutôt que d’inventer une norme.</li>
-        <li><strong>C’est une fourchette, pas une prévision.</strong> Le chiffre en gras suppose
-        que la période se vendra au rythme habituel de son segment ; les bornes viennent des deux
-        paliers de la courbe qui encadrent le délai du jour. Entre 14 et 30 jours avant la nuit,
-        ce rythme varie fortement — la fourchette le dit plutôt que de le masquer.</li>
-        <li><strong>Aucune projection sur une période fermée</strong> : cela inventerait un manque à gagner
-        qui n’existe pas.</li>
+        <li>${th('yfs.proj_expl_1')}</li>
+        <li>${th('yfs.proj_expl_2')}</li>
+        <li>${th('yfs.proj_expl_3')}</li>
+        <li>${th('yfs.proj_expl_4')}</li>
       </ul>`)
   }
 
@@ -977,43 +898,35 @@
     // bannière ne s'affichait alors qu'AUCUN jour n'est couvert.
     if (!d.sources.vacances || !d.sources.vacances.complete) {
       if (!horizon) {
-        return bloc('Événements à venir', 'Vacances scolaires, jours fériés et ponts',
-          `<div class="yf-alerte">Le calendrier scolaire n’est pas chargé : aucune période
-           de vacances n’est connue. Tous les jours sont comptés « hors vacances »,
-           et la référence saisonnière est faussée sur toute la fenêtre.</div>`)
+        return bloc(th('yfs.evenements'), th('yfs.evenements_sous'),
+          `<div class="yf-alerte">${th('yfs.ev_scolaire_absent')}</div>`)
       }
     }
     const limite = horizon && horizon < d.fenetre.fin
-      ? `<div class="yf-alerte">Le calendrier scolaire officiel s’arrête au
-         <strong>${nomPeriode(horizon)}</strong>. Au-delà, les vacances ne sont pas
-         connues : ces jours sont comptés « hors vacances », et la référence des
-         périodes concernées est faussée. À réimporter avant cette date.</div>`
+      ? `<div class="yf-alerte">${th('yfs.ev_horizon', { date: nomPeriode(horizon) })}</div>`
       : ''
     if (!ev.length) {
-      return bloc('Événements à venir', 'Vacances scolaires, jours fériés et ponts',
-        `<p class="yf-etat">Aucun événement sur cette fenêtre.</p>${limite}`)
+      return bloc(th('yfs.evenements'), th('yfs.evenements_sous'),
+        `<p class="yf-etat">${th('yfs.ev_vide')}</p>${limite}`)
     }
     const lignes = ev.map(e => `<tr>
-      <td>${nomPeriode(e.debut)}${e.fin !== e.debut ? ` → ${nomPeriode(e.fin)}` : ''}</td>
+      <td>${ech(nomPeriode(e.debut))}${e.fin !== e.debut ? ` → ${ech(nomPeriode(e.fin))}` : ''}</td>
       <td>${e.jours}</td>
       <td>${ech(e.libelle || nomSegment(e.detail))}</td>
       <td>${ech(nomSegment(e.segment))}</td>
       <td>${e.zones_en_vacances ? ech(e.zones_en_vacances.join(', ')) : ''}</td>
     </tr>`).join('')
-    return bloc('Événements à venir', 'Vacances scolaires, jours fériés et ponts',
+    return bloc(th('yfs.evenements'), th('yfs.evenements_sous'),
       `<div class="yf-scroll"><table class="yf-table">
         <thead><tr>
-          <th>Période</th><th>Jours</th><th>Événement</th>
-          <th>Compte comme</th><th>Zones en vacances</th>
+          <th>${th('yfs.col_periode')}</th><th>${th('yfs.col_jours')}</th><th>${th('yfs.col_evenement')}</th>
+          <th>${th('yfs.col_compte_comme')}</th><th>${th('yfs.col_zones')}</th>
         </tr></thead>
         <tbody>${lignes}</tbody>
       </table></div>
       <ul class="yf-explications">
-        <li><strong>Les vacances des autres zones comptent aussi</strong> — un logement
-        accueille des vacanciers de toute la France. Mais elles ne valent pas les vôtres :
-        sur ce logement, elles rapportent le même prix qu’une période hors vacances.</li>
-        <li>Ces dates sont en <strong>lecture seule</strong> : elles viennent du calendrier
-        officiel et du calcul des jours fériés, rien ici ne les modifie.</li>
+        <li>${th('yfs.ev_expl_1')}</li>
+        <li>${th('yfs.ev_expl_2')}</li>
       </ul>${limite}`)
   }
 
@@ -1035,50 +948,37 @@
     const form = peutEcrire
       ? `<form class="yf-form" id="yf-exc-form" autocomplete="off">
           <div class="yf-champ">
-            <label for="yf-exc-debut">Du</label>
-            <input type="date" id="yf-exc-debut" min="${plusTot}" max="${hier}" required>
+            <label for="yf-exc-debut">${th('yfs.du')}</label>
+            <input type="date" class="out-saisie" id="yf-exc-debut" min="${ech(plusTot)}" max="${ech(hier)}" required>
           </div>
           <div class="yf-champ">
-            <label for="yf-exc-fin">Au</label>
-            <input type="date" id="yf-exc-fin" min="${plusTot}" max="${hier}" required>
+            <label for="yf-exc-fin">${th('yfs.au')}</label>
+            <input type="date" class="out-saisie" id="yf-exc-fin" min="${ech(plusTot)}" max="${ech(hier)}" required>
           </div>
           <div class="yf-champ" style="flex:2 1 200px">
-            <label for="yf-exc-motif">Motif</label>
-            <input type="text" id="yf-exc-motif" maxlength="500" required
-                   placeholder="travaux, fermeture personnelle…">
+            <label for="yf-exc-motif">${th('yfs.motif')}</label>
+            <input type="text" class="out-saisie" id="yf-exc-motif" maxlength="500" required
+                   placeholder="${th('yfs.motif_exemple')}">
           </div>
-          <button class="btn" type="submit" id="yf-exc-ajouter">Déclarer</button>
+          <button class="btn btn--primary" type="submit" id="yf-exc-ajouter">${th('yfs.declarer')}</button>
         </form>
         <div id="yf-exc-retour"></div>`
-      : `<p class="yf-pied">Vous pouvez consulter ces périodes, pas les modifier :
-         déclarer une exception change ce que le moteur considère comme normal,
-         donc les prix qu’il suggérera.</p>`
+      : `<p class="yf-pied">${th('yfs.exc_lecture_seule')}</p>`
     const liste = ex.length
       ? `<ul class="yf-liste">${ex.map(e => `<li>
-          <strong>${nomPeriode(e.date_debut)} → ${nomPeriode(e.date_fin)}</strong>
+          <strong>${ech(nomPeriode(e.date_debut))} → ${ech(nomPeriode(e.date_fin))}</strong>
           <span class="yf-motif-texte">${ech(e.motif)}</span>
           ${peutEcrire ? `<button class="yf-sup" data-exc="${ech(e.id)}"
-            aria-label="Supprimer cette période">Supprimer</button>` : ''}
+            aria-label="${th('yfs.supprimer_aria')}">${th('yfs.supprimer')}</button>` : ''}
         </li>`).join('')}</ul>`
-      : `<p class="yf-pied">Aucune période déclarée. Les mois exceptionnels —
-         travaux, fermeture personnelle — comptent donc comme des mois normaux
-         dans la référence.</p>`
-    return bloc('Périodes hors référence', 'Ce qui ne doit pas compter comme normal',
+      : `<p class="yf-pied">${th('yfs.exc_aucune')}</p>`
+    return bloc(th('yfs.exceptions'), th('yfs.exceptions_sous'),
       `${form}${liste}
       <ul class="yf-explications">
-        <li><strong>Depuis le ${nomPeriode(plusTot)}.</strong> La référence se calcule sur
-        ${d.historique.ans} ans : une période déclarée avant cette date serait enregistrée
-        sans rien changer, et n’apparaîtrait pas dans cette liste.</li>
-        <li><strong>Le passé uniquement.</strong> Une exception relit ce qui a eu lieu.
-        Pour l’avenir, fermez la date au calendrier ou ajustez le prix : retirer de la
-        référence un jour encore vendable créerait deux vérités pour la même nuit —
-        son chiffre d’affaires dans le réalisé, ses nuits hors du normal.</li>
-        <li><strong>Ces nuits restent dans le réalisé.</strong> Une fermeture pour travaux
-        appartient à ce qui s’est passé ; elle est seulement écartée de ce qui est
-        « normal ».</li>
-        <li><strong>Sans elles, le moteur se trompe dans le bon sens.</strong> Un mois de
-        travaux à zéro nuit lui fait croire que la demande s’effondre à cette saison —
-        et il suggérera de brader l’an prochain.</li>
+        <li>${th('yfs.exc_expl_1', { date: nomPeriode(plusTot), ans: d.historique.ans })}</li>
+        <li>${th('yfs.exc_expl_2')}</li>
+        <li>${th('yfs.exc_expl_3')}</li>
+        <li>${th('yfs.exc_expl_4')}</li>
       </ul>`)
   }
 
@@ -1106,7 +1006,7 @@
     }
     if (motifs && motifs.length) return `<span class="yf-inconnu">${badges(motifs)}</span>`
     // Aucun motif fourni : on le DIT quand même, jamais une case vide.
-    return `<span class="yf-inconnu">non calculable</span>`
+    return `<span class="yf-inconnu">${th('mg.non_calculable_mot')}</span>`
   }
 
   // Les motifs d'une ligne qui concernent CET indicateur — pas tous ceux de la
@@ -1119,7 +1019,7 @@
   // ⚠ NI 0, NI « −100 % » QUAND ON NE SAIT PAS. Une comparaison non calculable
   // rend son motif, pas un chiffre.
   function comparaison (c, format, quand = null, unite = null) {
-    if (!c) return `<span class="yf-inconnu">non calculable</span>`
+    if (!c) return `<span class="yf-inconnu">${th('mg.non_calculable_mot')}</span>`
     if (c.non_calculable) {
       return `<span class="yf-inconnu">${badgeMotif(c.non_calculable)}</span>`
     }
@@ -1141,7 +1041,7 @@
       if (c.ecart != null && c.ecart !== 0) {
         const signe = c.ecart > 0 ? '+' : ''
         return `<span class="${c.ecart > 0 ? 'yf-hausse' : 'yf-baisse'}">${signe}${format(c.ecart)}</span>
-          <div class="yf-pied">contre ${format(c.n1)} l’an dernier</div>`
+          <div class="yf-pied">${th('yfs.contre_n1', { n1: format(c.n1) })}</div>`
       }
       return `<span class="yf-neutre">${format(c.n1)}</span>`
     }
@@ -1151,16 +1051,16 @@
     if (unite === 'points' && c.ecart != null) {
       const pts = c.ecart * 100
       const cls = pts >= 0 ? 'yf-hausse' : 'yf-baisse'
-      return `<span class="${cls}">${pts >= 0 ? '+' : ''}${pts.toFixed(1).replace('.', ',')} pts</span>
+      return `<span class="${cls}">${pts >= 0 ? '+' : ''}${th('yfs.points', { v: I18n.num(pts, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })}</span>
         <div class="yf-pied">${format(c.n1)}</div>`
     }
     const pct = (c.variation * 100)
     const cls = pct >= 0 ? 'yf-hausse' : 'yf-baisse'
     // ⚠ `toFixed(0)` rendait « +0 % » EN VERT pour +0,4 % : une décimale sous
     // le demi-point, sinon l'arrondi invente une stabilité.
-    const texte = Math.abs(pct) < 1 ? pct.toFixed(1).replace('.', ',') : pct.toFixed(0)
+    const texte = Math.abs(pct) < 1 ? I18n.num(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : I18n.num(Math.round(pct))
     // Le drapeau « estimé » est porté par la colonne « Limites » de la ligne.
-    return `<span class="${cls}">${pct >= 0 ? '+' : ''}${texte} %</span>
+    return `<span class="${cls}">${pct >= 0 ? '+' : ''}${th('yfm.pct', { v: texte })}</span>
       <div class="yf-pied">${format(c.n1)}</div>`
   }
 
@@ -1173,16 +1073,13 @@
       .filter(c => codes.includes(c))))]
     if (!vus.length) return ''
     return `<br>${vus.map(c => badgeMotif(c)).join(' ')}
-      L’occupation en personnes n’est pas affichée sur cet écran, mais ces limites
-      la concernent et vaudront pour les suggestions de prix.`
+      ${th('yfs.legende_personnes')}`
   }
 
   function legendeEstimee (lignes) {
     const n = lignes.filter(r => r.capacite_estimee).length
     if (!n) return ''
-    return `<br>${n} période(s) à <strong>capacité estimée</strong> : avant la mise en service du
-      calendrier, un jour passé sans trace est réputé ouvert, sauf exception déclarée.
-      Le taux d’occupation et le RevPAR y sont des estimations, pas des mesures.`
+    return `<br>${th('yfs.legende_estimee', { n })}`
   }
 
   function etat (msg, erreur = false) {
@@ -1190,7 +1087,7 @@
       `<div class="yf-etat${erreur ? ' erreur' : ''}">${ech(msg)}</div>`
   }
 
-  init()
+  init().catch(e => console.error('[yield]', e))
 </script>
 </body>
 </html>

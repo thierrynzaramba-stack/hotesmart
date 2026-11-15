@@ -49,6 +49,7 @@ function injecteur ({ compte = null } = {}) {
       ...(existe('shared/yieldflow-onglets.js') ? mod('shared/yieldflow-onglets.js') : {}),
       ...mod('shared/temperature-calendrier.js'),
       ...mod('shared/biens-vivants.js'),
+      ...mod('shared/yield-motifs.js'),
       supabase,
       requireAuth: async () => SESSION,
       compteCourant: () => compte,
@@ -483,4 +484,94 @@ test('LE TEST QUI COMPTE (2b, review constats 2, 8, 10) : le pied passe SOUS le 
   assert.match(src, /\[aria-pressed="true"\]\.similaire \{ background: var\(--yf-carte-similaire\); border-color: var\(--yf-carte-similaire\);/)
   assert.match(src, /\[aria-pressed="true"\]\.non \{ background: var\(--yf-carte-non\); border-color: var\(--yf-carte-non\);/)
   assert.match(src, /\.btn\.cp-btn \{ white-space: normal; height: auto; min-height: var\(--control\);/)
+})
+
+// ─── Sous-lot 2c : « Tarification dynamique » (apps/yield/index.html) ────────
+
+const SYNTHESE = 'apps/yield/index.html'
+const AUJ_2C = '2026-09-12'
+const reponseYield = (o = {}) => ({
+  bien: { id: 'B1', name: 'La bulle', provider: 'channex', capacity: 2, zone_scolaire: 'C', prix_minimum: 9500, base_price: null },
+  fenetre: { debut: '2026-09-01', fin: '2027-08-31', granularite: 'mois', pivot: AUJ_2C, aujourdhui: AUJ_2C },
+  historique: { debut: '2023-09-01', fin: '2026-08-31', ans: 3 },
+  realise: [{ periode: '2026-08', reservations: 2, ca: 1000, nuitees: 10, taux_occupation: 0.33, revpar: 33.3, prix_moyen: 100, delai_median: 20, non_calculable: [],
+    vs_n1: { ca: { valeur: 1000, n1: 800, ecart: 200, variation: 0.25 }, taux_occupation: { valeur: 0.33, n1: 0.3, ecart: 0.03, variation: 0.1 } } }],
+  a_date: [], projection: [],
+  reference: { seuil: 8, seuil_reservations: 3, nuits_vues: 680, nuits_sans_prix: 0, nuits_long_sejour: 0, par_segment: {} },
+  courbe: { paliers: [0, 7, 14, 30], nuits_sans_date_fiable: 0, par_segment: {} },
+  sources: { reservations_du_bien: 790, jours_hors_reference: 0, vacances: { complete: true, horizon: '2027-07-03' } },
+  evenements: [], exceptions: [], droits_ecriture: true,
+  ...o
+})
+
+test('LE TEST QUI COMPTE (2c) : la synthèse charge le socle V5 et se marque dans le sous-menu ; ses trois vues sont des onglets du socle', async () => {
+  const src = lire(SYNTHESE)
+  for (const f of ['/shared/theme.css', '/shared/ui.css']) assert.match(src, new RegExp(`<link rel="stylesheet" href="${f}">`))
+  assert.doesNotMatch(src, /public\/style\.css/)
+  assert.doesNotMatch(sansCommentaires(src), /renderSidebar|components\/sidebar\.js/)
+  const p = await monter(SYNTHESE, { api: () => ({ body: reponseYield() }) })
+  assert.deepEqual(p.journal.erreurs, [], p.journal.erreurs.join('\n'))
+  assert.equal(p.d.title, `HôteSmart — ${DICOS.fr['yfs.titre_onglet']}`)
+  assert.deepEqual(p.$$('[data-yf-onglets] [aria-current="page"]').map(a => a.getAttribute('href')), ['/apps/yield'])
+  // Pilotage par défaut ; Bilan bascule l'onglet ET les champs.
+  assert.ok(p.$('#yf-vue-pilotage').classList.contains('is-on'))
+  assert.ok(p.$('.yf-si-exploration').hidden && p.$('.yf-si-bilan').hidden && p.$('#yf-charger').hidden)
+  await p.cliquer(p.$('#yf-vue-bilan'))
+  assert.ok(p.$('#yf-vue-bilan').classList.contains('is-on') && !p.$('#yf-vue-pilotage').classList.contains('is-on'))
+  assert.equal(p.$('#yf-vue-bilan').getAttribute('aria-selected'), 'true')
+  assert.ok(!p.$('.yf-si-bilan').hidden && p.$('.yf-si-exploration').hidden)
+  p.fermer()
+})
+
+test('LE TEST QUI COMPTE (2c) : en anglais et en espagnol, la synthèse parle la langue de l hôte', async () => {
+  for (const langue of ['en', 'es']) {
+    const D = DICOS[langue]
+    const p = await monter(SYNTHESE, { langue, api: () => ({ body: reponseYield() }) })
+    assert.equal(p.texte('h1'), D['yfs.titre'])
+    assert.deepEqual(p.$$('.yf-onglet').map(b => b.textContent), [D['yfs.vue_pilotage'], D['yfs.vue_bilan'], D['yfs.vue_exploration']])
+    const titres = p.$$('.yf-bloc h2').map(h => h.textContent)
+    for (const k of ['yfs.a_date', 'yfs.projection', 'yfs.reference', 'yfs.realise', 'yfs.exceptions']) assert.ok(titres.includes(D[k]), `${langue} : ${k}`)
+    assert.equal(p.texte('#yf-exc-ajouter'), D['yfs.declarer'])
+    assert.doesNotMatch(p.$('main').textContent, /Réalisé|Ce qui s’est vendu|Périodes hors référence|Déclarer/, langue)
+    p.fermer()
+  }
+})
+
+// ⚠ NON-RÉGRESSION : l'ancien écran échappait déjà tout (ech) ; ce test passe
+// donc contre lui, et c'est voulu. Ce qu'il garde, c'est le passage à tHtml —
+// éprouvé par mutation (un brut() posé sur le nom du logement le rougit).
+test('2c (sécurité, non-régression) : le nom du logement, les motifs déclarés, les événements et l erreur du serveur restent du texte', async () => {
+  const P = k => `<img src=x data-piege="${k}" onerror="window.__xss=1">`
+  const corps = reponseYield({
+    bien: { id: 'B1', name: P('bien'), capacity: 2, prix_minimum: 9500 },
+    sources: { reservations_du_bien: 1, jours_hors_reference: 3, vacances: { complete: false, manque: P('manque'), horizon: '2027-07-03' } },
+    evenements: [{ debut: '2026-12-19', fin: '2027-01-03', jours: 16, libelle: P('libelle'), segment: 'vacances_zone', zones_en_vacances: [P('zone')] }],
+    exceptions: [{ id: 'e1', date_debut: '2025-03-01', date_fin: '2025-03-10', motif: P('motif') }]
+  })
+  const p = await monter(SYNTHESE, { api: () => ({ body: corps }) })
+  assert.deepEqual(p.$$('img[src="x"]').map(i => i.getAttribute('data-piege')), [])
+  for (const k of ['bien', 'manque', 'motif']) assert.ok(p.d.body.textContent.includes(P(k)), k)
+  assert.equal(p.w.__xss, undefined)
+  p.fermer()
+  const q = await monter(SYNTHESE, { api: () => ({ status: 400, body: { error: P('erreur') } }) })
+  assert.equal(q.$$('img[src="x"]').length, 0)
+  assert.ok(q.$('#yf-contenu').textContent.includes(P('erreur')))
+  q.fermer()
+})
+
+test('2c (non-régression) : déclarer une période part au même endpoint, avec le même corps, puis relit tout', async () => {
+  const p = await monter(SYNTHESE, { api: (u, e) => (u.startsWith('/api/yield-exceptions') ? { body: { ok: true } } : { body: reponseYield() }) })
+  p.$('#yf-exc-debut').value = '2025-03-01'
+  p.$('#yf-exc-fin').value = '2025-03-10'
+  p.$('#yf-exc-motif').value = 'travaux'
+  const avant = p.journal.fetch.filter(f => f.url.startsWith('/api/yield?')).length
+  p.$('#yf-exc-form').dispatchEvent(new p.w.Event('submit', { cancelable: true }))
+  await p.attendre()
+  const post = p.journal.fetch.find(f => f.url === '/api/yield-exceptions')
+  assert.ok(post, 'le POST est parti')
+  assert.equal(post.methode, 'POST')
+  assert.deepEqual(post.corps, { property_id: 'B1', debut: '2025-03-01', fin: '2025-03-10', motif: 'travaux' })
+  assert.equal(p.journal.fetch.filter(f => f.url.startsWith('/api/yield?')).length, avant + 1, 'la synthèse est relue')
+  assert.equal(p.texte('#yf-exc-retour'), 'Période déclarée — la référence a été recalculée.', 'le texte d avant, au caractère')
+  p.fermer()
 })

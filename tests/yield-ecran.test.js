@@ -29,11 +29,18 @@ test.before(async () => {
   const script = page.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
     .replace(/^\s*import .*$/gm, '')
     .replace(/^\s*initErrorHandler\(\)\s*$/m, '')
-    .replace(/^\s*init\(\)\s*$/m, '')
+    .replace(/^\s*init\(\)(?:\.catch\(.*\))?\s*$/m, '')
   const motifs = fs.readFileSync(path.join(RACINE, 'shared/yield-motifs.js'), 'utf8')
     .replace(/^export /gm, '')
+  // ⚠ DEPUIS L'INTEGRATION V5 (lot 2c), la page traduit par le VRAI moteur
+  // i18n (global `I18n`) et forme son HTML par shared/page-outil.js (tHtml,
+  // brut, jourIso, moisIso) : ce banc leur donne les vrais, en francais —
+  // chaque phrase affirmee plus bas l'est donc au caractere, rendue.
+  const outil = fs.readFileSync(path.join(RACINE, 'shared/page-outil.js'), 'utf8')
+    .replace(/^export /gm, '')
+  globalThis.I18n = await require('./outils/banc-page').moteurI18nNode('fr')
   tmp = path.join(os.tmpdir(), `yf-ecran-${process.pid}.mjs`)
-  fs.writeFileSync(tmp, `${motifs}\n${script}\nexport { rendre, choisirVue, MOTIFS }\n`
+  fs.writeFileSync(tmp, `${outil}\n${motifs}\n${script}\nexport { rendre, choisirVue, MOTIFS }\n`
     + 'function choisirVue (v) { vue = v }\n')
   ecran = await import(`file://${tmp}`)
 })
