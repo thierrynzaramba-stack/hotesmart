@@ -214,7 +214,7 @@ test('passage en prod : le menu YieldFlow mene aux deux pages de la V2 (« pages
   assert.match(onglets, /href: '\/apps\/yield\/comparables', cle: 'yfnav\.comparables'/)
   assert.equal(fr['yfnav.comparables'], 'Choisir vos comparables')
   assert.match(lire('apps/yield/marche-global.html'), /monterOngletsYieldFlow\(.*, 'marche-global', t\)/)
-  assert.match(lire('apps/yield/comparables.html'), /renderSidebar\('yield-comparables'\)/)
+  assert.match(lire('apps/yield/comparables.html'), /monterOngletsYieldFlow\(.*, 'comparables', t\)/)
 })
 
 test('LE TEST QUI COMPTE (garantie prod, §22.13) : la colonne « Prix de depart » de l ecran Prix ne fait que LIRE — deux GET, aucune methode d ecriture', () => {

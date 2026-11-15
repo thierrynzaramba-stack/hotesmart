@@ -369,3 +369,100 @@ test('LE TEST QUI COMPTE (sécurité, constat 2 de la review) : chaque texte ven
     p.fermer()
   }
 })
+// ─── Sous-lot 2b : « Choisir vos comparables » ───────────────────────────────
+
+const COMPARABLES = 'apps/yield/comparables.html'
+const leafletAbsent = () => ({})
+const profilVide = () => ({ body: { etat: 'calcule', profil: null, retenus: [], fondateur: [], comparables: null } })
+
+test('LE TEST QUI COMPTE (2b) : comparables charge le socle V5, la coquille, et se marque dans le sous-menu YieldFlow', async () => {
+  const src = lire(COMPARABLES)
+  for (const f of ['/shared/theme.css', '/shared/ui.css']) assert.match(src, new RegExp(`<link rel="stylesheet" href="${f}">`))
+  assert.doesNotMatch(src, /public\/style\.css/)
+  assert.doesNotMatch(sansCommentaires(src), /renderSidebar|components\/sidebar\.js/)
+  assert.match(src, /<body class="out-page out-pont">/)
+  const p = await monter(COMPARABLES, { api: profilVide })
+  assert.deepEqual(p.journal.erreurs, [], p.journal.erreurs.join('\n'))
+  assert.equal(p.d.title, `HôteSmart — ${DICOS.fr['cp.titre']}`)
+  assert.ok(p.$('[data-menu] a[href="/apps/yield"]'))
+  assert.deepEqual(p.$$('[data-yf-onglets] [aria-current="page"]').map(a => a.getAttribute('href')), ['/apps/yield/comparables'])
+  assert.deepEqual(p.journal.coquille, ['bandeau'])
+  p.fermer()
+})
+
+test('LE TEST QUI COMPTE (2b) : en anglais et en espagnol, le formulaire et ses sept équipements parlent la langue de l hôte', async () => {
+  for (const langue of ['en', 'es']) {
+    const D = DICOS[langue]
+    const p = await monter(COMPARABLES, { langue, api: profilVide })
+    assert.equal(p.texte('h1'), D['cp.titre'])
+    assert.equal(p.$('.cp-intro').textContent, D['cp.intro'].replace(/\*\*/g, ''))
+    assert.equal(p.texte('#cp-valider-a'), D['cp.valider_a'])
+    assert.equal(p.$('#cp-adresse').getAttribute('placeholder'), D['cp.adresse_exemple'])
+    const eq = p.$$('#cp-eq label').map(l => l.textContent.trim())
+    assert.deepEqual(eq, ['terrasse', 'spa', 'jardin', 'piscine', 'parking', 'vue', 'climatisation'].map(k => D[`cp.eq_${k}`]))
+    // La valeur qui part au serveur reste la CLÉ, quelle que soit la langue.
+    assert.deepEqual(p.$$('#cp-eq input').map(i => i.value), ['terrasse', 'spa', 'jardin', 'piscine', 'parking', 'vue', 'climatisation'])
+    assert.equal(p.$('.cp-strategies label').getAttribute('title'), D['cp.strat_agressif_titre'])
+    assert.doesNotMatch(p.$('main').textContent, /Votre logement|Valider la description|Chambres/, langue)
+    p.fermer()
+  }
+})
+
+test('LE TEST QUI COMPTE (2b) : les tranches gardent UN SEUL VOCABULAIRE — le français est, au caractère, la table TRANCHE de l écran Prix', () => {
+  const w = new (require('jsdom').JSDOM)('').window
+  const { TRANCHE } = evaluerModule(w, 'shared/prix-depart-jours.js', {})
+  for (const n of ['creux', 'modere', 'favorable', 'pic']) {
+    assert.equal(DICOS.fr[`cp.tranche_${n}`], TRANCHE[n], n)
+    for (const l of LANGUES) assert.ok(DICOS[l][`cp.tranche_${n}`], `${n} (${l})`)
+  }
+})
+
+test('LE TEST QUI COMPTE (2b) : chaque clé de comparables existe dans les trois langues', () => {
+  const src = lire(COMPARABLES)
+  const cles = new Set()
+  for (const m of src.matchAll(/(?:th|t)\('((?:cp|mc|mg|yfm|yfnav)\.[a-z0-9_]+)'/g)) cles.add(m[1])
+  for (const m of src.matchAll(/data-(?:i18n|riche)="((?:cp|yfm|yfnav)\.[a-z0-9_]+)"/g)) cles.add(m[1])
+  for (const m of src.matchAll(/(?:aria-label|placeholder|title):((?:cp|yfm|yfnav)\.[a-z0-9_]+)/g)) cles.add(m[1])
+  for (const m of src.matchAll(/'((?:cp|mc|mg|yfm|yfnav)\.[a-z0-9_]+)'/g)) cles.add(m[1])
+  for (const n of ['creux', 'modere', 'favorable', 'pic']) cles.add(`cp.tranche_${n}`)
+  assert.ok(cles.size > 150, `${cles.size} clés trouvées`)
+  const manques = []
+  for (const k of cles) for (const l of LANGUES) if (!(k in DICOS[l])) manques.push(`${k} (${l})`)
+  assert.deepEqual(manques, [])
+})
+
+test('LE TEST QUI COMPTE (2b) : aucun hexa dans la page ; les couleurs de la carte sont dans la charte, aux valeurs d avant', () => {
+  const src = sansCommentaires(lire(COMPARABLES))
+  assert.doesNotMatch(src, /#[0-9a-fA-F]{3,8}\b(?![\w-])/)
+  assert.doesNotMatch(src, /\p{Extended_Pictographic}/u)
+  // Les valeurs de l'ancienne table COULEUR (fb93b24e), dans la charte.
+  const theme = lire('shared/theme.css')
+  for (const [j, v] of Object.entries({ neutre: '#2A5E86', similaire: '#1F8A4C', non: '#5F6368', hote: '#E8A33D', equipements: '#7B3FA0' })) {
+    assert.match(theme, new RegExp(`--yf-carte-${j}: ${v};`), j)
+    assert.match(lire(COMPARABLES), new RegExp(`${j}: '--yf-carte-${j}'`), `la page lit --yf-carte-${j}`)
+  }
+})
+
+test('2b : les libellés d équipements Airbnb — en français par la table, tels qu Airbnb les écrit ailleurs', async () => {
+  const fiche = { listing_id: '123', nom: 'Chez Paul', ressemblance: 80, latitude: 43, longitude: 0.1, voyageurs: 2, chambres: 1, source: 'voisins', equipements: [], details: { equipements_airbnb: ['Kitchen', 'Wifi', 'Something new'] } }
+  const api = (u, e) => (e.methode === 'GET' ? { body: { etat: 'calcule', profil: { adresse: 'a', adresse_trouvee: 'A', voyageurs: 2, chambres: 1, pieces: 2, salles_de_bain: 1, equipements: [], latitude: 43, longitude: 0.1 }, retenus: [], fondateur: [], comparables: [fiche] } } : null)
+  for (const [langue, attendu] of [['fr', ['Cuisine', 'Wifi', 'Something new']], ['en', ['Kitchen', 'Wifi', 'Something new']], ['es', ['Kitchen', 'Wifi', 'Something new']]]) {
+    const p = await monter(COMPARABLES, { langue, api })
+    // Sans Leaflet au banc, la liste accessible ouvre la fiche.
+    const b = p.$('#cp-liste-biens button')
+    assert.ok(b, langue)
+    await p.cliquer(b)
+    assert.deepEqual(p.$$('.cp-tous-eq li').map(li => li.textContent), attendu, langue)
+    p.fermer()
+  }
+})
+
+test('2b (téléphone) : le pied collant se pose au-dessus de la barre du bas du socle, à la même largeur', () => {
+  const src = lire(COMPARABLES)
+  const ui = lire('shared/ui.css')
+  // La barre du bas devient fixe sous 721 px…
+  const bloc = ui.slice(ui.lastIndexOf('@media (max-width: 720px)', ui.indexOf('.bottombar {\n    position: fixed')), ui.indexOf('.bottombar {\n    position: fixed'))
+  assert.ok(bloc.startsWith('@media (max-width: 720px)'), 'la barre du bas est fixe sous 721 px')
+  // …et le pied de la page remonte à cette même largeur.
+  assert.match(src, /@media \(max-width: 720px\) \{\s*\.cp-pied \{ bottom: calc\(70px \+ env\(safe-area-inset-bottom, 0px\)\); \}/)
+})

@@ -237,6 +237,12 @@ const ATTENDU = {
   'apps/yield/marche-global.html': {
     '/api/marche-global': 1,      // l'historique du marché (sections 1 à 3)
     '/api/marche-temperature': 1  // le modèle AirROI (section 4 et « En résumé ») — deux pipelines étanches
+  },
+  // Sous-lot 2b (même date, spec §11) : un seul site d'appel, la fonction
+  // `appeler` — le GET au chargement, puis les POST des GESTES (profil,
+  // chercher, plus, retenir, stratégie, relever), jamais au chargement.
+  'apps/yield/comparables.html': {
+    '/api/marche-comparables': 1
   }
 }
 

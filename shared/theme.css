@@ -173,6 +173,14 @@
   --yf-annee-n: #1E3F73;
   --yf-barre: #9DB9E3;
   --yf-barre-partielle: #C9CED6;
+  /*  · « Choisir vos comparables » : les points de la carte (et sa légende).
+       Le gris « pas comparable » reste lisible en blanc dessus (review de
+       995f025 : l'ancien gris était à 2,6:1). */
+  --yf-carte-neutre: #2A5E86;
+  --yf-carte-similaire: #1F8A4C;
+  --yf-carte-non: #5F6368;
+  --yf-carte-hote: #E8A33D;
+  --yf-carte-equipements: #7B3FA0;
 
   /* Ombres */
   --shadow-hover: 0 6px 20px rgba(0, 0, 0, .12);

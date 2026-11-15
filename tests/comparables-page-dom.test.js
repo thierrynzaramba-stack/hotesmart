@@ -21,6 +21,13 @@ const path = require('path')
 const { JSDOM } = require('jsdom')
 const { lireJson } = require('../lib/airroi/json')
 const { trierComparables, reunirEtTrier } = require('../lib/marche/pertinence')
+const { socleV5 } = require('./outils/banc-page')
+// ⚠ LES COULEURS DE LA CARTE VIVENT DANS LA CHARTE depuis l'intégration V5
+// (lot 2b, 15 novembre 2026) : la page lit la valeur CALCULÉE des jetons
+// --yf-carte-*, --ink et --surface. Ce banc charge donc shared/theme.css, et
+// les attentes « noir » et « blanc » se lisent dans la charte, pas en dur.
+const THEME = fs.readFileSync(path.join(__dirname, '..', 'shared', 'theme.css'), 'utf8')
+const jeton = nom => (new RegExp(`${nom}:\\s*(#[0-9A-Fa-f]{3,8});`).exec(THEME) || [])[1]
 
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'apps', 'yield', 'comparables.html'), 'utf8')
 const COMPS = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'comps-labulle.json'), 'utf8')).listings
@@ -30,7 +37,9 @@ const SPA = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 
 const PROFIL = { adresse: '12 rue des Thermes', adresse_trouvee: '12 Rue des Thermes 65200 Bagnères-de-Bigorre', voyageurs: 2, chambres: 1, pieces: 2, salles_de_bain: 1, equipements: ['parking', 'spa'], latitude: 43.0636, longitude: 0.1476 }
 const CARTES = trierComparables(COMPS, PROFIL)
 const AVEC_SPA = reunirEtTrier(COMPS, SPA, PROFIL)
-const attendre = async () => { for (let i = 0; i < 25; i++) await new Promise(r => setImmediate(r)) }
+// 60 tours (et non plus 25) depuis l'intégration V5 : la page charge d'abord
+// ses dictionnaires.
+const attendre = async () => { for (let i = 0; i < 60; i++) await new Promise(r => setImmediate(r)) }
 const reponse = (d, status = 200) => ({ ok: status < 400, status, json: async () => d })
 
 // Une Leaflet simulee : elle garde chaque point, son style et son clic.
@@ -56,10 +65,18 @@ async function monter (serveur, { sansLeaflet = false } = {}) {
   const dom = new JSDOM(HTML.replace(/<script type="module">[\s\S]*?<\/script>/, '').replace(/<script src="https:\/\/cdnjs[^>]*><\/script>/, ''),
     { runScripts: 'outside-only', url: 'https://staging.example/apps/yield/comparables' })
   const w = dom.window
+  // La charte, comme la page la charge par son <link> (que jsdom ne suit pas).
+  const style = w.document.createElement('style'); style.textContent = THEME; w.document.head.append(style)
   const L = leafletSimule()
   if (!sansLeaflet) w.L = L
   const appels = []
+  // ⚠ LE SOCLE V5 : le VRAI moteur de traduction sur les VRAIS dictionnaires.
+  // Les dictionnaires ne sont pas des appels de la page au serveur.
+  const socle = socleV5(w)
+  Object.assign(w, socle.symboles)
   w.fetch = async (url, opts = {}) => {
+    const dico = socle.dictionnaire(url)
+    if (dico) return dico
     const corps = opts.body ? JSON.parse(opts.body) : null
     appels.push({ url, methode: opts.method || 'GET', corps })
     return serveur({ url, methode: opts.method || 'GET', corps })
@@ -442,11 +459,11 @@ test('LE TEST QUI COMPTE (§21.6) : un bien qui a l un de vos equipements RARES 
   const sans = AVEC_SPA.find(c => c.source === 'voisins' && !c.details.equipements_airbnb.some(e => /hot tub|sauna/i.test(e)))
   assert.equal(pointDe(L, spa.listing_id).style.color, '#7B3FA0')
   assert.equal(pointDe(L, spa.listing_id).style.weight, 4)
-  assert.equal(pointDe(L, sans.listing_id).style.color, '#fff')
+  assert.equal(pointDe(L, sans.listing_id).style.color, jeton('--surface'))
   assert.match(doc.querySelector('.cp-legende').textContent, /À vos équipements/)
   // Ouvert, le contour devient noir ; refermer sur un autre lui rend son violet.
   cliquerPoint(L, spa.listing_id)
-  assert.equal(pointDe(L, spa.listing_id).style.color, '#111')
+  assert.equal(pointDe(L, spa.listing_id).style.color, jeton('--ink'))
   cliquerPoint(L, sans.listing_id)
   assert.equal(pointDe(L, spa.listing_id).style.color, '#7B3FA0')
 })
