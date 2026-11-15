@@ -426,3 +426,33 @@ d'appel. AVANT : 12 appels (§6 bis). APRÈS : §11.5.
 3. Leaflet et ses tuiles viennent toujours de cdnjs et d'OpenStreetMap
    (inchangé) ; leurs contrôles (« + », « − », attribution) ne se traduisent
    pas — l'attribution d'OpenStreetMap passe par le dictionnaire.
+
+### 11.5 Mesures, contre-épreuve, téléphone
+
+**APRÈS** (même outil, même compte) : **12 → 10 appels** au chargement
+(`/api` 2 → 2, Supabase 8 → 5, `getUser` 2 → 1, dictionnaires 0 → 2) ; octets
+du dépôt 206 969 → 386 635 (gzip 75 309 → 121 945), le socle V5 commun aux
+écrans V5. Le site d'appel `/api/marche-comparables` est le même qu'avant
+(une fonction `appeler`, le GET au chargement, les POST sur geste) et
+`tests/budget-ecran.test.js` le compte.
+
+**Contre-épreuve** : les 7 tests 2b de `tests/integration-v5-lot-2.test.js`
+rougissent tous contre l'arbre de `d65054b8` (2a seul) extrait par
+`git archive`. Le banc de `tests/comparables-page-dom.test.js` (52 tests) est
+retargeté sur le socle V5 sans perdre une assertion : chaque phrase
+française y est affirmée rendue, au caractère ; les attentes « noir » et
+« blanc » du contour d'un point se lisent dans la charte (`--ink`,
+`--surface`) au lieu d'être écrites en dur — la couleur du contour d'un bien
+ouvert passe ainsi de `#111` à l'encre de la charte (`#222222`), seul écart
+de couleur du sous-lot, voulu.
+
+**Horloge décalée**, fichiers touchés et voisins : J+60 **194 / 194** ; J+200
+192 / 194 — les 2 rouges sont dans `tests/marche-comparables-api.test.js`, un
+test d'`api/` que le lot ne touche pas, rouges À L'IDENTIQUE sur l'ancien code
+(dette 124 du registre, « dès J+70 »). Suite complète : **8 741 / 8 741**.
+
+**Téléphone** (390 px, vrai navigateur) : le pied collant « Valider mes
+comparables » se pose au-dessus de la barre du bas du socle (fixe sous
+721 px) au lieu de glisser dessous ; formulaire, fiche et tableau des prix
+tiennent dans la largeur. Les boutons prennent le style du socle
+(`btn--primary` est cerclé d'encre dans la charte V5, pas plein).
