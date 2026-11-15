@@ -1,170 +1,157 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Le marché global</title>
-  <link rel="stylesheet" href="/public/style.css">
-  <!-- ⚠ LA POLICE DU SOCLE V5 SUR LES ÉCRANS YIELDFLOW — demande de Thierry du
-       30 octobre 2026. L'URL est IDENTIQUE à celle des pages V5
-       (pages/aujourdhui.html, pages/calendrier.html) : même fichier, donc
-       même entrée de cache navigateur, aucune requête supplémentaire pour un
-       hôte qui vient d'une page V5.
-       ⚠ ET LA CLASSE `police-v5` POSÉE SUR LA BALISE BODY EST LA SECONDE
-       MOITIÉ : sans elle, la fonte serait téléchargée sans être appliquée. La
-       règle `body` de public/style.css n'est PAS touchée, parce que cette
-       feuille sert aussi des écrans antérieurs à V5 que ce lot ne change pas. -->
-  <!-- ⚠ LE PRECONNECT EST LA MOITIE QU'ON OUBLIE — releve en review. Une
-       feuille tierce BLOQUANTE ajoutee a six ecrans, c'est un DNS puis un TLS
-       de plus devant le premier affichage, contre le budget « premier
-       affichage < 1 s » de CLAUDE.md. Les pages V5 de reference
-       (pages/aujourdhui.html, pages/calendrier.html) le portent ; ces ecrans
-       ne l'avaient pas, et le test n'epinglait que l'URL. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>
-    [hidden] { display: none !important; }
-    /* ⚠ PAGE EN LECTURE SEULE (spec §17 de docs/kb/chantier-nouveau-bien.md).
-       Elle n'ecrit rien, ne pilote rien, n'est reliee a aucun menu (acces par
-       l'adresse directe). PIPELINES ETANCHES : l'historique (sections 1 a 3) et
-       AirROI (section 4) s'affichent cote a cote, sans jamais se croiser. */
-    :root {
-      /* Les trois annees : N-2 la plus pale, N la plus soutenue. */
-      --mg-n2: #9DB9E3; --mg-n1: #5B87C9; --mg-n: #1E3F73;
-      --mg-barre: #9DB9E3; --mg-barre-partielle: #C9CED6;
-    }
-    /* ⚠ VARIANTE SOMBRE RETIREE — double validation de Thierry du 2 novembre
-       2026 : « pas de mode sombre sur YieldFlow pour l'instant ». Ces barres
-       s'eclaircissaient pendant que le texte et le fond de page restaient
-       clairs : un ecran a moitie sombre n'est pas un mode sombre. */
-    .mg-avertir { background: var(--amber-bg); border: 0.5px solid var(--amber); border-radius: var(--radius);
-                  padding: 12px 14px; margin-bottom: 16px; font-size: 13.5px; line-height: 1.5; }
-    .mg-meta { font-size: 12.5px; color: var(--text2); margin: 6px 0 16px; }
-    .mg-carte { border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px;
-                margin-bottom: 16px; background: var(--bg); }
-    .mg-carte h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
-    .mg-carte .sous { font-size: 12.5px; color: var(--text2); margin: 0 0 10px; line-height: 1.45; }
-    .mg-mention { font-size: 12px; color: var(--text2); margin: 6px 0 0; }
-    .mg-legende { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text2); margin: 8px 0 2px; }
-    .mg-legende i { display: inline-block; width: 22px; height: 0; vertical-align: 3px; margin-right: 6px; }
-    .non-calc { color: var(--text2); font-style: italic; }
-    /* « En resume » (§18) : quatre blocs, chacun sa source. */
-    /* ⚠ LES FONDS SOMBRES SONT RETIRES — double validation de Thierry du
-       2 novembre 2026 : « pas de mode sombre sur YieldFlow pour l'instant ».
-       CE QU'ILS FAISAIENT. Cet ecran redefinissait quatre fonds de niveaux
-       sous `prefers-color-scheme: dark`, alors que `public/style.css` n'a
-       AUCUN bloc sombre : `.mg-niv-l` continuait donc de peindre `--text`
-       (#1a1a1a) par-dessus. Contraste ~1,1:1 — les quatre lignes de
-       « Les niveaux du marche » etaient ILLISIBLES chez tout hote en
-       preference systeme sombre. Constate en recette le 1er novembre 2026,
-       et c'etait l'ecart 11 de docs/kb/charte-ui.md.
-       La page reste donc claire, comme le reste de l'application. Un vrai
-       mode sombre est un chantier a part, pas une surcharge de quatre
-       jetons sur un ecran. */
-    .mg-bloc { padding: 12px 0; border-top: 0.5px solid var(--border); }
-    #mg-resume-tendance { border-top: 0; padding-top: 4px; }
-    .mg-bloc h3 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
-    .mg-source { font-size: 11.5px; color: var(--text2); margin: 0 0 8px; }
-    .mg-verdict { font-size: 14px; font-weight: 600; margin: 4px 0 8px; }
-    .mg-sens { display: grid; grid-template-columns: 26px 1fr; gap: 4px 6px; font-size: 13.5px; align-items: center; }
-    .mg-sens b { font-size: 17px; text-align: center; }
-    .mg-zones { color: var(--text2); font-size: 12px; }
-    /* ⚠ LA LIGNE NE PORTE PLUS LE NIVEAU, LA PASTILLE LE PORTE — regle 1 de
-       Thierry, et c'est un constat de review du 3 novembre 2026. Avec
-       `background: var(--niv-fond)` sur la ligne, « Très haut ou
-       Exceptionnel » devenait une BANDE #222222 pleine largeur a texte blanc
-       au milieu d'un ecran clair. La regle dit « la pastille ou la case,
-       jamais la ligne » : la ligne reprend donc le fond neutre des blocs, et
-       le niveau vit dans une pastille, comme partout ailleurs.
-       ⚠ Et le test de la regle 1 ne l'avait pas vu : il cherche une classe
-       `.n-*` derriere un nom d'element, or ici le niveau arrivait par une
-       PROPRIETE PERSONNALISEE en style en ligne. Le test a ete elargi. */
-    .mg-niv-l { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px; margin-bottom: 4px;
-                border-radius: 4px; background: var(--bg2); font-size: 13.5px; color: var(--text); }
-    .mg-niv-l small { color: var(--text2); }
-    .mg-niv-l .mg-pastille { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
-                             background: var(--niveau-fond, var(--bg2)); color: var(--niv-encre, var(--text));
-                             border: 1px solid var(--niveau-lisere, var(--border2)); }
-    .mg-ev-liste { display: flex; flex-direction: column; gap: 6px; }
-    /* ⚠ LE RAIL EST NEUTRE DEPUIS LE 3 NOVEMBRE 2026, et le niveau est sur
-       le BADGE de la ligne. Il portait --tc-<niveau>, ce qui donnait sur ce
-       fond --bg2 : 1,08 / 1,50 / 2,72 / 9,55:1 en bleu — trois paliers sur
-       quatre deja sous le seuil de 3:1 — et 1,02 / 1,09 / 1,33 / 14,57:1 en
-       encre, ou le trait et le fond ont en plus la MEME teinte (0 % des deux
-       cotes). Un trait de 4 px ne peut pas encoder quatre densites de gris sur
-       un fond gris : c'est une limite de l'echelle, pas un reglage. Le niveau
-       est deja nomme a cote, sur un badge qui a sa bordure. */
-    .mg-ev-l { background: var(--bg2); border-left: 4px solid var(--border2); border-radius: 4px; padding: 7px 10px; font-size: 13px;
-               display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
-    .mg-ev-l .o { font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); }
-    svg.mg { width: 100%; height: auto; display: block; }
-    svg.mg text { font-size: 11px; fill: var(--text2); font-family: inherit; }
-    svg.mg .axe { stroke: var(--border2); stroke-width: 1; }
-    svg.mg .grille { stroke: var(--border); stroke-width: 1; }
-    svg.mg .repere-mois { stroke: var(--border); stroke-width: 0.6; }
-    svg.mg text.initiale { font-size: 10px; }
-    svg.mg text.annee { font-weight: 600; fill: var(--text); }
-    /* Telephone : chaque graphique est DESSINE a la largeur de sa carte (voir
-       largeurGraphe) et tient entier, sans defilement (demande de Thierry,
-       4 octobre 2026) ; la page, elle, ne deborde jamais. */
-    .mg-defile { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    @media (max-width: 640px) {
-      .content { padding-left: 12px; padding-right: 12px; } .mg-carte { padding: 12px; }
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « LE MARCHÉ GLOBAL » — intégrée au socle V5 le 15 novembre 2026
+     (docs/specs/spec-integration-v5-lot-2.md). La FORME change, pas le fond :
+     mêmes deux appels, mêmes sections, mêmes états.
+     ⚠ PAGE EN LECTURE SEULE (spec §17 de docs/kb/chantier-nouveau-bien.md).
+     Elle n'écrit rien, ne pilote rien. PIPELINES ÉTANCHES : l'historique
+     (sections 1 à 3) et AirROI (section 4) s'affichent côte à côte, sans
+     jamais se croiser.
+     RÈGLES V5 : aucun hexa (les trois années et les barres vivent dans
+     shared/theme.css, --yf-annee-* et --yf-barre*), aucun texte en dur. -->
+<style>
+  /* Les trois annees : N-2 la plus pale, N la plus soutenue. Des RENVOIS a
+     la charte : la page ne porte plus de couleur. */
+  .out-pont {
+    --mg-n2: var(--yf-annee-n2); --mg-n1: var(--yf-annee-n1); --mg-n: var(--yf-annee-n);
+    --mg-barre: var(--yf-barre); --mg-barre-partielle: var(--yf-barre-partielle);
+  }
+  /* ⚠ VARIANTE SOMBRE RETIREE — double validation de Thierry du 2 novembre
+     2026 : « pas de mode sombre sur YieldFlow pour l'instant ». */
+  .mg-meta { font-size: var(--fs-small); color: var(--muted); margin: 0; }
+  .mg-carte { border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px 18px; background: var(--surface); }
+  .mg-carte h2 { font-size: 16px; font-weight: var(--fw-bold); margin: 0 0 4px; }
+  .mg-carte .sous { font-size: var(--fs-small); color: var(--muted); margin: 0 0 10px; line-height: 1.45; }
+  .mg-mention { font-size: var(--fs-caption); color: var(--muted); margin: 6px 0 0; }
+  .mg-legende { display: flex; flex-wrap: wrap; gap: 14px; font-size: var(--fs-caption); color: var(--muted); margin: 8px 0 2px; }
+  .mg-legende i { display: inline-block; width: 22px; height: 0; vertical-align: 3px; margin-inline-end: 6px; }
+  .non-calc { color: var(--muted); font-style: italic; }
+  #mg-corps, #mg-airroi-zone { display: flex; flex-direction: column; gap: var(--gap-m); }
+  #mg-airroi-zone:empty { display: none; }
+  /* « En resume » (§18) : quatre blocs, chacun sa source. */
+  .mg-bloc { padding: 12px 0; border-top: 1px solid var(--line); }
+  #mg-resume-tendance { border-top: 0; padding-top: 4px; }
+  .mg-bloc h3 { font-size: 15px; font-weight: var(--fw-semibold); margin: 0 0 2px; }
+  .mg-source { font-size: var(--fs-caption); color: var(--muted); margin: 0 0 8px; }
+  .mg-verdict { font-size: 15px; font-weight: var(--fw-semibold); margin: 4px 0 8px; }
+  .mg-sens { display: grid; grid-template-columns: 26px 1fr; gap: 4px 6px; font-size: var(--fs-small); align-items: center; }
+  .mg-sens b { font-size: 17px; text-align: center; }
+  .mg-zones { color: var(--muted); font-size: var(--fs-caption); }
+  /* ⚠ LA LIGNE NE PORTE PAS LE NIVEAU, LA PASTILLE LE PORTE — regle 1 de
+     Thierry (constat de review du 3 novembre 2026). La ligne garde le fond
+     neutre des blocs ; le niveau vit dans une pastille. */
+  .mg-niv-l { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px; margin-bottom: 4px;
+              border-radius: 4px; background: var(--surface-2); font-size: var(--fs-small); color: var(--ink); }
+  .mg-niv-l small { color: var(--muted); }
+  .mg-niv-l .mg-pastille { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); white-space: nowrap;
+                           background: var(--niveau-fond, var(--surface-2)); color: var(--niv-encre, var(--ink));
+                           border: 1px solid var(--niveau-lisere, var(--border)); }
+  .mg-ev-liste { display: flex; flex-direction: column; gap: 6px; }
+  /* ⚠ LE RAIL EST NEUTRE DEPUIS LE 3 NOVEMBRE 2026, et le niveau est sur le
+     BADGE de la ligne (un trait de 4 px ne peut pas encoder quatre densites
+     de gris sur un fond gris). */
+  .mg-ev-l { background: var(--surface-2); border-inline-start: 4px solid var(--border); border-radius: 4px; padding: 7px 10px; font-size: var(--fs-small);
+             display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .mg-ev-l .o { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  svg.mg { width: 100%; height: auto; display: block; }
+  svg.mg text { font-size: 11px; fill: var(--muted); font-family: inherit; }
+  svg.mg .axe { stroke: var(--border); stroke-width: 1; }
+  svg.mg .grille { stroke: var(--line); stroke-width: 1; }
+  svg.mg .repere-mois { stroke: var(--line); stroke-width: 0.6; }
+  svg.mg text.initiale { font-size: 10px; }
+  svg.mg text.annee { font-weight: var(--fw-semibold); fill: var(--ink); }
+  /* Telephone : chaque graphique est DESSINE a la largeur de sa carte (voir
+     largeurGraphe) et tient entier, sans defilement (demande de Thierry,
+     4 octobre 2026) ; la page, elle, ne deborde jamais. */
+  .mg-defile { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  @media (max-width: 640px) {
+    .mg-carte { padding: 12px; }
+  }
+</style>
 </head>
-<body class="police-v5">
-<div class="layout">
-<div class="sidebar" id="sidebar"></div>
-<div class="main">
-<div class="content">
-  <div class="header"><h1>Le marché global</h1></div>
+<body class="out-page out-pont">
 
-  <div class="mg-avertir">
-    <b>Une estimation du marché, pas un prix.</b> Cette page montre le marché de votre commune d’après
-    les annonces Airbnb. Elle ne calcule aucun prix pour votre logement, n’en pousse aucun, et
-    <b>ne pilote rien</b>.
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
   </div>
+</header>
 
-  <div><label class="mg-meta">Logement <select id="mg-bien"></select></label></div>
-  <div class="mg-meta" id="mg-meta"></div>
+<main class="page out">
+  <div class="out-tete">
+    <div class="out-tete__titre"><h1 class="h1" data-i18n="mg.titre"></h1></div>
+  </div>
+  <nav class="seg out-yf" data-yf-onglets data-i18n-attr="aria-label:yfnav.aria"></nav>
+
+  <div class="out-note out-note--avertir mg-avertir" data-riche="mg.avertir"></div>
+
+  <label class="out-choix"><span data-i18n="yfm.logement"></span> <select id="mg-bien" class="out-saisie"></select></label>
+  <p class="mg-meta" id="mg-meta"></p>
   <!-- Sections 1 a 3 : l'historique du marche (/api/marche-global). -->
-  <div id="mg-corps"><p class="mg-meta">Lecture du marché…</p></div>
+  <div id="mg-corps"><p class="mg-meta" data-i18n="yfm.lecture_marche"></p></div>
   <!-- Section 4 : le calendrier AirROI, dans SON bloc, lu par SA route. -->
   <div id="mg-airroi-zone"></div>
   <!-- « En resume » (§18) : la tendance vient de l'historique, le reste
        d'AirROI ; chaque bloc nomme sa source, rien n'est croise. -->
-  <div class="mg-carte" id="mg-resume" hidden><h2>En résumé</h2>
+  <div class="mg-carte" id="mg-resume" hidden><h2 data-i18n="mg.resume_titre"></h2>
     <div class="mg-bloc" id="mg-resume-tendance"></div>
     <div id="mg-resume-airroi"></div>
   </div>
-</div>
-</div>
-</div>
+</main>
 
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
 <script type="module">
   // ⚠ LECTURE SEULE : la liste des logements du compte, puis deux GET, chacun
   // sa source : /api/marche-global (historique) et /api/marche-temperature
   // (AirROI). Aucune ecriture, aucun appel AirROI, aucun prix AirROI.
   import { requireAuth } from '/components/auth-guard.js'
-  import { renderSidebar } from '/components/sidebar.js'
-  import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { compteCourant, enteteCompte, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
   import { sansArchives } from '/shared/biens-vivants.js'
-  import { supabase } from '/shared/supabase.js'
+  import { supabase, signOut } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
-  import { monterAnneeTemperature, fermerDetail, badge, niv } from '/shared/temperature-calendrier.js'
+  import { renderOnboardingBanner } from '/components/onboarding-banner.js'
+  import { monterCoquille, tHtml, moisIso, formaterDate, listeLocale } from '/shared/page-outil.js'
+  import { monterOngletsYieldFlow } from '/shared/yieldflow-onglets.js'
+  import { monterAnneeTemperature, fermerDetail, badge, niv, parlerLangue } from '/shared/temperature-calendrier.js'
 
   initErrorHandler()
   const el = id => document.getElementById(id)
+  const t = (k, v) => I18n.t(k, v)
+  const th = (k, v) => tHtml(t, k, v)
   const ech = s => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
-  const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']
-  const moisFr = m => `${MOIS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`
-  const jourFr = iso => /^\d{4}-\d{2}-\d{2}/.test(String(iso || '')) ? `${Number(iso.slice(8, 10))}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—'
-  const euros = v => (typeof v === 'number' && Number.isFinite(v) ? `${String(Math.round(v * 10) / 10).replace('.', ',')} €` : 'non mesuré')
-  const pourcent = v => (typeof v === 'number' && Number.isFinite(v) ? `${Math.round(v * 100)} %` : 'non mesuré')
-  const INITIALES = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D']
+  // Les dates dans la langue de l'hote. En francais, le rendu d'avant :
+  // « oct. 2026 » pour un mois, « 30/09/2026 » pour un jour (horodatage
+  // accepte : seuls ses dix premiers caracteres comptent).
+  const moisFr = m => moisIso(I18n, m, { month: 'short', year: 'numeric' })
+  const jourFr = iso => (/^\d{4}-\d{2}-\d{2}/.test(String(iso || ''))
+    ? formaterDate(I18n, `${String(iso).slice(0, 10)}T12:00:00Z`, { day: 'numeric', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) || '—' : '—')
+  const euros = v => (typeof v === 'number' && Number.isFinite(v) ? t('yfm.euros', { v: I18n.num(Math.round(v * 10) / 10, { maximumFractionDigits: 1, useGrouping: false }) }) : t('mg.non_mesure'))
+  const pourcent = v => (typeof v === 'number' && Number.isFinite(v) ? t('yfm.pct', { v: I18n.num(Math.round(v * 100)) }) : t('mg.non_mesure'))
+  // Les initiales des douze mois, dans la langue de l'hote (« J F M A… »).
+  const INITIALES = Array.from({ length: 12 }, (_, k) => formaterDate(I18n, new Date(Date.UTC(2026, k, 15, 12)), { month: 'narrow', timeZone: 'UTC' }))
+  const liste = xs => listeLocale(I18n.lang, xs)
   // Le graphique des biens montre les 3 dernieres annees (la donnee garde 60 mois).
   const MOIS_AFFICHES = 36
   // Le mois en cours, a l'heure de Paris : le calendrier AirROI part de lui.
@@ -195,9 +182,20 @@
   })
 
   async function init () {
+    await I18n.init()
+    // Le calendrier commun parle la langue de l'hote (ses mots, ses dates).
+    parlerLangue(I18n)
     session = await requireAuth()
     if (!session) return
-    renderSidebar('yield-marche-global').catch(e => console.error('[marche-global] sidebar', e))
+    document.addEventListener('i18n:changed', () => location.reload())
+    monterCoquille({
+      HSNav, I18n, session, titre: t('mg.titre'),
+      compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
+      deconnexion: () => signOut()
+    })
+    monterOngletsYieldFlow(document.querySelector('[data-yf-onglets]'), 'marche-global', t)
+    // Le bandeau d'incitation que l'ancienne barre latérale posait : gardé.
+    renderOnboardingBanner().catch(() => {})
     const compte = compteCourant()
     // ⚠ UN LOGEMENT ARCHIVE NE PARAIT PLUS DANS LE SELECTEUR (point 7 du constat
     // de Thierry du 3 novembre 2026). Cette lecture est CLIENT — elle passe par
@@ -207,8 +205,8 @@
     let q = sansArchives(supabase.from('properties').select('id, name')).order('name')
     if (compte) q = q.eq('user_id', compte)
     const { data, error } = await q
-    if (error) return corps('<p class="non-calc">Impossible de lire la liste des logements.</p>')
-    if (!data || !data.length) return corps('<p class="non-calc">Aucun logement accessible sur ce compte.</p>')
+    if (error) return corps(`<p class="non-calc">${th('yfm.biens_illisibles')}</p>`)
+    if (!data || !data.length) return corps(`<p class="non-calc">${th('yfm.aucun_bien')}</p>`)
     el('mg-bien').innerHTML = data.map(b => `<option value="${ech(b.id)}">${ech(b.name)}</option>`).join('')
     // Le bien demande par l'URL (?bien=<uuid>), pose par le menu YieldFlow du
     // calendrier. La garde `data.some(...)` : un identifiant inconnu ou d'un
@@ -226,7 +224,7 @@
     // La fenetre de detail d'un jour appartient au logement precedent (review de 39d9d81).
     fermerDetail()
     el('mg-resume').hidden = false
-    el('mg-resume-tendance').innerHTML = '<p class="mg-meta">Lecture…</p>'
+    el('mg-resume-tendance').innerHTML = `<p class="mg-meta">${th('yfm.lecture')}</p>`
     el('mg-resume-airroi').innerHTML = ''
     chargerHistorique(j)
     chargerAirroi(j)
@@ -235,21 +233,21 @@
   // ─── L'HISTORIQUE (sections 1 a 3) ──────────────────────────────────────
   async function chargerHistorique (j) {
     dernier = null
-    corps('<p class="mg-meta">Lecture du marché…</p>'); el('mg-meta').innerHTML = ''
+    corps(`<p class="mg-meta">${th('yfm.lecture_marche')}</p>`); el('mg-meta').innerHTML = ''
     let r
     try {
       r = await fetch(`/api/marche-global?property_id=${encodeURIComponent(el('mg-bien').value)}`, {
         headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
-    } catch (e) { if (j === jeton) { corps('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>'); el('mg-resume-tendance').innerHTML = blocTendance(null) } return }
+    } catch (e) { if (j === jeton) { corps(`<p class="non-calc">${th('yfm.serveur_muet')}</p>`); el('mg-resume-tendance').innerHTML = blocTendance(null) } return }
     if (j !== jeton) return
-    if (!r.ok) { el('mg-resume-tendance').innerHTML = blocTendance(null); return corps(`<p class="non-calc">Lecture impossible (${r.status}).</p>`) }
+    if (!r.ok) { el('mg-resume-tendance').innerHTML = blocTendance(null); return corps(`<p class="non-calc">${th('yfm.statut', { statut: ech(r.status) })}</p>`) }
     let d
-    try { d = await r.json() } catch (e) { if (j === jeton) { corps('<p class="non-calc">Réponse illisible.</p>'); el('mg-resume-tendance').innerHTML = blocTendance(null) } return }
+    try { d = await r.json() } catch (e) { if (j === jeton) { corps(`<p class="non-calc">${th('yfm.illisible')}</p>`); el('mg-resume-tendance').innerHTML = blocTendance(null) } return }
     if (j !== jeton) return
     if (d.etat !== 'calcule') el('mg-resume-tendance').innerHTML = blocTendance(null)
-    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement${d.motif ? ` : ${ech(d.motif)}` : ''}.</p>`)
-    if (d.etat === 'historique_absent') return corps(`<p class="non-calc">Marché ${ech(d.marche && d.marche.localite)} : ${ech(d.motif)}.</p>`)
-    el('mg-meta').innerHTML = `Marché : <b>${ech(d.marche.localite)}</b> (${ech(d.marche.region)}, ${ech(d.marche.pays)}) · historique AirROI lu le ${jourFr(d.recupere_le)}`
+    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">${d.motif ? th('yfm.marche_inconnu_motif', { motif: ech(d.motif) }) : th('yfm.marche_inconnu')}</p>`)
+    if (d.etat === 'historique_absent') return corps(`<p class="non-calc">${th('mt.capture_absente', { localite: ech(d.marche && d.marche.localite), motif: ech(d.motif) })}</p>`)
+    el('mg-meta').innerHTML = th('mg.meta', { localite: `<b>${ech(d.marche.localite)}</b>`, region: ech(d.marche.region), pays: ech(d.marche.pays), date: ech(jourFr(d.recupere_le)) })
     dernier = d
     dessinerHistorique()
     el('mg-resume-tendance').innerHTML = blocTendance(d.progression)
@@ -277,8 +275,8 @@
     const series = troisAnnees(prog, recupereLe)
     const vals = series.flatMap(s => (s.donnee ? s.donnee.mois.map(m => m[cle]) : [])).filter(v => typeof v === 'number')
     if (!prog || prog.statut !== 'calcule' || !vals.length) {
-      const motif = prog && prog.statut === 'calcule' && !series.length ? 'la date de lecture de l’historique est illisible' : (prog && prog.motif) || 'historique absent'
-      return `<div class="mg-carte">${entete}<p class="non-calc">Non calculable : ${ech(motif)}.</p></div>`
+      const motif = prog && prog.statut === 'calcule' && !series.length ? t('mg.date_illisible') : (prog && prog.motif) || t('mg.historique_absent')
+      return `<div class="mg-carte">${entete}<p class="non-calc">${th('yfm.non_calculable', { motif: ech(motif) })}</p></div>`
     }
     const L = largeurGraphe(), H = L < 600 ? 220 : 260, G = 50, D = 12, HAUT = 12, BAS = 26
     const max = Math.max(...vals) * 1.08
@@ -299,28 +297,28 @@
         if (typeof m[cle] !== 'number') return ''
         const isole = !mesure(k - 1) && !mesure(k + 1)
         // Un mois de trop peu d'annonces reste trace, mais le dit : point creux.
-        if (m.peu_annonces) return `<circle class="peu" cx="${x(k).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="3.5" fill="var(--bg)" stroke="${s.couleur}" stroke-width="1.5"><title>${ech(moisFr(m.mois))} (${s.nom}) · ${bulle(m[cle])} · trop peu d’annonces pour être représentatif</title></circle>`
-        return `<circle cx="${x(k).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="${isole ? 3.5 : 6}" fill="${isole ? s.couleur : 'transparent'}"${isole ? ' class="isole"' : ''}><title>${ech(moisFr(m.mois))} (${s.nom}) · ${bulle(m[cle])}</title></circle>`
+        if (m.peu_annonces) return `<circle class="peu" cx="${x(k).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="3.5" fill="var(--bg)" stroke="${s.couleur}" stroke-width="1.5"><title>${ech(moisFr(m.mois))} (${s.nom}) · ${ech(bulle(m[cle]))} · ${th('mg.peu_annonces')}</title></circle>`
+        return `<circle cx="${x(k).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="${isole ? 3.5 : 6}" fill="${isole ? s.couleur : 'transparent'}"${isole ? ' class="isole"' : ''}><title>${ech(moisFr(m.mois))} (${s.nom}) · ${ech(bulle(m[cle]))}</title></circle>`
       }).join('')
       return `<path data-rang="${s.nom}" d="${dd}" fill="none" stroke="${s.couleur}" stroke-width="${s.epaisseur}"${a.partielle ? ' stroke-dasharray="6 4"' : ''}/>${points}`
     }).join('')
     const legende = `<div class="mg-legende">${series.slice().reverse().map(s => {
-      const note = !s.donnee ? ' : non mesurée' : s.donnee.partielle ? ' : partielle' : ''
+      const note = !s.donnee ? th('mg.leg_non_mesuree') : s.donnee.partielle ? th('mg.leg_partielle') : ''
       const trait = s.donnee && s.donnee.partielle ? `border-top:${s.epaisseur}px dashed ${s.couleur}` : `border-top:${s.epaisseur}px solid ${s.couleur}`
-      return `<span><i style="${trait}"></i>${s.nom}${note}</span>`
+      return `<span><i style="${trait}"></i>${note ? th('mg.ligne_sens', { nom: ech(s.nom), sens: note }) : s.nom}</span>`
     }).join('')}</div>`
-    return `<div class="mg-carte">${entete}${legende}<div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${H}" role="img" aria-label="${titre}, années N, N-1 et N-2 superposées">
+    return `<div class="mg-carte">${entete}${legende}<div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${H}" role="img" aria-label="${th('mg.aria_superposees', { titre })}">
       ${abscisse}${grille}<line class="axe" x1="${G}" x2="${L - D}" y1="${H - BAS}" y2="${H - BAS}"/>${courbes}</svg></div>
-      <p class="mg-mention">${mention}${series.some(s => s.donnee && s.donnee.mois.some(m => m.peu_annonces)) ? ` Un point creux marque un mois de moins de ${ech(prog.seuil_annonces)} annonces actives : trop peu pour être représentatif.` : ''}</p></div>`
+      <p class="mg-mention">${mention}${series.some(s => s.donnee && s.donnee.mois.some(m => m.peu_annonces)) ? ` ${th('mg.point_creux', { seuil: ech(prog.seuil_annonces) })}` : ''}</p></div>`
   }
 
   function sectionRevpar (prog, recupereLe) {
     return superposees(prog, recupereLe, 'revpar', {
-      titre: 'Le RevPAR du marché, mois par mois',
-      sous: 'Revenu par nuit disponible, médiane de l’ensemble des annonces du marché, de janvier à décembre. Une courbe par année : N (l’année de la dernière lecture de l’historique), N-1 et N-2.',
-      bulle: v => `RevPAR médian : ${euros(v)}`,
-      graduation: v => `${Math.round(v)} €`,
-      mention: 'RevPAR du marché, en euros par nuit disponible — <b>pas un prix pour votre logement</b>. Une année en pointillés est partielle : elle se lit mois par mois, jamais comme un total.',
+      titre: th('mg.revpar_titre'),
+      sous: th('mg.revpar_sous'),
+      bulle: v => t('mg.revpar_bulle', { v: euros(v) }),
+      graduation: v => ech(t('yfm.euros', { v: I18n.num(Math.round(v), { useGrouping: false }) })),
+      mention: th('mg.revpar_mention'),
     })
   }
 
@@ -328,22 +326,22 @@
   // compare aucune occupation de logement (regle 13 de Thierry).
   function sectionRemplissage (prog, recupereLe) {
     return superposees(prog, recupereLe, 'occupation', {
-      titre: 'Le remplissage du marché, mois par mois',
-      sous: 'Occupation médiane de l’ensemble des annonces du marché (part des nuits vendues), de janvier à décembre. Une courbe par année : N, N-1 et N-2.',
-      bulle: v => `occupation médiane : ${pourcent(v)}`,
-      graduation: v => `${Math.round(v * 100)} %`,
-      mention: 'Occupation <b>du marché</b>, comptée sur toutes ses annonces Airbnb, y compris les peu actives : elle ne se compare pas à l’occupation d’un logement.',
+      titre: th('mg.remplissage_titre'),
+      sous: th('mg.remplissage_sous'),
+      bulle: v => t('mg.remplissage_bulle', { v: pourcent(v) }),
+      graduation: v => ech(t('yfm.pct', { v: I18n.num(Math.round(v * 100)) })),
+      mention: th('mg.remplissage_mention'),
     })
   }
 
   // ─── Section 3 : le nombre de biens sur le marche (format existant) ─────
   function sectionBiens (ind) {
-    const entete = '<h2>Le nombre de biens sur le marché</h2><p class="sous">Annonces actives mesurées par AirROI, mois par mois, sur les 3 dernières années : là où la barre est basse, l’historique est mince.</p>'
+    const entete = `<h2>${th('mg.biens_titre')}</h2><p class="sous">${th('mg.biens_sous')}</p>`
     if (!ind || ind.statut !== 'calcule') {
-      return `<div class="mg-carte">${entete}<p class="non-calc">Non calculable : ${ech((ind && ind.motif) || 'historique absent')}.</p></div>`
+      return `<div class="mg-carte">${entete}<p class="non-calc">${th('yfm.non_calculable', { motif: ech((ind && ind.motif) || t('mg.historique_absent')) })}</p></div>`
     }
     const mois = ind.mois.slice(-MOIS_AFFICHES)
-    if (!mois.some(m => m.annonces)) return `<div class="mg-carte">${entete}<p class="non-calc">Non calculable : aucune annonce mesurée sur les 3 dernières années.</p></div>`
+    if (!mois.some(m => m.annonces)) return `<div class="mg-carte">${entete}<p class="non-calc">${th('yfm.non_calculable', { motif: th('mg.aucune_annonce') })}</p></div>`
     const L = largeurGraphe(), G = 44, D = 12, HC = 130, BAS = 34
     const x = i => G + (L - G - D) * (mois.length === 1 ? 0.5 : i / (mois.length - 1))
     // Etroit (telephone) : barres affinees, et une initiale par trimestre
@@ -359,29 +357,29 @@
     const barres = mois.map((m, i) => {
       const h = m.annonces ? (HC - BAS - 10) * m.annonces / maxA : 0
       return m.annonces
-        ? `<rect x="${(x(i) - lb / 2).toFixed(1)}" y="${(HC - BAS - h).toFixed(1)}" width="${lb.toFixed(1)}" height="${h.toFixed(1)}" fill="var(${m.couverture_partielle ? '--mg-barre-partielle' : '--mg-barre'})"><title>${ech(moisFr(m.mois))} : ${ech(m.annonces)} annonces actives${m.couverture_partielle ? ' (couverture AirROI partielle)' : ''}</title></rect>`
+        ? `<rect x="${(x(i) - lb / 2).toFixed(1)}" y="${(HC - BAS - h).toFixed(1)}" width="${lb.toFixed(1)}" height="${h.toFixed(1)}" fill="var(${m.couverture_partielle ? '--mg-barre-partielle' : '--mg-barre'})"><title>${th(m.couverture_partielle ? 'mg.barre_partielle' : 'mg.barre', { mois: ech(moisFr(m.mois)), n: ech(m.annonces) })}</title></rect>`
         : `<text x="${x(i)}" y="${HC - BAS - 4}" text-anchor="middle">·</text>`
     }).join('')
     const abscisse = mois.map((m, i) => {
       const janvier = m.mois.slice(5) === '01'
       const trimestre = ['01', '04', '07', '10'].includes(m.mois.slice(5))
-      return (!etroit || trimestre ? `<text class="initiale" x="${x(i)}" y="${HC - BAS + 12}" text-anchor="middle">${INITIALES[Number(m.mois.slice(5, 7)) - 1]}</text>` : '')
+      return (!etroit || trimestre ? `<text class="initiale" x="${x(i)}" y="${HC - BAS + 12}" text-anchor="middle">${ech(INITIALES[Number(m.mois.slice(5, 7)) - 1])}</text>` : '')
         + (janvier || (i === 0 && anneeDuPremier) ? `<text class="annee" x="${x(i)}" y="${HC - BAS + 27}" text-anchor="middle">${ech(m.mois.slice(0, 4))}</text>` : '')
     }).join('')
     const bornes = mois.filter(m => m.annonces)
-    return `<div class="mg-carte">${entete}<div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${HC}" role="img" aria-label="Annonces actives par mois, 36 derniers mois">
+    return `<div class="mg-carte">${entete}<div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${HC}" role="img" aria-label="${th('mg.biens_aria')}">
       ${barres}<line class="axe" x1="${G}" x2="${L - D}" y1="${HC - BAS}" y2="${HC - BAS}"/>${abscisse}</svg></div>
-      <p class="mg-mention">${ech(moisFr(bornes[0].mois))} : ${ech(bornes[0].annonces)} annonces · ${ech(moisFr(bornes[bornes.length - 1].mois))} : ${ech(bornes[bornes.length - 1].annonces)} annonces.${mois.some(m => m.couverture_partielle) ? ' Une barre grise : mois où la couverture d’AirROI était encore partielle.' : ''}</p></div>`
+      <p class="mg-mention">${th('mg.biens_bornes', { mois1: ech(moisFr(bornes[0].mois)), n1: ech(bornes[0].annonces), mois2: ech(moisFr(bornes[bornes.length - 1].mois)), n2: ech(bornes[bornes.length - 1].annonces) })}${mois.some(m => m.couverture_partielle) ? ` ${th('mg.barre_grise')}` : ''}</p></div>`
   }
 
   // ─── Section 4 : le calendrier AirROI, 12 mois d'un coup (§17.1) ────────
   // ⚠ PIPELINE ETANCHE : sa route, son bloc ; rien de l'historique n'y entre.
   // Le rendu est le module commun avec la page « La temperature du marche ».
   async function chargerAirroi (j) {
-    el('mg-airroi-zone').innerHTML = `<div class="mg-carte"><h2>Le calendrier du marché selon AirROI, jour par jour</h2>`
-      + `<p class="sous"><b>Estimation AirROI, pas un prix.</b> Le niveau de chaque jour d’après le modèle de prix d’AirROI pour votre commune, ramené à quatre niveaux. Touchez un jour pour son détail.</p>`
-      + `<div id="mg-airroi"><p class="mg-meta">Lecture du modèle AirROI…</p></div>`
-      + `<p class="mg-mention">Deux sources, deux calendriers. Le modèle AirROI ne tient pas compte de l’historique des ventes.</p>`
+    el('mg-airroi-zone').innerHTML = `<div class="mg-carte"><h2>${th('mg.airroi_titre')}</h2>`
+      + `<p class="sous">${th('mg.airroi_sous')}</p>`
+      + `<div id="mg-airroi"><p class="mg-meta">${th('mg.airroi_lecture')}</p></div>`
+      + `<p class="mg-mention">${th('mg.airroi_deux_sources')}</p>`
       + `<p class="mg-mention" id="mg-airroi-meta"></p></div>`
     const ici = html => {
       if (j !== jeton) return
@@ -392,16 +390,16 @@
     try {
       r = await fetch(`/api/marche-temperature?property_id=${encodeURIComponent(el('mg-bien').value)}`, {
         headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
-    } catch (e) { return ici('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>') }
+    } catch (e) { return ici(`<p class="non-calc">${th('yfm.serveur_muet')}</p>`) }
     if (j !== jeton) return
-    if (!r.ok) return ici(`<p class="non-calc">Lecture impossible (${r.status}).</p>`)
+    if (!r.ok) return ici(`<p class="non-calc">${th('yfm.statut', { statut: ech(r.status) })}</p>`)
     let d
-    try { d = await r.json() } catch (e) { return ici('<p class="non-calc">Réponse illisible.</p>') }
+    try { d = await r.json() } catch (e) { return ici(`<p class="non-calc">${th('yfm.illisible')}</p>`) }
     if (j !== jeton) return
-    if (d.etat === 'marche_inconnu') return ici(`<p class="non-calc">Aucun marché n’est relié à ce logement${d.motif ? ` : ${ech(d.motif)}` : ''}.</p>`)
+    if (d.etat === 'marche_inconnu') return ici(`<p class="non-calc">${d.motif ? th('yfm.marche_inconnu_motif', { motif: ech(d.motif) }) : th('yfm.marche_inconnu')}</p>`)
     if (d.etat === 'capture_absente') return ici(`<p class="non-calc">${ech(d.motif)}.</p>`)
-    if (d.etat !== 'calcule' || !Array.isArray(d.jours) || !d.jours.length) return ici('<p class="non-calc">Aucun jour à afficher pour ce marché.</p>')
-    el('mg-airroi-meta').innerHTML = `Modèle AirROI calculé le ${jourFr(d.capture_le)}.`
+    if (d.etat !== 'calcule' || !Array.isArray(d.jours) || !d.jours.length) return ici(`<p class="non-calc">${th('mt.aucun_jour')}</p>`)
+    el('mg-airroi-meta').innerHTML = th('mg.airroi_meta', { date: ech(jourFr(d.capture_le)) })
     // Le calendrier part du MEME mois que le resume calcule par l'API ; a
     // defaut, du mois de Paris lu ici (review de f229258).
     const depart = d.resume && d.resume.periode && /^\d{4}-\d{2}$/.test(String(d.resume.periode.debut)) ? d.resume.periode.debut : moisDeParis()
@@ -416,24 +414,24 @@
   const BANDE_STABLE = 3
   const sensDe = pct => (typeof pct !== 'number' ? null : pct > BANDE_STABLE ? 'hausse' : pct < -BANDE_STABLE ? 'baisse' : 'stable')
   const FLECHE = { hausse: '↑', baisse: '↓', stable: '→' }
-  const MOT = { hausse: 'en hausse', baisse: 'en baisse', stable: 'stable' }
+  const MOT = { hausse: 'mg.mot_hausse', baisse: 'mg.mot_baisse', stable: 'mg.mot_stable' }
+  const VERDICT = { hausse: 'mg.verdict_hausse', baisse: 'mg.verdict_baisse', stable: 'mg.verdict_stable' }
   function blocTendance (prog) {
-    const tete = '<h3>La tendance du marché</h3><p class="mg-source">Source : historique du marché — les 12 derniers mois comparés aux 12 précédents.</p>'
+    const tete = `<h3>${th('mg.tendance_titre')}</h3><p class="mg-source">${th('mg.tendance_source')}</p>`
     const p = prog && prog.statut === 'calcule' ? prog.progression : null
-    if (!p || p.statut !== 'calcule') return `${tete}<p class="non-calc">Non calculable : ${ech((p && p.motif) || (prog && prog.motif) || 'historique absent')}.</p>`
+    if (!p || p.statut !== 'calcule') return `${tete}<p class="non-calc">${th('yfm.non_calculable', { motif: ech((p && p.motif) || (prog && prog.motif) || t('mg.historique_absent')) })}</p>`
     const ligne = (cle, nom) => {
       const sn = sensDe(p.indicateurs[cle] && p.indicateurs[cle].pct)
-      return sn ? `<b aria-hidden="true">${FLECHE[sn]}</b><span>${nom} : ${MOT[sn]}</span>` : `<b aria-hidden="true">·</b><span>${nom} : <span class="non-calc">non calculable</span></span>`
+      return sn ? `<b aria-hidden="true">${FLECHE[sn]}</b><span>${th('mg.ligne_sens', { nom: th(nom), sens: th(MOT[sn]) })}</span>` : `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom: th(nom), sens: `<span class="non-calc">${th('mg.non_calculable_mot')}</span>` })}</span>`
     }
     const v = sensDe(p.indicateurs.revpar && p.indicateurs.revpar.pct)
-    const verdict = v === 'stable' ? 'Le marché est stable par rapport à l’année dernière.'
-      : v ? `Le marché est ${MOT[v]} par rapport à l’année dernière.` : null
-    return `${tete}${verdict ? `<p class="mg-verdict">${verdict}</p>` : '<p class="non-calc">Pas de verdict : le RevPAR n’est pas calculable.</p>'}`
-      + `<div class="mg-sens">${ligne('revpar', 'RevPAR')}${ligne('occupation', 'Occupation')}${ligne('annonces', 'Nombre de biens')}</div>`
+    const verdict = v ? th(VERDICT[v]) : null
+    return `${tete}${verdict ? `<p class="mg-verdict">${verdict}</p>` : `<p class="non-calc">${th('mg.pas_de_verdict')}</p>`}`
+      + `<div class="mg-sens">${ligne('revpar', 'mg.ind_revpar')}${ligne('occupation', 'mg.ind_occupation')}${ligne('annonces', 'mg.ind_biens')}</div>`
   }
 
   // 5b, 5c, 5d — AirROI, sur les 12 mois du calendrier.
-  const SOURCE_AIRROI = '<p class="mg-source">Source : modèle AirROI — les 12 mois du calendrier ci-dessus.</p>'
+  const sourceAirroi = () => `<p class="mg-source">${th('mg.source_airroi')}</p>`
   // ⚠ TROIS JETONS PAR NIVEAU : le fond, le trait, l'encre. L'echelle d'encre
   // n'a pas d'« accent » — elle n'a que des densites — donc le trait et le
   // texte se choisissent dans la meme echelle, et le texte bascule sur --bg
@@ -459,19 +457,24 @@
   }
   // Le CHIFFRE est toujours ecrit (regle 2) — a l'affichage seulement.
   const CHIFFRE_MARCHE = { Base: '1', Moyen: '2', Haut: '3', 'Très haut ou Exceptionnel': '4-5' }
+  // ⚠ LES CLES CI-DESSUS SONT LES VALEURS QUE L'API RENVOIE, en francais, et
+  // elles le restent : c'est leur NOM A L'ECRAN qui se traduit, ici. Un
+  // libelle inconnu est dit tel quel, echappe.
+  const NOM_YF = { Base: 'mg.yf_base', Moyen: 'mg.yf_moyen', Haut: 'mg.yf_haut', 'Très haut ou Exceptionnel': 'mg.yf_tres_haut_exc' }
+  const nomYf = x => (Object.hasOwn(NOM_YF, x) ? th(NOM_YF[x]) : ech(x))
   function blocsAirroi (r) {
     if (!r || r.statut !== 'calcule' || !r.semaine || !Array.isArray(r.niveaux) || !Array.isArray(r.evenements)) {
-      return `<div class="mg-bloc"><h3>Le marché selon AirROI</h3>${SOURCE_AIRROI}<p class="non-calc">Non calculable : ${ech((r && r.motif) || 'résumé absent')}.</p></div>`
+      return `<div class="mg-bloc"><h3>${th('mg.airroi_bloc_titre')}</h3>${sourceAirroi()}<p class="non-calc">${th('yfm.non_calculable', { motif: ech((r && r.motif) || t('mg.resume_absent')) })}</p></div>`
     }
     const s = r.semaine
-    const verdict = s.verdict === 'week_end' ? 'Le marché est plutôt favorable en week-end.'
-      : s.verdict === 'semaine' ? 'Le marché est plutôt favorable en semaine.'
-        : s.verdict === 'equilibre' ? 'Week-end et semaine se valent.' : null
-    const semaine = `<div class="mg-bloc"><h3>Week-end ou semaine</h3>${SOURCE_AIRROI}`
-      + (verdict ? `<p class="mg-verdict">${verdict}</p>` : '<p class="non-calc">Non calculable.</p>')
-      + (s.meilleur ? `<p class="mg-mention">Meilleur jour : <b>${ech(s.meilleur)}</b> · jour le plus faible : <b>${ech(s.pire)}</b>.</p>` : '')
-      + '<p class="mg-mention">Week-end : nuits du vendredi et du samedi ; semaine : du lundi au jeudi.</p></div>'
-    const niveaux = `<div class="mg-bloc"><h3>Les niveaux du marché</h3>${SOURCE_AIRROI}`
+    const verdict = s.verdict === 'week_end' ? th('mg.sem_week_end')
+      : s.verdict === 'semaine' ? th('mg.sem_semaine')
+        : s.verdict === 'equilibre' ? th('mt.verdict_egal') : null
+    const semaine = `<div class="mg-bloc"><h3>${th('mt.sem_titre')}</h3>${sourceAirroi()}`
+      + (verdict ? `<p class="mg-verdict">${verdict}</p>` : `<p class="non-calc">${th('mg.non_calculable_point')}</p>`)
+      + (s.meilleur ? `<p class="mg-mention">${th('mt.sem_meilleur', { meilleur: ech(s.meilleur), pire: ech(s.pire) })}</p>` : '')
+      + `<p class="mg-mention">${th('mg.sem_definition')}</p></div>`
+    const niveaux = `<div class="mg-bloc"><h3>${th('mg.niveaux_titre')}</h3>${sourceAirroi()}`
       + r.niveaux.map(n => {
         // ⚠ LE REPLI EST DEVENU UNE CLASSE VIDE, ET LA RAISON MERITE D'ETRE
         // GARDEE. Jusqu'au 3 novembre 2026 cette ligne rendait trois jetons en
@@ -485,79 +488,81 @@
         // dans les `var(…, …)` de la regle. Il n'y a plus de couleur a choisir
         // ici, donc plus de mauvaise couleur a choisir.
         const classe = YF[n.yieldflow] || ''
-        return `<div class="mg-niv-l"><span><b class="mg-pastille ${classe}">${CHIFFRE_MARCHE[n.yieldflow] ? `${CHIFFRE_MARCHE[n.yieldflow]} · ` : ''}${ech(n.yieldflow)}</b> <small>(${ech(NOM_AIRROI[niv(n.niveau)] || '—')})</small></span><span>${ech(n.jours)} jour${n.jours > 1 ? 's' : ''}</span></div>`
+        return `<div class="mg-niv-l"><span><b class="mg-pastille ${classe}">${CHIFFRE_MARCHE[n.yieldflow] ? `${CHIFFRE_MARCHE[n.yieldflow]} · ` : ''}${nomYf(n.yieldflow)}</b> <small>(${NOM_AIRROI[niv(n.niveau)] ? th(NOM_AIRROI[niv(n.niveau)]) : '—'})</small></span><span>${th('yfm.jours', { n: Number(n.jours) || 0 })}</span></div>`
       }).join('')
-      + '<p class="mg-mention">Les niveaux d’AirROI lus dans les noms de votre grille YieldFlow : une lecture, pas un calcul de vos prix. Pic correspond à Très haut ou Exceptionnel.</p></div>'
+      + `<p class="mg-mention">${th('mg.niveaux_mention')}</p></div>`
     const evts = r.evenements.map(e => {
       const n = niv(e.niveau)
       return `<div class="mg-ev-l"><strong>${ech(e.nom)}</strong>`
-        + `<span>${jourFr(e.debut)}${e.fin !== e.debut ? ` → ${jourFr(e.fin)}` : ''} (${ech(e.nuits)} nuit${e.nuits > 1 ? 's' : ''})</span>`
-        + `${badge(e.niveau)}<span class="o">${e.recurrent ? 'récurrent' : 'ponctuel'}</span></div>`
+        + `<span>${ech(jourFr(e.debut))}${e.fin !== e.debut ? ` → ${ech(jourFr(e.fin))}` : ''} (${th('yfm.nuits', { n: Number(e.nuits) || 0 })})</span>`
+        + `${badge(e.niveau)}<span class="o">${th(e.recurrent ? 'mg.recurrent' : 'mg.ponctuel')}</span></div>`
     }).join('')
-    const evenements = `<div class="mg-bloc"><h3>Les événements détectés</h3>${SOURCE_AIRROI}`
-      + '<p class="mg-mention" style="margin-bottom:8px">Ces événements sont détectés par le modèle AirROI. Pour qu’ils influencent vos prix, créez-les dans vos événements.</p>'
-      + (evts ? `<div class="mg-ev-liste">${evts}</div>` : '<p class="non-calc">Aucun événement détecté sur ces 12 mois.</p>') + '</div>'
+    const evenements = `<div class="mg-bloc"><h3>${th('mg.evenements_titre')}</h3>${sourceAirroi()}`
+      + `<p class="mg-mention" style="margin-bottom:8px">${th('mg.evenements_mention')}</p>`
+      + (evts ? `<div class="mg-ev-liste">${evts}</div>` : `<p class="non-calc">${th('mg.aucun_evenement')}</p>`) + '</div>'
     // Une capture qui ne couvre pas toute la fenetre le dit.
     const p = r.periode || {}
     const partiel = p.jours && p.jours_fenetre && p.jours < p.jours_fenetre
-      ? `<p class="mg-mention" style="margin-top:8px">Le modèle AirROI ne couvre que ${ech(p.jours)} jours sur ${ech(p.jours_fenetre)} : ce résumé ne porte que sur eux.</p>` : ''
+      ? `<p class="mg-mention" style="margin-top:8px">${th('mg.couverture_partielle', { jours: ech(p.jours), total: ech(p.jours_fenetre) })}</p>` : ''
     return partiel + semaine + niveaux + evenements + blocVacances(r.vacances)
   }
 
   // 5e — les vacances scolaires (§19) : le modele AirROI croise avec le
   // calendrier officiel des vacances. Un sens par periode et par zone, jamais
   // un chiffre, et une conclusion en une phrase.
-  const enListe = xs => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} et ${xs[xs.length - 1]}` : xs[0] || '')
-  const DE_PERIODE = { toussaint: 'de la Toussaint', noel: 'de Noël', hiver: 'd’hiver', printemps: 'de printemps', ete: 'd’été' }
-  const EN_PERIODE = { toussaint: 'À la Toussaint', noel: 'À Noël', hiver: 'En hiver', printemps: 'Au printemps', ete: 'En été' }
-  const EFFET_VAC = { hausse: 'font monter le marché', baisse: 'font baisser le marché', neutre: 'sans effet net' }
+  // ⚠ LES PHRASES SE COMPOSENT PAR CLE, PAS PAR CONCATENATION : « de Noël »,
+  // « À Noël » et la liste « A, B et C » changent de forme d'une langue a
+  // l'autre. Une periode inconnue garde son nom (echappe) dans un gabarit.
+  const PERIODES = ['toussaint', 'noel', 'hiver', 'printemps', 'ete']
+  const EFFET_VAC = { hausse: 'mg.vac_effet_hausse', baisse: 'mg.vac_effet_baisse', neutre: 'mg.vac_effet_neutre' }
   const FLECHE_VAC = { hausse: '↑', baisse: '↓', neutre: '→' }
   function blocVacances (v) {
     if (v === undefined) return ''
-    const tete = '<div class="mg-bloc"><h3>Les vacances scolaires</h3><p class="mg-source">Source : modèle AirROI et calendrier officiel des vacances scolaires — les 12 mois du calendrier ci-dessus.</p>'
+    const tete = `<div class="mg-bloc"><h3>${th('mg.vac_titre')}</h3><p class="mg-source">${th('mg.vac_source')}</p>`
     const connues = v && /^\d{4}-\d{2}-\d{2}$/.test(String(v.connues_jusqu_au || ''))
-      ? `<p class="mg-mention">Le calendrier officiel des vacances n’est publié que jusqu’au ${jourFr(v.connues_jusqu_au)} : les vacances suivantes n’entrent pas encore dans ce bilan.</p>` : ''
-    if (!v || v.statut !== 'calcule' || !Array.isArray(v.periodes)) return `${tete}<p class="non-calc">Non calculable : ${ech((v && v.motif) || 'vacances absentes')}.</p>${connues}</div>`
+      ? `<p class="mg-mention">${th('mg.vac_connues', { date: ech(jourFr(v.connues_jusqu_au)) })}</p>` : ''
+    if (!v || v.statut !== 'calcule' || !Array.isArray(v.periodes)) return `${tete}<p class="non-calc">${th('yfm.non_calculable', { motif: ech((v && v.motif) || t('mg.vac_absentes')) })}</p>${connues}</div>`
     // Une meme periode deux fois dans la fenetre se distingue par son annee scolaire.
-    const doublons = new Set(v.periodes.map(p => p.cle).filter((c, i, t) => t.indexOf(c) !== i))
-    const de = p => `${DE_PERIODE[p.cle] || `de ${ech(p.nom)}`}${doublons.has(p.cle) ? ` ${ech(p.annee_scolaire)}` : ''}`
-    const en = p => `${EN_PERIODE[p.cle] || `En ${ech(p.nom)}`}${doublons.has(p.cle) ? ` ${ech(p.annee_scolaire)}` : ''}`
+    const doublons = new Set(v.periodes.map(p => p.cle).filter((c, i, l) => l.indexOf(c) !== i))
+    const annee = p => (doublons.has(p.cle) ? ` ${ech(p.annee_scolaire)}` : '')
+    const de = p => `${PERIODES.includes(p.cle) ? th(`mg.vac_de_${p.cle}`) : th('mg.vac_de_autre', { nom: ech(p.nom) })}${annee(p)}`
+    const en = p => `${PERIODES.includes(p.cle) ? th(`mg.vac_en_${p.cle}`) : th('mg.vac_en_autre', { nom: ech(p.nom) })}${annee(p)}`
     const calc = v.periodes.filter(p => p.statut === 'calcule' && FLECHE_VAC[p.sens])
     const hausses = calc.filter(p => p.sens === 'hausse').map(de)
     const baisses = calc.filter(p => p.sens === 'baisse').map(de)
     const phrases = []
-    if (hausses.length) phrases.push(`Les vacances ${enListe(hausses)} portent le marché${baisses.length ? ` ; celles ${enListe(baisses)} le font baisser` : ''}.`)
-    else if (baisses.length) phrases.push(`Aucune période de vacances mesurée ne porte nettement le marché ; celles ${enListe(baisses)} le font baisser.`)
-    else if (calc.length) phrases.push('Les périodes de vacances mesurées n’ont pas d’effet net sur le marché.')
+    if (hausses.length) phrases.push(baisses.length ? th('mg.vac_hausses_baisses', { hausses: liste(hausses), baisses: liste(baisses) }) : th('mg.vac_hausses', { hausses: liste(hausses) }))
+    else if (baisses.length) phrases.push(th('mg.vac_baisses', { baisses: liste(baisses) }))
+    else if (calc.length) phrases.push(th('mg.vac_sans_effet'))
     // Les zones ne se departagent que dans une periode qui PORTE le marche.
     const parZone = calc.filter(p => p.sens === 'hausse' && Array.isArray(p.zones)).map(p => {
       const pp = Array.isArray(p.plus_porteuses) ? p.plus_porteuses : null
       const nb = Number(p.zones_mesurees) || 0
-      if (!pp || nb < 2) return `${en(p)}, les zones ne se départagent pas (trop peu de zones mesurées)`
-      if (!pp.length) return `${en(p)}, ${nb === 3 ? 'les trois zones se valent' : 'les zones mesurées se valent'}`
-      return `${en(p)}, ${pp.length > 1 ? `les zones ${enListe(pp.map(ech))} sont les plus porteuses` : `la zone ${ech(pp[0])} est la plus porteuse`}`
+      if (!pp || nb < 2) return th('mg.zones_indeparta', { quand: en(p) })
+      if (!pp.length) return th(nb === 3 ? 'mg.zones_trois_egales' : 'mg.zones_egales', { quand: en(p) })
+      return pp.length > 1 ? th('mg.zones_porteuses', { quand: en(p), zones: liste(pp.map(ech)) }) : th('mg.zone_porteuse', { quand: en(p), zone: ech(pp[0]) })
     })
-    // Apres un point-virgule, la suite reprend en minuscule (« ; au printemps »).
-    if (parZone.length) phrases.push(`${parZone.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x)).join(' ; ')}.`)
+    // Apres le separateur, la suite reprend en minuscule (« ; au printemps »).
+    if (parZone.length) phrases.push(th('mg.zones_phrase', { suite: parZone.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x)).join(t('mg.separateur')) }))
     const lignes = v.periodes.map(p => {
-      const nom = `Vacances ${de(p)}`
-      if (p.statut === 'debut_seulement') return `<b aria-hidden="true">·</b><span>${nom} : <span class="non-calc">non mesurables, seule leur date de début est publiée</span></span>`
-      if (p.statut === 'hors_fenetre') return `<b aria-hidden="true">·</b><span>${nom} : <span class="non-calc">en grande partie hors des 12 mois, non conclues</span></span>`
-      if (p.statut !== 'calcule' || !FLECHE_VAC[p.sens]) return `<b aria-hidden="true">·</b><span>${nom} : <span class="non-calc">non calculable${p.motif ? ` (${ech(p.motif)})` : ''}</span></span>`
+      const nom = th('mg.vac_nom', { de: de(p) })
+      if (p.statut === 'debut_seulement') return `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom, sens: `<span class="non-calc">${th('mg.vac_debut_seulement')}</span>` })}</span>`
+      if (p.statut === 'hors_fenetre') return `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom, sens: `<span class="non-calc">${th('mg.vac_hors_fenetre')}</span>` })}</span>`
+      if (p.statut !== 'calcule' || !FLECHE_VAC[p.sens]) return `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom, sens: `<span class="non-calc">${th('mg.non_calculable_mot')}${p.motif ? ` (${ech(p.motif)})` : ''}</span>` })}</span>`
       const zones = Array.isArray(p.zones)
-        ? `<br><small class="mg-zones">${p.zones.map(z => `zone ${ech(z.zone)} ${FLECHE_VAC[z.sens] || '(non mesurée)'}`).join(' · ')}</small>` : ''
-      const partielle = p.partielle ? ' <span class="non-calc">(en partie seulement dans les 12 mois)</span>' : ''
+        ? `<br><small class="mg-zones">${p.zones.map(z => th('mg.zone_sens', { zone: ech(z.zone), sens: FLECHE_VAC[z.sens] || th('mg.zone_non_mesuree') })).join(' · ')}</small>` : ''
+      const partielle = p.partielle ? ` <span class="non-calc">${th('mg.vac_partielle')}</span>` : ''
       // Le niveau du marche pendant la periode, comme pour un evenement.
       // Sans niveau lisible, rien n'est insere (pas de tiret orphelin).
-      return `<b aria-hidden="true">${FLECHE_VAC[p.sens]}</b><span>${nom}${niv(p.niveau) ? ` ${badge(p.niveau)}` : ''} : ${EFFET_VAC[p.sens]}${partielle}${zones}</span>`
+      return `<b aria-hidden="true">${FLECHE_VAC[p.sens]}</b><span>${th('mg.ligne_sens', { nom: `${nom}${niv(p.niveau) ? ` ${badge(p.niveau)}` : ''}`, sens: `${th(EFFET_VAC[p.sens])}${partielle}${zones}` })}</span>`
     }).join('')
     return `${tete}${phrases.length ? `<p class="mg-verdict">${phrases.join(' ')}</p>` : ''}<div class="mg-sens">${lignes}</div>`
-      + '<p class="mg-mention">Chaque période est comparée aux jours hors vacances des mois où elle tombe vraiment. Peu de jours ne concernent qu’une seule zone : l’écart entre zones reste indicatif.</p>'
+      + `<p class="mg-mention">${th('mg.vac_mention')}</p>`
       + `${connues}</div>`
   }
-  const NOM_AIRROI = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
+  const NOM_AIRROI = { creux: 'mg.airroi_creux', modere: 'mg.airroi_modere', favorable: 'mg.airroi_favorable', pic: 'mg.airroi_pic' }
 
-  init()
+  init().catch(e => console.error('[marche-global]', e))
 </script>
 </body>
 </html>

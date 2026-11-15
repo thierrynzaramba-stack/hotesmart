@@ -1,121 +1,114 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Le marché</title>
-  <link rel="stylesheet" href="/public/style.css">
-  <!-- ⚠ LA POLICE DU SOCLE V5 SUR LES ÉCRANS YIELDFLOW — demande de Thierry du
-       30 octobre 2026. L'URL est IDENTIQUE à celle des pages V5
-       (pages/aujourdhui.html, pages/calendrier.html) : même fichier, donc
-       même entrée de cache navigateur, aucune requête supplémentaire pour un
-       hôte qui vient d'une page V5.
-       ⚠ ET LA CLASSE `police-v5` POSÉE SUR LA BALISE BODY EST LA SECONDE
-       MOITIÉ : sans elle, la fonte serait téléchargée sans être appliquée. La
-       règle `body` de public/style.css n'est PAS touchée, parce que cette
-       feuille sert aussi des écrans antérieurs à V5 que ce lot ne change pas. -->
-  <!-- ⚠ LE PRECONNECT EST LA MOITIE QU'ON OUBLIE — releve en review. Une
-       feuille tierce BLOQUANTE ajoutee a six ecrans, c'est un DNS puis un TLS
-       de plus devant le premier affichage, contre le budget « premier
-       affichage < 1 s » de CLAUDE.md. Les pages V5 de reference
-       (pages/aujourdhui.html, pages/calendrier.html) le portent ; ces ecrans
-       ne l'avaient pas, et le test n'epinglait que l'URL. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>
-    [hidden] { display: none !important; }
-    /* ⚠ PAGE NEUVE, LECTURE SEULE (lot V2.3.4). Elle n'ecrit rien, ne
-       pilote rien, et ne modifie aucun ecran existant. Cadrage :
-       docs/kb/chantier-nouveau-bien.md §11 (frontiere), §13. */
-    .mc-avertir { background: var(--amber-bg); border: 0.5px solid var(--amber);
-                  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 16px;
-                  font-size: 13.5px; line-height: 1.5; }
-    .mc-avertir b { font-weight: 600; }
-    .mc-meta { font-size: 12.5px; color: var(--text2); margin-bottom: 16px; }
-    .mc-carte { border: 0.5px solid var(--border); border-radius: var(--radius-lg);
-                padding: 14px 16px; margin-bottom: 16px; background: var(--bg); }
-    .mc-carte h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
-    .mc-carte .sous { font-size: 12.5px; color: var(--text2); margin: 0 0 12px; }
-    .mc-echelle { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .02em;
-                  text-transform: uppercase; padding: 2px 8px; border-radius: 999px; margin-bottom: 8px; }
-    .mc-echelle.pacing { background: #E6EEF9; color: #234E8C; }
-    .mc-echelle.mensuel { background: #F4ECDF; color: #7A5418; }
-    .mc-echelle.dm { background: var(--bg3); color: var(--text2); }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « LE MARCHÉ » — intégrée au socle V5 le 15 novembre 2026
+     (docs/specs/spec-integration-v5-lot-2.md). La FORME change, pas le fond :
+     même appel (/api/yield-marche?vue=calendrier), mêmes cartes, mêmes états.
+     ⚠ LECTURE SEULE (lot V2.3.4). Elle n'écrit rien, ne pilote rien. Cadrage :
+     docs/kb/chantier-nouveau-bien.md §11 (frontière), §13.
+     RÈGLES V5 : aucun hexa (les deux palettes vivent dans shared/theme.css,
+     --yf-pacing-* et --yf-mensuel-*), aucun texte en dur. -->
+<style>
+  .mc-meta { font-size: var(--fs-small); color: var(--muted); margin: 0; }
+  .mc-carte { border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px 18px; background: var(--surface); }
+  .mc-carte h2 { font-size: 16px; font-weight: var(--fw-bold); margin: 0 0 4px; }
+  .mc-carte .sous { font-size: var(--fs-small); color: var(--muted); margin: 0 0 12px; }
+  .mc-echelle { display: inline-block; font-size: 11px; font-weight: var(--fw-semibold); letter-spacing: .02em;
+                text-transform: uppercase; padding: 2px 8px; border-radius: var(--radius-pill); margin-bottom: 8px; }
+  .mc-echelle.pacing { background: var(--yf-pacing-fond); color: var(--yf-pacing-4); }
+  .mc-echelle.mensuel { background: var(--yf-mensuel-fond); color: var(--yf-mensuel-4); }
+  .mc-echelle.dm { background: var(--surface-2); color: var(--muted); }
+  #mc-corps { display: flex; flex-direction: column; gap: var(--gap-m); }
 
-    /* La frise du pacing : une bande par saison, longueur = nombre de jours. */
-    .mc-frise { display: flex; height: 34px; border-radius: 6px; overflow: hidden; margin: 6px 0 4px; }
-    .mc-frise > div { position: relative; min-width: 2px; }
-    .mc-frise .rupt { box-shadow: inset 3px 0 0 #1a1a1a; }
-    .mc-frise .rupt.forte { box-shadow: inset 5px 0 0 #1a1a1a; }
-    .mc-frise .trans { background-image: linear-gradient(#fff 50%, transparent 50%);
-                       background-size: 2px 6px; background-repeat: repeat-y; background-position: 0 0; }
-    .mc-bornes { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text3); }
-    /* Echelle du PACING : bleus. Echelle MENSUELLE : ocres. Jamais la meme. */
-    .p-basse { background: #D8E4F5; } .p-moyenne { background: #9DB9E3; }
-    .p-forte { background: #5B87C9; } .p-tres_forte { background: #234E8C; }
-    .m-basse { background: #F1E6D2; } .m-moyenne { background: #DEC49A; }
-    .m-forte { background: #B98C47; } .m-tres_forte { background: #7A5418; }
-    .dm-zone { background: repeating-linear-gradient(45deg, var(--bg3), var(--bg3) 6px, var(--bg2) 6px, var(--bg2) 12px); }
+  /* La frise du pacing : une bande par saison, longueur = nombre de jours. */
+  .mc-frise { display: flex; height: 34px; border-radius: 6px; overflow: hidden; margin: 6px 0 4px; }
+  .mc-frise > div { position: relative; min-width: 2px; }
+  .mc-frise .rupt { box-shadow: inset 3px 0 0 var(--ink); }
+  .mc-frise .rupt.forte { box-shadow: inset 5px 0 0 var(--ink); }
+  .mc-frise .trans { background-image: linear-gradient(var(--surface) 50%, transparent 50%);
+                     background-size: 2px 6px; background-repeat: repeat-y; background-position: 0 0; }
+  .mc-bornes { display: flex; justify-content: space-between; font-size: var(--fs-caption); color: var(--muted-2); }
+  /* Echelle du PACING : bleus. Echelle MENSUELLE : ocres. Jamais la meme. */
+  .p-basse { background: var(--yf-pacing-1); } .p-moyenne { background: var(--yf-pacing-2); }
+  .p-forte { background: var(--yf-pacing-3); } .p-tres_forte { background: var(--yf-pacing-4); }
+  .m-basse { background: var(--yf-mensuel-1); } .m-moyenne { background: var(--yf-mensuel-2); }
+  .m-forte { background: var(--yf-mensuel-3); } .m-tres_forte { background: var(--yf-mensuel-4); }
+  .dm-zone { background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 6px, var(--line) 6px, var(--line) 12px); }
 
-    table.mc { width: 100%; border-collapse: collapse; font-size: 13px; }
-    table.mc th { text-align: left; font-weight: 600; font-size: 12px; color: var(--text2);
-                  border-bottom: 0.5px solid var(--border); padding: 6px 8px; }
-    table.mc td { padding: 7px 8px; border-bottom: 0.5px solid var(--border); vertical-align: top; }
-    .pastille { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+  table.mc { width: 100%; border-collapse: collapse; font-size: var(--fs-small); }
+  table.mc th { text-align: start; font-weight: var(--fw-semibold); font-size: var(--fs-caption); color: var(--muted);
+                border-bottom: 1px solid var(--border); padding: 6px 8px; }
+  table.mc td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .pastille { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-inline-end: 6px; }
 
-    /* Les frontieres : la force se VOIT (Thierry). Forte : trait epais et
-       fonce ; moderee : trait moyen ; faible : trait fin ; transition :
-       pointille gris, texte gris — « pas une rupture ». */
-    .front { display: inline-flex; align-items: center; gap: 8px; }
-    .front i { display: inline-block; width: 4px; height: 18px; background: #1a1a1a; border-radius: 1px; }
-    .front.f2 i { width: 7px; } .front.f1 i { width: 4px; } .front.f0 i { width: 2px; background: #555; }
-    .front.tr i { width: 0; height: 18px; border-left: 2px dashed var(--text3); background: none; }
-    .front.tr { color: var(--text3); }
-    .front b { font-weight: 600; }
-    .non-calc { color: var(--text2); font-style: italic; }
-    .a-lire { border-left: 3px solid var(--amber); padding: 6px 10px; margin: 8px 0; background: var(--bg2);
-              font-size: 13px; line-height: 1.45; border-radius: 0 6px 6px 0; }
-    .motif { font-size: 12.5px; color: var(--text2); }
-    /* Telephone : chaque ligne de tableau devient une fiche empilee (aucun
-       defilement horizontal). */
-    @media (max-width: 640px) {
-      .content { padding-left: 12px; padding-right: 12px; }
-      .mc-carte { padding: 12px; }
-      table.mc thead { display: none; }
-      table.mc, table.mc tbody, table.mc tr, table.mc td { display: block; width: 100%; }
-      table.mc tr { border-bottom: 0.5px solid var(--border); padding: 8px 0; }
-      table.mc td { border: none; padding: 2px 0; }
-      table.mc td:first-child { font-weight: 600; }
-    }
-  </style>
+  /* Les frontieres : la force se VOIT (Thierry). Forte : trait epais et
+     fonce ; moderee : trait moyen ; faible : trait fin ; transition :
+     pointille gris, texte gris — « pas une rupture ». */
+  .front { display: inline-flex; align-items: center; gap: 8px; }
+  .front i { display: inline-block; width: 4px; height: 18px; background: var(--ink); border-radius: 1px; }
+  .front.f2 i { width: 7px; } .front.f1 i { width: 4px; } .front.f0 i { width: 2px; background: var(--muted); }
+  .front.tr i { width: 0; height: 18px; border-left: 2px dashed var(--muted-2); background: none; }
+  .front.tr { color: var(--muted-2); }
+  .front b { font-weight: var(--fw-semibold); }
+  .non-calc { color: var(--muted); font-style: italic; }
+  .a-lire { border-inline-start: 3px solid var(--amber); padding: 6px 10px; margin: 8px 0; background: var(--surface-2);
+            font-size: var(--fs-small); line-height: 1.45; border-radius: 0 6px 6px 0; }
+  .motif { font-size: var(--fs-small); color: var(--muted); }
+  /* Telephone : chaque ligne de tableau devient une fiche empilee (aucun
+     defilement horizontal). */
+  @media (max-width: 640px) {
+    .mc-carte { padding: 12px; }
+    table.mc thead { display: none; }
+    table.mc, table.mc tbody, table.mc tr, table.mc td { display: block; width: 100%; }
+    table.mc tr { border-bottom: 1px solid var(--line); padding: 8px 0; }
+    table.mc td { border: none; padding: 2px 0; }
+    table.mc td:first-child { font-weight: var(--fw-semibold); }
+  }
+</style>
 </head>
-<body class="police-v5">
-<!-- Contrat de mise en page commun : `.layout > .sidebar#sidebar + .main > .content`
-     (voir apps/yield/prix.html, mesure du 14 septembre 2026). -->
-<div class="layout">
-<div class="sidebar" id="sidebar"></div>
-<div class="main">
-<div class="content">
-  <div class="header">
-    <h1>Le marché</h1>
+<body class="out-page out-pont">
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
   </div>
+</header>
 
-  <div class="mc-avertir" id="mc-avertir">
-    <b>Une estimation du marché, pas un prix.</b> Cette page décrit <b>quand</b> le marché
-    de votre commune se remplit, d’après les réservations Airbnb de l’ensemble du marché.
-    Elle ne calcule aucun prix, n’en pousse aucun, et <b>ne pilote rien</b> : vos prix et
-    votre calendrier ne changent pas.
+<main class="page out">
+  <div class="out-tete">
+    <div class="out-tete__titre"><h1 class="h1" data-i18n="mc.titre"></h1></div>
   </div>
+  <nav class="seg out-yf" data-yf-onglets data-i18n-attr="aria-label:yfnav.aria"></nav>
 
-  <div id="mc-choix"><label class="motif">Logement
-    <select id="mc-bien"></select></label></div>
-  <div class="mc-meta" id="mc-meta"></div>
-  <div id="mc-corps"><p class="motif">Lecture du marché…</p></div>
-</div>
-</div>
-</div>
+  <div class="out-note out-note--avertir" id="mc-avertir" data-riche="mc.avertir"></div>
 
+  <div id="mc-choix"><label class="out-choix"><span data-i18n="yfm.logement"></span>
+    <select id="mc-bien" class="out-saisie"></select></label></div>
+  <p class="mc-meta" id="mc-meta"></p>
+  <div id="mc-corps"><p class="motif" data-i18n="yfm.lecture_marche"></p></div>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
 <script type="module">
   // ⚠ LECTURE SEULE. La seule requete est un GET sur /api/yield-marche
   // (vue=calendrier) ; aucune ecriture, aucun appel AirROI, aucun prix.
@@ -124,37 +117,58 @@
   // chacune avec son libelle d'echelle. Rien ici ne les ordonne ensemble.
   // ⚠ TOUT CE QUI N'EST PAS CALCULABLE LE DIT, avec sa raison.
   import { requireAuth } from '/components/auth-guard.js'
-  import { renderSidebar } from '/components/sidebar.js'
-  import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { compteCourant, enteteCompte, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
   import { sansArchives } from '/shared/biens-vivants.js'
-  import { supabase } from '/shared/supabase.js'
+  import { supabase, signOut } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
+  import { renderOnboardingBanner } from '/components/onboarding-banner.js'
+  import { monterCoquille, tHtml, jourIso, moisIso } from '/shared/page-outil.js'
+  import { monterOngletsYieldFlow } from '/shared/yieldflow-onglets.js'
 
   initErrorHandler()
   const el = id => document.getElementById(id)
+  const t = (k, v) => I18n.t(k, v)
+  const th = (k, v) => tHtml(t, k, v)
   const ech = s => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
-  const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
-  const jourFr = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))
-    ? `${Number(iso.slice(8, 10))} ${MOIS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : '—'
-  const moisFr = m => `${MOIS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`
+  // Un jour et un mois dans la langue de l'hote (en francais : « 4 octobre
+  // 2026 », « octobre 2026 », comme avant) ; un jour illisible rend « — ».
+  const jourFr = iso => jourIso(I18n, iso)
+  const moisFr = m => moisIso(I18n, m)
   const nbJours = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000) + 1
-  const virgule = x => String(x).replace('.', ',')
-  // Les phrases du calcul portent des dates ISO : elles se lisent en francais.
-  const phrase = t => ech(String(t || '').replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (_, d) => jourFr(d)))
-  const NOM = { basse: 'Basse', moyenne: 'Moyenne', forte: 'Forte', tres_forte: 'Très forte' }
+  // Un nombre du calcul, a la decimale de la langue, SANS separateur de
+  // milliers et sans arrondi (l'ancien `virgule` : « 1,8 »).
+  const virgule = x => I18n.num(Number(x), { maximumFractionDigits: 6, useGrouping: false })
+  // Les phrases du calcul portent des dates ISO : elles se lisent dans la
+  // langue de l'hote. ⚠ LE RESTE DE LA PHRASE EST ECRIT PAR L'API, EN
+  // FRANCAIS, et le reste (api/ hors du lot : spec du lot 2, §8 point 2).
+  const phrase = p => ech(String(p || '').replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (_, d) => jourFr(d)))
+  const NOM = { basse: 'mc.saison_basse', moyenne: 'mc.saison_moyenne', forte: 'mc.saison_forte', tres_forte: 'mc.saison_tres_forte' }
   // Une saison n'entre dans un attribut `class` que si elle est connue
   // (liste blanche — review) ; sinon, dite telle quelle, echappee.
   const classe = x => (Object.hasOwn(NOM, x) ? x : 'inconnue')
-  const nomDe = x => (Object.hasOwn(NOM, x) ? NOM[x] : `saison inconnue (${ech(x)})`)
+  const nomDe = x => (Object.hasOwn(NOM, x) ? th(NOM[x]) : th('mc.saison_inconnue', { saison: ech(x) }))
   const nombre = x => (typeof x === 'number' && Number.isFinite(x) ? virgule(x) : '—')
+  const pct = v => th('yfm.pct', { v: ech(v) })
+  // Le sens d'une frontiere n'est dit que s'il est CONNU.
+  const SENS = { hausse: 'mc.sens_hausse', baisse: 'mc.sens_baisse' }
+  const sensDe = s => (Object.hasOwn(SENS, s) ? ` · ${th(SENS[s])}` : '')
 
   let session = null
 
   async function init () {
+    await I18n.init()
     session = await requireAuth()
     if (!session) return
-    renderSidebar('yield-marche').catch(e => console.error('[yield-marche] sidebar', e))
+    document.addEventListener('i18n:changed', () => location.reload())
+    monterCoquille({
+      HSNav, I18n, session, titre: t('mc.titre'),
+      compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
+      deconnexion: () => signOut()
+    })
+    monterOngletsYieldFlow(document.querySelector('[data-yf-onglets]'), null, t)
+    // Le bandeau d'incitation que l'ancienne barre latérale posait : gardé.
+    renderOnboardingBanner().catch(() => {})
     // ⚠ UN LOGEMENT, SON MARCHE (securite, review du 24 septembre) : la vue
     // ne rend que le marche relie au logement choisi, sous sa garde.
     const compte = compteCourant()
@@ -166,8 +180,8 @@
     let q = sansArchives(supabase.from('properties').select('id, name')).order('name')
     if (compte) q = q.eq('user_id', compte)
     const { data, error } = await q
-    if (error) return corps('<p class="non-calc">Impossible de lire la liste des logements.</p>')
-    if (!data || !data.length) return corps('<p class="non-calc">Aucun logement accessible sur ce compte.</p>')
+    if (error) return corps(`<p class="non-calc">${th('yfm.biens_illisibles')}</p>`)
+    if (!data || !data.length) return corps(`<p class="non-calc">${th('yfm.aucun_bien')}</p>`)
     el('mc-bien').innerHTML = data.map(b => `<option value="${ech(b.id)}">${ech(b.name)}</option>`).join('')
     el('mc-bien').addEventListener('change', charger)
     charger()
@@ -176,19 +190,19 @@
   let jeton = 0
   async function charger () {
     const j = ++jeton
-    corps('<p class="motif">Lecture du marché…</p>')
+    corps(`<p class="motif">${th('yfm.lecture_marche')}</p>`)
     el('mc-meta').innerHTML = ''
     let r
     try {
       r = await fetch(`/api/yield-marche?vue=calendrier&property_id=${encodeURIComponent(el('mc-bien').value)}`, {
         headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
-    } catch (e) { return corps('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>') }
+    } catch (e) { return corps(`<p class="non-calc">${th('yfm.serveur_muet')}</p>`) }
     if (j !== jeton) return
-    if (!r.ok) return corps(`<p class="non-calc">Lecture impossible (${r.status}).</p>`)
+    if (!r.ok) return corps(`<p class="non-calc">${th('yfm.statut', { statut: ech(r.status) })}</p>`)
     const d = await r.json()
     if (j !== jeton) return
-    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement${d.motif ? ` : ${ech(d.motif)}` : ''}.</p>`)
-    if (d.etat !== 'calendrier') return corps(`<p class="non-calc">Aucune étude du marché ${d.marche ? `de ${ech(d.marche.localite)} ` : ''}n’est encore enregistrée : rien à montrer.</p>`)
+    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">${d.motif ? th('yfm.marche_inconnu_motif', { motif: ech(d.motif) }) : th('yfm.marche_inconnu')}</p>`)
+    if (d.etat !== 'calendrier') return corps(`<p class="non-calc">${d.marche ? th('mc.aucune_etude_de', { localite: ech(d.marche.localite) }) : th('mc.aucune_etude')}</p>`)
     rendre(d.calendrier)
   }
 
@@ -196,38 +210,37 @@
 
   // La classe de force d'une frontiere : ce qui se VOIT.
   function front (f, estRupture) {
-    if (!f) return '<span class="motif">début de la lecture</span>'
+    if (!f) return `<span class="motif">${th('mc.debut_lecture')}</span>`
     // Une ligne d'une methode ANTERIEURE n'a pas enregistre de force : on le
     // dit, sans inventer « nuits absentes ».
     if (!('force' in f) && !('depuis_zero' in f)) {
       return estRupture
-        ? `<span class="front f1"><i></i><b>rupture</b> · force non enregistrée par cette méthode${f.rapport != null ? ` (rapport ×${nombre(f.rapport)})` : ''}${f.sens === 'hausse' || f.sens === 'baisse' ? ` · ${f.sens}` : ''}</span>`
-        : '<span class="front tr"><i></i>frontière · force non enregistrée par cette méthode</span>'
+        ? `<span class="front f1"><i></i>${th('mc.f_rupture_sans_force')}${f.rapport != null ? ` ${th('mc.f_rapport', { r: nombre(f.rapport) })}` : ''}${sensDe(f.sens)}</span>`
+        : `<span class="front tr"><i></i>${th('mc.f_frontiere_sans_force')}</span>`
     }
     if (f.force == null && !f.depuis_zero) {
       // Une rupture sans force mesuree reste une rupture a l'ecran, comme sur la frise.
-      return estRupture ? '<span class="front f1"><i></i><b>rupture</b> · force non mesurable</span>'
-        : '<span class="front tr"><i></i>transition · force non mesurable</span>'
+      return estRupture ? `<span class="front f1"><i></i>${th('mc.f_rupture_non_mesurable')}</span>`
+        : `<span class="front tr"><i></i>${th('mc.f_transition_non_mesurable')}</span>`
     }
-    if (!estRupture) return `<span class="front tr"><i></i>transition ×${virgule(f.force)} — pas une rupture</span>`
+    if (!estRupture) return `<span class="front tr"><i></i>${th('mc.f_transition', { f: virgule(f.force) })}</span>`
     const cls = f.depuis_zero || f.force >= 2 ? 'f2' : f.force >= 1.5 ? 'f1' : 'f0'
-    const libelle = f.depuis_zero ? 'depuis zéro nuit' : `×${nombre(f.force)}`
-    const mot = cls === 'f2' ? 'rupture forte' : cls === 'f1' ? 'rupture' : 'rupture faible'
+    const libelle = f.depuis_zero ? th('mc.depuis_zero') : `×${nombre(f.force)}`
+    const mot = cls === 'f2' ? 'mc.f_rupture_forte' : cls === 'f1' ? 'mc.f_rupture' : 'mc.f_rupture_faible'
     // Le sens n'est dit que s'il est CONNU (review : un sens absent devenait « baisse »).
-    const sens = f.sens === 'hausse' || f.sens === 'baisse' ? ` · ${f.sens}` : ''
-    return `<span class="front ${cls}"><i></i><b>${mot}</b> ${libelle}${sens}</span>`
+    return `<span class="front ${cls}"><i></i>${th(mot, { libelle })}${sensDe(f.sens)}</span>`
   }
 
   function rendre (m) {
-    el('mc-meta').innerHTML = `Marché : <b>${ech(m.localite)}</b> (${ech(m.region)}, ${ech(m.pays)}) ·
-      réservations lues le <b>${jourFr(m.capture_le)}</b> · méthode ${ech(m.methode)}`
+    el('mc-meta').innerHTML = th('mc.meta', { localite: ech(m.localite), region: ech(m.region), pays: ech(m.pays),
+      date: ech(jourFr(m.capture_le)), methode: ech(m.methode) })
     if (m.statut !== 'calcule') {
-      return corps(`<div class="mc-carte"><h2>Saisons non calculables</h2>
-        <p class="non-calc">${ech(m.motif || 'motif non précisé')}</p></div>`)
+      return corps(`<div class="mc-carte"><h2>${th('mc.non_calculables_titre')}</h2>
+        <p class="non-calc">${m.motif ? ech(m.motif) : th('mc.motif_non_precise')}</p></div>`)
     }
     // Une ligne sans regimes (methode anterieure a V2.3.1) : on le DIT.
     if (!Array.isArray(m.regimes) || !m.regimes.length) {
-      return corps('<div class="mc-carte"><h2>Saisons non affichables</h2><p class="non-calc">Cette étude ne porte pas ses régimes (méthode antérieure) : aucune saison n’est montrée plutôt qu’une lecture inventée.</p></div>')
+      return corps(`<div class="mc-carte"><h2>${th('mc.non_affichables_titre')}</h2><p class="non-calc">${th('mc.non_affichables')}</p></div>`)
     }
     const regimes = m.regimes
     const saisons = m.saisons || []
@@ -246,10 +259,10 @@
     const blocs = regimes.map(g => {
       if (g.regime === 'derniere_minute') {
         return `<div class="mc-carte">
-          <span class="mc-echelle dm">Zone de dernière minute</span>
-          <h2>${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
+          <span class="mc-echelle dm">${th('mc.echelle_dm')}</span>
+          <h2>${ech(jourFr(g.debut))} → ${ech(jourFr(g.fin))}</h2>
           <div class="mc-frise"><div class="dm-zone" style="flex:1"></div></div>
-          <p class="non-calc">${ech(g.phrase || 'Zone de dernière minute, non interprétable.')} Aucune saison, aucune rupture.</p>
+          <p class="non-calc">${g.phrase ? ech(g.phrase) : th('mc.dm_defaut')} ${th('mc.dm_rien')}</p>
         </div>`
       }
       if (g.regime === 'pacing') {
@@ -257,41 +270,41 @@
         const frise = saisons.map((s, k) => {
           const e = entree(s, k)
           const cls = !e ? '' : e.rupture ? ((e.f.force >= 2 || e.f.depuis_zero) ? 'rupt forte' : 'rupt') : 'trans'
-          return `<div class="p-${classe(s.saison)} ${cls}" style="flex:${nbJours(s.debut, s.fin) / total}" title="${nomDe(s.saison)} · ${jourFr(s.debut)} → ${jourFr(s.fin)}"></div>`
+          return `<div class="p-${classe(s.saison)} ${cls}" style="flex:${nbJours(s.debut, s.fin) / total}" title="${nomDe(s.saison)} · ${ech(jourFr(s.debut))} → ${ech(jourFr(s.fin))}"></div>`
         }).join('')
         const lignes = saisons.map((s, k) => {
           const e = entree(s, k)
-          return `<tr><td>${jourFr(s.debut)} → ${jourFr(s.fin)}</td>
+          return `<tr><td>${ech(jourFr(s.debut))} → ${ech(jourFr(s.fin))}</td>
             <td><span class="pastille p-${classe(s.saison)}"></span>${nomDe(s.saison)}</td>
             <td>${e ? front(e.f, e.rupture) : front(null)}</td></tr>`
         }).join('')
         return `<div class="mc-carte">
-          <span class="mc-echelle pacing">Échelle du pacing</span>
-          <h2>Réservations déjà prises · ${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
-          <p class="sous">${ech(g.phrase || '')}${m.horizon_fin && m.fenetre_fin && m.horizon_fin < m.fenetre_fin ? ` Au-delà du ${jourFr(m.horizon_fin)}, trop peu de réservations pour conclure.` : ''}</p>
+          <span class="mc-echelle pacing">${th('mc.echelle_pacing')}</span>
+          <h2>${th('mc.pacing_titre', { debut: ech(jourFr(g.debut)), fin: ech(jourFr(g.fin)) })}</h2>
+          <p class="sous">${ech(g.phrase || '')}${m.horizon_fin && m.fenetre_fin && m.horizon_fin < m.fenetre_fin ? ` ${th('mc.horizon', { date: ech(jourFr(m.horizon_fin)) })}` : ''}</p>
           <div class="mc-frise">${frise}</div>
-          <div class="mc-bornes"><span>${jourFr(saisons[0] && saisons[0].debut)}</span><span>${jourFr(saisons.length && saisons[saisons.length - 1].fin)}</span></div>
-          <table class="mc"><thead><tr><th>Période</th><th>Saison (échelle du pacing)</th><th>Comment elle commence</th></tr></thead>
+          <div class="mc-bornes"><span>${ech(jourFr(saisons[0] && saisons[0].debut))}</span><span>${ech(jourFr(saisons.length && saisons[saisons.length - 1].fin))}</span></div>
+          <table class="mc"><thead><tr><th>${th('mc.col_periode')}</th><th>${th('mc.col_saison_pacing')}</th><th>${th('mc.col_commence')}</th></tr></thead>
           <tbody>${lignes}</tbody></table>
         </div>`
       }
       if (g.regime === 'forme_mensuelle') {
         // `au_dela` absent : la forme mensuelle n'a pas ete calculee — dit, jamais « aucun mois ».
         if (!Array.isArray(m.au_dela)) {
-          return `<div class="mc-carte"><span class="mc-echelle mensuel">Échelle mensuelle</span>
-            <h2>Forme des trois dernières années · ${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
-            <p class="non-calc">Forme mensuelle non calculable : l’historique du marché n’a pas été fourni à cette étude.</p></div>`
+          return `<div class="mc-carte"><span class="mc-echelle mensuel">${th('mc.echelle_mensuel')}</span>
+            <h2>${th('mc.mensuel_titre', { debut: ech(jourFr(g.debut)), fin: ech(jourFr(g.fin)) })}</h2>
+            <p class="non-calc">${th('mc.mensuel_non_calc')}</p></div>`
         }
         const mois = m.au_dela
-        const lignes = mois.map(x => `<tr><td>${/^\d{4}-\d{2}$/.test(String(x.mois || '')) ? moisFr(x.mois) : '—'}</td>
-          <td>${x.saison ? `<span class="pastille m-${classe(x.saison)}"></span>${nomDe(x.saison)}` : `<span class="non-calc">non calculable : ${ech(x.motif || 'sans motif')}</span>`}</td>
-          <td class="motif">${x.indice != null ? `indice ${nombre(x.indice)} · ${nombre(x.annees)} an${x.annees > 1 ? 's' : ''}` : ''}</td></tr>`).join('')
+        const lignes = mois.map(x => `<tr><td>${/^\d{4}-\d{2}$/.test(String(x.mois || '')) ? ech(moisFr(x.mois)) : '—'}</td>
+          <td>${x.saison ? `<span class="pastille m-${classe(x.saison)}"></span>${nomDe(x.saison)}` : `<span class="non-calc">${th('mc.non_calc_motif', { motif: x.motif ? ech(x.motif) : th('mc.sans_motif') })}</span>`}</td>
+          <td class="motif">${x.indice != null ? th('mc.indice', { indice: nombre(x.indice), annees: nombre(x.annees), n: Number(x.annees) > 1 ? 2 : 1 }) : ''}</td></tr>`).join('')
         return `<div class="mc-carte">
-          <span class="mc-echelle mensuel">Échelle mensuelle — ne se compare pas à celle du pacing</span>
-          <h2>Forme des trois dernières années · ${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
+          <span class="mc-echelle mensuel">${th('mc.echelle_mensuel_long')}</span>
+          <h2>${th('mc.mensuel_titre', { debut: ech(jourFr(g.debut)), fin: ech(jourFr(g.fin)) })}</h2>
           <p class="sous">${ech(g.phrase || '')}</p>
-          ${lignes ? `<table class="mc"><thead><tr><th>Mois</th><th>Saison (échelle mensuelle)</th><th>Mesure</th></tr></thead><tbody>${lignes}</tbody></table>`
-            : '<p class="non-calc">Aucun mois au-delà de l’horizon.</p>'}
+          ${lignes ? `<table class="mc"><thead><tr><th>${th('mc.col_mois')}</th><th>${th('mc.col_saison_mensuel')}</th><th>${th('mc.col_mesure')}</th></tr></thead><tbody>${lignes}</tbody></table>`
+            : `<p class="non-calc">${th('mc.aucun_mois')}</p>`}
         </div>`
       }
       return ''
@@ -302,11 +315,11 @@
   }
 
   function explication (m) {
-    const titre = '<h2>Pourquoi le marché monte</h2><p class="sous">Le calendrier français (vacances des trois zones, fériés, ponts, dates commerciales) lu APRÈS coup, sur des saisons déjà établies sans lui.</p>'
+    const titre = `<h2>${th('mc.pourquoi_titre')}</h2><p class="sous">${th('mc.pourquoi_sous')}</p>`
     if (!m.pics) {
-      return `<div class="mc-carte">${titre}<p class="non-calc">${ech((m.limites || [])[0] || 'Explication non calculable.')}</p></div>`
+      return `<div class="mc-carte">${titre}<p class="non-calc">${(m.limites || [])[0] ? ech(m.limites[0]) : th('mc.explication_non_calc')}</p></div>`
     }
-    const pics = m.pics.map(p => `<tr><td>${jourFr(p.debut)} → ${jourFr(p.fin)}</td>
+    const pics = m.pics.map(p => `<tr><td>${ech(jourFr(p.debut))} → ${ech(jourFr(p.fin))}</td>
       <td><span class="pastille p-${classe(p.saison)}"></span>${nomDe(p.saison)}</td>
       <td>${phrase(p.phrase)}</td></tr>`).join('')
     // Seuls les evenements A LIRE s'affichent : un pic faiblement marque reste
@@ -314,25 +327,25 @@
     const tous = m.evenements_possibles || []
     const masques = tous.filter(e => e.a_lire === false).length
     // Masque ne veut pas dire explique (review) : la page le dit, sans montrer.
-    const noteMasques = masques ? `<p class="motif">${masques} période${masques > 1 ? 's' : ''} sans cause connue mais faiblement marquée${masques > 1 ? 's' : ''} (aucune rupture franche) : non affichée${masques > 1 ? 's' : ''}.</p>` : ''
+    const noteMasques = masques ? `<p class="motif">${th('mc.masques', { n: masques })}</p>` : ''
     const aLire = (tous.filter(e => e.a_lire !== false).map(e => `<div class="a-lire">${phrase(e.phrase)}</div>`).join('')
-      || (masques ? '<p class="motif">Aucune période à lire.</p>' : '<p class="motif">Rien à signaler : chaque pic a une cause dans le calendrier français.</p>')) + noteMasques
-    const ecarts = (m.ecart_semaine_week_end || []).map(x => `<tr><td>${jourFr(x.debut)} → ${jourFr(x.fin)}</td>
-      <td>${x.ecart_prix_pct != null ? `<b>${x.ecart_prix_pct > 0 ? '+' : ''}${nombre(x.ecart_prix_pct)} %</b> le week-end`
-        : `<span class="non-calc">${ech(x.motif || 'non calculable, motif non précisé')}</span>`}</td>
-      <td class="motif">${x.ecart_prix_pct != null ? `remplissage ${nombre(Math.round(x.remplissage_semaine * 1000) / 10)} % en semaine, ${nombre(Math.round(x.remplissage_week_end * 1000) / 10)} % le week-end` : `${nombre(x.nuits_reservees_semaine ?? 0)} / ${nombre(x.nuits_reservees_week_end ?? 0)} nuits réservées`}</td></tr>`).join('')
+      || (masques ? `<p class="motif">${th('mc.aucune_a_lire')}</p>` : `<p class="motif">${th('mc.rien_a_signaler')}</p>`)) + noteMasques
+    const ecarts = (m.ecart_semaine_week_end || []).map(x => `<tr><td>${ech(jourFr(x.debut))} → ${ech(jourFr(x.fin))}</td>
+      <td>${x.ecart_prix_pct != null ? th('mc.ecart_we', { ecart: `${x.ecart_prix_pct > 0 ? '+' : ''}${pct(nombre(x.ecart_prix_pct))}` })
+        : `<span class="non-calc">${x.motif ? ech(x.motif) : th('mc.non_calc_defaut')}</span>`}</td>
+      <td class="motif">${x.ecart_prix_pct != null ? th('mc.remplissage', { sem: pct(nombre(Math.round(x.remplissage_semaine * 1000) / 10)), we: pct(nombre(Math.round(x.remplissage_week_end * 1000) / 10)) }) : th('mc.nuits_reservees', { sem: nombre(x.nuits_reservees_semaine ?? 0), we: nombre(x.nuits_reservees_week_end ?? 0) })}</td></tr>`).join('')
     return `<div class="mc-carte">${titre}
-      <table class="mc"><thead><tr><th>Pic</th><th>Saison (échelle du pacing)</th><th>Cause lue dans le calendrier</th></tr></thead><tbody>${pics}</tbody></table>
-      <h2 style="margin-top:16px">À lire : sans cause calendaire française connue</h2>
-      <p class="sous">Rien n’est enregistré. Si vous en retenez une, saisissez-la vous-même dans vos événements.</p>
+      <table class="mc"><thead><tr><th>${th('mc.col_pic')}</th><th>${th('mc.col_saison_pacing')}</th><th>${th('mc.col_cause')}</th></tr></thead><tbody>${pics}</tbody></table>
+      <h2 style="margin-top:16px">${th('mc.a_lire_titre')}</h2>
+      <p class="sous">${th('mc.a_lire_sous')}</p>
       ${aLire}
-      <h2 style="margin-top:16px">Semaine / week-end</h2>
-      <p class="sous">Vendredi et samedi soir contre dimanche à jeudi, hors vacances et fériés. Un pourcentage, jamais un prix ; sous 400 nuits réservées d’un côté, pas de chiffre.</p>
-      <table class="mc"><thead><tr><th>Période</th><th>Écart</th><th>Mesure</th></tr></thead><tbody>${ecarts}</tbody></table>
+      <h2 style="margin-top:16px">${th('mc.semaine_titre')}</h2>
+      <p class="sous">${th('mc.semaine_sous')}</p>
+      <table class="mc"><thead><tr><th>${th('mc.col_periode')}</th><th>${th('mc.col_ecart')}</th><th>${th('mc.col_mesure')}</th></tr></thead><tbody>${ecarts}</tbody></table>
     </div>`
   }
 
-  init()
+  init().catch(e => console.error('[yield-marche]', e))
 </script>
 </body>
 </html>

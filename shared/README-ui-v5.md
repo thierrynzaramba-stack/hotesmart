@@ -98,6 +98,21 @@ font (spec : `docs/specs/spec-integration-v5-lot-*.md`) partagent :
   moteur i18n, vrai `nav.js`), et `tests/outils/mesurer-pages-outils.js` en
   tire la mesure AVANT / APRÈS de la règle de performance.
 
+Les **écrans YieldFlow** (lot 2, `docs/specs/spec-integration-v5-lot-2.md`)
+ajoutent :
+
+- **le sous-menu YieldFlow** de l'ancienne barre latérale, déplacé en rangée
+  d'onglets : `monterOngletsYieldFlow(conteneur, actif, t)` de
+  `shared/yieldflow-onglets.js`, une seule liste ;
+- **les palettes du marché** dans `shared/theme.css` (`--yf-pacing-*`,
+  `--yf-mensuel-*`, `--yf-annee-*`, `--yf-barre*`) et **les cinq niveaux**
+  `.out-pont .n-*`, copie au caractère de `public/style.css` ;
+- dans `shared/page-outil.js` : `tHtml` (une traduction posée en HTML, la
+  donnée échappée, `**gras**` du dictionnaire seulement), `jourIso`,
+  `moisIso`, `listeLocale` ;
+- le calendrier commun `shared/temperature-calendrier.js` parle la langue de
+  l'hôte après `parlerLangue(I18n)`, le français d'avant sans.
+
 ## Tester en local
 
 ```

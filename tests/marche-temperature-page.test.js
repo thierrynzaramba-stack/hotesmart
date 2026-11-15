@@ -10,7 +10,9 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 
-const PAGE = fs.readFileSync(path.join(__dirname, '..', 'apps', 'yield', 'marche-temperature.html'), 'utf8')
+// ⚠ LA SOURCE AVEC SES TEXTES (intégration V5, lot 2) : les phrases vivent dans
+// shared/i18n/fr.json, tests/outils/source-traduite.js les remet à côté de leur clé.
+const PAGE = require('./outils/source-traduite').sourceTraduite('apps/yield/marche-temperature.html')
 const SCRIPT = PAGE.slice(PAGE.indexOf('<script type="module">'))
 // Le calendrier jour par jour vit dans un module COMMUN (§16.1) : ce qu'on
 // exige de la page, on l'exige aussi de lui.

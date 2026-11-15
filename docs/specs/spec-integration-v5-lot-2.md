@@ -114,6 +114,14 @@ voit le menu ≡ du compte courant avec ses droits, comme sur les écrans V5.
 | Calendrier AirROI 12 mois (module commun), départ au mois du résumé ou au mois de Paris, date du modèle | conservé |
 | En résumé : la tendance (sens par indicateur, bande ±3 %, verdict sur le RevPAR), week-end ou semaine, niveaux du marché lus dans la grille YieldFlow (chiffre toujours écrit, niveau sur la pastille, jamais sur la ligne), événements détectés, couverture partielle dite, vacances scolaires (sens par période et par zone, phrases de synthèse, date de publication du calendrier officiel, statuts non mesurables) | conservé |
 
+### 3.4 Ce que portait l'ancienne barre latérale sur ces écrans
+
+| Fonction / information | Sort |
+|---|---|
+| Le sous-menu YieldFlow (Prédiction de prix, Vos événements, Le marché global, Choisir vos comparables) sous l'entrée « Tarification dynamique » | **déplacé** : une rangée d'onglets en tête de chaque écran YieldFlow (`shared/yieldflow-onglets.js`, une seule liste), aux MÊMES adresses et aux MÊMES libellés — lus par un test dans `components/sidebar.js` —, précédée de « Tarification dynamique » (`/apps/yield`, le nom de l'app dans `shared/config.js`). L'écran courant y est marqué ; « La température du marché » et « Le marché », qui n'étaient pas dans ce sous-menu, n'y entrent pas. |
+| L'entrée « Tarification dynamique » du menu | déplacée : « YieldFlow » dans les Outils du menu ≡ (`HSNav.outils`, lot 1), au droit `reservations` comme avant |
+| Le bandeau d'incitation, le sélecteur de compte, les badges | comme au lot 1 (§3.1) : bandeau gardé, sélecteur de compte dans le menu ≡ |
+
 ## 4. Catégorie des données affichées
 
 Inchangée : ces trois pages affichent des données NON URGENTES (marché,
@@ -163,7 +171,41 @@ Les 8 lectures Supabase : `onboarding_state` (`requireAuth`), `properties`
 (la page), puis la barre latérale (`api_keys`, `properties`, `subscriptions`)
 et son bandeau (`onboarding_state`, `accounts`, `subscriptions`).
 
-APRÈS : par sous-lot, §6 ter.
+### 6 ter. APRÈS — sous-lot 2a (même outil, même compte)
+
+| Page | Appels (avant → après) | dont `/api` | dont Supabase | dont `getUser` | dont dictionnaires | Octets des fichiers du dépôt (gzip) |
+|---|---|---|---|---|---|---|
+| marche-temperature | 12 → **10** | 2 → 2 | 8 → 5 | 2 → 1 | 0 → 2 | 166 453 → 360 156 (63 183 → 115 721) |
+| marche | 12 → **10** | 2 → 2 | 8 → 5 | 2 → 1 | 0 → 2 | 152 990 → 344 674 (58 442 → 110 102) |
+| marche-global | 13 → **11** | 3 → 3 | 8 → 5 | 2 → 1 | 0 → 2 | 192 064 → 384 195 (71 739 → 123 571) |
+
+- **Deux appels de moins par écran** : les trois lectures de l'ancienne barre
+  latérale et son second `getUser` partent ; les deux dictionnaires arrivent
+  (le français pèse 125 275 octets, servi en cache un an par sa version).
+- **Les octets montent, et c'est le socle V5** : `theme.css`, `ui.css`,
+  `nav.js`, le moteur i18n et ses dictionnaires — les mêmes fichiers que les
+  écrans V5, donc déjà en cache pour un hôte qui vient de l'un d'eux. Ce que le
+  lot 2a ajoute au socle : `ui.css` +2 274 octets (bloc YieldFlow), `theme.css`
+  +1 128 (les palettes), `fr.json` +16 843 (255 clés, dont 24 du calendrier
+  commun).
+- **Les sites d'appel `/api` sont identiques** avant et après (vérifié sur
+  `fb93b24e`) ; `tests/budget-ecran.test.js` les compte désormais.
+
+### 6 quater. Contre-épreuve (REVIEW.md règle 19)
+
+`tests/integration-v5-lot-2.test.js` (14 tests) lancé sur l'arbre de
+`fb93b24e` extrait par `git archive` hors du dépôt, avec les outils de test du
+lot : **11 rouges sur 14**, chacun sur ce que le lot change (socle, coquille,
+sous-menu, langue, charte, calendrier commun). Les 3 verts sont des tests de
+NON-RÉGRESSION (le motif du serveur reste du texte ; délégable, lecture seule,
+logement du compte courant ; identifiants des sélecteurs), verts sur l'ancien
+code par construction. Leur mordant est prouvé par mutation sur le nouveau
+code : retirer le filtre `user_id` de `marche.html` rougit le test de
+délégation ; insérer le motif sans `ech` dans `marche-temperature.html` rougit
+le test de sécurité ; renommer `mg-bien` rougit le test des identifiants.
+
+Horloge décalée : les fichiers de test touchés, à J+60 et J+200 :
+**213 / 213** aux deux paliers (dont le calendrier commun, `masquage-hidden` et `nav-i18n-cles`). Suite complète : **8 732 tests, 8 732 verts, 0 rouge**.
 
 ## 7. Report mobile
 
@@ -179,11 +221,39 @@ sien).
    dans les pages ; la règle V5 les veut dans `shared/theme.css`. Copiés tels
    quels, sous des noms `--yf-*` : aucune couleur ne change. À valider comme
    ajout à la charte.
-2. **Ce qui reste en français dans une autre langue** : le texte des modules
-   partagés de YieldFlow et celui que calcule l'API (§2). Les traduire est un
-   chantier à part (modules communs à d'autres écrans, `api/` hors du lot).
+2. **Ce qui reste en français dans une autre langue : ce que l'API écrit.**
+   Les noms des jours de la semaine du bloc « Week-end ou semaine »
+   (`lundi`…), les noms d'événements et de suggestions (« Noël », « Saison
+   favorable »), les phrases et motifs du calcul (« Vacances de Noël des trois
+   zones… »). Ils viennent de `api/` et `lib/`, hors du lot. Le calendrier
+   commun (`shared/temperature-calendrier.js`), lui, parle désormais la langue
+   de l'hôte quand l'écran le lui demande (`parlerLangue`) — sans cela, il
+   garde le français d'avant au caractère : aucun autre appelant ne change.
 3. **Le bandeau d'incitation** : comme au lot 1 (§8, point 1).
 
 ## 9. Constat mobile par page
 
-Rempli après vérification, par sous-lot.
+Vérifié à 390 px et à 1 280 px dans un vrai navigateur, sur les trois écrans
+rendus au banc avec les données réelles de Bagnères (fixtures AirROI du dépôt)
+et une étude du marché construite pour la capture.
+
+- Barre du haut, barre du bas, menu ≡ : ceux du socle. Le sous-menu YieldFlow
+  défile horizontalement au téléphone, comme les onglets du lot 1.
+- « Le marché » : chaque ligne de tableau devient une fiche empilée (règle
+  d'avant, gardée) ; la frise du pacing tient sur la largeur.
+- « Le marché global » : les douze mois du calendrier AirROI passent sur deux
+  colonnes ; les courbes sont dessinées à la largeur de la carte au chargement
+  (mesure du navigateur, gardée — au banc, sans mesure, elles prennent la
+  largeur de bureau, d'où une capture où elles paraissent petites).
+- « La température du marché » : les tableaux et la courbe défilent dans leur
+  carte (règle d'avant, gardée), la page ne déborde pas.
+
+## 10. Tests retargetés (aucun affaibli)
+
+| Fichier | Ce qui change, et pourquoi le garde-fou ne perd rien |
+|---|---|
+| `tests/marche-global-page-dom.test.js` (46) | le banc reçoit le socle V5 (`socleV5` de `tests/outils/banc-page.js` : VRAI moteur i18n, VRAIS dictionnaires, vrais modules) ; les dictionnaires ne comptent pas parmi les appels de la page au serveur ; 60 tours d'attente au lieu de 20 (les dictionnaires se chargent d'abord). **Chaque phrase française y est affirmée au caractère, rendue — aucune assertion retirée.** |
+| `tests/marche-global.test.js`, `tests/marche-temperature-page.test.js`, `tests/yield-marche-calendrier.test.js` | lisent la page par `tests/outils/source-traduite.js` : la phrase française de chaque clé est remise À CÔTÉ de la clé, là où le test la cherchait. Une clé inventée ou retirée rougit. |
+| `tests/v2-marche-aucune-ecriture-calendrier.test.js` | « le menu YieldFlow mène aux deux pages » : marche-global ne charge plus la barre latérale ; le test exige maintenant les deux adresses et libellés dans `shared/yieldflow-onglets.js` et la page qui s'y déclare. La barre latérale reste exigée (elle sert d'autres écrans). |
+| `tests/palette-niveaux.test.js` | « les six écrans chargent la police V5 » : un écran intégré tient sa police du socle (`theme.css` porte `--font`, `ui.css` l'applique au `body`), comme `evenements.html` ; le test l'exige au caractère. Les autres gardent `police-v5`. |
+| `tests/budget-ecran.test.js` | les trois écrans y entrent, sites d'appel mesurés avant et après. |

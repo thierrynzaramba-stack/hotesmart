@@ -2555,6 +2555,29 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .out-modale__tete { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); font-weight: var(--fw-semibold); }
 .out-modale__boite iframe { flex: 1; border: 0; width: 100%; }
 
+/* ── Les écrans YieldFlow (lot 2, docs/specs/spec-integration-v5-lot-2.md) ── */
+/* Le sous-menu de YieldFlow que portait l'ancienne barre latérale, en rangée
+   d'onglets (shared/yieldflow-onglets.js). Des LIENS, pas des boutons. */
+.out-yf { align-self: flex-start; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.out-yf::-webkit-scrollbar { display: none; }
+.out-yf a.seg__btn { white-space: nowrap; text-decoration: none; }
+/* L'avertissement en tête d'un écran du marché : « une estimation, pas un
+   prix ». Ambre doux, comme l'ancien — c'est une mise en garde, pas une aide. */
+.out-note--avertir { background: var(--amber-soft); color: var(--ink); }
+/* Le sélecteur de logement en tête d'écran, sur une ligne avec son libellé. */
+.out-choix { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s); font-size: var(--fs-small); color: var(--muted); }
+.out-choix .out-saisie { width: auto; min-width: 200px; max-width: 100%; }
+/* ⚠ LES CINQ NIVEAUX, COPIÉS AU CARACTÈRE DE public/style.css (« de ma main »,
+   choix de Thierry du 3 novembre 2026, docs/kb/charte-ui.md §3). Les écrans
+   YieldFlow ne chargent plus cette feuille ; sans cette copie, leurs pastilles
+   perdaient fond, encre et liseré. Portée limitée aux pages du pont, et
+   `tests/integration-v5-lot-2.test.js` exige l'égalité avec la source. */
+.out-pont .n-base        { --niveau-fond: var(--niveau-1); background: var(--niveau-fond); --niv-encre: var(--text); color: var(--niv-encre); --niveau-lisere: var(--niveau-4); }
+.out-pont .n-moyen       { --niveau-fond: var(--niveau-2); background: var(--niveau-fond); --niv-encre: var(--text); color: var(--niv-encre); --niveau-lisere: var(--niveau-5); }
+.out-pont .n-haut        { --niveau-fond: var(--niveau-3); background: var(--niveau-fond); --niv-encre: var(--text); color: var(--niv-encre); --niveau-lisere: var(--niveau-5); }
+.out-pont .n-tres-haut   { --niveau-fond: var(--niveau-4); background: var(--niveau-fond); --niv-encre: var(--text); color: var(--niv-encre); --niveau-lisere: var(--niveau-5); }
+.out-pont .n-exceptionnel{ --niveau-fond: var(--niveau-5); background: var(--niveau-fond); --niv-encre: var(--bg);   color: var(--niv-encre); --niveau-lisere: var(--niveau-3); }
+
 @media (max-width: 720px) {
   .out { gap: var(--gap-m); }
   .out-carte { padding: var(--gap-m); }

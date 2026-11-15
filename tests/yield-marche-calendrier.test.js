@@ -22,7 +22,9 @@ const fs = require('fs')
 const path = require('path')
 
 const RACINE = path.join(__dirname, '..')
-const PAGE = fs.readFileSync(path.join(RACINE, 'apps', 'yield', 'marche.html'), 'utf8')
+// ⚠ LA SOURCE AVEC SES TEXTES (intégration V5, lot 2) : les phrases vivent dans
+// shared/i18n/fr.json, tests/outils/source-traduite.js les remet à côté de leur clé.
+const PAGE = require('./outils/source-traduite').sourceTraduite('apps/yield/marche.html')
 
 test('LE TEST QUI COMPTE : la page est en lecture seule — des GET sur la vue du marche, la liste des logements, rien d autre', () => {
   const appels = [...PAGE.matchAll(/fetch\(\s*([`'"])([^`'"]*)/g)].map(m => m[2])

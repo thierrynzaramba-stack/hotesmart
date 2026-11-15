@@ -459,10 +459,22 @@ test('LE TEST QUI COMPTE : les six ecrans YieldFlow chargent la police V5', () =
   const ECRANS = ['comparables', 'index', 'marche-global', 'marche-temperature', 'marche', 'prix']
   const sansLien = []
   const sansClasse = []
+  // ⚠ UN ECRAN INTEGRE AU SOCLE V5 (lot 2 de l'integration, 15 novembre 2026)
+  // tient sa police du socle, comme evenements.html : il charge
+  // shared/theme.css (qui porte --font) et shared/ui.css (qui l'applique au
+  // body). Pour lui, la « classe » qui applique la fonte, c'est ce socle — et
+  // on l'exige au caractere, plus bas. Les autres gardent `police-v5`.
+  const V5 = nom => /<link rel="stylesheet" href="\/shared\/theme\.css">/.test(lire(`apps/yield/${nom}.html`))
   for (const nom of ECRANS) {
     const src = lire(`apps/yield/${nom}.html`)
     if (!src.includes('fonts.googleapis.com/css2?family=Plus+Jakarta+Sans')) sansLien.push(nom)
-    if (!/<body class="[^"]*police-v5/.test(src)) sansClasse.push(nom)
+    if (V5(nom)) {
+      if (!/<link rel="stylesheet" href="\/shared\/ui\.css">/.test(src)) sansClasse.push(`${nom} (socle V5 sans ui.css)`)
+    } else if (!/<body class="[^"]*police-v5/.test(src)) sansClasse.push(nom)
+  }
+  if (ECRANS.some(V5)) {
+    assert.match(lire('shared/theme.css'), /--font: 'Plus Jakarta Sans'/, 'le socle V5 doit porter la fonte')
+    assert.match(lire('shared/ui.css'), /^body \{[^}]*font-family: var\(--font\);/m, 'et ui.css doit l appliquer au body')
   }
   assert.deepEqual(sansLien, [], 'ces ecrans ne chargent pas la fonte :\n' + sansLien.join('\n'))
   assert.deepEqual(sansClasse, [], 'ces ecrans ne l appliquent pas :\n' + sansClasse.join('\n'))

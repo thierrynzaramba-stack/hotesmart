@@ -140,7 +140,10 @@ test('sans lien : marche inconnu ; sans historique en cache : dit, avec le cout,
 })
 
 // ─── La page ────────────────────────────────────────────────────────────────
-const PAGE = fs.readFileSync(path.join(RACINE, 'apps', 'yield', 'marche-global.html'), 'utf8')
+// ⚠ LA SOURCE AVEC SES TEXTES : depuis l'intégration V5 (lot 2), les phrases de
+// la page vivent dans shared/i18n/fr.json — tests/outils/source-traduite.js les
+// remet à côté de leur clé, là où ce test les cherchait.
+const PAGE = require('./outils/source-traduite').sourceTraduite('apps/yield/marche-global.html')
 
 test('LE TEST QUI COMPTE : la page est en lecture seule, dit en tete ce qu elle est, et porte les deux mentions', () => {
   const appels = [...PAGE.matchAll(/fetch\(\s*([`'"])([^`'"]*)/g)].map(m => m[2])

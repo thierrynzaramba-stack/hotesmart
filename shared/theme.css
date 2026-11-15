@@ -148,6 +148,32 @@
   --niveau-4: #8C8C8C;
   --niveau-5: #222222;
 
+  /* LES PALETTES DES ÉCRANS DU MARCHÉ (YieldFlow), entrées dans la charte à
+     l'intégration V5 (docs/specs/spec-integration-v5-lot-2.md §8, point 1).
+     ⚠ COPIÉES TELLES QUELLES des pages qui les portaient en dur : aucune
+     couleur ne change. Ce sont des ÉCHELLES DE LECTURE, pas des niveaux de
+     prix — elles ne se mélangent pas avec --niveau-*.
+     · « Le marché » : deux échelles qui ne se comparent JAMAIS, donc deux
+       teintes — les bleus du pacing, les ocres de la forme mensuelle
+       (apps/yield/marche.html, règle §13). */
+  --yf-pacing-1: #D8E4F5;
+  --yf-pacing-2: #9DB9E3;
+  --yf-pacing-3: #5B87C9;
+  --yf-pacing-4: #234E8C;
+  --yf-pacing-fond: #E6EEF9;
+  --yf-mensuel-1: #F1E6D2;
+  --yf-mensuel-2: #DEC49A;
+  --yf-mensuel-3: #B98C47;
+  --yf-mensuel-4: #7A5418;
+  --yf-mensuel-fond: #F4ECDF;
+  /*  · « Le marché global » : les trois années superposées (N-2 la plus pâle,
+       N la plus soutenue) et les barres du nombre de biens. */
+  --yf-annee-n2: #9DB9E3;
+  --yf-annee-n1: #5B87C9;
+  --yf-annee-n: #1E3F73;
+  --yf-barre: #9DB9E3;
+  --yf-barre-partielle: #C9CED6;
+
   /* Ombres */
   --shadow-hover: 0 6px 20px rgba(0, 0, 0, .12);
   --shadow-dot: 0 1px 3px rgba(0, 0, 0, .18);   /* pastilles du planning ménages */

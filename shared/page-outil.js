@@ -85,6 +85,47 @@ export function formaterDate (I18n, valeur, options = { day: '2-digit', month: '
   try { return I18n.date(d, options) } catch { return '' }
 }
 
+// ─── Un jour et un mois écrits en toutes lettres (écrans YieldFlow, lot 2) ──
+// Les écrans du marché reçoivent des JOURS (« 2026-10-04 ») et des MOIS
+// (« 2026-10 ») du calendrier, sans heure : ils se lisent en UTC, sinon un
+// fuseau à l'ouest de Greenwich recule le jour d'un cran. En français, le
+// rendu est celui des anciens `jourFr` / `moisFr` (« 4 octobre 2026 »,
+// « octobre 2026 ») ; un jour illisible rend « — », comme eux.
+export function jourIso (I18n, iso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return '—'
+  return formaterDate(I18n, `${iso}T12:00:00Z`, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }) || '—'
+}
+export function moisIso (I18n, mois, options = { month: 'long', year: 'numeric' }) {
+  const m = /^(\d{4})-(\d{2})/.exec(String(mois || ''))
+  if (!m) return '—'
+  return formaterDate(I18n, new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 15, 12)), { ...options, timeZone: 'UTC' }) || '—'
+}
+
+// « A, B et C » dans la langue de l'hôte (« A, B and C », « A, B y C »).
+export function listeLocale (lang, xs) {
+  const v = (xs || []).map(String)
+  try { return new Intl.ListFormat(lang || 'fr', { style: 'long', type: 'conjunction' }).format(v) } catch { return v.join(', ') }
+}
+
+// ─── Une traduction posée en HTML, sans rien laisser passer ─────────────────
+// Le texte du dictionnaire est ÉCHAPPÉ ; seules les valeurs passées en `html`
+// entrent telles quelles, et c'est à l'appelant de les avoir échappées
+// (`esc(nom)`, `<b>${esc(nom)}</b>`). Les nombres restent des nombres : ce
+// sont eux qui choisissent la forme du pluriel (`{n, plural, …}`).
+// `**mot**` du dictionnaire devient `<b>mot</b>` — AVANT que les valeurs
+// n'entrent, donc jamais dans une donnée.
+export function tHtml (t, cle, vars = {}) {
+  const html = {}
+  const v = {}
+  for (const [k, val] of Object.entries(vars)) {
+    if (typeof val === 'number') v[k] = val
+    else { html[k] = String(val == null ? '' : val); v[k] = `\u0001${k}\u0002` }
+  }
+  return esc(t(cle, v))
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\u0001(\w+)\u0002/g, (_, k) => (k in html ? html[k] : ''))
+}
+
 // ─── La coquille V5 : barre du haut, menu ≡, barre du bas ───────────────────
 // Les MÊMES droits que les écrans V5 (appel de pages/aujourdhui.html) :
 // Réglages au titulaire, Avis selon le droit, la section Outils de

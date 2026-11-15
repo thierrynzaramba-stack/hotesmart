@@ -25,17 +25,38 @@ export const jourFr = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || '')) ? `${
 // ⚠ UN NIVEAU INCONNU N'ENTRE JAMAIS DANS UN STYLE (revue de 675ed3b) : seuls
 // les quatre niveaux connus sont interpoles.
 export const niv = n => (Object.prototype.hasOwnProperty.call(NIVEAUX, n) ? n : null)
-export const badge = n => niv(n) ? `<span class="tc-badge" style="background:var(--tc-${niv(n)});color:var(--tc-${niv(n)}-txt);--tc-bord:var(--tc-${niv(n)}-bord)">${NIVEAUX[niv(n)]}</span>` : '<span class="non-calc">—</span>'
-const sens = v => SENS[v] || '—'
+
+// ─── LA LANGUE DE L'HÔTE (intégration V5, lot 2 — 15 novembre 2026) ─────────
+// Les deux écrans qui chargent ce module passent au socle V5 et parlent la
+// langue de l'hôte : ils appellent `parlerLangue(I18n)` une fois les
+// dictionnaires chargés, et le calendrier prend ses mots dans les clés `tc.*`
+// et ses dates dans `Intl`. SANS cet appel, il parle le français d'avant, au
+// caractère (les constantes ci-dessus) : un appelant qui ne connaît pas I18n
+// n'est pas cassé, et ses tests non plus.
+let langue = null
+export function parlerLangue (I18n) { langue = I18n && typeof I18n.t === 'function' ? I18n : null }
+const tr = (cle, francais, vars) => (langue ? langue.t(cle, vars) : francais)
+const nomNiveau = n => tr(`tc.niv_${n}`, NIVEAUX[n])
+const descNiveau = n => tr(`tc.desc_${n}`, DESCRIPTION[n])
+const dateIntl = (d, o) => { try { return langue.date(d, { ...o, timeZone: 'UTC' }) } catch { return '' } }
+const moisL = m => (langue ? dateIntl(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 15, 12)), { month: 'long', year: 'numeric' }) || moisFr(m) : moisFr(m))
+const jourL = iso => (langue && /^\d{4}-\d{2}-\d{2}$/.test(String(iso || '')) ? dateIntl(new Date(`${iso}T12:00:00Z`), { day: 'numeric', month: 'long', year: 'numeric' }) || jourFr(iso) : jourFr(iso))
+// Les jours de la semaine, du lundi au dimanche (le 5 janvier 2026 est un lundi).
+const lundiPlus = k => new Date(Date.UTC(2026, 0, 5 + k, 12))
+const joursCourts = () => (langue ? JOURS_COURTS.map((j, k) => dateIntl(lundiPlus(k), { weekday: 'narrow' }) || j) : JOURS_COURTS)
+const joursSem = () => (langue ? JOURS_SEM.map((j, k) => (dateIntl(lundiPlus(k), { weekday: 'short' }) || j).replace(/\.$/, '')) : JOURS_SEM)
+
+export const badge = n => niv(n) ? `<span class="tc-badge" style="background:var(--tc-${niv(n)});color:var(--tc-${niv(n)}-txt);--tc-bord:var(--tc-${niv(n)}-bord)">${ech(nomNiveau(niv(n)))}</span>` : '<span class="non-calc">—</span>'
+const sens = v => (Object.prototype.hasOwnProperty.call(SENS, v) ? ech(tr(`tc.sens_${v}`, SENS[v])) : '—')
 const joursValides = jours => (jours || []).filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(String(x.jour)))
 
 // Le detail d'un jour : ce qui fait son niveau, en sens, jamais en chiffres.
 function listeDuJour (x) {
   const sn = x.sens || {}
-  return `<dl><dt>Saison</dt><dd>${sens(sn.saison)}</dd>`
-    + `<dt>Jour de semaine</dt><dd>${sens(sn.semaine)}${x.week_end ? ' (nuit de week-end)' : ''}</dd>`
-    + `<dt>Férié ou événement</dt><dd>${x.evenement ? `${ech(x.evenement)} — ${sens(sn.evenement)}` : 'aucun'}</dd>`
-    + `<dt>Demande du marché</dt><dd>${sens(sn.demande)} <span class="non-calc">(non comptée dans le niveau : elle date du calcul)</span></dd></dl>`
+  return `<dl><dt>${ech(tr('tc.saison', 'Saison'))}</dt><dd>${sens(sn.saison)}</dd>`
+    + `<dt>${ech(tr('tc.jour_semaine', 'Jour de semaine'))}</dt><dd>${sens(sn.semaine)}${x.week_end ? ` ${ech(tr('tc.nuit_week_end', '(nuit de week-end)'))}` : ''}</dd>`
+    + `<dt>${ech(tr('tc.ferie', 'Férié ou événement'))}</dt><dd>${x.evenement ? `${ech(x.evenement)} — ${sens(sn.evenement)}` : ech(tr('tc.aucun', 'aucun'))}</dd>`
+    + `<dt>${ech(tr('tc.demande', 'Demande du marché'))}</dt><dd>${sens(sn.demande)} <span class="non-calc">${ech(tr('tc.demande_note', '(non comptée dans le niveau : elle date du calcul)'))}</span></dd></dl>`
 }
 
 // Quatre paliers, et ils prennent L'ECHELLE D'ENCRE depuis le 3 novembre 2026.
@@ -174,13 +195,13 @@ export function monterCalendrierTemperature (conteneur, jours) {
   const mois = [...new Set(valides.map(x => x.jour.slice(0, 7)))].sort()
   let moisCourant = 0
   let jourChoisi = null
-  if (!mois.length) { conteneur.innerHTML = '<p class="non-calc">Aucun jour à afficher pour ce marché.</p>'; return }
+  if (!mois.length) { conteneur.innerHTML = `<p class="non-calc">${ech(tr('tc.aucun_jour', 'Aucun jour à afficher pour ce marché.'))}</p>`; return }
 
   function detail () {
-    if (!jourChoisi) return '<span class="non-calc">Touchez un jour pour voir son détail.</span>'
+    if (!jourChoisi) return `<span class="non-calc">${ech(tr('tc.touchez', 'Touchez un jour pour voir son détail.'))}</span>`
     const x = parJour.get(jourChoisi)
     if (!x) return ''
-    return `<b>${ech(jourFr(x.jour))}</b> · ${badge(x.niveau)} <span class="non-calc">${DESCRIPTION[niv(x.niveau)] || ''}</span>` + listeDuJour(x)
+    return `<b>${ech(jourL(x.jour))}</b> · ${badge(x.niveau)} <span class="non-calc">${niv(x.niveau) ? ech(descNiveau(niv(x.niveau))) : ''}</span>` + listeDuJour(x)
   }
 
   function peindre () {
@@ -188,20 +209,20 @@ export function monterCalendrierTemperature (conteneur, jours) {
     const [a, mm] = m.split('-').map(Number)
     const decalage = (new Date(Date.UTC(a, mm - 1, 1)).getUTCDay() + 6) % 7
     const nb = new Date(Date.UTC(a, mm, 0)).getUTCDate()
-    let cases = JOURS_SEM.map(x => `<div class="tc-jsem">${x}</div>`).join('') + '<div></div>'.repeat(decalage)
+    let cases = joursSem().map(x => `<div class="tc-jsem">${ech(x)}</div>`).join('') + '<div></div>'.repeat(decalage)
     for (let d = 1; d <= nb; d++) {
       const cle = `${m}-${String(d).padStart(2, '0')}`
       const x = parJour.get(cle)
       const n = x && niv(x.niveau)
       cases += n
-        ? `<button type="button" class="tc-jour${x.evenement ? ' evt' : ''}" data-jour="${cle}" aria-pressed="${cle === jourChoisi}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}">${d}</button>`
+        ? `<button type="button" class="tc-jour${x.evenement ? ' evt' : ''}" data-jour="${cle}" aria-pressed="${cle === jourChoisi}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(jourL(cle))} : ${ech(nomNiveau(n))}${x.evenement ? ', ' + ech(x.evenement) : ''}">${d}</button>`
         : '<div></div>'
     }
-    const legende = Object.keys(NIVEAUX).map(n => `<span class="tc-niv"><span class="tc-pastille" style="background:var(--tc-${n});--tc-bord:var(--tc-${n}-bord)"></span><b>${NIVEAUX[n]}</b> ${DESCRIPTION[n]}</span>`).join('')
+    const legende = Object.keys(NIVEAUX).map(n => `<span class="tc-niv"><span class="tc-pastille" style="background:var(--tc-${n});--tc-bord:var(--tc-${n}-bord)"></span><b>${ech(nomNiveau(n))}</b> ${ech(descNiveau(n))}</span>`).join('')
     conteneur.innerHTML = `<div class="tc-legende">${legende}</div>`
-      + `<div class="tc-nav"><button type="button" data-tc="prec" aria-label="Mois précédent"${moisCourant === 0 ? ' disabled' : ''}>‹</button>`
-      + `<h3>${ech(moisFr(m))}</h3>`
-      + `<button type="button" data-tc="suiv" aria-label="Mois suivant"${moisCourant === mois.length - 1 ? ' disabled' : ''}>›</button></div>`
+      + `<div class="tc-nav"><button type="button" data-tc="prec" aria-label="${ech(tr('tc.mois_prec', 'Mois précédent'))}"${moisCourant === 0 ? ' disabled' : ''}>‹</button>`
+      + `<h3>${ech(moisL(m))}</h3>`
+      + `<button type="button" data-tc="suiv" aria-label="${ech(tr('tc.mois_suiv', 'Mois suivant'))}"${moisCourant === mois.length - 1 ? ' disabled' : ''}>›</button></div>`
       + `<div class="tc-grille">${cases}</div>`
       + `<div class="tc-detail" aria-live="polite">${detail()}</div>`
     conteneur.querySelector('[data-tc="prec"]').addEventListener('click', () => { if (moisCourant > 0) { moisCourant--; jourChoisi = null; peindre() } })
@@ -223,9 +244,9 @@ export function ouvrirDetailDuJour (x, retour) {
   const fond = document.createElement('div')
   fond.className = 'tc-fond'
   fond.innerHTML = `<div class="tc-popup" role="dialog" aria-modal="true" aria-labelledby="tc-popup-titre">`
-    + `<div class="tc-popup-tete"><h3 id="tc-popup-titre">${ech(jourFr(x.jour))}</h3>`
-    + `<button type="button" class="tc-fermer" aria-label="Fermer">×</button></div>`
-    + `<div>${badge(x.niveau)} <span class="non-calc">${DESCRIPTION[niv(x.niveau)] || ''}</span></div>`
+    + `<div class="tc-popup-tete"><h3 id="tc-popup-titre">${ech(jourL(x.jour))}</h3>`
+    + `<button type="button" class="tc-fermer" aria-label="${ech(tr('tc.fermer', 'Fermer'))}">×</button></div>`
+    + `<div>${badge(x.niveau)} <span class="non-calc">${niv(x.niveau) ? ech(descNiveau(niv(x.niveau))) : ''}</span></div>`
     + listeDuJour(x) + `</div>`
   // Echap ferme ; Tab reste dans la fenetre (son seul bouton) — review de 39d9d81.
   const touche = e => {
@@ -261,7 +282,7 @@ export function monterAnneeTemperature (conteneur, jours, { premierMois = null, 
   const valides = joursValides(jours)
   const parJour = new Map(valides.map(x => [x.jour, x]))
   const presents = new Set(valides.map(x => x.jour.slice(0, 7)))
-  if (!presents.size) { conteneur.innerHTML = '<p class="non-calc">Aucun jour à afficher pour ce marché.</p>'; return }
+  if (!presents.size) { conteneur.innerHTML = `<p class="non-calc">${ech(tr('tc.aucun_jour', 'Aucun jour à afficher pour ce marché.'))}</p>`; return }
   // nbMois mois CALENDAIRES a partir de premierMois (a defaut, le premier mois
   // de la capture) : un mois absent de la capture se dit, il ne decale pas la
   // fenetre (review de 39d9d81).
@@ -271,8 +292,8 @@ export function monterAnneeTemperature (conteneur, jours, { premierMois = null, 
     const d = new Date(Date.UTC(a0, m0 - 1 + i, 1))
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
   })
-  const legende = `<div class="tc-legende-simple">${Object.keys(NIVEAUX).map(n => `<span><i style="background:var(--tc-${n});border:1px solid var(--tc-${n}-bord)"></i>${NIVEAUX[n]} (${DESCRIPTION[n]})</span>`).join('')}</div>`
-  const entete = JOURS_COURTS.map(j => `<span class="tc-mjsem">${j}</span>`).join('')
+  const legende = `<div class="tc-legende-simple">${Object.keys(NIVEAUX).map(n => `<span><i style="background:var(--tc-${n});border:1px solid var(--tc-${n}-bord)"></i>${ech(nomNiveau(n))} (${ech(descNiveau(n))})</span>`).join('')}</div>`
+  const entete = joursCourts().map(j => `<span class="tc-mjsem">${ech(j)}</span>`).join('')
   const blocs = mois.map(m => {
     const [a, mm] = m.split('-').map(Number)
     const decalage = (new Date(Date.UTC(a, mm - 1, 1)).getUTCDay() + 6) % 7
@@ -283,11 +304,11 @@ export function monterAnneeTemperature (conteneur, jours, { premierMois = null, 
       const x = parJour.get(cle)
       const n = x && niv(x.niveau)
       cases += n
-        ? `<button type="button" class="tc-case" data-jour="${cle}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}" title="${ech(jourFr(cle))} · ${NIVEAUX[n]}${x.evenement ? ' · ' + ech(x.evenement) : ''}">${d}</button>`
+        ? `<button type="button" class="tc-case" data-jour="${cle}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(jourL(cle))} : ${ech(nomNiveau(n))}${x.evenement ? ', ' + ech(x.evenement) : ''}" title="${ech(jourL(cle))} · ${ech(nomNiveau(n))}${x.evenement ? ' · ' + ech(x.evenement) : ''}">${d}</button>`
         : `<span class="tc-vide">${d}</span>`
     }
-    const absent = presents.has(m) ? '' : '<p class="non-calc" style="font-size:11.5px;margin:4px 0 0">Non couvert par le modèle AirROI.</p>'
-    return `<div class="tc-mois"><h3>${ech(moisFr(m))}</h3><div class="tc-mini">${entete}${cases}</div>${absent}</div>`
+    const absent = presents.has(m) ? '' : `<p class="non-calc" style="font-size:11.5px;margin:4px 0 0">${ech(tr('tc.non_couvert', 'Non couvert par le modèle AirROI.'))}</p>`
+    return `<div class="tc-mois"><h3>${ech(moisL(m))}</h3><div class="tc-mini">${entete}${cases}</div>${absent}</div>`
   }).join('')
   conteneur.innerHTML = `${legende}<div class="tc-annee">${blocs}</div>`
   conteneur.querySelectorAll('.tc-case').forEach(b => b.addEventListener('click', () => {

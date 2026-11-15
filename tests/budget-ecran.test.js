@@ -222,6 +222,21 @@ const ATTENDU = {
   },
   'pages/abonnement.html': {
     '/api/stripe': 3         // essai, annulation, portail : des gestes, jamais au chargement
+  },
+  // ⚠ LES ÉCRANS DU MARCHÉ (YieldFlow) INTÉGRÉS AU SOCLE V5 (15 novembre 2026,
+  // docs/specs/spec-integration-v5-lot-2.md, sous-lot 2a). Lecture seule, des
+  // résumés calculés par le cron. Sites d'appel IDENTIQUES à ceux d'avant
+  // l'intégration (mesuré sur fb93b24e) ; pas d'endpoint d'écran (il
+  // demanderait un fichier api/, hors du lot — spec §6, point 1).
+  'apps/yield/marche-temperature.html': {
+    '/api/marche-temperature': 1 // le modèle AirROI du logement, au chargement et au changement de logement
+  },
+  'apps/yield/marche.html': {
+    '/api/yield-marche': 1   // l'étude du marché (vue calendrier), au chargement et au changement de logement
+  },
+  'apps/yield/marche-global.html': {
+    '/api/marche-global': 1,      // l'historique du marché (sections 1 à 3)
+    '/api/marche-temperature': 1  // le modèle AirROI (section 4 et « En résumé ») — deux pipelines étanches
   }
 }
 

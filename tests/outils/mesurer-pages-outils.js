@@ -103,7 +103,7 @@ function injecter (w, journal, supabase) {
   // Les modules YieldFlow (lot 2), sans import : exécutés tels quels.
   const yieldFlow = {}
   for (const m of ['shared/temperature-calendrier.js', 'shared/yield-motifs.js', 'shared/prix-depart-jours.js',
-    'shared/yield-libelles-feries.js', 'shared/yield-niveau-periode.js']) {
+    'shared/yield-libelles-feries.js', 'shared/yield-niveau-periode.js', 'shared/yieldflow-onglets.js']) {
     const fichier = require('path').join(RACINE, m)
     if (require('fs').existsSync(fichier)) Object.assign(yieldFlow, evaluerModule(w, m, {}))
   }

@@ -295,4 +295,42 @@ function octetsStatiques (rel, { avecNav = null } = {}) {
   return { brut, gzip, detail, externes: [...externes].sort(), modules: [...vus].sort() }
 }
 
-module.exports = { monterPage, evaluerModule, doubleSupabase, octetsStatiques, sansImports, stabiliser, RACINE }
+// ─── Le socle V5 dans un banc QUI N'EST PAS CELUI-CI (lot 2) ─────────────────
+// Les bancs existants des écrans YieldFlow retirent les `import` d'une page et
+// injectent eux-mêmes ce qu'elle importe. Une page intégrée au socle V5
+// importe davantage (la coquille, les traductions) : cet outil le leur donne
+// SANS rien simuler de ce qui compte — le VRAI moteur i18n sur les VRAIS
+// dictionnaires (REVIEW.md règle 22), le VRAI shared/nav.js, les VRAIS modules
+// shared/page-outil.js et shared/yieldflow-onglets.js. Seuls les comptes et la
+// déconnexion sont des doubles (un titulaire, sans délégation).
+//   socleV5(w, { langue }) → { symboles, dictionnaire(url) }
+//   - `symboles` : à copier sur la fenêtre avant d'exécuter la page ;
+//   - `dictionnaire(url)` : la réponse d'un `fetch` vers /shared/i18n/…, ou
+//     `null` si l'adresse n'en est pas une.
+function socleV5 (w, { langue = 'fr' } = {}) {
+  try { w.localStorage.setItem('hs.lang', langue) } catch { /* stockage indisponible */ }
+  const { moteurI18n } = require(path.join(RACINE, 'lib/i18n-version.js'))
+  w.eval(moteurI18n())
+  w.eval(lire('shared/nav.js'))
+  const symboles = {
+    ...evaluerModule(w, 'shared/page-outil.js'),
+    ...evaluerModule(w, 'shared/yieldflow-onglets.js'),
+    comptes: () => [],
+    peutLire: () => true,
+    estTitulaire: () => true,
+    basculerVers: () => {},
+    signOut: async () => {},
+    renderOnboardingBanner: async () => {}
+  }
+  delete symboles.default
+  const dictionnaire = (url) => {
+    const chemin = String(url).split('?')[0]
+    if (!chemin.startsWith('/shared/i18n/') || !chemin.endsWith('.json')) return null
+    const f = path.join(RACINE, chemin)
+    const texte = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null
+    return { ok: !!texte, status: texte ? 200 : 404, json: async () => JSON.parse(texte || '{}'), text: async () => texte || '' }
+  }
+  return { symboles, dictionnaire }
+}
+
+module.exports = { monterPage, evaluerModule, doubleSupabase, octetsStatiques, sansImports, stabiliser, socleV5, RACINE }

@@ -26,6 +26,7 @@ const { lireJson } = require('../lib/airroi/json')
 const { revparMensuel, adrOccupationMensuel } = require('../lib/marche/marche-global')
 const { progressionDuMarche } = require('../lib/marche/progression-marche')
 const t = require('../lib/marche/temperature-airroi')
+const { socleV5 } = require('./outils/banc-page')
 
 const RACINE = path.join(__dirname, '..')
 const HTML = fs.readFileSync(path.join(RACINE, 'apps', 'yield', 'marche-global.html'), 'utf8')
@@ -46,7 +47,10 @@ const VACANCES = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'va
 const TEMPERATURE = { source: 'airroi', etat: 'calcule', marche: MARCHE, ...t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-10', VACANCES, '2027-07-03') }
 
 const reponse = (corps, status = 200) => ({ ok: status < 400, status, json: async () => corps })
-const attendre = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)) }
+// ⚠ 60 TOURS ET NON PLUS 20 depuis l'intégration V5 (lot 2) : la page charge
+// d'abord ses dictionnaires (I18n.init), donc quelques allers-retours de plus
+// avant sa première lecture.
+const attendre = async () => { for (let i = 0; i < 60; i++) await new Promise(r => setImmediate(r)) }
 
 async function monter (routes, maintenant = MAINTENANT, largeur = 0) {
   const dom = new JSDOM(HTML.replace(/<script type="module">[\s\S]*?<\/script>/, ''), { runScripts: 'outside-only', url: 'https://staging.example/apps/yield/marche-global' })
@@ -58,13 +62,20 @@ async function monter (routes, maintenant = MAINTENANT, largeur = 0) {
   // jsdom ne mesure rien : la largeur de la carte est simulee quand le test la donne.
   if (largeur) Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { configurable: true, get () { return this.id === 'mg-corps' ? largeur : 0 } })
   const appels = []
+  // ⚠ LE SOCLE V5 (intégration, lot 2) : le VRAI moteur de traduction sur les
+  // VRAIS dictionnaires, la vraie coquille. Les dictionnaires ne sont pas des
+  // appels de la page au serveur : ils ne vont pas dans `appels`.
+  const socle = socleV5(w)
   w.fetch = async (url) => {
+    const dico = socle.dictionnaire(url)
+    if (dico) return dico
     appels.push(url)
     const route = Object.keys(routes).find(r => url.startsWith(r))
     return routes[route](url)
   }
+  Object.assign(w, socle.symboles)
   // Chaque nom que la page IMPORTE du module est expose, comme le ferait l'import.
-  w.eval(MODULE.replace(/^export /gm, '') + '\nObject.assign(window, { monterAnneeTemperature, fermerDetail, badge, niv })')
+  w.eval(MODULE.replace(/^export /gm, '') + '\nObject.assign(window, { monterAnneeTemperature, fermerDetail, badge, niv, parlerLangue })')
   w.requireAuth = async () => ({ access_token: 'jeton-factice' })
   w.renderSidebar = async () => {}
   w.compteCourant = () => null

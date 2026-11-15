@@ -203,7 +203,17 @@ test('passage en prod : le menu YieldFlow mene aux deux pages de la V2 (« pages
   const menu = lire('components/sidebar.js')
   assert.match(menu, /href="\/apps\/yield\/marche-global">[\s\S]{0,120}Le marché global/)
   assert.match(menu, /href="\/apps\/yield\/comparables">[\s\S]{0,120}Choisir vos comparables/)
-  assert.match(lire('apps/yield/marche-global.html'), /renderSidebar\('yield-marche-global'\)/)
+  // ⚠ INTEGRATION V5 (lot 2, 15 novembre 2026) : « Le marche global » n'a plus
+  // la barre laterale. Son sous-menu YieldFlow est DEPLACE, pas retire : une
+  // rangee d'onglets (shared/yieldflow-onglets.js), aux MEMES adresses, et la
+  // page s'y declare comme ecran courant.
+  const onglets = lire('shared/yieldflow-onglets.js')
+  const fr = JSON.parse(lire('shared/i18n/fr.json'))
+  assert.match(onglets, /href: '\/apps\/yield\/marche-global', cle: 'yfnav\.marche_global'/)
+  assert.equal(fr['yfnav.marche_global'], 'Le marché global')
+  assert.match(onglets, /href: '\/apps\/yield\/comparables', cle: 'yfnav\.comparables'/)
+  assert.equal(fr['yfnav.comparables'], 'Choisir vos comparables')
+  assert.match(lire('apps/yield/marche-global.html'), /monterOngletsYieldFlow\(.*, 'marche-global', t\)/)
   assert.match(lire('apps/yield/comparables.html'), /renderSidebar\('yield-comparables'\)/)
 })
 
