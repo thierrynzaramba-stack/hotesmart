@@ -2365,3 +2365,206 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
      débordait de sa largeur à gauche (recette du 11 novembre). */
   .chg-fiche { width: 100%; }
 }
+
+/* ============================================================
+   PAGES OUTILS (intégration V5)
+   Les écrans du menu ≡ « Outils » qui étaient encore sur l'ancien socle
+   (public/style.css et la barre latérale) : serrures, SMS, connexions,
+   abonnement, puis YieldFlow, réservation directe et le compte (lots 2 à 4,
+   docs/specs/spec-integration-v5-lot-*.md). Préfixe `out-`, et seulement des
+   AJOUTS : aucune règle de ce fichier n'est modifiée par ce bloc.
+   ⚠ LA FORME SEULEMENT. Chaque page garde ses gestes et ses appels : ce bloc
+   n'habille que ce qu'elle faisait déjà.
+   ============================================================ */
+.out { gap: var(--gap-l); }
+.out-tete { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--gap-m); }
+.out-tete__titre { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.out-tete__actions { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
+.out-sous { margin: 0; font-size: var(--fs-small); color: var(--muted); }
+
+/* Une carte de réglage : bordée, sans ombre au survol (rien n'y est
+   cliquable en bloc, contrairement à `.card`). */
+.out-carte {
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--surface); padding: var(--gap-l);
+  display: flex; flex-direction: column; gap: var(--gap-m); min-width: 0;
+}
+.out-carte--etroite { max-width: 640px; }
+.out-carte--bientot { opacity: .6; }
+.out-carte__tete { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.out-carte__titre { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 17px; font-weight: var(--fw-bold); }
+.out-carte__titre .icon { color: var(--muted); }
+.out-pile { display: flex; flex-direction: column; gap: var(--gap-m); }
+.out-grille { display: grid; gap: var(--gap-m); grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+.out-grille--2 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); }
+.out-filet { border: 0; border-top: 1px solid var(--line); margin: 0; }
+.out-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s); }
+.out-carte--fort { border-color: var(--ink); border-width: 2px; }
+
+/* L'état d'un service : TOUJOURS un mot, la couleur n'est qu'un renfort. */
+.out-etat {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 4px 10px; border-radius: var(--radius-pill);
+  font-size: var(--fs-caption); font-weight: var(--fw-semibold);
+  background: var(--surface-2); color: var(--muted);
+}
+.out-etat::before { content: ""; width: 8px; height: 8px; border-radius: var(--radius-pill); background: currentColor; }
+.out-etat--ok { background: var(--ok-soft); color: var(--ok-ink); }
+.out-etat--attente { background: var(--warn-soft); color: var(--warn); }
+.out-etat--erreur { background: var(--danger-soft); color: var(--danger-ink); }
+.out-etat--bientot::before { display: none; }
+/* Posé seul dans une carte (colonne), l'état garde sa largeur de mot. */
+.out-carte > .out-etat, .out-pile > .out-etat, .out-carte > .out-puce { align-self: flex-start; }
+/* La même chose en bandeau, sur la largeur de la carte. */
+.out-bandeau { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--radius-tile); background: var(--surface-2); color: var(--muted); font-size: var(--fs-small); }
+.out-bandeau::before { content: ""; width: 10px; height: 10px; flex: none; border-radius: var(--radius-pill); background: currentColor; }
+.out-bandeau--ok { background: var(--ok-soft); color: var(--ok-ink); }
+.out-bandeau--attente { background: var(--warn-soft); color: var(--warn); }
+.out-bandeau--erreur { background: var(--danger-soft); color: var(--danger-ink); }
+.out-bandeau--sans-point::before { display: none; }
+
+/* Une explication : fond doux, liens soulignés. */
+.out-note { padding: 14px 16px; border-radius: var(--radius-tile); background: var(--surface-2); color: var(--muted); font-size: var(--fs-small); line-height: 1.6; }
+.out-note strong, .out-note b { color: var(--ink); font-weight: var(--fw-semibold); }
+.out-note a, .out-lien { color: var(--ink); text-decoration: underline; font-weight: var(--fw-semibold); }
+.out-note ol, .out-note ul { margin: 6px 0 0; padding-inline-start: 20px; }
+.out-note p { margin: 0; }
+.out-note p + p { margin-top: 8px; }
+.out-note code, .out-etapes code { font-size: .95em; padding: 1px 6px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); }
+
+/* Les étapes numérotées d'une mise en route. */
+.out-etapes { list-style: none; counter-reset: out-etape; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.out-etapes > li { counter-increment: out-etape; display: grid; grid-template-columns: 26px 1fr; gap: 12px; align-items: start; font-size: var(--fs-small); color: var(--muted); line-height: 1.6; }
+.out-etapes > li::before { content: counter(out-etape); width: 26px; height: 26px; border-radius: var(--radius-pill); background: var(--ink); color: var(--on-ink); font-size: 12px; font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; }
+.out-etapes strong { color: var(--ink); font-weight: var(--fw-semibold); }
+.out-etapes a { color: var(--ink); text-decoration: underline; font-weight: var(--fw-semibold); }
+
+/* Champs. */
+.out-champ { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); min-width: 0; }
+.out-champ > span { color: var(--ink); }
+.out-saisie, .out-champ input, .out-champ select, .out-champ textarea {
+  font: inherit; font-size: var(--fs-small); font-weight: var(--fw-regular); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; min-height: var(--control); min-width: 0; width: 100%;
+}
+.out-champ textarea { resize: vertical; min-height: 110px; line-height: 1.45; }
+.out-saisie:focus-visible, .out-champ :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.out-saisie:disabled, .out-champ :disabled { background: var(--surface-2); color: var(--muted); }
+.out-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+/* Un champ et son bouton sur la même ligne ; le bouton passe dessous au téléphone. */
+.out-ligne-saisie { display: flex; gap: var(--gap-s); align-items: stretch; }
+.out-ligne-saisie > :first-child { flex: 1; min-width: 0; }
+.out-aide { margin: 0; font-size: var(--fs-caption); font-weight: var(--fw-regular); color: var(--muted); line-height: 1.5; }
+.out-aide--alerte { color: var(--danger-ink); }
+.out-aide:empty { display: none; }
+/* Le compteur d'un message : discret, puis ambre, puis rouge (au-delà d'un et de deux SMS). */
+.out-compteur { align-self: flex-end; font-size: var(--fs-caption); font-weight: var(--fw-regular); color: var(--muted); }
+.out-compteur--long { color: var(--warn); font-weight: var(--fw-semibold); }
+.out-compteur--trop { color: var(--danger-ink); font-weight: var(--fw-semibold); }
+
+/* L'interrupteur : une VRAIE case à cocher (son état, son `change`, sa
+   lecture par les lecteurs d'écran), habillée. Actif = NOIR, comme les
+   segments de la V5 : ni le vert d'un état, ni le rouge d'un défaut. */
+.out-inter { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-m); padding-top: var(--gap-m); border-top: 1px solid var(--line); font-size: var(--fs-small); }
+.out-sw {
+  appearance: none; -webkit-appearance: none; margin: 0; flex: none; cursor: pointer;
+  width: 44px; height: 26px; border-radius: var(--radius-pill); background: var(--border);
+  position: relative; transition: background .15s;
+}
+.out-sw::after {
+  content: ""; position: absolute; inset-block-start: 3px; inset-inline-start: 3px;
+  width: 20px; height: 20px; border-radius: var(--radius-pill);
+  background: var(--surface); box-shadow: var(--shadow-dot); transition: inset-inline-start .15s;
+}
+.out-sw:checked { background: var(--ink); }
+.out-sw:checked::after { inset-inline-start: 21px; }
+.out-sw:disabled { cursor: not-allowed; opacity: .5; }
+.out-sw:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* Le retour d'un geste, sous lui. Vide = absent. */
+.out-retour { margin: 0; padding: 10px 14px; border-radius: var(--radius-tile); font-size: var(--fs-small); background: var(--surface-2); color: var(--ink); }
+.out-retour--ok { background: var(--ok-soft); color: var(--ok-ink); }
+.out-retour--erreur { background: var(--danger-soft); color: var(--danger-ink); }
+.out-retour--attente { background: var(--warn-soft); color: var(--warn); }
+.out-retour:empty { display: none; }
+
+/* Les onglets d'un outil : le sélecteur `.seg` du socle, qui défile au
+   téléphone plutôt que de se tasser. */
+.out-onglets { align-self: flex-start; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.out-onglets::-webkit-scrollbar { display: none; }
+.out-onglets .seg__btn { white-space: nowrap; }
+
+/* Petites pastilles d'une ligne de liste. */
+.out-puce { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 12px; font-weight: var(--fw-semibold); background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.out-puce--ok { background: var(--ok-soft); color: var(--ok-ink); }
+.out-puce--attente { background: var(--warn-soft); color: var(--warn); }
+.out-puce--erreur { background: var(--danger-soft); color: var(--danger-ink); }
+.out-puce--fort { background: var(--ink); color: var(--on-ink); }
+
+/* Une liste de lignes bordées. */
+.out-liste { display: flex; flex-direction: column; gap: var(--gap-s); }
+.out-ligne { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-tile); min-width: 0; }
+.out-ligne__corps { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.out-ligne__titre { font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
+.out-ligne__sous { font-size: var(--fs-caption); color: var(--muted); overflow-wrap: anywhere; }
+.out-defile { max-height: 460px; overflow-y: auto; }
+.out-vide { padding: var(--gap-l) var(--gap-m); text-align: center; color: var(--muted); font-size: var(--fs-small); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.out-vide .h2 { color: var(--ink); }
+
+/* Trois chiffres de même rang. */
+.out-chiffres { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-s); }
+.out-chiffre { display: flex; flex-direction: column; gap: 2px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-tile); text-align: center; }
+.out-chiffre b { font-size: 22px; font-weight: var(--fw-black); font-variant-numeric: tabular-nums; }
+.out-chiffre span { font-size: var(--fs-caption); color: var(--muted); }
+.out-chiffre--alerte b { color: var(--danger-ink); }
+
+/* Un prix, et son détail à côté. */
+.out-prix { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.out-prix b { font-size: 24px; font-weight: var(--fw-black); letter-spacing: -0.02em; }
+.out-prix small { font-size: var(--fs-small); color: var(--muted); }
+/* Un geste qui défait (annuler un abonnement) : le texte en rouge, le fond reste neutre. */
+.btn.out-danger { color: var(--danger-ink); border-color: var(--danger-soft); }
+
+/* Un code d'accès : gros, espacé, lisible à voix haute. */
+.out-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 20px; font-weight: var(--fw-bold); letter-spacing: 2px; font-variant-numeric: tabular-nums; }
+.out-code--grand { font-size: 32px; display: block; text-align: center; }
+
+/* Fenêtre : un <dialog> natif, plein écran au téléphone. */
+.out-feuille { border: 0; padding: 0; background: var(--surface); color: var(--ink); width: min(460px, calc(100% - 32px)); max-height: 90vh; border-radius: var(--radius-card); }
+.out-feuille::backdrop { background: var(--scrim); }
+.out-feuille__corps { display: flex; flex-direction: column; gap: var(--gap-m); padding: 22px 24px 24px; }
+.out-feuille__pied { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--gap-s); }
+
+/* Le pont des variables de l'ANCIEN socle. Les assistants de connexion des
+   plateformes (components/connexions.js, airbnb-connect.js,
+   booking-connect.js) portent leurs styles en ligne avec les noms de
+   public/style.css (`--bg`, `--text2`, `.btn-primary`…). La page des
+   connexions ne charge plus cette feuille : sans ce pont, la fenêtre de
+   l'assistant s'ouvrait TRANSPARENTE. Des alias vers les jetons de la charte,
+   aucune couleur en dur — et seulement sur une page qui porte `out-pont`. */
+.out-pont {
+  --bg: var(--surface); --bg2: var(--surface-2); --text: var(--ink); --text2: var(--muted);
+  --green: var(--ok); --radius: var(--radius-tile); --radius-lg: var(--radius-card);
+}
+.out-pont .btn:not([class*="btn--"]) { background: var(--surface); color: var(--ink); border-color: var(--border); }
+.out-pont .btn.btn-primary { border-color: var(--ink); }
+/* La fenêtre en sommeil des plateformes (option B) : jamais ouverte
+   aujourd'hui, gardée telle quelle. */
+.out-modale { position: fixed; inset: 0; z-index: 1000; display: none; align-items: center; justify-content: center; padding: 20px; background: var(--scrim); }
+.out-modale.show { display: flex; }
+.out-modale__boite { width: 100%; max-width: 1100px; height: 90vh; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border-radius: var(--radius-card); }
+.out-modale__tete { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); font-weight: var(--fw-semibold); }
+.out-modale__boite iframe { flex: 1; border: 0; width: 100%; }
+
+@media (max-width: 720px) {
+  .out { gap: var(--gap-m); }
+  .out-carte { padding: var(--gap-m); }
+  .out-ligne-saisie { flex-direction: column; }
+  .out-ligne-saisie > .btn { width: 100%; }
+  .out-ligne { flex-wrap: wrap; }
+  .out-chiffre b { font-size: 19px; }
+  /* `100%` et pas `100vw` : `vw` compte la barre de défilement (leçon de la
+     fiche des charges, recette du 11 novembre). */
+  .out-feuille { width: 100%; max-width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; margin: 0; }
+  .out-modale { padding: 0; }
+  .out-modale__boite { height: 100vh; border-radius: 0; max-width: none; }
+}

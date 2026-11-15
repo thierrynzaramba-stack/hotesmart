@@ -464,14 +464,30 @@ test('LE TEST QUI COMPTE : la navigation est rendue', () => {
 test('toute page V5 qui porte une barre du bas rend sa navigation', () => {
   // ⚠ LE FILET, pour que le prochain ecran V5 ne refasse pas l omission : une
   // `.bottombar` vide devient un bandeau noir au telephone.
-  const dossier = path.join(racine, 'pages')
+  // ⚠ RECIBLE A L INTEGRATION V5 (lot 1, 15 novembre 2026) : les pages outils
+  // montent leur navigation par `monterCoquille` (shared/page-outil.js), qui
+  // appelle `HSNav.render` ET `HSNav.renderMenu` — c'est verifie ci-dessous,
+  // sur le module lui-meme. Et le filet couvre desormais `apps/` aussi : deux
+  // de ces pages y vivent (serrures, SMS), comme « Ce qui fait bouger vos prix ».
+  const coquille = fs.readFileSync(path.join(racine, 'shared/page-outil.js'), 'utf8')
+  const corps = coquille.slice(coquille.indexOf('export function monterCoquille'))
+  assert.match(corps, /HSNav\.renderMenu\(/, 'la coquille commune doit rendre le menu')
+  assert.match(corps, /HSNav\.render\(/, 'la coquille commune doit rendre les onglets')
+  assert.match(corps, /onDeconnexion:/, 'une deconnexion absente est un no-op silencieux')
   const oublis = []
-  for (const f of fs.readdirSync(dossier)) {
-    if (!f.endsWith('.html')) continue
-    const html = fs.readFileSync(path.join(dossier, f), 'utf8')
-    if (!/<nav class="bottombar"/.test(html)) continue
-    if (!/HSNav\.render\(/.test(html)) oublis.push('pages/' + f)
+  const parcourir = (rel) => {
+    for (const e of fs.readdirSync(path.join(racine, rel), { withFileTypes: true })) {
+      const r = rel + '/' + e.name
+      if (e.isDirectory()) { parcourir(r); continue }
+      if (!e.name.endsWith('.html')) continue
+      const html = fs.readFileSync(path.join(racine, r), 'utf8')
+      if (!/<nav class="bottombar"/.test(html)) continue
+      const directe = /HSNav\.render\(/.test(html)
+      const parCoquille = /\bmonterCoquille\(/.test(html) && /import \{[^}]*\bmonterCoquille\b[^}]*\} from '\/shared\/page-outil\.js'/.test(html)
+      if (!directe && !parCoquille) oublis.push(r)
+    }
   }
+  parcourir('pages'); parcourir('apps')
   assert.deepEqual(oublis, [], 'ces pages affichent une barre du bas qu elles ne remplissent jamais')
 })
 

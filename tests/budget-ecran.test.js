@@ -199,6 +199,29 @@ const ATTENDU = {
   'pages/charges.html': {
     '/api/ecran/charges': 1, // l'ecran en un appel (et « Afficher plus », et les relectures apres un geste)
     '/api/charges': 1        // les GESTES seulement : envoi, confirmer, valider, trancher, supprimer, consulter
+  },
+  // ⚠ LES PAGES OUTILS INTÉGRÉES AU SOCLE V5 (15 novembre 2026,
+  // docs/specs/spec-integration-v5-lot-1.md). Leurs sites d'appel sont
+  // IDENTIQUES à ceux d'avant l'intégration (mesuré sur 082d376e) : le lot
+  // change la forme, pas les appels. Elles n'ont pas d'endpoint d'écran — il
+  // demanderait un fichier api/, hors du lot (spec §6, point 1). Ce que le lot
+  // retire du chargement, ce sont les lectures de l'ancienne barre latérale,
+  // qui ne passaient pas par /api et que ce test ne voit donc pas : elles sont
+  // MESURÉES en exécutant la page (tests/outils/mesurer-pages-outils.js).
+  'apps/serrures/index.html': {
+    '/api/serrures': 7       // config au chargement ; serrures et codes au clic sur l'onglet ; enregistrer, basculer, générer, supprimer : des gestes
+  },
+  'apps/sms/index.html': {
+    '/api/sms': 5            // config au chargement ; historique au clic sur l'onglet ; enregistrer, basculer, envoyer : des gestes
+  },
+  'pages/connexions.html': {
+    '/api/beds24-setup': 3,  // état au chargement ; connecter et renouveler : des gestes
+    '/api/channel-property': 1, // les biens éligibles, au chargement
+    '/api/channel-connect': 1,  // la fenêtre EN SOMMEIL (option B), ouverte par aucun bouton
+    '/api/sms': 5            // config et expéditeurs au chargement ; clé, expéditeur, bascule : des gestes
+  },
+  'pages/abonnement.html': {
+    '/api/stripe': 3         // essai, annulation, portail : des gestes, jamais au chargement
   }
 }
 

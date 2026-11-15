@@ -1,348 +1,597 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Connexions API</title>
-  <link rel="stylesheet" href="/public/style.css">
-  <style>
-    .api-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; margin-bottom:16px; }
-    .api-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
-    .api-name { font-size:15px; font-weight:500; display:flex; align-items:center; gap:10px; }
-    .api-status { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:500; }
-    .status-ok  { background:#E1F5EE; color:#085041; }
-    .status-off { background:var(--bg2); color:var(--text2); border:0.5px solid var(--border); }
-    .status-soon { background:#FAEEDA; color:#633806; }
-    .steps { display:flex; flex-direction:column; gap:12px; margin-bottom:20px; }
-    .step { display:flex; gap:12px; align-items:flex-start; }
-    .step-num { width:24px; height:24px; border-radius:50%; background:var(--green); color:white; font-size:11px; font-weight:600; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
-    .step-body { font-size:13px; color:var(--text2); line-height:1.6; flex:1; }
-    .step-body strong { color:var(--text); }
-    .step-body a { color:var(--green); text-decoration:none; }
-    .step-body a:hover { text-decoration:underline; }
-    .step-body code { background:var(--bg2); padding:1px 6px; border-radius:4px; font-size:12px; border:0.5px solid var(--border); }
-    .invite-row { display:flex; gap:8px; margin-top:12px; }
-    .invite-row input { flex:1; font-family:var(--font-mono, monospace); font-size:12px; }
-    .token-info { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; font-size:12px; color:var(--text2); margin-top:12px; display:none; }
-    .token-info.show { display:block; }
-    .toast { padding:8px 14px; border-radius:var(--radius); font-size:12px; margin-top:12px; display:none; }
-    .toast.success { background:#E1F5EE; color:#085041; border:0.5px solid var(--green); }
-    .toast.error   { background:#fdecea; color:#E24B4A; border:0.5px solid #E24B4A; }
-    .divider { border:none; border-top:0.5px solid var(--border); margin:20px 0; }
-    .coming-soon { opacity:0.5; pointer-events:none; }
-    .api-actions { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
-
-    /* ── Brevo SMS ── */
-    .brevo-context { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; font-size:12px; color:var(--text2); line-height:1.6; margin-bottom:18px; }
-    .toggle-row { display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border); }
-    .toggle-label { font-size:13px; color:var(--text2); }
-    .toggle { position:relative; width:44px; height:24px; flex-shrink:0; }
-    .toggle input { opacity:0; width:0; height:0; }
-    .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
-    .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
-    input:checked + .toggle-slider { background:var(--green); }
-    input:checked + .toggle-slider:before { transform:translateX(20px); }
-
-    /* ── Plateformes OTA ── */
-    .ota-prop-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:0.5px solid var(--border); }
-    .ota-prop-row:last-child { border-bottom:none; }
-    .ota-modal { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:none; align-items:center; justify-content:center; z-index:1000; padding:20px; }
-    .ota-modal.show { display:flex; }
-    .ota-modal-box { background:var(--bg); border-radius:var(--radius-lg); width:100%; max-width:1100px; height:90vh; display:flex; flex-direction:column; overflow:hidden; }
-    .ota-modal-head { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:0.5px solid var(--border); }
-    .ota-modal-head .title { font-size:14px; font-weight:500; }
-    .ota-modal-box iframe { flex:1; border:none; width:100%; }
-    @media (max-width:768px){ .ota-modal { padding:0 } .ota-modal-box { height:100vh; border-radius:0; max-width:none } }
-
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « CONNEXIONS API » — intégrée au socle V5 le 15 novembre 2026
+     (docs/specs/spec-integration-v5-lot-1.md). La FORME change, pas le fond :
+     mêmes appels, mêmes gestes, mêmes messages.
+     ⚠ `out-pont` SUR <body> : l'assistant de connexion des plateformes
+     (components/connexions.js et ses deux voisins) porte ses styles en ligne
+     avec les noms de l'ancien socle. Le pont les relie aux jetons de la charte
+     (shared/ui.css, bloc PAGES OUTILS) ; sans lui, sa fenêtre s'ouvrait
+     transparente.
+     RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
-<body>
-<div class="layout">
-  <div class="sidebar" id="sidebar"></div>
-  <div class="main">
-    <div class="topbar">
-      <div>
-        <div class="page-title">⚡ Connexions API</div>
-        <div class="page-sub">Connectez vos services externes</div>
-      </div>
-    </div>
-    <div class="content">
-      <!-- Beds24 -->
-      <div class="api-card" id="card-beds24">
-        <div class="api-header">
-          <div class="api-name">🏨 Beds24</div>
-          <div class="api-status status-off" id="status-beds24">Vérification…</div>
-        </div>
+<body class="out-pont">
 
-        <div class="steps">
-          <div class="step">
-            <div class="step-num">1</div>
-            <div class="step-body">
-              Connectez-vous à Beds24 et allez dans
-              <a href="https://beds24.com/control3.php?pagetype=apiv2" target="_blank">
-                Paramètres → Marketplace → API
-              </a>
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">2</div>
-            <div class="step-body">
-              Cliquez sur <strong>Generate invite code</strong>.
-              Cochez <strong>READ + WRITE</strong> sur <code>bookings</code> et <code>properties</code>.
-              Sélectionnez <strong>All properties</strong>.
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">3</div>
-            <div class="step-body">
-              Copiez l'invite code généré et collez-le ci-dessous.
-              <strong>Attention : l'invite code est à usage unique.</strong>
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">4</div>
-            <div class="step-body">
-              Cliquez sur <strong>Connecter</strong> — HôteSmart récupère et sauvegarde automatiquement le token.
-            </div>
-          </div>
-        </div>
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
 
-        <div class="invite-row">
-          <input class="form-input" type="text" id="invite-code"
-            placeholder="Collez votre invite code Beds24 ici…">
-          <button class="btn btn-primary" id="btn-connect-beds24">Connecter</button>
-        </div>
-
-        <div class="token-info" id="token-info-beds24"></div>
-        <div class="toast" id="toast-beds24"></div>
-
-        <hr class="divider">
-
-        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
-          Le token Beds24 expire après <strong>24h</strong>.
-          HôteSmart renouvelle automatiquement via le refresh token.
-          Si la connexion échoue, générez un nouvel invite code.
-        </div>
-
-        <div class="api-actions">
-          <button class="btn" id="btn-refresh-beds24">🔄 Renouveler le token</button>
-          <a class="btn" href="https://beds24.com/control3.php?pagetype=apiv2" target="_blank">
-            🔗 Ouvrir Beds24 API
-          </a>
-        </div>
-      </div>
-
-      <!-- Brevo (par hôte : chaque hôte connecte son propre compte Brevo).
-           Une seule clé, deux usages : les SMS d'alerte et les e-mails envoyés
-           aux voyageurs de vos réservations directes. -->
-      <div class="api-card" id="card-brevo">
-        <div class="api-header">
-          <div class="api-name">💬 Brevo — SMS et e-mails</div>
-          <div class="api-status status-off" id="status-brevo">Vérification…</div>
-        </div>
-
-        <div class="brevo-context">
-          Une seule clé, deux usages. Les <strong>SMS</strong> sont optionnels et facturés sur
-          <strong>votre propre compte Brevo</strong> (~0,06 €/SMS), pas par HôteSmart.
-          Les <strong>e-mails aux voyageurs</strong> de vos réservations directes partent
-          également de votre compte, sous votre nom.
-        </div>
-
-        <div class="steps">
-          <div class="step">
-            <div class="step-num">1</div>
-            <div class="step-body">
-              Créez un compte sur <a href="https://www.brevo.com/fr/" target="_blank">brevo.com</a>.
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">2</div>
-            <div class="step-body">
-              Dans <strong>Mon compte → Clés API</strong>
-              (<a href="https://app.brevo.com/settings/keys/api" target="_blank">lien direct</a>),
-              créez une clé (commence par <code>xkeysib-</code>).
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">3</div>
-            <div class="step-body">
-              Achetez des crédits SMS :
-              <a href="https://app.brevo.com/billing/addon/customize/sms" target="_blank">app.brevo.com/billing</a>.
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">4</div>
-            <div class="step-body">
-              Collez la clé ci-dessous et enregistrez.
-            </div>
-          </div>
-        </div>
-
-        <div class="invite-row">
-          <input class="form-input" type="password" id="brevo-key" placeholder="xkeysib-…">
-          <button class="btn btn-primary" id="btn-save-brevo">Enregistrer</button>
-        </div>
-
-        <div class="toggle-row">
-          <span class="toggle-label">Activer l'envoi SMS</span>
-          <label class="toggle">
-            <input type="checkbox" id="brevo-enabled">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-
-        <!-- Adresse d'expédition des e-mails voyageur.
-             ⚠ JAMAIS UN CHAMP LIBRE : Brevo n'envoie qu'au nom d'un expéditeur
-             vérifié. Une adresse tapée à la main serait acceptée ici et refusée
-             à l'envoi — l'hôte croirait son adresse réglée et le découvrirait
-             devant un voyageur. On ne propose donc que ce que Brevo valide. -->
-        <div id="bloc-expediteur" style="margin-top:18px; padding-top:16px; border-top:0.5px solid var(--border);">
-          <div style="font-size:13px; font-weight:500; margin-bottom:6px;">
-            Adresse d'expédition des e-mails voyageur
-          </div>
-          <div style="font-size:12px; color:var(--text2); line-height:1.6; margin-bottom:10px;">
-            Vos voyageurs verront cette adresse comme expéditeur, et leurs réponses
-            y arriveront directement. Seuls les expéditeurs <strong>vérifiés</strong>
-            dans votre compte Brevo peuvent être utilisés —
-            <a href="https://app.brevo.com/senders/list" target="_blank">gérer mes expéditeurs ↗</a>.
-          </div>
-          <div class="invite-row">
-            <select class="form-input" id="brevo-sender">
-              <option value="">Chargement…</option>
-            </select>
-            <button class="btn btn-primary" id="btn-save-sender">Enregistrer</button>
-          </div>
-          <div id="sender-aide" style="font-size:12px; color:var(--text2); margin-top:8px;"></div>
-
-          <!-- ⚠ LE CIRCUIT DE RETOUR, EXPLIQUE LA OU L'ADRESSE SE REGLE.
-               La bascule du reply-to change une habitude : les réponses des
-               voyageurs n'arrivent plus dans la boîte de l'hôte mais dans
-               HôteSmart. Ne pas le dire ici, c'est le laisser découvrir qu'il
-               ne reçoit plus rien — et conclure que quelque chose est cassé. -->
-          <div style="margin-top:14px; padding:11px 13px; border-radius:8px;
-                      background:var(--bg2); border:0.5px solid var(--border);
-                      font-size:12px; line-height:1.65; color:var(--text2)">
-            <strong style="color:var(--text)">Où arrivent les réponses de vos voyageurs</strong><br>
-            Vos messages partent de votre adresse, mais les réponses reviennent dans
-            <strong>la messagerie HôteSmart</strong>, dans le fil de la réservation — et non
-            dans votre boîte mail. C'est ce qui permet de garder toute la conversation au
-            même endroit, et à l'assistant de la lire.<br><br>
-            Vous recevez malgré tout <strong>une copie par e-mail</strong> de chaque réponse,
-            marquée comme telle. N'y répondez pas directement : votre voyageur ne la verrait
-            pas. Répondez depuis la messagerie.
-          </div>
-        </div>
-
-        <div class="toast" id="toast-brevo"></div>
-      </div>
-
-      <!-- Plateformes OTA (gestionnaire de canaux, marque blanche) -->
-      <div class="api-card" id="card-ota">
-        <div class="api-header">
-          <div class="api-name">🌐 Mes plateformes (Booking, Airbnb…)</div>
-          <div class="api-status status-off" id="status-ota">Vérification…</div>
-        </div>
-        <div style="font-size:13px;color:var(--text2);line-height:1.7;margin-bottom:14px">
-          Connectez vos annonces Booking.com, Airbnb et autres plateformes directement à vos biens HôteSmart.
-          Les réservations remontent automatiquement et votre calendrier reste synchronisé en temps réel.
-        </div>
-        <div id="ota-properties" style="font-size:13px;color:var(--text2)">Chargement…</div>
-        <div class="toast" id="toast-ota"></div>
-      </div>
-
-      <!-- Seam -->
-      <div class="api-card">
-        <div class="api-header">
-          <div class="api-name">🔐 Seam — Serrures connectées</div>
-          <div class="api-status status-off" id="status-seam">Vérification…</div>
-        </div>
-        <div class="steps">
-          <div class="step">
-            <div class="step-num">1</div>
-            <div class="step-body">
-              Créez un compte sur <a href="https://console.seam.co" target="_blank">console.seam.co</a>
-              et connectez vos serrures.
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">2</div>
-            <div class="step-body">
-              Allez dans <strong>API Keys</strong>, créez une clé (commence par <code>seam_</code>).
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">3</div>
-            <div class="step-body">
-              Enregistrez-la dans
-              <a href="/apps/serrures">Paramètres → Serrures connectées</a>.
-            </div>
-          </div>
-        </div>
-        <div class="api-actions">
-          <a class="btn btn-primary" href="/apps/serrures">⚙️ Configurer Seam</a>
-        </div>
-      </div>
-
-      <!-- Stripe -->
-      <div class="api-card coming-soon">
-        <div class="api-header">
-          <div class="api-name">💳 Stripe</div>
-          <div class="api-status status-soon">Bientôt</div>
-        </div>
-        <div style="font-size:13px;color:var(--text2)">
-          Intégration Stripe pour les abonnements et paiements — disponible prochainement.
-        </div>
-      </div>
-
-      <!-- Airbnb -->
-      <div class="api-card coming-soon">
-        <div class="api-header">
-          <div class="api-name">🏠 Airbnb</div>
-          <div class="api-status status-soon">Bientôt</div>
-        </div>
-        <div style="font-size:13px;color:var(--text2)">
-          Synchronisation des annonces et avis Airbnb — disponible prochainement.
-        </div>
-      </div>
-
+<main class="page out">
+  <div class="out-tete">
+    <div class="out-tete__titre">
+      <h1 class="h1" data-i18n="cnx.titre"></h1>
+      <p class="out-sous" data-i18n="cnx.sous_titre"></p>
     </div>
   </div>
-</div>
+
+  <div class="out-pile">
+    <!-- Beds24 -->
+    <section class="out-carte" id="card-beds24" aria-labelledby="h-beds24">
+      <div class="out-carte__tete">
+        <h2 class="out-carte__titre" id="h-beds24"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-home"/></svg><span data-i18n="cnx.beds24"></span></h2>
+        <span class="out-etat" id="status-beds24" data-i18n="outil.verification"></span>
+      </div>
+
+      <ol class="out-etapes">
+        <li><span data-riche="cnx.beds24_1" data-lien-beds24="https://beds24.com/control3.php?pagetype=apiv2"></span></li>
+        <li><span data-riche="cnx.beds24_2"></span></li>
+        <li><span data-riche="cnx.beds24_3"></span></li>
+        <li><span data-riche="cnx.beds24_4"></span></li>
+      </ol>
+
+      <div class="out-ligne-saisie">
+        <input class="out-saisie out-mono" type="text" id="invite-code" data-i18n-attr="placeholder:cnx.invite_exemple;aria-label:cnx.invite_libelle">
+        <button type="button" class="btn btn--primary" id="btn-connect-beds24" data-i18n="cnx.connecter"></button>
+      </div>
+
+      <p class="out-bandeau out-bandeau--sans-point" id="token-info-beds24" hidden></p>
+      <p class="out-retour" id="toast-beds24"></p>
+
+      <hr class="out-filet">
+
+      <p class="out-aide" data-riche="cnx.beds24_note"></p>
+
+      <div class="out-actions">
+        <button type="button" class="btn btn--secondary" id="btn-refresh-beds24" data-i18n="cnx.renouveler"></button>
+        <a class="btn btn--secondary" href="https://beds24.com/control3.php?pagetype=apiv2" target="_blank" rel="noopener">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-link"/></svg><span data-i18n="cnx.ouvrir_beds24"></span>
+        </a>
+      </div>
+    </section>
+
+    <!-- Brevo (par hôte : chaque hôte connecte son propre compte Brevo).
+         Une seule clé, deux usages : les SMS d'alerte et les e-mails envoyés
+         aux voyageurs de vos réservations directes. -->
+    <section class="out-carte" id="card-brevo" aria-labelledby="h-brevo">
+      <div class="out-carte__tete">
+        <h2 class="out-carte__titre" id="h-brevo"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-send"/></svg><span data-i18n="cnx.brevo"></span></h2>
+        <span class="out-etat" id="status-brevo" data-i18n="outil.verification"></span>
+      </div>
+
+      <p class="out-note" data-riche="cnx.brevo_contexte"></p>
+
+      <ol class="out-etapes">
+        <li><span data-riche="cnx.brevo_1" data-lien-brevo="https://www.brevo.com/fr/"></span></li>
+        <li><span data-riche="cnx.brevo_2" data-lien-cles="https://app.brevo.com/settings/keys/api"></span></li>
+        <li><span data-riche="cnx.brevo_3" data-lien-credits="https://app.brevo.com/billing/addon/customize/sms"></span></li>
+        <li><span data-riche="cnx.brevo_4"></span></li>
+      </ol>
+
+      <div class="out-ligne-saisie">
+        <input class="out-saisie out-mono" type="password" id="brevo-key" autocomplete="off" data-i18n-attr="placeholder:cnx.brevo_cle_exemple;aria-label:sms.cle_libelle">
+        <button type="button" class="btn btn--primary" id="btn-save-brevo" data-i18n="outil.enregistrer"></button>
+      </div>
+
+      <label class="out-inter">
+        <span data-i18n="cnx.activer_sms"></span>
+        <input type="checkbox" class="out-sw" role="switch" id="brevo-enabled">
+      </label>
+
+      <!-- Adresse d'expédition des e-mails voyageur.
+           ⚠ JAMAIS UN CHAMP LIBRE : Brevo n'envoie qu'au nom d'un expéditeur
+           vérifié. Une adresse tapée à la main serait acceptée ici et refusée
+           à l'envoi — l'hôte croirait son adresse réglée et le découvrirait
+           devant un voyageur. On ne propose donc que ce que Brevo valide. -->
+      <div class="out-pile" id="bloc-expediteur">
+        <hr class="out-filet">
+        <div class="out-champ">
+          <label for="brevo-sender" data-i18n="cnx.expediteur_titre"></label>
+          <p class="out-aide" data-riche="cnx.expediteur_aide" data-lien-expediteurs="https://app.brevo.com/senders/list"></p>
+          <div class="out-ligne-saisie">
+            <select class="out-saisie" id="brevo-sender"><option value="" data-i18n="common.loading"></option></select>
+            <button type="button" class="btn btn--primary" id="btn-save-sender" data-i18n="outil.enregistrer"></button>
+          </div>
+        </div>
+        <p class="out-aide" id="sender-aide"></p>
+
+        <!-- ⚠ LE CIRCUIT DE RETOUR, EXPLIQUE LA OU L'ADRESSE SE REGLE.
+             La bascule du reply-to change une habitude : les réponses des
+             voyageurs n'arrivent plus dans la boîte de l'hôte mais dans
+             HôteSmart. Ne pas le dire ici, c'est le laisser découvrir qu'il
+             ne reçoit plus rien — et conclure que quelque chose est cassé. -->
+        <div class="out-note">
+          <p><b data-i18n="cnx.circuit_titre"></b></p>
+          <p data-riche="cnx.circuit_1"></p>
+          <p data-riche="cnx.circuit_2"></p>
+        </div>
+      </div>
+
+      <p class="out-retour" id="toast-brevo"></p>
+    </section>
+
+    <!-- Plateformes OTA (gestionnaire de canaux, marque blanche) -->
+    <section class="out-carte" id="card-ota" aria-labelledby="h-ota">
+      <div class="out-carte__tete">
+        <h2 class="out-carte__titre" id="h-ota"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-globe"/></svg><span data-i18n="cnx.ota_titre"></span></h2>
+        <span class="out-etat" id="status-ota" data-i18n="outil.verification"></span>
+      </div>
+      <p class="out-sous" data-i18n="cnx.ota_texte"></p>
+      <div class="out-liste" id="ota-properties"><p class="out-aide" data-i18n="common.loading"></p></div>
+      <p class="out-retour" id="toast-ota"></p>
+    </section>
+
+    <!-- Seam -->
+    <section class="out-carte" aria-labelledby="h-seam">
+      <div class="out-carte__tete">
+        <h2 class="out-carte__titre" id="h-seam"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-key"/></svg><span data-i18n="cnx.seam"></span></h2>
+        <span class="out-etat" id="status-seam" data-i18n="outil.verification"></span>
+      </div>
+      <ol class="out-etapes">
+        <li><span data-riche="cnx.seam_1" data-lien-seam="https://console.seam.co"></span></li>
+        <li><span data-riche="cnx.seam_2"></span></li>
+        <li><span data-riche="cnx.seam_3" data-lien-serrures="/apps/serrures"></span></li>
+      </ol>
+      <div class="out-actions">
+        <a class="btn btn--primary" href="/apps/serrures"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-settings"/></svg><span data-i18n="serrures.configurer"></span></a>
+      </div>
+    </section>
+
+    <!-- Stripe -->
+    <section class="out-carte out-carte--bientot" aria-labelledby="h-stripe">
+      <div class="out-carte__tete">
+        <h2 class="out-carte__titre" id="h-stripe"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-euro"/></svg><span data-i18n="cnx.stripe"></span></h2>
+        <span class="out-etat out-etat--bientot" data-i18n="outil.bientot"></span>
+      </div>
+      <p class="out-sous" data-i18n="cnx.stripe_texte"></p>
+    </section>
+
+    <!-- Airbnb -->
+    <section class="out-carte out-carte--bientot" aria-labelledby="h-airbnb">
+      <div class="out-carte__tete">
+        <h2 class="out-carte__titre" id="h-airbnb"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-canal-airbnb"/></svg><span data-i18n="cnx.airbnb"></span></h2>
+        <span class="out-etat out-etat--bientot" data-i18n="outil.bientot"></span>
+      </div>
+      <p class="out-sous" data-i18n="cnx.airbnb_texte"></p>
+    </section>
+  </div>
+</main>
 
 <!-- [EN SOMMEIL - Option B] Modale plein écran self-service (iframe headless Channex).
      Conservée pour réactivation post-beta ; plus ouverte par aucun bouton. -->
-<div class="ota-modal" id="ota-modal">
-  <div class="ota-modal-box">
-    <div class="ota-modal-head">
-      <div class="title" id="ota-modal-title">Mes plateformes</div>
-      <button class="btn" id="ota-modal-close">✕ Terminé</button>
+<div class="out-modale" id="ota-modal">
+  <div class="out-modale__boite">
+    <div class="out-modale__tete">
+      <span id="ota-modal-title" data-i18n="cnx.modale_titre"></span>
+      <button type="button" class="btn btn--secondary" id="ota-modal-close" data-i18n="cnx.terminer"></button>
     </div>
-    <iframe id="ota-iframe" src="about:blank" title="Connexion des plateformes"></iframe>
+    <iframe id="ota-iframe" src="about:blank" data-i18n-attr="title:cnx.iframe"></iframe>
   </div>
 </div>
 
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
 <script type="module">
+import { exigerCompteProprePage, compteCourant, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
+import { requireAuth } from '/components/auth-guard.js'
+import { supabase, signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { openConnexions } from '/components/connexions.js'
+import { bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
+import { renderOnboardingBanner } from '/components/onboarding-banner.js'
+import { esc, rendreRiche, poserEtat, afficherRetour, monterCoquille } from '/shared/page-outil.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+
+let session = null
+let otaProps = []      // biens OTA charges (source pour l'assistant de connexion par bien)
+
+function setStatus (id, type, label) {
+  poserEtat(document.getElementById(`status-${id}`), type, label)
+}
+
+function showToast (id, msg, type) {
+  afficherRetour(document.getElementById(`toast-${id}`), msg, type === 'success' ? 'ok' : 'erreur', 5000)
+}
+
+// ===== Beds24 =====
+async function checkBeds24Status () {
+  const res = await fetch('/api/beds24-setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action: 'status' })
+  })
+  const data = await res.json()
+  const ok = data.connected
+
+  setStatus('beds24', ok ? 'ok' : 'off', t(ok ? 'outil.connecte' : 'outil.non_connecte'))
+
+  const info = document.getElementById('token-info-beds24')
+  if (ok && data.hasRefresh) {
+    info.textContent = t('cnx.refresh_ok')
+    info.className = 'out-bandeau out-bandeau--sans-point out-bandeau--ok'
+    info.hidden = false
+  } else if (ok) {
+    info.textContent = t('cnx.refresh_absent')
+    info.className = 'out-bandeau out-bandeau--sans-point out-bandeau--attente'
+    info.hidden = false
+  } else {
+    info.hidden = true
+  }
+}
+
+function brancherBeds24 () {
+  document.getElementById('btn-connect-beds24').addEventListener('click', async () => {
+    const code = document.getElementById('invite-code').value.trim()
+    if (!code) return showToast('beds24', t('cnx.invite_requis'), 'error')
+
+    const btn = document.getElementById('btn-connect-beds24')
+    btn.disabled = true; btn.textContent = t('cnx.connexion')
+
+    const res = await fetch('/api/beds24-setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'setup', inviteCode: code })
+    })
+    const data = await res.json()
+    btn.disabled = false; btn.textContent = t('cnx.connecter')
+
+    if (data.success) {
+      document.getElementById('invite-code').value = ''
+      showToast('beds24', t('cnx.beds24_ok'), 'success')
+      await checkBeds24Status()
+    } else {
+      showToast('beds24', data.error || t('cnx.erreur_inconnue'), 'error')
+    }
+  })
+
+  document.getElementById('btn-refresh-beds24').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-refresh-beds24')
+    btn.disabled = true; btn.textContent = t('cnx.renouvellement')
+
+    const res = await fetch('/api/beds24-setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'refresh' })
+    })
+    const data = await res.json()
+    btn.disabled = false; btn.textContent = t('cnx.renouveler')
+
+    if (data.success) {
+      showToast('beds24', t('cnx.renouvele', { h: Math.round(data.expiresIn / 3600) }), 'success')
+      await checkBeds24Status()
+    } else {
+      showToast('beds24', data.error || t('outil.erreur'), 'error')
+    }
+  })
+}
+
+// ===== Brevo SMS (config par hôte) =====
+async function loadBrevoConfig () {
+  try {
+    const res = await fetch('/api/sms?action=config', {
+      headers: { 'Authorization': `Bearer ${session.access_token}` }
+    })
+    const data = await res.json()
+    if (data.configured) {
+      document.getElementById('brevo-key').value = '••••••••••••••••••••'
+      document.getElementById('brevo-enabled').checked = data.enabled
+      setStatus('brevo', data.enabled ? 'ok' : 'off',
+        t(data.enabled ? 'outil.connecte' : 'cnx.brevo_cle_sms_off'))
+      // ⚠ L'EXPEDITEUR NE SUIT PAS LE TOGGLE SMS. Couper les SMS ne coupe pas
+      // les e-mails : ce sont deux canaux, et un hôte qui refuse les SMS doit
+      // pouvoir régler quand même l'adresse vue par ses voyageurs.
+      await loadSenders(data.senderEmail)
+    } else {
+      setStatus('brevo', 'off', t('outil.non_configure'))
+      document.getElementById('bloc-expediteur').hidden = true
+    }
+  } catch {
+    setStatus('brevo', 'off', t('outil.erreur'))
+    // Sans ça, le bloc expéditeur reste affiché avec « Chargement… » figé et un
+    // bouton actif qui ne peut rien faire : on ne laisse pas une UI morte
+    // prétendre attendre quelque chose.
+    const bloc = document.getElementById('bloc-expediteur')
+    if (bloc) bloc.hidden = true
+  }
+}
+
+// ===== Adresse d'expédition des e-mails voyageur =====
+// La liste vient de Brevo, jamais d'une saisie. Le serveur la revérifie avant
+// d'enregistrer : se fier au menu affiché reviendrait à accepter n'importe
+// quelle adresse postée à la main, donc une identité d'expéditeur que l'hôte
+// ne possède pas.
+async function loadSenders (choisi) {
+  const sel = document.getElementById('brevo-sender')
+  const aide = document.getElementById('sender-aide')
+  const bloc = document.getElementById('bloc-expediteur')
+  try {
+    const res = await fetch('/api/sms?action=senders', {
+      headers: { 'Authorization': `Bearer ${session.access_token}` }
+    })
+    const data = await res.json()
+
+    if (!data.configured) {
+      // Sans clé, ce réglage n'a pas de sens : on cache plutôt que de montrer
+      // un menu vide dont personne ne devinerait la cause.
+      bloc.hidden = true
+      return
+    }
+    bloc.hidden = false
+    aide.className = 'out-aide'
+
+    if (data.error) {
+      sel.innerHTML = '<option value="">—</option>'
+      sel.disabled = true
+      aide.textContent = t('cnx.sender_muet', { erreur: data.error })
+      return
+    }
+    if (!data.senders.length) {
+      sel.innerHTML = `<option value="">${esc(t('cnx.sender_aucun'))}</option>`
+      sel.disabled = true
+      aide.textContent = t('cnx.sender_aucun_aide')
+      return
+    }
+
+    sel.disabled = false
+    sel.innerHTML = data.senders
+      .map(x => `<option value="${esc(x.email)}">${esc(t('cnx.sender_option', { nom: x.name, email: x.email }))}</option>`).join('')
+    if (choisi && data.senders.some(x => x.email === choisi)) {
+      sel.value = choisi
+      aide.textContent = ''
+    } else if (choisi) {
+      // ⚠ L'ECRAN NE DOIT PAS AFFIRMER LE CONTRAIRE DU SERVEUR.
+      // L'adresse enregistrée n'est plus vérifiée chez Brevo (supprimée,
+      // désactivée). Le serveur continue de l'utiliser telle quelle : Brevo
+      // rend 400 et PLUS AUCUN e-mail ne part. Annoncer « Par défaut : … »
+      // ici laisserait croire que tout va bien, et l'hôte n'aurait aucune
+      // raison de recliquer. Constat de review.
+      aide.className = 'out-aide out-aide--alerte'
+      aide.innerHTML = rendreRiche(t('cnx.sender_invalide', { email: choisi }))
+    } else {
+      // Rien de choisi : on annonce le défaut au lieu de laisser croire à une
+      // sélection. C'est bien cette adresse-là qui partira.
+      aide.textContent = t('cnx.sender_defaut', { nom: data.senders[0].name, email: data.senders[0].email })
+    }
+  } catch (e) {
+    bloc.hidden = false
+    aide.textContent = t('cnx.sender_lecture', { message: e.message })
+  }
+}
+
+function brancherBrevo () {
+  document.getElementById('btn-save-brevo').addEventListener('click', async () => {
+    const key = document.getElementById('brevo-key').value.trim()
+    if (!key || key.startsWith('•')) return showToast('brevo', t('outil.cle_invalide'), 'error')
+
+    const btn = document.getElementById('btn-save-brevo')
+    btn.disabled = true; btn.textContent = t('cnx.enregistrement')
+    try {
+      const res = await fetch('/api/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: 'saveConfig', apiKey: key })
+      })
+      const data = await res.json()
+      if (data.success) {
+        document.getElementById('brevo-key').value = '••••••••••••••••••••'
+        document.getElementById('brevo-enabled').checked = true
+        setStatus('brevo', 'ok', t('outil.connecte'))
+        showToast('brevo', t('cnx.brevo_cle_ok'), 'success')
+        // La clé venant d'arriver, les expéditeurs deviennent lisibles.
+        await loadSenders(null)
+      } else {
+        showToast('brevo', data.error || t('outil.erreur'), 'error')
+      }
+    } catch (e) {
+      showToast('brevo', e.message, 'error')
+    } finally {
+      btn.disabled = false; btn.textContent = t('outil.enregistrer')
+    }
+  })
+
+  document.getElementById('btn-save-sender').addEventListener('click', async () => {
+    const email = document.getElementById('brevo-sender').value
+    if (!email) return showToast('brevo', t('cnx.sender_choisir'), 'error')
+    const btn = document.getElementById('btn-save-sender')
+    btn.disabled = true; btn.textContent = t('cnx.enregistrement')
+    try {
+      const res = await fetch('/api/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: 'saveSender', email })
+      })
+      const data = await res.json()
+      if (data.success) {
+        document.getElementById('sender-aide').textContent = ''
+        showToast('brevo', t('cnx.sender_ok'), 'success')
+      } else {
+        showToast('brevo', data.error || t('outil.erreur'), 'error')
+      }
+    } catch (e) {
+      showToast('brevo', e.message, 'error')
+    } finally {
+      btn.disabled = false; btn.textContent = t('outil.enregistrer')
+    }
+  })
+
+  document.getElementById('brevo-enabled').addEventListener('change', async (e) => {
+    const enabled = e.target.checked
+    try {
+      const res = await fetch('/api/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: 'toggleConfig', enabled })
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || t('outil.erreur'))
+      setStatus('brevo', enabled ? 'ok' : 'off', t(enabled ? 'outil.connecte' : 'cnx.envoi_desactive'))
+      showToast('brevo', t(enabled ? 'sms.active' : 'sms.desactive'), 'success')
+    } catch (er) {
+      document.getElementById('brevo-enabled').checked = !enabled
+      showToast('brevo', er.message, 'error')
+    }
+  })
+}
+
+// ===== Plateformes OTA (gestionnaire de canaux) =====
+async function loadOtaProperties () {
+  const box = document.getElementById('ota-properties')
+  try {
+    const res = await fetch('/api/channel-property', {
+      headers: { 'Authorization': `Bearer ${session.access_token}` }
+    })
+    const data = await res.json()
+    // ⚠ ET LES BIENS EN COURS DE MIGRATION.
+    // Constat de Thierry, 10 septembre 2026 : « sur HoteSmart je ne peux pas
+    // deconnecter de Beds24 et remapper ensuite, je pensais que c'etait
+    // prevu ». Ce ne l'etait pas : ce filtre ne montrait que les biens DEJA
+    // chez le canal, donc un bien encore `beds24` — meme pourvu de sa
+    // propriete Channex par l'assistant de migration — n'apparaissait nulle
+    // part. Il n'existait aucun autre chemin dans le produit pour le
+    // connecter : la migration butait sur une page vide.
+    //
+    // Le critere est la PROPRIETE CIBLE : un bien qui en a une est pret a
+    // etre connecte, quel que soit le provider encore inscrit. Les endpoints,
+    // eux, resolvent deja la bonne destination (`proprieteChezLeProvider`).
+    const props = (data.properties || []).filter(p =>
+      p.provider === 'channex' || p.provider === 'channel' || p.migration_target_property_id)
+
+    // ⚠ LE PARAMETRE SE LIT AVANT TOUT DEPART (revue de l'etape 3). Quand le
+    // compte n'a aucun bien eligible, ce `return` partait AVANT la lecture de
+    // `?bien` : l'hote arrivait depuis la fiche et ne voyait rien, ni fenetre
+    // ni explication.
+    const bienDemande = new URLSearchParams(location.search).get('bien')
+
+    if (!props.length) {
+      box.innerHTML = `<p class="out-aide">
+        ${esc(t(bienDemande ? 'cnx.ota_non_eligible_bien' : 'cnx.ota_aucun'))}
+        ${rendreRiche(t('cnx.ota_creer'), { nouveau: '/logements/nouveau' })}</p>`
+      setStatus('ota', 'off', t('cnx.ota_aucun_bien'))
+      return
+    }
+
+    otaProps = props
+    setStatus('ota', 'ok', t('cnx.ota_n_biens', { n: props.length }))
+    // Self-service : chaque bien ouvre l'assistant marque blanche (Airbnb OAuth /
+    // Booking) via components/connexions.js -> Channex reste masque.
+    box.innerHTML = props.map(p => `
+      <div class="out-ligne">
+        <div class="out-ligne__corps">
+          <span class="out-ligne__titre">${esc(p.name)}</span>
+          <span class="out-ligne__sous">${esc(p.city || '')}${p.capacity ? ' · ' + esc(t('cnx.ota_pers', { n: p.capacity })) : ''}</span>
+        </div>
+        <button type="button" class="btn btn--primary" data-connect="${esc(p.id)}">${esc(t('cnx.ota_connecter'))}</button>
+      </div>`).join('')
+
+    box.querySelectorAll('button[data-connect]').forEach(b =>
+      b.addEventListener('click', () => {
+        const p = otaProps.find(x => String(x.id) === String(b.dataset.connect))
+        if (p) openConnexions(p, b)
+      }))
+
+    // ⚠ ARRIVEE DEPUIS LA FICHE D'UN LOGEMENT (lot Logements V5, etape 3) :
+    // `?bien=<uuid>` ouvre l'assistant sur CE bien. La fiche ne descend aucune
+    // cle du partenaire ; c'est cette page qui la connait deja, et elle resout
+    // l'UUID en propriete avant d'ouvrir.
+    // ⚠ ET UN IDENTIFIANT QU'ELLE NE CONNAIT PAS SE DIT (revue de l'etape 3) :
+    // un bien Beds24 sans propriete cible, ou le bien d'un autre compte, sont
+    // absents de cette liste. Ne rien faire laissait l'hote devant une page
+    // qui ignorait sa demande, sans un mot.
+    if (bienDemande) {
+      const cible = otaProps.find(x => String(x.id) === String(bienDemande))
+      if (cible) openConnexions(cible, null)
+      else {
+        box.insertAdjacentHTML('afterbegin',
+          `<p class="out-aide" data-bien-inconnu>${esc(t('cnx.ota_inconnu'))}</p>`)
+      }
+    }
+  } catch (e) {
+    box.innerHTML = `<p class="out-aide out-aide--alerte">${esc(t('cnx.ota_erreur'))}</p>`
+    setStatus('ota', 'off', t('outil.erreur'))
+  }
+}
+
+// [EN SOMMEIL] Ouverture de l'iframe self-service Channex BRUTE (expose l'UI Channex).
+// On lui prefere l'assistant marque blanche (openConnexions). Conservee
+// pour reactivation post-beta ; plus appelee par aucun bouton (voir loadOtaProperties).
+// eslint-disable-next-line no-unused-vars
+async function openOtaModal (propId, propName, btn) {
+  btn.disabled = true
+  const old = btn.textContent
+  btn.textContent = t('cnx.preparation')
+  try {
+    const res = await fetch(`/api/channel-connect?property_id=${encodeURIComponent(propId)}`, {
+      headers: { 'Authorization': `Bearer ${session.access_token}` }
+    })
+    const data = await res.json()
+    if (!res.ok || !data.iframe_url) throw new Error(data.error || t('cnx.erreur_connexion'))
+
+    document.getElementById('ota-modal-title').textContent = t('cnx.modale_titre_bien', { nom: propName })
+    document.getElementById('ota-iframe').src = data.iframe_url
+    document.getElementById('ota-modal').classList.add('show')
+  } catch (e) {
+    showToast('ota', e.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.textContent = old
+  }
+}
+
+async function init () {
+  await I18n.init()
   // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
   // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
   // s'ouvrait par URL directe en mode basculé et affichait un contresens.
-  import { exigerCompteProprePage } from '/shared/compte-courant.js'
-  await exigerCompteProprePage({ nomPage: 'Les connexions' })
-
-  import { requireAuth } from '/components/auth-guard.js'
-  import { renderSidebar } from '/components/sidebar.js'
-  import { supabase } from '/shared/supabase.js'
-  import { initErrorHandler } from '/shared/error-handler.js'
-  import { openConnexions } from '/components/connexions.js'
-  import { bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
-
-  initErrorHandler()
-  const session = await requireAuth()
-  if (!session) throw new Error('Non authentifié')
-  await renderSidebar('api')
-  window._session  = session
+  await exigerCompteProprePage({ nomPage: t('cnx.titre') })
+  session = await requireAuth()
+  if (!session) return
+  document.addEventListener('i18n:changed', () => location.reload())
+  monterCoquille({
+    HSNav, I18n, session,
+    compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
+    deconnexion: () => signOut()
+  })
+  window._session = session
   window._supabase = supabase
-
-  let otaProps = []      // biens OTA charges (source pour l'assistant de connexion par bien)
+  brancherBeds24()
+  brancherBrevo()
+  document.getElementById('ota-modal-close').addEventListener('click', () => {
+    document.getElementById('ota-modal').classList.remove('show')
+    document.getElementById('ota-iframe').src = 'about:blank'
+  })
 
   // Vérifier statut Beds24
   await checkBeds24Status()
@@ -351,7 +600,7 @@
   const { data: seamData } = await supabase.from('api_keys')
     .select('seam_api_key, seam_enabled').eq('user_id', session.user.id).maybeSingle()
   const seamOk = !!(seamData?.seam_api_key && seamData?.seam_enabled !== false)
-  setStatus('seam', seamOk ? 'ok' : 'off', seamOk ? 'Connecté ✓' : 'Non connecté')
+  setStatus('seam', seamOk ? 'ok' : 'off', t(seamOk ? 'outil.connecte' : 'outil.non_connecte'))
 
   // Plateformes OTA
   await loadOtaProperties()
@@ -369,371 +618,12 @@
   // Brevo SMS (config par hôte)
   await loadBrevoConfig()
 
-  // Bouton connecter Beds24
-  document.getElementById('btn-connect-beds24').addEventListener('click', async () => {
-    const code = document.getElementById('invite-code').value.trim()
-    if (!code) return showToast('beds24', 'Collez d\'abord votre invite code', 'error')
+  // Le bandeau d'incitation que l'ancienne barre latérale posait : gardé
+  // (spec §3.1 et §8), sans attente, après le rendu.
+  renderOnboardingBanner().catch(() => {})
+}
 
-    const btn = document.getElementById('btn-connect-beds24')
-    btn.disabled = true; btn.textContent = '⏳ Connexion…'
-
-    const res = await fetch('/api/beds24-setup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({ action: 'setup', inviteCode: code })
-    })
-    const data = await res.json()
-    btn.disabled = false; btn.textContent = 'Connecter'
-
-    if (data.success) {
-      document.getElementById('invite-code').value = ''
-      showToast('beds24', '✅ Beds24 connecté avec succès !', 'success')
-      await checkBeds24Status()
-    } else {
-      showToast('beds24', '❌ ' + (data.error || 'Erreur inconnue'), 'error')
-    }
-  })
-
-  // Bouton refresh Beds24
-  document.getElementById('btn-refresh-beds24').addEventListener('click', async () => {
-    const btn = document.getElementById('btn-refresh-beds24')
-    btn.disabled = true; btn.textContent = '⏳ Renouvellement…'
-
-    const res = await fetch('/api/beds24-setup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({ action: 'refresh' })
-    })
-    const data = await res.json()
-    btn.disabled = false; btn.textContent = '🔄 Renouveler le token'
-
-    if (data.success) {
-      showToast('beds24', `✅ Token renouvelé — expire dans ${Math.round(data.expiresIn / 3600)}h`, 'success')
-      await checkBeds24Status()
-    } else {
-      showToast('beds24', '❌ ' + (data.error || 'Erreur'), 'error')
-    }
-  })
-
-  // ===== Brevo SMS (config par hôte) =====
-  async function loadBrevoConfig() {
-    try {
-      const res = await fetch('/api/sms?action=config', {
-        headers: { 'Authorization': `Bearer ${session.access_token}` }
-      })
-      const data = await res.json()
-      if (data.configured) {
-        document.getElementById('brevo-key').value = '••••••••••••••••••••'
-        document.getElementById('brevo-enabled').checked = data.enabled
-        setStatus('brevo', data.enabled ? 'ok' : 'off',
-          data.enabled ? 'Connecté ✓' : 'Clé enregistrée, envoi SMS désactivé')
-        // ⚠ L'EXPEDITEUR NE SUIT PAS LE TOGGLE SMS. Couper les SMS ne coupe pas
-        // les e-mails : ce sont deux canaux, et un hôte qui refuse les SMS doit
-        // pouvoir régler quand même l'adresse vue par ses voyageurs.
-        await loadSenders(data.senderEmail)
-      } else {
-        setStatus('brevo', 'off', 'Non configuré')
-        document.getElementById('bloc-expediteur').style.display = 'none'
-      }
-    } catch {
-      setStatus('brevo', 'off', 'Erreur')
-      // Sans ça, le bloc expéditeur reste affiché avec « Chargement… » figé et un
-      // bouton actif qui ne peut rien faire : on ne laisse pas une UI morte
-      // prétendre attendre quelque chose.
-      const bloc = document.getElementById('bloc-expediteur')
-      if (bloc) bloc.style.display = 'none'
-    }
-  }
-
-  document.getElementById('btn-save-brevo').addEventListener('click', async () => {
-    const key = document.getElementById('brevo-key').value.trim()
-    if (!key || key.startsWith('•')) return showToast('brevo', 'Saisissez une clé API valide', 'error')
-
-    const btn = document.getElementById('btn-save-brevo')
-    btn.disabled = true; btn.textContent = '⏳ Enregistrement…'
-    try {
-      const res = await fetch('/api/sms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({ action: 'saveConfig', apiKey: key })
-      })
-      const data = await res.json()
-      if (data.success) {
-        document.getElementById('brevo-key').value = '••••••••••••••••••••'
-        document.getElementById('brevo-enabled').checked = true
-        setStatus('brevo', 'ok', 'Connecté ✓')
-        showToast('brevo', '✅ Clé Brevo enregistrée', 'success')
-        // La clé venant d'arriver, les expéditeurs deviennent lisibles.
-        await loadSenders(null)
-      } else {
-        showToast('brevo', '❌ ' + (data.error || 'Erreur'), 'error')
-      }
-    } catch (e) {
-      showToast('brevo', '❌ ' + e.message, 'error')
-    } finally {
-      btn.disabled = false; btn.textContent = 'Enregistrer'
-    }
-  })
-
-  // ===== Adresse d'expédition des e-mails voyageur =====
-  // La liste vient de Brevo, jamais d'une saisie. Le serveur la revérifie avant
-  // d'enregistrer : se fier au menu affiché reviendrait à accepter n'importe
-  // quelle adresse postée à la main, donc une identité d'expéditeur que l'hôte
-  // ne possède pas.
-  async function loadSenders(choisi) {
-    const sel = document.getElementById('brevo-sender')
-    const aide = document.getElementById('sender-aide')
-    const bloc = document.getElementById('bloc-expediteur')
-    try {
-      const res = await fetch('/api/sms?action=senders', {
-        headers: { 'Authorization': `Bearer ${session.access_token}` }
-      })
-      const data = await res.json()
-
-      if (!data.configured) {
-        // Sans clé, ce réglage n'a pas de sens : on cache plutôt que de montrer
-        // un menu vide dont personne ne devinerait la cause.
-        bloc.style.display = 'none'
-        return
-      }
-      bloc.style.display = ''
-
-      if (data.error) {
-        sel.innerHTML = '<option value="">—</option>'
-        sel.disabled = true
-        aide.textContent = `Brevo n'a pas répondu (${data.error}). Réessayez dans un instant.`
-        return
-      }
-      if (!data.senders.length) {
-        sel.innerHTML = '<option value="">Aucun expéditeur vérifié</option>'
-        sel.disabled = true
-        aide.innerHTML = 'Votre compte Brevo n\'a aucun expéditeur vérifié. '
-          + 'Ajoutez-en un chez Brevo, puis revenez : sans lui, aucun e-mail ne peut partir.'
-        return
-      }
-
-      sel.disabled = false
-      sel.innerHTML = data.senders
-        .map(x => `<option value="${x.email}">${x.name} — ${x.email}</option>`).join('')
-      if (choisi && data.senders.some(x => x.email === choisi)) {
-        sel.value = choisi
-        aide.textContent = ''
-      } else if (choisi) {
-        // ⚠ L'ECRAN NE DOIT PAS AFFIRMER LE CONTRAIRE DU SERVEUR.
-        // L'adresse enregistrée n'est plus vérifiée chez Brevo (supprimée,
-        // désactivée). Le serveur continue de l'utiliser telle quelle : Brevo
-        // rend 400 et PLUS AUCUN e-mail ne part. Annoncer « Par défaut : … »
-        // ici laisserait croire que tout va bien, et l'hôte n'aurait aucune
-        // raison de recliquer. Constat de review.
-        aide.innerHTML = `⚠️ L'adresse enregistrée (<strong>${choisi}</strong>) n'est plus `
-          + 'un expéditeur vérifié de votre compte Brevo : <strong>vos e-mails aux voyageurs '
-          + 'ne partent plus</strong>. Choisissez-en une ci-dessus et enregistrez.'
-      } else {
-        // Rien de choisi : on annonce le défaut au lieu de laisser croire à une
-        // sélection. C'est bien cette adresse-là qui partira.
-        aide.textContent = `Par défaut : ${data.senders[0].name} — ${data.senders[0].email}`
-      }
-    } catch (e) {
-      bloc.style.display = ''
-      aide.textContent = 'Impossible de lire vos expéditeurs : ' + e.message
-    }
-  }
-
-  document.getElementById('btn-save-sender').addEventListener('click', async () => {
-    const email = document.getElementById('brevo-sender').value
-    if (!email) return showToast('brevo', 'Choisissez une adresse', 'error')
-    const btn = document.getElementById('btn-save-sender')
-    btn.disabled = true; btn.textContent = '⏳…'
-    try {
-      const res = await fetch('/api/sms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({ action: 'saveSender', email })
-      })
-      const data = await res.json()
-      if (data.success) {
-        document.getElementById('sender-aide').textContent = ''
-        showToast('brevo', '✅ Adresse d\'expédition enregistrée', 'success')
-      } else {
-        showToast('brevo', '❌ ' + (data.error || 'Erreur'), 'error')
-      }
-    } catch (e) {
-      showToast('brevo', '❌ ' + e.message, 'error')
-    } finally {
-      btn.disabled = false; btn.textContent = 'Enregistrer'
-    }
-  })
-
-  document.getElementById('brevo-enabled').addEventListener('change', async (e) => {
-    const enabled = e.target.checked
-    try {
-      const res = await fetch('/api/sms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({ action: 'toggleConfig', enabled })
-      })
-      const data = await res.json()
-      if (!data.success) throw new Error(data.error || 'Erreur')
-      setStatus('brevo', enabled ? 'ok' : 'off', enabled ? 'Connecté ✓' : 'Envoi désactivé')
-      showToast('brevo', enabled ? '✅ SMS activé' : '⏸ SMS désactivé', 'success')
-    } catch (er) {
-      document.getElementById('brevo-enabled').checked = !enabled
-      showToast('brevo', '❌ ' + er.message, 'error')
-    }
-  })
-
-  async function checkBeds24Status() {
-    const res = await fetch('/api/beds24-setup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({ action: 'status' })
-    })
-    const data = await res.json()
-    const ok = data.connected
-
-    setStatus('beds24', ok ? 'ok' : 'off', ok ? 'Connecté ✓' : 'Non connecté')
-
-    const info = document.getElementById('token-info-beds24')
-    if (ok && data.hasRefresh) {
-      info.textContent = '🔄 Refresh token disponible — renouvellement automatique actif'
-      info.classList.add('show')
-    } else if (ok) {
-      info.textContent = '⚠️ Pas de refresh token — reconnectez avec un invite code pour activer le renouvellement auto'
-      info.classList.add('show')
-    } else {
-      info.classList.remove('show')
-    }
-  }
-
-  // ===== Plateformes OTA (gestionnaire de canaux) =====
-  async function loadOtaProperties() {
-    const box = document.getElementById('ota-properties')
-    try {
-      const res = await fetch('/api/channel-property', {
-        headers: { 'Authorization': `Bearer ${session.access_token}` }
-      })
-      const data = await res.json()
-      // ⚠ ET LES BIENS EN COURS DE MIGRATION.
-      // Constat de Thierry, 10 septembre 2026 : « sur HoteSmart je ne peux pas
-      // deconnecter de Beds24 et remapper ensuite, je pensais que c'etait
-      // prevu ». Ce ne l'etait pas : ce filtre ne montrait que les biens DEJA
-      // chez le canal, donc un bien encore `beds24` — meme pourvu de sa
-      // propriete Channex par l'assistant de migration — n'apparaissait nulle
-      // part. Il n'existait aucun autre chemin dans le produit pour le
-      // connecter : la migration butait sur une page vide.
-      //
-      // Le critere est la PROPRIETE CIBLE : un bien qui en a une est pret a
-      // etre connecte, quel que soit le provider encore inscrit. Les endpoints,
-      // eux, resolvent deja la bonne destination (`proprieteChezLeProvider`).
-      const props = (data.properties || []).filter(p =>
-        p.provider === 'channex' || p.provider === 'channel' || p.migration_target_property_id)
-
-      // ⚠ LE PARAMETRE SE LIT AVANT TOUT DEPART (revue de l'etape 3). Quand le
-      // compte n'a aucun bien eligible, ce `return` partait AVANT la lecture de
-      // `?bien` : l'hote arrivait depuis la fiche et ne voyait rien, ni fenetre
-      // ni explication.
-      const bienDemande = new URLSearchParams(location.search).get('bien')
-
-      if (!props.length) {
-        box.innerHTML = `<div style="font-size:13px;color:var(--text2)">
-          ${bienDemande ? 'Ce logement n\'est pas encore éligible à la connexion des plateformes.' : 'Aucun bien éligible pour le moment.'}
-          <a href="/logements/nouveau" style="color:var(--green)">Créez d'abord un bien</a>
-          pour connecter vos plateformes.</div>`
-        setStatus('ota', 'off', 'Aucun bien')
-        return
-      }
-
-      otaProps = props
-      setStatus('ota', 'ok', `${props.length} bien${props.length > 1 ? 's' : ''}`)
-      // Self-service : chaque bien ouvre l'assistant marque blanche (Airbnb OAuth /
-      // Booking) via components/connexions.js -> Channex reste masque.
-      box.innerHTML = props.map(p => `
-        <div class="ota-prop-row">
-          <div>
-            <div style="font-size:14px;font-weight:500;color:var(--text)">${esc(p.name)}</div>
-            <div style="font-size:12px;color:var(--text2)">${esc(p.city || '')}${p.capacity ? ' · ' + p.capacity + ' pers.' : ''}</div>
-          </div>
-          <button class="btn btn-primary" data-connect="${p.id}">Connecter mes plateformes</button>
-        </div>`).join('')
-
-      box.querySelectorAll('button[data-connect]').forEach(b =>
-        b.addEventListener('click', () => {
-          const p = otaProps.find(x => String(x.id) === String(b.dataset.connect))
-          if (p) openConnexions(p, b)
-        }))
-
-      // ⚠ ARRIVEE DEPUIS LA FICHE D'UN LOGEMENT (lot Logements V5, etape 3) :
-      // `?bien=<uuid>` ouvre l'assistant sur CE bien. La fiche ne descend aucune
-      // cle du partenaire ; c'est cette page qui la connait deja, et elle resout
-      // l'UUID en propriete avant d'ouvrir.
-      // ⚠ ET UN IDENTIFIANT QU'ELLE NE CONNAIT PAS SE DIT (revue de l'etape 3) :
-      // un bien Beds24 sans propriete cible, ou le bien d'un autre compte, sont
-      // absents de cette liste. Ne rien faire laissait l'hote devant une page
-      // qui ignorait sa demande, sans un mot.
-      if (bienDemande) {
-        const cible = otaProps.find(x => String(x.id) === String(bienDemande))
-        if (cible) openConnexions(cible, null)
-        else {
-          box.insertAdjacentHTML('afterbegin',
-            `<div style="font-size:13px;color:var(--text2);margin-bottom:10px" data-bien-inconnu>
-              Ce logement n'est pas éligible à la connexion des plateformes. Choisissez-en un ci-dessous.
-            </div>`)
-        }
-      }
-    } catch (e) {
-      box.innerHTML = `<div style="font-size:13px;color:#E24B4A">Erreur de chargement des biens.</div>`
-      setStatus('ota', 'off', 'Erreur')
-    }
-  }
-
-  // [EN SOMMEIL] Ouverture de l'iframe self-service Channex BRUTE (expose l'UI Channex).
-  // On lui prefere l'assistant marque blanche (openConnexions). Conservee
-  // pour reactivation post-beta ; plus appelee par aucun bouton (voir loadOtaProperties).
-  async function openOtaModal(propId, propName, btn) {
-    btn.disabled = true
-    const old = btn.textContent
-    btn.textContent = '⏳ Préparation…'
-    try {
-      const res = await fetch(`/api/channel-connect?property_id=${encodeURIComponent(propId)}`, {
-        headers: { 'Authorization': `Bearer ${session.access_token}` }
-      })
-      const data = await res.json()
-      if (!res.ok || !data.iframe_url) throw new Error(data.error || 'Erreur de connexion')
-
-      document.getElementById('ota-modal-title').textContent = `Mes plateformes — ${propName}`
-      document.getElementById('ota-iframe').src = data.iframe_url
-      document.getElementById('ota-modal').classList.add('show')
-    } catch (e) {
-      showToast('ota', '❌ ' + e.message, 'error')
-    } finally {
-      btn.disabled = false
-      btn.textContent = old
-    }
-  }
-
-  document.getElementById('ota-modal-close').addEventListener('click', () => {
-    document.getElementById('ota-modal').classList.remove('show')
-    document.getElementById('ota-iframe').src = 'about:blank'
-  })
-
-  function esc(s) {
-    return String(s || '').replace(/[&<>"']/g, c =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
-  }
-
-  function setStatus(id, type, label) {
-    const el = document.getElementById(`status-${id}`)
-    if (!el) return
-    el.textContent = label
-    el.className = `api-status status-${type}`
-  }
-
-  function showToast(id, msg, type) {
-    const t = document.getElementById(`toast-${id}`)
-    if (!t) return
-    t.textContent = msg; t.className = `toast ${type}`; t.style.display = 'block'
-    setTimeout(() => { t.style.display = 'none' }, 5000)
-  }
+init().catch(e => console.error('[connexions]', e))
 </script>
 </body>
 </html>

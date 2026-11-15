@@ -56,7 +56,7 @@ latérale, et la colonne « où » dit où il se trouve désormais.
 | Élément | Sort | Où, et pourquoi |
 |---|---|---|
 | Liens Accueil, Mes biens, Messages, Calendrier, Avis | déplacé | onglets V5 et menu ≡ (mêmes destinations V5 que les pages V5). |
-| Sous-menus d'apps (YieldFlow et ses 4 écrans, Ménages/Prestataires, Réservation directe/Liens/Paiements, Base de connaissance) | déplacé | section « Outils » du menu ≡ (entrée de chaque app) ; les écrans internes d'une app restent atteints depuis l'app. Même accès que depuis les pages V5. |
+| Sous-menus d'apps (YieldFlow et ses 4 écrans, Ménages/Prestataires, Réservation directe/Liens/Paiements, Base de connaissance) | déplacé | YieldFlow et Réservation directe : section « Outils » du menu ≡ ; Ménages : l'onglet V5 ; Base de connaissance : Messages. Les écrans internes d'une app restent atteints depuis l'app — même accès que depuis les écrans V5. |
 | Pastilles d'état Beds24 / Booking & Airbnb / Seam / Brevo | déplacé | elles sont sur la carte de chaque service dans `/connexions`, qui les portait déjà ; Seam aussi en tête de `/apps/serrures`. |
 | Sélecteur de compte | conservé | menu ≡ (`comptes`, `compteActif`, `onCompte`) — identique aux pages V5. Ces quatre pages refusent un compte partagé de toute façon (`exigerCompteProprePage`). |
 | Réglages (titulaire), Guide, Déconnexion | conservé | menu ≡ (Réglages, Aide, Déconnexion). |
@@ -174,7 +174,9 @@ aucune n'est un chiffre non urgent. Rien ne passe par un résumé.
    Celles qui restent (`subscriptions` d'un utilisateur, `api_keys` d'un
    utilisateur) rendent au plus quelques lignes.
 7. **Budget** — `tests/budget-ecran.test.js` compte désormais les appels de ces
-   quatre pages (inventaire chiffré, comme les écrans V5).
+   quatre pages (inventaire chiffré, comme les écrans V5) : il est identique à
+   l'AVANT, au site d'appel près. Pas d'en-tête `Server-Timing` ajouté : aucun
+   endpoint touché.
 8. **Mesure AVANT / APRÈS** — §6 bis.
 
 ### 6 bis. La mesure
@@ -209,7 +211,64 @@ lectures et 2 `getUser`** sur 11 (`api_keys`, `properties`, `subscriptions`,
 puis `onboarding_state`, `accounts`, `subscriptions` ; `onboarding_state` est
 aussi lu par `requireAuth`).
 
-APRÈS : §6 ter, mesuré sur la branche une fois le code écrit.
+### 6 ter. APRÈS (branche `integration-v5-lot-1`, même mesure, même compte)
+
+| Page | Appels | dont `/api` | dont lectures Supabase | dont `getUser` | dont dictionnaires | Octets du dépôt (gzip) | dont propres à la page (gzip) |
+|---|---|---|---|---|---|---|---|
+| serrures | **9** (11) | 2 | 4 | 1 | 2 | 330 966 (103 117) | 32 981 (11 732) |
+| SMS | **9** (11) | 2 | 4 | 1 | 2 | 328 711 (102 444) | 30 726 (11 059) |
+| connexions | **13** (15) | 5 | 5 | 1 | 2 | 406 682 (126 440) | 108 697 (35 055) |
+| abonnement | **6** (4) | 1 | 2 | 1 | 2 | 294 838 (88 778) | 20 547 (7 671) |
+
+Ce qui a bougé, ligne par ligne :
+
+- **Lectures Supabase −3 et `getUser` −1 sur les trois premières** : la barre
+  latérale (`api_keys`, `properties`, `subscriptions`, `getUser`) n'existe plus.
+  Le bandeau d'incitation, gardé (§8, point 1), garde ses trois lectures et son
+  `getUser`.
+- **Dictionnaires +2 partout** (`langues.json`, `fr.json`) : le prix de l'i18n,
+  le même que sur tous les écrans V5. Versionnés et cachés **un an**
+  (`immutable`) : payés une fois par version des dictionnaires, pas par page.
+  Sans eux, l'APRÈS est 7, 7, 11 et 4 — l'abonnement est inchangé.
+- **Octets** : le total monte parce que le socle V5 (`ui.css`, `theme.css`,
+  `nav.js`, le sprite, le moteur i18n) est plus lourd que `public/style.css` ;
+  ce sont **les mêmes fichiers, aux mêmes adresses, que les onze écrans V5** :
+  en arrivant d'un écran V5, le navigateur les a déjà. La colonne « propres »
+  compte ce que la page charge et que `pages/aujourdhui.html` ne charge pas
+  (son HTML, `shared/page-outil.js`, le bandeau, et pour les connexions
+  l'assistant des plateformes).
+- **Ce que le lot ajoute au socle commun, payé par TOUS les écrans V5** :
+  `ui.css` +14 531 octets (+2 912 gzip), `fr.json` +17 445 (+5 170 gzip),
+  `en.json` +16 162, `es.json` +17 389, `nav.js` +2 108 (+790 gzip). Les
+  dictionnaires portent 269 clés de plus (quatre pages entières de texte).
+
+Contre-épreuve de la mesure : la même commande, sur le même compte, avant et
+après — les écarts sont exactement les lectures de la barre latérale et les
+deux dictionnaires, rien d'autre (aucun `/api` ajouté ni retiré, ce que
+`tests/budget-ecran.test.js` confirme au site d'appel près).
+
+### 6 quater. Contre-épreuve des tests (REVIEW.md règle 19)
+
+`tests/integration-v5-lot-1.test.js`, lancé contre `082d376e` hors de l'arbre
+(`git archive` dans `/tmp`, seuls le banc et `shared/page-outil.js` ajoutés
+pour que l'ancien code s'exécute) : **38 rouges sur 46**.
+
+- Les **19 tests de ce que le lot change** rougissent tous (socle chargé,
+  onglets et menu au chargement, langue de l'hôte, ni hexa ni emoji, clés dans
+  les trois langues, adresses V5, liste unique des outils et ses sept copies,
+  bloc CSS, pont de variables).
+- Des 27 tests de **non-régression**, 19 rougissent contre l'ancien code parce
+  qu'ils lisent le texte rendu V5 (sans emoji, nouvelles classes) ; **8 restent
+  verts**, et c'est leur rôle : l'ancien code faisait déjà la même chose. Chacun
+  est passé contre une **version fautive plausible** du nouveau code, et
+  rougit : menu remplacé par un champ libre, défaut non annoncé, encart du
+  circuit retiré, expéditeur caché quand les SMS sont coupés, `?bien=` ignoré,
+  bien en migration filtré, identifiant inconnu tu, bouton laissé désactivé
+  après un refus de Stripe, annulation sans confirmation — et la réponse non
+  lue à la bascule des serrures.
+
+Horloge décalée (`tests/outils/horloge-decalee.js`) sur les fichiers de test
+touchés : 180 tests, 0 rouge à J+60 et à J+200.
 
 ## 7. Report mobile
 
@@ -255,10 +314,35 @@ fin de page laisse la place de la barre du bas (`.page`). Constat par page en
    - serrures : les dates par défaut de la fenêtre « Générer un code » sont
      affichées en heure UTC (`toISOString`), donc décalées d'une à deux heures
      en France.
+   - serrures : après un code généré, le bouton « Générer le code » reste
+     désactivé à la réouverture de la fenêtre (il n'est remis à zéro que sur
+     échec) ; un second code demande de recharger la page.
 
 ## 9. Constat mobile par page
 
-Rempli après vérification à 390 px.
+Vérifié à **390 × 1700** dans Chrome sans tête, sur le DOM rendu au banc (les
+vraies feuilles servies localement, la police de repli faute d'accès à Google
+Fonts) ; et à 1280 px pour comparaison. Captures gardées hors du dépôt.
+
+- **Serrures** : onglets en sélecteur noir, carte de configuration pleine
+  largeur, champ au-dessus de « Enregistrer », interrupteur ; liste : une carte
+  par serrure, état et mode lisibles, codes dépliés sous la carte ; la fenêtre
+  « Générer un code » occupe l'écran. Barre du bas présente, rien sous elle.
+- **SMS** : trois onglets — le troisième dépasse de quelques pixels à 390 px et
+  **défile** (choix du bloc : ne pas tasser) ; modèles rapides sur deux lignes ;
+  compteur sous le message ; historique : trois chiffres de même rang, lignes
+  qui passent à la ligne.
+- **Connexions** : étapes numérotées lisibles, liens soulignés, champ du code
+  d'invitation au-dessus de « Connecter » ; l'alerte d'expéditeur invalide en
+  rouge sous le menu ; deux logements avec leur bouton ; cartes « Bientôt »
+  grisées.
+- **Abonnement** : une carte par module, prix en grand, détail dessous, état en
+  pastille de la taille du mot, « Annuler » en rouge ; la fenêtre de quantité
+  occupe l'écran.
+
+Corrigé pendant la vérification : une pastille d'état s'étirait sur toute la
+largeur de la carte, et le texte d'aide d'un champ héritait du gras de son
+libellé.
 
 ## 10. Suite (hors de cette nuit)
 

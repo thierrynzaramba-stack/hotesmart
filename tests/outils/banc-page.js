@@ -155,6 +155,10 @@ async function monterPage (rel, o = {}) {
   w.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new w.Event('close')) }
   try { Object.defineProperty(w.navigator, 'clipboard', { value: { writeText: async (t) => { journal.presse = t } }, configurable: true }) } catch { /* lecture seule */ }
 
+  // La langue de l'hôte : le français par défaut, comme un navigateur réglé en
+  // français (jsdom annonce `en-US`, et le moteur suivrait le navigateur).
+  try { w.localStorage.setItem('hs.lang', o.langue || 'fr') } catch { /* stockage indisponible */ }
+
   const supabase = doubleSupabase(journal, o.tables || {}, session)
 
   // Les scripts, dans l'ordre du document.

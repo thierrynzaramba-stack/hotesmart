@@ -84,11 +84,12 @@ function injecter (w, journal, supabase) {
   const { renderOnboardingBanner } = evaluerModule(w, 'components/onboarding-banner.js', { supabase, getUser })
   const { sansArchives } = evaluerModule(w, 'shared/biens-vivants.js', {})
   const CONFIG = evaluerModule(w, 'shared/config.js', {}).default
+  const pageOutil = evaluerModule(w, 'shared/page-outil.js', {})
   const { renderSidebar } = evaluerModule(w, 'components/sidebar.js', {
     getUser, signOut, supabase, CONFIG, sansArchives, renderOnboardingBanner, ...cc
   })
   return {
-    ...cc, requireAuth, markOnboardingCompleted, renderSidebar, renderOnboardingBanner,
+    ...cc, ...pageOutil, requireAuth, markOnboardingCompleted, renderSidebar, renderOnboardingBanner,
     supabase, getUser, getSession, signOut,
     initErrorHandler: () => {}, logger: { info () {}, warn () {}, error () {} },
     escapeHtml: (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),

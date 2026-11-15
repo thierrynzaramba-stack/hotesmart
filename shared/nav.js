@@ -113,6 +113,7 @@
   //   (décision de Thierry, 10 octobre 2026) : les écrans qui n'ont pas encore
   //   rejoint un onglet V5. Chaque lot retire la ligne de l'outil qu'il fusionne
   //   (YieldFlow → Calendrier, Réservation directe et Connexions → Logements…).
+  //   Une page la prend dans `HSNav.outils(…)`, ci-dessous, et ne la recopie pas.
   function renderMenu(options = {}) {
     const bouton = document.querySelector('[data-menu-toggle]');
     const panneau = document.querySelector('[data-menu]');
@@ -165,7 +166,38 @@
     document.addEventListener('keydown', e => { if (e.key === 'Escape') fermer(); });
   }
 
-  window.HSNav = { render, renderLangSelector, renderMenu };
+  // ⚠ LA SECTION « OUTILS » A UN SEUL ENDROIT : ICI (intégration V5, lot 1,
+  // 15 novembre 2026). Elle était RECOPIÉE dans chaque écran V5 qui monte le
+  // menu — sept copies mesurées sur main 082d376e (aujourdhui, calendrier,
+  // menages, messages, logements, logement, logement-nouveau). Les pages outils
+  // intégrées la prennent ici ; les sept copies restent en place cette nuit et
+  // seront remplacées par cet appel dans un lot à part. D'ici là,
+  // tests/nav-i18n-cles.test.js exige qu'elles disent EXACTEMENT ce que dit
+  // cette liste : une copie qui divergerait rougit.
+  // Les droits sont ceux des copies : YieldFlow suit `reservations` en lecture
+  // (l'app est délégable), les autres restent au titulaire, comme dans
+  // l'ancienne barre latérale. ⚠ Masquer une entrée ne ferme pas la page :
+  // chacune refuse elle-même un compte partagé, et son endpoint garde.
+  const OUTILS = [
+    { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price', domaine: 'reservations' },
+    { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key', titulaire: true },
+    { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send', titulaire: true },
+    { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar', titulaire: true },
+    { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link', titulaire: true },
+    { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro', titulaire: true }
+  ];
+  // droits.peutLire(domaine), droits.titulaire : ceux de shared/compte-courant.js.
+  // Sans droits fournis, AUCUN outil : une entrée de trop est un lien vers un
+  // refus, une entrée de moins se remarque.
+  function outils(droits = {}) {
+    const peutLire = typeof droits.peutLire === 'function' ? droits.peutLire : () => false;
+    const titulaire = droits.titulaire === true;
+    return OUTILS
+      .filter(o => (o.titulaire ? titulaire : peutLire(o.domaine)))
+      .map(({ href, key, icon }) => ({ href, key, icon }));
+  }
+
+  window.HSNav = { render, renderLangSelector, renderMenu, outils };
 })();
 
 /* ============================================================

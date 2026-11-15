@@ -1,384 +1,363 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — SMS</title>
-  <link rel="stylesheet" href="/public/style.css">
-  <style>
-    .tabs { display:flex; gap:0; border-bottom:0.5px solid var(--border); margin-bottom:24px; }
-    .tab { padding:10px 20px; font-size:13px; cursor:pointer; color:var(--text2); border-bottom:2px solid transparent; margin-bottom:-1px; transition:all 0.15s; }
-    .tab.active { color:var(--text); border-bottom-color:var(--green); font-weight:500; }
-    .tab-content { display:none; }
-    .tab-content.active { display:block; }
-
-    .config-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; max-width:560px; margin-bottom:16px; }
-    .config-card-title { font-size:13px; font-weight:500; margin-bottom:16px; }
-
-    .notice { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px 16px; font-size:13px; color:var(--text2); line-height:1.7; margin-bottom:20px; }
-    .notice a { color:var(--green); text-decoration:none; }
-    .notice a:hover { text-decoration:underline; }
-    .notice ol { margin:8px 0 0 16px; }
-
-    .status-banner { display:flex; align-items:center; gap:10px; padding:12px 16px; border-radius:var(--radius); font-size:13px; margin-bottom:20px; }
-    .status-banner.on  { background:#E1F5EE; border:0.5px solid var(--green); color:#1a6644; }
-    .status-banner.off { background:var(--bg2); border:0.5px solid var(--border); color:var(--text2); }
-    .sdot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
-    .sdot.green { background:var(--green); }
-    .sdot.gray  { background:#ccc; }
-
-    .toggle-row { display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border); }
-    .toggle-label { font-size:13px; color:var(--text2); }
-    .toggle { position:relative; width:44px; height:24px; }
-    .toggle input { opacity:0; width:0; height:0; }
-    .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
-    .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
-    input:checked + .toggle-slider { background:var(--green); }
-    input:checked + .toggle-slider:before { transform:translateX(20px); }
-
-    .key-row { display:flex; gap:8px; }
-    .key-row input { flex:1; }
-
-    .toast { padding:10px 14px; border-radius:var(--radius); font-size:12px; margin-top:12px; display:none; }
-    .toast.success { background:#E1F5EE; color:var(--green); border:0.5px solid var(--green); }
-    .toast.error   { background:#fdecea; color:#E24B4A; border:0.5px solid #E24B4A; }
-
-    .sms-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
-    .sms-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; }
-    .sms-card-title { font-size:13px; font-weight:500; margin-bottom:18px; }
-
-    .templates { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; }
-    .template-btn { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:5px 10px; font-size:12px; color:var(--text2); cursor:pointer; transition:all 0.15s; font-family:inherit; }
-    .template-btn:hover { border-color:var(--green); color:var(--green); }
-
-    .char-count { text-align:right; font-size:11px; color:var(--text2); margin-top:4px; }
-    .char-count.warn { color:orange; }
-    .char-count.over { color:#E24B4A; }
-
-    .stats-row { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
-    .stat-mini { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px; text-align:center; }
-    .stat-mini-value { font-size:20px; font-weight:500; color:var(--green); }
-    .stat-mini-value.danger { color:#E24B4A; }
-    .stat-mini-label { font-size:11px; color:var(--text2); margin-top:2px; }
-
-    .filter-row { display:flex; gap:8px; margin-bottom:12px; }
-    .filter-row select { flex:1; }
-    .sms-list { display:flex; flex-direction:column; gap:8px; max-height:460px; overflow-y:auto; }
-    .sms-item { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; }
-    .sms-item-header { display:flex; justify-content:space-between; margin-bottom:5px; }
-    .sms-to { font-size:12px; font-weight:500; color:var(--green); font-family:monospace; }
-    .sms-time { font-size:11px; color:var(--text2); }
-    .sms-message { font-size:13px; color:var(--text); line-height:1.4; margin-bottom:6px; }
-    .sms-footer { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-    .badge { padding:2px 7px; border-radius:10px; font-size:11px; }
-    .badge-ok      { background:#E1F5EE; color:var(--green); }
-    .badge-error   { background:#fdecea; color:#E24B4A; }
-    .badge-ctx     { background:var(--bg2); border:0.5px solid var(--border); color:var(--text2); }
-    .empty-state   { text-align:center; padding:40px 20px; color:var(--text2); font-size:13px; }
-    .refresh-btn   { background:none; border:0.5px solid var(--border); border-radius:var(--radius); padding:5px 10px; color:var(--text2); font-size:12px; cursor:pointer; font-family:inherit; transition:all 0.15s; }
-    .refresh-btn:hover { border-color:var(--green); color:var(--green); }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « SMS » — intégrée au socle V5 le 15 novembre 2026
+     (docs/specs/spec-integration-v5-lot-1.md). La FORME change, pas le fond :
+     mêmes appels (/api/sms), mêmes gestes, mêmes messages.
+     RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
 <body>
 
-<div class="layout">
-  <div class="sidebar" id="sidebar"></div>
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
 
-  <div class="main">
-    <div class="topbar">
-      <div>
-        <div class="page-title">💬 SMS</div>
-        <div class="page-sub" id="topStatus">Brevo · Chargement…</div>
-      </div>
-    </div>
-
-    <div class="content">
-
-      <div class="tabs">
-        <div class="tab active" onclick="switchTab('config')">⚙️ Configuration</div>
-        <div class="tab" onclick="switchTab('test')">🧪 Test & Envoi</div>
-        <div class="tab" onclick="switchTab('history')">📋 Historique</div>
-      </div>
-
-      <!-- Configuration -->
-      <div class="tab-content active" id="tab-config">
-        <div class="config-card">
-          <div class="config-card-title">📡 Statut Brevo SMS</div>
-
-          <div class="status-banner off" id="statusBanner">
-            <div class="sdot gray" id="statusDot"></div>
-            <span id="statusText">Non configuré</span>
-          </div>
-
-          <div class="notice">
-            <strong>Comment obtenir votre clé API Brevo ?</strong>
-            <ol>
-              <li>Créez un compte sur <a href="https://www.brevo.com/fr/" target="_blank">brevo.com</a></li>
-              <li>Allez dans <strong>Mon compte → Clés API</strong> ou <a href="https://app.brevo.com/settings/keys/api" target="_blank">cliquez ici</a></li>
-              <li>Cliquez <strong>"Créer une nouvelle clé API"</strong></li>
-              <li>Copiez la clé (commence par <code>xkeysib-</code>)</li>
-              <li>Achetez des crédits SMS : <a href="https://app.brevo.com/billing/addon/customize/sms" target="_blank">app.brevo.com/billing</a> (~0.06€/SMS)</li>
-            </ol>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Clé API Brevo</label>
-            <div class="key-row">
-              <input class="form-input" type="password" id="apiKey" placeholder="xkeysib-xxxxxxxxxxxxxxxxxxxxxxxx">
-              <button class="btn btn-primary" onclick="saveConfig()">Enregistrer</button>
-            </div>
-          </div>
-
-          <div class="toggle-row">
-            <span class="toggle-label">Activer l'envoi SMS</span>
-            <label class="toggle">
-              <input type="checkbox" id="smsEnabled" onchange="toggleSms()">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="toast" id="configToast"></div>
-        </div>
-      </div>
-
-      <!-- Test & Envoi -->
-      <div class="tab-content" id="tab-test">
-        <div class="sms-grid">
-          <div class="sms-card">
-            <div class="sms-card-title">✉️ Envoyer un SMS</div>
-
-            <div class="form-group">
-              <label class="form-label">Destinataire</label>
-              <input class="form-input" type="tel" id="to" placeholder="+33 6 12 34 56 78">
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Bien concerné (optionnel)</label>
-              <select class="form-input" id="property_id">
-                <option value="">— Aucun —</option>
-                <option value="169567">Cœur de vie 23</option>
-                <option value="209413">La bulle</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Contexte</label>
-              <select class="form-input" id="context">
-                <option value="manuel">Manuel</option>
-                <option value="agent-ai">Agent AI</option>
-                <option value="menages">Ménages</option>
-                <option value="cron">Automatique</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Templates rapides</label>
-              <div class="templates">
-                <button class="template-btn" onclick="useTemplate('checkin')">🔑 Check-in</button>
-                <button class="template-btn" onclick="useTemplate('checkout')">👋 Check-out</button>
-                <button class="template-btn" onclick="useTemplate('menage')">🧹 Ménage</button>
-                <button class="template-btn" onclick="useTemplate('bienvenue')">🏠 Bienvenue</button>
-                <button class="template-btn" onclick="useTemplate('incident')">⚠️ Incident</button>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Message</label>
-              <textarea class="form-input" id="message" rows="4" placeholder="Votre message…" oninput="updateCount()" style="resize:vertical"></textarea>
-              <div class="char-count" id="charCount">0 / 160</div>
-            </div>
-
-            <button class="btn btn-primary" id="sendBtn" onclick="sendSms()" style="width:100%">Envoyer le SMS</button>
-            <div class="toast" id="sendToast"></div>
-          </div>
-
-          <div class="sms-card">
-            <div class="sms-card-title">ℹ️ Informations</div>
-            <div class="notice">
-              <strong>Mode test</strong><br>
-              Utilisez cet onglet pour tester l'envoi de SMS manuellement.<br><br>
-              Les SMS sont envoyés via votre compte Brevo et décomptés de vos crédits.<br><br>
-              <strong>Expéditeur :</strong> HoteSmart<br>
-              <strong>Format numéro :</strong> +33XXXXXXXXX ou 06XXXXXXXX<br><br>
-              Une fois validé, ce module sera utilisé automatiquement par l'Agent AI, les Ménages et le Cron.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Historique -->
-      <div class="tab-content" id="tab-history">
-        <div class="sms-card">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <div class="sms-card-title" style="margin-bottom:0">📋 Historique des SMS</div>
-            <button class="refresh-btn" onclick="loadHistory()">↻ Actualiser</button>
-          </div>
-
-          <div class="stats-row">
-            <div class="stat-mini"><div class="stat-mini-value" id="statTotal">—</div><div class="stat-mini-label">Total</div></div>
-            <div class="stat-mini"><div class="stat-mini-value" id="statSuccess">—</div><div class="stat-mini-label">Réussis</div></div>
-            <div class="stat-mini"><div class="stat-mini-value danger" id="statError">—</div><div class="stat-mini-label">Erreurs</div></div>
-          </div>
-
-          <div class="filter-row">
-            <select class="form-input" id="filterProperty" onchange="loadHistory()">
-              <option value="">Tous les biens</option>
-              <option value="169567">Cœur de vie 23</option>
-              <option value="209413">La bulle</option>
-            </select>
-          </div>
-
-          <div class="sms-list" id="smsList"><div class="empty-state">Chargement…</div></div>
-        </div>
-      </div>
-
+<main class="page out">
+  <div class="out-tete">
+    <div class="out-tete__titre">
+      <h1 class="h1" data-i18n="sms.titre"></h1>
+      <p class="out-sous" id="topStatus" data-i18n="sms.statut_chargement"></p>
     </div>
   </div>
-</div>
 
+  <div class="seg out-onglets" role="tablist" data-i18n-attr="aria-label:outil.onglets">
+    <button type="button" class="seg__btn is-on" role="tab" aria-selected="true" data-onglet="config" data-i18n="outil.onglet_config"></button>
+    <button type="button" class="seg__btn" role="tab" aria-selected="false" data-onglet="test" data-i18n="sms.onglet_test"></button>
+    <button type="button" class="seg__btn" role="tab" aria-selected="false" data-onglet="history" data-i18n="sms.onglet_historique"></button>
+  </div>
+
+  <!-- Configuration -->
+  <section class="out-carte out-carte--etroite" id="tab-config" data-panneau="config" aria-labelledby="h-statut">
+    <h2 class="out-carte__titre" id="h-statut"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-send"/></svg><span data-i18n="sms.carte_statut"></span></h2>
+
+    <div class="out-bandeau" id="statusBanner"><span id="statusText" data-i18n="outil.non_configure"></span></div>
+
+    <div class="out-note">
+      <p><b data-i18n="sms.aide_titre"></b></p>
+      <ol>
+        <li data-riche="sms.aide_1" data-lien-brevo="https://www.brevo.com/fr/"></li>
+        <li data-riche="sms.aide_2" data-lien-cles="https://app.brevo.com/settings/keys/api"></li>
+        <li data-riche="sms.aide_3"></li>
+        <li data-riche="sms.aide_4"></li>
+        <li data-riche="sms.aide_5" data-lien-credits="https://app.brevo.com/billing/addon/customize/sms"></li>
+      </ol>
+    </div>
+
+    <div class="out-champ">
+      <label for="apiKey" data-i18n="sms.cle_libelle"></label>
+      <div class="out-ligne-saisie">
+        <input class="out-saisie out-mono" type="password" id="apiKey" autocomplete="off" data-i18n-attr="placeholder:sms.cle_exemple">
+        <button type="button" class="btn btn--primary" data-action="enregistrer" data-i18n="outil.enregistrer"></button>
+      </div>
+    </div>
+
+    <label class="out-inter">
+      <span data-i18n="sms.activer"></span>
+      <input type="checkbox" class="out-sw" role="switch" id="smsEnabled">
+    </label>
+
+    <p class="out-retour" id="configToast"></p>
+  </section>
+
+  <!-- Test & envoi -->
+  <section class="out-grille out-grille--2" id="tab-test" data-panneau="test" hidden>
+    <div class="out-carte" aria-labelledby="h-envoyer">
+      <h2 class="out-carte__titre" id="h-envoyer"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-message"/></svg><span data-i18n="sms.envoyer_titre"></span></h2>
+
+      <div class="out-champ">
+        <label for="to" data-i18n="sms.destinataire"></label>
+        <input class="out-saisie" type="tel" id="to" data-i18n-attr="placeholder:sms.destinataire_exemple">
+      </div>
+
+      <div class="out-champ">
+        <label for="property_id" data-i18n="sms.bien"></label>
+        <select class="out-saisie" id="property_id"></select>
+      </div>
+
+      <div class="out-champ">
+        <label for="context" data-i18n="sms.contexte"></label>
+        <select class="out-saisie" id="context">
+          <option value="manuel" data-i18n="sms.ctx_manuel"></option>
+          <option value="agent-ai" data-i18n="sms.ctx_agent"></option>
+          <option value="menages" data-i18n="sms.ctx_menages"></option>
+          <option value="cron" data-i18n="sms.ctx_cron"></option>
+        </select>
+      </div>
+
+      <div class="out-champ">
+        <span data-i18n="sms.modeles"></span>
+        <div class="out-actions">
+          <button type="button" class="btn btn--secondary" data-modele="checkin" data-i18n="sms.modele_checkin"></button>
+          <button type="button" class="btn btn--secondary" data-modele="checkout" data-i18n="sms.modele_checkout"></button>
+          <button type="button" class="btn btn--secondary" data-modele="menage" data-i18n="sms.modele_menage"></button>
+          <button type="button" class="btn btn--secondary" data-modele="bienvenue" data-i18n="sms.modele_bienvenue"></button>
+          <button type="button" class="btn btn--secondary" data-modele="incident" data-i18n="sms.modele_incident"></button>
+        </div>
+      </div>
+
+      <div class="out-champ">
+        <label for="message" data-i18n="sms.message"></label>
+        <textarea id="message" rows="4" data-i18n-attr="placeholder:sms.message_exemple"></textarea>
+        <span class="out-compteur num" id="charCount"></span>
+      </div>
+
+      <button type="button" class="btn btn--primary btn--block" id="sendBtn" data-i18n="sms.envoyer"></button>
+      <p class="out-retour" id="sendToast"></p>
+    </div>
+
+    <div class="out-carte" aria-labelledby="h-infos">
+      <h2 class="out-carte__titre" id="h-infos"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-help"/></svg><span data-i18n="sms.infos_titre"></span></h2>
+      <div class="out-note">
+        <p><b data-i18n="sms.infos_1"></b></p>
+        <p data-riche="sms.infos_2"></p>
+        <p data-riche="sms.infos_3"></p>
+        <p data-riche="sms.infos_4"></p>
+        <p data-riche="sms.infos_5"></p>
+        <p data-riche="sms.infos_6"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Historique -->
+  <section class="out-carte" id="tab-history" data-panneau="history" hidden aria-labelledby="h-historique">
+    <div class="out-carte__tete">
+      <h2 class="out-carte__titre" id="h-historique"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-scheduled"/></svg><span data-i18n="sms.historique_titre"></span></h2>
+      <button type="button" class="btn btn--secondary" data-action="actualiser" data-i18n="outil.actualiser"></button>
+    </div>
+
+    <div class="out-chiffres">
+      <div class="out-chiffre"><b id="statTotal">—</b><span data-i18n="sms.total"></span></div>
+      <div class="out-chiffre"><b id="statSuccess">—</b><span data-i18n="sms.reussis"></span></div>
+      <div class="out-chiffre out-chiffre--alerte"><b id="statError">—</b><span data-i18n="sms.erreurs"></span></div>
+    </div>
+
+    <div class="out-champ">
+      <label for="filterProperty" class="sr-only" data-i18n="sms.filtre"></label>
+      <select class="out-saisie" id="filterProperty"></select>
+    </div>
+
+    <div class="out-liste out-defile" id="smsList"><p class="out-vide" data-i18n="common.loading"></p></div>
+  </section>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
 <script type="module">
+import { exigerCompteProprePage, compteCourant, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
+import { requireAuth } from '/components/auth-guard.js'
+import { signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { renderOnboardingBanner } from '/components/onboarding-banner.js'
+import { esc, afficherRetour, monterCoquille } from '/shared/page-outil.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+
+let session = null
+const entete = () => ({ Authorization: `Bearer ${session?.access_token}` })
+const enteteJson = () => ({ 'Content-Type': 'application/json', ...entete() })
+const toast = (id, msg, type) => afficherRetour(document.getElementById(id), msg, type, 4000)
+
+// ⚠ LA LISTE DES BIENS EST ÉCRITE EN DUR, ET C'ÉTAIT DÉJÀ LE CAS : les deux
+// biens de Thierry, pour l'envoi comme pour le filtre de l'historique. Gardée
+// telle quelle à l'intégration V5 (la page ne doit pas changer ce qu'elle
+// fait) ; la brancher sur les biens du compte est une décision produit
+// (spec-integration-v5-lot-1.md §8, point 5). Ce sont des NOMS PROPRES, pas
+// du texte d'interface : ils ne se traduisent pas.
+const BIENS = [
+  { id: '169567', nom: 'Cœur de vie 23' },
+  { id: '209413', nom: 'La bulle' }
+]
+const nomDuBien = (id) => (BIENS.find(b => b.id === String(id)) || {}).nom || ''
+
+function remplirBiens () {
+  const options = BIENS.map(b => `<option value="${esc(b.id)}">${esc(b.nom)}</option>`).join('')
+  $('#property_id').innerHTML = `<option value="">${esc(t('sms.aucun'))}</option>${options}`
+  $('#filterProperty').innerHTML = `<option value="">${esc(t('sms.tous_biens'))}</option>${options}`
+}
+
+// ── Onglets ────────────────────────────────────────────────────────────────
+function switchTab (name) {
+  for (const b of document.querySelectorAll('[data-onglet]')) {
+    const on = b.dataset.onglet === name
+    b.classList.toggle('is-on', on)
+    b.setAttribute('aria-selected', String(on))
+  }
+  for (const p of document.querySelectorAll('[data-panneau]')) p.hidden = p.dataset.panneau !== name
+  if (name === 'history') loadHistory()
+}
+
+// ── Config ─────────────────────────────────────────────────────────────────
+async function loadConfig () {
+  try {
+    const res = await fetch('/api/sms?action=config', { headers: entete() })
+    const data = await res.json()
+    if (data.configured) {
+      $('#apiKey').value = '••••••••••••••••••••••••'
+      $('#smsEnabled').checked = data.enabled
+      updateBanner(data.enabled)
+    }
+  } catch {}
+}
+
+async function saveConfig () {
+  const key = $('#apiKey').value.trim()
+  if (!key || key.startsWith('•')) return toast('configToast', t('outil.cle_invalide'), 'erreur')
+  try {
+    const res = await fetch('/api/sms', { method: 'POST', headers: enteteJson(), body: JSON.stringify({ action: 'saveConfig', apiKey: key }) })
+    const data = await res.json()
+    if (data.success) {
+      toast('configToast', t('sms.cle_enregistree'), 'ok')
+      $('#apiKey').value = '••••••••••••••••••••••••'
+      $('#smsEnabled').checked = true
+      updateBanner(true)
+    } else {
+      toast('configToast', data.error || t('outil.erreur'), 'erreur')
+    }
+  } catch (err) { toast('configToast', err.message, 'erreur') }
+}
+
+// ⚠ LA RÉPONSE N'EST PAS LUE, ET C'ÉTAIT DÉJÀ LE CAS : défaut d'origine relevé
+// à l'intégration V5 et NON corrigé (la consigne est de ne pas changer ce que
+// fait la page) — spec-integration-v5-lot-1.md §8, point 7.
+async function toggleSms () {
+  const enabled = $('#smsEnabled').checked
+  try {
+    await fetch('/api/sms', { method: 'POST', headers: enteteJson(), body: JSON.stringify({ action: 'toggleConfig', enabled }) })
+    updateBanner(enabled)
+    toast('configToast', t(enabled ? 'sms.active' : 'sms.desactive'), 'ok')
+  } catch {}
+}
+
+function updateBanner (on) {
+  $('#statusBanner').className = 'out-bandeau' + (on ? ' out-bandeau--ok' : '')
+  $('#statusText').textContent = t(on ? 'sms.bandeau_on' : 'sms.bandeau_off')
+  $('#topStatus').textContent = t(on ? 'sms.statut_actif' : 'sms.statut_inactif')
+}
+
+// ── Modèles ────────────────────────────────────────────────────────────────
+function useTemplate (k) {
+  $('#message').value = t('sms.texte_' + k)
+  updateCount()
+}
+
+function updateCount () {
+  const len = $('#message').value.length
+  const el = $('#charCount')
+  el.textContent = t('sms.compteur', { n: len })
+  el.className = 'out-compteur num' + (len > 320 ? ' out-compteur--trop' : len > 160 ? ' out-compteur--long' : '')
+}
+
+// ── Envoi ──────────────────────────────────────────────────────────────────
+async function sendSms () {
+  const to = $('#to').value.trim()
+  const message = $('#message').value.trim()
+  if (!to || !message) return toast('sendToast', t('sms.requis'), 'erreur')
+  const btn = $('#sendBtn')
+  btn.disabled = true; btn.textContent = t('sms.envoi')
+  try {
+    const res = await fetch('/api/sms', { method: 'POST', headers: enteteJson(), body: JSON.stringify({ action: 'send', to, message, property_id: $('#property_id').value || null, context: $('#context').value }) })
+    const data = await res.json()
+    if (data.success) {
+      toast('sendToast', t('sms.envoye'), 'ok')
+      $('#message').value = ''
+      $('#to').value = ''
+      updateCount()
+    } else { toast('sendToast', data.error || t('outil.erreur'), 'erreur') }
+  } catch (err) { toast('sendToast', err.message, 'erreur') } finally { btn.disabled = false; btn.textContent = t('sms.envoyer') }
+}
+
+// ── Historique ─────────────────────────────────────────────────────────────
+async function loadHistory () {
+  const pid = $('#filterProperty')?.value
+  try {
+    const res = await fetch('/api/sms?action=logs' + (pid ? `&property_id=${encodeURIComponent(pid)}` : ''), { headers: entete() })
+    const data = await res.json()
+    renderHistory(data.logs || [])
+  } catch { $('#smsList').innerHTML = `<p class="out-vide">${esc(t('sms.erreur_chargement'))}</p>` }
+}
+
+function renderHistory (logs) {
+  $('#statTotal').textContent = I18n.num(logs.length)
+  $('#statSuccess').textContent = I18n.num(logs.filter(l => l.status !== 'error').length)
+  $('#statError').textContent = I18n.num(logs.filter(l => l.status === 'error').length)
+  if (!logs.length) { $('#smsList').innerHTML = `<p class="out-vide">${esc(t('sms.vide'))}</p>`; return }
+  $('#smsList').innerHTML = logs.map(log => {
+    const d = new Date(log.created_at)
+    const quand = I18n.date(d, { day: '2-digit', month: '2-digit' }) + ' ' + I18n.time(d)
+    const erreur = log.status === 'error'
+    return `<div class="out-ligne">
+      <div class="out-ligne__corps">
+        <div class="out-carte__tete"><span class="out-mono out-ligne__titre">${esc(log.to_number)}</span><span class="out-ligne__sous num">${esc(quand)}</span></div>
+        <span>${esc(log.message)}</span>
+        <div class="out-actions">
+          <span class="out-puce ${erreur ? 'out-puce--erreur' : 'out-puce--ok'}">${esc(t(erreur ? 'sms.statut_erreur' : 'sms.statut_envoye'))}</span>
+          ${log.context ? `<span class="out-puce">${esc(log.context)}</span>` : ''}
+          ${log.property_id ? `<span class="out-puce">${esc(nomDuBien(log.property_id))}</span>` : ''}
+          ${log.error ? `<span class="out-aide out-aide--alerte">${esc(log.error)}</span>` : ''}
+        </div>
+      </div>
+    </div>`
+  }).join('')
+}
+
+function brancher () {
+  for (const b of document.querySelectorAll('[data-onglet]')) b.addEventListener('click', () => switchTab(b.dataset.onglet))
+  for (const b of document.querySelectorAll('[data-modele]')) b.addEventListener('click', () => useTemplate(b.dataset.modele))
+  $('[data-action="enregistrer"]').addEventListener('click', saveConfig)
+  $('#smsEnabled').addEventListener('change', toggleSms)
+  $('#message').addEventListener('input', updateCount)
+  $('#sendBtn').addEventListener('click', sendSms)
+  $('[data-action="actualiser"]').addEventListener('click', loadHistory)
+  $('#filterProperty').addEventListener('change', loadHistory)
+}
+
+async function init () {
+  await I18n.init()
   // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
   // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
   // s'ouvrait par URL directe en mode basculé et affichait un contresens.
-  import { exigerCompteProprePage } from '/shared/compte-courant.js'
-  await exigerCompteProprePage({ nomPage: 'Les SMS' })
+  await exigerCompteProprePage({ nomPage: t('sms.titre') })
+  session = await requireAuth()
+  if (!session) return
+  document.addEventListener('i18n:changed', () => location.reload())
+  monterCoquille({
+    HSNav, I18n, session,
+    compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
+    deconnexion: () => signOut()
+  })
+  remplirBiens()
+  updateCount()
+  brancher()
+  await loadConfig()
+  // Le bandeau d'incitation que l'ancienne barre latérale posait : gardé
+  // (spec §3.1 et §8), sans attente, après le rendu.
+  renderOnboardingBanner().catch(() => {})
+}
 
-  import { requireAuth } from '/components/auth-guard.js'
-  import { renderSidebar } from '/components/sidebar.js'
-  import { initErrorHandler } from '/shared/error-handler.js'
-
-  initErrorHandler()
-  const session = await requireAuth()
-  if (!session) throw new Error('Non authentifié')
-  await renderSidebar('sms')
-  window._session = session
-  window.loadConfig()
+init().catch(e => console.error('[sms]', e))
 </script>
-
-<script>
-  // Onglets
-  window.switchTab = name => {
-    document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['config','test','history'][i] === name))
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'))
-    document.getElementById('tab-' + name).classList.add('active')
-    if (name === 'history') loadHistory()
-  }
-
-  // Config
-  window.loadConfig = async () => {
-    try {
-      const res  = await fetch('/api/sms?action=config', { headers: { 'Authorization': `Bearer ${window._session?.access_token}` } })
-      const data = await res.json()
-      if (data.configured) {
-        document.getElementById('apiKey').value = '••••••••••••••••••••••••'
-        document.getElementById('smsEnabled').checked = data.enabled
-        updateBanner(data.enabled)
-      }
-    } catch {}
-  }
-
-  window.saveConfig = async () => {
-    const key = document.getElementById('apiKey').value.trim()
-    if (!key || key.startsWith('•')) return toast('configToast', 'Saisissez une clé API valide', 'error')
-    try {
-      const res  = await fetch('/api/sms', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'saveConfig', apiKey: key }) })
-      const data = await res.json()
-      if (data.success) {
-        toast('configToast', '✅ Clé enregistrée avec succès', 'success')
-        document.getElementById('apiKey').value = '••••••••••••••••••••••••'
-        document.getElementById('smsEnabled').checked = true
-        updateBanner(true)
-      } else {
-        toast('configToast', `❌ ${data.error}`, 'error')
-      }
-    } catch (err) { toast('configToast', `❌ ${err.message}`, 'error') }
-  }
-
-  window.toggleSms = async () => {
-    const enabled = document.getElementById('smsEnabled').checked
-    try {
-      await fetch('/api/sms', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'toggleConfig', enabled }) })
-      updateBanner(enabled)
-      toast('configToast', enabled ? '✅ SMS activé' : '⏸ SMS désactivé', 'success')
-    } catch {}
-  }
-
-  function updateBanner(on) {
-    const b = document.getElementById('statusBanner')
-    const d = document.getElementById('statusDot')
-    const t = document.getElementById('statusText')
-    b.className = 'status-banner ' + (on ? 'on' : 'off')
-    d.className = 'sdot ' + (on ? 'green' : 'gray')
-    t.textContent = on ? 'Brevo SMS connecté et actif' : 'SMS désactivé ou non configuré'
-    document.getElementById('topStatus').textContent = on ? 'Brevo · ✓ Actif' : 'Brevo · Inactif'
-  }
-
-  // Templates
-  const TEMPLATES = {
-    checkin:   "Bonjour, voici vos informations d'arrivée : le code de la boîte à clés est [CODE]. Bon séjour ! 🏠",
-    checkout:  "Bonjour, c'est l'heure du départ. Merci de laisser les clés dans la boîte et de bien fermer la porte. À bientôt ! 👋",
-    menage:    "Bonjour, un ménage est prévu aujourd'hui au logement. Merci de vous y rendre à [HEURE]. 🧹",
-    bienvenue: "Bienvenue dans votre logement ! N'hésitez pas à nous contacter si vous avez besoin de quoi que ce soit. Bon séjour ! 🏠✨",
-    incident:  "Bonjour, nous avons signalé un incident dans votre logement. Notre équipe va vous contacter rapidement. Merci. ⚠️"
-  }
-  window.useTemplate = k => { document.getElementById('message').value = TEMPLATES[k]; updateCount() }
-  window.updateCount = () => {
-    const len = document.getElementById('message').value.length
-    const el  = document.getElementById('charCount')
-    el.textContent = `${len} / 160`
-    el.className = 'char-count' + (len > 320 ? ' over' : len > 160 ? ' warn' : '')
-  }
-
-  // Envoi
-  window.sendSms = async () => {
-    const to = document.getElementById('to').value.trim()
-    const message = document.getElementById('message').value.trim()
-    if (!to || !message) return toast('sendToast', 'Numéro et message requis.', 'error')
-    const btn = document.getElementById('sendBtn')
-    btn.disabled = true; btn.textContent = 'Envoi en cours…'
-    try {
-      const res  = await fetch('/api/sms', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'send', to, message, property_id: document.getElementById('property_id').value || null, context: document.getElementById('context').value }) })
-      const data = await res.json()
-      if (data.success) {
-        toast('sendToast', '✅ SMS envoyé !', 'success')
-        document.getElementById('message').value = ''
-        document.getElementById('to').value = ''
-        updateCount()
-      } else { toast('sendToast', `❌ ${data.error}`, 'error') }
-    } catch (err) { toast('sendToast', `❌ ${err.message}`, 'error') }
-    finally { btn.disabled = false; btn.textContent = 'Envoyer le SMS' }
-  }
-
-  // Historique
-  window.loadHistory = async () => {
-    const pid = document.getElementById('filterProperty')?.value
-    try {
-      const res  = await fetch('/api/sms?action=logs' + (pid ? `&property_id=${pid}` : ''), { headers:{ 'Authorization':`Bearer ${window._session?.access_token}` } })
-      const data = await res.json()
-      renderHistory(data.logs || [])
-    } catch { document.getElementById('smsList').innerHTML = '<div class="empty-state">Erreur de chargement</div>' }
-  }
-
-  function renderHistory(logs) {
-    document.getElementById('statTotal').textContent   = logs.length
-    document.getElementById('statSuccess').textContent = logs.filter(l => l.status !== 'error').length
-    document.getElementById('statError').textContent   = logs.filter(l => l.status === 'error').length
-    const pn = id => id === '169567' ? 'Cœur de vie 23' : id === '209413' ? 'La bulle' : ''
-    if (!logs.length) { document.getElementById('smsList').innerHTML = "<div class='empty-state'>Aucun SMS envoyé pour l'instant</div>"; return }
-    document.getElementById('smsList').innerHTML = logs.map(log => {
-      const d = new Date(log.created_at)
-      const t = d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}) + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})
-      return `<div class="sms-item"><div class="sms-item-header"><span class="sms-to">${log.to_number}</span><span class="sms-time">${t}</span></div><div class="sms-message">${log.message}</div><div class="sms-footer"><span class="badge ${log.status==='error'?'badge-error':'badge-ok'}">${log.status==='error'?'❌ Erreur':'✅ Envoyé'}</span>${log.context?`<span class="badge badge-ctx">${log.context}</span>`:''} ${log.property_id?`<span class="badge badge-ctx">${pn(log.property_id)}</span>`:''} ${log.error?`<span style="font-size:11px;color:#E24B4A">${log.error}</span>`:''}</div></div>`
-    }).join('')
-  }
-
-  // Toast
-  function toast(id, msg, type) {
-    const t = document.getElementById(id)
-    t.textContent = msg; t.className = `toast ${type}`; t.style.display = 'block'
-    setTimeout(() => { t.style.display = 'none' }, 4000)
-  }
-</script>
-
 </body>
 </html>

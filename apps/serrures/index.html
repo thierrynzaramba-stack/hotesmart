@@ -1,478 +1,432 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Serrures</title>
-  <link rel="stylesheet" href="/public/style.css">
-  <style>
-    .tabs { display:flex; gap:0; border-bottom:0.5px solid var(--border); margin-bottom:24px; }
-    .tab { padding:10px 20px; font-size:13px; cursor:pointer; color:var(--text2); border-bottom:2px solid transparent; margin-bottom:-1px; transition:all 0.15s; }
-    .tab.active { color:var(--text); border-bottom-color:var(--green); font-weight:500; }
-    .tab-content { display:none; }
-    .tab-content.active { display:block; }
-
-    .config-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; max-width:560px; margin-bottom:16px; }
-    .config-card-title { font-size:13px; font-weight:500; margin-bottom:16px; }
-
-    .notice { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px 16px; font-size:13px; color:var(--text2); line-height:1.7; margin-bottom:20px; }
-    .notice a { color:var(--green); text-decoration:none; }
-    .notice a:hover { text-decoration:underline; }
-    .notice ol { margin:8px 0 0 16px; }
-
-    .status-banner { display:flex; align-items:center; gap:10px; padding:12px 16px; border-radius:var(--radius); font-size:13px; margin-bottom:20px; }
-    .status-banner.on  { background:#E1F5EE; border:0.5px solid var(--green); color:#1a6644; }
-    .status-banner.off { background:var(--bg2); border:0.5px solid var(--border); color:var(--text2); }
-    .sdot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
-    .sdot.green { background:var(--green); }
-    .sdot.gray  { background:#ccc; }
-
-    .toggle-row { display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border); }
-    .toggle-label { font-size:13px; color:var(--text2); }
-    .toggle { position:relative; width:44px; height:24px; }
-    .toggle input { opacity:0; width:0; height:0; }
-    .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
-    .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
-    input:checked + .toggle-slider { background:var(--green); }
-    input:checked + .toggle-slider:before { transform:translateX(20px); }
-
-    .key-row { display:flex; gap:8px; }
-    .key-row input { flex:1; }
-
-    .toast { padding:10px 14px; border-radius:var(--radius); font-size:12px; margin-top:12px; display:none; }
-    .toast.success { background:#E1F5EE; color:var(--green); border:0.5px solid var(--green); }
-    .toast.error   { background:#fdecea; color:#E24B4A; border:0.5px solid #E24B4A; }
-
-    /* Serrures */
-    .locks-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px; }
-
-    /* Badges mode offline/online */
-    .mode-badge { display:inline-flex; align-items:center; gap:4px; font-size:10px; padding:2px 8px; border-radius:20px; font-weight:500; margin-left:4px; }
-    .mode-badge.offline { background:#FEF3C7; color:#92400E; }
-    .mode-badge.online  { background:#D1FAE5; color:#065F46; }
-
-    .mode-info { background:#FEF9E7; border:0.5px solid #F59E0B; border-radius:var(--radius); padding:10px 12px; font-size:11px; color:#92400E; margin-top:10px; line-height:1.6; }
-    .mode-info.online { background:#ECFDF5; border-color:var(--green); color:#065F46; }
-    .mode-info-title { font-weight:600; margin-bottom:4px; }
-
-    /* Bouton corbeille désactivé pour codes immuables */
-    .btn-trash-disabled { opacity:0.3; cursor:not-allowed; position:relative; }
-    .btn-trash-disabled:hover::after {
-      content:"Code immuable (mode offline)"; position:absolute; right:0; top:calc(100% + 4px);
-      background:var(--text); color:white; font-size:10px; padding:4px 8px; border-radius:4px; white-space:nowrap; z-index:10;
-    }
-
-    /* Bloc pédagogique en haut de la section serrures */
-    .lock-modes-doc { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:16px 20px; margin-bottom:20px; font-size:13px; color:var(--text2); line-height:1.7; }
-    .lock-modes-doc h4 { font-size:13px; font-weight:600; color:var(--text); margin:0 0 10px 0; }
-    .lock-modes-doc .mode-row { display:flex; gap:10px; align-items:flex-start; padding:6px 0; }
-    .lock-modes-doc .mode-row span:first-child { flex-shrink:0; font-size:14px; }
-    .lock-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; }
-    .lock-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-    .lock-name { font-size:14px; font-weight:500; }
-    .lock-status { font-size:11px; padding:3px 8px; border-radius:20px; }
-    .lock-status.locked   { background:#fdecea; color:#E24B4A; }
-    .lock-status.unlocked { background:#E1F5EE; color:var(--green); }
-    .lock-meta { font-size:12px; color:var(--text2); margin-bottom:14px; line-height:1.5; }
-    .lock-actions { display:flex; gap:8px; flex-wrap:wrap; }
-
-    /* Codes */
-    .codes-list { display:flex; flex-direction:column; gap:8px; margin-top:16px; }
-    .code-item { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:10px 14px; display:flex; align-items:center; justify-content:space-between; }
-    .code-pin { font-family:monospace; font-size:18px; font-weight:600; color:var(--green); letter-spacing:2px; }
-    .code-info { font-size:11px; color:var(--text2); margin-top:2px; }
-    .code-name { font-size:13px; font-weight:500; }
-
-    /* Modal génération code */
-    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:100; display:flex; align-items:center; justify-content:center; }
-    .modal { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; width:400px; max-width:90vw; }
-    .modal-title { font-size:15px; font-weight:600; margin-bottom:16px; }
-    .modal-actions { display:flex; gap:8px; margin-top:16px; }
-
-    .empty-state { text-align:center; padding:40px; color:var(--text2); font-size:13px; }
-    .refresh-btn { background:none; border:0.5px solid var(--border); border-radius:var(--radius); padding:5px 10px; color:var(--text2); font-size:12px; cursor:pointer; font-family:inherit; transition:all 0.15s; }
-    .refresh-btn:hover { border-color:var(--green); color:var(--green); }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « SERRURES CONNECTÉES » — intégrée au socle V5 le 15 novembre 2026
+     (docs/specs/spec-integration-v5-lot-1.md). La FORME change, pas le fond :
+     mêmes appels (/api/serrures), mêmes gestes, mêmes messages ; l'inventaire
+     de la spec dit où chaque chose est passée.
+     RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
 <body>
 
-<div class="layout">
-  <div class="sidebar" id="sidebar"></div>
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
 
-  <div class="main">
-    <div class="topbar">
-      <div>
-        <div class="page-title">🔐 Serrures connectées</div>
-        <div class="page-sub" id="topStatus">Seam · Chargement…</div>
-      </div>
-    </div>
-
-    <div class="content">
-
-      <div class="tabs">
-        <div class="tab active" onclick="switchTab('config')">⚙️ Configuration</div>
-        <div class="tab" onclick="switchTab('locks')">🔐 Mes serrures</div>
-      </div>
-
-      <!-- Configuration -->
-      <div class="tab-content active" id="tab-config">
-        <div class="config-card">
-          <div class="config-card-title">🔗 Statut Seam</div>
-
-          <div class="status-banner off" id="statusBanner">
-            <div class="sdot gray" id="statusDot"></div>
-            <span id="statusText">Non configuré</span>
-          </div>
-
-          <div class="notice">
-            <strong>Comment obtenir votre clé API Seam ?</strong>
-            <ol>
-              <li>Créez un compte sur <a href="https://console.seam.co" target="_blank">console.seam.co</a></li>
-              <li>Connectez vos serrures (Igloo Home, Nuki, Yale…)</li>
-              <li>Allez dans <strong>API Keys</strong></li>
-              <li>Créez une clé et copiez-la (commence par <code>seam_</code>)</li>
-            </ol>
-            <br>
-            <strong>Serrures supportées :</strong> Igloo Home, Nuki, Yale, August, Schlage, Tedee et bien d'autres via Seam.<br>
-            <strong>Tarif Seam :</strong> Gratuit jusqu'à 1000 appels/mois.
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Clé API Seam</label>
-            <div class="key-row">
-              <input class="form-input" type="password" id="apiKey" placeholder="seam_xxxxxxxxxxxxxxxx">
-              <button class="btn btn-primary" onclick="saveConfig()">Enregistrer</button>
-            </div>
-          </div>
-
-          <div class="toggle-row">
-            <span class="toggle-label">Activer les serrures connectées</span>
-            <label class="toggle">
-              <input type="checkbox" id="seamEnabled" onchange="toggleSeam()">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="toast" id="configToast"></div>
-        </div>
-      </div>
-
-      <!-- Serrures -->
-      <div class="tab-content" id="tab-locks">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <div style="font-size:13px;font-weight:500">Mes serrures connectées</div>
-          <button class="refresh-btn" onclick="loadLocks()">↻ Actualiser</button>
-        </div>
-        <div class="lock-modes-doc">
-          <h4>ℹ️ Modes de fonctionnement des serrures</h4>
-          <div class="mode-row">
-            <span>🟡</span>
-            <div><strong>Mode offline</strong> — sans bridge/hub. Les codes d'accès sont calculés par la serrure à partir d'un algorithme interne. Ils sont <strong>immuables</strong> : une fois créés, ils ne peuvent ni être modifiés, ni être supprimés. Ils expirent automatiquement à leur date de fin. Pas d'unlock à distance ni de logs d'accès.</div>
-          </div>
-          <div class="mode-row">
-            <span>🟢</span>
-            <div><strong>Mode connecté (avec bridge)</strong> — en ajoutant un IglooHome Bridge, vous débloquez la gestion dynamique : codes révocables à tout moment, unlock à distance depuis l'application, logs d'accès en temps réel, statut de la serrure live. Un bridge coûte environ 80-100€ et se connecte à votre WiFi.</div>
-          </div>
-        </div>
-
-        <div id="locks-container">
-          <div class="empty-state">Chargement…</div>
-        </div>
-      </div>
-
+<main class="page out">
+  <div class="out-tete">
+    <div class="out-tete__titre">
+      <h1 class="h1" data-i18n="serrures.titre"></h1>
+      <p class="out-sous" id="topStatus" data-i18n="serrures.statut_chargement"></p>
     </div>
   </div>
-</div>
 
-<!-- Modal génération code -->
-<div class="modal-overlay" id="modal" style="display:none">
-  <div class="modal">
-    <div class="modal-title">🔑 Générer un code d'accès</div>
+  <div class="seg out-onglets" role="tablist" data-i18n-attr="aria-label:outil.onglets">
+    <button type="button" class="seg__btn is-on" role="tab" aria-selected="true" data-onglet="config" data-i18n="outil.onglet_config"></button>
+    <button type="button" class="seg__btn" role="tab" aria-selected="false" data-onglet="locks" data-i18n="serrures.onglet_serrures"></button>
+  </div>
+
+  <!-- Configuration -->
+  <section class="out-carte out-carte--etroite" id="tab-config" data-panneau="config" aria-labelledby="h-statut">
+    <h2 class="out-carte__titre" id="h-statut"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-link"/></svg><span data-i18n="serrures.carte_statut"></span></h2>
+
+    <div class="out-bandeau" id="statusBanner"><span id="statusText" data-i18n="outil.non_configure"></span></div>
+
+    <div class="out-note">
+      <p><b data-i18n="serrures.aide_titre"></b></p>
+      <ol>
+        <li data-riche="serrures.aide_1" data-lien-seam="https://console.seam.co"></li>
+        <li data-riche="serrures.aide_2"></li>
+        <li data-riche="serrures.aide_3"></li>
+        <li data-riche="serrures.aide_4"></li>
+      </ol>
+      <p data-riche="serrures.aide_supportees"></p>
+      <p data-riche="serrures.aide_tarif"></p>
+    </div>
+
+    <div class="out-champ">
+      <label for="apiKey" data-i18n="serrures.cle_libelle"></label>
+      <div class="out-ligne-saisie">
+        <input class="out-saisie out-mono" type="password" id="apiKey" autocomplete="off" data-i18n-attr="placeholder:serrures.cle_exemple">
+        <button type="button" class="btn btn--primary" data-action="enregistrer" data-i18n="outil.enregistrer"></button>
+      </div>
+    </div>
+
+    <label class="out-inter">
+      <span data-i18n="serrures.activer"></span>
+      <input type="checkbox" class="out-sw" role="switch" id="seamEnabled">
+    </label>
+
+    <p class="out-retour" id="configToast"></p>
+  </section>
+
+  <!-- Serrures -->
+  <section class="out-pile" id="tab-locks" data-panneau="locks" hidden aria-labelledby="h-serrures">
+    <div class="out-carte__tete">
+      <h2 class="h2" id="h-serrures" data-i18n="serrures.mes_serrures"></h2>
+      <button type="button" class="btn btn--secondary" data-action="actualiser" data-i18n="outil.actualiser"></button>
+    </div>
+    <div class="out-note">
+      <p><b data-i18n="serrures.modes_titre"></b></p>
+      <p data-riche="serrures.mode_offline"></p>
+      <p data-riche="serrures.mode_connecte"></p>
+    </div>
+    <div id="locks-container"><p class="out-vide" data-i18n="common.loading"></p></div>
+  </section>
+</main>
+
+<!-- Générer un code : une fenêtre <dialog> native, plein écran au téléphone. -->
+<dialog class="out-feuille" id="modal" aria-labelledby="modal-titre">
+  <div class="out-feuille__corps">
+    <h2 class="h2" id="modal-titre" data-i18n="serrures.generer_titre"></h2>
     <input type="hidden" id="modal-lock-id">
-    <div class="form-group">
-      <label class="form-label">Nom du voyageur</label>
-      <input class="form-input" id="modal-guest" placeholder="Ex: Marie Dupont">
+    <div class="out-champ">
+      <label for="modal-guest" data-i18n="serrures.voyageur"></label>
+      <input class="out-saisie" id="modal-guest" data-i18n-attr="placeholder:serrures.voyageur_exemple">
     </div>
-    <div class="form-group">
-      <label class="form-label">Début d'accès</label>
-      <input class="form-input" type="datetime-local" id="modal-start">
+    <div class="out-champ">
+      <label for="modal-start" data-i18n="serrures.debut"></label>
+      <input class="out-saisie" type="datetime-local" id="modal-start">
     </div>
-    <div class="form-group">
-      <label class="form-label">Fin d'accès</label>
-      <input class="form-input" type="datetime-local" id="modal-end">
+    <div class="out-champ">
+      <label for="modal-end" data-i18n="serrures.fin"></label>
+      <input class="out-saisie" type="datetime-local" id="modal-end">
     </div>
-    <div class="toast" id="modalToast"></div>
-    <div class="modal-actions">
-      <button class="btn btn-primary" id="modal-generate" onclick="generateCode()">Générer le code</button>
-      <button class="btn" onclick="closeModal()">Annuler</button>
+    <p class="out-retour" id="modalToast"></p>
+    <div class="out-feuille__pied">
+      <button type="button" class="btn btn--secondary" data-action="fermer" data-i18n="outil.annuler"></button>
+      <button type="button" class="btn btn--primary" id="modal-generate" data-i18n="serrures.generer_bouton"></button>
     </div>
     <!-- Résultat -->
-    <div id="code-result" style="display:none;margin-top:16px;text-align:center">
-      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">Code généré ✅</div>
-      <div class="code-pin" id="code-pin-display" style="font-size:32px;display:block;margin:8px 0"></div>
-      <div style="font-size:11px;color:var(--text2)" id="code-validity"></div>
-      <button class="btn btn-primary" style="margin-top:12px;width:100%" onclick="copyCode()">📋 Copier le code</button>
+    <div class="out-pile" id="code-result" hidden>
+      <p class="out-aide" data-i18n="serrures.code_genere"></p>
+      <span class="out-code out-code--grand" id="code-pin-display"></span>
+      <p class="out-aide" id="code-validity"></p>
+      <button type="button" class="btn btn--primary btn--block" data-action="copier" data-i18n="serrures.copier"></button>
     </div>
   </div>
-</div>
+</dialog>
 
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
 <script type="module">
+import { exigerCompteProprePage, compteCourant, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
+import { requireAuth } from '/components/auth-guard.js'
+import { signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { renderOnboardingBanner } from '/components/onboarding-banner.js'
+import { esc, afficherRetour, monterCoquille } from '/shared/page-outil.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+
+let session = null
+let dernierCode = null
+const entete = () => ({ Authorization: `Bearer ${session?.access_token}` })
+const enteteJson = () => ({ 'Content-Type': 'application/json', ...entete() })
+const toast = (id, msg, type) => afficherRetour(document.getElementById(id), msg, type, 4000)
+
+// ── Onglets ────────────────────────────────────────────────────────────────
+function switchTab (name) {
+  for (const b of document.querySelectorAll('[data-onglet]')) {
+    const on = b.dataset.onglet === name
+    b.classList.toggle('is-on', on)
+    b.setAttribute('aria-selected', String(on))
+  }
+  for (const p of document.querySelectorAll('[data-panneau]')) p.hidden = p.dataset.panneau !== name
+  if (name === 'locks') loadLocks()
+}
+
+// ── Config ─────────────────────────────────────────────────────────────────
+async function loadConfig () {
+  try {
+    const res = await fetch('/api/serrures?action=config', { headers: entete() })
+    const data = await res.json()
+    if (data.configured) {
+      $('#apiKey').value = '••••••••••••••••••••'
+      $('#seamEnabled').checked = data.enabled
+      updateBanner(data.enabled)
+    }
+  } catch {}
+}
+
+async function saveConfig () {
+  const key = $('#apiKey').value.trim()
+  if (!key || key.startsWith('•')) return toast('configToast', t('outil.cle_invalide'), 'erreur')
+  try {
+    const res = await fetch('/api/serrures', { method: 'POST', headers: enteteJson(), body: JSON.stringify({ action: 'saveConfig', apiKey: key }) })
+    const data = await res.json()
+    if (data.success) {
+      toast('configToast', t('serrures.cle_enregistree'), 'ok')
+      $('#apiKey').value = '••••••••••••••••••••'
+      $('#seamEnabled').checked = true
+      updateBanner(true)
+    } else { toast('configToast', data.error || t('outil.erreur'), 'erreur') }
+  } catch (err) { toast('configToast', err.message, 'erreur') }
+}
+
+async function toggleSeam () {
+  const el = $('#seamEnabled')
+  const enabled = el.checked
+  // ⚠ La reponse est LUE. Sans cle enregistree le serveur refuse la bascule, et
+  // la page affichait quand meme « Serrures activées » : l'hote croyait ses
+  // serrures actives alors que rien n'avait change.
+  const r = await fetch('/api/serrures', { method: 'POST', headers: enteteJson(), body: JSON.stringify({ action: 'toggleConfig', enabled }) })
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}))
+    el.checked = !enabled
+    return toast('configToast', d.error || t('serrures.bascule_impossible'), 'erreur')
+  }
+  updateBanner(enabled)
+  toast('configToast', t(enabled ? 'serrures.active' : 'serrures.desactive'), 'ok')
+}
+
+function updateBanner (on) {
+  $('#statusBanner').className = 'out-bandeau' + (on ? ' out-bandeau--ok' : '')
+  $('#statusText').textContent = t(on ? 'serrures.bandeau_on' : 'serrures.bandeau_off')
+  $('#topStatus').textContent = t(on ? 'serrures.statut_actif' : 'serrures.statut_inactif')
+}
+
+// ── Serrures ───────────────────────────────────────────────────────────────
+async function loadLocks () {
+  const container = $('#locks-container')
+  container.innerHTML = `<p class="out-vide">${esc(t('common.loading'))}</p>`
+  try {
+    const res = await fetch('/api/serrures?action=locks', { headers: entete() })
+    const data = await res.json()
+    renderLocks(data.locks || [])
+  } catch (err) {
+    container.innerHTML = `<p class="out-vide out-aide--alerte">${esc(err.message)}</p>`
+  }
+}
+
+// Les serrures affichées, par identifiant : les gestes (codes, suppression)
+// retrouvent leur liste sans fabriquer d'id de DOM avec une donnée externe.
+const serrures = new Map()
+
+function renderLocks (locks) {
+  const container = $('#locks-container')
+  serrures.clear()
+  if (!locks.length) {
+    container.innerHTML = `<div class="out-carte out-vide">
+      <svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-lock"/></svg>
+      <h2 class="h2">${esc(t('serrures.vide_titre'))}</h2>
+      <p>${esc(t('serrures.vide_texte'))}</p>
+      <button type="button" class="btn btn--primary" data-action="configurer">${esc(t('serrures.configurer'))}</button>
+    </div>`
+    return
+  }
+  container.innerHTML = `<div class="out-grille">${locks.map((lock, i) => {
+    const p = lock.properties || {}
+    const isLocked = p.locked
+    const battery = p.battery_level ? Math.round(p.battery_level * 100) : null
+    // Détecte le mode offline : pas de capability 'online_access_codes'
+    const caps = lock.capabilities_supported || []
+    const isOffline = !caps.includes('online_access_codes')
+    serrures.set(String(i), { id: lock.device_id, isOffline })
+    const nom = p.name || lock.display_name || t('serrures.serrure')
+    return `
+      <article class="out-carte" data-offline="${isOffline}" data-serrure="${i}">
+        <div class="out-carte__tete">
+          <h3 class="out-carte__titre"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-lock"/></svg><span>${esc(nom)}</span></h3>
+          <span class="out-etat ${isLocked ? 'out-etat--erreur' : 'out-etat--ok'}">${esc(t(isLocked ? 'serrures.verrouillee' : 'serrures.ouverte'))}</span>
+        </div>
+        <div class="out-actions">
+          <span class="out-puce ${isOffline ? 'out-puce--attente' : 'out-puce--ok'}">${esc(t(isOffline ? 'serrures.badge_offline' : 'serrures.badge_connecte'))}</span>
+        </div>
+        <p class="out-ligne__sous">
+          ${p.manufacturer ? esc(t('serrures.marque', { marque: p.manufacturer })) + '<br>' : ''}
+          ${battery != null ? esc(t('serrures.batterie', { n: battery })) + '<br>' : ''}
+          <span class="out-mono">${esc(lock.device_id)}</span>
+        </p>
+        <div class="out-note">
+          <p><b>${esc(t(isOffline ? 'serrures.info_offline_titre' : 'serrures.info_connecte_titre'))}</b></p>
+          <p>${esc(t(isOffline ? 'serrures.info_offline' : 'serrures.info_connecte'))}</p>
+        </div>
+        <div class="out-actions">
+          <button type="button" class="btn btn--primary" data-action="generer"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-key"/></svg>${esc(t('serrures.generer'))}</button>
+          <button type="button" class="btn btn--secondary" data-action="codes">${esc(t('serrures.voir_codes'))}</button>
+        </div>
+        <div class="out-liste" data-codes hidden></div>
+      </article>`
+  }).join('')}</div>`
+}
+
+async function loadCodes (carte, btn) {
+  const s = serrures.get(carte.dataset.serrure)
+  if (!s) return
+  const list = carte.querySelector('[data-codes]')
+  if (!list.hidden) {
+    list.hidden = true
+    btn.textContent = t('serrures.voir_codes')
+    return
+  }
+  btn.textContent = t('common.loading')
+  try {
+    const res = await fetch(`/api/serrures?action=codes&lock_id=${encodeURIComponent(s.id)}`, { headers: entete() })
+    const data = await res.json()
+    const codes = data.codes || []
+    const jour = (d) => I18n.date(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' })
+    if (!codes.length) {
+      list.innerHTML = `<p class="out-aide">${esc(t('serrures.aucun_code'))}</p>`
+    } else {
+      list.innerHTML = codes.map(c => `
+        <div class="out-ligne">
+          <div class="out-ligne__corps">
+            <span class="out-ligne__titre">${esc(c.name || t('serrures.code_defaut'))}</span>
+            <span class="out-code">${esc(c.code || '——')}</span>
+            <span class="out-ligne__sous">${c.starts_at ? esc(t('serrures.du', { date: jour(c.starts_at) })) : ''}${c.ends_at ? ' ' + esc(t('serrures.au', { date: jour(c.ends_at) })) : ''}</span>
+          </div>
+          ${s.isOffline || c.is_offline_access_code
+            ? `<button type="button" class="btn btn--secondary" disabled title="${esc(t('serrures.immuable'))}" aria-label="${esc(t('serrures.immuable'))}">${esc(t('serrures.supprimer'))}</button>`
+            : `<button type="button" class="btn btn--secondary" data-action="supprimer" data-code="${esc(c.access_code_id)}">${esc(t('serrures.supprimer'))}</button>`}
+        </div>`).join('')
+    }
+    list.hidden = false
+    btn.textContent = t('serrures.masquer_codes')
+  } catch (err) {
+    list.innerHTML = `<p class="out-aide out-aide--alerte">${esc(t('serrures.erreur', { message: err.message }))}</p>`
+    list.hidden = false
+    btn.textContent = t('serrures.voir_codes')
+  }
+}
+
+async function deleteCode (codeId, carte) {
+  if (!confirm(t('serrures.supprimer_confirmer'))) return
+  try {
+    await fetch('/api/serrures', { method: 'POST', headers: enteteJson(), body: JSON.stringify({ action: 'deleteCode', code_id: codeId }) })
+    carte.querySelector('[data-codes]').hidden = true
+  } catch {}
+}
+
+// ── Fenêtre « Générer un code » ────────────────────────────────────────────
+function openModal (lockId) {
+  $('#modal-lock-id').value = lockId
+  $('#modal-guest').value = ''
+  $('#code-result').hidden = true
+  $('#modal-generate').hidden = false
+
+  // Dates par défaut : aujourd'hui → dans 7 jours
+  const now = new Date()
+  const end = new Date(now)
+  end.setDate(end.getDate() + 7)
+  $('#modal-start').value = toDateTimeLocal(now)
+  $('#modal-end').value = toDateTimeLocal(end)
+
+  $('#modal').showModal()
+}
+
+function closeModal () { $('#modal').close() }
+
+async function generateCode () {
+  const lockId = $('#modal-lock-id').value
+  const guestName = $('#modal-guest').value.trim() || t('serrures.voyageur_defaut')
+  const startsAt = new Date($('#modal-start').value).toISOString()
+  const endsAt = new Date($('#modal-end').value).toISOString()
+
+  const btn = $('#modal-generate')
+  btn.textContent = t('serrures.generation')
+  btn.disabled = true
+
+  try {
+    const res = await fetch('/api/serrures', { method: 'POST', headers: enteteJson(), body: JSON.stringify({ action: 'generateCode', lock_id: lockId, guest_name: guestName, starts_at: startsAt, ends_at: endsAt }) })
+    const data = await res.json()
+
+    if (data.success && data.code) {
+      const jour = (d) => I18n.date(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' })
+      $('#code-pin-display').textContent = data.code.code
+      $('#code-validity').textContent = t('serrures.validite', { debut: jour(data.code.starts_at), fin: jour(data.code.ends_at) })
+      $('#code-result').hidden = false
+      btn.hidden = true
+      dernierCode = data.code.code
+    } else {
+      toast('modalToast', data.error || t('outil.erreur'), 'erreur')
+      btn.textContent = t('serrures.generer_bouton')
+      btn.disabled = false
+    }
+  } catch (err) {
+    toast('modalToast', err.message, 'erreur')
+    btn.textContent = t('serrures.generer_bouton')
+    btn.disabled = false
+  }
+}
+
+function copyCode () {
+  if (dernierCode) {
+    navigator.clipboard.writeText(dernierCode)
+    toast('modalToast', t('serrures.copie'), 'ok')
+  }
+}
+
+function toDateTimeLocal (date) {
+  return date.toISOString().slice(0, 16)
+}
+
+function brancher () {
+  for (const b of document.querySelectorAll('[data-onglet]')) b.addEventListener('click', () => switchTab(b.dataset.onglet))
+  $('[data-action="enregistrer"]').addEventListener('click', saveConfig)
+  $('#seamEnabled').addEventListener('change', toggleSeam)
+  $('[data-action="actualiser"]').addEventListener('click', loadLocks)
+  $('#modal-generate').addEventListener('click', generateCode)
+  $('[data-action="fermer"]').addEventListener('click', closeModal)
+  $('[data-action="copier"]').addEventListener('click', copyCode)
+  $('#locks-container').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-action]')
+    if (!b) return
+    if (b.dataset.action === 'configurer') return switchTab('config')
+    const carte = b.closest('[data-serrure]')
+    if (!carte) return
+    const s = serrures.get(carte.dataset.serrure)
+    if (b.dataset.action === 'generer' && s) openModal(s.id)
+    else if (b.dataset.action === 'codes') loadCodes(carte, b)
+    else if (b.dataset.action === 'supprimer') deleteCode(b.dataset.code, carte)
+  })
+}
+
+async function init () {
+  await I18n.init()
   // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
   // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
   // s'ouvrait par URL directe en mode basculé et affichait un contresens.
-  import { exigerCompteProprePage } from '/shared/compte-courant.js'
-  await exigerCompteProprePage({ nomPage: 'Les serrures' })
+  await exigerCompteProprePage({ nomPage: t('serrures.titre') })
+  session = await requireAuth()
+  if (!session) return
+  document.addEventListener('i18n:changed', () => location.reload())
+  monterCoquille({
+    HSNav, I18n, session,
+    compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
+    deconnexion: () => signOut()
+  })
+  brancher()
+  await loadConfig()
+  // Le bandeau d'incitation que l'ancienne barre latérale posait : gardé
+  // (spec §3.1 et §8), sans attente, après le rendu.
+  renderOnboardingBanner().catch(() => {})
+}
 
-  import { requireAuth } from '/components/auth-guard.js'
-  import { renderSidebar } from '/components/sidebar.js'
-  import { initErrorHandler } from '/shared/error-handler.js'
-
-  initErrorHandler()
-  const session = await requireAuth()
-  if (!session) throw new Error('Non authentifié')
-  await renderSidebar('serrures')
-  window._session = session
-  window.loadConfig()
+init().catch(e => console.error('[serrures]', e))
 </script>
-
-<script>
-  window.switchTab = name => {
-    document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['config','locks'][i] === name))
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'))
-    document.getElementById('tab-' + name).classList.add('active')
-    if (name === 'locks') loadLocks()
-  }
-
-  // ── Config ────────────────────────────────────────────────────────────────
-  window.loadConfig = async () => {
-    try {
-      const res  = await fetch('/api/serrures?action=config', { headers: { 'Authorization': `Bearer ${window._session?.access_token}` } })
-      const data = await res.json()
-      if (data.configured) {
-        document.getElementById('apiKey').value = '••••••••••••••••••••'
-        document.getElementById('seamEnabled').checked = data.enabled
-        updateBanner(data.enabled)
-      }
-    } catch {}
-  }
-
-  window.saveConfig = async () => {
-    const key = document.getElementById('apiKey').value.trim()
-    if (!key || key.startsWith('•')) return toast('configToast', 'Saisissez une clé API valide', 'error')
-    try {
-      const res  = await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'saveConfig', apiKey: key }) })
-      const data = await res.json()
-      if (data.success) {
-        toast('configToast', '✅ Clé enregistrée', 'success')
-        document.getElementById('apiKey').value = '••••••••••••••••••••'
-        document.getElementById('seamEnabled').checked = true
-        updateBanner(true)
-      } else { toast('configToast', `❌ ${data.error}`, 'error') }
-    } catch (err) { toast('configToast', `❌ ${err.message}`, 'error') }
-  }
-
-  window.toggleSeam = async () => {
-    const el = document.getElementById('seamEnabled')
-    const enabled = el.checked
-    // ⚠ La reponse est LUE. Sans cle enregistree le serveur refuse la bascule, et
-    // la page affichait quand meme « Serrures activées » : l'hote croyait ses
-    // serrures actives alors que rien n'avait change.
-    const r = await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'toggleConfig', enabled }) })
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}))
-      el.checked = !enabled
-      return toast('configToast', '❌ ' + (d.error || 'Bascule impossible'), 'error')
-    }
-    updateBanner(enabled)
-    toast('configToast', enabled ? '✅ Serrures activées' : '⏸ Serrures désactivées', 'success')
-  }
-
-  function updateBanner(on) {
-    const b = document.getElementById('statusBanner')
-    const d = document.getElementById('statusDot')
-    const t = document.getElementById('statusText')
-    b.className = 'status-banner ' + (on ? 'on' : 'off')
-    d.className = 'sdot ' + (on ? 'green' : 'gray')
-    t.textContent = on ? 'Seam connecté et actif' : 'Non configuré ou désactivé'
-    document.getElementById('topStatus').textContent = on ? 'Seam · ✓ Actif' : 'Seam · Inactif'
-  }
-
-  // ── Serrures ──────────────────────────────────────────────────────────────
-  window.loadLocks = async () => {
-    const container = document.getElementById('locks-container')
-    container.innerHTML = '<div class="empty-state">Chargement…</div>'
-    try {
-      const res  = await fetch('/api/serrures?action=locks', { headers: { 'Authorization': `Bearer ${window._session?.access_token}` } })
-      const data = await res.json()
-      renderLocks(data.locks || [])
-    } catch (err) {
-      container.innerHTML = `<div class="empty-state">❌ ${err.message}</div>`
-    }
-  }
-
-  function renderLocks(locks) {
-    const container = document.getElementById('locks-container')
-    if (!locks.length) {
-      container.innerHTML = `<div class="empty-state" style="max-width:460px;margin:0 auto;line-height:1.6">
-        <div style="font-size:40px;margin-bottom:12px">&#128274;</div>
-        <h2 style="font-size:17px;color:var(--text);margin-bottom:8px">Serrures connectées — module optionnel</h2>
-        <p style="font-size:14px;margin-bottom:20px">Reliez vos serrures (Nuki, Yale, Igloo, August…) pour générer et envoyer automatiquement un code d'accès à chaque réservation. Ce module est facultatif : HôteSmart fonctionne très bien sans.</p>
-        <button onclick="switchTab('config')" style="background:#007aff;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer">Configurer Seam</button>
-      </div>`
-      return
-    }
-
-    container.innerHTML = `<div class="locks-grid">${locks.map(lock => {
-      const isLocked = lock.properties?.locked
-      const battery  = lock.properties?.battery_level ? `🔋 ${Math.round(lock.properties.battery_level * 100)}%` : ''
-      // Détecte le mode offline : pas de capability 'online_access_codes'
-      const caps = lock.capabilities_supported || []
-      const isOffline = !caps.includes('online_access_codes')
-      const modeBadge = isOffline
-        ? '<span class="mode-badge offline">🟡 Offline</span>'
-        : '<span class="mode-badge online">🟢 Connecté</span>'
-      const modeInfo = isOffline
-        ? '<div class="mode-info"><div class="mode-info-title">Mode offline (codes immuables)</div>Les codes d\'accès générés ici ne peuvent plus être modifiés ni supprimés. Ils expirent automatiquement à leur date de fin.</div>'
-        : '<div class="mode-info online"><div class="mode-info-title">Mode connecté</div>Les codes peuvent être révoqués à tout moment et la serrure peut être déverrouillée à distance.</div>'
-      return `
-        <div class="lock-card" data-offline="${isOffline}">
-          <div class="lock-header">
-            <div class="lock-name">🔐 ${lock.properties?.name || lock.display_name || 'Serrure'}${modeBadge}</div>
-            <span class="lock-status ${isLocked ? 'locked' : 'unlocked'}">${isLocked ? '🔒 Verrouillée' : '🔓 Ouverte'}</span>
-          </div>
-          <div class="lock-meta">
-            ${lock.properties?.manufacturer ? `Marque : ${lock.properties.manufacturer}<br>` : ''}
-            ${battery ? `${battery}<br>` : ''}
-            <span style="font-size:10px;color:var(--text2);font-family:monospace">${lock.device_id}</span>
-          </div>
-          ${modeInfo}
-          <div class="lock-actions" style="margin-top:12px">
-            <button class="btn btn-primary" onclick="openModal('${lock.device_id}', '${(lock.properties?.name || '').replace(/'/g, '')}')">🔑 Générer code</button>
-            <button class="btn" onclick="loadCodes('${lock.device_id}', this, ${isOffline})">📋 Voir codes</button>
-          </div>
-          <div class="codes-list" id="codes-${lock.device_id}" style="display:none"></div>
-        </div>
-      `
-    }).join('')}</div>`
-  }
-
-  window.loadCodes = async (lockId, btn, isOffline = false) => {
-    const list = document.getElementById(`codes-${lockId}`)
-    if (list.style.display === 'flex' || list.style.display === 'block') {
-      list.style.display = 'none'
-      btn.textContent = '📋 Voir codes'
-      return
-    }
-    btn.textContent = '⏳ Chargement…'
-    try {
-      const res  = await fetch(`/api/serrures?action=codes&lock_id=${lockId}`, { headers: { 'Authorization': `Bearer ${window._session?.access_token}` } })
-      const data = await res.json()
-      const codes = data.codes || []
-      if (!codes.length) {
-        list.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:8px 0">Aucun code actif</div>'
-      } else {
-        list.innerHTML = codes.map(c => `
-          <div class="code-item">
-            <div>
-              <div class="code-name">${c.name || 'Code'}</div>
-              <div class="code-pin">${c.code || '——'}</div>
-              <div class="code-info">
-                ${c.starts_at ? `Du ${new Date(c.starts_at).toLocaleDateString('fr-FR')}` : ''}
-                ${c.ends_at   ? ` au ${new Date(c.ends_at).toLocaleDateString('fr-FR')}` : ''}
-              </div>
-            </div>
-            ${isOffline || c.is_offline_access_code
-              ? '<button class="btn btn-trash-disabled" style="font-size:11px" title="Code immuable (mode offline)" onclick="return false">🗑</button>'
-              : `<button class="btn" style="font-size:11px" onclick="deleteCode('${c.access_code_id}', '${lockId}')">🗑</button>`}
-          </div>
-        `).join('')
-      }
-      list.style.display = 'flex'
-      list.style.flexDirection = 'column'
-      btn.textContent = '📋 Masquer codes'
-    } catch (err) {
-      list.innerHTML = `<div style="font-size:12px;color:#E24B4A;padding:8px 0">Erreur : ${err.message}</div>`
-      list.style.display = 'block'
-      btn.textContent = '📋 Voir codes'
-    }
-  }
-
-  window.deleteCode = async (codeId, lockId) => {
-    if (!confirm('Supprimer ce code d\'accès ?')) return
-    try {
-      await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'deleteCode', code_id: codeId }) })
-      document.getElementById(`codes-${lockId}`).style.display = 'none'
-    } catch {}
-  }
-
-  // ── Modal ─────────────────────────────────────────────────────────────────
-  window.openModal = (lockId, lockName) => {
-    document.getElementById('modal-lock-id').value = lockId
-    document.getElementById('modal-guest').value = ''
-    document.getElementById('code-result').style.display = 'none'
-    document.getElementById('modal-generate').style.display = 'inline-flex'
-
-    // Dates par défaut : aujourd'hui → dans 7 jours
-    const now  = new Date()
-    const end  = new Date(now)
-    end.setDate(end.getDate() + 7)
-    document.getElementById('modal-start').value = toDateTimeLocal(now)
-    document.getElementById('modal-end').value   = toDateTimeLocal(end)
-
-    document.getElementById('modal').style.display = 'flex'
-  }
-
-  window.closeModal = () => { document.getElementById('modal').style.display = 'none' }
-
-  window.generateCode = async () => {
-    const lockId    = document.getElementById('modal-lock-id').value
-    const guestName = document.getElementById('modal-guest').value.trim() || 'Voyageur'
-    const startsAt  = new Date(document.getElementById('modal-start').value).toISOString()
-    const endsAt    = new Date(document.getElementById('modal-end').value).toISOString()
-
-    const btn = document.getElementById('modal-generate')
-    btn.textContent = 'Génération…'
-    btn.disabled = true
-
-    try {
-      const res  = await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'generateCode', lock_id: lockId, guest_name: guestName, starts_at: startsAt, ends_at: endsAt }) })
-      const data = await res.json()
-
-      if (data.success && data.code) {
-        document.getElementById('code-pin-display').textContent = data.code.code
-        document.getElementById('code-validity').textContent = `Valide du ${new Date(data.code.starts_at).toLocaleDateString('fr-FR')} au ${new Date(data.code.ends_at).toLocaleDateString('fr-FR')}`
-        document.getElementById('code-result').style.display = 'block'
-        btn.style.display = 'none'
-        window._lastCode = data.code.code
-      } else {
-        toast('modalToast', `❌ ${data.error}`, 'error')
-        btn.textContent = 'Générer le code'
-        btn.disabled = false
-      }
-    } catch (err) {
-      toast('modalToast', `❌ ${err.message}`, 'error')
-      btn.textContent = 'Générer le code'
-      btn.disabled = false
-    }
-  }
-
-  window.copyCode = () => {
-    if (window._lastCode) {
-      navigator.clipboard.writeText(window._lastCode)
-      toast('modalToast', '✅ Code copié !', 'success')
-    }
-  }
-
-  function toDateTimeLocal(date) {
-    return date.toISOString().slice(0, 16)
-  }
-
-  function toast(id, msg, type) {
-    const t = document.getElementById(id)
-    t.textContent = msg; t.className = `toast ${type}`; t.style.display = 'block'
-    setTimeout(() => { t.style.display = 'none' }, 4000)
-  }
-</script>
-
 </body>
 </html>

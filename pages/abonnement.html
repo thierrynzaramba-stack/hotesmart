@@ -1,231 +1,134 @@
-<!DOCTYPE html>
-<html lang="fr">
+<!doctype html>
+<html lang="fr" dir="auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Mon abonnement</title>
-  <link rel="icon" href="/favicon.ico">
-  <!-- `hidden` doit masquer : voir l en-tete de public/style.css et
-       CLAUDE.md. Cette page ne charge aucune des trois feuilles. -->
-  <style>[hidden] { display: none !important; }</style>
-  <style>
-    :root {
-      --primary: #C97B5C;
-      --primary-dark: #A85F44;
-      --primary-light: #F4E4DC;
-      --text: #1a1a1a;
-      --text-muted: #6b6b6b;
-      --border: #e5e5e5;
-      --bg: #fafaf7;
-      --bg-card: #ffffff;
-      --success: #4a9d6e;
-      --success-bg: #e8f5ec;
-      --warning: #d97706;
-      --warning-bg: #fff7ed;
-      --danger: #c0392b;
-      --shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.08);
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      line-height: 1.5;
-    }
-    .ab-shell { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
-    .ab-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
-    .ab-logo { font-weight: 700; font-size: 20px; color: var(--primary); letter-spacing: -0.02em; text-decoration: none; }
-    .ab-nav { display: flex; gap: 16px; align-items: center; }
-    .ab-nav a { font-size: 14px; color: var(--text-muted); text-decoration: none; padding: 6px 12px; border-radius: 6px; }
-    .ab-nav a:hover { background: var(--border); }
-    .ab-title { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
-    .ab-subtitle { color: var(--text-muted); margin-bottom: 32px; }
-    .ab-banner {
-      background: var(--success-bg); color: var(--success); border: 1px solid #b7dfc2;
-      padding: 12px 16px; border-radius: 8px; margin-bottom: 24px; font-size: 14px;
-    }
-    .ab-banner.warning { background: var(--warning-bg); color: var(--warning); border-color: #fed7aa; }
-    .ab-banner.error { background: #fee; color: var(--danger); border-color: #fbb; }
-
-    .ab-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-    @media (min-width: 720px) { .ab-grid { grid-template-columns: 1fr 1fr; } }
-
-    .ab-card {
-      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
-      padding: 24px; box-shadow: var(--shadow);
-      display: flex; flex-direction: column; gap: 12px;
-    }
-    .ab-card.required { border: 2px solid var(--primary); }
-    .ab-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-    .ab-card-title { font-size: 18px; font-weight: 700; }
-    .ab-card-required-tag {
-      font-size: 11px; background: var(--primary); color: #fff;
-      padding: 2px 8px; border-radius: 4px; font-weight: 500; white-space: nowrap;
-    }
-    .ab-card-status {
-      font-size: 13px; padding: 4px 10px; border-radius: 4px; display: inline-block; align-self: flex-start;
-    }
-    .ab-status-trialing { background: var(--success-bg); color: var(--success); }
-    .ab-status-active   { background: var(--success-bg); color: var(--success); }
-    .ab-status-past_due { background: var(--warning-bg); color: var(--warning); }
-    .ab-status-canceled { background: #f4f4f0; color: var(--text-muted); }
-    .ab-status-none     { background: #f4f4f0; color: var(--text-muted); }
-
-    .ab-price { font-size: 24px; font-weight: 700; color: var(--text); }
-    .ab-price small { font-size: 14px; font-weight: 400; color: var(--text-muted); }
-    .ab-desc { color: var(--text-muted); font-size: 14px; flex: 1; }
-    .ab-meta { font-size: 13px; color: var(--text-muted); }
-
-    .ab-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-    .ab-btn {
-      padding: 10px 16px; border: none; border-radius: 8px; font-size: 14px;
-      font-weight: 500; cursor: pointer; font-family: inherit; transition: all 0.15s;
-    }
-    .ab-btn-primary { background: var(--primary); color: #fff; }
-    .ab-btn-primary:hover { background: var(--primary-dark); }
-    .ab-btn-primary:disabled { background: var(--border); cursor: not-allowed; }
-    .ab-btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
-    .ab-btn-ghost:hover { color: var(--text); }
-    .ab-btn-danger { background: transparent; color: var(--danger); border: 1px solid #fbb; }
-    .ab-btn-danger:hover { background: #fee; }
-
-    /* Modal quantité */
-    .ab-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 1000; }
-    .ab-modal.open { display: flex; }
-    .ab-modal-box { background: #fff; padding: 28px; border-radius: 12px; max-width: 420px; width: 90%; }
-    .ab-modal-box h3 { font-size: 20px; margin-bottom: 8px; }
-    .ab-modal-box p { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
-    .ab-modal-box label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
-    .ab-modal-box input[type="number"] {
-      width: 100%; padding: 10px 12px; border: 1px solid var(--border);
-      border-radius: 8px; font-size: 15px; font-family: inherit;
-    }
-    .ab-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
-
-    .ab-loading { text-align: center; padding: 40px; color: var(--text-muted); }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « MON ABONNEMENT » — intégrée au socle V5 le 15 novembre 2026
+     (docs/specs/spec-integration-v5-lot-1.md). Elle était AUTONOME (styles et
+     en-tête à elle) : elle prend la barre V5 et le menu ≡, et garde tout le
+     reste — mêmes lectures, mêmes appels à /api/stripe, mêmes gestes.
+     ⚠ ARGENT : un défaut ici se voit sur un relevé, pas à l'écran du
+     développeur. Recette avec Thierry juste après le merge (CLAUDE.md, règle 5).
+     RÈGLES V5 : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
 </head>
 <body>
 
-<div class="ab-shell">
-  <header class="ab-header">
-    <a href="/pages/index.html" class="ab-logo">HôteSmart</a>
-    <nav class="ab-nav">
-      <a href="/pages/compte.html">Mon compte</a>
-      <a href="#" id="logout-link">Se déconnecter</a>
-    </nav>
-  </header>
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
 
-  <h1 class="ab-title">Mon abonnement</h1>
-  <p class="ab-subtitle">Activez les modules dont vous avez besoin. Essai gratuit de 15 jours sur tous les modules.</p>
-
-  <div id="banners"></div>
-  <div id="content" class="ab-loading">Chargement…</div>
-</div>
-
-<!-- Modal quantité -->
-<div class="ab-modal" id="qty-modal">
-  <div class="ab-modal-box">
-    <h3 id="qty-title">Combien de biens ?</h3>
-    <p id="qty-desc">Indiquez le nombre de biens à couvrir par ce module.</p>
-    <label for="qty-input">Nombre</label>
-    <input type="number" id="qty-input" min="1" max="50" value="1">
-    <div class="ab-modal-actions">
-      <button class="ab-btn ab-btn-ghost" id="qty-cancel">Annuler</button>
-      <button class="ab-btn ab-btn-primary" id="qty-confirm">Démarrer mon essai →</button>
+<main class="page out">
+  <div class="out-tete">
+    <div class="out-tete__titre">
+      <h1 class="h1" data-i18n="abo.titre"></h1>
+      <p class="out-sous" data-i18n="abo.sous_titre"></p>
+    </div>
+    <!-- « Mon compte » : l'ancienne en-tête de la page y menait, et aucun
+         écran V5 n'y mène (spec §3.5 et §8, point 2). Gardé ici. -->
+    <div class="out-tete__actions">
+      <a class="btn btn--secondary" href="/pages/compte.html"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-users"/></svg><span data-i18n="abo.mon_compte"></span></a>
     </div>
   </div>
-</div>
 
+  <div class="out-pile" id="banners"></div>
+  <div id="content"><p class="out-vide" data-i18n="common.loading"></p></div>
+</main>
+
+<!-- Fenêtre « quantité » : un <dialog> natif, plein écran au téléphone. -->
+<dialog class="out-feuille" id="qty-modal" aria-labelledby="qty-title">
+  <div class="out-feuille__corps">
+    <h2 class="h2" id="qty-title" data-i18n="abo.qty_titre_defaut"></h2>
+    <p class="out-sous" id="qty-desc" data-i18n="abo.qty_desc_defaut"></p>
+    <div class="out-champ">
+      <label for="qty-input" data-i18n="abo.nombre"></label>
+      <input class="out-saisie num" type="number" id="qty-input" min="1" max="50" value="1">
+    </div>
+    <div class="out-feuille__pied">
+      <button type="button" class="btn btn--secondary" id="qty-cancel" data-i18n="outil.annuler"></button>
+      <button type="button" class="btn btn--primary" id="qty-confirm" data-i18n="abo.confirmer"></button>
+    </div>
+  </div>
+</dialog>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
 <script type="module">
-  // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
-  // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
-  // s'ouvrait par URL directe en mode basculé et affichait un contresens.
-  import { exigerCompteProprePage } from '/shared/compte-courant.js'
-  await exigerCompteProprePage({ nomPage: 'L’abonnement' })
+import { exigerCompteProprePage, compteCourant, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
+import { supabase, getUser, signOut } from '/shared/supabase.js'
+import { esc, monterCoquille } from '/shared/page-outil.js'
 
-import { supabase, getUser, signOut } from '/shared/supabase.js';
-import { markOnboardingCompleted } from '/components/auth-guard.js';
+const t = (k, v) => I18n.t(k, v)
+// Un prix au centime, dans la langue de la page (`I18n.money` arrondit à
+// l'euro : 19,99 € deviendrait 20 €).
+const prix = (euros) => I18n.num(euros, { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+// ⚠ LES MONTANTS SONT CEUX DE L'ANCIENNE PAGE, AU CENTIME. Ils ne décident de
+// rien : Stripe facture ce que son produit porte (api/stripe.js). Ils ne sont
+// qu'affichés, comme avant.
 const MODULES = [
   {
     id: 'guestflow',
-    title: 'GuestFlow AI',
     required: true,
-    price: '19,99 €',
-    priceDetail: '/mois (1er bien) + 9,90 €/mois par bien supplémentaire',
-    desc: 'Agent IA qui répond automatiquement aux voyageurs, messagerie unifiée Airbnb+Booking, codes d\'accès auto.',
-    qtyLabel: 'biens'
+    price: 19.99,
+    detail: () => t('abo.detail_guestflow', { prix: prix(9.90) }),
+    unite: 'abo.unite_biens'
   },
   {
     id: 'menage',
-    title: 'Ménages',
     required: false,
-    price: '6,90 €',
-    priceDetail: '/mois par bien',
-    desc: 'Planning multi-prestataires, PWA Clean pour les agents de ménage, validation photo.',
-    qtyLabel: 'biens'
+    price: 6.90,
+    detail: () => t('abo.detail_menage'),
+    unite: 'abo.unite_biens'
   },
   {
     id: 'serrure',
-    title: 'Serrures connectées',
     required: false,
-    price: '9,99 €',
-    priceDetail: '/mois jusqu\'à 5 serrures (+2,99 €/mois au-delà)',
-    desc: 'Génération auto de codes voyageur via Seam, expiration au check-out.',
-    qtyLabel: 'serrures'
+    price: 9.99,
+    detail: () => t('abo.detail_serrure', { prix: prix(2.99) }),
+    unite: 'abo.unite_serrures'
   },
   {
     id: 'caution',
-    title: 'Caution CB voyageur',
     required: false,
-    price: '9,99 €',
-    priceDetail: '/mois par bien',
-    desc: 'Pre-autorisation automatique de caution Stripe au check-in, libération à check-out + 7 jours.',
-    qtyLabel: 'biens',
+    price: 9.99,
+    detail: () => t('abo.detail_caution'),
+    unite: 'abo.unite_biens',
     comingSoon: true
   }
-];
+]
 
-const STATUS_LABELS = {
-  trialing: 'Essai gratuit',
-  active: 'Actif',
-  past_due: '⚠️ Paiement en échec',
-  canceled: 'Annulé',
-  incomplete: 'Incomplet',
-  incomplete_expired: 'Expiré',
-  unpaid: 'Impayé'
-};
+// Le libellé de chaque état d'un abonnement Stripe ; un état inconnu
+// s'affiche tel quel, comme avant.
+const STATUTS = ['trialing', 'active', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'unpaid']
+const libelleStatut = (s) => (STATUTS.includes(s) ? t('abo.statut_' + s) : s)
+const TON = { trialing: 'ok', active: 'ok', past_due: 'attente', unpaid: 'attente' }
 
-const content = document.getElementById('content');
-const banners = document.getElementById('banners');
+const content = document.getElementById('content')
+const banners = document.getElementById('banners')
+const banniere = (texte, type = 'ok') => `<p class="out-retour out-retour--${type}" role="${type === 'erreur' ? 'alert' : 'status'}">${esc(texte)}</p>`
+const jour = (d) => I18n.date(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' })
+let user = null
 
-// ── Logout
-document.getElementById('logout-link').onclick = async (e) => {
-  e.preventDefault();
-  sessionStorage.clear();
-  await signOut();
-};
-
-// ── Bannières success/canceled (URL params depuis redirect Stripe)
-const params = new URLSearchParams(window.location.search);
-if (params.get('success') === 'true') {
-  const mod = params.get('module') || '';
-  banners.innerHTML = '<div class="ab-banner">✓ Votre essai gratuit a démarré' + (mod ? ' pour ' + escHtml(mod) : '') + '. Vous pouvez gérer vos abonnements ci-dessous.</div>';
-  history.replaceState({}, '', '/pages/abonnement.html');
-}
-if (params.get('canceled') === 'true') {
-  banners.innerHTML = '<div class="ab-banner warning">Vous avez annulé le processus de paiement. Vous pouvez réessayer à tout moment.</div>';
-  history.replaceState({}, '', '/pages/abonnement.html');
-}
-
-const user = await getUser();
-if (!user) { window.location.replace('/pages/login.html'); throw new Error('not authenticated'); }
-
-await loadAndRender();
-
-async function loadAndRender() {
+async function loadAndRender () {
   // BETA : compte flague accounts.is_beta => aucun ecran de paiement. On affiche un etat
   // neutre et on n'affiche jamais les offres ni le checkout. (Table accounts possiblement absente.)
   try {
@@ -233,10 +136,10 @@ async function loadAndRender() {
       .from('accounts')
       .select('is_beta')
       .eq('user_id', user.id)
-      .maybeSingle();
+      .maybeSingle()
     if (acct && acct.is_beta === true) {
-      content.innerHTML = '<div class="ab-banner">Votre compte est en beta : aucun paiement requis. Toutes les fonctionnalites sont accessibles sans abonnement.</div>';
-      return;
+      content.innerHTML = banniere(t('abo.beta'))
+      return
     }
   } catch (e) { /* colonne absente ou lecture KO : parcours normal */ }
 
@@ -244,127 +147,128 @@ async function loadAndRender() {
   const { data: subs, error } = await supabase
     .from('subscriptions')
     .select('module, status, trial_ends_at, current_period_end, cancel_at_period_end, quantity')
-    .eq('user_id', user.id);
+    .eq('user_id', user.id)
 
   if (error) {
-    content.innerHTML = '<div class="ab-banner error">Erreur de chargement : ' + escHtml(error.message) + '</div>';
-    return;
+    content.innerHTML = banniere(t('abo.erreur_chargement', { message: error.message }), 'erreur')
+    return
   }
 
-  const subByModule = {};
-  (subs || []).forEach(s => { subByModule[s.module] = s; });
+  const subByModule = {}
+  ;(subs || []).forEach(s => { subByModule[s.module] = s })
 
-  render(subByModule);
+  render(subByModule)
 }
 
-function render(subByModule) {
-  const cards = MODULES.map(m => renderCard(m, subByModule[m.id])).join('');
-  content.innerHTML = '<div class="ab-grid">' + cards + '</div>';
+function render (subByModule) {
+  const cards = MODULES.map(m => renderCard(m, subByModule[m.id])).join('')
+  content.innerHTML = '<div class="out-grille out-grille--2">' + cards + '</div>'
 
   // Bind boutons
   document.querySelectorAll('[data-action="start"]').forEach(btn => {
-    btn.onclick = () => openQtyModal(btn.dataset.module);
-  });
+    btn.onclick = () => openQtyModal(btn.dataset.module)
+  })
   document.querySelectorAll('[data-action="cancel"]').forEach(btn => {
-    btn.onclick = () => cancelSub(btn.dataset.module);
-  });
+    btn.onclick = () => cancelSub(btn.dataset.module)
+  })
   document.querySelectorAll('[data-action="portal"]').forEach(btn => {
-    btn.onclick = () => openPortal();
-  });
+    btn.onclick = () => openPortal()
+  })
 }
 
-function renderCard(mod, sub) {
-  const status = sub ? sub.status : 'none';
-  const statusLabel = sub ? STATUS_LABELS[status] || status : 'Non activé';
-  const requiredTag = mod.required ? '<span class="ab-card-required-tag">Requis</span>' : '';
-  const comingSoonTag = mod.comingSoon ? '<span class="ab-card-required-tag" style="background:var(--text-muted);">Bientôt</span>' : '';
+function renderCard (mod, sub) {
+  const status = sub ? sub.status : 'none'
+  const statusLabel = sub ? libelleStatut(status) : t('abo.statut_none')
+  const unite = t(mod.unite)
+  const requiredTag = mod.required ? `<span class="out-puce out-puce--fort">${esc(t('abo.requis'))}</span>` : ''
+  const comingSoonTag = mod.comingSoon ? `<span class="out-puce">${esc(t('abo.bientot'))}</span>` : ''
 
-  let meta = '';
+  let meta = ''
   if (sub) {
     if (status === 'trialing' && sub.trial_ends_at) {
-      const dt = new Date(sub.trial_ends_at);
-      meta = '<div class="ab-meta">Essai jusqu\'au ' + dt.toLocaleDateString('fr-FR') + '</div>';
+      meta = `<p class="out-aide">${esc(t('abo.essai_jusqu', { date: jour(sub.trial_ends_at) }))}</p>`
     } else if (status === 'active' && sub.current_period_end) {
-      const dt = new Date(sub.current_period_end);
       const label = sub.cancel_at_period_end
-        ? 'Se termine le ' + dt.toLocaleDateString('fr-FR')
-        : 'Prochain renouvellement le ' + dt.toLocaleDateString('fr-FR');
-      meta = '<div class="ab-meta">' + label + '</div>';
+        ? t('abo.se_termine', { date: jour(sub.current_period_end) })
+        : t('abo.renouvellement', { date: jour(sub.current_period_end) })
+      meta = `<p class="out-aide">${esc(label)}</p>`
     } else if (status === 'past_due') {
-      meta = '<div class="ab-meta">Mettez à jour votre moyen de paiement pour réactiver le service.</div>';
+      meta = `<p class="out-aide">${esc(t('abo.past_due_aide'))}</p>`
     }
     if (sub.quantity) {
-      meta += '<div class="ab-meta">Quantité : ' + sub.quantity + ' ' + mod.qtyLabel + '</div>';
+      meta += `<p class="out-aide">${esc(t('abo.quantite', { n: sub.quantity, unite }))}</p>`
     }
   }
 
-  let actions = '';
+  const bouton = (classe, action, cle, extra = '') =>
+    `<button type="button" class="btn ${classe}"${action ? ` data-action="${action}"` : ''}${action === 'start' || action === 'cancel' ? ` data-module="${esc(mod.id)}"` : ''}${extra}>${esc(t(cle))}</button>`
+  let actions = ''
   if (mod.comingSoon) {
-    actions = '<button class="ab-btn ab-btn-ghost" disabled>Bientôt disponible</button>';
+    actions = bouton('btn--secondary', null, 'abo.bientot_dispo', ' disabled')
   } else if (!sub || status === 'canceled' || status === 'incomplete_expired') {
-    actions = '<button class="ab-btn ab-btn-primary" data-action="start" data-module="' + mod.id + '">Démarrer mon essai gratuit</button>';
+    actions = bouton('btn--primary', 'start', 'abo.demarrer')
   } else if (status === 'trialing' || status === 'active') {
     if (sub.cancel_at_period_end) {
-      actions = '<button class="ab-btn ab-btn-ghost" data-action="portal">Gérer le paiement</button>';
+      actions = bouton('btn--secondary', 'portal', 'abo.gerer')
     } else {
-      actions = '<button class="ab-btn ab-btn-ghost" data-action="portal">Gérer le paiement</button>'
-              + '<button class="ab-btn ab-btn-danger" data-action="cancel" data-module="' + mod.id + '">Annuler</button>';
+      actions = bouton('btn--secondary', 'portal', 'abo.gerer') + bouton('btn--secondary out-danger', 'cancel', 'abo.annuler')
     }
   } else if (status === 'past_due' || status === 'unpaid') {
-    actions = '<button class="ab-btn ab-btn-primary" data-action="portal">Mettre à jour la CB</button>';
+    actions = bouton('btn--primary', 'portal', 'abo.maj_cb')
   } else {
-    actions = '<button class="ab-btn ab-btn-ghost" data-action="portal">Gérer le paiement</button>';
+    actions = bouton('btn--secondary', 'portal', 'abo.gerer')
   }
 
   return [
-    '<div class="ab-card' + (mod.required ? ' required' : '') + '">',
-    '<div class="ab-card-head">',
-    '<div class="ab-card-title">' + escHtml(mod.title) + '</div>',
+    `<article class="out-carte${mod.required ? ' out-carte--fort' : ''}">`,
+    '<div class="out-carte__tete">',
+    `<h2 class="out-carte__titre">${esc(t('abo.module_' + mod.id))}</h2>`,
     requiredTag || comingSoonTag,
     '</div>',
-    '<div class="ab-card-status ab-status-' + status + '">' + escHtml(statusLabel) + '</div>',
-    '<div class="ab-price">' + mod.price + ' <small>' + escHtml(mod.priceDetail) + '</small></div>',
-    '<div class="ab-desc">' + escHtml(mod.desc) + '</div>',
+    `<span class="out-etat${TON[status] ? ' out-etat--' + TON[status] : ''}" data-statut="${esc(status)}">${esc(statusLabel)}</span>`,
+    `<p class="out-prix"><b class="num">${esc(prix(mod.price))}</b> <small>${esc(mod.detail())}</small></p>`,
+    `<p class="out-sous">${esc(t('abo.desc_' + mod.id))}</p>`,
     meta,
-    '<div class="ab-actions">' + actions + '</div>',
-    '</div>'
-  ].join('');
+    `<div class="out-actions">${actions}</div>`,
+    '</article>'
+  ].join('')
 }
 
-// ── Modal quantité
-let currentModule = null;
-const qtyModal = document.getElementById('qty-modal');
-const qtyTitle = document.getElementById('qty-title');
-const qtyDesc = document.getElementById('qty-desc');
-const qtyInput = document.getElementById('qty-input');
+// ── Fenêtre quantité ───────────────────────────────────────────────────────
+let currentModule = null
+const qtyModal = document.getElementById('qty-modal')
+const qtyTitle = document.getElementById('qty-title')
+const qtyDesc = document.getElementById('qty-desc')
+const qtyInput = document.getElementById('qty-input')
 
-function openQtyModal(moduleId) {
-  const mod = MODULES.find(m => m.id === moduleId);
-  if (!mod) return;
-  currentModule = mod;
-  qtyTitle.textContent = 'Combien de ' + mod.qtyLabel + ' ?';
+function openQtyModal (moduleId) {
+  const mod = MODULES.find(m => m.id === moduleId)
+  if (!mod) return
+  currentModule = mod
+  const unite = t(mod.unite)
+  qtyTitle.textContent = t('abo.combien', { unite })
   qtyDesc.textContent = mod.id === 'guestflow'
-    ? '19,99 € pour le 1er bien, 9,90 € par bien supplémentaire. Essai gratuit 15 jours.'
+    ? t('abo.qty_guestflow', { prix1: prix(19.99), prix2: prix(9.90) })
     : mod.id === 'serrure'
-    ? 'Forfait 9,99 € pour les 5 premières serrures, 2,99 € par serrure au-delà. Essai 15 jours.'
-    : 'Indiquez le nombre de ' + mod.qtyLabel + '. Essai gratuit 15 jours.';
-  qtyInput.value = '1';
-  qtyInput.min = '1';
-  qtyInput.max = '50';
-  qtyModal.classList.add('open');
+      ? t('abo.qty_serrure', { prix1: prix(9.99), prix2: prix(2.99) })
+      : t('abo.qty_autre', { unite })
+  qtyInput.value = '1'
+  qtyInput.min = '1'
+  qtyInput.max = '50'
+  qtyModal.showModal()
 }
-function closeQtyModal() { qtyModal.classList.remove('open'); currentModule = null; }
-document.getElementById('qty-cancel').onclick = closeQtyModal;
-qtyModal.onclick = (e) => { if (e.target === qtyModal) closeQtyModal(); };
+function closeQtyModal () { qtyModal.close(); currentModule = null }
+document.getElementById('qty-cancel').onclick = closeQtyModal
+qtyModal.onclick = (e) => { if (e.target === qtyModal) closeQtyModal() }
 
 document.getElementById('qty-confirm').onclick = async () => {
-  if (!currentModule) return;
-  const qty = Math.max(1, Math.min(50, Number(qtyInput.value) || 1));
-  const btn = document.getElementById('qty-confirm');
-  btn.disabled = true;
-  btn.textContent = 'Redirection vers Stripe…';
+  if (!currentModule) return
+  const qty = Math.max(1, Math.min(50, Number(qtyInput.value) || 1))
+  const btn = document.getElementById('qty-confirm')
+  btn.disabled = true
+  btn.textContent = t('abo.redirection')
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await supabase.auth.getSession()
     const r = await fetch('/api/stripe?action=create_checkout', {
       method: 'POST',
       headers: {
@@ -372,29 +276,29 @@ document.getElementById('qty-confirm').onclick = async () => {
         'Authorization': 'Bearer ' + session.access_token
       },
       body: JSON.stringify({ action: 'create_checkout', module: currentModule.id, quantity: qty })
-    });
-    const data = await r.json();
+    })
+    const data = await r.json()
     if (!r.ok || !data.url) {
-      banners.innerHTML = '<div class="ab-banner error">' + escHtml(data.error || 'Erreur de création du paiement') + '</div>';
-      btn.disabled = false;
-      btn.textContent = 'Démarrer mon essai →';
-      closeQtyModal();
-      return;
+      banners.innerHTML = banniere(data.error || t('abo.erreur_paiement'), 'erreur')
+      btn.disabled = false
+      btn.textContent = t('abo.confirmer')
+      closeQtyModal()
+      return
     }
-    window.location.href = data.url;
+    window.location.href = data.url
   } catch (err) {
-    console.error('[abonnement] checkout error:', err);
-    banners.innerHTML = '<div class="ab-banner error">Erreur réseau. Réessayez.</div>';
-    btn.disabled = false;
-    btn.textContent = 'Démarrer mon essai →';
-    closeQtyModal();
+    console.error('[abonnement] checkout error:', err)
+    banners.innerHTML = banniere(t('outil.erreur_reseau'), 'erreur')
+    btn.disabled = false
+    btn.textContent = t('abo.confirmer')
+    closeQtyModal()
   }
-};
+}
 
-async function cancelSub(moduleId) {
-  if (!confirm('Êtes-vous sûr de vouloir annuler cet abonnement ? Vous conserverez l\'accès jusqu\'à la fin de la période en cours.')) return;
+async function cancelSub (moduleId) {
+  if (!confirm(t('abo.annuler_confirmer'))) return
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await supabase.auth.getSession()
     const r = await fetch('/api/stripe?action=cancel_subscription', {
       method: 'POST',
       headers: {
@@ -402,22 +306,22 @@ async function cancelSub(moduleId) {
         'Authorization': 'Bearer ' + session.access_token
       },
       body: JSON.stringify({ action: 'cancel_subscription', module: moduleId })
-    });
-    const data = await r.json();
+    })
+    const data = await r.json()
     if (!r.ok) {
-      banners.innerHTML = '<div class="ab-banner error">' + escHtml(data.error || 'Erreur') + '</div>';
-      return;
+      banners.innerHTML = banniere(data.error || t('outil.erreur'), 'erreur')
+      return
     }
-    banners.innerHTML = '<div class="ab-banner">✓ Annulation enregistrée. Vous conservez l\'accès jusqu\'à la fin de la période.</div>';
-    await loadAndRender();
+    banners.innerHTML = banniere(t('abo.annulation_ok'))
+    await loadAndRender()
   } catch (err) {
-    banners.innerHTML = '<div class="ab-banner error">Erreur réseau. Réessayez.</div>';
+    banners.innerHTML = banniere(t('outil.erreur_reseau'), 'erreur')
   }
 }
 
-async function openPortal() {
+async function openPortal () {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await supabase.auth.getSession()
     const r = await fetch('/api/stripe?action=portal', {
       method: 'POST',
       headers: {
@@ -425,22 +329,53 @@ async function openPortal() {
         'Authorization': 'Bearer ' + session.access_token
       },
       body: JSON.stringify({ action: 'portal' })
-    });
-    const data = await r.json();
+    })
+    const data = await r.json()
     if (!r.ok || !data.url) {
-      banners.innerHTML = '<div class="ab-banner error">' + escHtml(data.error || 'Erreur Portal') + '</div>';
-      return;
+      banners.innerHTML = banniere(data.error || t('abo.erreur_portail'), 'erreur')
+      return
     }
-    window.location.href = data.url;
+    window.location.href = data.url
   } catch (err) {
-    banners.innerHTML = '<div class="ab-banner error">Erreur réseau. Réessayez.</div>';
+    banners.innerHTML = banniere(t('outil.erreur_reseau'), 'erreur')
   }
 }
 
-function escHtml(t) {
-  return String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-</script>
+async function init () {
+  await I18n.init()
+  // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
+  // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
+  // s'ouvrait par URL directe en mode basculé et affichait un contresens.
+  await exigerCompteProprePage({ nomPage: t('abo.titre') })
+  document.addEventListener('i18n:changed', () => location.reload())
 
+  // ── Bannières success/canceled (URL params depuis redirect Stripe)
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('success') === 'true') {
+    const mod = params.get('module') || ''
+    banners.innerHTML = banniere(mod ? t('abo.succes_module', { module: mod }) : t('abo.succes'))
+    history.replaceState({}, '', '/pages/abonnement.html')
+  }
+  if (params.get('canceled') === 'true') {
+    banners.innerHTML = banniere(t('abo.annule'), 'attente')
+    history.replaceState({}, '', '/pages/abonnement.html')
+  }
+
+  user = await getUser()
+  if (!user) { window.location.replace('/pages/login.html'); return }
+
+  monterCoquille({
+    HSNav, I18n, session: { user },
+    compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
+    // ── Déconnexion : comme l'ancien lien « Se déconnecter » de la page, la
+    // session d'onglet est vidée AVANT la déconnexion.
+    deconnexion: async () => { try { sessionStorage.clear() } catch { /* stockage indisponible */ } await signOut() }
+  })
+
+  await loadAndRender()
+}
+
+init().catch(e => console.error('[abonnement]', e))
+</script>
 </body>
 </html>

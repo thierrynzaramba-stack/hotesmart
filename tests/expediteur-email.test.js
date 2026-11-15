@@ -174,10 +174,19 @@ test('colonnes absentes : l\'ecran ne dit pas « Non configuré » a tort', asyn
 })
 
 // ─── Le front ───────────────────────────────────────────────────────────────
+// ⚠ RECIBLÉ À L'INTÉGRATION V5 (15 novembre 2026, spec-integration-v5-lot-1.md).
+// La page des connexions ne porte plus son texte : il vit dans les
+// dictionnaires (`cnx.*`), et la page l'appelle par sa clé. Ces garde-fous
+// lisent donc la page SANS ses commentaires (un commentaire qui cite « Par
+// défaut : » faisait passer le test sans que l'écran le dise) ET le texte
+// français ; leur jumeau qui EXÉCUTE la page et lit l'écran rendu est dans
+// tests/integration-v5-lot-1.test.js (« connexions : … »).
 const html = fs.readFileSync(path.join(__dirname, '..', 'pages/connexions.html'), 'utf8')
+const vif = html.replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*\/\/.*$/gm, '')
+const FR = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/fr.json'), 'utf8'))
 
 test('LE TEST QUI COMPTE : l\'ecran n\'offre pas de champ de saisie libre', () => {
-  const bloc = html.split('id="bloc-expediteur"')[1].split('</div>\n\n        <div class="toast"')[0]
+  const bloc = vif.split('id="bloc-expediteur"')[1].split('id="sender-aide"')[0]
   assert.ok(/<select[^>]*id="brevo-sender"/.test(bloc), 'un menu, alimente par Brevo')
   assert.ok(!/<input[^>]*id="brevo-sender"/.test(bloc),
     'un champ texte laisserait saisir une adresse que Brevo refusera')
@@ -186,7 +195,8 @@ test('LE TEST QUI COMPTE : l\'ecran n\'offre pas de champ de saisie libre', () =
 test('l\'ecran annonce le defaut quand rien n\'est choisi', () => {
   // Sans ça, l'hôte voit la première ligne du menu et croit l'avoir choisie —
   // alors que c'est bien cette adresse-là qui partira.
-  assert.ok(/Par défaut :/.test(html))
+  assert.ok(/^Par défaut :/.test(FR['cnx.sender_defaut']))
+  assert.ok(/aide\.textContent = t\('cnx\.sender_defaut'/.test(vif), 'la page doit l AFFICHER, pas seulement le traduire')
 })
 
 test('l\'expediteur ne suit pas le toggle SMS', () => {
@@ -201,15 +211,14 @@ test('LE TEST QUI COMPTE : l\'ecran DIT que l\'adresse enregistree n\'est plus v
   // d'utiliser le choix stocke : Brevo rend 400 et plus aucun e-mail ne part.
   // L'ecran affirmerait exactement le contraire de ce que fait le serveur, et
   // l'hote n'aurait aucune raison de recliquer.
-  assert.ok(/n'est plus\s*\n?\s*.*un expéditeur vérifié/.test(html)
-    || /n'est plus `\s*\+\s*'un expéditeur vérifié/.test(html)
-    || html.includes("n'est plus "), 'l\'alerte existe')
-  assert.ok(/vos e-mails aux voyageurs/i.test(html), 'et elle dit la consequence')
+  assert.ok(/n'est plus un expéditeur vérifié/.test(FR['cnx.sender_invalide']), 'l\'alerte existe')
+  assert.ok(/vos e-mails aux voyageurs/i.test(FR['cnx.sender_invalide']), 'et elle dit la consequence')
+  assert.ok(/t\('cnx\.sender_invalide'/.test(vif), 'et la page l AFFICHE')
 })
 
 test('sur erreur de config, le bloc expediteur ne reste pas fige sur « Chargement… »', () => {
-  const bloc = html.split("setStatus('brevo', 'off', 'Erreur')")[1].slice(0, 400)
-  assert.ok(/bloc-expediteur/.test(bloc) && /display = 'none'/.test(bloc),
+  const bloc = vif.split("setStatus('brevo', 'off', t('outil.erreur'))")[1].slice(0, 400)
+  assert.ok(/bloc-expediteur/.test(bloc) && /\.hidden = true/.test(bloc),
     'une UI morte ne doit pas pretendre attendre quelque chose')
 })
 

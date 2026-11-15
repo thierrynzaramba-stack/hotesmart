@@ -566,11 +566,18 @@ test('les appelants qui ecrivent au VOYAGEUR transmettent la reservation', () =>
 })
 
 test('l\'encart de /connexions explique le circuit', () => {
+  // ⚠ RECIBLÉ À L'INTÉGRATION V5 (15 novembre 2026) : le texte vit dans les
+  // dictionnaires, la page l'appelle par sa clé. Le jumeau qui lit l'écran
+  // RENDU est dans tests/integration-v5-lot-1.test.js.
   const html = fsn.readFileSync(pathn.join(__dirname, '..', 'pages/connexions.html'), 'utf8')
-  assert.ok(/Où arrivent les réponses de vos voyageurs/.test(html))
-  assert.ok(/et non\s*\n?\s*dans votre boîte mail|non\s+dans votre boîte mail/.test(html),
+  const fr = JSON.parse(fsn.readFileSync(pathn.join(__dirname, '..', 'shared/i18n/fr.json'), 'utf8'))
+  for (const k of ['cnx.circuit_titre', 'cnx.circuit_1', 'cnx.circuit_2']) {
+    assert.ok(new RegExp(`data-(?:i18n|riche)="${k.replace('.', '\\.')}"`).test(html), `la page n'affiche pas ${k}`)
+  }
+  assert.ok(/Où arrivent les réponses de vos voyageurs/.test(fr['cnx.circuit_titre']))
+  assert.ok(/et non dans votre boîte mail/.test(fr['cnx.circuit_1']),
     'le changement d\'habitude est dit')
-  assert.ok(/une copie par e-mail/.test(html), 'et le filet aussi')
+  assert.ok(/une copie par e-mail/.test(fr['cnx.circuit_2']), 'et le filet aussi')
 })
 
 // ─── Facture voyageur, étape 2a (décision de Thierry du 10 novembre 2026) ────

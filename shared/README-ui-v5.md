@@ -76,6 +76,28 @@ en livre déjà cinq. Le filet qui ne peut pas avoir de trou est la **somme** :
 tout `data-i18n="` du fichier doit tomber dans l'un des deux comptes, et rien
 d'autre. C'est la règle à reprendre pour le balayage de la dette 81.
 
+## Les pages OUTILS (intégration V5)
+
+Les écrans du menu ≡ « Outils » passés sur le socle V5 sans changer ce qu'ils
+font (spec : `docs/specs/spec-integration-v5-lot-*.md`) partagent :
+
+- **`shared/page-outil.js`** : la coquille (`monterCoquille` — onglets, menu ≡
+  avec les droits des écrans V5, initiales), l'état d'un service
+  (`poserEtat`, toujours un mot), le retour d'un geste (`afficherRetour`) et
+  le **texte riche** des explications (`data-riche="clé"`) : une traduction
+  peut porter `**gras**`, `` `code` `` et `[libellé](nom)` — l'URL vient de la
+  page (`data-lien-<nom>`), jamais du dictionnaire, et tout est échappé avant.
+- **la liste unique des outils** : `HSNav.outils({ peutLire, titulaire })` dans
+  `shared/nav.js`. Les écrans V5 qui recopient encore la liste sont tenus à
+  l'identique par `tests/integration-v5-lot-1.test.js`.
+- **le bloc `out-`** à la fin de `shared/ui.css` (« PAGES OUTILS ») : cartes,
+  états, étapes, champs, interrupteur, fenêtre `<dialog>`, et le pont
+  `.out-pont` qui relie les noms de variables de l'ancien socle aux jetons,
+  pour l'assistant de connexion des plateformes.
+- **le banc** `tests/outils/banc-page.js` : il exécute une page entière (vrai
+  moteur i18n, vrai `nav.js`), et `tests/outils/mesurer-pages-outils.js` en
+  tire la mesure AVANT / APRÈS de la règle de performance.
+
 ## Tester en local
 
 ```

@@ -25,24 +25,30 @@ const CLES = [...new Set(STATIQUES)].sort()
 
 // ⚠ LE COMPTE EST L'ASSERTION. Sans lui, un motif d'extraction casse par une
 // reecriture de nav.js rendrait une liste VIDE, et un test vert sur rien.
-test('LE TEST QUI COMPTE : shared/nav.js porte 16 cles, et les voici', () => {
-  assert.equal(CLES.length, 16, `cles lues : ${CLES.join(', ')}`)
+// ⚠ 22 DEPUIS LE 15 NOVEMBRE 2026 (intégration V5, lot 1) : la section
+// « Outils » a désormais UN seul endroit, la liste `OUTILS` de nav.js, et ses
+// six clés `nav.tool_*` y sont donc écrites en toutes lettres. Elles étaient
+// jusque-là couvertes par le test des appelants, plus bas, qui les cherchait
+// dans chaque page ; il les compare maintenant à cette liste.
+test('LE TEST QUI COMPTE : shared/nav.js porte 22 cles, et les voici', () => {
+  assert.equal(CLES.length, 22, `cles lues : ${CLES.join(', ')}`)
   assert.deepEqual(CLES, [
     'nav.account', 'nav.account_menu', 'nav.account_mine', 'nav.account_shared',
     'nav.calendar', 'nav.charges', 'nav.cleaning', 'nav.help', 'nav.language', 'nav.logout',
     'nav.messages', 'nav.properties', 'nav.reviews', 'nav.settings', 'nav.today',
-    'nav.tools'
+    'nav.tool_billing', 'nav.tool_connections', 'nav.tool_direct', 'nav.tool_locks',
+    'nav.tool_sms', 'nav.tool_yield', 'nav.tools'
   ])
 })
 
-test('LE TEST QUI COMPTE : les 16 cles existent dans les TROIS langues', () => {
+test('LE TEST QUI COMPTE : les 22 cles existent dans les TROIS langues', () => {
   for (const code of LANGUES) {
     const manquantes = CLES.filter(k => !(k in TRADS[code]))
     assert.deepEqual(manquantes, [], `${code}.json`)
   }
 })
 
-test('aucune des 16 n est traduite par une chaine vide', () => {
+test('aucune des 22 n est traduite par une chaine vide', () => {
   for (const code of LANGUES) {
     for (const k of CLES) {
       assert.ok(String(TRADS[code][k]).trim().length > 0, `${code}.json : ${k} est vide`)
@@ -79,13 +85,13 @@ test('LE TEST QUI COMPTE : tout `data-i18n` tombe dans un des deux comptes', () 
   assert.equal((NAV.match(/data-i18n-attr/g) || []).length, 2)
 })
 
-// et aucune des 16 ne doit porter la trace d'une interpolation
-test('les 16 cles ont la forme d une cle, pas d un gabarit', () => {
+// et aucune des 22 ne doit porter la trace d'une interpolation
+test('les 22 cles ont la forme d une cle, pas d un gabarit', () => {
   for (const k of CLES) assert.match(k, /^[\w.]+$/, `cle suspecte : ${k}`)
 })
 
 // `${n.key}` ne peut valoir que les cles du tableau des entrees, qui sont dans
-// les 16 ci-dessus. Reste `${esc(o.key)}` : la section « Outils », dont les
+// les 22 ci-dessus. Reste `${esc(o.key)}` : la section « Outils », dont les
 // cles viennent de l'APPELANT. On va les chercher chez lui.
 // ⚠ CONSTAT DE LA REVUE : cette liste etait RECOPIEE, exactement le defaut que
 // le commentaire en tete de ce fichier denonce. Une cinquieme page qui passerait
@@ -117,7 +123,12 @@ const outilsDe = (p) => {
 // qui protege, et elle couvre le cinquieme appelant comme le premier.
 test('LE TEST QUI COMPTE : la cle interpolee de la section Outils est tracee jusqu a TOUS ses appelants', () => {
   assert.ok(PAGES_OUTILS.length >= 4, `decouverte vide ou trop courte : ${PAGES_OUTILS.join(', ')}`)
-  const reference = outilsDe(PAGES_OUTILS[0])
+  // ⚠ LA RÉFÉRENCE EST LA LISTE UNIQUE DE nav.js (intégration V5, lot 1), et
+  // plus la première page trouvée : une copie qui divergerait de la liste
+  // unique rougit, même si toutes les copies divergeaient ensemble.
+  const blocNav = NAV.match(/const OUTILS = \[([\s\S]*?)\n\s*\];/)
+  assert.ok(blocNav, 'la liste unique OUTILS est absente de shared/nav.js')
+  const reference = [...new Set(toutes(/\bkey:\s*'([^']+)'/g, blocNav[1]))].sort()
   assert.equal(reference.length, 6, `cles Outils : ${reference.join(', ')}`)
   for (const p of PAGES_OUTILS) assert.deepEqual(outilsDe(p), reference, p)
   for (const code of LANGUES) {
