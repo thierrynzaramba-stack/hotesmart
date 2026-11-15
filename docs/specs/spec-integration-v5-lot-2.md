@@ -895,9 +895,8 @@ code corrigé, une à la fois :
 ## 13. Sous-lot 2d — « Prédiction de prix » (`apps/yield/prix.html`) — SPEC SEULE, PAS DE CODE
 
 Écrit AVANT le code, et **arrêté là pour cette nuit**. Branche
-`integration-v5-lot-2d`, partie de 2c (`f45c53f5`). Si la review de 2c
-apporte des correctifs, cette branche se rebase sur le 2c corrigé avant tout
-code.
+`integration-v5-lot-2d`, partie de 2c, puis rebasée sur 2c corrigé
+(`279ab858`).
 
 **Pourquoi le code n'est pas écrit cette nuit.** C'est l'écran qui ÉCRIT des
 prix. Il pèse 2 814 lignes, porte environ 460 textes français en dur, 72
