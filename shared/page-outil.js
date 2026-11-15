@@ -108,18 +108,25 @@ export function listeLocale (lang, xs) {
 }
 
 // ─── Une traduction posée en HTML, sans rien laisser passer ─────────────────
-// Le texte du dictionnaire est ÉCHAPPÉ ; seules les valeurs passées en `html`
-// entrent telles quelles, et c'est à l'appelant de les avoir échappées
-// (`esc(nom)`, `<b>${esc(nom)}</b>`). Les nombres restent des nombres : ce
-// sont eux qui choisissent la forme du pluriel (`{n, plural, …}`).
+// ⚠ ÉCHAPPÉE PAR DÉFAUT (constat 1 de la review du lot 2a). Le texte du
+// dictionnaire est échappé, et CHAQUE valeur aussi — sauf les nombres, qui
+// choisissent la forme du pluriel (`{n, plural, …}`), et les valeurs marquées
+// `brut(html)`, qui sont déjà du HTML sûr (une autre traduction, un badge, un
+// `<b>` autour d'une donnée échappée). Oublier `ech()` ne peut donc plus ouvrir
+// une injection : il faudrait écrire `brut()` sur une donnée, ce qui se voit.
 // `**mot**` du dictionnaire devient `<b>mot</b>` — AVANT que les valeurs
 // n'entrent, donc jamais dans une donnée.
+const HTML_SUR = Symbol('html-sur')
+export const brut = (html) => ({ [HTML_SUR]: String(html == null ? '' : html) })
 export function tHtml (t, cle, vars = {}) {
   const html = {}
   const v = {}
   for (const [k, val] of Object.entries(vars)) {
     if (typeof val === 'number') v[k] = val
-    else { html[k] = String(val == null ? '' : val); v[k] = `\u0001${k}\u0002` }
+    else {
+      html[k] = val && typeof val === 'object' && HTML_SUR in val ? val[HTML_SUR] : esc(val)
+      v[k] = `\u0001${k}\u0002`
+    }
   }
   return esc(t(cle, v))
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')

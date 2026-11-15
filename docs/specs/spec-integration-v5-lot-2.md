@@ -257,3 +257,115 @@ et une étude du marché construite pour la capture.
 | `tests/v2-marche-aucune-ecriture-calendrier.test.js` | « le menu YieldFlow mène aux deux pages » : marche-global ne charge plus la barre latérale ; le test exige maintenant les deux adresses et libellés dans `shared/yieldflow-onglets.js` et la page qui s'y déclare. La barre latérale reste exigée (elle sert d'autres écrans). |
 | `tests/palette-niveaux.test.js` | « les six écrans chargent la police V5 » : un écran intégré tient sa police du socle (`theme.css` porte `--font`, `ui.css` l'applique au `body`), comme `evenements.html` ; le test l'exige au caractère. Les autres gardent `police-v5`. |
 | `tests/budget-ecran.test.js` | les trois écrans y entrent, sites d'appel mesurés avant et après. |
+
+## 10 bis. Review 1 du sous-lot 2a — rapport tel quel, puis correctifs
+
+Relecteur : un agent distinct, lancé sur l'arbre `/home/claude/hv5-lot2-revue`
+(worktree détaché), branche `integration-v5-lot-2`, plage
+`fb93b24eeb782c2d3bbffca31373043f939b5d11..d65054b82a6c7be78cef0a60e45e3ce167429073`.
+Contrôle : chaque fichier cité figure dans `git diff --name-only` de la plage.
+
+> ## Trace
+>
+> - Arbre lu : `/home/claude/hv5-lot2-revue` (worktree détaché, rien modifié, `git status` vide)
+> - SHA (`git rev-parse HEAD`) : `d65054b82a6c7be78cef0a60e45e3ce167429073`
+> - Plage : `fb93b24eeb782c2d3bbffca31373043f939b5d11..d65054b82a6c7be78cef0a60e45e3ce167429073` (2 commits : e6ee123e, d65054b8)
+> - Fichiers du diff (24) : apps/yield/marche-global.html, apps/yield/marche-temperature.html, apps/yield/marche.html, docs/specs/spec-integration-v5-lot-2.md, shared/README-ui-v5.md, shared/i18n/en.json, shared/i18n/es.json, shared/i18n/fr.json, shared/page-outil.js, shared/temperature-calendrier.js, shared/theme.css, shared/ui.css, shared/yieldflow-onglets.js, tests/budget-ecran.test.js, tests/integration-v5-lot-2.test.js, tests/marche-global-page-dom.test.js, tests/marche-global.test.js, tests/marche-temperature-page.test.js, tests/outils/banc-page.js, tests/outils/mesurer-pages-outils.js, tests/outils/source-traduite.js, tests/palette-niveaux.test.js, tests/v2-marche-aucune-ecriture-calendrier.test.js, tests/yield-marche-calendrier.test.js
+>
+> Ce que j'ai mesuré : suite complète sur cet arbre **8732 / 8732, 0 rouge**. `scripts/i18n-check.js` : 1984 clés dans chaque langue. Les 255 clés mt/mc/mg/yfm/yfnav/tc existent en fr, en et es, et aucun cas de pluriel ICU ne contient de `{var}`. J'ai aussi rendu l'ancienne et la nouvelle version de marche-temperature et de marche dans le banc, avec des données complètes, pour comparer le texte français.
+>
+> ## Constats
+>
+> **1. AUTRE (durcissement de sécurité, rien d'exploitable aujourd'hui) — shared/page-outil.js:117-127 et apps/yield/marche-temperature.html:197**
+> - **Le défaut :** `tHtml` insère telle quelle, sans échappement, toute valeur qui n'est pas un nombre. Le défaut est donc « HTML de confiance » : un oubli d'`ech()` ouvre une injection.
+> - **Où ça se produit déjà :** `th('mt.sem_decompte', { we: w.mois_week_end, sem: w.mois_semaine, egaux: w.mois_egaux })` passe des champs du serveur bruts. L'ancien code les insérait déjà bruts, donc ce n'est pas une régression.
+> - **Scénario :** si `/api/marche-temperature` renvoyait un jour ces décomptes sous forme de chaîne, la chaîne entrerait dans `innerHTML` sans échappement.
+> - **Correction proposée :** échapper par défaut toute valeur non numérique, et marquer explicitement les valeurs HTML (par exemple un objet `{ html: '…' }` ou un helper `brut()`). Les trois pages s'y adaptent mécaniquement. À défaut, envelopper ces trois champs dans `ech()`.
+>
+> **2. AUTRE (TESTS : un garde-fou devenu aveugle) — tests/marche-temperature-page.test.js:59-72, avec apps/yield/marche-temperature.html:158-161**
+> - **Le défaut :** le test « toute donnée venue du serveur passe par l'échappement » ne regarde que les expressions `${…}`. Un appel `th('…', { champ: valeur })` placé hors d'un gabarit lui échappe.
+> - **Preuve par mutation, en mémoire :** remplacer `region: ech(d.marche.region)` par `region: d.marche.region` dans `mt.meta` laisse le test vert (0 fautif). La même mutation sur `meilleur` est bien détectée, parce que cet appel est à l'intérieur d'un `${}`.
+> - **Ce qui ne couvre pas le reste :** le test DOM de tests/integration-v5-lot-2.test.js:194-205 ne pose le piège que sur `motif` (état `marche_inconnu`). `mc.meta` (apps/yield/marche.html:235-236 : localité, région, pays, méthode) n'est couvert par aucun test d'échappement.
+> - **Correction proposée :** ajouter un balayage des objets passés à `th(…, { … })` dans les trois pages. Chaque valeur doit être un nombre, ou commencer par `ech(`, `th(`, `nombre(`, `virgule(`, `pct(`, `liste(` ou `` `<b>${ech( ``. Étendre aussi le test DOM au piège sur `marche.localite/region/pays` et `methode`.
+>
+> **3. RÉGRESSION (texte français changé) — apps/yield/marche-temperature.html:101 et 241**
+> - **Le défaut :** l'axe de la courbe « La saison sur deux ans » passe de l'ancien `moisCourt` (4 lettres + « . ») à `Intl` `{ month: 'short', year: '2-digit' }`.
+> - **Mesuré dans le banc, ancienne page contre nouvelle :** « octo. 27 » devient « oct. 27 », « avri. 27 » devient « avr. 27 ». Par calcul, « mars. » devient « mars », « nove. » devient « nov. », « déce. » devient « déc. ». C'est le seul écart de texte français sur toute la page.
+> - **Correction proposée :** l'accepter comme une amélioration et le dire dans la spec (§2 affirme « la même chose qu'avant »), ou rétablir l'ancien format en français.
+> - **Point de comparaison :** sur marche.html, le seul écart mesuré est la précision de `virgule` (6 décimales au plus). Il est invisible, car l'API arrondit force et rapport à 2 décimales.
+>
+> **4. RÉGRESSION (visuelle) — shared/temperature-calendrier.js:127 et 168, et le pont `.out-pont` de shared/ui.css**
+> - **Le défaut :** `.tc-nav button` et `.tc-popup` utilisent `var(--border2)`. Ce jeton n'était défini que par public/style.css, que les pages ne chargent plus, et le pont `.out-pont` ne l'aliase pas. La déclaration `border` devient invalide, donc sans bordure.
+> - **Scénario :** sur la température du marché, les boutons ‹ › du calendrier perdent leur cadre (seul le glyphe reste sur la carte blanche). Sur le marché global, la fenêtre de détail d'un jour perd son liseré.
+> - **Correction proposée :** ajouter `--border2: var(--border)` au pont `.out-pont`, ou écrire `var(--border2, var(--border))` dans le module.
+>
+> **5. TRADUCTION — apps/yield/marche-global.html:153**
+> - **Le défaut :** `INITIALES` est calculé au chargement du module, avant `await I18n.init()`. Le moteur est alors encore sur `current = 'fr'`.
+> - **Mesuré dans le banc en espagnol :** les initiales des graphiques restent « J F M A M J J A S O N D » alors que les info-bulles disent « ene 2024 ». Janvier devrait donner « E ».
+> - **Correction proposée :** calculer les initiales à la demande (une fonction appelée dans `superposees` et `sectionBiens`), ou après `I18n.init()`.
+>
+> **6. TRADUCTION (ponctuation française dans le code) — shared/temperature-calendrier.js:218 et 307**
+> - **Le défaut :** `aria-label="${jourL} : ${niveau}…"` écrit « : » avec l'espace française en dur.
+> - **Scénario :** en anglais, le lecteur d'écran entend « October 5, 2026 : Peak, Fête ». tests/integration-v5-lot-2.test.js:311 fige d'ailleurs cette forme comme attendue.
+> - **Correction proposée :** une clé `tc.aria_jour` (« {jour} : {niveau} » / « {jour}: {niveau} »), puis corriger l'attente du test.
+>
+> **7. AUTRE (CSS) — shared/yieldflow-onglets.js:32 et shared/ui.css:2563**
+> - **Le défaut :** c'est le premier emploi de `.seg__btn` sur un `<a>`. Le composant vise un `<button>`, qui centre son libellé verticalement. Un lien devenu élément flex avec `min-height: var(--control)` (44 px) place son texte en haut.
+> - **Scénario :** les libellés des onglets YieldFlow sont collés en haut de leur pilule. C'est un raisonnement, pas une mesure dans un navigateur.
+> - **Correction proposée :** `.out-yf a.seg__btn { display: inline-flex; align-items: center; }`.
+>
+> **8. TRADUCTION (mineur) — shared/i18n/fr.json:514 et en.json:514 (`mt.sem_decompte`)**
+> - **Le défaut :** pas d'accord de pluriel. On lit « 1 favour the weekend », « 1 favorecen ». En français, « 1 favorisent » existait déjà avant.
+> - **Correction proposée :** des pluriels ICU par compteur, si la spec maintient « y compris ses accords ».
+>
+> **9. AUTRE (performance, mineur) — apps/yield/marche*.html:8-9**
+> - **Le défaut :** le `preconnect` vers `fonts.gstatic.com` (avec crossorigin) a disparu, alors que l'ancienne page l'avait ajouté après une review. C'est aligné sur les pages V5 de référence, mais le fichier de la police coûte de nouveau un DNS et un TLS.
+> - **Correction proposée :** le remettre, ou acter l'écart dans la spec §6.
+>
+> ## Par catégorie
+>
+> - **Sécurité :** aucune injection exploitable trouvée. Toutes les valeurs du serveur passées à `tHtml`/`th` sont échappées, sauf les trois décomptes du constat 1, déjà bruts avant. `enteteCompte()` est présent sur les 4 `fetch`. Le filtre `user_id` et la garde `?bien=` restent en place, et aucune garde n'est contournée.
+> - **Régression de fond :** rien d'autre que les constats 3 et 4. Le jeton contre les réponses périmées, `fermerDetail()` au changement de logement, `?bien=`, le redessin au redimensionnement, le mois de départ AirROI et tous les états sont conservés. Le texte français rendu est identique à l'ancien, hors constat 3 (banc et tests/marche-global-page-dom.test.js).
+> - **CSS / socle :** le bloc ajouté à ui.css ne contient que des sélecteurs `.out-*`. Aucun hexa hors de theme.css, et les jetons `--yf-*` reprennent les anciennes couleurs au caractère.
+> - **Tests :** les tests retargetés n'ont perdu aucune assertion. Le seul affaiblissement trouvé est celui du constat 2.
+>
+> Constats de sécurité : 0
+
+**Constats de sécurité : 0** — par la règle du dépôt, les correctifs se font
+SANS nouvelle review. Les neuf sont corrigés :
+
+1. **`tHtml` échappe désormais CHAQUE valeur par défaut** (la correction
+   principale proposée, pas le repli) : seules les valeurs marquées `brut(html)`
+   entrent telles quelles, et `brut` porte un jeton privé (un `Symbol`) — un
+   objet quelconque n'en est pas. Les trois pages ont été adaptées : `ech(x)`
+   passé en valeur devient `x`, une valeur qui porte du HTML devient `brut(…)`.
+   Oublier un échappement ne peut plus ouvrir une injection ; il faudrait
+   écrire `brut()` sur une donnée, ce qui se lit. Les trois décomptes du
+   serveur sont échappés comme le reste.
+2. **Le garde-fou rendu aveugle est refait** : le test de
+   `marche-temperature-page` traite `th(…, {…})` comme un contexte échappé
+   SAUF s'il contient `brut(` (son contenu reste alors vérifié). Et un test
+   DOM rend les TROIS écrans en entier, sur les vraies fixtures, avec un piège
+   HTML dans chaque champ texte du serveur (localité, région, pays, méthode,
+   motifs, phrases, noms d'événements, de suggestions, de périodes, de zones,
+   jours) : aucun ne devient du HTML, et ils sont dits en texte. Mordant prouvé
+   par mutation : `brut()` sur la localité de `mc.meta`, sur `meilleur`, ou
+   sur le nom d'une période inconnue rougit le test.
+3. **Accepté comme amélioration, et dit ici** : l'axe de « La saison sur deux
+   ans » s'écrit « oct. 27 », « avr. 27 », « mars 27 » (forme abrégée de la
+   langue) au lieu de « octo. 27 », « avri. 27 », « mars. 27 ». C'est le seul
+   texte français de ces écrans qui change.
+4. `--border2: var(--border)` ajouté au pont `.out-pont`.
+5. Les initiales des mois sont calculées à la demande, après le chargement des
+   dictionnaires (et échappées).
+6. Clé `tc.aria_jour` : « {jour} : {niveau} » en français, « {jour}: {niveau} »
+   en anglais et en espagnol ; l'attente du test est corrigée.
+7. `.out-yf a.seg__btn { display: inline-flex; align-items: center; }`.
+8. `mt.sem_decompte` accorde ses deux compteurs (« 1 favorise », « 3
+   favorisent », « 1 est équivalent ») dans les trois langues : le français
+   « 1 favorisent » d'avant est corrigé au passage.
+9. Le `preconnect` vers `fonts.gstatic.com` est remis sur les trois écrans.
+
+Après correctifs : suite complète **8 733 tests, 8 733 verts, 0 rouge** ;
+fichiers touchés à J+60 et J+200 : **214 / 214** ; `i18n-check` vert (1 985
+clés par langue).

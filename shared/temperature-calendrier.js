@@ -44,6 +44,9 @@ const jourL = iso => (langue && /^\d{4}-\d{2}-\d{2}$/.test(String(iso || '')) ? 
 // Les jours de la semaine, du lundi au dimanche (le 5 janvier 2026 est un lundi).
 const lundiPlus = k => new Date(Date.UTC(2026, 0, 5 + k, 12))
 const joursCourts = () => (langue ? JOURS_COURTS.map((j, k) => dateIntl(lundiPlus(k), { weekday: 'narrow' }) || j) : JOURS_COURTS)
+// « 5 octobre 2026 : Pic » — la ponctuation est celle de la langue (« : » en
+// français, «: » en anglais), donc dans le dictionnaire (constat 6 de la review).
+const ariaJour = (cle, n) => tr('tc.aria_jour', `${jourL(cle)} : ${nomNiveau(n)}`, { jour: jourL(cle), niveau: nomNiveau(n) })
 const joursSem = () => (langue ? JOURS_SEM.map((j, k) => (dateIntl(lundiPlus(k), { weekday: 'short' }) || j).replace(/\.$/, '')) : JOURS_SEM)
 
 export const badge = n => niv(n) ? `<span class="tc-badge" style="background:var(--tc-${niv(n)});color:var(--tc-${niv(n)}-txt);--tc-bord:var(--tc-${niv(n)}-bord)">${ech(nomNiveau(niv(n)))}</span>` : '<span class="non-calc">—</span>'
@@ -215,7 +218,7 @@ export function monterCalendrierTemperature (conteneur, jours) {
       const x = parJour.get(cle)
       const n = x && niv(x.niveau)
       cases += n
-        ? `<button type="button" class="tc-jour${x.evenement ? ' evt' : ''}" data-jour="${cle}" aria-pressed="${cle === jourChoisi}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(jourL(cle))} : ${ech(nomNiveau(n))}${x.evenement ? ', ' + ech(x.evenement) : ''}">${d}</button>`
+        ? `<button type="button" class="tc-jour${x.evenement ? ' evt' : ''}" data-jour="${cle}" aria-pressed="${cle === jourChoisi}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(ariaJour(cle, n))}${x.evenement ? ', ' + ech(x.evenement) : ''}">${d}</button>`
         : '<div></div>'
     }
     const legende = Object.keys(NIVEAUX).map(n => `<span class="tc-niv"><span class="tc-pastille" style="background:var(--tc-${n});--tc-bord:var(--tc-${n}-bord)"></span><b>${ech(nomNiveau(n))}</b> ${ech(descNiveau(n))}</span>`).join('')
@@ -304,7 +307,7 @@ export function monterAnneeTemperature (conteneur, jours, { premierMois = null, 
       const x = parJour.get(cle)
       const n = x && niv(x.niveau)
       cases += n
-        ? `<button type="button" class="tc-case" data-jour="${cle}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(jourL(cle))} : ${ech(nomNiveau(n))}${x.evenement ? ', ' + ech(x.evenement) : ''}" title="${ech(jourL(cle))} · ${ech(nomNiveau(n))}${x.evenement ? ' · ' + ech(x.evenement) : ''}">${d}</button>`
+        ? `<button type="button" class="tc-case" data-jour="${cle}" style="background:var(--tc-${n});color:var(--tc-${n}-txt);--tc-bord:var(--tc-${n}-bord)" aria-label="${ech(ariaJour(cle, n))}${x.evenement ? ', ' + ech(x.evenement) : ''}" title="${ech(jourL(cle))} · ${ech(nomNiveau(n))}${x.evenement ? ' · ' + ech(x.evenement) : ''}">${d}</button>`
         : `<span class="tc-vide">${d}</span>`
     }
     const absent = presents.has(m) ? '' : `<p class="non-calc" style="font-size:11.5px;margin:4px 0 0">${ech(tr('tc.non_couvert', 'Non couvert par le modèle AirROI.'))}</p>`

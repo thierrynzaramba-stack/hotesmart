@@ -65,7 +65,16 @@ test('toute donnee venue du serveur passe par l echappement HTML', () => {
   for (const m of (SCRIPT + MODULE).matchAll(/\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g)) {
     let expr = m[1]
     let avant
-    do { avant = expr; expr = expr.replace(/ech\((?:[^()]|\([^()]*\))*\)/g, '') } while (expr !== avant)
+    // ⚠ DEPUIS L'INTEGRATION V5 (lot 2a, constat 1 de sa review), `th(cle, {…})`
+    // ECHAPPE CHAQUE VALEUR PAR DEFAUT (shared/page-outil.js, tHtml) : une
+    // donnee passee en valeur est donc dans un contexte echappe, comme sous
+    // `ech()`. Seul `brut(…)` laisse passer du HTML — et un appel qui en
+    // contient n'est PAS retire ici : ce qu'il enveloppe reste verifie.
+    do {
+      avant = expr
+      expr = expr.replace(/ech\((?:[^()]|\([^()]*\))*\)/g, '')
+        .replace(/\bth\((?:'[^']*'|[^,()]+), \{((?:[^{}()]|\([^()]*\))*)\}\)/g, (m, corps) => (/brut\(/.test(corps) ? m : ''))
+    } while (expr !== avant)
     if (CHAMP.test(expr)) fautifs.push(m[0])
   }
   assert.deepEqual(fautifs, [])

@@ -2544,6 +2544,10 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .out-pont {
   --bg: var(--surface); --bg2: var(--surface-2); --text: var(--ink); --text2: var(--muted);
   --green: var(--ok); --radius: var(--radius-tile); --radius-lg: var(--radius-card);
+  /* Lot 2 (constat 4 de la review) : le calendrier commun du marché
+     (shared/temperature-calendrier.js) borde ses flèches et sa fenêtre de
+     détail en --border2, que seule l'ancienne feuille définissait. */
+  --border2: var(--border);
 }
 .out-pont .btn:not([class*="btn--"]) { background: var(--surface); color: var(--ink); border-color: var(--border); }
 .out-pont .btn.btn-primary { border-color: var(--ink); }
@@ -2560,7 +2564,7 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
    d'onglets (shared/yieldflow-onglets.js). Des LIENS, pas des boutons. */
 .out-yf { align-self: flex-start; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .out-yf::-webkit-scrollbar { display: none; }
-.out-yf a.seg__btn { white-space: nowrap; text-decoration: none; }
+.out-yf a.seg__btn { white-space: nowrap; text-decoration: none; display: inline-flex; align-items: center; }
 /* L'avertissement en tête d'un écran du marché : « une estimation, pas un
    prix ». Ambre doux, comme l'ancien — c'est une mise en garde, pas une aide. */
 .out-note--avertir { background: var(--amber-soft); color: var(--ink); }

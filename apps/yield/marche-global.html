@@ -6,6 +6,7 @@
 <title>HôteSmart</title>
 <link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shared/theme.css">
 <link rel="stylesheet" href="/shared/ui.css">
@@ -131,7 +132,7 @@
   import { supabase, signOut } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
   import { renderOnboardingBanner } from '/components/onboarding-banner.js'
-  import { monterCoquille, tHtml, moisIso, formaterDate, listeLocale } from '/shared/page-outil.js'
+  import { monterCoquille, tHtml, brut, moisIso, formaterDate, listeLocale } from '/shared/page-outil.js'
   import { monterOngletsYieldFlow } from '/shared/yieldflow-onglets.js'
   import { monterAnneeTemperature, fermerDetail, badge, niv, parlerLangue } from '/shared/temperature-calendrier.js'
 
@@ -149,8 +150,11 @@
     ? formaterDate(I18n, `${String(iso).slice(0, 10)}T12:00:00Z`, { day: 'numeric', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) || '—' : '—')
   const euros = v => (typeof v === 'number' && Number.isFinite(v) ? t('yfm.euros', { v: I18n.num(Math.round(v * 10) / 10, { maximumFractionDigits: 1, useGrouping: false }) }) : t('mg.non_mesure'))
   const pourcent = v => (typeof v === 'number' && Number.isFinite(v) ? t('yfm.pct', { v: I18n.num(Math.round(v * 100)) }) : t('mg.non_mesure'))
-  // Les initiales des douze mois, dans la langue de l'hote (« J F M A… »).
-  const INITIALES = Array.from({ length: 12 }, (_, k) => formaterDate(I18n, new Date(Date.UTC(2026, k, 15, 12)), { month: 'narrow', timeZone: 'UTC' }))
+  // L'initiale d'un mois (0 a 11), dans la langue de l'hote (« J F M A… »).
+  // ⚠ A LA DEMANDE, PAS AU CHARGEMENT DU MODULE (constat 5 de la review du
+  // lot 2a) : calculee avant `I18n.init()`, elle restait en francais pour un
+  // hote hispanophone (« J » pour enero).
+  const initiale = k => formaterDate(I18n, new Date(Date.UTC(2026, k, 15, 12)), { month: 'narrow', timeZone: 'UTC' })
   const liste = xs => listeLocale(I18n.lang, xs)
   // Le graphique des biens montre les 3 dernieres annees (la donnee garde 60 mois).
   const MOIS_AFFICHES = 36
@@ -240,14 +244,14 @@
         headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
     } catch (e) { if (j === jeton) { corps(`<p class="non-calc">${th('yfm.serveur_muet')}</p>`); el('mg-resume-tendance').innerHTML = blocTendance(null) } return }
     if (j !== jeton) return
-    if (!r.ok) { el('mg-resume-tendance').innerHTML = blocTendance(null); return corps(`<p class="non-calc">${th('yfm.statut', { statut: ech(r.status) })}</p>`) }
+    if (!r.ok) { el('mg-resume-tendance').innerHTML = blocTendance(null); return corps(`<p class="non-calc">${th('yfm.statut', { statut: r.status })}</p>`) }
     let d
     try { d = await r.json() } catch (e) { if (j === jeton) { corps(`<p class="non-calc">${th('yfm.illisible')}</p>`); el('mg-resume-tendance').innerHTML = blocTendance(null) } return }
     if (j !== jeton) return
     if (d.etat !== 'calcule') el('mg-resume-tendance').innerHTML = blocTendance(null)
-    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">${d.motif ? th('yfm.marche_inconnu_motif', { motif: ech(d.motif) }) : th('yfm.marche_inconnu')}</p>`)
-    if (d.etat === 'historique_absent') return corps(`<p class="non-calc">${th('mt.capture_absente', { localite: ech(d.marche && d.marche.localite), motif: ech(d.motif) })}</p>`)
-    el('mg-meta').innerHTML = th('mg.meta', { localite: `<b>${ech(d.marche.localite)}</b>`, region: ech(d.marche.region), pays: ech(d.marche.pays), date: ech(jourFr(d.recupere_le)) })
+    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">${d.motif ? th('yfm.marche_inconnu_motif', { motif: d.motif }) : th('yfm.marche_inconnu')}</p>`)
+    if (d.etat === 'historique_absent') return corps(`<p class="non-calc">${th('mt.capture_absente', { localite: d.marche && d.marche.localite, motif: d.motif })}</p>`)
+    el('mg-meta').innerHTML = th('mg.meta', { localite: brut(`<b>${ech(d.marche.localite)}</b>`), region: d.marche.region, pays: d.marche.pays, date: jourFr(d.recupere_le) })
     dernier = d
     dessinerHistorique()
     el('mg-resume-tendance').innerHTML = blocTendance(d.progression)
@@ -276,14 +280,14 @@
     const vals = series.flatMap(s => (s.donnee ? s.donnee.mois.map(m => m[cle]) : [])).filter(v => typeof v === 'number')
     if (!prog || prog.statut !== 'calcule' || !vals.length) {
       const motif = prog && prog.statut === 'calcule' && !series.length ? t('mg.date_illisible') : (prog && prog.motif) || t('mg.historique_absent')
-      return `<div class="mg-carte">${entete}<p class="non-calc">${th('yfm.non_calculable', { motif: ech(motif) })}</p></div>`
+      return `<div class="mg-carte">${entete}<p class="non-calc">${th('yfm.non_calculable', { motif })}</p></div>`
     }
     const L = largeurGraphe(), H = L < 600 ? 220 : 260, G = 50, D = 12, HAUT = 12, BAS = 26
     const max = Math.max(...vals) * 1.08
     const x = k => G + (L - G - D) * k / 11
     const y = v => HAUT + (H - HAUT - BAS) * (1 - v / max)
     const grille = [0, 0.25, 0.5, 0.75, 1].map(f => `<line class="grille" x1="${G}" x2="${L - D}" y1="${y(max * f)}" y2="${y(max * f)}"/><text x="${G - 6}" y="${y(max * f) + 4}" text-anchor="end">${graduation(max * f)}</text>`).join('')
-    const abscisse = INITIALES.map((n, k) => `<line class="repere-mois" x1="${x(k)}" x2="${x(k)}" y1="${HAUT}" y2="${H - BAS}"/><text class="initiale" x="${x(k)}" y="${H - BAS + 15}" text-anchor="middle">${n}</text>`).join('')
+    const abscisse = Array.from({ length: 12 }, (_, k) => initiale(k)).map((n, k) => `<line class="repere-mois" x1="${x(k)}" x2="${x(k)}" y1="${HAUT}" y2="${H - BAS}"/><text class="initiale" x="${x(k)}" y="${H - BAS + 15}" text-anchor="middle">${ech(n)}</text>`).join('')
     const courbes = series.filter(s => s.donnee).map(s => {
       const a = s.donnee
       const mesure = k => k >= 0 && k < a.mois.length && typeof a.mois[k][cle] === 'number'
@@ -305,11 +309,11 @@
     const legende = `<div class="mg-legende">${series.slice().reverse().map(s => {
       const note = !s.donnee ? th('mg.leg_non_mesuree') : s.donnee.partielle ? th('mg.leg_partielle') : ''
       const trait = s.donnee && s.donnee.partielle ? `border-top:${s.epaisseur}px dashed ${s.couleur}` : `border-top:${s.epaisseur}px solid ${s.couleur}`
-      return `<span><i style="${trait}"></i>${note ? th('mg.ligne_sens', { nom: ech(s.nom), sens: note }) : s.nom}</span>`
+      return `<span><i style="${trait}"></i>${note ? th('mg.ligne_sens', { nom: s.nom, sens: brut(note) }) : s.nom}</span>`
     }).join('')}</div>`
-    return `<div class="mg-carte">${entete}${legende}<div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${H}" role="img" aria-label="${th('mg.aria_superposees', { titre })}">
+    return `<div class="mg-carte">${entete}${legende}<div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${H}" role="img" aria-label="${th('mg.aria_superposees', { titre: brut(titre) })}">
       ${abscisse}${grille}<line class="axe" x1="${G}" x2="${L - D}" y1="${H - BAS}" y2="${H - BAS}"/>${courbes}</svg></div>
-      <p class="mg-mention">${mention}${series.some(s => s.donnee && s.donnee.mois.some(m => m.peu_annonces)) ? ` ${th('mg.point_creux', { seuil: ech(prog.seuil_annonces) })}` : ''}</p></div>`
+      <p class="mg-mention">${mention}${series.some(s => s.donnee && s.donnee.mois.some(m => m.peu_annonces)) ? ` ${th('mg.point_creux', { seuil: prog.seuil_annonces })}` : ''}</p></div>`
   }
 
   function sectionRevpar (prog, recupereLe) {
@@ -338,10 +342,10 @@
   function sectionBiens (ind) {
     const entete = `<h2>${th('mg.biens_titre')}</h2><p class="sous">${th('mg.biens_sous')}</p>`
     if (!ind || ind.statut !== 'calcule') {
-      return `<div class="mg-carte">${entete}<p class="non-calc">${th('yfm.non_calculable', { motif: ech((ind && ind.motif) || t('mg.historique_absent')) })}</p></div>`
+      return `<div class="mg-carte">${entete}<p class="non-calc">${th('yfm.non_calculable', { motif: (ind && ind.motif) || t('mg.historique_absent') })}</p></div>`
     }
     const mois = ind.mois.slice(-MOIS_AFFICHES)
-    if (!mois.some(m => m.annonces)) return `<div class="mg-carte">${entete}<p class="non-calc">${th('yfm.non_calculable', { motif: th('mg.aucune_annonce') })}</p></div>`
+    if (!mois.some(m => m.annonces)) return `<div class="mg-carte">${entete}<p class="non-calc">${th('yfm.non_calculable', { motif: brut(th('mg.aucune_annonce')) })}</p></div>`
     const L = largeurGraphe(), G = 44, D = 12, HC = 130, BAS = 34
     const x = i => G + (L - G - D) * (mois.length === 1 ? 0.5 : i / (mois.length - 1))
     // Etroit (telephone) : barres affinees, et une initiale par trimestre
@@ -357,19 +361,19 @@
     const barres = mois.map((m, i) => {
       const h = m.annonces ? (HC - BAS - 10) * m.annonces / maxA : 0
       return m.annonces
-        ? `<rect x="${(x(i) - lb / 2).toFixed(1)}" y="${(HC - BAS - h).toFixed(1)}" width="${lb.toFixed(1)}" height="${h.toFixed(1)}" fill="var(${m.couverture_partielle ? '--mg-barre-partielle' : '--mg-barre'})"><title>${th(m.couverture_partielle ? 'mg.barre_partielle' : 'mg.barre', { mois: ech(moisFr(m.mois)), n: ech(m.annonces) })}</title></rect>`
+        ? `<rect x="${(x(i) - lb / 2).toFixed(1)}" y="${(HC - BAS - h).toFixed(1)}" width="${lb.toFixed(1)}" height="${h.toFixed(1)}" fill="var(${m.couverture_partielle ? '--mg-barre-partielle' : '--mg-barre'})"><title>${th(m.couverture_partielle ? 'mg.barre_partielle' : 'mg.barre', { mois: moisFr(m.mois), n: m.annonces })}</title></rect>`
         : `<text x="${x(i)}" y="${HC - BAS - 4}" text-anchor="middle">·</text>`
     }).join('')
     const abscisse = mois.map((m, i) => {
       const janvier = m.mois.slice(5) === '01'
       const trimestre = ['01', '04', '07', '10'].includes(m.mois.slice(5))
-      return (!etroit || trimestre ? `<text class="initiale" x="${x(i)}" y="${HC - BAS + 12}" text-anchor="middle">${ech(INITIALES[Number(m.mois.slice(5, 7)) - 1])}</text>` : '')
+      return (!etroit || trimestre ? `<text class="initiale" x="${x(i)}" y="${HC - BAS + 12}" text-anchor="middle">${ech(initiale(Number(m.mois.slice(5, 7)) - 1))}</text>` : '')
         + (janvier || (i === 0 && anneeDuPremier) ? `<text class="annee" x="${x(i)}" y="${HC - BAS + 27}" text-anchor="middle">${ech(m.mois.slice(0, 4))}</text>` : '')
     }).join('')
     const bornes = mois.filter(m => m.annonces)
     return `<div class="mg-carte">${entete}<div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${HC}" role="img" aria-label="${th('mg.biens_aria')}">
       ${barres}<line class="axe" x1="${G}" x2="${L - D}" y1="${HC - BAS}" y2="${HC - BAS}"/>${abscisse}</svg></div>
-      <p class="mg-mention">${th('mg.biens_bornes', { mois1: ech(moisFr(bornes[0].mois)), n1: ech(bornes[0].annonces), mois2: ech(moisFr(bornes[bornes.length - 1].mois)), n2: ech(bornes[bornes.length - 1].annonces) })}${mois.some(m => m.couverture_partielle) ? ` ${th('mg.barre_grise')}` : ''}</p></div>`
+      <p class="mg-mention">${th('mg.biens_bornes', { mois1: moisFr(bornes[0].mois), n1: bornes[0].annonces, mois2: moisFr(bornes[bornes.length - 1].mois), n2: bornes[bornes.length - 1].annonces })}${mois.some(m => m.couverture_partielle) ? ` ${th('mg.barre_grise')}` : ''}</p></div>`
   }
 
   // ─── Section 4 : le calendrier AirROI, 12 mois d'un coup (§17.1) ────────
@@ -392,14 +396,14 @@
         headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
     } catch (e) { return ici(`<p class="non-calc">${th('yfm.serveur_muet')}</p>`) }
     if (j !== jeton) return
-    if (!r.ok) return ici(`<p class="non-calc">${th('yfm.statut', { statut: ech(r.status) })}</p>`)
+    if (!r.ok) return ici(`<p class="non-calc">${th('yfm.statut', { statut: r.status })}</p>`)
     let d
     try { d = await r.json() } catch (e) { return ici(`<p class="non-calc">${th('yfm.illisible')}</p>`) }
     if (j !== jeton) return
-    if (d.etat === 'marche_inconnu') return ici(`<p class="non-calc">${d.motif ? th('yfm.marche_inconnu_motif', { motif: ech(d.motif) }) : th('yfm.marche_inconnu')}</p>`)
+    if (d.etat === 'marche_inconnu') return ici(`<p class="non-calc">${d.motif ? th('yfm.marche_inconnu_motif', { motif: d.motif }) : th('yfm.marche_inconnu')}</p>`)
     if (d.etat === 'capture_absente') return ici(`<p class="non-calc">${ech(d.motif)}.</p>`)
     if (d.etat !== 'calcule' || !Array.isArray(d.jours) || !d.jours.length) return ici(`<p class="non-calc">${th('mt.aucun_jour')}</p>`)
-    el('mg-airroi-meta').innerHTML = th('mg.airroi_meta', { date: ech(jourFr(d.capture_le)) })
+    el('mg-airroi-meta').innerHTML = th('mg.airroi_meta', { date: jourFr(d.capture_le) })
     // Le calendrier part du MEME mois que le resume calcule par l'API ; a
     // defaut, du mois de Paris lu ici (review de f229258).
     const depart = d.resume && d.resume.periode && /^\d{4}-\d{2}$/.test(String(d.resume.periode.debut)) ? d.resume.periode.debut : moisDeParis()
@@ -419,10 +423,10 @@
   function blocTendance (prog) {
     const tete = `<h3>${th('mg.tendance_titre')}</h3><p class="mg-source">${th('mg.tendance_source')}</p>`
     const p = prog && prog.statut === 'calcule' ? prog.progression : null
-    if (!p || p.statut !== 'calcule') return `${tete}<p class="non-calc">${th('yfm.non_calculable', { motif: ech((p && p.motif) || (prog && prog.motif) || t('mg.historique_absent')) })}</p>`
+    if (!p || p.statut !== 'calcule') return `${tete}<p class="non-calc">${th('yfm.non_calculable', { motif: (p && p.motif) || (prog && prog.motif) || t('mg.historique_absent') })}</p>`
     const ligne = (cle, nom) => {
       const sn = sensDe(p.indicateurs[cle] && p.indicateurs[cle].pct)
-      return sn ? `<b aria-hidden="true">${FLECHE[sn]}</b><span>${th('mg.ligne_sens', { nom: th(nom), sens: th(MOT[sn]) })}</span>` : `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom: th(nom), sens: `<span class="non-calc">${th('mg.non_calculable_mot')}</span>` })}</span>`
+      return sn ? `<b aria-hidden="true">${FLECHE[sn]}</b><span>${th('mg.ligne_sens', { nom: brut(th(nom)), sens: brut(th(MOT[sn])) })}</span>` : `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom: brut(th(nom)), sens: brut(`<span class="non-calc">${th('mg.non_calculable_mot')}</span>`) })}</span>`
     }
     const v = sensDe(p.indicateurs.revpar && p.indicateurs.revpar.pct)
     const verdict = v ? th(VERDICT[v]) : null
@@ -464,7 +468,7 @@
   const nomYf = x => (Object.hasOwn(NOM_YF, x) ? th(NOM_YF[x]) : ech(x))
   function blocsAirroi (r) {
     if (!r || r.statut !== 'calcule' || !r.semaine || !Array.isArray(r.niveaux) || !Array.isArray(r.evenements)) {
-      return `<div class="mg-bloc"><h3>${th('mg.airroi_bloc_titre')}</h3>${sourceAirroi()}<p class="non-calc">${th('yfm.non_calculable', { motif: ech((r && r.motif) || t('mg.resume_absent')) })}</p></div>`
+      return `<div class="mg-bloc"><h3>${th('mg.airroi_bloc_titre')}</h3>${sourceAirroi()}<p class="non-calc">${th('yfm.non_calculable', { motif: (r && r.motif) || t('mg.resume_absent') })}</p></div>`
     }
     const s = r.semaine
     const verdict = s.verdict === 'week_end' ? th('mg.sem_week_end')
@@ -472,7 +476,7 @@
         : s.verdict === 'equilibre' ? th('mt.verdict_egal') : null
     const semaine = `<div class="mg-bloc"><h3>${th('mt.sem_titre')}</h3>${sourceAirroi()}`
       + (verdict ? `<p class="mg-verdict">${verdict}</p>` : `<p class="non-calc">${th('mg.non_calculable_point')}</p>`)
-      + (s.meilleur ? `<p class="mg-mention">${th('mt.sem_meilleur', { meilleur: ech(s.meilleur), pire: ech(s.pire) })}</p>` : '')
+      + (s.meilleur ? `<p class="mg-mention">${th('mt.sem_meilleur', { meilleur: s.meilleur, pire: s.pire })}</p>` : '')
       + `<p class="mg-mention">${th('mg.sem_definition')}</p></div>`
     const niveaux = `<div class="mg-bloc"><h3>${th('mg.niveaux_titre')}</h3>${sourceAirroi()}`
       + r.niveaux.map(n => {
@@ -503,7 +507,7 @@
     // Une capture qui ne couvre pas toute la fenetre le dit.
     const p = r.periode || {}
     const partiel = p.jours && p.jours_fenetre && p.jours < p.jours_fenetre
-      ? `<p class="mg-mention" style="margin-top:8px">${th('mg.couverture_partielle', { jours: ech(p.jours), total: ech(p.jours_fenetre) })}</p>` : ''
+      ? `<p class="mg-mention" style="margin-top:8px">${th('mg.couverture_partielle', { jours: p.jours, total: p.jours_fenetre })}</p>` : ''
     return partiel + semaine + niveaux + evenements + blocVacances(r.vacances)
   }
 
@@ -520,41 +524,41 @@
     if (v === undefined) return ''
     const tete = `<div class="mg-bloc"><h3>${th('mg.vac_titre')}</h3><p class="mg-source">${th('mg.vac_source')}</p>`
     const connues = v && /^\d{4}-\d{2}-\d{2}$/.test(String(v.connues_jusqu_au || ''))
-      ? `<p class="mg-mention">${th('mg.vac_connues', { date: ech(jourFr(v.connues_jusqu_au)) })}</p>` : ''
-    if (!v || v.statut !== 'calcule' || !Array.isArray(v.periodes)) return `${tete}<p class="non-calc">${th('yfm.non_calculable', { motif: ech((v && v.motif) || t('mg.vac_absentes')) })}</p>${connues}</div>`
+      ? `<p class="mg-mention">${th('mg.vac_connues', { date: jourFr(v.connues_jusqu_au) })}</p>` : ''
+    if (!v || v.statut !== 'calcule' || !Array.isArray(v.periodes)) return `${tete}<p class="non-calc">${th('yfm.non_calculable', { motif: (v && v.motif) || t('mg.vac_absentes') })}</p>${connues}</div>`
     // Une meme periode deux fois dans la fenetre se distingue par son annee scolaire.
     const doublons = new Set(v.periodes.map(p => p.cle).filter((c, i, l) => l.indexOf(c) !== i))
     const annee = p => (doublons.has(p.cle) ? ` ${ech(p.annee_scolaire)}` : '')
-    const de = p => `${PERIODES.includes(p.cle) ? th(`mg.vac_de_${p.cle}`) : th('mg.vac_de_autre', { nom: ech(p.nom) })}${annee(p)}`
-    const en = p => `${PERIODES.includes(p.cle) ? th(`mg.vac_en_${p.cle}`) : th('mg.vac_en_autre', { nom: ech(p.nom) })}${annee(p)}`
+    const de = p => `${PERIODES.includes(p.cle) ? th(`mg.vac_de_${p.cle}`) : th('mg.vac_de_autre', { nom: p.nom })}${annee(p)}`
+    const en = p => `${PERIODES.includes(p.cle) ? th(`mg.vac_en_${p.cle}`) : th('mg.vac_en_autre', { nom: p.nom })}${annee(p)}`
     const calc = v.periodes.filter(p => p.statut === 'calcule' && FLECHE_VAC[p.sens])
     const hausses = calc.filter(p => p.sens === 'hausse').map(de)
     const baisses = calc.filter(p => p.sens === 'baisse').map(de)
     const phrases = []
-    if (hausses.length) phrases.push(baisses.length ? th('mg.vac_hausses_baisses', { hausses: liste(hausses), baisses: liste(baisses) }) : th('mg.vac_hausses', { hausses: liste(hausses) }))
-    else if (baisses.length) phrases.push(th('mg.vac_baisses', { baisses: liste(baisses) }))
+    if (hausses.length) phrases.push(baisses.length ? th('mg.vac_hausses_baisses', { hausses: brut(liste(hausses)), baisses: brut(liste(baisses)) }) : th('mg.vac_hausses', { hausses: brut(liste(hausses)) }))
+    else if (baisses.length) phrases.push(th('mg.vac_baisses', { baisses: brut(liste(baisses)) }))
     else if (calc.length) phrases.push(th('mg.vac_sans_effet'))
     // Les zones ne se departagent que dans une periode qui PORTE le marche.
     const parZone = calc.filter(p => p.sens === 'hausse' && Array.isArray(p.zones)).map(p => {
       const pp = Array.isArray(p.plus_porteuses) ? p.plus_porteuses : null
       const nb = Number(p.zones_mesurees) || 0
-      if (!pp || nb < 2) return th('mg.zones_indeparta', { quand: en(p) })
-      if (!pp.length) return th(nb === 3 ? 'mg.zones_trois_egales' : 'mg.zones_egales', { quand: en(p) })
-      return pp.length > 1 ? th('mg.zones_porteuses', { quand: en(p), zones: liste(pp.map(ech)) }) : th('mg.zone_porteuse', { quand: en(p), zone: ech(pp[0]) })
+      if (!pp || nb < 2) return th('mg.zones_indeparta', { quand: brut(en(p)) })
+      if (!pp.length) return th(nb === 3 ? 'mg.zones_trois_egales' : 'mg.zones_egales', { quand: brut(en(p)) })
+      return pp.length > 1 ? th('mg.zones_porteuses', { quand: brut(en(p)), zones: brut(liste(pp.map(ech))) }) : th('mg.zone_porteuse', { quand: brut(en(p)), zone: pp[0] })
     })
     // Apres le separateur, la suite reprend en minuscule (« ; au printemps »).
-    if (parZone.length) phrases.push(th('mg.zones_phrase', { suite: parZone.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x)).join(t('mg.separateur')) }))
+    if (parZone.length) phrases.push(th('mg.zones_phrase', { suite: brut(parZone.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x)).join(t('mg.separateur'))) }))
     const lignes = v.periodes.map(p => {
-      const nom = th('mg.vac_nom', { de: de(p) })
-      if (p.statut === 'debut_seulement') return `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom, sens: `<span class="non-calc">${th('mg.vac_debut_seulement')}</span>` })}</span>`
-      if (p.statut === 'hors_fenetre') return `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom, sens: `<span class="non-calc">${th('mg.vac_hors_fenetre')}</span>` })}</span>`
-      if (p.statut !== 'calcule' || !FLECHE_VAC[p.sens]) return `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom, sens: `<span class="non-calc">${th('mg.non_calculable_mot')}${p.motif ? ` (${ech(p.motif)})` : ''}</span>` })}</span>`
+      const nom = th('mg.vac_nom', { de: brut(de(p)) })
+      if (p.statut === 'debut_seulement') return `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom: brut(nom), sens: brut(`<span class="non-calc">${th('mg.vac_debut_seulement')}</span>`) })}</span>`
+      if (p.statut === 'hors_fenetre') return `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom: brut(nom), sens: brut(`<span class="non-calc">${th('mg.vac_hors_fenetre')}</span>`) })}</span>`
+      if (p.statut !== 'calcule' || !FLECHE_VAC[p.sens]) return `<b aria-hidden="true">·</b><span>${th('mg.ligne_sens', { nom: brut(nom), sens: brut(`<span class="non-calc">${th('mg.non_calculable_mot')}${p.motif ? ` (${ech(p.motif)})` : ''}</span>`) })}</span>`
       const zones = Array.isArray(p.zones)
-        ? `<br><small class="mg-zones">${p.zones.map(z => th('mg.zone_sens', { zone: ech(z.zone), sens: FLECHE_VAC[z.sens] || th('mg.zone_non_mesuree') })).join(' · ')}</small>` : ''
+        ? `<br><small class="mg-zones">${p.zones.map(z => th('mg.zone_sens', { zone: z.zone, sens: brut(FLECHE_VAC[z.sens] || th('mg.zone_non_mesuree')) })).join(' · ')}</small>` : ''
       const partielle = p.partielle ? ` <span class="non-calc">${th('mg.vac_partielle')}</span>` : ''
       // Le niveau du marche pendant la periode, comme pour un evenement.
       // Sans niveau lisible, rien n'est insere (pas de tiret orphelin).
-      return `<b aria-hidden="true">${FLECHE_VAC[p.sens]}</b><span>${th('mg.ligne_sens', { nom: `${nom}${niv(p.niveau) ? ` ${badge(p.niveau)}` : ''}`, sens: `${th(EFFET_VAC[p.sens])}${partielle}${zones}` })}</span>`
+      return `<b aria-hidden="true">${FLECHE_VAC[p.sens]}</b><span>${th('mg.ligne_sens', { nom: brut(`${nom}${niv(p.niveau) ? ` ${badge(p.niveau)}` : ''}`), sens: brut(`${th(EFFET_VAC[p.sens])}${partielle}${zones}`) })}</span>`
     }).join('')
     return `${tete}${phrases.length ? `<p class="mg-verdict">${phrases.join(' ')}</p>` : ''}<div class="mg-sens">${lignes}</div>`
       + `<p class="mg-mention">${th('mg.vac_mention')}</p>`

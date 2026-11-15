@@ -181,14 +181,22 @@ test('les dates suivent la langue, et rendent le français d avant en français'
   assert.equal(po.listeLocale('es', ['A', 'B']), 'A y B')
 })
 
-test('LE TEST QUI COMPTE (sécurité) : tHtml échappe la donnée et le dictionnaire, et seul le gras du dictionnaire devient du HTML', () => {
+test('LE TEST QUI COMPTE (sécurité) : tHtml échappe le dictionnaire ET chaque valeur par défaut ; seul brut() laisse passer du HTML', () => {
   const w = new (require('jsdom').JSDOM)('').window
-  const { tHtml, esc } = evaluerModule(w, 'shared/page-outil.js', {})
-  const dico = { a: 'Marché : **{loc}** <i>{n}</i>', b: '{n, plural, one {# nuit} other {# nuits}}' }
+  const { tHtml, brut, esc } = evaluerModule(w, 'shared/page-outil.js', {})
+  const dico = { a: 'Marché : **{loc}** <i>{n}</i>' }
   const t = (k, v = {}) => dico[k].replace(/\{(\w+)\}/g, (_, x) => (v[x] ?? `{${x}}`))
-  assert.equal(tHtml(t, 'a', { loc: esc('<img src=x onerror=alert(1)>'), n: 3 }), 'Marché : <b>&lt;img src=x onerror=alert(1)&gt;</b> &lt;i&gt;3&lt;/i&gt;')
-  // Une donnée qui contient « ** » reste du texte.
-  assert.equal(tHtml(t, 'a', { loc: esc('**x**'), n: 1 }), 'Marché : <b>**x**</b> &lt;i&gt;1&lt;/i&gt;')
+  // Une donnée brute, OUBLIÉE sans ech() : elle reste du texte (constat 1 de la review).
+  assert.equal(tHtml(t, 'a', { loc: '<img src=x onerror=alert(1)>', n: 3 }), 'Marché : <b>&lt;img src=x onerror=alert(1)&gt;</b> &lt;i&gt;3&lt;/i&gt;')
+  // Une chaîne n'est jamais du HTML, même déjà échappée : pas de passe-droit.
+  assert.equal(tHtml(t, 'a', { loc: '&lt;', n: 1 }), 'Marché : <b>&amp;lt;</b> &lt;i&gt;1&lt;/i&gt;')
+  // Seul brut() entre tel quel — et c'est à l'appelant d'y avoir échappé la donnée.
+  assert.equal(tHtml(t, 'a', { loc: brut(`<u>${esc('<x>')}</u>`), n: 1 }), 'Marché : <b><u>&lt;x&gt;</u></b> &lt;i&gt;1&lt;/i&gt;')
+  // Une donnée qui contient « ** » reste du texte ; null et undefined rendent vide.
+  assert.equal(tHtml(t, 'a', { loc: '**x**', n: 1 }), 'Marché : <b>**x**</b> &lt;i&gt;1&lt;/i&gt;')
+  assert.equal(tHtml(t, 'a', { loc: null, n: 1 }), 'Marché : <b></b> &lt;i&gt;1&lt;/i&gt;')
+  // Un objet quelconque n'est pas du HTML sûr : seul le jeton de brut() l'est.
+  assert.equal(tHtml(t, 'a', { loc: { html: '<b>' }, n: 1 }), 'Marché : <b>[object Object]</b> &lt;i&gt;1&lt;/i&gt;')
 })
 
 test('LE TEST QUI COMPTE (sécurité) : un motif venu du serveur reste du texte sur les trois écrans', async () => {
@@ -308,7 +316,56 @@ test('LE TEST QUI COMPTE : le calendrier commun parle la langue de l hôte, et l
   assert.equal(en.titre, 'October 2026')
   assert.equal(en.entete, 'MTWTFSS')
   assert.equal(en.legende, 'Low (weak market)Moderate (normal market)Favourable (good time)Peak (very strong demand)')
-  assert.equal(en.cas, 'October 5, 2026 : Peak, Fête')
+  assert.equal(en.cas, 'October 5, 2026: Peak, Fête', 'la ponctuation de la langue (constat 6 de la review)')
   assert.match(en.badge, />Peak<\/span>$/)
   assert.match(rendre('es').titre, /octubre/)
+})
+
+test('LE TEST QUI COMPTE (sécurité, constat 2 de la review) : chaque texte venu du serveur reste du texte — rendu COMPLET des trois écrans, pièges partout', async () => {
+  // Les VRAIES données des fixtures, où chaque champ texte devient un piège :
+  // localité, région, pays, méthode, motifs, noms d'événements, de périodes et
+  // de zones, jours de la semaine, phrases du calcul.
+  const { lireJson } = require('../lib/airroi/json')
+  const { revparMensuel, adrOccupationMensuel } = require('../lib/marche/marche-global')
+  const { progressionDuMarche } = require('../lib/marche/progression-marche')
+  const T = require('../lib/marche/temperature-airroi')
+  const fixture = n => lireJson(lire(`tests/fixtures/airroi/${n}`))
+  const P = k => `<img src=x data-piege="${k}" onerror="window.__xss=1">`
+  const MARCHE = { pays: P('pays'), region: P('region'), localite: P('localite') }
+  const lignes = T.construireLignes({ marche: { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }, reponse: fixture('relief-bagneres-2026-09-30.json') })
+  const VAC = JSON.parse(lire('tests/fixtures/vacances-2026-2027.json')).vacances
+  const temp = T.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-10', VAC, '2027-07-03')
+  // Les pièges entrent dans les noms que le calcul produit.
+  temp.evenements.forEach(e => { e.nom = P('evenement') })
+  temp.suggestions.forEach(s => { s.nom = P('suggestion') })
+  temp.week_end_ou_semaine.meilleur = P('meilleur'); temp.week_end_ou_semaine.pire = P('pire')
+  temp.week_end_ou_semaine.par_jour.forEach(j => { j.jour_semaine = P('jour') })
+  temp.mois.forEach(m => { m.evenements = m.evenements.map(() => P('evt-mois')) })
+  if (temp.resume && Array.isArray(temp.resume.evenements)) temp.resume.evenements.forEach(e => { e.nom = P('evt-resume') })
+  if (temp.resume && temp.resume.vacances && Array.isArray(temp.resume.vacances.periodes)) {
+    temp.resume.vacances.periodes.forEach(p => { p.nom = P('periode'); p.cle = 'inconnue'; if (Array.isArray(p.zones)) p.zones.forEach(z => { z.zone = P('zone') }) })
+  }
+  const TEMPERATURE = { source: 'airroi', etat: 'calcule', marche: MARCHE, ...temp }
+  const M60 = fixture('marche-60.json')
+  const HISTO = { source: 'marche', etat: 'calcule', marche: MARCHE, recupere_le: '2026-09-30T10:00:00Z', adr_occupation: adrOccupationMensuel(M60), revpar: revparMensuel(M60), progression: progressionDuMarche(M60) }
+  const CAL = { localite: P('localite'), region: P('region'), pays: P('pays'), capture_le: '2026-10-30', methode: P('methode'), statut: 'calcule',
+    regimes: [{ regime: 'derniere_minute', debut: '2026-11-15', fin: '2026-11-28', phrase: P('phrase-dm') }, { regime: 'pacing', debut: '2026-11-29', fin: '2027-03-31', phrase: P('phrase-p') },
+      { regime: 'forme_mensuelle', debut: '2027-04-01', fin: '2027-10-31', phrase: P('phrase-m') }],
+    saisons: [{ saison: P('saison'), debut: '2026-11-29', fin: '2027-03-31' }], ruptures: [],
+    au_dela: [{ mois: '2027-05', saison: null, motif: P('motif-mois') }], pics: [{ debut: '2026-12-19', fin: '2027-01-03', saison: 'forte', phrase: P('pic') }],
+    evenements_possibles: [{ a_lire: true, phrase: P('a-lire') }], limites: [P('non mesurée')],
+    ecart_semaine_week_end: [{ debut: '2027-04-01', fin: '2027-06-30', ecart_prix_pct: null, motif: P('motif-ecart') }] }
+  const ROUTES = { '/api/marche-temperature': TEMPERATURE, '/api/marche-global': HISTO, '/api/yield-marche': { etat: 'calendrier', calendrier: CAL } }
+  for (const page of PAGES_2A) {
+    const p = await monter(page, { api: (u) => { const r = Object.keys(ROUTES).find(k => u.startsWith(k)); return r ? { body: ROUTES[r] } : null } })
+    assert.deepEqual(p.journal.erreurs, [], `${page} : ${p.journal.erreurs.join('\n')}`)
+    const injectes = p.$$('img[src="x"]').map(i => i.getAttribute('data-piege'))
+    assert.deepEqual(injectes, [], `${page} : des pièges sont devenus du HTML`)
+    // Et les pièges sont DITS, en texte, là où la donnée s'affiche.
+    assert.ok(p.$('main').textContent.includes(P('localite')), `${page} : la localité est dite`)
+    assert.ok(p.$('main').textContent.includes(P('region')), `${page} : la région est dite`)
+    if (page.endsWith('marche.html')) assert.ok(p.$('main').textContent.includes(P('methode')), 'la méthode est dite')
+    assert.equal(p.w.__xss, undefined)
+    p.fermer()
+  }
 })
