@@ -369,3 +369,60 @@ SANS nouvelle review. Les neuf sont corrigés :
 Après correctifs : suite complète **8 733 tests, 8 733 verts, 0 rouge** ;
 fichiers touchés à J+60 et J+200 : **214 / 214** ; `i18n-check` vert (1 985
 clés par langue).
+
+## 11. Sous-lot 2b — « Choisir vos comparables » (`apps/yield/comparables.html`)
+
+Écrit AVANT le code. Branche `integration-v5-lot-2b`, partie du sous-lot 2a
+(`d65054b8`) : elle emploie son sous-menu, ses jetons et ses outils.
+
+### 11.1 Inventaire
+
+« Retiré » : aucune ligne. Tout ce que la page écrit passe par le même
+endpoint, avec le même corps (`/api/marche-comparables`, GET puis POST
+`profil`, `chercher`, `plus`, `retenir`, `strategie`, `prix`).
+
+| Fonction / information | Sort |
+|---|---|
+| Introduction (« désignez au moins trois biens… », **Aucun prix**) | conservé |
+| Sélecteur de logement (vivants, compte courant) et logement demandé par `?bien=` (gardé par la liste) | conservé |
+| Rappel du profil (adresse trouvée, voyageurs, chambres ou studio, pièces, salles de bain, équipements) et « Modifier » | conservé |
+| Étape A : adresse (avec son aide), voyageurs, chambres (avec la définition d'une chambre), pièces, salles de bain, sept équipements qui comptent dans le prix, « Valider la description », « Annuler », messages et refus | conservé |
+| Étape B : la carte Leaflet et les fonds OpenStreetMap avec leur attribution, la taille du point selon la ressemblance, le contour violet « à vos équipements », le bien de l'hôte, la légende (cinq entrées), la note « position approchée », la carte en panne ou sans position (la liste prend le relais) | conservé |
+| La recherche lancée par l'hôte (« Chercher les biens du marché »), « Voir 10 de plus », la note du serveur, les anciens comparables qui ne sont plus proposés | conservé |
+| La fiche d'un bien : photos, nom, lien vers l'annonce Airbnb (identifiant numérique seul), ligne voyageurs / chambres / lits / salles de bain / distance, ouverture et ressemblance, badges d'équipements, « trouvé grâce à vos équipements », Type, Note, Avis, détail des notes, distinctions, hôte, réservation (séjour minimum, instantanée, annulation), horaires, photos, description, tous les équipements Airbnb (en français pour les libellés connus), « retenu par l'équipe HôteSmart », alertes d'équipement rare manquant ou en plus, explication, les quatre verdicts (bascule au second clic, focus gardé) | conservé |
+| La liste accessible des biens (clavier, lecteur d'écran), les retenus de l'équipe hors de la carte, le pied collant (« Valider mes comparables », compte, message) | conservé |
+| Étape C : les trois stratégies avec leur infobulle, l'explication de la voix par hôte, le séjour minimum, ce que pratique le marché, l'alerte « la plupart acceptent 1 nuit », « Enregistrer ma stratégie » | conservé |
+| Étape D : le tableau 4 tranches × semaine / week-end avec la fourchette, la provenance de la forme (phase 1 ou hôtes mouvants), la prime week-end pour information, les prix habituels par rang, le marché serré, les alertes « à vérifier », le comparable aberrant, le séjour minimum des comparables, le marché non relié (détail en infobulle), « Relever les prix » | conservé |
+| Le sous-menu YieldFlow de la barre latérale | déplacé (§3.4), « Choisir vos comparables » marqué comme écran courant |
+
+### 11.2 Ce qui change de forme
+
+- **Couleurs** : les cinq couleurs de la carte (`COULEUR`) entrent dans
+  `shared/theme.css` (`--yf-carte-*`, valeurs identiques) ; Leaflet peint ses
+  points par attribut SVG, qui n'accepte pas `var()` : la page lit la valeur
+  CALCULÉE du jeton au chargement. Le reste (vert « similaire », ambre des
+  alertes, rouge des erreurs) passe sur les jetons d'état de la charte
+  (`--ok-ink`, `--warn`, `--danger-ink`…). Les boutons prennent ceux du socle.
+- **Langue** : tout le texte de la page passe aux dictionnaires. Les libellés
+  d'équipements Airbnb : la table française existante est gardée pour le
+  français ; en anglais, le libellé d'Airbnb (qui est anglais) s'affiche tel
+  quel ; en espagnol aussi — **dans le doute**, signalé (§11.4).
+- **Montants** : « 120 € » se forme par la langue (`yfm.euros`).
+
+### 11.3 Performance
+
+Comme 2a (§6) : pas d'endpoint d'écran (fichier `api/`), donnée déjà servie
+depuis un cache (la liste des comparables et les prix de départ sont relevés
+par un geste de l'hôte, jamais au chargement), `budget-ecran` compte les sites
+d'appel. AVANT : 12 appels (§6 bis). APRÈS : §11.5.
+
+### 11.4 Dans le doute, pour Thierry
+
+1. Les libellés d'équipements Airbnb en espagnol restent ceux d'Airbnb
+   (anglais) : une table espagnole est un ajout de contenu, pas une
+   intégration.
+2. Les messages et notes que l'API écrit (`message`, `note`, `motif`) restent
+   en français (`api/` hors du lot).
+3. Leaflet et ses tuiles viennent toujours de cdnjs et d'OpenStreetMap
+   (inchangé) ; leurs contrôles (« + », « − », attribution) ne se traduisent
+   pas — l'attribution d'OpenStreetMap passe par le dictionnaire.
