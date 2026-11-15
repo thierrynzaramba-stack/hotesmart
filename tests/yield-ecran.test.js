@@ -184,12 +184,37 @@ test('LE TEST QUI COMPTE : en pilotage, le realise n affiche pas l avenir', () =
 })
 
 test('aucune periode ecoulee : on le DIT, on n additionne pas zero', () => {
+  // ⚠ `<b>` OU `<strong>` : depuis l'intégration V5 le gras sort du
+  // dictionnaire en `<b>`, et la regex d'avant ne pouvait plus rien attraper
+  // (review 2c, constat 4).
+  const zeroDur = /Périodes écoulées\s*:\s*<(?:strong|b)>0/
   const d = reponse({ realise: [periode('2026-10'), periode('2026-11')] })
   ecran.choisirVue('pilotage')
   const html = ecran.rendre(d)
-  assert.ok(!/Périodes écoulées\s*:\s*<strong>0/.test(html),
+  assert.ok(!zeroDur.test(html),
     'un zero dur la ou la verite est « aucune periode ecoulee »')
   assert.match(html, /Aucune période écoulée/)
+  // Et le cas où la regex PORTE : en Exploration, le seul mois de la fenêtre
+  // est EN COURS — une ligne au tableau, aucune période écoulée, donc pas de
+  // total (sinon « Périodes écoulées : 0 € »).
+  ecran.choisirVue('exploration')
+  const encours = ecran.rendre(reponse({ realise: [periode('2026-09')] }))
+  assert.ok(!zeroDur.test(encours), 'un total à zéro sur un mois qui n est pas fini')
+  assert.match(encours, /Aucune période écoulée dans cette fenêtre — un total n’aurait rien à additionner\./)
+  ecran.choisirVue('pilotage')
+})
+
+test('une baisse d un demi-point s arrondit comme avant (−12,5 % → −13 %), sans séparateur de milliers', () => {
+  // Review 2c, constat 1 : `Math.round` arrondissait les baisses vers zéro.
+  ecran.choisirVue('exploration')
+  const html = ecran.rendre(reponse({ realise: [
+    periode('2025-06', { vs_n1: { ca: { valeur: 700, n1: 800, ecart: -100, variation: -0.125 } } }),
+    periode('2025-07', { vs_n1: { ca: { valeur: 13145, n1: 980, ecart: 12165, variation: 12.345 } } })
+  ] }))
+  ecran.choisirVue('pilotage')
+  assert.match(html, />-13\s%</)
+  assert.doesNotMatch(html, />-12\s%</)
+  assert.match(html, />\+1235\s%</)
 })
 
 test('LE TEST QUI COMPTE : le motif PRECIS de capacite, pas le generique', () => {

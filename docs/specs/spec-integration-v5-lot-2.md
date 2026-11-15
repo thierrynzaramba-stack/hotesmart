@@ -707,6 +707,19 @@ par la langue (`I18n.num`) ; en français, le rendu d'avant.
    de la charte.
 5. **L'onglet du navigateur** garde « HôteSmart — Tarification » ; le titre de
    la page reste « Tarification dynamique ».
+6. **Changer de langue sur cette page** (ajout de la review, constat 3) : avec
+   une période hors référence en cours de saisie, la page demande avant de
+   recharger ; si l'hôte refuse, elle reste (textes fixes déjà dans la
+   nouvelle langue), comme comparables (§11.4 point 4).
+7. ⚠ **DÉFAUT D'AVANT, GARDÉ À L'IDENTIQUE — DÉCISION PRODUIT À PRENDRE**
+   (review 2c, constat 5). En Pilotage et en Bilan, **changer de logement ne
+   recharge rien** : les chiffres du logement précédent restent affichés, le
+   bouton « Afficher » est masqué hors Exploration, et une déclaration de
+   période répond « Le logement sélectionné a changé : affichez-le
+   d'abord. » sans bouton pour le faire. L'ancien écran faisait exactement
+   pareil (mesuré par la review sur les deux), et ce lot est tenu à la
+   parité. Le correctif proposé : recharger au changement de logement, avec
+   les gardes de `changerVue`. À trancher par Thierry, en lot à part.
 
 ### 12.5 Mesures, contre-épreuve, horloge, téléphone
 
@@ -757,3 +770,124 @@ la page ne déborde pas (largeur du document 375). Le seul contenu plus large
 que l'écran est la rangée de liens du sous-menu YieldFlow, qui défile dans son
 propre conteneur (`.out-yf`), comme sur les écrans 2a et 2b. Les tableaux
 défilent dans `.yf-scroll`, comme avant.
+
+### 12.6 Review 1 du sous-lot 2c — rapport tel quel
+
+Brief : arbre `/home/claude/hv5-lot2c-revue` (worktree détaché), branche
+`integration-v5-lot-2c`, plage
+`e40effbd0627ff35771f6387c30769898b676bfb..f45c53f5658947a662a29d5271a91251c3b788e3`.
+**Trace vérifiée avant lecture des constats** : worktree à
+`f45c53f5658947a662a29d5271a91251c3b788e3`, sans modification ; les dix
+fichiers listés sont ceux de mon `git diff --name-only` ; chaque lieu de
+constat est dans cette liste, et les fichiers hors liste sont cités comme
+contexte, déclarés comme tels.
+
+> ## Trace
+>
+> - Arbre : `/home/claude/hv5-lot2c-revue` (worktree détaché, branche `integration-v5-lot-2c`).
+> - `git -C /home/claude/hv5-lot2c-revue rev-parse HEAD` donne `f45c53f5658947a662a29d5271a91251c3b788e3`, c'est le SHA attendu.
+> - `git status --short` est vide au début, et toujours vide à la fin (les tests ont tourné dans l'arbre ; mutations et sondes ont tourné dans une copie `git archive` sous /tmp, supprimée ensuite).
+> - Plage relue : `e40effbd0627ff35771f6387c30769898b676bfb..f45c53f5658947a662a29d5271a91251c3b788e3` (3 commits : a850d987, 92dc8897, f45c53f5).
+> - Fichiers du diff : apps/yield/index.html, docs/specs/spec-integration-v5-lot-2.md, shared/i18n/en.json, shared/i18n/es.json, shared/i18n/fr.json, tests/budget-ecran.test.js, tests/integration-v5-lot-2.test.js, tests/outils/banc-page.js, tests/yield-ecran.test.js, tests/yield-motifs.test.js.
+> - Aucun fichier api/, lib/, core/, migrations/ ni vercel.json dans la plage. shared/page-outil.js, shared/i18n/i18n.modele.js, shared/ui.css et shared/yieldflow-onglets.js ont été lus comme contexte seulement : ils sont hors liste.
+>
+> **Contrôles faits, et ce qui est conforme**
+>
+> 1. **Échappement**
+>    - `tHtml` échappe la traduction entière, chaque valeur texte, et aussi les nombres (ils passent dans `esc(t(...))`). Le seul `brut()` de la page est sur `cadrage`, qui est lui-même une sortie de `th`.
+>    - Toutes les valeurs venues du serveur ou de l'hôte passent par `ech` ou `th` : nom du logement, motif, libellé, zones, `manque`, `error`, `refus()`, `e.message`, `e.id`, `plusTot`/`hier`.
+>    - Aucun `innerHTML` nouveau.
+>    - Restent bruts, comme avant : `nomPeriode(r.periode)` (ligne 650) et `e.jours` (ligne 914). Ce sont des clés et des nombres calculés par `/api/yield` (`clePeriode` de dates validées), donc pas un vecteur.
+>    - Mutations faites sur une copie, une à la fois : libellé brut, zones brutes, `etat` brut, motif brut, `brut(manque)`, nom brut. Le test sécurité 2c rougit à chaque fois.
+> 2. **Parité du fond**
+>    - Inchangés au caractère : URL `/api/yield`, `enteteCompte()`, `sansArchives` + `eq('user_id', compte)`, jeton `enCours`, `bienAffiche`, corps du POST, URL du DELETE, `window.confirm`, rechargement complet, ordre des blocs par vue, `droits_ecriture`, `[hidden]` (règle dans ui.css, masquage-hidden 8/8).
+>    - Garde `?bien=` : elle n'existe ni dans l'ancien écran ni dans le nouveau, la parité est donc tenue.
+> 3. **Français rendu**
+>    - J'ai exécuté l'ancien et le nouveau `rendre()` sur une réponse riche (les 8 blocs, alertes, exceptions, événements, 3 vues × 2 variantes) et comparé le texte rendu mot à mot. **0 écart.**
+>    - Variables `{…}` identiques entre fr, en et es, sauf `yfs.src_hors_reference` (fr `{v}`, en/es `{n}`), qui est déclarée.
+>    - Aucune `{var}` dans un cas de pluriel ICU : les deux pluriels en/es n'emploient que `#`.
+>    - 139 clés `yfs.*` dans chaque langue, aucune absente ni inutilisée. Les clés empruntées existent dans les trois langues (`yfm.pct`, `mg.non_calculable_mot`, `cp.enregistrement`, `yfm.*`, `yfnav.aria`). `scripts/i18n-check.js` : 2332 clés partout.
+>    - Aucun texte en dur dans le script, aucun hexa dans le `<style>`, et tous les jetons CSS employés existent dans theme.css.
+> 4. **Rendu en/es** : aucune accolade, ni `undefined`, ni `NaN`.
+> 5. **Tests**
+>    - Fichiers lancés : yield-ecran 12/12, yield-motifs 10/10, integration-v5-lot-2 27/27, budget-ecran 16/16, masquage-hidden 8/8, biens-vivants-parite 4/4, integration-v5-lot-1 60/60, pages-non-delegables 38/38, yield-exceptions 25/25, i18n-* 36/36.
+>    - Horloge décalée J+60 et J+200 sur les trois fichiers du lot : 0 rouge.
+>    - Aucune assertion de yield-ecran ni de yield-motifs n'a été modifiée : seul le banc a changé.
+>    - Les 4 tests 2c ont des dents. Rougissent par mutation : l'onglet sans `aria-selected` (test 1), les injections (test 3), la suppression du rechargement après déclaration (test 4).
+> 6. **Téléphone**
+>    - Mesuré avec le chrome-headless-shell épinglé (révision 1243), fenêtre de 390 px, en fr et en es, réponse remplie et formulaire d'exceptions visible : largeur du document 375, aucun élément ne déborde hors de `.yf-scroll`, `.out-yf` et `.out-onglets`. Les onglets de vue font 44 px de haut.
+>    - Accessibilité : `aria-selected` est tenu, la tablist a désormais un `aria-label`, le focus visible vient du socle.
+>    - Comme avant (pas une régression) : pas de flèches clavier ni de `aria-controls`/`tabpanel`.
+>    - Observation de forme : deux rangées `.seg` identiques se suivent, l'une de liens (sous-menu), l'autre d'onglets (vues).
+>
+> ## Constats
+>
+> **1. AUTRE — un pourcentage d'évolution négatif tombant sur un demi-point s'arrondit vers zéro**
+> - Où : apps/yield/index.html:1061
+> - Défaut : `I18n.num(Math.round(pct))` remplace `pct.toFixed(0)`. Or `Math.round(-12.5)` vaut −12, là où `toFixed` donnait −13. Les positifs ne bougent pas. En plus, `I18n.num` groupe les milliers, ce que l'ancien écran ne faisait pas.
+> - Scénario mesuré (ancien et nouveau `rendre()` sur la même réponse) : CA 700 € contre 800 € l'an dernier (variation −0,125). L'ancien écran affiche « -13 % », le nouveau « -12 % ». Une variation de +1 234,5 % passe de « +1235 % » à « +1 235 % ». Le français n'est donc pas identique au caractère, et l'arrondi devient asymétrique entre hausses et baisses.
+> - Correction : `I18n.num(pct, { maximumFractionDigits: 0, useGrouping: false })`. Intl arrondit les demis en s'éloignant de zéro, comme `toFixed`, ce qui redonne exactement l'ancien rendu.
+>
+> **2. AUTRE — les débuts en gras des explications perdent leur couleur**
+> - Où : apps/yield/index.html:44
+> - Défaut : `.yf-explications strong { color: var(--ink) }` ne touche plus rien, parce que `tHtml` produit `<b>` et non plus `<strong>`. Le socle avait prévu le cas pour `.out-note` (`.out-note strong, .out-note b`), pas cette page.
+> - Scénario : environ 25 débuts en gras (« Le N-1 est reconstruit, jamais observé », « Médiane, pas moyenne. »…) s'affichent désormais en gris `--muted` au lieu de l'encre. Ce changement visible n'est pas déclaré au §12.4.
+> - Correction : `.yf-explications strong, .yf-explications b { color: var(--ink); }`.
+>
+> **3. AUTRE — un changement de langue efface en silence une période en cours de saisie**
+> - Où : apps/yield/index.html:296
+> - Défaut : `document.addEventListener('i18n:changed', () => location.reload())` recharge sans condition. Or cette page écrit : le formulaire Du / Au / Motif des exceptions. Le menu ≡ porte un sélecteur de langue (shared/nav.js, hors liste), et l'ancien écran n'avait aucun chemin de ce genre. C'est le même défaut que le constat 3 de la review 2b, corrigé sur comparables.html.
+> - Scénario : l'hôte tape « travaux de toiture » et ses deux dates, ouvre le menu, change de langue. La page recharge et la saisie a disparu, sans un mot.
+> - Correction : reprendre la garde de comparables. Si `#yf-exc-motif`, `#yf-exc-debut` ou `#yf-exc-fin` n'est pas vide, `confirm(...)` avant de recharger, avec une clé de texte dans les trois dictionnaires.
+>
+> **4. AUTRE — le chemin « Supprimer » n'est gardé par aucun test, et une assertion ne peut plus échouer**
+> - Où : tests/integration-v5-lot-2.test.js (section « Sous-lot 2c », fin du fichier) et tests/yield-ecran.test.js:190
+> - Défaut :
+>   - Le lot a retraduit la confirmation et les deux messages de suppression, mais rien ne vérifie la confirmation, l'URL du DELETE, le rechargement ni le message rendu.
+>   - Dans yield-ecran.test.js:190, la regex `/Périodes écoulées\s*:\s*<strong>0/` cherche `<strong>`, alors que le total est désormais en `<b>`. Elle était déjà sans effet sur ses données (en pilotage, ces deux mois à venir sont filtrés), et elle ne peut plus rien attraper.
+> - Scénario mesuré : j'ai retiré `if (!window.confirm(t('yfs.exc_confirmer'))) return` dans une copie. Résultat : integration-v5-lot-2 27/27, yield-ecran 12/12, yield-motifs 10/10, budget-ecran 16/16, yield-exceptions 25/25. Tout reste vert.
+> - Correction :
+>   - Ajouter un test 2c « supprimer » calqué sur celui du POST. Avec `confirm` qui rend `false` : aucun fetch. Avec `true` : DELETE sur `/api/yield-exceptions?property_id=B1&id=e1`, la synthèse relue une fois, le texte « Période supprimée — la référence a été recalculée. » au caractère, et le texte de la confirmation vérifié.
+>   - Écrire la regex `<(?:strong|b)>0`, et lui donner une ligne écoulée dont `ecoulees.length === 0` (un mois en cours en exploration) pour qu'elle porte vraiment.
+>
+> **5. AUTRE — préexistant, hors périmètre (parité respectée), à signaler à Thierry : en Pilotage et en Bilan, changer de logement ne recharge rien**
+> - Où : apps/yield/index.html:318-329 (aucun écouteur `change` sur `#yf-bien`) ; le commentaire de tests/budget-ecran.test.js:247-248 dit l'inverse.
+> - Défaut :
+>   - « Afficher » est masqué hors Exploration, et seuls « Année » et les onglets déclenchent `charger()`. Un changement de logement laisse donc à l'écran les chiffres du précédent.
+>   - Si l'hôte déclare une période ensuite, il lit « Le logement sélectionné a changé : affichez-le d'abord. » alors qu'aucun bouton « Afficher » n'est visible.
+> - Scénario mesuré (sonde jsdom, deux logements, ancien et nouvel écran) : après passage de B1 à B2 dans la vue par défaut, 1 lecture `/api/yield` avant comme après, le titre reste « B1 », et « Afficher » est masqué. Comportement identique dans l'ancien écran.
+> - Correction (pas dans ce lot, qui est tenu à la parité) : ajouter `el('yf-bien').addEventListener('change', …)` avec les gardes de `changerVue` (pas d'appel si le bouton est désactivé). Corriger tout de suite le commentaire de budget-ecran (« au changement de vue ou de logement »), qui est faux.
+>
+> **6. AUTRE (mineur) — trois traductions qui se lisent mal**
+> - Où : shared/i18n/en.json et shared/i18n/es.json
+> - Défaut et correction :
+>   - en `yfs.ev_horizon` se termine par un fragment, « To reimport before that date. ». Proposé : « It must be reimported before that date. »
+>   - en `yfs.src_fermees_pilotage` : « this is the first thing to do » n'a pas de référent une fois la phrase rendue (« No price can sell there: this is the first thing to do… »). Proposé : « reopening them is the first thing to do… ».
+>   - es `yfs.du`/`yfs.au` : « Del » / « Al », en libellés de champs isolés, sonnent mal. Proposé : « Desde » / « Hasta ».
+> - Pas de contresens relevé ailleurs. Les motifs du moteur (« Fermé à la vente », « référence élargie ») restent en français dans les phrases en/es, comme le déclare le §12.4.
+>
+> Constats de sécurité : 0
+
+### 12.7 Correctifs de la review 1 (2c) — sans nouvelle review
+
+**Zéro constat de sécurité : les correctifs se font sans seconde review.**
+
+| constat | correctif | test |
+|---|---|---|
+| 1 | `I18n.num(pct, { maximumFractionDigits: 0, useGrouping: false })` : l'arrondi et l'écriture d'avant (« -13 % », « +1235 % ») | rendu : −12,5 % → « -13 % », +1234,5 % → « +1235 % » |
+| 2 | `.yf-explications strong, .yf-explications b` à l'encre | source |
+| 3 | `i18n:changed` demande avant de recharger si Du, Au ou Motif est rempli (clé `yfs.langue_perte`) ; §12.4 point 6 | rendu : sans saisie → recharge sans question ; saisie → question, refus garde la page et la saisie |
+| 4 | test « supprimer » (refus : rien ne part ; accord : DELETE `/api/yield-exceptions?property_id=B1&id=e1`, relecture, message d'avant) ; regex `<(?:strong\|b)>0` et un cas Exploration à mois EN COURS où elle porte | voir ci-dessous |
+| 5 | **non corrigé, par parité** : §12.4 point 7, décision pour Thierry ; le commentaire faux de `tests/budget-ecran.test.js` est corrigé | — |
+| 6 | en « It must be reimported before that date. », « reopening them is the first thing to do… » ; es « Desde » / « Hasta » | — |
+
+**Contre-épreuve** (arbre de `f45c53f5` par `git archive`, tests du correctif
+copiés dedans) : les tests des constats 1, 2 et 3 **rougissent**. Les deux
+tests du constat 4 y **passent**, et c'est voulu : ils couvrent un
+comportement juste mais non gardé. Ils sont éprouvés par **mutation** sur le
+code corrigé, une à la fois :
+- retirer la confirmation de `supprimerException` → le test « supprimer »
+  rougit ;
+- remplacer la relecture par `const rendu = true` → il rougit ;
+- faire porter le total sur `source.length` au lieu de `ecoulees.length` → le
+  test « aucune période écoulée » rougit.

@@ -575,3 +575,44 @@ test('2c (non-régression) : déclarer une période part au même endpoint, avec
   assert.equal(p.texte('#yf-exc-retour'), 'Période déclarée — la référence a été recalculée.', 'le texte d avant, au caractère')
   p.fermer()
 })
+
+test('2c (review, constat 4) : supprimer une période — confirmation au texte d avant, refus = rien ne part ; accord = DELETE au même endpoint, relecture, message d avant', async () => {
+  const avecPeriode = reponseYield({ exceptions: [{ id: 'e1', date_debut: '2025-03-01', date_fin: '2025-03-10', motif: 'travaux' }] })
+  const api = (u) => (u.startsWith('/api/yield-exceptions') ? { body: { ok: true } } : { body: avecPeriode })
+  const non = await monter(SYNTHESE, { confirmer: false, api })
+  const avant = non.journal.fetch.length
+  await non.cliquer(non.$('.yf-sup[data-exc="e1"]'))
+  assert.deepEqual(non.journal.confirmations, ['Supprimer cette période ? La référence sera recalculée.'])
+  assert.equal(non.journal.fetch.length, avant, 'un refus n envoie rien')
+  non.fermer()
+  const oui = await monter(SYNTHESE, { api })
+  const lectures = () => oui.journal.fetch.filter(f => f.url.startsWith('/api/yield?')).length
+  const l0 = lectures()
+  await oui.cliquer(oui.$('.yf-sup[data-exc="e1"]'))
+  await oui.attendre()
+  const del = oui.journal.fetch.filter(f => f.methode === 'DELETE')
+  assert.deepEqual(del.map(f => f.url), ['/api/yield-exceptions?property_id=B1&id=e1'])
+  assert.equal(lectures(), l0 + 1, 'la synthèse est relue')
+  assert.equal(oui.texte('#yf-exc-retour'), 'Période supprimée — la référence a été recalculée.', 'le texte d avant, au caractère')
+  oui.fermer()
+})
+
+test('LE TEST QUI COMPTE (2c, review constat 3) : changer de langue avec une période en cours de saisie DEMANDE avant de recharger ; sans saisie, recharge', async () => {
+  const vide = await monter(SYNTHESE, { api: () => ({ body: reponseYield() }) })
+  vide.d.dispatchEvent(new vide.w.CustomEvent('i18n:changed', { detail: { lang: 'en' } }))
+  assert.deepEqual(vide.journal.confirmations, [])
+  assert.equal(vide.journal.navigations.length, 1, 'la page recharge')
+  vide.fermer()
+  const p = await monter(SYNTHESE, { confirmer: false, api: () => ({ body: reponseYield() }) })
+  p.$('#yf-exc-motif').value = 'travaux de toiture'
+  p.d.dispatchEvent(new p.w.CustomEvent('i18n:changed', { detail: { lang: 'en' } }))
+  assert.deepEqual(p.journal.confirmations, [DICOS.fr['yfs.langue_perte']])
+  assert.equal(p.journal.navigations.length, 0, 'le refus garde la page et la saisie')
+  assert.equal(p.$('#yf-exc-motif').value, 'travaux de toiture')
+  p.fermer()
+})
+
+test('2c (review, constat 2) : le gras des explications garde l encre, qu il sorte en <b> (dictionnaire) ou en <strong>', () => {
+  assert.match(lire(SYNTHESE), /\.yf-explications strong, \.yf-explications b \{ color: var\(--ink\); \}/)
+  assert.match(DICOS.fr['yfs.ref_expl_mediane'], /^\*\*Médiane, pas moyenne\.\*\*/, 'le gras vient bien du dictionnaire, donc en <b>')
+})

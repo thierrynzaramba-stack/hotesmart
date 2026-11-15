@@ -443,6 +443,7 @@
   "charges.voir_autre": "Voir l'autre",
   "common.loading": "Chargement…",
   "tc.aria_jour": "{jour} : {niveau}",
+  "yfs.langue_perte": "Une période est en cours de saisie. Recharger la page dans la nouvelle langue l’effacera. Recharger quand même ?",
   "yfs.titre": "Tarification dynamique",
   "yfs.titre_onglet": "Tarification",
   "yfs.sous_titre": "Ce qui s’est passé, où on en est, et ce qui est normal",

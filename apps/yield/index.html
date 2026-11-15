@@ -41,7 +41,9 @@
   .yf-motif.inconnu { background: var(--danger-soft); color: var(--danger-ink); border-color: var(--danger-soft); }
   .yf-explications { margin: 10px 0 0; padding-inline-start: 18px; font-size: var(--fs-caption); color: var(--muted); line-height: 1.6; }
   .yf-explications li { margin-bottom: 5px; }
-  .yf-explications strong { color: var(--ink); }
+  /* `tHtml` écrit le gras en <b> : les deux, pour que les débuts d'explication
+     gardent l'encre (review 2c, constat 2). */
+  .yf-explications strong, .yf-explications b { color: var(--ink); }
 
   /* ─── Tableaux ───────────────────────────────────────────────────────── */
   .yf-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -293,7 +295,14 @@
     await I18n.init()
     session = await requireAuth()
     if (!session) return
-    document.addEventListener('i18n:changed', () => location.reload())
+    // ⚠ CETTE PAGE ÉCRIT (les périodes hors référence) : un changement de
+    // langue recharge, et ne doit pas effacer EN SILENCE une période en cours
+    // de saisie (review 2c, constat 3 ; même garde que comparables).
+    document.addEventListener('i18n:changed', () => {
+      const enCoursDeSaisie = ['yf-exc-debut', 'yf-exc-fin', 'yf-exc-motif'].some(id => el(id) && el(id).value.trim())
+      if (enCoursDeSaisie && !confirm(t('yfs.langue_perte'))) return
+      location.reload()
+    })
     monterCoquille({
       HSNav, I18n, session, titre: t('yfs.titre_onglet'),
       compte: { comptes, compteCourant, basculerVers, estTitulaire, peutLire },
@@ -1058,7 +1067,11 @@
     const cls = pct >= 0 ? 'yf-hausse' : 'yf-baisse'
     // ⚠ `toFixed(0)` rendait « +0 % » EN VERT pour +0,4 % : une décimale sous
     // le demi-point, sinon l'arrondi invente une stabilité.
-    const texte = Math.abs(pct) < 1 ? I18n.num(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : I18n.num(Math.round(pct))
+    // ⚠ Au-delà, l'arrondi d'avant (`toFixed(0)`) : un demi-point s'éloigne de
+    // zéro dans les deux sens (−12,5 → −13), et aucun séparateur de milliers
+    // (« +1235 % »). `Math.round` arrondissait les baisses vers zéro (review
+    // 2c, constat 1).
+    const texte = Math.abs(pct) < 1 ? I18n.num(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : I18n.num(pct, { maximumFractionDigits: 0, useGrouping: false })
     // Le drapeau « estimé » est porté par la colonne « Limites » de la ligne.
     return `<span class="${cls}">${pct >= 0 ? '+' : ''}${th('yfm.pct', { v: texte })}</span>
       <div class="yf-pied">${format(c.n1)}</div>`
