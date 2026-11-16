@@ -2259,3 +2259,64 @@ nouvelle review, comme la règle le veut) :
   service, phrase du guide (Q29 : l'adresse d'un membre devient un contact
   pour ce que ses droits ne couvrent pas).
 
+
+### 12.5 Recette sur staging (11 novembre 2026)
+
+Staging à `4325b99187588b05a2128072669eeb8d2b82bf2f` (le lot 2 complet,
+`afa97018` fusionné par le chef de file), déploiement vérifié. Avec Thierry.
+
+**Les migrations**, collées dans l'éditeur SQL de staging
+(`ortyofzzdsthlhqmzsnq`) dans une version SANS commentaires et en lignes
+courtes (règle du collage manuel, CLAUDE.md) — même SQL que les fichiers :
+- `2026-11-10-notifications-contacts` : succès ; les contraintes attendues
+  sont là, dont `notifications_contacts_essais_rang`,
+  `notifications_contacts_coord` et `notifications_file_un_destinataire` ;
+- `2026-11-10-agent-alert-config-serveur-seul` : la version courte a d'abord
+  été rejouée au banc Postgres contre le fichier, sur les 18 cas du §12.4 :
+  résultats identiques. Puis succès ; une seule politique
+  (`agent_alert_config_select SELECT`), le déclencheur, et **0** logement mixte.
+  ⚠ La requête « logements mixtes » de l'en-tête du fichier appelle
+  `jsonb_each(c.config)` sans garde : une config qui ne serait pas un objet la
+  ferait échouer. Celle de la recette (et de la prod) passe par
+  `jsonb_each(case when jsonb_typeof(c.config) = 'object' then c.config else '{}'::jsonb end)`.
+
+**La reprise** (`scripts/reprendre-listes-alertes.js`, lancé par Thierry dans
+une copie de travail détachée sur `origin/staging`, `~/hotesmart-recette-pwa`,
+avec `--env-file` vers `.env.staging`) :
+- à blanc : 1 compte avec des listes (`6c413095…`) — 4 lignes de liste, une
+  seule adresse, donc 1 contact à créer (`r***@hotesmart.test`, info manquante
+  + urgences, 2 logements), 0 perte, 0 compte bloqué ;
+- `--go` : le contact est créé, les listes coupées et gardées dans
+  `listes_reprises` ;
+- à blanc de nouveau : **0 compte** avec des listes actives — rejouable.
+
+**À l'écran et au serveur** (Chrome de Thierry, compte de recette) :
+- Réglages → Contacts prévenus montre le contact repris, ses deux alertes et
+  ses deux logements ;
+- Messages → Réponses de l'IA : aucun champ de liste (`[data-alerte]`,
+  `[data-tester]` : 0), le lien « Qui est prévenu → Réglages » ;
+- `POST /api/agent-config` cible alertes → **410** `alertes_dans_reglages` ;
+  liste apportée en legacy → **400** « réservé à sa cible » ;
+  `POST /api/alert-test` → **410** `essai_dans_reglages` ;
+- écriture directe par PostgREST avec la session de l'hôte (`PATCH` de la
+  config entière) → **0 ligne**, la config relue intacte (3 logements, 3 piles,
+  `updated_at` de la reprise) ;
+- un contact ajouté (l'adresse de Thierry), puis « Envoyer un essai » :
+  « L'essai n'est pas parti » — **attendu** : staging n'a pas
+  `ALERT_BREVO_API_KEY` (docs/STAGING.md, la protection), et l'essai non parti
+  est rendu au quota du jour ;
+- la page publique, par le lien du contact : adresse masquée, logements,
+  « Ne plus recevoir ces alertes » → « C'est fait » ; rouverte, elle le dit et
+  propose « Recevoir à nouveau » ; un `fetch` depuis la page est bloqué
+  (CSP `default-src 'none'`) ; côté hôte, « S'est désinscrit le 11/11/2026 :
+  ne reçoit plus rien » et « Réinscrire » → « Contact réinscrit » ; « Retirer »
+  → « Contact retiré », et le lien répond « Ce lien n'est plus valable ».
+  (Le lien était passé par la conversation : le contact de test est retiré,
+  son jeton est mort.)
+
+**Mesure (case 8)** : le GET de l'onglet Notifications (`/api/push`), compte
+de recette avec un contact : **1 761 octets transférés** (4 130 décodés),
+216 ms. Appels du navigateur : 1.
+
+**Reste à voir en production** : l'arrivée réelle de l'e-mail d'un contact et
+son lien — au premier essai, avec Thierry.

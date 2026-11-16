@@ -235,7 +235,9 @@ test('« À traiter » : à lire, à vérifier, illisible, et tout signal non tr
   assert.equal(q.limite, 50)
   assert.deepEqual(q.filtres.find(f => f[0] === 'or'), ['or', 'statut.in.(a_lire,a_verifier,illisible),and(signal.not.is.null,signal_tranche.is.false)'])
   assert.ok(q.filtres.some(f => f[0] === 'neq' && f[2] === 'envoi'))
-  assert.doesNotMatch(q.colonnes, /lecture_ia|justificatif_chemin/, 'ni la réponse brute de l\'IA, ni le chemin du fichier')
+  assert.doesNotMatch(q.colonnes, /justificatif_chemin/, 'jamais le chemin du fichier')
+  // ⚠ De la réponse de l'IA, le SEUL solde d'une régularisation (lot 7a).
+  assert.deepEqual(q.colonnes.match(/[\w:>-]*lecture_ia[\w:>-]*/g), ['solde_lu:lecture_ia->solde_ttc_cents'], 'jamais la réponse brute de l\'IA entière')
 })
 
 // ─── Les bornes d'une période ────────────────────────────────────────────────

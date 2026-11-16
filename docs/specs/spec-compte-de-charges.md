@@ -948,6 +948,257 @@ commit »).
 | 9 | mineur | la recette rangeait le résumé sans la catégorie | **corrigé** (`scripts/recette-charges.js`) |
 | 10 | mineur | le KB citait un contrôle absent du dépôt | **corrigé** (`migrations/2026-11-10-controle-charges.sql`) |
 
+## 14. Lot 7 — la période couverte, l'étalement et la facture annuelle
+
+Ouvert le 12 novembre 2026 sur le go de Thierry, après le lot 3 en
+production (`main` = `f4b2597c`). Il met en œuvre §6 ter et les réponses
+Q24 à Q27. **Spec d'abord** : aucune ligne de code avant les réponses aux
+questions du §14.9.
+
+### 14.0 En clair, et en trois livraisons
+
+Le lot est trop gros pour une seule review : il se livre en **trois
+sous-lots**, chacun avec sa branche, sa review, sa recette sur staging et
+son go.
+
+| Sous-lot | Ce que l'hôte gagne |
+|---|---|
+| **7a** Période, type de document, étalement | Une facture dit la période qu'elle couvre (« du 1er janv. au 31 déc. ») et son type (facture, régularisation, avoir, échéancier, avis d'impôt). Les totaux se lisent **étalés** sur la période ou **à la date** (Q24). Un avoir diminue le total (Q26). |
+| **7b** L'échéancier, une provision | Un échéancier d'énergie ou de taxe foncière apparaît en **prévision** sur sa période, marquée « estimation », jusqu'à la facture finale qui le remplace (Q25). |
+| **7c** La facture annuelle | « Cette facture revient chaque année » : HôteSmart **prévoit** l'année suivante avec le montant de l'an dernier, **alerte** si elle n'arrive pas, et **pré-remplit** la nouvelle (Q27). |
+
+### 14.1 Catégorie de chaque donnée affichée (règle d'architecture)
+
+| Donnée | Catégorie | Où elle se calcule |
+|---|---|---|
+| Totaux étalés et à la date, répartitions | non urgente | le résumé, tenu par trigger à chaque écriture (Q28), servi prêt par `charges_totaux` |
+| Prévisions (échéancier, an dernier) | non urgente | écrites au geste qui les crée (validation), dans la même répartition que les charges |
+| Alerte « facture annuelle pas arrivée » | non urgente | le cron quotidien `cron-charges` (Q28) |
+| Fiche, liste, « À traiter » | temps réel | lues à l'ouverture, comme au lot 3 |
+
+### 14.2 Sous-lot 7a — données
+
+**Sur `charges`** (migration additive, aucune donnée réécrite) :
+
+- `type_document` : `facture` (par défaut), `regularisation`, `avoir`,
+  `echeancier`, `avis_impot`. Lu par l'IA, corrigé par l'hôte.
+- `periode_debut`, `periode_fin` : **les deux ou aucune**, début ≤ fin,
+  **au plus 366 jours**. Au-delà, l'écran refuse et explique : une période
+  plus longue se saisit en plusieurs factures. Sans période, la charge vaut
+  pour son jour, comme aujourd'hui.
+- **L'avoir est négatif (Q26)** : pour ce seul type, les montants sont
+  ≤ 0 ; pour tous les autres, la contrainte « ≥ 0 » reste. L'hôte tape le
+  montant comme il est écrit sur l'avoir ; c'est le writer qui pose le
+  signe.
+- **La régularisation** : la charge est la **consommation de la période**
+  (§6 ter). Le solde à payer ou à rembourser reste dans `lecture_ia`,
+  montré à côté dans la fiche, jamais compté.
+- **L'échéancier** existe dès 7a comme type, mais **n'est compté nulle
+  part** : ni charge (Q25), ni encore prévision (7b).
+
+**La répartition** — *proposition technique* : une table
+`charges_repartition`, une ligne par charge et par jour de sa période (une
+seule ligne, au jour, pour une charge sans période). Le montant du jour est
+le prorata, arrondi au centime ; le reste se pose sur le dernier jour, donc
+la somme des jours redonne **exactement** le montant. Écrivain unique : le
+trigger, comme pour le résumé.
+
+*Ce qui a été construit (13 novembre 2026)* : **pas de table de
+répartition**. Le recalcul d'une série calcule la part de chaque jour à la
+volée, depuis `charges`, et l'écrit directement dans les colonnes étalées
+du résumé. Une facture annuelle ne pèse donc pas 365 lignes de plus. La
+part est un **arrondi cumulé** (`charges_part`) : le jour *k* sur *n* reçoit
+⌊m·k/n⌋ − ⌊m·(k−1)/n⌋. La somme se télescope et redonne le montant exact, et
+deux jours ne diffèrent jamais de plus d'un centime — mieux que de tout
+poser sur le dernier jour. Mesuré en local, sur une base presque vide :
+1 200 € sur 2026 font 365 cellules, 101,91 € en janvier, 92,06 € en février,
+la somme exacte, et le recalcul tient en 12 ms.
+
+**Coût mesuré après la review** (Postgres 16 local, un compte de **3 001
+charges**, 4 logements × 5 catégories, un quart à période, 15 novembre
+2026) : insérer une facture annuelle **105 ms** ; un UPDATE qui ne change
+ni la série ni la plage **55 ms** (un seul recalcul) ; recalculer tout le
+compte **0,9 s** ; `charges_totaux` sur 12 mois **7,6 ms**. La formule de la
+part est écrite dans la requête (une fonction à `search_path` fixe n'y était
+pas intégrée et coûtait le double).
+
+**Le résumé** porte les deux lectures dans la même cellule du jour :
+`…_cents` (à la date, comme aujourd'hui) et `…_etale_cents` (la somme des
+répartitions du jour). Un seul résumé, deux jeux de colonnes, tenus par le
+même trigger : ils ne peuvent pas diverger.
+
+⚠ **Les compteurs restent ceux des DOCUMENTS, lus à leur date**
+(« N à vérifier », « N à trancher », « N sans montant lu »). Étaler un
+compteur n'a pas de sens : une facture annuelle compterait 365 fois. Seuls
+les montants s'étalent.
+
+⚠ **Coût du recalcul.** Valider une facture annuelle touche 365 cellules.
+Le recalcul se fait **en une instruction par série** (compte × entité ×
+logement × catégorie, sur la plage de jours), jamais jour par jour, et le
+verrou se prend **par série** sur tous les chemins d'écriture. Mesuré en
+local avant la review.
+
+**`charges_totaux`** rend les deux lectures dans le même objet : afficher
+les deux côte à côte (Q34) ne coûte **aucun appel** de plus.
+
+### 14.3 Sous-lot 7a — lecture par l'IA
+
+La consigne lit en plus :
+- `type_document` ;
+- `periode_debut` et `periode_fin` (« période de consommation du … au … » ;
+  « taxe foncière 2026 » = du 1er janvier au 31 décembre 2026) ;
+- pour une régularisation, la **consommation** (HT, TVA, TTC) et le
+  **solde**.
+
+Les montants d'un avoir se lisent positifs, comme imprimés. Même règle
+qu'aujourd'hui : rien d'inventé, `null` si c'est absent.
+
+### 14.4 Sous-lot 7a — écran
+
+- **Fiche** : un champ « Type » ; « Période du … au … » (facultatif) ; pour
+  une régularisation, « Consommation (la charge) » et « Solde lu » côte à
+  côte, le second en lecture seule.
+- **Liste** : la période sous le fournisseur (« 1er janv. → 31 déc. 2026 ») ;
+  un avoir est marqué « Avoir », avec son montant en négatif.
+- **Totaux : les deux lectures côte à côte (Q34)**, sans bascule. Chaque
+  chiffre (TTC, HT, TVA) et chaque ligne de répartition (par mois, par
+  catégorie, par logement) porte deux montants : **« Étalé »** d'abord (la
+  charge du mois), **« À la date »** ensuite (ce qui a été facturé ce
+  mois-là). Au téléphone, les deux montants passent l'un sous l'autre.
+
+### 14.5 Sous-lot 7b — l'échéancier, une provision (Q25)
+
+- Un échéancier validé, avec sa période et son **total prévu** (la somme
+  des mensualités, lue par l'IA), devient une **prévision étalée** sur sa
+  période : même répartition, marquée `prevision`.
+- Les totaux montrent les prévisions **dans** le total, avec la mention
+  « dont N € prévus » et « Estimation ».
+- **La facture finale la remplace** : une facture ou une régularisation du
+  même fournisseur, pour le même logement et la même catégorie, dont la
+  période **chevauche** celle de l'échéancier, retire la prévision au
+  moment de sa validation. Automatique ou confirmé : **Q35**.
+- Les dates de prélèvement restent dans `lecture_ia` : le suivi des
+  paiements est hors V1 (Q2).
+
+### 14.6 Sous-lot 7c — la facture annuelle (Q27)
+
+- À la validation, une case **« Cette facture revient chaque année »** crée
+  un **contrat annuel** : table `charges_contrats` (fournisseur, entité,
+  logement, catégorie, période habituelle, date habituelle, montants de la
+  dernière facture).
+- **Prévoir** : le contrat pose aussitôt la prévision de l'année suivante
+  (même période + 1 an, montants de l'an dernier), étalée et marquée
+  « estimation ». Si un échéancier couvre la même période, **l'échéancier
+  l'emporte** : c'est l'estimation de l'année en cours, l'an dernier n'est
+  qu'un repli.
+- **Remplacer** : la nouvelle facture rattachée au contrat retire la
+  prévision, puis devient la « dernière facture » du contrat, qui prévoit
+  l'année d'après.
+- **Alerter** : le cron quotidien lève un signal « Facture annuelle
+  attendue » dans « À traiter » quand la facture n'est pas arrivée à la
+  date habituelle + le délai de **Q36**. À l'écran seulement, pas d'e-mail
+  en V1.
+- **Pré-remplir** : une facture lue dont le fournisseur et l'entité
+  correspondent à un contrat arrive avec le logement, la catégorie et la
+  période + 1 an déjà posés, et rattachée au contrat. L'hôte valide comme
+  d'habitude.
+- **Arrêter** : décocher la case sur une facture du contrat arrête le
+  contrat. Sa prévision et son alerte disparaissent.
+
+### 14.7 Case PERFORMANCE (les huit points, pour 7a, 7b et 7c)
+
+1. **Un endpoint d'écran** : toujours `/api/ecran/charges`. Les deux
+   lectures (Q34) arrivent dans le même objet : aucun appel de plus.
+2. **Non urgent pré-calculé** : totaux et prévisions dans le résumé, au
+   geste ; alerte par le cron quotidien. L'heure du calcul reste affichée.
+3. **Cache navigateur** : aucun, comme au lot 3.
+4. **`private, no-store`** avant le premier refus : inchangé.
+5. **Statiques** : comme le reste du dépôt (dette du lot 3).
+6. **Aucune lecture tronquée** : la répartition n'est jamais lue par
+   l'écran, seulement sommée en base ; les contrats se lisent page après
+   page.
+7. **Budget** : un appel au chargement, tenu par `tests/budget-ecran.test.js` ;
+   `Server-Timing` porte le nombre de requêtes.
+8. **Mesure** : AVANT = la mesure du lot 3 (1 appel, 7 requêtes,
+   1 492 octets, 653 ms) ; APRÈS mesuré sur staging à chaque sous-lot.
+
+### 14.8 Inventaire et mobile
+
+Rien n'est retiré de l'écran du lot 3 : tout s'y ajoute (type, période,
+seconde lecture des totaux, prévisions, signal du contrat). Une seule vue
+(`shared/charges-vue.js`) : le téléphone reçoit tout en même temps.
+
+### 14.9 Questions pour Thierry, et ce qui est retenu
+
+**Réponse du 12 novembre 2026, vers 23 h 05** :
+- **Q34 : « les deux ».** Pas de vue par défaut : les totaux montrent les
+  deux lectures **en même temps** (§14.4).
+
+**Q35 à Q37 sont restées sans réponse.** Les propositions recommandées sont
+retenues comme **hypothèses de travail**, dites à Thierry le même soir. Elles
+ne concernent que 7b et 7c, et se confirmeront à leur recette :
+- **Q35 → retirée automatiquement**, avec une mention dans la fiche de la
+  facture qui la remplace.
+- **Q36 → un mois** après la date habituelle.
+- **Q37 → non** : la lecture « à la date » ne montre que les documents
+  reçus ; les prévisions vivent dans la lecture étalée.
+
+Les questions, telles qu'elles ont été posées :
+
+- **Q34** — La vue des totaux proposée par défaut : **étalée** (la vraie
+  charge de chaque mois ; la taxe foncière compte 1/12 chaque mois) ou
+  **à la date** (ce qui a été facturé ce mois-là) ?
+- **Q35** — Quand la facture finale arrive, la prévision du même
+  fournisseur sur la même période disparaît **automatiquement**, ou
+  HôteSmart **demande** d'abord ?
+- **Q36** — L'alerte « facture annuelle pas arrivée » : combien de temps
+  après sa date habituelle ? Proposition : un mois.
+- **Q37** — Les prévisions dans la vue **à la date** : non (cette vue ne
+  montre que des documents reçus, les prévisions vivent dans la vue
+  étalée), ou oui, posées à la date habituelle ?
+
+### 14.10 Trace de la review du sous-lot 7a (15 novembre 2026)
+
+Réponse de la review, recopiée mot pour mot :
+
+```
+TRACE DE REVIEW
+Arbre lu : /home/claude/hotesmart-lot3
+Branche lue : charges-lot7-periode
+SHA de tête lu : 0b7c1cb6b1168ab4d05a3c9c73873a5de41a3de7
+Plage relue : 082d376e85c644687efb57d13101a13e311ebb67..0b7c1cb6b1168ab4d05a3c9c73873a5de41a3de7
+Fichiers de la plage (19) : docs/kb/compte-de-charges.md, docs/specs/spec-compte-de-charges.md, lib/charges.js, lib/charges/ecran.js, lib/charges/lecture.js, lib/charges/regles.js, migrations/2026-11-13-charges-periode.sql, migrations/2026-11-13-controle-charges-periode.sql, shared/charges-vue.js, shared/i18n/en.json, shared/i18n/es.json, shared/i18n/fr.json, shared/ui.css, tests/charges-ecran.test.js, tests/charges-lecture.test.js, tests/charges-migration-periode.test.js, tests/charges-page.test.js, tests/charges-regles.test.js, tests/charges-writer.test.js
+Fichiers cités dans les constats :
+- migrations/2026-11-13-charges-periode.sql : dans la plage
+- migrations/2026-11-13-controle-charges-periode.sql : dans la plage
+- shared/charges-vue.js : dans la plage
+- lib/charges.js : dans la plage
+- lib/charges/lecture.js : dans la plage
+- tests/charges-migration-periode.test.js : dans la plage
+- docs/specs/spec-compte-de-charges.md : dans la plage
+- migrations/2026-11-10-charges-resume-categorie.sql : HORS PLAGE, référence seulement (le lot 3 qu'on ne doit plus rejouer)
+```
+
+**Confrontation, refaite par le fil** : `git diff --name-only 082d376e
+0b7c1cb6` rend les 19 fichiers ci-dessus ; le seul fichier hors plage est
+cité comme référence, avec sa raison : statut **accepté**. La review a joué
+les trois migrations dans un Postgres jetable et comparé le résumé à un
+oracle en force brute sur 1 800 écritures aléatoires : 0 écart.
+
+**Aucun constat de sécurité** : les correctifs ne sont pas re-reviewés
+(« une review par commit »).
+
+| # | Sévérité | Objet | Statut |
+|---|---|---|---|
+| 1 | à corriger | l'étalé pouvait contenir une facture à vérifier ou sans montant lu, datée hors de la période, sans « Estimation » | **corrigé** : indicateurs étalés par jour au résumé, rendus par `charges_totaux`, lus par la vue (test de page) |
+| 2 | à corriger | le contrôle disait « ok » sur une migration à moitié collée (contrainte vérifiée à son nom) | **corrigé** : contraintes et trigger vérifiés à leur DÉFINITION, HT/TVA/TTC comparés ; contre-épreuve faite (contrainte du lot 2 remise : ligne 2 à `false`) |
+| 3 | à corriger | les tests de la migration ne voyaient pas une erreur de recalcul | **corrigé** : `scripts/oracle-resume-charges.sql` (lecture seule, 18 colonnes), joué en local sur 1 500 écritures aléatoires : 0 écart ; contre-épreuve « left join » : 7 626 écarts ; plus trois assertions de texte qui disent ce qu'elles ne voient pas |
+| 4 | mineur | coût, et une mesure sans sa plage | **corrigé** : formule écrite dans la requête, un seul recalcul quand rien ne bouge ; mesure refaite et datée (§14.2) |
+| 5 | mineur | interblocage cron / UPDATE de plusieurs lignes | **corrigé** : verrou du compte d'abord, sur les trois chemins |
+| 6 | mineur | une période non envoyée était effacée | **corrigé** : gardée, comme le type ; envoyée vide, elle s'efface (test) |
+| 7 | mineur | un avoir lu avec son signe tombait à « non lu » | **corrigé** : lu signé puis en valeur absolue ; consigne précisée (test) |
+| 8 | mineur | rejouer 2026-11-10 après 7a ; un « 0 » inventé si les indicateurs manquent | **corrigé** : en-tête de la migration ; la vue dit « non lu » sans indicateur (test) |
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

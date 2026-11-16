@@ -112,3 +112,12 @@ test('⚠ une lecture a un DÉLAI et aucune nouvelle tentative du SDK (sinon dix
 test('⚠ 404 (modèle ou route introuvable) est une PANNE de configuration, jamais l’échec de CE document', () => {
   assert.equal(estPanne({ status: 404, message: 'model: not_found' }), true)
 })
+
+// ─── Lot 7a : la consigne lit le type, la période et le solde ───────────────
+test('la consigne demande le type de document, la période couverte et le solde d\'une régularisation', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'charges', 'lecture.js'), 'utf8')
+  for (const cle of ['"type_document"', '"periode_debut"', '"periode_fin"', '"solde_ttc"']) assert.ok(src.includes(cle), cle)
+  // Les types de la consigne sont ceux de la base.
+  for (const t of require('../lib/charges/regles').TYPES_DOCUMENT) assert.ok(src.includes(`"${t}"`), t)
+  assert.match(src, /CONSOMMATION de la période/)
+})
