@@ -990,3 +990,36 @@ test('review 3 : deux gestes au même résultat donnent DEUX annonces (deux « C
     } finally { b.fermer() }
   }
 })
+
+// ─── La recette de 2b sur staging (17 novembre 2026) ───────────────────────
+
+test('recette : un presse-papiers qui ne répond JAMAIS ne bloque pas la fiche — 2 s, puis « sélectionnez le lien » et relecture', async () => {
+  const b = bancFiche({ reponses: { copier_lien: { ok: true, lien: LIEN } },
+    apres: { copier_lien: etatFacture({ statut: 'lien_envoye', dernierLien: new Date().toISOString() }) } })
+  try {
+    Object.defineProperty(b.window.navigator, 'clipboard', { configurable: true,
+      value: { writeText: () => new Promise(() => {}), write: () => new Promise(() => {}) } })
+    const zone = await ouvrirFiche(b)
+    zone.querySelector('[data-fac-copier]').click()
+    await new Promise(r => setTimeout(r, 2300))
+    for (let i = 0; i < 8; i++) await attendre()
+    assert.match(zone.textContent, /Copie automatique impossible/)
+    assert.equal(zone.querySelector('[data-fac-lien-texte]').value, LIEN)
+    assert.equal(zone.querySelector('[data-fac-copier]').disabled, false, 'les boutons reviennent')
+    assert.equal(b.lus.length, 2, 'la fiche est relue')
+    assert.match(zone.textContent, /Dernier lien créé le /)
+  } finally { b.fermer() }
+})
+
+test('recette : la date affichée est le jour LOCAL, pas le jour UTC (0 h 21 à Paris le 17 → « 17 »)', async () => {
+  const avant = process.env.TZ
+  process.env.TZ = 'Europe/Paris'
+  try {
+    // 23 h 21 UTC le 16 novembre = 0 h 21 à Paris le 17.
+    const b = bancFiche({ facture: etatFacture({ statut: 'lien_envoye', dernierLien: '2026-11-16T23:21:00.000Z' }) })
+    try {
+      const zone = await ouvrirFiche(b)
+      assert.match(zone.textContent, /Dernier lien créé le 17 nov\. 2026/, zone.textContent)
+    } finally { b.fermer() }
+  } finally { if (avant === undefined) delete process.env.TZ; else process.env.TZ = avant }
+})
