@@ -214,8 +214,31 @@ prévenue ») — la promesse centrale de ce module.
 7. **Budget** : un test compte les requêtes du GET de la page avant/après
    (+1 lecture, en parallèle) et celles de la fiche (+1).
 8. **Mesure AVANT / APRÈS** : appels, requêtes, octets du GET de la page de la
-   prestataire et de la fiche, **mesurés sur staging avant la première ligne
-   de code**, puis à la recette. Inscrits ici.
+   prestataire et de la fiche, mesurés sur staging avant la première ligne de
+   code, puis à la recette.
+
+   **AVANT — mesuré le 17 novembre 2026 sur staging** (`main` `f7b72ed7`
+   déployé), Chrome, compte de recette, prestataire « Berthe Recette »
+   (1 logement) :
+   - **page de la prestataire** (ouverte en aperçu depuis sa fiche,
+     `apercu=1`) : **3 appels**, tous `/api/menages-public` — le GET du
+     planning (300 octets transférés, 614 ms), `action=avis` (300 octets,
+     394 ms), `action=disponibilites` (300 octets, 1 042 ms) ; le document
+     `public.html` pèse **328 816 octets** décodés, **106 206** transférés en
+     brotli (mesuré par `curl`) ; styles et scripts servis depuis le cache ;
+   - **fiche de l'hôte** (ouverture de « Configurer — Berthe ») : **3 appels**
+     — `/api/menages?presta=` (1 090 octets transférés, 1 538 décodés,
+     732 ms), `/api/disponibilites` (570 / 5 477, 632 ms), `/api/avis`
+     (409 / 109, 372 ms) ;
+   - **requêtes Supabase** : ni `/api/menages-public` ni `/api/menages`
+     n'émettent `Server-Timing`. Elles se comptent par le test de l'étape 1
+     (point 7), lancé d'abord **contre le code d'avant** — c'est ce compte qui
+     sert d'AVANT.
+
+   **APRÈS** : attendu — la page, 3 appels (le GET porte l'état des
+   notifications) ; la fiche, 3 appels (`appareils` dans la réponse de
+   `?presta=`) ; une requête de plus dans chacun des deux GET, en parallèle.
+   Mesuré à la recette, inscrit ici.
 
 ## 9. Inventaire (la forme ne supprime jamais le fond)
 
@@ -229,7 +252,7 @@ Aucune : Q44 et Q45 sont tranchées (§2, 17 novembre 2026).
 
 ## 11. Étapes
 
-0. Mesure AVANT sur staging (§8.8).
+0. Mesure AVANT sur staging (§8.8) — **faite le 17 novembre 2026**.
 1. Migration + module des abonnements + actions de `api/menages-public.js` +
    GET (tests : garde, aperçu refusé, nouveau lien et désactivation qui
    purgent, unicité `(profil, endpoint)`, `no-store`).
