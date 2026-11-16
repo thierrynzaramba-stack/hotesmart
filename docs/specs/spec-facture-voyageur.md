@@ -638,8 +638,9 @@ l'étape 2b, base `main` = 669d081fd522f31d6cc40371c9b3427488b052b3).**
   (test « la lecture de la facture part EN PARALLÈLE »). Le chemin pose
   désormais `Server-Timing` (compteur plancher : la résolution des biens et
   la garde n'y sont pas comptées, et c'est écrit dans l'en-tête).
-- **Octets** : à mesurer sur staging à la recette (le champ `facture` pèse
-  ~200 octets de corps sur le double, sans demande).
+- **Octets, mesurés sur staging à la recette (14 novembre 2026)** : 2 appels,
+  **1 283 octets** transférés (921 pour `?booking=`, 362 pour
+  `/api/messages`) contre 1 079 AVANT : **+204 octets**, le champ `facture`.
 
 **Case performance de l'étape 2b** (règle du front, CLAUDE.md) :
 1. *Un écran = un endpoint* : la fiche lisait déjà `GET /api/calendar?booking=`
@@ -1155,6 +1156,32 @@ accordés à 2b) — ajouté à son périmètre au §7 ; 4 tests ajoutés (membr
 au bien de la demande : fiche 404, trois gestes 403 ; membre limité au bien de
 la réservation : la demande s'affiche) ; 5 commentaire corrigé, `property_uuid`
 retiré de la lecture.
+
+### 10 quinquies. Recette de l'étape 2b sur staging (17 novembre 2026, 0 h 20, demandée par Thierry)
+
+Staging (`staging` = b19ad581, qui contient la branche à 8e1f78db), réservation
+de test « Recette — Loft Pilotable » (STG-RECE…, Airbnb, 1er au 5 décembre
+2026), compte `staging.channex.io` : aucun vrai voyageur joignable.
+
+| geste | résultat |
+|---|---|
+| ouvrir la fiche | bloc Facture, « Aucune demande », trois boutons ; 2 appels, 1 283 octets |
+| Copier un lien | lien créé (forme `/facture#` + 43 caractères), aucun message ; état relu : « Demande ouverte », « Dernier lien créé » — **défaut 1** |
+| page du voyageur, par ce lien | servie en anglais (langue de la réservation), séjour du 1er au 5 décembre, formulaire |
+| Remplir à sa place | SIREN « 12 » refusé, champ nommé et focus dessus ; puis « Coordonnées reçues — saisi par l'hôte », focus sur « Modifier les coordonnées » ; `aria-required` sur les quatre champs |
+| Envoyer le lien | confirmation demandée ; le canal de test a refusé : « n'est pas parti », lien montré, boutons rendus |
+| téléphone | non mesuré à l'écran (fenêtre non réduite par l'outil) ; tenu par le banc (`large: false`) |
+
+**Défaut 1** — le presse-papiers du navigateur piloté ne répondait JAMAIS
+(`writeText` et `write` en attente au-delà de 3 s, mesuré) : la copie attendue
+sans borne laissait les boutons coupés et la fiche sans relecture. **Corrigé** :
+attente bornée à 2 s, puis « sélectionnez le lien » et relecture.
+**Défaut 2** — un lien créé à 0 h 21 à Paris le 17 s'affichait « le 16 »
+(jour UTC d'un horodatage ISO). **Corrigé** : jour local.
+Chaque correctif a son test, rouge quand on retire le correctif (mesuré). Pas
+de nouvelle review : les trois permises au lot sont faites.
+Reste à voir en production : un envoi LIVRÉ dans une vraie conversation (le
+canal de test ne livre pas), avec le contrôle prévu pour 2a.
 
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 

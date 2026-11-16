@@ -2139,7 +2139,15 @@ function ouvrirFicheResa (bienId, resaId) {
   let lienCourant = null
   let lienVisible = false        // montre a l'hote : apres « Copier », ou quand le message n'est pas parti
   const encoreLaFiche = () => !$('[data-bind="feuille"]').hidden && encoreCetteResa()
-  const dateCourte = (iso) => iso ? dateIntl(String(iso).slice(0, 10), langue()) : ''
+  // ⚠ LE JOUR LOCAL, PAS LE JOUR UTC (recette de 2b, 17 novembre 2026) : un
+  // lien cree a 0 h 21 a Paris le 17 s'affichait « le 16 », parce que
+  // `slice(0, 10)` d'un horodatage ISO rend le jour en UTC.
+  const dateCourte = (iso) => {
+    const d = iso ? new Date(iso) : null
+    if (!d || Number.isNaN(d.getTime())) return ''
+    const deux = (n) => String(n).padStart(2, '0')
+    return dateIntl(`${d.getFullYear()}-${deux(d.getMonth() + 1)}-${deux(d.getDate())}`, langue())
+  }
   // ⚠ LA ZONE D'ANNONCE (`role="status"`) EST POSEE UNE FOIS et n'est jamais
   // repeinte (review 1 de 2b, constat 8) : recreee a chaque relecture, un
   // lecteur d'ecran pouvait perdre l'annonce. Seul `[data-fac-contenu]` change.
@@ -2256,6 +2264,7 @@ function ouvrirFicheResa (bienId, resaId) {
       refus(zone, e); boutonsFacture(zone, true)
     }
   }
+  const DELAI_COPIE_MS = 2000
   async function copierLienFacture (zone) {
     dire(zone, null)
     boutonsFacture(zone, false)
@@ -2268,7 +2277,11 @@ function ouvrirFicheResa (bienId, resaId) {
       if (!encoreLaFiche()) return
       lienCourant = lien
       montrerLien(zone, lien)
-      const copie = await copieP
+      // ⚠ LA COPIE EST BORNEE A 2 SECONDES (recette de 2b) : un presse-papiers
+      // qui ne repond jamais laissait les boutons coupes et la fiche sans
+      // relecture. Passe ce delai, la fiche dit « selectionnez le lien », et
+      // continue.
+      const copie = await Promise.race([copieP, new Promise(ok => setTimeout(() => ok(false), DELAI_COPIE_MS))])
       dire(zone, { cle: copie ? 'cal.fac_copie_ok' : 'cal.fac_copie_manuelle' })
       if (nouveau) await lireDetailFiche()
       boutonsFacture(zone, true)
