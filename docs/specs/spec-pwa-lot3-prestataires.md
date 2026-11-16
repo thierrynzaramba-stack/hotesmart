@@ -11,7 +11,8 @@ prestataires, dans la foulée, au lot 3 » ; §8 : « la même paire de clés se
 - **La prestataire reçoit sur son téléphone une notification** quand un ménage
   lui est attribué, quand un ménage lui est proposé (à confirmer avant
   l'échéance), quand on attend son « Vu » (la veille et le jour même, 9 h), et
-  — c'est nouveau — **quand un de ses ménages est annulé ou change de date**.
+  — c'est nouveau — **quand un de ses ménages est annulé ou change de date**,
+  et **quand l'hôte le lui retire**.
 - **Elle l'active elle-même**, dans sa page (`apps/menages/public.html`), par un
   bouton « Recevoir les notifications sur ce téléphone ». Sur iPhone, il faut
   d'abord avoir installé la page sur l'écran d'accueil — la page le dit.
@@ -78,6 +79,8 @@ référence `auth.users`) : elle ne peut pas porter une prestataire.
 | Q41 | La notification et le SMS | **La notification remplace le SMS** ; le SMS repart seul si aucun appareil ne l'a reçue |
 | Q42 | La nuit | **À toute heure**, comme les SMS d'aujourd'hui |
 | Q43 | Les fichiers d'interface | Accord pour `apps/menages/public.html`, `apps/menages/sw.js`, `pages/menages.html` |
+| Q44 | L'annulation sans appareil abonné | **SMS et e-mail aussi**, même règle que les trois autres avis (décision du 17 novembre) |
+| Q45 | Un ménage que l'hôte lui retire | **Elle est prévenue** : « ne vous est plus confié », mêmes canaux (décision du 17 novembre) |
 
 ## 3. Ce que voit la prestataire
 
@@ -120,6 +123,7 @@ nouveau lien (§7.4).
 | à confirmer | « Ménage à confirmer : {jour} - {bien}. Répondez avant le {échéance}. » | chaque prestataire sollicitée |
 | « Vu » attendu | « Ménage du {jour} à {bien} : ouvrez votre page et touchez Vu. » (+ « C'est aujourd'hui. » le jour même) | la porteuse |
 | annulé ou déplacé | « Ménage du {jour} - {bien} annulé : la réservation est annulée ou son départ a changé. » | la porteuse, et chaque prestataire à qui il était proposé |
+| retiré par l'hôte | « Le ménage du {jour} - {bien} ne vous est plus confié. » | celle qui le portait, ou à qui la proposition est retirée |
 
 Le SMS garde ses textes actuels (GSM-7, tiret simple, au mot près pour le
 « Vu », texte de Thierry). L'annulation, quand elle part par SMS, suit les
@@ -129,7 +133,7 @@ comme Q12 du lot 2).
 
 ## 6. La règle d'envoi
 
-Pour chacun des quatre événements, dans `notifier-prestataire.js` :
+Pour chacun des cinq événements, dans `notifier-prestataire.js` :
 1. **La notification**, à tous ses appareils abonnés.
 2. **Le SMS seulement si aucun appareil ne l'a reçue** (aucun abonné, tous
    morts, tous en échec), et toujours sous les deux conditions d'aujourd'hui :
@@ -181,7 +185,13 @@ prévenue ») — la promesse centrale de ce module.
    aujourd'hui ou plus tard) : un ménage passé annulé par une correction de
    l'historique ne réveille personne. Best-effort : un envoi en échec ne
    défait pas l'annulation.
-8. **Hôte** : `fichePrestataire` (`api/menages.js`) rend `appareils: n`,
+8. **Le retrait par l'hôte** (Q45) : dans `api/menages.js`, aux gestes
+   « Retirer la proposition », « Personne » et à toute attribution qui change
+   la porteuse, après l'écriture réussie, une notification « ne vous est plus
+   confié » à celle qui perd le ménage — seulement pour un ménage à venir, et
+   jamais à celle qui le reçoit (elle a déjà son « attribué » ou son « à
+   confirmer »). Le moteur, lui, ne retire rien sans annuler : son cas est §7.7.
+9. **Hôte** : `fichePrestataire` (`api/menages.js`) rend `appareils: n`,
    lu en parallèle des lectures existantes.
 
 ## 8. Case PERFORMANCE (CLAUDE.md, huit points)
@@ -215,10 +225,7 @@ pas. Le cache hors ligne de la page reste tel quel.
 
 ## 10. Questions ouvertes (à Thierry)
 
-| # | question | proposition |
-|---|---|---|
-| Q44 | L'annulation, quand elle n'a aucun appareil abonné : part-elle aussi par SMS (nouveau SMS sur votre clé) et par e-mail ? | Oui, comme les trois autres : sinon la prestataire sans notifications ne l'apprend toujours pas |
-| Q45 | Quand **vous** lui retirez un ménage (« Retirer la proposition », « Personne », ou l'attribuer à une autre), est-elle prévenue ? | Oui, par le même texte « … ne vous est plus confié » — c'est le même risque : venir pour rien |
+Aucune : Q44 et Q45 sont tranchées (§2, 17 novembre 2026).
 
 ## 11. Étapes
 
@@ -230,14 +237,15 @@ pas. Le cache hors ligne de la page reste tel quel.
    refusé, abonnée) + code partagé du service worker.
 3. Envoi : `envoyerAPrestataire`, règle §6 dans les trois fonctions, bilan
    `push`.
-4. Annulation (§7.7) — et Q45 selon la réponse.
+4. Annulation (§7.7) et retrait par l'hôte (§7.8).
 5. Fiche de l'hôte (§4), guide utilisateur (`pages/guide.html`, si Thierry
    l'accorde), KB.
 Une review par étape, une re-review des seuls correctifs sur constat de
 sécurité ; suite aux deux horloges à zéro rouge avant chaque push.
 
 **Recette (staging, Thierry et un téléphone de prestataire)** : s'abonner,
-recevoir une attribution, une proposition, un « Vu », une annulation ; le SMS
+recevoir une attribution, une proposition, un « Vu », une annulation, un
+retrait par l'hôte ; le SMS
 qui ne part pas quand la notification est reçue, et qui part quand
 l'abonnement est retiré ; nouveau lien → plus rien ; iPhone installé.
 ⚠ Staging n'a ni cron ni clé Brevo : la proposition et le « Vu » se
