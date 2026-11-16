@@ -1183,6 +1183,17 @@ de nouvelle review : les trois permises au lot sont faites.
 Reste à voir en production : un envoi LIVRÉ dans une vraie conversation (le
 canal de test ne livre pas), avec le contrôle prévu pour 2a.
 
+**Re-recette des deux correctifs** (17 novembre 2026, 0 h 59 à Paris = 23 h 59
+UTC le 16 ; `staging` = 718025fa, qui porte c6471952) :
+- **Copier un lien** : « Lien copié. », boutons rendus en 1,3 s (le
+  presse-papiers a répondu cette fois). Puis presse-papiers rendu muet dans la
+  page (promesses qui ne se résolvent jamais) : « Copie automatique impossible
+  : sélectionnez le lien ci-dessus », boutons rendus en **2,0 s**, lien
+  affiché. Conforme.
+- **Date d'envoi après minuit** : le message de 0 h 27 à Paris (23 h 27 UTC le
+  16), affiché « le 16 nov. » avant le correctif, s'affiche « **Le message du
+  17 nov. 2026** ». Conforme.
+
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
 Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.
