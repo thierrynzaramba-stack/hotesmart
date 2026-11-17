@@ -1143,6 +1143,19 @@ ne concernent que 7b et 7c, et se confirmeront à leur recette :
 - **Q37 → non** : la lecture « à la date » ne montre que les documents
   reçus ; les prévisions vivent dans la lecture étalée.
 
+**Recette du 17 novembre 2026 sur staging, Q38 tranchée par Thierry** :
+- **Q38 — l'avis d'impôt n'a pas de TVA : HT = TTC, TVA = 0.** Constat de
+  la recette : un avis de taxe foncière de 3 700 €, type et période lus par
+  l'IA, laissait HT et TVA vides ; l'écran les comptait « sans montant lu »
+  et marquait tout le total « Estimation ». Thierry a demandé un « affichage
+  adapté », précisé ainsi : dans la fiche, les cases HT et TVA d'un avis
+  d'impôt sont retirées et l'aide dit « sans objet » ; l'impôt ne compte plus
+  comme montant manquant ; et le total HT **inclut** l'impôt (en
+  comptabilité, un impôt est une charge sans TVA). Le writer pose la règle
+  (`montantsDuType`), la base la tient (`charges_impot_ck`, migration
+  `2026-11-17-charges-avis-impot.sql`, qui corrige d'abord les avis déjà
+  enregistrés). Un TTC non lu reste non lu, et le HT avec lui.
+
 Les questions, telles qu'elles ont été posées :
 
 - **Q34** — La vue des totaux proposée par défaut : **étalée** (la vraie
@@ -1198,6 +1211,21 @@ oracle en force brute sur 1 800 écritures aléatoires : 0 écart.
 | 6 | mineur | une période non envoyée était effacée | **corrigé** : gardée, comme le type ; envoyée vide, elle s'efface (test) |
 | 7 | mineur | un avoir lu avec son signe tombait à « non lu » | **corrigé** : lu signé puis en valeur absolue ; consigne précisée (test) |
 | 8 | mineur | rejouer 2026-11-10 après 7a ; un « 0 » inventé si les indicateurs manquent | **corrigé** : en-tête de la migration ; la vue dit « non lu » sans indicateur (test) |
+
+### 14.11 Review du correctif « avis d'impôt » (17 novembre 2026)
+
+Une review, sur `3cf53692b2cf5044a82497b1c417640e3f8a1f67` (arbre
+`/home/claude/hotesmart-lot3`, branche `charges-lot7-periode`, plage
+`5752649e..3cf53692`, 14 fichiers, tous dans le diff). **Aucun constat de
+sécurité.** Quatre constats mineurs, corrigés sans nouvelle review (règle
+« une review par commit ») :
+
+| | Constat | Correction |
+|---|---|---|
+| A | Quitter « Avis d'impôt » dans la fiche gardait HT = TTC et TVA = 0 : une facture mal classée par l'IA repartait avec une TVA à 0 que personne n'a lue, sans « Estimation » | Les deux cases se vident quand elles valent encore ce que la règle a posé ; des montants tapés survivent |
+| B | L'en-tête de la migration ne disait pas « après le déploiement du code » : posée avant, la contrainte mettait la lecture des avis en panne, relancée à chaque cron | En-tête et KB le disent |
+| C | Le contrôle laissait passer une contrainte affaiblie (TVA = 0 seulement) | Il vérifie les deux moitiés de la règle, sous les deux écritures que Postgres peut rendre, et `convalidated` ; éprouvé sur Postgres 16 : règle affaiblie, contrainte non validée et contrainte absente rendent `false` |
+| D | Un avis lu en HT seul perdait son montant | Un impôt n'a qu'un montant : le TTC lu, sinon le HT lu ; la consigne de l'IA le dit |
 
 ## 12. Trace des reviews du lot 2
 

@@ -383,6 +383,7 @@
   "charges.a_traiter_vide": "Rien à traiter.",
   "charges.acces_refuse": "Cette page est réservée au titulaire du compte.",
   "charges.afficher_plus": "Afficher plus",
+  "charges.aide_avis_impot": "HT et TVA : sans objet, un impôt n'a pas de TVA. Seul le montant total se saisit.",
   "charges.aide_avoir": "Un avoir diminue le total : tapez le montant tel qu'il est écrit.",
   "charges.aide_echeancier": "Un échéancier n'est pas une charge : il ne compte pas dans les totaux.",
   "charges.aide_regularisation": "Les montants sont ceux de la consommation de la période : c'est la charge. Le solde ne compte pas.",
