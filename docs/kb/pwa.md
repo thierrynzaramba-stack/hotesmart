@@ -2320,3 +2320,106 @@ de recette avec un contact : **1 761 octets transférés** (4 130 décodés),
 
 **Reste à voir en production** : l'arrivée réelle de l'e-mail d'un contact et
 son lien — au premier essai, avec Thierry.
+
+## 13. Lot 3 — les notifications de la prestataire de ménage (17 novembre 2026)
+
+Spec : `docs/specs/spec-pwa-lot3-prestataires.md` (décisions Q40 à Q45 de
+Thierry). Le lot 2 notifie les personnes qui ont un **compte** ; une
+prestataire n'en a pas — son lien est sa seule identité. Le lot 3 lui donne
+ses propres appareils abonnés, sur le **profil**.
+
+### 13.1 Étape 1 — côté serveur : la table, le module, les deux gestes, l'état
+
+**La table** `push_abonnements_prestataires`
+(`migrations/2026-11-17-push-abonnements-prestataires.sql`) : une ligne = un
+appareil, pour un profil (`profil_id → profiles(id)`, cascade) et son compte
+(`compte_id`). RLS active, **aucune politique** : le serveur seul lit et
+écrit.
+
+- ⚠ **L'unicité porte sur (profil, adresse), pas sur l'adresse seule.** Sur
+  Android, les applis installées d'une même prestataire chez deux hôtes
+  partagent la portée `/apps/menages/`, donc le même abonnement : il sert aux
+  deux profils. Se désabonner chez l'un ne touche pas l'autre.
+
+**La purge est EN BASE, pas dans les chemins d'écriture.** Un déclencheur
+`security definer` sur `profiles` supprime les appareils de la personne quand
+son **jeton change** (nouveau lien), quand elle est **désactivée**, ou quand
+son **mode d'accès change**. L'ancien téléphone — peut-être perdu — ne reçoit
+plus rien. C'est la donnée qui porte la règle (même leçon que
+`menages.vu_par`) : trois écrivains de `profiles` existent dans
+`api/membres.js`, et aucun test n'attrape le quatrième qui n'existe pas
+encore. `security definer`, parce qu'un `delete` sans politique, exécuté par
+un rôle soumis à la RLS, ne supprimerait rien — en silence.
+
+Éprouvé sur un Postgres 16 local, migration appliquée deux fois (idempotente) :
+prénom changé → 2 appareils gardés ; même jeton réécrit → 2 gardés ; nouveau
+lien → 0 ; désactivée → 0 ; réactivée → rien de rendu ; mode « compte » → 0 ;
+nouveau lien écrit par un rôle **sous RLS** → 0 ; doublon (profil, adresse) →
+refusé ; profil supprimé → 0.
+
+⚠ **Un cas limite, assumé.** « Régénérer le lien » écrit `profiles.pwa_token`
+**avant** `public_tokens.token`, et revient en arrière si la seconde écriture
+échoue. La purge a alors déjà eu lieu : le lien d'avant fonctionne toujours,
+mais ses appareils sont désabonnés. Sa page le verra (son appareil n'est plus
+dans la liste) et elle pourra se réabonner. Rendre la purge différée pour ce
+seul chemin d'échec coûterait plus que le geste qu'il demande.
+
+**Le module** `lib/push/abonnements-prestataires.js` — le seul qui écrit dans
+la table : `enregistrer`, `retirer`, `lister`, `pourEnvoi`, `apresEnvoi`. La
+validation de l'abonnement est **celle du lot 2, importée** (`validerAbonnement`,
+liste des services d'envoi, anti-SSRF) ; le libellé de l'appareil et
+l'empreinte aussi. Plafond de 10 appareils **par profil**, compté hors de
+l'appareil qu'on réabonne. `lister` ne rend ni adresse ni clé : l'empreinte
+(16 hexa) et le libellé.
+
+**Les deux gestes**, dans `api/menages-public.js` (l'API de sa page) :
+`POST action=push_abonner` (`abonnement`, `appareil`) et
+`POST action=push_retirer` (`endpoint`). Derrière la garde existante :
+`public_tokens` (le compte) puis `profilActifDuJeton` (la personne). Le profil
+et le compte viennent **du lien**, jamais du corps. Refus :
+
+| cas | statut | motif |
+|---|---|---|
+| aperçu de l'hôte (`apercu=1`, en requête ou en corps) | 403 | `apercu` — rien n'est lu |
+| clés de notification absentes (s'abonner seulement) | 503 | `non_configure` |
+| lien inconnu, profil désactivé, pas un accès par lien | 401 | (garde) |
+| adresse hors des services d'envoi, clés invalides | 400 | motif du module |
+| plafond atteint | 409 | `plafond_atteint` |
+| base en panne | 503 | `lecture_impossible` / `ecriture_impossible` |
+
+Se désabonner marche **même sans clés** : on doit toujours pouvoir se retirer.
+
+**L'état dans la réponse de sa page** : le GET du planning porte
+`push: { pret, cle_publique, appareils: [empreintes] }`. La page se reconnaît
+en comparant l'empreinte de son propre abonnement. Lecture en panne →
+`appareils: null` et `erreur: 'lecture_impossible'` : la page dira « on ne sait
+pas », pas « pas abonnée », et le planning se sert quand même.
+
+**L'en-tête `Cache-Control: private, no-store`** est posé **en tête** du
+handler, avant le premier refus (le 401 du jeton manquant, l'OPTIONS). Il
+manquait à cet endpoint avant le lot — Vercel posait son défaut
+`public, max-age=0, must-revalidate`.
+
+**Mesure (case 8, requêtes Supabase du planning)** — banc à requêtes comptées,
+un bien, un séjour, un ménage, contre `main` `082d376e` puis contre la
+branche :
+
+| | requêtes | dont écritures | appels du navigateur |
+|---|---|---|---|
+| avant | 12 | 1 (horodatage de sa visite) | 1 |
+| après | 13 | 1 | 1 |
+
+La lecture des abonnements part juste après la garde du profil, **avant** la
+lecture des biens, et n'est attendue qu'au moment de répondre : elle ne
+rallonge pas le chemin. `tests/menages-public-push.test.js` tient les deux
+(le compte et l'ordre).
+
+**Tests** : `tests/menages-public-push.test.js` (30). Contre-épreuve contre
+l'API d'avant (module et migration recopiés, seule l'API diffère) : les 17
+tests de l'API et de la page rougissent ; deux d'entre eux passaient d'abord
+pour une mauvaise raison (un `>= 400` que l'action inconnue d'avant
+satisfaisait déjà) et exigent désormais le **401 de la garde**. Quatorze
+mutations des gardes (aperçu, en-tête, parallélisme, profil pris du corps,
+garde retirée, clés, `appareils: null`, filtre par profil au retrait, clé
+d'unicité, plafond, lecture non filtrée, empreinte qui laisserait sortir
+l'adresse, personne absente) : toutes attrapées.

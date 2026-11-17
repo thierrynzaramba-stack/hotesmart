@@ -15,6 +15,8 @@ const { colonneAbsente } = require('../lib/colonne-absente')
 const { chargerLiaisons, chargerDisponibilites, chargerRefus,
         deciderParGarde, echeanceOffre, proposeesDe } = require('../lib/cleaning/assign')
 const { notifierProposition } = require('../lib/cleaning/notifier-prestataire')
+const abosPresta = require('../lib/push/abonnements-prestataires')
+const { clesVapid } = require('../lib/push/envoyer')
 // ⚠ `cleJour` normalise une date de calendrier a midi UTC. A minuit, le moindre
 // decalage de fuseau la fait basculer d'un jour — piege deja corrige deux fois
 // dans ce depot. C'est la MEME fonction que celle du moteur : deux
@@ -223,7 +225,88 @@ function refuserPorteur (res, statut) {
     : res.status(401).json({ error: 'Token invalide' })
 }
 
+// ─── LES NOTIFICATIONS DE LA PRESTATAIRE (PWA lot 3, étape 1) ───────────────
+// Spec : docs/specs/spec-pwa-lot3-prestataires.md §3 et §7.3 · KB : docs/kb/pwa.md §13
+//
+// Le porteur du lien, résolu une fois : la ligne `public_tokens` (le compte)
+// PUIS la garde unique `profilActifDuJeton` (la personne). Rend
+// { statut } à refuser tel quel, ou { userId, profil }.
+async function porteurDuJeton (token) {
+  const { data: pt, error } = await supabase
+    .from('public_tokens').select('user_id').eq('token', token).maybeSingle()
+  if (error) {
+    console.error('[menages-public] lecture du token echec:', error.message)
+    return { statut: 503 }
+  }
+  if (!pt) return { statut: 401 }
+  const porteur = await profilActifDuJeton(pt.user_id, token)
+  if (porteur.statut) return { statut: porteur.statut }
+  return { userId: pt.user_id, profil: porteur.profil }
+}
+
+// L'état que la page lit pour se reconnaître : la clé publique (pas un secret),
+// et les EMPREINTES de ses appareils — jamais une adresse d'envoi ni une clé.
+// `appareils: null` = on n'a pas pu lire : la page le dit, elle ne conclut pas
+// « pas abonnée ».
+function etatPush (liste) {
+  const cles = clesVapid()
+  const lu = !!(liste && liste.ok)
+  return {
+    pret: !!cles,
+    cle_publique: cles ? cles.publique : null,
+    appareils: lu ? liste.appareils.map(a => a.empreinte) : null,
+    ...(lu ? {} : { erreur: 'lecture_impossible' })
+  }
+}
+
+const STATUT_PUSH = {
+  abonnement_absent: 400, adresse_refusee: 400, cle_p256dh_invalide: 400,
+  cle_auth_invalide: 400, cible_absente: 400, personne_absente: 400,
+  plafond_atteint: 409, lecture_impossible: 503, ecriture_impossible: 503
+}
+const MESSAGE_PUSH = {
+  plafond_atteint: 'Trop d’appareils abonnés : retirez-en un d’abord.',
+  lecture_impossible: 'Service temporairement indisponible',
+  ecriture_impossible: 'Service temporairement indisponible'
+}
+
+// `push_abonner` (abonnement + libellé de l'appareil) et `push_retirer`
+// (l'adresse de CET appareil). Rend l'état à jour, comme le GET.
+async function gestePush (req, res, token, action) {
+  // ⚠ L'APERÇU DE L'HÔTE NE S'ABONNE PAS. Depuis sa fiche, l'hôte ouvre la page
+  // de sa prestataire en lecture seule : son navigateur recevrait sinon les
+  // notifications de quelqu'un d'autre. La page n'affiche pas le bouton en
+  // aperçu ; ce refus est la garde serveur qui double ce masquage.
+  if (String(req.query.apercu || '') === '1' || String((req.body || {}).apercu || '') === '1') {
+    return res.status(403).json({ error: 'Aperçu : rien ne s’abonne ici.', motif: 'apercu' })
+  }
+  if (action === 'push_abonner' && !clesVapid()) {
+    return res.status(503).json({ error: 'Notifications non configurées', motif: 'non_configure' })
+  }
+  const p = await porteurDuJeton(token)
+  if (p.statut) return refuserPorteur(res, p.statut)
+  const b = req.body || {}
+  const r = action === 'push_abonner'
+    ? await abosPresta.enregistrer({ profilId: p.profil.id, compteId: p.userId,
+        abonnement: b.abonnement, appareil: b.appareil, db: supabase })
+    : await abosPresta.retirer({ profilId: p.profil.id, endpoint: b.endpoint, db: supabase })
+  if (!r.ok) {
+    return res.status(STATUT_PUSH[r.motif] || 400)
+      .json({ error: MESSAGE_PUSH[r.motif] || 'Abonnement refusé', motif: r.motif })
+  }
+  const liste = await abosPresta.lister({ profilId: p.profil.id, db: supabase })
+  return res.status(200).json({ ok: true, ...(r.empreinte ? { empreinte: r.empreinte } : {}), push: etatPush(liste) })
+}
+
 module.exports = async function handler(req, res) {
+  // ⚠ PRIVÉ ET JAMAIS GARDÉ, POUR TOUTE RÉPONSE, ET AVANT LE PREMIER REFUS
+  // (CLAUDE.md, case PERFORMANCE point 4). Chaque réponse de cet endpoint
+  // dépend d'un jeton — un planning, des noms de voyageurs, et depuis le lot 3
+  // l'état de ses notifications. Sans en-tête, Vercel posait le défaut
+  // `public, max-age=0, must-revalidate` : rien n'était gardé, mais rien ne
+  // l'interdisait à un cache intermédiaire. Posé ici, avant le 401 du jeton
+  // manquant, il vaut pour tous les chemins, ceux d'avant compris.
+  res.setHeader('Cache-Control', 'private, no-store')
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
@@ -244,6 +327,11 @@ module.exports = async function handler(req, res) {
 
   if (req.method === 'POST') {
     const { action, event_ids, booking_id, property_id, departure_date } = req.body || {}
+
+    // --- Les notifications de la prestataire (PWA lot 3) ---
+    if (action === 'push_abonner' || action === 'push_retirer') {
+      return await gestePush(req, res, token, action)
+    }
 
     // --- markRead ---
     // ⚠ GARDE DE PORTEUR, COMME LES AUTRES ECRITURES. Ce chemin n'en avait
@@ -562,6 +650,13 @@ module.exports = async function handler(req, res) {
     const porteur = await profilActifDuJeton(userId, token)
     if (porteur.statut) return refuserPorteur(res, porteur.statut)
     const profilPresta = porteur.profil
+
+    // ⚠ L'ÉTAT DES NOTIFICATIONS SE LIT EN PARALLÈLE DU RESTE (spec §8.1) :
+    // lancé ici, attendu au moment de répondre. Aucun appel de plus pour la
+    // page, une lecture de plus côté serveur, et sa panne ne coupe rien —
+    // la page dira « on ne sait pas », pas « pas abonnée ».
+    const pushLu = abosPresta.lister({ profilId: profilPresta.id, db: supabase })
+      .catch(() => ({ ok: false, motif: 'lecture_impossible' }))
 
     // Biens du prestataire : lecture de la table `properties` (dual-provider,
     // ZERO appel Beds24). Cle universelle = provider_property_id, deja utilisee par
@@ -984,7 +1079,9 @@ module.exports = async function handler(req, res) {
       aPrendre = (aPrendre || []).filter(m => !biensEpuises.has(String(m.propId || m.property_id)))
     }
 
+    const push = etatPush(await pushLu)
     return res.json({
+      push,
       bookings: allBookings, label: tokenData.label,
       // Les menages que personne ne porte, sur ses biens. Voir le bloc plus haut
       // pour les trois gardes qui rendent cette lecture sure.
