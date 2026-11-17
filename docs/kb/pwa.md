@@ -2320,3 +2320,181 @@ de recette avec un contact : **1 761 octets transférés** (4 130 décodés),
 
 **Reste à voir en production** : l'arrivée réelle de l'e-mail d'un contact et
 son lien — au premier essai, avec Thierry.
+
+## 13. Lot 3 — les notifications de la prestataire de ménage (17 novembre 2026)
+
+Spec : `docs/specs/spec-pwa-lot3-prestataires.md` (décisions Q40 à Q45 de
+Thierry). Le lot 2 notifie les personnes qui ont un **compte** ; une
+prestataire n'en a pas — son lien est sa seule identité. Le lot 3 lui donne
+ses propres appareils abonnés, sur le **profil**.
+
+### 13.1 Étape 1 — côté serveur : la table, le module, les deux gestes, l'état
+
+**La table** `push_abonnements_prestataires`
+(`migrations/2026-11-17-push-abonnements-prestataires.sql`) : une ligne = un
+appareil, pour un profil (`profil_id → profiles(id)`, cascade) et son compte
+(`compte_id`). RLS active, **aucune politique** : le serveur seul lit et
+écrit.
+
+- ⚠ **L'unicité porte sur (profil, adresse), pas sur l'adresse seule.** Sur
+  Android, les applis installées d'une même prestataire chez deux hôtes
+  partagent la portée `/apps/menages/`, donc le même abonnement : il sert aux
+  deux profils. Se désabonner chez l'un ne touche pas l'autre.
+
+**La purge est EN BASE, pas dans les chemins d'écriture.** Un déclencheur
+`security definer` sur `profiles` supprime les appareils de la personne quand
+son **jeton change** (nouveau lien), quand elle est **désactivée**, ou quand
+son **mode d'accès change**. L'ancien téléphone — peut-être perdu — ne reçoit
+plus rien. C'est la donnée qui porte la règle (même leçon que
+`menages.vu_par`) : deux écrivains de ces colonnes existent dans
+`api/membres.js` (régénérer le lien, activer/désactiver) ; le mode d'accès ne
+se change pas aujourd'hui (refusé en 400), et sa condition est une défense pour
+le jour où il se changera. Aucun test n'attrape l'écrivain qui n'existe pas
+encore. `security definer`, parce qu'un `delete` sans politique, exécuté par
+un rôle soumis à la RLS, ne supprimerait rien — en silence.
+
+Éprouvé sur un Postgres 16 local, migration appliquée deux fois (idempotente) :
+prénom changé → 2 appareils gardés ; même jeton réécrit → 2 gardés ; nouveau
+lien → 0 ; désactivée → 0 ; réactivée → rien de rendu ; mode « compte » → 0 ;
+nouveau lien écrit par un rôle **sous RLS** → 0 ; doublon (profil, adresse) →
+refusé ; profil supprimé → 0.
+
+⚠ **Un cas limite, assumé, sur DEUX chemins.** « Régénérer le lien » écrit
+`profiles.pwa_token` **avant** `public_tokens.token`, et revient en arrière si
+la seconde écriture échoue ; « Désactiver » écrit `active = false` **avant** de
+supprimer la ligne `public_tokens`, et remet `active = true` si la suppression
+échoue. Dans les deux cas la purge a déjà eu lieu : le lien d'avant fonctionne
+toujours, mais ses appareils sont désabonnés. Sa page le verra (son appareil
+n'est plus dans la liste) et elle pourra se réabonner. Rendre la purge
+différée pour ces seuls chemins d'échec coûterait plus que le geste qu'ils
+demandent.
+
+**Le module** `lib/push/abonnements-prestataires.js` — le seul qui écrit dans
+la table : `enregistrer`, `retirer`, `lister`, `pourEnvoi`, `apresEnvoi`. La
+validation de l'abonnement est **celle du lot 2, importée** (`validerAbonnement`,
+liste des services d'envoi, anti-SSRF) ; le libellé de l'appareil et
+l'empreinte aussi. Plafond de 10 appareils **par profil**, compté hors de
+l'appareil qu'on réabonne. `lister` ne rend ni adresse ni clé : l'empreinte
+(16 hexa) et le libellé.
+
+**Les deux gestes**, dans `api/menages-public.js` (l'API de sa page) :
+`POST action=push_abonner` (`abonnement`, `appareil`) et
+`POST action=push_retirer` (`endpoint`). Derrière la garde existante :
+`public_tokens` (le compte) puis `profilActifDuJeton` (la personne). Le profil
+et le compte viennent **du lien**, jamais du corps. Refus :
+
+| cas | statut | motif |
+|---|---|---|
+| aperçu de l'hôte (`apercu=1`, en requête ou en corps) | 403 | `apercu` — rien n'est lu |
+| clés de notification absentes (s'abonner seulement) | 503 | `non_configure` |
+| lien inconnu, profil désactivé, pas un accès par lien | 401 | (garde) |
+| adresse hors des services d'envoi, clés invalides | 400 | motif du module |
+| plafond atteint | 409 | `plafond_atteint` |
+| base en panne | 503 | `lecture_impossible` / `ecriture_impossible` |
+
+Se désabonner marche **même sans clés** : on doit toujours pouvoir se retirer.
+
+**L'état dans la réponse de sa page** : le GET du planning porte
+`push: { pret, cle_publique, appareils: [empreintes] }`. La page se reconnaît
+en comparant l'empreinte de son propre abonnement. Lecture en panne →
+`appareils: null` et `erreur: 'lecture_impossible'` : la page dira « on ne sait
+pas », pas « pas abonnée », et le planning se sert quand même.
+
+**L'en-tête `Cache-Control: private, no-store`** est posé **en tête** du
+handler, avant le premier refus (le 401 du jeton manquant, l'OPTIONS). Il
+manquait à cet endpoint avant le lot — Vercel posait son défaut
+`public, max-age=0, must-revalidate`.
+
+**Mesure (case 8, requêtes Supabase du planning)** — banc à requêtes comptées,
+un bien, un séjour, un ménage, contre `main` `082d376e` puis contre la
+branche :
+
+| | requêtes | dont écritures | appels du navigateur |
+|---|---|---|---|
+| avant | 12 | 1 (horodatage de sa visite) | 1 |
+| après | 13 | 1 | 1 |
+
+La lecture des abonnements part juste après la garde du profil, **avant** la
+lecture des biens, et n'est attendue qu'au moment de répondre : elle ne
+rallonge pas le chemin. `tests/menages-public-push.test.js` tient le compte,
+l'ordre de départ, et le parallélisme (la lecture des abonnements laissée
+pendante, le planning doit lire la suite sans l'attendre) — ce dernier depuis
+la review (§13.2, constat 2) : l'ordre des appels seul ne distinguait pas
+« en parallèle » de « en série ».
+
+**Tests** : `tests/menages-public-push.test.js` (30 au commit relu, 39 après
+les suites de la review, §13.3). Contre-épreuve contre l'API d'avant (module
+et migration recopiés, seule l'API diffère) : les 17 tests de l'API et de la
+page rougissent ; deux d'entre eux passaient d'abord pour une mauvaise raison
+(un `>= 400` que l'action inconnue d'avant satisfaisait déjà) et exigent
+désormais le **401 de la garde**. Quatorze mutations des gardes (aperçu,
+en-tête, lecture déplacée en fin de chemin, profil pris du corps, garde
+retirée, clés, `appareils: null`, filtre par profil au retrait, clé d'unicité,
+plafond, lecture non filtrée, empreinte qui laisserait sortir l'adresse,
+personne absente) : toutes attrapées.
+
+### 13.2 Trace de la review de l'étape 1 (17 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, plage
+`082d376e85c644687efb57d13101a13e311ebb67..afecf67136dd6a244699f712608a78dc9a2a2776`.
+Chaque fichier cité est dans le diff de l'étape. Rapport consigné tel quel à
+réception, avant correction :
+
+> **Aucun constat de sécurité sérieux.**
+> - **Profil et compte :** ils viennent du lien (`public_tokens` puis `profilActifDuJeton`, qui exige `access_mode='lien'`), jamais du corps de la requête.
+> - **Retrait :** `retirer` ne touche que les lignes du profil.
+> - **Réponses :** elles ne rendent que des empreintes, la clé publique VAPID et le libellé. Aucune adresse d'envoi, aucune clé.
+> - **SSRF :** la validation anti-SSRF est importée du lot 2, pas recopiée.
+> - **Déclencheur SQL :** `security definer`, `search_path` fixé, noms qualifiés. Une fonction de déclencheur ne peut pas être appelée directement.
+> - **Tests :** le fichier neuf passe à 30/30, et les fichiers liés (`menages-public*`, `push*`, `pwa*`) à 330/330.
+>
+> 1. **test** — `tests/menages-public-push.test.js:69`. Le double de Supabase est trop complaisant sur `profiles` : il ignore les filtres `pwa_token` et `account_user_id`, et rend le profil quel que soit le jeton. Mesuré : j'ai remplacé dans `porteurDuJeton` l'appel par `profilActifDuJeton(pt.user_id, 'n-importe-quel-jeton')`, et les 30 tests restent verts. Conséquence : ce fichier ne peut pas détecter que la nouvelle garde trouve le **mauvais** profil du compte. Le test « le profil vient du LIEN » prouve seulement qu'il ne vient pas du corps.
+> 2. **test** — `tests/menages-public-push.test.js:446` et `:400`. Le test « en parallèle, pas à la fin » ne compare que l'ordre des appels `from()`. Mesuré : avec `const pushLu = await abosPresta.lister(...)`, donc une lecture en série avant les biens, les 30 tests passent. Mesuré aussi : en retirant le `.catch(...)` de `api/menages-public.js:659`, les 30 tests passent. Aucun test ne fait **rejeter** `lister`, le double ne rend que `{ error }`. Ce `.catch` compte pourtant : sans lui, un rejet ferait tomber le GET en 500. Et si le rejet arrive après un des `return 503` du chemin, il devient un rejet non traité, qui peut arrêter le processus. La KB (`docs/kb/pwa.md:2414` et `:2421`) affirme que « le compte et l'ordre » sont tenus et que la mutation « parallélisme » est attrapée : c'est vrai pour « à la fin », faux pour « en série ».
+> 3. **test** — `tests/menages-public-push.test.js:490`. La logique du déclencheur n'est vérifiée que par des regex, fragment par fragment. Exemple : un `or` changé en `and` dans la condition de purge, ou une condition déplacée, garderait ce test vert. La seule épreuve réelle est la passe manuelle sur Postgres 16 décrite dans la KB. À savoir, sans forcément corriger dans cette étape.
+> 4. **mineur (garde déclarative)** — `api/menages-public.js:280`. Le refus en aperçu ne vaut que pour une requête qui se **déclare** `apercu=1`. Dans `public.html`, l'enveloppe de `fetch` en aperçu rejette tout POST *avant* d'ajouter `apercu=1`. Aucun chemin réel n'atteint donc ce refus. Si l'enveloppe est contournée (régression de l'étape 2), le POST part sans `apercu=1` et le serveur abonne le navigateur de l'hôte. C'est conforme à la spec §3.6 (« requête marquée »), et ce n'est pas une fuite entre comptes : l'hôte voit ses propres données. Signal serveur possible : l'en-tête `Referer`. `public.html` n'a pas de politique de référent, donc un fetch de même origine envoie l'URL complète du cadre, `apercu=1` compris.
+> 5. **mineur (purge manquée, fenêtre de quelques ms)** — `migrations/2026-11-17-push-abonnements-prestataires.sql:62` et `lib/push/abonnements-prestataires.js:61`. Concurrence entre un abonnement et un changement de lien. Scénario : un `push_abonner` de l'ancien téléphone passe la garde. L'hôte clique alors « Régénérer » : la mise à jour de `pwa_token` déclenche le `delete`. Puis l'`upsert` de l'ancien téléphone arrive, et sa ligne survit à la purge. Correctif possible : relire la garde après l'`upsert` et supprimer la ligne si le jeton ne vaut plus, ou poser l'insertion sous condition de l'état du profil.
+> 6. **mineur (KB et commentaire inexacts)** — `migrations/2026-11-17-push-abonnements-prestataires.sql:21-22` et `docs/kb/pwa.md:2349` annoncent trois écrivains, dont « changer de mode ». Or `api/membres.js` refuse le changement de mode (400, « Le mode d'accès ne se change pas »). La condition `access_mode` du déclencheur reste une bonne défense, mais l'écrivain n'existe pas. Le « cas limite assumé » (`docs/kb/pwa.md:2360`) ne cite que « Régénérer ». La désactivation a le même retour arrière : `active=false` purge, puis l'échec du `delete` de `public_tokens` remet `active=true`. Le lien marche encore et les appareils sont désabonnés.
+> 7. **mineur (performance)** — `api/menages-public.js:19`. `require('../lib/push/envoyer')` charge `web-push` au démarrage à froid de l'endpoint de la prestataire, seulement pour lire deux variables d'environnement. Mesuré : `web-push` n'était pas chargé sur la base `082d376e`, il l'est sur la branche. Son chargement coûte environ 30 ms en local.
+> 8. **mineur** — `migrations/2026-11-17-push-abonnements-prestataires.sql:50`. L'index `push_abonnements_prestataires_profil_idx` est redondant : la contrainte `unique (profil_id, endpoint)` crée déjà un index qui commence par `profil_id`.
+> 9. **mineur (dépendance à déclarer)** — la spec citée par le code, la migration et la KB (`docs/specs/spec-pwa-lot3-prestataires.md`) n'est pas dans cette branche. Elle vit sur `pwa-lot-3-spec` (`878f3b1a`). Il faut le dire au chef de file, dans les dépendances de la remise.
+
+### 13.3 Suites données à la review (17 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review (CLAUDE.md, « une
+review par commit »).
+
+1. **Double trop complaisant** — le double de `profiles` honore désormais
+   `account_user_id` et `pwa_token` (et peut changer de réponse d'une lecture à
+   l'autre). Deux tests neufs : un profil du compte au jeton différent, un
+   profil d'un autre compte — 401 tous les deux. La mutation de la review
+   (`profilActifDuJeton(pt.user_id, 'n-importe-quel-jeton')`) rougit 7 tests.
+2. **Parallélisme et rejet** — un test laisse la lecture des abonnements
+   pendante et exige que le planning lise biens et ménages sans l'attendre ;
+   un autre la fait **rejeter** (panne réseau) et exige une page servie avec
+   `appareils: null`. Les deux mutations de la review (`await` immédiat,
+   `.catch` retiré) rougissent.
+3. **Déclencheur** — le corps de la fonction est comparé **en entier** (espaces
+   normalisés) : un `or` devenu `and` rougit, sur l'une ou l'autre des deux
+   conditions. L'épreuve sur un vrai Postgres reste la passe du §13.1, rejouée
+   après correction (deux passes, purge au nouveau lien, deux index seulement).
+4. **Aperçu** — reconnu aussi par l'en-tête `Referer` (`apercu=1` dans
+   l'adresse de la page appelante), qui ne dépend pas de l'enveloppe de
+   `fetch` de la page. Test : refus 403 sans aucune lecture pour les deux
+   gestes, et la page de la prestataire elle-même (même adresse, sans
+   `apercu`) acceptée.
+5. **Concurrence avec un changement de lien** — après l'écriture, le lien est
+   **relu** ; s'il ne vaut plus (régénéré, désactivée), la ligne écrite est
+   retirée et la réponse est le 401 de la garde. Si le changement vient après
+   la relecture, la purge passe après la ligne et l'emporte. Coût : deux
+   lectures de plus, sur l'abonnement seulement (geste rare), pas sur le
+   planning. Deux tests (lien régénéré, personne désactivée pendant le geste).
+6. **Commentaire et KB** — deux écrivains, pas trois ; le cas limite vaut aussi
+   pour la désactivation (§13.1 corrigé).
+7. **`web-push` au démarrage à froid** — les clés vivent dans
+   `lib/push/cles.js`, sans dépendance ; `lib/push/envoyer.js` les réexporte,
+   ses appelants du lot 2 ne changent pas. Test : un sous-processus qui charge
+   l'API de la prestataire ne charge pas `web-push`.
+8. **Index redondant** — retiré : l'index de la contrainte d'unicité
+   (profil_id, endpoint) le couvre.
+9. **Dépendance** — la spec vit sur `pwa-lot-3-spec` (PR #26) : déclarée dans
+   la remise au chef de file.
