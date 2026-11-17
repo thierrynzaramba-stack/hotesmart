@@ -95,7 +95,9 @@ const recent = (min) => new Date(Date.now() - min * 60e3).toISOString()
 // Autant d'appels réussis que le plafond, dans les 24 h : 3 jusqu'à la dette
 // 146, 6 depuis. Les tests SUIVENT la constante au lieu de la recopier — c'est
 // la recopie (`[300, 200, 100]`) qui les a fait rougir au changement.
-const minutesAuPlafond = () => Array.from({ length: require('../lib/guestflow-garde').PLAFOND_JOUR }, (_, k) => 300 - k * 40)
+// Toujours dans le passé et dans les 24 h, quel que soit le plafond (review de
+// la dette 146, constat 7 : `300 - k * 40` passait dans le futur dès 9).
+const minutesAuPlafond = () => Array.from({ length: require('../lib/guestflow-garde').PLAFOND_JOUR }, (_, k) => 60 + k * 20)
 const tables = () => ({ knowledge: [], bookings_snapshot: [], conversations: [], agent_tasks: [], agent_prompting: [], guestflow_appels_ia: [], automation_incidents: [] })
 const bilan = () => ({ totalMessages: 0, totalTasks: 0, totalAutoReplies: 0, errors: [], properties: [] })
 const fil = (min = 30) => [{ bookingId: B, sender: 'guest', message: 'Merci pour tout !', time: recent(min) }]
@@ -178,7 +180,7 @@ test('LE TEST QUI COMPTE (vecu du 26 octobre, Ofuro Futari) : au plafond, un bie
   for (const m of minutesAuPlafond()) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
   const r = await deuxCycles({ tables: t, messages: fil(5), mode: 'auto', pause: true,
     reponse: { type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] } })
-  // Ce qui NE change pas : le plafond mord (aucun 4e appel)…
+  // Ce qui NE change pas : le plafond mord (aucun appel de plus)…
   assert.deepStrictEqual([r.premier, r.second], [0, 0], 'le plafond s applique en pause comme ailleurs')
   // …et le message reste VISIBLE pour l'hote. Un message de voyageur ne
   // disparait jamais parce qu'un bien est en pause.
@@ -249,7 +251,7 @@ test('garde-fou : journal ABSENT (migration en retard) — l agent tourne et le 
   assert.deepStrictEqual(await G.peutAppeler(panne, { userId: U, propertyId: P, bookingId: B, results: { errors: [] } }), { ok: false, motif: 'lecture' })
 })
 
-test('revue de ecce019 (B2) : au plafond, un 4e message (« une fuite ! ») devient une tache VISIBLE et l hote est ALERTE ; les echecs ne comptent pas', async () => {
+test('revue de ecce019 (B2) : au plafond, un message de plus (« une fuite ! ») devient une tache VISIBLE et l hote est ALERTE ; les echecs ne comptent pas', async () => {
   const t = tables()
   for (const m of minutesAuPlafond()) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
   const c = charger({ tables: t, messages: [{ bookingId: B, sender: 'guest', message: 'Il y a une fuite d eau !', time: recent(2) }], reponse: { type: 'intervention', reason: 'x', auto_reply: null, sub_tasks: [] } })
@@ -376,7 +378,9 @@ test('LE TEST QUI COMPTE (dette 146, decision de Thierry « double ») : le plaf
 
 test('LE TEST QUI COMPTE (dette 146) : une tache d arret posee AVANT, avec l ancien texte « 3 appels », est reconnue — pas de seconde tache', async () => {
   // Sans ca, chaque fil arrete avant le changement recevrait une SECONDE tache
-  // « l'agent s'est arrete » au message suivant, et l'hote une seconde alerte.
+  // « l'agent s'est arrete » au message suivant. (L'alerte repart dans les deux
+  // cas : c'est voulu, revue de ecce019, B2.) Et la tache reconnue prend le
+  // texte du jour, pour ne pas dire « 3 » quand l'alerte dit « 6 ».
   const { MOTIF_ARRET_AVANT_146 } = require('../lib/guestflow/rediger')
   const t = tables()
   for (const m of minutesAuPlafond()) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
@@ -388,6 +392,7 @@ test('LE TEST QUI COMPTE (dette 146) : une tache d arret posee AVANT, avec l anc
   const enAttente = t.agent_tasks.filter(x => x.status === 'pending')
   assert.deepStrictEqual(enAttente.map(x => x.id), ['arret-ancien'], 'une seconde tache d arret a ete posee')
   assert.strictEqual(enAttente[0].guest_message, 'Et le parking ?', 'la tache existante porte le nouveau message')
+  assert.match(enAttente[0].summary, new RegExp(`\\(${require('../lib/guestflow-garde').PLAFOND_JOUR} appels en 24 h\\)`), 'la tache reconnue garde l ancien chiffre')
 })
 
 test('le panneau « Réponses de l IA » dit le VRAI plafond, dans les trois langues (dette 146)', () => {

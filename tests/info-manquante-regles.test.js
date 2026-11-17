@@ -46,7 +46,10 @@ test('LE TEST QUI COMPTE (dette 146) : l ancien texte d arret (« 3 appels ») e
   assert.ok(m, 'l ancien motif est trouve dans lib/cron-classify.js')
   assert.equal(R.MOTIF_ARRET_AVANT_146, m[1])
   assert.ok(R.MOTIFS_SANS_QUESTION.includes(R.MOTIF_ARRET_AVANT_146))
-  assert.match(R.MOTIF_ARRET, /6 appels en 24 h/)
+  const n = require('../lib/guestflow-garde').PLAFOND_JOUR
+  assert.ok(R.MOTIF_ARRET.includes(`(${n} appels en 24 h)`), 'le texte d arret suit le plafond')
+  // Le libelle de l'alerte fondateur aussi (review de la dette 146, constat 4).
+  assert.ok(lire('lib/founder-notify.js').includes('${require(\'./guestflow-garde\').PLAFOND_JOUR} appels par jour'), 'le libelle fondateur ne suit plus la constante')
   assert.deepEqual(R.questionsDe(tache({ summary: R.MOTIF_ARRET_AVANT_146 })), [])
 })
 
