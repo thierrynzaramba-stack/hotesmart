@@ -489,7 +489,7 @@ function crans (n, fmt) {
 export function phrasesDeLaNuit (j, e, data, fmt, eteintes = []) {
   const n = j.nuit
   const out = []
-  if (!n) return [fmt.t('yfe.hors_periode'), ...(pileDeLaNuit(j.date, e, data, eteintes) || []).map(l => phraseDeLigne(l, fmt))]
+  if (!n) return [fmt.t('yfe.hors_periode'), ...phrasesDeLaPile(pileDeLaNuit(j.date, e, data, eteintes), fmt)]
   if (rangNiveau(n.niveau) < 0) {
     const m = motifDe((n.non_calculable || [])[0], fmt)
     out.push(m ? `${fmt.t('yfe.non_calculable')} — ${m.quoi}` : fmt.t('yfe.non_calculable'))
@@ -520,7 +520,7 @@ export function phrasesDeLaNuit (j, e, data, fmt, eteintes = []) {
   if (n.vendue) out.push(fmt.t('yfe.vendue'))
   // 4b : les séjours de la pile, en mots — au toucher (le téléphone n'a pas
   // de survol) comme au lecteur d'écran.
-  for (const l of pileDeLaNuit(j.date, e, data, eteintes) || []) out.push(phraseDeLigne(l, fmt))
+  out.push(...phrasesDeLaPile(pileDeLaNuit(j.date, e, data, eteintes, { occupee: !!n.vendue }), fmt))
   return out
 }
 
@@ -552,9 +552,19 @@ function indexDesSejours (data) {
   return m
 }
 
+/**
+ * Les années passées d'un événement que la page sait dessiner : un recul de 1,
+ * 2 ou 3, rien d'autre. ⚠ C'EST LA SEULE PORTE (review de l'étape 2, constat
+ * 12) : le recul entre dans une classe et dans `data-couche` ; une valeur
+ * inconnue (cache d'une autre version, réponse altérée) n'y entre pas.
+ */
+function anneesValides (e) {
+  return (e && Array.isArray(e.annees) ? e.annees : []).filter(a => a && [1, 2, 3].includes(a.recul))
+}
+
 /** Les années passées allumées d'un événement, dans l'ordre (N-1 d'abord). */
 export function anneesAllumees (e, eteintes = []) {
-  return (e && Array.isArray(e.annees) ? e.annees : []).filter(a => !eteintes.includes(COUCHE_DU_RECUL[a.recul]))
+  return anneesValides(e).filter(a => !eteintes.includes(COUCHE_DU_RECUL[a.recul]))
 }
 
 /**
@@ -564,11 +574,18 @@ export function anneesAllumees (e, eteintes = []) {
  * ⚠ SANS LA LISTE DES SÉJOURS, PAS DE PILE (null) : un écran peint depuis le
  * cache n'en a pas (§16.7, point 3), et une ligne de « — » y dirait « pas
  * encore réservée » d'une nuit peut-être vendue.
+ * ⚠ L'ANNÉE DE LA LIGNE DU HAUT EST CELLE DE L'OCCURRENCE (`e.annee`, servie
+ * par le serveur), jamais l'année civile de la nuit (review de l'étape 2,
+ * constat 3) : sous les vacances de Noël 2026, le lundi 4 janvier 2027 dit
+ * « 26 / 25 / 24 », comme le lundi d'avant.
+ * @param o.occupee la nuit est prise sans séjour vendu (un blocage de l'hôte
+ *   compte comme vendue dans `nuitsOccupees`) : la ligne du haut ne dit alors
+ *   ni « vendue » ni « pas encore réservée » (constat 4).
  * @returns null | [{ recul, annee, etat, sejour?, debut?, fin? }] — etat :
- *   'vendue' | 'vide' | 'avant' (le bien ne vendait pas encore) |
+ *   'vendue' | 'vide' | 'occupee' | 'avant' (le bien ne vendait pas encore) |
  *   'a_venir' (la nuit passée n'est pas encore jouée)
  */
-export function pileDeLaNuit (date, e, data, eteintes = []) {
+export function pileDeLaNuit (date, e, data, eteintes = [], o = {}) {
   const index = indexDesSejours(data)
   if (!index) return null
   const auj = data.aujourdhui || (data.fenetre && data.fenetre.debut) || null
@@ -581,23 +598,30 @@ export function pileDeLaNuit (date, e, data, eteintes = []) {
       if (!premiere || p < premiere) return { ...base, etat: 'avant' }
     }
     const s = index.get(p)
+    if (!s && recul === 0 && o.occupee) return { ...base, etat: 'occupee' }
     if (!s) return { ...base, etat: 'vide', passee: !!(auj && p < auj) }
     return { ...base, etat: 'vendue', sejour: s, debut: p === s.debut, fin: p === s.fin }
   }
-  return [ligne(0, Number(date.slice(0, 4)), 0),
+  const anneeOcc = Number(e && e.annee)
+  return [ligne(0, Number.isInteger(anneeOcc) && anneeOcc > 0 ? anneeOcc : Number(date.slice(0, 4)), 0),
     ...anneesAllumees(e, eteintes).map(a => ligne(a.recul, a.annee, a.decalage))]
 }
 
 function libelleCanalDe (source, fmt) {
   if (!source) return null
-  if (estOffline(source)) return fmt.t('yfe.canal_direct')
   const fam = familleSource(source)
+  // ⚠ « DIRECT » EST UN MOT, PAS UNE MARQUE : il se traduit, quelle que soit la
+  // source qui le porte (`Offline` ou `direct` — review de l'étape 2, constat
+  // 8). `LIBELLE_CANAL` ne sert qu'aux marques (Airbnb, Booking.com).
+  if (estOffline(source) || (fam === 'direct' && String(source).toLowerCase().includes('direct'))) return fmt.t('yfe.canal_direct')
   // Une source inconnue s'affiche telle quelle plutôt que d'être rangée en « Direct ».
-  return fam !== 'direct' || String(source).toLowerCase().includes('direct') ? LIBELLE_CANAL[fam] : String(source)
+  return fam !== 'direct' ? LIBELLE_CANAL[fam] : String(source)
 }
 
 /** La phrase d'une ligne : au survol, dans le détail de la nuit, et pour un lecteur d'écran. */
 export function phraseDeLigne (l, fmt) {
+  // Une nuit prise sans séjour : la marque « vendue » de la case l'a déjà dit.
+  if (l.etat === 'occupee') return null
   const an = String(l.annee)
   if (l.etat === 'a_venir') return fmt.t('yfe.sejour_a_venir', { annee: an })
   if (l.etat === 'avant') return fmt.t('yfe.sejour_avant', { annee: an })
@@ -611,9 +635,14 @@ export function phraseDeLigne (l, fmt) {
   return morceaux.join(' · ')
 }
 
+/** Les phrases d'une pile, sans les lignes qui n'ont rien à dire. */
+function phrasesDeLaPile (pile, fmt) {
+  return (pile || []).map(l => phraseDeLigne(l, fmt)).filter(Boolean)
+}
+
 function rendreLigne (l, date, fmt) {
   const js = jourSemaine(date)
-  const classes = ['yfe-sejour', 'yfe-sejour--a' + l.recul, 'yfe-sejour--' + l.etat]
+  const classes = ['yfe-sejour', 'yfe-sejour--a' + Number(l.recul), 'yfe-sejour--' + l.etat]
   // L'année sur le LUNDI seulement (registre §1) : la ligne se lit sur la semaine.
   const an = js === 0 ? `<span class="yfe-sejour__an" aria-hidden="true">${esc(String(l.annee).slice(-2))}</span>` : ''
   let corps = ''
@@ -630,7 +659,8 @@ function rendreLigne (l, date, fmt) {
   } else if (l.etat === 'vide') {
     corps = `<span class="yfe-sejour__prix">${esc(fmt.t('yfe.sejour_vide_court'))}</span>`
   }
-  return `<span class="${classes.join(' ')}" title="${esc(phraseDeLigne(l, fmt))}">${an}${corps}</span>`
+  const titre = phraseDeLigne(l, fmt)
+  return `<span class="${classes.join(' ')}"${titre ? ` title="${esc(titre)}"` : ''}>${an}${corps}</span>`
 }
 
 /**
@@ -640,7 +670,7 @@ function rendreLigne (l, date, fmt) {
  * pas.
  */
 export function rendreCouches (e, ui, fmt) {
-  const annees = e && Array.isArray(e.annees) ? e.annees : []
+  const annees = anneesValides(e)
   if (!annees.length) return ''
   const eteintes = (ui.couches && ui.couches.eteintes) || []
   const boutons = annees.map(a => {
@@ -658,7 +688,10 @@ export function rendreCouches (e, ui, fmt) {
     if (a.alignement === 'semaines') notes.push(fmt.t('yfe.couche_repli', { annee: String(a.annee), n: a.recul * 52 }))
   }
   const garde = ui.couches && ui.couches.lisibles === false ? 'yfe.couches_illisibles' : 'yfe.couches_garde'
-  const echec = ui.couchesMessage ? `<p class="yfe-message" role="status">${esc(ui.couchesMessage)}</p>` : ''
+  // ⚠ SANS RÔLE (review de l'étape 2, constat 11) : la liste se repeint à
+  // chaque toucher, et une région vivante déjà remplie y était réannoncée.
+  // L'annonce se fait UNE fois, par la région de la page (`couches-annonce`).
+  const echec = ui.couchesMessage ? `<p class="yfe-message">${esc(ui.couchesMessage)}</p>` : ''
   return `<div class="yfe-couches" role="group" aria-label="${esc(fmt.t('yfe.couches_aria'))}">`
     + `<span class="small muted">${esc(fmt.t('yfe.couches_titre'))}</span>${boutons}`
     + `<p class="caption muted yfe-couches__garde">${esc(fmt.t(garde))}</p>`
@@ -698,7 +731,7 @@ function rendreJour (j, e, data, sel, fmt) {
   if (n && n.vendue) marques.push(fmt.t('yfe.vendue'))
   const eteintes = sel.eteintes || []
   const nomAccessible = [fmt.date(d, { weekday: 'long', day: 'numeric', month: 'long' }), ...phrasesDeLaNuit(j, e, data, fmt, eteintes)].join(' · ')
-  const pile = pileDeLaNuit(j.date, e, data, eteintes)
+  const pile = pileDeLaNuit(j.date, e, data, eteintes, { occupee: !!(n && n.vendue) })
   return `<button type="button" class="${classes.join(' ')}" data-nuit="${esc(j.date)}"${etatDeLaCase(j, sel)} aria-label="${esc(nomAccessible)}">`
     + `<span class="yfe-jour__tete"><span class="yfe-jour__num num">${num}</span><span class="yfe-jour__mois">${esc(mois)}</span></span>`
     + `<span class="yfe-jour__corps">${corps}</span>`

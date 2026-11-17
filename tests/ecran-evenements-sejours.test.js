@@ -137,6 +137,15 @@ test('LE TEST QUI COMPTE : l’année affichée est celle de l’occurrence trou
   assert.deepEqual(SJ.RECULS.map(k => SJ.alignerAnnee({ cle: 'evenement:inconnu', debut: '2026-12-31' }, k, MATERIAUX).annee), [2025, 2024, 2023])
 })
 
+test('LE TEST QUI COMPTE (review de l’étape 2, constat 3) : l’année d’une occurrence est celle de sa nuit principale (date fixe) ou de sa première nuit — jamais l’année civile d’une nuit affichée', () => {
+  assert.equal(SJ.anneeDeLOccurrence({ debut: '2026-12-19' }), 2026, 'Noël 2026 reste 2026 le 4 janvier 2027')
+  assert.equal(SJ.anneeDeLOccurrence({ debut: '2026-12-31', date_fixe: true, principale: '2027-01-01' }), 2027, 'le jour de l’an se nomme par SA nuit')
+  assert.equal(SJ.anneeDeLOccurrence({ debut: '2026-12-31', date_fixe: false, principale: '2027-01-01' }), 2026, 'hors date fixe : la première nuit')
+  assert.equal(SJ.anneeDeLOccurrence({ debut: '2026-12-31', date_fixe: true, principale: 'pas une date' }), 2026)
+  assert.equal(SJ.anneeDeLOccurrence({}), null)
+  assert.equal(SJ.anneeDeLOccurrence(null), null)
+})
+
 test('hors date fixe, l’écart est arrondi à la semaine : le jour de semaine tient', () => {
   const vacancesNoel = { cle: `${R.SEGMENTS.VACANCES_ZONE}:${R.nomCourt('Vacances de Noël')}`, debut: '2026-12-19' }
   for (const k of SJ.RECULS) {
@@ -373,6 +382,19 @@ test('LE TEST QUI COMPTE : chaque événement porte ses années ; une date comme
   }
   assert.ok(dates > 0, 'des dates fixes dans la fixture')
   assert.ok(ecran.evenements.some(e => e.actif === false), 'la fixture coupe bien une date commerciale')
+})
+
+test('LE TEST QUI COMPTE (review de l’étape 2, constat 3) : chaque événement de l’écran porte `annee`, celle de son occurrence — la page n’a rien à calculer', async () => {
+  const reglages = new Map([[DC.cleSegment(DC.DATES[0].cle), { actif: false }]])
+  const ecran = await charger({ eclatements: [ecl('2024-01-02', 2)], reglages })()
+  for (const e of ecran.evenements) {
+    const principale = ((e.positions || []).find(p => p.zone === 'evenement' && p.nuit === 'date') || {}).date || e.debut
+    assert.equal(e.annee, Number((e.date_fixe ? principale : e.debut).slice(0, 4)), `${e.cle} ${e.debut}`)
+  }
+  const noel = ecran.evenements.find(e => e.cle === `${R.SEGMENTS.VACANCES_ZONE}:${R.nomCourt('Vacances de Noël')}` && e.debut.startsWith('2026-12'))
+  assert.ok(noel && noel.fin >= '2027-01-01', 'la fixture : des vacances de Noël à cheval sur le 1er janvier')
+  assert.equal(noel.annee, 2026)
+  assert.ok(ecran.evenements.some(e => e.actif === false && Number.isInteger(e.annee)), 'une date coupée a aussi son année')
 })
 
 test('LE TEST QUI COMPTE (S4) : à l’écran, une date fixe à samedi rattaché s’aligne sur SA nuit — la Saint-Valentin 2028', async () => {

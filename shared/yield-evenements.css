@@ -182,20 +182,29 @@
 .yfe-jour__marques { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; font-size: 10px; color: var(--muted); }
 
 /* ---------- 4b : les séjours de quatre années (spec §16.2) ----------
-   Une teinte, des transparences : --sejour (alias de --ink) à 100 / 60 / 40 /
-   25 %, texte --on-ink sur les deux premières (décision 4 du registre). Jamais
-   une couleur de niveau : une barre de la couleur d'un niveau se lit comme lui. */
-.yfe-pile { display: flex; flex-direction: column; gap: 4px; }
+   Une teinte, quatre forces : --sejour (alias de --ink) à 100 / 60 / 40 / 25 %,
+   texte --on-ink sur les deux premières (décision 4 du registre). Jamais une
+   couleur de niveau : une barre de la couleur d'un niveau se lit comme lui.
+   ⚠ MÉLANGÉE À --surface, PAS À transparent (review de l'étape 2, constat 6) :
+   une barre transparente laissait voir le bord de la case à travers elle et
+   changeait de teinte selon le fond ; opaque, son contraste ne dépend plus de
+   ce qu'elle recouvre. */
+/* ⚠ ANCRÉE EN BAS (review de l'étape 2, constat 2) : la hauteur de ce qui
+   la précède change d'une case à l'autre (« Hors période » sur une ligne,
+   pastille + prix sur deux, marque « vendue » ou non). Les cases d'une rangée
+   ont la même hauteur et les piles le même nombre de lignes : posées au fond,
+   elles s'alignent, et une barre ne fait plus de marche d'une case à l'autre. */
+.yfe-pile { display: flex; flex-direction: column; gap: 4px; margin-top: auto; }
 .yfe-sejour {
   display: flex; align-items: center; gap: 4px; min-height: 22px; padding: 2px 6px;
   border-radius: 6px; font-size: 11px; font-weight: var(--fw-semibold);
   box-sizing: border-box; overflow: hidden; white-space: nowrap;
 }
 .yfe-sejour--vendue.yfe-sejour--a0 { background: var(--sejour); color: var(--on-ink); }
-.yfe-sejour--vendue.yfe-sejour--a1 { background: color-mix(in srgb, var(--sejour) 60%, transparent); color: var(--on-ink); }
-.yfe-sejour--vendue.yfe-sejour--a2 { background: color-mix(in srgb, var(--sejour) 40%, transparent); color: var(--ink); }
-.yfe-sejour--vendue.yfe-sejour--a3 { background: color-mix(in srgb, var(--sejour) 25%, transparent); color: var(--ink); }
-.yfe-sejour--vide, .yfe-sejour--avant, .yfe-sejour--a_venir { color: var(--muted); }
+.yfe-sejour--vendue.yfe-sejour--a1 { background: color-mix(in srgb, var(--sejour) 60%, var(--surface)); color: var(--on-ink); }
+.yfe-sejour--vendue.yfe-sejour--a2 { background: color-mix(in srgb, var(--sejour) 40%, var(--surface)); color: var(--ink); }
+.yfe-sejour--vendue.yfe-sejour--a3 { background: color-mix(in srgb, var(--sejour) 25%, var(--surface)); color: var(--ink); }
+.yfe-sejour--vide, .yfe-sejour--avant, .yfe-sejour--a_venir, .yfe-sejour--occupee { color: var(--muted); }
 /* Une barre CONTINUE : elle traverse l'espace entre deux cases — rembourrage
    (6) + bord (2) + la moitié de l'espace (3). Coupée au bord d'une semaine,
    elle reste carrée sans déborder ; arrondie à ses vraies extrémités seules. */
@@ -216,16 +225,16 @@
 .yfe-couches { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .yfe-couches > p { flex-basis: 100%; margin: 0; }
 .yfe-couche {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 12px;
+  display: inline-flex; align-items: center; gap: 6px; min-height: var(--control); padding: 6px 12px;
   border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
   font: inherit; font-size: 13px; font-weight: var(--fw-semibold); cursor: pointer;
 }
 .yfe-couche[aria-pressed="true"] { border-color: var(--ink); }
 .yfe-couche[aria-pressed="false"] { color: var(--muted); }
 .yfe-couche__pastille { width: 10px; height: 10px; border-radius: 3px; box-sizing: border-box; }
-.yfe-couche--a1 .yfe-couche__pastille { background: color-mix(in srgb, var(--sejour) 60%, transparent); }
-.yfe-couche--a2 .yfe-couche__pastille { background: color-mix(in srgb, var(--sejour) 40%, transparent); }
-.yfe-couche--a3 .yfe-couche__pastille { background: color-mix(in srgb, var(--sejour) 25%, transparent); }
+.yfe-couche--a1 .yfe-couche__pastille { background: color-mix(in srgb, var(--sejour) 60%, var(--surface)); }
+.yfe-couche--a2 .yfe-couche__pastille { background: color-mix(in srgb, var(--sejour) 40%, var(--surface)); }
+.yfe-couche--a3 .yfe-couche__pastille { background: color-mix(in srgb, var(--sejour) 25%, var(--surface)); }
 .yfe-couche[aria-pressed="false"] .yfe-couche__pastille { background: transparent; border: 1px solid var(--muted); }
 
 /* ---------- Téléphone : la même grille, 7 colonnes de 150 px qui défilent

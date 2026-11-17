@@ -1232,7 +1232,7 @@
   "yfe.sejour_delai_long": "{n, plural, =0 {reservada el día de llegada} one {reservada # día antes de la llegada} other {reservada # días antes de la llegada}}",
   "yfe.sejour_delai_inconnu": "fecha de reserva desconocida",
   "yfe.sejour_prix_court_inconnu": "?",
-  "yfe.sejour_delai": "−{n} d",
+  "yfe.sejour_delai": "{n, plural, =0 {mismo día} other {−# d}}",
   "yfe.sejour_vide_court": "—",
   "yfe.couches_titre": "Mostrar en cada noche",
   "yfe.couches_aria": "Años mostrados bajo cada noche",

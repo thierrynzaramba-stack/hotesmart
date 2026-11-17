@@ -240,3 +240,236 @@ test('règles V5 : la feuille de 4b n’a aucun hexa, et la barre suit le jeton 
   assert.doesNotMatch(bloc, /#[0-9a-f]{3,8}\b/i)
   for (const pct of ['60%', '40%', '25%']) assert.match(bloc, new RegExp(`var\\(--sejour\\) ${pct}`))
 })
+
+// ─── Correctifs de la review de l'étape 2 (12 novembre 2026) ─────────────────
+
+const ES = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/es.json'), 'utf8'))
+// Un fmt sur un VRAI dictionnaire, pluriel ICU du socle compris.
+const fmtDe = (dict, lang) => ({
+  t: (k, v = {}) => String(dict[k])
+    .replace(/\{(\w+),\s*plural,\s*((?:[^{}]|\{[^{}]*\})*)\}/g, (_, c, corps) => {
+      const n = Number(v[c]); const f = {}
+      for (const m of corps.matchAll(/(=\d+|\w+)\s*\{([^{}]*)\}/g)) f[m[1]] = m[2]
+      return (f['=' + n] ?? f[new Intl.PluralRules(lang).select(n)] ?? f.other ?? '').replace(/#/g, String(n))
+    })
+    .replace(/\{(\w+)\}/g, (m, c) => (v[c] !== undefined ? String(v[c]) : m)),
+  money: n => `${n} €`
+})
+const differe = () => { let liberer; const p = new Promise(r => { liberer = r }); return { p, liberer } }
+const couchesDuCache = async (b) => {
+  const c = b.cache.lire('yield-evenements', b.MOI, b.COMPTE)
+  return c && c.donnees && c.donnees.couches
+}
+
+test('LE TEST QUI COMPTE (constat 1) : deux clics rapides — UN seul PUT en vol, puis l’état COURANT ; la base, la page et le cache finissent d’accord', async () => {
+  const base = []
+  const premier = differe()
+  const b = await monter({
+    ecran: async () => reponseEcran({ eclatements: SEJOURS }),
+    couchesEcriture: async (corps) => {
+      base.push(corps.couches.eteintes.slice())
+      if (base.length === 1) { await premier.p; return { status: 200, corps: {} } }
+      return { status: 200, corps: {} }
+    }
+  })
+  await ouvrirNoel(b)
+  await b.cliquer(b.$('.yfe-ev--ouvert [data-couche="n1"]'))
+  await b.cliquer(b.$('.yfe-ev--ouvert [data-couche="n2"]'))
+  assert.deepEqual(base, [['n1']], 'le second clic ne part pas pendant que le premier est en vol')
+  assert.equal(b.$('.yfe-ev--ouvert [data-couche="n2"]').getAttribute('aria-pressed'), 'false', 'le dessin, lui, suit tout de suite')
+  premier.liberer()
+  await b.attendre(8)
+  assert.deepEqual(base, [['n1'], ['n1', 'n2']], 'au retour, c’est l’état COURANT qui part')
+  assert.deepEqual(await couchesDuCache(b), { eteintes: ['n1', 'n2'], lisibles: true })
+  assert.equal(b.$('.yfe-ev--ouvert .yfe-couches .yfe-message'), null)
+})
+
+test('LE TEST QUI COMPTE (constats 1 et 16) : seul le DERNIER envoi parle — un échec dépassé par un succès ne s’affiche pas', async () => {
+  const base = []
+  const premier = differe()
+  const b = await monter({
+    ecran: async () => reponseEcran({ eclatements: SEJOURS }),
+    couchesEcriture: async (corps) => {
+      base.push(corps.couches.eteintes.slice())
+      if (base.length === 1) { await premier.p; return { status: 503, corps: { error: 'ecriture_impossible' } } }
+      return { status: 200, corps: {} }
+    }
+  })
+  await ouvrirNoel(b)
+  await b.cliquer(b.$('.yfe-ev--ouvert [data-couche="n1"]'))
+  await b.cliquer(b.$('.yfe-ev--ouvert [data-couche="n2"]'))
+  premier.liberer()
+  await b.attendre(8)
+  assert.deepEqual(base, [['n1'], ['n1', 'n2']])
+  assert.equal(b.$('.yfe-ev--ouvert .yfe-couches .yfe-message'), null, 'pas de « non enregistré » sous un choix enregistré')
+  assert.equal(b.$('[data-bind="couches-annonce"]').textContent, '')
+  assert.deepEqual(await couchesDuCache(b), { eteintes: ['n1', 'n2'], lisibles: true })
+})
+
+test('LE TEST QUI COMPTE (constat 16) : un enregistrement refusé n’écrit PAS le cache — il garde ce que le serveur a', async () => {
+  const b = await monter({
+    ecran: async () => reponseEcran({ eclatements: SEJOURS }),
+    couchesEcriture: async () => ({ status: 503, corps: { error: 'ecriture_impossible' } })
+  })
+  await ouvrirNoel(b)
+  assert.deepEqual(await couchesDuCache(b), { eteintes: [], lisibles: true }, 'le chargement a mis la réponse en cache')
+  await b.cliquer(b.$('.yfe-ev--ouvert [data-couche="n2"]'))
+  await b.attendre(5)
+  assert.deepEqual(await couchesDuCache(b), { eteintes: [], lisibles: true })
+  // Et une relecture ne l'y met pas non plus : le serveur n'a rien accepté.
+  await b.w.charger()
+  await b.attendre(5)
+  assert.deepEqual(await couchesDuCache(b), { eteintes: [], lisibles: true })
+  assert.equal(b.$('.yfe-ev--ouvert [data-couche="n2"]').getAttribute('aria-pressed'), 'false', 'la visite garde son choix')
+})
+
+test('LE TEST QUI COMPTE (constat 1) : une relecture lue AVANT l’enregistrement ne remet pas l’ancien choix en cache', async () => {
+  const b = await monter({ ecran: async () => reponseEcran({ eclatements: SEJOURS }) })
+  await ouvrirNoel(b)
+  await b.cliquer(b.$('.yfe-ev--ouvert [data-couche="n1"]'))
+  await b.attendre(5)
+  assert.deepEqual(await couchesDuCache(b), { eteintes: ['n1'], lisibles: true })
+  // Le serveur du banc répond toujours « rien d'éteint » : une réponse lue
+  // avant l'enregistrement.
+  await b.w.charger()
+  await b.attendre(5)
+  assert.deepEqual(await couchesDuCache(b), { eteintes: ['n1'], lisibles: true }, 'le cache garde ce que le serveur a ACCEPTÉ')
+})
+
+test('LE TEST QUI COMPTE (constat 16) : un écran peint depuis le cache ne réécrit pas le cache au clic — la réponse du serveur s’en charge', async () => {
+  const r = await import(RENDU)
+  const cacheMod = await import(path.join(__dirname, '..', 'shared/cache-ecran.js'))
+  const d = await reponseEcran({ eclatements: SEJOURS })
+  let pendantLAttente = null
+  const b = await monter({
+    cache: r.pourLeCache(d),
+    ecran: async (url, w) => {
+      const barre = [...w.document.querySelectorAll('.yfe-barre')].find(x => x.dataset.ouvrir.startsWith(NOEL + '|'))
+      barre.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+      const pastille = w.document.querySelector('.yfe-ev--ouvert [data-couche="n1"]')
+      pastille.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+      for (let i = 0; i < 8; i++) await new Promise(res => setTimeout(res, 0))
+      const c = cacheMod.lire('yield-evenements', 'u-moi', 'u-moi')
+      pendantLAttente = c && c.donnees && c.donnees.couches
+      return d
+    }
+  })
+  assert.deepEqual(pendantLAttente, { eteintes: [], lisibles: true }, 'l’écran ancien n’a pas réécrit le cache')
+  await b.attendre(5)
+  assert.deepEqual(await couchesDuCache(b), { eteintes: ['n1'], lisibles: true }, 'la réponse fraîche, elle, garde le choix accepté')
+})
+
+test('LE TEST QUI COMPTE (constat 3) : sous les vacances de Noël 2026, les nuits de janvier 2027 disent « 2026 » — l’année de l’occurrence, servie par le serveur', async () => {
+  const d = await reponseEcran({ eclatements: SEJOURS })
+  const noel = d.evenements.find(e => e.cle === NOEL && e.debut.startsWith('2026-12'))
+  assert.equal(noel.annee, 2026)
+  const b = await monter({ ecran: async () => d })
+  const nuit = await ouvrirNoel(b)
+  assert.ok(nuit('2027-01-02'), 'la fixture montre le 2 janvier 2027')
+  const nom = nuit('2027-01-02').getAttribute('aria-label')
+  assert.match(nom, /2026 · pas encore réservée/)
+  assert.doesNotMatch(nom, /2027 ·/)
+  assert.match(nom, /2025 ·/)
+  // Le rendu suit `e.annee` ; sans elle (vieille réponse), l'année de la nuit.
+  const r = await import(RENDU)
+  const data = { aujourdhui: '2026-11-09', sejours: { liste: [], premiere_nuit: '2024-01-01' } }
+  assert.equal(r.pileDeLaNuit('2027-01-04', { annee: 2026, annees: [] }, data)[0].annee, 2026)
+  assert.equal(r.pileDeLaNuit('2027-01-04', { annees: [] }, data)[0].annee, 2027)
+})
+
+test('LE TEST QUI COMPTE (constat 4) : une nuit bloquée sans séjour ne dit pas « pas encore réservée » sous « vendue »', async () => {
+  const b = await monter({ ecran: async () => reponseEcran({ eclatements: SEJOURS, vendues: { '2026-12-27': ['blocage-1'] } }) })
+  const nuit = await ouvrirNoel(b)
+  const ligne0 = lignesDe(nuit('2026-12-27'))[0]
+  assert.ok(ligne0.classList.contains('yfe-sejour--occupee'), [...ligne0.classList].join(' '))
+  assert.equal(ligne0.querySelector('.yfe-sejour__prix'), null, 'pas de « — »')
+  assert.equal(ligne0.getAttribute('title'), null)
+  const nom = nuit('2026-12-27').getAttribute('aria-label')
+  assert.match(nom, /vendue/)
+  assert.doesNotMatch(nom, /2026 · pas encore réservée/)
+  // Une nuit libre voisine, elle, le dit toujours.
+  assert.match(nuit('2026-12-26').getAttribute('aria-label'), /2026 · pas encore réservée/)
+})
+
+test('LE TEST QUI COMPTE (constat 5) : arrivé « illisible », un choix enregistré efface le message', async () => {
+  const b = await monter({ ecran: async () => reponseEcran({ eclatements: SEJOURS, couches: { eteintes: [], lisibles: false } }) })
+  await ouvrirNoel(b)
+  await b.cliquer(b.$('.yfe-ev--ouvert [data-couche="n1"]'))
+  await b.attendre(5)
+  const zone = b.$('.yfe-ev--ouvert .yfe-couches').textContent
+  assert.doesNotMatch(zone, /n’a pas pu être lu/)
+  assert.match(zone, /Votre choix est gardé d’un événement à l’autre/)
+})
+
+test('constat 7 : un séjour réservé le jour même dit « J0 », jamais « −0 j »', async () => {
+  const b = await monter({ ecran: async () => reponseEcran({ eclatements: [...SEJOURS, ecl('2026-12-26', 2, { vente: '2026-12-26T09:00:00Z' })] }) })
+  const nuit = await ouvrirNoel(b)
+  assert.equal(lignesDe(nuit('2026-12-27'))[0].querySelector('.yfe-sejour__delai').textContent, 'J0')
+  assert.match(nuit('2026-12-27').getAttribute('aria-label'), /réservé le jour de l’arrivée/)
+})
+
+test('constat 8 : « Direct » se traduit, que la source soit `Offline` ou `direct` ; une source inconnue reste telle quelle', async () => {
+  const r = await import(RENDU)
+  const fmt = fmtDe(ES, 'es')
+  const ligne = canal => ({ recul: 0, annee: 2026, etat: 'vendue', sejour: { nuits: 2, prix_nuit: 100, canal, delai: 3 } })
+  assert.match(r.phraseDeLigne(ligne('Offline'), fmt), /· Directo ·/)
+  assert.match(r.phraseDeLigne(ligne('direct'), fmt), /· Directo ·/)
+  assert.match(r.phraseDeLigne(ligne('BookingCom'), fmt), /· Booking\.com ·/)
+  assert.match(r.phraseDeLigne(ligne('Abritel'), fmt), /· Abritel ·/)
+})
+
+test('constat 9 : « séjour d’une nuit » au singulier, en toutes lettres', async () => {
+  const r = await import(RENDU)
+  const l = { recul: 0, annee: 2026, etat: 'vendue', sejour: { nuits: 1, prix_nuit: 100, canal: 'airbnb', delai: 3 } }
+  assert.match(r.phraseDeLigne(l, fmtDe(FR, 'fr')), /2026 · séjour d’une nuit ·/)
+})
+
+test('constat 11 : l’échec s’annonce dans la région de la page, une fois ; la liste le montre sans rôle', async () => {
+  const b = await monter({ ecran: async () => reponseEcran({ eclatements: SEJOURS }), couchesEcriture: async () => ({ status: 503, corps: {} }) })
+  const nuit = await ouvrirNoel(b)
+  await b.cliquer(b.$('.yfe-ev--ouvert [data-couche="n2"]'))
+  await b.attendre(5)
+  const region = b.$('[data-bind="couches-annonce"]')
+  assert.equal(region.getAttribute('role'), 'status')
+  assert.match(region.textContent, /n’a pas pu être enregistré/)
+  assert.ok(!b.$('.yfe-liste').contains(region), 'hors de la liste, qui se repeint')
+  assert.equal(b.$$('.yfe-ev--ouvert .yfe-couches [role]').length, 0)
+  // Toucher une nuit repeint la liste ; le message reste visible, sans rôle.
+  await b.cliquer(nuit('2026-12-23'))
+  assert.match(b.$('.yfe-ev--ouvert .yfe-couches .yfe-message').textContent, /n’a pas pu être enregistré/)
+  assert.equal(b.$$('.yfe-ev--ouvert .yfe-couches [role]').length, 0)
+})
+
+test('constat 12 : un recul inconnu n’entre ni dans une classe ni dans `data-couche`', async () => {
+  const r = await import(RENDU)
+  const fmt = fmtDe(FR, 'fr')
+  fmt.money = n => `${n} €`
+  const e = { annees: [{ recul: '1" onclick="x', annee: 2025, decalage: 364, ca: 0, nuits: 0 }, { recul: 7, annee: 2019, decalage: 2184, ca: 0, nuits: 0 }, { recul: 2, annee: 2024, decalage: 728, ca: 0, nuits: 0 }] }
+  const html = r.rendreCouches(e, { couches: { eteintes: [] } }, fmt)
+  assert.deepEqual([...html.matchAll(/data-couche="([^"]*)"/g)].map(m => m[1]), ['n2'])
+  assert.doesNotMatch(html, /onclick/)
+  const data = { aujourdhui: '2026-11-09', sejours: { liste: [], premiere_nuit: '2020-01-01' } }
+  assert.deepEqual(r.pileDeLaNuit('2026-12-23', e, data).map(l => l.recul), [0, 2])
+})
+
+test('LE TEST QUI COMPTE (constat 15) : la page soustrait le décalage DU SERVEUR — 357 jours (calé sur l’événement), 365 (date fixe)', async () => {
+  // Un seul séjour passé, du 29 au 31 décembre 2025 : avec 364 jours, le
+  // 22 décembre 2026 tomberait le 23 décembre 2025, resté vide.
+  const passe = [ecl('2025-12-29', 3, { vente: '2025-12-01T08:00:00Z' }), ecl('2024-06-01', 2, { prix: 90 })]
+  for (const [decalage, attendu] of [[357, { '2026-12-21': 'debut', '2026-12-22': null, '2026-12-23': 'fin' }], [365, { '2026-12-29': 'debut', '2026-12-30': null, '2026-12-31': 'fin' }]]) {
+    const d = await reponseEcran({ eclatements: passe })
+    const noel = d.evenements.find(e => e.cle === NOEL && e.debut.startsWith('2026-12'))
+    noel.annees[0].decalage = decalage
+    const b = await monter({ ecran: async () => d })
+    const nuit = await ouvrirNoel(b)
+    for (const [date, bout] of Object.entries(attendu)) {
+      const a1 = lignesDe(nuit(date))[1]
+      assert.ok(a1.classList.contains('yfe-sejour--vendue'), `${decalage} : ${date}`)
+      if (bout) assert.ok(a1.classList.contains('yfe-sejour--' + bout), `${decalage} : ${date} ${bout}`)
+    }
+    // Et la nuit d'avant le séjour passé, en face, est vide.
+    const avant = Object.keys(attendu)[0]
+    const veille = new Date(Date.parse(avant + 'T00:00:00Z') - 864e5).toISOString().slice(0, 10)
+    assert.ok(lignesDe(nuit(veille))[1].classList.contains('yfe-sejour--vide'), `${decalage} : ${veille}`)
+  }
+})

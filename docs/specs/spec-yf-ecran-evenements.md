@@ -607,6 +607,11 @@ le même ordre et toujours présentes**, pour que les cases d'une semaine
 s'alignent :
 
 1. **cette année** : le séjour réservé, sinon « — » (« pas encore réservée ») ;
+   une nuit prise sans séjour vendu (un blocage de l'hôte, que `vendue`
+   compte) a une ligne **vide et muette** : la marque « vendue » l'a dit, la
+   ligne ne la contredit pas. **Son année est celle de l'occurrence**
+   (`evenements[].annee`, servie par le serveur), jamais l'année civile de la
+   nuit : sous les vacances de Noël 2026, le 2 janvier 2027 dit « 2026 » ;
 2. **N-1, N-2, N-3** : le séjour de cette nuit-là cette année-là, sinon « — »
    (« restée vide »), chaque ligne seulement si sa couche est allumée et si
    l'historique existe (aucun séjour sur les quatre ans = pas de ligne) ;
@@ -616,12 +621,17 @@ s'alignent :
   seulement à leurs vraies extrémités (un séjour qui déborde de la semaine se
   voit couper, pas finir — `lib/yield/sejours.js`, `debute_ici` / `finit_ici`).
 - **Sur chaque nuit : le prix de la nuit** ; **en bout de barre : la pastille
-  du délai** avant l'arrivée (« −42 j ») ; **le canal au survol seulement**.
+  du délai** avant l'arrivée (« −42 j », « J0 » le jour même) ; **le canal au
+  survol seulement** (« Direct » traduit, quelle que soit la source).
 - **Étiquette d'année** (« 26 », « 25 »…) **sur le lundi seulement**.
 - **Couleur** : jeton `--sejour` (alias de `--ink`) à **100 / 60 / 40 / 25 %**
   pour cette année, N-1, N-2, N-3, **texte blanc sur les deux premières**
   (décision 4 du registre). Jamais une couleur de niveau, jamais le
-  `#3F6F99` de la maquette.
+  `#3F6F99` de la maquette. ⚠ **Mélangé à `--surface`, pas à `transparent`**
+  (review de l'étape 2) : opaque, la barre ne laisse pas voir le bord de la
+  case et son contraste ne dépend pas du fond. La pile est **ancrée au bas de
+  la case** : les barres s'alignent d'une case à l'autre, quel que soit ce qui
+  est écrit au-dessus.
 - **« Afficher dans chaque nuit »** : une pastille par année passée,
   « 2025 · 1 840 € · 12 nuits » — le CA et les nuits vendues **sur la zone
   affichée**, cette année-là, après alignement. Sous les pastilles : « Votre
@@ -710,6 +720,9 @@ absente de l'écran. Si cela arrivait quand même, le repli est dit.
     réelles : `{ debut, fin (dernière nuit), nuits, prix_nuit, canal, delai }`.
     Rendre les barres par événement répéterait les mêmes séjours une trentaine
     de fois ;
+  - `evenements[].annee` — l'année de l'occurrence (nuit principale pour une
+    date fixe, première nuit sinon : `anneeDeLOccurrence`, la même règle
+    qu'`alignerAnnee`), écrite sur la ligne « cette année » ;
   - `evenements[].annees` — une entrée par année passée **présente** :
     `{ recul, annee, decalage, alignement, ca, nuits, prix_inconnus? }`. La page
     met en face de chaque nuit affichée la nuit `date − decalage` ; elle ne
@@ -740,6 +753,12 @@ absente de l'écran. Si cela arrivait quand même, le repli est dit.
 - Une préférence illisible ou une table absente : **toutes les couches
   allumées**, et l'écran reste. Une écriture refusée : le choix vaut pour la
   session, et la page le dit.
+- ⚠ **Un seul `PUT` en vol** (review de l'étape 2) : deux envois concurrents
+  n'arrivent pas forcément dans l'ordre, et la base pouvait garder le plus
+  ancien. Un clic pendant le vol ne part pas ; au retour, la page renvoie
+  l'état **courant**, et seul le dernier envoi parle. Le cache garde ce que
+  le serveur a **accepté** — jamais un échec, jamais la réponse d'une
+  relecture lue avant l'enregistrement.
 
 ### 16.6 INVENTAIRE
 
@@ -848,3 +867,18 @@ Et une décision de produit portée à Thierry depuis la review : **S4** (§16.1
   (60 %) mesure **4,3:1** sur fond blanc, sous le 4,5:1 du texte courant. La
   décision 4 du registre fixe 60 % et le texte blanc ; si la recette le juge
   trop pâle, 65 % passe à 4,6:1.
+- **Correctifs de la review (17 novembre 2026)**, rapport
+  `docs/specs/revues/review-yf-ecran-sejours-etape2-2026-11-12.md`, aucun
+  constat de sécurité : un seul `PUT` en vol (§16.5) ; pile ancrée au bas de
+  la case et barres opaques (§16.2) ; année de l'occurrence servie
+  (`evenements[].annee`) ; nuit bloquée sans « pas encore réservée » ;
+  « illisible » effacé dès le clic ; « J0 » ; « Direct » traduit ; libellés
+  en/fr ; pastilles à la hauteur `--control` ; l'échec s'annonce une fois,
+  dans une région de la page hors de la liste ; un recul inconnu n'entre
+  dans aucune classe ; une règle de mise en cache commune (`cachable`). Le
+  test du décalage prend 357 et 365 jours, plus seulement des multiples de
+  364. Chaque test neuf rougit contre le code d'avant ou contre la mutation
+  de la garde qu'il tient (12 mutations, 12 rouges). Reste pour la recette
+  (constat 14) : l'anneau de la nuit choisie et celui du focus passent sous
+  les barres voisines ; le débordement de −11 px hors d'un bouton sous Safari
+  et Firefox.
