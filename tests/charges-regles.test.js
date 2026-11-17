@@ -127,6 +127,18 @@ test('le signe : l\'avoir seul est négatif ; un montant absent reste absent', (
   assert.deepEqual(r7.signerMontants('facture', { montant_ttc_cents: 600 }), { montant_ttc_cents: 600 })
 })
 
+test('LE TEST QUI COMPTE (recette du 17 novembre 2026) : un avis d\'impôt n\'a pas de TVA — HT = TTC, TVA = 0, quoi qu\'on ait lu', () => {
+  assert.deepEqual(r7.montantsDuType('avis_impot', { montant_ht_cents: 7, montant_tva_cents: null, montant_ttc_cents: 370000 }),
+    { montant_ht_cents: 370000, montant_tva_cents: 0, montant_ttc_cents: 370000 })
+  assert.deepEqual(r7.montantsDuType('avis_impot', { montant_ht_cents: null, montant_tva_cents: 12, montant_ttc_cents: null }),
+    { montant_ht_cents: null, montant_tva_cents: 0, montant_ttc_cents: null }, 'un TTC non lu reste non lu, et le HT avec lui')
+  // Les autres types ne changent pas : la facture telle quelle, l'avoir signé.
+  assert.deepEqual(r7.montantsDuType('facture', { montant_ht_cents: null, montant_tva_cents: null, montant_ttc_cents: 600 }),
+    { montant_ht_cents: null, montant_tva_cents: null, montant_ttc_cents: 600 })
+  assert.deepEqual(r7.montantsDuType('avoir', { montant_ht_cents: 500, montant_tva_cents: 100, montant_ttc_cents: 600 }),
+    { montant_ht_cents: -500, montant_tva_cents: -100, montant_ttc_cents: -600 })
+})
+
 test('la lecture : type inconnu → « facture » ; période incohérente → aucune ; solde lu pour une régularisation SEULEMENT, signé', () => {
   const a = r7.normaliserLecture({ type_document: 'devis', periode_debut: '2026-05-01', periode_fin: '2026-04-01', solde_ttc: 12 })
   assert.deepEqual([a.type_document, a.periode_debut, a.periode_fin, a.solde_ttc_cents], ['facture', null, null, null])

@@ -1143,6 +1143,19 @@ ne concernent que 7b et 7c, et se confirmeront à leur recette :
 - **Q37 → non** : la lecture « à la date » ne montre que les documents
   reçus ; les prévisions vivent dans la lecture étalée.
 
+**Recette du 17 novembre 2026 sur staging, Q38 tranchée par Thierry** :
+- **Q38 — l'avis d'impôt n'a pas de TVA : HT = TTC, TVA = 0.** Constat de
+  la recette : un avis de taxe foncière de 3 700 €, type et période lus par
+  l'IA, laissait HT et TVA vides ; l'écran les comptait « sans montant lu »
+  et marquait tout le total « Estimation ». Thierry a demandé un « affichage
+  adapté », précisé ainsi : dans la fiche, les cases HT et TVA d'un avis
+  d'impôt sont retirées et l'aide dit « sans objet » ; l'impôt ne compte plus
+  comme montant manquant ; et le total HT **inclut** l'impôt (en
+  comptabilité, un impôt est une charge sans TVA). Le writer pose la règle
+  (`montantsDuType`), la base la tient (`charges_impot_ck`, migration
+  `2026-11-17-charges-avis-impot.sql`, qui corrige d'abord les avis déjà
+  enregistrés). Un TTC non lu reste non lu, et le HT avec lui.
+
 Les questions, telles qu'elles ont été posées :
 
 - **Q34** — La vue des totaux proposée par défaut : **étalée** (la vraie

@@ -326,6 +326,7 @@
   "charges.a_traiter_vide": "Nada por tratar.",
   "charges.acces_refuse": "Esta página está reservada al titular de la cuenta.",
   "charges.afficher_plus": "Mostrar más",
+  "charges.aide_avis_impot": "Base e IVA: no aplica, un impuesto no lleva IVA. Solo se introduce el importe total.",
   "charges.aide_avoir": "Un abono reduce el total: escriba el importe tal como figura.",
   "charges.aide_echeancier": "Un calendario de pagos no es un gasto: no se cuenta en los totales.",
   "charges.aide_regularisation": "Los importes son el consumo del periodo: ese es el gasto. El saldo no se cuenta.",

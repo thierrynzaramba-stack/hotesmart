@@ -326,6 +326,7 @@
   "charges.a_traiter_vide": "Nothing to handle.",
   "charges.acces_refuse": "This page is reserved for the account holder.",
   "charges.afficher_plus": "Show more",
+  "charges.aide_avis_impot": "Excl. VAT and VAT: not applicable, a tax carries no VAT. Only the total amount is entered.",
   "charges.aide_avoir": "A credit note reduces the total: type the amount as written.",
   "charges.aide_echeancier": "A payment schedule is not an expense: it is not counted in the totals.",
   "charges.aide_regularisation": "Amounts are the consumption for the period: that is the expense. The balance is not counted.",

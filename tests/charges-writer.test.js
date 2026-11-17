@@ -704,6 +704,27 @@ test('valider : la période (les deux bornes ou aucune, un an au plus) et le typ
   assert.deepEqual([maj.charge.type_document, maj.charge.periode_debut, maj.charge.periode_fin], ['avis_impot', '2026-01-01', '2026-12-31'])
 })
 
+test('LE TEST QUI COMPTE (recette du 17 novembre 2026) : valider un AVIS D\'IMPÔT écrit HT = TTC et TVA = 0, quoi que l\'écran envoie', async () => {
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier())
+  const r = await charges.valider(client, { compte: COMPTE, valideur: COMPTE, id: ID,
+    champs: { ...CHAMPS_OK, type_document: 'avis_impot', montant_ttc_cents: 370000, montant_ht_cents: 1, montant_tva_cents: null } },
+  { entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(r.ok, true)
+  const maj = requetes.find(x => x.op === 'update').charge
+  assert.deepEqual([maj.montant_ttc_cents, maj.montant_ht_cents, maj.montant_tva_cents], [370000, 370000, 0])
+})
+
+test('une lecture d\'avis d\'impôt sans HT ni TVA s\'écrit HT = TTC et TVA = 0 ; la lecture, elle, reste telle quelle', async () => {
+  const lu = { type_document: 'avis_impot', periode_debut: '2026-01-01', periode_fin: '2026-12-31', solde_ttc_cents: null,
+    fournisseur_nom: 'DGFIP', montant_ttc_cents: 370000, montant_ht_cents: null, montant_tva_cents: null }
+  const { client, requetes } = baseEnregistreuse((r) => (r.op === 'select'
+    ? { data: { id: ID, statut: 'a_lire', tentatives_lecture: 0, cree_le: '2026-11-09T10:00:00Z' } } : { data: { id: ID } }))
+  await charges.appliquerLecture(client, { compte: COMPTE, id: ID, resultat: { ok: true, lu } }, { entites: entitesDouble({ entites: [E1] }) })
+  const maj = requetes.find(x => x.op === 'update').charge
+  assert.deepEqual([maj.montant_ttc_cents, maj.montant_ht_cents, maj.montant_tva_cents], [370000, 370000, 0])
+  assert.deepEqual([maj.lecture_ia.montant_ht_cents, maj.lecture_ia.montant_tva_cents], [null, null], 'l\'écart lu / écrit reste mesurable')
+})
+
 test('valider sans type envoyé garde celui que la charge porte (un écran resté ouvert ne le remet pas à « facture »)', async () => {
   const { client, requetes } = baseEnregistreuse(chargeAVerifier({ type_document: 'regularisation' }))
   await charges.valider(client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: { ...CHAMPS_OK } },

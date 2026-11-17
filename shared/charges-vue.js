@@ -379,7 +379,20 @@ export function monter (racine, deps) {
     }
     if (type === 'avoir') return t('charges.aide_avoir')
     if (type === 'echeancier') return t('charges.aide_echeancier')
+    if (type === 'avis_impot') return t('charges.aide_avis_impot')
     return ''
+  }
+
+  // ⚠ UN IMPÔT N'A PAS DE TVA (décision de Thierry, recette du 17 novembre
+  // 2026) : ses cases HT et TVA se retirent et l'aide dit « sans objet ». Le
+  // serveur pose HT = TTC et TVA = 0 quoi qu'on envoie : ce masquage est un
+  // confort, la règle vit dans `montantsDuType` et dans `charges_impot_ck`.
+  function adapterMontants (type) {
+    for (const k of ['montant_ht_cents', 'montant_tva_cents']) {
+      const el = dialogue().querySelector(`[data-champ="${k}"]`)
+      const l = el && el.closest('label')
+      if (l) l.hidden = type === 'avis_impot'
+    }
   }
 
   function peindreFiche (c) {
@@ -453,6 +466,7 @@ export function monter (racine, deps) {
       + '</div>'
     // Entrée dans un champ ne doit ni fermer la fenêtre ni rien envoyer.
     dialogue().querySelector('[data-bind="fiche-form"]').addEventListener('submit', (ev) => ev.preventDefault())
+    adapterMontants(type)
   }
 
   function ouvrirFiche (id) {
@@ -483,11 +497,14 @@ export function monter (racine, deps) {
     }
     const p = controlePeriode(champs.periode_debut, champs.periode_fin)
     if (p) return { refus: p }
-    for (const k of ['montant_ht_cents', 'montant_tva_cents', 'montant_ttc_cents']) {
+    // Un avis d'impôt ne lit que son TTC : ses cases HT et TVA sont retirées.
+    const impot = champs.type_document === 'avis_impot'
+    for (const k of impot ? ['montant_ttc_cents'] : ['montant_ht_cents', 'montant_tva_cents', 'montant_ttc_cents']) {
       const c = enCentimes(v(k))
       if (c === undefined) return { refus: 'montant_invalide' }
       champs[k] = c
     }
+    if (impot) { champs.montant_ht_cents = champs.montant_ttc_cents; champs.montant_tva_cents = 0 }
     if (!champs.categorie) return { refus: 'categorie_invalide' }
     if (!champs.entite_juridique_id) return { refus: 'entite_requise' }
     return { champs }
@@ -635,6 +652,7 @@ export function monter (racine, deps) {
     if (el.dataset && el.dataset.champ === 'type_document') {
       const aide = dialogue().querySelector('[data-bind="aide-type"]')
       if (aide) aide.textContent = aideType(el.value, etat.fiche)
+      adapterMontants(el.value)
       return
     }
     if (el.dataset && el.dataset.champ === 'entite_juridique_id') {
