@@ -71,6 +71,9 @@
   </div>
 
   <div class="yfe-liste" data-bind="liste"><p class="muted" data-i18n="common.loading"></p></div>
+  <!-- 4b : l'échec d'enregistrement des années s'annonce ICI, une fois ; la
+       liste, qui se repeint à chaque toucher, le montre sans le réannoncer. -->
+  <p class="sr-only" data-bind="couches-annonce" role="status" aria-live="polite"></p>
 </main>
 
 <nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
@@ -125,14 +128,15 @@ async function appelAPI (url) {
 
 // L'écriture : même jeton relu, même compte. Elle NE LÈVE PAS sur un refus —
 // un 409 porte la nouvelle confirmation, un 503 ce qui est déjà écrit ; seule
-// une panne réseau lève.
-async function ecrire (methode, corps) {
+// une panne réseau lève. `url` : les réglages par défaut ; les couches (4b)
+// s'écrivent sur l'endpoint d'écran.
+async function ecrire (methode, corps, url = ECRITURE) {
   let jeton = null
   try {
     const { data } = await supabase.auth.getSession()
     jeton = (data && data.session && data.session.access_token) || null
   } catch { /* pas de session : le serveur répondra 401 */ }
-  const res = await fetch(ECRITURE, {
+  const res = await fetch(url, {
     method: methode,
     headers: { 'Content-Type': 'application/json', ...(jeton ? { Authorization: `Bearer ${jeton}` } : {}), ...enteteCompte() },
     body: JSON.stringify(corps)
@@ -163,7 +167,23 @@ const etat = { data: null, idx: new Map(), filtre: 'tous', ouvert: null, nuit: n
   choix: new Set(), geste: null, message: null, occupe: false, cransConfirmer: null,
   // `perime` : une écriture a réussi et l'écran ne l'a pas encore relue. Les
   // lignes affichées sont alors celles d'AVANT : aucun geste ne part dessus.
-  perime: false }
+  perime: false,
+  // 4b : les couches (années affichées sous chaque nuit), à cette personne sur
+  // ce compte (S2). ⚠ UNE FOIS TOUCHÉES, LA VISITE GARDE SON CHOIX : une
+  // relecture après un geste ne doit pas rallumer une année que l'hôte vient
+  // d'éteindre, même si l'enregistrement a échoué.
+  couches: { eteintes: [], lisibles: true }, couchesTouchees: false, couchesMessage: null,
+  // ⚠ UN SEUL ENVOI EN VOL (review de l'étape 2, constat 1) : deux PUT
+  // concurrents n'arrivent pas forcément dans l'ordre, et la base pouvait
+  // garder le plus ancien. Un clic pendant le vol marque « à renvoyer » ; au
+  // retour, on renvoie l'état COURANT. `couchesConfirmees` : ce que le serveur
+  // a, à notre connaissance — c'est ce que le cache garde.
+  couchesEnVol: false, couchesARenvoyer: false, couchesConfirmees: null, couchesDerniere: null }
+
+// ⚠ UNE SEULE RÈGLE POUR METTRE UNE RÉPONSE EN CACHE (review de l'étape 2,
+// constat 13) : le chargement et le clic sur une année passent par elle. Une
+// réponse sans logement, indisponible ou sans événements ne s'y garde pas.
+const cachable = d => !!(d && d.bien && !d.indisponible && Array.isArray(d.evenements))
 
 // ⚠ RÉGLER EXIGE UNE RÉPONSE FRAÎCHE DU SERVEUR : un écran peint depuis le cache
 // n'a ni l'état des nuits, ni la certitude des droits ni des lignes posées.
@@ -261,7 +281,8 @@ function peindre () {
   for (const b of document.querySelectorAll('[data-filtre]')) b.setAttribute('aria-pressed', String(b.dataset.filtre === etat.filtre))
   $('[data-bind="liste"]').innerHTML = rendreListe(d, etat.idx, {
     filtre: etat.filtre, ouvert: etat.ouvert, nuit: etat.nuit, ecrire: peutRegler(), choix: etat.choix,
-    geste: etat.geste, message: etat.message, occupe: etat.occupe, cransConfirmer: etat.cransConfirmer
+    geste: etat.geste, message: etat.message, occupe: etat.occupe, cransConfirmer: etat.cransConfirmer,
+    couches: etat.couches, couchesMessage: etat.couchesMessage
   }, fmt, jourLong)
 }
 
@@ -278,6 +299,10 @@ function recevoir (d, { depuisCache = false, ageMs = 0 } = {}) {
   etat.depuisCache = depuisCache
   if (!depuisCache) etat.perime = false
   etat.idx = indexerNuits(d && d.nuits)
+  if (!etat.couchesTouchees && d && d.couches && Array.isArray(d.couches.eteintes)) {
+    etat.couches = { eteintes: d.couches.eteintes.slice(), lisibles: d.couches.lisibles !== false }
+    if (!depuisCache) etat.couchesConfirmees = d.couches.eteintes.slice()
+  }
   const age = $('[data-bind="age"]')
   age.hidden = !depuisCache
   age.textContent = depuisCache ? t('yfe.cache_age', { minutes: Math.max(1, Math.round(ageMs / 60000)) }) : ''
@@ -300,7 +325,12 @@ async function charger () {
     // 200 avec une liste vide — sans cela, l'écran du logement qu'il ne voit
     // plus se repeindrait depuis le navigateur pendant douze heures.
     if (etat.moi && etat.compte) {
-      if (d && d.bien && !d.indisponible && Array.isArray(d.evenements)) ecrireCache(CACHE, etat.moi, etat.compte, pourLeCache(d))
+      // ⚠ UNE VISITE QUI A TOUCHÉ AUX ANNÉES MET EN CACHE CE QUE LE SERVEUR A
+      // ACCEPTÉ, pas la réponse : elle a pu être lue AVANT l'enregistrement
+      // (constat 1 de la review de l'étape 2).
+      const aGarder = etat.couchesTouchees && etat.couchesConfirmees
+        ? { ...d, couches: { eteintes: etat.couchesConfirmees.slice(), lisibles: true } } : d
+      if (cachable(d)) ecrireCache(CACHE, etat.moi, etat.compte, pourLeCache(aGarder))
       else oublierCache(CACHE, etat.moi, etat.compte)
     }
     recevoir(d)
@@ -589,7 +619,71 @@ function surGeste (cible) {
   return false
 }
 
+// 4b : allumer / éteindre une année. Le dessin suit tout de suite ;
+// l'enregistrement part ensuite, et un échec le DIT sans défaire le choix.
+function basculerCouche (cle) {
+  const eteintes = new Set(etat.couches.eteintes)
+  if (eteintes.has(cle)) eteintes.delete(cle); else eteintes.add(cle)
+  // ⚠ `lisibles: true` DÈS LE CLIC (constat 5) : « votre choix n'a pas pu
+  // être lu » ne vaut plus une fois que l'hôte a choisi.
+  etat.couches = { eteintes: [...eteintes], lisibles: true }
+  etat.couchesTouchees = true
+  etat.couchesMessage = null
+  etat.couchesDerniere = cle
+  annoncerCouches('')
+  peindre()
+  rendreLeFocus('data-couche', cle, false)
+  envoyerCouches()
+}
+
+// L'annonce de l'échec, une fois, hors de la liste (constat 11).
+function annoncerCouches (texte) {
+  const r = $('[data-bind="couches-annonce"]')
+  if (r) r.textContent = texte
+}
+
+const memesCouches = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every(x => b.includes(x))
+
+// ⚠ UN SEUL PUT EN VOL (constat 1). Un clic pendant le vol ne part pas : il
+// marque « à renvoyer », et la boucle renvoie l'état COURANT au retour. Seul
+// le DERNIER envoi parle — un échec dépassé ne s'affiche pas sous un succès.
+async function envoyerCouches () {
+  if (etat.couchesEnVol) { etat.couchesARenvoyer = true; return }
+  etat.couchesEnVol = true
+  let ok = false
+  let envoye = null
+  try {
+    do {
+      etat.couchesARenvoyer = false
+      envoye = etat.couches.eteintes.slice()
+      ok = false
+      try {
+        const r = await ecrire('PUT', { couches: { eteintes: envoye } }, ECRAN)
+        ok = r.ok
+      } catch (e) { logger.error('Événements', 'couches', e) }
+      if (ok) etat.couchesConfirmees = envoye
+    } while (etat.couchesARenvoyer)
+  } finally {
+    etat.couchesEnVol = false
+  }
+  // ⚠ LE CACHE GARDE LE DERNIER CHOIX ENREGISTRÉ : sinon la prochaine ouverture
+  // peindrait d'abord les années d'avant, puis les éteindrait sous les yeux de
+  // l'hôte. Jamais un échec, jamais un écran lui-même peint depuis le cache
+  // (il réécrirait un horodatage neuf sur des données anciennes).
+  if (ok && cachable(etat.data) && etat.moi && etat.compte && !etat.depuisCache && memesCouches(envoye, etat.couches.eteintes)) {
+    ecrireCache(CACHE, etat.moi, etat.compte, pourLeCache({ ...etat.data, couches: { eteintes: envoye.slice(), lisibles: true } }))
+  }
+  if (!ok) {
+    etat.couchesMessage = t('yfe.couches_non_enregistre')
+    annoncerCouches(etat.couchesMessage)
+    peindre()
+    if (etat.couchesDerniere) rendreLeFocus('data-couche', etat.couchesDerniere, false)
+  }
+}
+
 document.addEventListener('click', (ev) => {
+  const couche = ev.target.closest && ev.target.closest('[data-couche]')
+  if (couche) { basculerCouche(couche.dataset.couche); return }
   const o = ev.target.closest && ev.target.closest('[data-ouvrir]')
   if (o) {
     const id = o.dataset.ouvrir

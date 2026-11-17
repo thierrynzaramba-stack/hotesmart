@@ -69,6 +69,8 @@ function materiauxDuBanc (o = {}) {
  * @param o.vendues  { date: [resa] }
  * @param o.prixHote Map date -> centimes (bien piloté)
  * @param o.evenementsEnPlus événements déclarés supplémentaires
+ * @param o.eclatements   réservations éclatées (`eclater`) : les séjours (4b)
+ * @param o.couches       { eteintes, lisibles } rendues par l'endpoint (4b)
  */
 async function reponseEcran (o = {}) {
   const reglages = o.reglages || new Map()
@@ -86,7 +88,8 @@ async function reponseEcran (o = {}) {
       contexte: R.construireContexte({ zoneBien: 'C', vacances: VACANCES, evenements, debut: '2023-11-09', fin: opt.fin }),
       evenements, reglages, lignesPosition: lignes, materiauxPositions,
       positions: P.positionsDuContexte({ ...materiauxPositions, lignes }),
-      pressionParMois: new Map(), vendues: o.vendues || {}, parDate, ouverts, ouvertureConnue: true
+      pressionParMois: new Map(), vendues: o.vendues || {}, parDate, ouverts, ouvertureConnue: true,
+      eclatements: o.eclatements || []
     }
   }
   const avant = Module._load
@@ -113,6 +116,8 @@ async function reponseEcran (o = {}) {
     bien: bien.id,
     droits_ecriture: true,
     calcule_a: '2026-11-09T09:30:00.000Z',
+    // L'endpoint les lit à côté de l'assemblée (api/ecran/evenements.js).
+    couches: o.couches || { eteintes: [], lisibles: true },
     ...ecran
   }
 }
@@ -156,6 +161,8 @@ function i18nFr () {
  * @param o.ecriture (methode, corps, w) → { status, corps } — `PUT` / `PATCH
  *                   /api/yield-evenements` (étape 3). Sans elle, l'écriture
  *                   répond 404 : un test qui ne l'attend pas le verra.
+ * @param o.couchesEcriture (corps, w) → { status, corps } — `PUT
+ *                   /api/ecran/evenements` (4b). Sans elle : 200, le choix rendu.
  */
 async function monter (o = {}) {
   const html = lire('apps/yield/evenements.html')
@@ -168,6 +175,12 @@ async function monter (o = {}) {
     journal.fetch.push(entree)
     if (entree.url === '/api/yield-evenements' && o.ecriture) {
       const r = await o.ecriture(entree.methode, entree.corps, w)
+      const status = r && r.status ? r.status : 200
+      return { ok: status >= 200 && status < 300, status, json: async () => (r && r.corps) || {} }
+    }
+    if (entree.url === '/api/ecran/evenements' && entree.methode === 'PUT') {
+      const r = o.couchesEcriture ? await o.couchesEcriture(entree.corps, w)
+        : { status: 200, corps: { couches: { eteintes: (entree.corps.couches || {}).eteintes || [], lisibles: true } } }
       const status = r && r.status ? r.status : 200
       return { ok: status >= 200 && status < 300, status, json: async () => (r && r.corps) || {} }
     }

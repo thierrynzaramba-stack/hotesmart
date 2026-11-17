@@ -10,7 +10,7 @@
 // « Quand vos prix bougent » : 5 appels `/api` et 10 appels Supabase directs,
 // 30 088 a 43 516 octets transferes, ecran complet en 2,5 a 2,7 s.
 //
-// ⚠ LECTURE SEULE. Les gestes (poser un niveau, changer une largeur) restent
+// ⚠ LECTURE SEULE DE TOUT CE QUI FAIT UN PRIX. Les gestes (poser un niveau, changer une largeur) restent
 // sur `PUT` / `PATCH /api/yield-evenements`, avec leurs gardes d'ecriture et la
 // confirmation par le nombre de nuits.
 //
@@ -21,6 +21,14 @@
 // 9 novembre 2026), et MESURE : si l'ouverture depasse 1 s, il passe en resume
 // quotidien. `calcule_a` dit l'heure du calcul — un chiffre sans son heure est
 // un chiffre dont personne ne sait l'age.
+//
+// ⚠ UNE SEULE ECRITURE ICI, ET ELLE N'EST PAS UN REGLAGE (4b, spec §16.5) :
+// `PUT` enregistre les COUCHES que la personne allume ou eteint (2025, 2024,
+// 2023, puis les comparables). Decision S2 de Thierry, 11 novembre 2026 :
+// « chacun le sien » — la ligne est cle (personne, compte, ecran), et le PUT
+// n'ecrit QUE celle de l'appelant. Un membre en lecture seule l'ecrit aussi :
+// c'est son affichage, pas un reglage du bien. Sur le meme endpoint plutot
+// qu'une fonction Vercel de plus : tout l'ecran reste derriere un seul appel.
 
 const { createClient } = require('@supabase/supabase-js')
 const { contexteDEcran, UUID_RE } = require('../../lib/require-permission')
@@ -42,14 +50,65 @@ const jourDeParis = () =>
 
 const brut = v => (Array.isArray(v) ? v[0] : v)
 
+// ─── LES COUCHES (4b) ───────────────────────────────────────────────────────
+const ECRAN = 'evenements'
+// ⚠ DES CLES RELATIVES (« l'an dernier », pas « 2025 ») : le choix tient d'une
+// saison a l'autre. Et on garde ce qui est ETEINT : une couche nouvelle (les
+// comparables, 4c) arrive allumee, comme la maquette le veut.
+const COUCHES = ['n1', 'n2', 'n3', 'comparables']
+const nettoyer = liste => COUCHES.filter(c => Array.isArray(liste) && liste.includes(c))
+
+/**
+ * Les couches eteintes par CETTE personne sur CE compte. ⚠ ILLISIBLE N'EST PAS
+ * VIDE, MAIS L'ECRAN RESTE : tout est allume, et `lisibles: false` le dit.
+ */
+async function lireCouches (userId, compte) {
+  const { data, error } = await supabase.from('preferences_ecran').select('valeur')
+    .eq('user_id', userId).eq('compte_id', compte).eq('ecran', ECRAN).maybeSingle()
+  if (error) {
+    console.error('[ecran/evenements] couches :', error.message)
+    return { eteintes: [], lisibles: false }
+  }
+  return { eteintes: nettoyer(data && data.valeur && data.valeur.eteintes), lisibles: true }
+}
+
+function lireCorps (req) {
+  if (req.body && typeof req.body === 'object') return req.body
+  if (typeof req.body !== 'string' || !req.body) return null
+  try { return JSON.parse(req.body) } catch { return null }
+}
+
+async function ecrireCouches (req, rendre, userId, compte) {
+  const corps = lireCorps(req)
+  const eteintes = corps && corps.couches ? corps.couches.eteintes : undefined
+  // ⚠ UNE LISTE INCONNUE EST REFUSEE, PAS FILTREE : un nom de couche mal
+  // ecrit serait sinon enregistre comme « tout allume » sans que rien ne le
+  // dise.
+  if (!Array.isArray(eteintes) || eteintes.length > COUCHES.length ||
+      eteintes.some(c => !COUCHES.includes(c))) {
+    return rendre(400, { error: 'couches_invalides' })
+  }
+  const valeur = { eteintes: nettoyer(eteintes) }
+  // ⚠ LA LIGNE DE L'APPELANT, JAMAIS UNE AUTRE : `user_id` vient de la
+  // session, `compte_id` de la garde — rien du corps ne les designe.
+  const { error } = await supabase.from('preferences_ecran').upsert({
+    user_id: userId, compte_id: compte, ecran: ECRAN, valeur, mis_a_jour_le: new Date().toISOString()
+  }, { onConflict: 'user_id,compte_id,ecran' })
+  if (error) {
+    console.error('[ecran/evenements] couches, ecriture :', error.message)
+    return rendre(503, { error: 'ecriture_impossible' })
+  }
+  return rendre(200, { couches: { eteintes: valeur.eteintes, lisibles: true } })
+}
+
 async function traiter (req, res, t0) {
   const garde = await contexteDEcran(req, res)
   if (!garde.ok) return
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET')
+  if (req.method !== 'GET' && req.method !== 'PUT') {
+    res.setHeader('Allow', 'GET, PUT')
     return res.status(405).json({ error: 'Méthode non autorisée' })
   }
-  const { accountUserId: compte, contexte } = garde
+  const { accountUserId: compte, userId, contexte } = garde
   const rendre = (code, corps) => {
     // ⚠ LE COMPTE PART DU DEBUT DE LA REQUETE, garde comprise : c'est ce que
     // l'ecran paie, pas seulement ses lectures metier.
@@ -60,10 +119,12 @@ async function traiter (req, res, t0) {
   // ⚠ LE MEME DROIT QUE `GET /api/yield-evenements` : la LECTURE des
   // reservations (un niveau « Haut » en plein mai doit pouvoir s'expliquer a
   // qui regarde), l'ECRITURE des reglages pour les gestes. Refus AVANT toute
-  // lecture.
+  // lecture. Les couches suivent le meme droit : elles n'ont de sens que pour
+  // qui voit l'ecran.
   if (!peutLire(contexte, 'reservations')) {
     return rendre(403, { error: 'Droit « réservations » requis' })
   }
+  if (req.method === 'PUT') return ecrireCouches(req, rendre, userId, compte)
   const demande = brut(req.query && req.query.bien)
   if (demande != null && demande !== '' && !UUID_RE.test(String(demande))) {
     return rendre(400, { error: 'bien_invalide' })
@@ -103,15 +164,19 @@ async function traiter (req, res, t0) {
 
   // ⚠ LA FICHE COMPLETE, PAS CELLE DE LA LISTE — le defaut du 11 septembre :
   // sans `zone_scolaire`, toutes les vacances partent en « autre zone ».
-  const { data: bien, error: eBien } = await supabase
-    .from('properties').select('*').eq('id', choisi.id).maybeSingle()
+  // Les couches se lisent EN MEME TEMPS : une requete de plus, pas un
+  // aller-retour de plus.
+  const [{ data: bien, error: eBien }, couches] = await Promise.all([
+    supabase.from('properties').select('*').eq('id', choisi.id).maybeSingle(),
+    lireCouches(userId, compte)
+  ])
   if (eBien) {
     console.error('[ecran/evenements] fiche du bien :', eBien.message)
     return rendre(503, { error: 'lecture_impossible' })
   }
   if (!bien) return rendre(404, { error: 'bien_introuvable' })
   const droitsEcriture = peutEcrire(contexte, 'reglages', { id: bien.id, ref: bien.provider_property_id })
-  const sansCalcul = motif => rendre(200, { ...entete, bien: bien.id, droits_ecriture: droitsEcriture, indisponible: motif })
+  const sansCalcul = motif => rendre(200, { ...entete, bien: bien.id, droits_ecriture: droitsEcriture, couches, indisponible: motif })
   // ⚠ LA COLONNE ABSENTE SE DIT, elle ne se subit pas.
   if (!Object.prototype.hasOwnProperty.call(bien, 'zone_scolaire')) {
     console.error('[ecran/evenements] colonne zone_scolaire absente')
@@ -134,6 +199,7 @@ async function traiter (req, res, t0) {
     bien: bien.id,
     droits_ecriture: droitsEcriture,
     calcule_a: new Date().toISOString(),
+    couches,
     ...ecran
   })
 }
