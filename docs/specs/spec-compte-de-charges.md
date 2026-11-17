@@ -1121,6 +1121,12 @@ qu'aujourd'hui : rien d'inventé, `null` si c'est absent.
    `Server-Timing` porte le nombre de requêtes.
 8. **Mesure** : AVANT = la mesure du lot 3 (1 appel, 7 requêtes,
    1 492 octets, 653 ms) ; APRÈS mesuré sur staging à chaque sous-lot.
+   **APRÈS 7a, mesuré sur staging le 17 novembre 2026 à 12:30** (code
+   `9ca294e7`, trois documents dont un avis d'impôt et un avoir étalés sur
+   l'année) : **1 appel** (`/api/ecran/charges`), **7 requêtes**
+   (`Server-Timing`), **1 792 octets** de corps transférés (6 377 décodés,
+   2 092 avec les en-têtes), **631 ms** dont 581 ms au serveur. Le budget
+   tient ; les deux lectures n'ont ajouté ni appel ni requête.
 
 ### 14.8 Inventaire et mobile
 
@@ -1339,6 +1345,35 @@ hors plage le sont sans constat, chacun pour une raison dite : la migration du
 s'applique (§3) ; `lib/charges/ecran.js`, lieu d'une correction proposée au
 constat A et non retenue (la correction retenue vit dans `charges-vue.js`).
 Statut : **accepté**.
+
+### 14.12 Recette du sous-lot 7a sur staging (17 novembre 2026)
+
+Avec Thierry, sur `hotesmart-staging` et le projet Supabase de staging,
+dans l'ordre de la remise :
+
+- **a. Base.** `2026-11-13-charges-periode.sql` : succès ; son contrôle :
+  10 lignes sur 10 à `true` ; vérificateur : 0 écart. Puis, après le
+  déploiement du correctif (`9ca294e7`), `2026-11-17-charges-avis-impot.sql`
+  : succès ; son contrôle : 2 lignes sur 2 (« 1 avis, 0 hors regle ») ;
+  vérificateur : **0 écart, 366 cellules** (365 jours de l'avis, 1 jour EDF).
+- **b.1 Facture annuelle.** Un avis de taxe foncière réel, 3 700 € : type
+  « Avis d'impôt » et période du 1er janvier au 31 décembre 2026 **lus par
+  l'IA** (Thierry n'y a pas touché). Étalé : 314,24 € en janvier, 283,84 € en
+  février, 3 385,75 € sur les 11 mois de la fenêtre ; à la date : 3 700 € en
+  septembre. Vérifié au centime. Constat : HT et TVA vides comptaient « sans
+  montant lu » et marquaient le total « Estimation » → **Q38** (§14.9),
+  correctif `3cf53692` + `620da165`, revérifié à l'écran : plus
+  d'« Estimation », HT étalé 4 854,00 € (impôt inclus), cases HT et TVA
+  masquées et aide « sans objet » dans la fiche.
+- **b.2 Avoir.** Un avoir de test (Thierry n'en a pas de réel) : −2 670 €,
+  période 2026, « Impôts et taxes ». Négatif dans la liste ; TTC à la date
+  5 461,90 → 2 791,90 € ; TTC étalé 5 147,65 → 2 704,41 € (−2 443,24 € sur
+  334 jours, au centime). Ses HT et TVA, non saisis, ramènent « Estimation » :
+  c'est le comportement voulu pour un montant non lu ; aucune règle ajoutée
+  (avoir de test).
+- **c. Mesure APRÈS** : §14.7, point 8.
+
+**Recette 7a : conforme.**
 
 ## 12. Trace des reviews du lot 2
 
