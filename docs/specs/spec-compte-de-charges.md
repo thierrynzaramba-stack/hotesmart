@@ -1227,6 +1227,119 @@ sécurité.** Quatre constats mineurs, corrigés sans nouvelle review (règle
 | C | Le contrôle laissait passer une contrainte affaiblie (TVA = 0 seulement) | Il vérifie les deux moitiés de la règle, sous les deux écritures que Postgres peut rendre, et `convalidated` ; éprouvé sur Postgres 16 : règle affaiblie, contrainte non validée et contrainte absente rendent `false` |
 | D | Un avis lu en HT seul perdait son montant | Un impôt n'a qu'un montant : le TTC lu, sinon le HT lu ; la consigne de l'IA le dit |
 
+Réponse de la review, recopiée mot pour mot. Arbre lu :
+`/home/claude/hotesmart-lot3` ; branche : `charges-lot7-periode` ; plage :
+`5752649e4d0e6ba697a93cdd509b0184264dce1d..3cf53692b2cf5044a82497b1c417640e3f8a1f67`.
+Seule transformation : les entités `&amp;`, `&lt;` et `&gt;` du canal de
+retour de la review sont rendues par `&`, `<` et `>`.
+
+````
+Review du commit `3cf53692`, faite uniquement dans `/home/claude/hotesmart-lot3`, sans rien modifier.
+
+```
+$ cd /home/claude/hotesmart-lot3 && git log -1 --format=%H
+3cf53692b2cf5044a82497b1c417640e3f8a1f67
+
+$ git diff --name-only 5752649e4d0e6ba697a93cdd509b0184264dce1d 3cf53692b2cf5044a82497b1c417640e3f8a1f67
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/regles.js
+migrations/2026-11-17-charges-avis-impot.sql
+migrations/2026-11-17-controle-charges-avis-impot.sql
+shared/charges-vue.js
+shared/i18n/en.json
+shared/i18n/es.json
+shared/i18n/fr.json
+tests/charges-migration-avis-impot.test.js
+tests/charges-page.test.js
+tests/charges-regles.test.js
+tests/charges-writer.test.js
+```
+
+Branche `charges-lot7-periode`, arbre propre (seul `node_modules` est non suivi).
+
+## Sécurité
+Aucun constat. `montantsDuType` ne fait que calculer, sans lire la base. Les deux écritures gardent leurs filtres `user_id = compte`. Les rôles `anon` et `authenticated` n'ont aucun droit sur `charges` (« référence seulement » : migration du 9 novembre, l. 190).
+
+## 1. Écritures de `public.charges` qui contourneraient `montantsDuType`
+Aucune trouvée. Le seul code qui écrit `charges` est `lib/charges.js`. Les fonctions SQL des migrations n'écrivent que `charges_resume`. `scripts/recette-charges.js` passe par `appliquerLecture` et `valider`, sauf une mise à jour de `cree_le`.
+- Les autres écritures (doublons, trancher, racine) ne touchent pas aux montants. Comme toutes les lignes sont mises en règle avant la contrainte, elles ne seront pas refusées.
+- La seule panne possible vient de l'ordre de déploiement (constat B).
+
+## Constats
+
+**A. `shared/charges-vue.js` l. 655 (avec l. 424) — mineur, données faussées sans signal**
+- Scénario : l'IA classe à tort une vraie facture en `avis_impot`. Le writer écrit alors HT = TTC et TVA = 0 et écarte le HT et la TVA lus. L'hôte corrige le type en « Facture » : les cases réapparaissent déjà remplies, avec HT = TTC et TVA = 0.
+- Mesuré par une sonde dans une copie jetable, hors de l'arbre :
+  - affichage : `HT = "120,00"`, `TVA = "0,00"` ;
+  - envoi : `['facture', 12000, 0, 12000]`.
+- Résultat : une facture validée avec une TVA à 0 que personne n'a lue ni tapée. Le 0 inventé pour l'impôt devient un fait, et rien ne marque le total « Estimation ».
+- Correction proposée : quand on quitte `avis_impot` dans la fiche et que les cases valent encore « HT = TTC, TVA = 0 », les vider pour qu'elles redeviennent « non lu ». Mieux encore : faire rendre `ht_lu` et `tva_lu` par `lib/charges/ecran.js`, comme il rend déjà `solde_lu`, et remplir les cases avec.
+
+**B. `migrations/2026-11-17-charges-avis-impot.sql` l. 5 — mineur, mais une panne si l'ordre est inversé**
+- L'en-tête dit seulement « À coller APRÈS 2026-11-13 ». Il ne dit pas « APRÈS le déploiement de ce code sur l'environnement visé ».
+- Scénario : la migration est collée sur staging avant le merge et le déploiement de ce commit. L'ancien code écrit un avis avec HT et TVA vides, et la contrainte le refuse :
+  - la lecture IA rend une panne et la charge reste `a_lire`, sans tentative comptée. Le cron la relit (et paie l'IA) à chaque passage, sans jamais aboutir ;
+  - la validation de l'hôte rend une erreur 503.
+- L'ordre inverse est sans risque : le nouveau code n'a pas besoin de la contrainte.
+- Correction proposée : une ligne dans l'en-tête, et la même dans `docs/kb/compte-de-charges.md`.
+
+**C. `migrations/2026-11-17-controle-charges-avis-impot.sql` l. 23-25 — mineur : le contrôle peut dire `ok = true` à tort**
+- Les trois `like` ne vérifient ni la partie HT de la règle ni la gestion des valeurs vides.
+- Prouvé sur un Postgres 16 jetable : avec `check (type_document <> 'avis_impot' or (montant_tva_cents = 0 and montant_ttc_cents >= 0))`, la ligne 1 dit `t`.
+  - Cette contrainte affaiblie accepte HT vide avec TTC à 370 000, et HT à 1 avec TTC à 370 000.
+  - Juste après la migration, la ligne 2 dit aussi `t`, car les données sont propres à cet instant.
+- Le contrôle ne vérifie pas non plus que la contrainte est bien validée (`convalidated`).
+- Définition réelle rendue par Postgres : `CHECK (((type_document <> 'avis_impot'::text) OR ((NOT (montant_tva_cents IS DISTINCT FROM 0)) AND (NOT (montant_ht_cents IS DISTINCT FROM montant_ttc_cents)))))`.
+- Correction proposée :
+  - ajouter `def like '%NOT (montant_tva_cents IS DISTINCT FROM 0)%'` ;
+  - ajouter `def like '%NOT (montant_ht_cents IS DISTINCT FROM ' || 'montant_ttc_cents)%'` (découpé par `||` pour garder des lignes de moins de 60 caractères) ;
+  - ajouter `bool_and(convalidated)` ;
+  - mettre à jour le test 4 de `tests/charges-migration-avis-impot.test.js`, qui fige aujourd'hui la version faible.
+
+**D. `lib/charges/regles.js` l. 141 — mineur, question plutôt que défaut**
+- Si l'IA met le montant de l'impôt en HT et laisse le TTC vide, la règle jette ce HT et le montant n'apparaît plus nulle part, sauf dans `lecture_ia`.
+- La migration fait la même chose : sur ma base de test, une ligne `annulee` avec un HT à 5 et un TTC vide est passée à HT vide.
+- C'est conforme à « un TTC non lu reste non lu », mais cette règle vient du commit, pas de la décision de Thierry. Si on veut garder le seul montant lu, ce serait : `ttc ?? ht`.
+- Sans correctif, le geste moins coûteux est d'ajouter dans la consigne de `lib/charges/lecture.js` (référence seulement) : « pour un avis d'impôt, montant_ttc = montant à payer ».
+
+## 2. La migration
+Correcte sur le reste. Testée deux fois sur un Postgres 16 jetable, en jouant les fichiers tels quels :
+- la mise en règle passe avant la contrainte ;
+- le rejeu ne touche aucune ligne et fonctionne sans erreur ;
+- les lignes `a_lire`, `illisible` et `annulee` en `avis_impot` sont mises en règle sans erreur. Les `a_lire` portent de toute façon le type `facture` par défaut, puisque le type n'est posé qu'à la lecture ;
+- compatible avec `charges_montants_ck` : un TTC d'avis est toujours positif ou nul ;
+- le trigger du résumé n'a pas de liste de colonnes, donc chaque avis corrigé recalcule sa série ;
+- `type_document` est obligatoire (non nul), donc la contrainte ne peut pas être contournée par un type vide.
+
+## 3. Le front
+- Une case masquée ne bloque rien : `lireChamps` ne lit que le TTC et pose HT = TTC et TVA = 0.
+- Le masquage est bien effectif : `.chg-champ` est en `display: flex`, et la règle `[hidden] { display: none !important }` est en tête de `ui.css`, que `pages/charges.html` charge.
+- `charges-vue.js` n'a qu'un utilisateur, `pages/charges.html` : rien à reporter côté mobile.
+- La vérification des traductions fr/en/es est verte (1485 clés).
+- Seul défaut : le constat A.
+
+## 4. Les tests neufs
+Ils mordent. Contre-épreuve faite avec `git archive 5752649e` et les nouveaux tests et migrations posés par-dessus :
+- 6 rouges, comme le commit l'annonce : 1 dans `charges-regles`, 2 dans `charges-writer`, 2 dans `charges-page`, et le test 2 de la migration ;
+- les 3 autres tests de la migration lisent seulement le SQL, ce qui est attendu ;
+- sur le commit, les 4 fichiers donnent 112 sur 112.
+
+Seule réserve : le test 4 de la migration valide le contrôle faible du constat C.
+````
+
+**Confrontation, refaite par le fil** : `git diff --name-only 5752649e
+3cf53692` rend les 14 fichiers que la review recopie en tête ; tous ses
+constats (A à D) portent sur des fichiers de cette liste. Les fichiers cités
+hors plage le sont sans constat, chacun pour une raison dite : la migration du
+9 novembre et `lib/charges/lecture.js`, déclarés « référence seulement » ;
+`scripts/recette-charges.js`, vérifié sans constat (§1 du rapport) ;
+`pages/charges.html` et `shared/ui.css`, lus pour vérifier que le masquage
+s'applique (§3) ; `lib/charges/ecran.js`, lieu d'une correction proposée au
+constat A et non retenue (la correction retenue vit dans `charges-vue.js`).
+Statut : **accepté**.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et
