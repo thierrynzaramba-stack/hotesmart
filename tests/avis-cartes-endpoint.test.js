@@ -28,7 +28,7 @@ const MODULES = ['../api/avis', '../lib/require-permission', '../lib/permissions
 const jour = n => new Date(Date.now() + n * 86400000).toISOString()
 const j10 = n => jour(n).slice(0, 10)
 
-function preparer ({ user = PROD, profil = null, permissions = null, avis = [], evaluations = [], snapshots = [], menages = [], prestataires = [] } = {}) {
+function preparer ({ user = PROD, profil = null, permissions = null, avis = [], evaluations = [], snapshots = [], menages = [], prestataires = [], relationTraduction = true } = {}) {
   // `resume_bien_avis` : vide tant qu'un test ne l'a pas rempli par le VRAI
   // writer (`remplirResume`) — l'ecran lit les chiffres, il ne les calcule plus.
   const resume = []
@@ -81,8 +81,21 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         && (!q._nonNul || l[q._nonNul] != null)
       function rep () {
         let lignes
+        // Avant la migration du 11 novembre 2026, PostgREST ne connait pas la
+        // relation embarquee : PGRST200, comme en vrai.
+        if (nom === 'ota_reviews' && !relationTraduction && /avis_traductions/.test(String(q._col || ''))) {
+          return Promise.resolve({ data: null, error: { code: 'PGRST200', message: "Could not find a relationship between 'ota_reviews' and 'avis_traductions'" } })
+        }
         if (nom === 'properties') lignes = [BIEN_A, BIEN_B]
-        else if (nom === 'ota_reviews') lignes = avis.map(a => ({ ...a, cache: a.is_hidden === true ? true : a.is_hidden === false ? false : undefined }))
+        else if (nom === 'ota_reviews') {
+          // La traduction n'arrive que si la lecture l'embarque, comme en vrai.
+          const embarquee = /avis_traductions/.test(String(q._col || ''))
+          lignes = avis.map(a => {
+            const l = { ...a, cache: a.is_hidden === true ? true : a.is_hidden === false ? false : undefined }
+            if (!embarquee) delete l.traduction
+            return l
+          })
+        }
         else if (nom === 'guest_evaluations') lignes = evaluations
         else if (nom === 'bookings_snapshot') lignes = snapshots
         else if (nom === 'menages') lignes = menages
@@ -336,4 +349,57 @@ test('SECURITE : un membre « avis » lit le retour privé de SES biens, jamais 
   assert.equal(r.code, 200)
   assert.equal(avisParId(r.body).a1.texte_prive, 'Privé de A')
   assert.doesNotMatch(JSON.stringify(r.body), /Privé de B/)
+})
+
+// ─── La traduction (décisions de Thierry du 11 novembre 2026) ──────────────
+// Spec : docs/specs/avis-v5/spec-traduction-avis.md. Elle arrive TOUTE FAITE,
+// embarquee dans la lecture de l'avis : l'ecran ne traduit rien.
+const { empreinteAvis } = require('../lib/avis/traduction')
+const TEXTES_EN = { public: { source: 'en', fr: 'Super séjour', es: 'Estancia genial' }, prive: { source: 'en', fr: 'Le chauffage était faible', es: 'La calefacción era débil' } }
+const avisAnglais = (id, extra = {}) => {
+  const a = avisDe(id, { content: 'Great stay', content_public: 'Great stay', content_private: 'The heating was weak', ...extra })
+  return { ...a, traduction: { empreinte: empreinteAvis(a), textes: TEXTES_EN } }
+}
+
+test('LE TEST QUI COMPTE : la carte porte la traduction de la langue demandée, lue DANS la lecture des avis', async () => {
+  const etat = preparer({ avis: [avisAnglais('a1')] })
+  const fr = await appeler({ periode: 'toujours' })
+  assert.equal(fr.code, 200)
+  assert.deepEqual(avisParId(fr.body).a1.traduction, {
+    public: { source: 'en', texte: 'Super séjour' }, prive: { source: 'en', texte: 'Le chauffage était faible' } })
+  assert.equal(avisParId(fr.body).a1.texte, 'Great stay', 'l’original reste servi : il est à un clic')
+  const lecture = etat.requetes.find(q => q.table === 'ota_reviews' && /\bbooking_uid\b/.test(String(q._col || '')))
+  assert.match(String(lecture._col), /traduction:avis_traductions\(empreinte, textes\)/)
+  assert.equal(etat.requetes.filter(q => q.table === 'avis_traductions').length, 0, 'aucune lecture à part')
+
+  preparer({ avis: [avisAnglais('a1')] })
+  const es = await appeler({ periode: 'toujours', langue: 'es' })
+  assert.equal(avisParId(es.body).a1.traduction.public.texte, 'Estancia genial')
+  preparer({ avis: [avisAnglais('a1')] })
+  const en = await appeler({ periode: 'toujours', langue: 'en' })
+  assert.equal(avisParId(en.body).a1.traduction, null, 'déjà dans la langue de lecture')
+  preparer({ avis: [avisAnglais('a1')] })
+  const inconnue = await appeler({ periode: 'toujours', langue: 'de' })
+  assert.equal(avisParId(inconnue.body).a1.traduction.public.texte, 'Super séjour', 'une langue inconnue vaut le français')
+})
+
+test('⚠ une traduction PÉRIMÉE ne sort pas, ni celle d’un avis masqué', async () => {
+  const perimee = { ...avisAnglais('a1'), content_private: 'The heating was weak, and the Wi-Fi was down' }
+  const masque = { ...avisAnglais('m2', { booking_uid: 'u-m2' }), is_hidden: true }
+  preparer({ avis: [perimee, masque] })
+  const r = await appeler({ periode: 'toujours' })
+  assert.equal(avisParId(r.body).a1.traduction, null)
+  assert.equal(avisParId(r.body).m2.traduction, null)
+  assert.doesNotMatch(JSON.stringify(r.body), /Le chauffage était faible/)
+})
+
+test('avant la migration : la page reste juste, SANS traduction (une relecture sans la relation)', async () => {
+  const etat = preparer({ avis: [avisAnglais('a1')], relationTraduction: false })
+  const r = await appeler({ periode: 'toujours' })
+  assert.equal(r.code, 200)
+  assert.equal(avisParId(r.body).a1.texte, 'Great stay')
+  assert.equal(avisParId(r.body).a1.traduction, null)
+  const lectures = etat.requetes.filter(q => q.table === 'ota_reviews' && /\bbooking_uid\b/.test(String(q._col || '')))
+  assert.equal(lectures.length, 2, 'une tentative avec, une relecture sans')
+  assert.doesNotMatch(String(lectures[1]._col), /avis_traductions/)
 })

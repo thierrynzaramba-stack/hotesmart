@@ -45,7 +45,10 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      // Les reservations, lues pour les seuls biens ARCHIVES
                      // (dernier depart a venir, constat 5 de la revue du
                      // 7 novembre 2026).
-                     resas = [] } = {}) {
+                     resas = [],
+                     // La migration des traductions pas encore collee :
+                     // PostgREST ne connait pas la relation embarquee.
+                     relationTraduction = true } = {}) {
   const etat = { lectures: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -76,7 +79,14 @@ function preparer ({ user = PROD, profil = null, permissions = null,
           }), error: null }
         }
         if (table === 'profiles') return { data: profils, error: null }
-        if (table === 'ota_reviews') return { data: erreurAvis ? null : avis, error: erreurAvis }
+        if (table === 'ota_reviews') {
+          const embarquee = /avis_traductions/.test(String(a.cols || ''))
+          if (embarquee && !relationTraduction) {
+            return { data: null, error: { code: 'PGRST200', message: "Could not find a relationship between 'ota_reviews' and 'avis_traductions'" } }
+          }
+          // Comme PostgREST : la traduction n'arrive que si la lecture l'embarque.
+          return { data: erreurAvis ? null : avis.map(x => { const l = { ...x }; if (!embarquee) delete l.traduction; return l }), error: erreurAvis }
+        }
         if (table === 'menage_done') return { data: erreurDone ? null : done, error: erreurDone }
         if (table === 'conges_plages') return { data: conges, error: null }
         if (table === 'menage_comments') return { data: notes, error: null }
@@ -1464,4 +1474,68 @@ test('un depart a venir ANNULE ne garde pas le bien archive', async () => {
   })
   const res = reponse(); await handler(get(), res)
   assert.deepStrictEqual(res.body.biens.map(b => b.id), ['B2'])
+})
+
+// ─── L'extrait traduit (décision de Thierry du 11 novembre 2026, Q4 = A) ────
+// Spec : docs/specs/avis-v5/spec-traduction-avis.md §3.4. La fiche ménage de
+// l'hôte montre l'extrait dans SA langue, l'original à un clic.
+const { empreinteAvis } = require('../lib/avis/traduction')
+const avisAnglais = (extra = {}) => {
+  const a = { booking_uid: 'b1', property_id_ref: BIEN, ai_clean_verdict: 'positif', statut: 'confirme',
+    ai_clean_excerpt: 'very clean', content_public: 'Very clean flat, lovely host', content: null,
+    content_private: null, verdict_source: 'auto', ...extra }
+  return { ...a, traduction: { empreinte: empreinteAvis(a), textes: {
+    public: { source: 'en', fr: 'Appartement très propre, hôte charmant', es: 'Piso muy limpio' },
+    extrait: { source: 'en', fr: 'très propre', es: 'muy limpio' } } } }
+}
+
+test('LE TEST QUI COMPTE : l’extrait sort traduit dans la langue de l’hôte, lu DANS la lecture des avis', async () => {
+  const { handler, etat } = preparer({ liaisons: [LIAISON()], menages: [MENAGE({ departure_date: HIER })], avis: [avisAnglais()] })
+  const res = reponse()
+  await handler(get({ ...PASSE, langue: 'fr' }), res)
+  const r = res.body.menages[0].retour
+  assert.strictEqual(r.extrait, 'very clean', 'l’original reste : il est à un clic')
+  assert.strictEqual(r.extrait_traduit, 'très propre')
+  assert.strictEqual(r.extrait_langue, 'en')
+  const l = etat.lectures.find(x => x.table === 'ota_reviews')
+  assert.match(String(l.cols), /traduction:avis_traductions\(empreinte, textes\)/)
+  // ⚠ L'EXTRAIT, ET RIEN D'AUTRE DU TEXTE : ni l'original complet, ni sa traduction.
+  const brut = JSON.stringify(res.body)
+  assert.ok(!brut.includes('lovely host'))
+  assert.ok(!brut.includes('hôte charmant'))
+
+  for (const [langue, attendu] of [['es', 'muy limpio'], ['en', null], ['de', 'très propre']]) {
+    const p = preparer({ liaisons: [LIAISON()], menages: [MENAGE({ departure_date: HIER })], avis: [avisAnglais()] })
+    const r2 = reponse()
+    await p.handler(get({ ...PASSE, langue }), r2)
+    assert.strictEqual(r2.body.menages[0].retour.extrait_traduit, attendu, langue)
+  }
+})
+
+test('⚠ une traduction PÉRIMÉE (l’extrait a changé) ne sort pas', async () => {
+  const perimee = { ...avisAnglais(), ai_clean_excerpt: 'Very clean flat' }
+  const { handler } = preparer({ liaisons: [LIAISON()], menages: [MENAGE({ departure_date: HIER })], avis: [perimee] })
+  const res = reponse()
+  await handler(get(PASSE), res)
+  assert.strictEqual(res.body.menages[0].retour.extrait_traduit, null)
+})
+
+test('avant la migration des traductions : le retour sort quand même, sans traduction', async () => {
+  const { handler, etat } = preparer({ liaisons: [LIAISON()], menages: [MENAGE({ departure_date: HIER })],
+    avis: [avisAnglais()], relationTraduction: false })
+  const res = reponse()
+  await handler(get(PASSE), res)
+  const r = res.body.menages[0].retour
+  assert.strictEqual(r.extrait, 'very clean')
+  assert.strictEqual(r.extrait_traduit, null)
+  assert.strictEqual(etat.lectures.filter(x => x.table === 'ota_reviews').length, 2, 'une tentative avec, une relecture sans')
+})
+
+test('la fiche ménage passe la langue à /api/garde et rend l’extrait par le module partagé', () => {
+  const fs = require('node:fs')
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'menages.html'), 'utf8')
+  assert.equal((page.match(/\/api\/garde\?du=\$\{du\}&au=\$\{au\}&langue=\$\{langueDesAvis\(\)\}/g) || []).length, 2, 'les deux lectures de la garde')
+  assert.match(page, /import \{ paire, mention, installer as installerBascules \} from '\/shared\/avis-traduction\.js'/)
+  assert.match(page, /function extraitDuRetour \(r\)/)
+  assert.match(page, /installerBascules\(document\.body, t\)/)
 })
