@@ -948,6 +948,433 @@ commit »).
 | 9 | mineur | la recette rangeait le résumé sans la catégorie | **corrigé** (`scripts/recette-charges.js`) |
 | 10 | mineur | le KB citait un contrôle absent du dépôt | **corrigé** (`migrations/2026-11-10-controle-charges.sql`) |
 
+## 14. Lot 7 — la période couverte, l'étalement et la facture annuelle
+
+Ouvert le 12 novembre 2026 sur le go de Thierry, après le lot 3 en
+production (`main` = `f4b2597c`). Il met en œuvre §6 ter et les réponses
+Q24 à Q27. **Spec d'abord** : aucune ligne de code avant les réponses aux
+questions du §14.9.
+
+### 14.0 En clair, et en trois livraisons
+
+Le lot est trop gros pour une seule review : il se livre en **trois
+sous-lots**, chacun avec sa branche, sa review, sa recette sur staging et
+son go.
+
+| Sous-lot | Ce que l'hôte gagne |
+|---|---|
+| **7a** Période, type de document, étalement | Une facture dit la période qu'elle couvre (« du 1er janv. au 31 déc. ») et son type (facture, régularisation, avoir, échéancier, avis d'impôt). Les totaux se lisent **étalés** sur la période ou **à la date** (Q24). Un avoir diminue le total (Q26). |
+| **7b** L'échéancier, une provision | Un échéancier d'énergie ou de taxe foncière apparaît en **prévision** sur sa période, marquée « estimation », jusqu'à la facture finale qui le remplace (Q25). |
+| **7c** La facture annuelle | « Cette facture revient chaque année » : HôteSmart **prévoit** l'année suivante avec le montant de l'an dernier, **alerte** si elle n'arrive pas, et **pré-remplit** la nouvelle (Q27). |
+
+### 14.1 Catégorie de chaque donnée affichée (règle d'architecture)
+
+| Donnée | Catégorie | Où elle se calcule |
+|---|---|---|
+| Totaux étalés et à la date, répartitions | non urgente | le résumé, tenu par trigger à chaque écriture (Q28), servi prêt par `charges_totaux` |
+| Prévisions (échéancier, an dernier) | non urgente | écrites au geste qui les crée (validation), dans la même répartition que les charges |
+| Alerte « facture annuelle pas arrivée » | non urgente | le cron quotidien `cron-charges` (Q28) |
+| Fiche, liste, « À traiter » | temps réel | lues à l'ouverture, comme au lot 3 |
+
+### 14.2 Sous-lot 7a — données
+
+**Sur `charges`** (migration additive, aucune donnée réécrite) :
+
+- `type_document` : `facture` (par défaut), `regularisation`, `avoir`,
+  `echeancier`, `avis_impot`. Lu par l'IA, corrigé par l'hôte.
+- `periode_debut`, `periode_fin` : **les deux ou aucune**, début ≤ fin,
+  **au plus 366 jours**. Au-delà, l'écran refuse et explique : une période
+  plus longue se saisit en plusieurs factures. Sans période, la charge vaut
+  pour son jour, comme aujourd'hui.
+- **L'avoir est négatif (Q26)** : pour ce seul type, les montants sont
+  ≤ 0 ; pour tous les autres, la contrainte « ≥ 0 » reste. L'hôte tape le
+  montant comme il est écrit sur l'avoir ; c'est le writer qui pose le
+  signe.
+- **La régularisation** : la charge est la **consommation de la période**
+  (§6 ter). Le solde à payer ou à rembourser reste dans `lecture_ia`,
+  montré à côté dans la fiche, jamais compté.
+- **L'échéancier** existe dès 7a comme type, mais **n'est compté nulle
+  part** : ni charge (Q25), ni encore prévision (7b).
+
+**La répartition** — *proposition technique* : une table
+`charges_repartition`, une ligne par charge et par jour de sa période (une
+seule ligne, au jour, pour une charge sans période). Le montant du jour est
+le prorata, arrondi au centime ; le reste se pose sur le dernier jour, donc
+la somme des jours redonne **exactement** le montant. Écrivain unique : le
+trigger, comme pour le résumé.
+
+*Ce qui a été construit (13 novembre 2026)* : **pas de table de
+répartition**. Le recalcul d'une série calcule la part de chaque jour à la
+volée, depuis `charges`, et l'écrit directement dans les colonnes étalées
+du résumé. Une facture annuelle ne pèse donc pas 365 lignes de plus. La
+part est un **arrondi cumulé** (`charges_part`) : le jour *k* sur *n* reçoit
+⌊m·k/n⌋ − ⌊m·(k−1)/n⌋. La somme se télescope et redonne le montant exact, et
+deux jours ne diffèrent jamais de plus d'un centime — mieux que de tout
+poser sur le dernier jour. Mesuré en local, sur une base presque vide :
+1 200 € sur 2026 font 365 cellules, 101,91 € en janvier, 92,06 € en février,
+la somme exacte, et le recalcul tient en 12 ms.
+
+**Coût mesuré après la review** (Postgres 16 local, un compte de **3 001
+charges**, 4 logements × 5 catégories, un quart à période, 15 novembre
+2026) : insérer une facture annuelle **105 ms** ; un UPDATE qui ne change
+ni la série ni la plage **55 ms** (un seul recalcul) ; recalculer tout le
+compte **0,9 s** ; `charges_totaux` sur 12 mois **7,6 ms**. La formule de la
+part est écrite dans la requête (une fonction à `search_path` fixe n'y était
+pas intégrée et coûtait le double).
+
+**Le résumé** porte les deux lectures dans la même cellule du jour :
+`…_cents` (à la date, comme aujourd'hui) et `…_etale_cents` (la somme des
+répartitions du jour). Un seul résumé, deux jeux de colonnes, tenus par le
+même trigger : ils ne peuvent pas diverger.
+
+⚠ **Les compteurs restent ceux des DOCUMENTS, lus à leur date**
+(« N à vérifier », « N à trancher », « N sans montant lu »). Étaler un
+compteur n'a pas de sens : une facture annuelle compterait 365 fois. Seuls
+les montants s'étalent.
+
+⚠ **Coût du recalcul.** Valider une facture annuelle touche 365 cellules.
+Le recalcul se fait **en une instruction par série** (compte × entité ×
+logement × catégorie, sur la plage de jours), jamais jour par jour, et le
+verrou se prend **par série** sur tous les chemins d'écriture. Mesuré en
+local avant la review.
+
+**`charges_totaux`** rend les deux lectures dans le même objet : afficher
+les deux côte à côte (Q34) ne coûte **aucun appel** de plus.
+
+### 14.3 Sous-lot 7a — lecture par l'IA
+
+La consigne lit en plus :
+- `type_document` ;
+- `periode_debut` et `periode_fin` (« période de consommation du … au … » ;
+  « taxe foncière 2026 » = du 1er janvier au 31 décembre 2026) ;
+- pour une régularisation, la **consommation** (HT, TVA, TTC) et le
+  **solde**.
+
+Les montants d'un avoir se lisent positifs, comme imprimés. Même règle
+qu'aujourd'hui : rien d'inventé, `null` si c'est absent.
+
+### 14.4 Sous-lot 7a — écran
+
+- **Fiche** : un champ « Type » ; « Période du … au … » (facultatif) ; pour
+  une régularisation, « Consommation (la charge) » et « Solde lu » côte à
+  côte, le second en lecture seule.
+- **Liste** : la période sous le fournisseur (« 1er janv. → 31 déc. 2026 ») ;
+  un avoir est marqué « Avoir », avec son montant en négatif.
+- **Totaux : les deux lectures côte à côte (Q34)**, sans bascule. Chaque
+  chiffre (TTC, HT, TVA) et chaque ligne de répartition (par mois, par
+  catégorie, par logement) porte deux montants : **« Étalé »** d'abord (la
+  charge du mois), **« À la date »** ensuite (ce qui a été facturé ce
+  mois-là). Au téléphone, les deux montants passent l'un sous l'autre.
+
+### 14.5 Sous-lot 7b — l'échéancier, une provision (Q25)
+
+- Un échéancier validé, avec sa période et son **total prévu** (la somme
+  des mensualités, lue par l'IA), devient une **prévision étalée** sur sa
+  période : même répartition, marquée `prevision`.
+- Les totaux montrent les prévisions **dans** le total, avec la mention
+  « dont N € prévus » et « Estimation ».
+- **La facture finale la remplace** : une facture ou une régularisation du
+  même fournisseur, pour le même logement et la même catégorie, dont la
+  période **chevauche** celle de l'échéancier, retire la prévision au
+  moment de sa validation. Automatique ou confirmé : **Q35**.
+- Les dates de prélèvement restent dans `lecture_ia` : le suivi des
+  paiements est hors V1 (Q2).
+
+### 14.6 Sous-lot 7c — la facture annuelle (Q27)
+
+- À la validation, une case **« Cette facture revient chaque année »** crée
+  un **contrat annuel** : table `charges_contrats` (fournisseur, entité,
+  logement, catégorie, période habituelle, date habituelle, montants de la
+  dernière facture).
+- **Prévoir** : le contrat pose aussitôt la prévision de l'année suivante
+  (même période + 1 an, montants de l'an dernier), étalée et marquée
+  « estimation ». Si un échéancier couvre la même période, **l'échéancier
+  l'emporte** : c'est l'estimation de l'année en cours, l'an dernier n'est
+  qu'un repli.
+- **Remplacer** : la nouvelle facture rattachée au contrat retire la
+  prévision, puis devient la « dernière facture » du contrat, qui prévoit
+  l'année d'après.
+- **Alerter** : le cron quotidien lève un signal « Facture annuelle
+  attendue » dans « À traiter » quand la facture n'est pas arrivée à la
+  date habituelle + le délai de **Q36**. À l'écran seulement, pas d'e-mail
+  en V1.
+- **Pré-remplir** : une facture lue dont le fournisseur et l'entité
+  correspondent à un contrat arrive avec le logement, la catégorie et la
+  période + 1 an déjà posés, et rattachée au contrat. L'hôte valide comme
+  d'habitude.
+- **Arrêter** : décocher la case sur une facture du contrat arrête le
+  contrat. Sa prévision et son alerte disparaissent.
+
+### 14.7 Case PERFORMANCE (les huit points, pour 7a, 7b et 7c)
+
+1. **Un endpoint d'écran** : toujours `/api/ecran/charges`. Les deux
+   lectures (Q34) arrivent dans le même objet : aucun appel de plus.
+2. **Non urgent pré-calculé** : totaux et prévisions dans le résumé, au
+   geste ; alerte par le cron quotidien. L'heure du calcul reste affichée.
+3. **Cache navigateur** : aucun, comme au lot 3.
+4. **`private, no-store`** avant le premier refus : inchangé.
+5. **Statiques** : comme le reste du dépôt (dette du lot 3).
+6. **Aucune lecture tronquée** : la répartition n'est jamais lue par
+   l'écran, seulement sommée en base ; les contrats se lisent page après
+   page.
+7. **Budget** : un appel au chargement, tenu par `tests/budget-ecran.test.js` ;
+   `Server-Timing` porte le nombre de requêtes.
+8. **Mesure** : AVANT = la mesure du lot 3 (1 appel, 7 requêtes,
+   1 492 octets, 653 ms) ; APRÈS mesuré sur staging à chaque sous-lot.
+   **APRÈS 7a, mesuré sur staging le 17 novembre 2026 à 12:30** (code
+   `9ca294e7`, trois documents dont un avis d'impôt et un avoir étalés sur
+   l'année) : **1 appel** (`/api/ecran/charges`), **7 requêtes**
+   (`Server-Timing`), **1 792 octets** de corps transférés (6 377 décodés,
+   2 092 avec les en-têtes), **631 ms** dont 581 ms au serveur. Le budget
+   tient ; les deux lectures n'ont ajouté ni appel ni requête.
+
+### 14.8 Inventaire et mobile
+
+Rien n'est retiré de l'écran du lot 3 : tout s'y ajoute (type, période,
+seconde lecture des totaux, prévisions, signal du contrat). Une seule vue
+(`shared/charges-vue.js`) : le téléphone reçoit tout en même temps.
+
+### 14.9 Questions pour Thierry, et ce qui est retenu
+
+**Réponse du 12 novembre 2026, vers 23 h 05** :
+- **Q34 : « les deux ».** Pas de vue par défaut : les totaux montrent les
+  deux lectures **en même temps** (§14.4).
+
+**Q35 à Q37 sont restées sans réponse.** Les propositions recommandées sont
+retenues comme **hypothèses de travail**, dites à Thierry le même soir. Elles
+ne concernent que 7b et 7c, et se confirmeront à leur recette :
+- **Q35 → retirée automatiquement**, avec une mention dans la fiche de la
+  facture qui la remplace.
+- **Q36 → un mois** après la date habituelle.
+- **Q37 → non** : la lecture « à la date » ne montre que les documents
+  reçus ; les prévisions vivent dans la lecture étalée.
+
+**Recette du 17 novembre 2026 sur staging, Q38 tranchée par Thierry** :
+- **Q38 — l'avis d'impôt n'a pas de TVA : HT = TTC, TVA = 0.** Constat de
+  la recette : un avis de taxe foncière de 3 700 €, type et période lus par
+  l'IA, laissait HT et TVA vides ; l'écran les comptait « sans montant lu »
+  et marquait tout le total « Estimation ». Thierry a demandé un « affichage
+  adapté », précisé ainsi : dans la fiche, les cases HT et TVA d'un avis
+  d'impôt sont retirées et l'aide dit « sans objet » ; l'impôt ne compte plus
+  comme montant manquant ; et le total HT **inclut** l'impôt (en
+  comptabilité, un impôt est une charge sans TVA). Le writer pose la règle
+  (`montantsDuType`), la base la tient (`charges_impot_ck`, migration
+  `2026-11-17-charges-avis-impot.sql`, qui corrige d'abord les avis déjà
+  enregistrés). Un TTC non lu reste non lu, et le HT avec lui.
+
+Les questions, telles qu'elles ont été posées :
+
+- **Q34** — La vue des totaux proposée par défaut : **étalée** (la vraie
+  charge de chaque mois ; la taxe foncière compte 1/12 chaque mois) ou
+  **à la date** (ce qui a été facturé ce mois-là) ?
+- **Q35** — Quand la facture finale arrive, la prévision du même
+  fournisseur sur la même période disparaît **automatiquement**, ou
+  HôteSmart **demande** d'abord ?
+- **Q36** — L'alerte « facture annuelle pas arrivée » : combien de temps
+  après sa date habituelle ? Proposition : un mois.
+- **Q37** — Les prévisions dans la vue **à la date** : non (cette vue ne
+  montre que des documents reçus, les prévisions vivent dans la vue
+  étalée), ou oui, posées à la date habituelle ?
+
+### 14.10 Trace de la review du sous-lot 7a (15 novembre 2026)
+
+Réponse de la review, recopiée mot pour mot :
+
+```
+TRACE DE REVIEW
+Arbre lu : /home/claude/hotesmart-lot3
+Branche lue : charges-lot7-periode
+SHA de tête lu : 0b7c1cb6b1168ab4d05a3c9c73873a5de41a3de7
+Plage relue : 082d376e85c644687efb57d13101a13e311ebb67..0b7c1cb6b1168ab4d05a3c9c73873a5de41a3de7
+Fichiers de la plage (19) : docs/kb/compte-de-charges.md, docs/specs/spec-compte-de-charges.md, lib/charges.js, lib/charges/ecran.js, lib/charges/lecture.js, lib/charges/regles.js, migrations/2026-11-13-charges-periode.sql, migrations/2026-11-13-controle-charges-periode.sql, shared/charges-vue.js, shared/i18n/en.json, shared/i18n/es.json, shared/i18n/fr.json, shared/ui.css, tests/charges-ecran.test.js, tests/charges-lecture.test.js, tests/charges-migration-periode.test.js, tests/charges-page.test.js, tests/charges-regles.test.js, tests/charges-writer.test.js
+Fichiers cités dans les constats :
+- migrations/2026-11-13-charges-periode.sql : dans la plage
+- migrations/2026-11-13-controle-charges-periode.sql : dans la plage
+- shared/charges-vue.js : dans la plage
+- lib/charges.js : dans la plage
+- lib/charges/lecture.js : dans la plage
+- tests/charges-migration-periode.test.js : dans la plage
+- docs/specs/spec-compte-de-charges.md : dans la plage
+- migrations/2026-11-10-charges-resume-categorie.sql : HORS PLAGE, référence seulement (le lot 3 qu'on ne doit plus rejouer)
+```
+
+**Confrontation, refaite par le fil** : `git diff --name-only 082d376e
+0b7c1cb6` rend les 19 fichiers ci-dessus ; le seul fichier hors plage est
+cité comme référence, avec sa raison : statut **accepté**. La review a joué
+les trois migrations dans un Postgres jetable et comparé le résumé à un
+oracle en force brute sur 1 800 écritures aléatoires : 0 écart.
+
+**Aucun constat de sécurité** : les correctifs ne sont pas re-reviewés
+(« une review par commit »).
+
+| # | Sévérité | Objet | Statut |
+|---|---|---|---|
+| 1 | à corriger | l'étalé pouvait contenir une facture à vérifier ou sans montant lu, datée hors de la période, sans « Estimation » | **corrigé** : indicateurs étalés par jour au résumé, rendus par `charges_totaux`, lus par la vue (test de page) |
+| 2 | à corriger | le contrôle disait « ok » sur une migration à moitié collée (contrainte vérifiée à son nom) | **corrigé** : contraintes et trigger vérifiés à leur DÉFINITION, HT/TVA/TTC comparés ; contre-épreuve faite (contrainte du lot 2 remise : ligne 2 à `false`) |
+| 3 | à corriger | les tests de la migration ne voyaient pas une erreur de recalcul | **corrigé** : `scripts/oracle-resume-charges.sql` (lecture seule, 18 colonnes), joué en local sur 1 500 écritures aléatoires : 0 écart ; contre-épreuve « left join » : 7 626 écarts ; plus trois assertions de texte qui disent ce qu'elles ne voient pas |
+| 4 | mineur | coût, et une mesure sans sa plage | **corrigé** : formule écrite dans la requête, un seul recalcul quand rien ne bouge ; mesure refaite et datée (§14.2) |
+| 5 | mineur | interblocage cron / UPDATE de plusieurs lignes | **corrigé** : verrou du compte d'abord, sur les trois chemins |
+| 6 | mineur | une période non envoyée était effacée | **corrigé** : gardée, comme le type ; envoyée vide, elle s'efface (test) |
+| 7 | mineur | un avoir lu avec son signe tombait à « non lu » | **corrigé** : lu signé puis en valeur absolue ; consigne précisée (test) |
+| 8 | mineur | rejouer 2026-11-10 après 7a ; un « 0 » inventé si les indicateurs manquent | **corrigé** : en-tête de la migration ; la vue dit « non lu » sans indicateur (test) |
+
+### 14.11 Review du correctif « avis d'impôt » (17 novembre 2026)
+
+Une review, sur `3cf53692b2cf5044a82497b1c417640e3f8a1f67` (arbre
+`/home/claude/hotesmart-lot3`, branche `charges-lot7-periode`, plage
+`5752649e..3cf53692`, 14 fichiers, tous dans le diff). **Aucun constat de
+sécurité.** Quatre constats mineurs, corrigés sans nouvelle review (règle
+« une review par commit ») :
+
+| | Constat | Correction |
+|---|---|---|
+| A | Quitter « Avis d'impôt » dans la fiche gardait HT = TTC et TVA = 0 : une facture mal classée par l'IA repartait avec une TVA à 0 que personne n'a lue, sans « Estimation » | Les deux cases se vident quand elles valent encore ce que la règle a posé ; des montants tapés survivent |
+| B | L'en-tête de la migration ne disait pas « après le déploiement du code » : posée avant, la contrainte mettait la lecture des avis en panne, relancée à chaque cron | En-tête et KB le disent |
+| C | Le contrôle laissait passer une contrainte affaiblie (TVA = 0 seulement) | Il vérifie les deux moitiés de la règle, sous les deux écritures que Postgres peut rendre, et `convalidated` ; éprouvé sur Postgres 16 : règle affaiblie, contrainte non validée et contrainte absente rendent `false` |
+| D | Un avis lu en HT seul perdait son montant | Un impôt n'a qu'un montant : le TTC lu, sinon le HT lu ; la consigne de l'IA le dit |
+
+Réponse de la review, recopiée mot pour mot. Arbre lu :
+`/home/claude/hotesmart-lot3` ; branche : `charges-lot7-periode` ; plage :
+`5752649e4d0e6ba697a93cdd509b0184264dce1d..3cf53692b2cf5044a82497b1c417640e3f8a1f67`.
+Seule transformation : les entités `&amp;`, `&lt;` et `&gt;` du canal de
+retour de la review sont rendues par `&`, `<` et `>`.
+
+````
+Review du commit `3cf53692`, faite uniquement dans `/home/claude/hotesmart-lot3`, sans rien modifier.
+
+```
+$ cd /home/claude/hotesmart-lot3 && git log -1 --format=%H
+3cf53692b2cf5044a82497b1c417640e3f8a1f67
+
+$ git diff --name-only 5752649e4d0e6ba697a93cdd509b0184264dce1d 3cf53692b2cf5044a82497b1c417640e3f8a1f67
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/regles.js
+migrations/2026-11-17-charges-avis-impot.sql
+migrations/2026-11-17-controle-charges-avis-impot.sql
+shared/charges-vue.js
+shared/i18n/en.json
+shared/i18n/es.json
+shared/i18n/fr.json
+tests/charges-migration-avis-impot.test.js
+tests/charges-page.test.js
+tests/charges-regles.test.js
+tests/charges-writer.test.js
+```
+
+Branche `charges-lot7-periode`, arbre propre (seul `node_modules` est non suivi).
+
+## Sécurité
+Aucun constat. `montantsDuType` ne fait que calculer, sans lire la base. Les deux écritures gardent leurs filtres `user_id = compte`. Les rôles `anon` et `authenticated` n'ont aucun droit sur `charges` (« référence seulement » : migration du 9 novembre, l. 190).
+
+## 1. Écritures de `public.charges` qui contourneraient `montantsDuType`
+Aucune trouvée. Le seul code qui écrit `charges` est `lib/charges.js`. Les fonctions SQL des migrations n'écrivent que `charges_resume`. `scripts/recette-charges.js` passe par `appliquerLecture` et `valider`, sauf une mise à jour de `cree_le`.
+- Les autres écritures (doublons, trancher, racine) ne touchent pas aux montants. Comme toutes les lignes sont mises en règle avant la contrainte, elles ne seront pas refusées.
+- La seule panne possible vient de l'ordre de déploiement (constat B).
+
+## Constats
+
+**A. `shared/charges-vue.js` l. 655 (avec l. 424) — mineur, données faussées sans signal**
+- Scénario : l'IA classe à tort une vraie facture en `avis_impot`. Le writer écrit alors HT = TTC et TVA = 0 et écarte le HT et la TVA lus. L'hôte corrige le type en « Facture » : les cases réapparaissent déjà remplies, avec HT = TTC et TVA = 0.
+- Mesuré par une sonde dans une copie jetable, hors de l'arbre :
+  - affichage : `HT = "120,00"`, `TVA = "0,00"` ;
+  - envoi : `['facture', 12000, 0, 12000]`.
+- Résultat : une facture validée avec une TVA à 0 que personne n'a lue ni tapée. Le 0 inventé pour l'impôt devient un fait, et rien ne marque le total « Estimation ».
+- Correction proposée : quand on quitte `avis_impot` dans la fiche et que les cases valent encore « HT = TTC, TVA = 0 », les vider pour qu'elles redeviennent « non lu ». Mieux encore : faire rendre `ht_lu` et `tva_lu` par `lib/charges/ecran.js`, comme il rend déjà `solde_lu`, et remplir les cases avec.
+
+**B. `migrations/2026-11-17-charges-avis-impot.sql` l. 5 — mineur, mais une panne si l'ordre est inversé**
+- L'en-tête dit seulement « À coller APRÈS 2026-11-13 ». Il ne dit pas « APRÈS le déploiement de ce code sur l'environnement visé ».
+- Scénario : la migration est collée sur staging avant le merge et le déploiement de ce commit. L'ancien code écrit un avis avec HT et TVA vides, et la contrainte le refuse :
+  - la lecture IA rend une panne et la charge reste `a_lire`, sans tentative comptée. Le cron la relit (et paie l'IA) à chaque passage, sans jamais aboutir ;
+  - la validation de l'hôte rend une erreur 503.
+- L'ordre inverse est sans risque : le nouveau code n'a pas besoin de la contrainte.
+- Correction proposée : une ligne dans l'en-tête, et la même dans `docs/kb/compte-de-charges.md`.
+
+**C. `migrations/2026-11-17-controle-charges-avis-impot.sql` l. 23-25 — mineur : le contrôle peut dire `ok = true` à tort**
+- Les trois `like` ne vérifient ni la partie HT de la règle ni la gestion des valeurs vides.
+- Prouvé sur un Postgres 16 jetable : avec `check (type_document <> 'avis_impot' or (montant_tva_cents = 0 and montant_ttc_cents >= 0))`, la ligne 1 dit `t`.
+  - Cette contrainte affaiblie accepte HT vide avec TTC à 370 000, et HT à 1 avec TTC à 370 000.
+  - Juste après la migration, la ligne 2 dit aussi `t`, car les données sont propres à cet instant.
+- Le contrôle ne vérifie pas non plus que la contrainte est bien validée (`convalidated`).
+- Définition réelle rendue par Postgres : `CHECK (((type_document <> 'avis_impot'::text) OR ((NOT (montant_tva_cents IS DISTINCT FROM 0)) AND (NOT (montant_ht_cents IS DISTINCT FROM montant_ttc_cents)))))`.
+- Correction proposée :
+  - ajouter `def like '%NOT (montant_tva_cents IS DISTINCT FROM 0)%'` ;
+  - ajouter `def like '%NOT (montant_ht_cents IS DISTINCT FROM ' || 'montant_ttc_cents)%'` (découpé par `||` pour garder des lignes de moins de 60 caractères) ;
+  - ajouter `bool_and(convalidated)` ;
+  - mettre à jour le test 4 de `tests/charges-migration-avis-impot.test.js`, qui fige aujourd'hui la version faible.
+
+**D. `lib/charges/regles.js` l. 141 — mineur, question plutôt que défaut**
+- Si l'IA met le montant de l'impôt en HT et laisse le TTC vide, la règle jette ce HT et le montant n'apparaît plus nulle part, sauf dans `lecture_ia`.
+- La migration fait la même chose : sur ma base de test, une ligne `annulee` avec un HT à 5 et un TTC vide est passée à HT vide.
+- C'est conforme à « un TTC non lu reste non lu », mais cette règle vient du commit, pas de la décision de Thierry. Si on veut garder le seul montant lu, ce serait : `ttc ?? ht`.
+- Sans correctif, le geste moins coûteux est d'ajouter dans la consigne de `lib/charges/lecture.js` (référence seulement) : « pour un avis d'impôt, montant_ttc = montant à payer ».
+
+## 2. La migration
+Correcte sur le reste. Testée deux fois sur un Postgres 16 jetable, en jouant les fichiers tels quels :
+- la mise en règle passe avant la contrainte ;
+- le rejeu ne touche aucune ligne et fonctionne sans erreur ;
+- les lignes `a_lire`, `illisible` et `annulee` en `avis_impot` sont mises en règle sans erreur. Les `a_lire` portent de toute façon le type `facture` par défaut, puisque le type n'est posé qu'à la lecture ;
+- compatible avec `charges_montants_ck` : un TTC d'avis est toujours positif ou nul ;
+- le trigger du résumé n'a pas de liste de colonnes, donc chaque avis corrigé recalcule sa série ;
+- `type_document` est obligatoire (non nul), donc la contrainte ne peut pas être contournée par un type vide.
+
+## 3. Le front
+- Une case masquée ne bloque rien : `lireChamps` ne lit que le TTC et pose HT = TTC et TVA = 0.
+- Le masquage est bien effectif : `.chg-champ` est en `display: flex`, et la règle `[hidden] { display: none !important }` est en tête de `ui.css`, que `pages/charges.html` charge.
+- `charges-vue.js` n'a qu'un utilisateur, `pages/charges.html` : rien à reporter côté mobile.
+- La vérification des traductions fr/en/es est verte (1485 clés).
+- Seul défaut : le constat A.
+
+## 4. Les tests neufs
+Ils mordent. Contre-épreuve faite avec `git archive 5752649e` et les nouveaux tests et migrations posés par-dessus :
+- 6 rouges, comme le commit l'annonce : 1 dans `charges-regles`, 2 dans `charges-writer`, 2 dans `charges-page`, et le test 2 de la migration ;
+- les 3 autres tests de la migration lisent seulement le SQL, ce qui est attendu ;
+- sur le commit, les 4 fichiers donnent 112 sur 112.
+
+Seule réserve : le test 4 de la migration valide le contrôle faible du constat C.
+````
+
+**Confrontation, refaite par le fil** : `git diff --name-only 5752649e
+3cf53692` rend les 14 fichiers que la review recopie en tête ; tous ses
+constats (A à D) portent sur des fichiers de cette liste. Les fichiers cités
+hors plage le sont sans constat, chacun pour une raison dite : la migration du
+9 novembre et `lib/charges/lecture.js`, déclarés « référence seulement » ;
+`scripts/recette-charges.js`, vérifié sans constat (§1 du rapport) ;
+`pages/charges.html` et `shared/ui.css`, lus pour vérifier que le masquage
+s'applique (§3) ; `lib/charges/ecran.js`, lieu d'une correction proposée au
+constat A et non retenue (la correction retenue vit dans `charges-vue.js`).
+Statut : **accepté**.
+
+### 14.12 Recette du sous-lot 7a sur staging (17 novembre 2026)
+
+Avec Thierry, sur `hotesmart-staging` et le projet Supabase de staging,
+dans l'ordre de la remise :
+
+- **a. Base.** `2026-11-13-charges-periode.sql` : succès ; son contrôle :
+  10 lignes sur 10 à `true` ; vérificateur : 0 écart. Puis, après le
+  déploiement du correctif (`9ca294e7`), `2026-11-17-charges-avis-impot.sql`
+  : succès ; son contrôle : 2 lignes sur 2 (« 1 avis, 0 hors regle ») ;
+  vérificateur : **0 écart, 366 cellules** (365 jours de l'avis, 1 jour EDF).
+- **b.1 Facture annuelle.** Un avis de taxe foncière réel, 3 700 € : type
+  « Avis d'impôt » et période du 1er janvier au 31 décembre 2026 **lus par
+  l'IA** (Thierry n'y a pas touché). Étalé : 314,24 € en janvier, 283,84 € en
+  février, 3 385,75 € sur les 11 mois de la fenêtre ; à la date : 3 700 € en
+  septembre. Vérifié au centime. Constat : HT et TVA vides comptaient « sans
+  montant lu » et marquaient le total « Estimation » → **Q38** (§14.9),
+  correctif `3cf53692` + `620da165`, revérifié à l'écran : plus
+  d'« Estimation », HT étalé 4 854,00 € (impôt inclus), cases HT et TVA
+  masquées et aide « sans objet » dans la fiche.
+- **b.2 Avoir.** Un avoir de test (Thierry n'en a pas de réel) : −2 670 €,
+  période 2026, « Impôts et taxes ». Négatif dans la liste ; TTC à la date
+  5 461,90 → 2 791,90 € ; TTC étalé 5 147,65 → 2 704,41 € (−2 443,24 € sur
+  334 jours, au centime). Ses HT et TVA, non saisis, ramènent « Estimation » :
+  c'est le comportement voulu pour un montant non lu ; aucune règle ajoutée
+  (avoir de test).
+- **c. Mesure APRÈS** : §14.7, point 8.
+
+**Recette 7a : conforme.**
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

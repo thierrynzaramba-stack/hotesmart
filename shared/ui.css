@@ -2369,3 +2369,23 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
      débordait de sa largeur à gauche (recette du 11 novembre). */
   .chg-fiche { width: 100%; }
 }
+
+/* ── Lot 7a : les deux lectures des totaux (Q34) et la période ────────────
+   « Étalé » d'abord (la charge du jour), « À la date » ensuite (la facture
+   entière à son jour), côte à côte ; ils passent l'un sous l'autre quand la
+   place manque. */
+.chg-lectures { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; }
+.chg-lecture { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.chg-lecture small { font-size: 12px; font-weight: var(--fw-semibold); color: var(--muted); }
+.chg-lecture b { white-space: nowrap; }
+.chg-chiffre .chg-lecture--date b { font-size: 15px; color: var(--muted); }
+.chg-rep li { flex-wrap: wrap; align-items: baseline; row-gap: 2px; }
+.chg-rep__nom { flex: 1 1 140px; }
+.chg-rep .chg-lecture b { font-size: var(--fs-small); }
+.chg-rep .chg-lecture--date b { font-weight: var(--fw-regular); color: var(--muted); }
+.chg-periode { border: 0; margin: 0; padding: 0; min-width: 0; }
+.chg-periode legend { padding: 0; margin-bottom: 4px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+.chg-periode__dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap-s); }
+@media (max-width: 899px) {
+  .chg-chiffre .chg-lecture--date b { font-size: 14px; }
+}
