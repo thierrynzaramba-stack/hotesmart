@@ -39,6 +39,17 @@ test('LE TEST QUI COMPTE : le motif d arret recopie est CELUI du cron, au caract
   assert.ok(R.MOTIFS_SANS_QUESTION.includes(require('../lib/gardes-des-fils').MOTIF_PAUSE))
 })
 
+test('LE TEST QUI COMPTE (dette 146) : l ancien texte d arret (« 3 appels ») est recopie a l identique et n ouvre JAMAIS de carte', () => {
+  // Les taches posees avant la dette 146 portent encore l'ancien texte : le
+  // cron les reconnait (pas de doublon), et la carte ne s'y ouvre pas.
+  const m = lire('lib/cron-classify.js').match(/const MOTIF_ARRET_AVANT_146 = '([^']+)'/)
+  assert.ok(m, 'l ancien motif est trouve dans lib/cron-classify.js')
+  assert.equal(R.MOTIF_ARRET_AVANT_146, m[1])
+  assert.ok(R.MOTIFS_SANS_QUESTION.includes(R.MOTIF_ARRET_AVANT_146))
+  assert.match(R.MOTIF_ARRET, /6 appels en 24 h/)
+  assert.deepEqual(R.questionsDe(tache({ summary: R.MOTIF_ARRET_AVANT_146 })), [])
+})
+
 test('les copies du front sont celles du serveur (REPONSES, bornes)', () => {
   assert.deepEqual([...F.REPONSES], R.REPONSES)
   assert.equal(F.MAX_PRECISION, R.MAX_PRECISION)

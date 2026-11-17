@@ -299,9 +299,10 @@ test('une information manquante prévient ; l\'arrêt de l\'agent au plafond aus
   const a = charger({ tables: tables(), messages: fil('Quel est le code wifi ?'), reponse: { type: 'info_unknown', reason: 'wifi', auto_reply: null, sub_tasks: [] } })
   await a.mod.processChannelPropertyMessages(U, bien, bilan())
   assert.deepStrictEqual(a.notifs.map(([k, o]) => [k, o.type, !!o.arret]), [['escalade', 'info_unknown', false]])
-  // Trois appels réussis dans la journée : l'agent s'arrête sur ce fil.
+  // Autant d'appels réussis dans la journée que le plafond (3 jusqu'à la dette
+  // 146, 6 depuis — le test suit la constante) : l'agent s'arrête sur ce fil.
   const t = tables()
-  for (let i = 0; i < 3; i++) t.guestflow_appels_ia.push({ user_id: U, property_id: P, booking_id: B, ok: true, created_at: recent(60 + i) })
+  for (let i = 0; i < require('../lib/guestflow-garde').PLAFOND_JOUR; i++) t.guestflow_appels_ia.push({ user_id: U, property_id: P, booking_id: B, ok: true, created_at: recent(60 + i) })
   const b = charger({ tables: t, messages: fil('Encore une question'), reponse: { type: 'sympathy', reason: 'x', auto_reply: 'x', sub_tasks: [] } })
   await b.mod.processChannelPropertyMessages(U, bien, bilan())
   assert.deepStrictEqual(b.notifs.map(([k, o]) => [k, o.type, o.arret]), [['escalade', 'info_unknown', true]])

@@ -3,7 +3,7 @@
 // epuiser le credit Anthropic, puis ecrivait un incident par appel en echec.
 //   - une trace apres CHAQUE appel IA (pause, reponse vide, tache existante) :
 //     pas de reclassement sans nouveau message du voyageur ;
-//   - au plus 3 appels par fil sur 24 h, avec un incident par fil et par jour ;
+//   - au plus PLAFOND_JOUR appels par fil sur 24 h (6 depuis la dette 146), avec un incident par fil et par jour ;
 //   - un delai croissant apres un echec (jamais rejoue a chaque cycle) ;
 //   - un seul incident api_credit par heure.
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
@@ -92,6 +92,10 @@ function charger ({ tables, messages, reponse, mode = 'test', pause = false, env
 const U = 'user-1', P = 'prop-1', B = 'booking-1'
 const bien = { id: P, name: 'Ofuro Futari', provider: 'channex' }
 const recent = (min) => new Date(Date.now() - min * 60e3).toISOString()
+// Autant d'appels réussis que le plafond, dans les 24 h : 3 jusqu'à la dette
+// 146, 6 depuis. Les tests SUIVENT la constante au lieu de la recopier — c'est
+// la recopie (`[300, 200, 100]`) qui les a fait rougir au changement.
+const minutesAuPlafond = () => Array.from({ length: require('../lib/guestflow-garde').PLAFOND_JOUR }, (_, k) => 300 - k * 40)
 const tables = () => ({ knowledge: [], bookings_snapshot: [], conversations: [], agent_tasks: [], agent_prompting: [], guestflow_appels_ia: [], automation_incidents: [] })
 const bilan = () => ({ totalMessages: 0, totalTasks: 0, totalAutoReplies: 0, errors: [], properties: [] })
 const fil = (min = 30) => [{ bookingId: B, sender: 'guest', message: 'Merci pour tout !', time: recent(min) }]
@@ -150,9 +154,9 @@ test('LE TEST QUI COMPTE : un ECHEC de l IA (credit coupe) n est pas rejoue au c
   assert.strictEqual(c.appelsIA.length, 1)
 })
 
-test('LE TEST QUI COMPTE : au plus 3 appels par fil sur 24 h — au-dela, aucun appel, et UN incident par fil et par jour', async () => {
+test('LE TEST QUI COMPTE : au plus PLAFOND_JOUR appels par fil sur 24 h — au-dela, aucun appel, et UN incident par fil et par jour', async () => {
   const t = tables()
-  for (const m of [300, 200, 100]) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
+  for (const m of minutesAuPlafond()) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
   const r = await deuxCycles({ tables: t, messages: fil(5), reponse: { type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] } })
   assert.deepStrictEqual([r.premier, r.second], [0, 0])
   assert.deepStrictEqual(r.incidents.map(i => i.type), ['guestflow_plafond'], 'un seul incident sur deux cycles')
@@ -171,7 +175,7 @@ test('LE TEST QUI COMPTE (vecu du 26 octobre, Ofuro Futari) : au plafond, un bie
   // sur un bien qu'il avait fait taire exprès — Ofuro Futari, en pause depuis
   // le 6 octobre 2026.
   const t = tables()
-  for (const m of [300, 200, 100]) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
+  for (const m of minutesAuPlafond()) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
   const r = await deuxCycles({ tables: t, messages: fil(5), mode: 'auto', pause: true,
     reponse: { type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] } })
   // Ce qui NE change pas : le plafond mord (aucun 4e appel)…
@@ -200,7 +204,7 @@ test('LA LECTURE DE LA PAUSE EST PARESSEUSE : rien n est lu quand le plafond n e
   // quand il ne faut pas, ET qu'on lit quand il faut.
   const { peutAppeler } = require('../lib/guestflow-garde')
   const journal = (lignes) => ({ from: () => { const q = { select: () => q, eq: () => q, gte: () => q, order: () => q, limit: () => Promise.resolve({ data: lignes, error: null }) }; return q } })
-  const trois = [300, 200, 100].map(m => ({ ok: true, created_at: recent(m) }))
+  const plein = minutesAuPlafond().map(m => ({ ok: true, created_at: recent(m) }))
 
   // Moitie 1 — sous le plafond : aucune lecture.
   let sous = 0
@@ -212,7 +216,7 @@ test('LA LECTURE DE LA PAUSE EST PARESSEUSE : rien n est lu quand le plafond n e
   // Moitie 2 — AU plafond : lue, et une seule fois. C'est elle qui rougit
   // contre le code d'avant.
   let au = 0
-  const b = await peutAppeler(journal(trois), { userId: U, propertyId: P, bookingId: B,
+  const b = await peutAppeler(journal(plein), { userId: U, propertyId: P, bookingId: B,
     signaler: async () => { assert.fail('un bien en pause ne doit pas etre signale') },
     enPause: async () => { au++; return true } })
   assert.strictEqual(b.ok, false, 'au plafond, aucun appel')
@@ -247,7 +251,7 @@ test('garde-fou : journal ABSENT (migration en retard) — l agent tourne et le 
 
 test('revue de ecce019 (B2) : au plafond, un 4e message (« une fuite ! ») devient une tache VISIBLE et l hote est ALERTE ; les echecs ne comptent pas', async () => {
   const t = tables()
-  for (const m of [300, 200, 100]) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
+  for (const m of minutesAuPlafond()) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
   const c = charger({ tables: t, messages: [{ bookingId: B, sender: 'guest', message: 'Il y a une fuite d eau !', time: recent(2) }], reponse: { type: 'intervention', reason: 'x', auto_reply: null, sub_tasks: [] } })
   await c.mod.processChannelPropertyMessages(U, bien, bilan())
   assert.strictEqual(c.appelsIA.length, 0)
@@ -272,7 +276,7 @@ test('revue de ecce019 (B1) : un envoi en ECHEC en Mode Auto devient une proposi
 
 test('revue de ecce019 (B3) : sous le plafond, une proposition en attente n est PAS ecartee (rien ne la remplacerait)', async () => {
   const t = tables()
-  for (const m of [300, 200, 100]) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
+  for (const m of minutesAuPlafond()) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
   t.agent_tasks.push({ id: 'prop-1', user_id: U, property_id: P, book_id: B, task_type: 'sympathy', status: 'pending_validation', guest_message: 'ancien lot', created_at: recent(200) })
   const c = charger({ tables: t, messages: fil(5), reponse: { type: 'sympathy', reason: 'x', auto_reply: 'ok', sub_tasks: [] } })
   await c.mod.processChannelPropertyMessages(U, bien, bilan())
@@ -359,4 +363,42 @@ test('decision du 9 octobre : l HOTE repond (app OTA ou messagerie) — la tache
   assert.strictEqual(b.appelsIA.length, 0)
   assert.strictEqual(t.agent_tasks.filter(x => x.status === 'pending').length, 0)
   assert.strictEqual(t.agent_tasks.filter(x => x.status === 'done').length, 1)
+})
+
+test('LE TEST QUI COMPTE (dette 146, decision de Thierry « double ») : le plafond est 6 — 5 appels reussis laissent passer, le 6e arrete', () => {
+  const G = require('../lib/guestflow-garde')
+  assert.strictEqual(G.PLAFOND_JOUR, 6)
+  const now = Date.now()
+  const reussis = (n) => Array.from({ length: n }, (_, k) => ({ ok: true, created_at: new Date(now - (k + 1) * 3600e3).toISOString() }))
+  assert.deepStrictEqual(G.decider(reussis(5), now), { ok: true }, 'a 5, l agent repond encore')
+  assert.strictEqual(G.decider(reussis(6), now).motif, 'plafond', 'a 6, il s arrete')
+})
+
+test('LE TEST QUI COMPTE (dette 146) : une tache d arret posee AVANT, avec l ancien texte « 3 appels », est reconnue — pas de seconde tache', async () => {
+  // Sans ca, chaque fil arrete avant le changement recevrait une SECONDE tache
+  // « l'agent s'est arrete » au message suivant, et l'hote une seconde alerte.
+  const { MOTIF_ARRET_AVANT_146 } = require('../lib/guestflow/rediger')
+  const t = tables()
+  for (const m of minutesAuPlafond()) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
+  t.agent_tasks.push({ id: 'arret-ancien', user_id: U, property_id: P, book_id: B, task_type: 'info_unknown', status: 'pending',
+    summary: MOTIF_ARRET_AVANT_146, guest_message: 'ancien message', created_at: recent(50) })
+  const c = charger({ tables: t, messages: [{ bookingId: B, sender: 'guest', message: 'Et le parking ?', time: recent(2) }], reponse: { type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] } })
+  await c.mod.processChannelPropertyMessages(U, bien, bilan())
+  assert.strictEqual(c.appelsIA.length, 0, 'au plafond, aucun appel')
+  const enAttente = t.agent_tasks.filter(x => x.status === 'pending')
+  assert.deepStrictEqual(enAttente.map(x => x.id), ['arret-ancien'], 'une seconde tache d arret a ete posee')
+  assert.strictEqual(enAttente[0].guest_message, 'Et le parking ?', 'la tache existante porte le nouveau message')
+})
+
+test('le panneau « Réponses de l IA » dit le VRAI plafond, dans les trois langues (dette 146)', () => {
+  // Le texte disait « au plus 3 réponses » ; le chiffre vit dans le code
+  // (PLAFOND_JOUR) et dans le dictionnaire. Ce test les tient ensemble.
+  const fs = require('node:fs'), path = require('node:path')
+  const n = require('../lib/guestflow-garde').PLAFOND_JOUR
+  for (const lang of ['fr', 'en', 'es']) {
+    const dico = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', lang + '.json'), 'utf8'))
+    const texte = dico['messages.breaker_desc']
+    assert.ok(texte, lang)
+    assert.deepStrictEqual((texte.match(/\d+/g) || []).map(Number).filter(x => x !== 24), [n], `${lang} : « ${texte} »`)
+  }
 })

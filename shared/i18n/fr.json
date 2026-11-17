@@ -995,7 +995,7 @@
   "messages.arrives_tomorrow": "Arrive demain",
   "messages.back": "Retour",
   "messages.booking_link": "Voir la réservation",
-  "messages.breaker_desc": "Protection automatique : au plus 3 réponses générées par conversation sur 24 heures, et une pause croissante après un échec. Rien à régler.",
+  "messages.breaker_desc": "Protection automatique : au plus 6 réponses générées par conversation sur 24 heures, et une pause croissante après un échec. Rien à régler.",
   "messages.breaker_title": "Garde des appels IA",
   "messages.call": "Appeler",
   "messages.channel_email": "E-mail",

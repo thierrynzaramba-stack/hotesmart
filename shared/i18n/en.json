@@ -995,7 +995,7 @@
   "messages.arrives_tomorrow": "Arrives tomorrow",
   "messages.back": "Back",
   "messages.booking_link": "View the booking",
-  "messages.breaker_desc": "Automatic protection: at most 3 generated replies per conversation over 24 hours, and a growing pause after a failure. Nothing to set.",
+  "messages.breaker_desc": "Automatic protection: at most 6 generated replies per conversation over 24 hours, and a growing pause after a failure. Nothing to set.",
   "messages.breaker_title": "AI call guard",
   "messages.call": "Call",
   "messages.channel_email": "Email",
