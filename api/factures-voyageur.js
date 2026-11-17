@@ -5,6 +5,7 @@
 // KB   : docs/kb/facture-voyageur.md (modif = MEME COMMIT)
 //
 // POST { action: 'envoyer_lien', booking }
+// POST { action: 'copier_lien', booking }   (étape 2b : un lien neuf, AUCUN message)
 // POST { action: 'saisir', booking, destinataire }
 //
 // ⚠ LA RÉSERVATION DÉSIGNE LE COMPTE ET LE BIEN (règle 11) : la garde résout
@@ -106,53 +107,76 @@ function issueDe (envoi, { CANAL, classerEnvoiOta }) {
   return classerEnvoiOta(envoi)
 }
 
-// Seule une réservation confirmée se facture (review 1, B3).
-function refusDuStatut (snap, provider) {
-  const { readStatus, STATUS } = require('../lib/bookings-snapshot-status')
-  const statut = readStatus(snap, provider)
-  if (statut === STATUS.CANCELLED) return 'reservation_annulee'
-  if (statut !== STATUS.CONFIRMED) return 'reservation_non_confirmee'
-  return null
-}
+// Seule une réservation confirmée se facture (review 1, B3) : la règle vit
+// dans lib/factures-voyageur.js, partagée avec la fiche (étape 2b).
+const refusDuStatut = FV.refusDuStatut
 const ESTIME_CHANNEX = (provider) => provider === 'channex' || provider === 'channel'
 
-async function envoyerLien (req, res, corps) {
-  const t0 = Date.now()
-  let requetes = 0
+// ─── Un lien neuf depuis la fiche : le tronc commun à « envoyer » et « copier »
+// La garde (`reservations` en écriture, la réservation désigne le compte), le
+// statut de la réservation, l'archivage (P3), le verrou d'une facture émise,
+// puis le jeton. Rend `null` quand une réponse est déjà partie.
+// `avecMessages` : envoyer le lien exige AUSSI `messages` en écriture (P1) ;
+// le copier n'envoie rien, `reservations` suffit (P2 quinquies).
+async function ouvrirUnLien (req, res, corps, { avecMessages }) {
   const garde = await requirePermission(req, res, {
     domaine: 'reservations', niveau: 'write', booking: corps.booking, bookingRequis: true
   })
-  if (!garde.ok) return
+  if (!garde.ok) return null
   const cible = { id: garde.bien ? garde.bien.id : null, ref: garde.booking.property_id }
-  if (!peutEcrire(garde.contexte, 'messages', cible)) {
-    return res.status(403).json({ error: 'Droits insuffisants', motif: 'droits_messages' })
+  if (avecMessages && !peutEcrire(garde.contexte, 'messages', cible)) {
+    res.status(403).json({ error: 'Droits insuffisants', motif: 'droits_messages' })
+    return null
   }
-  if (!garde.bien) return repondreRefus(res, 'bien_introuvable')
+  if (!garde.bien) { repondreRefus(res, 'bien_introuvable'); return null }
   const compte = garde.accountUserId
   const bookingId = String(garde.booking.booking_id)
   const snap = garde.booking.snapshot || {}
 
   const refusStatut = refusDuStatut(snap, garde.bien.provider)
-  if (refusStatut) return repondreRefus(res, refusStatut)
+  if (refusStatut) { repondreRefus(res, refusStatut); return null }
 
   const base = db()
-  requetes += 3
   const [arch, brut, active] = await Promise.all([
     lireArchivage(base, garde.bien.id), lireBrut(base, compte, bookingId),
     FV.demandeActive(compte, bookingId, { db: base })
   ])
-  if (!arch.ok || !brut.ok || !active.ok) return repondreRefus(res, 'panne')
+  if (!arch.ok || !brut.ok || !active.ok) { repondreRefus(res, 'panne'); return null }
   // P3 : sur un bien archivé, seulement une demande DÉJÀ en cours.
-  if (arch.archive && !active.demande) return repondreRefus(res, 'bien_archive')
-  if (active.demande && active.demande.statut === 'emise') return repondreRefus(res, 'verrouillee')
+  if (arch.archive && !active.demande) { repondreRefus(res, 'bien_archive'); return null }
+  if (active.demande && active.demande.statut === 'emise') { repondreRefus(res, 'verrouillee'); return null }
 
   const langue = FV.langueDeLaReservation({ snapshot: snap, raw: brut.raw })
-  requetes++
   const ouvert = await FV.ouvrirLien(compte, {
     propertyUuid: garde.bien.id, bookingId, langue, porte: 'fiche',
     creePar: garde.userId, depart: snap.departure || null
   }, { db: base })
-  if (!ouvert.ok) return repondreRefus(res, ouvert.motif, ouvert.champ)
+  if (!ouvert.ok) { repondreRefus(res, ouvert.motif, ouvert.champ); return null }
+  // 3 lectures en parallèle + la fonction SQL du jeton (la garde n'est pas comptée).
+  return { garde, compte, bookingId, snap, base, langue, ouvert, requetes: 4 }
+}
+
+// « Copier un lien » (P2 quinquies, Thierry, 11 nov. 2026) : un lien NEUF,
+// rendu à l'hôte, SANS AUCUN MESSAGE. L'issue du jeton reste vide (`envoi`
+// null) : aucun envoi n'a été tenté, et la fiche le dit « lien créé ».
+async function copierLien (req, res, corps) {
+  const t0 = Date.now()
+  const o = await ouvrirUnLien(req, res, corps, { avecMessages: false })
+  if (!o) return
+  res.setHeader('Server-Timing', `db;desc="${o.requetes} requêtes";dur=${Date.now() - t0}`)
+  return res.status(200).json({
+    ok: true,
+    demande: { id: o.ouvert.demande.id, statut: o.ouvert.demande.statut },
+    lien: o.ouvert.lien
+  })
+}
+
+async function envoyerLien (req, res, corps) {
+  const t0 = Date.now()
+  const o = await ouvrirUnLien(req, res, corps, { avecMessages: true })
+  if (!o) return
+  const { garde, compte, bookingId, snap, base, langue, ouvert } = o
+  let requetes = o.requetes
 
   // ─── L'envoi, par le chemin commun ───
   const { CANAL, MOTIF, canalPour } = require('../lib/canal-voyageur')
@@ -294,6 +318,7 @@ module.exports = async function handler (req, res) {
   if (corps == null) return repondreRefus(res, 'entree_invalide')
   try {
     if (corps.action === 'envoyer_lien') return await envoyerLien(req, res, corps)
+    if (corps.action === 'copier_lien') return await copierLien(req, res, corps)
     if (corps.action === 'saisir') return await saisir(req, res, corps)
     return repondreRefus(res, 'entree_invalide', 'action')
   } catch (e) {
