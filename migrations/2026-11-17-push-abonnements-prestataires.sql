@@ -18,9 +18,11 @@
 -- ⚠ LA PURGE EST EN BASE, PAS DANS LES CHEMINS D'ÉCRITURE. Un nouveau lien
 -- (le jeton change), une désactivation ou un changement de mode d'accès coupe
 -- les appareils de la personne : l'ancien téléphone, peut-être perdu, ne
--- reçoit plus rien. Trois écrivains de `profiles` existent aujourd'hui
--- (api/membres.js : régénérer, activer/désactiver, changer de mode) ; un
--- quatrième viendra, et aucun test n'attrape celui qui n'existe pas encore.
+-- reçoit plus rien. Deux écrivains de ces colonnes existent aujourd'hui
+-- (api/membres.js : régénérer le lien, activer/désactiver) ; le mode d'accès
+-- ne se change pas (refusé en 400), et la condition qui le surveille est une
+-- défense pour le jour où il se changera. Un troisième écrivain viendra, et
+-- aucun test n'attrape celui qui n'existe pas encore.
 -- C'est la DONNÉE qui porte la règle (même leçon que `menages.vu_par`).
 -- `security definer` : la mise à jour d'un profil peut venir d'un rôle soumis
 -- à la RLS, et un `delete` sans politique n'y supprimerait rien, en silence.
@@ -47,8 +49,8 @@ create table if not exists public.push_abonnements_prestataires (
   constraint push_abonnements_prestataires_unique unique (profil_id, endpoint)
 );
 
-create index if not exists push_abonnements_prestataires_profil_idx
-  on public.push_abonnements_prestataires (profil_id);
+-- Pas d'index à part sur `profil_id` : celui de la contrainte d'unicité
+-- (profil_id, endpoint) le couvre déjà.
 
 alter table public.push_abonnements_prestataires enable row level security;
 

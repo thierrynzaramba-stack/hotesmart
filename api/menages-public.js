@@ -16,7 +16,9 @@ const { chargerLiaisons, chargerDisponibilites, chargerRefus,
         deciderParGarde, echeanceOffre, proposeesDe } = require('../lib/cleaning/assign')
 const { notifierProposition } = require('../lib/cleaning/notifier-prestataire')
 const abosPresta = require('../lib/push/abonnements-prestataires')
-const { clesVapid } = require('../lib/push/envoyer')
+// Le module des clés, pas celui de l'envoi : celui-ci chargerait `web-push`
+// à chaque démarrage à froid, pour lire deux variables (review lot 3, constat 7).
+const { clesVapid } = require('../lib/push/cles')
 // ⚠ `cleJour` normalise une date de calendrier a midi UTC. A minuit, le moindre
 // decalage de fuseau la fait basculer d'un jour — piege deja corrige deux fois
 // dans ce depot. C'est la MEME fonction que celle du moteur : deux
@@ -270,6 +272,21 @@ const MESSAGE_PUSH = {
   ecriture_impossible: 'Service temporairement indisponible'
 }
 
+// L'aperçu de l'hôte, reconnu par TROIS signaux : la requête, le corps, et
+// l'adresse de la page qui appelle (`Referer`). Les deux premiers sont
+// déclaratifs : en aperçu, l'enveloppe de `fetch` de la page refuse tout POST
+// avant même d'ajouter `apercu=1`, donc le jour où elle serait contournée, la
+// requête partirait SANS marque (constat 4 de la review du lot 3, étape 1).
+// Le troisième ne dépend pas de la page : sans politique de référent, un appel
+// de même origine porte l'adresse complète du cadre, `apercu=1` compris.
+function enApercu (req) {
+  if (String((req.query || {}).apercu || '') === '1') return true
+  if (String((req.body || {}).apercu || '') === '1') return true
+  const ref = (req.headers || {}).referer || (req.headers || {}).referrer
+  if (!ref) return false
+  try { return new URL(String(ref)).searchParams.get('apercu') === '1' } catch { return false }
+}
+
 // `push_abonner` (abonnement + libellé de l'appareil) et `push_retirer`
 // (l'adresse de CET appareil). Rend l'état à jour, comme le GET.
 async function gestePush (req, res, token, action) {
@@ -277,7 +294,7 @@ async function gestePush (req, res, token, action) {
   // de sa prestataire en lecture seule : son navigateur recevrait sinon les
   // notifications de quelqu'un d'autre. La page n'affiche pas le bouton en
   // aperçu ; ce refus est la garde serveur qui double ce masquage.
-  if (String(req.query.apercu || '') === '1' || String((req.body || {}).apercu || '') === '1') {
+  if (enApercu(req)) {
     return res.status(403).json({ error: 'Aperçu : rien ne s’abonne ici.', motif: 'apercu' })
   }
   if (action === 'push_abonner' && !clesVapid()) {
@@ -293,6 +310,20 @@ async function gestePush (req, res, token, action) {
   if (!r.ok) {
     return res.status(STATUT_PUSH[r.motif] || 400)
       .json({ error: MESSAGE_PUSH[r.motif] || 'Abonnement refusé', motif: r.motif })
+  }
+  // ⚠ LE LIEN EST RELU APRÈS L'ÉCRITURE (constat 5 de la review). La purge est
+  // un déclencheur sur `profiles` : si l'hôte régénère le lien ou désactive la
+  // personne ENTRE la garde ci-dessus et l'écriture, la purge passe avant la
+  // ligne, et la ligne lui survit — l'ancien téléphone, peut-être perdu,
+  // continuerait de recevoir. Relue après : soit le changement est déjà là et
+  // on retire la ligne, soit il viendra après, et c'est la purge qui l'emporte.
+  if (action === 'push_abonner') {
+    const encore = await porteurDuJeton(token)
+    if (encore.statut || String(encore.profil.id) !== String(p.profil.id)) {
+      await abosPresta.retirer({ profilId: p.profil.id, endpoint: b.abonnement && b.abonnement.endpoint, db: supabase })
+        .catch(() => {})
+      return refuserPorteur(res, encore.statut || 401)
+    }
   }
   const liste = await abosPresta.lister({ profilId: p.profil.id, db: supabase })
   return res.status(200).json({ ok: true, ...(r.empreinte ? { empreinte: r.empreinte } : {}), push: etatPush(liste) })

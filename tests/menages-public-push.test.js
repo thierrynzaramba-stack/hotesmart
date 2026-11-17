@@ -33,10 +33,17 @@ const ABO = (endpoint = ADRESSE) => ({ endpoint, keys: { p256dh: P256, auth: AUT
 // ⚠ LES FILTRES SONT HONORÉS (eq, delete, upsert sur la clé composée). Un
 // double qui supprime « toutes les lignes » quel que soit le `.eq('profil_id')`
 // rendrait indétectable la fuite que garde le constat 4 ci-dessus.
-function preparer ({ profil = { id: BERTHE, first_name: 'Berthe', active: true, access_mode: 'lien' },
-                     abos = [], erreurPush = null, jetonConnu = true } = {}) {
+// ⚠ LE DOUBLE HONORE LE JETON ET LE COMPTE sur `profiles` (constat 1 de la
+// review) : un double qui rendait le profil quel que soit le jeton laissait
+// passer une garde qui aurait trouvé le MAUVAIS profil du compte.
+// `profil` peut être une fonction du rang de la lecture (0, 1, …) : c'est ce
+// qui simule un lien régénéré ENTRE deux lectures.
+const BERTHE_PROFIL = { id: BERTHE, first_name: 'Berthe', active: true, access_mode: 'lien',
+                        account_user_id: U, pwa_token: TOKEN }
+function preparer ({ profil = BERTHE_PROFIL, abos = [], erreurPush = null, jetonConnu = true,
+                     attentePush = null, rejetPush = false } = {}) {
   const journal = []
-  const etat = { abos: abos.map(a => ({ ...a })) }
+  const etat = { abos: abos.map(a => ({ ...a })), lecturesProfil: 0 }
   const client = {
     from (table) {
       const a = { table, f: {} }
@@ -67,14 +74,23 @@ function preparer ({ profil = { id: BERTHE, first_name: 'Berthe', active: true, 
               : null, error: null })
           }
           if (table === 'profiles') {
-            if (a.f.access_mode !== undefined && profil && profil.access_mode !== a.f.access_mode) {
-              return Promise.resolve({ data: null, error: null })
+            const p = typeof profil === 'function' ? profil(etat.lecturesProfil++) : profil
+            for (const col of ['access_mode', 'pwa_token', 'account_user_id']) {
+              if (a.f[col] !== undefined && p && String(p[col]) !== String(a.f[col])) {
+                return Promise.resolve({ data: null, error: null })
+              }
             }
-            return Promise.resolve({ data: profil, error: null })
+            return Promise.resolve({ data: p, error: null })
           }
           const r = rep(); return Promise.resolve({ data: (r.data || [])[0] || null, error: r.error })
         },
-        then (ok, ko) { return Promise.resolve(rep()).then(ok, ko) }
+        then (ok, ko) {
+          if (table === 'push_abonnements_prestataires' && !a.delete && !a.update) {
+            if (rejetPush) return Promise.reject(new Error('panne réseau')).then(ok, ko)
+            if (attentePush) return attentePush.then(() => rep()).then(ok, ko)
+          }
+          return Promise.resolve(rep()).then(ok, ko)
+        }
       }
       function rep () {
         if (table === 'push_abonnements_prestataires') {
@@ -260,7 +276,7 @@ test('POST push_abonner : un lien inconnu est refusé et n’écrit RIEN', avecC
 }))
 
 test('POST push_abonner : un profil DÉSACTIVÉ est refusé et n’écrit RIEN', avecCles(async () => {
-  const { etat, journal } = preparer({ profil: { id: BERTHE, first_name: 'Berthe', active: false, access_mode: 'lien' } })
+  const { etat, journal } = preparer({ profil: { ...BERTHE_PROFIL, active: false } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(geste('push_abonner', { abonnement: ABO() }), res)
@@ -274,12 +290,79 @@ test('POST push_abonner : un profil DÉSACTIVÉ est refusé et n’écrit RIEN',
 }))
 
 test('POST push_abonner : un profil qui n’est pas un accès par LIEN est refusé', avecCles(async () => {
-  const { etat } = preparer({ profil: { id: BERTHE, first_name: 'Berthe', active: true, access_mode: 'compte' } })
+  const { etat } = preparer({ profil: { ...BERTHE_PROFIL, access_mode: 'compte' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(geste('push_abonner', { abonnement: ABO() }), res)
   assert.strictEqual(res.code, 401, `refus de la garde attendu, reçu ${res.code} ${JSON.stringify(res.body)}`)
   assert.strictEqual(etat.abos.length, 0)
+}))
+
+test('POST push_abonner : le profil doit porter CE jeton — un profil du compte au jeton différent est refusé', avecCles(async () => {
+  // Le lien est connu du compte (public_tokens), mais aucun profil ne porte ce
+  // jeton : la garde ne doit pas « trouver » un autre profil du compte.
+  const { etat } = preparer({ profil: { ...BERTHE_PROFIL, pwa_token: 'jeton-d-une-autre' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(geste('push_abonner', { abonnement: ABO() }), res)
+  assert.strictEqual(res.code, 401, JSON.stringify(res.body))
+  assert.strictEqual(etat.abos.length, 0)
+}))
+
+test('POST push_abonner : le profil doit être du COMPTE du lien', avecCles(async () => {
+  const { etat } = preparer({ profil: { ...BERTHE_PROFIL, account_user_id: 'compte-2' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(geste('push_abonner', { abonnement: ABO() }), res)
+  assert.strictEqual(res.code, 401, JSON.stringify(res.body))
+  assert.strictEqual(etat.abos.length, 0)
+}))
+
+test('POST push_abonner : lien régénéré PENDANT l’abonnement — la ligne écrite est retirée, refus 401', avecCles(async () => {
+  // Constat 5 de la review : la purge (déclencheur) passe avant l'écriture, la
+  // ligne lui survivrait. Première lecture du profil : le lien vaut ; seconde
+  // (après l'écriture) : l'hôte a régénéré, le jeton n'est plus le sien.
+  const { etat } = preparer({ profil: (n) => n === 0 ? BERTHE_PROFIL : { ...BERTHE_PROFIL, pwa_token: 'nouveau-jeton' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(geste('push_abonner', { abonnement: ABO() }), res)
+  assert.strictEqual(res.code, 401, JSON.stringify(res.body))
+  assert.strictEqual(etat.lecturesProfil, 2, 'le lien n’a pas été relu après l’écriture : ce test ne mesure rien')
+  assert.strictEqual(etat.abos.length, 0, 'la ligne de l’ancien téléphone ne doit pas survivre')
+}))
+
+test('POST push_abonner : personne désactivée PENDANT l’abonnement — même traitement', avecCles(async () => {
+  const { etat } = preparer({ profil: (n) => n === 0 ? BERTHE_PROFIL : { ...BERTHE_PROFIL, active: false } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(geste('push_abonner', { abonnement: ABO() }), res)
+  assert.strictEqual(res.code, 401)
+  assert.strictEqual(etat.abos.length, 0)
+}))
+
+test('POST : l’APERÇU reconnu par l’adresse de la page appelante (Referer), même sans marque dans la requête', avecCles(async () => {
+  // Constat 4 : si l'enveloppe de `fetch` de la page était contournée, la
+  // requête partirait sans `apercu=1`. L'adresse du cadre, elle, le porte.
+  for (const action of ['push_abonner', 'push_retirer']) {
+    const { etat, journal } = preparer()
+    const handler = require('../api/menages-public')
+    const res = reponse()
+    const r = geste(action, { abonnement: ABO(), endpoint: ADRESSE })
+    r.headers = { referer: 'https://hotesmart.vercel.app/apps/menages/public.html?token=' + TOKEN + '&apercu=1' }
+    await handler(r, res)
+    assert.strictEqual(res.code, 403, action)
+    assert.strictEqual(etat.abos.length, 0)
+    assert.strictEqual(journal.length, 0)
+  }
+  // Et sa page à ELLE, sans aperçu, n'est pas refusée pour autant.
+  const { etat } = preparer()
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  const r = geste('push_abonner', { abonnement: ABO() })
+  r.headers = { referer: 'https://hotesmart.vercel.app/apps/menages/public.html?token=' + TOKEN }
+  await handler(r, res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  assert.strictEqual(etat.abos.length, 1)
 }))
 
 test('POST : l’APERÇU de l’hôte ne s’abonne pas — 403, et aucune lecture de la base', avecCles(async () => {
@@ -408,6 +491,20 @@ test('GET : la lecture des abonnements en panne ne casse pas la page — « on n
   assert.ok(Array.isArray(res.body.bookings))
 }))
 
+test('GET : la lecture des abonnements qui REJETTE (panne réseau) ne casse pas la page non plus', avecCles(async () => {
+  // Constat 2 : le double ne rendait que `{ error }`, donc le `.catch` qui
+  // protège le planning pouvait disparaître sans qu'un test bronche. Sans lui,
+  // un rejet ferait tomber la page en 500 — ou, s'il arrive après un refus déjà
+  // rendu, deviendrait un rejet non traité.
+  preparer({ rejetPush: true })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(planning(), res)
+  assert.strictEqual(res.code, null, 'la page doit se servir')
+  assert.strictEqual(res.body.push.appareils, null)
+  assert.strictEqual(res.body.push.erreur, 'lecture_impossible')
+}))
+
 test('GET : sans clés de notification, la page le sait (pret: false, pas de clé publique)', async () => {
   const avant = { pub: process.env.PUSH_VAPID_PUBLIC, priv: process.env.PUSH_VAPID_PRIVATE }
   delete process.env.PUSH_VAPID_PUBLIC; delete process.env.PUSH_VAPID_PRIVATE
@@ -443,7 +540,7 @@ test('PERFORMANCE : le planning coûte UNE requête de plus qu’avant le lot, e
   assert.ok(journal.length <= AVANT + 1, `le planning fait ${journal.length} requêtes (avant le lot : ${AVANT})`)
 }))
 
-test('PERFORMANCE : la lecture des abonnements part AVANT les lectures du planning (en parallèle, pas à la fin)', avecCles(async () => {
+test('PERFORMANCE : la lecture des abonnements part AVANT les lectures du planning (pas à la fin)', avecCles(async () => {
   const { journal } = preparer()
   const handler = require('../api/menages-public')
   await handler(planning(), reponse())
@@ -452,6 +549,55 @@ test('PERFORMANCE : la lecture des abonnements part AVANT les lectures du planni
   assert.ok(i >= 0 && j >= 0, 'lectures introuvables : ce test ne mesure rien')
   assert.ok(i < j, `la lecture des abonnements (rang ${i}) doit partir avant celle des biens (rang ${j})`)
 }))
+
+test('PERFORMANCE : le planning n’ATTEND pas la lecture des abonnements pour lire la suite (en parallèle, pas en série)', avecCles(async () => {
+  // Constat 2 : l'ordre des `from()` ne distingue pas « lancée puis attendue à
+  // la fin » de « attendue tout de suite ». Ici la lecture des abonnements
+  // reste PENDANTE : si le planning l'attendait avant de lire les biens, la
+  // lecture des biens ne partirait jamais.
+  let liberer
+  const attentePush = new Promise(r => { liberer = r })
+  const { journal } = preparer({ attentePush })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  const fini = handler(planning(), res)
+  for (let k = 0; k < 50 && !journal.some(a => a.table === 'menage_done'); k++) {
+    await new Promise(r => setImmediate(r))
+  }
+  const lu = journal.map(a => a.table)
+  liberer()
+  await fini
+  assert.ok(lu.includes('push_abonnements_prestataires'), 'la lecture des abonnements n’est pas partie : ce test ne mesure rien')
+  assert.ok(lu.includes('properties') && lu.includes('menages'),
+    `le planning a attendu les abonnements avant de lire la suite : ${lu.join(' ')}`)
+  assert.strictEqual(res.code, null)
+  assert.ok(res.body && res.body.push, 'la réponse porte l’état une fois la lecture rendue')
+}))
+
+test('PERFORMANCE : la page de la prestataire ne charge pas `web-push` (démarrage à froid)', () => {
+  // Constat 7 : importer l'envoi pour lire deux variables chargeait la
+  // bibliothèque de chiffrement à chaque démarrage à froid.
+  const { execFileSync } = require('node:child_process')
+  // Chemin ABSOLU dans le script du sous-processus : un `require` relatif dans
+  // une chaîne serait lu par tests/require-se-resout.test.js comme un require
+  // de ce fichier-ci, résolu depuis tests/.
+  const racine = path.join(__dirname, '..')
+  const sortie = execFileSync(process.execPath, ['-e', `
+    process.env.SUPABASE_URL = 'http://localhost:54321'; process.env.SUPABASE_SERVICE_KEY = 'k'
+    require(${JSON.stringify(path.join(racine, 'api', 'menages-public.js'))})
+    const charges = Object.keys(require.cache)
+    process.stdout.write('\\n@@' + JSON.stringify({ webpush: charges.some(k => k.includes('/node_modules/web-push/')),
+                                          cles: charges.some(k => k.endsWith('/lib/push/cles.js')) }))
+  `], { cwd: racine, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+        // ⚠ Sans `NODE_TEST_CONTEXT` : hérité du lanceur de tests, il fait
+        // parler le sous-processus au format du lanceur, et il échoue.
+        env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'NODE_TEST_CONTEXT')) })
+  // ⚠ D'autres modules écrivent sur la sortie au chargement (cron-shared) :
+  // on ne lit que la ligne marquée.
+  const r = JSON.parse(sortie.split('\n').find(l => l.startsWith('@@')).slice(2))
+  assert.strictEqual(r.cles, true, 'le module des clés n’est pas chargé : ce test ne mesure rien')
+  assert.strictEqual(r.webpush, false)
+})
 
 // ─── 5. L'en-tête de cache, avant le premier refus ─────────────────────────
 
@@ -485,6 +631,21 @@ test('MIGRATION : RLS active et AUCUNE politique — le serveur seul lit et écr
 test('MIGRATION : unicité sur (profil_id, endpoint), suppression en cascade avec le profil', () => {
   assert.match(SQL, /unique \(profil_id, endpoint\)/)
   assert.match(SQL, /profil_id uuid not null references public\.profiles \(id\) on delete cascade/)
+})
+
+test('MIGRATION : la condition de purge est EXACTEMENT celle-ci (un `or` devenu `and` serait un rouge)', () => {
+  // Constat 3 : des regex fragment par fragment laissaient passer une condition
+  // déplacée ou un connecteur changé. On compare le corps entier, espaces
+  // normalisés. L'épreuve sur un vrai Postgres reste la passe décrite en KB §13.1.
+  const corps = (SQL.match(/as \$\$([\s\S]*?)\$\$;/) || [])[1]
+  assert.ok(corps, 'corps de la fonction introuvable : ce test ne mesure rien')
+  const norme = corps.replace(/\s+/g, ' ').trim()
+  assert.strictEqual(norme,
+    'begin if new.pwa_token is distinct from old.pwa_token ' +
+    'or (new.active is false and old.active is distinct from false) ' +
+    'or new.access_mode is distinct from old.access_mode then ' +
+    'delete from public.push_abonnements_prestataires where profil_id = new.id; ' +
+    'end if; return new; end;')
 })
 
 test('MIGRATION : la purge suit les trois colonnes qui coupent un lien, en security definer', () => {
