@@ -131,7 +131,10 @@ test('LE TEST QUI COMPTE (recette du 17 novembre 2026) : un avis d\'impôt n\'a 
   assert.deepEqual(r7.montantsDuType('avis_impot', { montant_ht_cents: 7, montant_tva_cents: null, montant_ttc_cents: 370000 }),
     { montant_ht_cents: 370000, montant_tva_cents: 0, montant_ttc_cents: 370000 })
   assert.deepEqual(r7.montantsDuType('avis_impot', { montant_ht_cents: null, montant_tva_cents: 12, montant_ttc_cents: null }),
-    { montant_ht_cents: null, montant_tva_cents: 0, montant_ttc_cents: null }, 'un TTC non lu reste non lu, et le HT avec lui')
+    { montant_ht_cents: null, montant_tva_cents: 0, montant_ttc_cents: null }, 'aucun montant lu : non lu des deux côtés')
+  // Un impôt n'a qu'UN montant : lu en HT seul, il ne se jette pas (review du correctif, constat D).
+  assert.deepEqual(r7.montantsDuType('avis_impot', { montant_ht_cents: 5000, montant_tva_cents: null, montant_ttc_cents: null }),
+    { montant_ht_cents: 5000, montant_tva_cents: 0, montant_ttc_cents: 5000 })
   // Les autres types ne changent pas : la facture telle quelle, l'avoir signé.
   assert.deepEqual(r7.montantsDuType('facture', { montant_ht_cents: null, montant_tva_cents: null, montant_ttc_cents: 600 }),
     { montant_ht_cents: null, montant_tva_cents: null, montant_ttc_cents: 600 })

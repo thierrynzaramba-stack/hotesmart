@@ -3,6 +3,13 @@
 -- recette du 17 novembre 2026 : pour un document
 -- de type « avis_impot », HT = TTC et TVA = 0.
 -- A coller APRES 2026-11-13-charges-periode.sql.
+-- ⚠ ET APRES LE DEPLOIEMENT DU CODE qui pose la
+-- regle (`montantsDuType`) sur l'environnement
+-- vise : l'ancien code ecrit des avis sans HT
+-- ni TVA, que la contrainte refuserait (lecture
+-- en panne relancee a chaque cron, validation
+-- en 503). Le nouveau code, lui, n'a pas besoin
+-- d'elle : l'ordre inverse est sans risque.
 -- Rejouable. Lignes courtes : collage manuel.
 -- Controle : 2026-11-17-controle-charges-avis-
 --   impot.sql, puis scripts/oracle-resume-
@@ -13,16 +20,20 @@
 -- total « Estimation » ; et le total HT doit
 -- inclure l'impot, comme en comptabilite.
 --
--- 1. Les avis deja enregistres sont corriges.
---    Le trigger recalcule leur resume (serie,
---    verrou de compte) : rien d'autre a jouer.
+-- 1. Les avis deja enregistres sont corriges :
+--    un impot n'a qu'UN montant, le TTC lu,
+--    sinon le HT lu ; aucun des deux, il reste
+--    non lu des deux cotes. Le trigger recalcule
+--    leur resume (serie, verrou de compte).
 -- 2. La base tient la regle du writer
 --    (`montantsDuType`, lib/charges/regles.js) :
---    `charges_impot_ck`. Un TTC absent reste
---    absent, et le HT l'est avec lui.
+--    `charges_impot_ck`.
 
 update public.charges
-   set montant_ht_cents = montant_ttc_cents,
+   set montant_ttc_cents = coalesce(
+         montant_ttc_cents, montant_ht_cents),
+       montant_ht_cents = coalesce(
+         montant_ttc_cents, montant_ht_cents),
        montant_tva_cents = 0
  where type_document = 'avis_impot'
    and (montant_tva_cents

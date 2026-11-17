@@ -388,11 +388,20 @@ export function monter (racine, deps) {
   // serveur pose HT = TTC et TVA = 0 quoi qu'on envoie : ce masquage est un
   // confort, la règle vit dans `montantsDuType` et dans `charges_impot_ck`.
   function adapterMontants (type) {
-    for (const k of ['montant_ht_cents', 'montant_tva_cents']) {
-      const el = dialogue().querySelector(`[data-champ="${k}"]`)
-      const l = el && el.closest('label')
-      if (l) l.hidden = type === 'avis_impot'
+    const impot = type === 'avis_impot'
+    const [ht, tva] = ['montant_ht_cents', 'montant_tva_cents'].map(k => dialogue().querySelector(`[data-champ="${k}"]`))
+    if (!ht || !tva) return
+    // ⚠ EN QUITTANT « Avis d'impôt », HT = TTC et TVA = 0 ne sont pas des
+    // montants LUS : c'est la règle de l'impôt qui les a posés (review du
+    // correctif, constat A). Gardés, une facture que l'IA aurait classée en
+    // impôt repartirait avec une TVA à 0 que personne n'a lue — et sans
+    // « Estimation ». Ils redeviennent « non lu ».
+    if (!impot && ht.closest('label').hidden) {
+      const ttc = dialogue().querySelector('[data-champ="montant_ttc_cents"]')
+      if (ttc && enCentimes(tva.value) === 0 && enCentimes(ht.value) === enCentimes(ttc.value)) { ht.value = ''; tva.value = '' }
     }
+    ht.closest('label').hidden = impot
+    tva.closest('label').hidden = impot
   }
 
   function peindreFiche (c) {

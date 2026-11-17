@@ -1212,6 +1212,21 @@ oracle en force brute sur 1 800 écritures aléatoires : 0 écart.
 | 7 | mineur | un avoir lu avec son signe tombait à « non lu » | **corrigé** : lu signé puis en valeur absolue ; consigne précisée (test) |
 | 8 | mineur | rejouer 2026-11-10 après 7a ; un « 0 » inventé si les indicateurs manquent | **corrigé** : en-tête de la migration ; la vue dit « non lu » sans indicateur (test) |
 
+### 14.11 Review du correctif « avis d'impôt » (17 novembre 2026)
+
+Une review, sur `3cf53692b2cf5044a82497b1c417640e3f8a1f67` (arbre
+`/home/claude/hotesmart-lot3`, branche `charges-lot7-periode`, plage
+`5752649e..3cf53692`, 14 fichiers, tous dans le diff). **Aucun constat de
+sécurité.** Quatre constats mineurs, corrigés sans nouvelle review (règle
+« une review par commit ») :
+
+| | Constat | Correction |
+|---|---|---|
+| A | Quitter « Avis d'impôt » dans la fiche gardait HT = TTC et TVA = 0 : une facture mal classée par l'IA repartait avec une TVA à 0 que personne n'a lue, sans « Estimation » | Les deux cases se vident quand elles valent encore ce que la règle a posé ; des montants tapés survivent |
+| B | L'en-tête de la migration ne disait pas « après le déploiement du code » : posée avant, la contrainte mettait la lecture des avis en panne, relancée à chaque cron | En-tête et KB le disent |
+| C | Le contrôle laissait passer une contrainte affaiblie (TVA = 0 seulement) | Il vérifie les deux moitiés de la règle, sous les deux écritures que Postgres peut rendre, et `convalidated` ; éprouvé sur Postgres 16 : règle affaiblie, contrainte non validée et contrainte absente rendent `false` |
+| D | Un avis lu en HT seul perdait son montant | Un impôt n'a qu'un montant : le TTC lu, sinon le HT lu ; la consigne de l'IA le dit |
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

@@ -506,6 +506,31 @@ test('choisir « Avis d\'impôt » retire HT et TVA ; revenir à « Facture » l
   } finally { b.fermer() }
 })
 
+test('LE TEST QUI COMPTE (review du correctif, constat A) : quitter « Avis d\'impôt » VIDE le HT = TTC et la TVA à 0 posés par la règle — jamais une TVA à 0 que personne n\'a lue', async () => {
+  const c = facture(1, { statut: 'a_verifier', type_document: 'avis_impot', montant_ht_cents: 12000, montant_tva_cents: 0, montant_ttc_cents: 12000 })
+  const b = await monter({ ecran: () => reponseEcran({ aTraiter: [c] }), geste: () => ({ ok: true }) })
+  try {
+    await b.cliquer(b.$(`[data-ouvrir="${c.id}"]`))
+    await b.choisir(b.$('[data-champ="type_document"]'), 'facture')
+    assert.deepEqual([b.$('[data-champ="montant_ht_cents"]').value, b.$('[data-champ="montant_tva_cents"]').value], ['', ''])
+    assert.equal(b.$('[data-champ="montant_ttc_cents"]').value, '120,00', 'le TTC, lui, était lu : il reste')
+    await b.cliquer(b.$('[data-geste="valider"]'))
+    const [g] = b.gestes()
+    assert.deepEqual([g.champs.type_document, g.champs.montant_ttc_cents, g.champs.montant_ht_cents, g.champs.montant_tva_cents], ['facture', 12000, null, null])
+  } finally { b.fermer() }
+})
+
+test('des montants TAPÉS sur une facture survivent à un aller-retour par « Avis d\'impôt »', async () => {
+  const c = facture(1, { statut: 'a_verifier', montant_ht_cents: 10000, montant_tva_cents: 2000, montant_ttc_cents: 12000 })
+  const b = await monter({ ecran: () => reponseEcran({ aTraiter: [c] }) })
+  try {
+    await b.cliquer(b.$(`[data-ouvrir="${c.id}"]`))
+    await b.choisir(b.$('[data-champ="type_document"]'), 'avis_impot')
+    await b.choisir(b.$('[data-champ="type_document"]'), 'facture')
+    assert.deepEqual([b.$('[data-champ="montant_ht_cents"]').value, b.$('[data-champ="montant_tva_cents"]').value], ['100,00', '20,00'])
+  } finally { b.fermer() }
+})
+
 // ─── L'ajout d'une facture ──────────────────────────────────────────────────
 test('LE TEST QUI COMPTE : un PDF part en trois temps — envoi, dépôt au stockage, confirmer — puis sa fiche s\'ouvre', async () => {
   const lue = facture(7, { statut: 'a_verifier', fournisseur_nom: 'EDF' })
