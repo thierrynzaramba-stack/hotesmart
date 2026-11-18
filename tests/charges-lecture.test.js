@@ -121,3 +121,15 @@ test('la consigne demande le type de document, la période couverte et le solde 
   for (const t of require('../lib/charges/regles').TYPES_DOCUMENT) assert.ok(src.includes(`"${t}"`), t)
   assert.match(src, /CONSOMMATION de la période/)
 })
+
+test('LE TEST QUI COMPTE (Thierry, 18 novembre 2026) : sur une facture d\'ÉNERGIE, la consigne fait chercher la période de CONSOMMATION dans toutes les pages', () => {
+  // Vécu en production : une régularisation EDF de 5 856,48 € lue sans
+  // période — la consommation (« du 26/09/24 au 25/09/25 ») n'était écrite
+  // qu'en page 2 du détail. Sans période, tout tombait sur le mois de la date.
+  const { CONSIGNE } = require('../lib/charges/lecture')
+  assert.match(CONSIGNE, /facture d'ÉNERGIE \(électricité, gaz, eau\)/)
+  assert.match(CONSIGNE, /cherche-la dans TOUTES les pages/)
+  assert.match(CONSIGNE, /26\/09\/24 donne 2024-09-26/, 'l\'année sur deux chiffres')
+  assert.match(CONSIGNE, /Ne prends PAS la période de l'abonnement/)
+  assert.match(CONSIGNE, /plusieurs contrats \(électricité et gaz\)/)
+})

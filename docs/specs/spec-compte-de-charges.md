@@ -1062,6 +1062,17 @@ La consigne lit en plus :
 Les montants d'un avoir se lisent positifs, comme imprimés. Même règle
 qu'aujourd'hui : rien d'inventé, `null` si c'est absent.
 
+**Facture d'énergie : la période de CONSOMMATION, cherchée dans toutes les
+pages** (demande de Thierry, 18 novembre 2026, au chargement des factures 2025
+en production). Une régularisation EDF de 5 856,48 € (7 octobre 2025) a été
+lue sans période : la consommation — « du 26/09/24 au 25/09/25 » — n'était
+écrite qu'en page 2 du détail, et tout le montant tombait sur octobre 2025. La
+consigne dit désormais : chercher la période dans TOUTES les pages ; compléter
+une année sur deux chiffres ; ne pas prendre la période de l'abonnement
+(facturé d'avance) ; pour plusieurs contrats (électricité et gaz), le premier
+jour le plus ancien et le dernier jour le plus récent. Le PDF entier part déjà
+à l'IA : seule la consigne manquait.
+
 ### 14.4 Sous-lot 7a — écran
 
 - **Fiche** : un champ « Type » ; « Période du … au … » (facultatif) ; pour

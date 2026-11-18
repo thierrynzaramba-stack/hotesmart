@@ -133,6 +133,10 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   comptent « sans montant lu » et marquent tout le total « Estimation ». La
   fiche retire ses cases HT et TVA (confort : la règle vit au serveur). Le
   total HT inclut l'impôt.
+- **Facture d'énergie : la période est celle de la CONSOMMATION** (Thierry,
+  18 novembre 2026) : la consigne de lecture la fait chercher dans toutes les
+  pages (le détail EDF la porte en page 2), jamais celle de l'abonnement.
+  Spec §14.3.
 - **Lot 7a — une régularisation compte sa CONSOMMATION** ; le solde lu reste
   dans `lecture_ia.solde_ttc_cents`, montré à côté, jamais compté.
 - **Lot 7a — les compteurs restent ceux des DOCUMENTS, à leur date** : seuls
