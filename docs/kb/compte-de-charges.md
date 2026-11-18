@@ -158,6 +158,15 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 - **Lot 7a — après la migration 2026-11-13, ni 2026-11-10 ni 2026-11-09 ne
   se rejouent.**
 
+## Décidé pour plus tard (Thierry, 18 novembre 2026)
+
+- **Électricité et gaz séparés** : aujourd'hui une seule catégorie,
+  `energie` (« Eau, électricité, gaz »).
+- **Clé de répartition entre logements** : une facture commune à plusieurs
+  logements reste « sans logement » (compte dans le total de l'entité, pas
+  dans celui d'un logement). Rien n'est codé ; la clé reste à décider.
+Détail : spec §14.0.
+
 ## Dettes connues (review du lot 2, 10 novembre 2026)
 
 - **Lot 3 — `entitesDuCompte` et `liensDuCompte`** (lib/entites-juridiques.js,

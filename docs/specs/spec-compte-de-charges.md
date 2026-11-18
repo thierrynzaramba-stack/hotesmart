@@ -967,6 +967,15 @@ son go.
 | **7b** L'échéancier, une provision | Un échéancier d'énergie ou de taxe foncière apparaît en **prévision** sur sa période, marquée « estimation », jusqu'à la facture finale qui le remplace (Q25). |
 | **7c** La facture annuelle | « Cette facture revient chaque année » : HôteSmart **prévoit** l'année suivante avec le montant de l'an dernier, **alerte** si elle n'arrive pas, et **pré-remplit** la nouvelle (Q27). |
 
+**Décidé pour plus tard** (Thierry, 18 novembre 2026, au chargement des
+factures 2025 en production — sujets à spécifier, aucun lot ouvert) :
+- **Distinguer l'électricité et le gaz** : la catégorie « Eau, électricité,
+  gaz » (`energie`) les confond aujourd'hui.
+- **Une clé de répartition entre logements** : une facture qui couvre
+  plusieurs logements (un contrat EDF commun à La bulle et au 23) reste
+  aujourd'hui « sans logement » ; elle compte dans le total de l'entité, pas
+  dans celui d'un logement. La clé (50/50, surface, nuitées…) reste à décider.
+
 ### 14.1 Catégorie de chaque donnée affichée (règle d'architecture)
 
 | Donnée | Catégorie | Où elle se calcule |
