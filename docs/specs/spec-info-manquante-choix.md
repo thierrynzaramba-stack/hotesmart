@@ -121,11 +121,12 @@ réponse prête existante, elle propose sa modification.**
   2026 : « 3 est trop petit de toute façon »)** : **10 rédactions par
   conversation sur 24 h**, comptées dans le journal `ia_appels` sous
   l'étiquette `guestflow_rediger`. Elles ne touchent **jamais** le plafond de
-  l'agent (`guestflow_appels_ia`, 3 appels) : sinon trois clics de l'hôte
+  l'agent (`guestflow_appels_ia`, 3 appels à l'époque, 6 depuis la dette 146) : sinon trois clics de l'hôte
   arrêteraient l'agent sur la conversation (tâche « L'agent IA s'est
   arrêté… ») et réveilleraient le fondateur pour un geste voulu. Journal
   illisible : on n'appelle pas (503). Relever le plafond de l'agent lui-même
-  est un autre sujet : dette 146.
+  est un autre sujet : dette 146 — soldée le 17 novembre 2026, le plafond de
+  l'agent passe à 6 (« double »).
   ⚠ **Limite connue (review 1, constat 3)** : la ligne du journal est écrite
   APRÈS la réponse du modèle, et son échec est silencieux. Des demandes
   simultanées (deux onglets, un script d'un membre autorisé) lisent toutes le
@@ -243,5 +244,5 @@ Chaque étape fait l'objet de sa propre remise au chef de file.
 2. **Deux étapes** : la carte et le bouton « IA » d'abord, puis, après leur
    recette, les réponses prêtes.
 3. **Le plafond de l'hôte est le sien** : 10 rédactions par conversation sur
-   24 h, sans toucher les 3 appels de l'agent (« 3 est trop petit de toute
-   façon »).
+   24 h, sans toucher les appels de l'agent (3 à l'époque, 6 depuis la
+   dette 146 — « 3 est trop petit de toute façon »).

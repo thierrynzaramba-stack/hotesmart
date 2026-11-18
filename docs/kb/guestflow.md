@@ -706,9 +706,13 @@ envoi en échec en Mode Auto.
 - Une **trace** (tâche `ignored` du type classé) après chacun de ces chemins :
   un fil n'est jamais reclassé sans nouveau message du voyageur. Sur un bien en
   pause, une intervention ou une question inconnue crée toujours sa tâche.
-- `lib/guestflow-garde.js` : **au plus 3 appels IA par fil sur 24 h** (incident
+- `lib/guestflow-garde.js` : **au plus 6 appels IA par fil sur 24 h** (3 jusqu'au
+  17 novembre 2026, dette 146, décision de Thierry : « double ») (incident
   `guestflow_plafond`, un par fil et par jour) et **délai croissant après un
-  échec** (5, 10, 20, 40 min… plafonné à 6 h). Journal `guestflow_appels_ia`
+  échec** (5, 10, 20, 40 min… plafonné à 6 h). La tâche d'arrêt n'est PAS
+  fermée quand une réponse part ensuite sur le fil : laissé tel quel, décision
+  de Thierry du 17 novembre 2026, « je vais voir à l'usage » (registre,
+  dette 146). Journal `guestflow_appels_ia`
   (migration `2026-10-08-guestflow-appels-ia.sql`) : une ligne par appel, avec
   le modèle réellement utilisé — ce que le cron ne journalisait pas. Sans la
   migration, l'agent tourne sans plafond et le dit (`guestflow_journal_absent`).
@@ -863,9 +867,10 @@ ce chemin ne peut plus **supprimer** une entrée, et c'est ce qui le rend sûr.
 
 ### Le plafond d'appels IA précède tout ce que ce chantier pose
 
-`lib/guestflow-garde.js` : `PLAFOND_JOUR = 3` appels IA **réussis** par fil sur
-24 h glissantes, plus le délai croissant après échec (5, 10, 20, 40 min…
-plafonné à 6 h). **Une revalidation de brouillon consomme un de ces 3 appels.**
+`lib/guestflow-garde.js` : `PLAFOND_JOUR = 6` appels IA **réussis** par fil sur
+24 h glissantes (3 jusqu'au 17 novembre 2026 — dette 146), plus le délai
+croissant après échec (5, 10, 20, 40 min… plafonné à 6 h). **Une revalidation de
+brouillon consomme un de ces appels.**
 D'où la règle gravée du lot 2 : à l'échéance, **plafond atteint → aucun appel,
 le brouillon part tel quel**. Le texte est déjà écrit, l'envoyer ne coûte rien ;
 la revalidation est un bonus qui s'efface devant la garde, jamais une condition
