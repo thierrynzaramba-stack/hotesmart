@@ -631,3 +631,42 @@ par commit »). Chaque fichier cité est dans le diff de la plage ;
 | 6 | mineur | `api/cron.js` | un passage interrompu ne se voyait nulle part | corrigé : `results.resumeAvisBudgetAtteint`, alerte unique si le créneau n'est pas fini deux heures après ; test |
 | 7 | mineur | `api/cron.js` | « deux lectures » annoncées, il y en a trois | corrigé (commentaire et §10.4) |
 | 8 | mineur | `tests/avis-endpoint.test.js` | le test « recalcul en échec » passait par un `TypeError`, pas par un refus de la base | corrigé : la fonction SQL est appelée et refuse ; second test pour l'exception |
+
+## 11. Pas d'avis du voyageur (18 novembre 2026)
+
+**Décision de Thierry du 18 novembre 2026 (11:58), option A.** Un avis Airbnb
+encore masqué **plus de 14 jours après sa réception** affiche « Pas d'avis du
+voyageur. » au lieu de « Avis déposé, masqué par Airbnb jusqu'à votre
+évaluation. ». Avant ce délai, rien ne change.
+
+**Pourquoi.** L'objet d'avis Channex naît au **départ** du voyageur, masqué et
+vide, **qu'il écrive ou non** (docs/kb/avis-voyageurs.md). Sa réception date donc
+le départ, et Airbnb publie un avis écrit au plus tard 14 jours après. Vérifié
+le 18 novembre 2026 sur les commentaires publics de La bulle, triés du plus
+récent : les deux exemples relevés (départs des 27 et 30 octobre) n'y sont pas,
+alors que l'avis voisin, révélé chez nous, y est. À cette date, **42 cartes**
+étaient dans ce cas sur les 4 biens (la plus ancienne : départ du 22 août) :
+« avis déposé » y était faux.
+
+**Ce qui change.**
+- `lib/avis/cartes.js` : `avisPourCarte` porte `sans_avis`, vrai pour un avis
+  masqué reçu il y a plus de 14 jours, calculé avec le `maintenant` déjà injecté.
+  Un avis sans date de réception ne conclut rien (`false`). L'avis reste
+  `masque` : rien de lui ne sort de plus.
+- `core/avis/cartes.js` : la ligne grise « Pas d'avis du voyageur. », sans
+  cadenas (il n'y a rien à dévoiler), sur la carte et sur la ligne « À traiter ».
+- Une clé i18n (`avis.sans_avis`, fr/en/es).
+
+**Inventaire.** Rien n'est retiré. Aucun chiffre ne change : un avis masqué
+n'entrait déjà dans aucun compte (total, note, propreté).
+
+**Case performance.** Sans objet, point par point. Aucun endpoint, aucune
+requête et aucun octet en plus, à un booléen près par avis. Pas de cache
+touché. Aucune lecture nouvelle. Le budget de l'écran est inchangé
+(`Server-Timing` reste à 10).
+
+**Tests.** `tests/avis-cartes-endpoint.test.js` vérifie qu'un avis masqué à
+15 jours est `sans_avis`, et qu'un avis à 13 jours, sans date ou révélé ne l'est
+pas. `tests/avis-cartes-dom.test.js` vérifie le texte sans cadenas, sur la carte
+et sur la ligne « À traiter ». Les trois tests neufs rougissent contre `main`
+(contre-épreuve par `git archive`).

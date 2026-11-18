@@ -61,6 +61,7 @@
   "avis.jours_restants": "{n, plural, one {# jour restant} other {# jours restants}}",
   "avis.masque": "Avis déposé, masqué par Airbnb jusqu’à votre évaluation.",
   "avis.masque_court": "Avis masqué jusqu’à votre évaluation",
+  "avis.sans_avis": "Pas d’avis du voyageur.",
   "avis.menage": "ménage : {nom}",
   "avis.n_notes": "{n, plural, one {# note} other {# notes}}",
   "avis.notre_avis": "Notre avis",

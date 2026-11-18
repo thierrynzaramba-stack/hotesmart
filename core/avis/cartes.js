@@ -68,6 +68,7 @@ export const TEXTES_FR = {
   'avis.evaluer': 'Évaluer {prenom}',
   'avis.evaluer_court': 'Évaluer',
   'avis.masque_court': 'Avis masqué jusqu’à votre évaluation',
+  'avis.sans_avis': 'Pas d’avis du voyageur.',
   'avis.recu_sms': 'reçu par SMS',
   'avis.recu_email': 'reçu par email',
   'avis.recu_oral': 'reçu de vive voix',
@@ -273,6 +274,10 @@ function texteRepliable (texte, cle, ctx) {
 // passent ensemble (shared/avis-traduction.js).
 function blocSonAvis (a, ctx, cle) {
   const { T } = ctx
+  // Masque depuis plus de 14 jours : le voyageur n'a rien ecrit (decision de
+  // Thierry du 18 novembre 2026). Ni cadenas ni « depose » : il n'y a rien a
+  // devoiler.
+  if (a.masque && a.sans_avis) return `<p class="avp-gris">${ECHAPPER(T('avis.sans_avis'))}</p>`
   if (a.masque) return `<p class="avp-gris">${ICONE('i-lock')}${ECHAPPER(T('avis.masque'))}</p>`
   const texte = a.texte || ''
   const tr = a.traduction || {}
@@ -382,9 +387,11 @@ function ligneEvaluation (c, ctx, cle) {
   const origine = origineDe(e, ctx)
   // L'avis du voyageur, s'il en est un d'affichable : masque (le cas courant),
   // ou recu. Les detections sont sorties a part.
-  const avis = c.avis.filter(a => !a.detecte).map((a, k) => (a.masque
-    ? `<p class="avp-gris">${ICONE('i-lock')}${deuxFormes(T('avis.masque'), T('avis.masque_court'))}</p>`
-    : blocSonAvis(a, ctx, `${cle}-${k}`))).join('')
+  const avis = c.avis.filter(a => !a.detecte).map((a, k) => (a.masque && a.sans_avis
+    ? `<p class="avp-gris">${ECHAPPER(T('avis.sans_avis'))}</p>`
+    : a.masque
+      ? `<p class="avp-gris">${ICONE('i-lock')}${deuxFormes(T('avis.masque'), T('avis.masque_court'))}</p>`
+      : blocSonAvis(a, ctx, `${cle}-${k}`))).join('')
   return `<li class="avp-ligne-atraiter" data-cle="${ECHAPPER(c.cle)}">${vignette(c, ctx, ' avp-photo--l')}`
     + `<div class="avp-id"><span class="avp-qui">${ECHAPPER(nomCourt(c, T))} ${pastilleCanal(canal)}</span>`
     + `<span class="avp-infos">${infosDu(c, ctx).map(ECHAPPER).join(' · ')}</span>${etat}`

@@ -403,3 +403,25 @@ test('avant la migration : la page reste juste, SANS traduction (une relecture s
   assert.equal(lectures.length, 2, 'une tentative avec, une relecture sans')
   assert.doesNotMatch(String(lectures[1]._col), /avis_traductions/)
 })
+
+// ─── Pas d'avis du voyageur (décision de Thierry du 18 novembre 2026) ──────
+// Un avis Airbnb masqué plus de 14 jours après sa réception est un voyageur
+// qui n'a rien écrit : l'objet Channex naît au départ, vide. La carte le dit ;
+// rien de l'avis ne sort de plus, et aucun chiffre ne change.
+test('LE TEST QUI COMPTE : masqué depuis plus de 14 jours → sans_avis ; 13 jours, révélé ou sans date → non', async () => {
+  preparer({ avis: [
+    avisDe('vieux', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-15), booking_uid: 'u-v' }),
+    avisDe('jeune', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-13), booking_uid: 'u-j' }),
+    avisDe('sansdate', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: null, booking_uid: 'u-s' }),
+    avisDe('revele', { received_at: jour(-30), booking_uid: 'u-r' })
+  ] })
+  const r = await appeler({ periode: 'toujours', anciens: '1' })
+  assert.equal(r.code, 200)
+  const a = avisParId(r.body)
+  assert.equal(a.vieux.sans_avis, true)
+  assert.equal(a.vieux.masque, true, 'toujours masqué : rien de lui ne sort')
+  assert.equal(a.vieux.note_sur_5, null)
+  assert.equal(a.jeune.sans_avis, false, 'dans les 14 jours, il peut encore arriver')
+  assert.equal(a.sansdate.sans_avis, false, 'sans date, on ne conclut rien')
+  assert.equal(a.revele.sans_avis, false)
+})
