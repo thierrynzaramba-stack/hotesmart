@@ -2727,3 +2727,57 @@ attrapées : le SMS envoyé malgré la notification, le repli `/dashboard`, la
 remplaçante muette, les échecs comptés comme reçus, la lecture sans clés, la
 règle « prévenue » qui oublie `push`, `web-push` chargé en tête, le `tag`
 retiré, les appareils lus sur le compte au lieu du profil.
+
+### 13.8 Trace de la review de l'étape 3 (18 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, plage
+`9044d10f9d075eacaf99f1757a22abf1d3a8cb52..d18335dec373835ee695ed8ef95dae1d8f8d304d`.
+Chaque fichier cité comme lieu d'un constat est dans le diff de l'étape. Rapport
+consigné tel quel à réception, avant correction :
+
+> Je ne trouve aucun constat de sécurité. Deux points demandent une décision ou un correctif (1 et 2), un test laisse passer une mutation (3), et le reste est mineur.
+>
+> **1. Défaut de règle, à faire trancher par Thierry : « reçue » veut dire « acceptée par le service de push », pas « affichée ».** Fichier `lib/cleaning/notifier-prestataire.js`, lignes 137 et 148. Ce qui se passe : `push` compte les réponses 2xx d'Apple ou de Google. Un seul 2xx suffit à supprimer le SMS. La KB écrit pourtant « le nombre d'appareils qui l'ont reçue ». Scénario A, téléphone sans données : données mobiles coupées hors Wi-Fi, ou téléphone éteint : le service répond 201 et garde le message jusqu'à 24 h (`TTL_S`). Le SMS, lui, serait arrivé par le réseau téléphonique. C'est précisément le geste d'urgence pour lequel ce module existe : une attribution deux heures avant le départ. Scénario B, un téléphone qui n'est pas le sien : son lien est son identité. Toute personne qui a ce lien et l'ouvre hors aperçu peut toucher « Recevoir » : Thierry qui teste le lien de Régina sur son propre téléphone, ou une aide à qui elle l'a transmis. Dès lors, `push` vaut au moins 1 à chaque envoi : Régina ne reçoit plus aucun SMS, et le bilan dit « prévenue ». Pourquoi c'est plus risqué qu'au lot 2 : le lot 2 (Q11) a la même règle, mais un abonnement y est lié à une session connectée. Ce qui manque : ni la KB ni les « Limites connues » de la spec (§12) n'en parlent. Le code applique la règle telle qu'elle est écrite : c'est le sens de « reçue » que Thierry doit confirmer. Par exemple, garder le SMS pour une attribution proche du départ. Au minimum, écrire la limite et désabonner les téléphones de test après la recette.
+>
+> **2. Défaut de coût et de délai : les appareils sont appelés l'un après l'autre, 5 s au plus chacun, avant le SMS.** Fichiers `lib/push/envoyer.js` lignes 130-131, appelé depuis `lib/cleaning/notifier-prestataire.js` lignes 146-148. Mesure : avec un service de push qui ne répond pas, `notifierAssignation` prend 5 022 ms pour un appareil et 10 035 ms pour deux. Le SMS ne part qu'ensuite. Dans le cron : ni `poserPropositionsDues` ni `relancerValidations` n'a de limite de temps propre, contrairement aux brouillons dus (`resteMs`) et à la file des notifications en attente. Le cron dispose de 60 s (`maxDuration: 60`). Douze envois vers un appareil muet suffisent, par exemple pendant une panne d'Apple à 9 h. Les étapes suivantes du cycle ne passent plus : brouillons dus, distribution, signal de vie. Ce qui existait déjà : la relance portait déjà ce risque pour les téléphones de l'hôte (`notifierMenagePasVu`, lot 2c-2). Ce lot le double. Côté hôte : son clic d'attribution attend 5 s par appareil muet avant de répondre. Le geste qui pose jusqu'à 10 propositions (`MAX_NOTIFS`) peut attendre 10 × appareils × 5 s. Gravité : pas bloquant avec quatre logements. Pistes : une limite de temps dans les deux boucles, ou des envois en parallèle sur le seul chemin prestataire, pour ne pas toucher au lot 2.
+>
+> **3. Test qui laisse passer une mutation.** Fichier `tests/cleaning-notifier.test.js`, lignes 489-493. Ce qui se passe : pour `sync-menages-entite.js`, le contrôle n'est qu'une recherche de texte dans la source. Contre-épreuve : j'ai remplacé les deux `aEtePrevenue(notif)` par `notif && (notif.email || notif.sms)`. Résultat : 233 sur 233 au vert, sur `cleaning-notifier` et les six fichiers qui chargent ce module. Effet de la mutation : `notifiees` serait sous-compté : journal faux, et plafond `MAX_NOTIFS_PAR_CYCLE` moins efficace. Ce qui manque : aucun test de comportement de `poserNouveauxTours` ni de `elargirToursEnCours` avec un bilan `{ push: 1, sms: false, email: false }`. La relance, elle, en a un dans `menages-valider`.
+>
+> **4. Mineur.** Fichier `tests/cleaning-notifier.test.js`, ligne 437. Le titre annonce « désactivé ou hors du compte », mais seul `active: false` est exercé. Le filtre de compte reste couvert par le test plus ancien sur les filtres, qui passe par la même branche.
+>
+> **5. Mineur : commentaires périmés.** `lib/cleaning/notifier-prestataire.js`, ligne 85 : « Rend `{ sms, email }` ». `lib/cleaning/relance-validation.js`, lignes 291-294 : « les deux canaux décochés, rien ne partira jamais… « Aucun canal actif » ». C'est faux désormais : la notification part même quand l'hôte a décoché SMS et e-mail. C'est conforme aux §4 et §9 de la spec, mais l'avertissement de la fiche le contredit ; à reprendre à l'étape 5.
+>
+> **6. Mineur.** Le code et la KB citent `docs/specs/spec-pwa-lot3-prestataires.md`, qui n'existe pas dans cette branche. La spec vit sur `pwa-lot-3-spec`, dont le commit `878f3b1a` n'est pas un ancêtre de cette branche. C'était déjà le cas aux étapes 1 et 2 : c'est l'ordre des merges qui règle la question.
+>
+> **Vérifié, sans constat :** destinataires (`profilNotifiable`, lecture par `profil_id` seul, purge en base) ; contenu (jour, logement, échéance ; `tag` `menage-<bien>-<date>` ; adresse constante `/apps/menages/public.html` ; ni jeton, ni lien, ni voyageur) ; échecs (clés absentes, lecture en panne, 404/410, 5xx, délai, exception : `push` à 0 et le SMS part) ; `web-push` non chargé au démarrage de `api/menages-public.js` (mesuré) ; `envoyerAPersonne` inchangé ; compteurs de la relance justes ; suite complète 8743, 0 rouge (trois tests ont besoin du dépôt git), les deux fichiers du lot à 63 sur 63 à l'heure réelle et à J+4, J+60, J+200.
+
+### 13.9 Suites données à la review de l'étape 3 (18 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **« Reçue » n'est pas « vue »** — question posée à Thierry (**Q46**), tranchée
+   le 18 novembre : **un ménage d'aujourd'hui ou de demain garde son SMS**,
+   notification reçue ou non ; plus tard, la notification remplace le SMS.
+   Conséquence dite à Thierry : les rappels « Vu » (veille, jour même) gardent
+   toujours leur SMS. `estUrgent` lit le jour à Paris ; une date illisible est
+   urgente ; un SMS décoché ne part pas, même urgent. Tests : J−1 à J+10, les
+   trois envois, le passage de minuit à Paris, les dates illisibles. ⚠ **Le
+   bilan et la KB disent désormais « accepté par le service », pas « reçu ».**
+   ⚠ **Après la recette, désabonner les téléphones de test** : un téléphone
+   abonné avec le lien d'une prestataire supprime ses SMS non urgents.
+2. **Délai d'un service muet** — envoi **en parallèle** et **disjoncteur** par
+   service (cinq minutes de pause après un délai dépassé ou une erreur réseau),
+   sur le seul chemin prestataire : une notification coûte au plus un délai,
+   puis plus rien pendant la pause. Le lot 2 est inchangé (test). Mesuré dans le
+   test : deux appareils sur un service muet, un seul délai ; la notification
+   suivante ne l'appelle plus.
+3. **Le compteur du moteur** — test de comportement de la pose et de
+   l'élargissement d'un tour avec un bilan `{ push: 1, sms: false }` ; la
+   mutation de la review rougit, sur chacune des deux occurrences.
+4. **Titre de test** corrigé (seul le profil désactivé y est exercé).
+5. **Commentaires périmés** corrigés (`notifier-prestataire.js`,
+   `relance-validation.js`). ⚠ **Pour l'étape 5** : l'avertissement « Aucun
+   canal actif » de la fiche ne dit plus vrai pour une personne qui a abonné son
+   téléphone.
+6. **La spec sur sa branche** — connu : la spec passe avec le lot (dépendance
+   déclarée au chef de file).

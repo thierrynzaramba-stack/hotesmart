@@ -1176,8 +1176,22 @@ d'abord en **notification** sur les téléphones qu'elle a abonnés depuis sa pa
   ligne est retirée), tous en échec, notifications non configurées, ou lecture des appareils en
   panne. Et toujours sous ses deux conditions d'avant (`canalOuvert` : un numéro **et**
   `notify_sms` non décoché). Décocher « SMS » reste donc un geste qui tient.
+- ⚠️ **SAUF L'URGENT (décision Q46 de Thierry, 18 nov. 2026)** : un ménage d'**aujourd'hui ou de
+  demain** (heure de Paris, `estUrgent`) garde son SMS, notification reçue ou non. « Reçue » veut
+  dire **acceptée par le service d'Apple ou de Google**, pas vue : un téléphone éteint ou sans
+  données compte comme ayant reçu, et un téléphone qui n'est pas le sien (son lien abonné par
+  quelqu'un d'autre, l'hôte en recette par exemple) aussi. Pour le geste d'urgence — un ménage
+  attribué deux heures avant le départ —, le SMS reste la ceinture. **Conséquence : les rappels
+  « Vu » (la veille, le jour même) gardent toujours leur SMS.** Une date illisible est traitée
+  comme urgente. Un SMS décoché par l'hôte ne part pas, même urgent.
+- ⚠️ **Un service d'envoi muet ne bloque ni le cron ni le clic de l'hôte** (review de l'étape 3,
+  constat 2) : les appareils d'une prestataire sont appelés **en parallèle** (une notification
+  coûte au plus un délai de 5 s, quel que soit leur nombre), et un service qui dépasse son délai
+  ou tombe en erreur réseau est **mis en pause cinq minutes** dans l'instance (disjoncteur par
+  nom d'hôte : Apple, Google…) — la notification compte alors comme non reçue et le SMS part
+  aussitôt. Le lot 2 (personnes avec un compte) garde son déroulé, un appareil après l'autre.
 - **L'e-mail ne change pas** : il part comme avant, notification reçue ou non.
-- **Le bilan** gagne `push: n` (le nombre d'appareils qui l'ont reçue) à côté de `sms` et
+- **Le bilan** gagne `push: n` (le nombre d'appareils dont le service a accepté la notification) à côté de `sms` et
   `email`. ⚠️ **Les compteurs des appelants lisent `aEtePrevenue(bilan)`**
   (`lib/cleaning/bilan-notification.js`) : relire `sms || email` à la main ferait compter
   « muette » une personne prévenue sur son téléphone — `relance-validation.js` et les deux

@@ -46,7 +46,9 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
                      // et le journal des propositions (qui les a posees).
                      toursEnCours = [], offresJournal = [],
                      // PWA lot 2c-2 : la création refusée par la base.
-                     erreurUpsert = null } = {}) {
+                     erreurUpsert = null,
+                     // PWA lot 3 : ce que l'envoi rend (`push` à côté de sms/email).
+                     bilanNotif = { sms: true, email: false } } = {}) {
   const etat = { hote: [], inseres: [], majs: [], journal: [], incidents: [], requetes: [],
                  notifs: [] }
 
@@ -212,7 +214,7 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
   const absPresta = require.resolve(path.join(__dirname, '..', 'lib/cleaning/notifier-prestataire.js'))
   const mp = new Module(absPresta)
   mp.exports = {
-    notifierProposition: async (o) => { etat.notifs.push(o); return { sms: true, email: false } },
+    notifierProposition: async (o) => { etat.notifs.push(o); return bilanNotif },
     notifierAssignation: async (o) => { etat.notifs.push({ ...o, assignation: true }); return { sms: true, email: false } },
     jourLisible: d => String(d)
   }
@@ -1188,6 +1190,31 @@ test('la proposition est posée à l\'approche du départ, et NOTIFIÉE', async 
   assert.strictEqual(etat.notifs[0].providerId, NOUVELLE)
   assert.ok(etat.notifs[0].expireLe, 'le délai de réponse est DANS le message')
   assert.strictEqual(etat.journal.filter(l => l.event === 'offered').length, 1)
+})
+
+test('PWA lot 3 : une proposition reçue par NOTIFICATION seule compte comme notifiée — à la pose ET à l\'élargissement', async () => {
+  // Constat 3 de la review de l'étape 3 : ce compteur n'était gardé que par une
+  // recherche de texte. Depuis le lot 3, le SMS ne part plus quand un téléphone
+  // a reçu la notification : { push: 1, sms: false } est une personne prévenue.
+  for (const [bilanNotif, attendu] of [[{ push: 1, sms: false, email: false }, 1], [{ push: 0, sms: false, email: false }, 0]]) {
+    preparer({
+      liaisons: BAGNERES, regles: REGLES_SECONDE, bilanNotif,
+      propositions: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                       departure_date: '2026-09-05', provider_id: REGINA, status: 'accepted' }]
+    })
+    const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+    const bilan = await poserPropositionsDues(null, { maintenant: T0 })
+    assert.strictEqual(bilan.proposees, 1)
+    assert.strictEqual(bilan.notifiees, attendu, `pose : ${JSON.stringify(bilanNotif)}`)
+
+    const etat = preparer({ liaisons: OFURO(), propositions: [], toursEnCours: [TOUR_LENA()],
+                            offresJournal: [LIGNE(LOLA, { actor: 'host', created_at: '2026-08-30T10:00:00Z' }), LIGNE(LENA)],
+                            bilanNotif })
+    const { elargirToursEnCours } = require('../lib/cleaning/sync-menages-entite')
+    const b2 = await elargirToursEnCours(null, { maintenant: T0 })
+    assert.strictEqual(etat.notifs.length, 1, 'une personne ajoutée au tour, une notification')
+    assert.strictEqual(b2.notifiees, attendu, `élargissement : ${JSON.stringify(bilanNotif)}`)
+  }
 })
 
 test('ESCALADE : qui a refusé ou laissé expirer n\'est jamais resollicité', async () => {

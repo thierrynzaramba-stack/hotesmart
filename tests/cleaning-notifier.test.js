@@ -327,6 +327,17 @@ const nodeCrypto = require('node:crypto')
 const webpush = require('web-push')
 const VAPID = webpush.generateVAPIDKeys()
 
+// ⚠ DATES RELATIVES, ET EN HEURE DE PARIS : la règle Q46 lit l'horloge (un
+// ménage d'aujourd'hui ou de demain garde son SMS). Calculées ici sans la
+// fonction du module, pour ne pas la recopier.
+const JOUR_MS = 86400000
+const jourParis = (decalage) => {
+  const [a, m, j] = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).split('-').map(Number)
+  return new Date(Date.UTC(a, m - 1, j + decalage)).toISOString().slice(0, 10)
+}
+const LOIN = { ...BASE, departureDate: jourParis(10) }
+void JOUR_MS
+
 function appareil (id, profil = MARIE) {
   const ecdh = nodeCrypto.createECDH('prime256v1')
   ecdh.generateKeys()
@@ -358,10 +369,10 @@ async function avecPush ({ statut = 201, sansCles = false } = {}, fn) {
   }
 }
 
-test('LE TEST QUI COMPTE (lot 3) : un appareil l’a reçue — PAS de SMS, l’e-mail inchangé', async () => {
+test('LE TEST QUI COMPTE (lot 3) : un appareil l’a reçue — PAS de SMS, l’e-mail inchangé (ménage dans dix jours)', async () => {
   await avecPush({}, async ({ service }) => {
     const { etat, mod } = preparer({ abos: [appareil('a1')] })
-    const r = await mod.notifierAssignation(BASE)
+    const r = await mod.notifierAssignation(LOIN)
     assert.deepStrictEqual(r, { push: 1, sms: false, email: true })
     assert.strictEqual(etat.sms.length, 0, 'le SMS ne part pas quand la notification est reçue')
     assert.strictEqual(etat.emails.length, 1, 'l’e-mail part comme avant')
@@ -387,7 +398,7 @@ test('lot 3 : AUCUN appareil ne l’a reçue — le SMS part, pour chacune des t
 test('lot 3 : deux appareils, un mort et un vivant — reçue, donc pas de SMS', async () => {
   await avecPush({ statut: (u) => (u.endsWith('/mort') ? 410 : 201) }, async ({ service }) => {
     const { etat, mod } = preparer({ abos: [appareil('mort'), appareil('vivant')] })
-    const r = await mod.notifierAssignation(BASE)
+    const r = await mod.notifierAssignation(LOIN)
     assert.strictEqual(r.push, 1)
     assert.strictEqual(etat.sms.length, 0)
     assert.strictEqual(service.length, 2)
@@ -434,7 +445,7 @@ test('lot 3 : SMS décoché par l’hôte — rien ne change quand aucun apparei
   })
 })
 
-test('lot 3 : un profil désactivé ou hors du compte — aucune notification, aucune lecture des appareils', async () => {
+test('lot 3 : un profil désactivé — aucune notification, aucune lecture des appareils (le filtre de compte : test « la personne est cherchée SUR LE COMPTE »)', async () => {
   await avecPush({}, async ({ service }) => {
     const { etat, mod } = preparer({ profil: { first_name: 'M', phone: '+33600000000', active: false }, abos: [appareil('a1')] })
     assert.deepStrictEqual(await mod.notifierAssignation(BASE), { push: 0, sms: false, email: false })
@@ -491,4 +502,108 @@ test('lot 3 : chaque appelant compte une personne prévenue PAR NOTIFICATION —
     assert.ok(src.includes("require('./bilan-notification')"), f)
     assert.ok(!/notif\.sms \|\| notif\.email|!notif\.sms && !notif\.email/.test(src), `${f} relit sms/email à la main`)
   }
+})
+
+// ─── Q46 : l'urgent garde son SMS (18 novembre 2026) ───────────────────────
+
+test('LE TEST QUI COMPTE (Q46) : un ménage d’AUJOURD’HUI ou de DEMAIN garde son SMS, même notification reçue', async () => {
+  // « Reçue » veut dire acceptée par Apple ou Google, pas vue : un téléphone
+  // éteint compte comme ayant reçu. Pour l'urgence, le SMS reste la ceinture.
+  for (const [decalage, sms] of [[0, true], [1, true], [2, false], [10, false], [-1, true]]) {
+    await avecPush({}, async () => {
+      const { etat, mod } = preparer({ abos: [appareil('a1')] })
+      const r = await mod.notifierAssignation({ ...BASE, departureDate: jourParis(decalage) })
+      assert.strictEqual(r.push, 1, `J${decalage >= 0 ? '+' : ''}${decalage}`)
+      assert.strictEqual(r.sms, sms, `J${decalage >= 0 ? '+' : ''}${decalage} : SMS ${sms ? 'attendu' : 'évité'}`)
+      assert.strictEqual(etat.sms.length, sms ? 1 : 0)
+    })
+  }
+})
+
+test('Q46 : les trois envois suivent la même règle — et l’urgent ne force pas un SMS décoché', async () => {
+  await avecPush({}, async () => {
+    for (const fn of ['notifierAssignation', 'notifierProposition', 'notifierValidationAttendue']) {
+      const demain = preparer({ abos: [appareil('a1')] })
+      assert.strictEqual((await demain.mod[fn]({ ...BASE, departureDate: jourParis(1), expireLe: new Date(Date.now() + 3600000).toISOString() })).sms, true, `${fn} demain`)
+      const loin = preparer({ abos: [appareil('a1')] })
+      assert.strictEqual((await loin.mod[fn]({ ...LOIN, expireLe: new Date(Date.now() + 3600000).toISOString() })).sms, false, `${fn} dans dix jours`)
+    }
+    const decoche = preparer({ abos: [appareil('a1')], profil: { first_name: 'Marie', phone: '+33600000000', email: 'marie@x.fr',
+                                                               active: true, pwa_token: 'j', notify_sms: false } })
+    const r = await decoche.mod.notifierAssignation({ ...BASE, departureDate: jourParis(0) })
+    assert.deepStrictEqual(r, { push: 1, sms: false, email: true })
+  })
+})
+
+test('Q46 : « aujourd’hui » se lit à PARIS, et une date illisible est traitée comme urgente', () => {
+  const { mod } = preparer()
+  // 23 h 30 à Paris le 31 décembre = 22 h 30 UTC : « demain » est le 1er janvier.
+  const reveillon = Date.parse('2026-12-31T22:30:00Z')
+  assert.strictEqual(mod.estUrgent('2027-01-01', reveillon), true)
+  assert.strictEqual(mod.estUrgent('2027-01-02', reveillon), false)
+  // 00 h 30 à Paris le 1er janvier = 23 h 30 UTC le 31 : « aujourd'hui » est déjà le 1er.
+  const minuitPasse = Date.parse('2026-12-31T23:30:00Z')
+  assert.strictEqual(mod.estUrgent('2027-01-02', minuitPasse), true)
+  assert.strictEqual(mod.estUrgent('2027-01-03', minuitPasse), false)
+  for (const illisible of [null, undefined, '', '12/09/2026', 'demain']) {
+    assert.strictEqual(mod.estUrgent(illisible, reveillon), true, String(illisible))
+  }
+})
+
+// ─── Constat 2 : le délai d'un service muet ne s'additionne pas ─────────────
+
+test('LE TEST QUI COMPTE (constat 2) : un service muet coûte UN délai, pas un par appareil — puis plus rien', async () => {
+  // Le SMS attend la notification : avec deux appareils sur un service qui ne
+  // répond pas, l'envoi en série coûtait 10 s. En parallèle : 5 s une fois ;
+  // ensuite le service est en pause et la notification suivante ne l'attend plus.
+  await avecPush({ statut: 201 }, async () => {
+    const { etat, mod } = preparer({ abos: [appareil('lent1'), appareil('lent2')] })
+    const envoi = require('../lib/push/envoyer')
+    // Un service qui ne répond jamais : seul le minuteur de `envoyer` y met fin.
+    const appels = []
+    globalThis.fetch = (url, init) => { appels.push(String(url)); return new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new Error('abort')))
+    }) }
+    const t0 = Date.now()
+    const r1 = await mod.notifierAssignation(LOIN)
+    const duree1 = Date.now() - t0
+    assert.strictEqual(r1.push, 0)
+    assert.strictEqual(r1.sms, true, 'non reçue : le SMS part')
+    assert.ok(duree1 < envoi.DELAI_MS + 2000, `deux appareils en ${duree1} ms : les délais se sont additionnés`)
+    assert.strictEqual(appels.length, 2)
+    // Le service est en pause : la notification suivante ne l'appelle plus.
+    const t1 = Date.now()
+    const r2 = await mod.notifierAssignation(LOIN)
+    assert.ok(Date.now() - t1 < 1000, 'la notification suivante attend encore le service en panne')
+    assert.strictEqual(appels.length, 2, 'le service en pause n’est plus appelé')
+    assert.strictEqual(r2.sms, true)
+    assert.strictEqual(etat.sms.length, 2)
+  })
+})
+
+test('constat 2 : la pause ne vise QUE le service en panne — les autres continuent', async () => {
+  await avecPush({ statut: 201 }, async () => {
+    const google = appareil('g1')
+    const apple = { ...appareil('a1'), endpoint: 'https://web.push.apple.com/a1' }
+    const { mod } = preparer({ abos: [google, apple] })
+    const appels = []
+    globalThis.fetch = (url, init) => {
+      appels.push(String(url))
+      if (String(url).includes('googleapis')) return Promise.reject(new TypeError('Failed to fetch'))
+      return Promise.resolve({ status: 201, body: null })
+    }
+    const r1 = await mod.notifierAssignation(LOIN)
+    assert.strictEqual(r1.push, 1, 'Apple l’a acceptée')
+    const r2 = await mod.notifierAssignation(LOIN)
+    assert.strictEqual(r2.push, 1)
+    assert.deepStrictEqual(appels.filter(u => u.includes('googleapis')).length, 1, 'Google en pause après son erreur réseau')
+    assert.deepStrictEqual(appels.filter(u => u.includes('apple')).length, 2, 'Apple appelé les deux fois')
+  })
+})
+
+test('constat 2 : le lot 2 (personnes avec un compte) garde son déroulé — un appareil après l’autre, sans pause', async () => {
+  const src = require('node:fs').readFileSync(path.join(__dirname, '..', 'lib/push/envoyer.js'), 'utf8')
+  const personne = src.slice(src.indexOf('async function envoyerAPersonne'), src.indexOf('async function envoyerAPrestataire'))
+  assert.ok(personne.includes('envoyerAuxAbonnements('), 'le chemin commun')
+  assert.ok(!/parallele|disjoncteur/.test(personne), 'ni parallèle ni disjoncteur pour le lot 2')
 })
