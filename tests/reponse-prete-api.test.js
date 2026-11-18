@@ -25,7 +25,8 @@ const REF = '209413'
 const BIEN = { id: 'aa11bb22-cc33-4dd4-8ee5-ff6677889900', user_id: TITULAIRE, name: 'La bulle', provider: 'channex', provider_property_id: REF }
 const TACHE = {
   id: 'ti1', user_id: TITULAIRE, book_id: 'B1', property_id: REF, task_type: 'info_unknown', status: 'done', summary: 'Chien et moto',
-  sub_tasks: [{ question: 'Puis-je venir avec un chien ?', suggested_reply: 'NOTE INTERNE' }, { question: 'Puis-je garer ma moto dans l’appartement ?' }]
+  // « Anna » dans une question : l'anonymisation vaut aussi pour elles (review 2, constat G).
+  sub_tasks: [{ question: 'Puis-je venir avec un chien ? (Anna)', suggested_reply: 'NOTE INTERNE' }, { question: 'Puis-je garer ma moto dans l’appartement ?' }]
 }
 const BASE = [
   { id: 1, user_id: TITULAIRE, property_id: REF, type: 'faq', key: 'Animaux', value: 'Les animaux ne sont pas acceptés.', lisible_par_ia: true },
@@ -159,7 +160,7 @@ test('LE TEST QUI COMPTE : le modèle ne reçoit ni la conversation, ni une rép
   await appeler()
   assert.equal(lu(etat, 'messages').length, 0, 'la conversation n est pas lue')
   const p = etat.prompts[0]
-  assert.match(p, /Puis-je venir avec un chien \?/)
+  assert.match(p, /Puis-je venir avec un chien \? \(\[voyageur\]\)/)
   assert.match(p, /Yes, your dog is welcome/)
   assert.match(p, /\[1\] Sujet : Animaux/)
   for (const interdit of [/MOTDEPASSE-SECRET/, /Code wifi/, /FAIT-PAS-UNE-REPONSE/, /AUTRE-BIEN/, /NOTE INTERNE/, /Lefèvre/, /Anna/]) {

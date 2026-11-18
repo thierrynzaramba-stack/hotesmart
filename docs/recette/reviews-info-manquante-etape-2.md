@@ -130,3 +130,130 @@ Pendant ce délai, si l'hôte retouche la même réponse dans le volet Base, ou 
 | — | Banc DOM : carte, puis « Utiliser » « Code de la porte : 4521 », puis envoi | `envoye` contient 4521 |
 | — | Réponse de 1758 caractères | Fin absente du prompt ; texte vu rendu tel quel = modification acceptée |
 | — | Sondes du contrôle du nom | 6 faux positifs, 3 contournements (constat 5) |
+
+## Review 2 — reçue le 18 novembre 2026 (correctifs de la review 1 seulement)
+
+Plage : `d4ab49637cad8aa39c79d2587de2448fba80beaa..937306bc82be5986f65cee5900df98919f56797a`,
+worktree `/home/claude/hotesmart-infoetape2`. C'est la dernière : ce qu'elle
+trouve se corrige sans nouvelle review.
+
+---
+
+Arbre lu : `/home/claude/hotesmart-infoetape2`, branche `info-manquante-etape-2`, plage `d4ab49637cad8aa39c79d2587de2448fba80beaa..937306bc82be5986f65cee5900df98919f56797a`. La tête du worktree est bien `937306bc…`. Toutes les expériences ont tourné sur des copies `git archive` dans `/tmp`, supprimées ensuite. Le worktree n'a pas changé.
+
+**Bloquant : non.** Aucune fuite entre comptes, aucun contournement de garde. Deux constats IMPORTANTS, dont un défaut créé par le correctif du constat 1.
+
+## Bilan, constat par constat de la review 1
+
+| Constat | État |
+|---|---|
+| 1 | Fermé : le prénom ne part plus, ni dans `envoye` ni dans les questions. Mais le correctif crée un défaut neuf (constat A) et un cas Unicode (constat H). |
+| 2 | Fermé pour « Utiliser » dans tous les enchaînements demandés. Il reste un chemin par « Modifier » (constat D). Le filtre côté serveur est trop étroit (constat B). |
+| 3, 4, 5, 7, 8, 9, 11 | Fermés. Chaque mutation visée est tuée. |
+| 6 | Changement de fil et envoi : tués. Saisie vidée : le test passe pour une mauvaise raison (constat F). |
+| 403 titulaire | Placé juste après la garde, ne lit rien avant. Conforme. |
+
+## Constats
+
+**A. IMPORTANT — l'anonymisation remplace des mots courants pour les noms à particule.**
+`lib/guestflow/reponse-prete.js:56-58` et `:66-73`.
+- **Défaut :** toute partie de nom de 2 lettres ou plus est remplacée partout dans le texte : « le », « la », « de », « du », « el »… Ce sont les mots les plus fréquents du français.
+- **Mesuré :**
+  - « Le Gall » : « Oui, [voyageur] chien est [voyageur] bienvenu ».
+  - « De La Cruz » : « Le parking est [voyageur] [voyageur] mairie ».
+  - Même effet avec « Du Pont » et « El Amrani ».
+- **Effet :** le modèle reçoit un texte et des questions abîmés. S'il recopie « [voyageur] », sa proposition est écartée sans un mot.
+- **Correction :** ne pas anonymiser les particules (le, la, de, du, des, da, di, do, el, al, d, y). Garder les vrais noms de 2 lettres comme « Li ». Ajouter un test « Le Gall » qui vérifie que « le chien » reste intact.
+
+**B. IMPORTANT — `elementsSensibles` laisse passer la plupart des mots de passe et des codes.**
+`lib/guestflow/reponse-prete.js:80-88`.
+- **Mesuré, rien n'est détecté pour :**
+  - mots de passe : « LaBulle65 », « Livebox-A1B2 » ;
+  - codes : « A4B2 », « 12B4 », « 452 » (3 chiffres), « 1-2-3-4 » ;
+  - liens sans « http » ni « www » : « airbnb.fr/rooms/123 », « bit.ly/bulle ».
+- **Scénario :** l'hôte répond « Autre : le wifi est LaBulle65 » sur la carte, puis envoie. Si le modèle désobéit au prompt, la carte propose « Wifi : … LaBulle65 » avec le bouton Enregistrer. Rien n'est écrit sans clic, mais la décision de Thierry dit qu'un mot de passe ne doit pas finir dans une réponse prête.
+- **Correction :** écarter aussi :
+  - tout mot de 4 caractères ou plus qui mêle lettres et chiffres (sauf les heures du type 16h00) ;
+  - ce qui suit « code / digicode / mot de passe / password / clé » suivi de « : » ou « est » ;
+  - les adresses de type `domaine.tld/…`.
+
+**C. MINEUR — des propositions ordinaires sont écartées sans rien dire à l'hôte.**
+`lib/guestflow/reponse-prete.js:86`.
+- **Mesuré, propositions écartées :**
+  - « 65200 Bagnères-de-Bigorre » (code postal) ;
+  - « 1800 m d'altitude » ;
+  - « installé en 2025 » ;
+  - « 1500,00 € » et « €1500 » ;
+  - « 15000 € » : le motif revient en arrière et retient « 1500 ».
+- Les horaires, les surfaces, « 1500 € » et « 1 500 € » passent.
+- **Correction :** ancrer le motif (`(?<![\d.,])\d{4,}(?![\d.,]*\s?(?:€|eur))`), et ignorer les nombres suivis d'une unité (`m`, `km`) et les années.
+
+**D. MINEUR — il reste un chemin du constat 2 par « Modifier ».**
+`pages/messages.html:908`.
+- **Défaut :** la garde `!entree.valideTache` ne protège que tant que l'édition est ouverte.
+- **Scénario mesuré :**
+  1. « Modifier » une proposition « Le mot de passe wifi est LaBulle65. » ;
+  2. retouche du texte, passage par B2, retour dans B1. L'édition est fermée, le texte reste dans la saisie ;
+  3. bouton IA, puis Envoyer.
+
+  Résultat : l'appel `base` part avec `envoye` qui contient LaBulle65. Même effet si la proposition est close ailleurs pendant l'édition (`retirerTache`, l.1535, hors diff).
+- **Correction :** marquer l'origine dans `modifierProposition`, avec une marque qui tombe seulement quand la saisie est vidée ou à l'envoi, et la lire dans `saisiePorteLaBase`.
+
+**E. MINEUR — carte, puis IA, puis Annuler, puis Envoyer : plus aucune proposition.**
+`pages/messages.html:1110` et `annulerIA` (`:1156`).
+- **Défaut :** l'IA remplace `textesIA`. « Annuler » rend la marque mais pas `textesIA`, donc la réponse de la carte passe pour un texte de la base.
+- **Mesuré :** 0 proposition. L'erreur va dans le sens prudent, mais le geste est naturel.
+- **Correction :** garder l'ancien `textesIA` dans `iaAnnuler` et le rétablir dans `annulerIA`.
+
+**F. MINEUR — le test « saisie vidée » passe pour une mauvaise raison.**
+`tests/info-manquante-dom.test.js:972-982`, avec l'aide `taperSaisie` (`:76`).
+- **Défaut :** le banc n'appelle pas `init()`. L'écouteur `input` qui abandonne `saisieRemplie` ne tourne donc pas. La marque restée dans `saisieRemplie` fait rendre `true` à `saisiePorteLaBase`, quoi qu'il arrive à `saisieIA`.
+- **Mesuré :** la mutation « retirer seulement `etat.saisieIA = null` à la ligne 1152 » laisse 46 tests sur 46 verts. Avec une aide `taperSaisie` qui reproduit l'écouteur, le test 45 rougit. Le message du commit annonce « 13 mutations, toutes tuées » : celle-ci survit.
+- **Correction :** faire rejouer l'écouteur à `taperSaisie`.
+
+**G. MINEUR — deux gardes sans test.**
+- `!entree.valideTache` (`pages/messages.html:908`) : la mutation survit. C'est pourtant la seule barrière sur le parcours « Modifier, puis IA, puis Envoyer ».
+- L'anonymisation des questions (`api/guestflow-rediger.js:270`) : la mutation survit.
+- **Correction :** un test DOM « Modifier, puis IA, puis Envoyer : aucun appel `base` », et une question contenant « Anna » dans le test du prompt.
+
+**H. MINEUR — anonymisation et formes Unicode.**
+`lib/guestflow/reponse-prete.js:56` et `:66`.
+- **Défaut :** l'anonymisation suppose que le nom et le texte sont écrits sous la même forme Unicode. Avec la forme décomposée (accent stocké à part), elle se trompe.
+- **Mesuré :**
+  - prénom « Léa » reçu en forme décomposée : il est coupé en « Le » + « a ». Tous les « le » du texte sont remplacés, et « Léa » reste en clair ;
+  - texte en forme décomposée avec un prénom normal : le prénom n'est pas remplacé.
+- **Correction :** `.normalize('NFC')` sur les noms et sur le texte avant tout.
+
+**I. MINEUR, déduit et non mesuré — la limite de jetons.**
+`api/guestflow-rediger.js:278`.
+- 4000 jetons sur Haiku suffit dans le cas courant.
+- Le pire cas — 10 questions, 10 modifications de réponses de 1500 caractères — peut dépasser. La page reçoit alors un 502, qui est journalisé : ce n'est plus un JSON lu à moitié.
+- 8000 partout serait possible, Haiku 4.5 l'accepte.
+
+**Contrôles conformes :**
+- Les expressions de `anonymiser` ne peuvent pas être invalides : seulement des lettres et des classes fixes, aucun quantificateur. Mesuré : 132 ms pour un nom de 300 mots sur 4500 caractères.
+- `elementsSensibles` : 19 ms au pire sur 4000 caractères.
+- Clé `refuse` présente dans les 3 langues.
+- `pages/messages.html` : 171 lignes ajoutées, 0 retirée par rapport à `main`.
+
+## Expériences faites
+
+| Expérience | Résultat |
+|---|---|
+| 4 fichiers de tests du lot | 105/105 verts |
+| Même 4 fichiers, horloge à J+4, J+30, J+60, J+200 | 105/105 à chaque fois |
+| Suite complète sur la copie | 8867 tests, 3 rouges : les mêmes 3 qui ont besoin de `.git`, comme à la review 1 |
+| `i18n-check` | 1560 clés en fr, en et es |
+| `node -c` sur les 2 fichiers serveur | OK |
+| Contre-épreuve : tests neufs sur `d4ab4963` | 11 rouges. Les tests faits pour tuer une mutation restent verts, c'est attendu. |
+| Mutations tuées | M10, M12, retrait de `!baseDansLaSaisie`, retrait du marquage dans `redigerBrouillon`, retrait de `noterTexteIA`, M7 (`gt`), M14 (logement), M3 (`id`), anonymisation de `envoye`, 403 précoce, `sensible` en création, en modification et sans « avant », nom sans « avant », mot neutre, `stop_reason`, `max_tokens`, réponses longues montrées, noms composés |
+| Mutations qui survivent | M11 (saisieIA seul), `!entree.valideTache`, anonymisation des questions |
+| M11 avec un banc qui rejoue l'écouteur | Tuée |
+| Utiliser code, IA, Annuler, Envoyer | Aucun appel `base` |
+| Carte, Utiliser code, B2, retour B1, IA | Saisie vidée au changement de fil, rien ne part |
+| Carte, Utiliser code, effacement du code seul, Envoyer | Aucun appel `base` (prudent) |
+| IA, Utiliser code, Envoyer | Aucun appel `base` |
+| Modifier, IA, Envoyer | Aucun appel `base` |
+| Modifier, retouche, B2, retour B1, IA, Envoyer | `envoye` contient LaBulle65 (constat D) |
+| Carte, IA (autre texte), Annuler, Envoyer | 0 proposition (constat E) |
+| Sondes de `anonymiser` et de `elementsSensibles` | Voir constats A, B, C, H |

@@ -73,7 +73,22 @@ const choix = (v, i, r) => cliquer(v.carte().querySelector(`[data-info-choix="${
 const taper = (champ, texte) => { champ.value = texte; champ.dispatchEvent(new champ.ownerDocument.defaultView.Event('input', { bubbles: true })) }
 // La saisie : son écouteur `input` est branché par `init()`, que ce banc
 // n'appelle pas — on joue le même geste par la fonction qu'il appelle.
-const taperSaisie = (v, texte) => { v.zone().value = texte; v.msg.apresFrappeSaisie() }
+// ⚠ ET LA RÈGLE DE L'AUTRE ÉCOUTEUR `input` D'`init()` (review 2 de l'étape 2,
+// constat F) : un champ vidé garde sa marque « vide » ; à la frappe suivante,
+// un texte posé revenu la reprend, le texte de l'hôte l'abandonne. Sans elle,
+// la marque restait et faisait passer un test pour une autre raison.
+const taperSaisie = (v, texte) => {
+  v.zone().value = texte
+  const r = v.msg.etat.saisieRemplie
+  if (r) {
+    if (!texte.trim()) r.vide = true
+    else if (r.vide) {
+      if (r.textes.some(tx => String(texte).includes(tx))) r.vide = false
+      else v.msg.etat.saisieRemplie = null
+    }
+  }
+  v.msg.apresFrappeSaisie()
+}
 const attendre = () => new Promise(r => setTimeout(r, 0))
 
 test('la carte arrive par le fil en direct : une ligne par question, Oui / Non / Autre, et jamais une proposition', async () => {
@@ -1025,4 +1040,59 @@ test('review 1, constat 9 : un 404 laisse seulement « Non merci » ; un 403 dit
       }
     } finally { v.fermer() }
   }
+})
+
+// ─── Review 2 de l'étape 2 ───────────────────────────────────────────────────
+
+const PROPOSITION_IA = { id: 'p9', book_id: 'B1', property_id: '209413', task_type: 'auto_reply', status: 'pending_validation',
+  suggested_reply: 'Le mot de passe wifi est LaBulle65.', summary: 'Wifi', created_at: il(10 * MIN) }
+
+test('LE TEST QUI COMPTE (review 2, constats D et G) : « Modifier » une proposition, puis « IA », puis Envoyer — aucune proposition de base, même édition fermée', async () => {
+  // Édition ouverte : la garde de l'envoi (valideTache).
+  let v = monter({ repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    v.msg.etat.taches = [PROPOSITION_IA]; v.msg.indexerTaches(); v.msg.renderFil()
+    v.msg.modifierProposition('p9')
+    assert.match(v.zone().value, /LaBulle65/)
+    await v.msg.redigerBrouillon()
+    await v.msg.envoyer()
+    await attendre(); await attendre(); await attendre()
+    assert.equal(v.propositionsBase().length, 0, 'édition ouverte')
+  } finally { v.fermer() }
+  // Édition FERMÉE par un passage dans un autre fil : la marque de la saisie.
+  v = monter({
+    conversations: [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: reponsesBase()
+  })
+  try {
+    await v.msg.relireDirect()
+    v.msg.etat.taches = [PROPOSITION_IA]; v.msg.indexerTaches(); v.msg.renderFil()
+    v.msg.modifierProposition('p9')
+    taperSaisie(v, 'Le mot de passe wifi est LaBulle65, bon séjour.')
+    v.msg.ouvrir('B2'); v.msg.ouvrir('B1')
+    assert.equal(v.msg.etat.enEdition, null, 'l édition est fermée')
+    assert.match(v.zone().value, /LaBulle65/, 'le texte retouché reste')
+    await v.msg.redigerBrouillon()
+    await v.msg.envoyer()
+    await attendre(); await attendre(); await attendre()
+    assert.equal(v.propositionsBase().length, 0, 'édition fermée')
+  } finally { v.fermer() }
+})
+
+test('review 2, constat E : carte, « IA », « Annuler », Envoyer — la réponse de la carte propose bien de se retenir', async () => {
+  const v = monter({ repondre: reponsesBase((chemin, corps) => chemin === '/api/guestflow-rediger' && corps.action === 'texte' ? { ok: true, texte: 'Autre version.' } : undefined) })
+  try {
+    await v.msg.relireDirect()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre(); await attendre()
+    await v.msg.redigerBrouillon()
+    assert.equal(v.zone().value, 'Autre version.')
+    v.msg.annulerIA()
+    assert.equal(v.zone().value, REDIGE)
+    await v.msg.envoyer()
+    await attendre(); await attendre(); await attendre()
+    assert.deepEqual(v.propositionsBase().map(a => a.corps.envoye), [REDIGE])
+  } finally { v.fermer() }
 })

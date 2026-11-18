@@ -275,7 +275,7 @@ async function proposerReponsesPretes ({ corps, garde, userId, bookingId, bien, 
   // la classification, le JSON se coupait, l'appel était perdu, l'hôte ne
   // voyait rien.
   const demande = requeteClassification(prompt, modeleConfigure())
-  demande.max_tokens = Math.max(demande.max_tokens || 0, demande.output_config ? 8000 : 4000)
+  demande.max_tokens = Math.max(demande.max_tokens || 0, 8000)
   let brut
   try {
     const reponse = await avecContexteIA({ fonction: R.FONCTION_IA, userId, propertyId: refBien, bookingId },

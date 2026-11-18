@@ -1106,6 +1106,8 @@ async function redigerBrouillon () {
     etat.saisieRemplie = { bookId: ici, textes: [zone.value] }
     etat.iaAnnuler = { bookId: ici, avant, apres: zone.value, marque }
     // Étape 2 : ce texte vient de l'IA — son envoi proposera de le retenir.
+    // « Annuler » rendra les textes de l'IA d'avant (review 2, constat E).
+    etat.iaAnnuler.textesIA = etat.textesIA
     etat.saisieIA = { bookId: ici }
     etat.textesIA = { bookId: ici, textes: [zone.value] }
     ajusterHauteur(zone)
@@ -1160,8 +1162,10 @@ function annulerIA () {
   if (a && zone && String(a.bookId) === String(etat.ouverte) && zone.value === a.apres) {
     zone.value = a.avant
     etat.saisieRemplie = a.marque
-    // C'est le texte de l'hôte qui revient, pas celui de l'IA (étape 2).
+    // C'est le texte de l'hôte qui revient, pas celui de l'IA (étape 2) — avec
+    // les textes de l'IA qu'il portait déjà (la réponse de la carte).
     etat.saisieIA = null
+    etat.textesIA = a.textesIA || null
     ajusterHauteur(zone)
     zone.focus()
   }
@@ -1233,7 +1237,7 @@ function noterTexteIA (ici, texte) {
 // « Utiliser » ? `etat.saisieRemplie` mêle les textes de l'IA et ceux de la
 // base : ceux que l'IA n'a pas écrits sont de la base.
 function saisiePorteLaBase (ici) {
-  if (etat.baseDansSaisie && etat.baseDansSaisie.bookId === ici) return true
+  if (etat.baseDansSaisie) return true
   const r = etat.saisieRemplie
   if (!r || String(r.bookId) !== ici) return false
   const ia = etat.textesIA && etat.textesIA.bookId === ici ? etat.textesIA.textes : []
@@ -1410,6 +1414,10 @@ function modifierProposition (id) {
   ajusterHauteur(zone)
   etat.saisieRemplie = null
   etat.enEdition = { tacheId: x.id, bookId: String(etat.ouverte) }
+  // Information manquante, étape 2 : la saisie porte une proposition de l'IA,
+  // qui peut citer un code ; son texte ne se retiendra pas dans la base, même
+  // après la fermeture de l'édition (review 2 de l'étape 2, constat D).
+  etat.baseDansSaisie = { bookId: String(etat.ouverte) }
   // ⚠ OUVRIR SUSPEND L'ECHEANCE (regle 2 du chantier). Sans ca, l'hote
   // corrigerait un texte qui part sous ses doigts. L'appel est optimiste :
   // l'ecran n'attend pas, mais la suspension est posee en base — c'est elle
@@ -4092,7 +4100,9 @@ function ouvrir (bookId) {
   // retenir, ne suivent pas l'hôte dans un autre fil.
   if (etat.saisieIA && String(etat.saisieIA.bookId) !== String(bookId)) etat.saisieIA = null
   if (etat.textesIA && etat.textesIA.bookId !== String(bookId)) etat.textesIA = null
-  if (etat.baseDansSaisie && etat.baseDansSaisie.bookId !== String(bookId)) etat.baseDansSaisie = null
+  // La saisie est PARTAGÉE entre les fils : la marque « porte la base » suit
+  // son contenu, pas le fil — elle ne tombe que si la saisie est vide.
+  if (etat.baseDansSaisie && !$('[data-bind="texte"]').value.trim()) etat.baseDansSaisie = null
   if (etat.infoBase && etat.infoBase.bookId !== String(bookId)) etat.infoBase = null
   etat.ouverte = bookId
   // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry

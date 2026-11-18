@@ -144,3 +144,33 @@ test('une modification qui ne change rien est écartée ; une seule proposition 
   assert.deepEqual(P.propositionsDe(null), [])
   assert.deepEqual(P.propositionsDe({ propositions: 'non' }), [])
 })
+
+// ─── Review 2 de l'étape 2 ───────────────────────────────────────────────────
+
+test('review 2, constat A : les particules d un nom ne sont pas anonymisées — « le chien » reste « le chien » ; un vrai nom de deux lettres, si', () => {
+  assert.equal(P.anonymiser('Oui, le chien est le bienvenu, Monsieur Gall.', ['Le Gall']), 'Oui, le chien est le bienvenu, Monsieur [voyageur].')
+  assert.equal(P.anonymiser('Le parking est de la mairie.', ['De La Cruz']), 'Le parking est de la mairie.')
+  assert.equal(P.anonymiser('El parque, Amrani.', ['El Amrani']), 'El parque, [voyageur].')
+  assert.equal(P.anonymiser('Merci Li', ['Li']), 'Merci [voyageur]')
+})
+
+test('review 2, constat H : forme décomposée du nom ou du texte — le prénom est remplacé, « le » ne l est pas', () => {
+  const lea = 'Léa'.normalize('NFD')
+  assert.equal(P.anonymiser('Bonjour Léa, le logement est prêt.', [lea]), 'Bonjour [voyageur], le logement est prêt.')
+  assert.equal(P.anonymiser('Bonjour Léa.'.normalize('NFD'), ['Léa']), 'Bonjour [voyageur].')
+})
+
+test('LE TEST QUI COMPTE (review 2, constat B) : mots de passe, codes et liens sans « http » sont vus', () => {
+  const vus = (t) => [...P.elementsSensibles(t)]
+  for (const t of ['Le wifi est LaBulle65.', 'Box Livebox-A1B2.', 'Code A4B2.', 'Code 12B4.', 'Le code est 452.', 'Digicode : 7788B',
+    'Tapez 1-2-3-4.', 'Voir airbnb.fr/rooms/123', 'Voir bit.ly/bulle', 'Mot de passe : soleil']) {
+    assert.ok(vus(t).length > 0, t)
+  }
+})
+
+test('review 2, constat C : un code postal, une altitude, une année, un montant, une heure, un étage ne sont pas des codes', () => {
+  for (const t of ['65200 Bagnères-de-Bigorre', 'à 1800 m d’altitude', 'installé en 2025', 'caution de 1500,00 €', 'caution de €1500',
+    'caution de 15000 €', 'caution de 1 500 €', 'arrivée à 16h00', 'au 2e étage', 'départ à 10h30', 'le 1er jour', '45 m²']) {
+    assert.deepEqual([...P.elementsSensibles(t)], [], t)
+  }
+})
