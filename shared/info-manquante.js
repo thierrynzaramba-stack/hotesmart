@@ -189,6 +189,8 @@ export function cleErreurBase (err) {
   const code = err && err.code, statut = err && err.status
   if (statut === 409 && code === 'sujet_existe') return 'messages.info.base.erreur.sujet_existe'
   if (statut === 404) return 'messages.info.base.erreur.introuvable'
+  // Un refus définitif (logement archivé, compte du sélecteur) : pas « réessayez ».
+  if (statut === 403) return 'messages.info.base.erreur.refuse'
   if (statut === 400 && code === 'trop_long') return 'messages.info.base.erreur.trop_long'
   return 'messages.info.base.erreur.echec'
 }

@@ -64,6 +64,8 @@ test('LE TEST QUI COMPTE : une modification vise une réponse MONTRÉE, par son 
     assert.deepEqual(P.propositionsDe({ propositions: [{ action: 'modifier', ref, texte: 'X' }] }, { existantes: EXISTANTES }), [], String(ref))
   }
   assert.deepEqual(P.propositionsDe({ propositions: [{ action: 'modifier', id: 11, texte: 'X' }] }, { existantes: EXISTANTES }), [], 'un id fourni par le modèle n est jamais lu')
+  // Même accompagné d'un numéro valide (review 1, constat 8).
+  assert.equal(P.propositionsDe({ propositions: [{ action: 'modifier', ref: 1, id: 999, texte: 'Chiens oui.' }] }, { existantes: EXISTANTES })[0].id, 11)
 })
 
 test('une création sur un sujet existant devient la modification de cette réponse (le writer refuserait la création)', () => {
@@ -87,8 +89,39 @@ test('LE TEST QUI COMPTE : une proposition qui nomme le voyageur est écartée (
   assert.equal(P.propositionsDe({ propositions: [{ action: 'creer', sujet: 'Lit', texte: 'K' }] }, { noms: ['K'] }).length, 1)
 })
 
+test('review 1, constat 1 : anonymiser — prénom, nom, chaque partie d un nom composé, sans accent ni casse, mot entier', () => {
+  assert.equal(P.anonymiser('Hello Anna! Bonjour ANNA, Annabelle.', ['Anna']), 'Hello [voyageur]! Bonjour [voyageur], Annabelle.')
+  assert.equal(P.anonymiser('Cher Jean, M. LEFEVRE et Mme Lefèvre', ['Jean-Pierre', 'Lefèvre']), 'Cher [voyageur], M. [voyageur] et Mme [voyageur]')
+  assert.equal(P.anonymiser('Merci Li', ['Li']), 'Merci [voyageur]', 'un nom de deux lettres reste un nom')
+  assert.equal(P.anonymiser('Rien à cacher', [null, '', 'X']), 'Rien à cacher')
+})
+
+test('LE TEST QUI COMPTE (review 1, constat 2) : une proposition qui porte un code, un lien ou un numéro NEUF est écartée ; un montant reste', () => {
+  const brut = { propositions: [
+    { action: 'creer', sujet: 'Porte', texte: 'Le code de la porte est 4521.' },
+    { action: 'creer', sujet: 'Wifi', texte: 'Le mot de passe est sur https://exemple.fr/wifi' },
+    { action: 'creer', sujet: 'Urgence', texte: 'Appelez le 06 12 34 56 78.' },
+    { action: 'creer', sujet: 'Contact', texte: 'Écrivez à hote@exemple.fr' },
+    { action: 'creer', sujet: 'Caution', texte: 'Une caution de 1500 € est demandée ; arrivée après 16h, parking à 200 m.' },
+    { action: 'modifier', ref: 2, texte: 'Parking gratuit rue Voltaire, code du portail 7788.' }
+  ] }
+  assert.deepEqual(P.propositionsDe(brut, { existantes: EXISTANTES }).map(p => p.sujet), ['Caution'])
+  // Un numéro DÉJÀ dans la réponse d'avant n'est pas neuf : la mise à jour passe.
+  const avec = [{ id: 30, sujet: 'Portail', texte: 'Code du portail 7788.' }]
+  assert.equal(P.propositionsDe({ propositions: [{ action: 'modifier', ref: 1, texte: 'Code du portail 7788 ; refermez-le.' }] }, { existantes: avec }).length, 1)
+})
+
+test('review 1, constat 5 : le contrôle du nom — chaque partie d un nom composé ; pour une mise à jour, un mot déjà dans le texte d avant ne compte pas', () => {
+  const noms = ['Marie-Claire', 'Hugo']
+  assert.deepEqual(P.propositionsDe({ propositions: [{ action: 'creer', sujet: 'Accueil', texte: 'Marie est attendue à 16h.' }] }, { noms }), [])
+  const avant = [{ id: 40, sujet: 'Accès', texte: 'Le logement est rue Victor Hugo.' }]
+  const r = P.propositionsDe({ propositions: [{ action: 'modifier', ref: 1, texte: 'Le logement est rue Victor Hugo, au 2e étage.' }] }, { existantes: avant, noms })
+  assert.equal(r.length, 1)
+  assert.deepEqual(P.propositionsDe({ propositions: [{ action: 'creer', sujet: 'Merci', texte: 'Merci [voyageur] !' }] }), [], 'le mot neutre n entre pas dans la base')
+})
+
 test('une réponse « Hors IA » : rien ne se crée sous son sujet', () => {
-  const r = P.propositionsDe({ propositions: [{ action: 'creer', sujet: 'Code wifi', texte: 'X' }] }, { existantes: EXISTANTES, sujetsHorsIa: ['code WIFI'] })
+  const r = P.propositionsDe({ propositions: [{ action: 'creer', sujet: 'Code wifi', texte: 'X' }] }, { existantes: EXISTANTES, sujetsReserves: ['code WIFI'] })
   assert.deepEqual(r, [])
 })
 

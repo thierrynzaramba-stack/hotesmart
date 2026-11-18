@@ -372,10 +372,11 @@ test('LE TEST QUI COMPTE (étape 2) : corpsEnregistrer — une création est lis
 test('étape 2 : chaque refus du writer a sa phrase, et une phrase existe pour chaque clé', () => {
   assert.equal(F.cleErreurBase({ status: 409, code: 'sujet_existe' }), 'messages.info.base.erreur.sujet_existe')
   assert.equal(F.cleErreurBase({ status: 404 }), 'messages.info.base.erreur.introuvable')
+  assert.equal(F.cleErreurBase({ status: 403 }), 'messages.info.base.erreur.refuse')
   assert.equal(F.cleErreurBase({ status: 400, code: 'trop_long' }), 'messages.info.base.erreur.trop_long')
   assert.equal(F.cleErreurBase({ status: 400, code: 'autre' }), 'messages.info.base.erreur.echec')
   assert.equal(F.cleErreurBase({ status: 503 }), 'messages.info.base.erreur.echec')
   assert.equal(F.cleErreurBase(undefined), 'messages.info.base.erreur.echec')
   const fr = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', 'fr.json'), 'utf8'))
-  for (const k of ['echec', 'introuvable', 'sujet_existe', 'trop_long', 'vide']) assert.ok(fr['messages.info.base.erreur.' + k], k)
+  for (const k of ['echec', 'introuvable', 'refuse', 'sujet_existe', 'trop_long', 'vide']) assert.ok(fr['messages.info.base.erreur.' + k], k)
 })

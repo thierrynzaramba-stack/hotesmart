@@ -75,6 +75,12 @@ module.exports = async function handler (req, res) {
       bien: corps.propertyId || null
     })
     if (!garde.ok) return
+    // Étape 2 : la base n'est pas délégable (dette 68). Refusé ICI, avant même
+    // le logement et la pause : un membre reçoit 403 et non un motif qui ne le
+    // concerne pas (review 1, constat 11). Le même refus est repris plus bas.
+    if (action === 'base' && !estTitulaireDuCompte(garde.contexte)) {
+      return repondre(403, { error: 'reserve_titulaire', message: 'Réservé au titulaire du compte' })
+    }
     const userId = garde.accountUserId
     const snap = garde.booking?.snapshot || {}
     try {
@@ -189,9 +195,10 @@ async function plafondAtteint (userId, bookingId) {
 }
 
 // Les réponses prêtes du logement, par curseur (PostgREST tronque à 1000 SANS
-// erreur). Celles marquées « Hors IA » ne sont PAS montrées au modèle : l'hôte
-// les a cachées à l'IA. On garde seulement leur sujet, pour ne rien créer
-// dessous. Rend { existantes, sujetsHorsIa } ou { trop: true } ou { erreur }.
+// erreur). Ne sont PAS montrées au modèle : celles marquées « Hors IA » (l'hôte
+// les a cachées à l'IA), et celles trop longues pour être montrées entières
+// (review 1, constat 3). On garde seulement leur sujet, pour ne rien créer
+// dessous. Rend { existantes, sujetsReserves } ou { trop: true } ou { erreur }.
 async function reponsesPretesDuBien (userId, refBien) {
   const lire = async (colonnes) => {
     const acc = []
@@ -216,10 +223,11 @@ async function reponsesPretesDuBien (userId, refBien) {
   if (r.error) return { erreur: r.error }
   if (r.trop) return { trop: true }
   const lignes = r.lignes.filter(l => String(l.key || '').trim())
+  const montree = (l) => l.lisible_par_ia !== false && String(l.value || '').length <= P.MAX_TEXTE_EXISTANT
   return {
-    existantes: lignes.filter(l => l.lisible_par_ia !== false)
+    existantes: lignes.filter(montree)
       .map(l => ({ id: l.id, sujet: String(l.key).trim(), texte: String(l.value || '') })),
-    sujetsHorsIa: lignes.filter(l => l.lisible_par_ia === false).map(l => String(l.key).trim())
+    sujetsReserves: lignes.filter(l => !montree(l)).map(l => String(l.key).trim())
   }
 }
 
@@ -255,11 +263,27 @@ async function proposerReponsesPretes ({ corps, garde, userId, bookingId, bien, 
   // « nouvelle » réponse qui en doublerait une qu'on n'a pas lue.
   if (base.trop) return repondre(200, { ok: true, propositions: [], motif: 'base_trop_grande' })
 
-  const prompt = P.promptReponsesPretes({ questions, envoye: v.envoye, existantes: base.existantes, bienNom: bien.name })
+  // ⚠ NI LE PRÉNOM NI LE NOM DU VOYAGEUR (review 1, constat 1) : le texte
+  // envoyé commence presque toujours par « Bonjour {prénom} ».
+  const noms = [snap.firstName, snap.lastName]
+  const prompt = P.promptReponsesPretes({
+    questions: questions.map(q => P.anonymiser(q, noms)), envoye: P.anonymiser(v.envoye, noms),
+    existantes: base.existantes, bienNom: bien.name
+  })
+  // ⚠ UNE SORTIE PLUS LONGUE QU'UNE CLASSIFICATION (review 1, constat 4) : une
+  // mise à jour rend le texte COMPLET de chaque réponse visée. Avec la borne de
+  // la classification, le JSON se coupait, l'appel était perdu, l'hôte ne
+  // voyait rien.
+  const demande = requeteClassification(prompt, modeleConfigure())
+  demande.max_tokens = Math.max(demande.max_tokens || 0, demande.output_config ? 8000 : 4000)
   let brut
   try {
     const reponse = await avecContexteIA({ fonction: R.FONCTION_IA, userId, propertyId: refBien, bookingId },
-      () => anthropic.messages.create(requeteClassification(prompt, modeleConfigure())))
+      () => anthropic.messages.create(demande))
+    if (reponse && reponse.stop_reason === 'max_tokens') {
+      console.error('[guestflow-rediger] proposition de base coupee par max_tokens', demande.max_tokens)
+      return repondre(502, { error: 'ia_indisponible', message: 'L’assistant n’a pas pu finir sa proposition.' })
+    }
     brut = P.jsonDe(reponse)
   } catch (err) {
     console.error('[guestflow-rediger] proposition de base en echec', err?.message)
@@ -267,8 +291,8 @@ async function proposerReponsesPretes ({ corps, garde, userId, bookingId, bien, 
   }
   if (!brut) return repondre(502, { error: 'ia_indisponible', message: 'L’assistant n’a rien proposé, réessayez.' })
   const propositions = P.propositionsDe(brut, {
-    existantes: base.existantes, sujetsHorsIa: base.sujetsHorsIa,
-    noms: [snap.firstName, snap.lastName], maxPropositions: questions.length
+    existantes: base.existantes, sujetsReserves: base.sujetsReserves,
+    noms, maxPropositions: questions.length
   })
   return repondre(200, { ok: true, propositions })
 }

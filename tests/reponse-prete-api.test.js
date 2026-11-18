@@ -162,9 +162,12 @@ test('LE TEST QUI COMPTE : le modèle ne reçoit ni la conversation, ni une rép
   assert.match(p, /Puis-je venir avec un chien \?/)
   assert.match(p, /Yes, your dog is welcome/)
   assert.match(p, /\[1\] Sujet : Animaux/)
-  for (const interdit of [/MOTDEPASSE-SECRET/, /Code wifi/, /FAIT-PAS-UNE-REPONSE/, /AUTRE-BIEN/, /NOTE INTERNE/, /Lefèvre/]) {
+  for (const interdit of [/MOTDEPASSE-SECRET/, /Code wifi/, /FAIT-PAS-UNE-REPONSE/, /AUTRE-BIEN/, /NOTE INTERNE/, /Lefèvre/, /Anna/]) {
     assert.doesNotMatch(p, interdit)
   }
+  // Le prénom du texte envoyé (« Hello Anna! ») est remplacé, pas supprimé :
+  // la phrase reste lisible (review 1, constat 1).
+  assert.match(p, /Hello \[voyageur\]! Yes, your dog is welcome/)
   // La base est lue PAR CURSEUR, filtrée sur le compte, le logement et les réponses prêtes.
   const q = lu(etat, 'knowledge')[0]
   assert.deepEqual(q.eq, { user_id: TITULAIRE, property_id: REF, type: 'faq' })
@@ -178,6 +181,50 @@ test('une création sous le sujet d une réponse Hors IA est écartée ; une pro
   ] }) }] }) })
   const res = await appeler()
   assert.deepEqual(res.body.propositions.map(p => p.sujet), ['Moto'])
+})
+
+test('review 1, constat 3 : une réponse prête trop longue n est pas montrée (on ne peut pas la rendre entière) ; son sujet est réservé', async () => {
+  const longue = { id: 5, user_id: TITULAIRE, property_id: REF, type: 'faq', key: 'Règlement', value: 'x'.repeat(1499) + ' caution de 100 euros', lisible_par_ia: true }
+  const etat = preparer({ base: [...BASE, longue], ia: async () => ({ content: [{ type: 'text', text: JSON.stringify({ propositions: [
+    { action: 'creer', sujet: 'règlement', texte: 'Le règlement tronqué.' },
+    { action: 'modifier', ref: 2, texte: 'Hors de la liste.' }
+  ] }) }] }) })
+  const res = await appeler()
+  assert.doesNotMatch(etat.prompts[0], /Sujet : Règlement/)
+  assert.doesNotMatch(etat.prompts[0], /\[2\] Sujet/, 'seule la réponse courte est numérotée')
+  assert.deepEqual(res.body.propositions, [])
+})
+
+test('review 1, constat 4 : la sortie a la place de rendre plusieurs textes complets ; une sortie coupée est un 502, pas un JSON tronqué lu', async () => {
+  let demande
+  // Un JSON qui se lit EN ENTIER, mais une sortie coupée : la dernière
+  // proposition pourrait manquer, ou un texte « complet » être tronqué.
+  preparer({ ia: async (d) => { demande = d; return { stop_reason: 'max_tokens', content: [{ type: 'text', text: '{"propositions":[{"action":"creer","sujet":"Moto","texte":"Pas de moto."}]}' }] } } })
+  const res = await appeler()
+  assert.ok(demande.max_tokens >= 4000, `max_tokens = ${demande.max_tokens}`)
+  assert.equal(res.code, 502)
+})
+
+test('review 1, constat 11 : un membre sur un logement EN PAUSE reçoit 403, pas « en pause » — et rien n est lu', async () => {
+  const etat = preparer({ appelant: MEMBRE, pause: true })
+  const res = await appeler()
+  assert.equal(res.code, 403)
+  assert.equal(lu(etat, 'properties').length, 0)
+})
+
+test('review 1, constat 7 : une base de 150 réponses (plus d une page) se lit en entier, par curseur', async () => {
+  const base = Array.from({ length: 150 }, (_, i) => ({ id: i + 1, user_id: TITULAIRE, property_id: REF, type: 'faq', key: 'S' + i, value: 'v' + i, lisible_par_ia: true }))
+  const etat = preparer({ base, ia: async () => ({ content: [{ type: 'text', text: '{"propositions":[]}' }] }) })
+  const res = await appeler()
+  assert.equal(res.code, 200)
+  assert.equal(res.body.motif, undefined)
+  assert.match(etat.prompts[0], /\[150\] Sujet : S149/)
+  assert.equal(lu(etat, 'knowledge').length, 2, 'deux pages de 100')
+})
+
+test('review 1, constat 8 : une tâche d un AUTRE logement que la réservation, 404', async () => {
+  preparer({ taches: [{ ...TACHE, property_id: '169567' }] })
+  assert.equal((await appeler()).code, 404)
 })
 
 test('la migration de la base V5 absente : la lecture se fait sans la colonne, tout est lisible', async () => {

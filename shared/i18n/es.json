@@ -996,6 +996,7 @@
   "messages.info.base.enregistrer": "Guardar",
   "messages.info.base.erreur.echec": "No se pudo guardar: inténtelo de nuevo.",
   "messages.info.base.erreur.introuvable": "Esta respuesta lista ya no existe.",
+  "messages.info.base.erreur.refuse": "No se permite guardar para este alojamiento desde esta cuenta.",
   "messages.info.base.erreur.sujet_existe": "Ya hay una respuesta lista con este tema: cámbielo.",
   "messages.info.base.erreur.trop_long": "Texto demasiado largo.",
   "messages.info.base.erreur.vide": "El tema y la respuesta son obligatorios.",

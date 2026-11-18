@@ -996,6 +996,7 @@
   "messages.info.base.enregistrer": "Save",
   "messages.info.base.erreur.echec": "Could not save: try again.",
   "messages.info.base.erreur.introuvable": "This ready reply no longer exists.",
+  "messages.info.base.erreur.refuse": "Saving is not allowed for this property from this account.",
   "messages.info.base.erreur.sujet_existe": "A ready reply already has this topic: change it.",
   "messages.info.base.erreur.trop_long": "Text too long.",
   "messages.info.base.erreur.vide": "The topic and the reply are required.",

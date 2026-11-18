@@ -996,6 +996,7 @@
   "messages.info.base.enregistrer": "Enregistrer",
   "messages.info.base.erreur.echec": "Enregistrement impossible : réessayez.",
   "messages.info.base.erreur.introuvable": "Cette réponse prête n’existe plus.",
+  "messages.info.base.erreur.refuse": "Enregistrement refusé pour ce logement depuis ce compte.",
   "messages.info.base.erreur.sujet_existe": "Une réponse prête porte déjà ce sujet : changez-le.",
   "messages.info.base.erreur.trop_long": "Texte trop long.",
   "messages.info.base.erreur.vide": "Le sujet et la réponse sont obligatoires.",

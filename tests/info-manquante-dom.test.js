@@ -917,3 +917,112 @@ test('étape 2 : une panne de la proposition (500) se journalise, sans rien affi
     assert.equal(v.banc.journal.filter(l => /reponse prete/.test(String(l[1]))).length, 1)
   } finally { v.fermer() }
 })
+
+// ─── Review 1 de l'étape 2 : corrections ─────────────────────────────────────
+
+const utiliser = (v, texte) => {
+  const b = v.msg.etat.biens
+  if (b.set) b.set('209413', { id: '209413', name: 'La bulle' }); else b.add('209413')
+  return v.msg.utiliserDansLaSaisie({ texte, resa: 'B1', ref: '209413' })
+}
+
+test('LE TEST QUI COMPTE (review 1, constat 2) : une réponse de la base posée par « Utiliser » — rien ne se propose, ni après la carte, ni après « IA »', async () => {
+  // A : carte, Rédiger, puis « Utiliser » un code de la base.
+  let v = monter({ repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    choix(v, 0, 'oui'); choix(v, 1, 'non')
+    cliquer(v.carte().querySelector('[data-info-rediger]'))
+    await attendre(); await attendre()
+    assert.equal(utiliser(v, 'Code de la porte : 4521'), true, 'Utiliser a posé le texte')
+    await v.msg.envoyer()
+    await attendre(); await attendre(); await attendre()
+    assert.equal(v.envois().length, 1)
+    assert.match(v.envois()[0].corps.message, /4521/)
+    assert.equal(v.propositionsBase().length, 0, 'le code partirait vers une réponse prête')
+  } finally { v.fermer() }
+  // B : « Utiliser » puis « IA » — la version rédigée dérive de la base.
+  v = monter({ repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    assert.equal(utiliser(v, 'Code de la porte : 4521'), true)
+    await v.msg.redigerBrouillon()
+    assert.equal(v.zone().value, REDIGE)
+    await v.msg.envoyer()
+    await attendre(); await attendre(); await attendre()
+    assert.equal(v.propositionsBase().length, 0)
+  } finally { v.fermer() }
+})
+
+test('review 1, constat 6 : le texte de l IA ne suit pas l hôte — changement de fil, saisie vidée, envoi fait', async () => {
+  const deux = () => [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })]
+  // Changement de fil : « IA » dans B1, passage par B2, retour, texte tapé à la main.
+  let v = monter({ conversations: deux(), repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    taperSaisie(v, 'oui chien')
+    await v.msg.redigerBrouillon()
+    v.msg.ouvrir('B2'); v.msg.ouvrir('B1')
+    taperSaisie(v, 'Oui pour le chien.')
+    await v.msg.envoyer()
+    await attendre(); await attendre()
+    assert.equal(v.envois().length, 1)
+    assert.equal(v.propositionsBase().length, 0, 'changement de fil')
+  } finally { v.fermer() }
+  // Saisie vidée, puis texte à la main.
+  v = monter({ repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    taperSaisie(v, 'oui chien')
+    await v.msg.redigerBrouillon()
+    taperSaisie(v, '')
+    taperSaisie(v, 'Oui pour le chien.')
+    await v.msg.envoyer()
+    await attendre(); await attendre()
+    assert.equal(v.propositionsBase().length, 0, 'saisie vidée')
+  } finally { v.fermer() }
+  // Envoi fait : le message suivant, tapé à la main, ne propose rien.
+  v = monter({ repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    taperSaisie(v, 'oui chien')
+    await v.msg.redigerBrouillon()
+    await v.msg.envoyer()
+    await attendre(); await attendre(); await attendre()
+    assert.equal(v.propositionsBase().length, 1)
+    // Le voyageur repose une question : une NOUVELLE carte est ouverte. Le
+    // texte de l'IA déjà parti ne compte plus pour elle.
+    v.msg.etat.conversations[0].infos = [{ ...INFO, id: 'ti2', maj: new Date(Date.now() + 60000).toISOString(), questions: ['Et le parking ?'] }]
+    v.msg.renderFil()
+    assert.ok(v.carte(), 'la nouvelle carte est là')
+    taperSaisie(v, 'Et bon séjour !')
+    await v.msg.envoyer()
+    await attendre(); await attendre()
+    assert.equal(v.envois().length, 2)
+    assert.equal(v.propositionsBase().length, 1, 'le second envoi, à la main, a proposé')
+  } finally { v.fermer() }
+})
+
+test('review 1, constat 9 : un 404 laisse seulement « Non merci » ; un 403 dit un refus, pas « réessayez »', async () => {
+  for (const [status, attendu] of [[404, /n’existe plus/], [403, /refusé pour ce logement/]]) {
+    const v = monter({ repondre: reponsesBase((chemin) => {
+      if (chemin === '/api/ecran/connaissance') { const e = new Error('refus'); e.status = status; throw e }
+    }) })
+    try {
+      await envoyerDepuisLaCarte(v)
+      cliquer(v.carteBase().querySelector('[data-base-enregistrer="0"]'))
+      await attendre(); await attendre()
+      const ligne = v.carteBase().querySelector('[data-base="0"]')
+      assert.match(ligne.textContent, attendu)
+      if (status === 404) {
+        assert.equal(ligne.querySelector('[data-base-enregistrer]'), null, 'un nouveau clic redonnerait 404')
+        assert.ok(ligne.querySelector('[data-base-non]'))
+        cliquer(ligne.querySelector('[data-base-non]'))
+        assert.equal(v.carteBase().querySelectorAll('[data-base]').length, 1)
+      } else {
+        assert.ok(ligne.querySelector('[data-base-enregistrer]'))
+        assert.equal(v.banc.journal.filter(l => /reponse prete/.test(String(l[1]))).length, 1, 'un 403 se journalise')
+      }
+    } finally { v.fermer() }
+  }
+})

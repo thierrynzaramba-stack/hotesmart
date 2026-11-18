@@ -881,6 +881,7 @@ async function envoyer () {
   // le postait à Marie — mot de passe wifi d'une autre maison compris. Le
   // champ garde le texte (rien n'est jeté), et le dit.
   if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
+  const baseDansLaSaisie = saisiePorteLaBase(String(c.bookId))
   etat.saisieRemplie = null
   effacerNoteChamp()
   zone.value = ''
@@ -900,8 +901,14 @@ async function envoyer () {
     : (etat.saisieIA && String(etat.saisieIA.bookId) === String(c.bookId) ? (infoAAfficher(c.infos, c.messages) || {}).id : null)
   // ⚠ TITULAIRE SEULEMENT : la base est non délégable (dette 68). Le serveur le
   // refuse de toute façon (403) ; ici, on ne l'appelle pas pour rien.
-  if (tacheBase != null && reglagesIci()) entree.base = { tacheId: String(tacheBase) }
+  // ⚠ ET JAMAIS QUAND LA SAISIE PORTE UNE RÉPONSE DE LA BASE (« Utiliser »), ni
+  // la modification d'une proposition (review 1, constat 2) : leur texte peut
+  // porter un code ou une réponse « Hors IA », que la proposition recopierait
+  // en clair dans une réponse prête lue par l'IA pour tous les voyageurs.
+  if (tacheBase != null && reglagesIci() && !baseDansLaSaisie && !entree.valideTache) entree.base = { tacheId: String(tacheBase) }
   etat.saisieIA = null
+  etat.textesIA = null
+  etat.baseDansSaisie = null
   if (eng && String(eng.bookId) === String(c.bookId)) { entree.info = { tacheId: eng.tacheId, maj: eng.maj }; etat.infoEngagee = null }
   // Le texte part : « Annuler » et la note de rédaction n'ont plus d'objet.
   etat.iaAnnuler = null
@@ -1037,6 +1044,7 @@ async function redigerInfo (c) {
     const m = etat.saisieRemplie
     if (m && String(m.bookId) === ici) { m.textes.push(String(r.texte)); m.vide = false }
     else etat.saisieRemplie = { bookId: ici, textes: [String(r.texte)] }
+    noterTexteIA(ici, String(r.texte))
     ajusterHauteur(zone)
     etat.infoEngagee = { bookId: ici, tacheId: e.tacheId, maj }
     etat.infoNote = { bookId: ici, cle: 'messages.info.pret' }
@@ -1089,6 +1097,9 @@ async function redigerBrouillon () {
     // Même garde qu'au clic, refaite au retour (review 1, constat 1).
     if (saisieRemplieAilleurs()) { noteChamp(t('kb.use_wrong_conv')); return }
     const marque = etat.saisieRemplie
+    // Le brouillon réécrit portait une réponse de la base : sa version rédigée
+    // en dérive, elle ne se retiendra pas (review 1, constat 2).
+    if (saisiePorteLaBase(ici)) etat.baseDansSaisie = { bookId: ici }
     zone.value = String(r.texte)
     // La version rédigée est écrite POUR ce voyageur (sa langue, son prénom) :
     // elle porte la marque, comme un texte posé par « Utiliser ».
@@ -1096,6 +1107,7 @@ async function redigerBrouillon () {
     etat.iaAnnuler = { bookId: ici, avant, apres: zone.value, marque }
     // Étape 2 : ce texte vient de l'IA — son envoi proposera de le retenir.
     etat.saisieIA = { bookId: ici }
+    etat.textesIA = { bookId: ici, textes: [zone.value] }
     ajusterHauteur(zone)
     zone.focus()
     try { zone.setSelectionRange(zone.value.length, zone.value.length) } catch {}
@@ -1136,8 +1148,8 @@ function apresFrappeSaisie () {
   // Saisie vidée : la réponse de la carte n'y est plus, l'envoi suivant ne la
   // clora pas.
   if (!zone.value.trim() && etat.infoEngagee && String(etat.infoEngagee.bookId) === String(etat.ouverte)) etat.infoEngagee = null
-  // Saisie vidée : plus rien de rédigé par l'IA (étape 2).
-  if (!zone.value.trim()) etat.saisieIA = null
+  // Saisie vidée : plus rien de rédigé par l'IA, ni de la base (étape 2).
+  if (!zone.value.trim()) { etat.saisieIA = null; etat.textesIA = null; etat.baseDansSaisie = null }
   peindreSaisieIA()
 }
 
@@ -1207,7 +1219,26 @@ function cloreInfoTraitee (c, info) {
 // refuse les autres en 403, la page ne les appelle pas.
 //
 // État : etat.saisieIA { bookId } — la saisie porte un texte du bouton « IA » ;
-//        etat.infoBase  { bookId, liste } — les propositions de CE fil.
+//        etat.infoBase  { bookId, liste } — les propositions de CE fil ;
+//        etat.textesIA  { bookId, textes } — les textes posés PAR L'IA dans la
+//                       saisie (les autres textes posés viennent d'« Utiliser ») ;
+//        etat.baseDansSaisie { bookId } — un brouillon réécrit par « IA »
+//                       portait une réponse de la base.
+function noterTexteIA (ici, texte) {
+  const x = etat.textesIA
+  if (x && x.bookId === ici) x.textes.push(texte)
+  else etat.textesIA = { bookId: ici, textes: [texte] }
+}
+// La saisie de CE fil porte-t-elle une réponse de la base, posée par
+// « Utiliser » ? `etat.saisieRemplie` mêle les textes de l'IA et ceux de la
+// base : ceux que l'IA n'a pas écrits sont de la base.
+function saisiePorteLaBase (ici) {
+  if (etat.baseDansSaisie && etat.baseDansSaisie.bookId === ici) return true
+  const r = etat.saisieRemplie
+  if (!r || String(r.bookId) !== ici) return false
+  const ia = etat.textesIA && etat.textesIA.bookId === ici ? etat.textesIA.textes : []
+  return (r.textes || []).some(x => !ia.includes(x))
+}
 async function proposerBase (c, tacheId, envoye) {
   const ici = String(c.bookId)
   try {
@@ -1244,9 +1275,13 @@ function carteBase (c) {
       ? `<textarea maxlength="${MAX_TEXTE_BASE}" rows="4" data-base-texte="${i}" aria-label="${esc(t('messages.info.base.texte'))}">${esc(p.texte)}</textarea>`
       : `<span class="info-carte__texte">${esc(p.texte)}</span>`
     const erreur = p.erreur ? `<span class="caption info-carte__erreur" role="alert">${esc(t(p.erreur))}</span>` : ''
+    // Une réponse prête qui n'existe plus (404) : on ne peut plus que l'écarter
+    // (review 1, constat 9).
     const actions = p.statut === 'enregistree'
       ? `<span class="caption muted">${esc(t('messages.info.base.enregistree'))}</span>`
-      : `<span class="bulle__actions"><button type="button" class="btn btn--primary" data-base-enregistrer="${i}"${occupe ? ' disabled' : ''}>${esc(t(occupe ? 'messages.info.base.enregistrement' : 'messages.info.base.enregistrer'))}</button>${p.statut === 'proposee' ? `<button type="button" class="btn btn--secondary" data-base-modifier="${i}">${esc(t('messages.info.base.modifier_btn'))}</button>` : ''}<button type="button" class="link" data-base-non="${i}"${occupe ? ' disabled' : ''}>${esc(t('messages.info.base.non_merci'))}</button></span>`
+      : p.statut === 'introuvable'
+        ? `<span class="bulle__actions"><button type="button" class="link" data-base-non="${i}">${esc(t('messages.info.base.non_merci'))}</button></span>`
+        : `<span class="bulle__actions"><button type="button" class="btn btn--primary" data-base-enregistrer="${i}"${occupe ? ' disabled' : ''}>${esc(t(occupe ? 'messages.info.base.enregistrement' : 'messages.info.base.enregistrer'))}</button>${p.statut === 'proposee' ? `<button type="button" class="btn btn--secondary" data-base-modifier="${i}">${esc(t('messages.info.base.modifier_btn'))}</button>` : ''}<button type="button" class="link" data-base-non="${i}"${occupe ? ' disabled' : ''}>${esc(t('messages.info.base.non_merci'))}</button></span>`
     return `<div class="info-carte__q" data-base="${i}">${titre}${sujet}${avant}${texte}${erreur}${actions}</div>`
   }).join('')
   // ⚠ AUCUN BLANC ENTRE LES BALISES : `.bulle` est en `pre-wrap` (voir carteInfo).
@@ -1297,9 +1332,9 @@ async function enregistrerBase (c, i) {
     await appel('/api/ecran/connaissance', prep.corps)
     p.statut = 'enregistree'
   } catch (err) {
-    p.statut = avant
+    p.statut = err.status === 404 ? 'introuvable' : avant
     p.erreur = cleErreurBase(err)
-    if (![400, 403, 404, 409].includes(err.status)) logger.error('Messages', 'enregistrement reponse prete', err)
+    if (![400, 404, 409].includes(err.status)) logger.error('Messages', 'enregistrement reponse prete', err)
   }
   if (etat.infoBase === b && String(etat.ouverte) === b.bookId) renderFil()
 }
@@ -4056,6 +4091,8 @@ function ouvrir (bookId) {
   // Étape 2 : un texte rédigé par l'IA pour CE fil, et ce qu'elle propose de
   // retenir, ne suivent pas l'hôte dans un autre fil.
   if (etat.saisieIA && String(etat.saisieIA.bookId) !== String(bookId)) etat.saisieIA = null
+  if (etat.textesIA && etat.textesIA.bookId !== String(bookId)) etat.textesIA = null
+  if (etat.baseDansSaisie && etat.baseDansSaisie.bookId !== String(bookId)) etat.baseDansSaisie = null
   if (etat.infoBase && etat.infoBase.bookId !== String(bookId)) etat.infoBase = null
   etat.ouverte = bookId
   // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry
