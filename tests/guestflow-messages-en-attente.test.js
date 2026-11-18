@@ -531,8 +531,9 @@ test('dette 144 : l hote ECARTE la proposition d un envoi incertain — ce n est
   // Ecarter, ici, c'est refuser de le RENVOYER (le voyageur l'avait).
   const bloc = await promptPour(avecCode([{ status: 'ignored', guest_message: MARQUEUR_CODE_INCERTAIN }]))
   const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
-  assert.match(ligne, /: ENVOI INCERTAIN — .*\(l'hôte n'a pas voulu le renvoyer\)$/, bloc)
-  assert.doesNotMatch(ligne, /NON ENVOYÉ/)
+  // Le fait AVANT la consigne, et un fait, pas une intention (review 1, constat 2).
+  assert.match(ligne, /: ENVOI INCERTAIN \(proposition de renvoi écartée par l'hôte\) — coupure pendant l'envoi automatique, le voyageur l'a peut-être reçu\. .*c'est une intervention$/, bloc)
+  assert.doesNotMatch(ligne, /NON ENVOYÉ|n'a pas voulu/)
 })
 
 test('dette 144 : un « non envoyé » SÛR l emporte sur un envoi incertain (deux modèles de code), en attente comme écartés', async () => {
@@ -549,6 +550,17 @@ test('dette 144 : un « non envoyé » SÛR l emporte sur un envoi incertain (de
       assert.match(ligne, attendu, `${status} : ${bloc}`)
     }
   }
+  // ⚠ ET D'UN STATUT A L'AUTRE (review 1, constat 1) : l'incertain EN ATTENTE
+  // ne couvre pas un refus ECARTE par l'hote. Celle-ci rougit contre la
+  // premiere version du lot.
+  for (const sur of [MARQUEUR_CODE_IMPOSSIBLE, '[AUTO: arrival_code]']) {
+    const bloc = await promptPour(avecCode([
+      { status: 'pending_validation', guest_message: MARQUEUR_CODE_INCERTAIN },
+      { status: 'ignored', guest_message: sur }
+    ]))
+    const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
+    assert.match(ligne, /: NON ENVOYÉ — écarté par l'hôte$/, `${sur} : ${bloc}`)
+  }
   // Et une tache « a valider » du mode Test l'emporte aussi : rien n'est parti.
   const bloc = await promptPour(avecCode([
     { status: 'pending_validation', guest_message: MARQUEUR_CODE_INCERTAIN },
@@ -558,9 +570,13 @@ test('dette 144 : un « non envoyé » SÛR l emporte sur un envoi incertain (de
 })
 
 test('dette 144 : les marqueurs du code non abouti ne sont pas recopiés — l écrivain et l agent lisent le même module', () => {
+  // ALARME DE STYLE, pas une preuve (review 1, constat 5) : une recopie par
+  // concatenation la contourne. Le fond est tenu par les tests de l'etat des
+  // envois ci-dessus et de la tache dans arrival-code-manquant-alerte.
   const fs = require('fs')
   const ecrivain = fs.readFileSync(require.resolve('../lib/cron-arrival-code.js'), 'utf8')
   const agent = fs.readFileSync(require.resolve('../lib/cron-classify.js'), 'utf8')
+  for (const src of [ecrivain, agent]) assert.match(src, /require\('\.\/marqueurs-code-acces'\)/)
   for (const m of [MARQUEUR_CODE_IMPOSSIBLE, MARQUEUR_CODE_INCERTAIN]) {
     assert.ok(!ecrivain.includes(m), `marqueur recopié dans cron-arrival-code : ${m}`)
     assert.ok(!agent.includes(m), `marqueur recopié dans cron-classify : ${m}`)

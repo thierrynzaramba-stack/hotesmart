@@ -498,13 +498,21 @@ test('LE TEST QUI COMPTE (dette 144) : envoi INCERTAIN — la tache porte le mar
   assert.strictEqual(t.suggested_reply, vus.envois[0])
 })
 
-test('dette 144 : un REFUS du canal garde le marqueur « impossible » et son texte', async () => {
+test('dette 144 : un REFUS du canal, un échec PERMANENT ou un canal DIFFÉRÉ gardent le marqueur « impossible » et son texte', async () => {
+  // Review 1, constat 3 : seul le refus nu etait teste. Un `permanent` (adresse
+  // invalide, `call_error` Channex) ou un `differe` n'est PAS parti, c'est sur.
   const { MARQUEUR_CODE_IMPOSSIBLE } = require('../lib/marqueurs-code-acces')
-  const { mod, vus } = charger({ envoi: { ok: false, reason: 'pas de messagerie' } })
-  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
-  assert.strictEqual(vus.taches.length, 1)
-  assert.strictEqual(vus.taches[0].guest_message, MARQUEUR_CODE_IMPOSSIBLE)
-  assert.match(vus.taches[0].summary, /envoi automatique impossible \(pas de messagerie pour cette réservation\), à transmettre manuellement\.$/)
+  for (const envoi of [
+    { ok: false, reason: 'pas de messagerie' },
+    { ok: false, permanent: true, error: 'call_error' },
+    { ok: false, differe: true, error: 'canal e-mail coupe' }
+  ]) {
+    const { mod, vus } = charger({ envoi })
+    await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+    assert.strictEqual(vus.taches.length, 1, JSON.stringify(envoi))
+    assert.strictEqual(vus.taches[0].guest_message, MARQUEUR_CODE_IMPOSSIBLE, JSON.stringify(envoi))
+    assert.match(vus.taches[0].summary, /envoi automatique impossible \(pas de messagerie pour cette réservation\), à transmettre manuellement\.$/)
+  }
 })
 
 test('envoi INCERTAIN et information manquante : « PEUT-ÊTRE REÇU », puis le motif et la reservation en fin de texte', async () => {
