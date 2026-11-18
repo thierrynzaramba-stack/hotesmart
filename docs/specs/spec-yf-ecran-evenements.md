@@ -878,7 +878,31 @@ Et une décision de produit portée à Thierry depuis la review : **S4** (§16.1
   dans aucune classe ; une règle de mise en cache commune (`cachable`). Le
   test du décalage prend 357 et 365 jours, plus seulement des multiples de
   364. Chaque test neuf rougit contre le code d'avant ou contre la mutation
-  de la garde qu'il tient (12 mutations, 12 rouges). Reste pour la recette
-  (constat 14) : l'anneau de la nuit choisie et celui du focus passent sous
-  les barres voisines ; le débordement de −11 px hors d'un bouton sous Safari
-  et Firefox.
+  de la garde qu'il tient (12 mutations, 12 rouges).
+- **Recette sur staging, 18 novembre 2026** (fusion `66c2e4d4`, Chrome sur
+  l'ordinateur de Thierry, logement « Recette — Loft Pilotable », deux ans
+  d'historique) :
+  - migration `2026-11-11-preferences-ecran` appliquée sur staging, prouvée
+    par lecture du catalogue (5 colonnes, RLS, aucune policy, aucun droit
+    pour `anon` ni `authenticated`, 3 contraintes) et par le comportement
+    (clé anonyme et session connectée refusées en 42501 depuis le site) ;
+    le script de vérification ne tourne pas dans l'espace de la session
+    (pas de `.env.staging`) ;
+  - conformes : la pile sous chaque nuit (26 / 25 / 24 le lundi, année de
+    l'occurrence en janvier 2027) ; une seule position de pile par rangée,
+    sur les quatre semaines de Noël ; phrases des nuits ; pastille éteinte
+    enregistrée (PUT 200) et gardée après rechargement ; trois clics le
+    même instant = deux PUT qui se suivent sans se chevaucher, et l'état
+    final se retrouve sur un autre événement (Vacances d'hiver) ; « prix inconnu » d'une nuit sans prix ;
+    téléphone (7 colonnes de 150 px qui défilent, pastilles à la ligne) ;
+  - **constat 14 confirmé, corrigé** : sous Chrome, la barre de 2025
+    rayait l'anneau de la nuit choisie des deux côtés. La case choisie ou
+    focalisée monte à `z-index: 2` (au-dessus des barres, sous l'éditeur
+    collé) ; vérifié à l'écran, et un test garde l'ordre des couches. Safari
+    et Firefox ne sont pas éprouvés d'ici ;
+  - **mesure APRÈS (staging)**, trois logements, page rechargée : 1 appel
+    `/api` au chargement, **15 requêtes** côté serveur, **7 à 9 Ko
+    transférés** (140 Ko décodés), **0,9 à 1,4 s** côté serveur, écran
+    complet **1,2 à 2,1 s**. Staging n'a pas les logements de la mesure
+    AVANT : la comparaison sur les mêmes trois logements se fait en
+    production, après le merge.
