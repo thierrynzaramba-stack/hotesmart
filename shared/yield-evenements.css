@@ -163,6 +163,13 @@
   min-height: 92px; box-sizing: border-box; text-align: start; color: var(--ink);
 }
 .yfe-jour[aria-pressed="true"] { outline: 3px solid var(--ink); outline-offset: 2px; }
+/* ⚠ L'ANNEAU PASSE AU-DESSUS DES BARRES (recette de 4b, 18 novembre 2026 ;
+   constat 14 de la review de l'étape 2). Une barre de séjour (`z-index: 1`)
+   déborde de 11 px hors de sa case : sans cela, elle rayait l'anneau de la
+   nuit choisie et celui du focus, des deux côtés. Montée à 2, la case passe
+   au-dessus des barres ; l'éditeur collé en bas (`z-index: 2`, plus loin
+   dans la page) reste au-dessus d'elle. */
+.yfe-jour[aria-pressed="true"], .yfe-jour:focus-visible { position: relative; z-index: 2; }
 .yfe-jour--evenement { border-color: var(--ink); }
 .yfe-jour--rayonnement { border: 2px dashed var(--muted); }
 /* ⚠ ON ATTÉNUE LE FOND ET LE BORD, JAMAIS L'ENCRE (review de l'étape 2) : une

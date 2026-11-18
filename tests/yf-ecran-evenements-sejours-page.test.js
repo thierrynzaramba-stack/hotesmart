@@ -473,3 +473,21 @@ test('LE TEST QUI COMPTE (constat 15) : la page soustrait le décalage DU SERVEU
     assert.ok(lignesDe(nuit(veille))[1].classList.contains('yfe-sejour--vide'), `${decalage} : ${veille}`)
   }
 })
+
+test('LE TEST QUI COMPTE (recette du 18 novembre 2026, constat 14) : la nuit choisie et la nuit focalisée passent AU-DESSUS des barres, et SOUS l’éditeur collé', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared/yield-evenements.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const zDe = sel => {
+    const regles = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(m => m[1].split(',').map(x => x.trim()).includes(sel))
+    const z = regles.map(m => (m[2].match(/z-index:\s*(\d+)/) || [])[1]).filter(Boolean)
+    return z.length ? Number(z[z.length - 1]) : null
+  }
+  const barre = zDe('.yfe-sejour--vendue')
+  const editeur = zDe('.yfe-editeur')
+  for (const sel of ['.yfe-jour[aria-pressed="true"]', '.yfe-jour:focus-visible']) {
+    const z = zDe(sel)
+    assert.ok(z !== null && z > barre, `${sel} : z-index ${z} au-dessus des barres (${barre})`)
+    assert.ok(z <= editeur, `${sel} : z-index ${z} pas au-dessus de l’éditeur (${editeur}), qui vient après dans la page`)
+    const regle = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(m => m[1].split(',').map(x => x.trim()).includes(sel) && /z-index/.test(m[2]))
+    assert.match(regle[2], /position:\s*relative/, `${sel} : un z-index sans position ne fait rien`)
+  }
+})
