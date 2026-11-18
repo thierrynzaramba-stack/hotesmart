@@ -1375,6 +1375,53 @@ dans l'ordre de la remise :
 
 **Recette 7a : conforme.**
 
+### 14.16 Toute image que l'appareil sait lire (19 novembre 2026)
+
+**La demande** (Thierry, 19 novembre 2026, au chargement des factures 2025) :
+des factures reçues **par SMS** ne se chargeaient pas. Seuls le PDF, le JPEG et
+le PNG étaient acceptés, au sélecteur comme à l'envoi ; les photos HEIC (format
+de l'iPhone et de certains Android, dont le sien) et les autres formats étaient
+refusés, ou invisibles dans le sélecteur.
+
+**Décidé** (option « appareil + message », Thierry) :
+- le sélecteur propose **toutes les images courantes**, en liste explicite
+  (JPEG, PNG, WebP, GIF, AVIF, BMP, HEIC, HEIF, plus les extensions `.heic`
+  et `.heif`, que certains sélecteurs Android filtrent par extension). Pas
+  `image/*` : « /* » dans la page se lit comme un début de commentaire par
+  les tests qui la nettoient, et y masquait la garde de la page ;
+- toute image que **l'appareil sait lire** (JPEG, PNG, WebP, GIF, AVIF, BMP ;
+  HEIC sur iPhone, iPad et Mac) est convertie en JPEG par le navigateur avant
+  l'envoi (`preparerJpeg`, la même réduction que les photos de biens) — le
+  serveur et l'IA ne reçoivent toujours que du PDF, du JPEG ou du PNG ;
+- un fichier sans type (certains sélecteurs Android) se reconnaît à son
+  extension (`typeDuFichier`) ;
+- une image que l'appareil **ne sait pas lire** est refusée **en nommant son
+  format** : pour le HEIC, « prenez la facture en photo depuis HôteSmart
+  (Ajouter une facture › Appareil photo), ou enregistrez l'image en JPEG ».
+
+**Non retenu, et pourquoi** : un décodeur HEIC embarqué (Android et PC) — 2 à
+3 Mo téléchargés, et un décodeur HEVC couvert par des brevets et une licence
+LGPL, à faire vérifier avant. À rouvrir si les factures SMS de Thierry
+s'avèrent être du HEIC (le message le dira désormais).
+
+**Case PERFORMANCE** (règle du dépôt, huit points) :
+1. Écran : sans objet — aucun appel ajouté ; le chargement de `/charges` reste
+   `/api/ecran/charges` seul.
+2. Donnée non urgente : sans objet.
+3. Cache : sans objet.
+4. `private, no-store` : inchangé (aucun endpoint touché).
+5. Statiques : aucun fichier ajouté, aucune bibliothèque.
+6. Lecture tronquée : sans objet.
+7. Budget : inchangé ; la conversion se fait sur l'appareil, à l'envoi, et
+   réduit la photo (2 000 px, 2 Mo au plus) avant de l'envoyer.
+8. Mesure AVANT / APRÈS : l'écran ne change pas (1 appel, 7 requêtes) ; seul
+   l'envoi d'une photo change de format accepté.
+
+**Inventaire** : rien de retiré. Le PDF, le JPEG et le PNG passent comme avant ;
+le message « type refusé » devient « Seuls les PDF et les images sont
+acceptés. ». **Mobile** : un seul module (`shared/charges-vue.js`) pour les
+deux écrans.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

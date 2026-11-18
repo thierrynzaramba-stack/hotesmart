@@ -25,6 +25,28 @@ export const TYPES_ACCEPTES = {
   'image/png': 7 * 1024 * 1024
 }
 
+// ⚠ TOUTE IMAGE QUE L'APPAREIL SAIT LIRE EST ACCEPTÉE, puis convertie en JPEG
+// avant l'envoi (Thierry, 19 novembre 2026 : des factures reçues par SMS ne
+// passaient pas). Le serveur et l'IA ne reçoivent toujours que du PDF, du
+// JPEG ou du PNG : la conversion se fait ICI, par le navigateur. Un format que
+// l'appareil ne sait pas lire est refusé en le NOMMANT — le HEIC des photos
+// d'iPhone et de certains Android se lit sur iPhone et Mac, pas sous Chrome.
+// Un fichier sans type (certains sélecteurs Android) se reconnaît à son
+// extension.
+const EXTENSIONS_IMAGE = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+  heic: 'image/heic', heif: 'image/heif', avif: 'image/avif', bmp: 'image/bmp'
+}
+export function typeDuFichier (f) {
+  const t = (f && f.type) || ''
+  if (t === 'application/pdf' || /^image\//.test(t)) return t
+  const n = (f && f.name) || ''
+  if (/\.pdf$/i.test(n)) return 'application/pdf'
+  const ext = (n.match(/\.([a-z0-9]+)$/i) || [])[1]
+  return (ext && EXTENSIONS_IMAGE[ext.toLowerCase()]) || t
+}
+const estHeic = (type) => /^image\/hei[cf](-sequence)?$/.test(type)
+
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ESC[c])
 
@@ -588,15 +610,11 @@ export function monter (racine, deps) {
     z.classList.toggle('chg-erreur', Boolean(erreur))
   }
 
-  function typeDe (f) {
-    if (f.type) return f.type
-    return /\.pdf$/i.test(f.name || '') ? 'application/pdf' : ''
-  }
-
   async function envoyer (fichier) {
     if (etat.envoiEnCours || !fichier) return
-    let type = typeDe(fichier)
-    if (!TYPES_ACCEPTES[type]) { statutEnvoi(t('charges.refus_type_refuse'), true); return }
+    let type = typeDuFichier(fichier)
+    const image = /^image\//.test(type)
+    if (type !== 'application/pdf' && !image) { statutEnvoi(t('charges.refus_type_refuse'), true); return }
     etat.envoiEnCours = true
     const bouton = $('[data-action="ajouter"]')
     if (bouton) bouton.disabled = true
@@ -604,11 +622,15 @@ export function monter (racine, deps) {
       let corps = fichier
       // Une photo se réduit AVANT l'envoi (shared/photo-bien-client.js) : moins
       // lourde à envoyer en 4G, et moins chère à lire.
-      if (type !== 'application/pdf') {
+      if (image) {
         try {
-          corps = await deps.reduireImage(fichier)
+          // Le type reconnu à l'extension est donné au fichier : sans lui, le
+          // navigateur ne saurait pas quoi décoder.
+          corps = await deps.reduireImage(fichier.type === type ? fichier : fichier.slice(0, fichier.size, type))
         } catch (e) {
-          statutEnvoi(t(e && e.code === 'taille' ? 'charges.refus_trop_gros' : 'charges.refus_type_refuse'), true)
+          const refus = e && e.code === 'taille' ? 'charges.refus_trop_gros'
+            : (estHeic(type) ? 'charges.refus_heic' : 'charges.refus_image_illisible')
+          statutEnvoi(t(refus), true)
           return
         }
         type = 'image/jpeg'
