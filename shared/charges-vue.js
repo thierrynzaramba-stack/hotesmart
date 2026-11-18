@@ -35,7 +35,7 @@ export const TYPES_ACCEPTES = {
 // extension.
 const EXTENSIONS_IMAGE = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
-  heic: 'image/heic', heif: 'image/heif', avif: 'image/avif', bmp: 'image/bmp'
+  heic: 'image/heic', heif: 'image/heif', avif: 'image/avif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff'
 }
 export function typeDuFichier (f) {
   const t = (f && f.type) || ''
@@ -46,6 +46,40 @@ export function typeDuFichier (f) {
   return (ext && EXTENSIONS_IMAGE[ext.toLowerCase()]) || t
 }
 const estHeic = (type) => /^image\/hei[cf](-sequence)?$/.test(type)
+
+// Le format d'un fichier lu dans son CONTENU (ses premiers octets), quand son
+// type et son extension se taisent ou mentent : un HEIC enregistré en « .jpg »
+// par une messagerie, un fichier sans nom ni type (review du lot photos,
+// constat 1). Rend '' si rien n'est reconnu.
+export function formatDuContenu (o) {
+  const asc = (a, b) => String.fromCharCode(...o.slice(a, b))
+  if (asc(0, 4) === '%PDF') return 'application/pdf'
+  if (o[0] === 0xFF && o[1] === 0xD8 && o[2] === 0xFF) return 'image/jpeg'
+  if (o[0] === 0x89 && asc(1, 4) === 'PNG') return 'image/png'
+  if (asc(0, 4) === 'GIF8') return 'image/gif'
+  if (asc(0, 4) === 'RIFF' && asc(8, 12) === 'WEBP') return 'image/webp'
+  if (asc(4, 8) === 'ftyp') {
+    const marque = asc(8, 12)
+    if (['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1'].includes(marque)) return 'image/heic'
+    if (marque === 'avif') return 'image/avif'
+  }
+  return ''
+}
+// `Lecteur` : le FileReader de la page, pour les navigateurs (et le banc de
+// tests) dont les morceaux de fichier n'ont pas `arrayBuffer`.
+async function premiersOctets (f, Lecteur, n = 16) {
+  const part = f.slice(0, n)
+  if (typeof part.arrayBuffer === 'function') return new Uint8Array(await part.arrayBuffer())
+  return new Uint8Array(await new Promise((ok, ko) => {
+    const r = new Lecteur()
+    r.onload = () => ok(r.result)
+    r.onerror = () => ko(r.error)
+    r.readAsArrayBuffer(part)
+  }))
+}
+async function formatLu (f, Lecteur) {
+  try { return formatDuContenu(await premiersOctets(f, Lecteur)) } catch (e) { return '' }
+}
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ESC[c])
@@ -118,6 +152,7 @@ const racineDe = (c) => c.groupe_doublon || c.id
  * @param deps.t, deps.langue
  */
 export function monter (racine, deps) {
+  const Lecteur = ((racine && racine.ownerDocument && racine.ownerDocument.defaultView) || globalThis).FileReader
   const doc = racine.ownerDocument || racine
   const t = deps.t
   const langue = deps.langue || 'fr'
@@ -613,6 +648,10 @@ export function monter (racine, deps) {
   async function envoyer (fichier) {
     if (etat.envoiEnCours || !fichier) return
     let type = typeDuFichier(fichier)
+    // Un fichier SANS type, ou au type générique, que son nom ne fait pas
+    // reconnaître : son contenu tranche. Un type précis (texte, tableur…)
+    // n'est pas contredit.
+    if (!type || type === 'application/octet-stream') type = (await formatLu(fichier, Lecteur)) || type
     const image = /^image\//.test(type)
     if (type !== 'application/pdf' && !image) { statutEnvoi(t('charges.refus_type_refuse'), true); return }
     etat.envoiEnCours = true
@@ -624,12 +663,21 @@ export function monter (racine, deps) {
       // lourde à envoyer en 4G, et moins chère à lire.
       if (image) {
         try {
-          // Le type reconnu à l'extension est donné au fichier : sans lui, le
-          // navigateur ne saurait pas quoi décoder.
+          // ⚠ Le type reconnu (extension ou contenu) est donné au fichier, parce
+          // que `preparerJpeg` refuse tout fichier dont le TYPE n'est pas
+          // `image/…` (shared/photo-bien-client.js). Le navigateur, lui,
+          // reconnaît l'image à son contenu : ce retypage sert la garde.
           corps = await deps.reduireImage(fichier.type === type ? fichier : fichier.slice(0, fichier.size, type))
         } catch (e) {
-          const refus = e && e.code === 'taille' ? 'charges.refus_trop_gros'
-            : (estHeic(type) ? 'charges.refus_heic' : 'charges.refus_image_illisible')
+          // Le message de FORMAT ne vaut que pour un refus de format
+          // (`code: 'type'`) ; toute autre panne de conversion (mémoire,
+          // canvas) est un refus ordinaire (review, constat 3). Un HEIC se
+          // reconnaît aussi à son contenu, même nommé « .jpg ».
+          let refus = 'charges.refus'
+          if (e && e.code === 'taille') refus = 'charges.refus_trop_gros'
+          else if (e && e.code === 'type') {
+            refus = estHeic(type) || estHeic(await formatLu(fichier, Lecteur)) ? 'charges.refus_heic' : 'charges.refus_image_illisible'
+          }
           statutEnvoi(t(refus), true)
           return
         }

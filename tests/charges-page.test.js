@@ -623,7 +623,7 @@ test('LE TEST QUI COMPTE : une photo HEIC que l\'appareil ne sait pas lire est r
   try {
     await b.deposerFichier('photo.heif', 'image/heif')
     assert.deepEqual(b.gestes(), [])
-    assert.match(texte(b.$('[data-bind="envoi"]')), /format HEIC.*Appareil photo/)
+    assert.match(texte(b.$('[data-bind="envoi"]')), /Photo HEIC.*capture d'écran/)
     // Une autre image illisible : un autre message, sans parler de HEIC.
     await b.deposerFichier('scan.bmp', 'image/bmp')
     assert.deepEqual(b.gestes(), [])
@@ -637,12 +637,70 @@ test('le sélecteur propose toutes les images, HEIC compris ; un fichier ni PDF 
   // ⚠ LA LISTE EST EXPLICITE, PAS `image/*` : « /* » dans une page se lit
   // comme un début de commentaire par les tests qui nettoient le code
   // (tests/pages-non-delegables.test.js), et masquait la garde de la page.
-  assert.match(html, /<input type="file" data-bind="fichier" accept="application\/pdf,image\/jpeg,image\/png,image\/webp,image\/gif,image\/avif,image\/bmp,image\/heic,image\/heif,\.heic,\.heif"/)
+  assert.match(html, /<input type="file" data-bind="fichier" accept="application\/pdf,image\/jpeg,image\/png,image\/webp,image\/gif,image\/avif,image\/bmp,image\/tiff,image\/heic,image\/heif,\.heic,\.heif"/)
   const { typeDuFichier } = await import('../shared/charges-vue.js')
   assert.equal(typeDuFichier({ type: '', name: 'a.HEIC' }), 'image/heic')
   assert.equal(typeDuFichier({ type: 'application/octet-stream', name: 'b.jpg' }), 'image/jpeg', 'un type générique cède à l\'extension')
   assert.equal(typeDuFichier({ type: '', name: 'c.pdf' }), 'application/pdf')
   assert.equal(typeDuFichier({ type: 'text/plain', name: 'd.txt' }), 'text/plain')
+  assert.equal(typeDuFichier({ type: '', name: 'x.heic.jpg' }), 'image/jpeg', 'la dernière extension compte')
+  assert.equal(typeDuFichier({ type: '', name: 'sans-extension' }), '')
+  assert.equal(typeDuFichier({ type: '', name: 'X.PDF' }), 'application/pdf')
+  assert.equal(typeDuFichier({ type: '', name: 'scan.tiff' }), 'image/tiff')
+})
+
+test('formatDuContenu : le format se lit dans les premiers octets', async () => {
+  const { formatDuContenu } = await import('../shared/charges-vue.js')
+  const o = (s) => Uint8Array.from(s, c => c.charCodeAt(0))
+  assert.equal(formatDuContenu(o('%PDF-1.7')), 'application/pdf')
+  assert.equal(formatDuContenu(Uint8Array.from([0xFF, 0xD8, 0xFF, 0xE0])), 'image/jpeg')
+  assert.equal(formatDuContenu(Uint8Array.from([0x89, 0x50, 0x4E, 0x47])), 'image/png')
+  assert.equal(formatDuContenu(o('RIFF\0\0\0\0WEBP')), 'image/webp')
+  assert.equal(formatDuContenu(o('\0\0\0\x18ftypheic')), 'image/heic')
+  assert.equal(formatDuContenu(o('\0\0\0\x18ftypmif1')), 'image/heic')
+  assert.equal(formatDuContenu(o('\0\0\0\x18ftypavif')), 'image/avif')
+  assert.equal(formatDuContenu(o('bonjour')), '')
+})
+
+test('LE TEST QUI COMPTE (review, constat 1) : un HEIC enregistré en « .jpg » est reconnu à son CONTENU, et le message le nomme', async () => {
+  const illisible = () => { throw Object.assign(new Error('type'), { code: 'type' }) }
+  const b = await monter({ geste: geste8, preparerJpeg: illisible })
+  try {
+    await b.deposerFichier('facture-sms.jpg', 'image/jpeg', '\0\0\0\x18ftypheic-et-la-suite')
+    assert.deepEqual(b.gestes(), [])
+    assert.match(texte(b.$('[data-bind="envoi"]')), /Photo HEIC/)
+  } finally { b.fermer() }
+})
+
+test('un fichier SANS nom parlant ni type (sélecteur Android) est reconnu à son contenu : un PDF part en PDF', async () => {
+  const b = await monter({ geste: (corps) => (corps.action === 'envoi' ? { ok: true, id: id(11), url: 'https://stockage.test/envoi/v', jeton: 't' } : { ok: true, issue: 'lue', charge: facture(11, { statut: 'a_verifier' }) }) })
+  try {
+    await b.deposerFichier('document', '', '%PDF-1.4 contenu')
+    const [envoi] = b.gestes()
+    assert.equal(envoi.type, 'application/pdf')
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (review, constat 5) : un PDF typé `application/octet-stream` part en PDF, annoncé ET déposé', async () => {
+  const b = await monter({ geste: (corps) => (corps.action === 'envoi' ? { ok: true, id: id(12), url: 'https://stockage.test/envoi/u', jeton: 't' } : { ok: true, issue: 'lue', charge: facture(12, { statut: 'a_verifier' }) }) })
+  try {
+    await b.deposerFichier('facture.pdf', 'application/octet-stream')
+    const [envoi] = b.gestes()
+    assert.equal(envoi.type, 'application/pdf')
+    const depot = b.journal.fetch.find(f => f.url.startsWith('https://stockage.test/'))
+    assert.equal(depot.corps.get('').type, 'application/pdf', 'le fichier déposé porte le type annoncé')
+  } finally { b.fermer() }
+})
+
+test('une panne de conversion qui n\'est PAS un refus de format (mémoire, canvas) n\'accuse pas le format (review, constat 3)', async () => {
+  const panne = () => { throw new TypeError('getContext a rendu null') }
+  const b = await monter({ geste: geste8, preparerJpeg: panne })
+  try {
+    await b.deposerFichier('photo.heic', 'image/heic')
+    assert.deepEqual(b.gestes(), [])
+    assert.match(texte(b.$('[data-bind="envoi"]')), /n'a pas pu être enregistrée/)
+    assert.doesNotMatch(texte(b.$('[data-bind="envoi"]')), /HEIC/)
+  } finally { b.fermer() }
 })
 
 test('« trop d\'envois » (429) est dit tel quel', async () => {
