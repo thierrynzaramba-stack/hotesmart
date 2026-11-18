@@ -163,6 +163,13 @@
   min-height: 92px; box-sizing: border-box; text-align: start; color: var(--ink);
 }
 .yfe-jour[aria-pressed="true"] { outline: 3px solid var(--ink); outline-offset: 2px; }
+/* ⚠ L'ANNEAU PASSE AU-DESSUS DES BARRES (recette de 4b, 18 novembre 2026 ;
+   constat 14 de la review de l'étape 2). Une barre de séjour (`z-index: 1`)
+   déborde de 11 px hors de sa case : sans cela, elle rayait l'anneau de la
+   nuit choisie et celui du focus, des deux côtés. Montée à 2, la case passe
+   au-dessus des barres ; l'éditeur collé en bas (`z-index: 2`, plus loin
+   dans la page) reste au-dessus d'elle. */
+.yfe-jour[aria-pressed="true"], .yfe-jour:focus-visible { position: relative; z-index: 2; }
 .yfe-jour--evenement { border-color: var(--ink); }
 .yfe-jour--rayonnement { border: 2px dashed var(--muted); }
 /* ⚠ ON ATTÉNUE LE FOND ET LE BORD, JAMAIS L'ENCRE (review de l'étape 2) : une
@@ -180,6 +187,62 @@
 .yfe-jour__prix { font-size: var(--fs-body); font-weight: var(--fw-bold); }
 .yfe-jour__vide { font-size: 11px; color: var(--muted); text-align: center; }
 .yfe-jour__marques { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; font-size: 10px; color: var(--muted); }
+
+/* ---------- 4b : les séjours de quatre années (spec §16.2) ----------
+   Une teinte, quatre forces : --sejour (alias de --ink) à 100 / 60 / 40 / 25 %,
+   texte --on-ink sur les deux premières (décision 4 du registre). Jamais une
+   couleur de niveau : une barre de la couleur d'un niveau se lit comme lui.
+   ⚠ MÉLANGÉE À --surface, PAS À transparent (review de l'étape 2, constat 6) :
+   une barre transparente laissait voir le bord de la case à travers elle et
+   changeait de teinte selon le fond ; opaque, son contraste ne dépend plus de
+   ce qu'elle recouvre. */
+/* ⚠ ANCRÉE EN BAS (review de l'étape 2, constat 2) : la hauteur de ce qui
+   la précède change d'une case à l'autre (« Hors période » sur une ligne,
+   pastille + prix sur deux, marque « vendue » ou non). Les cases d'une rangée
+   ont la même hauteur et les piles le même nombre de lignes : posées au fond,
+   elles s'alignent, et une barre ne fait plus de marche d'une case à l'autre. */
+.yfe-pile { display: flex; flex-direction: column; gap: 4px; margin-top: auto; }
+.yfe-sejour {
+  display: flex; align-items: center; gap: 4px; min-height: 22px; padding: 2px 6px;
+  border-radius: 6px; font-size: 11px; font-weight: var(--fw-semibold);
+  box-sizing: border-box; overflow: hidden; white-space: nowrap;
+}
+.yfe-sejour--vendue.yfe-sejour--a0 { background: var(--sejour); color: var(--on-ink); }
+.yfe-sejour--vendue.yfe-sejour--a1 { background: color-mix(in srgb, var(--sejour) 60%, var(--surface)); color: var(--on-ink); }
+.yfe-sejour--vendue.yfe-sejour--a2 { background: color-mix(in srgb, var(--sejour) 40%, var(--surface)); color: var(--ink); }
+.yfe-sejour--vendue.yfe-sejour--a3 { background: color-mix(in srgb, var(--sejour) 25%, var(--surface)); color: var(--ink); }
+.yfe-sejour--vide, .yfe-sejour--avant, .yfe-sejour--a_venir, .yfe-sejour--occupee { color: var(--muted); }
+/* Une barre CONTINUE : elle traverse l'espace entre deux cases — rembourrage
+   (6) + bord (2) + la moitié de l'espace (3). Coupée au bord d'une semaine,
+   elle reste carrée sans déborder ; arrondie à ses vraies extrémités seules. */
+/* Au-dessus du bord de la case voisine (sinon il raye la barre), sous
+   l'éditeur collé en bas (`z-index: 2`). */
+.yfe-sejour--vendue { position: relative; z-index: 1; }
+.yfe-sejour--suite-avant { margin-inline-start: -11px; }
+.yfe-sejour--suite-apres { margin-inline-end: -11px; }
+.yfe-sejour--vendue:not(.yfe-sejour--debut) { border-start-start-radius: 0; border-end-start-radius: 0; }
+.yfe-sejour--vendue:not(.yfe-sejour--fin) { border-start-end-radius: 0; border-end-end-radius: 0; }
+.yfe-sejour__an { flex: 0 0 auto; font-size: 10px; font-weight: var(--fw-bold); }
+.yfe-sejour__prix { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.yfe-sejour__delai {
+  flex: 0 0 auto; padding: 1px 5px; border-radius: 999px; font-size: 10px;
+  font-weight: var(--fw-bold); background: var(--surface); color: var(--ink);
+}
+/* Les pastilles des années, au-dessus du calendrier. */
+.yfe-couches { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.yfe-couches > p { flex-basis: 100%; margin: 0; }
+.yfe-couche {
+  display: inline-flex; align-items: center; gap: 6px; min-height: var(--control); padding: 6px 12px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 13px; font-weight: var(--fw-semibold); cursor: pointer;
+}
+.yfe-couche[aria-pressed="true"] { border-color: var(--ink); }
+.yfe-couche[aria-pressed="false"] { color: var(--muted); }
+.yfe-couche__pastille { width: 10px; height: 10px; border-radius: 3px; box-sizing: border-box; }
+.yfe-couche--a1 .yfe-couche__pastille { background: color-mix(in srgb, var(--sejour) 60%, var(--surface)); }
+.yfe-couche--a2 .yfe-couche__pastille { background: color-mix(in srgb, var(--sejour) 40%, var(--surface)); }
+.yfe-couche--a3 .yfe-couche__pastille { background: color-mix(in srgb, var(--sejour) 25%, var(--surface)); }
+.yfe-couche[aria-pressed="false"] .yfe-couche__pastille { background: transparent; border: 1px solid var(--muted); }
 
 /* ---------- Téléphone : la même grille, 7 colonnes de 150 px qui défilent
    (registre §1 : pas de composant linéaire). ---------- */
