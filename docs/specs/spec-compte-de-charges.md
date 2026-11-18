@@ -967,6 +967,15 @@ son go.
 | **7b** L'échéancier, une provision | Un échéancier d'énergie ou de taxe foncière apparaît en **prévision** sur sa période, marquée « estimation », jusqu'à la facture finale qui le remplace (Q25). |
 | **7c** La facture annuelle | « Cette facture revient chaque année » : HôteSmart **prévoit** l'année suivante avec le montant de l'an dernier, **alerte** si elle n'arrive pas, et **pré-remplit** la nouvelle (Q27). |
 
+**Décidé pour plus tard** (Thierry, 18 novembre 2026, au chargement des
+factures 2025 en production — sujets à spécifier, aucun lot ouvert) :
+- **Distinguer l'électricité et le gaz** : la catégorie « Eau, électricité,
+  gaz » (`energie`) les confond aujourd'hui.
+- **Une clé de répartition entre logements** : une facture qui couvre
+  plusieurs logements (un contrat EDF commun à La bulle et au 23) reste
+  aujourd'hui « sans logement » ; elle compte dans le total de l'entité, pas
+  dans celui d'un logement. La clé (50/50, surface, nuitées…) reste à décider.
+
 ### 14.1 Catégorie de chaque donnée affichée (règle d'architecture)
 
 | Donnée | Catégorie | Où elle se calcule |
@@ -1052,6 +1061,21 @@ La consigne lit en plus :
 
 Les montants d'un avoir se lisent positifs, comme imprimés. Même règle
 qu'aujourd'hui : rien d'inventé, `null` si c'est absent.
+
+**Facture d'énergie : la période de CONSOMMATION, cherchée dans toutes les
+pages** (demande de Thierry, 18 novembre 2026, au chargement des factures 2025
+en production). Une régularisation EDF de 5 856,48 € (7 octobre 2025) a été
+lue sans période : la consommation — « du 26/09/24 au 25/09/25 » — n'était
+écrite qu'en page 2 du détail, et tout le montant tombait sur octobre 2025. La
+consigne dit désormais, pour une facture, une régularisation ou un avoir
+d'énergie (pas un échéancier) : chercher la période des RELEVÉS dans TOUTES
+les pages ; compléter une année sur deux chiffres ; ne pas prendre la période
+de l'abonnement (facturé d'avance) ; pour plusieurs contrats (électricité et
+gaz), la période du contrat d'électricité — pas l'union des deux, qui
+fabriquait des périodes de plus de 366 jours (review, §14.14). Le PDF entier
+part déjà à l'IA : seule la consigne manquait. Une période lue puis refusée
+(plus de 366 jours, bornes à l'envers) n'est plus perdue en silence : elle
+reste dans la lecture (`lecture_ia.periode_refusee`, avec son motif).
 
 ### 14.4 Sous-lot 7a — écran
 
@@ -1374,6 +1398,188 @@ dans l'ordre de la remise :
 - **c. Mesure APRÈS** : §14.7, point 8.
 
 **Recette 7a : conforme.**
+
+### 14.13 Mise en production du sous-lot 7a (17 et 18 novembre 2026)
+
+- **Code** : `main` = `8a59d514` (merge de `ab325c7d`, go de Thierry le
+  17 à 16:55), déployé le 17 à **17:04**.
+- **Migrations**, collées par Thierry sur la production le 18 :
+  `2026-11-13-charges-periode.sql` à **09:42** (deux fois par erreur de
+  fichier ; elle est rejouable), contrôle 10/10 ; puis
+  `2026-11-17-charges-avis-impot.sql` à 09:44, contrôle 2/2 (« 0 avis, 0 hors
+  regle »). Vérificateur : 0 écart, 0 cellule (aucune charge comptée en
+  production).
+- **Écran** `/charges` en production, mesuré dans la session de Thierry :
+  200, 7 requêtes, 681 octets de corps, 538 ms ; état vide correct.
+
+⚠ **ÉCART CONSIGNÉ : 16 h 38 entre le déploiement du code et la migration
+dont il a besoin.** Du 17 à 17:04 au 18 à 09:42, `/charges` lisait des
+colonnes absentes : erreur probable, **non mesurée**. Le passage de
+`cron-charges` du 18 à 02:17 a tourné **avant** la migration (carte 20 :
+4 requêtes, 0 externe, 0,9 s, travail 0 — le travail de ce cron ne compte que
+ses erreurs). Aucune charge en production : aucune donnée en jeu.
+
+**La leçon** (chef de file) : quand le code a besoin de la migration, on la
+colle dans les minutes qui suivent le déploiement — ou avant lui, quand elle
+est compatible avec le code en place, comme l'était `2026-11-13`.
+
+**Clôture** : sur le passage de `cron-charges` du 19 novembre à 02:17 — coût à
+la carte 20, et aucune erreur dans le journal de ce passage.
+
+### 14.14 Review de la consigne « période des factures d'énergie » (18 novembre 2026)
+
+Une review, sur `4fc0a811036c2693de38ba2c8cbff3bbf84dc13d` (arbre
+`/home/claude/hotesmart-lot3`, branche `charges-lot7-periode`, plage
+`9462a21697cf21f130cdab09f48a1f4b86b69b51..4fc0a811036c2693de38ba2c8cbff3bbf84dc13d`).
+⚠ **Le brief portait un SHA de base FAUX** (`9462a21697cf4af6…`, tapé de
+mémoire au-delà des 12 premiers caractères) : la review l'a refusé et a pris
+`4fc0a81^`, qui est la bonne base. La leçon : un SHA de brief se copie de
+`git rev-parse`, jamais se complète.
+
+Réponse de la review, recopiée mot pour mot :
+
+````
+```
+4fc0a811036c2693de38ba2c8cbff3bbf84dc13d
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges/lecture.js
+tests/charges-lecture.test.js
+```
+
+# Review du commit 4fc0a81 : un bloquant, quatre mineurs, aucun constat de sécurité
+
+**Arbre lu :** `/home/claude/hotesmart-lot3`, branche `charges-lot7-periode`, HEAD = `4fc0a811036c2693de38ba2c8cbff3bbf84dc13d`. L'arbre est propre : seul `node_modules` est non suivi.
+
+**Base de la plage :** le SHA du brief, `9462a21697cf4af69350b4dbad8306ee2f2ae6a2`, n'existe pas dans le dépôt (`git cat-file` répond « could not get object info »). J'ai donc pris `4fc0a81^`, soit `9462a21697cf21f130cdab09f48a1f4b86b69b51`. Les deux SHA ne partagent que leurs 12 premiers caractères.
+
+**Mesures faites :**
+- `tests/charges-lecture.test.js` : 11 verts sur 11.
+- Les tests `charges-*`, `cron-charges` et `recette-charges-script` : 202 verts sur 202.
+- Contre-épreuve : j'ai extrait l'arbre du commit dans un dossier temporaire avec `git archive`, puis remis le `lecture.js` d'avant. Résultat : 10 verts et 1 rouge, et le rouge est bien le nouveau test.
+
+## Sécurité
+
+Je n'ai trouvé aucun constat.
+- La ligne ajoutée est du texte fixe, sans aucune donnée insérée dedans.
+- Le risque d'injection depuis le document existait déjà : l'origine `email` est prévue en base, donc un tiers pourrait un jour envoyer un document. Le commit ne l'élargit pas de façon notable.
+- Ce que l'IA rend reste borné par la normalisation : dates entre 2000 et 2100, période de 366 jours au plus, catégories prises dans une liste fermée, entité jamais choisie par l'IA. Toute lecture passe ensuite en `a_verifier`, donc l'hôte la valide.
+- Le pire cas reste donc une période fausse dans la propre comptabilité de l'hôte, qu'il voit avant de valider. Il n'y a ni fuite ni effet sur un autre compte.
+
+## Bloquant
+
+### 1. Une union de contrats qui dépasse 366 jours est jetée sans rien dire, et le défaut de production revient
+`lib/charges/lecture.js:59`. Référence seulement : `lib/charges/regles.js:100`, `114` et `215`, `lib/charges.js:316` et `320`, `shared/charges-vue.js:82`.
+
+**Scénario.** Sur la facture réelle, l'électricité va du 2024-09-26 au 2025-09-25, soit 365 jours. **Il ne reste qu'un jour de marge** avant la borne de 366. Je l'ai mesuré avec `normaliserLecture` :
+- une union qui commence le 2024-09-25 est gardée ;
+- une union qui commence le 2024-09-24 donne `null` aux deux bornes ;
+- une union du 2024-09-20 au 2025-09-28 donne aussi `null`.
+
+Il suffit donc qu'un relevé de gaz commence deux jours avant celui de l'électricité, ou finisse deux jours après. La consigne pousse l'IA vers une valeur que le reste du système refuse par construction.
+
+**Ce qui se passe alors :**
+- `periodeSaisie` répond `periode_trop_longue` ;
+- `normaliserLecture` met `null` aux deux bornes ;
+- `lecture_ia` ne stocke que la lecture normalisée, donc la période lue par l'IA est perdue (le commentaire de tête de `lecture.js:8` annonce un `brut` dans le résultat, mais le code ne le rend pas) ;
+- tout le montant tombe sur le jour de la facture : c'est exactement le symptôme de production ;
+- si l'hôte tape lui-même cette union, l'écran la refuse : « une période plus longue se saisit en plusieurs factures ».
+
+Le même rejet touche aussi un seul contrat dont le relevé annuel dure plus de 366 jours, par exemple du 12/09/24 au 15/09/25. Cela existait avant, mais la nouvelle consigne rend ces périodes plus faciles à trouver pour l'IA.
+
+**Correction proposée :**
+- **(a) tout de suite :** ne plus jeter sans trace. Garder dans `lecture_ia` la période lue et le motif du refus, par exemple `periode_lue: { debut, fin, refus: 'periode_trop_longue' }`. La fiche dirait alors « période lue du … au …, plus d'un an : à saisir ».
+- **(b) décision de Thierry :** soit tolérer quelques jours de plus pour une régularisation, ce qui demande une migration de `charges_periode_ck` et de l'écran ; soit remplacer l'union par une autre règle dans la consigne.
+- **En recette :** lire la page 2 de la vraie facture EDF et calculer l'union de l'électricité et du gaz avant de conclure que le cas est réglé.
+
+## Mineurs
+
+### 2. Le mot « CONSOMMATION » a deux sens dans deux lignes voisines, et les montants peuvent en pâtir
+`lib/charges/lecture.js:59` et `:60`.
+
+À la ligne 60, déjà présente avant ce commit, « CONSOMMATION de la période » veut dire le total facturé de la période, par opposition au solde (spec §6 ter). La ligne 59 oppose désormais « CONSOMMATION » à l'abonnement.
+
+**Scénario.** Sur une régularisation qui détaille « Abonnement », « Consommation » et « Taxes », Haiku peut rendre le seul sous-total « Consommation » comme `montant_ttc`, sans l'abonnement ni les taxes. La charge serait alors sous-évaluée. Cela touche l'argent : à mesurer en recette.
+
+**Correction proposée.** À la ligne 60, écrire « le TOTAL facturé pour la période (abonnement, énergie et taxes compris), avant déduction des mensualités ». À la ligne 59, parler de « la période des RELEVÉS ».
+
+### 3. L'exemple de la consigne est la vraie facture de production
+`lib/charges/lecture.js:59`, et le test à la ligne 132.
+
+« Du 26/09/24 au 25/09/25 » est exactement la période réelle de la facture EDF. Deux conséquences :
+- **La recette ne prouve rien.** Relire cette facture et obtenir 2024-09-26 – 2025-09-25 ne montre pas que l'IA a lu la page 2, puisque la réponse est écrite dans la consigne.
+- **L'IA peut recopier l'exemple.** Sur une facture EDF où la période est illisible, Haiku risque de rendre ces dates-là. « N'INVENTE RIEN » limite ce risque sans l'annuler.
+
+**Correction proposée.** Prendre des dates neutres, par exemple « 14/03/24 donne 2024-03-14 », et ajuster l'expression régulière du test.
+
+### 4. Effet de bord possible sur l'échéancier d'énergie
+`lib/charges/lecture.js:59`.
+
+La ligne vise toute facture d'énergie, et un échéancier EDF rappelle souvent la consommation passée. L'IA pourrait alors donner à l'échéancier cette période passée plutôt que celle de ses mensualités, par exemple d'octobre 2025 à septembre 2026. Il n'y a pas d'effet sur l'argent aujourd'hui, puisque l'échéancier n'est compté nulle part. Il y en aura un au sous-lot 7b, qui fera des prévisions à partir des échéanciers.
+
+**Correction proposée.** Restreindre la ligne : « facture, régularisation ou avoir d'énergie (pas un échéancier) ».
+
+**Autres types de documents.** Les avis d'impôt et les factures ordinaires hors énergie ne sont pas concernés. Pour l'eau, l'abonnement facturé d'avance reste inclus dans le montant mais n'est pas compté dans la période. Le montant est donc étalé sur la seule période de consommation, ce qui est une petite approximation acceptable.
+
+### 5. Le test vérifie la présence de mots, pas un comportement
+`tests/charges-lecture.test.js:125-135`.
+
+Il mord, je l'ai mesuré, mais cela ne prouve pas grand-chose : il échoue forcément contre l'ancienne consigne, puisque ces mots n'y étaient pas. Ce qu'il ne garantit pas :
+- que la consigne est bien le texte envoyé à l'IA ;
+- que la période de la facture EDF traverse la normalisation ;
+- ce que devient une union de plus de 366 jours.
+
+**Correction proposée :**
+- Ajouter `assert.equal(c.demandes[0].messages[0].content[1].text, CONSIGNE)`.
+- Ajouter un test qui passe par `lireDocument` avec un client de test, sur une régularisation lue du 2024-09-26 au 2025-09-25 : la période doit être gardée.
+- Ajouter un second test avec une union de 370 jours, qui fige le comportement retenu au constat 1 : soit `null` avec un motif, soit la tolérance choisie par Thierry.
+
+## Coût : sans problème
+- La consigne passe de 2 812 à 3 491 caractères. La ligne ajoutée en fait 679, soit environ 200 jetons en entrée, ce qui est négligeable face aux pages du PDF.
+- La forme de la réponse ne change pas. Une réponse complète et indentée fait environ 900 caractères, soit 300 à 400 jetons : `MAX_TOKENS = 900` suffit.
+- Une réponse coupée par la limite finirait en `reponse_illisible`, donc en échec compté. Elle ne passerait pas en silence.
+
+## Pour la recette (ce n'est pas un défaut du commit)
+La facture EDF déjà en production ne sera pas relue. La lecture ne porte que sur les charges `a_lire`, il n'existe aucune action « relire », et renvoyer le même fichier créerait un doublon regroupé. Thierry devra saisir la période à la main ; 365 jours passent la borne. La recette de la consigne devra donc se faire sur un autre document.
+
+## Docs
+Le paragraphe de la spec (§14.3) et la ligne de la KB sont justes. Ils devront suivre si l'exemple ou la règle d'union changent.
+````
+
+**Confrontation, refaite par le fil** : `git diff --name-only 4fc0a81^
+4fc0a81` rend les 4 fichiers que la review recopie en tête ; ses constats
+portent sur `lib/charges/lecture.js` et `tests/charges-lecture.test.js`, dans
+la liste. Les fichiers cités hors plage (`lib/charges/regles.js`,
+`lib/charges.js`, `shared/charges-vue.js`) sont déclarés « référence
+seulement ». **Aucun constat de sécurité** : les cinq sont corrigés sans
+nouvelle review (règle « une review par commit ») :
+
+| | Constat | Correction |
+|---|---|---|
+| 1 | L'union des contrats fabriquait des périodes de plus de 366 jours, jetées en silence | La consigne prend la période du contrat d'électricité, plus l'union ; une période lue puis refusée garde sa trace (`lecture_ia.periode_refusee`, avec son motif). **La tolérance au-delà de 366 jours reste une question à Thierry** |
+| 2 | « CONSOMMATION » à double sens, risque de montant sous-évalué | Montants d'une régularisation : « le TOTAL facturé pour la période (abonnement, énergie et taxes compris), AVANT déduction des mensualités » ; période : « des RELEVÉS » |
+| 3 | L'exemple était la facture de production | Exemple neutre (14/03/24) ; le test refuse les dates de production |
+| 4 | Effet de bord possible sur l'échéancier | La règle vise facture, régularisation ou avoir — « pas un échéancier » |
+| 5 | Test de mots, pas de comportement | Le texte envoyé à l'IA est la consigne ; une régularisation sur 365 jours garde sa période ; sur 374 jours, elle tombe à `null` avec sa trace |
+
+### 14.15 Recette de la consigne « énergie » sur staging (19 novembre 2026)
+
+Staging à `f996d8db` (merge de `43150b3a`). Thierry recharge la vraie
+régularisation EDF du 7 octobre 2025 (PDF de 8 pages, électricité et gaz ;
+la consommation n'est écrite qu'en page 2 du détail). Lu par l'IA, **période
+déjà remplie à l'ouverture de la fiche** (Thierry n'y a pas touché) :
+
+| | Attendu | Lu |
+|---|---|---|
+| Type | régularisation | régularisation |
+| Période | 2024-09-26 → 2025-09-25 | **2024-09-26 → 2025-09-25** |
+| TTC | 5 856,48 € | 5 856,48 € (HT 4 932,24, TVA 924,24) |
+| Solde | 1 916,83 € | 1 916,83 € |
+
+L'exemple de la consigne est neutre (14/03/24, review constat 3) : la période
+lue ne vient pas de la consigne. **Recette conforme.** Question ouverte à
+Thierry, sans effet sur la mise en production : tolérer une période de plus de
+366 jours (relevé annuel de 367 à 370 jours) ou garder la borne d'un an.
 
 ## 12. Trace des reviews du lot 2
 

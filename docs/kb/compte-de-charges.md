@@ -133,6 +133,10 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   comptent « sans montant lu » et marquent tout le total « Estimation ». La
   fiche retire ses cases HT et TVA (confort : la règle vit au serveur). Le
   total HT inclut l'impôt.
+- **Facture d'énergie : la période est celle de la CONSOMMATION** (Thierry,
+  18 novembre 2026) : la consigne de lecture la fait chercher dans toutes les
+  pages (le détail EDF la porte en page 2), jamais celle de l'abonnement.
+  Spec §14.3.
 - **Lot 7a — une régularisation compte sa CONSOMMATION** ; le solde lu reste
   dans `lecture_ia.solde_ttc_cents`, montré à côté, jamais compté.
 - **Lot 7a — les compteurs restent ceux des DOCUMENTS, à leur date** : seuls
@@ -157,6 +161,15 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   des comptes.
 - **Lot 7a — après la migration 2026-11-13, ni 2026-11-10 ni 2026-11-09 ne
   se rejouent.**
+
+## Décidé pour plus tard (Thierry, 18 novembre 2026)
+
+- **Électricité et gaz séparés** : aujourd'hui une seule catégorie,
+  `energie` (« Eau, électricité, gaz »).
+- **Clé de répartition entre logements** : une facture commune à plusieurs
+  logements reste « sans logement » (compte dans le total de l'entité, pas
+  dans celui d'un logement). Rien n'est codé ; la clé reste à décider.
+Détail : spec §14.0.
 
 ## Dettes connues (review du lot 2, 10 novembre 2026)
 
