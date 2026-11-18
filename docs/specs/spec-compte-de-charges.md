@@ -1375,6 +1375,33 @@ dans l'ordre de la remise :
 
 **Recette 7a : conforme.**
 
+### 14.13 Mise en production du sous-lot 7a (17 et 18 novembre 2026)
+
+- **Code** : `main` = `8a59d514` (merge de `ab325c7d`, go de Thierry le
+  17 à 16:55), déployé le 17 à **17:04**.
+- **Migrations**, collées par Thierry sur la production le 18 :
+  `2026-11-13-charges-periode.sql` à **09:42** (deux fois par erreur de
+  fichier ; elle est rejouable), contrôle 10/10 ; puis
+  `2026-11-17-charges-avis-impot.sql` à 09:44, contrôle 2/2 (« 0 avis, 0 hors
+  regle »). Vérificateur : 0 écart, 0 cellule (aucune charge comptée en
+  production).
+- **Écran** `/charges` en production, mesuré dans la session de Thierry :
+  200, 7 requêtes, 681 octets de corps, 538 ms ; état vide correct.
+
+⚠ **ÉCART CONSIGNÉ : 16 h 38 entre le déploiement du code et la migration
+dont il a besoin.** Du 17 à 17:04 au 18 à 09:42, `/charges` lisait des
+colonnes absentes : erreur probable, **non mesurée**. Le passage de
+`cron-charges` du 18 à 02:17 a tourné **avant** la migration (carte 20 :
+4 requêtes, 0 externe, 0,9 s, travail 0 — le travail de ce cron ne compte que
+ses erreurs). Aucune charge en production : aucune donnée en jeu.
+
+**La leçon** (chef de file) : quand le code a besoin de la migration, on la
+colle dans les minutes qui suivent le déploiement — ou avant lui, quand elle
+est compatible avec le code en place, comme l'était `2026-11-13`.
+
+**Clôture** : sur le passage de `cron-charges` du 19 novembre à 02:17 — coût à
+la carte 20, et aucune erreur dans le journal de ce passage.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et
