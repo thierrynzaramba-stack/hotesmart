@@ -1164,6 +1164,34 @@ la fiche ? — qui ne dépend d'aucune limite interne. Contre-épreuve de la con
 400 caractères ajoutés dans l'appel le plus serré (`update`, à 1047/1400) font bien rougir.
 *Un vérificateur qui n'a rien lu doit échouer, pas se taire.*
 
+### La notification d'abord, le SMS en secours (PWA lot 3, 18 nov. 2026)
+
+Depuis le lot 3 PWA (décisions Q40 à Q42 de Thierry ; spec
+`docs/specs/spec-pwa-lot3-prestataires.md` §5-§6 ; KB `docs/kb/pwa.md` §13), les trois envois
+de `notifier-prestataire.js` — **attribué**, **à confirmer**, **« Vu » attendu** — partent
+d'abord en **notification** sur les téléphones qu'elle a abonnés depuis sa page
+(`push_abonnements_prestataires`, par profil), **à toute heure**.
+
+- **Le SMS ne part que si AUCUN appareil ne l'a reçue** : aucun abonné, tous morts (404/410, la
+  ligne est retirée), tous en échec, notifications non configurées, ou lecture des appareils en
+  panne. Et toujours sous ses deux conditions d'avant (`canalOuvert` : un numéro **et**
+  `notify_sms` non décoché). Décocher « SMS » reste donc un geste qui tient.
+- **L'e-mail ne change pas** : il part comme avant, notification reçue ou non.
+- **Le bilan** gagne `push: n` (le nombre d'appareils qui l'ont reçue) à côté de `sms` et
+  `email`. ⚠️ **Les compteurs des appelants lisent `aEtePrevenue(bilan)`**
+  (`lib/cleaning/bilan-notification.js`) : relire `sms || email` à la main ferait compter
+  « muette » une personne prévenue sur son téléphone — `relance-validation.js` et les deux
+  compteurs de `sync-menages-entite.js` le lisent.
+- **Le message** : titre « HôteSmart », texte court (jour et logement, jamais un voyageur), et
+  le toucher ouvre **sa page sans jeton** (`/apps/menages/public.html`, constante
+  `PAGE_PRESTATAIRE`). ⚠️ **L'expéditeur est la garantie** : sur iPhone 18.4+, le système ouvre
+  le message sans passer par son service worker. Un ménage = une notification à l'écran
+  (`tag = menage-<bien>-<départ>`) ; la suivante remplace la précédente **et sonne**.
+- ⚠️ **`lib/push/envoyer.js` est chargé à la demande**, pas en tête : ce module est requis par
+  l'API de la page de la prestataire, dont le démarrage à froid ne paie pas `web-push`.
+- **Éprouvé** : `tests/cleaning-notifier.test.js` avec le **vrai** chemin d'envoi (clés VAPID
+  réelles, message chiffré ; seul le service de push est simulé).
+
 ### Le nom de famille est obligatoire (point 4, 15 sept. 2026)
 
 **Pourquoi, et ce n'est pas de l'état civil.** Un prénom seul ne **désigne** personne dès qu'il y a

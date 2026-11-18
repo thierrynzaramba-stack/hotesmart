@@ -2684,3 +2684,46 @@ Aucun constat de sécurité : correction sans nouvelle review.
 
 L'empreinte de `shared/pwa/push-sw.js` change avec ces correctifs : elle est
 reportée dans les deux service workers (`?v=4b018acc0857`).
+
+### 13.7 Étape 3 — l'envoi (18 novembre 2026)
+
+`lib/push/envoyer.js` gagne `envoyerAPrestataire({ profilId, message })`, jumeau
+d'`envoyerAPersonne` : les deux passent par le même chemin
+(`envoyerAuxAbonnements` : lire les abonnements, envoyer, retirer les morts,
+dater les succès), sur l'une ou l'autre table. ⚠ **Sans clés, aucune lecture** :
+il rend `cles_absentes` tout de suite.
+
+`lib/cleaning/notifier-prestataire.js` applique la règle d'envoi (spec §6) aux
+trois envois — attribué, à confirmer, « Vu » attendu :
+
+1. la notification, à tous ses appareils abonnés, à toute heure (Q42) ;
+2. le SMS **seulement si aucun appareil ne l'a reçue** (Q41), sous ses deux
+   conditions d'avant (numéro, `notify_sms`) ;
+3. l'e-mail inchangé.
+
+Le bilan dit `push: n`. Détail, textes et pièges : `docs/kb/menage.md`, « La
+notification d'abord, le SMS en secours ».
+
+- ⚠ **Ce que l'étape 2 avait laissé à l'expéditeur (§13.6, point 3) est tenu
+  ICI** : le `navigate` est la constante `/apps/menages/public.html` — sous la
+  portée de son appli, jamais le repli `/dashboard`, ni `token` ni `apercu` — et
+  un test le vérifie sur les quatre messages (attribué, à confirmer, « Vu » la
+  veille et le jour même), ainsi que l'absence du jeton et de tout lien.
+- **Textes** (spec §5) : « Nouveau ménage : {jour} - {bien}. » ; « Ménage à
+  confirmer : {jour} - {bien}. Répondez avant le {échéance}. » ; « Ménage du
+  {jour} à {bien} : ouvrez votre page et touchez Vu. » (+ « C’est aujourd’hui. »
+  le jour même). Les SMS gardent leurs textes, au mot près.
+- **Un ménage = une notification à l'écran** (`tag`), et la remplaçante **sonne**
+  (`renotify`) : chacune demande quelque chose à la personne.
+- **Coût** : par envoi, une lecture des abonnements (aucune sans clés), un appel
+  au service de push par appareil (5 s au plus chacun, compté par le compteur
+  du cron), une écriture par appareil. Le SMS évité, lui, ne coûte plus rien à
+  l'hôte.
+
+**Tests** : `tests/cleaning-notifier.test.js` (+10, le vrai chemin d'envoi ;
+seul le service de push est simulé), `tests/menages-valider.test.js` (+1 : une
+relance reçue par notification n'est pas « muette »). Neuf mutations, toutes
+attrapées : le SMS envoyé malgré la notification, le repli `/dashboard`, la
+remplaçante muette, les échecs comptés comme reçus, la lecture sans clés, la
+règle « prévenue » qui oublie `push`, `web-push` chargé en tête, le `tag`
+retiré, les appareils lus sur le compte au lieu du profil.

@@ -23,15 +23,32 @@ function preparer ({ profil = { first_name: 'Marie', phone: '+33600000000',
                                 email: 'marie@x.fr', active: true, pwa_token: 'jeton-marie' },
                      erreurProfil = null,
                      smsRend = { success: true }, emailRend = { ok: true },
-                     smsJette = false, emailJette = false } = {}) {
-  const etat = { sms: [], emails: [], filtres: null }
+                     smsJette = false, emailJette = false,
+                     // Les appareils abonnés (PWA lot 3), dans le double de la
+                     // table `push_abonnements_prestataires` : filtres HONORÉS.
+                     abos = [], erreurAbos = null } = {}) {
+  const etat = { sms: [], emails: [], filtres: null, abos: abos.map(x => ({ ...x })), lecturesAbos: [] }
   const client = {
-    from () {
+    from (table) {
       const a = { f: {} }
+      const filtrer = (l) => Object.entries(a.f).every(([c, v]) => String(l[c]) === String(v))
+      const rep = () => {
+        if (erreurAbos) return { data: null, error: erreurAbos }
+        if (a.delete) { etat.abos = etat.abos.filter(l => !filtrer(l)); return { data: null, error: null } }
+        if (a.update) { etat.abos.filter(filtrer).forEach(l => Object.assign(l, a.update)); return { data: null, error: null } }
+        etat.lecturesAbos.push({ ...a.f })
+        return { data: etat.abos.filter(filtrer).map(l => ({ ...l })), error: null }
+      }
       const chain = {
         select () { return chain },
         eq (c, v) { a.f[c] = v; return chain },
-        maybeSingle () { etat.filtres = a.f; return Promise.resolve({ data: profil, error: erreurProfil }) }
+        update (v) { a.update = v; return chain },
+        delete () { a.delete = true; return chain },
+        maybeSingle () { etat.filtres = a.f; return Promise.resolve({ data: profil, error: erreurProfil }) },
+        then (ok, ko) {
+          assert.strictEqual(table, 'push_abonnements_prestataires', `lecture inattendue de ${table}`)
+          return Promise.resolve(rep()).then(ok, ko)
+        }
       }
       return chain
     }
@@ -41,7 +58,8 @@ function preparer ({ profil = { first_name: 'Marie', phone: '+33600000000',
   require.cache[abs] = m
 
   // ⚠ Cache vidé AVANT la pose des doubles.
-  for (const mod of ['../lib/cleaning/notifier-prestataire', '../api/sms', '../lib/platform-notify']) {
+  for (const mod of ['../lib/cleaning/notifier-prestataire', '../api/sms', '../lib/platform-notify',
+                     '../lib/push/envoyer', '../lib/push/abonnements-prestataires']) {
     try { delete require.cache[require.resolve(mod)] } catch {}
   }
   const absSms = require.resolve(path.join(__dirname, '..', 'api/sms.js'))
@@ -121,7 +139,7 @@ test('les DEUX décochés : rien ne part, et le bilan ne le cache pas', async ()
     first_name: 'Marie', phone: '+33600000000', email: 'marie@x.fr',
     active: true, pwa_token: 'j', notify_sms: false, notify_email: false } })
   const r = await mod.notifierProposition({ ...BASE, expireLe: '2026-09-11T18:00:00Z' })
-  assert.deepStrictEqual(r, { sms: false, email: false })
+  assert.deepStrictEqual(r, { push: 0, sms: false, email: false })
   assert.strictEqual(etat.sms.length + etat.emails.length, 0)
 })
 
@@ -131,7 +149,7 @@ test('coché SANS coordonnée : rien à envoyer, et rien ne casse', async () => 
     first_name: 'Marie', phone: null, email: null,
     active: true, pwa_token: 'j', notify_sms: true, notify_email: true } })
   const r = await mod.notifierAssignation(BASE)
-  assert.deepStrictEqual(r, { sms: false, email: false })
+  assert.deepStrictEqual(r, { push: 0, sms: false, email: false })
   assert.strictEqual(etat.sms.length + etat.emails.length, 0)
 })
 
@@ -145,7 +163,7 @@ test('un champ ABSENT vaut OUI, jamais non', async () => {
     first_name: 'Marie', phone: '+33600000000', email: 'marie@x.fr',
     active: true, pwa_token: 'j' } })
   const r = await mod.notifierAssignation(BASE)
-  assert.deepStrictEqual(r, { sms: true, email: true })
+  assert.deepStrictEqual(r, { push: 0, sms: true, email: true })
   assert.strictEqual(etat.sms.length, 1)
   assert.strictEqual(etat.emails.length, 1)
 })
@@ -180,7 +198,7 @@ test('la personne est cherchée SUR LE COMPTE, et en accès `lien`', async () =>
 test('un profil DÉSACTIVÉ n\'est pas notifié', async () => {
   const { etat, mod } = preparer({ profil: { first_name: 'M', phone: '+336', active: false } })
   const r = await mod.notifierAssignation(BASE)
-  assert.deepStrictEqual(r, { sms: false, email: false })
+  assert.deepStrictEqual(r, { push: 0, sms: false, email: false })
   assert.strictEqual(etat.sms.length, 0)
 })
 
@@ -213,19 +231,19 @@ test('un email qui ÉCHOUE rend `email: false`', async () => {
 test('quand tout part, le bilan le dit', async () => {
   const { mod } = preparer({})
   const r = await mod.notifierAssignation(BASE)
-  assert.deepStrictEqual(r, { sms: true, email: true })
+  assert.deepStrictEqual(r, { push: 0, sms: true, email: true })
 })
 
 test('une exception reste absorbée : l\'assignation est déjà écrite', async () => {
   const { mod } = preparer({ smsJette: true, emailJette: true })
   const r = await mod.notifierAssignation(BASE)
-  assert.deepStrictEqual(r, { sms: false, email: false })
+  assert.deepStrictEqual(r, { push: 0, sms: false, email: false })
 })
 
 test('sans téléphone ni email, rien n\'est promis', async () => {
   const { mod } = preparer({ profil: { first_name: 'M', active: true, pwa_token: 't' } })
   const r = await mod.notifierAssignation(BASE)
-  assert.deepStrictEqual(r, { sms: false, email: false })
+  assert.deepStrictEqual(r, { push: 0, sms: false, email: false })
 })
 
 // ─── Le contenu du message ─────────────────────────────────────────────────
@@ -295,5 +313,182 @@ test('la date ne bascule pas d\'un jour selon le fuseau', async () => {
     }
   } finally {
     if (avant === undefined) delete process.env.TZ; else process.env.TZ = avant
+  }
+})
+
+// ─── PWA lot 3 : la notification d'abord, le SMS en secours ────────────────
+// Spec docs/specs/spec-pwa-lot3-prestataires.md §5-§6 · KB docs/kb/pwa.md §13.
+// ⚠ LE VRAI CHEMIN D'ENVOI : `lib/push/envoyer.js` et
+// `lib/push/abonnements-prestataires.js` tournent pour de bon — clés VAPID
+// réelles, message réellement chiffré. Seul le SERVICE DE PUSH est simulé
+// (`globalThis.fetch`), qui rend le statut qu'on lui dit.
+
+const nodeCrypto = require('node:crypto')
+const webpush = require('web-push')
+const VAPID = webpush.generateVAPIDKeys()
+
+function appareil (id, profil = MARIE) {
+  const ecdh = nodeCrypto.createECDH('prime256v1')
+  ecdh.generateKeys()
+  return { id, profil_id: profil, compte_id: U, endpoint: `https://fcm.googleapis.com/fcm/send/${id}`,
+           cle_p256dh: ecdh.getPublicKey().toString('base64url'), cle_auth: nodeCrypto.randomBytes(16).toString('base64url') }
+}
+
+// Les clés posées, le service de push simulé, et le message capturé AVANT
+// chiffrement — par un appel TRAVERSANT : la vraie fonction tourne ensuite.
+async function avecPush ({ statut = 201, sansCles = false } = {}, fn) {
+  const avant = { pub: process.env.PUSH_VAPID_PUBLIC, priv: process.env.PUSH_VAPID_PRIVATE, fetch: globalThis.fetch }
+  if (sansCles) { delete process.env.PUSH_VAPID_PUBLIC; delete process.env.PUSH_VAPID_PRIVATE } else {
+    process.env.PUSH_VAPID_PUBLIC = VAPID.publicKey
+    process.env.PUSH_VAPID_PRIVATE = VAPID.privateKey
+  }
+  const service = []
+  globalThis.fetch = async (url) => { service.push(String(url)); return { status: typeof statut === 'function' ? statut(String(url)) : statut, body: null } }
+  try {
+    return await fn({ service, capturer (envoi) {
+      const messages = []
+      const reel = envoi.envoyerAPrestataire
+      envoi.envoyerAPrestataire = async (o) => { messages.push(o); return reel(o) }
+      return messages
+    } })
+  } finally {
+    globalThis.fetch = avant.fetch
+    if (avant.pub === undefined) delete process.env.PUSH_VAPID_PUBLIC; else process.env.PUSH_VAPID_PUBLIC = avant.pub
+    if (avant.priv === undefined) delete process.env.PUSH_VAPID_PRIVATE; else process.env.PUSH_VAPID_PRIVATE = avant.priv
+  }
+}
+
+test('LE TEST QUI COMPTE (lot 3) : un appareil l’a reçue — PAS de SMS, l’e-mail inchangé', async () => {
+  await avecPush({}, async ({ service }) => {
+    const { etat, mod } = preparer({ abos: [appareil('a1')] })
+    const r = await mod.notifierAssignation(BASE)
+    assert.deepStrictEqual(r, { push: 1, sms: false, email: true })
+    assert.strictEqual(etat.sms.length, 0, 'le SMS ne part pas quand la notification est reçue')
+    assert.strictEqual(etat.emails.length, 1, 'l’e-mail part comme avant')
+    assert.deepStrictEqual(service, ['https://fcm.googleapis.com/fcm/send/a1'])
+    assert.ok(etat.abos[0].dernier_envoi_le, 'l’envoi est daté')
+  })
+})
+
+test('lot 3 : AUCUN appareil ne l’a reçue — le SMS part, pour chacune des trois raisons', async () => {
+  // Aucun abonné ; tous morts (410, la ligne part) ; tous en échec (500).
+  for (const [abos, statut, raison] of [[[], 201, 'aucun abonné'], [[appareil('m1')], 410, 'mort'], [[appareil('e1')], 500, 'échec']]) {
+    await avecPush({ statut }, async () => {
+      const { etat, mod } = preparer({ abos })
+      const r = await mod.notifierAssignation(BASE)
+      assert.deepStrictEqual(r, { push: 0, sms: true, email: true }, raison)
+      assert.strictEqual(etat.sms.length, 1, `le SMS part (${raison})`)
+      if (statut === 410) assert.strictEqual(etat.abos.length, 0, 'l’abonnement mort est retiré')
+      if (statut === 500) assert.match(etat.abos[0].dernier_echec, /500|refus/, 'l’échec est noté')
+    })
+  }
+})
+
+test('lot 3 : deux appareils, un mort et un vivant — reçue, donc pas de SMS', async () => {
+  await avecPush({ statut: (u) => (u.endsWith('/mort') ? 410 : 201) }, async ({ service }) => {
+    const { etat, mod } = preparer({ abos: [appareil('mort'), appareil('vivant')] })
+    const r = await mod.notifierAssignation(BASE)
+    assert.strictEqual(r.push, 1)
+    assert.strictEqual(etat.sms.length, 0)
+    assert.strictEqual(service.length, 2)
+    assert.deepStrictEqual(etat.abos.map(l => l.id), ['vivant'])
+  })
+})
+
+test('lot 3 : sans clés de notification, aucune lecture des appareils, et le SMS part', async () => {
+  await avecPush({ sansCles: true }, async ({ service }) => {
+    const { etat, mod } = preparer({ abos: [appareil('a1')] })
+    const r = await mod.notifierAssignation(BASE)
+    assert.deepStrictEqual(r, { push: 0, sms: true, email: true })
+    assert.deepStrictEqual(etat.lecturesAbos, [], 'pas de lecture inutile')
+    assert.deepStrictEqual(service, [])
+  })
+})
+
+test('lot 3 : la lecture des appareils en panne ne fait pas taire le SMS', async () => {
+  await avecPush({}, async () => {
+    const { etat, mod } = preparer({ abos: [appareil('a1')], erreurAbos: { message: 'panne' } })
+    const r = await mod.notifierAssignation(BASE)
+    assert.deepStrictEqual(r, { push: 0, sms: true, email: true })
+    assert.strictEqual(etat.sms.length, 1)
+  })
+})
+
+test('lot 3 : seuls SES appareils sont lus — par son profil, jamais ceux d’une autre', async () => {
+  await avecPush({}, async ({ service }) => {
+    const { etat, mod } = preparer({ abos: [appareil('autre', 'p-autre'), appareil('sien')] })
+    const r = await mod.notifierAssignation(BASE)
+    assert.strictEqual(r.push, 1)
+    assert.deepStrictEqual(etat.lecturesAbos, [{ profil_id: MARIE }])
+    assert.deepStrictEqual(service, ['https://fcm.googleapis.com/fcm/send/sien'])
+  })
+})
+
+test('lot 3 : SMS décoché par l’hôte — rien ne change quand aucun appareil ne l’a reçue (pas de SMS)', async () => {
+  await avecPush({}, async () => {
+    const { etat, mod } = preparer({ profil: { first_name: 'Marie', phone: '+33600000000', email: 'marie@x.fr',
+                                               active: true, pwa_token: 'j', notify_sms: false } })
+    const r = await mod.notifierAssignation(BASE)
+    assert.deepStrictEqual(r, { push: 0, sms: false, email: true })
+    assert.strictEqual(etat.sms.length, 0)
+  })
+})
+
+test('lot 3 : un profil désactivé ou hors du compte — aucune notification, aucune lecture des appareils', async () => {
+  await avecPush({}, async ({ service }) => {
+    const { etat, mod } = preparer({ profil: { first_name: 'M', phone: '+33600000000', active: false }, abos: [appareil('a1')] })
+    assert.deepStrictEqual(await mod.notifierAssignation(BASE), { push: 0, sms: false, email: false })
+    assert.deepStrictEqual(etat.lecturesAbos, [])
+    assert.deepStrictEqual(service, [])
+  })
+})
+
+test('LE TEST QUI COMPTE (lot 3) : le message ouvre SA page sans jeton, ne nomme aucun voyageur, et dit le bon geste', async () => {
+  // ⚠ L'EXPÉDITEUR EST LA GARANTIE (review de l'étape 2, constat 3) : sur iPhone
+  // 18.4+, le système ouvre le message déclaratif sans passer par son service
+  // worker. Le chemin doit donc être, ICI, sous /apps/menages/, sans jeton.
+  const cas = [
+    ['notifierAssignation', {}, 'Nouveau ménage : samedi 12 septembre - La bulle.'],
+    ['notifierProposition', { expireLe: '2026-09-11T16:00:00Z' }, 'Ménage à confirmer : samedi 12 septembre - La bulle. Répondez avant le vendredi 11 septembre à 18:00.'],
+    ['notifierValidationAttendue', {}, 'Ménage du samedi 12 septembre à La bulle : ouvrez votre page et touchez Vu.'],
+    ['notifierValidationAttendue', { leJour: true }, 'Ménage du samedi 12 septembre à La bulle : ouvrez votre page et touchez Vu. C’est aujourd’hui.']
+  ]
+  for (const [fn, extra, corps] of cas) {
+    await avecPush({}, async ({ capturer }) => {
+      const { mod } = preparer({ abos: [appareil('a1')] })
+      const messages = capturer(require('../lib/push/envoyer'))
+      const r = await mod[fn]({ ...BASE, ...extra })
+      assert.strictEqual(r.push, 1, fn)
+      assert.strictEqual(messages.length, 1)
+      assert.strictEqual(messages[0].profilId, MARIE)
+      const n = messages[0].message.notification
+      assert.strictEqual(messages[0].message.web_push, 8030)
+      assert.strictEqual(n.title, 'HôteSmart')
+      assert.strictEqual(n.body, corps, fn)
+      assert.strictEqual(n.navigate, '/apps/menages/public.html', 'SA page, sans paramètre')
+      assert.strictEqual(n.tag, 'menage-209413-2026-09-12', 'un ménage = une notification à l’écran')
+      assert.strictEqual(n.renotify, true, 'la remplaçante sonne quand même')
+      const brut = JSON.stringify(messages[0].message)
+      for (const interdit of ['jeton-marie', 'token', 'apercu', 'hotesmart.vercel.app', '/dashboard']) {
+        assert.ok(!brut.includes(interdit), `${fn} : « ${interdit} » dans la notification`)
+      }
+    })
+  }
+})
+
+test('lot 3 : chaque appelant compte une personne prévenue PAR NOTIFICATION — jamais « muette »', () => {
+  const { aEtePrevenue } = require('../lib/cleaning/bilan-notification')
+  assert.strictEqual(aEtePrevenue({ push: 1, sms: false, email: false }), true)
+  assert.strictEqual(aEtePrevenue({ push: 0, sms: true, email: false }), true)
+  assert.strictEqual(aEtePrevenue({ push: 0, sms: false, email: true }), true)
+  assert.strictEqual(aEtePrevenue({ push: 0, sms: false, email: false }), false)
+  assert.strictEqual(aEtePrevenue(null), false)
+  assert.strictEqual(aEtePrevenue({ sms: 'oui' }), false, 'seul `true` compte')
+  // Et les trois compteurs le lisent : aucun ne relit `sms`/`email` à la main.
+  const fs = require('node:fs')
+  for (const f of ['lib/cleaning/sync-menages-entite.js', 'lib/cleaning/relance-validation.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    assert.ok(src.includes("require('./bilan-notification')"), f)
+    assert.ok(!/notif\.sms \|\| notif\.email|!notif\.sms && !notif\.email/.test(src), `${f} relit sms/email à la main`)
   }
 })
