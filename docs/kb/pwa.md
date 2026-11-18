@@ -2498,3 +2498,105 @@ review par commit »).
    (profil_id, endpoint) le couvre.
 9. **Dépendance** — la spec vit sur `pwa-lot-3-spec` (PR #26) : déclarée dans
    la remise au chef de file.
+
+### 13.4 Étape 2 — le service worker et la page de la prestataire (18 novembre 2026)
+
+**Le code commun des deux service workers** : `shared/pwa/push-sw.js`. La
+lecture du message, la règle « afficher toujours », la règle du chemin et le
+réabonnement vivaient dans le service worker de l'hôte (lot 2a) ; la
+prestataire en a besoin à l'identique, et deux copies divergent. Chaque
+service worker le charge par `importScripts`, puis appelle
+`installerNotifications({ accueil, portee, icone })` :
+
+| | hôte (`shared/pwa/service-worker.js`) | prestataire (`apps/menages/sw.js`) |
+|---|---|---|
+| portée | `/` | `/apps/menages/` |
+| accueil (chemin refusé) | `/dashboard` | `/apps/menages/public.html` |
+| icône | `/shared/pwa/icone-192.png` | `/apps/menages/icons/icon-192.png` |
+
+- ⚠ **La portée est une règle de plus que le lot 2** : un toucher n'ouvre jamais
+  une page hors de la portée de l'appli qui affiche, et ne reprend jamais une
+  fenêtre hors de sa portée. Sans elle, l'appli de la prestataire pouvait
+  détourner une fenêtre de l'hôte du même navigateur (`clients.matchAll` rend
+  toutes les fenêtres de l'origine). Pour l'hôte, portée `/` : rien ne change.
+- ⚠ **L'accueil de la prestataire est sa page SANS jeton** : l'appli installée
+  a le sien, rangé à sa première ouverture. Le jeton n'entre jamais dans un
+  message ni dans une adresse ouverte au toucher.
+- ⚠ **Versionné par son empreinte** : chaque service worker charge
+  `/shared/pwa/push-sw.js?v=<12 hexa du sha256 du fichier>`. Modifier le
+  fichier sans reporter l'empreinte dans les deux service workers est un rouge
+  (`tests/pwa-presta-sw.test.js`) — et c'est ce report qui change leurs
+  octets, donc qui les fait se réinstaller.
+- `CACHE_VERSION` de la prestataire bumpée : `hotesmart-clean-v7-notifications`.
+- Le banc des service workers (`tests/outils/sw-banc.js`) sait exécuter
+  `importScripts` (le vrai fichier, ou un corps muté pour une contre-épreuve).
+  Les contre-épreuves push du lot 2 (`tests/pwa-service-worker.test.js`) mutent
+  désormais `push-sw.js`.
+
+**Le module de la page** : `shared/push-prestataire.js`, jumeau de
+`shared/push-appareil.js` (l'hôte), dont il importe les primitives (support,
+iPhone, plateforme, empreinte, clé — `enOctets` et `memeCle` y sont exportées
+pour lui, sans autre changement). Trois écarts, qui tiennent à la personne :
+
+- pas de session : le lien est son identité, l'API est celle de sa page
+  (`push_abonner`, `push_retirer`, étape 1) ;
+- l'état connu du serveur arrive avec le GET de sa page : **lire l'état ne
+  touche jamais le réseau** ;
+- ⚠ **l'enregistrement est celui de SON appli** (portée `/apps/menages/`).
+  `getRegistration` et `ready` rendent la portée la plus proche : sur un
+  navigateur qui porte aussi l'appli de l'hôte, ce serait la sienne. On filtre
+  sur la portée exacte, et l'on attend au plus 10 s que son service worker soit
+  actif (première ouverture).
+
+États rendus par `etatNotifications(push)` : `indisponible` (pas de clés, ou
+navigateur incapable — pas de carte), `iphone_hors_appli`, `bloquee`,
+`inconnu` (le serveur n'a pas pu lire ses appareils), `abonne` (CET appareil
+est dans la liste du serveur pour ce lien), `a_activer`. ⚠ « Abonnée » est ce
+que le **serveur** sait : après un nouveau lien, le navigateur garde son
+abonnement, mais la liste est vide — elle lit « à activer ».
+
+- **S'abonner** : contrôles sans attente, puis **la permission en première
+  attente** (iPhone), puis son service worker, puis l'abonnement, puis le
+  serveur.
+- **Se désabonner** retire CE lien au serveur et **laisse l'abonnement du
+  navigateur** : sur Android, il peut servir l'appli d'un autre hôte de la même
+  prestataire (même portée, spec §12).
+- **Renouvellement** (`pushsubscriptionchange`) : à l'ouverture de sa page, si
+  une adresse **déjà envoyée depuis cet appareil** (les cinq dernières, en
+  stockage local) est encore connue du serveur et que l'adresse actuelle ne
+  l'est pas, l'actuelle est renvoyée. Une **purge** (nouveau lien, personne
+  désactivée) vide la liste : on ne réabonne jamais derrière l'hôte.
+
+**La page** (`apps/menages/public.html`) : une carte « Notifications » **en bas
+de sa page**, après la liste des trente jours, **hors** de `#dispo-contenu`
+(elle ne dépend pas de la sonde des disponibilités). Cachée tant que l'état
+n'est pas connu. Le module se charge **à la demande** (import dynamique), et
+seulement si le site a ses clés : hors ligne, son absence cache la carte et ne
+casse rien d'autre. Un bouton par état : « Recevoir les notifications sur ce
+téléphone » (`a_activer`), « Ne plus recevoir sur ce téléphone » (`abonne`).
+Bloquée : le chemin exact de l'appareil pour les rouvrir (même règle que l'hôte,
+lot 2 Q21). iPhone dans Safari : l'installer d'abord (spec §3.2).
+
+- ⚠ **Le clic appelle l'abonnement sans aucune attente avant** : la carte n'est
+  visible qu'une fois le module chargé, et le geste part directement du clic.
+- ⚠ **En aperçu de l'hôte** : ni module, ni carte, ni geste. Trois gardes
+  indépendantes : le script ne peint pas (`APERCU`), la feuille la cache
+  (`.apercu #carte-notifications`), et le serveur refuse (403, étape 1). Le
+  contrôle `APERCU` du branchement des boutons est un double : sans module
+  chargé, un clic ne fait déjà rien (sa mutation reste verte, c'est attendu).
+
+**Mesure (case 8)** : aucun appel d'API ajouté (l'état vient du GET de la
+page). Deux fichiers statiques de plus, chargés **après** l'affichage et
+seulement si le site a ses clés : `shared/push-prestataire.js` (9 128 octets,
+3 629 gzip) et `shared/push-appareil.js` (11 235, 4 429 gzip), revalidés comme
+les autres modules partagés (non versionnés). Le document `public.html` passe
+de 326 847 à 334 659 octets décodés. Le service worker charge en plus
+`shared/pwa/push-sw.js` (5 924 octets, 2 482 gzip) à son installation, et plus
+ensuite. À remesurer sur staging à la recette.
+
+**Tests** : `tests/push-prestataire.test.js` (13, le module avec les vraies
+primitives de l'hôte et un navigateur factice), `tests/pwa-presta-sw.test.js`
+(9, les deux service workers exécutés avec leur import),
+`tests/pwa-presta-notifications-dom.test.js` (6, la vraie page dans jsdom,
+seul le module remplacé par un double). Treize mutations des gardes, toutes
+attrapées sauf le double `APERCU` décrit plus haut.

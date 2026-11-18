@@ -91,13 +91,16 @@ export async function empreinte (endpoint) {
   return [...new Uint8Array(h)].map(o => o.toString(16).padStart(2, '0')).join('').slice(0, 16)
 }
 
-function enOctets (base64url) {
+// ⚠ EXPORTÉES DEPUIS LE LOT 3 : la page de la prestataire
+// (shared/push-prestataire.js) en a besoin à l'identique — deux copies
+// divergent. Rien d'autre n'a changé.
+export function enOctets (base64url) {
   const b = String(base64url).replace(/-/g, '+').replace(/_/g, '/')
   const brut = atob(b + '='.repeat((4 - (b.length % 4)) % 4))
   return Uint8Array.from(brut, c => c.charCodeAt(0))
 }
 
-function memeCle (sub, octets) {
+export function memeCle (sub, octets) {
   const k = sub && sub.options && sub.options.applicationServerKey
   if (!k) return false
   const a = new Uint8Array(k)

@@ -10,7 +10,11 @@
 // version à la main), les en-têtes `Vary`. La recette sur téléphone couvre le
 // reste — docs/kb/pwa.md §Recette.
 const vm = require('node:vm')
+const fs = require('node:fs')
+const path = require('node:path')
 const { serviceWorker } = require('../../lib/pwa')
+
+const RACINE = path.join(__dirname, '..', '..')
 
 const ORIGINE = 'https://hotesmart.test'
 
@@ -91,7 +95,12 @@ function reponse ({ statut = 200, type = 'basic', entetes = {}, corps = '' } = {
 
 // Charge une version du service worker. `reseau(requete)` rend une description
 // de réponse, ou LÈVE pour simuler l'absence de réseau.
-function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerStockage(), reseau, fenetres = [] }) {
+// `importes` : le corps à servir pour un script chargé par `importScripts`,
+// par chemin (« /shared/pwa/push-sw.js ») — pour une contre-épreuve sur ce
+// fichier-là. Par défaut, le VRAI fichier du dépôt ; un fichier absent lève,
+// comme `importScripts` dans un vrai navigateur (et l'installation échoue).
+// `portee` : l'adresse du service worker, donc sa portée par défaut.
+function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerStockage(), reseau, fenetres = [], importes = {}, adresse = '/sw.js' }) {
   const code = source !== undefined ? source : serviceWorker(version)
   const ecouteurs = {}
   let precharge = false
@@ -101,6 +110,8 @@ function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerSt
   const notifications = []
   const ouvertures = []
   const reabonnements = []
+  // Les scripts chargés par `importScripts`, adresse complète (paramètres compris).
+  const scriptsImportes = []
 
   class RequeteSW extends Request {
     constructor (entree, init) {
@@ -124,7 +135,7 @@ function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerSt
     Promise,
     fetch: fetchFaux,
     caches: stockage.api,
-    location: new URL('/sw.js', ORIGINE),
+    location: new URL(adresse, ORIGINE),
     registration: {
       navigationPreload: { async enable () { precharge = true } },
       async showNotification (titre, options = {}) { notifications.push({ titre, options }) },
@@ -139,7 +150,22 @@ function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerSt
     addEventListener (type, f) { (ecouteurs[type] = ecouteurs[type] || []).push(f) }
   }
   contexte.self = contexte
-  vm.runInNewContext(code, contexte, { filename: 'service-worker.js' })
+  // ⚠ UN SEUL CONTEXTE POUR LE SERVICE WORKER ET SES IMPORTS, comme dans un
+  // navigateur : un script importé déclare ses fonctions dans la même portée
+  // globale que le service worker qui l'importe.
+  contexte.importScripts = (...urls) => {
+    for (const brut of urls) {
+      const u = new URL(brut, contexte.location.href)
+      scriptsImportes.push(u.pathname + u.search)
+      if (u.origin !== ORIGINE) throw new Error('importScripts hors du site : ' + u.href)
+      const corps = Object.prototype.hasOwnProperty.call(importes, u.pathname)
+        ? importes[u.pathname]
+        : fs.readFileSync(path.join(RACINE, u.pathname), 'utf8')
+      vm.runInContext(corps, contexte, { filename: u.pathname })
+    }
+  }
+  vm.createContext(contexte)
+  vm.runInContext(code, contexte, { filename: 'service-worker.js' })
 
   function declencher (type, extra = {}) {
     const attentes = []
@@ -209,6 +235,7 @@ function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerSt
     notifications,
     ouvertures,
     reabonnements,
+    scriptsImportes,
     ecouteurs: () => Object.keys(ecouteurs).sort(),
     get prechargeActif () { return precharge }
   }
