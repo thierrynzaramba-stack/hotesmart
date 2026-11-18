@@ -120,7 +120,7 @@ self.addEventListener('fetch', (event) => {
 // page SANS jeton : l'appli installée a déjà le sien, rangé à sa première
 // ouverture — le jeton n'entre jamais dans un message ni dans une adresse
 // ouverte au toucher (spec du lot 3, §7.4).
-importScripts('/shared/pwa/push-sw.js?v=988bbfc0bcc1');
+importScripts('/shared/pwa/push-sw.js?v=4b018acc0857');
 installerNotifications({
   accueil: '/apps/menages/public.html',
   portee: '/apps/menages/',

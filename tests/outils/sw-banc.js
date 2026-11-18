@@ -99,7 +99,11 @@ function reponse ({ statut = 200, type = 'basic', entetes = {}, corps = '' } = {
 // par chemin (« /shared/pwa/push-sw.js ») — pour une contre-épreuve sur ce
 // fichier-là. Par défaut, le VRAI fichier du dépôt ; un fichier absent lève,
 // comme `importScripts` dans un vrai navigateur (et l'installation échoue).
-// `portee` : l'adresse du service worker, donc sa portée par défaut.
+// `adresse` : l'adresse du service worker (`self.location`).
+// ⚠ LES FENÊTRES FACTICES ACCEPTENT N'IMPORTE QUEL `navigate()`. Un vrai
+// navigateur le refuse sur un client que ce service worker ne contrôle pas :
+// un test qui montre une fenêtre « détournée » montre ce que le CODE tenterait,
+// pas ce que la plateforme laisserait faire (review lot 3, étape 2, constat 4).
 function chargerServiceWorker ({ version = 'abc1234', source, stockage = creerStockage(), reseau, fenetres = [], importes = {}, adresse = '/sw.js' }) {
   const code = source !== undefined ? source : serviceWorker(version)
   const ecouteurs = {}

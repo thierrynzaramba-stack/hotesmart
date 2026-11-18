@@ -26,6 +26,12 @@ const AUTRE_CLE = crypto.randomBytes(65).toString('base64url')
 const JETON = 'jeton/de berthe'
 const octets = (b64) => Uint8Array.from(Buffer.from(b64, 'base64url'))
 const empreinteDe = (e) => crypto.createHash('sha256').update(new URL(e).href).digest('hex').slice(0, 16)
+// La clé de la mémoire locale d'un lien : une empreinte du jeton, jamais le jeton.
+const cleDuLien = (j) => 'l' + crypto.createHash('sha256').update('lien ' + j).digest('hex').slice(0, 16)
+const envoyesDe = (nav, j = JETON) => {
+  const brut = nav.stockage.get('hotesmart-clean-push-envoyes')
+  return brut === undefined ? undefined : JSON.parse(brut)[cleDuLien(j)]
+}
 
 const ANDROID = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130 Mobile'
 const SAFARI_IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Safari/604.1'
@@ -35,10 +41,16 @@ const SAFARI_IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Sa
 // l'API de sa page qu'on règle par test.
 function navigateurFactice ({ ua = ANDROID, permission = 'granted', permissionActuelle = 'default',
                              abonnement = null, presta = 'active', hote = false, sansPushManager = false,
-                             serveur = serveurNormal, envoyes = null } = {}) {
+                             serveur = serveurNormal, envoyes = null, envoyesParLien = null } = {}) {
   const journal = []
   const stockage = new Map()
-  if (envoyes) stockage.set('hotesmart-clean-push-envoyes', JSON.stringify(envoyes))
+  // `envoyes` : les adresses déjà envoyées d'ici POUR JETON ; `envoyesParLien` :
+  // la mémoire entière, par jeton.
+  const memoire = { ...(envoyesParLien || {}) }
+  if (envoyes) memoire[JETON] = envoyes
+  if (Object.keys(memoire).length) {
+    stockage.set('hotesmart-clean-push-envoyes', JSON.stringify(Object.fromEntries(Object.entries(memoire).map(([j, l]) => [cleDuLien(j), l]))))
+  }
   let sub = null
   const fabriquer = (endpoint, cle) => ({
     endpoint,
@@ -130,7 +142,20 @@ test('LE TEST QUI COMPTE : s’abonner — la permission est la PREMIÈRE attent
   assert.ok(avant(nav.journal, 'subscribe:presta', 'reseau:POST:push_abonner'))
   assert.deepEqual(nav.journal.filter(e => e.startsWith('reseau')), ['reseau:POST:push_abonner'])
   assert.deepEqual(r.push.appareils, [empreinteDe(nav.sub.endpoint)])
-  assert.deepEqual(JSON.parse(nav.stockage.get('hotesmart-clean-push-envoyes')), [empreinteDe(nav.sub.endpoint)])
+  assert.deepEqual(envoyesDe(nav), [empreinteDe(nav.sub.endpoint)])
+  assert.ok(!nav.stockage.get('hotesmart-clean-push-envoyes').includes(JETON), 'le jeton n’est jamais rangé')
+})
+
+test('LE TEST QUI COMPTE : rien n’est attendu avant la permission — l’appel la demande dans le geste même', async () => {
+  // ⚠ CONSTAT 2 DE LA REVIEW DE L'ÉTAPE 2 : le journal ne notait que certains
+  // appels, donc une attente glissée avant la permission (`await empreinte(…)`)
+  // restait verte. Ici on appelle SANS attendre, et on lit le journal dans la
+  // foulée : la permission doit déjà être demandée, et rien d'autre.
+  const nav = navigateurFactice()
+  const P = await charger(nav)
+  const enCours = P.activerNotifications({ push: ETAT(), jeton: JETON })
+  assert.deepEqual(nav.journal, ['permission'], 'la permission n’est pas demandée dans le geste')
+  assert.equal((await enCours).ok, true)
 })
 
 test('s’abonner : l’abonnement et le libellé partent au serveur, rien d’autre', async () => {
@@ -202,7 +227,7 @@ test('s’abonner : le refus du serveur revient avec SON motif ; une coupure ré
   const plafond = navigateurFactice({ serveur: () => repondre(409, { error: 'Trop d’appareils', motif: 'plafond_atteint' }) })
   const r = await (await charger(plafond)).activerNotifications({ push: ETAT(), jeton: JETON })
   assert.deepEqual({ ok: r.ok, motif: r.motif, message: r.message }, { ok: false, motif: 'plafond_atteint', message: 'Trop d’appareils' })
-  assert.equal(plafond.stockage.get('hotesmart-clean-push-envoyes'), undefined, 'rien n’est noté comme envoyé')
+  assert.equal(envoyesDe(plafond), undefined, 'rien n’est noté comme envoyé')
   const coupe = navigateurFactice({ serveur: () => { throw new TypeError('Failed to fetch') } })
   const r2 = await (await charger(coupe)).activerNotifications({ push: ETAT(), jeton: JETON })
   assert.deepEqual({ ok: r2.ok, motif: r2.motif }, { ok: false, motif: 'reseau' })
@@ -287,7 +312,7 @@ test('renouvellement : déjà connu, ou autorisation non accordée — aucun app
   const connu = navigateurFactice({ abonnement: { endpoint: ICI, cle: CLE }, permissionActuelle: 'granted' })
   assert.equal(await (await charger(connu)).verifierRenouvellement({ push: ETAT([empreinteDe(ICI)]), jeton: JETON }), null)
   assert.ok(!connu.journal.some(e => e.startsWith('reseau')))
-  assert.deepEqual(JSON.parse(connu.stockage.get('hotesmart-clean-push-envoyes')), [empreinteDe(ICI)], 'l’adresse connue est notée')
+  assert.deepEqual(envoyesDe(connu), [empreinteDe(ICI)], 'l’adresse connue est notée')
   const sansAutorisation = navigateurFactice({ abonnement: { endpoint: ICI, cle: CLE }, permissionActuelle: 'default', envoyes: ['x'] })
   assert.equal(await (await charger(sansAutorisation)).verifierRenouvellement({ push: ETAT(['x']), jeton: JETON }), null)
   assert.ok(!sansAutorisation.journal.some(e => e.startsWith('reseau') || e.startsWith('getRegistration')))
@@ -297,5 +322,48 @@ test('les adresses notées comme envoyées sont bornées aux cinq dernières', a
   const ICI = 'https://fcm.googleapis.com/fcm/send/ici'
   const nav = navigateurFactice({ abonnement: { endpoint: ICI, cle: CLE }, permissionActuelle: 'granted', envoyes: ['a', 'b', 'c', 'd', 'e'] })
   await (await charger(nav)).verifierRenouvellement({ push: ETAT([empreinteDe(ICI)]), jeton: JETON })
-  assert.deepEqual(JSON.parse(nav.stockage.get('hotesmart-clean-push-envoyes')), [empreinteDe(ICI), 'a', 'b', 'c', 'd'])
+  assert.deepEqual(envoyesDe(nav), [empreinteDe(ICI), 'a', 'b', 'c', 'd'])
+})
+
+test('LE TEST QUI COMPTE : « Ne plus recevoir » n’est pas annulé à l’ouverture suivante', async () => {
+  // ⚠ CONSTAT 1 DE LA REVIEW DE L'ÉTAPE 2, rejoué tel quel : le serveur garde
+  // une ANCIENNE adresse envoyée d'ici (ligne morte pas encore nettoyée), le
+  // navigateur en a une nouvelle. Elle se désabonne ; à la réouverture, la page
+  // ne doit pas prendre l'ancienne adresse pour un renouvellement.
+  const E0 = 'https://fcm.googleapis.com/fcm/send/ancienne'
+  const E1 = 'https://fcm.googleapis.com/fcm/send/actuelle'
+  let serveurConnait = [empreinteDe(E0)]
+  const serveur = (u, c) => {
+    if (c.action === 'push_abonner') serveurConnait = [...new Set([...serveurConnait, empreinteDe(c.abonnement.endpoint)])]
+    if (c.action === 'push_retirer') serveurConnait = serveurConnait.filter(e => e !== empreinteDe(c.endpoint))
+    return repondre(200, { ok: true, empreinte: c.abonnement ? empreinteDe(c.abonnement.endpoint) : undefined, push: ETAT(serveurConnait) })
+  }
+  const nav = navigateurFactice({ abonnement: { endpoint: E1, cle: CLE }, permissionActuelle: 'granted', envoyes: [empreinteDe(E0)], serveur })
+  const P = await charger(nav)
+  // Ouverture : un vrai renouvellement, renvoyé.
+  await P.verifierRenouvellement({ push: ETAT(serveurConnait), jeton: JETON })
+  assert.equal((await P.etatNotifications(ETAT(serveurConnait))).etat, 'abonne')
+  // Elle se désabonne.
+  assert.equal((await P.desactiverNotifications({ jeton: JETON })).ok, true)
+  assert.equal(envoyesDe(nav), undefined, 'la mémoire de ce lien est oubliée')
+  // Réouverture : le serveur connaît toujours E0 ; rien ne doit repartir.
+  const avantReouverture = nav.journal.length
+  assert.equal(await P.verifierRenouvellement({ push: ETAT(serveurConnait), jeton: JETON }), null)
+  assert.ok(!nav.journal.slice(avantReouverture).some(e => e.startsWith('reseau')), 'réabonnée derrière elle')
+  assert.equal((await P.etatNotifications(ETAT(serveurConnait))).etat, 'a_activer')
+  assert.deepEqual(nav.journal.filter(e => e.startsWith('reseau')), ['reseau:POST:push_abonner', 'reseau:POST:push_retirer'])
+})
+
+test('la mémoire des adresses est rangée PAR LIEN : celle d’un lien ne réabonne pas un autre lien', async () => {
+  const VIEUX = 'https://fcm.googleapis.com/fcm/send/vieux'
+  const NEUF = 'https://fcm.googleapis.com/fcm/send/neuf'
+  // Envoyée d'ici pour un AUTRE lien (un autre hôte, même téléphone).
+  const nav = navigateurFactice({ abonnement: { endpoint: NEUF, cle: CLE }, permissionActuelle: 'granted',
+                                  envoyesParLien: { 'jeton-d-un-autre-hote': [empreinteDe(VIEUX)] } })
+  const P = await charger(nav)
+  assert.equal(await P.verifierRenouvellement({ push: ETAT([empreinteDe(VIEUX)]), jeton: JETON }), null)
+  assert.ok(!nav.journal.some(e => e.startsWith('reseau')))
+  // Et se désabonner d'un lien laisse la mémoire de l'autre.
+  await P.desactiverNotifications({ jeton: JETON })
+  assert.deepEqual(envoyesDe(nav, 'jeton-d-un-autre-hote'), [empreinteDe(VIEUX)])
 })

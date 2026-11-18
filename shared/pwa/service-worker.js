@@ -217,5 +217,5 @@ self.addEventListener('fetch', (event) => {
 // divergent. Comportement inchangé pour l'hôte : portée `/`, accueil
 // `/dashboard`. L'adresse porte l'empreinte du fichier (tests le vérifient) :
 // le modifier change aussi les octets de ce service worker, qui se réinstalle.
-importScripts('/shared/pwa/push-sw.js?v=988bbfc0bcc1')
+importScripts('/shared/pwa/push-sw.js?v=4b018acc0857')
 installerNotifications({ accueil: '/dashboard', portee: '/', icone: '/shared/pwa/icone-192.png' })

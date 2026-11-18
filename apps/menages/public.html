@@ -1506,7 +1506,11 @@ if ("serviceWorker" in navigator && !APERCU) {
     sans_service_worker: 'L’application n’est pas encore prête : rechargez la page, puis réessayez.',
     abonnement_impossible: 'Ce téléphone n’a pas pu s’abonner. Réessayez.',
     reseau: 'Hors ligne : réessayez quand vous aurez du réseau.',
-    hors_ligne: 'Hors ligne : réessayez quand vous aurez du réseau.'
+    hors_ligne: 'Hors ligne : réessayez quand vous aurez du réseau.',
+    // ⚠ PAS LE MESSAGE DU SERVEUR (« retirez-en un ») : sa page n'a pas de liste
+    // d'appareils. Le seul geste qui les remet à zéro est un nouveau lien, et
+    // c'est son hôte qui le donne (review de l'étape 2, constat 7).
+    plafond_atteint: 'Trop de téléphones reçoivent déjà les notifications de ce lien. Demandez un nouveau lien à votre hôte : il remet tout à zéro.'
   }
 
   // Le chemin EXACT de cet appareil pour rouvrir les notifications (même

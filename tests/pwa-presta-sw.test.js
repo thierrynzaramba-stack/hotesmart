@@ -141,6 +141,52 @@ test('le toucher reprend une fenêtre de SON appli, jamais une fenêtre de l’h
   assert.deepEqual(vues3, [ACCUEIL])
 })
 
+test('ni `token` ni `apercu` dans l’adresse ouverte au toucher — le reste de l’adresse est gardé', async () => {
+  assert.deepEqual(await ouvertPour('/apps/menages/public.html?token=secret&apercu=1&jour=2026-11-20#j'),
+    [`${ACCUEIL}?jour=2026-11-20#j`])
+  assert.deepEqual(await ouvertPour('/apps/menages/public.html?token=secret'), [ACCUEIL])
+  // Contre-épreuve : sans le retrait, le jeton est ouvert tel quel.
+  const fautif = muterPush("      u.searchParams.delete('token')\n", '')
+  assert.deepEqual(await ouvertPour('/apps/menages/public.html?token=secret', { importes: fautif }), [`${ACCUEIL}?token=secret`])
+})
+
+test('LE TEST QUI COMPTE : le toucher ne navigue JAMAIS dans un cadre — l’aperçu de l’hôte en est un', async () => {
+  // Constat 4 de la review : le cadre d'aperçu (`public.html?apercu=1&token=…`)
+  // est de même origine. Côté hôte, il est sous sa portée `/` ; côté
+  // prestataire, il est sous la sienne. Y naviguer ouvrirait la messagerie de
+  // l'hôte dans le cadre, ou sortirait le cadre du mode aperçu.
+  const vues = []
+  const cadre = { url: `${ORIGINE}/apps/menages/public.html?apercu=1&token=x`, frameType: 'nested',
+                  async navigate (u) { vues.push('cadre:' + u); return this }, async focus () { vues.push('cadre:focus') } }
+  const sw = presta({ fenetres: [cadre] })
+  await sw.evenement('notificationclick', { notification: { data: { chemin: '/apps/menages/public.html' }, close () {} } })
+  assert.deepEqual(vues, [])
+  assert.deepEqual(sw.ouvertures, [ACCUEIL])
+  const hote = chargerServiceWorker({ reseau: reseauMuet, fenetres: [cadre] })
+  await hote.evenement('notificationclick', { notification: { data: { chemin: '/messages?booking=42' }, close () {} } })
+  assert.deepEqual(vues, [], 'l’hôte non plus ne navigue dans le cadre')
+  assert.deepEqual(hote.ouvertures, [`${ORIGINE}/messages?booking=42`])
+  // Une fenêtre de premier niveau, elle, est reprise.
+  const fenetre = { ...cadre, url: `${ORIGINE}/apps/menages/public.html`, frameType: 'top-level' }
+  const sw2 = presta({ fenetres: [fenetre] })
+  await sw2.evenement('notificationclick', { notification: { data: { chemin: '/apps/menages/public.html' }, close () {} } })
+  assert.deepEqual(vues, [`cadre:${ACCUEIL}`, 'cadre:focus'])
+  // Contre-épreuve : sans le filtre, le cadre est navigué.
+  const fautif = muterPush("      if (f.frameType && f.frameType !== 'top-level') continue\n", '')
+  const vues2 = []
+  const cadre2 = { ...cadre, async navigate (u) { vues2.push(u); return this } }
+  await presta({ importes: fautif, fenetres: [cadre2] }).evenement('notificationclick', { notification: { data: { chemin: '/apps/menages/public.html' }, close () {} } })
+  assert.deepEqual(vues2, [ACCUEIL])
+})
+
+test('une portée illisible, ou un accueil hors de la portée, ARRÊTE l’installation — jamais un repli sur `/`', () => {
+  for (const options of ["{ accueil: '/x/', portee: 'apps/menages/' }", "{ accueil: '/x/', portee: '/apps/menages' }",
+    "{ accueil: '/dashboard', portee: '/apps/menages/' }", "{ accueil: '/a/' }", 'undefined']) {
+    const source = `importScripts('/shared/pwa/push-sw.js?v=${EMPREINTE}')\ninstallerNotifications(${options})\n`
+    assert.throws(() => presta({ source }), /installerNotifications/, options)
+  }
+})
+
 test('le toucher de l’HÔTE reste ce qu’il était : portée `/`, accueil /dashboard', async () => {
   const sw = chargerServiceWorker({ reseau: reseauMuet })
   await sw.evenement('push', sw.messagePush({ web_push: 8030, notification: { title: 't', navigate: '/messages?booking=42' } }))

@@ -2515,13 +2515,25 @@ service worker le charge par `importScripts`, puis appelle
 | icône | `/shared/pwa/icone-192.png` | `/apps/menages/icons/icon-192.png` |
 
 - ⚠ **La portée est une règle de plus que le lot 2** : un toucher n'ouvre jamais
-  une page hors de la portée de l'appli qui affiche, et ne reprend jamais une
-  fenêtre hors de sa portée. Sans elle, l'appli de la prestataire pouvait
-  détourner une fenêtre de l'hôte du même navigateur (`clients.matchAll` rend
-  toutes les fenêtres de l'origine). Pour l'hôte, portée `/` : rien ne change.
+  une page hors de la portée de l'appli qui affiche, et n'essaie jamais de
+  reprendre une fenêtre hors de sa portée. (Le navigateur refuse déjà
+  `navigate()` sur une fenêtre qu'un service worker ne contrôle pas — la review
+  l'a relevé, §13.5 constat 4 : le « détournement » que le banc montre est ce
+  que le code tenterait, pas ce que la plateforme laisserait faire.) Pour
+  l'hôte, portée `/` : rien ne change.
+- ⚠ **Jamais un cadre** (§13.6) : seule une fenêtre de premier niveau est
+  reprise. L'aperçu de la prestataire, ouvert par l'hôte, est un cadre de même
+  origine.
 - ⚠ **L'accueil de la prestataire est sa page SANS jeton** : l'appli installée
-  a le sien, rangé à sa première ouverture. Le jeton n'entre jamais dans un
-  message ni dans une adresse ouverte au toucher.
+  a le sien, rangé à sa première ouverture. Et le service worker retire
+  `token` et `apercu` de toute adresse ouverte. Mais ce n'est qu'une défense de
+  plus : **sur iPhone 18.4+, le système ouvre le message déclaratif sans passer
+  par le service worker** — la garantie est l'EXPÉDITEUR (étape 3, §13.6).
+- ⚠ **Le compromis de l'accueil sans jeton** (spec §12) : sur Android, une
+  prestataire qui a deux liens (deux hôtes) partage la même portée ; le toucher
+  ouvre sa page avec le jeton du DERNIER lien ouvert sur ce téléphone, et une
+  fenêtre `?token=A` déjà ouverte est ramenée à la page sans jeton, donc au
+  dernier lien.
 - ⚠ **Versionné par son empreinte** : chaque service worker charge
   `/shared/pwa/push-sw.js?v=<12 hexa du sha256 du fichier>`. Modifier le
   fichier sans reporter l'empreinte dans les deux service workers est un rouge
@@ -2591,8 +2603,9 @@ seulement si le site a ses clés : `shared/push-prestataire.js` (9 128 octets,
 3 629 gzip) et `shared/push-appareil.js` (11 235, 4 429 gzip), revalidés comme
 les autres modules partagés (non versionnés). Le document `public.html` passe
 de 326 847 à 334 659 octets décodés. Le service worker charge en plus
-`shared/pwa/push-sw.js` (5 924 octets, 2 482 gzip) à son installation, et plus
-ensuite. À remesurer sur staging à la recette.
+`shared/pwa/push-sw.js` (5 924 octets, 2 482 gzip) à son installation ; ensuite,
+le navigateur le revalide à chaque vérification de mise à jour (requête
+conditionnelle, 304 le plus souvent). À remesurer sur staging à la recette.
 
 **Tests** : `tests/push-prestataire.test.js` (13, le module avec les vraies
 primitives de l'hôte et un navigateur factice), `tests/pwa-presta-sw.test.js`
@@ -2600,3 +2613,74 @@ primitives de l'hôte et un navigateur factice), `tests/pwa-presta-sw.test.js`
 `tests/pwa-presta-notifications-dom.test.js` (6, la vraie page dans jsdom,
 seul le module remplacé par un double). Treize mutations des gardes, toutes
 attrapées sauf le double `APERCU` décrit plus haut.
+
+### 13.5 Trace de la review de l'étape 2 (18 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, plage
+`9e86cc93ceab1464259d462faafb2a2ca952a76b..7fce8e6e0bfe323d124f7aae6958ff48e5a0b973`.
+Chaque fichier cité comme lieu d'un constat est dans le diff de l'étape. Rapport
+consigné tel quel à réception, avant correction :
+
+> Je ne trouve rien de grave. Un défaut réel (constat 1), un test qui passe pour une mauvaise raison (constat 2), puis du mineur.
+>
+> **Ce qui tient, vérifié :**
+> - **Aperçu** : trois gardes. Le module n'est jamais chargé, la carte n'est pas peinte, les boutons ne sont pas branchés, et la feuille de style cache la carte.
+> - **Abonnement** : il ne se fait que sur l'enregistrement de portée exacte `/apps/menages/`. Le cas « seul l'enregistrement de l'hôte existe » est testé et refusé. Le stockage du navigateur ne garde que des empreintes, jamais le jeton.
+> - **Service worker de l'hôte, aucune régression trouvée** : le code déplacé est identique au caractère près, aux renommages près. Avec la portée `/`, `cheminSur` et `ouvrir` se comportent comme avant. L'`importScripts` est appelé au premier passage du script, donc il est permis. L'adresse porte l'empreinte du fichier : modifier `push-sw.js` change les octets des deux service workers, qui se réinstallent. Si l'import échoue, l'installation échoue et l'ancien service worker reste en place. Il n'y a pas d'état à moitié installé. Aucune règle de sécurité du contenu (CSP) ne s'applique à `/sw.js` ni à `/shared/*`, et `push-sw.js` n'est pas exclu du déploiement. La substitution de version de `lib/pwa.js` n'est pas touchée : le jeton de version n'apparaît toujours qu'une fois, et le test qui compile le `/sw.js` servi passe.
+> - **Suite** : les 4 fichiers du lot : 54 sur 54. Suite complète : 8725 sur 8725. Trois tests ont besoin de l'historique git : ils ont échoué dans ma copie sans `.git`, puis passé (16 sur 16) dans un clone qui a l'historique.
+>
+> **1. Défaut (consentement) — `shared/push-prestataire.js:151-158` et `:168-181`.** « Ne plus recevoir » est annulé tout seul à l'ouverture suivante de la page. Condition : le serveur garde une ancienne adresse déjà envoyée depuis ce téléphone. C'est fréquent, car une ligne morte ne part qu'au premier envoi qui reçoit 404 ou 410. À ce SHA, rien n'envoie aux prestataires, donc rien ne la retire. Comment cette ancienne adresse apparaît : un `pushsubscriptionchange` ; une autorisation réinitialisée puis réactivée (nouvelle adresse) ; un changement de clé (branche `memeCle`). Ce qui se passe : `desactiverNotifications` retire l'adresse actuelle mais laisse la liste `hotesmart-clean-push-envoyes` intacte. À l'ouverture suivante, `verifierRenouvellement` voit une ancienne adresse encore connue du serveur, conclut à un renouvellement et réabonne. Mesuré avec le vrai module dans le navigateur factice des tests (copie hors de l'arbre). Serveur `[E0]`, navigateur `E1`, liste locale `[E0]` : ouverture : état `abonne`, 2 lignes ; « Ne plus recevoir » : état `a_activer`, 1 ligne ; réouverture : état `abonne`, 2 lignes. Requêtes envoyées : `push_abonner | push_retirer | push_abonner`. Conséquence : elle reçoit les notifications qu'elle a refusées. La phrase de la KB « on ne réabonne jamais » est vraie après une purge, pas après son propre refus. Correctif proposé : vider la liste locale (idéalement rangée par lien) après une désactivation réussie, et ajouter ce test.
+>
+> **2. Test — `tests/push-prestataire.test.js:123-134`.** Le test « la permission est la PREMIÈRE attente » passe pour une mauvaise raison. Le journal ne note que certains appels. Mutation : ajouter `await empreinte('https://fcm.googleapis.com/x')` juste avant `Notification.requestPermission()` donne **13 sur 13 au vert**. Sur iPhone, la permission ne serait alors plus demandée dans le geste. Le test de la page (jsdom) ne couvre pas ce cas : il remplace le module par un double. Assertion à ajouter, vérifiée verte sur le code et rouge sur la mutation : appeler `P.activerNotifications(...)` sans `await`, puis lire le journal dans la foulée. Il doit valoir exactement `['permission']`.
+>
+> **3. Mineur (piège pour l'étape 3, KB inexacte) — `shared/pwa/push-sw.js:50-56`, `apps/menages/sw.js:115-128`, `docs/kb/pwa.md:2517-2524`.** Sur iPhone 18.4 et plus, un message au format déclaratif est affiché et ouvert par le système **sans passer par le service worker** (`lib/push/envoyer.js` le dit). Là-bas, la règle de portée et la page d'accueil de la prestataire ne s'appliquent donc pas. Le repli du serveur (`cheminDuSite`) est `/dashboard`, c'est-à-dire l'accueil de l'hôte. De plus, `cheminSur` garde la partie après le `?` telle quelle : un `?token=` serait conservé. « Jamais hors de la portée » et « le jeton n'entre jamais dans une adresse ouverte au toucher » doivent donc être garantis par **l'expéditeur de l'étape 3** : portée `/apps/menages/`, repli `/apps/menages/public.html`, ni `token` ni `apercu`, avec un test. La KB doit le dire. Aucun impact aujourd'hui, puisque rien n'envoie.
+>
+> **4. Mineur — `shared/pwa/push-sw.js:90-101`, plus le double des tests (`tests/outils/sw-banc.js:146`, `tests/pwa-presta-sw.test.js:120-142`).** Dans un vrai navigateur, `WindowClient.navigate()` refuse une fenêtre que le service worker appelant ne contrôle pas. Le détournement d'une fenêtre de l'hôte décrit par la KB (`pwa.md:2519-2521`) était donc déjà impossible. Le banc l'accepte parce que ses fenêtres factices acceptent n'importe quel `navigate`. La contre-épreuve montre donc un risque que la plateforme bloque déjà. Le cas réel restant : un cadre contrôlé par le *même* service worker. Chez l'hôte, le cadre d'aperçu `/apps/menages/public.html?apercu=1&token=…` est contrôlé par le service worker de l'hôte, car celui de la prestataire n'y est jamais enregistré. La portée `/` le couvre. Si l'hôte a cliqué dans ce cadre en dernier, toucher une de ses notifications peut ouvrir `/messages?…` *dans le cadre d'aperçu*. C'est ma lecture de l'ordre de `matchAll` (le plus récemment focalisé d'abord), pas une mesure dans un vrai navigateur. Pas de fuite (même personne). Le défaut existe depuis le lot 2, mais la nouvelle règle de portée ne le ferme pas. Le symétrique : sur un navigateur qui porte les deux applis, le service worker de la prestataire peut sortir un cadre d'aperçu du mode aperçu. La page s'ouvre alors sans `apercu=1` et lit le jeton du téléphone. Correctif proposé : `if (f.frameType && f.frameType !== 'top-level') continue`.
+>
+> **5. Mineur (ordre de mise en production) — `apps/menages/public.html:1499`.** À ce SHA, aucun code n'envoie aux prestataires : `pourEnvoi` de `lib/push/abonnements-prestataires.js` n'est appelé nulle part. La production a déjà ses clés d'envoi (lot 2), donc la carte s'afficherait dès cette étape. Elle promet « dès qu'un ménage vous est confié, proposé ou annulé », et rien n'arriverait. À déclarer comme dépendance dans la remise au chef de file : l'étape 2 n'entre pas dans `main` sans l'étape 3.
+>
+> **6. Mineur — accueil sans jeton, `apps/menages/sw.js:124-128`.** Sur Android, une prestataire qui a deux liens (deux hôtes) partage la même portée. Toucher une notification ouvre `public.html` avec le jeton du **dernier** lien ouvert sur ce téléphone. Si une fenêtre `?token=A` est déjà ouverte, elle est redirigée vers la page sans jeton, donc vers B. C'est un compromis à écrire en §13.4, qui présente l'accueil sans jeton comme sans conséquence.
+>
+> **7. Mineur — `apps/menages/public.html:1553`.** Le refus `plafond_atteint` (409) affiche le message du serveur « retirez-en un d'abord ». Sa page n'a aucune liste d'appareils : c'est une impasse. Il faut une entrée dans `MOTIFS_NOTIF`.
+>
+> **8. Mineur (KB, commentaires).** `docs/kb/pwa.md:2594-2595` dit « à son installation, et plus ensuite ». En fait, le script importé est revalidé à chaque vérification de mise à jour (requête conditionnelle, réponse 304). C'est négligeable mais inexact. `tests/outils/sw-banc.js:102` : le commentaire parle de `portee`, mais le paramètre s'appelle `adresse`. `shared/pwa/push-sw.js:39` : si la portée passée est invalide, elle retombe sur `/`, la plus large. Mieux vaudrait lever une erreur. Aucun impact avec les valeurs actuelles, qui sont des constantes.
+
+### 13.6 Suites données à la review de l'étape 2 (18 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **« Ne plus recevoir » réannulé à l'ouverture suivante** — la mémoire des
+   adresses envoyées d'ici est désormais **rangée par lien** (clé = empreinte
+   du jeton, jamais le jeton) et **oubliée quand elle se désabonne**. Le
+   scénario de la review est rejoué tel quel en test (serveur `[E0]`,
+   navigateur `E1`, mémoire `[E0]` : renouvelée à l'ouverture, désabonnée, puis
+   rien ne repart à la réouverture), plus un test « la mémoire d'un lien ne
+   réabonne pas un autre lien ».
+2. **La permission « en premier »** — le test appelle maintenant l'abonnement
+   sans attendre et lit le journal dans la foulée : il doit valoir exactement
+   `['permission']`. La mutation de la review (`await empreinte(…)` avant la
+   permission) rougit.
+3. **Le message déclaratif sur iPhone 18.4+** — le service worker retire
+   `token` et `apercu` de l'adresse ouverte (défense, test et contre-épreuve).
+   ⚠ **POUR L'ÉTAPE 3, À TENIR PAR L'EXPÉDITEUR** : le `navigate` d'une
+   notification de prestataire est construit sous `/apps/menages/`, avec pour
+   repli `/apps/menages/public.html` (jamais `/dashboard`, le repli de
+   `cheminDuSite`), sans `token` ni `apercu` — et un test le prouve.
+4. **Les cadres** — `ouvrir` ne reprend qu'une fenêtre de premier niveau
+   (`frameType`), pour les deux applis : l'aperçu de l'hôte est un cadre de même
+   origine. Test et contre-épreuve. Le banc dit désormais que ses fenêtres
+   factices acceptent tout `navigate()`, contrairement à un vrai navigateur ; la
+   KB §13.4 est corrigée sur ce point.
+5. **Ordre de mise en production** — l'étape 2 n'entre pas dans `main` sans
+   l'étape 3 (sinon la carte promet des notifications que rien n'envoie). Déclaré
+   dans la remise au chef de file.
+6. **Le compromis de l'accueil sans jeton** pour deux liens sur un même
+   téléphone Android — écrit au §13.4.
+7. **Plafond atteint** — la page dit le seul geste possible : « Demandez un
+   nouveau lien à votre hôte : il remet tout à zéro. » Test.
+8. **Commentaires et KB** — revalidation du script importé (§13.4) ; le
+   commentaire du banc (`adresse`) ; une portée invalide, ou un accueil hors de
+   la portée, **arrête l'installation** au lieu de retomber sur `/` (test).
+
+L'empreinte de `shared/pwa/push-sw.js` change avec ces correctifs : elle est
+reportée dans les deux service workers (`?v=4b018acc0857`).

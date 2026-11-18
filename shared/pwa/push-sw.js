@@ -36,8 +36,18 @@
 'use strict'
 
 function installerNotifications (options) {
-  const portee = typeof options.portee === 'string' && options.portee.startsWith('/') ? options.portee : '/'
-  const accueil = options.accueil
+  // ⚠ UNE PORTÉE ILLISIBLE ARRÊTE L'INSTALLATION, elle ne retombe pas sur `/`
+  // — la plus large (review de l'étape 2 du lot 3, constat 8). Un service worker
+  // qui ne s'installe pas laisse l'ancien en place ; un service worker trop
+  // large ouvrirait les pages de l'autre appli.
+  const portee = options && options.portee
+  const accueil = options && options.accueil
+  if (typeof portee !== 'string' || !portee.startsWith('/') || !portee.endsWith('/')) {
+    throw new Error('installerNotifications : portée invalide')
+  }
+  if (typeof accueil !== 'string' || !accueil.startsWith(portee)) {
+    throw new Error('installerNotifications : accueil hors de la portée')
+  }
   const icone = options.icone
 
   function chaine (v, max) {
@@ -47,12 +57,19 @@ function installerNotifications (options) {
   // Un chemin du site DANS LA PORTÉE de cette appli, et rien d'autre : sinon
   // l'accueil. Même règle que le serveur (lib/push/envoyer.js) et que la page
   // de connexion (`next`), plus la portée.
+  // ⚠ NI `token` NI `apercu` DANS L'ADRESSE OUVERTE (review de l'étape 2,
+  // constat 3) : un lien de prestataire ne voyage jamais dans une notification,
+  // et `apercu` ouvrirait la page en lecture seule. C'est une défense de plus :
+  // sur iPhone 18.4+, le système ouvre le message déclaratif SANS passer par
+  // ici — la vraie garantie est l'expéditeur (lib/push/envoyer.js, étape 3).
   function cheminSur (brut) {
     const s = typeof brut === 'string' ? brut : ''
     if (!s.startsWith('/') || s.startsWith('//') || s.includes('\\')) return accueil
     try {
       const u = new URL(s, self.location.origin)
       if (u.origin !== self.location.origin || !u.pathname.startsWith(portee)) return accueil
+      u.searchParams.delete('token')
+      u.searchParams.delete('apercu')
       return u.pathname + u.search + u.hash
     } catch (_) { return accueil }
   }
@@ -87,10 +104,17 @@ function installerNotifications (options) {
 
   // Reprend une fenêtre de l'appli déjà ouverte — de CETTE appli : une page
   // hors de la portée appartient à l'autre appli du même site (même origine).
+  // (Le navigateur refuse déjà `navigate()` sur un client qu'il ne contrôle pas ;
+  // le filtre évite d'essayer, et dit la règle.)
+  // ⚠ JAMAIS UN CADRE (review de l'étape 2, constat 4) : l'aperçu que l'hôte
+  // ouvre depuis la fiche d'une prestataire EST un cadre de même origine, sous
+  // la portée `/` de l'hôte. Y naviguer ouvrirait sa messagerie dans le cadre,
+  // ou — côté prestataire — sortirait le cadre du mode aperçu.
   async function ouvrir (chemin) {
     const cible = new URL(cheminSur(chemin), self.location.origin).href
     const fenetres = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     for (const f of fenetres) {
+      if (f.frameType && f.frameType !== 'top-level') continue
       let u
       try { u = new URL(f.url) } catch (_) { continue }
       if (u.origin !== self.location.origin || !u.pathname.startsWith(portee)) continue

@@ -144,6 +144,17 @@ test('après le geste, la carte dit l’état rendu par le serveur ; un refus di
   assert.ok(w)
 })
 
+test('plafond atteint : la page dit le seul geste possible (un nouveau lien), pas « retirez-en un »', async () => {
+  // Constat 7 de la review : sa page n'a pas de liste d'appareils, le message
+  // du serveur était une impasse.
+  const mod = moduleFactice({ activer: { ok: false, motif: 'plafond_atteint', message: 'Trop d’appareils abonnés : retirez-en un d’abord.' } })
+  const { $ } = await monter({ mod })
+  $('notif-activer').click()
+  for (let i = 0; i < 50 && !visible($('notif-message')); i++) await new Promise(r => setImmediate(r))
+  assert.match($('notif-message').textContent, /nouveau lien à votre hôte/)
+  assert.doesNotMatch($('notif-message').textContent, /retirez-en un/)
+})
+
 test('la carte vit HORS du contenu qui dépend de la sonde des disponibilités', () => {
   const dom = new JSDOM(HTML)
   const carte = dom.window.document.getElementById('carte-notifications')

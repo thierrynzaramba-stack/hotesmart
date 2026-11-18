@@ -21,22 +21,51 @@ import { pris, iphoneHorsAppli, libelleAppareil, plateforme, bloquee, empreinte,
 export { plateforme }
 
 const PORTEE = '/apps/menages/'
-// Les empreintes des abonnements envoyés DEPUIS CET APPAREIL (les dernières),
-// pour reconnaître un abonnement renouvelé par le navigateur.
+// Les empreintes des abonnements envoyés DEPUIS CET APPAREIL, PAR LIEN (les
+// dernières), pour reconnaître un abonnement renouvelé par le navigateur.
+// ⚠ RANGÉES PAR LIEN, ET VIDÉES QUAND ELLE SE DÉSABONNE (review de l'étape 2,
+// constat 1) : sans cela, une ancienne adresse encore connue du serveur faisait
+// passer son « Ne plus recevoir » pour un renouvellement, et la page la
+// réabonnait à l'ouverture suivante — contre ce qu'elle venait de demander.
+// La clé d'un lien est une EMPREINTE de son jeton, jamais le jeton.
 const CLE_ENVOYES = 'hotesmart-clean-push-envoyes'
 const GARDES = 5
 const DELAI_MS = 10000
 
-function lireEnvoyes () {
+function lireTout () {
   try {
-    const v = JSON.parse(localStorage.getItem(CLE_ENVOYES) || '[]')
-    return Array.isArray(v) ? v.filter(x => typeof x === 'string') : []
-  } catch { return [] }
+    const v = JSON.parse(localStorage.getItem(CLE_ENVOYES) || '{}')
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+  } catch { return {} }
 }
-function noterEnvoye (e) {
+function ecrireTout (tout) {
+  try {
+    if (Object.keys(tout).length) localStorage.setItem(CLE_ENVOYES, JSON.stringify(tout))
+    else localStorage.removeItem(CLE_ENVOYES)
+  } catch { /* stockage bloqué */ }
+}
+// L'espace rend la chaîne illisible comme adresse : `empreinte` la hache telle
+// quelle, sans la « normaliser » comme une URL.
+async function cleDuLien (jeton) {
+  return 'l' + await empreinte('lien ' + String(jeton))
+}
+async function lireEnvoyes (jeton) {
+  const v = lireTout()[await cleDuLien(jeton)]
+  return Array.isArray(v) ? v.filter(x => typeof x === 'string') : []
+}
+async function noterEnvoye (jeton, e) {
   if (!e) return
-  const liste = [e, ...lireEnvoyes().filter(x => x !== e)].slice(0, GARDES)
-  try { localStorage.setItem(CLE_ENVOYES, JSON.stringify(liste)) } catch { /* stockage bloqué */ }
+  const cle = await cleDuLien(jeton)
+  const tout = lireTout()
+  const avant = Array.isArray(tout[cle]) ? tout[cle] : []
+  tout[cle] = [e, ...avant.filter(x => x !== e)].slice(0, GARDES)
+  ecrireTout(tout)
+}
+async function oublierEnvoyes (jeton) {
+  const cle = await cleDuLien(jeton)
+  const tout = lireTout()
+  delete tout[cle]
+  ecrireTout(tout)
 }
 
 // ⚠ L'ENREGISTREMENT DE SON APPLI, ET AUCUN AUTRE. `getRegistration` et
@@ -140,7 +169,7 @@ export async function activerNotifications ({ push, jeton }) {
   }
   const r = await appel(jeton, { action: 'push_abonner', abonnement: sub.toJSON(), appareil: libelleAppareil() })
   if (!r.ok) return { ok: false, motif: r.motif || 'serveur', message: r.error }
-  noterEnvoye(r.empreinte)
+  await noterEnvoye(jeton, r.empreinte)
   return { ok: true, push: r.push || null }
 }
 
@@ -148,12 +177,15 @@ export async function activerNotifications ({ push, jeton }) {
 // ABONNEMENT : sur Android, il peut servir aussi l'appli d'un autre hôte de la
 // même prestataire (même portée). Le serveur, lui, n'envoie plus rien à ce
 // lien sur cet appareil — c'est ce qu'elle a demandé.
+// ⚠ ET LA MÉMOIRE DES ADRESSES ENVOYÉES POUR CE LIEN EST OUBLIÉE : c'est ce qui
+// empêche le renouvellement de la réabonner à l'ouverture suivante.
 export async function desactiverNotifications ({ jeton }) {
   if (!jeton) return { ok: false, motif: 'sans_lien' }
   const sub = await abonnementPresta()
-  if (!sub) return { ok: true, push: null }
+  if (!sub) { await oublierEnvoyes(jeton); return { ok: true, push: null } }
   const r = await appel(jeton, { action: 'push_retirer', endpoint: sub.endpoint })
   if (!r.ok) return { ok: false, motif: r.motif || 'serveur', message: r.error }
+  await oublierEnvoyes(jeton)
   return { ok: true, push: r.push || null }
 }
 
@@ -161,9 +193,11 @@ export async function desactiverNotifications ({ jeton }) {
 // (`pushsubscriptionchange` du service worker, qui n'a ni session ni lien) ?
 // Alors on renvoie le nouveau, par le même geste serveur et ses contrôles.
 // C'est le seul cas où cette vérification touche le réseau, et il est rare.
-// ⚠ SEULEMENT UN RENOUVELLEMENT : une adresse déjà envoyée depuis cet appareil
-// doit être ENCORE connue du serveur pour ce lien. Une purge — nouveau lien,
+// ⚠ SEULEMENT UN RENOUVELLEMENT : une adresse déjà envoyée depuis cet appareil,
+// POUR CE LIEN, doit être ENCORE connue du serveur. Une purge — nouveau lien,
 // personne désactivée — a vidé la liste : on ne réabonne pas derrière l'hôte.
+// Et son propre « Ne plus recevoir » a vidé la mémoire locale de ce lien : on
+// ne la réabonne pas derrière elle non plus.
 // Rend l'état serveur à jour, ou null si rien n'a été fait.
 export async function verifierRenouvellement ({ push, jeton }) {
   if (!jeton || !push || !push.pret || !Array.isArray(push.appareils)) return null
@@ -171,11 +205,11 @@ export async function verifierRenouvellement ({ push, jeton }) {
   const sub = await abonnementPresta()
   if (!sub) return null
   const actuelle = await empreinte(sub.endpoint)
-  if (push.appareils.includes(actuelle)) { noterEnvoye(actuelle); return null }
-  const renouvele = lireEnvoyes().some(e => e !== actuelle && push.appareils.includes(e))
+  if (push.appareils.includes(actuelle)) { await noterEnvoye(jeton, actuelle); return null }
+  const renouvele = (await lireEnvoyes(jeton)).some(e => e !== actuelle && push.appareils.includes(e))
   if (!renouvele) return null
   const r = await appel(jeton, { action: 'push_abonner', abonnement: sub.toJSON(), appareil: libelleAppareil() })
   if (!r.ok) return null
-  noterEnvoye(r.empreinte || actuelle)
+  await noterEnvoye(jeton, r.empreinte || actuelle)
   return r.push || null
 }
