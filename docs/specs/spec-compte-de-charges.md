@@ -1562,6 +1562,25 @@ nouvelle review (règle « une review par commit ») :
 | 4 | Effet de bord possible sur l'échéancier | La règle vise facture, régularisation ou avoir — « pas un échéancier » |
 | 5 | Test de mots, pas de comportement | Le texte envoyé à l'IA est la consigne ; une régularisation sur 365 jours garde sa période ; sur 374 jours, elle tombe à `null` avec sa trace |
 
+### 14.15 Recette de la consigne « énergie » sur staging (19 novembre 2026)
+
+Staging à `f996d8db` (merge de `43150b3a`). Thierry recharge la vraie
+régularisation EDF du 7 octobre 2025 (PDF de 8 pages, électricité et gaz ;
+la consommation n'est écrite qu'en page 2 du détail). Lu par l'IA, **période
+déjà remplie à l'ouverture de la fiche** (Thierry n'y a pas touché) :
+
+| | Attendu | Lu |
+|---|---|---|
+| Type | régularisation | régularisation |
+| Période | 2024-09-26 → 2025-09-25 | **2024-09-26 → 2025-09-25** |
+| TTC | 5 856,48 € | 5 856,48 € (HT 4 932,24, TVA 924,24) |
+| Solde | 1 916,83 € | 1 916,83 € |
+
+L'exemple de la consigne est neutre (14/03/24, review constat 3) : la période
+lue ne vient pas de la consigne. **Recette conforme.** Question ouverte à
+Thierry, sans effet sur la mise en production : tolérer une période de plus de
+366 jours (relevé annuel de 367 à 370 jours) ou garder la borne d'un an.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et
