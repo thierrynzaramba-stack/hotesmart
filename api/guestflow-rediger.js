@@ -7,10 +7,19 @@
 // POST { action: 'texte', bookingId, brouillon }
 //   -> { ok: true, texte }   à partir de la réponse brute tapée par l'hôte
 //      (bouton « IA » de la zone de saisie).
+// POST { action: 'base', bookingId, tacheId, envoye }
+//   -> { ok: true, propositions: [{ action: 'creer', sujet, texte }
+//                               | { action: 'modifier', id, sujet, avant, texte }] }
+//      après l'envoi d'une réponse à une « information manquante » : ce que
+//      l'IA propose d'enregistrer dans la base (étape 2, spec §2 C).
+//      ⚠ RÉSERVÉ AU TITULAIRE DU COMPTE (403 avant toute lecture de la base) :
+//      la base est non délégable (dette 68), et `avant` en montre le texte.
 //
 // ⚠ RIEN NE PART ET RIEN N'EST ÉCRIT. Le texte rendu va dans la zone de saisie
 // de l'hôte, qui l'envoie par le chemin d'envoi existant. Cet endpoint n'écrit
-// ni `messages`, ni `agent_tasks`, ni la base de connaissance.
+// ni `messages`, ni `agent_tasks`, ni la base de connaissance — une
+// proposition de réponse prête s'enregistre par le geste de l'hôte, au writer
+// unique de la base (`api/ecran/connaissance.js`).
 //
 // Refus parlants, jamais silencieux :
 //  - 409 en_pause        : kill switch actif sur le bien ;
@@ -29,10 +38,13 @@ const { isAutomationPaused, anthropic } = require('../lib/cron-shared')
 const { avecContexteIA } = require('../lib/ia/journal')
 const { compterRequetes, requetesJusquIci } = require('../lib/compte-requetes')
 const R = require('../lib/guestflow/rediger')
+const P = require('../lib/guestflow/reponse-prete')
+const { estTitulaireDuCompte } = require('../lib/permissions')
+const { colonneAbsente } = require('../lib/colonne-absente')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
-const ACTIONS = ['choix', 'texte']
+const ACTIONS = ['choix', 'texte', 'base']
 
 module.exports = async function handler (req, res) {
   // ⚠ AVANT LE PREMIER REFUS, le 405 compris (dette 90).
@@ -63,6 +75,12 @@ module.exports = async function handler (req, res) {
       bien: corps.propertyId || null
     })
     if (!garde.ok) return
+    // Étape 2 : la base n'est pas délégable (dette 68). Refusé ICI, avant même
+    // le logement et la pause : un membre reçoit 403 et non un motif qui ne le
+    // concerne pas (review 1, constat 11). Le même refus est repris plus bas.
+    if (action === 'base' && !estTitulaireDuCompte(garde.contexte)) {
+      return repondre(403, { error: 'reserve_titulaire', message: 'Réservé au titulaire du compte' })
+    }
     const userId = garde.accountUserId
     const snap = garde.booking?.snapshot || {}
     try {
@@ -77,6 +95,11 @@ module.exports = async function handler (req, res) {
 
       if (await isAutomationPaused(userId, refBien)) {
         return repondre(409, { error: 'en_pause', message: 'Automatisation en pause sur ce bien.' })
+      }
+
+      // ── Étape 2 : la proposition de réponse prête, à part ───────────────
+      if (action === 'base') {
+        return await proposerReponsesPretes({ corps, garde, userId, bookingId, bien, refBien, snap, repondre })
       }
 
       // ── L'entrée de l'hôte, validée AVANT tout appel au modèle ──────────
@@ -108,17 +131,8 @@ module.exports = async function handler (req, res) {
         entree = { brouillon: v.brouillon }
       }
 
-      // Le plafond PROPRE à l'hôte (lib/guestflow/rediger.js) : compté dans le
-      // journal `ia_appels`, jamais dans celui de l'agent. Lecture impossible :
-      // on n'appelle pas (on ne sait pas si le plafond est atteint).
-      const { data: recents, error: eJ } = await supabase.from('ia_appels').select('id')
-        .eq('fonction', R.FONCTION_IA).eq('user_id', userId).eq('booking_id', bookingId)
-        .gte('created_at', new Date(Date.now() - R.FENETRE_REDACTION_MS).toISOString())
-        .limit(R.PLAFOND_REDACTION)
-      if (eJ) return repondre(503, { error: 'Lecture impossible' })
-      if ((recents || []).length >= R.PLAFOND_REDACTION) {
-        return repondre(429, { error: 'garde_ia', message: `L’assistant a déjà été sollicité ${R.PLAFOND_REDACTION} fois sur cette conversation en 24 h : écrivez celle-ci à la main.` })
-      }
+      const refus = await plafondAtteint(userId, bookingId)
+      if (refus) return repondre(refus.statut, refus.corps)
 
       // Le fil, depuis le cœur (table `messages`) — jamais un provider. Les plus
       // RÉCENTS, remis à l'endroit : une réponse se rédige sur la fin du fil.
@@ -160,4 +174,125 @@ module.exports = async function handler (req, res) {
       return repondre(500, { error: 'Erreur interne' })
     }
   })
+}
+
+// Le plafond PROPRE à l'hôte (lib/guestflow/rediger.js) : compté dans le
+// journal `ia_appels`, jamais dans celui de l'agent. Lecture impossible : on
+// n'appelle pas (on ne sait pas si le plafond est atteint). Une proposition de
+// réponse prête (étape 2) est un appel au modèle comme une rédaction : elle
+// compte dans les mêmes dix, sous la même étiquette.
+// Rend null si l'appel est permis, sinon { statut, corps }.
+async function plafondAtteint (userId, bookingId) {
+  const { data: recents, error: eJ } = await supabase.from('ia_appels').select('id')
+    .eq('fonction', R.FONCTION_IA).eq('user_id', userId).eq('booking_id', bookingId)
+    .gte('created_at', new Date(Date.now() - R.FENETRE_REDACTION_MS).toISOString())
+    .limit(R.PLAFOND_REDACTION)
+  if (eJ) return { statut: 503, corps: { error: 'Lecture impossible' } }
+  if ((recents || []).length >= R.PLAFOND_REDACTION) {
+    return { statut: 429, corps: { error: 'garde_ia', message: `L’assistant a déjà été sollicité ${R.PLAFOND_REDACTION} fois sur cette conversation en 24 h : écrivez celle-ci à la main.` } }
+  }
+  return null
+}
+
+// Les réponses prêtes du logement, par curseur (PostgREST tronque à 1000 SANS
+// erreur). Ne sont PAS montrées au modèle : celles marquées « Hors IA » (l'hôte
+// les a cachées à l'IA), et celles trop longues pour être montrées entières
+// (review 1, constat 3). On garde seulement leur sujet, pour ne rien créer
+// dessous. Rend { existantes, sujetsReserves } ou { trop: true } ou { erreur }.
+async function reponsesPretesDuBien (userId, refBien) {
+  const lire = async (colonnes) => {
+    const acc = []
+    let apres = null
+    for (;;) {
+      let q = supabase.from('knowledge').select(colonnes)
+        .eq('user_id', userId).eq('property_id', refBien).eq('type', 'faq')
+        .order('id').limit(100)
+      if (apres != null) q = q.gt('id', apres)
+      const { data, error } = await q
+      if (error) return { error }
+      acc.push(...(data || []))
+      if (acc.length > P.MAX_REPONSES_LUES) return { trop: true }
+      if (!data || data.length < 100) return { lignes: acc }
+      apres = data[data.length - 1].id
+    }
+  }
+  // ⚠ LA MIGRATION DE LA BASE V5 PEUT MANQUER : sans la colonne, tout est
+  // lisible par l'IA (sa valeur par défaut), comme le lit l'agent.
+  let r = await lire('id, key, value, lisible_par_ia')
+  if (r.error && colonneAbsente(r.error)) r = await lire('id, key, value')
+  if (r.error) return { erreur: r.error }
+  if (r.trop) return { trop: true }
+  const lignes = r.lignes.filter(l => String(l.key || '').trim())
+  const montree = (l) => l.lisible_par_ia !== false && String(l.value || '').length <= P.MAX_TEXTE_EXISTANT
+  return {
+    existantes: lignes.filter(montree)
+      .map(l => ({ id: l.id, sujet: String(l.key).trim(), texte: String(l.value || '') })),
+    sujetsReserves: lignes.filter(l => !montree(l)).map(l => String(l.key).trim())
+  }
+}
+
+// ── Étape 2 (spec §2 C) : ce que l'IA propose d'enregistrer dans la base ──
+async function proposerReponsesPretes ({ corps, garde, userId, bookingId, bien, refBien, snap, repondre }) {
+  // ⚠ AVANT TOUTE LECTURE DE LA BASE : un membre délégué n'y a pas accès
+  // (dette 68), et la proposition en montre le texte (« avant »). Le masquage
+  // de la carte côté page est un confort ; ce refus est la garde.
+  if (!estTitulaireDuCompte(garde.contexte)) {
+    return repondre(403, { error: 'reserve_titulaire', message: 'Réservé au titulaire du compte' })
+  }
+  const tacheId = String(corps.tacheId || '').trim()
+  if (!tacheId || tacheId.length > 64) return repondre(400, { error: 'Demande invalide' })
+  const v = P.validerEnvoye(corps.envoye)
+  if (!v.ok) return repondre(400, { error: v.erreur })
+
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, book_id, property_id, task_type, status, summary, sub_tasks')
+    .eq('user_id', userId).eq('id', tacheId).maybeSingle()
+  if (eT) return repondre(503, { error: 'Lecture impossible' })
+  if (!tache || String(tache.book_id) !== bookingId || String(tache.property_id) !== refBien) {
+    return repondre(404, { error: 'Tâche introuvable' })
+  }
+  const questions = P.questionsPourLaBase(tache)
+  if (!questions.length) return repondre(409, { error: 'sans_question' })
+
+  const refus = await plafondAtteint(userId, bookingId)
+  if (refus) return repondre(refus.statut, refus.corps)
+
+  const base = await reponsesPretesDuBien(userId, refBien)
+  if (base.erreur) return repondre(503, { error: 'Lecture impossible' })
+  // Une base trop grande pour être rapprochée en entier : rien plutôt qu'une
+  // « nouvelle » réponse qui en doublerait une qu'on n'a pas lue.
+  if (base.trop) return repondre(200, { ok: true, propositions: [], motif: 'base_trop_grande' })
+
+  // ⚠ NI LE PRÉNOM NI LE NOM DU VOYAGEUR (review 1, constat 1) : le texte
+  // envoyé commence presque toujours par « Bonjour {prénom} ».
+  const noms = [snap.firstName, snap.lastName]
+  const prompt = P.promptReponsesPretes({
+    questions: questions.map(q => P.anonymiser(q, noms)), envoye: P.anonymiser(v.envoye, noms),
+    existantes: base.existantes, bienNom: bien.name
+  })
+  // ⚠ UNE SORTIE PLUS LONGUE QU'UNE CLASSIFICATION (review 1, constat 4) : une
+  // mise à jour rend le texte COMPLET de chaque réponse visée. Avec la borne de
+  // la classification, le JSON se coupait, l'appel était perdu, l'hôte ne
+  // voyait rien.
+  const demande = requeteClassification(prompt, modeleConfigure())
+  demande.max_tokens = Math.max(demande.max_tokens || 0, 8000)
+  let brut
+  try {
+    const reponse = await avecContexteIA({ fonction: R.FONCTION_IA, userId, propertyId: refBien, bookingId },
+      () => anthropic.messages.create(demande))
+    if (reponse && reponse.stop_reason === 'max_tokens') {
+      console.error('[guestflow-rediger] proposition de base coupee par max_tokens', demande.max_tokens)
+      return repondre(502, { error: 'ia_indisponible', message: 'L’assistant n’a pas pu finir sa proposition.' })
+    }
+    brut = P.jsonDe(reponse)
+  } catch (err) {
+    console.error('[guestflow-rediger] proposition de base en echec', err?.message)
+    return repondre(502, { error: 'ia_indisponible', message: 'L’assistant n’a pas pu répondre, réessayez.' })
+  }
+  if (!brut) return repondre(502, { error: 'ia_indisponible', message: 'L’assistant n’a rien proposé, réessayez.' })
+  const propositions = P.propositionsDe(brut, {
+    existantes: base.existantes, sujetsReserves: base.sujetsReserves,
+    noms, maxPropositions: questions.length
+  })
+  return repondre(200, { ok: true, propositions })
 }

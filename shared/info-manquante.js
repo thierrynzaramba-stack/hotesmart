@@ -127,3 +127,70 @@ export function cleErreur (code) {
 export function relireApres (code) {
   return code === 'deja_traitee' || code === 'sans_question' || code === 'questions_changees' || code === 'deja_close'
 }
+
+// ─── Étape 2 (spec §2 C) : retenir la réponse dans la base ──────────────────
+// Après l'envoi d'une réponse rédigée par l'IA (A ou B) sur une question
+// ouverte, l'IA propose d'enregistrer une réponse prête, ou d'en mettre une à
+// jour. ⚠ RIEN N'EST ÉCRIT SANS LE GESTE DE L'HÔTE : « Enregistrer » passe par
+// le writer UNIQUE de la base (`POST /api/ecran/connaissance`), avec ses gardes.
+// « Modifier » se fait dans la carte (décision de Thierry du 18 novembre 2026).
+
+// Copies des bornes du writer de la base, tenues par un test.
+export const MAX_SUJET_BASE = 200
+export const MAX_TEXTE_BASE = 4000
+
+/** Le corps de `POST /api/guestflow-rediger`, action `base`. */
+export function corpsBase (bookingId, tacheId, envoye) {
+  return { action: 'base', bookingId: String(bookingId), tacheId: String(tacheId), envoye: String(envoye || '').trim() }
+}
+
+/**
+ * Les propositions reçues, prêtes à afficher. Seules celles qui ont la forme
+ * attendue passent : une modification sans identifiant ne saurait pas QUELLE
+ * réponse elle remplace.
+ * Statuts : 'proposee' → 'edition' (« Modifier ») → 'enregistrement' →
+ * 'enregistree' ; ou 'ecartee' (« Non merci »).
+ */
+export function propositionsInitiales (liste) {
+  return (Array.isArray(liste) ? liste : [])
+    .filter(p => p && (p.action === 'creer' || (p.action === 'modifier' && p.id != null && p.id !== '')) &&
+      typeof p.sujet === 'string' && p.sujet.trim() && typeof p.texte === 'string' && p.texte.trim())
+    .map(p => ({
+      action: p.action, id: p.action === 'modifier' ? p.id : null, sujet: p.sujet, texte: p.texte,
+      avant: p.action === 'modifier' ? String(p.avant || '') : null, statut: 'proposee', erreur: null
+    }))
+}
+
+/** Les propositions encore à l'écran (« Non merci » les retire). */
+export function propositionsVisibles (liste) {
+  return (Array.isArray(liste) ? liste : []).filter(p => p && p.statut !== 'ecartee')
+}
+
+/**
+ * Le corps du writer de la base pour « Enregistrer » : `{ ok, corps }`, ou
+ * `{ ok: false, erreur }` (clé `messages.info.base.erreur.*`) sans appel.
+ * Une CRÉATION est lisible par l'IA (spec : c'est tout son objet) ; une
+ * MODIFICATION ne touche pas au cadenas que l'hôte a peut-être posé.
+ */
+export function corpsEnregistrer (p, refBien) {
+  const sujet = String((p && p.sujet) || '').trim()
+  const texte = String((p && p.texte) || '').trim()
+  if (!p || !refBien) return { ok: false, erreur: 'messages.info.base.erreur.echec' }
+  if (!sujet || !texte) return { ok: false, erreur: 'messages.info.base.erreur.vide' }
+  if (sujet.length > MAX_SUJET_BASE || texte.length > MAX_TEXTE_BASE) return { ok: false, erreur: 'messages.info.base.erreur.trop_long' }
+  const corps = { action: 'enregistrer', bien: String(refBien), key: sujet, value: texte }
+  if (p.action === 'modifier') corps.id = p.id
+  else corps.lisible_par_ia = true
+  return { ok: true, corps }
+}
+
+/** La phrase d'un refus du writer de la base ; jamais un écran muet. */
+export function cleErreurBase (err) {
+  const code = err && err.code, statut = err && err.status
+  if (statut === 409 && code === 'sujet_existe') return 'messages.info.base.erreur.sujet_existe'
+  if (statut === 404) return 'messages.info.base.erreur.introuvable'
+  // Un refus définitif (logement archivé, compte du sélecteur) : pas « réessayez ».
+  if (statut === 403) return 'messages.info.base.erreur.refuse'
+  if (statut === 400 && code === 'trop_long') return 'messages.info.base.erreur.trop_long'
+  return 'messages.info.base.erreur.echec'
+}
