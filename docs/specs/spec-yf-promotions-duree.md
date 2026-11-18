@@ -46,9 +46,27 @@ de novembre 2023 à octobre 2026.
 | Booking, promotions | oui (extranet) | **non** (Channex ne gère pas les promotions Booking) | manuel |
 | Booking, second tarif « séjour long » relié dans Channex | oui | à vérifier | la doc Channex : en tarification par occupation, restrictions par le seul « tarif principal » ; notre canal est en « Standard » — question à l'assistance |
 
-**État au 18 novembre 2026 sur le 23** : toutes les remises de l'annonce Airbnb
-retirées (elles étaient à −22 % dès 2, 3 et 7 nuits, toute l'année, août
-compris) ; seul reste l'ensemble « deux jour » sur avril 2027. Booking non touché.
+**Gestes faits en production le 18 novembre 2026 sur le 23, côté Airbnb, à la
+demande de Thierry** (heures de Paris, relevées dans `channel_events` du canal
+Airbnb `224cbb66`) :
+
+| heure | geste | preuve |
+|---|---|---|
+| 19:15:05 | `update_pricing_settings` : les trois remises de l'annonce (−22 % dès 2, 3 et 7 nuits, toute l'année, août compris) retirées par Channex > Listing > le 23 > Price settings ; prix de base 85 €, voyageurs, frais : inchangés | — |
+| 19:15:20 | `load_listing_price_settings` : relu depuis Airbnb, « No discount rules configured » | Airbnb > Réductions : 0 % semaine, 0 % mois, aucune autre |
+| 19:17:05 | `full_sync`, `scope: rate_plans`, un seul tarif : `b56feb44` (petit-enfant Airbnb du 23), lancé depuis le login Channex partagé — origine non établie (voir §2 ter) | — |
+| ≈ 19:19 | ensemble de règles « deux jour » (−10 % dès 2 nuits, rien d'autre) appliqué au 23 du 1er au 30 avril 2027, dans le calendrier Airbnb | 8 et 30 avril : « Ensemble de règles deux jour » ; 1er mai : aucun ; côté voyageur 6→8 avril −33,80 €, 4→6 mai rien |
+
+Booking, La bulle, Ofuro Futari : non touchés.
+
+### 2 ter. Le Full Sync de 19:17:05
+
+Il touchait le seul petit-enfant Airbnb du 23. Contrôle fait à 23:05 : sur
+469 jours (19/11/2026 → 01/03/2028), pour La bulle, le 23 et Ofuro Futari,
+**aucune nuit fermée sur la base (stop_sell ou disponibilité 0) n'est ouverte
+sur le petit-enfant Airbnb** (165, 284 et 428 nuits fermées, 0 écart). Le Full
+Sync ne pouvait donc rouvrir aucune nuit. Il est antérieur à la pose de
+l'ensemble « deux jour » : il ne prouve rien sur sa survie.
 
 ## 3. Les règles produit
 
