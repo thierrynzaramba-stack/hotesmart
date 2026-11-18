@@ -482,6 +482,39 @@ test('LE TEST QUI COMPTE : envoi INCERTAIN (coupure pendant l envoi) — l alert
   assert.doesNotMatch(LABELS.code_acces_non_envoye, /NON ENVOYÉ/, 'le libelle contredirait le texte')
 })
 
+test('LE TEST QUI COMPTE (dette 144) : envoi INCERTAIN — la tache porte le marqueur « incertain », que lit l agent IA ; pour l hote, la meme proposition', async () => {
+  const { MARQUEUR_CODE_INCERTAIN } = require('../lib/marqueurs-code-acces')
+  const { mod, vus } = charger({ envoi: { ok: false, incertain: true, error: 'network_error' } })
+  await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+  assert.strictEqual(vus.taches.length, 1)
+  const t = vus.taches[0]
+  assert.strictEqual(t.guest_message, MARQUEUR_CODE_INCERTAIN)
+  assert.match(t.summary, /envoi automatique interrompu \(coupure pendant l'envoi\) : il a peut-être été reçu\. Dans le doute, à transmettre manuellement\.$/)
+  assert.doesNotMatch(t.summary, /impossible|pas de messagerie/)
+  // Ce qui ne change pas pour l'hote (decision de Thierry) : une proposition
+  // « Envoyer » portant le texte du code.
+  assert.strictEqual(t.status, 'pending_validation')
+  assert.strictEqual(t.task_type, 'auto_message')
+  assert.strictEqual(t.suggested_reply, vus.envois[0])
+})
+
+test('dette 144 : un REFUS du canal, un échec PERMANENT ou un canal DIFFÉRÉ gardent le marqueur « impossible » et son texte', async () => {
+  // Review 1, constat 3 : seul le refus nu etait teste. Un `permanent` (adresse
+  // invalide, `call_error` Channex) ou un `differe` n'est PAS parti, c'est sur.
+  const { MARQUEUR_CODE_IMPOSSIBLE } = require('../lib/marqueurs-code-acces')
+  for (const envoi of [
+    { ok: false, reason: 'pas de messagerie' },
+    { ok: false, permanent: true, error: 'call_error' },
+    { ok: false, differe: true, error: 'canal e-mail coupe' }
+  ]) {
+    const { mod, vus } = charger({ envoi })
+    await mod.processArrivalCodes('u1', null, BIEN_AVEC_ADRESSE, [arrivante()], {})
+    assert.strictEqual(vus.taches.length, 1, JSON.stringify(envoi))
+    assert.strictEqual(vus.taches[0].guest_message, MARQUEUR_CODE_IMPOSSIBLE, JSON.stringify(envoi))
+    assert.match(vus.taches[0].summary, /envoi automatique impossible \(pas de messagerie pour cette réservation\), à transmettre manuellement\.$/)
+  }
+})
+
 test('envoi INCERTAIN et information manquante : « PEUT-ÊTRE REÇU », puis le motif et la reservation en fin de texte', async () => {
   // Review 2, constat 3 : le motif du canal n'etait ecrit nulle part.
   const { mod, vus } = charger({ envoi: { ok: false, incertain: true, error: 'network_error' } })

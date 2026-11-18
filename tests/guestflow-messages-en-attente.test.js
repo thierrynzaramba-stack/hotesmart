@@ -507,6 +507,83 @@ test('LE TEST QUI COMPTE : envoi impossible — journal ecrit, le code est dit N
   assert.ok(/Code d'accès[^\n]*: NON ENVOYÉ — envoi automatique impossible/.test(bloc), bloc)
 })
 
+// ─── Dette 144 : un envoi INCERTAIN du code n'est ni « envoyé » ni « non envoyé » ───
+// Decision de Thierry du 18 novembre 2026 : « corriger l'IA seulement ».
+const { MARQUEUR_CODE_IMPOSSIBLE, MARQUEUR_CODE_INCERTAIN } = require('../lib/marqueurs-code-acces')
+const avecCode = (taches) => {
+  const tables = tablesVides()
+  tables.message_templates = [{ id: 'tpl-code', user_id: U, property_id: P, event_type: 'menage_done', active: true }]
+  tables.message_sent_log = [{ user_id: U, booking_id: B, template_id: 'tpl-code', sent_at: '2026-10-01T12:00:00Z' }]
+  for (const o of taches) tables.agent_tasks.push(tache({ task_type: 'auto_message', created_at: '2026-10-01T12:00:00Z', ...o }))
+  return tables
+}
+
+test('LE TEST QUI COMPTE (dette 144) : envoi INCERTAIN du code — l agent ne le dit ni envoyé ni NON ENVOYÉ, et croit le voyageur', async () => {
+  const bloc = await promptPour(avecCode([{ status: 'pending_validation', guest_message: MARQUEUR_CODE_INCERTAIN }]))
+  const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
+  assert.match(ligne, /: ENVOI INCERTAIN — coupure pendant l'envoi automatique, le voyageur l'a peut-être reçu\./, bloc)
+  assert.match(ligne, /N'affirme ni qu'il est parti ni qu'il ne l'est pas ; s'il dit ne pas l'avoir reçu, c'est une intervention/)
+  assert.doesNotMatch(ligne, /NON ENVOYÉ/, 'l agent annoncerait un code que le voyageur a peut-être')
+  assert.doesNotMatch(ligne, /marqué envoyé/, 'l agent ferait chercher un message peut-être jamais arrivé')
+})
+
+test('dette 144 : l hote ECARTE la proposition d un envoi incertain — ce n est pas « NON ENVOYÉ »', async () => {
+  // Ecarter, ici, c'est refuser de le RENVOYER (le voyageur l'avait).
+  const bloc = await promptPour(avecCode([{ status: 'ignored', guest_message: MARQUEUR_CODE_INCERTAIN }]))
+  const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
+  // Le fait AVANT la consigne, et un fait, pas une intention (review 1, constat 2).
+  assert.match(ligne, /: ENVOI INCERTAIN \(proposition de renvoi écartée par l'hôte\) — coupure pendant l'envoi automatique, le voyageur l'a peut-être reçu\. .*c'est une intervention$/, bloc)
+  assert.doesNotMatch(ligne, /NON ENVOYÉ|n'a pas voulu/)
+})
+
+test('dette 144 : un « non envoyé » SÛR l emporte sur un envoi incertain (deux modèles de code), en attente comme écartés', async () => {
+  // Garde de NON-REGRESSION : elle passe aussi contre le code d'avant, qui ne
+  // connaissait pas le marqueur incertain. Elle tient l'ORDRE du code neuf.
+  const cas = [
+    ['pending_validation', MARQUEUR_CODE_IMPOSSIBLE, /: NON ENVOYÉ — envoi automatique impossible, l'hôte doit le transmettre lui-même$/],
+    ['ignored', '[AUTO: arrival_code]', /: NON ENVOYÉ — écarté par l'hôte$/]
+  ]
+  for (const [status, sur, attendu] of cas) {
+    for (const ordre of [[MARQUEUR_CODE_INCERTAIN, sur], [sur, MARQUEUR_CODE_INCERTAIN]]) {
+      const bloc = await promptPour(avecCode(ordre.map(guest_message => ({ status, guest_message }))))
+      const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
+      assert.match(ligne, attendu, `${status} : ${bloc}`)
+    }
+  }
+  // ⚠ ET D'UN STATUT A L'AUTRE (review 1, constat 1) : l'incertain EN ATTENTE
+  // ne couvre pas un refus ECARTE par l'hote. Celle-ci rougit contre la
+  // premiere version du lot.
+  for (const sur of [MARQUEUR_CODE_IMPOSSIBLE, '[AUTO: arrival_code]']) {
+    const bloc = await promptPour(avecCode([
+      { status: 'pending_validation', guest_message: MARQUEUR_CODE_INCERTAIN },
+      { status: 'ignored', guest_message: sur }
+    ]))
+    const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
+    assert.match(ligne, /: NON ENVOYÉ — écarté par l'hôte$/, `${sur} : ${bloc}`)
+  }
+  // Et une tache « a valider » du mode Test l'emporte aussi : rien n'est parti.
+  const bloc = await promptPour(avecCode([
+    { status: 'pending_validation', guest_message: MARQUEUR_CODE_INCERTAIN },
+    { status: 'pending_validation', guest_message: '[AUTO: arrival_code]' }
+  ]))
+  assert.match(bloc, /Code d'accès[^\n]*: NON ENVOYÉ — en attente de validation/, bloc)
+})
+
+test('dette 144 : les marqueurs du code non abouti ne sont pas recopiés — l écrivain et l agent lisent le même module', () => {
+  // ALARME DE STYLE, pas une preuve (review 1, constat 5) : une recopie par
+  // concatenation la contourne. Le fond est tenu par les tests de l'etat des
+  // envois ci-dessus et de la tache dans arrival-code-manquant-alerte.
+  const fs = require('fs')
+  const ecrivain = fs.readFileSync(require.resolve('../lib/cron-arrival-code.js'), 'utf8')
+  const agent = fs.readFileSync(require.resolve('../lib/cron-classify.js'), 'utf8')
+  for (const src of [ecrivain, agent]) assert.match(src, /require\('\.\/marqueurs-code-acces'\)/)
+  for (const m of [MARQUEUR_CODE_IMPOSSIBLE, MARQUEUR_CODE_INCERTAIN]) {
+    assert.ok(!ecrivain.includes(m), `marqueur recopié dans cron-arrival-code : ${m}`)
+    assert.ok(!agent.includes(m), `marqueur recopié dans cron-classify : ${m}`)
+  }
+  assert.notStrictEqual(MARQUEUR_CODE_IMPOSSIBLE, MARQUEUR_CODE_INCERTAIN)
+})
+
 test('un modele ecarte par l\'hote est NON ENVOYÉ ; un modele traite le dit sans garantir l\'envoi', async () => {
   const tables = tablesVides()
   tables.message_templates = [

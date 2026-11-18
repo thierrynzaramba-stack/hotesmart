@@ -49,8 +49,13 @@ moment et seulement si le logement est prêt.
   pas sur le logement : deux codes refusés le même jour sur le même logement (jour de
   dos-à-dos), ou deux modèles de code d'une même réservation, donnent **deux** alertes. Si la
   connexion a été coupée **pendant** l'envoi — messagerie du canal ou e-mail —, le texte dit
-  **« PEUT-ÊTRE REÇU »** : vérifier le fil avant de renvoyer (la tâche de l'hôte, elle, dit
-  encore « impossible » : dette 144). Pour un même modèle de code, une seule alerte : s'il
+  **« PEUT-ÊTRE REÇU »** : vérifier le fil avant de renvoyer. La tâche de l'hôte reste la même
+  proposition « Envoyer », sans avertissement (décision de Thierry du 18 novembre 2026 : un
+  code reçu deux fois ne gêne personne, un code manquant laisse la porte fermée) ; seul son
+  marqueur change (`[AUTO: arrival_code — envoi incertain]`, `lib/marqueurs-code-acces.js`),
+  pour que l'agent IA ne dise au voyageur ni que le code est parti, ni qu'il ne l'est pas
+  (« ENVOI INCERTAIN » dans l'état des envois, et un voyageur qui dit ne pas l'avoir reçu est
+  cru : c'est une intervention). Dette 144. Pour un même modèle de code, une seule alerte : s'il
   manque aussi une information, c'est l'alerte « information manquante » qui part — elle dit
   déjà « NON ENVOYÉ par le canal » (ou « PEUT-ÊTRE REÇU »), et le motif du canal en fin de
   texte. Deux modèles de code actifs sur un logement donnent chacun leur alerte. Un canal
