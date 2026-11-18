@@ -119,5 +119,42 @@ test('la consigne demande le type de document, la période couverte et le solde 
   for (const cle of ['"type_document"', '"periode_debut"', '"periode_fin"', '"solde_ttc"']) assert.ok(src.includes(cle), cle)
   // Les types de la consigne sont ceux de la base.
   for (const t of require('../lib/charges/regles').TYPES_DOCUMENT) assert.ok(src.includes(`"${t}"`), t)
-  assert.match(src, /CONSOMMATION de la période/)
+  assert.match(src, /TOTAL facturé pour la période \(abonnement, énergie et taxes compris\), AVANT déduction des mensualités/)
+})
+
+test('LE TEST QUI COMPTE (Thierry, 18 novembre 2026) : sur une facture d\'ÉNERGIE, la consigne fait chercher la période des RELEVÉS dans toutes les pages', async () => {
+  // Vécu en production : une régularisation EDF de 5 856,48 € lue sans
+  // période — la consommation n'était écrite qu'en page 2 du détail. Sans
+  // période, tout tombait sur le mois de la date.
+  const { CONSIGNE } = require('../lib/charges/lecture')
+  assert.match(CONSIGNE, /facture, une régularisation ou un avoir d'ÉNERGIE \(électricité, gaz, eau\) — pas un échéancier/)
+  assert.match(CONSIGNE, /cherche-la dans TOUTES les pages/)
+  assert.match(CONSIGNE, /14\/03\/24 donne 2024-03-14/, 'l\'année sur deux chiffres')
+  assert.match(CONSIGNE, /Ne prends PAS la période de l'abonnement/)
+  assert.match(CONSIGNE, /prends la période des relevés du contrat d'ÉLECTRICITÉ/)
+  // ⚠ L'EXEMPLE N'EST PAS LA FACTURE DE PRODUCTION (review, constat 3) :
+  // sinon sa relecture ne prouverait rien, et l'IA pourrait recopier ses dates.
+  assert.doesNotMatch(CONSIGNE, /26\/09\/24|25\/09\/25/)
+  // ⚠ L'UNION DES CONTRATS N'EST PLUS DEMANDÉE (review, constat 1) : elle
+  // fabriquait des périodes de plus de 366 jours, refusées par la normalisation.
+  assert.doesNotMatch(CONSIGNE, /le plus ancien et le dernier jour le plus récent/)
+  // Et c'est bien CE texte qui part à l'IA (review, constat 5).
+  const c = client(texte('{"montant_ttc": 12}'))
+  await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: c })
+  assert.equal(c.demandes[0].messages[0].content[1].text, CONSIGNE)
+})
+
+test('une régularisation lue sur un an de relevés garde sa période ; lue sur plus de 366 jours, elle tombe à null MAIS garde sa trace', async () => {
+  const regul = (debut, fin) => texte(JSON.stringify({ type_document: 'regularisation', montant_ttc: 5856.48, montant_ht: 4932.24, montant_tva: 924.24, solde_ttc: 1916.83, periode_debut: debut, periode_fin: fin }))
+  const c = client(regul('2024-09-26', '2025-09-25'))
+  const r = await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: c })
+  assert.deepEqual([r.lu.periode_debut, r.lu.periode_fin, r.lu.periode_refusee], ['2024-09-26', '2025-09-25', null])
+  const c2 = client(regul('2024-09-20', '2025-09-28'))
+  const r2 = await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: c2 })
+  assert.deepEqual([r2.lu.periode_debut, r2.lu.periode_fin], [null, null], '374 jours : au-delà de la borne de la base')
+  assert.deepEqual(r2.lu.periode_refusee, { debut: '2024-09-20', fin: '2025-09-28', motif: 'periode_trop_longue' })
+  // Rien de lu : pas de trace inventée.
+  const c3 = client(texte('{"montant_ttc": 12}'))
+  const r3 = await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: c3 })
+  assert.equal(r3.lu.periode_refusee, null)
 })
