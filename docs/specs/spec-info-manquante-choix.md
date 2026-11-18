@@ -222,8 +222,8 @@ vivent dans la zone de saisie jusqu'à l'envoi.
 | 3 | Cache navigateur | Aucun : ce sont des tâches et des messages (temps réel). |
 | 4 | `private, no-store` avant le premier refus | Oui, sur `/api/guestflow-rediger`, 405 compris. |
 | 5 | Fichiers statiques versionnés | Le JS ajouté vit dans un module partagé versionné (`shared/…`). |
-| 6 | Pas de lecture tronquée à 1000 lignes | Lectures bornées : une tâche, les 30 derniers messages du fil, les réponses prêtes d'un logement (bien moins de 1000), au plus 10 lignes du journal. Les tâches du fil en direct sont lues des plus récentes aux plus anciennes : la borne des 50 ne peut pas cacher la proposition du jour derrière de vieilles tâches jamais closes. |
-| 7 | Budget par écran | **Aucun appel périodique ajouté** : le fil en direct reste à 12 appels par minute. Chaque geste (« Rédiger », « IA », proposition de base) coûte un POST et un appel IA. Tenu par un test qui compte les appels de la page. |
+| 6 | Pas de lecture tronquée à 1000 lignes | Lectures bornées : une tâche, les 30 derniers messages du fil, les réponses prêtes d'un logement (étape 2 : par curseur, et au-delà de 300 aucune proposition plutôt qu'un rapprochement sur une base tronquée), au plus 10 lignes du journal. Les tâches du fil en direct sont lues des plus récentes aux plus anciennes : la borne des 50 ne peut pas cacher la proposition du jour derrière de vieilles tâches jamais closes. |
+| 7 | Budget par écran | **Aucun appel périodique ajouté** : le fil en direct reste à 12 appels par minute. Chaque geste (« Rédiger », « IA », proposition de base) coûte un POST et un appel IA. Étape 2 : la proposition n'est demandée qu'une fois, après l'envoi réussi d'une réponse rédigée par l'IA, et au titulaire seulement ; « Enregistrer » coûte un POST au writer de la base. Tenu par les tests qui comptent les appels de la page (`tests/info-manquante-dom.test.js`). |
 | 8 | Mesure avant / après | Avant, mesuré en production le 10 novembre 2026 : une relecture du fil = 7 requêtes, 423 octets. Après : identique hors gestes, à remesurer en recette. |
 
 ## 6. Inventaire (rien n'est retiré)

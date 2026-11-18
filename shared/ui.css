@@ -357,6 +357,12 @@ h1, h2, h3, p { margin: 0; }
 .info-carte__q input { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 9px 12px; font-size: var(--fs-small); font-family: inherit; outline: none; }
 .info-carte__q input:focus { border-color: var(--ink); }
 .info-carte .bulle__actions { margin-top: 0; }
+.info-carte__q textarea { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 9px 12px; font-size: var(--fs-small); font-family: inherit; outline: none; resize: vertical; min-height: 96px; }
+.info-carte__q textarea:focus { border-color: var(--ink); }
+.info-carte__sujet { font-weight: var(--fw-semibold); }
+.info-carte__texte, .info-carte__avant { white-space: pre-wrap; }
+.info-carte__avant { text-decoration: line-through; }
+.info-carte__erreur { color: var(--danger); }
 .bulle-menu { position: relative; }
 .bulle-menu summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface); color: var(--ink); }
 .bulle-menu summary::-webkit-details-marker { display: none; }

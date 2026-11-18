@@ -37,9 +37,9 @@ function differe () {
 }
 
 function monter ({ conversations = [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))])], infos = [INFO],
-  ecriture = true, repondre = () => ({}) } = {}) {
+  ecriture = true, titulaire = true, repondre = () => ({}) } = {}) {
   const appels = []
-  const banc = B.monter({ ecriture, appel: async (chemin, corps) => {
+  const banc = B.monter({ ecriture, titulaire, appel: async (chemin, corps) => {
     appels.push({ chemin, corps })
     if (chemin.startsWith('/api/messages?direct=1')) return { messages: [], taches: [], infos, dernier: null, complet: true }
     return repondre(chemin, corps)
@@ -58,7 +58,11 @@ function monter ({ conversations = [conv('B1', [entrant('Can I come with my dog?
     banc, msg, appels, doc: banc.doc,
     carte: () => banc.doc.querySelector('[data-list="fil"] [data-bind="info-carte"]'),
     zone: () => banc.doc.querySelector('[data-bind="texte"]'),
-    redactions: () => appels.filter(a => a.chemin === '/api/guestflow-rediger'),
+    // Les rédactions de l'étape 1 ; la proposition de base (étape 2) se compte à part.
+    redactions: () => appels.filter(a => a.chemin === '/api/guestflow-rediger' && !(a.corps && a.corps.action === 'base')),
+    propositionsBase: () => appels.filter(a => a.chemin === '/api/guestflow-rediger' && a.corps && a.corps.action === 'base'),
+    ecrituresBase: () => appels.filter(a => a.chemin === '/api/ecran/connaissance'),
+    carteBase: () => banc.doc.querySelector('[data-list="fil"] [data-bind="info-base"]'),
     envois: () => appels.filter(a => a.chemin === '/api/beds24' || a.chemin === '/api/channel-message'),
     clotures: () => appels.filter(a => a.chemin === '/api/messages' && a.corps && a.corps.action === 'info_traitee'),
     fermer: () => { banc.window.clearTimeout(msg.direct.minuteur); banc.fermer() }
@@ -668,5 +672,248 @@ test('« IA » refuse : la phrase du refus, le texte de l hote intact', async ()
     await v.msg.redigerBrouillon()
     assert.equal(v.zone().value, 'oui chien')
     assert.match(v.doc.querySelector('[data-bind="info-etat"]').textContent, /Trop de rédactions/)
+  } finally { v.fermer() }
+})
+
+// ─── Étape 2 (spec §2 C) : retenir la réponse dans la base ───────────────────
+// ⚠ CE QUE CES TESTS GARDENT : RIEN N'EST ÉCRIT SANS LE GESTE DE L'HÔTE (le
+// writer de la base n'est appelé qu'au clic « Enregistrer »), la proposition
+// n'est demandée qu'APRÈS un envoi réussi, et jamais pour un membre délégué.
+
+const PROPOSITIONS = [
+  { action: 'modifier', id: 7, sujet: 'Animaux', avant: 'Les animaux ne sont pas acceptés.', texte: 'Les chiens sont acceptés ; les autres animaux, non.' },
+  { action: 'creer', sujet: 'Moto', texte: 'Pas de moto dans le logement ; un garage est à 200 m.' }
+]
+const reponsesBase = (extra = () => undefined) => (chemin, corps) => {
+  const r = extra(chemin, corps)
+  if (r !== undefined) return r
+  if (chemin === '/api/guestflow-rediger') return corps.action === 'base' ? { ok: true, propositions: PROPOSITIONS } : { ok: true, texte: REDIGE }
+  return { ok: true }
+}
+async function envoyerDepuisLaCarte (v) {
+  await v.msg.relireDirect()
+  choix(v, 0, 'oui'); choix(v, 1, 'non')
+  cliquer(v.carte().querySelector('[data-info-rediger]'))
+  await attendre(); await attendre()
+  await v.msg.envoyer()
+  await attendre(); await attendre(); await attendre()
+}
+
+test('LE TEST QUI COMPTE (étape 2) : après l envoi depuis la carte, la proposition est demandée — APRÈS l envoi — et RIEN n est écrit sans clic', async () => {
+  const v = monter({ repondre: reponsesBase() })
+  try {
+    await envoyerDepuisLaCarte(v)
+    assert.equal(v.envois().length, 1)
+    assert.deepEqual(v.propositionsBase().map(a => a.corps), [{ action: 'base', bookingId: 'B1', tacheId: 'ti1', envoye: REDIGE }])
+    assert.ok(v.appels.indexOf(v.envois()[0]) < v.appels.indexOf(v.propositionsBase()[0]), 'la proposition est demandée avant l envoi')
+    const carte = v.carteBase()
+    assert.ok(carte, 'la carte de base est là')
+    assert.match(carte.textContent, /À retenir pour la prochaine fois/)
+    const lignes = [...carte.querySelectorAll('[data-base]')]
+    assert.equal(lignes.length, 2)
+    assert.match(lignes[0].textContent, /Mise à jour d’une réponse prête/)
+    assert.match(lignes[0].textContent, /Aujourd’hui : Les animaux ne sont pas acceptés\./)
+    assert.match(lignes[1].textContent, /Nouvelle réponse prête/)
+    assert.deepEqual(v.ecrituresBase(), [], 'la base est écrite sans geste de l hôte')
+  } finally { v.fermer() }
+})
+
+test('étape 2 : « Enregistrer » une création -> le writer de la base, lisible par l IA ; une mise à jour -> son id, sans toucher au cadenas', async () => {
+  const v = monter({ repondre: reponsesBase() })
+  try {
+    await envoyerDepuisLaCarte(v)
+    cliquer(v.carteBase().querySelector('[data-base-enregistrer="1"]'))
+    await attendre(); await attendre()
+    cliquer(v.carteBase().querySelector('[data-base-enregistrer="0"]'))
+    await attendre(); await attendre()
+    assert.deepEqual(v.ecrituresBase().map(a => a.corps), [
+      { action: 'enregistrer', bien: '209413', key: 'Moto', value: PROPOSITIONS[1].texte, lisible_par_ia: true },
+      { action: 'enregistrer', bien: '209413', key: 'Animaux', value: PROPOSITIONS[0].texte, id: 7 }
+    ])
+    const lignes = [...v.carteBase().querySelectorAll('[data-base]')]
+    for (const l of lignes) {
+      assert.match(l.textContent, /Enregistrée dans vos réponses prêtes/)
+      assert.equal(l.querySelector('[data-base-enregistrer]'), null, 'un second clic réécrirait')
+    }
+    assert.equal(v.envois().length, 1, 'rien d autre ne part au voyageur')
+  } finally { v.fermer() }
+})
+
+test('étape 2 : « Modifier » dans la carte — le texte (et le sujet d une création) se corrige sur place, survit au rendu, et part tel quel', async () => {
+  const v = monter({ repondre: reponsesBase() })
+  try {
+    await envoyerDepuisLaCarte(v)
+    cliquer(v.carteBase().querySelector('[data-base-modifier="1"]'))
+    const sujet = v.carteBase().querySelector('[data-base-sujet="1"]')
+    const texte = v.carteBase().querySelector('[data-base-texte="1"]')
+    assert.ok(sujet && texte, 'une création se corrige : sujet et texte')
+    taper(sujet, 'Stationnement moto')
+    taper(texte, 'Pas de moto dans le logement.')
+    v.msg.renderFil()
+    assert.equal(v.carteBase().querySelector('[data-base-texte="1"]').value, 'Pas de moto dans le logement.', 'un rendu du fil efface la correction')
+    cliquer(v.carteBase().querySelector('[data-base-modifier="0"]'))
+    assert.equal(v.carteBase().querySelector('[data-base-sujet="0"]'), null, 'le sujet d une réponse existante reste le sien')
+    cliquer(v.carteBase().querySelector('[data-base-enregistrer="1"]'))
+    await attendre(); await attendre()
+    assert.deepEqual(v.ecrituresBase()[0].corps, { action: 'enregistrer', bien: '209413', key: 'Stationnement moto', value: 'Pas de moto dans le logement.', lisible_par_ia: true })
+  } finally { v.fermer() }
+})
+
+test('étape 2 : un texte vidé ne part pas ; un refus du writer se dit, et la proposition reste', async () => {
+  const v = monter({ repondre: reponsesBase((chemin) => {
+    if (chemin === '/api/ecran/connaissance') { const e = new Error('Une réponse porte déjà ce sujet'); e.status = 409; e.code = 'sujet_existe'; throw e }
+  }) })
+  try {
+    await envoyerDepuisLaCarte(v)
+    cliquer(v.carteBase().querySelector('[data-base-modifier="1"]'))
+    taper(v.carteBase().querySelector('[data-base-texte="1"]'), '   ')
+    cliquer(v.carteBase().querySelector('[data-base-enregistrer="1"]'))
+    await attendre()
+    assert.equal(v.ecrituresBase().length, 0)
+    assert.match(v.carteBase().querySelector('[data-base="1"]').textContent, /Le sujet et la réponse sont obligatoires/)
+    taper(v.carteBase().querySelector('[data-base-texte="1"]'), 'Pas de moto.')
+    cliquer(v.carteBase().querySelector('[data-base-enregistrer="1"]'))
+    await attendre(); await attendre()
+    assert.equal(v.ecrituresBase().length, 1)
+    const ligne = v.carteBase().querySelector('[data-base="1"]')
+    assert.match(ligne.textContent, /Une réponse prête porte déjà ce sujet/)
+    assert.ok(ligne.querySelector('[data-base-texte="1"]'), 'la correction reste à l écran')
+  } finally { v.fermer() }
+})
+
+test('étape 2 : « Non merci » retire la proposition, et la carte quand il n en reste plus ; rien n est écrit', async () => {
+  const v = monter({ repondre: reponsesBase() })
+  try {
+    await envoyerDepuisLaCarte(v)
+    cliquer(v.carteBase().querySelector('[data-base-non="0"]'))
+    assert.equal(v.carteBase().querySelectorAll('[data-base]').length, 1)
+    cliquer(v.carteBase().querySelector('[data-base-non="1"]'))
+    assert.equal(v.carteBase(), null)
+    assert.equal(v.ecrituresBase().length, 0)
+  } finally { v.fermer() }
+})
+
+test('LE TEST QUI COMPTE (étape 2) : un MEMBRE délégué n appelle jamais la proposition — la base n est pas à lui', async () => {
+  const v = monter({ titulaire: false, repondre: reponsesBase() })
+  try {
+    await envoyerDepuisLaCarte(v)
+    assert.equal(v.envois().length, 1)
+    assert.equal(v.propositionsBase().length, 0)
+    assert.equal(v.carteBase(), null)
+  } finally { v.fermer() }
+})
+
+test('étape 2 : un envoi en échec ne demande rien ; « Réessayer » réussi demande la proposition', async () => {
+  let echoue = true
+  const v = monter({ repondre: reponsesBase((chemin) => {
+    if ((chemin === '/api/beds24' || chemin === '/api/channel-message') && echoue) { const e = new Error('canal'); e.status = 502; throw e }
+  }) })
+  try {
+    await envoyerDepuisLaCarte(v)
+    assert.equal(v.propositionsBase().length, 0, 'demandée pour un message qui n est pas parti')
+    echoue = false
+    cliquer(v.doc.querySelector('[data-list="fil"] [data-reessayer]'))
+    await attendre(); await attendre(); await attendre()
+    assert.equal(v.propositionsBase().length, 1)
+  } finally { v.fermer() }
+})
+
+test('étape 2 : le bouton « IA » sur une question ouverte propose de retenir ; un texte tapé à la main, ou sans question ouverte, non', async () => {
+  // B, carte présente : la tâche de la carte.
+  let v = monter({ repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    taperSaisie(v, 'oui chien, pas de moto')
+    await v.msg.redigerBrouillon()
+    await v.msg.envoyer()
+    await attendre(); await attendre(); await attendre()
+    assert.deepEqual(v.propositionsBase().map(a => a.corps), [{ action: 'base', bookingId: 'B1', tacheId: 'ti1', envoye: REDIGE }])
+  } finally { v.fermer() }
+  // À la main : rien.
+  v = monter({ repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    taperSaisie(v, 'Oui pour le chien.')
+    await v.msg.envoyer()
+    await attendre(); await attendre()
+    assert.equal(v.envois().length, 1)
+    assert.equal(v.propositionsBase().length, 0)
+  } finally { v.fermer() }
+  // « IA », puis « Annuler » : c'est le texte de l'hôte qui part — rien.
+  v = monter({ repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    taperSaisie(v, 'oui chien')
+    await v.msg.redigerBrouillon()
+    v.msg.annulerIA()
+    await v.msg.envoyer()
+    await attendre(); await attendre()
+    assert.equal(v.propositionsBase().length, 0)
+  } finally { v.fermer() }
+  // « IA » sans question ouverte : rien.
+  v = monter({ infos: [], repondre: reponsesBase() })
+  try {
+    await v.msg.relireDirect()
+    taperSaisie(v, 'oui chien')
+    await v.msg.redigerBrouillon()
+    await v.msg.envoyer()
+    await attendre(); await attendre()
+    assert.equal(v.envois().length, 1)
+    assert.equal(v.propositionsBase().length, 0)
+  } finally { v.fermer() }
+})
+
+test('étape 2 : la proposition ne suit pas l hôte dans un autre fil — ni affichée là-bas, ni gardée au retour', async () => {
+  const d = differe()
+  const v = monter({
+    conversations: [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: reponsesBase((chemin, corps) => chemin === '/api/guestflow-rediger' && corps.action === 'base' ? d.p : undefined)
+  })
+  try {
+    await envoyerDepuisLaCarte(v)
+    v.msg.ouvrir('B2')
+    d.resoudre({ ok: true, propositions: PROPOSITIONS })
+    await attendre(); await attendre()
+    assert.equal(v.carteBase(), null, 'affichée dans le fil de Marie')
+    v.msg.ouvrir('B1')
+    v.msg.renderFil()
+    assert.equal(v.carteBase(), null, 'une réponse arrivée pendant l absence est jetée')
+  } finally { v.fermer() }
+  // Affichée, puis l'hôte change de fil : elle tombe.
+  const w = monter({
+    conversations: [conv('B1', [entrant('Can I come with my dog?', il(25 * MIN))]), conv('B2', [entrant('Hola', il(30 * MIN))], { guestName: 'Marie' })],
+    repondre: reponsesBase()
+  })
+  try {
+    await envoyerDepuisLaCarte(w)
+    assert.ok(w.carteBase())
+    w.msg.ouvrir('B2'); w.msg.ouvrir('B1')
+    w.msg.renderFil()
+    assert.equal(w.carteBase(), null)
+  } finally { w.fermer() }
+})
+
+test('étape 2 : un refus de la proposition (plafond, pause, droit) ne se signale pas, et n affiche rien', async () => {
+  for (const status of [403, 409, 429]) {
+    const v = monter({ repondre: reponsesBase((chemin, corps) => {
+      if (chemin === '/api/guestflow-rediger' && corps.action === 'base') { const e = new Error('refus'); e.status = status; e.code = 'x'; throw e }
+    }) })
+    try {
+      await envoyerDepuisLaCarte(v)
+      assert.equal(v.propositionsBase().length, 1)
+      assert.equal(v.carteBase(), null)
+      assert.equal(v.banc.journal.filter(l => /reponse prete/.test(String(l[1]))).length, 0, `un refus ${status} est journalisé comme une panne`)
+    } finally { v.fermer() }
+  }
+})
+
+test('étape 2 : une panne de la proposition (500) se journalise, sans rien afficher', async () => {
+  const v = monter({ repondre: reponsesBase((chemin, corps) => {
+    if (chemin === '/api/guestflow-rediger' && corps.action === 'base') { const e = new Error('panne'); e.status = 502; e.code = 'ia_indisponible'; throw e }
+  }) })
+  try {
+    await envoyerDepuisLaCarte(v)
+    assert.equal(v.carteBase(), null)
+    assert.equal(v.banc.journal.filter(l => /reponse prete/.test(String(l[1]))).length, 1)
   } finally { v.fermer() }
 })

@@ -321,3 +321,61 @@ test('relireApres : la carte se relit quand la tache a bouge ailleurs, pas sur u
   for (const c of ['deja_traitee', 'sans_question', 'questions_changees', 'deja_close']) assert.equal(F.relireApres(c), true, c)
   for (const c of ['garde_ia', 'ia_indisponible', 'en_pause', undefined]) assert.equal(F.relireApres(c), false, String(c))
 })
+
+// ─── Étape 2 (spec §2 C) : retenir la réponse dans la base ───────────────────
+
+test('étape 2 : les bornes copiées sont celles du writer de la base et des propositions du serveur', () => {
+  const writer = fs.readFileSync(path.join(__dirname, '..', 'api', 'ecran', 'connaissance.js'), 'utf8')
+  const P = require('../lib/guestflow/reponse-prete')
+  assert.equal(Number(/const MAX_SUJET = (\d+)/.exec(writer)[1]), F.MAX_SUJET_BASE)
+  assert.equal(Number(/const MAX_TEXTE = (\d+)/.exec(writer)[1]), F.MAX_TEXTE_BASE)
+  assert.equal(P.MAX_SUJET, F.MAX_SUJET_BASE)
+  assert.equal(P.MAX_TEXTE, F.MAX_TEXTE_BASE)
+})
+
+test('étape 2 : corpsBase', () => {
+  assert.deepEqual(F.corpsBase(12, 'ti1', '  Oui.  '), { action: 'base', bookingId: '12', tacheId: 'ti1', envoye: 'Oui.' })
+})
+
+test('étape 2 : propositionsInitiales ne garde que la forme attendue ; une mise à jour sans identifiant ne sait pas quoi remplacer', () => {
+  const l = F.propositionsInitiales([
+    { action: 'creer', sujet: 'Moto', texte: 'Non.' },
+    { action: 'modifier', id: 7, sujet: 'Animaux', avant: 'Non.', texte: 'Chiens oui.' },
+    { action: 'modifier', sujet: 'Sans id', texte: 'X' },
+    { action: 'modifier', id: '', sujet: 'Id vide', texte: 'X' },
+    { action: 'creer', sujet: '  ', texte: 'X' },
+    { action: 'creer', sujet: 'Vide', texte: ' ' },
+    { action: 'supprimer', id: 1, sujet: 'S', texte: 'T' },
+    null
+  ])
+  assert.deepEqual(l, [
+    { action: 'creer', id: null, sujet: 'Moto', texte: 'Non.', avant: null, statut: 'proposee', erreur: null },
+    { action: 'modifier', id: 7, sujet: 'Animaux', texte: 'Chiens oui.', avant: 'Non.', statut: 'proposee', erreur: null }
+  ])
+  assert.deepEqual(F.propositionsInitiales(undefined), [])
+  assert.deepEqual(F.propositionsVisibles([{ statut: 'ecartee' }, { statut: 'enregistree' }]), [{ statut: 'enregistree' }])
+})
+
+test('LE TEST QUI COMPTE (étape 2) : corpsEnregistrer — une création est lisible par l IA, une mise à jour vise son id sans toucher au cadenas', () => {
+  assert.deepEqual(F.corpsEnregistrer({ action: 'creer', sujet: ' Moto ', texte: ' Non. ' }, '209413'),
+    { ok: true, corps: { action: 'enregistrer', bien: '209413', key: 'Moto', value: 'Non.', lisible_par_ia: true } })
+  const maj = F.corpsEnregistrer({ action: 'modifier', id: 7, sujet: 'Animaux', texte: 'Chiens oui.' }, '209413')
+  assert.deepEqual(maj, { ok: true, corps: { action: 'enregistrer', bien: '209413', key: 'Animaux', value: 'Chiens oui.', id: 7 } })
+  assert.ok(!('lisible_par_ia' in maj.corps), 'une mise à jour lève un cadenas « Hors IA » posé par l hôte')
+  assert.equal(F.corpsEnregistrer({ action: 'creer', sujet: 'S', texte: '  ' }, '209413').erreur, 'messages.info.base.erreur.vide')
+  assert.equal(F.corpsEnregistrer({ action: 'creer', sujet: '', texte: 'T' }, '209413').erreur, 'messages.info.base.erreur.vide')
+  assert.equal(F.corpsEnregistrer({ action: 'creer', sujet: 'x'.repeat(F.MAX_SUJET_BASE + 1), texte: 'T' }, '209413').erreur, 'messages.info.base.erreur.trop_long')
+  assert.equal(F.corpsEnregistrer({ action: 'creer', sujet: 'S', texte: 'x'.repeat(F.MAX_TEXTE_BASE + 1) }, '209413').erreur, 'messages.info.base.erreur.trop_long')
+  assert.equal(F.corpsEnregistrer({ action: 'creer', sujet: 'S', texte: 'T' }, '').ok, false, 'sans logement, le writer écrirait ailleurs')
+})
+
+test('étape 2 : chaque refus du writer a sa phrase, et une phrase existe pour chaque clé', () => {
+  assert.equal(F.cleErreurBase({ status: 409, code: 'sujet_existe' }), 'messages.info.base.erreur.sujet_existe')
+  assert.equal(F.cleErreurBase({ status: 404 }), 'messages.info.base.erreur.introuvable')
+  assert.equal(F.cleErreurBase({ status: 400, code: 'trop_long' }), 'messages.info.base.erreur.trop_long')
+  assert.equal(F.cleErreurBase({ status: 400, code: 'autre' }), 'messages.info.base.erreur.echec')
+  assert.equal(F.cleErreurBase({ status: 503 }), 'messages.info.base.erreur.echec')
+  assert.equal(F.cleErreurBase(undefined), 'messages.info.base.erreur.echec')
+  const fr = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', 'fr.json'), 'utf8'))
+  for (const k of ['echec', 'introuvable', 'sujet_existe', 'trop_long', 'vide']) assert.ok(fr['messages.info.base.erreur.' + k], k)
+})

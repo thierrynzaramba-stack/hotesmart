@@ -181,6 +181,8 @@ import { departEvaluable } from '/shared/calendrier-resa.js'
 import { delaiDirect, listeARelire, apresDuFil, fusionnerMessages, fusionnerTaches, aDejaSaLigne, RYTHME } from '/shared/messages-direct.js'
 import { infoAAfficher, etatInitial as etatInfoInitial, memeCarte, choisir as choisirInfo, preciser as preciserInfo, pretARediger, corpsChoix, iaPossible, corpsTexte, cleErreur, relireApres, REPONSES as REPONSES_INFO, MAX_PRECISION as MAX_PRECISION_INFO, DELAI_REDACTION_MS }
   from '/shared/info-manquante.js'
+import { corpsBase, propositionsInitiales, propositionsVisibles, corpsEnregistrer, cleErreurBase, MAX_SUJET_BASE, MAX_TEXTE_BASE }
+  from '/shared/info-manquante.js'
 import { confirmerDansLaPage, OCCUPEE } from '/shared/confirmer.js'
 
 initErrorHandler()
@@ -690,6 +692,9 @@ function renderFil () {
   // l'hôte n'a pas répondu depuis la tâche.
   deroule.insertAdjacentHTML('beforeend', carteInfo(c))
   brancherCarteInfo(c, deroule)
+  // Étape 2 (§2 C) : ce que l'IA propose de retenir, après l'envoi.
+  deroule.insertAdjacentHTML('beforeend', carteBase(c))
+  brancherCarteBase(c, deroule)
   // Dette 67 : au sejour TERMINE, la proposition « Evaluer {prenom} ? » en
   // fin de fil — par le BUS du coeur seulement (meme writer que la fiche
   // resa : la fenetre standard avis.evaluer et ses boutons a niveaux).
@@ -826,6 +831,9 @@ async function lancerEnvoi (c, entree) {
     // tâche se clôt (spec §2 A). Seulement l'entrée née de ce geste — jamais le
     // « Réessayer » d'un vieux message du même fil.
     if (entree.info) cloreInfoTraitee(c, entree.info)
+    // Étape 2 (spec §2 C) : la réponse est partie, l'IA propose de la retenir
+    // dans la base. Seulement l'entrée née de ce geste, comme la clôture.
+    if (entree.base) proposerBase(c, entree.base.tacheId, entree.texte)
     // Parti : la bulle definitive viendra du coeur (double ecriture messages).
     const liste = envoisDe(c.bookId)
     liste.splice(liste.indexOf(entree), 1)
@@ -885,6 +893,15 @@ async function envoyer () {
   // Une réponse rédigée depuis la carte « Information manquante » : CETTE
   // entrée clora la tâche à son premier envoi réussi (retry compris).
   const eng = etat.infoEngagee
+  // Étape 2 : la tâche dont la réponse se retiendra dans la base — celle de la
+  // carte (A), ou, pour un texte rédigé par le bouton « IA » (B), la question
+  // ouverte de ce fil. Lue AVANT l'envoi : la bulle de l'envoi retire la carte.
+  const tacheBase = eng && String(eng.bookId) === String(c.bookId) ? eng.tacheId
+    : (etat.saisieIA && String(etat.saisieIA.bookId) === String(c.bookId) ? (infoAAfficher(c.infos, c.messages) || {}).id : null)
+  // ⚠ TITULAIRE SEULEMENT : la base est non délégable (dette 68). Le serveur le
+  // refuse de toute façon (403) ; ici, on ne l'appelle pas pour rien.
+  if (tacheBase != null && reglagesIci()) entree.base = { tacheId: String(tacheBase) }
+  etat.saisieIA = null
   if (eng && String(eng.bookId) === String(c.bookId)) { entree.info = { tacheId: eng.tacheId, maj: eng.maj }; etat.infoEngagee = null }
   // Le texte part : « Annuler » et la note de rédaction n'ont plus d'objet.
   etat.iaAnnuler = null
@@ -1077,6 +1094,8 @@ async function redigerBrouillon () {
     // elle porte la marque, comme un texte posé par « Utiliser ».
     etat.saisieRemplie = { bookId: ici, textes: [zone.value] }
     etat.iaAnnuler = { bookId: ici, avant, apres: zone.value, marque }
+    // Étape 2 : ce texte vient de l'IA — son envoi proposera de le retenir.
+    etat.saisieIA = { bookId: ici }
     ajusterHauteur(zone)
     zone.focus()
     try { zone.setSelectionRange(zone.value.length, zone.value.length) } catch {}
@@ -1117,6 +1136,8 @@ function apresFrappeSaisie () {
   // Saisie vidée : la réponse de la carte n'y est plus, l'envoi suivant ne la
   // clora pas.
   if (!zone.value.trim() && etat.infoEngagee && String(etat.infoEngagee.bookId) === String(etat.ouverte)) etat.infoEngagee = null
+  // Saisie vidée : plus rien de rédigé par l'IA (étape 2).
+  if (!zone.value.trim()) etat.saisieIA = null
   peindreSaisieIA()
 }
 
@@ -1127,6 +1148,8 @@ function annulerIA () {
   if (a && zone && String(a.bookId) === String(etat.ouverte) && zone.value === a.apres) {
     zone.value = a.avant
     etat.saisieRemplie = a.marque
+    // C'est le texte de l'hôte qui revient, pas celui de l'IA (étape 2).
+    etat.saisieIA = null
     ajusterHauteur(zone)
     zone.focus()
   }
@@ -1172,6 +1195,113 @@ function cloreInfoTraitee (c, info) {
       }
       if (err.status !== 409) logger.error('Messages', 'cloture information manquante', err)
     })
+}
+
+// ─── Information manquante, étape 2 : retenir la réponse dans la base ────────
+// Spec §2 C. Après l'envoi d'une réponse rédigée par l'IA sur une question
+// ouverte, l'IA propose de créer ou de mettre à jour une réponse prête.
+// ⚠ RIEN N'EST ÉCRIT SANS LE GESTE DE L'HÔTE : « Enregistrer » passe par le
+// writer UNIQUE de la base (`POST /api/ecran/connaissance`), comme le volet
+// « Base de connaissance ». « Modifier » se fait dans la carte (décision de
+// Thierry du 18 novembre 2026). Titulaire seulement (dette 68) : le serveur
+// refuse les autres en 403, la page ne les appelle pas.
+//
+// État : etat.saisieIA { bookId } — la saisie porte un texte du bouton « IA » ;
+//        etat.infoBase  { bookId, liste } — les propositions de CE fil.
+async function proposerBase (c, tacheId, envoye) {
+  const ici = String(c.bookId)
+  try {
+    const r = await appel('/api/guestflow-rediger', corpsBase(ici, tacheId, envoye))
+    const liste = propositionsInitiales(r && r.propositions)
+    // L'hôte est passé à un autre fil : la proposition ne le suit pas.
+    if (!liste.length || String(etat.ouverte) !== ici) return
+    etat.infoBase = { bookId: ici, liste }
+    renderFil()
+  } catch (err) {
+    // Une proposition est un plus : son absence ne se signale pas (plafond,
+    // pause, droit). Le reste se journalise.
+    if (![403, 409, 429].includes(err.status)) logger.error('Messages', 'proposition de reponse prete', err)
+  }
+}
+
+function carteBase (c) {
+  const b = etat.infoBase
+  if (!b || b.bookId !== String(c.bookId) || !reglagesIci()) return ''
+  const visibles = propositionsVisibles(b.liste)
+  if (!visibles.length) return ''
+  const lignes = b.liste.map((p, i) => {
+    if (p.statut === 'ecartee') return ''
+    const edition = p.statut === 'edition'
+    const occupe = p.statut === 'enregistrement'
+    const titre = `<span class="caption muted">${esc(t(p.action === 'modifier' ? 'messages.info.base.modifier' : 'messages.info.base.creer'))}</span>`
+    // Le sujet d'une réponse existante reste le sien : on met à jour son texte.
+    const sujet = edition && p.action === 'creer'
+      ? `<input type="text" maxlength="${MAX_SUJET_BASE}" data-base-sujet="${i}" value="${esc(p.sujet)}" aria-label="${esc(t('messages.info.base.sujet'))}">`
+      : `<strong class="info-carte__sujet">${esc(p.sujet)}</strong>`
+    const avant = p.action === 'modifier' && !edition && p.statut !== 'enregistree'
+      ? `<span class="caption muted info-carte__avant">${esc(t('messages.info.base.avant'))} ${esc(p.avant)}</span>` : ''
+    const texte = edition
+      ? `<textarea maxlength="${MAX_TEXTE_BASE}" rows="4" data-base-texte="${i}" aria-label="${esc(t('messages.info.base.texte'))}">${esc(p.texte)}</textarea>`
+      : `<span class="info-carte__texte">${esc(p.texte)}</span>`
+    const erreur = p.erreur ? `<span class="caption info-carte__erreur" role="alert">${esc(t(p.erreur))}</span>` : ''
+    const actions = p.statut === 'enregistree'
+      ? `<span class="caption muted">${esc(t('messages.info.base.enregistree'))}</span>`
+      : `<span class="bulle__actions"><button type="button" class="btn btn--primary" data-base-enregistrer="${i}"${occupe ? ' disabled' : ''}>${esc(t(occupe ? 'messages.info.base.enregistrement' : 'messages.info.base.enregistrer'))}</button>${p.statut === 'proposee' ? `<button type="button" class="btn btn--secondary" data-base-modifier="${i}">${esc(t('messages.info.base.modifier_btn'))}</button>` : ''}<button type="button" class="link" data-base-non="${i}"${occupe ? ' disabled' : ''}>${esc(t('messages.info.base.non_merci'))}</button></span>`
+    return `<div class="info-carte__q" data-base="${i}">${titre}${sujet}${avant}${texte}${erreur}${actions}</div>`
+  }).join('')
+  // ⚠ AUCUN BLANC ENTRE LES BALISES : `.bulle` est en `pre-wrap` (voir carteInfo).
+  return `<div class="bulle bulle--proposition info-carte" data-bind="info-base"><span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.info.base.titre'))}</span><span class="caption muted">${esc(t('messages.info.base.aide'))}</span>${lignes}</div>`
+}
+
+function brancherCarteBase (c, deroule) {
+  const carte = deroule.querySelector('[data-bind="info-base"]')
+  const b = etat.infoBase
+  if (!carte || !b) return
+  // À la frappe, PAS de rendu (le champ garderait mal son curseur) : l'état
+  // suit, et un rendu du fil en direct redessine la carte avec ce qui est tapé.
+  carte.querySelectorAll('[data-base-sujet]').forEach(ch => ch.addEventListener('input', () => {
+    const p = b.liste[Number(ch.dataset.baseSujet)]; if (p) { p.sujet = ch.value; p.erreur = null }
+  }))
+  carte.querySelectorAll('[data-base-texte]').forEach(ch => ch.addEventListener('input', () => {
+    const p = b.liste[Number(ch.dataset.baseTexte)]; if (p) { p.texte = ch.value; p.erreur = null }
+  }))
+  carte.querySelectorAll('[data-base-modifier]').forEach(btn => btn.addEventListener('click', () => {
+    const i = Number(btn.dataset.baseModifier)
+    const p = b.liste[i]
+    if (!p || p.statut !== 'proposee') return
+    p.statut = 'edition'; p.erreur = null
+    renderFil()
+    $('[data-list="fil"]').querySelector(`[data-base-texte="${i}"]`)?.focus()
+  }))
+  carte.querySelectorAll('[data-base-non]').forEach(btn => btn.addEventListener('click', () => {
+    const p = b.liste[Number(btn.dataset.baseNon)]
+    if (!p || p.statut === 'enregistrement') return
+    p.statut = 'ecartee'
+    renderFil()
+  }))
+  carte.querySelectorAll('[data-base-enregistrer]').forEach(btn => btn.addEventListener('click', () =>
+    enregistrerBase(c, Number(btn.dataset.baseEnregistrer))))
+}
+
+async function enregistrerBase (c, i) {
+  const b = etat.infoBase
+  if (!b || b.bookId !== String(c.bookId) || !reglagesIci()) return
+  const p = b.liste[i]
+  if (!p || p.statut === 'enregistrement' || p.statut === 'enregistree' || p.statut === 'ecartee') return
+  const prep = corpsEnregistrer(p, c.propertyId)
+  if (!prep.ok) { p.erreur = prep.erreur; renderFil(); return }
+  const avant = p.statut
+  p.statut = 'enregistrement'; p.erreur = null
+  renderFil()
+  try {
+    await appel('/api/ecran/connaissance', prep.corps)
+    p.statut = 'enregistree'
+  } catch (err) {
+    p.statut = avant
+    p.erreur = cleErreurBase(err)
+    if (![400, 403, 404, 409].includes(err.status)) logger.error('Messages', 'enregistrement reponse prete', err)
+  }
+  if (etat.infoBase === b && String(etat.ouverte) === b.bookId) renderFil()
 }
 
 // Une rédaction ne tient pas la page : au-delà du délai, l'écran l'abandonne
@@ -3923,6 +4053,10 @@ function ouvrir (bookId) {
   // constat 2) — une question laissée ouverte ne coûte rien, une question
   // close à tort disparaît d'« À valider ».
   if (etat.infoEngagee && String(etat.infoEngagee.bookId) !== String(bookId)) etat.infoEngagee = null
+  // Étape 2 : un texte rédigé par l'IA pour CE fil, et ce qu'elle propose de
+  // retenir, ne suivent pas l'hôte dans un autre fil.
+  if (etat.saisieIA && String(etat.saisieIA.bookId) !== String(bookId)) etat.saisieIA = null
+  if (etat.infoBase && etat.infoBase.bookId !== String(bookId)) etat.infoBase = null
   etat.ouverte = bookId
   // ⚠ LE PANNEAU SUIT LE LOGEMENT DU FIL, MEME DEJA OUVERT — recette de Thierry
   // du 30 octobre 2026 (« le volet s'est encore ouvert sur Maison Jardin »), et
