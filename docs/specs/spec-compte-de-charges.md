@@ -3321,6 +3321,18 @@ section suivante) :
 NUL avant `stream`, refusé `flux_trop_gros` en 61 ms. Photo de 48 Mpx :
 convertie en 3,6 s, pic 763 Mo.
 
+**Recette du contrôle sur staging (19 novembre 2026, 12:06) : la ligne 7
+rendait `false`.** Diagnostic par une requête en lecture seule : trigger
+actif (`O`), type 23, index unique, et le corps de la fonction identique
+**sans ses blancs** (même empreinte) — mais 299 caractères contre 287 :
+l'éditeur SQL de Supabase change les blancs au collage. Le contrôle compare
+donc désormais `md5(regexp_replace(prosrc, '\s+', '', 'g'))`. Resaboté sur
+une copie de la base : corps vidé et trigger réduit à `before update` → ligne
+7 à `false` ; corps ré-indenté (comme staging) et sans sabotage → `true`.
+⚠ **Leçon** : une empreinte d'un texte COLLÉ À LA MAIN ne se compare qu'à
+blancs près ; les définitions de contraintes, elles, sont rendues par
+Postgres (`pg_get_constraintdef`), et la ligne 3 est passée telle quelle.
+
 #### Les correctifs de la troisième review HEIC, portés dans la file commune (19 novembre 2026)
 
 La troisième review HEIC (§14.19) a été faite sur la file HEIC à part

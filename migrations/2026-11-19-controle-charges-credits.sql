@@ -5,7 +5,11 @@
 -- lu a sa DEFINITION, pas a son nom (seconde
 -- review, mineur 4) ; les contraintes et le
 -- corps du trigger a leur empreinte exacte
--- (troisieme review, mineur 2). A jouer
+-- (troisieme review, mineur 2) ; le corps
+-- SANS SES BLANCS : l'editeur de Supabase
+-- les change au collage (recette du 19
+-- novembre : 299 caracteres contre 287,
+-- meme corps). A jouer
 -- juste apres la migration : une migration
 -- posterieure qui change la liste des
 -- categories ou des origines fera rendre
@@ -125,8 +129,9 @@ select '7 trigger actif, empreinte unique',
         'public.charges_credits'::regclass
       and t.tgenabled = 'O'
       and t.tgtype = 23
-      and md5(f.prosrc) =
-        '050a3d486895d2963751719ceeee2252')
+      and md5(regexp_replace(f.prosrc,
+        '\s+', '', 'g')) =
+        'e5905a8d200fb50c41ce4b2bc9464cdd')
     = 1
   and (select count(*) from pg_indexes
     where indexname =
