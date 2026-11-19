@@ -22,17 +22,20 @@
 export const TYPES_ACCEPTES = {
   'application/pdf': 10 * 1024 * 1024,
   'image/jpeg': 7 * 1024 * 1024,
-  'image/png': 7 * 1024 * 1024
+  'image/png': 7 * 1024 * 1024,
+  'image/heic': 10 * 1024 * 1024,
+  'image/heif': 10 * 1024 * 1024
 }
 
 // ⚠ TOUTE IMAGE QUE L'APPAREIL SAIT LIRE EST ACCEPTÉE, puis convertie en JPEG
 // avant l'envoi (Thierry, 19 novembre 2026 : des factures reçues par SMS ne
-// passaient pas). Le serveur et l'IA ne reçoivent toujours que du PDF, du
-// JPEG ou du PNG : la conversion se fait ICI, par le navigateur. Un format que
-// l'appareil ne sait pas lire est refusé en le NOMMANT — le HEIC des photos
-// d'iPhone et de certains Android se lit sur iPhone et Mac, pas sous Chrome.
-// Un fichier sans type (certains sélecteurs Android) se reconnaît à son
-// extension.
+// passaient pas). La conversion se fait ICI, par le navigateur, quand il sait
+// lire l'image. ⚠ SAUF LE HEIC que le navigateur ne sait pas lire (Chrome,
+// sur Android comme sur PC) : il part TEL QUEL, et c'est notre serveur qui le
+// convertit en JPEG à la confirmation (§14.19, lib/charges/heic.js). L'IA ne
+// reçoit donc toujours que du PDF, du JPEG ou du PNG. Un autre format que
+// l'appareil ne sait pas lire est refusé en le disant. Un fichier sans type
+// (certains sélecteurs Android) se reconnaît à son extension.
 const EXTENSIONS_IMAGE = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
   heic: 'image/heic', heif: 'image/heif', avif: 'image/avif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff'
@@ -663,6 +666,7 @@ export function monter (racine, deps) {
       // Une photo se réduit AVANT l'envoi (shared/photo-bien-client.js) : moins
       // lourde à envoyer en 4G, et moins chère à lire.
       if (image) {
+        let brut = null
         try {
           // ⚠ Le type reconnu (extension ou contenu) est donné au fichier, parce
           // que `preparerJpeg` refuse tout fichier dont le TYPE n'est pas
@@ -677,12 +681,18 @@ export function monter (racine, deps) {
           let refus = 'charges.refus'
           if (e && e.code === 'taille') refus = 'charges.refus_trop_gros'
           else if (e && e.code === 'type') {
-            refus = estHeic(type) || estHeic(await formatLu(fichier, Lecteur)) ? 'charges.refus_heic' : 'charges.refus_image_illisible'
+            const heic = estHeic(type) ? type : await formatLu(fichier, Lecteur)
+            // ⚠ UN HEIC QUE CE NAVIGATEUR NE SAIT PAS LIRE PART TEL QUEL : le
+            // serveur le convertit en JPEG à la confirmation (§14.19).
+            if (estHeic(heic)) brut = heic.replace('-sequence', '')
+            else refus = 'charges.refus_image_illisible'
           }
-          statutEnvoi(t(refus), true)
-          return
+          if (!brut) { statutEnvoi(t(refus), true); return }
         }
-        type = 'image/jpeg'
+        if (brut) {
+          type = brut
+          corps = fichier.type === type ? fichier : fichier.slice(0, fichier.size, type)
+        } else type = 'image/jpeg'
       } else if (corps.type !== type) {
         // ⚠ UN PDF SANS TYPE (certains sélecteurs Android et Windows) : le
         // fichier repartirait en `application/octet-stream`, que le bucket

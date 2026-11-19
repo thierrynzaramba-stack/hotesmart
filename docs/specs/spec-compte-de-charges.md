@@ -1943,6 +1943,442 @@ Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 
 | 5 | Mesures de la review dans la case PERFORMANCE ; renvois vers §14.18 aux lignes 527 et 995 ; question ouverte fermée ; avertissement dans `2026-11-13-charges-periode.sql`. |
 
 
+### 14.19 Les photos HEIC converties par notre serveur (19 novembre 2026)
+
+**La demande.**
+- Recette du §14.16 sur staging : la photo d'une facture reçue par SMS
+  arrive en **HEIC**. C'est confirmé par l'écran de Thierry : « Photo HEIC :
+  ce navigateur ne sait pas la convertir ».
+- Chrome ne sait pas lire ce format, ni sur Android ni sur PC. La conversion
+  par le téléphone (§14.16) ne peut donc pas avoir lieu.
+- Thierry a choisi l'**option 2** : la conversion se fait sur **notre
+  serveur**.
+- Écartés :
+  - un service en ligne : il aurait reçu ses factures, et n'est gratuit que
+    pour quelques conversions par jour ;
+  - un décodeur dans la page : 2 à 3 Mo de plus à chaque envoi.
+
+**Ce qui change.**
+- **L'écran** essaie d'abord de réduire la photo, comme avant : Safari sait lire
+  le HEIC et envoie un JPEG.
+  - Si l'écran refuse le format (`code: 'type'`) et que le contenu est un
+    HEIC, la photo part **telle quelle**, annoncée et déposée en `image/heic`
+    (ou `image/heif`).
+  - On reconnaît un HEIC à son type, à son extension ou à ses premiers
+    octets : un HEIC nommé « .jpg » part aussi.
+  - Limite : 10 Mo, la même que le stockage.
+  - Une autre image illisible reste refusée, avec son message.
+- **Le serveur** : `TYPES` accepte `image/heic` et `image/heif` (10 Mo), avec
+  `convertir: 'image/jpeg'`.
+  - `typeReel` lit la marque principale de la boîte `ftyp` :
+    - `heic`, `heix`, `hevc`, `hevx`, `heim`, `heis` donnent un HEIC ;
+    - `mif1`, `msf1` donnent un HEIF ;
+    - `avif` n'est pas reconnu.
+  - `confirmerEnvoi` convertit le fichier relu **avant l'empreinte**
+    (`lib/charges/heic.js`) : 2 000 px au plus, qualité 80, puis 65 et 50
+    jusqu'à tenir sous les 7 Mo d'une image lue par l'IA.
+  - ⚠ **Les dimensions DÉCLARÉES sont bornées avant le décodage** : 50 Mpx au
+    plus. Le plus grand capteur de téléphone fait 48 Mpx. Sans cette borne,
+    un fichier de quelques Ko annonçant 20 000 × 20 000 demanderait 1,6 Go et
+    ferait tomber la fonction.
+  - ⚠ **La conversion tourne dans un fil à usage unique** (`worker_threads`),
+    terminé après chaque photo et borné à 15 s : `convertirIsole`,
+    `lib/charges/heic-fil.js`. Le fil principal ne charge jamais le décodeur.
+    C'est le correctif du constat de sécurité 1 de la review : le tas
+    WebAssembly de libheif ne rétrécit jamais, et un fichier illisible le
+    faisait fuir jusqu'à geler l'instance (voir la review plus bas).
+  - ⚠ **Un seul fil à la fois par instance**, et deux photos au plus en
+    attente : au-delà, « occupé » (503, rien d'effacé). Le délai de 15 s court
+    depuis l'appel, attente comprise. C'est le correctif du constat de
+    sécurité de la seconde review : chaque fil a son propre tas, et trois
+    photos de 48 Mpx converties ENSEMBLE montaient à 2,1 Go.
+  - Le JPEG **remplace** la photo au même chemin (`upload` avec `upsert`).
+  - Ensuite, l'empreinte, les doublons, la lecture IA immédiate, le cron et la
+    consultation ne voient qu'un JPEG. **Aucun HEIC n'est gardé.**
+- **Les issues** :
+  - Photo impossible à convertir : effacée, ligne et fichier, refus **422
+    `conversion_impossible`**. L'écran dit : « Cette photo n'a pas pu être
+    convertie. Envoyez une capture d'écran de la facture, ou
+    enregistrez-la en JPEG ou en PDF. » (fr, en, es).
+  - Panne du stockage pendant le remplacement : rien n'est effacé ni écrit. La
+    ligne reste `envoi`, et la purge quotidienne la reprend.
+  - **Panne du convertisseur** (délai de 15 s, fil planté, module absent) :
+    503, rien n'est effacé — ce n'est pas la faute de la photo. Seul un fichier
+    que libheif refuse donne 422.
+  - Quand un envoi s'abandonne, **la ligne s'efface d'abord**, et le fichier
+    seulement si elle était encore `envoi` : une confirmation qui échoue
+    n'efface pas le JPEG qu'une autre confirmation du même envoi vient de
+    poser.
+- **Le bucket** : migration `2026-11-19-charges-heic.sql`, qui ajoute
+  `image/heic` et `image/heif` à `allowed_mime_types`. Collée à la main, son
+  contrôle tient en une ligne.
+  - Ordre libre :
+    - avant le code, rien ne change ;
+    - le code sans elle fait refuser le dépôt par le bucket, comme avant le
+      lot.
+  - Après elle, la section 5 de `2026-11-09` ne se rejoue plus.
+- **Les dépendances** : `heic-decode` 2.1.0 (ISC) sur `libheif-js` 1.23.5
+  (LGPL-3.0, exécutée sur le serveur, jamais distribuée), et `jpeg-js` 0.4.4
+  (BSD-3).
+  - Chargées **à la demande, et seulement dans le fil** : un envoi PDF ou JPEG
+    ne les paie pas, et le fil principal ne les charge jamais.
+  - Le décodeur pèse **2,04 Mo** (`libheif-wasm/libheif-bundle.js`,
+    WebAssembly en base64), chargé en environ 50 ms à chaque fil.
+  - ⚠ **Question ouverte pour Thierry** (review, constat 6) : la licence
+    LGPL-3.0 ne pose pas de problème tant que le code tourne sur notre serveur
+    sans être distribué. Mais le HEIC est du HEVC, un format couvert par des
+    brevets payants pour les décodeurs. La spec ne l'avait pas dit.
+- **Le message « Photo HEIC : ce navigateur ne sait pas la convertir »**
+  disparaît : aucun chemin ne le montre plus. Le message de taille dit
+  désormais « 10 Mo pour un PDF ou une photo HEIC, 7 Mo pour une autre
+  image ».
+
+**Mesures** (à la main, photos réelles hors dépôt) :
+- 1 280 × 854 : converti en **426 ms** dans le fil principal, **662 ms** dans
+  le fil à usage unique ;
+- photo de 3 Mo (environ 4 032 × 3 024) : **2 000 × 1 499 en 1,7 s** dans le
+  fil principal, **1,9 s** dans le fil (+185 ms), JPEG de 819 Ko, **373 Mo**
+  de mémoire au plus ;
+- à la borne, mesuré par la review : 48 Mpx (7 Mo) en 2,7 s et 789 Mo au
+  plus ; 49 Mpx bruité (12,5 Mo) en 5,7 s et 876 Mo ;
+- **trois photos de 3 Mo demandées ENSEMBLE** : elles passent l'une après
+  l'autre, à 2,0 s, 3,9 s et 5,7 s, avec **400 Mo** de mémoire au plus (sans
+  la file, la seconde review mesurait 2,1 Go pour trois photos de 48 Mpx) ;
+  une quatrième en même temps est refusée « occupé » ;
+- **30 puis 90 fichiers pourris de 10 Mo d'affilée** dans le même processus :
+  175 puis 165 Mo de mémoire, **sans croissance**, et une vraie photo
+  convertie juste après. Avant le fil, la review mesurait le tas de 32 à
+  392 Mo sur 30 échecs, puis l'arrêt du module vers 200.
+
+**Le budget de la fonction** `api/charges.js` (60 s), au pire :
+- téléchargement du fichier : 8,5 s au plus ;
+- conversion : 15 s au plus, attente dans la file comprise (6 s mesurées à
+  la borne pour une photo seule) ;
+- remplacement dans le stockage : 8 s au plus ;
+- lecture IA : 20 s au plus.
+
+Soit 51,5 s plus quelques requêtes en base : ça tient, de justesse au pire
+cumulé, et chaque étape a son délai.
+
+**Tests.**
+- `tests/charges-heic.test.js` décode un **vrai HEIC**, fabriqué pour le test
+  par `pillow-heif` 1.8.1 : 522 octets, moitié rouge, moitié bleue. Il relit
+  le JPEG obtenu, aux mêmes dimensions et aux mêmes couleurs.
+- `tests/charges-migration-heic.test.js` compare les types du bucket, du
+  serveur et de l'écran.
+- `tests/charges-writer.test.js` : conversion, refus 422, panne du stockage,
+  HEIC de plus de 10 Mo.
+- `tests/charges-page.test.js` : HEIC envoyé tel quel, HEIC nommé « .jpg »,
+  plus de 10 Mo, refus du serveur.
+
+**Case PERFORMANCE** (règle du dépôt, huit points) :
+1. Écran : sans objet. Aucun appel ajouté ; `/charges` se charge toujours par
+   `/api/ecran/charges` seul.
+2. Donnée non urgente : sans objet.
+3. Cache : sans objet.
+4. `private, no-store` : inchangé (`api/charges.js` n'est pas touché).
+5. Statiques : aucun fichier statique ajouté. Le décodeur vit dans la
+   fonction serveur, dans un fil à part, pas dans la page.
+6. Lecture tronquée : sans objet.
+7. Budget : l'affichage ne change pas. L'envoi d'un HEIC :
+   - coûte côté serveur la conversion mesurée ci-dessus (1,9 s pour une photo
+     de 3 Mo, 6 s au plus à la borne des 50 Mpx ; le budget de la fonction est
+     détaillé plus haut) ;
+   - côté téléphone, envoie la photo entière au lieu d'une réduction : 3 Mo au
+     lieu d'environ 0,8 Mo.
+   Les autres envois ne changent pas.
+8. Mesure AVANT / APRÈS :
+   - L'écran ne change pas : **1 appel, 7 requêtes, 681 octets** de
+     `/api/ecran/charges` (production, 18 novembre 2026), avant comme après.
+   - Le module `shared/charges-vue.js` passe de 41 359 à 41 952 octets
+     (+593, non compressé).
+   - L'envoi d'un HEIC passe de **0 appel** (refusé dans la page) à
+     **3 appels** : `envoi`, dépôt de la photo entière, `confirmer`. Ce sont
+     les mêmes que pour toute autre facture.
+
+#### Review du lot HEIC (19 novembre 2026)
+
+- **Arbre** : `/home/claude/hotesmart-heic` ; **branche** :
+  `charges-heic-serveur` ; **plage** :
+  `9e0fb53fad0ebe3c2e3f292b498433e547c03f10..8680ab564b0ae2295fce20f1358c5bc4a8de3e4b`
+  (SHA copiés de `git rev-parse`).
+- **Ce que la review dit avoir lu** : `8680ab564b0ae2295fce20f1358c5bc4a8de3e4b`,
+  et 19 fichiers.
+- **Confrontation** : ces 19 fichiers sont exactement ceux de
+  `git diff --name-only` sur la plage.
+- L'environnement a redémarré pendant la review : elle a repris sur le même
+  arbre et la même plage, sans rien modifier.
+
+Réponse de la review, recopiée telle quelle :
+
+````
+**SHA lu :** `8680ab564b0ae2295fce20f1358c5bc4a8de3e4b`. Arbre `/home/claude/hotesmart-heic`, branche `charges-heic-serveur`, plage `9e0fb53fad0ebe3c2e3f292b498433e547c03f10..8680ab564b0ae2295fce20f1358c5bc4a8de3e4b`. L'environnement a redémarré pendant la review ; j'ai repris sur le même arbre et la même plage. `git status` est vide avant et après : rien n'a été modifié dans l'arbre.
+
+**`git diff --name-only` de la plage :**
+```
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/heic.js
+lib/charges/regles.js
+migrations/2026-11-19-charges-heic.sql
+migrations/2026-11-19-controle-charges-heic.sql
+package-lock.json
+package.json
+shared/charges-vue.js
+shared/i18n/en.json
+shared/i18n/es.json
+shared/i18n/fr.json
+tests/charges-heic.test.js
+tests/charges-migration-heic.test.js
+tests/charges-page.test.js
+tests/charges-writer.test.js
+tests/fixtures/charges/deux-couleurs.heic
+tests/outils/base-enregistreuse.js
+```
+
+## Constats
+
+### 1. SÉCURITÉ (déni de service) — fuite de mémoire du décodeur, puis gel ou plantage de l'instance
+
+**Où :** `lib/charges/heic.js:87-96` (qui passe par `heic-decode`) et `lib/charges.js:274-282`.
+
+**La cause.** Quand un fichier HEIC ne se lit pas, `heic-decode.all()` lève « HEIF image not found » avant de rendre sa fonction de libération (`dispose`). La mémoire du décodeur, avec la copie du fichier, reste alors dans le tas WebAssembly. Ce tas ne rétrécit jamais, et il plafonne à 2 Go (valeur lue dans le code de `libheif-js`).
+
+**Mesures (dans un seul processus, comme une instance Vercel déjà démarrée) :**
+- 30 fichiers pourris de 10 Mo (boîte `ftyp heic` suivie de déchets) : le tas passe de 32 à 392 Mo, soit environ 12 Mo perdus par échec.
+- Un vrai HEIC dont la boîte `pitm` est retirée (3,6 Mo) : environ 3,7 Mo perdus par échec.
+- Vers 200 fichiers, le module s'arrête (`Aborted()`). Deux effets ensuite :
+  - une **vraie** photo de 12 Mpx est refusée (`decodage`, 314 ms). Dans `confirmerEnvoi`, cela donne un 422, et la photo et la ligne de **chaque** utilisateur servi par cette instance sont effacées ;
+  - l'appel suivant tourne à 99 % du processeur, boucle d'événements bloquée (aucun minuteur ne se déclenche). L'instance reste gelée jusqu'à la coupure des 60 s.
+- Avec une fonction à 2 Go, la mémoire du processus est saturée avant (2,17 Go mesurés) : l'instance plante, avec toutes les requêtes qu'elle sert en même temps.
+
+**Pourquoi rien ne l'arrête.** `MAX_ENVOIS_OUVERTS` (30 envois ouverts par compte) ne borne pas l'attaque : chaque échec efface sa ligne (`abandonner`), donc le compteur ne se remplit jamais. N'importe quel titulaire peut boucler envoi → dépôt → confirmer.
+
+**Même sans attaque.** Après une seule photo de 48 Mpx, l'instance garde 428 Mo de tas pour toute sa vie. La phrase « La mémoire du décodeur est rendue dans tous les cas » (`heic.js:84-85` et spec ligne 1983) est donc fausse.
+
+**Correction proposée.**
+- Convertir dans un `worker_threads` par appel, terminé à la fin, avec un délai (par exemple 15 s, appliqué par `terminate()`).
+  - Prototype mesuré : 30 échecs → mémoire stable à 195 Mo ; une vraie photo passe en 1,9 s ; environ 150 ms de surcoût par conversion.
+- Un plantage du worker, un délai dépassé ou une sortie anormale donnent `panne` (503, rien effacé). Seule une erreur de décodage rendue par libheif donne 422.
+- Correctif minimal si le worker est refusé : appeler `libheif-js` directement (`HeifDecoder`, puis `decoder.decoder.delete()` dans un `finally`). Mesuré : tas stable à 32 Mo après 30 échecs. Ce correctif ne couvre ni l'arrêt du module, ni le gel, ni la mémoire gardée après une grosse photo.
+- Ajouter un test : N échecs ne font pas grossir le tas.
+- Corriger la phrase fausse dans la spec et dans `heic.js`.
+
+### 2. MINEUR — une panne du convertisseur est traitée comme une photo inconvertible
+
+**Où :** `lib/charges.js:276-282` et `lib/charges/heic.js:111-115`.
+
+Toute exception de la conversion donne 422 et efface la photo et la ligne. Cela vaut aussi pour une panne : module absent (`require('jpeg-js')` à la ligne 108 ou `require('heic-decode')` → `MODULE_NOT_FOUND`), arrêt du module WebAssembly, mémoire épuisée. `heicEnJpeg` réemballe en plus toute erreur de décodage sous le motif `decodage`.
+
+C'est contraire à la règle du fichier lui-même : une panne n'est pas un refus (voir `telecharger` et `lecturesEntites`). Ça se règle avec la correction 1.
+
+### 3. MINEUR — course : `abandonner` efface le fichier avant la ligne
+
+**Où :** `lib/charges.js:259-262`.
+
+Avant le lot, les octets du bucket ne changeaient jamais entre deux confirmations, donc deux confirmations rendaient le même verdict. Maintenant le fichier change (HEIC → JPEG), et la conversion peut échouer de façon imprévisible (constat 1).
+
+**Scénario.** Double confirmation du même envoi (nouvel essai réseau, deux onglets) :
+1. A convertit, écrit le JPEG, passe la charge `a_lire`.
+2. B avait téléchargé le HEIC avant ; sa conversion échoue (instance empoisonnée).
+3. B efface le fichier de la charge de A ; son `delete … eq('statut','envoi')` ne touche aucune ligne.
+
+Résultat : une charge `a_lire` sans fichier. La lecture tombe sur `fichier_absent` et la consultation est cassée.
+
+**Correction.** Supprimer d'abord la ligne avec `.select('id')`, et n'effacer le fichier que si une ligne a été supprimée, comme le fait déjà `purgerEnvois` (lignes 625-628).
+
+La réécriture du même JPEG par B, elle, est sans effet : la conversion est déterministe (deux passes donnent un JPEG identique à l'octet).
+
+### 4. MINEUR — deux trous dans les tests, trouvés par mutation
+
+- **Le HEIF n'est jamais converti par un test.** Si `'image/heif'` devient `{ bloc: 'image' }` (donc non converti), aucun des 4 fichiers de tests ne rougit. Aucun test ne fait passer la marque `mif1` dans `confirmerEnvoi`. En vrai, un HEIF partirait à l'IA en `image/heif` : l'API le refuse, l'échec est compté, et le HEIF resterait stocké. À ajouter : un test writer avec `ftypmif1`.
+- **Le délai du remplacement n'est pas testé.** Si `remplacerFichier` ignore `r.delai`, aucun test ne rougit. À ajouter : un dépôt qui dépasse le délai rend 503 et n'efface rien.
+
+### 5. MINEUR — le contrôle de migration ment quand la liste des types est vide
+
+**Où :** `migrations/2026-11-19-controle-charges-heic.sql`.
+
+Si `allowed_mime_types` vaut `NULL` (pour Supabase : tout type accepté), le contrôle rend `ok` vide et le détail « bucket absent » alors que le bucket existe. Ce n'est pas un faux « true », mais le détail est faux.
+
+**Correction :**
+- `coalesce(bool_and(…), false)` ;
+- distinguer `count(*) = 0` (bucket absent) d'une liste `NULL`.
+
+### 6. MINEUR — case PERFORMANCE et spec : seul le cas typique est mesuré
+
+**Où :** spec lignes 2007, 2018 et 2041.
+
+- **Mesures à la borne des 50 Mpx (machine locale) :**
+
+| Photo | Temps | Pic mémoire | Mémoire gardée ensuite |
+|---|---|---|---|
+| 48 Mpx, 7 Mo | 2,7 s | 789 Mo | 428 Mo |
+| 49 Mpx bruité, 12,5 Mo | 5,7 s | 876 Mo | — |
+| 3 conversions simultanées | 10,4 s | 1,1 Go | — |
+
+- **Budget de 60 s.** La spec ne compte que l'IA (10 à 20 s). La vraie chaîne est : téléchargement ≤ 8,5 s, conversion ≤ ~6 s, remplacement ≤ 8 s, IA ≤ 20 s, soit environ 43 s plus la base. Ça tient, mais il faut l'écrire.
+- **Taille du décodeur.** « 1,4 Mo de WebAssembly » est inexact : le fichier réellement chargé est `libheif-wasm/libheif-bundle.js`, 2,04 Mo (le WebAssembly y est en base64). Chargement mesuré : environ 50 ms par instance froide.
+- Les points 1 à 6 et 8 sont honnêtes. Le passage de 41 359 à 41 952 octets de `charges-vue.js` est vérifié.
+
+**Question pour Thierry, ce n'est pas un défaut de code.** La licence LGPL-3.0 de `libheif-js` ne pose pas de problème tant que le code tourne sur le serveur sans être distribué. En revanche, `libde265` décode du HEVC, un format couvert par des brevets payants pour les décodeurs. La spec n'en dit rien.
+
+## Vérifié sans constat
+
+- **Cloisonnement entre comptes.** Toutes les lectures et écritures de `confirmerEnvoi` sont filtrées par `user_id`. Le chemin vient de la ligne du compte ; seul `ouvrirEnvoi` l'écrit (`${compte}/${uuid}`). Le remplacement ne vise que ce chemin. L'URL de dépôt signée donnée au navigateur n'autorise pas l'écrasement : il ne peut pas remplacer le JPEG ensuite.
+- **Bombe de décompression.** Un fichier codé en 8192² mais déclaré 100 × 100 est refusé par libheif lui-même (« Security limit exceeded »), sans allocation (pic 61 Mo). Un fichier déclarant 67 Mpx est refusé avant le décodage (49 ms).
+- **Orientation.** La rotation (`irot`) est appliquée : une image 300 × 100 tournée donne un JPEG 100 × 300, couleurs justes.
+- **Ce que voit la suite.** L'empreinte est calculée sur le JPEG. La lecture IA immédiate reçoit le JPEG. Le cron relit le JPEG. La consultation sert le JPEG (`contentType image/jpeg`). `lireDocument` refuse un type non lisible sans appeler l'API.
+- **L'écran.**
+  - Chrome échoue à lire le HEIC (`img.onerror` → code `'type'`), la photo part telle quelle. Le type annoncé est celui du fichier déposé (`heic` ou `heif`, sans `-sequence`).
+  - Un HEIC nommé « .jpg » est reconnu à son contenu.
+  - Safari n'est pas touché : il envoie toujours un JPEG réduit.
+  - Un BMP reste refusé ; un HEIC de plus de 10 Mo est refusé avant l'envoi.
+  - Les types acceptés sont les mêmes à l'écran, au serveur et dans le bucket.
+- **Chargement et licences.** Les deux modules se chargent à la demande. Le WebAssembly est intégré au fichier JS, donc rien à ajouter dans `vercel.json`. Les licences (ISC, LGPL-3.0, BSD-3) correspondent au `package-lock`.
+- **Migration**, jouée sur une copie de t11, effacée ensuite :
+  - lignes de 47 caractères au plus (en caractères comme en octets) ;
+  - jouée deux fois : `UPDATE 1` à chaque fois, donc rejouable ;
+  - contrôle à `f` avant, à `t` après ;
+  - un doublon dans la liste, un bucket public ou une autre taille limite donnent `f`.
+- **Les tests mordent.**
+  - Contre-épreuve sur `9e0fb53f` : `charges-heic` et `charges-migration-heic` rougissent (module et migration absents), `charges-page` a 4 rouges, `charges-writer` en a 4.
+  - Mutations qui font chacune rougir au moins un test : empreinte calculée avant la conversion, panne du stockage qui efface, borne des 50 Mpx retirée, écran sans changement de type, 422 sans effacement, HEIC sans borne de 10 Mo, réduction retirée, `dispose` oublié.
+  - Avec l'horloge décalée à J+60 et J+200 : 123 sur 123.
+- **Suite complète** sur une copie de l'arbre (`git archive`) : 8 916 verts sur 8 919. Les 3 rouges (`reponse-partenaire-execution`, `v2-marche-aucune-ecriture-calendrier`) viennent de l'absence de dossier `.git` dans la copie. Relancés dans le worktree : 16 sur 16 verts.
+- **Traductions.** Le contrôle i18n passe (1 565 clés dans chacune des trois langues). La clé `charges.refus_heic` n'est plus utilisée nulle part.
+````
+
+**Corrections.** Le constat 1 est un constat de sécurité : ses correctifs
+passent **une seconde review, limitée à leur diff** (règle « une review par
+commit »).
+
+| Constat | Correction |
+|---|---|
+| 1 | La conversion tourne dans un **fil à usage unique**, terminé après chaque photo, avec un délai de 15 s (`convertirIsole`, `lib/charges/heic-fil.js`). Le fil principal ne charge jamais le décodeur, et un test le vérifie dans un processus neuf. Les messages de libheif ne vont plus aux journaux. Mesuré : 30 puis 90 fichiers pourris de 10 Mo d'affilée donnent 175 puis 165 Mo, sans croissance, et une vraie photo se convertit ensuite. Le surcoût du fil est d'environ 185 ms. La phrase fausse est retirée de la spec et du code. |
+| 2 | Une panne du convertisseur (`PanneConversion` : délai, fil planté ou sorti, module absent) donne **503 sans rien effacer**. Seul `ConversionImpossible` donne 422. Un module absent dans `heicEnJpeg` devient une panne. |
+| 3 | `abandonner` efface **d'abord la ligne** (`.select('id')`), et le fichier seulement si une ligne `envoi` est partie. Un test couvre la course. |
+| 4 | Deux tests ajoutés : un HEIF `mif1` qui passe dans `confirmerEnvoi`, et un remplacement qui dépasse son délai (rend 503, rien d'effacé ; délai injectable). La conversion réelle d'un HEIF `mif1` est aussi testée, avec un échantillon dérivé de celui du HEIC. |
+| 5 | Contrôle avec `coalesce(…, false)`. Le détail distingue « bucket absent » de « liste vide : tout type accepté ». Mesuré sur Postgres 16 dans quatre états : avant, après, liste vide, bucket absent. |
+| 6 | Mesures à la borne, budget de la fonction au pire (51,5 s), taille réelle du décodeur (2,04 Mo). La question des brevets HEVC est posée à Thierry dans la spec. |
+
+#### Seconde review du lot HEIC, limitée aux correctifs (19 novembre 2026)
+
+- **Arbre** : `/home/claude/hotesmart-heic` ; **branche** :
+  `charges-heic-serveur` ; **plage** :
+  `8680ab564b0ae2295fce20f1358c5bc4a8de3e4b..9e20c30105b2f37ff54b087c6c4010584ab67610`.
+- **Ce que la review dit avoir lu** : `9e20c30105b2f37ff54b087c6c4010584ab67610`,
+  et 9 fichiers.
+- **Confrontation** : ces 9 fichiers sont exactement ceux de
+  `git diff --name-only` sur la plage.
+
+Réponse de la review, recopiée telle quelle :
+
+````
+**SHA de tête lu :** `9e20c30105b2f37ff54b087c6c4010584ab67610` (arbre `/home/claude/hotesmart-heic`, branche `charges-heic-serveur`). `git status` est vide avant et après : rien n'a été modifié dans l'arbre.
+
+**`git diff --name-only 8680ab56..9e20c301` :**
+```
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/heic-fil.js
+lib/charges/heic.js
+migrations/2026-11-19-controle-charges-heic.sql
+tests/charges-heic.test.js
+tests/charges-writer.test.js
+tests/fixtures/charges/deux-couleurs-mif1.heif
+```
+
+## Constats
+
+### 1. SÉCURITÉ (déni de service), créé par le correctif — aucune limite au nombre de fils simultanés
+**Où :** `lib/charges/heic.js:156-185` (chaque appel lance son propre fil, sans limite) ; chiffre périmé dans `docs/specs/spec-compte-de-charges.md:2038`.
+
+**Le problème.** Avant le correctif, les décodages passaient l'un après l'autre et se partageaient un seul tas WebAssembly. Maintenant, chaque conversion a son propre tas, et elles tournent toutes en parallèle. La mémoire grandit donc avec le nombre de conversions simultanées. Mesures dans un seul processus :
+
+| Cas | Avant (8680ab5) | Après (9e20c30) |
+|---|---|---|
+| 3 photos de 48 Mpx (`p48.heic`) en même temps | 807 Mo, toutes converties | **2 103 Mo**, au-dessus des 2 Go d'une fonction |
+| 6 photos de 12 Mpx en même temps (2 cœurs) | 555 Mo, toutes converties en 12,2 s | 942 Mo, **les 6 en 503 `delai`** |
+
+**Scénario.** N'importe quel titulaire ouvre 3 envois de photos 48 Mpx valides (≤ 10 Mo chacune), puis lance 3 `confirmer` en parallèle. Si l'instance Vercel sert plusieurs requêtes à la fois (« Fluid compute »), elle tombe en manque de mémoire avec les requêtes des autres hôtes. C'est la même famille que le constat 1. Je n'ai pas pu vérifier ce réglage : il ne figure pas dans `vercel.json` et se règle dans le tableau de bord. Sans lui, il ne reste que la ligne périmée de la spec.
+
+**Correction.**
+- Une file au niveau du module : **un seul fil actif par instance**, très peu de requêtes en attente au-delà. Le délai de 15 s compte **depuis l'appel**, attente comprise, pour que la fonction reste sous 60 s. File pleine → `PanneConversion('occupe')`, donc 503.
+- Prototype mesuré (file non bornée) : 3 × 48 Mpx → 890 Mo, toutes converties ; 6 × 12 Mpx → 439 Mo, toutes converties.
+- Ajouter un test : 3 appels simultanés → jamais plus d'un fil en vie.
+- Corriger la ligne 2038 de la spec.
+
+### 2. MINEUR — aucun test ne vérifie que le fil est tué au délai
+**Où :** `tests/charges-heic.test.js:118`, pour la mutation de `lib/charges/heic.js:170`.
+
+Si on retire `fil.terminate()`, la suite reste au vert. Or un fichier qui ferait tourner le décodeur sans fin garderait alors un fil qui consomme du processeur au-delà des 15 s.
+
+**Correction.** Après le refus pour délai, vérifier que le fil est bien sorti, par exemple avec un `Worker` injecté qui compte les `terminate`. (Retirer `clearTimeout` ne fait rougir aucun test non plus, mais c'est sans effet sur le fonctionnement.)
+
+### 3. MINEUR — la cause d'une panne du fil n'apparaît nulle part
+**Où :** `lib/charges/heic.js:179` (`'error'` jette l'erreur) et `lib/charges/heic-fil.js:19` (`panne: 'erreur'` sans message). Comme la sortie d'erreur du fil est elle aussi jetée, un défaut réel dans le fil (par exemple `jpeg-js` absent) se lit seulement « PanneConversion erreur ».
+
+**Scénario.** Des 503 qui se répètent, impossibles à diagnostiquer.
+
+**Correction.** Faire suivre `String(e.message).slice(0, 200)` dans le message du fil et dans `PanneConversion`, puis l'écrire dans le `console.error` de `confirmerEnvoi`.
+
+### 4. MINEUR (cosmétique) — le contrôle SQL ne dit rien pour une liste `{}`
+**Où :** `migrations/2026-11-19-controle-charges-heic.sql:18-21`. Une liste `{}` rend bien `ok = f`, mais avec un détail vide. Supabase traite probablement `{}` comme « tout type accepté », comme `null`.
+
+**Correction.** `case when count(*) = 0 … when coalesce(max(cardinality(allowed_mime_types)), 0) = 0 then 'liste vide : tout type accepte' …`
+
+## Réponses aux questions
+
+**1. Le constat 1 est fermé pour des conversions qui se suivent.**
+- 210 fichiers pourris de 10 Mo d'affilée (au-delà des ~200 où le module s'arrêtait avant) : la mémoire du processus reste à 170 Mo dès la 70e conversion, puis ne bouge plus. Les 210 rendent `ConversionImpossible:decodage`, environ 159 ms chacun. Une vraie photo de 12 Mpx se convertit juste après.
+- 45 vraies photos d'affilée : la mémoire oscille entre 310 et 450 Mo sans monter. Ce qui reste est gardé par l'allocateur, pas une fuite.
+- Le fil principal ne charge jamais le décodeur : `require.cache` est vide de `heic-decode`, `libheif` et `jpeg-js`.
+- Délai à 300 ms, 10 fois : refus `delai` à 300-303 ms, et le nombre de fils du processus revient à 7. Le fil principal continue de tourner (57 battements sur 60 attendus). Aucune ressource ne reste ouverte et le processus sort aussitôt.
+- Plusieurs conversions simultanées : c'est le constat 1 ci-dessus.
+
+**2. Les autres points demandés sont sans défaut.**
+- **Panne contre refus.** Toute erreur du décodeur dans un fil neuf reste un 422, puisque le fil ne sert qu'à cette photo. Pour obtenir un 503 à chaque essai, il faudrait un fichier qui dépasse 15 s à lui seul. Aux bornes actuelles, le pire mesuré est 5,7 s (photo de 49 Mpx bruitée, 12,5 Mo). Un 503 répété n'efface rien, la ligne `envoi` compte dans le plafond de 30 envois ouverts, et la purge quotidienne la reprend : c'est acceptable. Seul reste possible le fait de reconfirmer sans fin le même identifiant, puisque rien ne freine `confirmer` ; la file du constat 1 en borne le coût.
+- **Transfert du tampon.** L'appelant garde ses octets intacts (vérifié avec `equals`). La copie coûte environ 6 ms pour 10 Mo, et elle évite de transférer la réserve partagée des petits tampons Node.
+- **Course de `abandonner`.** La ligne est effacée d'abord, avec `select('id')`, et le fichier seulement si la ligne est partie : c'est correct.
+- **Traçage Vercel.** `@vercel/nft` 0.29, lancé sur `api/charges.js`, embarque `lib/charges/heic-fil.js`, `heic-decode`, `libheif-js/libheif-wasm/libheif-bundle.js` et `jpeg-js`. `require.resolve` suffit.
+
+**3. Les tests neufs mordent.**
+- Les nouveaux tests, rejoués sur le code d'avant (`8680ab56`) : 6 rouges.
+- Ceux du HEIF `mif1` et du délai de remplacement passent sur le code d'avant. C'est attendu : ils ferment des trous de mutation, pas des défauts.
+- Mutations sur la tête, chacune rougit au moins un test : HEIF non converti, `r.delai` ignoré, conversion dans le fil principal, motif rendu comme une panne, ancien ordre de `abandonner`.
+- Mutations qui restent au vert : retrait de `terminate` (constat 2) et de `clearTimeout`.
+- `charges-heic` et `charges-writer` sur la tête : 74 sur 74.
+
+**4. Le contrôle SQL corrigé est juste** (base copiée de t11, effacée ensuite). Il rend `f` avant la migration, `t` après, et `f` pour une liste `null` (« liste vide : tout type accepte »), une liste `{}` (détail vide, constat 4), un doublon, un bucket public, une taille limite `null` ou un bucket absent (« bucket absent »). Ligne la plus longue : 48 caractères.
+
+## Vérifié sans constat
+- Fil à usage unique : pas de fuite en série, fil et minuteur libérés au délai, décodeur absent du fil principal.
+- Classement panne / refus, y compris un module absent (503) et une erreur de création du fil (503, sans minuteur laissé derrière).
+- Les messages de libheif ne vont plus aux journaux.
+- Tampon de l'appelant intact ; `abandonner` sans course.
+- Délai injectable de `remplacerFichier`.
+- Traçage Vercel du fil et de ses dépendances.
+- Contrôle SQL dans tous les états testés.
+````
+
+**Corrections.**
+
+⚠ **Elles ne passent pas de troisième review.** La règle du dépôt en
+autorise deux sur un lot qui ne touche pas l'envoi au voyageur (« une review
+par commit », CLAUDE.md). Le correctif du constat 1 est donc **mesuré et
+testé, mais pas relu**. Ce fait est remis au chef de file et à Thierry ; c'est
+à eux de décider d'une relecture supplémentaire.
+
+| Constat | Correction |
+|---|---|
+| 1 | Une file au niveau du module : **un seul fil vivant par instance**, deux photos au plus en attente. Au-delà, `PanneConversion('occupe')`, donc 503. Le délai de 15 s court **depuis l'appel** : une photo qui attend plus que son délai part en panne sans lancer de fil. Mesuré : trois photos de 3 Mo demandées ensemble passent l'une après l'autre (2,0 s, 3,9 s, 5,7 s), avec 400 Mo de mémoire au plus ; une quatrième est refusée « occupé ». Tests avec un `Worker` injecté qui compte les fils vivants (jamais plus d'un), la file pleine, et l'attente au-delà du délai. |
+| 2 | Un test vérifie que le fil muet est **terminé** au délai (`terminate` compté), puis que la file repart. |
+| 3 | `PanneConversion` porte sa cause (`detail`, 200 caractères au plus), venue du fil ou de son erreur. Elle est écrite dans le `console.error` de `confirmerEnvoi`. Un test le vérifie. |
+| 4 | Le contrôle dit « liste vide : tout type accepte » pour `null` comme pour `{}`. Mesuré dans cinq états : avant, après, `null`, `{}`, bucket absent. |
+| — | Signalé par la review du lot crédit : `package-lock.json` portait le nom du dossier de travail (`hotesmart-heic`). Il reprend son nom, `hotesmart`. |
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

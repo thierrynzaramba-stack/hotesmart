@@ -129,6 +129,108 @@ test('confirmer : un vrai PDF passe `a_lire` avec son empreinte ; un même fichi
   sansFuite(requetes)
 })
 
+// ─── Une photo HEIC, convertie par le serveur (§14.19) ─────────────────────
+// Les octets d'un HEIC tels que `typeReel` les reconnaît : une boîte `ftyp`
+// de marque `heic`. Le décodage, lui, est un double (`deps.convertir`) : le
+// vrai décodeur est éprouvé par tests/charges-heic.test.js.
+const HEIC = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic\0\0\0\0mif1heic'), Buffer.alloc(64)])
+const JPEG = Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.from('jpeg converti')])
+const { ConversionImpossible, PanneConversion } = require('../lib/charges/heic')
+// `envoiPasse` : la ligne n'est plus `envoi` quand on veut l'effacer (une
+// autre confirmation l'a passée `a_lire` entre-temps) — le delete ne touche rien.
+const envoiHeic = (stockage = {}, { octets = HEIC, envoiPasse = false } = {}) => baseEnregistreuse((r) => {
+  if (r.op === 'select' && r.unique) return { data: { id: ID, statut: 'envoi', justificatif_chemin: `${COMPTE}/${ID}` } }
+  if (r.op === 'update' && r.unique) return { data: { id: ID, statut: 'a_lire' } }
+  if (r.op === 'delete') return { data: envoiPasse ? [] : [{ id: ID }] }
+  if (r.op === 'select') return { data: [] }
+  return { data: null }
+}, { download: () => ({ data: blob(octets), error: null }), ...stockage })
+
+test('LE TEST QUI COMPTE (§14.19) : un HEIC est converti AVANT l\'empreinte — le JPEG REMPLACE la photo au même chemin, et la suite ne voit qu\'un JPEG', async () => {
+  const { client, requetes, gestes } = envoiHeic()
+  const recus = []
+  const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID },
+    { convertir: async (o, opts) => { recus.push([Buffer.compare(o, HEIC), opts.max]); return JPEG } })
+  assert.equal(r.ok, true)
+  assert.deepEqual(recus, [[0, 7 * 1024 * 1024]], 'les octets relus du bucket, bornés comme une image lue par l\'IA')
+  const envoi = gestes.find(g => g.nom === 'upload')
+  assert.deepEqual([envoi.args[0], envoi.args[2]], [`${COMPTE}/${ID}`, { contentType: 'image/jpeg', upsert: true }])
+  assert.equal(Buffer.compare(envoi.args[1], JPEG), 0)
+  const maj = requetes.find(x => x.op === 'update' && x.charge.statut === 'a_lire')
+  assert.equal(maj.charge.justificatif_type, 'image/jpeg')
+  assert.equal(maj.charge.justificatif_octets, JPEG.length)
+  assert.equal(maj.charge.justificatif_empreinte, crypto.createHash('sha256').update(JPEG).digest('hex'))
+  assert.deepEqual([r.type, Buffer.compare(r.octets, JPEG)], ['image/jpeg', 0], 'la lecture immédiate reçoit le JPEG')
+  assert.equal(gestes.filter(g => g.nom === 'remove').length, 0)
+  sansFuite(requetes)
+})
+
+test('un HEIC qu\'on ne sait pas convertir est effacé, ligne et fichier, et le refus le dit (422) — rien ne reste `a_lire`', async () => {
+  const { client, requetes, gestes } = envoiHeic()
+  const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID },
+    { convertir: async () => { throw new ConversionImpossible('decodage') } })
+  assert.deepEqual([r.statut, r.code], [422, 'conversion_impossible'])
+  assert.ok(gestes.some(g => g.nom === 'remove'))
+  assert.ok(requetes.some(x => x.op === 'delete' && filtre(x, 'statut') === 'envoi' && filtre(x, 'user_id') === COMPTE))
+  assert.equal(requetes.filter(x => x.op === 'update').length, 0)
+  assert.equal(gestes.filter(g => g.nom === 'upload').length, 0)
+})
+
+test('le stockage qui refuse le JPEG converti : panne, RIEN n\'est effacé ni écrit — la ligne reste `envoi`', async () => {
+  const { client, requetes, gestes } = envoiHeic({ upload: () => ({ data: null, error: { message: 'panne' } }) })
+  const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID }, { convertir: async () => JPEG })
+  assert.equal(r.statut, 503)
+  assert.equal(gestes.filter(g => g.nom === 'remove').length, 0)
+  assert.equal(requetes.filter(x => x.op === 'update' || x.op === 'delete').length, 0)
+})
+
+test('LE TEST QUI COMPTE (review HEIC, constat 2) : une PANNE du convertisseur (délai, fil planté) n\'est pas une photo illisible — 503, RIEN n\'est effacé', async () => {
+  for (const erreur of [new PanneConversion('delai'), new PanneConversion('fil_sorti_1'), new TypeError('inattendu')]) {
+    const { client, requetes, gestes } = envoiHeic()
+    const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID }, { convertir: async () => { throw erreur } })
+    assert.equal(r.statut, 503, erreur.message)
+    assert.equal(gestes.filter(g => g.nom === 'remove' || g.nom === 'upload').length, 0, erreur.message)
+    assert.equal(requetes.filter(x => x.op === 'update' || x.op === 'delete').length, 0, erreur.message)
+  }
+})
+
+test('LE TEST QUI COMPTE (review HEIC, constat 3) : une confirmation qui échoue n\'efface PAS le fichier d\'une charge qu\'une autre confirmation a déjà passée `a_lire`', async () => {
+  const { client, requetes, gestes } = envoiHeic({}, { envoiPasse: true })
+  const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID }, { convertir: async () => { throw new ConversionImpossible('decodage') } })
+  assert.equal(r.statut, 422)
+  const del = requetes.find(x => x.op === 'delete')
+  assert.ok(del && filtre(del, 'statut') === 'envoi' && del.retour === 'id', 'la ligne d\'abord, en rendant ce qu\'elle a effacé')
+  assert.equal(gestes.filter(g => g.nom === 'remove').length, 0, 'aucune ligne effacée : le fichier reste')
+})
+
+test('un HEIF (marque `mif1`) est converti aussi, et la suite ne voit qu\'un JPEG (review HEIC, constat 4)', async () => {
+  const HEIF = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmif1\0\0\0\0mif1heic'), Buffer.alloc(64)])
+  const { client, requetes } = envoiHeic({}, { octets: HEIF })
+  let appels = 0
+  const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID }, { convertir: async () => { appels++; return JPEG } })
+  assert.equal(appels, 1)
+  assert.equal(r.type, 'image/jpeg')
+  assert.equal(requetes.find(x => x.op === 'update' && x.charge.statut === 'a_lire').charge.justificatif_type, 'image/jpeg')
+})
+
+test('un stockage qui ne répond pas à temps au remplacement : panne, rien n\'est effacé ni écrit (review HEIC, constat 4)', async () => {
+  const { client, requetes, gestes } = envoiHeic({ upload: () => new Promise(() => {}) })
+  const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID }, { convertir: async () => JPEG, delaiStockageMs: 20 })
+  assert.equal(r.statut, 503)
+  assert.equal(gestes.filter(g => g.nom === 'remove').length, 0)
+  assert.equal(requetes.filter(x => x.op === 'update' || x.op === 'delete').length, 0)
+})
+
+test('un HEIC de plus de 10 Mo est refusé sans être décodé', async () => {
+  const gros = Buffer.concat([HEIC, Buffer.alloc(10 * 1024 * 1024)])
+  const { client, gestes } = envoiHeic({ download: () => ({ data: blob(gros), error: null }) })
+  let decode = 0
+  const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID }, { convertir: async () => { decode++; return JPEG } })
+  assert.equal(r.statut, 413)
+  assert.equal(decode, 0)
+  assert.ok(gestes.some(g => g.nom === 'remove'))
+})
+
 test('confirmer une charge d’un AUTRE compte : 404, rien n’est relu ni écrit', async () => {
   const { client, requetes, gestes } = baseEnregistreuse(() => ({ data: null }))
   const r = await charges.confirmerEnvoi(client, { compte: AUTRE, id: ID })

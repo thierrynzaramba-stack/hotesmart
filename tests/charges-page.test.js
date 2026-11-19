@@ -617,16 +617,23 @@ test('LE TEST QUI COMPTE : une photo HEIC SANS type (sélecteur Android) se reco
   } finally { b.fermer() }
 })
 
-test('LE TEST QUI COMPTE : une photo HEIC que l\'appareil ne sait pas lire est refusée en le DISANT, avec quoi faire — rien ne part', async () => {
+test('LE TEST QUI COMPTE (§14.19) : une photo HEIC que l\'appareil ne sait pas lire (Chrome) part TELLE QUELLE, annoncée et déposée en HEIC — le serveur la convertit', async () => {
   const illisible = () => { throw Object.assign(new Error('type'), { code: 'type' }) }
   const b = await monter({ geste: geste8, preparerJpeg: illisible })
   try {
-    await b.deposerFichier('photo.heif', 'image/heif')
-    assert.deepEqual(b.gestes(), [])
-    assert.match(texte(b.$('[data-bind="envoi"]')), /Photo HEIC.*capture d'écran/)
-    // Une autre image illisible : un autre message, sans parler de HEIC.
+    await b.deposerFichier('photo.heif', 'image/heif', 'heif-original')
+    const [envoi, confirmer] = b.gestes()
+    assert.deepEqual(envoi, { action: 'envoi', type: 'image/heif', octets: 'heif-original'.length, origine: 'photo' })
+    assert.equal(confirmer.action, 'confirmer')
+    const depot = b.journal.fetch.find(f => f.url.startsWith('https://stockage.test/'))
+    const fichier = depot.corps.get('')
+    assert.equal(fichier.type, 'image/heif', 'le fichier déposé porte le type annoncé — celui que le bucket accepte')
+    assert.equal(fichier.size, 'heif-original'.length, 'les octets d\'origine, pas une réduction (« jpeg-reduit »)')
+    b.journal.fetch.length = 0
+    // Une autre image illisible : refusée en le disant, sans parler de HEIC.
+    const avant = b.gestes().length
     await b.deposerFichier('scan.bmp', 'image/bmp')
-    assert.deepEqual(b.gestes(), [])
+    assert.equal(b.gestes().length, avant, 'rien ne part')
     assert.match(texte(b.$('[data-bind="envoi"]')), /ne sait pas lire cette image/)
     assert.doesNotMatch(texte(b.$('[data-bind="envoi"]')), /HEIC/)
   } finally { b.fermer() }
@@ -662,13 +669,38 @@ test('formatDuContenu : le format se lit dans les premiers octets', async () => 
   assert.equal(formatDuContenu(o('bonjour')), '')
 })
 
-test('LE TEST QUI COMPTE (review, constat 1) : un HEIC enregistré en « .jpg » est reconnu à son CONTENU, et le message le nomme', async () => {
+test('LE TEST QUI COMPTE (review, constat 1) : un HEIC enregistré en « .jpg » est reconnu à son CONTENU, et part en HEIC pour le serveur', async () => {
   const illisible = () => { throw Object.assign(new Error('type'), { code: 'type' }) }
   const b = await monter({ geste: geste8, preparerJpeg: illisible })
   try {
     await b.deposerFichier('facture-sms.jpg', 'image/jpeg', '\0\0\0\x18ftypheic-et-la-suite')
+    const [envoi] = b.gestes()
+    assert.equal(envoi.type, 'image/heic')
+    const depot = b.journal.fetch.find(f => f.url.startsWith('https://stockage.test/'))
+    assert.equal(depot.corps.get('').type, 'image/heic')
+  } finally { b.fermer() }
+})
+
+test('un HEIC de plus de 10 Mo est refusé AVANT tout envoi, en le disant', async () => {
+  const illisible = () => { throw Object.assign(new Error('type'), { code: 'type' }) }
+  const b = await monter({ geste: geste8, preparerJpeg: illisible })
+  try {
+    await b.deposerFichier('grosse.heic', 'image/heic', 'x'.repeat(10 * 1024 * 1024 + 1))
     assert.deepEqual(b.gestes(), [])
-    assert.match(texte(b.$('[data-bind="envoi"]')), /Photo HEIC/)
+    assert.match(texte(b.$('[data-bind="envoi"]')), /trop lourd|trop volumineux|trop gros/i)
+  } finally { b.fermer() }
+})
+
+test('le serveur qui ne sait pas convertir la photo (422) le dit, avec quoi faire', async () => {
+  const illisible = () => { throw Object.assign(new Error('type'), { code: 'type' }) }
+  const geste = (corps) => {
+    if (corps.action === 'envoi') return { ok: true, id: id(13), url: 'https://stockage.test/envoi/h', jeton: 't' }
+    throw Object.assign(new Error('x'), { status: 422, error: 'conversion_impossible' })
+  }
+  const b = await monter({ geste, preparerJpeg: illisible })
+  try {
+    await b.deposerFichier('photo.heic', 'image/heic', 'heic')
+    assert.match(texte(b.$('[data-bind="envoi"]')), /n'a pas pu être convertie.*capture d'écran/)
   } finally { b.fermer() }
 })
 
