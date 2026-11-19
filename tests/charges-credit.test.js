@@ -283,3 +283,11 @@ test('LE PASSAGE QUOTIDIEN : un crédit en panne n\'arrête pas les autres (revi
   assert.deepEqual(r, { ok: false, materialisees: 1, erreurs: 1 })
   assert.ok(b.requetes.some(x => x.op === 'upsert' && x.charge[0].credit_id === AUTRE_CREDIT), 'le second crédit passe quand même')
 })
+
+test('la lecture du tableau prend la place du COMPTE dans la file commune (troisième review HEIC, constat de sécurité 1)', async () => {
+  const b = baseVide()
+  const recus = []
+  const r = await charges.importerCredit(b.client, ARGS, { entites: entitesDouble(), lireTableau: async (o, opts) => { recus.push(opts && opts.cle); return { ok: true, echeances: ECHEANCES } } })
+  assert.equal(r.ok, true)
+  assert.deepEqual(recus, [COMPTE])
+})

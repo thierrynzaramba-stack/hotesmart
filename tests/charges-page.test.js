@@ -704,6 +704,18 @@ test('le serveur qui ne sait pas convertir la photo (422) le dit, avec quoi fair
   } finally { b.fermer() }
 })
 
+test('le convertisseur PRIS se dit autrement qu\'une panne : « réessayez dans un instant » (troisième review HEIC, mineur 5)', async () => {
+  const geste = (corps) => {
+    if (corps.action === 'envoi') return { ok: true, id: id(13), url: 'https://stockage.test/envoi/o', jeton: 't' }
+    throw Object.assign(new Error('x'), { status: 503, error: 'conversion_occupee' })
+  }
+  const b = await monter({ geste, preparerJpeg: async () => { throw Object.assign(new Error('x'), { code: 'type' }) } })
+  try {
+    await b.deposerFichier('photo.heic', 'image/heic', 'heic')
+    assert.match(texte(b.$('[data-bind="envoi"]')), /convertit déjà une photo : réessayez dans un instant/)
+  } finally { b.fermer() }
+})
+
 test('un fichier SANS nom parlant ni type (sélecteur Android) est reconnu à son contenu : un PDF part en PDF', async () => {
   const b = await monter({ geste: (corps) => (corps.action === 'envoi' ? { ok: true, id: id(11), url: 'https://stockage.test/envoi/v', jeton: 't' } : { ok: true, issue: 'lue', charge: facture(11, { statut: 'a_verifier' }) }) })
   try {

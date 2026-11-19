@@ -94,6 +94,44 @@ test('LE TEST QUI COMPTE (mineur 3) : HEIC et tableaux partagent UNE file — ja
   assert.equal(FILE_LOURDE.max, 2)
 })
 
+test('LE TEST QUI COMPTE (troisième review HEIC, S1) : UN compte, UNE place — en cours ou en attente, sa seconde demande est « occupé », photo ou tableau ; un autre compte passe', async () => {
+  const file = creerFile()
+  const f = fabrique({ repond: 40 })
+  const demande = (cle) => executer(file, tache({ cle }), { Worker: f.Worker }).then(() => 'ok', (e) => e.motif)
+  // A convertit ; A redemande ; B attend ; A redemande encore.
+  assert.deepEqual(await Promise.all([demande('A'), demande('A'), demande('B'), demande('A')]), ['ok', 'occupe', 'ok', 'occupe'])
+  // C convertit, A ATTEND, A redemande : la clé en attente est prise aussi.
+  assert.deepEqual(await Promise.all([demande('C'), demande('A'), demande('A')]), ['ok', 'ok', 'occupe'])
+  // Une photo et un tableau du même compte, ensemble : le second est « occupé ».
+  const { convertirIsole } = require('../lib/charges/heic')
+  const { lireTableauIsole } = require('../lib/charges/credit-tableau')
+  const g = fabrique({ repond: 40 })
+  const r = await Promise.all([
+    convertirIsole(Buffer.from('x'), { max: 1e7, cle: 'D' }, { Worker: g.Worker }).then(() => 'photo', (e) => e.motif),
+    lireTableauIsole(Buffer.from('%PDF'), { cle: 'D' }, { Worker: g.Worker }).then((x) => (x.panne ? x.panne : 'tableau'))
+  ])
+  assert.deepEqual(r, ['reponse_vide', 'occupe'])
+})
+
+test('la place et la clé sont rendues AVANT la réponse : le compte qui enchaîne aussitôt passe', async () => {
+  const file = creerFile()
+  const f = fabrique({ repond: 10 })
+  await executer(file, tache({ cle: 'A' }), { Worker: f.Worker })
+  assert.deepEqual(await executer(file, tache({ cle: 'A' }), { Worker: f.Worker }), { ok: true })
+})
+
+test('un travail qui a attendu et à qui il reste moins de RESTE_MIN_MS ne lance pas d\'enfant : « occupé » (troisième review HEIC, mineur 6)', async () => {
+  const { RESTE_MIN_MS } = require('../lib/charges/fil-isole')
+  const file = creerFile()
+  const devant = fabrique({ repond: 200 })
+  const p = executer(file, tache({ delaiMs: 3000 }), { Worker: devant.Worker })
+  const derriere = fabrique({ repond: 10 })
+  const juste = executer(file, tache({ delaiMs: 200 + RESTE_MIN_MS - 150 }), { Worker: derriere.Worker }).then(() => 'ok', (e) => e.motif)
+  await p
+  assert.equal(await juste, 'occupe')
+  assert.equal(derriere.etat.crees, 0, 'aucun enfant lancé')
+})
+
 // ─── Le vrai processus ──────────────────────────────────────────────────────
 const enfants = () => {
   try { return fs.readFileSync(`/proc/self/task/${process.pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean) } catch (e) { return [] }

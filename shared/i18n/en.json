@@ -479,6 +479,7 @@
   "charges.refus_entite_hors_compte": "This entity is no longer in your account. Reload the page.",
   "charges.refus_entite_requise": "Choose this invoice's entity.",
   "charges.refus_fichier_absent": "The file did not arrive. Send the invoice again.",
+  "charges.refus_conversion_occupee": "The server is already converting a photo: try again in a moment.",
   "charges.refus_conversion_impossible": "This photo could not be converted. Upload a screenshot of the invoice, or save it as JPEG or PDF.",
   "charges.refus_image_illisible": "This browser cannot read this image. Upload a screenshot of the invoice, or save it as JPEG or PDF.",
   "charges.refus_montant_invalide": "An amount is not valid.",

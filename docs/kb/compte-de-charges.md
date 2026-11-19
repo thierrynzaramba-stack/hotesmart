@@ -55,8 +55,8 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   compte pas les tampons de pdf.js, et un PDF de 8 Ko aux filtres en règle
   montait à 5,4 Go. Ses flux compressés sont contrôlés AVANT pdf.js, fermé par
   défaut, mais ce contrôle refuse vite, il ne borne pas. Un processus et pas un
-  fil : un fil terminé ne rend pas sa mémoire (mesuré : 1,7 Go résidents après
-  huit tours). Une SEULE file pour les photos HEIC et les tableaux
+  fil : après un PDF piégé, un fil terminé ne rend pas sa mémoire (mesuré : 1,6 Go
+  résidents après huit tours ; une photo HEIC, elle, la rend). Une SEULE file pour les photos HEIC et les tableaux
   (`FILE_LOURDE`, lib/charges/fil-isole.js). « Payée » ne se dit que d'une
   échéance échue.
 - **Aucun HEIC n'est gardé ni lu** (§14.19) : une photo HEIC que le navigateur
@@ -66,7 +66,11 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   du convertisseur n'efface rien (503). ⚠ Le décodeur tourne dans un processus
   À USAGE UNIQUE (`convertirIsole`, file commune avec les tableaux, 1 Go de
   mémoire résidente au plus), jamais dans le processus principal : son tas
-  WebAssembly ne rétrécit jamais et fuyait sur les fichiers illisibles. Les types acceptés vivent à TROIS endroits (bucket, `TYPES`,
+  WebAssembly ne rétrécit jamais et fuyait sur les fichiers illisibles. Un
+  enfant à la fois par instance, deux en attente, et UN travail à la fois par
+  compte, photo ou tableau (sinon un seul compte tenait la file de tous) ; un
+  convertisseur pris rend « réessayez dans un instant » (503
+  `conversion_occupee`). Les types acceptés vivent à TROIS endroits (bucket, `TYPES`,
   `TYPES_ACCEPTES`) que `tests/charges-migration-heic.test.js` compare.
 - **Une période dure au plus TROIS ANS** (1 097 jours, date de fin comprise ; Thierry, 19 novembre
   2026 — un an au lot 7a). La même borne en trois endroits : la contrainte
