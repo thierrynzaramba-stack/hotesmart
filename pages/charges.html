@@ -39,8 +39,10 @@
 </header>
 
 <main class="page chg">
-  <div class="chg-tete">
-    <h1 class="h1" data-i18n="charges.titre"></h1>
+  <!-- Le bouton d'ajout, SEUL, tout en haut (retour de recette du lot 8a,
+       19 novembre 2026) ; puis le titre et le choix de l'entité, dont tout le
+       reste de la page dépend. -->
+  <div class="chg-barre">
     <!-- UN SEUL BOUTON (Q32) : PDF, JPEG ou PNG ; au téléphone, le sélecteur
          du système propose l'appareil photo. -->
     <button type="button" class="btn btn--primary chg-ajouter" data-action="ajouter" data-i18n-attr="aria-label:charges.ajouter">
@@ -49,13 +51,15 @@
     </button>
     <input type="file" data-bind="fichier" accept="application/pdf,image/jpeg,image/png,image/webp,image/gif,image/avif,image/bmp,image/tiff,image/heic,image/heif,.heic,.heif" hidden>
   </div>
+  <div class="chg-tete">
+    <h1 class="h1" data-i18n="charges.titre"></h1>
+    <div class="chg-tete__entite" data-bind="entite"></div>
+  </div>
   <p class="chg-envoi" data-bind="envoi" role="status"></p>
 
-  <div class="chg-haut">
-    <section class="chg-bloc" data-bind="a-traiter"><p class="muted" data-i18n="common.loading"></p></section>
-    <section class="chg-bloc" data-bind="totaux"></section>
-    <section class="chg-bloc" data-bind="credits"></section>
-  </div>
+  <section class="chg-bloc" data-bind="a-traiter"><p class="muted" data-i18n="common.loading"></p></section>
+  <section class="chg-bloc" data-bind="totaux"></section>
+  <section class="chg-bloc" data-bind="credits"></section>
   <section class="chg-bloc" data-bind="liste"></section>
 </main>
 
