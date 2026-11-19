@@ -3772,6 +3772,64 @@ Rien d'autre :
 - les crédits sous chaque mois, la fiche ouverte depuis le détail et « Afficher plus » marchent.
 ```
 
+#### 14.21.11 Retours de recette du 19 novembre 2026 — la présentation
+
+Recette de Thierry sur staging (`0c2ccfdc`) : « la mise en page n'est pas
+top, les paiements mensuels ne sont pas des factures qui reviennent tous les
+mois, trouve une présentation plus claire ». Sept maquettes plus tard, ses
+décisions, dans l'ordre où il les a données :
+
+1. **Les mois en liste**, tous affichés, sur toute la largeur.
+2. **Le total de l'exercice en TTC seul.** Les cases HT et TVA sont retirées
+   de l'écran (le résumé les calcule toujours ; la fiche d'une facture les
+   garde).
+3. **« À traiter » sur toute la largeur, en lignes fines** ; la liste du bas
+   aussi, et elle s'intitule « Factures de <entité> ».
+4. **L'entité se choisit en tête de page**, à côté du titre : tout le reste
+   en dépend.
+5. **« Ajouter une facture » seul, tout en haut.**
+6. **Les termes comptables** : « Prorata temporis » remplace « Étalé »,
+   « Date de facture » remplace « À la date », partout sur la page.
+7. **Chaque mois est un bloc** ; un mois ouvert se détache (en-tête teinté,
+   cadre marqué, détail en retrait).
+8. **Le détail d'un mois a deux parties** :
+   - « Factures du mois » — celles DATÉES de ce mois : type et date, période
+     couverte, solde d'une régularisation (« à payer » ou « remboursé »),
+     charge du mois, montant facturé ;
+   - « Charges mensuelles » — la part du mois des factures datées d'un autre
+     mois : le nom et la charge, sans date, sans période, sans montant de
+     facture (« les montants de la facture n'apparaissent qu'à la date de
+     facturation »).
+   La somme des « Charge du mois » est le « Prorata temporis » du mois ;
+   celle des « Montant facturé », son « Date de facture ».
+9. « On part sur ça dans un premier temps. »
+
+**Inventaire** (la forme ne supprime pas le fond) :
+
+| Élément d'avant | Devenir | Raison |
+|---|---|---|
+| Cases HT et TVA des totaux | retirées | décision 2 de Thierry |
+| « N sans montant lu » sous HT et TVA | retirées avec leurs cases ; celle du TTC reste | idem |
+| « Estimation » déclenchée par un HT ou une TVA non lus | ne se déclenche plus que par le TTC, une facture à vérifier ou un signal | l'écran ne doute pas d'un chiffre qu'il n'affiche pas |
+| Titre « Totaux » | gardé pour les lecteurs d'écran, masqué à l'œil | l'exercice et son total parlent d'eux-mêmes |
+| Mots « Étalé » / « À la date » sur chaque ligne | une ligne de titres par tableau | décisions 1 et 6 |
+| État « Vérifiée » dans le détail d'un mois | non affiché (les autres états le sont) | une ligne du détail est comptée, donc vérifiée, sauf mention |
+| Catégorie et logement dans le détail d'un mois | non affichés ; la fiche s'ouvre au clic | décision 8 : le nom et la charge |
+| Mensualité de crédit sous son mois | conservée, dans le bloc du mois | §14.20 |
+| Mention « mois partiel » (exercice décalé) | conservée | review 1, constat 1 |
+
+**Ce que la page ne fait pas**, dit à Thierry : les « charges mensuelles »
+sont la répartition d'une facture sur sa période, pas des prélèvements ; les
+prélèvements réels d'un échéancier ne sont pas suivis.
+
+**Mobile** : même module ; les colonnes se resserrent (88 px), l'entité prend
+la largeur. **Performance** : aucun appel ni requête de plus ; le serveur et
+la migration ne changent pas.
+
+**Tests** : `charges-page` 77/77 (4 nouveaux, 10 remis sur la nouvelle
+présentation) ; huit mutations de la présentation, sept rouges, la huitième
+a montré une branche inutile, retirée.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et
