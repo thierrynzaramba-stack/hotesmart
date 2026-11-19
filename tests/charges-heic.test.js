@@ -150,7 +150,9 @@ test('LE TEST QUI COMPTE (mémoire) : le fil PRINCIPAL ne charge jamais le déco
 // temps montaient à 2,1 Go (mesure de la review). Un double de `Worker` compte
 // les fils vivants et les `terminate`.
 const { EventEmitter } = require('node:events')
-function fabriqueDeFils ({ repond = 20, jamais = false } = {}) {
+// `mortLente` : un vrai fil met 20 à 35 ms à mourir (troisième review) — un
+// double qui meurt à l'instant ne voit pas une place rendue trop tôt.
+function fabriqueDeFils ({ repond = 20, jamais = false, mortLente = 0, reponse = null } = {}) {
   const etat = { vivants: 0, maxVivants: 0, crees: 0, termines: 0 }
   class FauxFil extends EventEmitter {
     constructor () {
@@ -163,15 +165,20 @@ function fabriqueDeFils ({ repond = 20, jamais = false } = {}) {
     }
     postMessage () {
       if (jamais) return
-      setTimeout(() => { if (!this.mort) this.emit('message', { ok: true, jpeg: Uint8Array.from([0xFF, 0xD8, 0xFF]) }) }, repond)
+      setTimeout(() => { if (!this.mort) this.emit('message', reponse || { ok: true, jpeg: Uint8Array.from([0xFF, 0xD8, 0xFF]) }) }, repond)
     }
-    async terminate () { if (!this.mort) { this.mort = true; etat.vivants--; etat.termines++ } }
+    async terminate () {
+      if (this.mort) return
+      this.mort = true
+      if (mortLente) await new Promise(r => setTimeout(r, mortLente))
+      etat.vivants--; etat.termines++
+    }
   }
   return { Worker: FauxFil, etat }
 }
 
-test('LE TEST QUI COMPTE (mémoire) : trois conversions demandées ENSEMBLE passent l\'une après l\'autre — jamais deux fils vivants', async () => {
-  const f = fabriqueDeFils({ repond: 30 })
+test('LE TEST QUI COMPTE (mémoire) : trois conversions demandées ENSEMBLE passent l\'une après l\'autre — jamais deux fils vivants, même quand un fil met du temps à mourir (troisième review, mineur 2)', async () => {
+  const f = fabriqueDeFils({ repond: 30, mortLente: 15 })
   const r = await Promise.all([1, 2, 3].map(() => convertirIsole(Buffer.from('x'), { max: 1e7 }, { Worker: f.Worker })))
   assert.equal(r.length, 3)
   assert.deepEqual([f.etat.crees, f.etat.maxVivants, f.etat.termines, f.etat.vivants], [3, 1, 3, 0])
@@ -199,12 +206,74 @@ test('une photo qui attend son tour plus que son délai part en panne « occupé
   const premiere = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 1000 }, { Worker: lent.Worker })
   const t0 = Date.now()
   const seconde = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 30 }, { Worker: lent.Worker })
-  // « occupé », pas « délai » (seconde review du lot crédit, mineur 2) : elle
-  // n'a pas eu son tour — une panne, 503, l'hôte réessaie.
+  // « occupé », pas « délai » (seconde review du lot crédit, mineur 2 ;
+  // troisième review HEIC, mineur 5) : elle n'a pas eu son tour — l'écran
+  // dit « réessayez dans un instant ».
   await assert.rejects(seconde, (e) => e instanceof PanneConversion && e.motif === 'occupe')
   assert.ok(Date.now() - t0 < 70, 'refusée à son délai, pas à la fin de la première')
   await premiere
   assert.equal(lent.etat.crees, 1, 'la seconde n\'a jamais eu de fil')
+})
+
+test('LE TEST QUI COMPTE (troisième review, S1) : UN compte, UNE place — sa seconde conversion est refusée « occupé », celle d\'un autre compte passe', async () => {
+  const f = fabriqueDeFils({ repond: 60 })
+  const r = await Promise.all([
+    convertirIsole(Buffer.from('x'), { max: 1e7, cle: 'compte-a' }, { Worker: f.Worker }).then(() => 'ok', (e) => e.motif),
+    convertirIsole(Buffer.from('x'), { max: 1e7, cle: 'compte-a' }, { Worker: f.Worker }).then(() => 'ok', (e) => e.motif),
+    convertirIsole(Buffer.from('x'), { max: 1e7, cle: 'compte-b' }, { Worker: f.Worker }).then(() => 'ok', (e) => e.motif),
+    convertirIsole(Buffer.from('x'), { max: 1e7, cle: 'compte-a' }, { Worker: f.Worker }).then(() => 'ok', (e) => e.motif)
+  ])
+  assert.deepEqual(r, ['ok', 'occupe', 'ok', 'occupe'], 'en cours, la clé est prise')
+  // Libérée à la fin : le compte A repasse.
+  assert.equal((await convertirIsole(Buffer.from('x'), { max: 1e7, cle: 'compte-a' }, { Worker: f.Worker })).length, 3)
+  // EN ATTENTE aussi, la clé est prise : C convertit, A attend, A redemande.
+  const r2 = await Promise.all(['compte-c', 'compte-a', 'compte-a'].map((cle) =>
+    convertirIsole(Buffer.from('x'), { max: 1e7, cle }, { Worker: f.Worker }).then(() => 'ok', (e) => e.motif)))
+  assert.deepEqual(r2, ['ok', 'ok', 'occupe'], 'en attente, la clé est prise')
+})
+
+test('le fil reçoit le RESTE du délai compté depuis l\'appel ; coupé après avoir attendu, c\'est « occupé » (troisième review, mineur 3)', async () => {
+  const premier = fabriqueDeFils({ repond: 600 })
+  const p1 = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 5000 }, { Worker: premier.Worker })
+  const lent = fabriqueDeFils({ repond: 900 })
+  const t0 = Date.now()
+  // Elle attend ~600 ms, il lui en reste ~700 : son fil (900 ms) est coupé à ~1300 ms de l\'appel.
+  await assert.rejects(convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 1300 }, { Worker: lent.Worker }), (e) => e.motif === 'occupe')
+  const duree = Date.now() - t0
+  assert.ok(duree >= 1250 && duree < 1600, `${duree} ms : le délai court depuis l'appel, pas depuis le lancement`)
+  assert.equal(lent.etat.crees, 1, 'elle a eu un fil, coupé en cours')
+  await p1
+})
+
+test('une attente expirée libère sa place dans la file ; un reste trop court ne lance pas de fil (troisième review, mineurs 3 et 6)', async () => {
+  const { RESTE_MIN_MS } = require('../lib/charges/heic')
+  const lent = fabriqueDeFils({ repond: 150 })
+  const premiere = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 3000 }, { Worker: lent.Worker })
+  assert.equal(await convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 20 }, { Worker: lent.Worker }).catch(e => e.motif), 'occupe')
+  const r = await Promise.all([1, 2].map(() => convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 3000 }, { Worker: lent.Worker }).then(() => 'ok', e => e.motif)))
+  await premiere
+  assert.deepEqual(r, ['ok', 'ok'], 'la place de l\'expirée est rendue')
+  // Elle sort de la file avec moins de RESTE_MIN_MS : refusée sans fil.
+  const f = fabriqueDeFils({ repond: 200 })
+  const devant = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 3000 }, { Worker: f.Worker })
+  const juste = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 200 + RESTE_MIN_MS - 150 }, { Worker: f.Worker }).catch(e => e.motif)
+  await devant
+  assert.equal(await juste, 'occupe')
+  assert.equal(f.etat.crees, 1, 'aucun fil lancé pour un reste trop court')
+})
+
+test('un fil qui répond par une panne garde sa cause ; un fil qui sort sans répondre rend la place tout de suite (troisième review, mineur 4)', async () => {
+  const enPanne = fabriqueDeFils({ reponse: { ok: false, panne: 'module_absent', cause: 'Cannot find module heic-decode' } })
+  await assert.rejects(convertirIsole(Buffer.from('x'), { max: 1e7 }, { Worker: enPanne.Worker }),
+    (e) => e instanceof PanneConversion && e.motif === 'module_absent' && /heic-decode/.test(e.detail))
+  class FilQuiSort extends EventEmitter {
+    constructor () { super(); this.stdout = { resume () {} }; this.stderr = { resume () {} } }
+    postMessage () { setTimeout(() => this.emit('exit', 0), 5) }
+    async terminate () {}
+  }
+  const t0 = Date.now()
+  await assert.rejects(convertirIsole(Buffer.from('x'), { max: 1e7 }, { Worker: FilQuiSort }), (e) => e instanceof PanneConversion && e.motif === 'fil_sorti_0')
+  assert.ok(Date.now() - t0 < 500, 'pas au délai de 15 s')
 })
 
 test('la cause d\'une panne du fil est gardée pour le journal (seconde review, constat 3)', async () => {

@@ -94,6 +94,104 @@ test('LE TEST QUI COMPTE (mineur 3) : HEIC et tableaux partagent UNE file — ja
   assert.equal(FILE_LOURDE.max, 2)
 })
 
+test('LE TEST QUI COMPTE (troisième review HEIC, S1) : UN compte, UNE place — en cours ou en attente, sa seconde demande est « occupé », photo ou tableau ; un autre compte passe', async () => {
+  const file = creerFile()
+  const f = fabrique({ repond: 40 })
+  const demande = (cle) => executer(file, tache({ cle }), { Worker: f.Worker }).then(() => 'ok', (e) => e.motif)
+  // A convertit ; A redemande ; B attend ; A redemande encore.
+  assert.deepEqual(await Promise.all([demande('A'), demande('A'), demande('B'), demande('A')]), ['ok', 'occupe', 'ok', 'occupe'])
+  // C convertit, A ATTEND, A redemande : la clé en attente est prise aussi.
+  assert.deepEqual(await Promise.all([demande('C'), demande('A'), demande('A')]), ['ok', 'ok', 'occupe'])
+  // Une photo et un tableau du même compte, ensemble : le second est « occupé ».
+  const { convertirIsole } = require('../lib/charges/heic')
+  const { lireTableauIsole } = require('../lib/charges/credit-tableau')
+  const g = fabrique({ repond: 40 })
+  const r = await Promise.all([
+    convertirIsole(Buffer.from('x'), { max: 1e7, cle: 'D' }, { Worker: g.Worker }).then(() => 'photo', (e) => e.motif),
+    lireTableauIsole(Buffer.from('%PDF'), { cle: 'D' }, { Worker: g.Worker }).then((x) => (x.panne ? x.panne : 'tableau'))
+  ])
+  assert.deepEqual(r, ['reponse_vide', 'occupe'])
+})
+
+test('la place et la clé sont rendues AVANT la réponse : le compte qui enchaîne aussitôt passe', async () => {
+  const file = creerFile()
+  const f = fabrique({ repond: 10 })
+  await executer(file, tache({ cle: 'A' }), { Worker: f.Worker })
+  assert.deepEqual(await executer(file, tache({ cle: 'A' }), { Worker: f.Worker }), { ok: true })
+})
+
+test('un travail qui a attendu et à qui il reste moins de RESTE_MIN_MS ne lance pas d\'enfant : « occupé » (troisième review HEIC, mineur 6)', async () => {
+  const { RESTE_MIN_MS } = require('../lib/charges/fil-isole')
+  const file = creerFile()
+  const devant = fabrique({ repond: 200 })
+  const p = executer(file, tache({ delaiMs: 3000 }), { Worker: devant.Worker })
+  const derriere = fabrique({ repond: 10 })
+  const juste = executer(file, tache({ delaiMs: 200 + RESTE_MIN_MS - 150 }), { Worker: derriere.Worker }).then(() => 'ok', (e) => e.motif)
+  await p
+  assert.equal(await juste, 'occupe')
+  assert.equal(derriere.etat.crees, 0, 'aucun enfant lancé')
+})
+
+test('LE TEST QUI COMPTE (troisième review, S3) : DEUX erreurs du même enfant ne tuent pas le parent — une seule réponse', async () => {
+  class DeuxErreurs extends EventEmitter {
+    constructor () { super(); this.stdout = null; this.stderr = null }
+    postMessage () { setTimeout(() => { this.emit('error', new Error('write EPIPE')); this.emit('error', Object.assign(new Error('tas plein'), { code: 'ERR_WORKER_OUT_OF_MEMORY' })) }, 5) }
+    async terminate () {}
+  }
+  await assert.rejects(executer(creerFile(), tache(), { Worker: DeuxErreurs }), (e) => e.motif === 'fil_en_erreur' && /EPIPE/.test(e.detail))
+  await attendre(20)
+})
+
+test('un envoi qui lève à l\'enfant est une panne rendue, pas une promesse pendue', async () => {
+  class EnvoiImpossible extends EventEmitter {
+    constructor () { super(); this.stdout = null; this.stderr = null }
+    postMessage () { throw new Error('ERR_IPC_CHANNEL_CLOSED') }
+    async terminate () {}
+  }
+  const t0 = Date.now()
+  await assert.rejects(executer(creerFile(), tache({ delaiMs: 5000 }), { Worker: EnvoiImpossible }), (e) => e.motif === 'fil_en_erreur')
+  assert.ok(Date.now() - t0 < 1000)
+})
+
+test('sous Linux, un enfant dont la mémoire ne se lit pas est REFUSÉ « garde_aveugle » (troisième review, mineur 3)', { skip: process.platform !== 'linux' && 'Linux seulement' }, async () => {
+  class Aveugle extends EventEmitter {
+    constructor () { super(); this.stdout = null; this.stderr = null; this.mort = false }
+    postMessage () {}
+    memoire () { return null }
+    async terminate () { this.mort = true }
+  }
+  const t0 = Date.now()
+  await assert.rejects(executer(creerFile(), tache({ delaiMs: 5000 }), { Worker: Aveugle }), (e) => e.motif === 'garde_aveugle')
+  assert.ok(Date.now() - t0 < 1000)
+})
+
+test('LE TEST QUI COMPTE (troisième review, S1) : un compte dont le travail a été COUPÉ se repose — l\'autre compte passe', async () => {
+  const file = creerFile()
+  await assert.rejects(executer(file, tache({ cle: 'A', delaiMs: 40 }), { Worker: fabrique({ jamais: true }).Worker }), (e) => e.motif === 'delai')
+  await assert.rejects(executer(file, tache({ cle: 'A' }), { Worker: fabrique().Worker }), (e) => e.motif === 'occupe' && e.detail === 'repos')
+  assert.deepEqual(await executer(file, tache({ cle: 'B' }), { Worker: fabrique().Worker }), { ok: true })
+  // Coupé pour la mémoire aussi.
+  let v = 0
+  await assert.rejects(executer(file, tache({ cle: 'C', memoireMax: 10 }), { Worker: fabrique({ jamais: true }).Worker, rss: () => (v += 20), intervalleGardeMs: 5 }), (e) => e.motif === 'memoire')
+  await assert.rejects(executer(file, tache({ cle: 'C' }), { Worker: fabrique().Worker }), (e) => e.motif === 'occupe')
+  // Un refus du FICHIER (réponse normale) ne met pas au repos.
+  assert.deepEqual(await executer(file, tache({ cle: 'D' }), { Worker: fabrique().Worker }), { ok: true })
+  assert.deepEqual(await executer(file, tache({ cle: 'D' }), { Worker: fabrique().Worker }), { ok: true })
+})
+
+test('une photo HEIC a sa propre borne, plus haute que celle d\'un tableau (troisième review, mineur 5 : une photo de 48 Mpx monte à ~790 Mo)', async () => {
+  const { convertirIsole, MEMOIRE_CONVERSION } = require('../lib/charges/heic')
+  const { MEMOIRE_MAX_DEFAUT } = require('../lib/charges/fil-isole')
+  assert.ok(MEMOIRE_CONVERSION > 1024 * 1024 * 1024)
+  class Photo extends EventEmitter {
+    constructor () { super(); this.stdout = null; this.stderr = null }
+    postMessage () { setTimeout(() => this.emit('message', { ok: true, jpeg: Uint8Array.from([0xFF, 0xD8, 0xFF]) }), 60) }
+    async terminate () {}
+  }
+  const r = await convertirIsole(Buffer.from('x'), { max: 1e7 }, { Worker: Photo, rss: () => MEMOIRE_MAX_DEFAUT + 400 * 1024 * 1024, intervalleGardeMs: 5 })
+  assert.equal(r.length, 3)
+})
+
 // ─── Le vrai processus ──────────────────────────────────────────────────────
 const enfants = () => {
   try { return fs.readFileSync(`/proc/self/task/${process.pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean) } catch (e) { return [] }
@@ -127,6 +225,36 @@ test('un enfant dont le tas JavaScript déborde avorte — « memoire », pas un
     delaiMs: 15000,
     limites: { maxOldGenerationSizeMb: 32 },
     memoireMax: 4 * 1024 * 1024 * 1024
-  }), (e) => e instanceof PanneFil && e.motif === 'memoire')
+  }), (e) => e instanceof PanneFil && e.motif === 'memoire' && e.detail === 'tas plein', 'le TAS, lu dans son stderr — pas la garde de 4 Go')
   assert.deepEqual(enfants(), [])
+})
+
+test('un enfant qui avorte SANS tas plein est une panne, pas « memoire » (troisième review, mineur 4) : le fichier n\'est pas accusé', async () => {
+  await assert.rejects(executer(creerFile(), {
+    fichier: path.join(__dirname, 'fixtures', 'charges', 'enfant-avorte.js'), entree: 1, delaiMs: 15000
+  }), (e) => e instanceof PanneFil && e.motif === 'fil_en_erreur' && /avorté/.test(e.detail))
+  assert.deepEqual(enfants(), [])
+})
+
+test('LE TEST QUI COMPTE (troisième review, S2) : l\'enfant n\'hérite PAS des secrets du parent, ni de NODE_OPTIONS', async () => {
+  const { ENV_ENFANT } = require('../lib/charges/fil-isole')
+  process.env.SECRET_TEMOIN_CHARGES = 'ne-doit-pas-passer'
+  try {
+    const { noms, tas } = await executer(creerFile(), { fichier: path.join(__dirname, 'fixtures', 'charges', 'enfant-env.js'), entree: 1, delaiMs: 15000, limites: { maxOldGenerationSizeMb: 64 } })
+    // Et le tas de l'enfant est bien celui qu'on lui donne (troisième review, mineur 5).
+    assert.ok(tas < 200 * 1024 * 1024, `${Math.round(tas / 1048576)} Mo`)
+    assert.ok(!noms.includes('SECRET_TEMOIN_CHARGES'))
+    assert.ok(!noms.includes('NODE_OPTIONS'))
+    for (const n of noms) assert.ok(ENV_ENFANT.includes(n), `${n} hérité`)
+  } finally { delete process.env.SECRET_TEMOIN_CHARGES }
+})
+
+test('le canal coupé, l\'enfant part, sans qu\'on le tue — et la sortie se conclut quand même (sur `exit`, pas sur `close`)', async () => {
+  const { FilProcessus } = require('../lib/charges/fil-isole')
+  const f = new FilProcessus(path.join(__dirname, '..', 'lib', 'charges', 'credit-tableau-fil.js'))
+  const parti = new Promise((r) => f.once('exit', r))
+  f.enfant.disconnect()
+  const code = await Promise.race([parti, new Promise((r) => setTimeout(() => r('toujours vivant'), 3000))])
+  if (code === 'toujours vivant') await f.terminate()
+  assert.equal(code, 0)
 })

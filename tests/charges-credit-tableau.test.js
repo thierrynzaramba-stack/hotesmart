@@ -206,6 +206,35 @@ test('S1 : un leurre dans une chaîne, un « endstream » caché dans les donné
   assert.equal(fluxSousBorne(Buffer.from('%PDF-1.4\n7 0 obj\n<< /Length 999 /Filter /FlateDecode >>\nstream\nxx', 'latin1')), 'flux_illisible')
 })
 
+test('LE TEST QUI COMPTE (troisième review, mineur 1) : le blanc est celui du LEXEUR de pdf.js — un NUL avant « stream » ne cache plus la bombe, un faux « stream » après 0xA0 ne la fait plus sauter', () => {
+  const L = `/Length ${BOMBE.length}`
+  // NUL avant le mot : pdf.js le tient pour un blanc, donc pour un flux.
+  assert.equal(fluxSousBorne(pdfDe(brut('7 0 obj', `${L} /Filter /FlateDecode`, BOMBE, '\0stream\n'))), 'flux_trop_gros')
+  // 0xA0 avant un faux mot : pdf.js n'y voit pas de flux ; son /Length sautait la vraie bombe.
+  const vraie = Buffer.concat([Buffer.from(`\nendstream\nendobj\n8 0 obj\n<< ${L} /Filter /FlateDecode >>\nstream\n`, 'latin1'), BOMBE])
+  const tete = (n) => Buffer.from(`%PDF-1.4\n7 0 obj\n<< /Length ${String(n).padStart(10, '0')} >>\n\xA0stream\n`, 'latin1')
+  const piege = Buffer.concat([tete(vraie.length), vraie, Buffer.from('\nendstream\nendobj\n%%EOF\n', 'latin1')])
+  assert.equal(fluxSousBorne(piege), 'flux_trop_gros')
+})
+
+test('un PDF PROTÉGÉ par un mot de passe de propriétaire, comme en livrent les banques, se lit (troisième review, mineur 7) — le contrôle s\'efface, la garde borne', async () => {
+  // tableau-tourne-protege.pdf : tableau-tourne.pdf passé par
+  // `qpdf --encrypt "" "proprietaire-fictif" 256 --print=none --modify=none`.
+  const protege = pdf('tourne-protege')
+  assert.equal(fluxSousBorne(protege), null)
+  const [a, b] = [await lireTableau(pdf('tourne')), await lireTableau(protege)]
+  assert.equal(b.ok, true, JSON.stringify(b))
+  assert.deepEqual(b.echeances, a.echeances)
+  // Et un /Encrypt fait s'effacer le contrôle, même devant une bombe : c'est la garde qui la tient.
+  assert.equal(fluxSousBorne(pdfDe(brut('7 0 obj', `/Length ${BOMBE.length} /Filter /FlateDecode`, BOMBE), Buffer.from('trailer\n<< /Root 1 0 R /Encrypt 9 0 R >>\n'))), null)
+})
+
+test('une IMAGE n\'est pas décompressée : un logo Flate de plus de 4 Mo ne fait plus refuser le tableau (troisième review, mineur 7)', () => {
+  assert.equal(fluxSousBorne(pdfDe(brut('7 0 obj', `/Length ${BOMBE.length} /Type /XObject /Subtype /Image /Width 2480 /Height 600 /Filter /FlateDecode`, BOMBE))), null)
+  // La même hors d'une image est une bombe.
+  assert.equal(fluxSousBorne(pdfDe(brut('7 0 obj', `/Length ${BOMBE.length} /Filter /FlateDecode`, BOMBE))), 'flux_trop_gros')
+})
+
 test('fermé par défaut, mais pas aveugle : le vrai tableau et les fixtures passent, un mot « stream » dans un titre ne déclenche rien', () => {
   for (const nom of ['portrait', 'tourne', 'ligne-fausse', 'sans-capital']) assert.equal(fluxSousBorne(pdf(nom)), null, nom)
   assert.equal(fluxSousBorne(pdfDe(Buffer.from('1 0 obj\n<< /Title (Livestream) /Producer (stream-x) >>\nendobj\n'), flux(2, '/Filter /FlateDecode', zlib.deflateSync(Buffer.from('BT ET'))))), null)

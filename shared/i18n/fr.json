@@ -479,6 +479,7 @@
   "charges.refus_entite_hors_compte": "Cette entité n'est plus dans votre compte. Rechargez la page.",
   "charges.refus_entite_requise": "Choisissez l'entité de cette facture.",
   "charges.refus_fichier_absent": "Le fichier n'est pas arrivé. Renvoyez la facture.",
+  "charges.refus_conversion_occupee": "Le serveur convertit déjà une photo : réessayez dans un instant.",
   "charges.refus_conversion_impossible": "Cette photo n'a pas pu être convertie. Envoyez une capture d'écran de la facture, ou enregistrez-la en JPEG ou en PDF.",
   "charges.refus_image_illisible": "Ce navigateur ne sait pas lire cette image. Envoyez une capture d'écran de la facture, ou enregistrez-la en JPEG ou en PDF.",
   "charges.refus_montant_invalide": "Un montant n'est pas valide.",
