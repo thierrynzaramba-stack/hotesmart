@@ -434,6 +434,7 @@
   "charges.detail_partiel": "Partial month: only its share within the financial year is shown, from {debut} to {fin}.",
   "charges.exercices_indispo": "The list of financial years is incomplete right now: only this one is offered.",
   "charges.mois": "Month",
+  "charges.type_echeance_credit": "Loan instalment",
   "charges.type_du": "{type} dated {date}",
   "charges.couvre": "covers {debut} to {fin}",
   "charges.solde_a_payer": "balance due: {montant}",

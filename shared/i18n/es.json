@@ -434,6 +434,7 @@
   "charges.detail_partiel": "Mes parcial: solo se muestra su parte dentro del ejercicio, del {debut} al {fin}.",
   "charges.exercices_indispo": "La lista de ejercicios está incompleta por ahora: solo se ofrece este.",
   "charges.mois": "Mes",
+  "charges.type_echeance_credit": "Cuota del crédito",
   "charges.type_du": "{type} del {date}",
   "charges.couvre": "cubre del {debut} al {fin}",
   "charges.solde_a_payer": "saldo a pagar: {montant}",
