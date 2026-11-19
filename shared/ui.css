@@ -2389,6 +2389,14 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 /* Les crédits (spec compte de charges §14.20) : la mensualité payée d'un mois,
    sous le mois, et la liste des crédits avec leur formulaire d'import. */
 .chg-rep li.chg-rep__credit { padding-left: 12px; color: var(--muted); }
+/* Les douze mois de l'exercice (§14.21.2) : toute la largeur, chaque mois
+   est un bouton qui ouvre, sous sa ligne, les factures du mois. */
+.chg-rep--mois { grid-column: 1 / -1; }
+.chg-rep li.chg-rep__mois { display: block; }
+.chg-mois { width: 100%; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; padding: 6px 8px; border: 0; border-radius: var(--radius-tile); background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-small); text-align: start; cursor: pointer; }
+.chg-mois:hover, .chg-rep__mois--ouvert .chg-mois { background: var(--surface-2); }
+.chg-rep li.chg-detail { display: block; padding: 4px 0 10px 12px; }
+.chg-detail__part { font-size: 12.5px; color: var(--muted); }
 .chg-credit-mois { display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 2px 8px; }
 .chg-credit-mois small { font-size: var(--fs-caption); }
 .chg-credits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

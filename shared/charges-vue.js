@@ -190,8 +190,10 @@ export function monter (racine, deps) {
     ? t('charges.periode_courte', { debut: jourLisible(c.periode_debut), fin: jourLisible(c.periode_fin) })
     : '')
 
+  // ⚠ UNE ENTITÉ À LA FOIS (§14.21, décision 7) : `entite` vide = le serveur
+  // choisit (la première active), et la réponse dit laquelle.
   const etat = {
-    entite: 'toutes', periode: '',
+    entite: '', periode: '', moisOuvert: null, detailMois: {},
     aTraiter: { lignes: [], nombre: 0 }, liste: [], suite: null,
     entites: [], biens: [], biensArchives: [], categories: [], totaux: null,
     fiche: null, occupe: false, envoiEnCours: false, ficheEnCours: false,
@@ -209,10 +211,12 @@ export function monter (racine, deps) {
   }
   const nomEntite = (e) => (e.archivee ? `${e.nom} · ${t('charges.archivee')}` : e.nom)
 
-  // Toutes les factures connues de l'écran, une seule fois chacune.
+  // Toutes les factures connues de l'écran, une seule fois chacune — celles du
+  // détail d'un mois comprises : un clic y ouvre la même fiche.
   function connues () {
     const vues = new Map()
-    for (const c of [...(etat.aTraiter.lignes || []), ...(etat.liste || [])]) vues.set(String(c.id), c)
+    const detail = Object.values(etat.detailMois || {}).flatMap(d => (d && d.lignes) || [])
+    for (const c of [...detail, ...(etat.aTraiter.lignes || []), ...(etat.liste || [])]) vues.set(String(c.id), c)
     return vues
   }
 
@@ -258,11 +262,15 @@ export function monter (racine, deps) {
   }
 
   // ─── Les totaux ──────────────────────────────────────────────────────────
+  // « Exercice 2026 » pour un exercice civil ; « Exercice 2025-2026 » sinon.
+  const libelleExercice = (annee, mmjj) => (mmjj === '01-01' || !mmjj
+    ? t('charges.exercice_civil', { annee })
+    : t('charges.exercice_decale', { debut: annee, fin: String(Number(annee) + 1) }))
   function selecteurs () {
-    const ents = `<option value="toutes"${etat.entite === 'toutes' ? ' selected' : ''}>${esc(t('charges.toutes_entites'))}</option>`
-      + etat.entites.map(e => `<option value="${esc(e.id)}"${String(e.id) === etat.entite ? ' selected' : ''}>${esc(nomEntite(e))}</option>`).join('')
+    if (!etat.entites.length) return ''
+    const ents = etat.entites.map(e => `<option value="${esc(e.id)}"${String(e.id) === etat.entite ? ' selected' : ''}>${esc(nomEntite(e))}</option>`).join('')
     const tot = etat.totaux
-    const pers = tot ? (tot.proposees || []).map(p => `<option value="${esc(p)}"${p === tot.periode ? ' selected' : ''}>${esc(t('charges.periode_' + p))}</option>`).join('') : ''
+    const pers = tot && !tot.sans_entite ? (tot.proposees || []).map(p => `<option value="${esc(p)}"${p === tot.periode ? ' selected' : ''}>${esc(libelleExercice(p, tot.debut_exercice))}</option>`).join('') : ''
     return '<div class="chg-choix">'
       + `<select class="chg-select" data-choix="entite" aria-label="${esc(t('charges.entite_aria'))}">${ents}</select>`
       + (pers ? `<select class="chg-select" data-choix="periode" aria-label="${esc(t('charges.periode_aria'))}">${pers}</select>` : '')
@@ -328,14 +336,95 @@ export function monter (racine, deps) {
     return ligne('charges.credit_decaisse', c.payee) + ligne('charges.credit_a_venir', c.avenir)
   }
 
+  // ─── Les douze mois de l'exercice, et le détail d'un mois (§14.21.2) ──────
+  // ⚠ TOUS les mois de l'exercice, même vides : l'hôte lit son année mois par
+  // mois. Un clic ouvre, sous la ligne, les factures du mois et leur part.
+  function moisDeLExercice (debut, fin) {
+    const liste = []
+    let [a, m] = String(debut).split('-').map(Number)
+    const [af, mf] = String(fin).split('-').map(Number)
+    while (a < af || (a === af && m <= mf)) {
+      liste.push(`${a}-${String(m).padStart(2, '0')}`)
+      m++
+      if (m > 12) { m = 1; a++ }
+      if (liste.length > 24) break
+    }
+    return liste
+  }
+  function ligneDetail (c) {
+    const e = etatDe(c)
+    const etale = c.periode_debut && c.periode_fin
+    const infos = [
+      c.type_document && c.type_document !== 'facture' ? (connu('charges.type_' + c.type_document) || '') : '',
+      periodeLisible(c), c.categorie ? nomCategorie(c.categorie) : '', nomBien(c.bien_id)
+    ].filter(Boolean).join(' · ')
+    // La part du mois se dit quand elle n'est pas la facture entière.
+    const part = etale && c.part_ttc_cents != null && c.part_ttc_cents !== c.montant_ttc_cents
+      ? `<span class="chg-detail__part">${esc(t('charges.part_du_mois', { montant: fmtMontant.format(c.part_ttc_cents / 100) }))}</span>`
+      : ''
+    const horsTotal = c.compte === false ? `<span class="chg-etat">${esc(t('charges.non_comptee'))}</span>` : ''
+    return `<li><button type="button" class="chg-ligne chg-ligne--detail" data-ouvrir="${esc(c.id)}">`
+      + `<span class="chg-ligne__jour">${esc(jourLisible(c.jour))}</span>`
+      + `<span class="chg-ligne__qui"><b>${esc(c.fournisseur_nom || t('charges.fournisseur_inconnu'))}</b>`
+      + (infos ? `<span class="chg-ligne__infos">${esc(infos)}</span>` : '') + part + '</span>'
+      + `<span class="chg-ligne__ttc">${montant(c.montant_ttc_cents)}</span>`
+      + (e ? `<span class="chg-etat chg-etat--${esc(e)}">${esc(t('charges.etat_' + e))}</span>` : horsTotal || '<span></span>')
+      + '<span></span></button></li>'
+  }
+  function detailDuMois (cle) {
+    const d = etat.detailMois[cle]
+    if (!d || d.etat === 'charge') return `<li class="chg-detail"><p class="muted small">${esc(t('charges.detail_chargement'))}</p></li>`
+    if (d.etat === 'erreur') return `<li class="chg-detail"><p class="chg-erreur">${esc(t('charges.detail_indispo'))}</p></li>`
+    if (!d.lignes.length) return `<li class="chg-detail"><p class="muted small">${esc(t('charges.detail_vide'))}</p></li>`
+    return `<li class="chg-detail"><ul class="chg-lignes">${d.lignes.map(ligneDetail).join('')}</ul></li>`
+  }
+  function repartitionMois (tot) {
+    const parCle = new Map((tot.par_mois || []).map(r => [String(r.cle), r]))
+    const credit = ligneCreditDuMois(decaissesParMois())
+    const lignes = moisDeLExercice(tot.debut, tot.fin).map(cle => {
+      const r = parCle.get(cle) || { cle }
+      const ouvert = etat.moisOuvert === cle
+      const plein = Number(r.nb_factures) > 0 || Number(r.nb_etale) > 0
+      return `<li class="chg-rep__mois${ouvert ? ' chg-rep__mois--ouvert' : ''}"><button type="button" class="chg-mois" data-mois="${esc(cle)}" aria-expanded="${ouvert ? 'true' : 'false'}">`
+        + `<span class="chg-rep__nom">${esc(moisLisible(cle))}</span>`
+        + (plein ? deuxLectures(r.ttc_etale, r.nb_etale, r.ttc, r.nb_factures) : `<span class="muted">${esc(t('charges.mois_vide'))}</span>`)
+        + '</button></li>'
+        + credit(r) + (ouvert ? detailDuMois(cle) : '')
+    }).join('')
+    return `<section class="chg-rep chg-rep--mois"><h3 class="chg-h3">${esc(t('charges.par_mois'))}</h3><ul>${lignes}</ul></section>`
+  }
+
+  async function basculerMois (cle) {
+    if (etat.moisOuvert === cle) { etat.moisOuvert = null; peindreTotaux(); return }
+    etat.moisOuvert = cle
+    const deja = etat.detailMois[cle]
+    if (deja && deja.etat === 'ok') { peindreTotaux(); return }
+    etat.detailMois[cle] = { etat: 'charge', lignes: [] }
+    peindreTotaux()
+    const entite = etat.entite
+    try {
+      const d = await deps.charger(`mois=${encodeURIComponent(cle)}&entite=${encodeURIComponent(entite)}`)
+      // Une autre entité choisie entre-temps : cette réponse n'est plus la sienne.
+      if (etat.entite !== entite) return
+      etat.detailMois[cle] = { etat: 'ok', lignes: (d && d.detail_mois && d.detail_mois.lignes) || [] }
+    } catch (e) {
+      if (etat.entite !== entite) return
+      etat.detailMois[cle] = { etat: 'erreur', lignes: [] }
+    }
+    peindreTotaux()
+  }
+
   function peindreTotaux () {
     const z = $('[data-bind="totaux"]')
     const tot = etat.totaux
     let corps
-    if (!tot) {
+    if (tot && tot.sans_entite) {
+      corps = `<div class="chg-alerte"><p>${esc(t('charges.sans_entite'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>`
+    } else if (!tot) {
       corps = `<p class="muted">${esc(t('charges.totaux_indispo'))}</p>`
     } else {
       const bornes = `<p class="chg-mentions">${esc(t('charges.du_au', { debut: jourLisible(tot.debut), fin: jourLisible(tot.fin) }))}</p>`
+        + (tot.standard ? `<p class="chg-mentions">${esc(t('charges.exercice_standard'))}</p>` : '')
       const s = tot.total || {}
       // ⚠ « ESTIMATION », ET LES TROIS RAISONS DE LA SPEC (§6, Q4) : une
       // facture en lecture, à vérifier ou illisible ; un signal non tranché
@@ -356,6 +445,7 @@ export function monter (racine, deps) {
       const ligneMentions = mentions ? `<p class="chg-mentions${estimation ? ' chg-mentions--estimation' : ''}">${esc(mentions)}</p>` : ''
       if (!s.nb_factures && !s.nb_etale) {
         corps = bornes + `<p class="muted">${esc(t('charges.totaux_vide'))}</p>` + ligneMentions
+          + `<div class="chg-reps">${repartitionMois(tot)}</div>`
       } else {
         // « N sans montant lu » compte les DOCUMENTS de la période ; un montant
         // manquant qui ne s'y trouve que par l'étalement se dit sans nombre.
@@ -370,7 +460,7 @@ export function monter (racine, deps) {
           + '</div>'
           + ligneMentions
           + '<div class="chg-reps">'
-          + repartition(t('charges.par_mois'), tot.par_mois, moisLisible, ligneCreditDuMois(decaissesParMois()))
+          + repartitionMois(tot)
           + repartition(t('charges.par_categorie'), tot.par_categorie, nomCategorie)
           + repartition(t('charges.par_bien'), tot.par_bien, (id) => (id ? (nomBien(id) || t('charges.sans_bien')) : t('charges.sans_bien')))
           + '</div>'
@@ -514,21 +604,27 @@ export function monter (racine, deps) {
     etat.categories = (d && d.categories) || []
     etat.totaux = (d && d.totaux) || null
     etat.credits = (d && d.credits) || null
+    // L'entité que le serveur a lue (la première active, si on n'en demandait
+    // pas). Une réponse qui ne la dit pas garde le choix en cours.
+    if (d && d.entite !== undefined) etat.entite = d.entite || ''
     if (etat.totaux && etat.totaux.periode) etat.periode = etat.totaux.periode
+    // Un autre exercice ou une autre entité : les détails ouverts ne valent plus.
+    etat.moisOuvert = null
+    etat.detailMois = {}
   }
 
   async function recharger () {
     const p = new URLSearchParams()
-    p.set('entite', etat.entite)
+    if (etat.entite) p.set('entite', etat.entite)
     if (etat.periode) p.set('periode', etat.periode)
     let d
     try {
       d = await deps.charger(p.toString())
     } catch (e) {
       // Une entité disparue (archivée puis supprimée, autre onglet) : on
-      // revient à « Toutes » au lieu de laisser l'écran en échec.
-      if (e && e.status === 404 && etat.entite !== 'toutes') {
-        etat.entite = 'toutes'; etat.periode = ''
+      // laisse le serveur choisir au lieu de laisser l'écran en échec.
+      if (e && e.status === 404 && etat.entite) {
+        etat.entite = ''; etat.periode = ''
         return recharger()
       }
       const z = $('[data-bind="a-traiter"]')
@@ -545,7 +641,8 @@ export function monter (racine, deps) {
     etat.occupe = true
     bouton.disabled = true
     try {
-      const d = await deps.charger('curseur=' + encodeURIComponent(etat.suite))
+      // La liste suit l'entité choisie (§14.21) : la page suivante aussi.
+      const d = await deps.charger('curseur=' + encodeURIComponent(etat.suite) + (etat.entite ? '&entite=' + encodeURIComponent(etat.entite) : ''))
       etat.liste = etat.liste.concat((d && d.liste && d.liste.lignes) || [])
       etat.suite = (d && d.liste && d.liste.suite) || null
     } catch (e) {
@@ -880,9 +977,10 @@ export function monter (racine, deps) {
 
   // ─── Les écouteurs : un seul, délégué ────────────────────────────────────
   racine.addEventListener('click', (ev) => {
-    const el = ev.target.closest && ev.target.closest('[data-ouvrir],[data-geste],[data-action]')
+    const el = ev.target.closest && ev.target.closest('[data-ouvrir],[data-geste],[data-action],[data-mois]')
     if (!el) return
     if (el.dataset.ouvrir) { ouvrirFiche(el.dataset.ouvrir); return }
+    if (el.dataset.mois) { basculerMois(el.dataset.mois); return }
     const g = el.dataset.geste || el.dataset.action
     if (g === 'ajouter') $('[data-bind="fichier"]').click()
     else if (g === 'plus') afficherPlus(el)

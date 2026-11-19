@@ -3561,6 +3561,57 @@ Chacun sa review, sa recette et sa remise ; 8a d'abord.
 - L'import depuis un tableau reconnu crée le crédit et retire la charge ;
   rien n'est créé si l'import échoue.
 
+#### 14.21.9 Lot 8a — ce qui est codé (19 novembre 2026)
+
+Branche `charges-exercice-ajout`, partie de `main` (`b4dfedc1`).
+
+- **Migration** `2026-11-19-charges-exercice-mois.sql` (à coller APRÈS
+  `2026-11-19-charges-credits`, AVANT le déploiement du code) et son contrôle
+  (3 lignes : deux fonctions `security definer`, corps à l'empreinte sans
+  blancs, aucun droit pour `anon`, `authenticated` ni `public`). Jouée sur
+  Postgres 16 local : détail de 79 mois comparé au résumé, 0 écart ; bornes
+  d'un exercice civil et d'un exercice au 1er juillet conformes. Trois
+  sabotages du contrôle, trois lignes à false.
+- **Serveur** (`lib/charges/ecran.js`, `api/ecran/charges.js`) : une entité à
+  la fois. Sans `entite` (ou `entite=toutes`, un lien d'avant), la première
+  entité active par son nom ; la réponse dit laquelle (`entite`). La période
+  se nomme par l'année où l'exercice commence (`2025`) ; les mots d'avant
+  (`exercice`, `exercice_precedent`, `12_mois`) restent compris. Exercices
+  proposés : du premier au dernier qui portent une facture, l'exercice en
+  cours toujours compris, au plus 20 en arrière ; une année raisonnable hors
+  liste se lit (`[en cours − 20 ; en cours + 5]`). La liste et « Afficher
+  plus » suivent l'entité ; « À traiter » reste commun au compte. Un compte
+  sans entité : « À traiter » et la liste, pas de lecture du résumé.
+  Branche `?mois=YYYY-MM&entite=<uuid>` : 400 sur un mois ou une entité
+  invalides, 404 sans rien lire sur une entité d'un autre compte, 503 sur
+  une panne ou une réponse qui n'est pas une liste.
+- **Écran** (`shared/charges-vue.js`, `shared/ui.css`, i18n fr/en/es) : plus
+  d'option « Toutes » ; « Exercice 2026 » (civil) ou « Exercice 2025-2026 » ;
+  la mention « réglage standard » quand l'entité n'a pas de début
+  d'exercice ; les DOUZE mois de l'exercice, même vides (« — », jamais 0) ;
+  un clic ouvre sous le mois ses factures, avec « part du mois » quand la
+  part n'est pas la facture entière, et la mensualité de crédit du mois
+  reste sous sa ligne ; un clic sur une facture ouvre la fiche ; un second
+  clic referme sans relire. Un seul mois ouvert à la fois ; changer
+  d'entité ou d'exercice referme et oublie les détails, et une réponse
+  arrivée après un changement d'entité est jetée (sinon elle serait servie
+  pour l'entité suivante).
+- **Lectures de l'écran complet** (test qui compte) : 8 sans crédit, 9 avec —
+  une de plus qu'avant, les bornes des exercices. Le détail d'un mois :
+  1 lecture d'entités + 1 fonction.
+- **Tests** : `charges-ecran` 31/31, `charges-page` 67/67,
+  `charges-migration-exercice-mois` 6/6. Contre-épreuve (code d'avant, hors
+  de l'arbre) : 14 et 11 rouges. Dix mutations, dix rouges : garde
+  d'entité du détail, filtre d'entité de la liste, réponse périmée gardée,
+  page suivante sans entité, détail relu à chaque clic, standard déplacé au
+  1er juillet ; et côté migration, corps changé, droit `anon` rendu,
+  `security invoker`, filtre d'entité retiré.
+- **Suite complète** : 9036 tests ; à l'heure réelle, 0 rouge après le
+  correctif du registre (`906539d4`) ; à J+60, 1 rouge, dette 124
+  (`tests/marche-comparables-api.test.js`), connue.
+- **APRÈS** (point 8) : à mesurer sur staging puis en production, comme
+  l'AVANT ; attendu 10 requêtes au lieu de 9 pour l'écran complet.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

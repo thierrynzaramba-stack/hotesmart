@@ -10,7 +10,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { monter, reponseEcran, facture, ENT, BIEN, BIEN_VIEUX, id } = require('./outils/banc-charges')
+const { monter, reponseEcran, facture, ENT, BIEN, BIEN_VIEUX, id, EXERCICE_2026 } = require('./outils/banc-charges')
 
 const racine = path.join(__dirname, '..')
 const lire = p => fs.readFileSync(path.join(racine, p), 'utf8')
@@ -46,12 +46,12 @@ test('charges : chaque clé de texte de la page et de la vue existe dans les tro
     ...[...(page + vue).matchAll(/\bt\('([\w.]*[a-z0-9])'\s*[,)]/g)].map(m => m[1]),
     // Les familles construites, sur leurs listes fermées.
     ...['validee', 'a_verifier', 'a_lire', 'panne', 'plafond', 'illisible', 'doublon', 'sans_facture'].map(e => 'charges.etat_' + e),
-    ...['exercice', 'exercice_precedent', '12_mois'].map(p => 'charges.periode_' + p),
     ...require('../lib/charges/regles').CATEGORIES.map(c => 'charges.cat_' + c.cle),
     ...['montant_invalide', 'categorie_invalide', 'entite_requise', 'type_refuse', 'trop_gros'].map(c => 'charges.refus_' + c)
   ])
   assert.ok(vue.includes("t('charges.etat_' + e)"), 'la famille des états a changé : mettre ce test à jour')
-  assert.ok(vue.includes("t('charges.periode_' + p)"), 'la famille des périodes a changé : mettre ce test à jour')
+  // Les exercices se nomment par leur année (§14.21) : plus de famille construite.
+  assert.ok(!/charges\.periode_' \+/.test(vue), 'une famille de périodes est revenue : mettre ce test à jour')
   assert.ok(cles.size > 60, `extraction vide (${cles.size})`)
   for (const l of ['fr', 'en', 'es']) {
     const d = JSON.parse(lire(`shared/i18n/${l}.json`))
@@ -59,16 +59,19 @@ test('charges : chaque clé de texte de la page et de la vue existe dans les tro
   }
 })
 
-test('les périodes de la vue sont celles du serveur (`PERIODES` fait foi)', () => {
-  const { PERIODES } = require('../lib/charges/ecran')
-  assert.deepEqual(PERIODES, ['exercice', 'exercice_precedent', '12_mois'])
+test('les mots de période d\'avant le lot 8a restent COMPRIS par le serveur (liens déjà ouverts)', () => {
+  const { PERIODES_D_AVANT, bornesPeriode } = require('../lib/charges/ecran')
+  assert.deepEqual(PERIODES_D_AVANT, ['exercice', 'exercice_precedent', '12_mois'])
+  const lu = PERIODES_D_AVANT.map(periode => bornesPeriode({ periode, aujourdhui: '2026-11-10' }).periode)
+  assert.deepEqual(lu, ['2026', '2025', '2026'])
 })
 
 // ─── Le budget ──────────────────────────────────────────────────────────────
 test('LE TEST QUI COMPTE (budget) : UN appel au chargement, vers l\'appel d\'écran, et la garde de compte propre AVANT', async () => {
   const b = await monter({ ecran: () => reponseEcran({ aTraiter: [facture(1, { statut: 'a_verifier' })], liste: Array.from({ length: 50 }, (_, i) => facture(100 + i)) }) })
   try {
-    assert.deepEqual(b.journal.fetch.map(f => `${f.methode} ${f.url}`), ['GET /api/ecran/charges?entite=toutes'])
+    // ⚠ Sans entité : le serveur choisit la première active (§14.21).
+    assert.deepEqual(b.journal.fetch.map(f => `${f.methode} ${f.url}`), ['GET /api/ecran/charges'])
     assert.equal(b.journal.gardes, 1)
     assert.equal(b.$$('[data-bind="liste"] .chg-ligne').length, 50)
     assert.equal(b.journal.fetch[0].entetes.Authorization, 'Bearer jeton-relu', 'le jeton RELU, pas celui de l\'amorce')
@@ -114,7 +117,7 @@ test('LE TEST QUI COMPTE : les totaux disent « non lu », l\'estimation et l\'h
     // cours) ne s'affiche pas : son montant n'est pas « non lu ».
     par_categorie: [{ cle: 'energie', ttc: 7000, ttc_etale: 7000, nb_factures: 2, nb_etale: 2 }, { cle: null, ttc: null, ttc_etale: null, nb_factures: 1, nb_etale: 1 }, { cle: 'menage', ttc: null, ttc_etale: null, nb_factures: 0, nb_etale: 0 }],
     par_bien: [{ cle: BIEN, ttc: 6000, ttc_etale: 6000, nb_factures: 1, nb_etale: 1 }, { cle: BIEN_VIEUX, ttc: 4000, ttc_etale: 4000, nb_factures: 1, nb_etale: 1 }, { cle: null, ttc: 2000, ttc_etale: 2000, nb_factures: 1, nb_etale: 1 }],
-    calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30'
+    calcule_le: '2026-11-10T19:05:00Z', ...EXERCICE_2026
   }
   const b = await monter({ ecran: () => reponseEcran({ totaux }) })
   try {
@@ -124,9 +127,16 @@ test('LE TEST QUI COMPTE : les totaux disent « non lu », l\'estimation et l\'h
     assert.match(chiffres[1], /^HT Étalé 100,00\s?€ À la date 100,00\s?€ 1 sans montant lu$/)
     assert.match(chiffres[2], /^TVA Étalé non lu À la date non lu 3 sans montant lu$/)
     assert.match(texte(z.querySelector('.chg-mentions--estimation')), /Estimation · 2 à vérifier · Calculé le/)
-    assert.match(texte(z), /Du 1 déc\.? 2025 au 30 nov\.? 2026/)
+    assert.match(texte(z), /Du 1 janv\.? 2026 au 31 déc\.? 2026/)
+    assert.match(texte(z), /Réglage standard : exercice du 1er janvier au 31 décembre/)
     const reps = [...z.querySelectorAll('.chg-rep')].map(el => [...el.querySelectorAll('h3, .chg-rep__nom, b')].map(texte).join(' '))
-    assert.match(reps[0], /Par mois octobre 2026 50,00\s?€ 50,00\s?€ novembre 2026 70,00\s?€ 70,00\s?€/)
+    assert.match(reps[0], /octobre 2026 50,00\s?€ 50,00\s?€ novembre 2026 70,00\s?€ 70,00\s?€ décembre 2026$/)
+    // ⚠ LES DOUZE MOIS de l'exercice, même vides (§14.21.2) : l'hôte lit son
+    // année mois par mois, un mois sans facture se dit « — », jamais 0.
+    const mois = [...z.querySelectorAll('[data-mois]')]
+    assert.deepEqual(mois.map(m => m.dataset.mois), Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`))
+    assert.match(texte(mois[0]), /^janvier 2026\s?—$/)
+    assert.doesNotMatch(texte(mois[0]), /0,00/)
     assert.match(reps[1], /^Par catégorie Eau, électricité, gaz 70,00\s?€ 70,00\s?€ Sans catégorie non lu non lu$/, 'la ligne Ménage, sans facture comptée, est absente')
     assert.match(reps[2], /Studio 60,00\s?€ 60,00\s?€ Ancien · archivé 40,00\s?€ 40,00\s?€ Sans logement 20,00\s?€ 20,00\s?€/)
   } finally { b.fermer() }
@@ -141,20 +151,19 @@ test('LE TEST QUI COMPTE (Q34) : une facture annuelle se lit ÉTALÉE et À LA D
     par_mois: [{ cle: '2026-09', ttc: 120000, ttc_etale: 9863, nb_factures: 1, nb_etale: 30 }, { cle: '2026-10', ttc: null, ttc_etale: 10191, nb_factures: 0, nb_etale: 31 }],
     par_categorie: [{ cle: 'impots_taxes', ttc: 120000, ttc_etale: 20054, nb_factures: 1, nb_etale: 61 }],
     par_bien: [],
-    calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30'
+    calcule_le: '2026-11-10T19:05:00Z', ...EXERCICE_2026
   }
   const b = await monter({ ecran: () => reponseEcran({ totaux }) })
   try {
     const z = b.$('[data-bind="totaux"]')
-    const rep = [...z.querySelectorAll('.chg-rep')][0]
-    const lignes = [...rep.querySelectorAll('li')].map(li => [...li.querySelectorAll('.chg-rep__nom, small, b')].map(texte).join(' '))
-    assert.match(lignes[0], /^septembre 2026 Étalé 98,63\s?€ À la date 1\s?200,00\s?€$/)
-    assert.match(lignes[1], /^octobre 2026 Étalé 101,91\s?€ À la date 0,00\s?€$/, 'un mois porté par l\'étalement seul s\'affiche, et sa lecture à la date vaut 0')
+    const lu = (cle) => [...z.querySelector(`[data-mois="${cle}"]`).querySelectorAll('.chg-rep__nom, small, b')].map(texte).join(' ')
+    assert.match(lu('2026-09'), /^septembre 2026 Étalé 98,63\s?€ À la date 1\s?200,00\s?€$/)
+    assert.match(lu('2026-10'), /^octobre 2026 Étalé 101,91\s?€ À la date 0,00\s?€$/, 'un mois porté par l\'étalement seul s\'affiche, et sa lecture à la date vaut 0')
   } finally { b.fermer() }
 })
 
 test('« aucune facture comptée » ne se dit que si AUCUNE des deux lectures n\'a de montant', async () => {
-  const totaux = { total: { ht: null, tva: null, ttc: null, ht_etale: 5000, tva_etale: null, ttc_etale: 5000, nb_etale: 30, nb_factures: 0, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [{ cle: '2026-11', ttc: null, ttc_etale: 5000, nb_factures: 0, nb_etale: 30 }], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30' }
+  const totaux = { total: { ht: null, tva: null, ttc: null, ht_etale: 5000, tva_etale: null, ttc_etale: 5000, nb_etale: 30, nb_factures: 0, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [{ cle: '2026-11', ttc: null, ttc_etale: 5000, nb_factures: 0, nb_etale: 30 }], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', ...EXERCICE_2026 }
   const b = await monter({ ecran: () => reponseEcran({ totaux }) })
   try {
     const z = b.$('[data-bind="totaux"]')
@@ -164,7 +173,7 @@ test('« aucune facture comptée » ne se dit que si AUCUNE des deux lectures n\
 })
 
 test('des factures seulement EN ATTENTE : « aucune comptée », mais l\'estimation reste dite', async () => {
-  const totaux = { total: { ht: null, tva: null, ttc: null, nb_factures: 0, nb_non_verifiees: 2, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30' }
+  const totaux = { total: { ht: null, tva: null, ttc: null, nb_factures: 0, nb_non_verifiees: 2, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', ...EXERCICE_2026 }
   const b = await monter({ ecran: () => reponseEcran({ totaux }) })
   try {
     const z = b.$('[data-bind="totaux"]')
@@ -175,7 +184,7 @@ test('des factures seulement EN ATTENTE : « aucune comptée », mais l\'estimat
 })
 
 test('LE TEST QUI COMPTE : un doublon non tranché rend le total « estimation » (spec §6), même tout vérifié', async () => {
-  const totaux = { total: { ht: 10000, tva: 2000, ttc: 12000, nb_factures: 1, nb_non_verifiees: 0, nb_signaux: 2, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30' }
+  const totaux = { total: { ht: 10000, tva: 2000, ttc: 12000, nb_factures: 1, nb_non_verifiees: 0, nb_signaux: 2, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', ...EXERCICE_2026 }
   const b = await monter({ ecran: () => reponseEcran({ totaux }) })
   try {
     assert.match(texte(b.$('.chg-mentions--estimation')), /^Estimation · 2 à trancher · Calculé le/)
@@ -203,24 +212,127 @@ test('des totaux en panne se disent « indisponibles », la liste reste là', as
   } finally { b.fermer() }
 })
 
-test('choisir une entité relit l\'écran avec cette entité, SANS période (le serveur choisit celle qui lui va)', async () => {
+test('LE TEST QUI COMPTE (§14.21) : une entité à la fois — pas de « Toutes » ; la choisir relit l\'écran SANS période, puis l\'exercice se choisit par son année', async () => {
   const urls = []
   const ENT_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
   const b = await monter({
     ecran: (u) => {
       urls.push(u)
       const r = reponseEcran({ entites: [{ id: ENT, nom: 'Moi', archivee: false, debut_exercice: null }, { id: ENT_B, nom: 'SCI', archivee: true, debut_exercice: '04-01' }] })
-      if (u.includes(ENT_B)) Object.assign(r.totaux, { entite: ENT_B, periode: 'exercice', proposees: ['exercice', 'exercice_precedent'] })
+      if (u.includes(ENT_B)) {
+        r.entite = ENT_B
+        const annee = /periode=(\d{4})/.exec(u)
+        const p = annee ? annee[1] : '2026'
+        Object.assign(r.totaux, { entite: ENT_B, periode: p, proposees: ['2026', '2025'], debut: `${p}-04-01`, fin: `${Number(p) + 1}-03-31`, debut_exercice: '04-01', standard: false })
+      }
       return r
     }
   })
   try {
     const sel = b.$('[data-choix="entite"]')
+    assert.deepEqual([...sel.options].map(o => o.value), [ENT, ENT_B], 'aucune option « Toutes »')
+    assert.equal(sel.value, ENT, 'l\'entité que le serveur a lue')
     assert.match(texte(sel), /SCI · archivée/)
+    assert.deepEqual([...b.$('[data-choix="periode"]').options].map(texte), ['Exercice 2026'])
     await b.choisir(sel, ENT_B)
     assert.equal(urls[1], `/api/ecran/charges?entite=${ENT_B}`)
-    await b.choisir(b.$('[data-choix="periode"]'), 'exercice_precedent')
-    assert.equal(urls[2], `/api/ecran/charges?entite=${ENT_B}&periode=exercice_precedent`)
+    const per = b.$('[data-choix="periode"]')
+    assert.deepEqual([...per.options].map(texte), ['Exercice 2026-2027', 'Exercice 2025-2026'])
+    assert.doesNotMatch(texte(b.$('[data-bind="totaux"]')), /Réglage standard/, 'une SCI réglée n\'est pas au standard')
+    await b.choisir(per, '2025')
+    assert.equal(urls[2], `/api/ecran/charges?entite=${ENT_B}&periode=2025`)
+    assert.match(texte(b.$('[data-bind="totaux"]')), /Du 1 avr\.? 2025 au 31 mars 2026/)
+    assert.equal(b.$('[data-choix="periode"]').value, '2025')
+  } finally { b.fermer() }
+})
+
+test('un compte sans entité : le chemin pour en créer une, ni choix ni totaux', async () => {
+  const b = await monter({ ecran: () => Object.assign(reponseEcran({ entites: [], totaux: { sans_entite: true }, credits: {} }), { entite: null }) })
+  try {
+    assert.equal(b.$('[data-choix="entite"]'), null)
+    assert.match(texte(b.$('[data-bind="totaux"]')), /il faut une entité juridique/)
+    assert.equal(b.$('[data-bind="totaux"] a').getAttribute('href'), '/logements')
+  } finally { b.fermer() }
+})
+
+// ─── Le détail d'un mois (§14.21.2) ─────────────────────────────────────────
+test('LE TEST QUI COMPTE : un clic sur un mois lit SES factures et leur part, sous la ligne ; un second clic le referme, sans relire', async () => {
+  const urls = []
+  const taxe = facture(7, { fournisseur_nom: 'Trésor public', montant_ttc_cents: 120000, jour: '2026-09-15', periode_debut: '2026-01-01', periode_fin: '2026-12-31', type_document: 'facture', part_ttc_cents: 10192, compte: true })
+  const eau = facture(8, { fournisseur_nom: 'Eau', montant_ttc_cents: 4000, jour: '2026-11-03', part_ttc_cents: 4000, compte: true })
+  const b = await monter({
+    ecran: (u) => {
+      urls.push(u)
+      if (u.includes('mois=')) return { detail_mois: { mois: '2026-11', debut: '2026-11-01', fin: '2026-11-30', entite: ENT, lignes: [eau, taxe] } }
+      return reponseEcran()
+    }
+  })
+  try {
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    assert.equal(urls[1], `/api/ecran/charges?mois=2026-11&entite=${ENT}`)
+    assert.equal(b.$('[data-mois="2026-11"]').getAttribute('aria-expanded'), 'true')
+    const detail = b.$('.chg-detail')
+    const lignes = [...detail.querySelectorAll('.chg-ligne')].map(texte)
+    assert.equal(lignes.length, 2)
+    assert.match(lignes[0], /Eau/)
+    assert.doesNotMatch(lignes[0], /part du mois/, 'une facture entière n\'a pas de « part »')
+    assert.match(lignes[1], /Trésor public.*part du mois : 101,92\s?€.*1\s?200,00\s?€/)
+    // La facture du détail s'ouvre dans la même fiche.
+    await b.cliquer(detail.querySelectorAll('.chg-ligne')[1])
+    assert.equal(b.$('[data-champ="fournisseur_nom"]').value, 'Trésor public')
+    // Refermer, rouvrir : la lecture est gardée.
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    assert.equal(b.$('.chg-detail'), null)
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    assert.ok(b.$('.chg-detail'))
+    assert.equal(urls.length, 2, 'aucune relecture')
+  } finally { b.fermer() }
+})
+
+test('le détail d\'un mois en panne se DIT, et un mois vide aussi', async () => {
+  const b = await monter({
+    ecran: (u) => {
+      if (u.includes('mois=2026-10')) throw Object.assign(new Error('panne'), { status: 503 })
+      if (u.includes('mois=')) return { detail_mois: { mois: '2026-03', lignes: [] } }
+      return reponseEcran()
+    }
+  })
+  try {
+    await b.cliquer(b.$('[data-mois="2026-10"]'))
+    assert.match(texte(b.$('.chg-detail')), /ne se lisent pas pour le moment/)
+    await b.cliquer(b.$('[data-mois="2026-03"]'))
+    assert.match(texte(b.$('.chg-detail')), /Aucune facture ce mois-ci/)
+    assert.equal(b.$$('.chg-detail').length, 1, 'un seul mois ouvert à la fois')
+  } finally { b.fermer() }
+})
+
+test('changer d\'entité referme le mois ouvert ; une réponse arrivée APRÈS le changement est jetée', async () => {
+  const ENT_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  let libererMois
+  const urls = []
+  const b = await monter({
+    ecran: (u) => {
+      urls.push(u)
+      if (u.includes('mois=') && u.includes(ENT_B)) return { detail_mois: { lignes: [facture(10, { fournisseur_nom: 'La SCI' })] } }
+      if (u.includes('mois=')) return new Promise(r => { libererMois = () => r({ detail_mois: { lignes: [facture(9, { fournisseur_nom: 'Fantôme' })] } }) })
+      const r = reponseEcran({ entites: [{ id: ENT, nom: 'Moi', archivee: false, debut_exercice: null }, { id: ENT_B, nom: 'SCI', archivee: false, debut_exercice: null }] })
+      if (u.includes(ENT_B)) r.entite = ENT_B
+      return r
+    }
+  })
+  try {
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    await b.choisir(b.$('[data-choix="entite"]'), ENT_B)
+    libererMois()
+    for (let i = 0; i < 6; i++) await b.attendre()
+    assert.equal(b.$('.chg-detail'), null)
+    assert.doesNotMatch(texte(b.$('[data-bind="totaux"]')), /Fantôme/)
+    // ⚠ Et la réponse en retard n'est pas GARDÉE pour l'entité suivante : le
+    // même mois, rouvert sur la SCI, se relit pour elle.
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    assert.equal(urls[urls.length - 1], `/api/ecran/charges?mois=2026-11&entite=${ENT_B}`)
+    assert.match(texte(b.$('.chg-detail')), /La SCI/)
+    assert.doesNotMatch(texte(b.$('.chg-detail')), /Fantôme/)
   } finally { b.fermer() }
 })
 
@@ -236,7 +348,7 @@ test('« Afficher plus » : la page suivante par le curseur, AJOUTÉE à la list
   })
   try {
     await b.cliquer(b.$('[data-geste="plus"]'))
-    assert.equal(urls[1], `/api/ecran/charges?curseur=${encodeURIComponent(`2026-11-02|2026-11-02T10:00:00Z|${id(2)}`)}`)
+    assert.equal(urls[1], `/api/ecran/charges?curseur=${encodeURIComponent(`2026-11-02|2026-11-02T10:00:00Z|${id(2)}`)}&entite=${ENT}`, 'la page suivante suit l\'entité')
     assert.equal(b.$$('[data-bind="liste"] .chg-ligne').length, 3)
     assert.equal(b.$('[data-geste="plus"]'), null, 'plus de suite, plus de bouton')
   } finally { b.fermer() }
@@ -386,7 +498,7 @@ test('une commission de plateforme ne se modifie pas : champs figés, ni « Vali
 test('LE TEST QUI COMPTE (review du lot 7a, constat 1) : une facture à vérifier qui ne fait que S\'ÉTALER sur la période rend le total « estimation »', async () => {
   // Datée de janvier 2027, elle couvre 2026 : aucun compteur « à la date »
   // dans la période, mais ses indicateurs étalés y sont.
-  const totaux = { total: { ht: null, tva: null, ttc: null, ht_etale: 100000, tva_etale: null, ttc_etale: 120000, nb_etale: 365, nb_etale_nv: 365, nb_etale_signal: 0, nb_etale_sans_ht: 0, nb_etale_sans_tva: 365, nb_etale_sans_ttc: 0, nb_factures: 0, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30' }
+  const totaux = { total: { ht: null, tva: null, ttc: null, ht_etale: 100000, tva_etale: null, ttc_etale: 120000, nb_etale: 365, nb_etale_nv: 365, nb_etale_signal: 0, nb_etale_sans_ht: 0, nb_etale_sans_tva: 365, nb_etale_sans_ttc: 0, nb_factures: 0, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', ...EXERCICE_2026 }
   const b = await monter({ ecran: () => reponseEcran({ totaux }) })
   try {
     const z = b.$('[data-bind="totaux"]')
@@ -398,7 +510,7 @@ test('LE TEST QUI COMPTE (review du lot 7a, constat 1) : une facture à vérifie
 })
 
 test('des totaux d\'AVANT le lot 7a (sans indicateur étalé) ne montrent pas « 0 € » étalé : on ne sait pas', async () => {
-  const totaux = { total: { ht: 10000, tva: 2000, ttc: 12000, nb_factures: 1, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [{ cle: '2026-11', ttc: 12000, nb_factures: 1 }], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30' }
+  const totaux = { total: { ht: 10000, tva: 2000, ttc: 12000, nb_factures: 1, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 }, par_mois: [{ cle: '2026-11', ttc: 12000, nb_factures: 1 }], par_categorie: [], par_bien: [], calcule_le: '2026-11-10T19:05:00Z', ...EXERCICE_2026 }
   const b = await monter({ ecran: () => reponseEcran({ totaux }) })
   try {
     const z = b.$('[data-bind="totaux"]')
