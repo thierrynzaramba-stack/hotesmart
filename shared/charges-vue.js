@@ -400,7 +400,11 @@ export function monter (racine, deps) {
   // une facture à vérifier se repère aussi dans ses charges mensuelles).
   const etatNonVerifie = (c) => { const e = etatDe(c); return e && e !== 'validee' ? ` <span class="chg-etat chg-etat--${esc(e)}">${esc(t('charges.etat_' + e))}</span>` : '' }
   function ligneFactureDuMois (c) {
-    const type = connu('charges.type_' + (c.type_document || 'facture')) || t('charges.type_facture')
+    // Les intérêts et l'assurance d'une échéance de crédit (catégorie
+    // « credit », elle seule) ne sont pas une « facture » : recette du 19
+    // novembre 2026 sur staging, « banque populaire · Facture du 22 janv. ».
+    const type = c.categorie === 'credit' ? t('charges.type_echeance_credit')
+      : connu('charges.type_' + (c.type_document || 'facture')) || t('charges.type_facture')
     const solde = c.type_document === 'regularisation' ? (c.solde_lu ?? (c.lecture_ia && c.lecture_ia.solde_ttc_cents)) : null
     const infos = [
       t('charges.type_du', { type, date: jourLisible(c.jour) }),

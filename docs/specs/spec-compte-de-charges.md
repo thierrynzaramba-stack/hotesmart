@@ -3944,6 +3944,32 @@ Tous les fichiers cités dans les constats sont dans cette liste, sauf ceux marq
 **Non mesuré** : au téléphone, colonnes de 88 px avec `white-space: nowrap` — un montant de cinq chiffres ou plus (« 12 345,67 € ») peut déborder ; à regarder en recette.
 ````
 
+#### 14.21.13 Recette de la présentation sur staging (19 novembre 2026, 23:55)
+
+Faite au navigateur sur `d04b5006`, à la demande de Thierry (« fais la
+recette »), compte de recette, ordinateur.
+
+Conforme : l'ordre des blocs ; le bouton seul en haut ; l'entité en tête (3
+entités, pas de « Toutes ») ; « À traiter » sur toute la largeur, ligne de
+37 px ; le total TTC et ses mentions ; les 12 blocs de mois, un seul
+ouvert ; le détail en deux parties ; le clic sur une ligne ouvre la fiche ;
+le second clic referme ; le changement d'entité relit tout (5 exercices
+proposés, liste « Factures de … », crédits, mensualité sous chaque mois).
+Sur « Thierry en nom propre », janvier 2026 : 403,57 + 314,24 − 226,77 =
+491,04 €, le « Prorata temporis » de l'en-tête ; « Montant facturé » 403,57 €,
+son « Date de facture ». Aucun débordement horizontal.
+
+Deux défauts, corrigés sur la branche sans nouvelle review (plafond de deux
+atteint, aucun n'est de sécurité) :
+- les colonnes du détail étaient 12 px à droite de celles de l'en-tête
+  (mesuré : 1028 contre 1016) ;
+- les intérêts d'une échéance de crédit se disaient « Facture du 22 janv. » :
+  ils se disent « Échéance de crédit du … » (catégorie `credit`).
+
+**Non fait** : la largeur téléphone. La fenêtre du navigateur n'a pas pu être
+réduite (largeur restée à 1 521 px) ; à regarder par Thierry sur son
+téléphone.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

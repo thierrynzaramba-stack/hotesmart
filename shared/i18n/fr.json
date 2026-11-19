@@ -434,6 +434,7 @@
   "charges.detail_partiel": "Mois partiel : seule sa part dans l'exercice est lue, du {debut} au {fin}.",
   "charges.exercices_indispo": "La liste des exercices est incomplète pour le moment : seul celui-ci est proposé.",
   "charges.mois": "Mois",
+  "charges.type_echeance_credit": "Échéance de crédit",
   "charges.type_du": "{type} du {date}",
   "charges.couvre": "couvre du {debut} au {fin}",
   "charges.solde_a_payer": "solde à payer : {montant}",

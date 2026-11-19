@@ -594,6 +594,21 @@ test('review 2, constats 5 et 6 : la feuille — l\'écart entre les mois s\'app
   assert.ok(grille('.chg-cols', tel))
 })
 
+// ─── Recette du 19 novembre 2026 sur staging (d04b5006) ─────────────────────
+test('recette : les intérêts d\'une échéance de crédit ne se disent pas « Facture » ; et le détail garde le retrait droit de l\'en-tête du mois', async () => {
+  const echeance = facture(70, { fournisseur_nom: 'banque populaire', categorie: 'credit', jour: '2026-11-22', montant_ttc_cents: 40357, part_ttc_cents: 40357, compte: true })
+  const b = await monter({ ecran: (u) => (u.includes('mois=') ? { detail_mois: { lignes: [echeance] } } : reponseEcran()) })
+  try {
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    assert.match(mots(b.$('button.chg-dl')), /^banque populaire Échéance de crédit du 22 nov\.? 2026 403,57\s?€ 403,57\s?€$/)
+  } finally { b.fermer() }
+  // Mesuré à l'écran : les colonnes du détail étaient 12 px à droite de celles
+  // de l'en-tête — le `padding` court de `.chg-dl` écrasait son retrait droit.
+  const css = lire('shared/ui.css')
+  assert.match(css, /\.chg-mois \{[^}]*padding: 9px 12px;/)
+  assert.match(css, /\.chg-dl \{[^}]*padding: 7px 12px 7px 0;/)
+})
+
 // ─── La liste ───────────────────────────────────────────────────────────────
 test('« Afficher plus » : la page suivante par le curseur, AJOUTÉE à la liste', async () => {
   const urls = []
