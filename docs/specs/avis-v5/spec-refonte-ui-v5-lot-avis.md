@@ -671,8 +671,22 @@ alors que l'avis voisin, révélé chez nous, y est. À cette date, **42 cartes*
   18 novembre dit l'inverse. Même correction dans le commentaire d'`estObjetVide`
   et dans un commentaire de test.
 
-**Inventaire.** Rien n'est retiré. Aucun chiffre ne change : un avis masqué
-n'entrait déjà dans aucun compte (total, note, propreté).
+**Inventaire.** Une seule chose est retirée, par décision (ci-dessous) : la
+carte SANS évaluation dont tous les avis sont « Pas d'avis du voyageur ». Elle
+ne disait rien, et sort du nombre de cartes anciennes (`anciens_total`). Aucun
+autre chiffre ne change : un avis masqué n'entrait déjà dans aucun compte
+(total, note, propreté).
+
+**Les cartes qui ne disent rien — décision de Thierry du 19 novembre 2026
+(21:51), option A.** Relevé par la relecture du 19 novembre (constat 1) : un
+objet masqué, vide et ancien, sans évaluation rattachée (surtout les départs
+d'août et septembre, d'avant la naissance des évaluations), gardait une carte à
+lui seul : « Pas d'avis du voyageur », puis « Aucune évaluation du voyageur pour
+ce séjour ». La règle du 20 octobre 2026 — « un objet d'avis vide ne compte
+nulle part, cartes comprises » — s'applique désormais à lui : la carte
+disparaît. Elle est retirée APRÈS l'assemblage (`assemblerCartes`), pas au
+filtre des avis : une carte qui porte une évaluation garde l'avis et sa ligne
+« Pas d'avis du voyageur », et un séjour qui a un autre avis garde sa carte.
 
 **Case performance.** Sans objet, point par point. Aucun endpoint, aucune
 requête et aucun octet en plus, à un booléen près par avis. Pas de cache
@@ -775,10 +789,14 @@ Rapport écrit dans `/home/claude/revues/avis-sans-avis-relecture-2026-11-19.md`
 
 Aucun constat de sécurité : corrigés sans nouvelle relecture.
 
-1. Commentaire d'`estObjetVide` corrigé. **Question produit posée à Thierry le
-   19 novembre 2026** : garder ou retirer les cartes sans évaluation dont tous
-   les avis sont « Pas d'avis du voyageur ». Sa réponse et ce qui en découle
-   sont ci-dessous.
+1. Commentaire d'`estObjetVide` corrigé. Question produit posée à Thierry :
+   **option A** (19 novembre 2026, 21:51), retirer ces cartes — voir
+   « Les cartes qui ne disent rien » plus haut. Test : une carte sans
+   évaluation qui ne dirait que « Pas d'avis » disparaît ; avec une évaluation,
+   dans le délai, masquée par prudence seulement, ou avec un autre avis, elle
+   reste ; `anciens_total` suit. Quatre mutations rougissent : retrait
+   supprimé, retrait même avec évaluation, `some` au lieu de `every`, filtre
+   posé au niveau de l'avis.
 2. Restes datés, hors des fichiers du lot, non touchés — à corriger avec
    l'accord du chef de file. Phrase « Airbnb révèle l'objet à 14 jours même si
    le voyageur n'a rien écrit » : `docs/kb/pwa.md:690`,

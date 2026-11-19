@@ -412,9 +412,10 @@ test('avant la migration : la page reste juste, SANS traduction (une relecture s
 // Les âges sont pris à DEMI-JOUR du seuil, pour que la granularité de `jour()`
 // et l'horloge décalée ne les fassent jamais basculer ; le bord exact, lui, se
 // teste plus bas sur la fonction pure, à `maintenant` figé.
-test('LE TEST QUI COMPTE : masqué depuis plus de 16 jours → sans_avis ; 15,5 jours, révélé ou sans date → non', async () => {
-  preparer({ avis: [
+test('LE TEST QUI COMPTE : masqué depuis plus de 16 jours → sans_avis ; 15,5 jours, révélé ou sans date → non ; seul, sans évaluation → plus de carte', async () => {
+  preparer({ evaluations: [{ ...EVAL, id: 'e-v', booking_uid: 'u-v', ota_review_id: 'vieux' }], avis: [
     avisDe('vieux', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-16.5), booking_uid: 'u-v' }),
+    avisDe('seul', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-40), booking_uid: 'u-seul' }),
     avisDe('jeune', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-15.5), booking_uid: 'u-j' }),
     avisDe('sansdate', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: null, booking_uid: 'u-s' }),
     avisDe('revele', { received_at: jour(-30), booking_uid: 'u-r' })
@@ -428,6 +429,11 @@ test('LE TEST QUI COMPTE : masqué depuis plus de 16 jours → sans_avis ; 15,5 
   assert.equal(a.jeune.sans_avis, false, 'dans la marge de transmission, il peut encore arriver')
   assert.equal(a.sansdate.sans_avis, false, 'sans date, on ne conclut rien')
   assert.equal(a.revele.sans_avis, false)
+  // Décision du 19 novembre 2026 : sans évaluation, la carte qui n'aurait dit
+  // que « Pas d'avis du voyageur » n'existe pas, et ne compte pas.
+  assert.equal(a.seul, undefined, 'la carte vide a disparu')
+  assert.equal(r.body.anciens_total, r.body.cartes.anciens.length)
+  assert.ok(r.body.cartes.anciens.some(c => c.avis.some(x => x.id === 'revele')), 'les autres anciens restent')
 })
 
 // Le bord exact, sur la fonction pure, à `maintenant` FIGÉ (constat 5 de la
@@ -438,8 +444,11 @@ test('le bord : 16 jours tout juste → non ; une seconde de plus → oui ; et l
   const T0 = Date.parse(RECU)
   const SEIZE_JOURS = 16 * 86400000
   const masque = (id, extra = {}) => ({ id, provider: 'channex', ota: 'airbnb', cache: true, overall_score: 0, content: null, content_public: null, received_at: RECU, booking_uid: `u-${id}`, ...extra })
+  // Chaque avis porte son évaluation : sans elle, une carte « pas d'avis »
+  // disparaît (test suivant), et le drapeau ne se lirait plus.
+  const evDe = a => ({ id: `e-${a.id}`, booking_uid: a.booking_uid, property_id: 'P1', property_id_ref: 'R1', ota: a.ota, status: 'a_remplir', deadline_at: '2027-01-15T12:00:00Z', published_at: null, public_text: null, ota_review_id: a.id, created_at: RECU })
   const drapeau = (a, maintenant) => {
-    const s = assemblerCartes({ avis: [a], maintenant })
+    const s = assemblerCartes({ avis: [a], evaluations: [evDe(a)], maintenant })
     const vu = [...s.attente, ...s.recents, ...s.anciens].flatMap(c => c.avis).find(x => x.id === a.id)
     assert.ok(vu, `l’avis ${a.id} a sa carte`)
     return vu.sans_avis
@@ -475,4 +484,35 @@ test('la règle seule : un objet vide Booking, une saisie manuelle → jamais «
   assert.equal(sansAvisDuVoyageur(vide({ ota: 'booking' }), tard), false)
   assert.equal(sansAvisDuVoyageur(vide({ provider: 'manuel', ota: null }), tard), false)
   assert.equal(sansAvisDuVoyageur(vide(), NaN), false, 'sans `maintenant`, on ne conclut rien')
+})
+
+// Décision de Thierry du 19 novembre 2026 (option A) : une carte SANS évaluation
+// dont tous les avis sont « Pas d'avis du voyageur » n'existe pas.
+test('une carte sans évaluation qui ne dirait que « Pas d’avis du voyageur » disparaît ; toute autre carte reste', () => {
+  const { assemblerCartes } = require('../lib/avis/cartes')
+  const RECU = '2026-08-22T10:00:00Z'
+  const maintenant = Date.parse('2026-11-19T12:00:00Z')
+  const vide = (id, extra = {}) => ({ id, provider: 'channex', ota: 'airbnb', cache: true, overall_score: 0, content: null, content_public: null, received_at: RECU, booking_uid: `u-${id}`, ...extra })
+  const ev = (uid, avisId) => ({ id: `e-${uid}`, booking_uid: uid, property_id: 'P1', property_id_ref: 'R1', ota: 'airbnb', status: 'publiee', deadline_at: '2026-09-05T10:00:00Z', published_at: '2026-09-01T10:00:00Z', public_text: 'Merci', ota_review_id: avisId, created_at: RECU })
+  const s = assemblerCartes({
+    maintenant,
+    avis: [
+      vide('seul'),
+      vide('evalue'),
+      vide('jeune', { received_at: '2026-11-05T10:00:00Z' }),
+      vide('doute', { cache: undefined }),
+      vide('double-a', { booking_uid: 'u-double' }),
+      vide('double-b', { booking_uid: 'u-double', cache: false, overall_score: 9, content: 'Parfait' })
+    ],
+    evaluations: [ev('u-evalue', 'evalue')]
+  })
+  const cartes = [...s.attente, ...s.recents, ...s.anciens]
+  const avecAvis = id => cartes.find(c => c.avis.some(a => a.id === id))
+  assert.equal(avecAvis('seul'), undefined, 'masqué, vide, ancien, sans évaluation : plus de carte')
+  assert.ok(avecAvis('evalue'), 'avec une évaluation, la carte reste')
+  assert.equal(avecAvis('evalue').avis[0].sans_avis, true, 'et elle dit « Pas d’avis du voyageur »')
+  assert.ok(avecAvis('jeune'), 'dans le délai, rien ne change')
+  assert.ok(avecAvis('doute'), 'masqué par prudence seulement : rien ne change')
+  assert.ok(avecAvis('double-a'), 'un autre avis du même séjour garde la carte')
+  assert.equal(cartes.length, 4)
 })
