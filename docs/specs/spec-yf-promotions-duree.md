@@ -54,32 +54,47 @@ Airbnb `224cbb66`) :
 |---|---|---|
 | 19:15:05 | `update_pricing_settings` : les trois remises de l'annonce (−22 % dès 2, 3 et 7 nuits, toute l'année, août compris) retirées par Channex > Listing > le 23 > Price settings ; prix de base 85 €, voyageurs, frais : inchangés | — |
 | 19:15:20 | `load_listing_price_settings` : relu depuis Airbnb, « No discount rules configured » | Airbnb > Réductions : 0 % semaine, 0 % mois, aucune autre |
-| 19:17:05 | `full_sync`, `scope: rate_plans`, un seul tarif : `b56feb44` (petit-enfant Airbnb du 23), lancé depuis le login Channex partagé — origine non établie (voir §2 ter) | — |
+| 19:17:05 | `full_sync`, `scope: rate_plans`, un seul tarif : `b56feb44` (petit-enfant Airbnb du 23), lancé par Channex lui-même (`user_name: System`) 120 s après le geste de 19:15:05 (voir §2 ter) | — |
 | ≈ 19:19 | ensemble de règles « deux jour » (−10 % dès 2 nuits, rien d'autre) appliqué au 23 du 1er au 30 avril 2027, dans le calendrier Airbnb | 8 et 30 avril : « Ensemble de règles deux jour » ; 1er mai : aucun ; côté voyageur 6→8 avril −33,80 €, 4→6 mai rien |
 
 Booking, La bulle, Ofuro Futari : non touchés.
 
-### 2 ter. Deux `full_sync` Channex lancés depuis le login partagé
+### 2 ter. Les `full_sync` d'un seul tarif sont lancés par Channex lui-même
 
 | heure (Paris) | tarif touché | lancé par |
 |---|---|---|
-| 18/11 19:17:05 | `b56feb44`, petit-enfant Airbnb du 23 | un utilisateur (`user_email` posé) |
-| 19/11 07:48:12 | `7cfcc078`, petit-enfant Airbnb d'Ofuro Futari | un utilisateur (`user_email` posé) |
+| 18/11 19:17:05 | `b56feb44`, petit-enfant Airbnb du 23 | `System`, 120 s après un `update_pricing_settings` |
+| 19/11 07:48:12 | `7cfcc078`, petit-enfant Airbnb d'Ofuro Futari | `System`, sans geste avant dans les events du canal |
 
-Les deux ont `scope: rate_plans` et un seul tarif : c'est la forme de l'action
-« Sync » d'une annonce (Channex > canal Airbnb > Listing > Actions > Sync), pas
-du « Full Sync » du canal.
+⚠ **Correction du 19/11 vers 16 h 15.** Une première version de ce paragraphe
+disait « lancé depuis le login partagé, `user_email` posé ». C'était faux : le
+test lisait `user_email || user_name`, et `user_name` vaut `System`. Les deux
+events n'ont **aucun** `user_email`. Thierry confirme n'avoir rien lancé.
 
-**Ce n'est pas HôteSmart** (vérifié le 19/11 vers 16 h 10, lecture seule en
+**Mesuré sur les 300 derniers events du canal Airbnb (depuis le 06/11)** :
+17 `full_sync`, **tous** `user_name: System`, tous `scope: rate_plans` sur un
+seul petit-enfant (le 23 : 11 ; La bulle : 4 ; Ofuro : 2). **Six d'entre eux
+tombent exactement 120 s (± 1 s) après un `update_pricing_settings`** sur
+l'annonce (16/11 00:26, 21:53, 22:15 ; 18/11 14:03, 14:07, 18:15 UTC). Les onze
+autres n'ont pas de geste avant dans les events du canal : ils suivent
+probablement une modification faite ailleurs (réglage d'un tarif dans Rooms &
+Rates, réglage côté Airbnb) — non établi.
+
+**Conséquence pour le lot.** Toute écriture des réglages de prix d'une annonce
+Airbnb par Channex — remises de durée comprises, donc l'option « remise annuelle
+envoyée par Channex » et l'étape 2 — est **suivie deux minutes plus tard d'un
+full_sync de son tarif**. Il renvoie à Airbnb les valeurs du petit-enfant. C'est
+sans risque tant que les fermetures descendent jusqu'au petit-enfant (0 écart
+mesuré ci-dessous), et c'est un risque de plus tant que le lot fermetures n'est
+pas fini.
+
+**Ce n'est pas HôteSmart non plus** (vérifié le 19/11 vers 16 h 10, lecture seule en
 production). Le « fullsync » d'HôteSmart (api/calendar.js `action=fullsync`,
 file `channel_sync_queue`, tâche cron `file_sync_ari`) pose
 `properties.last_fullsync_at` : il vaut **12/09/2026** pour les trois biens
 (Ofuro 09:55:41, le 23 10:05:43, La bulle 10:10:41 UTC), et la file ne contient
 que trois lignes, toutes `done` du 12/09/2026. Aucun chemin d'HôteSmart n'appelle
 l'action `full_sync` d'un canal Channex (mesuré dans `main` par le chef de file).
-Ce sont donc deux gestes faits par le login Channex partagé ; Thierry dira s'ils
-sont de lui. Le fil Calendrier n'en a lancé aucun : le 19/11 à 07:48, sa session
-n'avait aucune action dans le navigateur.
 
 **Rien n'a été rouvert.** Contrôlé après chacun : sur 469 jours (19/11/2026 →
 01/03/2028), pour La bulle, le 23 et Ofuro Futari, aucune nuit fermée sur la base
