@@ -59,3 +59,14 @@ test('collage manuel : aucune ligne de 60 caractères ou plus', () => {
     assert.deepEqual(t.split('\n').map((l, i) => [i + 1, l.length]).filter(([, n]) => n >= 60), [], nom)
   }
 })
+
+test('LE CONTRÔLE LIT LES DÉFINITIONS, PAS LES NOMS (seconde review, mineur 4) : trigger actif, index uniques, somme écrite, aucun droit à public', () => {
+  const c = aplati(controle)
+  // Mesuré sur une copie de la base : chacun de ces sabotages passait le contrôle d'avant.
+  assert.match(c, /tgenabled = 'o'/, 'un trigger désactivé (aplati en minuscules)')
+  assert.match(c, /indexname = 'charges_credit_uidx' and indexdef ilike 'create unique index%'/, 'un index d\'échéance non unique')
+  assert.match(c, /indexname = 'charges_credits_empreinte_uidx' and indexdef ilike 'create unique index%'/, 'un index d\'empreinte non unique')
+  assert.match(c, /'%echeance_cents=\(\(\(interets_cents' \|\| '\+assurance_cents\)\+accessoires' \|\| '_cents\)\+capital_cents\)%'/, 'une somme réduite à check (true)')
+  assert.match(c, /grantee in \('anon', 'authenticated', 'public'\)/, 'un droit donné à public')
+  assert.match(c, /d like '%on delete cascade'/, 'une clé sans cascade')
+})

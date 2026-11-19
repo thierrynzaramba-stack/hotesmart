@@ -154,7 +154,61 @@ test('les filtres : ASCII85 + Flate se suivent, un flux Flate que zlib refuse es
   assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter [ /ASCII85Decode /FlateDecode ]', a85(texte)))), null)
   assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /FlateDecode', Buffer.from('pas du zlib')))), 'flux_illisible')
   assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /LZWDecode', Buffer.from('xx')))), 'filtre_non_pris')
-  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /DCTDecode', Buffer.from([0xFF, 0xD8, 0xFF])))), null)
+  // Une image est laissée — mais seulement une IMAGE (seconde review) : un flux
+  // « JPEG » lu comme contenu serait décodé par pdf.js, à la taille qu'il déclare.
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Type /XObject /Subtype /Image /Filter /DCTDecode', Buffer.from([0xFF, 0xD8, 0xFF])))), null)
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /DCTDecode', Buffer.from([0xFF, 0xD8, 0xFF])))), 'filtre_non_pris')
+  // ASCII85 DEVANT une bombe : la chaîne est suivie jusqu'au bout (mutation « ASCII85 ignoré »).
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter [ /ASCII85Decode /FlateDecode ]', a85(zlib.deflateSync(Buffer.alloc(FLUX_MAX + 1024)))))), 'flux_trop_gros')
+  // Un flux TRONQUÉ se lit aussi loin qu'il va, comme pdf.js le lit (mutation « sans Z_SYNC_FLUSH ») ;
+  // une somme de contrôle fausse ne fait rien refuser (pdf.js ne la vérifie pas) ; un en-tête faux, si.
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /FlateDecode', texte.subarray(0, texte.length - 8)))), null)
+  const sommeFausse = Buffer.from(texte); sommeFausse[sommeFausse.length - 1] ^= 0xff
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /FlateDecode', sommeFausse))), null)
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /FlateDecode', Buffer.concat([Buffer.from([0x78, 0x00]), texte.subarray(2)])))), 'flux_illisible')
+})
+
+// ─── Fermé par défaut (seconde review, S1) ─────────────────────────────────
+// Chacune de ces formes a passé le contrôle d'avant, et pdf.js les lit.
+const BOMBE = zlib.deflateSync(Buffer.alloc(FLUX_MAX + 1024))
+const brut = (entete, dico, donnees, mot = 'stream\n') => Buffer.concat([Buffer.from(`${entete}\n<< ${dico} >>\n${mot}`, 'latin1'), donnees, Buffer.from('\nendstream\nendobj\n', 'latin1')])
+
+test('LE TEST QUI COMPTE (S1, fermé par défaut) : clé /F, filtre indirect, nom échappé, fin de ligne exotique, filtres doublés, chaîne déséquilibrée — refusés', () => {
+  const L = `/Length ${BOMBE.length}`
+  for (const [cas, objet] of [
+    ['clé /F (pdf.js lit F comme Filter)', brut('7 0 obj', `${L} /F /FlateDecode`, BOMBE)],
+    ['filtre par référence', brut('7 0 obj', `${L} /Filter 8 0 R`, BOMBE)],
+    ['nom échappé', brut('7 0 obj', `${L} /Filter /F#6CateDecode`, BOMBE)],
+    ['CR seul après stream', brut('7 0 obj', `${L} /Filter /FlateDecode`, BOMBE, 'stream\r')],
+    ['espaces avant le LF', brut('7 0 obj', `${L} /Filter /FlateDecode`, BOMBE, 'stream  \n')],
+    ['deux /Filter', brut('7 0 obj', `${L} /Filter /DCTDecode /Filter /FlateDecode`, BOMBE)],
+    ['un commentaire dans le dictionnaire', brut('7 0 obj', `${L} %x\n/Filter /FlateDecode`, BOMBE)],
+    ['un faux en-tête logé dans une chaîne', brut('7 0 obj', `${L} /Filter /FlateDecode /X (8 0 obj)`, BOMBE)],
+    ['un tableau de filtres qui n\'est pas fait de noms', brut('7 0 obj', `${L} /Filter [ 8 0 R ]`, BOMBE)]
+  ]) assert.equal(fluxSousBorne(pdfDe(objet)), 'flux_suspect', cas)
+})
+
+test('S1 : un leurre dans une chaîne, un « endstream » caché dans les données, un en-tête coupé — la vraie bombe est vue', () => {
+  const L = `/Length ${BOMBE.length}`
+  assert.equal(fluxSousBorne(pdfDe(brut('7 0 obj', `${L} /Note (/Filter /DCTDecode) /Filter /FlateDecode`, BOMBE))), 'flux_trop_gros', 'le leurre est retiré, le vrai filtre lu')
+  // « endstream » dans un bloc stocké, en tête du flux zlib ; /Length juste.
+  const mot = Buffer.from('endstream')
+  const stocke = Buffer.concat([Buffer.from([0x00, mot.length, 0, ~mot.length & 0xff, 0xff]), mot])
+  const cache = Buffer.concat([Buffer.from([0x78, 0xda]), stocke, zlib.deflateRawSync(Buffer.alloc(2 * FLUX_MAX)), Buffer.alloc(4)])
+  assert.equal(fluxSousBorne(pdfDe(brut('7 0 obj', `/Length ${cache.length} /Filter /FlateDecode`, cache))), 'flux_trop_gros', 'l\'étendue vient de /Length')
+  // La même, /Length indirect.
+  assert.equal(fluxSousBorne(pdfDe(brut('7 0 obj', '/Length 9 0 R /Filter /FlateDecode', cache), Buffer.from(`9 0 obj\n${cache.length}\nendobj\n`))), 'flux_trop_gros', '/Length indirect résolu')
+  // En-tête « 7 0\nobj », précédé d'une image : le dictionnaire lu est le bon.
+  const image = brut('8 0 obj', '/Length 4 /Type /XObject /Subtype /Image /Filter /DCTDecode', Buffer.from([0xFF, 0xD8, 0xFF, 0xD9]))
+  assert.equal(fluxSousBorne(pdfDe(image, brut('7 0\nobj', `${L} /Filter /FlateDecode`, BOMBE))), 'flux_trop_gros')
+  // Brotli (pdf.js 5 le décode), et un flux sans fin.
+  assert.equal(fluxSousBorne(pdfDe(brut('7 0 obj', '/Length 2 /Filter /BrotliDecode', Buffer.from('xx')))), 'filtre_non_pris')
+  assert.equal(fluxSousBorne(Buffer.from('%PDF-1.4\n7 0 obj\n<< /Length 999 /Filter /FlateDecode >>\nstream\nxx', 'latin1')), 'flux_illisible')
+})
+
+test('fermé par défaut, mais pas aveugle : le vrai tableau et les fixtures passent, un mot « stream » dans un titre ne déclenche rien', () => {
+  for (const nom of ['portrait', 'tourne', 'ligne-fausse', 'sans-capital']) assert.equal(fluxSousBorne(pdf(nom)), null, nom)
+  assert.equal(fluxSousBorne(pdfDe(Buffer.from('1 0 obj\n<< /Title (Livestream) /Producer (stream-x) >>\nendobj\n'), flux(2, '/Filter /FlateDecode', zlib.deflateSync(Buffer.from('BT ET'))))), null)
 })
 
 test('LE TEST QUI COMPTE (S1) : la lecture tourne dans un fil, bornée en temps — un fil muet est refusé « trop long » et tué ; une instance occupée est une panne', async () => {

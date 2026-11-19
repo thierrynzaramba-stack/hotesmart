@@ -897,6 +897,14 @@ test('LE TEST QUI COMPTE (review du crédit, B1) : une échéance PAS ENCORE ÉC
   } finally { b.fermer() }
 })
 
+test('l\'échéance DU JOUR est payée — la même règle que l\'import et le cron, `<=` (seconde review, mineur 5)', async () => {
+  const b = await monter({ ecran: () => reponseEcran({ credits: { ...UN_CREDIT, aujourdhui: '2026-11-22' } }) })
+  try {
+    assert.match(texte(b.$('[data-bind="totaux"] .chg-rep__credit')), /Crédit, mensualité payée/)
+    assert.doesNotMatch(texte(b.$('[data-bind="totaux"]')), /mensualité à venir/)
+  } finally { b.fermer() }
+})
+
 test('un logement choisi part avec le crédit ; les refus du crédit ont leurs mots (review, mineur 5)', async () => {
   const gestes = []
   const geste = (corps) => { gestes.push(corps); throw Object.assign(new Error('x'), { status: 413, error: 'trop_gros' }) }

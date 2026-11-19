@@ -1992,6 +1992,12 @@ Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 
     depuis l'appel, attente comprise. C'est le correctif du constat de
     sécurité de la seconde review : chaque fil a son propre tas, et trois
     photos de 48 Mpx converties ENSEMBLE montaient à 2,1 Go.
+  - ⚠ **Depuis le lot crédit (§14.20, seconde review) : un PROCESSUS à usage
+    unique, pas un fil, et une file COMMUNE aux photos et aux tableaux.** Un
+    fil terminé ne rendait pas sa mémoire au système (huit tours : 1,7 Go
+    résidents) ; l'enfant est tué au-delà de 1 Go de mémoire résidente (une
+    photo de 48 Mpx monte à ~790 Mo). Mergé seul, le lot HEIC garde son fil
+    et sa file à lui.
   - Le JPEG **remplace** la photo au même chemin (`upload` avec `upsert`).
   - Ensuite, l'empreinte, les doublons, la lecture IA immédiate, le cron et la
     consultation ne voient qu'un JPEG. **Aucun HEIC n'est gardé.**
@@ -2412,19 +2418,27 @@ corrigible en recette :
 **Ce qui change.**
 - **Lecture du tableau** (`lib/charges/credit-tableau.js`, `unpdf` 2.2.1, MIT,
   chargé à la demande) :
-  - ⚠ **Dans un fil à usage unique, un seul à la fois par instance**
-    (`lib/charges/fil-isole.js`, `lib/charges/credit-tableau-fil.js`) : 20 s
-    au plus, attente comprise ; tas JavaScript borné à 256 Mo ; fil tué
-    après un tableau. Au-delà du temps ou du tas : refus `tableau_illisible`
-    (rien n'est écrit). Instance occupée (deux tableaux déjà en attente) :
-    503 « occupé ». C'est le correctif du constat de sécurité S1 de la
-    review : un PDF piégé de 62 Ko tenait la fonction 6 à 26 s.
+  - ⚠ **Dans un PROCESSUS à usage unique, un seul travail lourd à la fois
+    par instance, photos et tableaux confondus** (`lib/charges/fil-isole.js`,
+    `lib/charges/credit-tableau-fil.js`) : 20 s au plus, attente comprise ;
+    tas JavaScript borné à 256 Mo ; **mémoire résidente bornée à 512 Mo**,
+    relevée toutes les 25 ms ; enfant tué après un tableau, et la place ne se
+    libère qu'une fois l'enfant mort. Au-delà du temps ou de la mémoire, après
+    avoir eu son délai entier : refus `tableau_illisible` (rien n'est écrit).
+    Instance occupée — deux travaux déjà en attente, ou délai mangé par
+    l'attente : 503 « occupé ». C'est le correctif du constat de sécurité S1
+    des deux reviews : un PDF piégé de 62 Ko tenait la fonction 6 à 26 s ;
+    un de 8 Ko, aux filtres en règle, la montait à 5,4 Go.
   - ⚠ **Les flux compressés sont bornés AVANT pdf.js** : chaque flux suit la
     chaîne de ses filtres (ASCII85, ASCIIHex, Flate), décompressé une fois
     sous 4 Mo, et 16 Mo pour tous. pdf.js décompresse sans plafond, et ses
     tampons échappent à la borne du tas. Un flux compressé que zlib refuse
     fait refuser le PDF, puisque pdf.js, plus tolérant, le décompresserait.
-    Les filtres LZW et RunLength ne sont pas pris. Le vrai tableau : 36 flux,
+    Les filtres LZW et RunLength ne sont pas pris. ⚠ **Ce contrôle refuse vite
+    ce qui se voit, il ne BORNE pas** (seconde review) : il est fermé par
+    défaut sur ce qu'il ne sait pas suivre (`flux_suspect`, `filtre_non_pris`),
+    mais un flux légal répété 600 fois dans `/Contents` passe tous ses
+    contrôles. La borne, c'est la mémoire de l'enfant. Le vrai tableau : 36 flux,
     2,4 Mo décompressés en tout, 0,7 Mo pour le plus gros.
   - Les cellules du PDF sont lues avec leur position. Chaque cellule est
     ramenée à son repère de lecture : le tableau réel est imprimé en paysage
@@ -2807,7 +2821,7 @@ Le reste de la sécurité tient (détail en fin de rapport). Chaque lecture et �
 
 | Constat | Correction |
 |---|---|
-| S1 | **La lecture tourne dans un fil à usage unique** (`fil-isole.js`), un seul à la fois par instance, deux en attente au plus. 20 s au plus, attente comprise ; tas borné à 256 Mo ; fil tué après un tableau. Au-delà : refus `tableau_illisible` ; occupé : 503. **Les flux compressés sont bornés avant pdf.js** : chaîne des filtres suivie (ASCII85, ASCIIHex, Flate), 4 Mo par flux et 16 Mo pour tous ; un flux Flate que zlib refuse, ou un filtre LZW ou RunLength, fait refuser le PDF. Mesuré : une bombe de 408 Ko (400 Mo décompressés) est refusée en **38 ms** ; le vrai tableau se lit en 371 ms dans le fil. Tests : la bombe (et sa version tronquée), le total, les filtres, un fil muet refusé « trop long » et tué, jamais deux fils vivants, l'occupation. Non fait : le plafond d'imports refusés par compte et par jour — chaque essai est désormais borné en temps et en mémoire. |
+| S1 | **La lecture tourne dans un fil à usage unique** (`fil-isole.js`), un seul à la fois par instance, deux en attente au plus. 20 s au plus, attente comprise ; tas borné à 256 Mo ; fil tué après un tableau. Au-delà : refus `tableau_illisible` ; occupé : 503. **Les flux compressés sont bornés avant pdf.js** : chaîne des filtres suivie (ASCII85, ASCIIHex, Flate), 4 Mo par flux et 16 Mo pour tous ; un flux Flate que zlib refuse, ou un filtre LZW ou RunLength, fait refuser le PDF. Mesuré : une bombe de 408 Ko (400 Mo décompressés) est refusée en **38 ms** ; le vrai tableau se lit en 371 ms dans le fil. Tests : la bombe (et sa version tronquée), le total, les filtres, un fil muet refusé « trop long » et tué, jamais deux fils vivants, l'occupation. Non fait : le plafond d'imports refusés par compte et par jour — chaque essai est désormais borné en temps et en mémoire. ⚠ **Cette dernière phrase était FAUSSE** (seconde review, ci-dessous) : le tas était borné, pas la mémoire. |
 | B1 | « Payée » seulement pour une échéance **échue** au jour du serveur (Paris) ; sinon « Crédit, mensualité à venir ». Test avec une échéance le 22 et le 19 pour aujourd'hui. |
 | 1 | `defaire` journalise l'échec de son effacement et garde alors le fichier avec sa ligne ; un insert ambigu défait le crédit. La transaction (une fonction SQL) est notée en dette. |
 | 2 | Le cron saute un crédit en panne, le compte et le remonte (`erreurs`), sans arrêter les autres. Test. |
@@ -2819,6 +2833,153 @@ Le reste de la sécurité tient (détail en fin de rapport). Chaque lecture et �
 | 8 | Tests ajoutés : échéance du jour à l'import, dates qui reculent, montant négatif, cellule de capital absente, plus de 1 000 lignes (422), logement envoyé par l'écran. |
 | 9 | `package-lock.json` reprend son nom (`hotesmart`). Pour `unpdf` et Node 24 : à vérifier en recette, noté dans la spec. |
 | 10 | Case PERFORMANCE corrigée : 8 règles CSS ; pagination testée ; temps de lecture mesurés ; poids du module et du corps remesurés. |
+
+#### Seconde review du lot crédit (19 novembre 2026), limitée aux correctifs
+
+**Arbre et plage.** Arbre `/home/claude/hotesmart-credit`, branche
+`charges-credit`, tête lue `beaa9ecdfc60d9136cb615524045bb5aaabdee9a`, plage
+`9cde8a7dd2dd67ab5cb94429f4752241ad5c8d58..beaa9ecdfc60d9136cb615524045bb5aaabdee9a`.
+⚠ **Le brief portait d'abord une base FAUSSE** (`9cde8a7d1ec4…`), tapée de
+mémoire au lieu d'être copiée depuis `git rev-parse` — le défaut déjà noté au
+§14.14. Corrigée par message pendant la review ; la review a relu `HEAD~1..HEAD`
+et l'a confirmé. Les 17 fichiers qu'elle cite sont ceux du diff.
+
+Verbatim :
+
+````
+Tête lue : `beaa9ecdfc60d9136cb615524045bb5aaabdee9a` (branche `charges-credit`). La base du brief ne correspondait pas à HEAD~1. J'ai donc relu HEAD~1..HEAD, soit `9cde8a7dd2dd67ab5cb94429f4752241ad5c8d58..beaa9ecd…`, ce que ta correction confirme. L'arbre n'a pas été modifié (`git status` vide).
+
+`git diff --name-only` :
+api/ecran/charges.js
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/credit-tableau-fil.js
+lib/charges/credit-tableau.js
+lib/charges/ecran.js
+lib/charges/fil-isole.js
+migrations/2026-11-19-controle-charges-credits.sql
+shared/charges-vue.js
+shared/i18n/en.json
+shared/i18n/es.json
+shared/i18n/fr.json
+tests/charges-credit-tableau.test.js
+tests/charges-credit.test.js
+tests/charges-ecran.test.js
+tests/charges-page.test.js
+
+## SÉCURITÉ — S1 n'est pas fermé (lib/charges/credit-tableau.js:259-290, lib/charges/fil-isole.js)
+
+Le fil ne gèle plus la boucle principale : le décalage mesuré reste à 96 ms au plus. En revanche, la mémoire n'est toujours pas bornée. `resourceLimits` ne compte pas les tampons de pdf.js, et `fluxSousBorne` se contourne. Mesures avec `lireTableauIsole` réel, pic RSS du processus appelant :
+
+| PDF piégé (taille) | `fluxSousBorne` | durée | pic RSS |
+|---|---|---|---|
+| Flate déclaré en clair (1,5 Mo) | refusé | 66 ms | 62 Mo |
+| clé `/F /FlateDecode` (pdf.js lit `get('F','Filter')`) | `null` | 8,6 s | **4,6 Go** |
+| `/Filter 8 0 R` (référence indirecte) | `null` | 7,3 s | 4,6 Go |
+| nom échappé `/F#6CateDecode` | `null` | 7,5 s | 4,6 Go |
+| `stream\r` (CR seul) | `null` | 11,4 s | 4,6 Go |
+| `stream  \n` (espaces avant LF) | `null` | 10,2 s | 4,6 Go |
+| leurre `(/Filter /DCTDecode)` dans une chaîne du dictionnaire | `null` | 8,0 s | 4,6 Go |
+| « endstream » dans un bloc stocké, `/Length` juste | `null` | 14,6 s | **5,7 Go** |
+| `/BrotliDecode` (pdf.js 5 le décode), **2 Ko** | `null` | 11,8 s | 4,6 Go |
+| en-tête `7 0\nobj` précédé d'un flux DCT | `null` | 8,7 s | 4,6 Go |
+| **filtres en règle** : un flux de 3,9 Mo répété 600 fois dans `/Contents` (**8 Ko**) | `null` | — | **processus tué (OOM, 5,4 Go)** |
+| le même, répété 250 fois (5,8 Ko) | `null` | 9,7 s | 3,0 Go |
+| LZW | refusé | 70 ms | — |
+| 80 pages sur un même flux de 3,9 Mo | `null` | 2,8 s | 127 Mo |
+
+La dernière ligne grave montre que même un pré-contrôle parfait ne suffirait pas : `/Contents` peut répéter un flux légal. Tout reste sous les 20 s, donc le délai ne coupe rien. La phrase de la spec « chaque essai est désormais borné en temps et en mémoire » est fausse.
+
+**Correction proposée.** Une garde mémoire dans le fil principal de `lancer` : relever `process.memoryUsage.rss()` toutes les 25 ms, et terminer le fil avec `PanneFil('memoire')` au-delà de la base + 512 Mo. Je l'ai prototypée dans une copie sous /tmp :
+- tous les PDF piégés sont refusés `trop_lourd` en 1,5 à 2,6 s, pic à 563 Mo au plus ;
+- le vrai tableau se lit toujours (563 ms, 119 Mo).
+
+Garder `fluxSousBorne` comme premier filtre, mais le rendre fail-closed : refuser `/F`, un `/Filter` indirect, `#` dans les noms, tout filtre inconnu (pas `break`), et tout `stream` qui n'est pas suivi de LF ou CRLF.
+
+## MINEUR
+
+1. **lib/charges/fil-isole.js:82 et :61 — la place se libère avant que le fil soit mort.** `terminate()` n'est pas attendu, donc le fil suivant démarre pendant que l'ancien meurt. Mesuré avec trois bombes en file : 2,6 Go contre 1,6 Go pour une seule. Avec `fil.terminate().finally(geste)`, prototypé : 1,6 Go. Le test « jamais deux fils vivants » passe parce que le `terminate` de son double est synchrone.
+2. **fil-isole.js:45 et :56, puis credit-tableau.js:340 — une attente expirée dans la file devient un refus.** Elle devient `delai`, puis 422 `tableau_illisible/trop_long`. Un hôte honnête placé derrière un PDF de 20 s voit son tableau refusé comme illisible. Il devrait recevoir `occupe` (503, réessayer).
+3. **Deux fils lourds par instance.** HEIC (`lib/charges/heic.js`) et crédit ont chacun leur file. Le « un seul à la fois par instance » de la documentation est faux.
+4. **migrations/2026-11-19-controle-charges-credits.sql:63-88 — le contrôle se contente de noms.** Mesuré sur une copie de t11 :
+   - un trigger désactivé passe ;
+   - un index d'empreinte NON unique passe ;
+   - une contrainte `charges_credit_ech_somme_ck` réduite à `check (true)` passe ;
+   - un `grant select … to public` passe la ligne 6 (la RLS tient encore).
+
+   Correction : `tgenabled = 'O'`, `indexdef ilike 'create unique%'`, `pg_get_constraintdef` comparé, et `grantee in ('anon','authenticated','PUBLIC')`.
+5. **Trois mutations survivent aux tests :**
+   - `<=` changé en `<` (shared/charges-vue.js:313) : aucun test sur l'échéance du jour à l'écran ;
+   - ASCII85 ignoré (`break`) : le test n'a qu'un petit flux ;
+   - `Z_SYNC_FLUSH` retiré : le cas « tronquée » dépasse 4 Mo avant la coupure.
+
+## Vérifié sans constat
+
+- **Lisibilité :** le vrai tableau (16 pages) et `tableau-tourne.pdf` se lisent dans le fil, en 400 ms et 175 ms.
+- **B1 :** le jour de Paris vient du serveur et se compare en chaîne ISO, avec le même `<=` que l'import et le cron. Le repli sur le jour de l'appareil ne joue que si le champ manque, et l'écran n'a pas de cache navigateur. La mutation « jour de l'appareil » fait rougir un test.
+- **Écritures et cron :**
+  - pagination en ordre total ;
+  - `defaire` après un insert ambigu, filtré par compte ;
+  - le 23505 n'efface qu'un chemin propre à l'id ;
+  - le cron saute un crédit en panne, et la mutation `return` fait rougir un test.
+- **Messages et traçage :** les messages propres au crédit et `refus_occupe` sont en place ; le traçage par `require.resolve` suit le même schéma que HEIC.
+- **Contre-épreuve :** les 13 tests neufs rougissent contre la base ; 112/112 à la tête.
+- **Contrôle SQL :** 7 lignes à ok sur t11 après les deux migrations ; un grant à `authenticated` et une RLS coupée sont bien détectés. La base copiée `trev2credit` est effacée.
+
+Fichiers de travail, tous hors de l'arbre :
+- générateurs : /tmp/s1rev-scripts/gen.py et brotli.js ;
+- PDF piégés : /tmp/s1rev-pdfs ;
+- prototype de la garde mémoire : /tmp/s1rev-fix/lib/charges/fil-isole.js.
+````
+
+⚠ **CES CORRECTIFS NE SONT PAS RELUS.** C'est la seconde review du lot hors
+envoi au voyageur : la règle s'arrête là (CLAUDE.md, « Une review par
+commit »). Ils sont mesurés et testés, ci-dessous, et la décision d'une
+relecture de plus revient au chef de file et à Thierry.
+
+| Constat | Correction |
+|---|---|
+| S1 (mémoire) | **La garde mémoire, et le travail dans un PROCESSUS à usage unique, pas un fil.** Le processus principal relève la mémoire résidente de l'enfant (`/proc/<pid>/status`) toutes les 25 ms et le tue au-delà de sa borne : **512 Mo** pour un tableau, **1 Go** pour une photo (une vraie photo de 48 Mpx monte à ~790 Mo). Pourquoi un processus et non la garde prototypée sur un fil : **mesuré après la review**, un fil terminé ne rend pas sa mémoire au système. Huit tours « PDF piégé, photo 48 Mpx, vrai tableau » dans un même processus laissaient **1,7 Go résidents, pic à 2,4 Go** — au-delà des 2 Go d'une fonction, sans qu'aucun travail n'ait dépassé sa borne. Les mêmes huit tours en processus : **67 à 143 Mo résidents, pic à 922 Mo**. Un tas JavaScript plein fait avorter l'enfant : lu `memoire`. Hors de Linux, la garde ne voit rien, et le journal le dit. |
+| S1 (pré-contrôle) | **`fluxSousBorne` fermé par défaut** : clé `/F`, `/Filter` indirect, répété ou en tableau qui n'est pas fait de noms, nom échappé (`#`), commentaire ou chaîne déséquilibrée dans le dictionnaire, `stream` sans LF ou CRLF → `flux_suspect` ; tout filtre inconnu (Brotli compris) → `filtre_non_pris` ; un filtre d'image (DCT, JPX, CCITT) hors d'une `/Subtype /Image` → `filtre_non_pris`. Et quatre lectures fidèles à pdf.js : les chaînes du dictionnaire sont retirées avant lecture (le leurre ne compte plus) ; l'étendue d'un flux vient de `/Length` (direct ou indirect) quand elle tombe sur `endstream` ; le dictionnaire part du dernier en-tête `N G obj`, quelle que soit sa mise en page ; le mot `stream` est lu comme le lexeur de pdf.js le lit. L'en-tête zlib est vérifié comme pdf.js le vérifie, et la somme de contrôle de fin ne l'est pas (pdf.js ne la lit pas). ⚠ **Ce n'est pas un analyseur, et la spec ne dit plus qu'il borne** : il refuse vite ce qui se voit ; la borne, c'est la garde. |
+| 1 | La réponse — donc la place dans la file — ne part qu'une fois l'enfant MORT. Un enfant qui ne meurt pas en 2 s ne bloque pas la file pour toujours : la place se libère, le journal le dit. Test : le second naît après la mort du premier, avec un `terminate` lent. |
+| 2 | Un travail qui expire dans la file, OU qui a attendu et n'a pas tenu le reste de son délai, rend `occupe` (503, réessayer) — jamais `trop_long`. Seul un travail qui a eu son délai entier peut être « trop long ». Test des trois cas. |
+| 3 | **Une seule file pour les deux familles** : `FILE_LOURDE` (lib/charges/fil-isole.js), que `convertirIsole` (HEIC) emprunte désormais aussi. Un seul enfant lourd par instance, deux en attente. C'est aussi ce qui garde la borne de mémoire de la fonction : base + 1 Go au plus. Test : deux photos et deux tableaux demandés ensemble, jamais deux enfants vivants, le quatrième « occupé ». ⚠ **Ce correctif touche le lot HEIC** (`lib/charges/heic.js`, `heic-fil.js`, un test) : le lot HEIC seul garde sa file à lui, cohérent ; mergé après lui, le crédit la remplace. |
+| 4 | Le contrôle lit chaque garde-fou à sa DÉFINITION : index uniques (`create unique index`), somme écrite terme à terme, clés comparées, cascade, trigger `tgenabled = 'O'`, aucun droit à `anon`, `authenticated` ni `PUBLIC`. Neuf lignes, la 9 informative. **Mesuré sur une copie de la base, un sabotage à la fois** : trigger désactivé → ligne 7 ; empreinte non unique → 7 ; somme réduite à `check (true)` → 5 ; `grant select … to public` → 8 ; index d'échéance non unique → 4 ; clé sans cascade → 6 ; sans sabotage, tout à `t`. |
+| 5 | Trois tests : l'échéance DU JOUR se dit « payée » à l'écran ; ASCII85 devant une bombe la fait refuser ; un flux tronqué se lit sans refus (et une somme de contrôle fausse aussi, un en-tête faux non). |
+
+**Mesures, `lireTableauIsole` réel, pic parent + enfant :**
+
+| PDF | pré-contrôle | avec le pré-contrôle | pré-contrôle neutralisé (la garde seule) |
+|---|---|---|---|
+| vrai tableau (16 pages, 301 échéances) | passe | lu, 416 ms, 142 Mo | — |
+| `tableau-tourne.pdf` | passe | lu, 165 ms, 110 Mo | — |
+| v0 Flate en clair | `flux_trop_gros` | 63 ms, 88 Mo | `trop_lourd`, 1,7 s, 568 Mo |
+| v1 clé `/F` | `flux_suspect` | 60 ms, 88 Mo | `trop_lourd`, 1,7 s, 557 Mo |
+| v2 filtre indirect | `flux_suspect` | 60 ms, 87 Mo | `trop_lourd`, 1,7 s, 556 Mo |
+| v3 nom échappé | `flux_suspect` | 63 ms, 87 Mo | `trop_lourd`, 1,8 s, 555 Mo |
+| v4 CR seul | `flux_suspect` | 67 ms, 88 Mo | `trop_lourd`, 1,8 s, 567 Mo |
+| v5 espaces avant LF | `flux_suspect` | 63 ms, 87 Mo | `trop_lourd`, 1,8 s, 563 Mo |
+| v6 leurre dans une chaîne | `flux_trop_gros` | 79 ms, 93 Mo | `trop_lourd`, 1,8 s, 561 Mo |
+| v7 « endstream » caché | `flux_trop_gros` | 62 ms, 88 Mo | `trop_lourd`, 1,8 s, 568 Mo |
+| v8 Brotli | `filtre_non_pris` | 52 ms, 79 Mo | `trop_lourd`, 2,6 s, 554 Mo |
+| v9 LZW | `filtre_non_pris` | 57 ms, 79 Mo | — |
+| v10 en-tête coupé | `flux_trop_gros` | 63 ms, 93 Mo | `trop_lourd`, 1,9 s, 566 Mo |
+| **v11 contenu répété 600 fois (8 Ko)** | passe | **`trop_lourd`, 1,2 s, 563 Mo** | `trop_lourd`, 1,3 s, 555 Mo |
+| v12 80 pages, un flux | passe | « aucune échéance », 3,0 s, 147 Mo | — |
+
+Photos, sous la même file : une photo de 48 Mpx (7 Mo) convertie en 3,8 s,
+pic 847 Mo ; quatre demandées ensemble — 48 Mpx, 12 Mpx, 49 Mpx bruitée,
+48 Mpx — : les trois premières converties l'une après l'autre (3,9 / 5,7 /
+13,7 s, sous les 15 s comptées depuis l'appel), la quatrième « occupée » en
+74 ms, pic 998 Mo.
+
+Ce qui reste, et c'est dit : un PDF honnête qui porterait une police nommée
+exactement `/F`, une chaîne `( stream )` hors d'un flux, ou un nom échappé dans
+un dictionnaire de flux serait refusé `flux_suspect` (« fermé par défaut »). Un
+PDF chiffré était déjà refusé (`flux_illisible`). Le plafond d'imports refusés
+par compte et par jour reste en dette : chaque essai coûte désormais au plus
+20 s et 512 Mo, une fois, sur une instance.
 
 ## 12. Trace des reviews du lot 2
 

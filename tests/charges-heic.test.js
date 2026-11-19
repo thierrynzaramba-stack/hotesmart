@@ -194,12 +194,14 @@ test('LE TEST QUI COMPTE : un fil qui ne répond jamais est TUÉ au délai (seco
   assert.equal((await convertirIsole(Buffer.from('x'), { max: 1e7 }, { Worker: f.Worker })).length, 3, 'la suivante passe')
 })
 
-test('une photo qui attend son tour plus que son délai part en panne SANS lancer de fil ; le délai court depuis l\'appel', async () => {
+test('une photo qui attend son tour plus que son délai part en panne « occupé » SANS lancer de fil ; le délai court depuis l\'appel', async () => {
   const lent = fabriqueDeFils({ repond: 80 })
   const premiere = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 1000 }, { Worker: lent.Worker })
   const t0 = Date.now()
   const seconde = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 30 }, { Worker: lent.Worker })
-  await assert.rejects(seconde, (e) => e.motif === 'delai')
+  // « occupé », pas « délai » (seconde review du lot crédit, mineur 2) : elle
+  // n'a pas eu son tour — une panne, 503, l'hôte réessaie.
+  await assert.rejects(seconde, (e) => e instanceof PanneConversion && e.motif === 'occupe')
   assert.ok(Date.now() - t0 < 70, 'refusée à son délai, pas à la fin de la première')
   await premiere
   assert.equal(lent.etat.crees, 1, 'la seconde n\'a jamais eu de fil')

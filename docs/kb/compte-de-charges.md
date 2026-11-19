@@ -50,15 +50,22 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   JAMAIS le capital) ; le cron fait entrer les suivantes à leur jour. La
   catégorie `credit` est réservée aux échéances (`charges_credit_ck`), et une
   échéance ne se corrige pas seule : le crédit se supprime et se réimporte.
-  ⚠ Le PDF se lit dans un fil à usage unique, borné en temps et en tas, et ses
-  flux compressés sont bornés AVANT pdf.js (un PDF piégé de 62 Ko gelait la
-  fonction). « Payée » ne se dit que d'une échéance échue.
+  ⚠ Le PDF se lit dans un PROCESSUS à usage unique, borné en temps, en tas et
+  en MÉMOIRE RÉSIDENTE (512 Mo, relevée toutes les 25 ms) — le tas seul ne
+  compte pas les tampons de pdf.js, et un PDF de 8 Ko aux filtres en règle
+  montait à 5,4 Go. Ses flux compressés sont contrôlés AVANT pdf.js, fermé par
+  défaut, mais ce contrôle refuse vite, il ne borne pas. Un processus et pas un
+  fil : un fil terminé ne rend pas sa mémoire (mesuré : 1,7 Go résidents après
+  huit tours). Une SEULE file pour les photos HEIC et les tableaux
+  (`FILE_LOURDE`, lib/charges/fil-isole.js). « Payée » ne se dit que d'une
+  échéance échue.
 - **Aucun HEIC n'est gardé ni lu** (§14.19) : une photo HEIC que le navigateur
   ne sait pas lire part telle quelle, et `confirmerEnvoi` la convertit en JPEG
   AVANT l'empreinte ; le JPEG la remplace au même chemin. Ce qu'on ne sait pas
   convertir s'efface (422 `conversion_impossible`) ; une panne du stockage ou
-  du convertisseur n'efface rien (503). ⚠ Le décodeur tourne dans un fil À
-  USAGE UNIQUE (`convertirIsole`), jamais dans le fil principal : son tas
+  du convertisseur n'efface rien (503). ⚠ Le décodeur tourne dans un processus
+  À USAGE UNIQUE (`convertirIsole`, file commune avec les tableaux, 1 Go de
+  mémoire résidente au plus), jamais dans le processus principal : son tas
   WebAssembly ne rétrécit jamais et fuyait sur les fichiers illisibles. Les types acceptés vivent à TROIS endroits (bucket, `TYPES`,
   `TYPES_ACCEPTES`) que `tests/charges-migration-heic.test.js` compare.
 - **Une période dure au plus TROIS ANS** (1 097 jours, date de fin comprise ; Thierry, 19 novembre
