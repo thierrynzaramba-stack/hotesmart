@@ -2393,7 +2393,7 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .chg-col--date { color: var(--muted); }
 .chg-rep__nom { min-width: 0; overflow-wrap: anywhere; }
 .chg-rep li.chg-cols { padding: 6px 12px; font-size: var(--fs-small); border-top: 1px solid var(--line); }
-.chg-ms { gap: 6px; }
+.chg-rep .chg-ms { gap: 6px; }
 .chg-m { border: 1px solid var(--line); border-radius: var(--radius-tile); background: var(--surface); overflow: hidden; }
 .chg-m--ouvert { border-color: var(--muted); margin-block: 8px; }
 .chg-mois { width: 100%; padding: 9px 12px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-small); text-align: start; cursor: pointer; }
@@ -2402,8 +2402,11 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .chg-m__chevron { width: 16px; height: 16px; color: var(--muted); transform: rotate(90deg); }
 .chg-m--ouvert .chg-m__chevron { transform: rotate(-90deg); }
 .chg-rep__credit { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; padding: 4px 12px 6px 24px; font-size: var(--fs-small); color: var(--muted); }
-.chg-detail { padding: 2px 12px 10px 24px; }
-.chg-dl { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 110px 110px; align-items: start; gap: 10px; padding: 7px 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-small); text-align: start; }
+.chg-detail { padding: 2px 0 10px 24px; }
+.chg-dl, .chg-detail > p { padding-inline-end: 12px; }
+/* La MÊME grille que l'en-tête du mois (`.chg-cols`) : « Charge du mois » tombe
+   sous « Prorata temporis », « Montant facturé » sous « Date de facture ». */
+.chg-dl { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 130px 120px 18px; align-items: start; gap: 8px; padding: 7px 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-small); text-align: start; }
 button.chg-dl { cursor: pointer; }
 button.chg-dl:hover { background: var(--surface-2); }
 .chg-dl--titres { margin-top: 8px; padding-bottom: 4px; font-size: var(--fs-caption); color: var(--muted); border-bottom: 1px solid var(--border); }
@@ -2423,6 +2426,6 @@ button.chg-dl:hover { background: var(--surface-2); }
   .chg-cols { grid-template-columns: minmax(0, 1fr) 88px 88px 16px; gap: 6px; }
   .chg-cols--titres { font-size: 12px; }
   .chg-detail { padding-left: 12px; }
-  .chg-dl { grid-template-columns: minmax(0, 1fr) 84px 84px; gap: 6px; }
+  .chg-dl { grid-template-columns: minmax(0, 1fr) 88px 88px 16px; gap: 6px; }
   .chg-total__fort b { font-size: 20px; }
 }

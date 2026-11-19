@@ -301,6 +301,7 @@ export function monter (racine, deps) {
   const deuxColonnes = (etale, nbEtale, date, nbDate) =>
     `<span class="chg-col chg-col--prorata">${parLecture(etale, nbEtale)}</span>`
     + `<span class="chg-col chg-col--date">${parLecture(date, nbDate)}</span>`
+  const lu = (cle) => `<span class="sr-only">${esc(t(cle))} </span>`
   const titresColonnes = (premier) => `<div class="chg-cols chg-cols--titres"><span>${esc(premier)}</span>`
     + `<span class="chg-col">${esc(t('charges.etale'))}</span><span class="chg-col">${esc(t('charges.a_la_date'))}</span><span></span></div>`
 
@@ -311,8 +312,12 @@ export function monter (racine, deps) {
     // « N à trancher ».
     const lignes = (toutes || []).filter(r => Number(r.nb_factures) > 0 || Number(r.nb_etale) > 0)
     if (!lignes.length) return ''
+    // Les titres de colonnes ne sont pas liés aux valeurs pour un lecteur
+    // d'écran (review 2 du lot 8a, constat 8) : chaque valeur redit le sien.
     return `<section class="chg-rep"><h3 class="chg-h3">${esc(titre)}</h3>` + titresColonnes('') + '<ul>'
-      + lignes.map(r => `<li class="chg-cols"><span class="chg-rep__nom">${esc(nom(r.cle))}</span>${deuxColonnes(r.ttc_etale, r.nb_etale, r.ttc, r.nb_factures)}<span></span></li>`).join('')
+      + lignes.map(r => `<li class="chg-cols"><span class="chg-rep__nom">${esc(nom(r.cle))}</span>`
+        + `<span class="chg-col chg-col--prorata">${lu('charges.etale')}${parLecture(r.ttc_etale, r.nb_etale)}</span>`
+        + `<span class="chg-col chg-col--date">${lu('charges.a_la_date')}${parLecture(r.ttc, r.nb_factures)}</span><span></span></li>`).join('')
       + '</ul></section>'
   }
 
@@ -391,26 +396,30 @@ export function monter (racine, deps) {
   // échéancier ou une commission déjà comptée sont « Vérifiés », et pourtant
   // hors du total.
   const horsTotal = (c) => (c.compte === false ? ` <span class="chg-etat chg-etat--hors">${esc(t('charges.non_comptee'))}</span>` : '')
+  // « Vérifiée » ne se redit pas ; tout autre état, si (review 2, constat 4 :
+  // une facture à vérifier se repère aussi dans ses charges mensuelles).
+  const etatNonVerifie = (c) => { const e = etatDe(c); return e && e !== 'validee' ? ` <span class="chg-etat chg-etat--${esc(e)}">${esc(t('charges.etat_' + e))}</span>` : '' }
   function ligneFactureDuMois (c) {
-    const e = etatDe(c)
     const type = connu('charges.type_' + (c.type_document || 'facture')) || t('charges.type_facture')
     const solde = c.type_document === 'regularisation' ? (c.solde_lu ?? (c.lecture_ia && c.lecture_ia.solde_ttc_cents)) : null
     const infos = [
       t('charges.type_du', { type, date: jourLisible(c.jour) }),
       c.periode_debut && c.periode_fin ? t('charges.couvre', { debut: jourLisible(c.periode_debut), fin: jourLisible(c.periode_fin) }) : '',
-      Number.isInteger(solde) ? t(solde < 0 ? 'charges.solde_rembourse' : 'charges.solde_a_payer', { montant: fmtMontant.format(Math.abs(solde) / 100) }) : ''
+      Number.isInteger(solde) && solde !== 0 ? t(solde < 0 ? 'charges.solde_rembourse' : 'charges.solde_a_payer', { montant: fmtMontant.format(Math.abs(solde) / 100) }) : ''
     ].filter(Boolean).join(' · ')
     return `<li><button type="button" class="chg-dl" data-ouvrir="${esc(c.id)}">`
       + `<span class="chg-dl__qui"><b>${esc(c.fournisseur_nom || t('charges.fournisseur_inconnu'))}</b>`
-      + (e && e !== 'validee' ? ` <span class="chg-etat chg-etat--${esc(e)}">${esc(t('charges.etat_' + e))}</span>` : '') + horsTotal(c)
+      + etatNonVerifie(c) + horsTotal(c)
       + `<span class="chg-ligne__infos">${esc(infos)}</span></span>`
-      + `<span class="chg-col chg-col--prorata">${chargeDuMois(c)}</span>`
-      + `<span class="chg-col chg-col--date">${montant(c.montant_ttc_cents)}</span></button></li>`
+      + `<span class="chg-col chg-col--prorata">${lu('charges.charge_du_mois')}${chargeDuMois(c)}</span>`
+      // Hors total, le montant se lit entre parenthèses : il n'est pas dans le
+      // « Date de facture » du mois (review 2, constat 2).
+      + `<span class="chg-col chg-col--date">${lu('charges.montant_facture')}${c.compte === false ? '(' + montant(c.montant_ttc_cents) + ')' : montant(c.montant_ttc_cents)}</span><span></span></button></li>`
   }
   function ligneChargeMensuelle (c) {
     return `<li><button type="button" class="chg-dl" data-ouvrir="${esc(c.id)}">`
-      + `<span class="chg-dl__qui"><b>${esc(c.fournisseur_nom || t('charges.fournisseur_inconnu'))}</b>${horsTotal(c)}</span>`
-      + `<span class="chg-col chg-col--prorata">${chargeDuMois(c)}</span><span></span></button></li>`
+      + `<span class="chg-dl__qui"><b>${esc(c.fournisseur_nom || t('charges.fournisseur_inconnu'))}</b>${etatNonVerifie(c)}${horsTotal(c)}</span>`
+      + `<span class="chg-col chg-col--prorata">${lu('charges.charge_du_mois')}${chargeDuMois(c)}</span><span></span><span></span></button></li>`
   }
   function detailDuMois (cle) {
     const d = etat.detailMois[cle]
@@ -420,11 +429,19 @@ export function monter (racine, deps) {
     // l'exercice : l'écran le dit.
     const partiel = d.partiel ? `<p class="muted small">${esc(t('charges.detail_partiel', { debut: jourLisible(d.debut), fin: jourLisible(d.fin) }))}</p>` : ''
     if (!d.lignes.length) return `<div class="chg-detail">${partiel}<p class="muted small">${esc(t('charges.detail_vide'))}</p></div>`
-    const duMois = d.lignes.filter(c => String(c.jour || '').slice(0, 7) === cle)
-    const ailleurs = d.lignes.filter(c => String(c.jour || '').slice(0, 7) !== cle)
+    // ⚠ « DATÉE DU MOIS » = datée de la PLAGE LUE, pas du mois civil (review 2,
+    // constat 1) : un mois de bord d'un exercice décalé n'est lu que pour sa
+    // part, et une facture du 3 novembre n'est pas « du mois » d'un exercice
+    // qui commence le 15. La fonction le dit (`a_la_date`) ; à défaut, les
+    // bornes lues ; à défaut encore, le mois civil.
+    const dansLaPlage = (c) => (typeof c.a_la_date === 'boolean' ? c.a_la_date
+      : (d.debut && d.fin) ? (String(c.jour) >= d.debut && String(c.jour) <= d.fin)
+          : String(c.jour || '').slice(0, 7) === cle)
+    const duMois = d.lignes.filter(dansLaPlage)
+    const ailleurs = d.lignes.filter(c => !dansLaPlage(c))
     const partie = (titre, avecFacture, lignes) => (lignes.length
       ? `<div class="chg-dl chg-dl--titres"><span>${esc(titre)}</span><span class="chg-col">${esc(t('charges.charge_du_mois'))}</span>`
-        + `<span class="chg-col">${avecFacture ? esc(t('charges.montant_facture')) : ''}</span></div><ul class="chg-dls">${lignes.join('')}</ul>`
+        + `<span class="chg-col">${avecFacture ? esc(t('charges.montant_facture')) : ''}</span><span></span></div><ul class="chg-dls">${lignes.join('')}</ul>`
       : '')
     return `<div class="chg-detail">${partiel}`
       + partie(t('charges.factures_du_mois'), true, duMois.map(ligneFactureDuMois))
@@ -441,7 +458,12 @@ export function monter (racine, deps) {
       const r = parCle.get(cle) || { cle }
       const ouvert = etat.moisOuvert === cle
       const plein = Number(r.nb_factures) > 0 || Number(r.nb_etale) > 0
-      return `<li class="chg-m${ouvert ? ' chg-m--ouvert' : ''}"><button type="button" class="chg-cols chg-mois" data-mois="${esc(cle)}" aria-expanded="${ouvert ? 'true' : 'false'}">`
+      // Lu d'un trait par un lecteur d'écran : le mois et ses deux montants,
+      // chacun avec son titre de colonne (review 2, constat 8).
+      const dit = plein
+        ? `${esc(moisLisible(cle))}, ${esc(t('charges.etale'))} ${parLecture(r.ttc_etale, r.nb_etale)}, ${esc(t('charges.a_la_date'))} ${parLecture(r.ttc, r.nb_factures)}`
+        : `${esc(moisLisible(cle))}, ${esc(t('charges.detail_vide'))}`
+      return `<li class="chg-m${ouvert ? ' chg-m--ouvert' : ''}"><button type="button" class="chg-cols chg-mois" data-mois="${esc(cle)}" aria-expanded="${ouvert ? 'true' : 'false'}" aria-label="${dit}">`
         + `<span class="chg-rep__nom">${esc(moisLisible(cle))}</span>`
         + (plein ? deuxColonnes(r.ttc_etale, r.nb_etale, r.ttc, r.nb_factures) : `<span class="chg-col">${tiret()}</span><span class="chg-col">${tiret()}</span>`)
         + '<svg class="icon chg-m__chevron" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>'

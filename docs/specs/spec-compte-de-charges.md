@@ -3801,7 +3801,11 @@ décisions, dans l'ordre où il les a données :
      facture (« les montants de la facture n'apparaissent qu'à la date de
      facturation »).
    La somme des « Charge du mois » est le « Prorata temporis » du mois ;
-   celle des « Montant facturé », son « Date de facture ».
+   celle des « Montant facturé », son « Date de facture » — les lignes
+   « Non comptée » hors somme (un tiret, et le montant entre parenthèses).
+   « Datée de ce mois » veut dire datée de la PLAGE LUE : dans un mois de
+   bord d'un exercice décalé, une facture datée avant le début de l'exercice
+   est une charge mensuelle (review 2, constat 1).
 9. « On part sur ça dans un premier temps. »
 
 **Inventaire** (la forme ne supprime pas le fond) :
@@ -3813,7 +3817,8 @@ décisions, dans l'ordre où il les a données :
 | « Estimation » déclenchée par un HT ou une TVA non lus | ne se déclenche plus que par le TTC, une facture à vérifier ou un signal | l'écran ne doute pas d'un chiffre qu'il n'affiche pas |
 | Titre « Totaux » | gardé pour les lecteurs d'écran, masqué à l'œil | l'exercice et son total parlent d'eux-mêmes |
 | Mots « Étalé » / « À la date » sur chaque ligne | une ligne de titres par tableau | décisions 1 et 6 |
-| État « Vérifiée » dans le détail d'un mois | non affiché (les autres états le sont) | une ligne du détail est comptée, donc vérifiée, sauf mention |
+| État « Vérifiée » dans le détail d'un mois | non affiché ; les autres états le sont, dans les DEUX parties | une ligne du détail est comptée, donc vérifiée, sauf mention |
+| Montant d'une ligne « Non comptée » | affiché entre parenthèses, hors des sommes | il n'est pas dans le « Date de facture » du mois |
 | Catégorie et logement dans le détail d'un mois | non affichés ; la fiche s'ouvre au clic | décision 8 : le nom et la charge |
 | Mensualité de crédit sous son mois | conservée, dans le bloc du mois | §14.20 |
 | Mention « mois partiel » (exercice décalé) | conservée | review 1, constat 1 |
@@ -3826,9 +3831,118 @@ prélèvements réels d'un échéancier ne sont pas suivis.
 la largeur. **Performance** : aucun appel ni requête de plus ; le serveur et
 la migration ne changent pas.
 
-**Tests** : `charges-page` 77/77 (4 nouveaux, 10 remis sur la nouvelle
-présentation) ; huit mutations de la présentation, sept rouges, la huitième
-a montré une branche inutile, retirée.
+**Tests** (après les correctifs de la review 2) : `charges-page` 81/81 ;
+huit mutations de la présentation, sept rouges, la huitième a montré une
+branche inutile, retirée ; six mutations des correctifs, six rouges (tri par
+mois civil, drapeau ignoré, bornes ignorées, hors total sans parenthèses,
+solde nul dit, état absent des charges mensuelles).
+
+#### 14.21.12 Review 2 du lot 8a — la présentation (19 novembre 2026)
+
+Lancée sur `/home/claude/hotesmart-exercice`, branche
+`charges-exercice-ajout`, plage
+`b16f72a331fc2ea66a445c011f54d08f6779913e..4320616cbd01f275041aa49f82c2a30eabaca719`
+(un commit, la présentation seule ; la review 1 portait sur un AUTRE commit,
+`dd8b1f2a` : une review par commit). Elle dit avoir lu cet arbre et ce SHA ;
+chaque fichier cité est dans la plage ou déclaré « hors plage ». **Aucun
+constat de sécurité** : correctifs sans nouvelle review.
+
+| # | gravité | constat | suite |
+|---|---|---|---|
+| 1 | bloquant | mois partiel : tri par mois civil au lieu de la plage lue | **corrigé** : `a_la_date`, puis les bornes lues, puis le mois civil |
+| 2 | mineur | une « Non comptée » montre son montant dans la colonne sommée | **corrigé** : entre parenthèses, hors somme, écrit dans §14.21.11 |
+| 3 | mineur | solde lu à 0 dit « à payer : 0,00 € » | **corrigé** : rien n'est dit |
+| 4 | mineur | aucun état dans « Charges mensuelles » | **corrigé** : l'état non vérifié s'y dit aussi (l'inventaire faisait foi) |
+| 5 | mineur | `.chg-ms { gap }` sans effet | **corrigé** |
+| 6 | mineur | colonnes du détail décalées de celles de l'en-tête | **corrigé** : même grille |
+| 7 | mineur | clés `charges.ttc`, `ht`, `tva` inutiles | **corrigé** : retirées des trois langues |
+| 8 | mineur | titres de colonnes non liés aux valeurs (lecteurs d'écran) | **corrigé** : `aria-label` du mois, libellé `sr-only` par valeur |
+| 9 | mineur | cas non testés | **corrigé** : 4 tests ajoutés |
+
+Reste à regarder en recette (non mesuré) : au téléphone, un montant de cinq
+chiffres dans une colonne de 88 px.
+
+Rapport, tel que rendu :
+
+````
+**Review — arbre lu : `/home/claude/hotesmart-exercice` · branche `charges-exercice-ajout` · SHA de tête lu : `4320616cbd01f275041aa49f82c2a30eabaca719` · plage `b16f72a3..4320616c`**
+
+`git diff --name-only` de la plage :
+docs/specs/spec-compte-de-charges.md
+pages/charges.html
+shared/charges-vue.js
+shared/i18n/en.json
+shared/i18n/es.json
+shared/i18n/fr.json
+shared/ui.css
+tests/charges-page.test.js
+
+Tous les fichiers cités dans les constats sont dans cette liste, sauf ceux marqués « hors plage » (lus comme référence). Rien n'a été modifié dans l'arbre. `node --test tests/charges-page.test.js` rend 77/77. Les constats 1 à 4 ont été reproduits sur le banc `tests/outils/banc-charges.js` (script temporaire hors dépôt, supprimé).
+
+**Sécurité : aucun constat.** Toutes les valeurs venues du serveur (fournisseur, type, dates, identifiants, nom d'entité) passent par `esc()` dans le code ajouté.
+
+## Constats
+
+**1. Bloquant — `shared/charges-vue.js:423-424` (dans la plage) — mois partiel : une facture hors de la plage lue est rangée dans « Factures du mois »**
+- **Défaut** : le tri se fait sur `jour.slice(0, 7) === cle`, c'est-à-dire le mois civil, alors que le serveur coupe un mois de bord à l'exercice (`plageDuMois`, `lib/charges/ecran.js:248`, hors plage).
+- **Scénario** : entité à exercice au 15 novembre (`debut_exercice` accepte tout jour, `lib/entites-juridiques.js:77`, hors plage), mois de novembre 2026 lu du 15 au 30. Une facture annuelle datée du 3 novembre 2026, période 2026 entière, touche la plage par sa période.
+- **Reproduit** : elle sort sous « Factures du mois » avec « Facture du 3 nov. 2026 · couvre… 52,60 € 1 200,00 € ». Ses 1 200 € appartiennent à l'exercice précédent : la somme des « Montant facturé » ne redonne plus le « Date de facture » de l'en-tête, contrairement à §14.21.11 point 8.
+- **Correction** : la fonction SQL rend déjà `a_la_date` (`jour between p_debut and p_fin`) et la vue ne le lit pas. Trier par `c.a_la_date === true`, avec repli sur `d.debut <= c.jour <= d.fin`, et jamais sur la clé de mois.
+- **Test manquant** : le test « mois partiel » (`tests/charges-page.test.js:392`) passe `lignes: []` et ne couvre donc pas ce cas.
+
+**2. Mineur — `shared/charges-vue.js:406` (dans la plage) — une facture « Non comptée » affiche son montant dans « Montant facturé »**
+- **Reproduit** : un échéancier daté du mois (`compte: false`) rend « Echeancier Non comptée Échéancier du 20 nov. 2026 — 600,00 € ».
+- **Conséquence** : la colonne « Charge du mois » porte bien un tiret, mais les 600 € ne sont pas dans le « Date de facture » de l'en-tête ; la somme annoncée par la spec ne tient pas. Même effet pour une commission déjà comptée ou un doublon non tranché.
+- **Correction** : pour `compte === false`, montant en `muted` ou entre parenthèses, ou tiret. Sinon, écrire dans la spec que les lignes « Non comptée » sont hors somme.
+
+**3. Mineur — `shared/charges-vue.js:397-401` (dans la plage) — un solde lu à 0 s'affiche « solde à payer : 0,00 € »**
+- **Reproduit** : régularisation avec `solde_lu: 0`.
+- **Cause** : `Number.isInteger(0)` est vrai et `solde < 0` est faux.
+- **Correction** : ne rien afficher quand `solde === 0`, ou ajouter un libellé « soldé ».
+
+**4. Mineur — `shared/charges-vue.js:409-413` (dans la plage) — « Charges mensuelles » ne montre aucun état**
+- **Reproduit** : une facture annuelle « À vérifier » datée de juin apparaît en novembre comme « AVerifAilleurs 52,60 € », sans mention.
+- **Conséquence** : l'inventaire de §14.21.11 dit que seul « Vérifiée » est masqué (« les autres états le sont »), alors que `ligneChargeMensuelle` n'émet que `horsTotal`. Le total passe en « Estimation » par `nb_etale_nv` sans que la ligne en cause soit repérable dans le mois.
+- **Correction** : reprendre le badge `e && e !== 'validee'` de `ligneFactureDuMois`, ou corriger l'inventaire si l'omission est voulue (point 8 : « le nom et la charge, rien d'autre »). Les deux phrases de la spec se contredisent ; c'est à Thierry de trancher.
+- **Test manquant** : aucun ne couvre ce cas.
+
+**5. Mineur — `shared/ui.css:2396` (dans la plage) — `.chg-ms { gap: 6px; }` ne s'applique jamais**
+- **Cause** : `.chg-rep ul { …; gap: 4px; }` (ligne 2313, conservée) a une spécificité supérieure (0,1,1 contre 0,1,0).
+- **Indice** : le même piège a été vu pour `.chg-rep .chg-dls { gap: 0; }`, mais pas ici.
+- **Correction** : `.chg-rep .chg-ms { gap: 6px; }`.
+
+**6. Mineur — `shared/ui.css:2387` et `2405` (dans la plage) — les colonnes du détail ne tombent pas sous celles de l'en-tête du mois**
+- **Calcul sur la feuille (non mesuré à l'écran)** : en-tête en `1fr 130px 120px 18px` avec gap 8 et padding 12 ; détail en `1fr 110px 110px` avec gap 10 et padding droit 12. « Montant facturé » se cale au bord droit, sous le chevron, soit environ 26 px à droite de « Date de facture ». Même décalage au téléphone (88/88/16 contre 84/84).
+- **Conséquence** : le commentaire de la vue dit que « les deux colonnes reprennent celles de l'en-tête ».
+- **Correction** : donner à `.chg-dl` la même grille que `.chg-cols` (quatrième colonne vide), ou un `padding-right` de 26 px au détail.
+
+**7. Mineur — `shared/i18n/{fr,en,es}.json` (dans la plage) — trois clés devenues inutiles**
+- `charges.ttc`, `charges.ht` et `charges.tva` n'étaient lues que par les cases retirées. Plus aucune occurrence dans `pages/` ni `shared/` hors i18n ; la fiche utilise les clés `charges.champ_*`.
+- `charges.part_du_mois` a bien été retirée des trois langues.
+- Aucune clé manquante : les trois fichiers portent le même jeu de clés `charges.*`. Aucun texte en dur dans le code ajouté.
+
+**8. Mineur (accessibilité) — `shared/charges-vue.js:303-304` et `426-428` (dans la plage) — les titres de colonnes sont des `div`/`span` sans lien avec les valeurs**
+- **Conséquence** : un lecteur d'écran lit « novembre 2026, 101,92 €, 40,00 € » sans savoir lequel est le prorata. Avant ce commit, chaque montant portait son mot en `<small>`.
+- **Correction** : un libellé `sr-only` dans chaque `.chg-col`, ou un vrai `<table>`.
+- **Vérifié sans défaut** : `aria-expanded` sur le bouton du mois, `<h2 class="sr-only">` (`.sr-only` existe, `ui.css:45`), `#i-chevron` présent dans `icons.svg`, bouton dans un `li` valide.
+
+**9. Mineur (tests) — `tests/charges-page.test.js` (dans la plage)**
+- Le test CSS (ligne 1093) vérifie l'absence de `.chg-haut` et une grille mobile, mais aucun test ne croise les classes émises et la feuille. Le constat 5 passe donc au vert.
+- Non couverts : la somme des deux colonnes du détail contre l'en-tête du mois (invariant de la spec, constats 1 et 2) ; une ligne `compte: false` dans chaque partie ; un solde à 0 ; un état non vérifié en « Charges mensuelles ».
+
+## Vérifié sans constat
+
+- **Gestes** : le clic sur un mois, le clic sur une ligne du détail (ouvre la fiche), « Afficher plus », l'envoi de fichier et les choix d'entité et d'exercice passent par les écouteurs délégués sur la racine (`document.body`), donc indifférents au déplacement du sélecteur d'entité en tête.
+- **Sans entité** : ni sélecteur ni totaux, titre de liste « Toutes les factures ».
+- **Totaux indisponibles** : le sélecteur d'entité reste, celui d'exercice disparaît — comme avant le commit, où il exigeait déjà `tot`. Pas de régression.
+- **Exercice sans facture** : le sélecteur d'exercice et les douze mois restent.
+- **Mensualité de crédit** : toujours sous son mois, en `div` dans le `li`.
+- **Règle « estimation »** : conforme à l'inventaire, et testée dans les deux sens (ligne 216).
+- **« Non lu » et charge à 0** : un TTC nul rend « non lu » dans les deux parties ; une période qui ne touche pas le mois rend 0,00 €.
+- **CSS** : aucun hexa, tous les jetons utilisés existent dans `shared/theme.css`, aucune classe émise par le code ajouté sans style, aucune règle laissée sans émetteur.
+
+**Non mesuré** : au téléphone, colonnes de 88 px avec `white-space: nowrap` — un montant de cinq chiffres ou plus (« 12 345,67 € ») peut déborder ; à regarder en recette.
+````
 
 ## 12. Trace des reviews du lot 2
 
