@@ -69,6 +69,24 @@ Paris relevées à l'écran :
 | ≈ 23:32 → 23:34:51 | appliqué au 23 seul, sur neuf périodes creuses : 20/11→18/12/2026, 04/01→28/01, 31/01→05/02, 08/03→26/03, 10/05→14/05, 18/05→30/06, 01/09→29/10, 02/11→10/11, 15/11→19/11/2027 | 17 dates relues une à une (bornes comprises) : dedans « Séjours longs », dehors aucun ; avril reste « deux jour » ; 19/12, 03/01, 29/01, 16/05, 01/07, 15/08, 30/10 : aucun ; La bulle le 25/11 : aucun |
 | 20/11 00:01 | ajout à « Séjours longs » : −10 % dès 3 nuits (choix de Thierry parmi −10, −15 et −20 %) ; les trois autres paliers inchangés | liste : « 10 % 3 nuits minimum · 25 % À la semaine · +2 règles » ; côté voyageur 09→12/03/2027 298 € au lieu de 330 €, 09→11/03 (2 nuits) 220 € sans remise |
 
+**Hors lot, même nuit, à la demande de Thierry (« enlève le supplément par
+personne à partir de 4 »)** : 20/11 00:17:25 Paris, Channex > canal Airbnb >
+Listing > le 23 > Price settings, « Price per extra guest » 10 → **0** (voyageurs
+inclus 4, prix 85 €, aucune remise ni frais : inchangés). Relu depuis Airbnb
+(Refresh) : 0. Côté voyageur, 09→11/03/2027 : 226 € à 4 voyageurs, 231 € à 6 (la
+taxe de séjour seule). Channex a lancé son `full_sync` de `b56feb44` à 00:19:25
+(`System`, +120 s, comme au §2 ter) ; contrôle après : 284 nuits fermées sur la
+base, **0** ouverte sur le petit-enfant Airbnb.
+
+⚠ **Un second supplément reste, côté HôteSmart** : `properties` du 23 porte
+`included_guests = 4`, `extra_guest_fee = 2` (€ par voyageur et par nuit), et
+`base_price` vide. Les grilles par occupation partent à Channex (plan de base
+`ad0a594e` : 90 € jusqu'à 4, 92 € à 5, 94 € à 6 par défaut), et les petits-enfants
+Airbnb et Booking ne sont mappés qu'à l'occupation 6 : **tout voyageur paie le
+prix à 6**, soit +4 € la nuit (85 € → 89 € vu au calendrier Airbnb). La fiche du
+logement refuse de le changer (`api/channel-property.js` : sans `base_price`,
+409 `grille_non_reconstructible`). Non touché : décision et correctif à part.
+
 Le même soir, Thierry a baissé le prix de la nuit (le calendrier Airbnb affiche
 89 € le 14/12, 94 € avant). Airbnb montre alors un « Prix initial » barré même
 sur 2 nuits en décembre (14→16/12 : 184 € au lieu de 207 €) : c'est la baisse de
