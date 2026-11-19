@@ -635,9 +635,15 @@ par commit »). Chaque fichier cité est dans le diff de la plage ;
 ## 11. Pas d'avis du voyageur (18 novembre 2026)
 
 **Décision de Thierry du 18 novembre 2026 (11:58), option A.** Un avis Airbnb
-encore masqué **plus de 14 jours après sa réception** affiche « Pas d'avis du
-voyageur. » au lieu de « Avis déposé, masqué par Airbnb jusqu'à votre
+encore masqué et vide **plus de 16 jours après sa réception** affiche « Pas
+d'avis du voyageur. » au lieu de « Avis déposé, masqué par Airbnb jusqu'à votre
 évaluation. ». Avant ce délai, rien ne change.
+
+**Le délai : 14 jours + 2 jours de marge — décision de Thierry du 19 novembre
+2026 (12:11), option B.** La relecture a relevé qu'à 14 jours tout juste, un
+voyageur qui a écrit au dernier moment serait annoncé « Pas d'avis » le temps
+que Channex nous transmette l'avis révélé. Avec la marge, plus aucune fausse
+annonce ; la mention « masqué » reste deux jours de plus.
 
 **Pourquoi.** L'objet d'avis Channex naît au **départ** du voyageur, masqué et
 vide, **qu'il écrive ou non** (docs/kb/avis-voyageurs.md). Sa réception date donc
@@ -649,13 +655,21 @@ alors que l'avis voisin, révélé chez nous, y est. À cette date, **42 cartes*
 « avis déposé » y était faux.
 
 **Ce qui change.**
-- `lib/avis/cartes.js` : `avisPourCarte` porte `sans_avis`, vrai pour un avis
-  masqué reçu il y a plus de 14 jours, calculé avec le `maintenant` déjà injecté.
-  Un avis sans date de réception ne conclut rien (`false`). L'avis reste
-  `masque` : rien de lui ne sort de plus.
+- `lib/avis/cartes.js` : `avisPourCarte` porte `sans_avis`, calculé avec le
+  `maintenant` déjà injecté. Il n'est vrai que sur preuve, trois conditions
+  strictes : masqué au sens strict (`cache === true` ; un `cache` absent, que
+  `estMasque` traite comme masqué par prudence, ne prouve rien), objet vide (ni
+  note ni texte, par `voyageurAEcrit`), et réception lisible il y a plus de
+  16 jours. Le délai est `FENETRE_AIRBNB_MS` de `lib/avis/naissance.js` (pas une
+  copie) plus 2 jours, et la réception se lit par `instantUTC`, comme là-bas.
+  L'avis reste `masque` : rien de lui ne sort de plus.
 - `core/avis/cartes.js` : la ligne grise « Pas d'avis du voyageur. », sans
   cadenas (il n'y a rien à dévoiler), sur la carte et sur la ligne « À traiter ».
 - Une clé i18n (`avis.sans_avis`, fr/en/es).
+- `docs/kb/avis-voyageurs.md` §12 : la phrase « Airbnb révèle l'objet au bout de
+  14 jours même si le voyageur n'a rien écrit » est corrigée — la mesure du
+  18 novembre dit l'inverse. Même correction dans le commentaire d'`estObjetVide`
+  et dans un commentaire de test.
 
 **Inventaire.** Rien n'est retiré. Aucun chiffre ne change : un avis masqué
 n'entrait déjà dans aucun compte (total, note, propreté).
@@ -665,8 +679,49 @@ requête et aucun octet en plus, à un booléen près par avis. Pas de cache
 touché. Aucune lecture nouvelle. Le budget de l'écran est inchangé
 (`Server-Timing` reste à 10).
 
-**Tests.** `tests/avis-cartes-endpoint.test.js` vérifie qu'un avis masqué à
-15 jours est `sans_avis`, et qu'un avis à 13 jours, sans date ou révélé ne l'est
-pas. `tests/avis-cartes-dom.test.js` vérifie le texte sans cadenas, sur la carte
-et sur la ligne « À traiter ». Les trois tests neufs rougissent contre `main`
-(contre-épreuve par `git archive`).
+**Tests.** `tests/avis-cartes-endpoint.test.js` vérifie, par l'endpoint, qu'un
+avis masqué à 16,5 jours est `sans_avis`, et qu'un avis à 15,5 jours, sans date
+ou révélé ne l'est pas (âges à un demi-jour du seuil, pour que ni la granularité
+ni l'horloge décalée ne les fassent basculer). Un test sur la fonction pure, à
+`maintenant` figé, tient le bord : 16 jours tout juste → non, une seconde de
+plus → oui ; une date sans fuseau lue en UTC ; `cache` absent, objet avec note,
+objet avec texte, avis Booking → non. `tests/avis-cartes-dom.test.js` vérifie
+le texte sans cadenas, sur la carte et sur la ligne « À traiter ».
+
+Contre-épreuves : les quatre tests neufs rougissent contre `main` ; contre
+`d3adfb25` (le seuil à 14 jours), les deux tests de l'endpoint rougissent, les
+deux tests d'écran passent — attendu, l'écran n'a pas changé. Cinq mutations,
+chacune rougit le test du bord (lancé en `TZ=Europe/Paris`) : retirer
+`cache === true`, retirer l'exigence d'objet vide, lire la date par
+`Date.parse` au lieu d'`instantUTC`, `>` devenu `>=`, marge à zéro.
+
+### Relecture (19 novembre 2026)
+
+Agent distinct, lecture seule. Arbre `/home/claude/hotesmart-avis-sans-avis`,
+branche `avis-sans-avis`, plage
+`1a5ba3a56651769e11e552221da3b72dec8c13ee..d3adfb25f4f5b565165df9dd5babe273d3adfff0`.
+**Aucun constat de sécurité** : rien de l'avis masqué ne sort de plus, pas
+d'injection dans le rendu.
+
+⚠ **Le rapport n'est PAS recopié tel quel ici, contrairement à la règle.** Je ne
+l'ai pas écrit sur disque à son retour, et le contexte de ma session a été
+compacté avant que je le recopie : son texte intégral est perdu. Ce qui suit
+est mon relevé des cinq constats, pas le texte de la relecture. Déclaré au chef
+de file à la remise.
+
+1. Le seuil de 14 jours tout juste peut annoncer « Pas d'avis » à un voyageur
+   qui a écrit au dernier moment, le temps de la transmission Channex. Question
+   produit → posée à Thierry, option B (2 jours de marge).
+2. `sans_avis` héritait de `estMasque`, qui traite un `cache` absent comme
+   masqué, et ne vérifiait pas que l'objet est vide. → exige `cache === true` et
+   un objet vide (`voyageurAEcrit`).
+3. Le délai et la lecture de la date étaient recopiés au lieu d'être importés :
+   `14 * JOUR_MS` et `Date.parse`, qui lit une date sans fuseau dans celui de la
+   machine. → `FENETRE_AIRBNB_MS` et `instantUTC` de `lib/avis/naissance.js`.
+4. Le commentaire d'`estObjetVide` et la KB (§12) affirmaient qu'Airbnb révèle
+   l'objet vide à 14 jours, ce que la mesure du 18 novembre contredit. → corrigés.
+5. Le test HTTP lit l'horloge et ne peut pas viser le bord ; son avis « vieux »
+   était à un jour du seuil. → test du bord sur la fonction pure à `maintenant`
+   figé, et âges à un demi-jour du seuil.
+
+Corrigés sans nouvelle relecture (aucun constat de sécurité).

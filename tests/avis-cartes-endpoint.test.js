@@ -225,8 +225,8 @@ test('SECURITE : une EVALUATION d un autre bien n apparait pas chez un membre li
 test('LE TEST QUI COMPTE : un objet d avis VIDE ne fait PAS de carte, et ne compte pas', async () => {
   // Decision de Thierry du 20 octobre 2026 : « un objet d'avis vide ne compte
   // nulle part (compte, ratio, cartes), meme regle que Logements ». L'objet
-  // Channex nait cache et vide ; Airbnb le revele a 14 jours MEME si le
-  // voyageur n'a rien ecrit. Il avait jusqu'ici une carte a lui, « 1 avis
+  // Channex nait cache et vide ; s'il arrive REVELE et vide (la mesure du
+  // 18 novembre 2026 dit qu'il reste plutot masque), il avait une carte a lui, « 1 avis
   // recu » dans la tuile, et « 0/10 » affiche — pendant que /logements disait
   // « Aucun avis » pour le meme bien.
   const VIDE = avisDe('objet-vide', { overall_score: null, content: null, content_public: null, is_hidden: false })
@@ -404,14 +404,18 @@ test('avant la migration : la page reste juste, SANS traduction (une relecture s
   assert.doesNotMatch(String(lectures[1]._col), /avis_traductions/)
 })
 
-// ─── Pas d'avis du voyageur (décision de Thierry du 18 novembre 2026) ──────
-// Un avis Airbnb masqué plus de 14 jours après sa réception est un voyageur
-// qui n'a rien écrit : l'objet Channex naît au départ, vide. La carte le dit ;
-// rien de l'avis ne sort de plus, et aucun chiffre ne change.
-test('LE TEST QUI COMPTE : masqué depuis plus de 14 jours → sans_avis ; 13 jours, révélé ou sans date → non', async () => {
+// ─── Pas d'avis du voyageur (décisions de Thierry des 18 et 19 novembre 2026)
+// Un avis Airbnb encore masqué et vide plus de 16 jours après sa réception
+// (fenêtre Airbnb de 14 jours + 2 jours de marge) est un voyageur qui n'a rien
+// écrit : l'objet Channex naît au départ, vide. La carte le dit ; rien de l'avis
+// ne sort de plus, et aucun chiffre ne change.
+// Les âges sont pris à DEMI-JOUR du seuil, pour que la granularité de `jour()`
+// et l'horloge décalée ne les fassent jamais basculer ; le bord exact, lui, se
+// teste plus bas sur la fonction pure, à `maintenant` figé.
+test('LE TEST QUI COMPTE : masqué depuis plus de 16 jours → sans_avis ; 15,5 jours, révélé ou sans date → non', async () => {
   preparer({ avis: [
-    avisDe('vieux', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-15), booking_uid: 'u-v' }),
-    avisDe('jeune', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-13), booking_uid: 'u-j' }),
+    avisDe('vieux', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-16.5), booking_uid: 'u-v' }),
+    avisDe('jeune', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-15.5), booking_uid: 'u-j' }),
     avisDe('sansdate', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: null, booking_uid: 'u-s' }),
     avisDe('revele', { received_at: jour(-30), booking_uid: 'u-r' })
   ] })
@@ -421,7 +425,36 @@ test('LE TEST QUI COMPTE : masqué depuis plus de 14 jours → sans_avis ; 13 jo
   assert.equal(a.vieux.sans_avis, true)
   assert.equal(a.vieux.masque, true, 'toujours masqué : rien de lui ne sort')
   assert.equal(a.vieux.note_sur_5, null)
-  assert.equal(a.jeune.sans_avis, false, 'dans les 14 jours, il peut encore arriver')
+  assert.equal(a.jeune.sans_avis, false, 'dans la marge de transmission, il peut encore arriver')
   assert.equal(a.sansdate.sans_avis, false, 'sans date, on ne conclut rien')
   assert.equal(a.revele.sans_avis, false)
+})
+
+// Le bord exact, sur la fonction pure, à `maintenant` FIGÉ (constat 5 de la
+// relecture : le test HTTP ci-dessus lit l'horloge, il ne peut pas viser le bord).
+test('le bord : 16 jours tout juste → non ; une seconde de plus → oui ; et les trois conditions strictes', () => {
+  const { assemblerCartes } = require('../lib/avis/cartes')
+  const RECU = '2026-11-01T10:00:00Z'
+  const T0 = Date.parse(RECU)
+  const SEIZE_JOURS = 16 * 86400000
+  const masque = (id, extra = {}) => ({ id, provider: 'channex', ota: 'airbnb', cache: true, overall_score: 0, content: null, content_public: null, received_at: RECU, booking_uid: `u-${id}`, ...extra })
+  const drapeau = (a, maintenant) => {
+    const s = assemblerCartes({ avis: [a], maintenant })
+    const vu = [...s.attente, ...s.recents, ...s.anciens].flatMap(c => c.avis).find(x => x.id === a.id)
+    assert.ok(vu, `l’avis ${a.id} a sa carte`)
+    return vu.sans_avis
+  }
+  assert.equal(drapeau(masque('bord'), T0 + SEIZE_JOURS), false, '16 jours tout juste : pas encore')
+  assert.equal(drapeau(masque('bord'), T0 + SEIZE_JOURS + 1000), true, 'une seconde de plus')
+  assert.equal(drapeau(masque('quinze'), T0 + 15 * 86400000), false, 'dans la marge de deux jours')
+  // Une date SANS fuseau est en UTC (instantUTC), pas dans le fuseau de la machine.
+  assert.equal(drapeau(masque('sansfuseau', { received_at: '2026-11-01T10:00:00' }), T0 + SEIZE_JOURS + 1000), true)
+  assert.equal(drapeau(masque('sansfuseau', { received_at: '2026-11-01T10:00:00' }), T0 + SEIZE_JOURS), false)
+  // Masqué par prudence seulement (`cache` absent) : on ne conclut rien.
+  assert.equal(drapeau(masque('doute', { cache: undefined }), T0 + 30 * 86400000), false)
+  // Un objet masqué qui porte une note ou un texte n'est pas vide.
+  assert.equal(drapeau(masque('note', { overall_score: 8 }), T0 + 30 * 86400000), false)
+  assert.equal(drapeau(masque('texte', { content: 'Super' }), T0 + 30 * 86400000), false)
+  // Booking n'a pas de double aveugle : jamais « pas d'avis », même avec `cache` vrai.
+  assert.equal(drapeau(masque('booking', { ota: 'booking', overall_score: 8 }), T0 + 30 * 86400000), false)
 })

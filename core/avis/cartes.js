@@ -274,9 +274,9 @@ function texteRepliable (texte, cle, ctx) {
 // passent ensemble (shared/avis-traduction.js).
 function blocSonAvis (a, ctx, cle) {
   const { T } = ctx
-  // Masque depuis plus de 14 jours : le voyageur n'a rien ecrit (decision de
-  // Thierry du 18 novembre 2026). Ni cadenas ni « depose » : il n'y a rien a
-  // devoiler.
+  // Masque et vide depuis plus de 16 jours : le voyageur n'a rien ecrit
+  // (decisions de Thierry des 18 et 19 novembre 2026 ; la regle vit dans
+  // lib/avis/cartes.js). Ni cadenas ni « depose » : il n'y a rien a devoiler.
   if (a.masque && a.sans_avis) return `<p class="avp-gris">${ECHAPPER(T('avis.sans_avis'))}</p>`
   if (a.masque) return `<p class="avp-gris">${ICONE('i-lock')}${ECHAPPER(T('avis.masque'))}</p>`
   const texte = a.texte || ''
