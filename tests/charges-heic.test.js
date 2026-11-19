@@ -16,7 +16,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { heicEnJpeg, decoderPremiere, reduire, ConversionImpossible, COTE_MAX, PIXELS_MAX } = require('../lib/charges/heic')
+const { heicEnJpeg, convertirIsole, decoderPremiere, reduire, ConversionImpossible, PanneConversion, COTE_MAX, PIXELS_MAX } = require('../lib/charges/heic')
 const { typeReel } = require('../lib/charges/regles')
 
 const ECHANTILLON = fs.readFileSync(path.join(__dirname, 'fixtures', 'charges', 'deux-couleurs.heic'))
@@ -96,4 +96,51 @@ test('LE TEST QUI COMPTE (mémoire) : une photo qui DÉCLARE plus de 50 Mpx est 
   // Le refus traverse heicEnJpeg tel quel : le motif reste lisible au journal.
   await assert.rejects(heicEnJpeg(Buffer.alloc(1), { max: 1e7 }, { decode: (o) => decoderPremiere(o, async () => conteneur(20000, 20000)) }),
     (e) => e.motif === 'trop_grande')
+})
+
+// ─── Le fil à usage unique (review du lot, constat de sécurité 1) ──────────
+// Le tas WebAssembly de libheif ne rétrécit jamais, et un fichier illisible le
+// faisait fuir (≈ 12 Mo par échec de 10 Mo) jusqu'à geler l'instance. La
+// conversion tourne donc dans un fil jeté après chaque photo. Mesuré à la main
+// (/tmp, 30 puis 90 fichiers pourris de 10 Mo d'affilée dans le même
+// processus) : 175 puis 165 Mo de mémoire, sans croissance, et une vraie
+// photo convertie juste après ; avant la correction, la review mesurait le
+// tas de 32 à 392 Mo sur 30 échecs, puis l'arrêt du module vers 200.
+
+test('LE TEST QUI COMPTE : convertirIsole convertit un vrai HEIC ET un vrai HEIF (`mif1`) dans un fil, et rend le JPEG', async () => {
+  for (const nom of ['deux-couleurs.heic', 'deux-couleurs-mif1.heif']) {
+    const sortie = await convertirIsole(fs.readFileSync(path.join(__dirname, 'fixtures', 'charges', nom)), { max: 7 * 1024 * 1024 })
+    const img = jpeg.decode(sortie, { useTArray: true })
+    assert.deepEqual([img.width, img.height], [96, 64], nom)
+  }
+})
+
+test('dans le fil, un fichier illisible reste un REFUS (ConversionImpossible) ; un délai dépassé est une PANNE', async () => {
+  const pourri = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic'), Buffer.alloc(300, 7)])
+  await assert.rejects(convertirIsole(pourri, { max: 1e7 }), (e) => e instanceof ConversionImpossible && e.motif === 'decodage')
+  await assert.rejects(convertirIsole(ECHANTILLON, { max: 1e7, delaiMs: 1 }), (e) => e instanceof PanneConversion && e.motif === 'delai')
+})
+
+test('un module absent n\'est pas une photo illisible : PanneConversion (review, constat 2)', async () => {
+  const absent = async () => { throw Object.assign(new Error('Cannot find module'), { code: 'MODULE_NOT_FOUND' }) }
+  await assert.rejects(heicEnJpeg(ECHANTILLON, { max: 1e7 }, { decode: absent }), (e) => e instanceof PanneConversion && e.motif === 'module_absent')
+})
+
+test('LE TEST QUI COMPTE (mémoire) : le fil PRINCIPAL ne charge jamais le décodeur, même après des échecs', () => {
+  // Un processus neuf : ce fichier-ci charge le décodeur pour ses propres tests.
+  const { spawnSync } = require('node:child_process')
+  const script = `
+    const { convertirIsole } = require(${JSON.stringify(path.join(__dirname, '..', 'lib', 'charges', 'heic'))})
+    const fs = require('fs')
+    ;(async () => {
+      const pourri = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic'), Buffer.alloc(300, 7)])
+      for (let i = 0; i < 3; i++) { try { await convertirIsole(pourri, { max: 1e7 }) } catch (e) {} }
+      const j = await convertirIsole(fs.readFileSync(${JSON.stringify(path.join(__dirname, 'fixtures', 'charges', 'deux-couleurs.heic'))}), { max: 1e7 })
+      const charge = Object.keys(require.cache).some(k => /heic-decode|libheif-js|jpeg-js/.test(k))
+      process.stdout.write(JSON.stringify({ jpeg: j.length > 0, charge }))
+    })()`
+  const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 60000 })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), { jpeg: true, charge: false })
+  assert.doesNotMatch(r.stdout + r.stderr, /Could not parse HEIF/, 'les messages du décodeur ne vont pas aux journaux')
 })
