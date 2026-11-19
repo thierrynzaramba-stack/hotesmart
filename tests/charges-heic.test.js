@@ -144,3 +144,73 @@ test('LE TEST QUI COMPTE (mémoire) : le fil PRINCIPAL ne charge jamais le déco
   assert.deepEqual(JSON.parse(r.stdout), { jpeg: true, charge: false })
   assert.doesNotMatch(r.stdout + r.stderr, /Could not parse HEIF/, 'les messages du décodeur ne vont pas aux journaux')
 })
+
+// ─── Un seul fil à la fois (seconde review, constat de sécurité 1) ─────────
+// Chaque fil a son propre tas WebAssembly : trois photos de 48 Mpx en même
+// temps montaient à 2,1 Go (mesure de la review). Un double de `Worker` compte
+// les fils vivants et les `terminate`.
+const { EventEmitter } = require('node:events')
+function fabriqueDeFils ({ repond = 20, jamais = false } = {}) {
+  const etat = { vivants: 0, maxVivants: 0, crees: 0, termines: 0 }
+  class FauxFil extends EventEmitter {
+    constructor () {
+      super()
+      etat.crees++; etat.vivants++
+      etat.maxVivants = Math.max(etat.maxVivants, etat.vivants)
+      this.mort = false
+      this.stdout = { resume () {} }
+      this.stderr = { resume () {} }
+    }
+    postMessage () {
+      if (jamais) return
+      setTimeout(() => { if (!this.mort) this.emit('message', { ok: true, jpeg: Uint8Array.from([0xFF, 0xD8, 0xFF]) }) }, repond)
+    }
+    async terminate () { if (!this.mort) { this.mort = true; etat.vivants--; etat.termines++ } }
+  }
+  return { Worker: FauxFil, etat }
+}
+
+test('LE TEST QUI COMPTE (mémoire) : trois conversions demandées ENSEMBLE passent l\'une après l\'autre — jamais deux fils vivants', async () => {
+  const f = fabriqueDeFils({ repond: 30 })
+  const r = await Promise.all([1, 2, 3].map(() => convertirIsole(Buffer.from('x'), { max: 1e7 }, { Worker: f.Worker })))
+  assert.equal(r.length, 3)
+  assert.deepEqual([f.etat.crees, f.etat.maxVivants, f.etat.termines, f.etat.vivants], [3, 1, 3, 0])
+})
+
+test('au-delà d\'une file de 2 en attente, la photo est refusée « occupé » (une panne : 503, rien d\'effacé)', async () => {
+  const { FILE_MAX } = require('../lib/charges/heic')
+  const f = fabriqueDeFils({ repond: 40 })
+  const appels = Array.from({ length: FILE_MAX + 2 }, () => convertirIsole(Buffer.from('x'), { max: 1e7 }, { Worker: f.Worker }).then(() => 'ok', (e) => e.motif))
+  assert.deepEqual(await Promise.all(appels), ['ok', 'ok', 'ok', 'occupe'])
+  assert.equal(f.etat.maxVivants, 1)
+})
+
+test('LE TEST QUI COMPTE : un fil qui ne répond jamais est TUÉ au délai (seconde review, constat 2), et la file repart', async () => {
+  const muet = fabriqueDeFils({ jamais: true })
+  await assert.rejects(convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 30 }, { Worker: muet.Worker }), (e) => e instanceof PanneConversion && e.motif === 'delai')
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual([muet.etat.termines, muet.etat.vivants], [1, 0])
+  const f = fabriqueDeFils()
+  assert.equal((await convertirIsole(Buffer.from('x'), { max: 1e7 }, { Worker: f.Worker })).length, 3, 'la suivante passe')
+})
+
+test('une photo qui attend son tour plus que son délai part en panne SANS lancer de fil ; le délai court depuis l\'appel', async () => {
+  const lent = fabriqueDeFils({ repond: 80 })
+  const premiere = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 1000 }, { Worker: lent.Worker })
+  const t0 = Date.now()
+  const seconde = convertirIsole(Buffer.from('x'), { max: 1e7, delaiMs: 30 }, { Worker: lent.Worker })
+  await assert.rejects(seconde, (e) => e.motif === 'delai')
+  assert.ok(Date.now() - t0 < 70, 'refusée à son délai, pas à la fin de la première')
+  await premiere
+  assert.equal(lent.etat.crees, 1, 'la seconde n\'a jamais eu de fil')
+})
+
+test('la cause d\'une panne du fil est gardée pour le journal (seconde review, constat 3)', async () => {
+  class FilEnErreur extends EventEmitter {
+    constructor () { super(); this.stdout = { resume () {} }; this.stderr = { resume () {} } }
+    postMessage () { setTimeout(() => this.emit('error', new Error('Cannot find module jpeg-js')), 5) }
+    async terminate () {}
+  }
+  await assert.rejects(convertirIsole(Buffer.from('x'), { max: 1e7 }, { Worker: FilEnErreur }),
+    (e) => e instanceof PanneConversion && e.motif === 'fil_en_erreur' && /jpeg-js/.test(e.detail))
+})

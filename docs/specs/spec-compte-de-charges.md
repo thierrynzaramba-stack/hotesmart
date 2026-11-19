@@ -1987,6 +1987,11 @@ Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 
     C'est le correctif du constat de sécurité 1 de la review : le tas
     WebAssembly de libheif ne rétrécit jamais, et un fichier illisible le
     faisait fuir jusqu'à geler l'instance (voir la review plus bas).
+  - ⚠ **Un seul fil à la fois par instance**, et deux photos au plus en
+    attente : au-delà, « occupé » (503, rien d'effacé). Le délai de 15 s court
+    depuis l'appel, attente comprise. C'est le correctif du constat de
+    sécurité de la seconde review : chaque fil a son propre tas, et trois
+    photos de 48 Mpx converties ENSEMBLE montaient à 2,1 Go.
   - Le JPEG **remplace** la photo au même chemin (`upload` avec `upsert`).
   - Ensuite, l'empreinte, les doublons, la lecture IA immédiate, le cron et la
     consultation ne voient qu'un JPEG. **Aucun HEIC n'est gardé.**
@@ -2035,8 +2040,11 @@ Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 
   fil principal, **1,9 s** dans le fil (+185 ms), JPEG de 819 Ko, **373 Mo**
   de mémoire au plus ;
 - à la borne, mesuré par la review : 48 Mpx (7 Mo) en 2,7 s et 789 Mo au
-  plus ; 49 Mpx bruité (12,5 Mo) en 5,7 s et 876 Mo ; trois conversions
-  simultanées en 10,4 s et 1,1 Go ;
+  plus ; 49 Mpx bruité (12,5 Mo) en 5,7 s et 876 Mo ;
+- **trois photos de 3 Mo demandées ENSEMBLE** : elles passent l'une après
+  l'autre, à 2,0 s, 3,9 s et 5,7 s, avec **400 Mo** de mémoire au plus (sans
+  la file, la seconde review mesurait 2,1 Go pour trois photos de 48 Mpx) ;
+  une quatrième en même temps est refusée « occupé » ;
 - **30 puis 90 fichiers pourris de 10 Mo d'affilée** dans le même processus :
   175 puis 165 Mo de mémoire, **sans croissance**, et une vraie photo
   convertie juste après. Avant le fil, la review mesurait le tas de 32 à
@@ -2044,7 +2052,8 @@ Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 
 
 **Le budget de la fonction** `api/charges.js` (60 s), au pire :
 - téléchargement du fichier : 8,5 s au plus ;
-- conversion : 15 s au plus (le délai du fil ; 6 s mesurées à la borne) ;
+- conversion : 15 s au plus, attente dans la file comprise (6 s mesurées à
+  la borne pour une photo seule) ;
 - remplacement dans le stockage : 8 s au plus ;
 - lecture IA : 20 s au plus.
 
@@ -2252,6 +2261,123 @@ commit »).
 | 4 | Deux tests ajoutés : un HEIF `mif1` qui passe dans `confirmerEnvoi`, et un remplacement qui dépasse son délai (rend 503, rien d'effacé ; délai injectable). La conversion réelle d'un HEIF `mif1` est aussi testée, avec un échantillon dérivé de celui du HEIC. |
 | 5 | Contrôle avec `coalesce(…, false)`. Le détail distingue « bucket absent » de « liste vide : tout type accepté ». Mesuré sur Postgres 16 dans quatre états : avant, après, liste vide, bucket absent. |
 | 6 | Mesures à la borne, budget de la fonction au pire (51,5 s), taille réelle du décodeur (2,04 Mo). La question des brevets HEVC est posée à Thierry dans la spec. |
+
+#### Seconde review du lot HEIC, limitée aux correctifs (19 novembre 2026)
+
+- **Arbre** : `/home/claude/hotesmart-heic` ; **branche** :
+  `charges-heic-serveur` ; **plage** :
+  `8680ab564b0ae2295fce20f1358c5bc4a8de3e4b..9e20c30105b2f37ff54b087c6c4010584ab67610`.
+- **Ce que la review dit avoir lu** : `9e20c30105b2f37ff54b087c6c4010584ab67610`,
+  et 9 fichiers.
+- **Confrontation** : ces 9 fichiers sont exactement ceux de
+  `git diff --name-only` sur la plage.
+
+Réponse de la review, recopiée telle quelle :
+
+````
+**SHA de tête lu :** `9e20c30105b2f37ff54b087c6c4010584ab67610` (arbre `/home/claude/hotesmart-heic`, branche `charges-heic-serveur`). `git status` est vide avant et après : rien n'a été modifié dans l'arbre.
+
+**`git diff --name-only 8680ab56..9e20c301` :**
+```
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/heic-fil.js
+lib/charges/heic.js
+migrations/2026-11-19-controle-charges-heic.sql
+tests/charges-heic.test.js
+tests/charges-writer.test.js
+tests/fixtures/charges/deux-couleurs-mif1.heif
+```
+
+## Constats
+
+### 1. SÉCURITÉ (déni de service), créé par le correctif — aucune limite au nombre de fils simultanés
+**Où :** `lib/charges/heic.js:156-185` (chaque appel lance son propre fil, sans limite) ; chiffre périmé dans `docs/specs/spec-compte-de-charges.md:2038`.
+
+**Le problème.** Avant le correctif, les décodages passaient l'un après l'autre et se partageaient un seul tas WebAssembly. Maintenant, chaque conversion a son propre tas, et elles tournent toutes en parallèle. La mémoire grandit donc avec le nombre de conversions simultanées. Mesures dans un seul processus :
+
+| Cas | Avant (8680ab5) | Après (9e20c30) |
+|---|---|---|
+| 3 photos de 48 Mpx (`p48.heic`) en même temps | 807 Mo, toutes converties | **2 103 Mo**, au-dessus des 2 Go d'une fonction |
+| 6 photos de 12 Mpx en même temps (2 cœurs) | 555 Mo, toutes converties en 12,2 s | 942 Mo, **les 6 en 503 `delai`** |
+
+**Scénario.** N'importe quel titulaire ouvre 3 envois de photos 48 Mpx valides (≤ 10 Mo chacune), puis lance 3 `confirmer` en parallèle. Si l'instance Vercel sert plusieurs requêtes à la fois (« Fluid compute »), elle tombe en manque de mémoire avec les requêtes des autres hôtes. C'est la même famille que le constat 1. Je n'ai pas pu vérifier ce réglage : il ne figure pas dans `vercel.json` et se règle dans le tableau de bord. Sans lui, il ne reste que la ligne périmée de la spec.
+
+**Correction.**
+- Une file au niveau du module : **un seul fil actif par instance**, très peu de requêtes en attente au-delà. Le délai de 15 s compte **depuis l'appel**, attente comprise, pour que la fonction reste sous 60 s. File pleine → `PanneConversion('occupe')`, donc 503.
+- Prototype mesuré (file non bornée) : 3 × 48 Mpx → 890 Mo, toutes converties ; 6 × 12 Mpx → 439 Mo, toutes converties.
+- Ajouter un test : 3 appels simultanés → jamais plus d'un fil en vie.
+- Corriger la ligne 2038 de la spec.
+
+### 2. MINEUR — aucun test ne vérifie que le fil est tué au délai
+**Où :** `tests/charges-heic.test.js:118`, pour la mutation de `lib/charges/heic.js:170`.
+
+Si on retire `fil.terminate()`, la suite reste au vert. Or un fichier qui ferait tourner le décodeur sans fin garderait alors un fil qui consomme du processeur au-delà des 15 s.
+
+**Correction.** Après le refus pour délai, vérifier que le fil est bien sorti, par exemple avec un `Worker` injecté qui compte les `terminate`. (Retirer `clearTimeout` ne fait rougir aucun test non plus, mais c'est sans effet sur le fonctionnement.)
+
+### 3. MINEUR — la cause d'une panne du fil n'apparaît nulle part
+**Où :** `lib/charges/heic.js:179` (`'error'` jette l'erreur) et `lib/charges/heic-fil.js:19` (`panne: 'erreur'` sans message). Comme la sortie d'erreur du fil est elle aussi jetée, un défaut réel dans le fil (par exemple `jpeg-js` absent) se lit seulement « PanneConversion erreur ».
+
+**Scénario.** Des 503 qui se répètent, impossibles à diagnostiquer.
+
+**Correction.** Faire suivre `String(e.message).slice(0, 200)` dans le message du fil et dans `PanneConversion`, puis l'écrire dans le `console.error` de `confirmerEnvoi`.
+
+### 4. MINEUR (cosmétique) — le contrôle SQL ne dit rien pour une liste `{}`
+**Où :** `migrations/2026-11-19-controle-charges-heic.sql:18-21`. Une liste `{}` rend bien `ok = f`, mais avec un détail vide. Supabase traite probablement `{}` comme « tout type accepté », comme `null`.
+
+**Correction.** `case when count(*) = 0 … when coalesce(max(cardinality(allowed_mime_types)), 0) = 0 then 'liste vide : tout type accepte' …`
+
+## Réponses aux questions
+
+**1. Le constat 1 est fermé pour des conversions qui se suivent.**
+- 210 fichiers pourris de 10 Mo d'affilée (au-delà des ~200 où le module s'arrêtait avant) : la mémoire du processus reste à 170 Mo dès la 70e conversion, puis ne bouge plus. Les 210 rendent `ConversionImpossible:decodage`, environ 159 ms chacun. Une vraie photo de 12 Mpx se convertit juste après.
+- 45 vraies photos d'affilée : la mémoire oscille entre 310 et 450 Mo sans monter. Ce qui reste est gardé par l'allocateur, pas une fuite.
+- Le fil principal ne charge jamais le décodeur : `require.cache` est vide de `heic-decode`, `libheif` et `jpeg-js`.
+- Délai à 300 ms, 10 fois : refus `delai` à 300-303 ms, et le nombre de fils du processus revient à 7. Le fil principal continue de tourner (57 battements sur 60 attendus). Aucune ressource ne reste ouverte et le processus sort aussitôt.
+- Plusieurs conversions simultanées : c'est le constat 1 ci-dessus.
+
+**2. Les autres points demandés sont sans défaut.**
+- **Panne contre refus.** Toute erreur du décodeur dans un fil neuf reste un 422, puisque le fil ne sert qu'à cette photo. Pour obtenir un 503 à chaque essai, il faudrait un fichier qui dépasse 15 s à lui seul. Aux bornes actuelles, le pire mesuré est 5,7 s (photo de 49 Mpx bruitée, 12,5 Mo). Un 503 répété n'efface rien, la ligne `envoi` compte dans le plafond de 30 envois ouverts, et la purge quotidienne la reprend : c'est acceptable. Seul reste possible le fait de reconfirmer sans fin le même identifiant, puisque rien ne freine `confirmer` ; la file du constat 1 en borne le coût.
+- **Transfert du tampon.** L'appelant garde ses octets intacts (vérifié avec `equals`). La copie coûte environ 6 ms pour 10 Mo, et elle évite de transférer la réserve partagée des petits tampons Node.
+- **Course de `abandonner`.** La ligne est effacée d'abord, avec `select('id')`, et le fichier seulement si la ligne est partie : c'est correct.
+- **Traçage Vercel.** `@vercel/nft` 0.29, lancé sur `api/charges.js`, embarque `lib/charges/heic-fil.js`, `heic-decode`, `libheif-js/libheif-wasm/libheif-bundle.js` et `jpeg-js`. `require.resolve` suffit.
+
+**3. Les tests neufs mordent.**
+- Les nouveaux tests, rejoués sur le code d'avant (`8680ab56`) : 6 rouges.
+- Ceux du HEIF `mif1` et du délai de remplacement passent sur le code d'avant. C'est attendu : ils ferment des trous de mutation, pas des défauts.
+- Mutations sur la tête, chacune rougit au moins un test : HEIF non converti, `r.delai` ignoré, conversion dans le fil principal, motif rendu comme une panne, ancien ordre de `abandonner`.
+- Mutations qui restent au vert : retrait de `terminate` (constat 2) et de `clearTimeout`.
+- `charges-heic` et `charges-writer` sur la tête : 74 sur 74.
+
+**4. Le contrôle SQL corrigé est juste** (base copiée de t11, effacée ensuite). Il rend `f` avant la migration, `t` après, et `f` pour une liste `null` (« liste vide : tout type accepte »), une liste `{}` (détail vide, constat 4), un doublon, un bucket public, une taille limite `null` ou un bucket absent (« bucket absent »). Ligne la plus longue : 48 caractères.
+
+## Vérifié sans constat
+- Fil à usage unique : pas de fuite en série, fil et minuteur libérés au délai, décodeur absent du fil principal.
+- Classement panne / refus, y compris un module absent (503) et une erreur de création du fil (503, sans minuteur laissé derrière).
+- Les messages de libheif ne vont plus aux journaux.
+- Tampon de l'appelant intact ; `abandonner` sans course.
+- Délai injectable de `remplacerFichier`.
+- Traçage Vercel du fil et de ses dépendances.
+- Contrôle SQL dans tous les états testés.
+````
+
+**Corrections.**
+
+⚠ **Elles ne passent pas de troisième review.** La règle du dépôt en
+autorise deux sur un lot qui ne touche pas l'envoi au voyageur (« une review
+par commit », CLAUDE.md). Le correctif du constat 1 est donc **mesuré et
+testé, mais pas relu**. Ce fait est remis au chef de file et à Thierry ; c'est
+à eux de décider d'une relecture supplémentaire.
+
+| Constat | Correction |
+|---|---|
+| 1 | Une file au niveau du module : **un seul fil vivant par instance**, deux photos au plus en attente. Au-delà, `PanneConversion('occupe')`, donc 503. Le délai de 15 s court **depuis l'appel** : une photo qui attend plus que son délai part en panne sans lancer de fil. Mesuré : trois photos de 3 Mo demandées ensemble passent l'une après l'autre (2,0 s, 3,9 s, 5,7 s), avec 400 Mo de mémoire au plus ; une quatrième est refusée « occupé ». Tests avec un `Worker` injecté qui compte les fils vivants (jamais plus d'un), la file pleine, et l'attente au-delà du délai. |
+| 2 | Un test vérifie que le fil muet est **terminé** au délai (`terminate` compté), puis que la file repart. |
+| 3 | `PanneConversion` porte sa cause (`detail`, 200 caractères au plus), venue du fil ou de son erreur. Elle est écrite dans le `console.error` de `confirmerEnvoi`. Un test le vérifie. |
+| 4 | Le contrôle dit « liste vide : tout type accepte » pour `null` comme pour `{}`. Mesuré dans cinq états : avant, après, `null`, `{}`, bucket absent. |
+| — | Signalé par la review du lot crédit : `package-lock.json` portait le nom du dossier de travail (`hotesmart-heic`). Il reprend son nom, `hotesmart`. |
 
 ## 12. Trace des reviews du lot 2
 
