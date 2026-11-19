@@ -34,6 +34,8 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 |---|---|
 | `migrations/2026-11-13-charges-periode.sql` | `charges.type_document` (facture, régularisation, avoir, échéancier, avis d'impôt), `periode_debut` / `periode_fin` (les deux ou aucune, 366 jours au plus — **trois ans depuis `2026-11-19`**), avoir négatif seul ; colonnes étalées du résumé ; recalcul **par série** (compte × entité × logement × catégorie) sur une plage ; `charges_totaux` rend les deux lectures. **À coller APRÈS** `2026-11-10`. Contrôle : `migrations/2026-11-13-controle-charges-periode.sql` (10 lignes). |
 | `migrations/2026-11-19-charges-periode-longue.sql` | La borne de la période passe à **trois ans** (1 097 jours, `PERIODE_MAX_JOURS` : trois ans d'anniversaire à anniversaire), décision de Thierry du 19 novembre 2026. **À coller APRÈS** `2026-11-17` **et AVANT le déploiement** du code qui l'accepte ; après elle, `2026-11-13` ne se rejoue plus. Contrôle : `migrations/2026-11-19-controle-charges-periode-longue.sql` (2 lignes), puis le vérificateur. |
+| `migrations/2026-11-19-charges-heic.sql` | Le bucket `justificatifs` accepte le **dépôt** d'une photo `image/heic` / `image/heif` (spec §14.19) ; le serveur la convertit en JPEG à la confirmation et le JPEG la remplace. Ordre libre ; après elle, la section 5 de `2026-11-09` ne se rejoue plus. Contrôle : `migrations/2026-11-19-controle-charges-heic.sql` (1 ligne). |
+| `migrations/2026-11-19-charges-credits.sql` | Les crédits (§14.20) : `charges_credits`, `charges_credit_echeances` (somme prouvée en base), `charges.credit_id` / `credit_indice` (une échéance, une charge ; cascade), origine et catégorie `credit` réservée aux échéances. **À coller APRÈS** `2026-11-19-charges-periode-longue` **et AVANT le code**. Contrôle : `migrations/2026-11-19-controle-charges-credits.sql` (5 lignes), puis le vérificateur. |
 | `migrations/2026-11-17-charges-avis-impot.sql` | L'avis d'impôt n'a pas de TVA (Q38, recette du 17 novembre 2026) : corrige les avis enregistrés, puis pose `charges_impot_ck` (HT = TTC, TVA = 0). **À coller APRÈS** `2026-11-13` **et APRÈS le déploiement** du code qui pose la règle sur l'environnement visé (l'ancien code écrit des avis sans HT ni TVA : la contrainte mettrait sa lecture en panne). Contrôle : `migrations/2026-11-17-controle-charges-avis-impot.sql` (2 lignes), puis le vérificateur. |
 | `lib/charges/regles.js` | `TYPES_DOCUMENT`, `periodeSaisie`, `signerMontants`, `montantsDuType` (avoir signé, avis d'impôt sans TVA), `centimesSignes` ; la lecture normalise type, période et solde. |
 | `lib/charges/lecture.js` | La consigne lit le type, la période couverte et, pour une régularisation, la consommation et le solde. |
@@ -41,6 +43,39 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 
 ## Règles à ne pas perdre
 
+- **Un crédit se lit dans son tableau d'amortissement, SANS IA, et chaque ligne
+  se prouve** (§14.20) : intérêts + assurance + frais + capital = échéance au
+  centime, sinon le tableau entier est refusé avec la date de la ligne. Chaque
+  échéance ÉCHUE devient une charge validée (intérêts + assurance + frais,
+  JAMAIS le capital) ; le cron fait entrer les suivantes à leur jour. La
+  catégorie `credit` est réservée aux échéances (`charges_credit_ck`), et une
+  échéance ne se corrige pas seule : le crédit se supprime et se réimporte.
+  ⚠ Le PDF se lit dans un PROCESSUS à usage unique, borné en temps, en tas et
+  en MÉMOIRE RÉSIDENTE (512 Mo, relevée toutes les 25 ms) — le tas seul ne
+  compte pas les tampons de pdf.js, et un PDF de 8 Ko aux filtres en règle
+  montait à 5,4 Go. Ses flux compressés sont contrôlés AVANT pdf.js, fermé par
+  défaut, mais ce contrôle refuse vite, il ne borne pas. Un processus et pas un
+  fil : après un PDF piégé, un fil terminé ne rend pas sa mémoire (mesuré : 1,6 Go
+  résidents après huit tours ; une photo HEIC, elle, la rend). Une SEULE file pour les photos HEIC et les tableaux
+  (`FILE_LOURDE`, lib/charges/fil-isole.js), un travail à la fois par compte,
+  et 60 s de repos pour un compte dont le travail a été coupé. L'enfant
+  n'hérite d'AUCUN secret (variables du système seulement). Un PDF chiffré
+  (mot de passe de propriétaire, fréquent chez les banques) et une image ne
+  sont pas contrôlés : la garde de mémoire les borne. « Payée » ne se dit que
+  d'une échéance échue.
+- **Aucun HEIC n'est gardé ni lu** (§14.19) : une photo HEIC que le navigateur
+  ne sait pas lire part telle quelle, et `confirmerEnvoi` la convertit en JPEG
+  AVANT l'empreinte ; le JPEG la remplace au même chemin. Ce qu'on ne sait pas
+  convertir s'efface (422 `conversion_impossible`) ; une panne du stockage ou
+  du convertisseur n'efface rien (503). ⚠ Le décodeur tourne dans un processus
+  À USAGE UNIQUE (`convertirIsole`, file commune avec les tableaux, 1 Go de
+  mémoire résidente au plus), jamais dans le processus principal : son tas
+  WebAssembly ne rétrécit jamais et fuyait sur les fichiers illisibles. Un
+  enfant à la fois par instance, deux en attente, et UN travail à la fois par
+  compte, photo ou tableau (sinon un seul compte tenait la file de tous) ; un
+  convertisseur pris rend « réessayez dans un instant » (503
+  `conversion_occupee`). Les types acceptés vivent à TROIS endroits (bucket, `TYPES`,
+  `TYPES_ACCEPTES`) que `tests/charges-migration-heic.test.js` compare.
 - **Une période dure au plus TROIS ANS** (1 097 jours, date de fin comprise ; Thierry, 19 novembre
   2026 — un an au lot 7a). La même borne en trois endroits : la contrainte
   `charges_periode_ck`, `PERIODE_MAX_JOURS` (serveur) et `controlePeriode`
@@ -210,3 +245,17 @@ Détail : spec §14.0.
 - **Racine d'empreinte** : la plus ancienne charge devient racine même
   `a_lire` ou `illisible` ; si le doublon est lu et pas elle, le groupe compte
   zéro. À faire : préférer une racine `a_verifier` ou `validee`.
+
+## Dettes connues (reviews des lots HEIC et crédit, 19 novembre 2026)
+
+- **Plafond d'imports refusés par compte et par jour** : un tableau refusé ne
+  laisse aucune trace, et une conversion en panne laisse une ligne `envoi`
+  reconfirmable. Un compte, une place, et 60 s de repos après un travail
+  coupé : mais **trois comptes peuvent encore remplir la file** d'une instance.
+  À faire avant d'ouvrir à des hôtes externes : compter les refus par compte
+  et par jour, et refuser au-delà (spec §14.20, troisième review du crédit, S1).
+- **La garde de mémoire relève toutes les 25 ms depuis le processus
+  principal** : si sa boucle est bloquée une seconde, un enfant qui alloue vite
+  peut monter à ~830 Mo pour une borne de 512 Mo. Option mesurée par la
+  review : la borne du noyau (`ulimit -d`) posée par un `sh` intermédiaire —
+  à vérifier sur Vercel avant de la prendre (§14.20, mineur 3).

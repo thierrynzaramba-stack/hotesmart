@@ -99,7 +99,7 @@ test('⚠ une tâche qui rend `ok: false` est une ERREUR du passage, pas un zér
   }
 })
 
-test('⚠ un passage À VIDE : 2 lectures de `charges`, la mesure, 2 RPC — ZÉRO appel à l’IA, zéro au stockage', async () => {
+test('⚠ un passage À VIDE : 2 lectures de `charges`, 1 des échéances de crédit, la mesure, 2 RPC — ZÉRO appel à l’IA, zéro au stockage', async () => {
   const avant = process.env.CRON_SECRET
   process.env.CRON_SECRET = 'le-bon'
   const b = baseEnregistreuse(() => ({ data: [], error: null }))
@@ -123,7 +123,7 @@ test('⚠ un passage À VIDE : 2 lectures de `charges`, la mesure, 2 RPC — ZÉ
     assert.equal(ia, 0, 'rien à lire : aucun appel à l’IA')
     assert.equal(b.gestes.length, 0, 'aucun appel au stockage')
     const parTable = b.requetes.map(r => `${r.op} ${r.table}`).sort()
-    assert.deepEqual(parTable, ['insert cron_stats', 'select charges', 'select charges'])
+    assert.deepEqual(parTable, ['insert cron_stats', 'select charges', 'select charges', 'select charges_credit_echeances'])
     assert.deepEqual(b.rpcs.map(x => x.nom), ['charges_comptes', 'charges_comptes'],
       'la liste des comptes, lue en deux tours (le départ tourne)')
     assert.ok(!b.requetes.some(r => r.table === 'ia_appels'), 'le plafond ne se lit que s’il y a quelque chose à lire')

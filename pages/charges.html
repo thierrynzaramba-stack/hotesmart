@@ -54,6 +54,7 @@
   <div class="chg-haut">
     <section class="chg-bloc" data-bind="a-traiter"><p class="muted" data-i18n="common.loading"></p></section>
     <section class="chg-bloc" data-bind="totaux"></section>
+    <section class="chg-bloc" data-bind="credits"></section>
   </div>
   <section class="chg-bloc" data-bind="liste"></section>
 </main>
@@ -105,6 +106,8 @@ async function appelAPI (url, methode = 'GET', corps = null) {
     const err = new Error(data.error || 'erreur')
     err.status = res.status
     err.code = data.error || null
+    // La ligne fautive d'un tableau d'amortissement (§14.20).
+    err.detail = data.detail || null
     throw err
   }
   return data

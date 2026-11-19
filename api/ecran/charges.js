@@ -62,7 +62,7 @@ async function traiter (req, res, t0, deps) {
   const ej = deps.entites || require('../../lib/entites-juridiques')
 
   // Les entités d'abord : la période dépend du début d'exercice de celle
-  // demandée. Les quatre autres lectures partent ensuite ENSEMBLE.
+  // demandée. Les cinq autres lectures partent ensuite ENSEMBLE.
   const ent = await ej.entitesDuCompte(compte, { db: base })
   if (!ent.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
   const entites = ent.entites || []
@@ -72,11 +72,12 @@ async function traiter (req, res, t0, deps) {
   if (entiteDemandee && !entite) return res.status(404).json({ error: 'entite_introuvable' })
   const periode = ecran.bornesPeriode({ periode: q.periode, entite })
 
-  const [t, l, b, tot] = await Promise.all([
+  const [t, l, b, tot, cr] = await Promise.all([
     ecran.aTraiter(base, compte),
     ecran.liste(base, compte, null),
     ecran.biens(base, compte, { entites: ej }),
-    ecran.totaux(base, compte, { debut: periode.debut, fin: periode.fin, entiteId: entite ? entite.id : null })
+    ecran.totaux(base, compte, { debut: periode.debut, fin: periode.fin, entiteId: entite ? entite.id : null }),
+    ecran.credits(base, compte, { debut: periode.debut, fin: periode.fin, entiteId: entite ? entite.id : null })
   ])
   timing()
   // La file et la liste sont l'écran : sans elles, il n'y a rien à montrer.
@@ -90,7 +91,10 @@ async function traiter (req, res, t0, deps) {
     biens: b.ok ? b.biens : null,
     biens_archives: b.ok ? b.archives : null,
     totaux: tot.ok ? { ...tot.totaux, entite: entite ? entite.id : null, periode: periode.periode, proposees: periode.proposees, debut: periode.debut, fin: periode.fin } : null,
-    categories: ecran.ORDRE_CATEGORIES
+    categories: ecran.ORDRE_CATEGORIES,
+    // Les crédits et leurs échéances de la période (§14.20) : un complément,
+    // comme les totaux — `null` dit « indisponible », jamais « aucun crédit ».
+    credits: cr.ok ? { liste: cr.credits, echeances: cr.echeances, aujourdhui: cr.aujourdhui } : null
   })
 }
 

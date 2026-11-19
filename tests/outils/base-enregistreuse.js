@@ -46,6 +46,7 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
       neq (c, v) { r.filtres.push(['neq', c, v]); return q },
       lt (c, v) { r.filtres.push(['lt', c, v]); return q },
       gte (c, v) { r.filtres.push(['gte', c, v]); return q },
+      lte (c, v) { r.filtres.push(['lte', c, v]); return q },
       in (c, v) { r.filtres.push(['in', c, v]); return q },
       not (c, o, v) { r.filtres.push(['not', c, o, v]); return q },
       is (c, v) { r.filtres.push(['is', c, v]); return q },
@@ -76,6 +77,7 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
         createSignedUrl: (chemin, s) => geste('createSignedUrl', [chemin, s],
           { data: { signedUrl: `https://stockage.test/lire/${chemin}` }, error: null }),
         download: (chemin) => geste('download', [chemin], { data: null, error: { message: 'absent' } }),
+        upload: (chemin, corps, o) => geste('upload', [chemin, corps, o], { data: { path: chemin }, error: null }),
         remove: (chemins) => geste('remove', [chemins], { data: [], error: null })
       }
     }
