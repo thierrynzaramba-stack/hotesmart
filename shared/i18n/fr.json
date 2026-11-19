@@ -485,7 +485,7 @@
   "charges.refus_origine_invalide": "L'envoi n'a pas pu commencer. Réessayez.",
   "charges.refus_pas_a_lire": "Cette facture a déjà été lue. Rechargez la page.",
   "charges.refus_periode_invalide": "La période a un début et une fin, dans l'ordre.",
-  "charges.refus_periode_trop_longue": "Une période dure au plus un an : saisissez plusieurs factures.",
+  "charges.refus_periode_trop_longue": "Une période dure au plus trois ans : saisissez plusieurs factures.",
   "charges.refus_sans_justificatif": "Cette facture n'a pas de justificatif.",
   "charges.refus_siret_invalide": "Le SIRET n'est pas valide.",
   "charges.refus_statut_non_validable": "Cette facture ne peut pas être validée dans son état.",

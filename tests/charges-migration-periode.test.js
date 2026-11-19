@@ -91,9 +91,8 @@ test('LE TEST QUI COMPTE (Q26) : l\'avoir seul est négatif ; tout le reste rest
   assert.match(code, /else\s+coalesce\(montant_ht_cents, 0\) >= 0\s+and coalesce\(montant_tva_cents, 0\) >= 0\s+and coalesce\(montant_ttc_cents, 0\) >= 0/)
 })
 
-test('la période : les deux bornes ou aucune, dans l\'ordre, 366 jours au plus — la MÊME borne que le serveur', () => {
+test('la période du lot 7a : les deux bornes ou aucune, dans l\'ordre, un an au plus — borne élargie à trois ans par 2026-11-19 (tests/charges-migration-periode-longue.test.js)', () => {
   assert.match(code, /periode_fin - periode_debut < 366/)
-  assert.equal(require('../lib/charges/regles').PERIODE_MAX_JOURS, 366)
 })
 
 test('LE TEST QUI COMPTE : la part d\'un jour est un ARRONDI CUMULÉ — la somme des jours redonne le montant exact', () => {
@@ -149,7 +148,9 @@ test('LE TEST QUI COMPTE : l\'oracle est en LECTURE SEULE, et compare les DIX-HU
 
 test('LE TEST QUI COMPTE : le contrôle vérifie les contraintes et le trigger à leur DÉFINITION, pas à leur nom', () => {
   assert.match(controle, /conname = 'charges_montants_ck'\s+and def like '%avoir%'/)
-  assert.match(controle, /conname = 'charges_periode_ck'\s+and def like '%366%'/)
+  // L'ancienne borne (lot 7a) OU la nouvelle (2026-11-19) : ce contrôle reste
+  // vrai après l'élargissement à trois ans.
+  assert.match(controle, /conname = 'charges_periode_ck'\s+and \(def like '%366%'\s+or def like '%1096%'\)/)
   assert.match(controle, /like '%charges_recalculer_serie%'/)
   assert.match(controle, /like '%charges_verrou_compte%'/)
   assert.match(controle, /where \(t\.ht, t\.tva, t\.ttc\)\s+<> \(t\.eht, t\.etva, t\.ettc\)/, 'HT, TVA et TTC, pas le TTC seul')

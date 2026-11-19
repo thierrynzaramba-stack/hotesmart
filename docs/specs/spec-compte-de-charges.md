@@ -1749,6 +1749,33 @@ est cité pour confirmer le choix de la liste explicite, sans constat.
 | 6 | L'extension l'emporte sur un type non image | Assumé (aller-retour inutile vers un 415 au pire ; `image/jpg` et `application/x-pdf` y gagnent) |
 | 7 | Documentation | « avec Safari » ; trois nombres en point 8 ; TIFF ajouté à la liste ; §14.13-14.15 reçus par la fusion de `main` (`1642ea29`) |
 
+### 14.18 Une période de trois ans au plus (19 novembre 2026)
+
+**Décision de Thierry** (option B, au chargement des factures 2025) : une
+facture peut couvrir **jusqu'à trois ans** — assurance ou abonnement
+pluriannuel, relevé annuel d'énergie de 367 à 370 jours (les relèves tombent
+« vers le 25 »). Elle s'étale sur toute sa durée. La borne d'un an du lot 7a
+forçait à raccourcir la période, ou à charger la facture deux fois — ce qui
+fabrique un doublon (même fournisseur, même numéro).
+
+- **Borne** : 1 096 jours (3 × 365 + 1, une année bissextile comprise), la
+  même en trois endroits : `charges_periode_ck` (migration
+  `2026-11-19-charges-periode-longue.sql`), `PERIODE_MAX_JOURS`
+  (`lib/charges/regles.js`) et `controlePeriode` (`shared/charges-vue.js`).
+- **Ordre** : migration AVANT le code (le code sans elle se ferait refuser par
+  la base au-delà d'un an ; l'ancien code avec elle reste plus strict, sans
+  risque). Après elle, `2026-11-13` ne se rejoue plus.
+- **Le résumé** n'a rien à changer : l'étalement porte déjà sur la plage
+  [début de la période, fin de la période], quelle que soit sa longueur.
+- **Message** : « Une période dure au plus trois ans : saisissez plusieurs
+  factures. » (fr, en, es).
+
+**Case PERFORMANCE** : 1-6 sans objet (aucun endpoint, aucune donnée affichée
+nouvelle, aucun fichier). 7 : une facture de trois ans écrit 1 096 cellules
+au lieu de 365 — mesuré sur Postgres local au lot 7a, une facture annuelle
+s'écrit en 105 ms ; trois ans restent sous la seconde. 8 : l'écran ne change
+pas (1 appel, 7 requêtes, 681 octets en production le 18 novembre).
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

@@ -110,12 +110,13 @@ test('le jour d’une charge : la date de la facture, sinon le jour de réceptio
 // ─── Lot 7a : type de document, période, signe (spec §14.2) ─────────────────
 const r7 = require('../lib/charges/regles')
 
-test('la période : les deux bornes ou aucune, dans l\'ordre, 366 jours au plus (un an bissextile passe)', () => {
+test('la période : les deux bornes ou aucune, dans l\'ordre, TROIS ANS au plus (Thierry, 19 novembre 2026 ; un an au lot 7a)', () => {
   assert.deepEqual(r7.periodeSaisie('', null), { ok: true, debut: null, fin: null })
   assert.deepEqual(r7.periodeSaisie('2026-01-01', '2026-12-31'), { ok: true, debut: '2026-01-01', fin: '2026-12-31' })
   assert.equal(r7.periodeSaisie('2028-01-01', '2028-12-31').ok, true)
-  assert.equal(r7.periodeSaisie('2026-01-01', '2027-01-01').ok, true, '366 jours')
-  assert.equal(r7.periodeSaisie('2026-01-01', '2027-01-02').code, 'periode_trop_longue')
+  assert.equal(r7.periodeSaisie('2026-01-01', '2027-01-02').ok, true, '367 jours : un relevé annuel qui déborde passe désormais')
+  assert.equal(r7.periodeSaisie('2026-01-01', '2028-12-31').ok, true, '1 096 jours, bissextile compris')
+  assert.equal(r7.periodeSaisie('2026-01-01', '2029-01-01').code, 'periode_trop_longue', '1 097 jours')
   assert.equal(r7.periodeSaisie('2026-01-01', '').code, 'periode_invalide')
   assert.equal(r7.periodeSaisie('2026-03-01', '2026-02-01').code, 'periode_invalide')
   assert.equal(r7.periodeSaisie('2026-02-30', '2026-03-01').code, 'periode_invalide')

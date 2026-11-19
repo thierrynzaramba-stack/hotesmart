@@ -683,11 +683,11 @@ test('LE TEST QUI COMPTE (Q26) : valider un AVOIR écrit des montants NÉGATIFS,
   assert.equal(f.requetes.find(x => x.op === 'update').charge.montant_ttc_cents, 12000)
 })
 
-test('valider : la période (les deux bornes ou aucune, un an au plus) et le type sont contrôlés AVANT toute écriture', async () => {
+test('valider : la période (les deux bornes ou aucune, trois ans au plus) et le type sont contrôlés AVANT toute écriture', async () => {
   for (const [champs, code] of [
     [{ periode_debut: '2026-01-01' }, 'periode_invalide'],
     [{ periode_debut: '2026-03-01', periode_fin: '2026-02-01' }, 'periode_invalide'],
-    [{ periode_debut: '2026-01-01', periode_fin: '2027-01-02' }, 'periode_trop_longue'],
+    [{ periode_debut: '2026-01-01', periode_fin: '2029-01-01' }, 'periode_trop_longue'],
     [{ type_document: 'devis' }, 'type_invalide']
   ]) {
     const { client, requetes } = baseEnregistreuse(chargeAVerifier())
