@@ -67,6 +67,13 @@ Paris relevées à l'écran :
 |---|---|---|
 | ≈ 23:30 | ensemble de règles « Séjours longs » créé : −25 % dès 7 nuits, −30 % dès 14, −35 % dès 21 ; rien d'autre (ni prix, ni dernière minute, ni anticipée, ni durée de séjour) | liste des ensembles : « 25 % À la semaine · 30 % 2 semaines · +1 règle » |
 | ≈ 23:32 → 23:34:51 | appliqué au 23 seul, sur neuf périodes creuses : 20/11→18/12/2026, 04/01→28/01, 31/01→05/02, 08/03→26/03, 10/05→14/05, 18/05→30/06, 01/09→29/10, 02/11→10/11, 15/11→19/11/2027 | 17 dates relues une à une (bornes comprises) : dedans « Séjours longs », dehors aucun ; avril reste « deux jour » ; 19/12, 03/01, 29/01, 16/05, 01/07, 15/08, 30/10 : aucun ; La bulle le 25/11 : aucun |
+| 20/11 00:01 | ajout à « Séjours longs » : −10 % dès 3 nuits (choix de Thierry parmi −10, −15 et −20 %) ; les trois autres paliers inchangés | liste : « 10 % 3 nuits minimum · 25 % À la semaine · +2 règles » ; côté voyageur 09→12/03/2027 298 € au lieu de 330 €, 09→11/03 (2 nuits) 220 € sans remise |
+
+Le même soir, Thierry a baissé le prix de la nuit (le calendrier Airbnb affiche
+89 € le 14/12, 94 € avant). Airbnb montre alors un « Prix initial » barré même
+sur 2 nuits en décembre (14→16/12 : 184 € au lieu de 207 €) : c'est la baisse de
+prix affichée par Airbnb, pas une remise — fin novembre, au même prix et sans
+baisse récente, 24→26/11 rend 184 € sans prix barré.
 
 Côté voyageur : 04→11/01/2027 (7 nuits) 619 € au lieu de 818 € ; 04→12/01
 (8 nuits) 692 € au lieu de 915 € ; 08→22/03/2027 (14 nuits) 1 206 € au lieu de
