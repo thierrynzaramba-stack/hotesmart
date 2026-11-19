@@ -20,7 +20,8 @@ c as (
 select '1 borne de trois ans' as controle,
   count(*) = 1
   and bool_and(v)
-  and bool_and(d like '%1096%')
+  and bool_and(d like '%(periode_fin'
+    || ' - periode_debut) < 1097)%')
   and bool_and(d not like '%< 366%')
   and bool_and(d like '%periode_debut <='
     || ' periode_fin%') as ok,

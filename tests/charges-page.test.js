@@ -450,7 +450,7 @@ test('une période incomplète ou de plus de trois ans est refusée dans la fich
     b.saisir(f.querySelector('[data-champ="periode_debut"]'), '2026-01-01')
     await b.cliquer(f.querySelector('[data-geste="valider"]'))
     assert.match(texte(f.querySelector('[data-bind="fiche-retour"]')), /un début et une fin/)
-    b.saisir(f.querySelector('[data-champ="periode_fin"]'), '2029-01-01')
+    b.saisir(f.querySelector('[data-champ="periode_fin"]'), '2029-01-02')
     await b.cliquer(f.querySelector('[data-geste="valider"]'))
     assert.match(texte(f.querySelector('[data-bind="fiche-retour"]')), /au plus trois ans/)
     assert.deepEqual(b.gestes(), [])

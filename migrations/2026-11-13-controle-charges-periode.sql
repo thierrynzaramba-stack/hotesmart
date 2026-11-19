@@ -54,7 +54,7 @@ select '2 contraintes a leur definition',
       and def like '%echeancier%')
     or (conname = 'charges_periode_ck'
       and (def like '%366%'
-        or def like '%1096%'))
+        or def like '%1097%'))
     or (conname = 'charges_montants_ck'
       and def like '%avoir%')) = 3,
   string_agg(conname, ', ')

@@ -3,6 +3,8 @@
 -- l'etalement (spec §14.2, Q24 a Q26).
 -- A coller APRES 2026-11-10-charges-resume-...
 -- Rejouable. Lignes courtes : collage manuel.
+-- ⚠ SAUF APRES 2026-11-19-charges-periode-
+--   longue : elle remettrait la borne d'un an.
 -- ⚠ APRES ELLE, 2026-11-10 (ET 2026-11-09) NE SE
 -- REJOUENT PLUS : elles remettraient le recalcul
 -- par cellule et des totaux sans lecture etalee.

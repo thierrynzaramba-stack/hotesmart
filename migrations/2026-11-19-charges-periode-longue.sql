@@ -4,9 +4,11 @@
 -- (assurance ou abonnement pluriannuel, releve
 -- annuel d'energie de 367 a 370 jours). Elle
 -- s'etale alors sur toute sa duree.
--- La borne passe de 366 a 1096 jours
--- (3 x 365 + 1), la meme que PERIODE_MAX_JOURS
--- (lib/charges/regles.js).
+-- La borne passe de 366 a 1097 jours
+-- (3 x 365 + 2), la meme que PERIODE_MAX_JOURS
+-- (lib/charges/regles.js) : trois ans
+-- d'anniversaire a anniversaire, date de fin
+-- comprise (du 01/01/2026 au 01/01/2029).
 --
 -- A coller APRES 2026-11-17-charges-avis-impot.
 -- ⚠ ET AVANT LE DEPLOIEMENT DU CODE qui accepte
@@ -32,4 +34,4 @@ alter table public.charges
     or (periode_debut is not null
       and periode_fin is not null
       and periode_debut <= periode_fin
-      and periode_fin - periode_debut < 1096));
+      and periode_fin - periode_debut < 1097));

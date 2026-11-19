@@ -150,7 +150,7 @@ test('LE TEST QUI COMPTE : le contrôle vérifie les contraintes et le trigger �
   assert.match(controle, /conname = 'charges_montants_ck'\s+and def like '%avoir%'/)
   // L'ancienne borne (lot 7a) OU la nouvelle (2026-11-19) : ce contrôle reste
   // vrai après l'élargissement à trois ans.
-  assert.match(controle, /conname = 'charges_periode_ck'\s+and \(def like '%366%'\s+or def like '%1096%'\)/)
+  assert.match(controle, /conname = 'charges_periode_ck'\s+and \(def like '%366%'\s+or def like '%1097%'\)/)
   assert.match(controle, /like '%charges_recalculer_serie%'/)
   assert.match(controle, /like '%charges_verrou_compte%'/)
   assert.match(controle, /where \(t\.ht, t\.tva, t\.ttc\)\s+<> \(t\.eht, t\.etva, t\.ettc\)/, 'HT, TVA et TTC, pas le TTC seul')
