@@ -8,15 +8,17 @@
 // ou modifié »). Ce qui suit un document se fait AU GESTE, pas ici : la
 // lecture IA à la confirmation (`api/charges.js`), les totaux par le trigger
 // `charges_resume_trg` à chaque écriture. Ce passage ne fait que le
-// rattrapage, en trois tâches bornées et indépendantes, dans cet ordre :
+// rattrapage, en quatre tâches bornées et indépendantes, dans cet ordre :
 //   1. effacer les ENVOIS jamais confirmés depuis plus de 24 h — la seule
 //      exception à « on garde tout » (Q12, acceptée le 9 novembre 2026) ;
-//   2. recalculer le résumé des totaux de chaque compte, pour la cohérence ;
-//   3. relire les charges restées `a_lire` (panne de l'IA ou plafond du
+//   2. faire entrer en charges les ÉCHÉANCES DE CRÉDIT arrivées à leur jour
+//      (§14.20) — c'est le geste qui manque : rien ne les « dépose » ;
+//   3. recalculer le résumé des totaux de chaque compte, pour la cohérence ;
+//   4. relire les charges restées `a_lire` (panne de l'IA ou plafond du
 //      jour au moment du geste).
-// À vide : 2 lectures de `charges`, l'écriture de la mesure, 2 appels RPC
-// (la liste des comptes), AUCUN appel à l'IA ni au stockage
-// (`tests/cron-charges.test.js` le tient).
+// À vide : 2 lectures de `charges`, 1 de `charges_credit_echeances`,
+// l'écriture de la mesure, 2 appels RPC (la liste des comptes), AUCUN appel
+// à l'IA ni au stockage (`tests/cron-charges.test.js` le tient).
 //
 // ⚠ POURQUOI UN CRON À PART, et pas une tâche de plus dans `api/cron.js` :
 // le cycle principal porte les codes d'accès, et sa limite de 60 s est déjà
@@ -25,7 +27,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const crypto = require('node:crypto')
-const { purgerEnvois, lireEnAttente, avecDelai } = require('../lib/charges')
+const { purgerEnvois, lireEnAttente, materialiserCredits, avecDelai } = require('../lib/charges')
 const { lireDocument } = require('../lib/charges/lecture')
 const { demarrerPassage } = require('../lib/metriques-cron')
 const { ecrireLePassage, ECRITURE_MAX_MS } = require('../lib/cron-stats')
@@ -38,6 +40,7 @@ const MUR_MESURE_MS = 59000
 // (`DELAI_IA_MS`, 20 s). 25 + 8 + 20 laisse de quoi écrire la mesure sous
 // le mur.
 const BUDGET_PURGE_MS = 8000
+const BUDGET_CREDITS_MS = 5000
 const BUDGET_LECTURES_MS = 25000
 const BUDGET_RECALCUL_MS = 15000
 const DELAI_RPC_MS = 8000
@@ -109,7 +112,7 @@ module.exports = async function handler (req, res) {
     } catch (e) { console.error('[cron-charges] mesure non journalisee :', e && e.message) }
   }
 
-  const bilan = { purges: 0, lues: 0, panne_ia: false, panne_stockage: false, plafonnes: 0, recalcul: null }
+  const bilan = { purges: 0, echeances_credits: 0, lues: 0, panne_ia: false, panne_stockage: false, plafonnes: 0, recalcul: null }
 
   // ⚠ CHAQUE TÂCHE A SON PROPRE `try` : une panne de l'une ne prive pas les
   // autres de leur passage.
@@ -120,6 +123,13 @@ module.exports = async function handler (req, res) {
     bilan.purges = p.purges || 0
     if (!p.ok) results.errors.push({ tache: 'purge_envois', error: 'lecture des envois impossible' })
   } catch (e) { results.errors.push({ tache: 'purge_envois', error: e.message }) }
+
+  try {
+    const c = await chrono.mesure('echeances_credits', () =>
+      materialiserCredits(supabase, { echeance: Date.now() + BUDGET_CREDITS_MS }))
+    bilan.echeances_credits = c.materialisees || 0
+    if (!c.ok) results.errors.push({ tache: 'echeances_credits', error: 'echeances non ecrites' })
+  } catch (e) { results.errors.push({ tache: 'echeances_credits', error: e.message }) }
 
   // Le recalcul passe AVANT les lectures : la nuit personne n'attend de
   // formulaire, et placé après, il n'aurait que le temps qu'elles laissent.

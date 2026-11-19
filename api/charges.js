@@ -9,6 +9,9 @@
 //   trancher   { id }                     -> le signal « Vérifier » tranché
 //   supprimer  { id }                     -> Q11 : à tout moment
 //   consulter  { id }                     -> URL de lecture de 60 s
+//   credit_importer  { fichier (PDF en base64), preteur, entite_id, bien_id }
+//                                         -> le crédit et ses charges (§14.20)
+//   credit_supprimer { id }               -> le crédit, ses échéances, ses charges
 // L'écran (lot 3) lit par `/api/ecran/charges` ; ici, on n'écrit que.
 //
 // ⚠ RÉSERVÉ AU TITULAIRE DU COMPTE, LECTURE COMPRISE (Q9, 8 novembre 2026).
@@ -29,10 +32,13 @@ const { lireDocument } = require('../lib/charges/lecture')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
-const ACTIONS = new Set(['envoi', 'confirmer', 'valider', 'trancher', 'supprimer', 'consulter'])
+const ACTIONS = new Set(['envoi', 'confirmer', 'valider', 'trancher', 'supprimer', 'consulter', 'credit_importer', 'credit_supprimer'])
+// Un tableau d'amortissement en base64 : 2 Mo de PDF font 2,7 Mo de texte, sous
+// la limite de 4,5 Mo d'un corps de requête Vercel.
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/
 
 function rendre (res, r, succes) {
-  if (!r.ok) return res.status(r.statut || 500).json({ error: r.code || 'erreur' })
+  if (!r.ok) return res.status(r.statut || 500).json({ error: r.code || 'erreur', ...(r.detail ? { detail: String(r.detail) } : {}) })
   return res.status(200).json({ ok: true, ...succes(r) })
 }
 
@@ -98,6 +104,23 @@ module.exports = async function handler (req, res) {
 
     if (action === 'supprimer') {
       const r = await charges.supprimer(supabase, { compte, id: corps.id })
+      return rendre(res, r, x => ({ supprime: x.supprime }))
+    }
+
+    if (action === 'credit_importer') {
+      const b64 = typeof corps.fichier === 'string' ? corps.fichier.replace(/\s+/g, '') : ''
+      if (!b64) return res.status(400).json({ error: 'fichier_requis' })
+      if (b64.length > Math.ceil(charges.CREDIT_PDF_MAX / 3) * 4 + 4) return res.status(413).json({ error: 'trop_gros' })
+      if (!BASE64_RE.test(b64)) return res.status(400).json({ error: 'fichier_invalide' })
+      const r = await charges.importerCredit(supabase, {
+        compte, octets: Buffer.from(b64, 'base64'),
+        preteur: corps.preteur, entiteId: corps.entite_id, bienId: corps.bien_id
+      })
+      return rendre(res, r, x => ({ credit: x.credit, charges: x.charges }))
+    }
+
+    if (action === 'credit_supprimer') {
+      const r = await charges.supprimerCredit(supabase, { compte, id: corps.id })
       return rendre(res, r, x => ({ supprime: x.supprime }))
     }
 

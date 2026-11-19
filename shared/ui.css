@@ -2392,6 +2392,16 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .chg-periode { border: 0; margin: 0; padding: 0; min-width: 0; }
 .chg-periode legend { padding: 0; margin-bottom: 4px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
 .chg-periode__dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap-s); }
+/* Les crédits (spec compte de charges §14.20) : la mensualité payée d'un mois,
+   sous le mois, et la liste des crédits avec leur formulaire d'import. */
+.chg-rep li.chg-rep__credit { padding-left: 12px; color: var(--muted); }
+.chg-credit-mois { display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 2px 8px; }
+.chg-credit-mois small { font-size: var(--fs-caption); }
+.chg-credits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.chg-credit { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.chg-credit:first-child { border-top: 0; }
+.chg-credit__qui { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.chg-credit-form { margin-bottom: 12px; }
 @media (max-width: 899px) {
   .chg-chiffre .chg-lecture--date b { font-size: 14px; }
 }

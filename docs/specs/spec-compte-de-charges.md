@@ -1992,6 +1992,12 @@ Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 
     depuis l'appel, attente comprise. C'est le correctif du constat de
     sécurité de la seconde review : chaque fil a son propre tas, et trois
     photos de 48 Mpx converties ENSEMBLE montaient à 2,1 Go.
+  - ⚠ **Depuis le lot crédit (§14.20, seconde review) : un PROCESSUS à usage
+    unique, pas un fil, et une file COMMUNE aux photos et aux tableaux.** Un
+    fil terminé ne rendait pas sa mémoire au système (huit tours : 1,7 Go
+    résidents) ; l'enfant est tué au-delà de 1 Go de mémoire résidente (une
+    photo de 48 Mpx monte à ~790 Mo). Mergé seul, le lot HEIC garde son fil
+    et sa file à lui.
   - Le JPEG **remplace** la photo au même chemin (`upload` avec `upsert`).
   - Ensuite, l'empreinte, les doublons, la lecture IA immédiate, le cron et la
     consultation ne voient qu'un JPEG. **Aucun HEIC n'est gardé.**
@@ -2378,6 +2384,602 @@ testé, mais pas relu**. Ce fait est remis au chef de file et à Thierry ; c'est
 | 3 | `PanneConversion` porte sa cause (`detail`, 200 caractères au plus), venue du fil ou de son erreur. Elle est écrite dans le `console.error` de `confirmerEnvoi`. Un test le vérifie. |
 | 4 | Le contrôle dit « liste vide : tout type accepte » pour `null` comme pour `{}`. Mesuré dans cinq états : avant, après, `null`, `{}`, bucket absent. |
 | — | Signalé par la review du lot crédit : `package-lock.json` portait le nom du dossier de travail (`hotesmart-heic`). Il reprend son nom, `hotesmart`. |
+
+### 14.20 Les crédits : le tableau d'amortissement en charges (19 novembre 2026)
+
+**La demande.** Thierry, 19 novembre 2026, 01 h 12 : il charge le tableau
+d'amortissement de son prêt immobilier (Banque Populaire, 16 pages,
+300 mensualités) et demande « le crédit et le calcul des charges ».
+
+**Ses décisions**, prises à 01 h 16 :
+- **Une charge par mensualité.**
+- Le crédit finance **les deux logements de Bagnères**. Il est donc rattaché à
+  leur entité, sans logement désigné, comme la facture EDF qui couvre les
+  deux.
+- « Le calcul des charges », dans ses mots : « affiche l'amortissement en fait
+  une ligne spéciale dans les dépenses mensuelles, le but étant d'avoir une vue
+  sur les décaissements mensuels quelque part ».
+
+Le reste a été tranché par le fil, annoncé à Thierry à 01 h 19, et reste
+corrigible en recette :
+- le tableau est lu **sans IA**, ligne par ligne ;
+- une charge par mensualité porte intérêts + assurance + frais, dans une
+  catégorie « Crédit : intérêts et assurance » ;
+- par mois, une ligne « Crédit » donne la mensualité entière décaissée, avec
+  sa part de capital.
+
+**Catégorie de chaque donnée affichée** (règle d'architecture) :
+- Les charges d'échéance : **temps réel** (des lignes de `charges`, comme toute
+  facture). Les totaux restent du **non urgent**, tenus par le résumé.
+- La ligne « Crédit » d'un mois et la liste des crédits : les **lignes du
+  tableau tel qu'importé**, lues par index, sans aucun calcul. Rien n'est
+  additionné à la lecture, sauf ranger 1 à 3 lignes par mois dans leur mois.
+
+**Ce qui change.**
+- **Lecture du tableau** (`lib/charges/credit-tableau.js`, `unpdf` 2.2.1, MIT,
+  chargé à la demande) :
+  - ⚠ **Dans un PROCESSUS à usage unique, un seul travail lourd à la fois
+    par instance, photos et tableaux confondus** (`lib/charges/fil-isole.js`,
+    `lib/charges/credit-tableau-fil.js`) : 20 s au plus, attente comprise ;
+    tas JavaScript borné à 256 Mo ; **mémoire résidente bornée à 512 Mo**,
+    relevée toutes les 25 ms ; enfant tué après un tableau, et la place ne se
+    libère qu'une fois l'enfant mort. Au-delà du temps ou de la mémoire, après
+    avoir eu son délai entier : refus `tableau_illisible` (rien n'est écrit).
+    Instance occupée — deux travaux déjà en attente, ou délai mangé par
+    l'attente : 503 « occupé ». C'est le correctif du constat de sécurité S1
+    des deux reviews : un PDF piégé de 62 Ko tenait la fonction 6 à 26 s ;
+    un de 8 Ko, aux filtres en règle, la montait à 5,4 Go.
+  - ⚠ **Les flux compressés sont bornés AVANT pdf.js** : chaque flux suit la
+    chaîne de ses filtres (ASCII85, ASCIIHex, Flate), décompressé une fois
+    sous 4 Mo, et 16 Mo pour tous. pdf.js décompresse sans plafond, et ses
+    tampons échappent à la borne du tas. Un flux compressé que zlib refuse
+    fait refuser le PDF, puisque pdf.js, plus tolérant, le décompresserait.
+    Les filtres LZW et RunLength ne sont pas pris. ⚠ **Ce contrôle refuse vite
+    ce qui se voit, il ne BORNE pas** (seconde review) : il est fermé par
+    défaut sur ce qu'il ne sait pas suivre (`flux_suspect`, `filtre_non_pris`),
+    mais un flux légal répété 600 fois dans `/Contents` passe tous ses
+    contrôles. La borne, c'est la mémoire de l'enfant. Le vrai tableau : 36 flux,
+    2,4 Mo décompressés en tout, 0,7 Mo pour le plus gros.
+  - Les cellules du PDF sont lues avec leur position. Chaque cellule est
+    ramenée à son repère de lecture : le tableau réel est imprimé en paysage
+    sur une page portrait, texte tourné d'un quart de tour.
+  - Les colonnes se retrouvent par leur en-tête, sur une ou deux lignes : intérêts,
+    assurance, accessoires, capital amorti, échéance, capital restant dû.
+    - Un mot d'en-tête va à la seule colonne qu'il recouvre le plus.
+    - Un texte qui recouvre trois colonnes ou plus est un titre, pas un
+      en-tête.
+    - Une page sans en-tête reprend les colonnes de la précédente.
+  - **Chaque ligne se prouve** : intérêts + assurance + accessoires + capital
+    = échéance, au centime.
+    - Une ligne fausse refuse **tout** le tableau, et le refus donne sa date.
+    - Des colonnes non reconnues : refusé aussi, jamais deviné.
+    - Une ligne sans rien à payer ni à amortir (un déblocage) est écartée,
+      même quand ses cellules d'échéance ou de capital sont vides, comme une
+      ligne sans date (un total).
+    - Une ligne du tableau porte une date **et au moins trois montants** : une
+      date seule au-dessus du tableau (« Date d'effet : … ») n'en est pas une.
+- **Données** (migration `2026-11-19-charges-credits.sql`, collée à la main) :
+  - `charges_credits` : banque, entité, logement facultatif, empreinte du PDF,
+    première et dernière échéance. Un même tableau ne s'importe pas deux fois.
+  - `charges_credit_echeances` : chaque ligne du tableau. La base revérifie la
+    somme ; `materialisee_le` dit si l'échéance est déjà en charge.
+  - `charges.credit_id` et `charges.credit_indice` : une échéance donne une
+    charge (index unique **sans** clause `where`, pour servir `ON CONFLICT`).
+    Les charges partent avec le crédit (`on delete cascade`).
+  - La catégorie `credit` **est réservée aux échéances**
+    (`charges_credit_ck`) : ni l'IA ni l'hôte ne la choisissent.
+  - RLS active, aucun droit pour `anon` ni `authenticated`.
+- **Écriture** (`lib/charges.js`, writer unique) :
+  - `importerCredit` vérifie, avant toute écriture :
+    - la banque ;
+    - l'entité, **active et du compte** ;
+    - le logement, du compte **et** de cette entité ;
+    - le fichier : un PDF de 2 Mo au plus ;
+    - la borne de 20 crédits par compte, et que le même tableau n'est pas déjà
+      importé.
+  - Puis il lit le tableau, dépose le PDF et écrit dans l'ordre : le crédit,
+    toutes ses échéances, puis une charge **validée** par échéance **échue**.
+    - Le montant d'une charge (HT = TTC, TVA 0) = intérêts + assurance + frais.
+      **Jamais le capital.**
+    - **Tout ou rien** : une écriture qui échoue en route efface le crédit, par
+      cascade ses échéances et ses charges, et son fichier.
+  - Le tout-ou-rien n'est **pas une transaction** : une fonction tuée entre
+    deux écritures laisserait un crédit partiel, que l'hôte voit dans le bloc
+    « Crédits » et supprime. Un effacement qui échoue se journalise et garde
+    le fichier avec sa ligne. Un insert ambigu (délai après écriture) défait le
+    crédit.
+  - `supprimerCredit` supprime le crédit dans le compte, avec son fichier.
+  - Une échéance ne se valide ni ne se supprime seule : 409
+    `credit_automatique`.
+  - Le cron quotidien (`api/cron-charges.js`, nouvelle tâche
+    `echeances_credits`, 5 s de budget) fait entrer en charges les échéances
+    arrivées à leur jour. Chacune porte le compte **de son crédit**. Un crédit
+    en panne est compté et sauté : il n'arrête pas les autres.
+- **Écran** (`/charges`, une seule vue pour l'ordinateur et le téléphone) :
+  - **Par mois** : sous chaque mois, une ligne « Crédit, mensualité payée » qui
+    donne la mensualité entière et, à côté, « dont X de capital ». Le capital
+    n'entre dans aucun total. ⚠ **« Payée » seulement si l'échéance est
+    échue** (le jour vient du serveur, à Paris) ; sinon « Crédit, mensualité à
+    venir ».
+  - **Un bloc « Crédits »** : banque, entité, « Tous les logements de
+    l'entité », nombre d'échéances et dates ; un bouton « Supprimer », avec
+    confirmation. Un formulaire « Ajouter un crédit » : le PDF, la banque,
+    l'entité (choisie d'office si elle est seule), le logement facultatif.
+  - **La fiche d'une échéance** : champs figés, ni Valider, ni Supprimer, ni
+    Voir, et un texte qui dit comment la corriger (supprimer le crédit,
+    réimporter le tableau).
+  - Une ligne fausse est nommée par sa date : « La ligne du 22 juin 2023 ne se
+    vérifie pas… Rien n'a été importé. »
+- **Ordre des migrations** : `2026-11-19-charges-credits` APRÈS
+  `2026-11-19-charges-periode-longue`, et AVANT le code. Seule, elle ne change
+  rien. Contrôle : `2026-11-19-controle-charges-credits.sql`, 5 lignes (false
+  avant, true après), puis le vérificateur.
+
+**Mesures.**
+- **Le vrai tableau de Thierry** (hors dépôt) :
+  - **301 échéances en 271 ms** : les frais de dossier de 500 € et les 300
+    mensualités.
+  - Totaux par année égaux au centime à ceux du PDF : 2025 = **3 700,80 €
+    d'intérêts + 1 242,41 € d'assurance = 4 943,21 €** ; 2022 = 4 612,96 €,
+    frais compris.
+- **Postgres 16 local**, avec ce même tableau :
+  - **57 charges échues insérées en 24 ms** ;
+  - vérificateur du résumé à **0 écart sur 10 367 cellules** ;
+  - suppression du crédit en **18 ms**, ses 57 charges parties avec lui, 0
+    écart.
+- **Tests** :
+  - `tests/charges-credit-tableau.test.js` : quatre tableaux **fictifs**
+    fabriqués par `tests/fixtures/charges/fabriquer-tableaux.py` — portrait,
+    le même tourné d'un quart de tour, une ligne fausse d'un centime, une
+    colonne absente.
+  - `tests/charges-credit.test.js` : le writer, de bout en bout avec le vrai
+    lecteur.
+  - `tests/charges-migration-credits.test.js`, `tests/charges-ecran.test.js`,
+    `tests/charges-page.test.js`, `tests/charges-endpoint.test.js`,
+    `tests/cron-charges.test.js`.
+
+**Ce que ce lot ne fait pas**, et c'est su :
+- Il ne lit que les tableaux dont il reconnaît les colonnes. Un autre format
+  est refusé en le disant ; il s'ajoutera quand un vrai tableau le montrera.
+- Il ne répartit pas un crédit entre deux logements : c'est la clé de
+  répartition, décidée pour plus tard (§14.0).
+- Il ne suit pas un remboursement anticipé ou une renégociation : on supprime
+  le crédit et on importe le nouveau tableau.
+- **Dette** : l'import n'est pas une transaction (voir plus haut). Une
+  fonction SQL qui écrirait crédit, échéances et charges d'un coup fermerait
+  le cas d'une fonction tuée en route.
+- **Dette** : la conversion HEIC (`convertirIsole`) et la lecture du tableau
+  (`fil-isole.js`) suivent le même schéma de fil, écrit deux fois. Les
+  réunir dans `fil-isole.js` est un lot de rangement.
+- **À vérifier en recette** : `unpdf` 2.2.1 déclare Node ≥ 24 ; il tourne
+  sous Node 22.23 en local (suite verte). La version de Node du projet Vercel
+  se règle dans son tableau de bord, et se lira au premier import sur
+  staging.
+
+**Case PERFORMANCE** (règle du dépôt, huit points) :
+1. Écran : toujours **un** appel, `/api/ecran/charges`. Il lit en plus, **en
+   parallèle** des quatre autres, les crédits du compte, puis leurs échéances
+   de la période s'il y en a. Le geste d'import passe par `/api/charges`, comme
+   les autres.
+2. Donnée non urgente : les totaux restent ceux du résumé, tenu par trigger.
+   La ligne « Crédit » n'est pas un calcul : ce sont les lignes du tableau, lues
+   par index `(user_id, date_echeance)`.
+3. Cache : sans objet (la page n'en a pas).
+4. `private, no-store` : inchangé ; les deux endpoints le posent avant tout
+   refus.
+5. Statiques : aucun fichier ajouté à la page ; `shared/ui.css` gagne 8 règles.
+6. Lecture tronquée : les échéances se lisent **page après page** (1 000 par
+   page, dans un ordre total `date_echeance, credit_id, indice` ; testé à
+   1 001 lignes, deux pages). Les crédits, bornés à 20 par compte, se lisent
+   en une fois (`limit(100)`).
+7. Budget : l'affichage gagne une lecture sans crédit, deux avec, en
+   parallèle des autres — mesuré en lectures au banc ; son temps se lira en
+   recette, dans `Server-Timing`. L'import se mesure à part : lecture du vrai
+   PDF **371 ms dans le fil** (396 ms dans le fil principal), écritures
+   24 ms pour 57 charges ; une bombe de 408 Ko (400 Mo décompressés) est
+   refusée en **38 ms**.
+8. Mesure AVANT / APRÈS, au banc (`tests/charges-ecran.test.js`) : l'écran
+   complet passe de **6 à 7 lectures** sans crédit et à **8** avec, toujours
+   **1 appel**. Le module `shared/charges-vue.js` passe de 41 952 à
+   **51 984 octets** (+9,8 Ko, non compressé). Le corps de l'écran gagne
+   `credits` sans crédit (63 octets, clé et jour compris) ; avec un crédit,
+   environ 250 octets par échéance de la période.
+
+**Inventaire et mobile.** Rien n'est retiré. La vue est commune aux deux
+écrans : le bloc « Crédits » et la ligne du mois s'affichent aussi au
+téléphone, avec les mêmes styles.
+
+#### Review du lot crédit (19 novembre 2026)
+
+- **Arbre** : `/home/claude/hotesmart-credit` ; **branche** : `charges-credit` ;
+  **plage** :
+  `8680ab564b0ae2295fce20f1358c5bc4a8de3e4b..c124f66b342a21aa9223354c03415e053d76df22`.
+- **Ce que la review dit avoir lu** : `c124f66b342a21aa9223354c03415e053d76df22`,
+  et 34 fichiers.
+- **Confrontation** : ces 34 fichiers sont exactement ceux de
+  `git diff --name-only` sur la plage.
+- ⚠ **Le commit relu a ensuite été rejoué** sur les correctifs du lot HEIC,
+  `9e20c301` puis `0db22d0e`, ce qui a donné `9cde8a7d`. Les lignes ajoutées
+  et retirées sont **identiques** à celles de `c124f66b`, vérifié par `diff`
+  hors de la spec et de `package-lock.json`. Deux conflits ont été résolus à
+  la main :
+  - dans `lib/charges.js`, la ligne d'import du module HEIC
+    (`convertirIsole`) ;
+  - le nom du verrouillage des paquets.
+
+Réponse de la review, recopiée telle quelle :
+
+````
+SHA de tête lu : `c124f66b342a21aa9223354c03415e053d76df22` (arbre `/home/claude/hotesmart-credit`, branche `charges-credit`, un seul commit dans la plage). Je n'ai rien modifié dans l'arbre et n'en suis pas sorti. Toutes les expériences ont tourné dans des copies faites par `git archive` dans `/tmp`.
+
+`git diff --name-only 8680ab56..c124f66b` :
+```
+api/charges.js
+api/cron-charges.js
+api/ecran/charges.js
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/credit-tableau.js
+lib/charges/ecran.js
+lib/charges/regles.js
+migrations/2026-11-19-charges-credits.sql
+migrations/2026-11-19-controle-charges-credits.sql
+package-lock.json
+package.json
+pages/charges.html
+pages/guide.html
+shared/charges-vue.js
+shared/i18n/en.json
+shared/i18n/es.json
+shared/i18n/fr.json
+shared/ui.css
+tests/charges-credit-tableau.test.js
+tests/charges-credit.test.js
+tests/charges-ecran.test.js
+tests/charges-endpoint.test.js
+tests/charges-migration-credits.test.js
+tests/charges-page.test.js
+tests/cron-charges.test.js
+tests/fixtures/charges/fabriquer-tableaux.py
+tests/fixtures/charges/tableau-ligne-fausse.pdf
+tests/fixtures/charges/tableau-portrait.pdf
+tests/fixtures/charges/tableau-sans-capital.pdf
+tests/fixtures/charges/tableau-tourne.pdf
+tests/outils/banc-charges.js
+tests/outils/base-enregistreuse.js
+```
+
+Le redémarrage de l'environnement a arrêté mon premier passage de la suite complète, lancé en arrière-plan. Je l'ai relancé au premier plan : les chiffres ci-dessous viennent de ce second passage.
+
+---
+
+## SÉCURITÉ
+
+**S1 — Un PDF piégé de quelques Ko bloque la fonction au-delà de 60 s et consomme plusieurs Go.** `lib/charges/credit-tableau.js:210-224`
+- Les bornes « 2 Mo » et « 80 pages » ne limitent pas le travail de pdf.js. Un flux FlateDecode se décompresse sans plafond.
+- Mesures sur des PDF fabriqués (`/tmp/rv-scripts/bombe.py`) :
+
+| Fichier | Contenu | Durée | Mémoire (pic) |
+|---|---|---|---|
+| 62 Ko | 1 page | 6,3 s | 369 Mo |
+| 62 Ko | 5 pages pointant le même flux | 26 s | 943 Mo |
+| 74 Ko | 80 pages | plus de 150 s (tué) | — |
+| 1,2 Mo | 1 page, 400 Mo décompressés | 92 s | 5,3 Go |
+
+- **Scénario** : n'importe quel titulaire authentifié peut le rejouer à volonté. Un échec n'écrit rien, donc ni l'empreinte ni la borne de 20 crédits ne freinent la répétition. Chaque appel coûte un 504 ou un manque de mémoire, et se paie en Go-heures Vercel.
+- **Correction** :
+  - lire le PDF dans un `worker_threads` (`resourceLimits`, `terminate()` vers 15-20 s, puis refus 422 `tableau_illisible`) ;
+  - avant pdf.js, pré-filtrer les flux Flate avec `zlib.inflateSync(flux, { maxOutputLength })`, par exemple 8 Mo par flux et 32 Mo au total ;
+  - plafonner les imports refusés par compte et par jour.
+- **Test à ajouter** : la bombe de 62 Ko doit rendre un refus en moins de 20 s.
+
+Le reste de la sécurité tient (détail en fin de rapport). Chaque lecture et écriture porte le compte. Les FK composites ferment en base le rattachement à l'entité, au logement ou au crédit d'un autre compte. Le cron écrit chaque charge avec le compte de son crédit. Ni l'IA ni `valider` ne peuvent poser la catégorie `credit`.
+
+## BLOQUANT
+
+**B1 — La ligne « Crédit, mensualité payée » annonce payées des échéances qui ne sont pas encore échues.** `shared/charges-vue.js:300-316`
+- `decaissesParMois` additionne toutes les échéances de la période, sans regarder si elles sont passées.
+- **Scénario** : le 19 novembre, l'échéance du 22 s'affiche déjà « mensualité payée, 1 235,43 € dont 816,46 € de capital » dès que novembre a une autre charge. Pareil pour tout mois futur d'un exercice où une charge étalée donne une ligne.
+- **Correction** : ne retenir que `date_echeance <= aujourd'hui` pour « payée », ou afficher séparément « à venir ». Ajouter un test avec une échéance au 22 et l'horloge au 19.
+
+## MINEUR
+
+1. **Le tout-ou-rien est fait à la main dans le code, pas par une transaction.** `lib/charges.js:827-835`
+   - `defaire` ignore l'erreur de son propre `delete`.
+   - Un insert du crédit en erreur ambiguë (expiration après validation en base) n'efface que le fichier, pas la ligne.
+   - Une fonction tuée entre deux écritures ne compense rien.
+   - **Conséquence** : un crédit à moitié importé reste, qui affiche « 300 échéances ». Le réimport est alors refusé `credit_deja_importe`, et le cron matérialise les échéances partielles.
+   - **Correction** : écrire le crédit, ses échéances et ses charges dans une seule fonction SQL (RPC) transactionnelle ; à défaut, vérifier l'erreur du `delete` et la journaliser.
+
+2. **Un crédit en panne arrête la tâche pour tous les comptes.** `lib/charges.js:891,894`
+   - Le `return { ok: false }` à la première panne arrête le passage. Le tri par date remet le même crédit en tête chaque nuit.
+   - **Scénario** : un logement transféré à un autre compte fait lever `charges_bien_meme_compte`, et plus personne n'est matérialisé.
+   - **Correction** : `continue`, compter l'erreur, la remonter.
+
+3. **Un déblocage dont le « capital amorti » est vide refuse tout le tableau,** avec un message faux (« intérêts, assurance, frais et capital ne font pas l'échéance »). `credit-tableau.js:174-177`
+   - Le test `capital === null` passe avant `echeance === 0`. Mesuré sur une page de synthèse : `ligne_incoherente 2025-01-22`.
+   - La spec dit pourtant que ces lignes sont écartées.
+   - **Correction** : écarter d'abord les lignes à échéance 0 ou vide qui ne portent ni intérêts ni capital.
+
+4. **Une date seule dans sa cellule au-dessus du tableau fait refuser un tableau lisible** (« Date d'effet : 15/01/2025 »). `credit-tableau.js:119-130`
+   - `haut` prend la première ligne datée, l'en-tête n'est plus trouvé, et le refus tombe en « colonnes non reconnues ». Mesuré.
+   - **Correction** : ne retenir comme lignes datées que celles qui portent au moins 3 montants.
+
+5. **Libellés d'erreur.** `shared/charges-vue.js:450`
+   - Un PDF de crédit de plus de 2 Mo affiche `refus_trop_gros` : « 10 Mo pour un PDF », faux ici.
+   - `refus_type_refuse` (« les images sont acceptées ») et `refus_entite_requise` (« de cette facture ») sonnent faux dans le formulaire crédit.
+   - **Correction** : clés propres au crédit.
+
+6. **Contrôle de la migration** (`2026-11-19-controle-charges-credits.sql`) :
+   - la ligne 5 rend toujours `true` ;
+   - rien ne vérifie `charges_credit_ech_somme_ck`, `charges_credits_entite_fk`, le trigger du logement, l'index d'empreinte ni le retrait des droits ;
+   - un `create table if not exists` qui tomberait sur une table d'un brouillon antérieur passerait le contrôle.
+
+7. **Échéances de l'écran : pagination et tri.** `lib/charges/ecran.js:205-206`
+   - Seule la première page est testée : la mutation « une seule page » passe tous les tests, alors que la spec écrit « testé ».
+   - Le tri `(date_echeance, credit_id)` n'est pas total : deux lignes d'un même crédit à la même date peuvent glisser à la frontière d'une page.
+   - **Correction** : ajouter `indice` au tri, et un test à 1000 + 1 lignes.
+
+8. **Mutations que les tests ne détectent pas** (détail plus bas) :
+   - échéance du jour même à l'import (`<=` remplacé par `<`) ;
+   - dates non ordonnées ;
+   - montants négatifs ;
+   - cellule capital absente lue comme 0 ;
+   - plus de 1000 lignes (la base refuserait, mais en 503 au lieu de 422) ;
+   - `bien_id` forcé à `null` côté écran.
+
+9. **Paquet** :
+   - `package-lock.json` change de `name` (`hotesmart-heic` devient `hotesmart-credit`) : du bruit qui créera des conflits entre branches.
+   - `unpdf` 2.2.1 déclare `engines >=24`. Il fonctionne sous Node 22.23 en local (tests verts), mais il faut vérifier la version Node du projet Vercel.
+
+10. **Case performance de la spec** :
+    - point 5 : le diff ajoute 8 règles CSS, pas 9 ;
+    - point 6 : « page après page, testé » est partiel (voir 7) ;
+    - point 7 : l'écran est mesuré en nombre de lectures, pas en temps ;
+    - le reste est exact : 1 appel, 6 lectures avant, 7 sans crédit, 8 avec (le test passe) ; module de 41 952 à 50 893 octets, mesuré ; +38 octets dans le corps.
+
+---
+
+## Tests
+
+- **Lot** : 120/120 verts, et aussi avec l'horloge décalée de 4, 30, 60, 200 et 400 jours.
+- **Suite complète** dans la copie `/tmp` : 8952 tests, 3 rouges. Ces 3 rouges viennent de la copie, pas du lot : ils ont besoin d'un dépôt git, sont rouges aussi sur la base dans la même copie, et verts dans le worktree (`reponse-partenaire-execution`, `v2-marche-aucune-ecriture-calendrier` : 16/16). Aucun rouge ne vient du lot.
+- **Contre-épreuve** : les tests neufs, lancés sur le code de `8680ab56`, rougissent tous.
+
+| Fichier de test | Rouges sur le code d'avant |
+|---|---|
+| tableau | 1/1 |
+| credit | 10/10 |
+| migration | 1/1 |
+| écran | 3 |
+| endpoint | 3 |
+| cron | 1 |
+| page | 6 |
+
+- **Mutations détectées** par au moins un test :
+  - filtre de compte retiré : logement, lecture et `delete` de la suppression, `delete` du défaire, crédit lu par le cron, marquage, empreinte, comptage, les deux lectures de l'écran ;
+  - capital compté dans la charge ;
+  - ligne fausse acceptée ;
+  - gardes `credit_automatique` de `valider` et `supprimer` ;
+  - défaire retiré ;
+  - entité archivée, logement hors entité ;
+  - `ignoreDuplicates` ;
+  - page sans en-tête ;
+  - déblocage gardé ;
+  - filtre `materialisee_le` ;
+  - bornes de taille et de pages ;
+  - base64 ;
+  - `detail` perdu ;
+  - côté écran : capital oublié, échéance sans capital, mauvais mois, fiche non figée, Supprimer visible, suppression sans confirmation, entité non choisie d'office, date de la ligne perdue.
+
+## Migration (Postgres 16, copie `t_rvcredit` de `t11`, effacée ensuite)
+
+- Contrôle avant : `f, f, f, f`. Après : 5 × `t`.
+- Rejeu sans erreur.
+- Toutes les lignes font moins de 60 caractères (le test le tient).
+- Le vérificateur du résumé rend 0 écart : 10 310 cellules au départ, 10 312 après les insertions, 10 310 après la suppression en cascade.
+- **Scénarios SQL**, tous conformes :
+
+| Cas | Résultat |
+|---|---|
+| Crédit de A sur l'entité de B | refusé (FK) |
+| Crédit de A sur le logement de B | refusé (trigger) |
+| Échéance de A au compte de B | refusé (FK) |
+| Échéance fausse d'un centime | refusé (check) |
+| Charge de B sur le crédit de A | refusé (FK) |
+| Catégorie `credit` en insert ou update ordinaire | refusé |
+| Origine `credit` sans crédit | refusé |
+| Même empreinte, compte A | refusé |
+| Même empreinte, compte B | accepté |
+| `ON CONFLICT (credit_id, credit_indice) DO NOTHING` rejoué | `INSERT 0 0` |
+| Suppression du crédit | 0 charge, 0 échéance restantes |
+
+- `charges_totaux` rend la catégorie `credit` (HT égal au TTC, TVA à 0).
+
+## Vérifié sans constat
+
+- Filtre de compte sur chaque requête du writer, de l'écran et du cron.
+- Chemin de stockage `<compte>/credit-<uuid>`, choisi par le serveur, aucun balayeur du bucket.
+- Endpoint réservé au titulaire, en-têtes privés posés avant le 405.
+- Catégorie `credit` hors de la liste fermée : refusée par `valider` et par la lecture IA, et en base.
+- Le cron écrit avec le compte du crédit, et la FK le garantit.
+- Course import / cron : aucune double charge.
+- Reprise des échéances déjà matérialisées : rejouable.
+- Lecture du tableau : en-têtes sur deux lignes, page sans en-tête, ligne de total, orientation tournée.
+- Une ligne fausse est nommée par sa date.
+- Formulaire : base64, entité choisie d'office, logement facultatif.
+- Suppression avec confirmation.
+- Fiche d'une échéance figée (ni Voir, ni Supprimer, ni Valider).
+- Bon mois et bonne somme, capital à part.
+- i18n : fr, en et es à 1597 clés.
+- `node -c` sur les fichiers serveur.
+````
+
+**Corrections.** S1 est un constat de sécurité : ses correctifs passent
+**une seconde review, limitée à leur diff**.
+
+| Constat | Correction |
+|---|---|
+| S1 | **La lecture tourne dans un fil à usage unique** (`fil-isole.js`), un seul à la fois par instance, deux en attente au plus. 20 s au plus, attente comprise ; tas borné à 256 Mo ; fil tué après un tableau. Au-delà : refus `tableau_illisible` ; occupé : 503. **Les flux compressés sont bornés avant pdf.js** : chaîne des filtres suivie (ASCII85, ASCIIHex, Flate), 4 Mo par flux et 16 Mo pour tous ; un flux Flate que zlib refuse, ou un filtre LZW ou RunLength, fait refuser le PDF. Mesuré : une bombe de 408 Ko (400 Mo décompressés) est refusée en **38 ms** ; le vrai tableau se lit en 371 ms dans le fil. Tests : la bombe (et sa version tronquée), le total, les filtres, un fil muet refusé « trop long » et tué, jamais deux fils vivants, l'occupation. Non fait : le plafond d'imports refusés par compte et par jour — chaque essai est désormais borné en temps et en mémoire. ⚠ **Cette dernière phrase était FAUSSE** (seconde review, ci-dessous) : le tas était borné, pas la mémoire. |
+| B1 | « Payée » seulement pour une échéance **échue** au jour du serveur (Paris) ; sinon « Crédit, mensualité à venir ». Test avec une échéance le 22 et le 19 pour aujourd'hui. |
+| 1 | `defaire` journalise l'échec de son effacement et garde alors le fichier avec sa ligne ; un insert ambigu défait le crédit. La transaction (une fonction SQL) est notée en dette. |
+| 2 | Le cron saute un crédit en panne, le compte et le remonte (`erreurs`), sans arrêter les autres. Test. |
+| 3 | Une ligne sans rien à payer ni à amortir est écartée avant toute preuve, même avec des cellules vides. Test. |
+| 4 | Une ligne datée ne compte que si elle porte au moins trois montants. Test avec une « Date d'effet » au-dessus du tableau. |
+| 5 | Messages propres au crédit : plus de 2 Mo, PDF seul, entité qui rembourse ; et « occupé ». |
+| 6 | Le contrôle vérifie aussi les garde-fous (somme, clés, unicité, trigger, empreinte, colonnes des échéances) et l'absence de droits pour `anon` et `authenticated`. La ligne 7 est annoncée comme une information. Mesuré : 7 lignes, false avant et true après, et false si un droit est donné par erreur. |
+| 7 | Tri total (`indice` ajouté) ; test à 1 001 lignes sur deux pages. |
+| 8 | Tests ajoutés : échéance du jour à l'import, dates qui reculent, montant négatif, cellule de capital absente, plus de 1 000 lignes (422), logement envoyé par l'écran. |
+| 9 | `package-lock.json` reprend son nom (`hotesmart`). Pour `unpdf` et Node 24 : à vérifier en recette, noté dans la spec. |
+| 10 | Case PERFORMANCE corrigée : 8 règles CSS ; pagination testée ; temps de lecture mesurés ; poids du module et du corps remesurés. |
+
+#### Seconde review du lot crédit (19 novembre 2026), limitée aux correctifs
+
+**Arbre et plage.** Arbre `/home/claude/hotesmart-credit`, branche
+`charges-credit`, tête lue `beaa9ecdfc60d9136cb615524045bb5aaabdee9a`, plage
+`9cde8a7dd2dd67ab5cb94429f4752241ad5c8d58..beaa9ecdfc60d9136cb615524045bb5aaabdee9a`.
+⚠ **Le brief portait d'abord une base FAUSSE** (`9cde8a7d1ec4…`), tapée de
+mémoire au lieu d'être copiée depuis `git rev-parse` — le défaut déjà noté au
+§14.14. Corrigée par message pendant la review ; la review a relu `HEAD~1..HEAD`
+et l'a confirmé. Les 17 fichiers qu'elle cite sont ceux du diff.
+
+Verbatim :
+
+````
+Tête lue : `beaa9ecdfc60d9136cb615524045bb5aaabdee9a` (branche `charges-credit`). La base du brief ne correspondait pas à HEAD~1. J'ai donc relu HEAD~1..HEAD, soit `9cde8a7dd2dd67ab5cb94429f4752241ad5c8d58..beaa9ecd…`, ce que ta correction confirme. L'arbre n'a pas été modifié (`git status` vide).
+
+`git diff --name-only` :
+api/ecran/charges.js
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/credit-tableau-fil.js
+lib/charges/credit-tableau.js
+lib/charges/ecran.js
+lib/charges/fil-isole.js
+migrations/2026-11-19-controle-charges-credits.sql
+shared/charges-vue.js
+shared/i18n/en.json
+shared/i18n/es.json
+shared/i18n/fr.json
+tests/charges-credit-tableau.test.js
+tests/charges-credit.test.js
+tests/charges-ecran.test.js
+tests/charges-page.test.js
+
+## SÉCURITÉ — S1 n'est pas fermé (lib/charges/credit-tableau.js:259-290, lib/charges/fil-isole.js)
+
+Le fil ne gèle plus la boucle principale : le décalage mesuré reste à 96 ms au plus. En revanche, la mémoire n'est toujours pas bornée. `resourceLimits` ne compte pas les tampons de pdf.js, et `fluxSousBorne` se contourne. Mesures avec `lireTableauIsole` réel, pic RSS du processus appelant :
+
+| PDF piégé (taille) | `fluxSousBorne` | durée | pic RSS |
+|---|---|---|---|
+| Flate déclaré en clair (1,5 Mo) | refusé | 66 ms | 62 Mo |
+| clé `/F /FlateDecode` (pdf.js lit `get('F','Filter')`) | `null` | 8,6 s | **4,6 Go** |
+| `/Filter 8 0 R` (référence indirecte) | `null` | 7,3 s | 4,6 Go |
+| nom échappé `/F#6CateDecode` | `null` | 7,5 s | 4,6 Go |
+| `stream\r` (CR seul) | `null` | 11,4 s | 4,6 Go |
+| `stream  \n` (espaces avant LF) | `null` | 10,2 s | 4,6 Go |
+| leurre `(/Filter /DCTDecode)` dans une chaîne du dictionnaire | `null` | 8,0 s | 4,6 Go |
+| « endstream » dans un bloc stocké, `/Length` juste | `null` | 14,6 s | **5,7 Go** |
+| `/BrotliDecode` (pdf.js 5 le décode), **2 Ko** | `null` | 11,8 s | 4,6 Go |
+| en-tête `7 0\nobj` précédé d'un flux DCT | `null` | 8,7 s | 4,6 Go |
+| **filtres en règle** : un flux de 3,9 Mo répété 600 fois dans `/Contents` (**8 Ko**) | `null` | — | **processus tué (OOM, 5,4 Go)** |
+| le même, répété 250 fois (5,8 Ko) | `null` | 9,7 s | 3,0 Go |
+| LZW | refusé | 70 ms | — |
+| 80 pages sur un même flux de 3,9 Mo | `null` | 2,8 s | 127 Mo |
+
+La dernière ligne grave montre que même un pré-contrôle parfait ne suffirait pas : `/Contents` peut répéter un flux légal. Tout reste sous les 20 s, donc le délai ne coupe rien. La phrase de la spec « chaque essai est désormais borné en temps et en mémoire » est fausse.
+
+**Correction proposée.** Une garde mémoire dans le fil principal de `lancer` : relever `process.memoryUsage.rss()` toutes les 25 ms, et terminer le fil avec `PanneFil('memoire')` au-delà de la base + 512 Mo. Je l'ai prototypée dans une copie sous /tmp :
+- tous les PDF piégés sont refusés `trop_lourd` en 1,5 à 2,6 s, pic à 563 Mo au plus ;
+- le vrai tableau se lit toujours (563 ms, 119 Mo).
+
+Garder `fluxSousBorne` comme premier filtre, mais le rendre fail-closed : refuser `/F`, un `/Filter` indirect, `#` dans les noms, tout filtre inconnu (pas `break`), et tout `stream` qui n'est pas suivi de LF ou CRLF.
+
+## MINEUR
+
+1. **lib/charges/fil-isole.js:82 et :61 — la place se libère avant que le fil soit mort.** `terminate()` n'est pas attendu, donc le fil suivant démarre pendant que l'ancien meurt. Mesuré avec trois bombes en file : 2,6 Go contre 1,6 Go pour une seule. Avec `fil.terminate().finally(geste)`, prototypé : 1,6 Go. Le test « jamais deux fils vivants » passe parce que le `terminate` de son double est synchrone.
+2. **fil-isole.js:45 et :56, puis credit-tableau.js:340 — une attente expirée dans la file devient un refus.** Elle devient `delai`, puis 422 `tableau_illisible/trop_long`. Un hôte honnête placé derrière un PDF de 20 s voit son tableau refusé comme illisible. Il devrait recevoir `occupe` (503, réessayer).
+3. **Deux fils lourds par instance.** HEIC (`lib/charges/heic.js`) et crédit ont chacun leur file. Le « un seul à la fois par instance » de la documentation est faux.
+4. **migrations/2026-11-19-controle-charges-credits.sql:63-88 — le contrôle se contente de noms.** Mesuré sur une copie de t11 :
+   - un trigger désactivé passe ;
+   - un index d'empreinte NON unique passe ;
+   - une contrainte `charges_credit_ech_somme_ck` réduite à `check (true)` passe ;
+   - un `grant select … to public` passe la ligne 6 (la RLS tient encore).
+
+   Correction : `tgenabled = 'O'`, `indexdef ilike 'create unique%'`, `pg_get_constraintdef` comparé, et `grantee in ('anon','authenticated','PUBLIC')`.
+5. **Trois mutations survivent aux tests :**
+   - `<=` changé en `<` (shared/charges-vue.js:313) : aucun test sur l'échéance du jour à l'écran ;
+   - ASCII85 ignoré (`break`) : le test n'a qu'un petit flux ;
+   - `Z_SYNC_FLUSH` retiré : le cas « tronquée » dépasse 4 Mo avant la coupure.
+
+## Vérifié sans constat
+
+- **Lisibilité :** le vrai tableau (16 pages) et `tableau-tourne.pdf` se lisent dans le fil, en 400 ms et 175 ms.
+- **B1 :** le jour de Paris vient du serveur et se compare en chaîne ISO, avec le même `<=` que l'import et le cron. Le repli sur le jour de l'appareil ne joue que si le champ manque, et l'écran n'a pas de cache navigateur. La mutation « jour de l'appareil » fait rougir un test.
+- **Écritures et cron :**
+  - pagination en ordre total ;
+  - `defaire` après un insert ambigu, filtré par compte ;
+  - le 23505 n'efface qu'un chemin propre à l'id ;
+  - le cron saute un crédit en panne, et la mutation `return` fait rougir un test.
+- **Messages et traçage :** les messages propres au crédit et `refus_occupe` sont en place ; le traçage par `require.resolve` suit le même schéma que HEIC.
+- **Contre-épreuve :** les 13 tests neufs rougissent contre la base ; 112/112 à la tête.
+- **Contrôle SQL :** 7 lignes à ok sur t11 après les deux migrations ; un grant à `authenticated` et une RLS coupée sont bien détectés. La base copiée `trev2credit` est effacée.
+
+Fichiers de travail, tous hors de l'arbre :
+- générateurs : /tmp/s1rev-scripts/gen.py et brotli.js ;
+- PDF piégés : /tmp/s1rev-pdfs ;
+- prototype de la garde mémoire : /tmp/s1rev-fix/lib/charges/fil-isole.js.
+````
+
+⚠ **CES CORRECTIFS NE SONT PAS RELUS.** C'est la seconde review du lot hors
+envoi au voyageur : la règle s'arrête là (CLAUDE.md, « Une review par
+commit »). Ils sont mesurés et testés, ci-dessous, et la décision d'une
+relecture de plus revient au chef de file et à Thierry.
+
+| Constat | Correction |
+|---|---|
+| S1 (mémoire) | **La garde mémoire, et le travail dans un PROCESSUS à usage unique, pas un fil.** Le processus principal relève la mémoire résidente de l'enfant (`/proc/<pid>/status`) toutes les 25 ms et le tue au-delà de sa borne : **512 Mo** pour un tableau, **1 Go** pour une photo (une vraie photo de 48 Mpx monte à ~790 Mo). Pourquoi un processus et non la garde prototypée sur un fil : **mesuré après la review**, un fil terminé ne rend pas sa mémoire au système. Huit tours « PDF piégé, photo 48 Mpx, vrai tableau » dans un même processus laissaient **1,7 Go résidents, pic à 2,4 Go** — au-delà des 2 Go d'une fonction, sans qu'aucun travail n'ait dépassé sa borne. Les mêmes huit tours en processus : **67 à 143 Mo résidents, pic à 922 Mo**. Un tas JavaScript plein fait avorter l'enfant : lu `memoire`. Hors de Linux, la garde ne voit rien, et le journal le dit. |
+| S1 (pré-contrôle) | **`fluxSousBorne` fermé par défaut** : clé `/F`, `/Filter` indirect, répété ou en tableau qui n'est pas fait de noms, nom échappé (`#`), commentaire ou chaîne déséquilibrée dans le dictionnaire, `stream` sans LF ou CRLF → `flux_suspect` ; tout filtre inconnu (Brotli compris) → `filtre_non_pris` ; un filtre d'image (DCT, JPX, CCITT) hors d'une `/Subtype /Image` → `filtre_non_pris`. Et quatre lectures fidèles à pdf.js : les chaînes du dictionnaire sont retirées avant lecture (le leurre ne compte plus) ; l'étendue d'un flux vient de `/Length` (direct ou indirect) quand elle tombe sur `endstream` ; le dictionnaire part du dernier en-tête `N G obj`, quelle que soit sa mise en page ; le mot `stream` est lu comme le lexeur de pdf.js le lit. L'en-tête zlib est vérifié comme pdf.js le vérifie, et la somme de contrôle de fin ne l'est pas (pdf.js ne la lit pas). ⚠ **Ce n'est pas un analyseur, et la spec ne dit plus qu'il borne** : il refuse vite ce qui se voit ; la borne, c'est la garde. |
+| 1 | La réponse — donc la place dans la file — ne part qu'une fois l'enfant MORT. Un enfant qui ne meurt pas en 2 s ne bloque pas la file pour toujours : la place se libère, le journal le dit. Test : le second naît après la mort du premier, avec un `terminate` lent. |
+| 2 | Un travail qui expire dans la file, OU qui a attendu et n'a pas tenu le reste de son délai, rend `occupe` (503, réessayer) — jamais `trop_long`. Seul un travail qui a eu son délai entier peut être « trop long ». Test des trois cas. |
+| 3 | **Une seule file pour les deux familles** : `FILE_LOURDE` (lib/charges/fil-isole.js), que `convertirIsole` (HEIC) emprunte désormais aussi. Un seul enfant lourd par instance, deux en attente. C'est aussi ce qui garde la borne de mémoire de la fonction : base + 1 Go au plus. Test : deux photos et deux tableaux demandés ensemble, jamais deux enfants vivants, le quatrième « occupé ». ⚠ **Ce correctif touche le lot HEIC** (`lib/charges/heic.js`, `heic-fil.js`, un test) : le lot HEIC seul garde sa file à lui, cohérent ; mergé après lui, le crédit la remplace. |
+| 4 | Le contrôle lit chaque garde-fou à sa DÉFINITION : index uniques (`create unique index`), somme écrite terme à terme, clés comparées, cascade, trigger `tgenabled = 'O'`, aucun droit à `anon`, `authenticated` ni `PUBLIC`. Neuf lignes, la 9 informative. **Mesuré sur une copie de la base, un sabotage à la fois** : trigger désactivé → ligne 7 ; empreinte non unique → 7 ; somme réduite à `check (true)` → 5 ; `grant select … to public` → 8 ; index d'échéance non unique → 4 ; clé sans cascade → 6 ; sans sabotage, tout à `t`. |
+| 5 | Trois tests : l'échéance DU JOUR se dit « payée » à l'écran ; ASCII85 devant une bombe la fait refuser ; un flux tronqué se lit sans refus (et une somme de contrôle fausse aussi, un en-tête faux non). |
+
+**Mesures, `lireTableauIsole` réel, pic parent + enfant :**
+
+| PDF | pré-contrôle | avec le pré-contrôle | pré-contrôle neutralisé (la garde seule) |
+|---|---|---|---|
+| vrai tableau (16 pages, 301 échéances) | passe | lu, 416 ms, 142 Mo | — |
+| `tableau-tourne.pdf` | passe | lu, 165 ms, 110 Mo | — |
+| v0 Flate en clair | `flux_trop_gros` | 63 ms, 88 Mo | `trop_lourd`, 1,7 s, 568 Mo |
+| v1 clé `/F` | `flux_suspect` | 60 ms, 88 Mo | `trop_lourd`, 1,7 s, 557 Mo |
+| v2 filtre indirect | `flux_suspect` | 60 ms, 87 Mo | `trop_lourd`, 1,7 s, 556 Mo |
+| v3 nom échappé | `flux_suspect` | 63 ms, 87 Mo | `trop_lourd`, 1,8 s, 555 Mo |
+| v4 CR seul | `flux_suspect` | 67 ms, 88 Mo | `trop_lourd`, 1,8 s, 567 Mo |
+| v5 espaces avant LF | `flux_suspect` | 63 ms, 87 Mo | `trop_lourd`, 1,8 s, 563 Mo |
+| v6 leurre dans une chaîne | `flux_trop_gros` | 79 ms, 93 Mo | `trop_lourd`, 1,8 s, 561 Mo |
+| v7 « endstream » caché | `flux_trop_gros` | 62 ms, 88 Mo | `trop_lourd`, 1,8 s, 568 Mo |
+| v8 Brotli | `filtre_non_pris` | 52 ms, 79 Mo | `trop_lourd`, 2,6 s, 554 Mo |
+| v9 LZW | `filtre_non_pris` | 57 ms, 79 Mo | — |
+| v10 en-tête coupé | `flux_trop_gros` | 63 ms, 93 Mo | `trop_lourd`, 1,9 s, 566 Mo |
+| **v11 contenu répété 600 fois (8 Ko)** | passe | **`trop_lourd`, 1,2 s, 563 Mo** | `trop_lourd`, 1,3 s, 555 Mo |
+| v12 80 pages, un flux | passe | « aucune échéance », 3,0 s, 147 Mo | — |
+
+Photos, sous la même file : une photo de 48 Mpx (7 Mo) convertie en 3,8 s,
+pic 847 Mo ; quatre demandées ensemble — 48 Mpx, 12 Mpx, 49 Mpx bruitée,
+48 Mpx — : les trois premières converties l'une après l'autre (3,9 / 5,7 /
+13,7 s, sous les 15 s comptées depuis l'appel), la quatrième « occupée » en
+74 ms, pic 998 Mo.
+
+Ce qui reste, et c'est dit : un PDF honnête qui porterait une police nommée
+exactement `/F`, une chaîne `( stream )` hors d'un flux, ou un nom échappé dans
+un dictionnaire de flux serait refusé `flux_suspect` (« fermé par défaut »). Un
+PDF chiffré était déjà refusé (`flux_illisible`). Le plafond d'imports refusés
+par compte et par jour reste en dette : chaque essai coûte désormais au plus
+20 s et 512 Mo, une fois, sur une instance.
 
 ## 12. Trace des reviews du lot 2
 

@@ -138,3 +138,60 @@ test('confirmer sous le plafond : la lecture a lieu tout de suite', async () => 
   assert.equal(appels, 1)
   assert.equal(r.charge.issue, 'panne')
 })
+
+// ─── Les crédits (§14.20) ───────────────────────────────────────────────────
+test('credit_importer : sans fichier 400, base64 invalide 400, trop gros 413 — AVANT toute requête', async () => {
+  const { CREDIT_PDF_MAX } = require('../lib/charges')
+  for (const [fichier, statut, code] of [
+    [undefined, 400, 'fichier_requis'],
+    ['%%% pas du base64 %%%', 400, 'fichier_invalide'],
+    ['A'.repeat(Math.ceil(CREDIT_PDF_MAX / 3) * 4 + 8), 413, 'trop_gros']
+  ]) {
+    const r = await appeler({ corps: { action: 'credit_importer', fichier, preteur: 'B', entite_id: ID } })
+    assert.deepEqual([r.statut, r.charge.error], [statut, code], code)
+    assert.equal(r.requetes.length, 0, code)
+    assert.equal(r.gestes.length, 0, code)
+  }
+})
+
+test('credit_supprimer : le crédit est cherché DANS le compte du titulaire', async () => {
+  const r = await appeler({ corps: { action: 'credit_supprimer', id: ID }, repondre: () => ({ data: null }) })
+  assert.deepEqual([r.statut, r.charge.error], [404, 'credit_introuvable'])
+  const lu = r.requetes.find(q => q.table === 'charges_credits')
+  assert.ok(lu.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id' && f[2] === TITULAIRE))
+  assert.equal(r.requetes.filter(q => q.op === 'delete').length, 0)
+})
+
+test('LE TEST QUI COMPTE : un refus du writer porte sa LIGNE fautive jusqu\'à l\'écran (`detail`), et les autres refus n\'en ont pas', async () => {
+  const absWriter = require.resolve('../lib/charges')
+  const absEndpoint = require.resolve('../api/charges')
+  const vrai = require('../lib/charges')
+  const recu = []
+  const faux = Object.assign({}, vrai, {
+    importerCredit: async (db, args) => { recu.push(args); return { ok: false, statut: 422, code: 'ligne_incoherente', detail: '2023-06-22' } }
+  })
+  const absGarde = require.resolve('../lib/require-permission')
+  const vraieGarde = require(absGarde)
+  require.cache[absGarde].exports = Object.assign({}, vraieGarde, {
+    contexteDEcran: async () => ({ ok: true, accountUserId: TITULAIRE, userId: TITULAIRE, contexte: { userId: TITULAIRE, accountUserId: TITULAIRE, titulaire: true, estTitulaire: true } })
+  })
+  const absPerm = require.resolve('../lib/permissions')
+  const vraiePerm = require(absPerm)
+  require.cache[absPerm].exports = Object.assign({}, vraiePerm, { estTitulaireDuCompte: () => true })
+  delete require.cache[absEndpoint]
+  require.cache[absWriter].exports = faux
+  try {
+    const endpoint = require(absEndpoint)
+    const rep = { statut: null, charge: null }
+    const res = { setHeader () {}, status (s) { rep.statut = s; return res }, json (c) { rep.charge = c; return res } }
+    await endpoint({ method: 'POST', headers: {}, body: { action: 'credit_importer', fichier: Buffer.from('%PDF-1.7').toString('base64'), preteur: 'B', entite_id: ID, bien_id: null } }, res)
+    assert.deepEqual([rep.statut, rep.charge], [422, { error: 'ligne_incoherente', detail: '2023-06-22' }])
+    assert.equal(Buffer.compare(recu[0].octets, Buffer.from('%PDF-1.7')), 0, 'le PDF décodé, octet pour octet')
+    assert.deepEqual([recu[0].compte, recu[0].preteur, recu[0].entiteId, recu[0].bienId], [TITULAIRE, 'B', ID, null])
+  } finally {
+    require.cache[absWriter].exports = vrai
+    require.cache[absGarde].exports = vraieGarde
+    require.cache[absPerm].exports = vraiePerm
+    delete require.cache[absEndpoint]
+  }
+})
