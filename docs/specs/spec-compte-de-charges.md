@@ -1977,6 +1977,11 @@ Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 
   - `confirmerEnvoi` convertit le fichier relu **avant l'empreinte**
     (`lib/charges/heic.js`) : 2 000 px au plus, qualité 80, puis 65 et 50
     jusqu'à tenir sous les 7 Mo d'une image lue par l'IA.
+  - ⚠ **Les dimensions DÉCLARÉES sont bornées avant le décodage** : 50 Mpx au
+    plus. Le plus grand capteur de téléphone fait 48 Mpx. Sans cette borne,
+    un fichier de quelques Ko annonçant 20 000 × 20 000 demanderait 1,6 Go et
+    ferait tomber la fonction. La mémoire du décodeur est rendue dans tous
+    les cas.
   - Le JPEG **remplace** la photo au même chemin (`upload` avec `upsert`).
   - Ensuite, l'empreinte, les doublons, la lecture IA immédiate, le cron et la
     consultation ne voient qu'un JPEG. **Aucun HEIC n'est gardé.**

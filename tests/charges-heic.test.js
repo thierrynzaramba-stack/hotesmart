@@ -16,7 +16,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { heicEnJpeg, reduire, ConversionImpossible, COTE_MAX } = require('../lib/charges/heic')
+const { heicEnJpeg, decoderPremiere, reduire, ConversionImpossible, COTE_MAX, PIXELS_MAX } = require('../lib/charges/heic')
 const { typeReel } = require('../lib/charges/regles')
 
 const ECHANTILLON = fs.readFileSync(path.join(__dirname, 'fixtures', 'charges', 'deux-couleurs.heic'))
@@ -80,4 +80,20 @@ test('typeReel : les marques HEIC et HEIF sont reconnues, AVIF ne l\'est pas', (
   for (const m of ['mif1', 'msf1']) assert.equal(typeReel(ftyp(m)), 'image/heif', m)
   assert.equal(typeReel(ftyp('avif')), null)
   assert.equal(typeReel(ftyp('isom')), null, 'une vidéo MP4 n\'est pas une photo')
+})
+
+test('LE TEST QUI COMPTE (mémoire) : une photo qui DÉCLARE plus de 50 Mpx est refusée AVANT d\'être décodée, et la mémoire du décodeur est rendue', async () => {
+  const journal = []
+  const conteneur = (width, height) => Object.assign([{ width, height, decode: async () => { journal.push('decode'); return { width, height, data: new Uint8ClampedArray(4) } } }],
+    { dispose: () => journal.push('dispose') })
+  await assert.rejects(decoderPremiere({ buffer: Buffer.alloc(1) }, async () => conteneur(20000, 20000)),
+    (e) => e instanceof ConversionImpossible && e.motif === 'trop_grande')
+  assert.deepEqual(journal, ['dispose'], 'jamais décodée, toujours libérée')
+  journal.length = 0
+  await decoderPremiere({ buffer: Buffer.alloc(1) }, async () => conteneur(8064, 6048))
+  assert.deepEqual(journal, ['decode', 'dispose'], '48 Mpx (le plus grand capteur de téléphone) passe')
+  assert.ok(8064 * 6048 <= PIXELS_MAX)
+  // Le refus traverse heicEnJpeg tel quel : le motif reste lisible au journal.
+  await assert.rejects(heicEnJpeg(Buffer.alloc(1), { max: 1e7 }, { decode: (o) => decoderPremiere(o, async () => conteneur(20000, 20000)) }),
+    (e) => e.motif === 'trop_grande')
 })
