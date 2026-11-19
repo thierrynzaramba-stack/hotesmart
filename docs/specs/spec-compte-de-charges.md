@@ -1943,6 +1943,110 @@ Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 
 | 5 | Mesures de la review dans la case PERFORMANCE ; renvois vers §14.18 aux lignes 527 et 995 ; question ouverte fermée ; avertissement dans `2026-11-13-charges-periode.sql`. |
 
 
+### 14.19 Les photos HEIC converties par notre serveur (19 novembre 2026)
+
+**La demande.**
+- Recette du §14.16 sur staging : la photo d'une facture reçue par SMS
+  arrive en **HEIC**. C'est confirmé par l'écran de Thierry : « Photo HEIC :
+  ce navigateur ne sait pas la convertir ».
+- Chrome ne sait pas lire ce format, ni sur Android ni sur PC. La conversion
+  par le téléphone (§14.16) ne peut donc pas avoir lieu.
+- Thierry a choisi l'**option 2** : la conversion se fait sur **notre
+  serveur**.
+- Écartés :
+  - un service en ligne : il aurait reçu ses factures, et n'est gratuit que
+    pour quelques conversions par jour ;
+  - un décodeur dans la page : 2 à 3 Mo de plus à chaque envoi.
+
+**Ce qui change.**
+- **L'écran** essaie d'abord de réduire la photo, comme avant : Safari sait lire
+  le HEIC et envoie un JPEG.
+  - Si l'écran refuse le format (`code: 'type'`) et que le contenu est un
+    HEIC, la photo part **telle quelle**, annoncée et déposée en `image/heic`
+    (ou `image/heif`).
+  - On reconnaît un HEIC à son type, à son extension ou à ses premiers
+    octets : un HEIC nommé « .jpg » part aussi.
+  - Limite : 10 Mo, la même que le stockage.
+  - Une autre image illisible reste refusée, avec son message.
+- **Le serveur** : `TYPES` accepte `image/heic` et `image/heif` (10 Mo), avec
+  `convertir: 'image/jpeg'`.
+  - `typeReel` lit la marque principale de la boîte `ftyp` :
+    - `heic`, `heix`, `hevc`, `hevx`, `heim`, `heis` donnent un HEIC ;
+    - `mif1`, `msf1` donnent un HEIF ;
+    - `avif` n'est pas reconnu.
+  - `confirmerEnvoi` convertit le fichier relu **avant l'empreinte**
+    (`lib/charges/heic.js`) : 2 000 px au plus, qualité 80, puis 65 et 50
+    jusqu'à tenir sous les 7 Mo d'une image lue par l'IA.
+  - Le JPEG **remplace** la photo au même chemin (`upload` avec `upsert`).
+  - Ensuite, l'empreinte, les doublons, la lecture IA immédiate, le cron et la
+    consultation ne voient qu'un JPEG. **Aucun HEIC n'est gardé.**
+- **Les issues** :
+  - Photo impossible à convertir : effacée, ligne et fichier, refus **422
+    `conversion_impossible`**. L'écran dit : « Cette photo n'a pas pu être
+    convertie. Envoyez une capture d'écran de la facture, ou
+    enregistrez-la en JPEG ou en PDF. » (fr, en, es).
+  - Panne du stockage pendant le remplacement : rien n'est effacé ni écrit. La
+    ligne reste `envoi`, et la purge quotidienne la reprend.
+- **Le bucket** : migration `2026-11-19-charges-heic.sql`, qui ajoute
+  `image/heic` et `image/heif` à `allowed_mime_types`. Collée à la main, son
+  contrôle tient en une ligne.
+  - Ordre libre :
+    - avant le code, rien ne change ;
+    - le code sans elle fait refuser le dépôt par le bucket, comme avant le
+      lot.
+  - Après elle, la section 5 de `2026-11-09` ne se rejoue plus.
+- **Les dépendances** : `heic-decode` 2.1.0 (ISC) sur `libheif-js` 1.23.5
+  (LGPL-3.0, exécutée sur le serveur, jamais distribuée), et `jpeg-js` 0.4.4
+  (BSD-3).
+  - Chargées **à la demande** : un envoi PDF ou JPEG ne les paie pas.
+  - Le décodeur pèse 1,4 Mo de WebAssembly dans la fonction.
+- **Le message « Photo HEIC : ce navigateur ne sait pas la convertir »**
+  disparaît : aucun chemin ne le montre plus. Le message de taille dit
+  désormais « 10 Mo pour un PDF ou une photo HEIC, 7 Mo pour une autre
+  image ».
+
+**Mesures** (à la main, photos réelles hors dépôt) :
+- 1 280 × 854 : converti en **426 ms** ;
+- photo de 3 Mo (environ 4 032 × 3 024) : **2 000 × 1 499 en 1,9 s**, JPEG de
+  819 Ko, **373 Mo** de mémoire au plus.
+
+La fonction `api/charges.js` a 60 s ; la lecture IA qui suit prend 10 à 20 s.
+
+**Tests.**
+- `tests/charges-heic.test.js` décode un **vrai HEIC**, fabriqué pour le test
+  par `pillow-heif` 1.8.1 : 522 octets, moitié rouge, moitié bleue. Il relit
+  le JPEG obtenu, aux mêmes dimensions et aux mêmes couleurs.
+- `tests/charges-migration-heic.test.js` compare les types du bucket, du
+  serveur et de l'écran.
+- `tests/charges-writer.test.js` : conversion, refus 422, panne du stockage,
+  HEIC de plus de 10 Mo.
+- `tests/charges-page.test.js` : HEIC envoyé tel quel, HEIC nommé « .jpg »,
+  plus de 10 Mo, refus du serveur.
+
+**Case PERFORMANCE** (règle du dépôt, huit points) :
+1. Écran : sans objet. Aucun appel ajouté ; `/charges` se charge toujours par
+   `/api/ecran/charges` seul.
+2. Donnée non urgente : sans objet.
+3. Cache : sans objet.
+4. `private, no-store` : inchangé (`api/charges.js` n'est pas touché).
+5. Statiques : aucun fichier statique ajouté. Le décodeur vit dans la
+   fonction serveur, pas dans la page.
+6. Lecture tronquée : sans objet.
+7. Budget : l'affichage ne change pas. L'envoi d'un HEIC :
+   - coûte côté serveur la conversion mesurée ci-dessus (1,9 s pour une photo
+     de 3 Mo) ;
+   - côté téléphone, envoie la photo entière au lieu d'une réduction : 3 Mo au
+     lieu d'environ 0,8 Mo.
+   Les autres envois ne changent pas.
+8. Mesure AVANT / APRÈS :
+   - L'écran ne change pas : **1 appel, 7 requêtes, 681 octets** de
+     `/api/ecran/charges` (production, 18 novembre 2026), avant comme après.
+   - Le module `shared/charges-vue.js` passe de 41 359 à 41 952 octets
+     (+593, non compressé).
+   - L'envoi d'un HEIC passe de **0 appel** (refusé dans la page) à
+     **3 appels** : `envoi`, dépôt de la photo entière, `confirmer`. Ce sont
+     les mêmes que pour toute autre facture.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

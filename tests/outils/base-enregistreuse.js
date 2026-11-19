@@ -76,6 +76,7 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
         createSignedUrl: (chemin, s) => geste('createSignedUrl', [chemin, s],
           { data: { signedUrl: `https://stockage.test/lire/${chemin}` }, error: null }),
         download: (chemin) => geste('download', [chemin], { data: null, error: { message: 'absent' } }),
+        upload: (chemin, corps, o) => geste('upload', [chemin, corps, o], { data: { path: chemin }, error: null }),
         remove: (chemins) => geste('remove', [chemins], { data: [], error: null })
       }
     }
