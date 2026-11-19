@@ -32,13 +32,21 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 
 | Fichier | Rôle |
 |---|---|
-| `migrations/2026-11-13-charges-periode.sql` | `charges.type_document` (facture, régularisation, avoir, échéancier, avis d'impôt), `periode_debut` / `periode_fin` (les deux ou aucune, 366 jours au plus), avoir négatif seul ; colonnes étalées du résumé ; recalcul **par série** (compte × entité × logement × catégorie) sur une plage ; `charges_totaux` rend les deux lectures. **À coller APRÈS** `2026-11-10`. Contrôle : `migrations/2026-11-13-controle-charges-periode.sql` (10 lignes). |
+| `migrations/2026-11-13-charges-periode.sql` | `charges.type_document` (facture, régularisation, avoir, échéancier, avis d'impôt), `periode_debut` / `periode_fin` (les deux ou aucune, 366 jours au plus — **trois ans depuis `2026-11-19`**), avoir négatif seul ; colonnes étalées du résumé ; recalcul **par série** (compte × entité × logement × catégorie) sur une plage ; `charges_totaux` rend les deux lectures. **À coller APRÈS** `2026-11-10`. Contrôle : `migrations/2026-11-13-controle-charges-periode.sql` (10 lignes). |
+| `migrations/2026-11-19-charges-periode-longue.sql` | La borne de la période passe à **trois ans** (1 097 jours, `PERIODE_MAX_JOURS` : trois ans d'anniversaire à anniversaire), décision de Thierry du 19 novembre 2026. **À coller APRÈS** `2026-11-17` **et AVANT le déploiement** du code qui l'accepte ; après elle, `2026-11-13` ne se rejoue plus. Contrôle : `migrations/2026-11-19-controle-charges-periode-longue.sql` (2 lignes), puis le vérificateur. |
 | `migrations/2026-11-17-charges-avis-impot.sql` | L'avis d'impôt n'a pas de TVA (Q38, recette du 17 novembre 2026) : corrige les avis enregistrés, puis pose `charges_impot_ck` (HT = TTC, TVA = 0). **À coller APRÈS** `2026-11-13` **et APRÈS le déploiement** du code qui pose la règle sur l'environnement visé (l'ancien code écrit des avis sans HT ni TVA : la contrainte mettrait sa lecture en panne). Contrôle : `migrations/2026-11-17-controle-charges-avis-impot.sql` (2 lignes), puis le vérificateur. |
 | `lib/charges/regles.js` | `TYPES_DOCUMENT`, `periodeSaisie`, `signerMontants`, `montantsDuType` (avoir signé, avis d'impôt sans TVA), `centimesSignes` ; la lecture normalise type, période et solde. |
 | `lib/charges/lecture.js` | La consigne lit le type, la période couverte et, pour une régularisation, la consommation et le solde. |
 | `shared/charges-vue.js` | Fiche : type, période, aide par type, solde lu ; liste : type et période ; totaux : « Étalé » et « À la date » côte à côte (Q34). |
 
 ## Règles à ne pas perdre
+
+- **Une période dure au plus TROIS ANS** (1 097 jours, date de fin comprise ; Thierry, 19 novembre
+  2026 — un an au lot 7a). La même borne en trois endroits : la contrainte
+  `charges_periode_ck`, `PERIODE_MAX_JOURS` (serveur) et `controlePeriode`
+  (écran) ; `tests/charges-migration-periode-longue.test.js` les compare.
+  Au-delà, la facture se saisit en plusieurs, et une période lue trop longue
+  garde sa trace (`lecture_ia.periode_refusee`).
 
 - **Toute image que l'appareil sait lire part en JPEG** (Thierry, 19 novembre
   2026, factures reçues par SMS) : la conversion se fait dans le navigateur

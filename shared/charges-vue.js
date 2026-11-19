@@ -127,7 +127,8 @@ export const TYPES_DOCUMENT = ['facture', 'regularisation', 'avoir', 'echeancier
 
 /**
  * La période saisie, contrôlée comme le serveur (`periodeSaisie`) : les deux
- * bornes ou aucune, dans l'ordre, 366 jours au plus. Le code du refus, ou
+ * bornes ou aucune, dans l'ordre, trois ans (1 097 jours) au plus — la borne
+ * du serveur, `PERIODE_MAX_JOURS` (lib/charges/regles.js). Le code du refus, ou
  * `null`. Le serveur reste la garde : ceci évite seulement un aller-retour.
  */
 export function controlePeriode (debut, fin) {
@@ -135,7 +136,7 @@ export function controlePeriode (debut, fin) {
   const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))
   if (!ok(debut) || !ok(fin) || debut > fin) return 'periode_invalide'
   const jours = Math.round((Date.parse(fin + 'T00:00:00Z') - Date.parse(debut + 'T00:00:00Z')) / 86400000) + 1
-  return jours > 366 ? 'periode_trop_longue' : null
+  return jours > 3 * 365 + 2 ? 'periode_trop_longue' : null
 }
 
 /** La racine d'un groupe de doublons : la première facture, ou elle-même. */

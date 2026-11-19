@@ -144,15 +144,19 @@ test('LE TEST QUI COMPTE (Thierry, 18 novembre 2026) : sur une facture d\'ÉNERG
   assert.equal(c.demandes[0].messages[0].content[1].text, CONSIGNE)
 })
 
-test('une régularisation lue sur un an de relevés garde sa période ; lue sur plus de 366 jours, elle tombe à null MAIS garde sa trace', async () => {
+test('une régularisation lue sur un an de relevés garde sa période, et sur 374 jours aussi ; au-delà de trois ans, elle tombe à null MAIS garde sa trace', async () => {
   const regul = (debut, fin) => texte(JSON.stringify({ type_document: 'regularisation', montant_ttc: 5856.48, montant_ht: 4932.24, montant_tva: 924.24, solde_ttc: 1916.83, periode_debut: debut, periode_fin: fin }))
   const c = client(regul('2024-09-26', '2025-09-25'))
   const r = await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: c })
   assert.deepEqual([r.lu.periode_debut, r.lu.periode_fin, r.lu.periode_refusee], ['2024-09-26', '2025-09-25', null])
-  const c2 = client(regul('2024-09-20', '2025-09-28'))
+  // 374 jours : refusés au lot 7a, gardés depuis la borne de trois ans.
+  const c1 = client(regul('2024-09-20', '2025-09-28'))
+  const r1 = await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: c1 })
+  assert.deepEqual([r1.lu.periode_debut, r1.lu.periode_fin, r1.lu.periode_refusee], ['2024-09-20', '2025-09-28', null])
+  const c2 = client(regul('2021-09-20', '2025-09-28'))
   const r2 = await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: c2 })
-  assert.deepEqual([r2.lu.periode_debut, r2.lu.periode_fin], [null, null], '374 jours : au-delà de la borne de la base')
-  assert.deepEqual(r2.lu.periode_refusee, { debut: '2024-09-20', fin: '2025-09-28', motif: 'periode_trop_longue' })
+  assert.deepEqual([r2.lu.periode_debut, r2.lu.periode_fin], [null, null], 'quatre ans : au-delà de la borne de la base')
+  assert.deepEqual(r2.lu.periode_refusee, { debut: '2021-09-20', fin: '2025-09-28', motif: 'periode_trop_longue' })
   // Rien de lu : pas de trace inventée.
   const c3 = client(texte('{"montant_ttc": 12}'))
   const r3 = await lireDocument({ octets: PDF, type: 'application/pdf', compte: 'u1' }, { client: c3 })

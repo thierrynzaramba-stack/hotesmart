@@ -683,11 +683,11 @@ test('LE TEST QUI COMPTE (Q26) : valider un AVOIR écrit des montants NÉGATIFS,
   assert.equal(f.requetes.find(x => x.op === 'update').charge.montant_ttc_cents, 12000)
 })
 
-test('valider : la période (les deux bornes ou aucune, un an au plus) et le type sont contrôlés AVANT toute écriture', async () => {
+test('valider : la période (les deux bornes ou aucune, trois ans au plus) et le type sont contrôlés AVANT toute écriture', async () => {
   for (const [champs, code] of [
     [{ periode_debut: '2026-01-01' }, 'periode_invalide'],
     [{ periode_debut: '2026-03-01', periode_fin: '2026-02-01' }, 'periode_invalide'],
-    [{ periode_debut: '2026-01-01', periode_fin: '2027-01-02' }, 'periode_trop_longue'],
+    [{ periode_debut: '2026-01-01', periode_fin: '2029-01-02' }, 'periode_trop_longue'],
     [{ type_document: 'devis' }, 'type_invalide']
   ]) {
     const { client, requetes } = baseEnregistreuse(chargeAVerifier())
@@ -702,6 +702,22 @@ test('valider : la période (les deux bornes ou aucune, un an au plus) et le typ
   { entites: entitesDouble({ entites: [E1] }) })
   const maj = requetes.find(x => x.op === 'update')
   assert.deepEqual([maj.charge.type_document, maj.charge.periode_debut, maj.charge.periode_fin], ['avis_impot', '2026-01-01', '2026-12-31'])
+})
+
+test('valider ÉCRIT une période de trois ans d\'anniversaire à anniversaire (1 097 jours, décision du 19 novembre 2026) — et pas un jour de plus', async () => {
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier())
+  const r = await charges.valider(client, { compte: COMPTE, valideur: COMPTE, id: ID,
+    champs: { ...CHAMPS_OK, type_document: 'echeancier', periode_debut: '2026-01-01', periode_fin: '2029-01-01' } },
+  { entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(r.ok, true, JSON.stringify(r))
+  const maj = requetes.find(x => x.op === 'update').charge
+  assert.deepEqual([maj.periode_debut, maj.periode_fin], ['2026-01-01', '2029-01-01'])
+  const refus = baseEnregistreuse(chargeAVerifier())
+  const r2 = await charges.valider(refus.client, { compte: COMPTE, valideur: COMPTE, id: ID,
+    champs: { ...CHAMPS_OK, periode_debut: '2026-01-01', periode_fin: '2029-01-02' } },
+  { entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(r2.code, 'periode_trop_longue')
+  assert.equal(refus.requetes.filter(x => x.op === 'update').length, 0)
 })
 
 test('LE TEST QUI COMPTE (recette du 17 novembre 2026) : valider un AVIS D\'IMPÔT écrit HT = TTC et TVA = 0, quoi que l\'écran envoie', async () => {

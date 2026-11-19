@@ -485,7 +485,7 @@
   "charges.refus_origine_invalide": "The upload could not start. Try again.",
   "charges.refus_pas_a_lire": "This invoice has already been read. Reload the page.",
   "charges.refus_periode_invalide": "The period needs a start and an end, in order.",
-  "charges.refus_periode_trop_longue": "A period lasts one year at most: enter several invoices.",
+  "charges.refus_periode_trop_longue": "A period lasts three years at most: enter several invoices.",
   "charges.refus_sans_justificatif": "This invoice has no document.",
   "charges.refus_siret_invalide": "The SIRET number is not valid.",
   "charges.refus_statut_non_validable": "This invoice cannot be checked in its current state.",

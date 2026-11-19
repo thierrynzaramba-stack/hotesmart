@@ -485,7 +485,7 @@
   "charges.refus_origine_invalide": "No se pudo iniciar el envío. Inténtelo de nuevo.",
   "charges.refus_pas_a_lire": "Esta factura ya se ha leído. Recargue la página.",
   "charges.refus_periode_invalide": "El periodo necesita un inicio y un fin, en orden.",
-  "charges.refus_periode_trop_longue": "Un periodo dura como máximo un año: introduzca varias facturas.",
+  "charges.refus_periode_trop_longue": "Un periodo dura como máximo tres años: introduzca varias facturas.",
   "charges.refus_sans_justificatif": "Esta factura no tiene justificante.",
   "charges.refus_siret_invalide": "El SIRET no es válido.",
   "charges.refus_statut_non_validable": "Esta factura no se puede validar en su estado.",
