@@ -457,4 +457,22 @@ test('le bord : 16 jours tout juste → non ; une seconde de plus → oui ; et l
   assert.equal(drapeau(masque('texte', { content: 'Super' }), T0 + 30 * 86400000), false)
   // Booking n'a pas de double aveugle : jamais « pas d'avis », même avec `cache` vrai.
   assert.equal(drapeau(masque('booking', { ota: 'booking', overall_score: 8 }), T0 + 30 * 86400000), false)
+  // Un objet masqué qui ne porte qu'un texte public, ou qu'un retour privé, n'est pas vide.
+  assert.equal(drapeau(masque('public', { content_public: 'Super' }), T0 + 30 * 86400000), false)
+  assert.equal(drapeau(masque('prive', { content_private: 'Merci' }), T0 + 30 * 86400000), false)
+})
+
+// La règle elle-même, sans passer par l'assemblage : un objet VIDE d'une autre
+// source n'atteint jamais `avisPourCarte` (l'assemblage l'écarte comme objet
+// vide), donc seul un appel direct prouve que `estMasque` mord encore (constat 3
+// de la relecture du 19 novembre 2026).
+test('la règle seule : un objet vide Booking, une saisie manuelle → jamais « pas d’avis », même avec `cache` vrai', () => {
+  const { sansAvisDuVoyageur } = require('../lib/avis/cartes')
+  const RECU = '2026-11-01T10:00:00Z'
+  const tard = Date.parse(RECU) + 30 * 86400000
+  const vide = extra => ({ provider: 'channex', ota: 'airbnb', cache: true, overall_score: 0, content: null, content_public: null, received_at: RECU, ...extra })
+  assert.equal(sansAvisDuVoyageur(vide(), tard), true, 'témoin : l’objet Airbnb vide et ancien')
+  assert.equal(sansAvisDuVoyageur(vide({ ota: 'booking' }), tard), false)
+  assert.equal(sansAvisDuVoyageur(vide({ provider: 'manuel', ota: null }), tard), false)
+  assert.equal(sansAvisDuVoyageur(vide(), NaN), false, 'sans `maintenant`, on ne conclut rien')
 })

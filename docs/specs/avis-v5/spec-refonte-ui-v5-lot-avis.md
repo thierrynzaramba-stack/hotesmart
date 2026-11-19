@@ -682,46 +682,122 @@ touché. Aucune lecture nouvelle. Le budget de l'écran est inchangé
 **Tests.** `tests/avis-cartes-endpoint.test.js` vérifie, par l'endpoint, qu'un
 avis masqué à 16,5 jours est `sans_avis`, et qu'un avis à 15,5 jours, sans date
 ou révélé ne l'est pas (âges à un demi-jour du seuil, pour que ni la granularité
-ni l'horloge décalée ne les fassent basculer). Un test sur la fonction pure, à
+ni l'horloge décalée ne les fassent basculer). Un test de l'assemblage, à
 `maintenant` figé, tient le bord : 16 jours tout juste → non, une seconde de
 plus → oui ; une date sans fuseau lue en UTC ; `cache` absent, objet avec note,
-objet avec texte, avis Booking → non. `tests/avis-cartes-dom.test.js` vérifie
-le texte sans cadenas, sur la carte et sur la ligne « À traiter ».
+avec texte, avec seulement un texte public ou un retour privé → non. Un test de
+la règle seule (`sansAvisDuVoyageur`, exportée pour lui) tient ce que
+l'assemblage ne peut pas montrer : un objet vide Booking ou une saisie manuelle
+n'atteignent jamais la règle par l'assemblage, qui les écarte comme objets
+vides ; appelée directement, elle répond non. `tests/avis-cartes-dom.test.js`
+vérifie le texte sans cadenas, sur la carte et sur la ligne « À traiter ».
 
-Contre-épreuves : les quatre tests neufs rougissent contre `main` ; contre
-`d3adfb25` (le seuil à 14 jours), les deux tests de l'endpoint rougissent, les
-deux tests d'écran passent — attendu, l'écran n'a pas changé. Cinq mutations,
-chacune rougit le test du bord (lancé en `TZ=Europe/Paris`) : retirer
+Contre-épreuves : les tests neufs rougissent contre `main`. Mutations, chacune
+rougit au moins un test (lancées en `TZ=Europe/Paris`) : retirer
 `cache === true`, retirer l'exigence d'objet vide, lire la date par
-`Date.parse` au lieu d'`instantUTC`, `>` devenu `>=`, marge à zéro.
+`Date.parse` au lieu d'`instantUTC`, `>` devenu `>=`, marge à zéro (relecture 1
+et 2) ; retirer `estMasque`, ne lire que `content`, oublier `content_private`,
+ajouter le cadenas sur la ligne « À traiter » (les trois mutations qui
+survivaient à la relecture du 19 novembre).
 
-### Relecture (19 novembre 2026)
+### Première relecture (18-19 novembre 2026) — sans trace
+
+Agent distinct, plage
+`1a5ba3a56651769e11e552221da3b72dec8c13ee..d3adfb25f4f5b565165df9dd5babe273d3adfff0`.
+Aucun constat de sécurité. **Son rapport est perdu** : il n'a pas été écrit sur
+disque à son retour, et le contexte de la session a été compacté avant la copie.
+Le chef de file l'a refusée comme trace (19 novembre 2026) : une review sans
+trace sur disque ne compte pas. Ses correctifs sont au commit `c0583919` (seuil
+à 16 jours — décision de Thierry, option B —, conditions strictes, délai et date
+importés de `naissance.js`, KB corrigée, test du bord). La relecture ci-dessous
+la remplace et compte comme la première du lot.
+
+### Relecture du 19 novembre 2026 — rapport recopié tel quel
 
 Agent distinct, lecture seule. Arbre `/home/claude/hotesmart-avis-sans-avis`,
 branche `avis-sans-avis`, plage
-`1a5ba3a56651769e11e552221da3b72dec8c13ee..d3adfb25f4f5b565165df9dd5babe273d3adfff0`.
-**Aucun constat de sécurité** : rien de l'avis masqué ne sort de plus, pas
-d'injection dans le rendu.
+`1a5ba3a56651769e11e552221da3b72dec8c13ee..c0583919d13343a6a14c825dfad89aa0a1e10a1c`.
+Trace sur disque : `/home/claude/revues/avis-sans-avis-relecture-2026-11-19.md`
+(hors dépôt), écrite par l'agent à son retour.
 
-⚠ **Le rapport n'est PAS recopié tel quel ici, contrairement à la règle.** Je ne
-l'ai pas écrit sur disque à son retour, et le contexte de ma session a été
-compacté avant que je le recopie : son texte intégral est perdu. Ce qui suit
-est mon relevé des cinq constats, pas le texte de la relecture. Déclaré au chef
-de file à la remise.
+Arbre lu : `/home/claude/hotesmart-avis-sans-avis` · branche `avis-sans-avis` · tête lue (`git rev-parse HEAD`) `c0583919d13343a6a14c825dfad89aa0a1e10a1c` · plage `1a5ba3a56651769e11e552221da3b72dec8c13ee..c0583919d13343a6a14c825dfad89aa0a1e10a1c` (d3adfb25, c0583919 ; 9 fichiers : `core/avis/cartes.js`, `docs/kb/avis-voyageurs.md`, `docs/specs/avis-v5/spec-refonte-ui-v5-lot-avis.md`, `lib/avis/cartes.js`, `shared/i18n/en.json`, `shared/i18n/es.json`, `shared/i18n/fr.json`, `tests/avis-cartes-dom.test.js`, `tests/avis-cartes-endpoint.test.js`). Aucun fichier du dépôt modifié ; mutations et contre-épreuves faites sur des copies `git archive` dans `/tmp`. `git status --short` final : `?? node_modules`.
 
-1. Le seuil de 14 jours tout juste peut annoncer « Pas d'avis » à un voyageur
-   qui a écrit au dernier moment, le temps de la transmission Channex. Question
-   produit → posée à Thierry, option B (2 jours de marge).
-2. `sans_avis` héritait de `estMasque`, qui traite un `cache` absent comme
-   masqué, et ne vérifiait pas que l'objet est vide. → exige `cache === true` et
-   un objet vide (`voyageurAEcrit`).
-3. Le délai et la lecture de la date étaient recopiés au lieu d'être importés :
-   `14 * JOUR_MS` et `Date.parse`, qui lit une date sans fuseau dans celui de la
-   machine. → `FENETRE_AIRBNB_MS` et `instantUTC` de `lib/avis/naissance.js`.
-4. Le commentaire d'`estObjetVide` et la KB (§12) affirmaient qu'Airbnb révèle
-   l'objet vide à 14 jours, ce que la mesure du 18 novembre contredit. → corrigés.
-5. Le test HTTP lit l'horloge et ne peut pas viser le bord ; son avis « vieux »
-   était à un jour du seuil. → test du bord sur la fonction pure à `maintenant`
-   figé, et âges à un demi-jour du seuil.
+**Aucun constat de sécurité.** `sans_avis` est un booléen ; l'avis reste `masque: true`, donc `note_sur_5`, `texte`, `texte_prive`, `extrait`, `traduction`, `verdict` et `analyse` restent nuls (`lib/avis/cartes.js:168-185`, inchangé). Le booléen est faux pendant toute la fenêtre Airbnb (avant 16 jours), donc il n'apprend rien pendant le double aveugle ; après, il dit seulement que l'objet est vide, ce qu'Airbnb aurait de toute façon rendu public. Le rendu n'insère qu'un texte i18n statique passé par `ECHAPPER` (`core/avis/cartes.js:280`, `:391`) : pas d'injection. Aucune lecture ni aucun champ lu en plus.
 
-Corrigés sans nouvelle relecture (aucun constat de sécurité).
+Ce qui a été mesuré :
+- La suite complète sur la tête : **8889 tests, 8889 verts, 0 rouge**.
+- Les deux fichiers de test touchés : 55/55 en `TZ=UTC`, `Europe/Paris` et `America/Los_Angeles`, et à horloge décalée (`tests/outils/horloge-decalee.js`) à J+1, 4, 15, 30, 60, 200 et 400. En `TZ=Pacific/Kiritimati`, un rouge (test « « À traiter » recoit les DETECTIONS », date de détection) : il est identique sur la base `1a5ba3a`, donc il ne vient pas du lot.
+- Contre-épreuves : contre la base `1a5ba3a`, les 4 tests neufs rougissent. La base est un ancêtre d'`origin/main`, et `main` n'a touché aucun fichier du lot depuis. Contre `d3adfb25`, les 2 tests de l'endpoint rougissent et les 2 tests d'écran passent. C'est ce que dit la spec §11.
+- Mutations (copie hors de l'arbre, `TZ=Europe/Paris`) : les cinq de la spec rougissent toutes. Rougissent aussi : `maintenant` non transmis à `avisPourCarte`, chacune des deux branches de `core/avis/cartes.js` retirée, marge passée à 3 jours. **Trois mutations survivent** (constats 3, 4 et 5).
+- Appelants : `assemblerCartes` est appelé deux fois, dans `api/avis.js` (`cartesLister`), et les deux appels passent `maintenant = Date.now()`. `/api/ecran/avis` passe par `cartesLister`. `avisPourCarte` n'est pas exporté. Aucun autre écran ne lit `masque` ni `avis.masque`. `sans_avis` n'entre dans aucun compte, et les chiffres viennent du résumé : aucun ne change. La fonction reste pure (temps injecté ; sans `maintenant`, le booléen vaut `false`, dans le sens prudent).
+- `node scripts/i18n-check.js` : 1564 clés en fr, en et es.
+
+1. **défaut** — `lib/avis/cartes.js:126-129` (commentaire d'`estObjetVide`), et la règle qu'il porte.
+   - **Ce qui se passe.** Le commentaire dit d'un avis masqué : « celui-là est un avis bel et bien déposé ». Le lot établit le contraire au-delà de 16 jours, quatre-vingts lignes plus haut dans le même fichier. Et la règle suit encore l'ancien commentaire : `estObjetVide` exempte tout objet masqué (`!estMasque(a)`). Un objet masqué, vide et âgé de plus de 16 jours, sans évaluation rattachée (départs d'août et septembre, avant la naissance des évaluations), garde donc **une carte à lui seul**. Cette carte dit « Pas d'avis du voyageur. » puis « Notre avis — Aucune évaluation du voyageur pour ce séjour. ». Pour un membre sans droit `reservations`, son en-tête dit en plus « reçu le 22 août 2026 », juste au-dessus de « Pas d'avis du voyageur ». Or la décision du 20 octobre 2026, citée dans ce même commentaire, dit qu'« un objet d'avis vide ne compte nulle part — compte, ratio, cartes ». Ces cartes comptent aussi dans `anciens_total`.
+   - **Comment je l'ai établi.** Lecture de `assemblerCartes` (filtre à la ligne 223) et des rendus `carte` et `infosDu` de `core/avis/cartes.js`.
+   - **Correction.** Corriger le commentaire (« sauf au-delà de `DELAI_SANS_AVIS_MS` : voir `sansAvisDuVoyageur` »). Et poser la question produit à Thierry : faut-il garder ces cartes, ou appliquer la règle du 20 octobre ? Pour l'appliquer, on retirerait, après l'assemblage, les cartes sans évaluation dont tous les avis sont `sans_avis`. Il ne faut pas filtrer à la ligne 223 : on retirerait alors l'avis des cartes qui ont une évaluation.
+
+2. **défaut** (document) — `docs/specs/avis-v5/spec-refonte-ui-v5-lot-avis.md:669-671` et `docs/kb/avis-voyageurs.md:969-975`.
+   - **Ce qui se passe.** La spec annonce que la phrase « Airbnb révèle l'objet au bout de 14 jours même si le voyageur n'a rien écrit » est corrigée, avec « même correction » dans le commentaire d'`estObjetVide` et dans un commentaire de test. Elle survit pourtant dans **quatre lignes de trois fichiers hors de la plage**, dont deux commentaires de code. Et l'en-tête de la bibliothèque de naissance des évaluations affirme la prémisse **inverse** du lot : « Channex ne crée l'objet que lorsque le voyageur a laissé un avis » (mesure du 2 octobre, 576 objets). Le dépôt se contredit donc sur la prémisse même de la règle.
+   - **Comment je l'ai établi.** `git grep -n "MEME si le voyageur\|même si le$\|que lorsque le voyageur a laisse" -- lib docs` : 5 lignes hors de `lib/avis/cartes.js` et de la KB corrigée.
+   - **Correction.** Les corriger dans ce lot, ou les lister au §11 comme restes datés. Pour l'en-tête de la bibliothèque de naissance, citer la mesure du 18 novembre à côté de celle du 2 octobre plutôt que l'effacer.
+
+3. **mineur** (test) — `tests/avis-cartes-endpoint.test.js:459`.
+   - **Ce qui se passe.** Le cas Booking (« jamais "pas d'avis", même avec `cache` vrai ») porte `overall_score: 8`. Il est donc écarté par la condition d'objet vide, pas par `estMasque`. Rien ne teste non plus la saisie manuelle.
+   - **Comment je l'ai établi.** La mutation qui retire `!estMasque(a) ||` de `lib/avis/cartes.js:111` reste à 55/55.
+   - **Correction.** Une fixture Booking vide (`{ ota: 'booking', overall_score: 0 }`) et un cas `provider: 'manuel'`. Vérifier qu'ils rougissent sous cette mutation.
+
+4. **mineur** (test et robustesse) — `lib/avis/cartes.js:112`.
+   - **Ce qui se passe.** Un objet masqué qui ne porte que `content_public` n'est testé nulle part. Et `content_private`, qui est lu, n'entre pas dans la preuve de vide. Or la règle est « on n'affirme une absence que sur preuve ».
+   - **Comment je l'ai établi.** La mutation `content: a.content` (sans `|| a.content_public`) reste à 55/55.
+   - **Correction.** Ajouter `masque('public', { content_public: 'Super' })` au test du bord. Et, par prudence, inclure `a.content_private` dans le contenu passé à `voyageurAEcrit`. Ça ne coûte rien, et ça ne change le résultat que pour un objet qui porterait un texte.
+
+5. **mineur** (test) — `tests/avis-cartes-dom.test.js:533-537`.
+   - **Ce qui se passe.** La ligne « À traiter » n'est pas vérifiée sans cadenas. Le test ne regarde que le texte (`/Pas d’avis/`, absence de `/masqué/`).
+   - **Comment je l'ai établi.** La mutation qui ajoute `ICONE('i-lock')` devant le texte de `core/avis/cartes.js:391` reste verte.
+   - **Correction.** Sur le `<p>` qui porte « Pas d’avis du voyageur. » dans la ligne, vérifier `querySelector('svg, use') === null`, comme dans le test de la carte.
+
+6. **mineur** (test) — `tests/avis-cartes-dom.test.js:523` et `:529`. Le titre dit « masqué depuis plus de 14 jours » et le commentaire « Dans les 14 jours, rien ne change ». Les deux sont périmés depuis c0583919 (le seuil est de 16 jours). **Correction :** écrire 16 jours.
+
+7. **mineur** (i18n) — `shared/i18n/en.json:64`.
+   - **Ce qui se passe.** « No review from the guest. » s'affiche sur la même carte que la clé existante `avis.aucune_eval`, « No guest review for this stay. ». Celle-ci parle de notre évaluation DU voyageur. En anglais, les deux phrases sont presque identiques et désignent deux sens opposés ; elles se suivent sur les cartes sans évaluation du constat 1. Le français (« Pas d'avis du voyageur » / « Aucune évaluation du voyageur ») et l'espagnol se lisent bien.
+   - **Correction.** Écrire « The guest didn't leave a review. ». Éventuellement, clarifier aussi `avis.aucune_eval` (« You haven't reviewed this guest. »).
+
+8. **mineur** (spec) — `docs/specs/avis-v5/spec-refonte-ui-v5-lot-avis.md`.
+   - **Ce qui se passe.** Les lignes 686-689 annoncent que le cas Booking et la ligne « À traiter » sans cadenas sont tenus par les tests : ils ne le sont pas (constats 3 et 5). La ligne 727, « Corrigés sans nouvelle relecture », devient fausse avec la présente relecture.
+   - **Correction.** Mettre ces lignes à jour en recopiant ce rapport.
+
+Hors constats : le seuil, son bord (`>` strict à 16 jours), la lecture UTC d'une date sans fuseau, l'avis sans date, `cache` absent, l'avis révélé, et le report sur la carte comme sur la ligne « À traiter » sont justes et tenus par des tests qui rougissent contre le code d'avant. La marge de 2 jours couvre le poll quotidien de Channex (jusqu'à 2000 avis par passage, triés par réception décroissante) en plus du webhook `updated_review`.
+
+Rapport écrit dans `/home/claude/revues/avis-sans-avis-relecture-2026-11-19.md`.
+
+### Ce qui en est fait
+
+Aucun constat de sécurité : corrigés sans nouvelle relecture.
+
+1. Commentaire d'`estObjetVide` corrigé. **Question produit posée à Thierry le
+   19 novembre 2026** : garder ou retirer les cartes sans évaluation dont tous
+   les avis sont « Pas d'avis du voyageur ». Sa réponse et ce qui en découle
+   sont ci-dessous.
+2. Restes datés, hors des fichiers du lot, non touchés — à corriger avec
+   l'accord du chef de file. Phrase « Airbnb révèle l'objet à 14 jours même si
+   le voyageur n'a rien écrit » : `docs/kb/pwa.md:690`,
+   `lib/logement/lecture.js:59`, `lib/notifications/evenements-avis.js:157`,
+   `lib/stats-avis.js:148` et `:245`, `tests/logement-lecture.test.js:1214`,
+   `tests/stats-avis.test.js:1041`. Prémisse inverse (« Channex ne crée l'objet
+   que lorsque le voyageur a laissé un avis », mesure du 2 octobre 2026) :
+   `lib/avis/naissance.js:11`, `docs/recette/decisions-nuit.md:39`. Mesure du
+   18 novembre 2026 : l'objet existe, masqué et vide, pour des voyageurs qui
+   n'ont rien écrit (deux départs vérifiés sur les commentaires publics de La
+   bulle).
+3. Test de la règle seule : objet vide Booking et saisie manuelle → non ;
+   `sansAvisDuVoyageur` exportée pour lui. La mutation qui retire `estMasque`
+   rougit.
+4. `content_private` entre dans la preuve de vide ; cas « texte public seul » et
+   « retour privé seul » ajoutés. Les deux mutations rougissent.
+5. La ligne « À traiter » est vérifiée sans cadenas. La mutation rougit.
+6. Titre et commentaire du test d'écran passés à 16 jours.
+7. Anglais : « The guest didn’t leave a review. ». `avis.aucune_eval` n'est pas
+   touchée : clé existante, hors des ajouts accordés.
+8. Ce §11 mis à jour : paragraphes Tests et Contre-épreuves réécrits, mention
+   « corrigés sans nouvelle relecture » remplacée par celle-ci.

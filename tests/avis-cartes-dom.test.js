@@ -520,13 +520,13 @@ test('la langue de lecture part avec la lecture — sauf le français, langue pa
 })
 
 // ─── Pas d'avis du voyageur (décision de Thierry du 18 novembre 2026) ──────
-test('LE TEST QUI COMPTE : un avis masqué depuis plus de 14 jours dit « Pas d’avis du voyageur », sans cadenas', () => {
+test('LE TEST QUI COMPTE : un avis masqué et vide depuis plus de 16 jours dit « Pas d’avis du voyageur », sans cadenas', () => {
   const vieux = doc(rendre(donnees({ recents: [carte({ avis: [{ id: 'm', masque: true, sans_avis: true }] })] }), { peutEcrire: false }))
   const p = vieux.querySelector('.avp-carte .avp-gris')
   assert.equal(p.textContent, 'Pas d’avis du voyageur.')
   assert.equal(p.querySelector('svg, use'), null, 'ni cadenas : il n’y a rien à dévoiler')
   assert.doesNotMatch(vieux.body.textContent, /Avis déposé/)
-  // Dans les 14 jours, rien ne change.
+  // Dans les 16 jours, rien ne change.
   const jeune = doc(rendre(donnees({ recents: [carte({ avis: [{ id: 'm', masque: true, sans_avis: false }] })] }), { peutEcrire: false }))
   assert.match(jeune.querySelector('.avp-carte .avp-gris').textContent, /Avis déposé, masqué par Airbnb/)
 })
@@ -535,6 +535,9 @@ test('la ligne « À traiter » suit la même règle', () => {
   const vieux = doc(rendre(donnees({ attente: [enAttente({ avis: [{ id: 'm', masque: true, sans_avis: true }] })] }), { peutEcrire: true }))
   assert.match(vieux.querySelector('.avp-ligne-atraiter').textContent, /Pas d’avis du voyageur\./)
   assert.doesNotMatch(vieux.querySelector('.avp-ligne-atraiter').textContent, /masqué/)
+  const p = [...vieux.querySelectorAll('.avp-ligne-atraiter p')].find(x => /Pas d’avis du voyageur/.test(x.textContent))
+  assert.ok(p, 'la ligne porte son paragraphe')
+  assert.equal(p.querySelector('svg, use'), null, 'ni cadenas : il n’y a rien à dévoiler')
   const jeune = doc(rendre(donnees({ attente: [enAttente()] }), { peutEcrire: true }))
   assert.match(jeune.querySelector('.avp-ligne-atraiter').textContent, /masqué/)
 })

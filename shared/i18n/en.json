@@ -61,7 +61,7 @@
   "avis.jours_restants": "{n, plural, one {# day left} other {# days left}}",
   "avis.masque": "Review submitted, hidden by Airbnb until you review the guest.",
   "avis.masque_court": "Review hidden until you review the guest",
-  "avis.sans_avis": "No review from the guest.",
+  "avis.sans_avis": "The guest didn’t leave a review.",
   "avis.menage": "cleaning: {nom}",
   "avis.n_notes": "{n, plural, one {# rating} other {# ratings}}",
   "avis.notre_avis": "Our review",
