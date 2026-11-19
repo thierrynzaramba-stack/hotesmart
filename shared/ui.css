@@ -2423,9 +2423,15 @@ button.chg-dl:hover { background: var(--surface-2); }
 }
 @media (max-width: 899px) {
   .chg-tete__entite, .chg-tete__entite .chg-select { width: 100%; }
-  .chg-cols { grid-template-columns: minmax(0, 1fr) 88px 88px 16px; gap: 6px; }
-  .chg-cols--titres { font-size: 12px; }
+  /* Recette du 20 novembre 2026, à 390 px de large : les titres de colonnes
+     (« Prorata temporis », 95 px) débordaient de leurs 88 px et se touchaient,
+     et le nom d'une facture n'avait plus que 80 px. Les titres passent à la
+     ligne, les colonnes de montants se resserrent, le détail perd son retrait. */
+  .chg-cols { grid-template-columns: minmax(0, 1fr) 78px 78px 14px; gap: 6px; }
+  .chg-cols--titres, .chg-dl--titres { font-size: 12px; line-height: 1.2; align-items: end; }
+  .chg-cols--titres .chg-col, .chg-dl--titres .chg-col { white-space: normal; }
   .chg-detail { padding-left: 12px; }
-  .chg-dl { grid-template-columns: minmax(0, 1fr) 88px 88px 16px; gap: 6px; }
+  .chg-dl { grid-template-columns: minmax(0, 1fr) 78px 78px 14px; gap: 6px; }
+  .chg-rep__credit { padding-left: 12px; }
   .chg-total__fort b { font-size: 20px; }
 }

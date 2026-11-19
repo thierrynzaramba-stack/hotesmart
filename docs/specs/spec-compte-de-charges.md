@@ -3966,9 +3966,13 @@ atteint, aucun n'est de sécurité) :
 - les intérêts d'une échéance de crédit se disaient « Facture du 22 janv. » :
   ils se disent « Échéance de crédit du … » (catégorie `credit`).
 
-**Non fait** : la largeur téléphone. La fenêtre du navigateur n'a pas pu être
-réduite (largeur restée à 1 521 px) ; à regarder par Thierry sur son
-téléphone.
+**Largeur téléphone**, regardée le 20 novembre 2026 sur `bb6a5973` dans un
+cadre de 390 px (la fenêtre ne se réduisait pas) : aucun débordement de la
+page ni montant coupé, mais les titres de colonnes débordaient de leurs
+88 px (« Prorata temporis » 95, « Montant facturé » 99) et se touchaient, et
+le nom d'une facture n'avait plus que 80 px. Corrigé dans la feuille
+(téléphone seul) : titres sur deux lignes, colonnes de 78 px, retrait
+réduit. Reste à voir par Thierry sur un vrai téléphone.
 
 ## 12. Trace des reviews du lot 2
 
