@@ -525,6 +525,7 @@ Trois défauts du modèle du §6, sur ces cas précis :
   (une ligne par charge et par jour de sa période, écrite par le trigger),
   dont les cellules du résumé font la somme — recalcul, jamais incrément.
   Une période se borne (au plus 366 jours) : au-delà, la charge se découpe.
+  ⚠ **Trois ans (1 097 jours) depuis le 19 novembre 2026 : §14.18.**
 - **La récurrence (Q27)** : sur une charge validée, « Cette facture
   revient chaque année » crée un **contrat annuel** (voir plus bas).
 - **Le suivi des paiements reste hors V1 (Q2)** : rien ici ne suit un
@@ -992,7 +993,8 @@ factures 2025 en production — sujets à spécifier, aucun lot ouvert) :
 - `type_document` : `facture` (par défaut), `regularisation`, `avoir`,
   `echeancier`, `avis_impot`. Lu par l'IA, corrigé par l'hôte.
 - `periode_debut`, `periode_fin` : **les deux ou aucune**, début ≤ fin,
-  **au plus 366 jours**. Au-delà, l'écran refuse et explique : une période
+  **au plus 366 jours** (⚠ **trois ans, 1 097 jours, depuis le 19 novembre
+  2026 : §14.18**). Au-delà, l'écran refuse et explique : une période
   plus longue se saisit en plusieurs factures. Sans période, la charge vaut
   pour son jour, comme aujourd'hui.
 - **L'avoir est négatif (Q26)** : pour ce seul type, les montants sont
@@ -1580,6 +1582,7 @@ L'exemple de la consigne est neutre (14/03/24, review constat 3) : la période
 lue ne vient pas de la consigne. **Recette conforme.** Question ouverte à
 Thierry, sans effet sur la mise en production : tolérer une période de plus de
 366 jours (relevé annuel de 367 à 370 jours) ou garder la borne d'un an.
+**Fermée le 19 novembre 2026** : trois ans au plus (option B), §14.18.
 ### 14.16 Toute image que l'appareil sait lire (19 novembre 2026)
 
 **La demande** (Thierry, 19 novembre 2026, au chargement des factures 2025) :
@@ -1748,6 +1751,197 @@ est cité pour confirmer le choix de la liste explicite, sans constat.
 | 5 | PDF `octet-stream` non testé de bout en bout | Test : annoncé et déposé en `application/pdf` (mutation 2 désormais rouge) ; cas unitaires `x.heic.jpg`, sans extension, `X.PDF` |
 | 6 | L'extension l'emporte sur un type non image | Assumé (aller-retour inutile vers un 415 au pire ; `image/jpg` et `application/x-pdf` y gagnent) |
 | 7 | Documentation | « avec Safari » ; trois nombres en point 8 ; TIFF ajouté à la liste ; §14.13-14.15 reçus par la fusion de `main` (`1642ea29`) |
+
+### 14.18 Une période de trois ans au plus (19 novembre 2026)
+
+**Décision de Thierry** (option B, au chargement des factures 2025) : une
+facture peut couvrir **jusqu'à trois ans** — assurance ou abonnement
+pluriannuel, relevé annuel d'énergie de 367 à 370 jours (les relèves tombent
+« vers le 25 »). Elle s'étale sur toute sa durée. La borne d'un an du lot 7a
+forçait à raccourcir la période, ou à charger la facture deux fois — ce qui
+fabrique un doublon (même fournisseur, même numéro).
+
+- **Borne** : 1 097 jours (3 × 365 + 2 : trois ans d'anniversaire à
+  anniversaire, date de fin comprise, une année bissextile comprise — « du
+  01/01/2026 au 01/01/2029 » passe). D'abord 1 096, porté à 1 097 sur la
+  review (constat 1, décision de Thierry du même jour). La même en trois
+  endroits : `charges_periode_ck` (migration
+  `2026-11-19-charges-periode-longue.sql`), `PERIODE_MAX_JOURS`
+  (`lib/charges/regles.js`) et `controlePeriode` (`shared/charges-vue.js`).
+- **Ordre** : migration AVANT le code (le code sans elle se ferait refuser par
+  la base au-delà d'un an ; l'ancien code avec elle reste plus strict, sans
+  risque). Après elle, `2026-11-13` ne se rejoue plus.
+- **Le résumé** n'a rien à changer : l'étalement porte déjà sur la plage
+  [début de la période, fin de la période], quelle que soit sa longueur.
+- **Message** : « Une période dure au plus trois ans : saisissez plusieurs
+  factures. » (fr, en, es).
+- **La lecture de l'IA suit la même borne** (constat 2 de la review, choix
+  tranché par le fil le 19 novembre, la question lui revenant cette nuit-là) :
+  une période lue de deux ans s'étale sur deux ans, mais toute lecture reste
+  « à vérifier » tant que l'hôte ne l'a pas validée, et c'est elle qui fait foi.
+  Une borne plus courte pour la seule IA viderait justement les assurances et
+  abonnements pluriannuels que cette décision veut accepter.
+
+**Case PERFORMANCE** : 1-6 sans objet (aucun endpoint, aucune donnée affichée
+nouvelle, aucun fichier). 7 : MESURÉ par la review sur Postgres 16 local, un
+compte de 174 charges sur trois ans — ajouter une facture de trois ans 15 ms,
+la même chevauchant 34 mensuelles 18 ms, changer sa période 28 ms, recalcul
+du compte 39 ms, vérificateur à 0 écart sur 3 428 cellules. Cas limite
+mesuré : 100 factures de trois ans d'une même série en UNE instruction, 23 s
+(coût quadratique du trigger) ; l'API n'écrit qu'une charge à la fois. 8 :
+l'écran ne change pas (1 appel, 7 requêtes, 681 octets en production le
+18 novembre).
+
+#### Review de la période de trois ans (19 novembre 2026)
+
+- **Arbre** : `/home/claude/hotesmart-periode` ; **branche** :
+  `charges-periode-longue` ; **plage** :
+  `5130027621c9ce61247eb2dddfafb483470f5623..54cbcaaaeb27f7a383ec2ff4ddf1c1ce0ab1894b`
+  (SHA copiés de `git rev-parse`, leçon du §14.14).
+- ⚠ Le texte exact du brief n'a pas été conservé : il nommait ces trois
+  éléments et demandait de ne pas sortir de l'arbre.
+- **Ce que la review dit avoir lu** : `54cbcaaaeb27f7a383ec2ff4ddf1c1ce0ab1894b`,
+  et dix-sept fichiers.
+- **Confrontation** : ces dix-sept fichiers sont exactement ceux de
+  `git diff --name-only` sur la plage.
+  - Elle cite aussi `api/charges.js:73-79`, hors du diff. Ce n'est pas un
+    constat, seulement la conséquence de l'ordre inverse des déploiements :
+    la review a lu le bon arbre.
+
+Réponse de la review, recopiée telle quelle :
+
+```
+54cbcaaaeb27f7a383ec2ff4ddf1c1ce0ab1894b
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/regles.js
+migrations/2026-11-13-controle-charges-periode.sql
+migrations/2026-11-19-charges-periode-longue.sql
+migrations/2026-11-19-controle-charges-periode-longue.sql
+shared/charges-vue.js
+shared/i18n/en.json
+shared/i18n/es.json
+shared/i18n/fr.json
+tests/charges-lecture.test.js
+tests/charges-migration-periode-longue.test.js
+tests/charges-migration-periode.test.js
+tests/charges-page.test.js
+tests/charges-regles.test.js
+tests/charges-writer.test.js
+
+# Review de `54cbcaaa` (branche `charges-periode-longue`)
+
+J'ai tout lu dans `/home/claude/hotesmart-periode`, sans rien modifier dans l'arbre de travail. Pour mesurer, j'ai monté un Postgres 16 jetable dans `/tmp`, avec le schéma construit à partir des migrations du 11-08 au 11-19. Il est effacé depuis.
+
+**Verdict : aucun constat de sécurité, aucun bloquant, cinq mineurs.** Le premier est une question pour Thierry à trancher avant le merge.
+
+## Sécurité : aucun constat
+- La borne est tenue à trois endroits : la contrainte de la base, le serveur et l'écran.
+- Le filtre par compte (`user_id`) n'a pas changé.
+- Pire cas avec un PDF piégé ou une IA qui se trompe : une période de 1 096 jours sur une charge de son propre compte. Elle reste en `a_verifier`, sous le plafond de 50 lectures par jour.
+
+## Bloquant : aucun
+
+## Point 1 : les trois bornes sont cohérentes, et un an ne survit nulle part dans le code
+- La base (`periode_fin - periode_debut < 1096`), `periodeSaisie` (`joursEntre + 1 > 1096`) et `controlePeriode` (`round + 1 > 1096`) disent tous « au plus 1 096 jours, bornes comprises ».
+- Mesuré sur Postgres : 1 096 jours acceptés, 1 097 refusés, partout. La règle du 29 février est la même aux trois endroits.
+- La consigne de lecture IA (`lib/charges/lecture.js`) ne contient aucune borne. `normaliserLecture` passe par `periodeSaisie`, donc elle suit.
+- Ce qui reste à un an, ce sont des textes, pas du code : voir le mineur 5.
+
+## Point 2 : l'ordre annoncé (migration AVANT le code) est le bon
+**Migration puis code (ordre annoncé) : sans risque.**
+- L'ancien code reste plus strict que la base. Il refuse au-delà de 366 jours (400 avec le message « un an »), et la lecture IA rend une période vide, avec sa trace.
+- Revenir à l'ancien code reste possible sans risque.
+
+**Code puis migration (ordre inverse) : nocif.**
+- **Validation par l'hôte** (de 367 à 1 096 jours) : la base refuse l'enregistrement. L'hôte reçoit une erreur 503 « panne » générique, sans explication (`lib/charges.js:447-450`).
+- **Lecture IA quand l'hôte confirme l'envoi** (`api/charges.js:73-79`) : 503, et la charge reste `a_lire`.
+- **Lecture IA par le cron** : la boucle est payante. Chaque passage relit la charge et paie l'appel IA. L'écriture est refusée, donc :
+  - les tentatives ne sont jamais comptées ;
+  - `modifie_le` ne bouge pas, et la charge reste en tête de file (20 places au plus par passage) ;
+  - `lues++` la compte quand même comme lue (`lib/charges.js:322-324, 658-659`).
+  
+  Ce défaut existe déjà, hors de la plage (référence seulement), et le cas déclencheur est justement le relevé EDF de 367 à 370 jours.
+- Le même effet se produit si quelqu'un rejoue `2026-11-13` après celle-ci. Le nouveau contrôle le détecte.
+
+**Pour le chef de file :**
+- L'ordre vaut pour chaque environnement : la migration collée sur la base de staging avant le merge dans `staging`, sur la base de prod avant le merge dans `main`.
+- « APRÈS 2026-11-17 » n'est pas une vraie dépendance technique (la contrainte est indépendante), mais c'est sans gêne : la 11-17 est déjà dans `main`.
+
+## Point 3 : le résumé et le coût tiennent
+Mesures sur un compte de 174 charges couvrant trois ans (Postgres 16 local) :
+
+| Geste | Temps |
+|---|---|
+| Ajouter une facture de 3 ans | 15 ms |
+| Ajouter une facture de 3 ans qui chevauche 34 factures mensuelles | 18 ms |
+| Changer la période d'une facture de 3 ans (deux recalculs) | 28 ms |
+| `charges_recalculer_compte` | 39 ms |
+
+Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 cellules.
+
+**Test de charge.** 100 factures de 3 ans, même série, insérées en une seule instruction : 23 s. Le coût est quadratique, parce que le trigger relit à chaque ligne toutes les factures qui la chevauchent. La 101e seule : 253 ms ; le recalcul du compte : 287 ms.
+- L'API n'écrit qu'une charge à la fois, donc elle ne peut pas déclencher ce cas.
+- Seules des mises à jour de plusieurs lignes y exposent (un bien ou une entité supprimés, `remplacerRacine`). C'est préexistant, trois fois plus cher qu'avec la borne d'un an.
+
+**Cron.** Le budget du recalcul est de 15 s, et chaque appel est coupé à 8 s côté client. Le recalcul s'arrête donc vers 23 s au plus tard, loin du mur de 60 s. Pour qu'un seul compte dépasse 8 s, il faudrait environ 3 000 factures de 3 ans qui se chevauchent : rien de réaliste.
+
+## Mineurs
+
+**1. Mineur, question pour Thierry : une échéance « d'anniversaire à anniversaire » est refusée trois fois sur quatre.**
+- Où : `lib/charges/regles.js:102`, `shared/charges-vue.js:139`, `migrations/2026-11-19-charges-periode-longue.sql:35`.
+- Scénario : une assurance de trois ans imprimée « du 01/01/2026 au 01/01/2029 » fait 1 097 jours. Elle est refusée, et c'est exactement le cas refusé des tests (`tests/charges-migration-periode-longue.test.js:32`).
+  - La lecture IA la vide, avec sa trace.
+  - Une saisie à la main affiche « au plus trois ans », alors que c'est trois ans.
+- Mesuré sur tous les jours de départ : **1 096 refus sur 1 461 (75 %)**. Avec l'ancienne borne, un an d'anniversaire à anniversaire n'était refusé que 366 fois sur 1 461 (25 %).
+- Correction : passer à 1 097 jours (`< 1097`, `3 * 365 + 2`) aux trois endroits, ce qui couvre toute échéance de trois ans. Sinon, garder 1 096 en le disant à Thierry.
+
+**2. Mineur : le garde-fou sur les lectures IA est trois fois plus large.**
+- Où : `lib/charges/regles.js:214-215`. Le commentaire dit encore « plus d'un an ».
+- La spec §14.14 citait « période de 366 jours au plus » comme garde-fou de ce que l'IA rend.
+- Scénario : une facture d'énergie dont l'IA prend la période d'abonnement (deux ans).
+  - Avant : la période était vidée, avec sa trace.
+  - Maintenant : la facture est étalée sur deux ans, comptée dans la lecture étalée en `a_verifier` jusqu'à ce que l'hôte corrige.
+- C'est un choix produit : soit l'accepter, soit garder une borne plus courte pour la seule lecture IA. Dans tous les cas, corriger le commentaire.
+
+**3. Mineur : le contrôle de la migration peut dire ok = true à tort.**
+- Où : `migrations/2026-11-19-controle-charges-periode-longue.sql:23`.
+- `like '%1096%'` accepte aussi `<= 1096` (1 097 jours en base), `< 10960` et `< 1096 or true`. Mesuré sur Postgres 16 : ok = true sur les trois.
+- Il ne dit jamais false à tort : false avant la migration, true après, false pour une contrainte non validée (`NOT VALID`). Mesuré.
+- Correction : `d like '%(periode_fin - periode_debut) < 1096)%'`, qui est le rendu exact de `pg_get_constraintdef`.
+- Le contrôle du lot 7a modifié rend true avant comme après, ce qui est attendu. Il ne distingue plus les deux bornes ; c'est le nouveau contrôle qui le fait.
+
+**4. Mineur : un des tests modifiés ne mord pas.**
+- Contre-épreuve (`git archive` de `51300276`, plus les nouveaux tests et les nouvelles migrations) : 5 rouges sur l'ancien code (regles, migration-longue, migration-periode, lecture, page). Les autres tests mordent.
+- `tests/charges-writer.test.js:690` ne mord pas : 2029-01-01 est refusé avant comme après.
+- Aucun test ne fait passer une période longue par `valider` jusqu'à l'écriture. Si on ajoute dans `valider` une garde propre à 366 jours : 0 rouge.
+- Correction : ajouter un cas de 1 096 jours accepté par `valider`, qui vérifie que `periode_debut` et `periode_fin` sont bien dans l'écriture.
+- Autres mutations : l'écran remis à 366 donne 2 rouges, l'écran en `>= 1096` donne 1 rouge. Ceux-là mordent.
+
+**5. Mineur : documentation.**
+- `docs/specs/spec-compte-de-charges.md:1776` (case PERFORMANCE, point 7) : « trois ans restent sous la seconde » est une estimation, alors que la règle 8 demande une mesure. Les chiffres du point 3 ci-dessus peuvent la remplacer.
+- Lignes 527 et 995 (§14.2, le texte qui fait règle) : « au plus 366 jours », sans renvoi vers §14.18.
+- Ligne 1581 : la question ouverte à Thierry n'est pas fermée.
+- `migrations/2026-11-13-charges-periode.sql:5` dit encore « Rejouable ». C'est conforme à l'usage du dépôt (l'avertissement vit dans la migration suivante), mais une ligne d'avertissement y serait plus sûre.
+
+## Vérifié sans constat
+- Rejeu de la migration sans erreur.
+- `node scripts/i18n-check.js` : 1 565 clés en fr, en et es.
+- Les 6 fichiers de tests touchés : 151 sur 151 en vert. Je n'ai pas relancé la suite complète.
+```
+
+**Corrections** (aucun constat de sécurité : pas de nouvelle review, règle
+« une review par commit »).
+
+| Constat | Correction |
+|---|---|
+| 1 | **Thierry a choisi 1 097 jours** (19 novembre, 01:16). `< 1097` dans la base, `3 * 365 + 2` dans le serveur et l'écran. Tous les départs sur 1 461 jours passent (test). Mesuré sur Postgres 16 : 1 097 jours acceptés, 1 098 refusés, rejeu sans erreur, vérificateur à 0 écart sur 10 310 cellules. |
+| 2 | La lecture de l'IA garde la même borne (voir la puce ci-dessus) ; le commentaire est corrigé. |
+| 3 | Le contrôle compare la définition exacte, `(periode_fin - periode_debut) < 1097)`. Mesuré : ok = false sur les mutants `<= 1097` et `< 10970`, true après la migration. |
+| 4 | Nouveau test : `valider` écrit une période du 01/01/2026 au 01/01/2029 et refuse le 02/01/2029 sans rien écrire. Les cas refusés passent au 02/01/2029. |
+| 5 | Mesures de la review dans la case PERFORMANCE ; renvois vers §14.18 aux lignes 527 et 995 ; question ouverte fermée ; avertissement dans `2026-11-13-charges-periode.sql`. |
+
 
 ## 12. Trace des reviews du lot 2
 

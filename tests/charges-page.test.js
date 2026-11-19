@@ -441,7 +441,7 @@ test('LE TEST QUI COMPTE : la fiche envoie le type et la période ; un avoir se 
   } finally { b.fermer() }
 })
 
-test('une période incomplète ou de plus d\'un an est refusée dans la fiche, et RIEN ne part', async () => {
+test('une période incomplète ou de plus de trois ans est refusée dans la fiche, et RIEN ne part', async () => {
   const c = facture(1, { statut: 'a_verifier' })
   const b = await monter({ ecran: () => reponseEcran({ aTraiter: [c] }) })
   try {
@@ -450,9 +450,9 @@ test('une période incomplète ou de plus d\'un an est refusée dans la fiche, e
     b.saisir(f.querySelector('[data-champ="periode_debut"]'), '2026-01-01')
     await b.cliquer(f.querySelector('[data-geste="valider"]'))
     assert.match(texte(f.querySelector('[data-bind="fiche-retour"]')), /un début et une fin/)
-    b.saisir(f.querySelector('[data-champ="periode_fin"]'), '2027-01-02')
+    b.saisir(f.querySelector('[data-champ="periode_fin"]'), '2029-01-02')
     await b.cliquer(f.querySelector('[data-geste="valider"]'))
-    assert.match(texte(f.querySelector('[data-bind="fiche-retour"]')), /au plus un an/)
+    assert.match(texte(f.querySelector('[data-bind="fiche-retour"]')), /au plus trois ans/)
     assert.deepEqual(b.gestes(), [])
   } finally { b.fermer() }
 })
