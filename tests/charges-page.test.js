@@ -269,7 +269,7 @@ test('LE TEST QUI COMPTE : un clic sur un mois lit SES factures et leur part, so
   })
   try {
     await b.cliquer(b.$('[data-mois="2026-11"]'))
-    assert.equal(urls[1], `/api/ecran/charges?mois=2026-11&entite=${ENT}`)
+    assert.equal(urls[1], `/api/ecran/charges?mois=2026-11&entite=${ENT}&periode=2026`, 'le mois se lit DANS l\'exercice affiché')
     assert.equal(b.$('[data-mois="2026-11"]').getAttribute('aria-expanded'), 'true')
     const detail = b.$('.chg-detail')
     const lignes = [...detail.querySelectorAll('.chg-ligne')].map(texte)
@@ -330,9 +330,96 @@ test('changer d\'entité referme le mois ouvert ; une réponse arrivée APRÈS l
     // ⚠ Et la réponse en retard n'est pas GARDÉE pour l'entité suivante : le
     // même mois, rouvert sur la SCI, se relit pour elle.
     await b.cliquer(b.$('[data-mois="2026-11"]'))
-    assert.equal(urls[urls.length - 1], `/api/ecran/charges?mois=2026-11&entite=${ENT_B}`)
+    assert.equal(urls[urls.length - 1], `/api/ecran/charges?mois=2026-11&entite=${ENT_B}&periode=2026`)
     assert.match(texte(b.$('.chg-detail')), /La SCI/)
     assert.doesNotMatch(texte(b.$('.chg-detail')), /Fantôme/)
+  } finally { b.fermer() }
+})
+
+// ─── Review 1 du lot 8a ─────────────────────────────────────────────────────
+test('LE TEST QUI COMPTE (review 1, constat 2) : une facture hors du total se dit « Non comptée », À CÔTÉ de son état', async () => {
+  const echeancier = facture(11, { fournisseur_nom: 'Échéancier EDF', statut: 'validee', type_document: 'echeancier', montant_ttc_cents: 60000, compte: false, part_ttc_cents: null })
+  const eau = facture(12, { fournisseur_nom: 'Eau', statut: 'validee', montant_ttc_cents: 4000, compte: true, part_ttc_cents: 4000 })
+  const b = await monter({ ecran: (u) => (u.includes('mois=') ? { detail_mois: { lignes: [echeancier, eau] } } : reponseEcran()) })
+  try {
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    const [l1, l2] = [...b.$$('.chg-detail .chg-ligne')].map(texte)
+    assert.match(l1, /Échéancier EDF.*Vérifiée.*Non comptée/)
+    assert.doesNotMatch(l2, /Non comptée/)
+  } finally { b.fermer() }
+})
+
+test('review 1, constat 3 : une facture COMPTÉE dont la période ne touche pas le mois y porte « part du mois : 0,00 € »', async () => {
+  const regul = facture(13, { fournisseur_nom: 'Régul 2025', montant_ttc_cents: 7777, jour: '2026-11-10', periode_debut: '2025-01-01', periode_fin: '2025-12-31', compte: true, part_ttc_cents: null })
+  const b = await monter({ ecran: (u) => (u.includes('mois=') ? { detail_mois: { lignes: [regul] } } : reponseEcran()) })
+  try {
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    assert.match(texte(b.$('.chg-detail')), /Régul 2025.*part du mois : 0,00\s?€.*77,77\s?€/)
+  } finally { b.fermer() }
+})
+
+test('review 1, constat 1 : un mois de bord d\'un exercice décalé se DIT partiel, avec ses bornes', async () => {
+  const b = await monter({ ecran: (u) => (u.includes('mois=') ? { detail_mois: { mois: '2026-11', partiel: true, debut: '2026-11-15', fin: '2026-11-30', lignes: [] } } : reponseEcran()) })
+  try {
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    assert.match(texte(b.$('.chg-detail')), /Mois partiel : seule sa part dans l'exercice est lue, du 15 nov\.? 2026 au 30 nov\.? 2026/)
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (review 1, constat 4) : « Afficher plus » pendant un changement d\'entité — la page de l\'ancienne liste est jetée', async () => {
+  const ENT_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  let libererSuite
+  const b = await monter({
+    ecran: (u) => {
+      if (u.includes('curseur=')) return new Promise(r => { libererSuite = () => r({ liste: { lignes: [facture(300, { fournisseur_nom: 'Ligne de Moi' })], suite: `2026-10-01|2026-10-01T10:00:00Z|${id(300)}` } }) })
+      const r = reponseEcran({ entites: [{ id: ENT, nom: 'Moi', archivee: false, debut_exercice: null }, { id: ENT_B, nom: 'SCI', archivee: false, debut_exercice: null }], liste: [facture(1)], suite: `2026-11-02|2026-11-02T10:00:00Z|${id(1)}` })
+      if (u.includes(ENT_B)) Object.assign(r, { entite: ENT_B, liste: { lignes: [facture(2, { fournisseur_nom: 'Ligne de la SCI' })], suite: null } })
+      return r
+    }
+  })
+  try {
+    await b.cliquer(b.$('[data-geste="plus"]'))
+    await b.choisir(b.$('[data-choix="entite"]'), ENT_B)
+    libererSuite()
+    for (let i = 0; i < 6; i++) await b.attendre()
+    const liste = texte(b.$('[data-bind="liste"]'))
+    assert.match(liste, /Ligne de la SCI/)
+    assert.doesNotMatch(liste, /Ligne de Moi/)
+    assert.equal(b.$('[data-bind="liste"] [data-geste="plus"]'), null, 'pas de curseur de l\'ancienne entité')
+  } finally { b.fermer() }
+})
+
+test('review 1, constat 4 : une RELECTURE de l\'écran (un geste) pendant la lecture d\'un mois — le détail périmé n\'est pas gardé', async () => {
+  let libererMois
+  let n = 0
+  const urls = []
+  const c = facture(1)
+  const b = await monter({
+    ecran: (u) => {
+      urls.push(u)
+      if (u.includes('mois=') && n++ === 0) return new Promise(r => { libererMois = () => r({ detail_mois: { lignes: [facture(20, { fournisseur_nom: 'Périmée' })] } }) })
+      if (u.includes('mois=')) return { detail_mois: { lignes: [facture(21, { fournisseur_nom: 'Fraîche' })] } }
+      return reponseEcran({ liste: [c] })
+    },
+    geste: () => ({ ok: true, supprime: true })
+  })
+  try {
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    // Le geste relit l'écran pendant que le mois se lit encore.
+    await b.cliquer(b.$(`[data-bind="liste"] [data-ouvrir="${c.id}"]`))
+    await b.cliquer(b.$('[data-geste="supprimer"]'))
+    libererMois()
+    for (let i = 0; i < 6; i++) await b.attendre()
+    await b.cliquer(b.$('[data-mois="2026-11"]'))
+    assert.match(texte(b.$('.chg-detail')), /Fraîche/)
+    assert.equal(urls.filter(u => u.includes('mois=')).length, 2, 'relu, pas servi depuis la réponse périmée')
+  } finally { b.fermer() }
+})
+
+test('review 1, constat 7 : la liste des exercices incomplète se DIT', async () => {
+  const b = await monter({ ecran: () => { const r = reponseEcran(); r.totaux.exercices_indisponibles = true; return r } })
+  try {
+    assert.match(texte(b.$('[data-bind="totaux"]')), /La liste des exercices est incomplète pour le moment/)
   } finally { b.fermer() }
 })
 

@@ -383,10 +383,12 @@ test('mesure (case PERFORMANCE, point 8) : l\'écran complet compte 8 lectures s
 // ─── Le détail d'un mois (§14.21.2) ──────────────────────────────────────────
 test('LE TEST QUI COMPTE : le détail d\'un mois — entité vérifiée AVANT, une seule fonction, rien d\'autre lu', async () => {
   const lignes = [{ id: uuid(1), part_ttc_cents: 100, montant_ttc_cents: 1200, compte: true }]
-  const r = await appeler({ query: { mois: '2026-03', entite: ENT_B }, rpc: (nom) => (nom === 'charges_detail_mois' ? { data: lignes, error: null } : { data: TOTAUX, error: null }) })
+  // ENT_B (SCI) commence au 1er avril : mars 2026 est le dernier mois de
+  // l'exercice 2025, entier.
+  const r = await appeler({ query: { mois: '2026-03', entite: ENT_B, periode: '2025' }, rpc: (nom) => (nom === 'charges_detail_mois' ? { data: lignes, error: null } : { data: TOTAUX, error: null }) })
   assert.equal(r.rep.statut, 200)
   assert.deepEqual(Object.keys(r.rep.corps), ['detail_mois'])
-  assert.deepEqual(r.rep.corps.detail_mois, { mois: '2026-03', debut: '2026-03-01', fin: '2026-03-31', entite: ENT_B, lignes })
+  assert.deepEqual(r.rep.corps.detail_mois, { mois: '2026-03', periode: '2025', debut: '2026-03-01', fin: '2026-03-31', partiel: false, entite: ENT_B, lignes })
   assert.equal(r.requetes.length, 0)
   assert.deepEqual(r.rpcs.map(x => [x.nom, x.args]), [['charges_detail_mois', { p_user: TITULAIRE, p_debut: '2026-03-01', p_fin: '2026-03-31', p_entite: ENT_B }]])
   assert.deepEqual(r.ej.appels.map(a => a[0]), ['entites'])
@@ -395,25 +397,84 @@ test('LE TEST QUI COMPTE : le détail d\'un mois — entité vérifiée AVANT, u
 })
 
 test('LE TEST QUI COMPTE : le détail d\'une entité d\'un AUTRE compte rend 404 sans rien lire ; mois ou entité invalides, 400', async () => {
-  const autre = await appeler({ query: { mois: '2026-03', entite: ENT_AUTRE } })
+  const autre = await appeler({ query: { mois: '2026-03', entite: ENT_AUTRE, periode: '2026' } })
   assert.equal(autre.rep.statut, 404)
   assert.equal(autre.rpcs.length, 0)
-  for (const query of [{ mois: '2026-13', entite: ENT_A }, { mois: '2026-03' }, { mois: '2026-03', entite: 'x' }]) {
+  for (const query of [{ mois: '2026-13', entite: ENT_A, periode: '2026' }, { mois: '2026-03', periode: '2026' }, { mois: '2026-03', entite: 'x', periode: '2026' }]) {
     const r = await appeler({ query })
     assert.equal(r.rep.statut, 400, JSON.stringify(query))
     assert.equal(r.rpcs.length, 0)
   }
   // Un membre délégué : 403 avant tout, comme l'écran.
-  const m = await appeler({ titulaire: false, query: { mois: '2026-03', entite: ENT_A } })
+  const m = await appeler({ titulaire: false, query: { mois: '2026-03', entite: ENT_A, periode: '2026' } })
   assert.equal(m.rep.statut, 403)
   assert.equal(m.rpcs.length, 0)
 })
 
 test('le détail en panne rend 503 ; une fonction qui rendrait un objet n\'est pas une liste', async () => {
   for (const rep of [{ data: null, error: { message: 'panne' } }, { data: { x: 1 }, error: null }]) {
-    const r = await appeler({ query: { mois: '2026-03', entite: ENT_A }, rpc: () => rep })
+    const r = await appeler({ query: { mois: '2026-03', entite: ENT_A, periode: '2026' }, rpc: () => rep })
     assert.equal(r.rep.statut, 503)
   }
+})
+
+// ─── Review 1 du lot 8a ─────────────────────────────────────────────────────
+const SCI_MARS = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+const entitesMars = () => entitesDouble({ entites: [{ id: SCI_MARS, nom: 'SCI mars', archivee_le: null, debut_exercice: '03-15' }] })
+
+test('LE TEST QUI COMPTE (review 1, constat 1) : un exercice au 15 mars — ses mois de bord ne se lisent que pour leur PART dans l\'exercice', async () => {
+  const lire = async (mois, periode) => appeler({ entites: entitesMars(), query: { mois, entite: SCI_MARS, periode }, rpc: () => ({ data: [], error: null }) })
+  const debut = await lire('2026-03', '2026')
+  assert.equal(debut.rep.statut, 200)
+  assert.deepEqual([debut.rpcs[0].args.p_debut, debut.rpcs[0].args.p_fin], ['2026-03-15', '2026-03-31'])
+  assert.equal(debut.rep.corps.detail_mois.partiel, true)
+  const fin = await lire('2027-03', '2026')
+  assert.deepEqual([fin.rpcs[0].args.p_debut, fin.rpcs[0].args.p_fin], ['2027-03-01', '2027-03-14'])
+  // Le même mois civil, lu dans l'exercice d'avant : l'autre moitié.
+  const avant = await lire('2026-03', '2025')
+  assert.deepEqual([avant.rpcs[0].args.p_debut, avant.rpcs[0].args.p_fin], ['2026-03-01', '2026-03-14'])
+  const plein = await lire('2026-07', '2026')
+  assert.deepEqual([plein.rpcs[0].args.p_debut, plein.rpcs[0].args.p_fin, plein.rep.corps.detail_mois.partiel], ['2026-07-01', '2026-07-31', false])
+  // Un mois hors de l'exercice : refusé, rien n'est lu.
+  const hors = await lire('2028-06', '2026')
+  assert.equal(hors.rep.statut, 400)
+  assert.equal(hors.rep.corps.error, 'mois_hors_exercice')
+  assert.equal(hors.rpcs.length, 0)
+})
+
+test('le détail exige son exercice, et un exercice hors des bornes de lecture n\'est pas lu en silence comme un autre', async () => {
+  for (const [periode, code] of [[undefined, 'periode_requise'], ['exercice', 'periode_requise'], ['2090', 'periode_invalide']]) {
+    const r = await appeler({ query: { mois: '2026-03', entite: ENT_A, periode } })
+    assert.equal(r.rep.statut, 400, String(periode))
+    assert.equal(r.rep.corps.error, code)
+    assert.equal(r.rpcs.length, 0)
+  }
+})
+
+test('un 29 février : l\'exercice d\'une année ordinaire commence le 28, et février n\'y compte qu\'un jour', () => {
+  const ex = ecran.bornesPeriode({ entite: { debut_exercice: '02-29' }, periode: '2027', aujourdhui: '2027-06-01' })
+  assert.deepEqual([ex.debut, ex.fin], ['2027-02-28', '2028-02-28'])
+  assert.deepEqual(ecran.plageDuMois('2027-02', ex), { debut: '2027-02-28', fin: '2027-02-28', partiel: true })
+  assert.deepEqual(ecran.plageDuMois('2028-02', ex), { debut: '2028-02-01', fin: '2028-02-28', partiel: true })
+  assert.equal(ecran.plageDuMois('2028-03', ex), null)
+})
+
+test('review 1, constats 5 et 6 : au plus 5 exercices à venir ; l\'exercice LU est toujours proposé', () => {
+  const loin = ecran.bornesPeriode({ aujourdhui: '2026-11-10', bornes: { premier: '2026-01-01', dernier: '2099-06-01' } })
+  assert.deepEqual(loin.proposees, ['2031', '2030', '2029', '2028', '2027', '2026'])
+  // 2024 choisi, puis sa seule facture supprimée : il reste dans le menu.
+  const seul = ecran.bornesPeriode({ periode: '2024', aujourdhui: '2026-11-10', bornes: { premier: '2026-02-01', dernier: '2026-02-01' } })
+  assert.equal(seul.periode, '2024')
+  assert.deepEqual(seul.proposees, ['2026', '2025', '2024'])
+})
+
+test('review 1, constat 7 : une panne des bornes des exercices se DIT, les totaux restent', async () => {
+  const r = await appeler({ rpc: (nom) => (nom === 'charges_exercices_bornes' ? { data: null, error: { message: 'panne' } } : { data: TOTAUX, error: null }) })
+  assert.equal(r.rep.statut, 200)
+  assert.equal(r.rep.corps.totaux.exercices_indisponibles, true)
+  assert.equal(r.rep.corps.totaux.proposees.length, 1)
+  const ok = await appeler({ rpc: (nom) => (nom === 'charges_exercices_bornes' ? { data: { premier: null, dernier: null }, error: null } : { data: TOTAUX, error: null }) })
+  assert.equal(ok.rep.corps.totaux.exercices_indisponibles, false)
 })
 
 test('« Afficher plus » suit l\'entité choisie', async () => {

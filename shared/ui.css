@@ -2397,6 +2397,7 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .chg-mois:hover, .chg-rep__mois--ouvert .chg-mois { background: var(--surface-2); }
 .chg-rep li.chg-detail { display: block; padding: 4px 0 10px 12px; }
 .chg-detail__part { font-size: 12.5px; color: var(--muted); }
+.chg-ligne__action.chg-detail__hors { text-decoration: none; color: var(--muted); }
 .chg-credit-mois { display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 2px 8px; }
 .chg-credit-mois small { font-size: var(--fs-caption); }
 .chg-credits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

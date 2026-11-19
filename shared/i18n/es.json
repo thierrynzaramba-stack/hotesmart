@@ -432,6 +432,8 @@
   "charges.detail_chargement": "Cargando las facturas del mes…",
   "charges.detail_indispo": "Las facturas de este mes no se pueden leer por ahora.",
   "charges.detail_vide": "Ninguna factura este mes.",
+  "charges.detail_partiel": "Mes parcial: solo se muestra su parte dentro del ejercicio, del {debut} al {fin}.",
+  "charges.exercices_indispo": "La lista de ejercicios está incompleta por ahora: solo se ofrece este.",
   "charges.du_au": "Del {debut} al {fin}",
   "charges.enregistre": "Guardado.",
   "charges.entite_aria": "Entidad",

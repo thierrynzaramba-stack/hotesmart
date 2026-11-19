@@ -194,6 +194,11 @@ export function monter (racine, deps) {
   // choisit (la première active), et la réponse dit laquelle.
   const etat = {
     entite: '', periode: '', moisOuvert: null, detailMois: {},
+    // ⚠ La GÉNÉRATION de l'écran (review 1, constat 4) : chaque relecture et
+    // chaque choix d'entité ou d'exercice l'avancent, et une réponse partie
+    // sous une génération plus ancienne est jetée — le détail d'un mois comme
+    // la page suivante de la liste.
+    generation: 0,
     aTraiter: { lignes: [], nombre: 0 }, liste: [], suite: null,
     entites: [], biens: [], biensArchives: [], categories: [], totaux: null,
     fiche: null, occupe: false, envoiEnCours: false, ficheEnCours: false,
@@ -358,25 +363,38 @@ export function monter (racine, deps) {
       c.type_document && c.type_document !== 'facture' ? (connu('charges.type_' + c.type_document) || '') : '',
       periodeLisible(c), c.categorie ? nomCategorie(c.categorie) : '', nomBien(c.bien_id)
     ].filter(Boolean).join(' · ')
-    // La part du mois se dit quand elle n'est pas la facture entière.
-    const part = etale && c.part_ttc_cents != null && c.part_ttc_cents !== c.montant_ttc_cents
-      ? `<span class="chg-detail__part">${esc(t('charges.part_du_mois', { montant: fmtMontant.format(c.part_ttc_cents / 100) }))}</span>`
+    // La part du mois se dit quand elle n'est pas la facture entière. Une
+    // facture COMPTÉE dont la période ne touche pas le mois (une régularisation
+    // datée de novembre pour l'an passé) y porte 0 : elle est dans « À la
+    // date », pas dans « Étalé » — review 1, constat 3.
+    const partCents = c.part_ttc_cents != null ? c.part_ttc_cents
+      : (c.compte !== false && c.montant_ttc_cents != null ? 0 : null)
+    const part = etale && partCents != null && partCents !== c.montant_ttc_cents
+      ? `<span class="chg-detail__part">${esc(t('charges.part_du_mois', { montant: fmtMontant.format(partCents / 100) }))}</span>`
       : ''
-    const horsTotal = c.compte === false ? `<span class="chg-etat">${esc(t('charges.non_comptee'))}</span>` : ''
+    // ⚠ « Non comptée » se dit À CÔTÉ de l'état (review 1, constat 2) : un
+    // échéancier ou une commission déjà comptée sont « Vérifiés », et pourtant
+    // hors du total.
+    // Dans la colonne de l'action (et sa ligne, au téléphone) : l'état garde
+    // la sienne.
+    const horsTotal = c.compte === false ? `<span class="chg-ligne__action chg-detail__hors">${esc(t('charges.non_comptee'))}</span>` : '<span></span>'
     return `<li><button type="button" class="chg-ligne chg-ligne--detail" data-ouvrir="${esc(c.id)}">`
       + `<span class="chg-ligne__jour">${esc(jourLisible(c.jour))}</span>`
       + `<span class="chg-ligne__qui"><b>${esc(c.fournisseur_nom || t('charges.fournisseur_inconnu'))}</b>`
       + (infos ? `<span class="chg-ligne__infos">${esc(infos)}</span>` : '') + part + '</span>'
       + `<span class="chg-ligne__ttc">${montant(c.montant_ttc_cents)}</span>`
-      + (e ? `<span class="chg-etat chg-etat--${esc(e)}">${esc(t('charges.etat_' + e))}</span>` : horsTotal || '<span></span>')
-      + '<span></span></button></li>'
+      + (e ? `<span class="chg-etat chg-etat--${esc(e)}">${esc(t('charges.etat_' + e))}</span>` : '<span></span>')
+      + horsTotal + '</button></li>'
   }
   function detailDuMois (cle) {
     const d = etat.detailMois[cle]
     if (!d || d.etat === 'charge') return `<li class="chg-detail"><p class="muted small">${esc(t('charges.detail_chargement'))}</p></li>`
     if (d.etat === 'erreur') return `<li class="chg-detail"><p class="chg-erreur">${esc(t('charges.detail_indispo'))}</p></li>`
-    if (!d.lignes.length) return `<li class="chg-detail"><p class="muted small">${esc(t('charges.detail_vide'))}</p></li>`
-    return `<li class="chg-detail"><ul class="chg-lignes">${d.lignes.map(ligneDetail).join('')}</ul></li>`
+    // Un mois de bord d'un exercice décalé n'est lu que pour sa part dans
+    // l'exercice : l'écran le dit.
+    const partiel = d.partiel ? `<p class="muted small">${esc(t('charges.detail_partiel', { debut: jourLisible(d.debut), fin: jourLisible(d.fin) }))}</p>` : ''
+    if (!d.lignes.length) return `<li class="chg-detail">${partiel}<p class="muted small">${esc(t('charges.detail_vide'))}</p></li>`
+    return `<li class="chg-detail">${partiel}<ul class="chg-lignes">${d.lignes.map(ligneDetail).join('')}</ul></li>`
   }
   function repartitionMois (tot) {
     const parCle = new Map((tot.par_mois || []).map(r => [String(r.cle), r]))
@@ -401,14 +419,18 @@ export function monter (racine, deps) {
     if (deja && deja.etat === 'ok') { peindreTotaux(); return }
     etat.detailMois[cle] = { etat: 'charge', lignes: [] }
     peindreTotaux()
-    const entite = etat.entite
+    const gen = etat.generation
+    // Le mois se lit DANS l'exercice affiché : le serveur le coupe à ses bornes.
+    const tot = etat.totaux || {}
     try {
-      const d = await deps.charger(`mois=${encodeURIComponent(cle)}&entite=${encodeURIComponent(entite)}`)
-      // Une autre entité choisie entre-temps : cette réponse n'est plus la sienne.
-      if (etat.entite !== entite) return
-      etat.detailMois[cle] = { etat: 'ok', lignes: (d && d.detail_mois && d.detail_mois.lignes) || [] }
+      const d = await deps.charger(`mois=${encodeURIComponent(cle)}&entite=${encodeURIComponent(etat.entite)}&periode=${encodeURIComponent(tot.periode || '')}`)
+      // Une autre entité, un autre exercice ou une relecture entre-temps :
+      // cette réponse n'est plus celle de l'écran.
+      if (etat.generation !== gen) return
+      const dm = (d && d.detail_mois) || {}
+      etat.detailMois[cle] = { etat: 'ok', lignes: dm.lignes || [], partiel: !!dm.partiel, debut: dm.debut, fin: dm.fin }
     } catch (e) {
-      if (etat.entite !== entite) return
+      if (etat.generation !== gen) return
       etat.detailMois[cle] = { etat: 'erreur', lignes: [] }
     }
     peindreTotaux()
@@ -425,6 +447,7 @@ export function monter (racine, deps) {
     } else {
       const bornes = `<p class="chg-mentions">${esc(t('charges.du_au', { debut: jourLisible(tot.debut), fin: jourLisible(tot.fin) }))}</p>`
         + (tot.standard ? `<p class="chg-mentions">${esc(t('charges.exercice_standard'))}</p>` : '')
+        + (tot.exercices_indisponibles ? `<p class="chg-mentions">${esc(t('charges.exercices_indispo'))}</p>` : '')
       const s = tot.total || {}
       // ⚠ « ESTIMATION », ET LES TROIS RAISONS DE LA SPEC (§6, Q4) : une
       // facture en lecture, à vérifier ou illisible ; un signal non tranché
@@ -609,6 +632,7 @@ export function monter (racine, deps) {
     if (d && d.entite !== undefined) etat.entite = d.entite || ''
     if (etat.totaux && etat.totaux.periode) etat.periode = etat.totaux.periode
     // Un autre exercice ou une autre entité : les détails ouverts ne valent plus.
+    etat.generation++
     etat.moisOuvert = null
     etat.detailMois = {}
   }
@@ -640,9 +664,13 @@ export function monter (racine, deps) {
     if (!etat.suite || etat.occupe) return
     etat.occupe = true
     bouton.disabled = true
+    const gen = etat.generation
     try {
       // La liste suit l'entité choisie (§14.21) : la page suivante aussi.
       const d = await deps.charger('curseur=' + encodeURIComponent(etat.suite) + (etat.entite ? '&entite=' + encodeURIComponent(etat.entite) : ''))
+      // La liste a été relue entre-temps (autre entité, geste, envoi) : cette
+      // page suivante était celle de l'ancienne liste — review 1, constat 4.
+      if (etat.generation !== gen) { etat.occupe = false; return }
       etat.liste = etat.liste.concat((d && d.liste && d.liste.lignes) || [])
       etat.suite = (d && d.liste && d.liste.suite) || null
     } catch (e) {
@@ -996,8 +1024,8 @@ export function monter (racine, deps) {
   })
   racine.addEventListener('change', (ev) => {
     const el = ev.target
-    if (el.dataset && el.dataset.choix === 'entite') { etat.entite = el.value; etat.periode = ''; recharger(); return }
-    if (el.dataset && el.dataset.choix === 'periode') { etat.periode = el.value; recharger(); return }
+    if (el.dataset && el.dataset.choix === 'entite') { etat.generation++; etat.entite = el.value; etat.periode = ''; recharger(); return }
+    if (el.dataset && el.dataset.choix === 'periode') { etat.generation++; etat.periode = el.value; recharger(); return }
     if (el.dataset && el.dataset.creditChamp === 'entite') {
       const b = $('[data-credit-champ="bien"]')
       if (b) b.innerHTML = optionsBiensCredit(el.value)

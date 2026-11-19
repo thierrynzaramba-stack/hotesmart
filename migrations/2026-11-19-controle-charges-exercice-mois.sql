@@ -1,6 +1,6 @@
 -- ═══ Controle de 2026-11-19-charges-exercice-
 -- mois (lot 8a, spec §14.21). Lecture seule.
--- Chaque ligne doit dire ok = true.
+-- Chaque ligne doit dire ok = true (4 lignes).
 -- Le corps de chaque fonction se compare SANS
 -- SES BLANCS : l'editeur de Supabase les change
 -- au collage (recette du 19 novembre 2026).
@@ -50,4 +50,11 @@ select '3 aucun droit : anon, auth., public',
         and a.privilege_type = 'EXECUTE'))
     = 2,
   'anon, authenticated, public'
+from f
+union all
+select '4 le serveur appelle',
+  count(*) filter (where
+    has_function_privilege('service_role',
+      f.oid, 'execute')) = 2,
+  'service_role'
 from f;

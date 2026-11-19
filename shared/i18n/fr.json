@@ -432,6 +432,8 @@
   "charges.detail_chargement": "Chargement des factures du mois…",
   "charges.detail_indispo": "Les factures de ce mois ne se lisent pas pour le moment.",
   "charges.detail_vide": "Aucune facture ce mois-ci.",
+  "charges.detail_partiel": "Mois partiel : seule sa part dans l'exercice est lue, du {debut} au {fin}.",
+  "charges.exercices_indispo": "La liste des exercices est incomplète pour le moment : seul celui-ci est proposé.",
   "charges.du_au": "Du {debut} au {fin}",
   "charges.enregistre": "Enregistré.",
   "charges.entite_aria": "Entité",

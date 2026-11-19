@@ -432,6 +432,8 @@
   "charges.detail_chargement": "Loading the month's invoices…",
   "charges.detail_indispo": "This month's invoices cannot be read right now.",
   "charges.detail_vide": "No invoice this month.",
+  "charges.detail_partiel": "Partial month: only its share within the financial year is shown, from {debut} to {fin}.",
+  "charges.exercices_indispo": "The list of financial years is incomplete right now: only this one is offered.",
   "charges.du_au": "From {debut} to {fin}",
   "charges.enregistre": "Saved.",
   "charges.entite_aria": "Entity",

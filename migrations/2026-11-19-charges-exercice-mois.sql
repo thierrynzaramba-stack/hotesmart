@@ -4,9 +4,9 @@
 -- novembre 2026).
 -- A coller APRES 2026-11-19-charges-credits.
 -- ET AVANT LE DEPLOIEMENT DU CODE du lot 8a :
--- sans elle, l'ecran ne lit ni les exercices
--- proposes ni le detail d'un mois (503 sur ces
--- deux lectures, le reste de l'ecran tient).
+-- sans elle, l'ecran ne propose que l'exercice
+-- en cours (et le dit), et le detail d'un mois
+-- rend 503 ; le reste de l'ecran tient.
 -- Rejouable. Lignes courtes : collage manuel.
 -- Controle : 2026-11-19-controle-charges-
 --   exercice-mois.sql.
@@ -176,3 +176,12 @@ revoke execute on function
   public.charges_detail_mois(
     uuid, date, date, uuid)
   from public, anon, authenticated;
+-- Et le serveur, lui, appelle : explicite, comme
+-- `charges_totaux` (2026-11-13-charges-periode).
+grant execute on function
+  public.charges_exercices_bornes(uuid, uuid)
+  to service_role;
+grant execute on function
+  public.charges_detail_mois(
+    uuid, date, date, uuid)
+  to service_role;

@@ -71,16 +71,26 @@ async function traiter (req, res, t0, deps) {
   // ── Le détail d'un mois (§14.21.2), seul ──────────────────────────────────
   // ⚠ L'ENTITÉ EST VÉRIFIÉE AVANT : elle doit être du compte de la garde
   // (la fonction filtre encore par compte).
+  // ⚠ ET LE MOIS EST COUPÉ À L'EXERCICE DEMANDÉ (review 1, constat 1) : son
+  // début d'exercice vient de l'entité RELUE ici, jamais de la requête.
   if (q.mois != null && q.mois !== '') {
     if (!ecran.bornesMois(q.mois)) return res.status(400).json({ error: 'mois_invalide' })
     if (!entiteDemandee) return res.status(400).json({ error: 'entite_requise' })
+    if (!/^\d{4}$/.test(String(q.periode || ''))) return res.status(400).json({ error: 'periode_requise' })
     const ent = await ej.entitesDuCompte(compte, { db: base })
     if (!ent.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
-    if (!(ent.entites || []).some(e => String(e.id) === entiteDemandee)) { timing(); return res.status(404).json({ error: 'entite_introuvable' }) }
-    const d = await ecran.detailMois(base, compte, { mois: q.mois, entiteId: entiteDemandee })
+    const entite = (ent.entites || []).find(e => String(e.id) === entiteDemandee)
+    if (!entite) { timing(); return res.status(404).json({ error: 'entite_introuvable' }) }
+    const exercice = ecran.bornesPeriode({ periode: q.periode, entite })
+    // Une année hors des bornes de lecture retombe sur l'exercice en cours :
+    // ce ne serait plus celui demandé.
+    if (exercice.periode !== String(q.periode)) { timing(); return res.status(400).json({ error: 'periode_invalide' }) }
+    const plage = ecran.plageDuMois(q.mois, exercice)
+    if (!plage) { timing(); return res.status(400).json({ error: 'mois_hors_exercice' }) }
+    const d = await ecran.detailMois(base, compte, { debut: plage.debut, fin: plage.fin, entiteId: entiteDemandee })
     timing()
     if (!d.ok) return res.status(503).json({ error: 'Lecture impossible' })
-    return res.status(200).json({ detail_mois: { mois: d.mois, debut: d.debut, fin: d.fin, entite: entiteDemandee, lignes: d.lignes } })
+    return res.status(200).json({ detail_mois: { mois: String(q.mois), periode: exercice.periode, debut: plage.debut, fin: plage.fin, partiel: plage.partiel, entite: entiteDemandee, lignes: d.lignes } })
   }
 
   // ── L'écran entier ────────────────────────────────────────────────────────
@@ -130,7 +140,13 @@ async function traiter (req, res, t0, deps) {
     totaux: !entite
       ? { sans_entite: true }
       : (tot.ok
-          ? { ...tot.totaux, entite: entiteId, periode: periode.periode, proposees: periode.proposees, debut: periode.debut, fin: periode.fin, debut_exercice: periode.debut_exercice, standard: periode.standard }
+          ? {
+              ...tot.totaux, entite: entiteId, periode: periode.periode, proposees: periode.proposees, debut: periode.debut, fin: periode.fin, debut_exercice: periode.debut_exercice, standard: periode.standard,
+              // Review 1, constat 7 : sans les bornes, seul l'exercice lu est
+              // proposé — l'écran le DIT au lieu de laisser croire qu'il n'y en
+              // a pas d'autre.
+              exercices_indisponibles: !bo.ok
+            }
           : null),
     categories: ecran.ORDRE_CATEGORIES,
     // Les crédits et leurs échéances de l'exercice (§14.20) : un complément,
