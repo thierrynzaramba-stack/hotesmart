@@ -2781,3 +2781,32 @@ Aucun constat de sécurité : correction sans nouvelle review.
    téléphone.
 6. **La spec sur sa branche** — connu : la spec passe avec le lot (dépendance
    déclarée au chef de file).
+
+### 13.10 Étape 4 — annulé, déplacé, retiré (19 novembre 2026)
+
+Deux avis de plus, mêmes canaux et même règle que les trois premiers (Q44 ;
+Q46 compris) : **annulé ou déplacé** (Q40), **retiré par l'hôte** (Q45).
+Détail : `docs/kb/menage.md`, « La notification d'abord, le SMS en secours ».
+
+- **Annulation** — `synchroniserMenages` prévient, après l'annulation réussie et
+  le journal, la porteuse et chaque sollicitée (`proposee_a`, `offered_to`),
+  pour un ménage à venir seulement, sous le plafond par cycle (les plus proches
+  d'abord ; le surplus est compté, pas réessayé). Le nom du bien vient de la
+  lecture des biens déjà faite par le moteur (`name` ajouté au `select`) :
+  aucune requête de plus.
+- **Retrait** — `reassigner` (`api/menages.js`) prévient celles qui perdent le
+  ménage, calculé par `perdants(avant, après)` sur l'état écrit ; jamais celle
+  qui le reçoit ou le garde ; ménage à venir seulement. La réponse porte
+  `retraits: { a_prevenir, prevenues }`. Le nom du bien n'est lu qu'une fois,
+  et seulement si quelqu'un est à prévenir.
+- `lib/cleaning/menage-perdants.js` : `participants`, `perdants`, `aVenir`,
+  `jourDeParis` — sans dépendance, pour que les doubles de
+  `notifier-prestataire` dans les tests n'emportent pas ces règles.
+
+**Tests** : `tests/cleaning-notifier.test.js` (+4 : textes, SMS GSM-7, même
+règle, règles de perte), `tests/cleaning-sync-menages-entite.test.js` (+5 :
+porteuse et sollicitées après l'écriture, départ déplacé, passé, sans personne
+ou annulation refusée, masse sous plafond), `tests/menages-reassignation.test.js`
+(+6 : « Personne », retirer la proposition, assigner ailleurs, nouvelle
+proposition, passé ou sans personne, échec d'envoi). Dix mutations, toutes
+attrapées.

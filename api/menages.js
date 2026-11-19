@@ -27,7 +27,9 @@ const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('.
 const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 const { echeanceOffre, chargerLiaisons, chargerDisponibilites,
         deciderParGarde, lireTout } = require('../lib/cleaning/assign')
-const { notifierAssignation, notifierProposition } = require('../lib/cleaning/notifier-prestataire')
+const { notifierAssignation, notifierProposition, notifierRetrait } = require('../lib/cleaning/notifier-prestataire')
+const { aEtePrevenue } = require('../lib/cleaning/bilan-notification')
+const { perdants, aVenir } = require('../lib/cleaning/menage-perdants')
 const { ratioProprete } = require('../lib/stats-avis')
 
 const supabase = createClient(
@@ -1262,15 +1264,34 @@ async function reassigner (req, res) {
   // ⚠ NOTIFIER, MAIS APRES AVOIR ECRIT. L'assignation est deja en base : un
   // envoi qui echoue ne doit ni la defaire, ni faire echouer la requete. On dit
   // a l'hote ce qui est REELLEMENT parti, plutot que de lui promettre un SMS.
-  let notif = { sms: false, email: false }
-  if (reponse.assignee && choisi) {
+  let notif = { push: 0, sms: false, email: false }
+
+  // ⚠ CELLES QUI PERDENT LE MENAGE SONT PREVENUES (PWA lot 3, Q45) : « ne vous
+  // est plus confie ». La porteuse qu'on remplace ou qu'on retire, et celles a
+  // qui il etait propose quand la proposition tombe ou change de main — jamais
+  // celle qui le recoit ou le garde (elle a son « attribue » ou son « a
+  // confirmer »). Le calcul compare l'etat d'AVANT et l'etat ECRIT, champ par
+  // champ : un champ que le geste n'ecrit pas garde sa valeur d'avant.
+  // ⚠ SEULEMENT UN MENAGE A VENIR (depart aujourd'hui ou plus tard, a Paris).
+  const apres = {
+    provider_id: 'provider_id' in maj ? maj.provider_id : avant.provider_id,
+    proposee_a: 'proposee_a' in maj ? maj.proposee_a : avant.proposee_a,
+    offered_to: 'offered_to' in maj ? maj.offered_to : avant.offered_to
+  }
+  const aPrevenir = aVenir(departure_date) ? perdants(avant, apres) : []
+
+  let bien = null
+  if ((reponse.assignee && choisi) || aPrevenir.length) {
     // ⚠ L'erreur est LUE : `provider_property_id` n'a pas de contrainte d'unicite,
     // et `maybeSingle` rend une erreur sur deux lignes. Ignoree, le SMS partait
     // sans nom de bien, en silence.
-    const { data: bien, error: errBien } = await supabase.from('properties')
+    const { data, error: errBien } = await supabase.from('properties')
       .select('name').eq('user_id', userId).eq('provider_property_id', String(property_id)).maybeSingle()
     if (errBien) console.error('[menages] nom du bien illisible', errBien.message)
-    const base = (process.env.PUBLIC_BASE_URL || 'https://hotesmart.vercel.app').replace(/\/+$/, '')
+    bien = data || null
+  }
+  const base = (process.env.PUBLIC_BASE_URL || 'https://hotesmart.vercel.app').replace(/\/+$/, '')
+  if (reponse.assignee && choisi) {
     try {
       notif = await notifierAssignation({
         userId, providerId: choisi.id, propertyName: bien && bien.name,
@@ -1279,8 +1300,20 @@ async function reassigner (req, res) {
       })
     } catch (e) { console.error('[menages] notification assignation echec', e.message) }
   }
+  let retraitsPrevenus = 0
+  for (const qui of aPrevenir) {
+    try {
+      const r = await notifierRetrait({
+        userId, providerId: qui, propertyName: bien && bien.name,
+        propertyId: String(property_id),
+        departureDate: departure_date, lien: `${base}/apps/menages/public`
+      })
+      if (aEtePrevenue(r)) retraitsPrevenus++
+    } catch (e) { console.error('[menages] avis de retrait echec', e.message) }
+  }
 
-  return res.status(200).json({ success: true, ...reponse, notifiee: notif })
+  return res.status(200).json({ success: true, ...reponse, notifiee: notif,
+                                retraits: { a_prevenir: aPrevenir.length, prevenues: retraitsPrevenus } })
 }
 
 // ─── Qui intervient sur quel bien, et a quel rang (spec §11.2) ──────────────

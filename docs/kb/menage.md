@@ -1205,6 +1205,26 @@ d'abord en **notification** sur les téléphones qu'elle a abonnés depuis sa pa
   l'API de la page de la prestataire, dont le démarrage à froid ne paie pas `web-push`.
 - **Éprouvé** : `tests/cleaning-notifier.test.js` avec le **vrai** chemin d'envoi (clés VAPID
   réelles, message chiffré ; seul le service de push est simulé).
+- **Deux avis de plus (étape 4, Q40, Q44, Q45)**, même règle et mêmes canaux :
+  - **annulé ou déplacé** (`notifierAnnulation`) — le moteur (`synchroniserMenages`) prévient,
+    APRÈS l'annulation et le journal, la porteuse et chaque prestataire à qui le ménage était
+    proposé ; « Ménage du {jour} - {bien} annulé : la réservation est annulée ou son départ a
+    changé. » Un départ déplacé fait naître un autre ménage, qui a son propre avis.
+  - **retiré par l'hôte** (`notifierRetrait`) — `api/menages.js` (`reassigner`) prévient celles
+    qui PERDENT le ménage : « Personne », « Retirer la proposition », une attribution qui change
+    la porteuse, une nouvelle proposition qui remplace l'ancienne ; « Le ménage du {jour} -
+    {bien} ne vous est plus confié. » Jamais celle qui le reçoit ou le garde.
+  - ⚠️ **Qui perd** : un seul calcul, `perdants(avant, après)` (`lib/cleaning/menage-perdants.js`,
+    sans dépendance) — participantes d'avant (porteuse, `proposee_a`, `offered_to`) qui ne le
+    sont plus après. Pour l'hôte, l'état d'après est l'état ÉCRIT, champ par champ : un champ
+    que le geste n'écrit pas garde sa valeur d'avant.
+  - ⚠️ **Seulement un ménage À VENIR** (départ aujourd'hui ou plus tard, à Paris) : une
+    correction de l'historique ne réveille personne.
+  - ⚠️ **Plafond par cycle pour l'annulation** (`MAX_NOTIFS_PAR_CYCLE`, les plus proches
+    d'abord) : une annulation en masse ne devient pas une rafale de SMS ; le surplus est compté
+    (`annulations_non_prevenues`) et journalisé, pas réessayé.
+  - **Limite connue** : un ménage annulé puis RESSUSCITÉ (sa réservation revient) ne déclenche
+    pas d'avis « il revient » — hors du périmètre décidé.
 
 ### Le nom de famille est obligatoire (point 4, 15 sept. 2026)
 

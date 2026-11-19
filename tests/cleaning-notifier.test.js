@@ -607,3 +607,81 @@ test('constat 2 : le lot 2 (personnes avec un compte) garde son déroulé — un
   assert.ok(personne.includes('envoyerAuxAbonnements('), 'le chemin commun')
   assert.ok(!/parallele|disjoncteur/.test(personne), 'ni parallèle ni disjoncteur pour le lot 2')
 })
+
+// ─── Étape 4 : annulé ou déplacé (Q40, Q44), retiré par l'hôte (Q45) ───────
+
+test('LE TEST QUI COMPTE (étape 4) : annulation et retrait — textes, page sans jeton, un ménage = une notification', async () => {
+  const cas = [
+    ['notifierAnnulation', 'Ménage du samedi 12 septembre - La bulle annulé : la réservation est annulée ou son départ a changé.'],
+    ['notifierRetrait', 'Le ménage du samedi 12 septembre - La bulle ne vous est plus confié.']
+  ]
+  for (const [fn, corps] of cas) {
+    await avecPush({}, async ({ capturer }) => {
+      const { mod } = preparer({ abos: [appareil('a1')] })
+      const messages = capturer(require('../lib/push/envoyer'))
+      const r = await mod[fn](BASE)
+      assert.strictEqual(r.push, 1, fn)
+      const n = messages[0].message.notification
+      assert.strictEqual(n.title, 'HôteSmart')
+      assert.strictEqual(n.body, corps, fn)
+      assert.strictEqual(n.navigate, '/apps/menages/public.html')
+      assert.strictEqual(n.tag, 'menage-209413-2026-09-12', 'remplace l’avis précédent du même ménage')
+      const brut = JSON.stringify(messages[0].message)
+      for (const interdit of ['jeton-marie', 'token', 'apercu', '/dashboard']) assert.ok(!brut.includes(interdit), `${fn} : ${interdit}`)
+    })
+  }
+})
+
+test('étape 4 : le SMS de l’annulation et du retrait — GSM-7, tiret simple, avec son planning', async () => {
+  for (const [fn, attendu] of [
+    ['notifierAnnulation', /^Menage du samedi 12 septembre - La bulle annule : la reservation est annulee ou son depart a change\. Votre planning : https:\/\/hotesmart\.vercel\.app\/apps\/menages\/public\?token=jeton-marie$/],
+    ['notifierRetrait', /^Le menage du samedi 12 septembre - La bulle ne vous est plus confie\. Votre planning : https:\/\/hotesmart\.vercel\.app\/apps\/menages\/public\?token=jeton-marie$/]
+  ]) {
+    await avecPush({ sansCles: true }, async () => {
+      const { etat, mod } = preparer()
+      const r = await mod[fn](BASE)
+      assert.deepStrictEqual(r, { push: 0, sms: true, email: true }, fn)
+      assert.match(etat.sms[0].message, attendu)
+      assert.ok(/^[\x20-\x7e]*$/.test(etat.sms[0].message), `${fn} : hors GSM-7 de base`)
+    })
+  }
+})
+
+test('étape 4 : même règle que les trois autres (Q44, Q46) — notification d’abord, SMS en secours ou si urgent', async () => {
+  for (const fn of ['notifierAnnulation', 'notifierRetrait']) {
+    await avecPush({}, async () => {
+      const loin = preparer({ abos: [appareil('a1')] })
+      assert.deepStrictEqual(await loin.mod[fn](LOIN), { push: 1, sms: false, email: true }, `${fn} loin`)
+      const demain = preparer({ abos: [appareil('a1')] })
+      assert.deepStrictEqual(await demain.mod[fn]({ ...BASE, departureDate: jourParis(1) }), { push: 1, sms: true, email: true }, `${fn} demain`)
+      const inactif = preparer({ profil: { first_name: 'M', phone: '+33600000000', active: false }, abos: [appareil('a1')] })
+      assert.deepStrictEqual(await inactif.mod[fn](LOIN), { push: 0, sms: false, email: false }, `${fn} profil désactivé`)
+      assert.deepStrictEqual(await inactif.mod[fn]({ ...LOIN, providerId: null }), { push: 0, sms: false, email: false })
+    })
+  }
+})
+
+test('étape 4 : qui PERD un ménage — la porteuse et les sollicitées, jamais qui le garde ou le reçoit', () => {
+  const { participants, perdants, aVenir } = require('../lib/cleaning/menage-perdants')
+  assert.deepStrictEqual(participants({ provider_id: 'a', proposee_a: ['b', 'a', 'c'], offered_to: 'b' }), ['a', 'b', 'c'])
+  assert.deepStrictEqual(participants(null), [])
+  // Annulation : toutes le perdent.
+  assert.deepStrictEqual(perdants({ provider_id: 'a', proposee_a: ['b'] }, null), ['a', 'b'])
+  // « Personne » : idem.
+  assert.deepStrictEqual(perdants({ provider_id: 'a', proposee_a: ['b'] }, { provider_id: null, proposee_a: null }), ['a', 'b'])
+  // Retirer la proposition : la porteuse garde.
+  assert.deepStrictEqual(perdants({ provider_id: 'a', proposee_a: ['b'] }, { provider_id: 'a', proposee_a: null }), ['b'])
+  // Assigner à la sollicitée : elle le reçoit, l'ancienne porteuse le perd.
+  assert.deepStrictEqual(perdants({ provider_id: 'a', proposee_a: ['b'] }, { provider_id: 'b', proposee_a: null }), ['a'])
+  // Une nouvelle proposition remplace l'ancienne.
+  assert.deepStrictEqual(perdants({ provider_id: 'a', proposee_a: ['c'] }, { provider_id: 'a', proposee_a: ['b'] }), ['c'])
+  assert.deepStrictEqual(perdants({ provider_id: 'a', proposee_a: ['b'] }, { provider_id: 'a', proposee_a: ['b'] }), [])
+  // À venir : aujourd'hui ou plus tard, à Paris.
+  assert.strictEqual(aVenir(jourParis(0)), true)
+  assert.strictEqual(aVenir(jourParis(1)), true)
+  assert.strictEqual(aVenir(jourParis(-1)), false)
+  assert.strictEqual(aVenir('pas une date'), false)
+  // 00 h 30 à Paris le 1er janvier = 23 h 30 UTC le 31 décembre : le 31 est passé.
+  assert.strictEqual(aVenir('2026-12-31', Date.parse('2026-12-31T23:30:00Z')), false)
+  assert.strictEqual(aVenir('2027-01-01', Date.parse('2026-12-31T23:30:00Z')), true)
+})

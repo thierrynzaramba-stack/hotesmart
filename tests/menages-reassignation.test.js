@@ -25,8 +25,9 @@ function preparer ({ user = PROD, profil = null, permissions = null, compteAtten
                      dateAttendue = LOIN, notifJette = false,
                      prestataire = { id: REGINA, first_name: 'Régina', active: true },
                      menage = { id: 'm1', provider_id: null, status: 'unassigned' },
-                     liaison = { rang: 1, requires_ack: false }, erreurProfil = null, erreurLiaison = null } = {}) {
-  const etat = { majs: [], journal: [], requetes: [], notifs: [] }
+                     liaison = { rang: 1, requires_ack: false }, erreurProfil = null, erreurLiaison = null,
+                     retraitJette = false } = {}) {
+  const etat = { majs: [], journal: [], requetes: [], notifs: [], retraits: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
                                        : { data: null, error: { message: 'x' } }) },
@@ -104,11 +105,20 @@ function preparer ({ user = PROD, profil = null, permissions = null, compteAtten
   }
   const absNotif = require.resolve(path.join(__dirname, '..', 'lib/cleaning/notifier-prestataire.js'))
   const mnotif = new Module(absNotif)
-  mnotif.exports = { notifierAssignation: async (opts) => {
-    if (notifJette) throw new Error('brevo indisponible')
-    etat.notifs.push(opts)
-    return { sms: true, email: false }
-  } }
+  mnotif.exports = {
+    notifierAssignation: async (opts) => {
+      if (notifJette) throw new Error('brevo indisponible')
+      etat.notifs.push(opts)
+      return { sms: true, email: false }
+    },
+    // PWA lot 3 (Q45) : « ne vous est plus confié ». On note ce qui était ÉCRIT
+    // au moment de l'appel, pour prouver qu'il part après l'écriture.
+    notifierRetrait: async (opts) => {
+      if (retraitJette) throw new Error('brevo indisponible')
+      etat.retraits.push({ ...opts, majsAvant: etat.majs.length, journalAvant: etat.journal.length })
+      return { push: 1, sms: false, email: false }
+    }
+  }
   mnotif.loaded = true
   require.cache[absNotif] = mnotif
   return { handler: require('../api/menages'), etat }
@@ -478,4 +488,72 @@ test('une notification qui ÉCHOUE ne défait pas l\'assignation', async () => {
   await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), res)
   assert.strictEqual(res.code, 200)
   assert.strictEqual(etat.majs[0].row.provider_id, NOUVELLE)
+})
+
+// ─── PWA lot 3 (Q45) : celles qui PERDENT le ménage sont prévenues ─────────
+
+const AUTRE = 'cccc3333-3333-4333-8333-333333333333'
+const qui = (etat) => etat.retraits.map(r => r.providerId).sort()
+
+test('LE TEST QUI COMPTE (Q45) : « Personne » prévient la porteuse ET celles à qui il était proposé — après l’écriture', async () => {
+  const { handler, etat } = preparer({ menage: { id: 'm1', provider_id: REGINA, status: 'accepted', proposee_a: [NOUVELLE] } })
+  const res = reponse()
+  await handler(post({ ...CORPS, provider_id: null }), res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(qui(etat), [NOUVELLE, REGINA].sort())
+  for (const r of etat.retraits) {
+    assert.ok(r.majsAvant >= 1, 'après l’écriture')
+    assert.ok(r.journalAvant >= 1, 'et après le journal')
+    assert.strictEqual(r.departureDate, LOIN)
+    assert.strictEqual(r.propertyId, '209413')
+  }
+  assert.deepStrictEqual(res.body.retraits, { a_prevenir: 2, prevenues: 2 })
+})
+
+test('Q45 : « Retirer la proposition » prévient celle à qui elle est retirée — pas la porteuse, qui le garde', async () => {
+  const { handler, etat } = preparer({ menage: { id: 'm1', provider_id: REGINA, status: 'accepted', proposee_a: [NOUVELLE] } })
+  await handler(post({ ...CORPS, provider_id: REGINA }), reponse())
+  assert.deepStrictEqual(qui(etat), [NOUVELLE])
+})
+
+test('Q45 : assigner à une autre prévient l’ancienne porteuse — JAMAIS celle qui le reçoit', async () => {
+  const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true },
+                                       menage: { id: 'm1', provider_id: REGINA, status: 'accepted', proposee_a: [NOUVELLE] } })
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), reponse())
+  assert.deepStrictEqual(qui(etat), [REGINA])
+  assert.deepStrictEqual(etat.notifs.map(n => n.providerId), [NOUVELLE], 'elle a son « attribué »')
+})
+
+test('Q45 : une nouvelle proposition prévient celles de l’ancienne — la porteuse garde, la nouvelle reçoit', async () => {
+  const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true },
+                                       menage: { id: 'm1', provider_id: REGINA, status: 'accepted', proposee_a: [AUTRE] } })
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'proposer' }), reponse())
+  assert.deepStrictEqual(qui(etat), [AUTRE])
+  // Re-proposer à la même : personne ne perd rien.
+  const meme = preparer({ liaison: { rang: 2, requires_ack: true },
+                          menage: { id: 'm1', provider_id: REGINA, status: 'accepted', proposee_a: [NOUVELLE] } })
+  await meme.handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'proposer' }), reponse())
+  assert.deepStrictEqual(meme.etat.retraits, [])
+})
+
+test('Q45 : un ménage sans personne, ou PASSÉ, ne prévient personne', async () => {
+  const vide = preparer({ menage: { id: 'm1', provider_id: null, status: 'unassigned' } })
+  await vide.handler(post({ ...CORPS, provider_id: null }), reponse())
+  assert.deepStrictEqual(vide.etat.retraits, [])
+  const HIER = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10)
+  const passe = preparer({ dateAttendue: HIER, menage: { id: 'm1', provider_id: REGINA, status: 'accepted' } })
+  const res = reponse()
+  await passe.handler(post({ ...CORPS, departure_date: HIER, provider_id: null }), res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(passe.etat.retraits, [])
+  assert.deepStrictEqual(res.body.retraits, { a_prevenir: 0, prevenues: 0 })
+})
+
+test('Q45 : un avis de retrait qui ÉCHOUE ne défait pas le geste', async () => {
+  const { handler, etat } = preparer({ retraitJette: true, menage: { id: 'm1', provider_id: REGINA, status: 'accepted' } })
+  const res = reponse()
+  await handler(post({ ...CORPS, provider_id: null }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.majs[0].row.provider_id, null)
+  assert.deepStrictEqual(res.body.retraits, { a_prevenir: 1, prevenues: 0 })
 })
