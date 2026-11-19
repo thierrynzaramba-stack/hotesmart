@@ -82,13 +82,14 @@ function reponseEcran ({ aTraiter = [], nombre = null, liste = [], suite = null,
  * @param o.depot(url)   → statut HTTP du dépôt au stockage (200 par défaut)
  * @param o.confirmer    réponse de `confirm` (vrai par défaut)
  * @param o.titulaire    faux : le compte courant n'est pas le sien
+ * @param o.preparerJpeg(f, w) → remplace la réduction d'image (peut lever)
  */
 async function monter (o = {}) {
   const html = lire('pages/charges.html')
   const corps = html.slice(html.indexOf('<body>') + 6, html.indexOf('<script src="/shared/i18n/i18n.js">'))
   const dom = new JSDOM(`<!doctype html><html><body>${corps}</body></html>`, { url: 'https://hs.test/charges', runScripts: 'outside-only', pretendToBeVisual: true })
   const w = dom.window
-  const journal = { fetch: [], onglets: [], confirmations: [], gardes: 0 }
+  const journal = { fetch: [], onglets: [], confirmations: [], gardes: 0, reduits: [] }
 
   const repondre = (statut, corpsJson) => ({ ok: statut >= 200 && statut < 300, status: statut, json: async () => corpsJson })
   w.fetch = async (url, opts = {}) => {
@@ -126,7 +127,13 @@ async function monter (o = {}) {
     basculerVers: () => {},
     enteteCompte: () => ({}),
     exigerCompteProprePage: async () => { journal.gardes++; return true },
-    preparerJpeg: async (f) => new w.Blob(['jpeg-reduit'], { type: 'image/jpeg' }),
+    // `o.preparerJpeg` remplace la réduction (une image que l'appareil ne sait
+    // pas lire) ; chaque fichier reçu est noté dans `journal.reduits`.
+    preparerJpeg: async (f) => {
+      journal.reduits.push({ type: f.type, taille: f.size })
+      if (o.preparerJpeg) return o.preparerJpeg(f, w)
+      return new w.Blob(['jpeg-reduit'], { type: 'image/jpeg' })
+    },
     monter: vue.monter
   }
   Object.assign(w, injectes)

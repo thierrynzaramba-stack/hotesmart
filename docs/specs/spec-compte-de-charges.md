@@ -1562,6 +1562,193 @@ nouvelle review (règle « une review par commit ») :
 | 4 | Effet de bord possible sur l'échéancier | La règle vise facture, régularisation ou avoir — « pas un échéancier » |
 | 5 | Test de mots, pas de comportement | Le texte envoyé à l'IA est la consigne ; une régularisation sur 365 jours garde sa période ; sur 374 jours, elle tombe à `null` avec sa trace |
 
+### 14.15 Recette de la consigne « énergie » sur staging (19 novembre 2026)
+
+Staging à `f996d8db` (merge de `43150b3a`). Thierry recharge la vraie
+régularisation EDF du 7 octobre 2025 (PDF de 8 pages, électricité et gaz ;
+la consommation n'est écrite qu'en page 2 du détail). Lu par l'IA, **période
+déjà remplie à l'ouverture de la fiche** (Thierry n'y a pas touché) :
+
+| | Attendu | Lu |
+|---|---|---|
+| Type | régularisation | régularisation |
+| Période | 2024-09-26 → 2025-09-25 | **2024-09-26 → 2025-09-25** |
+| TTC | 5 856,48 € | 5 856,48 € (HT 4 932,24, TVA 924,24) |
+| Solde | 1 916,83 € | 1 916,83 € |
+
+L'exemple de la consigne est neutre (14/03/24, review constat 3) : la période
+lue ne vient pas de la consigne. **Recette conforme.** Question ouverte à
+Thierry, sans effet sur la mise en production : tolérer une période de plus de
+366 jours (relevé annuel de 367 à 370 jours) ou garder la borne d'un an.
+### 14.16 Toute image que l'appareil sait lire (19 novembre 2026)
+
+**La demande** (Thierry, 19 novembre 2026, au chargement des factures 2025) :
+des factures reçues **par SMS** ne se chargeaient pas. Seuls le PDF, le JPEG et
+le PNG étaient acceptés, au sélecteur comme à l'envoi ; les photos HEIC (format
+de l'iPhone et de certains Android, dont le sien) et les autres formats étaient
+refusés, ou invisibles dans le sélecteur.
+
+**Décidé** (option « appareil + message », Thierry) :
+- le sélecteur propose **toutes les images courantes**, en liste explicite
+  (JPEG, PNG, WebP, GIF, AVIF, BMP, HEIC, HEIF, plus les extensions `.heic`
+  et `.heif`, que certains sélecteurs Android filtrent par extension). Pas
+  `image/*` : « /* » dans la page se lit comme un début de commentaire par
+  les tests qui la nettoient, et y masquait la garde de la page ;
+- toute image que **le navigateur sait lire** (JPEG, PNG, WebP, GIF, AVIF, BMP,
+  TIFF avec Safari ; HEIC **avec Safari** sur iPhone, iPad et Mac — Chrome ne
+  le lit nulle part) est convertie en JPEG par le navigateur avant
+  l'envoi (`preparerJpeg`, la même réduction que les photos de biens) — le
+  serveur et l'IA ne reçoivent toujours que du PDF, du JPEG ou du PNG ;
+- un fichier sans type (certains sélecteurs Android) se reconnaît à son
+  extension (`typeDuFichier`) ; sans type ni extension parlante, ou au type
+  générique `application/octet-stream`, à son **contenu** (`formatDuContenu`,
+  les premiers octets) ;
+- une image que le navigateur **ne sait pas lire** est refusée **en nommant
+  son format**, reconnu aussi à son contenu (un HEIC enregistré en « .jpg » par
+  une messagerie) : « Photo HEIC : ce navigateur ne sait pas la convertir.
+  Envoyez une capture d'écran de la facture, ou enregistrez-la en JPEG. » Une
+  capture d'écran donne un PNG, qui passe partout. Une autre panne de
+  conversion (mémoire, canvas) est un refus ordinaire, sans accuser le format.
+
+**Non retenu, et pourquoi** : un décodeur HEIC embarqué (Android et PC) — 2 à
+3 Mo téléchargés, et un décodeur HEVC couvert par des brevets et une licence
+LGPL, à faire vérifier avant. À rouvrir si les factures SMS de Thierry
+s'avèrent être du HEIC (le message le dira désormais).
+
+**Case PERFORMANCE** (règle du dépôt, huit points) :
+1. Écran : sans objet — aucun appel ajouté ; le chargement de `/charges` reste
+   `/api/ecran/charges` seul.
+2. Donnée non urgente : sans objet.
+3. Cache : sans objet.
+4. `private, no-store` : inchangé (aucun endpoint touché).
+5. Statiques : aucun fichier ajouté, aucune bibliothèque.
+6. Lecture tronquée : sans objet.
+7. Budget : inchangé ; la conversion se fait sur l'appareil, à l'envoi, et
+   réduit la photo (2 000 px, 2 Mo au plus) avant de l'envoyer.
+8. Mesure AVANT / APRÈS : l'écran ne change pas — **1 appel, 7 requêtes,
+   681 octets** de `/api/ecran/charges` (production, 18 novembre 2026), avant
+   comme après. Le module de la page, `shared/charges-vue.js`, passe de
+   38 645 à 41 265 octets (+2,6 Ko, non compressé). Seul l'envoi d'une photo
+   change.
+
+**Inventaire** : rien de retiré. Le PDF, le JPEG et le PNG passent comme avant ;
+le message « type refusé » devient « Seuls les PDF et les images sont
+acceptés. ». **Mobile** : un seul module (`shared/charges-vue.js`) pour les
+deux écrans.
+
+### 14.17 Review du lot photos (19 novembre 2026)
+
+Une review, sur `2001ae84705baea1d04501a5825c0d119c8f14d5` (arbre
+`/home/claude/hotesmart-photos`, branche `charges-photos-formats`, plage
+`1a5ba3a56651769e11e552221da3b72dec8c13ee..2001ae84705baea1d04501a5825c0d119c8f14d5`).
+Réponse de la review, recopiée mot pour mot :
+
+````
+**Arbre lu :** `/home/claude/hotesmart-photos`, branche `charges-photos-formats`, plage `1a5ba3a56651769e11e552221da3b72dec8c13ee..2001ae84705baea1d04501a5825c0d119c8f14d5`.
+
+```
+$ git log -1 --format=%H
+2001ae84705baea1d04501a5825c0d119c8f14d5
+
+$ git diff --name-only 1a5ba3a5…13ee 2001ae84…14d5
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+pages/charges.html
+shared/charges-vue.js
+shared/i18n/en.json
+shared/i18n/es.json
+shared/i18n/fr.json
+tests/charges-page.test.js
+tests/outils/banc-charges.js
+```
+
+Je n'ai modifié aucun fichier. L'arbre est inchangé (`git status` : seul `node_modules` non suivi). J'ai fait la contre-épreuve dans `/tmp`, puis je l'ai supprimée.
+
+## Ce que j'ai mesuré
+- `tests/charges-page.test.js` et `tests/pages-non-delegables.test.js` : **84 sur 84 verts**. `scripts/i18n-check.js` : 1565 clés dans chacune des trois langues.
+- **Contre-épreuve** (code parent extrait par `git archive`, tests du commit par-dessus) : les **5 tests** neufs ou mis à jour sont **rouges**.
+- **Mutation 1** (on passe le fichier sans le retyper) : le test « HEIC sans type » devient rouge. Il mord.
+- **Mutation 2** (le PDF n'est retypé que si son type est vide) : **tout reste vert**. C'est le trou de test du constat 5.
+
+## Sécurité : aucun constat
+- **Nom de fichier :** il n'est jamais affiché. `statutEnvoi` écrit en `textContent`, et seulement des clés i18n sans valeur insérée. Aucun risque d'injection de code par le nom.
+- **Ce qui part au serveur :** le type annoncé à `envoi` est toujours `image/jpeg` (le résultat de `preparerJpeg`, qui sort du canvas avec `toBlob('image/jpeg')`) ou `application/pdf`. Aucun HEIC, WebP ou octet-stream n'atteint le stockage. Et le serveur relit le type dans le contenu, puis efface le fichier s'il ne correspond pas (`lib/charges.js:241-247` ; `lib/charges/regles.js` pour les types acceptés, référence seulement).
+- **SVG ou image piégée :** une image SVG ne déroule aucun script et sort en JPEG ; si le canvas est bloqué par le navigateur, `toBlob` échoue et on retombe sur « image illisible ». Une image démesurée ne charge que l'appareil de l'hôte lui-même, et le PNG passait déjà par ce chemin.
+
+## Bloquant : aucun
+
+## Mineurs
+
+**1. Le message HEIC dépend du type annoncé ou de l'extension, pas du contenu**
+- **Où :** `shared/charges-vue.js:40-48` et `630-633`.
+- **Scénario :** `facture.heic.jpg`, ou un HEIC enregistré en `.jpg` par une messagerie. Sous Chrome, le décodage échoue, `estHeic('image/jpeg')` est faux, et l'hôte lit « Cet appareil ne sait pas lire cette image » sans que HEIC soit nommé.
+- **Autre cas :** un fichier sans type et sans extension (sélecteur Android) reçoit « Seuls les PDF et les images sont acceptés », alors que c'est peut-être une image.
+- **Pourquoi c'est gênant :** la spec §14.16 compte sur ce message pour savoir s'il faut rouvrir le décodeur HEIC (« le message le dira désormais »).
+- **Correction :** lire les 12 premiers octets (`await fichier.slice(0, 12).arrayBuffer()`), seulement dans le `catch` et pour un type vide ou inconnu. `ftyp` suivi de `heic`, `heix`, `hevc`, `hevx`, `heim`, `heis`, `mif1` ou `msf1` signale un HEIC. `%PDF`, `FFD8FF`, `89504E47`, `GIF8` et `RIFF…WEBP` servent à typer un fichier sans extension.
+
+**2. Les textes ne collent pas au cas réel**
+- **Où :** `shared/i18n/fr.json:482-483`, `en.json:482-483`, `es.json:482-483`.
+- **« cet appareil ne sait pas lire » est faux du point de vue de l'hôte :** sur Android, la Galerie ouvre le HEIC ; c'est Chrome qui ne sait pas le lire.
+- **« Prenez la facture en photo » ne convient pas** à une facture reçue par SMS : il n'y a pas de papier à photographier.
+- **Sur ordinateur, « Appareil photo » n'existe pas.** « Ajouter une facture » correspond bien au bouton (`charges.ajouter`).
+- **Proposition :** « Photo HEIC : ce navigateur ne sait pas la convertir. Envoyez une capture d'écran de la facture, ou enregistrez-la en JPEG. » Une capture d'écran donne un PNG, qui passe partout. Même ajustement pour en/es.
+
+**3. Toute erreur de conversion devient « format illisible »**
+- **Où :** `shared/charges-vue.js:630-633`.
+- **Scénario :** sur iPhone, une photo HEIC lisible dont le canvas échoue faute de mémoire (`getContext` rend `null`, d'où une `TypeError`) affiche « Photo au format HEIC, que cet appareil ne sait pas lire ».
+- **Correction :** réserver le message de format à `e.code === 'type'`, et répondre `t('charges.refus')` aux autres erreurs.
+
+**4. Le commentaire du retypage donne une fausse raison**
+- **Où :** `shared/charges-vue.js:627-628`, « sans lui, le navigateur ne saurait pas quoi décoder ».
+- **En réalité :** les navigateurs reconnaissent une image à son contenu. La vraie raison est la garde de `preparerJpeg` (`/^image\//.test(fichier.type)`, `shared/photo-bien-client.js:29`, référence seulement).
+- **Risque :** le prochain développeur, croyant le retypage inutile, peut le retirer.
+- **Correction :** réécrire le commentaire avec la vraie raison.
+
+**5. Trou de test : le PDF typé `application/octet-stream`**
+- **Où :** `tests/charges-page.test.js`.
+- **Constat :** ce cas était refusé avant le commit ; il est maintenant accepté, et le code le retype bien (ligne 636). Mais seul le test unitaire de `typeDuFichier` le couvre : la mutation 2 reste verte.
+- **Correction :** ajouter `deposerFichier('facture.pdf', 'application/octet-stream')`, puis vérifier que `envoi.type` et le type de la partie envoyée (`PUT`) valent `application/pdf`. Ajouter aussi les cas unitaires `x.heic.jpg`, nom sans extension et `X.PDF`.
+
+**6. Changement de comportement, sans correction nécessaire**
+- **Où :** `shared/charges-vue.js:40-46`.
+- **Constat :** `typeDuFichier` laisse l'extension l'emporter sur tout type déclaré autre que PDF ou image, pas seulement sur un type vide comme le dit le message du commit. Exemple : `text/plain` nommé `x.pdf` part maintenant au serveur. Ce dernier le refuse (415), efface le fichier, et l'écran affiche « Seuls les PDF et les images sont acceptés ».
+- **Effet :** aucun danger ; seulement un aller-retour inutile. En contrepartie, `application/x-pdf` et `image/jpg` passent désormais, ce qui est un gain.
+
+**7. Documentation**
+- `docs/specs/spec-compte-de-charges.md:1393` dit « HEIC sur iPhone, iPad et Mac ». Il faut écrire « avec Safari » : Chrome sur Mac ne lit pas le HEIC.
+- La case performance, point 8, ne donne que deux nombres. La règle du dépôt en demande trois : appels, requêtes, octets.
+- Les §14.13 à 14.15 sont absents de cette branche : à vérifier au merge, pour éviter une collision de numéros.
+- `image/tiff` n'est pas dans la liste, alors que Safari le lit et que les factures scannées l'utilisent souvent. C'est un choix à assumer, et la spec ne le mentionne pas.
+
+## Les points demandés, sans constat
+- **Le PDF (point 3) :** son chemin est inchangé pour le type `application/pdf` comme pour le type vide.
+- **Le `slice` (point 2) :** il est correct. Le type est normalisé, et le fichier n'est retypé que si son type diffère.
+- **L'attribut `accept` (point 4) :** la liste explicite est le bon choix. Le nettoyeur de `tests/pages-non-delegables.test.js:31` (`/\/\*[\s\S]*?\*\//`) aurait bien lu `image/*` comme le début d'un commentaire.
+- **iPhone :** WebKit ne convertit plus le HEIC en JPEG quand `accept` le liste ([bug 267277](https://bugs.webkit.org/show_bug.cgi?id=267277), corrigé en mars 2024). Avant cette correction, la conversion était systématique. Dans les deux cas, on obtient soit un JPEG, soit un HEIC que Safari 17 et suivants décodent : je n'ai trouvé aucun scénario de régression.
+- **Mac :** un [fil Apple](https://developer.apple.com/forums/thread/743049) signale que Safari 17+ convertit un JPEG en HEIC avec `accept="image/*,image/heic"`. Ici, JPEG et PNG sont listés explicitement, et Safari décode de toute façon le HEIC.
+- **Android :** les fichiers HEIC deviennent visibles dans le sélecteur. Chrome ne sait pas les lire, donc le message s'affiche. L'option appareil photo reste proposée.
+- **Recette conseillée :** sur iPhone, un HEIC de la Photothèque et une capture PNG ; sur Android avec Chrome, un HEIC reçu par SMS.
+- **Le banc (point 6) :** seul `tests/charges-page.test.js` l'utilise, et son comportement par défaut est inchangé. Il ne fausse aucun autre test.
+````
+
+**Confrontation, refaite par le fil** : `git diff --name-only 1a5ba3a5
+2001ae84` rend les 9 fichiers que la review recopie en tête ; ses constats
+portent sur des fichiers de cette liste. Les fichiers cités hors plage
+(`lib/charges.js`, `lib/charges/regles.js`, `shared/photo-bien-client.js`)
+sont déclarés « référence seulement » ; `tests/pages-non-delegables.test.js`
+est cité pour confirmer le choix de la liste explicite, sans constat.
+**Aucun constat de sécurité, aucun bloquant** : corrigés sans nouvelle review.
+
+| | Constat | Correction |
+|---|---|---|
+| 1 | Le HEIC n'était reconnu qu'au type ou à l'extension | `formatDuContenu` lit les premiers octets : un HEIC nommé « .jpg » est nommé ; un fichier sans type ni extension (ou `octet-stream`) est typé par son contenu. Un type précis (texte, tableur) n'est pas contredit |
+| 2 | Textes faux pour une facture reçue par SMS | « Photo HEIC : ce navigateur ne sait pas la convertir. Envoyez une capture d'écran de la facture, ou enregistrez-la en JPEG. » (fr, en, es) |
+| 3 | Toute panne de conversion accusait le format | Le message de format seulement pour `code: 'type'` ; sinon « La facture n'a pas pu être enregistrée. » |
+| 4 | Commentaire du retypage faux | La vraie raison : la garde de `preparerJpeg` sur le type |
+| 5 | PDF `octet-stream` non testé de bout en bout | Test : annoncé et déposé en `application/pdf` (mutation 2 désormais rouge) ; cas unitaires `x.heic.jpg`, sans extension, `X.PDF` |
+| 6 | L'extension l'emporte sur un type non image | Assumé (aller-retour inutile vers un 415 au pire ; `image/jpg` et `application/x-pdf` y gagnent) |
+| 7 | Documentation | « avec Safari » ; trois nombres en point 8 ; TIFF ajouté à la liste ; §14.13-14.15 reçus par la fusion de `main` (`1642ea29`) |
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

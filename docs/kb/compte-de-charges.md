@@ -40,6 +40,13 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 
 ## Règles à ne pas perdre
 
+- **Toute image que l'appareil sait lire part en JPEG** (Thierry, 19 novembre
+  2026, factures reçues par SMS) : la conversion se fait dans le navigateur
+  (`preparerJpeg`) ; le serveur ne reçoit que PDF, JPEG, PNG. Un format illisible
+  est refusé en le nommant, reconnu aussi à ses premiers octets (HEIC sous
+  Chrome : « envoyez une capture d'écran »). Pas de décodeur HEIC embarqué
+  (poids, brevets HEVC, LGPL) : spec §14.16 et §14.17.
+
 - **Les totaux ne se calculent jamais à la lecture.** Le trigger
   `charges_resume_trg` recalcule la cellule d'avant et celle d'après à chaque
   écriture, dans la même transaction (recalcul, jamais incrément). Le cron
