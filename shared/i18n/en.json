@@ -1595,5 +1595,9 @@
   "charges.refus_ligne_incoherente": "The line of {date} does not add up: interest, insurance, fees and principal do not make the instalment. Nothing was imported.",
   "charges.refus_credit_automatique": "A loan instalment cannot be edited: delete the loan and import its schedule again.",
   "charges.refus_credit_introuvable": "This loan no longer exists.",
-  "charges.refus_credit_non_designe": "This loan no longer exists."
+  "charges.refus_credit_non_designe": "This loan no longer exists.",
+  "charges.credit_a_venir": "Loan, instalment to come",
+  "charges.credit_trop_gros": "The amortization schedule is over 2 MB.",
+  "charges.credit_entite_requise": "Choose the entity that repays this loan.",
+  "charges.refus_occupe": "HôteSmart is busy: try again in a moment."
 }

@@ -74,3 +74,107 @@ test('les montants, les dates et les en-têtes, un par un', () => {
   assert.equal(classeDe('SOMMES TOTALES RESTANT DUES'), null)
   assert.equal(classeDe('ELEMENTS CAPITALISES'), null)
 })
+
+// ─── Des cellules fabriquées, pour les cas que les PDF fictifs ne portent pas ─
+// Une cellule de pdf.js : texte, matrice (texte horizontal), largeur ; les
+// montants sont cadrés à droite sur la fin de leur colonne.
+const FINS = { date: 75, interets: 180, assurance: 250, accessoires: 320, capital: 390, echeance: 460, restant: 540 }
+const cellule = (fin, str, y) => ({ str, transform: [9, 0, 0, 9, fin - 5 * str.length, y], width: 5 * str.length })
+const ENTETE = [
+  ['interets', 'MONTANT', 'INTERETS'], ['assurance', 'MONTANT', 'ASSURANCE'], ['accessoires', 'MONTANT', 'ACCESSOIRES'],
+  ['capital', 'CAPITAL', 'AMORTI'], ['echeance', 'MONTANT', 'ECHEANCE'], ['restant', 'CAPITAL', 'RESTANT DU']
+].flatMap(([k, h1, h2]) => [cellule(FINS[k], h1, 790), cellule(FINS[k], h2, 780)])
+function page (lignes) {
+  const items = [...ENTETE]
+  lignes.forEach((l, i) => {
+    const y = 760 - 12 * i
+    for (const [k, v] of Object.entries(l)) if (v !== undefined) items.push(cellule(FINS[k], v, y))
+  })
+  return items
+}
+const L = (date, interets, assurance, capital, echeance, extra = {}) => ({ date, interets, assurance, accessoires: '0,00', capital, echeance, restant: '1 000,00', ...extra })
+
+test('un déblocage dont les cellules d\'échéance et de capital sont VIDES est écarté, pas refusé (review, mineur 3)', () => {
+  const r = echeancesDesPages([page([
+    { date: '22/01/2025', interets: '0,00', assurance: '0,00', restant: '50 000,00' },
+    L('22/02/2025', '10,00', '5,00', '100,00', '115,00')
+  ])])
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.deepEqual(r.echeances.map(e => e.date), ['2025-02-22'])
+})
+
+test('une date SEULE au-dessus du tableau ne cache pas l\'en-tête (review, mineur 4)', () => {
+  const items = [cellule(200, "Date d'effet :", 805), cellule(260, '15/01/2025', 805), ...page([L('22/02/2025', '10,00', '5,00', '100,00', '115,00')])]
+  const r = echeancesDesPages([items])
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.equal(r.echeances.length, 1)
+})
+
+test('refusés : une cellule de capital absente, un montant négatif, des dates qui reculent (review, mineur 8)', () => {
+  assert.deepEqual(echeancesDesPages([page([L('22/01/2025', '10,00', '5,00', '100,00', '115,00'), L('22/02/2025', '10,00', '5,00', undefined, '115,00')])]), { ok: false, code: 'ligne_incoherente', detail: '2025-02-22' })
+  assert.deepEqual(echeancesDesPages([page([L('22/02/2025', '-10,00', '5,00', '120,00', '115,00')])]), { ok: false, code: 'ligne_incoherente', detail: '2025-02-22' })
+  assert.deepEqual(echeancesDesPages([page([L('22/03/2025', '10,00', '5,00', '100,00', '115,00'), L('22/02/2025', '10,00', '5,00', '100,00', '115,00')])]), { ok: false, code: 'ligne_incoherente', detail: '2025-02-22' })
+})
+
+// ─── Le PDF piégé (review du lot, constat de sécurité S1) ──────────────────
+const zlib = require('node:zlib')
+const { fluxSousBorne, lireTableauIsole, FLUX_MAX, FLUX_TOTAL_MAX } = require('../lib/charges/credit-tableau')
+const flux = (n, dico, donnees) => Buffer.concat([Buffer.from(`${n} 0 obj\n<< /Length ${donnees.length} ${dico} >>\nstream\n`, 'latin1'), donnees, Buffer.from('\nendstream\nendobj\n', 'latin1')])
+const pdfDe = (...objets) => Buffer.concat([Buffer.from('%PDF-1.4\n'), ...objets, Buffer.from('%%EOF\n')])
+
+test('LE TEST QUI COMPTE (S1) : un flux qui décompresse au-delà de sa borne fait refuser le PDF AVANT pdf.js — en moins d\'une seconde', async () => {
+  const bombe = zlib.deflateSync(Buffer.alloc(FLUX_MAX + 1024))
+  assert.ok(bombe.length < 64 * 1024, `une bombe de ${bombe.length} octets`)
+  const t0 = Date.now()
+  const r = await lireTableau(pdfDe(flux(1, '/Filter /FlateDecode', bombe)))
+  assert.deepEqual(r, { ok: false, code: 'tableau_illisible', detail: 'flux_trop_gros' })
+  assert.ok(Date.now() - t0 < 1000)
+  // Tronquée, elle se compte quand même (pdf.js la décompresserait aussi loin).
+  const grosse = zlib.deflateSync(Buffer.alloc(2 * FLUX_MAX))
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /FlateDecode', grosse.subarray(0, grosse.length - 40)))), 'flux_trop_gros')
+  // Plusieurs flux sous leur borne, mais au-delà du total.
+  const morceau = zlib.deflateSync(Buffer.alloc(FLUX_MAX - 1024))
+  const n = Math.ceil(FLUX_TOTAL_MAX / (FLUX_MAX - 1024)) + 1
+  assert.equal(fluxSousBorne(pdfDe(...Array.from({ length: n }, (_, i) => flux(i + 1, '/Filter /FlateDecode', morceau)))), 'flux_trop_gros')
+})
+
+test('les filtres : ASCII85 + Flate se suivent, un flux Flate que zlib refuse est refusé, LZW n\'est pas pris, une image est laissée', () => {
+  const texte = zlib.deflateSync(Buffer.from('BT /F1 9 Tf (22/03/2022) Tj ET'))
+  // ASCII85 de `texte`, encodé ici à la main.
+  const a85 = (b) => {
+    let s = ''
+    for (let i = 0; i < b.length; i += 4) {
+      const g = Buffer.alloc(4); b.copy(g, 0, i, i + 4)
+      let v = g.readUInt32BE(0); const c = []
+      for (let k = 0; k < 5; k++) { c.unshift(String.fromCharCode(33 + (v % 85))); v = Math.floor(v / 85) }
+      s += c.join('').slice(0, Math.min(5, b.length - i + 1))
+    }
+    return Buffer.from(s + '~>', 'latin1')
+  }
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter [ /ASCII85Decode /FlateDecode ]', a85(texte)))), null)
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /FlateDecode', Buffer.from('pas du zlib')))), 'flux_illisible')
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /LZWDecode', Buffer.from('xx')))), 'filtre_non_pris')
+  assert.equal(fluxSousBorne(pdfDe(flux(1, '/Filter /DCTDecode', Buffer.from([0xFF, 0xD8, 0xFF])))), null)
+})
+
+test('LE TEST QUI COMPTE (S1) : la lecture tourne dans un fil, bornée en temps — un fil muet est refusé « trop long » et tué ; une instance occupée est une panne', async () => {
+  const { EventEmitter } = require('node:events')
+  const etat = { vivants: 0, max: 0, termines: 0, limites: null }
+  class Muet extends EventEmitter {
+    constructor (f, o) { super(); etat.vivants++; etat.max = Math.max(etat.max, etat.vivants); etat.limites = o.resourceLimits; this.stdout = { resume () {} }; this.stderr = { resume () {} } }
+    postMessage () {}
+    async terminate () { etat.vivants--; etat.termines++ }
+  }
+  const lents = [1, 2, 3, 4].map(() => lireTableauIsole(Buffer.from('%PDF'), { delaiMs: 60 }, { Worker: Muet }))
+  const r = await Promise.all(lents)
+  assert.deepEqual(r[3], { panne: 'occupe' }, 'au-delà d\'une file de 2 : occupé')
+  assert.deepEqual(r[0], { ok: false, code: 'tableau_illisible', detail: 'trop_long' })
+  assert.equal(etat.max, 1, 'jamais deux fils vivants')
+  assert.ok(etat.limites && etat.limites.maxOldGenerationSizeMb > 0, 'le tas du fil est borné')
+  await new Promise(res => setTimeout(res, 20))
+  assert.equal(etat.vivants, 0, 'chaque fil muet est tué')
+  // Et le vrai fil lit un vrai tableau (fictif).
+  const vrai = await lireTableauIsole(pdf('tourne'))
+  assert.equal(vrai.ok, true)
+  assert.equal(vrai.echeances.length, 15)
+})

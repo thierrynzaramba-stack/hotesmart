@@ -1595,5 +1595,9 @@
   "charges.refus_ligne_incoherente": "La ligne du {date} ne se vérifie pas : intérêts, assurance, frais et capital ne font pas l'échéance. Rien n'a été importé.",
   "charges.refus_credit_automatique": "Une mensualité de crédit ne se modifie pas : supprimez le crédit et importez à nouveau son tableau.",
   "charges.refus_credit_introuvable": "Ce crédit n'existe plus.",
-  "charges.refus_credit_non_designe": "Ce crédit n'existe plus."
+  "charges.refus_credit_non_designe": "Ce crédit n'existe plus.",
+  "charges.credit_a_venir": "Crédit, mensualité à venir",
+  "charges.credit_trop_gros": "Le tableau d'amortissement dépasse 2 Mo.",
+  "charges.credit_entite_requise": "Choisissez l'entité qui rembourse ce crédit.",
+  "charges.refus_occupe": "HôteSmart est occupé : réessayez dans un instant."
 }

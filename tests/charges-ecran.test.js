@@ -319,7 +319,7 @@ test('LE TEST QUI COMPTE (§14.20) : l\'écran sert les crédits du COMPTE et le
 
 test('sans crédit, les échéances ne se lisent pas ; une entité choisie filtre ses crédits ; une panne dit `null`, sans casser l\'écran', async () => {
   const sans = await appeler()
-  assert.deepEqual(sans.rep.corps.credits, { liste: [], echeances: [] })
+  assert.deepEqual(sans.rep.corps.credits, { liste: [], echeances: [], aujourdhui: jourParis() })
   assert.equal(sans.requetes.filter(q => q.table === 'charges_credit_echeances').length, 0)
   const une = await appeler({ query: { entite: ENT_A } })
   assert.equal(filtre(une.requetes.find(q => q.table === 'charges_credits'), 'entite_juridique_id'), ENT_A)
@@ -334,4 +334,19 @@ test('mesure (case PERFORMANCE, point 8) : l\'écran complet passe de 6 à 7 lec
   const compte = (r) => r.requetes.length + r.rpcs.length + r.ej.appels.length
   assert.equal(compte(sans), 7)
   assert.equal(compte(avec), 8)
+})
+
+test('les échéances se lisent page après page, dans un ordre TOTAL — 1000 + 1 lignes, deux pages (review, mineur 7)', async () => {
+  const lignes = Array.from({ length: 1001 }, (_, i) => ({ credit_id: CREDIT_A, user_id: TITULAIRE, indice: i + 1, date_echeance: '2026-11-22', echeance_cents: 1 }))
+  const r = await appeler({
+    repondre: (q) => {
+      if (q.table === 'charges_credits') return { data: [{ id: CREDIT_A, user_id: TITULAIRE }] }
+      if (q.table === 'charges_credit_echeances') return { data: lignes.slice(q.plage[0], q.plage[1] + 1) }
+      return { data: [], count: 0 }
+    }
+  })
+  const pages = r.requetes.filter(q => q.table === 'charges_credit_echeances')
+  assert.deepEqual(pages.map(q => q.plage), [[0, 999], [1000, 1999]])
+  assert.deepEqual(pages[0].ordre, [['date_echeance', true], ['credit_id', true], ['indice', true]])
+  assert.equal(r.rep.corps.credits.echeances.length, 1001)
 })

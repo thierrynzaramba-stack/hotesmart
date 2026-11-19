@@ -297,13 +297,23 @@ export function monter (racine, deps) {
   // vue sur les décaissements mensuels ») : la mensualité ENTIÈRE qui sort du
   // compte, capital compris. Le capital n'est pas une charge — il n'entre dans
   // aucun total — ; il se lit ici, à côté, sans rien y ajouter.
+  // ⚠ « PAYÉE » SEULEMENT SI ELLE EST ÉCHUE (review du lot, bloquant B1) : le
+  // 19 novembre, l'échéance du 22 est « à venir ». Le jour vient du serveur
+  // (Paris) ; à défaut, celui de l'appareil.
+  const jourDeLAppareil = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
   function decaissesParMois () {
     const m = new Map()
+    const aujourdhui = (etat.credits && etat.credits.aujourdhui) || jourDeLAppareil()
     for (const e of (etat.credits && etat.credits.echeances) || []) {
       const k = String(e.date_echeance || '').slice(0, 7)
-      const x = m.get(k) || { echeance: 0, capital: 0 }
-      x.echeance += Number(e.echeance_cents) || 0
-      x.capital += Number(e.capital_cents) || 0
+      const x = m.get(k) || { payee: { echeance: 0, capital: 0, n: 0 }, avenir: { echeance: 0, capital: 0, n: 0 } }
+      const cote = String(e.date_echeance) <= aujourdhui ? x.payee : x.avenir
+      cote.echeance += Number(e.echeance_cents) || 0
+      cote.capital += Number(e.capital_cents) || 0
+      cote.n++
       m.set(k, x)
     }
     return m
@@ -311,8 +321,11 @@ export function monter (racine, deps) {
   const ligneCreditDuMois = (parMois) => (r) => {
     const c = parMois.get(String(r.cle || '').slice(0, 7))
     if (!c) return ''
-    return `<li class="chg-rep__credit"><span class="chg-rep__nom">${esc(t('charges.credit_decaisse'))}</span>`
-      + `<span class="chg-credit-mois"><b>${montant(c.echeance)}</b><small>${esc(t('charges.dont_capital', { montant: fmtMontant.format(c.capital / 100) }))}</small></span></li>`
+    const ligne = (cle, x) => (x.n
+      ? `<li class="chg-rep__credit"><span class="chg-rep__nom">${esc(t(cle))}</span>`
+        + `<span class="chg-credit-mois"><b>${montant(x.echeance)}</b><small>${esc(t('charges.dont_capital', { montant: fmtMontant.format(x.capital / 100) }))}</small></span></li>`
+      : '')
+    return ligne('charges.credit_decaisse', c.payee) + ligne('charges.credit_a_venir', c.avenir)
   }
 
   function peindreTotaux () {
@@ -447,9 +460,9 @@ export function monter (racine, deps) {
     const bien = champCredit('bien').value
     if (!f) { retourCredit(t('charges.credit_fichier_requis'), true); return }
     if (typeDuFichier(f) !== 'application/pdf') { retourCredit(t('charges.credit_pdf_seul'), true); return }
-    if (f.size > CREDIT_PDF_MAX) { retourCredit(t('charges.refus_trop_gros'), true); return }
+    if (f.size > CREDIT_PDF_MAX) { retourCredit(t('charges.credit_trop_gros'), true); return }
     if (!preteur) { retourCredit(t('charges.refus_preteur_requis'), true); return }
-    if (!entite) { retourCredit(t('charges.refus_entite_requise'), true); return }
+    if (!entite) { retourCredit(t('charges.credit_entite_requise'), true); return }
     etat.creditEnCours = true
     const bouton = $('[data-geste="credit-importer"]')
     if (bouton) bouton.disabled = true
@@ -464,9 +477,12 @@ export function monter (racine, deps) {
     } catch (e) {
       // ⚠ UNE LIGNE QUI NE SE PROUVE PAS SE NOMME par sa date : l'hôte la
       // retrouve dans son tableau.
+      // Les refus communs aux factures parlent de factures : ceux d'un crédit
+      // ont leurs mots (review du lot, mineur 5).
+      const propres = { type_refuse: 'charges.credit_pdf_seul', trop_gros: 'charges.credit_trop_gros', entite_requise: 'charges.credit_entite_requise' }
       retourCredit(e && e.code === 'ligne_incoherente' && e.detail
         ? t('charges.refus_ligne_incoherente', { date: jourLisible(e.detail) })
-        : messageErreur(e), true)
+        : e && propres[e.code] ? t(propres[e.code]) : messageErreur(e), true)
     } finally {
       etat.creditEnCours = false
       const b = $('[data-geste="credit-importer"]')

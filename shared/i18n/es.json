@@ -1595,5 +1595,9 @@
   "charges.refus_ligne_incoherente": "La línea del {date} no cuadra: intereses, seguro, comisiones y capital no suman la cuota. No se ha importado nada.",
   "charges.refus_credit_automatique": "Una cuota de préstamo no se modifica: elimine el préstamo e importe de nuevo su cuadro.",
   "charges.refus_credit_introuvable": "Este préstamo ya no existe.",
-  "charges.refus_credit_non_designe": "Este préstamo ya no existe."
+  "charges.refus_credit_non_designe": "Este préstamo ya no existe.",
+  "charges.credit_a_venir": "Préstamo, cuota por pagar",
+  "charges.credit_trop_gros": "El cuadro de amortización supera los 2 MB.",
+  "charges.credit_entite_requise": "Elija la entidad que reembolsa este préstamo.",
+  "charges.refus_occupe": "HôteSmart está ocupado: inténtelo de nuevo en un momento."
 }

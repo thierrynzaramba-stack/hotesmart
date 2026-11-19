@@ -180,7 +180,7 @@ test('LE PASSAGE QUOTIDIEN : les échéances arrivées à leur jour entrent en c
     return { data: null }
   })
   const r = await charges.materialiserCredits(b.client, { aujourdhui: '2026-11-19' })
-  assert.deepEqual(r, { ok: true, materialisees: 1 })
+  assert.deepEqual(r, { ok: true, materialisees: 1, erreurs: 0 })
   const lecture = b.requetes[0]
   assert.deepEqual(lecture.filtres.filter(f => f[0] === 'is' || f[0] === 'lte'), [['is', 'materialisee_le', null], ['lte', 'date_echeance', '2026-11-19']])
   const credit = b.requetes.find(x => x.table === 'charges_credits')
@@ -219,4 +219,67 @@ test('DE BOUT EN BOUT : le VRAI lecteur sur un tableau fictif écrit 15 échéan
   const somme = (k) => ech.reduce((s, e) => s + e[k], 0)
   assert.equal(ups.reduce((s, c) => s + c.montant_ttc_cents, 0), somme('interets_cents') + somme('assurance_cents') + somme('accessoires_cents'))
   assert.equal(somme('assurance_cents'), 14 * 3000)
+})
+
+// ─── Correctifs de la review du lot ─────────────────────────────────────────
+test('une instance occupée à lire un autre tableau : 503, rien n\'est écrit', async () => {
+  const b = baseVide()
+  const r = await charges.importerCredit(b.client, ARGS, { entites: entitesDouble(), lireTableau: async () => ({ panne: 'occupe' }) })
+  assert.deepEqual([r.statut, r.code], [503, 'occupe'])
+  assert.equal(b.requetes.filter(x => x.op !== 'select').length, 0)
+  assert.equal(b.gestes.length, 0)
+})
+
+test('plus de 1000 échéances : refus 422, pas une panne de la base (review, mineur 8)', async () => {
+  const b = baseVide()
+  const mille = Array.from({ length: 1001 }, (_, i) => ({ ...ECHEANCES[1], indice: i + 1 }))
+  const r = await charges.importerCredit(b.client, ARGS, { entites: entitesDouble(), lireTableau: async () => ({ ok: true, echeances: mille }) })
+  assert.deepEqual([r.statut, r.code], [422, 'tableau_illisible'])
+  assert.equal(b.requetes.filter(x => x.op !== 'select').length, 0)
+})
+
+test('l\'échéance DU JOUR est échue : elle entre en charge à l\'import (review, mineur 8)', async () => {
+  const b = baseVide()
+  const r = await charges.importerCredit(b.client, { ...ARGS, aujourdhui: '2026-10-22' }, { entites: entitesDouble(), ...lu })
+  assert.equal(r.charges, 2, 'le 22 septembre et le 22 octobre')
+})
+
+test('TOUT OU RIEN, les cas limites (review, mineur 1) : un insert ambigu défait le crédit ; un effacement qui échoue garde le fichier et le dit', async () => {
+  const ambigu = baseVide((r) => (r.table === 'charges_credits' && r.op === 'insert' ? { error: { message: 'délai', code: '57014' } } : null))
+  assert.equal((await charges.importerCredit(ambigu.client, ARGS, { entites: entitesDouble(), ...lu })).statut, 503)
+  assert.ok(ambigu.requetes.some(x => x.table === 'charges_credits' && x.op === 'delete'), 'la ligne est peut-être là : on l\'efface')
+  assert.ok(ambigu.gestes.some(g => g.nom === 'remove'))
+  const journal = []
+  const avant = console.error
+  console.error = (...a) => journal.push(a.join(' '))
+  try {
+    const coince = baseVide((r) => {
+      if (r.table === 'charges_credit_echeances' && r.op === 'insert') return { error: { message: 'panne' } }
+      if (r.table === 'charges_credits' && r.op === 'delete') return { error: { message: 'panne aussi' } }
+      return null
+    })
+    assert.equal((await charges.importerCredit(coince.client, ARGS, { entites: entitesDouble(), ...lu })).statut, 503)
+    assert.equal(coince.gestes.filter(g => g.nom === 'remove').length, 0, 'la ligne reste : son fichier aussi')
+    assert.ok(journal.some(l => /credit non defait/.test(l)), journal.join(' | '))
+  } finally { console.error = avant }
+})
+
+test('LE PASSAGE QUOTIDIEN : un crédit en panne n\'arrête pas les autres (review, mineur 2)', async () => {
+  const AUTRE_CREDIT = '88888888-8888-4888-8888-888888888888'
+  const dues = [
+    { credit_id: CREDIT, user_id: COMPTE, indice: 1, date_echeance: '2026-11-01', interets_cents: 1, assurance_cents: 1, accessoires_cents: 0 },
+    { credit_id: AUTRE_CREDIT, user_id: AUTRE, indice: 1, date_echeance: '2026-11-02', interets_cents: 2, assurance_cents: 2, accessoires_cents: 0 }
+  ]
+  const b = baseEnregistreuse((r) => {
+    if (r.table === 'charges_credit_echeances' && r.op === 'select') return { data: dues }
+    if (r.table === 'charges_credits' && r.op === 'select') {
+      const id = filtre(r, 'id')
+      return { data: { id, user_id: id === CREDIT ? COMPTE : AUTRE, entite_juridique_id: ENT, bien_id: null, preteur: 'B' } }
+    }
+    if (r.op === 'upsert' && r.charge[0].credit_id === CREDIT) return { error: { message: 'bien hors du compte' } }
+    return { data: null }
+  })
+  const r = await charges.materialiserCredits(b.client, { aujourdhui: '2026-11-19' })
+  assert.deepEqual(r, { ok: false, materialisees: 1, erreurs: 1 })
+  assert.ok(b.requetes.some(x => x.op === 'upsert' && x.charge[0].credit_id === AUTRE_CREDIT), 'le second crédit passe quand même')
 })

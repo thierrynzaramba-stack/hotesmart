@@ -50,6 +50,9 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   JAMAIS le capital) ; le cron fait entrer les suivantes à leur jour. La
   catégorie `credit` est réservée aux échéances (`charges_credit_ck`), et une
   échéance ne se corrige pas seule : le crédit se supprime et se réimporte.
+  ⚠ Le PDF se lit dans un fil à usage unique, borné en temps et en tas, et ses
+  flux compressés sont bornés AVANT pdf.js (un PDF piégé de 62 Ko gelait la
+  fonction). « Payée » ne se dit que d'une échéance échue.
 - **Aucun HEIC n'est gardé ni lu** (§14.19) : une photo HEIC que le navigateur
   ne sait pas lire part telle quelle, et `confirmerEnvoi` la convertit en JPEG
   AVANT l'empreinte ; le JPEG la remplace au même chemin. Ce qu'on ne sait pas

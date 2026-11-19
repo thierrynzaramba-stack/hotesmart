@@ -797,7 +797,8 @@ test('une seule vue : la fiche plein écran et les totaux sous « À traiter » 
 const CREDIT_ID = '99999999-9999-4999-8999-999999999999'
 const UN_CREDIT = {
   liste: [{ id: CREDIT_ID, entite_juridique_id: ENT, bien_id: null, preteur: 'Banque Exemple', nb_echeances: 301, premiere_echeance: '2022-02-22', derniere_echeance: '2047-02-22', cree_le: '2026-11-19T01:00:00Z' }],
-  echeances: [{ credit_id: CREDIT_ID, date_echeance: '2026-11-22', interets_cents: 30160, assurance_cents: 10125, accessoires_cents: 0, capital_cents: 83258, echeance_cents: 123543, capital_restant_cents: 25000000 }]
+  echeances: [{ credit_id: CREDIT_ID, date_echeance: '2026-11-22', interets_cents: 30160, assurance_cents: 10125, accessoires_cents: 0, capital_cents: 83258, echeance_cents: 123543, capital_restant_cents: 25000000 }],
+  aujourdhui: '2026-11-25'
 }
 
 test('LE TEST QUI COMPTE (§14.20) : sous le mois, la mensualité ENTIÈRE payée, capital compris — et le crédit dans son bloc', async () => {
@@ -884,5 +885,30 @@ test('LE TEST QUI COMPTE : la fiche d\'une échéance de crédit se LIT — cham
     for (const g of ['valider', 'supprimer', 'voir']) assert.equal(f.querySelector(`[data-geste="${g}"]`), null, g)
     assert.match(texte(f), /Mensualité d'un crédit/)
     assert.equal(f.querySelector('[data-champ="categorie"]').value, 'credit', 'sa catégorie s\'affiche, même hors de la liste fermée')
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (review du crédit, B1) : une échéance PAS ENCORE ÉCHUE se dit « à venir », jamais « payée »', async () => {
+  const b = await monter({ ecran: () => reponseEcran({ credits: { ...UN_CREDIT, aujourdhui: '2026-11-19' } }) })
+  try {
+    const mois = texte(b.$('[data-bind="totaux"] .chg-rep__credit'))
+    assert.match(mois, /Crédit, mensualité à venir/)
+    assert.doesNotMatch(texte(b.$('[data-bind="totaux"]')), /mensualité payée/)
+  } finally { b.fermer() }
+})
+
+test('un logement choisi part avec le crédit ; les refus du crédit ont leurs mots (review, mineur 5)', async () => {
+  const gestes = []
+  const geste = (corps) => { gestes.push(corps); throw Object.assign(new Error('x'), { status: 413, error: 'trop_gros' }) }
+  const b = await monter({ geste })
+  try {
+    await b.cliquer(b.$('[data-geste="credit-ajouter"]'))
+    Object.defineProperty(b.$('[data-credit-champ="fichier"]'), 'files', { value: [new b.w.File(['%PDF'], 't.pdf', { type: 'application/pdf' })], configurable: true })
+    b.saisir(b.$('[data-credit-champ="preteur"]'), 'Banque')
+    await b.choisir(b.$('[data-credit-champ="bien"]'), BIEN)
+    await b.cliquer(b.$('[data-geste="credit-importer"]'))
+    for (let i = 0; i < 10; i++) await b.attendre()
+    assert.equal(gestes[0].bien_id, BIEN)
+    assert.match(texte(b.$('[data-bind="credit-retour"]')), /dépasse 2 Mo/)
   } finally { b.fermer() }
 })

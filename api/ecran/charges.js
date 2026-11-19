@@ -94,7 +94,7 @@ async function traiter (req, res, t0, deps) {
     categories: ecran.ORDRE_CATEGORIES,
     // Les crédits et leurs échéances de la période (§14.20) : un complément,
     // comme les totaux — `null` dit « indisponible », jamais « aucun crédit ».
-    credits: cr.ok ? { liste: cr.credits, echeances: cr.echeances } : null
+    credits: cr.ok ? { liste: cr.credits, echeances: cr.echeances, aujourdhui: cr.aujourdhui } : null
   })
 }
 
