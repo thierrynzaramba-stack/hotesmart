@@ -31,6 +31,7 @@ const { notifierAssignation, notifierProposition, notifierRetrait } = require('.
 const { aEtePrevenue } = require('../lib/cleaning/bilan-notification')
 const { perdants, aVenir } = require('../lib/cleaning/menage-perdants')
 const { ratioProprete } = require('../lib/stats-avis')
+const abonnementsPrestataires = require('../lib/push/abonnements-prestataires')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -704,6 +705,30 @@ async function fichePrestataire (req, res, garde, userId, profilId) {
   // qu'il existe. Meme regle que `/api/membres`.
   if (!p) return res.status(404).json({ error: 'Profil introuvable' })
 
+  // PWA lot 3, étape 5 : sur combien d'appareils elle reçoit les notifications,
+  // et combien sont en échec (dernier envoi refusé sans être mort).
+  // ⚠ LANCÉE MAINTENANT, ATTENDUE À LA FIN : en parallèle des lectures qui
+  // suivent (spec §8.7 : une requête de plus, pas un aller-retour de plus).
+  // ⚠ `null` = NON LU, jamais 0 : l'écran dirait « n'a pas activé les
+  // notifications » sur une panne, et l'hôte la croirait sans moyen d'être
+  // prévenue. Le profil est déjà prouvé sur le compte de l'appelant (requête
+  // ci-dessus) : ses abonnements ne sortent pas de ce compte. Deux NOMBRES
+  // sortent — ni adresse, ni clé, ni libellé d'appareil.
+  const NON_LU = { appareils: null, appareils_en_echec: null }
+  const appareilsP = (async () => {
+    try {
+      const r = await abonnementsPrestataires.compter({ profilId: p.id, db: supabase })
+      if (!r.ok) {
+        console.error('[menages] fiche presta : lecture des appareils echec', r.motif)
+        return NON_LU
+      }
+      return { appareils: r.recoivent, appareils_en_echec: r.en_echec }
+    } catch (e) {
+      console.error('[menages] fiche presta : lecture des appareils echec', e.message)
+      return NON_LU
+    }
+  })()
+
   const refs = refsDuPerimetre(garde.contexte)
   // Les biens que l'APPELANT peut voir : c'est son perimetre qui borne l'ecran,
   // pas celui de la prestataire.
@@ -802,6 +827,8 @@ async function fichePrestataire (req, res, garde, userId, profilId) {
     .order('first_name', { ascending: true })
   if (eA) console.error('[menages] fiche presta : lecture collegues echec', eA.message)
 
+  const { appareils, appareils_en_echec: appareilsEnEchec } = await appareilsP
+
   return res.status(200).json({
     personne: {
       id: p.id, prenom: p.first_name || null, nom: p.last_name || null,
@@ -813,7 +840,10 @@ async function fichePrestataire (req, res, garde, userId, profilId) {
       ...(vueLe !== undefined ? { vue_le: vueLe } : {}),
       // Un lien SANS personne derriere ne peut rien recevoir : l'ecran coupe
       // alors les champs plutot que de promettre un enregistrement.
-      a_un_lien: !!p.pwa_token
+      a_un_lien: !!p.pwa_token,
+      // PWA lot 3 : appareils qui reçoivent, appareils en échec ; `null` = non lu.
+      appareils,
+      appareils_en_echec: appareilsEnEchec
     },
     biens: (biens || []).map(b => ({ id: String(b.provider_property_id),
                                      nom: b.name || '', photo: b.photo_url || null })),

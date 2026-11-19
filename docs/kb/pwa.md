@@ -2860,3 +2860,126 @@ Aucun constat de sécurité : correction sans nouvelle review.
    rappelle).
 5. **L'exemple du plafond** — corrigé : ce qui déclenche des avis en nombre est
    la perte partielle des réservations d'un bien, pas un compte qui se vide.
+
+### 13.13 Étape 5 — ce que voit l'hôte (19 novembre 2026)
+
+Go de Thierry le 19 novembre 2026 à 15:49.
+
+- **Serveur.** `fichePrestataire` (`api/menages.js`, `GET /api/menages?presta=`)
+  rend `personne.appareils` (appareils qui reçoivent) et
+  `personne.appareils_en_echec` (dernier envoi refusé sans être mort), comptés
+  par `compter` de `lib/push/abonnements-prestataires.js`, et rien d'autre de
+  ses abonnements — ni adresse, ni clé, ni libellé d'appareil, ni motif.
+  - Lue **après** la preuve que le profil est sur le compte de l'appelant (un
+    profil d'un autre compte reste un 404, ses abonnements ne sont pas lus),
+    **lancée avant** les autres lectures et attendue à la fin : une requête
+    de plus, pas un aller-retour de plus (spec §8.7).
+  - `null` = **non lu**, jamais 0 : une panne ne doit pas faire lire « n'a
+    pas activé les notifications ». La panne n'emporte pas la fiche.
+- **Écran.** Fenêtre de configuration, onglet des réglages, section
+  « Notifications », sous les bascules SMS et e-mail : « Reçoit les
+  notifications sur N téléphone(s) » avec l'aide « Quand elle les reçoit, le
+  SMS ne part que pour un ménage du jour ou du lendemain » (seulement si le SMS
+  est coché avec un numéro) ; ou « Notifications activées, mais le dernier
+  envoi vers son téléphone n'est pas passé » (que des appareils en échec) ; ou
+  « N'a pas activé les notifications sur son téléphone » ; ou, non lu, « état
+  illisible pour le moment ». Lecture seule : s'abonner est son geste, sur son
+  appareil.
+  - ⚠ **L'aide n'est pas celle de la spec §4** (« le SMS ne part pas ») : depuis
+    **Q46**, le SMS repart aussi pour un ménage du jour ou du lendemain. Le
+    texte dit la règle telle qu'elle est.
+  - **« Aucun canal actif »** ne s'affiche plus quand un téléphone reçoit les
+    notifications. Non lu, il reste affiché, comme avant ce lot : mieux vaut
+    une alerte de trop qu'une prestataire muette qu'on croit prévenue.
+- **Tests.** `tests/menages-fiche-presta.test.js` (+5 : le nombre et rien
+  d'autre, lecture réellement parallèle, appareil en échec, 0 contre `null`,
+  404 sans lecture), `tests/menages-fiche-regles-dom.test.js` (+6, dans un
+  vrai DOM) et `tests/i18n-parametres.test.js` (+1 : le pluriel rendu par le
+  vrai traducteur, trois langues). Contre-épreuves après les suites de la
+  review (§13.15) : 7 mutations, toutes attrapées — dont la lecture rendue
+  séquentielle, que la première version laissait passer.
+- **Mesure APRÈS** (spec §8) : à la recette, sur staging.
+
+### 13.14 Trace de la review de l'étape 5 (19 novembre 2026)
+
+Review par un sous-agent, en lecture seule, sur le diff non commité de
+`/home/claude/hs-l3` (branche `pwa-lot-3-prestataires`, HEAD
+`5d6de7178ce5e7cc3cc878a8fba0d49aabe64707`). Arbre et SHA confirmés par la
+review ; chaque fichier cité en constat est dans le diff. Rapport recopié tel
+quel :
+
+> **SÉCURITÉ — aucun constat.** Pas de fuite entre comptes : la lecture des
+> abonnements part après la requête du profil, filtrée sur `account_user_id`,
+> `id` et `access_mode='lien'` (404 sinon), et `lister` filtre sur `p.id`, relu
+> en base. Un appareil partagé par deux hôtes compte une seule ligne par profil.
+> Seul `r.appareils.length` sort ; le test vérifie l'absence de l'adresse, des
+> clés et du libellé. Le délégué passe par `peutLire(prestataires)` et voit déjà
+> téléphone et e-mail : le nombre n'ajoute rien de sensible. Pas d'injection :
+> `n` est vérifié par `Number.isInteger` avant `esc(JSON.stringify(...))`, et le
+> texte est posé par `textContent`. La promesse lancée tôt ne peut pas être
+> rejetée (`try/catch` rend un nombre ou `null`) ; si un 503 part avant, elle se
+> termine dans le vide, sans conséquence.
+>
+> **MAJEUR — aucun constat.**
+>
+> **1. MINEUR — `tests/menages-fiche-presta.test.js:442` : le test « donc en
+> parallèle » passe aussi contre du code séquentiel.** Le double enregistre
+> chaque lecture au moment de `from()`, donc il mesure l'ordre de lancement, pas
+> le parallélisme. Vérifié sur une copie : `const appareilsP = await (async ()
+> => {` laisse les 4 tests « étape 5 » verts. Renommer le test, ou mesurer
+> vraiment le parallélisme (faire attendre la réponse des abonnements jusqu'à ce
+> que `properties` ait été demandé). La phrase « 8 mutations, toutes
+> attrapées » ne couvre pas cette mutation-là.
+>
+> **2. MINEUR — `pages/menages.html:2194` (texte `shared/i18n/fr.json:775`, et
+> en/es) : l'aide sur le SMS s'affiche même quand le SMS est coupé.** La règle
+> réelle (`lib/cleaning/notifier-prestataire.js:171`) est `(bilan.push === 0 ||
+> estUrgent(...)) && canalOuvert(prof, 'sms')`. SMS décoché (ou pas de numéro)
+> et deux téléphones : l'écran laisse croire à un filet SMS pour l'urgent, alors
+> qu'aucun SMS ne part. N'afficher l'aide que si `p.notify_sms && p.tel`.
+>
+> **3. MINEUR — `api/menages.js:723`, `pages/menages.html:2188` / `2200` :
+> « Reçoit » compte des abonnements dont tous les envois échouent, et retire
+> « Aucun canal actif » sur cette base.** Seuls 404/410 suppriment une ligne ;
+> un 403 ou 400 (`refus_service`, par exemple après un changement des clés
+> VAPID) la laisse, avec `dernier_echec`. SMS et e-mail coupés et un abonnement
+> dans cet état : « Reçoit les notifications sur 1 téléphone », sans
+> avertissement, alors que rien ne part — contraire au principe du commentaire.
+> La donnée existe (`dernier_echec`, `dernier_envoi_le`) mais `lister` ne la rend
+> pas. Rare ; à corriger ou à noter comme dette.
+>
+> **4. MINEUR — `shared/i18n/fr.json:774` (et en/es) : « téléphone » n'est pas
+> toujours exact** : un ordinateur abonné compte comme « téléphone ».
+>
+> **5. MINEUR — `tests/menages-fiche-regles-dom.test.js` : le rendu du pluriel
+> n'est pas testé** (seuls `data-i18n` et `data-i18n-vars` sont vérifiés).
+>
+> **Hors du diff :** l'écart de l'aide avec la spec §4 (Q46) est à corriger sur
+> `pwa-lot-3-spec`.
+
+### 13.15 Suites données à la review de l'étape 5 (19 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **Le test « en parallèle » mesurait l'ordre, pas le parallélisme** — le
+   double ne répond plus aux abonnements qu'une fois les biens demandés ; lue
+   seule, la lecture reçoit une panne au bout de 200 ms. La mutation de la
+   review (`await (async () => {`) est désormais attrapée.
+2. **L'aide « le SMS ne part que pour un ménage du jour ou du lendemain »
+   s'affichait SMS coupé** — elle ne s'affiche plus que si le SMS est coché ET
+   qu'un numéro existe (`canalOuvert`). Deux tests.
+3. **« Reçoit » comptait les appareils en échec** — nouvelle lecture `compter`
+   (deux nombres : `recoivent`, `en_echec`, depuis `dernier_echec`) ; un
+   appareil dont le dernier envoi n'est pas passé ne compte plus, et s'il n'y a
+   que ceux-là la fiche dit « Notifications activées, mais le dernier envoi
+   vers son téléphone n'est pas passé » — et garde « Aucun canal actif ». Un
+   échec passager (délai, réseau) compte jusqu'au prochain succès : c'est le
+   côté prudent. `lister`, que lit la page de la prestataire, ne change pas.
+4. **« téléphone » pour un ordinateur abonné** — gardé : c'est le mot de la
+   spec §4, et le cas réel est le téléphone. Noté, sans correction.
+5. **Le pluriel n'était pas rendu** — test ajouté dans
+   `tests/i18n-parametres.test.js`, par le vrai traducteur, en fr, en et es.
+
+Hors du diff : l'aide s'écarte de la spec §4 (Q46) ; la correction de la spec
+se fait sur `pwa-lot-3-spec` (PR #26), signalée au chef de file à la remise.
+

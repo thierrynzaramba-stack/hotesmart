@@ -1191,6 +1191,11 @@ d'abord en **notification** sur les téléphones qu'elle a abonnés depuis sa pa
   nom d'hôte : Apple, Google…) — la notification compte alors comme non reçue et le SMS part
   aussitôt. Le lot 2 (personnes avec un compte) garde son déroulé, un appareil après l'autre.
 - **L'e-mail ne change pas** : il part comme avant, notification reçue ou non.
+- **L'hôte le voit sur sa fiche** (étape 5, 19 nov. 2026) : `/menages`, fenêtre de
+  configuration, section « Notifications » — « Reçoit les notifications sur N téléphone(s) »,
+  « N'a pas activé les notifications », ou « état illisible » si la lecture a échoué (`null`,
+  jamais 0). « Aucun canal actif » ne s'affiche plus quand un téléphone les reçoit. Détail :
+  `docs/kb/pwa.md` §13.13.
 - **Le bilan** gagne `push: n` (le nombre d'appareils dont le service a accepté la notification) à côté de `sms` et
   `email`. ⚠️ **Les compteurs des appelants lisent `aEtePrevenue(bilan)`**
   (`lib/cleaning/bilan-notification.js`) : relire `sms || email` à la main ferait compter
