@@ -40,7 +40,7 @@ de novembre 2023 à octobre 2026.
 | Canal / mécanisme | Limité à des dates | Pilotable par HôteSmart | Statut |
 |---|---|---|---|
 | Airbnb, remises de l'annonce (`default_pricing_rules` via Channex `pricing_settings`) | **non** | oui | les réglages de prix Airbnb sont VERROUILLÉS quand l'annonce est connectée (« Vos paramètres sont limités ») : on passe par Channex |
-| Airbnb, ensembles de règles (calendrier Airbnb) | **oui** | **non** (Channex ne les gère pas) | **test en cours** : « deux jour » (−10 % dès 2 nuits) posé sur le 23 du 1er au 30 avril 2027 ; vu côté voyageur −33,80 € sur 6→8 avril, rien sur 4→6 mai |
+| Airbnb, ensembles de règles (calendrier Airbnb) | **oui** | **non** (Channex ne les gère pas) | **en service à la main** : « deux jour » (−10 % dès 2 nuits) sur le 23 du 1er au 30 avril 2027 (test) ; « Séjours longs » (−25/30/35 % dès 7/14/21 nuits) sur neuf périodes creuses du 23 depuis le 19/11 (voir ci-dessous) |
 | Airbnb, promotions Channex (`NEW_LISTING`, `HIGH_RATED_GUEST`, `MOBILE_ONLY`) | non (jours exclus seulement, 30/an) | oui | sans durée de séjour : hors sujet |
 | **Airbnb, mode LOS de Channex** (bêta) | **oui**, via les tarifs et restrictions par date | **oui** | non activé ; prix envoyés toutes les 6 h (disponibilités immédiates) ; activation par l'assistance Channex, puis bascule annonce par annonce dans l'onglet Mapping |
 | Booking, promotions | oui (extranet) | **non** (Channex ne gère pas les promotions Booking) | manuel |
@@ -58,6 +58,34 @@ Airbnb `224cbb66`) :
 | ≈ 19:19 | ensemble de règles « deux jour » (−10 % dès 2 nuits, rien d'autre) appliqué au 23 du 1er au 30 avril 2027, dans le calendrier Airbnb | 8 et 30 avril : « Ensemble de règles deux jour » ; 1er mai : aucun ; côté voyageur 6→8 avril −33,80 €, 4→6 mai rien |
 
 Booking, La bulle, Ofuro Futari : non touchés.
+
+**Gestes faits en production le 19 novembre 2026 sur le 23, côté Airbnb, à la
+demande de Thierry** (« Poser les remises ») — calendrier Airbnb, heures de
+Paris relevées à l'écran :
+
+| heure | geste | preuve |
+|---|---|---|
+| ≈ 23:30 | ensemble de règles « Séjours longs » créé : −25 % dès 7 nuits, −30 % dès 14, −35 % dès 21 ; rien d'autre (ni prix, ni dernière minute, ni anticipée, ni durée de séjour) | liste des ensembles : « 25 % À la semaine · 30 % 2 semaines · +1 règle » |
+| ≈ 23:32 → 23:34:51 | appliqué au 23 seul, sur neuf périodes creuses : 20/11→18/12/2026, 04/01→28/01, 31/01→05/02, 08/03→26/03, 10/05→14/05, 18/05→30/06, 01/09→29/10, 02/11→10/11, 15/11→19/11/2027 | 17 dates relues une à une (bornes comprises) : dedans « Séjours longs », dehors aucun ; avril reste « deux jour » ; 19/12, 03/01, 29/01, 16/05, 01/07, 15/08, 30/10 : aucun ; La bulle le 25/11 : aucun |
+
+Côté voyageur : 04→11/01/2027 (7 nuits) 619 € au lieu de 818 € ; 04→12/01
+(8 nuits) 692 € au lieu de 915 € ; 08→22/03/2027 (14 nuits) 1 206 € au lieu de
+1 706 €. Les frais ne sont pas remisés, d'où un écart total un peu sous le
+pourcentage.
+
+⚠ **Première sauvegarde vide.** L'ensemble a d'abord été enregistré sans ses
+trois remises (valeurs saisies non prises en compte). Il n'était appliqué à
+aucune date : aucun effet. Corrigé par une seconde sauvegarde, relue.
+
+**Ce qui reste hors de la règle** : juillet-août, vacances scolaires, ponts et
+fêtes, et les fragments de moins de 5 nuits (22–23/02, 01–02/03, 30/03–02/04,
+19–20/04, 26–27/04, 03–05/05). Les réservations déjà prises découpent les
+périodes : sur la première, le 28/11 (Booking) et le 01/12 (direct) laissent
+02→18/12 comme plus longue plage libre (16 nuits).
+
+Booking, La bulle, Ofuro Futari : non touchés. Les remises Booking du 23
+(2 n −12 %, 3 n −17 %, 7 n −22 %, posées le 16/11) n'ont pas été touchées ce
+soir ; leur sort attend Thierry.
 
 ### 2 ter. Les `full_sync` d'un seul tarif sont lancés par Channex lui-même
 
