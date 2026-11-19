@@ -3387,6 +3387,12 @@ et à 15:16) :
 6. **Brevets HEVC** (décodage des photos HEIC sur le serveur, lot du
    19 novembre) : « J'accepte, on passe en prod » (vers 14:00). La question reste
    notée pour un juriste ; elle ne bloque plus.
+7. **La vue « Toutes les entités » est supprimée** : « chaque entité est
+   strictement séparée ; la vue tout fonctionne pour les logements au sein
+   d'une même entité » (15:46). ⚠ Elle remplace la proposition « année
+   civile » de cette spec.
+8. **Découpage** : 8a (l'exercice et les mois) d'abord, puis 8b (un seul
+   bouton « Ajouter ») (15:46).
 
 **Catégorie de chaque donnée affichée** (règle du dépôt) :
 - les totaux d'un exercice et ses douze mois : **non urgent**, servis par le
@@ -3418,12 +3424,16 @@ et à 15:16) :
   « Exercice du 1er janvier au 31 décembre (réglage standard) » et renvoie à
   ce réglage — c'est une configuration générale, pas une configuration
   d'application (CLAUDE.md, « config d'app vs config générale »).
-- ⚠ **POINT OUVERT, À TRANCHER PAR THIERRY AVANT LE CODE : la vue « Toutes
-  les entités ».** Des entités aux exercices différents (une SCI au 1er
-  juillet, une autre au 1er janvier) ne s'additionnent pas par exercice.
-  Proposition : si toutes les entités actives ont le même début, « Toutes »
-  se lit par cet exercice ; sinon par **année civile**, avec la mention « vos
-  entités n'ont pas le même exercice : année civile ».
+- ⚠ **PLUS DE VUE « TOUTES LES ENTITÉS »** (décision 7). Les totaux se
+  lisent toujours pour UNE entité, tous ses logements ensemble, avec la
+  répartition par logement (inchangée). Le choix d'entité ne propose plus
+  « Toutes » ; à l'ouverture, l'écran prend la première entité active (ordre
+  du nom). La **liste des factures** suit l'entité choisie. **« À traiter »
+  reste commun au compte** : une facture qui arrive n'a pas encore d'entité
+  (`charges_validee_entite_ck` ne l'exige qu'à la validation) ; elle entre
+  dans les totaux de son entité quand on la lui donne. Un compte sans entité
+  voit « À traiter », la liste, et un renvoi vers la création d'une entité à
+  la place des totaux.
 
 #### 14.21.2 Les mois, et le détail au clic
 
@@ -3486,6 +3496,8 @@ et à 15:16) :
 | Choix de période « Exercice en cours / Exercice précédent / 12 derniers mois » | Choix d'un exercice parmi la liste ; « 12 derniers mois » **retiré**, sur décision de Thierry (une période comptable, pas un an glissant). |
 | Répartition par mois (mois avec facture seulement) | Les douze mois de l'exercice, clic → détail. |
 | Répartitions par catégorie et par logement | **Conservées**, sur l'exercice choisi. |
+| Choix d'entité « Toutes les entités » | **Retiré**, sur décision de Thierry (décision 7) ; une entité à la fois. |
+| Liste « Toutes les factures » (tout le compte) | **Filtrée sur l'entité choisie** ; « À traiter » reste commun au compte. |
 | Lignes « Crédit, mensualité payée / à venir » | **Conservées**, sous chaque mois, et dans le détail. |
 | Formulaire « Importer un tableau » du bloc Crédits | **Déplacé** dans « Ajouter » (reconnaissance) et dans la fiche du tableau reconnu. |
 | Liste des crédits et suppression | **Conservées** dans le bloc Crédits. |
@@ -3540,6 +3552,9 @@ Chacun sa review, sa recette et sa remise ; 8a d'abord.
   l'exercice 2025 et 6/12 dans 2026, au centime de la règle.
 - Une entité sans début d'exercice se lit par année civile ; une SCI au
   1er juillet par exercice 2025-2026.
+- `entite=toutes` n'est plus accepté pour les totaux : l'écran prend la
+  première entité active ; la liste ne montre que les factures de l'entité ;
+  « À traiter » montre tout le compte.
 - L'écran fait 1 appel au chargement et 1 par clic sur un mois.
 - Un PDF tableau confirmé ne déclenche AUCUN appel IA et passe `tableau` ; une
   facture PDF passe à l'IA ; la file prise laisse passer l'IA.
