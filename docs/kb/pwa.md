@@ -2810,3 +2810,53 @@ ou annulation refusée, masse sous plafond), `tests/menages-reassignation.test.j
 (+6 : « Personne », retirer la proposition, assigner ailleurs, nouvelle
 proposition, passé ou sans personne, échec d'envoi). Dix mutations, toutes
 attrapées.
+
+### 13.11 Trace de la review de l'étape 4 (19 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, plage
+`65aee3a5946c729f8fb6d4e28a3f91d3c862c09a..79a61300706f8cfb000a1ac8332b084d1fd144e6`.
+Chaque fichier cité comme lieu d'un constat est dans le diff de l'étape. Rapport
+consigné tel quel à réception, avant correction :
+
+> **Ce que j'ai mesuré** — les trois fichiers de tests du lot : 180 sur 180 au vert, à l'heure réelle et avec l'horloge décalée de 4, 30, 60 et 200 jours. La suite complète : 8 762 verts et 3 rouges, qui viennent de ma copie sans `.git` (`tests/reponse-partenaire-execution.test.js`, `tests/v2-marche-aucune-ecriture-calendrier.test.js`), identiques sur la copie de la base `65aee3a`. Six mutations de ma part (garde « à venir » retirée côté moteur et côté `reassigner`, état d'après pris tel quel, prévenir la porteuse seule, plafond retiré, avis envoyé même si l'annulation a échoué) : chacune fait rougir au moins un test neuf.
+>
+> **Sécurité et vie privée : aucun constat.** Les deux nouveaux avis passent par `profilNotifiable` (`account_user_id = userId`, `access_mode = 'lien'`, `active`). Côté moteur, `userId` est le `m.user_id` du ménage ; côté `reassigner`, `garde.accountUserId`, et `avant` est lu avec `.eq('user_id', userId)` : un identifiant d'un autre compte dans `proposee_a`, `offered_to` ou `provider_id` ne reçoit rien. Ni jeton ni voyageur dans la notification. Le contrôle de périmètre de `reassigner` passe avant toute écriture et tout envoi.
+>
+> **1. Défaut — un ménage annulé puis ressuscité garde son « Vu » : la prestataire a reçu « annulé », plus rien ne la relance, et l'hôte voit « Vu ».** `lib/cleaning/sync-menages-entite.js:662-697` (nouvel avis) et `:557` (résurrection). L'avis d'annulation est explicite. Si la réservation revient, la résurrection réécrit l'assignation mais ne touche ni `vu_le` ni `vu_par`. Si la même porteuse est reprise par la garde, `vu_par = provider_id` reste vrai. Les relances « Vu » ne visent que les ménages non validés, donc rien ne part. Mesuré avec le double du test, sur deux cycles. Cycle 1 : `annules=1`, avis à `p-regina`. Cycle 2 : `ressuscites=1`, la mise à jour ne contient ni `vu_le` ni `vu_par`, aucun avis d'aucune sorte. Scénario réaliste : un voyageur demande une prolongation (départ samedi → dimanche), puis l'annule. Régina reçoit « Ménage du samedi annulé », puis « Ménage du dimanche annulé » pour un ménage dont on ne lui avait jamais parlé. Le samedi revient chez elle, l'écran de l'hôte affiche « Vu », et aucun message ne lui dit que le ménage existe à nouveau. Avant ce lot, le ménage disparaissait puis réapparaissait seulement dans sa page. Désormais un message affirme qu'il est annulé. La KB (`docs/kb/menage.md:1226`) cite bien la « limite connue », mais pas le « Vu » conservé ni le silence des relances. À trancher par Thierry : remettre `vu_le`/`vu_par` à zéro à la résurrection, ou envoyer un avis « il revient ».
+>
+> **2. Défaut — le surplus au-delà du plafond est perdu sans que rien ne le signale.** `lib/cleaning/sync-menages-entite.js:681-697`. Mesuré : 35 ménages annulés donnent `annulations_non_prevenues=5` et `results.errors=[]`. Au cycle suivant, ces ménages sont `cancelled`, donc exclus : 0 avis. Elles ne sont jamais prévenues. La seule trace est une ligne `console.error`. Le compte n'est ni dans la ligne de bilan finale du moteur ni dans `results`. Le même fichier écrit pourtant : « le diagnostic d'un cron se lit par `results.errors` … Un champ de bilan ne remonte nulle part ». La KB dit « compté et journalisé ». Or le journal `menage_assignment_log` ne dit rien des avis non envoyés. Correctif minimal : pousser une entrée dans `results.errors` quand le compte est supérieur à zéro.
+>
+> **3. Défaut (léger) — la boucle d'envoi n'a pas de limite de durée et a son propre plafond.** `lib/cleaning/sync-menages-entite.js:682`. Jusqu'à 30 avis envoyés l'un après l'autre. Chacun fait environ 5 à 7 allers-retours : profil, abonnements, push (jusqu'à 5 s de délai), clé SMS, Brevo, journal SMS, e-mail. C'est une estimation, pas une mesure : de l'ordre de 15 à 30 s. Ce temps est pris dans `sync_menages`, avant `propositions_dues` (qui a son propre plafond de 30) et avant le dispatch, dans un cycle limité à 60 s qui « dépasse régulièrement » cette limite. Ce plafond n'est pas partagé avec celui des propositions : un cycle peut maintenant envoyer 60 avis au lieu de 30. Les autres tâches qui envoient ont une limite de durée (15 à 20 s). Ce n'est atteignable qu'en cas d'annulation en masse, ce qui est rare.
+>
+> **4. Mineur — deux affirmations du diff sont inexactes.** `lib/cleaning/notifier-prestataire.js:320` et `api/menages.js:1271-1272` disent que celle qui reçoit le ménage « a déjà son « à confirmer » ». C'est faux pour le geste « Proposer » de l'hôte : `reassigner` n'appelle pas `notifierProposition`. Le cron ne la notifie pas non plus : `poserNouveauxTours` exige `proposee_a` nul, et `elargirToursEnCours` ne prévient que les ajoutées. Le défaut existait avant ce lot, mais le diff s'appuie dessus. Dans le cas « une nouvelle proposition remplace l'ancienne », l'ancienne reçoit « ne vous est plus confié » et la nouvelle ne reçoit rien. `lib/cleaning/notifier-prestataire.js:297-298` et `docs/kb/menage.md:1212` disent qu'un départ déplacé fait naître un ménage « qui a son propre avis ». Pour une porteuse attribuée d'office, le moteur n'envoie jamais d'avis « attribué ». Son seul signal pour la nouvelle date est la relance « Vu » de la veille à 9 h.
+>
+> **5. Mineur — l'exemple du plafond dans le commentaire est faux.** `lib/cleaning/sync-menages-entite.js:669` parle d'« un compte provider qui se vide ». Ce cas n'annule rien : un compte sans aucune réservation dans la fenêtre n'est pas dans `userIds`, donc ses ménages ne sont pas lus. L'exemple trompe sur ce que le plafond protège réellement : la perte partielle des réservations d'un bien.
+>
+> **Points vérifiés sans constat** — tous les chemins de `reassigner` (« Personne », « Retirer la proposition », attribution, nouvelle proposition, re-proposer à la même) ; l'ordre « écriture, puis avis » (aucun avis si l'annulation est refusée, ni si la mise à jour de `reassigner` échoue) ; la date « à venir » à Paris (limite de 23 h 30 UTC testée) ; aucun double avis entre annulation et retrait (un ménage annulé renvoie 409, et `cancelled` n'est plus repris) ; pas de régression (`pages/menages.html` ne lit que `retiree`, `assignee` et `prenom` ; `name` ajouté sans requête de plus ; `jourDeParis` n'était pas exporté avant).
+
+### 13.12 Suites données à la review de l'étape 4 (19 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **Un ménage annulé qui revient** — question posée à Thierry (**Q47**),
+   tranchée : à la résurrection, le « Vu » est **effacé**, et la porteuse est
+   prévenue (« est de nouveau prévu », ou « Nouveau ménage » si la garde le donne
+   à une autre), ménage à venir seulement. Tests : retour chez elle, chez une
+   autre, passé, verrouillé.
+2. **Le surplus perdu sans signal** — le compte remonte dans `results.errors`
+   (contexte `sync_menages_entite_avis`). Test et contre-épreuve.
+3. **Pas de limite de durée** — les avis du moteur (annulé, revenu) partent
+   ensemble, sous le plafond de nombre ET une limite de 15 s ; le surplus est
+   compté et signalé comme au point 2. Le plafond reste distinct de celui des
+   propositions (le partager demanderait de toucher à `api/cron.js`) : au pire
+   30 + 30 avis par cycle, écrit en KB.
+4. **Deux affirmations inexactes** — (a) « celle qui reçoit a son « à
+   confirmer » » était faux pour le geste « Proposer » de l'hôte : question posée
+   à Thierry (**Q48**), tranchée : **la proposition de l'hôte est annoncée**
+   (« Ménage à confirmer », échéance écrite, ménage à venir). L'ancien test « une
+   proposition ne notifie pas » est remplacé par celui de Q48. (b) « un départ
+   déplacé a son propre avis » : faux pour une porteuse d'office — commentaire et
+   KB corrigés (elle le voit dans sa page ; la relance « Vu » de la veille le
+   rappelle).
+5. **L'exemple du plafond** — corrigé : ce qui déclenche des avis en nombre est
+   la perte partielle des réservations d'un bien, pas un compte qui se vide.

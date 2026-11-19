@@ -1279,9 +1279,16 @@ async function reassigner (req, res) {
     offered_to: 'offered_to' in maj ? maj.offered_to : avant.offered_to
   }
   const aPrevenir = aVenir(departure_date) ? perdants(avant, apres) : []
+  // ⚠ CELLE A QUI L'HOTE PROPOSE EST PREVENUE (Q48 de Thierry, 19 novembre
+  // 2026) : « Menage a confirmer », avec son echeance. Ce silence datait d'avant
+  // les notifications, quand chaque avis coutait un SMS ; il laissait aussi
+  // l'ancienne sollicitee recevoir « ne vous est plus confie » pendant que la
+  // nouvelle ne recevait rien. Menage a venir seulement.
+  const aProposer = !!(choisi && Array.isArray(maj.proposee_a) && maj.proposee_a.length &&
+                       !reponse.retiree && !reponse.assignee && aVenir(departure_date))
 
   let bien = null
-  if ((reponse.assignee && choisi) || aPrevenir.length) {
+  if ((reponse.assignee && choisi) || aProposer || aPrevenir.length) {
     // ⚠ L'erreur est LUE : `provider_property_id` n'a pas de contrainte d'unicite,
     // et `maybeSingle` rend une erreur sur deux lignes. Ignoree, le SMS partait
     // sans nom de bien, en silence.
@@ -1299,6 +1306,16 @@ async function reassigner (req, res) {
         departureDate: departure_date, lien: `${base}/apps/menages/public`
       })
     } catch (e) { console.error('[menages] notification assignation echec', e.message) }
+  }
+  if (aProposer) {
+    try {
+      notif = await notifierProposition({
+        userId, providerId: choisi.id, propertyName: bien && bien.name,
+        propertyId: String(property_id),
+        departureDate: departure_date, expireLe: maj.offer_expires_at,
+        lien: `${base}/apps/menages/public`
+      })
+    } catch (e) { console.error('[menages] notification proposition echec', e.message) }
   }
   let retraitsPrevenus = 0
   for (const qui of aPrevenir) {

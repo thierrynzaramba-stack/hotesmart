@@ -1209,22 +1209,37 @@ d'abord en **notification** sur les téléphones qu'elle a abonnés depuis sa pa
   - **annulé ou déplacé** (`notifierAnnulation`) — le moteur (`synchroniserMenages`) prévient,
     APRÈS l'annulation et le journal, la porteuse et chaque prestataire à qui le ménage était
     proposé ; « Ménage du {jour} - {bien} annulé : la réservation est annulée ou son départ a
-    changé. » Un départ déplacé fait naître un autre ménage, qui a son propre avis.
+    changé. » Un départ déplacé fait naître un autre ménage — ⚠️ **sans avis** quand il est créé
+    d'office : le moteur ne prévient pas des ménages qu'il crée (des centaines au branchement
+    d'un PMS) ; la porteuse le voit dans sa page, et la relance « Vu » de la veille le rappelle.
   - **retiré par l'hôte** (`notifierRetrait`) — `api/menages.js` (`reassigner`) prévient celles
     qui PERDENT le ménage : « Personne », « Retirer la proposition », une attribution qui change
     la porteuse, une nouvelle proposition qui remplace l'ancienne ; « Le ménage du {jour} -
     {bien} ne vous est plus confié. » Jamais celle qui le reçoit ou le garde.
+  - **revenu** (`notifierRetour`, **Q47** de Thierry, 19 nov. 2026) — un ménage annulé dont la
+    réservation revient (prolongation demandée puis annulée) : à la résurrection, le **« Vu »
+    est effacé** (`vu_le`, `vu_par` à `null` — sa validation d'avant ne vaut plus : l'hôte
+    relit « Pas vu », les relances repartent), et sa porteuse est prévenue, ménage à venir
+    seulement : « Le ménage du {jour} - {bien} est de nouveau prévu. » si elle en était,
+    l'avis « Nouveau ménage » si la garde le donne à une autre. Un ménage verrouillé revient
+    sans personne : rien à prévenir.
+  - **proposé par l'hôte** (**Q48** de Thierry, 19 nov. 2026) — `reassigner`, geste
+    « Proposer » : celle à qui l'hôte propose reçoit « Ménage à confirmer », avec l'échéance
+    écrite, ménage à venir seulement. Ce silence (« c'est la PWA qui l'annonce ») datait d'avant
+    les notifications, quand chaque avis coûtait un SMS.
   - ⚠️ **Qui perd** : un seul calcul, `perdants(avant, après)` (`lib/cleaning/menage-perdants.js`,
     sans dépendance) — participantes d'avant (porteuse, `proposee_a`, `offered_to`) qui ne le
     sont plus après. Pour l'hôte, l'état d'après est l'état ÉCRIT, champ par champ : un champ
     que le geste n'écrit pas garde sa valeur d'avant.
   - ⚠️ **Seulement un ménage À VENIR** (départ aujourd'hui ou plus tard, à Paris) : une
     correction de l'historique ne réveille personne.
-  - ⚠️ **Plafond par cycle pour l'annulation** (`MAX_NOTIFS_PAR_CYCLE`, les plus proches
-    d'abord) : une annulation en masse ne devient pas une rafale de SMS ; le surplus est compté
-    (`annulations_non_prevenues`) et journalisé, pas réessayé.
-  - **Limite connue** : un ménage annulé puis RESSUSCITÉ (sa réservation revient) ne déclenche
-    pas d'avis « il revient » — hors du périmètre décidé.
+  - ⚠️ **Les avis du moteur (annulé, revenu) partent ensemble, sous un plafond ET une limite
+    de durée** (`MAX_NOTIFS_PAR_CYCLE`, `BUDGET_AVIS_MS` = 15 s ; les plus proches d'abord) : ce
+    qui les déclenche en nombre est la perte partielle des réservations d'un bien. Ce qui n'est
+    pas envoyé est **perdu** (au cycle suivant, le ménage est déjà annulé ou revenu) : le compte
+    `avis_non_envoyes` remonte dans **`results.errors`**, là où se lit le diagnostic du cron.
+    Ce plafond n'est pas partagé avec celui des propositions (`propositions_dues`) : au pire,
+    30 + 30 avis par cycle.
 
 ### Le nom de famille est obligatoire (point 4, 15 sept. 2026)
 

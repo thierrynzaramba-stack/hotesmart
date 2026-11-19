@@ -53,7 +53,7 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
                      // les mises à jour qui passent `status: 'cancelled'`).
                      erreurAnnulation = null } = {}) {
   const etat = { hote: [], inseres: [], majs: [], journal: [], incidents: [], requetes: [],
-                 notifs: [], annulations: [] }
+                 notifs: [], annulations: [], retours: [] }
 
   const client = {
     from (table) {
@@ -228,6 +228,8 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
       etat.annulations.push({ ...o, majsAvant: etat.majs.length, journalAvant: etat.journal.length })
       return bilanNotif
     },
+    // Q47 : le ménage annulé revient.
+    notifierRetour: async (o) => { etat.retours.push({ ...o, majsAvant: etat.majs.length }); return bilanNotif },
     jourLisible: d => String(d)
   }
   mp.loaded = true
@@ -444,8 +446,8 @@ test('LE TEST QUI COMPTE (lot 3) : un ménage annulé prévient sa porteuse ET c
     assert.ok(a.journalAvant >= 1, 'et après le journal')
     assert.ok(!String(a.lien).includes('token'), 'le jeton est ajouté par le module, jamais ici')
   }
-  assert.strictEqual(bilan.annulations_prevenues, 2)
-  assert.strictEqual(bilan.annulations_non_prevenues, 0)
+  assert.strictEqual(bilan.avis_prevenues, 2)
+  assert.strictEqual(bilan.avis_non_envoyes, 0)
 })
 
 test('lot 3 : un départ DÉPLACÉ prévient de l’annulation de l’ancien ménage', async () => {
@@ -506,13 +508,84 @@ test('lot 3 : une annulation en MASSE reste sous le plafond par cycle — les pl
   // n'est pas lu du tout, et rien n'est jugé.
   const etat = preparer({ snaps: [{ ...SNAP({ departure: jour(60) }), booking_id: 'vivante' }], menages,
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }] })
-  const bilan = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  const results = { errors: [] }
+  const bilan = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages(results)
   assert.strictEqual(bilan.annules, n)
   assert.strictEqual(etat.annulations.length, MAX_NOTIFS_PAR_CYCLE)
-  assert.strictEqual(bilan.annulations_non_prevenues, 5)
+  assert.strictEqual(bilan.avis_non_envoyes, 5)
+  // ⚠ Constat 2 de la review : ce qui n'est pas envoyé est PERDU — le compte
+  // remonte là où se lit le diagnostic du cron.
+  assert.ok(results.errors.some(e => e.context === 'sync_menages_entite_avis' && /5 avis/.test(e.error)), JSON.stringify(results.errors))
   const dates = etat.annulations.map(a => a.departureDate)
   assert.deepStrictEqual(dates, [...dates].sort(), 'les plus proches d’abord')
   assert.ok(dates[dates.length - 1] <= menages.map(m => m.departure_date).sort()[MAX_NOTIFS_PAR_CYCLE - 1])
+})
+
+test('lot 3 (constat 3) : les avis du cycle s’arrêtent à leur limite de DURÉE — le surplus est signalé', async () => {
+  const etat = preparer({
+    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: jour(3) } }],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const results = { errors: [] }
+  const bilan = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages(results, { budgetAvisMs: 0 })
+  assert.strictEqual(bilan.annules, 1, 'l’annulation a lieu')
+  assert.deepStrictEqual(etat.annulations, [], 'mais plus de temps pour l’avis')
+  assert.strictEqual(bilan.avis_non_envoyes, 1)
+  assert.strictEqual(results.errors.length, 1)
+})
+
+// ─── Q47 : un ménage annulé qui REVIENT ─────────────────────────────────────
+
+const ANNULE_VU = (over = {}) => ({ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1', departure_date: jour(3),
+                                     status: 'cancelled', provider_id: REGINA, vu_le: '2026-11-01T09:00:00Z', vu_par: REGINA, ...over })
+
+test('LE TEST QUI COMPTE (Q47) : un ménage annulé qui revient — « Vu » EFFACÉ, et sa porteuse prévenue', async () => {
+  const etat = preparer({
+    biens: BIENS_NOMMES,
+    snaps: [SNAP({ departure: jour(3) })],
+    menages: [ANNULE_VU()],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const bilan = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  assert.strictEqual(bilan.ressuscites, 1)
+  const maj = etat.majs.find(m => m.ids[0] === 'm1')
+  assert.strictEqual(maj.row.provider_id, REGINA)
+  assert.strictEqual(maj.row.vu_le, null, 'le « Vu » d’avant l’annulation ne vaut plus')
+  assert.strictEqual(maj.row.vu_par, null)
+  assert.deepStrictEqual(etat.retours.map(r => [r.providerId, r.departureDate, r.propertyName]), [[REGINA, jour(3), 'La bulle']])
+  assert.ok(etat.retours[0].majsAvant >= 1, 'après l’écriture')
+  assert.deepStrictEqual(etat.notifs, [], 'pas d’« attribué » : elle en était')
+})
+
+test('Q47 : revenu chez QUELQU’UN D’AUTRE, c’est un « Nouveau ménage » ; passé ou verrouillé, rien', async () => {
+  const autre = preparer({
+    snaps: [SNAP({ departure: jour(3) })],
+    menages: [ANNULE_VU({ provider_id: NOUVELLE, vu_par: NOUVELLE })],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  assert.deepStrictEqual(autre.retours, [])
+  assert.deepStrictEqual(autre.notifs.filter(n => n.assignation).map(n => n.providerId), [REGINA])
+
+  const passe = preparer({
+    snaps: [SNAP({ arrival: jour(-5), departure: jour(-2) })],
+    menages: [ANNULE_VU({ departure_date: jour(-2) })],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const b = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  assert.strictEqual(b.ressuscites, 1)
+  assert.deepStrictEqual(passe.retours, [])
+
+  const verrou = preparer({
+    snaps: [SNAP({ departure: jour(3) })],
+    menages: [ANNULE_VU({ assigned_by: 'manual' })],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  assert.deepStrictEqual(verrou.retours, [], 'verrouillé : revient sans personne, personne à prévenir')
+  assert.strictEqual(verrou.majs.find(m => m.ids[0] === 'm1').row.vu_par, null)
 })
 
 // ─── Isolation multi-comptes ───────────────────────────────────────────────

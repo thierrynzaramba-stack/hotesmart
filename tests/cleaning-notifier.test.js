@@ -613,7 +613,8 @@ test('constat 2 : le lot 2 (personnes avec un compte) garde son déroulé — un
 test('LE TEST QUI COMPTE (étape 4) : annulation et retrait — textes, page sans jeton, un ménage = une notification', async () => {
   const cas = [
     ['notifierAnnulation', 'Ménage du samedi 12 septembre - La bulle annulé : la réservation est annulée ou son départ a changé.'],
-    ['notifierRetrait', 'Le ménage du samedi 12 septembre - La bulle ne vous est plus confié.']
+    ['notifierRetrait', 'Le ménage du samedi 12 septembre - La bulle ne vous est plus confié.'],
+    ['notifierRetour', 'Le ménage du samedi 12 septembre - La bulle est de nouveau prévu.']
   ]
   for (const [fn, corps] of cas) {
     await avecPush({}, async ({ capturer }) => {
@@ -635,7 +636,8 @@ test('LE TEST QUI COMPTE (étape 4) : annulation et retrait — textes, page san
 test('étape 4 : le SMS de l’annulation et du retrait — GSM-7, tiret simple, avec son planning', async () => {
   for (const [fn, attendu] of [
     ['notifierAnnulation', /^Menage du samedi 12 septembre - La bulle annule : la reservation est annulee ou son depart a change\. Votre planning : https:\/\/hotesmart\.vercel\.app\/apps\/menages\/public\?token=jeton-marie$/],
-    ['notifierRetrait', /^Le menage du samedi 12 septembre - La bulle ne vous est plus confie\. Votre planning : https:\/\/hotesmart\.vercel\.app\/apps\/menages\/public\?token=jeton-marie$/]
+    ['notifierRetrait', /^Le menage du samedi 12 septembre - La bulle ne vous est plus confie\. Votre planning : https:\/\/hotesmart\.vercel\.app\/apps\/menages\/public\?token=jeton-marie$/],
+    ['notifierRetour', /^Le menage du samedi 12 septembre - La bulle est de nouveau prevu\. Votre planning : https:\/\/hotesmart\.vercel\.app\/apps\/menages\/public\?token=jeton-marie$/]
   ]) {
     await avecPush({ sansCles: true }, async () => {
       const { etat, mod } = preparer()
@@ -648,7 +650,7 @@ test('étape 4 : le SMS de l’annulation et du retrait — GSM-7, tiret simple,
 })
 
 test('étape 4 : même règle que les trois autres (Q44, Q46) — notification d’abord, SMS en secours ou si urgent', async () => {
-  for (const fn of ['notifierAnnulation', 'notifierRetrait']) {
+  for (const fn of ['notifierAnnulation', 'notifierRetrait', 'notifierRetour']) {
     await avecPush({}, async () => {
       const loin = preparer({ abos: [appareil('a1')] })
       assert.deepStrictEqual(await loin.mod[fn](LOIN), { push: 1, sms: false, email: true }, `${fn} loin`)

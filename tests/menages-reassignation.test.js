@@ -27,7 +27,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, compteAtten
                      menage = { id: 'm1', provider_id: null, status: 'unassigned' },
                      liaison = { rang: 1, requires_ack: false }, erreurProfil = null, erreurLiaison = null,
                      retraitJette = false } = {}) {
-  const etat = { majs: [], journal: [], requetes: [], notifs: [], retraits: [] }
+  const etat = { majs: [], journal: [], requetes: [], notifs: [], retraits: [], propositions: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
                                        : { data: null, error: { message: 'x' } }) },
@@ -110,6 +110,11 @@ function preparer ({ user = PROD, profil = null, permissions = null, compteAtten
       if (notifJette) throw new Error('brevo indisponible')
       etat.notifs.push(opts)
       return { sms: true, email: false }
+    },
+    // Q48 (19 novembre 2026) : la proposition de l'hôte est annoncée.
+    notifierProposition: async (opts) => {
+      etat.propositions.push({ ...opts, majsAvant: etat.majs.length })
+      return { push: 1, sms: false, email: false }
     },
     // PWA lot 3 (Q45) : « ne vous est plus confié ». On note ce qui était ÉCRIT
     // au moment de l'appel, pour prouver qu'il part après l'écriture.
@@ -473,11 +478,34 @@ test('une assignation directe est NOTIFIÉE, et la réponse dit ce qui est parti
   assert.ok(res.body.notifiee, 'la réponse porte ce qui est parti')
 })
 
-test('une PROPOSITION ne notifie pas par ce canal', async () => {
-  // Elle n'engage personne : c'est la PWA qui l'annonce, avec son délai.
+test('Q48 : une PROPOSITION de l\'hôte est annoncée — « à confirmer », avec son échéance, après l\'écriture', async () => {
+  // Décision de Thierry du 19 novembre 2026 : elle ne l'était pas (« c'est la
+  // PWA qui l'annonce »), du temps où chaque avis coûtait un SMS. Depuis les
+  // notifications, et depuis l'avis « ne vous est plus confié » à l'ancienne
+  // sollicitée, la nouvelle ne pouvait pas rester sans rien.
   const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true } })
-  await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'proposer' }), reponse())
-  assert.strictEqual(etat.notifs.length, 0)
+  const res = reponse()
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'proposer' }), res)
+  assert.strictEqual(etat.notifs.length, 0, 'pas d’« attribué » : elle n’est pas engagée')
+  assert.strictEqual(etat.propositions.length, 1)
+  const p = etat.propositions[0]
+  assert.strictEqual(p.providerId, NOUVELLE)
+  assert.strictEqual(p.expireLe, etat.majs[0].row.offer_expires_at, 'l’échéance écrite est celle annoncée')
+  assert.ok(p.majsAvant >= 1, 'après l’écriture')
+  assert.deepStrictEqual(res.body.notifiee, { push: 1, sms: false, email: false })
+})
+
+test('Q48 : ni « retirer la proposition », ni une attribution, ni un ménage passé n\'annoncent de proposition', async () => {
+  const retrait = preparer({ menage: { id: 'm1', provider_id: REGINA, status: 'accepted', proposee_a: [NOUVELLE] } })
+  await retrait.handler(post({ ...CORPS, provider_id: REGINA }), reponse())
+  assert.deepStrictEqual(retrait.etat.propositions, [])
+  const attribution = preparer({ liaison: { rang: 2, requires_ack: true } })
+  await attribution.handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), reponse())
+  assert.deepStrictEqual(attribution.etat.propositions, [])
+  const HIER = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10)
+  const passe = preparer({ dateAttendue: HIER, liaison: { rang: 2, requires_ack: true } })
+  await passe.handler(post({ ...CORPS, departure_date: HIER, provider_id: NOUVELLE, mode: 'proposer' }), reponse())
+  assert.deepStrictEqual(passe.etat.propositions, [])
 })
 
 test('une notification qui ÉCHOUE ne défait pas l\'assignation', async () => {
@@ -529,6 +557,7 @@ test('Q45 : une nouvelle proposition prévient celles de l’ancienne — la por
                                        menage: { id: 'm1', provider_id: REGINA, status: 'accepted', proposee_a: [AUTRE] } })
   await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'proposer' }), reponse())
   assert.deepStrictEqual(qui(etat), [AUTRE])
+  assert.deepStrictEqual(etat.propositions.map(p => p.providerId), [NOUVELLE], 'la nouvelle a son « à confirmer » (Q48)')
   // Re-proposer à la même : personne ne perd rien.
   const meme = preparer({ liaison: { rang: 2, requires_ack: true },
                           menage: { id: 'm1', provider_id: REGINA, status: 'accepted', proposee_a: [NOUVELLE] } })
