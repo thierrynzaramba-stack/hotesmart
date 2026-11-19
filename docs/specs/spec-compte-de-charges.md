@@ -3622,8 +3622,22 @@ Branche `charges-exercice-ajout`, partie de `main` (`b4dfedc1`).
 - **Suite complète** (après les correctifs de la review 1) : 9049 tests ;
   à l'heure réelle, 9049 verts ; à J+60, 1 rouge, dette 124
   (`tests/marche-comparables-api.test.js`), connue.
-- **APRÈS** (point 8) : à mesurer sur staging puis en production, comme
-  l'AVANT ; attendu 10 requêtes au lieu de 9 pour l'écran complet.
+- **APRÈS** (point 8), mesuré comme l'AVANT (API Performance du
+  navigateur, ordinateur) :
+  - **staging**, 19 novembre 2026 vers 22:15, compte de recette, après le
+    merge `0c2ccfdc` ; entité par défaut « Recette — SCI du Loft » (la
+    première active par son nom), exercice 2026, **aucun crédit** :
+    - **2 appels `/api`** au chargement : `/api/ecran/charges` (sans
+      paramètre : le serveur choisit l'entité) et `/api/membres` ;
+    - **9 requêtes** côté serveur (`Server-Timing : total 1149 ms,
+      9 requêtes`) — c'est l'attendu SANS crédit : le `Server-Timing`
+      compte une requête de plus que le test (la garde), soit 8 + 1 ;
+    - **1 777 octets** transférés pour l'appel d'écran (1 477 de corps) ;
+      33 023 octets pour toute la page ;
+    - **le clic sur un mois** : 1 appel, **3 requêtes** (garde, entités,
+      fonction), 1 291 octets (991 de corps), `total 1073 ms`.
+  - **production** : à mesurer après le go, sur le compte de Thierry
+    (avec un crédit) ; attendu **10 requêtes** contre 9 à l'AVANT.
 
 #### 14.21.10 Review 1 du lot 8a (19 novembre 2026)
 
