@@ -2042,9 +2042,12 @@ Le vérificateur (`scripts/oracle-resume-charges.sql`) donne 0 écart sur 3 428 
 - à la borne, mesuré par la review : 48 Mpx (7 Mo) en 2,7 s et 789 Mo au
   plus ; 49 Mpx bruité (12,5 Mo) en 5,7 s et 876 Mo ;
 - **trois photos de 3 Mo demandées ENSEMBLE** : elles passent l'une après
-  l'autre, à 2,0 s, 3,9 s et 5,7 s, avec **400 Mo** de mémoire au plus (sans
-  la file, la seconde review mesurait 2,1 Go pour trois photos de 48 Mpx) ;
-  une quatrième en même temps est refusée « occupé » ;
+  l'autre, à 2,0 s, 3,9 s et 5,7 s, avec **471 à 474 Mo** de mémoire au plus
+  (mesure de la troisième review ; « 400 Mo » était écrit ici) ; **trois de
+  48 Mpx**, avec la file : 811 à 821 Mo une fois la place rendue à la mort du
+  fil (sans la file, la seconde review mesurait 2,1 Go) ; une quatrième en
+  même temps est refusée « occupé » ; ⚠ **et une seule photo à la fois par
+  compte** (troisième review, constat de sécurité 1) ;
 - **30 puis 90 fichiers pourris de 10 Mo d'affilée** dans le même processus :
   175 puis 165 Mo de mémoire, **sans croissance**, et une vraie photo
   convertie juste après. Avant le fil, la review mesurait le tas de 32 à
@@ -2378,6 +2381,163 @@ testé, mais pas relu**. Ce fait est remis au chef de file et à Thierry ; c'est
 | 3 | `PanneConversion` porte sa cause (`detail`, 200 caractères au plus), venue du fil ou de son erreur. Elle est écrite dans le `console.error` de `confirmerEnvoi`. Un test le vérifie. |
 | 4 | Le contrôle dit « liste vide : tout type accepte » pour `null` comme pour `{}`. Mesuré dans cinq états : avant, après, `null`, `{}`, bucket absent. |
 | — | Signalé par la review du lot crédit : `package-lock.json` portait le nom du dossier de travail (`hotesmart-heic`). Il reprend son nom, `hotesmart`. |
+
+#### Troisième review du lot HEIC, limitée au dernier correctif (19 novembre 2026)
+
+**Exception décidée par Thierry**, transmise par le chef de file à 09:33 : UNE
+review de plus, limitée à `9e20c30105b2f37ff54b087c6c4010584ab67610..0db22d0edb80e32859b63eb23bdc742466fc395e`,
+sur `/home/claude/hotesmart-heic`. Ce qu'elle trouve se corrige sans nouvelle
+review. Arbre lu `/home/claude/hotesmart-heic`, tête lue `0db22d0edb80e32859b63eb23bdc742466fc395e` ;
+les sept fichiers qu'elle cite sont ceux du diff.
+
+Verbatim :
+
+````
+**Arbre lu** : `/home/claude/hotesmart-heic`, branche `charges-heic-serveur`. **Tête lue** : `0db22d0edb80e32859b63eb23bdc742466fc395e`. `git status` est vide avant et après : je n'ai rien modifié dans l'arbre.
+
+`git diff --name-only 9e20c30105b2f37ff54b087c6c4010584ab67610..0db22d0edb80e32859b63eb23bdc742466fc395e` :
+docs/specs/spec-compte-de-charges.md
+lib/charges.js
+lib/charges/heic-fil.js
+lib/charges/heic.js
+migrations/2026-11-19-controle-charges-heic.sql
+package-lock.json
+tests/charges-heic.test.js
+
+## SÉCURITÉ
+
+### 1. Un seul compte peut bloquer la conversion HEIC de tous les hôtes de l'instance
+**Où** : `lib/charges/heic.js:166-190` (la file est commune à tous les comptes, rien ne les distingue) et `lib/charges.js:285` (aucun compte n'est passé à la conversion).
+
+**Scénario.** Un titulaire garde quelques confirmations en cours, en continu. Les 3 places de la file (1 fil + 2 en attente) sont toujours prises, et tout autre hôte servi par la même instance reçoit `occupe` (503). Ce que ça coûte à l'attaquant :
+- Rien n'empêche de confirmer plusieurs fois **le même envoi** en même temps. Les 3 confirmations entrent dans la file et convertissent toutes : un seul dépôt de 10 Mo tient la file environ 3 conversions.
+- Un 503 `occupe` laisse la ligne en `envoi`, donc elle peut être reconfirmée sans fin.
+- Le plafond des envois ouverts (`lib/charges.js:132-136`) ne compte que le statut `envoi` : les envois confirmés n'y comptent pas.
+
+**Mesure** (dans un seul processus, vraies photos : le compte A avec p48, le compte B avec p12) :
+
+| Scénario | Ce que reçoit B |
+|---|---|
+| Tête, A garde 3 demandes en vol, B toutes les 500 ms pendant 25 s | 2 converties, 47 refusées `occupe` |
+| Tête, A garde 6 demandes en vol | 1 convertie, 48 refusées `occupe` |
+| Tête, B toutes les 3 s pendant 30 s | **0 sur 9** (9 `occupe`) |
+| Prototype avec une clé de compte, même scénario | **9 sur 9 converties** |
+
+**Portée.** C'est un problème de disponibilité, pas d'intégrité : rien n'est effacé et seul le HEIC est touché. Mais la file est bloquée tant que l'attaquant continue d'envoyer.
+
+**Correction** (environ 6 lignes, prototype dans `/tmp/rv3-proto`) :
+- `convertirIsole(octets, { max, delaiMs, cle })` refuse `occupe` si la même `cle` est déjà en cours ou en attente (`cleEnCours`, `attente.some(t => t.cle === cle)`).
+- `lib/charges.js:285` passe `cle: compte`.
+- Ajouter un test : deux appels avec la même clé donnent `occupe` au second, et une autre clé passe.
+
+**Ce qui reste.** Il faudrait au moins 3 comptes pour tenir la file. Et un hôte honnête qui confirme plusieurs HEIC en parallèle recevra des 503 : il faut vérifier que l'écran (hors de ce diff) les enchaîne, ou réessaie sur un 503.
+
+## MINEUR
+
+### 2. La place est rendue avant que le fil soit mort
+**Où** : `heic.js:224`. `terminate()` n'est pas attendu, et `finally` relance la suite (`heic.js:199-201`).
+
+**Mesure** (vrais fils, de la création à l'`exit`) : deux fils sont vivants en même temps pendant 8 à 35 ms, aussi bien après un succès qu'après un délai. Un fil tué au délai en plein décodage meurt en 24 ms.
+
+| 3 photos p48 ensemble | Fils vivants au plus | Pic mémoire (VmHWM) |
+|---|---|---|
+| Tête | 2 | 865 à 893 Mo |
+| Prototype qui rend la place à la mort du fil | 1 | 811 à 821 Mo |
+
+**Le test ne peut pas le voir.** Le test « jamais deux fils vivants » (`tests/charges-heic.test.js:173`) utilise un double dont `terminate` tue le fil tout de suite (l.168). Avec un double qui met 10 ms à mourir, le même test rougit sur la tête (`actual: 2`).
+
+**Correction.** Ne libérer la place (appeler `geste`) qu'une fois le fil mort, avec une borne pour qu'un fil qui ne meurt pas ne bloque pas la file :
+```js
+const mort = Promise.resolve().then(() => fil.terminate()).catch(() => {})
+Promise.race([mort, new Promise(r => setTimeout(r, 1000))]).then(geste)
+```
+Prototype (sans la borne) dans `/tmp/rv3-proto2` : les 17 tests du dépôt et les 3 tests proposés passent (20 sur 20).
+
+### 3. Deux règles de la file ne sont tenues par aucun test
+Deux mutations laissent `tests/charges-heic.test.js` au vert :
+- **M6, le délai recompté au lancement** au lieu d'être compté depuis l'appel. Le test l.197 annonce pourtant ce cas : il ne vérifie que l'attente. Ce défaut porterait la conversion à environ 30 s et ferait dépasser les 60 s de la fonction.
+- **M4, une attente expirée qui n'est pas retirée de la file** (`heic.js:185`). Elle produirait des `occupe` à tort.
+
+Deux tests sont proposés dans `/tmp/rv3-mut/tests/rv3-propositions.test.js`. Ils passent sur la tête et chacun rougit contre sa mutation. Pour le premier, prévoir plus de marge : réponse du fil à 100 ms, `delaiMs` à 150.
+
+### 4. Autres mutations restées au vert
+- **M8 et M9** : la cause envoyée par le fil (`heic.js:231`, `heic-fil.js:19`) n'est testée que par le chemin `error`. Test à ajouter : un double qui envoie `{ ok:false, panne, cause }`.
+- **M15** : l'événement `exit` ignoré. Un fil qui sortirait sans répondre tiendrait la place 15 s au lieu de rendre `fil_sorti_N`. Test à ajouter : un double qui émet `exit` 0 sans message.
+- M11 et M12 sont sans effet (mutants équivalents). M13 rendrait quand même un 503.
+
+### 5. `occupe` et `delai` ne se distinguent pas d'une vraie panne
+**Où** : `lib/charges.js:288`. Les deux rendent le même `503 conversion` qu'un fil planté : l'écran ne peut pas dire « réessayez dans un instant ».
+
+De plus, le refus `occupe` n'arrive qu'après le téléchargement complet du fichier (jusqu'à 10 Mo).
+
+**Correction proposée** : un code `conversion_occupee` pour `occupe` et `delai`.
+
+### 6. Un fil lancé pour presque rien
+**Où** : `heic.js:196-199`. Une photo qui sort de l'attente avec quelques ms de délai restant lance quand même un fil, aussitôt tué. Exiger un reste minimal (environ 500 ms), sinon refuser `delai` sans lancer de fil.
+
+### 7. La spec, mesures à corriger (`spec-compte-de-charges.md:2044-2046`)
+- Elle annonce « 400 Mo » pour 3 × 3 Mo. Je mesure 471 à 474 Mo (VmHWM).
+- Il manque le chiffre qui compte : 3 × 48 Mpx avec la file, soit 865 à 893 Mo.
+
+## Vérifié sans constat
+
+**La file et le fil**
+- **Aucun fil ne survit.** Au délai, `terminate` est appelé et le fil meurt en 24 ms. Une photo encore en attente ne lance jamais de fil.
+- **`error` puis `exit`, `message` puis `exit`** : le premier événement l'emporte (le drapeau `fini` et les écouteurs `once`). Node n'émet `error` qu'une fois.
+- **Toute promesse se résout.** `lancerFil` arme son minuteur avant le `postMessage`. Le seul blocage définitif possible serait une exception levée dans `lancerFil` avant sa promesse (`deps` à `null`), et aucun appelant ne le fait.
+- **Le délai couvre l'attente et l'exécution**, mesuré sur 3 × p48 avec un délai de 6 s :
+  - la première est convertie à 3,6 s ;
+  - la deuxième, en cours, est coupée à 6,0 s ;
+  - la troisième, en attente, part en `delai` à 6,0 s sans avoir eu de fil.
+- **422 et 503 bien distingués.** `decodage`, `trop_grande` et `trop_gros` donnent 422 et le fichier est effacé. `occupe`, `delai`, `fil_*`, `reponse_vide`, `module_absent` et `erreur` donnent 503 sans rien toucher : le fichier d'origine est préservé (`lib/charges.js:286-288`).
+- **Aucune fuite entre comptes.** Chaque photo a son propre fil et sa propre promesse, et `detail` ne part jamais dans la réponse HTTP (`panne()` ne rend que le code).
+
+**La mémoire, et les mesures de l'auteur**
+- 48 Mpx seule : 788 Mo. Confirmé.
+- Trois ensemble : 865 à 893 Mo. Confirmé.
+- **Le plateau d'environ 900 Mo résidents est contredit.** Huit p48 de suite laissent 169 à 237 Mo, mesurés 200 ms après chaque photo (pic VmHWM : 859 Mo). Trente p12 de suite se stabilisent vers 200 à 210 Mo. Le fil rend donc sa mémoire, comme le dit `heic.js:27`. Les 900 Mo sont vraisemblablement le pic, pas ce qui reste.
+
+**Le contrôle SQL**
+- Ligne la plus longue : 48 caractères.
+- Rejoué sur un Postgres 16 jetable dans 11 états : bucket absent, avant, après, `null`, `{}`, public, taille `null`, 6 types, un type `null`, `[null]`, public `null`. Seul l'état « après » rend `t`.
+- Le détail ne nomme pas la cause quand la liste est bonne mais que le bucket est public ou que la taille manque. C'est cosmétique.
+- Que Supabase traite `{}` comme « tout type accepté » n'est pas vérifié : ma recherche n'a rien tranché ([doc Supabase de mise à jour d'un bucket](https://docs-ff9wtj8hn-supabase.vercel.app/docs/reference/javascript/storage-updatebucket)). Sans effet sur `ok`, qui rend `f`.
+
+**Les tests et le reste**
+- `charges-heic` : 17 sur 17. Avec `charges-writer` : 79 sur 79. À horloge décalée (J+0, J+60, J+200) : 0 rouge. Sous charge processeur : 15 passes sur 15, aucun rouge.
+- Les mutations M1, M2, M3, M5, M7, M10, M14 et M16 rougissent bien.
+- `package-lock.json` porte le même nom que `origin/main` et `origin/staging`.
+
+## Fichiers de travail
+- `/tmp/rv3-heic` : copie de la tête.
+- `/tmp/rv3-proto` : prototype avec une clé de compte.
+- `/tmp/rv3-proto2` : prototype qui rend la place à la mort du fil.
+- `/tmp/rv3-mut` : banc de mutations, avec les tests proposés `tests/rv3-propositions.test.js` et `tests/rv3-mort-lente.test.js`.
+- `/tmp/rv3-scripts` : les mesures (`chevauchement.js`, `delai-puis.js`, `serie.js`, `accaparement.js`, `accaparement-cle.js`, `une.js`, `muter.py`) et les copies d'origine `heic.orig.js` et `heic-fil.orig.js`.
+- `/tmp/rv3-pg` : le Postgres 16 jetable, arrêté.
+````
+
+Corrigé sans nouvelle review, comme l'exception le prévoit :
+
+| Constat | Correction |
+|---|---|
+| 1 (sécurité) | **Un compte, une place** : `convertirIsole(…, { cle })` refuse « occupé » si la même clé est déjà en cours OU en attente ; `confirmerEnvoi` passe `cle: compte`. La clé se libère à la fin de la conversion. Test : deux photos du même compte → la seconde « occupé », celle d'un autre compte passe, puis le premier compte repasse. Ce qui reste, et c'est dit : il faut trois comptes pour tenir la file ; un hôte qui confirme deux HEIC à la fois (deux onglets) reçoit « réessayez dans un instant » pour la seconde — un même onglet n'en envoie qu'un à la fois (`envoiEnCours`). |
+| 2 | La réponse — donc la place — ne part qu'une fois le fil MORT, borné à 1 s pour un fil qui ne meurt pas. Le test « jamais deux fils vivants » prend un double qui met 15 ms à mourir. Et la place et la clé sont rendues AVANT la réponse, plus après : sinon l'appelant qui enchaîne aussitôt une photo du même compte se voyait refuser « occupé » — trouvé par le test de la clé, pas par la review. |
+| 3 | Les deux tests proposés, avec plus de marge : le fil reçoit le RESTE du délai compté depuis l'appel (coupé à ~1,3 s de l'appel, pas du lancement) ; une attente expirée rend sa place. |
+| 4 | Deux tests : un fil qui répond par une panne garde sa cause (`module_absent`, détail) ; un fil qui sort sans répondre rend `fil_sorti_0` tout de suite, pas au délai. |
+| 5 | Un code à part, `conversion_occupee` (503), et à l'écran « Le serveur convertit déjà une photo : réessayez dans un instant », en trois langues. ⚠ **Pour `occupe` seulement, pas pour `delai`** : une photo qui a eu ses 15 s entières et ne les a pas tenues ne se convertira pas mieux dans un instant. Pour que la règle soit juste, une photo qui a ATTENDU son tour rend « occupé », jamais « délai » — qu'elle ait expiré dans la file ou été coupée après son lancement. Non fait : refuser « occupé » avant de télécharger le fichier (10 Mo au plus, une fois). |
+| 6 | Une photo qui a attendu et à qui il reste moins de 500 ms ne lance pas de fil : « occupé ». Test : aucun fil créé. |
+| 7 | Mesures corrigées ci-dessous. |
+
+**Mesures, corrigées.** Trois photos de 3 Mo demandées ensemble : **471 à
+474 Mo** au plus (VmHWM, mesure de la troisième review), et non 400. Trois
+photos de 48 Mpx demandées ensemble, avec la file : **865 à 893 Mo** ; 811 à
+821 Mo une fois la place rendue à la mort du fil. ⚠ **Et une affirmation de
+l'auteur, remise au chef de file ce matin, était FAUSSE** : « huit photos de
+suite laissent ~900 Mo résidents ». La mesure était prise à l'instant où la
+promesse se résolvait, quand le fil n'était pas encore mort (le défaut du
+mineur 2). La review mesure 169 à 237 Mo résidents 200 ms après chaque photo :
+le fil rend sa mémoire.
 
 ## 12. Trace des reviews du lot 2
 

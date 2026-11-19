@@ -150,9 +150,9 @@ test('LE TEST QUI COMPTE (§14.19) : un HEIC est converti AVANT l\'empreinte —
   const { client, requetes, gestes } = envoiHeic()
   const recus = []
   const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID },
-    { convertir: async (o, opts) => { recus.push([Buffer.compare(o, HEIC), opts.max]); return JPEG } })
+    { convertir: async (o, opts) => { recus.push([Buffer.compare(o, HEIC), opts.max, opts.cle]); return JPEG } })
   assert.equal(r.ok, true)
-  assert.deepEqual(recus, [[0, 7 * 1024 * 1024]], 'les octets relus du bucket, bornés comme une image lue par l\'IA')
+  assert.deepEqual(recus, [[0, 7 * 1024 * 1024, COMPTE]], 'les octets relus du bucket, bornés comme une image lue par l\'IA ; la clé de file est le compte (troisième review, S1)')
   const envoi = gestes.find(g => g.nom === 'upload')
   assert.deepEqual([envoi.args[0], envoi.args[2]], [`${COMPTE}/${ID}`, { contentType: 'image/jpeg', upsert: true }])
   assert.equal(Buffer.compare(envoi.args[1], JPEG), 0)
@@ -184,11 +184,11 @@ test('le stockage qui refuse le JPEG converti : panne, RIEN n\'est effacé ni é
   assert.equal(requetes.filter(x => x.op === 'update' || x.op === 'delete').length, 0)
 })
 
-test('LE TEST QUI COMPTE (review HEIC, constat 2) : une PANNE du convertisseur (délai, fil planté) n\'est pas une photo illisible — 503, RIEN n\'est effacé', async () => {
-  for (const erreur of [new PanneConversion('delai'), new PanneConversion('fil_sorti_1'), new TypeError('inattendu')]) {
+test('LE TEST QUI COMPTE (review HEIC, constat 2) : une PANNE du convertisseur (délai, fil planté, convertisseur pris) n\'est pas une photo illisible — 503, RIEN n\'est effacé ; « pris » se dit à part', async () => {
+  for (const [erreur, code] of [[new PanneConversion('delai'), 'conversion'], [new PanneConversion('fil_sorti_1'), 'conversion'], [new TypeError('inattendu'), 'conversion'], [new PanneConversion('occupe'), 'conversion_occupee']]) {
     const { client, requetes, gestes } = envoiHeic()
     const r = await charges.confirmerEnvoi(client, { compte: COMPTE, id: ID }, { convertir: async () => { throw erreur } })
-    assert.equal(r.statut, 503, erreur.message)
+    assert.deepEqual([r.statut, r.code], [503, code], erreur.message)
     assert.equal(gestes.filter(g => g.nom === 'remove' || g.nom === 'upload').length, 0, erreur.message)
     assert.equal(requetes.filter(x => x.op === 'update' || x.op === 'delete').length, 0, erreur.message)
   }

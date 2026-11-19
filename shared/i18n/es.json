@@ -479,6 +479,7 @@
   "charges.refus_entite_hors_compte": "Esta entidad ya no está en su cuenta. Recargue la página.",
   "charges.refus_entite_requise": "Elija la entidad de esta factura.",
   "charges.refus_fichier_absent": "El archivo no ha llegado. Vuelva a enviar la factura.",
+  "charges.refus_conversion_occupee": "El servidor ya está convirtiendo una foto: inténtelo de nuevo en un momento.",
   "charges.refus_conversion_impossible": "No se pudo convertir esta foto. Suba una captura de pantalla de la factura o guárdela en JPEG o PDF.",
   "charges.refus_image_illisible": "Este navegador no puede leer esta imagen. Suba una captura de pantalla de la factura o guárdela en JPEG o PDF.",
   "charges.refus_montant_invalide": "Un importe no es válido.",

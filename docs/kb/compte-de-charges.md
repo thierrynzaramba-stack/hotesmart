@@ -48,7 +48,10 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   convertir s'efface (422 `conversion_impossible`) ; une panne du stockage ou
   du convertisseur n'efface rien (503). ⚠ Le décodeur tourne dans un fil À
   USAGE UNIQUE (`convertirIsole`), jamais dans le fil principal : son tas
-  WebAssembly ne rétrécit jamais et fuyait sur les fichiers illisibles. Les types acceptés vivent à TROIS endroits (bucket, `TYPES`,
+  WebAssembly ne rétrécit jamais et fuyait sur les fichiers illisibles. Un
+  fil à la fois par instance, deux en attente, et UNE photo à la fois par
+  compte (sinon un seul compte tenait la file de tous) ; un convertisseur pris
+  rend « réessayez dans un instant » (503 `conversion_occupee`). Les types acceptés vivent à TROIS endroits (bucket, `TYPES`,
   `TYPES_ACCEPTES`) que `tests/charges-migration-heic.test.js` compare.
 - **Une période dure au plus TROIS ANS** (1 097 jours, date de fin comprise ; Thierry, 19 novembre
   2026 — un an au lot 7a). La même borne en trois endroits : la contrainte
