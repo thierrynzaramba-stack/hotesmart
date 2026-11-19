@@ -70,3 +70,14 @@ test('LE CONTRÔLE LIT LES DÉFINITIONS, PAS LES NOMS (seconde review, mineur 4)
   assert.match(c, /grantee in \('anon', 'authenticated', 'public'\)/, 'un droit donné à public')
   assert.match(c, /d like '%on delete cascade'/, 'une clé sans cascade')
 })
+
+test('LE CONTRÔLE COMPARE LES EMPREINTES EXACTES (troisième review, mineur 2) : contraintes, corps et type du trigger, droits de colonne', () => {
+  const c = aplati(controle)
+  // Mesuré sur une copie de la base : chacun de ces sabotages passait le contrôle d'avant.
+  for (const h of ['b32b329722f287c71a7424ba1d68b3ba', '3f13ed332e09a83b2a7cbeba7de5bec0', '45a20f50f217aad61cb7da9d31fe7fc1', 'de8369922fa82f897e0a972503699ee6']) assert.ok(c.includes(h), `empreinte ${h}`)
+  assert.match(c, /md5\(replace\(d, ' ', ''\)\) = case conname/, 'la définition entière, pas un fragment')
+  assert.match(c, /t\.tgtype = 23/, 'ligne, avant, insert ET update')
+  assert.match(c, /md5\(f\.prosrc\) = '050a3d486895d2963751719ceeee2252'/, 'le corps de la fonction du trigger')
+  assert.match(c, /from information_schema\.column_privileges/, 'un droit de colonne')
+  assert.match(c, /count\(\*\) filter \(where md5/, 'les quatre contraintes comptées')
+})

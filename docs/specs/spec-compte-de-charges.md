@@ -3142,6 +3142,185 @@ PDF chiffré était déjà refusé (`flux_illisible`). Le plafond d'imports refu
 par compte et par jour reste en dette : chaque essai coûte désormais au plus
 20 s et 512 Mo, une fois, sur une instance.
 
+#### Troisième review du lot crédit, limitée au dernier correctif (19 novembre 2026)
+
+**Exception décidée par Thierry**, transmise par le chef de file à 10:00 : UNE
+review de plus, limitée à `beaa9ecdfc60d9136cb615524045bb5aaabdee9a..e0d4040390db907308bfd2ea6dfffec18af41636`,
+sur `/home/claude/hotesmart-credit`. Ce qu'elle trouve se corrige sans nouvelle
+review. Arbre lu `/home/claude/hotesmart-credit`, tête lue `e0d4040390db907308bfd2ea6dfffec18af41636` ;
+les fichiers qu'elle cite sont ceux du diff (elle nomme `importerCredit` et
+`confirmerEnvoi`, hors du diff, par leur fonction seulement, pour le contexte).
+
+Verbatim :
+
+````
+Arbre lu : `/home/claude/hotesmart-credit`, branche `charges-credit`, et je ne l'ai pas modifié (`git status --short` est vide).
+Tête lue : `e0d4040390db907308bfd2ea6dfffec18af41636`.
+
+`git diff --name-only beaa9ecdfc60d9136cb615524045bb5aaabdee9a..e0d4040390db907308bfd2ea6dfffec18af41636` :
+docs/kb/compte-de-charges.md
+docs/specs/spec-compte-de-charges.md
+lib/charges/credit-tableau-fil.js
+lib/charges/credit-tableau.js
+lib/charges/fil-isole.js
+lib/charges/heic-fil.js
+lib/charges/heic.js
+migrations/2026-11-19-controle-charges-credits.sql
+tests/charges-credit-tableau.test.js
+tests/charges-fil-isole.test.js
+tests/charges-heic.test.js
+tests/charges-migration-credits.test.js
+tests/charges-page.test.js
+tests/fixtures/charges/enfant-tas-plein.js
+
+Je ne cite que ces fichiers. J'ai lu `importerCredit` et `confirmerEnvoi` pour le contexte seulement, et je les nomme par leur fonction.
+
+Le Postgres de `/tmp/pgcharges` ne tournait pas (connexion refusée), et je ne l'ai pas relancé. J'ai copié son répertoire de données, démarré la copie sur le port 54339, travaillé sur des bases `create database … template t14`, puis tout effacé.
+
+## SÉCURITÉ
+
+### S1 — Un seul compte tient la file commune, et ce diff étend le blocage aux photos HEIC
+- **Où** : `lib/charges/fil-isole.js:127-140` (`executer` ne connaît aucun compte), `lib/charges/credit-tableau.js:414-417` et `lib/charges/heic.js:187-199`.
+- **Réponse à ta question** : non, ni `importerCredit` ni `confirmerEnvoi` ne passent un compte à la file.
+- **Scénario mesuré** :
+  - Un PDF fictif de 13 710 octets (80 pages sur un même flux de 3,9 Mo d'opérateurs `q Q`) passe le pré-contrôle. Il tient l'enfant 20,0 s, jusqu'au refus `trop_long`, avec un pic de 102 Mo.
+  - Le compte A envoie trois de ces PDF en même temps. À 0,2 s, le compte B reçoit `occupe` (503) pour un tableau honnête, et `occupe` aussi pour une photo HEIC de 12 Mpx.
+  - A relance un envoi toutes les 2 s, B réessaie toutes les 5 s : sur 30 s, B ne passe qu'une fois, dans la seconde où les deux attentes de A ont expiré ensemble.
+- **Ce qui laisse durer l'attaque** :
+  - Un tableau refusé ne laisse aucune trace, et aucun plafond par jour n'existe (c'est la dette déjà notée).
+  - Côté photo, une conversion en panne laisse la ligne `envoi`, que l'on peut reconfirmer sans limite.
+- **Ce que la file commune change** : avant ce diff, un PDF piégé ne bloquait que les tableaux. Maintenant, il bloque aussi la conversion des photos de tous les hôtes de l'instance.
+- **Correction proposée** :
+  - `executer(file, { compte, … })` refuse `occupe` si ce compte a déjà une tâche en cours ou en attente (`file.compteEnCours`, ou `attente.some(t => t.compte === compte)`).
+  - Passer `compte` depuis `importerCredit` et `confirmerEnvoi` jusqu'à `lireTableauIsole` et `convertirIsole`.
+  - Ajouter un temps de repos par compte après un `trop_long` ou un `trop_lourd`.
+  - Limite : trois comptes peuvent encore remplir la file. Le plafond quotidien de la dette devient donc plus pressant.
+
+### S2 — L'enfant hérite de tout l'environnement, secrets compris
+- **Où** : `lib/charges/fil-isole.js:71-75`. Le `fork` est lancé sans option `env`.
+- **Mesure** : un enfant-sonde, lancé par le vrai `FilProcessus`, voit une variable témoin posée dans le parent. Il hérite de 235 variables, dont 14 dont le nom contient KEY, SECRET, TOKEN ou PASS dans ce bac à sable, et de `NODE_OPTIONS`. En production, ce seraient les clés du projet et celles du rôle AWS.
+- **Le risque** : cet enfant fait tourner pdf.js et libheif sur un fichier hostile, avec accès au réseau. Une faille d'exécution de code dans ces bibliothèques suffirait à exfiltrer les secrets.
+- **Ce qui n'est pas en cause** : je n'ai pas trouvé de chemin `new Function` ni d'option `isEvalSupported` dans le pdf.js embarqué par unpdf 2.2.1, donc pas la famille de faille CVE-2024-4367. C'est de la défense en profondeur, pas une faille exploitable aujourd'hui.
+- **Pas une régression** : un `worker_threads` recevait déjà une copie de `process.env`. Mais avec un processus, la correction coûte une ligne.
+- **Correction** : `env: {}` dans le `fork`. Mesuré avec ce correctif :
+  - l'enfant voit 0 variable ;
+  - le vrai tableau rend 301 lignes, la fixture tournée 15 ;
+  - la photo de 48 Mpx et la fixture `deux-couleurs.heic` se convertissent ;
+  - les 38 tests des trois fichiers restent verts.
+
+### S3 — Deux événements `error` sur le même enfant tuent le processus parent
+- **Où** : `lib/charges/fil-isole.js:77` (`this.enfant.once('error')`), `:81` (un second `emit('error')` à la sortie SIGABRT) et `:203` (`fil.once('error')`).
+- **Scénario** : l'enfant avorte au démarrage pendant que le parent écrit encore une grosse entrée. Le parent reçoit d'abord EPIPE, qui consomme l'écouteur `once`. Puis la sortie SIGABRT émet un second `error` que plus personne n'écoute. L'exception n'est pas rattrapée : la fonction tombe, avec toutes les requêtes en cours de tous les hôtes.
+- **Mesure** (utilisateur `nobody`, `ulimit -u 8`, l'enfant ne peut pas créer ses fils d'exécution et avorte) :
+
+| Taille de l'entrée | Résultat |
+|---|---|
+| 7 Mo, 10 Mo, 30 Mo | parent sorti en code 1, `Unhandled 'error' event … tas plein` |
+| 1 Ko, 300 Ko, 2 Mo, 5 Mo | pas de crash |
+
+- **Portée** : une photo HEIC peut faire 10 Mo, donc ce chemin est atteignable. Le déclencheur reste rare (ressources épuisées sur l'instance) et aucun hôte ne le maîtrise.
+- **Correction** : `on` au lieu de `once` aux lignes 77 et 203 (`finir` est déjà idempotent). Mesuré avec ce correctif : refus `fil_en_erreur` (write EPIPE), le parent reste vivant, et 38 tests sur 38 restent verts.
+
+## MINEUR
+
+1. **`fluxSousBorne` se contourne encore, mais la garde mémoire tient** (`lib/charges/credit-tableau.js:292`, `:306`).
+   - La cause : le `\s` de JavaScript n'est pas le blanc du lexeur de pdf.js. pdf.js tient NUL pour un blanc, JavaScript non ; JavaScript tient 0xA0 et `\v` pour des blancs, pdf.js non.
+   - Un NUL avant ou après le mot `stream`, autour d'une bombe Flate de 300 Mo : le pré-contrôle rend `null` (le témoin sans NUL, lui, rend `flux_trop_gros`). La lecture finit en `trop_lourd` en 1,3 à 1,4 s.
+   - Un faux `stream` précédé de 0xA0, que seul le pré-contrôle voit : son `/Length` saute par-dessus la vraie bombe. Rendu `null`, puis `trop_lourd` en 1,5 s.
+   - Correction : `[\0\t\n\f\r ]` au lieu de `\s` dans ces expressions (et dans celles de `/Filter` et `/Length`), plus deux tests.
+
+2. **Le contrôle SQL ne lit pas encore chaque garde-fou à sa définition** (`migrations/2026-11-19-controle-charges-credits.sql:43-57`, `:85-108`, `:110-124`, `:126-135`). Sur une copie de t14, ces sabotages laissent les 9 lignes à `t` :
+   - `charges_credit_ck` réduite à `origine <> 'credit' or credit_indice is not null`, ou à `credit_indice is not null or true` ;
+   - `charges_credit_fk` sans `user_id` (c'est la garde « même compte ») ;
+   - `charges_origine_ck` et `charges_categorie_ck` rendues permissives ;
+   - le trigger réduit à `before update` seul, ou sa fonction vidée (`return new`) ;
+   - un droit de colonne `grant select (id, …) to anon`. Celui-ci est sans effet tant que la RLS n'a aucune policy.
+   - Correction : comparer la définition entière (`replace(d, ' ', '')`), vérifier `tgtype = 23` (ligne, avant, insert et update, à confirmer sur une copie) et `pg_get_functiondef(tgfoid)`, et utiliser `has_any_column_privilege('anon', …)`. Toutes les lignes doivent rester sous 60 caractères.
+   - Le test du diff, lui, ne fait que lire le texte du fichier : remplacer `= 4` par `>= 0` à la ligne 52, ou `role_table_grants` par `column_privileges`, le laisse à 6 sur 6.
+
+3. **La garde ne voit plus rien quand la boucle du parent est bloquée** (`lib/charges/fil-isole.js:194-200`).
+   - Avec un enfant qui alloue aussi vite que possible : pic de 520 à 545 Mo pour une borne de 512 Mo, sur deux cœurs comme sur un seul.
+   - Boucle du parent bloquée 300 ms : 532 Mo. Bloquée 1 s : **826 Mo**.
+   - Option mesurée : la borne du noyau `RLIMIT_DATA` (`ulimit -d`), via `/bin/sh -c 'ulimit -d N; exec node …'`. À 600 Mo, les tampons sont refusés vers 500 Mo et la mémoire WebAssembly vers 544 Mo. Le vrai tableau se lit sous 600 Mo, et la photo de 48 Mpx se convertit sous 1,1 Go. À vérifier sur Vercel.
+   - Par ailleurs, si `/proc` est illisible sous Linux, la garde s'efface sans bloquer. Elle devrait plutôt refuser le travail.
+
+4. **Le classement SIGABRT est trop large** (`lib/charges/fil-isole.js:81`).
+   - Un tas plein donne `exit(code null, signal SIGABRT)` : la branche `code === 134` n'est jamais vraie avec un `fork`.
+   - Un enfant qui avorte faute de fils d'exécution (mesuré sous `ulimit -u 8`) est classé `memoire`. Pour un tableau, cela devient un 422 `trop_lourd` : on accuse le fichier.
+   - Proposition : garder les derniers octets de stderr, et ne conclure `memoire` que sur « heap out of memory ». Sinon, rendre une panne 503.
+
+5. **Quatre mutations survivent aux tests.**
+   - Retirer `--max-old-space-size` (`fil-isole.js:63`) laisse 38 sur 38. Le test « tas plein » (`tests/charges-fil-isole.test.js:123-132`) passe quand même, en 7,8 s au lieu de 4 s, rattrapé par sa borne de 4 Go.
+   - Retirer `memoireMax: MEMOIRE_CONVERSION` (`heic.js:198`) laisse 38 sur 38. Pourtant, mesuré : sous 512 Mo, la photo de 48 Mpx est refusée `memoire`, donc toute photo de 48 Mpx tomberait en 503.
+   - Retirer le gestionnaire `disconnect` (`credit-tableau-fil.js:13`) ne fait rien rougir.
+   - Le test SQL, comme dit au point 2, est purement textuel.
+
+6. **La marge des photos HEIC sous 1 Go est mince.** Pic de l'enfant : 785 Mo pour la vraie photo de 48 Mpx, 874 et 932 Mo pour deux photos fictives bruitées de 49 Mpx. Une photo légitime proche des 50 Mpx autorisés pourrait se heurter à la borne et rester en 503.
+
+7. **Des PDF honnêtes sont refusés (déjà le cas avant ce diff).**
+   - Les PDF protégés par un simple mot de passe propriétaire (ouverture libre, impression ou copie interdites), fréquents dans les banques : 12 fichiers sur 12 refusés `flux_illisible` (chiffrement RC4, AES-128 et AES-256, quatre générateurs). Pourtant pdf.js en lit les 60 lignes (3 fichiers essayés).
+   - Une image Flate de plus de 4 Mo une fois décompressée : logos fictifs de 1200×1200 et 2480×600 refusés `flux_trop_gros`.
+   - Dans les deux cas, l'hôte lit « tableau illisible ». Il faudrait au moins un motif propre (PDF protégé).
+
+8. **Des commentaires disent faux.**
+   - `credit-tableau.js:409-410` parle de « 512 Mo au-dessus de sa base », alors que le code compare la mémoire résidente totale de l'enfant.
+   - `fil-isole.js:115` parle encore de `parentPort`.
+   - `credit-tableau.js:33` déclare `maxYoungGenerationSizeMb`, que `FilProcessus` ignore.
+   - `fil-isole.js:68-69` affirme que l'enfant n'hérite pas des options du parent. C'est faux pour `NODE_OPTIONS`, même si `execArgv` l'emporte pour la taille du tas (304 Mo mesurés avec `NODE_OPTIONS=--max-old-space-size=3000`). L'enfant HEIC, qui n'a pas de borne de tas, hérite celle de `NODE_OPTIONS` (8 240 Mo dans ce bac à sable) ; la garde de 1 Go le couvre.
+
+## Vérifié sans constat
+
+- **Tests** : 38 sur 38 sur les trois fichiers fil, tableau et HEIC ; 106 sur 106 en ajoutant les tests de migration et de page.
+- **`fluxSousBorne` ne refuse aucun PDF honnête non chiffré.** Essayé sur Chrome, wkhtmltopdf, LibreOffice, ReportLab (trois variantes), pdfTeX et matplotlib, puis sur leurs versions avec flux d'objets et flux de références (qpdf), linéarisées, passées par pikepdf et par pdftk : tous rendent `null`. Les quatre PDF de fixtures aussi. Le vrai tableau rend `null` et se lit dans l'enfant : 301 lignes en 472 ms.
+- **Les 13 pièges de la revue précédente** donnent les mêmes verdicts que le tableau de l'auteur. v11 est refusé `trop_lourd`, pic de l'enfant mesuré à 525 Mo par `VmHWM` ; v12 prend 2,6 s.
+- **Ce qui marche comme annoncé, avec de vrais processus** :
+  - la garde mesure bien l'enfant (la mutation « mémoire du parent » fait rougir les tests) ;
+  - deux photos et deux tableaux demandés ensemble : un seul enfant vivant au plus, le quatrième travail reçoit `occupe`, aucun enfant ne reste ensuite ;
+  - parent tué par SIGKILL : l'enfant meurt en moins d'une seconde, sans zombie qui reste ;
+  - l'enfant ne reçoit que sa socket IPC et `/dev/null` : la socket d'écoute du parent et son `--inspect` ne passent pas ;
+  - aucune fausse alerte « garde inactive » sur 20 lectures.
+- **La réponse de l'enfant reste bornée en pratique.** Un PDF fictif de 80 pages de lignes valides rend 15 280 échéances : message de 2,4 Mo, et 13 Mo de plus seulement dans le parent. `importerCredit` refuse ensuite au-delà de 1 000.
+- **Rien n'est partagé entre comptes** : chaque tâche a son enfant et sa promesse.
+- **Contrôle SQL** :
+  - il rend 9 lignes à `t` sur une copie de t14 ;
+  - sa plus longue ligne fait 49 caractères, donc toutes restent sous 60 ;
+  - il détecte bien un trigger désactivé, un droit de table donné à anon ou à public, une RLS coupée, un index partiel, une somme `NOT VALID` et une clé d'échéance sans cascade.
+- **Les mutations qui mordent** : garde muette, réponse avant la mort de l'enfant, conversion en `occupe` après une attente, classement SIGABRT, file HEIC séparée, mesure du parent, `<` au lieu de `<=` dans l'écran, et sept mutations de `fluxSousBorne` (`inflateSync`, `/Length` ignoré, image hors d'une image, clé `/F`, filtre doublé, chaînes conservées, total).
+
+Fichiers de travail sous /tmp :
+- `/tmp/rv3c` : extraction de la tête, avec un lien vers `node_modules`.
+- `/tmp/rv3c-scripts` : sondes et mesures, dont `hwm.py`, `muter.js`, `accaparement.js`, `double-erreur.js`, `nul.js`, `env-vide.js`, et les fichiers `hwm-*.json`.
+- `/tmp/rv3c-gen` : générateurs (`lent.py`, `nul.py`, `masque.py`, `lignes.py`, `rl.py`, HTML et TeX).
+- `/tmp/rv3c-pdfs` : PDF honnêtes et pièges, tous fictifs.
+- `/tmp/rv3c-sql/mutations.sh` : les sabotages du contrôle SQL.
+- Effacés : la copie Postgres `/tmp/rv3c-pg` (serveur arrêté, bases `rv3c` et `rvm` supprimées), `/tmp/rv3c-mut`, `/tmp/rv3c-env`, `/tmp/rv3c-err`.
+
+Je n'ai recopié aucune donnée du vrai tableau, seulement son nombre de lignes et ses durées, et rien de ce rapport ne vient de la mémoire.
+````
+
+Corrigé sans nouvelle review, comme l'exception le prévoit (sur
+`charges-credit`, avec la fusion des correctifs de la troisième review HEIC,
+section suivante) :
+
+| Constat | Correction |
+|---|---|
+| S1 | **Un compte, une place** dans la file commune, en cours ou en attente, photo ou tableau : porté de la troisième review HEIC (section suivante) ; `importerCredit` et `confirmerEnvoi` passent le compte. **Et un repos** : un compte dont le travail vient d'être COUPÉ (délai entier, ou mémoire) attend 60 s avant d'en relancer un — « occupé », 503. Un refus du fichier lui-même (réponse normale de l'enfant) ne met pas au repos. Tests : clé en cours, clé en attente, photo et tableau du même compte, repos après un délai et après la mémoire, pas de repos après un refus du fichier. Ce qui reste, et c'est dit : trois comptes peuvent encore remplir la file ; le plafond d'imports refusés par compte et par jour devient plus pressant (dette). |
+| S2 | **L'enfant n'hérite que des variables du système** : `PATH`, `LD_LIBRARY_PATH`, `TZ`, `LANG`, `LC_ALL`, `HOME`, `TMPDIR` — ni secret, ni `NODE_OPTIONS`. Pas `env: {}` : le binaire Node de la plateforme peut avoir besoin de ses chemins pour démarrer, et sur Vercel ça ne se vérifie qu'en recette. Test : une variable témoin posée dans le parent n'arrive pas dans l'enfant, `NODE_OPTIONS` non plus, et l'enfant ne voit que la liste. |
+| S3 | `on` au lieu de `once`, dans `FilProcessus` et dans `lancer` ; l'envoi à l'enfant passe par un rappel d'erreur, et un envoi qui lève est une panne rendue, pas une promesse pendue (garde et minuteur arrêtés). Test : deux erreurs du même enfant, une seule réponse, le parent vivant. |
+| 1 | Le blanc du lexeur de pdf.js, `[\0\t\n\f\r ]`, partout dans le contrôle : mot `stream`, en-têtes d'objet, `/Filter`, `/Length`, `endstream`. Tests : un NUL avant `stream` laisse voir la bombe ; un faux `stream` après 0xA0 ne la fait plus sauter. |
+| 2 | Le contrôle compare les **empreintes exactes** (md5 de la définition sans espaces) des quatre contraintes, le **corps** de la fonction du trigger (`md5(prosrc)`) et son **type** (`tgtype = 23`), et lit aussi les **droits de colonne** (`column_privileges`). **Mesuré sur une copie de la base, un sabotage à la fois** : `charges_credit_ck` affaiblie (deux variantes), clé sans `user_id`, origines permissives → ligne 3 ; trigger réduit à `before update`, corps vidé, trigger désactivé → ligne 7 ; droit de colonne à `anon`, droit de table à `public` → ligne 8 ; sans sabotage, tout à `t`. Plus longue ligne : 49 caractères. ⚠ **Le contrôle est à rejouer sur staging** (il est en lecture seule) : les empreintes sont celles du Postgres local, et le format des définitions est le même que celui de staging (la ligne 5 l'a montré ce matin), mais c'est la base qui le prouve. Il est à jouer juste après la migration : une migration postérieure qui change la liste des catégories fera rendre `false` à la ligne 3, et c'est voulu. Le test du dépôt vérifie que le fichier porte ces empreintes. |
+| 3 | **Sous Linux, une mémoire illisible fait REFUSER le travail** (`garde_aveugle`, une panne : 503), après trois relevés muets d'un enfant vivant. Non fait : la borne du noyau (`ulimit -d`) pour le cas où la boucle du parent serait bloquée — elle passe par un `sh` intermédiaire qui ne se vérifie que sur Vercel ; noté en dette. |
+| 4 | L'enfant garde les 4 derniers Ko de son stderr. Un avortement n'est « mémoire » que si le stderr dit « heap out of memory » ; sinon c'est une panne (`fil_en_erreur`, 503), et le fichier n'est pas accusé. La branche `code === 134` est retirée. Et la sortie se conclut sur `exit` (avec 200 ms au plus pour le dernier mot du stderr), pas sur `close` — qui ne vient jamais si le canal a été coupé avant : trouvé par le test du `disconnect`. Tests : un enfant qui avorte sans tas plein rend `fil_en_erreur` ; le tas plein se lit dans le stderr (détail « tas plein »), ce qui fait aussi rougir le retrait de `--max-old-space-size`. |
+| 5 | Trois des quatre mutations mordent : tas (l'enfant rend la borne de son tas : moins de 200 Mo pour 64 demandés), borne HEIC (une photo à 912 Mo passe, sous la borne d'un tableau elle serait tuée), contrôle SQL (empreintes). ⚠ **La quatrième, le `disconnect`, reste vivante, et c'est expliqué** : un enfant AU REPOS part de lui-même quand le canal se ferme, gestionnaire ou pas — plus rien ne tient sa boucle. Le gestionnaire ne servirait qu'à un enfant OCCUPÉ, et ce n'est pas prouvé : pdf.js ne rend peut-être pas la main aux événements pendant une lecture. Il reste, il ne coûte rien ; le test vérifie ce qui est vrai (l'enfant part, et la sortie se conclut). Les quatorze mutations des correctifs de cette review, une par une : treize rougissent. |
+| 6 | Borne d'une photo portée à **1,25 Go** (était 1 Go). Le parent et 1,25 Go tiennent sous les 2 Go d'une fonction, un seul enfant vivant à la fois. |
+| 7 | **Un PDF chiffré n'est pas contrôlé, il est laissé à la garde** : ses flux ne se décompressent qu'après déchiffrement, et pdf.js l'ouvre sans mot de passe. **Une image n'est jamais décompressée** par le contrôle : pdf.js ne la décode pas pour lire le texte. Mesuré : `chrome-chiffre-rc4.pdf` (fictif) se lit, 60 échéances ; les 12 PDF chiffrés et les 3 logos de la review passent le contrôle ; une nouvelle fixture, `tableau-tourne-protege.pdf` (la fixture tournée passée par `qpdf --encrypt "" "proprietaire-fictif" 256`), rend les MÊMES échéances que l'original. Ce qui reste : une bombe déguisée en image, ou logée dans un PDF chiffré, passe le contrôle — la garde la tient (v11 refusé `trop_lourd`, pic 554 Mo). |
+| 8 | Commentaires corrigés : « 512 Mo de mémoire résidente pour tout l'enfant » ; le script enfant reçoit par `process.on('message')` ; `maxYoungGenerationSizeMb` retiré (ignoré) ; l'enfant n'hérite plus de `NODE_OPTIONS`, et le commentaire le dit. |
+
+**Mesures après correction**, `lireTableauIsole` réel : vrai tableau, 301
+échéances en 418 ms, pic 126 Mo ; v11, `trop_lourd` en 1,3 s, pic 554 Mo ;
+NUL avant `stream`, refusé `flux_trop_gros` en 61 ms. Photo de 48 Mpx :
+convertie en 3,6 s, pic 763 Mo.
+
 #### Les correctifs de la troisième review HEIC, portés dans la file commune (19 novembre 2026)
 
 La troisième review HEIC (§14.19) a été faite sur la file HEIC à part

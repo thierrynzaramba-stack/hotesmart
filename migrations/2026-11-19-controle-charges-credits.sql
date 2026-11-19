@@ -3,7 +3,13 @@
 -- Chaque ligne doit dire ok = true (la 9 ne
 -- fait que compter). Chaque garde-fou est
 -- lu a sa DEFINITION, pas a son nom (seconde
--- review, mineur 4).
+-- review, mineur 4) ; les contraintes et le
+-- corps du trigger a leur empreinte exacte
+-- (troisieme review, mineur 2). A jouer
+-- juste apres la migration : une migration
+-- posterieure qui change la liste des
+-- categories ou des origines fera rendre
+-- false a la ligne 3, et c'est voulu.
 -- Puis jouer scripts/oracle-resume-charges.sql :
 -- ecarts = 0.
 with k as (
@@ -41,16 +47,19 @@ where table_schema = 'public'
 union all
 select '3 contraintes a leur definition',
   count(*) filter (where
-    (conname = 'charges_origine_ck'
-      and d like '%''credit''%')
-    or (conname = 'charges_categorie_ck'
-      and d like '%''credit''%')
-    or (conname = 'charges_credit_ck'
-      and d like '%credit_indice is not null%')
-    or (conname = 'charges_credit_fk'
-      and d like '%on delete cascade%'))
-    = 4 and bool_and(v),
-  string_agg(conname, ', ')
+    md5(replace(d, ' ', '')) = case conname
+      when 'charges_origine_ck' then
+        'b32b329722f287c71a7424ba1d68b3ba'
+      when 'charges_categorie_ck' then
+        '3f13ed332e09a83b2a7cbeba7de5bec0'
+      when 'charges_credit_ck' then
+        '45a20f50f217aad61cb7da9d31fe7fc1'
+      when 'charges_credit_fk' then
+        'de8369922fa82f897e0a972503699ee6'
+    end) = 4 and bool_and(v),
+  string_agg(conname || ' '
+    || left(md5(replace(d, ' ', '')), 8),
+    ', ')
 from k
 where conname in ('charges_origine_ck',
   'charges_categorie_ck', 'charges_credit_ck',
@@ -108,12 +117,17 @@ select '6 cles et colonnes des credits',
   'cles etrangeres, unicite, colonnes'
 union all
 select '7 trigger actif, empreinte unique',
-  (select count(*) from pg_trigger
-    where tgname =
+  (select count(*) from pg_trigger t
+    join pg_proc f on f.oid = t.tgfoid
+    where t.tgname =
       'charges_credits_bien_compte_trg'
-      and tgrelid =
+      and t.tgrelid =
         'public.charges_credits'::regclass
-      and tgenabled = 'O') = 1
+      and t.tgenabled = 'O'
+      and t.tgtype = 23
+      and md5(f.prosrc) =
+        '050a3d486895d2963751719ceeee2252')
+    = 1
   and (select count(*) from pg_indexes
     where indexname =
       'charges_credits_empreinte_uidx'
@@ -121,15 +135,21 @@ select '7 trigger actif, empreinte unique',
         'create unique index%'
       and indexdef ilike '%(user_id, '
         || 'justificatif_empreinte)%') = 1,
-  'trigger O, index unique'
+  'trigger O, ligne avant ins./maj., corps'
 union all
 select '8 aucun droit : anon, auth., public',
   count(*) = 0,
   coalesce(string_agg(grantee || ' '
     || table_name, ', '), 'aucun')
-from information_schema.role_table_grants
-where table_schema = 'public'
-  and table_name in ('charges_credits',
+from (
+  select grantee, table_name
+  from information_schema.role_table_grants
+  where table_schema = 'public'
+  union all
+  select grantee, table_name
+  from information_schema.column_privileges
+  where table_schema = 'public') g
+where table_name in ('charges_credits',
     'charges_credit_echeances')
   and grantee in ('anon', 'authenticated',
     'PUBLIC')
