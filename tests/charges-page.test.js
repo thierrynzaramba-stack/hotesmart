@@ -792,3 +792,97 @@ test('une seule vue : la fiche plein écran et les totaux sous « À traiter » 
   assert.match(bloc, /\.chg-chiffre--fort \{ grid-column: 1 \/ -1; \}/)
   assert.ok(!/#[0-9A-Fa-f]{3,6}\b/.test(bloc), 'aucun hexa hors de theme.css')
 })
+
+// ─── Les crédits (§14.20) ───────────────────────────────────────────────────
+const CREDIT_ID = '99999999-9999-4999-8999-999999999999'
+const UN_CREDIT = {
+  liste: [{ id: CREDIT_ID, entite_juridique_id: ENT, bien_id: null, preteur: 'Banque Exemple', nb_echeances: 301, premiere_echeance: '2022-02-22', derniere_echeance: '2047-02-22', cree_le: '2026-11-19T01:00:00Z' }],
+  echeances: [{ credit_id: CREDIT_ID, date_echeance: '2026-11-22', interets_cents: 30160, assurance_cents: 10125, accessoires_cents: 0, capital_cents: 83258, echeance_cents: 123543, capital_restant_cents: 25000000 }]
+}
+
+test('LE TEST QUI COMPTE (§14.20) : sous le mois, la mensualité ENTIÈRE payée, capital compris — et le crédit dans son bloc', async () => {
+  const b = await monter({ ecran: () => reponseEcran({ credits: UN_CREDIT }) })
+  try {
+    const mois = texte(b.$('[data-bind="totaux"] .chg-rep__credit'))
+    assert.match(mois, /Crédit, mensualité payée/)
+    assert.match(mois, /1\s?235,43\s?€/)
+    assert.match(mois, /dont 832,58\s?€ de capital/)
+    const bloc = texte(b.$('[data-bind="credits"]'))
+    assert.match(bloc, /Banque Exemple/)
+    assert.match(bloc, /Tous les logements de l'entité/)
+    assert.match(bloc, /301 échéances, du 22 févr\. 2022 au 22 févr\. 2047/)
+    assert.equal(b.lecturesEcran().length, 1, 'toujours un seul appel au chargement')
+  } finally { b.fermer() }
+})
+
+test('sans crédit, le bloc invite à en ajouter un ; sans lecture, il dit « indisponible », jamais « aucun »', async () => {
+  const vide = await monter()
+  try { assert.match(texte(vide.$('[data-bind="credits"]')), /Aucun crédit/) } finally { vide.fermer() }
+  const panne = await monter({ ecran: () => reponseEcran({ credits: null }) })
+  try { assert.match(texte(panne.$('[data-bind="credits"]')), /indisponibles/) } finally { panne.fermer() }
+})
+
+test('LE TEST QUI COMPTE : importer un crédit envoie le PDF en base64 avec la banque et l\'entité, puis relit l\'écran', async () => {
+  const gestes = []
+  const geste = (corps) => {
+    gestes.push(corps)
+    return { ok: true, credit: { id: CREDIT_ID, nb_echeances: 301, premiere_echeance: '2022-02-22', derniere_echeance: '2047-02-22' }, charges: 57 }
+  }
+  const b = await monter({ geste })
+  try {
+    await b.cliquer(b.$('[data-geste="credit-ajouter"]'))
+    const fichier = b.$('[data-credit-champ="fichier"]')
+    Object.defineProperty(fichier, 'files', { value: [new b.w.File(['%PDF-1.4 tableau'], 'tableau.pdf', { type: 'application/pdf' })], configurable: true })
+    b.saisir(b.$('[data-credit-champ="preteur"]'), 'Banque Exemple')
+    assert.equal(b.$('[data-credit-champ="entite"]').value, ENT, 'la seule entité active est choisie')
+    assert.match(texte(b.$('[data-credit-champ="bien"]')), /Tous les logements de l'entité/)
+    await b.cliquer(b.$('[data-geste="credit-importer"]'))
+    for (let i = 0; i < 10; i++) await b.attendre()
+    assert.deepEqual(gestes, [{ action: 'credit_importer', fichier: Buffer.from('%PDF-1.4 tableau').toString('base64'), preteur: 'Banque Exemple', entite_id: ENT, bien_id: null }])
+    assert.equal(b.lecturesEcran().length, 2, 'l\'écran est relu : les charges et la ligne du mois apparaissent')
+    assert.match(texte(b.$('[data-bind="credits"]')), /301 échéances lues.*Les 57 mensualités déjà passées sont dans vos charges/)
+    assert.equal(b.$('[data-bind="credit-form"]'), null, 'le formulaire se referme')
+  } finally { b.fermer() }
+})
+
+test('une ligne du tableau qui ne se prouve pas est NOMMÉE par sa date ; rien ne part sans fichier ni banque', async () => {
+  const geste = () => { throw Object.assign(new Error('x'), { status: 422, error: 'ligne_incoherente', detail: '2023-06-22' }) }
+  const b = await monter({ geste })
+  try {
+    await b.cliquer(b.$('[data-geste="credit-ajouter"]'))
+    await b.cliquer(b.$('[data-geste="credit-importer"]'))
+    assert.match(texte(b.$('[data-bind="credit-retour"]')), /Choisissez le tableau/)
+    const fichier = b.$('[data-credit-champ="fichier"]')
+    Object.defineProperty(fichier, 'files', { value: [new b.w.File(['%PDF'], 't.pdf', { type: 'application/pdf' })], configurable: true })
+    await b.cliquer(b.$('[data-geste="credit-importer"]'))
+    assert.match(texte(b.$('[data-bind="credit-retour"]')), /Indiquez la banque/)
+    assert.deepEqual(b.gestes(), [])
+    b.saisir(b.$('[data-credit-champ="preteur"]'), 'Banque')
+    await b.cliquer(b.$('[data-geste="credit-importer"]'))
+    for (let i = 0; i < 10; i++) await b.attendre()
+    assert.match(texte(b.$('[data-bind="credit-retour"]')), /La ligne du 22 juin 2023 ne se vérifie pas/)
+  } finally { b.fermer() }
+})
+
+test('supprimer un crédit demande confirmation, puis relit l\'écran', async () => {
+  const b = await monter({ ecran: () => reponseEcran({ credits: UN_CREDIT }) })
+  try {
+    await b.cliquer(b.$('[data-geste="credit-supprimer"]'))
+    assert.match(b.journal.confirmations[0], /Supprimer ce crédit/)
+    assert.deepEqual(b.gestes(), [{ action: 'credit_supprimer', id: CREDIT_ID }])
+    assert.equal(b.lecturesEcran().length, 2)
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE : la fiche d\'une échéance de crédit se LIT — champs figés, ni Valider, ni Supprimer, ni Voir', async () => {
+  const echeance = facture(21, { origine: 'credit', categorie: 'credit', fournisseur_nom: 'Banque Exemple', numero_facture: null, montant_ht_cents: 40285, montant_tva_cents: 0, montant_ttc_cents: 40285 })
+  const b = await monter({ ecran: () => reponseEcran({ liste: [echeance] }) })
+  try {
+    await b.cliquer(b.$(`[data-ouvrir="${echeance.id}"]`))
+    const f = b.$('[data-bind="fiche"]')
+    assert.ok([...f.querySelectorAll('[data-champ]')].every(c => c.disabled))
+    for (const g of ['valider', 'supprimer', 'voir']) assert.equal(f.querySelector(`[data-geste="${g}"]`), null, g)
+    assert.match(texte(f), /Mensualité d'un crédit/)
+    assert.equal(f.querySelector('[data-champ="categorie"]').value, 'credit', 'sa catégorie s\'affiche, même hors de la liste fermée')
+  } finally { b.fermer() }
+})

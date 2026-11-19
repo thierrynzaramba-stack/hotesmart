@@ -19,6 +19,10 @@
 // Les types que le serveur accepte (lib/charges/regles.js, TYPES) : la même
 // borne ici évite d'envoyer ce qui sera refusé — elle ne remplace pas la garde
 // du serveur.
+// Le tableau d'amortissement d'un crédit (§14.20) : un PDF, 2 Mo au plus — la
+// borne du serveur (`CREDIT_PDF_MAX`, lib/charges.js).
+export const CREDIT_PDF_MAX = 2 * 1024 * 1024
+
 export const TYPES_ACCEPTES = {
   'application/pdf': 10 * 1024 * 1024,
   'image/jpeg': 7 * 1024 * 1024,
@@ -190,7 +194,8 @@ export function monter (racine, deps) {
     entite: 'toutes', periode: '',
     aTraiter: { lignes: [], nombre: 0 }, liste: [], suite: null,
     entites: [], biens: [], biensArchives: [], categories: [], totaux: null,
-    fiche: null, occupe: false, envoiEnCours: false, ficheEnCours: false
+    fiche: null, occupe: false, envoiEnCours: false, ficheEnCours: false,
+    credits: null, creditForm: false, creditEnCours: false, creditRetour: null
   }
 
   // ─── Les noms ────────────────────────────────────────────────────────────
@@ -276,7 +281,7 @@ export function monter (racine, deps) {
     `<span class="chg-lecture"><small>${esc(t('charges.etale'))}</small><b>${parLecture(etale, nbEtale)}</b></span>`
     + `<span class="chg-lecture chg-lecture--date"><small>${esc(t('charges.a_la_date'))}</small><b>${parLecture(date, nbDate)}</b></span>`
 
-  function repartition (titre, toutes, nom) {
+  function repartition (titre, toutes, nom, apres = () => '') {
     // ⚠ UNE LIGNE SANS FACTURE COMPTÉE, NI À SA DATE NI ÉTALÉE, NE S'AFFICHE
     // PAS : son montant n'est pas « non lu », il est écarté (un doublon non
     // tranché, une facture en lecture). Il est déjà dit par « N à vérifier » /
@@ -284,8 +289,30 @@ export function monter (racine, deps) {
     const lignes = (toutes || []).filter(r => Number(r.nb_factures) > 0 || Number(r.nb_etale) > 0)
     if (!lignes.length) return ''
     return `<section class="chg-rep"><h3 class="chg-h3">${esc(titre)}</h3><ul>`
-      + lignes.map(r => `<li><span class="chg-rep__nom">${esc(nom(r.cle))}</span>${deuxLectures(r.ttc_etale, r.nb_etale, r.ttc, r.nb_factures)}</li>`).join('')
+      + lignes.map(r => `<li><span class="chg-rep__nom">${esc(nom(r.cle))}</span>${deuxLectures(r.ttc_etale, r.nb_etale, r.ttc, r.nb_factures)}</li>` + apres(r)).join('')
       + '</ul></section>'
+  }
+
+  // ⚠ LA LIGNE « CRÉDIT » D'UN MOIS (§14.20, demande de Thierry : « avoir une
+  // vue sur les décaissements mensuels ») : la mensualité ENTIÈRE qui sort du
+  // compte, capital compris. Le capital n'est pas une charge — il n'entre dans
+  // aucun total — ; il se lit ici, à côté, sans rien y ajouter.
+  function decaissesParMois () {
+    const m = new Map()
+    for (const e of (etat.credits && etat.credits.echeances) || []) {
+      const k = String(e.date_echeance || '').slice(0, 7)
+      const x = m.get(k) || { echeance: 0, capital: 0 }
+      x.echeance += Number(e.echeance_cents) || 0
+      x.capital += Number(e.capital_cents) || 0
+      m.set(k, x)
+    }
+    return m
+  }
+  const ligneCreditDuMois = (parMois) => (r) => {
+    const c = parMois.get(String(r.cle || '').slice(0, 7))
+    if (!c) return ''
+    return `<li class="chg-rep__credit"><span class="chg-rep__nom">${esc(t('charges.credit_decaisse'))}</span>`
+      + `<span class="chg-credit-mois"><b>${montant(c.echeance)}</b><small>${esc(t('charges.dont_capital', { montant: fmtMontant.format(c.capital / 100) }))}</small></span></li>`
   }
 
   function peindreTotaux () {
@@ -330,7 +357,7 @@ export function monter (racine, deps) {
           + '</div>'
           + ligneMentions
           + '<div class="chg-reps">'
-          + repartition(t('charges.par_mois'), tot.par_mois, moisLisible)
+          + repartition(t('charges.par_mois'), tot.par_mois, moisLisible, ligneCreditDuMois(decaissesParMois()))
           + repartition(t('charges.par_categorie'), tot.par_categorie, nomCategorie)
           + repartition(t('charges.par_bien'), tot.par_bien, (id) => (id ? (nomBien(id) || t('charges.sans_bien')) : t('charges.sans_bien')))
           + '</div>'
@@ -349,7 +376,116 @@ export function monter (racine, deps) {
       + (etat.suite ? `<button type="button" class="btn btn--secondary chg-plus" data-geste="plus">${esc(t('charges.afficher_plus'))}</button>` : '')
   }
 
-  function peindre () { peindreATraiter(); peindreTotaux(); peindreListe() }
+  // ─── Les crédits (§14.20) ────────────────────────────────────────────────
+  function formulaireCredit () {
+    const actives = entitesActives()
+    const choisie = actives.length === 1 ? String(actives[0].id) : ''
+    return '<form class="chg-form chg-credit-form" data-bind="credit-form" novalidate>'
+      + `<p class="chg-note">${esc(t('charges.credit_aide'))}</p>`
+      + champ('credit_fichier', t('charges.credit_tableau'), '<input type="file" accept="application/pdf,.pdf" data-credit-champ="fichier">')
+      + champ('credit_preteur', t('charges.credit_preteur'), '<input type="text" maxlength="120" autocomplete="off" data-credit-champ="preteur">')
+      + champ('credit_entite', t('charges.champ_entite'), `<select data-credit-champ="entite"><option value="">${esc(t('charges.choisir'))}</option>`
+        + actives.map(x => `<option value="${esc(x.id)}"${String(x.id) === choisie ? ' selected' : ''}>${esc(nomEntite(x))}</option>`).join('') + '</select>')
+      + champ('credit_bien', t('charges.champ_bien'), `<select data-credit-champ="bien">${optionsBiensCredit(choisie)}</select>`, true)
+      + '<div class="chg-alerte__gestes">'
+      + `<button type="button" class="btn btn--primary" data-geste="credit-importer">${esc(t('charges.credit_importer'))}</button>`
+      + `<button type="button" class="btn btn--secondary" data-geste="credit-annuler">${esc(t('charges.annuler'))}</button>`
+      + '</div></form>'
+  }
+  // Sans logement choisi, le crédit vaut pour toute l'entité (les logements
+  // qu'il finance ensemble, comme une facture qui couvre deux logements).
+  const optionsBiensCredit = (entiteId) => optionsBiens(entiteId, null)
+    .replace(`>${esc(t('charges.aucun_bien'))}<`, `>${esc(t('charges.credit_tous_biens'))}<`)
+
+  function peindreCredits () {
+    const z = $('[data-bind="credits"]')
+    if (!z) return
+    const tete = `<div class="chg-bloc__tete"><h2 class="chg-h2">${esc(t('charges.credits'))}</h2>`
+      + (etat.creditForm ? '' : `<button type="button" class="btn btn--secondary" data-geste="credit-ajouter">${esc(t('charges.credit_ajouter'))}</button>`)
+      + '</div>'
+    const cr = etat.credits
+    let corps
+    if (!cr) corps = `<p class="muted">${esc(t('charges.credits_indispo'))}</p>`
+    else if (!cr.liste.length) corps = etat.creditForm ? '' : `<p class="muted">${esc(t('charges.credits_vide'))}</p>`
+    else {
+      corps = '<ul class="chg-credits">' + cr.liste.map(c => {
+        const ent = etat.entites.find(e => String(e.id) === String(c.entite_juridique_id))
+        const ou = [ent ? nomEntite(ent) : '', c.bien_id ? nomBien(c.bien_id) : t('charges.credit_tous_biens')].filter(Boolean).join(' · ')
+        return '<li class="chg-credit"><span class="chg-credit__qui">'
+          + `<b>${esc(c.preteur)}</b><span class="chg-ligne__infos">${esc(ou)}</span>`
+          + `<span class="chg-ligne__infos">${esc(t('charges.credit_echeances', { n: c.nb_echeances, debut: jourLisible(c.premiere_echeance), fin: jourLisible(c.derniere_echeance) }))}</span></span>`
+          + `<button type="button" class="btn btn--secondary chg-danger" data-geste="credit-supprimer" data-credit="${esc(c.id)}">${esc(t('charges.supprimer'))}</button></li>`
+      }).join('') + '</ul>'
+    }
+    const retour = etat.creditRetour
+    z.innerHTML = tete + (etat.creditForm ? formulaireCredit() : '')
+      + `<p class="${retour && retour.erreur ? 'chg-erreur' : 'chg-note'}" data-bind="credit-retour" role="status">${esc(retour ? retour.texte : '')}</p>`
+      + corps
+  }
+
+  function retourCredit (texte, erreur = false) {
+    etat.creditRetour = texte ? { texte, erreur } : null
+    const p = $('[data-bind="credit-retour"]')
+    if (p) { p.textContent = texte || ''; p.className = erreur ? 'chg-erreur' : 'chg-note' }
+  }
+
+  // Le PDF part en base64 dans le corps du geste (2 Mo au plus) : un tableau
+  // d'amortissement pèse quelques centaines de Ko.
+  const enBase64 = (f) => new Promise((ok, ko) => {
+    const r = new Lecteur()
+    r.onload = () => ok(String(r.result).replace(/^data:[^,]*,/, ''))
+    r.onerror = () => ko(r.error || new Error('lecture'))
+    r.readAsDataURL(f)
+  })
+
+  async function importerCredit () {
+    if (etat.creditEnCours) return
+    const champCredit = (k) => $(`[data-credit-champ="${k}"]`)
+    const f = champCredit('fichier') && champCredit('fichier').files && champCredit('fichier').files[0]
+    const preteur = (champCredit('preteur').value || '').trim()
+    const entite = champCredit('entite').value
+    const bien = champCredit('bien').value
+    if (!f) { retourCredit(t('charges.credit_fichier_requis'), true); return }
+    if (typeDuFichier(f) !== 'application/pdf') { retourCredit(t('charges.credit_pdf_seul'), true); return }
+    if (f.size > CREDIT_PDF_MAX) { retourCredit(t('charges.refus_trop_gros'), true); return }
+    if (!preteur) { retourCredit(t('charges.refus_preteur_requis'), true); return }
+    if (!entite) { retourCredit(t('charges.refus_entite_requise'), true); return }
+    etat.creditEnCours = true
+    const bouton = $('[data-geste="credit-importer"]')
+    if (bouton) bouton.disabled = true
+    retourCredit(t('charges.credit_lecture'))
+    try {
+      const fichier = await enBase64(f)
+      const r = await deps.agir({ action: 'credit_importer', fichier, preteur, entite_id: entite, bien_id: bien || null })
+      etat.creditForm = false
+      const c = (r && r.credit) || {}
+      etat.creditRetour = { texte: t('charges.credit_importe', { n: c.nb_echeances, charges: r.charges, debut: jourLisible(c.premiere_echeance), fin: jourLisible(c.derniere_echeance) }), erreur: false }
+      await recharger()
+    } catch (e) {
+      // ⚠ UNE LIGNE QUI NE SE PROUVE PAS SE NOMME par sa date : l'hôte la
+      // retrouve dans son tableau.
+      retourCredit(e && e.code === 'ligne_incoherente' && e.detail
+        ? t('charges.refus_ligne_incoherente', { date: jourLisible(e.detail) })
+        : messageErreur(e), true)
+    } finally {
+      etat.creditEnCours = false
+      const b = $('[data-geste="credit-importer"]')
+      if (b) b.disabled = false
+    }
+  }
+
+  async function supprimerCredit (id) {
+    if (!id || !deps.confirmer(t('charges.credit_confirmer_suppression'))) return
+    try {
+      await deps.agir({ action: 'credit_supprimer', id })
+      etat.creditRetour = { texte: t('charges.credit_supprime'), erreur: false }
+      await recharger()
+    } catch (e) {
+      retourCredit(messageErreur(e), true)
+    }
+  }
+
+  function peindre () { peindreATraiter(); peindreTotaux(); peindreCredits(); peindreListe() }
 
   // ─── Les lectures ────────────────────────────────────────────────────────
   function appliquer (d) {
@@ -361,6 +497,7 @@ export function monter (racine, deps) {
     etat.biensArchives = (d && d.biens_archives) || []
     etat.categories = (d && d.categories) || []
     etat.totaux = (d && d.totaux) || null
+    etat.credits = (d && d.credits) || null
     if (etat.totaux && etat.totaux.periode) etat.periode = etat.totaux.periode
   }
 
@@ -468,7 +605,10 @@ export function monter (racine, deps) {
   function peindreFiche (c) {
     const e = etatDe(c)
     const ota = c.origine === 'ota'
-    const fige = ota ? ' disabled' : ''
+    // Une échéance de crédit vient de son tableau : elle se lit, elle ne se
+    // corrige pas ici (§14.20).
+    const credit = c.origine === 'credit'
+    const fige = ota || credit ? ' disabled' : ''
     const actives = entitesActives()
     // L'entité de la facture : celle qu'elle porte (même archivée), sinon la
     // seule entité active s'il n'y en a qu'une.
@@ -487,7 +627,7 @@ export function monter (racine, deps) {
       : ''
     const note = (e === 'panne' || e === 'plafond' || e === 'a_lire') ? t('charges.lecture_attente')
       : e === 'illisible' ? t('charges.illisible_aide')
-        : ota ? t('charges.commission_aide') : ''
+        : ota ? t('charges.commission_aide') : credit ? t('charges.credit_fiche_aide') : ''
     const verifiee = c.statut === 'validee' && c.valide_le ? `<p class="chg-verifiee">${esc(t('charges.validee_le', { date: jourLisible(c.valide_le) }))}</p>` : ''
     // ⚠ UN AVOIR SE SAISIT TEL QU'IMPRIMÉ (Q26) : le champ montre le montant
     // sans signe, et c'est le serveur qui le rend négatif.
@@ -522,7 +662,8 @@ export function monter (racine, deps) {
       + montantChamp('montant_ttc_cents', t('charges.champ_ttc'))
       + '</div>'
       + champ('categorie', t('charges.champ_categorie'), `<select data-champ="categorie"${fige}><option value="">${esc(t('charges.choisir'))}</option>`
-        + etat.categories.map(k => `<option value="${esc(k)}"${k === c.categorie ? ' selected' : ''}>${esc(nomCategorie(k))}</option>`).join('') + '</select>')
+        + [...etat.categories, ...(c.categorie && !etat.categories.includes(c.categorie) ? [c.categorie] : [])]
+          .map(k => `<option value="${esc(k)}"${k === c.categorie ? ' selected' : ''}>${esc(nomCategorie(k))}</option>`).join('') + '</select>')
       + (sansEntite ? '' : champ('entite_juridique_id', t('charges.champ_entite'), `<select data-champ="entite_juridique_id"${fige}><option value="">${esc(t('charges.choisir'))}</option>`
         + proposables.map(x => `<option value="${esc(x.id)}"${String(x.id) === String(entiteChoisie) ? ' selected' : ''}>${esc(nomEntite(x))}</option>`).join('') + '</select>'))
       + (sansEntite ? '' : champ('bien_id', t('charges.champ_bien'), `<select data-champ="bien_id"${fige}>${optionsBiens(entiteChoisie, c.bien_id)}</select>`, true))
@@ -530,9 +671,9 @@ export function monter (racine, deps) {
       + (sansEntite ? `<div class="chg-alerte"><p>${esc(t('charges.sans_entite'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>` : '')
       + '<p class="chg-erreur" data-bind="fiche-retour" role="status"></p>'
       + '</div><div class="chg-fiche__pied">'
-      + (ota || c.statut === 'sans_facture' ? '' : `<button type="button" class="btn btn--secondary" data-geste="voir">${esc(t('charges.voir'))}</button>`)
-      + `<button type="button" class="btn btn--secondary chg-danger" data-geste="supprimer">${esc(t('charges.supprimer'))}</button>`
-      + (ota || sansEntite ? '' : `<button type="button" class="btn btn--primary" data-geste="valider">${esc(t('charges.valider'))}</button>`)
+      + (ota || credit || c.statut === 'sans_facture' ? '' : `<button type="button" class="btn btn--secondary" data-geste="voir">${esc(t('charges.voir'))}</button>`)
+      + (credit ? '' : `<button type="button" class="btn btn--secondary chg-danger" data-geste="supprimer">${esc(t('charges.supprimer'))}</button>`)
+      + (ota || credit || sansEntite ? '' : `<button type="button" class="btn btn--primary" data-geste="valider">${esc(t('charges.valider'))}</button>`)
       + '</div>'
     // Entrée dans un champ ne doit ni fermer la fenêtre ni rien envoyer.
     dialogue().querySelector('[data-bind="fiche-form"]').addEventListener('submit', (ev) => ev.preventDefault())
@@ -734,11 +875,20 @@ export function monter (racine, deps) {
     else if (g === 'trancher') trancher()
     else if (g === 'supprimer') supprimer()
     else if (g === 'voir') voir()
+    else if (g === 'credit-ajouter') { etat.creditForm = true; etat.creditRetour = null; peindreCredits() }
+    else if (g === 'credit-annuler') { etat.creditForm = false; etat.creditRetour = null; peindreCredits() }
+    else if (g === 'credit-importer') importerCredit()
+    else if (g === 'credit-supprimer') supprimerCredit(el.dataset.credit)
   })
   racine.addEventListener('change', (ev) => {
     const el = ev.target
     if (el.dataset && el.dataset.choix === 'entite') { etat.entite = el.value; etat.periode = ''; recharger(); return }
     if (el.dataset && el.dataset.choix === 'periode') { etat.periode = el.value; recharger(); return }
+    if (el.dataset && el.dataset.creditChamp === 'entite') {
+      const b = $('[data-credit-champ="bien"]')
+      if (b) b.innerHTML = optionsBiensCredit(el.value)
+      return
+    }
     if (el.dataset && el.dataset.champ === 'type_document') {
       const aide = dialogue().querySelector('[data-bind="aide-type"]')
       if (aide) aide.textContent = aideType(el.value, etat.fiche)

@@ -294,3 +294,44 @@ test('LE TEST QUI COMPTE : les logements se lisent PAGE APRÈS PAGE — jamais t
   assert.equal(r.rep.corps.biens.length, 1001)
   assert.ok(r.rep.corps.biens.some(b => b.nom === 'Le dernier'))
 })
+
+// ─── Les crédits (§14.20) ───────────────────────────────────────────────────
+const CREDIT_A = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+test('LE TEST QUI COMPTE (§14.20) : l\'écran sert les crédits du COMPTE et leurs échéances de la PÉRIODE — deux lectures, dans le même appel', async () => {
+  const r = await appeler({
+    repondre: (q) => {
+      if (q.table === 'charges_credits') return { data: [{ id: CREDIT_A, user_id: TITULAIRE, entite_juridique_id: ENT_A, preteur: 'Banque' }] }
+      if (q.table === 'charges_credit_echeances') return { data: [{ credit_id: CREDIT_A, user_id: TITULAIRE, date_echeance: '2026-11-22', echeance_cents: 123543, capital_cents: 83258 }] }
+      return { data: [], count: 0 }
+    }
+  })
+  assert.equal(r.rep.statut, 200)
+  assert.equal(r.rep.corps.credits.liste[0].id, CREDIT_A)
+  assert.equal(r.rep.corps.credits.echeances[0].echeance_cents, 123543)
+  const c = r.requetes.find(q => q.table === 'charges_credits')
+  assert.equal(filtre(c, 'user_id'), TITULAIRE)
+  const e = r.requetes.find(q => q.table === 'charges_credit_echeances')
+  assert.equal(filtre(e, 'user_id'), TITULAIRE)
+  const { debut, fin } = r.rep.corps.totaux
+  assert.deepEqual(e.filtres.filter(f => ['in', 'gte', 'lte'].includes(f[0])), [['in', 'credit_id', [CREDIT_A]], ['gte', 'date_echeance', debut], ['lte', 'date_echeance', fin]])
+  assert.deepEqual(e.plage, [0, 999], 'page après page')
+})
+
+test('sans crédit, les échéances ne se lisent pas ; une entité choisie filtre ses crédits ; une panne dit `null`, sans casser l\'écran', async () => {
+  const sans = await appeler()
+  assert.deepEqual(sans.rep.corps.credits, { liste: [], echeances: [] })
+  assert.equal(sans.requetes.filter(q => q.table === 'charges_credit_echeances').length, 0)
+  const une = await appeler({ query: { entite: ENT_A } })
+  assert.equal(filtre(une.requetes.find(q => q.table === 'charges_credits'), 'entite_juridique_id'), ENT_A)
+  const panne = await appeler({ repondre: (q) => (q.table === 'charges_credits' ? { error: { message: 'x' } } : { data: [], count: 0 }) })
+  assert.equal(panne.rep.statut, 200)
+  assert.equal(panne.rep.corps.credits, null)
+})
+
+test('mesure (case PERFORMANCE, point 8) : l\'écran complet passe de 6 à 7 lectures sans crédit, 8 avec', async () => {
+  const sans = await appeler()
+  const avec = await appeler({ repondre: (q) => (q.table === 'charges_credits' ? { data: [{ id: CREDIT_A }] } : { data: [], count: 0 }) })
+  const compte = (r) => r.requetes.length + r.rpcs.length + r.ej.appels.length
+  assert.equal(compte(sans), 7)
+  assert.equal(compte(avec), 8)
+})

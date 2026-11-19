@@ -57,7 +57,7 @@ function facture (n, extra = {}) {
 }
 
 /** Une réponse d'écran plausible. */
-function reponseEcran ({ aTraiter = [], nombre = null, liste = [], suite = null, entites = null, totaux, biens = null } = {}) {
+function reponseEcran ({ aTraiter = [], nombre = null, liste = [], suite = null, entites = null, totaux, biens = null, credits } = {}) {
   return {
     a_traiter: { lignes: aTraiter, nombre: nombre == null ? aTraiter.length : nombre },
     liste: { lignes: liste, suite },
@@ -72,6 +72,7 @@ function reponseEcran ({ aTraiter = [], nombre = null, liste = [], suite = null,
           calcule_le: '2026-11-10T19:00:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30'
         }
       : totaux,
+    credits: credits === undefined ? { liste: [], echeances: [] } : credits,
     categories: ['menage', 'linge', 'consommables', 'energie', 'internet_telephone', 'entretien', 'travaux_equipement', 'assurance', 'impots_taxes', 'copropriete', 'abonnements_logiciels', 'honoraires', 'commissions_plateformes', 'frais_bancaires', 'autre']
   }
 }
@@ -103,7 +104,7 @@ async function monter (o = {}) {
       if (u === '/api/charges') return repondre(200, (o.geste || (() => ({ ok: true })))(entree.corps))
       if (u.startsWith('https://stockage.test/')) return repondre(o.depot ? o.depot(u) : 200, {})
     } catch (e) {
-      if (e && e.status) return repondre(e.status, { error: e.error || e.message })
+      if (e && e.status) return repondre(e.status, { error: e.error || e.message, ...(e.detail ? { detail: e.detail } : {}) })
       throw e
     }
     return repondre(404, { error: 'inconnu' })

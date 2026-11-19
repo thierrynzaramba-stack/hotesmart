@@ -46,6 +46,7 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
       neq (c, v) { r.filtres.push(['neq', c, v]); return q },
       lt (c, v) { r.filtres.push(['lt', c, v]); return q },
       gte (c, v) { r.filtres.push(['gte', c, v]); return q },
+      lte (c, v) { r.filtres.push(['lte', c, v]); return q },
       in (c, v) { r.filtres.push(['in', c, v]); return q },
       not (c, o, v) { r.filtres.push(['not', c, o, v]); return q },
       is (c, v) { r.filtres.push(['is', c, v]); return q },

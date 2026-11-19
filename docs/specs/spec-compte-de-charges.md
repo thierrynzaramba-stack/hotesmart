@@ -2379,6 +2379,162 @@ testé, mais pas relu**. Ce fait est remis au chef de file et à Thierry ; c'est
 | 4 | Le contrôle dit « liste vide : tout type accepte » pour `null` comme pour `{}`. Mesuré dans cinq états : avant, après, `null`, `{}`, bucket absent. |
 | — | Signalé par la review du lot crédit : `package-lock.json` portait le nom du dossier de travail (`hotesmart-heic`). Il reprend son nom, `hotesmart`. |
 
+### 14.20 Les crédits : le tableau d'amortissement en charges (19 novembre 2026)
+
+**La demande.** Thierry, 19 novembre 2026, 01 h 12 : il charge le tableau
+d'amortissement de son prêt immobilier (Banque Populaire, 16 pages,
+300 mensualités) et demande « le crédit et le calcul des charges ».
+
+**Ses décisions**, prises à 01 h 16 :
+- **Une charge par mensualité.**
+- Le crédit finance **les deux logements de Bagnères**. Il est donc rattaché à
+  leur entité, sans logement désigné, comme la facture EDF qui couvre les
+  deux.
+- « Le calcul des charges », dans ses mots : « affiche l'amortissement en fait
+  une ligne spéciale dans les dépenses mensuelles, le but étant d'avoir une vue
+  sur les décaissements mensuels quelque part ».
+
+Le reste a été tranché par le fil, annoncé à Thierry à 01 h 19, et reste
+corrigible en recette :
+- le tableau est lu **sans IA**, ligne par ligne ;
+- une charge par mensualité porte intérêts + assurance + frais, dans une
+  catégorie « Crédit : intérêts et assurance » ;
+- par mois, une ligne « Crédit » donne la mensualité entière décaissée, avec
+  sa part de capital.
+
+**Catégorie de chaque donnée affichée** (règle d'architecture) :
+- Les charges d'échéance : **temps réel** (des lignes de `charges`, comme toute
+  facture). Les totaux restent du **non urgent**, tenus par le résumé.
+- La ligne « Crédit » d'un mois et la liste des crédits : les **lignes du
+  tableau tel qu'importé**, lues par index, sans aucun calcul. Rien n'est
+  additionné à la lecture, sauf ranger 1 à 3 lignes par mois dans leur mois.
+
+**Ce qui change.**
+- **Lecture du tableau** (`lib/charges/credit-tableau.js`, `unpdf` 2.2.1, MIT,
+  chargé à la demande) :
+  - Les cellules du PDF sont lues avec leur position. Chaque cellule est
+    ramenée à son repère de lecture : le tableau réel est imprimé en paysage
+    sur une page portrait, texte tourné d'un quart de tour.
+  - Les colonnes se retrouvent par leur en-tête, sur une ou deux lignes : intérêts,
+    assurance, accessoires, capital amorti, échéance, capital restant dû.
+    - Un mot d'en-tête va à la seule colonne qu'il recouvre le plus.
+    - Un texte qui recouvre trois colonnes ou plus est un titre, pas un
+      en-tête.
+    - Une page sans en-tête reprend les colonnes de la précédente.
+  - **Chaque ligne se prouve** : intérêts + assurance + accessoires + capital
+    = échéance, au centime.
+    - Une ligne fausse refuse **tout** le tableau, et le refus donne sa date.
+    - Des colonnes non reconnues : refusé aussi, jamais deviné.
+    - Une ligne à échéance 0 (un déblocage) est écartée, comme une ligne sans
+      date (un total).
+- **Données** (migration `2026-11-19-charges-credits.sql`, collée à la main) :
+  - `charges_credits` : banque, entité, logement facultatif, empreinte du PDF,
+    première et dernière échéance. Un même tableau ne s'importe pas deux fois.
+  - `charges_credit_echeances` : chaque ligne du tableau. La base revérifie la
+    somme ; `materialisee_le` dit si l'échéance est déjà en charge.
+  - `charges.credit_id` et `charges.credit_indice` : une échéance donne une
+    charge (index unique **sans** clause `where`, pour servir `ON CONFLICT`).
+    Les charges partent avec le crédit (`on delete cascade`).
+  - La catégorie `credit` **est réservée aux échéances**
+    (`charges_credit_ck`) : ni l'IA ni l'hôte ne la choisissent.
+  - RLS active, aucun droit pour `anon` ni `authenticated`.
+- **Écriture** (`lib/charges.js`, writer unique) :
+  - `importerCredit` vérifie, avant toute écriture :
+    - la banque ;
+    - l'entité, **active et du compte** ;
+    - le logement, du compte **et** de cette entité ;
+    - le fichier : un PDF de 2 Mo au plus ;
+    - la borne de 20 crédits par compte, et que le même tableau n'est pas déjà
+      importé.
+  - Puis il lit le tableau, dépose le PDF et écrit dans l'ordre : le crédit,
+    toutes ses échéances, puis une charge **validée** par échéance **échue**.
+    - Le montant d'une charge (HT = TTC, TVA 0) = intérêts + assurance + frais.
+      **Jamais le capital.**
+    - **Tout ou rien** : une écriture qui échoue en route efface le crédit, par
+      cascade ses échéances et ses charges, et son fichier.
+  - `supprimerCredit` supprime le crédit dans le compte, avec son fichier.
+  - Une échéance ne se valide ni ne se supprime seule : 409
+    `credit_automatique`.
+  - Le cron quotidien (`api/cron-charges.js`, nouvelle tâche
+    `echeances_credits`, 5 s de budget) fait entrer en charges les échéances
+    arrivées à leur jour. Chacune porte le compte **de son crédit**.
+- **Écran** (`/charges`, une seule vue pour l'ordinateur et le téléphone) :
+  - **Par mois** : sous chaque mois, une ligne « Crédit, mensualité payée » qui
+    donne la mensualité entière et, à côté, « dont X de capital ». Le capital
+    n'entre dans aucun total.
+  - **Un bloc « Crédits »** : banque, entité, « Tous les logements de
+    l'entité », nombre d'échéances et dates ; un bouton « Supprimer », avec
+    confirmation. Un formulaire « Ajouter un crédit » : le PDF, la banque,
+    l'entité (choisie d'office si elle est seule), le logement facultatif.
+  - **La fiche d'une échéance** : champs figés, ni Valider, ni Supprimer, ni
+    Voir, et un texte qui dit comment la corriger (supprimer le crédit,
+    réimporter le tableau).
+  - Une ligne fausse est nommée par sa date : « La ligne du 22 juin 2023 ne se
+    vérifie pas… Rien n'a été importé. »
+- **Ordre des migrations** : `2026-11-19-charges-credits` APRÈS
+  `2026-11-19-charges-periode-longue`, et AVANT le code. Seule, elle ne change
+  rien. Contrôle : `2026-11-19-controle-charges-credits.sql`, 5 lignes (false
+  avant, true après), puis le vérificateur.
+
+**Mesures.**
+- **Le vrai tableau de Thierry** (hors dépôt) :
+  - **301 échéances en 271 ms** : les frais de dossier de 500 € et les 300
+    mensualités.
+  - Totaux par année égaux au centime à ceux du PDF : 2025 = **3 700,80 €
+    d'intérêts + 1 242,41 € d'assurance = 4 943,21 €** ; 2022 = 4 612,96 €,
+    frais compris.
+- **Postgres 16 local**, avec ce même tableau :
+  - **57 charges échues insérées en 24 ms** ;
+  - vérificateur du résumé à **0 écart sur 10 367 cellules** ;
+  - suppression du crédit en **18 ms**, ses 57 charges parties avec lui, 0
+    écart.
+- **Tests** :
+  - `tests/charges-credit-tableau.test.js` : quatre tableaux **fictifs**
+    fabriqués par `tests/fixtures/charges/fabriquer-tableaux.py` — portrait,
+    le même tourné d'un quart de tour, une ligne fausse d'un centime, une
+    colonne absente.
+  - `tests/charges-credit.test.js` : le writer, de bout en bout avec le vrai
+    lecteur.
+  - `tests/charges-migration-credits.test.js`, `tests/charges-ecran.test.js`,
+    `tests/charges-page.test.js`, `tests/charges-endpoint.test.js`,
+    `tests/cron-charges.test.js`.
+
+**Ce que ce lot ne fait pas**, et c'est su :
+- Il ne lit que les tableaux dont il reconnaît les colonnes. Un autre format
+  est refusé en le disant ; il s'ajoutera quand un vrai tableau le montrera.
+- Il ne répartit pas un crédit entre deux logements : c'est la clé de
+  répartition, décidée pour plus tard (§14.0).
+- Il ne suit pas un remboursement anticipé ou une renégociation : on supprime
+  le crédit et on importe le nouveau tableau.
+
+**Case PERFORMANCE** (règle du dépôt, huit points) :
+1. Écran : toujours **un** appel, `/api/ecran/charges`. Il lit en plus, **en
+   parallèle** des quatre autres, les crédits du compte, puis leurs échéances
+   de la période s'il y en a. Le geste d'import passe par `/api/charges`, comme
+   les autres.
+2. Donnée non urgente : les totaux restent ceux du résumé, tenu par trigger.
+   La ligne « Crédit » n'est pas un calcul : ce sont les lignes du tableau, lues
+   par index `(user_id, date_echeance)`.
+3. Cache : sans objet (la page n'en a pas).
+4. `private, no-store` : inchangé ; les deux endpoints le posent avant tout
+   refus.
+5. Statiques : aucun fichier ajouté à la page ; `shared/ui.css` gagne 9 règles.
+6. Lecture tronquée : les échéances se lisent **page après page** (1 000 par
+   page, testé). Les crédits, bornés à 20 par compte, se lisent en une fois
+   (`limit(100)`).
+7. Budget : l'affichage gagne une lecture sans crédit, deux avec. L'import se
+   mesure à part : lecture du PDF 271 ms, écritures 24 ms pour 57 charges.
+8. Mesure AVANT / APRÈS, au banc (`tests/charges-ecran.test.js`) : l'écran
+   complet passe de **6 à 7 lectures** sans crédit et à **8** avec, toujours
+   **1 appel**. Le module `shared/charges-vue.js` passe de 41 952 à
+   **50 893 octets** (+8,9 Ko, non compressé). Le corps de l'écran gagne
+   `credits` : `{ liste: [], echeances: [] }` sans crédit (39 octets, clé comprise) ; avec
+   un crédit, environ 250 octets par échéance de la période.
+
+**Inventaire et mobile.** Rien n'est retiré. La vue est commune aux deux
+écrans : le bloc « Crédits » et la ligne du mois s'affichent aussi au
+téléphone, avec les mêmes styles.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

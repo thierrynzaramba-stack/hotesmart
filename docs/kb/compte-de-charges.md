@@ -35,6 +35,7 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 | `migrations/2026-11-13-charges-periode.sql` | `charges.type_document` (facture, régularisation, avoir, échéancier, avis d'impôt), `periode_debut` / `periode_fin` (les deux ou aucune, 366 jours au plus — **trois ans depuis `2026-11-19`**), avoir négatif seul ; colonnes étalées du résumé ; recalcul **par série** (compte × entité × logement × catégorie) sur une plage ; `charges_totaux` rend les deux lectures. **À coller APRÈS** `2026-11-10`. Contrôle : `migrations/2026-11-13-controle-charges-periode.sql` (10 lignes). |
 | `migrations/2026-11-19-charges-periode-longue.sql` | La borne de la période passe à **trois ans** (1 097 jours, `PERIODE_MAX_JOURS` : trois ans d'anniversaire à anniversaire), décision de Thierry du 19 novembre 2026. **À coller APRÈS** `2026-11-17` **et AVANT le déploiement** du code qui l'accepte ; après elle, `2026-11-13` ne se rejoue plus. Contrôle : `migrations/2026-11-19-controle-charges-periode-longue.sql` (2 lignes), puis le vérificateur. |
 | `migrations/2026-11-19-charges-heic.sql` | Le bucket `justificatifs` accepte le **dépôt** d'une photo `image/heic` / `image/heif` (spec §14.19) ; le serveur la convertit en JPEG à la confirmation et le JPEG la remplace. Ordre libre ; après elle, la section 5 de `2026-11-09` ne se rejoue plus. Contrôle : `migrations/2026-11-19-controle-charges-heic.sql` (1 ligne). |
+| `migrations/2026-11-19-charges-credits.sql` | Les crédits (§14.20) : `charges_credits`, `charges_credit_echeances` (somme prouvée en base), `charges.credit_id` / `credit_indice` (une échéance, une charge ; cascade), origine et catégorie `credit` réservée aux échéances. **À coller APRÈS** `2026-11-19-charges-periode-longue` **et AVANT le code**. Contrôle : `migrations/2026-11-19-controle-charges-credits.sql` (5 lignes), puis le vérificateur. |
 | `migrations/2026-11-17-charges-avis-impot.sql` | L'avis d'impôt n'a pas de TVA (Q38, recette du 17 novembre 2026) : corrige les avis enregistrés, puis pose `charges_impot_ck` (HT = TTC, TVA = 0). **À coller APRÈS** `2026-11-13` **et APRÈS le déploiement** du code qui pose la règle sur l'environnement visé (l'ancien code écrit des avis sans HT ni TVA : la contrainte mettrait sa lecture en panne). Contrôle : `migrations/2026-11-17-controle-charges-avis-impot.sql` (2 lignes), puis le vérificateur. |
 | `lib/charges/regles.js` | `TYPES_DOCUMENT`, `periodeSaisie`, `signerMontants`, `montantsDuType` (avoir signé, avis d'impôt sans TVA), `centimesSignes` ; la lecture normalise type, période et solde. |
 | `lib/charges/lecture.js` | La consigne lit le type, la période couverte et, pour une régularisation, la consommation et le solde. |
@@ -42,6 +43,13 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 
 ## Règles à ne pas perdre
 
+- **Un crédit se lit dans son tableau d'amortissement, SANS IA, et chaque ligne
+  se prouve** (§14.20) : intérêts + assurance + frais + capital = échéance au
+  centime, sinon le tableau entier est refusé avec la date de la ligne. Chaque
+  échéance ÉCHUE devient une charge validée (intérêts + assurance + frais,
+  JAMAIS le capital) ; le cron fait entrer les suivantes à leur jour. La
+  catégorie `credit` est réservée aux échéances (`charges_credit_ck`), et une
+  échéance ne se corrige pas seule : le crédit se supprime et se réimporte.
 - **Aucun HEIC n'est gardé ni lu** (§14.19) : une photo HEIC que le navigateur
   ne sait pas lire part telle quelle, et `confirmerEnvoi` la convertit en JPEG
   AVANT l'empreinte ; le JPEG la remplace au même chemin. Ce qu'on ne sait pas
