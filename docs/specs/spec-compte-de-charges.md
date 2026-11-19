@@ -3352,6 +3352,412 @@ par la fusion de `charges-heic-serveur` dans le crédit.
 Tests : clé en cours, clé en attente, photo et tableau du même compte, compte
 qui enchaîne, reste minimal, et l'appel de `importerCredit`.
 
+### 14.21 L'exercice comptable et un seul bouton « Ajouter » (19 novembre 2026)
+
+**Origine.** Recette en production du lot crédit, 19 novembre 2026, 13:58.
+Deux retours de Thierry, puis ses réponses aux questions du fil (vers 14:00
+et à 15:16) :
+- « pourquoi avoir séparé le processus d'ajout de crédit des autres […] alors
+  qu'il suffirait de l'ajouter dans type de document et adapter les champs qui
+  suivent » ;
+- « le calcul se fait sur un an glissant alors qu'il devrait se faire sur une
+  période comptable configurable, du 1er janvier au 31 décembre par exemple
+  pour le réglage standard […] on ajoute les dépenses mois par mois, et quand
+  on clique sur les mois on a le détail des factures ».
+
+**Décisions de Thierry**, 19 novembre 2026 :
+1. **Le tableau d'amortissement est reconnu tout seul** à l'envoi d'un PDF,
+   sans IA ; l'écran affiche alors les champs du crédit ; le type reste
+   modifiable (15:16).
+2. **L'exercice se règle par entité**, et **par défaut du 1er janvier au
+   31 décembre** : « pour chaque entité cela doit être configurable, car dans
+   le cas d'une SCI on choisit les dates d'exercice » (15:16). ⚠ **Cette
+   décision remplace Q22 et Q33** (8 et 10 novembre 2026 : sans début
+   d'exercice, les 12 derniers mois, « on ne suppose pas une année civile ») :
+   l'entité sans réglage suit désormais l'année civile.
+3. **On choisit les exercices un par un** (2026, 2025, 2024…), selon le début
+   d'exercice de l'entité (vers 14:00).
+4. **Une facture qui couvre deux exercices compte dans chacun, au prorata** :
+   « si une facture couvre deux périodes, calculer la somme de l'année 1 et
+   année 2 : elle existera donc sur deux ans avec un prorata » (15:16). C'est
+   déjà la lecture « Étalé » (lot 7a, au jour près) ; le lot n'y change rien,
+   il la montre par exercice.
+5. **Un clic sur un mois ouvre le détail sous sa ligne** : les factures du
+   mois, avec la part du mois pour une facture étalée (15:16).
+6. **Brevets HEVC** (décodage des photos HEIC sur le serveur, lot du
+   19 novembre) : « J'accepte, on passe en prod » (vers 14:00). La question reste
+   notée pour un juriste ; elle ne bloque plus.
+7. **La vue « Toutes les entités » est supprimée** : « chaque entité est
+   strictement séparée ; la vue tout fonctionne pour les logements au sein
+   d'une même entité » (15:46). ⚠ Elle remplace la proposition « année
+   civile » de cette spec.
+8. **Découpage** : 8a (l'exercice et les mois) d'abord, puis 8b (un seul
+   bouton « Ajouter ») (15:46).
+
+**Catégorie de chaque donnée affichée** (règle du dépôt) :
+- les totaux d'un exercice et ses douze mois : **non urgent**, servis par le
+  résumé (`charges_totaux`, inchangé), heure du calcul affichée ;
+- la liste des exercices proposés : **non urgent**, deux lectures d'index du
+  résumé (premier et dernier jour) ;
+- le détail d'un mois (ses factures et leur part) : **temps réel**, la liste
+  des factures du mois lue dans `charges`, chaque part calculée par la MÊME
+  règle que le résumé (ci-dessous) ;
+- un tableau reconnu, en attente d'import : **temps réel** (« À traiter »).
+
+#### 14.21.1 L'exercice
+
+- **`bornesPeriode`** (`lib/charges/ecran.js`) : une entité sans
+  `debut_exercice` prend `01-01`. La période demandée devient un **exercice
+  nommé par l'année où il commence** (`periode=2025`), et les mots
+  `exercice` / `exercice_precedent` restent compris (liens et onglets
+  ouverts) ; `12_mois` disparaît.
+- **Exercices proposés** : du premier au dernier exercice qui portent un jour
+  du résumé pour ce compte (et cette entité), l'exercice en cours toujours
+  compris. Lus par une fonction `charges_exercices_bornes(p_user, p_entite)`
+  qui rend `{ premier, dernier }` en un objet (deux lectures d'index, aucune
+  troncature possible).
+- **Étiquette** : « Exercice 2026 » pour un exercice civil ; « Exercice
+  2025-2026 » sinon, avec ses bornes dessous (« du 1er juillet 2025 au
+  30 juin 2026 »).
+- **Où se règle le début** : là où il se règle déjà, la fiche de l'entité
+  (fiche du logement, section facturation). L'écran des charges dit
+  « Exercice du 1er janvier au 31 décembre (réglage standard) » et renvoie à
+  ce réglage — c'est une configuration générale, pas une configuration
+  d'application (CLAUDE.md, « config d'app vs config générale »).
+- ⚠ **PLUS DE VUE « TOUTES LES ENTITÉS »** (décision 7). Les totaux se
+  lisent toujours pour UNE entité, tous ses logements ensemble, avec la
+  répartition par logement (inchangée). Le choix d'entité ne propose plus
+  « Toutes » ; à l'ouverture, l'écran prend la première entité active (ordre
+  du nom). La **liste des factures** suit l'entité choisie. **« À traiter »
+  reste commun au compte** : une facture qui arrive n'a pas encore d'entité
+  (`charges_validee_entite_ck` ne l'exige qu'à la validation) ; elle entre
+  dans les totaux de son entité quand on la lui donne. Un compte sans entité
+  voit « À traiter », la liste, et un renvoi vers la création d'une entité à
+  la place des totaux.
+
+#### 14.21.2 Les mois, et le détail au clic
+
+- La répartition « Par mois » montre **les douze mois de l'exercice**, même
+  ceux sans facture (mois vide : « — »), avec la ligne de crédit du mois
+  (§14.20) quand il y en a une.
+- **Un clic sur un mois** ouvre sous sa ligne les factures du mois :
+  fournisseur, jour, catégorie, logement, montant de la facture, et **sa part
+  du mois** quand elle est étalée (« 1 200,00 € · part du mois : 100,00 € »).
+  Un clic sur une facture ouvre sa fiche, comme dans la liste. Les échéances
+  de crédit du mois y figurent, une ligne par crédit (intérêts et assurance
+  comptés, capital à part).
+- **Lecture** : `GET /api/ecran/charges?mois=2026-03&entite=…` (le même
+  endpoint, une branche de plus, comme « Afficher plus »). Une fonction SQL
+  `charges_detail_mois(p_user, p_debut, p_fin, p_entite)` rend un objet :
+  les factures qui touchent le mois (à leur jour, ou par leur période) et,
+  pour chacune, sa part par **la règle du résumé, à l'identique** : sur
+  `n` jours, le jour `k` reçoit `floor(m·k/n) − floor(m·(k−1)/n)`, donc la
+  part d'une plage `[a, b]` est `floor(m·kb/n) − floor(m·(ka−1)/n)`.
+  ⚠ **La somme des parts d'un mois égale le total « Étalé » du mois, au
+  centime** : c'est le test qui compte, joué contre le Postgres local et
+  l'oracle (`scripts/oracle-resume-charges.sql`).
+- Les mêmes factures que le résumé : mêmes statuts comptés, mêmes doublons
+  écartés, même échéancier exclu. Une facture « à vérifier » apparaît, et se
+  dit « à vérifier ».
+
+#### 14.21.3 Un seul bouton « Ajouter » : le tableau reconnu tout seul
+
+- **Le bloc « Crédits » perd son formulaire d'import.** Il garde la liste des
+  crédits importés et leur suppression. On ajoute un tableau par « Ajouter »,
+  comme une facture.
+- **À la confirmation d'un PDF** (`api/charges.js`, `confirmer`, et le cron
+  qui relit les charges `a_lire`), avant toute lecture IA : `lireTableauIsole`
+  (processus à usage unique, file commune, §14.20). Si le PDF est un tableau
+  d'amortissement lisible (au moins 3 échéances prouvées) : la charge passe
+  au **statut `tableau`** et au type `tableau_amortissement`, **sans appel à
+  l'IA**. Sinon, la lecture IA suit, comme aujourd'hui. Si la file est prise
+  (`occupe`) : la lecture IA suit (un tableau mal reconnu se corrige par le
+  type, ci-dessous).
+- **La fiche d'un tableau reconnu** (dans « À traiter ») : « Tableau
+  d'amortissement reconnu : N échéances, du … au … » ; champs **prêteur**,
+  **entité**, **logement** ; bouton **« Importer les échéances »**. L'import
+  relit le fichier déjà déposé (pas de second envoi), crée le crédit
+  (`importerCredit`, inchangé), puis retire la charge `tableau` et son
+  fichier — le justificatif vit désormais avec le crédit.
+- **Le type reste modifiable** : « Tableau d'amortissement » entre dans la
+  liste des types. Le choisir sur une facture lue par l'IA relance la
+  reconnaissance ; un PDF qui n'est pas un tableau lisible est refusé avec un
+  message. Choisir « Facture » sur un tableau reconnu le renvoie à la lecture
+  IA.
+- **Migration** `2026-11-2x-charges-tableau` : le statut `tableau` et le type
+  `tableau_amortissement` dans leurs contraintes. Une charge `tableau` n'entre
+  dans aucun total (le résumé ne compte que `a_verifier` et `validee`) ; elle
+  est comptée dans « À traiter ».
+
+#### 14.21.4 Inventaire (la forme ne supprime jamais le fond)
+
+| Existant | Devient |
+|---|---|
+| Choix de période « Exercice en cours / Exercice précédent / 12 derniers mois » | Choix d'un exercice parmi la liste ; « 12 derniers mois » **retiré**, sur décision de Thierry (une période comptable, pas un an glissant). |
+| Répartition par mois (mois avec facture seulement) | Les douze mois de l'exercice, clic → détail. |
+| Répartitions par catégorie et par logement | **Conservées**, sur l'exercice choisi. |
+| Choix d'entité « Toutes les entités » | **Retiré**, sur décision de Thierry (décision 7) ; une entité à la fois. |
+| Liste « Toutes les factures » (tout le compte) | **Filtrée sur l'entité choisie** ; « À traiter » reste commun au compte. |
+| Lignes « Crédit, mensualité payée / à venir » | **Conservées**, sous chaque mois, et dans le détail. |
+| Formulaire « Importer un tableau » du bloc Crédits | **Déplacé** dans « Ajouter » (reconnaissance) et dans la fiche du tableau reconnu. |
+| Liste des crédits et suppression | **Conservées** dans le bloc Crédits. |
+| Deux lectures « Étalé » et « À la date » | **Conservées**. |
+| Heure du calcul | **Conservée**. |
+
+#### 14.21.5 Case PERFORMANCE (les huit points)
+
+1. **Un écran, un endpoint** : `/api/ecran/charges` ; le détail d'un mois est
+   une branche du même endpoint, appelée au clic seulement.
+2. **Non urgent = résumé** : totaux et mois par `charges_totaux` (inchangé) ;
+   bornes des exercices par deux lectures d'index du résumé. Le détail d'un
+   mois est une **liste** (temps réel) : chaque part se calcule ligne à
+   ligne par la règle du résumé, rien n'y est additionné.
+3. **Cache navigateur** : aucun (montants, justificatifs).
+4. **`private, no-store`** avant tout refus, branche `mois` comprise.
+5. **Statiques** : inchangé (dette connue du dépôt : pas d'empreinte `?v=`).
+6. **Aucune lecture tronquée** : bornes en un objet, détail du mois en un
+   objet (`jsonb`), liste et file par curseur (inchangé).
+7. **Budget** : premier affichage < 1 s, écran complet < 2 s ; détail d'un
+   mois < 1 s. Un test compte les appels : 1 au chargement de l'écran
+   (`/api/ecran/charges`), 1 par clic sur un mois ; `Server-Timing` porte le
+   nombre de requêtes.
+8. **Mesure AVANT**, production, 19 novembre 2026 vers 15:40, compte de
+   Thierry, entités « toutes », ordinateur, API Performance du navigateur :
+   - **2 appels `/api`** au chargement : `/api/ecran/charges?entite=toutes`
+     et `/api/membres` (ce dernier commun à toutes les pages, hors du lot) ;
+   - **9 requêtes** Supabase côté serveur pour l'écran (`Server-Timing :
+     total 561 ms, 9 requêtes`) ;
+   - **4 711 octets** transférés pour l'appel d'écran (4 411 de corps) ;
+     33 412 octets pour toute la page.
+   APRÈS : mesuré de la même façon, sur staging puis en production.
+
+#### 14.21.6 Mobile
+
+Une seule vue pour les deux écrans : le choix d'exercice et le détail d'un
+mois s'ouvrent de la même façon au téléphone, le détail en pleine largeur.
+
+#### 14.21.7 Découpage proposé
+
+- **8a — L'exercice et les mois** : 14.21.1 et 14.21.2. Lecture seule, une
+  migration de fonctions (`charges_exercices_bornes`, `charges_detail_mois`).
+- **8b — Un seul bouton « Ajouter »** : 14.21.3. Écritures, une migration de
+  contraintes.
+Chacun sa review, sa recette et sa remise ; 8a d'abord.
+
+#### 14.21.8 Tests qui comptent
+
+- La somme des parts d'un mois = le total « Étalé » du mois, au centime
+  (Postgres local, avec une facture de trois ans, une à la date, un avoir).
+- Une facture du 1er juillet 2025 au 30 juin 2026 compte 6/12 environ dans
+  l'exercice 2025 et 6/12 dans 2026, au centime de la règle.
+- Une entité sans début d'exercice se lit par année civile ; une SCI au
+  1er juillet par exercice 2025-2026.
+- `entite=toutes` n'est plus accepté pour les totaux : l'écran prend la
+  première entité active ; la liste ne montre que les factures de l'entité ;
+  « À traiter » montre tout le compte.
+- L'écran fait 1 appel au chargement et 1 par clic sur un mois.
+- Un PDF tableau confirmé ne déclenche AUCUN appel IA et passe `tableau` ; une
+  facture PDF passe à l'IA ; la file prise laisse passer l'IA.
+- L'import depuis un tableau reconnu crée le crédit et retire la charge ;
+  rien n'est créé si l'import échoue.
+
+#### 14.21.9 Lot 8a — ce qui est codé (19 novembre 2026)
+
+Branche `charges-exercice-ajout`, partie de `main` (`b4dfedc1`).
+
+- **Migration** `2026-11-19-charges-exercice-mois.sql` (à coller APRÈS
+  `2026-11-19-charges-credits`, AVANT le déploiement du code) et son contrôle
+  (4 lignes : deux fonctions `security definer`, corps à l'empreinte sans
+  blancs, aucun droit pour `anon`, `authenticated` ni `public`, et
+  l'exécution donnée au serveur — `service_role`, explicite depuis la
+  review 1). Oracle rejouable `scripts/oracle-detail-mois-charges.sql`
+  (lecture seule, une ligne, `ecarts = 0` attendu) : à jouer après la
+  migration, sur staging puis en production. Jouée sur
+  Postgres 16 local : détail de 79 mois comparé au résumé, 0 écart ; bornes
+  d'un exercice civil et d'un exercice au 1er juillet conformes. Trois
+  sabotages du contrôle, trois lignes à false.
+- **Serveur** (`lib/charges/ecran.js`, `api/ecran/charges.js`) : une entité à
+  la fois. Sans `entite` (ou `entite=toutes`, un lien d'avant), la première
+  entité active par son nom ; la réponse dit laquelle (`entite`). La période
+  se nomme par l'année où l'exercice commence (`2025`) ; les mots d'avant
+  (`exercice`, `exercice_precedent`, `12_mois`) restent compris. Exercices
+  proposés : du premier au dernier qui portent une facture, l'exercice en
+  cours toujours compris, au plus 20 en arrière ; une année raisonnable hors
+  liste se lit (`[en cours − 20 ; en cours + 5]`). La liste et « Afficher
+  plus » suivent l'entité ; « À traiter » reste commun au compte. Un compte
+  sans entité : « À traiter » et la liste, pas de lecture du résumé.
+  Branche `?mois=YYYY-MM&entite=<uuid>&periode=<année>` : le mois est
+  COUPÉ aux bornes de l'exercice demandé, calculées depuis l'entité relue
+  (review 1, constat 1 : une SCI au 15 mars a des mois de bord partiels) ;
+  400 sur un mois, une entité ou un exercice invalides, ou sur un mois hors
+  de l'exercice ; 404 sans rien lire sur une entité d'un autre compte ; 503
+  sur une panne ou une réponse qui n'est pas une liste. La réponse dit
+  `partiel`, et l'écran l'affiche avec les bornes lues.
+- **Écran** (`shared/charges-vue.js`, `shared/ui.css`, i18n fr/en/es) : plus
+  d'option « Toutes » ; « Exercice 2026 » (civil) ou « Exercice 2025-2026 » ;
+  la mention « réglage standard » quand l'entité n'a pas de début
+  d'exercice ; les DOUZE mois de l'exercice, même vides (« — », jamais 0) ;
+  un clic ouvre sous le mois ses factures, avec « part du mois » quand la
+  part n'est pas la facture entière, et la mensualité de crédit du mois
+  reste sous sa ligne ; un clic sur une facture ouvre la fiche ; un second
+  clic referme sans relire. Un seul mois ouvert à la fois ; changer
+  d'entité ou d'exercice referme et oublie les détails, et une réponse
+  arrivée après un changement d'entité est jetée (sinon elle serait servie
+  pour l'entité suivante).
+- **Lectures de l'écran complet** (test qui compte) : 8 sans crédit, 9 avec —
+  une de plus qu'avant, les bornes des exercices. Le détail d'un mois :
+  1 lecture d'entités + 1 fonction.
+- **Tests** (après les correctifs de la review 1) : `charges-ecran` 36/36,
+  `charges-page` 73/73, `charges-migration-exercice-mois` 8/8.
+  Contre-épreuve (code d'avant, hors de l'arbre) : 14 et 11 rouges.
+  Dix-huit mutations, dix-huit rouges : garde d'entité du détail, filtre
+  d'entité de la liste, réponse périmée gardée, page suivante sans entité,
+  détail relu à chaque clic, standard déplacé au 1er juillet ; côté
+  migration, corps changé, droit `anon` rendu, `security invoker`, filtre
+  d'entité retiré ; et pour les correctifs, mois non coupé à l'exercice,
+  page suivante périmée gardée, détail périmé gardé, « Non comptée »
+  seulement sans état, part nulle muette, exercice lu absent du menu,
+  avenir sans borne, panne des bornes muette. L'oracle voit un `ka` à la
+  place de `ka − 1` : 79 écarts sur 79 mois (contrôle : ligne 2 à false).
+- **Suite complète** (après les correctifs de la review 1) : 9049 tests ;
+  à l'heure réelle, 9049 verts ; à J+60, 1 rouge, dette 124
+  (`tests/marche-comparables-api.test.js`), connue.
+- **APRÈS** (point 8) : à mesurer sur staging puis en production, comme
+  l'AVANT ; attendu 10 requêtes au lieu de 9 pour l'écran complet.
+
+#### 14.21.10 Review 1 du lot 8a (19 novembre 2026)
+
+Lancée sur `/home/claude/hotesmart-exercice`, branche
+`charges-exercice-ajout`, plage
+`906539d4896ccbc982206beea140d6e1d4a26d3a..dd8b1f2ac3a25c577b6c20240b5775abd74f942a`.
+Elle dit avoir lu cet arbre et ce SHA de tête ; chaque fichier qu'elle cite
+est dans la plage, ou nommé « hors plage » comme référence. **Aucun constat
+de sécurité** : les correctifs se font sans nouvelle review (CLAUDE.md, une
+review par commit).
+
+| # | gravité | constat | suite |
+|---|---|---|---|
+| 1 | bloquant | exercice décalé : le détail lisait le mois civil entier | **corrigé** : mois coupé à l'exercice côté serveur, `partiel` dit à l'écran |
+| 2 | bloquant | « Non comptée » ne s'affichait jamais | **corrigé** : dit à côté de l'état |
+| 3 | mineur | facture comptée hors période sans « part du mois » | **corrigé** : « part du mois : 0,00 € » |
+| 4 | mineur | réponses périmées gardées (page suivante, détail) | **corrigé** : génération de l'écran |
+| 5 | mineur | exercices proposés sans borne vers l'avenir | **corrigé** : 5 au plus, comme la lecture |
+| 6 | mineur | menu ≠ exercice des totaux | **corrigé** : l'exercice lu toujours proposé |
+| 7 | mineur | panne des bornes silencieuse, en-tête de migration faux | **corrigé** : `exercices_indisponibles` dit à l'écran ; en-tête corrigé |
+| 8 | mineur | pas de `grant … to service_role` | **corrigé** : grant explicite, 4e ligne du contrôle |
+| 9 | mineur | test de la règle trop lâche, mesure non rejouable | **corrigé** : expression exacte testée ; oracle `scripts/oracle-detail-mois-charges.sql` |
+| 10 | mineur | factures sans entité au-delà des 50 d'« À traiter » plus atteignables | **dette 153** (décision de Thierry, numéro du chef de file) : corrigée avant qu'un compte atteigne 50 factures à traiter, et avant l'arrivée d'autres hôtes |
+
+Choix fait sur le constat 1, sans décision produit nouvelle : la base
+accepte déjà tout jour comme début d'exercice (`ej_exercice_chk`) ; le
+code le respecte au lieu de le restreindre. Restreindre au 1er d'un mois
+reste possible si Thierry le décide.
+
+Rapport, tel que rendu :
+
+```
+**Review du lot 8a (compte de charges) : 2 constats bloquants, 8 mineurs, aucun constat de sécurité.**
+
+- **Arbre lu** : `/home/claude/hotesmart-exercice`
+- **Branche** : `charges-exercice-ajout`
+- **SHA de tête lu** : `dd8b1f2ac3a25c577b6c20240b5775abd74f942a`
+- **Plage** : `906539d4896ccbc982206beea140d6e1d4a26d3a..dd8b1f2ac3a25c577b6c20240b5775abd74f942a`
+- **Fichiers de la plage** (`git diff --name-only`) : `api/ecran/charges.js`, `docs/specs/spec-compte-de-charges.md`, `lib/charges/ecran.js`, `migrations/2026-11-19-charges-exercice-mois.sql`, `migrations/2026-11-19-controle-charges-exercice-mois.sql`, `shared/charges-vue.js`, `shared/i18n/en.json`, `shared/i18n/es.json`, `shared/i18n/fr.json`, `shared/ui.css`, `tests/charges-ecran.test.js`, `tests/charges-migration-exercice-mois.test.js`, `tests/charges-page.test.js`, `tests/outils/banc-charges.js`
+
+**Comment j'ai vérifié :**
+- Les trois fichiers de test du lot passent : 104 sur 104.
+- J'ai appliqué les migrations du 8 au 19 novembre sur un Postgres 16 jetable, hors de l'arbre, puis supprimé.
+- Le contrôle de la migration rend ses 3 lignes à `true`.
+- Sur des mois civils, la somme des parts égale le résumé pour TTC, HT et TVA : 49 mois, 0 écart. Le jeu d'essai comprend une facture de trois ans, un avoir, une régularisation hors de sa période, un montant non lu, un échéancier, une facture annulée, une facture sans entité et un autre compte.
+- J'ai sondé le front avec le banc jsdom du dépôt. Aucun fichier modifié ; `?? node_modules` était déjà là.
+
+## SÉCURITÉ — rien trouvé
+
+- Un membre délégué reçoit 403 avant toute lecture, branche `?mois` comprise.
+- Une entité d'un autre compte rend 404 sur l'écran et sur `?mois`. Avec le curseur, elle rend une liste vide grâce au filtre `user_id`.
+- Les deux fonctions sont `security definer`, avec `search_path = public` et des tables qualifiées. Les droits sont retirés à `anon`, `authenticated` et `public`, mesuré en base.
+- Appelée avec l'entité d'un autre compte, la fonction rend `[]`.
+- `private, no-store` est posé avant le 405.
+
+## Constats
+
+**1. BLOQUANT — un exercice qui ne commence pas un 1er : le détail lit le mois civil entier, pas sa part dans l'exercice.**
+- **Où** (tous dans la plage) : `api/ecran/charges.js:74-83`, `lib/charges/ecran.js:238-243`, `shared/charges-vue.js:342-353` et `:404-405`.
+- **Le défaut** : la base accepte n'importe quel jour comme début d'exercice (`ej_exercice_chk`, `dateDeMoisValide`), par exemple `03-15`. Les mois de bord de l'exercice ne sont alors que partiels, mais le clic lit tout le mois civil.
+- **Scénario mesuré** (SCI au 15 mars, exercice 2026) :
+  - l'écran affiche 13 mois, de mars 2026 à mars 2027 ;
+  - la ligne « mars 2026 » dit Étalé 370,00 €, À la date 200,00 € ;
+  - le clic sur mars montre 3 factures dont les parts font 100 + 200 + 310 = 610 € ;
+  - la facture du 5 mars, qui appartient à l'exercice 2025, y figure ;
+  - la facture étalée du 1er au 31 mars sort à 310 € sans « part du mois », alors que l'exercice n'en porte que 170 €.
+- L'invariant de la spec (§14.21.2 : somme des parts = Étalé du mois) est cassé. Même défaut avec `02-29` : en 2027, l'exercice commence le 28 février, donc « février 2027 » ne compte qu'un jour.
+- **Correction** : envoyer `periode` avec `mois`. Le serveur calcule `bornesPeriode` de l'entité vérifiée et passe à la fonction l'intersection du mois et de l'exercice (la fonction SQL marche telle quelle sur une plage). Le front dit qu'un mois est partiel. Ajouter un test sur un mois de bord.
+- **Décision pour Thierry** : l'autre voie est de n'autoriser qu'un début d'exercice au 1er d'un mois.
+
+**2. BLOQUANT (justesse de l'affichage) — « Non comptée » ne s'affiche jamais.**
+- **Où** : `shared/charges-vue.js:365` et `:371` (plage).
+- **Le défaut** : `horsTotal` n'apparaît que si `etatDe(c)` vaut `null`. Or `etatDe` rend `validee` ou `a_verifier` pour toutes les lignes exclues du total qui comptent, et la fonction SQL écarte déjà `annulee` et `envoi`. La branche est donc morte.
+- **Scénario mesuré** :
+  - un échéancier validé de 600 € s'affiche « Vérifiée » ;
+  - une commission déjà comptée et non tranchée s'affiche « Vérifiée » ;
+  - aucune des deux n'est dans le total du mois, et l'écran ne le dit pas.
+- **Correction** : tester `c.compte === false` avant l'état, ou afficher les deux. Ajouter un test.
+
+**3. Mineur — une facture datée du mois mais étalée sur une autre période n'a pas de « part du mois ».**
+- **Où** : `shared/charges-vue.js:362` (plage).
+- **Le défaut** : la fonction rend `part_ttc_cents = null` quand la période ne touche pas le mois.
+- **Scénario mesuré** : une régularisation du 10 novembre couvrant 2025 s'affiche 77,77 € sans mention. Elle compte dans « À la date » mais pas dans « Étalé ».
+- **Correction** : afficher « part du mois : 0,00 € » quand la facture compte, qu'elle a une période et que sa part est nulle.
+
+**4. Mineur — des réponses périmées sont gardées.**
+- **Où** : `shared/charges-vue.js:645-647` et `:404-411` (plage).
+- **« Afficher plus » pendant un changement d'entité** (mesuré au banc) :
+  - la liste de la SCI montre une ligne de « Moi » ;
+  - `etat.suite` garde le curseur de l'ancienne entité.
+- **Détail de mois** : `basculerMois` ne compare que l'entité. Une relecture déclenchée par un geste ou un envoi pendant la lecture d'un mois laisse un détail périmé en cache, resservi au clic suivant sans relire.
+- **Correction** : un compteur de génération, incrémenté dans `appliquer()` et au changement d'entité ou d'exercice, vérifié aux deux endroits.
+
+**5. Mineur — les exercices proposés n'ont pas de borne vers l'avenir.**
+- **Où** : `lib/charges/ecran.js:87-90` comparé à `:98` (plage). `dateValide` accepte jusqu'en 2100 (`lib/charges/regles.js:197-203`, hors plage).
+- **Scénario mesuré** : une facture lue au 1er juin 2099 donne 74 options. Choisir 2050 rend 2026 sans rien dire.
+- **Correction** : borner le plus récent à « en cours + 5 », la même borne que la lecture.
+
+**6. Mineur — le choix d'exercice affiche un autre exercice que celui des totaux.**
+- **Où** : `lib/charges/ecran.js:89-99` et `shared/charges-vue.js:273` (plage).
+- **Scénario mesuré** : on choisit 2024, puis on supprime sa seule facture. La relecture garde `periode=2024`, mais 2024 n'est plus proposé. Le menu affiche « Exercice 2026 » alors que les totaux disent « Du 1 janv. 2024 au 31 déc. 2024 ». Rechoisir 2026 ne déclenche rien.
+- **Correction** : toujours inclure l'exercice lu dans `proposees`.
+
+**7. Mineur — une panne de `charges_exercices_bornes` est silencieuse.**
+- **Où** : `api/ecran/charges.js:117` (plage).
+- **Le défaut** : en cas d'échec, l'écran ne propose que l'exercice en cours, sans dire « indisponible ». L'en-tête de la migration (lignes 8-9) annonce un 503, ce qui est faux pour cette lecture.
+- **Correction** : un drapeau d'indisponibilité, ou corriger l'en-tête.
+
+**8. Mineur — pas de `grant execute … to service_role` explicite.**
+- **Où** : `migrations/2026-11-19-charges-exercice-mois.sql:172-178` (plage). Convention : `2026-11-13-charges-periode.sql:562-571` (hors plage).
+- **Le défaut** : la migration et son contrôle ne s'assurent pas que `service_role` peut exécuter les fonctions.
+- **Risque** : sur Supabase, les droits par défaut le donnent, et c'est le cas en local avec ces droits reproduits. Sans eux, on aurait le constat 7 et un 503 sur le détail.
+- **Correction** : ajouter le `grant`, et une ligne de contrôle avec `has_function_privilege('service_role', …)`.
+
+**9. Mineur (tests) — un test passe sur du code faux, et trois cas ne sont pas couverts.**
+- **Où** : `tests/charges-migration-exercice-mois.test.js:59-72` (plage).
+- **Le défaut** : le test cherche seulement les mots `floor(`, `greatest(` et `least(`, puis recalcule la règle en JavaScript. Avec `ka` au lieu de `ka - 1`, il resterait vert. L'empreinte md5 lie la migration à son contrôle, pas à la justesse.
+- La mesure « 79 mois, 0 écart » de la spec n'est pas rejouable depuis le dépôt : `scripts/oracle-resume-charges.sql` (hors plage) n'a pas été étendu au détail.
+- **Correction** : un oracle « somme des parts = Étalé » à jouer en local, sur staging et en production. Ajouter les tests des constats 1, 2 et 3, qu'aucun test ne couvre.
+
+**10. Mineur — certaines factures sans entité ne sont plus atteignables.**
+- **Où** : `lib/charges/ecran.js:141` (fichier dans la plage, ligne inchangée).
+- **Le défaut** : une facture `a_lire`, `a_verifier` ou `illisible` peut ne pas avoir d'entité. Au-delà des 50 premières de « À traiter », elle n'apparaît plus nulle part, alors qu'avant le lot la liste du compte la montrait. C'est conforme à la spec (« À traiter » commun), mais un chemin est perdu.
+
+## Contrats, i18n, règles du dépôt
+
+Rien d'autre :
+- `scripts/i18n-check.js` passe (1607 clés dans chacune des trois langues) ;
+- aucun hexa ajouté ;
+- aucune lecture tronquée à 1000 lignes ;
+- les clés supprimées ne sont utilisées nulle part ailleurs ;
+- les crédits sous chaque mois, la fiche ouverte depuis le détail et « Afficher plus » marchent.
+```
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et
