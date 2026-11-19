@@ -59,14 +59,37 @@ Airbnb `224cbb66`) :
 
 Booking, La bulle, Ofuro Futari : non touchés.
 
-### 2 ter. Le Full Sync de 19:17:05
+### 2 ter. Deux `full_sync` Channex lancés depuis le login partagé
 
-Il touchait le seul petit-enfant Airbnb du 23. Contrôle fait à 23:05 : sur
-469 jours (19/11/2026 → 01/03/2028), pour La bulle, le 23 et Ofuro Futari,
-**aucune nuit fermée sur la base (stop_sell ou disponibilité 0) n'est ouverte
-sur le petit-enfant Airbnb** (165, 284 et 428 nuits fermées, 0 écart). Le Full
-Sync ne pouvait donc rouvrir aucune nuit. Il est antérieur à la pose de
-l'ensemble « deux jour » : il ne prouve rien sur sa survie.
+| heure (Paris) | tarif touché | lancé par |
+|---|---|---|
+| 18/11 19:17:05 | `b56feb44`, petit-enfant Airbnb du 23 | un utilisateur (`user_email` posé) |
+| 19/11 07:48:12 | `7cfcc078`, petit-enfant Airbnb d'Ofuro Futari | un utilisateur (`user_email` posé) |
+
+Les deux ont `scope: rate_plans` et un seul tarif : c'est la forme de l'action
+« Sync » d'une annonce (Channex > canal Airbnb > Listing > Actions > Sync), pas
+du « Full Sync » du canal.
+
+**Ce n'est pas HôteSmart** (vérifié le 19/11 vers 16 h 10, lecture seule en
+production). Le « fullsync » d'HôteSmart (api/calendar.js `action=fullsync`,
+file `channel_sync_queue`, tâche cron `file_sync_ari`) pose
+`properties.last_fullsync_at` : il vaut **12/09/2026** pour les trois biens
+(Ofuro 09:55:41, le 23 10:05:43, La bulle 10:10:41 UTC), et la file ne contient
+que trois lignes, toutes `done` du 12/09/2026. Aucun chemin d'HôteSmart n'appelle
+l'action `full_sync` d'un canal Channex (mesuré dans `main` par le chef de file).
+Ce sont donc deux gestes faits par le login Channex partagé ; Thierry dira s'ils
+sont de lui. Le fil Calendrier n'en a lancé aucun : le 19/11 à 07:48, sa session
+n'avait aucune action dans le navigateur.
+
+**Rien n'a été rouvert.** Contrôlé après chacun : sur 469 jours (19/11/2026 →
+01/03/2028), pour La bulle, le 23 et Ofuro Futari, aucune nuit fermée sur la base
+(stop_sell ou disponibilité 0) n'est ouverte sur le petit-enfant Airbnb (le
+19/11 : 164, 283 et 428 nuits fermées, 0 écart).
+
+**Survie de l'ensemble « deux jour »** (étape 0, relevé le 19/11 vers 14 h 20) :
+la sync du 19/11 00:05:38 (Paris ; 18/11 23:05:38 UTC) pousse au 23 cinq dates d'avril 2027 ;
+l'ensemble est intact après, le 08/04 et le 30/04, et absent le 01/05. Un envoi
+de prix n'efface donc pas un ensemble de règles posé à la main.
 
 ## 3. Les règles produit
 
