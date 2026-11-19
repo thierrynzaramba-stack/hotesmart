@@ -3646,7 +3646,7 @@ review par commit).
 | 7 | mineur | panne des bornes silencieuse, en-tête de migration faux | **corrigé** : `exercices_indisponibles` dit à l'écran ; en-tête corrigé |
 | 8 | mineur | pas de `grant … to service_role` | **corrigé** : grant explicite, 4e ligne du contrôle |
 | 9 | mineur | test de la règle trop lâche, mesure non rejouable | **corrigé** : expression exacte testée ; oracle `scripts/oracle-detail-mois-charges.sql` |
-| 10 | mineur | factures sans entité au-delà des 50 d'« À traiter » plus atteignables | **à inscrire en dette** (numéro à demander au chef de file) ; la décision « une entité à la fois » est de Thierry |
+| 10 | mineur | factures sans entité au-delà des 50 d'« À traiter » plus atteignables | **dette 153** (décision de Thierry, numéro du chef de file) : corrigée avant qu'un compte atteigne 50 factures à traiter, et avant l'arrivée d'autres hôtes |
 
 Choix fait sur le constat 1, sans décision produit nouvelle : la base
 accepte déjà tout jour comme début d'exercice (`ej_exercice_chk`) ; le
