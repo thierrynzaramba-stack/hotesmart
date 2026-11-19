@@ -1194,6 +1194,16 @@ UTC le 16 ; `staging` = 718025fa, qui porte c6471952) :
   16), affiché « le 16 nov. » avant le correctif, s'affiche « **Le message du
   17 nov. 2026** ». Conforme.
 
+**En production** (main a7dad213, 17 novembre 2026, 01:10) : carte 20 normale
+au premier passage du cron après le déploiement (00:20:24Z : 122 requêtes,
+8,1 s, aucune erreur comptée par les tâches). **L'envoi LIVRÉ se vérifie au
+premier vrai cas** (décision de Thierry du 18 novembre 2026) : pas de
+réservation fictive, dont la création et l'annulation font partir puis revenir
+la disponibilité chez Airbnb et Booking. Au premier voyageur qui demande une
+facture : envoi depuis la fiche, puis contrôle de la réception, du masquage du
+lien dans le fil et de la page du voyageur. L'écran du téléphone reste à
+regarder par Thierry, en lecture seule.
+
 ## 11. Les textes (VALIDÉS par Thierry le 8 novembre 2026, 22 h 20)
 
 Aucun texte ne nomme HôteSmart : les messages partent au nom de l'hôte.
