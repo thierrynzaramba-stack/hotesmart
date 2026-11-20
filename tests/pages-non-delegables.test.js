@@ -55,6 +55,9 @@ const NON_DELEGABLES = [
   'pages/charges.html',             // compte de charges (lot 3) : TITULAIRE seul,
                                     // lecture comprise (Q9) — /api/ecran/charges
                                     // et /api/charges refusent un membre en 403
+  'pages/labo-ia.html',             // labo IA (20 novembre 2026) : FONDATEUR seul,
+                                    // sur son compte propre — /api/labo-ia refuse
+                                    // tout autre compte et un compte basculé en 403
   'apps/agent-ai/analyze.html',     // conversations + clé Beds24
   'apps/menages/prestataires.html', // public_tokens — réservé au titulaire
     'apps/reservation-directe/index.html',     // liens de réservation et
