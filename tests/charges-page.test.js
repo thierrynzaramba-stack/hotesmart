@@ -1223,46 +1223,108 @@ test('sans crédit, le bloc invite à en ajouter un ; sans lecture, il dit « in
   try { assert.match(texte(panne.$('[data-bind="credits"]')), /indisponibles/) } finally { panne.fermer() }
 })
 
-test('LE TEST QUI COMPTE : importer un crédit envoie le PDF en base64 avec la banque et l\'entité, puis relit l\'écran', async () => {
-  const gestes = []
-  const geste = (corps) => {
-    gestes.push(corps)
-    return { ok: true, credit: { id: CREDIT_ID, nb_echeances: 301, premiere_echeance: '2022-02-22', derniere_echeance: '2047-02-22' }, charges: 57 }
-  }
-  const b = await monter({ geste })
+// ─── Lot 8b : un seul bouton « Ajouter », le tableau reconnu tout seul ──────
+const TABLEAU_ID = id(900)
+const tableau = (plus = {}) => facture(900, {
+  statut: 'tableau', type_document: 'tableau_amortissement', fournisseur_nom: null, montant_ttc_cents: null,
+  entite_juridique_id: null, bien_id: null, categorie: null,
+  tableau_lu: { echeances: 301, debut: '2022-02-22', fin: '2047-02-22' }, ...plus
+})
+
+test('LE TEST QUI COMPTE (8b) : le bloc Crédits n\'a plus de formulaire ; un tableau reconnu attend dans « À traiter », sans montant', async () => {
+  const b = await monter({ ecran: () => reponseEcran({ aTraiter: [tableau()] }) })
   try {
-    await b.cliquer(b.$('[data-geste="credit-ajouter"]'))
-    const fichier = b.$('[data-credit-champ="fichier"]')
-    Object.defineProperty(fichier, 'files', { value: [new b.w.File(['%PDF-1.4 tableau'], 'tableau.pdf', { type: 'application/pdf' })], configurable: true })
-    b.saisir(b.$('[data-credit-champ="preteur"]'), 'Banque Exemple')
-    assert.equal(b.$('[data-credit-champ="entite"]').value, ENT, 'la seule entité active est choisie')
-    assert.match(texte(b.$('[data-credit-champ="bien"]')), /Tous les logements de l'entité/)
-    await b.cliquer(b.$('[data-geste="credit-importer"]'))
-    for (let i = 0; i < 10; i++) await b.attendre()
-    assert.deepEqual(gestes, [{ action: 'credit_importer', fichier: Buffer.from('%PDF-1.4 tableau').toString('base64'), preteur: 'Banque Exemple', entite_id: ENT, bien_id: null }])
-    assert.equal(b.lecturesEcran().length, 2, 'l\'écran est relu : les charges et la ligne du mois apparaissent')
-    assert.match(texte(b.$('[data-bind="credits"]')), /301 échéances lues.*Les 57 mensualités déjà passées sont dans vos charges/)
-    assert.equal(b.$('[data-bind="credit-form"]'), null, 'le formulaire se referme')
+    assert.equal(b.$('[data-geste="credit-ajouter"]'), null)
+    assert.equal(b.$('[data-credit-champ="fichier"]'), null)
+    assert.match(texte(b.$('[data-bind="credits"]')), /Déposez le tableau d'amortissement de votre prêt avec « Ajouter une facture »/)
+    const ligne = b.$('[data-bind="a-traiter"] .chg-ligne')
+    assert.match(mots(ligne), /Tableau d'amortissement 301 échéances, du 22 févr\.? 2022 au 22 févr\.? 2047 Tableau reconnu Importer les échéances$/)
+    assert.doesNotMatch(mots(ligne), /non lu|0,00|€/, 'un tableau n\'a pas de montant')
   } finally { b.fermer() }
 })
 
-test('une ligne du tableau qui ne se prouve pas est NOMMÉE par sa date ; rien ne part sans fichier ni banque', async () => {
-  const geste = () => { throw Object.assign(new Error('x'), { status: 422, error: 'ligne_incoherente', detail: '2023-06-22' }) }
-  const b = await monter({ geste })
+test('LE TEST QUI COMPTE (8b) : importer depuis la fiche d\'un tableau reconnu — AUCUN fichier ne repart, la banque et l\'entité partent avec l\'identifiant, puis l\'écran est relu', async () => {
+  const gestes = []
+  const geste = (corps) => {
+    gestes.push(corps)
+    return { ok: true, credit: { id: CREDIT_ID, nb_echeances: 301, premiere_echeance: '2022-02-22', derniere_echeance: '2047-02-22' }, charges: 57, charge_retiree: true }
+  }
+  const b = await monter({ geste, ecran: () => reponseEcran({ aTraiter: [tableau()] }) })
   try {
-    await b.cliquer(b.$('[data-geste="credit-ajouter"]'))
-    await b.cliquer(b.$('[data-geste="credit-importer"]'))
-    assert.match(texte(b.$('[data-bind="credit-retour"]')), /Choisissez le tableau/)
-    const fichier = b.$('[data-credit-champ="fichier"]')
-    Object.defineProperty(fichier, 'files', { value: [new b.w.File(['%PDF'], 't.pdf', { type: 'application/pdf' })], configurable: true })
-    await b.cliquer(b.$('[data-geste="credit-importer"]'))
-    assert.match(texte(b.$('[data-bind="credit-retour"]')), /Indiquez la banque/)
-    assert.deepEqual(b.gestes(), [])
-    b.saisir(b.$('[data-credit-champ="preteur"]'), 'Banque')
-    await b.cliquer(b.$('[data-geste="credit-importer"]'))
+    await b.cliquer(b.$('[data-bind="a-traiter"] .chg-ligne'))
+    const dlg = b.$('[data-bind="fiche"]')
+    assert.match(texte(dlg), /Tableau d'amortissement reconnu : 301 échéances, du 22 févr\.? 2022 au 22 févr\.? 2047\./)
+    // La fiche d'un tableau n'est pas celle d'une facture.
+    assert.equal(dlg.querySelector('[data-champ="montant_ttc_cents"]'), null)
+    assert.equal(dlg.querySelector('[data-geste="valider"]'), null)
+    assert.equal(dlg.querySelector('input[type="file"]'), null, 'le fichier est déjà déposé')
+    b.saisir(dlg.querySelector('[data-credit-champ="preteur"]'), 'Banque Exemple')
+    assert.equal(dlg.querySelector('[data-credit-champ="entite"]').value, ENT, 'la seule entité active est choisie')
+    assert.match(texte(dlg.querySelector('[data-credit-champ="bien"]')), /Tous les logements de l'entité/)
+    await b.cliquer(dlg.querySelector('[data-geste="tableau-importer"]'))
     for (let i = 0; i < 10; i++) await b.attendre()
-    assert.match(texte(b.$('[data-bind="credit-retour"]')), /La ligne du 22 juin 2023 ne se vérifie pas/)
+    assert.deepEqual(gestes, [{ action: 'tableau_importer', id: TABLEAU_ID, preteur: 'Banque Exemple', entite_id: ENT, bien_id: null }])
+    assert.equal(b.lecturesEcran().length, 2, 'l\'écran est relu : le crédit, ses charges et la ligne du mois apparaissent')
+    assert.match(texte(b.$('[data-bind="credits"]')), /301 échéances lues.*Les 57 mensualités déjà passées sont dans vos charges/)
+    assert.equal(dlg.open, false, 'la fiche se referme')
   } finally { b.fermer() }
+})
+
+test('8b : une ligne du tableau qui ne se prouve pas est NOMMÉE par sa date ; rien ne part sans banque', async () => {
+  const geste = () => { throw Object.assign(new Error('x'), { status: 422, error: 'ligne_incoherente', detail: '2023-06-22' }) }
+  const b = await monter({ geste, ecran: () => reponseEcran({ aTraiter: [tableau()] }) })
+  try {
+    await b.cliquer(b.$('[data-bind="a-traiter"] .chg-ligne'))
+    const dlg = b.$('[data-bind="fiche"]')
+    await b.cliquer(dlg.querySelector('[data-geste="tableau-importer"]'))
+    assert.match(texte(dlg.querySelector('[data-bind="fiche-retour"]')), /Indiquez la banque/)
+    assert.deepEqual(b.gestes(), [])
+    b.saisir(dlg.querySelector('[data-credit-champ="preteur"]'), 'Banque')
+    await b.cliquer(dlg.querySelector('[data-geste="tableau-importer"]'))
+    for (let i = 0; i < 10; i++) await b.attendre()
+    assert.match(texte(dlg.querySelector('[data-bind="fiche-retour"]')), /La ligne du 22 juin 2023 ne se vérifie pas/)
+    assert.equal(dlg.open, true, 'la fiche reste ouverte, rien n\'est perdu')
+    assert.equal(dlg.querySelector('[data-geste="tableau-importer"]').disabled, false, 'on peut réessayer')
+  } finally { b.fermer() }
+})
+
+test('8b : « ce n\'est pas un tableau » renvoie la charge à la lecture, et la fiche se repeint en facture', async () => {
+  const gestes = []
+  const lue = facture(900, { statut: 'a_verifier', fournisseur_nom: 'Banque Exemple', montant_ttc_cents: 12300 })
+  let apres = false
+  const geste = (corps) => { gestes.push(corps); apres = true; return { ok: true, issue: 'a_verifier', charge: lue } }
+  const b = await monter({ geste, ecran: () => reponseEcran({ aTraiter: [apres ? lue : tableau()] }) })
+  try {
+    await b.cliquer(b.$('[data-bind="a-traiter"] .chg-ligne'))
+    await b.cliquer(b.$('[data-geste="tableau-en-facture"]'))
+    for (let i = 0; i < 10; i++) await b.attendre()
+    assert.deepEqual(gestes, [{ action: 'tableau_en_facture', id: TABLEAU_ID }])
+    assert.equal(b.$('[data-champ="fournisseur_nom"]').value, 'Banque Exemple')
+    assert.ok(b.$('[data-geste="valider"]'))
+  } finally { b.fermer() }
+})
+
+test('8b : choisir le type « Tableau d\'amortissement » sur une facture pas encore vérifiée relance la reconnaissance ; un refus remet le type d\'avant et le dit', async () => {
+  const gestes = []
+  const geste = (corps) => { gestes.push(corps); throw Object.assign(new Error('x'), { status: 422, error: 'pas_un_tableau' }) }
+  const c = facture(901, { statut: 'a_verifier', type_document: 'facture' })
+  const b = await monter({ geste, ecran: () => reponseEcran({ aTraiter: [c] }) })
+  try {
+    await b.cliquer(b.$('[data-bind="a-traiter"] .chg-ligne'))
+    const sel = b.$('[data-champ="type_document"]')
+    assert.ok([...sel.options].some(o => o.value === 'tableau_amortissement'))
+    await b.choisir(sel, 'tableau_amortissement')
+    for (let i = 0; i < 10; i++) await b.attendre()
+    assert.deepEqual(gestes, [{ action: 'tableau_reconnaitre', id: c.id }])
+    assert.match(texte(b.$('[data-bind="fiche-retour"]')), /n'est pas un tableau d'amortissement que nous savons lire/)
+    assert.equal(b.$('[data-champ="type_document"]').value, 'facture')
+  } finally { b.fermer() }
+  // Une facture VÉRIFIÉE n'offre pas ce type.
+  const v = await monter({ ecran: () => reponseEcran({ liste: [facture(902, { statut: 'validee' })] }) })
+  try {
+    await v.cliquer(v.$('[data-bind="liste"] .chg-ligne'))
+    assert.equal([...v.$('[data-champ="type_document"]').options].some(o => o.value === 'tableau_amortissement'), false)
+  } finally { v.fermer() }
 })
 
 test('supprimer un crédit demande confirmation, puis relit l\'écran', async () => {
@@ -1305,18 +1367,18 @@ test('l\'échéance DU JOUR est payée — la même règle que l\'import et le c
   } finally { b.fermer() }
 })
 
-test('un logement choisi part avec le crédit ; les refus du crédit ont leurs mots (review, mineur 5)', async () => {
+test('8b : un logement choisi part avec l\'import ; les refus du crédit ont leurs mots (review du lot 7, mineur 5)', async () => {
   const gestes = []
   const geste = (corps) => { gestes.push(corps); throw Object.assign(new Error('x'), { status: 413, error: 'trop_gros' }) }
-  const b = await monter({ geste })
+  const b = await monter({ geste, ecran: () => reponseEcran({ aTraiter: [tableau()] }) })
   try {
-    await b.cliquer(b.$('[data-geste="credit-ajouter"]'))
-    Object.defineProperty(b.$('[data-credit-champ="fichier"]'), 'files', { value: [new b.w.File(['%PDF'], 't.pdf', { type: 'application/pdf' })], configurable: true })
-    b.saisir(b.$('[data-credit-champ="preteur"]'), 'Banque')
-    await b.choisir(b.$('[data-credit-champ="bien"]'), BIEN)
-    await b.cliquer(b.$('[data-geste="credit-importer"]'))
+    await b.cliquer(b.$('[data-bind="a-traiter"] .chg-ligne'))
+    const dlg = b.$('[data-bind="fiche"]')
+    b.saisir(dlg.querySelector('[data-credit-champ="preteur"]'), 'Banque')
+    await b.choisir(dlg.querySelector('[data-credit-champ="bien"]'), BIEN)
+    await b.cliquer(dlg.querySelector('[data-geste="tableau-importer"]'))
     for (let i = 0; i < 10; i++) await b.attendre()
     assert.equal(gestes[0].bien_id, BIEN)
-    assert.match(texte(b.$('[data-bind="credit-retour"]')), /dépasse 2 Mo/)
+    assert.match(texte(dlg.querySelector('[data-bind="fiche-retour"]')), /dépasse 2 Mo/)
   } finally { b.fermer() }
 })

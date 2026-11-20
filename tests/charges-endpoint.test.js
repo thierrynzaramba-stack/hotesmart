@@ -15,13 +15,23 @@ const { baseEnregistreuse } = require('./outils/base-enregistreuse')
 const TITULAIRE = '11111111-1111-4111-8111-111111111111'
 const MEMBRE = '22222222-2222-4222-8222-222222222222'
 
-async function appeler ({ methode = 'POST', corps = null, titulaire = true, repondre, stockage, lire }) {
+async function appeler ({ methode = 'POST', corps = null, titulaire = true, repondre, stockage, lire, tableau }) {
   const { client, requetes, gestes } = baseEnregistreuse(repondre, stockage)
   // La lecture IA, remplacée quand le test le demande (jamais d'appel réel).
   const absLecture = require.resolve('../lib/charges/lecture')
   require('../lib/charges/lecture')
   const vraieLecture = require.cache[absLecture].exports
   if (lire) require.cache[absLecture].exports = Object.assign({}, vraieLecture, { lireDocument: lire })
+  // Le lecteur de tableaux d'amortissement (lot 8b) : TOUJOURS un double — par
+  // défaut « ce PDF n'est pas un tableau » — pour qu'aucun test ne lance le
+  // vrai processus de lecture.
+  const absTableau = require.resolve('../lib/charges/credit-tableau')
+  require('../lib/charges/credit-tableau')
+  const vraiTableau = require.cache[absTableau].exports
+  const lectures = []
+  require.cache[absTableau].exports = Object.assign({}, vraiTableau, {
+    lireTableauIsole: async (octets, o) => { lectures.push(o); return tableau ? tableau() : { ok: false, code: 'pdf_illisible', detail: null } }
+  })
   const absSdk = require.resolve('@supabase/supabase-js')
   require('@supabase/supabase-js')
   const vraiCreate = require.cache[absSdk].exports.createClient
@@ -57,9 +67,11 @@ async function appeler ({ methode = 'POST', corps = null, titulaire = true, repo
     require.cache[absSdk].exports.createClient = vraiCreate
     require.cache[absGarde].exports = vraieGarde
     require.cache[absLecture].exports = vraieLecture
+    require.cache[absTableau].exports = vraiTableau
     delete require.cache[absEndpoint]
+    delete require.cache[absWriter]
   }
-  return { ...rep, requetes, gestes }
+  return { ...rep, requetes, gestes, lectures }
 }
 
 test('GET -> 405, et l’en-tête privé est déjà posé', async () => {
@@ -137,6 +149,108 @@ test('confirmer sous le plafond : la lecture a lieu tout de suite', async () => 
   assert.equal(r.statut, 200)
   assert.equal(appels, 1)
   assert.equal(r.charge.issue, 'panne')
+})
+
+// ─── Lot 8b : un seul bouton « Ajouter », le tableau reconnu tout seul ──────
+const ech = (i, date) => ({ indice: i, rang: i, date, interets_cents: 1000, assurance_cents: 100, accessoires_cents: 0, capital_cents: 5000, echeance_cents: 6100, capital_restant_cents: 90000 })
+const TROIS = () => ({ ok: true, echeances: [ech(1, '2026-09-22'), ech(2, '2026-10-22'), ech(3, '2026-12-22')] })
+
+test('LE TEST QUI COMPTE (8b) : confirmer un PDF qui est un tableau d\'amortissement — AUCUN appel à l\'IA, même AU PLAFOND du jour, et la charge passe `tableau`', async () => {
+  for (const dejaLues of [3, 50]) {
+    let ia = 0
+    const r = await appeler({
+      corps: { action: 'confirmer', id: ID },
+      // La charge est `envoi` à la confirmation, puis `a_lire` quand la lecture s'applique.
+      repondre: ((n) => (q) => {
+        if (q.table === 'ia_appels') return { count: dejaLues }
+        if (q.table === 'charges' && q.op === 'select' && q.unique) return { data: { id: ID, user_id: TITULAIRE, statut: n++ ? 'a_lire' : 'envoi', cree_le: '2026-11-20T09:00:00Z', justificatif_chemin: `${TITULAIRE}/${ID}` } }
+        if (q.table === 'charges' && q.op === 'update' && q.unique) return { data: { id: ID, ...q.charge } }
+        return { data: [] }
+      })(0),
+      stockage: { download: () => ({ data: blob(PDF), error: null }) },
+      lire: async () => { ia++; return { ok: true, lu: {} } },
+      tableau: TROIS
+    })
+    assert.equal(r.statut, 200)
+    assert.equal(ia, 0, 'un tableau ne coûte aucune lecture')
+    assert.equal(r.charge.issue, 'tableau')
+    assert.equal(r.charge.charge.statut, 'tableau')
+    const maj = r.requetes.find(x => x.op === 'update' && x.charge.statut === 'tableau')
+    assert.deepEqual(maj.charge.lecture_ia.tableau, { echeances: 3, debut: '2026-09-22', fin: '2026-12-22' })
+    assert.deepEqual(r.lectures, [{ cle: TITULAIRE, delaiMs: 6000 }])
+    assert.ok(!r.requetes.some(x => x.table === 'ia_appels'), 'le plafond n\'est même pas consulté')
+  }
+})
+
+test('8b : confirmer une FACTURE en PDF — la reconnaissance la refuse, l\'IA la lit ; une file prise laisse passer l\'IA', async () => {
+  for (const tableau of [undefined, () => ({ panne: 'occupe' })]) {
+    let ia = 0
+    const r = await appeler({
+      corps: { action: 'confirmer', id: ID }, repondre: confirmable(3),
+      stockage: { download: () => ({ data: blob(PDF), error: null }) },
+      lire: async () => { ia++; return { panne: true } }, tableau
+    })
+    assert.equal(r.statut, 200)
+    assert.equal(ia, 1)
+    assert.equal(r.lectures.length, 1, 'la reconnaissance a bien été essayée, une fois')
+  }
+})
+
+const UNE = (statut, plus = {}) => (r) => {
+  if (r.table === 'ia_appels') return { count: 3 }
+  if (r.table === 'charges' && r.op === 'select' && r.unique) return { data: { id: ID, user_id: TITULAIRE, statut, cree_le: '2026-11-20T09:00:00Z', justificatif_type: 'application/pdf', justificatif_chemin: `${TITULAIRE}/${ID}`, groupe_doublon: null, origine: 'fichier', ...plus } }
+  if (r.table === 'charges' && r.op === 'update' && r.unique) return { data: { id: ID, ...r.charge } }
+  if (r.table === 'charges' && r.op === 'delete') return { data: [{ id: ID }] }
+  if (r.table === 'charges_credits' && r.optionsSelect && r.optionsSelect.head) return { count: 0 }
+  return { data: [] }
+}
+
+test('8b : tableau_reconnaitre — le PDF relu comme tableau ; un PDF qui n\'en est pas un : 422 `pas_un_tableau`, rien d\'écrit', async () => {
+  const stockage = { download: () => ({ data: blob(PDF), error: null }) }
+  const ok = await appeler({ corps: { action: 'tableau_reconnaitre', id: ID }, repondre: UNE('a_verifier'), stockage, tableau: TROIS })
+  assert.equal(ok.statut, 200)
+  assert.deepEqual([ok.charge.issue, ok.charge.charge.statut], ['tableau', 'tableau'])
+  const non = await appeler({ corps: { action: 'tableau_reconnaitre', id: ID }, repondre: UNE('a_verifier'), stockage })
+  assert.equal(non.statut, 422)
+  assert.equal(non.charge.error, 'pas_un_tableau')
+  assert.equal(non.requetes.filter(x => x.op !== 'select').length, 0)
+})
+
+test('8b : tableau_en_facture — la charge repart en lecture et l\'IA la lit TOUT DE SUITE, SANS repasser par la reconnaissance', async () => {
+  let ia = 0
+  const r = await appeler({
+    corps: { action: 'tableau_en_facture', id: ID }, repondre: UNE('tableau'),
+    stockage: { download: () => ({ data: blob(PDF), error: null }) },
+    lire: async () => { ia++; return { panne: true } }, tableau: TROIS
+  })
+  assert.equal(r.statut, 200)
+  assert.equal(ia, 1)
+  assert.equal(r.lectures.length, 0, 'sinon elle reviendrait `tableau` aussitôt')
+  assert.ok(r.requetes.some(x => x.op === 'update' && x.charge.statut === 'a_lire'))
+})
+
+test('8b : tableau_importer — le titulaire seul, le crédit sous SON compte, la charge retirée ; un membre est refusé avant toute requête', async () => {
+  const absEnt = require.resolve('../lib/entites-juridiques')
+  const vraies = require(absEnt)
+  const ENT = '44444444-4444-4444-8444-444444444444'
+  require.cache[absEnt].exports = Object.assign({}, vraies, {
+    entitesDuCompte: async () => ({ ok: true, entites: [{ id: ENT, nom: 'SCI', archivee_le: null }] }),
+    entiteDuBien: async () => ({ ok: true, entite: null })
+  })
+  try {
+    const corps = { action: 'tableau_importer', id: ID, preteur: 'Banque', entite_id: ENT, bien_id: null }
+    const r = await appeler({ corps, repondre: UNE('tableau'), stockage: { download: () => ({ data: blob(PDF), error: null }) }, tableau: TROIS })
+    assert.equal(r.statut, 200, JSON.stringify(r.charge))
+    assert.equal(r.charge.charge_retiree, true)
+    assert.equal(r.charge.credit.nb_echeances, 3)
+    assert.equal(r.charge.credit.justificatif_chemin, undefined)
+    assert.equal(r.requetes.find(x => x.table === 'charges_credits' && x.op === 'insert').charge.user_id, TITULAIRE)
+    assert.ok(r.requetes.some(x => x.table === 'charges' && x.op === 'delete'))
+    const m = await appeler({ corps, titulaire: false, repondre: UNE('tableau'), tableau: TROIS })
+    assert.equal(m.statut, 403)
+    assert.equal(m.requetes.length, 0)
+    assert.equal(m.lectures.length, 0)
+  } finally { require.cache[absEnt].exports = vraies }
 })
 
 // ─── Les crédits (§14.20) ───────────────────────────────────────────────────
