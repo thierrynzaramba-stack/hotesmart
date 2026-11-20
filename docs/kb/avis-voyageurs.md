@@ -961,11 +961,18 @@ Colomiers, 653 points sur 69 avis = 9,4638 sur 10, soit exactement **4,732 sur
 
 **2. L'objet d'avis vide.** La population était « une note non nulle »
 (`.not('overall_score','is',null)`), ce qui laissait passer les **zéros**.
-L'objet Channex naît au départ, caché et vide, et Airbnb le révèle au bout de
-14 jours **même si le voyageur n'a rien écrit** : la ligne arrive alors avec
-`is_hidden: false` et `overall_score: 0`, et entrait à 0/10 dans la note. Ce
-qui ferme le cas, c'est `microSurCinq` et son **`v > 0`** — pas un filtre de
-population.
+L'objet Channex naît au départ, caché et vide. S'il arrive **révélé et vide**,
+la ligne porte `is_hidden: false` et `overall_score: 0`, et entrait à 0/10 dans
+la note. Ce qui ferme le cas, c'est `microSurCinq` et son **`v > 0`** — pas un
+filtre de population.
+
+⚠ **Cette ligne disait qu'Airbnb révèle l'objet au bout de 14 jours « même si
+le voyageur n'a rien écrit ». La mesure du 18 novembre 2026 dit l'inverse** :
+sans avis écrit, l'objet **reste masqué** (42 cartes au-delà de 14 jours sur les
+4 biens ; deux départs vérifiés sur les commentaires publics de La bulle, absents
+alors que l'avis voisin y est). C'est ce qui fonde « Pas d'avis du voyageur »
+(spec avis-v5 `spec-refonte-ui-v5-lot-avis.md` §11). La garde `v > 0` reste :
+elle ne coûte rien.
 
 ⚠ **CE N'EST PAS `voyageurAEcrit`, et cette ligne a dit le contraire pendant
 une journée.** La première version appelait bien ce prédicat (« une note > 0

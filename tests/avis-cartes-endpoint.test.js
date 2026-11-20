@@ -225,8 +225,8 @@ test('SECURITE : une EVALUATION d un autre bien n apparait pas chez un membre li
 test('LE TEST QUI COMPTE : un objet d avis VIDE ne fait PAS de carte, et ne compte pas', async () => {
   // Decision de Thierry du 20 octobre 2026 : « un objet d'avis vide ne compte
   // nulle part (compte, ratio, cartes), meme regle que Logements ». L'objet
-  // Channex nait cache et vide ; Airbnb le revele a 14 jours MEME si le
-  // voyageur n'a rien ecrit. Il avait jusqu'ici une carte a lui, « 1 avis
+  // Channex nait cache et vide ; s'il arrive REVELE et vide (la mesure du
+  // 18 novembre 2026 dit qu'il reste plutot masque), il avait une carte a lui, « 1 avis
   // recu » dans la tuile, et « 0/10 » affiche — pendant que /logements disait
   // « Aucun avis » pour le meme bien.
   const VIDE = avisDe('objet-vide', { overall_score: null, content: null, content_public: null, is_hidden: false })
@@ -402,4 +402,117 @@ test('avant la migration : la page reste juste, SANS traduction (une relecture s
   const lectures = etat.requetes.filter(q => q.table === 'ota_reviews' && /\bbooking_uid\b/.test(String(q._col || '')))
   assert.equal(lectures.length, 2, 'une tentative avec, une relecture sans')
   assert.doesNotMatch(String(lectures[1]._col), /avis_traductions/)
+})
+
+// ─── Pas d'avis du voyageur (décisions de Thierry des 18 et 19 novembre 2026)
+// Un avis Airbnb encore masqué et vide plus de 16 jours après sa réception
+// (fenêtre Airbnb de 14 jours + 2 jours de marge) est un voyageur qui n'a rien
+// écrit : l'objet Channex naît au départ, vide. La carte le dit ; rien de l'avis
+// ne sort de plus, et aucun chiffre ne change.
+// Les âges sont pris à DEMI-JOUR du seuil, pour que la granularité de `jour()`
+// et l'horloge décalée ne les fassent jamais basculer ; le bord exact, lui, se
+// teste plus bas sur la fonction pure, à `maintenant` figé.
+test('LE TEST QUI COMPTE : masqué depuis plus de 16 jours → sans_avis ; 15,5 jours, révélé ou sans date → non ; seul, sans évaluation → plus de carte', async () => {
+  preparer({ evaluations: [{ ...EVAL, id: 'e-v', booking_uid: 'u-v', ota_review_id: 'vieux' }], avis: [
+    avisDe('vieux', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-16.5), booking_uid: 'u-v' }),
+    avisDe('seul', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-40), booking_uid: 'u-seul' }),
+    avisDe('jeune', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: jour(-15.5), booking_uid: 'u-j' }),
+    avisDe('sansdate', { is_hidden: true, overall_score: 0, content: null, content_public: null, received_at: null, booking_uid: 'u-s' }),
+    avisDe('revele', { received_at: jour(-30), booking_uid: 'u-r' })
+  ] })
+  const r = await appeler({ periode: 'toujours', anciens: '1' })
+  assert.equal(r.code, 200)
+  const a = avisParId(r.body)
+  assert.equal(a.vieux.sans_avis, true)
+  assert.equal(a.vieux.masque, true, 'toujours masqué : rien de lui ne sort')
+  assert.equal(a.vieux.note_sur_5, null)
+  assert.equal(a.jeune.sans_avis, false, 'dans la marge de transmission, il peut encore arriver')
+  assert.equal(a.sansdate.sans_avis, false, 'sans date, on ne conclut rien')
+  assert.equal(a.revele.sans_avis, false)
+  // Décision du 19 novembre 2026 : sans évaluation, la carte qui n'aurait dit
+  // que « Pas d'avis du voyageur » n'existe pas, et ne compte pas.
+  assert.equal(a.seul, undefined, 'la carte vide a disparu')
+  assert.equal(r.body.anciens_total, r.body.cartes.anciens.length)
+  assert.ok(r.body.cartes.anciens.some(c => c.avis.some(x => x.id === 'revele')), 'les autres anciens restent')
+})
+
+// Le bord exact, sur la fonction pure, à `maintenant` FIGÉ (constat 5 de la
+// relecture : le test HTTP ci-dessus lit l'horloge, il ne peut pas viser le bord).
+test('le bord : 16 jours tout juste → non ; une seconde de plus → oui ; et les trois conditions strictes', () => {
+  const { assemblerCartes } = require('../lib/avis/cartes')
+  const RECU = '2026-11-01T10:00:00Z'
+  const T0 = Date.parse(RECU)
+  const SEIZE_JOURS = 16 * 86400000
+  const masque = (id, extra = {}) => ({ id, provider: 'channex', ota: 'airbnb', cache: true, overall_score: 0, content: null, content_public: null, received_at: RECU, booking_uid: `u-${id}`, ...extra })
+  // Chaque avis porte son évaluation : sans elle, une carte « pas d'avis »
+  // disparaît (test suivant), et le drapeau ne se lirait plus.
+  const evDe = a => ({ id: `e-${a.id}`, booking_uid: a.booking_uid, property_id: 'P1', property_id_ref: 'R1', ota: a.ota, status: 'a_remplir', deadline_at: '2027-01-15T12:00:00Z', published_at: null, public_text: null, ota_review_id: a.id, created_at: RECU })
+  const drapeau = (a, maintenant) => {
+    const s = assemblerCartes({ avis: [a], evaluations: [evDe(a)], maintenant })
+    const vu = [...s.attente, ...s.recents, ...s.anciens].flatMap(c => c.avis).find(x => x.id === a.id)
+    assert.ok(vu, `l’avis ${a.id} a sa carte`)
+    return vu.sans_avis
+  }
+  assert.equal(drapeau(masque('bord'), T0 + SEIZE_JOURS), false, '16 jours tout juste : pas encore')
+  assert.equal(drapeau(masque('bord'), T0 + SEIZE_JOURS + 1000), true, 'une seconde de plus')
+  assert.equal(drapeau(masque('quinze'), T0 + 15 * 86400000), false, 'dans la marge de deux jours')
+  // Une date SANS fuseau est en UTC (instantUTC), pas dans le fuseau de la machine.
+  assert.equal(drapeau(masque('sansfuseau', { received_at: '2026-11-01T10:00:00' }), T0 + SEIZE_JOURS + 1000), true)
+  assert.equal(drapeau(masque('sansfuseau', { received_at: '2026-11-01T10:00:00' }), T0 + SEIZE_JOURS), false)
+  // Masqué par prudence seulement (`cache` absent) : on ne conclut rien.
+  assert.equal(drapeau(masque('doute', { cache: undefined }), T0 + 30 * 86400000), false)
+  // Un objet masqué qui porte une note ou un texte n'est pas vide.
+  assert.equal(drapeau(masque('note', { overall_score: 8 }), T0 + 30 * 86400000), false)
+  assert.equal(drapeau(masque('texte', { content: 'Super' }), T0 + 30 * 86400000), false)
+  // Booking n'a pas de double aveugle : jamais « pas d'avis », même avec `cache` vrai.
+  assert.equal(drapeau(masque('booking', { ota: 'booking', overall_score: 8 }), T0 + 30 * 86400000), false)
+  // Un objet masqué qui ne porte qu'un texte public, ou qu'un retour privé, n'est pas vide.
+  assert.equal(drapeau(masque('public', { content_public: 'Super' }), T0 + 30 * 86400000), false)
+  assert.equal(drapeau(masque('prive', { content_private: 'Merci' }), T0 + 30 * 86400000), false)
+})
+
+// La règle elle-même, sans passer par l'assemblage : un objet VIDE d'une autre
+// source n'atteint jamais `avisPourCarte` (l'assemblage l'écarte comme objet
+// vide), donc seul un appel direct prouve que `estMasque` mord encore (constat 3
+// de la relecture du 19 novembre 2026).
+test('la règle seule : un objet vide Booking, une saisie manuelle → jamais « pas d’avis », même avec `cache` vrai', () => {
+  const { sansAvisDuVoyageur } = require('../lib/avis/cartes')
+  const RECU = '2026-11-01T10:00:00Z'
+  const tard = Date.parse(RECU) + 30 * 86400000
+  const vide = extra => ({ provider: 'channex', ota: 'airbnb', cache: true, overall_score: 0, content: null, content_public: null, received_at: RECU, ...extra })
+  assert.equal(sansAvisDuVoyageur(vide(), tard), true, 'témoin : l’objet Airbnb vide et ancien')
+  assert.equal(sansAvisDuVoyageur(vide({ ota: 'booking' }), tard), false)
+  assert.equal(sansAvisDuVoyageur(vide({ provider: 'manuel', ota: null }), tard), false)
+  assert.equal(sansAvisDuVoyageur(vide(), NaN), false, 'sans `maintenant`, on ne conclut rien')
+})
+
+// Décision de Thierry du 19 novembre 2026 (option A) : une carte SANS évaluation
+// dont tous les avis sont « Pas d'avis du voyageur » n'existe pas.
+test('une carte sans évaluation qui ne dirait que « Pas d’avis du voyageur » disparaît ; toute autre carte reste', () => {
+  const { assemblerCartes } = require('../lib/avis/cartes')
+  const RECU = '2026-08-22T10:00:00Z'
+  const maintenant = Date.parse('2026-11-19T12:00:00Z')
+  const vide = (id, extra = {}) => ({ id, provider: 'channex', ota: 'airbnb', cache: true, overall_score: 0, content: null, content_public: null, received_at: RECU, booking_uid: `u-${id}`, ...extra })
+  const ev = (uid, avisId) => ({ id: `e-${uid}`, booking_uid: uid, property_id: 'P1', property_id_ref: 'R1', ota: 'airbnb', status: 'publiee', deadline_at: '2026-09-05T10:00:00Z', published_at: '2026-09-01T10:00:00Z', public_text: 'Merci', ota_review_id: avisId, created_at: RECU })
+  const s = assemblerCartes({
+    maintenant,
+    avis: [
+      vide('seul'),
+      vide('evalue'),
+      vide('jeune', { received_at: '2026-11-05T10:00:00Z' }),
+      vide('doute', { cache: undefined }),
+      vide('double-a', { booking_uid: 'u-double' }),
+      vide('double-b', { booking_uid: 'u-double', cache: false, overall_score: 9, content: 'Parfait' })
+    ],
+    evaluations: [ev('u-evalue', 'evalue')]
+  })
+  const cartes = [...s.attente, ...s.recents, ...s.anciens]
+  const avecAvis = id => cartes.find(c => c.avis.some(a => a.id === id))
+  assert.equal(avecAvis('seul'), undefined, 'masqué, vide, ancien, sans évaluation : plus de carte')
+  assert.ok(avecAvis('evalue'), 'avec une évaluation, la carte reste')
+  assert.equal(avecAvis('evalue').avis[0].sans_avis, true, 'et elle dit « Pas d’avis du voyageur »')
+  assert.ok(avecAvis('jeune'), 'dans le délai, rien ne change')
+  assert.ok(avecAvis('doute'), 'masqué par prudence seulement : rien ne change')
+  assert.ok(avecAvis('double-a'), 'un autre avis du même séjour garde la carte')
+  assert.equal(cartes.length, 4)
 })
