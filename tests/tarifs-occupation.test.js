@@ -76,7 +76,22 @@ test('la base de la grille est la partie SANS supplement', () => {
 })
 
 test('plan par logement : la seule option fait la base', () => {
-  assert.equal(T.baseDeLaGrille([{ occupancy: 6, rate: '120.00', is_primary: true }], 2), 120)
+  assert.equal(T.baseDeLaGrille([{ occupancy: 6, rate: '120.00', is_primary: true }], 2, 'per_room'), 120)
+})
+
+test('plan par personne : l option exacte ou rien, jamais la principale (review C3)', () => {
+  // Une grille aux options basses a 0 (plans provisionnes par la migration) :
+  // la principale porterait la base PLUS les supplements.
+  const trouee = GRILLE_23.map(o => (o.occupancy <= 4 ? { ...o, rate: '0.00' } : o))
+  assert.equal(T.baseDeLaGrille(trouee, 4, 'per_person'), null)
+  assert.equal(T.baseDeLaGrille(GRILLE_23, 4, 'per_person'), 90)
+})
+
+test('la forme des prix ne change que si les prix envoyes changent (review C6)', () => {
+  assert.notEqual(T.formeOccupation(6, 4, 2), T.formeOccupation(6, 6, 2), 'le 23 : 89 -> 85 a 6')
+  assert.equal(T.formeOccupation(6, 4, 0), T.formeOccupation(6, 2, 0), 'par logement : inclus sans effet')
+  assert.equal(T.formeOccupation(6, 4, null), T.formeOccupation(6, 6, 0))
+  assert.notEqual(T.formeOccupation(6, 4, 2), T.formeOccupation(5, 4, 2), 'la capacite change la forme')
 })
 
 test('une grille sans montant ne fabrique pas de base', () => {
@@ -199,7 +214,7 @@ test('un journal en panne ne fait pas echouer le renvoi, et le dit', async () =>
   console.error = (...a) => erreurs.push(a.join(' '))
   try {
     const r = await T.appliquerOccupation({ ...BASE_APPLIQUER, appel: c.appel,
-      lireInventaire: async () => [{ date: '2026-12-02', rate: 85 }], fenetre: ['2026-12-02'],
+      lignes: [{ date: '2026-12-02', rate: 85 }], fenetre: ['2026-12-02'],
       journal: { supabase: s.client, userId: 'U', propertyId: 'UUID', providerPropertyId: 'PP', unites: 1 } })
     assert.equal(r.ok, true, 'le prix EST parti')
     assert.ok(r.journal && r.journal.erreur)
@@ -226,18 +241,21 @@ function canal ({ echecs = {} } = {}) {
 const PLAN = { ok: true, mode: 'per_person', options: GRILLE_23 }
 const GRILLE_PLATE = { sell_mode: 'per_person', options: [1, 2, 3, 4, 5, 6].map(o => ({ occupancy: o, rate: 9000, is_primary: o === 6 })) }
 const BASE_APPLIQUER = {
-  ratePlanId: 'R', planActuel: PLAN, grille: GRILLE_PLATE, renvoyer: true,
-  lireInventaire: async () => [{ date: 'a', rate: 85 }, { date: 'b', rate: 95 }],
-  fenetre: ['a', 'b'], bien: BIEN_23, propId: 'P', capacite: 6, inclus: 6, supplement: 2
+  ratePlanId: 'R', planActuel: PLAN, grille: GRILLE_PLATE, renvoyer: true, typeDeChambre: null,
+  lignes: [{ date: '2026-12-02', rate: 85 }, { date: '2026-12-03', rate: 85 }, { date: '2026-12-04', rate: 95 }],
+  fenetre: ['2026-12-02', '2026-12-03', '2026-12-04'],
+  bien: BIEN_23, propId: 'P', capacite: 6, inclus: 6, supplement: 2
 }
 
-test('grille puis prix, dans cet ordre, en un seul envoi de prix', async () => {
+test('grille puis prix, dans cet ordre, en un seul envoi regroupe en plages', async () => {
   const c = canal()
   const r = await T.appliquerOccupation({ ...BASE_APPLIQUER, appel: c.appel })
   assert.equal(r.ok, true)
-  assert.equal(r.renvoyees, 2)
+  assert.equal(r.renvoyees, 3)
   assert.deepEqual(c.appels.map(a => `${a.method} ${a.chemin}`), ['PUT /rate_plans/R', 'POST /restrictions'])
-  assert.equal(c.appels[1].body.values.length, 2)
+  assert.deepEqual(c.appels[1].body.values.map(v => [v.date_from, v.date_to, v.rates[5].rate]),
+    [['2026-12-02', '2026-12-03', 8500], ['2026-12-04', '2026-12-04', 9500]],
+    'deux dates consecutives au meme prix partent en une plage, comme runFullSync')
 })
 
 test('sans renvoi demande (mode keep) : la grille seule', async () => {
@@ -267,13 +285,40 @@ test('une coupure pendant l envoi des prix remet aussi la grille', async () => {
   assert.equal(r.grille_remise, true)
 })
 
-test('calendrier illisible : la grille est remise, aucun prix ne part', async () => {
-  const c = canal()
+test('capacite baissee puis prix refuses : le type de chambre remonte AVANT la grille (review C1)', async () => {
+  const c = canal({ echecs: { 'POST /restrictions': 500 } })
   const r = await T.appliquerOccupation({ ...BASE_APPLIQUER, appel: c.appel,
-    lireInventaire: async () => { throw new Error('timeout') } })
+    typeDeChambre: { id: 'RT', avant: 6, apres: 5 } })
   assert.equal(r.ok, false)
-  assert.ok(!c.appels.some(a => a.chemin === '/restrictions'))
-  assert.equal(c.appels.filter(a => a.method === 'PUT').length, 2)
+  assert.equal(r.grille_remise, true)
+  assert.deepEqual(c.appels.map(a => `${a.method} ${a.chemin} ${a.body && a.body.room_type ? a.body.room_type.occ_adults : ''}`.trim()),
+    ['PUT /room_types/RT 5', 'PUT /rate_plans/R', 'POST /restrictions', 'PUT /room_types/RT 6', 'PUT /rate_plans/R'])
+})
+
+test('capacite montee puis prix refuses : la grille redescend AVANT le type de chambre', async () => {
+  const c = canal({ echecs: { 'POST /restrictions': 500 } })
+  await T.appliquerOccupation({ ...BASE_APPLIQUER, appel: c.appel, typeDeChambre: { id: 'RT', avant: 6, apres: 7 } })
+  assert.deepEqual(c.appels.slice(3).map(a => `${a.method} ${a.chemin}`), ['PUT /rate_plans/R', 'PUT /room_types/RT'])
+})
+
+test('une remise ratee ne se dit pas « rien n a ete change »', async () => {
+  const c = canal({ echecs: { 'POST /restrictions': 500 } })
+  let n = 0
+  const appel = async (m, ch, b) => {
+    if (m === 'PUT' && ch === '/rate_plans/R' && ++n === 2) return { ok: false, status: 422, json: {} }
+    return c.appel(m, ch, b)
+  }
+  const r = await T.appliquerOccupation({ ...BASE_APPLIQUER, appel })
+  assert.equal(r.grille_remise, false)
+  assert.doesNotMatch(r.message, /rien n'a ete change/)
+})
+
+test('grille refusee apres un type de chambre change : le type est remis', async () => {
+  const c = canal({ echecs: { 'PUT /rate_plans/R': 422 } })
+  const r = await T.appliquerOccupation({ ...BASE_APPLIQUER, appel: c.appel, typeDeChambre: { id: 'RT', avant: 6, apres: 5 } })
+  assert.equal(r.ok, false)
+  assert.deepEqual(c.appels.map(a => a.chemin), ['/room_types/RT', '/rate_plans/R', '/room_types/RT'])
+  assert.equal(c.appels[2].body.room_type.occ_adults, 6)
 })
 
 test('grille refusee : rien d autre ne part', async () => {
@@ -304,14 +349,22 @@ const PROP_23 = {
   pilote_tarifaire: 'yieldflow', rate_sync_mode: 'managed'
 }
 
-function preparerEndpoint ({ prop = PROP_23, grille = GRILLE_23, echecs = {} } = {}) {
-  const etat = { canal: [], updates: [], lectures: [], journal: [] }
+function preparerEndpoint ({ prop = PROP_23, grille = GRILLE_23, mode = 'per_person', echecs = {},
+                            inventaire = null, erreurInventaire = null } = {}) {
+  const etat = { canal: [], updates: [], lectures: [], journal: [], filtresInventaire: null }
+  // L'inventaire en base, par bien : un AUTRE bien porte d'autres prix. Un
+  // double qui ignorerait ses filtres laisserait passer une lecture sur la
+  // mauvaise cle (review T1).
+  const STOCK = inventaire || {
+    [PROP_23.id]: fenetrePoussee().slice(0, 3).map(d => ({ date: d, rate: 85 })),
+    [PROP_23.provider_property_id]: fenetrePoussee().slice(0, 3).map(d => ({ date: d, rate: 999 }))
+  }
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: COMPTE } }, error: null }) },
     from (table) {
       const q = {
-        _t: table, _u: null,
-        select () { return q }, eq () { return q }, gte () { return q }, lte () { return q },
+        _t: table, _u: null, _f: {},
+        select () { return q }, eq (c, v) { q._f[c] = v; return q }, gte () { return q }, lte () { return q },
         order () { return q }, is () { return q }, in () { return q }, or () { return q },
         range () { return q },
         insert: async (rows) => { etat.journal.push(...rows); return { error: null } },
@@ -327,10 +380,12 @@ function preparerEndpoint ({ prop = PROP_23, grille = GRILLE_23, echecs = {} } =
         maybeSingle: async () => ({ data: null, error: null }),
         then (ok, ko) {
           etat.lectures.push(table)
-          const data = table === 'calendar_inventory'
-            ? fenetrePoussee().slice(0, 3).map(d => ({ date: d, rate: 85 }))
-            : []
-          return Promise.resolve({ data, error: null }).then(ok, ko)
+          if (table === 'calendar_inventory') {
+            etat.filtresInventaire = { ...q._f }
+            if (erreurInventaire) return Promise.resolve({ data: null, error: { message: erreurInventaire } }).then(ok, ko)
+            return Promise.resolve({ data: STOCK[q._f.property_id] || [], error: null }).then(ok, ko)
+          }
+          return Promise.resolve({ data: [], error: null }).then(ok, ko)
         }
       }
       return q
@@ -350,7 +405,7 @@ function preparerEndpoint ({ prop = PROP_23, grille = GRILLE_23, echecs = {} } =
     etat.canal.push({ methode, chemin, body: opts.body ? JSON.parse(opts.body) : null })
     const statut = echecs[`${methode} ${chemin}`]
     const corps = (methode === 'GET' && chemin.startsWith('/rate_plans/'))
-      ? { data: { attributes: { sell_mode: 'per_person', options: grille } } }
+      ? { data: { attributes: { sell_mode: mode, options: grille } } }
       : { data: [{ id: 'tache' }] }
     return { ok: !statut, status: statut || 200, text: async () => JSON.stringify(corps) }
   }
@@ -387,12 +442,12 @@ test('LE GESTE DE RECETTE : « Voyageurs inclus » a 6 sur le 23, sans prix de b
   assert.deepEqual(grille.options.map(o => o.rate), [9000, 9000, 9000, 9000, 9000, 9000],
     'grille plate, montant lu chez le canal (option a 4 voyageurs)')
   const values = etat.canal[2].body.values
-  assert.equal(values.length, 3)
-  for (const v of values) {
-    assert.deepEqual(v.rates.map(r => r.rate), [8500, 8500, 8500, 8500, 8500, 8500])
-    assert.equal(v.property_id, PROP_23.provider_property_id)
-    assert.equal(v.stop_sell, undefined)
-  }
+  const f = fenetrePoussee()
+  assert.deepEqual(values.map(v => [v.date_from, v.date_to]), [[f[0], f[2]]], 'trois nuits au meme prix : une plage')
+  assert.deepEqual(values[0].rates.map(r => r.rate), [8500, 8500, 8500, 8500, 8500, 8500])
+  assert.equal(values[0].property_id, PROP_23.provider_property_id)
+  assert.equal(values[0].stop_sell, undefined)
+  assert.equal(etat.filtresInventaire.property_id, PROP_23.id, 'le calendrier se lit par l UUID du bien')
   assert.equal(etat.updates.length, 1)
   assert.equal(etat.updates[0].included_guests, 6)
   assert.equal(etat.updates[0].base_price, null, 'aucun prix de base invente en base')
@@ -427,7 +482,9 @@ test('prix refuses par le canal : 502, grille remise, base intacte', async () =>
   assert.equal(etat.updates.length, 0)
 })
 
-test('la capacite reste refusee sans prix de base, avant tout appel au canal', async () => {
+// Non-regression : ce refus existait avant le lot, et il doit survivre a
+// l'assouplissement des voyageurs inclus et du supplement.
+test('NON-REGRESSION : la capacite reste refusee sans prix de base, avant tout appel au canal', async () => {
   const { etat, res } = await patch({ capacity: 5 })
   assert.equal(res.statut, 409)
   assert.equal(res.corps.error, 'grille_non_reconstructible')
@@ -439,8 +496,52 @@ test('une grille sans montant chez le canal : refus, rien d ecrit', async () => 
     { grille: [{ occupancy: 6, rate: '0.00', is_primary: true }] })
   assert.equal(res.statut, 409)
   assert.equal(res.corps.error, 'grille_non_reconstructible')
-  assert.ok(!etat.canal.some(a => a.methode !== 'GET'))
+  // ⚠ L'ancien code rendait le meme 409 SANS lire le plan : c'est la lecture
+  // de la grille du canal, et son verdict, que ce test garde (review T2).
+  assert.deepEqual(etat.canal.map(a => `${a.methode} ${a.chemin}`), ['GET /rate_plans/ad0a594e-base'])
+  assert.match(res.corps.message, /grille chez la plateforme/)
   assert.equal(etat.updates.length, 0)
+})
+
+test('calendrier illisible : 502, rien n est ecrit chez le canal ni en base', async () => {
+  const { etat, res } = await patch({ included_guests: 6 }, { erreurInventaire: 'timeout' })
+  assert.equal(res.statut, 502)
+  assert.equal(res.corps.error, 'lecture_calendrier')
+  assert.deepEqual(etat.canal.map(a => a.methode), ['GET'])
+  assert.equal(etat.updates.length, 0)
+})
+
+test('capacite baissee avec prix de base, prix refuses : type de chambre et grille remis (review C1)', async () => {
+  const prop = { ...PROP_23, base_price: 90, included_guests: 4 }
+  const { etat, res } = await patch({ capacity: 5 }, { prop, echecs: { 'POST /restrictions': 500 } })
+  assert.equal(res.statut, 502)
+  const puts = etat.canal.filter(a => a.methode === 'PUT').map(a => a.chemin + (a.body.room_type ? ' ' + a.body.room_type.occ_adults : ''))
+  assert.deepEqual(puts, ['/room_types/rt-23 5', '/rate_plans/ad0a594e-base', '/room_types/rt-23 6', '/rate_plans/ad0a594e-base'])
+  assert.equal(etat.updates.length, 0)
+})
+
+test('prix de base change dans le meme geste : les dates sans tarif partent au NOUVEAU prix (review C2)', async () => {
+  const prop = { ...PROP_23, base_price: 100, included_guests: 2 }
+  const { etat, res } = await patch({ base_price: 120, included_guests: 4 }, { prop })
+  assert.equal(res.statut, 200, JSON.stringify(res.corps))
+  const plages = etat.canal.find(a => a.chemin === '/restrictions').body.values
+  const prixA6 = new Set(plages.map(v => v.rates[5].rate))
+  assert.ok(prixA6.has(12000 + 2 * 200), 'le prix de base de la requete, supplement compris')
+  assert.ok(![...prixA6].some(p => p === 10000 + 2 * 200), 'jamais l ancien prix de base')
+})
+
+test('plancher releve dans le meme geste : rien ne part sous le nouveau plancher (review C2)', async () => {
+  const { etat, res } = await patch({ prix_minimum: 9000, included_guests: 6 })
+  assert.equal(res.statut, 200, JSON.stringify(res.corps))
+  assert.ok(!etat.canal.some(a => a.chemin === '/restrictions'), 'les nuits a 85 EUR sont sous 90 EUR')
+})
+
+test('plan par logement : changer les voyageurs inclus ne renvoie aucun prix (review C6)', async () => {
+  const prop = { ...PROP_23, base_price: 90, included_guests: 6, extra_guest_fee: null }
+  const { etat, res } = await patch({ included_guests: 2 },
+    { prop, mode: 'per_room', grille: [{ occupancy: 6, rate: '90.00', is_primary: true }] })
+  assert.equal(res.statut, 200, JSON.stringify(res.corps))
+  assert.deepEqual(etat.canal.map(a => a.methode), ['GET', 'PUT'])
 })
 
 test('en « je garde mes prix » : la grille suit, aucun prix ne part', async () => {

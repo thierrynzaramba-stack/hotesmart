@@ -15,9 +15,9 @@ const { refsDuPerimetre } = require('../lib/permissions')
 const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
 const { clesMigrees } = require('../lib/cles-migrees')
 const { sansArchives, clesArchivees, cleDuBien } = require('../lib/biens-vivants')
-const { proprieteChezLeProvider } = require('../lib/rate-sync')
+const { proprieteChezLeProvider, canPushRates } = require('../lib/rate-sync')
 const {
-  modeDeVenteDemande, refusModeDeVente, baseDeLaGrille, lirePlan, appliquerOccupation
+  modeDeVenteDemande, refusModeDeVente, baseDeLaGrille, formeOccupation, lirePlan, appliquerOccupation
 } = require('../lib/tarifs-occupation')
 
 const { surveillerReponse } = require('../lib/reponse-partenaire')
@@ -609,7 +609,6 @@ module.exports = async function handler(req, res) {
     let grilleSautee = false     // vrai si la grille n'a pas pu etre reconstruite (pas de prix de base)
     let capaciteBouge = false    // la capacite EFFECTIVE change (pas seulement « envoyee »)
     let occupationBouge = false  // un champ d'occupation est dans le corps
-    let occupationChange = false // capacite, voyageurs inclus ou supplement EFFECTIFS changent
     let inclusAvant = null       // voyageurs inclus en base avant le geste (capacite si vide)
     let effCap, effBase, effInc, effExtra
     if (capacity !== undefined || base_price !== undefined || included_guests !== undefined || extra_guest_fee !== undefined) {
@@ -672,9 +671,6 @@ module.exports = async function handler(req, res) {
       capaciteBouge = capacity !== undefined && effCap !== Number(prop.capacity)
       occupationBouge = capacity !== undefined || included_guests !== undefined || extra_guest_fee !== undefined
       inclusAvant = prop.included_guests != null ? Number(prop.included_guests) : Number(prop.capacity)
-      occupationChange = capaciteBouge
-        || effInc !== inclusAvant
-        || (Number(effExtra) || 0) !== (Number(prop.extra_guest_fee) || 0)
       if (grilleSautee && capaciteBouge && prop.provider_rate_plan_id) {
         return res.status(409).json({
           error: 'grille_non_reconstructible',
@@ -714,24 +710,15 @@ module.exports = async function handler(req, res) {
         const refusMode = refusModeDeVente(planActuel.mode, modeDeVenteDemande(effExtra), effCap)
         if (refusMode) return res.status(refusMode.http).json({ error: refusMode.error, message: refusMode.message })
         if (!baseGrille && occupationBouge) {
-          baseGrille = baseDeLaGrille(planActuel.options, inclusAvant)
+          baseGrille = baseDeLaGrille(planActuel.options, inclusAvant, planActuel.mode)
           if (!baseGrille) {
             return res.status(409).json({
               error: 'grille_non_reconstructible',
               message: 'Ce logement n\'a pas de prix de base, et sa grille chez la plateforme ne porte '
-                + 'aucun montant : la grille tarifaire ne peut pas etre reconstruite. '
+                + 'aucun montant exploitable : la grille tarifaire ne peut pas etre reconstruite. '
                 + 'Renseignez un prix de base pour ce logement.'
             })
           }
-        }
-      }
-      if (capacity !== undefined && prop.provider_room_type_id) {
-        const rtRes = await channelCall('PUT', `/room_types/${prop.provider_room_type_id}`, {
-          room_type: { occ_adults: effCap, default_occupancy: effCap }
-        })
-        if (!rtRes.ok) {
-          console.error('[channel-property] PATCH room_type echec', rtRes.status, rtRes.json)
-          return res.status(502).json({ error: 'Mise a jour de la capacite echouee cote plateforme' })
         }
       }
       // ⚠ SANS PRIX DE BASE, ON NE RECONSTRUIT PAS LA GRILLE.
@@ -748,38 +735,62 @@ module.exports = async function handler(req, res) {
       // ⚠ SAUF QUAND L'OCCUPATION CHANGE : la grille se lit alors chez le canal
       // (`baseGrille`, ci-dessus), et le prix POUSSE de chaque date repart avec
       // la nouvelle occupation — sinon chaque nuit garderait son ancien prix
-      // par occupation jusqu'a ce que son tarif change. En `managed` seulement :
-      // en `keep`, aucun prix ne part, c'est le contrat du mode.
+      // par occupation jusqu'a ce que son tarif change. Seulement quand la FORME
+      // des prix par occupation change (`formeOccupation`) : sur un plan par
+      // logement, changer les voyageurs inclus ne change aucun prix. Et
+      // seulement si HoteSmart pousse les tarifs (`canPushRates`) : en `keep`,
+      // aucun prix ne part, c'est le contrat du mode.
       grilleSautee = !baseGrille
       if (prop.provider_rate_plan_id && baseGrille) {
         const rp = buildRatePlanOptions(baseGrille, effInc, effExtra, effCap)
         const propIdCanal = proprieteChezLeProvider(prop)
-        const renvoyer = occupationChange && prop.rate_sync_mode === 'managed' && !!propIdCanal
-        const fenetre = renvoyer ? require('../lib/channel-fullsync').fenetrePoussee() : []
+        const formeChange = formeOccupation(prop.capacity, prop.included_guests, prop.extra_guest_fee)
+          !== formeOccupation(effCap, effInc, effExtra)
+        const renvoyer = formeChange && canPushRates(prop) && !!propIdCanal
+        let fenetre = []
+        let lignes = []
+        if (renvoyer) {
+          fenetre = require('../lib/channel-fullsync').fenetrePoussee()
+          // ⚠ LU AVANT LA PREMIERE ECRITURE (review, constat C1) : une lecture
+          // ratee ne doit rien laisser a remettre. Et BORNEE ET COMPTEE : la
+          // fenetre fait 500 jours, donc 500 lignes au plus, sous la troncature
+          // silencieuse de PostgREST a 1000 — une lecture qui l'atteindrait
+          // serait incomplete, on refuse plutot que de renvoyer une partie des prix.
+          const { data, error } = await supabase
+            .from('calendar_inventory')
+            .select('date, rate, avail, stop_sell')
+            .eq('property_id', prop.id)
+            .gte('date', fenetre[0])
+            .lte('date', fenetre[fenetre.length - 1])
+            .order('date', { ascending: true })
+          if (error || (data || []).length >= 1000) {
+            console.error('[channel-property] lecture du calendrier', error ? error.message : 'tronquee a 1000 lignes')
+            return res.status(502).json({
+              error: 'lecture_calendrier',
+              message: 'Impossible de lire vos prix par date pour le moment. Rien n\'a ete change. Reessayez.'
+            })
+          }
+          lignes = data || []
+        }
         const resultat = await appliquerOccupation({
           appel: channelCall,
           ratePlanId: prop.provider_rate_plan_id,
           planActuel,
           grille: rp,
+          typeDeChambre: (capacity !== undefined && prop.provider_room_type_id)
+            ? { id: prop.provider_room_type_id, avant: Number(prop.capacity), apres: effCap }
+            : null,
           renvoyer,
-          // ⚠ BORNEE ET COMPTEE : la fenetre fait 500 jours, donc 500 lignes au
-          // plus, sous la troncature silencieuse de PostgREST a 1000. Une
-          // lecture qui l'atteindrait serait incomplete : on refuse plutot que
-          // de renvoyer une partie des prix.
-          lireInventaire: async () => {
-            const { data, error } = await supabase
-              .from('calendar_inventory')
-              .select('date, rate, avail, stop_sell')
-              .eq('property_id', prop.id)
-              .gte('date', fenetre[0])
-              .lte('date', fenetre[fenetre.length - 1])
-              .order('date', { ascending: true })
-            if (error) throw new Error(error.message)
-            if ((data || []).length >= 1000) throw new Error('lecture tronquee a 1000 lignes')
-            return data || []
-          },
+          lignes,
           fenetre,
-          bien: prop,
+          // ⚠ LES VALEURS EFFECTIVES DE LA REQUETE, PAS CELLES D'AVANT (review,
+          // constat C2) : un prix de base ou un plancher changes dans le meme
+          // enregistrement que l'occupation doivent valoir pour ce renvoi.
+          bien: {
+            ...prop,
+            base_price: effBase,
+            prix_minimum: updates.prix_minimum !== undefined ? updates.prix_minimum : prop.prix_minimum
+          },
           propId: propIdCanal,
           capacite: effCap,
           inclus: effInc,
@@ -793,10 +804,19 @@ module.exports = async function handler(req, res) {
           }
         })
         if (!resultat.ok) {
-          console.error('[channel-property] occupation non appliquee', resultat.error, resultat.status || '', resultat.detail || '')
+          console.error('[channel-property] occupation non appliquee', resultat.error, resultat.detail || '')
           return res.status(resultat.http).json({ error: resultat.error, message: resultat.message })
         }
         tarifsRenvoyes = resultat.renvoyees
+      } else if (capacity !== undefined && prop.provider_room_type_id) {
+        // Pas de plan tarifaire a reconstruire : le type de chambre seul, comme avant.
+        const rtRes = await channelCall('PUT', `/room_types/${prop.provider_room_type_id}`, {
+          room_type: { occ_adults: effCap, default_occupancy: effCap }
+        })
+        if (!rtRes.ok) {
+          console.error('[channel-property] PATCH room_type echec', rtRes.status, rtRes.json)
+          return res.status(502).json({ error: 'Mise a jour de la capacite echouee cote plateforme' })
+        }
       }
     }
 

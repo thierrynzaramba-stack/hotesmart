@@ -66,24 +66,50 @@ Module neuf `lib/tarifs-occupation.js`, branché dans le `PUT` de
    par personne : inclure tous les voyageurs). Plus de 502 opaque.
 3. **Sans prix de base, reconstruire la grille depuis Channex** : le montant
    de base est lu sur l'option du plan à l'occupation des voyageurs inclus
-   d'avant (la partie sans supplément). Aucun montant inventé, aucune
-   divergence. La capacité, elle, reste refusée sans prix de base (409
-   inchangé) : elle touche le type de chambre, hors de ce lot.
-4. **Renvoyer les prix par date** quand les voyageurs inclus ou le supplément
-   changent, et seulement en `managed` : un seul `POST /restrictions`, **prix
-   seuls** (ni `stop_sell`, ni disponibilité), sur la fenêtre de
-   `runFullSync` (500 jours), avec sa règle de prix (le tarif du jour, sinon le
-   prix de base, sinon rien ; un tarif sous le plancher n'est pas renvoyé).
-   Sans ce renvoi, chaque nuit garderait ses 89 € jusqu'à ce que son prix
-   change — `docs/CALENDRIER_TECH.md` le notait comme manque.
-5. **Échec du renvoi** : la grille est remise à l'identique, 502, et **rien
-   n'est écrit en base**. Ni demi-état, ni base qui dirait 6 pendant que les
-   canaux vendent à 89 €.
-6. Le `SELECT` du bien ajoute `rate_sync_mode` (une garde qui juge sur une
-   colonne non sélectionnée est une garde ouverte).
+   d'avant (la partie sans supplément). Sur un plan par personne, l'option
+   EXACTE ou rien : l'option principale inclut déjà les suppléments. Aucun
+   montant inventé, aucune divergence. La capacité, elle, reste refusée sans
+   prix de base (409 inchangé) : elle touche le type de chambre, hors de ce lot.
+4. **Renvoyer les prix par date** quand la FORME des prix par occupation change
+   (le 23 : 85/87/89 → 85 partout ; sur un plan par logement, changer les
+   voyageurs inclus ne change aucun prix et ne renvoie rien), et seulement si
+   HôteSmart pousse les tarifs (`canPushRates`) : un seul `POST /restrictions`,
+   **prix seuls** (ni `stop_sell`, ni disponibilité), regroupés en plages comme
+   `runFullSync`, sur sa fenêtre (500 jours) et avec sa règle de prix (le tarif
+   du jour, sinon le prix de base, sinon rien ; un tarif sous le plancher n'est
+   pas renvoyé). Le prix de base et le plancher sont ceux de la requête, pas
+   ceux d'avant. Sans ce renvoi, chaque nuit garderait ses 89 € jusqu'à ce que
+   son prix change — `docs/CALENDRIER_TECH.md` le notait comme manque.
+5. **Le calendrier est lu AVANT la première écriture** : une lecture ratée rend
+   502 et rien n'a bougé.
+6. **Échec d'une écriture chez le canal** : ce qui a déjà été écrit est remis —
+   type de chambre et grille, dans l'ordre qui garde les options sous la
+   capacité —, 502, et **rien n'est écrit en base**. Le message ne dit « rien
+   n'a été changé » que si toutes les remises ont réussi.
+7. Le `SELECT` du bien ajoute `rate_sync_mode` et `inventory_units` (une garde
+   qui juge sur une colonne non sélectionnée est une garde ouverte).
+8. **Le journal des prix affichés** (`price_display_log`) est alimenté après un
+   renvoi réussi, sur les nuits affichées (une ligne en mémoire, ni fermée, ni à
+   stock nul) et non vendues, au compte de la garde. En général le prix de base
+   d'une nuit ne change pas, et `enregistrerPrixPousses` n'écrit rien ; il écrit
+   quand une date servie par le prix de base change de montant. Le recensement
+   de `tests/price-log.test.js` inscrit ce chemin comme tarifaire.
 
-Le journal des prix affichés (`price_display_log`) ne bouge pas : il porte le
-prix de base de la nuit, qui ne change pas.
+**Limites connues, notées et non corrigées** (constats mineurs de la review) :
+
+- **Course avec une poussée en cours** : un `runFullSync` ou le pilote qui a lu
+  le bien AVANT l'enregistrement et poste APRÈS le renvoi repousse l'ancienne
+  répartition sur les dates qu'il touche. Fenêtre de quelques secondes ; le
+  prochain prix poussé sur ces dates la corrige.
+- **Échec de l'écriture en base après un renvoi réussi** : le canal porte la
+  nouvelle occupation, la base l'ancienne, l'hôte voit une erreur 500. Il
+  ré-enregistre : le renvoi repart et la base suit. Mettre le bien dans la file
+  des synchronisations complètes réglerait les deux cas, mais une
+  synchronisation complète pousse aussi les fermetures — hors de la portée de
+  ce lot tant que le lot fermetures n'est pas fait.
+- **Deux copies de la règle de prix** (`runFullSync` et `valeursTarifs`) : pas
+  de test de parité. Elles diffèrent déjà, à dessein, sur le journal (dette 27 :
+  `runFullSync` journalise des dates sans ligne).
 
 **Domaine.** Ce lot POUSSE des prix au canal, depuis l'endpoint de la fiche.
 Il ne touche ni `lib/channels/`, ni `lib/calendrier-writer.js`, ni le cron,
@@ -106,6 +132,8 @@ parallèle.
 
 Le lot ne touche aucun écran : la fiche affiche déjà le message du serveur.
 Points 1 à 8 : **sans objet**, sauf le coût du geste lui-même, rare et à la
-main : un enregistrement de la fiche qui change l'occupation coûte une lecture
-Channex, une lecture de `calendar_inventory` (500 lignes au plus, sous la
-borne de 1000), une écriture de grille et un `POST /restrictions`.
+main. Tout enregistrement de la fiche qui touche un prix ou l'occupation coûte
+désormais une lecture du plan chez Channex (avant : aucune). Quand la forme des
+prix change, s'y ajoutent une lecture de `calendar_inventory` (500 lignes au
+plus, sous la borne de 1000), une écriture de grille, un `POST /restrictions`
+et l'écriture du journal.
