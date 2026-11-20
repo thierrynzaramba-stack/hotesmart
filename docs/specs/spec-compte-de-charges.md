@@ -4208,6 +4208,16 @@ Rien trouvé.
 - **M3 — corrigé.** `etatDe` rend `tableau` avant `doublon`.
 - **M4 — corrigé**, dans §14.21.14.
 
+**Retour du chef de file (20 novembre 2026, 13:57) : 1 rouge sur l'arbre
+fusionné.** `tests/garde-colonne-selectionnee.test.js` : 46 listes de colonnes
+non résolues pour un plafond de 45 (main 43, staging 44, cette branche 45).
+Corrigé sur la branche, sans relever le plafond : `passerEnTableau` et
+`tableauEnFacture` n'écrivent plus qu'avec `.select('id')`, une liste
+littérale, et la charge rendue à l'écran est relue par `lireCharge`
+(une requête de plus sur ces deux gestes, rares). Une relecture en panne ne
+défait rien : l'écran reçoit l'identifiant et le statut, et recharge. La
+branche revient à **43**. Aucune garde touchée : pas de nouvelle review.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

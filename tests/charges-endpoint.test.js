@@ -196,13 +196,18 @@ test('8b : confirmer une FACTURE en PDF — la reconnaissance la refuse, l\'IA l
   }
 })
 
-const UNE = (statut, plus = {}) => (r) => {
+// La ligne GARDE ce qu'on lui écrit : une écriture ne rend que `id`, et la
+// charge rendue à l'écran est RELUE ensuite.
+const UNE = (statut, plus = {}) => {
+  const ligne = { id: ID, user_id: TITULAIRE, statut, cree_le: '2026-11-20T09:00:00Z', justificatif_type: 'application/pdf', justificatif_chemin: `${TITULAIRE}/${ID}`, groupe_doublon: null, origine: 'fichier', ...plus }
+  return (r) => {
   if (r.table === 'ia_appels') return { count: 3 }
-  if (r.table === 'charges' && r.op === 'select' && r.unique) return { data: { id: ID, user_id: TITULAIRE, statut, cree_le: '2026-11-20T09:00:00Z', justificatif_type: 'application/pdf', justificatif_chemin: `${TITULAIRE}/${ID}`, groupe_doublon: null, origine: 'fichier', ...plus } }
-  if (r.table === 'charges' && r.op === 'update' && r.unique) return { data: { id: ID, ...r.charge } }
+  if (r.table === 'charges' && r.op === 'select' && r.unique) return { data: { ...ligne } }
+  if (r.table === 'charges' && r.op === 'update' && r.unique) { Object.assign(ligne, r.charge); return { data: { id: ID, ...r.charge } } }
   if (r.table === 'charges' && r.op === 'delete') return { data: [{ id: ID }] }
   if (r.table === 'charges_credits' && r.optionsSelect && r.optionsSelect.head) return { count: 0 }
   return { data: [] }
+  }
 }
 
 test('8b : tableau_reconnaitre — le PDF relu comme tableau ; un PDF qui n\'en est pas un : 422 `pas_un_tableau`, rien d\'écrit', async () => {
@@ -210,6 +215,8 @@ test('8b : tableau_reconnaitre — le PDF relu comme tableau ; un PDF qui n\'en 
   const ok = await appeler({ corps: { action: 'tableau_reconnaitre', id: ID }, repondre: UNE('a_verifier'), stockage, tableau: TROIS })
   assert.equal(ok.statut, 200)
   assert.deepEqual([ok.charge.issue, ok.charge.charge.statut], ['tableau', 'tableau'])
+  const maj = ok.requetes.find(x => x.op === 'update')
+  assert.equal(maj.retour, 'id', 'l\'écriture ne demande que `id`, la charge est relue')
   const non = await appeler({ corps: { action: 'tableau_reconnaitre', id: ID }, repondre: UNE('a_verifier'), stockage })
   assert.equal(non.statut, 422)
   assert.equal(non.charge.error, 'pas_un_tableau')
