@@ -3984,6 +3984,114 @@ le nom d'une facture n'avait plus que 80 px. Corrigé dans la feuille
 (téléphone seul) : titres sur deux lignes, colonnes de 78 px, retrait
 réduit. Reste à voir par Thierry sur un vrai téléphone.
 
+#### 14.21.14 Lot 8b — ce qui est codé (20 novembre 2026)
+
+Branche `charges-ajout-unique`, partie de `main` (`c795e596`, le lot 8a).
+
+**Serveur.**
+- `lib/charges.js` §8 bis : `lireCommeTableau(octets, type, compte)` — un PDF
+  d'au plus 2 Mo dont le lecteur du §14.20 prouve **au moins 3 échéances**
+  (`ECHEANCES_MIN_TABLEAU`) ; délai de 6 s (`DELAI_RECONNAISSANCE_MS`), une
+  place par compte dans la file commune. Trois réponses : oui, non, ou
+  **panne** (file prise) — qui n'est pas un « non ».
+- `avecReconnaissance(lire)` : le tableau d'abord, l'IA sinon ; la panne
+  laisse passer l'IA. Branché dans `api/cron-charges.js`.
+- `appliquerLecture` : un résultat `{ tableau }` pose le statut `tableau`, le
+  type `tableau_amortissement`, **tous les champs lus à vide**, le jour de
+  réception, et `lecture_ia = { tableau: { echeances, debut, fin }, lu_le }`.
+  Seulement sur une charge `a_lire` du compte.
+- `passerEnTableau` (action `tableau_reconnaitre`) : sur une charge `a_lire`,
+  `a_verifier` ou `illisible`, d'origine fichier ou photo, dont le fichier est
+  un PDF. 422 `pas_un_tableau` sinon, **sans rien écrire** ; 409
+  `statut_non_retypable` ; 503 `occupe`. L'écriture est gardée par le statut
+  d'avant, et vide l'entité et le logement.
+- `tableauEnFacture` (action `tableau_en_facture`) : la charge repart
+  `a_lire`, échecs à zéro ; l'endpoint la fait lire par l'IA **sans repasser
+  par la reconnaissance** (elle reviendrait `tableau` aussitôt).
+- `importerTableau` (action `tableau_importer`) : relit le fichier **déjà
+  déposé**, appelle `importerCredit` (inchangé), **puis** `supprimer` la
+  charge et son fichier. Un import refusé ou en panne ne retire rien. Une
+  charge qui ne s'efface pas après un import réussi : le crédit reste,
+  `charge_retiree: false`, journalisé — la charge ne porte aucun montant.
+- `api/charges.js`, `confirmer` : la reconnaissance passe **avant** le plafond
+  du jour et l'IA ; un tableau ne consulte même pas `ia_appels`.
+  `credit_importer` reste accepté (plus aucun écran ne l'appelle).
+- `lib/charges/ecran.js` : « À traiter » compte le statut `tableau` ; la
+  projection `tableau_lu:lecture_ia->tableau` (jamais la lecture entière).
+
+**Migration** `2026-11-20-charges-tableau.sql` : `charges_statut_ck` et
+`charges_type_ck` retirées puis reposées avec une valeur de plus. Les deux
+listes ne font que s'allonger. **À coller après
+`2026-11-19-charges-exercice-mois`, et AVANT le code.** Contrôle
+`2026-11-20-controle-charges-tableau.sql` : 2 lignes à `true` (empreinte md5
+des définitions). Éprouvée sur Postgres 16 local par-dessus la migration du
+lot 8a : contrôle `false` avant, `true` après ; une charge `tableau`
+s'insère ; l'oracle du résumé reste à 0 écart. Une charge `tableau` n'entre
+dans aucun total : le résumé ne compte que `a_verifier` et `validee`, et elle
+n'a pas de montant.
+
+**Écran** (`shared/charges-vue.js`).
+- Ligne d'un tableau dans « À traiter » : « Tableau d'amortissement », pas de
+  montant, action « Importer les échéances ».
+- Fiche : « Tableau d'amortissement reconnu : N échéances, du … au … » ;
+  prêteur, entité, logement ; « Importer les échéances » ; « Ce n'est pas un
+  tableau » ; « Voir la facture » et « Supprimer » conservés.
+- Le type « Tableau d'amortissement » est proposé sur une charge pas encore
+  vérifiée (ni OTA, ni échéance de crédit). Un refus rend le type d'avant et
+  dit pourquoi.
+- Bloc « Crédits » : la liste et la suppression. Plus de formulaire ; un
+  texte dit de passer par « Ajouter une facture ».
+
+**Inventaire.**
+
+| Existant | Devient |
+|---|---|
+| Bouton « Ajouter un crédit » et son formulaire (fichier, prêteur, entité, logement) | **Retirés**. Le fichier passe par « Ajouter une facture » ; prêteur, entité, logement sont dans la fiche du tableau reconnu. |
+| Message « ligne incohérente » avec sa date | **Conservé**, dans la fiche, à l'import. |
+| Refus « déjà importé », « trop de crédits », « entité requise » | **Conservés** (mêmes codes, mêmes textes). |
+| Liste des crédits, « Supprimer » un crédit | **Conservés**. |
+| Dépôt d'un PDF de plus de 2 Mo comme crédit : refus `trop_gros` | Un PDF de plus de 2 Mo n'est **pas** essayé comme tableau : il part à l'IA comme une facture. Le type choisi à la main le refuse (`pas_un_tableau`). |
+| Action serveur `credit_importer` | **Conservée**, sans appelant. |
+
+**Case PERFORMANCE.**
+1. Un endpoint d'écran : inchangé (`/api/ecran/charges`), aucune requête de
+   plus — une valeur dans un filtre, une projection dans une lecture.
+2. Donnée non urgente : sans objet (une charge `tableau` n'entre dans aucun
+   résumé).
+3. Cache navigateur : sans objet, rien de neuf n'y entre.
+4. `private, no-store` : inchangé, posé avant le premier refus.
+5. Statiques versionnés : inchangé.
+6. Lecture tronquée : sans objet (« À traiter » garde sa borne de 50, dette
+   153).
+7. Budget : l'écran ne change pas de compte d'appels (test existant).
+8. Mesure. Écran : **AVANT = APRÈS** (2 appels ; `/api/ecran/charges` à
+   10 requêtes, mesuré en production au §14.21.9). Ce qui change est la
+   **confirmation d'un PDF** : un processus de lecture de plus, avant l'IA.
+   Mesuré en local, trois passes chacun : une facture PDF de 3 Ko, **219 à
+   254 ms** ; un tableau de 15 échéances, 351 à 415 ms ; un tableau réel de
+   301 échéances (121 Ko), **423 à 506 ms**. En échange, un tableau ne coûte
+   plus aucun appel à l'IA. Une photo n'est pas concernée. À remesurer sur
+   staging à la recette.
+
+**Mobile.** Même page, même fiche : rien de propre à l'ordinateur.
+
+**Tests.** `tests/charges-tableau.test.js` (reconnaissance, statut, retypage
+dans les deux sens, import, cron), `tests/charges-migration-tableau.test.js`,
+et des ajouts à `charges-endpoint`, `charges-ecran`, `charges-page`.
+Contre-épreuve : treize sabotages du serveur, chacun fait rougir au moins un
+test (une échéance suffit ; la file prise bloque l'IA ; écriture sans filtre
+de compte ; import depuis une facture ; retypage d'une charge vérifiée ;
+plafond avant le tableau ; « pas un tableau » qui repasse par la
+reconnaissance ; statut absent de « À traiter » ; charge retirée malgré un
+import refusé ; retypage et retour sans garde de statut ; photo téléchargée ;
+entité gardée au retypage).
+
+⚠ **Incident de méthode, noté pour ne pas le refaire.** Le script de
+sabotage sauvegardait `lib/charges.js` et `api/charges.js` sous le même nom :
+la restauration a écrasé le premier par le second, alors que rien n'était
+commité. Le module a été réécrit depuis la spec et ses tests. Depuis : commit
+de travail AVANT toute contre-épreuve, et restauration par `git show`.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

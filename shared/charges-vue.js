@@ -19,9 +19,6 @@
 // Les types que le serveur accepte (lib/charges/regles.js, TYPES) : la même
 // borne ici évite d'envoyer ce qui sera refusé — elle ne remplace pas la garde
 // du serveur.
-// Le tableau d'amortissement d'un crédit (§14.20) : un PDF, 2 Mo au plus — la
-// borne du serveur (`CREDIT_PDF_MAX`, lib/charges.js).
-export const CREDIT_PDF_MAX = 2 * 1024 * 1024
 
 export const TYPES_ACCEPTES = {
   'application/pdf': 10 * 1024 * 1024,
