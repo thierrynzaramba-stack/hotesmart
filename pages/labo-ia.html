@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart — Labo IA</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « LABO IA » — outil interne du fondateur (20 novembre 2026).
+     Doc : docs/kb/labo-ia.md. Endpoint unique : /api/labo-ia.
+     ⚠ RÉSERVÉE AU FONDATEUR, ET LE SERVEUR LE GARDE (403 pour tout autre
+     compte) : cette page ne masque rien, elle affiche le refus.
+     ⚠ OUTIL INTERNE, COMME LE DIAGNOSTIC : en français seul, hors de la
+     navigation des hôtes, ouvert par son adresse /pages/labo-ia.
+     ⚠ RIEN N'EST ENVOYÉ AUX VOYAGEURS, RIEN N'EST ÉCRIT dans le produit.
+     Chaque appel est compté dans le journal `ia_appels`. -->
+<style>
+  [hidden] { display: none !important; }
+  .labo { display: flex; flex-direction: column; gap: var(--gap-m); }
+  .labo-tete { display: flex; align-items: baseline; justify-content: space-between; gap: var(--gap-m); flex-wrap: wrap; }
+  .labo-sous { color: var(--muted); font-size: var(--fs-small); margin: 4px 0 0; }
+  .labo-alerte { padding: 10px 14px; border-radius: var(--radius-card); background: var(--warn-soft); font-size: var(--fs-small); }
+  .labo-alerte--ko { background: var(--danger-soft); }
+  .labo-champ { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-small); }
+  .labo-champ > span { font-weight: var(--fw-semibold); }
+  .labo input[type="search"], .labo select, .labo textarea {
+    border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface);
+    color: var(--ink); padding: 9px 12px; font-size: var(--fs-small); font-family: inherit; max-width: 100%;
+  }
+  .labo textarea { min-height: 96px; resize: vertical; }
+  .labo-ligne { display: flex; gap: var(--gap-m); flex-wrap: wrap; align-items: flex-end; }
+  .labo-ligne > .labo-champ { flex: 1 1 240px; }
+  .labo-modeles { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-card); }
+  .labo-modele { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: var(--fs-small); }
+  .labo-modele:last-child { border-bottom: 0; }
+  .labo-modele__nom { font-weight: var(--fw-medium); }
+  .labo-modele__id, .labo-petit { color: var(--muted); font-size: var(--fs-caption); }
+  .labo-modele__prix { text-align: right; color: var(--muted); font-size: var(--fs-caption); white-space: nowrap; }
+  .labo-pastille { display: inline-block; padding: 1px 7px; margin-inline-start: 4px; border-radius: var(--radius-pill); background: var(--surface-2); font-size: 11px; color: var(--muted); }
+  .labo-pastille--cn { background: var(--warn-soft); color: var(--ink); }
+  .labo-pastille--ko { background: var(--danger-soft); color: var(--ink); }
+  .labo-pastille--ok { background: var(--ok-soft); color: var(--ink); }
+  .labo-actions { display: flex; gap: var(--gap-s); align-items: center; flex-wrap: wrap; }
+  .labo-resultats { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--gap-m); }
+  .labo-rep { border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--gap-m); display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+  .labo-rep__tete { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .labo-rep__texte { white-space: pre-wrap; word-break: break-word; font-size: var(--fs-small); line-height: 1.5; }
+  .labo-rep__chiffres { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: var(--fs-caption); }
+  .labo-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-card); }
+  .labo table { border-collapse: collapse; width: 100%; font-size: var(--fs-caption); }
+  .labo th, .labo td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  .labo th { background: var(--surface-2); font-weight: var(--fw-semibold); white-space: nowrap; position: sticky; top: 0; }
+  .labo td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .labo td.ecart { background: var(--warn-soft); }
+  .labo td.vide { color: var(--muted); }
+  .labo pre.labo-contexte { white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; background: var(--surface-2); padding: 12px; border-radius: var(--radius-card); font-size: var(--fs-caption); }
+</style>
+</head>
+<body>
+<main class="page labo">
+  <div class="labo-tete">
+    <div>
+      <h1 class="h1">Labo IA</h1>
+      <p class="labo-sous">Comparez plusieurs IA sur la même question ou la même facture. Coût réel facturé par OpenRouter. Rien n’est envoyé aux voyageurs.</p>
+    </div>
+    <a class="btn btn--secondary" href="/pages/aujourdhui">Retour</a>
+  </div>
+
+  <p class="labo-alerte labo-alerte--ko" data-bind="refus" hidden></p>
+  <p class="labo-alerte" data-bind="sans-cle" hidden>La clé OpenRouter n’est pas encore posée dans Vercel (<code>OPENROUTER_API_KEY</code>) : le catalogue s’affiche, les essais seront refusés.</p>
+
+  <div data-bind="contenu" hidden>
+    <div class="seg" role="tablist">
+      <button type="button" class="seg__btn is-on" data-onglet="question" role="tab">Question</button>
+      <button type="button" class="seg__btn" data-onglet="facture" role="tab">Facture</button>
+    </div>
+
+    <!-- ─── Les modèles (communs aux deux onglets) ─────────────────────── -->
+    <section class="card" style="margin-top: var(--gap-m)">
+      <div class="labo-actions" style="justify-content: space-between">
+        <h2 class="h2" style="margin:0">Modèles <span class="labo-petit" data-bind="compte"></span></h2>
+        <div class="labo-actions">
+          <label class="labo-petit"><input type="checkbox" data-bind="seulement-selection"> Seulement la sélection</label>
+          <button type="button" class="btn btn--secondary" data-action="defaut">Sélection de départ</button>
+          <button type="button" class="btn btn--secondary" data-action="aucun">Tout décocher</button>
+        </div>
+      </div>
+      <input type="search" data-bind="recherche" placeholder="Chercher un modèle ou un fournisseur (claude, gpt, gemini, mistral, deepseek, qwen, kimi, glm…)">
+      <div class="labo-modeles" data-bind="modeles"><p class="labo-petit" style="padding:12px">Chargement du catalogue…</p></div>
+      <p class="labo-petit">Prix en dollars par million de tokens (entrée / sortie). <span class="labo-pastille labo-pastille--cn">CN</span> = modèle d’un éditeur chinois.</p>
+    </section>
+
+    <!-- ─── Onglet Question ─────────────────────────────────────────────── -->
+    <section class="card" data-panneau="question" style="margin-top: var(--gap-m)">
+      <h2 class="h2" style="margin:0">Question</h2>
+      <div class="labo-ligne">
+        <label class="labo-champ"><span>Logement</span><select data-bind="bien"></select></label>
+        <label class="labo-champ"><span>Conversation voyageur</span><select data-bind="conversation"><option value="">Sans conversation</option></select></label>
+      </div>
+      <details data-bind="details-contexte">
+        <summary class="labo-petit" style="cursor:pointer">Voir le contexte envoyé à chaque IA <span data-bind="tokens-contexte"></span></summary>
+        <pre class="labo-contexte" data-bind="contexte"></pre>
+      </details>
+      <label class="labo-champ"><span>Votre question (ou un message de voyageur à tester)</span>
+        <textarea data-bind="question" maxlength="4000" placeholder="Ex. : Le voyageur peut-il arriver à 23 h ? Que lui répondre ?"></textarea>
+      </label>
+      <div class="labo-actions">
+        <button type="button" class="btn btn--primary" data-action="interroger">Interroger</button>
+        <span class="labo-petit" data-bind="estimation-question"></span>
+      </div>
+    </section>
+
+    <!-- ─── Onglet Facture ──────────────────────────────────────────────── -->
+    <section class="card" data-panneau="facture" style="margin-top: var(--gap-m)" hidden>
+      <h2 class="h2" style="margin:0">Facture</h2>
+      <p class="labo-petit">PDF, JPEG ou PNG, 3 Mo au plus. Chaque IA reçoit la même consigne que la lecture du compte de charges. La facture n’est enregistrée nulle part.</p>
+      <input type="file" data-bind="fichier" accept="application/pdf,image/jpeg,image/png">
+      <p class="labo-petit" data-bind="fichier-info"></p>
+      <div class="labo-actions">
+        <button type="button" class="btn btn--primary" data-action="lire" disabled>Faire lire</button>
+        <span class="labo-petit" data-bind="estimation-facture"></span>
+      </div>
+    </section>
+
+    <!-- ─── Résultats ───────────────────────────────────────────────────── -->
+    <section data-bind="resultats-bloc" style="margin-top: var(--gap-m)" hidden>
+      <h2 class="h2">Résultats <span class="labo-petit" data-bind="total"></span></h2>
+      <div class="labo-table-wrap" data-bind="tableau"></div>
+      <div class="labo-resultats" data-bind="cartes" style="margin-top: var(--gap-m)"></div>
+    </section>
+  </div>
+</main>
+
+<script type="module">
+  // ⚠ PAGE NON DÉLÉGABLE : elle lit les logements et les conversations du
+  // compte PROPRE du fondateur. Le garde-fou passe AVANT toute lecture.
+  import { exigerCompteProprePage } from '/shared/compte-courant.js'
+  await exigerCompteProprePage({ nomPage: 'Le labo IA' })
+  import { requireAuth } from '/components/auth-guard.js'
+  import { supabase } from '/shared/supabase.js'
+
+  const session = await requireAuth()
+  if (!session) throw new Error('non connecté')
+
+  const $ = (sel) => document.querySelector(`[data-bind="${sel}"]`)
+  const echapper = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+  // ─── Appels ──────────────────────────────────────────────────────────────
+  // Un seul endpoint. Le corps d'erreur est gardé entier : le motif (clé
+  // absente, plafond, refus du modèle) est ce que la page affiche.
+  async function appel (methode, requete, corps = null) {
+    const { data: { session: s } } = await supabase.auth.getSession()
+    const res = await fetch('/api/labo-ia' + (methode === 'GET' ? '?' + new URLSearchParams(requete) : ''), {
+      method: methode,
+      headers: { 'Content-Type': 'application/json', ...(s ? { Authorization: `Bearer ${s.access_token}` } : {}) },
+      body: methode === 'POST' ? JSON.stringify({ ...requete, ...corps }) : undefined
+    })
+    let json = null
+    try { json = await res.json() } catch { json = null }
+    return { statut: res.status, json: json || {} }
+  }
+
+  // ─── Formats ─────────────────────────────────────────────────────────────
+  function usd (v) {
+    if (v === null || v === undefined || !Number.isFinite(Number(v))) return '—'
+    const n = Number(v)
+    if (n === 0) return '0 $'
+    const t = n < 0.01 ? n.toPrecision(3) : n.toFixed(4)
+    return t.replace('.', ',') + ' $'
+  }
+  const prix = (v) => (v === null || v === undefined) ? '—' : String(v).replace('.', ',')
+  const entier = (v) => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('fr-FR')
+  const secondes = (ms) => (ms === null || ms === undefined) ? '—' : (ms / 1000).toFixed(1).replace('.', ',') + ' s'
+  const euros = (c) => (c === null || c === undefined) ? null : (c / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
+
+  // Les éditeurs chinois, par le préfixe de l'identifiant (`auteur/…`).
+  const AUTEURS_CN = new Set(['deepseek', 'qwen', 'moonshotai', 'z-ai', 'thudm', 'zhipu', 'minimax', 'baidu', 'tencent', 'bytedance', 'bytedance-seed', 'xiaomi', 'stepfun-ai', 'stepfun', 'alibaba', 'inclusionai', 'meituan'])
+
+  // ─── État ────────────────────────────────────────────────────────────────
+  const CLE_SELECTION = 'hs_labo_ia_modeles'
+  let catalogue = []
+  let selection = new Set()
+  let onglet = 'question'
+  let tokensContexte = 0
+  let fichier = null // { b64, type, nom, taille }
+
+  function lireSelection () {
+    try { const v = JSON.parse(localStorage.getItem(CLE_SELECTION) || 'null'); return Array.isArray(v) ? v : null } catch { return null }
+  }
+  function garderSelection () {
+    try { localStorage.setItem(CLE_SELECTION, JSON.stringify([...selection])) } catch { /* stockage indisponible : la sélection vit le temps de la page */ }
+  }
+
+  // La sélection de départ : le modèle le plus récent de chaque famille.
+  const FAMILLES = ['anthropic/claude-haiku', 'anthropic/claude-sonnet', 'openai/gpt-', 'google/gemini', 'mistralai/mistral',
+    'deepseek/', 'qwen/', 'moonshotai/kimi', 'z-ai/glm']
+  function selectionDeDepart () {
+    const choix = new Set()
+    for (const f of FAMILLES) {
+      const m = catalogue.find(x => x.id.startsWith(f) && !x.id.includes(':'))
+      if (m) choix.add(m.id)
+    }
+    return choix
+  }
+
+  // ─── Rendu des modèles ───────────────────────────────────────────────────
+  function filtrer () {
+    const q = $('recherche').value.trim().toLowerCase()
+    const seule = $('seulement-selection').checked
+    return catalogue.filter(m => (!seule || selection.has(m.id)) &&
+      (!q || m.id.toLowerCase().includes(q) || m.nom.toLowerCase().includes(q)))
+  }
+  function rendreModeles () {
+    const liste = filtrer().slice(0, 300)
+    $('modeles').innerHTML = liste.length ? liste.map(m => `
+      <label class="labo-modele">
+        <input type="checkbox" data-modele="${echapper(m.id)}" ${selection.has(m.id) ? 'checked' : ''}>
+        <span><span class="labo-modele__nom">${echapper(m.nom)}</span>${AUTEURS_CN.has(m.auteur) ? '<span class="labo-pastille labo-pastille--cn">CN</span>' : ''}${m.image ? '<span class="labo-pastille">image</span>' : ''}${m.fichier ? '<span class="labo-pastille">PDF</span>' : ''}<br><span class="labo-modele__id">${echapper(m.id)}</span></span>
+        <span class="labo-modele__prix">${prix(m.entree)} / ${prix(m.sortie)} $</span>
+      </label>`).join('') : '<p class="labo-petit" style="padding:12px">Aucun modèle.</p>'
+    $('compte').textContent = `· ${selection.size} sélectionné${selection.size > 1 ? 's' : ''} sur ${catalogue.length}`
+    majEstimations()
+  }
+  $('modeles').addEventListener('change', (e) => {
+    const id = e.target && e.target.dataset && e.target.dataset.modele
+    if (!id) return
+    if (e.target.checked) selection.add(id); else selection.delete(id)
+    garderSelection()
+    $('compte').textContent = `· ${selection.size} sélectionné${selection.size > 1 ? 's' : ''} sur ${catalogue.length}`
+    majEstimations()
+  })
+  $('recherche').addEventListener('input', rendreModeles)
+  $('seulement-selection').addEventListener('change', rendreModeles)
+  document.querySelector('[data-action="defaut"]').addEventListener('click', () => { selection = selectionDeDepart(); garderSelection(); rendreModeles() })
+  document.querySelector('[data-action="aucun"]').addEventListener('click', () => { selection = new Set(); garderSelection(); rendreModeles() })
+
+  const modeleDe = (id) => catalogue.find(m => m.id === id)
+
+  // ─── Estimations (avant l'envoi) ─────────────────────────────────────────
+  // Une estimation, DITE estimation : ≈ 3,5 caractères par token, et une
+  // réponse de 400 tokens (2 000 au plus). Le coût réel s'affiche après.
+  function estimer (tokensEntree, sortieTypique, sortieMax, modeles) {
+    let typ = 0, max = 0
+    for (const m of modeles) {
+      typ += (tokensEntree * m.entree + sortieTypique * m.sortie) / 1e6
+      max += (tokensEntree * m.entree + sortieMax * m.sortie) / 1e6
+    }
+    return { typ, max }
+  }
+  function modelesPourFacture () {
+    const ms = [...selection].map(modeleDe).filter(Boolean)
+    if (fichier && fichier.type !== 'application/pdf') return ms.filter(m => m.image)
+    return ms
+  }
+  function majEstimations () {
+    const ms = [...selection].map(modeleDe).filter(Boolean)
+    const tq = tokensContexte + Math.ceil(($('question').value || '').length / 3.5)
+    const e = estimer(tq, 400, 2000, ms)
+    $('estimation-question').textContent = ms.length
+      ? `${ms.length} IA · coût estimé ≈ ${usd(e.typ)} (au plus ${usd(e.max)})` : 'Cochez au moins un modèle.'
+    document.querySelector('[data-action="interroger"]').textContent = `Interroger ${ms.length} IA`
+    const mf = modelesPourFacture()
+    // Une image ≈ 1 500 tokens, une page de PDF ≈ 1 000 : ordre de grandeur.
+    const tf = fichier ? (fichier.type === 'application/pdf' ? Math.ceil(fichier.taille / 300) : 1500) + 1200 : 0
+    const ef = estimer(tf, 400, 1500, mf)
+    $('estimation-facture').textContent = !fichier ? ''
+      : `${mf.length} IA${fichier.type !== 'application/pdf' && mf.length < ms.length ? ` (${ms.length - mf.length} ne lisent pas les images)` : ''} · coût estimé ≈ ${usd(ef.typ)} (au plus ${usd(ef.max)})`
+    const lire = document.querySelector('[data-action="lire"]')
+    lire.disabled = !fichier || !mf.length
+    lire.textContent = `Faire lire par ${mf.length} IA`
+  }
+  $('question').addEventListener('input', majEstimations)
+
+  // ─── Onglets ─────────────────────────────────────────────────────────────
+  document.querySelectorAll('[data-onglet]').forEach(b => b.addEventListener('click', () => {
+    onglet = b.dataset.onglet
+    document.querySelectorAll('[data-onglet]').forEach(x => x.classList.toggle('is-on', x === b))
+    document.querySelectorAll('[data-panneau]').forEach(p => { p.hidden = p.dataset.panneau !== onglet })
+  }))
+
+  // ─── Logement, conversation, contexte ────────────────────────────────────
+  async function chargerConversations () {
+    const bien = $('bien').value
+    $('conversation').innerHTML = '<option value="">Sans conversation</option>'
+    if (!bien) return
+    const r = await appel('GET', { action: 'conversations', bien })
+    if (r.statut !== 200) return
+    for (const c of r.json.conversations || []) {
+      const o = document.createElement('option')
+      o.value = c.bookingId
+      const dates = c.arrivee ? ` · ${c.arrivee}${c.depart ? ' → ' + c.depart : ''}` : ''
+      o.textContent = `${c.voyageur || 'Voyageur'}${dates} · ${c.messages} message${c.messages > 1 ? 's' : ''}`
+      $('conversation').appendChild(o)
+    }
+  }
+  async function chargerContexte () {
+    const bien = $('bien').value
+    if (!bien) return
+    const req = { action: 'contexte', bien }
+    if ($('conversation').value) req.booking = $('conversation').value
+    const r = await appel('GET', req)
+    if (r.statut !== 200) { $('contexte').textContent = r.json.error || 'Contexte illisible'; return }
+    tokensContexte = r.json.tokensEstimes || 0
+    $('contexte').textContent = r.json.systeme || ''
+    $('tokens-contexte').textContent = `(≈ ${entier(tokensContexte)} tokens${r.json.messages ? `, ${r.json.messages} messages` : ''})`
+    majEstimations()
+  }
+  $('bien').addEventListener('change', async () => { await chargerConversations(); await chargerContexte() })
+  $('conversation').addEventListener('change', chargerContexte)
+
+  // ─── Fichier ─────────────────────────────────────────────────────────────
+  const MAX_OCTETS = 3 * 1024 * 1024
+  $('fichier').addEventListener('change', () => {
+    const f = $('fichier').files && $('fichier').files[0]
+    fichier = null
+    $('fichier-info').textContent = ''
+    if (!f) { majEstimations(); return }
+    if (f.size > MAX_OCTETS) { $('fichier-info').textContent = 'Fichier trop lourd : 3 Mo au plus.'; majEstimations(); return }
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(f.type)) { $('fichier-info').textContent = 'PDF, JPEG ou PNG seulement.'; majEstimations(); return }
+    const lecteur = new FileReader()
+    lecteur.onload = () => {
+      const url = String(lecteur.result || '')
+      fichier = { b64: url.slice(url.indexOf(',') + 1), type: f.type, nom: f.name, taille: f.size }
+      $('fichier-info').textContent = `${f.name} · ${(f.size / 1024).toFixed(0)} Ko`
+      majEstimations()
+    }
+    lecteur.readAsDataURL(f)
+  })
+
+  // ─── Lancement : un appel par modèle, cinq à la fois ─────────────────────
+  const EN_PARALLELE = 5
+  async function enFile (taches) {
+    let i = 0
+    const ouvriers = Array.from({ length: Math.min(EN_PARALLELE, taches.length) }, async () => {
+      while (i < taches.length) { const t = taches[i++]; await t() }
+    })
+    await Promise.all(ouvriers)
+  }
+
+  let essai = 0
+  function carte (m) {
+    const el = document.createElement('article')
+    el.className = 'labo-rep'
+    el.innerHTML = `<div class="labo-rep__tete"><strong>${echapper(m.nom)}</strong><span class="labo-pastille">en cours…</span></div>
+      <span class="labo-modele__id">${echapper(m.id)}</span><div class="labo-rep__chiffres"></div><div class="labo-rep__texte"></div>`
+    $('cartes').appendChild(el)
+    return el
+  }
+  function remplirCarte (el, r) {
+    const etat = el.querySelector('.labo-pastille')
+    const chiffres = el.querySelector('.labo-rep__chiffres')
+    const texte = el.querySelector('.labo-rep__texte')
+    if (!r.ok) {
+      etat.className = 'labo-pastille labo-pastille--ko'
+      etat.textContent = 'échec'
+      texte.textContent = r.message || r.erreur || 'Le modèle n’a pas répondu.'
+      chiffres.textContent = r.dureeMs ? secondes(r.dureeMs) : ''
+      return
+    }
+    etat.className = 'labo-pastille labo-pastille--ok'
+    etat.textContent = usd(r.coutUsd)
+    const raison = r.usage && r.usage.raisonnement ? ` (dont ${entier(r.usage.raisonnement)} de réflexion)` : ''
+    chiffres.innerHTML = `<span>${secondes(r.dureeMs)}</span><span>entrée ${entier(r.usage && r.usage.entree)}</span><span>sortie ${entier(r.usage && r.usage.sortie)}${echapper(raison)}</span>`
+      + `<span>hébergé par ${echapper(r.hebergeur || '?')}${r.enChine ? ' <span class="labo-pastille labo-pastille--cn">en Chine</span>' : ''}${r.restrictionLevee ? ' <span class="labo-pastille labo-pastille--cn">aucun hébergeur hors Chine</span>' : ''}</span>`
+    texte.textContent = r.texte || ''
+  }
+  function rendreTableau (lignes) {
+    const tri = lignes.slice().sort((a, b) => (a.r && a.r.ok ? a.r.coutUsd ?? 1e9 : 2e9) - (b.r && b.r.ok ? b.r.coutUsd ?? 1e9 : 2e9))
+    $('tableau').innerHTML = `<table><thead><tr><th>Modèle</th><th>Coût réel</th><th>Entrée</th><th>Sortie</th><th>Durée</th><th>Hébergeur</th></tr></thead><tbody>${
+      tri.map(({ m, r }) => `<tr><td>${echapper(m.nom)}</td>${
+        !r ? '<td colspan="5" class="vide">en cours…</td>'
+          : !r.ok ? `<td colspan="5" class="vide">échec — ${echapper(r.message || r.erreur || '')}</td>`
+          : `<td class="num">${usd(r.coutUsd)}</td><td class="num">${entier(r.usage && r.usage.entree)}</td><td class="num">${entier(r.usage && r.usage.sortie)}</td><td class="num">${secondes(r.dureeMs)}</td><td>${echapper(r.hebergeur || '?')}${r.enChine ? ' (Chine)' : ''}</td>`
+      }</tr>`).join('')}</tbody></table>`
+    const total = lignes.reduce((s, x) => s + (x.r && x.r.ok && Number.isFinite(x.r.coutUsd) ? x.r.coutUsd : 0), 0)
+    const finis = lignes.filter(x => x.r).length
+    $('total').textContent = `· ${finis}/${lignes.length} · total ${usd(total)}`
+  }
+
+  function preparerResultats () {
+    $('resultats-bloc').hidden = false
+    $('cartes').innerHTML = ''
+    $('tableau').innerHTML = ''
+  }
+
+  // ── Question ──
+  document.querySelector('[data-action="interroger"]').addEventListener('click', async (e) => {
+    const question = $('question').value.trim()
+    const bien = $('bien').value
+    const ms = [...selection].map(modeleDe).filter(Boolean)
+    if (!question || !bien || !ms.length) { alerteLocale('Choisissez un logement, au moins un modèle, et écrivez une question.'); return }
+    const n = ++essai
+    e.target.disabled = true
+    preparerResultats()
+    const lignes = ms.map(m => ({ m, r: null, el: carte(m) }))
+    rendreTableau(lignes)
+    const corps = { bien, question }
+    if ($('conversation').value) corps.booking = $('conversation').value
+    await enFile(lignes.map(l => async () => {
+      const { statut, json } = await appel('POST', { action: 'question', modele: l.m.id }, corps).catch(() => ({ statut: 0, json: {} }))
+      if (n !== essai) return
+      l.r = statut === 200 ? json : { ok: false, erreur: json.error, message: json.message || json.error || (statut ? `HTTP ${statut}` : 'réseau'), dureeMs: json.dureeMs }
+      remplirCarte(l.el, l.r)
+      rendreTableau(lignes)
+    }))
+    e.target.disabled = false
+  })
+
+  // ── Facture ──
+  const CHAMPS = [
+    ['fournisseur_nom', 'Fournisseur'], ['fournisseur_siret', 'SIRET fournisseur'], ['numero_facture', 'N° de facture'],
+    ['date_facture', 'Date'], ['date_echeance', 'Échéance'], ['type_document', 'Type'], ['categorie', 'Catégorie'],
+    ['montant_ht_cents', 'HT'], ['montant_tva_cents', 'TVA'], ['montant_ttc_cents', 'TTC'], ['solde_ttc_cents', 'Solde (régularisation)'],
+    ['periode_debut', 'Période — début'], ['periode_fin', 'Période — fin'], ['destinataire_nom', 'Destinataire'], ['destinataire_siret', 'SIRET destinataire']
+  ]
+  const valeurAffichee = (cle, v) => (v === null || v === undefined || v === '') ? null : (/_cents$/.test(cle) ? euros(v) : String(v))
+  function rendreComparaison (lignes) {
+    const tetes = lignes.map(({ m }) => `<th>${echapper(m.nom)}</th>`).join('')
+    const corps = CHAMPS.map(([cle, libelle]) => {
+      const vals = lignes.map(({ r }) => (r && r.ok && r.lecture && r.lecture.ok) ? valeurAffichee(cle, r.lecture.lu[cle]) : undefined)
+      // La valeur majoritaire : un écart s'y compare, et se surligne.
+      const comptes = new Map()
+      vals.forEach(v => { if (v) comptes.set(v, (comptes.get(v) || 0) + 1) })
+      const majoritaire = [...comptes.entries()].sort((a, b) => b[1] - a[1])[0]
+      return `<tr><th>${echapper(libelle)}</th>${vals.map(v => v === undefined ? '<td class="vide">—</td>'
+        : v === null ? '<td class="vide">non lu</td>'
+        : `<td class="${majoritaire && v !== majoritaire[0] ? 'ecart' : ''}">${echapper(v)}</td>`).join('')}</tr>`
+    }).join('')
+    const pied = [
+      ['Coût réel', r => usd(r.coutUsd)],
+      ['Durée', r => secondes(r.dureeMs)],
+      ['Tokens entrée / sortie', r => `${entier(r.usage && r.usage.entree)} / ${entier(r.usage && r.usage.sortie)}`],
+      ['Hébergeur', r => `${r.hebergeur || '?'}${r.enChine ? ' (Chine)' : ''}`]
+    ].map(([lib, f], i) => `<tr><th>${lib}</th>${lignes.map(({ r }) => !r ? '<td class="vide">en cours…</td>'
+      // L'échec se dit une fois, sur la première ligne ; les suivantes restent vides.
+      : !r.ok ? (i === 0 ? `<td class="vide">échec — ${echapper(r.message || r.erreur || '')}</td>` : '<td class="vide">—</td>')
+      : `<td class="num">${echapper(f(r))}</td>`).join('')}</tr>`).join('')
+    $('tableau').innerHTML = `<table><thead><tr><th></th>${tetes}</tr></thead><tbody>${corps}${pied}</tbody></table>`
+    const total = lignes.reduce((s, x) => s + (x.r && x.r.ok && Number.isFinite(x.r.coutUsd) ? x.r.coutUsd : 0), 0)
+    $('total').textContent = `· ${lignes.filter(x => x.r).length}/${lignes.length} · total ${usd(total)} · les cases surlignées diffèrent de la majorité`
+  }
+  document.querySelector('[data-action="lire"]').addEventListener('click', async (e) => {
+    const ms = modelesPourFacture()
+    if (!fichier || !ms.length) return
+    const n = ++essai
+    e.target.disabled = true
+    preparerResultats()
+    const lignes = ms.map(m => ({ m, r: null, el: carte(m) }))
+    rendreComparaison(lignes)
+    await enFile(lignes.map(l => async () => {
+      const { statut, json } = await appel('POST', { action: 'facture', modele: l.m.id }, { fichier: fichier.b64 }).catch(() => ({ statut: 0, json: {} }))
+      if (n !== essai) return
+      l.r = statut === 200 ? json : { ok: false, erreur: json.error, message: json.message || json.error || (statut ? `HTTP ${statut}` : 'réseau'), dureeMs: json.dureeMs }
+      if (l.r.ok && l.r.lecture && !l.r.lecture.ok) l.r.texte = `Lecture inexploitable (${l.r.lecture.motif}).\n\n${l.r.texte || ''}`
+      remplirCarte(l.el, l.r)
+      rendreComparaison(lignes)
+    }))
+    e.target.disabled = false
+  })
+
+  function alerteLocale (texte) {
+    const p = $('refus')
+    p.textContent = texte
+    p.hidden = false
+    setTimeout(() => { p.hidden = true }, 5000)
+  }
+
+  // ─── Chargement : deux appels (catalogue, logements) ─────────────────────
+  const [cat, biens] = await Promise.all([appel('GET', { action: 'catalogue' }), appel('GET', { action: 'biens' })])
+  if (cat.statut === 403 || biens.statut === 403) {
+    $('refus').textContent = (cat.json.error || biens.json.error || 'Réservé au fondateur') + (cat.json.motif ? ` (${cat.json.motif})` : '')
+    $('refus').hidden = false
+  } else {
+    $('contenu').hidden = false
+    if (cat.statut !== 200) {
+      $('modeles').innerHTML = `<p class="labo-petit" style="padding:12px">Catalogue indisponible (${echapper(cat.json.motif || cat.statut)}).</p>`
+    } else {
+      catalogue = cat.json.modeles || []
+      $('sans-cle').hidden = !!cat.json.cle
+      const gardee = lireSelection()
+      selection = gardee ? new Set(gardee.filter(id => catalogue.some(m => m.id === id))) : selectionDeDepart()
+      rendreModeles()
+    }
+    for (const b of (biens.json.biens || [])) {
+      const o = document.createElement('option')
+      o.value = b.id
+      o.textContent = b.nom
+      $('bien').appendChild(o)
+    }
+    if ($('bien').value) { await chargerConversations(); await chargerContexte() }
+  }
+</script>
+</body>
+</html>

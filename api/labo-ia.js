@@ -1,0 +1,248 @@
+// api/labo-ia.js — LE LABO IA (page pages/labo-ia.html)
+// Chantier du 20 novembre 2026, doc docs/kb/labo-ia.md.
+//
+// ⚠ RÉSERVÉ AU FONDATEUR, ET C'EST UNE GARDE SERVEUR (règle absolue du
+// dépôt : un masquage ne protège rien). Même porte que la carte « Coût du
+// cron » de api/diagnostic.js : session vérifiée, compte propre (`titulaire`
+// sans ressource refuse un compte basculé), puis e-mail = FOUNDER_EMAIL. Les
+// données lues sont TOUJOURS celles du compte de l'appelant (`user_id`).
+//
+// GET  ?action=catalogue                      -> { ok, modeles: [...] }
+// GET  ?action=biens                          -> { ok, biens: [{ id, nom }] }
+// GET  ?action=conversations&bien=<uuid>      -> { ok, conversations: [...] }
+// GET  ?action=contexte&bien=<uuid>[&booking] -> { ok, systeme, tokensEstimes, fil }
+// POST { action: 'question', modele, bien, booking?, question }
+//   -> { ok, texte, modele, hebergeur, enChine, restrictionLevee, usage, coutUsd, dureeMs }
+// POST { action: 'facture', modele, fichier (base64) }
+//   -> { ok, lecture: { ok, lu } | { ok: false, motif }, texte, … même usage }
+//
+// ⚠ UN APPEL = UN MODÈLE. La page lance les modèles en parallèle et affiche
+// chaque réponse à son arrivée : une fonction qui attendrait le plus lent de
+// quinze modèles buterait sur son mur de durée.
+//
+// ⚠ RIEN N'EST ÉCRIT DANS LE PRODUIT, RIEN NE PART AU VOYAGEUR. Seul effet :
+// la ligne de `ia_appels` (lib/ia/openrouter.js) et la dépense OpenRouter.
+//
+// Refus parlants, jamais silencieux :
+//  - 403 : pas le fondateur, ou compte basculé, ou FOUNDER_EMAIL absent ;
+//  - 400 : demande invalide (le motif est nommé) ;
+//  - 404 : bien ou séjour introuvable SUR CE COMPTE ;
+//  - 429 garde_labo : plafond du jour atteint ;
+//  - 502 ia : le modèle a refusé ou n'a pas répondu (le motif est rendu) ;
+//  - 503 : lecture impossible, ou clé OpenRouter absente.
+
+const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
+const { sansArchives } = require('../lib/biens-vivants')
+const { replisDuBien } = require('../lib/balises')
+const L = require('../lib/labo-ia')
+const OR = require('../lib/ia/openrouter')
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+
+// ⚠ LU À CHAQUE APPEL (même raison que api/diagnostic.js : une garde figée au
+// démarrage à froid se trompe toute la vie de l'instance).
+const fondateur = () => String(process.env.FOUNDER_EMAIL || '').trim().toLowerCase()
+
+const ACTIONS_GET = ['catalogue', 'biens', 'conversations', 'contexte']
+const ACTIONS_POST = ['question', 'facture']
+
+module.exports = async function handler (req, res) {
+  try {
+    return await router(req, res)
+  } catch (e) {
+    console.error('[labo-ia] exception:', e && e.message)
+    if (!res.headersSent) return res.status(500).json({ error: 'Erreur serveur' })
+  }
+}
+
+/** La porte : rend l'identifiant du fondateur, ou null (la réponse est partie). */
+async function gardeFondateur (req, res) {
+  const garde = await requirePermission(req, res, { domaine: 'titulaire' })
+  if (!garde.ok) return null
+  if (!fondateur()) {
+    res.status(403).json({ error: 'Réservé au fondateur', motif: 'FOUNDER_EMAIL absent de la configuration' })
+    return null
+  }
+  if (String(garde.email || '').trim().toLowerCase() !== fondateur()) {
+    res.status(403).json({ error: 'Réservé au fondateur' })
+    return null
+  }
+  return garde.userId
+}
+
+async function router (req, res) {
+  // ⚠ AVANT LE PREMIER REFUS, le 405 compris (dette 90) : la garde le repose,
+  // mais un refus qui la précède partirait sans lui.
+  res.setHeader('Cache-Control', 'private, no-store')
+  if (!['GET', 'POST'].includes(req.method)) {
+    res.setHeader('Allow', 'GET, POST')
+    return res.status(405).json({ error: 'Méthode non autorisée' })
+  }
+  const action = req.method === 'GET' ? String((req.query || {}).action || '') : String((req.body || {}).action || '')
+  if (!(req.method === 'GET' ? ACTIONS_GET : ACTIONS_POST).includes(action)) return res.status(400).json({ error: 'Action inconnue' })
+
+  const uid = await gardeFondateur(req, res)
+  if (!uid) return
+
+  if (action === 'catalogue') {
+    const c = await OR.lireCatalogue()
+    if (!c.ok) return res.status(502).json({ error: 'Catalogue indisponible', motif: c.motif })
+    return res.status(200).json({ ok: true, modeles: c.modeles, cle: !!String(process.env.OPENROUTER_API_KEY || '').trim() })
+  }
+
+  if (action === 'biens') {
+    const { data, error } = await sansArchives(supabase.from('properties')
+      .select('id, name, provider_property_id').eq('user_id', uid))
+      .order('name', { ascending: true })
+    if (error) return res.status(503).json({ error: 'Lecture impossible' })
+    return res.status(200).json({ ok: true, biens: (data || []).map(b => ({ id: b.id, nom: b.name || 'Logement' })) })
+  }
+
+  if (action === 'conversations') {
+    const bien = await bienDuCompte(uid, req.query.bien)
+    if (bien.statut) return res.status(bien.statut).json({ error: bien.erreur })
+    const ref = String(bien.ligne.provider_property_id)
+    const { data: msgs, error } = await supabase.from('messages')
+      .select('booking_id, sent_at, direction')
+      .eq('user_id', uid).eq('property_id', ref).not('booking_id', 'is', null)
+      .order('sent_at', { ascending: false }).limit(1000)
+    if (error) return res.status(503).json({ error: 'Lecture impossible' })
+    const ids = [...new Set((msgs || []).map(m => String(m.booking_id)))].slice(0, L.MAX_CONVERSATIONS)
+    let snaps = []
+    if (ids.length) {
+      const r = await supabase.from('bookings_snapshot').select('booking_id, snapshot')
+        .eq('user_id', uid).in('booking_id', ids)
+      if (r.error) return res.status(503).json({ error: 'Lecture impossible' })
+      snaps = r.data || []
+    }
+    return res.status(200).json({ ok: true, conversations: L.resumerConversations(msgs, snaps) })
+  }
+
+  if (action === 'contexte') {
+    const ctx = await chargerContexte(uid, req.query.bien, req.query.booking)
+    if (ctx.statut) return res.status(ctx.statut).json({ error: ctx.erreur })
+    const systeme = L.contexteSysteme(ctx.contexte)
+    return res.status(200).json({ ok: true, systeme, tokensEstimes: L.estimerTokens(systeme), messages: ctx.contexte.fil.length })
+  }
+
+  // ── Les deux essais : un modèle par appel ─────────────────────────────────
+  const corps = req.body || {}
+  const modele = String(corps.modele || '').trim()
+  if (!OR.ID_MODELE.test(modele)) return res.status(400).json({ error: 'modele_invalide' })
+  if (!String(process.env.OPENROUTER_API_KEY || '').trim()) {
+    return res.status(503).json({ error: 'cle_absente', message: 'La clé OpenRouter n’est pas encore posée dans Vercel (OPENROUTER_API_KEY).' })
+  }
+  const refus = await plafondAtteint(uid)
+  if (refus) return res.status(refus.statut).json(refus.corps)
+
+  if (action === 'question') {
+    const q = L.validerQuestion(corps.question)
+    if (!q.ok) return res.status(400).json({ error: q.erreur })
+    const ctx = await chargerContexte(uid, corps.bien, corps.booking)
+    if (ctx.statut) return res.status(ctx.statut).json({ error: ctx.erreur })
+    const r = await OR.appelerModele({
+      modele,
+      messages: L.messagesQuestion(ctx.contexte, q.question),
+      maxTokens: L.MAX_TOKENS_QUESTION,
+      journal: { fonction: L.FONCTION_QUESTION, userId: uid, propertyId: ctx.ref, bookingId: ctx.booking }
+    }, { sb: supabase })
+    if (!r.ok) return res.status(r.motif === 'cle_absente' ? 503 : 502).json({ error: 'ia', motif: r.motif, message: r.message, dureeMs: r.dureeMs })
+    return res.status(200).json({ ok: true, ...r })
+  }
+
+  // action === 'facture'
+  const f = L.validerFichier(corps.fichier)
+  if (!f.ok) return res.status(400).json({ error: f.erreur })
+  const r = await OR.appelerModele({
+    modele,
+    messages: L.messagesFacture(f),
+    maxTokens: L.MAX_TOKENS_FACTURE,
+    journal: { fonction: L.FONCTION_FACTURE, userId: uid }
+  }, { sb: supabase })
+  if (!r.ok) return res.status(r.motif === 'cle_absente' ? 503 : 502).json({ error: 'ia', motif: r.motif, message: r.message, dureeMs: r.dureeMs })
+  return res.status(200).json({ ok: true, ...r, texte: String(r.texte || '').slice(0, 6000), lecture: L.lectureDeFacture(r.texte) })
+}
+
+/** Le bien désigné par le client, résolu SUR LE COMPTE de l'appelant (règle 11). */
+async function bienDuCompte (uid, idBien) {
+  if (!L.estUuid(idBien)) return { statut: 400, erreur: 'bien_invalide' }
+  const { data, error } = await supabase.from('properties').select('*')
+    .eq('user_id', uid).eq('id', idBien).maybeSingle()
+  if (error) return { statut: 503, erreur: 'Lecture impossible' }
+  if (!data) return { statut: 404, erreur: 'Bien introuvable' }
+  return { ligne: data }
+}
+
+/**
+ * Le contexte d'un essai : base de connaissance du bien (celle que lit
+ * l'agent, « Hors IA » exclu, replis de la fiche compris), consignes de
+ * l'hôte, et — si un séjour est choisi — les derniers messages de son fil.
+ */
+async function chargerContexte (uid, idBien, bookingBrut) {
+  const b = await bienDuCompte(uid, idBien)
+  if (b.statut) return b
+  const vb = L.validerBooking(bookingBrut)
+  if (!vb.ok) return { statut: 400, erreur: vb.erreur }
+  const bien = b.ligne
+  // ⚠ PIÈGE N°1 DU DÉPÔT (règle 10) : knowledge, messages et agent_prompting
+  // sont clés sur la RÉFÉRENCE PROVIDER, jamais l'UUID.
+  const ref = String(bien.provider_property_id)
+  const { buildKnowledgeText, loadPromptingInstructions } = require('../lib/cron-classify')
+
+  const { data: knowledge, error: eK } = await supabase.from('knowledge')
+    .select('*').eq('user_id', uid).eq('property_id', ref)
+  if (eK) return { statut: 503, erreur: 'Lecture impossible' }
+  const connaissance = buildKnowledgeText(knowledge || [], { replis: replisDuBien(bien) })
+  const lues = await loadPromptingInstructions(uid, ref)
+  const consignes = [lues.global, lues.propertyOverride].filter(Boolean).join('\n')
+
+  let fil = []
+  let voyageur = null
+  let arrivee = null
+  let depart = null
+  if (vb.booking) {
+    // Le séjour doit appartenir à CE bien de CE compte : sinon 404, jamais le
+    // fil d'un autre.
+    const { data: snap, error: eS } = await supabase.from('bookings_snapshot')
+      .select('booking_id, property_id, snapshot')
+      .eq('user_id', uid).eq('booking_id', vb.booking).maybeSingle()
+    if (eS) return { statut: 503, erreur: 'Lecture impossible' }
+    const { data: msgs, error: eM } = await supabase.from('messages')
+      .select('direction, kind, body, sent_at')
+      .eq('user_id', uid).eq('property_id', ref).eq('booking_id', vb.booking)
+      .order('sent_at', { ascending: false }).limit(L.MESSAGES_DU_FIL)
+    if (eM) return { statut: 503, erreur: 'Lecture impossible' }
+    if (snap && String(snap.property_id) !== ref) return { statut: 404, erreur: 'Séjour introuvable' }
+    if (!snap && !(msgs || []).length) return { statut: 404, erreur: 'Séjour introuvable' }
+    fil = L.filDepuisMessages(msgs)
+    const s = (snap && snap.snapshot) || {}
+    voyageur = [s.firstName, s.lastName].filter(Boolean).join(' ').trim() || null
+    arrivee = s.arrival || null
+    depart = s.departure || null
+  }
+  return {
+    ref,
+    booking: vb.booking,
+    contexte: { bienNom: bien.name, connaissance, consignes, voyageur, arrivee, depart, fil }
+  }
+}
+
+/**
+ * Garde de coût du labo, comptée dans le journal `ia_appels`. ⚠ UN COMPTE
+ * ILLISIBLE NE DIT PAS « OUI » (même règle que la lecture des charges) : sans
+ * le compte des appels, on ne dépense pas.
+ */
+async function plafondAtteint (uid) {
+  const depuis = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+  const { count, error } = await supabase.from('ia_appels').select('id', { count: 'exact', head: true })
+    .eq('user_id', uid).in('fonction', [L.FONCTION_QUESTION, L.FONCTION_FACTURE]).gte('created_at', depuis)
+  if (error || typeof count !== 'number') return { statut: 503, corps: { error: 'Lecture impossible' } }
+  if (count >= L.PLAFOND_JOUR) {
+    return { statut: 429, corps: { error: 'garde_labo', message: `Plafond du labo atteint : ${L.PLAFOND_JOUR} appels en 24 h.` } }
+  }
+  return null
+}
+
+module.exports.gardeFondateur = gardeFondateur
+module.exports.chargerContexte = chargerContexte
