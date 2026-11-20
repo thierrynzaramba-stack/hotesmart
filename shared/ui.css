@@ -2279,10 +2279,8 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
    fiche s'ouvre en plein écran (§13.9). */
 .chg { gap: var(--gap-l); }
 .chg-tete { display: flex; align-items: center; gap: var(--gap-s); }
-.chg-tete .h1 { flex: 1; margin: 0; }
 .chg-envoi { margin: 0; font-size: var(--fs-caption); color: var(--muted); }
 .chg-envoi:empty { display: none; }
-.chg-haut { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--gap-l); align-items: start; }
 .chg-bloc { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .chg-bloc__tete { display: flex; align-items: baseline; gap: 10px; }
 .chg-h2 { margin: 0; font-size: 20px; font-weight: var(--fw-black); letter-spacing: -0.02em; }
@@ -2315,22 +2313,10 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
   font: inherit; font-size: var(--fs-small); color: var(--ink); background: var(--surface);
   border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; min-height: var(--control);
 }
-/* TTC sur toute la largeur, HT et TVA côte à côte : trois colonnes coupaient
-   un montant au milieu au téléphone (« 1761,9 / 0 € », recette du 11 novembre). */
-.chg-chiffres { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap-s); }
-.chg-chiffre--fort { grid-column: 1 / -1; }
-.chg-chiffre { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-tile); padding: 12px; min-width: 0; }
-.chg-chiffre > span { font-size: var(--fs-caption); color: var(--muted); font-weight: var(--fw-semibold); }
-.chg-chiffre b { font-size: 20px; font-weight: var(--fw-black); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.chg-chiffre--fort b { font-size: 24px; }
 .chg-chiffre__sans { font-size: 12px; color: var(--muted); }
 .chg-mentions { margin: 0; font-size: var(--fs-caption); color: var(--muted); }
 .chg-mentions--estimation { color: var(--amber-text); font-weight: var(--fw-semibold); }
-.chg-reps { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: var(--gap-m); }
 .chg-rep ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.chg-rep li { display: flex; justify-content: space-between; gap: 10px; font-size: var(--fs-small); }
-.chg-rep li span { min-width: 0; overflow-wrap: anywhere; }
-.chg-rep li b { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* La fiche : un volet à droite à l'ordinateur. */
 .chg-fiche { border: 0; padding: 0; background: var(--surface); color: var(--ink); position: fixed; inset-block: 0; inset-inline: auto 0; margin: 0; width: 480px; max-width: 100%; height: 100%; max-height: 100%; border-inline-start: 1px solid var(--line); box-shadow: -12px 0 32px rgba(0, 0, 0, .12); }
@@ -2361,7 +2347,6 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
   .chg { gap: var(--gap-m); }
   .chg-ajouter { width: var(--control); padding: 0; }
   .chg-ajouter__mot { display: none; }
-  .chg-haut { grid-template-columns: minmax(0, 1fr); }
   .chg-ligne { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "qui ttc" "jour etat" "action action"; row-gap: 4px; }
   .chg-ligne__qui { grid-area: qui; }
   .chg-ligne__ttc { grid-area: ttc; }
@@ -2369,32 +2354,17 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
   .chg-ligne .chg-etat { grid-area: etat; justify-self: end; }
   .chg-ligne > span:empty { display: none; }
   .chg-ligne__action { grid-area: action; }
-  .chg-chiffre b { font-size: 17px; }
-  .chg-chiffre--fort b { font-size: 19px; }
   /* `100%` et pas `100vw` : `vw` compte la barre de défilement, et la fiche
      débordait de sa largeur à gauche (recette du 11 novembre). */
   .chg-fiche { width: 100%; }
 }
 
-/* ── Lot 7a : les deux lectures des totaux (Q34) et la période ────────────
-   « Étalé » d'abord (la charge du jour), « À la date » ensuite (la facture
-   entière à son jour), côte à côte ; ils passent l'un sous l'autre quand la
-   place manque. */
-.chg-lectures { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; }
-.chg-lecture { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
-.chg-lecture small { font-size: 12px; font-weight: var(--fw-semibold); color: var(--muted); }
-.chg-lecture b { white-space: nowrap; }
-.chg-chiffre .chg-lecture--date b { font-size: 15px; color: var(--muted); }
-.chg-rep li { flex-wrap: wrap; align-items: baseline; row-gap: 2px; }
-.chg-rep__nom { flex: 1 1 140px; }
-.chg-rep .chg-lecture b { font-size: var(--fs-small); }
-.chg-rep .chg-lecture--date b { font-weight: var(--fw-regular); color: var(--muted); }
+/* ── Lot 7a : la période d'une facture, dans la fiche ───────────────────── */
 .chg-periode { border: 0; margin: 0; padding: 0; min-width: 0; }
 .chg-periode legend { padding: 0; margin-bottom: 4px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
 .chg-periode__dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap-s); }
 /* Les crédits (spec compte de charges §14.20) : la mensualité payée d'un mois,
    sous le mois, et la liste des crédits avec leur formulaire d'import. */
-.chg-rep li.chg-rep__credit { padding-left: 12px; color: var(--muted); }
 .chg-credit-mois { display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 2px 8px; }
 .chg-credit-mois small { font-size: var(--fs-caption); }
 .chg-credits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -2402,6 +2372,72 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .chg-credit:first-child { border-top: 0; }
 .chg-credit__qui { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .chg-credit-form { margin-bottom: 12px; }
+
+/* ── Lot 8a, retours de recette du 19 novembre 2026 ───────────────────────
+   Le bouton d'ajout seul en haut ; l'entité à côté du titre ; « À traiter »
+   et la liste en lignes fines sur toute la largeur ; le total de l'exercice
+   en TTC ; les mois en BLOCS, deux colonnes sous une seule ligne de titres
+   (« Prorata temporis », « Date de facture ») ; le détail d'un mois en deux
+   parties (« Factures du mois », « Charges mensuelles »). */
+.chg-barre { display: flex; justify-content: flex-end; }
+.chg-tete { flex-wrap: wrap; gap: 8px 16px; }
+.chg-tete .h1 { margin: 0; }
+.chg-tete__entite .chg-select { min-width: min(100%, 240px); }
+.chg-choix { align-items: center; }
+.chg-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 24px; padding: 12px 14px; border-radius: var(--radius-tile); background: var(--surface-2); }
+.chg-total__fort { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.chg-total__fort > span { font-size: var(--fs-caption); color: var(--muted); font-weight: var(--fw-semibold); }
+.chg-total__fort b { font-size: 24px; font-weight: var(--fw-black); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chg-total__date { margin: 0; font-size: var(--fs-caption); color: var(--muted); }
+.chg-total__date b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chg-reps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: var(--gap-m); }
+.chg-rep--mois { grid-column: 1 / -1; }
+.chg-cols { display: grid; grid-template-columns: minmax(0, 1fr) 130px 120px 18px; align-items: center; gap: 8px; }
+.chg-cols--titres { padding: 0 12px 6px; font-size: var(--fs-caption); color: var(--muted); }
+.chg-col { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chg-col--prorata { font-weight: var(--fw-bold); }
+.chg-col--date { color: var(--muted); }
+.chg-rep__nom { min-width: 0; overflow-wrap: anywhere; }
+.chg-rep li.chg-cols { padding: 6px 12px; font-size: var(--fs-small); border-top: 1px solid var(--line); }
+.chg-rep .chg-ms { gap: 6px; }
+.chg-m { border: 1px solid var(--line); border-radius: var(--radius-tile); background: var(--surface); overflow: hidden; }
+.chg-m--ouvert { border-color: var(--muted); margin-block: 8px; }
+.chg-mois { width: 100%; padding: 9px 12px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-small); text-align: start; cursor: pointer; }
+.chg-mois:hover, .chg-m--ouvert .chg-mois { background: var(--surface-2); }
+.chg-m--ouvert .chg-mois .chg-rep__nom { font-weight: var(--fw-bold); }
+.chg-m__chevron { width: 16px; height: 16px; color: var(--muted); transform: rotate(90deg); }
+.chg-m--ouvert .chg-m__chevron { transform: rotate(-90deg); }
+.chg-rep__credit { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; padding: 4px 12px 6px 24px; font-size: var(--fs-small); color: var(--muted); }
+.chg-detail { padding: 2px 0 10px 24px; }
+.chg-detail > p { padding-inline-end: 12px; }
+/* La MÊME grille que l'en-tête du mois (`.chg-cols`) : « Charge du mois » tombe
+   sous « Prorata temporis », « Montant facturé » sous « Date de facture ». */
+.chg-dl { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 130px 120px 18px; align-items: start; gap: 8px; padding: 7px 12px 7px 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-small); text-align: start; }
+button.chg-dl { cursor: pointer; }
+button.chg-dl:hover { background: var(--surface-2); }
+.chg-dl--titres { margin-top: 8px; padding-bottom: 4px; font-size: var(--fs-caption); color: var(--muted); border-bottom: 1px solid var(--border); }
+.chg-dls { list-style: none; margin: 0; padding: 0; }
+.chg-rep .chg-dls { gap: 0; }
+.chg-dls > li + li { border-top: 1px solid var(--line); }
+.chg-dl__qui { min-width: 0; overflow-wrap: anywhere; }
+.chg-dl__qui b { font-weight: var(--fw-bold); }
+.chg-dl__qui .chg-ligne__infos { display: block; }
+.chg-etat--hors { background: var(--surface-2); color: var(--muted); }
+@media (min-width: 900px) {
+  .chg-lignes--fines .chg-ligne { padding-block: 7px; }
+  .chg-lignes--fines .chg-ligne__qui { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+}
 @media (max-width: 899px) {
-  .chg-chiffre .chg-lecture--date b { font-size: 14px; }
+  .chg-tete__entite, .chg-tete__entite .chg-select { width: 100%; }
+  /* Recette du 20 novembre 2026, à 390 px de large : les titres de colonnes
+     (« Prorata temporis », 95 px) débordaient de leurs 88 px et se touchaient,
+     et le nom d'une facture n'avait plus que 80 px. Les titres passent à la
+     ligne, les colonnes de montants se resserrent, le détail perd son retrait. */
+  .chg-cols { grid-template-columns: minmax(0, 1fr) 78px 78px 14px; gap: 6px; }
+  .chg-cols--titres, .chg-dl--titres { font-size: 12px; line-height: 1.2; align-items: end; }
+  .chg-cols--titres .chg-col, .chg-dl--titres .chg-col { white-space: normal; }
+  .chg-detail { padding-left: 12px; }
+  .chg-dl { grid-template-columns: minmax(0, 1fr) 78px 78px 14px; gap: 6px; }
+  .chg-rep__credit { padding-left: 12px; }
+  .chg-total__fort b { font-size: 20px; }
 }

@@ -57,10 +57,15 @@ function facture (n, extra = {}) {
 }
 
 /** Une réponse d'écran plausible. */
+// L'exercice civil 2026 de l'entité « Moi » : le réglage standard (§14.21).
+const EXERCICE_2026 = { entite: ENT, periode: '2026', proposees: ['2026'], debut: '2026-01-01', fin: '2026-12-31', debut_exercice: '01-01', standard: true }
+
 function reponseEcran ({ aTraiter = [], nombre = null, liste = [], suite = null, entites = null, totaux, biens = null, credits } = {}) {
   return {
     a_traiter: { lignes: aTraiter, nombre: nombre == null ? aTraiter.length : nombre },
     liste: { lignes: liste, suite },
+    // L'entité que le serveur a lue (§14.21 : une seule à la fois).
+    entite: ENT,
     entites: entites || [{ id: ENT, nom: 'Moi', archivee: false, debut_exercice: null }],
     biens: biens || [{ id: BIEN, nom: 'Studio', entite_id: ENT }],
     biens_archives: [{ id: BIEN_VIEUX, nom: 'Ancien', entite_id: ENT }],
@@ -69,7 +74,7 @@ function reponseEcran ({ aTraiter = [], nombre = null, liste = [], suite = null,
           total: { ht: 10000, tva: 2000, ttc: 12000, nb_factures: 1, nb_non_verifiees: 0, nb_signaux: 0, nb_sans_ht: 0, nb_sans_tva: 0, nb_sans_ttc: 0 },
           par_mois: [{ cle: '2026-11', ht: 10000, tva: 2000, ttc: 12000, nb_factures: 1, nb_sans_ttc: 0 }],
           par_categorie: [{ cle: 'energie', ttc: 12000 }], par_bien: [{ cle: BIEN, ttc: 12000 }],
-          calcule_le: '2026-11-10T19:00:00Z', entite: null, periode: '12_mois', proposees: ['12_mois'], debut: '2025-12-01', fin: '2026-11-30'
+          calcule_le: '2026-11-10T19:00:00Z', ...EXERCICE_2026
         }
       : totaux,
     credits: credits === undefined ? { liste: [], echeances: [] } : credits,
@@ -170,4 +175,4 @@ async function monter (o = {}) {
   return banc
 }
 
-module.exports = { monter, reponseEcran, facture, ENT, BIEN, BIEN_VIEUX, id }
+module.exports = { EXERCICE_2026, monter, reponseEcran, facture, ENT, BIEN, BIEN_VIEUX, id }
