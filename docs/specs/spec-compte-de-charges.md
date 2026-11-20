@@ -3636,8 +3636,18 @@ Branche `charges-exercice-ajout`, partie de `main` (`b4dfedc1`).
       33 023 octets pour toute la page ;
     - **le clic sur un mois** : 1 appel, **3 requêtes** (garde, entités,
       fonction), 1 291 octets (991 de corps), `total 1073 ms`.
-  - **production** : à mesurer après le go, sur le compte de Thierry
-    (avec un crédit) ; attendu **10 requêtes** contre 9 à l'AVANT.
+  - **production**, 20 novembre 2026 vers 10:40, `main` `c795e596`, compte
+    de Thierry (un crédit ; exercice décalé, du 1er février au 31 janvier) :
+    - **2 appels `/api`** au chargement ;
+    - `/api/ecran/charges` : **10 requêtes** contre 9 à l'AVANT
+      (`Server-Timing : total 565 ms`), **6 037 octets** (5 737 de corps) ;
+    - **le clic sur un mois** : 1 appel, **3 requêtes**, 211 ms,
+      1 256 octets.
+    C'est l'attendu : une requête de plus, les bornes des exercices.
+  - **Clôture** : regard de Thierry sur `/charges` en production le
+    20 novembre 2026 — « on peut faire mieux, mais au prochain passage ».
+    Lot 8a clos ; la présentation fera l'objet d'un lot à part, sur ses
+    retours.
 
 #### 14.21.10 Review 1 du lot 8a (19 novembre 2026)
 
