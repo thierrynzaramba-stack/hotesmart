@@ -3995,14 +3995,17 @@ Branche `charges-ajout-unique`, partie de `main` (`c795e596`, le lot 8a).
   place par compte dans la file commune. Trois réponses : oui, non, ou
   **panne** (file prise) — qui n'est pas un « non ».
 - `avecReconnaissance(lire)` : le tableau d'abord, l'IA sinon ; la panne
-  laisse passer l'IA. Branché dans `api/cron-charges.js`.
+  laisse passer l'IA. Branché dans `api/cron-charges.js`. ⚠ Le cron consulte
+  le plafond du jour AVANT de lire (inchangé) : un tableau resté `a_lire` sur
+  un compte au plafond n'est reconnu qu'une fois le compte redescendu — à la
+  confirmation, lui, la reconnaissance précède le plafond.
 - `appliquerLecture` : un résultat `{ tableau }` pose le statut `tableau`, le
   type `tableau_amortissement`, **tous les champs lus à vide**, le jour de
   réception, et `lecture_ia = { tableau: { echeances, debut, fin }, lu_le }`.
   Seulement sur une charge `a_lire` du compte.
 - `passerEnTableau` (action `tableau_reconnaitre`) : sur une charge `a_lire`,
-  `a_verifier` ou `illisible`, d'origine fichier ou photo, dont le fichier est
-  un PDF. 422 `pas_un_tableau` sinon, **sans rien écrire** ; 409
+  `a_verifier` ou `illisible`, qui n'est ni une ligne OTA ni une échéance de
+  crédit, dont le fichier est un PDF. 422 `pas_un_tableau` sinon, **sans rien écrire** ; 409
   `statut_non_retypable` ; 503 `occupe`. L'écriture est gardée par le statut
   d'avant, et vide l'entité et le logement.
 - `tableauEnFacture` (action `tableau_en_facture`) : la charge repart
@@ -4091,6 +4094,119 @@ sabotage sauvegardait `lib/charges.js` et `api/charges.js` sous le même nom :
 la restauration a écrasé le premier par le second, alors que rien n'était
 commité. Le module a été réécrit depuis la spec et ses tests. Depuis : commit
 de travail AVANT toute contre-épreuve, et restauration par `git show`.
+
+#### 14.21.15 Review du lot 8b (20 novembre 2026)
+
+Brief : arbre `/home/claude/hotesmart-8b`, branche `charges-ajout-unique`,
+plage `c795e5961da5146943777a068570d62ddb8395b9..ae73c6f97a6b729246e72a8d4aaf982d1669ec9d`.
+Les fichiers cités sont tous dans la plage. **Aucun constat de sécurité** :
+les correctifs ne sont pas re-reviewés (une review par commit).
+
+**Rapport, recopié tel quel.** Review du lot 8b — `charges-ajout-unique`
+
+- Arbre lu : `/home/claude/hotesmart-8b`
+- Branche : `charges-ajout-unique`
+- SHA de `git rev-parse HEAD` : `ae73c6f97a6b729246e72a8d4aaf982d1669ec9d`
+- Plage relue : `c795e5961da5146943777a068570d62ddb8395b9..ae73c6f97a6b729246e72a8d4aaf982d1669ec9d` (19 fichiers, tous dans la liste du brief)
+- Arbre laissé intact : `git status --short` ne montre que `node_modules`, déjà non suivi au départ. Les essais ont été faits dans `/tmp`, puis effacés.
+
+##### SÉCURITÉ
+
+Rien trouvé.
+
+##### BLOQUANT
+
+**B1 — « Ce n'est pas un tableau » est défait par le cron dès que l'IA ne conclut pas tout de suite.** MESURÉ avec les doubles du dépôt (`base-enregistreuse`, lecteur de tableau doublé).
+
+- Où : `lib/charges.js:978-993` (`tableauEnFacture`), `lib/charges.js:923-929` (`avecReconnaissance`), `api/cron-charges.js:146`.
+- Cause : `tableauEnFacture` remet la charge `a_lire` sans garder aucune trace du choix de l'hôte. L'endpoint évite bien la reconnaissance (`api/charges.js:118`), mais pas le cron, qui relit toute charge `a_lire` avec `avecReconnaissance(lireDocument)`.
+- Scénario : charge `tableau` → l'hôte clique « Ce n'est pas un tableau » → l'IA rend plafond, panne, ou un échec (1ʳᵉ ou 2ᵉ tentative) → la charge reste `a_lire` → au passage suivant du cron, elle redevient `tableau` / `tableau_amortissement`.
+- Mesure : pour les trois issues (`{plafond}`, `{panne}`, échec → `a_relire`), `lireEnAttente` repose `statut: 'tableau'`, avec 0 appel IA au cron.
+- Conséquence : le retour « dans les deux sens » de la spec §14.21.14 ne tient que si l'IA réussit dans la même requête. Sinon l'hôte retrouve le lendemain la fiche qu'il a écartée, sans fin tant que l'IA échoue. Un tableau lu « comme une facture » est justement le cas où `rien_lu` est probable.
+- Aucun test ne couvre cet enchaînement : le test du cron part d'une charge `a_lire` neuve.
+
+##### MINEUR
+
+**M1 — Le délai de 6 s met le compte au repos 60 s, y compris pour une facture ordinaire.** LU, non mesuré (aucun PDF lent sous la main).
+
+- Où : `lib/charges.js:900` (`DELAI_RECONNAISSANCE_MS = 6000`), `lib/charges/fil-isole.js:211-213` (repos après un travail coupé).
+- Scénario : un PDF de 2 Mo au plus, facture ou tableau, que pdf.js ne finit pas en 6 s ou qui dépasse 512 Mo. La reconnaissance est coupée, le PDF part à l'IA (voulu), mais le compte est au repos.
+- Pendant 60 s : une photo HEIC déposée est refusée en 503 `conversion_occupee`, et `tableau_reconnaitre` rend 503 `occupe`.
+- Avant le lot, seul un import de crédit explicite pouvait déclencher ce repos ; maintenant chaque dépôt de PDF le peut.
+- Corollaire : un vrai tableau qui demande entre 6 et 20 s n'est plus importable par l'écran. La reconnaissance le refuse (`pas_un_tableau`), et le formulaire qui passait par les 20 s de `credit_importer` est retiré.
+- À mesurer sur staging : la spec ne donne que des temps locaux (0,2 à 0,5 s).
+
+**M2 — Le compteur d'échecs remis à zéro permet de ne jamais atteindre `illisible`.** LU.
+
+- Où : `lib/charges.js:988` (`tentatives_lecture: 0`).
+- Scénario : sur un PDF qui est un tableau prouvable, boucler `tableau_en_facture` (1 appel IA, échec, reste `a_lire`) puis `tableau_reconnaitre` (`a_lire` est retypable).
+- Borne : chaque tour passe par `lectureAutorisee` (`api/charges.js:56`), donc 50 lectures par 24 h au plus. Le plafond n'est pas contourné, à condition que le journal `ia_appels` compte aussi les appels en échec, ce que je n'ai pas vérifié.
+
+**M3 — Un tableau déposé deux fois s'affiche « doublon / Vérifier », et sa fiche n'offre aucun geste pour trancher.** LU.
+
+- Où : `shared/charges-vue.js:97-99` (`etatDe` teste le doublon avant `tableau`), `shared/charges-vue.js:856` (`peindreFiche` bascule sur la fiche tableau).
+- Cause amont : `confirmerEnvoi` regroupe par empreinte avant la reconnaissance, et `champsDeTableau` ne touche ni `signal` ni `groupe_doublon`.
+- Issue : importer ou supprimer l'un des deux libère l'autre, dont l'import rend alors `credit_deja_importe`. Pas de total faux.
+
+**M4 — Deux affirmations de la spec §14.21.14 ne correspondent pas au code.** LU, fichier `docs/specs/spec-compte-de-charges.md`.
+
+- « `passerEnTableau` … d'origine fichier ou photo » : le code ne refuse que `ota` et `credit` (`lib/charges.js:954`), donc une charge d'origine `email` est acceptée.
+- Le cron ne relit pas « comme à la confirmation » : `lireEnAttente` consulte le plafond avant de lire (`lib/charges.js:714`), alors qu'à la confirmation la reconnaissance précède le plafond. Un tableau resté `a_lire` sur un compte au plafond n'est pas reconnu tant que le compte y reste.
+
+##### Vérifié sans constat
+
+**Sécurité**
+- Garde (LU) : `estTitulaireDuCompte` est posée avant toute lecture, pour les trois actions neuves (`api/charges.js:78-83`).
+- Membre délégué (MESURÉ) : le test d'endpoint 8b rend 403 avant toute requête.
+- Cloisonnement (LU) : chaque requête de `passerEnTableau`, `tableauEnFacture`, `importerTableau` et `appliquerLecture` porte `user_id = compte`.
+- Fichiers du bucket (LU) : le chemin vient toujours de la ligne résolue dans le compte, jamais du corps de la requête. Le crédit a sa propre copie (`<compte>/credit-<id>`), donc supprimer la charge n'efface pas son fichier.
+
+**Coût**
+- `tableau_en_facture` repasse par `lectureAutorisee` (LU).
+- `tableau_reconnaitre` en boucle (LU) : un processus à la fois par compte (`cle: compte`), file FIFO de 2, repos après coupure. Pas pire que `credit_importer` avant le lot.
+- Dépôts (LU) : l'écran dépose un fichier à la fois (`envoiEnCours`).
+
+**Justesse**
+- `valider` sur une charge `tableau` : 409 `statut_non_validable` (LU, `STATUTS_VALIDABLES` inchangé). `trancher` reste sans effet sur un total.
+- Totaux SQL (LU, `2026-11-19-charges-exercice-mois.sql`, `2026-11-13-charges-periode.sql`) : seuls `a_verifier` et `validee` comptent, et une charge `tableau` n'a ni montant ni entité.
+- Import réussi puis fonction tuée avant `supprimer` (LU) : la charge reste `tableau`, un nouvel import rend 409 `credit_deja_importe` (clé i18n présente), l'hôte la supprime.
+- Fichier absent (LU) : 409 `fichier_absent` sur l'import et sur le retour en facture, la suppression reste possible.
+- Courses avec le cron (LU) : toutes les écritures sont gardées par le statut d'avant.
+- Suppression d'une charge `tableau` racine ou membre d'un groupe (LU) : elle passe par `supprimer`, donc par `remplacerRacine` / `libererRacineSeule`, inchangés.
+
+**Migration**
+- Longueur des lignes (MESURÉ) : 53 caractères au plus, dans les deux fichiers.
+- Contraintes (MESURÉ sur `t15` / `t17`, en lecture seule) : les deux listes ne font que gagner une valeur, aucune n'est retirée.
+- Contrôle (MESURÉ) : `false, false` sur `t15`, `true, true` sur `t17`, et il ne fait que lire.
+- Rejouable (LU) : `drop constraint if exists` puis `add`.
+- Verrou (LU) : ACCESS EXCLUSIVE le temps d'un balayage de `charges`, négligeable à cette taille.
+
+**Écran**
+- i18n (MESURÉ) : `node scripts/i18n-check.js` rend 1638 clés en fr, en et es.
+- Clés retirées (MESURÉ) : `annuler`, `credit_ajouter`, `credit_fichier_requis`, `credit_tableau`, `credit_importer` n'ont plus d'appelant dans `shared`, `pages`, `apps`.
+- Fiche d'une facture ordinaire (LU) : seule l'option « Tableau d'amortissement » s'ajoute, sous condition `retypable`, doublée par la garde serveur `statut_non_retypable`.
+- Aucun texte en dur dans le diff (LU).
+
+**Tests**
+- Les 5 fichiers ciblés (MESURÉ) : 154 verts, 0 rouge.
+- Contre-épreuve (MESURÉ) : code d'avant extrait par `git archive` hors de l'arbre, tests du lot posés dessus. Aucun des 29 tests neufs ne passe contre le code d'avant.
+- Je n'ai pas lancé la suite complète, ni l'horloge décalée.
+
+**Ce qui a été fait de chaque constat.**
+- **B1 — corrigé.** `tableauEnFacture` écrit `lecture_ia = { pas_un_tableau:
+  true }` ; le cron projette cette seule marque et la passe au lecteur, qui
+  saute alors la reconnaissance. Une lecture IA réussie l'écrase, « Tableau
+  d'amortissement » choisi à la main aussi. Test : « ce n'est pas un tableau
+  TIENT au cron » (panne et échec de l'IA) ; saboté, il rougit.
+- **M1 — non corrigé, à mesurer à la recette.** Le repos de 60 s après une
+  lecture coupée existait déjà ; ce lot l'expose à chaque dépôt de PDF. En
+  local la lecture prend 0,2 à 0,5 s, soit douze fois moins que le délai. À
+  la recette sur staging : mesurer la confirmation d'une facture PDF et du
+  tableau réel. Si un tableau légitime dépasse 6 s, le délai se relève.
+- **M2 — pas de correctif.** La boucle est bornée par le plafond du jour :
+  `lib/ia/journal.js` écrit une ligne par appel terminé.
+- **M3 — corrigé.** `etatDe` rend `tableau` avant `doublon`.
+- **M4 — corrigé**, dans §14.21.14.
 
 ## 12. Trace des reviews du lot 2
 

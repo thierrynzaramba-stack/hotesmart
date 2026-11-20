@@ -94,9 +94,11 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ESC[c])
  */
 export function etatDe (c) {
   if (!c) return null
-  if (c.signal === 'doublon' && !c.signal_tranche) return 'doublon'
   // Un tableau d'amortissement reconnu (§14.21.3) : il attend son import.
+  // AVANT le doublon : sa fiche n'a aucun geste pour trancher (review 8b, M3) ;
+  // un second import du même fichier est refusé « déjà importé ».
   if (c.statut === 'tableau') return 'tableau'
+  if (c.signal === 'doublon' && !c.signal_tranche) return 'doublon'
   if (c.statut === 'a_lire') {
     if (c.motif === 'panne_ia') return 'panne'
     if (c.motif === 'plafond_ia') return 'plafond'

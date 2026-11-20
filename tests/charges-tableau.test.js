@@ -150,7 +150,7 @@ test('« ce n\'est pas un tableau » : la charge repart `a_lire`, compteur d\'é
   assert.equal(r.ok, true)
   assert.deepEqual([r.type, Buffer.compare(r.octets, PDF)], ['application/pdf', 0])
   const maj = b.requetes.find(x => x.op === 'update')
-  assert.deepEqual(maj.charge, { statut: 'a_lire', motif: null, type_document: 'facture', lecture_ia: null, tentatives_lecture: 0 })
+  assert.deepEqual(maj.charge, { statut: 'a_lire', motif: null, type_document: 'facture', lecture_ia: { pas_un_tableau: true }, tentatives_lecture: 0 })
   assert.deepEqual([filtre(maj, 'user_id'), filtre(maj, 'statut')], [COMPTE, 'tableau'])
   const f = baseCharge({ id: ID, user_id: COMPTE, statut: 'a_verifier', justificatif_chemin: 'x' })
   const refus = await charges.tableauEnFacture(f.client, { compte: COMPTE, id: ID })
@@ -234,6 +234,29 @@ test('le cron relit une charge `a_lire` comme à la confirmation : un tableau pa
   assert.deepEqual([r.ok, r.lues, r.panne], [true, 1, false])
   assert.equal(ia, 0)
   assert.equal(b.requetes.find(x => x.op === 'update').charge.statut, 'tableau')
+})
+
+test('LE TEST QUI COMPTE (review 8b, B1) : « ce n\'est pas un tableau » TIENT au cron — plafond, panne ou échec de l\'IA, la charge ne redevient jamais `tableau`', async () => {
+  for (const ia of [{ panne: true }, { ok: false, motif: 'rien_lu' }]) {
+    let appels = 0
+    const b = baseEnregistreuse((r) => {
+      if (r.table === 'ia_appels') return { count: 0 }
+      // La ligne telle que `tableauEnFacture` l'a laissée, projetée par le cron.
+      if (r.table === 'charges' && r.op === 'select' && !r.unique) {
+        assert.match(r.colonnes, /pas_un_tableau:lecture_ia->pas_un_tableau/)
+        return { data: [{ id: ID, user_id: COMPTE, justificatif_chemin: `${COMPTE}/f`, pas_un_tableau: true }] }
+      }
+      if (r.table === 'charges' && r.op === 'select') return { data: { id: ID, user_id: COMPTE, statut: 'a_lire', tentatives_lecture: 0, cree_le: '2026-11-20T09:00:00Z' } }
+      if (r.table === 'charges' && r.op === 'update') return { data: { id: ID, ...r.charge } }
+      return { data: [] }
+    }, { download: () => ({ data: blob(PDF), error: null }) })
+    const l = lecteur({ ok: true, echeances: TROIS })
+    const lire = charges.avecReconnaissance(async () => { appels++; return ia }, l)
+    await charges.lireEnAttente(b.client, { lire, echeance: Date.now() + 5000 })
+    assert.equal(appels, 1, 'l\'IA est bien appelée')
+    assert.equal(l.appels.length, 0, 'le lecteur de tableaux n\'est même pas lancé')
+    assert.ok(!b.requetes.some(x => x.op === 'update' && x.charge.statut === 'tableau'))
+  }
 })
 
 test('le cron et l\'endpoint branchent la reconnaissance AVANT la lecture IA (lecture du code)', () => {
