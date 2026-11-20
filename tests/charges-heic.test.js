@@ -118,7 +118,12 @@ test('LE TEST QUI COMPTE : convertirIsole convertit un vrai HEIC ET un vrai HEIF
 test('dans le fil, un fichier illisible reste un REFUS (ConversionImpossible) ; un délai dépassé est une PANNE', async () => {
   const pourri = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic'), Buffer.alloc(300, 7)])
   await assert.rejects(convertirIsole(pourri, { max: 1e7 }), (e) => e instanceof ConversionImpossible && e.motif === 'decodage')
-  await assert.rejects(convertirIsole(ECHANTILLON, { max: 1e7, delaiMs: 1 }), (e) => e instanceof PanneConversion && e.motif === 'delai')
+  // ⚠ 40 ms, pas 1 (dette 154) : avec 1 ms, il suffisait que l'horloge passe
+  // une milliseconde entre le dépôt du travail et son lancement pour que la
+  // file le refuse « occupé » AVANT d'avoir lancé le fil — mesuré machine
+  // chargée : 1 fois sur 80. À 40 ms, le fil est toujours lancé, et jamais
+  // fini (le seul démarrage du processus est plus long) : 40 « délai » sur 40.
+  await assert.rejects(convertirIsole(ECHANTILLON, { max: 1e7, delaiMs: 40 }), (e) => e instanceof PanneConversion && e.motif === 'delai')
 })
 
 test('un module absent n\'est pas une photo illisible : PanneConversion (review, constat 2)', async () => {
