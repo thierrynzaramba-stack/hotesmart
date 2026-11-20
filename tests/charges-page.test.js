@@ -1180,7 +1180,10 @@ test('une seule vue : la fiche plein écran et les totaux sous « À traiter » 
   // Depuis le lot 8a, les blocs se suivent sur toute la largeur aux deux
   // tailles : plus de grille à deux colonnes à défaire au téléphone.
   assert.doesNotMatch(bloc, /\.chg-haut\b/)
-  assert.match(bloc, /@media \(max-width: 899px\)[\s\S]*\.chg-cols \{ grid-template-columns: minmax\(0, 1fr\) 88px 88px 16px;/)
+  assert.match(bloc, /@media \(max-width: 899px\)[\s\S]*\.chg-cols \{ grid-template-columns: minmax\(0, 1fr\) 78px 78px 14px;/)
+  // Recette du 20 novembre 2026 à 390 px : un titre de colonne plus large que
+  // sa colonne passe à la ligne au lieu de toucher son voisin.
+  assert.match(bloc, /@media \(max-width: 899px\)[\s\S]*\.chg-cols--titres \.chg-col, \.chg-dl--titres \.chg-col \{ white-space: normal; \}/)
   assert.match(bloc, /@media \(max-width: 899px\)[\s\S]*\.chg-fiche \{ width: 100%; \}/)
   // ⚠ RECETTE DU 11 NOVEMBRE : `100vw` compte la barre de défilement (la fiche
   // débordait à gauche), et un montant coupé au milieu se lisait « 1761,9 / 0 € ».
