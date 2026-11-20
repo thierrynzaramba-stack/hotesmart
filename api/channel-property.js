@@ -15,6 +15,10 @@ const { refsDuPerimetre } = require('../lib/permissions')
 const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
 const { clesMigrees } = require('../lib/cles-migrees')
 const { sansArchives, clesArchivees, cleDuBien } = require('../lib/biens-vivants')
+const { proprieteChezLeProvider } = require('../lib/rate-sync')
+const {
+  modeDeVenteDemande, refusModeDeVente, baseDeLaGrille, lirePlan, appliquerOccupation
+} = require('../lib/tarifs-occupation')
 
 const { surveillerReponse } = require('../lib/reponse-partenaire')
 const supabase = createClient(
@@ -469,7 +473,12 @@ module.exports = async function handler(req, res) {
       // mordre. C'est mot pour mot la lecon ecrite deux lignes plus haut pour
       // `migration_target_property_id` — « une garde qui juge sur une colonne
       // non selectionnee est une garde ouverte » — et je l'ai repayee.
-      .select('id, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, pilote_tarifaire')
+      // ⚠ `rate_sync_mode` ET `inventory_units` AJOUTES LE 20 NOVEMBRE 2026 :
+      // le renvoi des prix par date apres un changement d'occupation ne part
+      // qu'en `managed`, et son journal ecarte les nuits vendues au stock du
+      // bien. Lus sans etre selectionnes, ils vaudraient `undefined` : le
+      // renvoi ne partirait jamais — la meme lecon que les colonnes ci-dessus.
+      .select('id, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, pilote_tarifaire, rate_sync_mode, inventory_units')
       .eq('id', bienPid)
       .eq('user_id', compteBien)
       .single()
@@ -598,6 +607,10 @@ module.exports = async function handler(req, res) {
     // canaux qui referencent cet id ne sont pas casses), de facon BLOQUANTE.
     let pricingTouched = false
     let grilleSautee = false     // vrai si la grille n'a pas pu etre reconstruite (pas de prix de base)
+    let capaciteBouge = false    // la capacite EFFECTIVE change (pas seulement « envoyee »)
+    let occupationBouge = false  // un champ d'occupation est dans le corps
+    let occupationChange = false // capacite, voyageurs inclus ou supplement EFFECTIFS changent
+    let inclusAvant = null       // voyageurs inclus en base avant le geste (capacite si vide)
     let effCap, effBase, effInc, effExtra
     if (capacity !== undefined || base_price !== undefined || included_guests !== undefined || extra_guest_fee !== undefined) {
       if (prop.provider !== 'channex' && prop.provider !== 'channel') {
@@ -642,20 +655,32 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'supplement_invalide', message: 'Le supplement par voyageur doit etre un montant positif.' })
       }
 
-      // ⚠ SANS PRIX DE BASE, LA GRILLE NE PEUT PAS ETRE RECONSTRUITE — et alors
-      // toucher a l'occupation ferait DIVERGER la DB et Channex.
+      // ⚠ SANS PRIX DE BASE, LA CAPACITE RESTE REFUSEE — la changer ferait
+      // DIVERGER la DB et Channex.
       // Constat de review : le room_type partirait a `occ_adults: 4` pendant que
       // les options du rate plan s'arreteraient a 2, et la DB dirait 4. Le
       // commentaire de ce bloc promet exactement l'inverse (« une ecriture DB
       // seule ferait diverger DB et Channex »). On refuse plutot que de mentir.
+      //
+      // ⚠ LES VOYAGEURS INCLUS ET LE SUPPLEMENT, EUX, NE SONT PLUS REFUSES
+      // (20 novembre 2026, docs/specs/spec-supplement-voyageur.md). Le refus
+      // les englobait, et c'est lui qui empechait de retirer le supplement du
+      // 23 : 85 EUR saisis, 89 EUR vendus. Ils ne touchent pas le type de
+      // chambre, et leur grille se reconstruit depuis celle du canal
+      // (`baseDeLaGrille`, plus bas, AVANT toute ecriture).
       grilleSautee = !effBase
-      const occupationBouge = capacity !== undefined || included_guests !== undefined || extra_guest_fee !== undefined
-      if (grilleSautee && occupationBouge && prop.provider_rate_plan_id) {
+      capaciteBouge = capacity !== undefined && effCap !== Number(prop.capacity)
+      occupationBouge = capacity !== undefined || included_guests !== undefined || extra_guest_fee !== undefined
+      inclusAvant = prop.included_guests != null ? Number(prop.included_guests) : Number(prop.capacity)
+      occupationChange = capaciteBouge
+        || effInc !== inclusAvant
+        || (Number(effExtra) || 0) !== (Number(prop.extra_guest_fee) || 0)
+      if (grilleSautee && capaciteBouge && prop.provider_rate_plan_id) {
         return res.status(409).json({
           error: 'grille_non_reconstructible',
           message: 'Ce logement n\'a pas de prix de base : la grille tarifaire ne peut pas etre reconstruite, '
-            + 'et modifier la capacite ou l\'occupation ferait diverger HoteSmart de la plateforme. '
-            + 'Renseignez un prix de base pour ce logement, ou modifiez ces champs avant de le connecter.'
+            + 'et modifier la capacite ferait diverger HoteSmart de la plateforme. '
+            + 'Renseignez un prix de base pour ce logement, ou modifiez ce champ avant de le connecter.'
         })
       }
       updates.capacity = effCap
@@ -669,7 +694,37 @@ module.exports = async function handler(req, res) {
     // Sync prix/occupation cote Channex (BLOQUANT : si echec, on n'ecrit PAS en DB pour
     // ne pas diverger). room_type mis a jour si la capacite change ; rate_plan reconstruit
     // en place via la formule partagee. Fait AVANT le PUT property cosmetique.
+    let tarifsRenvoyes
     if (pricingTouched && (prop.provider === 'channex' || prop.provider === 'channel') && prop.provider_property_id) {
+      // ⚠ LE PLAN EST LU AVANT TOUTE ECRITURE (docs/specs/spec-supplement-voyageur.md).
+      // Deux decisions en dependent, et toutes deux doivent tomber AVANT que le
+      // type de chambre ou la grille aient bouge :
+      //   - le MODE DE VENTE est fige chez Channex (422 mesure sur staging) :
+      //     une grille qui le changerait est refusee ici, avec ce qu'il faut
+      //     faire, au lieu d'un 502 apres coup ;
+      //   - sans prix de base, le montant de la grille se lit sur la grille
+      //     actuelle du canal (`baseDeLaGrille`) : rien d'invente.
+      let planActuel = null
+      let baseGrille = effBase || null
+      if (prop.provider_rate_plan_id) {
+        planActuel = await lirePlan(channelCall, prop.provider_rate_plan_id)
+        if (!planActuel.ok) {
+          return res.status(planActuel.http).json({ error: planActuel.error, message: planActuel.message })
+        }
+        const refusMode = refusModeDeVente(planActuel.mode, modeDeVenteDemande(effExtra), effCap)
+        if (refusMode) return res.status(refusMode.http).json({ error: refusMode.error, message: refusMode.message })
+        if (!baseGrille && occupationBouge) {
+          baseGrille = baseDeLaGrille(planActuel.options, inclusAvant)
+          if (!baseGrille) {
+            return res.status(409).json({
+              error: 'grille_non_reconstructible',
+              message: 'Ce logement n\'a pas de prix de base, et sa grille chez la plateforme ne porte '
+                + 'aucun montant : la grille tarifaire ne peut pas etre reconstruite. '
+                + 'Renseignez un prix de base pour ce logement.'
+            })
+          }
+        }
+      }
       if (capacity !== undefined && prop.provider_room_type_id) {
         const rtRes = await channelCall('PUT', `/room_types/${prop.provider_room_type_id}`, {
           room_type: { occ_adults: effCap, default_occupancy: effCap }
@@ -689,15 +744,59 @@ module.exports = async function handler(req, res) {
       // pousse chaque date avec son propre prix et FERME celles qui n'en ont
       // pas. La grille du rate plan ne sert que de defaut aux dates non
       // poussees — et il n'y en a plus.
-      if (prop.provider_rate_plan_id && !grilleSautee) {
-        const rp = buildRatePlanOptions(effBase, effInc, effExtra, effCap)
-        const rpRes = await channelCall('PUT', `/rate_plans/${prop.provider_rate_plan_id}`, {
-          rate_plan: { sell_mode: rp.sell_mode, options: rp.options }
+      //
+      // ⚠ SAUF QUAND L'OCCUPATION CHANGE : la grille se lit alors chez le canal
+      // (`baseGrille`, ci-dessus), et le prix POUSSE de chaque date repart avec
+      // la nouvelle occupation — sinon chaque nuit garderait son ancien prix
+      // par occupation jusqu'a ce que son tarif change. En `managed` seulement :
+      // en `keep`, aucun prix ne part, c'est le contrat du mode.
+      grilleSautee = !baseGrille
+      if (prop.provider_rate_plan_id && baseGrille) {
+        const rp = buildRatePlanOptions(baseGrille, effInc, effExtra, effCap)
+        const propIdCanal = proprieteChezLeProvider(prop)
+        const renvoyer = occupationChange && prop.rate_sync_mode === 'managed' && !!propIdCanal
+        const fenetre = renvoyer ? require('../lib/channel-fullsync').fenetrePoussee() : []
+        const resultat = await appliquerOccupation({
+          appel: channelCall,
+          ratePlanId: prop.provider_rate_plan_id,
+          planActuel,
+          grille: rp,
+          renvoyer,
+          // ⚠ BORNEE ET COMPTEE : la fenetre fait 500 jours, donc 500 lignes au
+          // plus, sous la troncature silencieuse de PostgREST a 1000. Une
+          // lecture qui l'atteindrait serait incomplete : on refuse plutot que
+          // de renvoyer une partie des prix.
+          lireInventaire: async () => {
+            const { data, error } = await supabase
+              .from('calendar_inventory')
+              .select('date, rate, avail, stop_sell')
+              .eq('property_id', prop.id)
+              .gte('date', fenetre[0])
+              .lte('date', fenetre[fenetre.length - 1])
+              .order('date', { ascending: true })
+            if (error) throw new Error(error.message)
+            if ((data || []).length >= 1000) throw new Error('lecture tronquee a 1000 lignes')
+            return data || []
+          },
+          fenetre,
+          bien: prop,
+          propId: propIdCanal,
+          capacite: effCap,
+          inclus: effInc,
+          supplement: effExtra,
+          journal: {
+            supabase,
+            userId: compteBien,               // le compte PROPRIETAIRE, resolu par la garde
+            propertyId: prop.id,              // le journal est cle sur properties.id
+            providerPropertyId: prop.provider_property_id,
+            unites: prop.inventory_units
+          }
         })
-        if (!rpRes.ok) {
-          console.error('[channel-property] PATCH rate_plan echec', rpRes.status, rpRes.json)
-          return res.status(502).json({ error: 'Mise a jour du tarif echouee cote plateforme' })
+        if (!resultat.ok) {
+          console.error('[channel-property] occupation non appliquee', resultat.error, resultat.status || '', resultat.detail || '')
+          return res.status(resultat.http).json({ error: resultat.error, message: resultat.message })
         }
+        tarifsRenvoyes = resultat.renvoyees
       }
     }
 
@@ -734,6 +833,8 @@ module.exports = async function handler(req, res) {
       // Dit a l'hote ce qui n'a PAS ete fait, plutot que de le laisser croire
       // que sa grille tarifaire a suivi.
       grille_non_reconstruite: grilleSautee || undefined,
+      // Le nombre de dates dont le prix est reparti avec la nouvelle occupation.
+      tarifs_renvoyes: tarifsRenvoyes,
       note: grilleSautee
         ? 'Ce logement n\'a pas de prix de base : la grille tarifaire n\'a pas ete reconstruite. Vos prix par date restent la seule source, et une date sans prix part fermee.'
         : undefined
