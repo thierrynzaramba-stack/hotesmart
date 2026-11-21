@@ -12,13 +12,16 @@ prestataires, dans la foulée, au lot 3 » ; §8 : « la même paire de clés se
   lui est attribué, quand un ménage lui est proposé (à confirmer avant
   l'échéance), quand on attend son « Vu » (la veille et le jour même, 9 h), et
   — c'est nouveau — **quand un de ses ménages est annulé ou change de date**,
-  et **quand l'hôte le lui retire**.
+  **quand l'hôte le lui retire**, **quand un ménage annulé revient** (Q47) et
+  **quand l'hôte le lui propose** depuis `/menages` (Q48).
 - **Elle l'active elle-même**, dans sa page (`apps/menages/public.html`), par un
   bouton « Recevoir les notifications sur ce téléphone ». Sur iPhone, il faut
   d'abord avoir installé la page sur l'écran d'accueil — la page le dit.
-- **La notification remplace le SMS** dès qu'un de ses appareils l'a reçue. Si
-  aucun ne l'a reçue (pas abonnée, abonnement mort), le SMS part comme
-  aujourd'hui, sur la clé Brevo de l'hôte. L'e-mail ne change pas.
+- **La notification remplace le SMS** dès qu'un de ses appareils l'a acceptée,
+  **sauf pour un ménage du jour ou du lendemain** (Q46) : là, le SMS part
+  aussi. Si aucun appareil ne l'a acceptée (pas abonnée, abonnement mort ou en
+  échec), le SMS part comme aujourd'hui, sur la clé Brevo de l'hôte. L'e-mail
+  ne change pas.
 - **À toute heure**, comme les SMS d'aujourd'hui.
 - **L'hôte voit sur sa fiche**, dans `/menages`, si elle reçoit les
   notifications et sur combien d'appareils.
@@ -81,6 +84,9 @@ référence `auth.users`) : elle ne peut pas porter une prestataire.
 | Q43 | Les fichiers d'interface | Accord pour `apps/menages/public.html`, `apps/menages/sw.js`, `pages/menages.html` |
 | Q44 | L'annulation sans appareil abonné | **SMS et e-mail aussi**, même règle que les trois autres avis (décision du 17 novembre) |
 | Q45 | Un ménage que l'hôte lui retire | **Elle est prévenue** : « ne vous est plus confié », mêmes canaux (décision du 17 novembre) |
+| Q46 | « Acceptée par le service » n'est pas « vue » | **Un ménage d'aujourd'hui ou de demain (heure de Paris) garde son SMS**, notification acceptée ou non ; plus tard, la notification remplace le SMS. Les rappels « Vu » gardent donc toujours leur SMS (décision du 18 novembre) |
+| Q47 | Un ménage annulé qui revient | **Son « Vu » est effacé** et sa porteuse est prévenue : « est de nouveau prévu », ou « Nouveau ménage » si la garde le donne à une autre ; ménage à venir seulement (décision du 19 novembre) |
+| Q48 | Le geste « Proposer » de l'hôte | **Il est annoncé** : « Ménage à confirmer », avec l'échéance écrite ; ménage à venir seulement (décision du 19 novembre) |
 
 ## 3. Ce que voit la prestataire
 
@@ -109,8 +115,15 @@ référence `auth.users`) : elle ne peut pas porter une prestataire.
 
 Sur la fiche de la prestataire (`/menages`, fenêtre de configuration, section
 « Notifications », sous les bascules SMS et e-mail) : « Reçoit les
-notifications sur N téléphone(s) » ou « N'a pas activé les notifications »,
-et une ligne d'aide : « Quand elle les reçoit, le SMS ne part pas. »
+notifications sur N téléphone(s) » ou « N'a pas activé les notifications sur
+son téléphone », et une ligne d'aide — **seulement si le SMS peut partir**
+(coché, avec un numéro) : « Quand elle les reçoit, le SMS ne part que pour un
+ménage du jour ou du lendemain » (Q46). Un appareil dont le dernier envoi a
+échoué ne compte pas comme « reçoit » ; s'il n'y a que ceux-là : « Notifications
+activées, mais le dernier envoi vers son téléphone n'est pas passé ». Lecture
+impossible : « état illisible », jamais « pas activé ». « Aucun canal actif »
+ne s'affiche plus quand un téléphone reçoit (corrections de la review de
+l'étape 5, 19 novembre).
 Lecture seule : l'abonnement est le geste de la prestataire, sur son
 appareil. L'hôte coupe tout en désactivant la personne ou en lui donnant un
 nouveau lien (§7.4).
@@ -120,10 +133,11 @@ nouveau lien (§7.4).
 | événement | texte (notification) | qui |
 |---|---|---|
 | attribué | « Nouveau ménage : {jour} - {bien}. » | la porteuse |
-| à confirmer | « Ménage à confirmer : {jour} - {bien}. Répondez avant le {échéance}. » | chaque prestataire sollicitée |
+| à confirmer | « Ménage à confirmer : {jour} - {bien}. Répondez avant le {échéance}. » | chaque prestataire sollicitée, par le moteur ou par le « Proposer » de l'hôte (Q48) |
 | « Vu » attendu | « Ménage du {jour} à {bien} : ouvrez votre page et touchez Vu. » (+ « C'est aujourd'hui. » le jour même) | la porteuse |
 | annulé ou déplacé | « Ménage du {jour} - {bien} annulé : la réservation est annulée ou son départ a changé. » | la porteuse, et chaque prestataire à qui il était proposé |
 | retiré par l'hôte | « Le ménage du {jour} - {bien} ne vous est plus confié. » | celle qui le portait, ou à qui la proposition est retirée |
+| revenu (Q47) | « Le ménage du {jour} - {bien} est de nouveau prévu. » | sa porteuse, si elle en était ; sinon « Nouveau ménage » à celle que la garde désigne |
 
 Le SMS garde ses textes actuels (GSM-7, tiret simple, au mot près pour le
 « Vu », texte de Thierry). L'annulation, quand elle part par SMS, suit les
@@ -133,11 +147,13 @@ comme Q12 du lot 2).
 
 ## 6. La règle d'envoi
 
-Pour chacun des cinq événements, dans `notifier-prestataire.js` :
+Pour chacun des six événements, dans `notifier-prestataire.js` :
 1. **La notification**, à tous ses appareils abonnés.
-2. **Le SMS seulement si aucun appareil ne l'a reçue** (aucun abonné, tous
-   morts, tous en échec), et toujours sous les deux conditions d'aujourd'hui :
-   un numéro, et `notify_sms` non décoché par l'hôte.
+2. **Le SMS si aucun appareil ne l'a acceptée** (aucun abonné, tous morts,
+   tous en échec), **ou si le ménage est aujourd'hui ou demain**, heure de
+   Paris (Q46, `estUrgent` ; une date illisible est urgente) — et toujours sous
+   les deux conditions d'aujourd'hui : un numéro, et `notify_sms` non décoché
+   par l'hôte.
 3. **L'e-mail inchangé** (adresse et `notify_email`).
 
 Le bilan rendu à l'appelant gagne `push: n` à côté de `sms` et `email`, pour
@@ -267,10 +283,12 @@ Une review par étape, une re-review des seuls correctifs sur constat de
 sécurité ; suite aux deux horloges à zéro rouge avant chaque push.
 
 **Recette (staging, Thierry et un téléphone de prestataire)** : s'abonner,
-recevoir une attribution, une proposition, un « Vu », une annulation, un
-retrait par l'hôte ; le SMS
-qui ne part pas quand la notification est reçue, et qui part quand
-l'abonnement est retiré ; nouveau lien → plus rien ; iPhone installé.
+recevoir une attribution, une proposition (du moteur et du « Proposer » de
+l'hôte), un « Vu », une annulation, un retrait par l'hôte, un ménage annulé qui
+revient ; le SMS qui ne part pas quand la notification est acceptée pour un
+ménage à J+2 ou plus, qui part quand même pour un ménage du jour ou du
+lendemain (Q46), et qui part quand l'abonnement est retiré ; la fiche de l'hôte
+(§4) ; nouveau lien → plus rien ; iPhone installé.
 ⚠ Staging n'a ni cron ni clé Brevo : la proposition et le « Vu » se
 déclenchent par script, le SMS ne part pas (la notification, si).
 
