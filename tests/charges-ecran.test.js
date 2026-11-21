@@ -258,11 +258,11 @@ test('« À traiter » : à lire, à vérifier, illisible, et tout signal non tr
   const q = r.requetes.find(x => x.table === 'charges' && x.optionsSelect && x.optionsSelect.count === 'exact')
   assert.ok(q, 'la file compte en base')
   assert.equal(q.limite, 50)
-  assert.deepEqual(q.filtres.find(f => f[0] === 'or'), ['or', 'statut.in.(a_lire,a_verifier,illisible),and(signal.not.is.null,signal_tranche.is.false)'])
+  assert.deepEqual(q.filtres.find(f => f[0] === 'or'), ['or', 'statut.in.(a_lire,a_verifier,illisible,tableau),and(signal.not.is.null,signal_tranche.is.false)'], 'un tableau reconnu attend son import (§14.21.3)')
   assert.ok(q.filtres.some(f => f[0] === 'neq' && f[2] === 'envoi'))
   assert.doesNotMatch(q.colonnes, /justificatif_chemin/, 'jamais le chemin du fichier')
   // ⚠ De la réponse de l'IA, le SEUL solde d'une régularisation (lot 7a).
-  assert.deepEqual(q.colonnes.match(/[\w:>-]*lecture_ia[\w:>-]*/g), ['solde_lu:lecture_ia->solde_ttc_cents'], 'jamais la réponse brute de l\'IA entière')
+  assert.deepEqual(q.colonnes.match(/[\w:>-]*lecture_ia[\w:>-]*/g), ['solde_lu:lecture_ia->solde_ttc_cents', 'tableau_lu:lecture_ia->tableau'], 'jamais la réponse brute de l\'IA entière : le solde d\'une régularisation, et les bornes d\'un tableau reconnu (lot 8b)')
 })
 
 // ─── Les bornes d'une période ────────────────────────────────────────────────

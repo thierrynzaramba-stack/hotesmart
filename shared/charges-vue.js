@@ -19,9 +19,6 @@
 // Les types que le serveur accepte (lib/charges/regles.js, TYPES) : la même
 // borne ici évite d'envoyer ce qui sera refusé — elle ne remplace pas la garde
 // du serveur.
-// Le tableau d'amortissement d'un crédit (§14.20) : un PDF, 2 Mo au plus — la
-// borne du serveur (`CREDIT_PDF_MAX`, lib/charges.js).
-export const CREDIT_PDF_MAX = 2 * 1024 * 1024
 
 export const TYPES_ACCEPTES = {
   'application/pdf': 10 * 1024 * 1024,
@@ -97,6 +94,10 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ESC[c])
  */
 export function etatDe (c) {
   if (!c) return null
+  // Un tableau d'amortissement reconnu (§14.21.3) : il attend son import.
+  // AVANT le doublon : sa fiche n'a aucun geste pour trancher (review 8b, M3) ;
+  // un second import du même fichier est refusé « déjà importé ».
+  if (c.statut === 'tableau') return 'tableau'
   if (c.signal === 'doublon' && !c.signal_tranche) return 'doublon'
   if (c.statut === 'a_lire') {
     if (c.motif === 'panne_ia') return 'panne'
@@ -202,7 +203,7 @@ export function monter (racine, deps) {
     aTraiter: { lignes: [], nombre: 0 }, liste: [], suite: null,
     entites: [], biens: [], biensArchives: [], categories: [], totaux: null,
     fiche: null, occupe: false, envoiEnCours: false, ficheEnCours: false,
-    credits: null, creditForm: false, creditEnCours: false, creditRetour: null
+    credits: null, creditEnCours: false, creditRetour: null
   }
 
   // ─── Les noms ────────────────────────────────────────────────────────────
@@ -236,20 +237,28 @@ export function monter (racine, deps) {
   }
 
   // ─── Une ligne de facture (À traiter et liste) ───────────────────────────
-  const ACTION_DE = { a_verifier: 'charges.ouvrir', a_lire: 'charges.saisir_main', panne: 'charges.saisir_main', plafond: 'charges.saisir_main', illisible: 'charges.saisir_main', doublon: 'charges.verifier' }
+  // Ce qu'un tableau reconnu dit de lui : l'écran le reçoit en `tableau_lu`,
+  // la réponse d'un geste dans `lecture_ia.tableau`.
+  const tableauDe = (c) => (c && (c.tableau_lu || (c.lecture_ia && c.lecture_ia.tableau))) || null
+  const echeancesLisibles = (tb) => (tb && tb.echeances
+    ? t('charges.credit_echeances', { n: tb.echeances, debut: jourLisible(tb.debut), fin: jourLisible(tb.fin) })
+    : '')
+  const ACTION_DE = { tableau: 'charges.tableau_importer', a_verifier: 'charges.ouvrir', a_lire: 'charges.saisir_main', panne: 'charges.saisir_main', plafond: 'charges.saisir_main', illisible: 'charges.saisir_main', doublon: 'charges.verifier' }
   function ligne (c, avecAction) {
     const e = etatDe(c)
-    const infos = [
+    const tb = c.statut === 'tableau'
+    const infos = (tb ? [echeancesLisibles(tableauDe(c))] : [
       c.type_document && c.type_document !== 'facture' ? (connu('charges.type_' + c.type_document) || '') : '',
       periodeLisible(c),
       c.categorie ? nomCategorie(c.categorie) : '', nomBien(c.bien_id)
-    ].filter(Boolean).join(' · ')
+    ]).filter(Boolean).join(' · ')
     const action = avecAction && e && ACTION_DE[e] ? `<span class="chg-ligne__action">${esc(t(ACTION_DE[e]))}</span>` : ''
     return `<li><button type="button" class="chg-ligne" data-ouvrir="${esc(c.id)}">`
       + `<span class="chg-ligne__jour">${esc(jourLisible(c.jour))}</span>`
-      + `<span class="chg-ligne__qui"><b>${esc(c.fournisseur_nom || t('charges.fournisseur_inconnu'))}</b>`
+      + `<span class="chg-ligne__qui"><b>${esc(tb ? t('charges.type_tableau_amortissement') : c.fournisseur_nom || t('charges.fournisseur_inconnu'))}</b>`
       + (infos ? `<span class="chg-ligne__infos">${esc(infos)}</span>` : '') + '</span>'
-      + `<span class="chg-ligne__ttc">${montant(c.montant_ttc_cents)}</span>`
+      // Un tableau n'a pas de montant : ni « non lu », ni 0.
+      + `<span class="chg-ligne__ttc">${tb ? '' : montant(c.montant_ttc_cents)}</span>`
       + (e ? `<span class="chg-etat chg-etat--${esc(e)}">${esc(t('charges.etat_' + e))}</span>` : '<span></span>')
       + action + '</button></li>'
   }
@@ -575,21 +584,10 @@ export function monter (racine, deps) {
   }
 
   // ─── Les crédits (§14.20) ────────────────────────────────────────────────
-  function formulaireCredit () {
-    const actives = entitesActives()
-    const choisie = actives.length === 1 ? String(actives[0].id) : ''
-    return '<form class="chg-form chg-credit-form" data-bind="credit-form" novalidate>'
-      + `<p class="chg-note">${esc(t('charges.credit_aide'))}</p>`
-      + champ('credit_fichier', t('charges.credit_tableau'), '<input type="file" accept="application/pdf,.pdf" data-credit-champ="fichier">')
-      + champ('credit_preteur', t('charges.credit_preteur'), '<input type="text" maxlength="120" autocomplete="off" data-credit-champ="preteur">')
-      + champ('credit_entite', t('charges.champ_entite'), `<select data-credit-champ="entite"><option value="">${esc(t('charges.choisir'))}</option>`
-        + actives.map(x => `<option value="${esc(x.id)}"${String(x.id) === choisie ? ' selected' : ''}>${esc(nomEntite(x))}</option>`).join('') + '</select>')
-      + champ('credit_bien', t('charges.champ_bien'), `<select data-credit-champ="bien">${optionsBiensCredit(choisie)}</select>`, true)
-      + '<div class="chg-alerte__gestes">'
-      + `<button type="button" class="btn btn--primary" data-geste="credit-importer">${esc(t('charges.credit_importer'))}</button>`
-      + `<button type="button" class="btn btn--secondary" data-geste="credit-annuler">${esc(t('charges.annuler'))}</button>`
-      + '</div></form>'
-  }
+  // ⚠ PLUS DE FORMULAIRE D'IMPORT ICI (§14.21.3, décision de Thierry : « un
+  // seul Ajouter, le tableau reconnu tout seul ») : le bloc garde la liste des
+  // crédits et leur suppression. Un tableau se dépose par « Ajouter », comme
+  // une facture, et s'importe depuis sa fiche dans « À traiter ».
   // Sans logement choisi, le crédit vaut pour toute l'entité (les logements
   // qu'il finance ensemble, comme une facture qui couvre deux logements).
   const optionsBiensCredit = (entiteId) => optionsBiens(entiteId, null)
@@ -598,13 +596,11 @@ export function monter (racine, deps) {
   function peindreCredits () {
     const z = $('[data-bind="credits"]')
     if (!z) return
-    const tete = `<div class="chg-bloc__tete"><h2 class="chg-h2">${esc(t('charges.credits'))}</h2>`
-      + (etat.creditForm ? '' : `<button type="button" class="btn btn--secondary" data-geste="credit-ajouter">${esc(t('charges.credit_ajouter'))}</button>`)
-      + '</div>'
+    const tete = `<div class="chg-bloc__tete"><h2 class="chg-h2">${esc(t('charges.credits'))}</h2></div>`
     const cr = etat.credits
     let corps
     if (!cr) corps = `<p class="muted">${esc(t('charges.credits_indispo'))}</p>`
-    else if (!cr.liste.length) corps = etat.creditForm ? '' : `<p class="muted">${esc(t('charges.credits_vide'))}</p>`
+    else if (!cr.liste.length) corps = `<p class="muted">${esc(t('charges.credits_vide'))}</p>`
     else {
       corps = '<ul class="chg-credits">' + cr.liste.map(c => {
         const ent = etat.entites.find(e => String(e.id) === String(c.entite_juridique_id))
@@ -616,7 +612,7 @@ export function monter (racine, deps) {
       }).join('') + '</ul>'
     }
     const retour = etat.creditRetour
-    z.innerHTML = tete + (etat.creditForm ? formulaireCredit() : '')
+    z.innerHTML = tete
       + `<p class="${retour && retour.erreur ? 'chg-erreur' : 'chg-note'}" data-bind="credit-retour" role="status">${esc(retour ? retour.texte : '')}</p>`
       + corps
   }
@@ -627,51 +623,94 @@ export function monter (racine, deps) {
     if (p) { p.textContent = texte || ''; p.className = erreur ? 'chg-erreur' : 'chg-note' }
   }
 
-  // Le PDF part en base64 dans le corps du geste (2 Mo au plus) : un tableau
-  // d'amortissement pèse quelques centaines de Ko.
-  const enBase64 = (f) => new Promise((ok, ko) => {
-    const r = new Lecteur()
-    r.onload = () => ok(String(r.result).replace(/^data:[^,]*,/, ''))
-    r.onerror = () => ko(r.error || new Error('lecture'))
-    r.readAsDataURL(f)
-  })
+  // ─── Un tableau d'amortissement reconnu : sa fiche et son import ─────────
+  function peindreFicheTableau (c) {
+    const actives = entitesActives()
+    const choisie = actives.length === 1 ? String(actives[0].id) : (actives.some(x => String(x.id) === etat.entite) ? etat.entite : '')
+    const lu = echeancesLisibles(tableauDe(c))
+    dialogue().innerHTML = '<div class="chg-fiche__tete">'
+      + `<h2 class="chg-h2" id="chg-fiche-titre">${esc(t('charges.type_tableau_amortissement'))}</h2>`
+      + `<span class="chg-etat chg-etat--tableau">${esc(t('charges.etat_tableau'))}</span>`
+      + `<button type="button" class="btn btn--secondary btn--icon" data-geste="fermer" aria-label="${esc(t('charges.fermer'))}"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg></button>`
+      + '</div><div class="chg-fiche__corps">'
+      + `<p class="chg-note">${esc(t('charges.tableau_reconnu', { echeances: lu }))}</p>`
+      + `<p class="chg-note">${esc(t('charges.credit_aide'))}</p>`
+      + (actives.length
+        ? '<form class="chg-form" data-bind="fiche-form" novalidate>'
+          + champ('credit_preteur', t('charges.credit_preteur'), '<input type="text" maxlength="120" autocomplete="off" data-credit-champ="preteur">')
+          + champ('credit_entite', t('charges.champ_entite'), `<select data-credit-champ="entite"><option value="">${esc(t('charges.choisir'))}</option>`
+            + actives.map(x => `<option value="${esc(x.id)}"${String(x.id) === choisie ? ' selected' : ''}>${esc(nomEntite(x))}</option>`).join('') + '</select>')
+          + champ('credit_bien', t('charges.champ_bien'), `<select data-credit-champ="bien">${optionsBiensCredit(choisie)}</select>`, true)
+          + '</form>'
+        : `<div class="chg-alerte"><p>${esc(t('charges.sans_entite'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>`)
+      + '<p class="chg-erreur" data-bind="fiche-retour" role="status"></p>'
+      + `<button type="button" class="chg-lien" data-geste="tableau-en-facture">${esc(t('charges.tableau_pas_un'))}</button>`
+      + '</div><div class="chg-fiche__pied">'
+      + `<button type="button" class="btn btn--secondary" data-geste="voir">${esc(t('charges.voir'))}</button>`
+      + `<button type="button" class="btn btn--secondary chg-danger" data-geste="supprimer">${esc(t('charges.supprimer'))}</button>`
+      + (actives.length ? `<button type="button" class="btn btn--primary" data-geste="tableau-importer">${esc(t('charges.tableau_importer'))}</button>` : '')
+      + '</div>'
+    const f = dialogue().querySelector('[data-bind="fiche-form"]')
+    if (f) f.addEventListener('submit', (ev) => ev.preventDefault())
+  }
 
-  async function importerCredit () {
-    if (etat.creditEnCours) return
-    const champCredit = (k) => $(`[data-credit-champ="${k}"]`)
-    const f = champCredit('fichier') && champCredit('fichier').files && champCredit('fichier').files[0]
-    const preteur = (champCredit('preteur').value || '').trim()
-    const entite = champCredit('entite').value
-    const bien = champCredit('bien').value
-    if (!f) { retourCredit(t('charges.credit_fichier_requis'), true); return }
-    if (typeDuFichier(f) !== 'application/pdf') { retourCredit(t('charges.credit_pdf_seul'), true); return }
-    if (f.size > CREDIT_PDF_MAX) { retourCredit(t('charges.credit_trop_gros'), true); return }
-    if (!preteur) { retourCredit(t('charges.refus_preteur_requis'), true); return }
-    if (!entite) { retourCredit(t('charges.credit_entite_requise'), true); return }
+  const boutonsFiche = (inactif) => dialogue().querySelectorAll('.chg-fiche__pied button, [data-geste="tableau-en-facture"]').forEach(b => { b.disabled = inactif })
+
+  // ⚠ L'IMPORT RELIT LE FICHIER DÉJÀ DÉPOSÉ : rien ne repart du navigateur.
+  async function importerTableau () {
+    const c = etat.fiche
+    if (!c || c.statut !== 'tableau' || etat.creditEnCours) return
+    const champCredit = (k) => dialogue().querySelector(`[data-credit-champ="${k}"]`)
+    const preteur = ((champCredit('preteur') || {}).value || '').trim()
+    const entite = (champCredit('entite') || {}).value || ''
+    const bien = (champCredit('bien') || {}).value || ''
+    if (!preteur) { retourFiche(t('charges.refus_preteur_requis')); return }
+    if (!entite) { retourFiche(t('charges.credit_entite_requise')); return }
     etat.creditEnCours = true
-    const bouton = $('[data-geste="credit-importer"]')
-    if (bouton) bouton.disabled = true
-    retourCredit(t('charges.credit_lecture'))
+    boutonsFiche(true)
+    retourFiche(t('charges.credit_lecture'))
     try {
-      const fichier = await enBase64(f)
-      const r = await deps.agir({ action: 'credit_importer', fichier, preteur, entite_id: entite, bien_id: bien || null })
-      etat.creditForm = false
-      const c = (r && r.credit) || {}
-      etat.creditRetour = { texte: t('charges.credit_importe', { n: c.nb_echeances, charges: r.charges, debut: jourLisible(c.premiere_echeance), fin: jourLisible(c.derniere_echeance) }), erreur: false }
+      const r = await deps.agir({ action: 'tableau_importer', id: c.id, preteur, entite_id: entite, bien_id: bien || null })
+      const cr = (r && r.credit) || {}
+      etat.creditRetour = { texte: t('charges.credit_importe', { n: cr.nb_echeances, charges: r.charges, debut: jourLisible(cr.premiere_echeance), fin: jourLisible(cr.derniere_echeance) }), erreur: false }
+      fermerFiche()
       await recharger()
     } catch (e) {
       // ⚠ UNE LIGNE QUI NE SE PROUVE PAS SE NOMME par sa date : l'hôte la
-      // retrouve dans son tableau.
-      // Les refus communs aux factures parlent de factures : ceux d'un crédit
-      // ont leurs mots (review du lot, mineur 5).
+      // retrouve dans son tableau. Les refus communs aux factures parlent de
+      // factures : ceux d'un crédit ont leurs mots (review du lot 7, mineur 5).
       const propres = { type_refuse: 'charges.credit_pdf_seul', trop_gros: 'charges.credit_trop_gros', entite_requise: 'charges.credit_entite_requise' }
-      retourCredit(e && e.code === 'ligne_incoherente' && e.detail
+      retourFiche(e && e.code === 'ligne_incoherente' && e.detail
         ? t('charges.refus_ligne_incoherente', { date: jourLisible(e.detail) })
-        : e && propres[e.code] ? t(propres[e.code]) : messageErreur(e), true)
+        : e && propres[e.code] ? t(propres[e.code]) : messageErreur(e))
+      boutonsFiche(false)
     } finally {
       etat.creditEnCours = false
-      const b = $('[data-geste="credit-importer"]')
-      if (b) b.disabled = false
+    }
+  }
+
+  // Un geste qui change la NATURE de la charge (tableau ↔ facture) : la fiche
+  // se repeint sur ce que le serveur rend.
+  async function changerNature (action) {
+    const c = etat.fiche
+    if (!c || etat.creditEnCours) return false
+    etat.creditEnCours = true
+    boutonsFiche(true)
+    retourFiche(t(action === 'tableau_reconnaitre' ? 'charges.credit_lecture' : 'charges.lecture_en_cours'))
+    try {
+      const r = await deps.agir({ action, id: c.id })
+      await recharger()
+      if (r && r.charge && r.charge.id) {
+        if (!connues().has(String(r.charge.id))) etat.aTraiter.lignes = [r.charge, ...etat.aTraiter.lignes]
+        ouvrirFiche(r.charge.id)
+      } else fermerFiche()
+      return true
+    } catch (e) {
+      retourFiche(messageErreur(e))
+      boutonsFiche(false)
+      return false
+    } finally {
+      etat.creditEnCours = false
     }
   }
 
@@ -816,6 +855,7 @@ export function monter (racine, deps) {
   }
 
   function peindreFiche (c) {
+    if (c.statut === 'tableau') { peindreFicheTableau(c); return }
     const e = etatDe(c)
     const ota = c.origine === 'ota'
     // Une échéance de crédit vient de son tableau : elle se lit, elle ne se
@@ -847,6 +887,7 @@ export function monter (racine, deps) {
     const montantChamp = (cle, libelle) => champ(cle, libelle,
       `<input type="text" inputmode="decimal" autocomplete="off" data-champ="${cle}" value="${esc(enSaisie(Number.isInteger(c[cle]) ? Math.abs(c[cle]) : c[cle], langue))}"${fige}>`)
     const type = c.type_document || 'facture'
+    const retypable = !ota && !credit && ['a_lire', 'a_verifier', 'illisible'].includes(c.statut)
 
     dialogue().innerHTML = '<div class="chg-fiche__tete">'
       + `<h2 class="chg-h2" id="chg-fiche-titre">${esc(t('charges.fiche_titre'))}</h2>`
@@ -862,7 +903,10 @@ export function monter (racine, deps) {
       + champ('numero_facture', t('charges.champ_numero'), `<input type="text" maxlength="100" data-champ="numero_facture" value="${esc(c.numero_facture || '')}"${fige}>`, true)
       + champ('date_facture', t('charges.champ_date'), `<input type="date" data-champ="date_facture" value="${esc(c.date_facture || '')}"${fige}>`)
       + champ('type_document', t('charges.champ_type'), `<select data-champ="type_document"${fige}>`
-        + TYPES_DOCUMENT.map(k => `<option value="${k}"${k === type ? ' selected' : ''}>${esc(t('charges.type_' + k))}</option>`).join('') + '</select>')
+        + TYPES_DOCUMENT.map(k => `<option value="${k}"${k === type ? ' selected' : ''}>${esc(t('charges.type_' + k))}</option>`).join('')
+        // « Tableau d'amortissement » se choisit sur une charge pas encore
+        // vérifiée : le serveur relit alors son fichier comme un tableau.
+        + (retypable ? `<option value="tableau_amortissement">${esc(t('charges.type_tableau_amortissement'))}</option>` : '') + '</select>')
       + `<fieldset class="chg-periode"><legend>${esc(t('charges.champ_periode'))} <span class="muted">${esc(t('charges.facultatif'))}</span></legend>`
       + '<div class="chg-periode__dates">'
       + champ('periode_debut', t('charges.periode_du'), `<input type="date" data-champ="periode_debut" value="${esc(c.periode_debut || '')}"${fige}>`)
@@ -1089,9 +1133,8 @@ export function monter (racine, deps) {
     else if (g === 'trancher') trancher()
     else if (g === 'supprimer') supprimer()
     else if (g === 'voir') voir()
-    else if (g === 'credit-ajouter') { etat.creditForm = true; etat.creditRetour = null; peindreCredits() }
-    else if (g === 'credit-annuler') { etat.creditForm = false; etat.creditRetour = null; peindreCredits() }
-    else if (g === 'credit-importer') importerCredit()
+    else if (g === 'tableau-importer') importerTableau()
+    else if (g === 'tableau-en-facture') changerNature('tableau_en_facture')
     else if (g === 'credit-supprimer') supprimerCredit(el.dataset.credit)
   })
   racine.addEventListener('change', (ev) => {
@@ -1099,8 +1142,14 @@ export function monter (racine, deps) {
     if (el.dataset && el.dataset.choix === 'entite') { etat.generation++; etat.entite = el.value; etat.periode = ''; recharger(); return }
     if (el.dataset && el.dataset.choix === 'periode') { etat.generation++; etat.periode = el.value; recharger(); return }
     if (el.dataset && el.dataset.creditChamp === 'entite') {
-      const b = $('[data-credit-champ="bien"]')
+      const b = dialogue().querySelector('[data-credit-champ="bien"]')
       if (b) b.innerHTML = optionsBiensCredit(el.value)
+      return
+    }
+    if (el.dataset && el.dataset.champ === 'type_document' && el.value === 'tableau_amortissement') {
+      // Un refus (ce PDF n'est pas un tableau lisible) remet le type d'avant.
+      const avant = (etat.fiche && etat.fiche.type_document) || 'facture'
+      changerNature('tableau_reconnaitre').then(ok => { if (!ok) { const s = dialogue().querySelector('[data-champ="type_document"]'); if (s) s.value = avant } })
       return
     }
     if (el.dataset && el.dataset.champ === 'type_document') {
