@@ -1,6 +1,8 @@
 # Spec — Les demandes Airbnb dans Messages (dette 129)
 
-Statut : **spec, rien n'est codé.** Fil messagerie, 21 novembre 2026.
+Statut (22 novembre 2026) : lot 1 étape 0 (mesure) sur staging, en attente du
+go prod ; lot 1 étapes 1-2 (migration, writers) codées, en review. Étape 3
+(rattrapage), lots 2 et 3 : à faire. Fil messagerie.
 
 ## 0. Constat, mesuré en production le 21 novembre 2026
 
@@ -54,7 +56,10 @@ Choix par défaut posés par cette spec (Thierry peut les renverser) :
 - **Une demande devenue réservation rejoint la conversation de la
   réservation** : ses messages prennent le `booking_id` que Channex donne au
   fil. L'hôte retrouve les questions d'avant la réservation dans le même fil,
-  et l'étiquette « Demande » disparaît.
+  et l'étiquette « Demande » disparaît. ⚠ Appliqué **en continu par le writer**
+  (`recordMessage`, dès qu'un message relu porte la réservation), pas seulement
+  au rattrapage : le renverser après la mise en production demande de défaire
+  des lignes déjà modifiées.
 
 ## 2. Modèle de données
 
@@ -64,7 +69,8 @@ Choix par défaut posés par cette spec (Thierry peut les renverser) :
   fil — `user_id`, `provider`, `property_id` (clé provider), `provider_thread_id`,
   `booking_id` (nul = demande), `titre` (le nom du voyageur chez Channex),
   `ota`, `ferme`, `maj_le`. Unicité `(provider, provider_thread_id)`. RLS
-  active, lecture par le propriétaire, écriture par la clé de service seule.
+  active ; lecture par la même règle que `messages` (domaine `messages`, par
+  bien) ; écriture par la clé de service seule.
   Elle porte le NOM d'une demande, que les messages ne portent pas.
 - **Clé de conversation d'une demande : `demande:<provider_thread_id>`.** Elle
   sert partout où un `bookId` sert de clé d'écran ou de tâche
@@ -102,9 +108,41 @@ Choix par défaut posés par cette spec (Thierry peut les renverser) :
     `ota_reviews.source_message_id` la désigne : elle est alors repointée vers
     la copie gardée ;
   - pose le `booking_id` du fil sur les messages d'une demande devenue
-    réservation.
+    réservation ;
+  - remplit `fils_provider` pour TOUS les fils du bien (l'import ne l'écrit que
+    pour les fils qui bougent : sans ça, les anciennes demandes n'auraient pas
+    de nom au lot 2). ⚠ Fil par fil, jamais en upsert de tableau : supabase-js
+    mettrait alors à null la réservation absente d'une ligne.
   Le script annonce ses nombres avant d'écrire, et la vérification les recompte
   après.
+- **Index anti-doublon** : la migration remplace `messages_sans_msgid_unique_idx`
+  par `messages_sans_msgid_fil_unique_idx`, qui porte le fil — l'ancien
+  confondait deux prospects écrivant le même texte dans la même minute.
+- **Unicité des fils par compte** (`user_id, provider, provider_thread_id`) :
+  deux biens de deux comptes peuvent porter la même référence provider.
+
+**Point ouvert, relevé en review 2 du lot 1, hors de ce lot :** l'import ne
+refuse pas une référence provider AMBIGUË (deux biens de deux comptes portant
+la même référence), alors que le webhook la refuse. Avec l'unicité par compte,
+chaque compte écrit SA ligne de fil — pas de fuite par la RLS, mais le compte
+qui a déclaré la référence d'un autre reçoit ses fils. Remède : refuser
+l'ambiguïté à l'import, comme le webhook.
+
+**Points ouverts, relevés en review, tranchés par la mesure de l'étape 0 :**
+- `importMessages` écrit sous le compte les messages de TOUS les fils que rend le
+  partenaire, y compris un fil d'un autre bien ou sans bien (comportement
+  antérieur au lot). `fils_provider`, lui, ne les écrit pas. Si la mesure
+  montre des fils écartés (`fils_d_autres_biens_ecartes`,
+  `fils_sans_bien_ecartes` non nuls), l'import devra les écarter aussi avant
+  le lot 2, sinon ils apparaîtraient comme des « Demandes ».
+- Le webhook lit `payload.message_id`, que la doc Channex ne connaît pas
+  (l'identifiant du message y est `payload.id`) : c'est la cause probable des
+  copies webhook sans identifiant. À vérifier sur la trace `payload message
+  keys` avant de le changer — si `payload.id` est bien l'identifiant de
+  l'import, le doublon disparaît à la source, séjours compris.
+- La réconciliation exige le même instant à la milliseconde, et l'exemple de
+  payload de la doc n'a pas d'`inserted_at`. La mesure de l'étape 0
+  (`copies_webhook_avec_jumelle`, comparée à la milliseconde) le dira.
 
 ## 4. Lot 2 — Écran
 
