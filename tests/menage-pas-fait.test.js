@@ -41,6 +41,7 @@ function faux (tables, { pannes = {} } = {}) {
       let charge = null
       let tri = null
       let limite = null
+      let debut = 0
       const ok = (l) => filtres.every(f => f(l))
       const val = (l, c) => {
         const m = /^snapshot->>(\w+)$/.exec(c)
@@ -56,6 +57,7 @@ function faux (tables, { pannes = {} } = {}) {
         gt (c, v) { filtres.push(l => String(val(l, c)) > String(v)); return q },
         order (c, o = {}) { tri = { c, asc: o.ascending !== false }; return q },
         limit (n) { limite = n; return q },
+        range (a, b) { debut = a; limite = b - a + 1; return q },
         insert (row) { mode = 'insert'; charge = row; return q },
         delete () { mode = 'delete'; return q },
         then (res, rej) {
@@ -75,7 +77,7 @@ function faux (tables, { pannes = {} } = {}) {
           }
           let r = lignes.filter(ok)
           if (tri) r = [...r].sort((x, y) => (String(x[tri.c]) < String(y[tri.c]) ? -1 : String(x[tri.c]) > String(y[tri.c]) ? 1 : 0) * (tri.asc ? 1 : -1))
-          if (limite != null) r = r.slice(0, limite)
+          if (limite != null) r = r.slice(debut, debut + limite)
           return Promise.resolve({ data: r, error: null }).then(res, rej)
         }
       }
@@ -92,6 +94,8 @@ const resa = (o = {}) => ({
 })
 const bien = (o = {}) => ({ id: `uuid-${o.provider_property_id || BULLE}-${o.user_id || A}`, user_id: A, name: 'La bulle',
   provider_property_id: BULLE, checkin_time: '16:00', archive_le: null, ...o })
+const liaison = (o = {}) => ({ id: `l-${++nId}`, user_id: A, property_id: BULLE, provider_id: REGINA, rang: 1,
+  weekdays: null, requires_ack: false, active: true, ...o })
 const menage = (o = {}) => ({ id: `m-${++nId}`, user_id: A, property_id: BULLE, booking_id: 'b-avant', departure_date: HIVER,
   status: 'accepted', provider_id: REGINA, ...o })
 
@@ -102,16 +106,18 @@ function base (o = {}) {
     menages: o.menages || [menage()],
     menage_done: o.faits || [],
     profiles: o.profils || [{ id: REGINA, first_name: 'Régina' }],
-    message_sent_log: o.memoires || []
+    message_sent_log: o.memoires || [],
+    // Le logement est CONFIÉ par défaut : c'est le cas que l'alerte sert.
+    property_cleaning_providers: o.liaisons || [liaison()]
   }
 }
 
-function lancer (tables, maintenant, { pannes, retour } = {}) {
+function lancer (tables, maintenant, { pannes, retour, budgetEnvoisMs } = {}) {
   const db = faux(tables, { pannes })
   const envois = []
   const notifier = async (o) => { envois.push(o); return retour || { ok: true, destinataires: 1, push: 1, emails: 0, sms: 0 } }
   const results = { errors: [] }
-  return prevenirMenagesPasFaits(results, { maintenant, db, deps: { envoi: { notifier } } })
+  return prevenirMenagesPasFaits(results, { maintenant, db, deps: { envoi: { notifier } }, budgetEnvoisMs })
     .then(bilan => ({ bilan, envois, results, db }))
 }
 
@@ -185,7 +191,34 @@ test('Q49 : heure d\'arrivée vide ou illisible — pas d\'alerte, jamais une he
   assert.strictEqual(envois[0].donnees.heure, '16:00', 'l\'heure dite est normalisée')
 })
 
-test('aucun ménage suivi dans HôteSmart pour ce logement : rien (l\'hôte ne suit pas ses ménages ici)', async () => {
+test('LE CAS RÉEL (review, constat 1) : logement sans prestataire — le ménage existe, sans porteuse ni « fait », et RIEN ne part', async () => {
+  // C'est ce que produit `synchroniserMenages` pour l'hôte qui fait son ménage
+  // lui-même : une ligne `unassigned` à chaque départ, jamais de `menage_done`.
+  const tables = base({ liaisons: [], menages: [menage({ provider_id: null, status: 'unassigned' })] })
+  const { bilan, envois } = await lancer(tables, aParis(HIVER, '15:35'))
+  assert.strictEqual(envois.length, 0)
+  assert.strictEqual(bilan.non_confies, 1)
+  assert.ok(!tables.message_sent_log.length, 'non mémorisé : confié dans la journée, il compte dès le cycle suivant')
+  tables.property_cleaning_providers.push(liaison())
+  const ensuite = await lancer(tables, aParis(HIVER, '15:40'))
+  assert.strictEqual(ensuite.envois.length, 1)
+})
+
+test('une liaison INACTIVE ou d\'un autre hôte ne rend pas le logement confié', async () => {
+  const tables = base({ liaisons: [liaison({ active: false }), liaison({ user_id: B })] })
+  const { bilan, envois } = await lancer(tables, aParis(HIVER, '15:35'))
+  assert.strictEqual(envois.length, 0)
+  assert.strictEqual(bilan.non_confies, 1)
+})
+
+test('liaisons illisibles : rien, et l\'erreur se dit (jamais « non confié » par défaut)', async () => {
+  const { envois, results, bilan } = await lancer(base(), aParis(HIVER, '15:35'), { pannes: { property_cleaning_providers: () => true } })
+  assert.strictEqual(envois.length, 0)
+  assert.strictEqual(bilan.non_confies, 0)
+  assert.ok(results.errors.some(e => e.context === 'menage_pas_fait'))
+})
+
+test('logement confié sans aucun ménage (première réservation) : rien, et la journée est tranchée', async () => {
   const tables = base({ menages: [] })
   const { bilan, envois } = await lancer(tables, aParis(HIVER, '15:35'))
   assert.strictEqual(envois.length, 0)
@@ -286,14 +319,16 @@ test('le plafond : au plus vingt arrivées tranchées par cycle, les plus proche
   const resas = []
   const biens = []
   const menages = []
+  const liaisons = []
   for (let i = 0; i < n; i++) {
     const ref = `ref-${String(i).padStart(2, '0')}`
     resas.push(resa({ property_id: ref }))
     // Les cinq derniers arrivent le plus tôt : ce sont eux qui passent d'abord.
     biens.push(bien({ provider_property_id: ref, name: ref, checkin_time: i >= MAX_PAR_CYCLE ? '15:00' : '16:00' }))
     menages.push(menage({ property_id: ref, booking_id: `b-${ref}` }))
+    liaisons.push(liaison({ property_id: ref }))
   }
-  const tables = base({ resas, biens, menages })
+  const tables = base({ resas, biens, menages, liaisons })
   const un = await lancer(tables, aParis(HIVER, '15:35'))
   assert.strictEqual(un.envois.length, MAX_PAR_CYCLE)
   assert.strictEqual(un.bilan.reportes, 5)
@@ -317,6 +352,57 @@ test('CURSEUR : une arrivée au-delà de la première page est lue (aucune tronc
 test('horlogeDeParis : le jour et l\'heure de la pendule, minuit compris', () => {
   assert.deepStrictEqual(horlogeDeParis(aParis(HIVER, '15:35')), { jour: HIVER, minutes: 15 * 60 + 35 })
   assert.deepStrictEqual(horlogeDeParis(new Date('2026-12-10T23:30:00Z')), { jour: '2026-12-11', minutes: 30 })
+})
+
+test('ISOLATION (3) : la mémoire d\'un autre hôte, même logement et même jour, ne fait pas taire A', async () => {
+  const tables = base({ memoires: [{ user_id: B, booking_id: `notif:menage_pas_fait:${BULLE}:${HIVER}`, template_id: ev.SENTINELLE_PAS_FAIT }] })
+  const { envois, bilan } = await lancer(tables, aParis(HIVER, '15:35'))
+  assert.strictEqual(envois.length, 1)
+  assert.strictEqual(bilan.deja, 0)
+})
+
+test('un logement archivé puis recréé sous la même référence : c\'est l\'ACTIF qui compte, quel que soit l\'ordre de lecture', async () => {
+  const tables = base({ biens: [bien({ id: 'ancien', archive_le: '2026-10-01T00:00:00Z', checkin_time: null }), bien({ id: 'actif' })] })
+  const { envois } = await lancer(tables, aParis(HIVER, '15:35'))
+  assert.strictEqual(envois.length, 1)
+})
+
+test('ménages illisibles : rien, l\'erreur se dit, RIEN n\'est mémorisé — le cycle suivant reprend', async () => {
+  const tables = base()
+  const panne = await lancer(tables, aParis(HIVER, '15:35'), { pannes: { menages: () => true } })
+  assert.strictEqual(panne.envois.length, 0)
+  assert.ok(panne.results.errors.some(e => e.context === 'menage_pas_fait'))
+  assert.ok(!tables.message_sent_log.length)
+  const reprise = await lancer(tables, aParis(HIVER, '15:40'))
+  assert.strictEqual(reprise.envois.length, 1)
+})
+
+test('BLOCAGE PROPRIÉTAIRE (review, constat 7) : une ligne Beds24 sans provider se lit avec celui de SON logement', async () => {
+  const sansProvider = (status) => {
+    const r = resa({ snapshot: { status } })
+    delete r.snapshot.provider
+    return r
+  }
+  const bloque = await lancer(base({ resas: [sansProvider('black')], biens: [bien({ provider: 'beds24' })] }), aParis(HIVER, '15:35'))
+  assert.strictEqual(bloque.envois.length, 0, 'un blocage n\'est pas une arrivée')
+  const vraie = await lancer(base({ resas: [sansProvider('new')], biens: [bien({ provider: 'beds24' })] }), aParis(HIVER, '15:35'))
+  assert.strictEqual(vraie.envois.length, 1)
+})
+
+test('LIMITE DE TEMPS (review, constat 6) : épuisée, rien ne part, rien n\'est mémorisé, le reste attend', async () => {
+  const tables = base()
+  const { envois, bilan } = await lancer(tables, aParis(HIVER, '15:35'), { budgetEnvoisMs: 0 })
+  assert.strictEqual(envois.length, 0)
+  assert.strictEqual(bilan.reportes, 1)
+  assert.ok(!tables.message_sent_log.length)
+  assert.strictEqual((await lancer(tables, aParis(HIVER, '15:40'))).envois.length, 1)
+})
+
+test('le travail de la tâche se lit dans `results` (review, constat 5)', async () => {
+  const { results } = await lancer(base(), aParis(HIVER, '15:35'))
+  assert.strictEqual(results.menagesPasFaits, 1)
+  const rien = await lancer(base({ resas: [] }), aParis(HIVER, '15:35'))
+  assert.strictEqual(rien.results.menagesPasFaits, 0)
 })
 
 // ─── Le texte ────────────────────────────────────────────────────────────────
