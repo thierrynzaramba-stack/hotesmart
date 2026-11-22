@@ -185,3 +185,20 @@ test('à l\'ordinateur, une commission de plateforme (sans fichier) garde la fic
     assert.deepEqual(b.gestes(), [])
   } finally { b.fermer() }
 })
+
+test('à l\'ordinateur, l\'adresse d\'une facture arrivée APRÈS le passage à une autre fiche est jetée : jamais le document d\'une autre facture', async () => {
+  let lacher
+  const lente = new Promise(r => { lacher = r })
+  const geste = (c) => (c.action === 'consulter' && c.id === id(1) ? lente.then(() => ({ ok: true, url: 'https://stockage.test/lire/1' })) : { ok: true, url: `https://stockage.test/lire/${c.id}` })
+  const b = await monter({ large: true, geste, ecran: ecranAvec({ aTraiter: [aVerifier(1), aVerifier(2)] }) })
+  try {
+    const lignes = b.$$('[data-bind="a-traiter"] .chg-ligne')
+    await b.cliquer(lignes[0])
+    await b.cliquer(lignes[1])
+    lacher()
+    for (let i = 0; i < 10; i++) await b.attendre()
+    const dlg = b.$('[data-bind="fiche"]')
+    assert.equal(dlg.querySelector('[data-champ="fournisseur_nom"]').value, 'Fournisseur 2')
+    assert.deepEqual(b.$$('[data-bind="fiche-doc"] iframe').map(f => f.getAttribute('src')), [`https://stockage.test/lire/${id(2)}`])
+  } finally { b.fermer() }
+})

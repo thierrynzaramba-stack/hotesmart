@@ -4274,8 +4274,10 @@ Branche `charges-masse`, partie de `main` (`b2ef2115`, lot 8b en production).
   conversion HEIC et la lecture IA restent celles d'un dépôt seul.
 - L'écran montre l'avancement (« 12 sur 50 ») ; un fichier refusé ne bloque
   pas les suivants, et la liste des refus est donnée à la fin, nom par nom.
-- `MAX_ENVOIS_OUVERTS` (30 envois non confirmés sur 24 h) passe à 60, pour
-  qu'un dépôt de 50 ne bute pas sur un reste d'envois abandonnés.
+- `MAX_ENVOIS_OUVERTS` (30 envois **non confirmés** sur 24 h) **reste à 30**
+  (correction au codage) : les fichiers partent un par un et chacun est
+  confirmé avant le suivant, donc un dépôt de 50 n'en tient jamais plus d'un
+  ouvert à la fois.
 
 **L'entité de base (décision 3).**
 - C'est l'entité affichée en tête de l'écran au moment du dépôt ; l'écran la
@@ -4307,9 +4309,11 @@ Branche `charges-masse`, partie de `main` (`b2ef2115`, lot 8b en production).
   (doublon). Les autres restent dans « À traiter », à faire une par une.
 - Une confirmation dit le compte avant d'agir : « N factures vont être
   enregistrées telles que lues. M restent à vérifier une par une. »
-- Côté serveur, une action `valider_lot` (au plus 100 identifiants) qui
-  applique à chacune **la même validation** que `valider`, avec les valeurs
-  lues ; elle rend le nombre enregistré et la liste des refus avec leur code.
+- Côté serveur, une action `valider_lot` (au plus **20** identifiants par
+  appel — correction au codage : six requêtes par facture doivent tenir dans
+  les 60 s d'une fonction ; l'écran enchaîne les appels) qui applique à
+  chacune **la même validation** que `valider`, avec les valeurs lues ; elle
+  rend le nombre enregistré et la liste des refus avec leur code.
 
 **Dette 153, soldée dans ce lot.** « À traiter » se lit par curseur, au-delà
 des 50 premières lignes : un dépôt de 50 la dépasserait tout de suite.
@@ -4324,12 +4328,13 @@ des 50 premières lignes : un dépôt de 50 la dépasserait tout de suite.
 | Limite de 50 lectures IA par jour | 100. |
 | « À traiter » bornée à 50 lignes | Lue par curseur (dette 153). |
 
-#### 14.22.4 Questions ouvertes (à trancher par Thierry)
+#### 14.22.4 Le téléphone (décision de Thierry, 22 novembre 2026 : « oui d'accord »)
 
-- **Le téléphone** (règle « le mobile suit l'ordinateur ») : proposition —
-  le dépôt en masse, « Enregistrer et suivante » et « Enregistrer tout »
-  aussi au téléphone ; le document reste derrière « Voir la facture », faute
-  de place pour deux colonnes.
+Le dépôt en masse, « Vérifier une par une » et « Enregistrer tout » existent
+aussi au téléphone. Le document y reste derrière « Voir la facture », faute de
+place pour deux colonnes : la fiche à deux colonnes n'est montée qu'au-delà de
+1 100 px de large (`deps.ecranLarge`), et rien n'est demandé au serveur
+au-dessous.
 
 #### 14.22.5 Case PERFORMANCE (à mesurer)
 
@@ -4343,7 +4348,68 @@ des 50 premières lignes : un dépôt de 50 la dépasserait tout de suite.
 7. Budget : le dépôt de 50 fichiers n'est pas un affichage ; l'écran garde
    ses 2 appels.
 8. AVANT / APRÈS : à mesurer sur staging (appels, requêtes, octets de
-   l'écran ; durée d'un dépôt de 10 fichiers).
+   l'écran ; durée d'un dépôt de 10 fichiers). Coût connu dès le code : à
+   l'ordinateur, chaque fiche ouverte demande une adresse de lecture
+   (`consulter`, une requête), pour afficher la facture.
+
+#### 14.22.6 Ce qui est codé (22 novembre 2026)
+
+**Serveur.**
+- `lib/charges.js` : `PLAFOND_LECTURES_JOUR` = 100. `ouvrirEnvoi` reçoit
+  `entiteId` : identifiant validé par motif, entité lue dans le compte, refus
+  400 `entite_invalide`, 403 `entite_hors_compte`, 409 `entite_archivee`,
+  **avant** toute ligne ni URL ; posée sur la ligne de l'envoi.
+  `appliquerLecture` relit `entite_juridique_id` et la **garde** ; les
+  entités ne sont lues (pour la proposition) que s'il n'y en a pas.
+  `estComplete`, `validerTelleQueLue`, `validerLot` (doublons retirés, motif
+  des identifiants, entités lues une fois pour le lot, une panne arrête le
+  lot et rend ce qui est déjà passé).
+- `api/charges.js` : `envoi` transmet `entite_id` ; action `valider_lot`.
+- `lib/charges/ecran.js` : `aTraiter(db, compte, curseur)` lit `PAGE + 1` et
+  rend `suite` ; la condition de la file et celle du curseur sont dans **un
+  seul** `or` (`and(or(…),or(…))`), jamais deux paramètres `or`. `aVerifier`
+  : statut `a_verifier`, `cree_le` puis `id` croissants, nombre exact à la
+  première page. `lireCurseurArrivee` : `cree_le|id`, motifs ancrés.
+- `api/ecran/charges.js` : `?suite_a_traiter=<curseur>` et
+  `?parcours=debut|<curseur>`, chacun une seule lecture ; un curseur forgé
+  est refusé en 400 avant toute requête ; la garde (titulaire) est celle de
+  l'écran.
+
+**Écran** (`shared/charges-vue.js`, `pages/charges.html`, `shared/ui.css`).
+- Le sélecteur de fichiers est `multiple`. Un seul fichier : le geste d'avant
+  (sa fiche s'ouvre). Plusieurs : « Dépôt 3 sur 12… », un par un, puis
+  « 10 factures déposées. 2 refusées : a.txt (motif) ; … », une seule
+  relecture de l'écran. Plus de 50 : rien ne part.
+- L'entité de base est nommée sous le bouton ; une entité archivée affichée
+  n'en est pas une (le dépôt part sans entité).
+- « À traiter » : « Afficher plus » à la place de « Et N de plus » ; deux
+  boutons dès qu'une facture est à vérifier : « Vérifier une par une » et
+  « Enregistrer les factures complètes ».
+- Parcours : compteur « 3 sur 17 », « Passer », « Enregistrer et suivante »
+  (le chemin `valider`) ; « Supprimer » passe aussi à la suivante ;
+  « Garder les deux » repeint la même fiche ; la page suivante se lit au fil ;
+  fermer la fiche arrête le parcours et relit l'écran.
+- « Enregistrer tout » : toute la file relue (40 pages au plus), les
+  complètes seules, confirmation avec les deux nombres, paquets de 20, bilan.
+- À l'ordinateur : fiche en deux colonnes (480 px de champs, la facture
+  dans un cadre à droite), adresse de 60 s demandée pour la fiche ouverte ;
+  une réponse arrivée après un changement de fiche est jetée.
+- `estComplete` est la même règle qu'au serveur, qui reste la garde.
+
+**Registre.** Dette 153 barrée, soldée par ce lot (effective en production).
+
+**Tests.** `tests/charges-masse.test.js` (serveur), `tests/charges-masse-page.test.js`
+(écran), ajouts à `charges-endpoint`, `charges-ecran`, `charges-page`,
+`charges-writer` ; le banc sait monter un écran d'ordinateur et déposer
+plusieurs fichiers. Contre-épreuve : vingt sabotages, chacun fait rougir au
+moins un test (entité d'un autre compte ou archivée acceptée, entité de base
+remplacée à la lecture, doublon compté complet au serveur et à l'écran, avoir
+signé deux fois, panne qui n'arrête pas le lot, lot sans borne, suite sans
+curseur, parcours à l'envers, entité non transmise, limite de 50 absente, un
+refus qui arrête le dépôt, entité archivée envoyée, pas de confirmation,
+valider qui ne passe pas à la suivante, page suivante non lue, commission en
+deux colonnes, document d'une autre fiche, fermeture qui ne relit pas).
+Suite complète : 9 250 verts à l'heure réelle, et à J+60.
 
 ## 12. Trace des reviews du lot 2
 
