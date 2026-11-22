@@ -38,6 +38,13 @@ de recette en inséraient. En production, la liste serait restée vide à jamais
 Airbnb chez Channex, **tous** avec une note du voyageur. Channex ne crée donc
 l'objet — la cible de la publication — que lorsque le voyageur a laissé un avis.
 
+⚠ **Mesure contraire du 18 novembre 2026, qui fait foi aujourd'hui** : l'objet
+Channex naît au départ, masqué et vide, que le voyageur écrive ou non (42 objets
+encore masqués et vides plus de 14 jours après le départ ; deux départs de La
+bulle vérifiés sans commentaire public chez Airbnb). Voir
+`docs/specs/avis-v5/spec-refonte-ui-v5-lot-avis.md` §11. Ce document reste tel
+qu'il a été écrit la nuit du 2 octobre ; seule cette note est ajoutée.
+
 **Option retenue — deux naissances, aucune date inventée :**
 1. quand la prestataire ouvre ses questions après « Ménage fait », pour un séjour
    **Airbnb passé par Channex** : l'évaluation naît `a_remplir`, sans objet ni
