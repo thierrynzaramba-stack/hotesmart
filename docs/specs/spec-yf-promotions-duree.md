@@ -276,6 +276,11 @@ de prix n'efface donc pas un ensemble de règles posé à la main.
 
 ## 8. À trancher par Thierry avant l'étape 1
 
+⚠ **Reporté par Thierry le 22/11/2026.** Ses réglages manuels du 23 (§2)
+donnent déjà une réponse de fait — remise en périodes creuses seulement,
+−10 % dès 3 nuits, aucune remise en Haut ni en août — mais ils ne valent
+pas encore règle par défaut du produit.
+
 - **Hausse de la haute saison pour « compenser » la remise** (proposition de
   Thierry) ou **remise limitée aux périodes creuses** (recommandation du fil :
   une remise au-dessus du plancher ne perd rien, la hausse ferait payer plus
