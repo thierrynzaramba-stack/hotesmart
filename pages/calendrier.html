@@ -1509,6 +1509,31 @@ function verdictToast (r) {
     toast(t('cal.task_copied', { ids }), { duree: 6000 })
   }
 }
+// ⚠ UN BLOCAGE N'EST « FAIT » QUE SI LE CANAL L'A ACCEPTE.
+// `fermer`, `modifier_fermeture` et `rouvrir_fermeture` rendent les memes
+// drapeaux que `save` : `push_failed` (le canal a refuse), `local_only` (rien
+// d'envoye : pas de plan tarifaire) et `warnings`. Les trois gestes de blocage
+// les ignoraient et affichaient « Blocage cree » quoi qu'il arrive : un blocage
+// refuse par le canal passait pour fait (docs/specs/spec-toast-bloquer.md).
+// Le succes n'est annonce qu'une fois les deux echecs ecartes.
+//
+// ⚠ LES AVERTISSEMENTS NE SONT MONTRES QUE SI LE SERVEUR N'A RIEN ECRIT
+// (`saved: 0`), constat 1 de la review. Quand il a ecrit, `warnings` vient du
+// writer : codes techniques, et surtout l'avertissement du mode « je garde mes
+// prix » (« vos reouvertures ne sont PAS envoyees ») — FAUX pour un blocage,
+// dont le stop_sell part dans tous les modes (`reaffirmerStopSell`), et qui
+// pousserait l'hote a changer de mode pour rien. Quand il n'a rien ecrit, les
+// seuls avertissements sont ceux des fermetures (lib/fermetures.js) : ils
+// disent pourquoi rien n'a bouge, et c'est ce que l'hote doit lire.
+// `siRien` : le succes a dire dans ce cas — « Blocage supprime » ne peut pas
+// promettre « nuits rouvertes » quand aucune ne l'a ete (constat 3).
+function verdictBlocage (r, succes, siRien = succes) {
+  if (r && r.push_failed) return toast(t('cal.block_push_failed'), { erreur: true, duree: 12000 })
+  if (r && r.local_only) return toast(t('cal.local_only'), { duree: 8000 })
+  const avertis = r && Number(r.saved) === 0 && Array.isArray(r.warnings) && r.warnings.length
+  toast(avertis ? siRien : succes)
+  if (avertis) toast(String(r.warnings[0]), { duree: 10000 })
+}
 // Enregistre des segments et propose « Annuler » : les valeurs PRECEDENTES
 // des dates touchees sont relevees AVANT l'ecriture, et « Annuler » les
 // REECRIT par le meme writer — jamais un undo d'affichage (§11.1).
@@ -1970,9 +1995,9 @@ function ouvrirFormulaire (type, jours, bienForce = null) {
         const raison = corps.querySelector('[data-aj="raison"]').value.trim()
         if (!raison) { etatEl.textContent = t('cal.block_reason_required'); bouton.disabled = false; return }
         const finNuit = toISO(new Date(new Date(departV + 'T12:00:00').getTime() - 86400000))
-        await api.calendar.fermer(bienId, duV, finNuit, raison)
+        const r = await api.calendar.fermer(bienId, duV, finNuit, raison)
         fermerFeuille(); viderSelection()
-        toast(t('cal.block_created'))
+        verdictBlocage(r, t('cal.block_created'))
         await charger()
       } else {
         const prenom = corps.querySelector('[data-aj="prenom"]').value.trim()
@@ -2494,16 +2519,16 @@ function ouvrirFicheBlocage (bienId, blocageId) {
       etatEl.textContent = t('cal.no_change'); return
     }
     try {
-      await api.calendar.modifierFermeture(bienId, f.id, debut, fin, raison)
-      fermerFeuille(); toast(t('cal.saved')); await charger()
+      const r = await api.calendar.modifierFermeture(bienId, f.id, debut, fin, raison)
+      fermerFeuille(); verdictBlocage(r, t('cal.saved')); await charger()
     } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
   })
   corps.querySelector('[data-b-suppr]').addEventListener('click', async () => {
     if (!window.confirm(t('cal.block_delete_confirm'))) return
     const etatEl = corps.querySelector('[data-b-etat]')
     try {
-      await api.calendar.rouvrirFermeture(bienId, f.id)
-      fermerFeuille(); toast(t('cal.block_deleted')); await charger()
+      const r = await api.calendar.rouvrirFermeture(bienId, f.id)
+      fermerFeuille(); verdictBlocage(r, t('cal.block_deleted'), t('cal.block_deleted_none')); await charger()
     } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
   })
 }

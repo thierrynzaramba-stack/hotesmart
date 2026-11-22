@@ -159,6 +159,8 @@
   "cal.block_delete": "Eliminar el bloqueo",
   "cal.block_delete_confirm": "Eliminar este bloqueo reabre a la venta todo el período. ¿Continuar?",
   "cal.block_deleted": "Bloqueo eliminado: noches reabiertas.",
+  "cal.block_deleted_none": "Bloqueo eliminado, pero no se ha reabierto ninguna noche:",
+  "cal.block_push_failed": "NO PUBLICADO — cambio guardado aquí, pero la plataforma no lo aceptó: puede que Airbnb y Booking no lo hayan recibido.",
   "cal.block_hint": "Cerradas a la venta en todas las plataformas. Solo usted podrá modificar o eliminar este bloqueo — ningún automatismo lo toca jamás.",
   "cal.block_reason": "Motivo",
   "cal.block_reason_ph": "Obras, uso personal…",

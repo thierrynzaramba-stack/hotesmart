@@ -159,6 +159,8 @@
   "cal.block_delete": "Supprimer le blocage",
   "cal.block_delete_confirm": "Supprimer ce blocage rouvre à la vente toute la période. Continuer ?",
   "cal.block_deleted": "Blocage supprimé : nuits rouvertes.",
+  "cal.block_deleted_none": "Blocage supprimé, mais aucune nuit n’a été rouverte :",
+  "cal.block_push_failed": "NON PUBLIÉ — modification enregistrée ici, mais la plateforme ne l’a pas acceptée : Airbnb et Booking ne l’ont peut-être pas reçue.",
   "cal.block_hint": "Fermées à la vente sur toutes les plateformes. Seul vous pourrez modifier ou supprimer ce blocage — aucun automatisme n’y touche jamais.",
   "cal.block_reason": "Raison",
   "cal.block_reason_ph": "Travaux, usage personnel…",
