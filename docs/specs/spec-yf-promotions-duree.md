@@ -112,6 +112,36 @@ Booking, La bulle, Ofuro Futari : non touchés. Les remises Booking du 23
 (2 n −12 %, 3 n −17 %, 7 n −22 %, posées le 16/11) n'ont pas été touchées ce
 soir ; leur sort attend Thierry.
 
+**Booking aligné sur Airbnb le 22/11/2026 (≈ 13:15 → 14:40, Paris), à la
+demande de Thierry** (« applique les mêmes promotions que Airbnb »), extranet
+Booking du 23 (hotel_id 8985969), Promotions :
+
+| promotion (Offre Standard, tout le monde) | remise | séjour minimum | dates de séjour |
+|---|---|---|---|
+| Sejours longs 3 nuits -10 | 10 % | 3 nuits | 22/11/2026 → 19/11/2027, 164 dates exclues |
+| Sejours longs 7 nuits -25 | 25 % | 7 nuits | idem |
+| Sejours longs 14 nuits -30 | 30 % | 14 nuits | idem |
+| Sejours longs 21 nuits -35 | 35 % | 21 nuits | idem |
+| Avril 2027 2 nuits -10 | 10 % | 2 nuits | 01/04 → 30/04/2027 |
+
+Les 164 dates exclues laissent exactement les neuf périodes creuses
+d'Airbnb (à partir du 22/11) ; l'extranet les relit : 19/12→03/01,
+29→30/01, 06/02→07/03, 27/03→09/05, 15→17/05, 01/07→31/08, 30/10→01/11,
+11→14/11. Puis, sur confirmation de Thierry, les trois anciennes remises
+(−12/−17/−22 %, toute l'année, août compris) sont **désactivées** : liste
+relue, 5 promotions actives, plus aucune autre.
+
+Comme les anciennes : cumulables avec Genius et les tarifs mobiles ou
+géociblés (réglage par défaut de Booking) ; entre elles, Booking n'affiche que
+la plus forte.
+
+⚠ **Le calendrier « dates spécifiques » de l'extranet ne se pilote pas par
+script** : un clic simulé y sélectionne une PLAGE (premier clic = début,
+second = fin), la touche Ctrl simulée n'est pas reconnue. Une plage se pose
+par deux clics simulés ; une date s'exclut par un vrai Ctrl+clic. La copie
+d'une promotion (« Créer une promotion similaire ») ne reprend ni les dates ni
+la remise.
+
 ### 2 ter. Les `full_sync` d'un seul tarif sont lancés par Channex lui-même
 
 | heure (Paris) | tarif touché | lancé par |
