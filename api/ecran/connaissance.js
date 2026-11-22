@@ -38,6 +38,7 @@ const { contexteDEcran, UUID_RE } = require('../../lib/require-permission')
 const { estTitulaireDuCompte } = require('../../lib/permissions')
 const { colonneAbsente } = require('../../lib/colonne-absente')
 const { carte, faits, HORS_DES_FAITS } = require('../../lib/connaissance')
+const { normaliserHeure, COLONNE_HEURE, estCleHeure } = require('../../lib/heures-logement')
 const { BALISES, etiquetteDe, remplacerBalises } = require('../../lib/balises')
 const { isActiveStatus } = require('../../lib/bookings-snapshot-status')
 
@@ -304,6 +305,34 @@ module.exports = async (req, res) => {
         // d'enregistrer une valeur morte.
         if (HORS_DES_FAITS.has(cle)) {
           return res.status(400).json({ error: 'adresse_dans_la_fiche', message: 'L’adresse se règle dans la fiche du logement.' })
+        }
+        // ⚠ LES HEURES S'ÉCRIVENT DANS LA FICHE, ET NULLE PART AILLEURS (spec
+        // heures-logement, S1) : `properties.checkin_time` / `checkout_time` du
+        // bien désigné, résolu ci-dessus dans les biens DU COMPTE (archivés
+        // exclus), titulaire seul. Plus aucune ligne `checkin` / `checkout`
+        // n'entre dans la base : elle ne serait lue par personne.
+        // ⚠ UNE HEURE EST OBLIGATOIRE (décision de Thierry du 22 novembre
+        // 2026) : la vider est refusé, et seule la forme « HH:MM » entre en
+        // base (`lib/heures-logement.js`, S5) — jamais une heure devinée.
+        if (estCleHeure(cle)) {
+          const brute = String(corps.value == null ? '' : corps.value).trim()
+          if (!brute) return res.status(400).json({ error: 'heure_obligatoire', message: 'L’heure est obligatoire.' })
+          const heure = normaliserHeure(brute)
+          if (!heure) return res.status(400).json({ error: 'heure_illisible', message: 'Heure attendue au format HH:MM.' })
+          const { data, error } = await supabase.from('properties')
+            .update({ [COLONNE_HEURE[cle]]: heure })
+            .eq('id', choisi.id).eq('user_id', accountUserId).is('archive_le', null)
+            .select('id').maybeSingle()
+          compteur.n++
+          if (error) {
+            console.error('[ecran/connaissance] heure', error.message)
+            return res.status(500).json({ error: 'Enregistrement impossible' })
+          }
+          // Archivé entre la lecture et l'écriture : rien n'a été écrit, et on
+          // le dit plutôt que de répondre « ok ».
+          if (!data) return res.status(409).json({ error: 'bien_indisponible', message: 'Ce logement n’est plus en service.' })
+          timing()
+          return res.status(200).json({ ok: true, heure: { cle, valeur: heure } })
         }
         const valeur = String(corps.value == null ? '' : corps.value).trim()
         if (valeur.length > MAX_FAIT) return res.status(400).json({ error: 'trop_long', message: 'Valeur trop longue' })

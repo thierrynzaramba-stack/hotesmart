@@ -136,6 +136,11 @@ aujourd'hui. Écrire une ligne `checkin` ou `checkout` dans la base est refusé
 - `lib/cron-beds24-props.js` : ne remplit que le vide ; pose l'heure de la
   fiche sur l'objet du partenaire.
 - `shared/i18n` fr/en/es : ajouts de clés.
+- `lib/heures-logement.js` (nouveau) : la forme « HH:MM » (`normaliserHeure`)
+  et le plan de la reprise (`planDeReprise`), partagés par le writer, la
+  synchro Beds24 et le script.
+- `shared/ui.css` : une règle (`.kb-avertissement`, couleur d'avertissement).
+- `docs/kb/codes-acces.md` : la fenêtre du code lit l'heure de la fiche.
 - `scripts/reprendre-heures-fiche.js` (nouveau) : la reprise base → fiche, à
   blanc par défaut, `--go` pour écrire ; après la copie, les lignes `checkin` /
   `checkout` de la base sont supprimées (elles ne sont plus lues par personne).
@@ -157,6 +162,8 @@ base dans cette étape (la validation est au writer, unique).
 | Repli 15:00 d'ouverture du code d'accès | **conservé** |
 | Avertissement Airbnb après 16:00 | **nouveau** |
 | Refus de créer un logement sans heures | **étape 2** |
+| Cadenas « Hors IA » sur une ligne d'heure | **retiré** : l'heure est une donnée de la fiche, que l'IA lit comme l'adresse ; la reprise supprime ces lignes |
+| Heure « par défaut » d'un logement archivé | **conservée**, sans « À compléter » (il ne loue plus) |
 
 ## 6. Case performance
 
@@ -175,8 +182,13 @@ base dans cette étape (la validation est au writer, unique).
    `knowledge`). Le cron lit l'heure de départ dans la ligne du bien déjà lue
    (`cron-access`) au lieu d'une lecture de `knowledge` : une requête de moins
    par code.
-8. Mesure AVANT / APRÈS : relevée au banc pour la fiche et `enregistrer`
-   (nombre de requêtes par `Server-Timing`), écrite ici avant la remise.
+8. Mesure AVANT / APRÈS (banc des tests de l'endpoint et de la fiche) :
+   - fiche du logement : **1 appel**, requêtes inchangées, octets : quatre
+     clés i18n et un booléen d'écran en plus, rien en réponse serveur ;
+   - écrire une heure : **2 requêtes avant** (lecture des biens + `upsert` de
+     `knowledge`), **2 après** (lecture des biens + `update` de `properties`) ;
+   - code d'accès (rafraîchissement) : **1 lecture avant** (`knowledge`),
+     **1 après** (`properties`).
 
 ## 7. Tests attendus
 
@@ -192,6 +204,16 @@ base dans cette étape (la validation est au writer, unique).
 - Reprise : à blanc n'écrit rien ; écart montré ; forme illisible signalée ;
   `--go` copie puis supprime la ligne de base.
 - Suite complète à zéro rouge, et contre-épreuve à horloge décalée.
+
+## 7 bis. Restes datés, hors des fichiers du lot (non touchés)
+
+- `lib/cron-messages.js` (~ligne 1144) : un commentaire dit encore « la chaîne
+  `checkInStart` → `checkin_time` y est gardée » ; elle ne l'est plus
+  (`replisDuBien`, fiche seule). Commentaire seulement.
+- `lib/cron-classify.js` (~ligne 1637) : le chemin « sans le bien » (appelant
+  ancien, sans replis) donne encore à l'IA les lignes de base sauf `adresse` —
+  donc une ligne `checkin` restée dans la base, jusqu'à la reprise. Après le
+  `--go` de la reprise, il n'en reste aucune et le writer n'en crée plus.
 
 ## 8. Étape 2 (après `fix-garde-suppression-bien`)
 

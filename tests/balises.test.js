@@ -45,12 +45,15 @@ test('LE TEST QUI COMPTE : une adresse SEULEMENT dans la base est un MANQUE (la 
   assert.deepEqual(r.manquants, ['adresse'])
 })
 
-test('valeurEffective suit le remplaceur (base, fiche, défaut ; l adresse, fiche seule)', () => {
+test('valeurEffective suit le remplaceur (base, fiche, défaut ; l adresse et les heures, fiche seule)', () => {
   const { valeurEffective, replisDuBien } = require('../lib/balises')
   const replis = replisDuBien({ address: '12 rue X', checkin_time: '16:00' })
   assert.equal(valeurEffective('adresse', { adresse: 'BASE' }, replis), '12 rue X')
   assert.equal(valeurEffective('checkin', {}, replis), '16:00')
-  assert.equal(valeurEffective('checkin', { checkin: '15:00' }, replis), '15:00')
+  // ⚠ Spec heures-logement (22 novembre 2026) : les heures vivent dans la
+  // fiche. Ce test disait l'inverse (la base passait devant) — c'était la règle
+  // d'avant, elle est retournée à dessein.
+  assert.equal(valeurEffective('checkin', { checkin: '15:00' }, replis), '16:00')
   assert.equal(valeurEffective('checkout', {}, replis), '10:00')
   assert.equal(valeurEffective('wifi_nom', {}, replis), null)
   assert.equal(valeurEffective('prenom', {}, replis), null, 'une balise de la réservation n est pas une info du logement')

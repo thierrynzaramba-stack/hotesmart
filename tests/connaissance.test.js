@@ -172,11 +172,13 @@ test('LE TEST QUI COMPTE : « vide » suit le remplaceur AVEC LES REPLIS de l’
     const { segments } = enEtiquettes(`x {${cle}} y`, {}, replis)
     assert.equal(segments[1].vide, r.manquants.includes(cle), `${cle} : l’écran et l’envoi disent la même chose`)
   }
+  // Les heures vivent dans la fiche (spec heures-logement) : la valeur MONTRÉE
+  // est celle des replis, plus un « repli » sous une base vide.
   const f = faits([], { maintenant: MAINTENANT, replis })
-  assert.equal(f.find(x => x.cle === 'checkin').repli, '16:00')
-  // Une chaîne de replis (`replisDuBien`) se lit comme dans le remplaceur.
+  assert.equal(f.find(x => x.cle === 'checkin').valeur, '16:00')
+  // Une chaîne de replis se lit comme dans le remplaceur.
   const chaine = faits([], { maintenant: MAINTENANT, replis: { checkin: ['  ', '15:30'] } })
-  assert.equal(chaine.find(x => x.cle === 'checkin').repli, '15:30')
+  assert.equal(chaine.find(x => x.cle === 'checkin').valeur, '15:30')
   // Un repli blanc n'est pas une valeur (même règle que le remplaceur).
   assert.equal(faits([], { replis: { telephone_hote: '   ' } }).find(x => x.cle === 'telephone_hote').aRemplir, true)
 })

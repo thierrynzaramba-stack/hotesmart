@@ -781,9 +781,18 @@ export function accueilHtml (fiche, outils, { enEdition = null, peutModifier = t
   // refuse d'écrire pour lui (`api/ecran/connaissance.js`, biens vivants
   // seulement), et le crayon menait à « Seul le titulaire… », un refus faux.
   const modifiable = peutModifier && !(fiche.bien && fiche.bien.archive_le)
-  const lignes = (a.faits || []).map(f => (modifiable && enEdition === f.cle
+  // ⚠ « AIRBNB EN VENTE » VIENT DE LA RÈGLE DES PASTILLES, IMPORTÉE (canal
+  // actif ET mappé pour ce bien) : l'avertissement des 16:00 ne s'affiche que
+  // là où l'annonce se vend vraiment (spec heures-logement §2.1). Canaux non
+  // lus : pas d'avertissement — on ne prévient pas sur un canal qu'on ignore.
+  const airbnbActif = (pastillesDesCanaux(fiche.canaux) || [])
+    .some(p => /airbnb/i.test(String(p.ota || '')) && p.etat === 'vente')
+  // ⚠ UN LOGEMENT ARCHIVÉ N'EST PAS « À COMPLÉTER » (spec heures-logement
+  // §2.1) : il ne loue plus, et rien ne s'y complète — il montre le défaut.
+  const archive = !!(fiche.bien && fiche.bien.archive_le)
+  const lignes = (a.faits || []).map(f => (archive && f.aCompleter ? { ...f, aCompleter: false } : f)).map(f => (modifiable && enEdition === f.cle
     ? editeurInfoHtml(f, { t, esc })
-    : ligneInfoHtml(f, { t, esc, peutModifier: modifiable })))
+    : ligneInfoHtml(f, { t, esc, peutModifier: modifiable, airbnbActif })))
   return `<p class="fic-aide caption">${esc(t('fiche.accueil_aide'))}</p>
     <div class="kb-faits" data-bind="accueil">${lignes.join('')}</div>
     <p class="fic-erreur caption" data-bind="accueil-erreur" role="alert" hidden></p>`

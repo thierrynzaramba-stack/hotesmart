@@ -141,4 +141,4 @@ code n'est créé ni envoyé** ; le **code déjà en place reste valable**. Voir
 Un hôte peut ne **jamais** connecter de serrure — HôteSmart fonctionne sans.
 
 ## Fix août 2026 — claim et contrainte NOT NULL
-Le claim access_codes (INSERT pending avant appel Seam) porte starts_at/ends_at dès l'INSERT (colonnes NOT NULL). Fenêtre calculée avant le claim : starts_at = maintenant, ends_at = departure + heure checkout + 1h. Un échec de claim déclenche un incident fondateur (claim_failure).
+Le claim access_codes (INSERT pending avant appel Seam) porte starts_at/ends_at dès l'INSERT (colonnes NOT NULL). Fenêtre calculée avant le claim : starts_at = maintenant, ends_at = departure + heure checkout + 1h. L'heure de checkout est celle de la **fiche du logement** (`properties.checkout_time`, lue par `heureDeLaFiche`), et plus celle de la base de connaissance — la même que celle du message qui porte le code (spec heures-logement, 22 novembre 2026) ; fiche vide : 11:00. Un échec de claim déclenche un incident fondateur (claim_failure).

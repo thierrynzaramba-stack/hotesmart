@@ -61,14 +61,15 @@ test('les horaires du bien voyagent avec lui sur le chemin Channex', () => {
     'les horaires doivent etre SELECTIONNES, pas seulement recopies')
 })
 
-test('les horaires ont trois replis, le defaut en dernier', () => {
-  // Le CABLAGE ici, l'EFFET dans `tests/balises.test.js` (« le repli du
-  // provider sert quand la base est muette, et le defaut en dernier »).
-  // ⚠ UNE CHAINE de replis depuis la review : un `checkInStart` blanc ne doit
-  // plus masquer `checkin_time` (l'EFFET est mesure dans tests/balises.test.js).
+test('les horaires : la fiche, puis le defaut — jamais l heure du partenaire devant la fiche', () => {
+  // Le CABLAGE ici, l'EFFET dans `tests/heures-logement.test.js`.
+  // ⚠ RETOURNE PAR LA SPEC HEURES-LOGEMENT (22 novembre 2026) : ce test
+  // exigeait la chaine [checkInStart, checkin_time], qui faisait passer l'heure
+  // Beds24 devant celle de la fiche. L'heure saisie par l'hote l'emporte.
   const balises = lire('lib/balises.js')
-  assert.match(balises, /checkin: \[b\.checkInStart, b\.checkin_time\]/)
-  assert.match(balises, /checkout: \[b\.checkOutEnd, b\.checkout_time\]/)
+  assert.match(balises, /checkin: heureDeLaFiche\(b, 'checkin'\)/)
+  assert.match(balises, /checkout: heureDeLaFiche\(b, 'checkout'\)/)
+  assert.doesNotMatch(balises, /checkin: \[b\.checkInStart/)
   assert.match(balises, /defaut: '18:00'/)
   assert.match(balises, /defaut: '10:00'/)
 })

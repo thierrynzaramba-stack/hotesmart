@@ -282,14 +282,17 @@ test('property reconstruit : provider present -> routage d\'envoi correct', () =
 test('property reconstruit : les placeholders des templates sont alimentes', () => {
   const { mod } = chargerDispatcher({ events: [] })
   const ctx = {
-    propsByKey: { 'u1|12345': { name: 'Bien', provider: 'beds24', address: '1 rue A' } },
-    knowledgeByKey: { 'u1|12345': { telephone_hote: '0600000000', checkin: '15:00', checkout: '11:00' } }
+    propsByKey: { 'u1|12345': { name: 'Bien', provider: 'beds24', address: '1 rue A', checkin_time: '15:00', checkout_time: '11:00' } },
+    knowledgeByKey: { 'u1|12345': { telephone_hote: '0600000000' } }
   }
   const p = mod.propertyDepuisContexte({ user_id: 'u1', property_id: '12345', provider: 'beds24' }, ctx)
   assert.strictEqual(p.address, '1 rue A')        // {adresse}
   assert.strictEqual(p.phone, '0600000000')       // {telephone_hote}
-  assert.strictEqual(p.checkInStart, '15:00')     // {checkin} (defaut 18:00 sinon)
-  assert.strictEqual(p.checkOutEnd, '11:00')      // {checkout} (defaut 10:00 sinon)
+  // Les heures viennent de la FICHE (spec heures-logement) : {checkin} / {checkout}.
+  assert.strictEqual(p.checkin_time, '15:00')
+  assert.strictEqual(p.checkout_time, '11:00')
+  assert.strictEqual(p.checkInStart, '15:00')
+  assert.strictEqual(p.checkOutEnd, '11:00')
 })
 
 test('LE TEST QUI COMPTE : une SEULE adresse, celle de la fiche — la ligne `adresse` de la base ne passe plus devant', () => {
@@ -424,15 +427,21 @@ test('hote Beds24 SANS Connaissances : booking_confirmed = heure Beds24 synchron
   assert.notStrictEqual(p.checkInStart, '18:00', 'pas le defaut code en dur')
 })
 
-test('le formulaire Connaissances prime sur les heures synchronisees', () => {
+// ⚠ RETOURNÉ PAR LA SPEC HEURES-LOGEMENT (décision de Thierry du 22 novembre
+// 2026) : ce test s'appelait « le formulaire Connaissances prime sur les
+// heures synchronisees ». La base ne porte plus d'heure ; la FICHE est la
+// seule source, et une ligne restée dans la base ne passe plus devant.
+test('LE TEST QUI COMPTE : les heures de la FICHE — une ligne `checkin` restée dans la base ne passe plus devant', () => {
   const { mod } = chargerDispatcher({ events: [] })
   const ctx = {
     propsByKey: { 'u1|12345': { name: 'Bien', provider: 'beds24', checkin_time: '15:00', checkout_time: '11:00' } },
     knowledgeByKey: { 'u1|12345': { checkin: '16:30', checkout: '10:30' } }
   }
   const p = mod.propertyDepuisContexte({ user_id: 'u1', property_id: '12345' }, ctx)
-  assert.strictEqual(p.checkInStart, '16:30')
-  assert.strictEqual(p.checkOutEnd, '10:30')
+  assert.strictEqual(p.checkInStart, '15:00')
+  assert.strictEqual(p.checkOutEnd, '11:00')
+  const { replisDuBien } = require('../lib/balises')
+  assert.deepStrictEqual([replisDuBien(p).checkin, replisDuBien(p).checkout], ['15:00', '11:00'])
 })
 
 test('ni Connaissances ni heures synchronisees : null (defauts appliques en aval)', () => {

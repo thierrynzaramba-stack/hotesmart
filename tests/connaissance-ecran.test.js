@@ -397,14 +397,16 @@ test('LE TEST QUI COMPTE : un fait vidé est SUPPRIMÉ, jamais gardé avec une v
 
 test('un fait rempli s écrit par sa CLÉ (upsert sur l identité du fait), date de vérification posée', async () => {
   const r = await appeler({
-    methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'checkin', value: ' 17:00 ' },
+    // La clé d'exemple était `checkin` : les heures vivent désormais dans la
+    // fiche (spec heures-logement), `wifi_nom` garde l'intention du test.
+    methode: 'POST', corps: { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'wifi_nom', value: ' RESEAU ' },
     repondre: (q) => (q.table === 'properties' ? { data: BIENS, error: null } : { data: [{ id: 'f1' }], error: null })
   })
   assert.equal(r.statut, 200)
   const q = r.requetes.find(x => x.table === 'knowledge')
   assert.equal(q.op, 'upsert')
   assert.equal(q.options.onConflict, 'user_id,property_id,type,key')
-  assert.equal(q.charge.value, '17:00')
+  assert.equal(q.charge.value, 'RESEAU')
   assert.ok(q.charge.verifie_le)
   // ⚠ L'IDENTITÉ DU FAIT EST DANS LA CHARGE : un upsert sans `user_id` ou sur
   // un autre bien écrirait chez quelqu'un d'autre (constat de review : rien ne
@@ -412,7 +414,7 @@ test('un fait rempli s écrit par sa CLÉ (upsert sur l identité du fait), date
   assert.equal(q.charge.user_id, TITULAIRE)
   assert.equal(q.charge.property_id, 'P1')
   assert.equal(q.charge.type, 'fixed')
-  assert.equal(q.charge.key, 'checkin')
+  assert.equal(q.charge.key, 'wifi_nom')
 })
 
 test('supprimer vise UNE ligne du compte et du bien, et dit quand elle n existe pas', async () => {
@@ -441,7 +443,7 @@ test('LE TEST QUI COMPTE : la migration absente se dit en écriture (503), avec 
   // api/sms.js et lib/email-guestflow.js la reconnaissent déjà.
   for (const op of ['update', 'insert', 'upsert']) {
     const corps = op === 'upsert'
-      ? { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'checkin', value: '17:00' }
+      ? { action: 'enregistrer', bien: 'P1', type: 'fixed', key: 'wifi_nom', value: 'RESEAU' }
       : { action: 'enregistrer', bien: 'P1', type: 'faq', key: 'S', value: 'T', lisible_par_ia: false, ...(op === 'update' ? { id: 'a1' } : {}) }
     const r = await appeler({
       methode: 'POST', corps,
@@ -515,11 +517,17 @@ test('LE TEST QUI COMPTE : l écran et l aperçu suivent la FICHE du logement qu
   assert.equal(c.apercu, 'Au 9 rue Fiche dès 16:00', 'ce que le voyageur recevra')
   assert.ok(c.segments.filter(s => s.cle).every(s => s.vide === false), 'pas d étiquette rouge : la fiche les remplit')
   // L'adresse n'est plus une info de la base (une seule adresse, celle de la
-  // fiche) ; l'heure d'arrivée, si, avec la fiche en repli.
+  // fiche) ; l'heure d'arrivée non plus (spec heures-logement) : elle EST
+  // celle de la fiche, et le départ, vide, est « À compléter ».
   assert.equal(r.charge.faits.find(f => f.cle === 'adresse'), undefined)
   const checkin = r.charge.faits.find(f => f.cle === 'checkin')
   assert.equal(checkin.aRemplir, false)
-  assert.equal(checkin.repli, '16:00')
+  assert.equal(checkin.valeur, '16:00')
+  assert.equal(checkin.aCompleter, false)
+  assert.equal(checkin.fiche, true)
+  const checkout = r.charge.faits.find(f => f.cle === 'checkout')
+  assert.equal(checkout.aCompleter, true)
+  assert.equal(checkout.defaut, '10:00')
 })
 
 test('LE TEST QUI COMPTE : écrire une ligne `adresse` dans la base est refusé (la fiche fait foi)', async () => {
@@ -590,4 +598,49 @@ test('et ne crée aucun droit : un bien du compte où l on est membre reste refu
   const eqDe = (q, c) => (q.filtres.find(x => x[0] === 'eq' && x[1] === c) || [])[2]
   assert.ok(!autre.requetes.some(q => q.table === 'properties' && eqDe(q, 'user_id') === MEMBRE && !eqDe(q, 'id')),
     'les biens du membre ont été lus : la bascule a eu lieu vers un compte que le bien ne désigne pas')
+})
+
+// ─── Les heures du logement : écrites dans la FICHE (spec heures-logement) ──
+test('LE TEST QUI COMPTE : une heure s écrit dans la FICHE du bien désigné, au format HH:MM, jamais dans la base', async () => {
+  const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'checkin', value: '17h30' }, repondre: base() })
+  assert.equal(r.statut, 200)
+  assert.deepEqual(r.charge.heure, { cle: 'checkin', valeur: '17:30' })
+  const ecrite = r.requetes.find(q => q.table === 'properties' && q.op === 'update')
+  assert.deepEqual(ecrite.charge, { checkin_time: '17:30' })
+  assert.equal(filtre(ecrite, 'id'), 'u-1')
+  assert.equal(filtre(ecrite, 'user_id'), TITULAIRE, 'dans le compte, jamais ailleurs')
+  assert.ok(ecrite.filtres.some(f => f[0] === 'is' && f[1] === 'archive_le' && f[2] === null), 'un logement en service seulement')
+  assert.equal(r.requetes.filter(q => q.table === 'knowledge').length, 0, 'plus aucune ligne d heure dans la base')
+  const depart = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P2', type: 'fixed', key: 'checkout', value: '10:00' }, repondre: base() })
+  assert.deepEqual(depart.requetes.find(q => q.op === 'update').charge, { checkout_time: '10:00' })
+})
+
+test('LE TEST QUI COMPTE : vider une heure est refusé, une forme illisible aussi — rien n est écrit', async () => {
+  for (const [value, code] of [['', 'heure_obligatoire'], ['   ', 'heure_obligatoire'], ['25:00', 'heure_illisible'], ['vers 18h', 'heure_illisible']]) {
+    const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'checkin', value }, repondre: base() })
+    assert.equal(r.statut, 400, JSON.stringify(value))
+    assert.equal(r.charge.error, code, JSON.stringify(value))
+    assert.equal(r.requetes.filter(q => q.op !== 'select').length, 0, `aucune écriture pour ${JSON.stringify(value)}`)
+  }
+})
+
+test('une heure sur un bien d un autre compte : 403, rien n est écrit', async () => {
+  const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bienId: 'uuid-d-un-autre-compte', type: 'fixed', key: 'checkout', value: '10:00' }, repondre: base() })
+  assert.equal(r.statut, 403)
+  assert.equal(r.requetes.filter(q => q.op === 'update').length, 0)
+})
+
+test('un membre délégué ne règle pas les heures : 403 avant toute lecture', async () => {
+  const r = await appeler({ methode: 'POST', titulaire: false, corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'checkin', value: '16:00' }, repondre: base() })
+  assert.equal(r.statut, 403)
+  assert.equal(r.requetes.filter(q => q.op === 'update').length, 0)
+})
+
+test('logement archivé entre la lecture et l écriture : 409, pas un « ok » mensonger', async () => {
+  const r = await appeler({
+    methode: 'POST', corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'checkin', value: '16:00' },
+    repondre: (q) => (q.table === 'properties' && q.op === 'update' ? { data: null, error: null } : base()(q))
+  })
+  assert.equal(r.statut, 409)
+  assert.equal(r.charge.error, 'bien_indisponible')
 })

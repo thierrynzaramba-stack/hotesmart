@@ -462,6 +462,8 @@ h1, h2, h3, p { margin: 0; }
 .kb-fait__libelle { display: flex; flex-direction: column; flex: 0 0 38%; font-size: var(--fs-small); color: var(--muted); }
 .kb-fait__valeur { flex: 1; min-width: 0; font-size: var(--fs-small); overflow-wrap: anywhere; }
 .kb-a-remplir { color: var(--danger); font-weight: var(--fw-semibold); }
+/* Heures du logement : l'arrivée après la limite d'Airbnb (spec heures-logement §2.1). */
+.kb-avertissement { margin: 2px 0 6px; color: var(--warn); }
 .kb-fait--edition { flex-wrap: wrap; }
 /* Accueil du voyageur (fiche du logement) : le bloc porte déjà sa marge. */
 .fic-bloc .kb-faits { padding: 0; }

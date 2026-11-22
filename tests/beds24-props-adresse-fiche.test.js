@@ -48,7 +48,7 @@ function charger ({ lignes, archives = [], archivesIllisibles = false, erreurAdr
         // code laissait le test « bornee, par compte » vert.
         const data = (filtre.user_id === 'u1' && filtre.provider === 'beds24' && refs)
           ? Object.entries(lignes).filter(([ref]) => refs.includes(ref))
-            .map(([ref, l]) => ({ provider_property_id: ref, address: l.address, zip_code: l.zip_code, city: l.city }))
+            .map(([ref, l]) => ({ provider_property_id: ref, address: l.address, zip_code: l.zip_code, city: l.city, checkin_time: l.checkin_time, checkout_time: l.checkout_time }))
           : []
         return Promise.resolve({ data, error: null, colonnes }).then(res, rej)
       },
@@ -131,7 +131,8 @@ test('une seule lecture des adresses par compte, bornee aux biens rendus par Bed
   const { mod, selects, lectures } = charger({ lignes: { 111: { id: 'a', active_at: 'x', address: 'A' }, 112: { id: 'b', active_at: 'x', address: 'B' }, 999: { id: 'z', active_at: 'x', address: 'Z' } } })
   const biens = [{ id: 111 }, { id: 112 }]
   await mod.materializeBeds24Properties('u1', biens, {})
-  assert.strictEqual(selects.filter(c => c === 'provider_property_id, address, zip_code, city').length, 1)
+  // Les heures de la fiche voyagent dans la MÊME lecture (spec heures-logement, S4).
+  assert.strictEqual(selects.filter(c => c === 'provider_property_id, address, zip_code, city, checkin_time, checkout_time').length, 1)
   const lecture = lectures.find(l => l.refs)
   assert.deepStrictEqual(lecture, { user_id: 'u1', provider: 'beds24', refs: ['111', '112'] },
     'la lecture est bornee au compte, au provider et aux biens rendus par l API')
@@ -151,4 +152,28 @@ test('la decoration Beds24 assemble la rue, le code postal et la ville de la fic
   const biens = [{ id: 111, address: 'Adresse Beds24' }]
   await mod.materializeBeds24Properties('u1', biens, {})
   assert.strictEqual(biens[0].adresseFiche, '4 rue du bourg vieux, 65200 Bagnères-de-Bigorre')
+})
+
+// ─── Les heures de la fiche, posées sur l'objet Beds24 (spec heures-logement, S4)
+test('LE TEST QUI COMPTE : l objet Beds24 porte les heures de la FICHE, et elles passent devant celles de Beds24', async () => {
+  const { replisDuBien, remplacerBalises } = require('../lib/balises')
+  const { mod } = charger({ lignes: { 111: { id: 'uuid-1', active_at: 'x', address: 'A', checkin_time: '17:00', checkout_time: '10:30' } } })
+  const biens = [{ id: 111, name: 'Gite', checkInStart: '15:00', checkOutEnd: '11:00' }]
+  await mod.materializeBeds24Properties('u1', biens, {})
+  assert.deepStrictEqual([biens[0].checkinFiche, biens[0].checkoutFiche], ['17:00', '10:30'])
+  assert.strictEqual(remplacerBalises('{checkin}-{checkout}', { connaissance: {}, replis: replisDuBien(biens[0]) }).texte, '17:00-10:30')
+})
+
+test('fiche sans heure : l heure Beds24 sert dès ce cycle (elle remplira la fiche), au format HH:MM', async () => {
+  const { mod } = charger({ lignes: { 111: { id: 'uuid-1', active_at: 'x', address: 'A', checkin_time: null, checkout_time: '' } } })
+  const biens = [{ id: 111, name: 'Gite', checkInStart: '15:00:00', checkOutEnd: '11h' }]
+  await mod.materializeBeds24Properties('u1', biens, {})
+  assert.deepStrictEqual([biens[0].checkinFiche, biens[0].checkoutFiche], ['15:00', '11:00'])
+})
+
+test('fiche illisible (lecture en échec) : l heure Beds24 reste le repli, jamais le défaut à sa place', async () => {
+  const { mod } = charger({ lignes: { 111: { id: 'uuid-1', active_at: 'x', address: 'X' } }, erreurAdresses: { message: 'panne' } })
+  const biens = [{ id: 111, name: 'Gite', checkInStart: '15:00', checkOutEnd: '11:00' }]
+  await mod.materializeBeds24Properties('u1', biens, {})
+  assert.deepStrictEqual([biens[0].checkinFiche, biens[0].checkoutFiche], ['15:00', '11:00'])
 })

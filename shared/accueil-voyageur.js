@@ -17,6 +17,17 @@
 
 export const ACC_MAX_VALEUR = 1000
 
+// ⚠ AIRBNB : L'ARRIVÉE AU PLUS TARD À 16:00 (décision de Thierry du
+// 22 novembre 2026, spec heures-logement §2.1). Un AVERTISSEMENT, jamais un
+// refus : l'enregistrement reste possible. Seul endroit du dépôt qui porte
+// cette limite — la fiche, qui connaît les canaux, la passe à ce module.
+export const ARRIVEE_AIRBNB_MAX = '16:00'
+/** L'heure d'arrivée (« HH:MM ») est-elle après la limite d'Airbnb ? */
+export function arriveeApresLimiteAirbnb (heure) {
+  const h = String(heure || '').trim()
+  return /^\d{2}:\d{2}$/.test(h) && h > ARRIVEE_AIRBNB_MAX
+}
+
 const iconeAccueil = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
 
 /** Le libellé d'une info : son étiquette, ou la clé pour une info sans balise. */
@@ -31,6 +42,13 @@ export function libelleInfo (f) {
  */
 export function valeurInfoHtml (f, { t, esc }) {
   const vide = !String(f.valeur || '').trim()
+  // ⚠ UNE HEURE DE LA FICHE ABSENTE EST « À COMPLÉTER », EN ROUGE, ET L'ÉCRAN
+  // DIT CE QUE LE VOYAGEUR REÇOIT D'ICI LÀ (spec heures-logement §2.1) : le
+  // défaut, qui part vraiment. Ni « À remplir » (ce n'est pas un trou), ni le
+  // défaut seul (l'heure est obligatoire).
+  if (f.aCompleter) {
+    return `<span class="kb-fait__valeur"><span class="kb-a-remplir">${esc(t('acc.to_complete'))}</span> <span class="caption muted">${esc(t('acc.guest_gets_default', { heure: f.defaut || '' }))}</span></span>`
+  }
   if (f.aRemplir) return `<span class="kb-fait__valeur kb-a-remplir">${esc(t('kb.to_fill'))}</span>`
   if (vide && f.repli) {
     return `<span class="kb-fait__valeur">${esc(f.repli)} <span class="caption muted">${esc(t('acc.synced'))}</span></span>`
@@ -41,8 +59,10 @@ export function valeurInfoHtml (f, { t, esc }) {
   return `<span class="kb-fait__valeur">${esc(f.valeur)}</span>`
 }
 
-/** Une ligne en lecture, avec son crayon quand l'hôte peut écrire. */
-export function ligneInfoHtml (f, { t, esc, peutModifier = true }) {
+/** Une ligne en lecture, avec son crayon quand l'hôte peut écrire.
+ *  `airbnbActif` : le logement a un canal Airbnb actif et mappé (la fiche le
+ *  sait, `fiche.canaux`) — l'heure d'arrivée après 16:00 s'y signale. */
+export function ligneInfoHtml (f, { t, esc, peutModifier = true, airbnbActif = false }) {
   const libelle = esc(libelleInfo(f))
   const sous = f.sansBalise ? `<span class="caption muted">${esc(t('kb.ai_only'))}</span>` : ''
   const verrou = f.horsIa ? `<span class="kb-badge kb-badge--horsia">${iconeAccueil('i-lock')}${esc(t('kb.no_ai'))}</span>` : ''
@@ -50,17 +70,27 @@ export function ligneInfoHtml (f, { t, esc, peutModifier = true }) {
     ? `<button type="button" class="kb-icone" data-acc-modifier="${esc(f.cle)}"
         aria-label="${esc(t('kb.edit_info', { info: libelleInfo(f) }))}">${iconeAccueil('i-edit')}</button>`
     : ''
+  const avertissement = airbnbActif && f.cle === 'checkin' && arriveeApresLimiteAirbnb(f.valeur)
+    ? `<p class="caption kb-avertissement" data-acc-airbnb>${esc(t('acc.airbnb_16h'))}</p>`
+    : ''
   return `<div class="kb-fait" data-acc-ligne="${esc(f.cle)}">
       <span class="kb-fait__libelle">${libelle}${sous}</span>${valeurInfoHtml(f, { t, esc })}${verrou}${crayon}
-    </div>`
+    </div>${avertissement}`
 }
 
 /** L'éditeur d'une info, au même endroit que sa ligne. */
 export function editeurInfoHtml (f, { t, esc }) {
   const id = `acc-saisie-${String(f.cle).replace(/[^a-z0-9_-]/gi, '')}`
+  // ⚠ UNE HEURE DE LA FICHE SE SAISIT DANS UN CHAMP HEURE (« HH:MM »), et le
+  // vide est refusé par le serveur (`heure_obligatoire`) : l'aide le dit AVANT
+  // le clic, plutôt qu'une erreur générique après.
+  const saisie = f.fiche
+    ? `<input id="${id}" type="time" step="60" required data-acc-saisie value="${esc(f.valeur || '')}" autocomplete="off">`
+    : `<input id="${id}" data-acc-saisie value="${esc(f.valeur || '')}" maxlength="${ACC_MAX_VALEUR}" autocomplete="off">`
+  const aide = f.fiche ? `<p class="caption muted">${esc(t('acc.hour_required'))}</p>` : ''
   return `<div class="kb-fait kb-fait--edition" data-acc-edition="${esc(f.cle)}">
       <label class="kb-fait__libelle" for="${id}">${esc(libelleInfo(f))}</label>
-      <input id="${id}" data-acc-saisie value="${esc(f.valeur || '')}" maxlength="${ACC_MAX_VALEUR}" autocomplete="off">
+      ${saisie}${aide}
       <div class="kb-actions">
         <button type="button" class="btn btn--primary" data-acc-enregistrer="${esc(f.cle)}">${esc(t('kb.save'))}</button>
         <button type="button" class="kb-lien" data-acc-annuler>${esc(t('kb.cancel'))}</button>
