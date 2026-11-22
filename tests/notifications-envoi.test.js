@@ -331,10 +331,10 @@ test('des réglages illisibles ne rendent personne muet ; un événement sans te
   } finally { textes.rediger = rediger }
 })
 
-test('lot 2c-2 : chacun des quinze événements du catalogue a son texte, dans les trois langues, et son essai', () => {
+test('lot 2c-2 : chacun des seize événements du catalogue a son texte, dans les trois langues, et son essai', () => {
   const { EVENEMENTS } = require('../lib/notifications/catalogue')
   const codes = EVENEMENTS.map(e => e.code)
-  assert.strictEqual(codes.length, 15)
+  assert.strictEqual(codes.length, 16)
   for (const code of codes) {
     for (const l of ['fr', 'en', 'es']) {
       const t = textes.rediger(code, l, textes.exemple(code, MIDI))

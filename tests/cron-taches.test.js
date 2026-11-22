@@ -40,7 +40,12 @@ const TACHES = [
   'revenus_derives',
   'poll_avis_beds24', 'classification_avis',
   'detection_messages', 'rattacher_menages', 'sync_menages', 'expirer_offres',
-  'propositions_dues', 'relance_validation', 'tentatives_bloquees',
+  'propositions_dues', 'relance_validation',
+  // ⚠ AJOUTEE LE 22 NOVEMBRE 2026 (PWA lot 4) : le ménage pas fait 30 minutes
+  // avant l'heure d'arrivée du logement. Juste après les relances, ses
+  // voisines du domaine ménage ; une lecture par cycle les jours sans arrivée.
+  'menage_pas_fait',
+  'tentatives_bloquees',
   'purge_tentatives', 'pilote_yieldflow',
   // 28 octobre 2026 — le releve mensuel des comparables
   // (spec-revenus-comparables). Place APRES le pilote, comme lui une tache
