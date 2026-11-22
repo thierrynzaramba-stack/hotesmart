@@ -1642,7 +1642,7 @@
   "charges.masse_fin": "{n} invoices uploaded.",
   "charges.masse_refus": "{n} rejected: {liste}.",
   "charges.masse_refus_un": "{nom} ({motif})",
-  "charges.parcourir": "Review one by one",
+  "charges.parcourir": "Handle all",
   "charges.parcours_compteur": "{i} of {n}",
   "charges.parcours_vide": "No invoice to review.",
   "charges.parcours_fin": "All invoices to review have been seen.",
