@@ -64,7 +64,8 @@ Choix par défaut posés par cette spec (Thierry peut les renverser) :
   fil — `user_id`, `provider`, `property_id` (clé provider), `provider_thread_id`,
   `booking_id` (nul = demande), `titre` (le nom du voyageur chez Channex),
   `ota`, `ferme`, `maj_le`. Unicité `(provider, provider_thread_id)`. RLS
-  active, lecture par le propriétaire, écriture par la clé de service seule.
+  active ; lecture par la même règle que `messages` (domaine `messages`, par
+  bien) ; écriture par la clé de service seule.
   Elle porte le NOM d'une demande, que les messages ne portent pas.
 - **Clé de conversation d'une demande : `demande:<provider_thread_id>`.** Elle
   sert partout où un `bookId` sert de clé d'écran ou de tâche
