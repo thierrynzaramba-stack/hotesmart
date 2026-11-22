@@ -6,8 +6,6 @@
 //   envoi      { type, octets, origine }  -> { id, url }   (URL d'envoi signée)
 //   confirmer  { id }                     -> la charge, lue par l'IA si possible
 //   valider    { id, champs }             -> la charge validée
-//   valider_lot { ids }                    -> lot 8c : les factures complètes,
-//                                            validées telles que lues (≤ 20)
 //   trancher   { id }                     -> le signal « Vérifier » tranché
 //   supprimer  { id }                     -> Q11 : à tout moment
 //   consulter  { id }                     -> URL de lecture de 60 s
@@ -34,7 +32,7 @@ const { lireDocument } = require('../lib/charges/lecture')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
-const ACTIONS = new Set(['envoi', 'confirmer', 'valider', 'valider_lot', 'trancher', 'supprimer', 'consulter', 'credit_importer', 'credit_supprimer',
+const ACTIONS = new Set(['envoi', 'confirmer', 'valider', 'trancher', 'supprimer', 'consulter', 'credit_importer', 'credit_supprimer',
   // Lot 8b (§14.21.3) : un seul bouton « Ajouter », le tableau reconnu tout seul.
   'tableau_importer', 'tableau_reconnaitre', 'tableau_en_facture'])
 // Un tableau d'amortissement en base64 : 2 Mo de PDF font 2,7 Mo de texte, sous
@@ -132,14 +130,6 @@ module.exports = async function handler (req, res) {
         compte, valideur: garde.userId, id: corps.id, champs: corps.champs
       })
       return rendre(res, r, x => ({ charge: x.charge }))
-    }
-
-    if (action === 'valider_lot') {
-      const r = await charges.validerLot(supabase, { compte, valideur: garde.userId, ids: corps.ids })
-      if (!r.ok) {
-        return res.status(r.statut || 500).json({ error: r.code || 'erreur', enregistrees: r.enregistrees || [], refusees: r.refusees || [] })
-      }
-      return res.status(200).json({ ok: true, enregistrees: r.enregistrees, refusees: r.refusees })
     }
 
     if (action === 'trancher') {

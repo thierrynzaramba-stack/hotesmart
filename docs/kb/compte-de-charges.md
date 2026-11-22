@@ -55,18 +55,20 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 
 | Fichier | Rôle |
 |---|---|
-| `lib/charges.js` | `PLAFOND_LECTURES_JOUR` = 100 ; l'entité reste reconnue à la lecture (vide dans le doute) ; `estComplete`, `validerLot` (≤ 20 par appel, chacune par `valider`). |
-| `api/charges.js` | action `valider_lot { ids }`. |
+| `lib/charges.js` | `PLAFOND_LECTURES_JOUR` = 100 ; l'entité reste reconnue à la lecture (vide dans le doute). |
 | `lib/charges/ecran.js`, `api/ecran/charges.js` | « À traiter » par curseur (`suite_a_traiter`, dette 153) ; le parcours `parcours=debut|<curseur>` (« À vérifier », ordre de dépôt). |
-| `shared/charges-vue.js` | Dépôt de 50 fichiers au plus, un par un ; « Vérifier une par une » ; « Enregistrer les factures complètes » ; facture à droite de la fiche à l'ordinateur (`deps.ecranLarge`). |
+| `shared/charges-vue.js` | Dépôt de 50 fichiers au plus, un par un, suivi par une fenêtre de chargement ; puis la vérification une par une du dépôt s'ouvre d'elle-même ; « Vérifier une par une » pour toute la file ; facture à droite de la fiche à l'ordinateur (`deps.ecranLarge`). « Enregistrer les factures complètes » est retiré en recette (spec §14.22.9). |
 
 ## Règles à ne pas perdre
 
 - **L'entité d'une facture est reconnue, ou laissée vide dans le doute**
   (décision de Thierry, recette du lot 8c) : il la choisit alors pour
-  enregistrer. « Enregistrer tout » ne fait rien d'autre que `valider`,
-  facture par facture, avec les valeurs lues ; une facture incomplète ou
-  signalée en doublon reste à faire une par une.
+  enregistrer.
+
+- **Chaque facture se vérifie, une par une** (décision de Thierry, recette du
+  lot 8c) : pas d'enregistrement en bloc. Après un dépôt, la vérification
+  s'ouvre d'elle-même sur les factures de CE dépôt, dans l'ordre ; un refus
+  se lit d'abord dans la fenêtre de chargement, jamais caché par la fiche.
 
 - **Un tableau reconnu n'appelle jamais l'IA et ne porte aucun montant**
   (statut `tableau`, hors de tout total). C'est l'import qui crée le crédit,

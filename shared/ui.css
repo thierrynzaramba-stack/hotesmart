@@ -2381,6 +2381,25 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
   .chg-fiche--double[open] { display: flex; }
   .chg-fiche__doc { display: none; }
 }
+/* La fenêtre de chargement d'un dépôt (recette du lot 8c, décision de
+   Thierry) : au centre, à l'ordinateur comme au téléphone ; une roue qui
+   tourne et une barre qui avance. */
+.chg-chargement { border: 0; border-radius: var(--radius-card); padding: 24px; width: min(400px, calc(100% - 32px)); background: var(--surface); color: var(--ink); box-shadow: 0 12px 32px rgba(0, 0, 0, .16); }
+.chg-chargement::backdrop { background: var(--scrim); }
+.chg-chargement[open] { display: flex; flex-direction: column; gap: var(--gap-s); }
+.chg-chargement .chg-h2 { margin: 0; }
+.chg-chargement__compte { margin: 0; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.chg-chargement__compte:empty { display: none; }
+.chg-chargement__etape { display: flex; align-items: center; gap: var(--gap-s); margin: 0; }
+.chg-chargement__nom { margin: 0; font-size: var(--fs-caption); color: var(--muted); overflow-wrap: anywhere; }
+.chg-chargement__roue { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--ink); animation: chg-tourne .8s linear infinite; }
+@keyframes chg-tourne { to { transform: rotate(360deg); } }
+.chg-chargement__barre { width: 100%; height: 8px; accent-color: var(--ink); }
+.chg-chargement__fin p { margin: 0; }
+.chg-chargement__gestes { display: flex; justify-content: flex-end; margin-top: var(--gap-s); }
+@media (prefers-reduced-motion: reduce) {
+  .chg-chargement__roue { animation: none; border-top-color: var(--line); }
+}
 
 /* ── Lot 7a : la période d'une facture, dans la fiche ───────────────────── */
 .chg-periode { border: 0; margin: 0; padding: 0; min-width: 0; }
