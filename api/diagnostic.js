@@ -2,7 +2,7 @@
 // Endpoint de diagnostic (page pages/diagnostic.html). LECTURE SEULE.
 // ?check=channel        -> teste la connexion live au gestionnaire de canaux
 // ?check=channel_detail -> canaux d'UN bien (mappings, is_active)
-// ?check=demandes       -> fils de messages d'UN bien : demandes Airbnb (dette 129)
+// ?check=demandes       -> fils de messages d'UN bien : demandes Airbnb (dette 129, fondateur)
 //
 // ⚠ FUITE ENTRE COMPTES CORRIGEE (2 septembre 2026). Cet endpoint ne verifiait
 // QUE la validite de la session, jamais l'appartenance des donnees demandees :
@@ -218,26 +218,48 @@ async function router(req, res) {
 
   // ?check=demandes&property_id=<bien>
   // DETTE 129, LOT 1, ETAPE 0 — MESURER AVANT D'ECRIRE. LECTURE SEULE, chez
-  // Channex comme dans le coeur. Dit, pour UN bien : combien de demandes (fils
-  // sans reservation), combien de fils devenus reservations dont les messages
-  // dorment sans reservation chez nous, et ce que le rattrapage saura rattacher.
-  // docs/specs/spec-demandes-airbnb.md §3.
+  // le gestionnaire de canaux comme dans le coeur. Dit, pour UN bien : combien
+  // de demandes (fils sans reservation), combien de fils devenus reservations
+  // dont les messages dorment sans reservation chez nous, et ce que le
+  // rattrapage saura rattacher. docs/specs/spec-demandes-airbnb.md §3.
   if (check === 'demandes') {
+    // ⚠ UN PARAMETRE REPETE N'EST PAS UNE EXCEPTION (review 1, M2) : `?a=1&a=2`
+    // arrive en tableau, et `.trim` levait avant la garde — un 500 parti sans
+    // `private, no-store`. On prend la premiere valeur, la garde juge le reste.
+    const brut = [].concat(req.query.property_id == null ? '' : req.query.property_id)[0]
     // Le bien vient du CLIENT : revalide contre le perimetre de l'appelant
     // (404 autre compte, 403 hors perimetre) AVANT tout appel au partenaire.
-    // Domaine `messages` : ce qu'on lit, ce sont les fils de messagerie du bien.
     const garde = await requirePermission(req, res, {
       domaine: 'messages', niveau: 'read',
-      bien: (req.query.property_id || '').trim(), bienRequis: true
+      bien: String(brut == null ? '' : brut).trim(), bienRequis: true
     })
     if (!garde.ok) return
-    const bien = garde.bien
-    if (bien.provider !== 'channex') {
-      return res.status(400).json({ error: 'Ce bien n\'est pas relié par Channex : il n\'a pas de fils de messages' })
+    // ⚠ RESERVE AU FONDATEUR (review 1, S2). Ce controle tire jusqu'a plusieurs
+    // centaines d'appels sur la cle du gestionnaire de canaux, PARTAGEE par
+    // tous les clients : un outil de mesure de l'etape 0, pas une fonction
+    // d'hote. Meme porte que `cron_stats`, et la meme raison de dire sa cause.
+    if (!fondateur()) {
+      return res.status(403).json({ error: 'Réservé au fondateur', motif: 'FOUNDER_EMAIL absent de la configuration' })
     }
+    if (String(garde.email || '').trim().toLowerCase() !== fondateur()) {
+      return res.status(403).json({ error: 'Réservé au fondateur' })
+    }
+    const bien = garde.bien
     const { getProvider } = require('../lib/channels')
     const { filsADetailler, mesurer } = require('../lib/demandes/mesure')
-    const provider = getProvider('channex')
+    // ⚠ PAR LE PROVIDER DU BIEN, JAMAIS NOMME EN DUR (review 1, M1) : un
+    // provider sans notion de fil le dit par l'absence du lecteur.
+    let provider = null
+    try { provider = getProvider(bien.provider) } catch { provider = null }
+    if (!provider || typeof provider.listerFils !== 'function' || typeof provider.idsDesMessagesDuFil !== 'function') {
+      return res.status(400).json({ error: 'Le gestionnaire de canaux de ce bien n\'a pas de fils de messages' })
+    }
+    // ⚠ UNE ECHEANCE, PAS UN ESPOIR (review 1, C1). Les appels au partenaire
+    // rejouent les 429 et les 5xx avec des attentes croissantes : sans borne,
+    // une serie de refus finit en FUNCTION_INVOCATION_TIMEOUT, corps vide —
+    // ce que l'en-tete de ce fichier interdit. Depassee, la mesure s'arrete et
+    // le DIT (`interrompu`).
+    const echeance = Date.now() + 10000
 
     // 1. Les lignes du coeur SANS reservation de ce bien. ⚠ PAR CURSEUR :
     // PostgREST rend 1000 lignes sans erreur, et une mesure tronquee en
@@ -262,19 +284,49 @@ async function router(req, res) {
       curseur = rangs[rangs.length - 1].id
     }
 
-    // 2. Les fils du bien chez Channex.
-    const liste = await provider.listerFils({ propertyId: bien.provider_property_id })
-    if (!liste.ok) return res.status(502).json({ ok: false, error: 'Fils illisibles chez le partenaire', motif: liste.erreur })
+    // 2. Les copies import AVEC reservation aux instants des copies webhook
+    // (review 1, J1) : la jumelle d'un message de demande peut avoir ete
+    // importee apres que le voyageur a reserve. Par paquets de 100 instants.
+    const instantsWebhook = [...new Set(lignes.filter(l => !l.provider_msg_id && l.sent_at).map(l => l.sent_at))]
+    const importAvecResa = []
+    let jumellesCompletes = true
+    for (let i = 0; i < instantsWebhook.length; i += 100) {
+      const { data, error } = await supabase.from('messages')
+        .select('provider_msg_id, direction, sent_at, body')
+        .eq('user_id', bien.user_id)
+        .eq('property_id', bien.provider_property_id)
+        .not('booking_id', 'is', null)
+        .not('provider_msg_id', 'is', null)
+        .in('sent_at', instantsWebhook.slice(i, i + 100))
+        .limit(1000)
+      if (error) return res.status(503).json({ ok: false, error: 'Lecture du cœur impossible', detail: error.message })
+      importAvecResa.push(...(data || []))
+      // Cent instants portent quelques lignes : mille dirait une lecture coupee.
+      if ((data || []).length >= 1000) jumellesCompletes = false
+    }
 
-    // 3. Les identifiants de messages des fils utiles, cinq appels a la fois.
-    const plusAncien = lignes.reduce((min, l) => (l.sent_at && (!min || l.sent_at < min)) ? l.sent_at : min, null)
-    const choix = filsADetailler(liste.fils, { depuis: plusAncien, max: 60 })
+    // 3. Les fils du bien chez le partenaire.
+    const liste = await provider.listerFils({ propertyId: bien.provider_property_id, echeance })
+    if (!liste.ok) return res.status(502).json({ ok: false, error: 'Fils illisibles chez le gestionnaire de canaux', motif: liste.erreur })
+
+    // 4. Les identifiants de messages des fils utiles, cinq appels a la fois.
+    // Le plus ancien instant se calcule en INSTANTS, pas en chaines.
+    let plusAncien = null
+    for (const l of lignes) {
+      const t = Date.parse(l.sent_at)
+      if (Number.isFinite(t) && (plusAncien == null || t < plusAncien)) plusAncien = t
+    }
+    const choix = filsADetailler(liste.fils, { depuis: plusAncien == null ? null : new Date(plusAncien).toISOString(), max: 60 })
     const details = new Map()
     const file = choix.choisis.slice()
+    let interrompu = Boolean(liste.interrompu)
     await Promise.all(Array.from({ length: 5 }, async () => {
       while (file.length) {
+        if (Date.now() > echeance) { interrompu = true; return }
         const f = file.shift()
-        details.set(f.id, await provider.idsDesMessagesDuFil(f.id))
+        const d = await provider.idsDesMessagesDuFil(f.id, { echeance })
+        if (d.interrompu) interrompu = true
+        details.set(f.id, d)
       }
     }))
 
@@ -283,9 +335,12 @@ async function router(req, res) {
       bien: bien.provider_property_id,
       nom: bien.name || null,
       liste_fils_complete: liste.complet,
+      // Un nombre non nul dit que le filtre par bien du partenaire ne tient plus.
+      fils_d_autres_biens_ecartes: liste.autres_biens || 0,
       lignes_lues_completes: lignesCompletes,
-      detail: { candidats: choix.candidats, lus: choix.choisis.length, tronque: choix.tronque },
-      ...mesurer({ fils: liste.fils, details, lignes }),
+      jumelles_lues_completes: jumellesCompletes,
+      detail: { candidats: choix.candidats, lus: details.size, tronque: choix.tronque, interrompu },
+      ...mesurer({ fils: liste.fils, details, lignes, importAvecResa }),
     })
   }
 
