@@ -1660,5 +1660,6 @@
   "charges.refus_incomplete": "This invoice is not complete: review it on its own.",
   "charges.refus_entite_invalide": "This entity is not valid. Reload the page.",
   "charges.refus_trop_de_charges": "Too many invoices at once. Try again.",
-  "charges.refus_aucune_charge": "No invoice to save."
+  "charges.refus_aucune_charge": "No invoice to save.",
+  "charges.masse_arret": "{n} files not sent: the upload stopped after three failures in a row. Try again later."
 }

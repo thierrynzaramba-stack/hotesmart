@@ -202,3 +202,92 @@ test('à l\'ordinateur, l\'adresse d\'une facture arrivée APRÈS le passage à 
     assert.deepEqual(b.$$('[data-bind="fiche-doc"] iframe').map(f => f.getAttribute('src')), [`https://stockage.test/lire/${id(2)}`])
   } finally { b.fermer() }
 })
+
+// ─── Review du lot 8c ───────────────────────────────────────────────────────
+test('LE TEST QUI COMPTE (review, B1) : changer d\'entité affichée PENDANT un dépôt de plusieurs ne le répartit pas — l\'entité est fixée au départ', async () => {
+  const ENT2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const entites = [{ id: ENT, nom: 'Moi', archivee: false, debut_exercice: null }, { id: ENT2, nom: 'SCI', archivee: false, debut_exercice: null }]
+  let b
+  let n = 0
+  const geste = async (c) => {
+    if (c.action === 'envoi') return { ok: true, id: id(700 + ++n), url: `https://stockage.test/${n}` }
+    // Au premier « confirmer », l'hôte choisit l'autre entité.
+    if (n === 1) await b.choisir(b.$('[data-choix="entite"]'), ENT2)
+    return { ok: true, issue: 'a_verifier', charge: aVerifier(700 + n) }
+  }
+  b = await monter({ geste, ecran: (url) => ({ ...reponseEcran({ entites }), entite: url.includes(ENT2) ? ENT2 : ENT }) })
+  try {
+    await b.deposerFichiers([['a.pdf', 'application/pdf'], ['b.pdf', 'application/pdf'], ['c.pdf', 'application/pdf']])
+    assert.deepEqual(b.gestes().filter(g => g.action === 'envoi').map(g => g.entite_id), [ENT, ENT, ENT])
+  } finally { b.fermer() }
+})
+
+test('review, M6 : trois PANNES de suite arrêtent un dépôt de plusieurs, et l\'écran dit combien ne sont pas partis ; un refus de fichier n\'en est pas une', async () => {
+  const geste = (c) => { if (c.action === 'envoi') throw Object.assign(new Error('x'), { status: 503, error: 'panne' }); return { ok: true } }
+  const b = await monter({ geste })
+  try {
+    await b.deposerFichiers([['t.txt', 'text/plain', 'x'], ['a.pdf', 'application/pdf'], ['b.pdf', 'application/pdf'], ['c.pdf', 'application/pdf'], ['d.pdf', 'application/pdf'], ['e.pdf', 'application/pdf']])
+    assert.equal(b.gestes().filter(g => g.action === 'envoi').length, 3, 'a, b, c — puis arrêt')
+    assert.match(b.$('[data-bind="envoi"]').textContent, /2 fichiers non envoyés : le dépôt s'est arrêté après trois pannes de suite/)
+  } finally { b.fermer() }
+})
+
+test('review, M2 et M3 : une page suivante qui ne se lit pas ne fait sauter aucune facture ; une fiche fermée pendant la lecture ne se rouvre pas', async () => {
+  let echecs = 1
+  let lacher = null
+  const pages = (c) => {
+    if (c === 'debut') return { lignes: [aVerifier(1)], suite: 'C1', nombre: 3 }
+    if (echecs-- > 0) throw Object.assign(new Error('x'), { status: 503 })
+    if (lacher === 'attendre') return new Promise(r => { lacher = () => r({ lignes: [aVerifier(2), aVerifier(3)], suite: null }) })
+    return { lignes: [aVerifier(2), aVerifier(3)], suite: null }
+  }
+  const ecran = (url) => {
+    const u = new URL(url, 'https://hs.test')
+    if (u.searchParams.has('parcours')) { const r = pages(u.searchParams.get('parcours')); return r && r.then ? r.then(p => ({ parcours: p })) : { parcours: r } }
+    return reponseEcran({ aTraiter: [aVerifier(1)] })
+  }
+  const b = await monter({ ecran })
+  try {
+    await b.cliquer(b.$('[data-geste="parcourir"]'))
+    const dlg = b.$('[data-bind="fiche"]')
+    await b.cliquer(dlg.querySelector('[data-geste="passer"]'))
+    assert.equal(dlg.querySelector('[data-champ="fournisseur_nom"]').value, 'Fournisseur 1', 'la page n\'est pas lue : on reste sur la facture')
+    assert.equal(dlg.querySelector('[data-bind="parcours-compteur"]').textContent, '1 sur 3')
+    await b.cliquer(dlg.querySelector('[data-geste="passer"]'))
+    assert.equal(dlg.querySelector('[data-champ="fournisseur_nom"]').value, 'Fournisseur 2', 'la facture 2 n\'est pas sautée')
+  } finally { b.fermer() }
+
+  // La page suivante tarde ; l'hôte ferme la fiche (Échap : le dialogue se
+  // ferme et émet `close`) avant qu'elle arrive.
+  const ecranLent = (url) => {
+    const u = new URL(url, 'https://hs.test')
+    if (!u.searchParams.has('parcours')) return reponseEcran({ aTraiter: [aVerifier(1)] })
+    if (u.searchParams.get('parcours') === 'debut') return { parcours: { lignes: [aVerifier(1)], suite: 'C1', nombre: 2 } }
+    return new Promise(r => { lacher = () => r({ parcours: { lignes: [aVerifier(2)], suite: null } }) })
+  }
+  const c = await monter({ ecran: ecranLent })
+  try {
+    await c.cliquer(c.$('[data-geste="parcourir"]'))
+    const dlg = c.$('[data-bind="fiche"]')
+    await c.cliquer(dlg.querySelector('[data-geste="passer"]'))
+    assert.equal(typeof lacher, 'function', 'la page suivante est bien en attente')
+    if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open')
+    dlg.dispatchEvent(new c.w.Event('close'))
+    lacher()
+    for (let i = 0; i < 10; i++) await c.attendre()
+    assert.equal(dlg.open || dlg.hasAttribute('open'), false, 'la fiche fermée ne se rouvre pas')
+  } finally { c.fermer() }
+})
+
+test('review, M4 : à l\'ordinateur, la fiche d\'un tableau reconnu revient à UNE colonne, même après une facture', async () => {
+  const tableau = aVerifier(9, { statut: 'tableau', type_document: 'tableau_amortissement', fournisseur_nom: null, montant_ttc_cents: null, entite_juridique_id: null, tableau_lu: { echeances: 15, debut: '2025-01-15', fin: '2026-03-05' } })
+  const geste = () => ({ ok: true, url: 'https://stockage.test/x' })
+  const b = await monter({ large: true, geste, ecran: ecranAvec({ aTraiter: [aVerifier(1), tableau] }) })
+  try {
+    const lignes = b.$$('[data-bind="a-traiter"] .chg-ligne')
+    await b.cliquer(lignes[0])
+    assert.equal(b.$('[data-bind="fiche"]').classList.contains('chg-fiche--double'), true)
+    await b.cliquer(lignes[1])
+    assert.equal(b.$('[data-bind="fiche"]').classList.contains('chg-fiche--double'), false)
+  } finally { b.fermer() }
+})

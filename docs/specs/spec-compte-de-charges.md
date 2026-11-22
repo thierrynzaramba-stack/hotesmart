@@ -4276,8 +4276,9 @@ Branche `charges-masse`, partie de `main` (`b2ef2115`, lot 8b en production).
   pas les suivants, et la liste des refus est donnée à la fin, nom par nom.
 - `MAX_ENVOIS_OUVERTS` (30 envois **non confirmés** sur 24 h) **reste à 30**
   (correction au codage) : les fichiers partent un par un et chacun est
-  confirmé avant le suivant, donc un dépôt de 50 n'en tient jamais plus d'un
-  ouvert à la fois.
+  confirmé avant le suivant. ⚠ Un envoi qui échoue laisse sa ligne ouverte
+  24 h (review, M6) : **trois pannes de suite arrêtent le dépôt**, et l'écran
+  dit combien de fichiers ne sont pas partis.
 
 **L'entité de base (décision 3).**
 - C'est l'entité affichée en tête de l'écran au moment du dépôt ; l'écran la
@@ -4410,6 +4411,151 @@ refus qui arrête le dépôt, entité archivée envoyée, pas de confirmation,
 valider qui ne passe pas à la suivante, page suivante non lue, commission en
 deux colonnes, document d'une autre fiche, fermeture qui ne relit pas).
 Suite complète : 9 250 verts à l'heure réelle, et à J+60.
+
+#### 14.22.7 Review du lot 8c (22 novembre 2026)
+
+Brief : arbre `/home/claude/hotesmart-8c`, branche `charges-masse`, plage
+`b2ef211591a5fa4babd7f2d44d2833ca2b546e2b..e5f52370d425a9fa7e39c8a996af45af414855ee`.
+Les fichiers cités sont tous dans la plage. **Aucun constat de sécurité** :
+les correctifs ne sont pas re-reviewés (une review par commit).
+
+**Rapport, recopié tel quel.**
+
+Review du lot 8c, branche `charges-masse` : aucun constat de sécurité, un constat bloquant
+
+**Arbre lu :** `/home/claude/hotesmart-8c`. **Branche :** `charges-masse`. **SHA de `git rev-parse HEAD` :** `e5f52370d425a9fa7e39c8a996af45af414855ee`. **Plage relue :** `b2ef211591a5fa4babd7f2d44d2833ca2b546e2b..e5f52370d425a9fa7e39c8a996af45af414855ee` (4 commits, 21 fichiers). Tous les fichiers cités ci-dessous sont dans ce diff. Je n'ai rien écrit dans l'arbre ; mes essais sont dans `/tmp/revue-8c/`. Les 6 fichiers de tests du lot passent : 223 verts, 0 rouge.
+
+##### SÉCURITÉ
+
+Rien trouvé (détail dans « Vérifié sans constat »).
+
+##### BLOQUANT
+
+**B1. Un dépôt de plusieurs fichiers se répartit sur deux entités si l'hôte change l'entité affichée pendant le dépôt.** `shared/charges-vue.js:1318`
+- **Cause :** dans `deposerUn`, `const base = entiteDeBase()` relit l'entité affichée **à chaque fichier**. `envoyerTous` (l. 1353) ne la fixe pas au départ.
+- **Pourquoi c'est probable :** un dépôt de 50 fichiers prend plusieurs minutes, car chaque `confirmer` attend la lecture IA. Pendant ce temps, la page reste utilisable, et changer d'entité pour regarder les totaux d'une autre société est un geste naturel.
+- **Scénario mesuré** (banc jsdom, `/tmp/revue-8c/essai-page.test.js`) : 3 fichiers déposés, l'hôte passe de « Moi » à « SCI » pendant le premier `confirmer`. Les `entite_id` envoyés sont `[ENT, ENT2, ENT2]`. Le bilan affiche « 3 factures déposées. » sans rien signaler.
+- **Conséquence :** des factures rattachées à une autre entité que celle choisie au dépôt, ce qui contredit la décision 3. « Enregistrer tout » peut ensuite les valider dans la mauvaise entité sans qu'aucune fiche ait été ouverte.
+- **Correction :** lire `entiteDeBase()` une fois avant la boucle, et la passer à `deposerUn`.
+
+##### MINEUR
+
+**M1. Un tableau d'amortissement reconnu garde l'entité de base, alors que la spec dit le contraire.**
+- **Où :** `lib/charges.js:369`. `champsDeTableau` ne remet pas `entite_juridique_id` à vide, alors que `passerEnTableau` le fait (l. 1068).
+- **Mesuré** (`/tmp/revue-8c/essai-serveur.test.js`) : sur une charge `a_lire` qui porte une entité, l'écriture `tableau` ne touche pas `entite_juridique_id`.
+- **Contradiction :** la spec §14.22.2 (`docs/specs/spec-compte-de-charges.md:4289`) dit « Un tableau d'amortissement reconnu l'efface, comme aujourd'hui ».
+- **Effet visible :** la ligne « Tableau d'amortissement », sans montant, apparaît aussi dans « Factures de <entité> ». La liste filtre par entité sur tous les statuts sauf `envoi`. Aucun total n'est faussé : le résumé ne compte que `a_verifier` et `validee`.
+- **Aucun test ne couvre ce cas.** Il faut corriger soit le code, soit la spec.
+
+**M2. Le parcours rouvre la fiche si l'hôte la ferme pendant la lecture de la page suivante.** `shared/charges-vue.js:1182-1193`
+- **Cause :** `suivante()` garde `p` en mémoire et, après l'`await pageDuParcours`, ne vérifie pas que le parcours tourne toujours.
+- **Mesuré** (`essai-parcours.test.js`) : « Passer » sur la dernière facture de la page, puis Échap pendant la lecture. Quand la réponse arrive, la fiche se rouvre sur « Fournisseur 2 », hors parcours, avec un bouton « Valider ».
+
+**M3. Une facture est sautée après un échec de lecture de la page suivante.** Même fonction, l. 1185 : `p.pos++` est fait avant la lecture.
+- **Mesuré** (`essai-saut.test.js`) : la page C1 échoue une fois. L'erreur s'affiche dans la fiche. Un nouveau « Passer » ouvre « Fournisseur 3 » : la facture 2 n'est jamais présentée.
+- **Variante après « Enregistrer et suivante » :** le bouton reste affiché sur une facture déjà validée. Un second clic la revalide, ce qui est sans dégât, puis ferme le parcours.
+
+**M4. La fiche d'un tableau garde la mise en page à deux colonnes.** `shared/charges-vue.js:672`
+- **Cause :** `peindreFicheTableau` ne retire pas la classe `chg-fiche--double`. Seule `peindreFiche` la bascule (l. 969).
+- **Mesuré** (banc, puis rendu Chrome headless) : à l'ordinateur, une facture ouverte puis un tableau ouvert donnent une fiche de 1280 px, avec 480 px de contenu et environ 800 px vides à droite.
+- **Même effet en plein parcours :** quand le type passe à « Tableau d'amortissement » (`changerNature` → `ouvrirFiche`).
+
+**M5. L'en-tête de « À traiter » déborde au téléphone.** `shared/ui.css:2285` et `:2364`
+- **Cause :** `.chg-bloc__tete` ne passe pas à la ligne (`flex-wrap` absent), et les boutons `.btn` sont en `nowrap`. Le bloc de boutons ne peut pas devenir plus étroit que « Enregistrer les factures complètes ».
+- **Mesuré** (Chrome headless, police de repli car Plus Jakarta Sans n'est pas installée ici) :
+  - à 360 px de large, la page défile horizontalement jusqu'à 406 px ;
+  - à 390 px, le débordement est encore de 16 px.
+- La fiche elle-même ne déborde pas au téléphone.
+
+**M6. `MAX_ENVOIS_OUVERTS` = 30 suppose qu'aucun envoi n'échoue (`lib/charges.js:57`, spec l. 4279).**
+- **Cause :** un dépôt au stockage (PUT) raté, ou un `confirmer` qui rend 503 (`stockage`, `conversion_occupee`), laisse sa ligne `envoi` ouverte pendant 24 h. `envoyerTous` continue malgré les pannes.
+- **Scénario :** un dépôt de photos en 4G instable, où les petits appels d'API passent mais les gros dépôts échouent. Les lignes ouvertes s'accumulent ; à 30, chaque `envoi` est refusé (429 `trop_d_envois`) pour tout le compte jusqu'à 24 h.
+- **Contradiction :** la phrase de la spec « un dépôt de 50 n'en tient jamais plus d'un ouvert à la fois » n'est vraie que si tout réussit.
+- **Piste :** supprimer la ligne quand le dépôt échoue, ou arrêter le dépôt après N pannes de suite.
+- Constat **lu**, pas mesuré.
+
+**M7. Un test n'apporte pas la preuve qu'il annonce.** `tests/charges-masse.test.js:116`
+- **Ce que le test affirme :** que `valider_lot` garde la période de la facture.
+- **Sabotage mesuré** (copie par `git archive` dans `/tmp`) : avec `validerTelleQueLue` qui envoie `periode_debut: null, periode_fin: null` (la période est alors effacée), `charges-masse` et `charges-endpoint` restent à 26 verts sur 26.
+- **Pourquoi :** la ligne de test n'a pas de période, et l'assertion accepte `null`.
+- **Le code, lui, est juste :** la période n'est pas envoyée, donc `valider` garde celle de la charge.
+
+**M8. Une facture déjà validée ailleurs est revalidée avec des valeurs périmées.** Constat lu.
+- **Cause :** le parcours ouvre les lignes telles qu'elles ont été lues au début, parfois des dizaines de minutes plus tôt.
+- **Scénario :** une facture validée entre-temps depuis un autre onglet ou appareil s'affiche « À vérifier ». « Enregistrer et suivante » la revalide, car `validee` est accepté par `valider`, et écrase sans un mot la correction faite ailleurs.
+- **Si la facture a été supprimée ailleurs :** l'erreur 404 s'affiche dans la fiche, et « Passer » continue.
+
+**M9. Une entité de base archivée avant la lecture IA est gardée.** `lib/charges.js:391`. Constat lu.
+- **Effet :** `estComplete` la compte comme complète, puis `valider_lot` la refuse en `entite_archivee` ; la fiche présélectionne l'entité archivée. Avant le lot, la proposition du code aurait choisi une entité active.
+- **Cas rare :** il faut que la lecture soit différée par le plafond ou une panne, puis faite par le cron.
+
+**Question produit à faire trancher par Thierry (lue, pas un défaut) :**
+- « Enregistrer tout » valide **toutes** les « À vérifier » complètes du compte, toutes entités confondues.
+- Cela inclut les factures dont l'entité n'est qu'une **proposition du code** : arrivées par e-mail, ou déposées avant le lot. Or le commentaire du code dit « la proposition est un confort, la validation la redemandera ».
+- La confirmation ne nomme pas les entités concernées.
+
+##### Vérifié sans constat
+
+- **Gardes (lu, et tests du lot) :**
+  - `api/charges.js` (`envoi` avec `entite_id`, `valider_lot`) et `api/ecran/charges.js` (`suite_a_traiter`, `parcours`) refusent un non-titulaire avant toute lecture.
+  - En-tête `private, no-store` posé avant le 405.
+- **Cloisonnement par compte :**
+  - Toutes les lectures et écritures de `charges` portent `user_id = compte`.
+  - L'entité envoyée à `envoi` est vérifiée par motif, puis lue dans le compte : refus 400, 403 ou 409, avant toute ligne et toute URL.
+  - Les identifiants de `valider_lot` sont résolus par `chargeDuCompte`. Un identifiant d'un autre compte rend 404 `charge_introuvable`, comme un identifiant inexistant : on ne peut pas savoir qu'il existe.
+  - Une liste de plus de 20, ou contenant un identifiant mal formé, est refusée en 400 avant toute requête.
+- **Curseurs :** `lireCurseurArrivee` valide l'instant et l'identifiant par des motifs ancrés, et l'instant est mis entre guillemets dans le filtre. Aucune injection possible dans `auDelaDe`. L'encodage de l'URL garde le `+` du fuseau.
+- **Imbrication `and(or(…),or(…))` dans un seul `.or()` (lu) :** la grammaire des opérateurs logiques de PostgREST est récursive. `or=(and(P,Q))` équivaut à P ET Q, et la forme non imbriquée du même filtre tourne déjà en production. Non exécuté contre un vrai PostgREST.
+- **Pagination de « À traiter » et du parcours :** les curseurs sont stricts et l'ordre est total (`cree_le`, puis `id`). Ni doublon ni trou quand des factures sortent de la file ; « Passer » ne fait pas de double. La garde de génération de « Afficher plus » de « À traiter » est correcte.
+- **`validerLot` et `validerTelleQueLue` :**
+  - Elles passent par `valider` : même catégorie, même entité active du compte, même logement de l'entité, même archivage, même clé de doublon.
+  - Avoir : montant remis positif par `Math.abs`, puis signé par `montantsDuType`.
+  - Avis d'impôt : HT = TTC et TVA = 0.
+  - Période non envoyée, donc gardée.
+  - La mémoïsation des entités se fait par appel, pour un seul compte. Un échec mémorisé arrête de toute façon le lot en 503.
+- **Lecture par le cron :** `lireEnAttente` passe par `appliquerLecture`, donc garde l'entité comme l'écran.
+- **Coût :**
+  - Plafond de lectures IA à 100.
+  - `valider_lot` : environ 4 requêtes par facture, au plus une dizaine, donc moins de 200 pour 20 factures ; ça tient dans les 60 s.
+  - Le dépôt se fait en série : une conversion HEIC ou une reconnaissance de tableau à la fois.
+  - Un `consulter` par fiche ouverte à l'ordinateur, plus un à chaque fiche repeinte (« Garder les deux » en parcours) ; rien au téléphone.
+- **Cadre du document :**
+  - Il pointe vers une autre origine (le stockage Supabase), donc le document n'accède jamais à la page.
+  - Seuls PDF, JPEG et PNG sont stockés (le HEIC est converti) : pas de SVG, pas de téléchargement forcé.
+  - `referrerpolicy=no-referrer` est posé, et aucune règle CSP de la page ne bloque le cadre.
+  - La réponse tardive d'une autre fiche est bien jetée (test mesuré).
+  - Le rendu Chrome donne une colonne de 480 px pour les champs et un cadre de 798 × 813 px.
+  - **Non vérifiable ici :** un éventuel en-tête anti-cadre (`X-Frame-Options`) du stockage Supabase. À regarder en recette sur staging.
+- **i18n :** `scripts/i18n-check.js` passe avec 1662 clés en fr, en et es. Toutes les nouvelles clés sont utilisées, les `refus_*` par leur code. `a_traiter_plus` est retirée partout. Aucun texte en dur affiché.
+- **Contre-épreuve des tests de page contre le code d'avant :** 9 sur 11 rougissent. Les deux qui restent verts (« entité archivée affichée » et « commission en une colonne ») sont des gardes de non-régression, chacune couplée à un test positif qui, lui, rougit.
+
+**Ce qui a été fait de chaque constat.**
+- **B1 — corrigé.** L'entité de base est lue une fois, au départ du dépôt,
+  et passée à chaque fichier. Test : l'entité change pendant le premier
+  `confirmer`, les trois envois gardent la première ; rouge sans le correctif.
+- **M1 — corrigé (le code suit la spec).** `champsDeTableau` efface l'entité
+  et le logement. Test de 8b mis à jour.
+- **M2, M3 — corrigés.** `suivante()` n'avance la position qu'une fois la
+  suivante connue, et ne rouvre rien si le parcours a été arrêté pendant la
+  lecture. Tests : page qui échoue une fois (aucune facture sautée), fiche
+  fermée pendant la lecture (ne se rouvre pas) ; rouges sans les correctifs.
+- **M4 — corrigé.** La fiche d'un tableau retire la mise en page à deux
+  colonnes. Test.
+- **M5 — corrigé.** L'en-tête de « À traiter » passe à la ligne ; au
+  téléphone, les deux boutons prennent toute la largeur et leur texte peut se
+  couper.
+- **M6 — corrigé.** Trois pannes de suite arrêtent le dépôt, avec le nombre
+  de fichiers non partis. Test.
+- **M7 — corrigé.** Le test porte une période, et vérifie qu'elle est gardée.
+- **M8 — non corrigé, noté.** La fiche d'une facture validée ailleurs entre-
+  temps se valide encore : c'était déjà vrai d'une fiche ouverte depuis
+  « À traiter » avant le lot. Une garde demanderait que `valider` refuse une
+  facture déjà validée quand l'écran l'attend « À vérifier » : contrat de
+  `valider` à changer, hors de ce lot.
+- **M9 — corrigé.** Une entité de base archivée entre le dépôt et la lecture
+  cède à la proposition du code ; des entités illisibles la gardent. Test.
+- **Question produit** : posée à Thierry (« Enregistrer tout » et les
+  entités proposées par le code).
 
 ## 12. Trace des reviews du lot 2
 

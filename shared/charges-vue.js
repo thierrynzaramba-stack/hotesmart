@@ -670,6 +670,8 @@ export function monter (racine, deps) {
 
   // ─── Un tableau d'amortissement reconnu : sa fiche et son import ─────────
   function peindreFicheTableau (c) {
+    // La fiche d'un tableau n'a pas de document à droite (review du lot 8c, M4).
+    dialogue().classList.remove('chg-fiche--double')
     const actives = entitesActives()
     const choisie = actives.length === 1 ? String(actives[0].id) : (actives.some(x => String(x.id) === etat.entite) ? etat.entite : '')
     const lu = echeancesLisibles(tableauDe(c))
@@ -1179,16 +1181,21 @@ export function monter (racine, deps) {
     }
   }
   // La suivante, ou la fin : la file se complète par sa page suivante.
+  // ⚠ LA POSITION N'AVANCE QU'UNE FOIS LA SUIVANTE CONNUE (review du lot 8c,
+  // M3) : une page qui ne se lit pas laisse la fiche où elle était, et un
+  // nouvel essai ne saute aucune facture. Et un parcours ARRÊTÉ pendant la
+  // lecture (fiche fermée) ne rouvre rien (M2).
   async function suivante () {
     const p = etat.parcours
     if (!p) return
-    p.pos++
-    if (p.pos >= p.lignes.length && p.suite) {
+    if (p.pos + 1 >= p.lignes.length && p.suite) {
       const n = await pageDuParcours(p.suite)
+      if (etat.parcours !== p) return
       p.lignes = p.lignes.concat(n.lignes)
       p.suite = n.suite
     }
-    if (p.pos < p.lignes.length) { ouvrirLigne(p.lignes[p.pos]); return }
+    if (etat.parcours !== p) return
+    if (p.pos + 1 < p.lignes.length) { p.pos++; ouvrirLigne(p.lignes[p.pos]); return }
     await finirParcours(t('charges.parcours_fin'))
   }
   async function finirParcours (message) {
@@ -1268,7 +1275,7 @@ export function monter (racine, deps) {
    * ⚠ L'ENTITÉ DE BASE PART AVEC L'ENVOI (lot 8c, décision 3) ; le serveur la
    * vérifie.
    */
-  async function deposerUn (fichier, suivi = () => {}) {
+  async function deposerUn (fichier, suivi = () => {}, base = entiteDeBase()) {
     let type = typeDuFichier(fichier)
     // Un fichier SANS type, ou au type générique, que son nom ne fait pas
     // reconnaître : son contenu tranche. Un type précis (texte, tableur…)
@@ -1315,7 +1322,6 @@ export function monter (racine, deps) {
     }
     if (corps.size > TYPES_ACCEPTES[type]) throw refusFichier(t('charges.refus_trop_gros'))
     suivi(t('charges.envoi_en_cours'))
-    const base = entiteDeBase()
     const o = await deps.agir({ action: 'envoi', type, octets: corps.size, origine: type === 'application/pdf' ? 'fichier' : 'photo', ...(base ? { entite_id: base.id } : {}) })
     await deps.deposer(o.url, corps)
     suivi(t('charges.lecture_en_cours'))
@@ -1356,16 +1362,29 @@ export function monter (racine, deps) {
     if (fichiers.length > MAX_FICHIERS) { statutEnvoi(t('charges.masse_trop', { n: fichiers.length, max: MAX_FICHIERS }), true); return }
     etat.envoiEnCours = true
     boutonAjouter(false)
+    // ⚠ L'ENTITÉ EST FIXÉE AU DÉPART (review du lot 8c, B1) : un dépôt de 50
+    // dure des minutes, et changer d'entité affichée pendant ce temps ne doit
+    // pas répartir le dépôt sur deux entités.
+    const base = entiteDeBase()
     const refus = []
     let ok = 0
+    let pannes = 0
+    let arret = 0
     try {
       for (const [i, f] of fichiers.entries()) {
         statutEnvoi(t('charges.masse_progression', { i: i + 1, n: fichiers.length }))
         try {
-          await deposerUn(f)
+          await deposerUn(f, () => {}, base)
           ok++
+          pannes = 0
         } catch (e) {
           refus.push(t('charges.masse_refus_un', { nom: (f && f.name) || '?', motif: e && e.texte ? e.texte : messageErreur(e) }))
+          // ⚠ TROIS PANNES DE SUITE ARRÊTENT LE DÉPÔT (review du lot 8c, M6) :
+          // chaque envoi raté laisse une ligne ouverte 24 h, et 30 lignes
+          // ouvertes bloquent tout dépôt du compte. Un refus de fichier (type,
+          // taille) n'est pas une panne.
+          pannes = e && e.texte ? 0 : pannes + 1
+          if (pannes >= 3) { arret = fichiers.length - i - 1; break }
         }
       }
     } finally {
@@ -1373,7 +1392,9 @@ export function monter (racine, deps) {
       boutonAjouter(true)
     }
     await recharger()
-    statutEnvoi(t('charges.masse_fin', { n: ok }) + (refus.length ? ' ' + t('charges.masse_refus', { n: refus.length, liste: refus.join(' ; ') }) : ''), refus.length > 0)
+    statutEnvoi(t('charges.masse_fin', { n: ok })
+      + (refus.length ? ' ' + t('charges.masse_refus', { n: refus.length, liste: refus.join(' ; ') }) : '')
+      + (arret ? ' ' + t('charges.masse_arret', { n: arret }) : ''), refus.length > 0)
   }
 
   // ─── Les écouteurs : un seul, délégué ────────────────────────────────────

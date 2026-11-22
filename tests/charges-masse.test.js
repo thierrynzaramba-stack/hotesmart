@@ -60,10 +60,12 @@ test('LE TEST QUI COMPTE : l\'entité de base part avec l\'envoi et se pose sur 
   assert.equal('entite_juridique_id' in sans.requetes.find(x => x.op === 'insert').charge, false)
 })
 
-test('LE TEST QUI COMPTE : la lecture IA GARDE l\'entité de base — la proposition du code ne s\'applique qu\'à une charge sans entité', async () => {
+test('LE TEST QUI COMPTE : la lecture IA GARDE l\'entité de base — la proposition du code ne s\'applique qu\'à une charge sans entité, ou dont l\'entité a été archivée depuis le dépôt', async () => {
   const lu = { fournisseur_nom: 'EDF', montant_ttc_cents: 12000, destinataire_siret: '12345678900012', categorie: 'energie' }
-  const lire = async (entite) => {
-    const ent = entitesDouble([{ id: ENT, nom: 'SCI', siret: '99999999900099', archivee_le: null }, { id: 'e-prop', nom: 'Proposée', siret: '12345678900012', archivee_le: null }])
+  const lire = async (entite, { panne = false } = {}) => {
+    const ent = panne
+      ? { lectures: () => 1, entitesDuCompte: async () => ({ ok: false, motif: 'panne' }) }
+      : entitesDouble([{ id: ENT, nom: 'SCI', siret: '99999999900099', archivee_le: null }, { id: ENT_ARCH, nom: 'Ancienne', siret: null, archivee_le: '2026-11-01T00:00:00Z' }, { id: 'e-prop', nom: 'Proposée', siret: '12345678900012', archivee_le: null }])
     const b = baseEnregistreuse((r) => (r.op === 'select'
       ? { data: { id: ID, statut: 'a_lire', tentatives_lecture: 0, cree_le: '2026-11-22T10:00:00Z', entite_juridique_id: entite } }
       : { data: { id: ID, statut: 'a_verifier' } }))
@@ -72,8 +74,12 @@ test('LE TEST QUI COMPTE : la lecture IA GARDE l\'entité de base — la proposi
     assert.match(sel.colonnes, /entite_juridique_id/, 'la lecture relit l\'entité posée au dépôt')
     return { entite: b.requetes.find(x => x.op === 'update').charge.entite_juridique_id, lectures: ent.lectures() }
   }
-  assert.deepEqual(await lire(ENT), { entite: ENT, lectures: 0 })
+  assert.deepEqual(await lire(ENT), { entite: ENT, lectures: 1 })
   assert.deepEqual(await lire(null), { entite: 'e-prop', lectures: 1 })
+  // Review du lot 8c, M9 : archivée entre le dépôt et la lecture, elle cède.
+  assert.deepEqual(await lire(ENT_ARCH), { entite: 'e-prop', lectures: 1 })
+  // Entités illisibles : l'entité de base est gardée telle quelle.
+  assert.equal((await lire(ENT, { panne: true })).entite, ENT)
 })
 
 // ─── Enregistrer tout ───────────────────────────────────────────────────────
@@ -104,7 +110,7 @@ const lotBase = (lignes, { panneUpdate = false } = {}) => baseEnregistreuse((r) 
 })
 
 test('LE TEST QUI COMPTE : « Enregistrer tout » passe chaque facture par la MÊME validation, avec les valeurs lues — un avoir garde son signe', async () => {
-  const lignes = { [ID]: COMPLETE, [ID2]: { ...COMPLETE, id: ID2, type_document: 'avoir', montant_ht_cents: -5000, montant_tva_cents: -1000, montant_ttc_cents: -6000 } }
+  const lignes = { [ID]: { ...COMPLETE, periode_debut: '2026-01-01', periode_fin: '2026-12-31' }, [ID2]: { ...COMPLETE, id: ID2, type_document: 'avoir', montant_ht_cents: -5000, montant_tva_cents: -1000, montant_ttc_cents: -6000 } }
   const b = lotBase(lignes)
   const ent = ENTITES()
   const r = await charges.validerLot(b.client, { compte: COMPTE, valideur: COMPTE, ids: [ID, ID2] }, { entites: ent })
@@ -113,7 +119,9 @@ test('LE TEST QUI COMPTE : « Enregistrer tout » passe chaque facture par la M�
   assert.equal(maj.length, 2)
   assert.deepEqual([maj[0].charge.entite_juridique_id, maj[0].charge.categorie, maj[0].charge.montant_ttc_cents, maj[0].charge.valide_par], [ENT, 'energie', 12000, COMPTE])
   assert.deepEqual([maj[1].charge.montant_ttc_cents, maj[1].charge.montant_ht_cents], [-6000, -5000], 'l\'avoir reste négatif')
-  assert.equal('periode_debut' in maj[0].charge && maj[0].charge.periode_debut !== undefined, true)
+  // Review du lot 8c, M7 : la période de la facture est GARDÉE (elle n'est pas
+  // envoyée, et `valider` reprend celle de la charge).
+  assert.deepEqual([maj[0].charge.periode_debut, maj[0].charge.periode_fin], ['2026-01-01', '2026-12-31'])
   assert.equal(ent.lectures(), 1, 'les entités sont lues UNE fois pour le lot')
   sansFuite(b.requetes)
 })

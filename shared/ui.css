@@ -2362,6 +2362,13 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 /* ── Lot 8c : charger en masse, parcourir pour valider ─────────────────── */
 .chg-barre__entite { font-size: var(--fs-caption); color: var(--muted); }
 .chg-a-traiter__gestes { display: flex; flex-wrap: wrap; gap: var(--gap-s); margin-inline-start: auto; }
+/* L'en-tête de « À traiter » passe à la ligne au téléphone (review du lot 8c,
+   M5) : sinon les deux boutons faisaient défiler la page en largeur. */
+[data-bind="a-traiter"] > .chg-bloc__tete { flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .chg-a-traiter__gestes { flex-basis: 100%; margin-inline-start: 0; }
+  .chg-a-traiter__gestes .btn { white-space: normal; text-align: start; }
+}
 /* À l'ordinateur, la facture À DROITE de ses champs (décision de Thierry). */
 .chg-fiche.chg-fiche--double { width: min(1280px, 100%); }
 .chg-fiche--double[open] { display: grid; grid-template-columns: 480px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "tete doc" "corps doc" "pied doc"; }

@@ -1660,5 +1660,6 @@
   "charges.refus_incomplete": "Cette facture n'est pas complète : vérifiez-la une par une.",
   "charges.refus_entite_invalide": "Cette entité n'est pas valide. Rechargez la page.",
   "charges.refus_trop_de_charges": "Trop de factures d'un coup. Réessayez.",
-  "charges.refus_aucune_charge": "Aucune facture à enregistrer."
+  "charges.refus_aucune_charge": "Aucune facture à enregistrer.",
+  "charges.masse_arret": "{n} fichiers non envoyés : le dépôt s'est arrêté après trois pannes de suite. Réessayez plus tard."
 }

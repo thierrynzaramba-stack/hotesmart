@@ -1660,5 +1660,6 @@
   "charges.refus_incomplete": "Esta factura no está completa: revísela por separado.",
   "charges.refus_entite_invalide": "Esta entidad no es válida. Recargue la página.",
   "charges.refus_trop_de_charges": "Demasiadas facturas a la vez. Inténtelo de nuevo.",
-  "charges.refus_aucune_charge": "Ninguna factura que guardar."
+  "charges.refus_aucune_charge": "Ninguna factura que guardar.",
+  "charges.masse_arret": "{n} archivos no enviados: la subida se detuvo tras tres fallos seguidos. Inténtelo más tarde."
 }
