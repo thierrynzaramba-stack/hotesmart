@@ -4235,6 +4235,11 @@ Migration et contrôle passés sur staging le 21 novembre à 17:02 (2 lignes à
 - **« Tableau d'amortissement » choisi sur l'échéancier BPCE** : refusé « Ce
   document n'est pas un tableau d'amortissement que nous savons lire », le
   type revient à « Échéancier », rien n'est écrit.
+- **« Ce n'est pas un tableau : le lire comme une facture »**, sur un tableau
+  de test de 15 échéances (fixture du dépôt, aucune donnée réelle) : dépôt
+  reconnu en 3 s (envoi, dépôt, reconnaissance et relecture de l'écran) ;
+  au clic, l'IA lit le document en 4,6 s, la fiche se repeint en « Facture »
+  à vérifier (type « Échéancier »). Charge de test supprimée ensuite.
 - **Correctif de recette** : après l'import, l'écran restait sur l'entité
   affichée ; un crédit importé dans une autre entité n'apparaissait nulle
   part. L'écran passe désormais sur l'entité du crédit, comme le sélecteur
