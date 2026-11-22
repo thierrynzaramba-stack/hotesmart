@@ -277,7 +277,7 @@ import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCou
 import { api } from '/shared/api-client.js'
 import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie, canauxDeVente,
   listeDeSuppression, noteDeSuppression, listeDArchivage, accueilHtml } from '/shared/logement-fiche.js'
-import { enregistrerInfo } from '/shared/accueil-voyageur.js'
+import { enregistrerInfo, etatBoutonHeure, cleRefusInfo } from '/shared/accueil-voyageur.js'
 // ⚠ LA PRÉPARATION DE LA PHOTO EST PARTAGÉE avec l'écran d'aujourd'hui : elle
 // porte deux leçons de revue (une image sans dimensions, l'échelle de qualité
 // qui décide « trop lourde ») et une seconde copie les perdrait.
@@ -624,14 +624,28 @@ async function enregistrerAccueil (cle) {
     peindreAccueil()
     const neuf = $('[data-bloc="accueil"] [data-acc-saisie]')
     if (neuf) neuf.value = valeur
-    erreurAccueil(t(e.status === 403 ? 'fiche.accueil_refus' : 'fiche.accueil_echec'))
+    etatBoutonHeure($('[data-bloc="accueil"] [data-acc-edition]'))
+    erreurAccueil(t(e.status === 403 ? 'fiche.accueil_refus' : (cleRefusInfo(e) || 'fiche.accueil_echec')))
   } finally {
     accueilEnVol = false
     for (const b of document.querySelectorAll('[data-bloc="accueil"] button')) b.disabled = false
+    // Le champ heure resté ouvert (refus) garde sa règle : vide, pas d'envoi.
+    etatBoutonHeure($('[data-bloc="accueil"] [data-acc-edition]'))
   }
 }
+// Un champ heure vide ne s'envoie pas : le bouton suit le champ (spec
+// heures-logement §2.1). Sur `change`, comme le reste de la page — jamais sur
+// `input` (règle de la page : rien ne part à chaque lettre) ; un champ heure
+// émet `change` dès qu'il porte une heure complète ou qu'on le vide.
+$('[data-bind="fiche"]').addEventListener('change', (ev) => {
+  if (!ev.target.matches || !ev.target.matches('[data-bloc="accueil"] [data-acc-saisie]')) return
+  etatBoutonHeure(ev.target.closest('[data-acc-edition]'))
+})
 $('[data-bind="fiche"]').addEventListener('keydown', (ev) => {
   if (!ev.target.matches || !ev.target.matches('[data-bloc="accueil"] [data-acc-saisie]')) return
+  // ⚠ ENTRÉE SUIT LE BOUTON : un champ heure vide ne part pas plus au clavier.
+  const bouton = ev.target.closest('[data-acc-edition]') && ev.target.closest('[data-acc-edition]').querySelector('[data-acc-enregistrer]')
+  if (ev.key === 'Enter' && bouton && bouton.disabled) { ev.preventDefault(); return }
   if (ev.key === 'Enter') { ev.preventDefault(); enregistrerAccueil(accueilEnEdition) }
   if (ev.key === 'Escape') { ev.preventDefault(); accueilEnEdition = null; peindreAccueil() }
 })
@@ -644,6 +658,7 @@ $('[data-bind="fiche"]').addEventListener('click', (ev) => {
     peindreAccueil()
     const champ = $('[data-bloc="accueil"] [data-acc-saisie]')
     if (champ) champ.focus()
+    etatBoutonHeure($('[data-bloc="accueil"] [data-acc-edition]'))
     return
   }
   if (ev.target.closest('[data-bloc="accueil"] [data-acc-annuler]')) {

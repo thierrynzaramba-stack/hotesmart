@@ -741,6 +741,8 @@
   "acc.to_complete": "Por completar",
   "acc.guest_gets_default": "el huésped recibe {heure} por defecto",
   "acc.hour_required": "La hora es obligatoria.",
+  "acc.hour_invalid": "Hora esperada en formato HH:MM.",
+  "acc.logement_unavailable": "Este alojamiento ya no está en servicio.",
   "acc.airbnb_16h": "Airbnb exige que la llegada empiece como muy tarde a las 16:00.",
   "kb.info_in_listing": "El teléfono, el wifi y los horarios están en la ficha del alojamiento.",
   "kb.open_listing": "Abrir la ficha",

@@ -204,12 +204,16 @@ async function main () {
   const k = await knowledgeDuBien(row.user_id, String(row.property_id))
   const guestName = [s.firstName, s.lastName].filter(Boolean).join(' ') || 'Voyageur'
 
+  // ⚠ LES HEURES DE LA FICHE, ET ELLES SEULES (spec heures-logement, constat 4
+  // de la relecture 1) : `replisDuBien` ne lit plus `checkInStart`, donc sans
+  // `checkin_time` le brouillon rejoue disait 18:00 / 10:00 quelle que soit la
+  // fiche, et partait tel quel avec --execute.
   const property = {
     id: row.property_id, name: bien.name, provider: bien.provider,
     address: k.adresse || bien.address || '',
     phone: k.telephone_hote || '',
-    checkInStart: k.checkin || bien.checkin_time || null,
-    checkOutEnd: k.checkout || bien.checkout_time || null
+    checkin_time: bien.checkin_time || null,
+    checkout_time: bien.checkout_time || null
   }
 
   let message

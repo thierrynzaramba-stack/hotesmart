@@ -112,6 +112,7 @@ function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, che
     Date, decodeURIComponent, Number, Intl, String, JSON, setTimeout,
     ficheHtml: M.ficheHtml, etatHtml: M.etatHtml, etatDeLaPage: M.etatDeLaPage,
     accueilHtml: M.accueilHtml, enregistrerInfo: A.enregistrerInfo,
+    etatBoutonHeure: A.etatBoutonHeure, cleRefusInfo: A.cleRefusInfo,
     // ⚠ DEUX DOMAINES DEPUIS L'ÉTAPE 3, ET C'EST LE FOND DU SUJET : la
     // suppression et les champs dépendent de `reglages`, mais « Publier mes
     // prix » est gardé côté serveur par `reservations`. Un double qui
@@ -1310,4 +1311,54 @@ test('relue ILLISIBLE : le bloc le dit, au lieu de garder l ancien état', async
   await ctx.__enregistrerAccueil('wifi_mdp')
   const bloc = doc.querySelector('[data-bloc="accueil"]')
   assert.ok(bloc.textContent.includes('fiche.accueil_non_lu'), bloc.textContent)
+})
+
+// ─── Heures du logement : un champ heure vide ne s'envoie pas, chaque refus
+// dit sa cause (spec heures-logement §2.1, constat 5 de la relecture 1) ───────
+const ACCUEIL_HEURES = { faits: [
+  { cle: 'checkin', libelle: 'Heure d’arrivée', balise: '{checkin}', valeur: '', defaut: '18:00', aRemplir: false, aCompleter: true, fiche: true, horsIa: false, sansBalise: false }
+] }
+
+test('LE TEST QUI COMPTE : un champ heure vide garde « Enregistrer » inactif, et la page branche la règle sur la saisie', async () => {
+  const { doc, ctx } = monter({ reponse: fiche({ accueil: ACCUEIL_HEURES }) })
+  await ctx.__charger()
+  ctx.__editer('checkin')
+  const edition = doc.querySelector('[data-bloc="accueil"] [data-acc-edition]')
+  const champ = edition.querySelector('[data-acc-saisie]')
+  const bouton = edition.querySelector('[data-acc-enregistrer]')
+  A.etatBoutonHeure(edition)
+  assert.equal(bouton.disabled, true, 'vide : pas d envoi')
+  champ.value = '16:00'
+  A.etatBoutonHeure(edition)
+  assert.equal(bouton.disabled, false)
+  // Une info qui n'est pas une heure n'est pas concernée.
+  const autre = new (doc.defaultView.DOMParser)().parseFromString(
+    A.editeurInfoHtml({ cle: 'wifi_nom', libelle: 'Nom wifi', valeur: '' }, { t: (k) => k, esc: (x) => x }), 'text/html')
+  A.etatBoutonHeure(autre.querySelector('[data-acc-edition]'))
+  assert.equal(autre.querySelector('[data-acc-enregistrer]').disabled, false)
+  // Le câblage de la page : à la saisie, à l'ouverture, et après un refus.
+  assert.match(PAGE, /addEventListener\('change'[\s\S]{0,400}etatBoutonHeure\(ev\.target\.closest/)
+  assert.ok((PAGE.match(/etatBoutonHeure\(/g) || []).length >= 4, 'saisie, ouverture, refus, fin d envoi')
+  assert.match(PAGE, /if \(ev\.key === 'Enter' && bouton && bouton\.disabled\)/, 'Entrée suit le bouton')
+})
+
+test('LE TEST QUI COMPTE : un refus d heure dit sa cause, la saisie reste, le bouton suit le champ', async () => {
+  for (const [code, cle] of [['heure_obligatoire', 'acc.hour_required'], ['heure_illisible', 'acc.hour_invalid'], ['bien_indisponible', 'acc.logement_unavailable']]) {
+    const err = new Error(code); err.status = code === 'bien_indisponible' ? 409 : 400
+    const { doc, ctx } = monter({ reponse: fiche({ accueil: ACCUEIL_HEURES }), erreurEcriture: err })
+    await ctx.__charger()
+    ctx.__editer('checkin')
+    doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value = '16:00'
+    await ctx.__enregistrerAccueil('checkin')
+    assert.equal(doc.querySelector('[data-bind="accueil-erreur"]').textContent, `[${cle}]`, code)
+    assert.equal(doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value, '16:00', `${code} : la saisie n est pas perdue`)
+  }
+  // Un autre refus garde le message générique.
+  const autre = new Error('Enregistrement impossible'); autre.status = 500
+  const { doc, ctx } = monter({ reponse: fiche({ accueil: ACCUEIL_HEURES }), erreurEcriture: autre })
+  await ctx.__charger()
+  ctx.__editer('checkin')
+  doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value = '16:00'
+  await ctx.__enregistrerAccueil('checkin')
+  assert.equal(doc.querySelector('[data-bind="accueil-erreur"]').textContent, '[fiche.accueil_echec]')
 })

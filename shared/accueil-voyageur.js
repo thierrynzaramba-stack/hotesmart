@@ -99,6 +99,35 @@ export function editeurInfoHtml (f, { t, esc }) {
 }
 
 /**
+ * ⚠ UN CHAMP HEURE VIDE NE S'ENVOIE PAS (spec heures-logement §2.1, constat 5
+ * de la relecture 1) : `required` ne bloque rien hors d'un formulaire, et le
+ * bouton est un `type="button"`. La page appelle ceci à l'ouverture de
+ * l'éditeur et à chaque saisie ; une info qui n'est pas une heure n'est pas
+ * concernée.
+ * @param {Element} edition  le bloc `[data-acc-edition]`
+ */
+export function etatBoutonHeure (edition) {
+  if (!edition) return
+  const champ = edition.querySelector('input[data-acc-saisie][type="time"]')
+  const bouton = edition.querySelector('[data-acc-enregistrer]')
+  if (champ && bouton) bouton.disabled = !String(champ.value || '').trim()
+}
+
+// ⚠ CHAQUE REFUS DE L'HEURE DIT SA CAUSE (constat 5) : « réessayez » sur une
+// heure vide, illisible ou un logement qui ne loue plus faisait réessayer
+// l'hôte pour rien. Les codes sont ceux de `api/ecran/connaissance.js`.
+const CLES_REFUS_HEURE = {
+  heure_obligatoire: 'acc.hour_required',
+  heure_illisible: 'acc.hour_invalid',
+  bien_indisponible: 'acc.logement_unavailable'
+}
+/** La clé i18n du refus d'une écriture, ou `null` (message générique). */
+export function cleRefusInfo (erreur) {
+  const code = erreur && erreur.message
+  return Object.prototype.hasOwnProperty.call(CLES_REFUS_HEURE, code) ? CLES_REFUS_HEURE[code] : null
+}
+
+/**
  * Écrit une info. ⚠ UN SEUL WRITER, CELUI DE LA BASE : le POST de
  * `api/ecran/connaissance.js` (titulaire seul, garde serveur), par la
  * bien désigné dans les biens DU COMPTE. Vider la valeur supprime la ligne.

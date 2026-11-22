@@ -208,7 +208,7 @@ test('planDeReprise : copier, identique, écart, illisible, normaliser, à compl
   const h = (nom, cle) => plan.find(b => b.nom === nom).heures[cle]
   assert.equal(archives, 1)
   assert.equal(plan.some(b => b.nom === 'Archive'), false)
-  assert.deepEqual(h('Copie', 'checkin'), { action: 'copier', ecrire: '18:00', supprimerLigne: 'k1', fiche: null, base: '18h' })
+  assert.deepEqual(h('Copie', 'checkin'), { action: 'copier', ecrire: '18:00', supprimerLigne: 'k1', fiche: null, ficheBrute: null, base: '18h', horsIa: false })
   assert.equal(h('Copie', 'checkout').action, 'copier', 'une fiche VIDE (chaîne vide) se remplit aussi')
   assert.deepEqual([h('Pareil', 'checkin').action, h('Pareil', 'checkin').ecrire, h('Pareil', 'checkin').supprimerLigne], ['identique', '16:00', 'k3'])
   assert.deepEqual([h('Pareil', 'checkout').action, h('Pareil', 'checkout').ecrire], ['rien', null])
@@ -289,4 +289,173 @@ test('un logement archivé montre ses heures sans crayon, et n est pas « À com
   assert.equal(d.querySelector('[data-acc-modifier]'), null)
   assert.doesNotMatch(d.body.textContent, /À compléter/)
   assert.match(d.querySelector('[data-acc-ligne="checkin"]').textContent, /18:00/)
+})
+
+// ─── Le générateur du code d'arrivée : fenêtre et message lisent la MÊME heure
+// (constat 3 de la relecture 1 : seule la fenêtre du rafraîchissement était
+// tenue ; un retour de `ensureCodeCreated` à la base restait vert).
+function chargerArrivee ({ codeExistant = null, connaissance = [], modele }) {
+  const claims = []
+  const taches = []
+  const table = (nom) => {
+    const q = {
+      select () { return q }, eq () { return q }, neq () { return q }, in () { return q },
+      is () { return q }, not () { return q }, lte () { return q }, gte () { return q },
+      order () { return q }, range () { return q },
+      insert (row) {
+        if (nom === 'access_codes') claims.push(row)
+        if (nom === 'agent_tasks') taches.push(row)
+        const fini = { data: null, error: null }
+        return {
+          select: () => ({ single: async () => ({ data: { id: 'ac-neuf', ...row }, error: null }) }),
+          then: (res, rej) => Promise.resolve(fini).then(res, rej)
+        }
+      },
+      upsert () { return Promise.resolve({ data: null, error: null }) },
+      update () { return q },
+      single: async () => ({ data: null }),
+      maybeSingle: async () => ({ data: null, error: null }),
+      limit () {
+        if (nom === 'access_codes') return Promise.resolve({ data: codeExistant ? [codeExistant] : [] })
+        return Promise.resolve({ data: [], error: null })
+      },
+      then (res, rej) {
+        const data = nom === 'message_templates' ? [modele] : nom === 'knowledge' ? connaissance : []
+        return Promise.resolve({ data, error: null }).then(res, rej)
+      }
+    }
+    return q
+  }
+  const chemins = [
+    injecter('../lib/cron-shared', {
+      supabase: { from: table },
+      getPropertyMode: async () => 'test',
+      lireReglagesDuBien: async () => ({ mode: 'test', delais: null }),
+      isAutomationPaused: async () => false
+    }),
+    injecter('../lib/alert-notify', { alertMissingAccessCode: async () => {} }),
+    injecter('../lib/founder-notify', { reportIncident: async () => {} })
+  ]
+  delete require.cache[require.resolve('../lib/cles-migrees')]
+  delete require.cache[require.resolve('../lib/cron-arrival-code')]
+  const mod = require('../lib/cron-arrival-code')
+  delete require.cache[require.resolve('../lib/cron-arrival-code')]
+  for (const c of chemins) delete require.cache[c]
+  return { mod, claims, taches }
+}
+const jourParis = (d) => new Date(Date.now() + d * 86400000).toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' })
+
+test('LE TEST QUI COMPTE : le code créé à l arrivée finit à l heure de départ de la FICHE + 1 h, pas à celle de la base', async () => {
+  const { mod, claims } = chargerArrivee({
+    connaissance: [{ key: 'checkout', value: '09:00' }],
+    modele: { id: 't1', lock_id: 'lock-1', event_type: 'menage_done', active: true, earliest_send_time: '00:00', template_text: 'Départ {checkout}. Code : {code_acces}' }
+  })
+  const depart = jourParis(3)
+  await mod.processArrivalCodes('u1', null,
+    { id: 'P1', name: 'La bulle', provider: 'channex', address: '1 rue A', checkin_time: '17:00', checkout_time: '12:00' },
+    [{ id: 'R1', arrival: jourParis(0), departure: depart, status: 'confirmed', provider: 'channex', firstName: 'Ana' }], {})
+  assert.equal(claims.length, 1, 'le code est réclamé')
+  const { fenetreDuCode } = require('../lib/cron-arrival-code')
+  assert.equal(claims[0].ends_at, fenetreDuCode(depart, '12:00').endsAt.toISOString(), 'fin = départ de la fiche + 1 h')
+  assert.notEqual(claims[0].ends_at, fenetreDuCode(depart, '09:00').endsAt.toISOString())
+})
+
+test('LE TEST QUI COMPTE : une fiche à « 11h » — le message et la fenêtre disent la même heure (11:00), jamais un code mort à 01:00', async () => {
+  const modele = { id: 't1', lock_id: 'lock-1', event_type: 'menage_done', active: true, earliest_send_time: '00:00', template_text: 'Départ {checkout}. Code : {code_acces}' }
+  const bien = { id: 'P1', name: 'La bulle', provider: 'channex', address: '1 rue A', checkout_time: '11h' }
+  const depart = jourParis(3)
+  const sejour = { id: 'R1', arrival: jourParis(0), departure: depart, status: 'confirmed', provider: 'channex', firstName: 'Ana' }
+  const creation = chargerArrivee({ modele })
+  await creation.mod.processArrivalCodes('u1', null, bien, [sejour], {})
+  const { fenetreDuCode } = require('../lib/cron-arrival-code')
+  assert.equal(creation.claims[0].ends_at, fenetreDuCode(depart, '11:00').endsAt.toISOString())
+  const envoi = chargerArrivee({ modele, codeExistant: { id: 'ac-1', seam_code_id: 's1', code: '123456', status: 'active', created_at: '2026-01-01T00:00:00Z' } })
+  await envoi.mod.processArrivalCodes('u1', null, bien, [sejour], {})
+  assert.equal(envoi.taches.length, 1)
+  assert.match(envoi.taches[0].suggested_reply, /Départ 11:00\. Code : 123456/)
+})
+
+test('l alerte « PIN toujours absent » règle son délai sur l heure d arrivée de la FICHE', () => {
+  const { pinAlertDue } = require('../lib/cron-arrival-code')
+  const dans = (h) => new Date(Date.now() + h * 3600000)
+  const enParis = (d) => ({
+    jour: d.toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' }),
+    heure: new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d)
+  })
+  const loin = enParis(dans(10))
+  const proche = enParis(dans(1))
+  // Code réclamé il y a 20 min : sous le seuil d'une arrivée lointaine (30 min),
+  // au-dessus de celui d'une arrivée proche (5 min).
+  const code = { created_at: new Date(Date.now() - 20 * 60000).toISOString() }
+  const sejour = { arrival: loin.jour, checkInStart: proche.heure }
+  assert.equal(pinAlertDue(code, sejour, { checkin_time: loin.heure }), false, 'la fiche dit « dans 10 h » : on patiente')
+  assert.equal(pinAlertDue(code, { arrival: proche.jour }, { checkin_time: proche.heure }), true, 'la fiche dit « dans 1 h » : on alerte')
+})
+
+test('planDeReprise : une ligne cachée à l IA est signalée, les lignes sans logement sont comptées', () => {
+  const { planDeReprise } = require('../lib/heures-logement')
+  const { plan, orphelines } = planDeReprise({
+    biens: [{ id: 'b1', user_id: 'u1', name: 'Bien', provider_property_id: '1', checkin_time: null, checkout_time: null }],
+    lignes: [
+      { id: 'k1', user_id: 'u1', property_id: '1', type: 'fixed', key: 'checkin', value: '18:00', lisible_par_ia: false },
+      { id: 'k2', user_id: 'u1', property_id: '99', type: 'fixed', key: 'checkin', value: '18:00' }
+    ]
+  })
+  assert.equal(plan[0].heures.checkin.horsIa, true)
+  assert.equal(plan[0].heures.checkout.horsIa, false)
+  assert.equal(orphelines, 1)
+})
+
+// ─── L'exécution de la reprise (constat 8 de la relecture 1) ───────────────
+function doubleReprise ({ ficheAChange = false, echecBase = false } = {}) {
+  const gestes = []
+  const sb = {
+    from (table) {
+      const g = { table, op: 'select', filtres: [] }
+      const b = {
+        update (c) { g.op = 'update'; g.charge = c; return b },
+        delete () { g.op = 'delete'; return b },
+        eq (c, v) { g.filtres.push(['eq', c, v]); return b },
+        is (c, v) { g.filtres.push(['is', c, v]); return b },
+        or (x) { g.filtres.push(['or', x]); return b },
+        select () { return b },
+        maybeSingle: async () => { gestes.push(g); return { data: ficheAChange ? null : { id: 'x' }, error: null } },
+        then (res, rej) { gestes.push(g); return Promise.resolve({ error: echecBase ? { message: 'panne' } : null }).then(res, rej) }
+      }
+      return b
+    }
+  }
+  return { sb, gestes }
+}
+const PLAN = [{ id: 'b1', userId: 'u1', nom: 'Bien', ref: '1', heures: {
+  checkin: { action: 'copier', ecrire: '18:00', supprimerLigne: 'k1', ficheBrute: null },
+  checkout: { action: 'ecart', ecrire: '12:00', supprimerLigne: 'k2', ficheBrute: '11:00' }
+} }]
+
+test('LE TEST QUI COMPTE : --go écrit la fiche SOUS CONDITION, puis retire la ligne de base — dans cet ordre', async () => {
+  const { executerReprise } = require('../lib/heures-logement')
+  const { sb, gestes } = doubleReprise()
+  const bilan = await executerReprise(sb, PLAN, { supprimer: true })
+  assert.deepEqual(gestes.map(g => `${g.table}:${g.op}`), ['properties:update', 'knowledge:delete', 'properties:update', 'knowledge:delete'])
+  assert.ok(gestes[0].filtres.some(f => f[0] === 'or' && f[1] === 'checkin_time.is.null,checkin_time.eq.'), 'une copie exige une fiche encore vide')
+  assert.ok(gestes[2].filtres.some(f => f[0] === 'eq' && f[1] === 'checkout_time' && f[2] === '11:00'), 'un écart exige la valeur lue')
+  assert.ok(gestes[1].filtres.some(f => f[1] === 'property_id' && f[2] === '1'), 'la ligne de base par la RÉFÉRENCE, jamais l UUID')
+  assert.deepEqual([bilan.ecrites, bilan.supprimees, bilan.sautees.length, bilan.echecs.length], [2, 2, 0, 0])
+})
+
+test('--copier écrit la fiche et ne retire AUCUNE ligne de base (avant le merge)', async () => {
+  const { executerReprise } = require('../lib/heures-logement')
+  const { sb, gestes } = doubleReprise()
+  const bilan = await executerReprise(sb, PLAN, { supprimer: false })
+  assert.deepEqual(gestes.map(g => `${g.table}:${g.op}`), ['properties:update', 'properties:update'])
+  assert.equal(bilan.supprimees, 0)
+})
+
+test('fiche changée depuis la lecture : rien n est écrit, la ligne de base RESTE, et on le dit', async () => {
+  const { executerReprise } = require('../lib/heures-logement')
+  const { sb, gestes } = doubleReprise({ ficheAChange: true })
+  const bilan = await executerReprise(sb, PLAN, { supprimer: true })
+  assert.equal(gestes.filter(g => g.op === 'delete').length, 0)
+  assert.equal(bilan.sautees.length, 2)
+  assert.equal(bilan.ecrites, 0)
 })

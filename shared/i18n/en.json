@@ -741,6 +741,8 @@
   "acc.to_complete": "To complete",
   "acc.guest_gets_default": "the guest receives {heure} by default",
   "acc.hour_required": "The time is required.",
+  "acc.hour_invalid": "Time expected as HH:MM.",
+  "acc.logement_unavailable": "This listing is no longer in service.",
   "acc.airbnb_16h": "Airbnb requires check-in to start no later than 4:00 PM.",
   "kb.info_in_listing": "The phone, Wi-Fi and times are in the listing page.",
   "kb.open_listing": "Open the listing",
