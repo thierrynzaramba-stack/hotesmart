@@ -4247,6 +4247,104 @@ Migration et contrôle passés sur staging le 21 novembre à 17:02 (2 lignes à
   `tests/charges-page.test.js`, rouge sans le correctif. Pas de garde touchée :
   pas de nouvelle review.
 
+### 14.22 Lot 8c — charger en masse, parcourir pour valider (22 novembre 2026)
+
+Branche `charges-masse`, partie de `main` (`b2ef2115`, lot 8b en production).
+
+#### 14.22.1 Décisions de Thierry (22 novembre 2026)
+
+1. **La limite de lectures IA passe de 50 à 100 par compte et par jour.**
+2. **On dépose jusqu'à 50 fichiers d'un coup.**
+3. **« Règle de base : toutes les factures pour une entité de base, mais on peut
+   modifier après. »** Les factures d'un dépôt sont rattachées à une même
+   entité ; chacune se corrige ensuite dans sa fiche (logement compris).
+4. **Sur l'ordinateur, la facture s'affiche à droite** des champs, pour
+   modifier les informations en la regardant.
+5. **Deux façons d'enregistrer** : tout d'un coup, ou une par une pour
+   modifier (exemple donné : attribuer un logement de l'entité).
+6. **On parcourt les factures dans l'ordre de dépôt.**
+
+#### 14.22.2 Ce qui est à coder
+
+**Dépôt en masse.**
+- Le choix de fichiers accepte plusieurs fichiers ; au-delà de 50, rien ne
+  part et l'écran le dit.
+- Les fichiers partent **un par un**, par le chemin existant (`envoi`, dépôt
+  à l'URL signée, `confirmer`) : la reconnaissance des tableaux, la
+  conversion HEIC et la lecture IA restent celles d'un dépôt seul.
+- L'écran montre l'avancement (« 12 sur 50 ») ; un fichier refusé ne bloque
+  pas les suivants, et la liste des refus est donnée à la fin, nom par nom.
+- `MAX_ENVOIS_OUVERTS` (30 envois non confirmés sur 24 h) passe à 60, pour
+  qu'un dépôt de 50 ne bute pas sur un reste d'envois abandonnés.
+
+**L'entité de base (décision 3).**
+- C'est l'entité affichée en tête de l'écran au moment du dépôt ; l'écran la
+  nomme à côté du bouton (« Les factures déposées sont rattachées à : … »).
+- Elle part avec `envoi` ; le serveur vérifie qu'elle est une entité **active
+  du compte** (403 sinon) et la pose sur la ligne.
+- La lecture IA la **garde** : la proposition d'entité par le code
+  (`proposerEntite`) ne s'applique qu'à une charge qui n'en a pas.
+- Un tableau d'amortissement reconnu l'efface, comme aujourd'hui (son entité
+  se choisit à l'import).
+
+**La fiche à l'ordinateur (décision 4).**
+- Sur un écran large, la fiche d'une facture s'ouvre en deux colonnes : les
+  champs à gauche, le document à droite (image ou PDF, par l'URL signée de
+  `consulter`, valable 60 s, rechargée à chaque fiche).
+- Au téléphone : voir 14.22.4.
+
+**Parcourir (décisions 5 et 6).**
+- La fiche porte « Enregistrer et suivante » et « Passer », et un compteur
+  (« 3 sur 17 »). L'ordre est celui du dépôt : `cree_le` puis `id`,
+  croissants, sur les factures « À vérifier » du compte.
+- « Enregistrer et suivante » valide par le chemin existant (`valider`) et
+  ouvre la suivante ; à la dernière, la fiche se ferme.
+
+**Enregistrer tout (décision 5).**
+- Un bouton dans « À traiter » : « Enregistrer les N factures complètes ».
+- Une facture est **complète** quand elle est « À vérifier », a une entité,
+  une catégorie et un montant TTC, et ne porte aucun signal non tranché
+  (doublon). Les autres restent dans « À traiter », à faire une par une.
+- Une confirmation dit le compte avant d'agir : « N factures vont être
+  enregistrées telles que lues. M restent à vérifier une par une. »
+- Côté serveur, une action `valider_lot` (au plus 100 identifiants) qui
+  applique à chacune **la même validation** que `valider`, avec les valeurs
+  lues ; elle rend le nombre enregistré et la liste des refus avec leur code.
+
+**Dette 153, soldée dans ce lot.** « À traiter » se lit par curseur, au-delà
+des 50 premières lignes : un dépôt de 50 la dépasserait tout de suite.
+
+#### 14.22.3 Inventaire
+
+| Existant | Devient |
+|---|---|
+| Dépôt d'un fichier à la fois | Conservé, comme dépôt de un. |
+| Fiche d'une facture (champs, « Voir la facture », « Supprimer », « Valider ») | Conservée ; à l'ordinateur, le document s'affiche à droite. « Voir la facture » reste. |
+| Entité proposée par le code à la lecture | Conservée pour une charge sans entité ; une entité de base n'est jamais remplacée. |
+| Limite de 50 lectures IA par jour | 100. |
+| « À traiter » bornée à 50 lignes | Lue par curseur (dette 153). |
+
+#### 14.22.4 Questions ouvertes (à trancher par Thierry)
+
+- **Le téléphone** (règle « le mobile suit l'ordinateur ») : proposition —
+  le dépôt en masse, « Enregistrer et suivante » et « Enregistrer tout »
+  aussi au téléphone ; le document reste derrière « Voir la facture », faute
+  de place pour deux colonnes.
+
+#### 14.22.5 Case PERFORMANCE (à mesurer)
+
+1. Un endpoint d'écran : inchangé (`/api/ecran/charges`), plus une lecture
+   « À traiter suite » par curseur, seulement au clic.
+2. Donnée non urgente : sans objet.
+3. Cache navigateur : sans objet.
+4. `private, no-store` : `valider_lot` passe par `api/charges.js`, déjà posé.
+5. Statiques versionnés : inchangé.
+6. Lecture tronquée : c'est la dette 153 qu'on solde.
+7. Budget : le dépôt de 50 fichiers n'est pas un affichage ; l'écran garde
+   ses 2 appels.
+8. AVANT / APRÈS : à mesurer sur staging (appels, requêtes, octets de
+   l'écran ; durée d'un dépôt de 10 fichiers).
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et
