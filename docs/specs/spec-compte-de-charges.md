@@ -4218,6 +4218,35 @@ littérale, et la charge rendue à l'écran est relue par `lireCharge`
 défait rien : l'écran reçoit l'identifiant et le statut, et recharge. La
 branche revient à **43**. Aucune garde touchée : pas de nouvelle review.
 
+#### 14.21.16 Recette du lot 8b sur staging (21-22 novembre 2026)
+
+Migration et contrôle passés sur staging le 21 novembre à 17:02 (2 lignes à
+`true`) ; lot mergé dans `staging` par le chef de file (`bc1e1ec6`).
+
+- **Reconnaissance, facture PDF** (échéancier BPCE, 6 pages) : « pas un
+  tableau » en 0,6 à 0,9 s aller-retour complet, contre 0,65 s pour un appel
+  témoin sans reconnaissance. M1 : le délai de 6 s est loin.
+- **Reconnaissance, tableau réel** (301 échéances) déposé par Thierry : ligne
+  « Tableau d'amortissement » dans « À traiter », sans montant.
+- **Second import du même fichier** : refusé « déjà importé » — un crédit de la
+  recette du 19 novembre existait encore. Supprimé sur staging, puis import
+  depuis la fiche : crédit de 301 échéances, 12 par exercice, ligne retirée de
+  « À traiter ».
+- **« Tableau d'amortissement » choisi sur l'échéancier BPCE** : refusé « Ce
+  document n'est pas un tableau d'amortissement que nous savons lire », le
+  type revient à « Échéancier », rien n'est écrit.
+- **« Ce n'est pas un tableau : le lire comme une facture »**, sur un tableau
+  de test de 15 échéances (fixture du dépôt, aucune donnée réelle) : dépôt
+  reconnu en 3 s (envoi, dépôt, reconnaissance et relecture de l'écran) ;
+  au clic, l'IA lit le document en 4,6 s, la fiche se repeint en « Facture »
+  à vérifier (type « Échéancier »). Charge de test supprimée ensuite.
+- **Correctif de recette** : après l'import, l'écran restait sur l'entité
+  affichée ; un crédit importé dans une autre entité n'apparaissait nulle
+  part. L'écran passe désormais sur l'entité du crédit, comme le sélecteur
+  d'en-tête (`shared/charges-vue.js`, `importerTableau`). Test dans
+  `tests/charges-page.test.js`, rouge sans le correctif. Pas de garde touchée :
+  pas de nouvelle review.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

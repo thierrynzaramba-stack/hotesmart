@@ -1270,6 +1270,26 @@ test('LE TEST QUI COMPTE (8b) : importer depuis la fiche d\'un tableau reconnu �
   } finally { b.fermer() }
 })
 
+test('8b (recette du 22 nov.) : un crédit importé dans une AUTRE entité que celle affichée — l\'écran passe sur la sienne ; dans la même, il garde son exercice', async () => {
+  const ENT_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const entites = [{ id: ENT, nom: 'Moi', archivee: false, debut_exercice: null }, { id: ENT_B, nom: 'SCI', archivee: false, debut_exercice: null }]
+  const geste = () => ({ ok: true, credit: { id: CREDIT_ID, nb_echeances: 301, premiere_echeance: '2022-02-22', derniere_echeance: '2047-02-22' }, charges: 57, charge_retiree: true })
+  for (const [choisie, attendue] of [[ENT_B, `/api/ecran/charges?entite=${ENT_B}`], [ENT, `/api/ecran/charges?entite=${ENT}&periode=2026`]]) {
+    const b = await monter({ geste, ecran: () => reponseEcran({ entites, aTraiter: [tableau()] }) })
+    try {
+      await b.cliquer(b.$('[data-bind="a-traiter"] .chg-ligne'))
+      const dlg = b.$('[data-bind="fiche"]')
+      b.saisir(dlg.querySelector('[data-credit-champ="preteur"]'), 'Banque')
+      await b.choisir(dlg.querySelector('[data-credit-champ="entite"]'), choisie)
+      await b.cliquer(dlg.querySelector('[data-geste="tableau-importer"]'))
+      for (let i = 0; i < 10; i++) await b.attendre()
+      const urls = b.lecturesEcran().map(f => f.url)
+      assert.equal(urls.length, 2, choisie)
+      assert.equal(urls[1], attendue, 'l\'écran relu est celui de l\'entité du crédit')
+    } finally { b.fermer() }
+  }
+})
+
 test('8b : une ligne du tableau qui ne se prouve pas est NOMMÉE par sa date ; rien ne part sans banque', async () => {
   const geste = () => { throw Object.assign(new Error('x'), { status: 422, error: 'ligne_incoherente', detail: '2023-06-22' }) }
   const b = await monter({ geste, ecran: () => reponseEcran({ aTraiter: [tableau()] }) })
