@@ -113,7 +113,9 @@ test('« À traiter » : son nombre exact, et le geste qui convient à chaque é
     assert.match(texte(panne), /Fournisseur inconnu/)
     assert.match(texte(panne), /non lu/, 'un montant absent n\'est pas 0 €')
     assert.doesNotMatch(texte(panne), /0,00/)
-    assert.match(texte(z), /Et 49 de plus/)
+    // Lot 8c (dette 153) : la suite se LIT, par un bouton — plus une phrase
+    // qui renvoyait à une liste où ces factures n'étaient pas.
+    assert.doesNotMatch(texte(z), /de plus, dans la liste/)
   } finally { b.fermer() }
 })
 
@@ -931,7 +933,7 @@ test('LE TEST QUI COMPTE : un PDF part en trois temps — envoi, dépôt au stoc
     const suite = b.journal.fetch.map(f => `${f.methode} ${f.url.replace(/\?.*$/, '')}`)
     assert.deepEqual(suite, ['GET /api/ecran/charges', 'POST /api/charges', 'PUT https://stockage.test/envoi/x', 'POST /api/charges', 'GET /api/ecran/charges'])
     const [envoi, confirmer] = b.gestes()
-    assert.deepEqual(envoi, { action: 'envoi', type: 'application/pdf', octets: 8, origine: 'fichier' })
+    assert.deepEqual(envoi, { action: 'envoi', type: 'application/pdf', octets: 8, origine: 'fichier', entite_id: ENT })
     assert.deepEqual(confirmer, { action: 'confirmer', id: lue.id })
     assert.equal(b.journal.fetch[2].entetes['x-upsert'], 'false', 'un dépôt n\'écrase jamais un fichier')
     assert.equal(b.$('[data-champ="fournisseur_nom"]').value, 'EDF', 'la fiche s\'ouvre pré-remplie')
@@ -956,7 +958,7 @@ test('une photo est RÉDUITE avant l\'envoi, et part en JPEG', async () => {
   try {
     await b.deposerFichier('photo.png', 'image/png', 'png-lourd-et-original')
     const [envoi] = b.gestes()
-    assert.deepEqual(envoi, { action: 'envoi', type: 'image/jpeg', octets: 'jpeg-reduit'.length, origine: 'photo' })
+    assert.deepEqual(envoi, { action: 'envoi', type: 'image/jpeg', octets: 'jpeg-reduit'.length, origine: 'photo', entite_id: ENT })
     assert.match(b.$('[data-bind="fiche"]').textContent, /La lecture reprendra seule/)
   } finally { b.fermer() }
 })
@@ -986,7 +988,7 @@ test('LE TEST QUI COMPTE : une image WebP (messageries) est acceptée et part en
     await b.deposerFichier('facture.webp', 'image/webp', 'webp-original')
     assert.deepEqual(b.journal.reduits, [{ type: 'image/webp', taille: 'webp-original'.length }])
     const [envoi] = b.gestes()
-    assert.deepEqual(envoi, { action: 'envoi', type: 'image/jpeg', octets: 'jpeg-reduit'.length, origine: 'photo' })
+    assert.deepEqual(envoi, { action: 'envoi', type: 'image/jpeg', octets: 'jpeg-reduit'.length, origine: 'photo', entite_id: ENT })
   } finally { b.fermer() }
 })
 
@@ -1006,7 +1008,7 @@ test('LE TEST QUI COMPTE (§14.19) : une photo HEIC que l\'appareil ne sait pas 
   try {
     await b.deposerFichier('photo.heif', 'image/heif', 'heif-original')
     const [envoi, confirmer] = b.gestes()
-    assert.deepEqual(envoi, { action: 'envoi', type: 'image/heif', octets: 'heif-original'.length, origine: 'photo' })
+    assert.deepEqual(envoi, { action: 'envoi', type: 'image/heif', octets: 'heif-original'.length, origine: 'photo', entite_id: ENT })
     assert.equal(confirmer.action, 'confirmer')
     const depot = b.journal.fetch.find(f => f.url.startsWith('https://stockage.test/'))
     const fichier = depot.corps.get('')
@@ -1027,7 +1029,7 @@ test('le sélecteur propose toutes les images, HEIC compris ; un fichier ni PDF 
   // ⚠ LA LISTE EST EXPLICITE, PAS `image/*` : « /* » dans une page se lit
   // comme un début de commentaire par les tests qui nettoient le code
   // (tests/pages-non-delegables.test.js), et masquait la garde de la page.
-  assert.match(html, /<input type="file" data-bind="fichier" accept="application\/pdf,image\/jpeg,image\/png,image\/webp,image\/gif,image\/avif,image\/bmp,image\/tiff,image\/heic,image\/heif,\.heic,\.heif"/)
+  assert.match(html, /<input type="file" data-bind="fichier" multiple accept="application\/pdf,image\/jpeg,image\/png,image\/webp,image\/gif,image\/avif,image\/bmp,image\/tiff,image\/heic,image\/heif,\.heic,\.heif"/)
   const { typeDuFichier } = await import('../shared/charges-vue.js')
   assert.equal(typeDuFichier({ type: '', name: 'a.HEIC' }), 'image/heic')
   assert.equal(typeDuFichier({ type: 'application/octet-stream', name: 'b.jpg' }), 'image/jpeg', 'un type générique cède à l\'extension')
