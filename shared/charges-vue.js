@@ -673,6 +673,11 @@ export function monter (racine, deps) {
       const r = await deps.agir({ action: 'tableau_importer', id: c.id, preteur, entite_id: entite, bien_id: bien || null })
       const cr = (r && r.credit) || {}
       etat.creditRetour = { texte: t('charges.credit_importe', { n: cr.nb_echeances, charges: r.charges, debut: jourLisible(cr.premiere_echeance), fin: jourLisible(cr.derniere_echeance) }), erreur: false }
+      // ⚠ L'ÉCRAN SUIT LE CRÉDIT (recette du 22 novembre 2026) : importé dans
+      // une autre entité que celle affichée, il resterait invisible — la ligne
+      // disparaît de « À traiter » et rien n'apparaît. L'écran passe sur son
+      // entité, au même geste que le sélecteur d'en-tête.
+      if (entite !== etat.entite) { etat.generation++; etat.entite = entite; etat.periode = '' }
       fermerFiche()
       await recharger()
     } catch (e) {
