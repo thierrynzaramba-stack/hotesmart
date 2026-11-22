@@ -126,7 +126,7 @@ test('⚠ confirmer AU PLAFOND du jour : l’IA n’est PAS appelée, la charge 
   let appels = 0
   const r = await appeler({
     corps: { action: 'confirmer', id: ID },
-    repondre: confirmable(50),
+    repondre: confirmable(100),
     stockage: { download: () => ({ data: blob(PDF), error: null }) },
     lire: async () => { appels++; return { echec: true } }
   })
@@ -156,7 +156,7 @@ const ech = (i, date) => ({ indice: i, rang: i, date, interets_cents: 1000, assu
 const TROIS = () => ({ ok: true, echeances: [ech(1, '2026-09-22'), ech(2, '2026-10-22'), ech(3, '2026-12-22')] })
 
 test('LE TEST QUI COMPTE (8b) : confirmer un PDF qui est un tableau d\'amortissement — AUCUN appel à l\'IA, même AU PLAFOND du jour, et la charge passe `tableau`', async () => {
-  for (const dejaLues of [3, 50]) {
+  for (const dejaLues of [3, 100]) {
     let ia = 0
     const r = await appeler({
       corps: { action: 'confirmer', id: ID },
@@ -234,6 +234,14 @@ test('8b : tableau_en_facture — la charge repart en lecture et l\'IA la lit TO
   assert.equal(ia, 1)
   assert.equal(r.lectures.length, 0, 'sinon elle reviendrait `tableau` aussitôt')
   assert.ok(r.requetes.some(x => x.op === 'update' && x.charge.statut === 'a_lire'))
+})
+
+// ─── Lot 8c, recette : « Enregistrer les factures complètes » retiré ───────
+test('8c, recette : `valider_lot` n\'existe plus — action inconnue, refusée avant toute requête', async () => {
+  const r = await appeler({ corps: { action: 'valider_lot', ids: ['33333333-3333-4333-8333-3333333333a1'] } })
+  assert.equal(r.statut, 400)
+  assert.equal(r.charge.error, 'action_inconnue')
+  assert.equal(r.requetes.length, 0)
 })
 
 test('8b : tableau_importer — le titulaire seul, le crédit sous SON compte, la charge retirée ; un membre est refusé avant toute requête', async () => {

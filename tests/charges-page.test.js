@@ -113,7 +113,9 @@ test('« À traiter » : son nombre exact, et le geste qui convient à chaque é
     assert.match(texte(panne), /Fournisseur inconnu/)
     assert.match(texte(panne), /non lu/, 'un montant absent n\'est pas 0 €')
     assert.doesNotMatch(texte(panne), /0,00/)
-    assert.match(texte(z), /Et 49 de plus/)
+    // Lot 8c (dette 153) : la suite se LIT, par un bouton — plus une phrase
+    // qui renvoyait à une liste où ces factures n'étaient pas.
+    assert.doesNotMatch(texte(z), /de plus, dans la liste/)
   } finally { b.fermer() }
 })
 
@@ -1027,7 +1029,7 @@ test('le sélecteur propose toutes les images, HEIC compris ; un fichier ni PDF 
   // ⚠ LA LISTE EST EXPLICITE, PAS `image/*` : « /* » dans une page se lit
   // comme un début de commentaire par les tests qui nettoient le code
   // (tests/pages-non-delegables.test.js), et masquait la garde de la page.
-  assert.match(html, /<input type="file" data-bind="fichier" accept="application\/pdf,image\/jpeg,image\/png,image\/webp,image\/gif,image\/avif,image\/bmp,image\/tiff,image\/heic,image\/heif,\.heic,\.heif"/)
+  assert.match(html, /<input type="file" data-bind="fichier" multiple accept="application\/pdf,image\/jpeg,image\/png,image\/webp,image\/gif,image\/avif,image\/bmp,image\/tiff,image\/heic,image\/heif,\.heic,\.heif"/)
   const { typeDuFichier } = await import('../shared/charges-vue.js')
   assert.equal(typeDuFichier({ type: '', name: 'a.HEIC' }), 'image/heic')
   assert.equal(typeDuFichier({ type: 'application/octet-stream', name: 'b.jpg' }), 'image/jpeg', 'un type générique cède à l\'extension')

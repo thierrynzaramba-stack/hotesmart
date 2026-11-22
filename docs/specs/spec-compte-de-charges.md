@@ -4247,6 +4247,409 @@ Migration et contrôle passés sur staging le 21 novembre à 17:02 (2 lignes à
   `tests/charges-page.test.js`, rouge sans le correctif. Pas de garde touchée :
   pas de nouvelle review.
 
+### 14.22 Lot 8c — charger en masse, parcourir pour valider (22 novembre 2026)
+
+Branche `charges-masse`, partie de `main` (`b2ef2115`, lot 8b en production).
+
+#### 14.22.1 Décisions de Thierry (22 novembre 2026)
+
+1. **La limite de lectures IA passe de 50 à 100 par compte et par jour.**
+2. **On dépose jusqu'à 50 fichiers d'un coup.**
+3. **« Règle de base : toutes les factures pour une entité de base, mais on peut
+   modifier après. »** Les factures d'un dépôt sont rattachées à une même
+   entité ; chacune se corrige ensuite dans sa fiche (logement compris).
+4. **Sur l'ordinateur, la facture s'affiche à droite** des champs, pour
+   modifier les informations en la regardant.
+5. **Deux façons d'enregistrer** : tout d'un coup, ou une par une pour
+   modifier (exemple donné : attribuer un logement de l'entité).
+   ⚠ « Tout d'un coup » est **retiré en recette** (14.22.9) : une par une
+   seulement, ouverte d'elle-même après le dépôt.
+6. **On parcourt les factures dans l'ordre de dépôt.**
+
+#### 14.22.2 Ce qui est à coder
+
+**Dépôt en masse.**
+- Le choix de fichiers accepte plusieurs fichiers ; au-delà de 50, rien ne
+  part et l'écran le dit.
+- Les fichiers partent **un par un**, par le chemin existant (`envoi`, dépôt
+  à l'URL signée, `confirmer`) : la reconnaissance des tableaux, la
+  conversion HEIC et la lecture IA restent celles d'un dépôt seul.
+- L'écran montre l'avancement (« 12 sur 50 ») ; un fichier refusé ne bloque
+  pas les suivants, et la liste des refus est donnée à la fin, nom par nom.
+- `MAX_ENVOIS_OUVERTS` (30 envois **non confirmés** sur 24 h) **reste à 30**
+  (correction au codage) : les fichiers partent un par un et chacun est
+  confirmé avant le suivant. ⚠ Un envoi qui échoue laisse sa ligne ouverte
+  24 h (review, M6) : **trois pannes de suite arrêtent le dépôt**, et l'écran
+  dit combien de fichiers ne sont pas partis.
+
+**L'entité (décision 3, remplacée le 22 novembre 2026 — voir 14.22.8).**
+- ~~L'entité affichée devient l'entité de base du dépôt~~ : abandonné en
+  recette. L'entité de chaque facture est **reconnue** à la lecture (SIRET ou
+  nom exact du destinataire), et **laissée vide dans le doute** ; l'hôte la
+  choisit alors pour enregistrer.
+
+**La fiche à l'ordinateur (décision 4).**
+- Sur un écran large, la fiche d'une facture s'ouvre en deux colonnes : les
+  champs à gauche, le document à droite (image ou PDF, par l'URL signée de
+  `consulter`, valable 60 s, rechargée à chaque fiche).
+- Au téléphone : voir 14.22.4.
+
+**Parcourir (décisions 5 et 6).**
+- La fiche porte « Enregistrer et suivante » et « Passer », et un compteur
+  (« 3 sur 17 »). L'ordre est celui du dépôt : `cree_le` puis `id`,
+  croissants, sur les factures « À vérifier » du compte.
+- « Enregistrer et suivante » valide par le chemin existant (`valider`) et
+  ouvre la suivante ; à la dernière, la fiche se ferme.
+
+**Enregistrer tout (décision 5) — RETIRÉ en recette (14.22.9).**
+- Un bouton dans « À traiter » : « Enregistrer les N factures complètes ».
+- Une facture est **complète** quand elle est « À vérifier », a une entité,
+  une catégorie et un montant TTC, et ne porte aucun signal non tranché
+  (doublon). Les autres restent dans « À traiter », à faire une par une.
+- Une confirmation dit le compte avant d'agir : « N factures vont être
+  enregistrées telles que lues. M restent à vérifier une par une. »
+- Côté serveur, une action `valider_lot` (au plus **20** identifiants par
+  appel — correction au codage : six requêtes par facture doivent tenir dans
+  les 60 s d'une fonction ; l'écran enchaîne les appels) qui applique à
+  chacune **la même validation** que `valider`, avec les valeurs lues ; elle
+  rend le nombre enregistré et la liste des refus avec leur code.
+
+**Dette 153, soldée dans ce lot.** « À traiter » se lit par curseur, au-delà
+des 50 premières lignes : un dépôt de 50 la dépasserait tout de suite.
+
+#### 14.22.3 Inventaire
+
+| Existant | Devient |
+|---|---|
+| Dépôt d'un fichier à la fois | Conservé, comme dépôt de un. |
+| Fiche d'une facture (champs, « Voir la facture », « Supprimer », « Valider ») | Conservée ; à l'ordinateur, le document s'affiche à droite. « Voir la facture » reste. |
+| Entité proposée par le code à la lecture | Conservée telle quelle : reconnue, ou vide dans le doute (14.22.8). |
+| Limite de 50 lectures IA par jour | 100. |
+| « À traiter » bornée à 50 lignes | Lue par curseur (dette 153). |
+
+#### 14.22.4 Le téléphone (décision de Thierry, 22 novembre 2026 : « oui d'accord »)
+
+Le dépôt en masse et « Vérifier une par une » existent aussi au téléphone
+(« Enregistrer tout » est retiré, 14.22.9), et la fenêtre de chargement y est
+la même. Le document y reste derrière « Voir la facture », faute de
+place pour deux colonnes : la fiche à deux colonnes n'est montée qu'au-delà de
+1 100 px de large (`deps.ecranLarge`), et rien n'est demandé au serveur
+au-dessous.
+
+#### 14.22.5 Case PERFORMANCE (à mesurer)
+
+1. Un endpoint d'écran : inchangé (`/api/ecran/charges`), plus une lecture
+   « À traiter suite » par curseur, seulement au clic.
+2. Donnée non urgente : sans objet.
+3. Cache navigateur : sans objet.
+4. `private, no-store` : inchangé (`api/charges.js` n'a plus d'action
+   nouvelle depuis 14.22.9).
+5. Statiques versionnés : inchangé.
+6. Lecture tronquée : c'est la dette 153 qu'on solde.
+7. Budget : le dépôt de 50 fichiers n'est pas un affichage ; l'écran garde
+   ses 2 appels.
+8. AVANT / APRÈS : à mesurer sur staging (appels, requêtes, octets de
+   l'écran ; durée d'un dépôt de 10 fichiers). Coût connu dès le code : à
+   l'ordinateur, chaque fiche ouverte demande une adresse de lecture
+   (`consulter`, une requête), pour afficher la facture.
+
+#### 14.22.6 Ce qui est codé (22 novembre 2026)
+
+**Serveur.**
+- `lib/charges.js` : `PLAFOND_LECTURES_JOUR` = 100. `ouvrirEnvoi` reçoit
+  `entiteId` : identifiant validé par motif, entité lue dans le compte, refus
+  400 `entite_invalide`, 403 `entite_hors_compte`, 409 `entite_archivee`,
+  **avant** toute ligne ni URL ; posée sur la ligne de l'envoi.
+  `appliquerLecture` relit `entite_juridique_id` et la **garde** ; les
+  entités ne sont lues (pour la proposition) que s'il n'y en a pas.
+  `estComplete`, `validerTelleQueLue`, `validerLot` (doublons retirés, motif
+  des identifiants, entités lues une fois pour le lot, une panne arrête le
+  lot et rend ce qui est déjà passé).
+- `api/charges.js` : `envoi` transmet `entite_id` ; action `valider_lot`.
+- `lib/charges/ecran.js` : `aTraiter(db, compte, curseur)` lit `PAGE + 1` et
+  rend `suite` ; la condition de la file et celle du curseur sont dans **un
+  seul** `or` (`and(or(…),or(…))`), jamais deux paramètres `or`. `aVerifier`
+  : statut `a_verifier`, `cree_le` puis `id` croissants, nombre exact à la
+  première page. `lireCurseurArrivee` : `cree_le|id`, motifs ancrés.
+- `api/ecran/charges.js` : `?suite_a_traiter=<curseur>` et
+  `?parcours=debut|<curseur>`, chacun une seule lecture ; un curseur forgé
+  est refusé en 400 avant toute requête ; la garde (titulaire) est celle de
+  l'écran.
+
+**Écran** (`shared/charges-vue.js`, `pages/charges.html`, `shared/ui.css`).
+- Le sélecteur de fichiers est `multiple`. Un seul fichier : le geste d'avant
+  (sa fiche s'ouvre). Plusieurs : « Dépôt 3 sur 12… », un par un, puis
+  « 10 factures déposées. 2 refusées : a.txt (motif) ; … », une seule
+  relecture de l'écran. Plus de 50 : rien ne part.
+- ~~L'entité de base est nommée sous le bouton~~ : retiré en recette
+  (14.22.8).
+- « À traiter » : « Afficher plus » à la place de « Et N de plus » ; deux
+  boutons dès qu'une facture est à vérifier : « Vérifier une par une » et
+  « Enregistrer les factures complètes ».
+- Parcours : compteur « 3 sur 17 », « Passer », « Enregistrer et suivante »
+  (le chemin `valider`) ; « Supprimer » passe aussi à la suivante ;
+  « Garder les deux » repeint la même fiche ; la page suivante se lit au fil ;
+  fermer la fiche arrête le parcours et relit l'écran.
+- « Enregistrer tout » : toute la file relue (40 pages au plus), les
+  complètes seules, confirmation avec les deux nombres, paquets de 20, bilan.
+- À l'ordinateur : fiche en deux colonnes (480 px de champs, la facture
+  dans un cadre à droite), adresse de 60 s demandée pour la fiche ouverte ;
+  une réponse arrivée après un changement de fiche est jetée.
+- `estComplete` est la même règle qu'au serveur, qui reste la garde.
+
+**Registre.** Dette 153 barrée, soldée par ce lot (effective en production).
+
+**Tests.** `tests/charges-masse.test.js` (serveur), `tests/charges-masse-page.test.js`
+(écran), ajouts à `charges-endpoint`, `charges-ecran`, `charges-page`,
+`charges-writer` ; le banc sait monter un écran d'ordinateur et déposer
+plusieurs fichiers. Contre-épreuve : vingt sabotages, chacun fait rougir au
+moins un test (entité d'un autre compte ou archivée acceptée, entité de base
+remplacée à la lecture, doublon compté complet au serveur et à l'écran, avoir
+signé deux fois, panne qui n'arrête pas le lot, lot sans borne, suite sans
+curseur, parcours à l'envers, entité non transmise, limite de 50 absente, un
+refus qui arrête le dépôt, entité archivée envoyée, pas de confirmation,
+valider qui ne passe pas à la suivante, page suivante non lue, commission en
+deux colonnes, document d'une autre fiche, fermeture qui ne relit pas).
+Suite complète : 9 250 verts à l'heure réelle, et à J+60.
+
+#### 14.22.7 Review du lot 8c (22 novembre 2026)
+
+Brief : arbre `/home/claude/hotesmart-8c`, branche `charges-masse`, plage
+`b2ef211591a5fa4babd7f2d44d2833ca2b546e2b..e5f52370d425a9fa7e39c8a996af45af414855ee`.
+Les fichiers cités sont tous dans la plage. **Aucun constat de sécurité** :
+les correctifs ne sont pas re-reviewés (une review par commit).
+
+**Rapport, recopié tel quel.**
+
+Review du lot 8c, branche `charges-masse` : aucun constat de sécurité, un constat bloquant
+
+**Arbre lu :** `/home/claude/hotesmart-8c`. **Branche :** `charges-masse`. **SHA de `git rev-parse HEAD` :** `e5f52370d425a9fa7e39c8a996af45af414855ee`. **Plage relue :** `b2ef211591a5fa4babd7f2d44d2833ca2b546e2b..e5f52370d425a9fa7e39c8a996af45af414855ee` (4 commits, 21 fichiers). Tous les fichiers cités ci-dessous sont dans ce diff. Je n'ai rien écrit dans l'arbre ; mes essais sont dans `/tmp/revue-8c/`. Les 6 fichiers de tests du lot passent : 223 verts, 0 rouge.
+
+##### SÉCURITÉ
+
+Rien trouvé (détail dans « Vérifié sans constat »).
+
+##### BLOQUANT
+
+**B1. Un dépôt de plusieurs fichiers se répartit sur deux entités si l'hôte change l'entité affichée pendant le dépôt.** `shared/charges-vue.js:1318`
+- **Cause :** dans `deposerUn`, `const base = entiteDeBase()` relit l'entité affichée **à chaque fichier**. `envoyerTous` (l. 1353) ne la fixe pas au départ.
+- **Pourquoi c'est probable :** un dépôt de 50 fichiers prend plusieurs minutes, car chaque `confirmer` attend la lecture IA. Pendant ce temps, la page reste utilisable, et changer d'entité pour regarder les totaux d'une autre société est un geste naturel.
+- **Scénario mesuré** (banc jsdom, `/tmp/revue-8c/essai-page.test.js`) : 3 fichiers déposés, l'hôte passe de « Moi » à « SCI » pendant le premier `confirmer`. Les `entite_id` envoyés sont `[ENT, ENT2, ENT2]`. Le bilan affiche « 3 factures déposées. » sans rien signaler.
+- **Conséquence :** des factures rattachées à une autre entité que celle choisie au dépôt, ce qui contredit la décision 3. « Enregistrer tout » peut ensuite les valider dans la mauvaise entité sans qu'aucune fiche ait été ouverte.
+- **Correction :** lire `entiteDeBase()` une fois avant la boucle, et la passer à `deposerUn`.
+
+##### MINEUR
+
+**M1. Un tableau d'amortissement reconnu garde l'entité de base, alors que la spec dit le contraire.**
+- **Où :** `lib/charges.js:369`. `champsDeTableau` ne remet pas `entite_juridique_id` à vide, alors que `passerEnTableau` le fait (l. 1068).
+- **Mesuré** (`/tmp/revue-8c/essai-serveur.test.js`) : sur une charge `a_lire` qui porte une entité, l'écriture `tableau` ne touche pas `entite_juridique_id`.
+- **Contradiction :** la spec §14.22.2 (`docs/specs/spec-compte-de-charges.md:4289`) dit « Un tableau d'amortissement reconnu l'efface, comme aujourd'hui ».
+- **Effet visible :** la ligne « Tableau d'amortissement », sans montant, apparaît aussi dans « Factures de <entité> ». La liste filtre par entité sur tous les statuts sauf `envoi`. Aucun total n'est faussé : le résumé ne compte que `a_verifier` et `validee`.
+- **Aucun test ne couvre ce cas.** Il faut corriger soit le code, soit la spec.
+
+**M2. Le parcours rouvre la fiche si l'hôte la ferme pendant la lecture de la page suivante.** `shared/charges-vue.js:1182-1193`
+- **Cause :** `suivante()` garde `p` en mémoire et, après l'`await pageDuParcours`, ne vérifie pas que le parcours tourne toujours.
+- **Mesuré** (`essai-parcours.test.js`) : « Passer » sur la dernière facture de la page, puis Échap pendant la lecture. Quand la réponse arrive, la fiche se rouvre sur « Fournisseur 2 », hors parcours, avec un bouton « Valider ».
+
+**M3. Une facture est sautée après un échec de lecture de la page suivante.** Même fonction, l. 1185 : `p.pos++` est fait avant la lecture.
+- **Mesuré** (`essai-saut.test.js`) : la page C1 échoue une fois. L'erreur s'affiche dans la fiche. Un nouveau « Passer » ouvre « Fournisseur 3 » : la facture 2 n'est jamais présentée.
+- **Variante après « Enregistrer et suivante » :** le bouton reste affiché sur une facture déjà validée. Un second clic la revalide, ce qui est sans dégât, puis ferme le parcours.
+
+**M4. La fiche d'un tableau garde la mise en page à deux colonnes.** `shared/charges-vue.js:672`
+- **Cause :** `peindreFicheTableau` ne retire pas la classe `chg-fiche--double`. Seule `peindreFiche` la bascule (l. 969).
+- **Mesuré** (banc, puis rendu Chrome headless) : à l'ordinateur, une facture ouverte puis un tableau ouvert donnent une fiche de 1280 px, avec 480 px de contenu et environ 800 px vides à droite.
+- **Même effet en plein parcours :** quand le type passe à « Tableau d'amortissement » (`changerNature` → `ouvrirFiche`).
+
+**M5. L'en-tête de « À traiter » déborde au téléphone.** `shared/ui.css:2285` et `:2364`
+- **Cause :** `.chg-bloc__tete` ne passe pas à la ligne (`flex-wrap` absent), et les boutons `.btn` sont en `nowrap`. Le bloc de boutons ne peut pas devenir plus étroit que « Enregistrer les factures complètes ».
+- **Mesuré** (Chrome headless, police de repli car Plus Jakarta Sans n'est pas installée ici) :
+  - à 360 px de large, la page défile horizontalement jusqu'à 406 px ;
+  - à 390 px, le débordement est encore de 16 px.
+- La fiche elle-même ne déborde pas au téléphone.
+
+**M6. `MAX_ENVOIS_OUVERTS` = 30 suppose qu'aucun envoi n'échoue (`lib/charges.js:57`, spec l. 4279).**
+- **Cause :** un dépôt au stockage (PUT) raté, ou un `confirmer` qui rend 503 (`stockage`, `conversion_occupee`), laisse sa ligne `envoi` ouverte pendant 24 h. `envoyerTous` continue malgré les pannes.
+- **Scénario :** un dépôt de photos en 4G instable, où les petits appels d'API passent mais les gros dépôts échouent. Les lignes ouvertes s'accumulent ; à 30, chaque `envoi` est refusé (429 `trop_d_envois`) pour tout le compte jusqu'à 24 h.
+- **Contradiction :** la phrase de la spec « un dépôt de 50 n'en tient jamais plus d'un ouvert à la fois » n'est vraie que si tout réussit.
+- **Piste :** supprimer la ligne quand le dépôt échoue, ou arrêter le dépôt après N pannes de suite.
+- Constat **lu**, pas mesuré.
+
+**M7. Un test n'apporte pas la preuve qu'il annonce.** `tests/charges-masse.test.js:116`
+- **Ce que le test affirme :** que `valider_lot` garde la période de la facture.
+- **Sabotage mesuré** (copie par `git archive` dans `/tmp`) : avec `validerTelleQueLue` qui envoie `periode_debut: null, periode_fin: null` (la période est alors effacée), `charges-masse` et `charges-endpoint` restent à 26 verts sur 26.
+- **Pourquoi :** la ligne de test n'a pas de période, et l'assertion accepte `null`.
+- **Le code, lui, est juste :** la période n'est pas envoyée, donc `valider` garde celle de la charge.
+
+**M8. Une facture déjà validée ailleurs est revalidée avec des valeurs périmées.** Constat lu.
+- **Cause :** le parcours ouvre les lignes telles qu'elles ont été lues au début, parfois des dizaines de minutes plus tôt.
+- **Scénario :** une facture validée entre-temps depuis un autre onglet ou appareil s'affiche « À vérifier ». « Enregistrer et suivante » la revalide, car `validee` est accepté par `valider`, et écrase sans un mot la correction faite ailleurs.
+- **Si la facture a été supprimée ailleurs :** l'erreur 404 s'affiche dans la fiche, et « Passer » continue.
+
+**M9. Une entité de base archivée avant la lecture IA est gardée.** `lib/charges.js:391`. Constat lu.
+- **Effet :** `estComplete` la compte comme complète, puis `valider_lot` la refuse en `entite_archivee` ; la fiche présélectionne l'entité archivée. Avant le lot, la proposition du code aurait choisi une entité active.
+- **Cas rare :** il faut que la lecture soit différée par le plafond ou une panne, puis faite par le cron.
+
+**Question produit à faire trancher par Thierry (lue, pas un défaut) :**
+- « Enregistrer tout » valide **toutes** les « À vérifier » complètes du compte, toutes entités confondues.
+- Cela inclut les factures dont l'entité n'est qu'une **proposition du code** : arrivées par e-mail, ou déposées avant le lot. Or le commentaire du code dit « la proposition est un confort, la validation la redemandera ».
+- La confirmation ne nomme pas les entités concernées.
+
+##### Vérifié sans constat
+
+- **Gardes (lu, et tests du lot) :**
+  - `api/charges.js` (`envoi` avec `entite_id`, `valider_lot`) et `api/ecran/charges.js` (`suite_a_traiter`, `parcours`) refusent un non-titulaire avant toute lecture.
+  - En-tête `private, no-store` posé avant le 405.
+- **Cloisonnement par compte :**
+  - Toutes les lectures et écritures de `charges` portent `user_id = compte`.
+  - L'entité envoyée à `envoi` est vérifiée par motif, puis lue dans le compte : refus 400, 403 ou 409, avant toute ligne et toute URL.
+  - Les identifiants de `valider_lot` sont résolus par `chargeDuCompte`. Un identifiant d'un autre compte rend 404 `charge_introuvable`, comme un identifiant inexistant : on ne peut pas savoir qu'il existe.
+  - Une liste de plus de 20, ou contenant un identifiant mal formé, est refusée en 400 avant toute requête.
+- **Curseurs :** `lireCurseurArrivee` valide l'instant et l'identifiant par des motifs ancrés, et l'instant est mis entre guillemets dans le filtre. Aucune injection possible dans `auDelaDe`. L'encodage de l'URL garde le `+` du fuseau.
+- **Imbrication `and(or(…),or(…))` dans un seul `.or()` (lu) :** la grammaire des opérateurs logiques de PostgREST est récursive. `or=(and(P,Q))` équivaut à P ET Q, et la forme non imbriquée du même filtre tourne déjà en production. Non exécuté contre un vrai PostgREST.
+- **Pagination de « À traiter » et du parcours :** les curseurs sont stricts et l'ordre est total (`cree_le`, puis `id`). Ni doublon ni trou quand des factures sortent de la file ; « Passer » ne fait pas de double. La garde de génération de « Afficher plus » de « À traiter » est correcte.
+- **`validerLot` et `validerTelleQueLue` :**
+  - Elles passent par `valider` : même catégorie, même entité active du compte, même logement de l'entité, même archivage, même clé de doublon.
+  - Avoir : montant remis positif par `Math.abs`, puis signé par `montantsDuType`.
+  - Avis d'impôt : HT = TTC et TVA = 0.
+  - Période non envoyée, donc gardée.
+  - La mémoïsation des entités se fait par appel, pour un seul compte. Un échec mémorisé arrête de toute façon le lot en 503.
+- **Lecture par le cron :** `lireEnAttente` passe par `appliquerLecture`, donc garde l'entité comme l'écran.
+- **Coût :**
+  - Plafond de lectures IA à 100.
+  - `valider_lot` : environ 4 requêtes par facture, au plus une dizaine, donc moins de 200 pour 20 factures ; ça tient dans les 60 s.
+  - Le dépôt se fait en série : une conversion HEIC ou une reconnaissance de tableau à la fois.
+  - Un `consulter` par fiche ouverte à l'ordinateur, plus un à chaque fiche repeinte (« Garder les deux » en parcours) ; rien au téléphone.
+- **Cadre du document :**
+  - Il pointe vers une autre origine (le stockage Supabase), donc le document n'accède jamais à la page.
+  - Seuls PDF, JPEG et PNG sont stockés (le HEIC est converti) : pas de SVG, pas de téléchargement forcé.
+  - `referrerpolicy=no-referrer` est posé, et aucune règle CSP de la page ne bloque le cadre.
+  - La réponse tardive d'une autre fiche est bien jetée (test mesuré).
+  - Le rendu Chrome donne une colonne de 480 px pour les champs et un cadre de 798 × 813 px.
+  - **Non vérifiable ici :** un éventuel en-tête anti-cadre (`X-Frame-Options`) du stockage Supabase. À regarder en recette sur staging.
+- **i18n :** `scripts/i18n-check.js` passe avec 1662 clés en fr, en et es. Toutes les nouvelles clés sont utilisées, les `refus_*` par leur code. `a_traiter_plus` est retirée partout. Aucun texte en dur affiché.
+- **Contre-épreuve des tests de page contre le code d'avant :** 9 sur 11 rougissent. Les deux qui restent verts (« entité archivée affichée » et « commission en une colonne ») sont des gardes de non-régression, chacune couplée à un test positif qui, lui, rougit.
+
+**Ce qui a été fait de chaque constat.**
+- **B1 — corrigé.** L'entité de base est lue une fois, au départ du dépôt,
+  et passée à chaque fichier. Test : l'entité change pendant le premier
+  `confirmer`, les trois envois gardent la première ; rouge sans le correctif.
+- **M1 — corrigé (le code suit la spec).** `champsDeTableau` efface l'entité
+  et le logement. Test de 8b mis à jour.
+- **M2, M3 — corrigés.** `suivante()` n'avance la position qu'une fois la
+  suivante connue, et ne rouvre rien si le parcours a été arrêté pendant la
+  lecture. Tests : page qui échoue une fois (aucune facture sautée), fiche
+  fermée pendant la lecture (ne se rouvre pas) ; rouges sans les correctifs.
+- **M4 — corrigé.** La fiche d'un tableau retire la mise en page à deux
+  colonnes. Test.
+- **M5 — corrigé.** L'en-tête de « À traiter » passe à la ligne ; au
+  téléphone, les deux boutons prennent toute la largeur et leur texte peut se
+  couper.
+- **M6 — corrigé.** Trois pannes de suite arrêtent le dépôt, avec le nombre
+  de fichiers non partis. Test.
+- **M7 — corrigé.** Le test porte une période, et vérifie qu'elle est gardée.
+- **M8 — non corrigé, noté.** La fiche d'une facture validée ailleurs entre-
+  temps se valide encore : c'était déjà vrai d'une fiche ouverte depuis
+  « À traiter » avant le lot. Une garde demanderait que `valider` refuse une
+  facture déjà validée quand l'écran l'attend « À vérifier » : contrat de
+  `valider` à changer, hors de ce lot.
+- **M9 — corrigé.** Une entité de base archivée entre le dépôt et la lecture
+  cède à la proposition du code ; des entités illisibles la gardent. Test.
+- **Question produit — tranchée par Thierry le 22 novembre 2026 (« ça me
+  va »)** : la confirmation de « Enregistrer tout » dit la **répartition par
+  entité** (« 15 factures vont être enregistrées telles que lues : 12 pour
+  SCI Le Florian, 3 pour Thierry en nom propre. 2 restent à vérifier une par
+  une. »), les plus nombreuses d'abord. Rien d'autre ne change : une facture
+  à l'entité proposée par le code reste enregistrable d'un coup, mais l'hôte
+  voit la répartition avant d'accepter. Test dans
+  `tests/charges-masse-page.test.js`.
+
+#### 14.22.8 Recette sur staging — l'entité de base abandonnée (22 novembre 2026)
+
+Vérifié sur staging, à l'ordinateur : la facture s'affiche dans le cadre de
+droite (PDF de l'échéancier BPCE, lisible page par page), à côté de ses
+champs. Le stockage ne refuse pas l'affichage en cadre.
+
+**Décision de Thierry, en recette** : « on laisse tomber cette spec ; on fait
+une reconnaissance auto de l'entité, et dans le doute on ne remplit pas, et il
+faut que l'opérateur la sélectionne obligatoirement pour enregistrer. »
+
+Ce qui change (correctif de recette sur `charges-masse`) :
+- plus de phrase « Les factures déposées sont rattachées à : … » ;
+- aucune entité ne part avec `envoi` ; `ouvrirEnvoi` et `api/charges.js`
+  reviennent à leur forme d'avant le lot ;
+- `appliquerLecture` revient à la seule reconnaissance (`proposerEntite` :
+  SIRET ou nom exact du destinataire, une seule entité active qui
+  correspond ; sinon `null`) ;
+- l'enregistrement exige toujours l'entité (`valider` la refuse vide), et
+  « Enregistrer tout » ne prend pas une facture sans entité (retiré ensuite,
+  14.22.9) ;
+- constats de review devenus sans objet : **B1** (l'entité ne part plus du
+  dépôt) et **M9** (aucune entité posée avant la lecture). M1 reste : un
+  tableau reconnu efface toujours entité et logement.
+Tests mis à la décision : `tests/charges-masse.test.js` (aucune entité à
+l'envoi ; reconnue par SIRET, par nom exact ; vide dans le doute),
+`tests/charges-masse-page.test.js`, `tests/charges-page.test.js`. Suite :
+9 250 verts.
+
+#### 14.22.9 Recette sur staging — une par une seulement, et une fenêtre de chargement (22 novembre 2026)
+
+Dépôt de plusieurs factures d'un coup vérifié par Thierry sur staging :
+« ça fonctionne ».
+
+**Décisions de Thierry, en recette** : « supprime « Enregistrer les factures
+complètes », et ouvre directement la page une par une. Pendant le chargement,
+mets une pop-up de chargement dynamique. »
+
+Ce qui change (correctif de recette sur `charges-masse`) :
+- **« Enregistrer les factures complètes » est retiré**, à l'écran ET au
+  serveur : l'action `valider_lot` n'existe plus (`api/charges.js` revient à
+  sa forme de `main`, une action inconnue est refusée en 400 avant toute
+  requête), et `estComplete`, `validerTelleQueLue`, `validerLot` quittent
+  `lib/charges.js`. Le correctif **retire** un chemin serveur, il n'en ajoute
+  aucun.
+- **Après un dépôt de plusieurs, la vérification une par une s'ouvre
+  d'elle-même**, sur les factures **de ce dépôt**, dans l'ordre du dépôt —
+  pas sur toute la file du compte : le compteur dit « 1 sur 8 » pour huit
+  déposées. N'y entrent que celles que la lecture a rendues « À vérifier »
+  (la règle du parcours du serveur) ; une facture qui attend sa lecture,
+  illisible ou reconnue comme tableau reste dans « À traiter ». À la fin :
+  « Toutes les factures déposées ont été vues. » Rien à vérifier : la ligne
+  d'état le dit, aucune fiche ne s'ouvre. « Vérifier une par une » (renommé
+  « Tout traiter », ci-dessous), dans
+  « À traiter », reste pour toute la file.
+- **Une fenêtre de chargement** suit tout dépôt, d'un fichier comme de
+  plusieurs : « Dépôt de 8 factures », « Facture 3 sur 8 », l'étape
+  (« Envoi de la facture… », puis « Lecture de la facture… »), le nom du
+  fichier, une roue qui tourne et une barre qui avance d'une demi-case par
+  étape. Échap ne la ferme pas pendant le dépôt. Sans refus, elle se ferme
+  d'elle-même ; un refus ou un arrêt après trois pannes **y reste écrit**,
+  avec « Continuer » (ou « Fermer » s'il n'y a rien à vérifier) — sinon la
+  fiche le cacherait. Le dépôt ne dépend pas d'elle : fermée de force, il
+  continue, et la ligne d'état garde le résumé.
+- Un seul fichier : la fenêtre, sans compteur, puis sa fiche, comme avant.
+
+**Case PERFORMANCE** : inchangée. Le parcours d'un dépôt ne lit rien de plus
+(les lignes viennent de l'écran relu après le dépôt, ou de la réponse de la
+confirmation) ; la fenêtre ne fait aucun appel.
+
+**Tests.** `tests/charges-masse-page.test.js` : la vérification ouverte
+d'elle-même sur le dépôt (sans relire la file du compte, ni la facture en
+attente, ni une plus ancienne), la fenêtre pendant le dépôt (titre, compteur,
+étape, nom, barre à 1,5 sur 3, Échap empêché), le refus lu dans la fenêtre
+puis « Continuer », rien à vérifier, un seul fichier, plus aucun bouton
+« Enregistrer les factures complètes », l'arrêt après trois pannes avec
+« Fermer ». `tests/charges-endpoint.test.js` : `valider_lot` refusé en 400
+`action_inconnue`, aucune requête. Les tests de `validerLot` et
+`estComplete` sont retirés avec le code. Contre-épreuve : les huit tests
+neufs ou modifiés rougissent contre `319fb669`. Suite : 9 249 verts à l'heure
+réelle ; les fichiers du compte de charges à J+60 : 405 verts.
+
+**Fin de recette (22 novembre 2026, 23 h 42).** Thierry : « parfait, on passe
+en prod ; au lieu de « Vérifier une par une », « Tout traiter » ». Le bouton
+de « À traiter » s'appelle désormais **« Tout traiter »** (anglais « Handle
+all », espagnol « Tratar todo ») ; il ouvre toujours, une par une, toutes les
+factures « À vérifier » du compte dans l'ordre de dépôt. Seul le texte change.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

@@ -51,7 +51,24 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 | `api/cron-charges.js` | Le cron relit avec `avecReconnaissance(lireDocument)`. |
 | `shared/charges-vue.js` | Ligne et fiche d'un tableau reconnu ; le bloc Crédits n'a plus de formulaire. |
 
+## Lot 8c — charger en masse, parcourir pour valider (spec §14.22)
+
+| Fichier | Rôle |
+|---|---|
+| `lib/charges.js` | `PLAFOND_LECTURES_JOUR` = 100 ; l'entité reste reconnue à la lecture (vide dans le doute). |
+| `lib/charges/ecran.js`, `api/ecran/charges.js` | « À traiter » par curseur (`suite_a_traiter`, dette 153) ; le parcours `parcours=debut|<curseur>` (« À vérifier », ordre de dépôt). |
+| `shared/charges-vue.js` | Dépôt de 50 fichiers au plus, un par un, suivi par une fenêtre de chargement ; puis la vérification une par une du dépôt s'ouvre d'elle-même ; « Tout traiter » (nommé « Vérifier une par une » jusqu'à la recette) pour toute la file ; facture à droite de la fiche à l'ordinateur (`deps.ecranLarge`). « Enregistrer les factures complètes » est retiré en recette (spec §14.22.9). |
+
 ## Règles à ne pas perdre
+
+- **L'entité d'une facture est reconnue, ou laissée vide dans le doute**
+  (décision de Thierry, recette du lot 8c) : il la choisit alors pour
+  enregistrer.
+
+- **Chaque facture se vérifie, une par une** (décision de Thierry, recette du
+  lot 8c) : pas d'enregistrement en bloc. Après un dépôt, la vérification
+  s'ouvre d'elle-même sur les factures de CE dépôt, dans l'ordre ; un refus
+  se lit d'abord dans la fenêtre de chargement, jamais caché par la fiche.
 
 - **Un tableau reconnu n'appelle jamais l'IA et ne porte aucun montant**
   (statut `tableau`, hors de tout total). C'est l'import qui crée le crédit,
