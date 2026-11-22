@@ -27,7 +27,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const crypto = require('node:crypto')
-const { purgerEnvois, lireEnAttente, materialiserCredits, avecDelai } = require('../lib/charges')
+const { purgerEnvois, lireEnAttente, materialiserCredits, avecDelai, avecReconnaissance } = require('../lib/charges')
 const { lireDocument } = require('../lib/charges/lecture')
 const { demarrerPassage } = require('../lib/metriques-cron')
 const { ecrireLePassage, ECRITURE_MAX_MS } = require('../lib/cron-stats')
@@ -141,7 +141,9 @@ module.exports = async function handler (req, res) {
 
   try {
     const l = await chrono.mesure('lectures', () => lireEnAttente(supabase, {
-      lire: lireDocument, echeance: t0 + BUDGET_LECTURES_MS
+      // Le tableau d'amortissement d'abord, l'IA sinon (§14.21.3) : une charge
+      // restée `a_lire` (panne, plafond) est relue comme à la confirmation.
+      lire: avecReconnaissance(lireDocument), echeance: t0 + BUDGET_LECTURES_MS
     }))
     bilan.lues = l.lues || 0
     bilan.panne_ia = !!l.panne

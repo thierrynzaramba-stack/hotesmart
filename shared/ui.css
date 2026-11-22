@@ -2423,6 +2423,10 @@ button.chg-dl:hover { background: var(--surface-2); }
 .chg-dl__qui b { font-weight: var(--fw-bold); }
 .chg-dl__qui .chg-ligne__infos { display: block; }
 .chg-etat--hors { background: var(--surface-2); color: var(--muted); }
+/* Lot 8b : un tableau d'amortissement reconnu, et le lien « ce n'en est pas un ». */
+.chg-etat--tableau { background: var(--ok-soft); color: var(--ink); }
+.chg-lien { align-self: flex-start; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-caption); text-decoration: underline; text-align: start; cursor: pointer; }
+.chg-lien:disabled { opacity: 1; cursor: default; text-decoration: none; }
 @media (min-width: 900px) {
   .chg-lignes--fines .chg-ligne { padding-block: 7px; }
   .chg-lignes--fines .chg-ligne__qui { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }

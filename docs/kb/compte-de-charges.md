@@ -41,7 +41,23 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 | `lib/charges/lecture.js` | La consigne lit le type, la période couverte et, pour une régularisation, la consommation et le solde. |
 | `shared/charges-vue.js` | Fiche : type, période, aide par type, solde lu ; liste : type et période ; totaux : « Étalé » et « À la date » côte à côte (Q34). |
 
+## Lot 8b — un seul bouton « Ajouter » (spec §14.21.3 et §14.21.14)
+
+| Fichier | Rôle |
+|---|---|
+| `migrations/2026-11-20-charges-tableau.sql` | Le statut `tableau` et le type `tableau_amortissement` dans leurs contraintes. **Après** `2026-11-19-charges-exercice-mois`, **avant** le code. Contrôle : `2026-11-20-controle-charges-tableau.sql` (2 lignes à `true`). |
+| `lib/charges.js` §8 bis | `lireCommeTableau` (au moins 3 échéances prouvées), `avecReconnaissance` (le tableau d'abord, l'IA sinon), `passerEnTableau`, `tableauEnFacture`, `importerTableau`. |
+| `api/charges.js` | `confirmer` reconnaît avant le plafond et l'IA ; actions `tableau_reconnaitre`, `tableau_en_facture`, `tableau_importer`. |
+| `api/cron-charges.js` | Le cron relit avec `avecReconnaissance(lireDocument)`. |
+| `shared/charges-vue.js` | Ligne et fiche d'un tableau reconnu ; le bloc Crédits n'a plus de formulaire. |
+
 ## Règles à ne pas perdre
+
+- **Un tableau reconnu n'appelle jamais l'IA et ne porte aucun montant**
+  (statut `tableau`, hors de tout total). C'est l'import qui crée le crédit,
+  PUIS retire la charge : un import refusé ne retire rien. « Ce n'est pas un
+  tableau » renvoie à l'IA SANS repasser par la reconnaissance. Une file
+  prise laisse passer l'IA.
 
 - **Un crédit se lit dans son tableau d'amortissement, SANS IA, et chaque ligne
   se prouve** (§14.20) : intérêts + assurance + frais + capital = échéance au
