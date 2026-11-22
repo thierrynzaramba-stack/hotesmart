@@ -65,7 +65,11 @@ d'aujourd'hui** (jour de Paris), réservation active du cœur
 3. **Pas fait** : aucune ligne `menage_done` pour ce ménage (même clé).
 4. **Une seule fois** par compte, logement et jour d'arrivée (mémoire
    `message_sent_log`, posée avant l'envoi, retirée si rien n'est parti — le
-   geste de h).
+   geste de h). La même mémoire est posée quand le ménage est trouvé **fait**
+   ou qu'il n'y a **aucun ménage** : l'arrivée est tranchée pour la journée et
+   n'est plus relue toutes les cinq minutes.
+5. **Dans le doute, rien** : `menage_done` illisible → pas d'alerte, l'erreur
+   va dans `results.errors`, le cycle suivant relit.
 
 Pas d'alerte :
 - marqué fait avant l'échéance ;
@@ -99,10 +103,16 @@ l'arrivée du jour la fait déjà passer les heures calmes.
   suivante libre), groupe et domaine `menages`.
 - `lib/notifications/textes.js` : ses textes fr/en/es et son exemple (bouton
   « Tester »).
-- `lib/notifications/evenements-menages.js` : `notifierMenagesPasFaits`, le lot
-  d'un cycle — lecture, règle du §3, mémoire, plafond par cycle (comme h).
-- **Appelé par le cycle ménage existant** (`lib/cleaning/…`, déjà lancé par le
-  cron) : `api/cron.js` n'est pas touché.
+- `lib/notifications/evenements-menages.js` : `notifierMenagePasFait` (mémoire
+  et envoi) et `memoriserPasFait`.
+- `lib/cleaning/menage-pas-fait.js` : `prevenirMenagesPasFaits`, l'émetteur —
+  lectures, règle du §3, plafond de 20 arrivées par cycle, bilan.
+- `api/cron.js` : **une tâche à part**, `menage_pas_fait`, après
+  `relance_validation` — mesurée à part dans `cron_stats`, et sa panne ne
+  touche pas le cycle ménage. (Écart avec la première version de cette spec,
+  qui la logeait dans le cycle ménage sans toucher le cron.)
+- KB : `docs/kb/menage-pas-fait.md` (fichier à part : le lot 3 ajoute déjà une
+  section en fin de `docs/kb/pwa.md`).
 - Lectures du cycle : les arrivées du jour (une requête, bornée, paginée par
   curseur si elle peut passer 1 000 lignes), les logements concernés, leurs
   ménages, leurs `menage_done`, la mémoire — seulement pour les arrivées dont
@@ -121,7 +131,8 @@ prévient » par la réponse existante du serveur.
 6. Lectures tronquées : la lecture des arrivées du jour est bornée et paginée
    par curseur ; les autres sont filtrées par les logements concernés.
 7. Budget : sans objet pour les écrans ; pour le cron, un test compte les
-   requêtes d'un cycle sans arrivée due (attendu : une lecture) et avec.
+   requêtes : un jour sans arrivée, **une** lecture ; des arrivées pas encore
+   dues, **deux** (+ les logements) ; une arrivée tranchée n'est plus relue.
 8. Mesure AVANT / APRÈS : la réponse des réglages (un événement de plus, en
    octets) et le coût du cycle ménage dans `cron_stats`, sur staging.
 
