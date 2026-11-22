@@ -1,8 +1,11 @@
 // tests/charges-masse-page.test.js — lot 8c (§14.22) : l'écran.
-// Dépôt de plusieurs fichiers rattachés à l'entité affichée, « À traiter » qui
-// se lit au-delà de 50, parcours « une par une » dans l'ordre de dépôt,
-// « Enregistrer tout » par paquets, et la facture à droite de sa fiche à
-// l'ordinateur. Les gestes se mesurent en cliquant (tests/outils/banc-charges.js).
+// Dépôt de plusieurs fichiers SANS entité (la lecture la reconnaît), une
+// fenêtre de chargement qui dit où en est le dépôt, puis la vérification une
+// par une qui s'ouvre d'elle-même sur ce dépôt (recette du 22 novembre 2026) ;
+// « À traiter » qui se lit au-delà de 50, le parcours de toute la file dans
+// l'ordre de dépôt, et la facture à droite de sa fiche à l'ordinateur.
+// « Enregistrer les factures complètes » est RETIRÉ (même recette). Les gestes
+// se mesurent en cliquant (tests/outils/banc-charges.js).
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -31,8 +34,128 @@ test('LE TEST QUI COMPTE : plusieurs fichiers partent UN PAR UN, SANS entité (l
     assert.equal(b.journal.fetch.filter(f => f.url.startsWith('https://stockage.test/')).length, 2)
     const statut = texte(b.$('[data-bind="envoi"]'))
     assert.match(statut, /2 factures déposées\. 1 refusées : notes\.txt \(Seuls les PDF et les images sont acceptés\.\)/)
-    assert.equal(b.$('[data-bind="fiche"]').open, false, 'aucune fiche ne s\'ouvre au milieu d\'un dépôt de plusieurs')
     assert.equal(b.lecturesEcran().length, 2, 'l\'écran est relu UNE fois, à la fin')
+    // Un refus se lit d'abord DANS LA FENÊTRE : la fiche le cacherait.
+    const fen = b.$('[data-bind="chargement"]')
+    assert.equal(fen.open, true)
+    assert.match(texte(fen.querySelector('[data-bind="chargement-fin"]')), /2 factures déposées\. 1 refusées : notes\.txt/)
+    assert.equal(b.$('[data-bind="fiche"]').open, false, 'la fiche attend « Continuer »')
+    await b.cliquer(fen.querySelector('[data-geste="chargement-continuer"]'))
+    assert.equal(fen.open, false)
+    const dlg = b.$('[data-bind="fiche"]')
+    assert.equal(dlg.open, true, 'la vérification s\'ouvre sur le dépôt')
+    assert.equal(texte(dlg.querySelector('[data-bind="parcours-compteur"]')), '1 sur 2')
+    assert.equal(dlg.querySelector('[data-champ="fournisseur_nom"]').value, 'Fournisseur 501')
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (recette du lot 8c) : après un dépôt sans refus, la vérification une par une s\'ouvre D\'ELLE-MÊME sur les factures DÉPOSÉES, dans l\'ordre — sans relire la file du compte', async () => {
+  let n = 0
+  // La deuxième attend sa lecture (plafond du jour) : elle reste dans « À traiter ».
+  const geste = (c) => {
+    if (c.action === 'envoi') return { ok: true, id: id(600 + ++n), url: `https://stockage.test/${n}` }
+    if (c.action === 'confirmer') return { ok: true, issue: n === 2 ? 'plafond' : 'a_verifier', charge: aVerifier(600 + n, n === 2 ? { statut: 'a_lire', fournisseur_nom: null } : {}) }
+    return { ok: true }
+  }
+  // Une facture plus ancienne attend aussi : elle n'entre pas dans ce parcours.
+  const b = await monter({ geste, ecran: ecranAvec({ aTraiter: [aVerifier(1)] }) })
+  try {
+    await b.deposerFichiers([['a.pdf', 'application/pdf'], ['b.pdf', 'application/pdf'], ['c.pdf', 'application/pdf']])
+    assert.equal(b.$('[data-bind="chargement"]').open, false, 'la fenêtre se ferme d\'elle-même')
+    const dlg = b.$('[data-bind="fiche"]')
+    assert.equal(dlg.open, true)
+    assert.equal(texte(dlg.querySelector('[data-bind="parcours-compteur"]')), '1 sur 2', 'les deux lues, pas celle en attente ni l\'ancienne')
+    assert.equal(dlg.querySelector('[data-champ="fournisseur_nom"]').value, 'Fournisseur 601')
+    await b.cliquer(dlg.querySelector('[data-geste="passer"]'))
+    assert.equal(dlg.querySelector('[data-champ="fournisseur_nom"]').value, 'Fournisseur 603')
+    assert.equal(texte(dlg.querySelector('[data-bind="parcours-compteur"]')), '2 sur 2')
+    await b.cliquer(dlg.querySelector('[data-geste="valider"]'))
+    assert.deepEqual(b.gestes().filter(g => g.action === 'valider').map(g => g.id), [id(603)])
+    assert.equal(dlg.open, false)
+    assert.match(texte(b.$('[data-bind="envoi"]')), /Toutes les factures déposées ont été vues/)
+    assert.equal(b.lecturesEcran().filter(f => f.url.includes('parcours=')).length, 0, 'la file du compte n\'est pas relue')
+    assert.equal(b.lecturesEcran().length, 3, 'au chargement, après le dépôt, à la fin du parcours')
+  } finally { b.fermer() }
+})
+
+test('LE TEST QUI COMPTE (recette du lot 8c) : PENDANT le dépôt, la fenêtre dit la facture en cours sur combien, son étape, son nom, et la barre avance ; Échap ne la ferme pas', async () => {
+  let n = 0
+  let lacher = null
+  const geste = (c) => {
+    if (c.action === 'envoi') return { ok: true, id: id(700 + ++n), url: `https://stockage.test/${n}` }
+    const charge = aVerifier(700 + n)
+    if (n === 2) return new Promise(r => { lacher = () => r({ ok: true, issue: 'a_verifier', charge }) })
+    return { ok: true, issue: 'a_verifier', charge }
+  }
+  const b = await monter({ geste })
+  try {
+    const input = b.$('[data-bind="fichier"]')
+    Object.defineProperty(input, 'files', { value: ['a.pdf', 'b.pdf', 'c.pdf'].map(nom => new b.w.File(['%PDF-1.4'], nom, { type: 'application/pdf' })), configurable: true })
+    input.dispatchEvent(new b.w.Event('change', { bubbles: true }))
+    for (let i = 0; i < 40 && !lacher; i++) await b.attendre()
+    assert.equal(typeof lacher, 'function', 'la lecture de la deuxième est en cours')
+    const fen = b.$('[data-bind="chargement"]')
+    assert.equal(fen.open, true)
+    assert.equal(fen.getAttribute('aria-busy'), 'true')
+    assert.equal(texte(fen.querySelector('#chg-chargement-titre')), 'Dépôt de 3 factures')
+    assert.equal(texte(fen.querySelector('[data-bind="chargement-compte"]')), 'Facture 2 sur 3')
+    assert.equal(texte(fen.querySelector('[data-bind="chargement-etape"]')), 'Lecture de la facture…')
+    assert.equal(texte(fen.querySelector('[data-bind="chargement-nom"]')), 'b.pdf')
+    const barre = fen.querySelector('[data-bind="chargement-barre"]')
+    assert.deepEqual([Number(barre.getAttribute('max')), Number(barre.value)], [3, 1.5])
+    const echap = new b.w.Event('cancel', { cancelable: true })
+    fen.dispatchEvent(echap)
+    assert.equal(echap.defaultPrevented, true, 'Échap ne ferme pas la fenêtre pendant le dépôt')
+    lacher()
+    for (let i = 0; i < 60; i++) await b.attendre()
+    assert.equal(fen.open, false)
+    assert.equal(b.$('[data-bind="fiche"]').open, true)
+    assert.equal(texte(b.$('[data-bind="parcours-compteur"]')), '1 sur 3')
+  } finally { b.fermer() }
+})
+
+test('un dépôt dont rien n\'est encore à vérifier : la fenêtre se ferme, aucune fiche ne s\'ouvre, et la ligne d\'état le dit', async () => {
+  let n = 0
+  const geste = (c) => (c.action === 'envoi'
+    ? { ok: true, id: id(800 + ++n), url: `https://stockage.test/${n}` }
+    : { ok: true, issue: 'plafond', charge: aVerifier(800 + n, { statut: 'a_lire' }) })
+  const b = await monter({ geste })
+  try {
+    await b.deposerFichiers([['a.pdf', 'application/pdf'], ['b.pdf', 'application/pdf']])
+    assert.equal(b.$('[data-bind="chargement"]').open, false)
+    assert.equal(b.$('[data-bind="fiche"]').open, false)
+    assert.equal(texte(b.$('[data-bind="envoi"]')), '2 factures déposées. Aucune n\'est à vérifier pour l\'instant : retrouvez-les dans « À traiter ».')
+  } finally { b.fermer() }
+})
+
+test('UN seul fichier : la fenêtre le suit aussi (sans compteur), puis SA fiche s\'ouvre, comme avant le lot', async () => {
+  let vue = null
+  const geste = (c) => {
+    if (c.action === 'envoi') return { ok: true, id: id(900), url: 'https://stockage.test/1' }
+    const fen = vue && vue.$('[data-bind="chargement"]')
+    if (fen) geste.pendant = [fen.open, texte(fen.querySelector('#chg-chargement-titre')), texte(fen.querySelector('[data-bind="chargement-compte"]')), texte(fen.querySelector('[data-bind="chargement-etape"]'))]
+    return { ok: true, issue: 'a_verifier', charge: aVerifier(900) }
+  }
+  const b = await monter({ geste })
+  vue = b
+  try {
+    await b.deposerFichier('seule.pdf', 'application/pdf')
+    assert.deepEqual(geste.pendant, [true, 'Dépôt de la facture', '', 'Lecture de la facture…'])
+    assert.equal(b.$('[data-bind="chargement"]').open, false)
+    const dlg = b.$('[data-bind="fiche"]')
+    assert.equal(dlg.open, true)
+    assert.equal(dlg.querySelector('[data-bind="parcours-compteur"]'), null, 'une facture seule n\'est pas un parcours')
+    assert.equal(dlg.querySelector('[data-champ="fournisseur_nom"]').value, 'Fournisseur 900')
+  } finally { b.fermer() }
+})
+
+test('recette du lot 8c : « Enregistrer les factures complètes » n\'existe plus ; « Vérifier une par une » reste', async () => {
+  const b = await monter({ ecran: ecranAvec({ aTraiter: [aVerifier(1), aVerifier(2)] }) })
+  try {
+    const z = b.$('[data-bind="a-traiter"]')
+    assert.equal(z.querySelector('[data-geste="tout-enregistrer"]'), null)
+    assert.equal(texte(z.querySelector('[data-geste="parcourir"]')), 'Vérifier une par une')
+    assert.doesNotMatch(texte(z), /complètes/)
   } finally { b.fermer() }
 })
 
@@ -106,45 +229,6 @@ test('le parcours : une fiche fermée en route l\'arrête et relit l\'écran ; h
   } finally { b.fermer() }
 })
 
-// ─── Enregistrer tout ───────────────────────────────────────────────────────
-test('LE TEST QUI COMPTE : « Enregistrer tout » relit TOUTE la file, ne garde que les complètes, dit le compte AVANT, puis envoie par paquets de 20', async () => {
-  const ENT2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
-  const entites = [{ id: ENT, nom: 'Moi', archivee: false, debut_exercice: null }, { id: ENT2, nom: 'SCI Le Florian', archivee: false, debut_exercice: null }]
-  // 22 pour la SCI, 3 pour « Moi » : la confirmation le dit, les plus nombreuses d'abord.
-  const completes = Array.from({ length: 25 }, (_, i) => aVerifier(i + 1, i < 3 ? {} : { entite_juridique_id: ENT2 }))
-  const incompletes = [aVerifier(40, { categorie: null }), aVerifier(41, { entite_juridique_id: null }), aVerifier(42, { signal: 'doublon', signal_tranche: false })]
-  const pages = { debut: { lignes: [...completes.slice(0, 20), incompletes[0]], suite: 'C1', nombre: 28 }, C1: { lignes: [...completes.slice(20), ...incompletes.slice(1)], suite: null } }
-  const lots = []
-  const geste = (c) => { lots.push(c.ids); return { ok: true, enregistrees: c.ids.slice(0, c.ids.length - (lots.length === 2 ? 1 : 0)), refusees: lots.length === 2 ? [{ id: c.ids[c.ids.length - 1], code: 'incomplete' }] : [] } }
-  const b = await monter({ ecran: ecranAvec({ parcours: (c) => pages[c], autre: { entites } }), geste })
-  try {
-    await b.cliquer(b.$('[data-geste="tout-enregistrer"]'))
-    for (let i = 0; i < 20; i++) await b.attendre()
-    assert.deepEqual(b.journal.confirmations, ['25 factures vont être enregistrées telles que lues : 22 pour SCI Le Florian, 3 pour Moi. 3 restent à vérifier une par une.'])
-    assert.deepEqual(b.gestes().map(g => g.action), ['valider_lot', 'valider_lot'])
-    assert.deepEqual(lots.map(l => l.length), [20, 5])
-    assert.deepEqual(lots.flat(), completes.map(c => c.id), 'les complètes, dans l\'ordre de dépôt — et aucune autre')
-    assert.match(texte(b.$('[data-bind="envoi"]')), /24 factures enregistrées\. 1 n'ont pas pu l'être et restent à vérifier\./)
-    assert.equal(b.lecturesEcran().filter(f => !f.url.includes('parcours=')).length, 2, 'l\'écran est relu')
-  } finally { b.fermer() }
-})
-
-test('« Enregistrer tout » refusé à la confirmation : rien ne part ; aucune complète : rien n\'est demandé', async () => {
-  const b = await monter({ confirmer: false, ecran: ecranAvec({ parcours: () => ({ lignes: [aVerifier(1)], suite: null, nombre: 1 }) }) })
-  try {
-    await b.cliquer(b.$('[data-geste="tout-enregistrer"]'))
-    assert.equal(b.journal.confirmations.length, 1)
-    assert.deepEqual(b.gestes(), [])
-  } finally { b.fermer() }
-  const c = await monter({ ecran: ecranAvec({ parcours: () => ({ lignes: [aVerifier(1, { categorie: null })], suite: null, nombre: 1 }) }) })
-  try {
-    await c.cliquer(c.$('[data-geste="tout-enregistrer"]'))
-    assert.deepEqual(c.journal.confirmations, [])
-    assert.deepEqual(c.gestes(), [])
-    assert.match(texte(c.$('[data-bind="envoi"]')), /Aucune facture complète à enregistrer/)
-  } finally { c.fermer() }
-})
-
 // ─── La facture à droite, à l'ordinateur ───────────────────────────────────
 test('LE TEST QUI COMPTE : à l\'ordinateur, la fiche s\'ouvre en deux colonnes et la facture s\'affiche À DROITE ; au téléphone, rien n\'est demandé', async () => {
   const geste = (c) => (c.action === 'consulter' ? { ok: true, url: `https://stockage.test/lire/${c.id}` } : { ok: true })
@@ -204,6 +288,14 @@ test('review, M6 : trois PANNES de suite arrêtent un dépôt de plusieurs, et l
     await b.deposerFichiers([['t.txt', 'text/plain', 'x'], ['a.pdf', 'application/pdf'], ['b.pdf', 'application/pdf'], ['c.pdf', 'application/pdf'], ['d.pdf', 'application/pdf'], ['e.pdf', 'application/pdf']])
     assert.equal(b.gestes().filter(g => g.action === 'envoi').length, 3, 'a, b, c — puis arrêt')
     assert.match(b.$('[data-bind="envoi"]').textContent, /2 fichiers non envoyés : le dépôt s'est arrêté après trois pannes de suite/)
+    // L'arrêt se lit dans la fenêtre ; rien à vérifier : son bouton la ferme.
+    const fen = b.$('[data-bind="chargement"]')
+    assert.match(texte(fen), /2 fichiers non envoyés/)
+    const bouton = fen.querySelector('[data-geste="chargement-continuer"]')
+    assert.equal(texte(bouton), 'Fermer')
+    await b.cliquer(bouton)
+    assert.equal(fen.open, false)
+    assert.equal(b.$('[data-bind="fiche"]').open, false)
   } finally { b.fermer() }
 })
 

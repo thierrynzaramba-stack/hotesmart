@@ -236,33 +236,12 @@ test('8b : tableau_en_facture — la charge repart en lecture et l\'IA la lit TO
   assert.ok(r.requetes.some(x => x.op === 'update' && x.charge.statut === 'a_lire'))
 })
 
-// ─── Lot 8c : l'entité de base d'un dépôt, et « Enregistrer tout » ─────────
-const avecEntites = async (entites, fn) => {
-  const absEnt = require.resolve('../lib/entites-juridiques')
-  const vraies = require(absEnt)
-  require.cache[absEnt].exports = Object.assign({}, vraies, {
-    entitesDuCompte: async () => ({ ok: true, entites }),
-    entiteDuBien: async () => ({ ok: true, entite: null })
-  })
-  try { return await fn() } finally { require.cache[absEnt].exports = vraies }
-}
-const ENT_8C = '55555555-5555-4555-8555-555555555551'
-
-test('8c : `valider_lot` — un membre est refusé avant toute requête ; le titulaire reçoit les enregistrées et les refus', async () => {
-  const ID_A = '33333333-3333-4333-8333-3333333333a1'
-  const m = await appeler({ corps: { action: 'valider_lot', ids: [ID_A] }, titulaire: false })
-  assert.equal(m.statut, 403)
-  assert.equal(m.requetes.length, 0)
-  await avecEntites([{ id: ENT_8C, nom: 'SCI', archivee_le: null }], async () => {
-    const r = await appeler({
-      corps: { action: 'valider_lot', ids: [ID_A] },
-      repondre: (q) => (q.table === 'charges' && q.op === 'select' && q.unique
-        ? { data: { id: ID_A, statut: 'a_verifier', origine: 'fichier', entite_juridique_id: ENT_8C, categorie: null, montant_ttc_cents: 100 } }
-        : { data: [] })
-    })
-    assert.equal(r.statut, 200)
-    assert.deepEqual([r.charge.enregistrees, r.charge.refusees], [[], [{ id: ID_A, code: 'incomplete' }]])
-  })
+// ─── Lot 8c, recette : « Enregistrer les factures complètes » retiré ───────
+test('8c, recette : `valider_lot` n\'existe plus — action inconnue, refusée avant toute requête', async () => {
+  const r = await appeler({ corps: { action: 'valider_lot', ids: ['33333333-3333-4333-8333-3333333333a1'] } })
+  assert.equal(r.statut, 400)
+  assert.equal(r.charge.error, 'action_inconnue')
+  assert.equal(r.requetes.length, 0)
 })
 
 test('8b : tableau_importer — le titulaire seul, le crédit sous SON compte, la charge retirée ; un membre est refusé avant toute requête', async () => {

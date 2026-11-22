@@ -4262,6 +4262,8 @@ Branche `charges-masse`, partie de `main` (`b2ef2115`, lot 8b en production).
    modifier les informations en la regardant.
 5. **Deux façons d'enregistrer** : tout d'un coup, ou une par une pour
    modifier (exemple donné : attribuer un logement de l'entité).
+   ⚠ « Tout d'un coup » est **retiré en recette** (14.22.9) : une par une
+   seulement, ouverte d'elle-même après le dépôt.
 6. **On parcourt les factures dans l'ordre de dépôt.**
 
 #### 14.22.2 Ce qui est à coder
@@ -4299,7 +4301,7 @@ Branche `charges-masse`, partie de `main` (`b2ef2115`, lot 8b en production).
 - « Enregistrer et suivante » valide par le chemin existant (`valider`) et
   ouvre la suivante ; à la dernière, la fiche se ferme.
 
-**Enregistrer tout (décision 5).**
+**Enregistrer tout (décision 5) — RETIRÉ en recette (14.22.9).**
 - Un bouton dans « À traiter » : « Enregistrer les N factures complètes ».
 - Une facture est **complète** quand elle est « À vérifier », a une entité,
   une catégorie et un montant TTC, et ne porte aucun signal non tranché
@@ -4327,8 +4329,9 @@ des 50 premières lignes : un dépôt de 50 la dépasserait tout de suite.
 
 #### 14.22.4 Le téléphone (décision de Thierry, 22 novembre 2026 : « oui d'accord »)
 
-Le dépôt en masse, « Vérifier une par une » et « Enregistrer tout » existent
-aussi au téléphone. Le document y reste derrière « Voir la facture », faute de
+Le dépôt en masse et « Vérifier une par une » existent aussi au téléphone
+(« Enregistrer tout » est retiré, 14.22.9), et la fenêtre de chargement y est
+la même. Le document y reste derrière « Voir la facture », faute de
 place pour deux colonnes : la fiche à deux colonnes n'est montée qu'au-delà de
 1 100 px de large (`deps.ecranLarge`), et rien n'est demandé au serveur
 au-dessous.
@@ -4339,7 +4342,8 @@ au-dessous.
    « À traiter suite » par curseur, seulement au clic.
 2. Donnée non urgente : sans objet.
 3. Cache navigateur : sans objet.
-4. `private, no-store` : `valider_lot` passe par `api/charges.js`, déjà posé.
+4. `private, no-store` : inchangé (`api/charges.js` n'a plus d'action
+   nouvelle depuis 14.22.9).
 5. Statiques versionnés : inchangé.
 6. Lecture tronquée : c'est la dette 153 qu'on solde.
 7. Budget : le dépôt de 50 fichiers n'est pas un affichage ; l'écran garde
@@ -4577,7 +4581,8 @@ Ce qui change (correctif de recette sur `charges-masse`) :
   SIRET ou nom exact du destinataire, une seule entité active qui
   correspond ; sinon `null`) ;
 - l'enregistrement exige toujours l'entité (`valider` la refuse vide), et
-  « Enregistrer tout » ne prend pas une facture sans entité ;
+  « Enregistrer tout » ne prend pas une facture sans entité (retiré ensuite,
+  14.22.9) ;
 - constats de review devenus sans objet : **B1** (l'entité ne part plus du
   dépôt) et **M9** (aucune entité posée avant la lecture). M1 reste : un
   tableau reconnu efface toujours entité et logement.
@@ -4585,6 +4590,58 @@ Tests mis à la décision : `tests/charges-masse.test.js` (aucune entité à
 l'envoi ; reconnue par SIRET, par nom exact ; vide dans le doute),
 `tests/charges-masse-page.test.js`, `tests/charges-page.test.js`. Suite :
 9 250 verts.
+
+#### 14.22.9 Recette sur staging — une par une seulement, et une fenêtre de chargement (22 novembre 2026)
+
+Dépôt de plusieurs factures d'un coup vérifié par Thierry sur staging :
+« ça fonctionne ».
+
+**Décisions de Thierry, en recette** : « supprime « Enregistrer les factures
+complètes », et ouvre directement la page une par une. Pendant le chargement,
+mets une pop-up de chargement dynamique. »
+
+Ce qui change (correctif de recette sur `charges-masse`) :
+- **« Enregistrer les factures complètes » est retiré**, à l'écran ET au
+  serveur : l'action `valider_lot` n'existe plus (`api/charges.js` revient à
+  sa forme de `main`, une action inconnue est refusée en 400 avant toute
+  requête), et `estComplete`, `validerTelleQueLue`, `validerLot` quittent
+  `lib/charges.js`. Le correctif **retire** un chemin serveur, il n'en ajoute
+  aucun.
+- **Après un dépôt de plusieurs, la vérification une par une s'ouvre
+  d'elle-même**, sur les factures **de ce dépôt**, dans l'ordre du dépôt —
+  pas sur toute la file du compte : le compteur dit « 1 sur 8 » pour huit
+  déposées. N'y entrent que celles que la lecture a rendues « À vérifier »
+  (la règle du parcours du serveur) ; une facture qui attend sa lecture,
+  illisible ou reconnue comme tableau reste dans « À traiter ». À la fin :
+  « Toutes les factures déposées ont été vues. » Rien à vérifier : la ligne
+  d'état le dit, aucune fiche ne s'ouvre. « Vérifier une par une », dans
+  « À traiter », reste pour toute la file.
+- **Une fenêtre de chargement** suit tout dépôt, d'un fichier comme de
+  plusieurs : « Dépôt de 8 factures », « Facture 3 sur 8 », l'étape
+  (« Envoi de la facture… », puis « Lecture de la facture… »), le nom du
+  fichier, une roue qui tourne et une barre qui avance d'une demi-case par
+  étape. Échap ne la ferme pas pendant le dépôt. Sans refus, elle se ferme
+  d'elle-même ; un refus ou un arrêt après trois pannes **y reste écrit**,
+  avec « Continuer » (ou « Fermer » s'il n'y a rien à vérifier) — sinon la
+  fiche le cacherait. Le dépôt ne dépend pas d'elle : fermée de force, il
+  continue, et la ligne d'état garde le résumé.
+- Un seul fichier : la fenêtre, sans compteur, puis sa fiche, comme avant.
+
+**Case PERFORMANCE** : inchangée. Le parcours d'un dépôt ne lit rien de plus
+(les lignes viennent de l'écran relu après le dépôt, ou de la réponse de la
+confirmation) ; la fenêtre ne fait aucun appel.
+
+**Tests.** `tests/charges-masse-page.test.js` : la vérification ouverte
+d'elle-même sur le dépôt (sans relire la file du compte, ni la facture en
+attente, ni une plus ancienne), la fenêtre pendant le dépôt (titre, compteur,
+étape, nom, barre à 1,5 sur 3, Échap empêché), le refus lu dans la fenêtre
+puis « Continuer », rien à vérifier, un seul fichier, plus aucun bouton
+« Enregistrer les factures complètes », l'arrêt après trois pannes avec
+« Fermer ». `tests/charges-endpoint.test.js` : `valider_lot` refusé en 400
+`action_inconnue`, aucune requête. Les tests de `validerLot` et
+`estComplete` sont retirés avec le code. Contre-épreuve : les huit tests
+neufs ou modifiés rougissent contre `319fb669`. Suite : 9 249 verts à l'heure
+réelle ; les fichiers du compte de charges à J+60 : 405 verts.
 
 ## 12. Trace des reviews du lot 2
 

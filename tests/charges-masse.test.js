@@ -1,7 +1,8 @@
 // tests/charges-masse.test.js — lot 8c (§14.22) : charger en masse, parcourir
-// pour valider. Le serveur : l'entité de base d'un dépôt, gardée à la lecture ;
-// « Enregistrer tout » par la même validation qu'à la main ; « À traiter » et
-// le parcours par curseur.
+// pour valider. Le serveur : l'entité reconnue à la lecture, ou vide dans le
+// doute ; « À traiter » et le parcours par curseur. (« Enregistrer tout » est
+// retiré à la recette du 22 novembre 2026 : tests/charges-endpoint.test.js
+// garde que l'action n'existe plus.)
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -10,11 +11,8 @@ const ecran = require('../lib/charges/ecran')
 const { baseEnregistreuse, filtre } = require('./outils/base-enregistreuse')
 
 const COMPTE = '11111111-1111-4111-8111-111111111111'
-const AUTRE = '22222222-2222-4222-8222-222222222222'
 const ID = '33333333-3333-4333-8333-333333333333'
-const ID2 = '33333333-3333-4333-8333-333333333334'
 const ENT = '55555555-5555-4555-8555-555555555551'
-const ENT_ARCH = '55555555-5555-4555-8555-555555555559'
 const ENT_AUTRE = '55555555-5555-4555-8555-555555555558'
 const CREE = '2026-11-22T19:00:00.123456+00:00'
 
@@ -24,17 +22,6 @@ const entitesDouble = (liste) => {
     lectures: () => lectures,
     entitesDuCompte: async (compte) => { lectures++; return { ok: true, entites: liste.filter(e => !e.user_id || e.user_id === compte) } },
     entiteDuBien: async () => ({ ok: true, entite: null })
-  }
-}
-const ENTITES = () => entitesDouble([
-  { id: ENT, nom: 'SCI', archivee_le: null },
-  { id: ENT_ARCH, nom: 'Ancienne', archivee_le: '2026-01-01T00:00:00Z' },
-  { id: ENT_AUTRE, nom: 'Chez un autre', archivee_le: null, user_id: AUTRE }
-])
-const sansFuite = (requetes) => {
-  for (const r of requetes.filter(x => x.table === 'charges')) {
-    if (r.op === 'insert') { assert.equal(r.charge.user_id, COMPTE); continue }
-    assert.equal(filtre(r, 'user_id'), COMPTE, `${r.op} sur charges sans filtre de compte`)
   }
 }
 const envoisOuverts = (r) => (r.optionsSelect && r.optionsSelect.head ? { count: 0 } : { data: null })
@@ -56,77 +43,6 @@ test('LE TEST QUI COMPTE (décision de Thierry, recette du lot 8c) : aucune enti
   assert.equal(await lire({ montant_ttc_cents: 100, destinataire_nom: 'sci le florian' }), ENT, 'reconnue par le nom exact')
   assert.equal(await lire({ montant_ttc_cents: 100, destinataire_nom: 'M. Thierry N.' }), null, 'dans le doute : rien')
   assert.equal(await lire({ montant_ttc_cents: 100 }), null, 'sans destinataire : rien')
-})
-
-// ─── Enregistrer tout ───────────────────────────────────────────────────────
-const COMPLETE = { id: ID, statut: 'a_verifier', origine: 'fichier', entite_juridique_id: ENT, bien_id: null, fournisseur_nom: 'EDF',
-  fournisseur_siret: null, numero_facture: 'F-1', date_facture: '2026-10-31', montant_ht_cents: 10000, montant_tva_cents: 2000,
-  montant_ttc_cents: 12000, categorie: 'energie', signal: null, signal_tranche: false, type_document: 'facture', cree_le: '2026-11-22T10:00:00Z' }
-
-test('estComplete : à vérifier, une entité, une catégorie, un montant TTC, aucun signal non tranché ; jamais une ligne automatique', () => {
-  assert.equal(charges.estComplete(COMPLETE), true)
-  assert.equal(charges.estComplete({ ...COMPLETE, montant_ttc_cents: 0 }), true, 'zéro est un montant')
-  for (const manque of [{ statut: 'a_lire' }, { statut: 'validee' }, { entite_juridique_id: null }, { categorie: null }, { montant_ttc_cents: null },
-    { signal: 'doublon', signal_tranche: false }, { origine: 'ota' }, { origine: 'credit' }]) {
-    assert.equal(charges.estComplete({ ...COMPLETE, ...manque }), false, JSON.stringify(manque))
-  }
-  assert.equal(charges.estComplete({ ...COMPLETE, signal: 'doublon', signal_tranche: true }), true, 'un doublon tranché ne bloque plus')
-})
-
-const lotBase = (lignes, { panneUpdate = false } = {}) => baseEnregistreuse((r) => {
-  if (r.table === 'charges' && r.op === 'select' && r.unique) {
-    const l = lignes[filtre(r, 'id')]
-    return { data: l && filtre(r, 'user_id') === COMPTE ? { ...l } : null }
-  }
-  if (r.table === 'charges' && r.op === 'update' && r.unique) {
-    if (panneUpdate) return { data: null, error: { message: 'panne' } }
-    return { data: { ...lignes[filtre(r, 'id')], ...r.charge } }
-  }
-  return { data: [] }
-})
-
-test('LE TEST QUI COMPTE : « Enregistrer tout » passe chaque facture par la MÊME validation, avec les valeurs lues — un avoir garde son signe', async () => {
-  const lignes = { [ID]: { ...COMPLETE, periode_debut: '2026-01-01', periode_fin: '2026-12-31' }, [ID2]: { ...COMPLETE, id: ID2, type_document: 'avoir', montant_ht_cents: -5000, montant_tva_cents: -1000, montant_ttc_cents: -6000 } }
-  const b = lotBase(lignes)
-  const ent = ENTITES()
-  const r = await charges.validerLot(b.client, { compte: COMPTE, valideur: COMPTE, ids: [ID, ID2] }, { entites: ent })
-  assert.deepEqual(r, { ok: true, enregistrees: [ID, ID2], refusees: [] })
-  const maj = b.requetes.filter(x => x.op === 'update' && x.charge.statut === 'validee')
-  assert.equal(maj.length, 2)
-  assert.deepEqual([maj[0].charge.entite_juridique_id, maj[0].charge.categorie, maj[0].charge.montant_ttc_cents, maj[0].charge.valide_par], [ENT, 'energie', 12000, COMPTE])
-  assert.deepEqual([maj[1].charge.montant_ttc_cents, maj[1].charge.montant_ht_cents], [-6000, -5000], 'l\'avoir reste négatif')
-  // Review du lot 8c, M7 : la période de la facture est GARDÉE (elle n'est pas
-  // envoyée, et `valider` reprend celle de la charge).
-  assert.deepEqual([maj[0].charge.periode_debut, maj[0].charge.periode_fin], ['2026-01-01', '2026-12-31'])
-  assert.equal(ent.lectures(), 1, 'les entités sont lues UNE fois pour le lot')
-  sansFuite(b.requetes)
-})
-
-test('« Enregistrer tout » : une facture incomplète, d\'un autre compte ou d\'une entité archivée est refusée — sans arrêter les autres ni rien écrire pour elle', async () => {
-  const ID3 = '33333333-3333-4333-8333-333333333335'
-  const ID4 = '33333333-3333-4333-8333-333333333336'
-  const lignes = { [ID]: { ...COMPLETE, categorie: null }, [ID2]: { ...COMPLETE, id: ID2 }, [ID4]: { ...COMPLETE, id: ID4, entite_juridique_id: ENT_ARCH } }
-  const b = lotBase(lignes)
-  const r = await charges.validerLot(b.client, { compte: COMPTE, valideur: COMPTE, ids: [ID, ID2, ID3, ID4] }, { entites: ENTITES() })
-  assert.equal(r.ok, true)
-  assert.deepEqual(r.enregistrees, [ID2])
-  assert.deepEqual(r.refusees, [{ id: ID, code: 'incomplete' }, { id: ID3, code: 'charge_introuvable' }, { id: ID4, code: 'entite_archivee' }])
-  assert.deepEqual(b.requetes.filter(x => x.op === 'update').map(x => filtre(x, 'id')), [ID2])
-})
-
-test('« Enregistrer tout » : une PANNE arrête le lot ; au plus 20 par appel ; des identifiants forgés sont refusés avant toute lecture', async () => {
-  const b = lotBase({ [ID]: COMPLETE, [ID2]: { ...COMPLETE, id: ID2 } }, { panneUpdate: true })
-  const r = await charges.validerLot(b.client, { compte: COMPTE, valideur: COMPTE, ids: [ID, ID2] }, { entites: ENTITES() })
-  assert.equal(r.ok, false)
-  assert.equal(r.statut, 503)
-  assert.equal(b.requetes.filter(x => x.op === 'update').length, 1, 'la deuxième n\'est pas tentée')
-  assert.equal(charges.MAX_LOT_VALIDATION, 20)
-  for (const [ids, code] of [[[], 'aucune_charge'], [null, 'aucune_charge'], [Array.from({ length: 21 }, (_, i) => `33333333-3333-4333-8333-3333333333${String(i).padStart(2, '0')}`), 'trop_de_charges'], [[ID, 'x),user_id.neq.(y'], 'charge_non_designee']]) {
-    const v = lotBase({})
-    const k = await charges.validerLot(v.client, { compte: COMPTE, valideur: COMPTE, ids }, { entites: ENTITES() })
-    assert.deepEqual([k.statut, k.code], [400, code])
-    assert.equal(v.requetes.length, 0)
-  }
 })
 
 // ─── « À traiter » par curseur et le parcours ───────────────────────────────

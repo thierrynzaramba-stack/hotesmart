@@ -50,7 +50,8 @@
       <span class="chg-ajouter__mot" data-i18n="charges.ajouter"></span>
     </button>
     <!-- Lot 8c : plusieurs fichiers d'un coup (50 au plus) ; l'entité de
-         chacun est reconnue à la lecture, ou laissée à choisir. -->
+         chacun est reconnue à la lecture, ou laissée à choisir. Puis la
+         vérification une par une s'ouvre d'elle-même. -->
     <input type="file" data-bind="fichier" multiple accept="application/pdf,image/jpeg,image/png,image/webp,image/gif,image/avif,image/bmp,image/tiff,image/heic,image/heif,.heic,.heif" hidden>
   </div>
   <div class="chg-tete">
@@ -68,6 +69,9 @@
 <!-- La fiche d'une facture : un volet à droite à l'ordinateur, plein écran au
      téléphone (§13.3). Rempli par /shared/charges-vue.js. -->
 <dialog class="chg-fiche" data-bind="fiche" aria-labelledby="chg-fiche-titre"></dialog>
+<!-- La fenêtre de chargement d'un dépôt (recette du lot 8c) : la facture en
+     cours, son étape, une barre qui avance. Remplie par /shared/charges-vue.js. -->
+<dialog class="chg-chargement" data-bind="chargement" aria-labelledby="chg-chargement-titre"></dialog>
 
 <nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
 
