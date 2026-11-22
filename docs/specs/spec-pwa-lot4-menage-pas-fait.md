@@ -46,7 +46,7 @@ propriétaire : ménage non marqué fait 30 minutes avant l'heure d'arrivée ».
 | — | Quelle heure d'arrivée ? | **Toujours celle du logement** (`checkin_time`), jamais celle annoncée par le voyageur (19 novembre 2026) |
 | — | Où ranger l'alerte ? | **Un lot à part, après le lot 3** (19 novembre 2026) |
 | — | Heures calmes ? | **« Configurable comme les autres »** (19 novembre 2026). Conséquence de la règle existante : liée à une arrivée du jour, elle passe les heures calmes comme les autres alertes ménage ; l'hôte choisit ses canaux ou la coupe. |
-| Q49 | Un logement **sans heure d'arrivée réglée** (vide ou illisible) | **Ouverte** (§10) |
+| Q49 | Un logement **sans heure d'arrivée réglée** (vide ou illisible) | **Pas d'alerte** pour ce logement tant que l'heure n'est pas réglée, et le guide le dit (22 novembre 2026) |
 
 ## 3. La règle
 
@@ -72,7 +72,8 @@ Pas d'alerte :
 - aucun ménage dans `menages` pour ce logement (l'hôte ne suit pas ses ménages
   dans HôteSmart, ou première réservation du logement) ;
 - arrivée annulée, logement archivé ;
-- heure d'arrivée absente ou illisible : selon Q49.
+- heure d'arrivée absente ou illisible (Q49) — le cycle le compte, sans
+  rien envoyer.
 
 ## 4. Ce que reçoit l'hôte
 
@@ -134,7 +135,8 @@ prévient », groupe « Ménages ».
 1. Catalogue, textes, émetteur et son branchement dans le cycle ménage ; tests
    (règle du §3 cas par cas, heure de Paris et changement d'heure, mémoire,
    plafond, compte des requêtes) ; contre-épreuves ; KB.
-2. Guide utilisateur (section des alertes), si Thierry l'accorde.
+2. Guide utilisateur (section des alertes, et l'heure d'arrivée à régler sur
+   le logement — Q49), si Thierry l'accorde.
 
 Une review par étape ; suite à zéro rouge aux deux horloges avant chaque push.
 
@@ -153,5 +155,4 @@ de cron : le cycle se lance par script.
 
 ## 10. Questions ouvertes (à Thierry)
 
-- **Q49** — Un logement **sans heure d'arrivée réglée** : (a) pas d'alerte pour
-  ce logement, et le guide le dit ; (b) une heure par défaut (16:00).
+Aucune : Q49 est tranchée (§2, 22 novembre 2026).
