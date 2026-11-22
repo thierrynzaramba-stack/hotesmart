@@ -39,47 +39,23 @@ const sansFuite = (requetes) => {
 }
 const envoisOuverts = (r) => (r.optionsSelect && r.optionsSelect.head ? { count: 0 } : { data: null })
 
-// ─── L'entité de base d'un dépôt ────────────────────────────────────────────
-test('LE TEST QUI COMPTE : l\'entité de base part avec l\'envoi et se pose sur la ligne — une entité active DU COMPTE seulement', async () => {
-  const ok = baseEnregistreuse(envoisOuverts)
-  const r = await charges.ouvrirEnvoi(ok.client, { compte: COMPTE, type: 'application/pdf', octets: 2000, entiteId: ENT }, { entites: ENTITES() })
-  assert.equal(r.ok, true)
-  assert.equal(ok.requetes.find(x => x.op === 'insert').charge.entite_juridique_id, ENT)
-  sansFuite(ok.requetes)
-
-  for (const [entiteId, statut, code] of [[ENT_AUTRE, 403, 'entite_hors_compte'], [ENT_ARCH, 409, 'entite_archivee'], ['e1,user_id.neq.x', 400, 'entite_invalide']]) {
-    const b = baseEnregistreuse(envoisOuverts)
-    const k = await charges.ouvrirEnvoi(b.client, { compte: COMPTE, type: 'application/pdf', octets: 2000, entiteId }, { entites: ENTITES() })
-    assert.deepEqual([k.statut, k.code], [statut, code], entiteId)
-    assert.equal(b.requetes.filter(x => x.op === 'insert').length, 0, 'rien n\'est créé')
-    assert.equal(b.gestes.length, 0, 'aucune URL d\'envoi')
-  }
-  // Sans entité : le dépôt d'avant le lot, inchangé.
-  const sans = baseEnregistreuse(envoisOuverts)
-  await charges.ouvrirEnvoi(sans.client, { compte: COMPTE, type: 'application/pdf', octets: 2000 }, { entites: ENTITES() })
-  assert.equal('entite_juridique_id' in sans.requetes.find(x => x.op === 'insert').charge, false)
-})
-
-test('LE TEST QUI COMPTE : la lecture IA GARDE l\'entité de base — la proposition du code ne s\'applique qu\'à une charge sans entité, ou dont l\'entité a été archivée depuis le dépôt', async () => {
-  const lu = { fournisseur_nom: 'EDF', montant_ttc_cents: 12000, destinataire_siret: '12345678900012', categorie: 'energie' }
-  const lire = async (entite, { panne = false } = {}) => {
-    const ent = panne
-      ? { lectures: () => 1, entitesDuCompte: async () => ({ ok: false, motif: 'panne' }) }
-      : entitesDouble([{ id: ENT, nom: 'SCI', siret: '99999999900099', archivee_le: null }, { id: ENT_ARCH, nom: 'Ancienne', siret: null, archivee_le: '2026-11-01T00:00:00Z' }, { id: 'e-prop', nom: 'Proposée', siret: '12345678900012', archivee_le: null }])
+// ─── L'entité : reconnue, ou vide dans le doute ─────────────────────────────
+test('LE TEST QUI COMPTE (décision de Thierry, recette du lot 8c) : aucune entité ne part avec l\'envoi ; la lecture la RECONNAÎT, ou laisse le champ vide dans le doute', async () => {
+  const ouvert = baseEnregistreuse(envoisOuverts)
+  await charges.ouvrirEnvoi(ouvert.client, { compte: COMPTE, type: 'application/pdf', octets: 2000, entiteId: ENT })
+  assert.equal('entite_juridique_id' in ouvert.requetes.find(x => x.op === 'insert').charge, false, 'une entité envoyée est ignorée')
+  const lire = async (lu) => {
     const b = baseEnregistreuse((r) => (r.op === 'select'
-      ? { data: { id: ID, statut: 'a_lire', tentatives_lecture: 0, cree_le: '2026-11-22T10:00:00Z', entite_juridique_id: entite } }
+      ? { data: { id: ID, statut: 'a_lire', tentatives_lecture: 0, cree_le: '2026-11-22T10:00:00Z' } }
       : { data: { id: ID, statut: 'a_verifier' } }))
-    await charges.appliquerLecture(b.client, { compte: COMPTE, id: ID, resultat: { ok: true, lu } }, { entites: ent })
-    const sel = b.requetes.find(x => x.op === 'select')
-    assert.match(sel.colonnes, /entite_juridique_id/, 'la lecture relit l\'entité posée au dépôt')
-    return { entite: b.requetes.find(x => x.op === 'update').charge.entite_juridique_id, lectures: ent.lectures() }
+    await charges.appliquerLecture(b.client, { compte: COMPTE, id: ID, resultat: { ok: true, lu } },
+      { entites: entitesDouble([{ id: ENT, nom: 'SCI Le Florian', siret: '12345678900012', archivee_le: null }, { id: ENT_AUTRE, nom: 'Thierry', siret: null, archivee_le: null }]) })
+    return b.requetes.find(x => x.op === 'update').charge.entite_juridique_id
   }
-  assert.deepEqual(await lire(ENT), { entite: ENT, lectures: 1 })
-  assert.deepEqual(await lire(null), { entite: 'e-prop', lectures: 1 })
-  // Review du lot 8c, M9 : archivée entre le dépôt et la lecture, elle cède.
-  assert.deepEqual(await lire(ENT_ARCH), { entite: 'e-prop', lectures: 1 })
-  // Entités illisibles : l'entité de base est gardée telle quelle.
-  assert.equal((await lire(ENT, { panne: true })).entite, ENT)
+  assert.equal(await lire({ montant_ttc_cents: 100, destinataire_siret: '12345678900012' }), ENT, 'reconnue par le SIRET')
+  assert.equal(await lire({ montant_ttc_cents: 100, destinataire_nom: 'sci le florian' }), ENT, 'reconnue par le nom exact')
+  assert.equal(await lire({ montant_ttc_cents: 100, destinataire_nom: 'M. Thierry N.' }), null, 'dans le doute : rien')
+  assert.equal(await lire({ montant_ttc_cents: 100 }), null, 'sans destinataire : rien')
 })
 
 // ─── Enregistrer tout ───────────────────────────────────────────────────────

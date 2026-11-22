@@ -4280,15 +4280,11 @@ Branche `charges-masse`, partie de `main` (`b2ef2115`, lot 8b en production).
   24 h (review, M6) : **trois pannes de suite arrêtent le dépôt**, et l'écran
   dit combien de fichiers ne sont pas partis.
 
-**L'entité de base (décision 3).**
-- C'est l'entité affichée en tête de l'écran au moment du dépôt ; l'écran la
-  nomme à côté du bouton (« Les factures déposées sont rattachées à : … »).
-- Elle part avec `envoi` ; le serveur vérifie qu'elle est une entité **active
-  du compte** (403 sinon) et la pose sur la ligne.
-- La lecture IA la **garde** : la proposition d'entité par le code
-  (`proposerEntite`) ne s'applique qu'à une charge qui n'en a pas.
-- Un tableau d'amortissement reconnu l'efface, comme aujourd'hui (son entité
-  se choisit à l'import).
+**L'entité (décision 3, remplacée le 22 novembre 2026 — voir 14.22.8).**
+- ~~L'entité affichée devient l'entité de base du dépôt~~ : abandonné en
+  recette. L'entité de chaque facture est **reconnue** à la lecture (SIRET ou
+  nom exact du destinataire), et **laissée vide dans le doute** ; l'hôte la
+  choisit alors pour enregistrer.
 
 **La fiche à l'ordinateur (décision 4).**
 - Sur un écran large, la fiche d'une facture s'ouvre en deux colonnes : les
@@ -4325,7 +4321,7 @@ des 50 premières lignes : un dépôt de 50 la dépasserait tout de suite.
 |---|---|
 | Dépôt d'un fichier à la fois | Conservé, comme dépôt de un. |
 | Fiche d'une facture (champs, « Voir la facture », « Supprimer », « Valider ») | Conservée ; à l'ordinateur, le document s'affiche à droite. « Voir la facture » reste. |
-| Entité proposée par le code à la lecture | Conservée pour une charge sans entité ; une entité de base n'est jamais remplacée. |
+| Entité proposée par le code à la lecture | Conservée telle quelle : reconnue, ou vide dans le doute (14.22.8). |
 | Limite de 50 lectures IA par jour | 100. |
 | « À traiter » bornée à 50 lignes | Lue par curseur (dette 153). |
 
@@ -4381,8 +4377,8 @@ au-dessous.
   (sa fiche s'ouvre). Plusieurs : « Dépôt 3 sur 12… », un par un, puis
   « 10 factures déposées. 2 refusées : a.txt (motif) ; … », une seule
   relecture de l'écran. Plus de 50 : rien ne part.
-- L'entité de base est nommée sous le bouton ; une entité archivée affichée
-  n'en est pas une (le dépôt part sans entité).
+- ~~L'entité de base est nommée sous le bouton~~ : retiré en recette
+  (14.22.8).
 - « À traiter » : « Afficher plus » à la place de « Et N de plus » ; deux
   boutons dès qu'une facture est à vérifier : « Vérifier une par une » et
   « Enregistrer les factures complètes ».
@@ -4562,6 +4558,33 @@ Rien trouvé (détail dans « Vérifié sans constat »).
   à l'entité proposée par le code reste enregistrable d'un coup, mais l'hôte
   voit la répartition avant d'accepter. Test dans
   `tests/charges-masse-page.test.js`.
+
+#### 14.22.8 Recette sur staging — l'entité de base abandonnée (22 novembre 2026)
+
+Vérifié sur staging, à l'ordinateur : la facture s'affiche dans le cadre de
+droite (PDF de l'échéancier BPCE, lisible page par page), à côté de ses
+champs. Le stockage ne refuse pas l'affichage en cadre.
+
+**Décision de Thierry, en recette** : « on laisse tomber cette spec ; on fait
+une reconnaissance auto de l'entité, et dans le doute on ne remplit pas, et il
+faut que l'opérateur la sélectionne obligatoirement pour enregistrer. »
+
+Ce qui change (correctif de recette sur `charges-masse`) :
+- plus de phrase « Les factures déposées sont rattachées à : … » ;
+- aucune entité ne part avec `envoi` ; `ouvrirEnvoi` et `api/charges.js`
+  reviennent à leur forme d'avant le lot ;
+- `appliquerLecture` revient à la seule reconnaissance (`proposerEntite` :
+  SIRET ou nom exact du destinataire, une seule entité active qui
+  correspond ; sinon `null`) ;
+- l'enregistrement exige toujours l'entité (`valider` la refuse vide), et
+  « Enregistrer tout » ne prend pas une facture sans entité ;
+- constats de review devenus sans objet : **B1** (l'entité ne part plus du
+  dépôt) et **M9** (aucune entité posée avant la lecture). M1 reste : un
+  tableau reconnu efface toujours entité et logement.
+Tests mis à la décision : `tests/charges-masse.test.js` (aucune entité à
+l'envoi ; reconnue par SIRET, par nom exact ; vide dans le doute),
+`tests/charges-masse-page.test.js`, `tests/charges-page.test.js`. Suite :
+9 250 verts.
 
 ## 12. Trace des reviews du lot 2
 

@@ -933,7 +933,7 @@ test('LE TEST QUI COMPTE : un PDF part en trois temps — envoi, dépôt au stoc
     const suite = b.journal.fetch.map(f => `${f.methode} ${f.url.replace(/\?.*$/, '')}`)
     assert.deepEqual(suite, ['GET /api/ecran/charges', 'POST /api/charges', 'PUT https://stockage.test/envoi/x', 'POST /api/charges', 'GET /api/ecran/charges'])
     const [envoi, confirmer] = b.gestes()
-    assert.deepEqual(envoi, { action: 'envoi', type: 'application/pdf', octets: 8, origine: 'fichier', entite_id: ENT })
+    assert.deepEqual(envoi, { action: 'envoi', type: 'application/pdf', octets: 8, origine: 'fichier' })
     assert.deepEqual(confirmer, { action: 'confirmer', id: lue.id })
     assert.equal(b.journal.fetch[2].entetes['x-upsert'], 'false', 'un dépôt n\'écrase jamais un fichier')
     assert.equal(b.$('[data-champ="fournisseur_nom"]').value, 'EDF', 'la fiche s\'ouvre pré-remplie')
@@ -958,7 +958,7 @@ test('une photo est RÉDUITE avant l\'envoi, et part en JPEG', async () => {
   try {
     await b.deposerFichier('photo.png', 'image/png', 'png-lourd-et-original')
     const [envoi] = b.gestes()
-    assert.deepEqual(envoi, { action: 'envoi', type: 'image/jpeg', octets: 'jpeg-reduit'.length, origine: 'photo', entite_id: ENT })
+    assert.deepEqual(envoi, { action: 'envoi', type: 'image/jpeg', octets: 'jpeg-reduit'.length, origine: 'photo' })
     assert.match(b.$('[data-bind="fiche"]').textContent, /La lecture reprendra seule/)
   } finally { b.fermer() }
 })
@@ -988,7 +988,7 @@ test('LE TEST QUI COMPTE : une image WebP (messageries) est acceptée et part en
     await b.deposerFichier('facture.webp', 'image/webp', 'webp-original')
     assert.deepEqual(b.journal.reduits, [{ type: 'image/webp', taille: 'webp-original'.length }])
     const [envoi] = b.gestes()
-    assert.deepEqual(envoi, { action: 'envoi', type: 'image/jpeg', octets: 'jpeg-reduit'.length, origine: 'photo', entite_id: ENT })
+    assert.deepEqual(envoi, { action: 'envoi', type: 'image/jpeg', octets: 'jpeg-reduit'.length, origine: 'photo' })
   } finally { b.fermer() }
 })
 
@@ -1008,7 +1008,7 @@ test('LE TEST QUI COMPTE (§14.19) : une photo HEIC que l\'appareil ne sait pas 
   try {
     await b.deposerFichier('photo.heif', 'image/heif', 'heif-original')
     const [envoi, confirmer] = b.gestes()
-    assert.deepEqual(envoi, { action: 'envoi', type: 'image/heif', octets: 'heif-original'.length, origine: 'photo', entite_id: ENT })
+    assert.deepEqual(envoi, { action: 'envoi', type: 'image/heif', octets: 'heif-original'.length, origine: 'photo' })
     assert.equal(confirmer.action, 'confirmer')
     const depot = b.journal.fetch.find(f => f.url.startsWith('https://stockage.test/'))
     const fichier = depot.corps.get('')

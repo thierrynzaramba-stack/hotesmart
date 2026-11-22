@@ -248,18 +248,6 @@ const avecEntites = async (entites, fn) => {
 }
 const ENT_8C = '55555555-5555-4555-8555-555555555551'
 
-test('8c : `envoi` porte l\'entité de base jusqu\'au writer, qui la vérifie ; une entité d\'ailleurs est refusée sans rien créer', async () => {
-  await avecEntites([{ id: ENT_8C, nom: 'SCI', archivee_le: null }], async () => {
-    const ouvert = (r) => (r.optionsSelect && r.optionsSelect.head ? { count: 0 } : { data: null })
-    const ok = await appeler({ corps: { action: 'envoi', type: 'application/pdf', octets: 2000, entite_id: ENT_8C }, repondre: ouvert })
-    assert.equal(ok.statut, 200)
-    assert.equal(ok.requetes.find(x => x.op === 'insert').charge.entite_juridique_id, ENT_8C)
-    const non = await appeler({ corps: { action: 'envoi', type: 'application/pdf', octets: 2000, entite_id: '55555555-5555-4555-8555-555555555552' }, repondre: ouvert })
-    assert.equal(non.statut, 403)
-    assert.equal(non.requetes.filter(x => x.op === 'insert').length, 0)
-  })
-})
-
 test('8c : `valider_lot` — un membre est refusé avant toute requête ; le titulaire reçoit les enregistrées et les refus', async () => {
   const ID_A = '33333333-3333-4333-8333-3333333333a1'
   const m = await appeler({ corps: { action: 'valider_lot', ids: [ID_A] }, titulaire: false })
