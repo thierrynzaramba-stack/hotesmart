@@ -1509,6 +1509,21 @@ function verdictToast (r) {
     toast(t('cal.task_copied', { ids }), { duree: 6000 })
   }
 }
+// ⚠ UN BLOCAGE N'EST « FAIT » QUE SI LA PLATEFORME L'A ACCEPTE.
+// `fermer`, `modifier_fermeture` et `rouvrir_fermeture` rendent les memes
+// drapeaux que `save` : `push_failed` (le canal a refuse), `local_only` (rien
+// d'envoye : pas de plan tarifaire) et `warnings`. Les trois gestes de blocage
+// les ignoraient et affichaient « Blocage cree » quoi qu'il arrive : un blocage
+// non parti chez Airbnb ou Booking passait pour fait, et la nuit restait
+// vendable sans que l'hote le sache (spec-fermetures-canaux.md §1, « aucune
+// alerte »). Meme lecture que `verdictToast`, mais le succes n'est annonce
+// qu'une fois les deux echecs ecartes.
+function verdictBlocage (r, succes) {
+  if (r && r.push_failed) return toast(t('cal.block_push_failed'), { erreur: true, duree: 12000 })
+  if (r && r.local_only) return toast(t('cal.local_only'), { duree: 8000 })
+  toast(succes)
+  if (r && r.warnings && r.warnings.length) toast(String(r.warnings[0]), { duree: 8000 })
+}
 // Enregistre des segments et propose « Annuler » : les valeurs PRECEDENTES
 // des dates touchees sont relevees AVANT l'ecriture, et « Annuler » les
 // REECRIT par le meme writer — jamais un undo d'affichage (§11.1).
@@ -1970,9 +1985,9 @@ function ouvrirFormulaire (type, jours, bienForce = null) {
         const raison = corps.querySelector('[data-aj="raison"]').value.trim()
         if (!raison) { etatEl.textContent = t('cal.block_reason_required'); bouton.disabled = false; return }
         const finNuit = toISO(new Date(new Date(departV + 'T12:00:00').getTime() - 86400000))
-        await api.calendar.fermer(bienId, duV, finNuit, raison)
+        const r = await api.calendar.fermer(bienId, duV, finNuit, raison)
         fermerFeuille(); viderSelection()
-        toast(t('cal.block_created'))
+        verdictBlocage(r, t('cal.block_created'))
         await charger()
       } else {
         const prenom = corps.querySelector('[data-aj="prenom"]').value.trim()
@@ -2494,16 +2509,16 @@ function ouvrirFicheBlocage (bienId, blocageId) {
       etatEl.textContent = t('cal.no_change'); return
     }
     try {
-      await api.calendar.modifierFermeture(bienId, f.id, debut, fin, raison)
-      fermerFeuille(); toast(t('cal.saved')); await charger()
+      const r = await api.calendar.modifierFermeture(bienId, f.id, debut, fin, raison)
+      fermerFeuille(); verdictBlocage(r, t('cal.saved')); await charger()
     } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
   })
   corps.querySelector('[data-b-suppr]').addEventListener('click', async () => {
     if (!window.confirm(t('cal.block_delete_confirm'))) return
     const etatEl = corps.querySelector('[data-b-etat]')
     try {
-      await api.calendar.rouvrirFermeture(bienId, f.id)
-      fermerFeuille(); toast(t('cal.block_deleted')); await charger()
+      const r = await api.calendar.rouvrirFermeture(bienId, f.id)
+      fermerFeuille(); verdictBlocage(r, t('cal.block_deleted')); await charger()
     } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
   })
 }
