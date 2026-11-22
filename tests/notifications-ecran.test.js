@@ -101,7 +101,7 @@ test('LE TEST QUI COMPTE : le tableau vient du serveur, et « Enregistrer » ren
   assert.equal(e.$('n-quand').hidden, false)
   assert.equal(e.$('n-calme').hidden, false)
   const lignes = e.w.document.querySelectorAll('#n-tableau tbody tr:not(.n-groupe)')
-  assert.equal(lignes.length, 15, 'les quinze événements')
+  assert.equal(lignes.length, 16, 'les seize événements (le lot 4 ajoute « ménage pas fait »)')
   assert.equal(e.w.document.querySelectorAll('#n-tableau tr.n-groupe').length, 4)
   // Les défauts de Q23, tels que l'écran les montre.
   assert.equal(e.caseDe('avis', 'push').checked, true)

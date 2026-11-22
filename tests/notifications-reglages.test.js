@@ -38,11 +38,14 @@ const NUIT = { debut: '22:00', fin: '07:00', jours: [1, 2, 3, 4, 5, 6, 7] }
 
 // ─── 1. Le catalogue ────────────────────────────────────────────────────────
 
-test('le catalogue : quinze événements, codes et lettres uniques, chacun dans un groupe connu', () => {
+test('le catalogue : seize événements, codes et lettres uniques, chacun dans un groupe connu', () => {
   const E = catalogue.EVENEMENTS
-  assert.equal(E.length, 15)
-  assert.equal(new Set(E.map(e => e.code)).size, 15)
-  assert.deepEqual(E.map(e => e.lettre).sort(), 'abcdefghijklmno'.split(''))
+  assert.equal(E.length, 16)
+  assert.equal(new Set(E.map(e => e.code)).size, 16)
+  assert.deepEqual(E.map(e => e.lettre).sort(), 'abcdefghijklmnop'.split(''))
+  // p, PWA lot 4 (22 novembre 2026) : groupe et domaine Ménages, non urgent par
+  // défaut — l'arrivée du jour la fait passer les heures calmes.
+  assert.deepEqual(catalogue.evenement('menage_pas_fait'), { ...catalogue.evenement('menage_pas_fait'), lettre: 'p', groupe: 'menages', domaine: 'menages', urgent: false })
   // o, trouvé à l'inventaire du 2c (Q27) : dans le groupe Avis, non urgent.
   assert.deepEqual(catalogue.evenement('evaluation_voyageur'), { ...catalogue.evenement('evaluation_voyageur'), lettre: 'o', groupe: 'avis', domaine: 'avis', urgent: false })
   const groupes = new Set(catalogue.GROUPES.map(g => g.code))
@@ -273,9 +276,9 @@ function baseReglages (lignes = []) {
 
 const toutCoche = () => Object.fromEntries(catalogue.EVENEMENTS.map(e => [e.code, { push: true, email: true, sms: true, urgent: false }]))
 
-test('effectifs : une personne sans ligne a les quinze défauts ; une ligne partielle se fusionne', () => {
+test('effectifs : une personne sans ligne a les seize défauts ; une ligne partielle se fusionne', () => {
   const vide = reglages.effectifs(null)
-  assert.equal(Object.keys(vide.evenements).length, 15)
+  assert.equal(Object.keys(vide.evenements).length, 16)
   assert.deepEqual(vide.evenements.surreservation, { push: true, email: true, sms: true, urgent: true })
   assert.deepEqual(vide.evenements.message_voyageur, { push: true, email: false, sms: false, urgent: false })
   assert.deepEqual(vide.plages, [])

@@ -121,6 +121,7 @@ const { classerMessages } = require('../lib/cron-messages-classify')
 const { rattacherMenages } = require('../lib/cron-rattacher-menages')
 const { synchroniserMenages, expirerPropositions, poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
 const { relancerValidations } = require('../lib/cleaning/relance-validation')
+const { prevenirMenagesPasFaits } = require('../lib/cleaning/menage-pas-fait')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
@@ -570,6 +571,21 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur relance des validations:', err.message)
       results.errors.push({ context: 'relance_validation', error: err.message })
+    }
+
+    // 4undecies ter. MÉNAGE PAS FAIT AVANT L'ARRIVÉE (PWA lot 4, 22 novembre
+    // 2026 ; spec docs/specs/spec-pwa-lot4-menage-pas-fait.md).
+    // ⚠ 30 MINUTES AVANT L'HEURE D'ARRIVÉE RÉGLÉE SUR LE LOGEMENT, le jour d'une
+    // arrivée, si le ménage qui la précède n'est pas marqué fait : l'hôte et son
+    // équipe sont prévenus, UNE fois (mémoire par logement et jour d'arrivée).
+    // Le module se tait tant que l'échéance n'est pas atteinte — le cycle de
+    // 5 minutes repasse — et ne coûte qu'une lecture les jours sans arrivée.
+    // ⚠ Placée APRÈS les relances, ses voisines : une tâche à part, mesurée à
+    // part (`cron_stats`), qui ne lève jamais.
+    try { await chrono.mesure('menage_pas_fait', () => prevenirMenagesPasFaits(results)) }
+    catch (err) {
+      console.error('[Cron] Erreur menage pas fait:', err.message)
+      results.errors.push({ context: 'menage_pas_fait', error: err.message })
     }
 
     // 4duodecies bis. TENTATIVES BLOQUÉES EN « PAYÉ » (moteur, §6.2).
