@@ -2360,7 +2360,6 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 }
 
 /* ── Lot 8c : charger en masse, parcourir pour valider ─────────────────── */
-.chg-barre__entite { font-size: var(--fs-caption); color: var(--muted); }
 .chg-a-traiter__gestes { display: flex; flex-wrap: wrap; gap: var(--gap-s); margin-inline-start: auto; }
 /* L'en-tête de « À traiter » passe à la ligne au téléphone (review du lot 8c,
    M5) : sinon les deux boutons faisaient défiler la page en largeur. */

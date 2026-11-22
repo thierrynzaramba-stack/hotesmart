@@ -18,16 +18,16 @@ const ecranAvec = ({ aTraiter = [aVerifier(1)], parcours = () => ({ lignes: [], 
 }
 
 // ─── Le dépôt en masse ──────────────────────────────────────────────────────
-test('LE TEST QUI COMPTE : plusieurs fichiers partent UN PAR UN, rattachés à l\'entité affichée ; un refusé n\'arrête pas les autres et il est NOMMÉ', async () => {
+test('LE TEST QUI COMPTE : plusieurs fichiers partent UN PAR UN, SANS entité (la lecture la reconnaît) ; un refusé n\'arrête pas les autres et il est NOMMÉ', async () => {
   let n = 0
   const geste = (c) => (c.action === 'envoi' ? { ok: true, id: id(500 + ++n), url: `https://stockage.test/${n}` } : { ok: true, issue: 'a_verifier', charge: aVerifier(500 + n) })
   const b = await monter({ geste })
   try {
-    assert.match(texte(b.$('[data-bind="envoi-entite"]')), /Les factures déposées sont rattachées à : Moi/)
     await b.deposerFichiers([['a.pdf', 'application/pdf'], ['notes.txt', 'text/plain', 'du texte'], ['b.pdf', 'application/pdf']])
     const gestes = b.gestes()
     assert.deepEqual(gestes.map(g => g.action), ['envoi', 'confirmer', 'envoi', 'confirmer'])
-    assert.deepEqual(gestes.filter(g => g.action === 'envoi').map(g => g.entite_id), [ENT, ENT], 'l\'entité de base part avec chaque envoi')
+    assert.deepEqual(gestes.filter(g => g.action === 'envoi').map(g => 'entite_id' in g), [false, false], 'aucune entité ne part avec l\'envoi (décision de Thierry)')
+    assert.equal(b.$('[data-bind="envoi-entite"]'), null, 'plus de phrase « rattachées à »')
     assert.equal(b.journal.fetch.filter(f => f.url.startsWith('https://stockage.test/')).length, 2)
     const statut = texte(b.$('[data-bind="envoi"]'))
     assert.match(statut, /2 factures déposées\. 1 refusées : notes\.txt \(Seuls les PDF et les images sont acceptés\.\)/)
@@ -42,16 +42,6 @@ test('plus de 50 fichiers : rien ne part, et l\'écran le dit', async () => {
     await b.deposerFichiers(Array.from({ length: 51 }, (_, i) => [`f${i}.pdf`, 'application/pdf']))
     assert.deepEqual(b.gestes(), [])
     assert.match(texte(b.$('[data-bind="envoi"]')), /50 fichiers au plus à la fois : vous en avez choisi 51\. Rien n'est parti\./)
-  } finally { b.fermer() }
-})
-
-test('une entité ARCHIVÉE affichée ne reçoit pas de facture neuve : le dépôt part sans entité, et rien n\'est annoncé', async () => {
-  const geste = (c) => (c.action === 'envoi' ? { ok: true, id: id(600), url: 'https://stockage.test/x' } : { ok: true, issue: 'a_verifier', charge: aVerifier(600) })
-  const b = await monter({ geste, ecran: () => reponseEcran({ entites: [{ id: ENT, nom: 'Moi', archivee: true, debut_exercice: null }] }) })
-  try {
-    assert.equal(texte(b.$('[data-bind="envoi-entite"]')), '')
-    await b.deposerFichier('a.pdf', 'application/pdf')
-    assert.equal('entite_id' in b.gestes()[0], false)
   } finally { b.fermer() }
 })
 
@@ -207,24 +197,6 @@ test('à l\'ordinateur, l\'adresse d\'une facture arrivée APRÈS le passage à 
 })
 
 // ─── Review du lot 8c ───────────────────────────────────────────────────────
-test('LE TEST QUI COMPTE (review, B1) : changer d\'entité affichée PENDANT un dépôt de plusieurs ne le répartit pas — l\'entité est fixée au départ', async () => {
-  const ENT2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
-  const entites = [{ id: ENT, nom: 'Moi', archivee: false, debut_exercice: null }, { id: ENT2, nom: 'SCI', archivee: false, debut_exercice: null }]
-  let b
-  let n = 0
-  const geste = async (c) => {
-    if (c.action === 'envoi') return { ok: true, id: id(700 + ++n), url: `https://stockage.test/${n}` }
-    // Au premier « confirmer », l'hôte choisit l'autre entité.
-    if (n === 1) await b.choisir(b.$('[data-choix="entite"]'), ENT2)
-    return { ok: true, issue: 'a_verifier', charge: aVerifier(700 + n) }
-  }
-  b = await monter({ geste, ecran: (url) => ({ ...reponseEcran({ entites }), entite: url.includes(ENT2) ? ENT2 : ENT }) })
-  try {
-    await b.deposerFichiers([['a.pdf', 'application/pdf'], ['b.pdf', 'application/pdf'], ['c.pdf', 'application/pdf']])
-    assert.deepEqual(b.gestes().filter(g => g.action === 'envoi').map(g => g.entite_id), [ENT, ENT, ENT])
-  } finally { b.fermer() }
-})
-
 test('review, M6 : trois PANNES de suite arrêtent un dépôt de plusieurs, et l\'écran dit combien ne sont pas partis ; un refus de fichier n\'en est pas une', async () => {
   const geste = (c) => { if (c.action === 'envoi') throw Object.assign(new Error('x'), { status: 503, error: 'panne' }); return { ok: true } }
   const b = await monter({ geste })

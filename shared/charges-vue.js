@@ -312,22 +312,7 @@ export function monter (racine, deps) {
     : t('charges.exercice_decale', { debut: annee, fin: String(Number(annee) + 1) }))
   // ⚠ L'ENTITÉ SE CHOISIT EN TÊTE DE PAGE (retour de recette du lot 8a) :
   // tout ce qui suit en dépend — totaux, mois, crédits, factures.
-  // L'entité de BASE d'un dépôt (lot 8c, décision 3) : celle affichée, si elle
-  // est active. Une entité archivée ne reçoit pas de facture neuve : le dépôt
-  // part alors sans entité, et la lecture en propose une.
-  function entiteDeBase () {
-    const e = etat.entites.find(x => String(x.id) === String(etat.entite || ''))
-    return e && !e.archivee ? e : null
-  }
-  function peindreEntiteDeBase () {
-    const z = $('[data-bind="envoi-entite"]')
-    if (!z) return
-    const bouton = $('[data-action="ajouter"]')
-    const e = entiteDeBase()
-    z.textContent = e && !(bouton && bouton.hidden) ? t('charges.envoi_entite', { entite: e.nom }) : ''
-  }
   function peindreEntite () {
-    peindreEntiteDeBase()
     const z = $('[data-bind="entite"]')
     if (!z) return
     if (!etat.entites.length) { z.innerHTML = ''; return }
@@ -1282,10 +1267,10 @@ export function monter (racine, deps) {
    * Dépose UN fichier par le chemin de toujours (`envoi`, dépôt à l'URL signée,
    * `confirmer`) et rend la réponse de la confirmation. Lève un `refusFichier`
    * pour un fichier refusé avant tout envoi, l'erreur du serveur sinon.
-   * ⚠ L'ENTITÉ DE BASE PART AVEC L'ENVOI (lot 8c, décision 3) ; le serveur la
-   * vérifie.
+   * ⚠ AUCUNE ENTITÉ NE PART AVEC L'ENVOI (décision de Thierry, recette du lot
+   * 8c) : la lecture la reconnaît, ou laisse le champ vide dans le doute.
    */
-  async function deposerUn (fichier, suivi = () => {}, base = entiteDeBase()) {
+  async function deposerUn (fichier, suivi = () => {}) {
     let type = typeDuFichier(fichier)
     // Un fichier SANS type, ou au type générique, que son nom ne fait pas
     // reconnaître : son contenu tranche. Un type précis (texte, tableur…)
@@ -1332,7 +1317,7 @@ export function monter (racine, deps) {
     }
     if (corps.size > TYPES_ACCEPTES[type]) throw refusFichier(t('charges.refus_trop_gros'))
     suivi(t('charges.envoi_en_cours'))
-    const o = await deps.agir({ action: 'envoi', type, octets: corps.size, origine: type === 'application/pdf' ? 'fichier' : 'photo', ...(base ? { entite_id: base.id } : {}) })
+    const o = await deps.agir({ action: 'envoi', type, octets: corps.size, origine: type === 'application/pdf' ? 'fichier' : 'photo' })
     await deps.deposer(o.url, corps)
     suivi(t('charges.lecture_en_cours'))
     return deps.agir({ action: 'confirmer', id: o.id })
@@ -1372,10 +1357,6 @@ export function monter (racine, deps) {
     if (fichiers.length > MAX_FICHIERS) { statutEnvoi(t('charges.masse_trop', { n: fichiers.length, max: MAX_FICHIERS }), true); return }
     etat.envoiEnCours = true
     boutonAjouter(false)
-    // ⚠ L'ENTITÉ EST FIXÉE AU DÉPART (review du lot 8c, B1) : un dépôt de 50
-    // dure des minutes, et changer d'entité affichée pendant ce temps ne doit
-    // pas répartir le dépôt sur deux entités.
-    const base = entiteDeBase()
     const refus = []
     let ok = 0
     let pannes = 0
@@ -1384,7 +1365,7 @@ export function monter (racine, deps) {
       for (const [i, f] of fichiers.entries()) {
         statutEnvoi(t('charges.masse_progression', { i: i + 1, n: fichiers.length }))
         try {
-          await deposerUn(f, () => {}, base)
+          await deposerUn(f)
           ok++
           pannes = 0
         } catch (e) {

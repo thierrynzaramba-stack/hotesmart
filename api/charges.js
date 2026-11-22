@@ -3,8 +3,7 @@
 // Spec : docs/specs/spec-compte-de-charges.md §5, §6 ; Q9
 //
 // POST seulement, une action par appel :
-//   envoi      { type, octets, origine, entite_id? } -> { id, url }
-//                                         (URL d'envoi signée ; lot 8c : l'entité de base)
+//   envoi      { type, octets, origine }  -> { id, url }   (URL d'envoi signée)
 //   confirmer  { id }                     -> la charge, lue par l'IA si possible
 //   valider    { id, champs }             -> la charge validée
 //   valider_lot { ids }                    -> lot 8c : les factures complètes,
@@ -93,9 +92,7 @@ module.exports = async function handler (req, res) {
     if (action === 'envoi') {
       const r = await charges.ouvrirEnvoi(supabase, {
         compte, type: String(corps.type || ''), octets: corps.octets,
-        origine: corps.origine === 'photo' ? 'photo' : 'fichier',
-        // Lot 8c : l'entité de base du dépôt, vérifiée par le writer.
-        entiteId: corps.entite_id == null ? null : String(corps.entite_id)
+        origine: corps.origine === 'photo' ? 'photo' : 'fichier'
       })
       return rendre(res, r, x => ({ id: x.id, url: x.url, jeton: x.jeton }))
     }
