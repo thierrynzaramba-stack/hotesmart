@@ -44,6 +44,34 @@ create index if not exists
   (user_id, provider_thread_id)
   where provider_thread_id is not null;
 
+-- ⚠ L'ANTI-DOUBLON DES MESSAGES SANS
+-- IDENTIFIANT SEPARE DESORMAIS LES FILS
+-- (review 1 du lot, B1). L'index de 2026-09-11
+-- confondait, sans reservation, deux prospects
+-- du meme bien qui ecrivent le meme texte dans
+-- la meme minute : le second etait refuse
+-- (23505) et n'entrait qu'a l'import suivant.
+-- On pose le nouvel index AVANT de retirer
+-- l'ancien : a aucun instant la table n'est
+-- sans garde. Sans fil (lignes d'avant, autres
+-- providers), la cle est celle d'avant.
+create unique index if not exists
+  messages_sans_msgid_fil_unique_idx
+  on public.messages (
+    user_id,
+    coalesce(booking_id, ''),
+    coalesce(provider_thread_id, ''),
+    direction,
+    sender,
+    md5(btrim(body)),
+    date_trunc('minute',
+      sent_at at time zone 'UTC')
+  )
+  where provider_msg_id is null;
+
+drop index if exists
+  public.messages_sans_msgid_unique_idx;
+
 -- ─── 2. La table des fils ───────────────────
 create table if not exists
   public.fils_provider (
@@ -60,8 +88,16 @@ create table if not exists
   derniere timestamptz,
   maj_le timestamptz not null default now(),
   cree_le timestamptz not null default now(),
+  -- ⚠ LE COMPTE EST DANS LA CLE (review 1,
+  -- S1). Deux biens de deux comptes peuvent
+  -- porter la meme reference provider : sans
+  -- `user_id` dans l'unicite, chaque import
+  -- reecrivait le proprietaire du fil — « le
+  -- dernier arrive gagne » — et l'autre compte
+  -- lisait le nom du voyageur.
   constraint fils_provider_fil_unique
-    unique (provider, provider_thread_id)
+    unique (user_id, provider,
+      provider_thread_id)
 );
 
 comment on table public.fils_provider is

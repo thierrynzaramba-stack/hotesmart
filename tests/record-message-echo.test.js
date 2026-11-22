@@ -298,10 +298,14 @@ test('la branche entrante compare des INSTANTS, pas des chaines — lecture du c
     'la comparaison passe par la normalisation : timestamptz se serialise de trois '
     + 'facons, et celle du provider n a pas de fuseau du tout')
   assert.ok(bloc.includes('lignesDuMemeFil(db, row'), 'le bloc entrant passe par la recherche commune')
-  assert.strictEqual(helper.split(".eq('user_id', row.user_id)").length - 1, 2,
-    'cloisonnement par compte, sur LES DEUX recherches (reservation et fil)')
-  assert.ok(helper.includes(".eq('booking_id', row.booking_id)"), 'par reservation')
-  assert.ok(helper.includes(".eq('provider_thread_id', row.provider_thread_id)"), 'et par fil')
+  // Les deux recherches passent par le meme lecteur `lire`, qui pose le
+  // compte : le cloisonnement ne peut pas manquer a l'une des deux. Le
+  // comportement (autre compte jamais reconcilie) est pilote dans
+  // tests/demandes-fils-coeur.test.js.
+  const lecteur = helper.slice(helper.indexOf('const lire = async'), helper.indexOf('let parResa'))
+  assert.ok(lecteur.includes(".eq('user_id', row.user_id)"), 'cloisonnement par compte, dans le lecteur commun')
+  assert.ok(helper.includes("lire('booking_id', row.booking_id)"), 'par reservation')
+  assert.ok(helper.includes("lire('provider_thread_id', row.provider_thread_id)"), 'et par fil')
   assert.ok(bloc.includes(".eq('provider', row.provider)"), 'et par provider')
   assert.ok(bloc.includes('sentAt'), 'la garde exige l instant fourni par le PRODUCTEUR')
 })

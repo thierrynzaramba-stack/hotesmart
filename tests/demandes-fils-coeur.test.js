@@ -18,9 +18,18 @@ const assert = require('node:assert')
 const path = require('node:path')
 
 // ─── Un faux Supabase qui APPLIQUE ses filtres et donne un `id` ─────────────
-function fauxSupabase (tables, { sansColonneFil = false } = {}) {
+// ⚠ ET QUI APPLIQUE L'INDEX ANTI-DOUBLON DE LA VRAIE BASE (review 1 du lot,
+// B1 ; REVIEW.md regle 22) : un double plus permissif que la base faisait
+// passer pour vert un comportement que la base refuse. La cle est celle de la
+// migration 2026-11-23 (`messages_sans_msgid_fil_unique_idx`) ; un test plus
+// bas verifie que la migration la porte bien. `indexSansFil` rejoue l'ancien.
+function cleAntiDoublon (r, avecFil) {
+  const minute = Math.floor(Date.parse(r.sent_at) / 60000)
+  return [r.user_id, r.booking_id || '', avecFil ? (r.provider_thread_id || '') : '', r.direction, r.sender, String(r.body || '').trim(), minute].join('|')
+}
+function fauxSupabase (tables, { sansColonneFil = false, indexSansFil = false } = {}) {
   let n = 0
-  const journal = { updates: [], upserts: [] }
+  const journal = { updates: [], upserts: [], selects: [] }
   const vrai = (r, f) => {
     switch (f.op) {
       case 'eq': return r[f.col] != null && String(r[f.col]) === String(f.val)
@@ -55,6 +64,12 @@ function fauxSupabase (tables, { sansColonneFil = false } = {}) {
               if (touche) return res({ data: null, error: erreurFil })
             }
             if (q.mode === 'insert') {
+              if (table === 'messages' && q.charge.provider_msg_id == null) {
+                const k = cleAntiDoublon(q.charge, !indexSansFil)
+                if (lignes.some(l => l.provider_msg_id == null && cleAntiDoublon(l, !indexSansFil) === k)) {
+                  return res({ data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } })
+                }
+              }
               lignes.push({ id: 'id-' + (++n), created_at: new Date(Date.now() + n).toISOString(), ...q.charge })
               return res({ data: null, error: null })
             }
@@ -66,6 +81,7 @@ function fauxSupabase (tables, { sansColonneFil = false } = {}) {
               else lignes.push({ id: 'id-' + (++n), ...q.charge })
               return res({ data: null, error: null })
             }
+            if (q.mode === 'select') journal.selects.push({ table, filtres: q.filtres.map(f => f.col) })
             const vises = lignes.filter(r => q.filtres.every(f => vrai(r, f)))
             if (q.mode === 'update') {
               journal.updates.push({ table, charge: q.charge, n: vises.length })
@@ -117,7 +133,15 @@ test('LE CAS MESURÉ EN PROD : une demande (sans réservation) n\'est plus enreg
   assert.deepStrictEqual([t.messages[0].provider_msg_id, t.messages[0].provider_thread_id, t.messages[0].booking_id], ['m1', 'T1', null])
 })
 
-test('deux prospects du même bien qui disent la même chose dans la même minute restent DEUX messages (dédup sans réservation par le fil)', async () => {
+test('deux prospects du même bien qui disent la même chose dans la même minute restent DEUX messages (dédup sans réservation par le fil, et index de la base)', async () => {
+  // Contre-epreuve de la base : avec l'ANCIEN index (sans le fil), le second
+  // prospect est refuse — c'est le defaut B1 de la review, que la migration ferme.
+  {
+    const t = { messages: [] }; const db = fauxSupabase(t, { indexSansFil: true }); const rec = writer()
+    await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Bonjour', threadId: 'T1', sentAt: QUAND }))
+    const r = await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Bonjour', threadId: 'T2', sentAt: '2026-11-20T15:47:50.000Z' }))
+    assert.strictEqual(r.reason, 'race_23505_outbound', 'l\'ancien index confond les deux prospects')
+  }
   const t = { messages: [] }; const db = fauxSupabase(t); const rec = writer()
   await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Bonjour', threadId: 'T1', sentAt: QUAND }))
   const r = await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Bonjour', threadId: 'T2', sentAt: '2026-11-20T15:47:50.000Z' }))
@@ -128,6 +152,9 @@ test('deux prospects du même bien qui disent la même chose dans la même minut
   assert.strictEqual(d.reason, 'duplicate_outbound')
 })
 
+// Non-regression : vert contre le code d'avant (qui ne cherchait pas par le
+// fil). Rougit contre la version fautive qui omet `.eq('user_id', …)` dans la
+// recherche par le fil — mutation mesuree.
 test('le fil ne traverse pas les comptes : même fil, même texte, même instant, AUTRE compte — pas de réconciliation', async () => {
   const t = { messages: [] }; const db = fauxSupabase(t); const rec = writer()
   await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Bonjour', threadId: 'T1', sentAt: QUAND }))
@@ -146,7 +173,9 @@ test('une demande DEVENUE réservation : la copie webhook (sans réservation) se
 })
 
 test('une ligne d\'AVANT ce lot (réservation, pas de fil) est toujours retrouvée par la réservation — l\'import qui suit le déploiement ne duplique rien', async () => {
-  const t = { messages: [{ id: 'old', user_id: 'C1', provider: 'channex', property_id: 'P1', booking_id: 'B1', direction: 'inbound', sender: 'guest', body: 'Merci', sent_at: QUAND, provider_msg_id: null, created_at: '2026-11-20T15:47:21Z' }] }
+  // Ligne d'avant le lot, telle que la base la rend APRES la migration : la
+  // colonne existe, et vaut null.
+  const t = { messages: [{ id: 'old', user_id: 'C1', provider: 'channex', property_id: 'P1', booking_id: 'B1', provider_thread_id: null, ota: null, direction: 'inbound', sender: 'guest', body: 'Merci', sent_at: QUAND, provider_msg_id: null, created_at: '2026-11-20T15:47:21Z' }] }
   const db = fauxSupabase(t); const rec = writer()
   const r = await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Merci', providerMsgId: 'm9', threadId: 'T1', bookingId: 'B1', sentAt: QUAND }))
   assert.strictEqual(r.reason, 'echo_entrant_reconcilie')
@@ -166,6 +195,8 @@ test('relu par l\'import, un message déjà connu reçoit le fil (lignes d\'avan
   assert.deepStrictEqual([t.messages[1].provider_thread_id, t.messages[1].booking_id], ['T1', 'B1'])
 })
 
+// Sobriete : vert contre le code d'avant (qui n'ecrivait jamais). Rougit contre
+// une version qui complete a chaque relecture sans regarder ce qui manque.
 test('COÛT : un message relu qui a déjà son fil et sa réservation ne déclenche AUCUNE écriture', async () => {
   const t = { messages: [{ id: 'a', user_id: 'C1', provider: 'channex', provider_msg_id: 'm1', booking_id: 'B1', provider_thread_id: 'T1', body: 'x' }] }
   const db = fauxSupabase(t); const rec = writer()
@@ -190,6 +221,9 @@ test('notre réponse à une demande (sans réservation) reconnaît son écho par
   assert.deepStrictEqual([t.messages.length, t.messages[0].provider_msg_id], [1, 'm5'])
 })
 
+// Non-regression de la fenetre « code deploye, migration pas collee » : vert
+// contre le code d'avant (qui ignorait la colonne). Rougit sans le repli
+// d'insertion ou sans la relecture sans colonne — mutations mesurees.
 test('migration pas encore collée : la colonne absente ne perd AUCUN message et ne fabrique aucun doublon', async () => {
   const t = { messages: [] }; const db = fauxSupabase(t, { sansColonneFil: true }); const rec = writer()
   const r1 = await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Bonjour', providerMsgId: 'm1', threadId: 'T1', bookingId: 'B1', sentAt: QUAND }))
@@ -205,6 +239,45 @@ test('migration pas encore collée : la colonne absente ne perd AUCUN message et
   assert.strictEqual(t.messages.length, 2)
 })
 
+test('S2 : la ligne d\'un AUTRE compte, retrouvée par l\'identifiant provider, n\'est jamais complétée', async () => {
+  const t = { messages: [{ id: 'a', user_id: 'C2', provider: 'channex', provider_msg_id: 'm1', booking_id: null, provider_thread_id: null, ota: null, body: 'x' }] }
+  const db = fauxSupabase(t); const rec = writer()
+  const r = await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'x', providerMsgId: 'm1', threadId: 'T1', bookingId: 'B1', ota: 'airbnb', sentAt: QUAND }))
+  assert.strictEqual(r.reason, 'duplicate_inbound')
+  assert.deepStrictEqual([t.messages[0].provider_thread_id, t.messages[0].booking_id, t.messages[0].ota], [null, null, null])
+  assert.strictEqual(db.journal.updates.length, 0)
+})
+
+test('un fil déjà connu n\'est jamais écrasé par un autre fil ; l\'OTA manquante d\'une copie webhook est complétée', async () => {
+  const t = { messages: [{ id: 'w', user_id: 'C1', provider: 'channex', property_id: 'P1', booking_id: 'B1', provider_thread_id: 'T-ANCIEN', ota: null, direction: 'inbound', sender: 'guest', body: 'Merci', sent_at: QUAND, provider_msg_id: null, created_at: '2026-11-20T15:47:21Z' }] }
+  const db = fauxSupabase(t); const rec = writer()
+  const r = await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Merci', providerMsgId: 'm1', threadId: 'T-NOUVEAU', bookingId: 'B1', ota: 'airbnb', sentAt: QUAND }))
+  assert.strictEqual(r.reason, 'echo_entrant_reconcilie')
+  assert.deepStrictEqual([t.messages[0].provider_thread_id, t.messages[0].ota, t.messages[0].provider_msg_id], ['T-ANCIEN', 'airbnb', 'm1'])
+})
+
+test('COÛT : pour un séjour ordinaire, la recherche par le fil ne part pas quand la réservation a trouvé la copie', async () => {
+  const t = { messages: [] }; const db = fauxSupabase(t); const rec = writer()
+  await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Merci', threadId: 'T1', bookingId: 'B1', sentAt: QUAND }))
+  db.journal.selects.length = 0
+  const r = await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Merci', providerMsgId: 'm1', threadId: 'T1', bookingId: 'B1', sentAt: QUAND }))
+  assert.strictEqual(r.reason, 'echo_entrant_reconcilie')
+  assert.ok(!db.journal.selects.some(q => q.filtres.includes('provider_thread_id')), JSON.stringify(db.journal.selects))
+})
+
+test('la migration porte l\'index anti-doublon AVEC le fil, posé avant le retrait de l\'ancien, et l\'unicité des fils par compte', () => {
+  const sql = require('fs').readFileSync(path.join(__dirname, '..', 'migrations/2026-11-23-demandes-fils.sql'), 'utf8')
+  const pose = sql.indexOf('messages_sans_msgid_fil_unique_idx')
+  const retrait = sql.indexOf('drop index if exists')
+  assert.ok(pose > 0 && retrait > pose, 'le nouvel index est posé AVANT le retrait de l\'ancien')
+  const def = sql.slice(pose, retrait)
+  for (const morceau of ["coalesce(booking_id, '')", "coalesce(provider_thread_id, '')", 'direction', 'sender', 'md5(btrim(body))', "date_trunc('minute'", 'where provider_msg_id is null']) {
+    assert.ok(def.includes(morceau), morceau)
+  }
+  assert.match(sql.slice(retrait), /messages_sans_msgid_unique_idx/)
+  assert.match(sql, /unique \(user_id, provider,\s+provider_thread_id\)/)
+})
+
 // ─── enregistrerFil ─────────────────────────────────────────────────────────
 
 function fils () {
@@ -217,12 +290,30 @@ test('enregistrerFil : une ligne par (provider, fil), mise à jour en place ; la
   const r = await enregistrerFil({ userId: 'C1', provider: 'channex', propertyId: 'P1', supabase: db,
     fil: { id: 'T1', titre: 'Marie', booking: null, ota: 'airbnb', ferme: false, derniere: QUAND } })
   assert.deepStrictEqual(r, { ok: true })
-  assert.strictEqual(db.journal.upserts[0].opts.onConflict, 'provider,provider_thread_id')
+  assert.strictEqual(db.journal.upserts[0].opts.onConflict, 'user_id,provider,provider_thread_id')
   assert.ok(!('booking_id' in db.journal.upserts[0].ligne), 'une demande n\'écrit pas booking_id : elle ne peut pas effacer')
   await enregistrerFil({ userId: 'C1', provider: 'channex', propertyId: 'P1', supabase: db, fil: { id: 'T1', titre: 'Marie', booking: 'B1' } })
   await enregistrerFil({ userId: 'C1', provider: 'channex', propertyId: 'P1', supabase: db, fil: { id: 'T1', titre: 'Marie D.', booking: null, ferme: true } })
   assert.strictEqual(t.fils_provider.length, 1)
   assert.deepStrictEqual([t.fils_provider[0].booking_id, t.fils_provider[0].titre, t.fils_provider[0].ferme], ['B1', 'Marie D.', true])
+})
+
+test('S1 : deux comptes qui portent le même fil gardent chacun LEUR ligne — le propriétaire ne bascule jamais', async () => {
+  const t = { fils_provider: [] }; const db = fauxSupabase(t); const { enregistrerFil } = fils()
+  for (let i = 0; i < 2; i++) {
+    await enregistrerFil({ userId: 'A', provider: 'channex', propertyId: 'P1', supabase: db, fil: { id: 'T1', titre: 'Voyageur de A' } })
+    await enregistrerFil({ userId: 'B', provider: 'channex', propertyId: 'P1', supabase: db, fil: { id: 'T1', titre: 'Voyageur de B' } })
+  }
+  assert.deepStrictEqual(t.fils_provider.map(f => [f.user_id, f.titre]).sort(), [['A', 'Voyageur de A'], ['B', 'Voyageur de B']])
+})
+
+test('enregistrerFil : un titre absent ne vide pas le nom connu', async () => {
+  const t = { fils_provider: [] }; const db = fauxSupabase(t); const { enregistrerFil } = fils()
+  await enregistrerFil({ userId: 'C1', provider: 'channex', propertyId: 'P1', supabase: db, fil: { id: 'T1', titre: 'Marie' } })
+  await enregistrerFil({ userId: 'C1', provider: 'channex', propertyId: 'P1', supabase: db, fil: { id: 'T1', titre: null } })
+  await enregistrerFil({ userId: 'C1', provider: 'channex', propertyId: 'P1', supabase: db, fil: { id: 'T1', titre: '  ' } })
+  assert.strictEqual(t.fils_provider[0].titre, 'Marie')
+  assert.ok(!('titre' in db.journal.upserts[1].ligne))
 })
 
 test('enregistrerFil : titre borné, paramètres manquants refusés, jamais d\'exception', async () => {
