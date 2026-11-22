@@ -257,12 +257,36 @@ test('« À traiter » : à lire, à vérifier, illisible, et tout signal non tr
   const r = await appeler()
   const q = r.requetes.find(x => x.table === 'charges' && x.optionsSelect && x.optionsSelect.count === 'exact')
   assert.ok(q, 'la file compte en base')
-  assert.equal(q.limite, 50)
+  assert.equal(q.limite, 51, 'une page de 50, plus une ligne pour savoir s\'il y a une suite (lot 8c, dette 153)')
   assert.deepEqual(q.filtres.find(f => f[0] === 'or'), ['or', 'statut.in.(a_lire,a_verifier,illisible,tableau),and(signal.not.is.null,signal_tranche.is.false)'], 'un tableau reconnu attend son import (§14.21.3)')
   assert.ok(q.filtres.some(f => f[0] === 'neq' && f[2] === 'envoi'))
   assert.doesNotMatch(q.colonnes, /justificatif_chemin/, 'jamais le chemin du fichier')
   // ⚠ De la réponse de l'IA, le SEUL solde d'une régularisation (lot 7a).
   assert.deepEqual(q.colonnes.match(/[\w:>-]*lecture_ia[\w:>-]*/g), ['solde_lu:lecture_ia->solde_ttc_cents', 'tableau_lu:lecture_ia->tableau'], 'jamais la réponse brute de l\'IA entière : le solde d\'une régularisation, et les bornes d\'un tableau reconnu (lot 8b)')
+})
+
+// ─── Lot 8c : la suite de « À traiter », le parcours ────────────────────────
+test('8c : `suite_a_traiter` et `parcours` — un membre est refusé, un curseur forgé aussi, AVANT toute requête', async () => {
+  const CR = '2026-11-22T19:00:00.123+00:00'
+  for (const query of [{ suite_a_traiter: `${CR}|${uuid(1)}` }, { parcours: 'debut' }]) {
+    const m = await appeler({ titulaire: false, query })
+    assert.equal(m.rep.statut, 403)
+    assert.equal(m.requetes.length, 0)
+  }
+  for (const query of [{ suite_a_traiter: `${CR}"),user_id.neq.(x|${uuid(1)}` }, { parcours: 'x|y' }]) {
+    const r = await appeler({ query })
+    assert.equal(r.rep.statut, 400, JSON.stringify(query))
+    assert.equal(r.requetes.length, 0)
+  }
+})
+
+test('8c : `parcours=debut` lit les « À vérifier » dans l\'ordre de dépôt, et rien d\'autre de l\'écran', async () => {
+  const r = await appeler({ query: { parcours: 'debut' }, repondre: () => ({ data: [], count: 0 }) })
+  assert.equal(r.rep.statut, 200)
+  assert.deepEqual(r.rep.corps, { parcours: { lignes: [], suite: null, nombre: 0 } })
+  assert.equal(r.requetes.length, 1, 'une seule lecture')
+  assert.equal(filtre(r.requetes[0], 'statut'), 'a_verifier')
+  assert.equal(filtre(r.requetes[0], 'user_id'), TITULAIRE)
 })
 
 // ─── Les bornes d'une période ────────────────────────────────────────────────

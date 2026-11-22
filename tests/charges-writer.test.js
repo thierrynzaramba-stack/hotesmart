@@ -576,7 +576,7 @@ test('⚠ garde de coût : la lecture se compte dans `ia_appels`, par compte, su
     assert.deepEqual(q.filtres.find(f => f[0] === 'gte'), ['gte', 'created_at', '2026-11-08T12:00:00.000Z'])
     assert.equal(q.optionsSelect.count, 'exact')
   }
-  assert.equal(charges.PLAFOND_LECTURES_JOUR, 50)
+  assert.equal(charges.PLAFOND_LECTURES_JOUR, 100, 'décision de Thierry du 22 novembre 2026 (lot 8c)')
 })
 
 test('⚠ lire en attente : un compte AU PLAFOND n’est pas lu, rien n’est compté, et les autres comptes passent', async () => {
