@@ -172,8 +172,20 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
     // ecriture, « construireEtats », « renderTout() » et la garde de course du
     // jeton de lecture n'etaient jamais exerces, et le journal du banc etait
     // pollue par une erreur que personne n'affirmait (constat 12).
+    // Les trois gestes de blocage passent par « window.__apiPost », qui rejoue
+    // « apiCall » de « shared/api-client.js » : POST sur « fetch », lecture du
+    // JSON, et une erreur PORTANT LE STATUT quand la reponse n est pas ok. Le
+    // test observe donc ce que la page envoie et ce qu elle fait de la reponse.
     const api = { get: async () => ({}), post: async () => ({}),
-      calendar: { load: async () => window.__chargement() } }
+      calendar: {
+        load: async () => window.__chargement(),
+        fermer: (p, debut, fin, raison) =>
+          window.__apiPost({ action: 'fermer', property_id: p, debut, fin, raison }),
+        modifierFermeture: (p, id, debut, fin, raison) =>
+          window.__apiPost({ action: 'modifier_fermeture', property_id: p, id, debut, fin, raison }),
+        rouvrirFermeture: (p, id) =>
+          window.__apiPost({ action: 'rouvrir_fermeture', property_id: p, id })
+      } }
     const compteCourant = () => 'U1'
     const peutLire = () => true
     // ⚠ AVEUGLE A SON ARGUMENT, LE DOUBLE NE PROUVE QUE « UN BOOLEEN GARDE »,
@@ -192,6 +204,7 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
     window.__cal = {
       etat, renderTout, renderFlottante, renderPlanning, renderGrilleMobile,
       joursSelection, actionPrix, viderSelection, enregistrerPopup, ouvrirPopup,
+      ouvrirFormulaire, ouvrirFicheBlocage,
       toast, AUJOURDHUI, estLarge, construireEtats, computeDays, toISO, etatNuit
     }
   `
@@ -204,6 +217,13 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
       + corpsDeLaPage() + '\n' + queue)
   } catch (e) {
     throw new Error('banc : le module de la page n a pas pu etre evalue — ' + e.message)
+  }
+  window.__apiPost = async (corps) => {
+    const res = await window.fetch('/api/calendar', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer jeton' }, body: JSON.stringify(corps) })
+    const data = await res.json()
+    if (!res.ok) { const e = new Error(data.error || 'Erreur serveur'); e.status = res.status; throw e }
+    return data
   }
   window.fetch = async (chemin, options = {}) => {
     const corps = options.body ? JSON.parse(options.body) : null
