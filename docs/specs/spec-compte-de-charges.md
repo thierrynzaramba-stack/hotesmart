@@ -4650,6 +4650,106 @@ de « À traiter » s'appelle désormais **« Tout traiter »** (anglais « Hand
 all », espagnol « Tratar todo ») ; il ouvre toujours, une par une, toutes les
 factures « À vérifier » du compte dans l'ordre de dépôt. Seul le texte change.
 
+### 14.23 Lot 8d — télécharger un exercice en ZIP (23 novembre 2026)
+
+Branche `charges-export`, partie de `main` (`8b102089`, lot 8c en production).
+
+#### 14.23.1 Décisions de Thierry (23 novembre 2026, 0 h 33 à 0 h 39)
+
+1. **« Télécharger l'exercice »** : un ZIP de l'exercice choisi, pour l'entité
+   choisie (maquette montrée dans la conversation).
+2. **Le ZIP contient** : un PDF de la **liste** des factures, les **factures
+   elles-mêmes en fichiers séparés** (« les factures ne sont pas
+   concaténées »), et un **tableau CSV** (« Oui »).
+3. **Les factures ENREGISTRÉES seulement.** Celles qui restent à traiter n'y
+   sont pas, et le PDF dit combien.
+4. **Version 1 : la liste seulement** (« version 1 seulement les factures et
+   la liste ») — ni totaux par catégorie, ni par logement, ni par mois.
+5. Un **total** en bas de la liste : proposé à Thierry (« sauf si vous ne le
+   voulez pas »), sans objection. À confirmer en recette.
+6. « Code-le pour que demain il soit prêt pour recette. »
+
+#### 14.23.2 Ce qui est à coder
+
+**Le bouton.** Sur `/charges`, sous le choix de l'entité et de l'exercice :
+« Télécharger l'exercice ». Il n'apparaît qu'avec une entité et un exercice.
+
+**Le ZIP** : `Charges-<exercice>-<entité>.zip`, sans dossier racine :
+- `Liste-<exercice>.pdf` ;
+- `Factures/NNN_AAAA-MM-JJ_Fournisseur_TTC.ext` — `NNN` est le numéro de la
+  ligne dans la liste (001, 002…), la date est le jour de la facture, le TTC
+  s'écrit avec une virgule (`84,20`) et garde le signe d'un avoir ; noms en
+  caractères simples (accents retirés), extension selon le type du fichier ;
+- `Factures-<exercice>.csv`.
+
+**Quelles factures.** Les charges `validee` de l'entité dont le **jour** est
+dans l'exercice — la lecture « Date de facture » de l'écran —, rangées par
+jour puis par arrivée. Une charge enregistrée sans fichier (commission de
+plateforme, échéance de crédit) est dans la liste et dans le CSV, marquée
+« sans fichier », et n'a pas de fichier dans le ZIP.
+
+**Le PDF (liste).** A4 paysage. En-tête : « Factures de l'exercice 2026 »,
+l'entité et son SIRET, « Du … au … », le nombre de factures, la date
+d'édition, et, s'il y en a, « N factures sont encore à traiter et ne sont pas
+dans cet export ». Colonnes : N°, Date, Fournisseur, N° de facture,
+Catégorie, Logement, HT, TVA, TTC. Une ligne de total (HT, TVA, TTC ; un
+montant non lu n'y compte pas, et la note le dit). Pied : « Page x sur y ».
+
+**Le CSV.** UTF-8 avec BOM, séparateur `;`, décimale `,` (Excel en français
+l'ouvre tel quel). Colonnes : N°, Date, Fournisseur, SIRET, N° de facture,
+Type, Catégorie, Logement, Début de période, Fin de période, HT, TVA, TTC,
+Fichier.
+
+**Où se fabrique le ZIP : dans le navigateur.** Une réponse de fonction
+Vercel est bornée à 4,5 Mo, et deux cents factures en font souvent bien
+plus. Le serveur rend la LISTE et des ADRESSES de lecture ; le navigateur
+télécharge chaque fichier au stockage, écrit le PDF, le CSV et le ZIP, puis
+le propose au téléchargement. **Aucune bibliothèque ajoutée** : un écrivain
+de ZIP « stocké » (sans compression — les PDF et les photos le sont déjà) et
+un écrivain de PDF minimal (police Helvetica standard, codage WinAnsi), dans
+`shared/`, testés.
+
+**Serveur.**
+- `GET /api/ecran/charges?export=1&entite=<uuid>&periode=<AAAA>` : la liste
+  d'export, page après page de 1 000 (5 000 au plus, sinon refus
+  `trop_de_factures`), et le nombre de factures à traiter du compte. Mêmes
+  gardes que le détail d'un mois : titulaire, entité relue dans le compte,
+  exercice relu (une année hors des bornes est refusée). Le chemin du fichier
+  ne sort pas : seulement « a un fichier ».
+- `POST /api/charges { action: 'export_urls', ids }` : 20 identifiants au
+  plus, motif vérifié avant toute lecture, charges du compte ET `validee`
+  seulement ; une adresse de lecture de 60 s par fichier
+  (`createSignedUrls`). Les paquets sont demandés au fil du téléchargement.
+
+**La fenêtre de progression** (celle du dépôt, 14.22.9) : « Préparation de
+la liste… », « Facture 12 sur 217 », « Création du ZIP… », une barre. Un
+fichier qui ne se télécharge pas après trois essais ARRÊTE l'export, et la
+fenêtre nomme la facture : aucun ZIP incomplet ne sort sans le dire.
+
+#### 14.23.3 Inventaire
+
+Rien n'est retiré. Le bouton s'ajoute à l'en-tête de la page.
+
+#### 14.23.4 Le téléphone
+
+Le même bouton. Le ZIP se construit en mémoire : un exercice très chargé peut
+peser sur un téléphone ancien. À mesurer en recette.
+
+#### 14.23.5 Case PERFORMANCE
+
+1. Un endpoint d'écran : inchangé ; l'export est un GESTE, servi par une
+   branche du même endpoint (`?export=1`), au clic seulement.
+2. Donnée non urgente : sans objet (une liste de factures, lue au geste).
+3. Cache navigateur : aucun. Ni la liste ni les adresses ne sont gardées.
+4. `private, no-store` : posé avant tout refus, sur les deux endpoints, déjà.
+5. Statiques versionnés : deux modules nouveaux, chargés par la page.
+6. Lecture tronquée : la liste se lit page après page ; au-delà de 5 000, le
+   refus est dit.
+7. Budget de l'écran : inchangé, aucun appel de plus au chargement.
+8. AVANT / APRÈS : l'écran ne change pas (2 appels). Le geste : 1 lecture de
+   liste, N ÷ 20 demandes d'adresses, N téléchargements au stockage. Durée et
+   taille du ZIP à mesurer en recette sur l'exercice réel.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et
