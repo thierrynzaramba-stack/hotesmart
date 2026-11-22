@@ -425,3 +425,28 @@ Ce qu'elle trouve se corrige sans nouvelle review.
 | Réserve B1 (contrôle 4 vert sur une base sans l'ancien index) | assumée : l'ancien index est en staging et en prod depuis septembre. |
 
 Mutations des correctifs : 3 sur 3 tuées. Suite 9207/9207.
+
+## Requête de preuve du lot 1 (docs/recette/preuve-dette-129-lot1.sql) — relecture (22-23 novembre 2026)
+
+Plage relue : `977c015965e0f814b54b6b2b463d766423b22d2a..fa7ec9e9fe873e28acc2fd12906ab1772d7369ce`,
+branche `dette-129-etape3`. Demandée par le chef de file avant le go prod du lot 1.
+
+### Constats (résumé fidèle du rapport ; la relecture a mesuré sur un Postgres 16 jetable)
+
+- **1. Lecture seule et sans risque : OUI** (une instruction `with … select`, aucune fonction à effet de bord, 57 ms sur 8 010 messages, lignes ≤ 48 caractères, ni texte de message ni nom de voyageur affichés).
+- **2. Prouve-t-elle les trois critères : NON.**
+  - **A, bloquant** : `copies` comparait l'instant à la microseconde et le texte par `md5(btrim(body))` ; un doublon dont la copie webhook a un instant différent (même de 1 ms : le webhook prend `payload.inserted_at || payload.timestamp`, or `timestamp` est au niveau supérieur du corps) ou un texte différent d'un retour à la ligne était dit « conforme » — précisément l'hypothèse à vérifier.
+  - **B, bloquant** : après réconciliation, le fil vient du webhook ; l'entrée import n'est prouvée que par une ligne « import seul », « envoi puis echo » ou une demande. Le protocole doit en exiger une.
+  - **C, mineur** : `fil <> 'AUCUN'` sur chaque ligne donne de fausses alarmes (nos envois au passage 1 ; les lignes `canal = 'email'` pour toujours). Filtrer `canal = 'ota'`.
+  - **D, mineur** : `entrees` peut attribuer au webhook un message importé en moins de 2 minutes (import toutes les 10 minutes) ; dire la cadence et quoi faire si le passage 1 est raté.
+  - **E, mineur** : `limit 30` peut masquer une ligne fautive ancienne.
+  - **F, mineur** : un résultat vide se lit « rien d'anormal » ; ajouter un verdict « AUCUN MESSAGE LU » et une empreinte qui distingue la prod de staging.
+  - **G, mineur, acceptable** : le filtre `sent_at >= depuis` exclut la classe déjà mesurée (copies webhook d'avant le déploiement) ; c'est l'étape 3.
+  - **H, mineur** : afficher les millisecondes.
+  - `fil_coeur` : jointure correcte, ne peut pas dire vrai à tort.
+- **3. En-tête** : exact mais insuffisant (heure UTC et conversion, ligne exacte de la date, délais des deux passages, « plus aucune webhook seul » au passage 2, AUCUN attendu sur nos envois au passage 1, lignes exigées au passage 2, résultat vide ≠ conformité).
+- **Dette 156** : fidèle sur le fond ; quatre imprécisions — 2 cellules au lieu de 4 ; le remède doit suivre la règle du webhook (`trouverBienParIdProvider`, deux colonnes, biens ARCHIVÉS compris) ; les références de code ; l'autre moitié du coût (le compte légitime PERD les messages importés d'abord par l'autre).
+
+### Suite donnée
+
+Tout corrigé : `copies` sur le texte sans aucun blanc et une fenêtre de 10 minutes, quel que soit l'instant ; colonne `non_reconciliee` (copie webhook restée sans identifiant alors que l'import a relu le fil) ; filtre `canal = 'ota'` ; ligne VERDICT (lus, fautives, « AUCUN MESSAGE LU », biens actifs de la base) ; millisecondes ; `limit 200` ; protocole réécrit (UTC, ligne de la date, cadence de l'import, passage raté, critères du passage 2 dont la ligne qui prouve l'import). Éprouvé sur un Postgres local (pglite) : base vide → « AUCUN MESSAGE LU » ; scénarios S3 (instant décalé de 2,5 s) et S4 (retour à la ligne) → `copies` = 2 et comptés fautifs ; ligne e-mail exclue ; bien archivé hors du compte. Ligne de la dette 156 réécrite (4 cellules, règle du webhook, références, coût dans les deux sens).

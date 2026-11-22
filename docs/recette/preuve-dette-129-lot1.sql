@@ -1,34 +1,52 @@
 -- Preuve du lot 1 de la dette 129, en
 -- PRODUCTION, sur les premiers vrais messages.
--- LECTURE SEULE. Collee par Thierry dans
--- l'editeur SQL du projet de PRODUCTION.
+-- LECTURE SEULE. A coller dans l'editeur SQL
+-- du projet de PRODUCTION (cjmrizpdyhrcurmgyrhs).
 --
--- AVANT DE COLLER : remplacer la date de la
--- ligne `depuis` par l'heure du deploiement
--- du lot 1 (UTC). Seuls les messages Channex
--- envoyes apres cette heure sont lus.
+-- AVANT DE COLLER : remplacer la date
+-- '2026-11-23 00:00:00+00' (ligne 51) par
+-- l'heure du deploiement du lot 1, en UTC :
+-- Vercel affiche l'heure de Paris ; en hiver,
+-- UTC = heure de Paris MOINS 1 h. Garder +00.
 --
--- A LANCER DEUX FOIS :
--- 1. dans les minutes qui suivent un message
---    d'un voyageur, AVANT le passage de
---    l'import : la ligne doit dire
---    « webhook seul » ET porter un fil
---    (preuve de l'entree webhook) ;
--- 2. apres un passage de l'import : la meme
---    ligne doit dire « webhook puis import »,
---    avec un id provider (preuve de l'entree
---    import et de la reconciliation).
+-- L'IMPORT PASSE TOUTES LES 10 MINUTES.
 --
--- CRITERES, sur chaque ligne :
--- - fil       <> 'AUCUN'
--- - copies    = 1 (aucun doublon)
--- - fil_coeur = true, des que l'import est
---   passe (le webhook n'ecrit pas les fils).
--- La colonne `entrees` est un INDICE : une
--- ligne inseree par un import tres rapide
--- (moins de 2 minutes) s'y lit comme
--- « webhook puis import ». Le passage 1
--- ci-dessus est ce qui prouve le webhook.
+-- PASSAGE 1, TOUT DE SUITE apres un message
+-- d'un voyageur (moins de 10 minutes) :
+--   sa ligne doit dire « webhook seul » ET
+--   porter un fil (preuve de l'entree webhook).
+--   Si elle n'apparait pas encore, ou dit deja
+--   id_prov = true : passage rate, attendre le
+--   message suivant.
+--   Nos propres envois y disent « envoi, echo
+--   a venir » avec fil = AUCUN : c'est normal
+--   a ce stade.
+--
+-- PASSAGE 2, au moins 15 minutes apres :
+--   - plus aucune ligne « webhook seul » ;
+--   - aucune ligne non_reconciliee = true ;
+--   - copies = 1 partout ;
+--   - fil <> 'AUCUN' partout ;
+--   - fil_coeur = true partout ;
+--   - et AU MOINS UNE ligne dont le fil vient
+--     de l'import : « import seul » (reponse
+--     tapee dans Airbnb), ou « envoi puis
+--     echo » (notre envoi, dont l'import a
+--     pose le fil), ou une demande (resa =
+--     false). Sans elle, l'entree import n'est
+--     pas prouvee.
+--
+-- LA PREMIERE LIGNE EST LE VERDICT : elle
+-- compte les lignes fautives et dit
+-- « AUCUN MESSAGE LU » si rien n'est lu. Un
+-- resultat vide n'est JAMAIS une conformite.
+-- `biens_base` aide a voir qu'on est bien en
+-- PRODUCTION (4 biens actifs fin novembre).
+--
+-- `entrees` est un INDICE : un import passe
+-- moins de 2 minutes apres le message s'y lit
+-- « webhook puis import ». Le passage 1 est ce
+-- qui prouve le webhook.
 with t as (
   select timestamptz '2026-11-23 00:00:00+00'
     as depuis
@@ -38,50 +56,90 @@ m as (
     x.booking_id, x.provider_thread_id,
     x.provider_msg_id, x.direction,
     x.sender, x.sent_at, x.created_at,
-    md5(btrim(x.body)) as empreinte
+    regexp_replace(x.body, '\s', '', 'g')
+      as texte
   from messages x, t
   where x.provider = 'channex'
+    and coalesce(x.canal, 'ota') = 'ota'
     and x.sent_at >= t.depuis
+),
+l as (
+  select m.*,
+    (select count(*) from m m2
+      where m2.user_id = m.user_id
+        and m2.direction = m.direction
+        and m2.texte = m.texte
+        and abs(extract(epoch from
+          m2.sent_at - m.sent_at)) < 600
+    ) as copies,
+    (select max(f.maj_le)
+      from fils_provider f
+      where f.user_id = m.user_id
+        and f.provider = 'channex'
+        and f.provider_thread_id
+          = m.provider_thread_id) as fil_lu
+  from m
+),
+r as (
+  select l.*,
+    coalesce(l.direction = 'inbound'
+      and l.provider_msg_id is null
+      and l.fil_lu > l.created_at, false)
+      as non_reconciliee
+  from l
 )
-select left(m.property_id, 8) as bien,
-  m.direction as sens,
-  m.sender as auteur,
-  to_char(m.sent_at at time zone 'UTC',
-    'DD/MM HH24:MI:SS') as envoye_utc,
-  m.booking_id is not null as resa,
-  coalesce(left(m.provider_thread_id, 8),
-    'AUCUN') as fil,
-  m.provider_msg_id is not null as id_prov,
-  case
-    when m.direction = 'inbound'
-      and m.provider_msg_id is null
-      then 'webhook seul'
-    when m.direction = 'inbound'
-      and m.created_at - m.sent_at
-        < interval '2 minutes'
-      then 'webhook puis import'
-    when m.direction = 'inbound'
-      then 'import seul'
-    when m.provider_msg_id is null
-      then 'envoi, echo a venir'
-    when m.created_at - m.sent_at
-        < interval '2 minutes'
-      then 'envoi puis echo'
-    else 'import seul'
-  end as entrees,
-  exists (
-    select 1 from fils_provider f
-    where f.user_id = m.user_id
-      and f.provider = 'channex'
-      and f.provider_thread_id
-        = m.provider_thread_id
-  ) as fil_coeur,
-  (select count(*) from m m2
-    where m2.user_id = m.user_id
-      and m2.property_id = m.property_id
-      and m2.direction = m.direction
-      and m2.empreinte = m.empreinte
-      and m2.sent_at = m.sent_at) as copies
-from m
-order by m.sent_at desc
-limit 30;
+select 'VERDICT' as bien,
+  null as sens, null as auteur,
+  case when count(*) = 0
+    then 'AUCUN MESSAGE LU'
+    else count(*) || ' lus' end
+    as envoye_utc,
+  null::boolean as resa,
+  (select count(*) from properties
+    where archive_le is null)
+    || ' biens_base' as fil,
+  null::boolean as id_prov,
+  count(*) filter (where copies > 1
+    or non_reconciliee
+    or provider_thread_id is null
+      and (direction = 'inbound'
+        or provider_msg_id is not null))
+    || ' fautives' as entrees,
+  null::boolean as fil_coeur,
+  null::bigint as copies,
+  null::boolean as non_reconciliee
+from r
+union all
+select * from (
+  select left(r.property_id, 8),
+    r.direction, r.sender,
+    to_char(r.sent_at at time zone 'UTC',
+      'DD/MM HH24:MI:SS.MS'),
+    r.booking_id is not null,
+    coalesce(left(r.provider_thread_id, 8),
+      'AUCUN'),
+    r.provider_msg_id is not null,
+    case
+      when r.direction = 'inbound'
+        and r.provider_msg_id is null
+        then 'webhook seul'
+      when r.direction = 'inbound'
+        and r.created_at - r.sent_at
+          < interval '2 minutes'
+        then 'webhook puis import'
+      when r.direction = 'inbound'
+        then 'import seul'
+      when r.provider_msg_id is null
+        then 'envoi, echo a venir'
+      when r.created_at - r.sent_at
+          < interval '2 minutes'
+        then 'envoi puis echo'
+      else 'import seul'
+    end,
+    r.fil_lu is not null,
+    r.copies,
+    r.non_reconciliee
+  from r
+  order by r.sent_at desc
+  limit 200
+) d;
