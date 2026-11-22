@@ -49,7 +49,10 @@
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg>
       <span class="chg-ajouter__mot" data-i18n="charges.ajouter"></span>
     </button>
-    <input type="file" data-bind="fichier" accept="application/pdf,image/jpeg,image/png,image/webp,image/gif,image/avif,image/bmp,image/tiff,image/heic,image/heif,.heic,.heif" hidden>
+    <!-- Lot 8c : plusieurs fichiers d'un coup (50 au plus), rattachés à
+         l'entité affichée, que la ligne d'à côté nomme. -->
+    <input type="file" data-bind="fichier" multiple accept="application/pdf,image/jpeg,image/png,image/webp,image/gif,image/avif,image/bmp,image/tiff,image/heic,image/heif,.heic,.heif" hidden>
+    <span class="chg-barre__entite" data-bind="envoi-entite"></span>
   </div>
   <div class="chg-tete">
     <h1 class="h1" data-i18n="charges.titre"></h1>
@@ -162,6 +165,8 @@ async function init () {
     reduireImage: preparerJpeg,
     ouvrirOnglet: () => window.open('', '_blank'),
     confirmer: (texte) => window.confirm(texte),
+    // Lot 8c : à l'ordinateur, la facture s'affiche à droite de sa fiche.
+    ecranLarge: () => Boolean(window.matchMedia && window.matchMedia('(min-width: 1100px)').matches),
     t,
     langue: I18n.lang
   })

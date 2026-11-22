@@ -96,10 +96,12 @@ test('LE TEST QUI COMPTE : une lecture « tableau » pose le statut `tableau` �
     fournisseur_nom: null, fournisseur_siret: null, numero_facture: null, date_facture: null,
     montant_ht_cents: null, montant_tva_cents: null, montant_ttc_cents: null,
     periode_debut: null, periode_fin: null, categorie: null, cle_doublon: null,
+    // Lot 8c (review, M1) : une entité de base posée au dépôt s'efface — un
+    // tableau choisit la sienne à l'import.
+    entite_juridique_id: null, bien_id: null,
     jour: '2026-11-20', date_repli: true
   })
   assert.deepEqual(lue.tableau, TABLEAU)
-  assert.ok(!('entite_juridique_id' in champs))
   sansFuite(b.requetes)
   // Une charge déjà lue par ailleurs : rien n'est écrit.
   const d = baseCharge({ id: ID, user_id: COMPTE, statut: 'a_verifier' })

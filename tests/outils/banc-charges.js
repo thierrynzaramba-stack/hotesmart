@@ -89,6 +89,8 @@ function reponseEcran ({ aTraiter = [], nombre = null, liste = [], suite = null,
  * @param o.confirmer    réponse de `confirm` (vrai par défaut)
  * @param o.titulaire    faux : le compte courant n'est pas le sien
  * @param o.preparerJpeg(f, w) → remplace la réduction d'image (peut lever)
+ * @param o.large        vrai : un écran d'ordinateur (lot 8c, la facture à
+ *                       droite de sa fiche)
  */
 async function monter (o = {}) {
   const html = lire('pages/charges.html')
@@ -117,6 +119,7 @@ async function monter (o = {}) {
   w.confirm = (texte) => { journal.confirmations.push(texte); return o.confirmer !== false }
   w.open = () => { const onglet = { location: { href: '' }, closed: false, opener: 'moi', close () { this.closed = true } }; journal.onglets.push(onglet); return onglet }
   w.I18n = i18nFr()
+  if (o.large) w.matchMedia = (q) => ({ matches: /min-width/.test(q), media: q })
   w.HSNav = { renderMenu () {}, render () {} }
 
   const vue = await import(path.join(RACINE, 'shared/charges-vue.js'))
@@ -167,6 +170,14 @@ async function monter (o = {}) {
       Object.defineProperty(input, 'files', { value: [f], configurable: true })
       input.dispatchEvent(new w.Event('change', { bubbles: true }))
       for (let i = 0; i < 12; i++) await attendre()
+    },
+    // Lot 8c : plusieurs fichiers d'un coup, `[nom, type, contenu]` chacun.
+    deposerFichiers: async (liste) => {
+      const input = w.document.querySelector('[data-bind="fichier"]')
+      const fichiers = liste.map(([nom, type, contenu = '%PDF-1.4']) => new w.File([contenu], nom, { type }))
+      Object.defineProperty(input, 'files', { value: fichiers, configurable: true })
+      input.dispatchEvent(new w.Event('change', { bubbles: true }))
+      for (let i = 0; i < 12 * Math.max(1, liste.length); i++) await attendre()
     },
     gestes: () => journal.fetch.filter(f => f.url === '/api/charges').map(f => f.corps),
     lecturesEcran: () => journal.fetch.filter(f => f.url.startsWith('/api/ecran/charges')),

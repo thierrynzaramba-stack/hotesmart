@@ -51,7 +51,22 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 | `api/cron-charges.js` | Le cron relit avec `avecReconnaissance(lireDocument)`. |
 | `shared/charges-vue.js` | Ligne et fiche d'un tableau reconnu ; le bloc Crédits n'a plus de formulaire. |
 
+## Lot 8c — charger en masse, parcourir pour valider (spec §14.22)
+
+| Fichier | Rôle |
+|---|---|
+| `lib/charges.js` | `PLAFOND_LECTURES_JOUR` = 100 ; `ouvrirEnvoi` reçoit l'entité de base (`entiteId`, une entité active du compte) ; `appliquerLecture` la garde ; `estComplete`, `validerLot` (≤ 20 par appel, chacune par `valider`). |
+| `api/charges.js` | `envoi` accepte `entite_id` ; action `valider_lot { ids }`. |
+| `lib/charges/ecran.js`, `api/ecran/charges.js` | « À traiter » par curseur (`suite_a_traiter`, dette 153) ; le parcours `parcours=debut|<curseur>` (« À vérifier », ordre de dépôt). |
+| `shared/charges-vue.js` | Dépôt de 50 fichiers au plus, un par un ; entité de base nommée près du bouton ; « Vérifier une par une » ; « Enregistrer les factures complètes » ; facture à droite de la fiche à l'ordinateur (`deps.ecranLarge`). |
+
 ## Règles à ne pas perdre
+
+- **L'entité de base d'un dépôt n'est jamais remplacée par la proposition du
+  code** : c'est un choix de l'hôte. Elle est vérifiée au serveur (entité
+  active du compte). « Enregistrer tout » ne fait rien d'autre que `valider`,
+  facture par facture, avec les valeurs lues ; une facture incomplète ou
+  signalée en doublon reste à faire une par une.
 
 - **Un tableau reconnu n'appelle jamais l'IA et ne porte aucun montant**
   (statut `tableau`, hors de tout total). C'est l'import qui crée le crédit,

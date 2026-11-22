@@ -133,6 +133,23 @@ export function enSaisie (cents, langue = 'fr') {
 // (TYPES_DOCUMENT), comparée par tests/charges-page.test.js.
 export const TYPES_DOCUMENT = ['facture', 'regularisation', 'avoir', 'echeancier', 'avis_impot']
 
+// ─── Lot 8c (§14.22) : charger en masse, parcourir pour valider ─────────────
+// 50 fichiers d'un coup au plus (décision de Thierry, 22 novembre 2026).
+export const MAX_FICHIERS = 50
+// Ce que le serveur accepte par appel de `valider_lot` (lib/charges.js).
+export const LOT_VALIDATION = 20
+/**
+ * Une facture COMPLÈTE : « À vérifier », une entité, une catégorie, un montant
+ * TTC, aucun signal non tranché, jamais une ligne automatique.
+ * ⚠ LA MÊME RÈGLE QUE LE SERVEUR (`estComplete`, lib/charges.js), qui reste la
+ * garde : l'écran ne fait que compter et choisir quoi envoyer.
+ */
+export function estComplete (c) {
+  return !!c && c.statut === 'a_verifier' && !!c.entite_juridique_id && !!c.categorie &&
+    Number.isInteger(c.montant_ttc_cents) && !(c.signal && !c.signal_tranche) &&
+    c.origine !== 'ota' && c.origine !== 'credit'
+}
+
 /**
  * La période saisie, contrôlée comme le serveur (`periodeSaisie`) : les deux
  * bornes ou aucune, dans l'ordre, trois ans (1 097 jours) au plus — la borne
@@ -200,7 +217,9 @@ export function monter (racine, deps) {
     // sous une génération plus ancienne est jetée — le détail d'un mois comme
     // la page suivante de la liste.
     generation: 0,
-    aTraiter: { lignes: [], nombre: 0 }, liste: [], suite: null,
+    aTraiter: { lignes: [], nombre: 0, suite: null }, liste: [], suite: null,
+    // Le parcours « une par une » (lot 8c) : sa file, dans l'ordre de dépôt.
+    parcours: null,
     entites: [], biens: [], biensArchives: [], categories: [], totaux: null,
     fiche: null, occupe: false, envoiEnCours: false, ficheEnCours: false,
     credits: null, creditEnCours: false, creditRetour: null
@@ -222,7 +241,8 @@ export function monter (racine, deps) {
   function connues () {
     const vues = new Map()
     const detail = Object.values(etat.detailMois || {}).flatMap(d => (d && d.lignes) || [])
-    for (const c of [...detail, ...(etat.aTraiter.lignes || []), ...(etat.liste || [])]) vues.set(String(c.id), c)
+    const file = (etat.parcours && etat.parcours.lignes) || []
+    for (const c of [...detail, ...file, ...(etat.aTraiter.lignes || []), ...(etat.liste || [])]) vues.set(String(c.id), c)
     return vues
   }
 
@@ -266,13 +286,23 @@ export function monter (racine, deps) {
   // ─── À traiter ───────────────────────────────────────────────────────────
   function peindreATraiter () {
     const z = $('[data-bind="a-traiter"]')
-    const { lignes, nombre } = etat.aTraiter
+    const { lignes, nombre, suite } = etat.aTraiter
+    // Lot 8c : « une par une » et « tout d'un coup », dès qu'une facture est à
+    // vérifier. Le compte exact se donne au clic, sur toute la file.
+    const aVerifier = lignes.some(c => c.statut === 'a_verifier') || Boolean(suite)
+    const gestes = aVerifier
+      ? '<div class="chg-a-traiter__gestes">'
+        + `<button type="button" class="btn btn--secondary" data-geste="parcourir">${esc(t('charges.parcourir'))}</button>`
+        + `<button type="button" class="btn btn--secondary" data-geste="tout-enregistrer">${esc(t('charges.tout_enregistrer'))}</button>`
+        + '</div>'
+      : ''
     const tete = `<div class="chg-bloc__tete"><h2 class="chg-h2">${esc(t('charges.a_traiter'))}</h2>`
-      + (nombre ? `<span class="chg-compte">${esc(nombre)}</span>` : '') + '</div>'
+      + (nombre ? `<span class="chg-compte">${esc(nombre)}</span>` : '') + gestes + '</div>'
     if (!lignes.length) { z.innerHTML = tete + `<p class="muted">${esc(t('charges.a_traiter_vide'))}</p>`; return }
-    const reste = nombre - lignes.length
+    // ⚠ LA SUITE SE LIT (lot 8c, dette 153) : au-delà des 50 premières, une
+    // facture n'était visible nulle part.
     z.innerHTML = tete + `<ul class="chg-lignes chg-lignes--fines">${lignes.map(c => ligne(c, true)).join('')}</ul>`
-      + (reste > 0 ? `<p class="muted small">${esc(t('charges.a_traiter_plus', { n: reste }))}</p>` : '')
+      + (suite ? `<button type="button" class="btn btn--secondary chg-plus" data-geste="plus-a-traiter">${esc(t('charges.afficher_plus'))}</button>` : '')
   }
 
   // ─── Les totaux ──────────────────────────────────────────────────────────
@@ -282,7 +312,22 @@ export function monter (racine, deps) {
     : t('charges.exercice_decale', { debut: annee, fin: String(Number(annee) + 1) }))
   // ⚠ L'ENTITÉ SE CHOISIT EN TÊTE DE PAGE (retour de recette du lot 8a) :
   // tout ce qui suit en dépend — totaux, mois, crédits, factures.
+  // L'entité de BASE d'un dépôt (lot 8c, décision 3) : celle affichée, si elle
+  // est active. Une entité archivée ne reçoit pas de facture neuve : le dépôt
+  // part alors sans entité, et la lecture en propose une.
+  function entiteDeBase () {
+    const e = etat.entites.find(x => String(x.id) === String(etat.entite || ''))
+    return e && !e.archivee ? e : null
+  }
+  function peindreEntiteDeBase () {
+    const z = $('[data-bind="envoi-entite"]')
+    if (!z) return
+    const bouton = $('[data-action="ajouter"]')
+    const e = entiteDeBase()
+    z.textContent = e && !(bouton && bouton.hidden) ? t('charges.envoi_entite', { entite: e.nom }) : ''
+  }
   function peindreEntite () {
+    peindreEntiteDeBase()
     const z = $('[data-bind="entite"]')
     if (!z) return
     if (!etat.entites.length) { z.innerHTML = ''; return }
@@ -625,6 +670,8 @@ export function monter (racine, deps) {
 
   // ─── Un tableau d'amortissement reconnu : sa fiche et son import ─────────
   function peindreFicheTableau (c) {
+    // La fiche d'un tableau n'a pas de document à droite (review du lot 8c, M4).
+    dialogue().classList.remove('chg-fiche--double')
     const actives = entitesActives()
     const choisie = actives.length === 1 ? String(actives[0].id) : (actives.some(x => String(x.id) === etat.entite) ? etat.entite : '')
     const lu = echeancesLisibles(tableauDe(c))
@@ -734,7 +781,7 @@ export function monter (racine, deps) {
 
   // ─── Les lectures ────────────────────────────────────────────────────────
   function appliquer (d) {
-    etat.aTraiter = (d && d.a_traiter) || { lignes: [], nombre: 0 }
+    etat.aTraiter = (d && d.a_traiter) || { lignes: [], nombre: 0, suite: null }
     etat.liste = (d && d.liste && d.liste.lignes) || []
     etat.suite = (d && d.liste && d.liste.suite) || null
     etat.entites = (d && d.entites) || []
@@ -797,6 +844,27 @@ export function monter (racine, deps) {
     }
     etat.occupe = false
     peindreListe()
+  }
+
+  // « À traiter », la suite (lot 8c, dette 153) : même garde de génération.
+  async function afficherPlusATraiter (bouton) {
+    if (!etat.aTraiter.suite || etat.occupe) return
+    etat.occupe = true
+    bouton.disabled = true
+    const gen = etat.generation
+    try {
+      const d = await deps.charger('suite_a_traiter=' + encodeURIComponent(etat.aTraiter.suite))
+      if (etat.generation !== gen) { etat.occupe = false; return }
+      const p = (d && d.a_traiter) || {}
+      etat.aTraiter = { ...etat.aTraiter, lignes: etat.aTraiter.lignes.concat(p.lignes || []), suite: p.suite || null }
+    } catch (e) {
+      bouton.disabled = false
+      etat.occupe = false
+      bouton.insertAdjacentHTML('afterend', `<p class="chg-erreur">${esc(messageErreur(e))}</p>`)
+      return
+    }
+    etat.occupe = false
+    peindreATraiter()
   }
 
   // ─── La fiche ────────────────────────────────────────────────────────────
@@ -894,8 +962,17 @@ export function monter (racine, deps) {
     const type = c.type_document || 'facture'
     const retypable = !ota && !credit && ['a_lire', 'a_verifier', 'illisible'].includes(c.statut)
 
+    // Le parcours « une par une » (lot 8c) : la facture courante de la file.
+    const p = etat.parcours
+    const enParcours = Boolean(p && p.lignes[p.pos] && String(p.lignes[p.pos].id) === String(c.id))
+    // À l'ordinateur, la facture s'affiche À DROITE des champs (décision 4).
+    const avecFichier = !ota && !credit && c.statut !== 'sans_facture'
+    const double = avecFichier && Boolean(deps.ecranLarge && deps.ecranLarge())
+    dialogue().classList.toggle('chg-fiche--double', double)
+
     dialogue().innerHTML = '<div class="chg-fiche__tete">'
       + `<h2 class="chg-h2" id="chg-fiche-titre">${esc(t('charges.fiche_titre'))}</h2>`
+      + (enParcours ? `<span class="chg-compte" data-bind="parcours-compteur">${esc(t('charges.parcours_compteur', { i: p.pos + 1, n: Math.max(p.nombre, p.pos + 1) }))}</span>` : '')
       + (e ? `<span class="chg-etat chg-etat--${esc(e)}">${esc(t('charges.etat_' + e))}</span>` : '')
       + `<button type="button" class="btn btn--secondary btn--icon" data-geste="fermer" aria-label="${esc(t('charges.fermer'))}"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg></button>`
       + '</div><div class="chg-fiche__corps">'
@@ -935,11 +1012,43 @@ export function monter (racine, deps) {
       + '</div><div class="chg-fiche__pied">'
       + (ota || credit || c.statut === 'sans_facture' ? '' : `<button type="button" class="btn btn--secondary" data-geste="voir">${esc(t('charges.voir'))}</button>`)
       + (credit ? '' : `<button type="button" class="btn btn--secondary chg-danger" data-geste="supprimer">${esc(t('charges.supprimer'))}</button>`)
-      + (ota || credit || sansEntite ? '' : `<button type="button" class="btn btn--primary" data-geste="valider">${esc(t('charges.valider'))}</button>`)
+      + (enParcours ? `<button type="button" class="btn btn--secondary" data-geste="passer">${esc(t('charges.passer'))}</button>` : '')
+      + (ota || credit || sansEntite ? '' : `<button type="button" class="btn btn--primary" data-geste="valider">${esc(t(enParcours ? 'charges.enregistrer_suivante' : 'charges.valider'))}</button>`)
       + '</div>'
+      + (double ? `<div class="chg-fiche__doc" data-bind="fiche-doc"><p class="muted small">${esc(t('common.loading'))}</p></div>` : '')
+    if (double) afficherDocument(c)
     // Entrée dans un champ ne doit ni fermer la fenêtre ni rien envoyer.
     dialogue().querySelector('[data-bind="fiche-form"]').addEventListener('submit', (ev) => ev.preventDefault())
     adapterMontants(type)
+  }
+
+  // Le document à droite de la fiche (lot 8c, décision 4) : l'adresse de
+  // lecture de 60 s, demandée pour CETTE fiche. Une réponse arrivée après un
+  // changement de fiche est jetée.
+  async function afficherDocument (c) {
+    let url = null
+    try {
+      const r = await deps.agir({ action: 'consulter', id: c.id })
+      url = r && r.url
+    } catch { url = null }
+    if (!etat.fiche || String(etat.fiche.id) !== String(c.id)) return
+    const z = dialogue().querySelector('[data-bind="fiche-doc"]')
+    if (!z) return
+    if (!url) { z.innerHTML = `<p class="chg-erreur">${esc(t('charges.document_indisponible'))}</p>`; return }
+    z.innerHTML = ''
+    const cadre = doc.createElement('iframe')
+    cadre.className = 'chg-fiche__cadre'
+    cadre.setAttribute('title', t('charges.document_titre'))
+    cadre.setAttribute('referrerpolicy', 'no-referrer')
+    cadre.src = url
+    z.appendChild(cadre)
+  }
+
+  function ouvrirLigne (c) {
+    etat.fiche = c
+    peindreFiche(c)
+    const dlg = dialogue()
+    if (!dlg.open && !dlg.hasAttribute('open')) ouvrirDialogue(dlg)
   }
 
   function ouvrirFiche (id) {
@@ -999,7 +1108,15 @@ export function monter (racine, deps) {
     }
   }
 
-  const fermerFiche = () => { etat.fiche = null; fermerDialogue(dialogue()) }
+  const fermerFiche = () => {
+    etat.fiche = null
+    // Fermer la fiche en plein parcours l'arrête (lot 8c) : ce qui a été
+    // enregistré depuis le début se relit.
+    const enCours = etat.parcours
+    etat.parcours = null
+    fermerDialogue(dialogue())
+    if (enCours) recharger()
+  }
 
   function valider () {
     return gesteFiche(async () => {
@@ -1007,6 +1124,7 @@ export function monter (racine, deps) {
       const l = lireChamps()
       if (l.refus) { retourFiche(t('charges.refus_' + l.refus)); return }
       await deps.agir({ action: 'valider', id: c.id, champs: l.champs })
+      if (enParcoursSur(c)) { await suivante(); return }
       fermerFiche()
       await recharger()
     })
@@ -1014,7 +1132,10 @@ export function monter (racine, deps) {
 
   function trancher () {
     return gesteFiche(async () => {
-      await deps.agir({ action: 'trancher', id: etat.fiche.id })
+      const c = etat.fiche
+      await deps.agir({ action: 'trancher', id: c.id })
+      // En parcours, la facture reste à vérifier : sa fiche se repeint.
+      if (enParcoursSur(c)) { Object.assign(c, { signal_tranche: true }); peindreFiche(c); return }
       fermerFiche()
       await recharger()
     })
@@ -1023,10 +1144,112 @@ export function monter (racine, deps) {
   function supprimer () {
     if (!deps.confirmer(t('charges.confirmer_suppression'))) return
     return gesteFiche(async () => {
-      await deps.agir({ action: 'supprimer', id: etat.fiche.id })
+      const c = etat.fiche
+      await deps.agir({ action: 'supprimer', id: c.id })
+      if (enParcoursSur(c)) { await suivante(); return }
       fermerFiche()
       await recharger()
     })
+  }
+
+  // ─── Le parcours « une par une » (lot 8c, décisions 5 et 6) ──────────────
+  // Les factures « À vérifier » dans l'ORDRE DE DÉPÔT, lues par pages de 50 au
+  // fil du parcours. La fiche porte « Passer » et « Enregistrer et suivante ».
+  const enParcoursSur = (c) => {
+    const p = etat.parcours
+    return Boolean(c && p && p.lignes[p.pos] && String(p.lignes[p.pos].id) === String(c.id))
+  }
+  async function pageDuParcours (curseur) {
+    const d = await deps.charger('parcours=' + encodeURIComponent(curseur || 'debut'))
+    const p = (d && d.parcours) || {}
+    return { lignes: p.lignes || [], suite: p.suite || null, nombre: p.nombre }
+  }
+  async function parcourir (bouton) {
+    if (etat.parcours || etat.occupe) return
+    etat.occupe = true
+    if (bouton) bouton.disabled = true
+    try {
+      const p = await pageDuParcours(null)
+      if (!p.lignes.length) { statutEnvoi(t('charges.parcours_vide')); return }
+      etat.parcours = { lignes: p.lignes, suite: p.suite, nombre: Number.isInteger(p.nombre) ? p.nombre : p.lignes.length, pos: 0 }
+      ouvrirLigne(p.lignes[0])
+    } catch (e) {
+      statutEnvoi(messageErreur(e), true)
+    } finally {
+      etat.occupe = false
+      if (bouton) bouton.disabled = false
+    }
+  }
+  // La suivante, ou la fin : la file se complète par sa page suivante.
+  // ⚠ LA POSITION N'AVANCE QU'UNE FOIS LA SUIVANTE CONNUE (review du lot 8c,
+  // M3) : une page qui ne se lit pas laisse la fiche où elle était, et un
+  // nouvel essai ne saute aucune facture. Et un parcours ARRÊTÉ pendant la
+  // lecture (fiche fermée) ne rouvre rien (M2).
+  async function suivante () {
+    const p = etat.parcours
+    if (!p) return
+    if (p.pos + 1 >= p.lignes.length && p.suite) {
+      const n = await pageDuParcours(p.suite)
+      if (etat.parcours !== p) return
+      p.lignes = p.lignes.concat(n.lignes)
+      p.suite = n.suite
+    }
+    if (etat.parcours !== p) return
+    if (p.pos + 1 < p.lignes.length) { p.pos++; ouvrirLigne(p.lignes[p.pos]); return }
+    await finirParcours(t('charges.parcours_fin'))
+  }
+  async function finirParcours (message) {
+    etat.parcours = null
+    fermerFiche()
+    if (message) statutEnvoi(message)
+    await recharger()
+  }
+  const passer = () => gesteFiche(suivante)
+
+  // ─── Enregistrer tout (lot 8c, décision 5) ───────────────────────────────
+  // Toute la file « À vérifier » est relue ; seules les factures COMPLÈTES
+  // partent, par paquets de 20, et la confirmation dit le compte avant d'agir.
+  async function enregistrerTout (bouton) {
+    if (etat.occupe || etat.parcours) return
+    etat.occupe = true
+    if (bouton) bouton.disabled = true
+    let agi = false
+    try {
+      let p = await pageDuParcours(null)
+      let lignes = p.lignes
+      // Borné : 40 pages de 50, bien au-delà d'un compte réel.
+      for (let n = 0; p.suite && n < 40; n++) { p = await pageDuParcours(p.suite); lignes = lignes.concat(p.lignes) }
+      const completes = lignes.filter(estComplete)
+      if (!completes.length) { statutEnvoi(t('charges.tout_aucune'), true); return }
+      // ⚠ LA RÉPARTITION PAR ENTITÉ EST DITE AVANT (décision de Thierry, 22
+      // novembre 2026) : une facture reçue par e-mail ou déposée avant le lot
+      // porte l'entité PROPOSÉE par le code ; un chiffre inattendu se voit ici.
+      const parEntite = new Map()
+      for (const c of completes) parEntite.set(String(c.entite_juridique_id), (parEntite.get(String(c.entite_juridique_id)) || 0) + 1)
+      const nomDe = (idEnt) => { const e = etat.entites.find(x => String(x.id) === idEnt); return e ? nomEntite(e) : '?' }
+      const repartition = [...parEntite.entries()]
+        .map(([idEnt, n]) => ({ n, nom: nomDe(idEnt) }))
+        .sort((a, b) => b.n - a.n || a.nom.localeCompare(b.nom, langue))
+        .map(x => t('charges.tout_repartition_un', { n: x.n, entite: x.nom })).join(', ')
+      if (!deps.confirmer(t('charges.tout_confirmer', { n: completes.length, repartition, m: lignes.length - completes.length }))) return
+      agi = true
+      let ok = 0
+      let refus = 0
+      for (let i = 0; i < completes.length; i += LOT_VALIDATION) {
+        statutEnvoi(t('charges.tout_progression', { i: Math.min(i + LOT_VALIDATION, completes.length), n: completes.length }))
+        const r = await deps.agir({ action: 'valider_lot', ids: completes.slice(i, i + LOT_VALIDATION).map(c => c.id) })
+        ok += ((r && r.enregistrees) || []).length
+        refus += ((r && r.refusees) || []).length
+      }
+      statutEnvoi(t('charges.tout_fin', { n: ok }) + (refus ? ' ' + t('charges.tout_refus', { n: refus }) : ''), refus > 0)
+    } catch (e) {
+      statutEnvoi(messageErreur(e), true)
+    } finally {
+      etat.occupe = false
+      if (bouton) bouton.disabled = false
+      // Ce qui est passé avant une panne est enregistré : l'écran le relit.
+      if (agi) await recharger()
+    }
   }
 
   // ⚠ L'ONGLET S'OUVRE AU CLIC, AVANT LA RÉPONSE : ouvert après un `await`, le
@@ -1052,62 +1275,78 @@ export function monter (racine, deps) {
     z.classList.toggle('chg-erreur', Boolean(erreur))
   }
 
-  async function envoyer (fichier) {
-    if (etat.envoiEnCours || !fichier) return
+  // Un refus d'UN fichier, dit par son texte (type, taille, image illisible).
+  const refusFichier = (texte) => Object.assign(new Error(texte), { texte })
+
+  /**
+   * Dépose UN fichier par le chemin de toujours (`envoi`, dépôt à l'URL signée,
+   * `confirmer`) et rend la réponse de la confirmation. Lève un `refusFichier`
+   * pour un fichier refusé avant tout envoi, l'erreur du serveur sinon.
+   * ⚠ L'ENTITÉ DE BASE PART AVEC L'ENVOI (lot 8c, décision 3) ; le serveur la
+   * vérifie.
+   */
+  async function deposerUn (fichier, suivi = () => {}, base = entiteDeBase()) {
     let type = typeDuFichier(fichier)
     // Un fichier SANS type, ou au type générique, que son nom ne fait pas
     // reconnaître : son contenu tranche. Un type précis (texte, tableur…)
     // n'est pas contredit.
     if (!type || type === 'application/octet-stream') type = (await formatLu(fichier, Lecteur)) || type
     const image = /^image\//.test(type)
-    if (type !== 'application/pdf' && !image) { statutEnvoi(t('charges.refus_type_refuse'), true); return }
-    etat.envoiEnCours = true
-    const bouton = $('[data-action="ajouter"]')
-    if (bouton) bouton.disabled = true
-    try {
-      let corps = fichier
-      // Une photo se réduit AVANT l'envoi (shared/photo-bien-client.js) : moins
-      // lourde à envoyer en 4G, et moins chère à lire.
-      if (image) {
-        let brut = null
-        try {
-          // ⚠ Le type reconnu (extension ou contenu) est donné au fichier, parce
-          // que `preparerJpeg` refuse tout fichier dont le TYPE n'est pas
-          // `image/…` (shared/photo-bien-client.js). Le navigateur, lui,
-          // reconnaît l'image à son contenu : ce retypage sert la garde.
-          corps = await deps.reduireImage(fichier.type === type ? fichier : fichier.slice(0, fichier.size, type))
-        } catch (e) {
-          // Le message de FORMAT ne vaut que pour un refus de format
-          // (`code: 'type'`) ; toute autre panne de conversion (mémoire,
-          // canvas) est un refus ordinaire (review, constat 3). Un HEIC se
-          // reconnaît aussi à son contenu, même nommé « .jpg ».
-          let refus = 'charges.refus'
-          if (e && e.code === 'taille') refus = 'charges.refus_trop_gros'
-          else if (e && e.code === 'type') {
-            const heic = estHeic(type) ? type : await formatLu(fichier, Lecteur)
-            // ⚠ UN HEIC QUE CE NAVIGATEUR NE SAIT PAS LIRE PART TEL QUEL : le
-            // serveur le convertit en JPEG à la confirmation (§14.19).
-            if (estHeic(heic)) brut = heic.replace('-sequence', '')
-            else refus = 'charges.refus_image_illisible'
-          }
-          if (!brut) { statutEnvoi(t(refus), true); return }
+    if (type !== 'application/pdf' && !image) throw refusFichier(t('charges.refus_type_refuse'))
+    let corps = fichier
+    // Une photo se réduit AVANT l'envoi (shared/photo-bien-client.js) : moins
+    // lourde à envoyer en 4G, et moins chère à lire.
+    if (image) {
+      let brut = null
+      try {
+        // ⚠ Le type reconnu (extension ou contenu) est donné au fichier, parce
+        // que `preparerJpeg` refuse tout fichier dont le TYPE n'est pas
+        // `image/…` (shared/photo-bien-client.js). Le navigateur, lui,
+        // reconnaît l'image à son contenu : ce retypage sert la garde.
+        corps = await deps.reduireImage(fichier.type === type ? fichier : fichier.slice(0, fichier.size, type))
+      } catch (e) {
+        // Le message de FORMAT ne vaut que pour un refus de format
+        // (`code: 'type'`) ; toute autre panne de conversion (mémoire,
+        // canvas) est un refus ordinaire (review, constat 3). Un HEIC se
+        // reconnaît aussi à son contenu, même nommé « .jpg ».
+        let refus = 'charges.refus'
+        if (e && e.code === 'taille') refus = 'charges.refus_trop_gros'
+        else if (e && e.code === 'type') {
+          const heic = estHeic(type) ? type : await formatLu(fichier, Lecteur)
+          // ⚠ UN HEIC QUE CE NAVIGATEUR NE SAIT PAS LIRE PART TEL QUEL : le
+          // serveur le convertit en JPEG à la confirmation (§14.19).
+          if (estHeic(heic)) brut = heic.replace('-sequence', '')
+          else refus = 'charges.refus_image_illisible'
         }
-        if (brut) {
-          type = brut
-          corps = fichier.type === type ? fichier : fichier.slice(0, fichier.size, type)
-        } else type = 'image/jpeg'
-      } else if (corps.type !== type) {
-        // ⚠ UN PDF SANS TYPE (certains sélecteurs Android et Windows) : le
-        // fichier repartirait en `application/octet-stream`, que le bucket
-        // refuse. On lui donne le type qu'on annonce à `envoi`.
-        corps = fichier.slice(0, fichier.size, type)
+        if (!brut) throw refusFichier(t(refus))
       }
-      if (corps.size > TYPES_ACCEPTES[type]) { statutEnvoi(t('charges.refus_trop_gros'), true); return }
-      statutEnvoi(t('charges.envoi_en_cours'))
-      const o = await deps.agir({ action: 'envoi', type, octets: corps.size, origine: type === 'application/pdf' ? 'fichier' : 'photo' })
-      await deps.deposer(o.url, corps)
-      statutEnvoi(t('charges.lecture_en_cours'))
-      const r = await deps.agir({ action: 'confirmer', id: o.id })
+      if (brut) {
+        type = brut
+        corps = fichier.type === type ? fichier : fichier.slice(0, fichier.size, type)
+      } else type = 'image/jpeg'
+    } else if (corps.type !== type) {
+      // ⚠ UN PDF SANS TYPE (certains sélecteurs Android et Windows) : le
+      // fichier repartirait en `application/octet-stream`, que le bucket
+      // refuse. On lui donne le type qu'on annonce à `envoi`.
+      corps = fichier.slice(0, fichier.size, type)
+    }
+    if (corps.size > TYPES_ACCEPTES[type]) throw refusFichier(t('charges.refus_trop_gros'))
+    suivi(t('charges.envoi_en_cours'))
+    const o = await deps.agir({ action: 'envoi', type, octets: corps.size, origine: type === 'application/pdf' ? 'fichier' : 'photo', ...(base ? { entite_id: base.id } : {}) })
+    await deps.deposer(o.url, corps)
+    suivi(t('charges.lecture_en_cours'))
+    return deps.agir({ action: 'confirmer', id: o.id })
+  }
+
+  const boutonAjouter = (actif) => { const b = $('[data-action="ajouter"]'); if (b) b.disabled = !actif }
+
+  // UN fichier : sa fiche s'ouvre ensuite, lue ou non (le geste d'avant le lot).
+  async function envoyer (fichier) {
+    if (etat.envoiEnCours || !fichier) return
+    etat.envoiEnCours = true
+    boutonAjouter(false)
+    try {
+      const r = await deposerUn(fichier, (texte) => statutEnvoi(texte))
       statutEnvoi('')
       await recharger()
       if (r && r.charge && r.charge.id) {
@@ -1117,11 +1356,55 @@ export function monter (racine, deps) {
         ouvrirFiche(r.charge.id)
       }
     } catch (e) {
-      statutEnvoi(messageErreur(e), true)
+      statutEnvoi(e && e.texte ? e.texte : messageErreur(e), true)
     } finally {
       etat.envoiEnCours = false
-      if (bouton) bouton.disabled = false
+      boutonAjouter(true)
     }
+  }
+
+  // ─── Le dépôt en masse (lot 8c, décisions 2 et 3) ────────────────────────
+  // Jusqu'à 50 fichiers, déposés UN PAR UN par le même chemin : un fichier
+  // refusé n'arrête pas les suivants, et les refus sont nommés à la fin.
+  async function envoyerTous (fichiers) {
+    if (etat.envoiEnCours || !fichiers.length) return
+    if (fichiers.length === 1) return envoyer(fichiers[0])
+    if (fichiers.length > MAX_FICHIERS) { statutEnvoi(t('charges.masse_trop', { n: fichiers.length, max: MAX_FICHIERS }), true); return }
+    etat.envoiEnCours = true
+    boutonAjouter(false)
+    // ⚠ L'ENTITÉ EST FIXÉE AU DÉPART (review du lot 8c, B1) : un dépôt de 50
+    // dure des minutes, et changer d'entité affichée pendant ce temps ne doit
+    // pas répartir le dépôt sur deux entités.
+    const base = entiteDeBase()
+    const refus = []
+    let ok = 0
+    let pannes = 0
+    let arret = 0
+    try {
+      for (const [i, f] of fichiers.entries()) {
+        statutEnvoi(t('charges.masse_progression', { i: i + 1, n: fichiers.length }))
+        try {
+          await deposerUn(f, () => {}, base)
+          ok++
+          pannes = 0
+        } catch (e) {
+          refus.push(t('charges.masse_refus_un', { nom: (f && f.name) || '?', motif: e && e.texte ? e.texte : messageErreur(e) }))
+          // ⚠ TROIS PANNES DE SUITE ARRÊTENT LE DÉPÔT (review du lot 8c, M6) :
+          // chaque envoi raté laisse une ligne ouverte 24 h, et 30 lignes
+          // ouvertes bloquent tout dépôt du compte. Un refus de fichier (type,
+          // taille) n'est pas une panne.
+          pannes = e && e.texte ? 0 : pannes + 1
+          if (pannes >= 3) { arret = fichiers.length - i - 1; break }
+        }
+      }
+    } finally {
+      etat.envoiEnCours = false
+      boutonAjouter(true)
+    }
+    await recharger()
+    statutEnvoi(t('charges.masse_fin', { n: ok })
+      + (refus.length ? ' ' + t('charges.masse_refus', { n: refus.length, liste: refus.join(' ; ') }) : '')
+      + (arret ? ' ' + t('charges.masse_arret', { n: arret }) : ''), refus.length > 0)
   }
 
   // ─── Les écouteurs : un seul, délégué ────────────────────────────────────
@@ -1133,6 +1416,10 @@ export function monter (racine, deps) {
     const g = el.dataset.geste || el.dataset.action
     if (g === 'ajouter') $('[data-bind="fichier"]').click()
     else if (g === 'plus') afficherPlus(el)
+    else if (g === 'plus-a-traiter') afficherPlusATraiter(el)
+    else if (g === 'parcourir') parcourir(el)
+    else if (g === 'tout-enregistrer') enregistrerTout(el)
+    else if (g === 'passer') passer()
     else if (g === 'fermer') fermerFiche()
     else if (g === 'valider') valider()
     else if (g === 'trancher') trancher()
@@ -1169,12 +1456,18 @@ export function monter (racine, deps) {
       return
     }
     if (el.dataset && el.dataset.bind === 'fichier') {
-      const f = el.files && el.files[0]
+      // Lot 8c : plusieurs fichiers d'un coup (50 au plus).
+      const fichiers = el.files ? [...el.files] : []
       el.value = ''
-      envoyer(f)
+      envoyerTous(fichiers)
     }
   })
-  dialogue().addEventListener('close', () => { etat.fiche = null })
+  dialogue().addEventListener('close', () => {
+    etat.fiche = null
+    // Une fiche fermée en plein parcours arrête le parcours : ce qui a été
+    // enregistré depuis le début se relit.
+    if (etat.parcours) { etat.parcours = null; recharger() }
+  })
 
   return { recharger, etat, ouvrirFiche, doc }
 }

@@ -66,6 +66,27 @@ async function traiter (req, res, t0, deps) {
     return res.status(200).json({ liste: { lignes: l.lignes, suite: l.suite } })
   }
 
+  // ── « À traiter », la suite (lot 8c, dette 153) ─────────────────────────
+  if (q.suite_a_traiter != null && q.suite_a_traiter !== '') {
+    const c = ecran.lireCurseurArrivee(q.suite_a_traiter)
+    if (!c.ok || !c.curseur) return res.status(400).json({ error: 'curseur_invalide' })
+    const t = await ecran.aTraiter(base, compte, c.curseur)
+    timing()
+    if (!t.ok) return res.status(503).json({ error: 'Lecture impossible' })
+    return res.status(200).json({ a_traiter: { lignes: t.lignes, suite: t.suite } })
+  }
+
+  // ── Le parcours « À vérifier », dans l'ordre de dépôt (lot 8c) ───────────
+  if (q.parcours != null && q.parcours !== '') {
+    const brut = q.parcours === 'debut' ? '' : q.parcours
+    const c = ecran.lireCurseurArrivee(brut)
+    if (!c.ok) return res.status(400).json({ error: 'curseur_invalide' })
+    const v = await ecran.aVerifier(base, compte, c.curseur)
+    timing()
+    if (!v.ok) return res.status(503).json({ error: 'Lecture impossible' })
+    return res.status(200).json({ parcours: { lignes: v.lignes, suite: v.suite, ...(v.nombre != null ? { nombre: v.nombre } : {}) } })
+  }
+
   const ej = deps.entites || require('../../lib/entites-juridiques')
 
   // ── Le détail d'un mois (§14.21.2), seul ──────────────────────────────────
@@ -129,7 +150,7 @@ async function traiter (req, res, t0, deps) {
   // La file et la liste sont l'écran : sans elles, il n'y a rien à montrer.
   if (!t.ok || !l.ok) return res.status(503).json({ error: 'Lecture impossible' })
   return res.status(200).json({
-    a_traiter: { lignes: t.lignes, nombre: t.nombre },
+    a_traiter: { lignes: t.lignes, nombre: t.nombre, suite: t.suite },
     liste: { lignes: l.lignes, suite: l.suite },
     entites: entites.map(e => ({ id: e.id, nom: e.nom, archivee: !!e.archivee_le, debut_exercice: e.debut_exercice || null })),
     entite: entiteId,
