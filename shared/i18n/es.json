@@ -1651,7 +1651,7 @@
   "charges.enregistrer_suivante": "Guardar y siguiente",
   "charges.tout_enregistrer": "Guardar las facturas completas",
   "charges.tout_aucune": "Ninguna factura completa que guardar: falta la entidad, la categoría o el importe. Revíselas una por una.",
-  "charges.tout_confirmer": "Se guardarán {n} facturas tal como se leyeron. Quedan {m} por revisar una por una.",
+  "charges.tout_confirmer": "Se guardarán {n} facturas tal como se leyeron: {repartition}. Quedan {m} por revisar una por una.",
   "charges.tout_progression": "Guardando: {i} de {n}…",
   "charges.tout_fin": "{n} facturas guardadas.",
   "charges.tout_refus": "{n} no se han podido guardar y quedan por revisar.",
@@ -1661,5 +1661,6 @@
   "charges.refus_entite_invalide": "Esta entidad no es válida. Recargue la página.",
   "charges.refus_trop_de_charges": "Demasiadas facturas a la vez. Inténtelo de nuevo.",
   "charges.refus_aucune_charge": "Ninguna factura que guardar.",
-  "charges.masse_arret": "{n} archivos no enviados: la subida se detuvo tras tres fallos seguidos. Inténtelo más tarde."
+  "charges.masse_arret": "{n} archivos no enviados: la subida se detuvo tras tres fallos seguidos. Inténtelo más tarde.",
+  "charges.tout_repartition_un": "{n} para {entite}"
 }

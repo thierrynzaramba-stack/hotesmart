@@ -4554,8 +4554,14 @@ Rien trouvé (détail dans « Vérifié sans constat »).
   `valider` à changer, hors de ce lot.
 - **M9 — corrigé.** Une entité de base archivée entre le dépôt et la lecture
   cède à la proposition du code ; des entités illisibles la gardent. Test.
-- **Question produit** : posée à Thierry (« Enregistrer tout » et les
-  entités proposées par le code).
+- **Question produit — tranchée par Thierry le 22 novembre 2026 (« ça me
+  va »)** : la confirmation de « Enregistrer tout » dit la **répartition par
+  entité** (« 15 factures vont être enregistrées telles que lues : 12 pour
+  SCI Le Florian, 3 pour Thierry en nom propre. 2 restent à vérifier une par
+  une. »), les plus nombreuses d'abord. Rien d'autre ne change : une facture
+  à l'entité proposée par le code reste enregistrable d'un coup, mais l'hôte
+  voit la répartition avant d'accepter. Test dans
+  `tests/charges-masse-page.test.js`.
 
 ## 12. Trace des reviews du lot 2
 

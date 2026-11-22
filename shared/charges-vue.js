@@ -1221,7 +1221,17 @@ export function monter (racine, deps) {
       for (let n = 0; p.suite && n < 40; n++) { p = await pageDuParcours(p.suite); lignes = lignes.concat(p.lignes) }
       const completes = lignes.filter(estComplete)
       if (!completes.length) { statutEnvoi(t('charges.tout_aucune'), true); return }
-      if (!deps.confirmer(t('charges.tout_confirmer', { n: completes.length, m: lignes.length - completes.length }))) return
+      // ⚠ LA RÉPARTITION PAR ENTITÉ EST DITE AVANT (décision de Thierry, 22
+      // novembre 2026) : une facture reçue par e-mail ou déposée avant le lot
+      // porte l'entité PROPOSÉE par le code ; un chiffre inattendu se voit ici.
+      const parEntite = new Map()
+      for (const c of completes) parEntite.set(String(c.entite_juridique_id), (parEntite.get(String(c.entite_juridique_id)) || 0) + 1)
+      const nomDe = (idEnt) => { const e = etat.entites.find(x => String(x.id) === idEnt); return e ? nomEntite(e) : '?' }
+      const repartition = [...parEntite.entries()]
+        .map(([idEnt, n]) => ({ n, nom: nomDe(idEnt) }))
+        .sort((a, b) => b.n - a.n || a.nom.localeCompare(b.nom, langue))
+        .map(x => t('charges.tout_repartition_un', { n: x.n, entite: x.nom })).join(', ')
+      if (!deps.confirmer(t('charges.tout_confirmer', { n: completes.length, repartition, m: lignes.length - completes.length }))) return
       agi = true
       let ok = 0
       let refus = 0

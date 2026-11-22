@@ -1651,7 +1651,7 @@
   "charges.enregistrer_suivante": "Enregistrer et suivante",
   "charges.tout_enregistrer": "Enregistrer les factures complètes",
   "charges.tout_aucune": "Aucune facture complète à enregistrer : il manque l'entité, la catégorie ou le montant. Vérifiez-les une par une.",
-  "charges.tout_confirmer": "{n} factures vont être enregistrées telles que lues. {m} restent à vérifier une par une.",
+  "charges.tout_confirmer": "{n} factures vont être enregistrées telles que lues : {repartition}. {m} restent à vérifier une par une.",
   "charges.tout_progression": "Enregistrement : {i} sur {n}…",
   "charges.tout_fin": "{n} factures enregistrées.",
   "charges.tout_refus": "{n} n'ont pas pu l'être et restent à vérifier.",
@@ -1661,5 +1661,6 @@
   "charges.refus_entite_invalide": "Cette entité n'est pas valide. Rechargez la page.",
   "charges.refus_trop_de_charges": "Trop de factures d'un coup. Réessayez.",
   "charges.refus_aucune_charge": "Aucune facture à enregistrer.",
-  "charges.masse_arret": "{n} fichiers non envoyés : le dépôt s'est arrêté après trois pannes de suite. Réessayez plus tard."
+  "charges.masse_arret": "{n} fichiers non envoyés : le dépôt s'est arrêté après trois pannes de suite. Réessayez plus tard.",
+  "charges.tout_repartition_un": "{n} pour {entite}"
 }

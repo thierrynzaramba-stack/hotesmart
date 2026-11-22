@@ -118,16 +118,19 @@ test('le parcours : une fiche fermée en route l\'arrête et relit l\'écran ; h
 
 // ─── Enregistrer tout ───────────────────────────────────────────────────────
 test('LE TEST QUI COMPTE : « Enregistrer tout » relit TOUTE la file, ne garde que les complètes, dit le compte AVANT, puis envoie par paquets de 20', async () => {
-  const completes = Array.from({ length: 25 }, (_, i) => aVerifier(i + 1))
+  const ENT2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const entites = [{ id: ENT, nom: 'Moi', archivee: false, debut_exercice: null }, { id: ENT2, nom: 'SCI Le Florian', archivee: false, debut_exercice: null }]
+  // 22 pour la SCI, 3 pour « Moi » : la confirmation le dit, les plus nombreuses d'abord.
+  const completes = Array.from({ length: 25 }, (_, i) => aVerifier(i + 1, i < 3 ? {} : { entite_juridique_id: ENT2 }))
   const incompletes = [aVerifier(40, { categorie: null }), aVerifier(41, { entite_juridique_id: null }), aVerifier(42, { signal: 'doublon', signal_tranche: false })]
   const pages = { debut: { lignes: [...completes.slice(0, 20), incompletes[0]], suite: 'C1', nombre: 28 }, C1: { lignes: [...completes.slice(20), ...incompletes.slice(1)], suite: null } }
   const lots = []
   const geste = (c) => { lots.push(c.ids); return { ok: true, enregistrees: c.ids.slice(0, c.ids.length - (lots.length === 2 ? 1 : 0)), refusees: lots.length === 2 ? [{ id: c.ids[c.ids.length - 1], code: 'incomplete' }] : [] } }
-  const b = await monter({ ecran: ecranAvec({ parcours: (c) => pages[c] }), geste })
+  const b = await monter({ ecran: ecranAvec({ parcours: (c) => pages[c], autre: { entites } }), geste })
   try {
     await b.cliquer(b.$('[data-geste="tout-enregistrer"]'))
     for (let i = 0; i < 20; i++) await b.attendre()
-    assert.deepEqual(b.journal.confirmations, ['25 factures vont être enregistrées telles que lues. 3 restent à vérifier une par une.'])
+    assert.deepEqual(b.journal.confirmations, ['25 factures vont être enregistrées telles que lues : 22 pour SCI Le Florian, 3 pour Moi. 3 restent à vérifier une par une.'])
     assert.deepEqual(b.gestes().map(g => g.action), ['valider_lot', 'valider_lot'])
     assert.deepEqual(lots.map(l => l.length), [20, 5])
     assert.deepEqual(lots.flat(), completes.map(c => c.id), 'les complètes, dans l\'ordre de dépôt — et aucune autre')

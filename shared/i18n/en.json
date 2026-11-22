@@ -1651,7 +1651,7 @@
   "charges.enregistrer_suivante": "Save and next",
   "charges.tout_enregistrer": "Save complete invoices",
   "charges.tout_aucune": "No complete invoice to save: the entity, category or amount is missing. Review them one by one.",
-  "charges.tout_confirmer": "{n} invoices will be saved as read. {m} remain to be reviewed one by one.",
+  "charges.tout_confirmer": "{n} invoices will be saved as read: {repartition}. {m} remain to be reviewed one by one.",
   "charges.tout_progression": "Saving: {i} of {n}…",
   "charges.tout_fin": "{n} invoices saved.",
   "charges.tout_refus": "{n} could not be saved and remain to be reviewed.",
@@ -1661,5 +1661,6 @@
   "charges.refus_entite_invalide": "This entity is not valid. Reload the page.",
   "charges.refus_trop_de_charges": "Too many invoices at once. Try again.",
   "charges.refus_aucune_charge": "No invoice to save.",
-  "charges.masse_arret": "{n} files not sent: the upload stopped after three failures in a row. Try again later."
+  "charges.masse_arret": "{n} files not sent: the upload stopped after three failures in a row. Try again later.",
+  "charges.tout_repartition_un": "{n} for {entite}"
 }
