@@ -562,8 +562,14 @@ note sur 5.
    12 biens) ; `Server-Timing` porte le compte de requêtes.
 8. **Mesure AVANT** — production, compte de Thierry, 9 novembre 2026 :
    1 appel, **14 requêtes**, 654 à 1 401 ms côté serveur. Attendu : 14 → 10
-   (quatre comptages et une lecture de notes remplacés par une lecture). La
-   mesure APRÈS se prend en production après le merge et se consigne ici.
+   (quatre comptages et une lecture de notes remplacés par une lecture).
+   **Mesure APRÈS** — production, même compte, 11 novembre 2026 à 10:05, après
+   le déploiement de `888d3842` (09:45:26), trois appels : 1 appel,
+   **10 requêtes** (`Server-Timing`), **463 à 649 ms** côté serveur,
+   35 468 octets. Attendu 14 → 10 : tenu. Le cron a rempli la table au premier
+   passage après le déploiement (09:50, ≈ 16 requêtes, ≈ 0,7 s, déduit de la
+   carte 20 : 22 requêtes et 928 ms sur trois passages, dont deux à vide de
+   3 requêtes) ; la page affichait « Calculé à 09:50 ».
 
 ### 10.8 Tests attendus
 
