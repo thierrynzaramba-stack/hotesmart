@@ -149,12 +149,12 @@ test('UN seul fichier : la fenêtre le suit aussi (sans compteur), puis SA fiche
   } finally { b.fermer() }
 })
 
-test('recette du lot 8c : « Enregistrer les factures complètes » n\'existe plus ; « Vérifier une par une » reste', async () => {
+test('recette du lot 8c : « Enregistrer les factures complètes » n\'existe plus ; le parcours de toute la file s\'appelle « Tout traiter »', async () => {
   const b = await monter({ ecran: ecranAvec({ aTraiter: [aVerifier(1), aVerifier(2)] }) })
   try {
     const z = b.$('[data-bind="a-traiter"]')
     assert.equal(z.querySelector('[data-geste="tout-enregistrer"]'), null)
-    assert.equal(texte(z.querySelector('[data-geste="parcourir"]')), 'Vérifier une par une')
+    assert.equal(texte(z.querySelector('[data-geste="parcourir"]')), 'Tout traiter', 'renommé en recette (décision de Thierry)')
     assert.doesNotMatch(texte(z), /complètes/)
   } finally { b.fermer() }
 })
@@ -186,7 +186,7 @@ test('LE TEST QUI COMPTE (dette 153) : « Afficher plus » lit la SUITE de « À
 })
 
 // ─── Le parcours « une par une » ────────────────────────────────────────────
-test('LE TEST QUI COMPTE : « Vérifier une par une » — dans l\'ordre de DÉPÔT, un compteur, « Passer », « Enregistrer et suivante », la page suivante lue au fil', async () => {
+test('LE TEST QUI COMPTE : « Tout traiter » — dans l\'ordre de DÉPÔT, un compteur, « Passer », « Enregistrer et suivante », la page suivante lue au fil', async () => {
   const pages = { debut: { lignes: [aVerifier(1), aVerifier(2)], suite: 'C1', nombre: 3 }, C1: { lignes: [aVerifier(3)], suite: null } }
   const b = await monter({ ecran: ecranAvec({ parcours: (c) => pages[c] }), geste: () => ({ ok: true }) })
   try {

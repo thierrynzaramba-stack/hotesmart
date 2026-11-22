@@ -4614,7 +4614,8 @@ Ce qui change (correctif de recette sur `charges-masse`) :
   (la règle du parcours du serveur) ; une facture qui attend sa lecture,
   illisible ou reconnue comme tableau reste dans « À traiter ». À la fin :
   « Toutes les factures déposées ont été vues. » Rien à vérifier : la ligne
-  d'état le dit, aucune fiche ne s'ouvre. « Vérifier une par une », dans
+  d'état le dit, aucune fiche ne s'ouvre. « Vérifier une par une » (renommé
+  « Tout traiter », ci-dessous), dans
   « À traiter », reste pour toute la file.
 - **Une fenêtre de chargement** suit tout dépôt, d'un fichier comme de
   plusieurs : « Dépôt de 8 factures », « Facture 3 sur 8 », l'étape
@@ -4642,6 +4643,12 @@ puis « Continuer », rien à vérifier, un seul fichier, plus aucun bouton
 `estComplete` sont retirés avec le code. Contre-épreuve : les huit tests
 neufs ou modifiés rougissent contre `319fb669`. Suite : 9 249 verts à l'heure
 réelle ; les fichiers du compte de charges à J+60 : 405 verts.
+
+**Fin de recette (22 novembre 2026, 23 h 42).** Thierry : « parfait, on passe
+en prod ; au lieu de « Vérifier une par une », « Tout traiter » ». Le bouton
+de « À traiter » s'appelle désormais **« Tout traiter »** (anglais « Handle
+all », espagnol « Tratar todo ») ; il ouvre toujours, une par une, toutes les
+factures « À vérifier » du compte dans l'ordre de dépôt. Seul le texte change.
 
 ## 12. Trace des reviews du lot 2
 

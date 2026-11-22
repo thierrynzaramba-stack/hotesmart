@@ -57,7 +57,7 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 |---|---|
 | `lib/charges.js` | `PLAFOND_LECTURES_JOUR` = 100 ; l'entité reste reconnue à la lecture (vide dans le doute). |
 | `lib/charges/ecran.js`, `api/ecran/charges.js` | « À traiter » par curseur (`suite_a_traiter`, dette 153) ; le parcours `parcours=debut|<curseur>` (« À vérifier », ordre de dépôt). |
-| `shared/charges-vue.js` | Dépôt de 50 fichiers au plus, un par un, suivi par une fenêtre de chargement ; puis la vérification une par une du dépôt s'ouvre d'elle-même ; « Vérifier une par une » pour toute la file ; facture à droite de la fiche à l'ordinateur (`deps.ecranLarge`). « Enregistrer les factures complètes » est retiré en recette (spec §14.22.9). |
+| `shared/charges-vue.js` | Dépôt de 50 fichiers au plus, un par un, suivi par une fenêtre de chargement ; puis la vérification une par une du dépôt s'ouvre d'elle-même ; « Tout traiter » (nommé « Vérifier une par une » jusqu'à la recette) pour toute la file ; facture à droite de la fiche à l'ordinateur (`deps.ecranLarge`). « Enregistrer les factures complètes » est retiré en recette (spec §14.22.9). |
 
 ## Règles à ne pas perdre
 

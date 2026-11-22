@@ -1644,7 +1644,7 @@
   "charges.masse_fin": "{n} factures déposées.",
   "charges.masse_refus": "{n} refusées : {liste}.",
   "charges.masse_refus_un": "{nom} ({motif})",
-  "charges.parcourir": "Vérifier une par une",
+  "charges.parcourir": "Tout traiter",
   "charges.parcours_compteur": "{i} sur {n}",
   "charges.parcours_vide": "Aucune facture à vérifier.",
   "charges.parcours_fin": "Toutes les factures à vérifier ont été vues.",
