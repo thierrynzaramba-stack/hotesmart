@@ -2,6 +2,7 @@
 // Endpoint de diagnostic (page pages/diagnostic.html). LECTURE SEULE.
 // ?check=channel        -> teste la connexion live au gestionnaire de canaux
 // ?check=channel_detail -> canaux d'UN bien (mappings, is_active)
+// ?check=demandes       -> fils de messages d'UN bien : demandes Airbnb (dette 129)
 //
 // ⚠ FUITE ENTRE COMPTES CORRIGEE (2 septembre 2026). Cet endpoint ne verifiait
 // QUE la validite de la session, jamais l'appartenance des donnees demandees :
@@ -212,6 +213,79 @@ async function router(req, res) {
       par_jour_erreur: cl.par_jour_erreur,
       derniers_passages: der.ok ? der.passages : undefined,
       derniers_passages_erreur: der.ok ? undefined : der.raison,
+    })
+  }
+
+  // ?check=demandes&property_id=<bien>
+  // DETTE 129, LOT 1, ETAPE 0 — MESURER AVANT D'ECRIRE. LECTURE SEULE, chez
+  // Channex comme dans le coeur. Dit, pour UN bien : combien de demandes (fils
+  // sans reservation), combien de fils devenus reservations dont les messages
+  // dorment sans reservation chez nous, et ce que le rattrapage saura rattacher.
+  // docs/specs/spec-demandes-airbnb.md §3.
+  if (check === 'demandes') {
+    // Le bien vient du CLIENT : revalide contre le perimetre de l'appelant
+    // (404 autre compte, 403 hors perimetre) AVANT tout appel au partenaire.
+    // Domaine `messages` : ce qu'on lit, ce sont les fils de messagerie du bien.
+    const garde = await requirePermission(req, res, {
+      domaine: 'messages', niveau: 'read',
+      bien: (req.query.property_id || '').trim(), bienRequis: true
+    })
+    if (!garde.ok) return
+    const bien = garde.bien
+    if (bien.provider !== 'channex') {
+      return res.status(400).json({ error: 'Ce bien n\'est pas relié par Channex : il n\'a pas de fils de messages' })
+    }
+    const { getProvider } = require('../lib/channels')
+    const { filsADetailler, mesurer } = require('../lib/demandes/mesure')
+    const provider = getProvider('channex')
+
+    // 1. Les lignes du coeur SANS reservation de ce bien. ⚠ PAR CURSEUR :
+    // PostgREST rend 1000 lignes sans erreur, et une mesure tronquee en
+    // silence est pire qu'une mesure absente.
+    const lignes = []
+    let lignesCompletes = false
+    let curseur = null
+    for (let page = 0; page < 20; page++) {
+      let q = supabase.from('messages')
+        .select('id, provider_msg_id, direction, sent_at, body')
+        .eq('user_id', bien.user_id)
+        .eq('property_id', bien.provider_property_id)
+        .is('booking_id', null)
+        .order('id', { ascending: true })
+        .limit(1000)
+      if (curseur) q = q.gt('id', curseur)
+      const { data, error } = await q
+      if (error) return res.status(503).json({ ok: false, error: 'Lecture du cœur impossible', detail: error.message })
+      const rangs = data || []
+      lignes.push(...rangs)
+      if (rangs.length < 1000) { lignesCompletes = true; break }
+      curseur = rangs[rangs.length - 1].id
+    }
+
+    // 2. Les fils du bien chez Channex.
+    const liste = await provider.listerFils({ propertyId: bien.provider_property_id })
+    if (!liste.ok) return res.status(502).json({ ok: false, error: 'Fils illisibles chez le partenaire', motif: liste.erreur })
+
+    // 3. Les identifiants de messages des fils utiles, cinq appels a la fois.
+    const plusAncien = lignes.reduce((min, l) => (l.sent_at && (!min || l.sent_at < min)) ? l.sent_at : min, null)
+    const choix = filsADetailler(liste.fils, { depuis: plusAncien, max: 60 })
+    const details = new Map()
+    const file = choix.choisis.slice()
+    await Promise.all(Array.from({ length: 5 }, async () => {
+      while (file.length) {
+        const f = file.shift()
+        details.set(f.id, await provider.idsDesMessagesDuFil(f.id))
+      }
+    }))
+
+    return res.status(200).json({
+      ok: true,
+      bien: bien.provider_property_id,
+      nom: bien.name || null,
+      liste_fils_complete: liste.complet,
+      lignes_lues_completes: lignesCompletes,
+      detail: { candidats: choix.candidats, lus: choix.choisis.length, tronque: choix.tronque },
+      ...mesurer({ fils: liste.fils, details, lignes }),
     })
   }
 
