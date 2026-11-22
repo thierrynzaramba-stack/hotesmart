@@ -121,6 +121,13 @@ Choix par défaut posés par cette spec (Thierry peut les renverser) :
 - **Unicité des fils par compte** (`user_id, provider, provider_thread_id`) :
   deux biens de deux comptes peuvent porter la même référence provider.
 
+**Point ouvert, relevé en review 2 du lot 1, hors de ce lot :** l'import ne
+refuse pas une référence provider AMBIGUË (deux biens de deux comptes portant
+la même référence), alors que le webhook la refuse. Avec l'unicité par compte,
+chaque compte écrit SA ligne de fil — pas de fuite par la RLS, mais le compte
+qui a déclaré la référence d'un autre reçoit ses fils. Remède : refuser
+l'ambiguïté à l'import, comme le webhook.
+
 **Points ouverts, relevés en review, tranchés par la mesure de l'étape 0 :**
 - `importMessages` écrit sous le compte les messages de TOUS les fils que rend le
   partenaire, y compris un fil d'un autre bien ou sans bien (comportement

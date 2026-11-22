@@ -84,7 +84,7 @@ function fauxSupabase (tables, { sansColonneFil = false, indexSansFil = false } 
             if (q.mode === 'select') journal.selects.push({ table, filtres: q.filtres.map(f => f.col) })
             const vises = lignes.filter(r => q.filtres.every(f => vrai(r, f)))
             if (q.mode === 'update') {
-              journal.updates.push({ table, charge: q.charge, n: vises.length })
+              journal.updates.push({ table, charge: q.charge, n: vises.length, filtres: q.filtres.map(f => f.col) })
               vises.forEach(r => Object.assign(r, q.charge))
               return res({ data: null, error: null })
             }
@@ -193,6 +193,28 @@ test('relu par l\'import, un message déjà connu reçoit le fil (lignes d\'avan
   assert.deepStrictEqual([r1.reason, r2.reason], ['duplicate_inbound', 'duplicate_inbound'])
   assert.deepStrictEqual([t.messages[0].provider_thread_id, t.messages[0].booking_id], ['T1', null])
   assert.deepStrictEqual([t.messages[1].provider_thread_id, t.messages[1].booking_id], ['T1', 'B1'])
+  // ⚠ Second verrou de S2 (review 2 du lot, D2) : TOUTE mise a jour filtre
+  // aussi sur le compte, quelle que soit la facon dont la ligne a ete trouvee.
+  assert.ok(db.journal.updates.length > 0)
+  for (const u of db.journal.updates) assert.ok(u.filtres.includes('user_id'), JSON.stringify(u))
+})
+
+test('D1 (review 2) : une copie du séjour au même texte mais à un autre instant ne fait pas sauter la recherche par le fil', async () => {
+  const t = { messages: [
+    // Phase demande : la copie webhook du message m1, sans reservation.
+    { id: 'w1', user_id: 'C1', provider: 'channex', property_id: 'P1', booking_id: null, provider_thread_id: 'T1', ota: null, direction: 'inbound', sender: 'guest', body: 'Merci', sent_at: '2026-11-20T10:00:00.000Z', provider_msg_id: null, created_at: '2026-11-20T10:00:01Z' },
+    // Apres la reservation : un autre « Merci », copie webhook pas encore reconciliee.
+    { id: 'w2', user_id: 'C1', provider: 'channex', property_id: 'P1', booking_id: 'B1', provider_thread_id: 'T1', ota: null, direction: 'inbound', sender: 'guest', body: 'Merci', sent_at: '2026-11-21T10:00:00.000Z', provider_msg_id: null, created_at: '2026-11-21T10:00:01Z' },
+  ] }
+  const db = fauxSupabase(t); const rec = writer()
+  // L'import relit m1, le message du 20/11, qui porte maintenant la reservation.
+  const r = await rec(base(db, { direction: 'inbound', sender: 'guest', body: 'Merci', providerMsgId: 'm1', threadId: 'T1', bookingId: 'B1', sentAt: '2026-11-20T10:00:00' }))
+  assert.strictEqual(r.reason, 'echo_entrant_reconcilie')
+  assert.strictEqual(t.messages.length, 2, 'pas de troisième ligne')
+  const w1 = t.messages.find(m => m.id === 'w1')
+  assert.deepStrictEqual([w1.provider_msg_id, w1.booking_id], ['m1', 'B1'])
+  assert.strictEqual(t.messages.find(m => m.id === 'w2').provider_msg_id, null)
+  for (const u of db.journal.updates) assert.ok(u.filtres.includes('user_id'), JSON.stringify(u))
 })
 
 // Sobriete : vert contre le code d'avant (qui n'ecrivait jamais). Rougit contre

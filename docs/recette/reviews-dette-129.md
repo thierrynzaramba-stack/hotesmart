@@ -313,3 +313,115 @@ branche `dette-129-lot1-coeur`, arbre `/home/claude/hotesmart-dette129-lot1`.
   - `message_thread_id` est bien dans le payload de l'événement `message`, ce qui confirme le champ choisi par le lot ;
   - l'identifiant du message y est `payload.id`, alors que le webhook lit `payload.message_id`, absent : c'est la cause probable des copies webhook « sans identifiant ». Si la ligne de journal `payload message keys` le confirme, utiliser `payload.id` supprimerait le doublon à la source, pour les séjours comme pour les demandes ;
   - l'exemple de payload n'a pas d'`inserted_at` (`timestamp` est au niveau supérieur). La réconciliation exige le même instant à la milliseconde : la mesure du §0 de la spec (« aux mêmes instants ») est à confirmer à la milliseconde avant le go.
+
+### Suite donnée à la review 1 du lot 1 (cœur)
+
+Corrigés dans `ac2b64d143894d90f2b6b7953ad2e8dc7676ba5b` : S1, S2, B1, et les points mineurs
+(fil, titre, OTA jamais écrasés ; écriture des fils après l'annonce ; recherche par le fil
+seulement si nécessaire ; contrôle SQL refait ; spec mise à jour). Constats de sécurité :
+review 2 sur les correctifs, ci-dessous.
+
+## Lot 1, étapes 1-2 (cœur) — review 2 (22 novembre 2026, dernière), rapport tel que rendu
+
+Plage relue : `dd850ad29d6eb2f75f9ae7d13eec8759b454f30b..ac2b64d143894d90f2b6b7953ad2e8dc7676ba5b`.
+Ce qu'elle trouve se corrige sans nouvelle review.
+
+---
+
+**Arbre lu** : `/home/claude/hotesmart-dette129-lot1`, branche `dette-129-lot1-coeur`, HEAD `ac2b64d143894d90f2b6b7953ad2e8dc7676ba5b`. Plage `dd850ad29d6eb2f75f9ae7d13eec8759b454f30b..ac2b64d143894d90f2b6b7953ad2e8dc7676ba5b`, un commit.
+
+**Fichiers de la plage (9)** :
+- `docs/recette/reviews-dette-129.md`
+- `docs/specs/spec-demandes-airbnb.md`
+- `lib/channels/channex.js`
+- `lib/demandes/fils.js`
+- `lib/record-message.js`
+- `migrations/2026-11-23-controle-demandes-fils.sql`
+- `migrations/2026-11-23-demandes-fils.sql`
+- `tests/demandes-fils-coeur.test.js`
+- `tests/record-message-echo.test.js`
+
+**Tests lancés** : `demandes-fils-coeur` 21/21, `record-message-echo` 12/12.
+
+**Mutations** : je les ai faites en mémoire, en interceptant le chargement des modules par Node. Aucun fichier n'a été écrit, et `git status --short` est vide.
+
+**Verdict** : S1, S2 et B1 sont fermés. Les correctifs introduisent une régression mineure, l'optimisation `dejaUnCandidat`, que j'ai reproduite.
+
+### 1. S1 — OUI, fermé
+
+- **Contrainte** : `migrations/2026-11-23-demandes-fils.sql:98-100` porte `unique (user_id, provider, provider_thread_id)`.
+- **Upsert** : `lib/demandes/fils.js:75` utilise `onConflict: 'user_id,provider,provider_thread_id'`, le même ensemble de colonnes. L'upsert réécrit `user_id` à sa propre valeur, donc une ligne ne peut plus passer à un autre compte.
+- **Contrôle 6** (l.53-63) :
+  - faux si la table manque (`count = 0`) ;
+  - faux contre l'ancienne contrainte : sa définition ne contient pas `user_id`.
+- **Policy** (l.128-132) : `can_read(user_id,'messages',property_id)`. `perm_level` et `in_scope` sont évalués sur le `user_id` **de la ligne** (schéma initial l.73-77, 186-200, 265-289). B ne lit donc jamais la ligne de A.
+- **Mutation** `onConflict` sans `user_id` : 2 tests rouges (16 et 17).
+- **Résiduel, hors commit, à transmettre** :
+  - Avec une unicité par compte, l'import de B écrit **sa propre** ligne, avec le même titre, si B déclare la même référence provider.
+  - Ce n'est pas une fuite par la RLS. C'est l'import qui ne refuse pas une référence ambiguë, alors que le webhook la refuse (`api/channel-webhook.js:256, 321`).
+  - Pour `messages`, c'était « premier arrivé gardé ». Ici, l'exposition devient permanente.
+  - Le remède est de refuser l'ambiguïté à l'import.
+- **Mineur** : `create table if not exists` ne remplace pas la contrainte si une version antérieure de la table a déjà été collée.
+  - Dans ce cas, rejouer la migration ne corrige rien : le contrôle 6 dirait faux, et l'upsert échouerait (42P10, sans casser l'import).
+  - Je n'ai trouvé aucune trace d'application dans `docs/`. À vérifier avant de coller.
+
+### 2. S2 — OUI, fermé
+
+- **Chemin « déjà connu »** : la garde `memeCompte` est aux l.384-387.
+- **`completerLigne`** : `ecrire` (l.259-265) pose toujours `.eq('id').eq('user_id', row.user_id)`, sur les deux écritures (l.266 et le repli l.271).
+- **Autres écritures** : c'est le seul `update` du fichier (grep : l.260). Les `insert` portent le `user_id` de l'appelant (l.326). Les lectures de `lignesDuMemeFil` sont filtrées par compte (l.215).
+- **Il ne reste aucune écriture qui traverse les comptes.**
+- **Mutation `memeCompte = true`** : le test 12 rougit.
+- **Mineur** : si l'on retire `.eq('user_id', row.user_id)` de `ecrire`, les 33 tests restent verts. Ce second verrou n'est gardé par aucun test, alors que le commit annonce « 7 mutants, tous tués ».
+- **Mineur** : `memeCompte` laisse passer quand `ex.user_id == null` (l.384). C'est inatteignable, car `messages.user_id` est NOT NULL (schéma l.1761) et il est lu dans les deux variantes (l.367 et 370). Une garde devrait plutôt refuser par défaut.
+
+### 3. B1 — OUI
+
+- **Expression** : identique à l'ancien index (`2026-09-11-messages-unicite.sql:102-111`, schéma l.3496), plus `coalesce(provider_thread_id,'')`. Même `md5(btrim(body))`, même `date_trunc('minute', sent_at at time zone 'UTC')`, même `where provider_msg_id is null`.
+- **Ordre** : la colonne est créée (l.29) avant l'index (l.58-70), qui est posé avant le retrait de l'ancien (l.72-73).
+- **Création sur les données existantes** : elle ne peut pas échouer. La nouvelle clé est strictement plus fine qu'un index unique présent et valide (créé sans CONCURRENTLY, dans une transaction, l.20/113). La colonne ajoutée n'est jamais nulle grâce au `coalesce`, donc la sémantique des NULL ne change pas.
+- **Réserve** : cela ne vaut que là où l'ancien index existe. Sur une base qui ne l'a jamais eu, le contrôle 4 serait vert pour rien.
+- **Mineur** : la création se fait sans CONCURRENTLY. Elle verrouille `messages` en SHARE : les écritures attendent quelques secondes, elles n'échouent pas.
+
+### Défauts introduits par ces correctifs
+
+**D1 — mineur, régression par rapport à `dd850ad`, contraire au but du lot.**
+- **Le problème** : `dejaUnCandidat` (l.235-238) saute la recherche par le fil dès que la recherche par réservation trouve **n'importe quelle** ligne sans identifiant. Or le chemin entrant n'accepte que le **même instant** (l.445).
+- **Scénario reproduit en mémoire** :
+  - phase demande : W1 « Merci » (sans réservation, fil T1, copie webhook du 20/11) ;
+  - après la réservation : W2 « Merci » (réservation B1, fil T1, copie webhook du 21/11, pas encore réconciliée) ;
+  - l'import relit m1 (le message du 20/11, qui porte maintenant B1) ;
+  - la recherche par réservation trouve W2, donc la recherche par le fil est sautée ;
+  - W1 n'est jamais trouvée, le message est inséré : **3 lignes au lieu de 2**.
+- **Avec `dd850ad`** : `echo_entrant_reconcilie`, et W1 reçoit m1 et B1.
+- **Conditions** : le même texte dans les deux phases, et la copie du séjour pas encore réconciliée quand le message de la demande est lu. L'ordre des messages chez Channex n'est pas vérifié (`channex.js:448-453`).
+- **Séjour pur** : aucune perte, toutes ses lignes portent la réservation.
+- **Sortants** : même choix qu'avant.
+- **Correctif** : ne sauter la recherche par le fil que si un candidat **valable pour l'appelant** a été trouvé (côté entrant : même instant et sans identifiant), par exemple en passant ce test à `lignesDuMemeFil`. Ajouter ce scénario aux tests.
+
+**D2 — mineur.** Le filtre `user_id` de `ecrire` n'est pas testé (voir S2).
+
+**D3 — mineur, transitoire.** Si le code est déployé avant la migration, `lire` demande `provider_thread_id` aussi pour les recherches par réservation sans fil (Beds24, e-mail). Chaque recherche échoue, puis repart sans la colonne : une requête de plus par appel. La spec prévoit la migration d'abord.
+
+**Contrôle SQL** : rien ne lève. `has_table_privilege(name, oid, text)` rend null sur une table absente, ramené à faux. `max(indexname)` passe par la conversion implicite vers `text`. Les contrôles 3, 4, 6, 7 et 8 sont faux sur l'état d'avant. Je l'ai raisonné, sans accès à une base.
+
+**Double de test** : le faux index utilise `trim()` de JS, qui enlève plus que le `btrim` de Postgres. Il est donc plus strict que la base, pas plus permissif : ce n'est pas un faux vert.
+
+**Mutations mesurées** : 4 en tout.
+- Tuées : `onConflict` sans `user_id` (tests 16 et 17), `memeCompte` (test 12), recherche par le fil toujours lancée (test 14).
+- Survivante : le filtre `user_id` retiré de `ecrire` (33/33 verts).
+
+### Suite donnée à la review 2 du lot 1 (cœur) — sans nouvelle review
+
+| constat | suite |
+|---|---|
+| S1, S2, B1 | fermés (confirmés par la review). |
+| D1 | corrigé : la recherche par le fil n'est sautée que si la réservation a trouvé un candidat **réconciliable pour l'appelant** (entrant : même instant, sans identifiant). Test du scénario ajouté. |
+| D2 | corrigé : toute mise à jour est vérifiée porter le filtre de compte ; la mutation qui retire `.eq('user_id', …)` de `ecrire` rougit désormais (2 tests). |
+| D3 | corrigé : sans fil chez l'appelant, la colonne n'est plus demandée. |
+| `memeCompte` | refus par défaut quand le compte de la ligne est illisible. |
+| S1 résiduel (import qui ne refuse pas une référence provider ambiguë) | hors de ce lot : noté comme point ouvert dans la spec, transmis au chef de file. |
+| `create table if not exists` sur une version antérieure | la table n'a jamais été collée nulle part ; le contrôle 6 dirait faux si c'était le cas. |
+| Réserve B1 (contrôle 4 vert sur une base sans l'ancien index) | assumée : l'ancien index est en staging et en prod depuis septembre. |
+
+Mutations des correctifs : 3 sur 3 tuées. Suite 9207/9207.
