@@ -107,3 +107,98 @@ Aucun constat de sécurité bloquant : pas de seconde review (règle « une revi
 | M2 | corrigé dans `demandes` (première valeur) ; `channel_detail`, défaut antérieur, laissé tel quel. |
 | `plusAncien` | corrigé : calculé en instants (`Date.parse`). |
 | T1 à T4 et chemins sans test | tests ajoutés ou resserrés ; contre-épreuve par mutation : 9 mutants tués sur 10, le survivant (retirer le filtre `booking_id` de la lecture des jumelles) est équivalent — une ligne import sans réservation est déjà reconnue par la première clé. |
+
+## Lot 1, étape 0 — review 2 (22 novembre 2026), sur les correctifs de sécurité S1 et S2
+
+Demandée par le chef de file : S1 et S2 sont classés sécurité, leurs correctifs se relisent une fois.
+Plage relue : `8874d695b78ae65ea9b5cf7c1c4cc88adefcbe36..779a6439188cf126586d3824ed6f7d243f845e68`,
+portée `api/diagnostic.js` et `lib/channels/channex.js`. C'est la dernière review de ce commit :
+ce qu'elle trouve se corrige sans nouvelle review. Rapport tel que rendu :
+
+---
+
+Arbre lu : `/home/claude/hotesmart-dette129`, branche `dette-129-sans-resa`. Tête lue : `779a6439188cf126586d3824ed6f7d243f845e68`. Plage : `8874d695..779a6439`, un seul commit. Le diff relu porte sur `api/diagnostic.js` et `lib/channels/channex.js`. J'ai lu aussi `lib/require-permission.js`, `lib/channels/index.js`, `lib/demandes/mesure.js` et `vercel.json` pour comprendre.
+
+Je n'ai rien modifié (`git status` est propre). `node --test tests/demandes-mesure.test.js` donne **31 sur 31 au vert**. J'ai aussi fait deux vérifications en mémoire avec `node -e`, avec un `fetch` simulé : aucun fichier écrit, aucun appel réseau.
+
+### 1. Le 403 « fondateur » tombe-t-il avant tout appel au partenaire et avant toute lecture du cœur ? OUI
+
+Ordre réel dans `api/diagnostic.js` :
+- l.232-236 : la garde `requirePermission`.
+- l.241-243 : refus 403 si `FOUNDER_EMAIL` est absent.
+- l.244-246 : refus 403 si l'e-mail n'est pas celui du fondateur.
+- Seulement ensuite : `getProvider` (l.253), la première lecture de `messages` (l.270), les jumelles (l.293) et le premier appel au partenaire (l.309).
+
+`garde.email` existe bien. Dans `lib/require-permission.js`, il vaut `userData.user.email` (l.261) quand la session est vérifiée par la garde elle-même. C'est le cas ici, puisqu'on ne lui passe pas de `userId`. Il est rendu sur le chemin `messages` (l.441). La comparaison se fait en minuscules des deux côtés ; un e-mail nul donne `''`, donc un refus.
+
+Seules les lectures propres à la garde (`properties`, `profiles`, `profile_permissions`) passent avant le 403. Elles ne renvoient qu'un statut.
+
+### 2. `private, no-store` est-il posé avant le premier refus ? OUI
+
+- Avant l'appel de la garde, seules s'exécutent les l.229 et 234. Elles ne peuvent pas lever : `req.query.property_id` vaut une chaîne, un tableau ou `undefined`, et `[].concat(..)[0]` puis `String(..)` sont sûrs. Le paramètre répété est couvert.
+- La première instruction de `requirePermission` est `posterEnTetesPrives(res)` (l.249). Elle passe avant le 401, et même la déstructuration des arguments ne peut pas lever avant elle.
+- Tous les refus suivants (403, 400, 503, 502) et le 500 du filet (l.108) partent donc avec l'en-tête déjà posé.
+- Aucun test ne fixe cet en-tête sur cette branche, parce que le double de la garde ne le pose pas. La preuve est à la lecture.
+
+### 3. Aucun fil d'un autre bien ne peut-il sortir ? NON, pas sans condition
+
+`channex.js:1048-1049` :
+```js
+const bienDuFil = th.relationships?.property?.data?.id
+if (bienDuFil && String(bienDuFil) !== String(propId)) { autresBiens++; continue }
+```
+- **Si `relationships.property` est absent, le fil est GARDÉ.** C'est aussi le cas avec `data: null` (forme permise par JSON:API), un identifiant vide ou un identifiant à 0.
+- Mesuré en mémoire, avec un filtre ignoré et 4 fils : les fils de « CLIENT-B » (sans `property`) et de « CLIENT-C » (sans `relationships`) sortent avec leur `titre`, donc le nom du voyageur. Seul le fil qui déclare `AUTRE` est écarté, et `autres_biens` vaut 1.
+- **Le compteur d'alerte est aveugle dans ce cas précis** : `fils_d_autres_biens_ecartes` reste à 0.
+- **Les tests figent ce comportement.** L'outil `thread()` (`tests/demandes-mesure.test.js:156`) fabrique les fils avec réservation sans `property`, et la l.163 exige qu'ils soient gardés.
+- **Casse ou type différent : le fil est écarté.** Mesuré : un bien `p` face à `P` donne 0 fil gardé et 1 écarté. Pas de fuite, et l'écart se voit dans le compteur.
+- **Filtre ignoré avec un fil qui déclare son bien : écarté et compté.** C'est juste.
+- **Un fil écarté ne fuit par aucun autre chemin.** Il ne sert qu'à `autresBiens++` et à `vus`. Le détail des messages ne lit que des fils gardés (`choix.choisis`). `mesurer` et `titre` ne voient que `liste.fils`. `motif` ne porte qu'un code d'erreur. Les lectures du cœur sont bornées à `bien.user_id` et `bien.provider_property_id`.
+
+**Gravité : sécurité, au titre du durcissement, non bloquant.**
+- Il faut deux écarts du partenaire en même temps : le filtre ignoré, et la relation absente. La doc Channex montre `relationships.property` dans chaque fil.
+- Depuis S2, seul le fondateur verrait la fuite.
+- Correctif d'une ligne, qui refuse par défaut : `if (String(bienDuFil ?? '') !== String(propId)) { autresBiens++; continue }`. Il faut aussi mettre `property` dans `thread()` l.156 pour les fils avec réservation.
+
+### Autres défauts introduits par les correctifs
+
+**D1. Mineur. C1 n'est fermé qu'à moitié : l'échéance ne borne pas un appel déjà parti.**
+- `listerFils` et `idsDesMessagesDuFil` ne regardent l'échéance qu'entre deux pages. `channelCall` (`channex.js:67-71`) rejoue jusqu'à 4 fois en attendant 1, 2, 4 puis 8 s, et respecte `Retry-After` tel quel, sans plafond.
+- Mesuré avec des attentes réduites à un dixième (100 ms au lieu de 1 s), une échéance à +50 ms et 4 réponses 429 : l'appel dure 1 503 ms et rend `complet: true` **sans `interrompu`**.
+- À l'échelle réelle, le premier appel de la liste qui reçoit une série de 429 dure environ 15 s. C'est exactement le scénario C1 de la review 1. Avec `Retry-After: 30`, il dure jusqu'à 120 s.
+- `vercel.json` ne donne aucun `maxDuration` à `api/diagnostic.js`. Le dépôt mentionne une limite de 15 s (`channex.js:29`). On peut donc encore finir en `FUNCTION_INVOCATION_TIMEOUT` avec un corps vide, et le commentaire l.257-261 promet le contraire.
+- Correctif le plus sûr : un `maxDuration` d'au moins 60 s pour `api/diagnostic.js`. Je ne conseille pas de modifier `channelCall`, qui est partagé.
+
+**D2. Mineur, non mesuré. Les jumelles avec réservation sont cherchées à la microseconde.**
+- `diagnostic.js:300` filtre par `.in('sent_at', instantsWebhook)` : Postgres compare alors à la microseconde.
+- Or `cleJumelle` et `recordMessage` comparent à la milliseconde. `record-message.js` explique pourquoi il ne filtre pas l'instant en SQL : comparer des instants, pas des chaînes.
+- Si les deux copies d'un même message diffèrent sous la milliseconde, `dont_jumelle_avec_resa` est sous-compté.
+
+**D3. Mineur. Le compteur `lus: details.size` (l.342) compte les tentatives, pas les fils lus.**
+- Il inclut les détails en échec et ceux interrompus avant leur première page.
+- Le nombre de fils lus en entier vaut `lus − fils.detail_incomplet`. Le chiffre n'est pas faux une fois rapproché de l'autre, mais le nom trompe.
+
+**Défaut déjà présent, non introduit par ce commit.** La garde rend 404 pour un bien inconnu et 403 pour le bien d'un autre compte. N'importe quel utilisateur connecté peut donc savoir si une référence de bien existe. C'est commun à tous les endpoints. Le commentaire `diagnostic.js:230-231`, « 404 autre compte », est inexact.
+
+**Constat de fonctionnement, pas un défaut.** Le fondateur doit aussi avoir `messages:read` sur le bien. Il ne peut donc pas mesurer le bien d'un client dont il n'est pas membre.
+
+### Verdict
+- S2 : fermé.
+- S1 : fermé pour le cas documenté, mais il reste ouvert par défaut quand la relation au bien manque. Correctif d'une ligne, plus l'outil de test.
+- C1 : à moitié fermé (D1).
+
+C'est la dernière review de ce commit : ces correctifs s'appliquent sans nouvelle review.
+
+### Suite donnée à la review 2
+
+| constat | suite |
+|---|---|
+| 1. 403 avant tout appel | confirmé par la review, rien à corriger. |
+| 2. no-store avant le premier refus | confirmé par la review, rien à corriger. |
+| 3. S1, relation au bien absente | corrigé : un fil qui ne déclare pas son bien (relation absente, `data: null`, identifiant vide) est écarté par défaut et compté à part (`fils_sans_bien_ecartes`). L'outil `thread()` des tests déclare désormais le bien de chaque fil. |
+| D1 | corrigé : `maxDuration` 60 s pour `api/diagnostic.js` dans `vercel.json` ; `channelCall`, partagé, n'est pas touché ; le commentaire de l'échéance dit sa limite. |
+| D2 | corrigé : les jumelles avec réservation se lisent par plage d'instants (par curseur), plus par liste d'instants comparée à la microseconde. |
+| D3 | corrigé : `detail.tentes` et `detail.lus_en_entier`. |
+| commentaire « 404 autre compte » | corrigé : 404 bien inconnu, 403 bien d'un autre compte ou hors périmètre. L'oracle d'existence est commun à tous les endpoints, antérieur, non traité ici. |
+
+Contre-épreuve par mutation des quatre correctifs : 4 mutants tués sur 4. Pas de nouvelle review (dernière review de ce commit).

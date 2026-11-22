@@ -153,7 +153,11 @@ function channexFrais () {
 const thread = (id, extra = {}) => ({
   id,
   attributes: { provider: 'Airbnb', title: 'Voyageur ' + id, is_closed: false, message_count: 3, last_message_received_at: '2026-11-10T10:00:00.000000', ...(extra.attributes || {}) },
-  relationships: extra.booking ? { booking: { data: { id: extra.booking } } } : { property: { data: { id: 'P' } } },
+  // Chaque fil declare son bien, comme dans la doc Channex : un fil qui ne le
+  // declare pas est ECARTE (review 2, S1) — le test qui le prouve est plus bas.
+  relationships: extra.booking
+    ? { property: { data: { id: 'P' } }, booking: { data: { id: extra.booking } } }
+    : { property: { data: { id: 'P' } } },
 })
 
 test('listerFils : pagine jusqu\'à la page VIDE (pas la page courte), et normalise chaque fil', async () => {
@@ -252,6 +256,22 @@ test('listerFils : un fil qui désigne un AUTRE bien est écarté et compté —
   })
 })
 
+test('listerFils : un fil qui ne DÉCLARE PAS son bien est écarté par défaut et compté à part (review 2, S1)', async () => {
+  const ch = channexFrais()
+  const sansRel = { ...thread('sans-relations') }; delete sansRel.relationships
+  const sansProp = { ...thread('sans-property'), relationships: { booking: { data: { id: 'B' } } } }
+  const dataNul = { ...thread('data-nul'), relationships: { property: { data: null } } }
+  const idVide = { ...thread('id-vide'), relationships: { property: { data: { id: '' } } } }
+  const sien = thread('sien')
+  await avecFetch(url => /pagination\[page\]=1&/.test(url) ? { json: { data: [sansRel, sansProp, dataNul, idVide, sien] } } : { json: { data: [] } }, async () => {
+    const r = await ch.listerFils({ propertyId: 'P' })
+    assert.deepStrictEqual(r.fils.map(f => f.id), ['sien'])
+    assert.strictEqual(r.sans_bien, 4)
+    assert.strictEqual(r.autres_biens, 0)
+    assert.ok(!/Voyageur (sans|data|id-vide)/.test(JSON.stringify(r)))
+  })
+})
+
 test('listerFils : le dernier mouvement d\'un fil est le plus récent de ses trois instants (review 1, J2)', async () => {
   const ch = channexFrais()
   const th = thread('t', { attributes: {
@@ -334,6 +354,9 @@ function charger ({
         is (c, v) { f.desc.push(['is', c, v]); f.preds.push(l => l[c] === v); return q },
         not (c, op, v) { f.desc.push(['not', c, op, v]); f.preds.push(l => l[c] !== v); return q },
         in (c, vals) { f.desc.push(['in', c, vals.length]); f.preds.push(l => vals.includes(l[c])); return q },
+        // Bornes d'instants : comparees en INSTANTS, comme Postgres compare des timestamptz.
+        gte (c, v) { f.desc.push(['gte', c, v]); f.preds.push(l => Date.parse(l[c]) >= Date.parse(v)); return q },
+        lt (c, v) { f.desc.push(['lt', c, v]); f.preds.push(l => Date.parse(l[c]) < Date.parse(v)); return q },
         order () { return q },
         gt (c, v) { f.gt = v; f.preds.push(l => l[c] > v); return q },
         limit (n) { f.limite = n; return q },
@@ -485,7 +508,33 @@ test('diagnostic demandes : un fil avec réservation qui n\'a pas bougé depuis 
   const lus = etat.appelsProvider.filter(a => a[0] === 'ids').map(a => a[1]).sort()
   // Le MINIMUM des instants borne la lecture : avec le maximum, « entre-deux » serait ecarte.
   assert.deepStrictEqual(lus, ['d1', 'entre-deux'])
-  assert.deepStrictEqual(res.body.detail, { candidats: 2, lus: 2, tronque: false, interrompu: false })
+  assert.deepStrictEqual(res.body.detail, { candidats: 2, tentes: 2, lus_en_entier: 2, tronque: false, interrompu: false })
+})
+
+test('diagnostic demandes : la jumelle avec réservation se reconnaît à la MILLISECONDE, pas à la microseconde (review 2, D2)', async () => {
+  const lignes = [
+    ligne('w1', { sent_at: '2026-11-01T10:00:00.123456+00:00', body: 'Je réserve' }),
+    ligne('i1', { sent_at: '2026-11-01T10:00:00.123+00:00', body: 'Je réserve', booking_id: 'B1', provider_msg_id: 'm7' }),
+    // Hors de la plage des instants webhook : ne doit pas etre lue.
+    ligne('i2', { sent_at: '2026-12-01T10:00:00+00:00', body: 'Plus tard', booking_id: 'B1', provider_msg_id: 'm8' }),
+  ]
+  const { res, etat } = await appeler({ lignes })
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  assert.strictEqual(res.body.lignes_sans_resa.dont_jumelle_avec_resa, 1)
+  const plage = etat.requetes.find(r => r.desc.some(d => d[0] === 'gte'))
+  assert.ok(plage, 'la lecture des jumelles se fait par plage')
+  assert.ok(!plage.desc.some(d => d[0] === 'in'), 'plus de liste d\'instants comparée à la microseconde')
+})
+
+test('diagnostic demandes : un détail en échec compte dans les tentatives, pas dans les fils lus en entier (review 2, D3)', async () => {
+  const { res } = await appeler({ ids: (id) => id === 'd1' ? { ok: false, erreur: 'HTTP 500', ids: [], complet: false } : { ok: true, complet: true, ids: [] } })
+  assert.strictEqual(res.body.detail.tentes, 2)
+  assert.strictEqual(res.body.detail.lus_en_entier, 1)
+})
+
+test('diagnostic demandes : la fonction a 60 s au moins — l\'échéance ne coupe pas un appel qui rejoue des 429 (review 2, D1)', () => {
+  const v = require('../vercel.json')
+  assert.ok(Number(v.functions['api/diagnostic.js']?.maxDuration) >= 60)
 })
 
 test('diagnostic demandes : la réponse dit les demandes et les fils devenus réservations, sans aucun texte de message', async () => {
@@ -496,6 +545,7 @@ test('diagnostic demandes : la réponse dit les demandes et les fils devenus ré
   assert.strictEqual(res.body.demandes[0].chez_nous_sans_resa, 1)
   assert.deepStrictEqual(res.body.devenues_resa.map(d => d.fil), ['r1'])
   assert.strictEqual(res.body.fils_d_autres_biens_ecartes, 0)
+  assert.strictEqual(res.body.fils_sans_bien_ecartes, 0)
   assert.ok(!JSON.stringify(res.body).includes('TEXTE-PRIVE'))
 })
 
@@ -520,5 +570,5 @@ test('diagnostic demandes : au-delà de 60 fils à lire, la lecture est plafonn�
   const fils = Array.from({ length: 65 }, (_, i) => ({ id: 'd' + i, booking: null, derniere: '2026-11-10T10:00:00Z' }))
   const { res, etat } = await appeler({ fils, ids: () => ({ ok: true, complet: true, ids: [] }) })
   assert.strictEqual(etat.appelsProvider.filter(a => a[0] === 'ids').length, 60)
-  assert.deepStrictEqual(res.body.detail, { candidats: 65, lus: 60, tronque: true, interrompu: false })
+  assert.deepStrictEqual(res.body.detail, { candidats: 65, tentes: 60, lus_en_entier: 60, tronque: true, interrompu: false })
 })

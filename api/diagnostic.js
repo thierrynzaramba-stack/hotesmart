@@ -228,7 +228,8 @@ async function router(req, res) {
     // `private, no-store`. On prend la premiere valeur, la garde juge le reste.
     const brut = [].concat(req.query.property_id == null ? '' : req.query.property_id)[0]
     // Le bien vient du CLIENT : revalide contre le perimetre de l'appelant
-    // (404 autre compte, 403 hors perimetre) AVANT tout appel au partenaire.
+    // (404 bien inconnu, 403 bien d'un autre compte ou hors perimetre) AVANT
+    // tout appel au partenaire.
     const garde = await requirePermission(req, res, {
       domaine: 'messages', niveau: 'read',
       bien: String(brut == null ? '' : brut).trim(), bienRequis: true
@@ -259,6 +260,10 @@ async function router(req, res) {
     // une serie de refus finit en FUNCTION_INVOCATION_TIMEOUT, corps vide —
     // ce que l'en-tete de ce fichier interdit. Depassee, la mesure s'arrete et
     // le DIT (`interrompu`).
+    // ⚠ ELLE SE CONSULTE ENTRE DEUX PAGES, ELLE NE COUPE PAS UN APPEL PARTI
+    // (review 2, D1) : un seul appel qui rejoue quatre 429 dure ~15 s. C'est
+    // pourquoi cette fonction a 60 s dans vercel.json — le filet, l'echeance
+    // n'etant que la regle ordinaire. `channelCall`, partage, n'est pas touche.
     const echeance = Date.now() + 10000
 
     // 1. Les lignes du coeur SANS reservation de ce bien. ⚠ PAR CURSEUR :
@@ -284,25 +289,41 @@ async function router(req, res) {
       curseur = rangs[rangs.length - 1].id
     }
 
-    // 2. Les copies import AVEC reservation aux instants des copies webhook
+    // 2. Les copies import AVEC reservation autour des copies webhook
     // (review 1, J1) : la jumelle d'un message de demande peut avoir ete
-    // importee apres que le voyageur a reserve. Par paquets de 100 instants.
-    const instantsWebhook = [...new Set(lignes.filter(l => !l.provider_msg_id && l.sent_at).map(l => l.sent_at))]
+    // importee apres que le voyageur a reserve.
+    // ⚠ UNE PLAGE, PAS UNE LISTE D'INSTANTS (review 2, D2) : `.in('sent_at', …)`
+    // compare a la MICROSECONDE en SQL, alors que la jumelle se reconnait a la
+    // milliseconde (regle de recordMessage, qui ne filtre pas l'instant en SQL
+    // pour la meme raison). On lit la plage des instants webhook, par curseur,
+    // et c'est `mesurer` qui compare des instants.
+    const instantsWebhook = lignes.filter(l => !l.provider_msg_id).map(l => Date.parse(l.sent_at)).filter(Number.isFinite)
     const importAvecResa = []
     let jumellesCompletes = true
-    for (let i = 0; i < instantsWebhook.length; i += 100) {
-      const { data, error } = await supabase.from('messages')
-        .select('provider_msg_id, direction, sent_at, body')
-        .eq('user_id', bien.user_id)
-        .eq('property_id', bien.provider_property_id)
-        .not('booking_id', 'is', null)
-        .not('provider_msg_id', 'is', null)
-        .in('sent_at', instantsWebhook.slice(i, i + 100))
-        .limit(1000)
-      if (error) return res.status(503).json({ ok: false, error: 'Lecture du cœur impossible', detail: error.message })
-      importAvecResa.push(...(data || []))
-      // Cent instants portent quelques lignes : mille dirait une lecture coupee.
-      if ((data || []).length >= 1000) jumellesCompletes = false
+    if (instantsWebhook.length) {
+      const de = new Date(Math.min(...instantsWebhook)).toISOString()
+      const a = new Date(Math.max(...instantsWebhook) + 1).toISOString()
+      jumellesCompletes = false
+      let apres = null
+      for (let page = 0; page < 20; page++) {
+        let q = supabase.from('messages')
+          .select('id, provider_msg_id, direction, sent_at, body')
+          .eq('user_id', bien.user_id)
+          .eq('property_id', bien.provider_property_id)
+          .not('booking_id', 'is', null)
+          .not('provider_msg_id', 'is', null)
+          .gte('sent_at', de)
+          .lt('sent_at', a)
+          .order('id', { ascending: true })
+          .limit(1000)
+        if (apres) q = q.gt('id', apres)
+        const { data, error } = await q
+        if (error) return res.status(503).json({ ok: false, error: 'Lecture du cœur impossible', detail: error.message })
+        const rangs = data || []
+        importAvecResa.push(...rangs)
+        if (rangs.length < 1000) { jumellesCompletes = true; break }
+        apres = rangs[rangs.length - 1].id
+      }
     }
 
     // 3. Les fils du bien chez le partenaire.
@@ -337,9 +358,21 @@ async function router(req, res) {
       liste_fils_complete: liste.complet,
       // Un nombre non nul dit que le filtre par bien du partenaire ne tient plus.
       fils_d_autres_biens_ecartes: liste.autres_biens || 0,
+      // Un nombre non nul dit que le partenaire ne declare plus le bien de ses
+      // fils : ecartes par defaut (review 2, S1), donc une mesure a revoir.
+      fils_sans_bien_ecartes: liste.sans_bien || 0,
       lignes_lues_completes: lignesCompletes,
       jumelles_lues_completes: jumellesCompletes,
-      detail: { candidats: choix.candidats, lus: details.size, tronque: choix.tronque, interrompu },
+      // `tentes` compte les fils dont on a demande le detail, `lus_en_entier`
+      // ceux dont on a tout lu (review 2, D3) : un echec ou une coupure ne
+      // compte que dans le premier.
+      detail: {
+        candidats: choix.candidats,
+        tentes: details.size,
+        lus_en_entier: [...details.values()].filter(d => d && d.ok && d.complet).length,
+        tronque: choix.tronque,
+        interrompu,
+      },
       ...mesurer({ fils: liste.fils, details, lignes, importAvecResa }),
     })
   }

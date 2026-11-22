@@ -23,6 +23,9 @@
     "api/labo-ia.js": {
       "maxDuration": 120
     },
+    "api/diagnostic.js": {
+      "maxDuration": 60
+    },
     "api/pwa.js": {
       "includeFiles": "shared/{theme.css,pwa/service-worker.js}"
     },
