@@ -14,7 +14,7 @@ propriétaire : ménage non marqué fait 30 minutes avant l'heure d'arrivée ».
   précède cette arrivée **n'est pas marqué fait**.
 - Il se règle **comme les autres alertes** (« Choisir ce qui vous prévient » :
   canaux, ou coupé), et va au titulaire et aux membres ayant le domaine
-  « ménages ». **Pas aux contacts prévenus** pour l'instant : Q51, ouverte (§10).
+  « ménages ». **Pas aux contacts prévenus** (Q51, 23 novembre 2026).
 - Seulement pour un logement **confié** à au moins une prestataire (règle du
   3 septembre pour les alertes ménage ; review de l'étape 1).
 - Rien ne change pour la prestataire.
@@ -169,10 +169,9 @@ de cron : le cycle se lance par script.
 
 ## 10. Questions ouvertes (à Thierry)
 
-- **Q50** — Quels logements : appliqué « confiés à au moins une prestataire »
-  (la spec validée exclut les ménages non suivis ; définition du 3 septembre).
-  Posée le 22 novembre, réponse « on continue » : à confirmer.
-- **Q51** — Les contacts prévenus (gardien) la reçoivent-ils, comme « ménage
-  refusé » ? Non tranchée. L'ajouter touche la liste « urgences », qui sert
-  aussi à la reprise des anciennes alertes, et la phrase de Réglages
-  (`pages/settings.html`) : un lot à part, sur décision.
+Aucune. Tranchées le 23 novembre 2026 (Thierry, « oui ») :
+- **Q50** — Quels logements : **les logements confiés à au moins une
+  prestataire** (définition du 3 septembre pour les alertes ménage).
+- **Q51** — Les contacts prévenus : **ils ne la reçoivent pas**. (L'ajouter
+  toucherait la liste « urgences », qui sert aussi à la reprise des anciennes
+  alertes, et la phrase de Réglages : un lot à part, si un jour il le faut.)
