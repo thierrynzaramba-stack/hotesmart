@@ -4982,7 +4982,9 @@ pas, elle était prévue au découpage (§8, lot 5) et décrite au §7.
 
 #### 14.24.1 Ce qui est déjà décidé (8 et 9 novembre 2026)
 
-- Une adresse de factures **par compte** (Q6), ouverte à **tout expéditeur**,
+- ~~Une adresse de factures **par compte** (Q6)~~ — remplacé le 23 novembre
+  2026 par une adresse par entité et par logement (§14.24.2). Ouverte à
+  **tout expéditeur**,
   fournisseurs compris (Q7), sur `reply.hotesmart.fr` (Q8) : aucun geste DNS,
   le sous-domaine reçoit déjà toute adresse et l'envoie à
   `api/inbound-email.js`.
@@ -5000,31 +5002,67 @@ pas, elle était prévue au découpage (§8, lot 5) et décrite au §7.
 - L'entité est reconnue sur la facture, ou laissée à choisir (Q6, recette du
   lot 8c).
 
-#### 14.24.2 Ce qui est proposé, et qui attend Thierry
+#### 14.24.2 Décision de Thierry du 23 novembre 2026, et ce qui en découle
 
-1. **L'adresse : courte et tirée au hasard, plutôt que signée.** Le §7
-   proposait `fac-<compte>-<version>-<signature>@reply.hotesmart.fr`, signée
-   par un secret dédié (Q16). Proposition : `factures-<jeton>@reply.hotesmart.fr`,
-   où le jeton (16 caractères, environ 80 bits) est tiré au hasard et gardé
-   dans `charges_adresses`. Mêmes garanties — impossible à deviner, refusée
-   aussitôt après « Changer d'adresse », jamais confondue avec une adresse de
-   réponse d'un voyageur —, mais une adresse **deux fois plus courte**, que
-   l'hôte peut dicter ou recopier, et **aucun secret de plus** à créer dans
-   Vercel.
-2. **Où l'adresse s'affiche** : sur `/charges`, sous « Ajouter une facture »,
-   avec « Copier » et « Changer d'adresse » (maquette dans la conversation).
-3. **Les petites images ignorées** : un logo de signature ou une icône de
-   réseau social arrive en pièce jointe ; chacune deviendrait une « facture »
-   à supprimer. Proposition : une image de moins de 30 Ko est ignorée ; un PDF
-   est toujours pris.
-4. **Aucune notification en V1** : une facture arrivée par e-mail apparaît
+**Thierry, 23 novembre 2026, 15 h 02 : « nom de l'entité dans le mail et aussi
+un lien par bien ».** Cela remplace Q6 (« une adresse par compte ») :
+
+- **Une adresse par entité juridique** non archivée, qui porte le nom de
+  l'entité. Une facture qui y arrive est rangée dans cette entité.
+- **Une adresse par logement**, qui porte le nom du logement. Une facture qui
+  y arrive est rangée dans ce logement **et** dans son entité (lue par
+  `entiteDuBien` à l'arrivée, Q18).
+- Un logement **sans entité** n'a pas d'adresse : la ligne dit « rattachez
+  d'abord ce logement à une entité, depuis sa fiche » (même règle que Q18).
+
+**Ce qui en découle, et qui est une proposition** (le développeur la tient
+pour acquise jusqu'à avis contraire de Thierry) :
+
+1. **Le nom ne suffit pas : on lui ajoute 8 caractères tirés au hasard.**
+   `la-bulle.k2j9x7q4@reply.hotesmart.fr`. Le nom seul se devine (celui d'un
+   logement est public sur Airbnb) et n'est pas unique : deux hôtes peuvent
+   avoir une « La bulle ». Avec la partie tirée au hasard, l'adresse reste
+   lisible et impossible à deviner, et **aucun secret de plus** n'est à créer
+   dans Vercel (la signature du §7 et de Q16 est abandonnée). Le point sépare
+   le nom du code : une adresse de réponse d'un voyageur n'en contient jamais,
+   donc les deux ne se confondent pas.
+2. **Le nom est figé à la création de l'adresse.** Renommer l'entité ou le
+   logement ne change pas l'adresse déjà donnée aux fournisseurs ; « Changer
+   d'adresse » en tire une nouvelle, avec le nom du moment, et l'ancienne est
+   refusée aussitôt (Q16).
+3. **Entité ou logement archivé : son adresse est refusée** (200, trace au
+   journal serveur), comme une adresse changée, et elle n'est plus affichée.
+4. **L'adresse range, la lecture ne la contredit pas.** L'entité (et le
+   logement) viennent de l'adresse ; la reconnaissance du destinataire sur la
+   facture (Q6, recette du lot 8c) ne sert plus que pour une facture déposée à
+   la main. Tout arrive « à vérifier » : l'hôte corrige si besoin.
+
+**Les trois questions restées sans réponse le 23 novembre, prises à leur
+option recommandée** (Thierry peut revenir dessus) :
+
+5. **Où les adresses s'affichent** : sur `/charges`, sous « Ajouter une
+   facture », une ligne par entité et une par logement, chacune avec
+   « Copier » et « Changer d'adresse ».
+6. **Les petites images ignorées** : une image de moins de 30 Ko (logo de
+   signature, icône de réseau social) est ignorée ; un PDF est toujours pris.
+7. **Aucune notification en V1** : une facture arrivée par e-mail apparaît
    dans « À traiter », comme une facture déposée.
 
 #### 14.24.3 Ce qui est à coder
 
 **Données (migration AVANT le code).**
-- `charges_adresses.jeton` (texte, unique, motif `^[a-z0-9]{16}$`) et
-  `charges_adresses.changee_le`. Writer unique : `lib/charges/adresse.js`.
+- Table `charges_adresses_email` : `locale` (clé ; partie avant `@`, motif
+  `^[a-z0-9]+(-[a-z0-9]+)*\.[a-z0-9]{8}$`, 50 caractères au plus),
+  `user_id`, `entite_id` **ou** `property_uuid` (exactement un des deux),
+  `cree_le`. Au plus une adresse vivante par entité et par logement (index
+  uniques partiels). Entité et logement **du même compte**, garantis en base
+  (clé étrangère composée vers `entites_juridiques (id, user_id)`, déclencheur
+  pour `properties`). RLS sans politique ; writer unique
+  `lib/charges/adresse.js`. « Changer d'adresse » remplace la ligne : l'ancienne
+  `locale` n'existe plus, donc elle est refusée.
+- L'ancienne table `charges_adresses` (compte, numéro de version, Q16) n'a
+  jamais été lue ni écrite par aucun code : elle est supprimée par la même
+  migration, qui refuse de le faire si elle contient une ligne.
 - `charges.email_sujet` et `charges.email_texte` (texte, borné à 2 000
   caractères), pour la ligne « sans facture lisible » (Q19).
 
@@ -5033,13 +5071,16 @@ Brevo et le refus d'une divergence, et AVANT le filtre anti-boucle et le
 refus d'un message sans texte (§7) — ces deux gardes existent parce que
 l'agent IA répond, et le chemin des factures ne répond jamais. Le score de
 spam reste appliqué. ⚠ L'aiguillage lit le `recipient` RELU, jamais celui du
-POST, et une adresse `factures-…` ne tombe jamais dans le chemin des
-réponses. **Le chemin des réponses voyageurs ne change pas**, et des tests
+POST, et une adresse de factures (un point dans la partie locale) ne tombe
+jamais dans le chemin des réponses. **Le chemin des réponses voyageurs ne change pas**, et des tests
 le prouvent.
 
 **Le chemin des factures** (`lib/charges/email.js`) :
-- le compte vient du jeton, **résolu en base** ; un jeton inconnu ou ancien
-  est refusé en 200 (définitif), trace au journal serveur seulement ;
+- le compte, l'entité et le logement viennent de l'adresse, **résolue en
+  base** ; pour une adresse de logement, l'entité est celle du logement à
+  l'arrivée ; une adresse inconnue, changée, ou d'une entité ou d'un logement
+  archivé (ou d'un logement qui n'a plus d'entité) est refusée en 200
+  (définitif), trace au journal serveur seulement ;
 - au plus 10 pièces jointes prises par e-mail ; types : PDF, JPEG, PNG,
   WebP, HEIC et HEIF (convertis comme au dépôt) ; 10 Mo au plus chacune ;
 - chaque pièce : nom, type et taille confrontés à la relecture (un champ
@@ -5059,8 +5100,11 @@ le prouvent.
 - panne passagère (réseau, Brevo en 5xx, stockage) : 503, Brevo rejoue ;
   l'index unique (compte, e-mail, empreinte) rend le rejeu sans effet.
 
-**L'écran.** Le bloc de l'adresse ; `POST /api/charges` actions
-`adresse_creer` et `adresse_changer` (titulaire seul) ; la ligne « sans
+**L'écran.** Le bloc des adresses, une ligne par entité non archivée et une
+par logement non archivé ; `POST /api/charges` actions `adresse_creer`
+(entité ou logement désigné ; idempotente : rend l'adresse vivante si elle
+existe) et `adresse_changer` (titulaire seul, entité ou logement du compte
+vérifié avant toute écriture) ; la ligne « sans
 facture lisible » entre dans « À traiter », et sa fiche montre l'expéditeur,
 le sujet et le texte, avec « Supprimer ».
 
@@ -5089,7 +5133,9 @@ utile au téléphone.
 3. Cache navigateur : aucun.
 4. `private, no-store` : déjà posé sur les deux endpoints.
 5. Statiques versionnés : inchangé (pas de module nouveau côté écran).
-6. Lecture tronquée : sans objet (une ligne par compte).
+6. Lecture tronquée : au plus une adresse par entité et par logement du
+   compte, très en dessous de 1 000 ; la lecture est quand même bornée et un
+   dépassement est une erreur, pas une troncature.
 7. Budget de l'écran : inchangé, une lecture de plus côté serveur, en
    parallèle.
 8. AVANT / APRÈS : appels de l'écran 2 → 2 ; requêtes +1 ; octets +80
