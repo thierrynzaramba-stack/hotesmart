@@ -34,6 +34,7 @@ Toucher la notification ouvre `/menages`.
 | Rangement | Un lot à part, après le lot 3 (19 nov. 2026) |
 | Heures calmes | « Configurable comme les autres » (19 nov. 2026) — voir §3 |
 | Q49 — logement sans heure d'arrivée réglée | **Pas d'alerte** pour ce logement, et le guide le dit (22 nov. 2026) |
+| Q49 bis — logement « À compléter », 18:00 annoncé au voyageur (lot `logement-heures`) | **Pas d'alerte** non plus : l'alerte ne suit pas l'heure par défaut (23 nov. 2026) |
 
 ## 3. Ce qu'il faut savoir en le lisant
 
@@ -229,4 +230,13 @@ Aucun constat de sécurité : correction sans nouvelle review.
    ligne sans provider ; test du blocage Beds24 (`black`).
 8. **Commentaires** — « seize » au catalogue, « cinq » au module.
 9. **La spec** — sur `pwa-lot-4-spec` (PR #29) : dépendance écrite à la remise.
+
+## 10. Dépendance : le lot `logement-heures` (fil logements)
+
+Le fil logements livre `lib/heures-logement.js` (`normaliserHeure`) : la seule
+lecture des heures du logement, et une reprise qui pose `checkin_time` au
+format « HH:MM » (vide = « À compléter »). ⚠ `minutesDeLHeure` de ce lot en est
+une COPIE (CLAUDE.md : une règle partagée vit dans un module commun). Quand
+`logement-heures` est dans `main`, l'alerte passe par `normaliserHeure`, et ce
+lot passe APRÈS lui — à écrire dans la remise au chef de file.
 
