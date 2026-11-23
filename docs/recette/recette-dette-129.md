@@ -30,7 +30,37 @@ lecture par la review 2 (point 1).
 
 Staging n'a aucune demande Airbnb : la mesure utile se lit en production.
 
-### Production — à faire après le go de Thierry
+### Production — 23 novembre 2026, 11:08, CONFORME
 
-Après le déploiement et un cycle de cron : lecture bien par bien des quatre
-biens Channex de production, chiffres rendus au chef de file et notés ici.
+Étape 0 en production depuis le 23 novembre à 00:39 (`main` 97827682). Lecture
+faite bien par bien, sur les quatre biens Channex, dans la session du
+fondateur. Toutes les réponses sont en 200 et `private, no-store`, et les
+trois lectures du cœur sont complètes. Les chiffres ont été rendus au chef de
+file, qui les a retenus le 23 novembre à 22:25. Le tableau et ce qu'il
+tranche sont dans `docs/specs/spec-demandes-airbnb.md` §3, « Mesure de
+l'étape 0 en production ».
+
+En résumé :
+- 0 fil écarté partout ;
+- 85 copies webhook sur 85 ont leur jumelle à la milliseconde ;
+- 26 demandes, toutes Airbnb, toutes avec un titre ;
+- Ofuro Futari et La bulle ne sont mesurés qu'en partie (10 s, 60 fils) : le
+  script de l'étape 3 lira tout ;
+- Colomiers, archivé, n'a plus aucun fil chez le partenaire.
+
+## Lot 1, étapes 1 et 2 — migration et writers
+
+### Staging — 23 novembre 2026
+
+- Migration `2026-11-23-demandes-fils.sql` collée par Thierry : contrôle à
+  8 lignes sur 8 `true`. Le chef de file a mergé dans `staging` (0c7575a4).
+- Recette des deux entrées (webhook et import) sur un vrai message : elle n'est
+  pas faisable sur staging, qui n'a ni cron ni demande Airbnb. Le chef de file
+  a accepté qu'elle se fasse en production, par
+  `docs/recette/preuve-dette-129-lot1.sql`.
+
+### Production — en cours
+
+- 23 novembre 2026, 22h : Thierry a collé la migration dans l'éditeur SQL de
+  production, qui a rendu « Success. No rows returned ». Le contrôle
+  (8 lignes) est à relever.

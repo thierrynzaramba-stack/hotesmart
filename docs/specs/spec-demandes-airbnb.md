@@ -144,6 +144,33 @@ l'ambiguïté à l'import, comme le webhook.
   payload de la doc n'a pas d'`inserted_at`. La mesure de l'étape 0
   (`copies_webhook_avec_jumelle`, comparée à la milliseconde) le dira.
 
+**Mesure de l'étape 0 en production : 23 novembre 2026, 11:08, session du
+fondateur, `?check=demandes` bien par bien.** Toutes les réponses sont en 200
+et `private, no-store`, et les trois lectures du cœur sont complètes.
+
+| bien (réf) | fils | demandes | devenus résa (msgs) | écartés autre bien / sans bien | copies webhook / avec jumelle à la ms | lignes sans résa à id : rattachées | détail |
+|---|---|---|---|---|---|---|---|
+| Ofuro Futari (204cef81) | 81 | 15 (41 msgs) | 2 (6) | 0 / 0 | 32 / 32 | 47 sur 53 | 44 sur 72 tentés, tronqué et interrompu, 10,8 s |
+| La bulle (0db6b39b) | 82 | 6 (15 msgs) | 7 (30) | 0 / 0 | 34 / 34 | 45 sur 45 | 60 sur 69, tronqué, 10,1 s |
+| Cœur de vie 23 (1655ab32) | 30 | 5 (18 msgs) | 0 | 0 / 0 | 10 / 10 | 18 sur 18 | 27 sur 27, complet, 4,3 s |
+| Colomiers, archivé (0544fd9a) | 0 | 0 | 0 | 0 / 0 | 9 / 9 (avec résa) | 0 sur 15 | aucun fil chez le partenaire, 0,6 s |
+
+Ce que la mesure tranche :
+- **Le filtre par bien du partenaire tient**, et chaque fil déclare son bien
+  (0 écarté partout). L'import n'a donc pas, aujourd'hui, de fils étrangers à
+  écarter avant le lot 2. Le garde-fou de `fils_provider` reste en place.
+- **Les instants concordent à la milliseconde** : 85 copies webhook sur 85 ont
+  leur jumelle exacte. La réconciliation du lot 1 et le retrait des doublons à
+  l'étape 3 reposent sur un fait mesuré.
+- **26 demandes, toutes Airbnb**, aucune fermée, toutes avec un titre.
+- Ofuro Futari et La bulle sont mesurés **partiellement** (budget de 10 s,
+  plafond de 60 fils détaillés). Leurs nombres « devenus résa » et
+  « rattachées » sont donc des minimums. **Le script de l'étape 3 lit tout,
+  sans ce plafond ni ce budget.**
+- Colomiers n'a plus aucun fil chez le partenaire, donc ses 15 lignes à
+  identifiant ne se rattacheront pas. Ses 9 copies webhook ont leur jumelle,
+  qui porte la réservation : elles restent retirables.
+
 ## 4. Lot 2 — Écran
 
 - `api/messages.js` : les messages sans réservation mais avec un fil se
