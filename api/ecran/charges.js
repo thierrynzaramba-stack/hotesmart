@@ -13,6 +13,11 @@
 // GET ?mois=<YYYY-MM>&entite=<uuid>
 //   → les factures du mois et la part de chacune, seules (clic sur un mois,
 //     §14.21.2).
+// GET ?export=1&entite=<uuid>&periode=<AAAA>
+//   → la liste d'export de l'exercice (lot 8d, §14.23) : les factures
+//     enregistrées, sans le chemin de leur fichier, et le nombre de factures
+//     encore à traiter. Un GESTE (« Télécharger l'exercice »), jamais au
+//     chargement.
 //
 // ⚠ RÉSERVÉ AU TITULAIRE (Q9), LECTURE COMPRISE, ET REFUSÉ AVANT TOUTE
 // LECTURE : `contexteDEcran` refuse sans session, il ne refuse pas un membre ;
@@ -112,6 +117,34 @@ async function traiter (req, res, t0, deps) {
     timing()
     if (!d.ok) return res.status(503).json({ error: 'Lecture impossible' })
     return res.status(200).json({ detail_mois: { mois: String(q.mois), periode: exercice.periode, debut: plage.debut, fin: plage.fin, partiel: plage.partiel, entite: entiteDemandee, lignes: d.lignes } })
+  }
+
+  // ── L'export d'un exercice (lot 8d, §14.23), seul ────────────────────────
+  // Les mêmes gardes que le détail d'un mois : l'entité RELUE dans le compte,
+  // l'exercice relu à partir d'elle, jamais de la requête.
+  if (q.export != null && q.export !== '') {
+    if (!entiteDemandee) return res.status(400).json({ error: 'entite_requise' })
+    if (!/^\d{4}$/.test(String(q.periode || ''))) return res.status(400).json({ error: 'periode_requise' })
+    const ent = await ej.entitesDuCompte(compte, { db: base })
+    if (!ent.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
+    const entite = (ent.entites || []).find(e => String(e.id) === entiteDemandee)
+    if (!entite) { timing(); return res.status(404).json({ error: 'entite_introuvable' }) }
+    const exercice = ecran.bornesPeriode({ periode: q.periode, entite })
+    if (exercice.periode !== String(q.periode)) { timing(); return res.status(400).json({ error: 'periode_invalide' }) }
+    const [x, n] = await Promise.all([
+      ecran.aExporter(base, compte, { debut: exercice.debut, fin: exercice.fin, entiteId: entiteDemandee }),
+      ecran.nombreATraiter(base, compte)
+    ])
+    timing()
+    if (x.trop) return res.status(413).json({ error: 'trop_de_factures', max: ecran.EXPORT_MAX })
+    if (!x.ok || !n.ok) return res.status(503).json({ error: 'Lecture impossible' })
+    return res.status(200).json({
+      export: {
+        entite: { id: entite.id, nom: entite.nom, siret: entite.siret || null },
+        periode: exercice.periode, debut: exercice.debut, fin: exercice.fin, standard: exercice.standard,
+        lignes: x.lignes, a_traiter: n.nombre
+      }
+    })
   }
 
   // ── L'écran entier ────────────────────────────────────────────────────────

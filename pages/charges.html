@@ -138,6 +138,25 @@ async function deposer (url, blob) {
   }
 }
 
+// Lot 8d : un fichier de l'export d'un exercice, lu au stockage par son
+// adresse signée de 60 s. Aucun jeton : l'adresse suffit, et elle expire.
+// ⚠ UN DÉLAI (review du lot 8d, M6) : une connexion figée ne bloque pas
+// l'export — le délai dépassé compte comme un essai. `signal` : l'export
+// arrêté interrompt aussi les téléchargements en cours.
+const DELAI_FICHIER_MS = 45000
+async function telecharger (url, { signal } = {}) {
+  const delai = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(DELAI_FICHIER_MS) : null
+  const signaux = [signal, delai].filter(Boolean)
+  const s = signaux.length > 1 && AbortSignal.any ? AbortSignal.any(signaux) : (signaux[0] || undefined)
+  const res = await fetch(url, s ? { signal: s } : {})
+  if (!res.ok) {
+    const err = new Error('telechargement')
+    err.status = res.status
+    throw err
+  }
+  return new Uint8Array(await res.arrayBuffer())
+}
+
 async function init () {
   await I18n.init()
   // ⚠ PAGE NON DÉLÉGABLE (Q9, tests/pages-non-delegables.test.js) : sur un
@@ -165,6 +184,7 @@ async function init () {
     charger: (qs) => appelAPI(ECRAN + (qs ? '?' + qs : '')),
     agir: (corps) => appelAPI(CHARGES, 'POST', corps),
     deposer,
+    telecharger,
     reduireImage: preparerJpeg,
     ouvrirOnglet: () => window.open('', '_blank'),
     confirmer: (texte) => window.confirm(texte),

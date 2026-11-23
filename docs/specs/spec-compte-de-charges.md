@@ -4650,6 +4650,329 @@ de « À traiter » s'appelle désormais **« Tout traiter »** (anglais « Hand
 all », espagnol « Tratar todo ») ; il ouvre toujours, une par une, toutes les
 factures « À vérifier » du compte dans l'ordre de dépôt. Seul le texte change.
 
+### 14.23 Lot 8d — télécharger un exercice en ZIP (23 novembre 2026)
+
+Branche `charges-export`, partie de `main` (`8b102089`, lot 8c en production).
+
+#### 14.23.1 Décisions de Thierry (23 novembre 2026, 0 h 33 à 0 h 39)
+
+1. **« Télécharger l'exercice »** : un ZIP de l'exercice choisi, pour l'entité
+   choisie (maquette montrée dans la conversation).
+2. **Le ZIP contient** : un PDF de la **liste** des factures, les **factures
+   elles-mêmes en fichiers séparés** (« les factures ne sont pas
+   concaténées »), et un **tableau CSV** (« Oui »).
+3. **Les factures ENREGISTRÉES seulement.** Celles qui restent à traiter n'y
+   sont pas, et le PDF dit combien.
+4. **Version 1 : la liste seulement** (« version 1 seulement les factures et
+   la liste ») — ni totaux par catégorie, ni par logement, ni par mois.
+5. Un **total** en bas de la liste : proposé à Thierry (« sauf si vous ne le
+   voulez pas »), sans objection. À confirmer en recette.
+6. « Code-le pour que demain il soit prêt pour recette. »
+
+#### 14.23.2 Ce qui est à coder
+
+**Le bouton.** Sur `/charges`, sous le choix de l'entité et de l'exercice :
+« Télécharger l'exercice ». Il n'apparaît qu'avec une entité et un exercice.
+
+**Le ZIP** : `Charges-<exercice>-<entité>.zip`, sans dossier racine :
+- `Liste-<exercice>.pdf` ;
+- `Factures/NNN_AAAA-MM-JJ_Fournisseur_TTC.ext` — `NNN` est le numéro de la
+  ligne dans la liste (001, 002…), la date est le jour de la facture, le TTC
+  s'écrit avec une virgule (`84,20`) et garde le signe d'un avoir ; noms en
+  caractères simples (accents retirés), extension selon le type du fichier ;
+- `Factures-<exercice>.csv`.
+
+**Quelles factures.** Les charges `validee` de l'entité dont le **jour** est
+dans l'exercice — la lecture « Date de facture » de l'écran —, rangées par
+jour puis par arrivée. Une charge enregistrée sans fichier (commission de
+plateforme, échéance de crédit) est dans la liste et dans le CSV, marquée
+« sans fichier », et n'a pas de fichier dans le ZIP.
+
+**Le PDF (liste).** A4 paysage. En-tête : « Factures de l'exercice 2026 »,
+l'entité et son SIRET, « Du … au … », le nombre de factures, la date
+d'édition, et, s'il y en a, « N factures sont encore à traiter et ne sont pas
+dans cet export ». Colonnes : N°, Date, Fournisseur, N° de facture,
+Catégorie, Logement, HT, TVA, TTC. Une ligne de total (HT, TVA, TTC ; un
+montant non lu n'y compte pas, et la note le dit). Pied : « Page x sur y ».
+
+**Le CSV.** UTF-8 avec BOM, séparateur `;`, décimale `,` (Excel en français
+l'ouvre tel quel). Colonnes : N°, Date, Fournisseur, SIRET, N° de facture,
+Type, Catégorie, Logement, Début de période, Fin de période, HT, TVA, TTC,
+Fichier.
+
+**Où se fabrique le ZIP : dans le navigateur.** Une réponse de fonction
+Vercel est bornée à 4,5 Mo, et deux cents factures en font souvent bien
+plus. Le serveur rend la LISTE et des ADRESSES de lecture ; le navigateur
+télécharge chaque fichier au stockage, écrit le PDF, le CSV et le ZIP, puis
+le propose au téléchargement. **Aucune bibliothèque ajoutée** : un écrivain
+de ZIP « stocké » (sans compression — les PDF et les photos le sont déjà) et
+un écrivain de PDF minimal (police Helvetica standard, codage WinAnsi), dans
+`shared/`, testés.
+
+**Serveur.**
+- `GET /api/ecran/charges?export=1&entite=<uuid>&periode=<AAAA>` : la liste
+  d'export, page après page de 1 000 (5 000 au plus, sinon refus
+  `trop_de_factures`), et le nombre de factures à traiter du compte. Mêmes
+  gardes que le détail d'un mois : titulaire, entité relue dans le compte,
+  exercice relu (une année hors des bornes est refusée). Le chemin du fichier
+  ne sort pas : seulement « a un fichier ».
+- `POST /api/charges { action: 'export_urls', ids }` : 20 identifiants au
+  plus, motif vérifié avant toute lecture, charges du compte ET `validee`
+  seulement ; une adresse de lecture de 60 s par fichier
+  (`createSignedUrls`). L'écran les demande PAR GROUPE DE QUATRE, juste avant
+  de télécharger le groupe (review, M5).
+
+**La fenêtre de progression** (celle du dépôt, 14.22.9) : « Préparation de
+la liste… », « Facture 12 sur 217 », « Création du ZIP… », une barre. Un
+fichier qui ne se télécharge pas après trois essais ARRÊTE l'export, et la
+fenêtre nomme la facture : aucun ZIP incomplet ne sort sans le dire.
+
+#### 14.23.3 Inventaire
+
+Rien n'est retiré. Le bouton s'ajoute à l'en-tête de la page.
+
+#### 14.23.4 Le téléphone
+
+Le même bouton. Le ZIP se construit en mémoire : un exercice très chargé peut
+peser sur un téléphone ancien. À mesurer en recette.
+
+#### 14.23.5 Case PERFORMANCE
+
+1. Un endpoint d'écran : inchangé ; l'export est un GESTE, servi par une
+   branche du même endpoint (`?export=1`), au clic seulement.
+2. Donnée non urgente : sans objet (une liste de factures, lue au geste).
+3. Cache navigateur : aucun. Ni la liste ni les adresses ne sont gardées.
+4. `private, no-store` : posé avant tout refus, sur les deux endpoints, déjà.
+5. Statiques versionnés : deux modules nouveaux, chargés par la page.
+6. Lecture tronquée : la liste se lit page après page ; au-delà de 5 000, le
+   refus est dit.
+7. Budget de l'écran : inchangé, aucun appel de plus au chargement.
+8. AVANT / APRÈS : l'écran ne change pas (2 appels). Le geste : 1 lecture de
+   liste, N ÷ 20 demandes d'adresses, N téléchargements au stockage. Durée et
+   taille du ZIP à mesurer en recette sur l'exercice réel.
+
+#### 14.23.6 Ce qui est codé (23 novembre 2026, nuit)
+
+**Serveur.**
+- `lib/charges/ecran.js` : `aExporter` (colonnes `COLONNES_EXPORT`, `user_id`,
+  entité, `statut = 'validee'`, `jour` entre les bornes, ordre jour puis
+  `cree_le` puis `id`, pages de 1 000 par `range`, refus au-delà de 5 000 ;
+  `justificatif_chemin` lu puis retiré, remplacé par `fichier` — faux pour une
+  commission ou une échéance de crédit) ; `nombreATraiter` (compte exact de la
+  file « À traiter », la même condition que l'écran).
+- `api/ecran/charges.js` : branche `?export=1`, mêmes gardes et même ordre que
+  le détail d'un mois (entité requise et relue, exercice relu, 413 au-delà).
+- `lib/charges.js` : `urlsExport` (≤ 20, motif avant lecture, `user_id`,
+  `validee` et fichier, `createSignedUrls` de 60 s, rapprochement par chemin,
+  `absentes`) ; `api/charges.js` : action `export_urls`.
+
+**Écran.**
+- `shared/zip-simple.js` : CRC-32, ZIP stocké, noms en UTF-8, pas de ZIP64.
+- `shared/pdf-simple.js` : PDF 1.4, Helvetica et Helvetica-Bold, WinAnsi
+  (largeurs des fichiers AFM d'Adobe), chaînes en hexadécimal ; `couper` par
+  « … ».
+- `shared/charges-export.js` : `preparerExport` (numéros 001…, sur quatre
+  chiffres au-delà de 999 ; noms simples, ligatures dépliées), `totauxExport`,
+  `csvExport`, `pdfExport` (A4 paysage, titre répété, total, notes, « Page x
+  sur y »), `telechargerFichiers` (paquets de 20, quatre de front, trois
+  essais avec adresse neuve), `zipExport`.
+- `shared/charges-vue.js` : bouton dans le bloc des totaux, `exporter`, la
+  fenêtre de chargement reprise (titre et étape au choix), Échap bloqué
+  pendant l'export, `sauverParDefaut` (lien de téléchargement d'un Blob).
+- `pages/charges.html` : `telecharger(url)` injecté.
+
+**Tests.** `tests/charges-export.test.js` (ZIP relu, PDF relu par unpdf,
+noms, CSV, paquets et essais), `tests/charges-export-page.test.js` (le geste
+dans la vraie page, ZIP relu), ajouts à `charges-ecran` et `charges-endpoint`.
+Contre-épreuve : quinze sabotages, chacun fait rougir au moins un test (statut
+non filtré, chemin exposé, sans borne, sans compte, non enregistrées signées,
+rapprochement par position, motif absent, un seul essai, paquets de 50, ZIP
+incomplet, commission avec fichier, Échap pendant l'export, montants non lus
+tus, CSV sans guillemets, exercice hors bornes). Suite : 9 283 verts à l'heure
+réelle et à J+60.
+
+#### 14.23.7 Review du lot 8d (23 novembre 2026)
+
+Brief : arbre `/home/claude/hotesmart-8d`, branche `charges-export`, plage
+`8b102089bc1f45ac731aa1fa7a99b65a37ed5c26..33549fde79cd9a4e1be8fafc28c9c16a785bc97e`.
+La review dit avoir lu cet arbre et ce SHA ; tous les fichiers qu'elle cite
+sont dans le diff de la plage. **Aucun constat de sécurité** : les
+correctifs ne sont pas re-reviewés (une review par commit).
+
+**Rapport, recopié tel quel.**
+
+```
+TRACE : arbre lu = /home/claude/hotesmart-8d, branche = charges-export, SHA de tête lu = 33549fde79cd9a4e1be8fafc28c9c16a785bc97e (vérifié par `git rev-parse HEAD`). Plage relue : 8b102089..33549fde. Tous les fichiers cités ci-dessous font partie du diff.
+
+Tests lancés :
+- `tests/charges-*.test.js` : 424 sur 424 verts.
+- budget-ecran, i18n (doublons, paramètres, version), masquage-hidden, pages-non-delegables : 90 sur 90.
+- Fichiers d'export à J+60 (horloge décalée) : 54 sur 54.
+
+Contrôles faits en dehors des tests :
+- Le ZIP produit passe `unzip -t` et `zipfile` de Python.
+- Le PDF produit passe `qpdf --check` et `pdftotext`.
+
+## SÉCURITÉ — aucun constat
+
+- Garde `estTitulaireDuCompte` avant toute lecture sur les deux endpoints.
+- En-tête `private, no-store` posé avant le premier refus, le 405 compris.
+- `user_id` = compte de la garde sur chaque requête : `aExporter`, `nombreATraiter`, `urlsExport`.
+- Les identifiants sont vérifiés par leur forme (UUID) avant le filtre `.in`. L'entité est relue dans le compte. L'exercice est relu à partir d'elle.
+- Le chemin du fichier ne sort pas.
+- Les adresses sont rapprochées par chemin, et `absentes` ne dit rien d'un autre compte.
+
+## BLOQUANT
+
+**B1 — Le total du PDF compte ce que l'écran ne compte pas, et la note « à traiter » est fausse**
+Fichiers : lib/charges/ecran.js:331, lib/charges/ecran.js:348, shared/charges-export.js:60-66.
+
+- `aExporter` prend toutes les charges `validee`. Or le résumé et `charges_detail_mois` en excluent trois sortes : l'échéancier (`type_document <> 'echeancier'`, Q25), les membres d'un doublon non tranché, et `commission_deja_comptee` non tranchée. L'écran dit pourtant à l'hôte : « Un échéancier n'est pas une charge : il ne compte pas dans les totaux. »
+- **Vérifié :** j'ai produit un PDF avec une facture à 120 €, un échéancier à 960 €, un avoir à −50 € et une seconde facture à 120 €. Le PDF affiche un TTC total de 1 150,00 € ; l'écran afficherait 190 €.
+- **Doublon (lu dans le code) :** une facture A est validée, puis on dépose B, son doublon, et on valide B (`valider` ne le refuse pas). Les deux sont dans l'export, donc TTC compté deux fois. Les deux sont aussi comptées dans `a_traiter`, car `A_TRAITER` inclut `signal non nul et non tranché`. Le PDF imprime alors « 2 factures sont encore à traiter et ne sont pas dans cet export » alors qu'elles y sont.
+- **Correction :**
+  - Le serveur rend pour chaque ligne un booléen `compte`, avec la règle exacte du SQL.
+  - `totauxExport` ignore les lignes à `compte === false`.
+  - Le PDF et le CSV marquent « Non comptée » (clé `charges.non_comptee`, déjà présente).
+  - `nombreATraiter` ajoute `.neq('statut','validee')`, ou bien la note ne dit plus « ne sont pas dans cet export ».
+
+**B2 — Un HT ou une TVA non lus sortent du total sans que la note le dise ; une colonne entièrement non lue affiche « 0,00 € »**
+Fichiers : shared/charges-export.js:66, 176, 179.
+
+- `non_lus` ne compte que le TTC manquant. Le cas est courant : `valider` accepte une facture avec seulement le TTC.
+- **Vérifié :** j'ai produit un PDF avec un HT à « — » sur une ligne. Le « Total » HT s'affiche sans aucune note.
+- Si tous les TTC sont non lus, la ligne de total affiche « 0,00 € ».
+- La spec §14.23.2 (« un montant non lu n'y compte pas, et la note le dit ») et la règle du dépôt (le résumé tient `nb_sans_ht`, `nb_sans_tva` et `nb_sans_ttc`) ne sont donc pas respectées.
+- **Correction :** compter les montants non lus par colonne et le dire par colonne. Afficher « — » quand aucune ligne de la colonne n'a de montant.
+
+## MINEUR
+
+**M1 — Le CSV n'est pas « juste tel quel » dans Excel en français**
+Fichier : shared/charges-export.js:81-97.
+
+- Ce qui est juste : BOM, `;` et virgule décimale.
+- Mais Excel convertit les colonnes de texte qui ressemblent à des nombres ou à des dates :
+  - un SIRET de 14 chiffres s'affiche `1,23457E+13` ;
+  - « 001 » devient 1 ;
+  - un numéro de facture comme « 000123 » perd ses zéros, et « 2026-03 » devient une date.
+- Durcissement en plus (ce n'est pas une fuite entre comptes) : un texte lu par l'IA sur la facture d'un fournisseur et commençant par `=`, `+`, `-` ou `@` est écrit tel quel. Par exemple `=HYPERLINK(...)` sort sous forme de formule (vérifié en sortie de `csvExport`).
+- **Correction :** préfixer d'une apostrophe les champs de texte qui commencent par `= + - @` ; écrire SIRET, N° et numéro de facture en `="…"`.
+
+**M2 — Les dates du CSV suivent la langue de l'interface**
+Fichier : shared/charges-export.js:71-76, 92.
+
+- En `en`, `jourCourt` rend `01/05/2026` pour le 5 janvier, alors que les séparateurs restent ceux d'Excel en français.
+- Résultat dans Excel en français : 1er mai. Jour et mois sont inversés sans erreur.
+- **Correction :** une date fixe `JJ/MM/AAAA` dans le CSV.
+
+**M3 — La colonne « Type » du CSV dit « Facture » pour une échéance de crédit**
+Fichiers : shared/charges-export.js:93, shared/charges-vue.js:1499.
+
+- `chargeDEcheance` écrit `type_document: 'facture'`, `categorie: 'credit'`.
+- C'est exactement le défaut corrigé à l'écran lors de la recette du 19 novembre (charges-vue.js:440).
+- **Correction :** même règle qu'à l'écran — catégorie `credit` → `charges.type_echeance_credit`.
+
+**M4 — Après un échec, les téléchargements en cours continuent et écrivent dans la fenêtre**
+Fichier : shared/charges-export.js:224.
+
+- `Promise.all` rejette, mais les trois autres `prendre` continuent, sans moyen de les interrompre.
+- **Vérifié par simulation :** après `ECHEC fichier_absent`, trois appels `avancer 1/4`, `2/4`, `3/4` arrivent quand même.
+  - Dans la page, « Facture 3 sur 4 » s'affiche au-dessus du message d'échec.
+  - La barre recule.
+  - Si l'hôte relance tout de suite, ces mises à jour tombent dans le nouvel export.
+- **Correction :** un `AbortController` (signal passé à `telecharger`) et un drapeau `fini` testé avant `avancer`.
+
+**M5 — Une panne de la demande d'adresses par paquet de 20 n'est pas réessayée**
+Fichier : shared/charges-export.js:206.
+
+- L'appel `agir` du paquet n'est pas dans un `try`. Un seul 503 (`panne('stockage')`) arrête un export de 200 factures, même après 180 téléchargements.
+- De plus, les 20 adresses sont prises au début du paquet. Sur une connexion lente, celles des groupes suivants ont expiré avant usage et consomment un des trois essais.
+- **Correction :**
+  - si l'appel du paquet échoue, partir d'une Map vide, pour que chaque fichier passe par `urlNeuve` ;
+  - ou demander les adresses par groupe de 4.
+
+**M6 — Aucun délai maximal sur le téléchargement, et la fenêtre ne se ferme pas**
+Fichiers : pages/charges.html:143-144, shared/charges-vue.js:1600.
+
+- Si une connexion mobile se fige, `fetch(url)` ne rend jamais la main.
+- Échap est bloqué et la fenêtre n'a aucun bouton : l'hôte doit recharger la page.
+- **Correction :** `AbortSignal.timeout(...)` dans `telecharger`. Le délai dépassé compte comme un essai.
+
+**M7 — Pagination par décalage plutôt que par curseur**
+Fichier : lib/charges/ecran.js:334.
+
+- Au-delà de 1 000 lignes, une écriture entre deux pages décale la lecture d'une ligne. Exemples : le cron qui crée une échéance de crédit, ou une validation dans un autre onglet.
+- Effet : une ligne doublée (numérotée deux fois, comptée deux fois) ou sautée, sans erreur.
+- C'est la règle que `liste` applique déjà (« PAR CURSEUR, JAMAIS PAR DÉCALAGE »).
+- **Correction :** curseur sur `(jour, cree_le, id)`, ou au minimum un dédoublonnage par `id`.
+
+**M8 — Textes en dur dans `shared/`**
+Fichiers : shared/charges-export.js:54, shared/charges-vue.js:1487, 1522.
+
+- `'Facture'` est atteint dès qu'un fournisseur n'est pas lu, ou qu'il est écrit dans un alphabet non latin. Le fichier s'appelle alors `…_Facture.pdf` même pour une interface en anglais ou en espagnol.
+- Même problème pour `'Factures'` et `'entite'`.
+- **Correction :** passer ces textes par `t()`.
+
+**M9 — Mémoire**
+Fichiers : shared/charges-export.js:197-226, shared/zip-simple.js:84.
+
+- Le pic de mémoire vaut environ deux fois le poids total de l'export : la Map des fichiers plus la copie dans le Blob.
+- La limite de 4 Go n'est vérifiée qu'après le téléchargement de tous les fichiers.
+- La spec renvoie la mesure à la recette. Correction peu coûteuse :
+  - calculer le CRC à la réception, puis garder un `Blob` au lieu du `Uint8Array` ;
+  - additionner la taille au fil du téléchargement.
+
+**M10 — Tests qui passeraient avec du code faux**
+Fichier : tests/charges-export.test.js.
+
+- **Prouvé :** j'ai cassé un PDF généré (offsets du xref décalés de 7, chaque `/Length` augmenté de 50, `startxref` décalé de 3). unpdf le relit quand même et trouve « Fournisseur 1 » et « Page 1 sur 1 » ; seul `qpdf` signale l'erreur. Le test « le PDF se RELIT » ne protège donc ni le xref ni les `Length`.
+- `lireZip` ignore le CRC et les tailles de l'en-tête local.
+- Le test du total ne vérifie que le TTC.
+- Aucun test ne couvre l'échéancier, les doublons ou un HT non lu (B1 et B2 passent au vert aujourd'hui).
+- **Correction :**
+  - vérifier que chaque offset du xref pointe sur `N 0 obj`, que `Length` est égal à la taille réelle du flux, et que `startxref` pointe sur `xref` ;
+  - comparer l'en-tête local du ZIP au répertoire central ;
+  - ajouter les cas de B1 et B2.
+
+## Hors catégorie
+
+Dans lib/charges/ecran.js, le bloc d'export a été inséré entre le commentaire de `detailMois` et la fonction elle-même : le commentaire des lignes 304-309 décrit maintenant `COLONNES_EXPORT`.
+
+## Points vérifiés et justes
+
+- **ZIP :** signatures, champs, CRC, tailles, position de chaque fichier et fin du répertoire central sont justes ; noms en ASCII.
+- **PDF :** xref à 20 octets par entrée, `Length` exact (flux en ASCII grâce aux chaînes hexadécimales), WinAnsi juste. Seul défaut, sans effet sur le rendu : la largeur de « Ÿ » (code 0x9F) vaut 500 au lieu de 667.
+- **Numérotation :** les numéros des fichiers correspondent à ceux de la liste du PDF.
+- **Signes :** un avoir est négatif dans le nom du fichier, dans le CSV et dans le total.
+- **Double clic et dépôt en cours :** l'export est refusé dans les deux cas.
+```
+
+**Ce qui a été fait de chaque constat** (commit de correctifs sur la branche,
+sans nouvelle review — aucun constat de sécurité) :
+
+| Constat | Suite |
+|---|---|
+| B1 | Corrigé. `compteDansLesTotaux` reprend la condition de `charges_detail_mois` à l'identique ; chaque ligne porte `compte` ; le total l'ignore ; la ligne s'écrit en gris, marquée « ° », expliquée en bas ; le CSV a une colonne « Comptée dans le total ». `nombreATraiter` exclut les `validee`. |
+| B2 | Corrigé. Non lus comptés par colonne et dits par colonne ; une colonne sans aucun montant lu a « — » pour total. |
+| M1 | Corrigé. N°, SIRET et numéro de facture en `="…"` ; un texte qui commence par `= + - @` (ou une tabulation) est précédé d'une apostrophe. |
+| M2 | Corrigé. Dates `JJ/MM/AAAA` dans le CSV et le PDF, quelle que soit la langue. |
+| M3 | Corrigé. Type d'une échéance de crédit : « Échéance de crédit », la règle de l'écran. |
+| M4 | Corrigé. `AbortController` de la fenêtre de la page (un signal d'une autre fenêtre est refusé par `AbortSignal.any`), drapeau `fini` testé avant chaque annonce. |
+| M5 | Corrigé. Adresses demandées par groupe de quatre, juste avant le groupe ; une demande en panne n'arrête rien (chaque fichier redemande la sienne). |
+| M6 | Corrigé. `telecharger` : délai de 45 s, combiné au signal de l'export ; le délai compte comme un essai. |
+| M7 | Corrigé. Curseur `(jour, cree_le, id)`, parties validées par motif avant le filtre, et dédoublonnage par `id`. |
+| M8 | Corrigé. Dossier et fournisseur inconnu viennent de `t()` ; le nom du ZIP omet l'entité si elle n'a pas de caractère simple. |
+| M9 | Corrigé. Chaque fichier gardé en Blob, CRC calculé à la réception ; le poids s'additionne au fil du téléchargement, arrêt dit au-delà de ce qu'un ZIP porte. |
+| M10 | Corrigé. Structure du PDF vérifiée (xref, `Length`, `startxref`), en-têtes locaux du ZIP comparés au répertoire central, cas B1, B2, M4, M5 et Blob couverts. |
+| Hors catégorie | Corrigé. Le bloc d'export est placé après `detailMois`. Largeur de « Ÿ » : 667. |
+
+Contre-épreuve des correctifs : seize sabotages (total qui compte tout,
+serveur qui compte tout, « à traiter » avec les enregistrées, HT non lu tu,
+zéro inventé, décalage, doublon de page, annonce après l'arrêt, arrêt sans
+interruption, paquets de 20, panne d'adresses fatale, formule, identifiants
+en nombres, contrôleur d'une autre fenêtre, xref décalé), chacun fait rougir
+au moins un test. Suite : 9 288 verts à l'heure réelle et à J+60.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

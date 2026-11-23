@@ -76,6 +76,9 @@ function baseEnregistreuse (repondre = () => ({ data: null, error: null }), stoc
           { data: { signedUrl: `https://stockage.test/envoi/${chemin}`, token: 'jeton', path: chemin }, error: null }),
         createSignedUrl: (chemin, s) => geste('createSignedUrl', [chemin, s],
           { data: { signedUrl: `https://stockage.test/lire/${chemin}` }, error: null }),
+        // Lot 8d : plusieurs adresses d'un coup, chacune avec son chemin.
+        createSignedUrls: (chemins, s) => geste('createSignedUrls', [chemins, s],
+          { data: chemins.map(c => ({ path: c, signedUrl: `https://stockage.test/lire/${c}`, error: null })), error: null }),
         download: (chemin) => geste('download', [chemin], { data: null, error: { message: 'absent' } }),
         upload: (chemin, corps, o) => geste('upload', [chemin, corps, o], { data: { path: chemin }, error: null }),
         remove: (chemins) => geste('remove', [chemins], { data: [], error: null })

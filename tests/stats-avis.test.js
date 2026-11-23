@@ -1037,9 +1037,9 @@ test("LE TEST QUI COMPTE : une lecture COMPLETE au plafond n'est pas dite incomp
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('LE TEST QUI COMPTE : un objet d avis VIDE ne compte pas dans le RATIO', async () => {
-  // L'objet Channex nait au depart, cache et vide ; Airbnb le revele au bout de
-  // 14 jours MEME si le voyageur n'a rien ecrit. Il arrive alors avec
-  // `is_hidden = false`, sans note et sans texte.
+  // L'objet Channex nait au depart, cache et vide ; s'il arrive REVELE et vide
+  // (la mesure du 18 novembre 2026 dit plutot qu'il RESTE masque — spec
+  // avis-v5 §11), il porte `is_hidden = false`, sans note et sans texte.
   const vide = { user_id: 'u1', statut: 'confirme', is_hidden: false, overall_score: null,
                  content: null, content_public: null, received_at: '2026-09-01T00:00:00Z',
                  property_id_ref: '209413' }

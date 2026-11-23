@@ -1246,9 +1246,10 @@ test('les avis de la liste sont PAGINES et cloisonnes par compte', async () => {
 // ⚠ LE CAS QUE PERSONNE NE COUVRAIT (constat G1 de la revue du 20 octobre 2026).
 
 test('LE TEST QUI COMPTE (G1) : un objet d avis VIDE mais visible n est pas un avis', async () => {
-  // L'objet Channex nait au depart, cache et vide ; Airbnb le revele au bout de
-  // 14 jours MEME si le voyageur n'a rien ecrit (lib/avis/naissance.js). Il a
-  // alors `is_hidden: false`, pas de texte, et une note a 0 ou absente. Le
+  // L'objet Channex nait au depart, cache et vide ; s'il arrive REVELE et vide
+  // (la mesure du 18 novembre 2026 dit plutot qu'il RESTE masque — spec
+  // avis-v5 §11), il a `is_hidden: false`, pas de texte, et une note a 0 ou
+  // absente. Le
   // compter gonflerait le total ET entrerait a 0/10 dans la moyenne — le defaut
   // de la recette du 7 octobre, arrive par l'autre porte.
   const r = await L.lireListe(listeDe({

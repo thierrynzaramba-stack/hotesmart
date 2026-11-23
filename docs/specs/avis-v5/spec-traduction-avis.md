@@ -383,3 +383,37 @@ revue) :
 - **Constat 6** : `vides` compté à part, dans le cron et dans le script.
 - **Constat 7** : `drop function if exists` de la forme à 3 paramètres, avant la
   création (la migration n'a été appliquée nulle part, staging compris).
+
+## 11. Mise en production (17 novembre 2026)
+
+- **Recette staging** validée par Thierry le 17 novembre 2026 à 01:15, sur
+  staging `8c83593d`. Migration posée sur staging à 00:24. Le script a traduit
+  3 avis en 5 appels, sans échec, et l'extrait a été traduit par son propre
+  appel (vérifié en base : `textes.extrait` séparé). Les trois écrans ont été
+  vérifiés : la page Avis en fr, en et es, la fiche ménage, et l'aperçu de
+  l'application de la prestataire « Recette PWA ». `/api/ecran/avis` reste à
+  **10 requêtes** dans les trois langues.
+- **Migration en production** à 01:19, prise à `991fccdc` (sha256
+  `548d671d1efa…`). Vérifiée en lecture seule : RLS active ; ni
+  `authenticated` ni `anon` ne lisent la table ; `authenticated` n'appelle ni
+  `avis_a_traduire` ni `avis_empreinte` ; `service_role` appelle la file ; une
+  seule fonction `avis_a_traduire` ; aucune policy.
+- **Go de Thierry** à 01:21. Le chef de file a mergé dans `main`
+  (`c059449a`), déployé à 01:28:32.
+- **Carte 20, les deux premiers passages** (01:30 et 01:35) : `traduction_avis`
+  y figure. Elle a traduit 5 avis en 5 appels à l'IA (3 puis 2, sous le
+  plafond de 10), pour 23 requêtes et 7,4 s. Le passage complet de 01:35 a fait
+  140 requêtes en 10,9 s, contre une moyenne de 128 requêtes et 8,9 s sur 24 h.
+- **À 12:20** (lecture seule, production) : `cron_logs.agent-ai.errors = []` ;
+  15 appels du jour, 15 avis traduits, 0 en échec.
+- **Ce que la mesure montre, à garder en tête** : la tâche passe tard dans le
+  cycle, et un appel ne part que si ses 20 s tiennent avant le plancher de
+  25 s. Elle ne traduit donc qu'aux passages légers : 15 appels en 11 heures,
+  pas 100. C'est assez pour le flux de nouveaux avis, qui ne compte que
+  quelques avis par jour. Ce n'est pas assez pour l'historique, d'où le script
+  (§3.6).
+- **Données de recette staging qui restent modifiées.** L'avis `6ad50d21` a
+  ses textes anglais (public, retour privé, extrait), et il est rattaché à
+  `STG-BIEN-1` / `RECETTE-AVIS-PWA-202610012320`, statut `confirme` ; il sert aux
+  recettes de l'application prestataire. Le `menage_event` de recette
+  `f43bffc0` est supprimé après la mise en production.

@@ -687,9 +687,11 @@ aucun ne lève.
    révélation** (masqué en base, visible dans l'écriture) prévient une fois,
    avec la vraie note — « Avis révélé — La bulle : 4,7/5 · Airbnb. »
    ⚠ **Un avis visible mais VIDE n'est pas un avis** : l'objet Channex naît au
-   départ, caché et vide, et Airbnb le révèle au bout de 14 jours même si le
-   voyageur n'a rien écrit. Sans note ni texte (`voyageurAEcrit`, la règle de
-   l'écran), il ne prévient ni comme nouveau, ni comme révélé.
+   départ, caché et vide. S'il arrive révélé et vide (la mesure du 18 novembre
+   2026 dit plutôt qu'il RESTE masqué quand le voyageur n'a rien écrit — spec
+   avis-v5 `spec-refonte-ui-v5-lot-avis.md` §11), sans note ni texte
+   (`voyageurAEcrit`, la règle de l'écran), il ne prévient ni comme nouveau, ni
+   comme révélé.
 4. **n ne prévient que d'un avis que l'écriture AJOUTE ou DÉMASQUE** : le writer
    lit, avant d'écrire, l'état des avis déjà en base (par compte et par
    provider, avec `is_hidden`), et ne prévient que de ceux qu'il a effectivement
