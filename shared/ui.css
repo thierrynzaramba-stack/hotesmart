@@ -2401,6 +2401,29 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .chg-chargement__barre { width: 100%; height: 8px; accent-color: var(--ink); }
 .chg-chargement__fin p { margin: 0; }
 .chg-chargement__gestes { display: flex; justify-content: flex-end; margin-top: var(--gap-s); }
+/* Lot 5 (§14.24) : « Envoyer par e-mail » sous le bouton d'ajout, et la
+   fenêtre des adresses de factures, au centre comme celle du chargement. */
+.chg-lien-email { align-self: flex-end; }
+.chg-email { border: 0; border-radius: var(--radius-card); padding: 24px; width: min(480px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; background: var(--surface); color: var(--ink); box-shadow: 0 12px 32px rgba(0, 0, 0, .16); }
+.chg-email::backdrop { background: var(--scrim); }
+.chg-email[open] { display: flex; flex-direction: column; gap: var(--gap-s); }
+.chg-email__tete { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-s); }
+.chg-email__tete .chg-h2 { margin: 0; }
+.chg-email__groupe { margin: var(--gap-s) 0 0; font-size: var(--fs-caption); color: var(--muted); }
+.chg-email__liste { list-style: none; margin: 0; padding: 0; }
+.chg-email__ligne { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; border-top: 1px solid var(--line); }
+.chg-email__nom { margin: 0; font-weight: var(--fw-semibold); }
+.chg-email__adresse { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-caption); overflow-wrap: anywhere; user-select: all; }
+.chg-email__rappel { margin: 0; font-size: var(--fs-caption); color: var(--muted); }
+.chg-email__gestes { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
+.chg-email-recu { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.chg-email-recu__info { display: flex; gap: var(--gap-s); font-size: var(--fs-small); }
+.chg-email-recu__info dt { flex: none; width: 80px; color: var(--muted); }
+.chg-email-recu__info dd { margin: 0; overflow-wrap: anywhere; }
+.chg-email-recu__texte { margin: 0; padding: 10px 12px; border-inline-start: 3px solid var(--line); font-size: var(--fs-small); white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 899px) {
+  .chg-email { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+}
 /* Lot 8d : « Télécharger l'exercice », à côté du choix de l'exercice. */
 .chg-exporter { margin-inline-start: auto; }
 @media (prefers-reduced-motion: reduce) {
@@ -2427,7 +2450,7 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
    en TTC ; les mois en BLOCS, deux colonnes sous une seule ligne de titres
    (« Prorata temporis », « Date de facture ») ; le détail d'un mois en deux
    parties (« Factures du mois », « Charges mensuelles »). */
-.chg-barre { display: flex; justify-content: flex-end; }
+.chg-barre { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .chg-tete { flex-wrap: wrap; gap: 8px 16px; }
 .chg-tete .h1 { margin: 0; }
 .chg-tete__entite .chg-select { min-width: min(100%, 240px); }

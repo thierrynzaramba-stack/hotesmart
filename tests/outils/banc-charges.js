@@ -97,7 +97,7 @@ async function monter (o = {}) {
   const corps = html.slice(html.indexOf('<body>') + 6, html.indexOf('<script src="/shared/i18n/i18n.js">'))
   const dom = new JSDOM(`<!doctype html><html><body>${corps}</body></html>`, { url: 'https://hs.test/charges', runScripts: 'outside-only', pretendToBeVisual: true })
   const w = dom.window
-  const journal = { fetch: [], onglets: [], confirmations: [], gardes: 0, reduits: [], zips: [], clics: [] }
+  const journal = { fetch: [], onglets: [], confirmations: [], gardes: 0, reduits: [], zips: [], clics: [], copies: [] }
 
   // `arrayBuffer` : un fichier lu au stockage (lot 8d, l'export d'un
   // exercice) ; `o.fichier(url)` en donne le contenu, ou lève.
@@ -132,6 +132,12 @@ async function monter (o = {}) {
   w.URL.revokeObjectURL = () => {}
   w.HTMLAnchorElement.prototype.click = function () { journal.clics.push({ href: this.href, download: this.download }) }
   w.open = () => { const onglet = { location: { href: '' }, closed: false, opener: 'moi', close () { this.closed = true } }; journal.onglets.push(onglet); return onglet }
+  // Lot 5 : « Copier » une adresse de factures. `o.copier` peut lever (un
+  // navigateur qui refuse le presse-papiers).
+  Object.defineProperty(w.navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: async (texte) => { if (o.copier) await o.copier(texte); journal.copies.push(texte) } }
+  })
   w.I18n = i18nFr()
   if (o.large) w.matchMedia = (q) => ({ matches: /min-width/.test(q), media: q })
   w.HSNav = { renderMenu () {}, render () {} }

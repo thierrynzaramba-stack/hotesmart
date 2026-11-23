@@ -4973,6 +4973,416 @@ interruption, paquets de 20, panne d'adresses fatale, formule, identifiants
 en nombres, contrôleur d'une autre fenêtre, xref décalé), chacun fait rougir
 au moins un test. Suite : 9 288 verts à l'heure réelle et à J+60.
 
+### 14.24 Lot 5 — recevoir les factures par e-mail (23 novembre 2026)
+
+Branche `charges-email`, partie de `main` (`5e220196`, lot 8d en production).
+Lancé par Thierry le 23 novembre 2026 à 14 h 39 (« lance-le »), après sa
+demande de « tester l'envoi de facture par e-mail » : la fonction n'existait
+pas, elle était prévue au découpage (§8, lot 5) et décrite au §7.
+
+#### 14.24.1 Ce qui est déjà décidé (8 et 9 novembre 2026)
+
+- ~~Une adresse de factures **par compte** (Q6)~~ — remplacé le 23 novembre
+  2026 par une adresse par entité et par logement (§14.24.2). Ouverte à
+  **tout expéditeur**,
+  fournisseurs compris (Q7), sur `reply.hotesmart.fr` (Q8) : aucun geste DNS,
+  le sous-domaine reçoit déjà toute adresse et l'envoie à
+  `api/inbound-email.js`.
+- Un bouton **« Changer d'adresse »** : l'ancienne est refusée aussitôt
+  (Q16).
+- Chaque pièce jointe devient une facture **« à lire »**, puis lue par l'IA
+  **à l'arrivée** (Q28), comme une facture déposée ; tout arrive « à
+  vérifier ». Gardes sur les pièces jointes : nombre, nom, type et taille
+  confrontés à la relecture Brevo (Q15).
+- Un e-mail sans pièce jointe lisible arrive **« sans facture lisible »**,
+  avec son expéditeur, son sujet et son texte (Q19) ; l'hôte ajoute le PDF à
+  la main.
+- Un doublon n'est jamais refusé, il est regroupé (Q14) ; un **rejeu** du
+  même e-mail par Brevo ne crée rien.
+- L'entité est reconnue sur la facture, ou laissée à choisir (Q6, recette du
+  lot 8c).
+
+#### 14.24.2 Décision de Thierry du 23 novembre 2026, et ce qui en découle
+
+**Thierry, 23 novembre 2026, 15 h 02 : « nom de l'entité dans le mail et aussi
+un lien par bien ».** Cela remplace Q6 (« une adresse par compte ») :
+
+- **Une adresse par entité juridique** non archivée, qui porte le nom de
+  l'entité. Une facture qui y arrive est rangée dans cette entité.
+- **Une adresse par logement**, qui porte le nom du logement. Une facture qui
+  y arrive est rangée dans ce logement **et** dans son entité (lue par
+  `entiteDuBien` à l'arrivée, Q18).
+- ~~Un logement sans entité n'a pas d'adresse~~ — **changement de consigne
+  de Thierry, 23 novembre 2026 à 15 h 16 : « un bien peut avoir des factures
+  sans être lié à une entité, mais un rappel est fait qu'il manque l'entité
+  juridique ».** Un logement sans entité a son adresse comme les autres ; sa
+  ligne, dans la fenêtre, porte le rappel « Entité juridique manquante —
+  rattachez ce logement depuis sa fiche ». Une facture qui y arrive est rangée
+  dans le logement, sans entité, et porte le même rappel. **Et elle se valide
+  sans entité** (Thierry, 15 h 18, option « Oui, valider sans entité ») :
+  c'est le lot 5 bis (§14.25), qui lève Q18 pour ce cas.
+
+**Ce qui en découle, et qui est une proposition** (le développeur la tient
+pour acquise jusqu'à avis contraire de Thierry) :
+
+1. **Le nom ne suffit pas : on lui ajoute 8 caractères tirés au hasard.**
+   `la-bulle.k2j9x7q4@reply.hotesmart.fr`. Le nom seul se devine (celui d'un
+   logement est public sur Airbnb) et n'est pas unique : deux hôtes peuvent
+   avoir une « La bulle ». Avec la partie tirée au hasard, l'adresse reste
+   lisible et impossible à deviner, et **aucun secret de plus** n'est à créer
+   dans Vercel (la signature du §7 et de Q16 est abandonnée). Le point sépare
+   le nom du code : une adresse de réponse d'un voyageur n'en contient jamais,
+   donc les deux ne se confondent pas.
+2. **Le nom est figé à la création de l'adresse.** Renommer l'entité ou le
+   logement ne change pas l'adresse déjà donnée aux fournisseurs ; « Changer
+   d'adresse » en tire une nouvelle, avec le nom du moment, et l'ancienne est
+   refusée aussitôt (Q16).
+3. **Entité ou logement archivé : son adresse est refusée** (200, trace au
+   journal serveur), comme une adresse changée, et elle n'est plus affichée.
+4. **L'adresse range, la lecture ne la contredit pas.** L'entité (et le
+   logement) viennent de l'adresse ; la reconnaissance du destinataire sur la
+   facture (Q6, recette du lot 8c) ne sert plus que pour une facture déposée à
+   la main. Tout arrive « à vérifier » : l'hôte corrige si besoin.
+
+**Les trois questions restées sans réponse le 23 novembre, prises à leur
+option recommandée** (Thierry peut revenir dessus) :
+
+5. ~~Où les adresses s'affichent : sous « Ajouter une facture », en
+   liste~~ — **tranché par Thierry le 23 novembre 2026 à 15 h 14 : « en
+   dessous d'ajouter une facture, une petite phrase de type "envoi par
+   e-mail" ; quand on clique, un pop-up s'ouvre et les e-mails sont affichés
+   avec la possibilité de copier ou de changer ».** Sous « Ajouter une
+   facture », un lien « Envoyer par e-mail » ; il ouvre une fenêtre qui liste
+   une adresse par entité et une par logement, chacune avec « Copier » et
+   « Changer d'adresse ».
+6. **Les petites images ignorées** : une image de moins de 30 Ko (logo de
+   signature, icône de réseau social) est ignorée ; un PDF est toujours pris.
+7. **Aucune notification en V1** : une facture arrivée par e-mail apparaît
+   dans « À traiter », comme une facture déposée.
+
+#### 14.24.3 Ce qui est à coder
+
+**Données (migration AVANT le code).**
+- Table `charges_adresses_email` : `locale` (clé ; partie avant `@`, motif
+  `^[a-z0-9]+(-[a-z0-9]+)*\.[a-z0-9]{8}$`, 50 caractères au plus),
+  `user_id`, `entite_id` **ou** `property_uuid` (exactement un des deux),
+  `cree_le`. Au plus une adresse vivante par entité et par logement (index
+  uniques partiels). Entité et logement **du même compte**, garantis en base
+  (clé étrangère composée vers `entites_juridiques (id, user_id)`, déclencheur
+  pour `properties`). RLS sans politique ; writer unique
+  `lib/charges/adresse.js`. « Changer d'adresse » remplace la ligne : l'ancienne
+  `locale` n'existe plus, donc elle est refusée.
+- L'ancienne table `charges_adresses` (compte, numéro de version, Q16) n'a
+  jamais été lue ni écrite par aucun code : elle est supprimée par la même
+  migration, qui refuse de le faire si elle contient une ligne.
+- `charges.email_sujet` et `charges.email_texte` (texte, bornés en base à
+  300 et 2 000 caractères), pour la ligne « sans facture lisible » (Q19).
+- Fichiers : `migrations/2026-11-23-charges-adresses-email.sql`, son contrôle
+  `2026-11-23-controle-charges-adresses-email.sql` (cinq lignes à `true`), et
+  l'épreuve sur un Postgres local `scripts/eprouver-adresses-factures.sh`
+  (31 gestes, 0 écart ; le contrôle rend cinq `false` avant la migration).
+- **Appliquée par Thierry le 23 novembre 2026** : staging à 16 h 49 (contrôle
+  à 16 h 51 : cinq `true`), production à 16 h 54 (contrôle à 16 h 55 : cinq
+  `true`). Avant le code, donc : la migration ne fait qu'ajouter, et supprime
+  une table vide que rien ne lisait.
+
+**L'aiguillage**, dans `api/inbound-email.js` : APRÈS la relecture chez
+Brevo et le refus d'une divergence, et AVANT le filtre anti-boucle et le
+refus d'un message sans texte (§7) — ces deux gardes existent parce que
+l'agent IA répond, et le chemin des factures ne répond jamais. Le score de
+spam reste appliqué. ⚠ L'aiguillage lit le `recipient` RELU, jamais celui du
+POST, et une adresse de factures (un point dans la partie locale) ne tombe
+jamais dans le chemin des réponses. **Le chemin des réponses voyageurs ne change pas**, et des tests
+le prouvent.
+
+**Le chemin des factures** (`lib/charges/email.js`) :
+- le compte, l'entité et le logement viennent de l'adresse, **résolue en
+  base** ; pour une adresse de logement, l'entité est celle du logement à
+  l'arrivée, ou aucune s'il n'en a pas (la charge porte alors le rappel) ;
+  une adresse inconnue, changée, ou d'une entité ou d'un logement archivé est
+  refusée en 200 (définitif), trace au journal serveur seulement ;
+- au plus 10 pièces jointes prises par e-mail ; types : ceux d'un dépôt —
+  PDF, JPEG, PNG, HEIC et HEIF (convertis comme au dépôt) ; un autre type
+  (WebP, `.ics`, `.docx`) est ignoré ; 10 Mo au plus pour un PDF, 7 Mo pour
+  une image ;
+- chaque pièce : nom, type et taille confrontés à la relecture (un champ
+  absent de la relecture est un refus), jeton de téléchargement vérifié par
+  motif puis encodé, octets téléchargés chez Brevo
+  (`GET /v3/inbound/attachments/<jeton>`) dont la taille doit égaler la
+  taille relue ;
+- puis le même chemin qu'un dépôt : fichier au bucket, empreinte, doublons,
+  charge `a_lire` d'origine `email` (`email_uuid`, `email_expediteur`,
+  `email_recu_le` de Brevo), lecture par l'IA si le budget de temps et la
+  limite de 100 lectures par jour le permettent, sinon le cron quotidien la
+  rattrape ;
+- un e-mail sans pièce prise (aucune, ou toutes ignorées) : UNE ligne
+  `sans_facture` avec expéditeur, sujet et texte ; une pièce refusée
+  définitivement (taille qui ne correspond pas, jeton refusé) : une ligne
+  `sans_facture` avec son motif, visible de l'hôte ;
+- panne passagère (réseau, Brevo en 5xx, stockage) : 503, Brevo rejoue ;
+  l'index unique (compte, e-mail, empreinte) rend le rejeu sans effet.
+
+**L'écran.** Sous « Ajouter une facture », le lien « Envoyer par e-mail ».
+Il ouvre une fenêtre (`<dialog>`) qui liste une adresse par entité non
+archivée, puis une par logement non archivé (avec le rappel « Entité
+juridique manquante » s'il n'en a pas), chacune avec « Copier » et « Changer d'adresse »
+(confirmation : « l'ancienne adresse ne recevra plus rien »). À l'ouverture,
+UN appel `POST /api/charges` action `adresses` (titulaire seul) : il crée
+les adresses qui manquent et rend la liste — idempotent, rien n'est créé deux
+fois. `adresse_changer` désigne une entité ou un logement, dont le compte est
+vérifié avant toute écriture. La ligne « sans
+facture lisible » entre dans « À traiter », et sa fiche montre l'expéditeur,
+le sujet et le texte, avec « Supprimer ».
+
+**La recette.** ⚠ L'envoi réel ne se recette QU'EN PRODUCTION : Brevo
+envoie les e-mails du sous-domaine à l'adresse de production seulement. Sur
+staging : la fenêtre, « Copier », « Changer d'adresse », et la ligne « sans
+facture lisible » posée par un test. En production : un e-mail avec un PDF,
+une photo, un e-mail sans pièce jointe, puis « Changer d'adresse » et un
+e-mail à l'ancienne adresse.
+
+#### 14.24.4 Inventaire
+
+Rien n'est retiré de l'écran. Le chemin des réponses voyageurs reste
+identique, octet pour octet sur ce qu'il écrit ; seule la fonction du score de
+spam est sortie de celle des en-têtes, et celle-ci l'appelle toujours. En base,
+la table `charges_adresses` (Q16), qu'aucun code n'a jamais lue ni écrite, est
+supprimée par la migration, vide.
+
+#### 14.24.5 Le téléphone
+
+La même fenêtre, en plein écran, l'adresse sur deux lignes si besoin ;
+« Copier » est le geste utile au téléphone.
+
+#### 14.24.6 Case PERFORMANCE
+
+1. Un endpoint d'écran : l'écran ne charge rien de plus ; les adresses
+   arrivent par UN appel, seulement à l'ouverture de la fenêtre.
+2. Donnée non urgente : sans objet (des adresses, lues telles quelles).
+3. Cache navigateur : aucun.
+4. `private, no-store` : déjà posé sur les deux endpoints.
+5. Statiques versionnés : inchangé (pas de module nouveau côté écran).
+6. Lecture tronquée : au plus une adresse par entité et par logement du
+   compte, très en dessous de 1 000 ; la lecture est quand même bornée et un
+   dépassement est une erreur, pas une troncature.
+7. Budget de l'écran : inchangé ; la fenêtre ajoute un appel au clic, dont
+   les lectures (entités, logements, adresses) partent en parallèle.
+8. AVANT / APRÈS : appels de l'écran 2 → 2, requêtes et octets inchangés au
+   chargement ; à l'ouverture de la fenêtre, 1 appel. À mesurer en recette.
+
+#### 14.24.7 Ce qui est codé (23 novembre 2026)
+
+- **`lib/charges/adresse.js`**, writer unique des adresses : forme
+  `nom.code8` (nom en ASCII et tirets, coupé à 41 caractères, repli
+  « factures » ou « logement » ; code de 8 tiré par `crypto`, un octet ≥ 252
+  rejeté pour ne biaiser aucune lettre), `adresses` (une par entité active et
+  par logement actif, celles qui manquent créées ; deux fenêtres ouvertes en
+  même temps ne créent rien deux fois), `changer` (cible résolue dans le
+  compte AVANT toute écriture ; l'ancienne adresse n'existe plus), `resoudre`
+  (refus **définitif** : adresse inconnue ou changée, cible archivée ; sinon
+  panne, rejouée).
+- **`lib/charges/email.js`**, le chemin d'un e-mail : appariement POST ↔
+  relecture par nom, type et Content-ID ; un champ absent de la relecture, un
+  nombre ou une pièce qui diffère : tout l'e-mail refusé
+  (`relecture_incomplete`, `pieces_divergentes`), rien téléchargé ; images de
+  moins de 30 Ko ignorées ; au-delà de 10, `trop_de_pieces` ; jeton contrôlé
+  (`^[A-Za-z0-9._~-]{8,1024}$`) puis encodé ; octets téléchargés = taille
+  RELUE, sinon `taille_differente`. ⚠ **La taille du POST n'est pas
+  comparée** : Brevo la documente comme une estimation. Budgets : les
+  téléchargements finis à 35 s (sinon 503, Brevo rejoue), une lecture IA ne
+  démarre plus après 30 s (elle dure 20 s au plus).
+- **`lib/charges.js`** : `deposerPieceEmail` et `noterSansFacture` (writer
+  unique de `charges` et du bucket) ; `appliquerLecture` garde l'entité de
+  l'adresse pour une facture d'origine `email` (§14.24.2, point 4).
+- **`api/inbound-email.js`** : l'aiguillage ; **`vercel.json`** :
+  `maxDuration` 60 s pour ce webhook.
+- **`api/charges.js`** : `adresses`, `adresse_changer`.
+- **Écran** : le lien, la fenêtre (Copier, Changer avec confirmation), la
+  ligne et la fiche « sans facture lisible » (expéditeur, objet, reçu le,
+  texte, motif ; seul « Supprimer »), le rappel « Entité juridique manquante »
+  dans la ligne et la fiche. 36 textes en trois langues.
+- **Tests** : `tests/charges-adresse.test.js` (11), `tests/charges-email.test.js`
+  (15), `tests/inbound-email-factures.test.js` (6),
+  `tests/charges-email-page.test.js` (7, dans la vraie page),
+  `tests/charges-migration-adresses-email.test.js` (6), 3 de plus dans
+  `tests/charges-endpoint.test.js`. **26 sabotages, 26 rouges.** Suite :
+  9371 verts à l'heure réelle et à J+60. Analyseur des colonnes : 43
+  formes non résolues (inchangé). Après la review (§14.24.8) : 13 tests
+  d'adresses, 23 du chemin e-mail, 17 sabotages de plus, tous rouges ;
+  suite 9381 verts à l'heure réelle et à J+60.
+- **Risque à mesurer en recette** : la durée du webhook quand il lit une
+  facture à l'arrivée (jusqu'à ~25 s ; le budget total est de 55 s). Si Brevo coupe et rejoue avant la fin,
+  le rejeu ne crée rien (index uniques), mais une lecture peut être payée deux
+  fois. Le journal de Vercel le dira (`[inbound-email] factures_recue`).
+
+#### 14.24.8 Review 1 — sur `650ee0fa` (23 novembre 2026)
+
+Brief envoyé, tel quel (extrait de ce qui désigne l'arbre et la plage) :
+
+```
+- Chemin absolu du worktree : /home/claude/hotesmart-8e
+- Branche : charges-email
+- Plage exacte : 5e220196b70adfb2f1ab0b6c270eb87da5414812..650ee0fa94424a48b3873a80bfb802f9d30db9d9
+```
+
+Contrôle : la review dit avoir lu `/home/claude/hotesmart-8e` à
+`650ee0fa94424a48b3873a80bfb802f9d30db9d9`, et chaque fichier qu'elle cite
+(`lib/charges/email.js`, `lib/charges.js`, `lib/charges/adresse.js`,
+`tests/charges-email.test.js`, `tests/charges-adresse.test.js`) est dans
+`git diff --name-only` de la plage.
+
+Rapport, tel quel :
+
+Arbre lu : `/home/claude/hotesmart-8e`, branche `charges-email`, tête `650ee0fa94424a48b3873a80bfb802f9d30db9d9` (vérifié par `rev-parse HEAD`). Plage relue : `5e220196b70adfb2f1ab0b6c270eb87da5414812..650ee0fa94424a48b3873a80bfb802f9d30db9d9`. Chaque fichier cité plus bas fait partie de ce diff.
+
+**Mesures faites**
+- Les tests du lot passent tous : `charges-adresse` 11/11, `charges-email` 15/15, `charges-email-page` 7/7, `charges-endpoint` 22/22, `charges-migration-adresses-email` 6/6, `inbound-email-factures` 6/6, `charges-ecran` 42/42, `charges-masse` 4/4.
+- `inbound-email.test.js`, que le lot ne touche pas, passe à 36/36.
+- `node scripts/i18n-check.js` : 1736 clés dans chacune des trois langues.
+- Une simulation `node -e` rejoue plusieurs fois le même e-mail (constat 1). Elle n'a rien écrit dans le dépôt.
+
+**Sécurité : aucun défaut trouvé**
+- Le compte, l'entité et le logement viennent toujours de la base. Chaque requête porte le compte ou la clé `locale`.
+- Le chemin est choisi sur le destinataire relu chez Brevo, et seulement après le refus d'une divergence.
+- Le jeton de téléchargement est contrôlé par un motif, puis envoyé uniquement à l'hôte fixe de Brevo.
+- Une adresse changée n'existe plus ; une entité ou un logement archivé est refusé.
+- La base garantit l'isolation : RLS sans politique, droits retirés, clé composée et déclencheur.
+- La garde « titulaire » passe avant toute requête dans `api/charges.js`.
+- L'écran échappe tout (`esc`) et aucun secret n'apparaît dans les journaux.
+
+**Chemin des voyageurs : inchangé**
+- `motifAutomatique` est identique au code de base : la seule différence est que le calcul du score de spam a été sorti dans `motifSpam`, que `motifAutomatique` appelle toujours.
+- Les deux formes d'adresse ne peuvent pas se confondre : une adresse de réponse finit par `-` + 12 caractères hexadécimaux, une adresse de factures par `.` + 8 caractères.
+- Seul changement pour les voyageurs : `maxDuration` passe à 60 s, ce qui ne leur nuit pas.
+
+---
+
+1. **Bloquant — `lib/charges/email.js:180`. Après un « délai », Brevo rejoue l'e-mail sans jamais avancer, et les pièces restantes sont perdues sans trace.**
+   - **Défaut.** Pour reconnaître une pièce déjà entrée, il faut son empreinte. Un rejeu doit donc tout refaire pour chaque pièce : télécharger, convertir un HEIC, déposer au stockage, insérer (refus 23505), effacer. Il coûte plus cher que le premier passage et bute sur la limite de 35 s au même endroit, à chaque fois.
+   - **Mesure.** 5 PDF à 10 s de téléchargement chacun, 4 passages :
+     - chaque passage rend `{"rejouer":true,"raison":"delai"}` ;
+     - la base garde 4 charges, la 5e n'entre jamais ;
+     - aucune ligne « sans facture lisible ».
+
+     Quand Brevo abandonne, l'hôte ne voit rien, contrairement à « l'hôte voit toujours qu'on lui a écrit ».
+   - **Scénario réaliste.** Un e-mail de 8 à 10 photos HEIC (conversion, puis dépôt de chaque fichier), ou des PDF lourds avec un stockage lent.
+   - **Correction.**
+     - Vérifier `(compte, email_uuid, empreinte)` AVANT le dépôt au stockage, pour qu'un rejeu ne paie plus le dépôt puis l'effacement.
+     - Mieux : tenir une clé par pièce (rang ou nom + taille relus), unique avec `(user_id, email_uuid)`, et la vérifier avant même le téléchargement.
+     - Garantir la fin : si un passage atteint le délai sans aucune pièce nouvelle (`nouvelles.length === 0 && deja > 0`), poser la ligne `sans_facture` (motif « délai ») et rendre 200.
+     - Le test « les téléchargements ont un budget » (`tests/charges-email.test.js:360`) ne vérifie que le premier 503. Il passe donc contre ce défaut : il faut deux passages et exiger qu'ils aboutissent ou laissent une trace.
+
+2. **Mineur — `lib/charges/email.js:51-52`, `:180`, `:215` et `lib/charges.js:851-859`. Les limites de temps ne contrôlent que le DÉBUT de chaque étape, d'où des fichiers orphelins.**
+   - **Défaut.** Un téléchargement peut commencer à 34,9 s. Le pire cas devient : 15 s de téléchargement (`DELAI_PIECE_MS`), puis 15 s de conversion HEIC, puis 8 s de dépôt, soit environ 73 s, au-delà des 60 s permises par Vercel. Côté lecture : début à 29,9 s, puis 6 s de reconnaissance et 20 s d'IA, plus les écritures, soit environ 58 à 60 s.
+   - **Scénario.** Vercel coupe la fonction entre le dépôt du fichier (ligne 851) et l'insertion de la ligne. Il reste un fichier sous `compte/<id aléatoire>` sans aucune ligne en base, que la purge (qui part des lignes) ne retrouvera jamais. Même effet quand `remplacerFichier` rend `false` sur délai alors que le dépôt finit en arrière-plan : on rejoue, avec un nouvel `id`, donc un nouvel orphelin.
+   - **Correction.**
+     - Donner à chaque étape le minimum entre son délai et le temps restant (par exemple 55 s moins le temps écoulé), ou exiger un temps restant au moins égal au pire cas avant d'entamer une pièce.
+     - Utiliser un chemin déterministe par `(compte, email_uuid, empreinte)` : un rejeu écrase alors le même objet au lieu d'en créer un autre. Dans ce cas, ne plus effacer le fichier sur 23505, car c'est celui de la ligne existante.
+
+3. **Mineur — `lib/charges.js:885` et `:858-862`, avec `:800-802` et `:814`. Un refus définitif de la base est traité comme une panne, donc Brevo rejoue à l'infini.**
+   - **Défaut.** Toute erreur autre que 23505 devient `panne()`, donc 503. Or `texteEmail` et `texteCourt` laissent passer U+0000, et coupent en unités UTF-16.
+   - **Mesure côté JS.** `("a"×1999 + "😀").slice(0, 2000)` se termine par `"\ud83d"`, un demi-caractère orphelin.
+   - **Scénario.**
+     - Un e-mail sans pièce jointe dont le texte ou le sujet contient un U+0000 : Postgres refuse ce caractère dans un champ texte (erreur 22P05).
+     - Un emoji coupé pile à la position 2000 du texte ou 300 du sujet : le rejet par Postgres et PostgREST est probable, mais je ne l'ai pas mesuré.
+
+     Dans les deux cas : 503 à chaque essai, puis l'e-mail est perdu sans ligne.
+   - **Correction.**
+     - Retirer `\u0000` et couper par points de code (`Array.from(t).slice(0, n).join('')`).
+     - Classer les erreurs 22xxx et 23514 comme définitives : 200 et une trace au journal. Garder 503 pour le réseau et les 5xx seulement.
+
+4. **Mineur — `lib/charges/adresse.js:270-272` (et `:171`, `:194`). Une adresse de logement dont l'entité est archivée range la facture dans cette entité archivée.**
+   - **Défaut.** `entiteDuBien` rend l'entité même archivée (c'est son contrat), et `resoudre` ne la filtre pas.
+   - **Scénario.** Un logement est rattaché à une entité archivée. La facture reçue par e-mail porte cette entité. Le rappel « entité juridique manquante » ne s'affiche pas. À l'enregistrement, l'écran refuse avec « entité archivée ». Dans la fenêtre des adresses, la ligne du logement n'a pas non plus de rappel.
+   - **Correction.** `entiteId: eb.entite && !eb.entite.archivee_le ? eb.entite.id : null`, la même règle dans `adresses()` pour `entite_id`, et un test pour ce cas (absent de `tests/charges-adresse.test.js:221`).
+
+5. **Mineur — `lib/charges/email.js:82`. Un POST sans pièce jointe face à une relecture qui en liste est rangé « sans pièce » au lieu de « pièces divergentes ».**
+   - **Défaut.** `if (!post.length) return { ok: true, paires: [] }` passe avant la comparaison avec la relecture.
+   - **Scénario.** Brevo enregistre 2 pièces, mais le POST n'en porte aucune (champ absent ou tronqué). L'hôte lit « Cet e-mail n'a pas de facture en pièce jointe » alors qu'il en avait.
+   - **Correction.** Comparer d'abord les longueurs dès que la relecture rend une liste non vide. Ajouter ce cas au test, qui ne couvre aujourd'hui que « vide des deux côtés ».
+
+6. **Mineur — `lib/charges/email.js:116`. Une pièce annoncée `application/octet-stream` est ignorée, sans trace si une autre pièce est prise.**
+   - **Défaut.** Le tri se fait sur le type annoncé, alors que le type réel est de toute façon relu dans le contenu (`typeReel`).
+   - **Scénario.** Un logiciel de facturation envoie le PDF en `application/octet-stream`, ce qui est courant (la spec le relève pour les dépôts manuels). Seul dans l'e-mail : ligne « pas de facture en pièce jointe ». À côté d'une autre facture : la seconde est perdue sans aucune trace.
+   - **Correction.** Pour `octet-stream` (et les variantes `image/jpg`, `application/x-pdf`), prendre la pièce et laisser `typeReel` décider ; un refus devient alors `type_refuse`, visible. C'est une décision produit à confirmer avec Thierry.
+
+7. **Mineur — `lib/charges/email.js:157-230`. Aucune limite de volume par compte.**
+   - **Défaut.** N'importe qui connaissant l'adresse peut envoyer un nombre illimité d'e-mails de 10 pièces de 10 Mo, qui remplissent le stockage. Chacun consomme aussi les 100 lectures IA par 24 h, que les dépôts manuels partagent. Le dépôt manuel, lui, est plafonné à 30 envois ouverts par 24 h ; rien d'équivalent ici.
+   - **Scénario.** Un expéditeur hostile ou un automate en boucle épuise le quota du jour : les factures déposées à la main par l'hôte restent « à lire (plafond) ».
+   - **Correction.** Compter les charges d'origine `email` du compte sur 24 h avant de prendre une pièce. Au-delà d'un seuil, une seule ligne `sans_facture` (motif « quota ») et 200. Le seuil est à décider avec Thierry.
+
+8. **Mineur — `lib/charges/adresse.js:113-118`. La garde « dépassement = panne » ne peut jamais se déclencher.**
+   - **Défaut.** PostgREST plafonne `.limit(2001)` à 1000 lignes, sans erreur. `data.length > 2000` n'arrive donc jamais. Le résultat reste juste (au-delà de 1000, `creer` retombe sur 23505 puis `adresseDe`), mais au prix d'une requête de plus par adresse. Et la spec (§14.24.6, point 6) affirme une garantie qui n'existe pas.
+   - **Correction.** Lire page par page (`range`), comme le fait `biensDuCompte` juste au-dessus.
+
+9. **Mineur — `lib/charges/email.js:179-198`. Pré-existant, hérité du chemin voyageurs : seul `Uuid[0]` est relu.**
+   - **Scénario.** Un e-mail adressé à la fois à l'adresse d'une entité et à celle d'un logement (ou à deux comptes) n'est rangé qu'au premier destinataire. L'autre ne reçoit rien, sans trace.
+   - **Correction.** Pour les factures, boucler sur chaque `Uuid`, ou documenter la limite dans le guide.
+
+10. **Mineur (tests) — `tests/charges-email.test.js`. Trois tests ne prouvent pas tout ce qu'ils annoncent.**
+    - `:360` passe contre le défaut du constat 1 (voir plus haut).
+    - `:320`, « puis ENCODÉ » : le motif n'accepte que des caractères qu'`encodeURIComponent` ne modifie pas. Retirer l'encodage ne ferait rougir aucun test. La garde réelle est le motif ; le nom du test promet plus qu'il ne vérifie.
+    - Le double de `monde()` rend chaque entité non archivée : la branche `entite_archivee` du chemin e-mail n'est pas couverte (lien avec le constat 4).
+
+Constats de sécurité : 0
+
+**Ce qui en a été fait.** Aucun constat de sécurité : on corrige sans nouvelle
+review (règle « une review par commit »), puis on pousse.
+
+| Constat | Suite |
+|---|---|
+| 1 (bloquant) | **Corrigé.** Chaque pièce a un identifiant STABLE, tiré du compte, de l'e-mail et de ce que la relecture dit d'elle (rang, nom, type, taille) : il nomme la charge et le chemin du fichier. Un rejeu lit les pièces déjà entrées (`piecesDeLEmail`) et les saute SANS les retélécharger. Une pièce ne commence plus après 17 s ; ce qui reste se fait au rejeu, qui avance donc à chaque passage. Test : 5 pièces de 10 s, les rejeux finissent en 3 passages au plus, 5 charges, 5 dépôts, aucune pièce ne commence après 17 s. |
+| 2 | **Corrigé.** Budget total 55 s ; le téléchargement et le dépôt reçoivent ce qui RESTE (test : un téléchargement fini à 50 s ne laisse que 5 s au dépôt) ; une lecture ne commence plus après 28 s. Le chemin stable fait qu'une coupure entre le dépôt et la ligne est reprise par le rejeu (même objet réécrit). Sur un conflit d'index, le fichier n'est effacé que s'il n'est pas celui d'une ligne existante (test des passages croisés). |
+| 3 | **Corrigé.** Caractère nul retiré, coupe par caractère (`Array.from`) pour l'expéditeur, le sujet et le texte ; une erreur 22xxx ou 23514 est un refus définitif (`ligne_refusee`, 200, tracé), plus une panne. |
+| 4 | **Corrigé.** Une entité archivée ne range plus une facture neuve : `resoudre` et `adresses` la traitent comme une absence d'entité (le rappel). Test ajouté. |
+| 5 | **Corrigé.** POST sans pièce face à une relecture qui en liste : `pieces_divergentes`. Test ajouté. |
+| 6 | **Corrigé, confirmé par Thierry (23 novembre 2026, 22 h 06 : « ok pour les deux »)** : une pièce au type vague (`application/octet-stream`, `application/x-pdf`, `image/jpg`…) est prise, son contenu décide ; un faux devient `type_refuse`, visible. Un type précis qu'on ne lit pas (agenda, Word) reste ignoré. |
+| 7 | **Corrigé sur l'accord de Thierry (même message)** : au plus **50 lignes reçues par e-mail par compte et par 24 heures glissantes** (pièces et « sans facture lisible » comprises ; le chiffre est celui du développeur, Thierry peut le changer : `QUOTA_EMAIL_JOUR`). Au-delà, rien n'est téléchargé ni n'entre, et UNE ligne « sans facture lisible » de motif `quota_jour` le dit — une seule par 24 heures, sinon un expéditeur en boucle remplirait la file avec elle. Une panne du comptage fait rejouer. 4 tests, 7 sabotages rouges. |
+| 8 | **Corrigé.** Lecture des adresses par pages (`range`) ; la spec (§14.24.6, point 6) dit désormais vrai. Test ajouté. |
+| 9 | **Dette 5-2, documentée** (guide et KB) : une seule adresse HôteSmart par e-mail est servie, la première ; héritée du chemin des voyageurs. |
+| 10 | **Corrigé.** Le test du budget fait plusieurs passages et exige qu'ils aboutissent ; le test du jeton dit ce qu'il prouve (le motif) ; le cas de l'entité archivée est couvert. |
+
+Contre-épreuve des correctifs : 17 sabotages, 17 rouges (en plus des 26 du
+lot). Un premier sabotage — retirer le seuil des 17 s — restait vert : le test
+des pièces lentes vérifie désormais qu'aucune pièce ne commence après 17 s.
+
+### 14.25 Lot 5 bis — valider une facture d'un logement sans entité (23 novembre 2026)
+
+**Décision de Thierry, 23 novembre 2026, 15 h 16 et 15 h 18.** « Un bien peut
+avoir des factures sans être lié à une entité, mais un rappel est fait qu'il
+manque l'entité juridique » ; et à la question « peut-on la valider avant
+d'avoir rattaché le logement ? » : **« Oui, valider sans entité »**, en
+sachant qu'elle compte dans un total à part et que les totaux et l'export,
+déjà en production, sont à retoucher.
+
+**Ce que ça lève.** Q18 refusait une facture rattachée à un logement sans
+entité (`bien_sans_entite`). Désormais : une facture d'un logement **sans
+entité** se valide **sans entité**. Q18 reste entière pour tout le reste :
+un logement qui a une entité impose celle-là, et une facture sans logement
+exige toujours une entité.
+
+**Ordre.** Lot 5 d'abord (les e-mails), puis ce lot, sur sa propre branche
+partie de `main`. En attendant ce lot, une facture reçue pour un logement sans
+entité attend dans « À traiter » avec son rappel.
+
+**À détailler avant de coder, et à faire valider par Thierry** (périmètre
+pressenti, pas encore une spec) :
+- la validation (`lib/charges.js`) : entité vide acceptée seulement si le
+  logement choisi n'a pas d'entité ; ⚠ et une **migration**, car la base
+  l'interdit aujourd'hui (`charges_validee_entite_ck` : une charge validée a
+  son entité, D3 / Q20) ;
+- un total « Sans entité juridique » dans le choix d'entité de l'écran, avec
+  le rappel en tête ; sans exercice, donc par mois (comme une entité dont le
+  début d'exercice est vide) ; les fonctions SQL des totaux, qui filtrent
+  aujourd'hui par `entite_juridique_id = p_entite`, apprennent le cas vide —
+  le résumé `charges_resume` a déjà une cellule « sans entité » ;
+- l'export d'une période « Sans entité juridique » ;
+- **la question ouverte** : quand le logement est enfin rattaché à une
+  entité, ses factures déjà validées sans entité y passent-elles d'elles-mêmes,
+  ou restent-elles « sans entité » jusqu'à un geste de l'hôte ?
+- les crédits (import du tableau d'amortissement) gardent l'entité
+  obligatoire : la consigne parle des factures d'un logement.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

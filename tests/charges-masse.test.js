@@ -57,7 +57,7 @@ test('LE TEST QUI COMPTE (dette 153) : « À traiter » lit 51 lignes et rend un
   const q = b2.requetes[0]
   const ors = q.filtres.filter(f => f[0] === 'or')
   assert.equal(ors.length, 1, 'UN SEUL `or` : sa combinaison avec un second ne dépend pas du serveur')
-  assert.equal(ors[0][1], `and(or(statut.in.(a_lire,a_verifier,illisible,tableau),and(signal.not.is.null,signal_tranche.is.false)),or(cree_le.lt."${CREE}",and(cree_le.eq."${CREE}",id.lt.${lignes[49].id})))`)
+  assert.equal(ors[0][1], `and(or(statut.in.(a_lire,a_verifier,illisible,tableau,sans_facture),and(signal.not.is.null,signal_tranche.is.false)),or(cree_le.lt."${CREE}",and(cree_le.eq."${CREE}",id.lt.${lignes[49].id})))`)
   assert.equal(filtre(q, 'user_id'), COMPTE)
 })
 
