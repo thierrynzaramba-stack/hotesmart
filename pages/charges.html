@@ -138,6 +138,18 @@ async function deposer (url, blob) {
   }
 }
 
+// Lot 8d : un fichier de l'export d'un exercice, lu au stockage par son
+// adresse signée de 60 s. Aucun jeton : l'adresse suffit, et elle expire.
+async function telecharger (url) {
+  const res = await fetch(url)
+  if (!res.ok) {
+    const err = new Error('telechargement')
+    err.status = res.status
+    throw err
+  }
+  return new Uint8Array(await res.arrayBuffer())
+}
+
 async function init () {
   await I18n.init()
   // ⚠ PAGE NON DÉLÉGABLE (Q9, tests/pages-non-delegables.test.js) : sur un
@@ -165,6 +177,7 @@ async function init () {
     charger: (qs) => appelAPI(ECRAN + (qs ? '?' + qs : '')),
     agir: (corps) => appelAPI(CHARGES, 'POST', corps),
     deposer,
+    telecharger,
     reduireImage: preparerJpeg,
     ouvrirOnglet: () => window.open('', '_blank'),
     confirmer: (texte) => window.confirm(texte),

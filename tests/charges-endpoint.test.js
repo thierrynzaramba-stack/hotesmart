@@ -10,7 +10,7 @@ process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { baseEnregistreuse } = require('./outils/base-enregistreuse')
+const { baseEnregistreuse, filtre } = require('./outils/base-enregistreuse')
 
 const TITULAIRE = '11111111-1111-4111-8111-111111111111'
 const MEMBRE = '22222222-2222-4222-8222-222222222222'
@@ -323,4 +323,54 @@ test('LE TEST QUI COMPTE : un refus du writer porte sa LIGNE fautive jusqu\'à l
     require.cache[absPerm].exports = vraiePerm
     delete require.cache[absEndpoint]
   }
+})
+
+// ─── Lot 8d (§14.23) : les adresses des fichiers de l'export ────────────────
+const IDX = (n) => `33333333-3333-4333-8333-3333333333${String(n).padStart(2, '0')}`
+
+test('⚠ 8d : `export_urls` — un membre est refusé AVANT toute requête', async () => {
+  const r = await appeler({ titulaire: false, corps: { action: 'export_urls', ids: [IDX(1)] } })
+  assert.equal(r.statut, 403)
+  assert.equal(r.requetes.length, 0)
+  assert.equal(r.gestes.length, 0)
+})
+
+test('LE TEST QUI COMPTE (8d) : `export_urls` ne signe que des factures DU COMPTE, ENREGISTRÉES et AVEC fichier — rapprochées par leur chemin, les autres dites absentes', async () => {
+  const lignes = [
+    { id: IDX(1), user_id: TITULAIRE, statut: 'validee', origine: 'fichier', justificatif_chemin: `${TITULAIRE}/a.pdf` },
+    { id: IDX(2), user_id: TITULAIRE, statut: 'validee', origine: 'photo', justificatif_chemin: `${TITULAIRE}/b.jpg` },
+    { id: IDX(3), user_id: TITULAIRE, statut: 'a_verifier', origine: 'fichier', justificatif_chemin: `${TITULAIRE}/c.pdf` },
+    { id: IDX(4), user_id: 'autre-compte', statut: 'validee', origine: 'fichier', justificatif_chemin: 'autre/d.pdf' },
+    { id: IDX(5), user_id: TITULAIRE, statut: 'validee', origine: 'ota', justificatif_chemin: null }
+  ]
+  const r = await appeler({
+    corps: { action: 'export_urls', ids: [IDX(1), IDX(2), IDX(3), IDX(4), IDX(5)] },
+    repondre: () => ({ data: lignes }),
+    // Le stockage rend les adresses DANS UN AUTRE ORDRE : le rapprochement se
+    // fait par le chemin, jamais par la position.
+    stockage: { createSignedUrls: (chemins, s) => ({ data: [...chemins].reverse().map(c => ({ path: c, signedUrl: `https://stockage.test/lire/${c}?s=${s}`, error: null })), error: null }) }
+  })
+  assert.equal(r.statut, 200)
+  assert.deepEqual(r.charge.urls, [
+    { id: IDX(1), url: `https://stockage.test/lire/${TITULAIRE}/a.pdf?s=60` },
+    { id: IDX(2), url: `https://stockage.test/lire/${TITULAIRE}/b.jpg?s=60` }
+  ])
+  assert.deepEqual(r.charge.absentes, [IDX(3), IDX(4), IDX(5)])
+  const lecture = r.requetes.find(q => q.table === 'charges')
+  assert.equal(filtre(lecture, 'user_id'), TITULAIRE)
+  assert.deepEqual(r.gestes.map(g => [g.nom, g.args[0]]), [['createSignedUrls', [`${TITULAIRE}/a.pdf`, `${TITULAIRE}/b.jpg`]]])
+})
+
+test('8d : `export_urls` — au plus 20, des identifiants forgés refusés AVANT toute lecture ; une panne du stockage est une panne', async () => {
+  for (const [ids, code] of [[[], 'aucune_charge'], [null, 'aucune_charge'], [Array.from({ length: 21 }, (_, i) => IDX(i + 1)), 'trop_de_charges'], [[IDX(1), 'x),user_id.neq.(y'], 'charge_non_designee']]) {
+    const r = await appeler({ corps: { action: 'export_urls', ids } })
+    assert.deepEqual([r.statut, r.charge.error], [400, code], JSON.stringify(ids))
+    assert.equal(r.requetes.length, 0)
+  }
+  const p = await appeler({
+    corps: { action: 'export_urls', ids: [IDX(1)] },
+    repondre: () => ({ data: [{ id: IDX(1), user_id: TITULAIRE, statut: 'validee', origine: 'fichier', justificatif_chemin: 'a.pdf' }] }),
+    stockage: { createSignedUrls: () => ({ data: null, error: { message: 'panne' } }) }
+  })
+  assert.ok(p.statut >= 500)
 })

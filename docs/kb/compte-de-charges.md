@@ -59,7 +59,23 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 | `lib/charges/ecran.js`, `api/ecran/charges.js` | « À traiter » par curseur (`suite_a_traiter`, dette 153) ; le parcours `parcours=debut|<curseur>` (« À vérifier », ordre de dépôt). |
 | `shared/charges-vue.js` | Dépôt de 50 fichiers au plus, un par un, suivi par une fenêtre de chargement ; puis la vérification une par une du dépôt s'ouvre d'elle-même ; « Tout traiter » (nommé « Vérifier une par une » jusqu'à la recette) pour toute la file ; facture à droite de la fiche à l'ordinateur (`deps.ecranLarge`). « Enregistrer les factures complètes » est retiré en recette (spec §14.22.9). |
 
+## Lot 8d — télécharger un exercice en ZIP (spec §14.23)
+
+| Fichier | Rôle |
+|---|---|
+| `lib/charges/ecran.js`, `api/ecran/charges.js` | `?export=1&entite&periode` : les factures `validee` de l'entité dont le jour est dans l'exercice, page après page (5 000 au plus, sinon 413 `trop_de_factures`), sans le chemin du fichier ; et le nombre « À traiter » du compte. |
+| `lib/charges.js`, `api/charges.js` | `export_urls { ids }` (≤ 20) : une adresse de lecture de 60 s par facture du compte, enregistrée, avec fichier ; les autres dites `absentes`. Rapprochement par CHEMIN. |
+| `shared/charges-export.js` | Numérotation et noms des fichiers, CSV (BOM, `;`, virgule), PDF de la liste, téléchargement par paquets avec trois essais. |
+| `shared/pdf-simple.js`, `shared/zip-simple.js` | Écrivains minimaux, sans bibliothèque : PDF (Helvetica, WinAnsi, chaînes en hexadécimal) et ZIP « stocké ». |
+| `shared/charges-vue.js`, `pages/charges.html` | Bouton « Télécharger l'exercice » ; la fenêtre de chargement suit l'export ; `telecharger` injecté par la page. |
+
 ## Règles à ne pas perdre
+
+- **Un export ne sort jamais incomplet sans le dire** (lot 8d) : un fichier
+  qui ne vient pas après trois essais, chacun avec une adresse neuve, arrête
+  l'export, aucun ZIP n'est proposé, et la fenêtre nomme la facture.
+- **Le ZIP se fabrique dans le navigateur** : une réponse de fonction est
+  bornée à 4,5 Mo. Le serveur ne rend que la liste et des adresses signées.
 
 - **L'entité d'une facture est reconnue, ou laissée vide dans le doute**
   (décision de Thierry, recette du lot 8c) : il la choisit alors pour

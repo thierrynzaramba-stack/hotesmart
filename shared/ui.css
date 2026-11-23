@@ -2397,6 +2397,8 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .chg-chargement__barre { width: 100%; height: 8px; accent-color: var(--ink); }
 .chg-chargement__fin p { margin: 0; }
 .chg-chargement__gestes { display: flex; justify-content: flex-end; margin-top: var(--gap-s); }
+/* Lot 8d : « Télécharger l'exercice », à côté du choix de l'exercice. */
+.chg-exporter { margin-inline-start: auto; }
 @media (prefers-reduced-motion: reduce) {
   .chg-chargement__roue { animation: none; border-top-color: var(--line); }
 }

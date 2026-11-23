@@ -521,3 +521,76 @@ test('les échéances se lisent page après page, dans un ordre TOTAL — 1000 +
   assert.deepEqual(pages[0].ordre, [['date_echeance', true], ['credit_id', true], ['indice', true]])
   assert.equal(r.rep.corps.credits.echeances.length, 1001)
 })
+
+// ─── Lot 8d (§14.23) : la liste d'export d'un exercice ───────────────────────
+const ligneExport = (n, extra = {}) => ({
+  id: uuid(n), jour: '2026-03-0' + ((n % 9) + 1), date_facture: '2026-03-01', fournisseur_nom: 'F' + n, fournisseur_siret: null,
+  numero_facture: 'N' + n, type_document: 'facture', categorie: 'energie', bien_id: null, periode_debut: null, periode_fin: null,
+  montant_ht_cents: 1000, montant_tva_cents: 200, montant_ttc_cents: 1200, origine: 'fichier', justificatif_type: 'application/pdf',
+  justificatif_chemin: `${TITULAIRE}/${uuid(n)}.pdf`, cree_le: '2026-03-01T10:00:00Z', ...extra
+})
+
+test('LE TEST QUI COMPTE (8d) : `?export=1` rend les factures ENREGISTRÉES de l\'entité et de l\'exercice, sans le chemin de leur fichier, et le nombre à traiter', async () => {
+  const r = await appeler({
+    query: { export: '1', entite: ENT_A, periode: '2026' },
+    repondre: (q) => {
+      if (q.optionsSelect && q.optionsSelect.head) return { count: 4 }
+      return { data: [ligneExport(1), ligneExport(2, { origine: 'ota', justificatif_chemin: null }), ligneExport(3, { origine: 'credit', justificatif_chemin: 'x' })] }
+    }
+  })
+  assert.equal(r.rep.statut, 200)
+  const x = r.rep.corps.export
+  assert.deepEqual([x.periode, x.debut, x.fin, x.a_traiter, x.entite.nom], ['2026', '2026-01-01', '2026-12-31', 4, 'Moi'])
+  assert.deepEqual(x.lignes.map(l => l.fichier), [true, false, false], 'une commission et une échéance de crédit n\'ont pas de fichier')
+  assert.ok(x.lignes.every(l => !('justificatif_chemin' in l)), 'le chemin du fichier ne sort pas')
+  const lecture = r.requetes.find(q => q.table === 'charges' && !(q.optionsSelect && q.optionsSelect.head))
+  assert.equal(filtre(lecture, 'user_id'), TITULAIRE)
+  assert.equal(filtre(lecture, 'entite_juridique_id'), ENT_A)
+  assert.equal(filtre(lecture, 'statut'), 'validee')
+  assert.deepEqual(lecture.filtres.filter(f => f[0] === 'gte' || f[0] === 'lte'), [['gte', 'jour', '2026-01-01'], ['lte', 'jour', '2026-12-31']])
+  assert.deepEqual(lecture.ordre, [['jour', true], ['cree_le', true], ['id', true]])
+  assert.deepEqual(lecture.plage, [0, 999])
+  const compte = r.requetes.find(q => q.optionsSelect && q.optionsSelect.head)
+  assert.equal(filtre(compte, 'user_id'), TITULAIRE)
+  assert.match(String(r.rep.entetes['cache-control'] || ''), /no-store|private/)
+})
+
+test('8d : l\'export d\'un exercice décalé suit le début d\'exercice de l\'entité RELUE', async () => {
+  const r = await appeler({ query: { export: '1', entite: ENT_B, periode: '2025' }, repondre: (q) => (q.optionsSelect && q.optionsSelect.head ? { count: 0 } : { data: [] }) })
+  assert.equal(r.rep.statut, 200)
+  assert.deepEqual([r.rep.corps.export.debut, r.rep.corps.export.fin], ['2025-04-01', '2026-03-31'])
+})
+
+test('8d : l\'export se lit PAGE APRÈS PAGE, et au-delà de 5 000 il est refusé en le disant', async () => {
+  const mille = Array.from({ length: 1000 }, (_, i) => ligneExport(i + 1))
+  let pages = 0
+  const r = await appeler({ query: { export: '1', entite: ENT_A, periode: '2026' }, repondre: (q) => {
+    if (q.optionsSelect && q.optionsSelect.head) return { count: 0 }
+    pages++
+    return { data: pages === 1 ? mille : [ligneExport(5000)] }
+  } })
+  assert.equal(r.rep.statut, 200)
+  assert.equal(r.rep.corps.export.lignes.length, 1001)
+  assert.deepEqual(r.requetes.filter(q => q.plage).map(q => q.plage), [[0, 999], [1000, 1999]])
+  const trop = await appeler({ query: { export: '1', entite: ENT_A, periode: '2026' }, repondre: (q) => (q.optionsSelect && q.optionsSelect.head ? { count: 0 } : { data: mille }) })
+  assert.equal(trop.rep.statut, 413)
+  assert.equal(trop.rep.corps.error, 'trop_de_factures')
+  assert.equal(trop.requetes.filter(q => q.plage).length, 6, 'on s\'arrête après 5 000, sans tout lire')
+})
+
+test('⚠ 8d : un MEMBRE est refusé AVANT toute lecture ; une entité, un exercice ou une entité d\'un autre compte manquants ou faux sont refusés avant la liste', async () => {
+  const m = await appeler({ titulaire: false, query: { export: '1', entite: ENT_A, periode: '2026' } })
+  assert.equal(m.rep.statut, 403)
+  assert.equal(m.requetes.length, 0)
+  for (const [query, statut, erreur] of [
+    [{ export: '1', periode: '2026' }, 400, 'entite_requise'],
+    [{ export: '1', entite: 'pas-un-uuid', periode: '2026' }, 400, 'entite_invalide'],
+    [{ export: '1', entite: ENT_A }, 400, 'periode_requise'],
+    [{ export: '1', entite: ENT_AUTRE, periode: '2026' }, 404, 'entite_introuvable'],
+    [{ export: '1', entite: ENT_A, periode: '1900' }, 400, 'periode_invalide']
+  ]) {
+    const r = await appeler({ query })
+    assert.deepEqual([r.rep.statut, r.rep.corps.error], [statut, erreur], JSON.stringify(query))
+    assert.equal(r.requetes.filter(q => q.table === 'charges').length, 0, 'aucune facture lue')
+  }
+})

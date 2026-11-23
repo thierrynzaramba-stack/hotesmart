@@ -97,9 +97,14 @@ async function monter (o = {}) {
   const corps = html.slice(html.indexOf('<body>') + 6, html.indexOf('<script src="/shared/i18n/i18n.js">'))
   const dom = new JSDOM(`<!doctype html><html><body>${corps}</body></html>`, { url: 'https://hs.test/charges', runScripts: 'outside-only', pretendToBeVisual: true })
   const w = dom.window
-  const journal = { fetch: [], onglets: [], confirmations: [], gardes: 0, reduits: [] }
+  const journal = { fetch: [], onglets: [], confirmations: [], gardes: 0, reduits: [], zips: [], clics: [] }
 
-  const repondre = (statut, corpsJson) => ({ ok: statut >= 200 && statut < 300, status: statut, json: async () => corpsJson })
+  // `arrayBuffer` : un fichier lu au stockage (lot 8d, l'export d'un
+  // exercice) ; `o.fichier(url)` en donne le contenu, ou lève.
+  const repondre = (statut, corpsJson, octets = null) => ({
+    ok: statut >= 200 && statut < 300, status: statut, json: async () => corpsJson,
+    arrayBuffer: async () => (octets || new TextEncoder().encode('')).slice().buffer
+  })
   w.fetch = async (url, opts = {}) => {
     const u = String(url)
     const entree = { url: u, methode: opts.method || 'GET', entetes: opts.headers || {}, corps: null }
@@ -109,6 +114,10 @@ async function monter (o = {}) {
     try {
       if (u.startsWith('/api/ecran/charges')) return repondre(200, (o.ecran || (() => reponseEcran()))(u))
       if (u === '/api/charges') return repondre(200, (o.geste || (() => ({ ok: true })))(entree.corps))
+      if (u.startsWith('https://stockage.test/lire/')) {
+        if (o.fichier) { const r = await o.fichier(u); return repondre(r.statut || 200, {}, r.octets) }
+        return repondre(200, {}, new TextEncoder().encode('fichier:' + u))
+      }
       if (u.startsWith('https://stockage.test/')) return repondre(o.depot ? o.depot(u) : 200, {})
     } catch (e) {
       if (e && e.status) return repondre(e.status, { error: e.error || e.message, ...(e.detail ? { detail: e.detail } : {}) })
@@ -117,6 +126,11 @@ async function monter (o = {}) {
     return repondre(404, { error: 'inconnu' })
   }
   w.confirm = (texte) => { journal.confirmations.push(texte); return o.confirmer !== false }
+  // Lot 8d : le ZIP proposé au téléchargement. Le Blob est gardé, et le clic
+  // sur le lien est noté au lieu de naviguer (jsdom ne sait pas).
+  w.URL.createObjectURL = (b) => { journal.zips.push(b); return 'blob:hs-test/' + journal.zips.length }
+  w.URL.revokeObjectURL = () => {}
+  w.HTMLAnchorElement.prototype.click = function () { journal.clics.push({ href: this.href, download: this.download }) }
   w.open = () => { const onglet = { location: { href: '' }, closed: false, opener: 'moi', close () { this.closed = true } }; journal.onglets.push(onglet); return onglet }
   w.I18n = i18nFr()
   if (o.large) w.matchMedia = (q) => ({ matches: /min-width/.test(q), media: q })

@@ -4750,6 +4750,46 @@ peser sur un téléphone ancien. À mesurer en recette.
    liste, N ÷ 20 demandes d'adresses, N téléchargements au stockage. Durée et
    taille du ZIP à mesurer en recette sur l'exercice réel.
 
+#### 14.23.6 Ce qui est codé (23 novembre 2026, nuit)
+
+**Serveur.**
+- `lib/charges/ecran.js` : `aExporter` (colonnes `COLONNES_EXPORT`, `user_id`,
+  entité, `statut = 'validee'`, `jour` entre les bornes, ordre jour puis
+  `cree_le` puis `id`, pages de 1 000 par `range`, refus au-delà de 5 000 ;
+  `justificatif_chemin` lu puis retiré, remplacé par `fichier` — faux pour une
+  commission ou une échéance de crédit) ; `nombreATraiter` (compte exact de la
+  file « À traiter », la même condition que l'écran).
+- `api/ecran/charges.js` : branche `?export=1`, mêmes gardes et même ordre que
+  le détail d'un mois (entité requise et relue, exercice relu, 413 au-delà).
+- `lib/charges.js` : `urlsExport` (≤ 20, motif avant lecture, `user_id`,
+  `validee` et fichier, `createSignedUrls` de 60 s, rapprochement par chemin,
+  `absentes`) ; `api/charges.js` : action `export_urls`.
+
+**Écran.**
+- `shared/zip-simple.js` : CRC-32, ZIP stocké, noms en UTF-8, pas de ZIP64.
+- `shared/pdf-simple.js` : PDF 1.4, Helvetica et Helvetica-Bold, WinAnsi
+  (largeurs des fichiers AFM d'Adobe), chaînes en hexadécimal ; `couper` par
+  « … ».
+- `shared/charges-export.js` : `preparerExport` (numéros 001…, sur quatre
+  chiffres au-delà de 999 ; noms simples, ligatures dépliées), `totauxExport`,
+  `csvExport`, `pdfExport` (A4 paysage, titre répété, total, notes, « Page x
+  sur y »), `telechargerFichiers` (paquets de 20, quatre de front, trois
+  essais avec adresse neuve), `zipExport`.
+- `shared/charges-vue.js` : bouton dans le bloc des totaux, `exporter`, la
+  fenêtre de chargement reprise (titre et étape au choix), Échap bloqué
+  pendant l'export, `sauverParDefaut` (lien de téléchargement d'un Blob).
+- `pages/charges.html` : `telecharger(url)` injecté.
+
+**Tests.** `tests/charges-export.test.js` (ZIP relu, PDF relu par unpdf,
+noms, CSV, paquets et essais), `tests/charges-export-page.test.js` (le geste
+dans la vraie page, ZIP relu), ajouts à `charges-ecran` et `charges-endpoint`.
+Contre-épreuve : quinze sabotages, chacun fait rougir au moins un test (statut
+non filtré, chemin exposé, sans borne, sans compte, non enregistrées signées,
+rapprochement par position, motif absent, un seul essai, paquets de 50, ZIP
+incomplet, commission avec fichier, Échap pendant l'export, montants non lus
+tus, CSV sans guillemets, exercice hors bornes). Suite : 9 283 verts à l'heure
+réelle et à J+60.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et

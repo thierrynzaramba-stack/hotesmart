@@ -7,7 +7,8 @@
 // passent sous « À traiter ».
 //
 // ⚠ AUCUN APPEL RÉSEAU ÉCRIT ICI. La page injecte `charger` (l'appel d'écran),
-// `agir` (les gestes) et `deposer` (l'envoi du fichier au stockage) : c'est
+// `agir` (les gestes), `deposer` (l'envoi du fichier au stockage) et
+// `telecharger` (la lecture d'un fichier de l'export, lot 8d) : c'est
 // elle qui porte l'inventaire de ses endpoints (tests/budget-ecran.test.js).
 //
 // ⚠ AUCUN TEXTE EN DUR, AUCUN HEXA, AUCUNE ICÔNE DESSINÉE : les textes passent
@@ -15,6 +16,8 @@
 //
 // ⚠ UN MONTANT ABSENT N'EST JAMAIS 0 : il s'affiche « non lu », et le total dit
 // combien de factures n'ont pas de montant (règle du résumé, spec §8).
+
+import { preparerExport, csvExport, pdfExport, telechargerFichiers, zipExport, nomSimple } from './charges-export.js'
 
 // Les types que le serveur accepte (lib/charges/regles.js, TYPES) : la même
 // borne ici évite d'envoyer ce qui sera refusé — elle ne remplace pas la garde
@@ -211,6 +214,8 @@ export function monter (racine, deps) {
     fiche: null, occupe: false, envoiEnCours: false, ficheEnCours: false,
     // Ce que « Continuer » fait à la fin d'un dépôt (recette du lot 8c).
     apresChargement: null,
+    // Un export d'exercice en cours (lot 8d).
+    exportEnCours: false,
     credits: null, creditEnCours: false, creditRetour: null
   }
 
@@ -539,7 +544,9 @@ export function monter (racine, deps) {
     } else if (!tot) {
       corps = `<p class="muted">${esc(t('charges.totaux_indispo'))}</p>`
     } else {
-      const bornes = `<div class="chg-choix">${selecteurExercice()}<p class="chg-mentions">${esc(t('charges.du_au', { debut: jourLisible(tot.debut), fin: jourLisible(tot.fin) }))}</p></div>`
+      // Lot 8d : « Télécharger l'exercice », l'exercice et l'entité affichés.
+      const bornes = `<div class="chg-choix">${selecteurExercice()}<p class="chg-mentions">${esc(t('charges.du_au', { debut: jourLisible(tot.debut), fin: jourLisible(tot.fin) }))}</p>`
+        + `<button type="button" class="btn btn--secondary chg-exporter" data-geste="exporter">${esc(t('charges.exporter'))}</button></div>`
         + (tot.standard ? `<p class="chg-mentions">${esc(t('charges.exercice_standard'))}</p>` : '')
         + (tot.exercices_indisponibles ? `<p class="chg-mentions">${esc(t('charges.exercices_indispo'))}</p>` : '')
       const s = tot.total || {}
@@ -1233,11 +1240,11 @@ export function monter (racine, deps) {
   // continue, et la ligne d'état garde le résumé.
   const fenetre = () => $('[data-bind="chargement"]')
   const fenetreOuverte = (f) => Boolean(f && (f.open || f.hasAttribute('open')))
-  function ouvrirChargement (n) {
+  function ouvrirChargement (n, titre = null) {
     const f = fenetre()
     if (!f) return
     etat.apresChargement = null
-    f.innerHTML = `<h2 class="chg-h2" id="chg-chargement-titre">${esc(n > 1 ? t('charges.chargement_titre_masse', { n }) : t('charges.chargement_titre'))}</h2>`
+    f.innerHTML = `<h2 class="chg-h2" id="chg-chargement-titre">${esc(titre || (n > 1 ? t('charges.chargement_titre_masse', { n }) : t('charges.chargement_titre')))}</h2>`
       + '<p class="chg-chargement__compte" data-bind="chargement-compte"></p>'
       + '<p class="chg-chargement__etape" data-bind="chargement-en-cours"><span class="chg-chargement__roue" aria-hidden="true"></span><span data-bind="chargement-etape"></span></p>'
       + '<p class="chg-chargement__nom" data-bind="chargement-nom"></p>'
@@ -1246,14 +1253,19 @@ export function monter (racine, deps) {
     f.setAttribute('aria-busy', 'true')
     ouvrirDialogue(f)
   }
-  function avancerChargement ({ i, n, etape, nom }) {
+  // `texte` remplace l'étape du dépôt (l'export a les siennes) ; `max` et
+  // `valeur` règlent la barre quand elle ne compte pas des demi-cases.
+  function avancerChargement ({ i, n, etape, nom, texte = null, max = null, valeur = null }) {
     const f = fenetre()
     if (!f) return
     const z = (k) => f.querySelector(`[data-bind="chargement-${k}"]`)
     if (z('compte')) z('compte').textContent = n > 1 ? t('charges.masse_progression', { i: i + 1, n }) : ''
-    if (z('etape')) z('etape').textContent = t(etape === 'lecture' ? 'charges.lecture_en_cours' : 'charges.envoi_en_cours')
+    if (z('etape')) z('etape').textContent = texte || t(etape === 'lecture' ? 'charges.lecture_en_cours' : 'charges.envoi_en_cours')
     if (z('nom')) z('nom').textContent = nom || ''
-    if (z('barre')) z('barre').value = i + (etape === 'lecture' ? 0.5 : 0)
+    if (z('barre')) {
+      if (max != null) z('barre').setAttribute('max', String(max))
+      z('barre').value = valeur != null ? valeur : i + (etape === 'lecture' ? 0.5 : 0)
+    }
   }
   function fermerChargement () {
     const f = fenetre()
@@ -1439,6 +1451,91 @@ export function monter (racine, deps) {
     suite()
   }
 
+  // ─── Télécharger l'exercice (lot 8d, §14.23) ─────────────────────────────
+  // Un ZIP de l'exercice et de l'entité AFFICHÉS : la liste en PDF, les
+  // factures enregistrées en fichiers séparés, et un CSV. Tout se fabrique ici
+  // (shared/charges-export.js) ; le serveur rend la liste et les adresses.
+  // « 2026 » pour un exercice civil, « 2025-2026 » sinon.
+  const anneesExercice = (annee, mmjj) => (mmjj === '01-01' || !mmjj ? String(annee) : `${annee}-${Number(annee) + 1}`)
+  function sauverParDefaut (morceaux, nom) {
+    const w = doc.defaultView
+    const url = w.URL.createObjectURL(new w.Blob(morceaux, { type: 'application/zip' }))
+    const a = doc.createElement('a')
+    a.href = url
+    a.download = nom
+    a.hidden = true
+    doc.body.appendChild(a)
+    a.click()
+    // L'adresse vit le temps que le navigateur prenne le fichier.
+    w.setTimeout(() => { w.URL.revokeObjectURL(url); a.remove() }, 60000)
+  }
+  async function exporter (bouton) {
+    const tot = etat.totaux
+    if (etat.exportEnCours || etat.envoiEnCours || !tot || tot.sans_entite || !tot.entite || !tot.periode) return
+    etat.exportEnCours = true
+    if (bouton) bouton.disabled = true
+    const annees = anneesExercice(tot.periode, tot.debut_exercice)
+    ouvrirChargement(1, t('charges.export_fenetre', { exercice: annees }))
+    avancerChargement({ i: 0, n: 1, texte: t('charges.export_preparation'), max: 1, valeur: 0 })
+    let message = null
+    let erreur = false
+    try {
+      const d = await deps.charger('export=1&entite=' + encodeURIComponent(tot.entite) + '&periode=' + encodeURIComponent(tot.periode))
+      const x = (d && d.export) || null
+      if (!x) throw Object.assign(new Error('erreur'), { status: 500 })
+      if (!x.lignes.length) { message = t('charges.export_vide'); return }
+      const prepare = preparerExport(x.lignes, { dossier: nomSimple(t('charges.export_dossier')) || 'Factures' })
+      const nbFichiers = prepare.filter(l => l.chemin).length
+      avancerChargement({ i: 0, n: 1, texte: t('charges.export_telechargement'), max: nbFichiers + 1, valeur: 0 })
+      const fichiers = await telechargerFichiers(prepare, {
+        agir: deps.agir,
+        telecharger: deps.telecharger,
+        avancer: (fait, total, l) => avancerChargement({ i: fait - 1, n: total, texte: t('charges.export_telechargement'), nom: l.chemin.split('/').pop(), max: total + 1, valeur: fait })
+      })
+      avancerChargement({ i: 0, n: 1, texte: t('charges.export_creation'), max: nbFichiers + 1, valeur: nbFichiers })
+      const noms = {
+        bien: nomBien,
+        categorie: nomCategorie,
+        type: (k) => connu('charges.type_' + k) || k
+      }
+      const aujourdhui = new Date()
+      const jourIso = `${aujourdhui.getFullYear()}-${String(aujourdhui.getMonth() + 1).padStart(2, '0')}-${String(aujourdhui.getDate()).padStart(2, '0')}`
+      const entete = {
+        titre: t('charges.export_titre', { exercice: annees }),
+        entite: x.entite.siret ? t('charges.export_entite_siret', { entite: x.entite.nom, siret: x.entite.siret }) : x.entite.nom,
+        du_au: t('charges.du_au', { debut: jourLisible(x.debut), fin: jourLisible(x.fin) }),
+        compte: t('charges.export_compte', { n: prepare.length, date: jourLisible(jourIso) }),
+        a_traiter: x.a_traiter ? t('charges.export_a_traiter', { n: x.a_traiter }) : ''
+      }
+      const pdf = pdfExport(prepare, { t, langue, noms, entete })
+      const csv = csvExport(prepare, { t, langue, noms })
+      const simple = (k) => nomSimple(t(k)) || k
+      const morceaux = zipExport({
+        nomListe: `${simple('charges.export_nom_liste')}-${annees}.pdf`,
+        pdf,
+        nomCsv: `${simple('charges.export_dossier')}-${annees}.csv`,
+        csv,
+        prepare,
+        fichiers,
+        date: aujourdhui
+      })
+      ;(deps.sauver || sauverParDefaut)(morceaux, `${simple('charges.export_nom_zip')}-${annees}-${nomSimple(x.entite.nom) || 'entite'}.zip`)
+      message = t('charges.export_fin', { n: prepare.length, f: nbFichiers })
+    } catch (e) {
+      erreur = true
+      message = e && e.code === 'fichier_absent'
+        ? t('charges.export_echec_fichier', { numero: e.ligne.numero, fournisseur: e.ligne.fournisseur_nom || t('charges.fournisseur_inconnu') })
+        : messageErreur(e)
+    } finally {
+      etat.exportEnCours = false
+      if (bouton) bouton.disabled = false
+      if (message) {
+        statutEnvoi(message, erreur)
+        finirChargement(message, erreur, () => {}, true)
+      }
+    }
+  }
+
   // ─── Les écouteurs : un seul, délégué ────────────────────────────────────
   racine.addEventListener('click', (ev) => {
     const el = ev.target.closest && ev.target.closest('[data-ouvrir],[data-geste],[data-action],[data-mois]')
@@ -1451,6 +1548,7 @@ export function monter (racine, deps) {
     else if (g === 'plus-a-traiter') afficherPlusATraiter(el)
     else if (g === 'parcourir') parcourir(el)
     else if (g === 'chargement-continuer') continuerApresChargement()
+    else if (g === 'exporter') exporter(el)
     else if (g === 'passer') passer()
     else if (g === 'fermer') fermerFiche()
     else if (g === 'valider') valider()
@@ -1499,7 +1597,7 @@ export function monter (racine, deps) {
   // une » reste là).
   const f8c = fenetre()
   if (f8c) {
-    f8c.addEventListener('cancel', (ev) => { if (etat.envoiEnCours) ev.preventDefault() })
+    f8c.addEventListener('cancel', (ev) => { if (etat.envoiEnCours || etat.exportEnCours) ev.preventDefault() })
     f8c.addEventListener('close', () => { etat.apresChargement = null })
   }
   dialogue().addEventListener('close', () => {
