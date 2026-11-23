@@ -4973,6 +4973,128 @@ interruption, paquets de 20, panne d'adresses fatale, formule, identifiants
 en nombres, contrôleur d'une autre fenêtre, xref décalé), chacun fait rougir
 au moins un test. Suite : 9 288 verts à l'heure réelle et à J+60.
 
+### 14.24 Lot 5 — recevoir les factures par e-mail (23 novembre 2026)
+
+Branche `charges-email`, partie de `main` (`5e220196`, lot 8d en production).
+Lancé par Thierry le 23 novembre 2026 à 14 h 39 (« lance-le »), après sa
+demande de « tester l'envoi de facture par e-mail » : la fonction n'existait
+pas, elle était prévue au découpage (§8, lot 5) et décrite au §7.
+
+#### 14.24.1 Ce qui est déjà décidé (8 et 9 novembre 2026)
+
+- Une adresse de factures **par compte** (Q6), ouverte à **tout expéditeur**,
+  fournisseurs compris (Q7), sur `reply.hotesmart.fr` (Q8) : aucun geste DNS,
+  le sous-domaine reçoit déjà toute adresse et l'envoie à
+  `api/inbound-email.js`.
+- Un bouton **« Changer d'adresse »** : l'ancienne est refusée aussitôt
+  (Q16).
+- Chaque pièce jointe devient une facture **« à lire »**, puis lue par l'IA
+  **à l'arrivée** (Q28), comme une facture déposée ; tout arrive « à
+  vérifier ». Gardes sur les pièces jointes : nombre, nom, type et taille
+  confrontés à la relecture Brevo (Q15).
+- Un e-mail sans pièce jointe lisible arrive **« sans facture lisible »**,
+  avec son expéditeur, son sujet et son texte (Q19) ; l'hôte ajoute le PDF à
+  la main.
+- Un doublon n'est jamais refusé, il est regroupé (Q14) ; un **rejeu** du
+  même e-mail par Brevo ne crée rien.
+- L'entité est reconnue sur la facture, ou laissée à choisir (Q6, recette du
+  lot 8c).
+
+#### 14.24.2 Ce qui est proposé, et qui attend Thierry
+
+1. **L'adresse : courte et tirée au hasard, plutôt que signée.** Le §7
+   proposait `fac-<compte>-<version>-<signature>@reply.hotesmart.fr`, signée
+   par un secret dédié (Q16). Proposition : `factures-<jeton>@reply.hotesmart.fr`,
+   où le jeton (16 caractères, environ 80 bits) est tiré au hasard et gardé
+   dans `charges_adresses`. Mêmes garanties — impossible à deviner, refusée
+   aussitôt après « Changer d'adresse », jamais confondue avec une adresse de
+   réponse d'un voyageur —, mais une adresse **deux fois plus courte**, que
+   l'hôte peut dicter ou recopier, et **aucun secret de plus** à créer dans
+   Vercel.
+2. **Où l'adresse s'affiche** : sur `/charges`, sous « Ajouter une facture »,
+   avec « Copier » et « Changer d'adresse » (maquette dans la conversation).
+3. **Les petites images ignorées** : un logo de signature ou une icône de
+   réseau social arrive en pièce jointe ; chacune deviendrait une « facture »
+   à supprimer. Proposition : une image de moins de 30 Ko est ignorée ; un PDF
+   est toujours pris.
+4. **Aucune notification en V1** : une facture arrivée par e-mail apparaît
+   dans « À traiter », comme une facture déposée.
+
+#### 14.24.3 Ce qui est à coder
+
+**Données (migration AVANT le code).**
+- `charges_adresses.jeton` (texte, unique, motif `^[a-z0-9]{16}$`) et
+  `charges_adresses.changee_le`. Writer unique : `lib/charges/adresse.js`.
+- `charges.email_sujet` et `charges.email_texte` (texte, borné à 2 000
+  caractères), pour la ligne « sans facture lisible » (Q19).
+
+**L'aiguillage**, dans `api/inbound-email.js` : APRÈS la relecture chez
+Brevo et le refus d'une divergence, et AVANT le filtre anti-boucle et le
+refus d'un message sans texte (§7) — ces deux gardes existent parce que
+l'agent IA répond, et le chemin des factures ne répond jamais. Le score de
+spam reste appliqué. ⚠ L'aiguillage lit le `recipient` RELU, jamais celui du
+POST, et une adresse `factures-…` ne tombe jamais dans le chemin des
+réponses. **Le chemin des réponses voyageurs ne change pas**, et des tests
+le prouvent.
+
+**Le chemin des factures** (`lib/charges/email.js`) :
+- le compte vient du jeton, **résolu en base** ; un jeton inconnu ou ancien
+  est refusé en 200 (définitif), trace au journal serveur seulement ;
+- au plus 10 pièces jointes prises par e-mail ; types : PDF, JPEG, PNG,
+  WebP, HEIC et HEIF (convertis comme au dépôt) ; 10 Mo au plus chacune ;
+- chaque pièce : nom, type et taille confrontés à la relecture (un champ
+  absent de la relecture est un refus), jeton de téléchargement vérifié par
+  motif puis encodé, octets téléchargés chez Brevo
+  (`GET /v3/inbound/attachments/<jeton>`) dont la taille doit égaler la
+  taille relue ;
+- puis le même chemin qu'un dépôt : fichier au bucket, empreinte, doublons,
+  charge `a_lire` d'origine `email` (`email_uuid`, `email_expediteur`,
+  `email_recu_le` de Brevo), lecture par l'IA si le budget de temps et la
+  limite de 100 lectures par jour le permettent, sinon le cron quotidien la
+  rattrape ;
+- un e-mail sans pièce prise (aucune, ou toutes ignorées) : UNE ligne
+  `sans_facture` avec expéditeur, sujet et texte ; une pièce refusée
+  définitivement (taille qui ne correspond pas, jeton refusé) : une ligne
+  `sans_facture` avec son motif, visible de l'hôte ;
+- panne passagère (réseau, Brevo en 5xx, stockage) : 503, Brevo rejoue ;
+  l'index unique (compte, e-mail, empreinte) rend le rejeu sans effet.
+
+**L'écran.** Le bloc de l'adresse ; `POST /api/charges` actions
+`adresse_creer` et `adresse_changer` (titulaire seul) ; la ligne « sans
+facture lisible » entre dans « À traiter », et sa fiche montre l'expéditeur,
+le sujet et le texte, avec « Supprimer ».
+
+**La recette.** ⚠ L'envoi réel ne se recette QU'EN PRODUCTION : Brevo
+envoie les e-mails du sous-domaine à l'adresse de production seulement. Sur
+staging : l'adresse, « Copier », « Changer d'adresse », et la ligne « sans
+facture lisible » posée par un test. En production : un e-mail avec un PDF,
+une photo, un e-mail sans pièce jointe, puis « Changer d'adresse » et un
+e-mail à l'ancienne adresse.
+
+#### 14.24.4 Inventaire
+
+Rien n'est retiré. Le chemin des réponses voyageurs reste identique, octet
+pour octet sur ce qu'il écrit.
+
+#### 14.24.5 Le téléphone
+
+Le même bloc, l'adresse sur deux lignes si besoin ; « Copier » est le geste
+utile au téléphone.
+
+#### 14.24.6 Case PERFORMANCE
+
+1. Un endpoint d'écran : l'adresse vient avec l'écran (`/api/ecran/charges`),
+   aucun appel de plus.
+2. Donnée non urgente : sans objet (une adresse, lue telle quelle).
+3. Cache navigateur : aucun.
+4. `private, no-store` : déjà posé sur les deux endpoints.
+5. Statiques versionnés : inchangé (pas de module nouveau côté écran).
+6. Lecture tronquée : sans objet (une ligne par compte).
+7. Budget de l'écran : inchangé, une lecture de plus côté serveur, en
+   parallèle.
+8. AVANT / APRÈS : appels de l'écran 2 → 2 ; requêtes +1 ; octets +80
+   environ. À mesurer en recette.
+
 ## 12. Trace des reviews du lot 2
 
 Demandée par le chef de file le 9 novembre 2026 : arbre, branche, plage et
