@@ -827,8 +827,12 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
    bas, fond blanc, bord discret. */
 /* `user-select: none` : le glisser de selection a la souris, en vue etroite,
    ne doit pas selectionner le numero du jour (la ligne Prix de l'ordinateur
-   l'a depuis toujours, les cases du mois ne l'avaient pas). */
-.cal-case { user-select: none; position: relative; aspect-ratio: 1 / 1.7; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); display: flex; flex-direction: column; justify-content: flex-start; align-items: center; padding: 4px 3px 5px; cursor: pointer; font-family: inherit; overflow: hidden; }
+   l'a depuis toujours, les cases du mois ne l'avaient pas).
+   `-webkit-user-select` et `-webkit-touch-callout` : sur iPhone, l'appui long
+   (fiche du jour, 23 novembre 2026) selectionnait sinon le numero du jour,
+   avec sa loupe, et Safari annulait le geste. Memes proprietes que les cases
+   de l'app menage. */
+.cal-case { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; position: relative; aspect-ratio: 1 / 1.7; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); display: flex; flex-direction: column; justify-content: flex-start; align-items: center; padding: 4px 3px 5px; cursor: pointer; font-family: inherit; overflow: hidden; }
 .cal-case--vide { background: transparent; border: 0; cursor: default; }
 .cal-case__num { font-size: var(--fs-small); font-weight: var(--fw-semibold); line-height: 1.1; }
 .cal-case .cal-case__valeur { font-size: var(--fs-caption); font-weight: var(--fw-semibold); margin-top: auto; color: var(--muted); }

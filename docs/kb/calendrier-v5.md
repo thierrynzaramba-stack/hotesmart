@@ -251,6 +251,53 @@ le test lit l'horloge, dates figées s'il injecte le temps* — et **ancrer le
 test dans sa fenêtre est le premier recours, documenter un rouge calendaire le
 dernier.**
 
+## 23 novembre 2026 — AU TÉLÉPHONE, LES DEUX GESTES S'INVERSENT
+
+**Constaté par Thierry, sur Android** : l'appui long sur une date ouvrait la
+fiche du jour (« Configurer les dates ») au lieu de la barre d'actions. La
+barre — Prix, Fermer à la vente, **Bloquer les dates**, Réservation, Plus… —
+était donc **inatteignable au téléphone**.
+
+**Cause.** Un doigt posé « immobile » bouge d'un ou deux pixels, et le
+téléphone l'envoie en `pointermove`. La garde « un déplacement annule l'appui
+long » (point 5 du 21 octobre, rétablie plus haut) annulait au **premier**
+d'entre eux : l'appui long ne partait jamais, le relâchement valait un tap, et
+le tap ouvrait la fiche. Aucun test ne le voyait : le banc n'envoyait jamais de
+`pointermove` pendant un appui long.
+
+**Ce qui change** (décision de Thierry, même jour — branche `fix-appui-long-mobile`) :
+
+| geste au téléphone | avant | depuis le 23 novembre 2026 |
+|---|---|---|
+| appui **court** sur une date, sans sélection | fiche du jour | **sélection + barre**, comme le clic de l'ordinateur |
+| appui court sur une autre date du même bien | étend la sélection | inchangé |
+| appui court **dans** la sélection | saisie de prix (rubrique Prix) | inchangé |
+| appui **long** | sélection + barre | **fiche du jour** de la date tenue, ouverte **au relâchement** |
+| clic de souris en vue étroite, Entrée au clavier | fiche du jour | **sélection** (même énoncé que le tap) |
+
+- **L'appui long ne s'annule qu'au-delà de 10 px** sur l'un des deux axes, et
+  seulement pour le doigt qui a commencé le geste (`TOLERANCE_APPUI_LONG_PX`,
+  même règle que l'app ménage, `TOLERANCE_PX`). Au-delà, le navigateur prend
+  la main pour faire défiler et envoie `pointercancel`, qui clôt le geste.
+- **La fiche s'ouvre au relâchement.** Le doigt sent que l'appui long est
+  pris (`navigator.vibrate(15)`, quand le téléphone le permet).
+- ⚠ **Le clic fantôme est avalé.** Au doigt, le navigateur envoie un `click`
+  après le relâchement, cible recalculée à la position du doigt dans la page
+  que le geste vient de changer (barre en bas, case recentrée, fiche ouverte).
+  Il est avalé une fois, s'il arrive dans les 700 ms à moins de 10 px ; le
+  clic du clavier n'est jamais touché.
+- ⚠ **Au doigt, `e.target` ne bouge jamais** (capture implicite) : la case du
+  relâchement est celle **sous le doigt** (`elementFromPoint`).
+- Sur iPhone : `-webkit-user-select: none` et `-webkit-touch-callout: none`
+  sur `.cal-case`, sinon l'appui long sélectionne le numéro du jour.
+- **Le menu contextuel de l'appui long** (Chrome Android) est retenu pendant le
+  geste. ⚠ À confirmer sur le téléphone de Thierry : jsdom ne le prouve pas.
+- La fiche du jour reste atteignable par **« Plus… »** dans la barre.
+
+Tests : `tests/calendrier-appui-long-mobile.test.js` (18), et sept tests de
+`tests/calendrier-saisie-prix-dom.test.js` réécrits à l'énoncé nouveau. Spec et
+contre-épreuve : docs/specs/spec-appui-long-mobile.md.
+
 ## Reste du lot (étapes 2-4)
 
 Volet Prix (pilote, fenêtre, radar, grille 5 niveaux + fixée, ✎ dans la
