@@ -2399,7 +2399,6 @@ select.avp-prop { padding-inline-end: 10px; cursor: pointer; }
 .chg-chargement__gestes { display: flex; justify-content: flex-end; margin-top: var(--gap-s); }
 /* Lot 5 (§14.24) : « Envoyer par e-mail » sous le bouton d'ajout, et la
    fenêtre des adresses de factures, au centre comme celle du chargement. */
-.chg-lien-email { align-self: flex-end; }
 .chg-email { border: 0; border-radius: var(--radius-card); padding: 24px; width: min(480px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; background: var(--surface); color: var(--ink); box-shadow: 0 12px 32px rgba(0, 0, 0, .16); }
 .chg-email::backdrop { background: var(--scrim); }
 .chg-email[open] { display: flex; flex-direction: column; gap: var(--gap-s); }
@@ -2494,6 +2493,12 @@ button.chg-dl:hover { background: var(--surface-2); }
 .chg-etat--tableau { background: var(--ok-soft); color: var(--ink); }
 .chg-lien { align-self: flex-start; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-caption); text-decoration: underline; text-align: start; cursor: pointer; }
 .chg-lien:disabled { opacity: 1; cursor: default; text-decoration: none; }
+/* Lot 5 : « Envoyer par e-mail » SOUS le bouton d'ajout, à droite comme lui.
+   ⚠ `.chg-lien` ci-dessus pose `align-self: flex-start` : la règle du lien
+   vient APRÈS elle ET avec un sélecteur composé — la première version, plus
+   haut dans la feuille et à même spécificité, perdait, et le lien partait à
+   gauche (recette de Thierry, 23 novembre 2026). */
+.chg-barre .chg-lien-email { align-self: flex-end; }
 @media (min-width: 900px) {
   .chg-lignes--fines .chg-ligne { padding-block: 7px; }
   .chg-lignes--fines .chg-ligne__qui { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }

@@ -155,3 +155,26 @@ test('une facture REÇUE PAR E-MAIL pour un logement sans entité porte le rappe
     assert.doesNotMatch(texte(b2.$('[data-bind="a-traiter"] [data-ouvrir]')), /Entité juridique manquante/)
   } finally { b2.fermer() }
 })
+
+test('recette du 23 novembre : « Envoyer par e-mail » se range SOUS le bouton (à droite, comme lui), quelle que soit la règle `.chg-lien` plus bas dans la feuille', () => {
+  const { JSDOM } = require('jsdom')
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'charges.html'), 'utf8')
+  const barre = /<div class="chg-barre">[\s\S]*?<\/div>/.exec(page)[0]
+  const d = new JSDOM(`<style>${css}</style>${barre}`)
+  const doc = d.window.document
+  const b = doc.querySelector('.chg-barre')
+  const lien = doc.querySelector('[data-action="email"]')
+  assert.equal(lien.parentElement, b, 'dans la barre du bouton')
+  assert.ok(doc.querySelector('[data-action="ajouter"]').compareDocumentPosition(lien) & d.window.Node.DOCUMENT_POSITION_FOLLOWING, 'après le bouton')
+  assert.equal(d.window.getComputedStyle(b).flexDirection, 'column', 'l\'un sous l\'autre')
+  assert.equal(d.window.getComputedStyle(b).alignItems, 'flex-end')
+  assert.equal(d.window.getComputedStyle(lien).alignSelf, 'flex-end')
+  // ⚠ jsdom ne compare pas les spécificités (l'ordre seul tranche) : le
+  // sélecteur composé, qui fait gagner la règle dans un vrai navigateur, se
+  // vérifie à part.
+  assert.match(css, /\.chg-barre \.chg-lien-email \{ align-self: flex-end; \}/)
+  assert.ok(css.indexOf('.chg-barre .chg-lien-email') > css.indexOf('.chg-lien {'), 'après `.chg-lien`')
+})
