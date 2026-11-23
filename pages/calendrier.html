@@ -1227,25 +1227,50 @@ const caseSousLeRelachement = (e, sel) =>
 document.addEventListener('pointerup', (e) => {
   const g = finirGesteMobile(e)
   if (!g) return
-  // Le geste a POSE une plage (glisser, ou appui long) : il n'ouvre rien.
-  if (g.bouge || g.long) { renderFlottante(); return }
+  // Le glisser (souris, vue etroite) a POSE une plage : il n'ouvre rien.
+  if (g.bouge) { renderFlottante(); return }
   const sur = caseSousLeRelachement(e, '.cal-case[data-case]')
   if (!sur || sur.dataset.bien !== g.bien || sur.dataset.case !== g.depuis) return
+  // ⚠ APPUI LONG = FICHE DU JOUR, APPUI COURT = SELECTION (decision de Thierry
+  // du 23 novembre 2026, qui inverse le point 5 du 21 octobre). Le telephone
+  // suit l'ordinateur : un clic y selectionne et fait paraitre la barre
+  // d'actions. La fiche s'ouvre AU RELACHEMENT, jamais sous le doigt encore
+  // pose : ouverte par le minuteur, elle recevait le relachement du doigt.
+  if (g.long) return ouvrirFicheDuJour(g.bien, g.depuis)
   agirSurLaCaseTapee(g.bien, g.depuis)
 })
 document.addEventListener('pointercancel', (e) => { finirGesteMobile(e) })
 // ⚠ ET UN DEPLACEMENT ANNULE L'APPUI LONG (garde posee par une review
 // anterieure sur `touchmove`, et qu'il ne faut pas perdre au passage aux
 // pointeurs : sans elle, un defilement du doigt armait une selection).
-document.addEventListener('pointermove', () => {
-  if (glisseMobile && !glisseMobile.long) clearTimeout(presseLongue)
+// ⚠ MAIS UN DOIGT IMMOBILE BOUGE TOUJOURS UN PEU (constate par Thierry le
+// 23 novembre 2026, sur Android). Le telephone envoie des `pointermove` d'un
+// ou deux pixels pendant que le doigt reste pose : la version d'avant
+// annulait l'appui long au PREMIER, donc il ne partait jamais — le
+// relachement ouvrait la fiche du jour, et la barre (Bloquer les dates,
+// Fermer a la vente…) etait inatteignable au telephone. On n'annule donc
+// qu'au-dela d'une TOLERANCE, sur l'un des deux axes, et seulement pour le
+// doigt qui a commence le geste — meme regle que l'app menage
+// (apps/menages/public.html, `TOLERANCE_PX`). Au-dela, le navigateur prend
+// la main pour faire defiler et envoie `pointercancel`, qui clot le geste.
+const TOLERANCE_APPUI_LONG_PX = 10
+document.addEventListener('pointermove', (e) => {
+  if (!glisseMobile || glisseMobile.long) return
+  if (e.pointerId != null && e.pointerId !== glisseMobile.id) return
+  if (Math.abs((e.clientX || 0) - glisseMobile.x0) > TOLERANCE_APPUI_LONG_PX ||
+      Math.abs((e.clientY || 0) - glisseMobile.y0) > TOLERANCE_APPUI_LONG_PX) clearTimeout(presseLongue)
 })
-// UN TAP COURT, ET LES TROIS CAS — le meme enonce pour le doigt et pour le
-// clavier, qui passe par `click` et non par le pointeur.
+// UN TAP COURT, ET LES TROIS CAS — le meme enonce pour le doigt, pour le clic
+// de souris en vue etroite, et pour le clavier, qui passe par `click` et non
+// par le pointeur.
 // ⚠ LE MOBILE SUIT L'ORDINATEUR (constat 11) : un tap DANS la selection ouvre
 // la saisie de prix pour TOUTE la selection, exactement comme le clic de
 // l'ordinateur. Avant, il tombait dans la branche d'extension et RETRECISSAIT
 // la selection en silence — quatre nuits perdues sans un mot.
+// ⚠ ET SANS SELECTION, LE TAP SELECTIONNE (23 novembre 2026) : il ouvrait la
+// fiche du jour, et la barre — Bloquer les dates, Fermer a la vente — ne se
+// gagnait que par un appui long que le tremblement du doigt annulait. La
+// fiche du jour reste a un appui long, et a « Plus… » dans la barre.
 function agirSurLaCaseTapee (bienId, iso) {
   const s = etat.sel
   const dansSel = !!s && s.bien === bienId && !!s.duIso && iso >= s.duIso && iso <= s.auIso
@@ -1258,8 +1283,16 @@ function agirSurLaCaseTapee (bienId, iso) {
     peindreSelectionMobile(); renderFlottante()
     return
   }
-  // une selection sur un AUTRE bien se vide : un seul contexte d'action
-  if (s && s.duIso) { etat.sel = null; peindreSelectionMobile(); renderFlottante() }
+  // Sans selection, ou une selection sur un AUTRE bien (elle est remplacee :
+  // un seul contexte d'action) : la date tapee devient la selection.
+  etat.sel = { bien: bienId, duIso: iso, auIso: iso }
+  peindreSelectionMobile(); renderFlottante()
+}
+// L'APPUI LONG : la fiche du jour de la date tenue. Une selection en cours se
+// vide d'abord, sinon la barre resterait affichee derriere la fiche avec un
+// contexte qui n'est plus celui de l'ecran.
+function ouvrirFicheDuJour (bienId, iso) {
+  if (etat.sel) { etat.sel = null; peindreSelectionMobile(); renderFlottante() }
   ouvrirPopup([iso], null, bienId)
 }
 document.addEventListener('mouseup', (e) => {
@@ -1439,15 +1472,20 @@ function brancherMobile () {
         finirGesteMobile(null)
       }
       glisseMobile = { id: e.pointerId, bien: bienId, depuis: iso, bouge: false, long: false,
-        direct: manipulationDirecte(e) }
+        direct: manipulationDirecte(e), x0: e.clientX || 0, y0: e.clientY || 0 }
       if (!glisseMobile.direct) return
+      // L'appui long est PRIS ici, mais la fiche du jour ne s'ouvre qu'au
+      // relachement (gestionnaire `pointerup` du document). Le doigt le sent.
       presseLongue = setTimeout(() => {
         if (!glisseMobile) return
         glisseMobile.long = true
-        etat.sel = { bien: bienId, duIso: iso, auIso: iso }
-        peindreSelectionMobile(); renderFlottante()
+        try { if (navigator.vibrate) navigator.vibrate(15) } catch {}
       }, 450)
     })
+    // Le menu contextuel de l'appui long (Chrome Android) est retenu pendant
+    // le geste : il volerait le relachement qui ouvre la fiche du jour. Meme
+    // geste que l'app menage (apps/menages/public.html).
+    c.addEventListener('contextmenu', (e) => { if (glisseMobile && glisseMobile.direct) e.preventDefault() })
     c.addEventListener('pointerenter', (e) => {
       // ⚠ A LA SOURIS SEULEMENT, ET C'EST UNE LIMITE ASSUMEE. Un pointeur
       // TACTILE est capture implicitement par la case ou il a commence :

@@ -291,11 +291,14 @@ function peupler (banc, { biens, inv = {}, jours = 1, mois = null, decalage = 0 
 // test peut forcer `boutons: 0` sur un survol : c'est precisement le cas du
 // relachement perdu.
 const BOUTONS_PAR_DEFAUT = (type) => /up$|cancel$|^click$/.test(type) ? 0 : 1
-function geste (banc, el, type, { pointerType = 'mouse', bouton = 0, boutons = null, pointerId = 1, detail = null } = {}) {
+// `x` et `y` : la position du doigt ou du curseur (`clientX` / `clientY`).
+// Un doigt pose « immobile » bouge toujours d'un ou deux pixels : un test de
+// l'appui long doit pouvoir le dire.
+function geste (banc, el, type, { pointerType = 'mouse', bouton = 0, boutons = null, pointerId = 1, detail = null, x = 0, y = 0 } = {}) {
   const { window } = banc
   const bulle = !/enter$|leave$/.test(type)
   const e = new window.MouseEvent(type, {
-    bubbles: bulle, cancelable: true, button: bouton, view: window,
+    bubbles: bulle, cancelable: true, button: bouton, view: window, clientX: x, clientY: y,
     buttons: boutons == null ? BOUTONS_PAR_DEFAUT(type) : boutons,
     detail: detail == null ? (/^click$/.test(type) ? 1 : 0) : detail
   })

@@ -237,13 +237,18 @@ test('POINT 6 : apres Enregistrer DANS LA POPUP, la selection et la barre se vid
 // TELEPHONE (point 4) et VUE ETROITE A LA SOURIS (point 5)
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('POINT 4 : au doigt, appui long puis tap sur une seconde date, la rubrique Prix ecrit UN segment', async () => {
+// ⚠ 23 NOVEMBRE 2026 : LES DEUX GESTES SONT INVERSES (decision de Thierry).
+// L'appui COURT selectionne et fait paraitre la barre, comme le clic de
+// l'ordinateur ; l'appui LONG ouvre la fiche du jour. Les tests de ce bloc
+// qui portaient l'ancien enonce (tap = fiche, appui long = selection) sont
+// reecrits a l'enonce nouveau, chacun gardant ce qu'il protegeait. Les tests
+// propres a l'inversion et au tremblement du doigt vivent dans
+// tests/calendrier-appui-long-mobile.test.js.
+test('POINT 4 : au doigt, appui court puis appui court sur une seconde date, la rubrique Prix ecrit UN segment', async () => {
   const { b } = bancMobile()
   const a = jourDuMois(MOIS_A_VENIR, 5), z = jourDuMois(MOIS_A_VENIR, 8)
-  B.geste(b, caseM(b, a), 'pointerdown', { pointerType: 'touch' })
-  await new Promise(r => setTimeout(r, 500))           // appui LONG
-  B.geste(b, caseM(b, a), 'pointerup', { pointerType: 'touch' })
-  assert.ok(B.barreVisible(b), 'l appui long ouvre la barre d actions')
+  tapCase(b, caseM(b, a), 'touch')                     // appui COURT
+  assert.ok(B.barreVisible(b), 'l appui court ouvre la barre d actions')
   // Un tap sur une seconde date HORS de la plage l'ETEND (point 5).
   B.geste(b, caseM(b, z), 'pointerdown', { pointerType: 'touch' })
   B.geste(b, caseM(b, z), 'pointerup', { pointerType: 'touch' })
@@ -300,20 +305,27 @@ test('POINT 5 : une date deja choisie, un clic de SOURIS HORS de la plage l eten
   assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, true, 'la popup ne s est pas rouverte')
 })
 
-test('POINT 5 : sans selection, un clic de souris ouvre toujours la popup du jour', () => {
+test('POINT 5 : sans selection, un clic de souris en vue etroite SELECTIONNE le jour, comme a l ordinateur', () => {
+  // Avant le 23 novembre 2026, ce clic ouvrait la fiche du jour.
   const { b } = bancMobile()
   const iso = jourDuMois(MOIS_A_VENIR, 7)
   tapCase(b, caseM(b, iso), 'mouse')
-  assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, false, 'la popup du jour s ouvre')
-  assert.equal(b.doc.querySelector('[data-champ="cfg-du"]').value, iso, 'pre-remplie sur le jour clique')
+  assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, true, 'pas de fiche du jour')
+  assert.deepEqual([...b.cal.joursSelection()], [iso], 'le jour clique est selectionne')
+  assert.ok(B.barreVisible(b), 'la barre d actions parait')
 })
 
 test('CONSTAT 5 : les cases sont des boutons, donc elles repondent au CLAVIER', () => {
   // Entree et Espace produisent un `click` SANS evenement de pointeur.
+  // Depuis le 23 novembre 2026, le clavier suit le tap : la premiere frappe
+  // selectionne, la seconde (dans la selection) ouvre la saisie de prix.
   const { b } = bancMobile()
   const iso = jourDuMois(MOIS_A_VENIR, 7)
   B.clicClavier(b, caseM(b, iso))
-  assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, false, 'le clavier ouvre la popup du jour')
+  assert.deepEqual([...b.cal.joursSelection()], [iso], 'le clavier selectionne le jour')
+  assert.ok(B.barreVisible(b), 'et fait paraitre la barre')
+  B.clicClavier(b, caseM(b, iso))
+  assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, false, 'la seconde frappe ouvre la saisie')
   assert.equal(b.doc.querySelector('[data-champ="cfg-du"]').value, iso)
 })
 
@@ -321,10 +333,13 @@ test('CONSTAT 5 bis : le clic qui SUIT un geste de pointeur n agit pas deux fois
   const { b } = bancMobile()
   const iso = jourDuMois(MOIS_A_VENIR, 7)
   const c = caseM(b, iso)
-  tapCase(b, c)
-  const avant = b.doc.querySelector('[data-champ="cfg-du"]').value
+  tapCase(b, c)                          // le tap a selectionne le jour
+  assert.deepEqual([...b.cal.joursSelection()], [iso])
+  // Si le `click` qui suit agissait, il tomberait DANS la selection et
+  // ouvrirait la saisie de prix : un seul geste, deux effets.
   B.geste(b, c, 'click')                 // detail = 1 : il vient du pointeur
-  assert.equal(b.doc.querySelector('[data-champ="cfg-du"]').value, avant, 'rien n a bouge')
+  assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, true, 'rien ne s ouvre')
+  assert.deepEqual([...b.cal.joursSelection()], [iso], 'la selection n a pas bouge')
 })
 
 test('CONSTAT 10 : un second doigt ne vole pas le geste du premier', async () => {
@@ -334,12 +349,11 @@ test('CONSTAT 10 : un second doigt ne vole pas le geste du premier', async () =>
   B.geste(b, caseM(b, autre), 'pointerdown', { pointerType: 'touch', pointerId: 2 })  // pince, paume
   await new Promise(r => setTimeout(r, 500))
   B.geste(b, caseM(b, a), 'pointerup', { pointerType: 'touch', pointerId: 1 })
-  // L'appui long du PREMIER doigt a bien pose SA date, et rien ne s est ouvert
-  // sur la date du second.
-  assert.ok(b.cal.etat.sel, 'le geste du premier doigt a survecu')
-  assert.equal(b.cal.etat.sel.duIso, a)
-  assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, true,
-    'aucune popup sur une date jamais touchee')
+  // L'appui long du PREMIER doigt ouvre la fiche de SA date (depuis le
+  // 23 novembre 2026, l'appui long = fiche du jour), jamais celle du second.
+  assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, false, 'le geste du premier doigt a survecu')
+  assert.equal(b.doc.querySelector('[data-champ="cfg-du"]').value, a,
+    'la fiche est celle de la date du premier doigt, pas d une date jamais tenue')
 })
 
 test('CONSTAT 6 : vue etroite, un survol SANS bouton tenu n etend rien', () => {
@@ -719,7 +733,10 @@ test('ADDENDUM B : une selection prise A COTE du tiroir ouvert survit a Enregist
   // toast « Enregistre » qui n avait ecrit que la nuit du tiroir.
   const { b } = bancMobile()
   const seul = jourDuMois(MOIS_A_VENIR, 3)
-  tapCase(b, caseM(b, seul))                       // le tiroir s ouvre sur UNE nuit
+  // Le tiroir s ouvre sur UNE nuit, par l'appui long (23 novembre 2026).
+  B.geste(b, caseM(b, seul), 'pointerdown', { pointerType: 'touch' })
+  await new Promise(r => setTimeout(r, 500))
+  B.geste(b, caseM(b, seul), 'pointerup', { pointerType: 'touch' })
   assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, false)
   // Pendant que le tiroir est ouvert, l hote selectionne quatre nuits a cote.
   glisserMobile(b, caseM(b, jourDuMois(MOIS_A_VENIR, 20)), caseM(b, jourDuMois(MOIS_A_VENIR, 23)))
@@ -773,11 +790,13 @@ test('ADDENDUM C : un STYLET exige l appui long, comme le doigt', async () => {
   B.geste(b, au, 'pointerenter', { pointerType: 'pen' })
   assert.equal(b.cal.etat.sel, null, 'aucune selection sans appui long au stylet')
   assert.equal(B.barreVisible(b), false)
-  // Et avec l appui long, le stylet selectionne comme le doigt.
+  // Et l appui long du stylet est reconnu comme celui du doigt : il ouvre la
+  // fiche du jour (23 novembre 2026 ; il selectionnait avant l'inversion).
   B.geste(b, du, 'pointerdown', { pointerType: 'pen' })
   await new Promise(r => setTimeout(r, 500))
   B.geste(b, du, 'pointerup', { pointerType: 'pen' })
-  assert.ok(b.cal.etat.sel, 'avec l appui long, le stylet selectionne')
+  assert.equal(b.doc.querySelector('[data-bind="feuille"]').hidden, false, 'avec l appui long, le stylet ouvre la fiche du jour')
+  assert.equal(b.doc.querySelector('[data-champ="cfg-du"]').value, jourDuMois(MOIS_A_VENIR, 5))
 })
 
 test('ADDENDUM C bis : un pointeur INDETERMINE est traite comme direct, pas comme une souris', () => {
