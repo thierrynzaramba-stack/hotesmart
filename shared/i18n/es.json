@@ -1734,5 +1734,6 @@
   "charges.refus_bien_archive": "Este alojamiento está archivado.",
   "charges.refus_bien_introuvable": "Este alojamiento ya no existe.",
   "charges.refus_entite_introuvable": "Esta entidad ya no existe.",
-  "charges.refus_cible_invalide": "Elija una entidad o un alojamiento."
+  "charges.refus_cible_invalide": "Elija una entidad o un alojamiento.",
+  "charges.motif_email_ligne_refusee": "No se pudo guardar un adjunto."
 }

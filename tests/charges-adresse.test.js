@@ -137,7 +137,8 @@ test('⚠ deux fenêtres ouvertes ensemble : la seconde création se heurte à l
       premiere = false
       m.etat.adresses.push({ locale: 'ofuro-futari.zzzz0000', user_id: A, entite_id: null, property_uuid: OFURO })
       const sauf = m.etat.adresses.filter(a => a.property_uuid !== OFURO)
-      return { select: () => ({ eq: () => ({ limit: async () => ({ data: sauf, error: null }) }) }) }
+      const chaine = { select: () => chaine, eq: () => chaine, order: () => chaine, range: async () => ({ data: sauf, error: null }) }
+      return chaine
     }
     return q
   }
@@ -206,6 +207,23 @@ test('⚠ ISOLATION : une entité ou un logement d\'un AUTRE compte — 404, rie
   }
   assert.equal(m.requetes.slice(avant).filter(q => q.op !== 'select').length, 0, 'aucune écriture')
   assert.deepEqual(m.etat.adresses.map(a => a.locale).sort(), deB)
+})
+
+test('⚠ un logement rattaché à une entité ARCHIVÉE : pas d\'entité pour une facture neuve — le rappel, dans la fenêtre comme à la réception', async () => {
+  const m = memoire()
+  m.etat.liens.push({ property_uuid: OFURO, entite_id: ENT_A_ARCH, user_id: A })
+  const r = await adresse.adresses(m.db, A, m.deps)
+  assert.deepEqual(r.biens.map(b => [b.nom, b.entite_id]), [['La bulle', ENT_A], ['Ofuro Futari', null]])
+  const res = await adresse.resoudre(m.db, r.biens[1].adresse, m.deps)
+  assert.deepEqual(res, { ok: true, compte: A, entiteId: null, bienId: OFURO })
+})
+
+test('la liste des adresses se lit PAR PAGES (PostgREST rend 1000 lignes sans erreur)', async () => {
+  const m = memoire()
+  await adresse.adresses(m.db, A, m.deps)
+  const lecture = m.requetes.find(q => q.table === 'charges_adresses_email' && q.op === 'select')
+  assert.deepEqual(lecture.plage, [0, 999])
+  assert.equal(lecture.limite, null)
 })
 
 test('changer : cible archivée refusée (409), cible absente ou double refusée (400)', async () => {

@@ -1734,5 +1734,6 @@
   "charges.refus_bien_archive": "Ce logement est archivé.",
   "charges.refus_bien_introuvable": "Ce logement n'existe plus.",
   "charges.refus_entite_introuvable": "Cette entité n'existe plus.",
-  "charges.refus_cible_invalide": "Choisissez une entité ou un logement."
+  "charges.refus_cible_invalide": "Choisissez une entité ou un logement.",
+  "charges.motif_email_ligne_refusee": "Une pièce jointe n'a pas pu être enregistrée."
 }

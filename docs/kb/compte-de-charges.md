@@ -92,6 +92,16 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   La taille du POST n'est pas comparée : Brevo la dit « estimée ».
 - **L'envoi réel ne se recette qu'en production** : Brevo envoie les e-mails
   du sous-domaine à l'adresse de production seulement.
+- **Une pièce jointe a un identifiant stable** (lot 5, review 1) : tiré de
+  l'e-mail et de ce que la relecture dit de la pièce, il nomme la charge ET le
+  fichier. Un rejeu de Brevo saute les pièces déjà entrées sans les
+  retélécharger, et chaque passage avance (une pièce ne commence plus après
+  17 s, rien ne dépasse 55 s).
+- **Dettes du lot 5** : 5-1, aucun plafond de factures reçues par e-mail par
+  compte (à trancher par Thierry) ; 5-2, une seule adresse HôteSmart servie
+  par e-mail (la première du destinataire) ; 5-3, une pièce entrée lors d'un
+  passage qui a fini en rejeu est lue par le cron quotidien, pas à
+  l'arrivée.
 
 - **Un export ne sort jamais incomplet sans le dire** (lot 8d) : un fichier
   qui ne vient pas après trois essais, chacun avec une adresse neuve, arrête

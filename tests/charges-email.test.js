@@ -262,7 +262,7 @@ test('une PANNE chez Brevo (5xx, 429, réseau) fait REJOUER : rien de tracé ; u
   assert.deepEqual(m404.etat.charges.map(x => [x.statut, x.motif]), [['sans_facture', 'piece_introuvable']])
 })
 
-test('LE TEST QUI COMPTE : un REJEU du même e-mail ne crée rien — la pièce déjà entrée est reconnue, le fichier posé pour rien est effacé', async () => {
+test('LE TEST QUI COMPTE : un REJEU du même e-mail ne crée rien — la pièce déjà entrée est reconnue AVANT d\'être retéléchargée', async () => {
   const m = monde()
   const fichier = pdf()
   const o = {
@@ -270,14 +270,18 @@ test('LE TEST QUI COMPTE : un REJEU du même e-mail ne crée rien — la pièce 
     relues: [pieceRelue('f.pdf', 'application/pdf', fichier.length)],
     octets: { 'jeton-piece-1': fichier }
   }
-  await appel(m, o)
-  const { r } = await appel(m, o)
+  const { appels: a1 } = await appel(m, o)
+  const { r, appels: a2 } = await appel(m, o)
   assert.deepEqual([r.trace.prises, r.trace.deja], [0, 1])
   assert.equal(m.etat.charges.length, 1)
-  const poses = m.gestes.filter(g => g.nom === 'upload').map(g => g.args[0])
-  const effaces = m.gestes.filter(g => g.nom === 'remove').flatMap(g => g.args[0])
-  assert.equal(poses.length, 2)
-  assert.deepEqual(effaces, [poses[1]], 'seul le second fichier est effacé')
+  assert.equal(a1.length, 1)
+  assert.equal(a2.length, 0, 'le rejeu ne retélécharge pas')
+  assert.equal(m.gestes.filter(g => g.nom === 'upload').length, 1)
+  assert.equal(m.gestes.filter(g => g.nom === 'remove').length, 0)
+  // L'identifiant de la pièce nomme la charge ET son fichier, et il est stable.
+  const c = m.etat.charges[0]
+  assert.equal(c.justificatif_chemin, `${A}/${c.id}`)
+  assert.equal(c.id, email.idDePiece(A, UUID, { rang: 0, nom: 'f.pdf', type: 'application/pdf', taille: fichier.length }))
   // Un e-mail sans pièce rejoué : une seule ligne.
   const m2 = monde()
   await appel(m2, {})
@@ -317,7 +321,7 @@ test('au plus 10 pièces prises ; la 11e est refusée en le disant', async () =>
   assert.deepEqual(m.etat.charges.filter(x => x.statut === 'sans_facture').map(x => x.motif), ['trop_de_pieces'])
 })
 
-test('le jeton de téléchargement vient du POST : contrôlé (sinon refusé, sans appel) puis ENCODÉ dans l\'URL', async () => {
+test('le jeton de téléchargement vient du POST : contrôlé par un motif qui n\'admet que des caractères sûrs d\'URL (sinon refusé, sans appel), vers l\'hôte fixe de Brevo', async () => {
   const m = monde()
   const { appels } = await appel(m, { post: [piecePost('f.pdf', 'application/pdf', '../../events/x')], relues: [pieceRelue('f.pdf', 'application/pdf', 40000)] })
   assert.equal(appels.length, 0)
@@ -357,16 +361,188 @@ test('la lecture à l\'arrivée a un budget : passé 30 s, la facture reste « �
   assert.deepEqual([m3.etat.charges[0].statut, m3.etat.charges[0].motif, m3.etat.charges[0].tentatives_lecture], ['a_lire', 'panne_ia', 0])
 })
 
-test('les téléchargements ont un budget : passé 35 s, on fait rejouer plutôt que de laisser Vercel couper', async () => {
+test('LE TEST QUI COMPTE (review, constat 1) : des pièces LENTES — chaque passage avance, les rejeux finissent, et AUCUNE pièce n\'est perdue', async () => {
+  const m = monde()
+  const post = []
+  const relues = []
+  const octets = {}
+  for (let i = 0; i < 5; i++) {
+    const f = pdf(40000, String(i))
+    post.push(piecePost(`f${i}.pdf`, 'application/pdf', `jeton-piece-${i}`))
+    relues.push(pieceRelue(`f${i}.pdf`, 'application/pdf', f.length))
+    octets[`jeton-piece-${i}`] = f
+  }
+  // Chaque téléchargement prend 10 s ; chaque passage repart de zéro.
+  let passages = 0
+  let fin = null
+  const delais = []
+  while (passages < 10) {
+    passages++
+    let t = 1000
+    const b = brevo(octets)
+    const r = await email.recevoir(m.db, {
+      ref: { recipient: 'la-bulle.k2j9x7q4@reply.hotesmart.fr', attachments: relues, receivedAt: '2026-11-23T15:00:00Z' },
+      item: { Attachments: post }, uuid: UUID, debut: 1000, texte: ''
+    }, {
+      cle: 'k', entites: m.entites, lectureAutorisee: async () => false,
+      fetch: async (url, o) => { delais.push(t - 1000); t += 10000; return b.f(url, o) },
+      maintenant: () => t
+    })
+    if (!r.rejouer) { fin = r; break }
+    assert.equal(r.raison, 'delai')
+  }
+  assert.ok(fin, 'les rejeux finissent')
+  assert.ok(passages <= 3, `${passages} passages`)
+  assert.equal(m.etat.charges.filter(x => x.statut === 'a_lire').length, 5)
+  assert.equal(m.etat.charges.filter(x => x.statut === 'sans_facture').length, 0)
+  assert.equal(new Set(m.etat.charges.map(x => x.id)).size, 5)
+  assert.equal(m.gestes.filter(g => g.nom === 'upload').length, 5, 'aucune pièce déposée deux fois')
+  // Aucune pièce ne COMMENCE après 17 s dans son passage.
+  assert.ok(delais.every(d => d <= email.DEBUT_PIECE_MAX_MS), JSON.stringify(delais))
+})
+
+test('chaque étape est bornée par le TEMPS RESTANT, pas seulement son début (review, constat 2)', async () => {
+  // Par construction : une pièce commencée au plus tard, dans son pire cas
+  // (téléchargement 15 s, HEIC 15 s, dépôt 8 s), et une lecture commencée au
+  // plus tard (tableau 6 s, IA 20 s) tiennent dans 55 s.
+  assert.ok(email.BUDGET_TOTAL_MS <= 55000)
+  assert.ok(email.DEBUT_PIECE_MAX_MS + 15000 + 15000 + 8000 <= email.BUDGET_TOTAL_MS)
+  assert.ok(email.DEBUT_LECTURES_MAX_MS + 6000 + 20000 <= email.BUDGET_TOTAL_MS)
+  // Et le dépôt reçoit ce qui RESTE : un téléchargement qui a mangé le
+  // temps (fini à 50 s) ne laisse au dépôt que 6 s, pas 8.
   const m = monde()
   const fichier = pdf()
-  let t = 1000
+  const ecrivain = require('../lib/charges')
+  const vrai = ecrivain.deposerPieceEmail
+  const delais = []
+  ecrivain.deposerPieceEmail = async (db, p, deps) => { delais.push(deps.delaiStockageMs); return vrai(db, p, deps) }
+  let t = 2000
+  try {
+    await email.recevoir(m.db, {
+      ref: { recipient: 'la-bulle.k2j9x7q4@reply.hotesmart.fr', attachments: [pieceRelue('f.pdf', 'application/pdf', fichier.length)] },
+      item: { Attachments: [piecePost('f.pdf', 'application/pdf', 'jeton-piece-1')] }, uuid: UUID, debut: 1000
+    }, {
+      cle: 'k', entites: m.entites, lectureAutorisee: async () => false,
+      maintenant: () => t,
+      fetch: async (url, o) => { t = 51000; return brevo({ 'jeton-piece-1': fichier }).f(url, o) }
+    })
+  } finally { ecrivain.deposerPieceEmail = vrai }
+  assert.deepEqual(delais, [5000])
+})
+
+test('⚠ un texte d\'e-mail choisi par l\'expéditeur : le caractère nul est retiré, la coupe se fait par caractère (jamais un demi-emoji)', async () => {
+  const m = monde()
+  const nul = String.fromCharCode(0)
+  const texte = 'a' + nul + 'b' + 'x'.repeat(1997) + '😀😀'
+  await email.recevoir(m.db, {
+    ref: { recipient: 'la-bulle.k2j9x7q4@reply.hotesmart.fr', attachments: [] },
+    item: {}, uuid: UUID, debut: 1000, texte, sujet: 'É'.repeat(299) + '😀😀', expediteur: 'x' + nul + '@y.fr'
+  }, { cle: 'k', entites: m.entites, maintenant: () => 2000 })
+  const s = m.etat.charges[0]
+  assert.ok(!s.email_texte.includes(nul))
+  assert.equal(Array.from(s.email_texte).length, 2000)
+  assert.ok(s.email_texte.endsWith('😀'), 'l\'emoji entier, pas sa moitié')
+  assert.ok(!/[\uD800-\uDBFF]$/.test(s.email_texte))
+  assert.equal(Array.from(s.email_sujet).length, 300)
+  assert.ok(s.email_sujet.endsWith('😀'))
+  assert.equal(s.email_expediteur, 'x@y.fr')
+})
+
+test('⚠ un REFUS de la base n\'est pas une panne : la ligne refusée ne fait pas rejouer l\'e-mail sans fin', async () => {
+  const m = monde()
+  const insertion = m.db.from
+  m.db.from = (t) => {
+    const q = insertion(t)
+    if (t !== 'charges') return q
+    const ins = q.insert
+    q.insert = (x) => { const r = ins(x); r.select = () => ({ maybeSingle: async () => ({ data: null, error: { code: '22P05', message: 'unsupported Unicode escape sequence' } }) }); return r }
+    return q
+  }
+  const r = await email.recevoir(m.db, {
+    ref: { recipient: 'la-bulle.k2j9x7q4@reply.hotesmart.fr', attachments: [] }, item: {}, uuid: UUID, debut: 1000, texte: 'x'
+  }, { cle: 'k', entites: m.entites, maintenant: () => 2000 })
+  assert.equal(r.rejouer, undefined)
+  assert.equal(r.issue, 'recue')
+})
+
+test('un POST sans pièce face à une relecture qui en liste : « pièces divergentes », pas « sans pièce » (review, constat 5)', async () => {
+  const m = monde()
+  await appel(m, { post: [], relues: [pieceRelue('f.pdf', 'application/pdf', 40000)] })
+  assert.deepEqual(m.etat.charges.map(x => x.motif), ['pieces_divergentes'])
+})
+
+test('un PDF annoncé `application/octet-stream` est pris — son CONTENU décide ; un faux est refusé en le disant (review, constat 6)', async () => {
+  const m = monde()
+  const fichier = pdf(12000)
+  await appel(m, { post: [piecePost('f.pdf', 'application/octet-stream', 'jeton-piece-1')], relues: [pieceRelue('f.pdf', 'application/octet-stream', fichier.length)], octets: { 'jeton-piece-1': fichier } })
+  assert.deepEqual(m.etat.charges.map(x => [x.statut, x.justificatif_type]), [['a_verifier', 'application/pdf']])
+  const m2 = monde()
+  const docx = Buffer.alloc(40000, 3)
+  await appel(m2, { post: [piecePost('f.docx', 'application/octet-stream', 'jeton-piece-1')], relues: [pieceRelue('f.docx', 'application/octet-stream', docx.length)], octets: { 'jeton-piece-1': docx } })
+  assert.deepEqual(m2.etat.charges.map(x => [x.statut, x.motif]), [['sans_facture', 'type_refuse']])
+  // Un type précis qu'on ne lit pas (agenda, Word) reste ignoré.
+  const m3 = monde()
+  const { appels } = await appel(m3, { post: [piecePost('i.ics', 'text/calendar', 'jeton-piece-1')], relues: [pieceRelue('i.ics', 'text/calendar', 900)] })
+  assert.equal(appels.length, 0)
+  assert.deepEqual(m3.etat.charges.map(x => x.motif), ['sans_piece'])
+})
+
+test('deux pièces IDENTIQUES dans le même e-mail : une seule charge, et le fichier de la seconde est effacé — jamais celui de la première', async () => {
+  const m = monde()
+  const fichier = pdf()
   const { r } = await appel(m, {
     post: [piecePost('a.pdf', 'application/pdf', 'jeton-piece-1'), piecePost('b.pdf', 'application/pdf', 'jeton-piece-2')],
     relues: [pieceRelue('a.pdf', 'application/pdf', fichier.length), pieceRelue('b.pdf', 'application/pdf', fichier.length)],
-    octets: { 'jeton-piece-1': fichier, 'jeton-piece-2': pdf(40000, 'y') },
-    maintenant: () => (t += 20000)
+    octets: { 'jeton-piece-1': fichier, 'jeton-piece-2': fichier }
   })
-  assert.equal(r.rejouer, true)
-  assert.equal(r.raison, 'delai')
+  assert.deepEqual([r.trace.prises, r.trace.deja], [1, 1])
+  assert.equal(m.etat.charges.length, 1)
+  const poses = m.gestes.filter(g => g.nom === 'upload').map(g => g.args[0])
+  const effaces = m.gestes.filter(g => g.nom === 'remove').flatMap(g => g.args[0])
+  assert.equal(poses.length, 2)
+  assert.deepEqual(effaces, [poses[1]])
+  assert.equal(m.etat.charges[0].justificatif_chemin, poses[0])
+})
+
+test('deux passages CROISÉS (le second ne voit pas encore la pièce du premier) : le même chemin est réécrit, et le fichier de la charge n\'est PAS effacé', async () => {
+  const m = monde()
+  const fichier = pdf()
+  const o = {
+    post: [piecePost('f.pdf', 'application/pdf', 'jeton-piece-1')],
+    relues: [pieceRelue('f.pdf', 'application/pdf', fichier.length)],
+    octets: { 'jeton-piece-1': fichier }
+  }
+  await appel(m, o)
+  const ecrivain = require('../lib/charges')
+  const vrai = ecrivain.piecesDeLEmail
+  ecrivain.piecesDeLEmail = async () => ({ ok: true, ids: new Set() })
+  try { await appel(m, o) } finally { ecrivain.piecesDeLEmail = vrai }
+  const poses = m.gestes.filter(g => g.nom === 'upload').map(g => g.args[0])
+  assert.equal(poses.length, 2)
+  assert.equal(poses[0], poses[1], 'le même chemin')
+  assert.equal(m.gestes.filter(g => g.nom === 'remove').length, 0)
+  assert.equal(m.etat.charges.length, 1)
+})
+
+test('une PIÈCE refusée par la base (donnée invalide) : refus définitif, tracé, son fichier effacé — pas de rejeu', async () => {
+  const m = monde()
+  const fichier = pdf()
+  const insertion = m.db.from
+  m.db.from = (t) => {
+    const q = insertion(t)
+    if (t !== 'charges') return q
+    const ins = q.insert
+    q.insert = (x) => {
+      const r = ins(x)
+      if (x.statut === 'a_lire') r.select = () => ({ maybeSingle: async () => ({ data: null, error: { code: '22001', message: 'value too long' } }) })
+      return r
+    }
+    return q
+  }
+  const { r } = await appel(m, { post: [piecePost('f.pdf', 'application/pdf', 'jeton-piece-1')], relues: [pieceRelue('f.pdf', 'application/pdf', fichier.length)], octets: { 'jeton-piece-1': fichier } })
+  assert.equal(r.issue, 'recue')
+  assert.deepEqual(r.trace.refusees, ['ligne_refusee'])
+  assert.deepEqual(m.etat.charges.map(x => [x.statut, x.motif]), [['sans_facture', 'ligne_refusee']])
+  const pose = m.gestes.find(g => g.nom === 'upload').args[0]
+  assert.deepEqual(m.gestes.filter(g => g.nom === 'remove').flatMap(g => g.args[0]), [pose])
 })

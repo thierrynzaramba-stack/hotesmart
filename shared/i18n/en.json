@@ -1734,5 +1734,6 @@
   "charges.refus_bien_archive": "This property is archived.",
   "charges.refus_bien_introuvable": "This property no longer exists.",
   "charges.refus_entite_introuvable": "This entity no longer exists.",
-  "charges.refus_cible_invalide": "Choose an entity or a property."
+  "charges.refus_cible_invalide": "Choose an entity or a property.",
+  "charges.motif_email_ligne_refusee": "An attachment could not be saved."
 }
