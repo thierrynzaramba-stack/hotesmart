@@ -290,11 +290,20 @@ le tap ouvrait la fiche. Aucun test ne le voyait : le banc n'envoyait jamais de
   relâchement est celle **sous le doigt** (`elementFromPoint`).
 - Sur iPhone : `-webkit-user-select: none` et `-webkit-touch-callout: none`
   sur `.cal-case`, sinon l'appui long sélectionne le numéro du jour.
+- ⚠ **Au doigt, la barre tient sur UNE ligne de boutons** (recette du
+  23 novembre, `pointer: coarse`) : sur trois lignes elle faisait 238 px, plus
+  86 px de navigation, et cachait les semaines qui suivent la date choisie — un
+  appui dessus touchait la barre, la sélection ne s'étendait pas. À la souris
+  en fenêtre étroite, les boutons passent toujours à la ligne (pas de poignée
+  pour faire défiler, et « Plus… » y est le seul chemin vers la fiche du jour).
+- Et la page ne défile que si la **date tapée** est cachée (moins de la moitié
+  de sa case visible entre l'en-tête collant et la barre) : recentrer à chaque
+  appui déplaçait le mois sous le doigt.
 - **Le menu contextuel de l'appui long** (Chrome Android) est retenu pendant le
   geste. ⚠ À confirmer sur le téléphone de Thierry : jsdom ne le prouve pas.
 - La fiche du jour reste atteignable par **« Plus… »** dans la barre.
 
-Tests : `tests/calendrier-appui-long-mobile.test.js` (18), et sept tests de
+Tests : `tests/calendrier-appui-long-mobile.test.js` (23), et sept tests de
 `tests/calendrier-saisie-prix-dom.test.js` réécrits à l'énoncé nouveau. Spec et
 contre-épreuve : docs/specs/spec-appui-long-mobile.md.
 
