@@ -316,3 +316,53 @@ test('16. deux biens : un appui long sur le second bien ouvre SA fiche et vide l
   assert.equal(b.cal.etat.sel, null, 'la selection du premier bien est videe')
   assert.equal(B.barreVisible(b), false)
 })
+
+// ─── La barre ne cache plus les semaines suivantes (recette du 23/11) ───────
+// Recette de Thierry : apres un premier appui, une seconde date ne s'ajoutait
+// pas. Mesure sur un ecran de 387 x 797 : la barre faisait 238px (ses cinq
+// boutons sur trois lignes), plus 86px de navigation, et la page RECENTRAIT
+// la date a chaque appui — les semaines suivantes etaient derriere la barre,
+// l'appui touchait la barre. jsdom ne calcule aucune geometrie : on la pose.
+function geometrie (b, { caseTop, barreTop = 600, teteBas = 80 }) {
+  const rect = (top, h) => ({ top, bottom: top + h, left: 0, right: 50, width: 50, height: h, x: 0, y: top })
+  b.doc.querySelector('[data-bind="flottante"]').getBoundingClientRect = () => rect(barreTop, 92)
+  const tete = b.doc.querySelector('.cal-mois__tete')
+  if (tete) tete.getBoundingClientRect = () => rect(0, teteBas)
+  return (el) => { el.getBoundingClientRect = () => rect(caseTop, 70); return el }
+}
+
+test('17. au telephone, une date VISIBLE ne fait pas defiler la page, ni au premier appui ni a l extension', () => {
+  const b = bancMobile()
+  let defilements = 0
+  b.window.Element.prototype.scrollIntoView = function () { defilements++ }
+  const placer = geometrie(b, { caseTop: 300 })
+  tap(b, placer(caseM(b, jourDuMois(12))))
+  tap(b, placer(caseM(b, jourDuMois(19))))
+  assert.equal(selection(b).length, 8, 'la selection s est etendue')
+  assert.equal(defilements, 0, 'le mois n a pas bouge sous le doigt')
+})
+
+test('18. au telephone, une date CACHEE sous la barre ou sous l en-tete est ramenee a l ecran', () => {
+  for (const caseTop of [640, 40]) {
+    const b = bancMobile()
+    let defilements = 0
+    b.window.Element.prototype.scrollIntoView = function () { defilements++ }
+    const placer = geometrie(b, { caseTop })
+    tap(b, placer(caseM(b, jourDuMois(12))))
+    assert.equal(defilements, 1, `date a ${caseTop}px : ramenee a l ecran`)
+  }
+})
+
+test('19. au telephone, les boutons de la barre tiennent sur UNE ligne (aucun style en ligne ne la casse)', () => {
+  const fs = require('fs'), path = require('path')
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'calendrier.html'), 'utf8')
+  const balise = html.match(/<span[^>]*data-bind="flottante-actions"[^>]*>/)[0]
+  assert.match(balise, /class="[^"]*\bcal-flottante__actions\b/, 'la ligne de boutons porte sa classe')
+  assert.doesNotMatch(balise, /style=/, 'un style en ligne l emporterait sur la regle du telephone')
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const media = css.split('@media (max-width: 899px)').slice(1).map(m => m.split(/\n}\n/)[0])
+  const regle = media.join('\n').match(/\.cal-flottante > \.cal-flottante__actions \{[^}]*\}/)
+  assert.ok(regle, 'la regle du telephone existe')
+  assert.match(regle[0], /flex-wrap: nowrap/)
+  assert.match(regle[0], /overflow-x: auto/)
+})

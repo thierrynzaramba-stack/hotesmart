@@ -90,7 +90,7 @@
 
 <div class="cal-flottante" data-bind="flottante" hidden>
   <span class="small" data-bind="flottante-compte"></span>
-  <span class="row" style="gap: 8px; flex-wrap: wrap" data-bind="flottante-actions"></span>
+  <span class="row cal-flottante__actions" data-bind="flottante-actions"></span>
   <span class="caption muted" data-bind="flottante-note" hidden></span>
   <button type="button" class="link small" data-bind="flottante-annuler" data-i18n="cal.cancel_selection"></button>
 </div>
@@ -1152,7 +1152,21 @@ function degagerLaSelection () {
   const cible = document.querySelector(`[data-ligne-prix] .cal-nuit[data-bien="${CSS.escape(etat.sel.bien)}"][data-iso="${jours[0]}"]`)
     || document.querySelector(`.cal-case[data-bien="${CSS.escape(etat.sel.bien)}"][data-case="${jours[0]}"]`)
   if (!cible || typeof cible.scrollIntoView !== 'function') return
+  // ⚠ AU TELEPHONE, ON NE DEFILE QUE SI LA DATE EST CACHEE (recette de Thierry,
+  // 23 novembre 2026). Recentrer a chaque appui deplacait le mois sous le
+  // doigt — l'hote visait une date et la page en mettait une autre a sa place —
+  // et repoussait les semaines suivantes derriere la barre. On ne bouge donc
+  // que si la date est sous l'en-tete collant du mois ou sous la barre.
+  if (!estLarge() && cible.classList.contains('cal-case') && dateVisible(cible)) return
   try { cible.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch {}
+}
+function dateVisible (cas) {
+  const r = cas.getBoundingClientRect()
+  const tete = cas.closest('.cal-mois') && cas.closest('.cal-mois').querySelector('.cal-mois__tete')
+  const haut = tete ? Math.max(0, tete.getBoundingClientRect().bottom) : 0
+  const barre = $('[data-bind="flottante"]')
+  const bas = barre && !barre.hidden ? barre.getBoundingClientRect().top : window.innerHeight
+  return r.top >= haut && r.bottom <= bas
 }
 function actionBarre (id, toutFerme) {
   const jours = joursSelection()

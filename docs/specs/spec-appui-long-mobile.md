@@ -89,6 +89,30 @@ en vue étroite : inchangé. Seule exception : la règle `.cal-case` de
 `shared/ui.css` (cases du téléphone uniquement) gagne ses deux propriétés
 `-webkit-`.
 
+**Correctif de recette (23 novembre 2026, Android de Thierry sur `staging`).**
+Appui court et appui long conformes, blocage conforme ; mais **une seconde date
+ne s'ajoutait pas** à la sélection. Mesuré sur un écran de 387 × 797 :
+
+- la barre faisait **238 px** (ses cinq boutons sur trois lignes), plus les
+  86 px de la navigation : 40 % de l'écran ;
+- la page **recentrait** la date à chaque appui ;
+- les semaines suivantes étaient donc **derrière la barre** : sur 31 dates du
+  mois, celles du 14 au 31 décembre renvoyaient la barre sous le doigt
+  (`elementFromPoint`), pas la case.
+
+Correction, au téléphone seulement :
+
+- la barre tient sur **une ligne de boutons** qu'on fait défiler du doigt, le
+  compte et « Annuler » en tête, la note dessous : **238 → 92 px**, mesuré
+  dans le même écran ;
+- la page **ne défile plus** si la date choisie est déjà visible entre
+  l'en-tête collant du mois et la barre ; elle ne défile que si la date est
+  cachée.
+
+L'ordinateur ne change pas : la ligne de boutons y garde `gap: 8px` et
+`flex-wrap: wrap`, passés du style en ligne à la classe `cal-flottante__actions`,
+et son défilement reste celui d'avant.
+
 ## 3. Case performance
 
 1. Endpoint d'écran : sans objet, aucun appel ajouté ni retiré.
@@ -107,7 +131,8 @@ en vue étroite : inchangé. Seule exception : la règle `.cal-case` de
 
 **Tests.**
 
-- `tests/calendrier-appui-long-mobile.test.js` : 18 tests neufs.
+- `tests/calendrier-appui-long-mobile.test.js` : 21 tests neufs (18 du lot,
+  3 du correctif de recette).
 - `tests/calendrier-saisie-prix-dom.test.js` : 7 tests réécrits à l'énoncé
   nouveau, chacun gardant ce qu'il protégeait. Ce sont POINT 4, POINT 5,
   CONSTAT 5, CONSTAT 5 bis, CONSTAT 10, ADDENDUM B et ADDENDUM C.
@@ -133,6 +158,8 @@ versions fautives du correctif :
 | 5 : la case du relâchement lue sur `e.target` | 8 | l'ancre au doigt, sous capture implicite |
 | 6 : une sélection sur un autre bien étendue | 15 | la barre n'agit que sur le bien tapé |
 | 7 : le clic du clavier sans la garde du jour passé | « un jour passé… » (fichier saisie-prix) | le jour passé au clavier |
+| tête d'avant le correctif de recette (`693b6337`) | 17 et 19 | la page immobile sous le doigt, la barre sur une ligne |
+| 8 : ne jamais défiler au téléphone | 18 | une date cachée est ramenée à l'écran |
 
 Le test 5 est un test de **non-régression** : il était déjà juste sur `main`.
 Il rougit contre la version 3, et c'est cette régression qu'il garde.
@@ -160,3 +187,6 @@ Sur `staging`, une fois la branche mergée par le chef de file :
    sélectionne, et aucune fiche de réservation ne s'ouvre toute seule.
 7. Si un iPhone est sous la main : un appui long n'affiche ni loupe ni
    sélection du numéro, et ouvre la fiche du jour.
+8. (Correctif de recette) Un appui court sur une date, puis un appui court sur
+   une date **deux semaines plus loin** : la sélection s'étend, la barre ne
+   cache pas les semaines suivantes, et la page ne saute pas.
