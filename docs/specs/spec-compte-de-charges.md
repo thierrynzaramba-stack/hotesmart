@@ -5081,6 +5081,10 @@ option recommandée** (Thierry peut revenir dessus) :
   `2026-11-23-controle-charges-adresses-email.sql` (cinq lignes à `true`), et
   l'épreuve sur un Postgres local `scripts/eprouver-adresses-factures.sh`
   (31 gestes, 0 écart ; le contrôle rend cinq `false` avant la migration).
+- **Appliquée par Thierry le 23 novembre 2026** : staging à 16 h 49 (contrôle
+  à 16 h 51 : cinq `true`), production à 16 h 54 (contrôle à 16 h 55 : cinq
+  `true`). Avant le code, donc : la migration ne fait qu'ajouter, et supprime
+  une table vide que rien ne lisait.
 
 **L'aiguillage**, dans `api/inbound-email.js` : APRÈS la relecture chez
 Brevo et le refus d'une divergence, et AVANT le filtre anti-boucle et le
