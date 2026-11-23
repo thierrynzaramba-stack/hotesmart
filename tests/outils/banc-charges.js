@@ -107,7 +107,7 @@ async function monter (o = {}) {
   })
   w.fetch = async (url, opts = {}) => {
     const u = String(url)
-    const entree = { url: u, methode: opts.method || 'GET', entetes: opts.headers || {}, corps: null }
+    const entree = { url: u, methode: opts.method || 'GET', entetes: opts.headers || {}, corps: null, signal: opts.signal || null }
     if (typeof opts.body === 'string') entree.corps = JSON.parse(opts.body)
     else if (opts.body) entree.corps = opts.body
     journal.fetch.push(entree)

@@ -1671,7 +1671,6 @@
   "charges.export_compte": "{n} factures enregistrées · édité le {date}",
   "charges.export_a_traiter": "{n} factures sont encore à traiter et ne sont pas dans cet export.",
   "charges.export_total": "Total",
-  "charges.export_non_lus": "{n} montants non lus ne sont pas comptés dans le total.",
   "charges.export_sans_fichier": "* Sans fichier : commission de plateforme ou échéance de crédit.",
   "charges.export_page": "Page {i} sur {n}",
   "charges.export_nom_zip": "Charges",
@@ -1692,5 +1691,12 @@
   "charges.export_col_ttc": "TTC",
   "charges.export_col_fichier": "Fichier",
   "charges.refus_trop_de_factures": "Trop de factures sur cet exercice pour un seul export (5 000 au plus).",
-  "charges.export_marque": "HôteSmart"
+  "charges.export_marque": "HôteSmart",
+  "charges.export_sans_fournisseur": "Facture",
+  "charges.export_trop_gros": "Les fichiers de cet exercice pèsent trop pour un seul ZIP. Aucun ZIP n'a été créé.",
+  "charges.export_col_comptee": "Comptée dans le total",
+  "charges.export_oui": "oui",
+  "charges.export_non": "non",
+  "charges.export_non_lus_col": "Montants non lus, absents du total : HT {ht}, TVA {tva}, TTC {ttc}.",
+  "charges.export_hors_total": "° Non comptée dans le total, comme à l'écran : échéancier, doublon ou commission déjà comptée, pas encore tranchés."
 }

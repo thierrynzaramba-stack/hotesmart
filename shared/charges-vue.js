@@ -1484,19 +1484,24 @@ export function monter (racine, deps) {
       const x = (d && d.export) || null
       if (!x) throw Object.assign(new Error('erreur'), { status: 500 })
       if (!x.lignes.length) { message = t('charges.export_vide'); return }
-      const prepare = preparerExport(x.lignes, { dossier: nomSimple(t('charges.export_dossier')) || 'Factures' })
+      const prepare = preparerExport(x.lignes, { dossier: nomSimple(t('charges.export_dossier')), sansNom: t('charges.export_sans_fournisseur') })
       const nbFichiers = prepare.filter(l => l.chemin).length
       avancerChargement({ i: 0, n: 1, texte: t('charges.export_telechargement'), max: nbFichiers + 1, valeur: 0 })
       const fichiers = await telechargerFichiers(prepare, {
         agir: deps.agir,
         telecharger: deps.telecharger,
+        Blob: doc.defaultView.Blob,
+        AbortController: doc.defaultView.AbortController,
         avancer: (fait, total, l) => avancerChargement({ i: fait - 1, n: total, texte: t('charges.export_telechargement'), nom: l.chemin.split('/').pop(), max: total + 1, valeur: fait })
       })
       avancerChargement({ i: 0, n: 1, texte: t('charges.export_creation'), max: nbFichiers + 1, valeur: nbFichiers })
+      // Le type d'une ligne : une échéance de crédit n'est pas une « facture »
+      // (la règle de l'écran, recette du 19 novembre 2026 ; review du lot 8d, M3).
       const noms = {
         bien: nomBien,
         categorie: nomCategorie,
-        type: (k) => connu('charges.type_' + k) || k
+        type: (l) => (l.categorie === 'credit' ? t('charges.type_echeance_credit')
+          : connu('charges.type_' + (l.type_document || 'facture')) || t('charges.type_facture'))
       }
       const aujourdhui = new Date()
       const jourIso = `${aujourdhui.getFullYear()}-${String(aujourdhui.getMonth() + 1).padStart(2, '0')}-${String(aujourdhui.getDate()).padStart(2, '0')}`
@@ -1508,7 +1513,7 @@ export function monter (racine, deps) {
         a_traiter: x.a_traiter ? t('charges.export_a_traiter', { n: x.a_traiter }) : ''
       }
       const pdf = pdfExport(prepare, { t, langue, noms, entete })
-      const csv = csvExport(prepare, { t, langue, noms })
+      const csv = csvExport(prepare, { t, noms })
       const simple = (k) => nomSimple(t(k)) || k
       const morceaux = zipExport({
         nomListe: `${simple('charges.export_nom_liste')}-${annees}.pdf`,
@@ -1519,13 +1524,13 @@ export function monter (racine, deps) {
         fichiers,
         date: aujourdhui
       })
-      ;(deps.sauver || sauverParDefaut)(morceaux, `${simple('charges.export_nom_zip')}-${annees}-${nomSimple(x.entite.nom) || 'entite'}.zip`)
+      ;(deps.sauver || sauverParDefaut)(morceaux, [simple('charges.export_nom_zip'), annees, nomSimple(x.entite.nom)].filter(Boolean).join('-') + '.zip')
       message = t('charges.export_fin', { n: prepare.length, f: nbFichiers })
     } catch (e) {
       erreur = true
       message = e && e.code === 'fichier_absent'
         ? t('charges.export_echec_fichier', { numero: e.ligne.numero, fournisseur: e.ligne.fournisseur_nom || t('charges.fournisseur_inconnu') })
-        : messageErreur(e)
+        : e && e.code === 'zip_trop_gros' ? t('charges.export_trop_gros') : messageErreur(e)
     } finally {
       etat.exportEnCours = false
       if (bouton) bouton.disabled = false

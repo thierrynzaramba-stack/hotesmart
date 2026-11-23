@@ -63,9 +63,9 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 
 | Fichier | Rôle |
 |---|---|
-| `lib/charges/ecran.js`, `api/ecran/charges.js` | `?export=1&entite&periode` : les factures `validee` de l'entité dont le jour est dans l'exercice, page après page (5 000 au plus, sinon 413 `trop_de_factures`), sans le chemin du fichier ; et le nombre « À traiter » du compte. |
+| `lib/charges/ecran.js`, `api/ecran/charges.js` | `?export=1&entite&periode` : les factures `validee` de l'entité dont le jour est dans l'exercice, par curseur (5 000 au plus, sinon 413 `trop_de_factures`), sans le chemin du fichier, chacune avec `compte` (la règle de `charges_detail_mois`) ; et le nombre « À traiter » non enregistré du compte. |
 | `lib/charges.js`, `api/charges.js` | `export_urls { ids }` (≤ 20) : une adresse de lecture de 60 s par facture du compte, enregistrée, avec fichier ; les autres dites `absentes`. Rapprochement par CHEMIN. |
-| `shared/charges-export.js` | Numérotation et noms des fichiers, CSV (BOM, `;`, virgule), PDF de la liste, téléchargement par paquets avec trois essais. |
+| `shared/charges-export.js` | Numérotation et noms des fichiers, CSV (BOM, `;`, virgule, identifiants en `="…"`, aucune formule), PDF de la liste (total sans les non comptées ni les non lus, dits par colonne), téléchargement par groupes de quatre, trois essais, arrêt qui interrompt tout. |
 | `shared/pdf-simple.js`, `shared/zip-simple.js` | Écrivains minimaux, sans bibliothèque : PDF (Helvetica, WinAnsi, chaînes en hexadécimal) et ZIP « stocké ». |
 | `shared/charges-vue.js`, `pages/charges.html` | Bouton « Télécharger l'exercice » ; la fenêtre de chargement suit l'export ; `telecharger` injecté par la page. |
 
@@ -76,6 +76,9 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   l'export, aucun ZIP n'est proposé, et la fenêtre nomme la facture.
 - **Le ZIP se fabrique dans le navigateur** : une réponse de fonction est
   bornée à 4,5 Mo. Le serveur ne rend que la liste et des adresses signées.
+- **Le total d'un export est celui de l'écran** (review du lot 8d, B1) : un
+  échéancier, un doublon ou une commission non tranchés sont dans la liste,
+  marqués, et hors du total.
 
 - **L'entité d'une facture est reconnue, ou laissée vide dans le doute**
   (décision de Thierry, recette du lot 8c) : il la choisit alors pour

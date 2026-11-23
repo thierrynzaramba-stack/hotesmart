@@ -35,12 +35,16 @@ function dos (d) {
 }
 
 const MAX_ENTREES = 65535
-const MAX_OCTETS = 0xFFFFFFFF
+// La position d'un fichier s'écrit sur 32 bits : au-delà, il faudrait ZIP64.
+export const ZIP_MAX_OCTETS = 0xFFFFFFFF - 64 * 1024 * 1024
 
 /**
  * Les morceaux d'un ZIP (à passer tels quels à `new Blob(morceaux)`) pour
- * `entrees` : `[{ nom, octets }]`, `nom` avec `/` pour un dossier, `octets`
- * un `Uint8Array`. Les noms sont écrits en UTF-8 (drapeau 11).
+ * `entrees` : `[{ nom, octets }]` (`octets` un `Uint8Array`), ou
+ * `[{ nom, blob, crc, taille }]` pour un fichier déjà gardé en Blob, son CRC
+ * calculé à la réception (l'export d'un exercice : le ZIP référence le Blob
+ * au lieu de recopier les octets). `nom` avec `/` pour un dossier, écrit en
+ * UTF-8 (drapeau 11).
  */
 export function zipStocke (entrees, date = new Date()) {
   if (entrees.length > MAX_ENTREES) throw new Error('zip_trop_de_fichiers')
@@ -51,8 +55,9 @@ export function zipStocke (entrees, date = new Date()) {
   let position = 0
   for (const e of entrees) {
     const nom = enc.encode(e.nom)
-    const donnees = e.octets
-    const crc = crc32(donnees)
+    const donnees = e.octets || e.blob
+    const longueur = e.octets ? e.octets.length : e.taille
+    const crc = e.octets ? crc32(e.octets) : e.crc
     const local = new Uint8Array(30 + nom.length)
     const v = new DataView(local.buffer)
     v.setUint32(0, 0x04034b50, true)
@@ -62,8 +67,8 @@ export function zipStocke (entrees, date = new Date()) {
     v.setUint16(10, heure, true)
     v.setUint16(12, jour, true)
     v.setUint32(14, crc, true)
-    v.setUint32(18, donnees.length, true)
-    v.setUint32(22, donnees.length, true)
+    v.setUint32(18, longueur, true)
+    v.setUint32(22, longueur, true)
     v.setUint16(26, nom.length, true)
     v.setUint16(28, 0, true)
     local.set(nom, 30)
@@ -77,15 +82,15 @@ export function zipStocke (entrees, date = new Date()) {
     w.setUint16(12, heure, true)
     w.setUint16(14, jour, true)
     w.setUint32(16, crc, true)
-    w.setUint32(20, donnees.length, true)
-    w.setUint32(24, donnees.length, true)
+    w.setUint32(20, longueur, true)
+    w.setUint32(24, longueur, true)
     w.setUint16(28, nom.length, true)
     w.setUint32(42, position, true)
     c.set(nom, 46)
     central.push(c)
     morceaux.push(local, donnees)
-    position += local.length + donnees.length
-    if (position > MAX_OCTETS) throw new Error('zip_trop_gros')
+    position += local.length + longueur
+    if (position > ZIP_MAX_OCTETS) throw Object.assign(new Error('zip_trop_gros'), { code: 'zip_trop_gros' })
   }
   const tailleCentral = central.reduce((s, c) => s + c.length, 0)
   const fin = new Uint8Array(22)

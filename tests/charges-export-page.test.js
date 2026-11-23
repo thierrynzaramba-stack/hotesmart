@@ -50,8 +50,13 @@ test('LE TEST QUI COMPTE (8d) : « Télécharger l\'exercice » lit la liste de 
     for (let i = 0; i < 200; i++) await b.attendre()
     const lecture = b.lecturesEcran().find(f => f.url.includes('export=1'))
     assert.equal(lecture.url, `/api/ecran/charges?export=1&entite=${ENT}&periode=2026`)
-    assert.deepEqual(b.gestes().map(g => [g.action, g.ids.length]), [['export_urls', 20], ['export_urls', 5]])
-    assert.equal(b.journal.fetch.filter(f => f.url.startsWith('https://stockage.test/lire/')).length, 25, 'un téléchargement par fichier, pas pour la commission')
+    // Par groupe de quatre, juste avant chaque groupe (review du lot 8d, M5).
+    assert.deepEqual(b.gestes().map(g => [g.action, g.ids.length]), [...Array(6).fill(['export_urls', 4]), ['export_urls', 1]])
+    const lectures = b.journal.fetch.filter(f => f.url.startsWith('https://stockage.test/lire/'))
+    assert.equal(lectures.length, 25, 'un téléchargement par fichier, pas pour la commission')
+    // Review M4 et M6 : chaque téléchargement porte un signal — l'arrêt de
+    // l'export et le délai de 45 s.
+    assert.ok(lectures.every(f => f.signal && typeof f.signal.aborted === 'boolean'))
     assert.equal(b.journal.zips.length, 1)
     assert.deepEqual(b.journal.clics.map(c => c.download), ['Charges-2026-Moi.zip'])
     const zip = await lireBlob(b.w, b.journal.zips[0])

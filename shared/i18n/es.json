@@ -1671,7 +1671,6 @@
   "charges.export_compte": "{n} facturas guardadas · emitido el {date}",
   "charges.export_a_traiter": "{n} facturas siguen por tratar y no están en esta exportación.",
   "charges.export_total": "Total",
-  "charges.export_non_lus": "{n} importes no leídos no se cuentan en el total.",
   "charges.export_sans_fichier": "* Sin archivo: comisión de plataforma o cuota de préstamo.",
   "charges.export_page": "Página {i} de {n}",
   "charges.export_nom_zip": "Gastos",
@@ -1692,5 +1691,12 @@
   "charges.export_col_ttc": "Con IVA",
   "charges.export_col_fichier": "Archivo",
   "charges.refus_trop_de_factures": "Demasiadas facturas en este ejercicio para una sola exportación (5000 como máximo).",
-  "charges.export_marque": "HôteSmart"
+  "charges.export_marque": "HôteSmart",
+  "charges.export_sans_fournisseur": "Factura",
+  "charges.export_trop_gros": "Los archivos de este ejercicio pesan demasiado para un solo ZIP. No se ha creado ningún ZIP.",
+  "charges.export_col_comptee": "Contada en el total",
+  "charges.export_oui": "sí",
+  "charges.export_non": "no",
+  "charges.export_non_lus_col": "Importes no leídos, fuera del total: sin IVA {ht}, IVA {tva}, con IVA {ttc}.",
+  "charges.export_hors_total": "° No contada en el total, como en pantalla: calendario de pagos, duplicado o comisión ya contada, aún sin resolver."
 }
