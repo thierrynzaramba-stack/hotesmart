@@ -5012,8 +5012,15 @@ un lien par bien ».** Cela remplace Q6 (« une adresse par compte ») :
 - **Une adresse par logement**, qui porte le nom du logement. Une facture qui
   y arrive est rangée dans ce logement **et** dans son entité (lue par
   `entiteDuBien` à l'arrivée, Q18).
-- Un logement **sans entité** n'a pas d'adresse : la ligne dit « rattachez
-  d'abord ce logement à une entité, depuis sa fiche » (même règle que Q18).
+- ~~Un logement sans entité n'a pas d'adresse~~ — **changement de consigne
+  de Thierry, 23 novembre 2026 à 15 h 16 : « un bien peut avoir des factures
+  sans être lié à une entité, mais un rappel est fait qu'il manque l'entité
+  juridique ».** Un logement sans entité a son adresse comme les autres ; sa
+  ligne, dans la fenêtre, porte le rappel « Entité juridique manquante —
+  rattachez ce logement depuis sa fiche ». Une facture qui y arrive est rangée
+  dans le logement, sans entité, et porte le même rappel. **Et elle se valide
+  sans entité** (Thierry, 15 h 18, option « Oui, valider sans entité ») :
+  c'est le lot 5 bis (§14.25), qui lève Q18 pour ce cas.
 
 **Ce qui en découle, et qui est une proposition** (le développeur la tient
 pour acquise jusqu'à avis contraire de Thierry) :
@@ -5083,9 +5090,9 @@ le prouvent.
 **Le chemin des factures** (`lib/charges/email.js`) :
 - le compte, l'entité et le logement viennent de l'adresse, **résolue en
   base** ; pour une adresse de logement, l'entité est celle du logement à
-  l'arrivée ; une adresse inconnue, changée, ou d'une entité ou d'un logement
-  archivé (ou d'un logement qui n'a plus d'entité) est refusée en 200
-  (définitif), trace au journal serveur seulement ;
+  l'arrivée, ou aucune s'il n'en a pas (la charge porte alors le rappel) ;
+  une adresse inconnue, changée, ou d'une entité ou d'un logement archivé est
+  refusée en 200 (définitif), trace au journal serveur seulement ;
 - au plus 10 pièces jointes prises par e-mail ; types : PDF, JPEG, PNG,
   WebP, HEIC et HEIF (convertis comme au dépôt) ; 10 Mo au plus chacune ;
 - chaque pièce : nom, type et taille confrontés à la relecture (un champ
@@ -5107,8 +5114,8 @@ le prouvent.
 
 **L'écran.** Sous « Ajouter une facture », le lien « Envoyer par e-mail ».
 Il ouvre une fenêtre (`<dialog>`) qui liste une adresse par entité non
-archivée, puis une par logement non archivé (ou la phrase « rattachez d'abord
-ce logement à une entité »), chacune avec « Copier » et « Changer d'adresse »
+archivée, puis une par logement non archivé (avec le rappel « Entité
+juridique manquante » s'il n'en a pas), chacune avec « Copier » et « Changer d'adresse »
 (confirmation : « l'ancienne adresse ne recevra plus rien »). À l'ouverture,
 UN appel `POST /api/charges` action `adresses` (titulaire seul) : il crée
 les adresses qui manquent et rend la liste — idempotent, rien n'est créé deux
@@ -5149,6 +5156,41 @@ La même fenêtre, en plein écran, l'adresse sur deux lignes si besoin ;
    les lectures (entités, logements, adresses) partent en parallèle.
 8. AVANT / APRÈS : appels de l'écran 2 → 2, requêtes et octets inchangés au
    chargement ; à l'ouverture de la fenêtre, 1 appel. À mesurer en recette.
+
+### 14.25 Lot 5 bis — valider une facture d'un logement sans entité (23 novembre 2026)
+
+**Décision de Thierry, 23 novembre 2026, 15 h 16 et 15 h 18.** « Un bien peut
+avoir des factures sans être lié à une entité, mais un rappel est fait qu'il
+manque l'entité juridique » ; et à la question « peut-on la valider avant
+d'avoir rattaché le logement ? » : **« Oui, valider sans entité »**, en
+sachant qu'elle compte dans un total à part et que les totaux et l'export,
+déjà en production, sont à retoucher.
+
+**Ce que ça lève.** Q18 refusait une facture rattachée à un logement sans
+entité (`bien_sans_entite`). Désormais : une facture d'un logement **sans
+entité** se valide **sans entité**. Q18 reste entière pour tout le reste :
+un logement qui a une entité impose celle-là, et une facture sans logement
+exige toujours une entité.
+
+**Ordre.** Lot 5 d'abord (les e-mails), puis ce lot, sur sa propre branche
+partie de `main`. En attendant ce lot, une facture reçue pour un logement sans
+entité attend dans « À traiter » avec son rappel.
+
+**À détailler avant de coder, et à faire valider par Thierry** (périmètre
+pressenti, pas encore une spec) :
+- la validation (`lib/charges.js`) : entité vide acceptée seulement si le
+  logement choisi n'a pas d'entité ;
+- un total « Sans entité juridique » dans le choix d'entité de l'écran, avec
+  le rappel en tête ; sans exercice, donc par mois (comme une entité dont le
+  début d'exercice est vide) ; les fonctions SQL des totaux, qui filtrent
+  aujourd'hui par `entite_juridique_id = p_entite`, apprennent le cas vide —
+  le résumé `charges_resume` a déjà une cellule « sans entité » ;
+- l'export d'une période « Sans entité juridique » ;
+- **la question ouverte** : quand le logement est enfin rattaché à une
+  entité, ses factures déjà validées sans entité y passent-elles d'elles-mêmes,
+  ou restent-elles « sans entité » jusqu'à un geste de l'hôte ?
+- les crédits (import du tableau d'amortissement) gardent l'entité
+  obligatoire : la consigne parle des factures d'un logement.
 
 ## 12. Trace des reviews du lot 2
 
