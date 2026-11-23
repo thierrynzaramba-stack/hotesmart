@@ -39,7 +39,9 @@ function monde () {
   }
   const eqs = (r) => r.filtres.filter(f => f[0] === 'eq')
   const neqs = (r) => r.filtres.filter(f => f[0] === 'neq')
-  const passe = (l, r) => eqs(r).every(([, c, v]) => String(l[c]) === String(v)) && neqs(r).every(([, c, v]) => String(l[c]) !== String(v))
+  const gtes = (r) => r.filtres.filter(f => f[0] === 'gte')
+  const passe = (l, r) => eqs(r).every(([, c, v]) => String(l[c]) === String(v)) && neqs(r).every(([, c, v]) => String(l[c]) !== String(v)) &&
+    gtes(r).every(([, c, v]) => String(l[c]) >= String(v))
   const b = baseEnregistreuse((r) => {
     if (r.table === 'charges_adresses_email') {
       if (etat.panneAdresse) return { data: null, error: { message: 'panne' } }
@@ -60,7 +62,11 @@ function monde () {
         for (const l of cibles) Object.assign(l, r.charge)
         return { data: cibles, error: null }
       }
-      if (r.op === 'select') return { data: etat.charges.filter(l => passe(l, r)), error: null }
+      if (r.op === 'select') {
+        if (etat.panneVolume && r.optionsSelect && r.optionsSelect.count) return { data: null, error: { message: 'panne' } }
+        const lignes = etat.charges.filter(l => passe(l, r))
+        return r.optionsSelect && r.optionsSelect.count ? { data: null, count: lignes.length, error: null } : { data: lignes, error: null }
+      }
     }
     return { data: null, error: null }
   })
@@ -545,4 +551,67 @@ test('une PIÈCE refusée par la base (donnée invalide) : refus définitif, tra
   assert.deepEqual(m.etat.charges.map(x => [x.statut, x.motif]), [['sans_facture', 'ligne_refusee']])
   const pose = m.gestes.find(g => g.nom === 'upload').args[0]
   assert.deepEqual(m.gestes.filter(g => g.nom === 'remove').flatMap(g => g.args[0]), [pose])
+})
+
+// ─── Le plafond du jour (Thierry, 23 novembre 2026 ; review, constat 7) ──────
+const ilYA = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString()
+const ligneEmail = (n, o = {}) => ({ id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`, user_id: A, origine: 'email', statut: 'a_verifier', motif: null, email_uuid: `ancien-${n}`, justificatif_empreinte: `e${n}`, cree_le: ilYA(1), ...o })
+
+test('LE TEST QUI COMPTE (plafond) : à 49 lignes reçues par e-mail sur 24 h, une seule pièce de plus entre ; les autres sont refusées et UNE ligne dit le plafond', async () => {
+  const m = monde()
+  for (let i = 0; i < 49; i++) m.etat.charges.push(ligneEmail(i))
+  // Une ligne d'il y a 25 h ne compte plus.
+  m.etat.charges.push(ligneEmail(99, { cree_le: ilYA(25) }))
+  const post = []; const relues = []; const octets = {}
+  for (let i = 0; i < 3; i++) {
+    const f = pdf(40000, String(i))
+    post.push(piecePost(`f${i}.pdf`, 'application/pdf', `jeton-piece-${i}`))
+    relues.push(pieceRelue(`f${i}.pdf`, 'application/pdf', f.length))
+    octets[`jeton-piece-${i}`] = f
+  }
+  const { r, appels } = await appel(m, { post, relues, octets })
+  assert.equal(appels.length, 1, 'les pièces au-delà du plafond ne sont même pas téléchargées')
+  assert.equal(r.trace.prises, 1)
+  assert.deepEqual(r.trace.refusees, ['quota_jour', 'quota_jour'])
+  const neuves = m.etat.charges.filter(x => x.email_uuid === UUID)
+  assert.deepEqual(neuves.map(x => [x.statut, x.motif]).sort(), [['a_verifier', null], ['sans_facture', 'quota_jour']])
+  const q = m.requetes.find(x => x.table === 'charges' && x.optionsSelect && x.optionsSelect.count)
+  assert.equal(filtre(q, 'user_id'), A)
+  assert.equal(filtre(q, 'origine'), 'email')
+})
+
+test('plafond atteint : rien n\'entre ; la ligne « plafond » n\'est posée qu\'UNE fois par 24 h, même si l\'expéditeur insiste', async () => {
+  const m = monde()
+  for (let i = 0; i < 50; i++) m.etat.charges.push(ligneEmail(i))
+  const fichier = pdf()
+  const o = { post: [piecePost('f.pdf', 'application/pdf', 'jeton-piece-1')], relues: [pieceRelue('f.pdf', 'application/pdf', fichier.length)], octets: { 'jeton-piece-1': fichier } }
+  const { r, appels } = await appel(m, o)
+  assert.equal(appels.length, 0)
+  assert.equal(r.trace.plafond, true)
+  assert.deepEqual(m.etat.charges.filter(x => x.statut === 'sans_facture').map(x => x.motif), ['quota_jour'])
+  // Un second e-mail, puis un e-mail sans pièce : plus aucune ligne.
+  for (const autre of [o, {}]) {
+    const avant = m.etat.charges.length
+    const { r: r2 } = await email.recevoir(m.db, {
+      ref: { recipient: 'la-bulle.k2j9x7q4@reply.hotesmart.fr', attachments: autre.relues || [] },
+      item: { Attachments: autre.post || [] }, uuid: crypto.randomUUID(), debut: 1000
+    }, { cle: 'k', fetch: brevo(autre.octets || {}).f, entites: m.entites, maintenant: () => 2000 }).then(x => ({ r: x }))
+    assert.equal(r2.issue, 'recue')
+    assert.equal(m.etat.charges.length, avant, 'rien de plus')
+  }
+})
+
+test('plafond atteint par un e-mail SANS pièce : sa ligne dit le plafond, pas « sans pièce »', async () => {
+  const m = monde()
+  for (let i = 0; i < 50; i++) m.etat.charges.push(ligneEmail(i))
+  await appel(m, {})
+  assert.deepEqual(m.etat.charges.filter(x => x.email_uuid === UUID).map(x => x.motif), ['quota_jour'])
+})
+
+test('une panne du comptage fait rejouer (on ne prend pas à l\'aveugle)', async () => {
+  const m = monde()
+  m.etat.panneVolume = true
+  const { r } = await appel(m, { post: [piecePost('f.pdf', 'application/pdf', 'jeton-piece-1')], relues: [pieceRelue('f.pdf', 'application/pdf', 40000)], octets: { 'jeton-piece-1': pdf() } })
+  assert.equal(r.rejouer, true)
+  assert.equal(m.etat.charges.length, 0)
 })

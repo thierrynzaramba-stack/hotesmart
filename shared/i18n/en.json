@@ -1735,5 +1735,6 @@
   "charges.refus_bien_introuvable": "This property no longer exists.",
   "charges.refus_entite_introuvable": "This entity no longer exists.",
   "charges.refus_cible_invalide": "Choose an entity or a property.",
-  "charges.motif_email_ligne_refusee": "An attachment could not be saved."
+  "charges.motif_email_ligne_refusee": "An attachment could not be saved.",
+  "charges.motif_email_quota_jour": "More than 50 invoices received by email in 24 hours: the next ones were not taken. Add them by hand, or send them again tomorrow."
 }

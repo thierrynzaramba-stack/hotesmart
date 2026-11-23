@@ -1735,5 +1735,6 @@
   "charges.refus_bien_introuvable": "Este alojamiento ya no existe.",
   "charges.refus_entite_introuvable": "Esta entidad ya no existe.",
   "charges.refus_cible_invalide": "Elija una entidad o un alojamiento.",
-  "charges.motif_email_ligne_refusee": "No se pudo guardar un adjunto."
+  "charges.motif_email_ligne_refusee": "No se pudo guardar un adjunto.",
+  "charges.motif_email_quota_jour": "Más de 50 facturas recibidas por correo en 24 horas: las siguientes no se tomaron. Añádalas a mano o reenvíelas mañana."
 }

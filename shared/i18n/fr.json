@@ -1735,5 +1735,6 @@
   "charges.refus_bien_introuvable": "Ce logement n'existe plus.",
   "charges.refus_entite_introuvable": "Cette entité n'existe plus.",
   "charges.refus_cible_invalide": "Choisissez une entité ou un logement.",
-  "charges.motif_email_ligne_refusee": "Une pièce jointe n'a pas pu être enregistrée."
+  "charges.motif_email_ligne_refusee": "Une pièce jointe n'a pas pu être enregistrée.",
+  "charges.motif_email_quota_jour": "Plus de 50 factures reçues par e-mail en 24 heures : les suivantes n'ont pas été prises. Ajoutez-les à la main, ou renvoyez-les demain."
 }

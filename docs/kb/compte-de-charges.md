@@ -97,8 +97,11 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   fichier. Un rejeu de Brevo saute les pièces déjà entrées sans les
   retélécharger, et chaque passage avance (une pièce ne commence plus après
   17 s, rien ne dépasse 55 s).
-- **Dettes du lot 5** : 5-1, aucun plafond de factures reçues par e-mail par
-  compte (à trancher par Thierry) ; 5-2, une seule adresse HôteSmart servie
+- **Au plus 50 lignes reçues par e-mail par compte et par 24 heures**
+  (Thierry, 23 novembre 2026) : au-delà, rien n'entre, et une seule ligne
+  « plafond atteint » par 24 heures le dit (`QUOTA_EMAIL_JOUR`,
+  `lib/charges/email.js`).
+- **Dettes du lot 5** : 5-2, une seule adresse HôteSmart servie
   par e-mail (la première du destinataire) ; 5-3, une pièce entrée lors d'un
   passage qui a fini en rejeu est lue par le cron quotidien, pas à
   l'arrivée.
