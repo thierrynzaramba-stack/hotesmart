@@ -114,8 +114,15 @@ test('une lecture des canaux en echec ne vaut PAS « aucun canal »', () => {
   const bornes = [fin, g, h].filter(x => x > f)
   const corps = src.slice(f, bornes.length ? Math.min(...bornes) : src.length)
   assert.ok(corps.length > 200, 'le corps de la fonction n a pas ete trouve')
-  assert.match(corps, /if \(!r \|\| !r\.ok\) return null/)
+  // ⚠ La lecture passe par le releve pagine depuis le 23 novembre 2026 ; un
+  // echec n'y rend `[]` QUE si la propriete n'existe plus chez le partenaire
+  // (404). Le COMPORTEMENT est eprouve en appelant la fonction, dans
+  // tests/suppression-bien-garde-serveur.test.js ; ici, la forme seulement.
+  assert.match(corps, /if \(!canaux\.ok\) return await siLaProprieteADisparu\(cle\)/)
+  assert.match(corps, /if \(!tarifs\.ok\) return await siLaProprieteADisparu\(cle\)/)
   assert.match(corps, /catch \(e\) \{[\s\S]*?return null/)
+  const disparu = src.slice(src.indexOf('async function siLaProprieteADisparu'))
+  assert.match(disparu, /r\.status === 404 \? \[\] : null/, 'seul un 404 vaut « aucun canal »')
 })
 
 test('la garde lit `migration_target_property_id`, donc elle le SELECTIONNE', () => {

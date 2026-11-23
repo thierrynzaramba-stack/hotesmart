@@ -156,20 +156,31 @@ Module._load = function (demande) {
   return origine.apply(this, arguments)
 }
 
-// Le partenaire. DEUX appels distincts, et il a fallu les separer : le
-// croisement en direct fait `GET /channels?filter[property_id]=...`, la
-// suppression fait `DELETE /properties/...`. Repondre la meme chose aux deux
-// faisait echouer le croisement des qu'on simulait un refus de suppression,
-// donc deux tests mesuraient autre chose que leur titre.
-//   · `monde.canauxVivants` : ce que le GET /channels rend (defaut : aucun).
-//   · `monde.partenaire`    : ce que le DELETE /properties rend.
+// Le partenaire. QUATRE appels distincts, et il a fallu les separer : le
+// croisement en direct fait `GET /channels?filter[property_id]=...`, puis
+// `GET /rate_plans?filter[property_id]=...` (relecture du 23 novembre 2026 :
+// un canal ne vend CE bien que s'il mappe un de SES tarifs), et sur une lecture
+// en echec `GET /properties/...` ; la suppression fait `DELETE /properties/...`.
+// Repondre la meme chose a tous faisait echouer le croisement des qu'on
+// simulait un refus de suppression, donc deux tests mesuraient autre chose que
+// leur titre.
+//   · `monde.canauxVivants`       : ce que le GET /channels rend (defaut : aucun) ;
+//     une FONCTION recoit le numero de page ;
+//   · `monde.tarifsPartenaire`    : ce que le GET /rate_plans rend (defaut : les
+//     deux plans du bien, base et derive) ;
+//   · `monde.proprietePartenaire` : ce que le GET /properties rend (defaut : 200) ;
+//   · `monde.partenaire`          : ce que le DELETE /properties rend.
 global.fetch = async (url, opts) => {
   const methode = (opts && opts.method) || 'GET'
-  trace.fetchs.push(`${methode} ${String(url)}`)
-  const estLectureCanaux = methode === 'GET' && String(url).includes('/channels')
-  const r = estLectureCanaux
-    ? (monde.canauxVivants || { status: 200, body: { data: [] } })
-    : (monde.partenaire || { status: 200, body: { data: {} } })
+  const u = String(url)
+  trace.fetchs.push(`${methode} ${u}`)
+  const page = Number((u.match(/pagination\[page\]=(\d+)/) || [])[1] || 1)
+  const servir = (v, defaut) => (typeof v === 'function' ? v(page) : v) || defaut
+  let r
+  if (methode === 'GET' && u.includes('/channels')) r = servir(monde.canauxVivants, { status: 200, body: { data: [] } })
+  else if (methode === 'GET' && u.includes('/rate_plans')) r = servir(monde.tarifsPartenaire, { status: 200, body: { data: [{ id: 'PLAN-BASE' }, { id: 'PLAN-DERIVE' }] } })
+  else if (methode === 'GET' && u.includes('/properties/')) r = servir(monde.proprietePartenaire, { status: 200, body: { data: {} } })
+  else r = monde.partenaire || { status: 200, body: { data: {} } }
   return {
     ok: r.status >= 200 && r.status < 300,
     status: r.status,
@@ -179,10 +190,11 @@ global.fetch = async (url, opts) => {
   }
 }
 
-// Un canal ACTIF chez le partenaire, dans la forme que `canauxActifsDuBien` lit.
-const canalVivant = (ota) => ({
+// Un canal ACTIF chez le partenaire, qui MAPPE un tarif de ce bien (le plan
+// derive : depuis le 10 septembre 2026 tous les mappings pointent le derive).
+const canalVivant = (ota, mappings = [{ rate_plan_id: 'PLAN-DERIVE' }]) => ({
   status: 200,
-  body: { data: [{ id: 'ch-1', attributes: { is_active: true, channel: ota } }] }
+  body: { data: [{ id: 'ch-1', attributes: { is_active: true, channel: ota, rate_plans: mappings } }] }
 })
 
 const handler = require('../api/channel-property.js')
@@ -607,7 +619,7 @@ test('un bien BEDS24 n interroge pas le partenaire du canal', async () => {
 
 test('la cle de MIGRATION est celle qu on interroge quand elle existe', async () => {
   // ⚠ UN BIEN EN BASCULE PORTE SES CANAUX SUR LA CLE CIBLE. `canauxActifsDuBien`
-  // lit `provider_property_id || migration_target_property_id` — mais le SELECT
+  // lit la cle cible EN PRIORITE (`proprieteChezLePartenaire`) — mais le SELECT
   // du handler ne ramenait pas cette colonne, donc pour un bien dont l'ancienne
   // cle est nulle, le croisement aurait interroge `undefined` et conclu
   // « aucun canal » sur un bien en vente. Une garde qui regarde ailleurs se
@@ -846,4 +858,131 @@ test('la limite de page est DEMANDEE au partenaire', async () => {
   assert.ok(lecture, 'le partenaire n a pas ete interroge')
   assert.match(lecture, /pagination\[limit\]=\d+/,
     'aucune limite de page demandee : un bien a plus de 10 canaux serait insupprimable a vie')
+})
+
+// ─── Relecture du 23 novembre 2026 ──────────────────────────────────────────
+
+test('LE TEST QUI COMPTE : un canal PARTAGE, actif, qui ne mappe AUCUN tarif de ce bien n empeche rien', async () => {
+  // ⚠ CONSTAT 1. `is_active` est une propriete du CANAL : un compte Airbnb
+  // porte plusieurs logements, et `filter[property_id]` rend le canal pour
+  // chaque bien rattache, mappe ou non. Le second logement du compte, sans
+  // annonce a lui, etait refuse a vie — et l'assistant ne lui offre pas
+  // « Deconnecter », puisqu'il n'a rien a deconnecter.
+  for (const [nom, mappings] of [
+    ['mappe un tarif d un AUTRE bien', [{ rate_plan_id: 'PLAN-D-UN-AUTRE-BIEN' }]],
+    ['aucun mapping', []]
+  ]) {
+    poser({
+      canaux: [{ ota: 'airbnb', titre: 'Annonce', actif: true, mappe_pour_ce_bien: false }],
+      canauxVivants: canalVivant('airbnb', mappings),
+      partenaire: { status: 200, body: { data: {} } }
+    })
+    const r = await appeler()
+    assert.equal(r.code, 200, `${nom} : ${r.code} ${JSON.stringify(r.corps)}`)
+    assert.ok(trace.fetchs.some(f => f.startsWith('DELETE')), `${nom} : la propriete n a pas ete supprimee`)
+  }
+})
+
+test('LE TEST QUI COMPTE : le tarif mappe se lit CHEZ LE PARTENAIRE — un plan absent de nos liens vend quand meme', async () => {
+  // Un plan derive, ou un mappage pose hors d'HoteSmart, n'est pas dans
+  // `property_channel_rate_plans` : s'y fier autoriserait la suppression d'un
+  // logement qui vend.
+  poser({
+    canaux: [],
+    canauxVivants: canalVivant('airbnb', [{ rate_plan_id: 'PLAN-POSE-HORS-HOTESMART' }]),
+    tarifsPartenaire: { status: 200, body: { data: [{ id: 'PLAN-BASE' }, { id: 'PLAN-POSE-HORS-HOTESMART' }] } }
+  })
+  const r = await appeler()
+  assert.equal(r.code, 409)
+  assert.equal(r.corps.motif, 'annonce_reliee')
+  assert.equal(r.corps.source, 'partenaire')
+  assert.deepEqual(trace.deletes, [])
+  assert.ok(trace.fetchs.some(f => f.startsWith('GET') && f.includes('/rate_plans?filter[property_id]=PROP-1')),
+    `les tarifs n ont pas ete lus sur la cle du bien : ${trace.fetchs.join(' | ')}`)
+})
+
+test('LE TEST QUI COMPTE : un mappage qu on ne sait pas lire, ou des tarifs illisibles, refusent', async () => {
+  for (const [nom, etat] of [
+    ['canal actif sans liste de mappings', { canauxVivants: { status: 200, body: { data: [{ id: 'ch-1', attributes: { is_active: true, channel: 'airbnb' } }] } } }],
+    ['mapping sans rate_plan_id', { canauxVivants: canalVivant('airbnb', [{ settings: {} }]) }],
+    ['tarifs en panne', { canauxVivants: canalVivant('airbnb'), tarifsPartenaire: { status: 500, body: {} } }],
+    ['tarifs malformes', { canauxVivants: canalVivant('airbnb'), tarifsPartenaire: { status: 200, body: { data: { id: 'x' } } } }],
+    ['un tarif sans id', { canauxVivants: canalVivant('airbnb'), tarifsPartenaire: { status: 200, body: { data: [{ attributes: {} }] } } }],
+    ['un canal qui n en est pas un', { canauxVivants: { status: 200, body: { data: [null] } } }]
+  ]) {
+    poser({ canaux: [], ...etat })
+    const r = await appeler()
+    assert.equal(r.code, 409, `${nom} : ${r.code}`)
+    assert.equal(r.corps.motif, 'partenaire_illisible', nom)
+    assert.deepEqual(trace.deletes, [], nom)
+    assert.ok(!trace.fetchs.some(f => f.startsWith('DELETE')), `${nom} : un DELETE est parti`)
+  }
+})
+
+test('LE TEST QUI COMPTE : une propriete DEJA effacee chez le partenaire redevient supprimable — sur un 404 et lui seul', async () => {
+  // ⚠ CONSTAT 2. La lecture des canaux en echec rendait 409 « reessayez »
+  // pour toujours : le 404 que le DELETE accepte n'etait plus jamais atteint.
+  poser({
+    canaux: [],
+    canauxVivants: { status: 404, body: {} },
+    proprietePartenaire: { status: 404, body: {} },
+    partenaire: { status: 404, body: {} }
+  })
+  const r = await appeler()
+  assert.equal(r.code, 200, `${r.code} ${JSON.stringify(r.corps)}`)
+  assert.ok(trace.fetchs.some(f => f === 'GET ' + process.env.CHANNEL_BASE_URL + '/properties/PROP-1'),
+    `l existence de la propriete n a pas ete demandee : ${trace.fetchs.join(' | ')}`)
+  // Toute autre reponse garde le refus.
+  for (const [nom, lecture, propriete] of [
+    ['canaux en panne, propriete presente', { status: 500, body: {} }, { status: 200, body: { data: {} } }],
+    ['canaux 404, propriete en panne', { status: 404, body: {} }, { status: 500, body: {} }],
+    ['canaux 422, propriete 422', { status: 422, body: {} }, { status: 422, body: {} }]
+  ]) {
+    poser({ canaux: [], canauxVivants: lecture, proprietePartenaire: propriete })
+    const k = await appeler()
+    assert.equal(k.code, 409, `${nom} : ${k.code}`)
+    assert.equal(k.corps.motif, 'partenaire_illisible', nom)
+    assert.deepEqual(trace.deletes, [], nom)
+  }
+})
+
+test('LE TEST QUI COMPTE : les canaux se lisent PAGE PAR PAGE — un canal en vente en page 2 est vu', async () => {
+  // ⚠ CONSTAT 3. Le partenaire plafonne sa propre limite : 12 canaux arrivent
+  // en 10 puis 2. `pagination[limit]=100` laissait le refus permanent ; la
+  // lecture d'une seule page, elle, ne verrait pas la page 2.
+  const inactif = (n) => ({ id: `ch-${n}`, attributes: { is_active: false, channel: 'airbnb', rate_plans: [] } })
+  const pages = (deuxieme) => (page) => ({
+    status: 200,
+    body: page === 1
+      ? { data: Array.from({ length: 10 }, (_, k) => inactif(k)), meta: { total: 12 } }
+      : page === 2 ? { data: deuxieme } : { data: [] }
+  })
+  poser({
+    canaux: [],
+    canauxVivants: pages([inactif(10), { id: 'ch-11', attributes: { is_active: true, channel: 'BookingCom', rate_plans: [{ rate_plan_id: 'PLAN-BASE' }] } }])
+  })
+  const r = await appeler()
+  assert.equal(r.code, 409, `${r.code} : le canal de la page 2 n a pas ete vu`)
+  assert.equal(r.corps.motif, 'annonce_reliee')
+  assert.deepEqual(r.corps.canaux, ['BookingCom'])
+  // Et sans canal en vente, douze canaux ne rendent plus le bien insupprimable.
+  poser({ canaux: [], canauxVivants: pages([inactif(10), inactif(11)]),
+          partenaire: { status: 200, body: { data: {} } } })
+  const k = await appeler()
+  assert.equal(k.code, 200, `${k.code} ${JSON.stringify(k.corps)}`)
+})
+
+test('le second appelant (PATCH « je garde mes prix ») suit la meme regle : un bien Beds24 hors bascule n interroge pas le partenaire', async () => {
+  // ⚠ CONSTAT 5 : `canauxActifsDuBien` sert aussi au PATCH `rate_sync_mode =
+  // keep`, et son comportement y a change sans test.
+  poser({})
+  trace.fetchs.length = 0
+  const lu = await handler.canauxActifsDuBien({ provider: 'beds24', provider_property_id: 'B24-1' })
+  assert.deepEqual(lu, [])
+  assert.deepEqual(trace.fetchs, [], `le partenaire a ete interroge : ${trace.fetchs.join(' | ')}`)
+  // Un canal partage sans mapping pour ce bien ne bloque pas non plus le `keep`.
+  poser({ canauxVivants: canalVivant('airbnb', [{ rate_plan_id: 'PLAN-D-UN-AUTRE-BIEN' }]) })
+  assert.deepEqual(await handler.canauxActifsDuBien(monde.bien), [])
+  poser({ canauxVivants: canalVivant('airbnb') })
+  assert.deepEqual(await handler.canauxActifsDuBien(monde.bien), ['airbnb'])
 })
