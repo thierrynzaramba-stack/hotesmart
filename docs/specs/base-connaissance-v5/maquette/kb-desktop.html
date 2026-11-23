@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HôteSmart — Base de connaissance (V5, ordinateur)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+  :root{
+    --fg:#222222; --muted:#717171; --muted-2:#9B9B9B; --line:#EBEBEB;
+    --ok:#0F7A4F; --ok-soft:#E8F5EE; --warn:#9A5B00; --warn-soft:#FFF4E0;
+    --danger:#B42318; --danger-soft:#FEF0EE; --info:#2563EB; --night:#0E1726;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#FFFFFF;font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--fg)}
+  .note{max-width:1180px;margin:18px auto 0;padding:10px 14px;border:1px dashed var(--line);border-radius:12px;font-size:13px;color:var(--muted)}
+  .app{max-width:1180px;margin:14px auto;border:1px solid var(--line);border-radius:18px;overflow:hidden}
+  header.top{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line)}
+  .h1{font-size:19px;font-weight:800;margin:0;flex:1}
+  .ico{width:40px;height:40px;border:1px solid var(--line);border-radius:99px;background:#fff;display:flex;align-items:center;justify-content:center;flex:none;font-size:15px}
+  .ico.on{background:var(--night);color:#fff;border-color:var(--night)}
+  .body{display:grid;grid-template-columns:1fr 420px}
+  .fil{padding:18px 20px;border-right:1px solid var(--line);min-height:560px}
+  .bulle{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px;font-size:14px;max-width:78%}
+  .bulle.moi{margin-left:auto;background:#F7F7F7}
+  .saisie{border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:18px}
+  .saisie textarea{width:100%;border:0;outline:0;font:inherit;resize:vertical;min-height:62px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--line);margin-top:8px}
+  .chip{border:1px solid var(--line);border-radius:99px;padding:5px 10px;font-size:12px;background:#fff;display:flex;gap:6px;align-items:center}
+  .chip b{font-weight:700}
+  .chip .v{color:var(--muted);font-weight:500}
+  .chip.vide{border-color:var(--danger);color:var(--danger);background:var(--danger-soft)}
+  .apercu{margin-top:10px;background:var(--ok-soft);border:1px solid #CBE7D8;border-radius:12px;padding:10px 12px;font-size:13px}
+  .apercu .t{font-weight:700;color:var(--ok);font-size:12px;margin-bottom:4px}
+  .bloque{margin-top:10px;background:var(--danger-soft);border:1px solid #F3C9C4;border-radius:12px;padding:10px 12px;font-size:13px;color:var(--danger)}
+  .volet{padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+  .volet h2{font-size:16px;font-weight:800;margin:0}
+  .sel{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;padding:7px 12px;font-size:14px;font-weight:600}
+  .sect{font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:6px 0 2px}
+  .fait{border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:grid;gap:4px}
+  .fait .l1{display:flex;align-items:baseline;gap:8px}
+  .fait .lib{font-weight:700;font-size:14px;flex:1}
+  .fait .val{font-size:14px}
+  .fait .meta{font-size:12px;color:var(--muted-2);display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .bal{font-family:ui-monospace,monospace;font-size:12px;background:#F4F4F4;border-radius:6px;padding:2px 6px}
+  .pastille{font-size:11px;font-weight:700;border-radius:99px;padding:2px 8px}
+  .pastille.vieux{background:var(--warn-soft);color:var(--warn)}
+  .pastille.ok{background:var(--ok-soft);color:var(--ok)}
+  .pastille.ia{background:#EEF2FF;color:var(--info)}
+  .pastille.priv{background:#F4F4F4;color:var(--muted)}
+  .usage{font-size:12px;color:var(--muted)}
+  .usage.aucun{color:var(--warn)}
+  .ajout{border:1px dashed var(--line);border-radius:14px;padding:10px 12px;font-size:14px;color:var(--muted);text-align:center}
+  .legende{max-width:1180px;margin:0 auto 40px;padding:0 6px;font-size:13px;color:var(--muted)}
+  .legende li{margin:5px 0}
+</style>
+</head>
+<body>
+
+<div class="note"><b>Maquette — ordinateur.</b> La base s'ouvre comme un troisième volet de Messages, par le bouton 📖 de l'en-tête, à côté de « Messages programmés ». Les valeurs montrées sont celles mesurées en production le 3 novembre 2026 (La bulle).</div>
+
+<div class="app">
+  <header class="top">
+    <h1 class="h1">Messages</h1>
+    <div class="ico" title="Réponses de l'IA">✨</div>
+    <div class="ico" title="Messages programmés">🗓</div>
+    <div class="ico on" title="Base de connaissance">📖</div>
+  </header>
+
+  <div class="body">
+    <!-- ───────── le fil, avec l'insertion en un clic ───────── -->
+    <section class="fil">
+      <div class="bulle">Bonsoir, j'aimerai savoir quels sont les suppléments que vous proposez ? Merci</div>
+      <div class="bulle moi">Bonjour {prenom}, nous proposons une bouteille de champagne au frais avec des glaçons pour <b>29 €</b>.</div>
+
+      <div class="saisie">
+        <textarea>Bonjour {prenom}, pour rappel l'adresse est {adresse}. En cas de besoin : {telephone_hote}. Le wifi est {wifi_nom}.</textarea>
+        <div class="chips">
+          <span class="chip"><b>{prenom}</b><span class="v">Jean-Marie</span></span>
+          <span class="chip"><b>{adresse}</b><span class="v">rue de La bulle…</span></span>
+          <span class="chip"><b>{telephone_hote}</b><span class="v">NUMERO-A</span></span>
+          <span class="chip"><b>{wifi_nom}</b><span class="v">Livebox-A1B2</span></span>
+          <span class="chip vide"><b>{wifi_mdp}</b><span class="v">à remplir</span></span>
+        </div>
+        <div class="apercu">
+          <div class="t">Ce que le voyageur recevra</div>
+          Bonjour Jean-Marie, pour rappel l'adresse est adresse complète de La bulle. En cas de besoin : NUMERO-A. Le wifi est Livebox-A1B2.
+        </div>
+        <div class="bloque">
+          <b>Envoi bloqué</b> — <b>{wifi_mdp}</b> n'a pas de valeur pour La bulle. À remplir dans la base de connaissance → Mot de passe wifi.
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── le volet « Base de connaissance » ───────── -->
+    <aside class="volet">
+      <h2>Base de connaissance</h2>
+      <div class="sel">🏠 La bulle ▾</div>
+
+      <div class="sect">Les faits — utilisables comme balises</div>
+
+      <div class="fait">
+        <div class="l1"><span class="lib">Téléphone hôte</span><span class="pastille vieux">à vérifier</span></div>
+        <div class="val">NUMERO-A</div>
+        <div class="meta"><span class="bal">{telephone_hote}</span><span class="pastille ia">lue par l'IA</span></div>
+        <div class="usage aucun">⚠ utilisée dans <b>aucun</b> message — 3 modèles écrivent un numéro en dur</div>
+      </div>
+
+      <div class="fait">
+        <div class="l1"><span class="lib">Adresse</span><span class="pastille ok">vérifié le 2 nov.</span></div>
+        <div class="val">adresse complète de La bulle</div>
+        <div class="meta"><span class="bal">{adresse}</span><span class="pastille ia">lue par l'IA</span></div>
+        <div class="usage">utilisée dans <b>1</b> message : Ménage fait</div>
+      </div>
+
+      <div class="fait">
+        <div class="l1"><span class="lib">Code de la porte d'immeuble</span><span class="pastille priv">jamais lue par l'IA</span></div>
+        <div class="val">CODE-IMMEUBLE</div>
+        <div class="meta"><span class="bal">{code_immeuble}</span></div>
+        <div class="usage">utilisée dans <b>1</b> message : Ménage fait</div>
+      </div>
+
+      <div class="fait">
+        <div class="l1"><span class="lib">Arrivée à partir de</span><span class="pastille ok">vérifié le 2 nov.</span></div>
+        <div class="val">18:00</div>
+        <div class="meta"><span class="bal">{checkin}</span><span class="pastille ia">lue par l'IA</span></div>
+        <div class="usage aucun">⚠ 3 messages écrivent « 18h » en dur</div>
+      </div>
+
+      <div class="ajout">+ Ajouter une information</div>
+
+      <div class="sect">Questions &amp; réponses — lues par l'IA</div>
+
+      <div class="fait">
+        <div class="l1"><span class="lib">Pack en complément</span><span class="pastille vieux">39 € · écrit le 20 juil.</span></div>
+        <div class="val" style="color:var(--muted)">« … une bouteille de champagne servie avec glaçons au prix de 39 €. Le pack massage est épuisé… »</div>
+        <div class="meta">⚠ un prix non vérifié depuis 3 mois</div>
+      </div>
+
+      <div class="fait">
+        <div class="l1"><span class="lib">Arrivée après 18h</span><span class="pastille ok">vérifié le 2 nov.</span></div>
+        <div class="val" style="color:var(--muted)">« Les horaires sont flexibles car il y a une boîte à clé… »</div>
+      </div>
+
+      <div class="ajout">+ Ajouter une question</div>
+    </aside>
+  </div>
+</div>
+
+<div class="legende">
+  <b>Ce que la maquette fixe</b>
+  <ul>
+    <li><b>Un prix a toujours un âge visible.</b> C'est la seule chose qui aurait évité le 39 €.</li>
+    <li><b>Chaque fait dit où il sert</b> — et « aucun message » est une alerte, pas une information neutre : c'est le signe d'un fait écrit en dur ailleurs.</li>
+    <li><b>Deux étiquettes de portée</b> : « lue par l'IA » et « jamais lue par l'IA » (codes, secrets).</li>
+    <li><b>L'aperçu montre le texte final</b> avant l'envoi, et une balise vide <b>bloque</b> en nommant où la remplir.</li>
+    <li>Les pastilles reprennent les jetons de <code>shared/theme.css</code> ; aucune couleur nouvelle.</li>
+  </ul>
+</div>
+
+</body>
+</html>

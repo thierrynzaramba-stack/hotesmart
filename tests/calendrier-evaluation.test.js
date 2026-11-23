@@ -136,9 +136,12 @@ test('LE TEST QUI COMPTE (règle V5) : les pictogrammes viennent du SPRITE, jama
   assert.match(code, /picto\('i-check'\)/, 'la coche aussi')
   assert.match(code, /const picto = \(id\) =>[\s\S]{0,200}icons\.svg#\$\{id\}/,
     'et le helper reference bien le sprite partagé')
-  // Et dans la page Avis, dont le titre portait le même emoji.
+  // Et dans la page Avis, dont le titre portait le même emoji. Depuis la
+  // refonte V5 (8 novembre 2026), le titre est un mot seul — l'étoile vit dans
+  // le menu ≡ qui mène à la page — et ses pictogrammes viennent du sprite.
   const avis = fs.readFileSync(path.join(__dirname, '..', 'pages', 'avis.html'), 'utf8')
-  const titre = avis.slice(avis.indexOf('class="page-title"'), avis.indexOf('class="page-title"') + 400)
-  assert.doesNotMatch(titre, /[\u{1F300}-\u{1FAFF}\u{2B50}]/u)
-  assert.match(titre, /icons\.svg#i-review/)
+  const titre = avis.slice(avis.indexOf('<h1'), avis.indexOf('</h1>') + 5)
+  assert.match(titre, /data-i18n="avis\.titre"/)
+  assert.doesNotMatch(avis, /[\u{1F300}-\u{1FAFF}\u{2B50}]/u, 'aucun emoji dans la page')
+  assert.match(avis, /icons\.svg#i-settings/, 'les pictogrammes de la page viennent du sprite')
 })

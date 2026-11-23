@@ -74,14 +74,142 @@ const ATTENDU = {
     // Le premier affichage : trois endpoints, c'est le contrat du lot (b).
     '/api/ecran/aujourdhui': 1,          // l'ecran en un appel
     '/api/menages': 1,                   // la fenetre de 400 jours — lot (d)
-    // ⚠ UN SEUL LITTERAL, MAIS DEUX ALLERS-RETOURS PAR BIEN : le chemin est
-    // assemble une fois dans `const base` puis joint deux fois. C'est le
-    // troisieme test de ce fichier qui compte les allers-retours ; celui-ci
-    // compte les ENDPOINTS JOINTS. Les deux comptes sont necessaires, et les
-    // confondre etait ma premiere version.
-    '/api/yield': 1,                     // CA et TO, par bien — lot (c)
+    // ⚠ `/api/yield` A DISPARU DE CET INVENTAIRE A L'ETAPE 4, ET C'EST LE PLUS
+    // GROS GAIN DE LA REFONTE. Il etait appele DEUX FOIS PAR BIEN, apres le
+    // premier affichage : mesure du 22 octobre 2026 en production, compte reel a
+    // 4 logements, 72 requetes Supabase et 586 Ko — a lui seul 72 % des requetes
+    // de la page, pour du CA et du TO sur 30 jours, c'est-a-dire exactement de
+    // la donnee NON URGENTE.
+    //
+    // Ses trois consommateurs ont trouve leur place : le CA 30 j par bien est
+    // remplace par le bloc « Revenus nets » (en mois de VERSEMENT, decision Q3,
+    // inventaire I29), les min/max mensuels partent dans la fiche du logement
+    // (Q4, I30, dette 96), et le repli « non raccorde » vit deja sur /logements.
+    //
+    // ⚠ SA LIGNE EST RETIREE, PAS COMMENTEE, parce que le message de ce test le
+    // demande : « UN DE MOINS : il a ete replie, retirez sa ligne pour que le
+    // gain soit garde. » Le jour ou un appel par bien revient sur cet ecran, ce
+    // test rougira — et c'est tout l'objet.
     // Et une ACTION, qui ne part que sur un clic de l'hote.
-    '/api/incidents-acquitter': 1
+    '/api/incidents-acquitter': 1,
+    // ⚠ LA VUE ANNEE, ET ELLE NE PART QUE SUR UN CLIC (27 octobre 2026).
+    // Ce test demande de nommer a quoi sert un appel de plus et pourquoi il ne
+    // pouvait pas entrer dans l'appel d'ecran. Les deux raisons :
+    //   · ce qu'il sert — douze mois de DEUX annees, par logement, pour la
+    //     courbe de la vue Annee ;
+    //   · pourquoi il n'entre pas dans l'appel d'ouverture — parce qu'il serait
+    //     alors paye par CHAQUE hote a CHAQUE visite, pour un ecran que
+    //     beaucoup n'ouvriront jamais. Le budget du PREMIER AFFICHAGE reste
+    //     donc a deux appels : celui-ci n'y figure pas, il arrive au clic.
+    //
+    // ⚠ ET IL NE CROIT PAS AVEC LE NOMBRE DE LOGEMENTS : un seul appel rend
+    // les douze mois des deux annees pour TOUS les biens. C'est ce que le test
+    // « l'accueil n'a PLUS AUCUN appel par bien » garde juste en dessous.
+    //
+    // ⚠ DEUX SITES D'APPEL DEPUIS LE 28 OCTOBRE 2026, et le second se justifie
+    // ici parce que ce test l'exige avant de l'inscrire :
+    //   1. `chargerAnnee` — les douze mois des deux annees, au clic sur
+    //      « Annee ».
+    //   2. `chargerComparables` — la BANDE DES COMPARABLES d'UN logement, au
+    //      clic sur SA PASTILLE.
+    // Pourquoi le second ne pouvait pas entrer dans le premier : au moment du
+    // clic sur « Annee », AUCUN logement n'est choisi — la pastille est un
+    // geste humain qui vient apres. Charger d'avance les bandes de tous les
+    // biens multiplierait la lecture par leur nombre, pour une donnee que
+    // personne n'a demandee, et ferait exactement ce que ce test interdit :
+    // un cout qui croit avec le parc.
+    // ⚠ ET IL NE S'APPELLE QU'UNE FOIS PAR BIEN : `etat.comparablesParBien`
+    // garde la reponse, cle posee AVANT l'appel pour que deux clics rapides
+    // n'en lancent pas deux. Revenir sur une pastille deja vue ne coute rien.
+    // ⚠ NI L'UN NI L'AUTRE N'EST DANS LE BUDGET DU PREMIER AFFICHAGE : il
+    // reste a DEUX appels, et c'est ce que le test du chargement garde.
+    '/api/ecran/revenus-annee': 2,
+    // ⚠ UN DE PLUS, LE 29 OCTOBRE 2026, ET VOICI LES DEUX REPONSES QUE CE TEST
+    // EXIGE AVANT DE L'INSCRIRE.
+    //   A QUOI IL SERT : la SUITE du bloc « Derniers avis », trois par trois,
+    //   au DEFILEMENT. Decision de Thierry du 29 octobre (option 3) : « 30
+    //   jours, puis un lien vers /avis ».
+    //   POURQUOI IL NE POUVAIT PAS ENTRER DANS L'APPEL D'ECRAN : parce qu'il
+    //   depend d'un GESTE et d'un CURSEUR. Les trois premiers avis arrivent
+    //   bien avec l'appel d'ecran, comme avant ; la suite se demande a partir
+    //   de la derniere carte AFFICHEE, que le serveur ne connait pas au
+    //   chargement. Tout descendre d'avance ferait payer a chaque hote, a
+    //   chaque visite, un historique que personne n'a demande — mesure en
+    //   production le 29 octobre : 16 avis avec texte sur 30 jours, et 645 au
+    //   total.
+    // ⚠ ET IL N'EST PAS DANS LE BUDGET DU PREMIER AFFICHAGE : celui-ci reste a
+    // DEUX appels, et c'est le test du chargement qui le garde. Un hote qui ne
+    // defile pas ne paie jamais cette ligne.
+    '/api/ecran/avis-recents': 1
+  },
+  // ⚠ LE CALENDRIER ENTRE DANS CE TEST LE 28 OCTOBRE 2026, avec le lot
+  // « acces YieldFlow ». Il n'y etait pas : son inventaire d'appels pouvait
+  // donc grossir sans que rien ne parle, et le lot y ajoutait justement un
+  // endpoint. Mesure du jour, sur l'arbre du lot.
+  //
+  // ⚠ CET ECRAN N'EST PAS ENCORE UN « UN ECRAN = UN ENDPOINT » : il lit le
+  // coeur par `/api/calendar`, et `/api/yield-pilote` part UNE FOIS PAR BIEN
+  // PILOTE au chargement (la fenetre du 4e etat, dette 20). C'est un 1 + N
+  // ANTERIEUR a ce lot, et il est nomme ici pour qu'il cesse d'etre invisible
+  // — il se replie au lot (d), quand le calendrier aura son endpoint d'ecran.
+  'pages/calendrier.html': {
+    '/api/calendar': 3,              // GET l'ecran, POST save, POST fermetures
+    '/api/messages': 1,              // la fiche d'une resa : le fil du sejour
+    '/api/reservation-directe': 3,   // creer, modifier, annuler — des ACTIONS
+    '/api/yield-pilote': 1,          // la fenetre du pilote, par bien pilote
+    // ⚠ ET CELUI-CI NE PART QUE SUR UN GESTE. C'est toute la condition de
+    // l'exception datee du 28 octobre 2026 (spec-yf-bouton-calendrier §6 bis) :
+    // le menu YieldFlow compte au CLIC, pour un seul bien. Le jour ou il
+    // partirait avec la page, ce serait le defaut mesure le 22 octobre sur
+    // l'accueil — un appel par bien, 72 requetes, 586 Ko. Un test d'execution
+    // le garde en plus de celui-ci : tests/yf-bouton-calendrier.test.js.
+    '/api/yield-menu': 1,
+    // ⚠ LA FACTURE DU VOYAGEUR, ET ELLE NE PART QU'AU CLIC (11 novembre 2026,
+    // etape 2b du lot facture). Les deux reponses que ce test exige :
+    //   A QUOI IL SERT : les GESTES de l'hote sur la facture, depuis la fiche
+    //   d'une reservation — envoyer le lien, copier un lien, remplir a la place
+    //   du voyageur. UN site d'appel (`posterFacture`) pour les trois.
+    //   POURQUOI IL N'ENTRE PAS DANS L'APPEL D'ECRAN : ce sont des ECRITURES,
+    //   declenchees par un geste. L'ETAT de la facture, lui, arrive dans la
+    //   reponse que la fiche lit deja (`/api/calendar?booking=`) : aucun appel
+    //   de plus a l'ouverture de la fiche (mesure AVANT/APRES dans
+    //   docs/specs/spec-facture-voyageur.md §9).
+    '/api/factures-voyageur': 1
+  },
+  // ⚠ LA PAGE AVIS ENTRE DANS CE TEST LE 8 NOVEMBRE 2026, avec sa refonte V5
+  // (docs/specs/avis-v5). Mesure AVANT en production le meme jour : 3 appels
+  // `/api` au chargement (`membres`, `avis?action=auto-validation`,
+  // `avis?action=cartes`), derriere dix lectures Supabase du vieux socle, ecran
+  // complet a 4,8 s. Apres : UN appel d'ecran.
+  // ⚠ LES DEUX SITES SONT DES CONSTANTES, posees une fois en tete du module :
+  // c'est l'INVENTAIRE que ce test garde. Ce qui part a l'execution (un seul
+  // appel au chargement, le meme a 1 et a 12 logements) est mesure en cliquant,
+  // dans tests/avis-v5.test.js.
+  'pages/avis.html': {
+    '/api/ecran/avis': 1,   // l'ecran en un appel (et ses relectures : filtre, geste)
+    '/api/avis': 1          // les GESTES seulement : corriger, confirmer, saisir, sejours de la saisie
+  },
+  // ⚠ « CE QUI FAIT BOUGER VOS PRIX » ENTRE DANS CE TEST LE 9 NOVEMBRE 2026,
+  // avec sa page (lot 4, 4a). Mesure AVANT en production le meme jour, sur
+  // l'ancienne pop-up : 5 appels `/api` (dont `/api/yield-evenements` DEUX
+  // fois) et 10 appels Supabase directs. Apres : UN appel d'ecran, aussi pour
+  // changer de logement. Les gestes (etape 3, meme jour) passent par
+  // `/api/yield-evenements` — jamais au chargement.
+  'apps/yield/evenements.html': {
+    '/api/ecran/evenements': 1,   // l'ecran en un appel (et sa relecture apres un geste)
+    '/api/yield-evenements': 1    // les GESTES seulement : PUT (simuler, confirmer), PATCH (zone, crans d'avant)
+  },
+  // ⚠ LA PAGE CHARGES NAIT DANS CE TEST LE 10 NOVEMBRE 2026 (compte de charges,
+  // lot 3, spec §13.7). Ecran neuf : pas de mesure AVANT. UN appel d'ecran
+  // peint la page entiere — file, totaux, liste, entites, logements — et la
+  // page suivante de la liste passe par LE MEME endpoint, avec un curseur.
+  // ⚠ L'ENVOI DU FICHIER NE FIGURE PAS ICI, ET C'EST VOULU : il part a l'URL
+  // signee du stockage que `envoi` rend, pas vers une fonction `/api`. Un
+  // geste, jamais au chargement. Ce qui part a l'execution est mesure en
+  // cliquant, dans tests/charges-page.test.js.
+  'pages/charges.html': {
+    '/api/ecran/charges': 1, // l'ecran en un appel (et « Afficher plus », et les relectures apres un geste)
+    '/api/charges': 1        // les GESTES seulement : envoi, confirmer, valider, trancher, supprimer, consulter
   }
 }
 
@@ -111,21 +239,67 @@ test("LE TEST QUI COMPTE : l'accueil n'appelle pas l'endpoint d'un AUTRE ecran",
   }
 })
 
-test("LE TEST QUI COMPTE : les appels par BIEN sont comptes a part", () => {
-  // Le seul cout de l'accueil qui croit avec le nombre de logements est
-  // `/api/yield`, DEUX fois par bien (CA de la periode et de la precedente).
-  // Mesure du 22 octobre 2026 : 72 requetes et 586 Ko a 4 biens. C'est la
-  // moitie du lot (c), et il faut que ce soit VISIBLE ici — un appel par bien
-  // de plus multiplie par le nombre de logements.
+test("LE TEST QUI COMPTE : l'accueil n'a PLUS AUCUN appel par bien", () => {
+  // ⚠ CE TEST A CHANGE DE SENS A L'ETAPE 4, ET C'EST UNE VICTOIRE, PAS UNE
+  // PERTE. Il comptait les deux appels `/api/yield` par bien pour que le cout
+  // reste VISIBLE — « un appel par bien de plus multiplie par le nombre de
+  // logements ». Mesure du 22 octobre 2026 : 72 requetes et 586 Ko a 4 biens.
+  // Ces appels sont retires ; il garde donc maintenant leur ABSENCE.
+  //
+  // C'est le seul cout de l'accueil qui croissait avec le nombre de logements.
+  // Les revenus arrivent desormais AVEC la reponse d'ecran, dans la meme
+  // requete que tout le reste — l'endpoint fait deux lectures Supabase (les
+  // delais, puis les sejours, paginee), quel que soit le nombre de biens.
   const src = lire('pages/aujourdhui.html')
-  const bloc = (src.match(/async function chargerChiffresBien[\s\S]*?\n\}/) || [''])[0]
-  assert.ok(bloc, 'chargerChiffresBien a disparu : le compte par bien n est plus mesurable')
-  // ⚠ SUR LES APPELS, PAS SUR LES LITTERAUX. `chargerChiffresBien` assemble
-  // `const base = '/api/yield?...'` UNE fois et le joint DEUX fois : compter
-  // les chaines `/api/` donnerait 1, et le lot (c) croirait n'avoir qu'un
-  // appel par bien a replier.
-  const parBien = (bloc.match(/await appel\(/g) || []).length
-  assert.strictEqual(parBien, 2,
-    `${parBien} appels par bien au lieu de 2 : a 4 logements cela fait ${parBien * 4} appels, `
-    + 'et le lot (c) doit les ramener a une lecture de table de resume')
+  const code = src.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('<!--')).join('\n')
+
+  // Aucune boucle sur les biens qui part en reseau.
+  assert.doesNotMatch(code, /chargerChiffresBien/,
+    'la fonction qui appelait /api/yield par bien est revenue')
+  assert.doesNotMatch(code, /\/api\/yield/,
+    "l'accueil joint /api/yield : c'est le cout qui croit avec le nombre de logements")
+
+  // ⚠ ET LE CONTROLE QUI COMPTE VRAIMENT : aucun `await appel(` dans une
+  // iteration sur `etat.biens`. Un endpoint different appele par bien couterait
+  // exactement la meme chose — ce test ne doit pas garder un NOM d'endpoint,
+  // mais la FORME du 1 + N.
+  //
+  // ⚠ MA PREMIERE VERSION NE MORDAIT PAS, ET LA REVIEW L'A PROUVE PAR MUTATION.
+  // Elle cherchait `etat\.biens\s*\.map\(`, et la page ecrit
+  // `(etat.biens || []).map(b => {` — la parenthese de garde suffisait a lui
+  // echapper. Mesure : un vrai 1 + N plante dans la boucle REELLE laissait la
+  // suite a `fail 0`. Donc seuls les deux `doesNotMatch` ci-dessus mordaient,
+  // c'est-a-dire des NOMS — exactement ce que ce commentaire dit vouloir
+  // eviter.
+  //
+  // Le motif ne presume plus de la forme : il cherche `etat.biens` suivi d'un
+  // iterateur OU un `for..of` dessus, puis un appel reseau dans la portee qui
+  // suit. Les quatre formes sont couvertes, y compris celle de la page.
+  const FORMES = [
+    /etat\.biens[^\n]{0,30}\.(map|forEach|flatMap|reduce)\s*\([\s\S]{0,400}?await appel\(/,
+    /for\s*\([^)]{0,60}\bof\b[^)]{0,60}etat\.biens[\s\S]{0,400}?await appel\(/,
+    /etat\.biens[^\n]{0,30}\.(map|forEach|flatMap)\s*\([\s\S]{0,400}?fetch\s*\(/
+  ]
+  for (const f of FORMES) {
+    const m = code.match(f)
+    assert.strictEqual(m, null,
+      `un appel reseau part dans une boucle sur les biens : ${m && m[0].slice(0, 120)}`)
+  }
+
+  // ⚠ ET LE MOTIF SE PROUVE SUR DES FORMES FABRIQUEES, parce qu'un motif qui ne
+  // reconnait rien passe au vert sans rien mesurer — c'est le faux vert que je
+  // viens de payer. Quatre formes doivent etre VUES, et le code reel ne doit
+  // pas l'etre.
+  const DOIVENT_MORDRE = [
+    'etat.biens.map(b => { await appel("/api/x") })',
+    '(etat.biens || []).map(b => { await appel("/api/x") })',
+    'for (const b of etat.biens) { await appel("/api/x") }',
+    'for (const b of (etat.biens || [])) { await appel("/api/x") }'
+  ]
+  for (const faux of DOIVENT_MORDRE) {
+    assert.ok(FORMES.some(f => f.test(faux)),
+      `la garde ne reconnait pas cette forme de 1 + N : ${faux}`)
+  }
+  assert.ok(!FORMES.some(f => f.test('etat.biens.map(b => b.name).join(", ")')),
+    'la garde crie sur une boucle qui ne part pas en reseau')
 })

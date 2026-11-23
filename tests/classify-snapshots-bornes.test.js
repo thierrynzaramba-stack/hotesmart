@@ -120,7 +120,7 @@ function charger ({ snapshots }) {
         return { data: [], error: null }
       }
     },
-    getPropertyMode: async () => 'test',
+    getPropertyMode: async () => 'test', lireReglagesDuBien: async () => ({ mode: 'test', delais: null }),
     isAutomationPaused: async () => false,
     surAppel: () => {}
   }

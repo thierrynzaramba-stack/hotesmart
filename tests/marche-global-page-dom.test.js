@@ -71,7 +71,21 @@ async function monter (routes, maintenant = MAINTENANT, largeur = 0) {
   w.enteteCompte = () => ({})
   w.initErrorHandler = () => {}
   const biens = { data: [{ id: 'B1', name: 'La bulle' }, { id: 'B2', name: 'Cœur de vie' }], error: null }
-  w.supabase = { from: () => { const q = { select: () => q, order: () => q, eq: () => q, then: (ok) => ok(biens) }; return q } }
+  w.supabase = { from: () => { const q = { select: () => q, order: () => q, eq: () => q,
+    // ⚠ `is` COMPLETE CE DOUBLE depuis le filtre des biens archives :
+    // `sansArchives` LEVE sur une chaine qui n'a pas `.is`, et c'est voulu — un
+    // double incomplet doit echouer bruyamment plutot que de valider du code
+    // qui ne peut pas tourner. Il ne fait que chainer : ce banc ne parle pas
+    // d'archivage, c'est tests/biens-vivants-parite.test.js qui s'en charge.
+    is: () => q, then: (ok) => ok(biens) }; return q } }
+  // ⚠ LE VRAI `sansArchives`, DEPUIS LE MODULE COMMUN (jamais recopie). Ce banc
+  // retire les `import` de la page, donc toute dependance neuve doit lui etre
+  // fournie — sinon `ReferenceError` et toute la page tombe. Un double local
+  // serait plus permissif que le vrai : il accepterait un appel ecrit a
+  // l'envers que le module refuse.
+  w.sansArchives = new w.Function(
+    fs.readFileSync(path.join(__dirname, '..', 'shared', 'biens-vivants.js'), 'utf8')
+      .replace(/^export /gm, '') + '\nreturn sansArchives')()
   const script = /<script type="module">([\s\S]*?)<\/script>/.exec(HTML)[1].replace(/^\s*import .*$/gm, '')
   w.eval(`(async () => {${script}})()`)
   await attendre()
@@ -426,7 +440,11 @@ test('5b : le verdict week-end, le meilleur et le plus faible jour', async () =>
 test('LE TEST QUI COMPTE (5c) : les niveaux sous les noms YieldFlow, avec leur nombre de jours, et le rappel que c est une lecture', async () => {
   const { doc } = await monter(OK)
   const lignes = [...blocs(doc)[2].querySelectorAll('.mg-niv-l')].map(l => [...l.children].map(c => c.textContent.trim()).join(' | '))
-  assert.deepEqual(lignes, ['Base (Creux) | 106 jours', 'Moyen (Modéré) | 139 jours', 'Haut (Favorable) | 74 jours', 'Très haut ou Exceptionnel (Pic) | 46 jours'])
+  // ⚠ LE CHIFFRE EST ECRIT DEVANT LE NOM depuis le 3 novembre 2026 (regle 2
+  // de Thierry, avec l'echelle d'encre) : au bas de l'echelle le fond ne
+  // porte plus l'information, c'est « 1 · Base » qui la porte. La derniere
+  // ligne couvre deux niveaux, d'ou « 4-5 ».
+  assert.deepEqual(lignes, ['1 · Base (Creux) | 106 jours', '2 · Moyen (Modéré) | 139 jours', '3 · Haut (Favorable) | 74 jours', '4-5 · Très haut ou Exceptionnel (Pic) | 46 jours'])
   assert.match(blocs(doc)[2].textContent, /une lecture, pas un calcul de vos prix/)
 })
 

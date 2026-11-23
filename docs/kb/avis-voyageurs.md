@@ -961,11 +961,18 @@ Colomiers, 653 points sur 69 avis = 9,4638 sur 10, soit exactement **4,732 sur
 
 **2. L'objet d'avis vide.** La population était « une note non nulle »
 (`.not('overall_score','is',null)`), ce qui laissait passer les **zéros**.
-L'objet Channex naît au départ, caché et vide, et Airbnb le révèle au bout de
-14 jours **même si le voyageur n'a rien écrit** : la ligne arrive alors avec
-`is_hidden: false` et `overall_score: 0`, et entrait à 0/10 dans la note. Ce
-qui ferme le cas, c'est `microSurCinq` et son **`v > 0`** — pas un filtre de
-population.
+L'objet Channex naît au départ, caché et vide. S'il arrive **révélé et vide**,
+la ligne porte `is_hidden: false` et `overall_score: 0`, et entrait à 0/10 dans
+la note. Ce qui ferme le cas, c'est `microSurCinq` et son **`v > 0`** — pas un
+filtre de population.
+
+⚠ **Cette ligne disait qu'Airbnb révèle l'objet au bout de 14 jours « même si
+le voyageur n'a rien écrit ». La mesure du 18 novembre 2026 dit l'inverse** :
+sans avis écrit, l'objet **reste masqué** (42 cartes au-delà de 14 jours sur les
+4 biens ; deux départs vérifiés sur les commentaires publics de La bulle, absents
+alors que l'avis voisin y est). C'est ce qui fonde « Pas d'avis du voyageur »
+(spec avis-v5 `spec-refonte-ui-v5-lot-avis.md` §11). La garde `v > 0` reste :
+elle ne coûte rien.
 
 ⚠ **CE N'EST PAS `voyageurAEcrit`, et cette ligne a dit le contraire pendant
 une journée.** La première version appelait bien ce prédicat (« une note > 0
@@ -1111,3 +1118,60 @@ QueryBuilder qui n'expose que `select`/`insert`/`update`/`upsert`/`delete`, et
 accepte tout dans n'importe quel ordre, restent **verts**.
 `tests/stats-avis.test.js` porte désormais un double qui a la **forme** du vrai
 client et refuse cet ordre.
+
+## Notifications de l'hôte et de son équipe (PWA lot 2c-2, 9 novembre 2026)
+
+Deux événements partent par le point d'envoi unique
+(`lib/notifications/evenements-avis.js`, docs/kb/pwa.md §11.4), selon les
+réglages de chaque personne qui a le domaine `avis` sur le bien :
+- **Nouvel avis** — depuis `upsertAvis`, le writer unique : seulement un avis que
+  l'écriture ajoute (lu avant), reçu depuis moins de trois jours, dix au plus par
+  compte et par écriture ; une lecture ratée ne prévient personne. Le bien, la
+  note sur 5 (la conversion de l'écran, `lib/avis/echelle.js`) et le canal —
+  **jamais le nom du voyageur** (le domaine `avis` se délègue sans
+  `reservations`), jamais le texte.
+- **Avis révélé** — un avis Airbnb masqué ne prévient pas (l'objet naît au
+  départ, masqué et vide, que le voyageur écrive ou non) ; quand il devient
+  visible ET que le voyageur a écrit, une notification donne la vraie note. Un
+  avis révélé vide ne prévient pas.
+- **Évaluation du voyageur** — depuis `noterEtEnvoyer`, une fois par palier comme
+  la tâche : la prestataire a rempli, J-5, J-1, puis le rappel et l'échec de la
+  publication automatique. Formulation neutre (un membre en lecture seule la
+  reçoit aussi). Le lien ouvre la fenêtre d'évaluation (`/avis?evaluer=`).
+
+## 16. La page `/avis` au socle V5 — 8 novembre 2026
+
+Spec du lot et maquettes : `docs/specs/avis-v5/`. Ce qui change, et ce qu'il
+faut savoir pour y toucher :
+
+- **Un appel au chargement** : `/api/ecran/avis`. Il appelle `cartesLister` et
+  `autoValidationLire` d'`api/avis.js` (exportés sous `module.exports.ecran`)
+  **tels quels** : les gardes de périmètre ne sont écrites qu'une fois. Avant :
+  trois appels `/api` et dix lectures Supabase du vieux socle, écran complet à
+  4,8 s (production, compte de Thierry, 734 séjours).
+- **« À traiter » remplace « En attente de notation »** et reçoit aussi les avis
+  **détectés** dans un message. Une carte qui n'avait qu'une détection, sans
+  évaluation, disparaît de Récents : elle n'avait rien d'autre à dire. Les
+  détections des Anciens sont servies **même section fermée**
+  (`anciens_a_traiter`, assemblées en mémoire, aucune lecture de plus).
+- **Le cache navigateur ne garde jamais les cartes** : seulement les chiffres,
+  les logements, les périodes et la publication automatique. Il ne connaît
+  pas les droits et ne se vide qu'à la déconnexion.
+- **La dernière lecture demandée gagne** (`monter` numérote ses lectures), et la
+  page peut relire avant la première réponse (`surPret`).
+- **Les textes passent par `t`** (I18n de la page). `TEXTES_FR` est le repli du
+  module, et il doit rester **identique** à `fr.json` —
+  `tests/avis-cartes-i18n.test.js` rougit sinon. Une origine que l'écran ne
+  connaît pas garde le libellé envoyé par le serveur.
+- **La photo du bien** vient de la liste `biens` de la réponse (`photo_url`),
+  retrouvée par `carte.bien_ref`. Un bien archivé n'est plus dans cette liste :
+  sa carte garde son nom, avec l'initiale à la place de la photo.
+- **Les gestes ne changent pas d'endpoint** : corriger, confirmer, saisir et
+  lister les séjours de la saisie passent toujours par `api/avis.js`, avec
+  leurs gardes d'écriture.
+- **`Server-Timing` compte les requêtes** par `lib/compte-requetes.js`
+  (`AsyncLocalStorage` sur `fetch`), parce que l'appel d'écran réutilise des
+  lectures qu'on ne peut pas compter une à une sans les réécrire.
+- **Reste du lot** : l'étape 2 met les trois chiffres en résumé
+  (`resume_bien_avis`, décision de Thierry du 8 novembre 2026), avec l'heure du
+  calcul à l'écran. La fenêtre d'évaluation est restylée dans un lot à part.

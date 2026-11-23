@@ -161,6 +161,7 @@ import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
 import { bandeJoursHtml, classesWE as classesWEDuJour } from '/shared/bande-jours.js'
 import { lignesATraiter, nonVuPar, limiteDeLImminence } from '/shared/menages-a-traiter.js'
+import { paire, mention, installer as installerBascules } from '/shared/avis-traduction.js'
 import { etatDeLaPrestataire, defautDeLaLiaison, joursAffiches, joursApresClic, gesteDuJour } from '/shared/presta-etat.js'
 import { hsBus } from '/shared/hs-bus.js'
 import { brancherReordonnancement } from '/shared/reordonner-biens.js'
@@ -190,6 +191,9 @@ const MOIS = [1, 3, 6, 12]
 const JOURS_PAR_MOIS = { 1: 30, 3: 91, 6: 182, 12: 364 }
 const TRANCHE_MAX = 92
 const langue = () => (window.I18n && I18n.lang) || document.documentElement.lang || 'fr'
+// La langue des extraits d'avis traduits (spec avis-v5 spec-traduction-avis.md
+// §3.4) : fr, en ou es ; le serveur ramène toute autre valeur au français.
+const langueDesAvis = () => { const l = String(langue()).slice(0, 2); return ['fr', 'en', 'es'].includes(l) ? l : 'fr' }
 
 const etat = {
   biens: [],            // réponse /api/garde : [{id(ref provider), name, photo}]
@@ -313,7 +317,7 @@ async function chargerATraiter () {
   d.setUTCDate(d.getUTCDate() + 60)
   const au = d.toISOString().slice(0, 10)
   try {
-    const r = await appel(`/api/garde?du=${du}&au=${au}`)
+    const r = await appel(`/api/garde?du=${du}&au=${au}&langue=${langueDesAvis()}`)
     if (jeton !== jetonBulle) return
     etat.aTraiter = lignesATraiter({
       biens: r.biens || [], garde: r.garde || [], menages: r.menages || [],
@@ -375,7 +379,7 @@ async function charger () {
       const bloc = jours.slice(i, i + TRANCHE_MAX)
       tranches.push([bloc[0], bloc[bloc.length - 1]])
     }
-    const reponses = await Promise.all(tranches.map(([du, au]) => appel(`/api/garde?du=${du}&au=${au}`)))
+    const reponses = await Promise.all(tranches.map(([du, au]) => appel(`/api/garde?du=${du}&au=${au}&langue=${langueDesAvis()}`)))
     if (jeton !== jetonLecture) return   // réponse en retard : on ne repeint pas
     const d0 = reponses[0]
     const gardeParBien = new Map()
@@ -746,6 +750,18 @@ function fermerFiche () {
   etat.fiche = null
 }
 
+// ⚠ L'EXTRAIT ÉCRIT DANS UNE AUTRE LANGUE S'AFFICHE TRADUIT, l'original à un
+// clic (décision de Thierry du 11 novembre 2026, Q4 = A). La traduction arrive
+// toute faite de /api/garde ; le rendu est celui de la page Avis
+// (shared/avis-traduction.js), jamais recopié.
+function extraitDuRetour (r) {
+  const tr = r.extrait_traduit ? { extrait: { source: r.extrait_langue, texte: r.extrait_traduit } } : null
+  return `<div data-trad-zone="fiche-extrait">`
+    + paire(r.extrait, tr && tr.extrait, (x) => `<p class="caption men-fiche__extrait">« ${esc(x)} »</p>`)
+    + mention(tr, 'fiche-extrait', t, langueDesAvis())
+    + '</div>'
+}
+
 function renderFiche () {
   const m = etat.fiche
   if (!m) return
@@ -757,7 +773,7 @@ function renderFiche () {
          ${icone(m.retour.verdict === 'remarque' ? 'i-thumb-down' : 'i-thumb-up')}
          <span>${esc(t(m.retour.verdict === 'remarque' ? 'menages.retour_mauvais' : 'menages.retour_bon'))}${
            m.retour.prive ? ' · ' + esc(t('menages.retour_prive')) : ''}</span>
-       </p>${m.retour.extrait ? `<p class="caption men-fiche__extrait">« ${esc(m.retour.extrait)} »</p>` : ''}`
+       </p>${m.retour.extrait ? extraitDuRetour(m.retour) : ''}`
     : ''
 
   // Deux ménages le même jour : on passe de l'un à l'autre.
@@ -2868,6 +2884,8 @@ async function init () {
   if (!session) return
   await I18n.init()
   document.addEventListener('i18n:changed', () => location.reload())
+  // Les bascules « Voir l'original » des extraits traduits (déléguées).
+  installerBascules(document.body, t)
   const user = await getUser()
   $('[data-bind="initials"]').textContent = (user?.email || '').slice(0, 2).toUpperCase()
   HSNav.renderMenu({

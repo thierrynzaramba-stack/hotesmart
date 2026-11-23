@@ -82,7 +82,21 @@
     sel.className = 'btn btn--secondary';
     sel.setAttribute('data-i18n-attr', 'aria-label:nav.language');
     sel.innerHTML = I18n.langues.map(l => `<option value="${esc(l.code)}"${l.code === I18n.lang ? ' selected' : ''}>${esc(l.nom)}</option>`).join('');
-    sel.addEventListener('change', e => I18n.set(e.target.value));
+    sel.addEventListener('change', e => {
+      const code = e.target.value;
+      // PWA lot 2b : la langue de la PERSONNE, pour ses notifications. Chargé
+      // à la demande et seulement sur ce geste — jamais au chargement d'une page.
+      // ⚠ ENREGISTRÉE AVANT LE CHANGEMENT DE LANGUE DE LA PAGE (recette du
+      // 7 novembre 2026) : plusieurs écrans se RECHARGENT sur `i18n:changed`, et
+      // le rechargement coupait l'enregistrement — l'appareil était passé en
+      // français, le serveur avait gardé l'anglais. On attend donc
+      // l'enregistrement, au plus 1,5 s : une panne réseau ne bloque jamais
+      // le changement de langue.
+      const enregistrement = import('/shared/langue-personne.js')
+        .then(m => m.enregistrer(code)).catch(() => {});
+      Promise.race([enregistrement, new Promise(r => setTimeout(r, 1500))])
+        .then(() => I18n.set(code));
+    });
     container.appendChild(sel);
     I18n.apply(container);
   }
@@ -124,6 +138,12 @@
     }
     if (options.reglages) parts.push(`<a class="menu__item" href="/settings">${icon('i-settings')}<span data-i18n="nav.settings"></span></a>`);
     if (options.avis) parts.push(`<a class="menu__item" href="/avis">${icon('i-review')}<span data-i18n="nav.reviews"></span></a>`);
+    // Le compte de charges : titulaire seul (Q9). `options.charges` vaut par
+    // défaut `options.reglages`, les deux droits étant « titulaire seul » ; le
+    // jour où un domaine `charges` délégable existera, les pages le passeront
+    // elles-mêmes. ⚠ Le masquage ne protège rien : /api/ecran/charges et
+    // /api/charges refusent un membre en 403 (spec du compte de charges §13.4).
+    if (options.charges ?? options.reglages) parts.push(`<a class="menu__item" href="/charges">${icon('i-euro')}<span data-i18n="nav.charges"></span></a>`);
     parts.push(`<a class="menu__item" href="/guide">${icon('i-help')}<span data-i18n="nav.help"></span></a>`);
     parts.push(`<div class="menu__item">${icon('i-globe')}<span data-menu-langue></span></div>`);
     parts.push(`<button type="button" class="menu__item" data-menu-sortie>${icon('i-logout')}<span data-i18n="nav.logout"></span></button>`);
@@ -146,4 +166,63 @@
   }
 
   window.HSNav = { render, renderLangSelector, renderMenu };
+})();
+
+/* ============================================================
+   HÔTESMART INSTALLABLE SUR TÉLÉPHONE (PWA lot 1) — KB : docs/kb/pwa.md
+
+   ⚠ POURQUOI ICI. Il n'existe pas d'en-tête HTML commun : chaque page porte
+   le sien, et pages/ ne bouge pas pendant la refonte V5. nav.js est l'en-tête
+   commun DE FAIT — les sept écrans V5 le chargent, et lui seul. Il pose donc,
+   une fois, dans <head> : le manifeste, theme-color, les balises
+   apple-mobile-web-app-* et l'icône iPhone ; puis il enregistre le service
+   worker. Une balise déjà présente n'est jamais doublée.
+   Chrome et Safari lisent ces balises au moment de « Ajouter à l'écran
+   d'accueil », donc après ce script : les poser en JavaScript suffit. La
+   recette sur téléphone le vérifie (docs/kb/pwa.md §Recette).
+
+   ⚠ theme-color se LIT dans la charte (jeton --surface de shared/theme.css),
+   au chargement : aucun hexa ici. Aucun écran hôte ne change de thème en
+   cours de page aujourd'hui ; le jour où un sélecteur de thème existera, il
+   devra mettre cette balise à jour.
+
+   ⚠ L'ENREGISTREMENT ATTEND la fin du chargement : le service worker ne
+   dispute pas le réseau à la page qui s'affiche.
+   ============================================================ */
+(() => {
+  const head = document.head;
+  if (!head) return;
+  const poser = (selecteur, creer) => { if (!head.querySelector(selecteur)) head.appendChild(creer()); };
+  const lien = (rel, href, attrs = {}) => () => {
+    const l = document.createElement('link');
+    l.rel = rel;
+    l.href = href;
+    for (const [k, v] of Object.entries(attrs)) l.setAttribute(k, v);
+    return l;
+  };
+  const meta = (name, content) => () => {
+    const m = document.createElement('meta');
+    m.name = name;
+    m.content = content;
+    return m;
+  };
+
+  // `use-credentials` : le manifeste se récupère aussi derrière une protection
+  // d'accès Vercel (le navigateur l'envoie sans cookie sinon).
+  poser('link[rel="manifest"]', lien('manifest', '/manifest.webmanifest', { crossorigin: 'use-credentials' }));
+  poser('link[rel="apple-touch-icon"]', lien('apple-touch-icon', '/apple-touch-icon.png'));
+  poser('meta[name="mobile-web-app-capable"]', meta('mobile-web-app-capable', 'yes'));
+  poser('meta[name="apple-mobile-web-app-capable"]', meta('apple-mobile-web-app-capable', 'yes'));
+  poser('meta[name="apple-mobile-web-app-status-bar-style"]', meta('apple-mobile-web-app-status-bar-style', 'default'));
+  poser('meta[name="apple-mobile-web-app-title"]', meta('apple-mobile-web-app-title', 'HôteSmart'));
+  const surface = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim();
+  if (surface) poser('meta[name="theme-color"]', meta('theme-color', surface));
+
+  function enregistrer() {
+    if (!('serviceWorker' in navigator) || window.top !== window) return;
+    navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' })
+      .catch(err => console.warn('PWA : service worker non enregistré', err));
+  }
+  if (document.readyState === 'complete') enregistrer();
+  else window.addEventListener('load', enregistrer, { once: true });
 })();

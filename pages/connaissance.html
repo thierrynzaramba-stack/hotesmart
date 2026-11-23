@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « BASE DE CONNAISSANCE » — chantier KB V5, lot 3. La version
+     TÉLÉPHONE de l'écran : plein écran, ouverte depuis le bouton de Messages
+     (à l'ordinateur, le même bouton ouvre le volet de 440 px). Spec :
+     docs/specs/spec-base-connaissance-v5.md §3.
+     La vue est `shared/connaissance-vue.js`, la MÊME que celle du volet : cette
+     page ne porte que son en-tête et son amorce.
+     ⚠ L'APPLI INSTALLABLE : cette page charge `shared/nav.js`, qui pose le
+     manifeste et enregistre le service worker. Elle n'en enregistre JAMAIS un
+     elle-même (tests/pwa-nav.test.js).
+     RÈGLES : aucun hexa, aucun texte en dur, aucune icône dessinée ici. -->
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
+
+<main class="kb-page">
+  <div class="kb-page__entete">
+    <a class="btn btn--secondary btn--icon" href="/pages/messages" data-bind="retour" data-i18n-attr="aria-label:kb.back;title:kb.back">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(180 12 12)"/></svg>
+    </a>
+    <h1 class="h2" data-i18n="kb.title"></h1>
+  </div>
+  <div data-kb-racine><p class="muted small kb-vide" data-i18n="common.loading"></p></div>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+// ⚠ PAGE NON DÉLÉGABLE, comme celle qu'elle remplace : la base de connaissance
+// est réservée au titulaire (l'endpoint refuse un membre en 403). Sur un compte
+// partagé, la page le dit au lieu de montrer un écran vide.
+import { exigerCompteProprePage } from '/shared/compte-courant.js'
+await exigerCompteProprePage({ nomPage: 'La base de connaissance' })
+
+import { requireAuth } from '/components/auth-guard.js'
+import { getUser, signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { api } from '/shared/api-client.js'
+import { compteCourant, peutLire, estTitulaire, comptes, basculerVers } from '/shared/compte-courant.js'
+import { monterConnaissance } from '/shared/connaissance-vue.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+
+// La vue n'appelle qu'UN endpoint ; on le lui sert par le client partagé, qui
+// pose le jeton et l'en-tête de compte.
+const appel = (chemin, corps) => (corps
+  ? api.connaissance.ecrire(corps)
+  : api.connaissance.lire(String(chemin).split('?')[1] || ''))
+
+async function init () {
+  const session = await requireAuth()
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+  const user = await getUser()
+  $('[data-bind="initials"]').textContent = (user?.email || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis')
+  })
+  HSNav.render({ peutLire })
+  I18n.apply(document)
+
+  const racine = $('[data-kb-racine]')
+  const params = new URLSearchParams(location.search)
+  // Venue d'une conversation (l'icône de la saisie, 7 novembre 2026) : le
+  // retour rouvre CETTE conversation, même si l'hôte a changé de logement ici.
+  const resa = params.get('resa')
+  if (resa) $('[data-bind="retour"]').href = '/pages/messages?conv=' + encodeURIComponent(resa)
+  monterConnaissance({
+    racine, appel, t, esc, selecteur: true,
+    bien: params.get('bien'), resa: params.get('resa'),
+    // L'adresse suit le logement affiché : un retour arrière ou un
+    // rechargement rouvre le même.
+    onBien: (vu) => {
+      const u = new URL(location.href)
+      if (vu) u.searchParams.set('bien', vu); else u.searchParams.delete('bien')
+      if (u.searchParams.get('bien') !== params.get('bien')) u.searchParams.delete('resa')
+      history.replaceState(null, '', u)
+    }
+  })
+}
+
+init().catch(e => logger.error('Connaissance', e.message, e))
+</script>
+</body>
+</html>

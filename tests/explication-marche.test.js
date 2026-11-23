@@ -131,8 +131,12 @@ test('FRONTIERE V2 : les modules purs ne touchent aucune base ; les autres, seul
   // dossiers compris.)
   // `marche_temperature_airroi` : le pipeline AirROI (§15, 4 octobre 2026).
   // `bien_profil` : le profil decrit par l'hote (§20, 5 octobre 2026).
-  const V2 = new Set(['airroi_cache', 'airroi_appels', 'comparables_retenus', 'grille_controle', 'marche_calendrier', 'marche_biens', 'marche_temperature_airroi', 'bien_profil', 'airroi_annonces_retirees'])
+  const V2 = new Set(['airroi_cache', 'airroi_appels', 'comparables_retenus', 'grille_controle', 'marche_calendrier', 'marche_biens', 'marche_temperature_airroi', 'bien_profil', 'airroi_annonces_retirees', 'comparables_releves'])
   // `airroi_annonces_retirees` : les annonces retirees d'Airbnb (§22.9, 5 octobre 2026).
+  // `comparables_releves` : les releves mensuels des comparables (28 octobre
+  // 2026, spec-revenus-comparables). ⚠ `cron_logs` n'y entre PAS, et c'est
+  // voulu : son marqueur de cadence est fourni par `api/cron.js`, qui a le
+  // droit d'y toucher. Le marche calcule, le cron cadence.
   const fichiers = []
   const parcourir = d => { for (const x of fs.readdirSync(path.join(racine, d), { withFileTypes: true })) { const p = `${d}/${x.name}`; if (x.isDirectory()) parcourir(p); else if (p.endsWith('.js')) fichiers.push(p) } }
   parcourir('lib/marche'); parcourir('lib/airroi')

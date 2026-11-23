@@ -19,6 +19,8 @@ const { etatMenage } = require('../lib/cron-arrival-code')
 // Lot 7 du chantier avis : l'archivage des fils (spec §9), une fonction pure.
 const { etatArchivage } = require('../lib/archivage-conversations')
 const { readStatus } = require('../lib/bookings-snapshot-status')
+const { clesArchivees, cleDuBien } = require('../lib/biens-vivants')
+const { questionsDe } = require('../lib/guestflow/rediger')
 
 // Jour de Paris (celui des biens), YYYY-MM-DD, a un decalage de jours pres.
 //
@@ -261,15 +263,29 @@ async function cloreProposition(req, res) {
   if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
     return res.status(404).json({ error: 'Proposition introuvable' })
   }
-  if (tache.status !== 'pending_validation') {
+  // ⚠ `sending` N'EST CLOTURABLE QUE POUR UN ENVOI (constat 4 de la revue).
+  // C'est l'etat normal quand l'ecran a RESERVE la tache avant d'envoyer :
+  // refuser ce statut bloquerait la cloture de son propre envoi. Mais
+  // l'accepter pour un REJET rouvrait la course que le claim ferme : le cron
+  // claime et commence l'appel provider, l'hote clique « Ne pas envoyer », la
+  // tache passe a `ignored` — et le cron finit d'envoyer. Le voyageur a recu
+  // le message, l'hote lit « rejetee », et rien ne le dit.
+  // Un rejet n'a rien a reserver, donc rien a gagner a accepter `sending` : il
+  // attend que la tache revienne (echec de l'envoi, ou reprise des orphelines).
+  const CLOTURABLES = statut === 'done'
+    ? ['pending_validation', STATUT_EN_COURS]
+    : ['pending_validation']
+  if (!CLOTURABLES.includes(tache.status)) {
     // Deja close ailleurs (ancienne page, autre onglet) : on le dit, on ne
     // re-ecrit pas — l'ecran retire la bulle dans les deux cas.
     return res.status(409).json({ error: 'deja_close', statut: tache.status })
   }
   // La condition de statut dans l'UPDATE ferme la course entre deux clics.
+  // ⚠ ET ELLE DESARME L'ECHEANCE : sans `send_after: null`, une tache close par
+  // l'ecran garderait son echeance et la passe du cron la relirait comme due.
   const { data: maj, error: eU } = await supabase.from('agent_tasks')
-    .update({ status: statut })
-    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .update({ status: statut, send_after: null })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', tache.status)
     .select('id')
   if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
   if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
@@ -283,6 +299,284 @@ async function cloreProposition(req, res) {
     if (eJ) console.error('[messages] journal conversations non ecrit', eJ.message)
   }
   return res.status(200).json({ ok: true, task_id: tache.id, statut })
+}
+
+// ─── Clore une « information manquante » (spec-info-manquante-choix.md §3) ───
+// La page l'appelle APRÈS l'envoi réussi d'une réponse rédigée depuis la carte
+// Oui / Non / Autre : la tâche `info_unknown` passe de `pending` à `done`.
+// ⚠ Rien ne part d'ici : l'envoi au voyageur a déjà eu lieu, par le chemin
+// d'envoi existant. Et rien n'est écrit dans le journal `conversations` : il
+// porte les réponses de l'AGENT, et celle-ci est celle de l'hôte.
+// ⚠ Le cron ne clôt jamais une tâche `pending` quand l'hôte répond : sans ce
+// geste, la carte et la ligne « À valider » d'Aujourd'hui resteraient.
+async function cloreInfo (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+  // La version de la tâche sur laquelle la réponse a été rédigée (`maj` de
+  // `infos`), et son séjour. Facultatifs pour la forme, ils DÉCIDENT quand ils
+  // sont là (review 1, constat 4) : le cron complète la tâche quand le voyageur
+  // écrit encore, et clore sur l'ancienne version ferait disparaître d'« À
+  // valider » une question à laquelle personne n'a répondu.
+  const maj = req.body.maj == null ? null : String(req.body.maj)
+  const bookingId = req.body.booking_id == null ? null : String(req.body.booking_id)
+  if ((maj && maj.length > 40) || (bookingId && bookingId.length > 200)) return res.status(400).json({ error: 'Demande invalide' })
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, task_type, summary, sub_tasks, property_id, book_id, created_at, updated_at')
+    .eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Tâche introuvable' })
+  if (bookingId && String(tache.book_id) !== bookingId) return res.status(404).json({ error: 'Tâche introuvable' })
+  // Périmètre par bien, 404 pas 403 — même règle que cloreProposition.
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Tâche introuvable' })
+  }
+  // Une proposition se clôt par `action: 'proposition'`, une intervention garde
+  // son circuit (décision de Thierry du 10 novembre 2026) : 404 ici, comme une
+  // tâche qui n'existe pas pour ce geste.
+  if (tache.task_type !== 'info_unknown') return res.status(404).json({ error: 'Tâche introuvable' })
+  if (tache.status !== 'pending') return res.status(409).json({ error: 'deja_close', statut: tache.status })
+  // Les tâches système (pause, arrêt de l'agent) ne portent pas de question :
+  // la carte ne les montre pas, et leur cycle appartient au cron.
+  if (!questionsDe(tache).length) return res.status(409).json({ error: 'sans_question' })
+  const courante = tache.updated_at || tache.created_at || null
+  if (maj && String(courante) !== maj) return res.status(409).json({ error: 'questions_changees' })
+  // La condition de statut ET de version dans l'UPDATE ferme la course entre
+  // deux clics, et avec le cron qui COMPLÈTE la tâche entre la lecture et
+  // l'écriture (il pose `updated_at`).
+  let qMaj = supabase.from('agent_tasks')
+    .update({ status: 'done', updated_at: new Date().toISOString() })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending')
+  qMaj = tache.updated_at ? qMaj.eq('updated_at', tache.updated_at) : qMaj.is('updated_at', null)
+  const { data: fait, error: eU } = await qMaj.select('id')
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  if (!fait || !fait.length) {
+    // Rien écrit : close entre-temps, ou complétée par le cron. On relit pour
+    // le dire juste (la relecture n'a lieu que dans cette course).
+    const { data: apres } = await supabase.from('agent_tasks').select('status')
+      .eq('user_id', userId).eq('id', tache.id).maybeSingle()
+    return res.status(409).json({ error: apres && apres.status === 'pending' ? 'questions_changees' : 'deja_close' })
+  }
+  return res.status(200).json({ ok: true, task_id: tache.id, statut: 'done' })
+}
+
+// ─── Le CLAIM, avant que l'ecran envoie (chantier « delai de reponse IA ») ───
+//
+// ⚠ C'EST LE CORRECTIF DU CONSTAT CENTRAL DE L'ETAPE 0. `cloreProposition` a
+// toujours eu un claim atomique, mais l'ecran envoyait D'ABORD et le claim
+// venait APRES : « le client envoie d'abord par posterMessage, PUIS cette
+// action pose le statut ». Inoffensif tant que seul un humain envoyait — deux
+// onglets se soldaient par un 409 apres coup. Des que le CRON peut envoyer la
+// meme tache, cet ordre produit le double envoi au voyageur.
+//
+// L'ecran suit donc desormais le meme ordre que la passe du cron :
+//   1. POST { action: 'reserver' }  -> la tache passe a `sending` (409 si prise)
+//   2. l'ecran envoie               -> seulement si l'etape 1 a reussi
+//   3. POST { action: 'proposition' } -> `done` + journal
+// Un 409 a l'etape 1 veut dire « cette reponse vient de partir » : l'ecran le
+// dit et n'envoie RIEN.
+const STATUT_EN_COURS = 'sending'
+
+async function reserverProposition (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, property_id, suggested_reply')
+    .eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  // Perimetre par bien, 404 pas 403 — meme regle qu'archiverFil.
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+
+  // ⚠ LA CONDITION DE STATUT EST LE CLAIM : zero ligne = quelqu'un d'autre l'a
+  // prise (le cron, ou un autre onglet). On ne reessaie pas, on le DIT.
+  const { data: prise, error: eU } = await supabase.from('agent_tasks')
+    .update({ status: STATUT_EN_COURS, updated_at: new Date().toISOString() })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .select('id')
+  if (eU) return res.status(503).json({ error: 'Reservation impossible' })
+  if (!prise || !prise.length) {
+    return res.status(409).json({ error: 'deja_prise', statut: tache.status })
+  }
+  return res.status(200).json({ ok: true, task_id: tache.id, texte: tache.suggested_reply })
+}
+
+// ⚠ ET UNE RESERVATION SE RELACHE — MAIS DESARMEE, comme la reprise des
+// orphelines du cron (constat 14 de la revue du 27 octobre 2026). L'ecran ne
+// relache qu'apres un ECHEC de `posterMessage` : c'est precisement le cas
+// « on ne sait pas si l'envoi est parti ». `reprendreOrphelines` refuse
+// deliberement de renvoyer dans ce doute et rend la main a l'hote ; laisser
+// `send_after` dans le passe ici faisait l'inverse — le cron renvoyait le meme
+// brouillon au cycle suivant. Deux traitements opposes pour le meme doute.
+async function relacherProposition (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, property_id').eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+  const { error: eU } = await supabase.from('agent_tasks')
+    .update({
+      status: 'pending_validation',
+      send_after: null,
+      // ⚠ LA SUSPENSION S'EFFACE AUSSI (constat 5 de la seconde revue).
+      // Desarmer en laissant `suspendu_le` produisait un etat SANS ISSUE : la
+      // bulle affichait « En attente : vous modifiez » pour toujours, sans lien
+      // de reprise (il exige une echeance) et sans que le cron la reprenne
+      // (`reprendreSuspensionsDormantes` exige `send_after` non nul).
+      suspendu_le: null,
+      summary: "Envoi interrompu : impossible de savoir si le message est parti. "
+        + "Vérifiez le fil avant de renvoyer.",
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', STATUT_EN_COURS)
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  return res.status(200).json({ ok: true, task_id: tache.id, desarmee: true })
+}
+
+// ─── La REPRISE du compte a rebours (decision 4 de Thierry, 27/10/2026) ──────
+//
+// ⚠ « Reprise AVEC LE TEMPS RESTANT, 5 minutes au minimum » — et ce temps se
+// CALCULE, il n'a pas besoin d'une colonne. `send_after - suspendu_le` est
+// exactement ce qui restait quand l'hote a ouvert le brouillon : les deux
+// instants sont en base.
+//
+// Sans ce recalcul, deux defauts opposes : si on laissait `send_after` tel
+// quel, un brouillon ouvert vingt minutes partirait a la seconde ou l'hote le
+// relache — sous ses doigts ; et si on repartait du delai PLEIN, l'hote qui
+// jette un oeil a sa proposition repousserait l'envoi de quinze minutes a
+// chaque regard.
+//
+// Le plancher de 5 minutes existe pour le cas limite : un brouillon suspendu a
+// trente secondes de son echeance ne doit pas partir dans la seconde qui suit
+// le relachement.
+const REPRISE_MIN_MS = 5 * 60 * 1000
+
+async function reprendreEcheance (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, property_id, send_after, suspendu_le')
+    .eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+  if (tache.status !== 'pending_validation') {
+    return res.status(409).json({ error: 'deja_close', statut: tache.status })
+  }
+  // Rien a reprendre : la tache n'etait pas suspendue, ou n'a pas d'echeance.
+  if (!tache.suspendu_le || !tache.send_after) {
+    return res.status(409).json({ error: 'rien_a_reprendre' })
+  }
+
+  const echeance = Date.parse(tache.send_after)
+  const suspension = Date.parse(tache.suspendu_le)
+  if (!Number.isFinite(echeance) || !Number.isFinite(suspension)) {
+    return res.status(409).json({ error: 'rien_a_reprendre' })
+  }
+  const maintenant = Date.now()
+  const restait = Math.max(REPRISE_MIN_MS, echeance - suspension)
+  const nouvelle = new Date(maintenant + restait).toISOString()
+
+  const { data: maj, error: eU } = await supabase.from('agent_tasks')
+    .update({ suspendu_le: null, send_after: nouvelle, updated_at: new Date(maintenant).toISOString() })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .select('id')
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
+  return res.status(200).json({ ok: true, task_id: tache.id, send_after: nouvelle })
+}
+
+// ─── Le brouillon que l'hote a ecrit (decision 6 de Thierry, 27/10/2026) ─────
+//
+// ⚠ SANS CETTE ACTION, LA REPRISE DU COMPTE A REBOURS ENVOIE LE TEXTE DE L'IA.
+// L'edition de l'hote ne touchait pas la base : `suggested_reply` portait le
+// texte de l'IA, et l'ecran envoyait le contenu du champ au moment du clic. Une
+// reprise automatique livrait donc au voyageur la version que l'hote avait
+// justement commence a corriger.
+//
+// Trois colonnes bougent ensemble, et chacune a son role :
+//   · `suggested_reply` -> le texte de l'hote, celui qui partira ;
+//   · `suspendu_le`     -> l'ouverture suspend le compte a rebours (regle 2) ;
+//   · `modifie_le`      -> la reprise devra l'ALERTER (decision 7), et la
+//                          sourdine de nuit ne s'applique qu'a ce cas.
+async function enregistrerBrouillon (req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  const texte = typeof req.body.texte === 'string' ? req.body.texte : null
+  const ouverture = req.body.ouverture === true
+  if (!taskId || taskId.length > 64) return res.status(400).json({ error: 'Demande invalide' })
+  // Une ouverture n'apporte pas de texte ; une sauvegarde en exige un.
+  if (!ouverture && (texte === null || !texte.trim())) {
+    return res.status(400).json({ error: 'Texte requis' })
+  }
+  // Borne comme les autres champs du fichier.
+  if (texte !== null && texte.length > 10000) return res.status(400).json({ error: 'Texte trop long' })
+
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, property_id').eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+  // ⚠ UNE TACHE DEJA PARTIE NE S'EDITE PAS : sans cette garde, l'hote
+  // ecraserait le texte d'une reponse deja delivree, et le journal
+  // `conversations` dirait autre chose que ce que le voyageur a lu.
+  if (tache.status !== 'pending_validation') {
+    return res.status(409).json({ error: 'deja_close', statut: tache.status })
+  }
+
+  const maintenant = new Date().toISOString()
+  const patch = { suspendu_le: maintenant, updated_at: maintenant }
+  // ⚠ `modifie_le` NE SE POSE QUE SUR UNE VRAIE ECRITURE. Une simple ouverture
+  // suspend le compte a rebours, mais elle ne doit PAS declencher l'alerte de
+  // reprise ni la sourdine : l'hote qui ouvre, lit et ferme n'a rien change, et
+  // le brouillon de l'IA peut partir la nuit comme en journee (decision 7).
+  if (!ouverture) {
+    patch.suggested_reply = texte
+    patch.modifie_le = maintenant
+  }
+
+  const { data: maj, error: eU } = await supabase.from('agent_tasks')
+    .update(patch)
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .select('id')
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
+  return res.status(200).json({ ok: true, task_id: tache.id, suspendu: true, modifie: !ouverture })
 }
 
 // ─── L'epingle (lot 2 etape 4) ───────────────────────────────────────────────
@@ -374,9 +668,194 @@ async function archiverFil(req, res) {
   return res.status(200).json({ ok: true, booking_id: bookingId, archivee: archiver })
 }
 
+// ─── Le fil en direct (docs/specs/spec-messages-fil-en-direct.md §3) ────────
+// `GET /api/messages?direct=1[&fil=<bookId>&depuis=<instant ISO>]`.
+// La page la pose toutes les 5 secondes quand un fil est ouvert et l'onglet
+// affiche (une fois par minute sans fil, rien quand l'onglet est cache). Elle
+// rend SEULEMENT ce qui est neuf : les messages du fil insérés depuis `depuis`, ses
+// propositions en attente, et l'instant du message le plus recent du compte
+// HORS de ce fil — que la page compare au sien pour savoir si la LISTE doit
+// etre relue.
+//
+// ⚠ LA COLLECTION N'EST PAS RELUE ICI. Elle lit jusqu'a 2000 messages et
+// toutes les reservations du compte (31 Ko mesures le 9 novembre 2026) :
+// toutes les 5 secondes, ce serait 22 Mo par heure et par ecran pour presque
+// toujours rien. Trois lectures indexees, et la garde.
+//
+// ⚠ LE CURSEUR EST L'ORDRE D'INSERTION (`created_at`, pose par la base), PAS
+// `sent_at` (review 1, constat 3). Le webhook Channex, son import de
+// rattrapage, Beds24 et l'e-mail entrant ecrivent des lignes dont `sent_at` est
+// ANTERIEUR a leur insertion : un curseur sur `sent_at` sautait pour toujours
+// le message du voyageur arrive apres la reponse de l'hote. Le serveur rend
+// `curseur` (le `created_at` de la derniere ligne rendue) et la page le
+// renvoie tel quel — une seule horloge, celle de la base.
+// ⚠ MEMES BARRIERES QUE LA COLLECTION : compte cible, filtre de perimetre sur
+// les TROIS lectures — un membre limite au bien A n'apprend rien du bien B,
+// pas meme l'heure de son dernier message —, et la regle d'archivage.
+const DIRECT_MAX = 200
+const DIRECT_FENETRE_MS = 7 * 86400000
+// Un instant ISO 8601 complet : date, heure, jusqu'a six decimales, fuseau.
+// `[T]` et non `T(` : tests/imports-manquants.test.js lit `T(` comme un appel.
+const INSTANT_ISO = /^(\d{4})-(\d{2})-(\d{2})[T](\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?(Z|[+-](\d{2}):?(\d{2}))$/
+// ⚠ LA FORME NE SUFFIT PAS : V8 lit `2026-02-30` comme le 2 mars, Postgres le
+// refuse (« out of range ») — un 503 pour ce qui est une demande invalide
+// (review 3, constat 5). Le curseur passant TEL QUEL a la base, chaque champ
+// doit exister : le jour dans son mois, l'heure < 24, les minutes et secondes
+// < 60, le decalage < 24 h.
+function instantExiste (brut) {
+  const m = INSTANT_ISO.exec(brut)
+  if (!m) return false
+  const [a, mo, j, h, mi, se] = m.slice(1, 7).map(Number)
+  if (mo < 1 || mo > 12 || j < 1 || h > 23 || mi > 59 || se > 59) return false
+  if (new Date(Date.UTC(a, mo - 1, j)).getUTCDate() !== j) return false
+  if (m[9] !== undefined && (Number(m[9]) > 23 || Number(m[10]) > 59)) return false
+  return true
+}
+async function lireEnDirect (req, res) {
+  const t0 = Date.now()
+  const { compterRequetes, requetesJusquIci } = require('../lib/compte-requetes')
+  const repondre = (statut, corps) => {
+    const n = requetesJusquIci()
+    res.setHeader('Server-Timing', `db;desc="${n == null ? '?' : n} requêtes";dur=${Date.now() - t0}`)
+    return res.status(statut).json(corps)
+  }
+  const { resultat } = await compterRequetes(async () => {
+    const garde = await requirePermission(req, res, {
+      domaine: 'messages', niveau: 'read', compteDelegue: true })
+    if (!garde.ok) return
+    const userId = garde.accountUserId
+    const filtreOr = filtrePerimetreSql(refsDuPerimetre(garde.contexte))
+
+    const filBrut = req.query.fil == null ? '' : String(req.query.fil).trim()
+    const fil = filBrut || null
+    if (fil && (fil.length > 200 || fil === '__SIM_ENABLED__')) {
+      return repondre(400, { error: 'Conversation invalide' })
+    }
+    let depuis = null
+    if (fil) {
+      // ⚠ LE CURSEUR PASSE TEL QUEL, A LA MICROSECONDE (review 2, constat 4).
+      // PostgREST rend `created_at` avec six decimales ; le reparser par
+      // `new Date` le tronquait a la milliseconde, et `gt` rendait de nouveau la
+      // ligne du curseur a CHAQUE cycle. On valide la forme, strictement, et on
+      // ne reecrit l'instant que s'il faut le ramener a la fenetre.
+      const brut = String(req.query.depuis || '')
+      const t = new Date(brut).getTime()
+      if (!instantExiste(brut) || !Number.isFinite(t)) return repondre(400, { error: 'Instant invalide' })
+      // Une page restee ouverte longtemps ne relit pas tout l'historique : au
+      // plus 7 jours, et `complet: false` au-dela de 200 messages.
+      const plancher = Date.now() - DIRECT_FENETRE_MS
+      depuis = t < plancher ? new Date(plancher).toISOString() : brut
+    }
+    // Perimetre vide ou refuse : rien, et la meme forme.
+    if (filtreOr === '') return repondre(200, { messages: [], taches: [], infos: [], dernier: null, complet: true, curseur: depuis })
+
+    // ⚠ `dernier` EST PRIS HORS DU FIL OUVERT : la page tient deja ce fil a
+    // jour par la lecture ci-dessous. Compter ses messages ferait relire la
+    // liste entiere (31 Ko) a chaque message du voyageur avec qui l'hote est
+    // justement en train d'echanger — pour rien.
+    const dernierQ = (() => {
+      let q = supabase.from('messages').select('created_at').eq('user_id', userId)
+      if (fil) q = q.neq('booking_id', fil)
+      if (filtreOr) q = q.or(filtreOr)
+      return q.order('created_at', { ascending: false }).limit(1)
+    })()
+    const lectures = [dernierQ]
+    if (fil) {
+      const lire = (colonnes) => {
+        // `gt` : la ligne du curseur est deja chez la page. Deux cas perdus,
+        // tous deux infimes, et dits pour qu'on ne les croie pas fermes :
+        // deux insertions a la MEME microseconde coupees par la borne des 200 ;
+        // et `created_at = now()` etant l'instant de DEBUT de la transaction,
+        // deux insertions du meme fil a quelques millisecondes, lues ENTRE
+        // leurs deux commits, font sauter la premiere (review 2, constat 6).
+        let q = supabase.from('messages').select(colonnes)
+          .eq('user_id', userId).eq('booking_id', fil).gt('created_at', depuis)
+        if (filtreOr) q = q.or(filtreOr)
+        return q.order('created_at', { ascending: true }).limit(DIRECT_MAX + 1)
+      }
+      lectures.push((async () => {
+        // `origine` (dette 66) avec repli, comme la collection.
+        let r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind, created_at, origine')
+        if (r.error && /origine/.test(r.error.message || '')) {
+          r = await lire('booking_id, property_id, sender, direction, body, sent_at, kind, created_at')
+        }
+        return r
+      })())
+      // ⚠ UNE SEULE LECTURE POUR DEUX CHAMPS (spec-info-manquante-choix.md §3) :
+      // les propositions (`pending_validation`) ET les tâches « information
+      // manquante » (`pending`). Le tri se fait ICI, plus bas — une tâche
+      // `pending` ne doit JAMAIS sortir dans `taches`, que la page affiche en
+      // proposition : « Envoyer » y partirait avec `suggested_reply`, qui est
+      // une NOTE INTERNE pour l'hôte.
+      // ⚠ LES PLUS RÉCENTES D'ABORD, puis remises à l'endroit : une tâche
+      // `pending` n'est jamais close par le cron quand l'hôte répond à la main,
+      // donc un fil peut en accumuler — en ASC, la borne des 50 couperait
+      // justement la proposition du jour.
+      let qt = supabase.from('agent_tasks')
+        .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, updated_at, send_after, suspendu_le, modifie_le, sub_tasks')
+        .eq('user_id', userId).eq('book_id', fil).in('status', ['pending_validation', 'pending'])
+      if (filtreOr) qt = qt.or(filtreOr)
+      lectures.push(qt.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(50))
+      lectures.push(clesArchivees(supabase, [userId]))
+    }
+    const [d, m, tch, arch] = await Promise.all(lectures)
+    if (d.error || (m && m.error) || (tch && tch.error)) {
+      console.error('[messages] lecture en direct', (d.error || (m && m.error) || tch.error).message)
+      return repondre(503, { error: 'Lecture impossible' })
+    }
+    const dernier = (d.data && d.data[0] && d.data[0].created_at) || null
+    if (!fil) return repondre(200, { dernier })
+
+    let lignes = m.data || []
+    const complet = lignes.length <= DIRECT_MAX
+    lignes = lignes.slice(0, DIRECT_MAX)
+    // Un bien archive ne sort plus de Messages (decision du 6 novembre 2026),
+    // en direct pas plus que dans la collection. `clesArchivees` ne leve
+    // jamais : une lecture ratee ne retire rien.
+    const archive = (ref) => arch && arch.cles && arch.cles.size && ref != null
+      && arch.cles.has(cleDuBien(userId, String(ref)))
+    // Le curseur suit la derniere ligne RENDUE (sur une lecture coupee a 200,
+    // le cycle suivant reprend a la 201e), sinon il ne bouge pas.
+    const curseur = lignes.length ? lignes[lignes.length - 1].created_at : depuis
+    if ([...lignes, ...(tch.data || [])].some(l => archive(l.property_id))) {
+      return repondre(200, { messages: [], taches: [], infos: [], dernier, complet: true, curseur })
+    }
+    const messages = lignes.map(l => ({
+      sender: l.sender, direction: l.direction, body: l.body, sent_at: l.sent_at,
+      kind: l.kind, origine: l.origine || null
+    }))
+    const lues = (tch.data || []).slice().reverse()
+    // `taches` : EXACTEMENT ce que la page recevait avant — les propositions,
+    // mêmes colonnes, rien de plus.
+    const taches = lues.filter(x => x.status === 'pending_validation').map(x => {
+      const t = { ...x }
+      delete t.sub_tasks
+      delete t.updated_at
+      return t
+    })
+    // `infos` : les QUESTIONS seules (lib/guestflow/rediger.js `questionsDe`) —
+    // ni `suggested_reply`, ni le résumé. Une intervention, une tâche système
+    // (pause, arrêt) ou une tâche sans question n'y entre pas.
+    const infos = lues.map(x => ({ x, questions: questionsDe(x) }))
+      .filter(({ questions }) => questions.length)
+      .map(({ x, questions }) => ({
+        id: x.id, book_id: x.book_id, property_id: x.property_id,
+        created_at: x.created_at, maj: x.updated_at || x.created_at, questions
+      }))
+    return repondre(200, { messages, taches, infos, dernier, complet, curseur })
+  })
+  return resultat
+}
+
 module.exports = async function handler(req, res) {
+  // ⚠ DONNEE DE COMPTE : jamais en cache, et l'en-tete AVANT le premier refus,
+  // le 405 compris (regle « chargement rapide », point 4 ; dette 90).
+  res.setHeader('Cache-Control', 'private, no-store')
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Methode non autorisee' })
+  }
+  if (req.method === 'GET' && req.query && req.query.direct === '1') {
+    return await lireEnDirect(req, res)
   }
 
   // L'archivage manuel est une ECRITURE : sa propre garde, avant la lecture.
@@ -390,6 +869,24 @@ module.exports = async function handler(req, res) {
   // Etape 3 : Envoyer / Rejeter une proposition clot la tache (et le journal).
   if (req.method === 'POST' && req.body && req.body.action === 'proposition') {
     return await cloreProposition(req, res)
+  }
+  // Information manquante : la réponse est partie depuis la carte, la tâche se clôt.
+  if (req.method === 'POST' && req.body && req.body.action === 'info_traitee') {
+    return await cloreInfo(req, res)
+  }
+  // Chantier « delai de reponse IA » : le claim AVANT l'envoi, son relachement,
+  // et le brouillon que l'hote a ecrit.
+  if (req.method === 'POST' && req.body && req.body.action === 'reserver') {
+    return await reserverProposition(req, res)
+  }
+  if (req.method === 'POST' && req.body && req.body.action === 'relacher') {
+    return await relacherProposition(req, res)
+  }
+  if (req.method === 'POST' && req.body && req.body.action === 'brouillon') {
+    return await enregistrerBrouillon(req, res)
+  }
+  if (req.method === 'POST' && req.body && req.body.action === 'reprendre') {
+    return await reprendreEcheance(req, res)
   }
   // Etape 4 : l'epingle, portee de l'ancienne page.
   if (req.method === 'POST' && req.body && (req.body.action === 'epingler' || req.body.action === 'desepingler')) {
@@ -492,6 +989,10 @@ module.exports = async function handler(req, res) {
   try {
     // Fenetre 6 mois.
     const since = new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000).toISOString()
+    // L'instant de cette lecture, horloge SERVEUR : le point de depart du fil
+    // en direct (`lireEnDirect`, curseur sur l'ordre d'insertion). Pris AVANT
+    // les lectures : ce qui s'insere pendant qu'elles tournent est relu.
+    const luLe = new Date().toISOString()
 
     // ── 2 SELECT (zero N+1) : messages recents + snapshots du user ──
     const [msgRes, snapRes] = await Promise.all([
@@ -614,6 +1115,33 @@ module.exports = async function handler(req, res) {
       }
     })
 
+    // ⚠ LES CONVERSATIONS D'UN BIEN ARCHIVE QUITTENT MESSAGES — decision de
+    // Thierry du 6 novembre 2026 : « les biens archives ne doivent pas
+    // apparaitre sur les pages Bonjour, Calendrier et Messages car ils ne sont
+    // pas actifs ». Elle REMPLACE le choix ecrit cote ecran (pages/messages.html,
+    // « les conversations d'un logement archive restent lisibles ») : les
+    // messages restent en base, ils ne s'affichent plus.
+    // ⚠ ICI, ET PAS DANS LA PAGE : tout ce qui lit cette collection — la liste
+    // et les arrivees du jour de Messages — voit la meme verite. ⚠ L'accueil,
+    // lui, ne passe PAS par ici (`api/ecran/aujourdhui.js` lit `messages`
+    // lui-meme ; constat 9 de la revue du 7 novembre 2026 : cette ligne
+    // affirmait le contraire).
+    // ⚠ LA CLE EST COMPOSITE (`cleDuBien`) : `provider_property_id` n'a aucune
+    // unicite globale, et un bien archive chez un autre compte ne doit RIEN
+    // retirer ici (constat 6 de la revue de 320aa4f8, lib/biens-vivants.js).
+    // ⚠ UNE LECTURE RATEE NE RETIRE RIEN : `clesArchivees` ne leve jamais et
+    // rend un ensemble vide. Mieux vaut un fil de trop qu'une messagerie vide
+    // un jour de panne — c'est la regle de cet endpoint pour l'archivage.
+    {
+      const arch = await clesArchivees(supabase, [userId])
+      if (arch.cles.size) {
+        for (let i = conversations.length - 1; i >= 0; i--) {
+          if (arch.cles.has(cleDuBien(userId, conversations[i].propertyId))) conversations.splice(i, 1)
+        }
+      }
+      if (!arch.complet) console.error('[messages] lecture des biens archives incomplete : rien n\'est ecarte en plus')
+    }
+
     // Tri conversations par lastTime desc (plus recentes d'abord).
     conversations.sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
 
@@ -669,13 +1197,13 @@ module.exports = async function handler(req, res) {
       const hasMore = fenetre.length > limite
       const bord = hasMore ? fenetre[limite - 1] : null
       return res.status(200).json({
-        conversations: page, archivage, has_more: hasMore,
+        conversations: page, archivage, has_more: hasMore, lu_le: luLe,
         next_before: bord ? (bord.lastTime || '') : null,
         next_before_id: bord ? String(bord.bookId) : null
       })
     }
 
-    return res.status(200).json({ conversations, archivage })
+    return res.status(200).json({ conversations, archivage, lu_le: luLe })
 
   } catch (e) {
     console.error('[messages] exception', e.message)

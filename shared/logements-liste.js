@@ -448,7 +448,16 @@ export function carteHtml (bien, outils) {
   return `<article class="log-carte" data-bien="${esc(bien.id)}">
     <div class="log-photo">${photo}</div>
     <div class="log-texte">
-      <div class="log-nom"><a class="log-lien" href="/logements/${esc(encodeURIComponent(bien.id))}">${esc(bien.nom || '')}</a></div>
+      <div class="log-nom"><a class="log-lien" href="/logements/${esc(encodeURIComponent(bien.id))}">${esc(bien.nom || '')}</a>${
+        // ⚠ LA MARQUE « ARCHIVE » MANQUAIT ICI, et Thierry l'a vu en recette de
+        // staging le 3 novembre 2026, hors de son plan : la liste montrait ses
+        // deux biens archives « comme les autres ». L'accueil et les revenus les
+        // marquaient deja ; cette page etait le dernier endroit ou un bien range
+        // se lisait comme un bien vivant.
+        // ⚠ ET C'EST LA MEME CLASSE QUE PARTOUT (`marque-archive`) : une seconde
+        // forme pour le meme etat divergerait au premier correctif de style.
+        bien.archive_le ? `<span class="marque-archive">${esc(t('logements.archive'))}</span>` : ''
+      }</div>
       ${sous ? `<div class="log-sous caption">${sous}</div>` : ''}
     </div>
     <div class="log-canaux">${canauxHtml(bien, outils)}</div>
@@ -473,7 +482,14 @@ export function etatHtml (quoi, { peutAjouter = false } = {}) {
     // le refuserait en 403. La regle de Thierry du 20 octobre : « on ne montre
     // jamais ce qui mene a un refus » — et c'est l'argument que ce meme fichier
     // applique deja au bouton « Reessayer » d'un refus de droit.
-    return `<h2 class="h2" data-i18n="logements.vide_titre"></h2>
+    // ⚠ LE TITRE SUIT LE DROIT, LUI AUSSI (constat FAIBLE 6 de la revue du
+    // 25 octobre 2026). Les deux boutons etaient bien masques pour un membre
+    // delegue, mais le titre disait toujours « Ajoutez votre premier
+    // logement » au-dessus de « Aucun logement ne vous est confie sur ce
+    // compte » : une injonction qu'il ne peut pas suivre, suivie de sa propre
+    // contradiction. Prealable sur /logements ; l'accueil le porte depuis
+    // l'etape 1 du lot Aujourd'hui V5, la ou un membre atterrit par defaut.
+    return `<h2 class="h2" data-i18n="${peutAjouter ? 'logements.vide_titre' : 'logements.vide_titre_membre'}"></h2>
       <p class="muted" data-i18n="${peutAjouter ? 'logements.vide_aide' : 'logements.vide_aide_membre'}"></p>
       ${peutAjouter ? `<div class="log-etat__actions">
         <a class="btn btn--primary" href="/pages/connexions" data-i18n="logements.vide_connecter"></a>

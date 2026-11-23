@@ -63,7 +63,13 @@ if (process.env.CHANNEL_BASE_URL && process.env.CHANNEL_API_KEY) {
 
 ;(async () => {
   console.log(`Projet Supabase : ${projet} — ${GO ? 'ECRITURE (--go)' : 'dry-run'}${jour ? ` — jour ${jour}` : ''}\n`)
+  // ⚠ UN BIEN ARCHIVE N'EST PLUS PILOTE, ET C'EST LA SECONDE LIGNE DE DEFENSE.
+  // L'archivage repasse deja `pilote_tarifaire` a `calendrier` (decision de
+  // Thierry du 1er novembre 2026) ; ce filtre tient le jour ou quelqu'un
+  // reposerait le drapeau a la main sur un bien archive. Sans lui, le pilote
+  // pousserait des prix chez le provider pour une annonce retiree.
   let q = sb.from('properties').select('*').eq('pilote_tarifaire', 'yieldflow')
+    .is('archive_le', null)
     .not('pilote_fenetre_type', 'is', null).not('pilote_fenetre_valeur', 'is', null).order('name')
   if (bienVoulu) q = q.eq('id', bienVoulu)
   const { data: biens, error } = await q

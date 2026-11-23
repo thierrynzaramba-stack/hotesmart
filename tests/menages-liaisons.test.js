@@ -861,3 +861,30 @@ test('UN DÉLÉGUÉ N\'AMPUTE PAS ce que sa page sert hors de son périmètre', 
     'le bien hors périmètre reste servi — il garde sa liaison active')
   assert.ok(!w.row.property_ids.includes('999999'), 'et les biens d\'une AUTRE personne n\'y entrent pas')
 })
+
+// ─── Un bien ARCHIVE n'est pas retire a l'aveugle ───────────────────────────
+// Constat 6 de la revue du 7 novembre 2026. Apres son dernier depart, un bien
+// archive quitte l'ecran des prestataires : l'enregistrement, qui REMPLACE la
+// liste, desactivait sa liaison sans que l'hote l'ait vue. Reactive, le bien
+// n'avait plus personne.
+test('LE TEST QUI COMPTE : enregistrer une prestataire ne desactive PAS sa liaison a un bien archive', async () => {
+  const { handler, etat } = preparer({
+    biens: [{ provider_property_id: '209413' }, { provider_property_id: '169567', archive_le: '2026-11-03T10:00:00Z' }]
+  })
+  const res = reponse()
+  await handler(post(CORPS), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.majs.find(m => m.table === 'property_cleaning_providers')
+  assert.ok(maj && maj.not && maj.not.c === 'property_id', 'la desactivation n exclut rien')
+  assert.match(String(maj.not.v), /"169567"/, 'la liaison au bien archive serait desactivee')
+  assert.match(String(maj.not.v), /"209413"/, 'le bien garde n est plus exclu')
+})
+
+test('un bien archive que l hote ENVOIE reste une liaison voulue (pas de double dans le filtre)', async () => {
+  const { handler, etat } = preparer({
+    biens: [{ provider_property_id: '169567', archive_le: '2026-11-03T10:00:00Z' }]
+  })
+  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '169567', rang: 1 }] }), reponse())
+  const maj = etat.majs.find(m => m.table === 'property_cleaning_providers')
+  assert.strictEqual(String(maj.not.v), '("169567")')
+})

@@ -126,6 +126,13 @@ function fauxClient (opts = {}) {
         select () { return chain },
         eq (c, v) { appel.filtres[c] = v; return chain },
         not () { return chain },
+        // ⚠ `is` EXISTE PARCE QUE LE VRAI CLIENT L'A. Le lot « archiver un
+        // bien » ajoute `.is('archive_le', null)` a la sonde d'avis Beds24 : un
+        // bien archive ne recoit plus d'avis, et le sonder coute un appel
+        // provider par cycle pour une annonce retiree. Un double qui ne connait
+        // pas ce maillon fabrique un faux rouge sur une forme que PostgREST
+        // accepte.
+        is () { return chain },
         maybeSingle () {
           if (table !== 'cron_logs') return Promise.resolve({ data: null, error: null })
           // `marqueurs` : un marqueur PAR compte, comme en base.

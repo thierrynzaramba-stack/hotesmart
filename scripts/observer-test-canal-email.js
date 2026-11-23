@@ -231,7 +231,7 @@ async function main () {
   if (e7) {
     dire('ROUGE', 'lecture des incidents impossible', e7.message)
   } else {
-    const pertinents = (inc || []).filter(i => /email|send_failure|message_non_envoye/.test(i.type))
+    const pertinents = (inc || []).filter(i => /email|send_failure|message_non_envoye|code_acces|message_envoye_incomplet/.test(i.type))
     const autres = (inc || []).length - pertinents.length
     if (!pertinents.length) {
       dire('VERT', `aucun incident lie a l'e-mail${autres ? ` (${autres} autre(s), hors chantier)` : ''}`)

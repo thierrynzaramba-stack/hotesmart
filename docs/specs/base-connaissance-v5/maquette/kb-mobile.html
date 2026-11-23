@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HôteSmart — Base de connaissance (V5, téléphone)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+  :root{
+    --fg:#222222; --muted:#717171; --muted-2:#9B9B9B; --line:#EBEBEB;
+    --ok:#0F7A4F; --ok-soft:#E8F5EE; --warn:#9A5B00; --warn-soft:#FFF4E0;
+    --danger:#B42318; --danger-soft:#FEF0EE; --info:#2563EB; --night:#0E1726;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#F2F2F2;font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--fg);padding:16px}
+  .note{max-width:760px;margin:0 auto 14px;padding:10px 14px;border:1px dashed #D8D8D8;border-radius:12px;font-size:13px;color:var(--muted);background:#fff}
+  .rang{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;align-items:flex-start}
+  .tel{width:360px;background:#fff;border:1px solid var(--line);border-radius:26px;overflow:hidden;box-shadow:0 2px 14px rgba(0,0,0,.06)}
+  .cap{font-size:12px;font-weight:700;color:var(--muted);text-align:center;padding:8px 0 10px}
+  /* en-tete collante */
+  .top{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;gap:10px}
+  .top .t{font-size:16px;font-weight:800;flex:1}
+  .x{width:34px;height:34px;border:1px solid var(--line);border-radius:99px;display:flex;align-items:center;justify-content:center;flex:none}
+  .sel{margin:12px 14px 0;display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;padding:8px 12px;font-size:14px;font-weight:600}
+  .ongl{display:flex;gap:4px;padding:10px 14px 0}
+  .ongl button{flex:1;height:38px;border:1px solid var(--line);background:#fff;border-radius:99px;font:inherit;font-size:13px;font-weight:600;color:var(--muted)}
+  .ongl button.on{background:var(--night);color:#fff;border-color:var(--night)}
+  .liste{padding:12px 14px 18px;display:grid;gap:10px}
+  .carte{border:1px solid var(--line);border-radius:14px;padding:11px 12px;display:grid;gap:5px}
+  .carte .l1{display:flex;align-items:center;gap:8px}
+  .carte .lib{font-weight:700;font-size:14px;flex:1}
+  .carte .val{font-size:14px;word-break:break-word}
+  .carte .bal{font-family:ui-monospace,monospace;font-size:12px;background:#F4F4F4;border-radius:6px;padding:2px 6px;justify-self:start}
+  .carte .usage{font-size:12px;color:var(--muted)}
+  .carte .usage.aucun{color:var(--warn)}
+  .pastille{font-size:11px;font-weight:700;border-radius:99px;padding:2px 8px;flex:none}
+  .pastille.vieux{background:var(--warn-soft);color:var(--warn)}
+  .pastille.ok{background:var(--ok-soft);color:var(--ok)}
+  .pastille.ia{background:#EEF2FF;color:var(--info)}
+  .pastille.priv{background:#F4F4F4;color:var(--muted)}
+  .ajout{border:1px dashed var(--line);border-radius:14px;padding:11px;font-size:14px;color:var(--muted);text-align:center}
+  /* ecran 2 : la saisie */
+  .fil{padding:12px 14px;display:grid;gap:8px}
+  .bulle{border:1px solid var(--line);border-radius:14px;padding:10px 12px;font-size:14px;max-width:85%}
+  .bulle.moi{margin-left:auto;background:#F7F7F7}
+  .saisie{border-top:1px solid var(--line);padding:12px 14px;display:grid;gap:8px}
+  .saisie textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px;font:inherit;min-height:66px;resize:vertical}
+  .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+  .chip{border:1px solid var(--line);border-radius:99px;padding:6px 10px;font-size:12px;background:#fff;white-space:nowrap;flex:none}
+  .chip b{font-weight:700}
+  .chip .v{color:var(--muted);font-weight:500}
+  .chip.vide{border-color:var(--danger);color:var(--danger);background:var(--danger-soft)}
+  .apercu{background:var(--ok-soft);border:1px solid #CBE7D8;border-radius:12px;padding:10px;font-size:13px}
+  .apercu .t{font-weight:700;color:var(--ok);font-size:12px;margin-bottom:3px}
+  .bloque{background:var(--danger-soft);border:1px solid #F3C9C4;border-radius:12px;padding:10px;font-size:13px;color:var(--danger)}
+  .envoyer{height:44px;border-radius:99px;border:0;background:#CFCFCF;color:#fff;font:inherit;font-weight:700;font-size:15px}
+  .legende{max-width:760px;margin:22px auto 40px;font-size:13px;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 16px}
+  .legende li{margin:5px 0}
+</style>
+</head>
+<body>
+
+<div class="note"><b>Maquette — téléphone (360 px).</b> La base est une feuille PLEIN ÉCRAN, ouverte par le bouton 📖 de l'en-tête de Messages. Pas de volet latéral au téléphone : les deux colonnes de l'ordinateur deviennent deux écrans.</div>
+
+<div class="rang">
+
+  <!-- ───────── écran 1 : la base ───────── -->
+  <div>
+    <div class="tel">
+      <div class="top"><div class="t">Base de connaissance</div><div class="x">✕</div></div>
+      <div class="sel">🏠 La bulle ▾</div>
+      <div class="ongl">
+        <button class="on">Les faits</button>
+        <button>Questions</button>
+      </div>
+      <div class="liste">
+
+        <div class="carte">
+          <div class="l1"><span class="lib">Téléphone hôte</span><span class="pastille vieux">à vérifier</span></div>
+          <div class="val">NUMERO-A</div>
+          <span class="bal">{telephone_hote}</span>
+          <div class="usage aucun">⚠ aucun message ne l'utilise — 3 modèles écrivent un numéro en dur</div>
+        </div>
+
+        <div class="carte">
+          <div class="l1"><span class="lib">Adresse</span><span class="pastille ok">vérifié</span></div>
+          <div class="val">adresse complète de La bulle</div>
+          <span class="bal">{adresse}</span>
+          <div class="usage">1 message : Ménage fait</div>
+        </div>
+
+        <div class="carte">
+          <div class="l1"><span class="lib">Code porte d'immeuble</span><span class="pastille priv">pas pour l'IA</span></div>
+          <div class="val">CODE-IMMEUBLE</div>
+          <span class="bal">{code_immeuble}</span>
+          <div class="usage">1 message : Ménage fait</div>
+        </div>
+
+        <div class="carte">
+          <div class="l1"><span class="lib">Arrivée à partir de</span><span class="pastille ok">vérifié</span></div>
+          <div class="val">18:00</div>
+          <span class="bal">{checkin}</span>
+          <div class="usage aucun">⚠ 3 messages écrivent « 18h » en dur</div>
+        </div>
+
+        <div class="ajout">+ Ajouter une information</div>
+      </div>
+    </div>
+    <div class="cap">1 — la base, onglet « Les faits »</div>
+  </div>
+
+  <!-- ───────── écran 2 : la saisie avec balises ───────── -->
+  <div>
+    <div class="tel">
+      <div class="top"><div class="t">Jean-Marie · La bulle</div><div class="x">📖</div></div>
+      <div class="fil">
+        <div class="bulle">Bonsoir, quels sont les suppléments ?</div>
+        <div class="bulle moi">Une bouteille de champagne au frais pour <b>29 €</b>.</div>
+      </div>
+      <div class="saisie">
+        <textarea>Bonjour {prenom}, l'adresse est {adresse}. Le wifi est {wifi_nom} / {wifi_mdp}.</textarea>
+        <div class="chips">
+          <span class="chip"><b>{prenom}</b> <span class="v">Jean-Marie</span></span>
+          <span class="chip"><b>{adresse}</b> <span class="v">4 Rue…</span></span>
+          <span class="chip"><b>{wifi_nom}</b> <span class="v">Livebox-A1B2</span></span>
+          <span class="chip vide"><b>{wifi_mdp}</b> <span class="v">vide</span></span>
+          <span class="chip"><b>{checkin}</b> <span class="v">18:00</span></span>
+        </div>
+        <div class="apercu">
+          <div class="t">Ce que le voyageur recevra</div>
+          Bonjour Jean-Marie, l'adresse est adresse complète de La bulle. Le wifi est Livebox-A1B2 / …
+        </div>
+        <div class="bloque"><b>Envoi bloqué</b> — <b>{wifi_mdp}</b> est vide pour La bulle. Touchez 📖 pour la remplir.</div>
+        <button class="envoyer">Envoyer</button>
+      </div>
+    </div>
+    <div class="cap">2 — la saisie : insertion, aperçu, blocage</div>
+  </div>
+
+</div>
+
+<div class="legende">
+  <b>Ce que la version téléphone change, et rien d'autre</b>
+  <ul>
+    <li><b>Deux onglets</b> au lieu de deux sections : « Les faits » et « Questions ». Un seul écran ne peut pas porter les deux listes.</li>
+    <li><b>La rangée de balises défile horizontalement</b> sous la saisie — même mécanique que les filtres de la liste de messages (`.msg-pilules`).</li>
+    <li><b>Le bouton « Envoyer » est désarmé visuellement</b> quand une balise est vide, et le motif est au-dessus, pas dans une boîte native.</li>
+    <li><b>L'en-tête et le sélecteur de bien sont collants</b> : on ne perd jamais de vue le logement dont on lit les faits. C'est la leçon du 28 octobre (une note posée sous le mauvais logement).</li>
+    <li>Pas de nouvelle couleur : les mêmes jetons que l'ordinateur.</li>
+  </ul>
+</div>
+
+</body>
+</html>

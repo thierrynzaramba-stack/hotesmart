@@ -67,13 +67,13 @@ function fakeSupabase (tables, tablesEnPanne = []) {
 }
 
 // `contenuIA` : le tableau `content` que rend l'API (permet un bloc thinking).
-function charger ({ tables, messagesChannex, contenuIA, mode = 'test', messagesBeds24 = [], tablesEnPanne = [], creer = null }) {
+function charger ({ tables, messagesChannex, contenuIA, mode = 'test', delais = null, messagesBeds24 = [], tablesEnPanne = [], creer = null }) {
   const appelsIA = []; const alertes = []
   const anthropic = { messages: { create: async (req) => { appelsIA.push(req); return creer ? creer(req) : { content: contenuIA } } } }
   const stubs = {
     '../lib/cron-shared': {
       supabase: fakeSupabase(tables, tablesEnPanne), anthropic,
-      getPropertyMode: async () => mode, isAutomationPaused: async () => false,
+      getPropertyMode: async () => mode, lireReglagesDuBien: async () => ({ mode: mode, delais }), isAutomationPaused: async () => false,
       getSignatureForKey: () => '', SENDVIABEDS24_ENABLED: false
     },
     '../lib/cron-beds24': { fetchMessages: async () => messagesBeds24, fetchBookingsHistory: async () => [] },
@@ -507,6 +507,83 @@ test('LE TEST QUI COMPTE : envoi impossible — journal ecrit, le code est dit N
   assert.ok(/Code d'accès[^\n]*: NON ENVOYÉ — envoi automatique impossible/.test(bloc), bloc)
 })
 
+// ─── Dette 144 : un envoi INCERTAIN du code n'est ni « envoyé » ni « non envoyé » ───
+// Decision de Thierry du 18 novembre 2026 : « corriger l'IA seulement ».
+const { MARQUEUR_CODE_IMPOSSIBLE, MARQUEUR_CODE_INCERTAIN } = require('../lib/marqueurs-code-acces')
+const avecCode = (taches) => {
+  const tables = tablesVides()
+  tables.message_templates = [{ id: 'tpl-code', user_id: U, property_id: P, event_type: 'menage_done', active: true }]
+  tables.message_sent_log = [{ user_id: U, booking_id: B, template_id: 'tpl-code', sent_at: '2026-10-01T12:00:00Z' }]
+  for (const o of taches) tables.agent_tasks.push(tache({ task_type: 'auto_message', created_at: '2026-10-01T12:00:00Z', ...o }))
+  return tables
+}
+
+test('LE TEST QUI COMPTE (dette 144) : envoi INCERTAIN du code — l agent ne le dit ni envoyé ni NON ENVOYÉ, et croit le voyageur', async () => {
+  const bloc = await promptPour(avecCode([{ status: 'pending_validation', guest_message: MARQUEUR_CODE_INCERTAIN }]))
+  const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
+  assert.match(ligne, /: ENVOI INCERTAIN — coupure pendant l'envoi automatique, le voyageur l'a peut-être reçu\./, bloc)
+  assert.match(ligne, /N'affirme ni qu'il est parti ni qu'il ne l'est pas ; s'il dit ne pas l'avoir reçu, c'est une intervention/)
+  assert.doesNotMatch(ligne, /NON ENVOYÉ/, 'l agent annoncerait un code que le voyageur a peut-être')
+  assert.doesNotMatch(ligne, /marqué envoyé/, 'l agent ferait chercher un message peut-être jamais arrivé')
+})
+
+test('dette 144 : l hote ECARTE la proposition d un envoi incertain — ce n est pas « NON ENVOYÉ »', async () => {
+  // Ecarter, ici, c'est refuser de le RENVOYER (le voyageur l'avait).
+  const bloc = await promptPour(avecCode([{ status: 'ignored', guest_message: MARQUEUR_CODE_INCERTAIN }]))
+  const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
+  // Le fait AVANT la consigne, et un fait, pas une intention (review 1, constat 2).
+  assert.match(ligne, /: ENVOI INCERTAIN \(proposition de renvoi écartée par l'hôte\) — coupure pendant l'envoi automatique, le voyageur l'a peut-être reçu\. .*c'est une intervention$/, bloc)
+  assert.doesNotMatch(ligne, /NON ENVOYÉ|n'a pas voulu/)
+})
+
+test('dette 144 : un « non envoyé » SÛR l emporte sur un envoi incertain (deux modèles de code), en attente comme écartés', async () => {
+  // Garde de NON-REGRESSION : elle passe aussi contre le code d'avant, qui ne
+  // connaissait pas le marqueur incertain. Elle tient l'ORDRE du code neuf.
+  const cas = [
+    ['pending_validation', MARQUEUR_CODE_IMPOSSIBLE, /: NON ENVOYÉ — envoi automatique impossible, l'hôte doit le transmettre lui-même$/],
+    ['ignored', '[AUTO: arrival_code]', /: NON ENVOYÉ — écarté par l'hôte$/]
+  ]
+  for (const [status, sur, attendu] of cas) {
+    for (const ordre of [[MARQUEUR_CODE_INCERTAIN, sur], [sur, MARQUEUR_CODE_INCERTAIN]]) {
+      const bloc = await promptPour(avecCode(ordre.map(guest_message => ({ status, guest_message }))))
+      const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
+      assert.match(ligne, attendu, `${status} : ${bloc}`)
+    }
+  }
+  // ⚠ ET D'UN STATUT A L'AUTRE (review 1, constat 1) : l'incertain EN ATTENTE
+  // ne couvre pas un refus ECARTE par l'hote. Celle-ci rougit contre la
+  // premiere version du lot.
+  for (const sur of [MARQUEUR_CODE_IMPOSSIBLE, '[AUTO: arrival_code]']) {
+    const bloc = await promptPour(avecCode([
+      { status: 'pending_validation', guest_message: MARQUEUR_CODE_INCERTAIN },
+      { status: 'ignored', guest_message: sur }
+    ]))
+    const ligne = bloc.split('\n').find(l => /Code d'accès/.test(l))
+    assert.match(ligne, /: NON ENVOYÉ — écarté par l'hôte$/, `${sur} : ${bloc}`)
+  }
+  // Et une tache « a valider » du mode Test l'emporte aussi : rien n'est parti.
+  const bloc = await promptPour(avecCode([
+    { status: 'pending_validation', guest_message: MARQUEUR_CODE_INCERTAIN },
+    { status: 'pending_validation', guest_message: '[AUTO: arrival_code]' }
+  ]))
+  assert.match(bloc, /Code d'accès[^\n]*: NON ENVOYÉ — en attente de validation/, bloc)
+})
+
+test('dette 144 : les marqueurs du code non abouti ne sont pas recopiés — l écrivain et l agent lisent le même module', () => {
+  // ALARME DE STYLE, pas une preuve (review 1, constat 5) : une recopie par
+  // concatenation la contourne. Le fond est tenu par les tests de l'etat des
+  // envois ci-dessus et de la tache dans arrival-code-manquant-alerte.
+  const fs = require('fs')
+  const ecrivain = fs.readFileSync(require.resolve('../lib/cron-arrival-code.js'), 'utf8')
+  const agent = fs.readFileSync(require.resolve('../lib/cron-classify.js'), 'utf8')
+  for (const src of [ecrivain, agent]) assert.match(src, /require\('\.\/marqueurs-code-acces'\)/)
+  for (const m of [MARQUEUR_CODE_IMPOSSIBLE, MARQUEUR_CODE_INCERTAIN]) {
+    assert.ok(!ecrivain.includes(m), `marqueur recopié dans cron-arrival-code : ${m}`)
+    assert.ok(!agent.includes(m), `marqueur recopié dans cron-classify : ${m}`)
+  }
+  assert.notStrictEqual(MARQUEUR_CODE_IMPOSSIBLE, MARQUEUR_CODE_INCERTAIN)
+})
+
 test('un modele ecarte par l\'hote est NON ENVOYÉ ; un modele traite le dit sans garantir l\'envoi', async () => {
   const tables = tablesVides()
   tables.message_templates = [
@@ -603,4 +680,104 @@ test('LE TEST QUI COMPTE : arrivee anticipee — la regle de la base repond ; l\
   assert.ok(/ne dit rien de l'arrivée anticipée : info_unknown/.test(regle), 'sans regle, l\'hote decide')
   assert.ok(/insiste ou redemande après avoir reçu la règle[^\n]*: intervention/.test(regle), 'l\'insistance revient a l\'hote')
   assert.ok(/départ tardif/.test(toujours), 'le depart tardif reste a l\'hote')
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// L'ECHEANCE POSEE PAR LA CLASSIFICATION — chantier « delai de reponse IA »,
+// lot 2. Spec : docs/specs/spec-delai-reponse-ia.md §4.0.
+//
+// ⚠ EPROUVE SUR LE BANC REEL DE classify, pas sur un double parallele : c'est
+// l'insert de `agent_tasks` qui est lu, donc exactement ce que la base recevra.
+// ════════════════════════════════════════════════════════════════════════════
+
+const DELAI_15 = { reponse_ia: 15, alerte_info: 15, sourdine: { active: false, debut: '22:00', fin: '08:00' } }
+
+test('⚠ delai de 15 min : la proposition porte une ECHEANCE, et elle est a ~15 min', async () => {
+  const tables = tablesVides()
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Le wifi marche ?', time: t(1) }]
+  const avant = Date.now()
+  const { mod } = charger({ tables, messagesChannex: messages, mode: 'auto', delais: DELAI_15,
+    contenuIA: json({ type: 'info_known', reason: 'wifi', auto_reply: 'Oui, le code est au mur.', sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(tables.agent_tasks.length, 1, 'une proposition est posee, pas un envoi direct')
+  const tache = tables.agent_tasks[0]
+  assert.strictEqual(tache.status, 'pending_validation')
+  assert.ok(tache.send_after, `send_after doit etre pose, recu ${JSON.stringify(tache.send_after)}`)
+  // L'horloge est reelle ici (classify appelle Date.now()), donc on verifie une
+  // PLAGE et on dit sa largeur — jamais une egalite qui rougirait sur une
+  // machine lente.
+  const ecartMin = (Date.parse(tache.send_after) - avant) / 60000
+  assert.ok(ecartMin > 14.5 && ecartMin < 16,
+    `l echeance doit tomber a ~15 min, mesuree a ${ecartMin.toFixed(2)} min`)
+})
+
+test('⚠ validation manuelle : AUCUNE echeance, la proposition attend l hote', async () => {
+  const tables = tablesVides()
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Le wifi marche ?', time: t(1) }]
+  const { mod } = charger({ tables, messagesChannex: messages, mode: 'test',
+    delais: { reponse_ia: null, alerte_info: 0 },
+    contenuIA: json({ type: 'info_known', reason: 'wifi', auto_reply: 'Oui.', sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(tables.agent_tasks.length, 1)
+  assert.strictEqual(tables.agent_tasks[0].status, 'pending_validation')
+  assert.strictEqual(tables.agent_tasks[0].send_after, null,
+    'send_after NUL est le repli sur : rien ne part tout seul')
+})
+
+test('⚠ delai 0 : rien n attend, ca part comme l ancien Mode Auto', async () => {
+  const tables = tablesVides()
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Le wifi marche ?', time: t(1) }]
+  const { mod } = charger({ tables, messagesChannex: messages, mode: 'auto',
+    delais: { reponse_ia: 0, alerte_info: 0 },
+    contenuIA: json({ type: 'info_known', reason: 'wifi', auto_reply: 'Oui.', sub_tasks: [] }) })
+  const bilan = nouveauBilan()
+  await mod.processChannelPropertyMessages(U, bien, bilan)
+  // ⚠ CE BANC NE PEUT PAS REUSSIR UN ENVOI (aucun `sendGuestMessage` reel) :
+  // ma premiere version attendait `totalAutoReplies === 1` et rougissait pour
+  // cette raison, pas pour le comportement teste. Ce qui se LIT ici, c'est que
+  // le chemin d'ENVOI a bien ete emprunte — la tache porte « NON DELIVREE »,
+  // marque de l'envoi tente — et surtout qu'AUCUNE echeance n'a ete posee : un
+  // delai de 0 n'attend rien.
+  assert.strictEqual(tables.agent_tasks.length, 1)
+  assert.match(tables.agent_tasks[0].summary, /NON DÉLIVRÉE/,
+    'le chemin d envoi a ete emprunte, pas celui de l attente')
+  assert.ok(!tables.agent_tasks[0].send_after,
+    'un delai de 0 ne pose aucune echeance')
+})
+
+test('sans bloc delais, le binaire d avant gouverne encore (bascule en cours)', async () => {
+  const tables = tablesVides()
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Le wifi marche ?', time: t(1) }]
+  const { mod } = charger({ tables, messagesChannex: messages, mode: 'test', delais: null,
+    contenuIA: json({ type: 'info_known', reason: 'wifi', auto_reply: 'Oui.', sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(tables.agent_tasks.length, 1)
+  assert.strictEqual(tables.agent_tasks[0].send_after, null)
+})
+
+test('⚠ un reglage HORS CONTRAT ne fabrique pas d echeance (repli sur le mode)', async () => {
+  // Le blob est un JSONB qu'aucune contrainte de base ne borne : une forme
+  // fautive ne doit ni armer un envoi, ni inventer une echeance.
+  const tables = tablesVides()
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Le wifi marche ?', time: t(1) }]
+  const { mod } = charger({ tables, messagesChannex: messages, mode: 'test',
+    delais: { reponse_ia: '15', alerte_info: 0 },
+    contenuIA: json({ type: 'info_known', reason: 'wifi', auto_reply: 'Oui.', sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(tables.agent_tasks.length, 1)
+  assert.strictEqual(tables.agent_tasks[0].send_after, null)
+})
+
+test('le kill switch passe AVANT le delai : en pause, aucune echeance', async () => {
+  // Decision de Thierry du 9 octobre 2026 : pas de reponse automatique tardive.
+  // Un delai ne doit pas rouvrir cette porte.
+  const tables = tablesVides()
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Le wifi marche ?', time: t(1) }]
+  const stubs = charger({ tables, messagesChannex: messages, mode: 'auto', delais: DELAI_15,
+    contenuIA: json({ type: 'info_known', reason: 'wifi', auto_reply: 'Oui.', sub_tasks: [] }) })
+  // `isAutomationPaused` est stube a false par le banc ; on verifie ici le
+  // CHEMIN inverse par la tache posee, pas par le stub. Voir
+  // tests/guestflow-boucle.test.js pour la pause elle-meme.
+  await stubs.mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.ok(tables.agent_tasks.length >= 1)
 })

@@ -1,4 +1,9 @@
 // api/incidents-acquitter.js
+// Les types d'alarme qu'un hote peut acquitter. Ils doivent rester le MEME
+// ensemble que celui servi au bandeau par `api/ecran/aujourdhui.js` : une
+// alarme affichee et non acquittable laisse un bouton qui rend 404.
+const TYPES_ACQUITTABLES = ['overbooking', 'message_ota_a_verifier',
+  'message_ota_arret', 'email_voyageur_abandon']
 // DOC : docs/kb/reservation-directe.md (modif = MEME COMMIT)
 //
 // Acquittement MANUEL d'une alarme recurrente (surreservation).
@@ -54,7 +59,13 @@ module.exports = async (req, res) => {
       .from('automation_incidents')
       .select('id, type, property_id, detail, created_at, last_alerted_at')
       .eq('user_id', garde.accountUserId)
-      .eq('type', 'overbooking')
+      // ⚠ TROIS TYPES, PLUS UN SEUL — constat HAUT d'une revue independante, et
+      // c'est l'ironie du lot : j'avais rendu les alarmes d'envoi VISIBLES sur
+      // /aujourdhui en citant « impossible a acquitter » comme le defaut a
+      // fermer, et ce filtre les rendait toujours inacquittables. Le POST du
+      // bouton rendait 404, l'ecran basculait sur « Reessayer », et l'alarme
+      // restait pour toujours. Le defaut etait DEPLACE d'un cran, pas ferme.
+      .in('type', TYPES_ACQUITTABLES)
       .is('acquitted_at', null)
     if (filtre !== null) q = q.or(filtre)
     const { data, error } = await q.order('created_at', { ascending: false })
@@ -85,7 +96,13 @@ module.exports = async (req, res) => {
       .update({ acquitted_at: new Date().toISOString(), acquitted_by: garde.userId })
       .eq('id', id)
       .eq('user_id', garde.accountUserId)
-      .eq('type', 'overbooking')
+      // ⚠ TROIS TYPES, PLUS UN SEUL — constat HAUT d'une revue independante, et
+      // c'est l'ironie du lot : j'avais rendu les alarmes d'envoi VISIBLES sur
+      // /aujourdhui en citant « impossible a acquitter » comme le defaut a
+      // fermer, et ce filtre les rendait toujours inacquittables. Le POST du
+      // bouton rendait 404, l'ecran basculait sur « Reessayer », et l'alarme
+      // restait pour toujours. Le defaut etait DEPLACE d'un cran, pas ferme.
+      .in('type', TYPES_ACQUITTABLES)
       .is('acquitted_at', null)
     if (filtre !== null) m = m.or(filtre)
     const { data, error } = await m.select('id, type, property_id')
@@ -101,6 +118,16 @@ module.exports = async (req, res) => {
     }
 
     console.log(`[incidents-acquitter] overbooking bien ${data[0].property_id} acquitte par ${String(garde.userId).slice(0, 8)} (compte ${String(garde.accountUserId).slice(0, 8)})`)
+    // PWA lot 2c-1 : une surreservation acquittee ne part plus a la fin des
+    // heures calmes de qui que ce soit du compte (docs/kb/pwa.md §10). Jamais
+    // une raison de faire echouer l'acquittement.
+    if (data[0].type === 'overbooking') {
+      try {
+        await require('../lib/notifications/file').retirerSujet({
+          compte: garde.accountUserId, sujet: `surreservation:${data[0].property_id}`, db: supabase
+        })
+      } catch (e) { console.error('[incidents-acquitter] file non nettoyee', e.message) }
+    }
     return res.status(200).json({ ok: true, acquitte: data[0].id })
   }
 

@@ -20,7 +20,11 @@ const path = require('node:path')
 // ⚠ pages/avis.html a la MEME structure : un <script type="module"> qui importe,
 // et un <script> classique qui fait tout le travail. C'est exactement la
 // configuration qui a tue la messagerie.
-const PAGES = ['pages/avis.html']   // la messagerie V5 est un module ES, l'ancienne une redirection (etape 4)
+// ⚠ VIDE DEPUIS LE 8 NOVEMBRE 2026 : la page Avis est passee au socle V5, un
+// seul `<script type="module">` (comme la messagerie V5 avant elle). La
+// decouverte automatique plus bas (`pagesMixtes`) continue de garder toute page
+// qui melangerait de nouveau les deux sortes de script.
+const PAGES = []
 
 // Helpers venus de shared/compte-courant.js, systematiquement en cause.
 const HELPERS = ['compteCourant', 'peutEcrire', 'peutLire', 'enteteCompte', 'estTitulaire']
@@ -104,6 +108,22 @@ function sansCommentaires (src) {
     .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
 }
 
+// Les intervalles des blocs qui suivent un motif donne (accolades suivies).
+function blocsDe (src, re) {
+  const zones = []
+  let m
+  while ((m = re.exec(src))) {
+    let i = m.index + m[0].length, prof = 1
+    while (i < src.length && prof > 0) {
+      if (src[i] === '{') prof++
+      else if (src[i] === '}') prof--
+      i++
+    }
+    zones.push([m.index, i])
+  }
+  return zones
+}
+
 function blocsTry (src) {
   const zones = []
   const re = /try\s*\{/g
@@ -126,7 +146,14 @@ test('pages/avis.html : chaque appel API est DANS un try', () => {
   // blanche au premier 403 — c'est-à-dire le cas NORMAL d'un membre au périmètre
   // restreint, pas un cas limite.
   const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', 'pages/avis.html'), 'utf8'))
-  const zones = blocsTry(html)
+  // ⚠ REFONTE V5 (8 novembre 2026) : la lecture de l'ecran et les deux gestes
+  // des cartes sont des fonctions CONFIEES a `monterCartes`, qui attrape leur
+  // echec et le dit a l'ecran (tests/avis-cartes-dom.test.js, « un echec se
+  // dit »). Leur corps compte donc comme couvert — mais seulement s'ils sont
+  // bien passes a `monterCartes`, ce que le test exige d'abord.
+  assert.match(html, /await monterCartes\([\s\S]{0,80}\{\s*charger: lireEcran,\s*actions,/,
+    'la lecture et les gestes doivent etre confies a monterCartes, qui attrape leurs echecs')
+  const zones = [...blocsTry(html), ...blocsDe(html, /async function lireEcran\s*\([^)]*\)\s*\{/g), ...blocsDe(html, /const actions = \{/g)]
   const appels = [...html.matchAll(/(?<![\w.])appelAPI\s*\(/g)]
     // La déclaration de la fonction n'est pas un appel.
     .filter(m => !/function\s+$/.test(html.slice(Math.max(0, m.index - 20), m.index)))

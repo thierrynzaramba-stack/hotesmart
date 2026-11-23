@@ -212,6 +212,19 @@ une branche dédiée du même GET, servie AVANT le listing :
   ne le sert pas → `null`, et la fiche LE DIT (pas de répartition inventée :
   l'uniforme est une règle du moteur, docs/kb/eclatement-yield.md) ;
 - `factures` = lignes `invoiceItems` de type charge (Beds24).
+- `facture` (ajouté le 11 novembre 2026, étape 2b du lot facture du voyageur,
+  docs/kb/facture-voyageur.md) = l'état de la demande de facture du voyageur
+  et les gestes permis, rendus par `etatPourLaFiche`
+  (lib/factures-voyageur.js). **Une lecture de plus, EN PARALLÈLE** de celle
+  de `bookings_snapshot`** — la demande active et ses 20 derniers jetons, par
+  embarquement PostgREST —, bornée au compte, à la réservation et aux biens
+  que la garde vient de résoudre ; **aucun appel de plus** depuis le
+  navigateur. Les droits s'évaluent sur le bien de la réservation, avec le
+  `contexte` que `gardeSurBiens` rend désormais : un niveau **lecture** ne
+  reçoit que `{ statut, gestes }` (décision P2 de Thierry — c'est le serveur
+  qui omet). Une panne de cette lecture rend `{ indisponible: true }` et la
+  fiche reste servie. Le chemin pose `Server-Timing` (compteur PLANCHER : la
+  résolution des biens et la garde ne sont pas comptées).
 
 ## 9. Existence d'une conversation : une réservation à la fois
 

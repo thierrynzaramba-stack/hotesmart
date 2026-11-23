@@ -149,7 +149,7 @@ function base ({ taches = [], conversations = [], rpcEnPanne = null }) {
 
   const abs = require.resolve(path.join(__dirname, '..', 'lib/cron-shared.js'))
   const m = new Module(abs)
-  m.exports = { supabase: client, anthropic: null, getPropertyMode: async () => 'test', isAutomationPaused: async () => false }
+  m.exports = { supabase: client, anthropic: null, getPropertyMode: async () => 'test', lireReglagesDuBien: async () => ({ mode: 'test', delais: null }), isAutomationPaused: async () => false }
   m.loaded = true
   require.cache[abs] = m
   delete require.cache[require.resolve('../lib/cron-classify')]

@@ -553,6 +553,11 @@ test('RECENSEMENT : aucun chemin de poussee tarifaire n echappe au journal', () 
     // le writer, appele par deux portes (api/calendar.js et le canal interne).
     // `api/calendar.js` sort donc du recensement, et le writer y entre.
     'lib/calendrier-writer.js':  'tarifaire',
+    // Le renvoi des prix par date quand l'occupation d'un logement change
+    // (20 novembre 2026, docs/specs/spec-supplement-voyageur.md). Il porte des
+    // `rates[]`, donc il journalise — meme si, le plus souvent, le prix de base
+    // d'une nuit ne bouge pas et `enregistrerPrixPousses` n'ecrit rien.
+    'lib/tarifs-occupation.js':  'tarifaire',
     // Poussent /restrictions SANS aucun rate -> rien a journaliser.
     // `reaffirmerStopSell` ne porte que `stop_sell` (lib/rate-sync.js le dit
     // explicitement) ; `channel-rateplan` ne pousse que `min_stay` sur le rate

@@ -67,3 +67,11 @@ test('le ménage sans personne est en PAUSE de SMS — mais pas silencieux', () 
   assert.ok(!/SANS_EMAIL|sansEmail/.test(src), 'aucun mécanisme ne coupe l\'e-mail')
   assert.match(src, /menage_non_assigne:\s*'/, 'et le type garde son libellé lisible')
 })
+
+test('une reservation sur un bien ARCHIVE reveille et porte un libelle lisible', () => {
+  // L'hote a archive son bien, un voyageur arrive quand meme : il doit
+  // l'apprendre avant l'arrivee, pas a la porte.
+  assert.ok(!SANS_SMS.has('reservation_sur_bien_archive'))
+  assert.ok(LABELS.reservation_sur_bien_archive,
+    'sans libelle, le SMS et l e-mail afficheraient le code brut')
+})

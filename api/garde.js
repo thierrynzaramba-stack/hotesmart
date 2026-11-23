@@ -40,6 +40,10 @@ const { chargerLiaisons, chargerDisponibilites,
         dansLaFenetreDeProposition, proposeesDe } = require('../lib/cleaning/assign')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 const { colonneAbsente } = require('../lib/colonne-absente')
+const { archivesEpuisees } = require('../lib/biens-vivants')
+const { isActiveStatus } = require('../lib/bookings-snapshot-status')
+const traductionAvis = require('../lib/avis/traduction')
+let repliTraductionDit = false
 
 // ⚠ UNE VALIDATION NE VAUT QUE POUR QUI L'A POSEE. Un menage change de main —
 // l'hote reassigne, une collegue accepte, le moteur pose une remplacante apres
@@ -137,7 +141,7 @@ module.exports = async function handler (req, res) {
     if (filtreRef === '') return res.status(200).json({ jours, biens: [], garde: [], menages: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
 
     let qProps = supabase.from('properties')
-      .select('provider_property_id, name, photo_url')
+      .select('provider_property_id, name, photo_url, provider, archive_le')
       .eq('user_id', userId).not('provider_property_id', 'is', null)
     if (filtreRef) qProps = qProps.or(filtreRef)
     const { data: propRows, error: errProps } = await qProps
@@ -146,7 +150,46 @@ module.exports = async function handler (req, res) {
       console.error('[garde] lecture biens echec', errProps.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
-    const biens = (propRows || []).map(p => ({
+    // ⚠ UN BIEN ARCHIVE RESTE AU PLANNING JUSQU'A SON DERNIER DEPART, et pas
+    // au-dela — constat 5 de la revue du 7 novembre 2026 : cet ecran (la bulle
+    // « A traiter » et le calendrier de garde de `pages/menages.html`) ne
+    // filtrait AUCUN archivage, donc un bien range y restait sans limite de
+    // temps, et en « sans personnel » s'il gardait des liaisons. La regle est
+    // celle de `api/menages.js` et de l'app prestataire : `archivesEpuisees`,
+    // en un seul exemplaire (decision de Thierry du 3 novembre 2026).
+    // ⚠ LES DEPARTS VIENNENT DES RESERVATIONS, PAS DE LA FENETRE AFFICHEE : un
+    // depart dans trois semaines garde le bien, meme sur une vue d'une semaine.
+    // Et pas des menages : apres l'archivage, la synchro ne les touche plus.
+    // ⚠ UNE LECTURE RATEE OU TRONQUEE NE RETIRE RIEN : un bien de trop au
+    // planning vaut mieux qu'un menage a faire qui disparait.
+    let epuises = new Set()
+    const archivesLus = (propRows || []).filter(p => p.archive_le)
+    if (archivesLus.length) {
+      const aujourdhui = new Date().toISOString().slice(0, 10)
+      const { data: resas, error: eResas } = await supabase.from('bookings_snapshot')
+        .select('property_id, snapshot')
+        .eq('user_id', userId)
+        .in('property_id', archivesLus.map(p => String(p.provider_property_id)))
+        .gte('snapshot->>departure', aujourdhui)
+        .limit(LOT_MENAGES)
+      if (eResas) console.error('[garde] lecture des departs des biens archives echec', eResas.message)
+      else if ((resas || []).length < LOT_MENAGES) {
+        const providerDe = new Map(archivesLus.map(p => [String(p.provider_property_id), p.provider || null]))
+        const departs = {}
+        for (const r of (resas || [])) {
+          const cle = String(r.property_id)
+          if (!r.snapshot || !r.snapshot.departure) continue
+          if (!isActiveStatus(r.snapshot, providerDe.get(cle))) continue
+          ;(departs[cle] = departs[cle] || []).push(String(r.snapshot.departure))
+        }
+        epuises = archivesEpuisees({
+          biens: archivesLus.map(p => ({ cle: String(p.provider_property_id), archive_le: p.archive_le })),
+          departs,
+          aujourdhui
+        })
+      }
+    }
+    const biens = (propRows || []).filter(p => !epuises.has(String(p.provider_property_id))).map(p => ({
       id: String(p.provider_property_id), name: p.name || `Bien ${p.provider_property_id}`,
       // La photo de couverture (lot photos) : l'ecran V5 l'affiche en tete de
       // bloc, repli initiales cote client. `null` est une absence, pas une panne.
@@ -368,13 +411,19 @@ module.exports = async function handler (req, res) {
     // booking.
     const avisParMenage = {}
     const passes = (menagesRows || []).filter(m => m.departure_date < todayEnParis())
+    // La langue de lecture de l'hote, pour l'extrait traduit (spec avis-v5
+    // spec-traduction-avis.md §3.4, Q4 = A). Une valeur inconnue vaut le francais.
+    const langue = traductionAvis.LANGUES.includes(String(req.query.langue || '')) ? String(req.query.langue) : 'fr'
     if (avecAvis && avecNoms && passes.length) {
-      const { data: avis, error: errAvis } = await supabase.from('ota_reviews')
-        // ⚠ NI `guest_name`, NI `content`, NI `raw`. `content_private` et
-        // `content_public` servent UNIQUEMENT a decider de l'etiquette, ici, cote
-        // serveur : ils ne partent jamais au front. C'est la meme regle que la
-        // PWA prestataire.
-        .select('booking_uid, property_id_ref, ai_clean_verdict, ai_clean_excerpt, content_private, content_public, verdict_source')
+      const lireAvis = (traduite) => supabase.from('ota_reviews')
+        // ⚠ NI `guest_name`, NI `raw`. `content_private`, `content_public` et
+        // `content` servent UNIQUEMENT ici, cote serveur — l'etiquette « retour
+        // prive », et l'empreinte qui dit si la traduction est encore vraie. Ils
+        // ne partent jamais au front. C'est la meme regle que la PWA prestataire.
+        // ⚠ LA TRADUCTION EST EMBARQUEE DANS LA MEME LECTURE (aucune requete de
+        // plus) ; avant la migration du 11 novembre 2026, on relit sans.
+        .select('booking_uid, property_id_ref, ai_clean_verdict, ai_clean_excerpt, content_private, content_public, verdict_source'
+          + (traduite ? ', content, traduction:avis_traductions(empreinte, textes)' : ''))
         .eq('user_id', userId)
         // ⚠ `statut = 'confirme'` : c'est la VALIDATION HUMAINE. Une detection en
         // attente n'est pas un fait, et l'afficher sur un planning en ferait un.
@@ -382,6 +431,12 @@ module.exports = async function handler (req, res) {
         .in('property_id_ref', [...new Set(passes.map(m => String(m.property_id)))])
         .in('booking_uid', [...new Set(passes.map(m => String(m.booking_id)))])
         .limit(LOT_MENAGES)
+      let { data: avis, error: errAvis } = await lireAvis(true)
+      if (errAvis && (String(errAvis.code) === 'PGRST200' || traductionAvis.migrationAbsente(errAvis))) {
+        // Le repli se dit, une fois par instance (revue du lot, constat 6).
+        if (!repliTraductionDit) { repliTraductionDit = true; console.warn('[garde] traductions illisibles, retours servis sans elles :', errAvis.code || errAvis.message) }
+        ;({ data: avis, error: errAvis } = await lireAvis(false))
+      }
       if (errAvis) {
         // ⚠ Ne COUPE PAS l'ecran : sans retour, le planning reste juste. C'est la
         // difference avec les liaisons, dont l'absence rendrait la garde FAUSSE.
@@ -407,9 +462,16 @@ module.exports = async function handler (req, res) {
                          !dejaLa.humain)
           if (!prime) continue
         }
+        // L'extrait dans la langue de l'hote, s'il est ecrit dans une autre :
+        // la traduction toute faite, verifiee a l'empreinte (jamais perimee).
+        const tr = a.ai_clean_excerpt
+          ? traductionAvis.traductionPour(a, Array.isArray(a.traduction) ? a.traduction[0] : a.traduction, langue)
+          : null
         avisParMenage[cle] = {
           verdict: a.ai_clean_verdict,
           extrait: a.ai_clean_excerpt || null,
+          extrait_traduit: (tr && tr.extrait && tr.extrait.texte) || null,
+          extrait_langue: (tr && tr.extrait && tr.extrait.source) || null,
           // ⚠ « RETOUR PRIVE » DES QU'IL N'EST PAS CERTAINEMENT PUBLIC. Un extrait
           // a cheval entre le public et le prive sortait sinon comme public, et
           // l'hote lisait sur son planning une phrase que le voyageur n'avait pas

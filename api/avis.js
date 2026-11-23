@@ -14,8 +14,25 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
-const { ratioProprete, noteMoyenne, notesDuPerimetre, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
+const { sansArchives, COLONNE: COLONNE_ARCHIVE } = require('../lib/biens-vivants')
+const { ratioProprete, notesDuPerimetre, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 const { assemblerCartes } = require('../lib/avis/cartes')
+const traductionAvis = require('../lib/avis/traduction')
+// Les langues de lecture des traductions d'avis (spec spec-traduction-avis).
+const LANGUES_LECTURE = traductionAvis.LANGUES
+// La relation `avis_traductions` absente du schema (migration du 11 novembre
+// 2026 pas encore appliquee) : PostgREST rend PGRST200 pour une ressource
+// embarquee inconnue ; la table ou la fonction absentes ont leurs propres codes.
+const traductionAbsente = (e) => !!e && (String(e.code) === 'PGRST200' || traductionAvis.migrationAbsente(e))
+// Le repli se DIT, une fois par instance (revue du lot, constat 6) : une
+// relation que PostgREST ne verrait jamais ferait disparaitre les traductions
+// et couterait une requete par page, sans un mot.
+let repliTraductionDit = false
+const direRepliTraduction = (e) => {
+  if (repliTraductionDit) return
+  repliTraductionDit = true
+  console.warn('[avis] traductions illisibles, page servie sans elles :', e && (e.code || e.message))
+}
 const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origine')
 const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
@@ -27,6 +44,10 @@ const { assurerEvaluation, echeanceDuDepart } = require('../lib/avis/naissance')
 // Lot 6 : l'hote est prevenu quand la prestataire a rempli sa part (spec §10).
 const { prevenirHote } = require('../lib/avis/notifications')
 const { normaliserHeures, lireHeures, HEURES_MIN, HEURES_MAX } = require('../lib/avis/auto-validation')
+// Les trois chiffres de la page se recalculent APRES un geste de l'hote sur la
+// page (decision Q3 de Thierry, 10 novembre 2026 ; spec avis-v5 §10.4). Lu a
+// l'appel, pas destructure : un test peut remplacer la fonction sur le module.
+const resumeAvis = require('../lib/avis/resume')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -56,9 +77,14 @@ const MAX_TEXTE   = 5000
 // ferme rien : le domaine `avis` donne acces au CONTENU des avis, pas a
 // l'identite des voyageurs ni a leurs sejours, qui relevent de `reservations`.
 //
-// `content_private` est retire pour la meme raison de moindre exposition : la
-// page ne l'affiche pas, l'extrait de proprete suffit. L'ajouter un jour est une
-// decision a prendre, pas un defaut a laisser.
+// `content_private` n'est PAS dans cette liste, et c'est voulu — mais il est
+// lu par `cartesLister` depuis le 11 novembre 2026 (decision de Thierry, spec
+// avis-v5/spec-retour-prive.md : le retour prive s'affiche sur la page Avis,
+// sous le droit `avis`). ⚠ SEULEMENT LA (revue du lot, constat 1) : `CHAMPS`
+// sert aussi l'action `list`, qui ne sait pas qu'un avis est masque par
+// Airbnb ; la le texte prive d'un avis masque serait sorti. `cartesLister`,
+// lui, passe chaque avis par `avisPourCarte`, qui ne montre RIEN d'un avis
+// masque.
 //
 // Regle a tenir en modifiant cette liste : une colonne qui n'est pas rendue par
 // pages/avis.html n'a rien a y faire.
@@ -157,9 +183,21 @@ async function lister (req, res, garde) {
   }
 
   // Les biens du perimetre, pour le filtre et le formulaire.
-  let qb = supabase.from('properties')
+  //
+  // ⚠ POINT 5 DU CONSTAT DE THIERRY DU 3 NOVEMBRE 2026, et sa decision est
+  // precise : « les avis recus restent dans la note globale ; filtre et
+  // formulaire excluent le bien archive ». On ne propose donc plus de SAISIR un
+  // avis sur un logement range, ni de filtrer la liste par lui — mais ses avis
+  // deja recus ne bougent pas d'un pouce.
+  //
+  // ⚠ LES DEUX TABLES DE NOMS, PLUS BAS, NE SONT PAS FILTREES : ce sont elles
+  // qui donnent son nom a l'avis d'un bien archive. Les filtrer ferait
+  // s'afficher une reference provider (« Bien 0544fd9a-… ») sur un avis que la
+  // decision garde a l'ecran. Une liste de CHOIX se filtre, une table de
+  // CORRESPONDANCE jamais.
+  let qb = sansArchives(supabase.from('properties')
     .select('id, name, provider_property_id, provider')
-    .eq('user_id', userId)
+    .eq('user_id', userId))
     // Un bien pas encore provisionne chez le provider n'a pas de reference : il
     // produirait une <option value=""> qui se confond avec « Tous les biens »,
     // et que le formulaire refuserait apres l'avoir presentee comme choisie.
@@ -327,6 +365,9 @@ async function creer (req, res, garde) {
     console.error('[avis] classification immediate echec:', e.message)
   }
 
+  // APRES la classification : le pouce de cet avis compte tout de suite.
+  await resumeAvis.recalculerApresGeste(supabase, userId)
+
   return res.status(201).json({ ok: true, id: cree.id, verdict: verdict ? verdict.verdict : null })
 }
 
@@ -370,6 +411,9 @@ async function valider (req, res, garde) {
     console.error('[avis] validation echec:', error.message)
     return res.status(500).json({ error: 'Enregistrement impossible' })
   }
+  // Seule une detection CONFIRMEE entre dans les chiffres ; l'ignorer ne
+  // change rien a ce qui est compte (une detection en attente ne l'est pas).
+  if (statut === 'confirme') await resumeAvis.recalculerApresGeste(supabase, userId)
   return res.status(200).json({ ok: true, statut })
 }
 
@@ -432,6 +476,7 @@ async function requalifier (req, res, garde) {
     console.error('[avis] requalification echec:', error.message)
     return res.status(500).json({ error: 'Enregistrement impossible' })
   }
+  await resumeAvis.recalculerApresGeste(supabase, userId)
   return res.status(200).json({ ok: true, verdict, verdict_source: 'humain' })
 }
 
@@ -472,6 +517,9 @@ async function evaluationsLister (req, res, garde) {
   if (error) return res.status(503).json({ error: 'Évaluations illisibles', detail: error.message })
 
   // Les noms de biens, pour que l'ecran n'affiche pas des references provider.
+  // ⚠ **NON FILTREE** : c'est une table de CORRESPONDANCE, pas une liste de
+  // choix. Un avis recu sur un bien archive reste a l'ecran (decision de
+  // Thierry) ; sans son nom ici, il s'afficherait sous sa reference provider.
   const { data: biens, error: eBiens } = await supabase.from('properties')
     .select('id, name, provider_property_id').eq('user_id', userId)
   if (eBiens) return res.status(503).json({ error: 'Biens illisibles', detail: eBiens.message })
@@ -481,7 +529,10 @@ async function evaluationsLister (req, res, garde) {
 
   return res.status(200).json({
     // ⚠ CHAQUE LIGNE DIT LE SEJOUR (demande de Thierry du 2 octobre 2026 au
-    // soir) : le voyageur, les dates, le bien, qui a fait le menage, son avis
+    // soir), Y COMPRIS A UN MEMBRE SANS `reservations` : decision de Thierry
+    // du 9 novembre 2026, « pour evaluer quelqu'un, il faut savoir de qui on
+    // parle » (docs/kb/profils-et-droits.md). Ce n'est pas un oubli de garde.
+    // Le voyageur, les dates, le bien, qui a fait le menage, son avis
     // s'il est visible, et le notre s'il est publie. Notre texte n'est servi
     // qu'une fois PUBLIE — il est alors public chez Airbnb ; un brouillon reste
     // dans la fenetre d'evaluation, par `action=evaluation`.
@@ -609,6 +660,9 @@ async function contexteDesSejours (userId, evaluations) {
 // ⚠ LES COMPTEURS PORTENT SUR TOUTE LA PERIODE, calcules par la base
 // (lib/stats-avis.js) : jamais sur les lignes servies.
 const MAX_AVIS_CARTES = 5000
+// Une borne, pas un usage : des detections qui dorment par centaines seraient
+// deja un defaut de tri, pas une liste a peindre.
+const MAX_ANCIENS_A_TRAITER = 100
 const MAX_EVALS_CARTES = 2000
 const PAGE_AVIS = 1000
 async function cartesLister (req, res, garde) {
@@ -627,6 +681,9 @@ async function cartesLister (req, res, garde) {
   }
   const voitSejours = !garde.contexte || peutLire(garde.contexte, 'reservations', null)
   const avecAnciens = String(req.query?.anciens || '') === '1'
+  // La langue de lecture (spec avis-v5 spec-traduction-avis.md §3.3) : seule la
+  // traduction de CETTE langue est servie. Une valeur inconnue vaut le francais.
+  const langue = LANGUES_LECTURE.includes(String(req.query?.langue || '')) ? String(req.query.langue) : 'fr'
 
   // Les evaluations du perimetre. ⚠ `origine_texte` arrive avec la migration du
   // 8 octobre : avant elle, on relit sans, et l'origine se deduit du statut.
@@ -642,18 +699,33 @@ async function cartesLister (req, res, garde) {
   if (ev.error) return res.status(503).json({ error: 'Évaluations illisibles', detail: ev.error.message })
 
   // Les avis du perimetre, PAGINES (jamais tronques en silence a 1000 lignes).
+  // ⚠ LA TRADUCTION EST EMBARQUEE DANS LA MEME LECTURE (`avis_traductions` par
+  // sa cle etrangere) : aucune requete de plus (spec spec-traduction-avis §5).
+  // Avant la migration du 11 novembre 2026, la relation n'existe pas : on relit
+  // SANS, une fois, et la page reste juste — sans traduction.
   const avis = []
+  let avecTraduction = true
   for (let debut = 0; debut < MAX_AVIS_CARTES; debut += PAGE_AVIS) {
-    let q = supabase.from('ota_reviews')
-      // ⚠ Sans le droit `reservations`, le nom et les dates ne sont meme pas
-      // LUS (regle de CHAMPS_AVEC_SEJOUR) ; la reservation reste lue, elle range
-      // l'avis dans la carte de son sejour.
-      .select(`${CHAMPS}, booking_uid, ${voitSejours ? 'stay_start, stay_end, guest_name, ' : ''}cache:raw->attributes->is_hidden`)
-      .eq('user_id', userId).neq('statut', 'ignore')
-    if (bienDemande) q = q.eq('property_id_ref', bienDemande)
-    else if (filtre) q = q.or(filtre)
-    const { data, error } = await q.order('received_at', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
-      .range(debut, debut + PAGE_AVIS - 1)
+    const lirePage = (traduite) => {
+      let q = supabase.from('ota_reviews')
+        // ⚠ Sans le droit `reservations`, le nom et les dates ne sont meme pas
+        // LUS (regle de CHAMPS_AVEC_SEJOUR) ; la reservation reste lue, elle range
+        // l'avis dans la carte de son sejour.
+        // ⚠ `content_private` est lu ICI SEULEMENT (voir CHAMPS) : chaque avis
+        // passe ensuite par `avisPourCarte`, qui ne montre rien d'un avis masque.
+        .select(`${CHAMPS}, content_private, booking_uid, ${voitSejours ? 'stay_start, stay_end, guest_name, ' : ''}cache:raw->attributes->is_hidden${traduite ? ', traduction:avis_traductions(empreinte, textes)' : ''}`)
+        .eq('user_id', userId).neq('statut', 'ignore')
+      if (bienDemande) q = q.eq('property_id_ref', bienDemande)
+      else if (filtre) q = q.or(filtre)
+      return q.order('received_at', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
+        .range(debut, debut + PAGE_AVIS - 1)
+    }
+    let { data, error } = await lirePage(avecTraduction)
+    if (error && avecTraduction && traductionAbsente(error)) {
+      direRepliTraduction(error)
+      avecTraduction = false
+      ;({ data, error } = await lirePage(false))
+    }
     if (error) {
       console.error('[avis] cartes : lecture echec:', error.message)
       return res.status(500).json({ error: 'Lecture impossible' })
@@ -664,8 +736,16 @@ async function cartesLister (req, res, garde) {
   // Une borne atteinte se DIT, jamais en silence (revue de ed445b2).
   const avisTronques = avis.length >= MAX_AVIS_CARTES
 
+  // ⚠ **NON FILTREE**, meme raison : `nomParId` et `nomParRef` nomment les
+  // cartes d'avis, y compris celles d'un bien archive que la decision garde.
+  // ⚠ MAIS `archive_le` EST LU, pour la LISTE DE CHOIX rendue plus bas : c'est
+  // elle que la page lit pour son filtre et son formulaire (constat 3 de la
+  // revue du 7 novembre 2026 — le lot avait filtre `lister`, que la page
+  // n'appelle plus, et laisse celle-ci proposer le bien archive).
+  // ⚠ `photo_url` : la vignette du bien dans la refonte V5 (pastilles du
+  // filtre, cartes). Une colonne de la meme ligne, aucune lecture de plus.
   const { data: biens, error: eBiens } = await supabase.from('properties')
-    .select('id, name, provider_property_id, provider').eq('user_id', userId)
+    .select('id, name, provider_property_id, provider, photo_url, ' + COLONNE_ARCHIVE).eq('user_id', userId)
     .not('provider_property_id', 'is', null).order('name')
   if (eBiens) return res.status(500).json({ error: 'Lecture impossible' })
   const nomParId = new Map((biens || []).map(b => [b.id, b.name]))
@@ -675,33 +755,65 @@ async function cartesLister (req, res, garde) {
   // Les sejours, pour les seules cartes servies : on assemble une premiere fois
   // sans eux pour savoir lesquelles partent, puis on lit leurs sejours.
   const maintenant = Date.now()
-  const sansSejours = assemblerCartes({ evaluations: ev.data || [], avis, nomBien, voitSejours, maintenant })
-  const servies = [...sansSejours.attente, ...sansSejours.recents, ...(avecAnciens ? sansSejours.anciens : [])]
+  const sansSejours = assemblerCartes({ evaluations: ev.data || [], avis, nomBien, voitSejours, maintenant, langue })
+  // ⚠ LES DETECTIONS DES ANCIENS SONT SERVIES MEME SECTION FERMEE (revue du lot
+  // Avis V5, constat 5) : la page les range dans « À traiter », et une bulle
+  // qui dirait « Rien ne vous attend » pendant qu'un message de voyageur ecrit
+  // trois semaines apres son depart attend une confirmation serait un
+  // mensonge. Elles sont deja assemblees en memoire : aucune lecture de plus.
+  const aTraiterAnciens = (liste) => liste.filter(c => (c.avis || []).some(a => a.detecte)).slice(0, MAX_ANCIENS_A_TRAITER)
+  const servies = [...sansSejours.attente, ...sansSejours.recents, ...(avecAnciens ? sansSejours.anciens : aTraiterAnciens(sansSejours.anciens))]
   const uids = servies.map(c => (c.cle.startsWith('sejour:') ? c.cle.slice(7) : null)).filter(Boolean)
   const sejours = await sejoursDe(userId, uids)
-  const cartes = assemblerCartes({ evaluations: ev.data || [], avis, sejours, nomBien, voitSejours, maintenant })
+  const cartes = assemblerCartes({ evaluations: ev.data || [], avis, sejours, nomBien, voitSejours, maintenant, langue })
 
+  // ⚠ LES TROIS CHIFFRES SONT LUS, PLUS CALCULES (lot Avis V5, etape 2 ; spec
+  // avis-v5 §10.5). Ils viennent de `resume_bien_avis`, calcule a 06:00 et
+  // 18:00 et apres chaque geste de l'hote sur la page : une lecture au lieu de
+  // quatre comptages et d'une lecture de notes, et l'heure du calcul part avec.
+  // Meme perimetre qu'avant : le bien demande, sinon les biens du membre, sinon
+  // tout le compte (references orphelines comprises).
   const refsStats = bienDemande ? [bienDemande] : (refs === null ? null : refs.map(String))
-  const [ratio, moy] = await Promise.all([
-    ratioProprete(supabase, { userId, periode, refs: refsStats }),
-    noteMoyenne(supabase, { userId, periode, refs: refsStats }),
-  ])
+  // ⚠ LES REFERENCES ATTENDUES SONT CELLES DES BIENS, PAS LA LISTE DU
+  // PERIMETRE : `refsDuPerimetre` y melange les uuid (`property_ids`) et les
+  // references (`property_refs`, tenues par trigger). Un uuid n'a jamais de
+  // ligne ; l'attendre ferait dire « pas encore calcule » pour toujours.
+  const refsDesBiens = (biens || []).map(b => String(b.provider_property_id))
+  const attendues = bienDemande ? [bienDemande]
+    : refsStats === null ? refsDesBiens
+    : refsDesBiens.filter(r => refsStats.includes(r))
+  const stats = await resumeAvis.lireResumeAvis(supabase, { userId, periode, refs: refsStats, attendues })
   const anciensTotal = cartes.anciens.length
   return res.status(200).json({
     cartes: { attente: cartes.attente, recents: cartes.recents, anciens: avecAnciens ? cartes.anciens.slice(0, MAX_LIGNES) : null },
     anciens_total: anciensTotal,
     anciens_tronques: avecAnciens && anciensTotal > MAX_LIGNES,
+    // Les cartes des Anciens qui portent une detection a confirmer, servies
+    // meme section fermee (voir plus haut). Section ouverte, la page les lit
+    // dans `cartes.anciens` et ignore ce champ.
+    anciens_a_traiter: aTraiterAnciens(cartes.anciens),
+    // Les cartes des Anciens qui n'ont QU'une detection, sans evaluation : la
+    // page les monte dans « À traiter », donc la section Anciens ne les montre
+    // plus — et son compte ne doit plus les compter. Compte exact, sur toute la
+    // section (la liste ci-dessus est bornee).
+    anciens_detection_seule: cartes.anciens.filter(c => (c.avis || []).length && c.avis.every(a => a.detecte) && !c.evaluation).length,
     // La liste lue a atteint une borne : des cartes anciennes peuvent manquer.
     liste_incomplete: avisTronques || (ev.data || []).length >= MAX_EVALS_CARTES,
-    biens: (biens || []).filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
-      .map(b => ({ name: b.name, provider_property_id: b.provider_property_id })),
+    // La liste de CHOIX (filtre et formulaire de la page) : sans les biens
+    // archives — decision de Thierry du 3 novembre 2026, point 5. Les cartes,
+    // elles, gardent leurs noms par les deux tables ci-dessus.
+    biens: (biens || []).filter(b => !b[COLONNE_ARCHIVE])
+      .filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
+      .map(b => ({ name: b.name, provider_property_id: b.provider_property_id, photo_url: b.photo_url || null })),
     periodes: Object.keys(PERIODES),
     // ⚠ `note_sur_5` ET PLUS `moyenne` (decision de Thierry, 20 octobre 2026 :
     // « tout sur 5 … meme regle partout ou une note globale s'affiche »). Un
     // champ sur 10 qui subsisterait inviterait un ecran a le rediviser : c'est
     // exactement le defaut qu'on referme — la page divisait une moyenne DEJA
     // arrondie, donc arrondissait deux fois.
-    stats: { ...ratio, note_sur_5: moy.note_sur_5, notes: moy.notes, ...(moy.erreur ? { erreur: true } : {}) },
+    // Un `motif` (pas encore calcule, lecture incomplete) remplace les
+    // chiffres : jamais un zero a leur place.
+    stats,
   })
 }
 
@@ -794,8 +906,11 @@ async function configLire (req, res, garde) {
 // droit de le changer.
 async function autoValidationLire (req, res, garde) {
   const userId = garde.accountUserId
-  const { data: biens, error } = await supabase.from('properties')
-    .select('id, name, provider_property_id').eq('user_id', userId).order('name', { ascending: true })
+  // ⚠ FILTREE : c'est un ecran de REGLAGE par bien, donc une liste de choix.
+  // Regler l'auto-validation des avis d'un logement range n'a pas de sens — et
+  // le reglage existant reste en base, il reviendra a la reactivation.
+  const { data: biens, error } = await sansArchives(supabase.from('properties')
+    .select('id, name, provider_property_id').eq('user_id', userId).order('name', { ascending: true }))
   if (error) return res.status(503).json({ error: 'Biens illisibles', detail: error.message })
   const visibles = (biens || []).filter(b => peutLire(garde.contexte, 'avis', { id: b.id, ref: b.provider_property_id }))
   const { data: lignes, error: eL } = visibles.length
@@ -2171,7 +2286,14 @@ async function evaluationPublier (req, res, garde, options = {}) {
       await relacher()
       return res.status(503).json({ error: 'Évaluation illisible', detail: eFrais ? eFrais.message : 'introuvable' })
     }
+    // ⚠ LES DEUX COLONNES (re-revue de 22f2013, constat 2). Une prise faite
+    // « sans prestataire » ecrit ses meilleurs niveaux dans `answers_host`, qui
+    // l'emporte a la fusion : une prestataire autorisee entre-temps qui coche
+    // « tres sale » apres la prise aurait vu sa reponse masquee, et un avis
+    // positif serait parti. Sa colonne doit etre celle de la prise.
     const memes = JSON.stringify(trier(frais.answers_host)) === JSON.stringify(trier(options.auto.answers_host))
+      && (!('answers_cleaner' in options.auto)
+        || JSON.stringify(trier(frais.answers_cleaner ?? null)) === JSON.stringify(trier(options.auto.answers_cleaner ?? null)))
     let negatif = true
     try { negatif = estNegatif({ ...(frais.answers_cleaner || {}), ...(frais.answers_host || {}) }, e.grille_figee) } catch { negatif = true }
     if (!memes || negatif || frais.auto_publier_le || ['publiee', 'abandonnee', 'expiree', 'evaluee_ailleurs'].includes(frais.status)) {
@@ -2306,7 +2428,7 @@ const outilsAutoValidation = {
       json (b) { sortie.body = b; res.headersSent = true; return res },
     }
     await evaluationPublier({ method: 'POST', query: {}, body: { id: e.id } }, res, gardeDuTitulaire(e.user_id),
-      { auto: { answers_host: e.answers_host } })
+      { auto: { answers_host: e.answers_host, answers_cleaner: e.answers_cleaner ?? null } })
     return sortie
   },
 }
@@ -2443,3 +2565,11 @@ async function router (req, res) {
 }
 
 module.exports.outilsAutoValidation = outilsAutoValidation
+
+// ⚠ L'APPEL D'ECRAN DE LA PAGE AVIS (api/ecran/avis.js) REUTILISE CES DEUX
+// LECTURES TELLES QUELLES, avec leurs gardes de perimetre : les recopier dans
+// l'endpoint d'ecran ferait deux versions de la meme regle, et le chantier
+// profils et droits a ferme dix fuites nees exactement de ca. Elles attendent
+// une garde de la forme `{ accountUserId, contexte }`, que `contexteDEcran`
+// produit comme `requirePermission`.
+module.exports.ecran = { cartesLister, autoValidationLire }

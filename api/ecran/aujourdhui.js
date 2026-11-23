@@ -1,4 +1,21 @@
 // api/ecran/aujourdhui.js
+// ⚠ SEUIL DE MISE EN SERVICE DES ALERTES D'ENVOI AU VOYAGEUR (decision de
+// Thierry du 30 octobre 2026) : le bandeau n'affiche que les incidents d'envoi
+// NES APRES le deploiement du correctif `fix-envoi-ota`. L'historique sera
+// acquitte en masse plus tard, sur son go, avec auteur et motif, en lot separe.
+// ⚠ VERS LE PASSE SEULEMENT. Un seuil dans le futur masquerait toutes les
+// alertes d'envoi, en silence — c'est exactement la famille de defaut que ce
+// chantier passe son temps a fermer. `tests/bandeau-alarmes.test.js` le refuse.
+//
+// ⚠ ET IL A COMMENCE DANS LE FUTUR, DE VINGT-CINQ MINUTES. J'avais ecrit
+// `2026-10-30T00:00:00Z` en lisant la date LOCALE (Paris, UTC+1) alors qu'il
+// etait encore 22 h 35 le 29 en UTC. Le test l'a refuse immediatement — c'est
+// la lecon du depot sur l'heure de la mesure : « meme fuseau que le code
+// mesure, l'heure fait partie de la mesure ». Une date ecrite a la main depuis
+// une horloge locale n'est pas la date qu'un serveur en UTC va lire.
+// Un seuil ANTERIEUR est sans danger : aucune ligne de ces trois types
+// n'existait en production (mesure faite), donc rien ne peut le preceder.
+const SEUIL_ALARMES_ENVOI = '2026-10-29T00:00:00.000Z'
 // L'ECRAN D'ACCUEIL EN UN APPEL — lot (b) du chantier performance.
 // DOC : docs/specs/spec-performance-pages.md (modif = MEME COMMIT)
 //
@@ -41,7 +58,24 @@ const {
   arriveesProches, verdictDuCode, codesParReservation, lireLesCodes
 } = require('../../lib/ecran/etat-du-code')
 const { etatMenage } = require('../../lib/cron-arrival-code')
-const { notesDuPerimetre } = require('../../lib/stats-avis')
+const { notesDuPerimetre, derniersAvis } = require('../../lib/stats-avis')
+// ⚠ TROIS MODULES, AUCUN CALCUL ICI. Le bloc « Revenus nets » compose des
+// regles qui vivent toutes dans `lib/` : le net hote par canal, la date de
+// versement par canal, et l'agregation par mois. Recopier l'une des trois ici
+// ferait deux implementations qui divergent au premier correctif — la dette 17
+// que le depot a deja soldee une fois.
+// ⚠ LES TROIS IMPORTS DE CALCUL SONT PARTIS, ET C'EST LA MESURE DU CHANGEMENT.
+// Cet endpoint composait `revenusDuMois`, `fenetreDeLecture` et
+// `tableDesDelais` sur 1 436 payloads a chaque ouverture de l'accueil. Il ne
+// calcule plus rien : deux appels d'agregat SQL, et la mise en forme de ce
+// qu'ils rendent. C'est la regle d'architecture de CLAUDE.md prise au mot — un
+// endpoint d'ecran ne lit que des donnees preparees.
+//
+// `lib/revenus/mois.js` reste au depot : il devient l'ORACLE du SQL. C'est lui
+// que `scripts/verifier-parite-revenus.js` fait tourner sur les donnees reelles
+// pour prouver que l'agregat dit la meme chose — un calcul remplace par un
+// autre doit pouvoir etre compare, sinon la migration des chiffres se fait sur
+// parole.
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -190,6 +224,21 @@ module.exports = async (req, res) => {
 
   const jour = jourParis(0)
   const demain = jourParis(1)
+
+  // ⚠ LE MOIS DEMANDE SE VALIDE, IL NE SE PREND PAS TEL QUEL. Le selecteur de
+  // l'ecran envoie `?mois=YYYY-MM` ; par defaut, le mois courant A PARIS — le
+  // meme fuseau que `jour`, et pas celui du serveur. Une valeur hors forme
+  // retombe sur le mois courant plutot que de refuser l'ecran entier : le bloc
+  // Revenus n'est pas la page.
+  //
+  // ⚠ ET LA VALIDATION REFUSE « 2026-13 », QUI PASSE LA FORME. `^\d{4}-\d{2}$`
+  // l'accepte, et `Date.UTC(2026, 12, 1)` ROULE sur janvier 2027 : l'ecran
+  // aurait servi les revenus de janvier sous l'etiquette « mois 13 ». Meme
+  // garde que `fenetreDeLecture` et `moisDe` dans lib/revenus/mois.js — les
+  // trois doivent s'accorder sur ce qu'est un mois.
+  const moisDemande = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query && req.query.mois || ''))
+    ? String(req.query.mois)
+    : jour.slice(0, 7)
   const depuis7j = new Date(Date.now() - JOURS_FAIT_POUR_VOUS * 86400000).toISOString()
 
   // `indisponibles` : ce qu'on n'a PAS pu lire. Un bloc absent de la reponse
@@ -243,6 +292,13 @@ module.exports = async (req, res) => {
     let q = supabase.from('properties')
       .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency, photo_url')
       .eq('user_id', compte)
+      // ⚠ LES BIENS ARCHIVES QUITTENT L'ACCUEIL (lot « archiver un bien »,
+      // etape 3). Avant ce filtre, AUCUN endpoint d'ecran ne jugeait d'un etat
+      // d'activite : un bien que le provider avait supprime restait dans la
+      // liste, dans les tuiles et dans le selecteur, et l'hote n'avait aucun
+      // moyen de l'en retirer. Les REVENUS sont le seul ecran qui le garde —
+      // decision de Thierry du 31 octobre 2026 : son historique est vrai.
+      .is('archive_le', null)
     q = bornerUuid(q, 'id')
     const { data, error } = await compter(q.order('name', { ascending: true }))
     // ⚠ `null`, PAS `[]`. Une liste vide dit « cet hote n'a aucun logement »,
@@ -252,6 +308,41 @@ module.exports = async (req, res) => {
     // haut, condamne.
     if (error) { console.error('[ecran/aujourdhui]', 'biens', error.message); indisponibles.push('biens'); return null }
     return data || []
+  }
+
+  // ⚠ LES BIENS ARCHIVES, A PART — constat 1 de la revue de 26339835, et c'est
+  // un defaut d'ARGENT. `lireBiens` les ecarte (etape 3 : plus de tuile, plus de
+  // place dans le selecteur), mais la RPC `revenus_du_mois` n'a AUCUN filtre
+  // d'archive : leurs euros restent dans le total du bandeau. Et la reserve
+  // `hors_biens` ne les rattrape pas — `revenus_hors_mois` ne compte que les
+  // sejours rattaches a AUCUN bien de `properties`, et un bien archive y est
+  // toujours. Resultat : un bandeau qui annonce 300 € de plus que la somme de
+  // ses lignes, sans ligne ni reserve pour l'expliquer. C'est la dette 118,
+  // qu'on venait de solder sur la vue Annee et qui restait entiere sur la vue
+  // Mois — le bloc principal de l'ecran.
+  // ⚠ UNE LISTE SEPAREE, PAS UN RETOUR DANS `biens` : les descendre dans
+  // `biens` les ferait revenir dans les tuiles, le selecteur et les
+  // indicateurs, que l'etape 3 vient de nettoyer. L'ecran s'en sert pour les
+  // LIGNES de revenus, et pour rien d'autre.
+  const lireBiensArchives = async () => {
+    if (!droits.reservations && !droits.menages) return null
+    if (perimetreVide) return []
+    let q = supabase
+      .from('properties')
+      .select('id, name, photo_url')
+      .eq('user_id', compte)
+      .not('archive_le', 'is', null)
+    q = bornerUuid(q, 'id')
+    const { data, error } = await compter(q.order('name', { ascending: true }))
+    // ⚠ `null` ICI NE MASQUE RIEN : l'ecran rend alors ses lignes sans les
+    // archives, comme avant ce lot. On le dit tout de meme, parce qu'un ecart
+    // entre le bandeau et les lignes a une cause lisible.
+    if (error) {
+      console.error('[ecran/aujourdhui]', 'biens_archives', error.message)
+      indisponibles.push('biens_archives')
+      return null
+    }
+    return (data || []).map(b => ({ id: String(b.id), nom: b.name || null, photo_url: b.photo_url || null }))
   }
 
   const lireTaches = async () => {
@@ -308,13 +399,81 @@ module.exports = async (req, res) => {
     // ⚠ ET `tests/garde-colonne-selectionnee.test.js` NE L'AURAIT PAS VU : il
     // verifie qu'une colonne LUE est SELECTIONNEE, pas qu'elle EXISTE. Les deux
     // defauts se ressemblent et n'ont pas le meme filet.
-    let q = supabase.from('automation_incidents')
-      .select('id, type, property_id, detail, created_at, acquitted_at')
-      .eq('user_id', compte).eq('type', 'overbooking').is('acquitted_at', null)
-    q = bornerRef(q, 'property_id')
-    const { data, error } = await compter(q.order('created_at', { ascending: false }).limit(50))
-    if (error) { indisponibles.push('alarmes'); return null }
-    return data || []
+    // ⚠ TROIS TYPES, PLUS UN SEUL — ET C'EST UN CONSTAT DE THIERRY DU
+    // 29 OCTOBRE 2026 : « une alerte sans geste possible ne sert a rien ».
+    // Le bandeau ne montrait que `overbooking`. Les alertes d'envoi au voyageur
+    // etaient donc ecrites en base, envoyees par e-mail au fondateur... et
+    // INVISIBLES sur tous les ecrans — donc impossibles a acquitter, puisque le
+    // bouton n'existe que sur une alarme affichee. Une alerte que personne ne
+    // peut voir ni fermer n'est pas une alerte, c'est une ligne de journal.
+    //   · `message_ota_a_verifier` : un envoi dont l'issue est INCERTAINE. Il ne
+    //     repartira pas seul, et l'hote doit aller voir le fil chez l'OTA.
+    //   · `message_ota_abandon`    : un message qui NE PARTIRA PAS. S'il le veut,
+    //     c'est a lui de l'envoyer depuis /messages.
+    // Les deux portent dans leur `detail` le voyageur, le texte et les trois pas
+    // a suivre — le bandeau affiche ce `detail` tel quel.
+    // ⚠ LE MEME ENSEMBLE QUE `api/incidents-acquitter.js`, A LA LETTRE : une
+    // alarme affichee mais non acquittable laisse un bouton qui rend 404 et une
+    // alarme a l'ecran pour toujours (constat HAUT d'une revue independante).
+    // ⚠ `email_voyageur_abandon` EN FAIT PARTIE, ET SON ABSENCE ETAIT LE MEME
+    // DEFAUT ROUVERT DU COTE E-MAIL (constat d'une revue independante) : un
+    // e-mail au voyageur abandonne sans seconde chance ecrivait son incident,
+    // telephonait au fondateur, et n'apparaissait sur AUCUN ecran de l'hote —
+    // donc inacquittable, comme les trois types OTA avant ce lot. Mesure en
+    // production avant correctif : 0 ligne de ce type, le canal e-mail n'etant
+    // pas branche. Il entre donc sans rien faire apparaitre.
+    // ⚠ ET `message_ota_abandon` N'EN FAIT PLUS PARTIE : il doublait
+    // `message_ota_arret` — meme echec, deux cartes, deux SMS, deux e-mails.
+    // La fonction qui le posait est supprimee (mesure : 0 ligne en production,
+    // le type n'a jamais ete deploye).
+    const TYPES_ALARME = ['overbooking', 'message_ota_a_verifier',
+      'message_ota_arret', 'email_voyageur_abandon']
+
+    // ⚠ DEUX LECTURES, ET UN PLAFOND PAR FAMILLE — DECISION DE THIERRY DU
+    // 30 OCTOBRE 2026, et un defaut que la mesure a precise.
+    //
+    // Sa crainte : « le bandeau risque d'etre noye, et l'alarme de
+    // surreservation chassee (limit 50) ». MESURE EN PRODUCTION, en lecture
+    // seule, avant ce correctif : `api_credit` 11 977 ouverts et `send_failure`
+    // 1 209 ouverts ne sont PAS dans `TYPES_ALARME`, donc ils n'entrent pas au
+    // bandeau ; `overbooking` a UNE ligne, deja acquittee ; et les trois types
+    // d'envoi n'existent pas encore. Le bandeau afficherait donc ZERO alarme au
+    // deploiement. Sa prémisse ne tenait pas — mais le MECANISME qu'il decrit
+    // est reel : `limit(50)` etait PARTAGE, trie par date descendante, et les
+    // alarmes d'envoi sont par nature plus fraiches qu'une surreservation qui
+    // dure. Le jour ou cinquante alertes d'envoi tombent, elles chassent la
+    // surreservation — qui est le conflit le plus cher du produit.
+    //
+    // D'ou la separation : la surreservation a sa propre lecture et son propre
+    // plafond. Aucune alerte d'envoi ne peut plus la pousser hors de l'ecran.
+    const lireFamille = async (types, borneDate) => {
+      let q = supabase.from('automation_incidents')
+        .select('id, type, property_id, detail, created_at, acquitted_at')
+        .eq('user_id', compte).in('type', types).is('acquitted_at', null)
+      if (borneDate) q = q.gte('created_at', borneDate)
+      q = bornerRef(q, 'property_id')
+      return compter(q.order('created_at', { ascending: false }).limit(25))
+    }
+
+    const [critiques, envois] = await Promise.all([
+      lireFamille(['overbooking'], null),
+      // ⚠ « L'ECRAN N'AFFICHE QUE LES INCIDENTS D'ENVOI NES APRES LE
+      // DEPLOIEMENT » (decision de Thierry). L'historique sera acquitte en
+      // masse plus tard, sur son go, avec auteur et motif, en lot separe.
+      //
+      // ⚠ ET C'EST UNE CEINTURE, PAS UNE BRETELLE : aucune ligne de ces trois
+      // types ne PEUT preceder ce correctif, puisque les types naissent avec
+      // lui — mesure faite, zero ligne en production. Le seuil ne sert donc que
+      // le jour ou l'on importerait de l'historique, ou ou un type serait
+      // reutilise.
+      // ⚠ IL NE DOIT JAMAIS ETRE DEPLACE VERS LE FUTUR : un seuil a venir
+      // masquerait TOUTES les alertes d'envoi, en silence. Un test refuse un
+      // seuil qui n'est pas dans le passe.
+      lireFamille(TYPES_ALARME.filter(t => t !== 'overbooking'), SEUIL_ALARMES_ENVOI)
+    ])
+    if (critiques.error || envois.error) { indisponibles.push('alarmes'); return null }
+    // La surreservation d'abord : c'est elle qu'on ne doit jamais rater.
+    return [...(critiques.data || []), ...(envois.data || [])]
   }
 
   // Les arrivees du jour et du lendemain, et elles SEULES : c'est tout ce dont
@@ -424,6 +583,326 @@ module.exports = async (req, res) => {
     return out
   }
 
+  // ⚠ LES TROIS DERNIERS COMMENTAIRES — bloc « Derniers avis » (spec §3).
+  // Meme population et meme perimetre que `lireNotes` : la moyenne affichee en
+  // tete du bloc et les cartes en dessous doivent parler des MEMES avis.
+  //
+  // ⚠ LE NOM DU VOYAGEUR EXIGE `reservations` EN PLUS D'`avis`, et la colonne
+  // n'est pas selectionnee sans ce droit. C'est la regle deja tranchee pour les
+  // dates de sejour (api/avis.js) : le CONTENU de l'avis suit `avis`, ce qu'il
+  // dit du SEJOUR suit `reservations`. Un membre `avis: read` voit donc les
+  // commentaires, sans savoir qui les a ecrits.
+  const lireDerniersAvis = async () => {
+    if (!droits.avis) return null
+    // ⚠ UNE REQUETE, ET ELLE SE COMPTE. `derniersAvis` fait UNE lecture bornee
+    // a trois lignes — pas de pagination, contrairement a `notesDuPerimetre`.
+    // Le compteur de l'en-tete `Server-Timing` est un PLANCHER : l'y oublier le
+    // rendrait faux de un, et c'est ce chiffre qui designe la cause quand une
+    // reponse traine.
+    requetes++
+    const out = await derniersAvis(supabase, {
+      userId: compte, periode: '30j', limite: 3,
+      refs: refs === null ? null : refs.map(String),
+      avecNom: droits.reservations
+    })
+    if (out && out.erreur) { indisponibles.push('derniers_avis'); return null }
+    return out
+  }
+
+  // ─── Les revenus du MOIS, par bien (spec §4, etape 4) ─────────────────────
+  //
+  // ⚠ DROIT `reservations`, DECISION Q5 DE THIERRY du 24 octobre 2026 : « comme
+  // aujourd'hui, lecture des reservations, limite aux biens du profil ». Le
+  // montant d'un sejour EST une donnee de reservation ; un membre qui n'a pas ce
+  // droit ne voit pas le bloc, et la garde est ICI parce que la cle de service
+  // contourne la RLS.
+  //
+  // ⚠ DONNEE NON URGENTE, ET ELLE N'EST PLUS CALCULEE A LA LECTURE. Tout ce
+  // paragraphe disait le contraire jusqu'au 26 octobre 2026, et c'est la review
+  // du lot qui l'a releve : il decrivait l'implementation d'AVANT — « dette
+  // assumee », « aucune table de resume n'existe », « avec `raw`, 3,8 Mo et
+  // 569-961 ms », « TROIS appels PostgREST ». Plus un seul de ces faits n'etait
+  // vrai apres le commit qui les laissait en place, et c'est le premier texte
+  // qu'un lecteur rencontre. Le depot a paye six fois cette erreur les 23-24
+  // octobre : une affirmation ecrite a la main est lue comme une mesure, et
+  // elle ne rougit jamais.
+  //
+  // L'etat reel : le payload provider n'est lu qu'UNE FOIS, a l'ECRITURE de la
+  // reservation (`lib/revenus/derive.js`, appele par le writer unique), qui pose
+  // colonnes derivees. Cet endpoint ne fait plus que LIRE trois agregats
+  // SQL — aucun `raw`, aucun `delais_versement`, aucune pagination.
+  //
+  // C'est l'architecture decidee par Thierry le 27 octobre 2026, et elle est la
+  // forme generale de la regle de CLAUDE.md : une page non urgente lit des
+  // donnees preparees a l'ecriture ou par le serveur, jamais un calcul sur les
+  // donnees brutes a l'ouverture.
+  const lireRevenus = async () => {
+    // ⚠ GARDE SERVEUR DU DROIT, ET ELLE PRECEDE TOUTE LECTURE. Decision Q5 de
+    // Thierry : « comme aujourd'hui, lecture des reservations, limite aux biens
+    // du profil ». Le masquage de l'ecran est un confort ; celui-ci protege.
+    // Le payload part dans le `localStorage` du membre pour 12 h.
+    if (!droits.reservations) return null
+    if (perimetreVide) return null
+    // ⚠ UN PERIMETRE SANS CLE UUID NE REND PAS ZERO EURO, IL REND « JE NE SAIS
+    // PAS » (constat de la review du lot). `uuidIntrouvable` est le cas d'un
+    // membre dont la delegation n'est exprimee qu'en cles provider : `refsUuid`
+    // vaut `[]` alors que le perimetre n'est pas vide. `lireBiens` le consulte
+    // deja et pousse `indisponibles` ; ce bloc ne le faisait pas, donc il
+    // passait `p_refs: []` — et `property_uuid = any('{}')` est FAUX POUR TOUT
+    // LE MONDE. Zero ligne, total a zero, `revenus` absent de `indisponibles`,
+    // et cet objet partait dans le `localStorage` du membre pour 12 h comme un
+    // resultat valide.
+    //
+    // L'ecran etait sauve par coincidence : `lireBiens` rendant `null`, la
+    // section se masquait. La coherence tenait a un AUTRE bloc — et le payload,
+    // lui, affirmait « 0 € » la ou la bonne reponse est « non calculable ».
+    if (uuidIntrouvable) {
+      console.error('[ecran/aujourdhui]', 'revenus : perimetre sans cle UUID', { refs: refsTexte })
+      indisponibles.push('revenus')
+      return null
+    }
+
+    // ─── DEUX AGREGATS SQL, ET PLUS AUCUNE LECTURE DU PAYLOAD ─────────────
+    //
+    // ⚠ C'EST LE CŒUR DE L'ARCHITECTURE DECIDEE PAR THIERRY LE 27 OCTOBRE 2026.
+    // Ce bloc lisait `bookings_snapshot.raw` — le payload provider INTEGRAL —
+    // a chaque ouverture de l'accueil, pour en deduire le canal, le montant net
+    // et la date de versement. Mesure du depot pour cette lecture exacte :
+    // 3,8 Mo et 569-961 ms (docs/kb/performance.md), sur le chemin critique du
+    // premier rendu. Et elle grossissait avec l'historique.
+    //
+    // Le payload n'est plus lu qu'UNE FOIS, a l'ECRITURE de la reservation
+    // (`lib/revenus/derive.js`, appele par le writer unique). Ici, deux appels
+    // qui rendent une ligne par logement : mesure sur staging, 0,1 Ko contre
+    // 40,6 Ko pour la lecture qu'ils remplacent.
+    //
+    // ⚠ ET CE N'EST PAS UNE SOMME STOCKEE. Les totaux sont CALCULES, par un
+    // agregat sur un index partiel — pas par du JavaScript sur 1 436 payloads.
+    // Une somme maintenue a la main derive au premier correctif, et personne ne
+    // le voit.
+
+    // ⚠ LE JOUR DE REFERENCE EST CELUI DE PARIS, PASSE EN PARAMETRE. « Recu »
+    // se compare a ce jour, et `current_date` cote Postgres est en UTC : une
+    // comparaison faite en base se decalerait d'un jour chaque soir entre
+    // minuit et 2 heures. Le depot a deja paye ce decalage.
+    //
+    // ⚠ ET LE PERIMETRE EST PASSE EN UUID. `refsUuid` est la liste des biens
+    // confies a un membre delegue ; `null` veut dire titulaire, donc tout le
+    // compte. C'est la fonction SQL qui applique la borne, et elle traite
+    // `null` comme « aucune borne » — pas comme « aucun bien ».
+    // ⚠ LES TROIS APPELS PARTENT ENSEMBLE. Sequentiels, ils coutaient trois
+    // allers-retours sur le chemin critique du premier rendu ; en parallele, la
+    // latence est celle du plus lent. C'est le seul endroit de ce bloc ou la
+    // forme du code change le temps d'affichage.
+    requetes += 3
+    const [
+      { data: parBien, error: eMois },
+      { data: hors, error: eHors },
+      { data: sonde, error: eSonde }
+    ] = await Promise.all([
+      supabase.rpc('revenus_du_mois', {
+        p_user_id: compte,
+        p_mois: moisDemande,
+        p_aujourdhui: jour,
+        p_refs: refsUuid === null ? null : refsUuid
+      }),
+      // ⚠ LE MOIS EST PASSE AUX RESERVES AUSSI, et il ne l'etait pas (constat
+      // GRAVE 3 de la review du lot). La fonction n'avait AUCUNE borne de
+      // mois : elle sommait les sejours orphelins de TOUTES les periodes, et
+      // l'ecran affichait ce total sous un bandeau strictement mensuel. Mesure
+      // du scenario : 4 sejours orphelins, un verse en novembre (500 €) et
+      // trois en 2025 (2 500 €) — l'hote lisait un ecart de 500 € et, juste en
+      // dessous, « 4 sejours rattaches a aucun de vos logements : 3 000,00 € ».
+      // Le chiffre de la reserve additionnait de l'argent qui n'est PAS dans le
+      // total qu'elle pretend expliquer.
+      supabase.rpc('revenus_hors_mois', {
+        p_user_id: compte,
+        p_mois: moisDemande,
+        p_refs: refsUuid === null ? null : refsUuid
+      }),
+      supabase.rpc('revenus_calcul_incomplet', {
+        p_user_id: compte,
+        p_refs: refsUuid === null ? null : refsUuid
+      })
+    ])
+
+    // ⚠ UNE FONCTION QUI N'EXISTE PAS ENCORE EST UNE ATTENTE, PAS UNE PANNE.
+    // Une migration se colle A LA MAIN dans ce depot : entre le push et le go
+    // de Thierry, la base n'a ni les colonnes ni les agregats. L'ecran dit
+    // alors « non calculable », ce qui est vrai — et ne crie pas au loup.
+    //
+    // ⚠ MAIS LA DETECTION AVALAIT UNE ERREUR DE DROITS, et c'est un constat de
+    // la review du lot. Elle testait `texte.includes('revenus_du_mois')`, qui
+    // attrape TOUT message nommant la fonction — donc aussi
+    // « 42501 permission denied for function revenus_du_mois ». Un `grant`
+    // oublie, ou des privileges non reportes par `create or replace`, auraient
+    // vide le bloc pour TOUS les hotes sans une ligne dans les journaux. Le
+    // code PostgREST `PGRST202` suffit a couvrir le cas « migration en
+    // attente » ; on garde `does not exist` pour un appel direct hors
+    // PostgREST, et c'est tout.
+    const estAbsente = (e) => {
+      const texte = `${(e && e.code) || ''} ${(e && e.message) || ''}`.toLowerCase()
+      return texte.includes('pgrst202') ||
+        (texte.includes('function') && texte.includes('does not exist'))
+    }
+
+    if (eMois) {
+      if (!estAbsente(eMois)) {
+        console.error('[ecran/aujourdhui] revenus_du_mois echec:', eMois.message)
+      }
+      indisponibles.push('revenus')
+      return null
+    }
+
+    // ⚠⚠ LA SONDE DECIDE SI LE CHIFFRE A LE DROIT D'ETRE AFFICHE, et c'est le
+    // constat GRAVE 1 de la review du lot. Les deux agregats filtrent sur
+    // `statut_canonique = 'confirmed'` — une colonne NEUVE, qui vaut NULL tant
+    // que le remplissage n'a pas passe. `NULL = 'confirmed'` rend NULL, donc
+    // TOUTES les lignes sortent des deux agregats, et l'ecran affichait
+    // « 0,00 € · Recu 0,00 € · A venir 0,00 € » AVEC L'APLOMB D'UN FAIT : pas
+    // de reserve, pas de « non calculable », un mois vendu indistinguable d'un
+    // mois vide. Et pire en remplissage PARTIEL — un total plausible mais
+    // ampute, le script ayant une limite et le cron un plafond de 2 000 lignes.
+    //
+    // ⚠ SON ABSENCE REFUSE AUSSI, et ce n'est pas un exces de prudence : si la
+    // migration de la sonde n'est pas collee, on ne peut PAS savoir si le
+    // calcul est fini. Afficher le total serait reprendre exactement le pari
+    // qu'on vient de perdre. L'ecran dit « non calculable », et l'ordre de
+    // collage est donc contraint : la sonde AVANT que cet endpoint ne serve.
+    if (eSonde) {
+      if (!estAbsente(eSonde)) {
+        console.error('[ecran/aujourdhui] revenus_calcul_incomplet echec:', eSonde.message)
+      }
+      indisponibles.push('revenus')
+      return null
+    }
+    // ⚠ UNE REPONSE SANS ERREUR MAIS SANS DONNEE REFUSE AUSSI (constat de la
+    // review). La doctrine du lot — « seul un `false` explicite autorise » —
+    // etait appliquee a la sonde mais pas a la FORME des agregats : un `data`
+    // nul sans `error` donnait un total a zero presente comme un fait. Peu
+    // atteignable via PostgREST, mais c'est exactement l'asymetrie qu'on vient
+    // de payer deux fois dans ce lot.
+    if (!Array.isArray(parBien)) {
+      console.error('[ecran/aujourdhui] revenus_du_mois : reponse sans donnee')
+      indisponibles.push('revenus')
+      return null
+    }
+    const ligneSonde = Array.isArray(sonde) ? sonde[0] : sonde
+    if (!ligneSonde || ligneSonde.incomplet !== false) {
+      // ⚠ `!== false` ET NON `=== true`. Une reponse vide, un champ absent ou
+      // un `null` doivent refuser : la seule valeur qui autorise l'affichage
+      // est un `false` explicite. L'inverse — autoriser sauf si `true` — fait
+      // d'une reponse malformee un feu vert.
+      indisponibles.push('revenus_calcul_en_cours')
+      return null
+    }
+
+    // ⚠⚠ UN ECHEC DES RESERVES REFUSE LE BLOC ENTIER, et mon commentaire
+    // precedent affirmait le contraire — « l'ecran affiche des totaux justes et
+    // DIT qu'il ne sait pas compter ce qui en sort ». IL NE LE DISAIT PAS.
+    // Constat BLOQUANT de la review du 26 octobre 2026 : `revenus_reserves`
+    // n'etait lu par PERSONNE — une seule occurrence dans tout le depot, la
+    // ligne qui l'ecrivait. Ni la page, ni un test.
+    //
+    // Consequence mesuree au banc DOM : les trois compteurs tombaient a zero,
+    // les trois `if (… > 0)` de la page ne poussaient rien, et
+    // `revenue-reserves` restait masque. Le bandeau affichait son total, aucune
+    // ligne ne portait l'argent orphelin, et aucune reserve ne l'expliquait :
+    // c'est mot pour mot G2 + G3, les deux constats que ce lot declare
+    // refermes.
+    //
+    // ⚠ ET L'ORDRE DE COLLAGE QUE J'AVAIS ANNONCE CREAIT LA FENETRE : entre la
+    // migration de la sonde et celle de `revenus_hors_mois`, la sonde repond et
+    // les reserves rendent PGRST202. L'ordre est inverse dans les deux
+    // en-tetes ; ce refus est la seconde ligne, pour le jour ou un `grant` sera
+    // oublie apres le `drop`.
+    //
+    // Un total qu'on ne peut pas EXPLIQUER ne s'affiche pas. C'est plus strict
+    // que mon intention d'origine, et c'est la seule version qui tient la
+    // promesse du lot.
+    if (eHors) {
+      if (!estAbsente(eHors)) {
+        console.error('[ecran/aujourdhui] revenus_hors_mois echec:', eHors.message)
+      }
+      indisponibles.push('revenus')
+      return null
+    }
+
+    // ─── La mise en forme, et elle ne CALCULE rien ────────────────────────
+    //
+    // ⚠ UN GARDE-FOU DE CONVERSION, ET SON MOTIF ETAIT FAUX. J'avais ecrit
+    // « LES SOMMES VIENNENT DE POSTGRES, EN `bigint`, DONC EN CHAINES » :
+    // mesure sur staging, la reponse reelle est `{"sejours":2,"recu_cents":0}`
+    // — des NOMBRES JSON. PostgREST sait rendre un `bigint` en nombre quand il
+    // tient dans un double, et nos centimes y tiennent largement.
+    //
+    // Le garde-fou reste, parce qu'il protege de deux choses REELLES : un
+    // `bigint` au-dela de 2^53 que PostgREST serialiserait alors en chaine, et
+    // un `null` rendu par un agregat vide. Un `+` sur deux chaines les
+    // CONCATENE — « 40000 » + « 30000 » donnerait « 4000030000 » — et
+    // `Number(null)` vaut 0, pas NaN.
+    //
+    // Ce qui change : ce n'est plus « les sommes SONT des chaines », c'est
+    // « elles peuvent l'etre, et on ne veut pas le savoir ici ».
+    const n = (v) => {
+      const x = Number(v)
+      return Number.isFinite(x) ? x : 0
+    }
+    const vide = () => ({
+      sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0,
+      bruts: 0, refuses: { montant: 0, date: 0 }, motifs: {}
+    })
+    const total = vide()
+    const lignes = {}
+    for (const r of parBien || []) {
+      const l = {
+        sejours: n(r.sejours),
+        recu_cents: n(r.recu_cents),
+        a_venir_cents: n(r.a_venir_cents),
+        total_cents: n(r.total_cents),
+        bruts: n(r.bruts),
+        // ⚠ LE MOTIF N'EST PLUS DETAILLE PAR BIEN, et c'est assume : l'agregat
+        // compte les refus, il ne les nomme pas. Le motif precis vit dans
+        // `bookings_snapshot.motif_non_calculable`, ligne par ligne, pour qui
+        // diagnostique. L'ecran, lui, a besoin du COMPTE — « 2 sans montant » —
+        // et c'est ce que la ligne porte.
+        refuses: { montant: n(r.sans_montant), date: 0 },
+        motifs: {}
+      }
+      // ⚠ LA CLE EST L'UUID DU BIEN, PLUS LA CLE PROVIDER. C'est tout l'objet de
+      // la colonne `property_uuid` : joindre par l'IDENTITE du bien et non par
+      // le numero du provider, qu'un re-keying ou une bascule laisse derriere.
+      // L'ecran joint donc desormais par `b.id`.
+      lignes[String(r.property_uuid == null ? '' : r.property_uuid)] = l
+      for (const c of ['sejours', 'recu_cents', 'a_venir_cents', 'total_cents', 'bruts']) {
+        total[c] += l[c]
+      }
+      total.refuses.montant += l.refuses.montant
+    }
+
+    const h = (hors || [])[0] || {}
+    return {
+      mois: moisDemande,
+      calcule_le: jour,
+      par_bien: lignes,
+      total,
+      // Les sejours sans date de versement : tous mois confondus, par
+      // construction — sans date, il n'y a pas de mois a leur attribuer.
+      hors_mois: { ...vide(), sejours: n(h.sans_date), refuses: { montant: 0, date: n(h.sans_date) } },
+      // ⚠ ET L'ARGENT RATTACHE A AUCUN BIEN CONNU, qui valait 1 000 EUR d'ecart
+      // MUET entre le bandeau et les lignes avant d'avoir un compteur. Un
+      // membre delegue n'en voit rien : la fonction SQL rend zero des que
+      // `p_refs` est pose, parce que ces reservations ne lui sont pas
+      // attribuables — elles ne sont rattachees a aucun bien.
+      hors_biens: { ...vide(), sejours: n(h.hors_biens), total_cents: n(h.hors_biens_cents) },
+      // ⚠ PLUS DE TRONCATURE POSSIBLE : l'agregat ne pagine pas, il groupe. Le
+      // champ reste a `false` pour que l'ecran n'ait pas a distinguer deux
+      // formes de reponse — et le jour ou un plafond revient, il aura sa place.
+      tronque: false,
+      source: 'agregat_sql'
+    }
+  }
+
   // « Fait pour vous », 7 jours : des COMPTAGES, donc `head: true` — aucune
   // ligne ne traverse le reseau.
   const compterSi = async (autorise, table, ajuster, colonneBien, borner = bornerRef) => {
@@ -476,13 +955,34 @@ module.exports = async (req, res) => {
   }
 
   const tDebutLectures = Date.now()
-  const [biens, taches, alarmes, arrivees, notes, conversations, nMenages, nPrix, nSurresa, nIa] =
+  // ⚠ LA PROMESSE DES BIENS EST CAPTUREE, PAS ATTENDUE, et c'est ce qui permet
+  // a `lireRevenus` d'en dependre SANS serialiser les deux lectures. Il a
+  // besoin des cles provider pour compter l'argent qui n'atterrira sur aucune
+  // ligne — mais seulement A LA FIN, pour la comparaison : les deux requetes
+  // qui coutent (les delais, puis les sejours) ne dependent pas des biens et
+  // partent en parallele.
+  //
+  // ⚠ ET C'EST UN DEFAUT QUE J'AI INTRODUIT PUIS RATTRAPE DANS LA MEME HEURE :
+  // ma premiere version lisait la variable `biens` depuis la closure, alors
+  // qu'elle n'est affectee qu'APRES le `Promise.all` — elle valait donc
+  // `undefined` a l'execution, `refsDesBiens` tombait a `null`, et le compteur
+  // `hors_biens` restait muet. Le correctif d'un constat grave aurait ete
+  // inerte, et aucun test ne l'aurait dit : `null` veut dire « je ne sais pas »,
+  // donc le module ne compte rien et ne se plaint pas.
+  const pBiens = sur('biens', lireBiens, null)
+  // ⚠ EN PARALLELE DES AUTRES, et derriere le meme `sur()` : une lecture qui
+  // echoue ne doit pas emporter l'ecran — elle se declare `indisponible`.
+  const pArchives = sur('biens_archives', lireBiensArchives, null)
+  const [biens, biensArchives, taches, alarmes, arrivees, notes, derniers, revenus, conversations, nMenages, nPrix, nSurresa, nIa] =
     await Promise.all([
-      sur('biens', lireBiens, null),
+      pBiens,
+      pArchives,
       sur('taches', lireTaches, null),
       sur('alarmes', lireAlarmes, null),
       sur('arrivees', lireArrivees, []),
       sur('notes', lireNotes, null),
+      sur('derniers_avis', lireDerniersAvis, null),
+      sur('revenus', lireRevenus, null),
       sur('conversations', lireConversations, null),
       sur('compteur:menages', () => compterSi(droits.menages, 'menages',
         q => q.gte('accepted_at', depuis7j).neq('status', 'cancelled'), 'property_id'), null),
@@ -635,6 +1135,9 @@ module.exports = async (req, res) => {
   return res.status(200).json({
     jour,
     biens,
+    // La liste SEPAREE des biens archives : l'ecran s'en sert pour les LIGNES
+    // de revenus, et pour rien d'autre (voir `lireBiensArchives`).
+    biens_archives: biensArchives,
     taches,
     alarmes,
     // ⚠ `arrivees` NE PART PLUS DANS LA REPONSE, ET C'ETAIT UNE FUITE DE
@@ -649,6 +1152,13 @@ module.exports = async (req, res) => {
     conversations,
     etats_arrivee: etatsArrivee,
     notes,
+    derniers_avis: derniers,
+    // ⚠ LE MOIS SERVI EST RENVOYE, et ce n'est pas une redondance : l'ecran a
+    // demande un mois, il doit pouvoir verifier lequel il a REELLEMENT recu.
+    // Une valeur hors forme retombe sur le mois courant — sans ce champ,
+    // l'ecran afficherait « novembre » sur les chiffres d'octobre.
+    mois: moisDemande,
+    revenus,
     fait_pour_vous: { messages_ia: nIa, menages: nMenages, prix: nPrix, surreservation: nSurresa, jours: JOURS_FAIT_POUR_VOUS },
     droits,
     refuses,

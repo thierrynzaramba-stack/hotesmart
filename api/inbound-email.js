@@ -41,6 +41,9 @@
 const { createClient } = require('@supabase/supabase-js')
 const { bookingDepuisAdresse, estAdresseDeReponse, compacter } = require('../lib/jeton-reponse')
 const { recordMessage } = require('../lib/record-message')
+// Facture voyageur, étape 2a (décision de Thierry du 10 novembre 2026) : le
+// lien du formulaire de facture n'entre jamais en clair — voir `corpsUtile`.
+const { masquerLiensFacture } = require('../lib/factures-voyageur')
 const { envoyerHtml } = require('../lib/email-guestflow')
 // ⚠ LE MEME HELPER QUE LA NOTIFICATION DE VENTE, pas une recopie. Il fait la
 // meme lecture (profil proprietaire, `notify_email`, `active`), il est
@@ -113,11 +116,18 @@ function motifAutomatique (evenement) {
 // ⚠ LE MESSAGE, PAS LA CONVERSATION ENTIERE. Brevo detache la signature et les
 // citations (`ExtractedMarkdownMessage`) : sans ca, chaque reponse rapporterait
 // tout le fil precedent, que l'agent IA relirait comme une nouvelle question.
+// ⚠ LE CORPS EST MASQUÉ ICI, À LA SOURCE (facture voyageur, étape 2a ;
+// dernière review, S2) : une réponse qui cite notre e-mail — le texte brut
+// reprend le fil quand l'extraction de Brevo est vide — porte le lien du
+// formulaire de facture. Masqué une seule fois ici, il l'est partout où ce
+// corps va : `conversations.guest_message`, `agent_tasks.guest_message`, la
+// copie à l'hôte, la déduplication (qui compare à `messages.body`, lui-même
+// masqué par `recordMessage`).
 function corpsUtile (e) {
   const candidats = [e?.ExtractedMarkdownMessage, e?.RawTextBody, e?.RawHtmlBody]
   for (const c of candidats) {
     const t = String(c || '').trim()
-    if (t) return t.slice(0, 20000)
+    if (t) return masquerLiensFacture(t.slice(0, 20000))
   }
   return ''
 }

@@ -659,6 +659,9 @@ test('toutes les lectures multi-lignes sont PAGINEES, aucune ne se contente d un
     v.table !== 'properties' &&               // maybeSingle (la fiche)
     v.table !== 'taxes_sejour' &&             // une seule ligne, `limit(1)`
     v.table !== 'fermetures' &&               // bornee par sa FENETRE de dates, chez lib/fermetures.js
+    // Les infos d'accueil d'UN bien : une ligne par cle (unicite
+    // `user_id, property_id, type, key`), quelques-unes — jamais mille.
+    v.table !== 'knowledge' &&
     !v.pages)
   assert.deepEqual(sansPagination.map(v => v.table), [],
     'une lecture `.limit(n)` avec n > 1000 est ramenee a 1000 par le serveur, SANS erreur : la garde ne peut plus mordre')
@@ -792,7 +795,11 @@ test('S1 : les QUATRE domaines sont ceux des policies RLS, pas une liste invente
   assert.deepEqual(L.blocsRefuses(null), [], 'aucun droit fourni = lecture interne, rien n est refuse')
   // ⚠ AUCUNE BRANCHE MORTE : tout bloc qui se teste `refuses.includes(...)` doit
   // pouvoir etre refuse. C est l absence de `serrures` ici qui avait cree le trou.
-  assert.deepEqual(Object.keys(L.DROITS_DES_BLOCS).sort(), ['avis', 'menage', 'serrures', 'taxe'])
+  // `accueil` n'est pas un domaine RLS : c'est la garde de la base de
+  // connaissance d'ou viennent ses infos — le TITULAIRE seul (mot de passe wifi).
+  assert.deepEqual(Object.keys(L.DROITS_DES_BLOCS).sort(), ['accueil', 'avis', 'menage', 'serrures', 'taxe'])
+  assert.equal(L.DROITS_DES_BLOCS.accueil, 'titulaire')
+  assert.deepEqual(L.blocsRefuses({ titulaire: false }), ['accueil'])
 })
 
 test('M4 : le `refuses` de la LISTE ne porte QUE `avis` — les blocs jamais demandes n y figurent pas', async () => {
@@ -1239,9 +1246,10 @@ test('les avis de la liste sont PAGINES et cloisonnes par compte', async () => {
 // ⚠ LE CAS QUE PERSONNE NE COUVRAIT (constat G1 de la revue du 20 octobre 2026).
 
 test('LE TEST QUI COMPTE (G1) : un objet d avis VIDE mais visible n est pas un avis', async () => {
-  // L'objet Channex nait au depart, cache et vide ; Airbnb le revele au bout de
-  // 14 jours MEME si le voyageur n'a rien ecrit (lib/avis/naissance.js). Il a
-  // alors `is_hidden: false`, pas de texte, et une note a 0 ou absente. Le
+  // L'objet Channex nait au depart, cache et vide ; s'il arrive REVELE et vide
+  // (la mesure du 18 novembre 2026 dit plutot qu'il RESTE masque — spec
+  // avis-v5 §11), il a `is_hidden: false`, pas de texte, et une note a 0 ou
+  // absente. Le
   // compter gonflerait le total ET entrerait a 0/10 dans la moyenne — le defaut
   // de la recette du 7 octobre, arrive par l'autre porte.
   const r = await L.lireListe(listeDe({

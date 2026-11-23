@@ -177,3 +177,84 @@ test('les pages HORS LIGNE de l app prestataire portent la regle en ligne', () =
     assert.ok(regleEffective(css), `${p} : la regle ne lui parvient pas`)
   }
 })
+
+// ─── LE PIEGE DU `display` SUR UNE CELLULE DE TABLEAU ────────────────────────
+//
+// ⚠ POURQUOI CE TEST VIT DANS CE FICHIER. C'est celui qui tient la coherence
+// entre les feuilles et ce que les pages promettent — la meme famille que
+// `[hidden]`, mais pour une semantique qu'un `display` defait en silence.
+//
+// Vecu le 27 octobre 2026 : le bloc Revenus de l'accueil a recu un vrai
+// `<table>` avec `<th scope="row">`, et le message de commit justifiait cette
+// forme par l'accessibilite — « un lecteur d'ecran doit pouvoir dire "A venir,
+// 480 €" sur la bonne cellule ». La feuille posait pourtant
+// `display: flex` SUR le `<th>`, ce qui retire la semantique de cellule de
+// l'arbre d'accessibilite : le `<th>` cesse d'etre un `rowheader`, `scope="row"`
+// devient inerte, et l'annonce ne se produit pas. La forme etait justifiee par
+// exactement ce qu'elle detruisait.
+//
+// ⚠ ET AUCUN TEST NE POUVAIT LE VOIR : c'etait le premier `scope="row"` du
+// depot. La suggestion de ce garde-fou vient de la session chef de file, parce
+// que le piege vaut pour tout le depot et pas seulement pour ce bloc.
+test('LE TEST QUI COMPTE : aucune classe de cellule de tableau ne change son `display`', () => {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const racine = path.join(__dirname, '..')
+
+  // Les classes portees par un `<th>` ou un `<td>`, dans toutes les pages.
+  const portees = new Set()
+  const pages = []
+  for (const dossier of ['pages', 'apps']) {
+    const d = path.join(racine, dossier)
+    if (!fs.existsSync(d)) continue
+    for (const f of fs.readdirSync(d, { recursive: true })) {
+      if (String(f).endsWith('.html')) pages.push(path.join(d, String(f)))
+    }
+  }
+  assert.ok(pages.length > 10, `seulement ${pages.length} page(s) lue(s) : ce test ne mesure rien`)
+  for (const f of pages) {
+    const src = fs.readFileSync(f, 'utf8')
+    for (const m of src.matchAll(/<(?:th|td)\b[^>]*class="([^"]+)"/g)) {
+      // ⚠ ON NE GARDE QUE DES NOMS DE CLASSE VALIDES, et ma premiere version
+      // n'en tenait pas compte : `class="${x ? 'a' : 'b'}"` donne des morceaux
+      // comme `?` ou `:`, et `.?` comme expression reguliere correspond a
+      // N'IMPORTE QUOI — le test rendait donc trois faux positifs sur des
+      // classes qui n'existent pas. Un garde-fou qui crie a tort se fait
+      // desactiver, ce qui est pire que son absence.
+      for (const c of m[1].split(/\s+/)) {
+        if (/^[A-Za-z_-][\w-]*$/.test(c)) portees.add(c)
+      }
+    }
+  }
+  assert.ok(portees.size > 0, 'aucune cellule de tableau trouvee : ce test ne mesure rien')
+
+  // ⚠ ET ON CHERCHE LE `display` DANS LES TROIS FEUILLES, parce qu'une classe
+  // declaree deux fois ne se lit pas a un seul endroit — c'est la lecon de
+  // `[hidden]`.
+  const feuilles = ['shared/ui.css', 'shared/theme.css', 'public/style.css']
+    .filter(f => fs.existsSync(path.join(racine, f)))
+  const fautifs = []
+  for (const f of feuilles) {
+    const css = fs.readFileSync(path.join(racine, f), 'utf8')
+    for (const classe of portees) {
+      // ⚠ TOUTES LES DECLARATIONS DE LA CLASSE, PAS LA PREMIERE. Ma premiere
+      // version faisait `css.match(...)` : la mutation « remettre le flex sur
+      // le <th> » ne la faisait pas rougir, parce que la classe est declaree
+      // DEUX fois dans la feuille — une pour le `font-weight`, une pour le
+      // `display` — et `match` ne rend que la premiere. Un test qui ne regarde
+      // qu'une occurrence passe a cote du defaut des qu'une feuille repete un
+      // selecteur, ce que toutes font.
+      const motif = new RegExp('\\.' + classe.replace(/-/g, '\\-') + '\\s*\\{([^}]*)\\}', 'g')
+      for (const bloc of css.matchAll(motif)) {
+        const d = bloc[1].match(/display\s*:\s*([a-z-]+)/)
+        if (d && !['table-cell', 'table-row', 'none', 'revert', 'inherit'].includes(d[1])) {
+          fautifs.push(f + ' : .' + classe + ' { display: ' + d[1] + ' } — porte par un <th> ou <td>')
+        }
+      }
+    }
+  }
+  assert.deepEqual(fautifs, [],
+    'une classe de cellule de tableau change son `display` : la cellule quitte l arbre '
+    + 'd accessibilite, `scope` devient inerte, et le lecteur d ecran n annonce plus la '
+    + 'colonne. Le `display` doit vivre sur un ENFANT de la cellule.')
+})

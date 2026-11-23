@@ -2,6 +2,7 @@
 // Endpoint de diagnostic (page pages/diagnostic.html). LECTURE SEULE.
 // ?check=channel        -> teste la connexion live au gestionnaire de canaux
 // ?check=channel_detail -> canaux d'UN bien (mappings, is_active)
+// ?check=demandes       -> fils de messages d'UN bien : demandes Airbnb (dette 129, fondateur)
 //
 // ⚠ FUITE ENTRE COMPTES CORRIGEE (2 septembre 2026). Cet endpoint ne verifiait
 // QUE la validite de la session, jamais l'appartenance des donnees demandees :
@@ -212,6 +213,167 @@ async function router(req, res) {
       par_jour_erreur: cl.par_jour_erreur,
       derniers_passages: der.ok ? der.passages : undefined,
       derniers_passages_erreur: der.ok ? undefined : der.raison,
+    })
+  }
+
+  // ?check=demandes&property_id=<bien>
+  // DETTE 129, LOT 1, ETAPE 0 — MESURER AVANT D'ECRIRE. LECTURE SEULE, chez
+  // le gestionnaire de canaux comme dans le coeur. Dit, pour UN bien : combien
+  // de demandes (fils sans reservation), combien de fils devenus reservations
+  // dont les messages dorment sans reservation chez nous, et ce que le
+  // rattrapage saura rattacher. docs/specs/spec-demandes-airbnb.md §3.
+  if (check === 'demandes') {
+    // ⚠ UN PARAMETRE REPETE N'EST PAS UNE EXCEPTION (review 1, M2) : `?a=1&a=2`
+    // arrive en tableau, et `.trim` levait avant la garde — un 500 parti sans
+    // `private, no-store`. On prend la premiere valeur, la garde juge le reste.
+    const brut = [].concat(req.query.property_id == null ? '' : req.query.property_id)[0]
+    // Le bien vient du CLIENT : revalide contre le perimetre de l'appelant
+    // (404 bien inconnu, 403 bien d'un autre compte ou hors perimetre) AVANT
+    // tout appel au partenaire.
+    const garde = await requirePermission(req, res, {
+      domaine: 'messages', niveau: 'read',
+      bien: String(brut == null ? '' : brut).trim(), bienRequis: true
+    })
+    if (!garde.ok) return
+    // ⚠ RESERVE AU FONDATEUR (review 1, S2). Ce controle tire jusqu'a plusieurs
+    // centaines d'appels sur la cle du gestionnaire de canaux, PARTAGEE par
+    // tous les clients : un outil de mesure de l'etape 0, pas une fonction
+    // d'hote. Meme porte que `cron_stats`, et la meme raison de dire sa cause.
+    if (!fondateur()) {
+      return res.status(403).json({ error: 'Réservé au fondateur', motif: 'FOUNDER_EMAIL absent de la configuration' })
+    }
+    if (String(garde.email || '').trim().toLowerCase() !== fondateur()) {
+      return res.status(403).json({ error: 'Réservé au fondateur' })
+    }
+    const bien = garde.bien
+    const { getProvider } = require('../lib/channels')
+    const { filsADetailler, mesurer } = require('../lib/demandes/mesure')
+    // ⚠ PAR LE PROVIDER DU BIEN, JAMAIS NOMME EN DUR (review 1, M1) : un
+    // provider sans notion de fil le dit par l'absence du lecteur.
+    let provider = null
+    try { provider = getProvider(bien.provider) } catch { provider = null }
+    if (!provider || typeof provider.listerFils !== 'function' || typeof provider.idsDesMessagesDuFil !== 'function') {
+      return res.status(400).json({ error: 'Le gestionnaire de canaux de ce bien n\'a pas de fils de messages' })
+    }
+    // ⚠ UNE ECHEANCE, PAS UN ESPOIR (review 1, C1). Les appels au partenaire
+    // rejouent les 429 et les 5xx avec des attentes croissantes : sans borne,
+    // une serie de refus finit en FUNCTION_INVOCATION_TIMEOUT, corps vide —
+    // ce que l'en-tete de ce fichier interdit. Depassee, la mesure s'arrete et
+    // le DIT (`interrompu`).
+    // ⚠ ELLE SE CONSULTE ENTRE DEUX PAGES, ELLE NE COUPE PAS UN APPEL PARTI
+    // (review 2, D1) : un seul appel qui rejoue quatre 429 dure ~15 s. C'est
+    // pourquoi cette fonction a 60 s dans vercel.json — le filet, l'echeance
+    // n'etant que la regle ordinaire. `channelCall`, partage, n'est pas touche.
+    const echeance = Date.now() + 10000
+
+    // 1. Les lignes du coeur SANS reservation de ce bien. ⚠ PAR CURSEUR :
+    // PostgREST rend 1000 lignes sans erreur, et une mesure tronquee en
+    // silence est pire qu'une mesure absente.
+    const lignes = []
+    let lignesCompletes = false
+    let curseur = null
+    for (let page = 0; page < 20; page++) {
+      let q = supabase.from('messages')
+        .select('id, provider_msg_id, direction, sent_at, body')
+        .eq('user_id', bien.user_id)
+        .eq('property_id', bien.provider_property_id)
+        .is('booking_id', null)
+        .order('id', { ascending: true })
+        .limit(1000)
+      if (curseur) q = q.gt('id', curseur)
+      const { data, error } = await q
+      if (error) return res.status(503).json({ ok: false, error: 'Lecture du cœur impossible', detail: error.message })
+      const rangs = data || []
+      lignes.push(...rangs)
+      if (rangs.length < 1000) { lignesCompletes = true; break }
+      curseur = rangs[rangs.length - 1].id
+    }
+
+    // 2. Les copies import AVEC reservation autour des copies webhook
+    // (review 1, J1) : la jumelle d'un message de demande peut avoir ete
+    // importee apres que le voyageur a reserve.
+    // ⚠ UNE PLAGE, PAS UNE LISTE D'INSTANTS (review 2, D2) : `.in('sent_at', …)`
+    // compare a la MICROSECONDE en SQL, alors que la jumelle se reconnait a la
+    // milliseconde (regle de recordMessage, qui ne filtre pas l'instant en SQL
+    // pour la meme raison). On lit la plage des instants webhook, par curseur,
+    // et c'est `mesurer` qui compare des instants.
+    const instantsWebhook = lignes.filter(l => !l.provider_msg_id).map(l => Date.parse(l.sent_at)).filter(Number.isFinite)
+    const importAvecResa = []
+    let jumellesCompletes = true
+    if (instantsWebhook.length) {
+      const de = new Date(Math.min(...instantsWebhook)).toISOString()
+      const a = new Date(Math.max(...instantsWebhook) + 1).toISOString()
+      jumellesCompletes = false
+      let apres = null
+      for (let page = 0; page < 20; page++) {
+        let q = supabase.from('messages')
+          .select('id, provider_msg_id, direction, sent_at, body')
+          .eq('user_id', bien.user_id)
+          .eq('property_id', bien.provider_property_id)
+          .not('booking_id', 'is', null)
+          .not('provider_msg_id', 'is', null)
+          .gte('sent_at', de)
+          .lt('sent_at', a)
+          .order('id', { ascending: true })
+          .limit(1000)
+        if (apres) q = q.gt('id', apres)
+        const { data, error } = await q
+        if (error) return res.status(503).json({ ok: false, error: 'Lecture du cœur impossible', detail: error.message })
+        const rangs = data || []
+        importAvecResa.push(...rangs)
+        if (rangs.length < 1000) { jumellesCompletes = true; break }
+        apres = rangs[rangs.length - 1].id
+      }
+    }
+
+    // 3. Les fils du bien chez le partenaire.
+    const liste = await provider.listerFils({ propertyId: bien.provider_property_id, echeance })
+    if (!liste.ok) return res.status(502).json({ ok: false, error: 'Fils illisibles chez le gestionnaire de canaux', motif: liste.erreur })
+
+    // 4. Les identifiants de messages des fils utiles, cinq appels a la fois.
+    // Le plus ancien instant se calcule en INSTANTS, pas en chaines.
+    let plusAncien = null
+    for (const l of lignes) {
+      const t = Date.parse(l.sent_at)
+      if (Number.isFinite(t) && (plusAncien == null || t < plusAncien)) plusAncien = t
+    }
+    const choix = filsADetailler(liste.fils, { depuis: plusAncien == null ? null : new Date(plusAncien).toISOString(), max: 60 })
+    const details = new Map()
+    const file = choix.choisis.slice()
+    let interrompu = Boolean(liste.interrompu)
+    await Promise.all(Array.from({ length: 5 }, async () => {
+      while (file.length) {
+        if (Date.now() > echeance) { interrompu = true; return }
+        const f = file.shift()
+        const d = await provider.idsDesMessagesDuFil(f.id, { echeance })
+        if (d.interrompu) interrompu = true
+        details.set(f.id, d)
+      }
+    }))
+
+    return res.status(200).json({
+      ok: true,
+      bien: bien.provider_property_id,
+      nom: bien.name || null,
+      liste_fils_complete: liste.complet,
+      // Un nombre non nul dit que le filtre par bien du partenaire ne tient plus.
+      fils_d_autres_biens_ecartes: liste.autres_biens || 0,
+      // Un nombre non nul dit que le partenaire ne declare plus le bien de ses
+      // fils : ecartes par defaut (review 2, S1), donc une mesure a revoir.
+      fils_sans_bien_ecartes: liste.sans_bien || 0,
+      lignes_lues_completes: lignesCompletes,
+      jumelles_lues_completes: jumellesCompletes,
+      // `tentes` compte les fils dont on a demande le detail, `lus_en_entier`
+      // ceux dont on a tout lu (review 2, D3) : un echec ou une coupure ne
+      // compte que dans le premier.
+      detail: {
+        candidats: choix.candidats,
+        tentes: details.size,
+        lus_en_entier: [...details.values()].filter(d => d && d.ok && d.complet).length,
+        tronque: choix.tronque,
+        interrompu,
+      },
+      ...mesurer({ fils: liste.fils, details, lignes, importAvecResa }),
     })
   }
 

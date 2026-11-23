@@ -34,6 +34,11 @@ process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key
 
 const test = require('node:test')
 const assert = require('node:assert')
+// PWA lot 2c-2 : le writer prévient d'un nouveau message de voyageur. Ce banc
+// mesure l'ÉCRITURE ; la notification a le sien (tests/notifications-messages.test.js).
+const cheminNotif = require.resolve('../lib/notifications/evenements-messages')
+require.cache[cheminNotif] = { id: cheminNotif, filename: cheminNotif, loaded: true,
+  exports: { notifierMessageVoyageur: async () => ({ ok: true }) } }
 const { recordMessage } = require('../lib/record-message')
 
 // Faux client qui APPLIQUE REELLEMENT les filtres. Un faux client qui rend

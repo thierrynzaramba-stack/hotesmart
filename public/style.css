@@ -27,11 +27,216 @@
   --green-bg: #E1F5EE;
   --amber: #BA7517;
   --amber-bg: #FAEEDA;
+  /* ⚠ DEUX TEINTES AJOUTEES LE 28 OCTOBRE 2026, et TROIS couleurs reservees.
+     Decisions de Thierry, dans l'ordre ou elles ont ete posees :
+       · le NOIR est reserve a la NAVIGATION ;
+       · l'AMBRE est reserve a « ce que HoteSmart a fait pour vous » ;
+       · le BLEU est reserve a CE QUI EST CLIQUABLE.
+     D'ou les deux jetons ci-dessous, et leur partage du travail.
+
+     ⚠ ET LES NIVEAUX DE PRIX N'EN PRENNENT AUCUNE : depuis le 3 novembre
+     2026 ils sont une ECHELLE D'ENCRE, cinq densites du noir, saturation
+     0 %. Ils ne consomment donc pas de place dans la charte — c'est tout
+     l'interet du choix, et c'est pour cela qu'il a remplace les deux
+     tentatives colorees.
+
+     ⚠ IL Y A EU UNE QUATRIEME RESERVATION PENDANT VINGT-QUATRE HEURES, ET
+     ELLE EST RETIREE. Le 2 novembre, le PRUNE a ete reserve aux niveaux de
+     prix, ecrit ici et dans docs/kb/charte-ui.md, tenu par un test. Le
+     3 novembre, Thierry a tranche pour l'echelle d'encre « de sa main », et
+     la reservation tombe avec elle : le prune redevient une couleur
+     ordinaire — et il sort du produit le 3 novembre avec le lot des
+     periodes en niveaux, voir plus bas. La duree de vie de cette reservation est elle-meme la lecon :
+     une couleur reservee se paie en place, et les niveaux n'avaient pas
+     besoin d'en prendre.
+
+     --blue : les ACTIONS, et elles seules. Un bouton, un lien.
+
+     ⚠ --prune ET --prune-bg SONT PARTIS LE 3 NOVEMBRE 2026, et c'etait
+     annonce. Ils portaient l'ETAT « moins chers » de la pop-up des periodes —
+     leur SEUL usage produit. Thierry, le 2 novembre : « le prune moins chers
+     disparait avec le lot 4 (les periodes passent en niveaux de grille) ».
+     Le lot a eu lieu : les periodes affichent desormais le NIVEAU de la
+     grille du bien, sur l'echelle d'encre, et le vocabulaire d'effet qui
+     justifiait une couleur propre n'existe plus.
+
+     ⚠ ET L'EXCEPTION QUI LES NOMMAIT DANS tests/palette-niveaux.test.js PART
+     DANS LE MEME LOT. Une entree de liste blanche qui ne garde plus rien se
+     reveille en silence le jour ou son motif revient : ce fichier porte la
+     lecon trois fois, et c'est la quatrieme fois qu'elle sert. */
+  /* ⚠ OUI, C'EST LA MEME VALEUR QUE `--info` DE shared/theme.css, ET C'EST
+     UN DOUBLON ASSUME — releve en review le 28 octobre 2026, et dit ici
+     plutot que decouvert plus tard. Les pages qui chargent CETTE feuille
+     (apps/yield/*, les pages historiques) ne chargent PAS `theme.css` : sans
+     ce jeton, elles n'auraient aucun bleu. ⚠ Et le doublon n'est pas complet :
+     `theme.css` porte une variante SOMBRE (`--info: #60A5FA`) que celui-ci
+     n'a pas, parce que cette feuille n'a pas de mode sombre du tout.
+     A fondre le jour ou ces pages passeront au socle V5 — pas avant, et pas
+     en silence. */
+  --blue: #2563EB;
   --radius: 8px;
   --radius-lg: 12px;
   --sidebar-width: 210px;
   --sidebar-collapsed: 48px;
+
+  /* ⚠⚠ L'ECHELLE D'ENCRE DES CINQ NIVEAUX — ELEMENT DE STRUCTURE.
+     Choix definitif de Thierry, 3 novembre 2026, de sa main : « Echelle
+     d'encre : choix definitif. Elle remplace le prune ET l'orange ; aucune
+     autre palette ne doit etre appliquee. » Cinq DENSITES du noir de la
+     charte. Aucune teinte : saturation 0 % sur les cinq valeurs.
+
+     ⚠ C'EST ICI LA SOURCE, ET NULLE PART AILLEURS. Les ecrans YieldFlow ne
+     chargent QUE cette feuille — mesure du 3 novembre 2026 sur les six :
+     aucun ne charge shared/theme.css. Les y mettre les aurait laisses
+     INDEFINIS, c'est-a-dire des niveaux sans couleur ; et faire charger
+     theme.css a ces pages aurait change --border ET --amber (#BA7517 ->
+     #F5A524), donc repeint la couleur RESERVEE et la nuit « fermee ».
+
+     ⚠ CINQ VALEURS, PAS DIX, et c'est ce qui change par rapport aux palettes
+     d'avant. Il n'y a plus d'« accent » par niveau : l'encre du texte est
+     --text pour les niveaux 1 a 4 et --bg pour le 5, le lisere est
+     --niveau-4 ou --niveau-5. Tout s'exprime en jetons DEJA la : aucun hexa
+     neuf n'entre nulle part.
+
+     Les cinq regles de Thierry, et ce qui les mesure :
+       1. le niveau colore la PASTILLE ou la CASE de grille, jamais la ligne
+          ni la page ;
+       2. le CHIFFRE est toujours ecrit (« 1 · Base » … « 5 · Exceptionnel ») ;
+          la couleur n'est qu'un repere ;
+       3. ambre = fermee / fait pour vous, vert = hausse, rouge = baisse.
+          Rien d'autre n'a de teinte — et le vert/rouge reste sur le PRIX,
+          jamais sur la pastille ;
+       4. pas de degrade ni de brillance ;
+       5. contraste texte/fond >= 4,5:1 sur les cinq.
+     tests/palette-niveaux.test.js les tient toutes les cinq.
+
+     ⚠ DEUX CORRECTIONS VALIDEES PAR THIERRY LE 3 NOVEMBRE, mesurees avant
+     d'etre proposees :
+       · le niveau 4 porte du texte NOIR (5,18:1) et non blanc (3,36:1, sous
+         son propre seuil de 4,5). Garder le blanc aurait demande de foncer
+         #8C8C8C jusqu'a #767676 ou moins ;
+       · les pastilles 1 a 3 portent un LISERE. Sans lui, leur fond ne dit
+         rien : 1,02 a 1,45:1 contre les quatre fonds de ligne reels, et le
+         filet d'origine de la pastille etait lui-meme a 1,19:1. Le lisere
+         est pris trois crans plus bas dans la MEME echelle : 3,14 a 13,35:1.
+
+     ⚠ CE QUE L'ECHELLE D'ENCRE GAGNE, ET CE QU'ELLE COUTE. Elle gagne la
+     PLACE : sans teinte, aucune collision possible avec l'ambre reserve, le
+     vert ou le rouge — ce que ni le prune (ΔE 19,2 de l'ambre) ni l'orange
+     (ΔE 5,9, et 4,3 pour la premiere version) ne pouvaient offrir. Elle coute
+     le BAS de l'echelle : --niveau-1 est a ΔE 1,0 du fond « nuit passee » et
+     --niveau-2 a ΔE 1,7 du fond des lignes de periode. Les regles 1 et 2 sont
+     exactement ce qui rend ce cout acceptable, et le lisere le referme.
+     Detail, mesures et historique des quatre rampes : docs/kb/charte-ui.md §3. */
+  --niveau-1: #F7F7F7;
+  --niveau-2: #EBEBEB;
+  --niveau-3: #D6D6D6;
+  --niveau-4: #8C8C8C;
+  --niveau-5: #222222;
+
+  /* La police du socle V5, pour les écrans YieldFlow qui la chargent.
+     ⚠ LE STACK EST ÉCRIT ICI UNE FOIS : six pages l'appliquent, et six
+     copies d'une liste de polices divergent. Il est identique à --font de
+     shared/theme.css — les deux feuilles ne se chargent pas ensemble sur les
+     écrans legacy, donc ce n'est pas un doublon utilisable, c'est le même
+     choix écrit dans les deux mondes. */
+  --font-v5: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
+
+/* ⚠ L'ECHELLE D'ENCRE : cinq densites du noir, aucune teinte. Les cinq
+   valeurs viennent de public/style.css et de nulle part ailleurs. Ici,
+   AUCUN hexa : l'encre du texte est --text (niveaux 1 a 4) ou --bg (le 5),
+   le lisere est une autre densite de la meme echelle. Tout en jetons
+   deja la.
+
+   ⚠ TOUT PASSE PAR DES PROPRIETES PERSONNALISEES — --niveau-fond,
+   --niv-encre, --niveau-lisere — ET C'EST UN CORRECTIF, PAS UN STYLE.
+   Mesure du 3 novembre 2026 dans un vrai navigateur, deux fois :
+     · pose en direct, `background` perdait contre
+       `.yp-niv { background: var(--bg) }` — meme specificite (0,1,0),
+       declare plus bas. Les CINQ cartes rendaient BLANC, et le niveau 5
+       affichait du blanc sur blanc ;
+     · pose en direct, `border` perdait contre
+       `.yp-niv-badge { border: 0.5px solid rgba(0,0,0,.08) }` — meme
+       piege, releve en review. Les SIX pastilles rendaient le filet
+       d'origine a 1,19:1 : la correction validee par Thierry etait
+       INERTE sur l'element meme qu'elle visait.
+   Une propriete personnalisee ne depend pas de l'ordre des regles : c'est
+   la valeur qui voyage, pas la declaration.
+
+   ⚠ ET LE LISERE EST SUR LA PASTILLE, PAS SUR LA CASE. Les cases de
+   grille sont deja separees par le `gap: 1px` sur fond `--border` de
+   .yp-niveaux : leur ajouter une bordure faisait un double filet, et le
+   niveau 5 n'en ayant pas, la bande montrait quatre contours et un sans.
+   La pastille, elle, en a besoin : son fond est a 1,02-1,45:1 des quatre
+   fonds de ligne reels. Chaque lisere est pris dans la MEME echelle, a au
+   moins 3:1 de son propre fond (3,14 / 13,35 / 10,95 / 4,73 / 10,95). */
+.n-base        { --niveau-fond: var(--niveau-1); background: var(--niveau-fond); --niv-encre: var(--text); color: var(--niv-encre); --niveau-lisere: var(--niveau-4); }
+.n-moyen       { --niveau-fond: var(--niveau-2); background: var(--niveau-fond); --niv-encre: var(--text); color: var(--niv-encre); --niveau-lisere: var(--niveau-5); }
+.n-haut        { --niveau-fond: var(--niveau-3); background: var(--niveau-fond); --niv-encre: var(--text); color: var(--niv-encre); --niveau-lisere: var(--niveau-5); }
+.n-tres-haut   { --niveau-fond: var(--niveau-4); background: var(--niveau-fond); --niv-encre: var(--text); color: var(--niv-encre); --niveau-lisere: var(--niveau-5); }
+.n-exceptionnel{ --niveau-fond: var(--niveau-5); background: var(--niveau-fond); --niv-encre: var(--bg);   color: var(--niv-encre); --niveau-lisere: var(--niveau-3); }
+
+/* ⚠ LA POLICE V5 SE DEMANDE, ELLE NE S'IMPOSE PAS. Cette feuille est chargée
+   par des écrans antérieurs à V5 que ce lot ne touche pas : changer le `body`
+   ci-dessous aurait changé la police de TOUS, pas des six écrans YieldFlow
+   demandés. La classe est donc posée page par page, avec le `<link>` qui
+   charge la fonte — sans le lien, la classe ne rendrait qu'un repli système. */
+body.police-v5 { font-family: var(--font-v5); }
+/* ⚠ ET LA POLICE S'ARRETAIT AUX CONTROLES — releve en review. `input`,
+   `select`, `button` et `textarea` n'heritent PAS `font-family` : ils prennent
+   celle de la feuille du NAVIGATEUR. Avant ce lot l'ecart etait invisible
+   (le repli `-apple-system` ressemble a une police d'interface) ; avec Plus
+   Jakarta Sans il se voit a cote de chaque libelle — et le selecteur de
+   logement est en tete de chacun des six ecrans.
+   `comparables.html` ne portait AUCUNE regle `font-family` : ses quatre
+   boutons, son selecteur et ses cinq champs restaient tous en police
+   navigateur. `:where()` garde la specificite a zero, donc n'importe quelle
+   regle de page continue de gagner. */
+body.police-v5 :where(input, select, button, textarea, optgroup) { font-family: inherit; }
+/* ⚠ LEAFLET POSE SA PROPRE POLICE, ET UN HERITAGE NE PEUT PAS LA BATTRE.
+   `leaflet.css` declare `font-family` sur `.leaflet-container` : une
+   declaration l'emporte toujours sur ce qui descend du parent, donc la regle
+   d'heritage ci-dessus ne l'atteignait pas. Releve en recette du 1er novembre
+   2026 sur l'ecran Comparables : l'etiquette « Votre logement », les boutons
+   de zoom + et − et les noms de communes restaient en Helvetica au milieu
+   d'une page en Plus Jakarta Sans.
+   On vise donc le conteneur ET ce qu'il contient : Leaflet re-declare la
+   police sur certains de ses controles. */
+body.police-v5 .leaflet-container,
+body.police-v5 .leaflet-container :where(a, div, span, button) { font-family: var(--font-v5); }
+
+/* ⚠ LE SELECTEUR DE LOGEMENT N'AVAIT AUCUNE REGLE SUR CINQ ECRANS SUR SIX
+   — releve en recette. `<select id="yp-bien">`, `cp-bien`, `mg-bien`,
+   `mt-bien`, `mc-bien` : apparence brute du navigateur, bord carre et fond
+   gris, a cote d'une page en Plus Jakarta Sans. Seul `yf-bien` portait une
+   largeur minimale.
+   ⚠ ET LA REGLE EST PORTEE PAR `body.police-v5`, PAS PAR `select` TOUT SEUL :
+   cette feuille sert aussi des ecrans anterieurs a V5 que ce lot ne touche
+   pas. Styler tous les `select` du socle legacy les aurait tous changes. */
+body.police-v5 .yf-champ select,
+body.police-v5 .yp-barre select,
+body.police-v5 select[id$="-bien"] {
+  height: 34px; padding: 0 10px;
+  border: 0.5px solid var(--border2); border-radius: var(--radius);
+  background: var(--bg); color: var(--text);
+  font-size: 13px; cursor: pointer; max-width: 100%;
+  /* ⚠ PAS DE `min-width` ICI — relevé en review. J'y avais mis 150px, et ce
+     sélecteur (0,2,2) bat la règle mobile de apps/yield/index.html (0,1,1), qui
+     pose `min-width: 0; width: 100%` sous 640px. Sous ~320px la barre
+     d'exploration retombait à un champ par ligne et les `select` cessaient de
+     se comporter comme les `input` de la même rangée.
+     Cette règle n'apporte que l'APPARENCE ; la taille reste l'affaire de chaque
+     écran, qui la connait mieux qu'une feuille partagée. */
+}
+body.police-v5 select[id$="-bien"]:hover { background: var(--bg2); }
+/* ⚠ PAS DE REGLE DE FOCUS ICI. Elle avait ete retiree quand `--blue`
+   n'existait pas sur l'arbre du socle (un `var()` sans repli aurait fait
+   disparaitre l'anneau EN SILENCE). Depuis que la chaine porte
+   `yf-ecran-periodes`, `--blue` est defini plus haut dans ce fichier : la
+   regle POURRAIT revenir — mais ce serait un changement visible, a recetter.
+   D'ici la, l'anneau du navigateur, qui est toujours la (review de la chaine,
+   8 novembre 2026). */
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

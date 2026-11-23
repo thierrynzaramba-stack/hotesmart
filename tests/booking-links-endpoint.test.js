@@ -20,7 +20,11 @@ function table (nom) {
   const q = { table: nom, filtres: {}, maj: null }
   etat.requetes.push(q)
   const chaine = {
-    select () { return chaine },
+    // ⚠ LES COLONNES SONT ENREGISTREES, et pas ignorees : c'est la seule facon
+    // de prouver qu'une liste de `select` porte bien une colonne dont depend une
+    // garde PURE. Le double rendait `chaine` sans rien retenir, donc les deux
+    // lectures de `properties` de cet endpoint n'etaient couvertes par rien.
+    select (champs) { q.champs = champs; return chaine },
     eq (c, v) { q.filtres[c] = v; return chaine },
     in (c, v) { q.filtres[c + '@'] = v; return chaine },
     order () { return chaine },
@@ -222,6 +226,48 @@ test('un bien qui ne peut pas vendre dit POURQUOI', async () => {
 
   reinit()
   assert.equal((await appeler('GET', {})).corps.biens[0].bloquant, null)
+})
+
+test("LE TEST QUI COMPTE : les DEUX lectures du bien demandent archive_le", async () => {
+  // ⚠ CE TEST EXISTE PARCE QUE `raisonNonVendable` EST PURE : elle juge l'objet
+  // qu'on lui donne. Une liste de `select` qui perd `archive_le` lui fait voir
+  // `undefined` sur un bien range, donc « ce bien peut vendre » — et le test de
+  // comportement juste en dessous resterait VERT, puisque le banc injecte la
+  // colonne a la main. Le depot a deja paye exactement cet oubli sur
+  // `base_price` : chaque creation de lien annoncait un bloquant a tort.
+  // Constat de la revue de 3ab472d9 : mon commentaire promettait ce test, il
+  // n'existait pas, et les deux lectures d'ici n'etaient couvertes par rien.
+  // On lit la requete REELLEMENT emise, jamais la source du module.
+  reinit()
+  await appeler('GET', {})
+  const liste = etat.requetes.find(x => x.table === 'properties')
+  assert.ok(liste && liste.champs, 'la liste GET ne lit pas properties')
+  assert.match(String(liste.champs), /\barchive_le\b/,
+    `la liste GET demande « ${liste.champs} » : archive_le n y est pas`)
+
+  reinit()
+  await appeler('POST', { bien: 'uuid-bien' }, { bien: 'uuid-bien', label: 'Site vitrine' })
+  const apres = etat.requetes.filter(x => x.table === 'properties' && x.champs)
+  assert.ok(apres.length >= 1, 'la creation ne relit pas le bien complet')
+  for (const q of apres) {
+    assert.match(String(q.champs), /\barchive_le\b/,
+      `une lecture de la creation demande « ${q.champs} » : archive_le n y est pas`)
+  }
+})
+
+test("LE TEST QUI COMPTE : un bien ARCHIVE est annonce bloquant a l hote", async () => {
+  // L'ecran de reservation directe affiche `bloquant` tel quel si le motif ne
+  // lui est pas connu — c'est le second constat de la revue de 3ab472d9, ou
+  // l'hote lisait la chaine technique « bien_archive » dans l'encadre rouge.
+  reinit({ archive_le: '2026-11-03T20:42:19.342Z' })
+  assert.equal((await appeler('GET', {})).corps.biens[0].bloquant, 'bien_archive')
+
+  // Et a la creation d'un lien : on n'interdit pas, on PREVIENT.
+  reinit({ archive_le: '2026-11-03T20:42:19.342Z' })
+  const r = await appeler('POST', { bien: 'uuid-bien' }, { bien: 'uuid-bien', label: 'Site vitrine' })
+  assert.equal(r.code, 200, 'la creation d un lien est refusee alors qu elle doit seulement prevenir')
+  assert.equal(r.corps.bloquant, 'bien_archive',
+    `le lien est cree en annoncant « ${r.corps.bloquant} »`)
 })
 
 test('la liste ne sort QUE les biens du compte', async () => {

@@ -209,3 +209,36 @@ test('la tâche de l’hôte porte un titre neutre, pas le prénom de la prestat
   await prevenirHote(sb, { evaluation: EVAL, prenomPrestataire: 'Regina', deps: { envoyer: async () => {} } })
   assert.strictEqual(etat.inserts[0].guest_name, 'Évaluation du voyageur')
 })
+
+// ─── PWA lot 2c-2 : l'hôte et son équipe par le point d'envoi (docs/kb/pwa.md §11.4) ──
+
+test('LE TEST QUI COMPTE (2c-2) : la prestataire a rempli → « évaluation à faire », une fois, avec son prénom et l\'échéance', async () => {
+  const { sb } = base()
+  const vus = []
+  const deps = { envoyer: async () => {}, notifierEvaluation: async (o) => { vus.push(o); return { ok: true } } }
+  await prevenirHote(sb, { evaluation: { ...EVAL, deadline_at: '2026-10-20T10:00:00Z' }, prenomPrestataire: 'Regina', deps })
+  await prevenirHote(sb, { evaluation: { ...EVAL, deadline_at: '2026-10-20T10:00:00Z' }, prenomPrestataire: 'Regina', deps })
+  assert.deepStrictEqual(vus.map(o => [o.compte, o.propertyRef, o.bookingUid, o.rempli, o.prestataire, o.echeance]),
+    [[EVAL.user_id, EVAL.property_id_ref, EVAL.booking_uid, true, 'Regina', '2026-10-20T10:00:00Z']])
+})
+
+test('(2c-2) les relances J-5 et J-1 préviennent aussi, et la J-1 se dit « dernier jour »', async () => {
+  const evaluations = [
+    { ...EVAL, booking_uid: 'BK-5', status: 'a_remplir', deadline_at: new Date(MAINTENANT + 4 * JOUR).toISOString() },
+    { ...EVAL, booking_uid: 'BK-1', status: 'a_valider', deadline_at: new Date(MAINTENANT + 0.5 * JOUR).toISOString() }
+  ]
+  const { sb } = base({ evaluations })
+  const vus = []
+  await relancerEvaluations(sb, { maintenant: MAINTENANT, deps: { envoyer: async () => {}, notifierEvaluation: async (o) => { vus.push(o); return { ok: true } } } })
+  assert.deepStrictEqual(vus.map(o => [o.bookingUid, o.rempli, o.derniere]).sort(), [['BK-1', false, true], ['BK-5', false, false]])
+  // L'horloge du cycle : « à publier avant » se juge contre ELLE (une échéance passée ne se dit pas).
+  assert.ok(vus.every(o => o.maintenant === MAINTENANT))
+})
+
+test('(2c-2) une notification qui lève ne défait pas la tâche', async () => {
+  const { etat, sb } = base()
+  const ok = await prevenirHote(sb, { evaluation: EVAL, prenomPrestataire: 'Regina',
+    deps: { envoyer: async () => {}, notifierEvaluation: async () => { throw new Error('boum') } } })
+  assert.strictEqual(ok, true)
+  assert.strictEqual(etat.inserts.length, 1)
+})

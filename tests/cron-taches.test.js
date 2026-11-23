@@ -30,11 +30,48 @@ const TACHES = [
   'refresh_tokens', 'biens_channel', 'file_sync_ari', 'backfill_messages',
   'poll_channel_feed', 'sonde_batteries', 'sonde_volume_messages',
   'sonde_evenements', 'sonde_croissance', 'sonde_surreservation',
-  'poll_avis_channel', 'poll_avis_beds24', 'classification_avis',
+  'poll_avis_channel',
+  // ⚠ AJOUTEE LE 27 OCTOBRE 2026 : le rattrapage des colonnes derivees des
+  // revenus, a 04:00 heure de PARIS. Placee la pour la meme raison que ses
+  // voisines — apres les sondes, avant le dispatch — et avec les memes
+  // garde-fous : marqueur pose AVANT le travail, budget mur, plafond de lignes
+  // par passage. L'ORDRE compte dans ce tableau : il est compare a la sequence
+  // reelle des appels, pas a un ensemble.
+  'revenus_derives',
+  'poll_avis_beds24', 'classification_avis',
   'detection_messages', 'rattacher_menages', 'sync_menages', 'expirer_offres',
   'propositions_dues', 'relance_validation', 'tentatives_bloquees',
-  'purge_tentatives', 'pilote_yieldflow', 'naissances_avis', 'relances_avis',
-  'auto_validation_avis', 'dispatch_changements',
+  'purge_tentatives', 'pilote_yieldflow',
+  // 28 octobre 2026 — le releve mensuel des comparables
+  // (spec-revenus-comparables). Place APRES le pilote, comme lui une tache
+  // a cadence lente qui ne traite qu'UN bien par passage.
+  'comparables_releves',
+  'naissances_avis', 'relances_avis',
+  'auto_validation_avis',
+  // ⚠ AJOUTEE LE 27 OCTOBRE 2026 (chantier « delai de reponse IA », lot 2) :
+  // les brouillons de reponse IA echus partent. Placee ICI, juste avant le
+  // dispatch, pour la raison qui gouverne tout ce tableau — elle ENVOIE (un
+  // appel provider par brouillon), et le dispatch est le poste le plus couteux
+  // du cycle. Elle porte son propre budget mur de 20 s et un plafond de 30 par
+  // cycle : le reliquat part au cycle suivant, avec son echeance intacte.
+  'brouillons_dus',
+  // ⚠ AJOUTEE LE 8 NOVEMBRE 2026 (PWA lot 2c-1) : les notifications qui
+  // attendaient la fin des heures calmes partent, regroupees par personne.
+  // Juste apres les brouillons et avant le dispatch : elle ENVOIE aussi.
+  'notifications_file',
+  // ⚠ AJOUTEE LE 10 NOVEMBRE 2026 (lot Avis V5, etape 2) : les trois chiffres
+  // de la page Avis, calcules a 06:00 et 18:00 heure de Paris et pour le
+  // logement neuf. APRES les classifications (un verdict frais compte), AVANT
+  // le dispatch, avec un budget mur de 10 s et un plancher de 25 s laisse au
+  // reste du cycle.
+  'resume_avis',
+  // ⚠ AJOUTEE LE 11 NOVEMBRE 2026 (spec avis-v5 spec-traduction-avis.md) : les
+  // traductions des avis. APRES les classifications (l'extrait est traduit
+  // dans le meme appel), AVANT le dispatch, budget mur de 12 s, plancher de
+  // 25 s, et le plafond de cout decide par Thierry (10 par passage, 100 par
+  // jour, zero si la file est vide).
+  'traduction_avis',
+  'dispatch_changements',
   // Dette 59, 19 octobre 2026 — la seule entree neuve de ce lot.
   'releve_canaux'
 ]
@@ -89,4 +126,12 @@ test('le releve des canaux est borne en temps et en nombre', () => {
 
 test('le cycle journalise son bilan de canaux dans results', () => {
   assert.match(source, /results\.canaux = /)
+})
+
+// PWA lot 2c-1 (seconde review) : la passe de la file reçoit le budget du cycle.
+// Sans lui, elle enverrait jusqu'à son plafond même quand le cycle n'a plus le
+// temps — et un groupe pris serait perdu au moment où la fonction est tuée.
+test('la passe de la file des notifications reçoit le budget du cycle', () => {
+  const bloc = source.slice(source.indexOf("chrono.mesure('notifications_file'"))
+  assert.match(bloc.slice(0, 400), /viderFileNotifications\(\{\s*resteMs:\s*\(\)\s*=>\s*55000 - chrono\.total\(\)\s*\}\)/)
 })

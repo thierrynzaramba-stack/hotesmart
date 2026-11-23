@@ -25,24 +25,24 @@ const CLES = [...new Set(STATIQUES)].sort()
 
 // ⚠ LE COMPTE EST L'ASSERTION. Sans lui, un motif d'extraction casse par une
 // reecriture de nav.js rendrait une liste VIDE, et un test vert sur rien.
-test('LE TEST QUI COMPTE : shared/nav.js porte 15 cles, et les voici', () => {
-  assert.equal(CLES.length, 15, `cles lues : ${CLES.join(', ')}`)
+test('LE TEST QUI COMPTE : shared/nav.js porte 16 cles, et les voici', () => {
+  assert.equal(CLES.length, 16, `cles lues : ${CLES.join(', ')}`)
   assert.deepEqual(CLES, [
     'nav.account', 'nav.account_menu', 'nav.account_mine', 'nav.account_shared',
-    'nav.calendar', 'nav.cleaning', 'nav.help', 'nav.language', 'nav.logout',
+    'nav.calendar', 'nav.charges', 'nav.cleaning', 'nav.help', 'nav.language', 'nav.logout',
     'nav.messages', 'nav.properties', 'nav.reviews', 'nav.settings', 'nav.today',
     'nav.tools'
   ])
 })
 
-test('LE TEST QUI COMPTE : les 15 cles existent dans les TROIS langues', () => {
+test('LE TEST QUI COMPTE : les 16 cles existent dans les TROIS langues', () => {
   for (const code of LANGUES) {
     const manquantes = CLES.filter(k => !(k in TRADS[code]))
     assert.deepEqual(manquantes, [], `${code}.json`)
   }
 })
 
-test('aucune des 15 n est traduite par une chaine vide', () => {
+test('aucune des 16 n est traduite par une chaine vide', () => {
   for (const code of LANGUES) {
     for (const k of CLES) {
       assert.ok(String(TRADS[code][k]).trim().length > 0, `${code}.json : ${k} est vide`)
@@ -73,17 +73,19 @@ test('LE TEST QUI COMPTE : tout `data-i18n` tombe dans un des deux comptes', () 
   const statiques = toutes(/data-i18n="([^"$]+)"/g).length
   assert.equal(poses, statiques + DYNAMIQUES.length,
     `${poses} data-i18n poses, ${statiques} statiques + ${DYNAMIQUES.length} interpoles comptes : une forme MIXTE echappe aux deux`)
-  assert.equal(poses, 12)
+  // 13 depuis le 10 novembre 2026 : l'entree « Charges » du menu (compte de
+  // charges, lot 3).
+  assert.equal(poses, 13)
   assert.equal((NAV.match(/data-i18n-attr/g) || []).length, 2)
 })
 
-// et aucune des 15 ne doit porter la trace d'une interpolation
-test('les 15 cles ont la forme d une cle, pas d un gabarit', () => {
+// et aucune des 16 ne doit porter la trace d'une interpolation
+test('les 16 cles ont la forme d une cle, pas d un gabarit', () => {
   for (const k of CLES) assert.match(k, /^[\w.]+$/, `cle suspecte : ${k}`)
 })
 
 // `${n.key}` ne peut valoir que les cles du tableau des entrees, qui sont dans
-// les 15 ci-dessus. Reste `${esc(o.key)}` : la section « Outils », dont les
+// les 16 ci-dessus. Reste `${esc(o.key)}` : la section « Outils », dont les
 // cles viennent de l'APPELANT. On va les chercher chez lui.
 // ⚠ CONSTAT DE LA REVUE : cette liste etait RECOPIEE, exactement le defaut que
 // le commentaire en tete de ce fichier denonce. Une cinquieme page qui passerait

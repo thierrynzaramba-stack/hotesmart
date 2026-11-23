@@ -294,19 +294,24 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         completed_at: new Date().toISOString()
       })
       .eq('user_id', user.id);
-    // Seed des alertes : email du compte active par defaut (canal universel, cle plateforme).
+    // Seed du MODE de chaque bien (« Je valide chaque reponse » par defaut).
     // Best-effort, non bloquant : on ne retarde/casse jamais la fin d'onboarding pour ca.
-    try { await seedAlertConfig(); } catch (e) { console.error('[onboarding] seed alertes:', e); }
+    try { await seedAlertConfig(); } catch (e) { console.error('[onboarding] seed mode:', e); }
     markOnboardingCompleted();
     // Plus aucune demande de paiement en fin d'onboarding : acces direct au tableau de bord.
     window.location.replace('/logements');
   }
 
-  // Prerempli agent_alert_config pour chaque bien : email d'alerte = email du compte,
-  // email_enabled=true (canal par defaut). N'ecrase JAMAIS une config existante (merge).
+  // Prerempli agent_alert_config pour chaque bien : le MODE seulement (`test`).
+  // N'ecrase JAMAIS une config existante (merge).
+  //
+  // ⚠ IL NE PREREMPLIT PLUS DE LISTE D'ALERTES (PWA lot 2c-3, etape 4 ;
+  // docs/kb/pwa.md §12.4). Il posait l'e-mail du compte dans les deux listes de
+  // chaque bien : le titulaire est desormais prevenu par SES reglages (e-mail
+  // coche par defaut pour les urgences et l'info manquante), et une liste en
+  // plus le ferait prevenir deux fois. Le serveur refuse d'ailleurs toute liste
+  // apportee (api/agent-config.js, cles reservees).
   async function seedAlertConfig() {
-    const email = user?.email || '';
-    if (!email) return;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     const auth = { 'Authorization': 'Bearer ' + session.access_token };
@@ -326,18 +331,11 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     } catch {}
     if (!props.length) return;
 
-    const TYPES = ['intervention', 'info_unknown'];
     let changed = false;
     for (const p of props) {
       const pid = String(p.provider_property_id || p.id);
       if (!config[pid]) { config[pid] = {}; changed = true; }
       if (!config[pid].mode) { config[pid].mode = 'test'; changed = true; }
-      for (const t of TYPES) {
-        if (!config[pid][t]) {
-          config[pid][t] = { sms_enabled: false, sms_lines: '', email_enabled: true, email_lines: email };
-          changed = true;
-        }
-      }
     }
     if (!changed) return;
 

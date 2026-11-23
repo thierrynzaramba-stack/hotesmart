@@ -23,8 +23,9 @@ saisie en bas), où **l'IA est un participant visible**, jamais un panneau à pa
 - ce qu'elle a envoyé porte une petite icône robot sous la bulle ;
 - ce qu'elle propose apparaît **dans le fil**, à sa place chronologique, comme une
   bulle en pointillés avec deux boutons : **Envoyer** / **Modifier** ;
-- l'hôte règle son autonomie au même endroit : un interrupteur Test / Auto par bien,
-  un lien « ce qu'il valide seul ».
+- l'hôte règle son autonomie au même endroit : ~~un interrupteur Test / Auto par
+  bien, un lien « ce qu'il valide seul »~~ → **un DÉLAI par bien** (chantier
+  « délai de réponse IA »), et plus aucun « Auto » à l'écran (voir § Inventaire).
 
 Règle gravée : **« Envoyer » envoie, « Voir » ouvre.** Un bouton ne porte jamais un
 verbe qu'il n'exécute pas.
@@ -257,3 +258,13 @@ pages actives : `knowledge.html` ET `analyze.html` (celle-ci avec sa lecture
 - « Ce qu'il valide seul » (spec §2) : en Auto, l'IA envoie seule `sympathy`
   et `info_known` ; `intervention` et `info_unknown` restent à l'hôte —
   aujourd'hui, un paragraphe d'aide, pas un réglage.
+  ⚠ **RETIRÉ LE 28 OCTOBRE 2026, sur demande de Thierry en recette** :
+  « plus aucun „Auto“ à l'écran ». Le paragraphe décrivait un MODE, et il n'y a
+  plus de mode — il y a un délai, que la pilule et son aide disent déjà. La clé
+  `messages.auto_scope` est supprimée des trois dictionnaires, avec
+  `mode_auto`, `mode_test` et `mode_label` (zéro appelant mesuré), et la ligne
+  correspondante est sortie de l'inventaire de
+  `tests/messages-v5.test.js`. **Le FOND, lui, n'est pas perdu** : ce que l'IA
+  envoie seule reste `sympathy` + `info_known` dans `lib/cron-classify.js`, et
+  `intervention` / `info_unknown` reviennent toujours à l'hôte — c'est
+  l'AFFICHAGE de la règle qui disparaît, pas la règle.

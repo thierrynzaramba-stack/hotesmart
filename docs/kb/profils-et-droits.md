@@ -1119,6 +1119,28 @@ policy de lecture. Test : « un JETON DE PRESTATAIRE est refusé par le writer d
 visibilité » (`tests/disponibilites-visibilite.test.js`), qui rougit si la
 garde de session est retirée.
 
+## L'évaluation du voyageur montre le séjour évalué au droit `avis` (9 novembre 2026)
+
+**Décision de Thierry du 9 novembre 2026 (option 2) : pour évaluer quelqu'un, il
+faut savoir de qui on parle.** Un membre `avis` (lecture ou écriture) sans
+`reservations` voit, **pour un séjour qui porte une évaluation, et pour lui
+seul**, le nom du voyageur, les dates du séjour et la prestataire du ménage :
+- la liste des évaluations (`api/avis.js`, `evaluationsLister`, action `evaluations`) ;
+- les cartes de la page Avis qui portent une évaluation (`lib/avis/cartes.js`,
+  `montreSejour = Boolean(e) || voitSejours`, servies par `/api/ecran/avis`).
+
+Ce qui **reste sous `reservations`** : une carte d'**avis seul** (sans évaluation)
+dit « reçu le … », sans nom ni dates (`voitSejours`, bloc `CHAMPS_AVEC_SEJOUR` de
+`api/avis.js`). Et l'action `sejours` (liste nominative des occupants d'un bien,
+pour la saisie) exige `avis: write` — sa dette assumée reste écrite dans
+`api/avis.js`.
+
+**Origine.** Une review du lot PWA 2c (hors de son lot) a relevé comme défaut de
+sécurité que la liste des évaluations envoyait ces trois informations à un membre
+sans `reservations`. La règle était déjà écrite dans `lib/avis/cartes.js`
+(« on évalue quelqu'un ») mais pas tranchée par Thierry : elle l'est. **Ce n'est
+pas un défaut, ne pas le « corriger »** sans nouvelle décision de sa part.
+
 ---
 
 ## §13. Un masquage par droit n'est pas une garde — audit du 19 octobre 2026

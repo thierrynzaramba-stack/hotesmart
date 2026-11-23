@@ -3,11 +3,13 @@ const { createClient } = require('@supabase/supabase-js')
 const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 // Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
+const { archivesEpuisees } = require('../lib/biens-vivants')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, filtresAttribution, MAX_IDS } = require('../lib/attribution-prestataire')
 const { alertMenageRefuse, alertReglesModifiees, alertPlageModifiee } = require('../lib/alert-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 const { colonneAbsente } = require('../lib/colonne-absente')
+const traductionAvis = require('../lib/avis/traduction')
 // Le moteur de garde (lot 3.3) : c'est LUI qui dit qui remplace, jamais un
 // « rang 2 » lu en dur — un rang 2 en conge ou non attitre ce jour-la n'est pas
 // la remplacante de ce jour.
@@ -569,9 +571,18 @@ module.exports = async function handler(req, res) {
     // ecrites AVANT l'unification : elles portent le statut BRUT du provider et
     // aucun champ `provider`. Sans ce defaut, un blocage proprietaire Beds24
     // ('black') retomberait sur le fallback 'confirmed' -> menage fantome.
+    // ⚠ L'APP DE LA PRESTATAIRE SUIT LA MEME REGLE QUE L'ECRAN DE L'HOTE, et
+    // par le MEME module : un bien archive reste tant qu'il a un depart a venir
+    // (decision de Thierry du 3 novembre 2026). Un `sansArchives` ici retirait
+    // de son planning un menage prevu demain sur un sejour deja vendu.
+    //
+    // ⚠ `archive_le` EST DONC SELECTIONNEE : la regle est pure, elle juge
+    // l'objet qu'on lui donne, et sans cette colonne elle voit `undefined`
+    // partout — donc aucun bien archive, donc aucun retrait. Le defaut serait
+    // silencieux et le test vert si le banc injectait la colonne a la main.
     const { data: propRows, error: errProps } = await supabase
       .from('properties')
-      .select('provider_property_id, name, provider, checkout_time, photo_url')
+      .select('provider_property_id, name, provider, checkout_time, photo_url, archive_le')
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null)
     // ⚠ L'ERREUR ETAIT AVALEE, trois instructions avant la garde `errSnaps`.
@@ -589,7 +600,8 @@ module.exports = async function handler(req, res) {
     const properties = (propRows || [])
       .filter(p => !allowedIds.length || allowedIds.includes(String(p.provider_property_id)))
       .map(p => ({ id: String(p.provider_property_id), name: p.name, provider: p.provider,
-                   checkout_time: p.checkout_time, photo: p.photo_url || null }))
+                   checkout_time: p.checkout_time, photo: p.photo_url || null,
+                   archive_le: p.archive_le || null }))
     const propNameById = {}
     const propProviderById = {}
     properties.forEach(p => { propNameById[p.id] = p.name; propProviderById[p.id] = p.provider })
@@ -728,6 +740,11 @@ module.exports = async function handler(req, res) {
     const menagesAssignes = mn || []
     const siens = new Set((mn || []).map(m =>
       `${String(m.property_id)}|${String(m.booking_id)}|${m.departure_date}`))
+    // ⚠ LES SEJOURS RETENUS DES BIENS DU JETON, AVANT le filtre par personne.
+    // Ils ne sortent JAMAIS dans la reponse : ils servent seulement a savoir si
+    // un bien ARCHIVE a encore un depart a venir (constat 2 de la revue du
+    // 7 novembre 2026, voir `archivesEpuisees` plus bas).
+    const sejoursDesBiens = allBookings
     // ⚠ LE FILTRE S'APPLIQUE DANS LES DEUX CAS. Un seul chemin non filtre
     // suffisait a rouvrir la fuite ; il n'y en a plus.
     allBookings = allBookings.filter(b =>
@@ -939,6 +956,35 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    // ⚠ LES BIENS ARCHIVES SANS DEPART A VENIR SORTENT DU PLANNING, et ici
+    // seulement : il faut les reservations pour savoir s'il reste un depart.
+    // ⚠ LE DERNIER DEPART EST CELUI DU BIEN, PAS CELUI DE SES MENAGES A ELLE —
+    // constat 2 de la revue du 7 novembre 2026. Ma premiere version lisait
+    // `allBookings`, deja reduit aux menages de CETTE prestataire : une
+    // prestataire sans menage sur le bien le voyait « epuise », et le menage
+    // « a prendre » a J+4 que personne ne porte — exactement celui qu'il faut
+    // prendre — disparaissait. La decision de Thierry dit « jusqu'au DERNIER
+    // DEPART » du bien. On lit donc les sejours retenus du bien, et les departs
+    // des menages a prendre.
+    const departsParBien = {}
+    const noterDepart = (cle, dep) => {
+      if (!cle || !dep) return
+      ;(departsParBien[cle] = departsParBien[cle] || []).push(String(dep))
+    }
+    for (const b of sejoursDesBiens) if (b) noterDepart(b.propId, b.departure)
+    for (const m of (aPrendre || [])) if (m) noterDepart(String(m.propId || m.property_id), m.departure_date)
+    const biensEpuises = archivesEpuisees({
+      biens: properties.map(p => ({ cle: p.id, archive_le: p.archive_le })),
+      departs: departsParBien,
+      aujourdhui: new Date().toISOString().slice(0, 10)
+    })
+    if (biensEpuises.size) {
+      // ⚠ LES DEUX LISTES PARTENT ENSEMBLE : un menage « a prendre » dont le
+      // bien a disparu du planning s'afficherait sans nom de logement.
+      allBookings = allBookings.filter(b => !biensEpuises.has(b.propId))
+      aPrendre = (aPrendre || []).filter(m => !biensEpuises.has(String(m.propId || m.property_id)))
+    }
+
     return res.json({
       bookings: allBookings, label: tokenData.label,
       // Les menages que personne ne porte, sur ses biens. Voir le bloc plus haut
@@ -1035,6 +1081,50 @@ function extraitEstPrive (a) {
   // Ni l'un ni l'autre : extrait a cheval, ou texte modifie depuis l'analyse.
   // On etiquette, c'est le defaut sur.
   return true
+}
+
+// ⚠ L'EXTRAIT TRADUIT EN FRANCAIS (decision de Thierry du 11 novembre 2026,
+// spec avis-v5 spec-traduction-avis.md §3.5) : l'application de la
+// prestataire n'existe qu'en francais, elle lit donc la version francaise d'un
+// extrait ecrit dans une autre langue, l'original a un clic.
+//
+// ⚠ L'EXTRAIT SEUL, comme avant : la traduction du texte public et celle du
+// retour prive ne sortent JAMAIS d'ici — seul `textes.extrait` est lu.
+//
+// ⚠ UNE LECTURE A PART, AJOUTEE (le lot 2 PWA tient la lecture des avis de ce
+// fichier ; on n'en reecrit aucune ligne). Elle ne coupe rien : en echec, ou
+// avant la migration, la liste sort telle quelle, sans traduction. `content`
+// n'y sert qu'a l'empreinte, cote serveur : une traduction PERIMEE n'est jamais
+// servie (lib/avis/traduction.js, `traductionPour`).
+let repliTraductionDit = false
+async function ajouterExtraitsTraduits (userId, avis, lignes) {
+  const avecExtrait = new Map((lignes || []).filter(l => l && l.ai_clean_excerpt).map(l => [String(l.id), l]))
+  if (!avecExtrait.size || !Array.isArray(avis)) return
+  const { data, error } = await supabase.from('ota_reviews')
+    .select('id, content, traduction:avis_traductions(empreinte, textes)')
+    .eq('user_id', userId).in('id', [...avecExtrait.keys()])
+  if (error) {
+    if (String(error.code) !== 'PGRST200' && !traductionAvis.migrationAbsente(error)) {
+      console.error('[menages-public] extraits traduits echec:', error.message)
+    } else if (!repliTraductionDit) {
+      // Le repli se dit, une fois par instance (revue du lot, constat 6).
+      repliTraductionDit = true
+      console.warn('[menages-public] traductions illisibles, extraits servis sans elles :', error.code || error.message)
+    }
+    return
+  }
+  const parId = new Map((data || []).map(d => [String(d.id), d]))
+  for (const a of avis) {
+    const l = avecExtrait.get(String(a.id))
+    const d = parId.get(String(a.id))
+    if (!l || !d) continue
+    const ligne = { content_public: l.content_public, content: d.content, content_private: l.content_private, ai_clean_excerpt: l.ai_clean_excerpt }
+    const tr = traductionAvis.traductionPour(ligne, Array.isArray(d.traduction) ? d.traduction[0] : d.traduction, 'fr')
+    if (tr && tr.extrait) {
+      a.extraitTraduit = tr.extrait.texte
+      a.extraitLangue = tr.extrait.source
+    }
+  }
 }
 
 // ─── Vue « Avis » de la prestataire (spec-prestataires-menage §6) ───────────
@@ -1679,6 +1769,9 @@ async function avisDeLaPrestataire (req, res, token) {
         // « 287031 » ne dit rien a une femme de menage.
         bienNom: null
       }))
+      // L'extrait en francais quand il est ecrit dans une autre langue (spec
+      // avis-v5 spec-traduction-avis.md §3.5).
+      await ajouterExtraitsTraduits(userId, avis, data)
 
       // Le nom lisible du bien. Il ne peut PAS etre resolu par le front : sa
       // liste de biens est construite a partir des reservations de la fenetre
@@ -2150,6 +2243,16 @@ async function retirerMonMenage (req, res, token, { propertyId, bookingId, depar
   if (errLog) {
     console.error('[menages-public] trace de retrait NON ECRITE:', menage.id, errLog.message)
   }
+  // PWA lot 2c-2 (docs/kb/pwa.md §11.3) : le logement n'a plus personne —
+  // l'hote et les membres qui ont le domaine `menages` sur ce bien l'apprennent
+  // comme un « Menage refuse » (decision de Thierry du 9 novembre 2026). Une
+  // fois : le retrait n'arrive qu'une fois (l'ecriture conditionnee ci-dessus).
+  // Ne leve jamais, et ATTENDUE avant la reponse (une fonction serverless peut
+  // etre coupee apres).
+  await require('../lib/notifications/evenements-menages').notifierMenageRefuse({
+    compte: pt.user_id, propertyId: String(propertyId), jour: departureDate,
+    prestataire: profil.first_name || null, db: supabase
+  })
   return res.json({ success: true, status: 'orphaned' })
 }
 

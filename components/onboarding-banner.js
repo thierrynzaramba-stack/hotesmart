@@ -95,7 +95,65 @@ export async function renderOnboardingBanner() {
   close.setAttribute('aria-label', 'Fermer')
   close.innerHTML = '&times;'
   close.style.cssText = 'position:absolute;right:10px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#fff;font-size:22px;line-height:1;cursor:pointer;opacity:0.7;padding:0 6px;'
-  close.addEventListener('click', () => { try { sessionStorage.setItem(DISMISS_KEY, '1') } catch {}; bar.remove() })
+  // ⚠ LE BANDEAU PUBLIE SA HAUTEUR, parce que quelqu'un se tient dessous.
+  // Il est `position: sticky; top: 0`, donc il occupe le haut de l'ecran ; le
+  // bouton ☰ de la barre laterale est `position: fixed; top: 14px` avec un
+  // z-index superieur, et il lui passait DESSUS. Constate en recette le
+  // 1er novembre 2026 sur telephone, capture a l'appui : le ☰ recouvrait
+  // « Finalisez la configuration de votre compte ».
+  //
+  // ⚠ ET LA HAUTEUR SE MESURE, ELLE NE SE DEVINE PAS : le bandeau porte
+  // `flex-wrap`, donc il passe sur deux ou trois lignes selon la largeur et la
+  // longueur du message. Une valeur en dur aurait ete juste sur un telephone
+  // et fausse sur le suivant.
+  const publierHauteur = () => {
+    const h = bar.isConnected ? Math.ceil(bar.getBoundingClientRect().height) : 0
+    document.documentElement.style.setProperty('--bandeau-h', h + 'px')
+  }
+
+  let observateur = null
+  close.addEventListener('click', () => {
+    try { sessionStorage.setItem(DISMISS_KEY, '1') } catch {}
+    // ⚠ ON DEBRANCHE AVANT DE RETIRER — releve en review. Sans
+    // `disconnect()`, l'observateur garde une reference sur un nœud detache,
+    // et la branche de repli garde un ecouteur `resize` qui fait vivre la
+    // fermeture, et `bar` avec elle, aussi longtemps que la page. Un nœud par
+    // chargement, pas un par interaction : ca ne grandissait pas, mais ca ne
+    // coute qu'une ligne a fermer.
+    if (observateur) { observateur.disconnect(); observateur = null }
+    else window.removeEventListener('resize', publierHauteur)
+    bar.remove()
+    // Le bandeau parti, ce qui se decalait doit revenir en place.
+    publierHauteur()
+  })
+
   bar.appendChild(msg); bar.appendChild(link); bar.appendChild(close)
   document.body.insertBefore(bar, document.body.firstChild)
+
+  // ⚠⚠ ON PUBLIE APRES L'INSERTION, ET PAS AVANT — releve en review, et mon
+  // correctif ne corrigeait RIEN sans ca. La seule publication synchrone avait
+  // lieu quand `bar` n'etait ni rempli ni insere : `isConnected` etait faux,
+  // elle ecrivait donc `0px`. Le ☰ continuait de recouvrir « Finalisez la
+  // configuration de votre compte » — exactement la recette du 1er novembre
+  // 2026 que ce lot dit fermer.
+  // Avec `ResizeObserver` la vraie hauteur finissait par partir au premier
+  // declenchement ; sur la branche de repli, RIEN ne la publiait avant un
+  // redimensionnement de fenetre. Deux chemins, un seul reparable : mesurer
+  // quand il y a quelque chose a mesurer.
+  publierHauteur()
+  if (typeof ResizeObserver === 'function') {
+    observateur = new ResizeObserver(publierHauteur)
+    observateur.observe(bar)
+  } else {
+    window.addEventListener('resize', publierHauteur)
+  }
+
+  // ⚠ UN RETRAIT DU BANDEAU PAR UN AUTRE CHEMIN NE REPUBLIERAIT RIEN.
+  // Aujourd'hui `bar.remove()` n'existe qu'au-dessus, dans le bouton de
+  // fermeture : le cas n'existe pas. Le jour ou un re-rendu retirera ce nœud
+  // autrement, `--bandeau-h` restera a sa derniere valeur et le ☰ flottera
+  // dans le vide. Ce qui fermerait la classe : un `MutationObserver` sur le
+  // parent, ou un ☰ qui relit `isConnected` plutot que de faire confiance a
+  // une variable. Nomme ici plutot que corrige : on ne batit pas un garde-fou
+  // pour un chemin qui n'existe pas encore.
 }

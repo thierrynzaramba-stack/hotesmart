@@ -21,6 +21,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { isActiveStatus } = require('../lib/bookings-snapshot')
+const { archivesEpuisees } = require('../lib/biens-vivants')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
@@ -107,15 +108,25 @@ module.exports = async function handler(req, res) {
 
   try {
     // ===== BIENS (tous providers) =====
-    let qProps = supabase
+    // ⚠ UN BIEN ARCHIVE EST LU, ET SON SORT SE DECIDE EN AVAL. Point 4 du
+    // constat de Thierry du 3 novembre 2026, AFFINE par sa decision du meme
+    // jour : les menages des sejours DEJA VENDUS d'un bien archive restent
+    // visibles jusqu'au dernier depart.
+    //
+    // ⚠ UN `sansArchives` ICI SERAIT FAUX, et c'etait ma premiere version : il
+    // retirait du planning un menage prevu demain sur un sejour deja vendu. Or
+    // l'archivage est autorise avec des sejours a venir — leurs codes d'acces
+    // continuent de fonctionner, donc le voyageur arrive, donc il faut nettoyer
+    // apres lui. La regle est dans `archivesEpuisees`, en un seul exemplaire.
+    let qProps = (supabase
       .from('properties')
       // `id` (UUID) est indispensable a l'ecran Prestataires : `/api/membres`
       // attend `permissions.property_ids` en UUID, alors que tout le domaine
       // menage raisonne en `provider_property_id`. Les deux sont donc exposes,
       // sous deux noms distincts — les confondre est le piege n°1 du depot.
-      .select('id, provider_property_id, name, provider')
+      .select('id, provider_property_id, name, provider, archive_le')
       .eq('user_id', userId)
-      .not('provider_property_id', 'is', null)
+      .not('provider_property_id', 'is', null))
     if (filtreRef) qProps = qProps.or(filtreRef)
     const { data: propRows, error: propErr } = await qProps
       .order('name', { ascending: true })
@@ -130,7 +141,11 @@ module.exports = async function handler(req, res) {
       id:       String(p.provider_property_id),
       uuid:     p.id,
       name:     p.name || `Bien ${p.provider_property_id}`,
-      provider: p.provider || null
+      provider: p.provider || null,
+      // ⚠ PORTEE JUSQU'A L'ECRAN : c'est elle qui permet de marquer la ligne
+      // « archive » pendant la periode ou le bien reste visible. Sans elle,
+      // l'hote verrait un bien range sans savoir qu'il l'est.
+      archive_le: p.archive_le || null
     }))
     if (!properties.length) {
       console.log(t.ligne(' -> aucun bien'))
@@ -359,9 +374,34 @@ module.exports = async function handler(req, res) {
       else liaisons = lia || []
     }
 
+    // ⚠ LES BIENS ARCHIVES SANS DEPART A VENIR SORTENT ICI, et pas avant : il
+    // faut les reservations pour savoir s'il reste un depart. `bookings` est
+    // deja filtre sur le statut canonique — seul un sejour non annule donne
+    // lieu a un menage —, donc ses departs sont exactement ceux qui comptent.
+    const departs = {}
+    for (const b of bookings) {
+      if (!b.departure) continue
+      ;(departs[b.propId] = departs[b.propId] || []).push(String(b.departure))
+    }
+    const epuises = archivesEpuisees({
+      biens: properties.map(p => ({ cle: p.id, archive_le: p.archive_le })),
+      departs,
+      aujourdhui: new Date().toISOString().slice(0, 10)
+    })
+    // ⚠ ON RETIRE LE BIEN **ET** CE QUI S'Y RATTACHE : une ligne de menage dont
+    // le bien a disparu de la liste s'affiche sans nom, et le calendrier la
+    // place sous un en-tete vide. Les quatre collections partent ensemble.
+    const vivants = properties.filter(p => !epuises.has(p.id))
+    const bookingsVivants = bookings.filter(b => !epuises.has(b.propId))
+    const menagesVivants = menages.filter(m => !epuises.has(String(m.property_id)))
+    const liaisonsVivantes = liaisons.filter(l => !epuises.has(String(l.property_id)))
+
     t.top('mapping')
-    console.log(t.ligne(` biens=${properties.length} resas=${bookings.length} menages=${menages.length}${tronque ? ' TRONQUE' : ''}`))
-    return res.status(200).json({ properties, bookings, tronque, menages, prestataires, liaisons, rapprochement })
+    console.log(t.ligne(` biens=${vivants.length} resas=${bookingsVivants.length} menages=${menagesVivants.length}${tronque ? ' TRONQUE' : ''}${epuises.size ? ` archives_epuises=${epuises.size}` : ''}`))
+    return res.status(200).json({
+      properties: vivants, bookings: bookingsVivants, tronque,
+      menages: menagesVivants, prestataires, liaisons: liaisonsVivantes, rapprochement
+    })
   } catch (err) {
     // Une requete qui rame PUIS echoue est le cas le plus interessant a
     // diagnostiquer : il doit loguer son chrono comme les autres.
@@ -1344,8 +1384,17 @@ async function ecrireLiaisons (req, res) {
                    requiresAck: l && l.requires_ack !== undefined ? l.requires_ack : undefined })
   }
 
+  // ⚠ CELLE-CI N'EST **PAS** FILTREE, ET C'EST RAISONNE. Elle VALIDE les
+  // references d'une ecriture — l'assignation des prestataires de menage —, et
+  // un prestataire peut porter dans ses biens un logement archive depuis. La
+  // filtrer ferait rejeter cette reference, donc refuser l'enregistrement
+  // ENTIER : l'hote ne pourrait plus toucher a ses prestataires tant qu'il n'a
+  // pas devine lequel de ses biens coince. Une liste d'ecran se filtre, une
+  // garde d'appartenance jamais.
   const { data: biensDuCompte, error: errBiens } = await supabase.from('properties')
-    .select('provider_property_id').eq('user_id', userId)
+    // `archive_le` : voir « les liaisons d'un bien archive ne se desactivent
+    // pas » plus bas.
+    .select('provider_property_id, archive_le').eq('user_id', userId)
     .not('provider_property_id', 'is', null)
   if (errBiens) {
     console.error('[menages] lecture biens echec', errBiens.message)
@@ -1368,6 +1417,23 @@ async function ecrireLiaisons (req, res) {
   // C'est REVIEW.md regle 11 dans l'autre sens : la donnee client agissait sur
   // des ressources qu'elle ne designe pas.
   const gardees = voulues.map(v => v.ref)
+  // ⚠ LES LIAISONS D'UN BIEN ARCHIVE NE SE DESACTIVENT PAS ICI — constat 6 de
+  // la revue du 7 novembre 2026. Apres son dernier depart, un bien archive
+  // quitte l'ecran des prestataires : l'hote ne peut donc ni le voir ni le
+  // decocher, et l'enregistrement (qui REMPLACE la liste) le retirait en
+  // silence. Reactive un jour, le bien n'avait plus personne, et ses menages
+  // naissaient non assignes, sans alerte (un bien sans liaison n'est pas en
+  // panne). On ne retire pas a l'aveugle ce qu'on n'a pas montre.
+  // ⚠ ET `public_tokens.property_ids` SUIT, puisqu'il se calcule sur les
+  // liaisons REELLEMENT actives apres ecriture (`apres`, plus bas).
+  // ⚠ SEULES LES REFERENCES SURES entrent dans le filtre, qui est interpole :
+  // une reference archivee hors du format se comporte comme avant ce correctif.
+  const REF_SURE = /^[A-Za-z0-9_-]{1,64}$/
+  const archivesProteges = (biensDuCompte || [])
+    .filter(b => b.archive_le && REF_SURE.test(String(b.provider_property_id)))
+    .map(b => String(b.provider_property_id))
+    .filter(r => !gardees.includes(r))
+  const exclues = [...gardees, ...archivesProteges]
   let desactivation = supabase.from('property_cleaning_providers')
     .update({ active: false })
     .eq('user_id', userId).eq('provider_id', prof.id)
@@ -1376,7 +1442,7 @@ async function ecrireLiaisons (req, res) {
     // desactivation, ce qui est le comportement sur (il ne gere aucun bien).
     desactivation = desactivation.in('property_id', refs.map(String))
   }
-  if (gardees.length) desactivation = desactivation.not('property_id', 'in', `(${gardees.map(r => `"${r}"`).join(',')})`)
+  if (exclues.length) desactivation = desactivation.not('property_id', 'in', `(${exclues.map(r => `"${r}"`).join(',')})`)
   const { error: errDes } = await desactivation
   if (errDes) {
     console.error('[menages] desactivation liaisons echec', errDes.message)

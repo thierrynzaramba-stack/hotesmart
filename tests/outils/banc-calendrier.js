@@ -69,6 +69,29 @@ function squelette () {
 // l'hote voit, pas une cle.
 const FR = JSON.parse(lire('shared', 'i18n', 'fr.json'))
 
+// La VRAIE fonction `plural` de `shared/i18n/i18n.js`, evaluee dans la fenetre
+// du test. `current` est sa variable de portee : la langue du banc est le
+// francais, comme son dictionnaire.
+function fabriquerPlural (window) {
+  const src = lire('shared', 'i18n', 'i18n.modele.js')
+  const i = src.indexOf('function plural(')
+  if (i < 0) throw new Error('banc : la fonction plural de i18n.js est introuvable')
+  let j = src.indexOf('{', i); let profondeur = 0; let fin = -1
+  for (; j < src.length; j++) {
+    if (src[j] === '{') profondeur++
+    else if (src[j] === '}') { profondeur--; if (!profondeur) { fin = j + 1; break } }
+  }
+  if (fin < 0) throw new Error('banc : accolades desequilibrees dans plural()')
+  window.eval("const current = 'fr';\n" + src.slice(i, fin) + '\nwindow.__p = plural')
+  const f = window.__p
+  // Un garde-fou : si l'extraction rendait une fonction inerte, tous les
+  // pluriels du banc passeraient en silence.
+  if (f('{n, plural, one {# nuit} other {# nuits}}', { n: 2 }) !== '2 nuits') {
+    throw new Error('banc : la fonction plural extraite ne pluralise pas')
+  }
+  return f
+}
+
 /**
  * Monte le banc.
  * @param {object} o
@@ -113,10 +136,22 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
       return out
     }
   }
+  // ⚠ LES PLURIELS SONT CEUX DE LA VRAIE `I18n`, PAS UNE APPROXIMATION.
+  // Le dictionnaire porte des chaines ICU — `{n, plural, one {# prix ajuste}
+  // other {# prix ajustes}}` — et un double qui ne ferait que remplacer
+  // `{n}` les rendrait TELLES QUELLES. Le test comparerait alors la chaine
+  // ICU a elle-meme : vert, pour un texte que l'hote ne verra jamais. C'est
+  // la forme exacte du « double plus permissif que le vrai » que ce depot a
+  // deja payee.
+  // On EXTRAIT donc la vraie fonction de `shared/i18n/i18n.js` — par
+  // equilibre des accolades, pas par une regex qui s'arrete au premier `}` —
+  // et on l'evalue ici. Une copie ecrite a la main divergerait.
+  window.__plural = fabriquerPlural(window)
   window.I18n = {
     lang: 'fr',
     t: (k, v) => {
       let s = Object.prototype.hasOwnProperty.call(FR, k) ? FR[k] : k
+      s = window.__plural(s, v || {})
       if (v) for (const [a, b] of Object.entries(v)) s = s.split('{' + a + '}').join(String(b))
       return s
     }
@@ -137,8 +172,20 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
     // ecriture, « construireEtats », « renderTout() » et la garde de course du
     // jeton de lecture n'etaient jamais exerces, et le journal du banc etait
     // pollue par une erreur que personne n'affirmait (constat 12).
+    // Les trois gestes de blocage passent par « window.__apiPost », qui rejoue
+    // « apiCall » de « shared/api-client.js » : POST sur « fetch », lecture du
+    // JSON, et une erreur PORTANT LE STATUT quand la reponse n est pas ok. Le
+    // test observe donc ce que la page envoie et ce qu elle fait de la reponse.
     const api = { get: async () => ({}), post: async () => ({}),
-      calendar: { load: async () => window.__chargement() } }
+      calendar: {
+        load: async () => window.__chargement(),
+        fermer: (p, debut, fin, raison) =>
+          window.__apiPost({ action: 'fermer', property_id: p, debut, fin, raison }),
+        modifierFermeture: (p, id, debut, fin, raison) =>
+          window.__apiPost({ action: 'modifier_fermeture', property_id: p, id, debut, fin, raison }),
+        rouvrirFermeture: (p, id) =>
+          window.__apiPost({ action: 'rouvrir_fermeture', property_id: p, id })
+      } }
     const compteCourant = () => 'U1'
     const peutLire = () => true
     // ⚠ AVEUGLE A SON ARGUMENT, LE DOUBLE NE PROUVE QUE « UN BOOLEEN GARDE »,
@@ -157,6 +204,7 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
     window.__cal = {
       etat, renderTout, renderFlottante, renderPlanning, renderGrilleMobile,
       joursSelection, actionPrix, viderSelection, enregistrerPopup, ouvrirPopup,
+      ouvrirFormulaire, ouvrirFicheBlocage,
       toast, AUJOURDHUI, estLarge, construireEtats, computeDays, toISO, etatNuit
     }
   `
@@ -169,6 +217,13 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
       + corpsDeLaPage() + '\n' + queue)
   } catch (e) {
     throw new Error('banc : le module de la page n a pas pu etre evalue — ' + e.message)
+  }
+  window.__apiPost = async (corps) => {
+    const res = await window.fetch('/api/calendar', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer jeton' }, body: JSON.stringify(corps) })
+    const data = await res.json()
+    if (!res.ok) { const e = new Error(data.error || 'Erreur serveur'); e.status = res.status; throw e }
+    return data
   }
   window.fetch = async (chemin, options = {}) => {
     const corps = options.body ? JSON.parse(options.body) : null

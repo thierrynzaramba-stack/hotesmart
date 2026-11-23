@@ -20,7 +20,7 @@
 // calendrier, jamais par ici.
 
 const { createClient } = require('@supabase/supabase-js')
-const { requirePermission } = require('../lib/require-permission')
+const { requirePermission, posterEnTetesPrives } = require('../lib/require-permission')
 const { peutEcrire } = require('../lib/permissions')
 const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
 const {
@@ -114,6 +114,11 @@ function bornesDePeriode (cle) {
 }
 
 module.exports = async (req, res) => {
+  // ⚠ DETTE 90 : AVANT LE PREMIER REFUS, pas seulement avant la garde. Les refus
+  // qui precedent `requirePermission` — methode, bien absent — partaient avec le
+  // defaut de Vercel, `public, max-age=0, must-revalidate`. Le pourquoi et les
+  // trois garde-fous : `tests/cache-prive-endpoints.test.js`, section dette 90.
+  posterEnTetesPrives(res)
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET')
     return res.status(405).json({ error: 'Méthode non autorisée' })

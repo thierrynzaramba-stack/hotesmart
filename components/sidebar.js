@@ -1,5 +1,6 @@
 import { getUser, signOut, supabase } from '../shared/supabase.js'
 import CONFIG from '../shared/config.js'
+import { sansArchives } from '../shared/biens-vivants.js'
 import { renderOnboardingBanner } from '/components/onboarding-banner.js'
 import { compteCourant, peutLire, doitAfficherSelecteur, comptes, basculerVers, estTitulaire }
   from '/shared/compte-courant.js'
@@ -140,13 +141,20 @@ export async function renderSidebar(activePage = '') {
 function initMobileSidebar(sidebar) {
   if (document.getElementById('sidebar-toggle')) return
 
+  // ⚠ LE ☰ SE PLACE SOUS LE BANDEAU D'ONBOARDING, PAS DESSUS.
+  // `components/onboarding-banner.js` publie sa hauteur MESUREE dans
+  // `--bandeau-h` ; sans bandeau la variable vaut 0 et rien ne bouge.
+  // Avant ce repli, le ☰ (fixed, z-index 1000) passait par-dessus le
+  // bandeau (sticky, z-index 200) et recouvrait « Finalisez la configuration
+  // de votre compte » — recette du 1er novembre 2026, sur telephone,
+  // capture a l'appui.
   const toggle = document.createElement('button')
   toggle.id = 'sidebar-toggle'
   toggle.innerHTML = '☰'
   toggle.style.cssText = `
     display: none;
     position: fixed;
-    top: 14px;
+    top: calc(14px + var(--bandeau-h, 0px));
     left: 14px;
     z-index: 1000;
     background: var(--bg);
@@ -405,10 +413,15 @@ async function getApiStatus(user) {
     let otaActive = false
     let firstPropertyId = null
     try {
-      const { data: chProps } = await supabase
+      // ⚠ UN BIEN ARCHIVE NE DOIT PAS FAIRE NAITRE UN LIEN OTA dans le menu :
+      // cette lecture cherche le PREMIER bien Channex du compte pour decider
+      // d'afficher l'entree de connexion, et un logement range la declenchait
+      // encore. Lecture CLIENT, donc la regle vient de `shared/biens-vivants`.
+      // Thierry ne l'avait pas listee : trouvee en cherchant le point 7.
+      const { data: chProps } = await sansArchives(supabase
         .from('properties')
         .select('id')
-        .eq('user_id', compteCourant())
+        .eq('user_id', compteCourant()))
         .in('provider', ['channex', 'channel'])
         .order('created_at', { ascending: true })
         .limit(1)

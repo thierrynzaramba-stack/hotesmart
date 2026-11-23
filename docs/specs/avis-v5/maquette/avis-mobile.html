@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HôteSmart — Avis (V5, maquette téléphone)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<!--
+  MAQUETTE — lot « Avis » de la refonte V5, téléphone (< 900 px). Données FICTIVES.
+  Deux écrans côte à côte : le haut de la page, puis la liste après défilement.
+  Spec : docs/specs/avis-v5/spec-refonte-ui-v5-lot-avis.md
+-->
+<style>
+:root{
+  --ink:#222222; --muted:#717171; --muted-2:#9B9B9B; --line:#EBEBEB; --border:#DDDDDD;
+  --surface:#FFFFFF; --surface-2:#F7F7F7;
+  --amber:#F5A524; --amber-soft:#FFF4E0;
+  --canal-airbnb:#FF5A5F; --canal-booking:#003580; --canal-direct:#0E1726;
+  --ok:#0F7A4F; --ok-soft:#E8F5EE; --danger:#B42318; --danger-soft:#FEF0EE;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#EFEDEA;font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;color:inherit}
+svg{flex:none}
+.ecrans{display:flex;gap:40px;flex-wrap:wrap;justify-content:center;padding:32px 16px}
+.tel{width:390px;height:844px;background:var(--surface);display:flex;flex-direction:column;overflow:hidden;border-radius:28px;box-shadow:0 10px 40px rgba(0,0,0,.12)}
+.corps{flex:1;overflow:hidden;padding:0 16px}
+.ico{width:44px;height:44px;border:1px solid var(--border);border-radius:99px;background:#fff;display:flex;align-items:center;justify-content:center;flex:none}
+h1{margin:0;flex:1;font-size:26px;font-weight:800;letter-spacing:-0.03em}
+.sub{font-size:12.5px;color:var(--muted);margin:2px 0 12px}
+.sub a{color:var(--ink);font-weight:600;text-decoration:underline}
+.defile{display:flex;gap:6px;overflow:hidden;padding-bottom:10px}
+.pill{height:34px;padding:0 12px;border:1px solid var(--border);border-radius:99px;background:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;flex:none}
+.pill.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.th{border-radius:10px;flex:none}
+.t1{background:linear-gradient(135deg,#E4CBA8,#8A6A4F)}
+.t2{background:linear-gradient(135deg,#BFD0DA,#55738A)}
+.t3{background:linear-gradient(135deg,#CDD6B5,#66774D)}
+.chiffres{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:6px 0 14px}
+.ch b{display:flex;align-items:center;gap:4px;font-size:22px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;line-height:1}
+.ch span{display:block;font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.3}
+.bulle{background:var(--amber-soft);border-radius:18px;padding:10px}
+.bulle-h{display:flex;align-items:center;gap:8px;padding:0 4px 8px;font-size:15px;font-weight:700}
+.bulle-h b{min-width:22px;height:22px;padding:0 6px;border-radius:99px;background:var(--amber);font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.todo{background:#fff;border-radius:14px;padding:10px;display:flex;gap:10px;align-items:center}
+.todo + .todo{margin-top:6px}
+.qui{font-size:14.5px;font-weight:700}
+.infos{font-size:12px;color:var(--muted);margin-top:2px}
+.delai{font-size:12px;font-weight:700;color:var(--danger);display:flex;align-items:center;gap:4px;margin-top:3px}
+.delai.calme{color:var(--muted);font-weight:600}
+.btn1{height:38px;padding:0 14px;border:0;border-radius:99px;background:var(--ink);color:#fff;font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px;flex:none}
+.btnl{height:38px;padding:0 12px;border:1px solid var(--border);border-radius:99px;background:#fff;font-size:13.5px;font-weight:600;flex:none}
+.canal{width:20px;height:20px;border-radius:99px;color:#fff;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex:none}
+.c-a{background:var(--canal-airbnb)} .c-b{background:var(--canal-booking)} .c-d{background:var(--canal-direct)}
+.sec-h{display:flex;align-items:baseline;gap:8px;margin:18px 0 10px}
+.sec-h h2{margin:0;font-size:18px;font-weight:800;letter-spacing:-0.02em}
+.sec-h span{font-size:12px;color:var(--muted)}
+.carte{border:1px solid var(--line);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.carte + .carte{margin-top:10px}
+.carte-t{display:flex;align-items:center;gap:10px}
+.son{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.note{display:flex;align-items:center;gap:4px;font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
+.note small{font-size:11px;color:var(--muted);font-weight:600}
+.prop{height:26px;padding:0 9px 0 7px;border-radius:99px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;border:0}
+.prop.pos{background:var(--ok-soft);color:var(--ok)}
+.prop.neg{background:var(--danger-soft);color:var(--danger)}
+.texte{font-size:13.5px;line-height:1.45;margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.notre{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;font-size:12.5px}
+.notre .lib{font-weight:700}
+.etat{display:flex;align-items:center;gap:4px;color:var(--muted)}
+.gris{color:var(--muted);font-size:13px;display:flex;align-items:center;gap:6px}
+.nav{height:76px;background:#222222;display:flex;padding:0 8px;flex:none}
+.nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#BDBDBD;padding-top:10px;text-decoration:none}
+.legende{width:390px;font-size:12px;color:#6b6b6b;margin-top:10px;text-align:center}
+</style>
+</head>
+<body>
+<div class="ecrans">
+
+<!-- ════════ Écran 1 : le haut de la page ════════ -->
+<div>
+<div class="tel">
+  <div class="corps">
+    <!-- Avis vient du menu ≡ : on le garde à portée en haut, aucun onglet du bas n'est actif -->
+    <div style="display:flex;align-items:center;gap:8px;padding:14px 0 6px">
+      <h1>Avis</h1>
+      <button class="ico" aria-label="Réglages des avis"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+      <button class="ico" aria-label="Saisir un avis reçu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1.75" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="ico" aria-label="Menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    </div>
+    <div class="sub">Publication automatique : 2 logements sur 3 · <a href="#">Réglages</a></div>
+
+    <div class="defile" role="group" aria-label="Période">
+      <button class="pill">15 j</button><button class="pill on">30 j</button><button class="pill">6 mois</button><button class="pill">Tout</button>
+    </div>
+    <div class="defile" role="group" aria-label="Logements">
+      <button class="pill on">Tous</button>
+      <button class="pill" style="padding-left:3px"><span class="th t1" style="width:28px;height:28px;border-radius:99px"></span>La bulle</button>
+      <button class="pill" style="padding-left:3px"><span class="th t2" style="width:28px;height:28px;border-radius:99px"></span>Cœur de vie 23</button>
+      <button class="pill" style="padding-left:3px"><span class="th t3" style="width:28px;height:28px;border-radius:99px"></span>Ofuro</button>
+    </div>
+
+    <div class="chiffres">
+      <div class="ch"><b><svg width="18" height="18" viewBox="0 0 24 24" fill="#222"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>4,8</b><span>sur 5 · 27 notes</span></div>
+      <div class="ch"><b>31</b><span>avis reçus</span></div>
+      <div class="ch"><b><span style="color:var(--ok);display:flex;align-items:center;gap:3px;font-size:22px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>18</span><span style="color:var(--danger);display:flex;align-items:center;gap:3px;margin:0 0 0 6px;font-size:22px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>2</span></b><span>propreté</span></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted-2);margin:-6px 0 12px">Calculé à 06:12</div>
+
+    <section class="bulle" aria-label="À traiter">
+      <div class="bulle-h"><span style="flex:1">À traiter</span><b>3</b></div>
+      <div class="todo">
+        <span class="th t1" style="width:44px;height:44px"></span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px"><span class="qui">Julie M.</span><span class="canal c-a">A</span></div>
+          <div class="infos">La bulle · 2 → 4 nov.</div>
+          <div class="infos" style="display:flex;align-items:center;gap:4px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Avis masqué jusqu’à votre évaluation</div>
+          <div class="delai">Dernier jour</div>
+        </div>
+        <button class="btn1">Évaluer</button>
+      </div>
+      <div class="todo">
+        <span class="th t2" style="width:44px;height:44px"></span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px"><span class="qui">Marco R.</span><span class="canal c-a">A</span></div>
+          <div class="infos">Cœur de vie 23 · Remplie par la prestataire</div>
+          <div class="delai calme">11 jours restants</div>
+        </div>
+        <button class="btn1">Évaluer</button>
+      </div>
+      <div class="todo" style="flex-wrap:wrap">
+        <span style="width:44px;height:44px;border-radius:12px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex:none"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
+        <div style="flex:1;min-width:0">
+          <div class="qui">Paul D. · Ofuro Futari</div>
+          <div style="font-size:12.5px;font-style:italic;margin-top:2px">« La douche n’était pas très propre à notre arrivée. »</div>
+        </div>
+        <div style="display:flex;gap:6px;width:100%;justify-content:flex-end">
+          <button class="btnl">Ignorer</button><button class="btn1">Confirmer</button>
+        </div>
+      </div>
+    </section>
+  </div>
+  <nav class="nav" aria-label="Navigation">
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7v9H4Z"/></svg>Aujourd’hui</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Calendrier</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4Z"/></svg>Messages</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg>Ménages</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linejoin="round"><path d="M3 21V10l9-6 9 6v11Z"/><path d="M9 21v-6h6v6"/></svg>Logements</a>
+  </nav>
+</div>
+<div class="legende">Haut de page : filtres qui défilent, trois chiffres, À traiter</div>
+</div>
+
+<!-- ════════ Écran 2 : la liste, après défilement ════════ -->
+<div>
+<div class="tel">
+  <div class="corps">
+    <div class="sec-h" style="margin-top:14px"><h2>Récents</h2><span>20 derniers jours</span></div>
+
+    <article class="carte">
+      <div class="carte-t">
+        <span class="th t1" style="width:40px;height:40px"></span>
+        <div style="flex:1;min-width:0"><div class="qui">Sophie L.</div><div class="infos">La bulle · 28 → 30 oct. · Ménage : Léa</div></div>
+        <span class="canal c-a">A</span>
+      </div>
+      <div class="son">
+        <span class="note"><svg width="16" height="16" viewBox="0 0 24 24" fill="#222"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>5,0<small>/5</small></span>
+        <button class="prop pos"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>Propreté saluée</button>
+      </div>
+      <p class="texte">Un endroit magique, très propre et décoré avec goût. La vue sur les montagnes au réveil est inoubliable.</p>
+      <div class="notre"><span class="lib">Notre avis</span><span class="etat"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Publié le 31 oct.</span></div>
+    </article>
+
+    <article class="carte">
+      <div class="carte-t">
+        <span class="th t2" style="width:40px;height:40px"></span>
+        <div style="flex:1;min-width:0"><div class="qui">Thomas B.</div><div class="infos">Cœur de vie 23 · 25 → 27 oct.</div></div>
+        <span class="canal c-b">B</span>
+      </div>
+      <div class="son">
+        <span class="note"><svg width="16" height="16" viewBox="0 0 24 24" fill="#222"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>4,0<small>/5</small></span>
+        <button class="prop neg"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>Remarque propreté</button>
+      </div>
+      <p class="texte">Appartement bien situé et confortable. Quelques cheveux dans la salle de bain à l’arrivée.</p>
+      <div class="notre"><span class="lib">Notre avis</span><span class="gris">Aucune évaluation du voyageur pour ce séjour.</span></div>
+    </article>
+
+    <article class="carte">
+      <div class="carte-t">
+        <span class="th t3" style="width:40px;height:40px"></span>
+        <div style="flex:1;min-width:0"><div class="qui">Inès K.</div><div class="infos">Ofuro Futari · 24 → 26 oct.</div></div>
+        <span class="canal c-a">A</span>
+      </div>
+      <div class="son">
+        <span class="note"><svg width="16" height="16" viewBox="0 0 24 24" fill="#222"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>4,7<small>/5</small></span>
+        <button class="prop pos"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>Propreté saluée</button>
+      </div>
+      <p class="texte">Très bel endroit, calme et cosy. Le bain japonais est une expérience à part entière !</p>
+      <div class="notre"><span class="lib">Notre avis</span><span class="etat">Évaluée sur Airbnb</span></div>
+    </article>
+
+    <div style="display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);margin-top:14px;padding:14px 0;font-size:16px;font-weight:800">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="2.2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg>Anciens <span style="font-size:12px;font-weight:700;background:var(--surface-2);border-radius:99px;padding:2px 9px;color:var(--muted)">703</span>
+    </div>
+  </div>
+  <nav class="nav" aria-label="Navigation">
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7v9H4Z"/></svg>Aujourd’hui</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Calendrier</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4Z"/></svg>Messages</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg>Ménages</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linejoin="round"><path d="M3 21V10l9-6 9 6v11Z"/><path d="M9 21v-6h6v6"/></svg>Logements</a>
+  </nav>
+</div>
+<div class="legende">Après défilement : une carte par séjour, « Anciens » repliée</div>
+</div>
+
+</div>
+</body>
+</html>

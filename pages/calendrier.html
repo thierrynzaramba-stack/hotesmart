@@ -106,6 +106,13 @@
   <p class="caption msg-tiroir__note" data-bind="feuille-note" hidden></p>
 </aside>
 
+<!-- ACCES YIELDFLOW (lot du 28 octobre 2026) : UN menu pour toute la page —
+     popover a l'ordinateur, volet du bas au telephone, meme balisage. Il vit
+     ici, hors du planning : le planning defile dans un conteneur a overflow,
+     et un popover place dedans serait rogne. -->
+<div class="cal-yf-voile" data-bind="yf-voile" hidden></div>
+<div class="cal-yf-menu" data-bind="yf-menu" hidden role="dialog" aria-labelledby="h-yf"></div>
+
 <div class="cal-toasts" data-bind="toasts" aria-live="polite"></div>
 
 <nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
@@ -124,7 +131,8 @@ import { api } from '/shared/api-client.js'
 import { toISO, computeDays, buildStateFromInventory, loadCalendarData, PARAMS }
   from '/shared/calendar-core.js'
 import { mapResa, familleSource, LIBELLE_CANAL, libelleStatut, droitsResa, badgeSansEmailVisible,
-  TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, brancherEvaluation }
+  TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, brancherEvaluation,
+  presentationFacture, cleRetourEnvoiFacture, cleRefusFacture }
   from '/shared/calendrier-resa.js'
 import { ACTIONS_BARRE, RUBRIQUES_POPUP, CHAMPS_FICHE, etatDeNuit, prixIntl, dateIntl }
   from '/shared/calendrier-contrat.js'
@@ -271,7 +279,13 @@ async function appel (chemin, corpsPost) {
     ...(corpsPost ? { body: JSON.stringify(corpsPost) } : {})
   })
   const corps = await r.json().catch(() => ({}))
-  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.code || corps.error; throw e }
+  if (!r.ok) {
+    const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.code || corps.error
+    // Le motif et le champ refuses (api/factures-voyageur.js) : la fiche dit
+    // QUEL champ corriger, et pourquoi un geste est refuse.
+    e.motif = corps.motif || null; e.champ = corps.champ || null
+    throw e
+  }
   return corps
 }
 
@@ -348,6 +362,7 @@ function identiteBien (bien, { mobile = false } = {}) {
       <span class="cal-poigne" data-poigne title="${esc(t('cal.drag_hint'))}" aria-label="${esc(t('cal.drag_hint'))}">${icone('i-menu')}</span>
       <span class="cal-photo cal-bien__photo">${photoBien(bien)}</span>
       <b class="cal-bien__nom">${esc(bien.name || '')}</b>
+      ${boutonYfHtml(bien)}
       ${mobile ? '' : `<span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span>`}
       ${mobile && peut ? `<button type="button" class="cal-btn-plus" data-plus="${esc(bien.id)}" title="${esc(t('cal.add_title'))}" aria-label="${esc(t('cal.add_title'))}">${icone('i-plus')}</button>` : ''}
       <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
@@ -449,6 +464,308 @@ function brancherBulles (zone) {
     viderSelection(); ecrirePrefs(); charger()
   }))
 }
+// ─── ACCES YIELDFLOW : le bouton de la ligne du bien, et son menu ──────────
+// Lot du 28 octobre 2026. Spec : docs/specs/spec-yf-bouton-calendrier.md.
+//
+// ⚠ RIEN DE NEUF N'EST CALCULE AU CHARGEMENT DU CALENDRIER. La couleur du
+// bouton se lit dans `pilote_tarifaire`, deja servi par /api/channel-property
+// avec la liste des biens. Les faits du menu — le compteur et les trois
+// reperes — partent sur le CLIC, pour le SEUL bien clique. C'est l'exception
+// datee du 28 octobre 2026 a la regle « donnee non urgente = resume
+// pre-calcule » (spec §6 bis) : elle ne tient QUE parce que le comptage suit
+// un geste. Le jour ou l'un de ces chiffres s'affiche sans clic, il faut la
+// table de resume, le cron, et l'heure du calcul affichee.
+//
+// ⚠ ET LE MENU N'ECRIT RIEN. Il ouvre des pages. La bascule du pilote reste
+// le parcours d'activation de `apps/yield/prix`, avec sa confirmation
+// « N nuits ont deja un prix au calendrier » comptee SERVEUR : jamais de
+// bascule en un clic depuis le calendrier.
+const yfPilote = (bien) => bien.pilote_tarifaire === 'yieldflow'
+function boutonYfHtml (bien) {
+  // Beds24 : un bouton qui ouvrirait un menu sans issue est pire qu'une
+  // absence — et les biens Beds24 sont deja grises et non cochables partout
+  // ailleurs dans cet ecran.
+  //
+  // ⚠ ET CE FILTRE EST LE SEUL, CE QUI N'EST PAS CE QUE CE COMMENTAIRE DISAIT
+  // (review du 28 octobre 2026). Il attribuait la restriction a
+  // `peutPasserEnYieldflow` ; or cette regle ne lit QUE `rate_sync_mode`,
+  // jamais `provider` (lib/pilote-tarifaire.js). Un bien Beds24 en
+  // `managed` — cas joignable pendant une migration — obtient donc
+  // `peut_basculer: true` de `/api/yield-menu` comme de `/api/yield-pilote`.
+  // Rien de confidentiel n'en sort : ce sont les memes faits que
+  // `/api/marche-global` sert sous le meme domaine.
+  // ⚠ ON NE CORRIGE PAS ICI EN AJOUTANT UNE REGLE QUE L'AUTRE ENDPOINT N'A
+  // PAS : deux verdicts pour la meme question, c'est ainsi qu'un ecran finit
+  // par contredire l'autre. Si la restriction doit devenir une regle, elle va
+  // dans `lib/pilote-tarifaire.js`, pour les deux a la fois.
+  if (bien.provider === 'beds24') return ''
+  const on = yfPilote(bien)
+  const label = t(on ? 'cal.yf_open_on' : 'cal.yf_open_off', { nom: bien.name || '' })
+  return `<button type="button" class="cal-yf ${on ? 'cal-yf--on' : 'cal-yf--off'}"
+    data-yf="${esc(bien.id)}" aria-haspopup="dialog" aria-expanded="false"
+    title="${esc(label)}" aria-label="${esc(label)}">${icone('i-chart')}</button>`
+}
+
+// Les quatre entrees, dans l'ordre de la spec §4. `evenements=1` et non une
+// page a part : `apps/yield/evenements.html` est une REDIRECTION vers
+// `prix?evenements=1` depuis le 22 septembre 2026 — l'ecran Evenements est une
+// pop-up DANS la Prediction de prix. Et « Donnees marche » vise
+// `marche-global`, la seule des trois pages marche qui soit au menu.
+const ENTREES_YF = [
+  { cle: 'cal.yf_prediction',  icone: 'i-price',    page: 'prix',          repere: 'fenetre' },
+  { cle: 'cal.yf_market',      icone: 'i-globe',    page: 'marche-global', repere: 'marche' },
+  // ⚠ SANS REPERE, ET C'EST UNE CORRECTION D'HONNETETE (recette du 28 octobre
+  // 2026). Il affichait « N a venir » en comptant les seules dates AJOUTEES
+  // PAR L'HOTE, a cote d'un ecran qui montre AUSSI les vacances scolaires,
+  // les feries, les ponts et les fetes du calendrier. Sur un logement sans
+  // date propre, le menu annoncait « 0 a venir » pour un ecran qui en liste
+  // 35. Le vrai compte n'est pas servi sans calcul (mesure du jour) : la
+  // regle du lot dit alors de ne rien afficher.
+  { cle: 'cal.yf_events',      icone: 'i-calendar', page: 'prix',          repere: null, params: { evenements: '1' } },
+  { cle: 'cal.yf_comparables', icone: 'i-home',     page: 'comparables',   repere: 'comparables' }
+]
+const urlYf = (page, bienId, params) =>
+  `/apps/yield/${page}?` + new URLSearchParams({ bien: bienId, ...(params || {}) })
+
+// Le repere d'une entree. ⚠ IL NE S'AFFICHE QUE S'IL EST SERVI : `null` =
+// illisible, et on se tait. Un entier, lui, est un fait — 0 compris.
+function repereYf (quoi, d) {
+  if (!quoi || !d) return ''
+  if (quoi === 'fenetre') {
+    const f = d.fenetre
+    if (!f || !Number.isFinite(Number(f.valeur))) return ''
+    return t(f.type === 'mois' ? 'cal.yf_window_months' : 'cal.yf_window_days', { n: f.valeur })
+  }
+  if (quoi === 'marche') return d.marche || ''
+  // ⚠ ZERO COMPARABLE EST UN FAIT, ET IL APPELLE UN GESTE (demande de Thierry,
+  // 28 octobre 2026). « 0 retenus » se lit comme un echec ; « A choisir » dit
+  // ce qu'il reste a faire. La distinction avec l'ILLISIBLE tient toujours :
+  // `null` ne rend rien du tout.
+  if (quoi === 'comparables') {
+    if (!Number.isInteger(d.comparables)) return ''
+    return d.comparables === 0 ? t('cal.yf_comparables_none') : t('cal.yf_comparables_count', { n: d.comparables })
+  }
+  return ''
+}
+
+const menuYf = { bien: null, bouton: null }
+function menuYfHtml (bien, d) {
+  // ⚠ L'ETAT VIENT DE LA REPONSE DES QU'ELLE EST LA, PAS DE LA PAGE — constat
+  // de la re-review du 28 octobre 2026. `bien.pilote_tarifaire` date du
+  // CHARGEMENT du calendrier ; l'hote a pu activer le pilote dans un autre
+  // onglet entre-temps. Le menu annoncait alors « Prix manuels » et proposait
+  // « Activer le pilote automatique » sur un bien DEJA pilote — et ce clic ne
+  // menait nulle part, puisque la page d'arrivee refuse d'ouvrir un parcours
+  // sur un bien pilote. Un cul-de-sac que la valeur fraiche, deja en main,
+  // suffit a fermer.
+  // Au premier rendu (`d` absent), on n'a que la valeur de la page : c'est
+  // elle qui colore le bouton, et elle est juste dans le cas courant.
+  const on = d && d.pilote ? d.pilote === 'yieldflow' : yfPilote(bien)
+  // La ligne ambre : bien pilote SEULEMENT, et masquee a 0 — comme elle est
+  // masquee quand le compte est illisible (`null`). On n'ecrit jamais « 0 »
+  // a la place d'une absence : un 0 de remplacement transforme une absence en
+  // fait, et l'ecran l'affiche avec l'aplomb des vrais chiffres.
+  const n = d && d.prix_ajustes
+  const ajuste = (on && Number.isInteger(n) && n > 0)
+    ? `<p class="cal-yf-menu__ajuste">${icone('i-alert')}<span>${esc(t('cal.yf_adjusted', { n }))}</span></p>` : ''
+  const entrees = ENTREES_YF.map(e => `<a class="cal-yf-menu__entree" href="${esc(urlYf(e.page, bien.id, e.params))}">
+      ${icone(e.icone)}<span class="cal-yf-menu__nom">${esc(t(e.cle))}</span>
+      ${(r => r ? `<span class="cal-yf-menu__repere">${esc(r)}</span>` : '')(repereYf(e.repere, d))}
+    </a>`).join('')
+  // Le pied. Les deux gestes touchent au reglage tarifaire : masques sans le
+  // droit `reglages` en ecriture — et la garde REELLE reste le serveur, qui
+  // refuse la bascule a qui ne l'a pas (`/api/yield-pilote`, reglages write).
+  // Ici on ne fait qu'ouvrir une page : un masquage suffit a ne pas proposer
+  // un geste impossible, il ne protege rien et n'a pas a le faire.
+  const peutRegler = !etat.lectureSeule && peutEcrire('reglages')
+  // ⚠ ON NE PROPOSE PAS UNE ACTIVATION QU'ON NE PEUT PAS TENIR — recette de
+  // Thierry du 28 octobre 2026, point 6. Un bien regle en « Je garde mes
+  // prix » n'est pas basculable : le parcours d'activation refuse de s'ouvrir,
+  // et c'est juste. Mais le pied affichait quand meme le bouton, qui ne
+  // faisait RIEN au clic — une promesse muette, le pire des deux mondes.
+  // Plusieurs etats, donc, et non deux (spec §4) :
+  //   · pilote              -> le lien vers ses reglages ;
+  //   · menu en panne       -> on le DIT, et le lien vers les reglages ;
+  //   · basculable          -> le bouton d'activation ;
+  //   · refus connu (keep)  -> une ligne, et le lien vers la fiche ;
+  //   · refus inconnu       -> le verdict du moteur, et aucun geste.
+  // ⚠ ET TANT QU'ON NE SAIT PAS (`d` absent, premier rendu), ON NE PROPOSE
+  // RIEN sur un bien non pilote : afficher le bouton puis le retirer ferait
+  // clignoter une promesse. Le menu porte deja sa ligne « Chargement… ».
+  const sait = !!(d && typeof d.peut_basculer === 'boolean')
+  // ⚠ « PAS ENCORE DE REPONSE » N'EST PAS « REPONSE EN ECHEC » (review du
+  // 10 novembre 2026). En panne de `/api/yield-menu`, un bien non pilote
+  // perdait tout geste, sans un mot — la ligne « Chargement… » disparaissait,
+  // et l'hote qui a le droit d'activer ne voyait ni bouton ni raison.
+  const enPanne = !!(d && d.echec)
+  let pied = ''
+  if (peutRegler && on) {
+    pied = `<div class="cal-yf-menu__pied"><a class="link cal-yf-menu__lien" href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a></div>`
+  } else if (peutRegler && enPanne) {
+    // En panne : on le DIT, et on mene aux reglages SANS `activer=1` — la page
+    // Prediction de prix lit elle-meme l'etat et la raison, et n'ouvre aucun
+    // parcours sur la foi d'un etat qu'on n'a pas pu lire.
+    pied = `<div class="cal-yf-menu__pied">
+      <p class="cal-yf-menu__refus">${esc(t('cal.yf_unreadable'))}</p>
+      <a class="link cal-yf-menu__lien" href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a>
+    </div>`
+  } else if (peutRegler && sait && d.peut_basculer) {
+    pied = `<div class="cal-yf-menu__pied"><a class="cal-yf-menu__activer" href="${esc(urlYf('prix', bien.id, { activer: '1' }))}">${esc(t('cal.yf_activate'))}</a></div>`
+  } else if (peutRegler && sait && d.raison_code === 'pilote_refuse_keep') {
+    // ⚠ LE REFUS CONNU PORTE UN GESTE, PAS UN PARAGRAPHE (recette du
+    // 28 octobre 2026). La phrase du moteur disait la meme chose en cinq
+    // lignes, et laissait l'hote sans rien a faire : « Je garde mes prix »
+    // se change sur la fiche du logement, et c'est a un clic.
+    // ⚠ ON RECONNAIT LE REFUS PAR SON CODE, jamais par ses mots : un ecran
+    // qui lit la phrase se tromperait au premier reformulage.
+    pied = `<div class="cal-yf-menu__pied">
+      <p class="cal-yf-menu__refus">${esc(t('cal.yf_prices_outside'))}</p>
+      <a class="link cal-yf-menu__lien" href="/logements/${esc(bien.id)}">${esc(t('cal.yf_send_prices'))}</a>
+    </div>`
+  } else if (peutRegler && sait && d.raison) {
+    // Tout autre refus : le verdict du moteur s'AFFICHE, il ne se recopie pas
+    // (REVIEW.md regle 13). On ne sait pas quel geste le debloque, donc on
+    // n'en propose aucun — plutot que d'en inventer un.
+    // ⚠ LA PHRASE DU MOTEUR EST FRANCAISE (review du 10 novembre 2026) : en
+    // anglais ou en espagnol, une ligne traduite la remplace, et la phrase
+    // reste en infobulle. Aucun refus inconnu n'existe aujourd'hui
+    // (`peutPasserEnYieldflow` ne refuse qu'avec `pilote_refuse_keep`).
+    const francais = langue().slice(0, 2) === 'fr'
+    pied = `<div class="cal-yf-menu__pied"><p class="cal-yf-menu__refus" title="${esc(d.raison)}">${esc(francais ? d.raison : t('cal.yf_refused'))}</p></div>`
+  }
+  return `<div class="cal-yf-menu__entete">
+      <span class="cal-yf-menu__titre" id="h-yf">${esc(t('cal.yf_title'))}</span>
+      <span class="cal-yf-menu__bien">${esc(bien.name || '')}</span>
+      <span class="cal-yf-menu__pastille cal-yf-menu__pastille--${on ? 'on' : 'off'}">${esc(t(on ? 'cal.yf_state_on' : 'cal.yf_state_off'))}</span>
+    </div>
+    ${ajuste}${entrees}${pied}`
+}
+
+function placerMenuYf (bouton) {
+  const menu = $('[data-bind="yf-menu"]')
+  // Au telephone, le volet du bas est pose par la feuille de style : on EFFACE
+  // les coordonnees du popover, sinon le style en ligne les garderait d'une
+  // ouverture a l'autre quand on tourne l'appareil.
+  if (!estLarge()) { menu.style.top = ''; menu.style.insetInlineStart = ''; return }
+  const r = bouton.getBoundingClientRect()
+  const large = menu.offsetWidth || 320
+  const gauche = Math.min(Math.max(8, r.left), window.innerWidth - large - 8)
+  const place = window.innerHeight - r.bottom
+  menu.style.insetInlineStart = gauche + 'px'
+  // Sous le bouton s'il y a la place, au-dessus sinon — un menu qui deborde
+  // en bas de la fenetre est un menu qu'on ne lit pas.
+  if (place < (menu.offsetHeight || 260) + 12 && r.top > place) {
+    menu.style.top = Math.max(8, r.top - (menu.offsetHeight || 260) - 6) + 'px'
+  } else {
+    menu.style.top = (r.bottom + 6) + 'px'
+  }
+}
+
+// ⚠ LE FOCUS NE SE REPREND QUE SUR UNE FERMETURE DEMANDEE — constat de la
+// review du 28 octobre 2026. Le rendre a chaque chemin de fermeture faisait
+// deux degats, tous deux invisibles au developpeur :
+//   · l'hote ouvre le menu, puis clique une case de prix pour taper un
+//     montant. La case est `tabIndex = 0` et sa saisie vit dans un `keydown` :
+//     le clic dehors fermait le menu ET ramenait le focus sur le bouton, donc
+//     le chiffre tape ensuite tombait sur le bouton. Aucun prix saisi, et rien
+//     a l'ecran pour dire pourquoi.
+//   · un defilement ferme le menu : `focus()` ramenait alors le bandeau du
+//     bien dans la vue, donc DEFAISAIT le defilement de l'hote.
+// Escape et le second clic sur le bouton sont des fermetures DEMANDEES : la
+// main est au clavier, et lui rendre le focus est ce qu'on attend. Un clic
+// ailleurs, un defilement, un redimensionnement ne le sont pas.
+function fermerMenuYf ({ rendreLeFocus = false } = {}) {
+  const menu = $('[data-bind="yf-menu"]')
+  const voile = $('[data-bind="yf-voile"]')
+  if (menu.hidden) return
+  menu.hidden = true
+  voile.hidden = true
+  if (menuYf.bouton && document.contains(menuYf.bouton)) {
+    menuYf.bouton.setAttribute('aria-expanded', 'false')
+    if (rendreLeFocus) menuYf.bouton.focus()
+  }
+  menuYf.bien = null
+  menuYf.bouton = null
+}
+
+// ⚠ `clavier` : le menu ne DEPLACE le focus que s'il a ete ouvert au clavier.
+// Ouvert au doigt ou a la souris, `focus()` peint un anneau que l'hote n'a pas
+// demande — releve sur l'apercu du 28 octobre 2026, ou la premiere entree
+// portait un cadre noir au telephone. La page distingue deja les deux par
+// `detail === 0` (un clic synthetique du clavier n'a pas de compte de clics) :
+// c'est la meme regle qu'au telephone pour la saisie d'un prix.
+async function ouvrirMenuYf (bienId, bouton, { clavier = false } = {}) {
+  const bien = etat.biens.find(b => b.id === bienId)
+  if (!bien) return
+  const dejaOuvert = menuYf.bien === bienId && !$('[data-bind="yf-menu"]').hidden
+  // Second clic sur le MEME bouton : fermeture demandee, le focus lui revient.
+  // Clic sur un AUTRE bouton : on ferme le premier sans lui rendre le focus,
+  // sinon il reprendrait celui que le nouveau menu s'apprete a recevoir.
+  fermerMenuYf({ rendreLeFocus: dejaOuvert })
+  if (dejaOuvert) return
+  const menu = $('[data-bind="yf-menu"]')
+  const voile = $('[data-bind="yf-voile"]')
+  menuYf.bien = bienId
+  menuYf.bouton = bouton
+  bouton.setAttribute('aria-expanded', 'true')
+  // Le menu s'ouvre TOUT DE SUITE avec ce qu'on sait deja (l'etat du pilote,
+  // le nom), et les reperes arrivent apres : un menu qui attend le reseau pour
+  // s'afficher donne un ecran qui ne repond pas au doigt.
+  menu.innerHTML = menuYfHtml(bien, null) + `<p class="cal-yf-menu__attente">${esc(t('common.loading'))}</p>`
+  menu.hidden = false
+  voile.hidden = estLarge()   // le voile n'est qu'au telephone
+  placerMenuYf(bouton)
+  if (clavier) menu.querySelector('.cal-yf-menu__entree')?.focus()
+  let faits = null
+  try {
+    faits = await appel(`/api/yield-menu?bien=${encodeURIComponent(bienId)}`)
+  } catch (e) {
+    // ⚠ UNE PANNE DE REPERES NE FERME PAS LE MENU. Les quatre entrees mènent
+    // a des pages qui savent se charger seules, et les reperes se taisent.
+    // ⚠ MAIS CE N'EST PAS TOUT CE QU'ON PERD (review du 10 novembre 2026) :
+    // l'etat du pilote vient du meme appel. `echec` le dit au pied, qui
+    // l'annonce et mene aux reglages plutot que de se taire.
+    logger.error('Calendrier', 'menu yieldflow', e)
+    faits = { echec: true }
+  }
+  // L'hote a pu refermer, ou ouvrir un autre bien, pendant l'appel.
+  if (menuYf.bien !== bienId || menu.hidden) return
+  // ⚠ LE FOCUS NE SURVIT PAS A `innerHTML` — constat de la re-review du
+  // 28 octobre 2026. Le noeud focalise est DETRUIT par le remplacement, et le
+  // focus retombe sur `body` : un hote au clavier ouvre le menu, les reperes
+  // arrivent cent millisecondes plus tard, et sa tabulation repart du haut du
+  // document alors que le menu est ouvert. On ne le rend que s'il etait
+  // DEDANS — sinon on le volerait a l'endroit ou l'hote l'a mis entre-temps.
+  const focusDedans = menu.contains(document.activeElement)
+  menu.innerHTML = menuYfHtml(bien, faits)
+  if (focusDedans) menu.querySelector('.cal-yf-menu__entree')?.focus()
+  placerMenuYf(bouton)
+}
+
+function brancherYf (zone) {
+  zone.querySelectorAll('[data-yf]').forEach(b =>
+    b.addEventListener('click', (e) => {
+      e.stopPropagation()
+      ouvrirMenuYf(b.dataset.yf, b, { clavier: e.detail === 0 })
+    }))
+}
+// Fermetures : le voile, la touche d'echappement, un clic dehors, et tout
+// defilement — le popover est place en coordonnees FIXES, donc il se
+// decrocherait de son bouton. Meme regle que le menu de l'angle de la bande.
+$('[data-bind="yf-voile"]').addEventListener('click', () => fermerMenuYf())
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fermerMenuYf({ rendreLeFocus: true }) })
+document.addEventListener('click', (e) => {
+  if (menuYf.bien && !e.target.closest('[data-bind="yf-menu"]') && !e.target.closest('[data-yf]')) fermerMenuYf()
+})
+// ⚠ `() => fermerMenuYf()` ET NON `fermerMenuYf` : passee directement, la
+// fonction recevrait l'EVENEMENT comme premier argument, et `rendreLeFocus`
+// serait lu dessus. Il vaut `undefined` aujourd'hui, donc le defaut serait
+// inerte — et il cesserait de l'etre le jour ou un objet d'options porterait
+// un nom present sur un evenement.
+window.addEventListener('scroll', () => fermerMenuYf(), { passive: true })
+$('[data-bind="planning"]').addEventListener('scroll', () => fermerMenuYf(), { passive: true })
+window.addEventListener('resize', () => fermerMenuYf())
+
 // ─── L'ORDRE des biens : la liste etat.choisis, persistee et COMMUNE aux
 //     deux ecrans. On attrape un bloc par la POIGNEE de son bandeau ; au
 //     doigt, la section sous le doigt devient la cible.
@@ -1036,6 +1353,7 @@ function brancherPlanning () {
   zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
+  brancherYf(zone)
   brancherDrag(zone)
 }
 // La navigation de mois (telephone) : UNE regle, sens 0 = retour au mois
@@ -1174,6 +1492,7 @@ function brancherMobile () {
   // laissait la barre d'actions AFFICHEE, annoncant deux nuits, avec tous ses
   // boutons inertes — le defaut exact que le point 6 dit fermer ailleurs.
   zone.querySelectorAll('[data-plus]').forEach(b => b.addEventListener('click', () => { viderSelection(); ouvrirFormulaire('reservation', [AUJOURDHUI], b.dataset.plus) }))
+  brancherYf(zone)
   brancherDrag(zone)
 }
 
@@ -1189,6 +1508,31 @@ function verdictToast (r) {
     try { navigator.clipboard.writeText(ids) } catch {}
     toast(t('cal.task_copied', { ids }), { duree: 6000 })
   }
+}
+// ⚠ UN BLOCAGE N'EST « FAIT » QUE SI LE CANAL L'A ACCEPTE.
+// `fermer`, `modifier_fermeture` et `rouvrir_fermeture` rendent les memes
+// drapeaux que `save` : `push_failed` (le canal a refuse), `local_only` (rien
+// d'envoye : pas de plan tarifaire) et `warnings`. Les trois gestes de blocage
+// les ignoraient et affichaient « Blocage cree » quoi qu'il arrive : un blocage
+// refuse par le canal passait pour fait (docs/specs/spec-toast-bloquer.md).
+// Le succes n'est annonce qu'une fois les deux echecs ecartes.
+//
+// ⚠ LES AVERTISSEMENTS NE SONT MONTRES QUE SI LE SERVEUR N'A RIEN ECRIT
+// (`saved: 0`), constat 1 de la review. Quand il a ecrit, `warnings` vient du
+// writer : codes techniques, et surtout l'avertissement du mode « je garde mes
+// prix » (« vos reouvertures ne sont PAS envoyees ») — FAUX pour un blocage,
+// dont le stop_sell part dans tous les modes (`reaffirmerStopSell`), et qui
+// pousserait l'hote a changer de mode pour rien. Quand il n'a rien ecrit, les
+// seuls avertissements sont ceux des fermetures (lib/fermetures.js) : ils
+// disent pourquoi rien n'a bouge, et c'est ce que l'hote doit lire.
+// `siRien` : le succes a dire dans ce cas — « Blocage supprime » ne peut pas
+// promettre « nuits rouvertes » quand aucune ne l'a ete (constat 3).
+function verdictBlocage (r, succes, siRien = succes) {
+  if (r && r.push_failed) return toast(t('cal.block_push_failed'), { erreur: true, duree: 12000 })
+  if (r && r.local_only) return toast(t('cal.local_only'), { duree: 8000 })
+  const avertis = r && Number(r.saved) === 0 && Array.isArray(r.warnings) && r.warnings.length
+  toast(avertis ? siRien : succes)
+  if (avertis) toast(String(r.warnings[0]), { duree: 10000 })
 }
 // Enregistre des segments et propose « Annuler » : les valeurs PRECEDENTES
 // des dates touchees sont relevees AVANT l'ecriture, et « Annuler » les
@@ -1651,9 +1995,9 @@ function ouvrirFormulaire (type, jours, bienForce = null) {
         const raison = corps.querySelector('[data-aj="raison"]').value.trim()
         if (!raison) { etatEl.textContent = t('cal.block_reason_required'); bouton.disabled = false; return }
         const finNuit = toISO(new Date(new Date(departV + 'T12:00:00').getTime() - 86400000))
-        await api.calendar.fermer(bienId, duV, finNuit, raison)
+        const r = await api.calendar.fermer(bienId, duV, finNuit, raison)
         fermerFeuille(); viderSelection()
-        toast(t('cal.block_created'))
+        verdictBlocage(r, t('cal.block_created'))
         await charger()
       } else {
         const prenom = corps.querySelector('[data-aj="prenom"]').value.trim()
@@ -1725,6 +2069,7 @@ function ouvrirFicheResa (bienId, resaId) {
       <span data-fiche-evaluation></span>
       <button type="button" class="btn btn--secondary" data-fiche-conv disabled>${esc(t('cal.open_conversation'))}</button>
       <p class="caption muted" data-fiche-conv-note hidden></p>
+      <div data-fiche-facture></div>
     </div>
     ${droits.modifiable ? `<div class="msg-tiroir__bloc">
       <label class="caption muted">${esc(t('cal.fiche_arrivee'))}</label><input type="date" data-f="arrivee" value="${r.startISO}">
@@ -1755,7 +2100,10 @@ function ouvrirFicheResa (bienId, resaId) {
   // du total) vient d'un second appel, par booking_id : jamais dans le
   // listing (minimisation). Une lecture echouee n'affiche rien — la fiche
   // reste juste, pas de champ invente.
-  appel(`/api/calendar?property_ids=${encodeURIComponent(bienId)}&start=${r.startISO}&end=${String(r.checkout).slice(0, 10)}&booking=${encodeURIComponent(resaCourante)}`).then(d => {
+  // ⚠ L'ETAT DE LA FACTURE ARRIVE DANS CETTE MEME REPONSE (etape 2b) : aucun
+  // appel de plus a l'ouverture. Apres un geste sur la facture, c'est CETTE
+  // lecture qui est refaite — l'etat affiche est toujours celui du serveur.
+  const lireDetailFiche = () => appel(`/api/calendar?property_ids=${encodeURIComponent(bienId)}&start=${r.startISO}&end=${String(r.checkout).slice(0, 10)}&booking=${encodeURIComponent(resaCourante)}`).then(d => {
     // Reponse en retard : la feuille peut montrer une AUTRE reservation —
     // on n'ecrit que si c'est encore la meme (sinon le tel: de A s'injecte
     // dans la fiche de B).
@@ -1800,7 +2148,242 @@ function ouvrirFicheResa (bienId, resaId) {
           ${parNuit ? `<p class="caption muted" style="margin: 8px 0 0">${esc(t('cal.price_per_night'))}</p>${parNuit}` : `<p class="caption muted">${esc(t('cal.per_night_unavailable'))}</p>`}
         </div>
       </details>`
+    peindreFacture(d.facture)
   }).catch(e => logger.error('Calendrier', 'detail reservation', e))
+
+  // ─── La facture du voyageur (etape 2b, spec-facture-voyageur §7) ──────────
+  // UN composant pour l'ordinateur et le telephone (cette fiche est la meme sur
+  // les deux). Les DROITS viennent du serveur (`facture.gestes`) ; les clés de
+  // texte, du module commun (presentationFacture). Un bouton absent reste
+  // refuse par api/factures-voyageur.js : le masquage n'est pas la garde.
+  // ⚠ LE LIEN EN CLAIR N'EST JAMAIS RELU : la base n'en garde que l'empreinte.
+  // Celui qu'un geste vient d'obtenir est garde ICI, le temps de cette
+  // ouverture de la fiche : « Copier un lien » le recopie tel quel au lieu d'en
+  // creer un de plus (et l'anti-double-clic de 30 s ne le refuse pas). Rouvrir
+  // la fiche en cree un neuf (P2 quinquies).
+  let lienCourant = null
+  let lienVisible = false        // montre a l'hote : apres « Copier », ou quand le message n'est pas parti
+  const encoreLaFiche = () => !$('[data-bind="feuille"]').hidden && encoreCetteResa()
+  // ⚠ LE JOUR LOCAL, PAS LE JOUR UTC (recette de 2b, 17 novembre 2026) : un
+  // lien cree a 0 h 21 a Paris le 17 s'affichait « le 16 », parce que
+  // `slice(0, 10)` d'un horodatage ISO rend le jour en UTC.
+  const dateCourte = (iso) => {
+    const d = iso ? new Date(iso) : null
+    if (!d || Number.isNaN(d.getTime())) return ''
+    const deux = (n) => String(n).padStart(2, '0')
+    return dateIntl(`${d.getFullYear()}-${deux(d.getMonth() + 1)}-${deux(d.getDate())}`, langue())
+  }
+  // ⚠ LA ZONE D'ANNONCE (`role="status"`) EST POSEE UNE FOIS et n'est jamais
+  // repeinte (review 1 de 2b, constat 8) : recreee a chaque relecture, un
+  // lecteur d'ecran pouvait perdre l'annonce. Seul `[data-fac-contenu]` change.
+  function peindreFacture (f) {
+    const zone = corps.querySelector('[data-fiche-facture]')
+    if (!zone) return
+    if (!zone.querySelector('[data-fac-retour]')) {
+      zone.innerHTML = '<div data-fac-contenu></div><p class="caption" data-fac-retour role="status" style="margin: 6px 0 0"></p>'
+    }
+    const contenu = zone.querySelector('[data-fac-contenu]')
+    const p = presentationFacture(f)
+    if (!p) { contenu.innerHTML = ''; return }
+    const dest = p.destinataire
+    const lignesDest = dest ? [dest.nom, [dest.code_postal, dest.ville].filter(Boolean).join(' '), dest.pays].filter(Boolean).join(', ') : ''
+    contenu.innerHTML = `
+      <div data-fac style="margin-top: 14px">
+        <p class="caption muted" style="margin: 0 0 4px">${esc(t('cal.fac_titre'))}</p>
+        <p data-fac-statut style="margin: 0">${esc(t(p.statut))}</p>
+        ${p.envoi ? `<p class="caption muted" data-fac-envoi style="margin: 2px 0 0">${esc(t(p.envoi.cle, { date: dateCourte(p.envoi.le) }))}</p>` : ''}
+        ${dest ? `<p class="caption" data-fac-dest style="margin: 4px 0 0; overflow-wrap: anywhere">${esc(lignesDest)}${p.saisiPar ? ' — ' + esc(t(p.saisiPar === 'hote' ? 'cal.fac_saisi_hote' : 'cal.fac_saisi_voyageur')) : ''}</p>` : ''}
+        ${p.note ? `<p class="caption muted" data-fac-note style="margin: 4px 0 0">${esc(t(p.note))}</p>` : ''}
+        ${p.boutons.envoyer || p.boutons.copier || p.boutons.saisir ? `<div class="row" style="gap: 8px; flex-wrap: wrap; margin-top: 8px">
+          ${p.boutons.envoyer ? `<button type="button" class="btn btn--secondary" data-fac-envoyer>${esc(t(p.boutons.envoyer))}</button>` : ''}
+          ${p.boutons.copier ? `<button type="button" class="btn btn--secondary" data-fac-copier>${esc(t('cal.fac_copier'))}</button>` : ''}
+          ${p.boutons.saisir ? `<button type="button" class="link" data-fac-saisir>${esc(t(p.boutons.saisir))}</button>` : ''}
+        </div>` : ''}
+        <div data-fac-lien hidden style="margin-top: 8px">
+          <label class="caption muted" for="fac-lien-texte">${esc(t('cal.fac_lien_label'))}</label>
+          <input type="text" id="fac-lien-texte" readonly data-fac-lien-texte style="width: 100%">
+        </div>
+        <form data-fac-form hidden novalidate style="margin-top: 8px"></form>
+      </div>`
+    if (lienCourant && lienVisible) montrerLien(zone, lienCourant)
+    zone.querySelector('[data-fac-envoyer]')?.addEventListener('click', () => envoyerLienFacture(zone))
+    zone.querySelector('[data-fac-copier]')?.addEventListener('click', () => copierLienFacture(zone))
+    zone.querySelector('[data-fac-saisir]')?.addEventListener('click', () => ouvrirSaisieFacture(zone, dest))
+  }
+  // ⚠ LA ZONE D'ANNONCE EST VIDEE AU DEPART DE CHAQUE GESTE, PUIS ECRITE
+  // (review 3 de 2b) : deux gestes au meme resultat — deux « Copier », deux
+  // refus — donnent deux annonces. Elle n'est jamais reecrite par une
+  // relecture (`peindreFacture` ne l'appelle pas) : c'etait la cause de la
+  // double annonce (review 2, constat 6).
+  function dire (zone, retour) {
+    const el = zone.querySelector('[data-fac-retour]')
+    if (!el) return
+    el.textContent = retour ? t(retour.cle, retour.vars || {}) : ''
+    el.classList.toggle('msg-echec', !!(retour && retour.erreur))
+  }
+  function montrerLien (zone, lien) {
+    const bloc = zone.querySelector('[data-fac-lien]')
+    if (!bloc) return
+    bloc.hidden = false
+    lienVisible = true
+    const champ = bloc.querySelector('[data-fac-lien-texte]')
+    champ.value = lien
+    champ.addEventListener('focus', () => champ.select())
+  }
+  // ⚠ FORMULAIRE OUVERT = « Envoyer », « Copier » et « Remplir » restent
+  // coupes (review 1 de 2b, constat 3) : leur relecture repeint la fiche et
+  // effacait la saisie en cours. Ils reviennent a la fermeture du formulaire.
+  const boutonsFacture = (zone, actifs) => {
+    const formOuvert = !!zone.querySelector('[data-fac-form]:not([hidden])')
+    zone.querySelectorAll('[data-fac-envoyer], [data-fac-copier], [data-fac-saisir]').forEach(b => { b.disabled = !actifs || formOuvert })
+    zone.querySelectorAll('[data-fac-form] button').forEach(b => { b.disabled = !actifs })
+  }
+  // UN site d'appel pour tous les gestes (tests/budget-ecran.test.js) : ils ne
+  // partent qu'au clic, jamais a l'ouverture de la fiche.
+  const posterFacture = (corpsPost) => appel('/api/factures-voyageur', { booking: resaCourante, ...corpsPost })
+  const refus = (zone, e, libelles = {}) => {
+    const code = e && (e.motif || e.code)
+    const cle = cleRefusFacture(code, e && e.status)
+    dire(zone, { cle, vars: { champ: libelles[e && e.champ] || '' }, erreur: true })
+  }
+  // ⚠ SAFARI REFUSE UNE COPIE DEMANDEE APRES UNE ATTENTE RESEAU (review 1 de
+  // 2b, constat 7) : le geste de l'utilisateur est alors « consomme ». La copie
+  // est donc DEMANDEE tout de suite, dans le clic, avec un `ClipboardItem`
+  // nourri par la PROMESSE du lien ; Chrome l'accepte aussi. Sans
+  // `ClipboardItem`, repli `writeText` une fois le lien en main. Rend une
+  // promesse de booleen, jamais d'exception.
+  function demanderCopie (lienP) {
+    const cb = navigator.clipboard
+    try {
+      if (cb && typeof cb.write === 'function' && typeof window.ClipboardItem === 'function') {
+        // ⚠ LA PROMESSE DU BLOB A SON GESTIONNAIRE (review 2 de 2b, constat 3) :
+        // sur un refus du serveur, le navigateur peut l'abandonner sans la
+        // lire, et son rejet non rattrape affichait la barre d'erreur
+        // generique par-dessus le bon message.
+        const blobP = lienP.then(l => new Blob([l], { type: 'text/plain' }))
+        blobP.catch(() => {})
+        const item = new window.ClipboardItem({ 'text/plain': blobP })
+        return cb.write([item]).then(() => true, () => false)
+      }
+    } catch { /* on tente le repli */ }
+    return lienP.then(l => (cb && typeof cb.writeText === 'function' ? cb.writeText(l).then(() => true, () => false) : false), () => false)
+  }
+  async function envoyerLienFacture (zone) {
+    if (!window.confirm(t('cal.fac_confirm_envoi'))) return
+    dire(zone, null)
+    boutonsFacture(zone, false)
+    try {
+      const rep = await posterFacture({ action: 'envoyer_lien' })
+      if (!encoreLaFiche()) return
+      lienCourant = rep.lien || lienCourant
+      // Livre : le lien est dans la conversation, masque dans HoteSmart (P2
+      // ter). Sinon : il est montre ici, pour que l'hote le transmette.
+      if (rep.envoi !== 'livre' && lienCourant) montrerLien(zone, lienCourant)
+      dire(zone, { cle: cleRetourEnvoiFacture(rep.envoi), erreur: !['livre', 'differe'].includes(rep.envoi) })
+      await lireDetailFiche()
+      // Une relecture echouee ne repeint rien : sans ceci, les boutons
+      // restaient coupes jusqu'a la prochaine ouverture de la fiche.
+      boutonsFacture(zone, true)
+    } catch (e) {
+      if (!encoreLaFiche()) return
+      refus(zone, e); boutonsFacture(zone, true)
+    }
+  }
+  const DELAI_COPIE_MS = 2000
+  async function copierLienFacture (zone) {
+    dire(zone, null)
+    boutonsFacture(zone, false)
+    const nouveau = !lienCourant
+    // Rien n'est attendu avant `demanderCopie` : c'est la condition de Safari.
+    const lienP = nouveau ? posterFacture({ action: 'copier_lien' }).then(rep => rep.lien) : Promise.resolve(lienCourant)
+    const copieP = demanderCopie(lienP)
+    try {
+      const lien = await lienP
+      if (!encoreLaFiche()) return
+      lienCourant = lien
+      montrerLien(zone, lien)
+      // ⚠ LA COPIE EST BORNEE A 2 SECONDES (recette de 2b) : un presse-papiers
+      // qui ne repond jamais laissait les boutons coupes et la fiche sans
+      // relecture. Passe ce delai, la fiche dit « selectionnez le lien », et
+      // continue.
+      const copie = await Promise.race([copieP, new Promise(ok => setTimeout(() => ok(false), DELAI_COPIE_MS))])
+      dire(zone, { cle: copie ? 'cal.fac_copie_ok' : 'cal.fac_copie_manuelle' })
+      if (nouveau) await lireDetailFiche()
+      boutonsFacture(zone, true)
+    } catch (e) {
+      if (!encoreLaFiche()) return
+      refus(zone, e); boutonsFacture(zone, true)
+    }
+  }
+  // « Remplir a sa place » (Q12) : les champs du formulaire du voyageur
+  // (pages/facture.html), memes noms que validerDestinataire.
+  const CHAMPS_DEST = [
+    ['nom', 'cal.fac_f_nom', 200], ['adresse1', 'cal.fac_f_adresse1', 200], ['adresse2', 'cal.fac_f_adresse2', 200],
+    ['code_postal', 'cal.fac_f_cp', 20], ['ville', 'cal.fac_f_ville', 120], ['pays', 'cal.fac_f_pays', 80],
+    ['tva', 'cal.fac_f_tva', 20], ['siren', 'cal.fac_f_siren', 11]
+  ]
+  // Les champs que le serveur exige (validerDestinataire) : dits a l'aide
+  // technique, pas seulement refuses apres coup.
+  const OBLIGATOIRES = ['nom', 'adresse1', 'ville', 'pays']
+  function ouvrirSaisieFacture (zone, dest) {
+    const form = zone.querySelector('[data-fac-form]')
+    if (!form) return
+    const v = dest || {}
+    const societe = v.type === 'societe'
+    form.innerHTML = `
+      <fieldset style="border: 0; padding: 0; margin: 0">
+        <legend class="caption muted">${esc(t('cal.fac_f_type'))}</legend>
+        <label><input type="radio" name="fac-type" value="particulier"${societe ? '' : ' checked'}> ${esc(t('cal.fac_f_particulier'))}</label>
+        <label style="margin-left: 12px"><input type="radio" name="fac-type" value="societe"${societe ? ' checked' : ''}> ${esc(t('cal.fac_f_societe'))}</label>
+      </fieldset>
+      ${CHAMPS_DEST.map(([c, cle, max]) => `<div data-fac-champ="${c}"${!societe && (c === 'tva' || c === 'siren') ? ' hidden' : ''}>
+        <label class="caption muted" for="fac-${c}">${esc(t(cle))}</label>
+        <input type="text" id="fac-${c}" name="${c}" maxlength="${max}" value="${esc(v[c] || '')}"${OBLIGATOIRES.includes(c) ? ' required aria-required="true"' : ''} style="width: 100%">
+      </div>`).join('')}
+      <span class="row" style="gap: 8px; margin-top: 8px">
+        <button type="submit" class="btn btn--primary" data-fac-enregistrer>${esc(t('cal.fac_f_enregistrer'))}</button>
+        <button type="button" class="link" data-fac-fermer>${esc(t('cal.fac_f_annuler'))}</button>
+      </span>`
+    form.hidden = false
+    boutonsFacture(zone, true)
+    const typeChoisi = () => form.querySelector('input[name="fac-type"]:checked').value
+    form.querySelectorAll('input[name="fac-type"]').forEach(x => x.addEventListener('change', () => {
+      for (const c of ['tva', 'siren']) form.querySelector(`[data-fac-champ="${c}"]`).hidden = typeChoisi() !== 'societe'
+    }))
+    form.querySelector('[data-fac-fermer]').addEventListener('click', () => { form.hidden = true; form.innerHTML = ''; boutonsFacture(zone, true) })
+    form.querySelector('#fac-nom').focus()
+    // ⚠ `onsubmit`, PAS `addEventListener` : le meme <form> se rouvre apres
+    // « Annuler », et un second ecouteur ferait partir DEUX saisies.
+    form.onsubmit = async (ev) => {
+      ev.preventDefault()
+      const destinataire = { type: typeChoisi() }
+      for (const [c] of CHAMPS_DEST) destinataire[c] = form.querySelector(`#fac-${c}`).value
+      // ⚠ UN PARTICULIER N'A NI TVA NI SIREN (review 1 de 2b, constat 2) : une
+      // valeur tapee puis cachee (retour a « particulier ») partait quand meme,
+      // et le serveur la refusait sur un champ que l'hote ne voyait plus.
+      if (destinataire.type !== 'societe') { destinataire.tva = ''; destinataire.siren = '' }
+      const libelles = Object.fromEntries(CHAMPS_DEST.map(([c, cle]) => [c, t(cle)]))
+      dire(zone, null)
+      boutonsFacture(zone, false)
+      try {
+        await posterFacture({ action: 'saisir', destinataire })
+        if (!encoreLaFiche()) return
+        dire(zone, { cle: 'cal.fac_saisie_ok' })
+        await lireDetailFiche()
+        boutonsFacture(zone, true)
+        // Le formulaire a disparu avec la relecture : le focus revient au
+        // geste qui le rouvre, pas dans le vide.
+        zone.querySelector('[data-fac-saisir]')?.focus()
+      } catch (e) {
+        if (!encoreLaFiche()) return
+        refus(zone, e, libelles)
+        boutonsFacture(zone, true)
+        const fautif = e && e.champ && form.querySelector(`#fac-${e.champ}`)
+        if (fautif) fautif.focus()
+      }
+    }
+  }
+  lireDetailFiche()
   appel(`/api/messages?booking_id=${encodeURIComponent(resaCourante)}`).then(rep => {
     // Reponse en retard : la feuille peut montrer une AUTRE resa — le bouton
     // de conversation de A ne doit pas s'armer dans la fiche de B.
@@ -1936,16 +2519,16 @@ function ouvrirFicheBlocage (bienId, blocageId) {
       etatEl.textContent = t('cal.no_change'); return
     }
     try {
-      await api.calendar.modifierFermeture(bienId, f.id, debut, fin, raison)
-      fermerFeuille(); toast(t('cal.saved')); await charger()
+      const r = await api.calendar.modifierFermeture(bienId, f.id, debut, fin, raison)
+      fermerFeuille(); verdictBlocage(r, t('cal.saved')); await charger()
     } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
   })
   corps.querySelector('[data-b-suppr]').addEventListener('click', async () => {
     if (!window.confirm(t('cal.block_delete_confirm'))) return
     const etatEl = corps.querySelector('[data-b-etat]')
     try {
-      await api.calendar.rouvrirFermeture(bienId, f.id)
-      fermerFeuille(); toast(t('cal.block_deleted')); await charger()
+      const r = await api.calendar.rouvrirFermeture(bienId, f.id)
+      fermerFeuille(); verdictBlocage(r, t('cal.block_deleted'), t('cal.block_deleted_none')); await charger()
     } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
   })
 }

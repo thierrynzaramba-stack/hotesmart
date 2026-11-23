@@ -331,6 +331,36 @@ test('une grille indisponible n’empeche pas de savoir OU EN EST l’evaluation
 })
 
 // ─── Recette du 2 octobre 2026 : la prestataire a fini, la fenetre se ferme ─
+// ⚠ ON ATTEND UNE CONDITION, PAS UNE DUREE — et c'est un rouge INTERMITTENT
+// mesure le 26 octobre 2026 sur l'arbre de staging. Ces quatre tests cliquaient
+// puis attendaient `setTimeout(r, 10)` avant d'asserter le rendu. Dix
+// millisecondes suffisent sur une machine au repos ; sous la charge de la suite
+// entiere — `node --test` lance un processus par coeur — la chaine asynchrone
+// n'a pas fini, et le test rougit.
+//
+// MESURE, et elle tranche entre les trois hypotheses qui circulaient : le
+// fichier SEUL, machine au repos, 0 rouge sur 8 ; le MEME fichier, machine
+// chargee par 32 boucles de calcul sur 16 coeurs, 2 rouges sur 8 — et c'est
+// exactement ce test-la. Ce n'est donc ni calendaire (il passe a toutes les
+// heures decalees quand il est seul), ni un etat partage entre fichiers de
+// test : `node --test` donne a chaque FICHIER son propre processus, rien n'y
+// fuit. C'est la charge.
+//
+// ⚠ ET LE PIEGE DE L'ASSERTION NEGATIVE : deux de ces tests verifient que la
+// fenetre NE se ferme PAS. Attendre une duree y est pire qu'inutile — sous
+// charge, la fermeture n'a simplement pas encore eu lieu, et le test passe pour
+// une bonne raison qui n'est pas la sienne. On attend donc le signal POSITIF
+// que la chaine est allee au bout, puis on assert l'absence.
+const jusqua = async (predicat, quoi, limite = 2000) => {
+  const debut = Date.now()
+  while (!predicat()) {
+    if (Date.now() - debut > limite) {
+      assert.fail(`${quoi} : rien au bout de ${limite} ms — ce n'est plus une question de charge`)
+    }
+    await new Promise(r => setTimeout(r, 5))
+  }
+}
+
 test('LE TEST QUI COMPTE : la prestataire qui n’a rien a publier lit un merci, et la fenetre se ferme', async () => {
   const { conteneur, ferme } = await monter({
     role: 'prestataire', criteres: [CRITERES[0]],
@@ -338,7 +368,13 @@ test('LE TEST QUI COMPTE : la prestataire qui n’a rien a publier lit un merci,
     autres: { 'action=eval-reponses': { ok: true, status: 'a_valider', peut_publier: false, negatif: true, motif: 'avis negatif : l hote tranche, quel que soit le pouvoir' } },
   }, { delaiFermeture: 0 })
   conteneur.querySelector('[data-avis="enregistrer"]').click()
-  await new Promise(r => setTimeout(r, 10))
+  // ⚠ ON ATTEND LE DERNIER EVENEMENT DE LA CHAINE, PAS LE PREMIER — et ma
+  // premiere version attendait le texte, qui arrive AVANT la fermeture : sous
+  // charge, le predicat etait satisfait et `ferme.length` valait encore 0.
+  // Mesure : 4 rouges sur 10, pire que les 2 sur 8 d'origine. Un predicat qui
+  // s'arrete a mi-chaine est plus fragile qu'une duree, parce qu'il rend la
+  // main a coup sur au lieu d'attendre par hasard assez longtemps.
+  await jusqua(() => ferme.length === 1, 'la fermeture de la fenetre')
   assert.match(conteneur.textContent, /Merci, vos réponses sont enregistrées/)
   assert.ok(!/l hote tranche/.test(conteneur.textContent), 'le motif brut ne lui est pas montre')
   assert.strictEqual(ferme.length, 1, 'la fenetre se ferme')
@@ -351,19 +387,22 @@ test('une prestataire qui PEUT publier garde la fenetre pour relire', async () =
     autres: { 'action=eval-reponses': { ok: true, status: 'a_valider', peut_publier: true, negatif: false, redaction: { ok: true, public_text: 'Merci.' } } },
   }, { delaiFermeture: 0 })
   conteneur.querySelector('[data-avis="enregistrer"]').click()
-  await new Promise(r => setTimeout(r, 10))
+  await jusqua(() => /texte a été rédigé/.test(conteneur.textContent), 'le texte redige')
   assert.strictEqual(ferme.length, 0)
   assert.match(conteneur.textContent, /texte a été rédigé/)
 })
 
 test('une part encore INCOMPLETE ne ferme pas la fenetre', async () => {
-  const { conteneur, ferme } = await monter({
+  const { conteneur, ferme, appels } = await monter({
     role: 'prestataire', criteres: CRITERES,
     evaluation: { answers_cleaner: { etat: 'impeccable' } },
     autres: { 'action=eval-reponses': { ok: true, status: 'a_remplir', peut_publier: false, negatif: false } },
   }, { delaiFermeture: 0 })
   conteneur.querySelector('[data-avis="enregistrer"]').click()
-  await new Promise(r => setTimeout(r, 10))
+  // Le signal positif ici, c'est l'APPEL : une fois `eval-reponses` parti et
+  // revenu, la decision de fermer ou non est prise. Attendre une duree aurait
+  // rendu ce test vert par simple lenteur.
+  await jusqua(() => appels.some(a => a.chemin.includes('eval-reponses')), 'l appel eval-reponses')
   assert.strictEqual(ferme.length, 0)
 })
 
@@ -384,7 +423,10 @@ test('l’hote a un bouton « Déjà évaluée sur Airbnb », qui range apres co
   const b = conteneur.querySelector('[data-avis="ailleurs"]')
   assert.ok(b, 'le bouton existe pour l hote')
   b.click()
-  await new Promise(r => setTimeout(r, 10))
+  // ⚠ L'APPEL N'EST PAS LE BON SIGNAL ICI, et je l'avais pris : il part AVANT
+  // le rendu, donc attendre l'appel laissait le test asserter un DOM pas encore
+  // remis a jour. Le signal positif est le texte rendu, qui vient apres.
+  await jusqua(() => /Évaluée sur Airbnb/.test(conteneur.textContent), 'le rendu « Évaluée sur Airbnb »')
   assert.ok(appels.some(a => a.chemin.includes('eval-ailleurs')))
   assert.match(conteneur.textContent, /Évaluée sur Airbnb/)
   assert.strictEqual(conteneur.querySelector('[data-avis="publier"]'), null, 'plus de publication')

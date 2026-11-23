@@ -42,7 +42,7 @@ function charger ({ tables = {}, sortieIA }) {
   const supa = fakeSupabase(tables, ecritures)
   const anthropic = { messages: { create: async (req) => { appelsIA.push(req); return { content: [{ type: 'text', text: JSON.stringify(sortieIA) }] } } } }
   const stubs = {
-    '../lib/cron-shared': { supabase: supa, anthropic, getPropertyMode: async () => 'test', isAutomationPaused: async () => false },
+    '../lib/cron-shared': { supabase: supa, anthropic, getPropertyMode: async () => 'test', lireReglagesDuBien: async () => ({ mode: 'test', delais: null }), isAutomationPaused: async () => false },
     '../lib/cron-beds24': { fetchMessages: async () => [], fetchBookingsHistory: async () => [] },
     '../lib/alert-notify': { sendAlertNotifications: async () => {} },
     '../lib/record-message': { recordMessage: async () => ({ ok: true }) },

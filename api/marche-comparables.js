@@ -24,7 +24,7 @@
 // ⚠ La cle AirROI reste au serveur (lib/airroi/client.js).
 
 const { createClient } = require('@supabase/supabase-js')
-const { requirePermission } = require('../lib/require-permission')
+const { requirePermission, posterEnTetesPrives } = require('../lib/require-permission')
 const { creerClient, cleCanonique } = require('../lib/airroi/client')
 const { depotSupabase } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
@@ -375,6 +375,11 @@ async function prixSansPanne (o) {
 }
 
 module.exports = async (req, res) => {
+  // ⚠ DETTE 90 : AVANT LE PREMIER REFUS, pas seulement avant la garde. Les refus
+  // qui precedent `requirePermission` — methode, bien absent — partaient avec le
+  // defaut de Vercel, `public, max-age=0, must-revalidate`. Le pourquoi et les
+  // trois garde-fous : `tests/cache-prive-endpoints.test.js`, section dette 90.
+  posterEnTetesPrives(res)
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST')
     return res.status(405).json({ error: 'methode_non_supportee' })
