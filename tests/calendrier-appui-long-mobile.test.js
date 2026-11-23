@@ -328,7 +328,7 @@ function geometrie (b, { caseTop, barreTop = 600, teteBas = 80 }) {
   b.doc.querySelector('[data-bind="flottante"]').getBoundingClientRect = () => rect(barreTop, 92)
   const tete = b.doc.querySelector('.cal-mois__tete')
   if (tete) tete.getBoundingClientRect = () => rect(0, teteBas)
-  return (el) => { el.getBoundingClientRect = () => rect(caseTop, 70); return el }
+  return (el, top = caseTop) => { el.getBoundingClientRect = () => rect(top, 70); return el }
 }
 
 test('17. au telephone, une date VISIBLE ne fait pas defiler la page, ni au premier appui ni a l extension', () => {
@@ -343,7 +343,9 @@ test('17. au telephone, une date VISIBLE ne fait pas defiler la page, ni au prem
 })
 
 test('18. au telephone, une date CACHEE sous la barre ou sous l en-tete est ramenee a l ecran', () => {
-  for (const caseTop of [640, 40]) {
+  // 640 : sous la barre (haut a 600). 20 : sous l'en-tete (bas a 80), seuls
+  // 20 px sur 70 depassent — moins de la moitie.
+  for (const caseTop of [640, 20]) {
     const b = bancMobile()
     let defilements = 0
     b.window.Element.prototype.scrollIntoView = function () { defilements++ }
@@ -353,16 +355,49 @@ test('18. au telephone, une date CACHEE sous la barre ou sous l en-tete est rame
   }
 })
 
-test('19. au telephone, les boutons de la barre tiennent sur UNE ligne (aucun style en ligne ne la casse)', () => {
+test('19. au doigt, les boutons de la barre tiennent sur UNE ligne ; a l ordinateur et a la souris, ils passent a la ligne', () => {
   const fs = require('fs'), path = require('path')
   const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'calendrier.html'), 'utf8')
   const balise = html.match(/<span[^>]*data-bind="flottante-actions"[^>]*>/)[0]
   assert.match(balise, /class="[^"]*\bcal-flottante__actions\b/, 'la ligne de boutons porte sa classe')
   assert.doesNotMatch(balise, /style=/, 'un style en ligne l emporterait sur la regle du telephone')
   const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
-  const media = css.split('@media (max-width: 899px)').slice(1).map(m => m.split(/\n}\n/)[0])
-  const regle = media.join('\n').match(/\.cal-flottante > \.cal-flottante__actions \{[^}]*\}/)
-  assert.ok(regle, 'la regle du telephone existe')
+  const blocDe = (entete) => css.split(entete).slice(1).map(m => m.split(/\n}\n/)[0]).join('\n')
+  // Au doigt : une ligne qu'on fait defiler.
+  const doigt = blocDe('@media (max-width: 899px) and (pointer: coarse)')
+  const regle = doigt.match(/\.cal-flottante > \.cal-flottante__actions \{[^}]*\}/)
+  assert.ok(regle, 'la regle du doigt existe')
   assert.match(regle[0], /flex-wrap: nowrap/)
   assert.match(regle[0], /overflow-x: auto/)
+  assert.doesNotMatch(regle[0], /scrollbar-width: none/, 'la souris garderait une ligne sans poignee')
+  // Hors de ce bloc (ordinateur, souris en fenetre etroite) : retour a la ligne.
+  const hors = css.split('@media (max-width: 899px) and (pointer: coarse)')[0]
+  assert.match(hors, /\.cal-flottante__actions \{ gap: 8px; flex-wrap: wrap; \}/, 'l ordinateur garde le retour a la ligne')
+  const etroits = css.split('@media (max-width: 899px) {').slice(1).map(m => m.split(/\n}\n/)[0])
+    .filter(m => m.includes('cal-flottante'))
+  assert.ok(etroits.length, 'le bloc etroit de la barre existe')
+  for (const m of etroits) assert.doesNotMatch(m, /cal-flottante__actions[^}]*nowrap/, 'la vue etroite a la souris n est pas en ligne unique')
+})
+
+test('20. au telephone, etendre apres avoir fait defiler ne recentre PAS la premiere date, passee sous l en-tete', () => {
+  const b = bancMobile()
+  let defilements = 0
+  b.window.Element.prototype.scrollIntoView = function () { defilements++ }
+  const placer = geometrie(b, { caseTop: 300 })
+  const premiere = placer(caseM(b, jourDuMois(3)))
+  tap(b, premiere)
+  assert.equal(defilements, 0, 'la premiere date etait visible')
+  placer(premiere, 40)                              // l hote a fait defiler : elle passe sous l en-tete
+  tap(b, placer(caseM(b, jourDuMois(24)), 300))     // la date tapee, elle, est bien visible
+  assert.equal(selection(b).length, 22, 'la selection s est etendue')
+  assert.equal(defilements, 0, 'le mois ne bouge pas : la date tapee est a l ecran')
+})
+
+test('21. au telephone, une date a peine rognee par l en-tete (plus de la moitie visible) ne fait pas defiler', () => {
+  const b = bancMobile()
+  let defilements = 0
+  b.window.Element.prototype.scrollIntoView = function () { defilements++ }
+  const placer = geometrie(b, { caseTop: 60 })      // 60..130 sous un en-tete qui finit a 80 : 50 px sur 70 visibles
+  tap(b, placer(caseM(b, jourDuMois(12))))
+  assert.equal(defilements, 0)
 })

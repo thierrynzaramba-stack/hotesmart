@@ -1143,14 +1143,23 @@ function reserverLaPlaceDeLaBarre (barre) {
 // On ne defile qu'au CHANGEMENT de selection : sinon chaque rendu de la barre
 // ramenerait la page sous le curseur de l'hote en pleine manipulation.
 let derniereSelPeinte = null
+// La date que l'hote vient de taper (doigt, clic en vue etroite, clavier) :
+// au telephone, c'est ELLE que le defilement doit garder a l'ecran, pas le
+// premier jour de la selection (review du correctif de recette : apres un
+// defilement entre deux appuis, viser `jours[0]` recentrait une date passee
+// sous l'en-tete et repoussait la date tapee derriere la barre).
+let dateTapee = null
 function degagerLaSelection () {
+  const tapee = dateTapee
+  dateTapee = null
   const jours = joursSelection()
   const signature = jours.length && etat.sel ? `${etat.sel.bien}|${jours[0]}|${jours[jours.length - 1]}` : null
   if (signature === derniereSelPeinte) return
   derniereSelPeinte = signature
   if (!signature) return
+  const isoMobile = !estLarge() && tapee && jours.includes(tapee) ? tapee : jours[0]
   const cible = document.querySelector(`[data-ligne-prix] .cal-nuit[data-bien="${CSS.escape(etat.sel.bien)}"][data-iso="${jours[0]}"]`)
-    || document.querySelector(`.cal-case[data-bien="${CSS.escape(etat.sel.bien)}"][data-case="${jours[0]}"]`)
+    || document.querySelector(`.cal-case[data-bien="${CSS.escape(etat.sel.bien)}"][data-case="${isoMobile}"]`)
   if (!cible || typeof cible.scrollIntoView !== 'function') return
   // ⚠ AU TELEPHONE, ON NE DEFILE QUE SI LA DATE EST CACHEE (recette de Thierry,
   // 23 novembre 2026). Recentrer a chaque appui deplacait le mois sous le
@@ -1160,13 +1169,16 @@ function degagerLaSelection () {
   if (!estLarge() && cible.classList.contains('cal-case') && dateVisible(cible)) return
   try { cible.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch {}
 }
+// Visible = au moins la MOITIE de la case entre le bas de l'en-tete collant et
+// le haut de la barre. Une case a peine rognee de quelques pixels ne vaut pas
+// un recentrage : ce serait encore le mois qui bouge sous le doigt.
 function dateVisible (cas) {
   const r = cas.getBoundingClientRect()
   const tete = cas.closest('.cal-mois') && cas.closest('.cal-mois').querySelector('.cal-mois__tete')
   const haut = tete ? Math.max(0, tete.getBoundingClientRect().bottom) : 0
   const barre = $('[data-bind="flottante"]')
   const bas = barre && !barre.hidden ? barre.getBoundingClientRect().top : window.innerHeight
-  return r.top >= haut && r.bottom <= bas
+  return Math.min(r.bottom, bas) - Math.max(r.top, haut) >= r.height / 2
 }
 function actionBarre (id, toutFerme) {
   const jours = joursSelection()
@@ -1330,12 +1342,14 @@ function agirSurLaCaseTapee (bienId, iso) {
     // 21 octobre, point 5).
     if (iso < s.duIso) s.duIso = iso
     else s.auIso = iso
+    dateTapee = iso
     peindreSelectionMobile(); renderFlottante()
     return
   }
   // Sans selection, ou une selection sur un AUTRE bien (elle est remplacee :
   // un seul contexte d'action) : la date tapee devient la selection.
   etat.sel = { bien: bienId, duIso: iso, auIso: iso }
+  dateTapee = iso
   peindreSelectionMobile(); renderFlottante()
 }
 // L'APPUI LONG : la fiche du jour de la date tenue. Une selection en cours se

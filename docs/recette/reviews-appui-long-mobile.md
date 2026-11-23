@@ -74,3 +74,62 @@
 6. **pages/calendrier.html:1482 — mineur.** Chrome bloque `navigator.vibrate` tant que la page n'a reçu aucune interaction de l'utilisateur, et un `pointerdown` au doigt ne compte pas comme interaction (seuls `pointerup` / `touchend` comptent). Un appui long qui serait le tout premier geste après le chargement ne vibre donc pas, avec un avertissement en console. Sans conséquence fonctionnelle ; la spec dit « quand le téléphone le permet » ; à savoir pour la recette.
 
 7. **tests/calendrier-appui-long-mobile.test.js:22-23 — mineur (document).** L'en-tête annonce « les deux versions naïves », au §5. La spec en compte trois, et la contre-épreuve est au §4 (le §5 est la recette). À corriger pour que le renvoi ne mène pas au mauvais endroit.
+
+---
+
+# Seconde review — le correctif de recette (barre sur une ligne, défilement)
+
+- **Arbre** : `/home/claude/hotesmart-appui`
+- **Branche** : `fix-appui-long-mobile`
+- **Plage relue** : `693b6337da345a67f07cdf54ec029615b15e8a9c..46450a01744317945e160f7404c48c4a64fbaae2`
+  (un commit, collé depuis `git rev-parse`).
+- **Le rapport nomme lui-même l'arbre et le SHA lus** : `/home/claude/hotesmart-appui`,
+  `HEAD` = `46450a01744317945e160f7404c48c4a64fbaae2`, conformes.
+- **Seconde et dernière review du lot** (deux au plus hors envoi au voyageur),
+  aucun constat de sécurité : les suites partent sans nouvelle review.
+
+## Fichiers cités par le rapport
+
+| fichier cité | dans `git diff --name-only` de la plage |
+|---|---|
+| `pages/calendrier.html` | oui |
+| `shared/ui.css` | oui |
+| `tests/calendrier-appui-long-mobile.test.js` | oui |
+| `docs/specs/spec-appui-long-mobile.md` | oui |
+| `docs/kb/calendrier-v5.md` | oui (listé, pas cité en constat) |
+
+## Suite donnée
+
+| constat | gravité | suite |
+|---|---|---|
+| 1 — à l'extension, on teste `jours[0]`, pas la date tapée : après un défilement, la page saute encore | défaut | **corrigé** : au téléphone, la cible est la date tapée (`dateTapee`, posée par `agirSurLaCaseTapee` là où la barre se redessine) ; test 20, rouge contre `46450a01` et contre la version « premier jour » |
+| 2 — à la souris en fenêtre étroite, « Plus… » et « Réservation » hors d'atteinte | défaut | **corrigé** : ligne unique réservée à `@media (max-width: 899px) and (pointer: coarse)`, la souris garde le retour à la ligne ; `scrollbar-width: none` retiré ; test 19 réécrit (garde aussi l'ordinateur) |
+| 3 — contour de focus rogné par `overflow-x: auto` | mineur | **corrigé** : `padding-block` et `padding-inline` de 3 px sur la ligne au doigt. L'ordre visuel (« Annuler » avant les boutons) diffère de l'ordre de tabulation : noté, sans effet au doigt |
+| 4 — la note YieldFlow : 92 px ne vaut que pour un bien non piloté | mineur | **corrigé dans la spec et le commentaire CSS** (~140-150 px pour un bien piloté) ; recette §5 point 9 sur le Loft Pilotable |
+| 5 — une case à peine rognée compte comme cachée | mineur | **corrigé** : visible si au moins la moitié de la case l'est ; test 21, rouge contre la visibilité stricte |
+| 6 — tests 17-19 : le 17 ne couvre pas le constat 1, le 19 ne garde pas l'ordinateur | mineur | **corrigé** : tests 19 (réécrit) et 20 |
+
+## Rapport tel que rendu
+
+**Arbre et SHA lus**
+- Arbre : `/home/claude/hotesmart-appui`, branche `fix-appui-long-mobile`, HEAD `46450a01744317945e160f7404c48c4a64fbaae2`
+- Plage : `693b6337da345a67f07cdf54ec029615b15e8a9c..46450a01744317945e160f7404c48c4a64fbaae2`. Fichiers : `docs/kb/calendrier-v5.md`, `docs/specs/spec-appui-long-mobile.md`, `pages/calendrier.html`, `shared/ui.css`, `tests/calendrier-appui-long-mobile.test.js`
+- Je n'ai rien modifié dans l'arbre (`git status` vide). Les essais ont été faits hors de l'arbre dans `/tmp`, puis supprimés.
+- Suite demandée : **79/79 verts**.
+- Contre-épreuve, avec les tests neufs posés sur `693b6337` (par `git archive`, hors de l'arbre) : 17 et 19 rougissent, 18 reste vert. C'est conforme au tableau de la spec.
+
+**Réponse au point 1, l'ordinateur (≥ 900 px) : il n'a pas changé.** Les deux règles ont la même spécificité : `.row` (ui.css:77) et `.cal-flottante__actions` (ui.css:861). La seconde vient après, donc elle gagne : `gap: 8px` et `flex-wrap: wrap`, comme le style en ligne d'avant. Aucune autre règle ne vise ce span hors du bloc `@media (max-width: 899px)`. La page n'a pas de bloc `<style>`. Côté code, le chemin de l'ordinateur est intact : la garde `!estLarge()` l'écarte. Ce qui a changé, c'est la vue étroite **à la souris**, une fenêtre d'ordinateur sous 900 px (constat 2).
+
+**1. DÉFAUT — `pages/calendrier.html:1152-1161` : à l'extension, on teste la visibilité du premier jour de la sélection (`jours[0]`), pas de la date tapée. La page saute encore.** Quand on étend vers le bas, `auIso` change mais `jours[0]` reste la première date (`agirSurLaCaseTapee`, l.1331-1332). Si l'hôte a fait défiler entre ses deux appuis, cette première date est passée sous l'en-tête collant ou hors de l'écran. `dateVisible` répond alors faux, et `scrollIntoView({block:'center'})` ramène la première date au centre, alors que la date tapée était visible. **Mesuré**, par un banc hors de l'arbre : appui sur le 3, alors visible ; le 3 passe sous l'en-tête (en-tête : bas à 120 px ; case du 3 : haut à 60 px) ; appui sur le 24, visible à 480 px ; résultat : sélection de 22 jours, et `scrollIntoView` appelé sur le **3**. **Conséquence**, avec des semaines de 70 px et le haut de la barre à 619 px (797 − 86 − 92) : le 3 est recentré vers 363-433 px ; le 24 descend à 573-643 px, sa moitié basse derrière la barre ; à quatre semaines d'écart, il est entièrement caché. C'est le défaut de la recette, dans un cas plus étroit. L'étape 8 de la recette (« deux semaines plus loin ») le déclenche dès que l'hôte fait défiler entre ses deux appuis. Le clavier (Entrée sur une case) suit le même chemin. **Aucun test ne le couvre** : le test 17 place les deux dates à 300 px. **Correction proposée** : au téléphone, viser la date qui vient d'être tapée, par exemple mémoriser `iso` dans `agirSurLaCaseTapee` et s'en servir comme cible quand `!estLarge()` ; ou ne jamais défiler à l'extension. **Test à ajouter** : première date à 40 px (sous l'en-tête), seconde à 300 px, zéro défilement attendu ; il doit rougir contre `46450a0`.
+
+**2. DÉFAUT — `shared/ui.css:878-879` : en vue étroite à la souris, « Plus… » et « Réservation » deviennent inatteignables.** Les cinq boutons font environ 790 px. Au téléphone (387 px), la zone utile fait environ 341 px : on voit « Prix », « Fermer à la vente » et 27 px de « Bloquer les dates » ; « Réservation » et « Plus… » sont entièrement hors champ. À la souris (fenêtre de moins de ~835 px) : `scrollbar-width: none` retire la seule poignée ; la molette verticale ne fait pas défiler à l'horizontale ; à la souris il n'y a pas d'appui long (`if (!glisseMobile.direct) return`, l.1526), donc la fiche du jour ne s'atteint **que** par « Plus… ». Avant le correctif, les boutons passaient à la ligne et tout restait atteignable. **Correction proposée** : retirer `scrollbar-width: none` ; ou réserver la ligne unique à `@media (max-width: 899px) and (pointer: coarse)` et garder le retour à la ligne pour une souris. Au téléphone, un dégradé au bord droit rendrait le défilement découvrable. Ajouter à la recette : faire défiler jusqu'à « Plus… ».
+
+**3. MINEUR — `shared/ui.css:878` : accessibilité de la ligne défilante.** `overflow-x: auto` force `overflow-y: auto`, et la ligne fait exactement la hauteur d'un bouton (44 px) : le contour de focus est rogné en haut et en bas, et à gauche du premier bouton. Correction : `padding-block: 3px` sur la ligne au téléphone, ou un `outline-offset` négatif. L'ordre visuel (« Annuler » avant les boutons) ne suit pas l'ordre de tabulation, qui reste celui du DOM : sans effet au doigt, visible au clavier en vue étroite ; acceptable si on le note.
+
+**4. MINEUR — `shared/ui.css:881`, chiffres de la spec : la note YieldFlow.** La règle est correcte : la note est sur sa propre ligne, et `[hidden]` reste respecté. Mais sur un bien piloté par YieldFlow, la note d'environ 110 caractères prend 2 à 3 lignes : la barre fait alors environ 140-150 px, pas 92. La logique tient, puisque `dateVisible` lit la vraie géométrie, mais le « 238 → 92 px » ne vaut que pour un bien non piloté. Proposition : refaire l'étape 8 de la recette sur un bien piloté.
+
+**5. MINEUR — `pages/calendrier.html:1169` : une date à peine rognée compte comme cachée.** La condition est un contenu strict (`r.top >= haut && r.bottom <= bas`). Une date de la rangée du haut, couverte de quelques pixels par l'en-tête collant, déclenche un recentrage au premier appui. Correction : une tolérance, par exemple visible si plus de la moitié de la case est visible ; ou `block: 'nearest'` avec un `scroll-padding`.
+
+**6. MINEUR — tests 17 à 19 : ce qu'ils prouvent.** Test 18 : solide. Test 17 prouve « pas de défilement quand la première date est visible », et ne dit rien du cas où la date tapée est visible mais pas la première (constat 1). Test 19 est statique et ne garde pas l'ordinateur : supprimer `ui.css:861` laisse tout vert. Ajouter une assertion sur `flex-wrap: wrap` hors du bloc mobile.
+
+**Points vérifiés et sans défaut** : plusieurs biens empilés (un seul en-tête `.cal-mois__tete`, global) ; barre masquée (cas inatteignable) ; extension vers une date avant la première (correcte) ; réserve de place (la dernière semaine reste atteignable) ; boutons désactivés ; compte et « Annuler » sur la première ligne ; compte de 21 tests exact.

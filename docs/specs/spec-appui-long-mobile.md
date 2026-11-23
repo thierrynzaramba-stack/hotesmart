@@ -102,12 +102,19 @@ ne s'ajoutait pas** à la sélection. Mesuré sur un écran de 387 × 797 :
 
 Correction, au téléphone seulement :
 
-- la barre tient sur **une ligne de boutons** qu'on fait défiler du doigt, le
-  compte et « Annuler » en tête, la note dessous : **238 → 92 px**, mesuré
-  dans le même écran ;
-- la page **ne défile plus** si la date choisie est déjà visible entre
-  l'en-tête collant du mois et la barre ; elle ne défile que si la date est
-  cachée.
+- **au doigt** (`pointer: coarse`), la barre tient sur **une ligne de
+  boutons** qu'on fait défiler du doigt, le compte et « Annuler » en tête, la
+  note dessous : **238 → 92 px** sur un bien non piloté, mesuré dans le même
+  écran ; la note YieldFlow d'un bien piloté ajoute deux à trois lignes
+  (~140-150 px). À la souris dans une fenêtre étroite, les boutons passent
+  toujours à la ligne : une ligne à faire défiler n'y a pas de poignée, et
+  « Plus… » est le seul chemin vers la fiche du jour sans appui long ;
+- la page **ne défile plus** si la date **tapée** est visible — au moins la
+  moitié de sa case entre l'en-tête collant du mois et la barre ; elle ne
+  défile que si elle est cachée. C'est la date tapée qui compte, pas le premier
+  jour de la sélection : après un défilement entre deux appuis, viser le
+  premier jour recentrait une date passée sous l'en-tête et repoussait la date
+  tapée derrière la barre (seconde review).
 
 L'ordinateur ne change pas : la ligne de boutons y garde `gap: 8px` et
 `flex-wrap: wrap`, passés du style en ligne à la classe `cal-flottante__actions`,
@@ -131,8 +138,8 @@ et son défilement reste celui d'avant.
 
 **Tests.**
 
-- `tests/calendrier-appui-long-mobile.test.js` : 21 tests neufs (18 du lot,
-  3 du correctif de recette).
+- `tests/calendrier-appui-long-mobile.test.js` : 23 tests neufs (18 du lot,
+  5 du correctif de recette).
 - `tests/calendrier-saisie-prix-dom.test.js` : 7 tests réécrits à l'énoncé
   nouveau, chacun gardant ce qu'il protégeait. Ce sont POINT 4, POINT 5,
   CONSTAT 5, CONSTAT 5 bis, CONSTAT 10, ADDENDUM B et ADDENDUM C.
@@ -160,15 +167,19 @@ versions fautives du correctif :
 | 7 : le clic du clavier sans la garde du jour passé | « un jour passé… » (fichier saisie-prix) | le jour passé au clavier |
 | tête d'avant le correctif de recette (`693b6337`) | 17 et 19 | la page immobile sous le doigt, la barre sur une ligne |
 | 8 : ne jamais défiler au téléphone | 18 | une date cachée est ramenée à l'écran |
+| tête d'avant les suites de la seconde review (`46450a01`) | 19, 20 et 21 | la souris garde le retour à la ligne, la date tapée, la tolérance |
+| 9 : viser le premier jour de la sélection | 20 | la date tapée reste à l'écran après un défilement |
+| 10 : visibilité stricte (case entière) | 21 | une case à peine rognée ne fait pas bouger le mois |
 
 Le test 5 est un test de **non-régression** : il était déjà juste sur `main`.
 Il rougit contre la version 3, et c'est cette régression qu'il garde.
 
-**Suite.** 9341 tests, 9341 verts. Les trois fichiers du lot à J+30, J+60 et
-J+200 : 85 verts, 0 rouge.
+**Suite.** 9346 tests, 9346 verts. Les trois fichiers du lot à J+30, J+60 et
+J+200 : 90 verts, 0 rouge.
 
-**Review.** Une review, sans constat de sécurité ; ses sept constats et la
-suite donnée sont dans docs/recette/reviews-appui-long-mobile.md.
+**Reviews.** Deux, sans constat de sécurité : celle du lot (sept constats) et
+celle du correctif de recette (six constats). Rapports et suite donnée :
+docs/recette/reviews-appui-long-mobile.md.
 
 ## 5. Recette (Thierry, sur son téléphone Android)
 
@@ -189,4 +200,8 @@ Sur `staging`, une fois la branche mergée par le chef de file :
    sélection du numéro, et ouvre la fiche du jour.
 8. (Correctif de recette) Un appui court sur une date, puis un appui court sur
    une date **deux semaines plus loin** : la sélection s'étend, la barre ne
-   cache pas les semaines suivantes, et la page ne saute pas.
+   cache pas les semaines suivantes, et la page ne saute pas. Puis la même chose
+   en faisant défiler le mois entre les deux appuis.
+9. Sur **« Recette — Loft Pilotable »** (piloté par YieldFlow, sa barre porte
+   la note) : refaire l'essai 8.
+10. Dans la barre, faire défiler les boutons du doigt jusqu'à « Plus… ».

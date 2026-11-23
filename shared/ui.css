@@ -863,20 +863,31 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 @media (max-width: 899px) {
   .cal-periode { display: none; }
   .cal-nav [data-nav] { display: none; }
-  /* ⚠ AU TELEPHONE, LA BARRE TIENT SUR UNE LIGNE DE BOUTONS (recette de
-     Thierry, 23 novembre 2026). Ses cinq boutons passaient sur trois lignes :
-     238px de haut, plus les 86px de la navigation — 40 % de l'ecran. Les
-     semaines qui suivent la date choisie etaient DERRIERE la barre, et un appui
-     dessus touchait la barre : la selection ne s'etendait pas. Mesure sur un
-     ecran de 387 x 797 : 238px avant, 92px apres. Le compte et « Annuler » en
-     tete, les boutons sur une ligne qu'on fait defiler du doigt, la note en
-     dessous. */
-  .cal-flottante { bottom: calc(86px + env(safe-area-inset-bottom)); width: calc(100vw - 20px);
-    gap: 6px 10px; padding: 8px 10px; justify-content: space-between; }
+  .cal-flottante { bottom: calc(86px + env(safe-area-inset-bottom)); width: calc(100vw - 20px); }
+}
+
+/* ⚠ AU DOIGT, LA BARRE TIENT SUR UNE LIGNE DE BOUTONS (recette de Thierry,
+   23 novembre 2026). Ses cinq boutons passaient sur trois lignes : 238px de
+   haut, plus les 86px de la navigation — 40 % de l'ecran. Les semaines qui
+   suivent la date choisie etaient DERRIERE la barre, et un appui dessus
+   touchait la barre : la selection ne s'etendait pas. Mesure sur un ecran de
+   387 x 797 : 238px avant, 92px apres sur un bien non pilote (la note
+   YieldFlow d'un bien pilote ajoute deux a trois lignes). Le compte et
+   « Annuler » en tete, les boutons sur une ligne qu'on fait defiler du doigt,
+   la note en dessous.
+   ⚠ `pointer: coarse` SEULEMENT (review du correctif) : a la souris, dans une
+   fenetre etroite, une ligne a faire defiler n'a pas de poignee — « Plus… »
+   et « Reservation » seraient hors d'atteinte, et sans appui long « Plus… »
+   est le seul chemin vers la fiche du jour. La souris garde le retour a la
+   ligne. */
+@media (max-width: 899px) and (pointer: coarse) {
+  .cal-flottante { gap: 6px 10px; padding: 8px 10px; justify-content: space-between; }
   .cal-flottante > [data-bind="flottante-compte"] { order: 0; }
   .cal-flottante > [data-bind="flottante-annuler"] { order: 1; }
+  /* `padding-block` : `overflow-x: auto` rogne aussi en hauteur, et le
+     contour de focus d'un bouton de 44px en serait coupe. */
   .cal-flottante > .cal-flottante__actions { order: 2; flex: 1 0 100%; flex-wrap: nowrap;
-    overflow-x: auto; justify-content: flex-start; scrollbar-width: none; }
+    overflow-x: auto; justify-content: flex-start; padding-block: 3px; padding-inline: 3px; }
   .cal-flottante__actions > * { flex: 0 0 auto; }
   .cal-flottante > [data-bind="flottante-note"] { order: 3; flex: 1 0 100%; }
 }
