@@ -49,6 +49,7 @@ propriétaire : ménage non marqué fait 30 minutes avant l'heure d'arrivée ».
 | — | Où ranger l'alerte ? | **Un lot à part, après le lot 3** (19 novembre 2026) |
 | — | Heures calmes ? | **« Configurable comme les autres »** (19 novembre 2026). Conséquence de la règle existante : liée à une arrivée du jour, elle passe les heures calmes comme les autres alertes ménage ; l'hôte choisit ses canaux ou la coupe. |
 | Q49 | Un logement **sans heure d'arrivée réglée** (vide ou illisible) | **Pas d'alerte** pour ce logement tant que l'heure n'est pas réglée, et le guide le dit (22 novembre 2026) |
+| Q49 bis | Le logement « À compléter » annonce **18:00** au voyageur (lot `logement-heures`) : l'alerte suit-elle cette heure ? | **Non** : Q49 tient, pas d'alerte tant que l'heure n'est pas réglée (23 novembre 2026) |
 
 ## 3. La règle
 
