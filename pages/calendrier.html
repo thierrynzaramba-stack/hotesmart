@@ -1222,8 +1222,42 @@ function finirGesteMobile (e) {
 // s'en apercoit, glisse hors de la grille et relache ailleurs voyait donc
 // s'ouvrir la fiche du jour qu'il venait d'abandonner. On exige que le
 // relachement atterrisse sur une case DU MEME BIEN.
-const caseSousLeRelachement = (e, sel) =>
-  (e && e.target && e.target.closest) ? e.target.closest(sel) : null
+// ⚠ AU DOIGT, `e.target` NE BOUGE JAMAIS (constat 4 de la review du
+// 23 novembre 2026) : le navigateur capture implicitement le pointeur sur la
+// case de depart, donc le `pointerup` lui est TOUJOURS adresse, ou que le
+// doigt se leve. Pour un pointeur direct, c'est la case SOUS LE DOIGT qui
+// compte, et `elementFromPoint` la donne. Sans lui (jsdom), on garde la cible.
+const caseSousLeRelachement = (e, sel) => {
+  if (!e) return null
+  if (manipulationDirecte(e) && typeof document.elementFromPoint === 'function') {
+    const sous = document.elementFromPoint(e.clientX || 0, e.clientY || 0)
+    return (sous && sous.closest) ? sous.closest(sel) : null
+  }
+  return (e.target && e.target.closest) ? e.target.closest(sel) : null
+}
+// ⚠ LE CLIC FANTOME (constat 1 de la meme review). Au doigt, le navigateur
+// envoie un `click` APRES le relachement, et il en recalcule la cible a la
+// position du doigt — dans une page que le geste vient de changer : la barre
+// d'actions parait en bas, la case est ramenee au centre par
+// `degagerLaSelection`, ou la fiche du jour s'ouvre. Ce `click` tomberait sur
+// ce qui est maintenant sous le doigt — « Fermer a la vente », une barre de
+// reservation, la fiche — et agirait sans que l'hote l'ait voulu. On l'avale
+// donc, une fois, s'il arrive vite et au meme endroit. Le clic du clavier
+// (`detail === 0`) n'est jamais touche. Meme garde que l'app menage
+// (apps/menages/public.html, `clicIgnore`), mais au niveau du document,
+// puisque la cible ne se connait pas d'avance.
+const CLIC_FANTOME_MS = 700
+let clicFantome = null
+document.addEventListener('click', (e) => {
+  const f = clicFantome
+  if (!f || e.detail === 0) return
+  clicFantome = null
+  if (Date.now() > f.jusqua) return
+  if (Math.abs((e.clientX || 0) - f.x) > TOLERANCE_APPUI_LONG_PX ||
+      Math.abs((e.clientY || 0) - f.y) > TOLERANCE_APPUI_LONG_PX) return
+  e.preventDefault()
+  e.stopPropagation()
+}, true)
 document.addEventListener('pointerup', (e) => {
   const g = finirGesteMobile(e)
   if (!g) return
@@ -1231,11 +1265,13 @@ document.addEventListener('pointerup', (e) => {
   if (g.bouge) { renderFlottante(); return }
   const sur = caseSousLeRelachement(e, '.cal-case[data-case]')
   if (!sur || sur.dataset.bien !== g.bien || sur.dataset.case !== g.depuis) return
+  if (g.direct) clicFantome = { x: e.clientX || 0, y: e.clientY || 0, jusqua: Date.now() + CLIC_FANTOME_MS }
   // ⚠ APPUI LONG = FICHE DU JOUR, APPUI COURT = SELECTION (decision de Thierry
   // du 23 novembre 2026, qui inverse le point 5 du 21 octobre). Le telephone
   // suit l'ordinateur : un clic y selectionne et fait paraitre la barre
-  // d'actions. La fiche s'ouvre AU RELACHEMENT, jamais sous le doigt encore
-  // pose : ouverte par le minuteur, elle recevait le relachement du doigt.
+  // d'actions. La fiche s'ouvre au relachement, comme toute action du tap ;
+  // ce qui pourrait l'atteindre ensuite, c'est le clic fantome, avale
+  // ci-dessus.
   if (g.long) return ouvrirFicheDuJour(g.bien, g.depuis)
   agirSurLaCaseTapee(g.bien, g.depuis)
 })

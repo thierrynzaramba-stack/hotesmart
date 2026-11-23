@@ -56,20 +56,38 @@ La fiche du jour reste atteignable par « Plus… » dans la barre.
 
 **Détails du geste long.**
 
-- La fiche s'ouvre **au relâchement**, jamais sous le doigt encore posé :
-  ouverte par le minuteur, elle recevrait le relâchement.
+- La fiche s'ouvre **au relâchement**, comme toute action du tap.
 - Le relâchement doit atterrir sur la **même case** (même ancre que l'appui
-  court) ; ailleurs, l'appui est abandonné et rien ne s'ouvre.
+  court) ; ailleurs, l'appui est abandonné et rien ne s'ouvre. Au doigt, le
+  `pointerup` est toujours adressé à la case de départ (capture implicite du
+  pointeur) : la case du relâchement est donc celle **sous le doigt**, donnée
+  par `document.elementFromPoint` (constat 4 de la review).
 - Une sélection en cours se vide avant d'ouvrir la fiche, sinon la barre
   resterait derrière elle avec un contexte qui n'est plus celui de l'écran.
 - Le doigt sent que l'appui long est pris : `navigator.vibrate(15)`, quand le
-  téléphone le permet (sans effet sur iPhone).
+  téléphone le permet. Sans effet sur iPhone ; et Chrome l'ignore tant que la
+  page n'a reçu aucune interaction, donc un appui long qui serait le tout
+  premier geste après le chargement ne vibre pas (constat 6, sans conséquence).
 - Le menu contextuel de l'appui long (Chrome Android) est retenu pendant le
-  geste, comme dans l'app ménage.
+  geste, comme dans l'app ménage. Sur iPhone, Safari n'envoie pas ce
+  `contextmenu` : ce sont `-webkit-user-select: none` et
+  `-webkit-touch-callout: none` sur `.cal-case` (`shared/ui.css`) qui empêchent
+  la sélection du numéro du jour et sa loupe (constat 5).
+
+**Le clic fantôme** (constat 1 de la review). Au doigt, le navigateur envoie un
+`click` après le relâchement, et il en recalcule la cible à la position du
+doigt — dans une page que le geste vient de changer (la barre paraît en bas, la
+case est ramenée au centre, la fiche s'ouvre). Ce `click` tomberait sur
+« Fermer à la vente », une barre de réservation ou un bouton de la fiche. Il
+est donc avalé, une seule fois, s'il arrive dans les 700 ms et à moins de
+10 px du relâchement. Le clic du clavier (`detail === 0`) n'est jamais
+touché.
 
 **Ce que le lot ne touche pas.** L'ordinateur (grille large) : ses gestes
 passent par `mousedown` sur les nuits, pas par ce code. Le glisser à la souris
-en vue étroite : inchangé.
+en vue étroite : inchangé. Seule exception : la règle `.cal-case` de
+`shared/ui.css` (cases du téléphone uniquement) gagne ses deux propriétés
+`-webkit-`.
 
 ## 3. Case performance
 
@@ -77,17 +95,19 @@ en vue étroite : inchangé.
 2. Donnée non urgente : sans objet.
 3. Cache navigateur : sans objet, rien n'est mis en cache.
 4. `private, no-store` : sans objet, aucun endpoint touché.
-5. Fichiers statiques : sans objet, aucun fichier statique ajouté.
+5. Fichiers statiques : sans objet, aucun fichier statique ajouté
+   (`shared/ui.css` gagne deux propriétés sur une règle existante).
 6. Lecture tronquée : sans objet, aucune lecture.
 7. Budget : inchangé, un geste ne fait aucun appel réseau.
 8. Mesure avant / après : 0 appel, 0 requête par geste, avant comme après.
-   Octets de la page : 150 968 → 153 653 (+2 685), code et commentaires.
+   Octets de la page : 150 968 → 155 608 (+4 640), code et commentaires ;
+   `shared/ui.css` : +2 propriétés et 4 lignes de commentaire.
 
 ## 4. Preuves
 
 **Tests.**
 
-- `tests/calendrier-appui-long-mobile.test.js` : 10 tests neufs.
+- `tests/calendrier-appui-long-mobile.test.js` : 18 tests neufs.
 - `tests/calendrier-saisie-prix-dom.test.js` : 7 tests réécrits à l'énoncé
   nouveau, chacun gardant ce qu'il protégeait. Ce sont POINT 4, POINT 5,
   CONSTAT 5, CONSTAT 5 bis, CONSTAT 10, ADDENDUM B et ADDENDUM C.
@@ -95,23 +115,33 @@ en vue étroite : inchangé.
   devient « appui long = fiche du jour » et « appui court = sélection ».
 - `tests/outils/banc-calendrier.js` : un geste porte désormais sa position
   (`x`, `y` → `clientX`, `clientY`).
+- Le test « un jour passé ne se sélectionne toujours pas » gagne une assertion
+  au clavier (constat 2 de la review) : depuis l'inversion, « pas de fiche » ne
+  gardait plus rien seul.
 
 **Contre-épreuve (REVIEW.md règle 19).** Les tests neufs ont été lancés hors
-de l'arbre (`git archive`) contre le code d'avant et contre trois versions
-naïves du correctif :
+de l'arbre contre le code d'avant (`git archive` de `main`) et contre sept
+versions fautives du correctif :
 
 | version | rouges | ce qu'ils gardent |
 |---|---|---|
-| `main` (code d'avant) | 9 sur 10 : tous sauf le 5 | l'inversion, la tolérance, le second doigt, l'ancre, le menu contextuel |
-| naïve 1 : l'inversion sans la tolérance | 3 et 7 | la tolérance au tremblement, le second doigt |
-| naïve 2 : aucune annulation au déplacement | 4 et 6 | la garde du défilement, la tolérance par axe |
-| naïve 3 : sans `pointercancel` | 5 | le défilement pris par le navigateur sous les 10 px |
+| `main` (code d'avant) | 17 sur 18 : tous sauf le 5 | l'inversion, la tolérance, le second doigt, l'ancre, le menu contextuel, le clic fantôme, les deux biens |
+| 1 : l'inversion sans la tolérance | 3 et 7 | la tolérance au tremblement, le second doigt |
+| 2 : aucune annulation au déplacement | 4 et 6 | la garde du défilement, la tolérance par axe |
+| 3 : sans `pointercancel` | 5 | le défilement pris par le navigateur sous les 10 px |
+| 4 : sans avaler le clic fantôme | 11, 13 et 14 | le clic fantôme, après l'appui court comme après l'appui long |
+| 5 : la case du relâchement lue sur `e.target` | 8 | l'ancre au doigt, sous capture implicite |
+| 6 : une sélection sur un autre bien étendue | 15 | la barre n'agit que sur le bien tapé |
+| 7 : le clic du clavier sans la garde du jour passé | « un jour passé… » (fichier saisie-prix) | le jour passé au clavier |
 
 Le test 5 est un test de **non-régression** : il était déjà juste sur `main`.
-Il rougit contre la version naïve 3, et c'est cette régression qu'il garde.
+Il rougit contre la version 3, et c'est cette régression qu'il garde.
 
-**Suite.** 9333 tests, 9333 verts. Les tests du lot à J+30, J+60 et J+200 :
-68 verts, 0 rouge.
+**Suite.** 9341 tests, 9341 verts. Les trois fichiers du lot à J+30, J+60 et
+J+200 : 85 verts, 0 rouge.
+
+**Review.** Une review, sans constat de sécurité ; ses sept constats et la
+suite donnée sont dans docs/recette/reviews-appui-long-mobile.md.
 
 ## 5. Recette (Thierry, sur son téléphone Android)
 
@@ -124,3 +154,9 @@ Sur `staging`, une fois la branche mergée par le chef de file :
    fiche « Configurer les dates » s'ouvre sur cette date. Le téléphone vibre
    peut-être, et aucun menu du téléphone ne s'ouvre.
 4. Faire défiler le mois du doigt : rien ne se sélectionne, rien ne s'ouvre.
+5. Un appui court sur une date de la **dernière ligne** du mois, là où la barre
+   apparaît : la barre paraît, et aucun de ses boutons n'agit tout seul.
+6. Un appui court **en haut** d'un mois chargé de réservations : la date se
+   sélectionne, et aucune fiche de réservation ne s'ouvre toute seule.
+7. Si un iPhone est sous la main : un appui long n'affiche ni loupe ni
+   sélection du numéro, et ouvre la fiche du jour.

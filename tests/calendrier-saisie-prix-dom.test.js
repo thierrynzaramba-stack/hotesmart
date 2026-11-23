@@ -561,6 +561,9 @@ test('un jour passe ne se selectionne toujours pas, aux deux ecrans', () => {
   // Et le clavier non plus.
   B.clicClavier(m.b, passeeM)
   assert.equal(m.b.doc.querySelector('[data-bind="feuille"]').hidden, true, 'telephone : ni au clavier')
+  // Depuis le 23 novembre 2026 le clavier SELECTIONNE au lieu d'ouvrir la
+  // fiche : l'assertion de la fiche ne garde plus rien seule (review du lot).
+  assert.equal(m.b.cal.etat.sel, null, 'telephone : le clavier ne selectionne pas un jour passe')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

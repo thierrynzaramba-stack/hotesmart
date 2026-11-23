@@ -279,15 +279,22 @@ le tap ouvrait la fiche. Aucun test ne le voyait : le banc n'envoyait jamais de
   seulement pour le doigt qui a commencé le geste (`TOLERANCE_APPUI_LONG_PX`,
   même règle que l'app ménage, `TOLERANCE_PX`). Au-delà, le navigateur prend
   la main pour faire défiler et envoie `pointercancel`, qui clôt le geste.
-- **La fiche s'ouvre au relâchement, jamais sous le doigt encore posé** :
-  ouverte par le minuteur, elle recevrait le relâchement. Le doigt sent que
-  l'appui long est pris (`navigator.vibrate(15)`, quand le téléphone le
-  permet).
+- **La fiche s'ouvre au relâchement.** Le doigt sent que l'appui long est
+  pris (`navigator.vibrate(15)`, quand le téléphone le permet).
+- ⚠ **Le clic fantôme est avalé.** Au doigt, le navigateur envoie un `click`
+  après le relâchement, cible recalculée à la position du doigt dans la page
+  que le geste vient de changer (barre en bas, case recentrée, fiche ouverte).
+  Il est avalé une fois, s'il arrive dans les 700 ms à moins de 10 px ; le
+  clic du clavier n'est jamais touché.
+- ⚠ **Au doigt, `e.target` ne bouge jamais** (capture implicite) : la case du
+  relâchement est celle **sous le doigt** (`elementFromPoint`).
+- Sur iPhone : `-webkit-user-select: none` et `-webkit-touch-callout: none`
+  sur `.cal-case`, sinon l'appui long sélectionne le numéro du jour.
 - **Le menu contextuel de l'appui long** (Chrome Android) est retenu pendant le
   geste. ⚠ À confirmer sur le téléphone de Thierry : jsdom ne le prouve pas.
 - La fiche du jour reste atteignable par **« Plus… »** dans la barre.
 
-Tests : `tests/calendrier-appui-long-mobile.test.js` (10), et sept tests de
+Tests : `tests/calendrier-appui-long-mobile.test.js` (18), et sept tests de
 `tests/calendrier-saisie-prix-dom.test.js` réécrits à l'énoncé nouveau. Spec et
 contre-épreuve : docs/specs/spec-appui-long-mobile.md.
 

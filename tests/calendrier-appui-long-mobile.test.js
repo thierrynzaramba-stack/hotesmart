@@ -18,9 +18,14 @@
 //   2. l'appui long ne s'annule qu'au-dela de 10 px sur un axe, et seulement
 //      pour le doigt qui a commence le geste.
 //
+// La review du lot a ajoute trois gardes, testees ici aussi : le clic
+// fantome qui suit le relachement est avale ; au doigt, la case du
+// relachement est celle SOUS LE DOIGT (capture implicite) ; une selection sur
+// un autre bien est remplacee, jamais etendue.
+//
 // Contre-epreuve (REVIEW.md regle 19) : le compte rendu du lot donne, test par
-// test, le resultat contre le code d'avant (`main`) et contre les deux
-// versions naives du correctif (docs/specs/spec-appui-long-mobile.md §5).
+// test, le resultat contre le code d'avant (`main`) et contre les versions
+// naives du correctif (docs/specs/spec-appui-long-mobile.md §4).
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -163,13 +168,24 @@ test('7. le mouvement d un SECOND doigt n annule pas l appui long du premier', a
   assert.equal(ficheDu(b), a, 'la fiche est celle de la date du premier doigt')
 })
 
-test('8. un appui long relache HORS de sa case n ouvre rien', async () => {
+test('8. un appui long relache HORS de sa case n ouvre rien, meme sous capture implicite', async () => {
+  // Au doigt, le `pointerup` est TOUJOURS adresse a la case de depart (capture
+  // implicite du pointeur). Le banc le reproduit : le relachement part de la
+  // case, et c'est `elementFromPoint` qui dit ce qu'il y a sous le doigt.
   const b = bancMobile()
-  B.geste(b, caseM(b, jourDuMois(12)), 'pointerdown', doigt())
+  const c = caseM(b, jourDuMois(12))
+  const ailleurs = b.doc.querySelector('[data-bind="toasts"]')
+  b.doc.elementFromPoint = (x, y) => (x === 100 && y === 200) ? c : ailleurs
+  B.geste(b, c, 'pointerdown', doigt({ x: 100, y: 200 }))
   await attendre(500)
-  B.geste(b, b.doc.querySelector('[data-bind="toasts"]'), 'pointerup', doigt())
+  B.geste(b, c, 'pointerup', doigt({ x: 100, y: 600 }))   // le doigt s'est leve ailleurs
   assert.equal(ficheOuverte(b), false, 'l hote a abandonne : aucune fiche')
   assert.equal(b.cal.etat.sel, null, 'et aucune selection')
+  // Et sous le doigt, c'est bien la case : la fiche s'ouvre.
+  B.geste(b, c, 'pointerdown', doigt({ x: 100, y: 200 }))
+  await attendre(500)
+  B.geste(b, c, 'pointerup', doigt({ x: 100, y: 200 }))
+  assert.equal(ficheDu(b), jourDuMois(12))
 })
 
 test('9. un appui long sur une date vide la selection en cours avant d ouvrir sa fiche', async () => {
@@ -197,4 +213,106 @@ test('10. le menu contextuel de l appui long est retenu pendant le geste du doig
   const e2 = new b.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true })
   c.dispatchEvent(e2)
   assert.equal(e2.defaultPrevented, false, 'hors geste, le menu n est pas touche')
+})
+
+// ─── Le clic fantome (constat 1 de la review) ──────────────────────────────
+// Au doigt, le navigateur envoie un `click` apres le relachement, cible
+// recalculee a la position du doigt dans la page que le geste vient de
+// changer. Le banc le reproduit en tirant ce `click` sur le bouton qui serait
+// maintenant sous le doigt. « Plus… » de la barre sert de temoin : il agit
+// sans reseau, et son effet (la fiche s'ouvre) se lit sans ambiguite.
+const plus = (b) => b.doc.querySelector('[data-action="plus"]')
+
+test('11. le clic fantome qui suit un appui court est avale : la barre neuve sous le doigt n agit pas', () => {
+  const b = bancMobile()
+  const iso = jourDuMois(12)
+  tap(b, caseM(b, iso), { x: 100, y: 600 })
+  assert.ok(B.barreVisible(b))
+  const e = B.geste(b, plus(b), 'click', { x: 101, y: 601 })     // detail = 1 : il vient du doigt
+  assert.equal(e.defaultPrevented, true, 'le clic fantome est avale')
+  assert.equal(ficheOuverte(b), false, 'le bouton sous le doigt n a pas agi')
+  assert.deepEqual(selection(b), [iso])
+})
+
+test('12 a. un vrai clic LOIN du doigt agit normalement', () => {
+  const b = bancMobile()
+  tap(b, caseM(b, jourDuMois(12)), { x: 100, y: 200 })
+  B.geste(b, plus(b), 'click', { x: 100, y: 600 })
+  assert.equal(ficheOuverte(b), true)
+})
+
+test('12 b. un clic au CLAVIER n est jamais avale', () => {
+  const b = bancMobile()
+  tap(b, caseM(b, jourDuMois(12)), { x: 100, y: 200 })
+  B.clicClavier(b, plus(b))                                       // detail = 0
+  assert.equal(ficheOuverte(b), true)
+})
+
+test('12 c. passe le delai, un clic au meme endroit agit', async () => {
+  const b = bancMobile()
+  tap(b, caseM(b, jourDuMois(12)), { x: 100, y: 200 })
+  await attendre(750)
+  B.geste(b, plus(b), 'click', { x: 100, y: 200 })
+  assert.equal(ficheOuverte(b), true)
+})
+
+test('13. le clic fantome n est avale qu UNE fois', () => {
+  const b = bancMobile()
+  tap(b, caseM(b, jourDuMois(12)), { x: 100, y: 200 })
+  B.geste(b, plus(b), 'click', { x: 100, y: 200 })                // le fantome
+  assert.equal(ficheOuverte(b), false, 'le fantome est avale')
+  B.geste(b, plus(b), 'click', { x: 100, y: 200 })                // un vrai second toucher
+  assert.equal(ficheOuverte(b), true, 'le clic suivant agit')
+})
+
+test('14. le clic fantome qui suit un appui long ne tombe pas dans la fiche qui vient de s ouvrir', async () => {
+  const b = bancMobile()
+  const c = caseM(b, jourDuMois(12))
+  B.geste(b, c, 'pointerdown', doigt({ x: 100, y: 200 }))
+  await attendre(500)
+  B.geste(b, c, 'pointerup', doigt({ x: 100, y: 200 }))
+  assert.equal(ficheOuverte(b), true)
+  const enregistrer = b.doc.querySelector('[data-cfg-save]')
+  assert.ok(enregistrer, 'le bouton Enregistrer de la fiche sert de cible')
+  const e = B.geste(b, enregistrer, 'click', { x: 100, y: 200 })
+  await attendre(0)
+  assert.equal(e.defaultPrevented, true, 'le clic fantome est avale')
+  assert.equal(b.envois.filter(x => x.methode === 'POST').length, 0, 'rien n est enregistre')
+})
+
+// ─── Deux biens empiles au telephone (constat 3 de la review) ───────────────
+const BIEN2 = { ...BIEN, id: 'B2', name: 'La bulle', provider_property_id: 'P2' }
+function bancDeuxBiens () {
+  const b = B.monter({ large: false, appel: async () => ({ saved: 1, pushed: true, local_only: false, push_failed: false, warnings: [] }) })
+  const o = { biens: [BIEN, BIEN2], jours: 3, decalage: 0, mois: MOIS_A_VENIR }
+  const jours = B.peupler(b, o)
+  const inv = { ...inventaire(jours), B2: inventaire(jours).B1 }
+  B.peupler(b, { ...o, inv })
+  return b
+}
+const caseDe = (b, bien, iso) => {
+  const el = b.doc.querySelector(`.cal-case[data-case="${iso}"][data-bien="${bien}"]`)
+  assert.ok(el, `case ${bien} ${iso} absente de la grille rendue`)
+  return el
+}
+
+test('15. deux biens : un appui court sur le second bien REMPLACE la selection du premier, il ne l etend pas', () => {
+  const b = bancDeuxBiens()
+  tap(b, caseDe(b, 'B1', jourDuMois(5)))
+  tap(b, caseDe(b, 'B2', jourDuMois(9)))
+  assert.equal(b.cal.etat.sel.bien, 'B2', 'la barre agira sur le bien tape, pas sur l autre')
+  assert.deepEqual(selection(b), [jourDuMois(9)])
+})
+
+test('16. deux biens : un appui long sur le second bien ouvre SA fiche et vide la selection du premier', async () => {
+  const b = bancDeuxBiens()
+  tap(b, caseDe(b, 'B1', jourDuMois(5)))
+  tap(b, caseDe(b, 'B1', jourDuMois(7)))
+  const c = caseDe(b, 'B2', jourDuMois(20))
+  B.geste(b, c, 'pointerdown', doigt())
+  await attendre(500)
+  B.geste(b, c, 'pointerup', doigt())
+  assert.equal(ficheDu(b), jourDuMois(20))
+  assert.equal(b.cal.etat.sel, null, 'la selection du premier bien est videe')
+  assert.equal(B.barreVisible(b), false)
 })
