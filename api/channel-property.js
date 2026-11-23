@@ -165,11 +165,34 @@ async function canauxActifsDuBien (prop) {
     // bien a plus de canaux qu'une page restait refuse a vie. Les regles de la
     // pagination — total retenu, flux interrompu, page courte, plafond — vivent
     // dans `lireCanauxDuPartenaire` : on les emprunte, on ne les recopie pas.
-    // Et elles refusent deja les deux formes du constat MAJEUR du 26 octobre :
-    // une reponse sans liste (`reponse_invalide`) et un flux sous le total
-    // annonce (`tronquee`).
-    const canaux = await lireCanauxDuPartenaire({ appel: channelCall, chemin: `/channels?${filtre}` })
-    if (!canaux.ok) return await siLaProprieteADisparu(cle)
+    // Elles refusent les deux formes du constat MAJEUR du 26 octobre : une
+    // reponse sans liste (`reponse_invalide`) et un flux sous le total annonce
+    // (`tronquee`).
+    //
+    // ⚠ ET LE TOTAL EST EXIGE (constat 2 de la relecture 2 du 23 novembre
+    // 2026). Pour le releve, une page courte sans total vaut fin de liste ;
+    // pour une garde DESTRUCTRICE, un tarif manque est une suppression
+    // irreversible. Mesure de la relecture : 11 tarifs servis par pages de 10,
+    // sans total, le canal mappant le 11e -> 200 et 19 purges. Sans total,
+    // on refuse.
+    //
+    // ⚠ UNE ECHEANCE COMMUNE AUX DEUX LECTURES (constat 5 de la relecture 2) :
+    // chacune avait ses six secondes, soit douze ; elles partagent maintenant
+    // la meme, posee ici.
+    const debut = Date.now()
+    const lire = (chemin) => lireCanauxDuPartenaire({ appel: channelCall, chemin, maintenant: debut, totalExige: true })
+    const canaux = await lire(`/channels?${filtre}`)
+    // ⚠ UNE LECTURE EN ECHEC REFUSE, QUELLE QU'EN SOIT LA CAUSE (constat de
+    // SECURITE de la relecture 2 du 23 novembre 2026). Le correctif d'avant
+    // demandait au partenaire si la propriete existait encore, et prenait un
+    // 404 pour « elle n'existe plus » : or un 404 vient aussi d'une route
+    // introuvable — une base d'URL fausse, la page d'erreur d'un intermediaire,
+    // une maintenance. Mesure : toutes les routes en 404 HTML -> 200, 19 purges,
+    // DELETE parti, propriete toujours chez le partenaire avec ses canaux. Ce
+    // correctif est RETIRE, pas rafistole : une propriete deja effacee chez le
+    // partenaire reste insupprimable ici, et c'est une dette du registre
+    // (docs/specs/spec-garde-suppression-bien.md §5), pas un trou de la garde.
+    if (!canaux.ok) return null
     const rows = canaux.canaux
     // ⚠ UNE ENTREE QUI N'EST PAS UN CANAL N'EST PAS « UN CANAL INACTIF »
     // (constat 4 de la relecture du 23 novembre 2026). `data: [null]` passait
@@ -195,8 +218,8 @@ async function canauxActifsDuBien (prop) {
     // d'un logement qui vend. Une lecture impossible rend `null`, donc un refus.
     if (actifs.some(c => !Array.isArray(c.attributes.rate_plans) ||
       c.attributes.rate_plans.some(m => !m || typeof m !== 'object' || m.rate_plan_id == null))) return null
-    const tarifs = await lireCanauxDuPartenaire({ appel: channelCall, chemin: `/rate_plans?${filtre}` })
-    if (!tarifs.ok) return await siLaProprieteADisparu(cle)
+    const tarifs = await lire(`/rate_plans?${filtre}`)
+    if (!tarifs.ok) return null
     if (tarifs.canaux.some(t => !t || typeof t !== 'object' || t.id == null)) return null
     const tarifsDuBien = new Set(tarifs.canaux.map(t => String(t.id)))
     return actifs
@@ -206,19 +229,6 @@ async function canauxActifsDuBien (prop) {
     console.error('[channel-property] lecture des canaux echec', e.message)
     return null
   }
-}
-
-// ⚠ UNE LECTURE EN ECHEC SUR UNE PROPRIETE QUI N'EXISTE PLUS N'EST PAS UNE PANNE
-// (constat 2 de la relecture du 23 novembre 2026). Une propriete supprimee hors
-// d'HoteSmart — ou par une tentative precedente qui a supprime chez le
-// partenaire puis echoue plus loin — rendait la lecture des canaux en erreur,
-// donc 409 « reessayez dans quelques minutes » pour toujours : le 404 que le
-// DELETE accepte n'etait plus jamais atteint. On demande donc au partenaire si
-// la propriete existe : un 404 — et lui seul — veut dire qu'aucune annonce ne
-// peut la vendre. Toute autre reponse garde le refus.
-async function siLaProprieteADisparu (cle) {
-  const r = await channelCall('GET', `/properties/${encodeURIComponent(cle)}`)
-  return r && r.status === 404 ? [] : null
 }
 
 module.exports = async function handler(req, res) {

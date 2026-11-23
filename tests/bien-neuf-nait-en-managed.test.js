@@ -114,15 +114,15 @@ test('une lecture des canaux en echec ne vaut PAS « aucun canal »', () => {
   const bornes = [fin, g, h].filter(x => x > f)
   const corps = src.slice(f, bornes.length ? Math.min(...bornes) : src.length)
   assert.ok(corps.length > 200, 'le corps de la fonction n a pas ete trouve')
-  // ⚠ La lecture passe par le releve pagine depuis le 23 novembre 2026 ; un
-  // echec n'y rend `[]` QUE si la propriete n'existe plus chez le partenaire
-  // (404). Le COMPORTEMENT est eprouve en appelant la fonction, dans
-  // tests/suppression-bien-garde-serveur.test.js ; ici, la forme seulement.
-  assert.match(corps, /if \(!canaux\.ok\) return await siLaProprieteADisparu\(cle\)/)
-  assert.match(corps, /if \(!tarifs\.ok\) return await siLaProprieteADisparu\(cle\)/)
+  // ⚠ La lecture passe par le releve pagine depuis le 23 novembre 2026, et
+  // une lecture en echec refuse quelle qu'en soit la cause : la tentative de
+  // lire un 404 comme « propriete effacee » a ete retiree (constat de securite
+  // de la relecture 2). Le COMPORTEMENT est eprouve en appelant la fonction,
+  // dans tests/suppression-bien-garde-serveur.test.js ; ici, la forme.
+  assert.match(corps, /if \(!canaux\.ok\) return null/)
+  assert.match(corps, /if \(!tarifs\.ok\) return null/)
   assert.match(corps, /catch \(e\) \{[\s\S]*?return null/)
-  const disparu = src.slice(src.indexOf('async function siLaProprieteADisparu'))
-  assert.match(disparu, /r\.status === 404 \? \[\] : null/, 'seul un 404 vaut « aucun canal »')
+  assert.doesNotMatch(src, /siLaProprieteADisparu/, 'un 404 ne doit plus jamais valoir « aucun canal »')
 })
 
 test('la garde lit `migration_target_property_id`, donc elle le SELECTIONNE', () => {

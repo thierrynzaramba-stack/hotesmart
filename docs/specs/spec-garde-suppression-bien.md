@@ -1,6 +1,7 @@
 # Garde serveur de la suppression d'un logement — `fix-garde-suppression-bien`
 
-**Statut : relecture du 23 novembre 2026 faite, correctifs écrits.** Fil
+**Statut : deux relectures (23 novembre 2026), la seconde est la dernière ;
+correctifs écrits.** Fil
 logements, à qui le chef de file a confié la branche (décision de Thierry du
 22 novembre 2026, confirmée par lui dans la fenêtre du fil le 23).
 
@@ -128,10 +129,11 @@ toujours ; ils sont corrigés, comme les mineurs 3 à 6.
    des tarifs illisibles ou un tarif sans `id` refusent. Le test 26 reçoit un
    mapping pour ce bien ; trois tests neufs : canal partagé sans mapping → 200,
    plan absent de nos liens → 409, mappage ou tarifs illisibles → 409.
-2. **Une propriété déjà effacée chez le partenaire redevient supprimable.**
+2. ~~**Une propriété déjà effacée chez le partenaire redevient supprimable.**
    Sur une lecture en échec, `siLaProprieteADisparu` demande
-   `GET /properties/<clé>` : un 404 — et lui seul — vaut « aucun canal ».
-   Test : 404 → 200 ; trois autres réponses → 409.
+   `GET /properties/<clé>` : un 404 — et lui seul — vaut « aucun canal ».~~
+   **RETIRÉ après la relecture 2** (§4, constat de sécurité) : un 404 ne
+   prouve pas qu'une propriété a disparu. Le défaut reste au registre (§5).
 3. **Pagination.** La lecture passe par `lireCanauxDuPartenaire`
    (`lib/canaux-du-bien.js`), qui reçoit un paramètre `chemin` (défaut
    inchangé : le relevé du compte) : ses règles de pagination ne sont pas
@@ -154,7 +156,129 @@ erreur vaut disparition, jamais de disparition, sans `|| canaux.length`,
 mappage illisible accepté, tarif sans id accepté, une seule page) : toutes
 attrapées.
 
-## 4. Restes, hors de ce lot
+## 4. Relecture 2, la dernière (23 novembre 2026) — rapport recopié tel quel
+
+Agent distinct, lecture seule, limitée au diff des correctifs de la relecture
+1 : ils RELÂCHAIENT une garde sur une action irréversible, d'où cette seconde
+et dernière relecture accordée par le chef de file. Arbre
+`/home/claude/hotesmart-fixgarde`, branche `fix-garde-suppression-bien`, plage
+`e82e9ed38262d7382d6fcce67a77c2726ad40314..c5cfdf2510bf2ff76b265675a8ff5e48e7615363`.
+Trace sur disque : `/home/claude/revues/fix-garde-suppression-bien-relecture-2.md`.
+
+# Relecture 2 (dernière) — fix-garde-suppression-bien
+
+- Arbre lu : /home/claude/hotesmart-fixgarde (rien lu dans un autre worktree)
+- Branche : fix-garde-suppression-bien
+- SHA de tête lu (`git rev-parse HEAD`) : c5cfdf2510bf2ff76b265675a8ff5e48e7615363
+- Plage : e82e9ed38262d7382d6fcce67a77c2726ad40314..c5cfdf2510bf2ff76b265675a8ff5e48e7615363 (un commit, 7 fichiers : api/channel-property.js, docs/specs/spec-garde-suppression-bien.md, lib/canaux-du-bien.js, lib/logement/lecture.js, tests/bien-neuf-nait-en-managed.test.js, tests/logement-lecture.test.js, tests/suppression-bien-garde-serveur.test.js)
+- Lus en contexte seulement (hors plage) : lib/rate-sync.js, lib/rate-plans-derives.js, lib/channels/channex.js, scripts/verifier-mapping-airbnb.js, docs/kb/dettes-v1.md (dettes 35 et 108), vercel.json.
+- `git status --short` du worktree : vide au début et à la fin. Tests, bancs et mutations : sur des copies `git archive` dans /tmp/revue2-fixgarde, plus un clone local pour les deux tests qui appellent git.
+
+## Constat de sécurité : OUI, un seul, conditionnel (constat 1)
+
+Je le classe SÉCURITÉ parce qu'il répond exactement à la définition de la relecture 1 : une purge part alors qu'un canal peut être actif. Ses conditions sont étroites : il faut une panne côté partenaire ou intermédiaire, et un cœur qui n'a pas encore vu un mappage récent. Aucun geste de l'hôte ne peut le provoquer. La correction tient dans `siLaProprieteADisparu` et ses deux appels.
+
+## Constats
+
+1. **SÉCURITÉ (conditionnel) — un 404 « nu » vaut « la propriété n'existe plus », quelle que soit sa provenance.** `api/channel-property.js:172`, `:199`, `:219-222` (puis le DELETE, `:1228`, qui accepte lui aussi un 404).
+   - Ce qui se passe. Toute lecture en échec (`injoignable`, mais aussi `delai`, `reponse_invalide`, `tronquee`, `plafonnee`) appelle `GET /properties/<clé>`. Un statut 404 suffit alors pour conclure « aucun canal ».
+   - Or un 404 peut venir d'une route introuvable : `CHANNEL_BASE_URL` faux, page 404 d'un intermédiaire, maintenance. Dans ce cas, la propriété existe toujours. Le DELETE qui suit rend lui aussi 404, compté comme un succès, et les 19 tables sont purgées. Pendant ce temps, la propriété reste chez le partenaire avec ses canaux.
+   - `channelCall` signale lui-même un corps non JSON (`json.raw`). Le code ne le regarde pas.
+   - Comment je l'ai établi : mesuré, sur le vrai handler avec le double du fichier de tests, cœur à relevé sain :
+     - toutes les routes en 404 HTML, avec soit une ligne `mappe=false` périmée, soit aucune ligne → tête : **200, 19 purges, DELETE parti**. e82e9ed3 : 409 `partenaire_illisible`, 0 purge ;
+     - `/channels` en 200 malformé, puis `/properties` en 404 → 200, 19 purges ;
+     - `/channels` muet (échéance de 6 s), puis `/properties` en 404 → 200, 19 purges, en 6008 ms.
+   - Ce qui réduit la fenêtre (lu) : dès que le relevé horaire a échoué, `releveEnEchec` fait refuser en amont (`suppressionPossible`). Il faut donc aussi un mappage posé depuis le dernier relevé. C'est précisément la fenêtre que le croisement existe pour couvrir.
+   - Correction proposée :
+     - a) n'appeler `siLaProprieteADisparu` que sur `motif === 'injoignable'`. Un délai, une liste malformée, tronquée ou plafonnée refusent directement ;
+     - b) n'accepter le 404 que s'il a un corps JSON du partenaire : pas de `json.raw`, et `json.errors` présent. La forme exacte se mesure une fois sur staging, avec un UUID inexistant ;
+     - c) avant de conclure, faire une lecture témoin, `GET /properties?pagination[page]=1&pagination[limit]=1`, qui doit rendre 200 avec un `data` tableau. Elle prouve que la base URL et la clé répondent.
+   - Tests à ajouter : les trois bancs ci-dessus → 409. Le test du 404 existant passe à un 404 JSON avec témoin à 200.
+
+2. **Défaut (latent) — la complétude des tarifs repose sur `meta.total`.** `api/channel-property.js:198-201`, `lib/canaux-du-bien.js:192` (cas 3 : « page courte sans total = fin de liste »).
+   - Ce qui se passe. Si le partenaire plafonne sa page à 10 sans envoyer `meta.total`, la lecture de `/rate_plans` s'arrête à la page 1. Un canal qui mappe le 11e tarif n'est alors pas compté.
+   - Comment je l'ai établi : mesuré. 11 tarifs en pages de 10 sans total, et le canal mappe le 11e → tête : **200, 19 purges**. e82e9ed3 : 409. Témoin avec `meta.total: 11` → 409.
+   - Contexte : Channex envoie `meta.total` sur les routes mesurées (`/channels` le 19 octobre, réservations ; `lib/channels/channex.js:176`). Pour `/rate_plans`, rien n'est mesuré dans le dépôt. C'est la classe de la dette 35. Dans le relevé, un élément manqué devient une disparition, soumise à confirmation. Ici, il devient une suppression irréversible.
+   - Correction proposée : une option `totalExige: true` de `lireCanauxDuPartenaire` pour les deux lectures de la garde. Sans total sur la page 1, la lecture rend `{ ok: false, motif: 'sans_total' }`. Le défaut reste inchangé pour le relevé. Avec 1 a), ce motif refuse. Test : le banc ci-dessus → 409.
+
+3. **Mineur (tests) — la jointure `?`/`&` et l'URL du relevé ne sont figées par rien, et le double ignore la requête.** `tests/suppression-bien-garde-serveur.test.js:177-183`, `lib/canaux-du-bien.js:132`.
+   - Mesuré sur les 6 fichiers concernés (garde, lecture, bien-neuf, canaux-du-bien, canaux-ecran, bouton-actualiser) :
+     - `joint = '?'` : 232/232 verts. La garde enverrait `filter[property_id]=PROP-1?pagination[page]=1…`. Si Channex rendait alors 200 avec une liste vide, ce serait une autorisation (non mesuré chez Channex) ;
+     - `joint = '&'` : 232/232 verts. Le relevé du compte deviendrait `/channels&pagination…`.
+   - Le double aiguille par `includes`, ne lit ni le filtre ni la clé, et sert une valeur non fonction identique à chaque page. Une page partielle avec un total plus grand serait lue « complète » par doublons : un faux vert latent pour les tests à venir.
+   - Lu : le relevé par défaut est inchangé à l'octet (`'/channels' + '?' + 'pagination[page]=…'`), et son seul appelant (`lib/canaux-du-bien.js:488`) ne passe pas `chemin`.
+   - Correction proposée :
+     - le double parse `new URL(u)`, aiguille par chemin, et rend 422 si `filter[property_id]` n'est pas la clé attendue ou si la pagination est malformée ;
+     - pour une valeur non fonction, il rend `{ data: [] }` au-delà de la page 1 ;
+     - un test fige l'URL du relevé (`/channels?pagination[page]=1&pagination[limit]=50`).
+
+4. **Mineur — des commentaires et la spec annoncent plus que le code.**
+   - `api/channel-property.js:168-170` dit que la lecture « refuse déjà » `reponse_invalide` et `tronquee`. C'est faux depuis ce commit : le banc du constat 1 donne 200 sur un 200 malformé suivi d'un 404.
+   - `:210-217`, et `docs/specs/spec-garde-suppression-bien.md:133`, disent qu'« un 404 — et lui seul » prouve qu'aucune annonce ne peut vendre. Un 404 de route ne le prouve pas.
+   - Accessoire : le GET encode la clé (`:220`), le DELETE non (`:1227`). C'est sans effet sur des UUID Channex, mais la vérification et la suppression devraient viser le même chemin.
+   - Correction proposée : à corriger avec le constat 1.
+
+5. **Mineur — l'échéance de 6 s ne borne plus la garde.** `api/channel-property.js:171`, `:198`, `:219-222`.
+   - Ce qui se passe. Chaque lecture calcule sa propre échéance (`maintenant` par défaut à chaque appel), soit jusqu'à 12 s. Viennent ensuite `GET /properties` puis le DELETE, sans aucune borne : le `channelCall` local n'a pas de délai, et `vercel.json` ne donne pas de `maxDuration` à cette fonction.
+   - Sur un partenaire muet, l'hôte attend jusqu'à la limite de la plateforme et reçoit une erreur de plateforme, pas le message « Rien n'a été supprimé ». Rien n'est purgé : la purge suit la réponse du DELETE.
+   - Pas une régression dans le pire cas : e82e9ed3 faisait déjà un appel `/channels` non borné.
+   - Établi par lecture, et par le banc à 6008 ms du constat 1.
+   - Correction proposée : une échéance commune aux deux lectures. Avec 1 a), un délai refuse sans troisième appel. Le GET `/properties` passe sous la même échéance.
+
+## Ce qui tient (vérifié)
+
+- **La question de `canauxActifsDuBien` est juste.** Elle reprend celle de `lignesDeLaLecture` : le canal porte-t-il un tarif de ce bien ?
+  - Les plans dérivés sont créés avec `property_id` (`lib/rate-plans-derives.js:83-91`), donc ils figurent dans `/rate_plans?filter[property_id]` ;
+  - un plan d'une autre propriété est exclu (test) ;
+  - si le partenaire ignorait le filtre de `/channels`, l'intersection resterait exacte. S'il ignorait celui de `/rate_plans`, on obtiendrait un sur-ensemble, donc des refus en trop : sens sûr ;
+  - en bascule, c'est la clé cible qui est lue. La mutation « tarifs lus sur la clé source » est attrapée par le test du bien en bascule encore Beds24 ;
+  - une clé Beds24 n'est jamais envoyée : le résolveur rend la cible, ou `null` hors bascule, sans aucun appel (test).
+- **Contre-épreuve** : les tests du lot sur le code de e82e9ed3 donnent 7 rouges sur 153, conforme à la spec.
+- **Mutations attrapées** : tarifs lus sur la clé source ; `catch` → `[]` ; contrôle `Array.isArray(rate_plans)` retiré ; tarifs en échec → `[]` ; tout mapping compte ; tarifs non filtrés ; 404 ou 410. Les deux restées vertes sont au constat 3.
+- **Horloge décalée** (garde, lecture, bien-neuf, canaux-du-bien) : `JOURS` = 4, 30, 60, 200, 400 et `HEURES` = 1, 13, 23, 49 → 199/199 à chaque fois.
+- **Suite complète à c5cfdf25** : 9358 tests. Dans la copie `git archive`, 9355 verts et 3 rouges, qui sont les tests appelant git (`reponse-partenaire-execution` ×2, `v2-marche-aucune-ecriture-calendrier`). Ces trois-là sont verts dans le clone local.
+- **La spec contre le code** : conforme, sauf les phrases du constat 4.
+
+Rapport écrit dans /home/claude/revues/fix-garde-suppression-bien-relecture-2.md
+
+### Ce qui en est fait
+
+**Un constat de sécurité, né de mon correctif du constat 2 de la relecture 1.
+Il est fermé en RETIRANT ce correctif, pas en le rafistolant** : la lecture en
+échec refuse de nouveau, quelle qu'en soit la cause, comme à `e82e9ed3` — un
+état que la relecture 1 avait validé. Aucun code neuf sur ce chemin. Les
+autres correctifs ne font que refuser davantage.
+
+1. `siLaProprieteADisparu` est retirée ; `if (!canaux.ok)` et
+   `if (!tarifs.ok)` rendent `null`. Test : les trois bancs de la relecture
+   (404 HTML partout, cœur vide ou ligne périmée ; canaux malformés puis 404 ;
+   tarifs en 404) donnent 409, sans purge, sans DELETE, sans même demander
+   l'existence de la propriété. Le test de forme interdit le retour du nom.
+2. `lireCanauxDuPartenaire` reçoit `totalExige` : sans total entier dès la
+   page 1, la lecture rend `sans_total` (`Number(null)` valant 0, un total
+   `null` passait pour « zéro élément »). La garde l'utilise pour ses deux
+   lectures ; le relevé garde sa règle. Test : 11 tarifs sans total dont le
+   11e est mappé, canaux sans total, total `null`, total en texte → 409.
+3. Le double du partenaire lit l'URL (`new URL`), aiguille par route, refuse
+   une lecture qu'il ne connaît pas, annonce le total comme Channex et sert
+   une liste vide au-delà de la page 1. Un test fige les URL : le relevé
+   inchangé, la garde filtrée puis paginée.
+4. Commentaires corrigés avec le constat 1 ; le DELETE n'encode toujours pas
+   la clé (sans effet sur des UUID, noté).
+5. Une échéance commune aux deux lectures (`maintenant: debut`). Le DELETE
+   reste sans borne, comme avant le lot.
+
+## 5. Restes, hors de ce lot
+
+- **Une propriété déjà effacée chez le partenaire reste insupprimable ici**
+  (constat 2 de la relecture 1, rouvert par le retrait). Toute lecture en
+  échec refuse, donc le 404 accepté par le DELETE n'est jamais atteint. Le
+  corriger demande une preuve d'absence qui ne se confond pas avec une
+  panne — un 404 au corps JSON du partenaire (sans `json.raw`, avec
+  `errors`), plus une lecture témoin à 200 — et cette forme se MESURE d'abord
+  sur staging avec un identifiant inexistant. Lot à part, avec sa propre
+  relecture. D'ici là, le refus tient ; si le cas se présente, Thierry
+  tranche.
 
 - Les quatre constats « au registre » du message de `403aa9b8`, toujours vrais
   et non destructeurs (relecture, constat 8 a, b, c, d) — dont la dette 105.
