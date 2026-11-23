@@ -4,6 +4,12 @@
 Aucun numéro de dette : c'est un lot neuf (chef de file, 10 novembre 2026). Domaine messagerie / GuestFlow. Ce lot touche l'**envoi au voyageur** :
 trois reviews au plus, et Thierry doit être présent juste après le merge.
 
+⚠ **Modifiée le 23 novembre 2026** par `spec-info-manquante-reponse-hote.md`
+(décisions de Thierry). Deux changements : une réponse de l'hôte clôt
+désormais la tâche, ce qui remplace la règle du §2 A (« le cron ne clôt
+jamais une tâche `pending` quand l'hôte répond à la main ») ; et Oui / Non
+deviennent deux réponses rédigées par l'IA, une positive et une négative.
+
 ## 0. La demande (Thierry, 10 novembre 2026)
 
 > Quand une information manque, l'IA propose plusieurs types de réponse. Le
