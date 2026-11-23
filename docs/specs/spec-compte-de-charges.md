@@ -5075,8 +5075,12 @@ option recommandée** (Thierry peut revenir dessus) :
 - L'ancienne table `charges_adresses` (compte, numéro de version, Q16) n'a
   jamais été lue ni écrite par aucun code : elle est supprimée par la même
   migration, qui refuse de le faire si elle contient une ligne.
-- `charges.email_sujet` et `charges.email_texte` (texte, borné à 2 000
-  caractères), pour la ligne « sans facture lisible » (Q19).
+- `charges.email_sujet` et `charges.email_texte` (texte, bornés en base à
+  300 et 2 000 caractères), pour la ligne « sans facture lisible » (Q19).
+- Fichiers : `migrations/2026-11-23-charges-adresses-email.sql`, son contrôle
+  `2026-11-23-controle-charges-adresses-email.sql` (cinq lignes à `true`), et
+  l'épreuve sur un Postgres local `scripts/eprouver-adresses-factures.sh`
+  (31 gestes, 0 écart ; le contrôle rend cinq `false` avant la migration).
 
 **L'aiguillage**, dans `api/inbound-email.js` : APRÈS la relecture chez
 Brevo et le refus d'une divergence, et AVANT le filtre anti-boucle et le
