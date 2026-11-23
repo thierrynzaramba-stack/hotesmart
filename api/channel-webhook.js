@@ -385,6 +385,11 @@ async function handleMessage(payload) {
     sender:        'guest',
     body:          payload.message || '',
     providerMsgId: payload.message_id || null,
+    // Dette 129 : le fil du message (doc Channex, evenement `message` :
+    // `message_thread_id`). C'est la seule cle d'une DEMANDE — fil sans
+    // reservation — et ce qui permet a l'import de reconcilier cette copie au
+    // lieu de la dupliquer quand `booking_id` est nul.
+    threadId:      payload.message_thread_id ? String(payload.message_thread_id) : null,
     ota:           null,
     // ⚠ MEME NORMALISATION QUE L'IMPORT. Channex rend ses instants SANS fuseau,
     // et ce chemin-ci est l'AUTOMATIQUE — celui qui tourne tous les jours, quand

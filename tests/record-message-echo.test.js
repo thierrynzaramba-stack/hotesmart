@@ -286,12 +286,26 @@ test('la branche entrante compare des INSTANTS, pas des chaines — lecture du c
   const fin = src.indexOf("row.direction === 'outbound'")
   assert.ok(debut > 0 && fin > debut, 'les deux blocs sont reperables et distincts')
   const bloc = src.slice(debut, fin)
+  // Dette 129 : la recherche des lignes candidates est sortie dans
+  // `lignesDuMemeFil` (par la reservation ET par le fil). Le cloisonnement par
+  // compte et par reservation s'y lit ; le bloc entrant doit l'appeler.
+  const dHelper = src.indexOf('async function lignesDuMemeFil')
+  const fHelper = src.indexOf('async function completerLigne')
+  assert.ok(dHelper > 0 && fHelper > dHelper, 'la recherche des candidats est reperable')
+  const helper = src.slice(dHelper, fHelper)
 
   assert.ok(bloc.includes('instantDe(row.sent_at)') && bloc.includes('instantDe(x.sent_at)'),
     'la comparaison passe par la normalisation : timestamptz se serialise de trois '
     + 'facons, et celle du provider n a pas de fuseau du tout')
-  assert.ok(bloc.includes(".eq('user_id', row.user_id)"), 'cloisonnement par compte')
-  assert.ok(bloc.includes(".eq('booking_id', row.booking_id)"), 'et par reservation')
+  assert.ok(bloc.includes('lignesDuMemeFil(db, row'), 'le bloc entrant passe par la recherche commune')
+  // Les deux recherches passent par le meme lecteur `lire`, qui pose le
+  // compte : le cloisonnement ne peut pas manquer a l'une des deux. Le
+  // comportement (autre compte jamais reconcilie) est pilote dans
+  // tests/demandes-fils-coeur.test.js.
+  const lecteur = helper.slice(helper.indexOf('const lire = async'), helper.indexOf('let parResa'))
+  assert.ok(lecteur.includes(".eq('user_id', row.user_id)"), 'cloisonnement par compte, dans le lecteur commun')
+  assert.ok(helper.includes("lire('booking_id', row.booking_id)"), 'par reservation')
+  assert.ok(helper.includes("lire('provider_thread_id', row.provider_thread_id)"), 'et par fil')
   assert.ok(bloc.includes(".eq('provider', row.provider)"), 'et par provider')
   assert.ok(bloc.includes('sentAt'), 'la garde exige l instant fourni par le PRODUCTEUR')
 })
