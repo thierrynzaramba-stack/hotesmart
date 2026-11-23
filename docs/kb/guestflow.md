@@ -537,6 +537,19 @@ et l'hôte ne saurait jamais qu'on lui a écrit. Il atterrit dans `agent_tasks`
 (`task_type: 'email_non_rattache'`, `pending_validation`), là où l'hôte regarde déjà — avec
 la raison et le message conservé.
 
+### Les adresses de FACTURES ont leur propre chemin (compte de charges, lot 5, 23 novembre 2026)
+
+Un destinataire relu de la forme `<nom>.<code8>@reply.hotesmart.fr` (un point :
+jamais dans une adresse de réponse `<réservation>-<signature>`) part à
+`lib/charges/email.js`, **après** la relecture et le refus d'une divergence,
+**avant** le filtre des en-têtes automatiques et le refus d'un corps vide —
+ces deux gardes n'existent que parce que l'agent IA répond, et ce chemin ne
+répond jamais. Le score de spam s'applique (`motifSpam`, sorti de
+`motifAutomatique`, qui l'appelle toujours : rien ne change pour les
+voyageurs). La fonction a désormais `maxDuration` 60 s dans `vercel.json`
+(téléchargement des pièces jointes, lecture IA à l'arrivée). Détail :
+`docs/kb/compte-de-charges.md`, spec du compte de charges §14.24.
+
 ### Dettes connues de l'inbound (seconde review, 18 septembre 2026)
 
 Deux reviews, aucune fuite entre comptes ni contournement d'authentification — donc on

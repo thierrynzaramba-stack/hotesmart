@@ -216,7 +216,9 @@ export function monter (racine, deps) {
     apresChargement: null,
     // Un export d'exercice en cours (lot 8d).
     exportEnCours: false,
-    credits: null, creditEnCours: false, creditRetour: null
+    credits: null, creditEnCours: false, creditRetour: null,
+    // Lot 5 (§14.24) : les adresses de factures, lues à l'ouverture de leur fenêtre.
+    adresses: null, emailEnCours: false
   }
 
   // ─── Les noms ────────────────────────────────────────────────────────────
@@ -257,22 +259,38 @@ export function monter (racine, deps) {
   const echeancesLisibles = (tb) => (tb && tb.echeances
     ? t('charges.credit_echeances', { n: tb.echeances, debut: jourLisible(tb.debut), fin: jourLisible(tb.fin) })
     : '')
-  const ACTION_DE = { tableau: 'charges.tableau_importer', a_verifier: 'charges.ouvrir', a_lire: 'charges.saisir_main', panne: 'charges.saisir_main', plafond: 'charges.saisir_main', illisible: 'charges.saisir_main', doublon: 'charges.verifier' }
+  const ACTION_DE = { tableau: 'charges.tableau_importer', a_verifier: 'charges.ouvrir', a_lire: 'charges.saisir_main', panne: 'charges.saisir_main', plafond: 'charges.saisir_main', illisible: 'charges.saisir_main', doublon: 'charges.verifier', sans_facture: 'charges.ouvrir' }
+  // ⚠ LE RAPPEL « ENTITÉ JURIDIQUE MANQUANTE » (Thierry, 23 novembre 2026) :
+  // une facture rangée dans un logement qui n'a pas d'entité. Lu sur le
+  // logement tel qu'il est AUJOURD'HUI : rattaché depuis, le rappel tombe.
+  function entiteManquante (c) {
+    if (!c || !c.bien_id || c.entite_juridique_id) return false
+    const b = [...(etat.biens || []), ...(etat.biensArchives || [])].find(x => String(x.id) === String(c.bien_id))
+    return Boolean(b && !b.entite_id)
+  }
   function ligne (c, avecAction) {
     const e = etatDe(c)
     const tb = c.statut === 'tableau'
-    const infos = (tb ? [echeancesLisibles(tableauDe(c))] : [
+    // Lot 5 (§14.24) : un e-mail reçu sans pièce lisible se nomme par son
+    // expéditeur et son sujet ; il n'a pas de montant.
+    const sansFacture = c.statut === 'sans_facture'
+    const infos = (tb ? [echeancesLisibles(tableauDe(c))] : sansFacture ? [c.email_sujet || '', nomBien(c.bien_id)] : [
+      c.origine === 'email' ? t('charges.recue_email') : '',
       c.type_document && c.type_document !== 'facture' ? (connu('charges.type_' + c.type_document) || '') : '',
       periodeLisible(c),
       c.categorie ? nomCategorie(c.categorie) : '', nomBien(c.bien_id)
-    ]).filter(Boolean).join(' · ')
+    ]).concat(entiteManquante(c) ? [t('charges.entite_manquante')] : []).filter(Boolean).join(' · ')
+    const qui = tb ? t('charges.type_tableau_amortissement')
+      : sansFacture ? (c.email_expediteur || t('charges.expediteur_inconnu'))
+        : (c.fournisseur_nom || t('charges.fournisseur_inconnu'))
     const action = avecAction && e && ACTION_DE[e] ? `<span class="chg-ligne__action">${esc(t(ACTION_DE[e]))}</span>` : ''
     return `<li><button type="button" class="chg-ligne" data-ouvrir="${esc(c.id)}">`
       + `<span class="chg-ligne__jour">${esc(jourLisible(c.jour))}</span>`
-      + `<span class="chg-ligne__qui"><b>${esc(tb ? t('charges.type_tableau_amortissement') : c.fournisseur_nom || t('charges.fournisseur_inconnu'))}</b>`
+      + `<span class="chg-ligne__qui"><b>${esc(qui)}</b>`
       + (infos ? `<span class="chg-ligne__infos">${esc(infos)}</span>` : '') + '</span>'
-      // Un tableau n'a pas de montant : ni « non lu », ni 0.
-      + `<span class="chg-ligne__ttc">${tb ? '' : montant(c.montant_ttc_cents)}</span>`
+      // Un tableau n'a pas de montant : ni « non lu », ni 0. Un e-mail sans
+      // facture non plus.
+      + `<span class="chg-ligne__ttc">${tb || sansFacture ? '' : montant(c.montant_ttc_cents)}</span>`
       + (e ? `<span class="chg-etat chg-etat--${esc(e)}">${esc(t('charges.etat_' + e))}</span>` : '<span></span>')
       + action + '</button></li>'
   }
@@ -909,8 +927,37 @@ export function monter (racine, deps) {
     tva.closest('label').hidden = impot
   }
 
+  // ─── Un e-mail reçu sans facture lisible (lot 5, §14.24 ; Q19) ───────────
+  // Ce qu'on a reçu, tel quel : l'expéditeur, le sujet, le texte, et pourquoi
+  // rien n'est entré. Pas de formulaire : l'hôte ajoute le PDF par « Ajouter
+  // une facture », puis supprime la ligne.
+  function peindreFicheSansFacture (c) {
+    dialogue().classList.remove('chg-fiche--double')
+    const motif = connu('charges.motif_email_' + (c.motif || '')) || t('charges.motif_email_sans_piece')
+    const info = (cle, valeur) => (valeur ? `<div class="chg-email-recu__info"><dt>${esc(t(cle))}</dt><dd>${esc(valeur)}</dd></div>` : '')
+    dialogue().innerHTML = '<div class="chg-fiche__tete">'
+      + `<h2 class="chg-h2" id="chg-fiche-titre">${esc(t('charges.email_recu_titre'))}</h2>`
+      + `<span class="chg-etat chg-etat--sans_facture">${esc(t('charges.etat_sans_facture'))}</span>`
+      + `<button type="button" class="btn btn--secondary btn--icon" data-geste="fermer" aria-label="${esc(t('charges.fermer'))}"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg></button>`
+      + '</div><div class="chg-fiche__corps">'
+      + `<div class="chg-alerte"><p>${esc(motif)}</p><p>${esc(t('charges.email_recu_aide'))}</p></div>`
+      + '<dl class="chg-email-recu">'
+      + info('charges.email_de', c.email_expediteur)
+      + info('charges.email_objet', c.email_sujet)
+      + info('charges.email_recu_le', instantLisible(c.email_recu_le))
+      + info('charges.champ_bien', nomBien(c.bien_id))
+      + '</dl>'
+      + (c.email_texte ? `<p class="chg-email-recu__texte">${esc(c.email_texte)}</p>` : '')
+      + (entiteManquante(c) ? `<div class="chg-alerte"><p>${esc(t('charges.entite_manquante_aide'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>` : '')
+      + '<p class="chg-erreur" data-bind="fiche-retour" role="status"></p>'
+      + '</div><div class="chg-fiche__pied">'
+      + `<button type="button" class="btn btn--secondary chg-danger" data-geste="supprimer">${esc(t('charges.supprimer'))}</button>`
+      + '</div>'
+  }
+
   function peindreFiche (c) {
     if (c.statut === 'tableau') { peindreFicheTableau(c); return }
+    if (c.statut === 'sans_facture') { peindreFicheSansFacture(c); return }
     const e = etatDe(c)
     const ota = c.origine === 'ota'
     // Une échéance de crédit vient de son tableau : elle se lit, elle ne se
@@ -990,9 +1037,11 @@ export function monter (racine, deps) {
       + (sansEntite ? '' : champ('bien_id', t('charges.champ_bien'), `<select data-champ="bien_id"${fige}>${optionsBiens(entiteChoisie, c.bien_id)}</select>`, true))
       + '</form>'
       + (sansEntite ? `<div class="chg-alerte"><p>${esc(t('charges.sans_entite'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>` : '')
+      + (!sansEntite && entiteManquante(c) ? `<div class="chg-alerte"><p>${esc(t('charges.entite_manquante_aide'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>` : '')
+      + (c.origine === 'email' && c.email_expediteur ? `<p class="chg-note">${esc(t('charges.recue_email_de', { de: c.email_expediteur }))}</p>` : '')
       + '<p class="chg-erreur" data-bind="fiche-retour" role="status"></p>'
       + '</div><div class="chg-fiche__pied">'
-      + (ota || credit || c.statut === 'sans_facture' ? '' : `<button type="button" class="btn btn--secondary" data-geste="voir">${esc(t('charges.voir'))}</button>`)
+      + (ota || credit ? '' : `<button type="button" class="btn btn--secondary" data-geste="voir">${esc(t('charges.voir'))}</button>`)
       + (credit ? '' : `<button type="button" class="btn btn--secondary chg-danger" data-geste="supprimer">${esc(t('charges.supprimer'))}</button>`)
       + (enParcours ? `<button type="button" class="btn btn--secondary" data-geste="passer">${esc(t('charges.passer'))}</button>` : '')
       + (ota || credit || sansEntite ? '' : `<button type="button" class="btn btn--primary" data-geste="valider">${esc(t(enParcours ? 'charges.enregistrer_suivante' : 'charges.valider'))}</button>`)
@@ -1541,6 +1590,94 @@ export function monter (racine, deps) {
     }
   }
 
+  // ─── Envoyer par e-mail (lot 5, §14.24) ──────────────────────────────────
+  // Sous « Ajouter une facture », une petite phrase ; au clic, une fenêtre
+  // liste une adresse par entité et une par logement, chacune avec « Copier »
+  // et « Changer » (Thierry, 23 novembre 2026). Les adresses arrivent par UN
+  // appel, à l'ouverture seulement : l'écran ne charge rien de plus.
+  const fenetreEmail = () => $('[data-bind="email"]')
+  function ligneAdresse (cible, x) {
+    const rappel = cible === 'bien' && !x.entite_id
+    return `<li class="chg-email__ligne" data-email-cible="${esc(cible)}" data-email-id="${esc(x.id)}">`
+      + `<p class="chg-email__nom">${esc(x.nom || '')}</p>`
+      + `<p class="chg-email__adresse" data-bind="email-adresse">${esc(x.adresse)}</p>`
+      + (rappel ? `<p class="chg-email__rappel">${esc(t('charges.entite_manquante_aide'))}</p>` : '')
+      + '<div class="chg-email__gestes">'
+      + `<button type="button" class="btn btn--secondary" data-geste="email-copier">${esc(t('charges.email_copier'))}</button>`
+      + `<button type="button" class="btn btn--secondary" data-geste="email-changer">${esc(t('charges.email_changer'))}</button>`
+      + '</div><p class="chg-note" data-bind="email-retour" role="status"></p></li>'
+  }
+  function peindreEmail ({ attente = false, erreur = null } = {}) {
+    const f = fenetreEmail()
+    if (!f) return
+    const a = etat.adresses || { entites: [], biens: [] }
+    const tete = '<div class="chg-email__tete">'
+      + `<h2 class="chg-h2" id="chg-email-titre">${esc(t('charges.email_titre'))}</h2>`
+      + `<button type="button" class="btn btn--secondary btn--icon" data-geste="email-fermer" aria-label="${esc(t('charges.fermer'))}"><svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg></button>`
+      + '</div>'
+    if (attente) { f.innerHTML = tete + `<p class="muted">${esc(t('common.loading'))}</p>`; return }
+    if (erreur) { f.innerHTML = tete + `<p class="chg-erreur">${esc(erreur)}</p>`; return }
+    const bloc = (titre, cible, liste) => (liste.length
+      ? `<p class="chg-email__groupe">${esc(t(titre))}</p><ul class="chg-email__liste">${liste.map(x => ligneAdresse(cible, x)).join('')}</ul>`
+      : '')
+    const vide = !a.entites.length && !a.biens.length
+    f.innerHTML = tete
+      + `<p class="chg-note">${esc(t('charges.email_aide'))}</p>`
+      + (vide ? `<p class="muted">${esc(t('charges.email_vide'))}</p>` : '')
+      + bloc('charges.email_entites', 'entite', a.entites)
+      + bloc('charges.email_logements', 'bien', a.biens)
+  }
+  async function ouvrirEmail () {
+    const f = fenetreEmail()
+    if (!f || etat.emailEnCours) return
+    etat.emailEnCours = true
+    peindreEmail({ attente: true })
+    if (!f.open && !f.hasAttribute('open')) ouvrirDialogue(f)
+    try {
+      const r = await deps.agir({ action: 'adresses' })
+      etat.adresses = { entites: (r && r.entites) || [], biens: (r && r.biens) || [] }
+      peindreEmail()
+    } catch (e) {
+      peindreEmail({ erreur: messageErreur(e) })
+    } finally {
+      etat.emailEnCours = false
+    }
+  }
+  const retourEmail = (li, texte) => { const r = li && li.querySelector('[data-bind="email-retour"]'); if (r) r.textContent = texte || '' }
+  async function copierAdresse (bouton) {
+    const li = bouton.closest('[data-email-id]')
+    const a = li && li.querySelector('[data-bind="email-adresse"]')
+    if (!a) return
+    try {
+      await deps.copier(a.textContent)
+      retourEmail(li, t('charges.email_copiee'))
+    } catch (e) {
+      retourEmail(li, t('charges.email_copie_impossible'))
+    }
+  }
+  async function changerAdresse (bouton) {
+    const li = bouton.closest('[data-email-id]')
+    if (!li || etat.emailEnCours) return
+    if (!deps.confirmer(t('charges.email_changer_confirmer'))) return
+    etat.emailEnCours = true
+    li.querySelectorAll('button').forEach(b => { b.disabled = true })
+    const cible = li.dataset.emailCible === 'entite' ? { entite_id: li.dataset.emailId } : { bien_id: li.dataset.emailId }
+    try {
+      const r = await deps.agir({ action: 'adresse_changer', ...cible })
+      const liste = li.dataset.emailCible === 'entite' ? etat.adresses.entites : etat.adresses.biens
+      const x = liste.find(y => String(y.id) === String(li.dataset.emailId))
+      if (x && r && r.adresse) x.adresse = r.adresse
+      const a = li.querySelector('[data-bind="email-adresse"]')
+      if (a && r && r.adresse) a.textContent = r.adresse
+      retourEmail(li, t('charges.email_changee'))
+    } catch (e) {
+      retourEmail(li, messageErreur(e))
+    } finally {
+      li.querySelectorAll('button').forEach(b => { b.disabled = false })
+      etat.emailEnCours = false
+    }
+  }
+
   // ─── Les écouteurs : un seul, délégué ────────────────────────────────────
   racine.addEventListener('click', (ev) => {
     const el = ev.target.closest && ev.target.closest('[data-ouvrir],[data-geste],[data-action],[data-mois]')
@@ -1549,6 +1686,10 @@ export function monter (racine, deps) {
     if (el.dataset.mois) { basculerMois(el.dataset.mois); return }
     const g = el.dataset.geste || el.dataset.action
     if (g === 'ajouter') $('[data-bind="fichier"]').click()
+    else if (g === 'email') ouvrirEmail()
+    else if (g === 'email-fermer') { const f = fenetreEmail(); if (f) fermerDialogue(f) }
+    else if (g === 'email-copier') copierAdresse(el)
+    else if (g === 'email-changer') changerAdresse(el)
     else if (g === 'plus') afficherPlus(el)
     else if (g === 'plus-a-traiter') afficherPlusATraiter(el)
     else if (g === 'parcourir') parcourir(el)

@@ -374,3 +374,44 @@ test('8d : `export_urls` — au plus 20, des identifiants forgés refusés AVANT
   })
   assert.ok(p.statut >= 500)
 })
+
+// ─── Lot 5 (§14.24) : les adresses de factures ──────────────────────────────
+test('⚠ lot 5 : `adresses` et `adresse_changer` — un membre est refusé AVANT toute requête', async () => {
+  for (const corps of [{ action: 'adresses' }, { action: 'adresse_changer', bien_id: '33333333-3333-4333-8333-333333333333' }]) {
+    const r = await appeler({ titulaire: false, corps })
+    assert.equal(r.statut, 403, corps.action)
+    assert.equal(r.requetes.length, 0)
+  }
+})
+
+test('LE TEST QUI COMPTE (lot 5) : `adresses` lit et crée sous le compte DE LA GARDE — un `compte` glissé dans le corps n\'est pas lu', async () => {
+  const BIEN = '44444444-4444-4444-8444-444444444444'
+  const r = await appeler({
+    corps: { action: 'adresses', compte: MEMBRE, user_id: MEMBRE },
+    repondre: (q) => {
+      if (q.table === 'properties') return { data: [{ id: BIEN, name: 'La bulle', archive_le: null }], error: null }
+      if (q.table === 'charges_adresses_email' && q.op === 'insert') return { data: [q.charge], error: null }
+      return { data: [], error: null }
+    }
+  })
+  assert.equal(r.statut, 200)
+  assert.deepEqual(r.charge.entites, [])
+  assert.match(r.charge.biens[0].adresse, /^la-bulle\.[a-z0-9]{8}@reply\.hotesmart\.fr$/)
+  assert.equal(r.charge.biens[0].entite_id, null)
+  for (const q of r.requetes.filter(x => ['charges_adresses_email', 'properties', 'entites_juridiques', 'biens_entites'].includes(x.table))) {
+    if (q.op === 'insert') assert.equal(q.charge.user_id, TITULAIRE)
+    else assert.equal(filtre(q, 'user_id'), TITULAIRE, `${q.table} ${q.op}`)
+  }
+  assert.match(String(r.entetes['cache-control']), /private/)
+})
+
+test('lot 5 : `adresse_changer` sur un logement qui n\'est pas DU COMPTE — 404, rien d\'écrit', async () => {
+  const r = await appeler({
+    corps: { action: 'adresse_changer', bien_id: '55555555-5555-4555-8555-555555555555' },
+    repondre: () => ({ data: [], error: null })
+  })
+  assert.equal(r.statut, 404)
+  assert.equal(r.charge.error, 'bien_introuvable')
+  assert.equal(r.requetes.filter(q => q.op !== 'select').length, 0)
+  assert.equal(filtre(r.requetes.find(q => q.table === 'properties'), 'user_id'), TITULAIRE)
+})

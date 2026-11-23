@@ -69,7 +69,42 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
 | `shared/pdf-simple.js`, `shared/zip-simple.js` | Écrivains minimaux, sans bibliothèque : PDF (Helvetica, WinAnsi, chaînes en hexadécimal) et ZIP « stocké ». |
 | `shared/charges-vue.js`, `pages/charges.html` | Bouton « Télécharger l'exercice » ; la fenêtre de chargement suit l'export ; `telecharger` injecté par la page. |
 
+## Lot 5 — recevoir les factures par e-mail (spec §14.24)
+
+| Fichier | Rôle |
+|---|---|
+| `migrations/2026-11-23-charges-adresses-email.sql` | Table `charges_adresses_email` (clé = l'adresse, une cible : entité OU logement, du même compte, une adresse vivante par cible), `charges.email_sujet` (300) et `email_texte` (2 000), suppression de l'ancienne `charges_adresses` (jamais lue). Contrôle : cinq `true`. Appliquée staging et prod le 23 novembre 2026. |
+| `lib/charges/adresse.js` | Writer unique des adresses : `nom.code8` (nom ASCII coupé à 41, code de 8 tiré par `crypto` sans biais), `adresses` (crée celles qui manquent, idempotent), `changer` (l'ancienne n'existe plus), `resoudre` (compte, entité, logement lus EN BASE ; refus définitif ou panne). |
+| `lib/charges/email.js` | Le chemin d'un e-mail de factures : pièces appariées POST ↔ relecture (nom, type, Content-ID), taille RELUE = octets téléchargés, petites images ignorées, 10 pièces au plus, jeton contrôlé puis encodé ; panne → rejeu (503), refus → ligne « sans facture lisible » ; lecture IA à l'arrivée sous budget. |
+| `lib/charges.js` | `deposerPieceEmail` (comme un dépôt : type lu dans le contenu, HEIC converti, empreinte, bucket, ligne `a_lire` d'origine `email` ; rejeu sans effet) et `noterSansFacture` ; `appliquerLecture` garde l'entité DE L'ADRESSE pour une facture reçue par e-mail. |
+| `api/inbound-email.js` | Aiguillage sur le destinataire RELU, après relecture et divergence, avant les en-têtes automatiques et le corps vide ; score de spam appliqué (`motifSpam`, sorti de `motifAutomatique` sans rien changer aux voyageurs). `maxDuration` 60 s. |
+| `api/charges.js` | Actions `adresses` et `adresse_changer` (titulaire seul). |
+| `shared/charges-vue.js`, `pages/charges.html`, `shared/ui.css` | Lien « Envoyer par e-mail » et sa fenêtre (Copier, Changer) ; ligne et fiche « sans facture lisible » ; rappel « Entité juridique manquante ». |
+
 ## Règles à ne pas perdre
+
+- **Le compte d'une facture reçue par e-mail vient de l'adresse RELUE chez
+  Brevo, résolue en base** (lot 5) — jamais du POST, qui n'est pas
+  authentifiable. Le nom dans l'adresse ne protège rien (un nom de logement
+  est public) : c'est le code de 8 caractères qui la rend impossible à
+  deviner.
+- **Une pièce jointe n'entre que si ses octets font la taille RELUE** (lot 5).
+  La taille du POST n'est pas comparée : Brevo la dit « estimée ».
+- **L'envoi réel ne se recette qu'en production** : Brevo envoie les e-mails
+  du sous-domaine à l'adresse de production seulement.
+- **Une pièce jointe a un identifiant stable** (lot 5, review 1) : tiré de
+  l'e-mail et de ce que la relecture dit de la pièce, il nomme la charge ET le
+  fichier. Un rejeu de Brevo saute les pièces déjà entrées sans les
+  retélécharger, et chaque passage avance (une pièce ne commence plus après
+  17 s, rien ne dépasse 55 s).
+- **Au plus 50 lignes reçues par e-mail par compte et par 24 heures**
+  (Thierry, 23 novembre 2026) : au-delà, rien n'entre, et une seule ligne
+  « plafond atteint » par 24 heures le dit (`QUOTA_EMAIL_JOUR`,
+  `lib/charges/email.js`).
+- **Dettes du lot 5** : 5-2, une seule adresse HôteSmart servie
+  par e-mail (la première du destinataire) ; 5-3, une pièce entrée lors d'un
+  passage qui a fini en rejeu est lue par le cron quotidien, pas à
+  l'arrivée.
 
 - **Un export ne sort jamais incomplet sans le dire** (lot 8d) : un fichier
   qui ne vient pas après trois essais, chacun avec une adresse neuve, arrête
