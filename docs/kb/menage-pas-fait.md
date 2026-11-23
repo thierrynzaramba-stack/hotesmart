@@ -20,8 +20,8 @@ L'événement **`menage_pas_fait`** (lettre p, groupe et domaine « Ménages »)
 Elle va aux destinataires du catalogue (titulaire, membres du domaine
 « ménages »), avec leurs canaux. ⚠ **Pas aux contacts prévenus** (le gardien,
 par e-mail et SMS) : leurs listes sont celles reprises des anciennes alertes
-(Q25), et `lib/notifications/contacts.js` ne la contient pas. Les y ajouter est
-la question Q51, ouverte (§9). Texte : « Ménage pas fait —
+(Q25), et `lib/notifications/contacts.js` ne la contient pas. Décision Q51 du
+23 novembre 2026 : ils ne la reçoivent pas. Texte : « Ménage pas fait —
 {logement} » / « {prénom} n'a pas marqué fait le ménage. Le voyageur arrive à
 {heure}. » (ou « …et personne ne l'a pris » si le ménage n'a pas de porteuse).
 Toucher la notification ouvre `/menages`.
@@ -34,6 +34,8 @@ Toucher la notification ouvre `/menages`.
 | Rangement | Un lot à part, après le lot 3 (19 nov. 2026) |
 | Heures calmes | « Configurable comme les autres » (19 nov. 2026) — voir §3 |
 | Q49 — logement sans heure d'arrivée réglée | **Pas d'alerte** pour ce logement, et le guide le dit (22 nov. 2026) |
+| Q50 — quels logements | **Les logements confiés** à au moins une prestataire (23 nov. 2026) |
+| Q51 — les contacts prévenus | **Ne la reçoivent pas** (23 nov. 2026) |
 | Q49 bis — logement « À compléter », 18:00 annoncé au voyageur (lot `logement-heures`) | **Pas d'alerte** non plus : l'alerte ne suit pas l'heure par défaut (23 nov. 2026) |
 
 ## 3. Ce qu'il faut savoir en le lisant
@@ -207,13 +209,13 @@ Aucun constat de sécurité : correction sans nouvelle review.
    porte la spec validée (« pas d'alerte si le ménage n'est pas suivi ») avec la
    définition existante du 3 septembre : **logement confié = au moins une
    liaison active**. Le test du cas réel (ménage `unassigned` sans liaison)
-   remplace celui de `menages: []`. ⚠ À confirmer par Thierry.
+   remplace celui de `menages: []`. **Confirmé par Thierry le 23 novembre.**
 2. **Isolation de la mémoire** — test ajouté (ISOLATION 3), la mutation de la
    review est attrapée.
 3. **Deux chemins sans test** — archivé puis recréé, et ménages illisibles :
    tests ajoutés, mutations attrapées.
 4. **Les contacts** — la KB est corrigée : ils ne la reçoivent pas. Question
-   posée à Thierry (Q51), sans réponse. L'essai de l'ajouter à la liste
+   posée à Thierry (Q51) : **confirmé le 23 novembre**. L'essai de l'ajouter à la liste
    « urgences » a rougi 12 tests de `tests/notifications-reprise-listes.test.js` :
    cette liste est aussi celle de la REPRISE des anciennes alertes (Q25,
    « chacun garde ce que sa liste recevait »), et un événement nouveau n'y a
