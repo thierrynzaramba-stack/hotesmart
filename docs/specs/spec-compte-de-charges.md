@@ -5040,9 +5040,14 @@ pour acquise jusqu'à avis contraire de Thierry) :
 **Les trois questions restées sans réponse le 23 novembre, prises à leur
 option recommandée** (Thierry peut revenir dessus) :
 
-5. **Où les adresses s'affichent** : sur `/charges`, sous « Ajouter une
-   facture », une ligne par entité et une par logement, chacune avec
-   « Copier » et « Changer d'adresse ».
+5. ~~Où les adresses s'affichent : sous « Ajouter une facture », en
+   liste~~ — **tranché par Thierry le 23 novembre 2026 à 15 h 14 : « en
+   dessous d'ajouter une facture, une petite phrase de type "envoi par
+   e-mail" ; quand on clique, un pop-up s'ouvre et les e-mails sont affichés
+   avec la possibilité de copier ou de changer ».** Sous « Ajouter une
+   facture », un lien « Envoyer par e-mail » ; il ouvre une fenêtre qui liste
+   une adresse par entité et une par logement, chacune avec « Copier » et
+   « Changer d'adresse ».
 6. **Les petites images ignorées** : une image de moins de 30 Ko (logo de
    signature, icône de réseau social) est ignorée ; un PDF est toujours pris.
 7. **Aucune notification en V1** : une facture arrivée par e-mail apparaît
@@ -5100,17 +5105,21 @@ le prouvent.
 - panne passagère (réseau, Brevo en 5xx, stockage) : 503, Brevo rejoue ;
   l'index unique (compte, e-mail, empreinte) rend le rejeu sans effet.
 
-**L'écran.** Le bloc des adresses, une ligne par entité non archivée et une
-par logement non archivé ; `POST /api/charges` actions `adresse_creer`
-(entité ou logement désigné ; idempotente : rend l'adresse vivante si elle
-existe) et `adresse_changer` (titulaire seul, entité ou logement du compte
-vérifié avant toute écriture) ; la ligne « sans
+**L'écran.** Sous « Ajouter une facture », le lien « Envoyer par e-mail ».
+Il ouvre une fenêtre (`<dialog>`) qui liste une adresse par entité non
+archivée, puis une par logement non archivé (ou la phrase « rattachez d'abord
+ce logement à une entité »), chacune avec « Copier » et « Changer d'adresse »
+(confirmation : « l'ancienne adresse ne recevra plus rien »). À l'ouverture,
+UN appel `POST /api/charges` action `adresses` (titulaire seul) : il crée
+les adresses qui manquent et rend la liste — idempotent, rien n'est créé deux
+fois. `adresse_changer` désigne une entité ou un logement, dont le compte est
+vérifié avant toute écriture. La ligne « sans
 facture lisible » entre dans « À traiter », et sa fiche montre l'expéditeur,
 le sujet et le texte, avec « Supprimer ».
 
 **La recette.** ⚠ L'envoi réel ne se recette QU'EN PRODUCTION : Brevo
 envoie les e-mails du sous-domaine à l'adresse de production seulement. Sur
-staging : l'adresse, « Copier », « Changer d'adresse », et la ligne « sans
+staging : la fenêtre, « Copier », « Changer d'adresse », et la ligne « sans
 facture lisible » posée par un test. En production : un e-mail avec un PDF,
 une photo, un e-mail sans pièce jointe, puis « Changer d'adresse » et un
 e-mail à l'ancienne adresse.
@@ -5122,24 +5131,24 @@ pour octet sur ce qu'il écrit.
 
 #### 14.24.5 Le téléphone
 
-Le même bloc, l'adresse sur deux lignes si besoin ; « Copier » est le geste
-utile au téléphone.
+La même fenêtre, en plein écran, l'adresse sur deux lignes si besoin ;
+« Copier » est le geste utile au téléphone.
 
 #### 14.24.6 Case PERFORMANCE
 
-1. Un endpoint d'écran : l'adresse vient avec l'écran (`/api/ecran/charges`),
-   aucun appel de plus.
-2. Donnée non urgente : sans objet (une adresse, lue telle quelle).
+1. Un endpoint d'écran : l'écran ne charge rien de plus ; les adresses
+   arrivent par UN appel, seulement à l'ouverture de la fenêtre.
+2. Donnée non urgente : sans objet (des adresses, lues telles quelles).
 3. Cache navigateur : aucun.
 4. `private, no-store` : déjà posé sur les deux endpoints.
 5. Statiques versionnés : inchangé (pas de module nouveau côté écran).
 6. Lecture tronquée : au plus une adresse par entité et par logement du
    compte, très en dessous de 1 000 ; la lecture est quand même bornée et un
    dépassement est une erreur, pas une troncature.
-7. Budget de l'écran : inchangé, une lecture de plus côté serveur, en
-   parallèle.
-8. AVANT / APRÈS : appels de l'écran 2 → 2 ; requêtes +1 ; octets +80
-   environ. À mesurer en recette.
+7. Budget de l'écran : inchangé ; la fenêtre ajoute un appel au clic, dont
+   les lectures (entités, logements, adresses) partent en parallèle.
+8. AVANT / APRÈS : appels de l'écran 2 → 2, requêtes et octets inchangés au
+   chargement ; à l'ouverture de la fenêtre, 1 appel. À mesurer en recette.
 
 ## 12. Trace des reviews du lot 2
 
