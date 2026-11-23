@@ -103,7 +103,7 @@ async function main () {
   // ─── Le bien ───────────────────────────────────────────────────────────────
   const { data: bien, error: eb } = await supabase
     .from('properties')
-    .select('id, name, provider, provider_property_id, user_id, checkin_time, checkout_time, address')
+    .select('id, name, provider, provider_property_id, user_id, checkin_time, checkout_time, address, zip_code, city')
     .eq('provider_property_id', String(row.property_id))
     .eq('user_id', row.user_id).maybeSingle()
   if (eb) throw new Error(`lecture bien : ${eb.message}`)
@@ -208,9 +208,12 @@ async function main () {
   // de la relecture 1) : `replisDuBien` ne lit plus `checkInStart`, donc sans
   // `checkin_time` le brouillon rejoue disait 18:00 / 10:00 quelle que soit la
   // fiche, et partait tel quel avec --execute.
+  // ⚠ ET L'ADRESSE DE LA FICHE SEULE, ASSEMBLÉE COMME PAR LE CRON (constat 10
+  // de la relecture 2) : la ligne `adresse` de la base passait devant, sans
+  // code postal ni ville — le brouillon rejoué différait de l'envoi du cron.
   const property = {
     id: row.property_id, name: bien.name, provider: bien.provider,
-    address: k.adresse || bien.address || '',
+    address: bien.address || '', zip_code: bien.zip_code || null, city: bien.city || null,
     phone: k.telephone_hote || '',
     checkin_time: bien.checkin_time || null,
     checkout_time: bien.checkout_time || null

@@ -319,6 +319,21 @@ module.exports = async (req, res) => {
           if (!brute) return res.status(400).json({ error: 'heure_obligatoire', message: 'L’heure est obligatoire.' })
           const heure = normaliserHeure(brute)
           if (!heure) return res.status(400).json({ error: 'heure_illisible', message: 'Heure attendue au format HH:MM.' })
+          // ⚠ L'ANCIENNE LIGNE DE BASE DE CETTE HEURE S'EN VA, ET AVANT
+          // L'ÉCRITURE (constat 1 de la relecture 2). Plus personne ne la lit,
+          // mais la reprise (`--go`) la lirait : elle classerait l'heure tapée
+          // ici en « écart » et remettrait l'heure de la base par-dessus. Une
+          // heure tapée dans ce bloc ne laisse donc aucune ligne derrière elle.
+          // Dans cet ordre, un échec ne coûte rien au voyageur : la ligne n'est
+          // plus lue, et l'hôte voit un refus et recommence. Dans l'autre, une
+          // ligne restée derrière une heure écrite serait remise en fiche.
+          const { error: errBase } = await supabase.from('knowledge').delete()
+            .eq('user_id', accountUserId).eq('property_id', ref).eq('type', 'fixed').eq('key', cle)
+          compteur.n++
+          if (errBase) {
+            console.error('[ecran/connaissance] heure, ligne de base', errBase.message)
+            return res.status(500).json({ error: 'Enregistrement impossible' })
+          }
           const { data, error } = await supabase.from('properties')
             .update({ [COLONNE_HEURE[cle]]: heure })
             .eq('id', choisi.id).eq('user_id', accountUserId).is('archive_le', null)

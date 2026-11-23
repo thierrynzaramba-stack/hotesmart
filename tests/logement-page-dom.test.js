@@ -1352,7 +1352,20 @@ test('LE TEST QUI COMPTE : un refus d heure dit sa cause, la saisie reste, le bo
     await ctx.__enregistrerAccueil('checkin')
     assert.equal(doc.querySelector('[data-bind="accueil-erreur"]').textContent, `[${cle}]`, code)
     assert.equal(doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value, '16:00', `${code} : la saisie n est pas perdue`)
+    assert.equal(doc.querySelector('[data-bloc="accueil"] [data-acc-enregistrer]').disabled, false, `${code} : une heure saisie se renvoie`)
   }
+  // ⚠ Constat 6 de la relecture 2 : le titre le promettait, rien ne le
+  // vérifiait. Après un refus sur un champ VIDE, le `finally` réactive les
+  // boutons — puis la règle du champ doit reprendre la main.
+  const vide = new Error('heure_obligatoire'); vide.status = 400
+  const r = monter({ reponse: fiche({ accueil: ACCUEIL_HEURES }), erreurEcriture: vide })
+  await r.ctx.__charger()
+  r.ctx.__editer('checkin')
+  r.doc.querySelector('[data-bloc="accueil"] [data-acc-saisie]').value = ''
+  await r.ctx.__enregistrerAccueil('checkin')
+  assert.equal(r.doc.querySelector('[data-bind="accueil-erreur"]').textContent, '[acc.hour_required]')
+  assert.equal(r.doc.querySelector('[data-bloc="accueil"] [data-acc-enregistrer]').disabled, true,
+    'champ vide après le refus : le bouton reste inactif')
   // Un autre refus garde le message générique.
   const autre = new Error('Enregistrement impossible'); autre.status = 500
   const { doc, ctx } = monter({ reponse: fiche({ accueil: ACCUEIL_HEURES }), erreurEcriture: autre })

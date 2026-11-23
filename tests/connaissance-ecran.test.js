@@ -610,9 +610,35 @@ test('LE TEST QUI COMPTE : une heure s écrit dans la FICHE du bien désigné, a
   assert.equal(filtre(ecrite, 'id'), 'u-1')
   assert.equal(filtre(ecrite, 'user_id'), TITULAIRE, 'dans le compte, jamais ailleurs')
   assert.ok(ecrite.filtres.some(f => f[0] === 'is' && f[1] === 'archive_le' && f[2] === null), 'un logement en service seulement')
-  assert.equal(r.requetes.filter(q => q.table === 'knowledge').length, 0, 'plus aucune ligne d heure dans la base')
+  assert.equal(r.requetes.filter(q => q.table === 'knowledge' && q.op !== 'delete').length, 0, 'plus aucune ligne d heure écrite dans la base')
   const depart = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bien: 'P2', type: 'fixed', key: 'checkout', value: '10:00' }, repondre: base() })
   assert.deepEqual(depart.requetes.find(q => q.op === 'update').charge, { checkout_time: '10:00' })
+})
+
+// ⚠ Constat 1 de la relecture 2 : une ligne de base laissée derrière une heure
+// tapée dans le bloc serait lue par la reprise (`--go`), classée en « écart »,
+// et remise en fiche par-dessus l'heure de l'hôte.
+test('LE TEST QUI COMPTE : écrire une heure retire SA ligne de base, AVANT l écriture, dans le compte et le bien', async () => {
+  const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bienId: 'u-2', type: 'fixed', key: 'checkout', value: '11:30' }, repondre: base() })
+  assert.equal(r.statut, 200)
+  const retraits = r.requetes.filter(q => q.table === 'knowledge' && q.op === 'delete')
+  assert.equal(retraits.length, 1)
+  const [retrait] = retraits
+  assert.equal(filtre(retrait, 'user_id'), TITULAIRE)
+  assert.equal(filtre(retrait, 'property_id'), 'P2', 'la référence TEXTE du partenaire, jamais l UUID')
+  assert.equal(filtre(retrait, 'type'), 'fixed')
+  assert.equal(filtre(retrait, 'key'), 'checkout', 'la ligne de CETTE heure seulement')
+  assert.ok(r.requetes.indexOf(retrait) < r.requetes.findIndex(q => q.table === 'properties' && q.op === 'update'),
+    'le retrait précède l écriture : une ligne restée derrière une heure écrite serait remise en fiche')
+})
+
+test('le retrait de la ligne de base échoue : 500, et la fiche n est pas écrite', async () => {
+  const r = await appeler({
+    methode: 'POST', corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'checkin', value: '16:00' },
+    repondre: (q) => (q.table === 'knowledge' && q.op === 'delete' ? { data: null, error: { message: 'panne' } } : base()(q))
+  })
+  assert.equal(r.statut, 500)
+  assert.equal(r.requetes.filter(q => q.table === 'properties' && q.op === 'update').length, 0)
 })
 
 test('LE TEST QUI COMPTE : vider une heure est refusé, une forme illisible aussi — rien n est écrit', async () => {
@@ -627,13 +653,13 @@ test('LE TEST QUI COMPTE : vider une heure est refusé, une forme illisible auss
 test('une heure sur un bien d un autre compte : 403, rien n est écrit', async () => {
   const r = await appeler({ methode: 'POST', corps: { action: 'enregistrer', bienId: 'uuid-d-un-autre-compte', type: 'fixed', key: 'checkout', value: '10:00' }, repondre: base() })
   assert.equal(r.statut, 403)
-  assert.equal(r.requetes.filter(q => q.op === 'update').length, 0)
+  assert.equal(r.requetes.filter(q => q.op === 'update' || q.op === 'delete').length, 0)
 })
 
 test('un membre délégué ne règle pas les heures : 403 avant toute lecture', async () => {
   const r = await appeler({ methode: 'POST', titulaire: false, corps: { action: 'enregistrer', bienId: 'u-1', type: 'fixed', key: 'checkin', value: '16:00' }, repondre: base() })
   assert.equal(r.statut, 403)
-  assert.equal(r.requetes.filter(q => q.op === 'update').length, 0)
+  assert.equal(r.requetes.filter(q => q.op === 'update' || q.op === 'delete').length, 0)
 })
 
 test('logement archivé entre la lecture et l écriture : 409, pas un « ok » mensonger', async () => {

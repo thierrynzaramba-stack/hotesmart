@@ -171,7 +171,19 @@ test('fiche sans heure : l heure Beds24 sert dès ce cycle (elle remplira la fic
   assert.deepStrictEqual([biens[0].checkinFiche, biens[0].checkoutFiche], ['15:00', '11:00'])
 })
 
-test('fiche illisible (lecture en échec) : l heure Beds24 reste le repli, jamais le défaut à sa place', async () => {
+// Constat 3 de la relecture 2 : retomber sur Beds24 donnait au message
+// d'arrivée l'heure Beds24, au code rafraîchi et à l'écran le défaut — pour
+// toujours, puisque la synchro ne remplit que le vide.
+test('LE TEST QUI COMPTE : une fiche à l heure ILLISIBLE ne retombe pas sur Beds24 — le défaut partout, comme l écran le dit', async () => {
+  const { replisDuBien, remplacerBalises } = require('../lib/balises')
+  const { mod } = charger({ lignes: { 111: { id: 'uuid-1', active_at: 'x', address: 'A', checkin_time: '4pm', checkout_time: 'midi' } } })
+  const biens = [{ id: 111, name: 'Gite', checkInStart: '15:00', checkOutEnd: '13:00' }]
+  await mod.materializeBeds24Properties('u1', biens, {})
+  assert.deepStrictEqual([biens[0].checkinFiche, biens[0].checkoutFiche], [null, null])
+  assert.strictEqual(remplacerBalises('{checkin}-{checkout}', { connaissance: {}, replis: replisDuBien(biens[0]) }).texte, '18:00-10:00')
+})
+
+test('fiche non lue (lecture en échec) : l heure Beds24 reste le repli, jamais le défaut à sa place', async () => {
   const { mod } = charger({ lignes: { 111: { id: 'uuid-1', active_at: 'x', address: 'X' } }, erreurAdresses: { message: 'panne' } })
   const biens = [{ id: 111, name: 'Gite', checkInStart: '15:00', checkOutEnd: '11:00' }]
   await mod.materializeBeds24Properties('u1', biens, {})
