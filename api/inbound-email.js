@@ -53,6 +53,11 @@ const { envoyerHtml } = require('../lib/email-guestflow')
 // Ce helper a deja ete corrige une fois pour cette raison.
 const { destinataire: destinataireHote } = require('../lib/notif-hote-resa')
 const { isActiveStatus } = require('../lib/bookings-snapshot')
+// Compte de charges, lot 5 (spec §14.24) : les adresses de FACTURES
+// (`<nom>.<code>@reply.hotesmart.fr`) ont leur propre chemin, qui ne répond
+// jamais à personne. Ici, la seule reconnaissance de la forme ; le chemin
+// lui-même (`lib/charges/email.js`) n'est chargé que pour un tel e-mail.
+const { estAdresseDeFactures } = require('../lib/charges/adresse')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const CLE_BREVO = process.env.ALERT_BREVO_API_KEY
@@ -98,6 +103,15 @@ function motifAutomatique (evenement) {
   for (const [cle, test] of ENTETES_AUTOMATIQUES) {
     if (h[cle] !== undefined && test(h[cle])) return `en-tete ${cle}`
   }
+  return motifSpam(evenement)
+}
+
+// ⚠ LE SCORE DE SPAM EST SORTI DES EN-TETES (compte de charges, lot 5, §7) :
+// le chemin des factures saute les en-tetes — un e-mail de facture porte
+// souvent `List-Unsubscribe` ou `Precedence: bulk` — mais PAS le score.
+// `motifAutomatique` l'appelle toujours a la fin : rien ne change pour les
+// voyageurs.
+function motifSpam (evenement) {
   // ⚠ `SpamScore`, A LA RACINE — PAS `Spam.Score`. Constat de review, et la
   // garde etait MORTE : Brevo envoie un flottant `SpamScore` au meme niveau que
   // `Subject`. La lecture precedente rendait `undefined`, donc `NaN`, donc
@@ -329,6 +343,7 @@ module.exports = async function handler (req, res) {
     return res.status(503).json({ ok: false, reason: raison, ...extra })
   }
 
+  const debut = Date.now()
   try {
     const brut = req.body || {}
     const item = Array.isArray(brut.items) ? brut.items[0] : brut
@@ -358,6 +373,27 @@ module.exports = async function handler (req, res) {
     // 1. Le POST dit-il la meme chose que Brevo ?
     const ecart = divergence(item, ref)
     if (ecart) return fini('payload_incoherent', { ecart })
+
+    // 1 bis. Une adresse de FACTURES (compte de charges, lot 5, §14.24) : son
+    // propre chemin, APRES la relecture et le refus d'une divergence, AVANT
+    // les deux gardes qui n'existent que parce que l'agent IA repond — le
+    // filtre des en-tetes automatiques et le refus d'un corps vide. Le score
+    // de spam, lui, s'applique. ⚠ Decide sur le `recipient` RELU, jamais sur
+    // celui du POST ; et une adresse de factures (un point avant le code) ne
+    // ressemble a aucune adresse de reponse (`<reservation>-<signature>`).
+    if (estAdresseDeFactures(ref.recipient)) {
+      const spam = motifSpam(item)
+      if (spam) return fini('factures_spam_ignore', { motif: spam })
+      const { recevoir } = require('../lib/charges/email')
+      const r = await recevoir(supabase, {
+        ref, item, uuid, debut,
+        expediteur: ref.sender || premiereAdresse(item.From || item.from),
+        sujet: ref.subject || item.Subject || item.subject || '',
+        texte: corpsUtile(item)
+      }, { cle: CLE_BREVO })
+      if (r.rejouer) return rejouer('factures_panne', { raison: r.raison })
+      return fini('factures_' + r.issue, r.trace || {})
+    }
 
     // 2. Ce qui ne doit jamais reveiller l'agent. Les en-tetes ne sont QUE dans
     // le payload : Brevo ne les expose pas a la relecture. On les lit donc du

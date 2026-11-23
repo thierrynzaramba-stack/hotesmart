@@ -5101,8 +5101,10 @@ le prouvent.
   l'arrivée, ou aucune s'il n'en a pas (la charge porte alors le rappel) ;
   une adresse inconnue, changée, ou d'une entité ou d'un logement archivé est
   refusée en 200 (définitif), trace au journal serveur seulement ;
-- au plus 10 pièces jointes prises par e-mail ; types : PDF, JPEG, PNG,
-  WebP, HEIC et HEIF (convertis comme au dépôt) ; 10 Mo au plus chacune ;
+- au plus 10 pièces jointes prises par e-mail ; types : ceux d'un dépôt —
+  PDF, JPEG, PNG, HEIC et HEIF (convertis comme au dépôt) ; un autre type
+  (WebP, `.ics`, `.docx`) est ignoré ; 10 Mo au plus pour un PDF, 7 Mo pour
+  une image ;
 - chaque pièce : nom, type et taille confrontés à la relecture (un champ
   absent de la relecture est un refus), jeton de téléchargement vérifié par
   motif puis encodé, octets téléchargés chez Brevo
@@ -5141,8 +5143,11 @@ e-mail à l'ancienne adresse.
 
 #### 14.24.4 Inventaire
 
-Rien n'est retiré. Le chemin des réponses voyageurs reste identique, octet
-pour octet sur ce qu'il écrit.
+Rien n'est retiré de l'écran. Le chemin des réponses voyageurs reste
+identique, octet pour octet sur ce qu'il écrit ; seule la fonction du score de
+spam est sortie de celle des en-têtes, et celle-ci l'appelle toujours. En base,
+la table `charges_adresses` (Q16), qu'aucun code n'a jamais lue ni écrite, est
+supprimée par la migration, vide.
 
 #### 14.24.5 Le téléphone
 
@@ -5164,6 +5169,49 @@ La même fenêtre, en plein écran, l'adresse sur deux lignes si besoin ;
    les lectures (entités, logements, adresses) partent en parallèle.
 8. AVANT / APRÈS : appels de l'écran 2 → 2, requêtes et octets inchangés au
    chargement ; à l'ouverture de la fenêtre, 1 appel. À mesurer en recette.
+
+#### 14.24.7 Ce qui est codé (23 novembre 2026)
+
+- **`lib/charges/adresse.js`**, writer unique des adresses : forme
+  `nom.code8` (nom en ASCII et tirets, coupé à 41 caractères, repli
+  « factures » ou « logement » ; code de 8 tiré par `crypto`, un octet ≥ 252
+  rejeté pour ne biaiser aucune lettre), `adresses` (une par entité active et
+  par logement actif, celles qui manquent créées ; deux fenêtres ouvertes en
+  même temps ne créent rien deux fois), `changer` (cible résolue dans le
+  compte AVANT toute écriture ; l'ancienne adresse n'existe plus), `resoudre`
+  (refus **définitif** : adresse inconnue ou changée, cible archivée ; sinon
+  panne, rejouée).
+- **`lib/charges/email.js`**, le chemin d'un e-mail : appariement POST ↔
+  relecture par nom, type et Content-ID ; un champ absent de la relecture, un
+  nombre ou une pièce qui diffère : tout l'e-mail refusé
+  (`relecture_incomplete`, `pieces_divergentes`), rien téléchargé ; images de
+  moins de 30 Ko ignorées ; au-delà de 10, `trop_de_pieces` ; jeton contrôlé
+  (`^[A-Za-z0-9._~-]{8,1024}$`) puis encodé ; octets téléchargés = taille
+  RELUE, sinon `taille_differente`. ⚠ **La taille du POST n'est pas
+  comparée** : Brevo la documente comme une estimation. Budgets : les
+  téléchargements finis à 35 s (sinon 503, Brevo rejoue), une lecture IA ne
+  démarre plus après 30 s (elle dure 20 s au plus).
+- **`lib/charges.js`** : `deposerPieceEmail` et `noterSansFacture` (writer
+  unique de `charges` et du bucket) ; `appliquerLecture` garde l'entité de
+  l'adresse pour une facture d'origine `email` (§14.24.2, point 4).
+- **`api/inbound-email.js`** : l'aiguillage ; **`vercel.json`** :
+  `maxDuration` 60 s pour ce webhook.
+- **`api/charges.js`** : `adresses`, `adresse_changer`.
+- **Écran** : le lien, la fenêtre (Copier, Changer avec confirmation), la
+  ligne et la fiche « sans facture lisible » (expéditeur, objet, reçu le,
+  texte, motif ; seul « Supprimer »), le rappel « Entité juridique manquante »
+  dans la ligne et la fiche. 36 textes en trois langues.
+- **Tests** : `tests/charges-adresse.test.js` (11), `tests/charges-email.test.js`
+  (15), `tests/inbound-email-factures.test.js` (6),
+  `tests/charges-email-page.test.js` (7, dans la vraie page),
+  `tests/charges-migration-adresses-email.test.js` (6), 3 de plus dans
+  `tests/charges-endpoint.test.js`. **26 sabotages, 26 rouges.** Suite :
+  9371 verts à l'heure réelle et à J+60. Analyseur des colonnes : 43
+  formes non résolues (inchangé).
+- **Risque à mesurer en recette** : la durée du webhook quand il lit une
+  facture à l'arrivée (jusqu'à ~25 s). Si Brevo coupe et rejoue avant la fin,
+  le rejeu ne crée rien (index uniques), mais une lecture peut être payée deux
+  fois. Le journal de Vercel le dira (`[inbound-email] factures_recue`).
 
 ### 14.25 Lot 5 bis — valider une facture d'un logement sans entité (23 novembre 2026)
 
@@ -5187,7 +5235,9 @@ entité attend dans « À traiter » avec son rappel.
 **À détailler avant de coder, et à faire valider par Thierry** (périmètre
 pressenti, pas encore une spec) :
 - la validation (`lib/charges.js`) : entité vide acceptée seulement si le
-  logement choisi n'a pas d'entité ;
+  logement choisi n'a pas d'entité ; ⚠ et une **migration**, car la base
+  l'interdit aujourd'hui (`charges_validee_entite_ck` : une charge validée a
+  son entité, D3 / Q20) ;
 - un total « Sans entité juridique » dans le choix d'entité de l'écran, avec
   le rappel en tête ; sans exercice, donc par mois (comme une entité dont le
   début d'exercice est vide) ; les fonctions SQL des totaux, qui filtrent

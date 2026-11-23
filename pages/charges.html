@@ -52,6 +52,10 @@
     <!-- Lot 8c : plusieurs fichiers d'un coup (50 au plus) ; l'entité de
          chacun est reconnue à la lecture, ou laissée à choisir. Puis la
          vérification une par une s'ouvre d'elle-même. -->
+    <!-- Lot 5 (§14.24, Thierry, 23 novembre 2026) : sous le bouton, une
+         petite phrase ; elle ouvre la fenêtre des adresses de factures, une
+         par entité et une par logement. -->
+    <button type="button" class="chg-lien chg-lien-email" data-action="email" data-i18n="charges.email_lien" hidden></button>
     <input type="file" data-bind="fichier" multiple accept="application/pdf,image/jpeg,image/png,image/webp,image/gif,image/avif,image/bmp,image/tiff,image/heic,image/heif,.heic,.heif" hidden>
   </div>
   <div class="chg-tete">
@@ -72,6 +76,9 @@
 <!-- La fenêtre de chargement d'un dépôt (recette du lot 8c) : la facture en
      cours, son étape, une barre qui avance. Remplie par /shared/charges-vue.js. -->
 <dialog class="chg-chargement" data-bind="chargement" aria-labelledby="chg-chargement-titre"></dialog>
+<!-- Les adresses de factures (lot 5, §14.24) : au centre, comme la fenêtre de
+     chargement. Remplie par /shared/charges-vue.js. -->
+<dialog class="chg-email" data-bind="email" aria-labelledby="chg-email-titre"></dialog>
 
 <nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
 
@@ -179,6 +186,7 @@ async function init () {
   // ⚠ LE BOUTON D'AJOUT N'EXISTE QUE POUR LE TITULAIRE ; le serveur refuse
   // de toute façon un membre en 403, lecture comprise (Q9).
   $('[data-action="ajouter"]').hidden = !estTitulaire()
+  $('[data-action="email"]').hidden = !estTitulaire()
 
   const vue = monter(document.body, {
     charger: (qs) => appelAPI(ECRAN + (qs ? '?' + qs : '')),
@@ -188,6 +196,8 @@ async function init () {
     reduireImage: preparerJpeg,
     ouvrirOnglet: () => window.open('', '_blank'),
     confirmer: (texte) => window.confirm(texte),
+    // Lot 5 : « Copier » une adresse de factures.
+    copier: (texte) => navigator.clipboard.writeText(texte),
     // Lot 8c : à l'ordinateur, la facture s'affiche à droite de sa fiche.
     ecranLarge: () => Boolean(window.matchMedia && window.matchMedia('(min-width: 1100px)').matches),
     t,

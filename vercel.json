@@ -20,6 +20,9 @@
     "api/charges.js": {
       "maxDuration": 60
     },
+    "api/inbound-email.js": {
+      "maxDuration": 60
+    },
     "api/labo-ia.js": {
       "maxDuration": 120
     },

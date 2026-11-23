@@ -258,7 +258,7 @@ test('« À traiter » : à lire, à vérifier, illisible, et tout signal non tr
   const q = r.requetes.find(x => x.table === 'charges' && x.optionsSelect && x.optionsSelect.count === 'exact')
   assert.ok(q, 'la file compte en base')
   assert.equal(q.limite, 51, 'une page de 50, plus une ligne pour savoir s\'il y a une suite (lot 8c, dette 153)')
-  assert.deepEqual(q.filtres.find(f => f[0] === 'or'), ['or', 'statut.in.(a_lire,a_verifier,illisible,tableau),and(signal.not.is.null,signal_tranche.is.false)'], 'un tableau reconnu attend son import (§14.21.3)')
+  assert.deepEqual(q.filtres.find(f => f[0] === 'or'), ['or', 'statut.in.(a_lire,a_verifier,illisible,tableau,sans_facture),and(signal.not.is.null,signal_tranche.is.false)'], 'un tableau reconnu attend son import (§14.21.3) ; un e-mail sans facture lisible se voit (lot 5)')
   assert.ok(q.filtres.some(f => f[0] === 'neq' && f[2] === 'envoi'))
   assert.doesNotMatch(q.colonnes, /justificatif_chemin/, 'jamais le chemin du fichier')
   // ⚠ De la réponse de l'IA, le SEUL solde d'une régularisation (lot 7a).

@@ -14,6 +14,11 @@
 //   credit_importer  { fichier (PDF en base64), preteur, entite_id, bien_id }
 //                                         -> le crédit et ses charges (§14.20)
 //   credit_supprimer { id }               -> le crédit, ses échéances, ses charges
+//   adresses   {}                         -> lot 5 (§14.24) : les adresses de
+//                                            factures, une par entité et par
+//                                            logement, celles qui manquent créées
+//   adresse_changer { entite_id | bien_id } -> une nouvelle adresse ; l'ancienne
+//                                            est refusée aussitôt
 // L'écran (lot 3) lit par `/api/ecran/charges` ; ici, on n'écrit que.
 //
 // ⚠ RÉSERVÉ AU TITULAIRE DU COMPTE, LECTURE COMPRISE (Q9, 8 novembre 2026).
@@ -31,12 +36,15 @@ const { contexteDEcran, posterEnTetesPrives } = require('../lib/require-permissi
 const { estTitulaireDuCompte } = require('../lib/permissions')
 const charges = require('../lib/charges')
 const { lireDocument } = require('../lib/charges/lecture')
+const adresse = require('../lib/charges/adresse')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
 const ACTIONS = new Set(['envoi', 'confirmer', 'valider', 'trancher', 'supprimer', 'consulter', 'export_urls', 'credit_importer', 'credit_supprimer',
   // Lot 8b (§14.21.3) : un seul bouton « Ajouter », le tableau reconnu tout seul.
-  'tableau_importer', 'tableau_reconnaitre', 'tableau_en_facture'])
+  'tableau_importer', 'tableau_reconnaitre', 'tableau_en_facture',
+  // Lot 5 (§14.24) : les adresses de factures.
+  'adresses', 'adresse_changer'])
 // Un tableau d'amortissement en base64 : 2 Mo de PDF font 2,7 Mo de texte, sous
 // la limite de 4,5 Mo d'un corps de requête Vercel.
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/
@@ -159,6 +167,16 @@ module.exports = async function handler (req, res) {
     if (action === 'credit_supprimer') {
       const r = await charges.supprimerCredit(supabase, { compte, id: corps.id })
       return rendre(res, r, x => ({ supprime: x.supprime }))
+    }
+
+    if (action === 'adresses') {
+      const r = await adresse.adresses(supabase, compte)
+      return rendre(res, r, x => ({ entites: x.entites, biens: x.biens }))
+    }
+
+    if (action === 'adresse_changer') {
+      const r = await adresse.changer(supabase, compte, { entiteId: corps.entite_id, bienId: corps.bien_id })
+      return rendre(res, r, x => ({ adresse: x.adresse }))
     }
 
     if (action === 'export_urls') {
