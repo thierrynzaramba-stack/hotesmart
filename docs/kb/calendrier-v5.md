@@ -290,10 +290,14 @@ le tap ouvrait la fiche. Aucun test ne le voyait : le banc n'envoyait jamais de
   relâchement est celle **sous le doigt** (`elementFromPoint`).
 - Sur iPhone : `-webkit-user-select: none` et `-webkit-touch-callout: none`
   sur `.cal-case`, sinon l'appui long sélectionne le numéro du jour.
-- ⚠ **Au doigt, la barre tient sur UNE ligne de boutons** (recette du
-  23 novembre, `pointer: coarse`) : sur trois lignes elle faisait 238 px, plus
-  86 px de navigation, et cachait les semaines qui suivent la date choisie — un
-  appui dessus touchait la barre, la sélection ne s'étendait pas. À la souris
+- ⚠ **Au doigt, la barre tient sur UNE rangée de cinq boutons en colonnes**
+  (recettes des 23 et 24 novembre, `pointer: coarse`), icône au-dessus d'un
+  libellé court, 112 px : sur trois lignes elle faisait 238 px, plus 86 px de
+  navigation, et cachait les semaines qui suivent la date choisie — un appui
+  dessus touchait la barre, la sélection ne s'étendait pas. ⚠ Et **aucun
+  bouton ne dépend d'un défilement** : une ligne à faire défiler du doigt ne
+  défilait pas sur l'Android de Thierry, « Réservation » et « Plus… » restaient
+  hors d'atteinte. À la souris
   en fenêtre étroite, les boutons passent toujours à la ligne (pas de poignée
   pour faire défiler, et « Plus… » y est le seul chemin vers la fiche du jour).
 - Et la page ne défile que si la **date tapée** est cachée (moins de la moitié

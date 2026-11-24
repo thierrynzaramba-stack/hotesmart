@@ -355,7 +355,7 @@ test('18. au telephone, une date CACHEE sous la barre ou sous l en-tete est rame
   }
 })
 
-test('19. au doigt, les boutons de la barre tiennent sur UNE ligne ; a l ordinateur et a la souris, ils passent a la ligne', () => {
+test('19. au doigt, les boutons de la barre tiennent sur UNE rangee sans defilement ; a l ordinateur et a la souris, ils passent a la ligne', () => {
   const fs = require('fs'), path = require('path')
   const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'calendrier.html'), 'utf8')
   const balise = html.match(/<span[^>]*data-bind="flottante-actions"[^>]*>/)[0]
@@ -363,13 +363,16 @@ test('19. au doigt, les boutons de la barre tiennent sur UNE ligne ; a l ordinat
   assert.doesNotMatch(balise, /style=/, 'un style en ligne l emporterait sur la regle du telephone')
   const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
   const blocDe = (entete) => css.split(entete).slice(1).map(m => m.split(/\n}\n/)[0]).join('\n')
-  // Au doigt : une ligne qu'on fait defiler.
+  // Au doigt : une rangee de colonnes egales, SANS rien a faire defiler — la
+  // recette du 24 novembre 2026 a montre qu'une ligne a faire defiler ne
+  // defilait pas sur Android, et cachait « Reservation » et « Plus… ».
   const doigt = blocDe('@media (max-width: 899px) and (pointer: coarse)')
   const regle = doigt.match(/\.cal-flottante > \.cal-flottante__actions \{[^}]*\}/)
   assert.ok(regle, 'la regle du doigt existe')
-  assert.match(regle[0], /flex-wrap: nowrap/)
-  assert.match(regle[0], /overflow-x: auto/)
-  assert.doesNotMatch(regle[0], /scrollbar-width: none/, 'la souris garderait une ligne sans poignee')
+  assert.match(regle[0], /display: grid/)
+  assert.match(regle[0], /grid-auto-flow: column/)
+  assert.match(regle[0], /grid-auto-columns: minmax\(0, 1fr\)/, 'les colonnes se partagent la largeur, sans deborder')
+  assert.doesNotMatch(regle[0], /overflow-x/, 'aucun bouton ne doit dependre d un defilement')
   // Hors de ce bloc (ordinateur, souris en fenetre etroite) : retour a la ligne.
   const hors = css.split('@media (max-width: 899px) and (pointer: coarse)')[0]
   assert.match(hors, /\.cal-flottante__actions \{ gap: 8px; flex-wrap: wrap; \}/, 'l ordinateur garde le retour a la ligne')
