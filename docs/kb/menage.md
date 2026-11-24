@@ -5197,3 +5197,4 @@ ils extraient `liaisonsAEnvoyer` de la page et passent sa sortie au handler.
 ⚠ Hors de ce correctif : l'ancien formulaire (apps/menages/prestataires.html)
 coche les sept cases d'une liaison à `null` et renvoie `[0..6]` — une liaison
 « proposée » jamais sollicitée y passe à « sollicitée tous les jours ».
+Review et suites : docs/recette/reviews-liaisons-jours-non-regles.md.
