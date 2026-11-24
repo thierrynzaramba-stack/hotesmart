@@ -1,7 +1,7 @@
 # Garde serveur de la suppression d'un logement — `fix-garde-suppression-bien`
 
-**Statut : deux relectures (23 novembre 2026), la seconde est la dernière ;
-correctifs écrits.** Fil
+**Statut : trois relectures (23 et 24 novembre 2026) ; la troisième,
+accordée par Thierry par exception, est la dernière. Correctifs écrits.** Fil
 logements, à qui le chef de file a confié la branche (décision de Thierry du
 22 novembre 2026, confirmée par lui dans la fenêtre du fil le 23).
 
@@ -133,7 +133,7 @@ toujours ; ils sont corrigés, comme les mineurs 3 à 6.
    Sur une lecture en échec, `siLaProprieteADisparu` demande
    `GET /properties/<clé>` : un 404 — et lui seul — vaut « aucun canal ».~~
    **RETIRÉ après la relecture 2** (§4, constat de sécurité) : un 404 ne
-   prouve pas qu'une propriété a disparu. Le défaut reste au registre (§5).
+   prouve pas qu'une propriété a disparu. Le défaut reste au registre (§6).
 3. **Pagination.** La lecture passe par `lireCanauxDuPartenaire`
    (`lib/canaux-du-bien.js`), qui reçoit un paramètre `chemin` (défaut
    inchangé : le relevé du compte) : ses règles de pagination ne sont pas
@@ -156,7 +156,7 @@ erreur vaut disparition, jamais de disparition, sans `|| canaux.length`,
 mappage illisible accepté, tarif sans id accepté, une seule page) : toutes
 attrapées.
 
-## 4. Relecture 2, la dernière (23 novembre 2026) — rapport recopié tel quel
+## 4. Relecture 2 (23 novembre 2026) — rapport recopié tel quel
 
 Agent distinct, lecture seule, limitée au diff des correctifs de la relecture
 1 : ils RELÂCHAIENT une garde sur une action irréversible, d'où cette seconde
@@ -256,7 +256,8 @@ autres correctifs ne font que refuser davantage.
    l'existence de la propriété. Le test de forme interdit le retour du nom.
 2. `lireCanauxDuPartenaire` reçoit `totalExige` : sans total entier dès la
    page 1, la lecture rend `sans_total` (`Number(null)` valant 0, un total
-   `null` passait pour « zéro élément »). La garde l'utilise pour ses deux
+   `null` passait pour « zéro élément »). ⚠ Le contrôle s'arrêtait à la
+   page 1 : complété après la relecture 3 (§5). La garde l'utilise pour ses deux
    lectures ; le relevé garde sa règle. Test : 11 tarifs sans total dont le
    11e est mappé, canaux sans total, total `null`, total en texte → 409.
 3. Le double du partenaire lit l'URL (`new URL`), aiguille par route, refuse
@@ -268,7 +269,191 @@ autres correctifs ne font que refuser davantage.
 5. Une échéance commune aux deux lectures (`maintenant: debut`). Le DELETE
    reste sans borne, comme avant le lot.
 
-## 5. Restes, hors de ce lot
+## 5. Relecture 3, la dernière (24 novembre 2026) — rapport recopié tel quel
+
+Accordée par Thierry le 24 novembre 2026, par exception, dans la fenêtre du
+chef de file : limitée au diff du correctif de sécurité de la relecture 2 ; ce
+qu'elle trouve se corrige sans nouvelle relecture. Agent distinct, lecture
+seule. Arbre `/home/claude/hotesmart-fixgarde`, branche
+`fix-garde-suppression-bien`, plage
+`c5cfdf2510bf2ff76b265675a8ff5e48e7615363..e0c94447914c22247069c1e8e83cce27c49d527e`.
+Trace sur disque : `/home/claude/revues/fix-garde-suppression-bien-relecture-3.md`.
+Numérotation : le rapport parle de la spec dans son état d'alors, où §5
+était « Restes » ; ils sont aujourd'hui en §6.
+
+# Relecture 3 (dernière, par exception) — fix-garde-suppression-bien
+
+- Arbre lu : /home/claude/hotesmart-fixgarde. Je n'ai rien lu dans un autre worktree ni dans /home/claude/hotesmart.
+- Branche : fix-garde-suppression-bien
+- SHA de tête lu (`git rev-parse HEAD`) : e0c94447914c22247069c1e8e83cce27c49d527e
+- Plage : c5cfdf2510bf2ff76b265675a8ff5e48e7615363..e0c94447914c22247069c1e8e83cce27c49d527e. Un commit, 5 fichiers :
+  - api/channel-property.js
+  - docs/specs/spec-garde-suppression-bien.md
+  - lib/canaux-du-bien.js
+  - tests/bien-neuf-nait-en-managed.test.js
+  - tests/suppression-bien-garde-serveur.test.js
+- Lus en contexte seulement, hors plage :
+  - lib/channels/channex.js (`listeComplete`, `getReservations`) ;
+  - les appelants de `lireCanauxDuPartenaire` ;
+  - la doc publique Channex « rate plans collection ».
+- Méthode :
+  - tout a été mesuré sur des copies `git archive` dans /tmp/revue3 : tête, c5cfdf25, main 5e220196, et une copie par mutation ;
+  - les bancs appellent le vrai handler, avec le double du fichier de tests de la tête ;
+  - un clone local sert aux tests qui appellent git ;
+  - `git status --short` du worktree est vide au début et à la fin.
+
+## Constat de sécurité : NON
+
+Je ne relève aucun constat au sens de la grille de la relecture 2, qui réserve SÉCURITÉ à une panne plausible d'infrastructure.
+
+Le constat 1 ci-dessous mène pourtant à la même issue : 200, 19 purges, DELETE parti. Il le fait sur une anomalie de format du partenaire, la même classe que le constat 2 de la relecture 2, qui avait été classé « défaut latent ». Le chef de file peut le reclasser. Le correctif tient en trois lignes, éprouvées plus bas.
+
+## Les trois points
+
+### 1. Toute lecture en échec refuse — TENU, SAUF UN CAS (constat 1)
+
+Mesuré avec 58 cas sur le vrai handler. La copie de tête porte le double du fichier de tests, un `fetch` qui lève, et le cœur à relevé sain avec `canaux: []`.
+
+Chaque cas est joué sur `/channels` et sur `/rate_plans` (canal actif). Résultat : 409 `partenaire_illisible`, 0 purge, 0 DELETE, 0 GET `/properties`. Les cas :
+- 404 JSON, 404 HTML, 500 JSON, 503 HTML, 200 HTML ;
+- `ok:false` sans statut ;
+- `fetch` qui lève, en page 1 comme en page 2 ;
+- `data` absent, `null` ou objet ;
+- `meta` absent, `meta: {}` ;
+- total `null`, `"0"`, `"abc"`, `-1`, `0.5`, `false`, `[]` ;
+- flux tronqué (11 annoncés, 10 lus) ;
+- plafond de pages ;
+- délai. Au handler : canaux muets 7 s → 409 à 6010 ms ; canaux à 5,9 s puis tarifs lents → 409 à 6001 ms.
+
+Témoin : aucun canal avec `meta.total: 0` → 200.
+
+**Pas tenu** : un flux tronqué dont une page suivante porte `meta.total` à `null`, `0`, `"0"`, `""`, `false`, `-1` ou `10`. Cela fait 14 cas sur 14 en 200, avec 19 purges et un DELETE parti. Détail au constat 1.
+
+Aucun GET `/properties/<clé>` ne subsiste :
+- `grep` : il ne reste sur ce chemin que PUT `:927` et DELETE `:77`, `:1237` ;
+- `siLaProprieteADisparu` est absente du dépôt hors docs ;
+- et 0 GET `/properties` sur les 58 cas.
+
+### 2. `totalExige = false` ne change rien pour le relevé — TENU
+
+- Il y a un seul autre appelant dans tout le dépôt : `lib/canaux-du-bien.js:500` (`rafraichirCanauxDuCompte`, appelé par le cron et par l'actualisation). Il ne passe ni `chemin` ni `totalExige`.
+- Entre main et la tête, le diff de `lib/canaux-du-bien.js` se limite à l'en-tête, à `joint` et au bloc `brut`/`totalExige`. L'expression `Number(r.json && r.json.meta && r.json.meta.total)` est conservée à l'identique.
+- Mesuré : un banc appelle `lireCanauxDuPartenaire` par défaut, `delaiMs: 30`, sur main, c5cfdf25 et la tête, avec 20 scénarios. Résultat et URL sont comparés au caractère : **0 écart sur 20**. Les scénarios :
+  - page courte sans total, page pleine sans total puis courte ;
+  - total `null` (liste vide ou non), total `"2"`, `"abc"`, `-1`, `1.5` ;
+  - cas 4 (25 par 10), flux tronqué, tronqué avec total `null` en page 2 ;
+  - plafond, 502, `ok:false` sans statut, `undefined`, sans `data`, `data` objet, rejet, délai.
+- Première URL partout : `GET /channels?pagination[page]=1&pagination[limit]=50`.
+- Les tests du relevé (canaux-du-bien, canaux-ecran, canaux-bouton-actualiser, cron-taches, logements-liste-dom, prestataires-canaux-dom), identiques à main : 148/148.
+
+### 3. L'échéance commune ne laisse rien partir après l'échéance — TENU
+
+Mesuré en appelant `canauxActifsDuBien` avec un `fetch` lent injecté :
+- A — `/channels` muet 7 s → `null` à 6007 ms. `/rate_plans` n'est jamais lancé.
+- B — `/channels` à 5,9 s, puis `/rate_plans` à 500 ms → `null` à 6001 ms. Le second appel est lancé à 5904 ms, avant l'échéance, et coupé à l'échéance.
+- C — l'horloge franchit l'échéance pendant `/channels` (+7 s), réponse valide → `null` en 1 ms, **aucun appel `/rate_plans`**.
+- D — même saut pendant la page 1 d'une liste de 11 → `null`, **la page 2 n'est pas lancée**.
+- E — page 1 à 5,9 s, page 2 lente → `null` à 6001 ms.
+- Témoin F, rapide → `['airbnb']`.
+
+Contre-épreuve sur c5cfdf25, où chaque lecture avait sa propre échéance :
+- B rend `['airbnb']` à 6406 ms ;
+- C lance `/rate_plans` et rend `['airbnb']`.
+
+Le banc discrimine donc bien l'avant et l'après.
+
+## Constats
+
+1. **DÉFAUT (latent, à la frontière de la sécurité) — un total en page 2 ou suivante écrase le total retenu, et un flux tronqué passe pour complet.** `lib/canaux-du-bien.js:179-187`, appelé par `api/channel-property.js:183`.
+   - Ce qui se passe :
+     - le contrôle `totalExige` ne regarde que `page === 1` ;
+     - aux pages suivantes, `Number(brut)` réécrit `totalAnnonce` dès que la valeur est finie. C'est exactement la coercition que le commentaire du correctif dénonce (« `Number(null)` vaut 0 ») ;
+     - avec 11 annoncés, 10 lus, puis une page 2 vide qui porte `meta.total: null`, on obtient `totalAnnonce = 0`, puis `10 >= 0`, et la lecture rend `ok: true` avec 10 éléments.
+   - Établi par mesure, au handler. Les 14 cas (7 valeurs de total en page 2, chacune sur `/channels` et sur `/rate_plans`) rendent 200, 19 purges, DELETE parti. Les 7 valeurs : `null`, `0`, `"0"`, `""`, `false`, `-1`, `10`. Dans le cas des tarifs, le canal actif mappe le 11e tarif, jamais lu.
+   - Ce défaut existait déjà à c5cfdf25 (même banc, mêmes 14 × 200). Il n'est donc pas introduit par e0c94447. Mais :
+     - le correctif annonce fermer la classe « total null » ;
+     - le point 1 demandé exige qu'aucun flux tronqué ne laisse partir de DELETE ;
+     - et la ligne touchée est celle du diff.
+   - Ce qui le rend latent : la doc Channex montre `meta {page, total, limit}` dans la liste des rate plans (https://docs.channex.io/api-v.1-documentation/rate-plans-collection). Il faut donc une réponse anormale du partenaire.
+   - Hors plage, pour le registre : le relevé de main a la même réécriture. Mesuré au banc du point 2, il rend `ok: true` sur 10/11. Les deux lignes de la garde, cœur et direct, tombent donc devant la même anomalie. L'écriture de `disparu_le` qui suit, je l'ai lue, pas mesurée.
+   - Correction proposée, éprouvée dans une copie : insérer avant `const t = Number(brut)` les lignes suivantes.
+     ```js
+     if (totalExige && page > 1 && brut !== undefined && brut !== totalAnnonce) {
+       return { ok: false, motif: 'tronquee', http: 200, canaux: [] }
+     }
+     ```
+     Résultats dans la copie :
+     - banc 1 : 58/58 refusés, dont les 14 ;
+     - lot : 201/201 ;
+     - relevé : 0 écart sur 20 au banc du point 2, puisque `totalExige` vaut faux pour lui.
+   - Test à ajouter : 11 tarifs annoncés, 10 lus, page 2 `{ data: [], meta: { total: null } }`, le canal mappant le 11e → 409. Même cas pour les canaux.
+
+2. **Mineur (tests) — trois règles du correctif ne sont gardées par aucun test, et un sous-cas passe pour une autre raison que la sienne.** Les fichiers : `tests/suppression-bien-garde-serveur.test.js:966-986` et `:988-1009` ; `lib/canaux-du-bien.js:136`, `:184` ; `api/channel-property.js:182-183`.
+   - Mesuré par mutations : lot de 4 fichiers, 201 tests, sur copie. **Restent vertes (201/201)** :
+     - M7 : échéance propre à chaque lecture (`maintenant: debut` retiré) ;
+     - M5 : total négatif accepté en page 1 ;
+     - M6 : total flottant accepté ;
+     - M12 : `totalExige = true` par défaut. Aucun test du relevé ne sert une page sans total, donc l'invariant du point 2 n'est figé par rien.
+   - **Attrapées** :
+     - M1 et M2 : jointure `?` toujours, ou `&` toujours ;
+     - M3 : garde sans `totalExige` ;
+     - M4 : contrôle retiré ;
+     - M8 et M9 : échec → `[]` ;
+     - M10 : contrôle en page 2 seulement ;
+     - M11 : `sans_total` rend `ok: true`.
+   - Le sous-cas « tarifs au total en texte » (`:978`, `total: '2'`, `data: []`) est refusé **même sans `totalExige`**, avec le motif `tronquee` (mesuré). Il ne prouve donc pas sa règle.
+   - Correction proposée :
+     - `total: '0'` avec `data: []` pour le texte ;
+     - `total: -1` avec `data: []`, puis `total: 0.5` avec `data: [{ id: 'AUTRE' }]` ;
+     - un test du relevé : page courte sans total, puis total `null`, rendus `ok: true` ;
+     - un test d'échéance par saut d'horloge, la forme C du point 3, qui s'exécute en 1 ms.
+
+3. **Mineur (commentaires) — l'en-tête du double décrit encore l'appel retiré.** `tests/suppression-bien-garde-serveur.test.js:159-171` dit « QUATRE appels », « sur une lecture en echec `GET /properties/...` » et « `monde.proprietePartenaire` ». Le double lève désormais sur tout GET inconnu. Établi par lecture. Correction : trois appels, et retirer la ligne `proprietePartenaire`.
+
+## Ce qui tient (vérifié)
+
+- Le double du partenaire ne fabrique pas de faux vert sur les tests du correctif :
+  - un GET inconnu lève, ce qui mène au refus. Mais la trace est posée avant la levée, et le test du 404 vérifie qu'aucun `/properties` n'est parti ;
+  - le total ajouté d'office ne vaut que pour un corps fixe sans `meta`. Les tests « sans total » posent `meta: {}` ou une fonction ;
+  - la seule faiblesse est le sous-cas du constat 2.
+- Contre-épreuve : les tests de la tête sur le code de c5cfdf25 donnent 3 rouges sur 45. Ce sont la forme (`bien-neuf`), le test du 404 et le test du total. Le test des URL reste vert à c5cfdf25, c'est attendu : il garde la jointure, et M1 et M2 le font rougir.
+- Horloge décalée sur garde, bien-neuf, canaux-du-bien et logement-lecture : `JOURS` = 4, 30, 60, 200, 400 et `HEURES` = 1, 13, 23, 49. Résultat : 201/201 à chaque palier.
+- Suite complète sur la copie de tête : 9360 tests, 9357 verts. Les 3 rouges sont les tests qui appellent git (`reponse-partenaire-execution` ×2, `v2-marche-aucune-ecriture-calendrier`) ; ils passent à 16/16 dans un clone local.
+- La spec §4 (« Ce qui en est fait ») et §5 est conforme au code, à deux réserves :
+  - le point 2 ne dit pas que le contrôle s'arrête à la page 1 (constat 1) ;
+  - le point 5 n'a pas de test (constat 2).
+
+Rapport écrit dans /home/claude/revues/fix-garde-suppression-bien-relecture-3.md
+
+### Ce qui en est fait
+
+Les trois points du chef de file sont tenus ; aucun constat de sécurité.
+Tout est corrigé, sans nouvelle relecture.
+
+1. `lireCanauxDuPartenaire`, sous `totalExige` : un total présent en page 2
+   ou au-delà et différent de celui de la page 1 rend `tronquee`, AVANT que
+   `Number(brut)` ne remplace le total retenu. Test : 11 annoncés, 10 lus,
+   page 2 vide au total `null`, `0`, `'0'`, `''`, `false`, `-1` ou `10`, sur
+   les tarifs (le canal mappe le 11e) et sur les canaux → 409 ; témoin, même
+   total répété en page 2 → 200.
+2. Tests ajoutés pour les règles que rien ne gardait : total en texte (`'0'`),
+   négatif (`-1`), flottant (`0.5`), chacun ACCEPTÉ sans la règle du total
+   entier ; le relevé du compte garde « page courte sans total = fin de
+   liste » (rougit si `totalExige` devient vrai par défaut) ; l'échéance
+   commune, par un saut d'horloge pendant la lecture des canaux (aucune
+   lecture des tarifs ne part). ⚠ Ce dernier test passait d'abord pour une
+   autre raison — sa réponse n'annonçait pas de total, donc la lecture
+   échouait sur `sans_total` ; c'est la mutation « une échéance par lecture »,
+   restée verte, qui l'a montré. Corrigé.
+
+Mesures : suite complète 9363/9363 ; fichiers du lot verts à J+4, 60, 400 ×
+H+0, 23 ; contre-épreuve contre `e0c94447` : le test du total changé rougit ;
+mutations « une échéance par lecture », « total négatif », « total
+flottant », « total en texte », « `totalExige` vrai par défaut », « total
+changé accepté » : toutes attrapées.
+3. L'en-tête du double décrit trois appels, plus de `GET /properties`.
+
+## 6. Restes, hors de ce lot
 
 - **Une propriété déjà effacée chez le partenaire reste insupprimable ici**
   (constat 2 de la relecture 1, rouvert par le retrait). Toute lecture en
@@ -289,3 +474,8 @@ autres correctifs ne font que refuser davantage.
 - Un canal actif dont le partenaire ne donnerait jamais la liste des mappings
   refuserait la suppression en permanence (`partenaire_illisible`). Choix
   prudent, non observé.
+- **Le relevé du compte remplace lui aussi son total en page 2** (relecture 3,
+  constat 1, hors plage, mesuré : `ok: true` sur 10 lus pour 11 annoncés).
+  Une réponse anormale du partenaire y écrirait des disparitions — qui
+  attendent confirmation, d'où le choix de ne pas le changer dans ce lot.
+  À traiter avec le prochain lot qui touche `lib/canaux-du-bien.js`.

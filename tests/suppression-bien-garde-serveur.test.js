@@ -156,11 +156,12 @@ Module._load = function (demande) {
   return origine.apply(this, arguments)
 }
 
-// Le partenaire. QUATRE appels distincts, et il a fallu les separer : le
+// Le partenaire. TROIS appels distincts, et il a fallu les separer : le
 // croisement en direct fait `GET /channels?filter[property_id]=...`, puis
 // `GET /rate_plans?filter[property_id]=...` (relecture du 23 novembre 2026 :
-// un canal ne vend CE bien que s'il mappe un de SES tarifs), et sur une lecture
-// en echec `GET /properties/...` ; la suppression fait `DELETE /properties/...`.
+// un canal ne vend CE bien que s'il mappe un de SES tarifs) ; la suppression
+// fait `DELETE /properties/...`. Plus aucun `GET /properties/...` : un 404 n'y
+// prouvait rien (relecture 2), et le double LEVE sur une lecture inconnue.
 // Repondre la meme chose a tous faisait echouer le croisement des qu'on
 // simulait un refus de suppression, donc deux tests mesuraient autre chose que
 // leur titre.
@@ -168,7 +169,6 @@ Module._load = function (demande) {
 //     une FONCTION recoit le numero de page ;
 //   · `monde.tarifsPartenaire`    : ce que le GET /rate_plans rend (defaut : les
 //     deux plans du bien, base et derive) ;
-//   · `monde.proprietePartenaire` : ce que le GET /properties rend (defaut : 200) ;
 //   · `monde.partenaire`          : ce que le DELETE /properties rend.
 //   ⚠ Le TOTAL est annonce comme le fait le partenaire (`meta.total` = taille
 //   de la liste) quand le corps ne porte pas de `meta` : la garde l'exige
@@ -975,7 +975,12 @@ test('LE TEST QUI COMPTE : une liste dont le partenaire n annonce pas le TOTAL r
     ['tarifs sans total, le 11e est mappe', { canauxVivants: canalVivant('airbnb', [{ rate_plan_id: 'PLAN-ONZIEME' }]), tarifsPartenaire: onze }],
     ['canaux sans total', { canauxVivants: { status: 200, body: { data: [], meta: {} } } }],
     ['canaux au total null', { canauxVivants: { status: 200, body: { data: [], meta: { total: null } } } }],
-    ['tarifs au total en texte', { canauxVivants: canalVivant('airbnb'), tarifsPartenaire: { status: 200, body: { data: [], meta: { total: '2' } } } }]
+    // ⚠ Chaque sous-cas doit être ACCEPTÉ sans la règle du total entier
+    // (constat 2 de la relecture 3 : « total: '2' » avec une liste vide était
+    // refusé en `tronquee`, donc pour une autre raison que la sienne).
+    ['tarifs au total en texte', { canauxVivants: canalVivant('airbnb'), tarifsPartenaire: { status: 200, body: { data: [], meta: { total: '0' } } } }],
+    ['tarifs au total négatif', { canauxVivants: canalVivant('airbnb'), tarifsPartenaire: { status: 200, body: { data: [], meta: { total: -1 } } } }],
+    ['tarifs au total flottant', { canauxVivants: canalVivant('airbnb'), tarifsPartenaire: { status: 200, body: { data: [{ id: 'AUTRE' }], meta: { total: 0.5 } } } }]
   ]) {
     poser({ canaux: [], ...etat })
     const r = await appeler()
@@ -983,6 +988,69 @@ test('LE TEST QUI COMPTE : une liste dont le partenaire n annonce pas le TOTAL r
     assert.equal(r.corps.motif, 'partenaire_illisible', nom)
     assert.deepEqual(trace.deletes, [], nom)
   }
+})
+
+test('LE TEST QUI COMPTE : un total qui CHANGE en page 2 est un flux tronqué — canaux comme tarifs', async () => {
+  // ⚠ CONSTAT 1 de la relecture 3. 11 annoncés, 10 lus, une page 2 vide qui
+  // porte un autre total : `Number(null)` = 0 faisait de la liste tronquée une
+  // liste complète. Mesure : 200, 19 purges, et le canal mappait le 11e tarif.
+  const tronque = (element, totalPage2) => (page) => ({ status: 200, body: page === 1
+    ? { data: Array.from({ length: 10 }, (_, k) => element(k)), meta: { total: 11 } }
+    : { data: [], meta: { total: totalPage2 } } })
+  const inactif = (k) => ({ id: `ch-${k}`, attributes: { is_active: false, channel: 'airbnb', rate_plans: [] } })
+  for (const total of [null, 0, '0', '', false, -1, 10]) {
+    for (const [nom, etat] of [
+      ['tarifs', { canauxVivants: canalVivant('airbnb', [{ rate_plan_id: 'PLAN-ONZIEME' }]), tarifsPartenaire: tronque((k) => ({ id: `PLAN-${k}` }), total) }],
+      ['canaux', { canauxVivants: tronque(inactif, total) }]
+    ]) {
+      poser({ canaux: [], ...etat })
+      const r = await appeler()
+      assert.equal(r.code, 409, `${nom}, total page 2 = ${JSON.stringify(total)} : ${r.code}`)
+      assert.equal(r.corps.motif, 'partenaire_illisible')
+      assert.deepEqual(trace.deletes, [])
+      assert.ok(!trace.fetchs.some(f => f.startsWith('DELETE')))
+    }
+  }
+  // Témoin : le même total répété en page 2 n'est pas un changement.
+  poser({ canaux: [], canauxVivants: (page) => ({ status: 200, body: page === 1
+    ? { data: Array.from({ length: 10 }, (_, k) => inactif(k)), meta: { total: 11 } }
+    : { data: [inactif(10)], meta: { total: 11 } } }) })
+  const k = await appeler()
+  assert.equal(k.code, 200, `${k.code} ${JSON.stringify(k.corps)}`)
+})
+
+test('le RELEVÉ du compte garde sa règle : une page courte sans total vaut fin de liste', async () => {
+  // ⚠ Constat 2 de la relecture 3 : rendre `totalExige` vrai par défaut
+  // laissait toute la suite verte. Le relevé n'exige pas le total — une
+  // disparition y attend confirmation, une suppression non.
+  const { lireCanauxDuPartenaire } = require('../lib/canaux-du-bien')
+  const pages = { 1: { data: [{ id: 'c1' }] } }
+  const r = await lireCanauxDuPartenaire({ appel: async (m, c) => ({ ok: true, status: 200, json: pages[Number(c.match(/page\]=(\d+)/)[1])] || { data: [] } }) })
+  assert.equal(r.ok, true, r.motif)
+  assert.deepEqual(r.canaux.map(c => c.id), ['c1'])
+  const pleine = { data: Array.from({ length: 50 }, (_, k) => ({ id: `c${k}` })) }
+  const r2 = await lireCanauxDuPartenaire({ appel: async (m, c) => ({ ok: true, status: 200,
+    json: /page\]=1&/.test(c) ? pleine : { data: [{ id: 'dernier' }], meta: { total: null } } }) })
+  assert.equal(r2.ok, true, r2.motif)
+  assert.equal(r2.canaux.length, 51)
+})
+
+test('L ÉCHÉANCE EST COMMUNE : une lecture des canaux qui la consomme ne laisse partir AUCUNE lecture des tarifs', async () => {
+  // ⚠ Constat 2 de la relecture 3 : une échéance par lecture laissait la suite
+  // verte. L'horloge saute l'échéance pendant la lecture des canaux.
+  const vrai = Date.now
+  // La réponse porte son total (une fonction n'en reçoit pas d'office) : sans
+  // lui, la lecture échouait sur `sans_total` et le test passait pour une
+  // autre raison que la sienne — mesuré, la mutation « une échéance par
+  // lecture » restait verte.
+  const avecTotal = { status: 200, body: { ...canalVivant('airbnb').body, meta: { total: 1 } } }
+  poser({ canaux: [], canauxVivants: () => { const saut = vrai.call(Date) + 7000; Date.now = () => saut; return avecTotal } })
+  trace.fetchs.length = 0
+  let lu
+  try { lu = await handler.canauxActifsDuBien(monde.bien) } finally { Date.now = vrai }
+  assert.equal(lu, null, 'l échéance dépassée refuse')
+  assert.ok(trace.fetchs.some(f => f.includes('/channels')), 'la lecture des canaux a bien eu lieu')
+  assert.ok(!trace.fetchs.some(f => f.includes('/rate_plans')), `une lecture des tarifs est partie après l échéance : ${trace.fetchs.join(' | ')}`)
 })
 
 test('les URL lues chez le partenaire : le releve inchange, la garde filtre PUIS pagine', async () => {

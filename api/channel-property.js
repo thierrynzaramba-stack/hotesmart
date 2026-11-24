@@ -191,7 +191,7 @@ async function canauxActifsDuBien (prop) {
     // DELETE parti, propriete toujours chez le partenaire avec ses canaux. Ce
     // correctif est RETIRE, pas rafistole : une propriete deja effacee chez le
     // partenaire reste insupprimable ici, et c'est une dette du registre
-    // (docs/specs/spec-garde-suppression-bien.md §5), pas un trou de la garde.
+    // (docs/specs/spec-garde-suppression-bien.md §6), pas un trou de la garde.
     if (!canaux.ok) return null
     const rows = canaux.canaux
     // ⚠ UNE ENTREE QUI N'EST PAS UN CANAL N'EST PAS « UN CANAL INACTIF »
