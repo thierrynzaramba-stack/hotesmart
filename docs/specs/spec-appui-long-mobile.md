@@ -102,11 +102,16 @@ ne s'ajoutait pas** à la sélection. Mesuré sur un écran de 387 × 797 :
 
 Correction, au téléphone seulement :
 
-- **au doigt** (`pointer: coarse`), la barre tient sur **une ligne de
-  boutons** qu'on fait défiler du doigt, le compte et « Annuler » en tête, la
-  note dessous : **238 → 92 px** sur un bien non piloté, mesuré dans le même
-  écran ; la note YieldFlow d'un bien piloté ajoute deux à trois lignes
-  (~140-150 px). À la souris dans une fenêtre étroite, les boutons passent
+- **au doigt** (`pointer: coarse`), la barre tient sur **une rangée de cinq
+  boutons en colonnes égales**, l'icône au-dessus d'un libellé court, comme une
+  barre d'onglets ; le compte et « Annuler » en tête, la note dessous :
+  **238 → 112 px** sur un bien non piloté, mesuré à 360, 387 et 412 px de
+  large, rien ne déborde ; la note YieldFlow d'un bien piloté ajoute deux à
+  trois lignes. ⚠ Une première version mettait les boutons sur une ligne qu'on
+  faisait défiler du doigt (92 px) : à la recette du 24 novembre, sur
+  l'Android de Thierry, **la ligne ne défilait pas**, et « Réservation » et
+  « Plus… » restaient hors d'atteinte. Aucun bouton ne dépend plus d'un
+  défilement. À la souris dans une fenêtre étroite, les boutons passent
   toujours à la ligne : une ligne à faire défiler n'y a pas de poignée, et
   « Plus… » est le seul chemin vers la fiche du jour sans appui long ;
 - la page **ne défile plus** si la date **tapée** est visible — au moins la
@@ -170,6 +175,7 @@ versions fautives du correctif :
 | tête d'avant les suites de la seconde review (`46450a01`) | 19, 20 et 21 | la souris garde le retour à la ligne, la date tapée, la tolérance |
 | 9 : viser le premier jour de la sélection | 20 | la date tapée reste à l'écran après un défilement |
 | 10 : visibilité stricte (case entière) | 21 | une case à peine rognée ne fait pas bouger le mois |
+| tête d'avant la rangée de colonnes (`8ffcc88f`) | 19 | aucun bouton ne dépend d'un défilement |
 
 Le test 5 est un test de **non-régression** : il était déjà juste sur `main`.
 Il rougit contre la version 3, et c'est cette régression qu'il garde.
@@ -204,4 +210,5 @@ Sur `staging`, une fois la branche mergée par le chef de file :
    en faisant défiler le mois entre les deux appuis.
 9. Sur **« Recette — Loft Pilotable »** (piloté par YieldFlow, sa barre porte
    la note) : refaire l'essai 8.
-10. Dans la barre, faire défiler les boutons du doigt jusqu'à « Plus… ».
+10. Dans la barre, les cinq boutons sont visibles sans rien faire défiler ;
+    toucher « Plus… » ouvre la fiche « Configurer les dates ».
