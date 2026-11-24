@@ -106,6 +106,45 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   passage qui a fini en rejeu est lue par le cron quotidien, pas à
   l'arrivée.
 
+## Lot 5 bis — la facture d'un logement sans entité (spec §14.25)
+
+- **Une facture sans entité est celle d'un logement qui n'en a pas, et ne
+  l'est que tant qu'il n'en a pas** (Thierry, 23 et 24 novembre 2026). Une
+  charge générale (sans logement) a toujours son entité ; un crédit aussi.
+- **Les factures suivent le logement** : un rattachement (premier, ou
+  changement d'entité) passe toutes ses factures SANS entité à la nouvelle,
+  quel que soit leur statut — déclencheur `biens_entites_factures_trg`, en
+  base, pas dans le writer des rattachements. Celles qui ont une entité ne
+  bougent pas ; un détachement ne touche rien.
+- **La base le garantit pour les validées** (`charges_sans_entite_trg`,
+  23514), et la course validation / rattachement est fermée par le verrou de
+  compte, pris AVANT de lire le lien. Pas de `check` : la suppression d'un
+  logement (`on delete set null`) doit passer.
+- **`p_entite` NULL veut dire « sans entité »** dans `charges_totaux`,
+  `charges_exercices_bornes` et `charges_detail_mois` : sans entité, AVEC un
+  logement, et ce logement sans ligne `biens_entites` (Thierry, 25 novembre
+  2026). Une facture générale dont l'entité n'est pas reconnue reste dans
+  « À traiter », hors totaux. L'ancien « toutes les entités » est abandonné ;
+  **la migration passe donc AVANT le code**, sinon la vue « Sans entité »
+  afficherait en silence le total de tout le compte. Côté code, c'est
+  `'sans'` (`SANS_ENTITE`), traduit en NULL au seul appel ; une entité absente
+  est refusée.
+- **Le déplacement verrouille les LIGNES, puis le compte** : l'ordre de toute
+  écriture sur `charges`. L'inverse interblocait (review 1, M1, mesuré).
+- **« Sans entité juridique »** : une option du choix d'entité, proposée quand
+  le résumé porte une facture comptée sans entité ; l'année civile, son
+  rappel en tête, son export, aucun crédit. Un compte sans entité ouvre
+  dessus.
+- **Un logement rattaché à une entité ARCHIVÉE n'est pas « sans entité »** :
+  sa facture ne se valide ni sans entité (`entite_requise`) ni avec l'entité
+  archivée ; on rattache le logement à une entité active, et ses factures sans
+  entité suivent. ⚠ La page n'affiche AUCUN rappel dans ce cas (dette 5 bis-2,
+  comportement d'avant le lot).
+- **Dettes du lot 5 bis** : 5 bis-1, une facture validée sans entité dont le
+  logement est SUPPRIMÉ sort des totaux et de l'export (la suppression d'un
+  logement est rare, l'archivage est le chemin normal) ; 5 bis-2, aucun rappel
+  pour la facture d'un logement rattaché à une entité archivée.
+
 - **Un export ne sort jamais incomplet sans le dire** (lot 8d) : un fichier
   qui ne vient pas après trois essais, chacun avec une adresse neuve, arrête
   l'export, aucun ZIP n'est proposé, et la fenêtre nomme la facture.

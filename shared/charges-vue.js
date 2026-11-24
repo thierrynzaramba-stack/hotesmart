@@ -140,6 +140,11 @@ export const TYPES_DOCUMENT = ['facture', 'regularisation', 'avoir', 'echeancier
 // 50 fichiers d'un coup au plus (décision de Thierry, 22 novembre 2026).
 export const MAX_FICHIERS = 50
 
+// « Sans entité juridique » (lot 5 bis, §14.25) : le nom que le serveur
+// comprend partout où il attend une entité (`entite=sans`). Dans la fiche
+// d'une facture, il devient une entité VIDE à l'envoi.
+export const SANS_ENTITE = 'sans'
+
 /**
  * La période saisie, contrôlée comme le serveur (`periodeSaisie`) : les deux
  * bornes ou aucune, dans l'ordre, trois ans (1 097 jours) au plus — la borne
@@ -325,11 +330,15 @@ export function monter (racine, deps) {
     : t('charges.exercice_decale', { debut: annee, fin: String(Number(annee) + 1) }))
   // ⚠ L'ENTITÉ SE CHOISIT EN TÊTE DE PAGE (retour de recette du lot 8a) :
   // tout ce qui suit en dépend — totaux, mois, crédits, factures.
+  // Lot 5 bis (§14.25) : « Sans entité juridique », en dernier, quand le
+  // serveur dit qu'il y a de quoi l'afficher.
   function peindreEntite () {
     const z = $('[data-bind="entite"]')
     if (!z) return
-    if (!etat.entites.length) { z.innerHTML = ''; return }
+    const sans = etat.optionSansEntite || etat.entite === SANS_ENTITE
+    if (!etat.entites.length && !sans) { z.innerHTML = ''; return }
     const ents = etat.entites.map(e => `<option value="${esc(e.id)}"${String(e.id) === etat.entite ? ' selected' : ''}>${esc(nomEntite(e))}</option>`).join('')
+      + (sans ? `<option value="${SANS_ENTITE}"${etat.entite === SANS_ENTITE ? ' selected' : ''}>${esc(t('charges.sans_entite_choix'))}</option>` : '')
     z.innerHTML = `<select class="chg-select" data-choix="entite" aria-label="${esc(t('charges.entite_aria'))}">${ents}</select>`
   }
   function selecteurExercice () {
@@ -562,10 +571,15 @@ export function monter (racine, deps) {
     } else if (!tot) {
       corps = `<p class="muted">${esc(t('charges.totaux_indispo'))}</p>`
     } else {
+      // Lot 5 bis (§14.25) : « Sans entité juridique » porte son rappel EN TÊTE
+      // — ces factures attendent que leur logement soit rattaché.
+      const rappelSans = tot.entite === SANS_ENTITE
+        ? `<div class="chg-alerte" data-bind="rappel-sans-entite"><p>${esc(t('charges.sans_entite_rappel'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>`
+        : ''
       // Lot 8d : « Télécharger l'exercice », l'exercice et l'entité affichés.
-      const bornes = `<div class="chg-choix">${selecteurExercice()}<p class="chg-mentions">${esc(t('charges.du_au', { debut: jourLisible(tot.debut), fin: jourLisible(tot.fin) }))}</p>`
+      const bornes = rappelSans + `<div class="chg-choix">${selecteurExercice()}<p class="chg-mentions">${esc(t('charges.du_au', { debut: jourLisible(tot.debut), fin: jourLisible(tot.fin) }))}</p>`
         + `<button type="button" class="btn btn--secondary chg-exporter" data-geste="exporter">${esc(t('charges.exporter'))}</button></div>`
-        + (tot.standard ? `<p class="chg-mentions">${esc(t('charges.exercice_standard'))}</p>` : '')
+        + (tot.standard && tot.entite !== SANS_ENTITE ? `<p class="chg-mentions">${esc(t('charges.exercice_standard'))}</p>` : '')
         + (tot.exercices_indisponibles ? `<p class="chg-mentions">${esc(t('charges.exercices_indispo'))}</p>` : '')
       const s = tot.total || {}
       // ⚠ « ESTIMATION », ET LES TROIS RAISONS DE LA SPEC (§6, Q4) : une
@@ -621,7 +635,9 @@ export function monter (racine, deps) {
     const z = $('[data-bind="liste"]')
     // « Factures de <entité> » : la liste suit l'entité choisie (§14.21).
     const ent = etat.entites.find(e => String(e.id) === etat.entite)
-    const tete = `<div class="chg-bloc__tete"><h2 class="chg-h2">${esc(ent ? t('charges.factures_de', { entite: ent.nom }) : t('charges.toutes'))}</h2></div>`
+    const titre = etat.entite === SANS_ENTITE ? t('charges.factures_sans_entite')
+      : ent ? t('charges.factures_de', { entite: ent.nom }) : t('charges.toutes')
+    const tete = `<div class="chg-bloc__tete"><h2 class="chg-h2">${esc(titre)}</h2></div>`
     z.innerHTML = tete + (etat.liste.length
       ? `<ul class="chg-lignes chg-lignes--liste chg-lignes--fines">${etat.liste.map(c => ligne(c, false)).join('')}</ul>`
       : `<p class="muted">${esc(t('charges.liste_vide'))}</p>`)
@@ -785,6 +801,7 @@ export function monter (racine, deps) {
     etat.liste = (d && d.liste && d.liste.lignes) || []
     etat.suite = (d && d.liste && d.liste.suite) || null
     etat.entites = (d && d.entites) || []
+    etat.optionSansEntite = Boolean(d && d.option_sans_entite)
     etat.biens = (d && d.biens) || []
     etat.biensArchives = (d && d.biens_archives) || []
     etat.categories = (d && d.categories) || []
@@ -880,13 +897,20 @@ export function monter (racine, deps) {
 
   const entitesActives = () => etat.entites.filter(e => !e.archivee)
 
+  // Lot 5 bis (§14.25) : les logements ACTIFS qui n'ont pas d'entité.
+  const biensSansEntite = () => (etat.biens || []).filter(b => !b.entite_id)
+  const bienDe = (id) => [...(etat.biens || []), ...(etat.biensArchives || [])].find(x => String(x.id) === String(id))
+
+  // « Sans entité juridique » propose les logements QUI N'EN ONT PAS, et un
+  // logement y est obligatoire : une charge générale a toujours son entité.
   function optionsBiens (entiteId, actuel) {
-    const proposes = (etat.biens || []).filter(b => entiteId && String(b.entite_id) === String(entiteId))
+    const sans = entiteId === SANS_ENTITE
+    const proposes = (etat.biens || []).filter(b => (sans ? !b.entite_id : (entiteId && String(b.entite_id) === String(entiteId))))
     // Le logement que la facture porte déjà reste proposé, même archivé ou
     // passé à une autre entité : une facture validée garde son rattachement.
     const garde = actuel && !proposes.some(b => String(b.id) === String(actuel))
       ? [{ id: actuel, nom: nomBien(actuel) || actuel }] : []
-    return `<option value="">${esc(t('charges.aucun_bien'))}</option>`
+    return `<option value="">${esc(t(sans ? 'charges.choisir' : 'charges.aucun_bien'))}</option>`
       + [...proposes, ...garde].map(b => `<option value="${esc(b.id)}"${String(b.id) === String(actuel || '') ? ' selected' : ''}>${esc(b.nom)}</option>`).join('')
   }
 
@@ -965,13 +989,25 @@ export function monter (racine, deps) {
     const credit = c.origine === 'credit'
     const fige = ota || credit ? ' disabled' : ''
     const actives = entitesActives()
-    // L'entité de la facture : celle qu'elle porte (même archivée), sinon la
-    // seule entité active s'il n'y en a qu'une.
-    const entiteChoisie = c.entite_juridique_id || (actives.length === 1 ? actives[0].id : '')
+    // Lot 5 bis (§14.25) : « Sans entité juridique » est proposé quand un
+    // logement actif n'a pas d'entité, ou que la facture porte déjà un
+    // logement sans entité.
+    const bienPorte = c.bien_id ? bienDe(c.bien_id) : null
+    const offreSans = biensSansEntite().length > 0 || Boolean(!c.entite_juridique_id && bienPorte && !bienPorte.entite_id)
+    // L'entité proposée d'office : celle que la facture porte (même archivée) ;
+    // sinon celle de son logement ; sinon « Sans entité » si son logement n'en
+    // a pas ; sinon la seule entité active. ⚠ La seule entité active ne vaut
+    // plus pour un logement sans entité : elle serait refusée
+    // (`bien_sans_entite`).
+    const entiteChoisie = c.entite_juridique_id ? String(c.entite_juridique_id)
+      : bienPorte && bienPorte.entite_id ? String(bienPorte.entite_id)
+        : bienPorte ? SANS_ENTITE
+          : (actives.length === 1 ? String(actives[0].id) : '')
     const proposables = [...actives]
     const portee = etat.entites.find(x => String(x.id) === String(c.entite_juridique_id || ''))
     if (portee && portee.archivee) proposables.push(portee)
-    const sansEntite = !actives.length && !(c.statut === 'validee' && c.entite_juridique_id)
+    // Rien à choisir : ni entité active, ni logement sans entité.
+    const sansEntite = !actives.length && !offreSans && !(c.statut === 'validee' && c.entite_juridique_id)
 
     const autres = [...connues().values()].filter(x => racineDe(x) === racineDe(c) && x.id !== c.id)
     const blocDoublon = e === 'doublon'
@@ -1033,11 +1069,15 @@ export function monter (racine, deps) {
         + [...etat.categories, ...(c.categorie && !etat.categories.includes(c.categorie) ? [c.categorie] : [])]
           .map(k => `<option value="${esc(k)}"${k === c.categorie ? ' selected' : ''}>${esc(nomCategorie(k))}</option>`).join('') + '</select>')
       + (sansEntite ? '' : champ('entite_juridique_id', t('charges.champ_entite'), `<select data-champ="entite_juridique_id"${fige}><option value="">${esc(t('charges.choisir'))}</option>`
-        + proposables.map(x => `<option value="${esc(x.id)}"${String(x.id) === String(entiteChoisie) ? ' selected' : ''}>${esc(nomEntite(x))}</option>`).join('') + '</select>'))
+        + proposables.map(x => `<option value="${esc(x.id)}"${String(x.id) === String(entiteChoisie) ? ' selected' : ''}>${esc(nomEntite(x))}</option>`).join('')
+        + (offreSans ? `<option value="${SANS_ENTITE}"${entiteChoisie === SANS_ENTITE ? ' selected' : ''}>${esc(t('charges.sans_entite_choix'))}</option>` : '')
+        + '</select>'))
       + (sansEntite ? '' : champ('bien_id', t('charges.champ_bien'), `<select data-champ="bien_id"${fige}>${optionsBiens(entiteChoisie, c.bien_id)}</select>`, true))
       + '</form>'
       + (sansEntite ? `<div class="chg-alerte"><p>${esc(t('charges.sans_entite'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>` : '')
-      + (!sansEntite && entiteManquante(c) ? `<div class="chg-alerte"><p>${esc(t('charges.entite_manquante_aide'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>` : '')
+      // Le rappel suit le choix : il s'affiche dès que « Sans entité
+      // juridique » est choisi, pas seulement à l'ouverture (lot 5 bis).
+      + (sansEntite ? '' : `<div class="chg-alerte" data-bind="rappel-entite"${entiteChoisie === SANS_ENTITE || entiteManquante(c) ? '' : ' hidden'}><p>${esc(t('charges.entite_manquante_aide'))}</p><a class="btn btn--secondary" href="/logements">${esc(t('charges.vers_logements'))}</a></div>`)
       + (c.origine === 'email' && c.email_expediteur ? `<p class="chg-note">${esc(t('charges.recue_email_de', { de: c.email_expediteur }))}</p>` : '')
       + '<p class="chg-erreur" data-bind="fiche-retour" role="status"></p>'
       + '</div><div class="chg-fiche__pied">'
@@ -1120,6 +1160,11 @@ export function monter (racine, deps) {
     if (impot) { champs.montant_ht_cents = champs.montant_ttc_cents; champs.montant_tva_cents = 0 }
     if (!champs.categorie) return { refus: 'categorie_invalide' }
     if (!champs.entite_juridique_id) return { refus: 'entite_requise' }
+    // Lot 5 bis : « Sans entité » part VIDE, et exige son logement.
+    if (champs.entite_juridique_id === SANS_ENTITE) {
+      if (!champs.bien_id) return { refus: 'bien_requis' }
+      champs.entite_juridique_id = ''
+    }
     return { champs }
   }
 
@@ -1554,9 +1599,11 @@ export function monter (racine, deps) {
       }
       const aujourdhui = new Date()
       const jourIso = `${aujourdhui.getFullYear()}-${String(aujourdhui.getMonth() + 1).padStart(2, '0')}-${String(aujourdhui.getDate()).padStart(2, '0')}`
+      // « Sans entité juridique » n'a ni nom ni SIRET : la page écrit le sien.
+      const nomEntiteExport = x.entite.sans ? t('charges.sans_entite_choix') : x.entite.nom
       const entete = {
         titre: t('charges.export_titre', { exercice: annees }),
-        entite: x.entite.siret ? t('charges.export_entite_siret', { entite: x.entite.nom, siret: x.entite.siret }) : x.entite.nom,
+        entite: x.entite.siret ? t('charges.export_entite_siret', { entite: nomEntiteExport, siret: x.entite.siret }) : nomEntiteExport,
         du_au: t('charges.du_au', { debut: jourLisible(x.debut), fin: jourLisible(x.fin) }),
         compte: t('charges.export_compte', { n: prepare.length, date: jourLisible(jourIso) }),
         a_traiter: x.a_traiter ? t('charges.export_a_traiter', { n: x.a_traiter }) : ''
@@ -1573,7 +1620,7 @@ export function monter (racine, deps) {
         fichiers,
         date: aujourdhui
       })
-      ;(deps.sauver || sauverParDefaut)(morceaux, [simple('charges.export_nom_zip'), annees, nomSimple(x.entite.nom)].filter(Boolean).join('-') + '.zip')
+      ;(deps.sauver || sauverParDefaut)(morceaux, [simple('charges.export_nom_zip'), annees, nomSimple(nomEntiteExport)].filter(Boolean).join('-') + '.zip')
       message = t('charges.export_fin', { n: prepare.length, f: nbFichiers })
     } catch (e) {
       erreur = true
@@ -1728,7 +1775,13 @@ export function monter (racine, deps) {
     }
     if (el.dataset && el.dataset.champ === 'entite_juridique_id') {
       const b = dialogue().querySelector('[data-champ="bien_id"]')
-      if (b) b.innerHTML = optionsBiens(el.value, etat.fiche && String(etat.fiche.entite_juridique_id || '') === el.value ? etat.fiche.bien_id : null)
+      const f = etat.fiche
+      // Le logement de la facture reste choisi quand on revient à SON entité —
+      // ou à « Sans entité », si elle n'en a pas.
+      const memeEntite = f && (String(f.entite_juridique_id || '') === el.value || (el.value === SANS_ENTITE && !f.entite_juridique_id))
+      if (b) b.innerHTML = optionsBiens(el.value, memeEntite ? f.bien_id : null)
+      const r = dialogue().querySelector('[data-bind="rappel-entite"]')
+      if (r) r.hidden = el.value !== SANS_ENTITE
       return
     }
     if (el.dataset && el.dataset.bind === 'fichier') {
