@@ -58,7 +58,7 @@ function chargerShared (w, fichier, noms) {
   w.eval(`(() => {${src}\n${noms.map(n => `globalThis.${n} = ${n}`).join(';')}})()`)
 }
 
-function monter ({ regles = [], droits = 'write' } = {}) {
+function monter ({ regles = [], droits = 'write', personne = {} } = {}) {
   const dom = new JSDOM(HTML, { runScripts: 'outside-only',
                                 url: 'https://hotesmart.vercel.app/menages' })
   const w = dom.window
@@ -69,7 +69,7 @@ function monter ({ regles = [], droits = 'write' } = {}) {
 
   const fiche = {
     personne: { id: PROFIL, prenom: 'Lola', nom: 'M.', tel: null, email: null,
-                self_availability: true, vue_le: null },
+                self_availability: true, vue_le: null, ...personne },
     liaisons: [], biens: [], droits: { prestataires: droits, equipe: droits, avis: 'none' }
   }
 
@@ -305,3 +305,67 @@ test('une récurrence illisible ferme le geste, et la case revient à son état'
     'et la case cochée par le navigateur est revenue à son état — sinon l\'écran ment')
   assert.ok(ctx.appels.length >= avant)
 })
+
+// ─── PWA lot 3, étape 5 : les notifications de son téléphone ───────────────
+//
+// La fiche dit sur combien d'appareils elle reçoit les notifications, et
+// « Aucun canal actif » cesse de mentir quand un téléphone les reçoit.
+// ⚠ `null` (non lu) n'est PAS 0 : on dit « illisible », pas « pas activé ».
+
+async function ongletParam (personne) {
+  const ctx = monter({ personne: { a_un_lien: true, notify_sms: false, notify_email: false, ...personne } })
+  const c = await ouvrir(ctx)
+  c.cfg.onglet = 'param'
+  c.renderConfig()
+  await souffler(3)
+  const d = ctx.w.document
+  return {
+    push: d.querySelector('[data-push-etat]'),
+    cle: (k) => d.querySelector(`[data-i18n="menages.equipe.config.${k}"]`)
+  }
+}
+
+test('étape 5 : deux téléphones — le nombre est dit, et « Aucun canal actif » disparaît', async () => {
+  const { push, cle } = await ongletParam({ appareils: 2, appareils_en_echec: 0 })
+  assert.ok(push, 'la ligne des notifications est là')
+  const n = cle('push_n')
+  assert.ok(n, 'le nombre est dit')
+  assert.deepEqual(JSON.parse(n.dataset.i18nVars), { n: 2 })
+  assert.equal(cle('av_muet'), null, 'elle reçoit sur son téléphone : elle n\'est pas muette')
+  assert.equal(cle('push_aucun'), null)
+  assert.equal(cle('push_aide'), null, 'SMS coupé : pas de filet SMS à promettre (constat 2)')
+})
+
+test('étape 5 (constat 2) : la règle du SMS n\'est dite que si le SMS peut partir', async () => {
+  const ouvert = await ongletParam({ appareils: 1, notify_sms: true, tel: '+33600000000' })
+  assert.ok(ouvert.cle('push_aide'), 'SMS coché avec un numéro : le SMS repart pour un ménage du jour ou du lendemain (Q46)')
+  const sansNumero = await ongletParam({ appareils: 1, notify_sms: true, tel: null })
+  assert.equal(sansNumero.cle('push_aide'), null, 'sans numéro, aucun SMS ne part')
+})
+
+test('étape 5 (constat 3) : que des appareils en échec — on le dit, et « Aucun canal actif » reste', async () => {
+  const { push, cle } = await ongletParam({ appareils: 0, appareils_en_echec: 1 })
+  assert.equal(push.dataset.i18n, 'menages.equipe.config.push_echec', 'pas « pas activé » : elle les a activées')
+  assert.ok(cle('av_muet'), 'rien ne l\'atteint')
+})
+
+test('étape 5 : aucun téléphone — « pas activé », et sans SMS ni e-mail, « Aucun canal actif » reste', async () => {
+  const { push, cle } = await ongletParam({ appareils: 0 })
+  assert.equal(push.dataset.i18n, 'menages.equipe.config.push_aucun')
+  assert.equal(cle('push_aide'), null, 'pas de règle du SMS pour un téléphone qui ne reçoit rien')
+  assert.ok(cle('av_muet'))
+})
+
+test('étape 5 : non lu (`null`) — on dit « illisible », jamais « pas activé », et l\'alerte reste', async () => {
+  const { push, cle } = await ongletParam({ appareils: null })
+  assert.equal(push.dataset.i18n, 'menages.equipe.config.push_illisible')
+  assert.equal(cle('push_aucun'), null, 'une panne n\'est pas un refus')
+  assert.ok(cle('av_muet'), 'dans le doute, l\'alerte de trop plutôt que la prestataire muette qu\'on croit prévenue')
+})
+
+test('étape 5 : SMS actif avec un numéro et aucun téléphone — pas de « Aucun canal actif » (comportement d\'avant gardé)', async () => {
+  const { cle } = await ongletParam({ appareils: 0, notify_sms: true, tel: '+33600000000' })
+  assert.equal(cle('av_muet'), null)
+  assert.ok(cle('push_aucun'))
+})
+

@@ -221,7 +221,9 @@ function preparerRelance ({ menages = [], faits = [], erreurLecture = null,
                             erreurMarqueur = null,
                             // Le lien de la prestataire : son jeton, et ce que sa PAGE montre.
                             // `null` = aucun lien ; `[]` = tous les biens.
-                            jeton = 'tok-regina', perimetre = [], relanceLeve = false } = {}) {
+                            jeton = 'tok-regina', perimetre = [], relanceLeve = false,
+                            // Ce que l'envoi rend (PWA lot 3 : `push` à côté de sms/email).
+                            bilanEnvoi = { sms: true, email: false } } = {}) {
   const etat = { notifs: [], marqueurs: [], lectures: [], hote: [] }
   const client = {
     from (table) {
@@ -298,7 +300,7 @@ function preparerRelance ({ menages = [], faits = [], erreurLecture = null,
   mp.exports = {
     notifierValidationAttendue: async (o) => {
       if (relanceLeve) throw new Error('Brevo en panne')
-      etat.notifs.push(o); return { sms: true, email: false }
+      etat.notifs.push(o); return bilanEnvoi
     }
   }
   mp.loaded = true
@@ -332,6 +334,21 @@ test('relance : avant 9 h de Paris, rien ne part et rien n\'est marqué', async 
   assert.equal(bilan.differe, true)
   assert.equal(etat.notifs.length, 0)
   assert.equal(etat.marqueurs.length, 0)
+})
+
+test('relance (PWA lot 3) : prévenue par NOTIFICATION seule, elle est relancée — pas « muette »', async () => {
+  // Depuis le lot 3, le SMS ne part plus quand un téléphone a reçu la
+  // notification : un bilan { push: 1, sms: false, email: false } est un succès.
+  for (const [bilanEnvoi, relances, muettes] of [
+    [{ push: 1, sms: false, email: false }, 1, 0],
+    [{ push: 0, sms: false, email: false }, 0, 1]
+  ]) {
+    preparerRelance({ menages: [DOFFICE()], bilanEnvoi })
+    const { relancerValidations } = require('../lib/cleaning/relance-validation')
+    const bilan = await relancerValidations({}, { maintenant: A_NEUF_HEURES })
+    assert.equal(bilan.relances, relances, JSON.stringify(bilanEnvoi))
+    assert.equal(bilan.muettes, muettes, JSON.stringify(bilanEnvoi))
+  }
 })
 
 test('relance : la veille à 9 h, un ménage d\'office non validé est relancé une fois', async () => {

@@ -248,3 +248,20 @@ ${tranche('function t(')}
 ;return t`)
   return fabrique(dico, dico, lang)
 }
+
+// PWA lot 3, étape 5 (review, constat 5) : le pluriel de la fiche, rendu par le
+// VRAI traducteur dans les trois langues — un ICU mal écrit rendrait le texte
+// brut, et aucun test de la fiche ne le verrait (son double rend la clef).
+test('le nombre de téléphones de la fiche prestataire se rend au singulier et au pluriel', () => {
+  const attendus = {
+    fr: ['Reçoit les notifications sur 1 téléphone', 'Reçoit les notifications sur 2 téléphones'],
+    en: ['Gets notifications on 1 phone', 'Gets notifications on 2 phones'],
+    es: ['Recibe las notificaciones en 1 teléfono', 'Recibe las notificaciones en 2 teléfonos']
+  }
+  for (const [lang, [un, deux]] of Object.entries(attendus)) {
+    const t = traducteurReel(lang)
+    assert.strictEqual(t('menages.equipe.config.push_n', { n: 1 }), un, lang)
+    assert.strictEqual(t('menages.equipe.config.push_n', { n: 2 }), deux, lang)
+  }
+})
+
