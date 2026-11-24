@@ -122,7 +122,8 @@ function buildRatePlanOptions(basePrice, incGuests, extraFee, cap) {
   return { sell_mode: 'per_room', options: [{ occupancy: cap, rate: Math.round(basePrice * 100), is_primary: true }] }
 }
 
-// Les canaux ACTIFS d'un bien, par leur OTA. `null` = on n'a pas pu savoir.
+// Les canaux actifs QUI VENDENT ce bien — ceux qui mappent un de ses tarifs —,
+// par leur OTA. `null` = on n'a pas pu savoir.
 //
 // ⚠ `null` N'EST PAS « AUCUN ». Prendre une panne de lecture pour « ce bien
 // n'est connecte nulle part » laisserait passer le `keep` qu'on veut refuser —
@@ -155,33 +156,75 @@ async function canauxActifsDuBien (prop) {
   // meme que ce lot repare entre l'ecran et le serveur.
   const cle = proprieteChezLePartenaire(prop)
   if (!cle) return []
+  const { lireCanauxDuPartenaire } = require('../lib/canaux-du-bien')
+  const filtre = `filter[property_id]=${encodeURIComponent(cle)}`
   try {
-    // ⚠ LA LIMITE EST EXPLICITE, SINON LA GARDE DE TRONCATURE MORD TOUJOURS.
-    // Constat de la re-review : le plafond de page du partenaire est 10
-    // (mesure du 19 octobre 2026, citee dans lib/canaux-du-bien.js), donc un
-    // bien portant 12 canaux rendait `meta.total > data.length` — refus
-    // `partenaire_illisible` PERMANENT, avec un message « reessayez dans
-    // quelques minutes » qui ne changerait jamais rien. La garde etait juste ;
-    // son entree etait tronquee par construction.
-    const r = await channelCall('GET',
-      `/channels?filter[property_id]=${encodeURIComponent(cle)}&pagination[limit]=100`)
-    if (!r || !r.ok) return null
-    // ⚠ UNE REPONSE 200 SANS LISTE N'EST PAS « AUCUN CANAL » (constat MAJEUR de
-    // la meme review). `{data:{id:'c1'}}` — un objet au lieu d'un tableau — et
-    // `{meta:{total:3}}` — le partenaire annonce trois canaux et n'en rend
-    // aucun — passaient tous deux pour une liste VIDE, donc pour une
-    // autorisation de supprimer. Mesure : 200 et purge dans les deux cas.
+    // ⚠ LA LECTURE EST PAGINEE PAR LE RELEVE LUI-MEME (constat 3 de la relecture
+    // du 23 novembre 2026). `pagination[limit]=100` ne reglait rien : le
+    // partenaire plafonne sa propre limite (mesure du 19 octobre 2026), donc un
+    // bien a plus de canaux qu'une page restait refuse a vie. Les regles de la
+    // pagination — total retenu, flux interrompu, page courte, plafond — vivent
+    // dans `lireCanauxDuPartenaire` : on les emprunte, on ne les recopie pas.
+    // Elles refusent les deux formes du constat MAJEUR du 26 octobre : une
+    // reponse sans liste (`reponse_invalide`) et un flux sous le total annonce
+    // (`tronquee`).
     //
-    // `lib/canaux-du-bien.js` refuse explicitement ces deux formes
-    // (`reponse_invalide`, `tronquee`) sur le MEME endpoint. Ici, l'inconnu doit
-    // refuser comme partout ailleurs dans ce chemin : on rend `null`.
-    if (!Array.isArray(r.json?.data)) return null
-    const annonces = Number(r.json?.meta?.total)
-    if (Number.isFinite(annonces) && annonces > r.json.data.length) return null
-    const rows = r.json.data
-    return rows
-      .filter(c => c.attributes?.is_active === true)
-      .map(c => String(c.attributes?.channel || c.attributes?.ota_name || 'canal'))
+    // ⚠ ET LE TOTAL EST EXIGE (constat 2 de la relecture 2 du 23 novembre
+    // 2026). Pour le releve, une page courte sans total vaut fin de liste ;
+    // pour une garde DESTRUCTRICE, un tarif manque est une suppression
+    // irreversible. Mesure de la relecture : 11 tarifs servis par pages de 10,
+    // sans total, le canal mappant le 11e -> 200 et 19 purges. Sans total,
+    // on refuse.
+    //
+    // ⚠ UNE ECHEANCE COMMUNE AUX DEUX LECTURES (constat 5 de la relecture 2) :
+    // chacune avait ses six secondes, soit douze ; elles partagent maintenant
+    // la meme, posee ici.
+    const debut = Date.now()
+    const lire = (chemin) => lireCanauxDuPartenaire({ appel: channelCall, chemin, maintenant: debut, totalExige: true })
+    const canaux = await lire(`/channels?${filtre}`)
+    // ⚠ UNE LECTURE EN ECHEC REFUSE, QUELLE QU'EN SOIT LA CAUSE (constat de
+    // SECURITE de la relecture 2 du 23 novembre 2026). Le correctif d'avant
+    // demandait au partenaire si la propriete existait encore, et prenait un
+    // 404 pour « elle n'existe plus » : or un 404 vient aussi d'une route
+    // introuvable — une base d'URL fausse, la page d'erreur d'un intermediaire,
+    // une maintenance. Mesure : toutes les routes en 404 HTML -> 200, 19 purges,
+    // DELETE parti, propriete toujours chez le partenaire avec ses canaux. Ce
+    // correctif est RETIRE, pas rafistole : une propriete deja effacee chez le
+    // partenaire reste insupprimable ici, et c'est une dette du registre
+    // (docs/specs/spec-garde-suppression-bien.md §6), pas un trou de la garde.
+    if (!canaux.ok) return null
+    const rows = canaux.canaux
+    // ⚠ UNE ENTREE QUI N'EST PAS UN CANAL N'EST PAS « UN CANAL INACTIF »
+    // (constat 4 de la relecture du 23 novembre 2026). `data: [null]` passait
+    // par le `catch` ci-dessous — un refus par accident, qu'une mutation
+    // rendait en autorisation sans qu'aucun test rougisse.
+    if (rows.some(c => !c || typeof c !== 'object' || !c.attributes || typeof c.attributes !== 'object')) return null
+    const actifs = rows.filter(c => c.attributes.is_active === true)
+    if (!actifs.length) return []
+
+    // ⚠⚠ `is_active` EST UNE PROPRIETE DU CANAL, PAS DU BIEN (constat 1 de la
+    // relecture du 23 novembre 2026, le plus important). Un canal Airbnb porte
+    // plusieurs logements, et `filter[property_id]` le rend pour chaque bien
+    // RATTACHE, mappe ou non — api/channel-mapping.js et lib/canaux-du-bien.js
+    // le disent deja. Mesure au banc : un second logement du meme compte
+    // Airbnb, sans aucune annonce a lui, etait refuse en 409 `annonce_reliee`
+    // pour toujours — l'assistant ne lui offre pas « Deconnecter », puisqu'il
+    // n'a rien a deconnecter.
+    //
+    // La question juste est donc : CE CANAL MAPPE-T-IL UN TARIF DE CETTE
+    // PROPRIETE ? Et les tarifs se lisent CHEZ LE PARTENAIRE, pas dans nos
+    // liens : un plan derive, ou un mappage pose hors d'HoteSmart, est absent
+    // de `property_channel_rate_plans` — s'y fier autoriserait la suppression
+    // d'un logement qui vend. Une lecture impossible rend `null`, donc un refus.
+    if (actifs.some(c => !Array.isArray(c.attributes.rate_plans) ||
+      c.attributes.rate_plans.some(m => !m || typeof m !== 'object' || m.rate_plan_id == null))) return null
+    const tarifs = await lire(`/rate_plans?${filtre}`)
+    if (!tarifs.ok) return null
+    if (tarifs.canaux.some(t => !t || typeof t !== 'object' || t.id == null)) return null
+    const tarifsDuBien = new Set(tarifs.canaux.map(t => String(t.id)))
+    return actifs
+      .filter(c => c.attributes.rate_plans.some(m => tarifsDuBien.has(String(m.rate_plan_id))))
+      .map(c => String(c.attributes.channel || c.attributes.ota_name || 'canal'))
   } catch (e) {
     console.error('[channel-property] lecture des canaux echec', e.message)
     return null
@@ -935,8 +978,10 @@ module.exports = async function handler(req, res) {
     const bienPid = gardeDelete.bien ? gardeDelete.bien.id : pid
 
     // ⚠ `migration_target_property_id` EST DANS LE SELECT, et il n'y etait pas.
-    // `canauxActifsDuBien` le lit en repli de `provider_property_id` : un bien
-    // EN BASCULE porte ses canaux sur la cle CIBLE, pas sur l'ancienne. Sans
+    // `canauxActifsDuBien` la lit EN PRIORITE (`proprieteChezLePartenaire`) :
+    // un bien EN BASCULE porte ses canaux sur la cle CIBLE, pas sur
+    // l'ancienne — « en repli », ecrit ici jusqu'au 23 novembre 2026, disait
+    // le contraire du code (constat 6 de la relecture de ce jour). Sans
     // cette colonne, le croisement ci-dessous aurait interroge le partenaire
     // sur la mauvaise cle — donc « aucun canal actif » sur un bien en vente,
     // et une garde qui se croit vivante en regardant ailleurs.

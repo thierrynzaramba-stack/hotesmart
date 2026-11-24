@@ -322,6 +322,18 @@ test('LE TEST QUI COMPTE : un releve de compte EN ECHEC ne conclut rien', () => 
   assert.equal(avecLigne.possible, null)
   assert.equal(avecLigne.motif, 'canaux_illisibles')
 
+  // ⚠ ET UNE LIGNE SANS CLE PARTENAIRE REFUSE AUSSI (constat 4 de la relecture
+  // du 23 novembre 2026 : retirer `|| canaux.length` laissait la suite verte).
+  // Un bien dont la reference partenaire a ete videe garde ses lignes d'avant :
+  // elles sont perimees comme les autres, et c'est par elles que passerait la
+  // suppression.
+  const ligneSansCle = L.suppressionPossible(
+    bienDe({ provider_property_id: null, migration_target_property_id: null }),
+    [{ ota: 'airbnb', mappe: false }],
+    { releveDuCompte: '2026-10-22T08:00:00Z', releveEnEchec: true })
+  assert.equal(ligneSansCle.possible, null)
+  assert.equal(ligneSansCle.motif, 'canaux_illisibles')
+
   // ⚠ MAIS PAS UN BIEN BEDS24 SANS LIGNE : le releve en echec est celui de
   // l'AUTRE partenaire, il ne dit rien de ce bien. Sans cette borne, une panne
   // Channex rendrait insupprimable tout le parc Beds24.
