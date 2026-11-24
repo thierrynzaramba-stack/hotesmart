@@ -5528,8 +5528,9 @@ rappel et la fiche sont les mêmes composants. Le rappel suit le gabarit
    comme ceux d'une entité ; l'heure du calcul s'affiche de même.
 3. Cache navigateur : sans objet (la page n'en a pas).
 4. `private, no-store` : inchangé, posé avant tout refus.
-5. Fichiers statiques versionnés : `?v=` de `charges-vue.js` et `ui.css` mis à
-   jour.
+5. Fichiers statiques : les dictionnaires portent la version calculée au
+   déploiement (`i18n.modele.js`) ; `charges-vue.js` et `ui.css` ne sont pas
+   versionnés aujourd'hui, et ce lot n'y change rien (aucune feuille touchée).
 6. Aucune lecture nouvelle sans borne : la présence de « Sans entité » est un
    `limit 1` ; la liste reste par curseur ; les totaux, un objet.
 7. Budget : **+1 requête** au chargement de l'écran (la présence), lancée en
@@ -5541,6 +5542,49 @@ rappel et la fiche sont les mêmes composants. Le rappel suit le gabarit
 - Il ne rattache aucun logement : c'est la fiche du logement qui le fait.
 - Il ne touche ni l'import de crédit ni l'adresse e-mail d'un logement.
 - Il ne change rien pour un logement rattaché à une entité archivée.
+
+#### 14.25.10 Mesure avant / après
+
+Comptée par le banc de l'endpoint (`tests/charges-ecran.test.js`, test
+« mesure (case PERFORMANCE, point 8) ») : requêtes Supabase + fonctions +
+lectures d'entités, pour UN appel d'écran.
+
+| écran | appels | requêtes avant | requêtes après |
+|---|---|---|---|
+| une entité, sans crédit | 1 | 8 | **9** (+ la présence, en parallèle des entités) |
+| une entité, avec crédits | 1 | 9 | **10** |
+| « Sans entité juridique » | 1 | — | **8** (aucun crédit lu) |
+| détail d'un mois « sans entité » | 1 | — | **1** (aucune entité relue) |
+
+Octets : la réponse gagne `option_sans_entite` (un booléen, ~26 octets) ;
+rien d'autre ne change de taille.
+
+#### 14.25.11 Preuves
+
+- **Épreuve sur un vrai Postgres** (`scripts/eprouver-charges-sans-entite.sh`) :
+  la chaîne réelle des migrations du compte de charges, puis celle-ci, deux
+  fois. **44 gestes, 0 écart** — dont la garde (validée sans entité sur un
+  logement sans / avec / à entité archivée, sans logement, transitions), le
+  rattrapage (entité active seulement), le déplacement au rattachement et au
+  changement d'entité, le détachement qui ne touche rien, la suppression d'un
+  logement qui passe, les trois lectures « sans entité », et **les deux
+  courses** validation / rattachement jouées dans deux sessions réelles.
+  Contrôle : `f f f f t` avant, `t t t t t` après.
+- **Trois sabotages de la migration, trois rouges** : verrou retiré de la
+  garde (course 2 passe), verrou retiré du déplacement (courses 1 et 2),
+  `= p_entite` remis dans `charges_totaux` (totaux à 0).
+- **Contre-épreuve des tests** contre le code de `main` : 23 des nouveaux
+  tests rougissent. Restent verts, et c'est leur rôle, quatre gardes de
+  non-régression qui disent ce que l'assouplissement **n'ouvre pas** : une
+  entité ni UUID ni `sans` (400), entité vide sans logement, entité vide sur
+  un logement qui en a une (`entite_requise`), Q18 pour une entité choisie
+  (`bien_sans_entite`).
+- **Trois sabotages du code, trois rouges** : le refus « logement avec
+  entité » retiré (writer), `sans` non traduit en NULL (lectures), `sans`
+  envoyé tel quel par la fiche (page).
+- **Suite** : 9439 / 9439 à l'heure réelle. À J+60 : 9438, le rouge étant
+  `tests/marche-comparables-api.test.js` (dette 124, déjà rouge sur `main` à
+  J+60, mesuré : aucun fichier de ce lot).
 
 ## 12. Trace des reviews du lot 2
 

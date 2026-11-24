@@ -873,3 +873,91 @@ test('valider SANS période envoyée garde celle que la charge porte ; envoyée 
   const n = b.requetes.find(x => x.op === 'update').charge
   assert.deepEqual([n.periode_debut, n.periode_fin], [null, null])
 })
+
+// ─── Lot 5 bis (§14.25) : la facture d'un logement SANS entité ──────────────
+// Thierry, 23 novembre 2026 : « Oui, valider sans entité ». Une facture sans
+// entité est celle d'un logement qui n'en a pas — et ne l'est que tant qu'il
+// n'en a pas. Une charge générale (sans logement) garde son entité.
+
+// Le double d'entités compte ses lectures : « sans entité » n'a aucune entité
+// à relire, seulement le lien du logement.
+const entitesComptees = (o = {}) => {
+  const lu = { entites: 0, biens: [] }
+  const d = entitesDouble(o)
+  return {
+    lu,
+    entitesDuCompte: async (...a) => { lu.entites++; return d.entitesDuCompte(...a) },
+    entiteDuBien: async (compte, bien) => { lu.biens.push([compte, bien]); return d.entiteDuBien(compte, bien) }
+  }
+}
+const SANS = { ...CHAMPS_OK, entite_juridique_id: '', bien_id: BIEN }
+
+test('LE TEST QUI COMPTE : entité vide + logement SANS entité → validée SANS entité, le lien du logement relu dans le compte', async () => {
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier({ bien_id: BIEN }))
+  const ent = entitesComptees({ entites: [E1] })
+  const r = await charges.valider(client, { compte: COMPTE, valideur: COMPTE, id: ID, champs: SANS }, { entites: ent })
+  assert.equal(r.ok, true)
+  const maj = requetes.find(x => x.table === 'charges' && x.op === 'update')
+  assert.equal(maj.charge.statut, 'validee')
+  assert.equal(maj.charge.entite_juridique_id, null, 'NULL, jamais une chaîne vide')
+  assert.equal(maj.charge.bien_id, BIEN)
+  assert.deepEqual(ent.lu.biens, [[COMPTE, BIEN]])
+  assert.equal(ent.lu.entites, 0, 'aucune entité à relire')
+  sansFuite(requetes)
+})
+
+test('LE TEST QUI COMPTE : entité vide + logement AVEC entité → 409 entite_requise, rien d\'écrit — même archivée', async () => {
+  for (const entite of [E1, EARCH]) {
+    const { client, requetes } = baseEnregistreuse(chargeAVerifier({ bien_id: BIEN }))
+    const r = await charges.valider(client, { compte: COMPTE, id: ID, champs: SANS },
+      { entites: entitesDouble({ entites: [E1, EARCH], parBien: { [BIEN]: entite } }) })
+    assert.deepEqual([r.statut, r.code], [409, 'entite_requise'], entite.nom)
+    assert.ok(!requetes.some(x => x.op === 'update'))
+  }
+})
+
+test('entité vide SANS logement : 409 entite_requise, avant toute lecture (une charge générale a son entité)', async () => {
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier())
+  const ent = entitesComptees({ entites: [E1] })
+  const r = await charges.valider(client, { compte: COMPTE, id: ID, champs: { ...SANS, bien_id: '' } }, { entites: ent })
+  assert.deepEqual([r.statut, r.code], [409, 'entite_requise'])
+  assert.deepEqual([ent.lu.entites, ent.lu.biens.length], [0, 0])
+  assert.ok(!requetes.some(x => x.table === 'properties'))
+})
+
+test('LE TEST QUI COMPTE : une facture DÉJÀ validée sans entité se corrige… et son lien se RELIT — le logement rattaché depuis, elle est refusée', async () => {
+  const deja = chargeAVerifier({ statut: 'validee', entite_juridique_id: null, bien_id: BIEN })
+  // Toujours sans entité : la correction passe.
+  let b = baseEnregistreuse(deja)
+  let ent = entitesComptees({ entites: [E1] })
+  assert.equal((await charges.valider(b.client, { compte: COMPTE, id: ID, champs: SANS }, { entites: ent })).ok, true)
+  assert.equal(ent.lu.biens.length, 1, 'le lien est relu, même pour une correction')
+  // Rattaché depuis (la base l'aurait déplacée ; une course la laisserait) : refus.
+  b = baseEnregistreuse(deja)
+  ent = entitesComptees({ entites: [E1], parBien: { [BIEN]: E1 } })
+  const r = await charges.valider(b.client, { compte: COMPTE, id: ID, champs: SANS }, { entites: ent })
+  assert.equal(r.code, 'entite_requise')
+  assert.ok(!b.requetes.some(x => x.op === 'update'))
+})
+
+test('entité vide + logement d\'un AUTRE compte → 403, avant toute lecture de son lien', async () => {
+  const AILLEURS = '66666666-6666-4666-8666-666666666666'
+  const { client } = baseEnregistreuse(chargeAVerifier())
+  const ent = entitesComptees({ entites: [E1] })
+  const r = await charges.valider(client, { compte: COMPTE, id: ID, champs: { ...SANS, bien_id: AILLEURS } }, { entites: ent })
+  assert.equal(r.code, 'bien_hors_compte')
+  assert.equal(ent.lu.biens.length, 0)
+})
+
+test('entité vide : le lien du logement en panne → 503, jamais « sans entité »', async () => {
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier())
+  const r = await charges.valider(client, { compte: COMPTE, id: ID, champs: SANS }, { entites: entitesDouble({ panne: true }) })
+  assert.equal(r.statut, 503)
+  assert.ok(!requetes.some(x => x.op === 'update'))
+})
+
+test('Q18 tient pour tout le reste : une entité choisie + un logement sans entité reste refusé (bien_sans_entite)', async () => {
+  const { client } = baseEnregistreuse(chargeAVerifier())
+  const r = await charges.valider(client, { compte: COMPTE, id: ID, champs: { ...CHAMPS_OK, bien_id: BIEN } }, { entites: entitesDouble({ entites: [E1] }) })
+  assert.equal(r.code, 'bien_sans_entite')
+})

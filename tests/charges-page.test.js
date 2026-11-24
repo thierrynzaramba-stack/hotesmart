@@ -276,7 +276,9 @@ test('un compte sans entité : le chemin pour en créer une, ni choix ni totaux'
   const b = await monter({ ecran: () => Object.assign(reponseEcran({ entites: [], totaux: { sans_entite: true }, credits: {} }), { entite: null }) })
   try {
     assert.equal(b.$('[data-choix="entite"]'), null)
-    assert.match(texte(b.$('[data-bind="totaux"]')), /il faut une entité juridique/)
+    // Lot 5 bis : la facture d'un LOGEMENT se valide sans entité ; c'est la
+    // charge générale qui en demande une.
+    assert.match(texte(b.$('[data-bind="totaux"]')), /charge générale \(sans logement\) demande une entité juridique/)
     assert.equal(b.$('[data-bind="totaux"] a').getAttribute('href'), '/logements')
   } finally { b.fermer() }
 })
@@ -696,14 +698,14 @@ test('la fiche ne propose que les logements de l\'entité choisie ; un logement 
   } finally { b.fermer() }
 })
 
-test('LE TEST QUI COMPTE : sans entité active, « Valider » est remplacé par l\'explication et le chemin vers les logements (Q20)', async () => {
+test('LE TEST QUI COMPTE : sans entité active NI logement sans entité, « Valider » est remplacé par l\'explication et le chemin vers les logements (Q20, lot 5 bis)', async () => {
   const c = facture(1, { statut: 'a_verifier', entite_juridique_id: null })
   const b = await monter({ ecran: () => reponseEcran({ aTraiter: [c], entites: [] }) })
   try {
     await b.cliquer(b.$(`[data-ouvrir="${c.id}"]`))
     const f = b.$('[data-bind="fiche"]')
     assert.equal(f.querySelector('[data-geste="valider"]'), null)
-    assert.match(texte(f), /il faut une entité juridique/)
+    assert.match(texte(f), /charge générale \(sans logement\) demande une entité juridique/)
     assert.equal(f.querySelector('a[href="/logements"]') !== null, true)
   } finally { b.fermer() }
 })
