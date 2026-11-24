@@ -39,14 +39,20 @@ test('LE TEST QUI COMPTE : la garde prend le VERROU DU COMPTE avant de lire le l
   // Sans logement : seul ce qu'un writer pose est refusé (la suppression du
   // logement, `on delete set null`, reste permise).
   assert.match(g, /tg_op = 'INSERT'\s+or old\.statut <> 'validee'\s+or old\.entite_juridique_id is not null/)
+  // Review 1, M3 : un writer ne peut pas lui RETIRER son logement — seule la
+  // suppression du logement (sa ligne n'est alors plus visible) y mène.
+  assert.match(g, /or exists \(\s+select 1 from public\.properties p\s+where p\.id = old\.bien_id\)/)
   assert.match(CODE, /create trigger charges_sans_entite_trg\s+before insert or update on public\.charges/)
 })
 
-test('LE TEST QUI COMPTE : un rattachement déplace les factures SANS entité du logement — verrou d\'abord, celles qui ont une entité ne bougent pas', () => {
+test('LE TEST QUI COMPTE : un rattachement déplace les factures SANS entité du logement — LIGNES, PUIS verrou, puis déplacement ; celles qui ont une entité ne bougent pas', () => {
   const f = corps('biens_entites_factures_suivent')
+  // Review 1, M1 : l'ordre de toute écriture sur `charges` (sa ligne, puis le
+  // verrou du compte). L'inverse interbloque.
+  const lignes = f.search(/order by c\.id\s+for update;/)
   const verrou = f.indexOf('charges_verrou_compte(')
   const maj = f.indexOf('update public.charges')
-  assert.ok(verrou > 0 && maj > verrou)
+  assert.ok(lignes > 0 && verrou > lignes && maj > verrou, 'for update, PUIS verrou, PUIS update')
   assert.match(f, /set entite_juridique_id = new\.entite_id/)
   assert.match(f, /c\.user_id = new\.user_id/)
   assert.match(f, /c\.bien_id = new\.property_uuid/)
@@ -66,12 +72,13 @@ test('le rattrapage ne touche que les logements d\'une entité ACTIVE (une entit
   assert.match(r, /c\.entite_juridique_id is null/)
 })
 
-test('LE TEST QUI COMPTE : les trois lectures du résumé lisent p_entite NULL comme « sans entité » — et plus aucune « = p_entite »', () => {
+test('LE TEST QUI COMPTE : les trois lectures du résumé lisent p_entite NULL comme « sans entité » — un LOGEMENT qui n\'en a pas (Thierry, 25 nov. 2026)', () => {
   for (const nom of ['charges_totaux', 'charges_exercices_bornes', 'charges_detail_mois']) {
     const f = corps(nom)
-    assert.match(f, /entite_juridique_id\s+is not distinct from p_entite/, nom)
-    assert.doesNotMatch(f, /= p_entite/, nom)
-    assert.doesNotMatch(f, /p_entite is null/, `${nom} : l'ancien « toutes les entités » est abandonné`)
+    assert.match(f, /p_entite is not null\s+and [rc]\.entite_juridique_id = p_entite/, nom)
+    assert.match(f, /p_entite is null\s+and [rc]\.entite_juridique_id is null\s+and [rc]\.bien_id is not null\s+and not exists \(\s+select 1\s+from public\.biens_entites be\s+where be\.property_uuid\s+= [rc]\.bien_id\)/, `${nom} : pas une charge générale, pas un logement rattaché`)
+    assert.doesNotMatch(f, /\(p_entite is null\s+or/, `${nom} : l'ancien « toutes les entités » est abandonné`)
+    assert.doesNotMatch(f, /is not distinct from p_entite/, `${nom} : NULL n'est pas « toute facture sans entité »`)
     assert.match(f, /user_id = p_user/, `${nom} : toujours le compte`)
   }
   // Mêmes signatures : un `create or replace`, aucun `drop function`.

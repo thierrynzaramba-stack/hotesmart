@@ -39,8 +39,11 @@ alter table public.charges
 --  a. une facture VALIDEE sans entite dont le
 --     logement a une entite ;
 --  b. une facture qui DEVIENT validee sans entite
---     ni logement. Seule la suppression du
---     logement y mene, et elle reste permise.
+--     ni logement — y compris en perdant son
+--     logement : seule la SUPPRESSION du logement
+--     y mene (on delete set null : la ligne du
+--     logement n'est plus visible), et elle reste
+--     permise (review 1, M3).
 -- ⚠ LE VERROU DU COMPTE AVANT DE LIRE LE LIEN :
 -- celui que prend `charges_resume_suivre`, et
 -- celui que prend le geste 3. Une validation et
@@ -64,6 +67,9 @@ begin
     if tg_op = 'INSERT'
       or old.statut <> 'validee'
       or old.entite_juridique_id is not null
+      or exists (
+        select 1 from public.properties p
+        where p.id = old.bien_id)
     then
       raise exception
         'charges: validee sans entite ni logement'
@@ -100,6 +106,13 @@ create trigger charges_sans_entite_trg
 -- sienne », §6). Le detachement ne touche rien.
 -- Les totaux suivent : chaque facture deplacee
 -- passe par `charges_resume_suivre`.
+-- ⚠ LES LIGNES D'ABORD, LE VERROU DU COMPTE
+-- ENSUITE (review 1, M1) : toute ecriture sur
+-- `charges` tient sa ligne PUIS prend le verrou
+-- du compte (garde, `charges_resume_suivre`).
+-- Prendre le verrou avant les lignes croisait
+-- les deux ordres : interblocage mesure, le
+-- rattachement annule.
 create or replace function
   public.biens_entites_factures_suivent()
 returns trigger
@@ -114,6 +127,12 @@ begin
   then
     return null;
   end if;
+  perform 1 from public.charges c
+  where c.user_id = new.user_id
+    and c.bien_id = new.property_uuid
+    and c.entite_juridique_id is null
+  order by c.id
+  for update;
   perform public.charges_verrou_compte(
     new.user_id);
   update public.charges c
@@ -138,10 +157,10 @@ create trigger biens_entites_factures_trg
 -- (e-mail, lot 5) prend son entite maintenant.
 -- ⚠ ENTITE ACTIVE SEULEMENT : un logement d'une
 -- entite archivee garde ses factures sans entite
--- et leur rappel (lot 5, §14.24) ; elles
--- suivront quand l'hote le rattachera a une
--- entite active. Rejouable : la seconde fois, il
--- n'y a plus rien a deplacer.
+-- (lot 5, §14.24) ; elles suivront quand l'hote
+-- le rattachera a une entite active.
+-- Rejouable : la seconde fois, il n'y a plus
+-- rien a deplacer.
 update public.charges c
   set entite_juridique_id = be.entite_id
 from public.biens_entites be
@@ -154,7 +173,14 @@ where be.property_uuid = c.bien_id
   and c.entite_juridique_id is null;
 
 -- ─── 4. Les lectures des totaux ────────────────
--- ⚠ p_entite NULL VEUT DIRE « SANS ENTITE ».
+-- ⚠ p_entite NULL VEUT DIRE « SANS ENTITE » : les
+-- factures sans entite D'UN LOGEMENT QUI N'EN A
+-- PAS (Thierry, 25 nov. 2026). Pas une facture
+-- generale dont l'entite n'est pas reconnue (elle
+-- attend dans « A traiter », hors totaux, comme
+-- avant), ni celle d'un logement rattache a une
+-- entite archivee. Une facture validee dont le
+-- logement a ete supprime sort des totaux.
 -- L'ancien sens de NULL dans `charges_totaux`
 -- (« toutes les entites ») est abandonne : aucun
 -- appelant ne le passe depuis le lot 8a (§14.21,
@@ -175,8 +201,16 @@ as $$
     from public.charges_resume r
     where r.user_id = p_user
       and r.jour between p_debut and p_fin
-      and r.entite_juridique_id
-        is not distinct from p_entite
+      and ((p_entite is not null
+          and r.entite_juridique_id = p_entite)
+        or (p_entite is null
+          and r.entite_juridique_id is null
+          and r.bien_id is not null
+          and not exists (
+            select 1
+            from public.biens_entites be
+            where be.property_uuid
+              = r.bien_id)))
   ),
   m as (
     select to_char(c.jour, 'YYYY-MM') as cle,
@@ -282,8 +316,15 @@ as $$
     'dernier', max(r.jour))
   from public.charges_resume r
   where r.user_id = p_user
-    and r.entite_juridique_id
-      is not distinct from p_entite
+    and ((p_entite is not null
+        and r.entite_juridique_id = p_entite)
+      or (p_entite is null
+        and r.entite_juridique_id is null
+        and r.bien_id is not null
+        and not exists (
+          select 1
+          from public.biens_entites be
+          where be.property_uuid = r.bien_id)))
     and (r.nb_factures > 0
       or r.nb_etale > 0);
 $$;
@@ -312,8 +353,16 @@ as $$
       coalesce(c.periode_fin, c.jour) as d1
     from public.charges c
     where c.user_id = p_user
-      and c.entite_juridique_id
-        is not distinct from p_entite
+      and ((p_entite is not null
+          and c.entite_juridique_id = p_entite)
+        or (p_entite is null
+          and c.entite_juridique_id is null
+          and c.bien_id is not null
+          and not exists (
+            select 1
+            from public.biens_entites be
+            where be.property_uuid
+              = c.bien_id)))
       and c.statut not in (
         'envoi', 'annulee', 'sans_facture')
       and ((c.jour between p_debut and p_fin)

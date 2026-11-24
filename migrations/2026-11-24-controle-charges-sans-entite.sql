@@ -34,7 +34,9 @@ select '4 lectures sans entite',
         'charges_exercices_bornes',
         'charges_detail_mois')
       and p.prosrc ilike
-        '%is not distinct from p_entite%') = 3,
+        '%p_entite is null%bien_id is not null%'
+      and p.prosrc ilike
+        '%from public.biens_entites%') = 3,
   'totaux, bornes, detail du mois'
 union all
 select '5 aucune validee hors regle',

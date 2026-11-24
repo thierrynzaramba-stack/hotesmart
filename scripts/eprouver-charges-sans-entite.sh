@@ -51,6 +51,9 @@ W=0000000e-0000-4000-8000-00000000000e   # rattaché à E3, archivée
 Q=0000000f-0000-4000-8000-00000000000f   # course 1
 R=00000010-0000-4000-8000-000000000010   # course 2
 T=00000011-0000-4000-8000-000000000011   # rattaché à E1 APRÈS un e-mail
+U=00000012-0000-4000-8000-000000000012   # sans entité, une facture à vérifier
+S=00000013-0000-4000-8000-000000000013   # course 3
+S2=00000014-0000-4000-8000-000000000014  # course 4
 
 # Le socle que Supabase fournit : rôles, auth.users, storage.buckets, properties.
 $P >/dev/null <<SQL || exit 2
@@ -62,7 +65,8 @@ create table storage.buckets (id text primary key, name text, public boolean,
 create table public.properties (id uuid primary key, user_id uuid not null, name text);
 insert into auth.users values ('$A'), ('$B');
 insert into public.properties (id, user_id) values
-  ('$X','$A'),('$Y','$A'),('$Z','$A'),('$V','$A'),('$W','$A'),('$Q','$A'),('$R','$A'),('$T','$A');
+  ('$X','$A'),('$Y','$A'),('$Z','$A'),('$V','$A'),('$W','$A'),('$Q','$A'),('$R','$A'),('$T','$A'),
+  ('$U','$A'),('$S','$A'),('$S2','$A');
 SQL
 for f in $CHAINE; do
   $P -f "$M/$f.sql" >/dev/null 2>"$DIR/err" || { echo "la migration $f ne s'applique pas :"; cat "$DIR/err"; exit 1; }
@@ -136,12 +140,15 @@ essai "14. à vérifier sans entité sur X (rattaché) : passe (la garde porte s
 essai "15. … puis validée sans entité : refusée" refus "update public.charges set statut = 'validee' where id = '$C4'"
 essai "16. validée sans entité sur Z, avec une autre facture validée E1 sur Z : passent" passe \
   "$(charge $C5 validee null "'$Z'") $(charge bbbbbbbb-0000-4000-8000-0000000000b6 validee "'$E1'" "'$Z'")"
+essai "16 bis. un writer retire le logement d'une validée sans entité : refusée (M3)" refus "update public.charges set bien_id = null where id = '$C1'"
+C10=bbbbbbbb-0000-4000-8000-0000000000ba
+essai "16 ter. à vérifier sans entité sur U (sans entité) : passe" passe "$(charge $C10 a_verifier null "'$U'")"
 
 # ── Les totaux « sans entité » ────────────────────────────────────────────────
-note "5" "$(val "select public.charges_totaux('$A','2026-01-01','2026-12-31',null)->'total'->>'nb_factures'")" \
-  "17. charges_totaux(NULL) : les 5 factures comptées sans entité de A (C1, C5 validées ; C_W, C2, C4 à vérifier)"
-note "3" "$(val "select public.charges_totaux('$A','2026-01-01','2026-12-31',null)->'total'->>'nb_non_verifiees'")" \
-  "18. charges_totaux(NULL) : dont 3 non vérifiées (l'estimation le dira)"
+note "3" "$(val "select public.charges_totaux('$A','2026-01-01','2026-12-31',null)->'total'->>'nb_factures'")" \
+  "17. charges_totaux(NULL) : les factures d'un logement SANS entité seules — C1, C5 validées, C10 à vérifier ; ni C2 (sans logement), ni C4 (X rattaché), ni C_W (entité archivée)"
+note "1" "$(val "select public.charges_totaux('$A','2026-01-01','2026-12-31',null)->'total'->>'nb_non_verifiees'")" \
+  "18. charges_totaux(NULL) : dont 1 non vérifiée (C10, l'estimation le dira)"
 note "2026-11-10" "$(val "select public.charges_exercices_bornes('$A', null)->>'premier'")" "19. charges_exercices_bornes(NULL) : bornes des factures sans entité"
 note "$C1 $C5 " "$(val "select string_agg(e->>'id', ' ' order by e->>'id') || ' ' from jsonb_array_elements(public.charges_detail_mois('$A','2026-11-01','2026-11-30',null)) e where e->>'statut' = 'validee'")" \
   "20. charges_detail_mois(NULL) : les validées sans entité seules (C1, C5)"
@@ -152,7 +159,7 @@ note "0" "$(val "select count(*) from jsonb_array_elements(public.charges_detail
 essai "22. rattacher Y à E2 : passe" passe "insert into public.biens_entites (property_uuid, entite_id, user_id) values ('$Y','$E2','$A')"
 note "$E2" "$(val "select entite_juridique_id from public.charges where id = '$C1'")" "23. la facture validée de Y a pris E2"
 note "1" "$(val "select public.charges_totaux('$A','2026-01-01','2026-12-31','$E2')->'total'->>'nb_factures'")" "24. les totaux de E2 la comptent"
-note "4" "$(val "select public.charges_totaux('$A','2026-01-01','2026-12-31',null)->'total'->>'nb_factures'")" "25. les totaux sans entité ne comptent plus C1 : C5, C_W, C2, C4"
+note "2" "$(val "select public.charges_totaux('$A','2026-01-01','2026-12-31',null)->'total'->>'nb_factures'")" "25. les totaux sans entité ne comptent plus C1 : C5 et C10"
 essai "26. rattacher Z à E2 : passe" passe "insert into public.biens_entites (property_uuid, entite_id, user_id) values ('$Z','$E2','$A')"
 note "$E2|$E1" "$(val "select (select entite_juridique_id from public.charges where id = '$C5') || '|' || (select entite_juridique_id from public.charges where id = 'bbbbbbbb-0000-4000-8000-0000000000b6')")" \
   "27. sur Z : la facture sans entité prend E2, celle d'E1 garde E1"
@@ -169,6 +176,8 @@ essai "33. validée sans entité sur V : passe" passe "$(charge $C6 validee null
 essai "34. supprimer le logement V : passe (on delete set null)" passe "delete from public.properties where id = '$V'"
 note "validee||" "$(val "select statut || '|' || coalesce(entite_juridique_id::text,'') || '|' || coalesce(bien_id::text,'') from public.charges where id = '$C6'")" \
   "35. la facture reste validée, sans entité ni logement"
+note "1" "$(val "select public.charges_totaux('$A','2026-01-01','2026-12-31',null)->'total'->>'nb_factures'")" \
+  "35 bis. elle sort des totaux sans entité (plus de logement) : C10 seule"
 essai "36. on peut encore la toucher (signal tranché)" passe "update public.charges set signal_tranche = true where id = '$C6'"
 essai "37. et lui donner une entité" passe "update public.charges set entite_juridique_id = '$E1' where id = '$C6'"
 essai "38. mais pas la lui retirer de nouveau" refus "update public.charges set entite_juridique_id = null where id = '$C6'"
@@ -195,9 +204,37 @@ note refus "$r" "40. course 2 (rattachement d'abord) : la validation sans entit�
 note "a_verifier|" "$(val "select statut || '|' || coalesce(entite_juridique_id::text,'') from public.charges where id = '$C8'")" \
   "41. course 2 : la facture est restée à vérifier"
 
+# Course 3 (review 1, M1) : un TIERS tient le verrou du compte (le recalcul du
+# cron, une autre écriture) ; le rattachement de S le demande d'abord, PUIS une
+# écriture ordinaire sur une facture de S (la lecture IA d'un e-mail) arrive.
+# Avant le correctif : interblocage, l'un des deux annulé. Attendu : les deux
+# passent, la facture prend E1 ET garde l'écriture.
+C11=cccccccc-0000-4000-8000-0000000000c3
+C12=cccccccc-0000-4000-8000-0000000000c4
+$P -c "$(charge $C11 a_verifier null "'$S'") $(charge $C12 a_verifier null "'$S2'")" >/dev/null || exit 2
+( $P -c "begin; select public.charges_verrou_compte('$A'); select pg_sleep(2); commit;" >/dev/null 2>&1 ) &
+sleep 0.4
+( if $P -c "insert into public.biens_entites (property_uuid, entite_id, user_id) values ('$S','$E1','$A')" >/dev/null 2>&1; then echo passe; else echo refus; fi > "$DIR/c3" ) &
+sleep 0.4
+if $P -c "update public.charges set fournisseur_nom = 'Lu' where id = '$C11'" >/dev/null 2>&1; then r=passe; else r=refus; fi
+wait
+note "passe passe" "$(cat "$DIR/c3") $r" "42. course 3 (rattachement puis écriture, verrou tenu par un tiers) : aucun interblocage"
+note "$E1|Lu" "$(val "select coalesce(entite_juridique_id::text,'') || '|' || coalesce(fournisseur_nom,'') from public.charges where id = '$C11'")" \
+  "43. course 3 : la facture a suivi ET garde l'écriture"
+# Course 4 : l'écriture d'abord, le rattachement ensuite, le tiers toujours là.
+( $P -c "begin; select public.charges_verrou_compte('$A'); select pg_sleep(2); commit;" >/dev/null 2>&1 ) &
+sleep 0.4
+( if $P -c "update public.charges set fournisseur_nom = 'Lu' where id = '$C12'" >/dev/null 2>&1; then echo passe; else echo refus; fi > "$DIR/c4" ) &
+sleep 0.4
+if $P -c "insert into public.biens_entites (property_uuid, entite_id, user_id) values ('$S2','$E1','$A')" >/dev/null 2>&1; then r=passe; else r=refus; fi
+wait
+note "passe passe" "$(cat "$DIR/c4") $r" "44. course 4 (écriture puis rattachement) : aucun interblocage"
+note "$E1|Lu" "$(val "select coalesce(entite_juridique_id::text,'') || '|' || coalesce(fournisseur_nom,'') from public.charges where id = '$C12'")" \
+  "45. course 4 : la facture a suivi ET garde l'écriture"
+
 # ── L'autre compte n'est pas touché ───────────────────────────────────────────
-note "0" "$(val "select public.charges_totaux('$B','2026-01-01','2026-12-31',null)->'total'->>'nb_factures'")" "42. un autre compte : rien sans entité"
-note "t t t t t " "$($P -F'|' -f "$CONTROLE" 2>/dev/null | cut -d'|' -f2 | tr '\n' ' ')" "43. le contrôle à la fin dit encore cinq fois vrai"
+note "0" "$(val "select public.charges_totaux('$B','2026-01-01','2026-12-31',null)->'total'->>'nb_factures'")" "46. un autre compte : rien sans entité"
+note "t t t t t " "$($P -F'|' -f "$CONTROLE" 2>/dev/null | cut -d'|' -f2 | tr '\n' ' ')" "47. le contrôle à la fin dit encore cinq fois vrai"
 
 echo "—— $ok ok, $ko écart(s)"
 [ "$ko" = 0 ]

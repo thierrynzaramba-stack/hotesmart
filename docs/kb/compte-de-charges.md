@@ -121,17 +121,29 @@ Spec §13 (choix de Thierry du 10 novembre 2026 : l'écran avant le lot 7).
   compte, pris AVANT de lire le lien. Pas de `check` : la suppression d'un
   logement (`on delete set null`) doit passer.
 - **`p_entite` NULL veut dire « sans entité »** dans `charges_totaux`,
-  `charges_exercices_bornes` et `charges_detail_mois`. L'ancien « toutes les
-  entités » est abandonné. Côté code, c'est `'sans'`
-  (`SANS_ENTITE`), traduit en NULL au seul appel ; une entité absente est
-  refusée.
+  `charges_exercices_bornes` et `charges_detail_mois` : sans entité, AVEC un
+  logement, et ce logement sans ligne `biens_entites` (Thierry, 25 novembre
+  2026). Une facture générale dont l'entité n'est pas reconnue reste dans
+  « À traiter », hors totaux. L'ancien « toutes les entités » est abandonné ;
+  **la migration passe donc AVANT le code**, sinon la vue « Sans entité »
+  afficherait en silence le total de tout le compte. Côté code, c'est
+  `'sans'` (`SANS_ENTITE`), traduit en NULL au seul appel ; une entité absente
+  est refusée.
+- **Le déplacement verrouille les LIGNES, puis le compte** : l'ordre de toute
+  écriture sur `charges`. L'inverse interblocait (review 1, M1, mesuré).
 - **« Sans entité juridique »** : une option du choix d'entité, proposée quand
   le résumé porte une facture comptée sans entité ; l'année civile, son
   rappel en tête, son export, aucun crédit. Un compte sans entité ouvre
   dessus.
 - **Un logement rattaché à une entité ARCHIVÉE n'est pas « sans entité »** :
-  il garde la règle du lot 5 (rappel), et ses factures suivent quand on le
-  rattache à une entité active.
+  sa facture ne se valide ni sans entité (`entite_requise`) ni avec l'entité
+  archivée ; on rattache le logement à une entité active, et ses factures sans
+  entité suivent. ⚠ La page n'affiche AUCUN rappel dans ce cas (dette 5 bis-2,
+  comportement d'avant le lot).
+- **Dettes du lot 5 bis** : 5 bis-1, une facture validée sans entité dont le
+  logement est SUPPRIMÉ sort des totaux et de l'export (la suppression d'un
+  logement est rare, l'archivage est le chemin normal) ; 5 bis-2, aucun rappel
+  pour la facture d'un logement rattaché à une entité archivée.
 
 - **Un export ne sort jamais incomplet sans le dire** (lot 8d) : un fichier
   qui ne vient pas après trois essais, chacun avec une adresse neuve, arrête

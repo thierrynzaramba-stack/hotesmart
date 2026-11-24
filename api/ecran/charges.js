@@ -72,7 +72,14 @@ async function traiter (req, res, t0, deps) {
   if (q.curseur != null && q.curseur !== '') {
     const c = ecran.lireCurseur(q.curseur)
     if (!c.ok) return res.status(400).json({ error: 'curseur_invalide' })
-    const l = await ecran.liste(base, compte, c.curseur, entiteDemandee)
+    // « Sans entité » : les logements RATTACHÉS sont écartés (lot 5 bis).
+    let rattaches = []
+    if (sansEntite) {
+      const li = await (deps.entites || require('../../lib/entites-juridiques')).liensDuCompte(compte, { db: base })
+      if (!li.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
+      rattaches = (li.liens || []).map(x => x.property_uuid)
+    }
+    const l = await ecran.liste(base, compte, c.curseur, entiteDemandee, { rattaches })
     timing()
     if (!l.ok) return res.status(503).json({ error: 'Lecture impossible' })
     return res.status(200).json({ liste: { lignes: l.lignes, suite: l.suite } })
@@ -167,11 +174,14 @@ async function traiter (req, res, t0, deps) {
   // demandée. Avec elles, la présence d'un total « Sans entité » (lot 5 bis) :
   // un compte SANS entité ouvre dessus. Les six autres lectures partent
   // ensuite ENSEMBLE.
-  const [ent, pres] = await Promise.all([
+  // « Sans entité » DEMANDÉ : les logements rattachés, que la liste écarte
+  // (un compte qui n'a aucune entité n'en a aucun : rien à lire).
+  const [ent, pres, li] = await Promise.all([
     ej.entitesDuCompte(compte, { db: base }),
-    ecran.sansEntitePresente(base, compte)
+    ecran.sansEntitePresente(base, compte),
+    sansEntite ? ej.liensDuCompte(compte, { db: base }) : Promise.resolve({ ok: true, liens: [] })
   ])
-  if (!ent.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
+  if (!ent.ok || !li.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
   const entites = ent.entites || []
   // ⚠ UNE ENTITÉ D'UN AUTRE COMPTE N'EXISTE PAS ICI : la liste vient du compte
   // de la garde, et `charges_totaux` filtre encore par compte.
@@ -199,7 +209,7 @@ async function traiter (req, res, t0, deps) {
 
   const [t, l, b, tot, cr, bo] = await Promise.all([
     ecran.aTraiter(base, compte),
-    ecran.liste(base, compte, null, entiteId),
+    ecran.liste(base, compte, null, entiteId, { rattaches: (li.liens || []).map(x => x.property_uuid) }),
     ecran.biens(base, compte, { entites: ej }),
     entiteId ? ecran.totaux(base, compte, { debut: lu.debut, fin: lu.fin, entiteId }) : rien,
     entite && !vueSans ? ecran.credits(base, compte, { debut: lu.debut, fin: lu.fin, entiteId }) : rien,

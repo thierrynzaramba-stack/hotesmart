@@ -942,11 +942,30 @@ test('LE TEST QUI COMPTE : une facture DÉJÀ validée sans entité se corrige�
 
 test('entité vide + logement d\'un AUTRE compte → 403, avant toute lecture de son lien', async () => {
   const AILLEURS = '66666666-6666-4666-8666-666666666666'
-  const { client } = baseEnregistreuse(chargeAVerifier())
+  const { client, requetes } = baseEnregistreuse(chargeAVerifier())
   const ent = entitesComptees({ entites: [E1] })
   const r = await charges.valider(client, { compte: COMPTE, id: ID, champs: { ...SANS, bien_id: AILLEURS } }, { entites: ent })
   assert.equal(r.code, 'bien_hors_compte')
   assert.equal(ent.lu.biens.length, 0)
+  // Review 1, M6 : le cloisonnement, pas seulement l'ordre — le logement se
+  // cherche DANS le compte.
+  const p = requetes.find(x => x.table === 'properties')
+  assert.deepEqual([filtre(p, 'id'), filtre(p, 'user_id')], [AILLEURS, COMPTE])
+})
+
+test('LE TEST QUI COMPTE (review 1, M2) : la garde de la base refuse — le logement rattaché entre-temps — et c\'est un REFUS 409, pas une panne', async () => {
+  const garde = (r) => (r.table === 'charges' && r.op === 'update'
+    ? { data: null, error: { code: '23514', message: 'charges: ce logement a une entite' } }
+    : chargeAVerifier()(r))
+  const { client } = baseEnregistreuse(garde)
+  const r = await charges.valider(client, { compte: COMPTE, id: ID, champs: SANS }, { entites: entitesDouble({ entites: [E1] }) })
+  assert.deepEqual([r.statut, r.code], [409, 'entite_requise'])
+  // Une AUTRE contrainte de la base reste une panne : elle ne dit rien de l'entité.
+  const autre = (r) => (r.table === 'charges' && r.op === 'update'
+    ? { data: null, error: { code: '23514', message: 'new row violates check constraint "charges_impot_ck"' } }
+    : chargeAVerifier()(r))
+  const b = baseEnregistreuse(autre)
+  assert.equal((await charges.valider(b.client, { compte: COMPTE, id: ID, champs: SANS }, { entites: entitesDouble({ entites: [E1] }) })).statut, 503)
 })
 
 test('entité vide : le lien du logement en panne → 503, jamais « sans entité »', async () => {

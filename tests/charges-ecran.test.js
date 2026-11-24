@@ -115,7 +115,10 @@ test('LE TEST QUI COMPTE : chaque lecture porte le compte de la GARDE, et les to
   assert.equal(r.rep.statut, 200)
   for (const q of r.requetes) assert.equal(filtre(q, 'user_id'), TITULAIRE, `${q.table} sans le compte`)
   assert.deepEqual(r.ej.appels.map(a => a[1]), [TITULAIRE, TITULAIRE])
-  assert.deepEqual(r.rpcs.map(x => x.nom).sort(), ['charges_exercices_bornes', 'charges_totaux'])
+  // Lot 5 bis : les bornes « sans entité » (p_entite NULL) disent si l'option
+  // « Sans entité juridique » est offerte.
+  assert.deepEqual(r.rpcs.map(x => x.nom).sort(), ['charges_exercices_bornes', 'charges_exercices_bornes', 'charges_totaux'])
+  assert.deepEqual(r.rpcs.filter(x => x.nom === 'charges_exercices_bornes').map(x => x.args.p_entite).sort(), [ENT_A, null].sort())
   for (const x of r.rpcs) assert.equal(x.args.p_user, TITULAIRE)
   // ⚠ Plus de « toutes les entités » (§14.21, décision 7) : sans entité
   // demandée, la première ACTIVE par son nom — « Moi » avant « SCI ».
@@ -178,21 +181,22 @@ test('une SCI au 1er avril se lit par exercice d\'avril à mars ; les exercices 
   const enCours = ecran.anneeDExercice(jourParis(), '04-01')
   assert.equal(t.proposees[0], String(Math.max(enCours, 2025)))
   assert.equal(t.proposees[t.proposees.length - 1], '2023', 'du premier exercice qui porte une facture')
-  assert.equal(r.rpcs.find(x => x.nom === 'charges_exercices_bornes').args.p_entite, ENT_B)
+  assert.ok(r.rpcs.some(x => x.nom === 'charges_exercices_bornes' && x.args.p_entite === ENT_B))
 })
 
-test('un compte SANS entité : « À traiter » et la liste, pas de totaux ni de lecture du résumé', async () => {
+test('un compte SANS entité ni facture d\'un logement sans entité : « À traiter » et la liste, pas de totaux', async () => {
   const r = await appeler({ entites: entitesDouble({ entites: [] }) })
   assert.equal(r.rep.statut, 200)
   assert.deepEqual(r.rep.corps.totaux, { sans_entite: true })
   assert.equal(r.rep.corps.entite, null)
-  assert.equal(r.rpcs.length, 0)
+  // La seule lecture du résumé : la présence « sans entité » (lot 5 bis).
+  assert.deepEqual(r.rpcs.map(x => [x.nom, x.args.p_entite]), [['charges_exercices_bornes', null]])
 })
 
 test('LE TEST QUI COMPTE : une entité qui n\'est pas du compte rend 404, sans totaux', async () => {
   const r = await appeler({ query: { entite: ENT_AUTRE } })
   assert.equal(r.rep.statut, 404)
-  assert.equal(r.rpcs.length, 0)
+  assert.ok(!r.rpcs.some(x => x.nom === 'charges_totaux' || x.args.p_entite === ENT_AUTRE))
 })
 
 test('une entité mal formée rend 400', async () => {
@@ -217,8 +221,8 @@ test('les entités en panne rendent 503, sans autre lecture que la présence « 
   assert.equal(r.rep.statut, 503)
   // Lot 5 bis (§14.25) : la présence d'un total « Sans entité » part EN MÊME
   // TEMPS que les entités (un compte sans entité ouvre dessus) ; rien après.
-  assert.deepEqual(r.requetes.map(q => q.table), ['charges_resume'])
-  assert.equal(r.rpcs.length, 0)
+  assert.equal(r.requetes.length, 0)
+  assert.deepEqual(r.rpcs.map(x => [x.nom, x.args.p_entite]), [['charges_exercices_bornes', null]])
 })
 
 // ─── La liste, par curseur ───────────────────────────────────────────────────
@@ -398,17 +402,17 @@ test('sans crédit, les échéances ne se lisent pas ; une entité choisie filtr
   assert.equal(panne.rep.corps.credits, null)
 })
 
-test('mesure (case PERFORMANCE, point 8) : l\'écran complet compte 9 lectures sans crédit, 10 avec ; la vue « Sans entité », 8', async () => {
+test('mesure (case PERFORMANCE, point 8) : l\'écran complet compte 9 lectures sans crédit, 10 avec ; la vue « Sans entité », 9', async () => {
   const sans = await appeler()
   const avec = await appeler({ repondre: (q) => (q.table === 'charges_credits' ? { data: [{ id: CREDIT_A }] } : { data: [], count: 0 }) })
   const vueSans = await appeler({ query: { entite: 'sans' } })
   const compte = (r) => r.requetes.length + r.rpcs.length + r.ej.appels.length
   // Lot 5 bis (§14.25.10) : +1, la présence d'un total « Sans entité » (8 → 9,
   // 9 → 10). La vue « Sans entité » ne lit aucun crédit (un crédit a toujours
-  // son entité).
+  // son entité) et lit les liens des logements, que sa liste écarte.
   assert.equal(compte(sans), 9)
   assert.equal(compte(avec), 10)
-  assert.equal(compte(vueSans), 8)
+  assert.equal(compte(vueSans), 9)
   assert.equal(vueSans.requetes.filter(q => q.table === 'charges_credits').length, 0)
 })
 
@@ -623,21 +627,30 @@ test('⚠ 8d : un MEMBRE est refusé AVANT toute lecture ; une entité, un exerc
 })
 
 // ─── « Sans entité juridique » (lot 5 bis, §14.25) ──────────────────────────
-// Une présence de total « sans entité » : la cellule du résumé, `limit 1`.
-const avecSans = (q) => (q.table === 'charges_resume' ? { data: [{ jour: '2026-11-10' }], error: null } : { data: [], error: null, count: 0 })
+// Une présence de total « sans entité » : les bornes du résumé « sans entité »
+// (p_entite NULL), la même règle que les totaux, dite par la base.
+let r0 = 0
+const avecSans = (nom, args) => (nom === 'charges_exercices_bornes'
+  ? { data: args.p_entite === null ? { premier: '2026-11-10', dernier: '2026-11-10' } : { premier: null, dernier: null }, error: null }
+  : { data: TOTAUX, error: null })
+// Les liens bien → entité du double : BIEN_1 est rattaché à ENT_A.
 
 test('LE TEST QUI COMPTE : ?entite=sans lit les totaux, les bornes et la liste SANS entité — p_entite NULL, aucune entité inventée', async () => {
-  const r = await appeler({ query: { entite: 'sans' }, repondre: avecSans })
+  const r = await appeler({ query: { entite: 'sans' }, rpc: avecSans })
   assert.equal(r.rep.statut, 200)
   assert.equal(r.rep.corps.entite, 'sans')
   assert.equal(r.rep.corps.option_sans_entite, true)
-  // Les deux lectures du résumé : « sans entité », c'est NULL, et le compte.
-  assert.deepEqual(r.rpcs.map(x => x.nom).sort(), ['charges_exercices_bornes', 'charges_totaux'])
+  // Les lectures du résumé : « sans entité », c'est NULL, et le compte.
+  assert.deepEqual(r.rpcs.map(x => x.nom).sort(), ['charges_exercices_bornes', 'charges_exercices_bornes', 'charges_totaux'])
   for (const x of r.rpcs) assert.deepEqual([x.args.p_user, x.args.p_entite], [TITULAIRE, null], x.nom)
-  // La liste : les factures sans entité, et elles seules.
+  // La liste : sans entité, AVEC un logement, et pas un logement RATTACHÉ —
+  // la règle des totaux (Thierry, 25 novembre 2026, review 1 B1).
   const liste = r.requetes.find(q => q.table === 'charges' && !(q.optionsSelect && q.optionsSelect.count) && q.limite === 51)
   assert.ok(liste.filtres.some(f => f[0] === 'is' && f[1] === 'entite_juridique_id' && f[2] === null))
+  assert.ok(liste.filtres.some(f => f[0] === 'not' && f[1] === 'bien_id' && f[2] === 'is' && f[3] === null), 'pas une charge générale')
+  assert.ok(liste.filtres.some(f => f[0] === 'not' && f[1] === 'bien_id' && f[2] === 'in' && f[3] === `(${BIEN_1})`), 'pas un logement rattaché')
   assert.ok(!liste.filtres.some(f => f[0] === 'eq' && f[1] === 'entite_juridique_id'))
+  assert.deepEqual(r.ej.appels.map(a => a[0]).sort(), ['entites', 'liens', 'liens'])
   // Aucun crédit (un crédit a toujours son entité), et l'année civile.
   assert.equal(r.requetes.filter(q => q.table === 'charges_credits').length, 0)
   assert.deepEqual(r.rep.corps.credits, { liste: [], echeances: [], aujourdhui: null })
@@ -646,13 +659,10 @@ test('LE TEST QUI COMPTE : ?entite=sans lit les totaux, les bornes et la liste S
   assert.equal(r.rep.corps.totaux.standard, true)
 })
 
-test('la présence « sans entité » : une cellule du résumé du compte, sans entité, qui compte — une ligne au plus', async () => {
-  const r = await appeler({ repondre: avecSans })
-  const q = r.requetes.find(x => x.table === 'charges_resume')
-  assert.equal(filtre(q, 'user_id'), TITULAIRE)
-  assert.ok(q.filtres.some(f => f[0] === 'is' && f[1] === 'entite_juridique_id' && f[2] === null))
-  assert.ok(q.filtres.some(f => f[0] === 'or' && f[1] === 'nb_factures.gt.0,nb_etale.gt.0'))
-  assert.equal(q.limite, 1)
+test('la présence « sans entité » : les bornes du résumé « sans entité » du compte — la règle des totaux, dite par la base', async () => {
+  const r = await appeler({ rpc: avecSans })
+  assert.ok(r.rpcs.some(x => x.nom === 'charges_exercices_bornes' && x.args.p_user === TITULAIRE && x.args.p_entite === null))
+  assert.equal(r.requetes.filter(x => x.table === 'charges_resume').length, 0, 'aucune lecture du résumé hors de ses fonctions')
   // Un compte AVEC entités : la première reste lue par défaut, l'option est offerte.
   assert.equal(r.rep.corps.entite, ENT_A)
   assert.equal(r.rep.corps.option_sans_entite, true)
@@ -663,19 +673,19 @@ test('la présence « sans entité » : une cellule du résumé du compte, sans 
 
 test('LE TEST QUI COMPTE : un compte SANS aucune entité ouvre sur « Sans entité » s\'il y a de quoi l\'afficher ; sinon, comme avant', async () => {
   const aucune = entitesDouble({ entites: [] })
-  const r = await appeler({ entites: aucune, repondre: avecSans })
+  const r = await appeler({ entites: aucune, rpc: avecSans })
   assert.equal(r.rep.corps.entite, 'sans')
   assert.equal(r.rep.corps.totaux.entite, 'sans')
   assert.ok(r.rpcs.some(x => x.nom === 'charges_totaux' && x.args.p_entite === null))
   const vide = await appeler({ entites: entitesDouble({ entites: [] }) })
   assert.equal(vide.rep.corps.entite, null)
   assert.deepEqual(vide.rep.corps.totaux, { sans_entite: true })
-  assert.equal(vide.rpcs.length, 0, 'ni totaux ni bornes')
+  assert.deepEqual(vide.rpcs.map(x => [x.nom, x.args.p_entite]), [['charges_exercices_bornes', null]], 'la présence seule : ni totaux ni bornes d\'exercice')
   assert.equal(vide.rep.corps.option_sans_entite, false)
 })
 
 test('?entite=sans : la présence en panne n\'empêche pas la vue, et l\'option reste offerte puisqu\'on la lit', async () => {
-  const r = await appeler({ query: { entite: 'sans' }, repondre: (q) => (q.table === 'charges_resume' ? { data: null, error: { message: 'panne' } } : { data: [], error: null, count: 0 }) })
+  const r = await appeler({ query: { entite: 'sans' }, rpc: (nom, args) => (nom === 'charges_exercices_bornes' && args.p_entite === null && !r0++ ? { data: null, error: { message: 'panne' } } : { data: TOTAUX, error: null }) })
   assert.equal(r.rep.statut, 200)
   assert.equal(r.rep.corps.option_sans_entite, true)
 })
@@ -724,4 +734,26 @@ test('LE TEST QUI COMPTE : les lectures du résumé refusent une entité ABSENTE
   await ecran.totaux(client, TITULAIRE, { ...plage, entiteId: ENT_A })
   await ecran.totaux(client, TITULAIRE, { ...plage, entiteId: ecran.SANS_ENTITE })
   assert.deepEqual(rpcs.map(x => x.args.p_entite), [ENT_A, null])
+})
+
+test('« Afficher plus » en vue « sans » : les logements rattachés relus et écartés ; leurs liens en panne → 503, aucune facture lue', async () => {
+  const r = await appeler({ query: { entite: 'sans', curseur: `2026-10-15|${CREE}|${uuid(51)}` } })
+  assert.equal(r.rep.statut, 200)
+  assert.deepEqual(r.ej.appels.map(a => a[0]), ['liens'])
+  const q = r.requetes.find(x => x.table === 'charges')
+  assert.ok(q.filtres.some(f => f[0] === 'not' && f[1] === 'bien_id' && f[2] === 'in' && f[3] === `(${BIEN_1})`))
+  const panne = entitesDouble({ entites: [] })
+  panne.liensDuCompte = async (u) => { panne.appels.push(['liens', u]); return { ok: false, motif: 'panne' } }
+  const p = await appeler({ query: { entite: 'sans', curseur: `2026-10-15|${CREE}|${uuid(51)}` }, entites: panne })
+  assert.equal(p.rep.statut, 503)
+  assert.equal(p.requetes.length, 0)
+  const e = await appeler({ query: { entite: 'sans' }, entites: panne })
+  assert.equal(e.rep.statut, 503)
+})
+
+test('la liste « sans entité » refuse un lien qui ne serait pas un UUID (il entre dans un filtre)', async () => {
+  const { client, requetes } = baseEnregistreuse(() => ({ data: [], error: null }))
+  const l = await ecran.liste(client, TITULAIRE, null, ecran.SANS_ENTITE, { rattaches: ['x),id.neq.(0'] })
+  assert.equal(l.ok, false)
+  assert.equal(requetes.length, 0)
 })

@@ -5388,7 +5388,15 @@ découle :
 | crédit (import du tableau) | entité obligatoire | **inchangé** : la consigne parle des factures d'un logement |
 
 « Sans entité » veut dire **aucune ligne dans `biens_entites`** (D2 bis,
-`entiteDuBien` rend `null`). Un logement rattaché à une entité **archivée**
+`entiteDuBien` rend `null`).
+
+**Et le total « Sans entité juridique » ne contient QUE ces factures-là**
+(Thierry, 25 novembre 2026, après la review 1, constat B1 : « Logements sans
+entité ») : sans entité, **avec** un logement, et ce logement sans entité. Une
+facture générale dont HôteSmart n'a pas reconnu l'entité attend dans « À
+traiter », hors totaux, comme avant ; une facture d'un logement rattaché à une
+entité archivée aussi. Une facture validée dont le logement a été **supprimé**
+sort des totaux et de l'export (dette 5 bis-1). Un logement rattaché à une entité **archivée**
 n'est pas « sans entité » : il garde la règle d'aujourd'hui (on le rattache à
 une entité active, et ses factures sans entité le suivent).
 
@@ -5421,8 +5429,10 @@ apparaîtront dans l'export de l'entité au prochain téléchargement.
 est **retirée**, et remplacée par un déclencheur `before insert or update` sur
 `charges`, qui refuse (23514) :
 1. une facture **validée**, sans entité, dont le logement **a** une entité ;
-2. une facture qui **devient** validée sans entité ni logement (insertion, ou
-   passage d'un autre statut, ou d'une entité à aucune).
+2. une facture qui **devient** validée sans entité ni logement (insertion,
+   passage d'un autre statut, d'une entité à aucune, ou **perte de son
+   logement par un writer** — review 1, M3 : seule la suppression du logement,
+   dont la ligne n'est alors plus visible, y mène).
 
 ⚠ **Pas de contrainte `check` à la place, et c'est voulu** : la suppression
 d'un logement met `bien_id` à `NULL` (`on delete set null`). Une contrainte
@@ -5437,8 +5447,18 @@ verrou de compte** (`charges_verrou_compte`, déjà pris par
 lire `biens_entites` ; celui de `biens_entites`, **avant** de déplacer les
 factures. Quel que soit l'ordre, la seconde transaction voit la première
 (une fonction plpgsql volatile relit à chaque instruction, en `read
-committed`) : soit la validation sans entité est refusée, soit la facture
-validée est déplacée.
+committed`) : soit la validation sans entité est refusée — un **409**
+`entite_requise`, pas une panne (review 1, M2) —, soit la facture validée est
+déplacée.
+
+⚠ **Et les lignes avant le verrou, dans le déplacement** (review 1, M1, mesuré
+en interblocage) : toute écriture sur `charges` tient sa ligne PUIS prend le
+verrou du compte. Le déplacement prenait le verrou puis les lignes : avec un
+tiers qui tient le verrou (le recalcul, une autre écriture), une écriture
+ordinaire sur une facture du logement et le rattachement s'attendaient l'un
+l'autre, et Postgres annulait le rattachement. Il verrouille désormais les
+factures candidates (`for update`, par identifiant) **puis** le compte, puis
+les déplace : l'ordre de tout le monde.
 
 **La garantie porte sur les factures validées.** Une facture à vérifier
 insérée sans entité au moment exact où son logement est rattaché peut garder
@@ -5448,10 +5468,16 @@ validation sans entité est refusée (`entite_requise`). Rien ne compte faux.
 #### 14.25.4 Les fonctions SQL des totaux
 
 `charges_totaux`, `charges_exercices_bornes` et `charges_detail_mois`
-filtraient par `entite_juridique_id = p_entite`. Elles filtrent désormais par
-`is not distinct from p_entite` : **`p_entite` NULL veut dire « sans
-entité »**. Même signature : un `create or replace`, pas de fenêtre où la
-fonction manque, droits inchangés.
+filtraient par `entite_juridique_id = p_entite`. **`p_entite` NULL veut
+désormais dire « sans entité »** au sens du §14.25.1 : sans entité, avec un
+logement, et ce logement sans ligne `biens_entites`. Même signature : un
+`create or replace`, pas de fenêtre où la fonction manque, droits inchangés.
+
+⚠ **L'ORDRE MIGRATION → CODE EST CRITIQUE, ET INVERSÉ IL NE SE VOIT PAS**
+(review 1, M5) : sans la migration, `charges_totaux(NULL)` veut encore dire
+« toutes les entités », et la vue « Sans entité » afficherait en silence le
+total de tout le compte. La migration passe en production **avant** le
+merge.
 
 ⚠ **L'ancien sens de `NULL` dans `charges_totaux` (« toutes les entités »)
 est abandonné**, et c'est mesuré : aucun appelant ne le passe — le seul est
@@ -5469,8 +5495,12 @@ une entité absente : un oubli d'argument ne peut plus devenir une lecture
 
 - **Le choix d'entité** (en tête de page) gagne une option **« Sans entité
   juridique »**, en dernier. Elle apparaît quand le résumé porte au moins une
-  facture comptée sans entité (une lecture du résumé, `limit 1`) — et quand
-  c'est elle qu'on lit.
+  facture comptée sans entité — lue par `charges_exercices_bornes(NULL)`, la
+  règle même des totaux — et quand c'est elle qu'on lit.
+- **La liste** « sans entité » suit la même règle : sans entité, avec un
+  logement, et pas un logement rattaché (les liens sont relus et écartés,
+  `not bien_id in (…)`, chaque identifiant vérifié avant d'entrer dans le
+  filtre).
 - **Par défaut** : la première entité active, comme aujourd'hui. Un compte
   **sans aucune entité** qui a des factures sans entité ouvre sur « Sans entité
   juridique » (il avait jusqu'ici le message « il faut une entité »).
@@ -5553,7 +5583,7 @@ lectures d'entités, pour UN appel d'écran.
 |---|---|---|---|
 | une entité, sans crédit | 1 | 8 | **9** (+ la présence, en parallèle des entités) |
 | une entité, avec crédits | 1 | 9 | **10** |
-| « Sans entité juridique » | 1 | — | **8** (aucun crédit lu) |
+| « Sans entité juridique » | 1 | — | **9** (aucun crédit lu ; les liens, que la liste écarte) |
 | détail d'un mois « sans entité » | 1 | — | **1** (aucune entité relue) |
 
 Octets : la réponse gagne `option_sans_entite` (un booléen, ~26 octets) ;
@@ -5563,7 +5593,10 @@ rien d'autre ne change de taille.
 
 - **Épreuve sur un vrai Postgres** (`scripts/eprouver-charges-sans-entite.sh`) :
   la chaîne réelle des migrations du compte de charges, puis celle-ci, deux
-  fois. **44 gestes, 0 écart** — dont la garde (validée sans entité sur un
+  fois. **51 gestes, 0 écart** après la review 1 (44 avant : s'ajoutent le
+  logement retiré par un writer, une facture à vérifier d'un logement sans
+  entité comptée, la facture d'un logement supprimé qui sort des totaux, et
+  les courses 3 et 4 avec un tiers qui tient le verrou) — dont la garde (validée sans entité sur un
   logement sans / avec / à entité archivée, sans logement, transitions), le
   rattrapage (entité active seulement), le déplacement au rattachement et au
   changement d'entité, le détachement qui ne touche rien, la suppression d'un
@@ -5572,7 +5605,12 @@ rien d'autre ne change de taille.
   Contrôle : `f f f f t` avant, `t t t t t` après.
 - **Trois sabotages de la migration, trois rouges** : verrou retiré de la
   garde (course 2 passe), verrou retiré du déplacement (courses 1 et 2),
-  `= p_entite` remis dans `charges_totaux` (totaux à 0).
+  `= p_entite` remis dans `charges_totaux` (totaux à 0). **Après la review 1,
+  trois de plus, trois rouges** : le `for update` retiré du déplacement
+  (course 3 : interblocage, le rattachement annulé), la règle M3 retirée (le
+  logement retiré passe), `is not distinct from` remis (la facture générale,
+  celle d'un logement rattaché et celle d'une entité archivée reviennent dans
+  le total).
 - **Contre-épreuve des tests** contre le code de `main` : 23 des nouveaux
   tests rougissent. Restent verts, et c'est leur rôle, quatre gardes de
   non-régression qui disent ce que l'assouplissement **n'ouvre pas** : une
@@ -5582,9 +5620,52 @@ rien d'autre ne change de taille.
 - **Trois sabotages du code, trois rouges** : le refus « logement avec
   entité » retiré (writer), `sans` non traduit en NULL (lectures), `sans`
   envoyé tel quel par la fiche (page).
-- **Suite** : 9439 / 9439 à l'heure réelle. À J+60 : 9438, le rouge étant
+- **Suite** (après la review 1) : 9442 / 9442 à l'heure réelle. À J+60 :
+  9441, le rouge étant
   `tests/marche-comparables-api.test.js` (dette 124, déjà rouge sur `main` à
   J+60, mesuré : aucun fichier de ce lot).
+
+#### 14.25.12 Review 1 — rapport recopié, et ce qui en a été fait
+
+Lancée sur l'arbre `/home/claude/hotesmart-5bis`, branche
+`charges-sans-entite`, plage
+`874e6b7c7a803226a268fef6f97d80f2c7063a69..8bcefcd61126762faa04909975e50f4a77e6898e`.
+Chaque fichier cité est dans le diff du lot. Rapport recopié tel quel :
+
+> Arbre lu : `/home/claude/hotesmart-5bis`, branche `charges-sans-entite`, HEAD `8bcefcd61126762faa04909975e50f4a77e6898e`, plage `874e6b7c7a803226a268fef6f97d80f2c7063a69..8bcefcd61126762faa04909975e50f4a77e6898e`. Rien modifié dans l'arbre (`git status` : seul `node_modules` non suivi) ; mes essais tournaient sur un cluster Postgres 16 jetable dans `/tmp`, supprimé.
+>
+> Lancé : l'épreuve `bash scripts/eprouver-charges-sans-entite.sh` → **44 ok, 0 écart** ; les 5 fichiers de tests du lot → **221/221** ; la suite complète → **9439/9439, 0 rouge** ; `scripts/i18n-check.js` vert (1742 clés ×3) ; `node -c` vert sur les 3 JS.
+>
+> **SÉCURITÉ** — Aucun constat.
+>
+> **BLOQUANT — B1. « Sans entité juridique » inclut des factures qui ne sont pas « d'un logement sans entité » ; le rappel affiché devient faux.** `lib/charges/ecran.js:409` (présence), `:227` (liste), `:378` (export) ; `migrations/2026-11-24-charges-sans-entite.sql:179, 286, 316` (les trois lectures) ; `shared/i18n/fr.json:1741` (texte du rappel). « Sans entité » n'est filtré que par `entite_juridique_id IS NULL` ; le résumé compte `a_verifier` + `validee` sans regarder le logement. Mesuré sur Postgres : un compte dont le seul logement a une entité dépose une facture dont l'entité n'est pas reconnue (cas courant depuis la décision « dans le doute, rien » du 22 nov.) → présence = 1, l'option « Sans entité juridique » apparaît, total sans entité = 12000 centimes, liste = `a_verifier/-` et un `tableau/-` (tableau d'amortissement). L'hôte voit alors le rappel « Ces factures concernent des logements rattachés à aucune entité juridique… » au-dessus de charges générales pas encore rangées et d'un tableau d'amortissement. Même chose pour les factures (à vérifier) d'un logement rattaché à une entité archivée (arrivées par e-mail, ou restées après le rattrapage) : le rappel les présente comme d'un logement sans entité. L'épreuve fige d'ailleurs ce comportement (geste 17 : 5 factures, dont C2 sans logement et C4 sur X qui a une entité). Contredit le §14.25.1 et le texte du rappel. À trancher (décision produit, Thierry) : (a) limiter « sans » aux factures portant un logement — `bien_id is not null` dans la présence et la liste, `(p_entite is not null or r.bien_id is not null)` dans les trois fonctions ; attention, une facture validée dont le logement a été supprimé en sortirait (la spec dit le contraire, §14.25.3), il faut alors décider de son sort ; ou (b) garder le périmètre, mais reformuler le rappel et le titre (« factures pas encore rattachées à une entité »).
+>
+> **MINEUR — M1. Interblocage possible entre un rattachement et une écriture sur une facture du logement ; la spec annonce deux issues, il y en a une troisième.** `migrations/2026-11-24-charges-sans-entite.sql:117-123` (et spec §14.25.3, « Quel que soit l'ordre… soit refusée, soit déplacée »). Le déplacement prend d'abord le verrou de compte, puis les lignes de `charges` ; toute écriture sur `charges` fait l'inverse (ligne verrouillée avant le déclencheur BEFORE, puis la garde ou `charges_resume_suivre` prend le verrou de compte). Mesuré, avec le verrou tenu par une troisième session (ce que fait le recalcul du cron ou toute écriture en cours) : scénario A, validation sans entité de X1 (logement P1) pendant le rattachement de P1 → `ERROR: deadlock detected`, le rattachement est annulé ; scénario B, simple `update fournisseur_nom` de X2 (même schéma que la lecture IA d'une facture reçue par e-mail) pendant le rattachement de P2 → même interblocage. Données cohérentes, mais l'hôte prend une erreur au rattachement (ou un 503 côté écriture). Corrections possibles : dans le déclencheur, verrouiller d'abord les lignes candidates (`perform 1 from charges where user_id=… and bien_id=… and entite_juridique_id is null order by id for update`) puis le verrou de compte, puis l'`update` ; à défaut, rejouer une fois sur 40P01 dans `rattacherBien`/`valider`. Ajouter une course 3 à l'épreuve (X portant déjà `bien_id`, verrou tenu par un tiers).
+>
+> **M2. `lib/charges.js:550` : un refus de la garde (23514) est rendu comme une panne.** Contrôles JS passés, rattachement concurrent commité → l'`UPDATE` est refusé par la garde → `panne()` → 503 « erreur serveur ». La spec annonce « la validation est refusée ». Correction : traduire `error.code === '23514'` en `refus(409, 'entite_requise')`.
+>
+> **M3. La garde laisse un writer retirer le logement d'une facture validée sans entité.** `migrations/2026-11-24-charges-sans-entite.sql:63-71`. Mesuré : `update charges set bien_id = null` sur une facture validée sans entité du logement P3 passe → `validee|∅|∅`. Le §14.25.3 dit que seule la suppression du logement doit mener là ; aucun writer actuel ne le fait. Correction : refuser aussi quand `old.bien_id` existe encore dans `properties` (pendant la cascade `on delete set null`, la ligne n'est plus visible, la suppression reste permise).
+>
+> **M4. Documentation inexacte sur les logements d'une entité archivée.** `docs/kb/compte-de-charges.md:133` et le commentaire du rattrapage (`migration:139-141`) disent que ces factures « gardent leur rappel ». Mesuré dans le banc de la vraie page : facture sur un logement dont l'entité est archivée → aucun rappel (`rappel-entite` caché, pas de « Entité juridique manquante » sur la ligne), le choix d'entité vide, et ni « Sans entité » ni l'entité active ne passeraient (`entite_requise` / `bien_hors_entite`). Comportement antérieur, exclu par le §14.25.9, mais la doc l'affirme. Corriger la doc, ou afficher le rappel dans ce cas.
+>
+> **M5. L'ordre migration → code est critique, et l'inversion ne se voit pas.** Si le code part avant la migration, l'ancien `charges_totaux(NULL)` veut dire « toutes les entités » : la vue « Sans entité » afficherait en silence le total de toutes les entités. À dire noir sur blanc dans le message de commit et l'annonce du go prod.
+>
+> **M6. Un test qui ne prouve pas tout ce qu'il semble couvrir.** `tests/charges-writer.test.js`, « entité vide + logement d'un AUTRE compte → 403 » : le double rend `null` pour `AILLEURS` même sans filtre `user_id` ; il prouve l'ordre (le lien n'est pas lu), pas le cloisonnement. Pas faux, mais à ne pas compter comme preuve de compte.
+>
+> **Vérifié sans constat** — Compte toujours porté : `api/ecran/charges.js` refuse le membre avant toute lecture ; présence, liste, totaux, bornes, détail et export filtrés par le compte de la garde ; `?entite=sans` ne relit aucune entité ; une valeur ni UUID ni `sans` → 400 ; une entité d'un autre compte → 404 ; en-tête privé avant tout refus, `Server-Timing` inchangé. Base, cloisonnement : le déplacement filtre `c.user_id = new.user_id` ; `biens_entites` a une clé primaire `property_uuid`, des clés composées vers l'entité, un déclencheur « même compte », et l'écriture y est retirée à `anon`/`authenticated` ; le rattrapage est joint par compte et ne prend que les entités actives. Droits : les fonctions `security definer` marchent sous `service_role` (mesuré : validation sans entité puis déplacement) ; les droits des trois lectures sont conservés par `create or replace`. Writers existants : aucun n'est refusé à tort par la garde — `valider` couvert ; les échéances de crédit ont toujours une entité (`not null`) ; `passerEnTableau` / `tableauEnFacture` / `appliquerLecture` ne posent pas `validee` ; `trancher`, les doublons et la suppression d'un logement passent ; les deux courses de l'épreuve sont justes, le rattrapage est rejouable. Ancien sens de NULL : aucun appelant n'en dépend dans tout l'arbre (seul `lib/charges/ecran.js` ; le contrôle 2026-11-13 n'en lit que les clés ; `scripts/recette-charges.js` lit `charges_resume` en direct ; aucun cron). Écran : choix par défaut inchangé pour un compte avec entités ; un compte sans entité ouvre sur « sans » ; année civile, aucun crédit, détail du mois et export « sans » corrects. Page : option en dernier, entité vide envoyée avec le logement exigé, rappel qui suit le choix, fiche d'un compte avec entités comme avant. Tests : ils disent ce qu'ils prouvent, à M6 près.
+
+**Ce qui en a été fait.** Aucun constat de sécurité : pas de seconde review
+(règle « une review par commit »).
+
+| constat | décision | ce qui a changé | preuve |
+|---|---|---|---|
+| B1 | **Thierry, 25 novembre 2026 : « Logements sans entité »** | « sans » = sans entité, avec un logement, ce logement sans ligne `biens_entites` — dans les trois fonctions (`not exists`), la présence (par `charges_exercices_bornes(NULL)`, la règle même), la liste (liens relus et écartés) et l'export (`bien_id not null`) | épreuve, gestes 17, 18, 25, 35 bis ; sabotage : `is not distinct from` remis → 6 écarts ; tests de l'endpoint |
+| M1 | corrigé comme proposé | `for update` sur les factures candidates, PUIS le verrou de compte, PUIS le déplacement | épreuve, courses 3 et 4 ; sabotage : `for update` retiré → interblocage, course 3 en écart |
+| M2 | corrigé | le refus de LA garde (`23514` + son message) devient `409 entite_requise` ; toute autre contrainte reste une panne | `tests/charges-writer.test.js` (les deux cas) |
+| M3 | corrigé comme proposé | la garde refuse aussi la perte du logement tant que sa ligne `properties` existe | épreuve, geste 16 bis ; sabotage → écart |
+| M4 | doc corrigée | KB et commentaire du rattrapage ; le rappel absent pour une entité archivée devient la dette 5 bis-2 | — |
+| M5 | dit | §14.25.4, message de commit, remise au chef de file : migration en production AVANT le merge | — |
+| M6 | corrigé | le test vérifie que le logement se cherche dans le compte (`id` ET `user_id`) | `tests/charges-writer.test.js` |
 
 ## 12. Trace des reviews du lot 2
 
