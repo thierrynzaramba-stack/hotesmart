@@ -5625,6 +5625,13 @@ rien d'autre ne change de taille.
   `tests/marche-comparables-api.test.js` (dette 124, déjà rouge sur `main` à
   J+60, mesuré : aucun fichier de ce lot).
 
+- **Migration appliquée par Thierry** : staging le 24 novembre 2026 à
+  14 h 22, recollée dans sa version d'après la review le 25 novembre à
+  00 h 34 ; production le 25 novembre à 00 h 40. Contrôle : 5 lignes sur 5 à
+  `true` sur les deux bases (une première tentative sur la production avait
+  rendu `f f f f t` — la migration avait été collée sur l'autre base ; le
+  contrôle l'a dit, et elle a été recollée au bon endroit).
+
 #### 14.25.12 Review 1 — rapport recopié, et ce qui en a été fait
 
 Lancée sur l'arbre `/home/claude/hotesmart-5bis`, branche
