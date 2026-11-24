@@ -5346,6 +5346,35 @@ Contre-épreuve des correctifs : 17 sabotages, 17 rouges (en plus des 26 du
 lot). Un premier sabotage — retirer le seuil des 17 s — restait vert : le test
 des pièces lentes vérifie désormais qu'aucune pièce ne commence après 17 s.
 
+#### 14.24.9 Recette et mise en production (23-24 novembre 2026)
+
+- **Recette écran sur staging** (Thierry, 23 novembre, 22 h 45) : la fenêtre,
+  « Copier », « Changer » et le rappel sont conformes ; un défaut, le lien
+  « Envoyer par e-mail » parti à gauche (une règle `.chg-lien` plus bas dans
+  la feuille l'emportait), corrigé sur la branche du lot (`52ebae43`) et
+  revu sur staging.
+- **Production** : go de Thierry au chef de file le 23 novembre à 23 h 08 ;
+  merge dans `main` `874e6b7c`, déployé à 23 h 16.
+- **Recette des vrais e-mails** (journal Vercel, requête → ligne
+  `factures_recue`) :
+
+| Essai | Résultat | Durée du webhook |
+|---|---|---|
+| PDF transféré (à l'adresse de La bulle) | entré, lu, rangé (23 h 26) | ~5 s |
+| Photo prise au téléphone (Cœur de vie 23) | entrée, lue, rangée (23 h 30) | ~10 s |
+| E-mail sans pièce jointe | à 23 h 33, la relecture chez Brevo rend 500 : 503, Brevo rejoue ; à 23 h 38, ligne « sans facture lisible » posée | ~1 s |
+| « Changer », puis un PDF à l'ancienne adresse | rien n'entre (constaté par Thierry le 24 novembre à 11 h 46, l'e-mail étant arrivé avec retard) | — |
+
+  La lecture IA à l'arrivée tient largement dans le budget (55 s) : le
+  risque noté au §14.24.7 ne s'est pas présenté.
+- **Le rejeu a servi dès le premier soir** : la panne passagère de Brevo
+  (500 sur la relecture) a été rattrapée sans intervention, comme prévu au
+  §7.
+- **Cron** : six passages de 23 h 25 à 23 h 50, tous en 200, `errors: []`.
+- **Reste à observer** : qu'une réponse de VOYAGEUR arrive toujours dans la
+  messagerie, au premier cas réel (le chemin est inchangé et testé, mais
+  aucun cas réel n'est passé depuis la mise en production).
+
 ### 14.25 Lot 5 bis — valider une facture d'un logement sans entité (23 novembre 2026)
 
 **Décision de Thierry, 23 novembre 2026, 15 h 16 et 15 h 18.** « Un bien peut
