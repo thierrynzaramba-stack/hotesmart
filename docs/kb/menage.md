@@ -5250,3 +5250,33 @@ les réglages de chaque personne qui a le domaine `menages` sur le bien :
   remplacent sans sonner** (décision du 9 novembre 2026).
 Aucune de ces notifications ne lève : la passe du ménage continue.
 
+## « Ce que vous lui confiez » refusait tout dès qu'un bien n'avait pas de jours réglés (24 novembre 2026)
+
+**Le symptôme, en production** : confier La bulle (« Proposé en 1er ») à une
+prestataire déjà attribuée d'office sur Cœur de vie 23 affichait « Une erreur
+est survenue », et le menu revenait sur « Ne pas lui confier ». Console :
+`Jours attitrés invalides`. Rien n'était écrit (le refus précède toute écriture).
+
+**La cause** : la fiche V5 (`liaisonsAEnvoyer`, pages/menages.html, depuis le
+14 octobre 2026) renvoie TOUTES les liaisons actives en recopiant l'état relu —
+`weekdays: null` pour des jours jamais réglés, et pour un bien qu'on confie à
+l'instant. `ecrireLiaisons` (api/menages.js) n'acceptait qu'un tableau ou
+l'absence du champ : `null` rendait 400. Donc **tout** geste de la section — le
+menu d'un bien comme la case d'un jour — échouait dès qu'UN des biens de la
+personne avait des jours non réglés.
+
+**Le correctif, côté serveur** : `weekdays: null` vaut ABSENT — on garde ce qui
+est en base, `null` pour une liaison neuve. Lu comme absent plutôt qu'écrit tel
+quel : une fiche ouverte avant qu'un autre écran règle les jours ne les efface
+pas en enregistrant un autre bien. La page n'est pas touchée (refonte V5 en cours).
+
+**Pourquoi aucun test ne l'a vu** : ceux de l'endpoint écrivaient leurs charges
+à la main, et aucun ne branchait la page sur le serveur. Les deux tests « LE
+GESTE RÉEL » de `tests/menages-liaisons.test.js` prennent la charge à la source :
+ils extraient `liaisonsAEnvoyer` de la page et passent sa sortie au handler.
+⚠ Aucun appel ne peut plus remettre `null` sur une liaison existante : un geste
+« jours non réglés » à venir devra envoyer autre chose qu'un `null`.
+⚠ Hors de ce correctif : l'ancien formulaire (apps/menages/prestataires.html)
+coche les sept cases d'une liaison à `null` et renvoie `[0..6]` — une liaison
+« proposée » jamais sollicitée y passe à « sollicitée tous les jours ».
+Review et suites : docs/recette/reviews-liaisons-jours-non-regles.md.

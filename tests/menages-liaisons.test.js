@@ -30,6 +30,14 @@ const MARIE = 'bbbb2222-2222-4222-8222-222222222222'
 const TOUS_LES_JOURS = [0, 1, 2, 3, 4, 5, 6]
 
 
+// ⚠ LES FILTRES `.eq()` SONT HONORÉS sur les liaisons (REVIEW.md règle 22) :
+// depuis que `weekdays: null` reprend les jours lus en base, la lecture par
+// `provider_id` est le chemin de chaque geste de la fiche — un double qui
+// l'ignorait laissait Marie hériter des jours d'une collègue, au vert. Un
+// champ absent de la fixture ne filtre pas.
+const filtrer = (lignes, f) => lignes.filter(l =>
+  Object.entries(f).every(([c, v]) => !(c in l) || String(l[c]) === String(v)))
+
 function preparer ({ user = PROD, profil = null, permissions = null,
                      prestataire = { id: MARIE, first_name: 'Marie', active: true },
                      biens = [{ provider_property_id: '209413' }, { provider_property_id: '169567' }],
@@ -54,7 +62,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         range (from) {
           if (from !== 0) return Promise.resolve({ data: [], error: null })
           if (table === 'property_cleaning_providers') {
-            const d = a.f.user_id === undefined || a.f.user_id === PROD ? apres : []
+            const d = a.f.user_id === undefined || a.f.user_id === PROD ? filtrer(apres, a.f) : []
             return Promise.resolve({ data: d, error: null })
           }
           return Promise.resolve({ data: [], error: null })
@@ -113,7 +121,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
             return Promise.resolve({ data: d, error: a.f.user_id === undefined ? null : null }).then(ok)
           }
           if (table === 'property_cleaning_providers') {
-            const d = a.f.user_id === undefined || a.f.user_id === PROD ? apres : []
+            const d = a.f.user_id === undefined || a.f.user_id === PROD ? filtrer(apres, a.f) : []
             return Promise.resolve({ data: d, error: null }).then(ok)
           }
           return Promise.resolve({ data: [], error: null }).then(ok)
@@ -746,6 +754,119 @@ test('un champ ABSENT ne remet rien à zéro', async () => {
   const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
   assert.deepStrictEqual(up.rows[0].weekdays, [0, 6])
   assert.strictEqual(up.rows[0].requires_ack, false)
+})
+
+test('`weekdays: null` vaut ABSENT : accepté, et il ne remet rien à zéro', async () => {
+  // ⚠ Refusé en 400 jusqu'au 24 novembre 2026, alors que la fiche V5 l'envoie
+  // pour toute liaison sans jours réglés. Lu comme absent : une fiche ouverte
+  // avant qu'un autre écran règle les jours ne les efface pas.
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1,
+              requires_ack: true, weekdays: [0, 6] }]
+  })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons: [
+    { property_id: '209413', rang: 1, requires_ack: true, weekdays: null }
+  ] }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.deepStrictEqual(up.rows[0].weekdays, [0, 6])
+})
+
+// ─── LE CONTRAT AVEC LA FICHE V5 : ce qu'elle envoie, le serveur l'accepte ──
+//
+// ⚠ Vécu le 24 novembre 2026 : confier La bulle à une prestataire déjà
+// attribuée d'office sur Cœur de vie 23 rendait « Une erreur est survenue ».
+// La fiche recopie l'état relu (`weekdays: null` pour des jours non réglés),
+// le serveur refusait `null`, et aucun test ne branchait l'un sur l'autre :
+// les tests de l'endpoint écrivaient leurs charges à la main. Celui-ci prend la
+// charge à la source — la fonction de la page qui la construit.
+function liaisonsDeLaFiche (fiche, modif) {
+  const page = PAGE_MENAGES()
+  const debut = page.indexOf('function liaisonsAEnvoyer (modif) {')
+  assert.ok(debut >= 0, 'liaisonsAEnvoyer introuvable dans pages/menages.html')
+  const m = /\r?\n\}\r?\n/.exec(page.slice(debut))
+  assert.ok(m, 'fin de liaisonsAEnvoyer introuvable')
+  // ⚠ ET C'EST BIEN ELLE QUI PART : sans ce contrôle, le test resterait vert
+  // sur du code mort le jour où l'envoi cesserait de l'appeler.
+  assert.match(page, /const liaisons = liaisonsAEnvoyer\(modif\)\s+const r = await poster\('\/api\/menages',\s+\{ action: 'liaisons', provider_id: cfg\.profilId, liaisons \}\)/,
+    'envoyerLiaisons doit poster la sortie de liaisonsAEnvoyer')
+  // eslint-disable-next-line no-new-func
+  const construire = new Function('cfg', page.slice(debut, debut + m.index + m[0].length) + '\nreturn liaisonsAEnvoyer')
+  // L'aller-retour JSON de `poster` : c'est cette forme qui arrive au serveur.
+  return JSON.parse(JSON.stringify(construire({ fiche })(modif)))
+}
+let pageMenages = null
+const PAGE_MENAGES = () => (pageMenages ||= require('node:fs').readFileSync(
+  path.join(__dirname, '..', 'pages', 'menages.html'), 'utf8'))
+
+const FICHE_ANA = {
+  biens: [{ id: '169567', nom: 'Cœur de vie 23' }, { id: '209413', nom: 'La bulle' }],
+  // Attribuée d'office sur Cœur de vie 23, jours jamais réglés : `null`.
+  liaisons: [{ property_id: '169567', rang: 1, requires_ack: false, weekdays: null, active: true }]
+}
+const LIAISON_ANA = { user_id: PROD, property_id: '169567', provider_id: MARIE, rang: 1,
+                      requires_ack: false, weekdays: null, active: true }
+
+test('LE GESTE RÉEL : confier un bien en « Proposé en 1er » à une prestataire attribuée d’office ailleurs', async () => {
+  // Le choix `p1` du menu, tel que la page l'écrit.
+  assert.ok(PAGE_MENAGES().includes('p1: { active: true, requires_ack: true, rang: 1 }'),
+    'le choix « Proposé en 1er » a changé dans pages/menages.html')
+  const p1 = { active: true, requires_ack: true, rang: 1 }
+  const liaisons = liaisonsDeLaFiche(FICHE_ANA, b => (b.property_id === '209413' ? { ...b, ...p1 } : b))
+  // Le jeu d'essai, vérifié : la fiche envoie bien `null` pour les deux biens.
+  assert.deepStrictEqual(liaisons, [
+    { property_id: '169567', rang: 1, requires_ack: false, weekdays: null },
+    { property_id: '209413', rang: 1, requires_ack: true, weekdays: null }
+  ])
+  const { handler, etat } = preparer({ apres: [LIAISON_ANA] })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  const bulle = up.rows.find(r => r.property_id === '209413')
+  const cdv = up.rows.find(r => r.property_id === '169567')
+  assert.deepStrictEqual([bulle.requires_ack, bulle.rang, bulle.weekdays], [true, 1, null],
+    'La bulle : proposée, jours à régler')
+  assert.deepStrictEqual([cdv.requires_ack, cdv.rang, cdv.weekdays], [false, 1, null],
+    'Cœur de vie 23 : toujours d’office, rien de changé')
+})
+
+test('LE GESTE RÉEL : régler les jours d’un bien quand un AUTRE n’a pas de jours réglés', async () => {
+  // La case d'un jour passe par le même envoi : elle échouait aussi.
+  const fiche = { ...FICHE_ANA, liaisons: [...FICHE_ANA.liaisons,
+    { property_id: '209413', rang: 1, requires_ack: true, weekdays: null, active: true }] }
+  // Le vrai clic : la case du lundi, par la règle partagée avec le rendu.
+  const { joursApresClic } = require('../shared/presta-etat.js')
+  const liaisons = liaisonsDeLaFiche(fiche, b => (b.property_id === '209413'
+    ? { ...b, weekdays: joursApresClic(b, 1) } : b))
+  assert.strictEqual(liaisons.find(l => l.property_id === '169567').weekdays, null)
+  const { handler, etat } = preparer({ apres: [LIAISON_ANA,
+    { ...LIAISON_ANA, property_id: '209413', requires_ack: true }] })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.deepStrictEqual(up.rows.find(r => r.property_id === '209413').weekdays, [1])
+  assert.strictEqual(up.rows.find(r => r.property_id === '169567').weekdays, null)
+})
+
+test('`weekdays: null` reprend SES jours, jamais ceux d’une collègue sur le même bien', async () => {
+  // Le contre-test du filtre `provider_id` de la lecture des liaisons connues.
+  const { handler, etat } = preparer({
+    // La collègue EN DERNIER : une lecture non filtrée la ferait gagner.
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2,
+              requires_ack: true, weekdays: [0, 6] },
+            { user_id: PROD, property_id: '209413', provider_id: 'collegue', rang: 1,
+              requires_ack: false, weekdays: [1] }]
+  })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons: [
+    { property_id: '209413', rang: 2, requires_ack: true, weekdays: null }
+  ] }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.deepStrictEqual(up.rows[0].weekdays, [0, 6])
 })
 
 test('retirer un bien ne rattrape rien', async () => {
