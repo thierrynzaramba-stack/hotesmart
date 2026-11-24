@@ -748,6 +748,89 @@ test('un champ ABSENT ne remet rien à zéro', async () => {
   assert.strictEqual(up.rows[0].requires_ack, false)
 })
 
+test('`weekdays: null` vaut ABSENT : accepté, et il ne remet rien à zéro', async () => {
+  // ⚠ Refusé en 400 jusqu'au 24 novembre 2026, alors que la fiche V5 l'envoie
+  // pour toute liaison sans jours réglés. Lu comme absent : une fiche ouverte
+  // avant qu'un autre écran règle les jours ne les efface pas.
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1,
+              requires_ack: true, weekdays: [0, 6] }]
+  })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons: [
+    { property_id: '209413', rang: 1, requires_ack: true, weekdays: null }
+  ] }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.deepStrictEqual(up.rows[0].weekdays, [0, 6])
+})
+
+// ─── LE CONTRAT AVEC LA FICHE V5 : ce qu'elle envoie, le serveur l'accepte ──
+//
+// ⚠ Vécu le 24 novembre 2026 : confier La bulle à une prestataire déjà
+// attribuée d'office sur Cœur de vie 23 rendait « Une erreur est survenue ».
+// La fiche recopie l'état relu (`weekdays: null` pour des jours non réglés),
+// le serveur refusait `null`, et aucun test ne branchait l'un sur l'autre :
+// les tests de l'endpoint écrivaient leurs charges à la main. Celui-ci prend la
+// charge à la source — la fonction de la page qui la construit.
+function liaisonsDeLaFiche (fiche, modif) {
+  const fs = require('node:fs')
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'menages.html'), 'utf8')
+  const debut = page.indexOf('function liaisonsAEnvoyer (modif) {')
+  assert.ok(debut >= 0, 'liaisonsAEnvoyer introuvable dans pages/menages.html')
+  const fin = page.indexOf('\n}\n', debut)
+  assert.ok(fin > debut, 'fin de liaisonsAEnvoyer introuvable')
+  // eslint-disable-next-line no-new-func
+  const construire = new Function('cfg', page.slice(debut, fin + 2) + '\nreturn liaisonsAEnvoyer')
+  return construire({ fiche })(modif)
+}
+
+const FICHE_ANA = {
+  biens: [{ id: '169567', nom: 'Cœur de vie 23' }, { id: '209413', nom: 'La bulle' }],
+  // Attribuée d'office sur Cœur de vie 23, jours jamais réglés : `null`.
+  liaisons: [{ property_id: '169567', rang: 1, requires_ack: false, weekdays: null, active: true }]
+}
+const LIAISON_ANA = { user_id: PROD, property_id: '169567', provider_id: MARIE, rang: 1,
+                      requires_ack: false, weekdays: null, active: true }
+
+test('LE GESTE RÉEL : confier un bien en « Proposé en 1er » à une prestataire attribuée d’office ailleurs', async () => {
+  const p1 = { active: true, requires_ack: true, rang: 1 } // le choix `p1` du menu
+  const liaisons = liaisonsDeLaFiche(FICHE_ANA, b => (b.property_id === '209413' ? { ...b, ...p1 } : b))
+  // Le jeu d'essai, vérifié : la fiche envoie bien `null` pour les deux biens.
+  assert.deepStrictEqual(liaisons, [
+    { property_id: '169567', rang: 1, requires_ack: false, weekdays: null },
+    { property_id: '209413', rang: 1, requires_ack: true, weekdays: null }
+  ])
+  const { handler, etat } = preparer({ apres: [LIAISON_ANA] })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  const bulle = up.rows.find(r => r.property_id === '209413')
+  const cdv = up.rows.find(r => r.property_id === '169567')
+  assert.deepStrictEqual([bulle.requires_ack, bulle.rang, bulle.weekdays], [true, 1, null],
+    'La bulle : proposée, jours à régler')
+  assert.deepStrictEqual([cdv.requires_ack, cdv.rang, cdv.weekdays], [false, 1, null],
+    'Cœur de vie 23 : toujours d’office, rien de changé')
+})
+
+test('LE GESTE RÉEL : régler les jours d’un bien quand un AUTRE n’a pas de jours réglés', async () => {
+  // La case d'un jour passe par le même envoi : elle échouait aussi.
+  const fiche = { ...FICHE_ANA, liaisons: [...FICHE_ANA.liaisons,
+    { property_id: '209413', rang: 1, requires_ack: true, weekdays: null, active: true }] }
+  const liaisons = liaisonsDeLaFiche(fiche, b => (b.property_id === '209413'
+    ? { ...b, weekdays: TOUS_LES_JOURS } : b))
+  assert.strictEqual(liaisons.find(l => l.property_id === '169567').weekdays, null)
+  const { handler, etat } = preparer({ apres: [LIAISON_ANA,
+    { ...LIAISON_ANA, property_id: '209413', requires_ack: true }] })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.deepStrictEqual(up.rows.find(r => r.property_id === '209413').weekdays, TOUS_LES_JOURS)
+  assert.strictEqual(up.rows.find(r => r.property_id === '169567').weekdays, null)
+})
+
 test('retirer un bien ne rattrape rien', async () => {
   // Aucun `apres` sur ce bien : il n'y a personne à qui donner les ménages.
   const { handler, etat } = preparer({ apres: [], rattrapables: [{ id: 'm1', user_id: PROD }] })

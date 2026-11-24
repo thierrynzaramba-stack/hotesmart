@@ -1334,8 +1334,18 @@ async function ecrireLiaisons (req, res) {
     //     ce qui est en base. C'est ce qui protege un reglage existant contre un
     //     ecran plus ancien qui n'enverrait pas ce champ ;
     //   - `weekdays: []` = « aucun jour attitre », un choix explicite de l'hote.
+    //   - `weekdays: null` = ABSENT, et c'est la fiche V5 qui l'envoie : pour une
+    //     liaison dont les jours ne sont pas regles, ou un bien qu'on lui confie
+    //     a l'instant, elle recopie l'etat relu, qui est `null` (§12.1).
+    //     ⚠ Vecu le 24 novembre 2026 : `null` etait refuse en 400 « Jours
+    //     attitres invalides », donc TOUT geste de « Ce que vous lui confiez »
+    //     (menu d'un bien, case d'un jour) echouait des qu'UN de ses biens
+    //     n'avait pas de jours regles — confier La bulle a une prestataire
+    //     etait impossible. Lu comme absent plutot qu'ecrit tel quel : une
+    //     fiche ouverte avant qu'un autre ecran regle les jours ne les efface
+    //     pas en enregistrant un autre bien.
     let jours
-    if (l && l.weekdays !== undefined) {
+    if (l && l.weekdays !== undefined && l.weekdays !== null) {
       if (!Array.isArray(l.weekdays)) {
         return res.status(400).json({ error: 'Jours attitrés invalides' })
       }
