@@ -1343,7 +1343,9 @@ async function ecrireLiaisons (req, res) {
     //     n'avait pas de jours regles — confier La bulle a une prestataire
     //     etait impossible. Lu comme absent plutot qu'ecrit tel quel : une
     //     fiche ouverte avant qu'un autre ecran regle les jours ne les efface
-    //     pas en enregistrant un autre bien.
+    //     pas en enregistrant un autre bien. Consequence : aucun appel ne peut
+    //     plus REMETTRE `null` sur une liaison existante — un futur geste
+    //     « jours non regles » devra envoyer autre chose qu'un `null`.
     let jours
     if (l && l.weekdays !== undefined && l.weekdays !== null) {
       if (!Array.isArray(l.weekdays)) {

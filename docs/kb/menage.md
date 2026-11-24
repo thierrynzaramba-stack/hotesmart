@@ -5168,7 +5168,6 @@ les réglages de chaque personne qui a le domaine `menages` sur le bien :
   remplacent sans sonner** (décision du 9 novembre 2026).
 Aucune de ces notifications ne lève : la passe du ménage continue.
 
-
 ## « Ce que vous lui confiez » refusait tout dès qu'un bien n'avait pas de jours réglés (24 novembre 2026)
 
 **Le symptôme, en production** : confier La bulle (« Proposé en 1er ») à une
@@ -5193,3 +5192,8 @@ pas en enregistrant un autre bien. La page n'est pas touchée (refonte V5 en cou
 à la main, et aucun ne branchait la page sur le serveur. Les deux tests « LE
 GESTE RÉEL » de `tests/menages-liaisons.test.js` prennent la charge à la source :
 ils extraient `liaisonsAEnvoyer` de la page et passent sa sortie au handler.
+⚠ Aucun appel ne peut plus remettre `null` sur une liaison existante : un geste
+« jours non réglés » à venir devra envoyer autre chose qu'un `null`.
+⚠ Hors de ce correctif : l'ancien formulaire (apps/menages/prestataires.html)
+coche les sept cases d'une liaison à `null` et renvoie `[0..6]` — une liaison
+« proposée » jamais sollicitée y passe à « sollicitée tous les jours ».
