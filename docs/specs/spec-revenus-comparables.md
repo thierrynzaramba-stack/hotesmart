@@ -427,11 +427,36 @@ recette du 27 octobre). Les deux formes viennent du MÊME module
 
 Mesuré au banc local le 25 novembre 2026 : réponse JSON de l'endpoint pour
 10 comparables × 15 mois, toutes cases remplies = **16 251 octets** (avant
-compression). La mesure de production se fait à la recette.
+compression).
 
-À compléter à la recette : octets réels de la réponse sur La bulle et Cœur de
-vie 23, nombre de comparables nommés après la migration (contrôle
-`2026-11-25-controle-comparables-detail.sql`).
+**Staging** (25 novembre, logement « Recette — Loft Pilotable », 5 comparables) :
+1 appel, **5 requêtes**, 7 141 octets, 281 ms serveur, `private, no-store`.
+
+**Production** (26 novembre 2026, 00:05, mesuré dans le navigateur de Thierry,
+`Server-Timing` lu) — un clic sur « Afficher » = **1 appel, 5 requêtes** :
+
+| logement | comparables | octets | serveur | navigateur |
+|---|---|---|---|---|
+| La bulle | 4 | 6 673 | 166 ms | 227 ms |
+| Cœur de vie 23 | 6 | 9 287 | 250 ms | 319 ms |
+| Ofuro Futari | 5 | 7 415 | 147 ms | 219 ms |
+
+Les 15 comparables actifs portent leur titre (contrôle de migration prod :
+15 sur 15). Relevés affichés dans l'ⓘ : du 28 octobre au 3 novembre 2026.
+Premier affichage de l'accueil inchangé (deux appels) : le détail ne part
+qu'au clic.
+
+**Recette** :
+- staging, ordinateur : OK (25 novembre) — après le correctif « la vue Année
+  s'ouvre pendant un calcul en cours » (défaut préexistant trouvé là) ;
+- production, ordinateur : **OK par Thierry** (26 novembre, La bulle, ⓘ des
+  relevés vérifié) ;
+- téléphone : **non recetté** (proposé à Thierry, règle « le mobile suit
+  l'ordinateur »).
+
+Reste ouvert : l'écriture du titre au moment du choix des comparables
+(`enregistrerChoix`, `lib/marche`) attend le go de Thierry (§7.2) ; dette 157
+(§7.8).
 
 ### 7.8 Dette PRÉEXISTANTE relevée par la review (hors de ce lot) — dette 157
 
