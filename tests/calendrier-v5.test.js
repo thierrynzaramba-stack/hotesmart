@@ -144,7 +144,11 @@ test('inventaire §12 : chaque fonction de l\'etape 1 est presente, manquantes n
     'fiche blocage : modifier / supprimer': 'rouvrirFermeture',
     'selecteur de vue mobile conserve (arbitrage a)': 'vue-mobile',
     'mois mobile persiste': 'annee: etat.annee',
-    'appui long mobile = selection': "setTimeout(() => {",
+    // Inverses le 23 novembre 2026 (decision de Thierry) : le comportement est
+    // prouve par tests/calendrier-appui-long-mobile.test.js, ici on n'en garde
+    // que l'inventaire.
+    'appui long mobile = fiche du jour': 'ouvrirFicheDuJour(',
+    'appui court mobile = selection': 'etat.sel = { bien: bienId, duIso: iso, auIso: iso }',
     'X-Compte sur les appels directs': 'enteteCompte()'
   }
   const manquantes = Object.entries(LIGNES).filter(([, motif]) => !src.includes(motif)).map(([nom]) => nom)

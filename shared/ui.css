@@ -827,8 +827,12 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
    bas, fond blanc, bord discret. */
 /* `user-select: none` : le glisser de selection a la souris, en vue etroite,
    ne doit pas selectionner le numero du jour (la ligne Prix de l'ordinateur
-   l'a depuis toujours, les cases du mois ne l'avaient pas). */
-.cal-case { user-select: none; position: relative; aspect-ratio: 1 / 1.7; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); display: flex; flex-direction: column; justify-content: flex-start; align-items: center; padding: 4px 3px 5px; cursor: pointer; font-family: inherit; overflow: hidden; }
+   l'a depuis toujours, les cases du mois ne l'avaient pas).
+   `-webkit-user-select` et `-webkit-touch-callout` : sur iPhone, l'appui long
+   (fiche du jour, 23 novembre 2026) selectionnait sinon le numero du jour,
+   avec sa loupe, et Safari annulait le geste. Memes proprietes que les cases
+   de l'app menage. */
+.cal-case { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; position: relative; aspect-ratio: 1 / 1.7; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); display: flex; flex-direction: column; justify-content: flex-start; align-items: center; padding: 4px 3px 5px; cursor: pointer; font-family: inherit; overflow: hidden; }
 .cal-case--vide { background: transparent; border: 0; cursor: default; }
 .cal-case__num { font-size: var(--fs-small); font-weight: var(--fw-semibold); line-height: 1.1; }
 .cal-case .cal-case__valeur { font-size: var(--fs-caption); font-weight: var(--fw-semibold); margin-top: auto; color: var(--muted); }
@@ -854,10 +858,42 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-toast--erreur { background: var(--danger); }
 .cal-toast .link { color: var(--on-ink); text-decoration: underline; background: none; border: 0; cursor: pointer; font-weight: var(--fw-bold); }
 
+.cal-flottante__actions { gap: 8px; flex-wrap: wrap; }
+
 @media (max-width: 899px) {
   .cal-periode { display: none; }
   .cal-nav [data-nav] { display: none; }
   .cal-flottante { bottom: calc(86px + env(safe-area-inset-bottom)); width: calc(100vw - 20px); }
+}
+
+/* ⚠ AU DOIGT, LA BARRE TIENT SUR UNE LIGNE DE BOUTONS (recette de Thierry,
+   23 novembre 2026). Ses cinq boutons passaient sur trois lignes : 238px de
+   haut, plus les 86px de la navigation — 40 % de l'ecran. Les semaines qui
+   suivent la date choisie etaient DERRIERE la barre, et un appui dessus
+   touchait la barre : la selection ne s'etendait pas. Mesure sur un ecran de
+   387 x 797 : 238px avant, 112px apres sur un bien non pilote (la note
+   YieldFlow d'un bien pilote ajoute deux a trois lignes). Le compte et
+   « Annuler » en tete, les boutons sur une rangee, la note en dessous.
+   ⚠ `pointer: coarse` SEULEMENT (review du correctif) : a la souris, dans une
+   fenetre etroite, la barre garde ses boutons pleins qui passent a la
+   ligne. */
+@media (max-width: 899px) and (pointer: coarse) {
+  .cal-flottante { gap: 6px 10px; padding: 8px 10px; justify-content: space-between; }
+  .cal-flottante > [data-bind="flottante-compte"] { order: 0; }
+  .cal-flottante > [data-bind="flottante-annuler"] { order: 1; }
+  /* ⚠ ET AUCUN BOUTON N'EST CACHE (recette du 24 novembre 2026, Android) :
+     une ligne qu'on fait defiler du doigt ne defilait pas, et « Reservation »
+     et « Plus… » restaient hors d'atteinte. Les boutons se partagent donc la
+     largeur en colonnes egales, l'icone au-dessus d'un libelle court, comme
+     une barre d'onglets. Mesure a 360, 387 et 412px de large : les cinq
+     boutons sur une rangee, rien ne deborde, barre de 112px. Un bouton masque
+     par droit (`[hidden]`) sort de la grille, et les autres s'elargissent. */
+  .cal-flottante > .cal-flottante__actions { order: 2; flex: 1 0 100%; display: grid;
+    grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
+  .cal-flottante__actions > .btn { flex-direction: column; justify-content: center; gap: 3px;
+    padding: 6px 2px; min-height: 54px; height: auto; font-size: 11px; line-height: 1.15;
+    white-space: normal; text-align: center; border-radius: 12px; }
+  .cal-flottante > [data-bind="flottante-note"] { order: 3; flex: 1 0 100%; }
 }
 
 /* ─── Accès YieldFlow depuis le calendrier (lot du 28 octobre 2026) ────────
