@@ -3,9 +3,12 @@
 -- Spec : docs/specs/spec-revenus-comparables.md §7.
 --
 -- 1. comparables_retenus.nom : le titre de
---    l'annonce. WRITER UNIQUE : enregistrerChoix
---    (lib/marche/choix-comparables.js), au moment
---    du choix — la liste proposee le porte deja.
+--    l'annonce. Ecrit ICI, par la reprise (2).
+--    ⚠ PAS ENCORE AU MOMENT DU CHOIX : faire
+--    ecrire enregistrerChoix (lib/marche) attend
+--    le go de Thierry. D'ici la, un comparable
+--    choisi APRES cette migration reste « sans
+--    titre » — rejouer le bloc 2 le rattrape.
 --    ⚠ Le releve mensuel ne le recoit PAS : ses
 --    deux appels AirROI n'ont pas `listing_name`.
 -- 2. Rattrapage des titres depuis airroi_cache :
@@ -29,9 +32,9 @@ alter table public.comparables_retenus
 
 comment on column
   public.comparables_retenus.nom is
-  'Titre de l''annonce, pris dans la liste '
-  'proposee au choix (aucun appel AirROI). '
-  'Writer : enregistrerChoix. Nul = inconnu.';
+  'Titre de l''annonce, repris des reponses '
+  'AirROI deja en cache (aucun appel). '
+  'Nul = inconnu.';
 
 -- ─── 2. Le rattrapage des titres ────────────
 -- ⚠ UNE REPONSE ILLISIBLE NE BLOQUE PAS LES
@@ -60,7 +63,11 @@ begin
     exception when others then
       continue;
     end;
-    -- Une liste (`listings`), ou une fiche seule.
+    -- Une liste (`listings` : voisins ;
+    -- `results` : recherche par equipement,
+    -- POST /listings/search/radius), ou une
+    -- fiche seule. Un element sans
+    -- `listing_info` est ecarte plus bas.
     for l in
       select e.v
       from jsonb_array_elements(
@@ -68,6 +75,9 @@ begin
           when jsonb_typeof(j -> 'listings')
             = 'array'
           then j -> 'listings'
+          when jsonb_typeof(j -> 'results')
+            = 'array'
+          then j -> 'results'
           else jsonb_build_array(j)
         end) as e(v)
     loop

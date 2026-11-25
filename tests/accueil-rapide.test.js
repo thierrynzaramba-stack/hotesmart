@@ -919,7 +919,7 @@ function ouvrirAujourdhui (options = {}) {
     // ⚠ CINQUIEME MODULE, ET ON NE L'OUBLIE PAS CETTE FOIS : le detail des
     // comparables (spec-revenus-comparables §7). Le VRAI module, pas un
     // double — c'est son rendu qu'on juge.
-    'detailComparablesHtml',
+    'detailComparablesHtml', 'refuseTout',
     batirAujourdhui(options.sansInit)
   )(requireAuth, supabase, rien, rien, journal, ESC,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
@@ -947,7 +947,8 @@ function ouvrirAujourdhui (options = {}) {
     require('../shared/courbe-mensuelle.js').courbeMensuelle,
     require('../shared/ibulle.js').brancherInfoBulles,
     require('../shared/rail-fleches.js').brancherFleches,
-    require('../shared/comparables-detail.js').detailComparablesHtml)
+    require('../shared/comparables-detail.js').detailComparablesHtml,
+    require('../shared/comparables-detail.js').refuseTout)
 
   return {
     // Le corps que le test a fourni. Depuis le lot (b), les tests nourrissent
@@ -4533,4 +4534,29 @@ test("LE TEST QUI COMPTE : « Lecture impossible » de l annee vide AUSSI le det
   p.interne.renderAnnee()
   assert.strictEqual(detailNoeud(p).hidden, true, 'le detail survit a une lecture ratee de l annee')
   assert.strictEqual(String(detailNoeud(p).innerHTML), '', 'le detail garde les chiffres d une autre lecture')
+})
+
+test("LE TEST QUI COMPTE : deplie, une pastille SANS bande n'appelle rien (constat m5 de la review)", async () => {
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }, { id: 'uuid-2', name: 'Sans bande' }],
+    filtre: 'uuid-1', annee: anneeDeTest(), comparables: bandeDeTest(),
+    corps: (url) => (url.includes('detail=comparables') ? { detail: detailDeTest(), indisponibles: [] } : {})
+  })
+  p.interne.basculerDetailComparables()
+  await tours()
+  assert.strictEqual(p.urls.filter(u => u.includes('detail=comparables')).length, 1)
+  // On passe a un logement dont la bande n existe pas : le detail ne peut pas
+  // se montrer, donc rien ne doit partir.
+  p.interne.etat.filtreAnnee = 'uuid-2'
+  p.interne.renderAnnee()
+  await tours()
+  assert.deepEqual(p.urls.filter(u => u.includes('bien=uuid-2')), [],
+    'le detail d un logement sans bande est demande alors qu il ne peut pas s afficher')
+  assert.strictEqual(detailNoeud(p).hidden, true)
+  // Retour sur le premier : rien de plus, la reponse est en main.
+  p.interne.etat.filtreAnnee = 'uuid-1'
+  p.interne.renderAnnee()
+  await tours()
+  assert.strictEqual(p.urls.filter(u => u.includes('detail=comparables')).length, 1)
+  assert.strictEqual(detailNoeud(p).hidden, false, 'le detail ne suit pas la pastille quand il est deplie')
 })

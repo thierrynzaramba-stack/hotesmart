@@ -300,3 +300,39 @@ test('une case partielle dit ses nuits mesurees, un mois inactif le dit en mots'
     'revenue.detail_motif_partiel(n=4,total=31)')
   assert.equal(valeurCase({ etat: 'inactif' }, outils).texte, 'revenue.detail_inactif')
 })
+
+test("LE TEST QUI COMPTE : une liste de retenus ILLISIBLE n'affirme rien (constat M3 de la review)", () => {
+  const f = E.fenetreDetail('2026-11-25')
+  const d = E.detailDesComparables({ lignes: [photo({ listing_id: '111' })], retenus: null, fenetre: f })
+  assert.equal(d.comparables[0].retenu, null, 'illisible est rendu comme « plus retenu »')
+  const html = detailComparablesHtml(detailDe({ comparables: [{ listing_id: '111', nom: null, retenu: null, mois: {} }] }), outils)
+  assert.ok(!/revenue\.detail_plus_retenu/.test(html), 'l ecran affirme « n est plus retenu » sans le savoir')
+})
+
+test("LE TEST QUI COMPTE : au telephone, le motif d'un « n. c. » est ECRIT sous la case (constat M7)", () => {
+  // Un `title` ne s'affiche ni au toucher ni au clavier : la carte doit porter
+  // le motif dans le DOM.
+  const html = detailComparablesHtml(detailDe(), outils)
+  const cartes = html.slice(html.indexOf('<ul class="rev-liste rev-cmp-liste">'))
+  const tableau = html.slice(html.indexOf('<table'), html.indexOf('</table>'))
+  assert.match(cartes, /revenue\.detail_nc<\/abbr><span class="rev-cmp__nuits">revenue\.detail_court_absent<\/span>/,
+    'la carte du telephone ne dit pas pourquoi un mois est « n. c. »')
+  // A l ordinateur, le survol suffit : pas une ligne de plus dans chaque case.
+  assert.ok(!tableau.includes('revenue.detail_court_absent'), 'le tableau de l ordinateur se charge du motif court')
+})
+
+test("LE TEST QUI COMPTE : un chiffre INCOMPLET du logement le dit, dans les deux formes (constat m3)", () => {
+  const sans = valeurLogement({ '2026-05': { total_cents: 50000, sans_montant: 2, bruts: 0 } }, '2026-05', outils)
+  assert.equal(sans.texte, '500EUR', 'un total partiel est remplace au lieu d etre garde')
+  assert.equal(sans.reserve, 'revenue.detail_court_incomplet')
+  assert.match(sans.titre, /revenue\.detail_titre_sans_montant\(n=2\)/)
+  const bruts = valeurLogement({ '2026-05': { total_cents: 50000, sans_montant: 0, bruts: 1 } }, '2026-05', outils)
+  assert.equal(bruts.reserve, 'revenue.detail_court_brut')
+  const html = detailComparablesHtml(detailDe({ logement: { '2026-05': { total_cents: 210000, sans_montant: 1, bruts: 0 } } }), outils)
+  const tableau = html.slice(html.indexOf('<table'), html.indexOf('</table>'))
+  assert.ok(tableau.includes('revenue.detail_court_incomplet'), 'la reserve ne se voit pas a l ordinateur')
+  assert.ok(html.slice(html.indexOf('<ul class="rev-liste')).includes('revenue.detail_court_incomplet'),
+    'la reserve ne se voit pas au telephone')
+  // Un mois propre ne porte aucune reserve.
+  assert.equal(valeurLogement({ '2026-05': { total_cents: 1, sans_montant: 0, bruts: 0 } }, '2026-05', outils).reserve, null)
+})

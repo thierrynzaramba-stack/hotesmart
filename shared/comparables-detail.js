@@ -19,22 +19,30 @@
 // fournit (`t`, `montant`, `moisCourt`, `dateLongue`). Le module ne sait que
 // quoi dire de chaque case.
 
-// Un mois dont aucun montant n'est calculable — meme regle que `refuseTout`
-// de la vue Annee : un total nul ET des sejours sans montant.
-const refuseTout = (c) => !!c && Number(c.sans_montant || 0) > 0 && Number(c.total_cents || 0) === 0
+// Un mois dont aucun montant n'est calculable : un total nul ET des sejours
+// sans montant. ⚠ LA SEULE COPIE DE CETTE REGLE : la vue Annee l'importe d'ici
+// (constat m4 de la review du 25 novembre 2026 — deux copies divergent).
+// ⚠ « NON CALCULABLE » N'EST JAMAIS ZERO : un mois a 3 sejours dont 1 sans
+// montant garde son total partiel — une verite incomplete, que la reserve dit.
+export const refuseTout = (c) => !!c && Number(c.sans_montant || 0) > 0 && Number(c.total_cents || 0) === 0
 
 const ID_ANNONCE = /^[0-9]{1,24}$/
 
 // Ce que dit UNE case : un texte court, un titre (le motif, au survol), et
 // deux drapeaux de mise en forme. ⚠ « NON CALCULABLE » N'EST JAMAIS 0 NI UN
 // TIRET : il s'ecrit « n. c. » et porte son motif.
+// ⚠ ET LE MOTIF A UNE FORME COURTE, VISIBLE (`court`) : un `title` ne
+// s'affiche ni au toucher ni au clavier (constat M7 de la review). Au
+// telephone, la carte l'ecrit sous la case ; a l'ordinateur, le survol suffit.
 export function valeurCase (c, o) {
   const { t, montant } = o
-  const nc = (motif) => ({ texte: t('revenue.detail_nc'), titre: motif, vide: true })
-  if (!c || c.etat === 'absent') return nc(t('revenue.detail_motif_absent'))
-  if (c.etat === 'nc') return nc(c.motif ? `${t('revenue.detail_motif_nc')} (${c.motif})` : t('revenue.detail_motif_nc'))
+  const nc = (motif, court) => ({ texte: t('revenue.detail_nc'), titre: motif, court: t(court), vide: true })
+  if (!c || c.etat === 'absent') return nc(t('revenue.detail_motif_absent'), 'revenue.detail_court_absent')
+  if (c.etat === 'nc') {
+    return nc(c.motif ? `${t('revenue.detail_motif_nc')} (${c.motif})` : t('revenue.detail_motif_nc'), 'revenue.detail_court_nc')
+  }
   if (c.etat === 'partiel') {
-    return nc(t('revenue.detail_motif_partiel', { n: c.nuits_mesurees, total: c.jours }))
+    return nc(t('revenue.detail_motif_partiel', { n: c.nuits_mesurees, total: c.jours }), 'revenue.detail_court_partiel')
   }
   // ⚠ ZERO EUR D'UN MOIS CLOS N'EST PAS « IL A GAGNE ZERO » : il n'etait pas
   // sur le marche. On le dit en mots, comme la bande l'ecarte du minimum.
@@ -50,7 +58,7 @@ export function valeurCase (c, o) {
         .filter(Boolean).join(' — ') || null
     }
   }
-  return nc(t('revenue.detail_motif_absent'))
+  return nc(t('revenue.detail_motif_absent'), 'revenue.detail_court_absent')
 }
 
 // La case du LOGEMENT de l'hote : ses chiffres de la courbe, mois par mois.
@@ -60,12 +68,29 @@ export function valeurCase (c, o) {
 export function valeurLogement (logement, mois, o) {
   const { t, montant } = o
   if (logement === null || logement === undefined) {
-    return { texte: t('revenue.detail_nc'), titre: t('revenue.detail_motif_logement'), vide: true }
+    return { texte: t('revenue.detail_nc'), titre: t('revenue.detail_motif_logement'), court: t('revenue.detail_court_logement'), vide: true }
   }
   const c = logement[mois]
   if (!c) return { texte: t('revenue.detail_aucun'), titre: t('revenue.detail_aucun_titre'), vide: true }
-  if (refuseTout(c)) return { texte: t('revenue.detail_nc'), titre: t('revenue.detail_motif_refus'), vide: true }
-  return { texte: montant(Number(c.total_cents || 0)), titre: null }
+  if (refuseTout(c)) {
+    return { texte: t('revenue.detail_nc'), titre: t('revenue.detail_motif_refus'), court: t('revenue.detail_court_refus'), vide: true }
+  }
+  // ⚠ UN CHIFFRE INCOMPLET SE DIT, comme dans l'ⓘ du total de la vue Annee
+  // (constat m3 de la review) : des sejours sans montant le SOUS-estiment, des
+  // montants bruts le SUR-estiment (la commission n'a pas ete transmise). La
+  // reserve est VISIBLE dans les deux formes — elle est rare, et elle change
+  // la lecture du chiffre.
+  const sans = Number(c.sans_montant || 0)
+  const bruts = Number(c.bruts || 0)
+  const reserves = [
+    sans > 0 ? t('revenue.detail_titre_sans_montant', { n: sans }) : null,
+    bruts > 0 ? t('revenue.detail_titre_bruts', { n: bruts }) : null
+  ].filter(Boolean)
+  return {
+    texte: montant(Number(c.total_cents || 0)),
+    titre: reserves.join(' — ') || null,
+    reserve: reserves.length ? t(sans > 0 ? 'revenue.detail_court_incomplet' : 'revenue.detail_court_brut') : null
+  }
 }
 
 // Le nom d'un comparable, avec le lien vers son annonce. ⚠ L'IDENTIFIANT EST
@@ -79,18 +104,22 @@ function nomComparable (c, o) {
       + ` target="_blank" rel="noopener noreferrer"`
       + ` aria-label="${esc(t('revenue.detail_ouvrir_annonce', { nom }))}">${esc(nom)}</a>`
     : esc(nom)
-  const plus = c.retenu ? '' : ` <span class="caption muted">${esc(t('revenue.detail_plus_retenu'))}</span>`
+  // ⚠ SEULEMENT SI ON LE SAIT : `retenu === null` veut dire « liste des retenus
+  // illisible », et l'ecran ne l'affirme pas (constat M3 de la review).
+  const plus = c.retenu === false ? ` <span class="caption muted">${esc(t('revenue.detail_plus_retenu'))}</span>` : ''
   return lien + plus
 }
 
 const attrTitre = (titre, esc) => (titre ? ` title="${esc(titre)}"` : '')
 
-// Le contenu de la case, pour les deux formes.
-function contenu (v, esc) {
+// Le contenu de la case, pour les deux formes. ⚠ LE TELEPHONE ECRIT LE MOTIF
+// COURT sous la case (`court`) : il n'a ni survol ni `title`.
+function contenu (v, esc, telephone = false) {
   const texte = v.vide
     ? `<abbr${attrTitre(v.titre, esc)}>${esc(v.texte)}</abbr>`
     : esc(v.texte)
-  return texte + (v.nuits ? `<span class="rev-cmp__nuits">${esc(v.nuits)}</span>` : '')
+  const sous = v.nuits || v.reserve || (telephone && v.court) || null
+  return texte + (sous ? `<span class="rev-cmp__nuits">${esc(sous)}</span>` : '')
 }
 
 /**
@@ -175,7 +204,7 @@ export function detailComparablesHtml (detail, o) {
       + `<div class="rev-carte__tete"><span class="rev-carte__bien">${l.nom}</span></div>`
       + `<dl class="rev-cmp-grille">`
       + l.cases.map((v, i) => `<div class="${classeMois(mois[i])}">`
-        + `<dt>${esc(o.moisCourt(mois[i]))}</dt><dd${v.vide ? '' : attrTitre(v.titre, esc)}>${contenu(v, esc)}</dd></div>`).join('')
+        + `<dt>${esc(o.moisCourt(mois[i]))}</dt><dd${v.vide ? '' : attrTitre(v.titre, esc)}>${contenu(v, esc, true)}</dd></div>`).join('')
       + `</dl></li>`).join('')
     + `</ul>`
 

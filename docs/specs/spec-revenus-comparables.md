@@ -326,6 +326,11 @@ d'abord. ⚠ Le §6 ci-dessus disait « aucune écriture dans `comparables_reten
 sans décision explicite : **cette écriture-là attend le go de Thierry** pour
 toucher `lib/marche` (demandé le 25 novembre).
 
+⚠ **TANT QUE CE GO N'EST PAS DONNÉ**, un comparable choisi APRÈS la migration
+reste « Annonce sans titre » : seule la reprise depuis le cache l'a nommé.
+Rejouer le bloc 2 de la migration rattrape les nouveaux (constat M5 de la
+review du 25 novembre).
+
 ⚠ **UN TITRE MANQUANT N'EMPÊCHE RIEN** : l'écran écrit « Annonce sans titre » et
 garde le lien. Et l'écriture du titre ne fait jamais échouer l'enregistrement du
 choix : elle vient APRÈS, et son échec se journalise.
@@ -363,12 +368,24 @@ par la fenêtre, pas par l'âge de la table.
 | votre logement | encaissé (mêmes chiffres que la courbe) | déjà réservé |
 | un comparable | revenu estimé AirROI (`clos`) | « occupé » : prix affichés des nuits indisponibles + `nuits prises / nuits du mois` (`futur`) |
 
-Mêmes filtres que la bande, pour qu'une case ne dise jamais ce que la bande
-refuse : un `futur` sur un mois clos est écarté ; une couverture partielle se
+Mêmes filtres DE SOURCE que la bande, pour qu'une case ne dise jamais ce que
+la bande refuse : un `futur` sur un mois clos est écarté ; une couverture partielle se
 dit « n. c. » avec son motif ; un montant nul se dit « inactif » (le comparable
 n'était pas sur le marché) ; une absence se dit « n. c. — pas de relevé », jamais
 0 ni tiret. Pour le logement, un mois sans ligne est « aucun » (aucun séjour
-versé), et un mois dont aucun montant n'est calculable est « n. c. ».
+versé), et un mois dont aucun montant n'est calculable est « n. c. » ; un mois
+dont une partie des séjours n'a pas de montant, ou porte un montant brut, garde
+son chiffre et le dit (« incomplet », « en brut »).
+
+⚠ **CE QUI DIFFÈRE DE LA BANDE, VOLONTAIREMENT** : la bande écarte de son
+minimum un comparable à 0 € ; le détail montre chaque comparable, donc une
+ligne peut descendre sous le bas de la bande (« inactif » sur un mois clos,
+« 0 € · 0/31 » sur un mois à venir).
+
+⚠ **LE MOTIF D'UN « n. c. »** se lit au survol à l'ordinateur (`title`), et
+s'écrit sous la case au téléphone — un `title` ne s'affiche ni au toucher ni au
+clavier (constat M7 de la review). Une liste de retenus illisible ne fait
+jamais dire « n'est plus retenu » (constat M3).
 
 ### 7.5 Inventaire (la forme ne supprime jamais le fond)
 
@@ -408,6 +425,21 @@ recette du 27 octobre). Les deux formes viennent du MÊME module
 
 ### 7.7 Mesures et recette
 
+Mesuré au banc local le 25 novembre 2026 : réponse JSON de l'endpoint pour
+10 comparables × 15 mois, toutes cases remplies = **16 251 octets** (avant
+compression). La mesure de production se fait à la recette.
+
 À compléter à la recette : octets réels de la réponse sur La bulle et Cœur de
 vie 23, nombre de comparables nommés après la migration (contrôle
 `2026-11-25-controle-comparables-detail.sql`).
+
+### 7.8 Dette PRÉEXISTANTE relevée par la review (hors de ce lot)
+
+La lecture de la **bande** (`bandeDesComparables`, même fichier) demande
+`.limit(5000)` à PostgREST, dont le plafond est 1 000 lignes : la table garde
+TOUTES les photos (≈ 37 lignes par comparable et par relevé), donc au-delà
+d'environ 27 comparables par relevé, ou après plusieurs relevés, la bande peut
+perdre des photos **sans le dire** et diverger du détail. Le correctif naturel
+— lire la bande par `comparables_derniers_releves` — n'est pas fait ici : il
+change le chemin d'un écran déjà en production. **À trancher par Thierry**
+(lot à part).

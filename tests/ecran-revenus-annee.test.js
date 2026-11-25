@@ -39,7 +39,11 @@ async function appeler ({
   // deux, et un double unique ne dirait pas laquelle a rendu quoi).
   derniers = [], erreurDerniers = null,
   retenus = [], erreurRetenus = null,
-  lignesParAnnee = null, anneesEnErreur = []
+  lignesParAnnee = null, anneesEnErreur = [],
+  // ⚠ LE JOUR INJECTE : le recouvrement des deux appels a `revenus_annee`
+  // n'existe qu'en octobre et en novembre. Un test qui lit l'horloge ne le
+  // garde que deux mois par an (constat M6 de la review du 25 novembre 2026).
+  jourDetail = null
 } = {}) {
   const vu = { rpc: [], selects: [], filtres: [] }
 
@@ -69,15 +73,20 @@ async function appeler ({
       // ferait passer la lecture des comparables pour une liste de biens, et
       // les tests de la bande mesureraient autre chose que ce qu'ils croient.
       const comparables = table === 'comparables_releves'
-      // ⚠ LE FILTRE `eq('id', …)` EST HONORE sur `properties` : la garde du
+      // ⚠ LE FILTRE `eq('id', …)` EST HONORE sur `properties`, SANS LA CASSE
+      // comme le type uuid de Postgres : la garde du
       // detail lit UN bien du compte, et un double qui rendrait tous les biens
       // quel que soit le filtre laisserait passer un uuid etranger.
       const local = []
+      // ⚠ ET LES FILTRES `eq` SONT HONORES SUR `comparables_retenus` (constat
+      // M2 de la review) : la cle de service contourne la RLS, donc c'est le
+      // filtre de la requete qui cloisonne. Un double qui rendrait tout quel
+      // que soit le filtre laisserait passer sa suppression.
       const reponse = () => table === 'comparables_retenus'
-        ? { data: erreurRetenus ? null : retenus, error: erreurRetenus }
+        ? { data: erreurRetenus ? null : retenus.filter(r => local.every(([c, v]) => !(c in r) || r[c] === v)), error: erreurRetenus }
         : comparables
         ? { data: erreurReleves ? null : releves, error: erreurReleves }
-        : { data: erreurBiens ? null : biens.filter(id => local.every(([c, v]) => c !== 'id' || v === id)).map(id => ({
+        : { data: erreurBiens ? null : biens.filter(id => local.every(([c, v]) => c !== 'id' || String(v).toLowerCase() === String(id).toLowerCase())).map(id => ({
             id,
             // ⚠ LE DOUBLE REND LE NOM, parce que la vraie lecture le demande
             // desormais : sans lui, la ligne d'un bien archive n'aurait rien a
@@ -148,7 +157,14 @@ async function appeler ({
   // SUIVANTS du meme fichier : des rouges en cascade dont le premier seul est
   // vrai. Ce depot compte ses rouges, et un compte fausse coute une enquete.
   try {
-    await endpoint({ method: methode, query }, res)
+    if (jourDetail) {
+      await endpoint._interne.rendreDetail(res, Date.now(), {
+        compte: TITULAIRE, refsUuid: refs === null ? null : refs, uuidIntrouvable: false,
+        jour: jourDetail, bien: query.bien
+      })
+    } else {
+      await endpoint({ method: methode, query }, res)
+    }
   } finally {
     require.cache[absSdk].exports.createClient = vraiCreate
     require.cache[absGarde].exports = vraieGarde
@@ -794,8 +810,12 @@ test("LE TEST QUI COMPTE : le seuil s applique A CHAQUE PERIMETRE, pas au seul c
 const { _interne: DET } = require('../api/ecran/revenus-annee')
 
 test("LE TEST QUI COMPTE (SECURITE) : le detail d'un bien HORS PERIMETRE rend 403, sans rien lire", async () => {
+  // ⚠ LES DEUX BIENS SONT DU COMPTE (constat M1 de la review) : avec
+  // `biens: [BIEN_A]`, c'etait la garde « bien du compte » qui refusait B, et
+  // retirer la garde du PERIMETRE laissait ce test vert. Ici seul le perimetre
+  // du membre peut refuser.
   const r = await appeler({
-    titulaire: false, refs: [BIEN_A], biens: [BIEN_A],
+    titulaire: false, refs: [BIEN_A], biens: [BIEN_A, BIEN_B],
     query: { detail: 'comparables', bien: BIEN_B },
     derniers: [{ listing_id: '111', mois: `${moisDecale(-1)}-01`, nature: 'clos', montant_estime_cents: 1, releve_le: jourDeParis() }]
   })
@@ -908,9 +928,13 @@ test("LE TEST QUI COMPTE : une lecture ratee se dit, elle ne devient pas « aucu
 })
 
 test("LE TEST QUI COMPTE : des revenus illisibles sur UNE annee ne laissent pas une demi-ligne", async () => {
-  const fen = DET.fenetreDetail(jourDeParis())
+  // ⚠ JOUR INJECTE : le 25 novembre, la fenetre touche trois annees, donc
+  // DEUX appels — le seul cas ou une demi-ligne peut exister.
+  const fen = DET.fenetreDetail('2026-11-25')
   const appels = DET.anneesARevenus(fen.mois)
+  assert.equal(appels.length, 2, 'le jour injecte ne produit pas deux appels : le test ne garde plus rien')
   const r = await appeler({
+    jourDetail: '2026-11-25',
     query: { detail: 'comparables', bien: BIEN_A },
     lignesParAnnee: Object.fromEntries(appels.map(p => [p, [ligne(BIEN_A, p, 1)]])),
     anneesEnErreur: [appels[appels.length - 1]]
@@ -927,5 +951,48 @@ test("des titres illisibles n'empechent pas le tableau : chaque ligne reste, san
   })
   assert.equal(r.charge.detail.comparables.length, 1)
   assert.equal(r.charge.detail.comparables[0].nom, null)
+  // ⚠ ILLISIBLE N'EST PAS « PLUS RETENU » (constat M3 de la review) : sans la
+  // liste, on ne sait pas, et l'ecran ne doit rien affirmer.
+  assert.equal(r.charge.detail.comparables[0].retenu, null,
+    'une liste illisible fait dire « n est plus retenu » a chaque comparable')
   assert.ok(r.charge.indisponibles.includes('noms'))
+})
+
+test("LE TEST QUI COMPTE (SECURITE) : les retenus d'un AUTRE bien ou d'un AUTRE compte n'apparaissent pas", async () => {
+  // La cle de service contourne la RLS : c'est le filtre de la requete qui
+  // cloisonne (constat M2 de la review). Retirer `.eq('user_id')` ou
+  // `.eq('property_id')` doit faire rougir ce test.
+  const r = await appeler({
+    query: { detail: 'comparables', bien: BIEN_A }, lignesParAnnee: {},
+    retenus: [
+      { listing_id: '111', nom: 'Le mien', actif: true, property_id: BIEN_A, user_id: TITULAIRE },
+      { listing_id: '222', nom: 'Autre bien', actif: true, property_id: BIEN_B, user_id: TITULAIRE },
+      { listing_id: '333', nom: 'Autre compte', actif: true, property_id: BIEN_A, user_id: MEMBRE }
+    ]
+  })
+  const noms = r.charge.detail.comparables.map(c => c.nom)
+  assert.deepEqual(noms, ['Le mien'], `des retenus etrangers apparaissent : ${JSON.stringify(noms)}`)
+})
+
+test("LE TEST QUI COMPTE (regle 11) : un uuid en MAJUSCULES lit le bien resolu en base", async () => {
+  // La garde accepte la casse ; la ligne du logement compare des chaines. Sans
+  // l'id resolu en base, douze mois d'encaissements se lisaient « aucun ».
+  const passe = moisDecale(-2)
+  const an = Number(passe.slice(0, 4))
+  const lignesParAnnee = {}
+  for (const p of DET.anneesARevenus(DET.fenetreDetail(jourDeParis()).mois)) {
+    lignesParAnnee[p] = (an === p || an === p - 1) ? [ligne(BIEN_A, an, Number(passe.slice(5, 7)), { total_cents: 4200 })] : []
+  }
+  const r = await appeler({ query: { detail: 'comparables', bien: BIEN_A.toUpperCase() }, lignesParAnnee })
+  assert.equal(r.statut, 200)
+  assert.equal(r.charge.detail.logement[passe].total_cents, 4200, 'la ligne du logement est vide pour un uuid en majuscules')
+  for (const x of r.vu.rpc) {
+    if (x.nom === 'revenus_annee') assert.deepEqual(x.args.p_refs, [BIEN_A])
+    if (x.nom === 'comparables_derniers_releves') assert.equal(x.args.p_property_id, BIEN_A)
+  }
+})
+
+test("un `?annee=` invalide ne fait pas refuser le detail, qui ne s'en sert pas", async () => {
+  const r = await appeler({ query: { annee: 'xyz', detail: 'comparables', bien: BIEN_A }, lignesParAnnee: {} })
+  assert.equal(r.statut, 200, `le detail est refuse pour une annee qu il ignore : ${r.statut}`)
 })

@@ -441,7 +441,7 @@ import { brancherInfoBulles } from '/shared/ibulle.js'
 import { brancherFleches } from '/shared/rail-fleches.js'
 // Le detail de chaque comparable, sous la courbe de l'annee (spec-revenus-
 // comparables §7) : les deux formes, ordinateur et telephone, d'un seul module.
-import { detailComparablesHtml } from '/shared/comparables-detail.js'
+import { detailComparablesHtml, refuseTout } from '/shared/comparables-detail.js'
 // ⚠ `enteteCompte()` sur chaque fetch : les endpoints lus ici honorent X-Compte
 // (compteDelegue) ; sans l'en-tête, un membre verrait SON compte pendant que
 // les lectures Supabase, juste à côté, lisent le compte consulté.
@@ -690,12 +690,18 @@ async function chargerDetailComparables (bienId) {
 // Deplier ou replier le detail. ⚠ UNE LECTURE RATEE SE RETENTE A LA
 // REOUVERTURE : garder l'echec en cache laisserait « n'a pas pu etre lu »
 // jusqu'au rechargement de la page, pour une panne peut-etre passagere.
+// ⚠ LE CHARGEMENT N'EST PAS ICI : `renderAnnee` le demande quand le detail va
+// se montrer, et seulement la (constat m5 de la review).
 function basculerDetailComparables () {
   etat.detailOuvert = !etat.detailOuvert
   const bien = etat.filtreAnnee ? String(etat.filtreAnnee) : ''
   if (etat.detailOuvert && bien && etat.detailComparables[bien] === null) delete etat.detailComparables[bien]
   renderAnnee()
-  if (etat.detailOuvert && bien) chargerDetailComparables(bien)
+  // ⚠ LE RENDU A RECONSTRUIT LA LEGENDE, DONC LE BOUTON : le focus du clavier
+  // et du lecteur d'ecran serait perdu sur un noeud detache (constat m6). On le
+  // rend au nouveau bouton.
+  const b = document.querySelector('[data-detail-comparables]')
+  if (b && typeof b.focus === 'function') b.focus()
 }
 
 async function allerALaVue (vue) {
@@ -2181,11 +2187,11 @@ function douzeMois (parMois, an, champ, de = 1, a = 12) {
   return out
 }
 
-// ⚠ « NON CALCULABLE » N'EST JAMAIS ZERO. Un mois ne refuse QUE si son total
-// est nul ET qu'il porte des sejours sans montant : un mois a 3 sejours dont 1
-// sans montant garde son total partiel — c'est une verite incomplete, et la
-// reserve le dit en chiffres. Meme regle que `toutRefuse` de la vue Mois.
-const refuseTout = (c) => !!c && Number(c.sans_montant || 0) > 0 && Number(c.total_cents || 0) === 0
+// ⚠ « NON CALCULABLE » N'EST JAMAIS ZERO : `refuseTout` (un total nul ET des
+// sejours sans montant) vient desormais de `shared/comparables-detail.js`, qui
+// en a besoin pour la ligne du logement. Une seule copie : deux divergent
+// (constat m4 de la review du 25 novembre 2026). Meme regle que `toutRefuse`
+// de la vue Mois.
 
 // Le total d'une tranche, ET ce qu'il ne sait pas dire. ⚠ LES DEUX ENSEMBLE,
 // parce que `0` tout seul ne distingue pas « rien encaisse » de « rien de
@@ -2803,7 +2809,16 @@ function renderAnnee () {
   // ⚠ IL NE SE MONTRE QUE DEPLIE, ET LA OU LE BOUTON EXISTE. Le contenu vient
   // du module commun : le tableau de l'ordinateur et les cartes du telephone
   // sortent des MEMES valeurs, donc ne peuvent pas se contredire.
+  // ⚠ ET C'EST LE RENDU QUI DEMANDE LA LECTURE, seulement quand le detail VA
+  // se montrer (constat m5 de la review). Deplie, changer de pastille vers un
+  // logement SANS bande n'appelle plus rien ; vers un logement avec bande, le
+  // detail suit la pastille sans se replier. Le chargeur pose sa cle avant
+  // l'appel et rend a nouveau : pas de boucle.
   const noeudDetail = $('[data-bind="revenue-annee-detail"]')
+  if (detailPossible && etat.detailOuvert
+      && !Object.prototype.hasOwnProperty.call(etat.detailComparables, String(choisi.id))) {
+    chargerDetailComparables(choisi.id)
+  }
   if (noeudDetail) {
     const montrer = detailPossible && etat.detailOuvert
     noeudDetail.hidden = !montrer
@@ -3275,9 +3290,6 @@ async function init () {
       // La bande suit la pastille, et elle arrive apres : le rendu ci-dessus
       // montre deja la courbe du bien, celui du chargeur ajoutera la bande.
       if (etat.filtreAnnee) chargerComparables(etat.filtreAnnee)
-      // ⚠ LE DETAIL DEPLIE SUIT LA PASTILLE : changer de logement le montre
-      // pour l'autre logement, il ne le replie pas.
-      if (etat.filtreAnnee && etat.detailOuvert) chargerDetailComparables(etat.filtreAnnee)
     })
   }
   // Le bouton « Afficher » vit dans la legende, que chaque rendu reecrit :

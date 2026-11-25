@@ -244,4 +244,11 @@ Spec et décisions de Thierry : `docs/specs/spec-revenus-comparables.md` §7.
   sans séjour versé du logement. Jamais 0 ni tiret pour une absence.
 - **Le titre** vient de `comparables_retenus.nom` (migration
   `2026-11-25-comparables-detail.sql`, reprise depuis `airroi_cache` sans
-  appel payant). Absent : « Annonce sans titre », le lien reste.
+  appel payant). Absent : « Annonce sans titre », le lien reste. ⚠ Un
+  comparable choisi APRÈS la migration n'est pas encore nommé : l'écriture au
+  moment du choix (`enregistrerChoix`, `lib/marche`) attend le go de Thierry.
+- **Au téléphone**, le motif d'un « n. c. » est écrit sous la case (pas de
+  survol au toucher). Une liste de retenus illisible ne fait jamais dire
+  « n'est plus retenu ».
+- **Dette préexistante** (spec §7.8) : la lecture de la bande garde
+  `.limit(5000)` contre un plafond PostgREST de 1 000 lignes.
