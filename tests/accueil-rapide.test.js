@@ -4572,19 +4572,31 @@ test("LE TEST QUI COMPTE : la vue Annee s'ouvre meme quand le total du mois est 
     ecran, biens, vueRevenus: 'annee', anneeRevenus: 2026, anneeEtat: 'ok', aujourdHui: '2026-11-25',
     annee: anneeDeTest()
   })
+  // ⚠ LE BLOC ANNEE PART MASQUE, COMME DANS LE BALISAGE (`hidden` sur
+  // `revenue-annee`). Le double cree ses noeuds visibles : sans cette ligne,
+  // « la vue Annee n'est plus masquee » etait vraie d'avance (constat M2 de la
+  // review, REVIEW.md regle 22 — un double plus permissif que le vrai).
+  p.cache('[data-bind="revenue-annee"]').hidden = true
+  const tableauMois = '.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl):not(.rev-cmp-tbl)'
   p.interne.renderRevenus()
   assert.strictEqual(p.cache('[data-bind="revenue-annee"]').hidden, false,
     'la vue Annee reste masquee tant que le total du mois est en calcul')
   assert.match(p.html('[data-list="revenue-annee-filtres"]'), /La bulle/, 'les pastilles des logements ne sont pas rendues')
   assert.strictEqual(String(p.cache('[data-bind="revenue-month-nav"]').textContent), '2026',
     'le libelle des fleches dit le mois en vue Annee')
-  // Retour au mois : l'annee se masque, le total redit « calcul en cours ».
-  // ⚠ L'ORDRE `renderAnnee` PUIS `videDuTotal` (le tableau du mois, vide, reste
-  // masque) NE SE MESURE PAS ICI : le banc donne un noeud par CHAINE de
-  // selecteur, et les deux fonctions atteignent le meme tableau par deux
-  // chaines differentes. Il se verifie a la recette (vue Mois sur staging).
+  // Retour au mois : l'annee se masque, le total redit « calcul en cours », et
+  // le tableau du mois — sans lignes — RESTE masque. ⚠ `videDuTotal` et
+  // `renderAnnee` l'atteignent desormais par la MEME chaine de selecteur (le
+  // banc donne un noeud par chaine) : l'assertion voit donc les deux.
   p.interne.etat.vueRevenus = 'mois'
   p.interne.renderRevenus()
   assert.strictEqual(p.cache('[data-bind="revenue-annee"]').hidden, true)
   assert.match(String(p.cache('[data-bind="revenue-total"]').textContent), /revenue\.computing/)
+  assert.strictEqual(p.cache(tableauMois).hidden, true, 'le tableau du mois vide s affiche en en-tetes seuls')
+  // ⚠ ET UN `renderAnnee` SEUL — la bande ou le detail qui repond APRES le
+  // retour au mois (constat M1) — ne le demasque pas non plus.
+  p.interne.renderAnnee()
+  assert.strictEqual(p.cache(tableauMois).hidden, true,
+    'une reponse arrivee apres le retour au mois reaffiche le tableau vide')
+  assert.match(String(p.cache('[data-bind="revenue-month-nav"]').textContent), /./, 'le libelle du mois a disparu')
 })
