@@ -2983,3 +2983,91 @@ Aucun constat de sécurité : correction sans nouvelle review.
 Hors du diff : l'aide s'écarte de la spec §4 (Q46) ; la correction de la spec
 se fait sur `pwa-lot-3-spec` (PR #26), signalée au chef de file à la remise.
 
+
+### 13.16 Recette sur staging (24-25 novembre 2026, en cours)
+
+Staging à `851dc2822ce01fc9acb98886b642978d755fb636` (le lot 3 fusionné par le
+chef de file ; arbre testé `05bf50db` + le fichier de contrôle, 9594/9594).
+
+**La migration et son contrôle** (Thierry, éditeur SQL de staging, version en
+lignes courtes, même SQL que les fichiers) : « Success. No rows returned »,
+puis le contrôle `2026-11-17-controle-push-abonnements-prestataires` à **13
+lignes sur 13 `true`**. Ligne 11 : l'ACL de `purger_push_prestataire` garde
+EXECUTE pour `anon` et `authenticated` (droits par défaut de Supabase) — sans
+portée, la fonction rend un trigger (ligne 12).
+
+**Pièces jouées** (Samsung de Thierry, Chrome, lien de « Berthe Recette ») :
+1. Le bloc Notifications disait « bloquées » à l'ouverture. Le site était
+   pourtant autorisé dans Chrome : c'est **Android** qui interdisait les
+   notifications à Chrome (Paramètres → Applications → Chrome →
+   Notifications). Rouvertes, le bouton est apparu ; abonnement fait.
+   ⚠ **Constat de recette** : le texte « bloquées » (`texteNotifBloquees`,
+   `apps/menages/public.html`) ne cite que le réglage du SITE dans Chrome. Il
+   doit citer aussi le réglage du TÉLÉPHONE pour Chrome — à proposer à
+   Thierry (fichier sous `apps/`, son accord requis).
+2. Fiche de l'hôte : « Reçoit les notifications sur 1 téléphone » ; pas
+   d'aide sur le SMS (SMS de Berthe coupé) — conforme §4.
+
+**Le script de recette** `scripts/recette-pwa-lot3.js` (go de Thierry du
+25 novembre) : séjour de test sur le bien de Berthe, annulation, rétablissement,
+nettoyage, et un passage du cron de STAGING par HTTP — les clés de
+notification n'existent que dans Vercel, donc seul le serveur peut envoyer.
+
+### 13.17 Trace de la review du script de recette (25 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`,
+HEAD `8000e3ab75da707bf42c37c77ecf7f9c57d51744`, fichier non suivi
+`scripts/recette-pwa-lot3.js`. Rapport tel quel :
+
+> Arbre lu : `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, HEAD `8000e3ab75da707bf42c37c77ecf7f9c57d51744`. Fichier relu : `scripts/recette-pwa-lot3.js` (non suivi, 179 lignes). J'ai vérifié la syntaxe avec `node -c` sans lancer le script. J'ai lu `lib/empreinte-base.js`, `lib/bookings-snapshot-status.js`, `lib/cleaning/sync-menages-entite.js`, `lib/cleaning/assign.js`, `lib/cleaning/relance-validation.js`, `lib/cron-overbooking.js`, `api/cron.js`, `docs/STAGING.md` et les migrations des tables utilisées pour vérifier les contrats.
+>
+> **Réponses courtes**
+> 1. **Staging et secrets.** Le script ne peut pas écrire ailleurs que sur staging : `nomDeLaBase(URL)` refuse toute autre base avant de créer le client. L'adresse du cron est écrite en dur (`hotesmart-staging.vercel.app`). Aucun secret ne s'affiche : `CRON_SECRET` n'apparaît que par sa longueur, la clé de service n'est jamais imprimée, et ni `pwa_token` ni `public_tokens` ne sont lus. Seul un durcissement mineur reste à faire (constat 7).
+> 2. **Forme du séjour.** Elle convient à `synchroniserMenages` : dates `YYYY-MM-DD` dans la fenêtre J-30 à J+180, statut canonique, `property_id` texte égal à `provider_property_id`, `user_id` égal au compte. L'annulation et le rétablissement sont bien vus : un séjour `cancelled` sort des réservations vivantes et son ménage est annulé ; un séjour revenu à `confirmed` ressuscite le ménage, efface le « Vu » et envoie l'avis `retour`. Une condition n'est pas vérifiée par le script : que le bien existe et ne soit pas archivé (constat 1).
+> 3. **`--nettoyer`.** Il reste dans son périmètre (compte de Berthe, préfixe `RECETTE-PWA3-`), mais il est fragile et laisse des restes (constat 5).
+> 4. **Colonnes.** Toutes les colonnes utilisées existent. Les défauts de logique sont listés ci-dessous.
+>
+> **Constats**
+>
+> 1. **MAJEUR — `scripts/recette-pwa-lot3.js:74-77`, puis 140 et 145** — la lecture du bien ne vérifie ni l'erreur, ni l'absence de résultat, ni l'archivage (`archive_le`). Si `bien` est vide, le séjour est créé quand même avec `provider: 'channex'`. Or `synchroniserMenages` ignore tout séjour dont le bien n'est pas dans `properties` (avec `provider_property_id` non nul), ou dont le bien est archivé. Scénario : la liaison de Berthe pointe vers un identifiant sans bien, ou vers un bien archivé. Le script affiche « Le ménage naîtra au prochain --cron », chaque `--cron` rend « ménages créés : 0 », et la recette conclut à tort que le serveur est en panne. De même, `liaison.user_id` n'est ni lu ni comparé au compte : s'ils diffèrent, le ménage naît sans prestataire. Correctif : dans `berthe()`, lire aussi `user_id` de la liaison, ainsi que `provider_property_id` et `archive_le` du bien. Arrêter avec un `echec(...)` si l'erreur est posée, si le bien est absent, s'il est archivé, ou si `liaison.user_id !== p.account_user_id`.
+> 2. **MAJEUR — `scripts/recette-pwa-lot3.js:99` et `:113`** — l'état ne lit que `offered_to`. Or le serveur n'écrit plus jamais cette colonne (`colonnesAssignation` la met à `null`) : la proposition vit dans `proposee_a`. Scénario : `requires_ack` vaut `true` par défaut, donc c'est le cas le plus probable. Le ménage s'affiche « ménage offered · porté par — · pas vu », sans « proposé à Berthe » ni échéance. La recette ne peut pas confirmer la proposition qu'elle teste. Correctif : remplacer `m.offered_to` par la liste `proposee_a` (ou `offered_to` en repli, comme `proposeesDe`), et l'ajouter à `ids` pour retrouver les prénoms. Afficher `offer_expires_at` dès que cette liste n'est pas vide.
+> 3. **MINEUR — `scripts/recette-pwa-lot3.js:134`** — `Number(null)` vaut 0. Si la valeur manque, le séjour part aujourd'hui sans aucun message (mesuré : `--sejour` seul donne `0 true`). Scénario : `--sejour 3`, avec un espace, ou `--sejour=` vide, crée un départ aujourd'hui au lieu de J+3, et déclenche la relance du jour même. Correctif : exiger une valeur explicite : `const brut = val('sejour'); if (brut == null || !/^\d+$/.test(brut)) echec(...)`.
+> 4. **MINEUR — `scripts/recette-pwa-lot3.js:138-143`** — rien ne vérifie le chevauchement avec un séjour confirmé du même bien. Scénario : lancer `--sejour=3` deux fois (à des minutes différentes), ou tomber sur une réservation existante du bien. La sonde de surréservation du cron lève alors une alarme qui relance le fondateur à chaque passage, jusqu'à un nouveau `--cron` après nettoyage. Deux ménages naissent aussi le même jour. Correctif : avant l'insertion, lire les séjours `confirmed` du bien dont l'arrivée est avant le départ et le départ après l'arrivée. S'il y en a un, arrêter, ou proposer `--annuler` d'abord.
+> 5. **MINEUR — `scripts/recette-pwa-lot3.js:130` et `:155-160`** — `--nettoyer` passe d'abord par `berthe()`, qui exige exactement un bien actif confié à Berthe. Scénario : si la recette lui retire son bien ou lui en confie un second, le nettoyage refuse de tourner et les séjours et ménages de recette restent en base. Aucun décompte des lignes supprimées ni restantes : le script annonce « retirés » même si rien n'a été supprimé — le constat déjà corrigé dans `recette-avis-staging.js`. Restes possibles après nettoyage : `menage_done` si « Ménage fait » a été cliqué ; le marqueur hôte `menage_sans_personne` dans `message_sent_log` (une fois par bien et par jour) : un deuxième passage le même jour sur le même bien ne préviendra plus l'hôte ; l'alarme de surréservation, qui ne se ferme qu'au cron suivant. Correctif : pour `--nettoyer`, ne demander que le profil (son `account_user_id`), pas la liaison ; supprimer avec `.select('id')` et afficher les nombres ; ajouter `menage_done` au nettoyage ; recompter ce qui reste ; dire qu'il faut lancer un `--cron` après le nettoyage.
+> 6. **MINEUR — `scripts/recette-pwa-lot3.js:112`** — le script affiche « vu le … » dès que `vu_le` est posé, sans vérifier `vu_par === provider_id`. La règle gravée dit qu'une validation ne vaut que pour la personne qui l'a posée. Scénario : le ménage change de mains. L'état affiche « vu » alors que la nouvelle porteuse n'a rien lu. Correctif : `const vu = m.vu_le && String(m.vu_par) === String(m.provider_id)`.
+> 7. **MINEUR — `scripts/recette-pwa-lot3.js:167` et `:171`** — `fetch` suit les redirections par défaut, avec l'en-tête `Authorization`. Les versions récentes de Node le retirent quand la redirection change de domaine, mais ce n'est pas garanti partout. Par ailleurs, un 401 peut venir d'une protection du déploiement Vercel (page HTML) et non du cron, et le message dit alors à tort « CRON_SECRET refusé ». Correctif : ajouter `redirect: 'error'`. N'attribuer le 401 au secret que si le corps JSON vaut `{ error: 'Non autorisé' }`.
+> 8. **MINEUR — `scripts/recette-pwa-lot3.js:173-175`** — certaines erreurs du cron n'ont pas de `context` (surréservation : `etape` ; `{ user_id, error }` ; `{ property_id, error }`). Elles s'impriment « undefined ». Et `relancesValidation` n'est pas posé avant 9 h à Paris (retour anticipé), donc « relances « Vu » : 0 » ne distingue pas « reportée » de « aucune ». Correctif : utiliser `e.context || e.etape || 'sans contexte'`, et afficher « non lancée (avant 9 h) » quand le champ est absent.
+> 9. **MINEUR — `scripts/recette-pwa-lot3.js:85-98`** — les lectures de `etat()` ignorent leur `error`. Scénario : si la migration `2026-11-17-push-abonnements-prestataires` n'est pas appliquée sur staging, le script affiche « Téléphones abonnés : 0 » au lieu de signaler la table absente. Une erreur sur `bookings_snapshot` devient « Aucun séjour de recette. » Correctif : déstructurer `error` et appeler `echec(...)` sur chacune de ces lectures.
+> 10. **MINEUR — `scripts/recette-pwa-lot3.js:133-176`** — les actions sont exclusives (enchaînement de `else if`), sans le dire. Avec `--sejour=3 --cron`, le cron est ignoré en silence. De plus : deux `--sejour` dans la même minute entrent en conflit sur l'unicité `(user_id, booking_id)` (l'échec est clair) ; avec `requires_ack`, un départ au-delà de J+7 ne reçoit sa proposition qu'à l'approche du départ (`JOURS_PROPOSITION = 7`), donc aucune notification n'arrive pendant la recette. Correctif : refuser plus d'une action à la fois ; ajouter les secondes au suffixe ; prévenir quand `n > 7` et que la liaison est « à confirmer ».
+> 11. **MINEUR — `scripts/recette-pwa-lot3.js:5`** — l'en-tête cite `docs/specs/spec-pwa-lot3-prestataires.md §11`. Ce fichier n'existe pas dans cet arbre (`git ls-files` ne le connaît pas), alors que `docs/kb/pwa.md §13` le cite aussi. Correctif : pousser la spec sur la branche, ou corriger la référence.
+>
+> Note hors constat : `--cron` lance un passage COMPLET du cron de staging, pour tous les comptes, comme le prescrit `docs/STAGING.md §7`. Les alarmes au fondateur et les notifications des autres comptes de staging partent aussi.
+
+### 13.18 Suites données à la review du script de recette (25 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **Bien non vérifié** — `berthe()` lit le bien par compte ET clé, refuse
+   s'il n'y en a pas exactement un, s'il est archivé (`archive_le`), ou si la
+   liaison appartient à un autre compte.
+2. **La proposition lue dans `offered_to`** — l'état lit `proposee_a` (repli
+   `offered_to`, même règle que `proposeesDe`) et affiche les prénoms et
+   l'échéance.
+3. **`--sejour` sans valeur partait aujourd'hui** — la valeur est exigée
+   (`--sejour=N`, 0 à 60), vérifiée avant toute lecture.
+4. **Chevauchement** — refusé s'il existe un séjour confirmé du bien sur ces
+   dates.
+5. **Nettoyage** — ne demande que le profil, retire aussi `menage_done`,
+   compte ce qu'il retire, recompte ce qui reste, et rappelle le `--cron` qui
+   referme une alarme de surréservation. Le marqueur hôte `menage_sans_personne`
+   n'est pas retiré : il ne joue que sur la notification de l'HÔTE, hors
+   périmètre de cette recette.
+6. **« vu »** — seulement si `vu_par` est la porteuse.
+7. **Redirection et 401** — `redirect: 'error'` ; un 401 n'est attribué au
+   secret que si le corps est celui du cron.
+8. **Bilan du cron** — contexte de repli (`etape`, sinon « sans contexte ») ;
+   relances « non lancées (avant 9 h à Paris) » quand le champ manque.
+9. **Lectures muettes** — chaque lecture de l'état arrête sur son erreur.
+10. **Actions** — une seule à la fois ; suffixe à la seconde ; avertissement
+    au-delà de 7 jours quand le bien est « à confirmer ».
+11. **Référence de la spec** — l'en-tête dit qu'elle vit sur `pwa-lot-3-spec`.
