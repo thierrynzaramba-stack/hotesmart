@@ -929,8 +929,11 @@ Prédiction de prix.
     ajoute, supprime ou cesse de tenir compte d'un événement ;
   - le bouton est **masqué** à qui n'a pas `droits_ecriture`, sans écran
     calculé, pendant un changement de logement et après un refus du serveur ;
-    le serveur de la pop-up refuse de toute façon (inventaire §7, lecture
-    seule) ;
+    le serveur de la pop-up refuse de toute façon (`/api/yield-evenements`,
+    `requirePermission` « reglages: write » sur le logement) ;
+  - **revenu par le bouton retour**, la page se relit si le navigateur l'a
+    restaurée depuis son cache de pages (`pageshow`, `persisted`) : sinon
+    l'événement ajouté dans la pop-up n'y serait pas, sans un mot ;
   - la Prédiction de prix garde son bouton « Quand vos prix bougent ».
 - Au sous-lot 4d, le bouton ouvrira le geste d'ajout **dans la page**, et la
   pop-up redirigera vers elle (sur go de Thierry, §1).
@@ -938,17 +941,29 @@ Prédiction de prix.
 **Case performance** : sans objet sur les huit points — aucun appel, aucune
 donnée, aucun cache ajouté ; un lien et deux adresses changent.
 
-**Preuves.** `tests/yf-evenements-lien.test.js` (5 tests) ; deux garde-fous
+**Preuves.** `tests/yf-evenements-lien.test.js` (6 tests) ; deux garde-fous
 d'avant réécrits à la nouvelle adresse (`tests/yf-bouton-calendrier.test.js`,
 `tests/prix-hote.test.js`), en gardant ce qu'ils protégeaient — la pop-up
-reste atteignable. Contre-épreuve : les 5 tests rougissent contre `main`
-(`0428e0ad`) ; le test 3, qui rougirait contre `main` faute de bouton, est
-prouvé par trois mutations (droit ignoré, écran non calculé ignoré, refus
-qui laisse le bouton) qui le font chacune rougir sur son assertion ; une
-quatrième (le bouton sans le logement) fait rougir les tests 1 et 2.
+reste atteignable. Contre-épreuve : les tests rougissent contre `main`
+(`0428e0ad`) ; ceux qui y rougiraient faute de bouton sont prouvés par
+mutation, chacune rougissant sur son assertion :
+
+| mutation | rouge |
+|---|---|
+| droit d'écriture ignoré ; écran non calculé ignoré ; refus qui laisse le bouton | 3 |
+| bouton sans le logement | 1 et 2 |
+| bouton non masqué pendant un changement de logement | 2 |
+| classe `btn-primary` (absente des feuilles V5) | 1 |
+| la Prédiction de prix n'ouvre plus la fenêtre sur `?evenements=1` | 5 |
+| pas de relecture au retour arrière | 6 |
+
+**Review** : une, sans constat de sécurité ; cinq constats, tous corrigés
+sans nouvelle review. Trace : docs/recette/reviews-lien-calendrier-evenements.md.
 
 **Recette** (Thierry, sur staging puis en production) :
 1. Calendrier, menu YieldFlow d'un logement, « Quand vos prix bougent » :
    la page « Ce qui fait bouger vos prix » s'ouvre, sur ce logement.
-2. Sur la page, « + Ajouter un événement » à droite des filtres : il ouvre la
-   fenêtre des événements de la Prédiction de prix, sur le même logement.
+2. Sur la page, « + Ajouter un événement » à droite des filtres, avec l'allure
+   d'un bouton : il ouvre la fenêtre des événements de la Prédiction de prix,
+   sur le même logement.
+3. Revenir par le bouton retour du navigateur : la page se recharge.

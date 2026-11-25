@@ -33,13 +33,31 @@ test('LE TEST QUI COMPTE : « + Ajouter un événement » mène à l’ancienne 
   assert.equal(u.searchParams.get('evenements'), '1', 'il ouvre la fenêtre des événements')
   assert.equal(u.searchParams.get('bien'), d.bien, 'sur le logement affiché')
   assert.match(lienAjouter(b).textContent, /Ajouter un événement/)
+  // La classe du bouton principal V5 (`ui.css`) : `btn-primary` n'existe que
+  // dans l'ancienne feuille, que cette page ne charge pas (review du lien).
+  assert.match(lienAjouter(b).className, /\bbtn--primary\b/)
+  assert.doesNotMatch(lienAjouter(b).className, /\bbtn-primary\b/)
 })
 
-test('changer de logement : le bouton suit le logement choisi', async () => {
+test('LE TEST QUI COMPTE : changer de logement — masqué pendant la lecture, puis il suit le logement choisi', async () => {
+  // Pendant la lecture du nouveau logement, la page ne se repeint pas : un
+  // bouton resté visible porterait l'adresse de l'ANCIEN logement, sous un
+  // sélecteur qui dit le nouveau (review du lien, constat 2).
   const d = await reponseEcran()
-  const b = await monter({ ecran: async (url) => ({ ...d, bien: /bien=/.test(url) ? AUTRE : d.bien }) })
+  let liberer
+  const attente = new Promise(r => { liberer = r })
+  const b = await monter({ ecran: async (url) => {
+    if (!/bien=/.test(url)) return d
+    await attente
+    return { ...d, bien: AUTRE }
+  } })
+  assert.equal(lienAjouter(b).hidden, false)
   await b.choisir(b.$('[data-bind="bien"]'), AUTRE)
-  assert.equal(cible(b).searchParams.get('bien'), AUTRE)
+  assert.equal(lienAjouter(b).hidden, true, 'masqué tant que le nouveau logement n est pas lu')
+  liberer()
+  await b.attendre(6)
+  assert.equal(lienAjouter(b).hidden, false)
+  assert.equal(cible(b).searchParams.get('bien'), AUTRE, 'puis il mène au logement choisi')
 })
 
 test('sans droit d’écriture, ou sans écran calculé, pas de bouton', async () => {
@@ -72,4 +90,23 @@ test('LE TEST QUI COMPTE : l’ancienne fenêtre reste atteignable jusqu’à 4d
   assert.match(prix, /id="ev-ajouter"/, 'la fenêtre garde son geste d’ajout')
   const page = lire('apps/yield/evenements.html')
   assert.match(page, /data-bind="ajouter" href="\/apps\/yield\/prix\?evenements=1"/, 'la page y mène')
+  // Et à l'arrivée, la Prédiction de prix OUVRE la fenêtre et prend le
+  // logement demandé : c'est tout l'intérêt du bouton (review du lien,
+  // constat 3) — sans ces deux lectures, il mènerait sur une page sans fenêtre.
+  assert.match(prix, /get\('evenements'\) === '1'\) setTimeout\(ouvrirPopup/, '?evenements=1 ouvre la fenêtre')
+  assert.match(prix, /get\('bien'\)\s*\n\s*if \(voulu && data\.some\(b => b\.id === voulu\)\) el\('yp-bien'\)\.value = voulu/, '?bien= choisit le logement')
+})
+
+test('revenu par le bouton retour depuis la fenêtre, la page se relit (cache de pages du navigateur)', async () => {
+  const d = await reponseEcran()
+  const b = await monter({ ecran: async () => d })
+  const avant = b.journal.fetch.length
+  const ev = (persisted) => { const e = new b.w.Event('pageshow'); Object.defineProperty(e, 'persisted', { value: persisted }); return e }
+  b.w.dispatchEvent(ev(false))
+  await b.attendre()
+  assert.equal(b.journal.fetch.length, avant, 'un affichage ordinaire ne relit pas deux fois')
+  b.w.dispatchEvent(ev(true))
+  await b.attendre()
+  assert.equal(b.journal.fetch.length, avant + 1, 'une page restaurée se relit')
+  assert.equal(b.journal.fetch.at(-1).url.split('?')[0], '/api/ecran/evenements')
 })
