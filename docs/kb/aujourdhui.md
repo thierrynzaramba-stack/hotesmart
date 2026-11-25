@@ -250,5 +250,5 @@ Spec et décisions de Thierry : `docs/specs/spec-revenus-comparables.md` §7.
 - **Au téléphone**, le motif d'un « n. c. » est écrit sous la case (pas de
   survol au toucher). Une liste de retenus illisible ne fait jamais dire
   « n'est plus retenu ».
-- **Dette préexistante** (spec §7.8) : la lecture de la bande garde
-  `.limit(5000)` contre un plafond PostgREST de 1 000 lignes.
+- **Dette préexistante 157** (spec §7.8, `docs/kb/dettes-v1.md`) : la lecture
+  de la bande garde `.limit(5000)` contre un plafond PostgREST de 1 000 lignes.

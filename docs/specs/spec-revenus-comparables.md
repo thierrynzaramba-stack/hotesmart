@@ -433,7 +433,7 @@ compression). La mesure de production se fait à la recette.
 vie 23, nombre de comparables nommés après la migration (contrôle
 `2026-11-25-controle-comparables-detail.sql`).
 
-### 7.8 Dette PRÉEXISTANTE relevée par la review (hors de ce lot)
+### 7.8 Dette PRÉEXISTANTE relevée par la review (hors de ce lot) — dette 157
 
 La lecture de la **bande** (`bandeDesComparables`, même fichier) demande
 `.limit(5000)` à PostgREST, dont le plafond est 1 000 lignes : la table garde
@@ -442,4 +442,5 @@ d'environ 27 comparables par relevé, ou après plusieurs relevés, la bande peu
 perdre des photos **sans le dire** et diverger du détail. Le correctif naturel
 — lire la bande par `comparables_derniers_releves` — n'est pas fait ici : il
 change le chemin d'un écran déjà en production. **À trancher par Thierry**
-(lot à part).
+(lot à part). Inscrite au registre sous le numéro **157**
+(`docs/kb/dettes-v1.md`). Trace de la review : `docs/recette/reviews-comparables-detail.md`.
