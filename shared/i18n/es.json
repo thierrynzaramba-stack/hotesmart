@@ -1783,5 +1783,7 @@
   "charges.sans_entite_choix": "Sin entidad jurídica",
   "charges.sans_entite_rappel": "Estas facturas pertenecen a alojamientos que no están vinculados a ninguna entidad jurídica. Vincule cada alojamiento desde su ficha: sus facturas pasarán a ella automáticamente.",
   "charges.factures_sans_entite": "Facturas sin entidad jurídica",
-  "charges.refus_bien_requis": "Elija el alojamiento: una factura sin entidad jurídica es la de un alojamiento."
+  "charges.refus_bien_requis": "Elija el alojamiento: una factura sin entidad jurídica es la de un alojamiento.",
+  "yfe.ajouter": "Añadir un evento",
+  "yfe.ajouter_titre": "Abre la ventana de eventos de este alojamiento: añadir un evento, eliminar uno o dejar de tenerlo en cuenta."
 }

@@ -65,6 +65,10 @@
 
 /* ---------- Les filtres ---------- */
 .yfe-filtres { display: flex; flex-wrap: wrap; gap: var(--gap-s); }
+/* La rangee des filtres et du bouton « + Ajouter un evenement », comme la
+   maquette : filtres a gauche, bouton a droite. */
+.yfe-barre-liste { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gap-s); }
+.yfe-barre-liste > .yfe-ajouter { margin-left: auto; }
 .yfe-filtre {
   min-height: var(--control); padding: 0 14px; border-radius: var(--radius-pill);
   border: 1px solid var(--border); background: var(--surface);

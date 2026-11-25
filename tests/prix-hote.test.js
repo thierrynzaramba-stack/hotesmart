@@ -150,12 +150,15 @@ test('LE TEST QUI COMPTE : l ecran « Quand vos prix bougent » — ce qui RESTE
   assert.ok(pop.includes("id=\"ev-ajouter\"") && PAGE.includes('+ Ajouter une période'),
     'le geste d ajout existe toujours — derriere un bouton desormais')
 
-  // FOND CONSERVE 3 : la porte d'entree du menu. ⚠ L'ADRESSE
-  // /apps/yield/evenements N'EN EST PLUS UNE depuis le lot 4 (4a, 9 novembre
-  // 2026) : decision Q1 de Thierry, l'ecran devient une page entiere a cette
-  // adresse. La pop-up reste en service jusqu'a 4d, et le menu la vise
-  // DIRECTEMENT — c'est cette porte-la qui doit tenir jusqu'a la redirection.
-  assert.match(lire('components/sidebar.js'), /href="\/apps\/yield\/prix\?evenements=1"/)
+  // FOND CONSERVE 3 : les portes d'entree. ⚠ DEPUIS LE 25 NOVEMBRE 2026
+  // (decision de Thierry), le menu « Vos evenements » ouvre la PAGE du lot 4,
+  // et la pop-up reste en service jusqu'a 4d par deux portes : le bouton de la
+  // Prediction de prix, et « + Ajouter un evenement » de la page
+  // (tests/yf-evenements-lien.test.js).
+  assert.match(lire('components/sidebar.js'), /href="\/apps\/yield\/evenements"/)
+  assert.ok(PAGE.includes('id="yp-ouvrir-ev"'), 'la Prediction de prix garde sa porte vers la pop-up')
+  assert.match(lire('apps/yield/evenements.html'), /data-bind="ajouter" href="\/apps\/yield\/prix\?evenements=1"/,
+    'la page aussi')
   assert.match(lire('apps/yield/evenements.html'), /const ECRAN = '\/api\/ecran\/evenements'/,
     'l adresse /apps/yield/evenements porte le nouvel ecran (lot 4)')
 

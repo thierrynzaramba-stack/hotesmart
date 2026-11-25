@@ -906,3 +906,64 @@ Et une décision de produit portée à Thierry depuis la review : **S4** (§16.1
     complet **1,2 à 2,1 s**. Staging n'a pas les logements de la mesure
     AVANT : la comparaison sur les mêmes trois logements se fait en
     production, après le merge.
+
+## 17. La page reliée au site — 25 novembre 2026 (branche `lien-calendrier-evenements`)
+
+**Constat de Thierry.** La page « Ce qui fait bouger vos prix » (4a et 4b en
+production) n'était atteignable que par son adresse : « Quand vos prix
+bougent » du menu YieldFlow du calendrier, et « Vos événements » du menu
+YieldFlow (`components/sidebar.js`), ouvraient encore l'ancienne pop-up de la
+Prédiction de prix.
+
+**Décision de Thierry (25 novembre 2026) : relier maintenant**, sans attendre
+4d.
+
+- Le calendrier (`ENTREES_YF`, `pages/calendrier.html`) et le menu YieldFlow
+  ouvrent `/apps/yield/evenements` ; le calendrier passe le logement
+  (`?bien=`), comme ses autres entrées.
+- **L'ancienne pop-up reste en service jusqu'à 4d**, parce qu'elle seule sait
+  encore ajouter, supprimer et « ne plus tenir compte » d'un événement (§7) :
+  - la page porte **« + Ajouter un événement »**, à la place de la maquette
+    (à droite des filtres), qui ouvre la pop-up **sur le logement affiché**
+    (`/apps/yield/prix?bien=…&evenements=1`) ; son infobulle dit qu'on y
+    ajoute, supprime ou cesse de tenir compte d'un événement ;
+  - le bouton est **masqué** à qui n'a pas `droits_ecriture`, sans écran
+    calculé, pendant un changement de logement et après un refus du serveur ;
+    le serveur de la pop-up refuse de toute façon (`/api/yield-evenements`,
+    `requirePermission` « reglages: write » sur le logement) ;
+  - **revenu par le bouton retour**, la page se relit si le navigateur l'a
+    restaurée depuis son cache de pages (`pageshow`, `persisted`) : sinon
+    l'événement ajouté dans la pop-up n'y serait pas, sans un mot ;
+  - la Prédiction de prix garde son bouton « Quand vos prix bougent ».
+- Au sous-lot 4d, le bouton ouvrira le geste d'ajout **dans la page**, et la
+  pop-up redirigera vers elle (sur go de Thierry, §1).
+
+**Case performance** : sans objet sur les huit points — aucun appel, aucune
+donnée, aucun cache ajouté ; un lien et deux adresses changent.
+
+**Preuves.** `tests/yf-evenements-lien.test.js` (6 tests) ; deux garde-fous
+d'avant réécrits à la nouvelle adresse (`tests/yf-bouton-calendrier.test.js`,
+`tests/prix-hote.test.js`), en gardant ce qu'ils protégeaient — la pop-up
+reste atteignable. Contre-épreuve : les tests rougissent contre `main`
+(`0428e0ad`) ; ceux qui y rougiraient faute de bouton sont prouvés par
+mutation, chacune rougissant sur son assertion :
+
+| mutation | rouge |
+|---|---|
+| droit d'écriture ignoré ; écran non calculé ignoré ; refus qui laisse le bouton | 3 |
+| bouton sans le logement | 1 et 2 |
+| bouton non masqué pendant un changement de logement | 2 |
+| classe `btn-primary` (absente des feuilles V5) | 1 |
+| la Prédiction de prix n'ouvre plus la fenêtre sur `?evenements=1` | 5 |
+| pas de relecture au retour arrière | 6 |
+
+**Review** : une, sans constat de sécurité ; cinq constats, tous corrigés
+sans nouvelle review. Trace : docs/recette/reviews-lien-calendrier-evenements.md.
+
+**Recette** (Thierry, sur staging puis en production) :
+1. Calendrier, menu YieldFlow d'un logement, « Quand vos prix bougent » :
+   la page « Ce qui fait bouger vos prix » s'ouvre, sur ce logement.
+2. Sur la page, « + Ajouter un événement » à droite des filtres, avec l'allure
+   d'un bouton : il ouvre la fenêtre des événements de la Prédiction de prix,
+   sur le même logement.
+3. Revenir par le bouton retour du navigateur : la page se recharge.
