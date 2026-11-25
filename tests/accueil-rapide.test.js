@@ -647,7 +647,7 @@ function batirAujourdhui (sansInit = false) {
   // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
   // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
   // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
-  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran, repartirEnEuros, renderAnnee, renderEvenements }'
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran, repartirEnEuros, renderAnnee, renderEvenements, chargerDetailComparables, basculerDetailComparables }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -916,6 +916,10 @@ function ouvrirAujourdhui (options = {}) {
     // Le VRAI module, pas un double : un double qui ne branche rien laisserait
     // croire que les fleches defilent.
     'brancherFleches',
+    // ⚠ CINQUIEME MODULE, ET ON NE L'OUBLIE PAS CETTE FOIS : le detail des
+    // comparables (spec-revenus-comparables §7). Le VRAI module, pas un
+    // double — c'est son rendu qu'on juge.
+    'detailComparablesHtml', 'refuseTout',
     batirAujourdhui(options.sansInit)
   )(requireAuth, supabase, rien, rien, journal, ESC,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
@@ -942,7 +946,9 @@ function ouvrirAujourdhui (options = {}) {
     require('../shared/cache-ecran.js'),
     require('../shared/courbe-mensuelle.js').courbeMensuelle,
     require('../shared/ibulle.js').brancherInfoBulles,
-    require('../shared/rail-fleches.js').brancherFleches)
+    require('../shared/rail-fleches.js').brancherFleches,
+    require('../shared/comparables-detail.js').detailComparablesHtml,
+    require('../shared/comparables-detail.js').refuseTout)
 
   return {
     // Le corps que le test a fourni. Depuis le lot (b), les tests nourrissent
@@ -2341,7 +2347,9 @@ const mo = (total, sejours = 1) => ({
 // l'horloge, dates figees s'il injecte le temps.* Des dates relatives ici
 // feraient varier la tranche comparee d'un jour a l'autre.
 function bancAnnee (options = {}) {
-  const p = ouvrirAujourdhui({ sansInit: true, etroit: options.etroit === true })
+  // ⚠ `corps` ET `fetchLeve` PASSENT : le detail des comparables se charge au
+  // clic, et son chargeur se juge sur ce que le faux reseau a rendu.
+  const p = ouvrirAujourdhui({ sansInit: true, etroit: options.etroit === true, corps: options.corps, fetchLeve: options.fetchLeve })
   const an = options.an || 2026
   p.interne.etat.vueRevenus = 'annee'
   p.interne.etat.anneeRevenus = an
@@ -2837,7 +2845,7 @@ test("LE TEST QUI COMPTE : en vue Annee, le tableau du MOIS est masque", () => {
   // date » a ajoute un 3e `.rev-tbl-wrap`, donc la negation nomme desormais
   // les deux formes de l'annee. Ce test a rougi a ce changement — c'est son
   // role, et c'est pourquoi il cite la chaine exacte plutot qu'un equivalent.
-  const formesDuMois = ['.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl)', '[data-list="revenue-cards"]']
+  const formesDuMois = ['.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl):not(.rev-cmp-tbl)', '[data-list="revenue-cards"]']
   for (const sel of formesDuMois) {
     assert.strictEqual(p.cache(sel).hidden, true,
       `${sel} reste affiche sous la courbe de l annee`)
@@ -4422,4 +4430,173 @@ test("vue ANNEE, un bien archive qui n a d euros qu en N-1 GARDE sa ligne", () =
   const html = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
   assert.ok(html.includes('Colomiers'), 'le bien archive a perdu la ligne qui porte ses euros N-1')
   assert.strictEqual((html.match(/marque-archive/g) || []).length, 1)
+})
+
+// ─── LE DETAIL DE CHAQUE COMPARABLE (spec-revenus-comparables §7) ──────────
+// Decisions de Thierry du 25 novembre 2026 : un bouton « Afficher » a cote de
+// la legende des comparables, un tableau sous la courbe, son logement en
+// premiere ligne, les 12 derniers mois et les 3 prochains.
+const bandeDeTest = () => ({
+  'uuid-1': {
+    releve_le: '2026-10-06',
+    mois: {
+      '2026-04': { nature: 'clos', min_cents: 500000, max_cents: 900000, comparables: 8, releve_le: '2026-10-06' },
+      '2026-05': { nature: 'clos', min_cents: 600000, max_cents: 950000, comparables: 8, releve_le: '2026-10-06' }
+    }
+  }
+})
+const anneeDeTest = () => ({
+  total: { '2026-05': mo(10000) },
+  par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+  hors_biens: {}
+})
+const detailDeTest = () => ({
+  mois: ['2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06',
+    '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12', '2027-01'],
+  mois_courant: '2026-10',
+  logement: { '2026-05': { total_cents: 10000, sans_montant: 0 } },
+  comparables: [{ listing_id: '111', nom: 'Gîte du lac', retenu: true,
+    mois: { '2026-05': { etat: 'clos', montant_cents: 300000, releve_le: '2026-10-06' } } }],
+  releves: { de: '2026-10-06', a: '2026-10-06' }
+})
+const legendeDe = (p) => String(p.cache('[data-bind="revenue-annee-legende"]').innerHTML || '')
+const detailNoeud = (p) => p.cache('[data-bind="revenue-annee-detail"]')
+
+test("LE TEST QUI COMPTE : le bouton « Afficher » suit la bande, et seulement elle", () => {
+  // Un logement choisi ET une bande : le bouton est la, a cote de la marque.
+  const avec = bancAnnee({ biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1', annee: anneeDeTest(), comparables: bandeDeTest() })
+  const leg = legendeDe(avec)
+  assert.match(leg, /data-detail-comparables/, 'le bouton manque alors que la bande existe')
+  assert.ok(leg.indexOf('rev-an-marque--bande') < leg.indexOf('data-detail-comparables'),
+    'le bouton n est pas a cote de la legende des comparables')
+  assert.match(leg, /aria-expanded="false"/, 'le detail est annonce deplie avant tout clic')
+  assert.match(leg, /revenue\.detail_afficher/)
+  // ⚠ REPLIE PAR DEFAUT : rien n est rendu, et le conteneur est masque.
+  assert.strictEqual(detailNoeud(avec).hidden, true, 'le detail est deplie a l ouverture')
+  // Sous « Tous » : pas de bande, donc pas de bouton (decision 2 du §4 bis).
+  const tous = bancAnnee({ biens: [{ id: 'uuid-1', name: 'A' }], filtre: null, annee: anneeDeTest(), comparables: bandeDeTest() })
+  assert.ok(!/data-detail-comparables/.test(legendeDe(tous)), 'un bouton detaille des comparables sous « Tous »')
+  // Un logement choisi SANS bande : un bouton qui ouvrirait du vide est pire qu absent.
+  const sans = bancAnnee({ biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1', annee: anneeDeTest(), comparables: {} })
+  assert.ok(!/data-detail-comparables/.test(legendeDe(sans)), 'le bouton existe sans bande')
+})
+
+test("LE TEST QUI COMPTE : « Afficher » charge le detail UNE fois, au clic, et le montre", async () => {
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }], filtre: 'uuid-1', annee: anneeDeTest(), comparables: bandeDeTest(),
+    corps: (url) => (url.includes('detail=comparables') ? { jour: '2026-10-15', detail: detailDeTest(), indisponibles: [] } : {})
+  })
+  // ⚠ AUCUN APPEL TANT QU'ON N'A PAS CLIQUE : le detail ne part pas avec la pastille.
+  assert.deepEqual(p.urls.filter(u => u.includes('detail=comparables')), [], 'le detail part sans clic')
+  p.interne.basculerDetailComparables()
+  await tours()
+  const appels = p.urls.filter(u => u.includes('/api/ecran/revenus-annee?detail=comparables&bien=uuid-1'))
+  assert.strictEqual(appels.length, 1, `le detail est demande ${appels.length} fois`)
+  const n = detailNoeud(p)
+  assert.strictEqual(n.hidden, false, 'le detail reste masque apres « Afficher »')
+  const html = String(n.innerHTML)
+  assert.ok(html.includes('La bulle') && html.includes('Gîte du lac'), 'le tableau ne nomme pas les logements')
+  assert.ok(html.indexOf('La bulle') < html.indexOf('Gîte du lac'), 'le logement de l hote n est pas en tete')
+  assert.match(legendeDe(p), /aria-expanded="true"/, 'le bouton ne dit pas que le detail est deplie')
+  assert.match(legendeDe(p), /revenue\.detail_masquer/)
+  // Replier, puis rouvrir : aucun appel de plus.
+  p.interne.basculerDetailComparables()
+  assert.strictEqual(detailNoeud(p).hidden, true, 'le detail ne se replie pas')
+  p.interne.basculerDetailComparables()
+  await tours()
+  assert.strictEqual(p.urls.filter(u => u.includes('detail=comparables')).length, 1,
+    'rouvrir le detail rappelle le reseau pour une donnee deja en main')
+})
+
+test("LE TEST QUI COMPTE : une lecture ratee se dit, et se RETENTE a la reouverture", async () => {
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }], filtre: 'uuid-1', annee: anneeDeTest(), comparables: bandeDeTest(),
+    fetchLeve: true
+  })
+  p.interne.basculerDetailComparables()
+  await tours()
+  assert.match(String(detailNoeud(p).innerHTML), /revenue\.detail_echec/,
+    'une lecture ratee ne se dit pas (ou se dit « aucun comparable »)')
+  p.interne.basculerDetailComparables()
+  p.interne.basculerDetailComparables()
+  await tours()
+  assert.strictEqual(p.urls.filter(u => u.includes('detail=comparables')).length, 2,
+    'l echec est garde en cache : « n a pas pu etre lu » jusqu au rechargement')
+})
+
+test("LE TEST QUI COMPTE : « Lecture impossible » de l annee vide AUSSI le detail", () => {
+  const p = bancAnnee({ biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1', annee: anneeDeTest(), comparables: bandeDeTest() })
+  p.interne.etat.detailOuvert = true
+  p.interne.etat.detailComparables['uuid-1'] = detailDeTest()
+  p.interne.renderAnnee()
+  assert.strictEqual(detailNoeud(p).hidden, false)
+  p.interne.etat.anneeEtat = 'echec'
+  p.interne.renderAnnee()
+  assert.strictEqual(detailNoeud(p).hidden, true, 'le detail survit a une lecture ratee de l annee')
+  assert.strictEqual(String(detailNoeud(p).innerHTML), '', 'le detail garde les chiffres d une autre lecture')
+})
+
+test("LE TEST QUI COMPTE : deplie, une pastille SANS bande n'appelle rien (constat m5 de la review)", async () => {
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'La bulle' }, { id: 'uuid-2', name: 'Sans bande' }],
+    filtre: 'uuid-1', annee: anneeDeTest(), comparables: bandeDeTest(),
+    corps: (url) => (url.includes('detail=comparables') ? { detail: detailDeTest(), indisponibles: [] } : {})
+  })
+  p.interne.basculerDetailComparables()
+  await tours()
+  assert.strictEqual(p.urls.filter(u => u.includes('detail=comparables')).length, 1)
+  // On passe a un logement dont la bande n existe pas : le detail ne peut pas
+  // se montrer, donc rien ne doit partir.
+  p.interne.etat.filtreAnnee = 'uuid-2'
+  p.interne.renderAnnee()
+  await tours()
+  assert.deepEqual(p.urls.filter(u => u.includes('bien=uuid-2')), [],
+    'le detail d un logement sans bande est demande alors qu il ne peut pas s afficher')
+  assert.strictEqual(detailNoeud(p).hidden, true)
+  // Retour sur le premier : rien de plus, la reponse est en main.
+  p.interne.etat.filtreAnnee = 'uuid-1'
+  p.interne.renderAnnee()
+  await tours()
+  assert.strictEqual(p.urls.filter(u => u.includes('detail=comparables')).length, 1)
+  assert.strictEqual(detailNoeud(p).hidden, false, 'le detail ne suit pas la pastille quand il est deplie')
+})
+
+test("LE TEST QUI COMPTE : la vue Annee s'ouvre meme quand le total du mois est « calcul en cours »", () => {
+  // Recette du 25 novembre 2026 sur staging (pas de cron, donc total du mois
+  // toujours « en cours ») : cliquer « Annee » chargeait l'annee, et l'ecran
+  // restait sur le mois — `renderRevenus` sortait avant le selecteur et
+  // `renderAnnee`. Thierry : « pas de bien affiche ».
+  const ecran = { mois: '2026-11', revenus: null, indisponibles: ['revenus_calcul_en_cours'], droits: { reservations: true } }
+  const biens = [{ id: 'uuid-1', name: 'La bulle' }]
+  const p = bancDeRendu({
+    ecran, biens, vueRevenus: 'annee', anneeRevenus: 2026, anneeEtat: 'ok', aujourdHui: '2026-11-25',
+    annee: anneeDeTest()
+  })
+  // ⚠ LE BLOC ANNEE PART MASQUE, COMME DANS LE BALISAGE (`hidden` sur
+  // `revenue-annee`). Le double cree ses noeuds visibles : sans cette ligne,
+  // « la vue Annee n'est plus masquee » etait vraie d'avance (constat M2 de la
+  // review, REVIEW.md regle 22 — un double plus permissif que le vrai).
+  p.cache('[data-bind="revenue-annee"]').hidden = true
+  const tableauMois = '.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl):not(.rev-cmp-tbl)'
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-annee"]').hidden, false,
+    'la vue Annee reste masquee tant que le total du mois est en calcul')
+  assert.match(p.html('[data-list="revenue-annee-filtres"]'), /La bulle/, 'les pastilles des logements ne sont pas rendues')
+  assert.strictEqual(String(p.cache('[data-bind="revenue-month-nav"]').textContent), '2026',
+    'le libelle des fleches dit le mois en vue Annee')
+  // Retour au mois : l'annee se masque, le total redit « calcul en cours », et
+  // le tableau du mois — sans lignes — RESTE masque. ⚠ `videDuTotal` et
+  // `renderAnnee` l'atteignent desormais par la MEME chaine de selecteur (le
+  // banc donne un noeud par chaine) : l'assertion voit donc les deux.
+  p.interne.etat.vueRevenus = 'mois'
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-annee"]').hidden, true)
+  assert.match(String(p.cache('[data-bind="revenue-total"]').textContent), /revenue\.computing/)
+  assert.strictEqual(p.cache(tableauMois).hidden, true, 'le tableau du mois vide s affiche en en-tetes seuls')
+  // ⚠ ET UN `renderAnnee` SEUL — la bande ou le detail qui repond APRES le
+  // retour au mois (constat M1) — ne le demasque pas non plus.
+  p.interne.renderAnnee()
+  assert.strictEqual(p.cache(tableauMois).hidden, true,
+    'une reponse arrivee apres le retour au mois reaffiche le tableau vide')
+  assert.match(String(p.cache('[data-bind="revenue-month-nav"]').textContent), /./, 'le libelle du mois a disparu')
 })

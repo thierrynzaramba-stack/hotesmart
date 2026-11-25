@@ -1897,6 +1897,51 @@ body.men-cfg-ouvert { overflow: hidden; }
    tableaux du bloc (decision de Thierry du 28 octobre 2026). */
 .rev-tbl__ecart--nul { color: var(--muted); font-weight: var(--fw-semibold); }
 
+/* ─── Le detail de chaque comparable (spec-revenus-comparables §7) ────────
+   Decisions de Thierry du 25 novembre 2026 : un tableau sous la courbe, son
+   logement en premiere ligne, les 12 derniers mois et les 3 prochains. */
+/* Le bouton de la legende. ⚠ 44 px DE HAUT, comme toute cible de cette page
+   (`--control`) : la recette se fait au telephone. Un lien souligne plutot
+   qu'une pilule : il ouvre un detail, il n'agit sur rien. */
+.rev-an-detail {
+  min-height: var(--control); padding: 0 6px;
+  border: 0; background: none; color: var(--ink);
+  font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer;
+}
+.rev-an-detail:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.rev-cmp { margin-top: 12px; }
+.rev-cmp__tete { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+/* Quinze colonnes ne tiennent pas : le tableau glisse dans son conteneur
+   (`.rev-tbl-wrap`), et la colonne des noms RESTE en place — une ligne qu'on
+   fait glisser doit garder son nom. */
+.rev-tbl--cmp { width: auto; min-width: 100%; }
+.rev-tbl--cmp th, .rev-tbl--cmp td { padding: 6px 8px; font-size: .8125rem; }
+.rev-tbl--cmp .rev-cmp__nom {
+  position: sticky; inset-inline-start: 0; z-index: 1;
+  background: var(--surface); min-width: 10em; max-width: 16em; white-space: normal;
+}
+/* Les mois en cours et a venir : l'« occupe » chez les comparables, le « deja
+   reserve » chez l'hote. ⚠ LA COULEUR N'EST PAS SEULE : le trait pointille
+   marque l'entree dans le mois courant, comme le pointille de la courbe. */
+.rev-tbl--cmp .rev-cmp--avenir { color: var(--muted); }
+.rev-tbl--cmp .rev-cmp--courant { border-inline-start: 1px dashed var(--border); }
+.rev-cmp__moi > th, .rev-cmp__moi > td { font-weight: 600; }
+.rev-cmp__nuits { display: block; font-size: .7rem; color: var(--muted); }
+/* « n. c. », « inactif », « aucun » : des mots, pas des montants. Gris, et le
+   motif au survol (`title`). */
+.rev-cmp abbr { text-decoration: none; color: var(--muted); cursor: help; }
+/* La forme TELEPHONE : une carte par logement, ses quinze mois en grille de
+   trois. Elle ne s'affiche que sous 560 px (`.rev-liste`). */
+.rev-cmp-grille {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 12px; margin: 0;
+}
+.rev-cmp-grille > div { min-width: 0; }
+.rev-cmp-grille dt { font-size: .7rem; color: var(--muted); }
+.rev-cmp-grille dd { margin: 0; font-size: .8125rem; }
+.rev-cmp-grille .rev-cmp--avenir dd { color: var(--muted); }
+.rev-cmp-grille .rev-cmp--courant { border-inline-start: 1px dashed var(--border); padding-inline-start: 6px; }
+
 /* ⚠ ET LE NEGATIF, LUI, DIFFERE ENTRE LES DEUX TABLEAUX, EXPRES : `--bas`
    (encre) dans le tableau des biens, `--retard` (rouge) dans « Reserve a
    date ». Un bien qui a moins vendu que l'an dernier est un FAIT, pas une
