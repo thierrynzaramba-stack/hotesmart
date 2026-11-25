@@ -123,7 +123,19 @@ const ATTENDU = {
     // n'en lancent pas deux. Revenir sur une pastille deja vue ne coute rien.
     // ⚠ NI L'UN NI L'AUTRE N'EST DANS LE BUDGET DU PREMIER AFFICHAGE : il
     // reste a DEUX appels, et c'est ce que le test du chargement garde.
-    '/api/ecran/revenus-annee': 2,
+    // ⚠ UN TROISIEME SITE LE 25 NOVEMBRE 2026, et voici les deux reponses que
+    // ce test exige avant de l'inscrire (spec-revenus-comparables §7) :
+    //   A QUOI IL SERT : `chargerDetailComparables` — le DETAIL de chaque
+    //   comparable d'UN logement (decisions D1-D3 de Thierry : un tableau,
+    //   une ligne par comparable, les 12 derniers mois et les 3 prochains),
+    //   au clic sur « Afficher » dans la legende.
+    //   POURQUOI IL N'ENTRE PAS DANS LA BANDE : la bande part au clic sur la
+    //   pastille, et la plupart des regards s'arretent a elle. Y joindre le
+    //   detail ferait payer a chaque pastille quinze mois par comparable que
+    //   personne n'a demandes. Et il ne depend pas de l'annee affichee (il
+    //   glisse avec le jour) : une fois par logement et par session.
+    // ⚠ IL N'EST PAS NON PLUS DANS LE PREMIER AFFICHAGE : deux appels.
+    '/api/ecran/revenus-annee': 3,
     // ⚠ UN DE PLUS, LE 29 OCTOBRE 2026, ET VOICI LES DEUX REPONSES QUE CE TEST
     // EXIGE AVANT DE L'INSCRIRE.
     //   A QUOI IL SERT : la SUITE du bloc « Derniers avis », trois par trois,

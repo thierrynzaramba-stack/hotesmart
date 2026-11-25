@@ -350,6 +350,11 @@
            ailleurs. -->
       <div class="rev-an-legende" data-bind="revenue-annee-legende"></div>
       <div data-bind="revenue-annee-courbe"></div>
+      <!-- ⚠ LE DETAIL DE CHAQUE COMPARABLE, replie par defaut (decisions de
+           Thierry du 25 novembre 2026, spec-revenus-comparables §7). Il
+           s'ouvre par le bouton « Afficher » de la legende, qui n'existe que
+           la ou la bande existe : un logement choisi, une bande tracee. -->
+      <div class="rev-cmp" id="rev-an-detail" data-bind="revenue-annee-detail" hidden></div>
 
       <!-- ⚠ UN VRAI TABLEAU : trois colonnes de chiffres alignees se lisent,
            et un lecteur d'ecran doit pouvoir dire « La bulle, 2025, 19 800 € ».
@@ -434,6 +439,9 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { courbeMensuelle } from '/shared/courbe-mensuelle.js'
 import { brancherInfoBulles } from '/shared/ibulle.js'
 import { brancherFleches } from '/shared/rail-fleches.js'
+// Le detail de chaque comparable, sous la courbe de l'annee (spec-revenus-
+// comparables §7) : les deux formes, ordinateur et telephone, d'un seul module.
+import { detailComparablesHtml } from '/shared/comparables-detail.js'
 // ⚠ `enteteCompte()` sur chaque fetch : les endpoints lus ici honorent X-Compte
 // (compteDelegue) ; sans l'en-tête, un membre verrait SON compte pendant que
 // les lectures Supabase, juste à côté, lisent le compte consulté.
@@ -470,6 +478,15 @@ const etat = {
   // pastille deja vue ne rappelle pas le reseau : revenir sur « La bulle » apres
   // un detour par « Colomiers » ne doit rien couter.
   comparablesParBien: {},
+  // Le DETAIL de chaque comparable, par bien. ⚠ LA CLE NE PORTE PAS L'ANNEE,
+  // au contraire de la bande : le detail glisse avec le JOUR (12 derniers mois
+  // + 3 prochains, decision D2 de Thierry), pas avec l'annee affichee.
+  // `undefined` pendant la lecture, `null` si elle a echoue.
+  detailComparables: {},
+  // Le detail est-il deplie ? ⚠ UN SEUL INTERRUPTEUR POUR TOUS LES BIENS :
+  // l'hote qui l'a ouvert et change de pastille veut voir celui de l'autre
+  // logement, pas le replier a chaque fois.
+  detailOuvert: false,
   // Le logement dont la COURBE est tracee, ou `null` pour le compte entier.
   // ⚠ IL NE FILTRE QUE LA COURBE : le total de l'en-tete et le tableau restent
   // ceux du compte. Voir le commentaire de `renderAnnee`.
@@ -648,6 +665,37 @@ async function chargerComparables (bienId) {
     etat.comparablesParBien[cle] = null
   }
   renderAnnee()
+}
+
+// Le DETAIL de chaque comparable d'UN logement (spec-revenus-comparables §7).
+// ⚠ IL NE SE CHARGE QU'AU CLIC SUR « AFFICHER », jamais avec la pastille : la
+// bande suffit a la plupart des regards, et un tableau que personne n'a
+// demande ne vaut pas un appel. Une fois par logement, cle posee AVANT l'appel
+// pour que deux clics rapides n'en lancent pas deux.
+async function chargerDetailComparables (bienId) {
+  const cle = String(bienId || '')
+  if (!cle || Object.prototype.hasOwnProperty.call(etat.detailComparables, cle)) return
+  etat.detailComparables[cle] = undefined
+  try {
+    const recu = await appel(`/api/ecran/revenus-annee?detail=comparables&bien=${encodeURIComponent(cle)}`)
+    // ⚠ `null` VEUT DIRE « LECTURE RATEE », et l'ecran le dit — il ne
+    // l'affiche pas comme « aucun comparable ».
+    etat.detailComparables[cle] = recu && recu.detail && typeof recu.detail === 'object' ? recu.detail : null
+  } catch (e) {
+    etat.detailComparables[cle] = null
+  }
+  renderAnnee()
+}
+
+// Deplier ou replier le detail. ⚠ UNE LECTURE RATEE SE RETENTE A LA
+// REOUVERTURE : garder l'echec en cache laisserait « n'a pas pu etre lu »
+// jusqu'au rechargement de la page, pour une panne peut-etre passagere.
+function basculerDetailComparables () {
+  etat.detailOuvert = !etat.detailOuvert
+  const bien = etat.filtreAnnee ? String(etat.filtreAnnee) : ''
+  if (etat.detailOuvert && bien && etat.detailComparables[bien] === null) delete etat.detailComparables[bien]
+  renderAnnee()
+  if (etat.detailOuvert && bien) chargerDetailComparables(bien)
 }
 
 async function allerALaVue (vue) {
@@ -2097,7 +2145,7 @@ function renderRevenus () {
   // prend le PREMIER du document. Il tombe sur celui du mois aujourd'hui, mais
   // c'est un accident d'ordre dans le balisage, pas une garantie.
   const enAnneeMaintenant = etat.vueRevenus === 'annee'
-  const wrap = document.querySelector('.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl)')
+  const wrap = document.querySelector('.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl):not(.rev-cmp-tbl)')
   if (wrap) wrap.hidden = sansBien || enAnneeMaintenant
   // ⚠ LES DEUX FORMES SE MASQUENT ENSEMBLE. C'est la media query qui choisit
   // laquelle s'affiche ; `hidden` dit s'il y a quelque chose a afficher. Les
@@ -2229,8 +2277,8 @@ function renderAnnee () {
   // une 2e `.rev-liste` : ces selecteurs les attrapaient, et ne rendaient juste
   // que parce que `querySelector` prend le PREMIER du document — « un accident
   // d'ordre dans le balisage, pas une garantie », dit le commentaire d'a cote.
-  for (const sel of ['.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl)',
-    '.rev-liste:not(.rev-liste--annee):not(.rev-rad-liste)']) {
+  for (const sel of ['.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl):not(.rev-cmp-tbl)',
+    '.rev-liste:not(.rev-liste--annee):not(.rev-rad-liste):not(.rev-cmp-liste)']) {
     const n = document.querySelector(sel)
     if (n) n.hidden = enAnnee || !(etat.biens || []).length
   }
@@ -2287,6 +2335,10 @@ function renderAnnee () {
     const rad_ = $('[data-bind="revenue-annee-rad"]'); if (rad_) rad_.hidden = true
     const ibt = $('[data-bind="revenue-annee-ib-total"]'); if (ibt) ibt.hidden = true
     const lg = $('[data-bind="revenue-annee-legende"]'); if (lg) lg.innerHTML = ''
+    // ⚠ LE DETAIL DES COMPARABLES AUSSI : il parle du logement choisi, et
+    // « Lecture impossible » au-dessus d'un tableau d'une autre lecture serait
+    // le defaut deja ferme pour « Reserve a date ».
+    const dt = $('[data-bind="revenue-annee-detail"]'); if (dt) { dt.hidden = true; dt.innerHTML = '' }
   }
   if (etat.anneeEtat === 'chargement') { dire('revenue.computing'); videTout(); return }
   // ⚠ `!etat.annee.total` ET NON `=== null` : la vue Mois ecrit la forme lache
@@ -2696,6 +2748,10 @@ function renderAnnee () {
 
   // La legende : trois marques au plus, et la troisieme n'apparait que si le
   // trait pointille existe vraiment.
+  // Le detail des comparables existe-t-il ici ? Un logement choisi ET une
+  // bande tracee pour l'annee affichee — la condition meme de la marque de
+  // legende a cote de laquelle vit son bouton.
+  const detailPossible = !!choisi && bandes.length > 0 && !riendDuTout
   const noeudLeg = $('[data-bind="revenue-annee-legende"]')
   if (noeudLeg && riendDuTout) {
     noeudLeg.innerHTML = ''
@@ -2732,6 +2788,38 @@ function renderAnnee () {
         + `<svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-help"></use></svg>`
         + `</button><span class="ibulle__txt" role="note" id="ib-comparables-txt">`
         + `${esc(txtComparables)}</span></span>` : '')
+      // ⚠ LE BOUTON « AFFICHER » SUIT LA MARQUE DES COMPARABLES (demande de
+      // Thierry du 25 novembre 2026 : « a cote de la legende comparable »).
+      // Il n'existe que si la bande existe : sans logement choisi ou sans
+      // bande, il n'y a rien a detailler, et un bouton qui ouvre du vide est
+      // pire qu'absent.
+      + (detailPossible ? `<button type="button" class="rev-an-detail" data-detail-comparables`
+        + ` aria-expanded="${etat.detailOuvert ? 'true' : 'false'}" aria-controls="rev-an-detail"`
+        + ` aria-label="${esc(t(etat.detailOuvert ? 'revenue.detail_masquer_aria' : 'revenue.detail_afficher_aria'))}">`
+        + `${esc(t(etat.detailOuvert ? 'revenue.detail_masquer' : 'revenue.detail_afficher'))}</button>` : '')
+  }
+
+  // ─── LE DETAIL DE CHAQUE COMPARABLE (spec-revenus-comparables §7) ────────
+  // ⚠ IL NE SE MONTRE QUE DEPLIE, ET LA OU LE BOUTON EXISTE. Le contenu vient
+  // du module commun : le tableau de l'ordinateur et les cartes du telephone
+  // sortent des MEMES valeurs, donc ne peuvent pas se contredire.
+  const noeudDetail = $('[data-bind="revenue-annee-detail"]')
+  if (noeudDetail) {
+    const montrer = detailPossible && etat.detailOuvert
+    noeudDetail.hidden = !montrer
+    noeudDetail.innerHTML = montrer
+      ? detailComparablesHtml(etat.detailComparables[String(choisi.id)], {
+        t, esc,
+        // ⚠ LA FORME COURTE DES MONTANTS (« 1,2 k € ») : quinze colonnes ne
+        // tiennent pas en montants pleins. Meme formatteur que l'axe.
+        montant: (cents) => monnaieCourte(Number(cents) / 100, devise),
+        moisCourt: (m) => dateDuJour(`${m}-15`, { month: 'short', year: '2-digit' }),
+        moisLong: (m) => dateDuJour(`${m}-15`, { month: 'long', year: 'numeric' }),
+        dateLongue: (j) => dateDuJour(String(j), { day: 'numeric', month: 'long', year: 'numeric' }),
+        nomLogement: String(choisi.name || ''),
+        idIb: 'ib-detail-cmp-txt'
+      })
+      : ''
   }
 
   // ─── Le tableau par logement ────────────────────────────────────────────
@@ -3187,6 +3275,20 @@ async function init () {
       // La bande suit la pastille, et elle arrive apres : le rendu ci-dessus
       // montre deja la courbe du bien, celui du chargeur ajoutera la bande.
       if (etat.filtreAnnee) chargerComparables(etat.filtreAnnee)
+      // ⚠ LE DETAIL DEPLIE SUIT LA PASTILLE : changer de logement le montre
+      // pour l'autre logement, il ne le replie pas.
+      if (etat.filtreAnnee && etat.detailOuvert) chargerDetailComparables(etat.filtreAnnee)
+    })
+  }
+  // Le bouton « Afficher » vit dans la legende, que chaque rendu reecrit :
+  // UN ecouteur sur le conteneur, qui lui ne bouge pas (meme raison que les
+  // pastilles juste au-dessus).
+  const legende = $('[data-bind="revenue-annee-legende"]')
+  if (legende) {
+    legende.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-detail-comparables]')
+      if (!b || !legende.contains(b)) return
+      basculerDetailComparables()
     })
   }
 

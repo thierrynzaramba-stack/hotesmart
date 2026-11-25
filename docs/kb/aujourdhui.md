@@ -220,3 +220,28 @@ les laissait verts et un renommage les faisait rougir (REVIEW.md règle 20).
 
 L'ordre des rendus qui suivent — le lot des 5 chargeurs, puis les notes, puis
 les chiffres par bien — n'a pas bougé (§6, dette 61).
+
+## 8. Le détail de chaque comparable (vue Année, 25 novembre 2026)
+
+Spec et décisions de Thierry : `docs/specs/spec-revenus-comparables.md` §7.
+
+- **Où** : bouton « Afficher » dans la légende de la courbe, juste après la
+  marque des comparables. Il n'existe que si la bande existe (un logement
+  choisi, une bande tracée pour l'année affichée) ; replié par défaut.
+- **Quoi** : un tableau, le logement de l'hôte en première ligne, puis un
+  comparable par ligne (titre de l'annonce + lien Airbnb). Fenêtre
+  **glissante** : les 12 derniers mois (mois en cours compris) et les 3
+  prochains — indépendante de l'année affichée. Téléphone (≤ 560 px) : une
+  carte par logement, les 15 mois en grille de trois.
+- **D'où** : `GET /api/ecran/revenus-annee?detail=comparables&bien=<uuid>`, au
+  clic, une fois par logement et par session. Trois lectures en parallèle
+  après la garde du bien : `comparables_derniers_releves` (fonction SQL, la
+  photo la plus récente par case), `revenus_annee` × 1 ou 2 (bornée au bien),
+  `comparables_retenus` (titre). Module de rendu : `shared/comparables-detail.js`.
+- **Ce que dit une case** : mêmes filtres que la bande. « n. c. » + motif au
+  survol (pas de relevé, relevé partiel, montant absent) ; « inactif » pour un
+  comparable à 0 € un mois clos (pas sur le marché) ; « aucun » pour un mois
+  sans séjour versé du logement. Jamais 0 ni tiret pour une absence.
+- **Le titre** vient de `comparables_retenus.nom` (migration
+  `2026-11-25-comparables-detail.sql`, reprise depuis `airroi_cache` sans
+  appel payant). Absent : « Annonce sans titre », le lien reste.

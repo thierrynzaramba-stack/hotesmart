@@ -32,7 +32,14 @@ async function appeler ({
   // Les lignes de `comparables_releves`, et une erreur de lecture au besoin.
   releves = [], erreurReleves = null,
   // Les lignes de `revenus_reserve_a_date`.
-  lignesRad = [], erreurRad = null
+  lignesRad = [], erreurRad = null,
+  // LE DETAIL DES COMPARABLES (spec-revenus-comparables §7) : les lignes de
+  // `comparables_derniers_releves`, celles de `comparables_retenus`, et les
+  // lignes de `revenus_annee` PAR ANNEE demandee (le detail en demande une ou
+  // deux, et un double unique ne dirait pas laquelle a rendu quoi).
+  derniers = [], erreurDerniers = null,
+  retenus = [], erreurRetenus = null,
+  lignesParAnnee = null, anneesEnErreur = []
 } = {}) {
   const vu = { rpc: [], selects: [], filtres: [] }
 
@@ -45,6 +52,15 @@ async function appeler ({
       if (nom === 'revenus_reserve_a_date') {
         return Promise.resolve({ data: erreurRad ? null : lignesRad, error: erreurRad })
       }
+      if (nom === 'comparables_derniers_releves') {
+        return Promise.resolve({ data: erreurDerniers ? null : derniers, error: erreurDerniers })
+      }
+      if (lignesParAnnee && nom === 'revenus_annee') {
+        if (anneesEnErreur.includes(args.p_annee)) {
+          return Promise.resolve({ data: null, error: { message: 'panne' } })
+        }
+        return Promise.resolve({ data: lignesParAnnee[args.p_annee] || [], error: null })
+      }
       return Promise.resolve({ data: erreurRpc ? null : lignes, error: erreurRpc })
     },
     from (table) {
@@ -53,9 +69,15 @@ async function appeler ({
       // ferait passer la lecture des comparables pour une liste de biens, et
       // les tests de la bande mesureraient autre chose que ce qu'ils croient.
       const comparables = table === 'comparables_releves'
-      const reponse = () => comparables
+      // ⚠ LE FILTRE `eq('id', …)` EST HONORE sur `properties` : la garde du
+      // detail lit UN bien du compte, et un double qui rendrait tous les biens
+      // quel que soit le filtre laisserait passer un uuid etranger.
+      const local = []
+      const reponse = () => table === 'comparables_retenus'
+        ? { data: erreurRetenus ? null : retenus, error: erreurRetenus }
+        : comparables
         ? { data: erreurReleves ? null : releves, error: erreurReleves }
-        : { data: erreurBiens ? null : biens.map(id => ({
+        : { data: erreurBiens ? null : biens.filter(id => local.every(([c, v]) => c !== 'id' || v === id)).map(id => ({
             id,
             // ⚠ LE DOUBLE REND LE NOM, parce que la vraie lecture le demande
             // desormais : sans lui, la ligne d'un bien archive n'aurait rien a
@@ -66,7 +88,7 @@ async function appeler ({
           })), error: erreurBiens }
       const q = {
         select () { return q },
-        eq (c, v) { vu.filtres.push(['eq', c, v]); return q },
+        eq (c, v) { vu.filtres.push(['eq', c, v]); local.push([c, v]); return q },
         in (c, v) { vu.filtres.push(['in', c, v]); return q },
         gte (c, v) { vu.filtres.push(['gte', c, v]); return q },
         lt (c, v) { vu.filtres.push(['lt', c, v]); return q },
@@ -762,4 +784,148 @@ test("LE TEST QUI COMPTE : le seuil s applique A CHAQUE PERIMETRE, pas au seul c
   // BIEN_B en a 7 : il passe.
   assert.strictEqual(rad.par_bien[BIEN_B][`${AN() - 1}-11`].sous_seuil, false)
   assert.strictEqual(rad.par_bien[BIEN_B][`${AN() - 1}-11`].total_cents, 140000)
+})
+
+// ─── LE DETAIL DE CHAQUE COMPARABLE (spec-revenus-comparables §7) ──────────
+// ⚠ DATES RELATIVES : le handler lit l'horloge (`jourDeParis`), donc la
+// fenetre glissante aussi. Les mois sont designes par leur ecart au mois
+// courant — jamais « 2026-11 » en dur, qui deviendrait un mois clos dans
+// trente jours (dette 124).
+const { _interne: DET } = require('../api/ecran/revenus-annee')
+
+test("LE TEST QUI COMPTE (SECURITE) : le detail d'un bien HORS PERIMETRE rend 403, sans rien lire", async () => {
+  const r = await appeler({
+    titulaire: false, refs: [BIEN_A], biens: [BIEN_A],
+    query: { detail: 'comparables', bien: BIEN_B },
+    derniers: [{ listing_id: '111', mois: `${moisDecale(-1)}-01`, nature: 'clos', montant_estime_cents: 1, releve_le: jourDeParis() }]
+  })
+  assert.equal(r.statut, 403, `un bien hors perimetre rend ${r.statut}`)
+  assert.equal(r.vu.rpc.length, 0, `des fonctions ont ete appelees avant le refus : ${r.vu.rpc.map(x => x.nom)}`)
+  assert.ok(!r.vu.selects.includes('comparables_retenus'), 'les titres ont ete lus avant le refus')
+})
+
+test("LE TEST QUI COMPTE (SECURITE) : un uuid d'un AUTRE compte rend 403 au titulaire", async () => {
+  // La cle de service CONTOURNE la RLS : sans la garde « ce bien est du
+  // compte », un titulaire lirait les comparables et les revenus d'un logement
+  // etranger en tapant son uuid.
+  const r = await appeler({ query: { detail: 'comparables', bien: BIEN_MORT }, biens: [BIEN_A, BIEN_B] })
+  assert.equal(r.statut, 403, `un bien etranger rend ${r.statut}`)
+  assert.equal(r.vu.rpc.length, 0, 'une lecture est partie pour un bien etranger')
+  assert.ok(r.vu.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id' && f[2] === TITULAIRE),
+    'la garde du bien ne borne pas au compte')
+})
+
+test("LE TEST QUI COMPTE : un perimetre VIDE ne voit le detail d'aucun bien", async () => {
+  const r = await appeler({ titulaire: false, refs: [], query: { detail: 'comparables', bien: BIEN_A } })
+  assert.equal(r.statut, 403, `un perimetre vide rend ${r.statut}`)
+})
+
+test("un uuid malforme ou un detail inconnu rend 400, pas une lecture", async () => {
+  const a = await appeler({ query: { detail: 'comparables', bien: 'pas-un-uuid' } })
+  assert.equal(a.statut, 400)
+  const b = await appeler({ query: { detail: 'tout', bien: BIEN_A } })
+  assert.equal(b.statut, 400)
+  assert.equal(a.vu.rpc.length + b.vu.rpc.length, 0)
+})
+
+test("LE TEST QUI COMPTE : le detail ne lit PAS l'annee, et borne ses revenus au SEUL bien", async () => {
+  const r = await appeler({ query: { annee: '2024', detail: 'comparables', bien: BIEN_A }, lignesParAnnee: {} })
+  assert.equal(r.statut, 200)
+  const revenus = r.vu.rpc.filter(x => x.nom === 'revenus_annee')
+  const fen = DET.fenetreDetail(jourDeParis())
+  assert.deepEqual(revenus.map(x => x.args.p_annee), DET.anneesARevenus(fen.mois),
+    'les annees demandees ne couvrent pas la fenetre glissante')
+  assert.ok(!revenus.some(x => x.args.p_annee === 2024) || DET.anneesARevenus(fen.mois).includes(2024),
+    'le detail a lu l annee affichee au lieu de la fenetre')
+  for (const x of revenus) {
+    assert.deepEqual(x.args.p_refs, [BIEN_A], 'les revenus du detail ne sont pas bornes au logement')
+    assert.equal(x.args.p_user_id, TITULAIRE)
+  }
+  assert.ok(!r.vu.rpc.some(x => x.nom === 'revenus_reserve_a_date'), 'le detail calcule le « reserve a date »')
+  const d = r.vu.rpc.find(x => x.nom === 'comparables_derniers_releves')
+  assert.deepEqual(d.args, {
+    p_property_id: BIEN_A, p_debut: fen.debut, p_fin: fen.fin, p_mois_courant: `${fen.courant}-01`
+  })
+  assert.deepEqual(r.charge.detail.mois, fen.mois)
+})
+
+test("LE TEST QUI COMPTE : le detail rend chaque comparable, son titre, et la ligne du logement", async () => {
+  const an = (m) => Number(m.slice(0, 4))
+  const mm = (m) => Number(m.slice(5, 7))
+  const passe = moisDecale(-2)
+  const avenir = moisDecale(1)
+  const lignesParAnnee = {}
+  for (const p of DET.anneesARevenus(DET.fenetreDetail(jourDeParis()).mois)) {
+    lignesParAnnee[p] = [passe, avenir].filter(m => an(m) === p || an(m) === p - 1)
+      .map(m => ligne(BIEN_A, an(m), mm(m), { total_cents: m === passe ? 150000 : 60000 }))
+  }
+  const r = await appeler({
+    query: { detail: 'comparables', bien: BIEN_A },
+    lignesParAnnee,
+    retenus: [{ listing_id: '111', nom: '  Gîte du lac  ', actif: true }],
+    derniers: [
+      { listing_id: '111', mois: `${passe}-01`, nature: 'clos', montant_estime_cents: 210000, releve_le: jourDeParis() },
+      { listing_id: '111', mois: `${avenir}-01`, nature: 'futur', montant_affiche_cents: 90000,
+        nuits_indisponibles: 9, nuits_mesurees: new Date(Date.UTC(an(avenir), mm(avenir), 0)).getUTCDate(), releve_le: jourDeParis() }
+    ]
+  })
+  assert.equal(r.statut, 200)
+  const { detail } = r.charge
+  assert.equal(detail.logement[passe].total_cents, 150000, 'le mois passe du logement est faux ou double')
+  assert.equal(detail.logement[avenir].total_cents, 60000)
+  assert.equal(detail.comparables.length, 1)
+  const c = detail.comparables[0]
+  assert.equal(c.nom, 'Gîte du lac', 'le titre de l annonce n est pas rendu (ou pas nettoye)')
+  assert.equal(c.mois[passe].etat, 'clos')
+  assert.equal(c.mois[passe].montant_cents, 210000)
+  assert.equal(c.mois[avenir].etat, 'futur')
+  assert.equal(c.mois[avenir].nuits_indisponibles, 9)
+  assert.deepEqual(r.charge.indisponibles, [])
+  assert.match(String(r.entetes['Server-Timing'] || ''), /req/, 'le detail ne dit pas son nombre de requetes')
+})
+
+test("LE TEST QUI COMPTE : une reponse qui ATTEINT le plafond n'est pas lue comme entiere", async () => {
+  // PostgREST rend 1 000 lignes SANS erreur : au plafond, la lecture est
+  // peut-etre tronquee, et le detail le dit au lieu d'afficher une moitie.
+  const mille = Array.from({ length: 1000 }, (_, i) => ({
+    listing_id: String(100000 + i), mois: `${moisDecale(-1)}-01`, nature: 'clos',
+    montant_estime_cents: 1000, releve_le: jourDeParis()
+  }))
+  const r = await appeler({ query: { detail: 'comparables', bien: BIEN_A }, derniers: mille, lignesParAnnee: {} })
+  assert.equal(r.statut, 200)
+  assert.equal(r.charge.detail.comparables, null, 'une lecture au plafond est rendue comme entiere')
+  assert.ok(r.charge.indisponibles.includes('comparables'))
+})
+
+test("LE TEST QUI COMPTE : une lecture ratee se dit, elle ne devient pas « aucun comparable »", async () => {
+  const r = await appeler({
+    query: { detail: 'comparables', bien: BIEN_A }, lignesParAnnee: {},
+    erreurDerniers: { message: 'fonction absente' }
+  })
+  assert.equal(r.statut, 200)
+  assert.equal(r.charge.detail.comparables, null, 'un echec est rendu comme une liste vide')
+  assert.ok(r.charge.indisponibles.includes('comparables'))
+})
+
+test("LE TEST QUI COMPTE : des revenus illisibles sur UNE annee ne laissent pas une demi-ligne", async () => {
+  const fen = DET.fenetreDetail(jourDeParis())
+  const appels = DET.anneesARevenus(fen.mois)
+  const r = await appeler({
+    query: { detail: 'comparables', bien: BIEN_A },
+    lignesParAnnee: Object.fromEntries(appels.map(p => [p, [ligne(BIEN_A, p, 1)]])),
+    anneesEnErreur: [appels[appels.length - 1]]
+  })
+  assert.equal(r.charge.detail.logement, null, 'une moitie de fenetre est rendue comme « aucun sejour »')
+  assert.ok(r.charge.indisponibles.includes('logement'))
+})
+
+test("des titres illisibles n'empechent pas le tableau : chaque ligne reste, sans titre", async () => {
+  const r = await appeler({
+    query: { detail: 'comparables', bien: BIEN_A }, lignesParAnnee: {},
+    erreurRetenus: { message: 'colonne nom absente' },
+    derniers: [{ listing_id: '111', mois: `${moisDecale(-1)}-01`, nature: 'clos', montant_estime_cents: 5000, releve_le: jourDeParis() }]
+  })
+  assert.equal(r.charge.detail.comparables.length, 1)
+  assert.equal(r.charge.detail.comparables[0].nom, null)
+  assert.ok(r.charge.indisponibles.includes('noms'))
 })
