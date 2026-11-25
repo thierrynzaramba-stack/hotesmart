@@ -496,7 +496,7 @@
   "charges.refus_bien_hors_compte": "This property is no longer in your account. Reload the page.",
   "charges.refus_bien_hors_entite": "This property does not belong to the chosen entity.",
   "charges.refus_bien_invalide": "This property is not valid. Reload the page.",
-  "charges.refus_bien_sans_entite": "This property is not linked to any entity.",
+  "charges.refus_bien_sans_entite": "This property is not linked to any entity: choose “No legal entity”.",
   "charges.refus_categorie_invalide": "Choose a category.",
   "charges.refus_charge_introuvable": "This invoice no longer exists.",
   "charges.refus_charge_non_designee": "Invoice not found. Reload the page.",
@@ -526,7 +526,7 @@
   "charges.saisir_main": "Enter manually",
   "charges.sans_bien": "No property",
   "charges.sans_categorie": "No category",
-  "charges.sans_entite": "To check an invoice, you need a legal entity: yourself, or your company. Create it from a property's page.",
+  "charges.sans_entite": "A general expense (no property) needs a legal entity: yourself, or your company. Create it from a property's page.",
   "charges.sans_montant": "{n} without an amount read",
   "charges.solde_lu": "Balance read: {montant}.",
   "charges.supprimee": "Invoice deleted.",
@@ -1712,7 +1712,7 @@
   "charges.email_changer_confirmer": "Change the address? The old one will no longer receive anything: remember to tell your suppliers.",
   "charges.email_changee": "New address. The old one no longer receives anything.",
   "charges.entite_manquante": "Legal entity missing",
-  "charges.entite_manquante_aide": "Legal entity missing: link this property to an entity from its page.",
+  "charges.entite_manquante_aide": "Legal entity missing: link this property to an entity from its page, and its invoices will move there automatically.",
   "charges.recue_email": "received by email",
   "charges.recue_email_de": "Received by email, from {de}.",
   "charges.expediteur_inconnu": "Unknown sender",
@@ -1736,5 +1736,9 @@
   "charges.refus_entite_introuvable": "This entity no longer exists.",
   "charges.refus_cible_invalide": "Choose an entity or a property.",
   "charges.motif_email_ligne_refusee": "An attachment could not be saved.",
-  "charges.motif_email_quota_jour": "More than 50 invoices received by email in 24 hours: the next ones were not taken. Add them by hand, or send them again tomorrow."
+  "charges.motif_email_quota_jour": "More than 50 invoices received by email in 24 hours: the next ones were not taken. Add them by hand, or send them again tomorrow.",
+  "charges.sans_entite_choix": "No legal entity",
+  "charges.sans_entite_rappel": "These invoices belong to properties that are not linked to any legal entity. Link each property from its page: its invoices will move there automatically.",
+  "charges.factures_sans_entite": "Invoices without a legal entity",
+  "charges.refus_bien_requis": "Choose the property: an invoice without a legal entity belongs to a property."
 }

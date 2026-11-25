@@ -496,7 +496,7 @@
   "charges.refus_bien_hors_compte": "Este alojamiento ya no está en su cuenta. Recargue la página.",
   "charges.refus_bien_hors_entite": "Este alojamiento no pertenece a la entidad elegida.",
   "charges.refus_bien_invalide": "Este alojamiento no es válido. Recargue la página.",
-  "charges.refus_bien_sans_entite": "Este alojamiento no está vinculado a ninguna entidad.",
+  "charges.refus_bien_sans_entite": "Este alojamiento no está vinculado a ninguna entidad: elija «Sin entidad jurídica».",
   "charges.refus_categorie_invalide": "Elija una categoría.",
   "charges.refus_charge_introuvable": "Esta factura ya no existe.",
   "charges.refus_charge_non_designee": "Factura no encontrada. Recargue la página.",
@@ -526,7 +526,7 @@
   "charges.saisir_main": "Introducir a mano",
   "charges.sans_bien": "Sin alojamiento",
   "charges.sans_categorie": "Sin categoría",
-  "charges.sans_entite": "Para verificar una factura, necesita una entidad jurídica: usted o su sociedad. Créela desde la ficha de un alojamiento.",
+  "charges.sans_entite": "Un gasto general (sin alojamiento) necesita una entidad jurídica: usted o su sociedad. Créela desde la ficha de un alojamiento.",
   "charges.sans_montant": "{n} sin importe leído",
   "charges.solde_lu": "Saldo leído: {montant}.",
   "charges.supprimee": "Factura eliminada.",
@@ -1712,7 +1712,7 @@
   "charges.email_changer_confirmer": "¿Cambiar la dirección? La antigua ya no recibirá nada: avise a sus proveedores.",
   "charges.email_changee": "Nueva dirección. La antigua ya no recibe nada.",
   "charges.entite_manquante": "Falta la entidad jurídica",
-  "charges.entite_manquante_aide": "Falta la entidad jurídica: vincule este alojamiento a una entidad desde su ficha.",
+  "charges.entite_manquante_aide": "Falta la entidad jurídica: vincule este alojamiento a una entidad desde su ficha, y sus facturas pasarán a ella automáticamente.",
   "charges.recue_email": "recibida por correo",
   "charges.recue_email_de": "Recibida por correo, de {de}.",
   "charges.expediteur_inconnu": "Remitente desconocido",
@@ -1736,5 +1736,9 @@
   "charges.refus_entite_introuvable": "Esta entidad ya no existe.",
   "charges.refus_cible_invalide": "Elija una entidad o un alojamiento.",
   "charges.motif_email_ligne_refusee": "No se pudo guardar un adjunto.",
-  "charges.motif_email_quota_jour": "Más de 50 facturas recibidas por correo en 24 horas: las siguientes no se tomaron. Añádalas a mano o reenvíelas mañana."
+  "charges.motif_email_quota_jour": "Más de 50 facturas recibidas por correo en 24 horas: las siguientes no se tomaron. Añádalas a mano o reenvíelas mañana.",
+  "charges.sans_entite_choix": "Sin entidad jurídica",
+  "charges.sans_entite_rappel": "Estas facturas pertenecen a alojamientos que no están vinculados a ninguna entidad jurídica. Vincule cada alojamiento desde su ficha: sus facturas pasarán a ella automáticamente.",
+  "charges.factures_sans_entite": "Facturas sin entidad jurídica",
+  "charges.refus_bien_requis": "Elija el alojamiento: una factura sin entidad jurídica es la de un alojamiento."
 }

@@ -13,6 +13,11 @@
 // GET ?mois=<YYYY-MM>&entite=<uuid>
 //   → les factures du mois et la part de chacune, seules (clic sur un mois,
 //     §14.21.2).
+// GET …&entite=sans
+//   → « Sans entité juridique » (lot 5 bis, §14.25) : les factures d'un
+//     logement qui n'a pas d'entité, sur l'année civile. Partout où une
+//     entité est attendue, `sans` est accepté — et devient NULL à l'appel
+//     des lectures du résumé, nulle part ailleurs.
 // GET ?export=1&entite=<uuid>&periode=<AAAA>
 //   → la liste d'export de l'exercice (lot 8d, §14.23) : les factures
 //     enregistrées, sans le chemin de leur fichier, et le nombre de factures
@@ -58,14 +63,23 @@ async function traiter (req, res, t0, deps) {
   const timing = () => res.setHeader('Server-Timing', `total;dur=${Date.now() - t0};desc="${requetesJusquIci()} requêtes"`)
 
   const entiteDemandee = q.entite && q.entite !== 'toutes' ? String(q.entite) : null
-  if (entiteDemandee && !UUID_RE.test(entiteDemandee)) return res.status(400).json({ error: 'entite_invalide' })
+  const SANS = ecran.SANS_ENTITE
+  if (entiteDemandee && entiteDemandee !== SANS && !UUID_RE.test(entiteDemandee)) return res.status(400).json({ error: 'entite_invalide' })
+  const sansEntite = entiteDemandee === SANS
 
   // ── « Afficher plus » : la page suivante de la liste, seule ──────────────
   // La liste suit l'entité choisie : le curseur vient avec elle (§14.21).
   if (q.curseur != null && q.curseur !== '') {
     const c = ecran.lireCurseur(q.curseur)
     if (!c.ok) return res.status(400).json({ error: 'curseur_invalide' })
-    const l = await ecran.liste(base, compte, c.curseur, entiteDemandee)
+    // « Sans entité » : les logements RATTACHÉS sont écartés (lot 5 bis).
+    let rattaches = []
+    if (sansEntite) {
+      const li = await (deps.entites || require('../../lib/entites-juridiques')).liensDuCompte(compte, { db: base })
+      if (!li.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
+      rattaches = (li.liens || []).map(x => x.property_uuid)
+    }
+    const l = await ecran.liste(base, compte, c.curseur, entiteDemandee, { rattaches })
     timing()
     if (!l.ok) return res.status(503).json({ error: 'Lecture impossible' })
     return res.status(200).json({ liste: { lignes: l.lignes, suite: l.suite } })
@@ -103,10 +117,14 @@ async function traiter (req, res, t0, deps) {
     if (!ecran.bornesMois(q.mois)) return res.status(400).json({ error: 'mois_invalide' })
     if (!entiteDemandee) return res.status(400).json({ error: 'entite_requise' })
     if (!/^\d{4}$/.test(String(q.periode || ''))) return res.status(400).json({ error: 'periode_requise' })
-    const ent = await ej.entitesDuCompte(compte, { db: base })
-    if (!ent.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
-    const entite = (ent.entites || []).find(e => String(e.id) === entiteDemandee)
-    if (!entite) { timing(); return res.status(404).json({ error: 'entite_introuvable' }) }
+    // « Sans entité » : l'année civile, aucune entité à relire.
+    let entite = null
+    if (!sansEntite) {
+      const ent = await ej.entitesDuCompte(compte, { db: base })
+      if (!ent.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
+      entite = (ent.entites || []).find(e => String(e.id) === entiteDemandee)
+      if (!entite) { timing(); return res.status(404).json({ error: 'entite_introuvable' }) }
+    }
     const exercice = ecran.bornesPeriode({ periode: q.periode, entite })
     // Une année hors des bornes de lecture retombe sur l'exercice en cours :
     // ce ne serait plus celui demandé.
@@ -125,10 +143,13 @@ async function traiter (req, res, t0, deps) {
   if (q.export != null && q.export !== '') {
     if (!entiteDemandee) return res.status(400).json({ error: 'entite_requise' })
     if (!/^\d{4}$/.test(String(q.periode || ''))) return res.status(400).json({ error: 'periode_requise' })
-    const ent = await ej.entitesDuCompte(compte, { db: base })
-    if (!ent.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
-    const entite = (ent.entites || []).find(e => String(e.id) === entiteDemandee)
-    if (!entite) { timing(); return res.status(404).json({ error: 'entite_introuvable' }) }
+    let entite = null
+    if (!sansEntite) {
+      const ent = await ej.entitesDuCompte(compte, { db: base })
+      if (!ent.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
+      entite = (ent.entites || []).find(e => String(e.id) === entiteDemandee)
+      if (!entite) { timing(); return res.status(404).json({ error: 'entite_introuvable' }) }
+    }
     const exercice = ecran.bornesPeriode({ periode: q.periode, entite })
     if (exercice.periode !== String(q.periode)) { timing(); return res.status(400).json({ error: 'periode_invalide' }) }
     const [x, n] = await Promise.all([
@@ -140,7 +161,8 @@ async function traiter (req, res, t0, deps) {
     if (!x.ok || !n.ok) return res.status(503).json({ error: 'Lecture impossible' })
     return res.status(200).json({
       export: {
-        entite: { id: entite.id, nom: entite.nom, siret: entite.siret || null },
+        // « Sans entité » n'a ni nom ni SIRET : la page écrit le sien.
+        entite: sansEntite ? { id: SANS, nom: null, siret: null, sans: true } : { id: entite.id, nom: entite.nom, siret: entite.siret || null },
         periode: exercice.periode, debut: exercice.debut, fin: exercice.fin, standard: exercice.standard,
         lignes: x.lignes, a_traiter: n.nombre
       }
@@ -149,36 +171,51 @@ async function traiter (req, res, t0, deps) {
 
   // ── L'écran entier ────────────────────────────────────────────────────────
   // Les entités d'abord : l'exercice dépend du début d'exercice de celle
-  // demandée. Les six autres lectures partent ensuite ENSEMBLE.
-  const ent = await ej.entitesDuCompte(compte, { db: base })
-  if (!ent.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
+  // demandée. Avec elles, la présence d'un total « Sans entité » (lot 5 bis) :
+  // un compte SANS entité ouvre dessus. Les six autres lectures partent
+  // ensuite ENSEMBLE.
+  // « Sans entité » DEMANDÉ : les logements rattachés, que la liste écarte
+  // (un compte qui n'a aucune entité n'en a aucun : rien à lire).
+  const [ent, pres, li] = await Promise.all([
+    ej.entitesDuCompte(compte, { db: base }),
+    ecran.sansEntitePresente(base, compte),
+    sansEntite ? ej.liensDuCompte(compte, { db: base }) : Promise.resolve({ ok: true, liens: [] })
+  ])
+  if (!ent.ok || !li.ok) { timing(); return res.status(503).json({ error: 'Lecture impossible' }) }
   const entites = ent.entites || []
   // ⚠ UNE ENTITÉ D'UN AUTRE COMPTE N'EXISTE PAS ICI : la liste vient du compte
   // de la garde, et `charges_totaux` filtre encore par compte.
-  let entite = entiteDemandee ? entites.find(e => String(e.id) === entiteDemandee) : null
-  if (entiteDemandee && !entite) return res.status(404).json({ error: 'entite_introuvable' })
+  let entite = entiteDemandee && !sansEntite ? entites.find(e => String(e.id) === entiteDemandee) : null
+  if (entiteDemandee && !sansEntite && !entite) return res.status(404).json({ error: 'entite_introuvable' })
   // Sans entité demandée : la première entité ACTIVE par son nom, sinon la
-  // première tout court (une entité archivée garde ses totaux).
-  if (!entite && entites.length) {
+  // première tout court (une entité archivée garde ses totaux) ; et un compte
+  // qui n'en a aucune, « Sans entité » s'il y a de quoi l'afficher.
+  if (!entite && !entiteDemandee && entites.length) {
     const parNom = [...entites].sort((x, y) => String(x.nom || '').localeCompare(String(y.nom || ''), 'fr'))
     entite = parNom.find(e => !e.archivee_le) || parNom[0]
   }
-  const entiteId = entite ? entite.id : null
+  const optionSans = Boolean(pres.ok && pres.oui)
+  const vueSans = sansEntite || (!entite && !entiteDemandee && optionSans)
+  // L'identifiant LU : l'entité, `sans`, ou rien (un compte sans entité ni
+  // facture sans entité : la liste est alors celle de tout le compte).
+  const entiteId = vueSans ? SANS : (entite ? entite.id : null)
   // L'exercice LU vient de la demande seule ; les exercices PROPOSÉS, des
-  // bornes du résumé : les deux lectures partent donc ensemble.
+  // bornes du résumé : les deux lectures partent donc ensemble. « Sans
+  // entité » : l'année civile (`entite` nulle).
   const lu = ecran.bornesPeriode({ periode: q.periode, entite })
-  // Un compte SANS entité n'a ni totaux ni crédits : rien à lire.
+  // Un compte SANS entité n'a ni totaux ni crédits : rien à lire. « Sans
+  // entité » a des totaux, et aucun crédit (un crédit a toujours son entité).
   const rien = Promise.resolve({ ok: true, vide: true })
 
   const [t, l, b, tot, cr, bo] = await Promise.all([
     ecran.aTraiter(base, compte),
-    ecran.liste(base, compte, null, entiteId),
+    ecran.liste(base, compte, null, entiteId, { rattaches: (li.liens || []).map(x => x.property_uuid) }),
     ecran.biens(base, compte, { entites: ej }),
-    entite ? ecran.totaux(base, compte, { debut: lu.debut, fin: lu.fin, entiteId }) : rien,
-    entite ? ecran.credits(base, compte, { debut: lu.debut, fin: lu.fin, entiteId }) : rien,
-    entite ? ecran.exercicesBornes(base, compte, entiteId) : rien
+    entiteId ? ecran.totaux(base, compte, { debut: lu.debut, fin: lu.fin, entiteId }) : rien,
+    entite && !vueSans ? ecran.credits(base, compte, { debut: lu.debut, fin: lu.fin, entiteId }) : rien,
+    entiteId ? ecran.exercicesBornes(base, compte, entiteId) : rien
   ])
-  const periode = ecran.bornesPeriode({ periode: q.periode, entite, bornes: bo.ok && !bo.vide ? bo.bornes : null })
+  const periode = ecran.bornesPeriode({ periode: q.periode, entite: vueSans ? null : entite, bornes: bo.ok && !bo.vide ? bo.bornes : null })
   timing()
   // La file et la liste sont l'écran : sans elles, il n'y a rien à montrer.
   if (!t.ok || !l.ok) return res.status(503).json({ error: 'Lecture impossible' })
@@ -187,11 +224,14 @@ async function traiter (req, res, t0, deps) {
     liste: { lignes: l.lignes, suite: l.suite },
     entites: entites.map(e => ({ id: e.id, nom: e.nom, archivee: !!e.archivee_le, debut_exercice: e.debut_exercice || null })),
     entite: entiteId,
+    // Lot 5 bis : le choix « Sans entité juridique » est proposé (un total
+    // existe, ou c'est lui qu'on lit). Un complément : son échec le cache.
+    option_sans_entite: optionSans || vueSans,
     // Les logements et les totaux sont des compléments : leur échec se DIT
     // (`null`, que la page affiche « indisponible »), il ne casse pas l'écran.
     biens: b.ok ? b.biens : null,
     biens_archives: b.ok ? b.archives : null,
-    totaux: !entite
+    totaux: !entiteId
       ? { sans_entite: true }
       : (tot.ok
           ? {
@@ -205,7 +245,7 @@ async function traiter (req, res, t0, deps) {
     categories: ecran.ORDRE_CATEGORIES,
     // Les crédits et leurs échéances de l'exercice (§14.20) : un complément,
     // comme les totaux — `null` dit « indisponible », jamais « aucun crédit ».
-    credits: !entite ? { liste: [], echeances: [], aujourdhui: null } : (cr.ok ? { liste: cr.credits, echeances: cr.echeances, aujourdhui: cr.aujourdhui } : null)
+    credits: !entite || vueSans ? { liste: [], echeances: [], aujourdhui: null } : (cr.ok ? { liste: cr.credits, echeances: cr.echeances, aujourdhui: cr.aujourdhui } : null)
   })
 }
 
