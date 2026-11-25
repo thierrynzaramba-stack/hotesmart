@@ -1662,6 +1662,20 @@ function repartirEnEuros (listeCents) {
 const deviseDuCompte = () =>
   ((etat.biens || []).find(b => b && b.currency) || {}).currency || 'EUR'
 
+// Le selecteur « Mois | Annee » dit la vue courante. ⚠ UNE SEULE FONCTION
+// POUR LES DEUX CHEMINS de `renderRevenus` qui rendent l'annee — avec et sans
+// total du mois : recopie, l'un des deux finirait par l'oublier, et c'est
+// exactement ce qui rendait la vue Annee inaccessible pendant un « calcul en
+// cours ». Les deux autres sorties (liste des biens illisible, aucun logement)
+// ne rendent pas de revenus du tout : elles ne l'appellent pas.
+function marquerLaVue () {
+  for (const b of document.querySelectorAll('.seg__btn[data-vue]')) {
+    const actif = b.dataset.vue === etat.vueRevenus
+    b.classList.toggle('is-on', actif)
+    b.setAttribute('aria-pressed', actif ? 'true' : 'false')
+  }
+}
+
 function renderRevenus () {
   const section = $('[data-bind="revenue-section"]')
   if (!section) return
@@ -1700,7 +1714,14 @@ function renderRevenus () {
     // « les fleches et le chiffre doivent parler de la MEME periode » — il ne
     // couvrait que le chemin ou il y a un chiffre.
     const nav = $('[data-bind="revenue-month-nav"]')
-    if (nav) nav.textContent = moisEnClair(etat.ecran && etat.ecran.mois)
+    // ⚠ ET IL SUIT LA VUE, comme dans le chemin avec total : « 2026 » en vue
+    // Annee (constat m1 de la review du correctif de recette — deux ecritures
+    // successives dans une zone `aria-live`, et deux endroits qui decidaient).
+    if (nav) {
+      nav.textContent = etat.vueRevenus === 'annee'
+        ? String(etat.anneeRevenus || '')
+        : moisEnClair(etat.ecran && etat.ecran.mois)
+    }
     const n = $('[data-bind="revenue-total"]')
     if (n) n.textContent = t(calculEnCours() ? 'revenue.computing' : 'revenue.unavailable')
     for (const sel of ['revenue-received', 'revenue-upcoming']) {
@@ -1708,7 +1729,10 @@ function renderRevenus () {
     }
     const liste = $('[data-list="revenue-rows"]'); if (liste) liste.innerHTML = ''
     const cartes = $('[data-list="revenue-cards"]'); if (cartes) cartes.innerHTML = ''
-    const w = document.querySelector('.rev-tbl-wrap'); if (w) w.hidden = true
+    // ⚠ LE MEME SELECTEUR QUE `renderAnnee` : le nu `.rev-tbl-wrap` ne tombait
+    // sur le tableau du mois que par l'ordre du balisage (constat M3).
+    const w = document.querySelector('.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl):not(.rev-cmp-tbl)')
+    if (w) w.hidden = true
     const res = $('[data-bind="revenue-reserves"]'); if (res) res.hidden = true
   }
   if (!Array.isArray(etat.biens)) {
@@ -1767,7 +1791,16 @@ function renderRevenus () {
   // comme aucun bien », qui tenait deja cette regle pour l'ancien bloc.
   if (!rev || !rev.total) {
     section.hidden = false
+    // ⚠ LA VUE ANNEE NE DEPEND PAS DU RESUME DU MOIS (recette du 25 novembre
+    // 2026, go de Thierry). Ce `return` sortait AVANT le selecteur et
+    // `renderAnnee` : tant que le total du mois etait « calcul en cours » — en
+    // permanence sur staging, qui n'a pas de cron, et pendant les minutes de
+    // rattrapage en prod —, cliquer « Annee » chargeait bien l'annee… et
+    // l'ecran restait sur le mois, sans pastille ni courbe. L'annee a sa propre
+    // lecture (`/api/ecran/revenus-annee`) et ses propres etats : elle se rend.
     videDuTotal()
+    marquerLaVue()
+    renderAnnee()
     return
   }
 
@@ -1833,11 +1866,7 @@ function renderRevenus () {
   // selecteur parce que rien d'autre ne la porte. Ici la decision 5 de Thierry
   // demande des fleches, donc un libelle de periode ; le selecteur retrouve sa
   // fonction, qui est de nommer les deux VUES.
-  for (const b of document.querySelectorAll('.seg__btn[data-vue]')) {
-    const actif = b.dataset.vue === etat.vueRevenus
-    b.classList.toggle('is-on', actif)
-    b.setAttribute('aria-pressed', actif ? 'true' : 'false')
-  }
+  marquerLaVue()
   renderAnnee()
 
   // ─── Ce que le total ne dit pas ───────────────────────────────────────────
@@ -2286,7 +2315,14 @@ function renderAnnee () {
   for (const sel of ['.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl):not(.rev-cmp-tbl)',
     '.rev-liste:not(.rev-liste--annee):not(.rev-rad-liste):not(.rev-cmp-liste)']) {
     const n = document.querySelector(sel)
-    if (n) n.hidden = enAnnee || !(etat.biens || []).length
+    // ⚠ ET SEULEMENT S'IL Y A UN TOTAL DU MOIS (constat M1 de la review du
+    // correctif de recette, 25 novembre 2026). Sans lui, le tableau n'a pas de
+    // lignes : le demasquer affichait ses en-tetes seuls sous « calcul en
+    // cours ». `renderAnnee` est appele SEUL par trois chemins — la bande, le
+    // detail des comparables, le seuil etroit — : la regle doit tenir ici, pas
+    // dans l'ordre des appels de `renderRevenus`.
+    const totalDuMois = !!(etat.ecran && etat.ecran.revenus && etat.ecran.revenus.total)
+    if (n) n.hidden = enAnnee || !(etat.biens || []).length || !totalDuMois
   }
   const bandeauMois = $('[data-bind="revenue-total"]')
   const carteMois = bandeauMois && bandeauMois.closest('.card')

@@ -151,3 +151,98 @@ Aucun.
 - **Suite complète :** 9500/9500 verts.
 - **Tests du lot :** verts à J+6, 37, 60, 128, 200 et 400.
 - **`scripts/i18n-check.js` :** OK.
+
+---
+
+# Review 2 — correctif de recette « la vue Année s'ouvre pendant un calcul en cours »
+
+- **Arbre** : `/home/claude/hotesmart`
+- **Branche** : `accueil-comparables-detail`
+- **Plage relue** : `b3fba1e24bec7b76c9c4530ca4ec4be880d17c4f..aab08fc5aaf82bab9888452db490d2cdbf9aa2b7`
+  (un commit, le correctif de recette ; go de Thierry du 25 novembre 2026).
+- **Le rapport nomme lui-même l'arbre et le SHA lus** : « Arbre lu : /home/claude/hotesmart, SHA
+  aab08fc5aaf82bab9888452db490d2cdbf9aa2b7 (branche accueil-comparables-detail, plage
+  b3fba1e2..aab08fc5) » — conformes au brief.
+- **Aucun constat de sécurité** (le correctif ne touche que le rendu navigateur : pas d'appel ni de
+  paramètre nouveaux, la garde `aLeDroit` passe avant le chemin modifié). Correctifs dans
+  `2c388c2ac01f951a1456ded48c209f889f011d30`, sans nouvelle review.
+
+## Fichiers cités par le rapport
+
+| fichier cité | dans `git diff --name-only` de la plage |
+|---|---|
+| `pages/aujourdhui.html` | oui |
+| `tests/accueil-rapide.test.js` | oui |
+
+## Suite donnée
+
+| constat | gravité | suite |
+|---|---|---|
+| M1 — le tableau du mois vide réapparaît quand une lecture de l'Année répond après le retour au Mois | moyen | **corrigé** : `renderAnnee` ne démasque ce tableau que s'il y a un total du mois ; la règle ne dépend plus de l'ordre des appels. Mutation (garde retirée) : **rouge** |
+| M2 — première assertion du test vraie d'avance (double plus permissif que le balisage) | moyen | **corrigé** : le bloc Année part masqué dans le test |
+| M3 — `marquerLaVue`, la carte du mois et l'ordre non gardés par le banc | moyen | **corrigé en partie** : `videDuTotal` vise le tableau par le même sélecteur que `renderAnnee`, et le test le voit (y compris après un `renderAnnee` seul) ; mutation « ancien `return` » : **rouge**. `marquerLaVue` reste hors de portée du banc (`querySelectorAll` rend `[]`) : **vérifié à la recette** |
+| m1 — libellé des flèches écrit deux fois | mineur | **corrigé** : `videDuTotal` choisit selon la vue, une seule écriture |
+| m2 — préexistant : seuil étroit + `renderAnnee` seul réaffiche le tableau vide | mineur | **fermé** par le correctif de M1 |
+| m3 — commentaire « deux chemins » | mineur | **corrigé** (le compte sans logement ne rend pas de revenus, il n'appelle pas `marquerLaVue`) |
+
+Suite après correctifs : `npm test` **9508 / 9508**.
+
+## Rapport tel que rendu
+
+Texte inchangé ; seuls ses titres sont descendus d'un niveau (`##` → `###`).
+
+Arbre lu : /home/claude/hotesmart, SHA aab08fc5aaf82bab9888452db490d2cdbf9aa2b7 (branche accueil-comparables-detail, plage b3fba1e2..aab08fc5). Fichiers cités : pages/aujourdhui.html et tests/accueil-rapide.test.js, tous deux dans la plage. Lecture seule respectée : l'arbre n'a pas bougé (HEAD inchangé, `git status` vide). Toutes les mutations ont été faites dans /tmp, sur une copie tirée par `git archive`, puis supprimées.
+
+**Sécurité : aucun constat.** Le correctif ne touche que le rendu côté navigateur : pas de nouvel appel, pas de nouveau paramètre, et la garde `aLeDroit` passe toujours avant le chemin modifié.
+
+### Ce que j'ai mesuré
+- **Suites :** `tests/accueil-rapide.test.js` passe 148/148. Les 17 fichiers de tests qui lisent la page passent 421/421, `budget-ecran` compris. Le nouveau test reste vert avec l'horloge décalée à J+60 et J+400.
+- **Banc à vrai DOM :** j'ai monté un banc temporaire où jsdom charge le balisage réel de la page, sans les doubles. La correction fait ce qu'elle annonce :
+  - vue Année sans total du mois : courbe et pastilles visibles, carte du mois masquée, sélecteur sur Année, libellé « 2026 » ;
+  - année en chargement : « calcul en cours » ; année en échec : « non calculable » ;
+  - retour au Mois : carte visible, tableau vide masqué, sélecteur sur Mois.
+- **Pas de boucle ni d'appel en double :** avec le détail des comparables déplié, quatre `renderRevenus` donnent une seule lecture `detail=comparables`.
+
+### GRAVE
+Aucun.
+
+### MOYEN
+
+**M1 — Le tableau du mois vide réapparaît (en-têtes seuls) quand une lecture de l'Année se termine après le retour au Mois.** `pages/aujourdhui.html:2312-2316`, avec les déclencheurs aux lignes 667 et 687.
+- **Cause :** en vue Mois, `renderAnnee` démasque le tableau du mois dès qu'il y a des logements. Le correctif ne le remasque qu'à l'intérieur de `renderRevenus`, en comptant sur l'ordre (`videDuTotal` après `renderAnnee`, lignes 1791-1794). Or `chargerComparables` et `chargerDetailComparables` se terminent par un `renderAnnee()` seul.
+- **Scénario mesuré au vrai DOM :** total du mois « calcul en cours », vue Année, clic sur « Afficher » (ou sur une pastille), puis clic sur « Mois » avant la réponse. À l'arrivée de la réponse, `.rev-tbl-wrap` passe de masqué à affiché avec un `tbody` vide : l'en-tête « Logement | Reçu | À venir | Total » s'affiche sous « calcul en cours ».
+- **Pourquoi c'est ce correctif :** avant lui, l'Année ne s'ouvrait pas sans total du mois, donc ce chemin était inatteignable. Le message de commit affirme justement que l'ordre garde ce tableau masqué.
+- **Correctif :** dans la boucle de `renderAnnee` (ligne 2315), ne démasquer que s'il y a un total du mois :
+  `n.hidden = enAnnee || !(etat.biens || []).length || !(etat.ecran && etat.ecran.revenus && etat.ecran.revenus.total)`.
+  `renderAnnee` devient alors suffisant seul, la dépendance à l'ordre disparaît, et le cas déjà présent de la ligne 3308 (seuil étroit franchi, voir m2) est fermé du même geste.
+
+**M2 — La première assertion du test ne peut pas rougir.** `tests/accueil-rapide.test.js:4576`.
+- Le double du banc crée ses nœuds avec `hidden: false`, alors que le balisage réel porte l'attribut `hidden` (`pages/aujourdhui.html:277`). L'assertion « la vue Année n'est plus masquée » est donc vraie d'avance.
+- **Mesuré :** contre la page d'avant, cette assertion passe. Le rouge vient uniquement de l'assertion des pastilles. C'est le défaut de la règle 22 de REVIEW.md : un double plus permissif que le vrai.
+- **Correctif :** poser `p.cache('[data-bind="revenue-annee"]').hidden = true` avant le rendu, comme dans le balisage.
+
+**M3 — `marquerLaVue`, la carte du mois et l'ordre des appels ne sont gardés par aucun test.** `tests/accueil-rapide.test.js:4564-4590`.
+- Dans le banc, `document.querySelectorAll` rend `[]` (ligne 779) et `closest` rend `null` (ligne 766). `marquerLaVue` n'y fait donc rien, et l'état de la carte du total ne se lit pas.
+- **Mutations dans le banc actuel :**
+
+| Mutation | Résultat |
+|---|---|
+| retirer `marquerLaVue()` du chemin sans total | vert |
+| retirer `marquerLaVue()` du chemin avec total | fichier entier vert, 148/148 |
+| inverser `renderAnnee` et `videDuTotal` | vert |
+
+- **Les mêmes mutations au vrai DOM** rougissent toutes : le sélecteur reste sur Mois en vue Année, ou le tableau vide s'affiche.
+- **Correctif, en deux temps :**
+  1. Dans `videDuTotal`, ligne 1723, remplacer `.rev-tbl-wrap` par le sélecteur de `renderAnnee` : `.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl):not(.rev-cmp-tbl)`. Le commentaire de la ligne 2176 dit déjà que le sélecteur nu est un accident d'ordre dans le balisage. Mesuré : avec ce changement plus une assertion sur ce sélecteur, le banc actuel voit l'ordre (vert dans le bon ordre, rouge dans l'ordre inversé), et le fichier reste à 148/148.
+  2. Pour le sélecteur et la carte : donner au banc deux boutons `.seg__btn[data-vue]` en option, ou faire tourner ce test sur jsdom avec le vrai balisage.
+
+### MINEUR
+
+**m1 — Le libellé des flèches est écrit deux fois par rendu en vue Année sans total.** `pages/aujourdhui.html:1794-1800`. `videDuTotal` écrit le mois, puis le bloc ajouté écrase avec l'année, dans une zone `aria-live`. Correctif : faire choisir le libellé selon la vue dans `videDuTotal` lui-même, avec le même ternaire que la ligne 1851. Une seule écriture, et un seul endroit qui décide.
+
+**m2 — Déjà présent avant ce commit :** le changement de seuil étroit (ligne 3308) appelle `renderAnnee()` seul. En vue Mois sans total, il réaffiche le tableau vide (mesuré au vrai DOM). Le correctif de M1 le ferme.
+
+**m3 — Déjà présent :** le commentaire parle de « deux chemins », mais la fonction a quatre sorties. Le chemin « aucun logement » (ligne 1752) sort toujours sans `marquerLaVue`. Sur un compte sans logement, un clic sur « Année » lance la lecture de l'année et rien ne change à l'écran. Il suffit de corriger le commentaire, ou de décider ce que ce cas doit afficher.
+
+### Verdict
+La correction est juste sur le chemin visé : à corriger avant le merge, M1 (les en-têtes du tableau vide reviennent par un chemin que ce correctif a rendu atteignable). M2 et M3 sont des faiblesses du test, qui fait bien rougir la page d'avant mais par une seule de ses assertions. Aucun de ces constats ne relève de la sécurité : selon la règle du dépôt, ils se corrigent sans nouvelle review.
