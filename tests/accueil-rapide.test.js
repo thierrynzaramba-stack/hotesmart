@@ -4560,3 +4560,31 @@ test("LE TEST QUI COMPTE : deplie, une pastille SANS bande n'appelle rien (const
   assert.strictEqual(p.urls.filter(u => u.includes('detail=comparables')).length, 1)
   assert.strictEqual(detailNoeud(p).hidden, false, 'le detail ne suit pas la pastille quand il est deplie')
 })
+
+test("LE TEST QUI COMPTE : la vue Annee s'ouvre meme quand le total du mois est « calcul en cours »", () => {
+  // Recette du 25 novembre 2026 sur staging (pas de cron, donc total du mois
+  // toujours « en cours ») : cliquer « Annee » chargeait l'annee, et l'ecran
+  // restait sur le mois — `renderRevenus` sortait avant le selecteur et
+  // `renderAnnee`. Thierry : « pas de bien affiche ».
+  const ecran = { mois: '2026-11', revenus: null, indisponibles: ['revenus_calcul_en_cours'], droits: { reservations: true } }
+  const biens = [{ id: 'uuid-1', name: 'La bulle' }]
+  const p = bancDeRendu({
+    ecran, biens, vueRevenus: 'annee', anneeRevenus: 2026, anneeEtat: 'ok', aujourdHui: '2026-11-25',
+    annee: anneeDeTest()
+  })
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-annee"]').hidden, false,
+    'la vue Annee reste masquee tant que le total du mois est en calcul')
+  assert.match(p.html('[data-list="revenue-annee-filtres"]'), /La bulle/, 'les pastilles des logements ne sont pas rendues')
+  assert.strictEqual(String(p.cache('[data-bind="revenue-month-nav"]').textContent), '2026',
+    'le libelle des fleches dit le mois en vue Annee')
+  // Retour au mois : l'annee se masque, le total redit « calcul en cours ».
+  // ⚠ L'ORDRE `renderAnnee` PUIS `videDuTotal` (le tableau du mois, vide, reste
+  // masque) NE SE MESURE PAS ICI : le banc donne un noeud par CHAINE de
+  // selecteur, et les deux fonctions atteignent le meme tableau par deux
+  // chaines differentes. Il se verifie a la recette (vue Mois sur staging).
+  p.interne.etat.vueRevenus = 'mois'
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-annee"]').hidden, true)
+  assert.match(String(p.cache('[data-bind="revenue-total"]').textContent), /revenue\.computing/)
+})

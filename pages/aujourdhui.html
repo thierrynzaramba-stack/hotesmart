@@ -1662,6 +1662,18 @@ function repartirEnEuros (listeCents) {
 const deviseDuCompte = () =>
   ((etat.biens || []).find(b => b && b.currency) || {}).currency || 'EUR'
 
+// Le selecteur « Mois | Annee » dit la vue courante. ⚠ UNE SEULE FONCTION
+// POUR LES DEUX CHEMINS de `renderRevenus` — avec et sans total du mois :
+// recopie, l'un des deux finirait par l'oublier, et c'est exactement ce qui
+// rendait la vue Annee inaccessible pendant un « calcul en cours ».
+function marquerLaVue () {
+  for (const b of document.querySelectorAll('.seg__btn[data-vue]')) {
+    const actif = b.dataset.vue === etat.vueRevenus
+    b.classList.toggle('is-on', actif)
+    b.setAttribute('aria-pressed', actif ? 'true' : 'false')
+  }
+}
+
 function renderRevenus () {
   const section = $('[data-bind="revenue-section"]')
   if (!section) return
@@ -1767,7 +1779,25 @@ function renderRevenus () {
   // comme aucun bien », qui tenait deja cette regle pour l'ancien bloc.
   if (!rev || !rev.total) {
     section.hidden = false
+    // ⚠ LA VUE ANNEE NE DEPEND PAS DU RESUME DU MOIS (recette du 25 novembre
+    // 2026, go de Thierry). Ce `return` sortait AVANT le selecteur et
+    // `renderAnnee` : tant que le total du mois etait « calcul en cours » — en
+    // permanence sur staging, qui n'a pas de cron, et pendant les minutes de
+    // rattrapage en prod —, cliquer « Annee » chargeait bien l'annee… et
+    // l'ecran restait sur le mois, sans pastille ni courbe. L'annee a sa propre
+    // lecture (`/api/ecran/revenus-annee`) et ses propres etats : elle se rend.
+    marquerLaVue()
+    renderAnnee()
+    // ⚠ `videDuTotal` APRES `renderAnnee`, ET L'ORDRE COMPTE : en vue Mois,
+    // `renderAnnee` rend sa place au tableau du mois (`hidden = false`) ; vide
+    // de lignes, il s'afficherait en en-tetes seuls. `videDuTotal` le remasque.
     videDuTotal()
+    // Et le libelle des fleches dit l'ANNEE en vue Annee — `videDuTotal` vient
+    // d'y ecrire le mois servi.
+    if (etat.vueRevenus === 'annee') {
+      const labelNav = $('[data-bind="revenue-month-nav"]')
+      if (labelNav) labelNav.textContent = String(etat.anneeRevenus || '')
+    }
     return
   }
 
@@ -1833,11 +1863,7 @@ function renderRevenus () {
   // selecteur parce que rien d'autre ne la porte. Ici la decision 5 de Thierry
   // demande des fleches, donc un libelle de periode ; le selecteur retrouve sa
   // fonction, qui est de nommer les deux VUES.
-  for (const b of document.querySelectorAll('.seg__btn[data-vue]')) {
-    const actif = b.dataset.vue === etat.vueRevenus
-    b.classList.toggle('is-on', actif)
-    b.setAttribute('aria-pressed', actif ? 'true' : 'false')
-  }
+  marquerLaVue()
   renderAnnee()
 
   // ─── Ce que le total ne dit pas ───────────────────────────────────────────
