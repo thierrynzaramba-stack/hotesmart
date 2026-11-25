@@ -1740,5 +1740,7 @@
   "charges.sans_entite_choix": "Sans entité juridique",
   "charges.sans_entite_rappel": "Ces factures concernent des logements rattachés à aucune entité juridique. Rattachez chaque logement depuis sa fiche : ses factures y passeront d'elles-mêmes.",
   "charges.factures_sans_entite": "Factures sans entité juridique",
-  "charges.refus_bien_requis": "Choisissez le logement : une facture sans entité juridique est celle d'un logement."
+  "charges.refus_bien_requis": "Choisissez le logement : une facture sans entité juridique est celle d'un logement.",
+  "yfe.ajouter": "Ajouter un événement",
+  "yfe.ajouter_titre": "Ouvre la fenêtre des événements de ce logement : y ajouter un événement, en supprimer un, ou ne plus en tenir compte."
 }

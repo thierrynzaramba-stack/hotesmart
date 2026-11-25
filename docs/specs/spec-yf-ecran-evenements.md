@@ -906,3 +906,49 @@ Et une décision de produit portée à Thierry depuis la review : **S4** (§16.1
     complet **1,2 à 2,1 s**. Staging n'a pas les logements de la mesure
     AVANT : la comparaison sur les mêmes trois logements se fait en
     production, après le merge.
+
+## 17. La page reliée au site — 25 novembre 2026 (branche `lien-calendrier-evenements`)
+
+**Constat de Thierry.** La page « Ce qui fait bouger vos prix » (4a et 4b en
+production) n'était atteignable que par son adresse : « Quand vos prix
+bougent » du menu YieldFlow du calendrier, et « Vos événements » du menu
+YieldFlow (`components/sidebar.js`), ouvraient encore l'ancienne pop-up de la
+Prédiction de prix.
+
+**Décision de Thierry (25 novembre 2026) : relier maintenant**, sans attendre
+4d.
+
+- Le calendrier (`ENTREES_YF`, `pages/calendrier.html`) et le menu YieldFlow
+  ouvrent `/apps/yield/evenements` ; le calendrier passe le logement
+  (`?bien=`), comme ses autres entrées.
+- **L'ancienne pop-up reste en service jusqu'à 4d**, parce qu'elle seule sait
+  encore ajouter, supprimer et « ne plus tenir compte » d'un événement (§7) :
+  - la page porte **« + Ajouter un événement »**, à la place de la maquette
+    (à droite des filtres), qui ouvre la pop-up **sur le logement affiché**
+    (`/apps/yield/prix?bien=…&evenements=1`) ; son infobulle dit qu'on y
+    ajoute, supprime ou cesse de tenir compte d'un événement ;
+  - le bouton est **masqué** à qui n'a pas `droits_ecriture`, sans écran
+    calculé, pendant un changement de logement et après un refus du serveur ;
+    le serveur de la pop-up refuse de toute façon (inventaire §7, lecture
+    seule) ;
+  - la Prédiction de prix garde son bouton « Quand vos prix bougent ».
+- Au sous-lot 4d, le bouton ouvrira le geste d'ajout **dans la page**, et la
+  pop-up redirigera vers elle (sur go de Thierry, §1).
+
+**Case performance** : sans objet sur les huit points — aucun appel, aucune
+donnée, aucun cache ajouté ; un lien et deux adresses changent.
+
+**Preuves.** `tests/yf-evenements-lien.test.js` (5 tests) ; deux garde-fous
+d'avant réécrits à la nouvelle adresse (`tests/yf-bouton-calendrier.test.js`,
+`tests/prix-hote.test.js`), en gardant ce qu'ils protégeaient — la pop-up
+reste atteignable. Contre-épreuve : les 5 tests rougissent contre `main`
+(`0428e0ad`) ; le test 3, qui rougirait contre `main` faute de bouton, est
+prouvé par trois mutations (droit ignoré, écran non calculé ignoré, refus
+qui laisse le bouton) qui le font chacune rougir sur son assertion ; une
+quatrième (le bouton sans le logement) fait rougir les tests 1 et 2.
+
+**Recette** (Thierry, sur staging puis en production) :
+1. Calendrier, menu YieldFlow d'un logement, « Quand vos prix bougent » :
+   la page « Ce qui fait bouger vos prix » s'ouvre, sur ce logement.
+2. Sur la page, « + Ajouter un événement » à droite des filtres : il ouvre la
+   fenêtre des événements de la Prédiction de prix, sur le même logement.

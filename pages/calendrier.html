@@ -506,11 +506,14 @@ function boutonYfHtml (bien) {
     title="${esc(label)}" aria-label="${esc(label)}">${icone('i-chart')}</button>`
 }
 
-// Les quatre entrees, dans l'ordre de la spec §4. `evenements=1` et non une
-// page a part : `apps/yield/evenements.html` est une REDIRECTION vers
-// `prix?evenements=1` depuis le 22 septembre 2026 — l'ecran Evenements est une
-// pop-up DANS la Prediction de prix. Et « Donnees marche » vise
+// Les quatre entrees, dans l'ordre de la spec §4. « Donnees marche » vise
 // `marche-global`, la seule des trois pages marche qui soit au menu.
+// ⚠ « QUAND VOS PRIX BOUGENT » OUVRE LA PAGE `apps/yield/evenements` (decision
+// de Thierry du 25 novembre 2026) : la page « Ce qui fait bouger vos prix »
+// (lot 4, en production depuis 4a et 4b) n'etait atteignable que par son
+// adresse, et le menu ouvrait encore l'ancienne pop-up. Celle-ci reste en
+// service jusqu'a 4d : la page y renvoie par « + Ajouter un evenement », et la
+// Prediction de prix garde son bouton.
 const ENTREES_YF = [
   { cle: 'cal.yf_prediction',  icone: 'i-price',    page: 'prix',          repere: 'fenetre' },
   { cle: 'cal.yf_market',      icone: 'i-globe',    page: 'marche-global', repere: 'marche' },
@@ -521,7 +524,7 @@ const ENTREES_YF = [
   // date propre, le menu annoncait « 0 a venir » pour un ecran qui en liste
   // 35. Le vrai compte n'est pas servi sans calcul (mesure du jour) : la
   // regle du lot dit alors de ne rien afficher.
-  { cle: 'cal.yf_events',      icone: 'i-calendar', page: 'prix',          repere: null, params: { evenements: '1' } },
+  { cle: 'cal.yf_events',      icone: 'i-calendar', page: 'evenements',    repere: null },
   { cle: 'cal.yf_comparables', icone: 'i-home',     page: 'comparables',   repere: 'comparables' }
 ]
 const urlYf = (page, bienId, params) =>

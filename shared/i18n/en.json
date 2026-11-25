@@ -1740,5 +1740,7 @@
   "charges.sans_entite_choix": "No legal entity",
   "charges.sans_entite_rappel": "These invoices belong to properties that are not linked to any legal entity. Link each property from its page: its invoices will move there automatically.",
   "charges.factures_sans_entite": "Invoices without a legal entity",
-  "charges.refus_bien_requis": "Choose the property: an invoice without a legal entity belongs to a property."
+  "charges.refus_bien_requis": "Choose the property: an invoice without a legal entity belongs to a property.",
+  "yfe.ajouter": "Add an event",
+  "yfe.ajouter_titre": "Opens this listing's events window: add an event there, delete one, or stop taking one into account."
 }

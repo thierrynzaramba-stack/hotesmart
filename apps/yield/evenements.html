@@ -63,11 +63,21 @@
     <p class="yfe-frise__aide" data-i18n="yfe.frise_aide"></p>
   </section>
 
-  <div class="yfe-filtres" role="group" data-bind="filtres" data-i18n-attr="aria-label:yfe.filtres_aria" hidden>
-    <button type="button" class="yfe-filtre" data-filtre="tous" aria-pressed="true" data-i18n="yfe.filtre_tous"></button>
-    <button type="button" class="yfe-filtre" data-filtre="officiel" aria-pressed="false" data-i18n="yfe.filtre_officiel"></button>
-    <button type="button" class="yfe-filtre" data-filtre="commercial" aria-pressed="false" data-i18n="yfe.filtre_commercial"></button>
-    <button type="button" class="yfe-filtre" data-filtre="mien" aria-pressed="false" data-i18n="yfe.filtre_mien"></button>
+  <div class="yfe-barre-liste">
+    <div class="yfe-filtres" role="group" data-bind="filtres" data-i18n-attr="aria-label:yfe.filtres_aria" hidden>
+      <button type="button" class="yfe-filtre" data-filtre="tous" aria-pressed="true" data-i18n="yfe.filtre_tous"></button>
+      <button type="button" class="yfe-filtre" data-filtre="officiel" aria-pressed="false" data-i18n="yfe.filtre_officiel"></button>
+      <button type="button" class="yfe-filtre" data-filtre="commercial" aria-pressed="false" data-i18n="yfe.filtre_commercial"></button>
+      <button type="button" class="yfe-filtre" data-filtre="mien" aria-pressed="false" data-i18n="yfe.filtre_mien"></button>
+    </div>
+    <!-- ⚠ PROVISOIRE, jusqu'au sous-lot 4d (decision de Thierry du 25 novembre
+         2026) : ajouter, supprimer ou ne plus tenir compte d'un evenement ne
+         se fait encore que dans l'ancienne fenetre. Le bouton y mene, sur le
+         meme logement ; la page le masque a qui n'a pas le droit d'ecrire, et
+         le serveur de l'ancienne fenetre refuse de toute facon. -->
+    <a class="btn btn-primary yfe-ajouter" data-bind="ajouter" href="/apps/yield/prix?evenements=1" data-i18n-attr="title:yfe.ajouter_titre" hidden>
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg><span data-i18n="yfe.ajouter"></span>
+    </a>
   </div>
 
   <div class="yfe-liste" data-bind="liste"><p class="muted" data-i18n="common.loading"></p></div>
@@ -219,7 +229,7 @@ function peindreSelecteur () {
 }
 
 function viderEcran (message) {
-  for (const z of ['frise-zone', 'filtres']) $(`[data-bind="${z}"]`).hidden = true
+  for (const z of ['frise-zone', 'filtres', 'ajouter']) $(`[data-bind="${z}"]`).hidden = true
   for (const z of ['legende', 'frise', 'alertes']) $(`[data-bind="${z}"]`).innerHTML = ''
   $('[data-bind="sous-titre"]').textContent = ''
   $('[data-bind="age"]').hidden = true
@@ -248,7 +258,7 @@ function peindre () {
   if (changementEnCours()) {
     $('[data-bind="sous-titre"]').textContent = (etat.biens.find(b => b.id === etat.bienVoulu) || {}).nom || ''
     $('[data-bind="age"]').hidden = true
-    for (const z of ['frise-zone', 'filtres']) $(`[data-bind="${z}"]`).hidden = true
+    for (const z of ['frise-zone', 'filtres', 'ajouter']) $(`[data-bind="${z}"]`).hidden = true
     for (const z of ['legende', 'frise', 'alertes']) $(`[data-bind="${z}"]`).innerHTML = ''
     $('[data-bind="liste"]').innerHTML = `<p class="muted">${esc(t('common.loading'))}</p>`
     return
@@ -270,6 +280,13 @@ function peindre () {
     : nomBien
   $('[data-bind="frise-zone"]').hidden = !calcule
   $('[data-bind="filtres"]').hidden = !calcule
+  // « + Ajouter un événement » mène à l'ancienne fenêtre DU LOGEMENT AFFICHÉ, et
+  // seulement à qui a le droit d'écrire (le serveur de la fenêtre refuse
+  // aussi). Sans logement connu, pas de bouton : il ouvrirait celui d'un autre.
+  // Et pas d'écran calculé, pas de bouton : comme les filtres.
+  const ajouter = $('[data-bind="ajouter"]')
+  ajouter.hidden = !(calcule && d.bien && d.droits_ecriture)
+  if (d.bien) ajouter.setAttribute('href', '/apps/yield/prix?' + new URLSearchParams({ bien: d.bien, evenements: '1' }))
   if (!calcule) {
     $('[data-bind="legende"]').innerHTML = ''
     $('[data-bind="frise"]').innerHTML = ''
