@@ -2194,7 +2194,33 @@ function htmlOngletParam () {
     ? `<p class="men-cfg__av" data-i18n="menages.equipe.config.av_sans_tel"></p>` : ''
   const avMail = p.notify_email && !p.email
     ? `<p class="men-cfg__av" data-i18n="menages.equipe.config.av_sans_email"></p>` : ''
-  const avMuet = !(p.notify_sms && p.tel) && !(p.notify_email && p.email)
+  // PWA lot 3, étape 5 : les notifications de SON téléphone. Lecture seule —
+  // l'abonnement est son geste, sur son appareil (spec §4) ; l'hôte coupe tout
+  // en la désactivant ou en lui donnant un nouveau lien.
+  // ⚠ `null` = NON LU : on le dit, on n'affiche pas « pas activé » sur une
+  // panne. Un appareil dont le dernier envoi a échoué ne compte pas comme
+  // « reçoit » (review de l'étape 5, constat 3) : s'il n'y a que ceux-là, on le
+  // dit. Et l'aide dit la règle telle qu'elle est (Q46) — le SMS repart pour un
+  // ménage du jour ou du lendemain —, donc SEULEMENT si le SMS peut partir :
+  // décoché ou sans numéro, il n'y a pas de filet à promettre (constat 2).
+  const n = p.appareils
+  const ko = p.appareils_en_echec
+  const recoit = Number.isInteger(n) && n > 0
+  const smsOuvert = !!(p.notify_sms && p.tel)
+  const push = !Number.isInteger(n)
+    ? `<p class="caption muted" data-push-etat data-i18n="menages.equipe.config.push_illisible"></p>`
+    : recoit
+      ? `<div class="men-cfg__row" data-push-etat><div class="men-cfg__rowTxt">
+          <span data-i18n="menages.equipe.config.push_n" data-i18n-vars="${esc(JSON.stringify({ n }))}"></span>
+          ${smsOuvert ? `<span class="caption muted" data-i18n="menages.equipe.config.push_aide"></span>` : ''}
+        </div></div>`
+      : Number.isInteger(ko) && ko > 0
+        ? `<p class="caption muted" data-push-etat data-i18n="menages.equipe.config.push_echec"></p>`
+        : `<p class="caption muted" data-push-etat data-i18n="menages.equipe.config.push_aucun"></p>`
+  // « Aucun canal actif » : ni SMS, ni e-mail, ni téléphone qui reçoit. Non lu,
+  // l'avertissement reste — comme avant ce lot : mieux vaut une alerte de trop
+  // qu'une prestataire muette qu'on croit prévenue.
+  const avMuet = !(p.notify_sms && p.tel) && !(p.notify_email && p.email) && !recoit
     ? `<p class="men-cfg__av" data-i18n="menages.equipe.config.av_muet"></p>` : ''
 
   // ⚠ LES TROIS GESTES DU LIEN VIVENT ICI (décision de Thierry, 14 octobre
@@ -2235,7 +2261,8 @@ function htmlOngletParam () {
     ${bascule('cfg-sms', 'notif_sms', p.notify_sms, 'notif_sms_aide', peut && p.a_un_lien)}
     ${avSms}
     ${bascule('cfg-mail', 'notif_email', p.notify_email, null, peut && p.a_un_lien)}
-    ${avMail}${avMuet}
+    ${avMail}
+    ${push}${avMuet}
   </section>
 
   ${lien}

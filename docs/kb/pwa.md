@@ -2322,3 +2322,754 @@ de recette avec un contact : **1 761 octets transférés** (4 130 décodés),
 
 **Reste à voir en production** : l'arrivée réelle de l'e-mail d'un contact et
 son lien — au premier essai, avec Thierry.
+
+## 13. Lot 3 — les notifications de la prestataire de ménage (17 novembre 2026)
+
+Spec : `docs/specs/spec-pwa-lot3-prestataires.md` (décisions Q40 à Q45 de
+Thierry). Le lot 2 notifie les personnes qui ont un **compte** ; une
+prestataire n'en a pas — son lien est sa seule identité. Le lot 3 lui donne
+ses propres appareils abonnés, sur le **profil**.
+
+### 13.1 Étape 1 — côté serveur : la table, le module, les deux gestes, l'état
+
+**La table** `push_abonnements_prestataires`
+(`migrations/2026-11-17-push-abonnements-prestataires.sql`) : une ligne = un
+appareil, pour un profil (`profil_id → profiles(id)`, cascade) et son compte
+(`compte_id`). RLS active, **aucune politique** : le serveur seul lit et
+écrit.
+
+- ⚠ **L'unicité porte sur (profil, adresse), pas sur l'adresse seule.** Sur
+  Android, les applis installées d'une même prestataire chez deux hôtes
+  partagent la portée `/apps/menages/`, donc le même abonnement : il sert aux
+  deux profils. Se désabonner chez l'un ne touche pas l'autre.
+
+**La purge est EN BASE, pas dans les chemins d'écriture.** Un déclencheur
+`security definer` sur `profiles` supprime les appareils de la personne quand
+son **jeton change** (nouveau lien), quand elle est **désactivée**, ou quand
+son **mode d'accès change**. L'ancien téléphone — peut-être perdu — ne reçoit
+plus rien. C'est la donnée qui porte la règle (même leçon que
+`menages.vu_par`) : deux écrivains de ces colonnes existent dans
+`api/membres.js` (régénérer le lien, activer/désactiver) ; le mode d'accès ne
+se change pas aujourd'hui (refusé en 400), et sa condition est une défense pour
+le jour où il se changera. Aucun test n'attrape l'écrivain qui n'existe pas
+encore. `security definer`, parce qu'un `delete` sans politique, exécuté par
+un rôle soumis à la RLS, ne supprimerait rien — en silence.
+
+Éprouvé sur un Postgres 16 local, migration appliquée deux fois (idempotente) :
+prénom changé → 2 appareils gardés ; même jeton réécrit → 2 gardés ; nouveau
+lien → 0 ; désactivée → 0 ; réactivée → rien de rendu ; mode « compte » → 0 ;
+nouveau lien écrit par un rôle **sous RLS** → 0 ; doublon (profil, adresse) →
+refusé ; profil supprimé → 0.
+
+⚠ **Un cas limite, assumé, sur DEUX chemins.** « Régénérer le lien » écrit
+`profiles.pwa_token` **avant** `public_tokens.token`, et revient en arrière si
+la seconde écriture échoue ; « Désactiver » écrit `active = false` **avant** de
+supprimer la ligne `public_tokens`, et remet `active = true` si la suppression
+échoue. Dans les deux cas la purge a déjà eu lieu : le lien d'avant fonctionne
+toujours, mais ses appareils sont désabonnés. Sa page le verra (son appareil
+n'est plus dans la liste) et elle pourra se réabonner. Rendre la purge
+différée pour ces seuls chemins d'échec coûterait plus que le geste qu'ils
+demandent.
+
+**Le module** `lib/push/abonnements-prestataires.js` — le seul qui écrit dans
+la table : `enregistrer`, `retirer`, `lister`, `pourEnvoi`, `apresEnvoi`. La
+validation de l'abonnement est **celle du lot 2, importée** (`validerAbonnement`,
+liste des services d'envoi, anti-SSRF) ; le libellé de l'appareil et
+l'empreinte aussi. Plafond de 10 appareils **par profil**, compté hors de
+l'appareil qu'on réabonne. `lister` ne rend ni adresse ni clé : l'empreinte
+(16 hexa) et le libellé.
+
+**Les deux gestes**, dans `api/menages-public.js` (l'API de sa page) :
+`POST action=push_abonner` (`abonnement`, `appareil`) et
+`POST action=push_retirer` (`endpoint`). Derrière la garde existante :
+`public_tokens` (le compte) puis `profilActifDuJeton` (la personne). Le profil
+et le compte viennent **du lien**, jamais du corps. Refus :
+
+| cas | statut | motif |
+|---|---|---|
+| aperçu de l'hôte (`apercu=1`, en requête ou en corps) | 403 | `apercu` — rien n'est lu |
+| clés de notification absentes (s'abonner seulement) | 503 | `non_configure` |
+| lien inconnu, profil désactivé, pas un accès par lien | 401 | (garde) |
+| adresse hors des services d'envoi, clés invalides | 400 | motif du module |
+| plafond atteint | 409 | `plafond_atteint` |
+| base en panne | 503 | `lecture_impossible` / `ecriture_impossible` |
+
+Se désabonner marche **même sans clés** : on doit toujours pouvoir se retirer.
+
+**L'état dans la réponse de sa page** : le GET du planning porte
+`push: { pret, cle_publique, appareils: [empreintes] }`. La page se reconnaît
+en comparant l'empreinte de son propre abonnement. Lecture en panne →
+`appareils: null` et `erreur: 'lecture_impossible'` : la page dira « on ne sait
+pas », pas « pas abonnée », et le planning se sert quand même.
+
+**L'en-tête `Cache-Control: private, no-store`** est posé **en tête** du
+handler, avant le premier refus (le 401 du jeton manquant, l'OPTIONS). Il
+manquait à cet endpoint avant le lot — Vercel posait son défaut
+`public, max-age=0, must-revalidate`.
+
+**Mesure (case 8, requêtes Supabase du planning)** — banc à requêtes comptées,
+un bien, un séjour, un ménage, contre `main` `082d376e` puis contre la
+branche :
+
+| | requêtes | dont écritures | appels du navigateur |
+|---|---|---|---|
+| avant | 12 | 1 (horodatage de sa visite) | 1 |
+| après | 13 | 1 | 1 |
+
+La lecture des abonnements part juste après la garde du profil, **avant** la
+lecture des biens, et n'est attendue qu'au moment de répondre : elle ne
+rallonge pas le chemin. `tests/menages-public-push.test.js` tient le compte,
+l'ordre de départ, et le parallélisme (la lecture des abonnements laissée
+pendante, le planning doit lire la suite sans l'attendre) — ce dernier depuis
+la review (§13.2, constat 2) : l'ordre des appels seul ne distinguait pas
+« en parallèle » de « en série ».
+
+**Tests** : `tests/menages-public-push.test.js` (30 au commit relu, 39 après
+les suites de la review, §13.3). Contre-épreuve contre l'API d'avant (module
+et migration recopiés, seule l'API diffère) : les 17 tests de l'API et de la
+page rougissent ; deux d'entre eux passaient d'abord pour une mauvaise raison
+(un `>= 400` que l'action inconnue d'avant satisfaisait déjà) et exigent
+désormais le **401 de la garde**. Quatorze mutations des gardes (aperçu,
+en-tête, lecture déplacée en fin de chemin, profil pris du corps, garde
+retirée, clés, `appareils: null`, filtre par profil au retrait, clé d'unicité,
+plafond, lecture non filtrée, empreinte qui laisserait sortir l'adresse,
+personne absente) : toutes attrapées.
+
+### 13.2 Trace de la review de l'étape 1 (17 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, plage
+`082d376e85c644687efb57d13101a13e311ebb67..afecf67136dd6a244699f712608a78dc9a2a2776`.
+Chaque fichier cité est dans le diff de l'étape. Rapport consigné tel quel à
+réception, avant correction :
+
+> **Aucun constat de sécurité sérieux.**
+> - **Profil et compte :** ils viennent du lien (`public_tokens` puis `profilActifDuJeton`, qui exige `access_mode='lien'`), jamais du corps de la requête.
+> - **Retrait :** `retirer` ne touche que les lignes du profil.
+> - **Réponses :** elles ne rendent que des empreintes, la clé publique VAPID et le libellé. Aucune adresse d'envoi, aucune clé.
+> - **SSRF :** la validation anti-SSRF est importée du lot 2, pas recopiée.
+> - **Déclencheur SQL :** `security definer`, `search_path` fixé, noms qualifiés. Une fonction de déclencheur ne peut pas être appelée directement.
+> - **Tests :** le fichier neuf passe à 30/30, et les fichiers liés (`menages-public*`, `push*`, `pwa*`) à 330/330.
+>
+> 1. **test** — `tests/menages-public-push.test.js:69`. Le double de Supabase est trop complaisant sur `profiles` : il ignore les filtres `pwa_token` et `account_user_id`, et rend le profil quel que soit le jeton. Mesuré : j'ai remplacé dans `porteurDuJeton` l'appel par `profilActifDuJeton(pt.user_id, 'n-importe-quel-jeton')`, et les 30 tests restent verts. Conséquence : ce fichier ne peut pas détecter que la nouvelle garde trouve le **mauvais** profil du compte. Le test « le profil vient du LIEN » prouve seulement qu'il ne vient pas du corps.
+> 2. **test** — `tests/menages-public-push.test.js:446` et `:400`. Le test « en parallèle, pas à la fin » ne compare que l'ordre des appels `from()`. Mesuré : avec `const pushLu = await abosPresta.lister(...)`, donc une lecture en série avant les biens, les 30 tests passent. Mesuré aussi : en retirant le `.catch(...)` de `api/menages-public.js:659`, les 30 tests passent. Aucun test ne fait **rejeter** `lister`, le double ne rend que `{ error }`. Ce `.catch` compte pourtant : sans lui, un rejet ferait tomber le GET en 500. Et si le rejet arrive après un des `return 503` du chemin, il devient un rejet non traité, qui peut arrêter le processus. La KB (`docs/kb/pwa.md:2414` et `:2421`) affirme que « le compte et l'ordre » sont tenus et que la mutation « parallélisme » est attrapée : c'est vrai pour « à la fin », faux pour « en série ».
+> 3. **test** — `tests/menages-public-push.test.js:490`. La logique du déclencheur n'est vérifiée que par des regex, fragment par fragment. Exemple : un `or` changé en `and` dans la condition de purge, ou une condition déplacée, garderait ce test vert. La seule épreuve réelle est la passe manuelle sur Postgres 16 décrite dans la KB. À savoir, sans forcément corriger dans cette étape.
+> 4. **mineur (garde déclarative)** — `api/menages-public.js:280`. Le refus en aperçu ne vaut que pour une requête qui se **déclare** `apercu=1`. Dans `public.html`, l'enveloppe de `fetch` en aperçu rejette tout POST *avant* d'ajouter `apercu=1`. Aucun chemin réel n'atteint donc ce refus. Si l'enveloppe est contournée (régression de l'étape 2), le POST part sans `apercu=1` et le serveur abonne le navigateur de l'hôte. C'est conforme à la spec §3.6 (« requête marquée »), et ce n'est pas une fuite entre comptes : l'hôte voit ses propres données. Signal serveur possible : l'en-tête `Referer`. `public.html` n'a pas de politique de référent, donc un fetch de même origine envoie l'URL complète du cadre, `apercu=1` compris.
+> 5. **mineur (purge manquée, fenêtre de quelques ms)** — `migrations/2026-11-17-push-abonnements-prestataires.sql:62` et `lib/push/abonnements-prestataires.js:61`. Concurrence entre un abonnement et un changement de lien. Scénario : un `push_abonner` de l'ancien téléphone passe la garde. L'hôte clique alors « Régénérer » : la mise à jour de `pwa_token` déclenche le `delete`. Puis l'`upsert` de l'ancien téléphone arrive, et sa ligne survit à la purge. Correctif possible : relire la garde après l'`upsert` et supprimer la ligne si le jeton ne vaut plus, ou poser l'insertion sous condition de l'état du profil.
+> 6. **mineur (KB et commentaire inexacts)** — `migrations/2026-11-17-push-abonnements-prestataires.sql:21-22` et `docs/kb/pwa.md:2349` annoncent trois écrivains, dont « changer de mode ». Or `api/membres.js` refuse le changement de mode (400, « Le mode d'accès ne se change pas »). La condition `access_mode` du déclencheur reste une bonne défense, mais l'écrivain n'existe pas. Le « cas limite assumé » (`docs/kb/pwa.md:2360`) ne cite que « Régénérer ». La désactivation a le même retour arrière : `active=false` purge, puis l'échec du `delete` de `public_tokens` remet `active=true`. Le lien marche encore et les appareils sont désabonnés.
+> 7. **mineur (performance)** — `api/menages-public.js:19`. `require('../lib/push/envoyer')` charge `web-push` au démarrage à froid de l'endpoint de la prestataire, seulement pour lire deux variables d'environnement. Mesuré : `web-push` n'était pas chargé sur la base `082d376e`, il l'est sur la branche. Son chargement coûte environ 30 ms en local.
+> 8. **mineur** — `migrations/2026-11-17-push-abonnements-prestataires.sql:50`. L'index `push_abonnements_prestataires_profil_idx` est redondant : la contrainte `unique (profil_id, endpoint)` crée déjà un index qui commence par `profil_id`.
+> 9. **mineur (dépendance à déclarer)** — la spec citée par le code, la migration et la KB (`docs/specs/spec-pwa-lot3-prestataires.md`) n'est pas dans cette branche. Elle vit sur `pwa-lot-3-spec` (`878f3b1a`). Il faut le dire au chef de file, dans les dépendances de la remise.
+
+### 13.3 Suites données à la review (17 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review (CLAUDE.md, « une
+review par commit »).
+
+1. **Double trop complaisant** — le double de `profiles` honore désormais
+   `account_user_id` et `pwa_token` (et peut changer de réponse d'une lecture à
+   l'autre). Deux tests neufs : un profil du compte au jeton différent, un
+   profil d'un autre compte — 401 tous les deux. La mutation de la review
+   (`profilActifDuJeton(pt.user_id, 'n-importe-quel-jeton')`) rougit 7 tests.
+2. **Parallélisme et rejet** — un test laisse la lecture des abonnements
+   pendante et exige que le planning lise biens et ménages sans l'attendre ;
+   un autre la fait **rejeter** (panne réseau) et exige une page servie avec
+   `appareils: null`. Les deux mutations de la review (`await` immédiat,
+   `.catch` retiré) rougissent.
+3. **Déclencheur** — le corps de la fonction est comparé **en entier** (espaces
+   normalisés) : un `or` devenu `and` rougit, sur l'une ou l'autre des deux
+   conditions. L'épreuve sur un vrai Postgres reste la passe du §13.1, rejouée
+   après correction (deux passes, purge au nouveau lien, deux index seulement).
+4. **Aperçu** — reconnu aussi par l'en-tête `Referer` (`apercu=1` dans
+   l'adresse de la page appelante), qui ne dépend pas de l'enveloppe de
+   `fetch` de la page. Test : refus 403 sans aucune lecture pour les deux
+   gestes, et la page de la prestataire elle-même (même adresse, sans
+   `apercu`) acceptée.
+5. **Concurrence avec un changement de lien** — après l'écriture, le lien est
+   **relu** ; s'il ne vaut plus (régénéré, désactivée), la ligne écrite est
+   retirée et la réponse est le 401 de la garde. Si le changement vient après
+   la relecture, la purge passe après la ligne et l'emporte. Coût : deux
+   lectures de plus, sur l'abonnement seulement (geste rare), pas sur le
+   planning. Deux tests (lien régénéré, personne désactivée pendant le geste).
+6. **Commentaire et KB** — deux écrivains, pas trois ; le cas limite vaut aussi
+   pour la désactivation (§13.1 corrigé).
+7. **`web-push` au démarrage à froid** — les clés vivent dans
+   `lib/push/cles.js`, sans dépendance ; `lib/push/envoyer.js` les réexporte,
+   ses appelants du lot 2 ne changent pas. Test : un sous-processus qui charge
+   l'API de la prestataire ne charge pas `web-push`.
+8. **Index redondant** — retiré : l'index de la contrainte d'unicité
+   (profil_id, endpoint) le couvre.
+9. **Dépendance** — la spec vit sur `pwa-lot-3-spec` (PR #26) : déclarée dans
+   la remise au chef de file.
+
+### 13.4 Étape 2 — le service worker et la page de la prestataire (18 novembre 2026)
+
+**Le code commun des deux service workers** : `shared/pwa/push-sw.js`. La
+lecture du message, la règle « afficher toujours », la règle du chemin et le
+réabonnement vivaient dans le service worker de l'hôte (lot 2a) ; la
+prestataire en a besoin à l'identique, et deux copies divergent. Chaque
+service worker le charge par `importScripts`, puis appelle
+`installerNotifications({ accueil, portee, icone })` :
+
+| | hôte (`shared/pwa/service-worker.js`) | prestataire (`apps/menages/sw.js`) |
+|---|---|---|
+| portée | `/` | `/apps/menages/` |
+| accueil (chemin refusé) | `/dashboard` | `/apps/menages/public.html` |
+| icône | `/shared/pwa/icone-192.png` | `/apps/menages/icons/icon-192.png` |
+
+- ⚠ **La portée est une règle de plus que le lot 2** : un toucher n'ouvre jamais
+  une page hors de la portée de l'appli qui affiche, et n'essaie jamais de
+  reprendre une fenêtre hors de sa portée. (Le navigateur refuse déjà
+  `navigate()` sur une fenêtre qu'un service worker ne contrôle pas — la review
+  l'a relevé, §13.5 constat 4 : le « détournement » que le banc montre est ce
+  que le code tenterait, pas ce que la plateforme laisserait faire.) Pour
+  l'hôte, portée `/` : rien ne change.
+- ⚠ **Jamais un cadre** (§13.6) : seule une fenêtre de premier niveau est
+  reprise. L'aperçu de la prestataire, ouvert par l'hôte, est un cadre de même
+  origine.
+- ⚠ **L'accueil de la prestataire est sa page SANS jeton** : l'appli installée
+  a le sien, rangé à sa première ouverture. Et le service worker retire
+  `token` et `apercu` de toute adresse ouverte. Mais ce n'est qu'une défense de
+  plus : **sur iPhone 18.4+, le système ouvre le message déclaratif sans passer
+  par le service worker** — la garantie est l'EXPÉDITEUR (étape 3, §13.6).
+- ⚠ **Le compromis de l'accueil sans jeton** (spec §12) : sur Android, une
+  prestataire qui a deux liens (deux hôtes) partage la même portée ; le toucher
+  ouvre sa page avec le jeton du DERNIER lien ouvert sur ce téléphone, et une
+  fenêtre `?token=A` déjà ouverte est ramenée à la page sans jeton, donc au
+  dernier lien.
+- ⚠ **Versionné par son empreinte** : chaque service worker charge
+  `/shared/pwa/push-sw.js?v=<12 hexa du sha256 du fichier>`. Modifier le
+  fichier sans reporter l'empreinte dans les deux service workers est un rouge
+  (`tests/pwa-presta-sw.test.js`) — et c'est ce report qui change leurs
+  octets, donc qui les fait se réinstaller.
+- `CACHE_VERSION` de la prestataire bumpée : `hotesmart-clean-v7-notifications`.
+- Le banc des service workers (`tests/outils/sw-banc.js`) sait exécuter
+  `importScripts` (le vrai fichier, ou un corps muté pour une contre-épreuve).
+  Les contre-épreuves push du lot 2 (`tests/pwa-service-worker.test.js`) mutent
+  désormais `push-sw.js`.
+
+**Le module de la page** : `shared/push-prestataire.js`, jumeau de
+`shared/push-appareil.js` (l'hôte), dont il importe les primitives (support,
+iPhone, plateforme, empreinte, clé — `enOctets` et `memeCle` y sont exportées
+pour lui, sans autre changement). Trois écarts, qui tiennent à la personne :
+
+- pas de session : le lien est son identité, l'API est celle de sa page
+  (`push_abonner`, `push_retirer`, étape 1) ;
+- l'état connu du serveur arrive avec le GET de sa page : **lire l'état ne
+  touche jamais le réseau** ;
+- ⚠ **l'enregistrement est celui de SON appli** (portée `/apps/menages/`).
+  `getRegistration` et `ready` rendent la portée la plus proche : sur un
+  navigateur qui porte aussi l'appli de l'hôte, ce serait la sienne. On filtre
+  sur la portée exacte, et l'on attend au plus 10 s que son service worker soit
+  actif (première ouverture).
+
+États rendus par `etatNotifications(push)` : `indisponible` (pas de clés, ou
+navigateur incapable — pas de carte), `iphone_hors_appli`, `bloquee`,
+`inconnu` (le serveur n'a pas pu lire ses appareils), `abonne` (CET appareil
+est dans la liste du serveur pour ce lien), `a_activer`. ⚠ « Abonnée » est ce
+que le **serveur** sait : après un nouveau lien, le navigateur garde son
+abonnement, mais la liste est vide — elle lit « à activer ».
+
+- **S'abonner** : contrôles sans attente, puis **la permission en première
+  attente** (iPhone), puis son service worker, puis l'abonnement, puis le
+  serveur.
+- **Se désabonner** retire CE lien au serveur et **laisse l'abonnement du
+  navigateur** : sur Android, il peut servir l'appli d'un autre hôte de la même
+  prestataire (même portée, spec §12).
+- **Renouvellement** (`pushsubscriptionchange`) : à l'ouverture de sa page, si
+  une adresse **déjà envoyée depuis cet appareil** (les cinq dernières, en
+  stockage local) est encore connue du serveur et que l'adresse actuelle ne
+  l'est pas, l'actuelle est renvoyée. Une **purge** (nouveau lien, personne
+  désactivée) vide la liste : on ne réabonne jamais derrière l'hôte.
+
+**La page** (`apps/menages/public.html`) : une carte « Notifications » **en bas
+de sa page**, après la liste des trente jours, **hors** de `#dispo-contenu`
+(elle ne dépend pas de la sonde des disponibilités). Cachée tant que l'état
+n'est pas connu. Le module se charge **à la demande** (import dynamique), et
+seulement si le site a ses clés : hors ligne, son absence cache la carte et ne
+casse rien d'autre. Un bouton par état : « Recevoir les notifications sur ce
+téléphone » (`a_activer`), « Ne plus recevoir sur ce téléphone » (`abonne`).
+Bloquée : le chemin exact de l'appareil pour les rouvrir (même règle que l'hôte,
+lot 2 Q21). iPhone dans Safari : l'installer d'abord (spec §3.2).
+
+- ⚠ **Le clic appelle l'abonnement sans aucune attente avant** : la carte n'est
+  visible qu'une fois le module chargé, et le geste part directement du clic.
+- ⚠ **En aperçu de l'hôte** : ni module, ni carte, ni geste. Trois gardes
+  indépendantes : le script ne peint pas (`APERCU`), la feuille la cache
+  (`.apercu #carte-notifications`), et le serveur refuse (403, étape 1). Le
+  contrôle `APERCU` du branchement des boutons est un double : sans module
+  chargé, un clic ne fait déjà rien (sa mutation reste verte, c'est attendu).
+
+**Mesure (case 8)** : aucun appel d'API ajouté (l'état vient du GET de la
+page). Deux fichiers statiques de plus, chargés **après** l'affichage et
+seulement si le site a ses clés : `shared/push-prestataire.js` (9 128 octets,
+3 629 gzip) et `shared/push-appareil.js` (11 235, 4 429 gzip), revalidés comme
+les autres modules partagés (non versionnés). Le document `public.html` passe
+de 326 847 à 334 659 octets décodés. Le service worker charge en plus
+`shared/pwa/push-sw.js` (5 924 octets, 2 482 gzip) à son installation ; ensuite,
+le navigateur le revalide à chaque vérification de mise à jour (requête
+conditionnelle, 304 le plus souvent). À remesurer sur staging à la recette.
+
+**Tests** : `tests/push-prestataire.test.js` (13, le module avec les vraies
+primitives de l'hôte et un navigateur factice), `tests/pwa-presta-sw.test.js`
+(9, les deux service workers exécutés avec leur import),
+`tests/pwa-presta-notifications-dom.test.js` (6, la vraie page dans jsdom,
+seul le module remplacé par un double). Treize mutations des gardes, toutes
+attrapées sauf le double `APERCU` décrit plus haut.
+
+### 13.5 Trace de la review de l'étape 2 (18 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, plage
+`9e86cc93ceab1464259d462faafb2a2ca952a76b..7fce8e6e0bfe323d124f7aae6958ff48e5a0b973`.
+Chaque fichier cité comme lieu d'un constat est dans le diff de l'étape. Rapport
+consigné tel quel à réception, avant correction :
+
+> Je ne trouve rien de grave. Un défaut réel (constat 1), un test qui passe pour une mauvaise raison (constat 2), puis du mineur.
+>
+> **Ce qui tient, vérifié :**
+> - **Aperçu** : trois gardes. Le module n'est jamais chargé, la carte n'est pas peinte, les boutons ne sont pas branchés, et la feuille de style cache la carte.
+> - **Abonnement** : il ne se fait que sur l'enregistrement de portée exacte `/apps/menages/`. Le cas « seul l'enregistrement de l'hôte existe » est testé et refusé. Le stockage du navigateur ne garde que des empreintes, jamais le jeton.
+> - **Service worker de l'hôte, aucune régression trouvée** : le code déplacé est identique au caractère près, aux renommages près. Avec la portée `/`, `cheminSur` et `ouvrir` se comportent comme avant. L'`importScripts` est appelé au premier passage du script, donc il est permis. L'adresse porte l'empreinte du fichier : modifier `push-sw.js` change les octets des deux service workers, qui se réinstallent. Si l'import échoue, l'installation échoue et l'ancien service worker reste en place. Il n'y a pas d'état à moitié installé. Aucune règle de sécurité du contenu (CSP) ne s'applique à `/sw.js` ni à `/shared/*`, et `push-sw.js` n'est pas exclu du déploiement. La substitution de version de `lib/pwa.js` n'est pas touchée : le jeton de version n'apparaît toujours qu'une fois, et le test qui compile le `/sw.js` servi passe.
+> - **Suite** : les 4 fichiers du lot : 54 sur 54. Suite complète : 8725 sur 8725. Trois tests ont besoin de l'historique git : ils ont échoué dans ma copie sans `.git`, puis passé (16 sur 16) dans un clone qui a l'historique.
+>
+> **1. Défaut (consentement) — `shared/push-prestataire.js:151-158` et `:168-181`.** « Ne plus recevoir » est annulé tout seul à l'ouverture suivante de la page. Condition : le serveur garde une ancienne adresse déjà envoyée depuis ce téléphone. C'est fréquent, car une ligne morte ne part qu'au premier envoi qui reçoit 404 ou 410. À ce SHA, rien n'envoie aux prestataires, donc rien ne la retire. Comment cette ancienne adresse apparaît : un `pushsubscriptionchange` ; une autorisation réinitialisée puis réactivée (nouvelle adresse) ; un changement de clé (branche `memeCle`). Ce qui se passe : `desactiverNotifications` retire l'adresse actuelle mais laisse la liste `hotesmart-clean-push-envoyes` intacte. À l'ouverture suivante, `verifierRenouvellement` voit une ancienne adresse encore connue du serveur, conclut à un renouvellement et réabonne. Mesuré avec le vrai module dans le navigateur factice des tests (copie hors de l'arbre). Serveur `[E0]`, navigateur `E1`, liste locale `[E0]` : ouverture : état `abonne`, 2 lignes ; « Ne plus recevoir » : état `a_activer`, 1 ligne ; réouverture : état `abonne`, 2 lignes. Requêtes envoyées : `push_abonner | push_retirer | push_abonner`. Conséquence : elle reçoit les notifications qu'elle a refusées. La phrase de la KB « on ne réabonne jamais » est vraie après une purge, pas après son propre refus. Correctif proposé : vider la liste locale (idéalement rangée par lien) après une désactivation réussie, et ajouter ce test.
+>
+> **2. Test — `tests/push-prestataire.test.js:123-134`.** Le test « la permission est la PREMIÈRE attente » passe pour une mauvaise raison. Le journal ne note que certains appels. Mutation : ajouter `await empreinte('https://fcm.googleapis.com/x')` juste avant `Notification.requestPermission()` donne **13 sur 13 au vert**. Sur iPhone, la permission ne serait alors plus demandée dans le geste. Le test de la page (jsdom) ne couvre pas ce cas : il remplace le module par un double. Assertion à ajouter, vérifiée verte sur le code et rouge sur la mutation : appeler `P.activerNotifications(...)` sans `await`, puis lire le journal dans la foulée. Il doit valoir exactement `['permission']`.
+>
+> **3. Mineur (piège pour l'étape 3, KB inexacte) — `shared/pwa/push-sw.js:50-56`, `apps/menages/sw.js:115-128`, `docs/kb/pwa.md:2517-2524`.** Sur iPhone 18.4 et plus, un message au format déclaratif est affiché et ouvert par le système **sans passer par le service worker** (`lib/push/envoyer.js` le dit). Là-bas, la règle de portée et la page d'accueil de la prestataire ne s'appliquent donc pas. Le repli du serveur (`cheminDuSite`) est `/dashboard`, c'est-à-dire l'accueil de l'hôte. De plus, `cheminSur` garde la partie après le `?` telle quelle : un `?token=` serait conservé. « Jamais hors de la portée » et « le jeton n'entre jamais dans une adresse ouverte au toucher » doivent donc être garantis par **l'expéditeur de l'étape 3** : portée `/apps/menages/`, repli `/apps/menages/public.html`, ni `token` ni `apercu`, avec un test. La KB doit le dire. Aucun impact aujourd'hui, puisque rien n'envoie.
+>
+> **4. Mineur — `shared/pwa/push-sw.js:90-101`, plus le double des tests (`tests/outils/sw-banc.js:146`, `tests/pwa-presta-sw.test.js:120-142`).** Dans un vrai navigateur, `WindowClient.navigate()` refuse une fenêtre que le service worker appelant ne contrôle pas. Le détournement d'une fenêtre de l'hôte décrit par la KB (`pwa.md:2519-2521`) était donc déjà impossible. Le banc l'accepte parce que ses fenêtres factices acceptent n'importe quel `navigate`. La contre-épreuve montre donc un risque que la plateforme bloque déjà. Le cas réel restant : un cadre contrôlé par le *même* service worker. Chez l'hôte, le cadre d'aperçu `/apps/menages/public.html?apercu=1&token=…` est contrôlé par le service worker de l'hôte, car celui de la prestataire n'y est jamais enregistré. La portée `/` le couvre. Si l'hôte a cliqué dans ce cadre en dernier, toucher une de ses notifications peut ouvrir `/messages?…` *dans le cadre d'aperçu*. C'est ma lecture de l'ordre de `matchAll` (le plus récemment focalisé d'abord), pas une mesure dans un vrai navigateur. Pas de fuite (même personne). Le défaut existe depuis le lot 2, mais la nouvelle règle de portée ne le ferme pas. Le symétrique : sur un navigateur qui porte les deux applis, le service worker de la prestataire peut sortir un cadre d'aperçu du mode aperçu. La page s'ouvre alors sans `apercu=1` et lit le jeton du téléphone. Correctif proposé : `if (f.frameType && f.frameType !== 'top-level') continue`.
+>
+> **5. Mineur (ordre de mise en production) — `apps/menages/public.html:1499`.** À ce SHA, aucun code n'envoie aux prestataires : `pourEnvoi` de `lib/push/abonnements-prestataires.js` n'est appelé nulle part. La production a déjà ses clés d'envoi (lot 2), donc la carte s'afficherait dès cette étape. Elle promet « dès qu'un ménage vous est confié, proposé ou annulé », et rien n'arriverait. À déclarer comme dépendance dans la remise au chef de file : l'étape 2 n'entre pas dans `main` sans l'étape 3.
+>
+> **6. Mineur — accueil sans jeton, `apps/menages/sw.js:124-128`.** Sur Android, une prestataire qui a deux liens (deux hôtes) partage la même portée. Toucher une notification ouvre `public.html` avec le jeton du **dernier** lien ouvert sur ce téléphone. Si une fenêtre `?token=A` est déjà ouverte, elle est redirigée vers la page sans jeton, donc vers B. C'est un compromis à écrire en §13.4, qui présente l'accueil sans jeton comme sans conséquence.
+>
+> **7. Mineur — `apps/menages/public.html:1553`.** Le refus `plafond_atteint` (409) affiche le message du serveur « retirez-en un d'abord ». Sa page n'a aucune liste d'appareils : c'est une impasse. Il faut une entrée dans `MOTIFS_NOTIF`.
+>
+> **8. Mineur (KB, commentaires).** `docs/kb/pwa.md:2594-2595` dit « à son installation, et plus ensuite ». En fait, le script importé est revalidé à chaque vérification de mise à jour (requête conditionnelle, réponse 304). C'est négligeable mais inexact. `tests/outils/sw-banc.js:102` : le commentaire parle de `portee`, mais le paramètre s'appelle `adresse`. `shared/pwa/push-sw.js:39` : si la portée passée est invalide, elle retombe sur `/`, la plus large. Mieux vaudrait lever une erreur. Aucun impact avec les valeurs actuelles, qui sont des constantes.
+
+### 13.6 Suites données à la review de l'étape 2 (18 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **« Ne plus recevoir » réannulé à l'ouverture suivante** — la mémoire des
+   adresses envoyées d'ici est désormais **rangée par lien** (clé = empreinte
+   du jeton, jamais le jeton) et **oubliée quand elle se désabonne**. Le
+   scénario de la review est rejoué tel quel en test (serveur `[E0]`,
+   navigateur `E1`, mémoire `[E0]` : renouvelée à l'ouverture, désabonnée, puis
+   rien ne repart à la réouverture), plus un test « la mémoire d'un lien ne
+   réabonne pas un autre lien ».
+2. **La permission « en premier »** — le test appelle maintenant l'abonnement
+   sans attendre et lit le journal dans la foulée : il doit valoir exactement
+   `['permission']`. La mutation de la review (`await empreinte(…)` avant la
+   permission) rougit.
+3. **Le message déclaratif sur iPhone 18.4+** — le service worker retire
+   `token` et `apercu` de l'adresse ouverte (défense, test et contre-épreuve).
+   ⚠ **POUR L'ÉTAPE 3, À TENIR PAR L'EXPÉDITEUR** : le `navigate` d'une
+   notification de prestataire est construit sous `/apps/menages/`, avec pour
+   repli `/apps/menages/public.html` (jamais `/dashboard`, le repli de
+   `cheminDuSite`), sans `token` ni `apercu` — et un test le prouve.
+4. **Les cadres** — `ouvrir` ne reprend qu'une fenêtre de premier niveau
+   (`frameType`), pour les deux applis : l'aperçu de l'hôte est un cadre de même
+   origine. Test et contre-épreuve. Le banc dit désormais que ses fenêtres
+   factices acceptent tout `navigate()`, contrairement à un vrai navigateur ; la
+   KB §13.4 est corrigée sur ce point.
+5. **Ordre de mise en production** — l'étape 2 n'entre pas dans `main` sans
+   l'étape 3 (sinon la carte promet des notifications que rien n'envoie). Déclaré
+   dans la remise au chef de file.
+6. **Le compromis de l'accueil sans jeton** pour deux liens sur un même
+   téléphone Android — écrit au §13.4.
+7. **Plafond atteint** — la page dit le seul geste possible : « Demandez un
+   nouveau lien à votre hôte : il remet tout à zéro. » Test.
+8. **Commentaires et KB** — revalidation du script importé (§13.4) ; le
+   commentaire du banc (`adresse`) ; une portée invalide, ou un accueil hors de
+   la portée, **arrête l'installation** au lieu de retomber sur `/` (test).
+
+L'empreinte de `shared/pwa/push-sw.js` change avec ces correctifs : elle est
+reportée dans les deux service workers (`?v=4b018acc0857`).
+
+### 13.7 Étape 3 — l'envoi (18 novembre 2026)
+
+`lib/push/envoyer.js` gagne `envoyerAPrestataire({ profilId, message })`, jumeau
+d'`envoyerAPersonne` : les deux passent par le même chemin
+(`envoyerAuxAbonnements` : lire les abonnements, envoyer, retirer les morts,
+dater les succès), sur l'une ou l'autre table. ⚠ **Sans clés, aucune lecture** :
+il rend `cles_absentes` tout de suite.
+
+`lib/cleaning/notifier-prestataire.js` applique la règle d'envoi (spec §6) aux
+trois envois — attribué, à confirmer, « Vu » attendu :
+
+1. la notification, à tous ses appareils abonnés, à toute heure (Q42) ;
+2. le SMS **seulement si aucun appareil ne l'a reçue** (Q41), sous ses deux
+   conditions d'avant (numéro, `notify_sms`) ;
+3. l'e-mail inchangé.
+
+Le bilan dit `push: n`. Détail, textes et pièges : `docs/kb/menage.md`, « La
+notification d'abord, le SMS en secours ».
+
+- ⚠ **Ce que l'étape 2 avait laissé à l'expéditeur (§13.6, point 3) est tenu
+  ICI** : le `navigate` est la constante `/apps/menages/public.html` — sous la
+  portée de son appli, jamais le repli `/dashboard`, ni `token` ni `apercu` — et
+  un test le vérifie sur les quatre messages (attribué, à confirmer, « Vu » la
+  veille et le jour même), ainsi que l'absence du jeton et de tout lien.
+- **Textes** (spec §5) : « Nouveau ménage : {jour} - {bien}. » ; « Ménage à
+  confirmer : {jour} - {bien}. Répondez avant le {échéance}. » ; « Ménage du
+  {jour} à {bien} : ouvrez votre page et touchez Vu. » (+ « C’est aujourd’hui. »
+  le jour même). Les SMS gardent leurs textes, au mot près.
+- **Un ménage = une notification à l'écran** (`tag`), et la remplaçante **sonne**
+  (`renotify`) : chacune demande quelque chose à la personne.
+- **Coût** : par envoi, une lecture des abonnements (aucune sans clés), un appel
+  au service de push par appareil (5 s au plus chacun, compté par le compteur
+  du cron), une écriture par appareil. Le SMS évité, lui, ne coûte plus rien à
+  l'hôte.
+
+**Tests** : `tests/cleaning-notifier.test.js` (+10, le vrai chemin d'envoi ;
+seul le service de push est simulé), `tests/menages-valider.test.js` (+1 : une
+relance reçue par notification n'est pas « muette »). Neuf mutations, toutes
+attrapées : le SMS envoyé malgré la notification, le repli `/dashboard`, la
+remplaçante muette, les échecs comptés comme reçus, la lecture sans clés, la
+règle « prévenue » qui oublie `push`, `web-push` chargé en tête, le `tag`
+retiré, les appareils lus sur le compte au lieu du profil.
+
+### 13.8 Trace de la review de l'étape 3 (18 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, plage
+`9044d10f9d075eacaf99f1757a22abf1d3a8cb52..d18335dec373835ee695ed8ef95dae1d8f8d304d`.
+Chaque fichier cité comme lieu d'un constat est dans le diff de l'étape. Rapport
+consigné tel quel à réception, avant correction :
+
+> Je ne trouve aucun constat de sécurité. Deux points demandent une décision ou un correctif (1 et 2), un test laisse passer une mutation (3), et le reste est mineur.
+>
+> **1. Défaut de règle, à faire trancher par Thierry : « reçue » veut dire « acceptée par le service de push », pas « affichée ».** Fichier `lib/cleaning/notifier-prestataire.js`, lignes 137 et 148. Ce qui se passe : `push` compte les réponses 2xx d'Apple ou de Google. Un seul 2xx suffit à supprimer le SMS. La KB écrit pourtant « le nombre d'appareils qui l'ont reçue ». Scénario A, téléphone sans données : données mobiles coupées hors Wi-Fi, ou téléphone éteint : le service répond 201 et garde le message jusqu'à 24 h (`TTL_S`). Le SMS, lui, serait arrivé par le réseau téléphonique. C'est précisément le geste d'urgence pour lequel ce module existe : une attribution deux heures avant le départ. Scénario B, un téléphone qui n'est pas le sien : son lien est son identité. Toute personne qui a ce lien et l'ouvre hors aperçu peut toucher « Recevoir » : Thierry qui teste le lien de Régina sur son propre téléphone, ou une aide à qui elle l'a transmis. Dès lors, `push` vaut au moins 1 à chaque envoi : Régina ne reçoit plus aucun SMS, et le bilan dit « prévenue ». Pourquoi c'est plus risqué qu'au lot 2 : le lot 2 (Q11) a la même règle, mais un abonnement y est lié à une session connectée. Ce qui manque : ni la KB ni les « Limites connues » de la spec (§12) n'en parlent. Le code applique la règle telle qu'elle est écrite : c'est le sens de « reçue » que Thierry doit confirmer. Par exemple, garder le SMS pour une attribution proche du départ. Au minimum, écrire la limite et désabonner les téléphones de test après la recette.
+>
+> **2. Défaut de coût et de délai : les appareils sont appelés l'un après l'autre, 5 s au plus chacun, avant le SMS.** Fichiers `lib/push/envoyer.js` lignes 130-131, appelé depuis `lib/cleaning/notifier-prestataire.js` lignes 146-148. Mesure : avec un service de push qui ne répond pas, `notifierAssignation` prend 5 022 ms pour un appareil et 10 035 ms pour deux. Le SMS ne part qu'ensuite. Dans le cron : ni `poserPropositionsDues` ni `relancerValidations` n'a de limite de temps propre, contrairement aux brouillons dus (`resteMs`) et à la file des notifications en attente. Le cron dispose de 60 s (`maxDuration: 60`). Douze envois vers un appareil muet suffisent, par exemple pendant une panne d'Apple à 9 h. Les étapes suivantes du cycle ne passent plus : brouillons dus, distribution, signal de vie. Ce qui existait déjà : la relance portait déjà ce risque pour les téléphones de l'hôte (`notifierMenagePasVu`, lot 2c-2). Ce lot le double. Côté hôte : son clic d'attribution attend 5 s par appareil muet avant de répondre. Le geste qui pose jusqu'à 10 propositions (`MAX_NOTIFS`) peut attendre 10 × appareils × 5 s. Gravité : pas bloquant avec quatre logements. Pistes : une limite de temps dans les deux boucles, ou des envois en parallèle sur le seul chemin prestataire, pour ne pas toucher au lot 2.
+>
+> **3. Test qui laisse passer une mutation.** Fichier `tests/cleaning-notifier.test.js`, lignes 489-493. Ce qui se passe : pour `sync-menages-entite.js`, le contrôle n'est qu'une recherche de texte dans la source. Contre-épreuve : j'ai remplacé les deux `aEtePrevenue(notif)` par `notif && (notif.email || notif.sms)`. Résultat : 233 sur 233 au vert, sur `cleaning-notifier` et les six fichiers qui chargent ce module. Effet de la mutation : `notifiees` serait sous-compté : journal faux, et plafond `MAX_NOTIFS_PAR_CYCLE` moins efficace. Ce qui manque : aucun test de comportement de `poserNouveauxTours` ni de `elargirToursEnCours` avec un bilan `{ push: 1, sms: false, email: false }`. La relance, elle, en a un dans `menages-valider`.
+>
+> **4. Mineur.** Fichier `tests/cleaning-notifier.test.js`, ligne 437. Le titre annonce « désactivé ou hors du compte », mais seul `active: false` est exercé. Le filtre de compte reste couvert par le test plus ancien sur les filtres, qui passe par la même branche.
+>
+> **5. Mineur : commentaires périmés.** `lib/cleaning/notifier-prestataire.js`, ligne 85 : « Rend `{ sms, email }` ». `lib/cleaning/relance-validation.js`, lignes 291-294 : « les deux canaux décochés, rien ne partira jamais… « Aucun canal actif » ». C'est faux désormais : la notification part même quand l'hôte a décoché SMS et e-mail. C'est conforme aux §4 et §9 de la spec, mais l'avertissement de la fiche le contredit ; à reprendre à l'étape 5.
+>
+> **6. Mineur.** Le code et la KB citent `docs/specs/spec-pwa-lot3-prestataires.md`, qui n'existe pas dans cette branche. La spec vit sur `pwa-lot-3-spec`, dont le commit `878f3b1a` n'est pas un ancêtre de cette branche. C'était déjà le cas aux étapes 1 et 2 : c'est l'ordre des merges qui règle la question.
+>
+> **Vérifié, sans constat :** destinataires (`profilNotifiable`, lecture par `profil_id` seul, purge en base) ; contenu (jour, logement, échéance ; `tag` `menage-<bien>-<date>` ; adresse constante `/apps/menages/public.html` ; ni jeton, ni lien, ni voyageur) ; échecs (clés absentes, lecture en panne, 404/410, 5xx, délai, exception : `push` à 0 et le SMS part) ; `web-push` non chargé au démarrage de `api/menages-public.js` (mesuré) ; `envoyerAPersonne` inchangé ; compteurs de la relance justes ; suite complète 8743, 0 rouge (trois tests ont besoin du dépôt git), les deux fichiers du lot à 63 sur 63 à l'heure réelle et à J+4, J+60, J+200.
+
+### 13.9 Suites données à la review de l'étape 3 (18 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **« Reçue » n'est pas « vue »** — question posée à Thierry (**Q46**), tranchée
+   le 18 novembre : **un ménage d'aujourd'hui ou de demain garde son SMS**,
+   notification reçue ou non ; plus tard, la notification remplace le SMS.
+   Conséquence dite à Thierry : les rappels « Vu » (veille, jour même) gardent
+   toujours leur SMS. `estUrgent` lit le jour à Paris ; une date illisible est
+   urgente ; un SMS décoché ne part pas, même urgent. Tests : J−1 à J+10, les
+   trois envois, le passage de minuit à Paris, les dates illisibles. ⚠ **Le
+   bilan et la KB disent désormais « accepté par le service », pas « reçu ».**
+   ⚠ **Après la recette, désabonner les téléphones de test** : un téléphone
+   abonné avec le lien d'une prestataire supprime ses SMS non urgents.
+2. **Délai d'un service muet** — envoi **en parallèle** et **disjoncteur** par
+   service (cinq minutes de pause après un délai dépassé ou une erreur réseau),
+   sur le seul chemin prestataire : une notification coûte au plus un délai,
+   puis plus rien pendant la pause. Le lot 2 est inchangé (test). Mesuré dans le
+   test : deux appareils sur un service muet, un seul délai ; la notification
+   suivante ne l'appelle plus.
+3. **Le compteur du moteur** — test de comportement de la pose et de
+   l'élargissement d'un tour avec un bilan `{ push: 1, sms: false }` ; la
+   mutation de la review rougit, sur chacune des deux occurrences.
+4. **Titre de test** corrigé (seul le profil désactivé y est exercé).
+5. **Commentaires périmés** corrigés (`notifier-prestataire.js`,
+   `relance-validation.js`). ⚠ **Pour l'étape 5** : l'avertissement « Aucun
+   canal actif » de la fiche ne dit plus vrai pour une personne qui a abonné son
+   téléphone.
+6. **La spec sur sa branche** — connu : la spec passe avec le lot (dépendance
+   déclarée au chef de file).
+
+### 13.10 Étape 4 — annulé, déplacé, retiré (19 novembre 2026)
+
+Deux avis de plus, mêmes canaux et même règle que les trois premiers (Q44 ;
+Q46 compris) : **annulé ou déplacé** (Q40), **retiré par l'hôte** (Q45).
+Détail : `docs/kb/menage.md`, « La notification d'abord, le SMS en secours ».
+
+- **Annulation** — `synchroniserMenages` prévient, après l'annulation réussie et
+  le journal, la porteuse et chaque sollicitée (`proposee_a`, `offered_to`),
+  pour un ménage à venir seulement, sous le plafond par cycle (les plus proches
+  d'abord ; le surplus est compté, pas réessayé). Le nom du bien vient de la
+  lecture des biens déjà faite par le moteur (`name` ajouté au `select`) :
+  aucune requête de plus.
+- **Retrait** — `reassigner` (`api/menages.js`) prévient celles qui perdent le
+  ménage, calculé par `perdants(avant, après)` sur l'état écrit ; jamais celle
+  qui le reçoit ou le garde ; ménage à venir seulement. La réponse porte
+  `retraits: { a_prevenir, prevenues }`. Le nom du bien n'est lu qu'une fois,
+  et seulement si quelqu'un est à prévenir.
+- `lib/cleaning/menage-perdants.js` : `participants`, `perdants`, `aVenir`,
+  `jourDeParis` — sans dépendance, pour que les doubles de
+  `notifier-prestataire` dans les tests n'emportent pas ces règles.
+
+**Tests** : `tests/cleaning-notifier.test.js` (+4 : textes, SMS GSM-7, même
+règle, règles de perte), `tests/cleaning-sync-menages-entite.test.js` (+5 :
+porteuse et sollicitées après l'écriture, départ déplacé, passé, sans personne
+ou annulation refusée, masse sous plafond), `tests/menages-reassignation.test.js`
+(+6 : « Personne », retirer la proposition, assigner ailleurs, nouvelle
+proposition, passé ou sans personne, échec d'envoi). Dix mutations, toutes
+attrapées.
+
+### 13.11 Trace de la review de l'étape 4 (19 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, plage
+`65aee3a5946c729f8fb6d4e28a3f91d3c862c09a..79a61300706f8cfb000a1ac8332b084d1fd144e6`.
+Chaque fichier cité comme lieu d'un constat est dans le diff de l'étape. Rapport
+consigné tel quel à réception, avant correction :
+
+> **Ce que j'ai mesuré** — les trois fichiers de tests du lot : 180 sur 180 au vert, à l'heure réelle et avec l'horloge décalée de 4, 30, 60 et 200 jours. La suite complète : 8 762 verts et 3 rouges, qui viennent de ma copie sans `.git` (`tests/reponse-partenaire-execution.test.js`, `tests/v2-marche-aucune-ecriture-calendrier.test.js`), identiques sur la copie de la base `65aee3a`. Six mutations de ma part (garde « à venir » retirée côté moteur et côté `reassigner`, état d'après pris tel quel, prévenir la porteuse seule, plafond retiré, avis envoyé même si l'annulation a échoué) : chacune fait rougir au moins un test neuf.
+>
+> **Sécurité et vie privée : aucun constat.** Les deux nouveaux avis passent par `profilNotifiable` (`account_user_id = userId`, `access_mode = 'lien'`, `active`). Côté moteur, `userId` est le `m.user_id` du ménage ; côté `reassigner`, `garde.accountUserId`, et `avant` est lu avec `.eq('user_id', userId)` : un identifiant d'un autre compte dans `proposee_a`, `offered_to` ou `provider_id` ne reçoit rien. Ni jeton ni voyageur dans la notification. Le contrôle de périmètre de `reassigner` passe avant toute écriture et tout envoi.
+>
+> **1. Défaut — un ménage annulé puis ressuscité garde son « Vu » : la prestataire a reçu « annulé », plus rien ne la relance, et l'hôte voit « Vu ».** `lib/cleaning/sync-menages-entite.js:662-697` (nouvel avis) et `:557` (résurrection). L'avis d'annulation est explicite. Si la réservation revient, la résurrection réécrit l'assignation mais ne touche ni `vu_le` ni `vu_par`. Si la même porteuse est reprise par la garde, `vu_par = provider_id` reste vrai. Les relances « Vu » ne visent que les ménages non validés, donc rien ne part. Mesuré avec le double du test, sur deux cycles. Cycle 1 : `annules=1`, avis à `p-regina`. Cycle 2 : `ressuscites=1`, la mise à jour ne contient ni `vu_le` ni `vu_par`, aucun avis d'aucune sorte. Scénario réaliste : un voyageur demande une prolongation (départ samedi → dimanche), puis l'annule. Régina reçoit « Ménage du samedi annulé », puis « Ménage du dimanche annulé » pour un ménage dont on ne lui avait jamais parlé. Le samedi revient chez elle, l'écran de l'hôte affiche « Vu », et aucun message ne lui dit que le ménage existe à nouveau. Avant ce lot, le ménage disparaissait puis réapparaissait seulement dans sa page. Désormais un message affirme qu'il est annulé. La KB (`docs/kb/menage.md:1226`) cite bien la « limite connue », mais pas le « Vu » conservé ni le silence des relances. À trancher par Thierry : remettre `vu_le`/`vu_par` à zéro à la résurrection, ou envoyer un avis « il revient ».
+>
+> **2. Défaut — le surplus au-delà du plafond est perdu sans que rien ne le signale.** `lib/cleaning/sync-menages-entite.js:681-697`. Mesuré : 35 ménages annulés donnent `annulations_non_prevenues=5` et `results.errors=[]`. Au cycle suivant, ces ménages sont `cancelled`, donc exclus : 0 avis. Elles ne sont jamais prévenues. La seule trace est une ligne `console.error`. Le compte n'est ni dans la ligne de bilan finale du moteur ni dans `results`. Le même fichier écrit pourtant : « le diagnostic d'un cron se lit par `results.errors` … Un champ de bilan ne remonte nulle part ». La KB dit « compté et journalisé ». Or le journal `menage_assignment_log` ne dit rien des avis non envoyés. Correctif minimal : pousser une entrée dans `results.errors` quand le compte est supérieur à zéro.
+>
+> **3. Défaut (léger) — la boucle d'envoi n'a pas de limite de durée et a son propre plafond.** `lib/cleaning/sync-menages-entite.js:682`. Jusqu'à 30 avis envoyés l'un après l'autre. Chacun fait environ 5 à 7 allers-retours : profil, abonnements, push (jusqu'à 5 s de délai), clé SMS, Brevo, journal SMS, e-mail. C'est une estimation, pas une mesure : de l'ordre de 15 à 30 s. Ce temps est pris dans `sync_menages`, avant `propositions_dues` (qui a son propre plafond de 30) et avant le dispatch, dans un cycle limité à 60 s qui « dépasse régulièrement » cette limite. Ce plafond n'est pas partagé avec celui des propositions : un cycle peut maintenant envoyer 60 avis au lieu de 30. Les autres tâches qui envoient ont une limite de durée (15 à 20 s). Ce n'est atteignable qu'en cas d'annulation en masse, ce qui est rare.
+>
+> **4. Mineur — deux affirmations du diff sont inexactes.** `lib/cleaning/notifier-prestataire.js:320` et `api/menages.js:1271-1272` disent que celle qui reçoit le ménage « a déjà son « à confirmer » ». C'est faux pour le geste « Proposer » de l'hôte : `reassigner` n'appelle pas `notifierProposition`. Le cron ne la notifie pas non plus : `poserNouveauxTours` exige `proposee_a` nul, et `elargirToursEnCours` ne prévient que les ajoutées. Le défaut existait avant ce lot, mais le diff s'appuie dessus. Dans le cas « une nouvelle proposition remplace l'ancienne », l'ancienne reçoit « ne vous est plus confié » et la nouvelle ne reçoit rien. `lib/cleaning/notifier-prestataire.js:297-298` et `docs/kb/menage.md:1212` disent qu'un départ déplacé fait naître un ménage « qui a son propre avis ». Pour une porteuse attribuée d'office, le moteur n'envoie jamais d'avis « attribué ». Son seul signal pour la nouvelle date est la relance « Vu » de la veille à 9 h.
+>
+> **5. Mineur — l'exemple du plafond dans le commentaire est faux.** `lib/cleaning/sync-menages-entite.js:669` parle d'« un compte provider qui se vide ». Ce cas n'annule rien : un compte sans aucune réservation dans la fenêtre n'est pas dans `userIds`, donc ses ménages ne sont pas lus. L'exemple trompe sur ce que le plafond protège réellement : la perte partielle des réservations d'un bien.
+>
+> **Points vérifiés sans constat** — tous les chemins de `reassigner` (« Personne », « Retirer la proposition », attribution, nouvelle proposition, re-proposer à la même) ; l'ordre « écriture, puis avis » (aucun avis si l'annulation est refusée, ni si la mise à jour de `reassigner` échoue) ; la date « à venir » à Paris (limite de 23 h 30 UTC testée) ; aucun double avis entre annulation et retrait (un ménage annulé renvoie 409, et `cancelled` n'est plus repris) ; pas de régression (`pages/menages.html` ne lit que `retiree`, `assignee` et `prenom` ; `name` ajouté sans requête de plus ; `jourDeParis` n'était pas exporté avant).
+
+### 13.12 Suites données à la review de l'étape 4 (19 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **Un ménage annulé qui revient** — question posée à Thierry (**Q47**),
+   tranchée : à la résurrection, le « Vu » est **effacé**, et la porteuse est
+   prévenue (« est de nouveau prévu », ou « Nouveau ménage » si la garde le donne
+   à une autre), ménage à venir seulement. Tests : retour chez elle, chez une
+   autre, passé, verrouillé.
+2. **Le surplus perdu sans signal** — le compte remonte dans `results.errors`
+   (contexte `sync_menages_entite_avis`). Test et contre-épreuve.
+3. **Pas de limite de durée** — les avis du moteur (annulé, revenu) partent
+   ensemble, sous le plafond de nombre ET une limite de 15 s ; le surplus est
+   compté et signalé comme au point 2. Le plafond reste distinct de celui des
+   propositions (le partager demanderait de toucher à `api/cron.js`) : au pire
+   30 + 30 avis par cycle, écrit en KB.
+4. **Deux affirmations inexactes** — (a) « celle qui reçoit a son « à
+   confirmer » » était faux pour le geste « Proposer » de l'hôte : question posée
+   à Thierry (**Q48**), tranchée : **la proposition de l'hôte est annoncée**
+   (« Ménage à confirmer », échéance écrite, ménage à venir). L'ancien test « une
+   proposition ne notifie pas » est remplacé par celui de Q48. (b) « un départ
+   déplacé a son propre avis » : faux pour une porteuse d'office — commentaire et
+   KB corrigés (elle le voit dans sa page ; la relance « Vu » de la veille le
+   rappelle).
+5. **L'exemple du plafond** — corrigé : ce qui déclenche des avis en nombre est
+   la perte partielle des réservations d'un bien, pas un compte qui se vide.
+
+### 13.13 Étape 5 — ce que voit l'hôte (19 novembre 2026)
+
+Go de Thierry le 19 novembre 2026 à 15:49.
+
+- **Serveur.** `fichePrestataire` (`api/menages.js`, `GET /api/menages?presta=`)
+  rend `personne.appareils` (appareils qui reçoivent) et
+  `personne.appareils_en_echec` (dernier envoi refusé sans être mort), comptés
+  par `compter` de `lib/push/abonnements-prestataires.js`, et rien d'autre de
+  ses abonnements — ni adresse, ni clé, ni libellé d'appareil, ni motif.
+  - Lue **après** la preuve que le profil est sur le compte de l'appelant (un
+    profil d'un autre compte reste un 404, ses abonnements ne sont pas lus),
+    **lancée avant** les autres lectures et attendue à la fin : une requête
+    de plus, pas un aller-retour de plus (spec §8.7).
+  - `null` = **non lu**, jamais 0 : une panne ne doit pas faire lire « n'a
+    pas activé les notifications ». La panne n'emporte pas la fiche.
+- **Écran.** Fenêtre de configuration, onglet des réglages, section
+  « Notifications », sous les bascules SMS et e-mail : « Reçoit les
+  notifications sur N téléphone(s) » avec l'aide « Quand elle les reçoit, le
+  SMS ne part que pour un ménage du jour ou du lendemain » (seulement si le SMS
+  est coché avec un numéro) ; ou « Notifications activées, mais le dernier
+  envoi vers son téléphone n'est pas passé » (que des appareils en échec) ; ou
+  « N'a pas activé les notifications sur son téléphone » ; ou, non lu, « état
+  illisible pour le moment ». Lecture seule : s'abonner est son geste, sur son
+  appareil.
+  - ⚠ **L'aide n'est pas celle de la spec §4** (« le SMS ne part pas ») : depuis
+    **Q46**, le SMS repart aussi pour un ménage du jour ou du lendemain. Le
+    texte dit la règle telle qu'elle est.
+  - **« Aucun canal actif »** ne s'affiche plus quand un téléphone reçoit les
+    notifications. Non lu, il reste affiché, comme avant ce lot : mieux vaut
+    une alerte de trop qu'une prestataire muette qu'on croit prévenue.
+- **Tests.** `tests/menages-fiche-presta.test.js` (+5 : le nombre et rien
+  d'autre, lecture réellement parallèle, appareil en échec, 0 contre `null`,
+  404 sans lecture), `tests/menages-fiche-regles-dom.test.js` (+6, dans un
+  vrai DOM) et `tests/i18n-parametres.test.js` (+1 : le pluriel rendu par le
+  vrai traducteur, trois langues). Contre-épreuves après les suites de la
+  review (§13.15) : 7 mutations, toutes attrapées — dont la lecture rendue
+  séquentielle, que la première version laissait passer.
+- **Mesure APRÈS** (spec §8) : à la recette, sur staging.
+
+### 13.14 Trace de la review de l'étape 5 (19 novembre 2026)
+
+Review par un sous-agent, en lecture seule, sur le diff non commité de
+`/home/claude/hs-l3` (branche `pwa-lot-3-prestataires`, HEAD
+`5d6de7178ce5e7cc3cc878a8fba0d49aabe64707`). Arbre et SHA confirmés par la
+review ; chaque fichier cité en constat est dans le diff. Rapport recopié tel
+quel :
+
+> **SÉCURITÉ — aucun constat.** Pas de fuite entre comptes : la lecture des
+> abonnements part après la requête du profil, filtrée sur `account_user_id`,
+> `id` et `access_mode='lien'` (404 sinon), et `lister` filtre sur `p.id`, relu
+> en base. Un appareil partagé par deux hôtes compte une seule ligne par profil.
+> Seul `r.appareils.length` sort ; le test vérifie l'absence de l'adresse, des
+> clés et du libellé. Le délégué passe par `peutLire(prestataires)` et voit déjà
+> téléphone et e-mail : le nombre n'ajoute rien de sensible. Pas d'injection :
+> `n` est vérifié par `Number.isInteger` avant `esc(JSON.stringify(...))`, et le
+> texte est posé par `textContent`. La promesse lancée tôt ne peut pas être
+> rejetée (`try/catch` rend un nombre ou `null`) ; si un 503 part avant, elle se
+> termine dans le vide, sans conséquence.
+>
+> **MAJEUR — aucun constat.**
+>
+> **1. MINEUR — `tests/menages-fiche-presta.test.js:442` : le test « donc en
+> parallèle » passe aussi contre du code séquentiel.** Le double enregistre
+> chaque lecture au moment de `from()`, donc il mesure l'ordre de lancement, pas
+> le parallélisme. Vérifié sur une copie : `const appareilsP = await (async ()
+> => {` laisse les 4 tests « étape 5 » verts. Renommer le test, ou mesurer
+> vraiment le parallélisme (faire attendre la réponse des abonnements jusqu'à ce
+> que `properties` ait été demandé). La phrase « 8 mutations, toutes
+> attrapées » ne couvre pas cette mutation-là.
+>
+> **2. MINEUR — `pages/menages.html:2194` (texte `shared/i18n/fr.json:775`, et
+> en/es) : l'aide sur le SMS s'affiche même quand le SMS est coupé.** La règle
+> réelle (`lib/cleaning/notifier-prestataire.js:171`) est `(bilan.push === 0 ||
+> estUrgent(...)) && canalOuvert(prof, 'sms')`. SMS décoché (ou pas de numéro)
+> et deux téléphones : l'écran laisse croire à un filet SMS pour l'urgent, alors
+> qu'aucun SMS ne part. N'afficher l'aide que si `p.notify_sms && p.tel`.
+>
+> **3. MINEUR — `api/menages.js:723`, `pages/menages.html:2188` / `2200` :
+> « Reçoit » compte des abonnements dont tous les envois échouent, et retire
+> « Aucun canal actif » sur cette base.** Seuls 404/410 suppriment une ligne ;
+> un 403 ou 400 (`refus_service`, par exemple après un changement des clés
+> VAPID) la laisse, avec `dernier_echec`. SMS et e-mail coupés et un abonnement
+> dans cet état : « Reçoit les notifications sur 1 téléphone », sans
+> avertissement, alors que rien ne part — contraire au principe du commentaire.
+> La donnée existe (`dernier_echec`, `dernier_envoi_le`) mais `lister` ne la rend
+> pas. Rare ; à corriger ou à noter comme dette.
+>
+> **4. MINEUR — `shared/i18n/fr.json:774` (et en/es) : « téléphone » n'est pas
+> toujours exact** : un ordinateur abonné compte comme « téléphone ».
+>
+> **5. MINEUR — `tests/menages-fiche-regles-dom.test.js` : le rendu du pluriel
+> n'est pas testé** (seuls `data-i18n` et `data-i18n-vars` sont vérifiés).
+>
+> **Hors du diff :** l'écart de l'aide avec la spec §4 (Q46) est à corriger sur
+> `pwa-lot-3-spec`.
+
+### 13.15 Suites données à la review de l'étape 5 (19 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **Le test « en parallèle » mesurait l'ordre, pas le parallélisme** — le
+   double ne répond plus aux abonnements qu'une fois les biens demandés ; lue
+   seule, la lecture reçoit une panne au bout de 200 ms. La mutation de la
+   review (`await (async () => {`) est désormais attrapée.
+2. **L'aide « le SMS ne part que pour un ménage du jour ou du lendemain »
+   s'affichait SMS coupé** — elle ne s'affiche plus que si le SMS est coché ET
+   qu'un numéro existe (`canalOuvert`). Deux tests.
+3. **« Reçoit » comptait les appareils en échec** — nouvelle lecture `compter`
+   (deux nombres : `recoivent`, `en_echec`, depuis `dernier_echec`) ; un
+   appareil dont le dernier envoi n'est pas passé ne compte plus, et s'il n'y a
+   que ceux-là la fiche dit « Notifications activées, mais le dernier envoi
+   vers son téléphone n'est pas passé » — et garde « Aucun canal actif ». Un
+   échec passager (délai, réseau) compte jusqu'au prochain succès : c'est le
+   côté prudent. `lister`, que lit la page de la prestataire, ne change pas.
+4. **« téléphone » pour un ordinateur abonné** — gardé : c'est le mot de la
+   spec §4, et le cas réel est le téléphone. Noté, sans correction.
+5. **Le pluriel n'était pas rendu** — test ajouté dans
+   `tests/i18n-parametres.test.js`, par le vrai traducteur, en fr, en et es.
+
+Hors du diff : l'aide s'écarte de la spec §4 (Q46) ; la correction de la spec
+se fait sur `pwa-lot-3-spec` (PR #26), signalée au chef de file à la remise.
+
+
+### 13.16 Recette sur staging (24-25 novembre 2026, en cours)
+
+Staging à `851dc2822ce01fc9acb98886b642978d755fb636` (le lot 3 fusionné par le
+chef de file ; arbre testé `05bf50db` + le fichier de contrôle, 9594/9594).
+
+**La migration et son contrôle** (Thierry, éditeur SQL de staging, version en
+lignes courtes, même SQL que les fichiers) : « Success. No rows returned »,
+puis le contrôle `2026-11-17-controle-push-abonnements-prestataires` à **13
+lignes sur 13 `true`**. Ligne 11 : l'ACL de `purger_push_prestataire` garde
+EXECUTE pour `anon` et `authenticated` (droits par défaut de Supabase) — sans
+portée, la fonction rend un trigger (ligne 12).
+
+**Pièces jouées** (Samsung de Thierry, Chrome, lien de « Berthe Recette ») :
+1. Le bloc Notifications disait « bloquées » à l'ouverture. Le site était
+   pourtant autorisé dans Chrome : c'est **Android** qui interdisait les
+   notifications à Chrome (Paramètres → Applications → Chrome →
+   Notifications). Rouvertes, le bouton est apparu ; abonnement fait.
+   ⚠ **Constat de recette** : le texte « bloquées » (`texteNotifBloquees`,
+   `apps/menages/public.html`) ne cite que le réglage du SITE dans Chrome. Il
+   doit citer aussi le réglage du TÉLÉPHONE pour Chrome — à proposer à
+   Thierry (fichier sous `apps/`, son accord requis).
+2. Fiche de l'hôte : « Reçoit les notifications sur 1 téléphone » ; pas
+   d'aide sur le SMS (SMS de Berthe coupé) — conforme §4.
+
+**Le script de recette** `scripts/recette-pwa-lot3.js` (go de Thierry du
+25 novembre) : séjour de test sur le bien de Berthe, annulation, rétablissement,
+nettoyage, et un passage du cron de STAGING par HTTP — les clés de
+notification n'existent que dans Vercel, donc seul le serveur peut envoyer.
+
+### 13.17 Trace de la review du script de recette (25 novembre 2026)
+
+Sous-agent, arbre `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`,
+HEAD `8000e3ab75da707bf42c37c77ecf7f9c57d51744`, fichier non suivi
+`scripts/recette-pwa-lot3.js`. Rapport tel quel :
+
+> Arbre lu : `/home/claude/hs-l3`, branche `pwa-lot-3-prestataires`, HEAD `8000e3ab75da707bf42c37c77ecf7f9c57d51744`. Fichier relu : `scripts/recette-pwa-lot3.js` (non suivi, 179 lignes). J'ai vérifié la syntaxe avec `node -c` sans lancer le script. J'ai lu `lib/empreinte-base.js`, `lib/bookings-snapshot-status.js`, `lib/cleaning/sync-menages-entite.js`, `lib/cleaning/assign.js`, `lib/cleaning/relance-validation.js`, `lib/cron-overbooking.js`, `api/cron.js`, `docs/STAGING.md` et les migrations des tables utilisées pour vérifier les contrats.
+>
+> **Réponses courtes**
+> 1. **Staging et secrets.** Le script ne peut pas écrire ailleurs que sur staging : `nomDeLaBase(URL)` refuse toute autre base avant de créer le client. L'adresse du cron est écrite en dur (`hotesmart-staging.vercel.app`). Aucun secret ne s'affiche : `CRON_SECRET` n'apparaît que par sa longueur, la clé de service n'est jamais imprimée, et ni `pwa_token` ni `public_tokens` ne sont lus. Seul un durcissement mineur reste à faire (constat 7).
+> 2. **Forme du séjour.** Elle convient à `synchroniserMenages` : dates `YYYY-MM-DD` dans la fenêtre J-30 à J+180, statut canonique, `property_id` texte égal à `provider_property_id`, `user_id` égal au compte. L'annulation et le rétablissement sont bien vus : un séjour `cancelled` sort des réservations vivantes et son ménage est annulé ; un séjour revenu à `confirmed` ressuscite le ménage, efface le « Vu » et envoie l'avis `retour`. Une condition n'est pas vérifiée par le script : que le bien existe et ne soit pas archivé (constat 1).
+> 3. **`--nettoyer`.** Il reste dans son périmètre (compte de Berthe, préfixe `RECETTE-PWA3-`), mais il est fragile et laisse des restes (constat 5).
+> 4. **Colonnes.** Toutes les colonnes utilisées existent. Les défauts de logique sont listés ci-dessous.
+>
+> **Constats**
+>
+> 1. **MAJEUR — `scripts/recette-pwa-lot3.js:74-77`, puis 140 et 145** — la lecture du bien ne vérifie ni l'erreur, ni l'absence de résultat, ni l'archivage (`archive_le`). Si `bien` est vide, le séjour est créé quand même avec `provider: 'channex'`. Or `synchroniserMenages` ignore tout séjour dont le bien n'est pas dans `properties` (avec `provider_property_id` non nul), ou dont le bien est archivé. Scénario : la liaison de Berthe pointe vers un identifiant sans bien, ou vers un bien archivé. Le script affiche « Le ménage naîtra au prochain --cron », chaque `--cron` rend « ménages créés : 0 », et la recette conclut à tort que le serveur est en panne. De même, `liaison.user_id` n'est ni lu ni comparé au compte : s'ils diffèrent, le ménage naît sans prestataire. Correctif : dans `berthe()`, lire aussi `user_id` de la liaison, ainsi que `provider_property_id` et `archive_le` du bien. Arrêter avec un `echec(...)` si l'erreur est posée, si le bien est absent, s'il est archivé, ou si `liaison.user_id !== p.account_user_id`.
+> 2. **MAJEUR — `scripts/recette-pwa-lot3.js:99` et `:113`** — l'état ne lit que `offered_to`. Or le serveur n'écrit plus jamais cette colonne (`colonnesAssignation` la met à `null`) : la proposition vit dans `proposee_a`. Scénario : `requires_ack` vaut `true` par défaut, donc c'est le cas le plus probable. Le ménage s'affiche « ménage offered · porté par — · pas vu », sans « proposé à Berthe » ni échéance. La recette ne peut pas confirmer la proposition qu'elle teste. Correctif : remplacer `m.offered_to` par la liste `proposee_a` (ou `offered_to` en repli, comme `proposeesDe`), et l'ajouter à `ids` pour retrouver les prénoms. Afficher `offer_expires_at` dès que cette liste n'est pas vide.
+> 3. **MINEUR — `scripts/recette-pwa-lot3.js:134`** — `Number(null)` vaut 0. Si la valeur manque, le séjour part aujourd'hui sans aucun message (mesuré : `--sejour` seul donne `0 true`). Scénario : `--sejour 3`, avec un espace, ou `--sejour=` vide, crée un départ aujourd'hui au lieu de J+3, et déclenche la relance du jour même. Correctif : exiger une valeur explicite : `const brut = val('sejour'); if (brut == null || !/^\d+$/.test(brut)) echec(...)`.
+> 4. **MINEUR — `scripts/recette-pwa-lot3.js:138-143`** — rien ne vérifie le chevauchement avec un séjour confirmé du même bien. Scénario : lancer `--sejour=3` deux fois (à des minutes différentes), ou tomber sur une réservation existante du bien. La sonde de surréservation du cron lève alors une alarme qui relance le fondateur à chaque passage, jusqu'à un nouveau `--cron` après nettoyage. Deux ménages naissent aussi le même jour. Correctif : avant l'insertion, lire les séjours `confirmed` du bien dont l'arrivée est avant le départ et le départ après l'arrivée. S'il y en a un, arrêter, ou proposer `--annuler` d'abord.
+> 5. **MINEUR — `scripts/recette-pwa-lot3.js:130` et `:155-160`** — `--nettoyer` passe d'abord par `berthe()`, qui exige exactement un bien actif confié à Berthe. Scénario : si la recette lui retire son bien ou lui en confie un second, le nettoyage refuse de tourner et les séjours et ménages de recette restent en base. Aucun décompte des lignes supprimées ni restantes : le script annonce « retirés » même si rien n'a été supprimé — le constat déjà corrigé dans `recette-avis-staging.js`. Restes possibles après nettoyage : `menage_done` si « Ménage fait » a été cliqué ; le marqueur hôte `menage_sans_personne` dans `message_sent_log` (une fois par bien et par jour) : un deuxième passage le même jour sur le même bien ne préviendra plus l'hôte ; l'alarme de surréservation, qui ne se ferme qu'au cron suivant. Correctif : pour `--nettoyer`, ne demander que le profil (son `account_user_id`), pas la liaison ; supprimer avec `.select('id')` et afficher les nombres ; ajouter `menage_done` au nettoyage ; recompter ce qui reste ; dire qu'il faut lancer un `--cron` après le nettoyage.
+> 6. **MINEUR — `scripts/recette-pwa-lot3.js:112`** — le script affiche « vu le … » dès que `vu_le` est posé, sans vérifier `vu_par === provider_id`. La règle gravée dit qu'une validation ne vaut que pour la personne qui l'a posée. Scénario : le ménage change de mains. L'état affiche « vu » alors que la nouvelle porteuse n'a rien lu. Correctif : `const vu = m.vu_le && String(m.vu_par) === String(m.provider_id)`.
+> 7. **MINEUR — `scripts/recette-pwa-lot3.js:167` et `:171`** — `fetch` suit les redirections par défaut, avec l'en-tête `Authorization`. Les versions récentes de Node le retirent quand la redirection change de domaine, mais ce n'est pas garanti partout. Par ailleurs, un 401 peut venir d'une protection du déploiement Vercel (page HTML) et non du cron, et le message dit alors à tort « CRON_SECRET refusé ». Correctif : ajouter `redirect: 'error'`. N'attribuer le 401 au secret que si le corps JSON vaut `{ error: 'Non autorisé' }`.
+> 8. **MINEUR — `scripts/recette-pwa-lot3.js:173-175`** — certaines erreurs du cron n'ont pas de `context` (surréservation : `etape` ; `{ user_id, error }` ; `{ property_id, error }`). Elles s'impriment « undefined ». Et `relancesValidation` n'est pas posé avant 9 h à Paris (retour anticipé), donc « relances « Vu » : 0 » ne distingue pas « reportée » de « aucune ». Correctif : utiliser `e.context || e.etape || 'sans contexte'`, et afficher « non lancée (avant 9 h) » quand le champ est absent.
+> 9. **MINEUR — `scripts/recette-pwa-lot3.js:85-98`** — les lectures de `etat()` ignorent leur `error`. Scénario : si la migration `2026-11-17-push-abonnements-prestataires` n'est pas appliquée sur staging, le script affiche « Téléphones abonnés : 0 » au lieu de signaler la table absente. Une erreur sur `bookings_snapshot` devient « Aucun séjour de recette. » Correctif : déstructurer `error` et appeler `echec(...)` sur chacune de ces lectures.
+> 10. **MINEUR — `scripts/recette-pwa-lot3.js:133-176`** — les actions sont exclusives (enchaînement de `else if`), sans le dire. Avec `--sejour=3 --cron`, le cron est ignoré en silence. De plus : deux `--sejour` dans la même minute entrent en conflit sur l'unicité `(user_id, booking_id)` (l'échec est clair) ; avec `requires_ack`, un départ au-delà de J+7 ne reçoit sa proposition qu'à l'approche du départ (`JOURS_PROPOSITION = 7`), donc aucune notification n'arrive pendant la recette. Correctif : refuser plus d'une action à la fois ; ajouter les secondes au suffixe ; prévenir quand `n > 7` et que la liaison est « à confirmer ».
+> 11. **MINEUR — `scripts/recette-pwa-lot3.js:5`** — l'en-tête cite `docs/specs/spec-pwa-lot3-prestataires.md §11`. Ce fichier n'existe pas dans cet arbre (`git ls-files` ne le connaît pas), alors que `docs/kb/pwa.md §13` le cite aussi. Correctif : pousser la spec sur la branche, ou corriger la référence.
+>
+> Note hors constat : `--cron` lance un passage COMPLET du cron de staging, pour tous les comptes, comme le prescrit `docs/STAGING.md §7`. Les alarmes au fondateur et les notifications des autres comptes de staging partent aussi.
+
+### 13.18 Suites données à la review du script de recette (25 novembre 2026)
+
+Aucun constat de sécurité : correction sans nouvelle review.
+
+1. **Bien non vérifié** — `berthe()` lit le bien par compte ET clé, refuse
+   s'il n'y en a pas exactement un, s'il est archivé (`archive_le`), ou si la
+   liaison appartient à un autre compte.
+2. **La proposition lue dans `offered_to`** — l'état lit `proposee_a` (repli
+   `offered_to`, même règle que `proposeesDe`) et affiche les prénoms et
+   l'échéance.
+3. **`--sejour` sans valeur partait aujourd'hui** — la valeur est exigée
+   (`--sejour=N`, 0 à 60), vérifiée avant toute lecture.
+4. **Chevauchement** — refusé s'il existe un séjour confirmé du bien sur ces
+   dates.
+5. **Nettoyage** — ne demande que le profil, retire aussi `menage_done`,
+   compte ce qu'il retire, recompte ce qui reste, et rappelle le `--cron` qui
+   referme une alarme de surréservation. Le marqueur hôte `menage_sans_personne`
+   n'est pas retiré : il ne joue que sur la notification de l'HÔTE, hors
+   périmètre de cette recette.
+6. **« vu »** — seulement si `vu_par` est la porteuse.
+7. **Redirection et 401** — `redirect: 'error'` ; un 401 n'est attribué au
+   secret que si le corps est celui du cron.
+8. **Bilan du cron** — contexte de repli (`etape`, sinon « sans contexte ») ;
+   relances « non lancées (avant 9 h à Paris) » quand le champ manque.
+9. **Lectures muettes** — chaque lecture de l'état arrête sur son erreur.
+10. **Actions** — une seule à la fois ; suffixe à la seconde ; avertissement
+    au-delà de 7 jours quand le bien est « à confirmer ».
+11. **Référence de la spec** — l'en-tête dit qu'elle vit sur `pwa-lot-3-spec`.

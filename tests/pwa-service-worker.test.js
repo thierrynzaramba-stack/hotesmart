@@ -199,6 +199,16 @@ function muter (avant, apres) {
   return SOURCE.replace(avant, apres)
 }
 
+// ⚠ LES NOTIFICATIONS VIVENT DANS shared/pwa/push-sw.js DEPUIS LE LOT 3
+// (chargé par `importScripts`) : leurs contre-épreuves mutent CE fichier-là,
+// servi au banc à la place du vrai.
+const SOURCE_PUSH = lire('shared/pwa/push-sw.js')
+function muterPush (avant, apres) {
+  const n = SOURCE_PUSH.split(avant).length - 1
+  assert.equal(n, 1, `la mutation doit porter sur UNE occurrence de : ${avant.trim()}`)
+  return { '/shared/pwa/push-sw.js': SOURCE_PUSH.replace(avant, apres) }
+}
+
 const MUTATIONS = [
   { nom: 'tout est cachable (liste positive retirée)', avant: 'function estCachable (url) {', apres: 'function estCachable (url) { return true;' },
   { nom: 'HTML admis dans le cache', avant: '  if (estHtml(res)) return false\n', apres: '' },
@@ -372,14 +382,14 @@ const MESSAGE = { web_push: 8030, notification: { title: 'Nouveau message de Mar
 test('LE TEST QUI COMPTE : chaque push AFFICHE une notification, même illisible', async () => {
   // Safari retire l'abonnement d'un service worker qui reçoit un push sans
   // rien montrer : un message illisible doit quand même afficher quelque chose.
-  async function afficheesPour (source, corps) {
+  async function afficheesPour (importes, corps) {
     const { reseau } = creerReseau()
-    const sw = chargerServiceWorker({ source, reseau })
+    const sw = chargerServiceWorker({ importes, reseau })
     const r = await sw.evenement('push', sw.messagePush(corps))
     assert.equal(r.erreurs.length, 0, 'le traitement du push ne doit pas échouer')
     return sw.notifications
   }
-  const bonne = await afficheesPour(SOURCE, MESSAGE)
+  const bonne = await afficheesPour({}, MESSAGE)
   assert.equal(bonne.length, 1)
   assert.equal(bonne[0].titre, 'Nouveau message de Marie — La bulle')
   assert.equal(bonne[0].options.body, 'Arrivée demain')
@@ -387,21 +397,21 @@ test('LE TEST QUI COMPTE : chaque push AFFICHE une notification, même illisible
   assert.equal(bonne[0].options.renotify, false)
   assert.equal(bonne[0].options.data.chemin, '/messages?booking=42')
   for (const illisible of ['pas du json', null, { autre: 1 }, { web_push: 8030, notification: 'x' }]) {
-    const n = await afficheesPour(SOURCE, illisible)
+    const n = await afficheesPour({}, illisible)
     assert.equal(n.length, 1, `rien d'affiché pour ${JSON.stringify(illisible)}`)
     assert.equal(n[0].titre, 'HôteSmart')
   }
   // Contre-épreuve : le service worker qui n'affiche rien sur un message
   // illisible (la faute la plus plausible) — le contrôle doit rougir.
-  const fautif = muter('function afficher (event) {\n  const n = lireMessage(event)\n',
-    'function afficher (event) {\n  const n = lireMessage(event)\n  if (!n.title) return Promise.resolve()\n')
+  const fautif = muterPush('  function afficher (event) {\n    const n = lireMessage(event)\n',
+    '  function afficher (event) {\n    const n = lireMessage(event)\n    if (!n.title) return Promise.resolve()\n')
   assert.equal((await afficheesPour(fautif, 'pas du json')).length, 0, 'la contre-épreuve doit voir le push muet')
 })
 
 test('LE TEST QUI COMPTE : le toucher n\'ouvre jamais hors du site', async () => {
-  async function ouvertPour (navigate, source = SOURCE) {
+  async function ouvertPour (navigate, importes = {}) {
     const { reseau } = creerReseau()
-    const sw = chargerServiceWorker({ source, reseau })
+    const sw = chargerServiceWorker({ importes, reseau })
     await sw.evenement('push', sw.messagePush({ web_push: 8030, notification: { title: 't', navigate } }))
     const n = sw.notifications[0]
     let fermee = false
@@ -414,7 +424,7 @@ test('LE TEST QUI COMPTE : le toucher n\'ouvre jamais hors du site', async () =>
     assert.deepEqual(await ouvertPour(piege), [`${ORIGINE}/dashboard`], `adresse acceptée : ${String(piege)}`)
   }
   // Contre-épreuve : sans la règle du chemin, l'adresse tierce est ouverte.
-  const fautif = muter('function cheminSur (brut) {\n', "function cheminSur (brut) {\n  if (typeof brut === 'string' && brut) return brut\n")
+  const fautif = muterPush('  function cheminSur (brut) {\n', "  function cheminSur (brut) {\n    if (typeof brut === 'string' && brut) return brut\n")
   assert.deepEqual(await ouvertPour('https://exemple.fr/hameconnage', fautif), ['https://exemple.fr/hameconnage'])
 })
 

@@ -39,7 +39,8 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      jeton = { visibility_days: 60, ratio_periode: '30j', pwa_vue_le: '2026-10-13T18:09:00Z' },
                      erreurJeton = null, droitsPresta = { self_availability: 'write' }, erreurDroits = null,
                      collegues = [{ id: LENA, first_name: 'Lena', last_name: 'Lou', active: false }],
-                     erreurUpdate = null } = {}) {
+                     erreurUpdate = null, abonnements = [], erreurAbonnements = null,
+                     attendreBiens = false } = {}) {
   const etat = { lectures: [], ecritures: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -52,6 +53,9 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         if (table === 'profiles') return { data: collegues, error: null }
         if (table === 'property_cleaning_providers') return { data: erreurLiaisons ? null : liaisons, error: erreurLiaisons }
         if (table === 'properties') return { data: erreurBiens ? null : biens, error: erreurBiens }
+        if (table === 'push_abonnements_prestataires') {
+          return { data: erreurAbonnements ? null : abonnements, error: erreurAbonnements }
+        }
         return { data: [], error: null }
       }
       const chain = {
@@ -96,7 +100,24 @@ function preparer ({ user = PROD, profil = null, permissions = null,
           if (table === 'public_tokens') return Promise.resolve({ data: erreurJeton ? null : jeton, error: erreurJeton })
           return Promise.resolve({ data: null, error: null })
         },
-        then (ok) { return Promise.resolve(rep()).then(ok) }
+        then (ok) {
+          // ⚠ LE PARALLÉLISME SE MESURE ICI (review de l'étape 5, constat 1) :
+          // la réponse des abonnements n'arrive qu'une fois les biens DEMANDÉS.
+          // Une lecture attendue avant de lancer les autres ne les voit jamais
+          // venir : au bout de 200 ms, elle reçoit une panne, donc `null`.
+          if (table === 'push_abonnements_prestataires' && attendreBiens) {
+            return new Promise(resoudre => {
+              const debut = Date.now()
+              const guetter = () => {
+                if (etat.lectures.some(l => l.table === 'properties')) resoudre(rep())
+                else if (Date.now() - debut > 200) resoudre({ data: null, error: { message: 'lue seule' } })
+                else setTimeout(guetter, 2)
+              }
+              guetter()
+            }).then(ok)
+          }
+          return Promise.resolve(rep()).then(ok)
+        }
       }
       return chain
     }
@@ -414,3 +435,73 @@ test('une panne d\'écriture le DIT, elle ne confirme pas un enregistrement', as
   await handler(post({ action: 'reglages_lien', provider_id: REGINA, visibility_days: 30 }), res)
   assert.strictEqual(res.code, 503)
 })
+
+// ─── PWA lot 3, étape 5 : sur combien d'appareils elle reçoit ──────────────
+
+const ABO = (n) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/abo-${n}`, appareil: 'Android · Chrome',
+                      cree_le: '2026-11-18T09:00:00Z', dernier_envoi_le: null,
+                      cle_p256dh: 'CLE-SECRETE', cle_auth: 'AUTH-SECRETE' })
+
+test('étape 5 : la fiche rend le NOMBRE d\'appareils de CETTE prestataire — rien d\'autre de ses abonnements', async () => {
+  const { handler, etat } = preparer({ liaisons: [LIAISON()], abonnements: [ABO(1), ABO(2)] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.personne.appareils, 2)
+  assert.strictEqual(res.body.personne.appareils_en_echec, 0)
+  const lecture = etat.lectures.find(l => l.table === 'push_abonnements_prestataires')
+  assert.ok(lecture, 'les abonnements sont lus')
+  assert.strictEqual(lecture.f.profil_id, REGINA, 'ceux de la prestataire demandée')
+  const brut = JSON.stringify(res.body)
+  for (const fuite of ['fcm.googleapis.com', 'abo-1', 'CLE-SECRETE', 'AUTH-SECRETE', 'Android']) {
+    assert.ok(!brut.includes(fuite), `« ${fuite} » ne sort pas`)
+  }
+})
+
+test('étape 5 : la lecture des appareils court EN PARALLÈLE des autres (spec §8.7)', async () => {
+  // Le double ne répond aux abonnements qu'une fois les biens demandés : lue
+  // seule, avant les autres, elle rendrait `null`.
+  const { handler, etat } = preparer({ liaisons: [LIAISON()], abonnements: [ABO(1)], attendreBiens: true })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.personne.appareils, 1, 'la réponse est arrivée PENDANT les autres lectures')
+  const ordre = etat.lectures.map(l => l.table)
+  assert.ok(ordre.indexOf('push_abonnements_prestataires') < ordre.indexOf('properties'),
+    `et lancée avant les biens : ${ordre.join(', ')}`)
+})
+
+test('étape 5 (constat 3) : un appareil dont le dernier envoi a ÉCHOUÉ ne compte pas comme « reçoit »', async () => {
+  // 403, 400, délai : la ligne reste avec `dernier_echec`. La compter comme
+  // reçue retirerait « Aucun canal actif » à une prestataire que rien n'atteint.
+  const { handler } = preparer({ liaisons: [LIAISON()],
+    abonnements: [ABO(1), { ...ABO(2), dernier_echec: 'refus_service' }] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.personne.appareils, 1)
+  assert.strictEqual(res.body.personne.appareils_en_echec, 1)
+  assert.ok(!JSON.stringify(res.body).includes('refus_service'), 'le motif ne sort pas')
+})
+
+test('étape 5 : sans appareil, 0 ; en panne, `null` — JAMAIS 0, et la fiche répond quand même', async () => {
+  const zero = preparer({ liaisons: [LIAISON()] })
+  const r0 = reponse()
+  await zero.handler(get(), r0)
+  assert.strictEqual(r0.body.personne.appareils, 0)
+
+  const panne = preparer({ liaisons: [LIAISON()], erreurAbonnements: { message: 'timeout' } })
+  const rP = reponse()
+  await panne.handler(get(), rP)
+  assert.strictEqual(rP.code, 200, 'une panne des abonnements n\'emporte pas la fiche')
+  assert.strictEqual(rP.body.personne.appareils, null, 'non lu, pas « aucun »')
+  assert.strictEqual(rP.body.personne.appareils_en_echec, null)
+  assert.strictEqual(rP.body.personne.prenom, 'Régina')
+})
+
+test('étape 5 : une prestataire d\'un AUTRE compte reste un 404 — ses abonnements ne sont même pas lus', async () => {
+  const { handler, etat } = preparer({ cible: null, abonnements: [ABO(1)] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 404)
+  assert.ok(!etat.lectures.some(l => l.table === 'push_abonnements_prestataires'))
+})
+

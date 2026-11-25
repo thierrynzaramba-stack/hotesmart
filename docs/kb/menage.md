@@ -1164,6 +1164,88 @@ la fiche ? — qui ne dépend d'aucune limite interne. Contre-épreuve de la con
 400 caractères ajoutés dans l'appel le plus serré (`update`, à 1047/1400) font bien rougir.
 *Un vérificateur qui n'a rien lu doit échouer, pas se taire.*
 
+### La notification d'abord, le SMS en secours (PWA lot 3, 18 nov. 2026)
+
+Depuis le lot 3 PWA (décisions Q40 à Q42 de Thierry ; spec
+`docs/specs/spec-pwa-lot3-prestataires.md` §5-§6 ; KB `docs/kb/pwa.md` §13), les trois envois
+de `notifier-prestataire.js` — **attribué**, **à confirmer**, **« Vu » attendu** — partent
+d'abord en **notification** sur les téléphones qu'elle a abonnés depuis sa page
+(`push_abonnements_prestataires`, par profil), **à toute heure**.
+
+- **Le SMS ne part que si AUCUN appareil ne l'a reçue** : aucun abonné, tous morts (404/410, la
+  ligne est retirée), tous en échec, notifications non configurées, ou lecture des appareils en
+  panne. Et toujours sous ses deux conditions d'avant (`canalOuvert` : un numéro **et**
+  `notify_sms` non décoché). Décocher « SMS » reste donc un geste qui tient.
+- ⚠️ **SAUF L'URGENT (décision Q46 de Thierry, 18 nov. 2026)** : un ménage d'**aujourd'hui ou de
+  demain** (heure de Paris, `estUrgent`) garde son SMS, notification reçue ou non. « Reçue » veut
+  dire **acceptée par le service d'Apple ou de Google**, pas vue : un téléphone éteint ou sans
+  données compte comme ayant reçu, et un téléphone qui n'est pas le sien (son lien abonné par
+  quelqu'un d'autre, l'hôte en recette par exemple) aussi. Pour le geste d'urgence — un ménage
+  attribué deux heures avant le départ —, le SMS reste la ceinture. **Conséquence : les rappels
+  « Vu » (la veille, le jour même) gardent toujours leur SMS.** Une date illisible est traitée
+  comme urgente. Un SMS décoché par l'hôte ne part pas, même urgent.
+- ⚠️ **Un service d'envoi muet ne bloque ni le cron ni le clic de l'hôte** (review de l'étape 3,
+  constat 2) : les appareils d'une prestataire sont appelés **en parallèle** (une notification
+  coûte au plus un délai de 5 s, quel que soit leur nombre), et un service qui dépasse son délai
+  ou tombe en erreur réseau est **mis en pause cinq minutes** dans l'instance (disjoncteur par
+  nom d'hôte : Apple, Google…) — la notification compte alors comme non reçue et le SMS part
+  aussitôt. Le lot 2 (personnes avec un compte) garde son déroulé, un appareil après l'autre.
+- **L'e-mail ne change pas** : il part comme avant, notification reçue ou non.
+- **L'hôte le voit sur sa fiche** (étape 5, 19 nov. 2026) : `/menages`, fenêtre de
+  configuration, section « Notifications » — « Reçoit les notifications sur N téléphone(s) »,
+  « N'a pas activé les notifications », ou « état illisible » si la lecture a échoué (`null`,
+  jamais 0). « Aucun canal actif » ne s'affiche plus quand un téléphone les reçoit. Détail :
+  `docs/kb/pwa.md` §13.13.
+- **Le bilan** gagne `push: n` (le nombre d'appareils dont le service a accepté la notification) à côté de `sms` et
+  `email`. ⚠️ **Les compteurs des appelants lisent `aEtePrevenue(bilan)`**
+  (`lib/cleaning/bilan-notification.js`) : relire `sms || email` à la main ferait compter
+  « muette » une personne prévenue sur son téléphone — `relance-validation.js` et les deux
+  compteurs de `sync-menages-entite.js` le lisent.
+- **Le message** : titre « HôteSmart », texte court (jour et logement, jamais un voyageur), et
+  le toucher ouvre **sa page sans jeton** (`/apps/menages/public.html`, constante
+  `PAGE_PRESTATAIRE`). ⚠️ **L'expéditeur est la garantie** : sur iPhone 18.4+, le système ouvre
+  le message sans passer par son service worker. Un ménage = une notification à l'écran
+  (`tag = menage-<bien>-<départ>`) ; la suivante remplace la précédente **et sonne**.
+- ⚠️ **`lib/push/envoyer.js` est chargé à la demande**, pas en tête : ce module est requis par
+  l'API de la page de la prestataire, dont le démarrage à froid ne paie pas `web-push`.
+- **Éprouvé** : `tests/cleaning-notifier.test.js` avec le **vrai** chemin d'envoi (clés VAPID
+  réelles, message chiffré ; seul le service de push est simulé).
+- **Deux avis de plus (étape 4, Q40, Q44, Q45)**, même règle et mêmes canaux :
+  - **annulé ou déplacé** (`notifierAnnulation`) — le moteur (`synchroniserMenages`) prévient,
+    APRÈS l'annulation et le journal, la porteuse et chaque prestataire à qui le ménage était
+    proposé ; « Ménage du {jour} - {bien} annulé : la réservation est annulée ou son départ a
+    changé. » Un départ déplacé fait naître un autre ménage — ⚠️ **sans avis** quand il est créé
+    d'office : le moteur ne prévient pas des ménages qu'il crée (des centaines au branchement
+    d'un PMS) ; la porteuse le voit dans sa page, et la relance « Vu » de la veille le rappelle.
+  - **retiré par l'hôte** (`notifierRetrait`) — `api/menages.js` (`reassigner`) prévient celles
+    qui PERDENT le ménage : « Personne », « Retirer la proposition », une attribution qui change
+    la porteuse, une nouvelle proposition qui remplace l'ancienne ; « Le ménage du {jour} -
+    {bien} ne vous est plus confié. » Jamais celle qui le reçoit ou le garde.
+  - **revenu** (`notifierRetour`, **Q47** de Thierry, 19 nov. 2026) — un ménage annulé dont la
+    réservation revient (prolongation demandée puis annulée) : à la résurrection, le **« Vu »
+    est effacé** (`vu_le`, `vu_par` à `null` — sa validation d'avant ne vaut plus : l'hôte
+    relit « Pas vu », les relances repartent), et sa porteuse est prévenue, ménage à venir
+    seulement : « Le ménage du {jour} - {bien} est de nouveau prévu. » si elle en était,
+    l'avis « Nouveau ménage » si la garde le donne à une autre. Un ménage verrouillé revient
+    sans personne : rien à prévenir.
+  - **proposé par l'hôte** (**Q48** de Thierry, 19 nov. 2026) — `reassigner`, geste
+    « Proposer » : celle à qui l'hôte propose reçoit « Ménage à confirmer », avec l'échéance
+    écrite, ménage à venir seulement. Ce silence (« c'est la PWA qui l'annonce ») datait d'avant
+    les notifications, quand chaque avis coûtait un SMS.
+  - ⚠️ **Qui perd** : un seul calcul, `perdants(avant, après)` (`lib/cleaning/menage-perdants.js`,
+    sans dépendance) — participantes d'avant (porteuse, `proposee_a`, `offered_to`) qui ne le
+    sont plus après. Pour l'hôte, l'état d'après est l'état ÉCRIT, champ par champ : un champ
+    que le geste n'écrit pas garde sa valeur d'avant.
+  - ⚠️ **Seulement un ménage À VENIR** (départ aujourd'hui ou plus tard, à Paris) : une
+    correction de l'historique ne réveille personne.
+  - ⚠️ **Les avis du moteur (annulé, revenu) partent ensemble, sous un plafond ET une limite
+    de durée** (`MAX_NOTIFS_PAR_CYCLE`, `BUDGET_AVIS_MS` = 15 s ; les plus proches d'abord) : ce
+    qui les déclenche en nombre est la perte partielle des réservations d'un bien. Ce qui n'est
+    pas envoyé est **perdu** (au cycle suivant, le ménage est déjà annulé ou revenu) : le compte
+    `avis_non_envoyes` remonte dans **`results.errors`**, là où se lit le diagnostic du cron.
+    Ce plafond n'est pas partagé avec celui des propositions (`propositions_dues`) : au pire,
+    30 + 30 avis par cycle.
+
 ### Le nom de famille est obligatoire (point 4, 15 sept. 2026)
 
 **Pourquoi, et ce n'est pas de l'état civil.** Un prénom seul ne **désigne** personne dès qu'il y a

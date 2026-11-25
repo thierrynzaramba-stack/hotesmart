@@ -46,9 +46,14 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
                      // et le journal des propositions (qui les a posees).
                      toursEnCours = [], offresJournal = [],
                      // PWA lot 2c-2 : la création refusée par la base.
-                     erreurUpsert = null } = {}) {
+                     erreurUpsert = null,
+                     // PWA lot 3 : ce que l'envoi rend (`push` à côté de sms/email).
+                     bilanNotif = { sms: true, email: false },
+                     // PWA lot 3 : une ANNULATION refusée par la base (seulement
+                     // les mises à jour qui passent `status: 'cancelled'`).
+                     erreurAnnulation = null } = {}) {
   const etat = { hote: [], inseres: [], majs: [], journal: [], incidents: [], requetes: [],
-                 notifs: [] }
+                 notifs: [], annulations: [], retours: [] }
 
   const client = {
     from (table) {
@@ -108,7 +113,10 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
             gt (c, v) { q.gt = v; return suite },
             neq (c, v) { q.neq = v; return suite },
             select () { return Promise.resolve({ data: [{ id: q.ids[0] }], error: null }) },
-            then (ok, ko) { return Promise.resolve({ data: null, error: null }).then(ok, ko) }
+            then (ok, ko) {
+              const err = erreurAnnulation && q.row && q.row.status === 'cancelled' ? erreurAnnulation : null
+              return Promise.resolve({ data: null, error: err }).then(ok, ko)
+            }
           }
           return suite
         }
@@ -212,8 +220,16 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
   const absPresta = require.resolve(path.join(__dirname, '..', 'lib/cleaning/notifier-prestataire.js'))
   const mp = new Module(absPresta)
   mp.exports = {
-    notifierProposition: async (o) => { etat.notifs.push(o); return { sms: true, email: false } },
+    notifierProposition: async (o) => { etat.notifs.push(o); return bilanNotif },
     notifierAssignation: async (o) => { etat.notifs.push({ ...o, assignation: true }); return { sms: true, email: false } },
+    // PWA lot 3 : l'avis d'annulation. On note aussi CE QUI ÉTAIT ÉCRIT au
+    // moment de l'appel, pour prouver qu'il part APRÈS l'annulation et le journal.
+    notifierAnnulation: async (o) => {
+      etat.annulations.push({ ...o, majsAvant: etat.majs.length, journalAvant: etat.journal.length })
+      return bilanNotif
+    },
+    // Q47 : le ménage annulé revient.
+    notifierRetour: async (o) => { etat.retours.push({ ...o, majsAvant: etat.majs.length }); return bilanNotif },
     jourLisible: d => String(d)
   }
   mp.loaded = true
@@ -403,6 +419,173 @@ test('un départ DÉPLACÉ annule l\'ancien ménage et en crée un nouveau', asy
   assert.strictEqual(etat.inseres[0].departure_date, jour(6))
   assert.strictEqual(bilan.annules, 1)
   assert.deepStrictEqual(etat.majs[0].ids, ['m1'])
+})
+
+// ─── PWA lot 3 : prévenir celles qui perdent un ménage annulé ───────────────
+
+const BIENS_NOMMES = [{ user_id: U, provider_property_id: '209413', provider: 'beds24', name: 'La bulle' }]
+
+test('LE TEST QUI COMPTE (lot 3) : un ménage annulé prévient sa porteuse ET celles à qui il était proposé — après l’écriture', async () => {
+  const etat = preparer({
+    biens: BIENS_NOMMES,
+    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: jour(3) } }],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1', departure_date: jour(3),
+                status: 'accepted', provider_id: REGINA, proposee_a: [NOUVELLE, REGINA], offered_to: NOUVELLE }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.annules, 1)
+  assert.deepStrictEqual(etat.annulations.map(a => a.providerId).sort(), [NOUVELLE, REGINA].sort(), 'chacune une fois')
+  for (const a of etat.annulations) {
+    assert.strictEqual(a.userId, U)
+    assert.strictEqual(a.propertyName, 'La bulle')
+    assert.strictEqual(a.propertyId, '209413')
+    assert.strictEqual(a.departureDate, jour(3))
+    assert.ok(a.majsAvant >= 1, 'l’avis part APRÈS l’annulation')
+    assert.ok(a.journalAvant >= 1, 'et après le journal')
+    assert.ok(!String(a.lien).includes('token'), 'le jeton est ajouté par le module, jamais ici')
+  }
+  assert.strictEqual(bilan.avis_prevenues, 2)
+  assert.strictEqual(bilan.avis_non_envoyes, 0)
+})
+
+test('lot 3 : un départ DÉPLACÉ prévient de l’annulation de l’ancien ménage', async () => {
+  const etat = preparer({
+    snaps: [SNAP({ departure: jour(6) })],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages()
+  assert.deepStrictEqual(etat.annulations.map(a => [a.providerId, a.departureDate]), [[REGINA, jour(3)]])
+})
+
+test('lot 3 : un ménage PASSÉ annulé (correction de l’historique) ne réveille personne', async () => {
+  const etat = preparer({
+    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: jour(-2) } }],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: jour(-2), status: 'completed', provider_id: REGINA }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.annules, 1, 'l’annulation, elle, a lieu')
+  assert.deepStrictEqual(etat.annulations, [])
+})
+
+test('lot 3 : un ménage sans personne annulé ne prévient personne ; une annulation refusée par la base non plus', async () => {
+  const etat = preparer({
+    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: jour(3) } }],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: jour(3), status: 'unassigned', provider_id: null }],
+    liaisons: []
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages()
+  assert.deepStrictEqual(etat.annulations, [])
+  // La base refuse l'annulation : personne n'est prévenu d'une annulation qui n'a pas eu lieu.
+  const refus = preparer({
+    erreurAnnulation: { message: 'refus' },
+    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: jour(3) } }],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const bilan = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  assert.strictEqual(bilan.annules, 0)
+  assert.deepStrictEqual(refus.annulations, [])
+})
+
+test('lot 3 : une annulation en MASSE reste sous le plafond par cycle — les plus proches d’abord', async () => {
+  const { MAX_NOTIFS_PAR_CYCLE } = require('../lib/cleaning/sync-menages-entite')
+  const n = MAX_NOTIFS_PAR_CYCLE + 5
+  const menages = Array.from({ length: n }, (_, i) => ({
+    id: 'm' + i, user_id: U, property_id: '209413', booking_id: 'b' + i,
+    departure_date: jour(1 + ((n - i) % 40)), status: 'accepted', provider_id: REGINA }))
+  // Une réservation VIVANTE ailleurs dans la fenêtre : sans elle, le compte
+  // n'est pas lu du tout, et rien n'est jugé.
+  const etat = preparer({ snaps: [{ ...SNAP({ departure: jour(60) }), booking_id: 'vivante' }], menages,
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }] })
+  const results = { errors: [] }
+  const bilan = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages(results)
+  assert.strictEqual(bilan.annules, n)
+  assert.strictEqual(etat.annulations.length, MAX_NOTIFS_PAR_CYCLE)
+  assert.strictEqual(bilan.avis_non_envoyes, 5)
+  // ⚠ Constat 2 de la review : ce qui n'est pas envoyé est PERDU — le compte
+  // remonte là où se lit le diagnostic du cron.
+  assert.ok(results.errors.some(e => e.context === 'sync_menages_entite_avis' && /5 avis/.test(e.error)), JSON.stringify(results.errors))
+  const dates = etat.annulations.map(a => a.departureDate)
+  assert.deepStrictEqual(dates, [...dates].sort(), 'les plus proches d’abord')
+  assert.ok(dates[dates.length - 1] <= menages.map(m => m.departure_date).sort()[MAX_NOTIFS_PAR_CYCLE - 1])
+})
+
+test('lot 3 (constat 3) : les avis du cycle s’arrêtent à leur limite de DURÉE — le surplus est signalé', async () => {
+  const etat = preparer({
+    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: jour(3) } }],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const results = { errors: [] }
+  const bilan = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages(results, { budgetAvisMs: 0 })
+  assert.strictEqual(bilan.annules, 1, 'l’annulation a lieu')
+  assert.deepStrictEqual(etat.annulations, [], 'mais plus de temps pour l’avis')
+  assert.strictEqual(bilan.avis_non_envoyes, 1)
+  assert.strictEqual(results.errors.length, 1)
+})
+
+// ─── Q47 : un ménage annulé qui REVIENT ─────────────────────────────────────
+
+const ANNULE_VU = (over = {}) => ({ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1', departure_date: jour(3),
+                                     status: 'cancelled', provider_id: REGINA, vu_le: '2026-11-01T09:00:00Z', vu_par: REGINA, ...over })
+
+test('LE TEST QUI COMPTE (Q47) : un ménage annulé qui revient — « Vu » EFFACÉ, et sa porteuse prévenue', async () => {
+  const etat = preparer({
+    biens: BIENS_NOMMES,
+    snaps: [SNAP({ departure: jour(3) })],
+    menages: [ANNULE_VU()],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const bilan = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  assert.strictEqual(bilan.ressuscites, 1)
+  const maj = etat.majs.find(m => m.ids[0] === 'm1')
+  assert.strictEqual(maj.row.provider_id, REGINA)
+  assert.strictEqual(maj.row.vu_le, null, 'le « Vu » d’avant l’annulation ne vaut plus')
+  assert.strictEqual(maj.row.vu_par, null)
+  assert.deepStrictEqual(etat.retours.map(r => [r.providerId, r.departureDate, r.propertyName]), [[REGINA, jour(3), 'La bulle']])
+  assert.ok(etat.retours[0].majsAvant >= 1, 'après l’écriture')
+  assert.deepStrictEqual(etat.notifs, [], 'pas d’« attribué » : elle en était')
+})
+
+test('Q47 : revenu chez QUELQU’UN D’AUTRE, c’est un « Nouveau ménage » ; passé ou verrouillé, rien', async () => {
+  const autre = preparer({
+    snaps: [SNAP({ departure: jour(3) })],
+    menages: [ANNULE_VU({ provider_id: NOUVELLE, vu_par: NOUVELLE })],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  assert.deepStrictEqual(autre.retours, [])
+  assert.deepStrictEqual(autre.notifs.filter(n => n.assignation).map(n => n.providerId), [REGINA])
+
+  const passe = preparer({
+    snaps: [SNAP({ arrival: jour(-5), departure: jour(-2) })],
+    menages: [ANNULE_VU({ departure_date: jour(-2) })],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  const b = await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  assert.strictEqual(b.ressuscites, 1)
+  assert.deepStrictEqual(passe.retours, [])
+
+  const verrou = preparer({
+    snaps: [SNAP({ departure: jour(3) })],
+    menages: [ANNULE_VU({ assigned_by: 'manual' })],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
+  })
+  await require('../lib/cleaning/sync-menages-entite').synchroniserMenages()
+  assert.deepStrictEqual(verrou.retours, [], 'verrouillé : revient sans personne, personne à prévenir')
+  assert.strictEqual(verrou.majs.find(m => m.ids[0] === 'm1').row.vu_par, null)
 })
 
 // ─── Isolation multi-comptes ───────────────────────────────────────────────
@@ -1188,6 +1371,31 @@ test('la proposition est posée à l\'approche du départ, et NOTIFIÉE', async 
   assert.strictEqual(etat.notifs[0].providerId, NOUVELLE)
   assert.ok(etat.notifs[0].expireLe, 'le délai de réponse est DANS le message')
   assert.strictEqual(etat.journal.filter(l => l.event === 'offered').length, 1)
+})
+
+test('PWA lot 3 : une proposition reçue par NOTIFICATION seule compte comme notifiée — à la pose ET à l\'élargissement', async () => {
+  // Constat 3 de la review de l'étape 3 : ce compteur n'était gardé que par une
+  // recherche de texte. Depuis le lot 3, le SMS ne part plus quand un téléphone
+  // a reçu la notification : { push: 1, sms: false } est une personne prévenue.
+  for (const [bilanNotif, attendu] of [[{ push: 1, sms: false, email: false }, 1], [{ push: 0, sms: false, email: false }, 0]]) {
+    preparer({
+      liaisons: BAGNERES, regles: REGLES_SECONDE, bilanNotif,
+      propositions: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                       departure_date: '2026-09-05', provider_id: REGINA, status: 'accepted' }]
+    })
+    const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+    const bilan = await poserPropositionsDues(null, { maintenant: T0 })
+    assert.strictEqual(bilan.proposees, 1)
+    assert.strictEqual(bilan.notifiees, attendu, `pose : ${JSON.stringify(bilanNotif)}`)
+
+    const etat = preparer({ liaisons: OFURO(), propositions: [], toursEnCours: [TOUR_LENA()],
+                            offresJournal: [LIGNE(LOLA, { actor: 'host', created_at: '2026-08-30T10:00:00Z' }), LIGNE(LENA)],
+                            bilanNotif })
+    const { elargirToursEnCours } = require('../lib/cleaning/sync-menages-entite')
+    const b2 = await elargirToursEnCours(null, { maintenant: T0 })
+    assert.strictEqual(etat.notifs.length, 1, 'une personne ajoutée au tour, une notification')
+    assert.strictEqual(b2.notifiees, attendu, `élargissement : ${JSON.stringify(bilanNotif)}`)
+  }
 })
 
 test('ESCALADE : qui a refusé ou laissé expirer n\'est jamais resollicité', async () => {

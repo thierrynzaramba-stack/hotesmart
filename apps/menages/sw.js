@@ -23,7 +23,9 @@
 // ouverte hors ligne sert indéfiniment l'entrée précachée de la veille. Un
 // seul bump couvre les commits d'un même lot ; ce qui ne se rattrape pas,
 // c'est de l'oublier avant la mise en production.
-const CACHE_VERSION = 'hotesmart-clean-v6-vignettes';
+// ⚠ REBUMPE LE 18 NOVEMBRE 2026 (PWA lot 3, notifications) : `public.html`
+// porte le bloc « Notifications », et ce service worker les affiche.
+const CACHE_VERSION = 'hotesmart-clean-v7-notifications';
 // ⚠ LES DEUX FEUILLES DE STYLE SONT DANS LA COQUILLE DEPUIS LA CHARTE V5
 // (constat de la revue de 41d4afe). `public.html` remappe les seize variables
 // de `public/style.css` SUR les tokens de `theme.css` : sans `theme.css`, les
@@ -108,4 +110,19 @@ self.addEventListener('fetch', (event) => {
           return Response.error();
         }))
   );
+});
+
+// ─── Notifications push (PWA lot 3) ──────────────────────────────────────────
+// Le code est COMMUN avec le service worker de l'hôte : shared/pwa/push-sw.js,
+// chargé ici avec l'empreinte du fichier (tests/pwa-presta-sw.test.js la
+// vérifie). La portée est CELLE DE CETTE APPLI : un toucher n'ouvre jamais une
+// page de l'hôte, et ne reprend jamais une de ses fenêtres. L'accueil est sa
+// page SANS jeton : l'appli installée a déjà le sien, rangé à sa première
+// ouverture — le jeton n'entre jamais dans un message ni dans une adresse
+// ouverte au toucher (spec du lot 3, §7.4).
+importScripts('/shared/pwa/push-sw.js?v=4b018acc0857');
+installerNotifications({
+  accueil: '/apps/menages/public.html',
+  portee: '/apps/menages/',
+  icone: '/apps/menages/icons/icon-192.png'
 });

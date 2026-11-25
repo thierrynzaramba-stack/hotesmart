@@ -156,6 +156,7 @@
                    border: 1px solid var(--border); border-radius: var(--radius-tile);
                    background: var(--surface); color: var(--ink); }
     .dispo-aide { font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.5; }
+    .notif-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .dispo-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
                   font-size: var(--fs-caption); padding: 10px 0; min-height: 52px;
                   border-bottom: 1px solid var(--line); }
@@ -915,6 +916,10 @@
        disparaît, plutôt que d'échouer en « Connexion impossible » et de faire
        croire à l'hôte que son réseau est en panne. */
     .apercu [data-dispo], .apercu #btn-reglages { display: none !important; }
+    /* ⚠ LE BLOC NOTIFICATIONS N'EXISTE PAS EN APERÇU (PWA lot 3) : le navigateur
+       de l'hôte recevrait celles de sa prestataire. Le script ne le peint pas,
+       cette règle le double, et le serveur refuse l'abonnement (403). */
+    .apercu #carte-notifications { display: none !important; }
     .apercu .sync-banner { display: none !important; }
     .apercu .apercu-bandeau { display: flex; }
     .apercu-bandeau {
@@ -1293,6 +1298,21 @@
           </div>
 
         </div>
+
+        <!-- ⚠ NOTIFICATIONS SUR CE TÉLÉPHONE (PWA lot 3). Discrètes : une carte en
+             bas de la page, jamais un bandeau à l'ouverture. HORS de
+             `#dispo-contenu`, comme les nouveautés : elles ne dépendent pas de la
+             sonde des disponibilités. Cachée tant que l'état n'est pas connu, et
+             toujours en aperçu. -->
+        <div class="dispo-carte" id="carte-notifications" hidden>
+          <div class="dispo-titre">Notifications</div>
+          <div class="dispo-aide" id="notif-etat" style="margin-top:0"></div>
+          <div class="notif-actions">
+            <button type="button" class="btn btn-primary" id="notif-activer" hidden>Recevoir les notifications sur ce téléphone</button>
+            <button type="button" class="btn" id="notif-desactiver" hidden>Ne plus recevoir sur ce téléphone</button>
+          </div>
+          <div class="dispo-aide" id="notif-message" role="status" hidden></div>
+        </div>
       </section>
 
     </div>
@@ -1468,6 +1488,122 @@ if ("serviceWorker" in navigator && !APERCU) {
 
   // ======= FILTRES MOBILE (bottom sheet) =======
 
+  // ─── Notifications sur ce téléphone (PWA lot 3) ────────────────────────────
+  // Spec : docs/specs/spec-pwa-lot3-prestataires.md §3 · KB : docs/kb/pwa.md §13
+  // ⚠ LE MODULE SE CHARGE À LA DEMANDE, et seulement si le site a ses clés :
+  // hors ligne, son absence cache la carte et ne touche à rien d'autre — une
+  // importation statique aurait arrêté toute la page.
+  // ⚠ RIEN EN APERÇU : ni module, ni carte, ni geste.
+  let pushServeur = null
+  let modPush = null          // le module, une fois chargé
+  let gestePush = false       // un geste en cours : pas de double clic
+
+  const TEXTES_NOTIF = {
+    a_activer: 'Soyez prévenue sur ce téléphone dès qu’un ménage vous est confié, proposé ou annulé.',
+    abonne: 'Ce téléphone reçoit les notifications.',
+    iphone_hors_appli: 'Pour les recevoir sur iPhone, ajoutez cette page à votre écran d’accueil (Partager, puis « Sur l’écran d’accueil »), puis ouvrez-la depuis son icône.',
+    inconnu: 'L’état des notifications n’a pas pu être lu. Réessayez plus tard.'
+  }
+  const MOTIFS_NOTIF = {
+    ignoree: 'La demande d’autorisation a été fermée sans réponse. Réessayez.',
+    sans_service_worker: 'L’application n’est pas encore prête : rechargez la page, puis réessayez.',
+    abonnement_impossible: 'Ce téléphone n’a pas pu s’abonner. Réessayez.',
+    reseau: 'Hors ligne : réessayez quand vous aurez du réseau.',
+    hors_ligne: 'Hors ligne : réessayez quand vous aurez du réseau.',
+    // ⚠ PAS LE MESSAGE DU SERVEUR (« retirez-en un ») : sa page n'a pas de liste
+    // d'appareils. Le seul geste qui les remet à zéro est un nouveau lien, et
+    // c'est son hôte qui le donne (review de l'étape 2, constat 7).
+    plafond_atteint: 'Trop de téléphones reçoivent déjà les notifications de ce lien. Demandez un nouveau lien à votre hôte : il remet tout à zéro.'
+  }
+
+  // Le chemin EXACT de cet appareil pour rouvrir les notifications (même
+  // décision que pour l'hôte, lot 2 Q21). L'adresse est celle du site ouvert.
+  function texteNotifBloquees (plateforme) {
+    const site = location.host
+    if (plateforme === 'android') {
+      return `Les notifications sont bloquées pour cette page dans Chrome. Pour les autoriser : ouvrez Chrome, touchez ⋮ puis Paramètres → Paramètres des sites → Notifications, choisissez ${site}, puis Autoriser. Revenez ensuite ici.`
+    }
+    if (plateforme === 'android-autre') {
+      return `Les notifications sont bloquées pour cette page dans ce navigateur. Pour les autoriser : ouvrez ses paramètres, puis les autorisations des sites → Notifications, choisissez ${site}, puis Autoriser. Revenez ensuite ici.`
+    }
+    if (plateforme === 'iphone') {
+      return 'Les notifications sont bloquées. Pour les autoriser : ouvrez l’app Réglages → Notifications, choisissez cette application, puis Autoriser les notifications.'
+    }
+    return `Les notifications sont bloquées pour cette page. Pour les autoriser : cliquez sur l’icône à gauche de l’adresse (${site}), puis Notifications → Autoriser, et rechargez la page.`
+  }
+
+  async function peindreNotifications (message) {
+    const carte = document.getElementById('carte-notifications')
+    if (!carte || APERCU) return
+    if (!pushServeur || !pushServeur.pret) { carte.hidden = true; return }
+    if (!modPush) {
+      try { modPush = await import('/shared/push-prestataire.js') } catch (e) { carte.hidden = true; return }
+      // Une seule fois par ouverture : un abonnement renouvelé par le
+      // navigateur est renvoyé au serveur (rare, et sans geste d'elle).
+      const maj = await modPush.verifierRenouvellement({ push: pushServeur, jeton: currentToken }).catch(() => null)
+      if (maj) pushServeur = maj
+    }
+    let etat = 'indisponible'
+    try { ({ etat } = await modPush.etatNotifications(pushServeur)) } catch (e) { etat = 'indisponible' }
+    if (etat === 'indisponible') { carte.hidden = true; return }
+    document.getElementById('notif-etat').textContent =
+      etat === 'bloquee' ? texteNotifBloquees(modPush.plateforme()) : (TEXTES_NOTIF[etat] || '')
+    document.getElementById('notif-activer').hidden = etat !== 'a_activer'
+    document.getElementById('notif-desactiver').hidden = etat !== 'abonne'
+    const m = document.getElementById('notif-message')
+    m.textContent = message || ''
+    m.hidden = !message
+    carte.hidden = false
+  }
+
+  function messageDuRefus (r) {
+    return MOTIFS_NOTIF[r.motif] || r.message || 'Impossible pour le moment. Réessayez.'
+  }
+
+  // ⚠ LE GESTE N'ATTEND RIEN AVANT DE DEMANDER LA PERMISSION : le module est
+  // déjà là (la carte n'est visible qu'une fois chargé), et l'appel part
+  // directement du clic. Sur iPhone, une demande qui ne suit pas immédiatement
+  // le toucher est ignorée.
+  function brancherNotifications () {
+    const activer = document.getElementById('notif-activer')
+    const desactiver = document.getElementById('notif-desactiver')
+    if (!activer || !desactiver || APERCU) return
+    activer.addEventListener('click', async () => {
+      if (gestePush || !modPush) return
+      if (!navigator.onLine) { peindreNotifications(MOTIFS_NOTIF.hors_ligne); return }
+      gestePush = true
+      activer.disabled = true
+      let r
+      try {
+        r = await modPush.activerNotifications({ push: pushServeur, jeton: currentToken })
+      } catch (e) {
+        r = { ok: false, motif: 'abonnement_impossible' }
+      }
+      if (r.ok && r.push) pushServeur = r.push
+      gestePush = false
+      activer.disabled = false
+      // Refusée : l'état « bloquée » dit déjà quoi faire, sans message de plus.
+      await peindreNotifications(r.ok || r.motif === 'refusee' ? '' : messageDuRefus(r))
+    })
+    desactiver.addEventListener('click', async () => {
+      if (gestePush || !modPush) return
+      if (!navigator.onLine) { peindreNotifications(MOTIFS_NOTIF.hors_ligne); return }
+      gestePush = true
+      desactiver.disabled = true
+      let r
+      try {
+        r = await modPush.desactiverNotifications({ jeton: currentToken })
+      } catch (e) {
+        r = { ok: false, motif: 'serveur' }
+      }
+      if (r.ok && r.push) pushServeur = r.push
+      gestePush = false
+      desactiver.disabled = false
+      await peindreNotifications(r.ok ? '' : messageDuRefus(r))
+    })
+  }
+  brancherNotifications()
+
   function getToken() {
     const fromUrl = new URLSearchParams(window.location.search).get('token');
     // ⚠ EN APERÇU, LE JETON NE SE RANGE NI NE SE REPÊCHE. Il ne doit pas rester
@@ -1507,6 +1643,8 @@ if ("serviceWorker" in navigator && !APERCU) {
     renderFilters()
     renderNews()
     renderSyncBanner()
+    // Après le reste, sans l'attendre : la carte arrive quand son module est là.
+    peindreNotifications().catch(e => console.warn('[notifications]', e))
 
     // ⚠ UN SEUL ECOUTEUR SUR LE CORPS, pose une fois : la feuille est reconstruite
   // a chaque ouverture, un ecouteur par bouton aurait fui a chaque tape.
@@ -1748,6 +1886,9 @@ if ("serviceWorker" in navigator && !APERCU) {
       return { ok: false }
     }
     const data = await res.json()
+    // L'état des notifications que le serveur connaît (PWA lot 3) — `null` si
+    // le GET ne le porte pas (déploiement d'avant le lot).
+    pushServeur = data.push && typeof data.push === 'object' ? data.push : null
 
     document.getElementById('presta-label').textContent = data.label || 'Planning ménages'
     visibilityDays = data.visibility_days || 30
