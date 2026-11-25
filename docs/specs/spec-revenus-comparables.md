@@ -287,3 +287,160 @@ vient de corriger trois fois.
 - aucune écriture dans `comparables_retenus` ;
 - aucun changement au pipeline du marché ni aux prix ;
 - aucune modification de `apps/yield/`.
+
+---
+
+## 7. LE DÉTAIL DE CHAQUE COMPARABLE — lot du 25 novembre 2026
+
+Demande de Thierry : « quand on sélectionne un bien, un bouton à côté de la
+légende des comparables (Afficher) pour afficher chaque comparable ; au lieu de
+12 mois, je veux aussi les 3 prochains mois pour voir la performance ».
+
+### 7.1 Décisions de Thierry (25 novembre 2026)
+
+| # | décision |
+|---|---|
+| D1 | **un tableau sous la courbe** : une ligne par comparable, le montant mois par mois, **son logement en première ligne** ; la bande grise reste |
+| D2 | **fenêtre glissante 12 + 3** : les 12 derniers mois (mois en cours compris) et les 3 prochains — au 25 novembre 2026, décembre 2025 → février 2027. **La courbe de l'année ne change pas** : seul le détail glisse |
+| D3 | **chaque comparable porte le titre de son annonce et un lien** vers elle |
+| D4 | go du lot (« go ») après le plan en une phrase |
+
+⚠ **LE BOUTON N'EXISTE QUE LÀ OÙ LA BANDE EXISTE** : un logement choisi, et une
+bande tracée pour l'année affichée. Sous « Tous », rien — même règle que la
+bande (décision 2 du §4 bis).
+
+### 7.2 Le titre de l'annonce — une correction du plan, annoncée à Thierry
+
+Le plan disait « le relevé mensuel enregistre le titre ». **C'était faux** : le
+relevé appelle `listings/metrics/all` et `listings/live/calendar`, et **aucun des
+deux ne porte `listing_name`** (mesuré sur `tests/fixtures/airroi/labulle-60.json`
+et sur `lib/marche/etude.js`, qui va chercher le nom dans un TROISIÈME appel, la
+fiche). Le prendre au relevé coûterait 0,10 $ de plus par comparable et par mois.
+
+Ce qui le porte déjà, sans rien payer : **la liste proposée** à « Choisir vos
+comparables » (carte `nom`, `lib/marche/pertinence.js`). Le titre s'écrit donc
+**au moment du choix**, dans `comparables_retenus.nom`, par son writer unique
+`enregistrerChoix`. Les comparables déjà choisis sont repris par la migration,
+**depuis `airroi_cache`** (listes et fiches déjà payées), la plus récente
+d'abord. ⚠ Le §6 ci-dessus disait « aucune écriture dans `comparables_retenus` »
+sans décision explicite : **cette écriture-là attend le go de Thierry** pour
+toucher `lib/marche` (demandé le 25 novembre).
+
+⚠ **TANT QUE CE GO N'EST PAS DONNÉ**, un comparable choisi APRÈS la migration
+reste « Annonce sans titre » : seule la reprise depuis le cache l'a nommé.
+Rejouer le bloc 2 de la migration rattrape les nouveaux (constat M5 de la
+review du 25 novembre).
+
+⚠ **UN TITRE MANQUANT N'EMPÊCHE RIEN** : l'écran écrit « Annonce sans titre » et
+garde le lien. Et l'écriture du titre ne fait jamais échouer l'enregistrement du
+choix : elle vient APRÈS, et son échec se journalise.
+
+### 7.3 Les données — catégorie déclarée AVANT le code
+
+**Non urgent.** Les comparables sont relevés une fois par mois par le cron
+(`comparables_releves`, writer unique `lib/marche/comparables-releves.js`) : la
+table EST le résumé. Les revenus du logement viennent de l'agrégat
+`revenus_annee` — celui de la courbe, et l'en-tête de l'endpoint dit déjà
+pourquoi il n'a pas de table de résumé (l'agrégat coûte moins que le réseau).
+**La date du relevé s'affiche** (dans l'ⓘ du détail).
+
+**Le mode `?detail=comparables&bien=<uuid>`** de `api/ecran/revenus-annee`. Il
+ne lit PAS l'année : le détail ne dépend que du jour. Lectures, en parallèle
+après la garde du périmètre :
+
+| lecture | rôle | borne |
+|---|---|---|
+| `comparables_derniers_releves` (fonction SQL) | **la photo la plus récente** de chaque (comparable, mois, nature), sur la fenêtre | ≤ 15 lignes par comparable ; 1 000 = refus, dit |
+| `revenus_annee` × 1 ou 2 | les mois du logement (`p_refs = [bien]`) | la fenêtre couvre 2 ou 3 années civiles |
+| `comparables_retenus` | titre, et « n'est plus retenu » | `RETENUS_MAX + 1` |
+
+⚠ **POURQUOI UNE FONCTION SQL** et pas la lecture de la bande : la table garde
+TOUTES les photos (une par mois et par relevé, 24 mois clos réécrits à chaque
+passage), donc la lecture brute grossit d'environ 37 lignes par comparable et
+par mois de relevé — elle dépasse 1 000 en quelques mois, et PostgREST tronque
+sans erreur. `distinct on` ne rend que la dernière photo : la réponse est bornée
+par la fenêtre, pas par l'âge de la table.
+
+### 7.4 Ce que dit chaque case
+
+| ligne | mois passés | mois en cours et à venir |
+|---|---|---|
+| votre logement | encaissé (mêmes chiffres que la courbe) | déjà réservé |
+| un comparable | revenu estimé AirROI (`clos`) | « occupé » : prix affichés des nuits indisponibles + `nuits prises / nuits du mois` (`futur`) |
+
+Mêmes filtres DE SOURCE que la bande, pour qu'une case ne dise jamais ce que
+la bande refuse : un `futur` sur un mois clos est écarté ; une couverture partielle se
+dit « n. c. » avec son motif ; un montant nul se dit « inactif » (le comparable
+n'était pas sur le marché) ; une absence se dit « n. c. — pas de relevé », jamais
+0 ni tiret. Pour le logement, un mois sans ligne est « aucun » (aucun séjour
+versé), et un mois dont aucun montant n'est calculable est « n. c. » ; un mois
+dont une partie des séjours n'a pas de montant, ou porte un montant brut, garde
+son chiffre et le dit (« incomplet », « en brut »).
+
+⚠ **CE QUI DIFFÈRE DE LA BANDE, VOLONTAIREMENT** : la bande écarte de son
+minimum un comparable à 0 € ; le détail montre chaque comparable, donc une
+ligne peut descendre sous le bas de la bande (« inactif » sur un mois clos,
+« 0 € · 0/31 » sur un mois à venir).
+
+⚠ **LE MOTIF D'UN « n. c. »** se lit au survol à l'ordinateur (`title`), et
+s'écrit sous la case au téléphone — un `title` ne s'affiche ni au toucher ni au
+clavier (constat M7 de la review). Une liste de retenus illisible ne fait
+jamais dire « n'est plus retenu » (constat M3).
+
+### 7.5 Inventaire (la forme ne supprime jamais le fond)
+
+Rien n'est retiré : la bande, sa légende, son ⓘ, la courbe et les deux tableaux
+restent tels quels. Le détail s'ajoute sous la courbe, replié par défaut.
+Ordinateur : un tableau, la colonne des noms fixée au défilement horizontal
+(15 colonnes ne tiennent pas). Téléphone (≤ 560 px) : une carte par logement,
+les 15 mois en grille de trois — même règle que les deux tableaux voisins
+(« un tableau qu'il faut faire glisser pour lire son total n'est pas lisible »,
+recette du 27 octobre). Les deux formes viennent du MÊME module
+(`shared/comparables-detail.js`), à partir des mêmes valeurs.
+
+### 7.6 Case PERFORMANCE
+
+1. **Un endpoint d'écran** : `revenus-annee`, mode `detail` ; garde
+   `contexteDEcran` ; lectures en parallèle côté serveur.
+2. **Non urgent = résumé** : `comparables_releves` (mensuel) et l'agrégat
+   `revenus_annee` ; date du relevé affichée.
+3. **Cache navigateur** : sans objet — réponse gardée en mémoire par logement
+   pour la session (comme la bande), rien en `localStorage`.
+4. **`private, no-store`** : posé par `contexteDEcran` avant le premier refus
+   (inchangé).
+5. **Fichiers statiques** : `shared/comparables-detail.js` suit les modules
+   voisins de `/shared` (pas de règle de cache propre aujourd'hui) — sans
+   changement de politique.
+6. **Aucune lecture tronquée en silence** : `distinct on` borne la réponse ;
+   1 000 lignes = refus « non calculable » journalisé ; `comparables_retenus`
+   lu à `RETENUS_MAX + 1`.
+7. **Budget** : le premier affichage reste à **deux appels** ; le détail part
+   **au clic sur « Afficher »**, une fois par logement. `tests/budget-ecran.test.js`
+   inscrit le troisième site d'appel de `/api/ecran/revenus-annee`, avec sa
+   raison.
+8. **Avant / après** : avant, 0 appel (le détail n'existait pas). Après, au
+   clic : 1 appel, 4 ou 5 requêtes Supabase (garde de périmètre + 3 ou 4
+   lectures), mesurées par `Server-Timing`. Octets : mesurés au banc local sur
+   10 comparables (voir §7.7) ; la mesure de production se fait à la recette.
+
+### 7.7 Mesures et recette
+
+Mesuré au banc local le 25 novembre 2026 : réponse JSON de l'endpoint pour
+10 comparables × 15 mois, toutes cases remplies = **16 251 octets** (avant
+compression). La mesure de production se fait à la recette.
+
+À compléter à la recette : octets réels de la réponse sur La bulle et Cœur de
+vie 23, nombre de comparables nommés après la migration (contrôle
+`2026-11-25-controle-comparables-detail.sql`).
+
+### 7.8 Dette PRÉEXISTANTE relevée par la review (hors de ce lot) — dette 157
+
+La lecture de la **bande** (`bandeDesComparables`, même fichier) demande
+`.limit(5000)` à PostgREST, dont le plafond est 1 000 lignes : la table garde
+TOUTES les photos (≈ 37 lignes par comparable et par relevé), donc au-delà
+d'environ 27 comparables par relevé, ou après plusieurs relevés, la bande peut
+perdre des photos **sans le dire** et diverger du détail. Le correctif naturel
+— lire la bande par `comparables_derniers_releves` — n'est pas fait ici : il
+change le chemin d'un écran déjà en production. **À trancher par Thierry**
+(lot à part). Inscrite au registre sous le numéro **157**
+(`docs/kb/dettes-v1.md`). Trace de la review : `docs/recette/reviews-comparables-detail.md`.

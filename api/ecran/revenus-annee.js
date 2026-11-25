@@ -91,6 +91,24 @@ module.exports = async (req, res) => {
   const demandee = /^\d{4}$/.test(brut) ? Number(brut) : null
   const jour = jourDeParis()
   const anneeCourante = Number(jour.slice(0, 4))
+  // ─── LE DETAIL DE CHAQUE COMPARABLE (spec-revenus-comparables §7) ─────────
+  // ⚠ UN MODE A PART, ET IL NE LIT PAS L'ANNEE. Le detail glisse avec le JOUR
+  // (12 derniers mois + 3 prochains, decision D2 de Thierry du 25 novembre
+  // 2026) : la courbe de l'annee, elle, ne change pas. Il part au clic sur
+  // « Afficher », jamais avec la pastille — une lecture que personne n'a
+  // demandee ne vaut pas un appel (meme regle que la bande).
+  // ⚠ IL PASSE AVANT LA VALIDATION DE `?annee=` : il ne s'en sert pas, et un
+  // parametre qu'on ignore ne doit pas faire refuser la demande.
+  const detail = req.query && req.query.detail
+  if (detail !== undefined && detail !== '') {
+    if (String(detail) !== 'comparables') {
+      return res.status(400).json({ error: 'Détail inconnu' })
+    }
+    return rendreDetail(res, t0, {
+      compte, refsUuid, uuidIntrouvable, jour, bien: String((req.query && req.query.bien) || '')
+    })
+  }
+
   // ⚠ UNE ANNEE HORS BORNES NE REMPLACE PAS SILENCIEUSEMENT PAR L'ANNEE
   // COURANTE : on refuse. Un ecran qui montre 2026 a qui a demande 1870 ment
   // sur ce qu'il affiche — et l'hote ne verrait que le resultat.
@@ -501,6 +519,289 @@ function joursDuMois (mois) {
   return new Date(Date.UTC(an, m, 0)).getUTCDate()
 }
 
+// ═══ LE DETAIL DE CHAQUE COMPARABLE (spec-revenus-comparables §7) ═════════
+//
+// Decisions de Thierry du 25 novembre 2026 : un tableau sous la courbe, une
+// ligne par comparable et SON logement en premier (D1) ; les 12 derniers mois
+// et les 3 prochains, en fenetre GLISSANTE (D2) ; le titre de l'annonce et un
+// lien (D3).
+
+// Au-dela, la liste des retenus d'UN logement est tronquee : on le dit au lieu
+// de nommer la moitie des comparables. « Choisir vos comparables » en propose
+// 50 au plus (`PAGES_MAX`) : la borne est large, mais finie.
+const COMPARABLES_MAX = 200
+// ⚠ LE PLAFOND SERVEUR DE POSTGREST. Une reponse qui l'atteint est peut-etre
+// tronquee, et rien ne le signale : c'est la famille de defauts la plus
+// silencieuse du depot (CLAUDE.md, regle 6). La fonction SQL ne rend qu'UNE
+// photo par case — au plus 15 par comparable —, donc l'atteindre veut dire
+// plus de 66 comparables pour un logement : on refuse, et on le journalise.
+const LIGNES_MAX = 1000
+const ID_ANNONCE = /^[0-9]{1,24}$/
+const MOIS_RE = /^\d{4}-(0[1-9]|1[0-2])$/
+
+// Le mois « YYYY-MM » decale de `pas` mois. ⚠ `Date.UTC` regle les
+// debordements d'annee, dans les deux sens.
+function moisDecale (mois, pas) {
+  const [a, m] = String(mois).split('-').map(Number)
+  const d = new Date(Date.UTC(a, m - 1 + pas, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+// La fenetre du detail : les 12 derniers mois — le mois en cours COMPRIS — et
+// les 3 prochains. Au 25 novembre 2026 : decembre 2025 → fevrier 2027.
+// ⚠ ELLE SE CALCULE SUR LE JOUR DE PARIS, comme tout l'endpoint : en UTC, le
+// 1er du mois entre minuit et 2 h, la fenetre aurait un mois de retard.
+function fenetreDetail (jour) {
+  const courant = String(jour).slice(0, 7)
+  const mois = []
+  for (let i = -11; i <= 3; i++) mois.push(moisDecale(courant, i))
+  return { mois, courant, debut: `${mois[0]}-01`, fin: `${moisDecale(courant, 4)}-01` }
+}
+
+// Les annees a demander a `revenus_annee`, qui rend [p-1, p] pour `p_annee = p`.
+// ⚠ LA FENETRE TOUCHE DEUX OU TROIS ANNEES CIVILES : trois en octobre et en
+// novembre (2025, 2026, 2027), deux sinon. Un seul appel laisserait un bout de
+// la fenetre sans chiffres — et un mois sans ligne se lirait « aucun sejour ».
+function anneesARevenus (mois) {
+  const ans = [...new Set(mois.map(m => Number(String(m).slice(0, 4))))].sort((a, b) => a - b)
+  const max = ans[ans.length - 1]
+  const couvertes = new Set()
+  const appels = []
+  for (const a of ans) {
+    if (couvertes.has(a)) continue
+    const p = Math.min(a + 1, max)
+    appels.push(p)
+    couvertes.add(p - 1); couvertes.add(p)
+  }
+  return appels
+}
+
+// Ce que dit UNE case d'un comparable. ⚠ LES MEMES FILTRES DE SOURCE QUE LA
+// BANDE, pour qu'une case ne dise jamais ce que la bande refuse :
+//   · avant le mois courant, seul `clos` compte (le revenu estime d'AirROI) ;
+//   · a partir du mois courant, seul `futur` compte (l'occupe), et un mois
+//     dont la couverture est PARTIELLE ne donne pas de montant — le calendrier
+//     commence a sa date de capture, et un mois couvert sur 4 nuits se lirait
+//     comme un mois creux ;
+//   · un montant ABSENT n'est jamais 0 : il porte son motif.
+// ⚠ CE QUI DIFFERE, ET C'EST VOULU : la bande ecarte de son MINIMUM un
+// comparable a 0 €, parce qu'un min tire a zero par un logement ferme ne dit
+// rien du marche. Le detail, lui, montre CHAQUE comparable : un mois clos a
+// 0 € s'y lit « inactif », et un mois a venir a 0 € s'y lit « 0 € · 0/31 » —
+// aucune nuit prise, ce qui est un fait mesure. Une ligne peut donc descendre
+// sous le bas de la bande ; c'est le but d'un detail.
+function caseComparable (l, mois, courant) {
+  if (!l) return { etat: 'absent' }
+  const releve_le = l.releve_le ? String(l.releve_le).slice(0, 10) : null
+  const nombre = (v) => (v === null || v === undefined || v === '' ? null
+    : (Number.isFinite(Number(v)) ? Number(v) : null))
+  if (mois < courant) {
+    const v = nombre(l.montant_estime_cents)
+    if (v === null) return { etat: 'nc', motif: l.motif || null, releve_le }
+    // ⚠ ZERO N'EST PAS « IL A GAGNE ZERO » : c'est un logement qui n'etait pas
+    // sur le marche ce mois-la. La bande l'ecarte du minimum pour la meme
+    // raison (constat de recette du 28 octobre 2026).
+    if (v === 0) return { etat: 'inactif', releve_le }
+    return { etat: 'clos', montant_cents: v, releve_le }
+  }
+  const jours = joursDuMois(mois)
+  const mesurees = nombre(l.nuits_mesurees)
+  // ⚠ UNE COUVERTURE INCONNUE N'EST PAS UNE COUVERTURE ENTIERE : sans le
+  // compte des nuits mesurees, rien ne dit que le mois n'est pas tronque.
+  if (mesurees === null) return { etat: 'nc', motif: l.motif || null, releve_le }
+  if (mesurees < jours) return { etat: 'partiel', nuits_mesurees: mesurees, jours, releve_le }
+  const v = nombre(l.montant_affiche_cents)
+  if (v === null) return { etat: 'nc', motif: l.motif || null, releve_le }
+  return {
+    etat: 'futur', montant_cents: v,
+    nuits_indisponibles: nombre(l.nuits_indisponibles), nuits_mesurees: mesurees,
+    // Le motif du writer dit « prix affiche absent sur N nuits » : le montant
+    // est alors SOUS-estime, et l'ecran le dit au survol.
+    motif: l.motif || null, releve_le
+  }
+}
+
+// Les lignes du tableau : un comparable par ligne, ses quinze cases.
+//
+// ⚠ QUI EST LISTE : tout comparable qui a une photo dans la fenetre — c'est la
+// population de la bande, et une ligne absente laisserait un min ou un max
+// sans visage —, plus les retenus ACTIFS sans photo encore (choisis depuis le
+// dernier releve : leur ligne dit « pas de releve » au lieu de disparaitre).
+// Un comparable qui n'est plus retenu mais garde des photos est liste, et dit
+// qu'il ne l'est plus.
+// ⚠ `retenus === null` VEUT DIRE « ILLISIBLES », pas « aucun » (constat M3 de
+// la review du 25 novembre 2026). Sans la liste, on ne SAIT PAS lesquels sont
+// encore retenus : chaque ligne rend `retenu: null`, et l'ecran n'affirme rien.
+// L'ancienne forme mettait « n'est plus retenu » sous CHAQUE comparable — une
+// absence de lecture devenue un fait.
+function detailDesComparables ({ lignes, retenus, fenetre }) {
+  const connus = Array.isArray(retenus)
+  const { mois: fen, courant } = fenetre
+  const dans = new Set(fen)
+  const parId = new Map()
+  const fiche = (id) => {
+    const k = String(id)
+    if (!parId.has(k)) parId.set(k, { listing_id: k, nom: null, actif: false, photos: new Map() })
+    return parId.get(k)
+  }
+  for (const r of retenus || []) {
+    if (!r || !ID_ANNONCE.test(String(r.listing_id))) continue
+    const c = fiche(r.listing_id)
+    c.actif = r.actif !== false
+    const nom = typeof r.nom === 'string' ? r.nom.trim() : ''
+    c.nom = nom || null
+  }
+  for (const l of lignes || []) {
+    if (!l || !ID_ANNONCE.test(String(l.listing_id))) continue
+    const m = String(l.mois || '').slice(0, 7)
+    if (!MOIS_RE.test(m) || !dans.has(m)) continue
+    // ⚠ LA FONCTION SQL FILTRE DEJA, ET ON REFILTRE : une case ne se fie pas a
+    // une borne posee ailleurs (une version de la fonction collee a moitie
+    // rendrait le `futur` perime d'un mois clos).
+    if (l.nature === 'clos' ? !(m < courant) : (l.nature !== 'futur' || m < courant)) continue
+    const c = fiche(l.listing_id)
+    const avant = c.photos.get(m)
+    if (!avant || String(l.releve_le) > String(avant.releve_le)) c.photos.set(m, l)
+  }
+  const comparables = []
+  let de = null
+  let a = null
+  for (const c of parId.values()) {
+    if (!c.photos.size && !c.actif) continue
+    const cases = {}
+    for (const m of fen) {
+      cases[m] = caseComparable(c.photos.get(m), m, courant)
+      const d = cases[m].releve_le
+      if (d) { if (!de || d < de) de = d; if (!a || d > a) a = d }
+    }
+    comparables.push({ listing_id: c.listing_id, nom: c.nom, retenu: connus ? c.actif : null, mois: cases })
+  }
+  // Les retenus d'abord, puis par titre — un titre absent en dernier.
+  comparables.sort((x, y) => (Number(y.retenu === true) - Number(x.retenu === true))
+    || (x.nom === null) - (y.nom === null)
+    || String(x.nom || '').localeCompare(String(y.nom || ''), 'fr', { sensitivity: 'base' })
+    || x.listing_id.localeCompare(y.listing_id))
+  return { comparables, releves: de ? { de, a } : null }
+}
+
+// Les mois du logement, sur la fenetre, au format de la vue Annee.
+// ⚠ ON POSE, ON N'ADDITIONNE PAS : deux appels a `revenus_annee` se
+// recouvrent d'une annee (p-1 de l'un est p de l'autre), et leurs lignes sont
+// identiques. Les additionner doublerait cette annee-la.
+// ⚠ ET AUCUN TROU N'EST COMBLE : un mois sans ligne n'est pas un mois a zero,
+// c'est l'ecran qui le dit (decision de Thierry du 27 octobre).
+function detailDuLogement ({ lignes, bien, fenetre }) {
+  const dans = new Set(fenetre.mois)
+  const out = {}
+  for (const l of lignes || []) {
+    if (String(l.property_uuid) !== String(bien)) continue
+    const cle = `${n(l.annee)}-${String(n(l.mois)).padStart(2, '0')}`
+    if (!dans.has(cle)) continue
+    out[cle] = {
+      sejours: n(l.sejours), recu_cents: n(l.recu_cents), a_venir_cents: n(l.a_venir_cents),
+      total_cents: n(l.total_cents), bruts: n(l.bruts), sans_montant: n(l.sans_montant)
+    }
+  }
+  return out
+}
+
+async function rendreDetail (res, t0, { compte, refsUuid, uuidIntrouvable, jour, bien: demande }) {
+  let bien = String(demande || '')
+  if (!UUID_RE.test(bien)) return res.status(400).json({ error: 'Logement invalide' })
+  // ⚠ UN PERIMETRE SANS CLE UUID DIT « JE NE SAIS PAS » — meme forme que la
+  // vue Annee : on ne peut pas affirmer que ce bien en fait partie.
+  if (uuidIntrouvable) {
+    return rendre(res, t0, 0, { jour, detail: null, indisponibles: ['detail'] })
+  }
+  // ⚠ LE PERIMETRE AVANT TOUTE LECTURE. Un membre delegue qui demanderait un
+  // bien hors de son perimetre lirait les comparables et les revenus d'un
+  // logement qu'il n'a pas le droit de voir ; un perimetre VIDE ne voit rien.
+  if (Array.isArray(refsUuid) && !refsUuid.map(r => String(r).toLowerCase()).includes(bien.toLowerCase())) {
+    return res.status(403).json({ error: 'Logement hors de votre périmètre' })
+  }
+  // ⚠ ET LE BIEN DOIT ETRE DU COMPTE : la cle de service CONTOURNE la RLS,
+  // donc un uuid d'un autre compte serait lu sans cette garde.
+  let requetes = 1
+  const { data: biens, error: eBien } = await supabase
+    .from('properties').select('id').eq('user_id', compte).eq('id', bien).limit(1)
+  if (eBien) {
+    console.error('[ecran/revenus-annee] detail, garde du bien :', eBien.message)
+    return rendre(res, t0, requetes, { jour, detail: null, indisponibles: ['detail'] })
+  }
+  if (!(biens || []).length) {
+    return res.status(403).json({ error: 'Logement hors de votre périmètre' })
+  }
+  // ⚠ DESORMAIS, LE BIEN EST CELUI QUE LA BASE A RESOLU, pas la chaine de
+  // l'appelant (REVIEW.md regle 11 ; constat m2 de la review). `UUID_RE`
+  // accepte les majuscules et le cast uuid aussi : la garde passait, puis la
+  // comparaison de chaines de la ligne du logement ne trouvait rien — « aucun »
+  // sur douze mois, pour un logement qui a encaisse.
+  bien = String(biens[0].id)
+
+  const fenetre = fenetreDetail(jour)
+  const ans = anneesARevenus(fenetre.mois)
+  requetes += 2 + ans.length
+  // ⚠ EN PARALLELE : les trois lectures ne dependent que de la garde.
+  const [rel, ret, ...revs] = await Promise.all([
+    supabase.rpc('comparables_derniers_releves', {
+      p_property_id: bien, p_debut: fenetre.debut, p_fin: fenetre.fin,
+      p_mois_courant: `${fenetre.courant}-01`
+    }),
+    supabase.from('comparables_retenus').select('listing_id, nom, actif')
+      .eq('user_id', compte).eq('property_id', bien).limit(COMPARABLES_MAX + 1),
+    ...ans.map(a => supabase.rpc('revenus_annee', {
+      p_user_id: compte, p_annee: a, p_aujourdhui: jour, p_refs: [bien]
+    }))
+  ])
+
+  const indisponibles = []
+  // Les revenus du logement : tout ou rien. ⚠ UN APPEL EN ECHEC SUR DEUX
+  // LAISSERAIT LA MOITIE DE LA FENETRE SANS LIGNE — lue « aucun sejour ».
+  let logement = null
+  const eRev = revs.find(r => r && r.error)
+  if (eRev) {
+    console.error('[ecran/revenus-annee] detail, revenus :', eRev.error.message)
+    indisponibles.push('logement')
+  } else {
+    logement = detailDuLogement({ lignes: revs.flatMap(r => (r && r.data) || []), bien, fenetre })
+  }
+
+  // Les titres. ⚠ LEUR ABSENCE N'EMPECHE PAS LE TABLEAU : sans eux, chaque
+  // ligne dit « Annonce sans titre » et garde son lien. ⚠ `null`, PAS `[]` :
+  // une liste illisible n'est pas une liste vide (voir `detailDesComparables`).
+  let retenus = null
+  if (ret.error) {
+    console.error('[ecran/revenus-annee] detail, retenus :', ret.error.message)
+    indisponibles.push('noms')
+  } else if ((ret.data || []).length > COMPARABLES_MAX) {
+    console.error(`[ecran/revenus-annee] detail : plus de ${COMPARABLES_MAX} retenus pour ${bien}`)
+    indisponibles.push('noms')
+  } else {
+    retenus = ret.data || []
+  }
+
+  let comparables = null
+  let releves = null
+  if (rel.error) {
+    console.error('[ecran/revenus-annee] detail, releves :', rel.error.message)
+    indisponibles.push('comparables')
+  } else if ((rel.data || []).length >= LIGNES_MAX) {
+    // ⚠ UNE REPONSE QUI ATTEINT LE PLAFOND N'EST PAS LUE COMME ENTIERE.
+    console.error(`[ecran/revenus-annee] detail : ${LIGNES_MAX} lignes atteintes pour ${bien}, lecture peut-etre tronquee`)
+    indisponibles.push('comparables')
+  } else {
+    const d = detailDesComparables({ lignes: rel.data || [], retenus, fenetre })
+    comparables = d.comparables
+    releves = d.releves
+  }
+
+  return rendre(res, t0, requetes, {
+    jour,
+    detail: { mois: fenetre.mois, mois_courant: fenetre.courant, logement, comparables, releves },
+    indisponibles
+  })
+}
+
 // ⚠ `Server-Timing` PORTE LE COMPTE DE REQUETES, et c'est un PLANCHER annonce
 // comme tel : `contexteDEcran` fait un a trois allers-retours qui ne sont pas
 // comptes ici. Un instrument pose pour designer la CAUSE qui se donnerait pour
@@ -510,3 +811,9 @@ function rendre (res, t0, requetes, charge) {
   res.setHeader('Server-Timing', `total;dur=${total};desc="${requetes} req (ordre de grandeur)"`)
   return res.status(200).json(charge)
 }
+
+// Pour les tests : les regles du detail, eprouvees sans base ni horloge.
+// `rendreDetail` sort aussi : le recouvrement des DEUX appels a `revenus_annee`
+// n'existe qu'en octobre et en novembre, et le test qui le garde doit pouvoir
+// injecter le jour au lieu de lire l'horloge (constat M6 de la review).
+module.exports._interne = { fenetreDetail, anneesARevenus, caseComparable, detailDesComparables, detailDuLogement, rendreDetail }
